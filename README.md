@@ -1,5 +1,7 @@
 # Umbra Studio
 
+![Umbra Studio](.github/assets/umbra-studio-banner.png)
+
 ![Nocturne Labs](.github/assets/nocturne-labs-banner.png)
 
 **An original Nocturne AI Labs project, developed by Minokai.**
@@ -43,6 +45,14 @@ Quick summary:
 
 The screenshots below use safe demonstration media and omit the embedded
 ComfyUI workspace. Select an image to open the full-size view.
+
+See the [Umbra UI Tour](UMBRA_UI_TOUR.md) for a guided walkthrough of the shared
+model-aware pipeline, TXT2IMG, IMG2IMG, Inpaint, Video, Extras, and the Power
+Prompter handoff.
+
+| Umbra UI TXT2IMG | Umbra UI Inpaint |
+| --- | --- |
+| [![Umbra UI TXT2IMG](.github/screenshots/umbra-ui-txt2img.png)](.github/screenshots/umbra-ui-txt2img.png) | [![Umbra UI Inpaint](.github/screenshots/umbra-ui-inpaint.png)](.github/screenshots/umbra-ui-inpaint.png) |
 
 | Power Prompter Editor | Queue Manager |
 | --- | --- |

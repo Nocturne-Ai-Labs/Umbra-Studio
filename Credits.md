@@ -404,6 +404,13 @@ custom-node repositories and other upstream tools installed by the user.
 The managed-tool and model links above mirror the public setup scripts and the
 pinned Data Forge model manifest included in this repository.
 
+## Repository Demonstration Media
+
+The PG-safe red-jacket character artwork in
+`.github/assets/umbra-ui-tour-inpaint-source.png` was created specifically for
+the Umbra Studio interface tour. It is demonstration media owned by the project
+and is not a user Gallery image or a bundled generation model output.
+
 ## Licenses
 
 Umbra Studio is distributed under the MIT License, which keeps the project open

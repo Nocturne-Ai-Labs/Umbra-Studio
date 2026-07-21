@@ -189,6 +189,29 @@ After publishing:
 - Confirm Windows and Linux packages contain no personal `User/` files or installed `Tools/` checkouts.
 - Confirm no runtime data was wiped during no-bump updates.
 
+## Public Release Gate
+
+Do not make the repository public or publish release assets until every item
+below has been reviewed in a clean packaged build:
+
+- [ ] Refresh the Umbra UI tour from a clean workspace using only the curated
+  PG-safe source in `.github/assets/umbra-ui-tour-inpaint-source.png`.
+- [ ] Review every repository screenshot at full size and confirm it contains
+  no NSFW media, private outputs, personal paths, prompt history, or persisted
+  developer workspace state.
+- [ ] Confirm Power Prompter visibly exposes the shared model-family pipeline,
+  model resources, sampling controls, hires fix, ordered detailer stages, and
+  optional output upscale wherever the selected pipeline supports them.
+- [ ] Queue a Power Prompter group with hires fix and at least one detailer
+  enabled, then verify the backend receives those exact controls and the output
+  metadata records them.
+- [ ] Confirm disabled hires-fix, detailer, and output-upscale stages are truly
+  bypassed and do not load models or leave invalid graph inputs.
+- [ ] Confirm TXT2IMG, IMG2IMG, Inpaint, Video, and Extras retain their state
+  while switching Umbra Studio workspaces.
+- [ ] Run the repository source audit, frontend build, lint, source tests, and
+  Umbra UI pipeline audit from the clean repository candidate.
+
 ## Safety Rules
 
 - Never delete `User/` or `Tools/` in a no-bump update.

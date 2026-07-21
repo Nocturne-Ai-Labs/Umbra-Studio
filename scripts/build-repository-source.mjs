@@ -54,6 +54,7 @@ const SOURCE_FILES = [
   'UmbraServer.ts',
   'UmbraStudio',
   'UmbraStudio.bat',
+  'UMBRA_UI_TOUR.md',
 ];
 
 const RUNTIME_SKELETON_LEAF_DIRECTORIES = [
@@ -160,6 +161,7 @@ function verifyOutput() {
     'scripts/build-webapp-folder.mjs',
     'scripts/build-linux-folder.mjs',
     'REQUIREMENTS.md',
+    'UMBRA_UI_TOUR.md',
     'Tools/.gitkeep',
     'User/README.md',
     'User/Models/DataForgeCaption/.gitkeep',
