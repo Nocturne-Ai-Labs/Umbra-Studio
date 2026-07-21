@@ -101,6 +101,7 @@ models belong in \`User/Models/\`; ComfyUI models belong in
 
 const SKIP_NAMES = new Set([
   '.bun-tmp',
+  'tsconfig.tsbuildinfo',
   '.codex',
   '.git',
   '.tmp',

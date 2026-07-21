@@ -34,6 +34,7 @@ dist*/
 dist-webapp/
 *.exe
 *.appimage
+*.tsbuildinfo
 
 # Logs and temporary files
 /logs/
