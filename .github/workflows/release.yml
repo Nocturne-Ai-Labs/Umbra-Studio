@@ -96,4 +96,4 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           if [ "${GITHUB_REF_TYPE}" != "tag" ]; then tag="${REQUESTED_TAG}"; fi
           if [ -z "${tag}" ]; then echo "release_tag is required" >&2; exit 1; fi
-          gh release create "${tag}" artifacts/* --generate-notes --title "Umbra Studio ${tag}"
+          gh release create "${tag}" artifacts/* --repo "${GITHUB_REPOSITORY}" --generate-notes --title "Umbra Studio ${tag}"
