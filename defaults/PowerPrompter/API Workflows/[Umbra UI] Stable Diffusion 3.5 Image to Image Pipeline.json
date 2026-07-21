@@ -1,0 +1,334 @@
+{
+  "1": {
+    "class_type": "UmbraLoadCheckpoint",
+    "inputs": {
+      "model_type": "checkpoint",
+      "checkpoint_name": "[None]",
+      "diffusers_model": "",
+      "diffusion_model_name": "",
+      "unet_name": "",
+      "gguf_name": "",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Umbra UI Stable Diffusion 3.5",
+      "umbra_model_family": "Stable Diffusion 3.5",
+      "umbra_ui_pipelines": [
+        {
+          "feature": "img2img",
+          "model_family": "Stable Diffusion 3.5",
+          "model_sources": [
+            "checkpoint"
+          ],
+          "priority": 100,
+          "defaults": {
+            "modelName": "",
+            "modelNamesBySource": {
+              "checkpoint": ""
+            },
+            "steps": 20,
+            "cfg": 4,
+            "samplerName": "euler",
+            "scheduler": "sgm_uniform",
+            "width": 1024,
+            "height": 1024,
+            "clipSkip": 1,
+            "denoise": 0.3
+          }
+        }
+      ]
+    }
+  },
+  "2": {
+    "class_type": "UmbraPowerPrompterReader",
+    "inputs": {
+      "prompt_text": "masterpiece, best quality, detailed image",
+      "negative_prompt": "",
+      "seed": 123456789,
+      "control_after_generate": "fixed",
+      "increment_step": 1,
+      "style_seed_behavior": "normal",
+      "aspect_ratio": "custom",
+      "swap_dimensions": "Off",
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Umbra Prompt + Generation Controls"
+    }
+  },
+  "3": {
+    "class_type": "UmbraA1111LoraSyntax",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "1",
+        1
+      ],
+      "prompt_text": [
+        "2",
+        0
+      ],
+      "lora_syntax_text": "",
+      "lora_name": "[None]",
+      "lora_strength_model": 1,
+      "lora_strength_clip": 1,
+      "strict_mode": false,
+      "strip_lora_tags_from_text": true
+    },
+    "_meta": {
+      "title": "Umbra LoRA Stack"
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": [
+        "2",
+        8
+      ],
+      "clip": [
+        "3",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "Stable Diffusion 3.5 Negative Conditioning"
+    }
+  },
+  "5": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": {
+      "width": [
+        "2",
+        4
+      ],
+      "height": [
+        "2",
+        5
+      ],
+      "batch_size": [
+        "2",
+        6
+      ]
+    },
+    "_meta": {
+      "title": "Stable Diffusion 3.5 Latent"
+    }
+  },
+  "6": {
+    "class_type": "UmbraKSamplerHiResFix",
+    "inputs": {
+      "model": [
+        "3",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "steps": 20,
+      "cfg": 4,
+      "sampler_name": "euler",
+      "scheduler": "sgm_uniform",
+      "positive": [
+        "3",
+        3
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "latent_image": [
+        "13",
+        0
+      ],
+      "denoise": 0.3,
+      "enabled": false,
+      "upscaler": "Latent",
+      "resize_mode": "upscale by",
+      "scale_by": 2,
+      "resize_width": 0,
+      "resize_height": 0,
+      "hires_steps": 0,
+      "hires_cfg": 0,
+      "hires_sampler_name": "Use same",
+      "hires_scheduler": "Use same",
+      "hires_denoise": 0.35
+    },
+    "_meta": {
+      "title": "Sample + Optional Hires Fix",
+      "umbra_role": "img2img_sampler"
+    }
+  },
+  "7": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "6",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Decode"
+    }
+  },
+  "8": {
+    "class_type": "UmbraImageDetailer",
+    "inputs": {
+      "image": [
+        "7",
+        0
+      ],
+      "model": [
+        "3",
+        0
+      ],
+      "clip": [
+        "3",
+        1
+      ],
+      "vae": [
+        "1",
+        2
+      ],
+      "positive": [
+        "3",
+        3
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "pipeline_json": "",
+      "person_detail": true,
+      "face_detail": true,
+      "eye_detail": true,
+      "hand_detail": true
+    },
+    "_meta": {
+      "title": "Umbra Detail Pipeline"
+    }
+  },
+  "9": {
+    "class_type": "UmbraImageUpscale",
+    "inputs": {
+      "image": [
+        "8",
+        0
+      ],
+      "upscale_model": "4x-AnimeSharp.pth",
+      "max_dimension": 3840,
+      "enabled": false
+    },
+    "_meta": {
+      "title": "Optional Output Upscale"
+    }
+  },
+  "10": {
+    "class_type": "UmbraLabSaveImage",
+    "inputs": {
+      "images": [
+        "9",
+        0
+      ],
+      "filename_prefix": "UmbraUI_IMG2IMG_Umbra_UI_Stable_Diffusion_3_5_Image_Pipeline_json_%date%",
+      "positive_prompt": [
+        "3",
+        2
+      ],
+      "negative_prompt": [
+        "2",
+        8
+      ],
+      "positive": [
+        "3",
+        3
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "output_folder": "Umbra UI/img2img",
+      "save_to_yyyy_mm_dd_folder": true,
+      "save_to_set_subfolder": false,
+      "set_subfolder": "",
+      "save_set_to_style_subfolder": "",
+      "model_name": [
+        "1",
+        3
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "steps": 20,
+      "cfg": 4,
+      "sampler_name": "euler",
+      "scheduler": "sgm_uniform"
+    },
+    "_meta": {
+      "title": "Save Stable Diffusion 3.5 Image"
+    }
+  },
+  "11": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "umbra-img2img-source.png"
+    },
+    "_meta": {
+      "title": "IMG2IMG Source Image",
+      "umbra_role": "img2img_source"
+    }
+  },
+  "12": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "11",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": 1024,
+      "height": 1024,
+      "crop": "disabled"
+    },
+    "_meta": {
+      "title": "IMG2IMG Working Resolution",
+      "umbra_role": "img2img_resize"
+    }
+  },
+  "13": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "12",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Encode IMG2IMG Source",
+      "umbra_role": "img2img_encode"
+    }
+  }
+}

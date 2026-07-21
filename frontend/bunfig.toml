@@ -1,0 +1,11 @@
+[install]
+# Disable symlinks to avoid Turbopack workspace detection issues
+linkNativePackages = false
+globalBinDir = false
+preferOffline = false
+frozenLockfile = false
+production = false
+dryRun = false
+exact = false
+# Force copy mode instead of symlinks
+backend = "copyfile"

@@ -1,0 +1,355 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Wan High Noise Model",
+      "umbra_role": "wan_high_model",
+      "umbra_media_type": "video",
+      "umbra_video_family": "wan22",
+      "umbra_video_mode": "video_to_video",
+      "umbra_model_family": "Wan 2.2",
+      "umbra_ui_pipeline": {
+        "feature": "vid2vid",
+        "model_family": "Wan 2.2",
+        "model_sources": [
+          "unet"
+        ],
+        "priority": 100,
+        "defaults": {
+          "denoise": 0.35
+        }
+      }
+    }
+  },
+  "2": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "lora_name": "wan2.2_lightx2v_t2v_high_noise_lora.safetensors",
+      "strength_model": 1
+    },
+    "_meta": {
+      "title": "Wan High Noise LoRA",
+      "umbra_role": "wan_high_lora"
+    }
+  },
+  "3": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "2",
+        0
+      ],
+      "shift": 5
+    },
+    "_meta": {
+      "title": "Wan High Noise Shift",
+      "umbra_role": "wan_high_shift"
+    }
+  },
+  "4": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Wan Low Noise Model",
+      "umbra_role": "wan_low_model"
+    }
+  },
+  "5": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "4",
+        0
+      ],
+      "lora_name": "wan2.2_lightx2v_t2v_low_noise_lora.safetensors",
+      "strength_model": 1
+    },
+    "_meta": {
+      "title": "Wan Low Noise LoRA",
+      "umbra_role": "wan_low_lora"
+    }
+  },
+  "6": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "5",
+        0
+      ],
+      "shift": 5
+    },
+    "_meta": {
+      "title": "Wan Low Noise Shift",
+      "umbra_role": "wan_low_shift"
+    }
+  },
+  "7": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "Wan Text Encoder",
+      "umbra_role": "wan_text_encoder"
+    }
+  },
+  "8": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "7",
+        0
+      ],
+      "text": "A cinematic subject moving naturally through the scene."
+    },
+    "_meta": {
+      "title": "Positive Prompt",
+      "umbra_role": "positive_prompt"
+    }
+  },
+  "9": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "7",
+        0
+      ],
+      "text": "low quality, distorted motion, flicker, bad anatomy"
+    },
+    "_meta": {
+      "title": "Negative Prompt",
+      "umbra_role": "negative_prompt"
+    }
+  },
+  "10": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    },
+    "_meta": {
+      "title": "Wan VAE",
+      "umbra_role": "wan_vae"
+    }
+  },
+  "11": {
+    "class_type": "EmptyHunyuanLatentVideo",
+    "inputs": {
+      "width": 832,
+      "height": 480,
+      "length": 81,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Wan Video Latent",
+      "umbra_role": "wan_video_latent"
+    }
+  },
+  "12": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": {
+      "model": [
+        "3",
+        0
+      ],
+      "add_noise": "enable",
+      "noise_seed": 0,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "8",
+        0
+      ],
+      "negative": [
+        "9",
+        0
+      ],
+      "latent_image": [
+        "21",
+        0
+      ],
+      "start_at_step": 0,
+      "end_at_step": 2,
+      "return_with_leftover_noise": "enable"
+    },
+    "_meta": {
+      "title": "Wan High Noise Sampler",
+      "umbra_role": "wan_high_sampler"
+    }
+  },
+  "13": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": {
+      "model": [
+        "6",
+        0
+      ],
+      "add_noise": "enable",
+      "noise_seed": 0,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "8",
+        0
+      ],
+      "negative": [
+        "9",
+        0
+      ],
+      "latent_image": [
+        "21",
+        0
+      ],
+      "start_at_step": 2,
+      "end_at_step": 4,
+      "return_with_leftover_noise": "disable"
+    },
+    "_meta": {
+      "title": "Wan Low Noise Sampler",
+      "umbra_role": "wan_low_sampler"
+    }
+  },
+  "14": {
+    "class_type": "VAEDecodeTiled",
+    "inputs": {
+      "samples": [
+        "13",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ],
+      "tile_size": 768,
+      "overlap": 64,
+      "temporal_size": 64,
+      "temporal_overlap": 8
+    },
+    "_meta": {
+      "title": "Wan Video Decode",
+      "umbra_role": "video_decode"
+    }
+  },
+  "15": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "14",
+        0
+      ],
+      "fps": 16,
+      "audio": [
+        "18",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "Create Wan Video",
+      "umbra_role": "video_create"
+    }
+  },
+  "16": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "15",
+        0
+      ],
+      "filename_prefix": "video/Umbra_Wan_VID2VID",
+      "format": "auto",
+      "codec": "h264"
+    },
+    "_meta": {
+      "title": "Save Wan Video",
+      "umbra_role": "video_output"
+    }
+  },
+  "17": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "umbra-vid2vid-source.mp4"
+    },
+    "_meta": {
+      "title": "VID2VID Source Video",
+      "umbra_role": "source_video"
+    }
+  },
+  "18": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "17",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Extract Source Video",
+      "umbra_role": "source_video_components"
+    }
+  },
+  "19": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "18",
+        0
+      ],
+      "batch_index": 0,
+      "length": 81
+    },
+    "_meta": {
+      "title": "Trim Source Frames",
+      "umbra_role": "source_video_frames"
+    }
+  },
+  "20": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "19",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": 832,
+      "height": 480,
+      "crop": "center"
+    },
+    "_meta": {
+      "title": "VID2VID Working Resolution",
+      "umbra_role": "source_video_scale"
+    }
+  },
+  "21": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "20",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Encode Wan Source Video",
+      "umbra_role": "source_video_encode"
+    }
+  }
+}

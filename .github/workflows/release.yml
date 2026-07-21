@@ -1,0 +1,99 @@
+name: Build portable releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish the artifacts as a GitHub release
+        required: true
+        type: boolean
+        default: false
+      release_tag:
+        description: Release tag when publishing, for example v0.10.4
+        required: false
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+      - run: bun install --frozen-lockfile
+      - name: Build Windows portable folder
+        shell: pwsh
+        env:
+          UMBRA_PUBLISH_ROOT: ${{ github.workspace }}\release\windows
+          UMBRA_WEBAPP_CLEAN_RELEASE: '1'
+          UMBRA_BUNDLE_DATA_FORGE_MODELS: '0'
+        run: bun run webapp:update-folder:no-bump
+      - name: Archive Windows package
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $packageRoot = "release/windows/v$version"
+          if (!(Test-Path "$packageRoot/Install-Data-Forge-Models.bat")) { throw 'Data Forge model installer is missing' }
+          if (!(Test-Path "$packageRoot/resources/app/defaults/DataForge/model-manifest.json")) { throw 'Data Forge model manifest is missing' }
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          Copy-Item "$packageRoot/resources/app/defaults/DataForge/model-manifest.json" "artifacts/Data-Forge-Models-v$version.json"
+          & tar.exe -a -c -f "artifacts/Umbra-Studio-v$version-Windows-x64.zip" -C $packageRoot .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: umbra-studio-windows
+          path: artifacts/*
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+      - run: bun install --frozen-lockfile
+      - name: Build Linux portable folder
+        env:
+          UMBRA_LINUX_PUBLISH_ROOT: ${{ github.workspace }}/release/linux
+          UMBRA_WEBAPP_CLEAN_RELEASE: '1'
+          UMBRA_BUNDLE_DATA_FORGE_MODELS: '0'
+        run: bun run linux:update-folder:no-bump
+      - name: Archive Linux package
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          package_root="release/linux/v${version}"
+          test -f "${package_root}/install-data-forge-models.sh"
+          test -f "${package_root}/resources/app/defaults/DataForge/model-manifest.json"
+          mkdir -p artifacts
+          tar -C "${package_root}" -czf "artifacts/Umbra-Studio-v${version}-Linux-x64.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: umbra-studio-linux
+          path: artifacts/*
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_release == true
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: umbra-studio-*
+          merge-multiple: true
+          path: artifacts
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then tag="${REQUESTED_TAG}"; fi
+          if [ -z "${tag}" ]; then echo "release_tag is required" >&2; exit 1; fi
+          gh release create "${tag}" artifacts/* --generate-notes --title "Umbra Studio ${tag}"

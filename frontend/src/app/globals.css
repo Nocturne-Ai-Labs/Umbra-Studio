@@ -1,0 +1,3039 @@
+@import "tailwindcss" source("../");
+
+@theme inline {
+  --color-background: var(--umbra-bg);
+  --color-foreground: var(--umbra-text);
+  --color-panel: var(--umbra-panel);
+  --color-accent: var(--umbra-accent);
+  --color-border: var(--umbra-border);
+
+  --font-sans: var(--font-family);
+  --font-mono: var(--font-mono-clean);
+}
+
+:root {
+  /* Typography families with local fallbacks (ensures distinct styles without internet) */
+  --font-system: 'Segoe UI', 'Noto Sans', 'Liberation Sans', Arial, sans-serif;
+  --font-serif: 'Georgia', 'Noto Serif', 'Liberation Serif', 'Times New Roman', serif;
+  --font-retro: 'VT323', 'Courier New', 'Lucida Console', monospace;
+  --font-mono-clean: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Liberation Mono', monospace;
+  --font-display: 'Impact', 'Arial Black', 'Segoe UI Black', 'Franklin Gothic Demi', 'Trebuchet MS', sans-serif;
+
+  /* Dynamic Variables - Controlled by useThemeStore */
+  --umbra-accent: #ff3860;
+  --umbra-accent-primary: #ff3860;
+  --umbra-accent-secondary: #ff6b6b;
+  --umbra-accent-ratio: 50%;
+  --umbra-accent-gradient: linear-gradient(
+    120deg,
+    var(--umbra-accent-primary) 0%,
+    var(--umbra-accent-primary) var(--umbra-accent-ratio),
+    var(--umbra-accent-secondary) var(--umbra-accent-ratio),
+    var(--umbra-accent-secondary) 100%
+  );
+  --umbra-accent-gradient-soft: linear-gradient(
+    120deg,
+    var(--umbra-accent-primary) 0%,
+    var(--umbra-accent-primary) var(--umbra-accent-ratio),
+    var(--umbra-accent-secondary) 100%
+  );
+  --umbra-border-gradient: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--umbra-accent-primary) 44%, transparent) 0%,
+    color-mix(in srgb, var(--umbra-accent-primary) 44%, transparent) var(--umbra-accent-ratio),
+    color-mix(in srgb, var(--umbra-accent-secondary) 44%, transparent) 100%
+  );
+  --umbra-bg: #09090b;
+  --umbra-panel: #141417;
+  --umbra-text: #fafafa;
+  --umbra-border: rgba(255, 255, 255, 0.1);
+  --umbra-blur: 16px;
+  --umbra-radius: 12px;
+  --umbra-transparency: 0.85;
+  --umbra-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --umbra-panel-bg: rgba(20, 20, 30, 0.85);
+  --umbra-accent-glow: color-mix(in srgb, var(--umbra-accent) 45%, transparent);
+  --umbra-library-tree-line: color-mix(in srgb, var(--umbra-accent) 34%, rgba(255, 255, 255, 0.24));
+  --umbra-frost-intensity: 16px;
+  --umbra-liquid-refraction: 0.55;
+  --umbra-liquid-specular: 0.65;
+  --umbra-metalness: 0.72;
+  --umbra-metal-flow: 0.5;
+  --ui-scale: 1;
+  --text-scale: 1;
+  --font-size-normalize: 1;
+  --font-letter-spacing: 0em;
+  --font-line-height: 1.5;
+  --font-size-adjust: 0.52;
+  /* 85% NSFW thumbnail blur intensity (normalized to px for CSS filter blur) */
+  --umbra-nsfw-thumbnail-blur: 17px;
+
+  /* DNA-specific variables */
+  --umbra-border-width: 1px;
+  --umbra-border-style: solid;
+  --umbra-inset-shadow: 0 0 0 transparent;
+  --umbra-outline: none;
+
+  /* Static Vitals */
+  --font-family: var(--font-system);
+
+  /* Scrollbars should feel like part of the surface, not browser chrome. */
+  --umbra-scrollbar-size: 6px;
+  --umbra-scrollbar-track: transparent;
+  --umbra-scrollbar-thumb: color-mix(in srgb, var(--umbra-accent) 18%, rgba(113, 113, 122, 0.32));
+  --umbra-scrollbar-thumb-hover: color-mix(in srgb, var(--umbra-accent) 42%, rgba(161, 161, 170, 0.54));
+  --umbra-scrollbar-thumb-idle: transparent;
+}
+
+/* Global NSFW mode: blur thumbnail surfaces across the app */
+body.umbra-nsfw-thumbnail-blur-enabled img[src*="umbra-media://thumb"],
+body.umbra-nsfw-thumbnail-blur-enabled img[src*="/api/fs/thumbnail"],
+body.umbra-nsfw-thumbnail-blur-enabled video[src*="umbra-media://preview"],
+body.umbra-nsfw-thumbnail-blur-enabled video[src*="/api/fs/preview"],
+body.umbra-nsfw-thumbnail-blur-enabled .filmstrip-container img,
+body.umbra-nsfw-thumbnail-blur-enabled .filmstrip-container video,
+body.umbra-nsfw-thumbnail-blur-enabled .umbra-editor-grid img,
+body.umbra-nsfw-thumbnail-blur-enabled .umbra-editor-grid video,
+body.umbra-nsfw-thumbnail-blur-enabled [class*="thumbnail"] img,
+body.umbra-nsfw-thumbnail-blur-enabled [class*="thumbnail"] video,
+body.umbra-nsfw-thumbnail-blur-enabled .p-3.grid img,
+body.umbra-nsfw-thumbnail-blur-enabled .p-3.grid video {
+  filter: blur(var(--umbra-nsfw-thumbnail-blur)) !important;
+}
+
+body.umbra-nsfw-thumbnail-blur-enabled .umbra-power-prompter-generation-preview {
+  filter: blur(var(--umbra-nsfw-thumbnail-blur)) !important;
+}
+
+/* Keep full-size viewer media clear; NSFW mode targets thumbnails only */
+body.umbra-nsfw-thumbnail-blur-enabled [data-umbra-lightbox-root] img,
+body.umbra-nsfw-thumbnail-blur-enabled [data-umbra-lightbox-root] video {
+  filter: none !important;
+}
+
+body {
+  background: var(--umbra-bg);
+  color: var(--umbra-text);
+  font-family: var(--font-family);
+  font-size-adjust: calc(var(--font-size-adjust) / var(--text-scale));
+  letter-spacing: var(--font-letter-spacing);
+  line-height: var(--font-line-height);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* UI Scale - Apply to root html element to scale layout/components proportionally */
+html {
+  font-size: calc(16px * var(--ui-scale) * var(--font-size-normalize));
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  max-width: 100vw;
+  max-height: 100vh;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+[data-umbra-studio-shell],
+[data-umbra-workspace-frame],
+[data-umbra-workspace-stage] {
+  overscroll-behavior: none;
+}
+
+[data-umbra-appbar],
+[data-umbra-appbar-shell],
+[data-umbra-phone-topbar],
+[data-umbra-gallery-viewer-header],
+[data-umbra-modal-header] {
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
+button,
+a,
+input,
+select,
+textarea,
+[role="button"] {
+  touch-action: manipulation;
+}
+
+@keyframes umbraWorkspaceSlideInDown {
+  from {
+    transform: translate3d(0, -100%, 0);
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes umbraWorkspaceSlideOutDown {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(0, 100%, 0);
+  }
+}
+
+@keyframes umbraWorkspaceSlideInUp {
+  from {
+    transform: translate3d(0, 100%, 0);
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes umbraWorkspaceSlideOutUp {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(0, -100%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-comfyui,
+  .workspace-library,
+  .workspace-modelmanager,
+  .workspace-board,
+  .workspace-remote,
+  [style*="umbraWorkspaceSlide"] {
+    animation: none !important;
+  }
+}
+
+/* Hide default cursor when custom cursor is enabled */
+body.custom-cursor-enabled {
+  cursor: none;
+}
+
+body.custom-cursor-enabled * {
+  cursor: none !important;
+}
+
+/* 240FPS & High-Refinement Optimization */
+* {
+  backface-visibility: hidden;
+  /* Note: perspective and transform-style removed from global selector
+     as they cause layout shifts when combined with scale transforms.
+     Apply these only to specific 3D transform containers if needed. */
+  will-change: auto;
+}
+
+.will-change-transform {
+  will-change: transform, opacity;
+}
+
+/* UI Primitives */
+.glass-panel {
+  background: var(--umbra-panel-bg);
+  backdrop-filter: blur(var(--umbra-blur));
+  -webkit-backdrop-filter: blur(var(--umbra-blur));
+  border: var(--umbra-border);
+  border-image: var(--umbra-border-gradient) 1;
+  border-radius: var(--umbra-radius);
+  box-shadow: var(--umbra-shadow), var(--umbra-inset-shadow);
+  outline: var(--umbra-outline);
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Accent surfaces: apply ratio-based gradient to accent backgrounds */
+.bg-\[var\(--umbra-accent\)\] {
+  background-image: var(--umbra-accent-gradient) !important;
+  background-color: transparent !important;
+}
+
+.hover\:bg-\[var\(--umbra-accent\)\]:hover {
+  background-image: var(--umbra-accent-gradient-soft) !important;
+  background-color: transparent !important;
+}
+
+.border-\[var\(--umbra-accent\)\] {
+  border-color: transparent !important;
+  border-image: var(--umbra-border-gradient) 1 !important;
+}
+
+.hover\:border-\[var\(--umbra-accent\)\]:hover {
+  border-color: transparent !important;
+  border-image: var(--umbra-border-gradient) 1 !important;
+}
+
+/* Output Browser-specific accent alpha utilities should also use ratio gradients */
+.output-library-theme .bg-\[var\(--umbra-accent\)\/10\],
+.output-library-theme .bg-\[var\(--umbra-accent\)\/12\],
+.output-library-theme .bg-\[var\(--umbra-accent\)\/20\] {
+  background-image: var(--umbra-accent-gradient-soft) !important;
+  background-color: color-mix(in srgb, var(--umbra-accent) 10%, transparent) !important;
+}
+
+.output-library-theme .border-\[var\(--umbra-accent\)\/35\],
+.output-library-theme .border-\[var\(--umbra-accent\)\/40\] {
+  border-color: transparent !important;
+  border-image: var(--umbra-border-gradient) 1 !important;
+}
+
+/* Theme utility surfaces for workspace panels/inputs */
+.umbra-surface-soft {
+  background: color-mix(in srgb, var(--umbra-panel) 72%, transparent);
+  border-color: color-mix(in srgb, var(--umbra-border) 90%, transparent);
+}
+
+.umbra-surface-deep {
+  background: color-mix(in srgb, var(--umbra-bg) 76%, transparent);
+  border-color: color-mix(in srgb, var(--umbra-border) 85%, transparent);
+}
+
+.umbra-input {
+  background: color-mix(in srgb, var(--umbra-bg) 62%, transparent);
+  border: 1px solid color-mix(in srgb, var(--umbra-border) 100%, transparent);
+  color: var(--umbra-text);
+}
+
+.umbra-input::placeholder {
+  color: color-mix(in srgb, var(--umbra-text) 44%, transparent);
+}
+
+.umbra-text-muted {
+  color: color-mix(in srgb, var(--umbra-text) 68%, transparent);
+}
+
+.umbra-text-faint {
+  color: color-mix(in srgb, var(--umbra-text) 48%, transparent);
+}
+
+.umbra-chip-neutral {
+  background: color-mix(in srgb, var(--umbra-text) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--umbra-border) 96%, transparent);
+  color: color-mix(in srgb, var(--umbra-text) 86%, transparent);
+}
+
+.umbra-chip-row {
+  border: 1px solid color-mix(in srgb, var(--umbra-border) 95%, transparent);
+  background: color-mix(in srgb, var(--umbra-panel) 64%, transparent);
+}
+
+.umbra-icon-button {
+  color: color-mix(in srgb, var(--umbra-text) 60%, transparent);
+}
+
+.umbra-icon-button:hover {
+  background: color-mix(in srgb, var(--umbra-text) 10%, transparent);
+  color: var(--umbra-text);
+}
+
+/* ============================================
+   DNA-SPECIFIC GLOBAL STYLES
+   Each DNA creates a dramatically different UI feel
+   ============================================ */
+
+/* BRUTALIST - Raw, industrial, no frills */
+body[data-dna="brutalist"] {
+  font-weight: 600;
+}
+body[data-dna="brutalist"] .glass-panel {
+  border-width: 4px;
+}
+body[data-dna="brutalist"] button,
+body[data-dna="brutalist"] input {
+  border-radius: 0 !important;
+}
+
+/* TERMINAL - Hacker aesthetic without media-distorting scanlines */
+body[data-dna="terminal"] {
+  letter-spacing: 0.01em;
+}
+body[data-dna="terminal"] .glass-panel {
+  text-shadow: 0 0 10px var(--umbra-accent);
+}
+
+/* CYBER - Neon glow, futuristic */
+body[data-dna="cyber"] .glass-panel:hover {
+  box-shadow: 0 0 40px var(--umbra-accent), 0 0 80px var(--umbra-accent-glow);
+}
+body[data-dna="cyber"] button:hover {
+  text-shadow: 0 0 8px var(--umbra-accent);
+}
+
+/* RETRO - 80s/90s pixel vibe */
+body[data-dna="retro"] {
+  image-rendering: pixelated;
+}
+body[data-dna="retro"] img,
+body[data-dna="retro"] video,
+body[data-dna="retro"] canvas,
+body[data-dna="retro"] iframe,
+body[data-dna="retro"] [data-umbra-gallery-viewer-media],
+body[data-dna="retro"] .umbra-power-prompter-generation-preview {
+  image-rendering: auto !important;
+}
+body[data-dna="retro"] .glass-panel {
+  border-width: 3px;
+}
+
+/* NEUMORPHIC - Soft 3D, extruded */
+body[data-dna="neumorphic"] .glass-panel {
+  border: none;
+}
+body[data-dna="neumorphic"] button:active {
+  box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.4), inset -4px -4px 8px rgba(80, 80, 100, 0.1) !important;
+}
+
+/* FLAT - Pure minimalism, no shadows */
+body[data-dna="flat"] .glass-panel {
+  border: none;
+  box-shadow: none !important;
+}
+body[data-dna="flat"] .neon-glow:hover {
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* MATERIAL - Elevated cards */
+body[data-dna="material"] .glass-panel {
+  border: none;
+}
+body[data-dna="material"] .glass-panel:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.3), 0 8px 16px rgba(0,0,0,0.3), 0 16px 32px rgba(0,0,0,0.3);
+}
+
+/* ORGANIC - Natural flowing shapes */
+body[data-dna="organic"] {
+  --umbra-radius: 40px 16px 40px 16px;
+}
+body[data-dna="organic"] button {
+  border-radius: 20px 8px 20px 8px !important;
+}
+
+/* GLASS - Enhanced glassmorphism */
+body[data-dna="glass"] .glass-panel {
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+}
+
+/* LIQUID GLASS - Refractive, specular, fluid */
+body[data-dna="liquid-glass"] .glass-panel {
+  border: 1px solid color-mix(in srgb, white 28%, transparent);
+  backdrop-filter: blur(calc(var(--umbra-frost-intensity) + (var(--umbra-liquid-refraction) * 12px))) saturate(1.35);
+  -webkit-backdrop-filter: blur(calc(var(--umbra-frost-intensity) + (var(--umbra-liquid-refraction) * 12px))) saturate(1.35);
+  background:
+    radial-gradient(130% 90% at 6% 2%, rgba(255, 255, 255, calc(0.16 * var(--umbra-liquid-specular))), transparent 45%),
+    radial-gradient(90% 80% at 95% 0%, color-mix(in srgb, var(--umbra-accent) calc(22% + (var(--umbra-liquid-refraction) * 26%)), transparent), transparent 62%),
+    linear-gradient(165deg, rgba(255, 255, 255, calc(0.08 + (0.12 * var(--umbra-transparency)))) 0%, rgba(255, 255, 255, 0.02) 40%, rgba(0, 0, 0, 0.14) 100%);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, calc(0.3 * var(--umbra-liquid-specular))),
+    inset 0 -10px 24px rgba(0, 0, 0, calc(0.14 * var(--umbra-liquid-refraction)));
+}
+
+/* LIQUID METAL - Reflective chrome fluid */
+body[data-dna="liquid-metal"] .glass-panel {
+  border: 1px solid rgba(255, 255, 255, calc(0.16 + (0.3 * var(--umbra-metalness))));
+  backdrop-filter: blur(calc(4px + (var(--umbra-frost-intensity) * 0.45)));
+  -webkit-backdrop-filter: blur(calc(4px + (var(--umbra-frost-intensity) * 0.45)));
+  background:
+    linear-gradient(calc(105deg + (var(--umbra-metal-flow) * 24deg)),
+      rgba(250, 250, 250, calc(0.08 + (0.25 * var(--umbra-metalness)))) 0%,
+      rgba(160, 166, 176, calc(0.2 + (0.38 * var(--umbra-metalness)))) 22%,
+      rgba(64, 70, 82, calc(0.28 + (0.24 * var(--umbra-metalness)))) 44%,
+      rgba(212, 218, 228, calc(0.16 + (0.28 * var(--umbra-metalness)))) 68%,
+      rgba(36, 40, 50, 0.5) 100%);
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.48),
+    inset 0 1px 0 rgba(255, 255, 255, calc(0.2 + (0.38 * var(--umbra-metalness)))),
+    inset 0 -8px 20px rgba(0, 0, 0, calc(0.18 + (0.34 * var(--umbra-metal-flow)))),
+    inset 22px 0 24px rgba(255, 255, 255, calc(0.05 + (0.1 * var(--umbra-metal-flow))));
+}
+
+body[data-dna="liquid-metal"] .glass-panel:hover {
+  filter: saturate(calc(1 + (var(--umbra-metal-flow) * 0.4)));
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, calc(0.28 + (0.45 * var(--umbra-metalness)))),
+    inset 0 -10px 22px rgba(0, 0, 0, calc(0.22 + (0.4 * var(--umbra-metal-flow))));
+}
+
+/* CARDS - Clean elevated cards */
+body[data-dna="cards"] .glass-panel:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 12px rgba(0, 0, 0, 0.4), 0 16px 32px rgba(0, 0, 0, 0.3);
+}
+
+.neon-glow {
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+              border-color 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.neon-glow:hover {
+  box-shadow: 0 0 20px var(--umbra-accent-glow);
+  border-color: var(--umbra-accent);
+  transform: translateY(-1px);
+}
+
+/* App-wide scrollbar policy: keep scroll behavior, hide default browser chrome by default. */
+:where(*) {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+:where(*)::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* Tailwind scrollbar-thin commonly leaks native browser chrome. Keep it hidden. */
+.scrollbar-thin,
+.scrollbar-thin:hover,
+.scrollbar-thin:focus,
+.scrollbar-thin:focus-within {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+.scrollbar-thin::-webkit-scrollbar,
+.scrollbar-thin:hover::-webkit-scrollbar,
+.scrollbar-thin:focus::-webkit-scrollbar,
+.scrollbar-thin:focus-within::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+/* Custom Scrollbar - quiet until the user interacts with the scroll surface */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--umbra-scrollbar-thumb-idle) var(--umbra-scrollbar-track);
+  -ms-overflow-style: auto;
+}
+
+/* Vertical panels should not drift sideways when a child is a few pixels wide. */
+.overflow-y-auto:not(.overflow-x-auto):not(.overflow-x-scroll):not(.overflow-x-visible),
+.overflow-y-scroll:not(.overflow-x-auto):not(.overflow-x-scroll):not(.overflow-x-visible) {
+  overflow-x: hidden;
+  overscroll-behavior-x: contain;
+  touch-action: pan-y;
+}
+
+.custom-scrollbar:hover,
+.custom-scrollbar:focus,
+.custom-scrollbar:focus-within {
+  scrollbar-color: var(--umbra-scrollbar-thumb) var(--umbra-scrollbar-track);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: var(--umbra-scrollbar-size);
+  height: var(--umbra-scrollbar-size);
+  display: block;
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: var(--umbra-scrollbar-track);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  min-height: 24px;
+  min-width: 24px;
+  background: var(--umbra-scrollbar-thumb-idle);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+.custom-scrollbar:hover::-webkit-scrollbar-thumb,
+.custom-scrollbar:focus::-webkit-scrollbar-thumb,
+.custom-scrollbar:focus-within::-webkit-scrollbar-thumb {
+  background-color: var(--umbra-scrollbar-thumb);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: var(--umbra-scrollbar-thumb-hover);
+}
+
+textarea.custom-scrollbar::-webkit-scrollbar,
+pre.custom-scrollbar::-webkit-scrollbar,
+code.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+/* Power Prompter: dense editor lanes use hidden/reveal scroll affordances. */
+.powerprompter-lane-scrollbar {
+  scrollbar-gutter: auto;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  -ms-overflow-style: auto;
+}
+
+.powerprompter-lane-scrollbar:hover,
+.powerprompter-lane-scrollbar:focus,
+.powerprompter-lane-scrollbar:focus-within {
+  scrollbar-color: var(--umbra-scrollbar-thumb) transparent;
+}
+
+.powerprompter-lane-scrollbar::-webkit-scrollbar {
+  width: var(--umbra-scrollbar-size);
+  height: var(--umbra-scrollbar-size);
+  display: block;
+  background: transparent;
+}
+
+.powerprompter-lane-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 999px;
+}
+
+.powerprompter-lane-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.powerprompter-lane-scrollbar:hover::-webkit-scrollbar-thumb,
+.powerprompter-lane-scrollbar:focus::-webkit-scrollbar-thumb,
+.powerprompter-lane-scrollbar:focus-within::-webkit-scrollbar-thumb {
+  background-color: var(--umbra-scrollbar-thumb);
+}
+
+.powerprompter-lane-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: var(--umbra-scrollbar-thumb-hover);
+}
+
+/* Hide native scrollbars when a synced custom bar is used */
+.hide-native-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.hide-native-scrollbar::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+/* 240fps optimized animations */
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 3s ease-in-out infinite;
+}
+
+@keyframes sidebar-glow-pulse {
+  0%, 100% {
+    border-right-color: color-mix(in srgb, var(--umbra-accent) 42%, rgba(255, 255, 255, 0.08));
+    box-shadow: inset -1px 0 0 color-mix(in srgb, var(--umbra-accent) 45%, transparent),
+                10px 0 22px color-mix(in srgb, var(--umbra-accent) 14%, transparent);
+  }
+  50% {
+    border-right-color: color-mix(in srgb, var(--umbra-accent) 72%, rgba(255, 255, 255, 0.14));
+    box-shadow: inset -1px 0 0 color-mix(in srgb, var(--umbra-accent) 78%, transparent),
+                12px 0 34px color-mix(in srgb, var(--umbra-accent) 28%, transparent);
+  }
+}
+
+@keyframes sidebar-icon-breathe {
+  0%, 100% {
+    color: color-mix(in srgb, var(--umbra-accent) 52%, #e5e7eb);
+  }
+  50% {
+    color: color-mix(in srgb, var(--umbra-accent) 68%, #22d3ee);
+  }
+}
+
+.umbra-sidebar-shell {
+  border-right: 1px solid color-mix(in srgb, var(--umbra-accent) 42%, rgba(255, 255, 255, 0.08));
+  animation: sidebar-glow-pulse 7s ease-in-out infinite;
+}
+
+.umbra-sidebar-divider {
+  border-color: color-mix(in srgb, var(--umbra-accent) 24%, rgba(255, 255, 255, 0.08));
+}
+
+.umbra-sidebar-section {
+  border-color: color-mix(in srgb, var(--umbra-accent) 10%, transparent);
+}
+
+.umbra-sidebar-section:hover {
+  border-color: color-mix(in srgb, var(--umbra-accent) 34%, rgba(255, 255, 255, 0.1));
+}
+
+.umbra-sidebar-shell button svg {
+  animation: sidebar-icon-breathe 5.4s ease-in-out infinite;
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+              color 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+              filter 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--umbra-accent) 34%, transparent));
+}
+
+.umbra-sidebar-shell button:hover svg {
+  transform: translateY(-1px) scale(1.08);
+  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--umbra-accent) 50%, transparent));
+}
+
+.umbra-sidebar-shell button:active svg {
+  transform: scale(0.96);
+}
+
+.umbra-sidebar-shell button svg.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+html[data-umbra-remote-mode="tablet"] {
+  --umbra-remote-sidebar-width: 14rem;
+  --umbra-remote-sidebar-collapsed-width: 3.25rem;
+  --umbra-remote-touch-target: 2.625rem;
+}
+
+html[data-umbra-remote-mode="tablet"],
+html[data-umbra-remote-mode="tablet"] body {
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-studio-shell] {
+  height: 100dvh;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-appbar] {
+  width: var(--umbra-remote-sidebar-width) !important;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-appbar][data-umbra-sidebar-expanded="0"] {
+  width: var(--umbra-remote-sidebar-collapsed-width) !important;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-appbar-shell] {
+  width: var(--umbra-remote-sidebar-width) !important;
+  animation: none;
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--umbra-accent) 46%, transparent),
+              6px 0 18px rgba(0, 0, 0, 0.28);
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-appbar-shell][data-umbra-sidebar-expanded="0"] {
+  width: var(--umbra-remote-sidebar-collapsed-width) !important;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-sidebar-system-section] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-sidebar-quick-actions] {
+  padding-top: 0.5rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-sidebar-nav] {
+  padding: 0.5rem;
+  gap: 0.5rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-sidebar-nav] button,
+html[data-umbra-remote-mode="tablet"] [data-umbra-sidebar-quick-actions] button {
+  min-height: var(--umbra-remote-touch-target);
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-sidebar-nav] button {
+  padding-left: 0.625rem;
+  padding-right: 0.625rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-sidebar-nav] .umbra-sidebar-section {
+  border-color: color-mix(in srgb, var(--umbra-accent) 16%, rgba(255, 255, 255, 0.08));
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-appbar-shell] button svg,
+html[data-umbra-remote-mode="tablet"] [data-umbra-appbar-shell] button:hover svg,
+html[data-umbra-remote-mode="tablet"] [data-umbra-appbar-shell] button:active svg {
+  animation: none;
+  filter: none;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-workspace-stage] {
+  box-shadow: 0 0 42px rgba(0, 0, 0, 0.48) !important;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-appbar-shell] [role="dialog"],
+html[data-umbra-remote-mode="tablet"] [data-umbra-appbar-shell] [data-headlessui-state],
+html[data-umbra-remote-mode="tablet"] [data-umbra-appbar-shell] .glass-panel {
+  max-width: min(32rem, calc(100vw - var(--umbra-remote-sidebar-width) - 1.5rem));
+}
+
+html[data-umbra-remote-mode="tablet"] :where(button, [role="button"], [data-umbra-card-nav-button], [data-umbra-prompt-card], [data-umbra-gallery-tile]) {
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-nav-strip],
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-lane] {
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] textarea[data-variant-plain-edit="true"]:not(:focus) {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+html[data-umbra-remote-mode="tablet"] :where(input:focus, textarea:focus, [contenteditable="true"]:focus) {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
+html[data-umbra-remote-mode="phone"] {
+  --umbra-remote-drawer-width: min(19.5rem, calc(100vw - 3.25rem));
+  --umbra-remote-phone-touch-target: 3.25rem;
+  --umbra-phone-shell-top: 3.625rem;
+  --umbra-phone-pp-command-height: 7.45rem;
+  --umbra-phone-pp-panel-top: calc(var(--umbra-phone-shell-top) + var(--umbra-phone-pp-command-height));
+}
+
+html[data-umbra-remote-mode="phone"],
+html[data-umbra-remote-mode="phone"] body {
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-studio-shell] {
+  height: 100dvh;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-workspace-frame] {
+  width: 100vw;
+  min-height: 0;
+  height: 100dvh;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-workspace-stage] {
+  box-shadow: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-appbar] {
+  position: fixed;
+  inset: var(--umbra-phone-shell-top) auto 0 0;
+  width: var(--umbra-remote-drawer-width) !important;
+  height: calc(100dvh - var(--umbra-phone-shell-top)) !important;
+  z-index: 120;
+  transform: translateX(-105%);
+  transition: transform 180ms ease-out;
+  pointer-events: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-appbar][data-umbra-phone-open="1"] {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-appbar-shell] {
+  width: var(--umbra-remote-drawer-width) !important;
+  height: calc(100dvh - var(--umbra-phone-shell-top)) !important;
+  border-right: 1px solid color-mix(in srgb, var(--umbra-accent) 48%, rgba(255, 255, 255, 0.08));
+  border-top: 0;
+  animation: none;
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--umbra-accent) 46%, transparent),
+              18px 0 36px rgba(0, 0, 0, 0.5);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-appbar-shell] > div:first-child {
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-menu-button] {
+  display: inline-flex;
+  width: 2.625rem;
+  height: 2.625rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--umbra-accent) 38%, rgba(255, 255, 255, 0.12));
+  background: rgba(255, 255, 255, 0.045);
+  color: #f4f4f5;
+  box-shadow: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-topbar] {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 135;
+  display: flex;
+  min-height: var(--umbra-phone-shell-top);
+  align-items: center;
+  gap: 0.625rem;
+  padding: max(0.5rem, env(safe-area-inset-top)) max(0.625rem, env(safe-area-inset-right)) 0.5rem max(0.625rem, env(safe-area-inset-left));
+  border-bottom: 1px solid color-mix(in srgb, var(--umbra-accent) 22%, rgba(255, 255, 255, 0.08));
+  background: rgba(5, 5, 8, 0.94);
+  color: #f4f4f5;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(16px);
+}
+
+html:not([data-umbra-remote-mode="phone"]) [data-umbra-phone-topbar] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-topbar-title] {
+  min-width: 0;
+  flex: 1 1 auto;
+  line-height: 1.05;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-topbar-title] span {
+  display: block;
+  font-size: 0.56rem;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--umbra-accent) 72%, #a1a1aa);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-topbar-title] strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+  letter-spacing: 0;
+  color: #f4f4f5;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-topbar-status] {
+  width: 0.625rem;
+  height: 0.625rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #52525b;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-topbar-status][data-status="connected"] {
+  background: #34d399;
+  box-shadow: 0 0 14px rgba(52, 211, 153, 0.55);
+}
+
+html[data-umbra-remote-mode="phone"][data-umbra-active-workspace="comfyui"] {
+  --umbra-phone-shell-top: 0px;
+}
+
+html[data-umbra-remote-mode="phone"][data-umbra-active-workspace="comfyui"] [data-umbra-phone-topbar] {
+  inset: var(--umbra-phone-comfy-menu-y, max(0.25rem, env(safe-area-inset-top))) auto auto var(--umbra-phone-comfy-menu-x, max(0.25rem, env(safe-area-inset-left)));
+  z-index: 210;
+  width: auto;
+  min-height: 0;
+  gap: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+html[data-umbra-remote-mode="phone"][data-umbra-active-workspace="comfyui"] [data-umbra-phone-menu-button] {
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 0.55rem;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(5, 5, 8, 0.58);
+  color: rgba(244, 244, 245, 0.76);
+  backdrop-filter: blur(10px);
+  touch-action: none;
+  user-select: none;
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+html[data-umbra-remote-mode="phone"][data-umbra-active-workspace="comfyui"] [data-umbra-phone-topbar][data-umbra-phone-comfy-dragging="1"] [data-umbra-phone-menu-button] {
+  border-color: color-mix(in srgb, var(--umbra-accent) 56%, rgba(255, 255, 255, 0.12));
+  background: rgba(5, 5, 8, 0.82);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--umbra-accent) 30%, transparent),
+              0 0 24px color-mix(in srgb, var(--umbra-accent) 22%, transparent);
+  transform: scale(1.04);
+}
+
+html[data-umbra-remote-mode="phone"][data-umbra-active-workspace="comfyui"] [data-umbra-phone-menu-button] svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+html[data-umbra-remote-mode="phone"][data-umbra-active-workspace="comfyui"] [data-umbra-phone-topbar-title] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"][data-umbra-active-workspace="comfyui"] [data-umbra-phone-topbar-status] {
+  width: 0.38rem;
+  height: 0.38rem;
+  opacity: 0.78;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-menu-backdrop] {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  border: 0;
+  background: rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(2px);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-system-section] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-quick-actions] {
+  padding-top: 4rem;
+}
+
+html[data-umbra-remote-mode="phone"] .umbra-sidebar-divider {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-nav] {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0.75rem;
+  scrollbar-width: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-nav] .umbra-sidebar-section {
+  border-color: color-mix(in srgb, var(--umbra-accent) 16%, rgba(255, 255, 255, 0.08));
+  background: rgba(255, 255, 255, 0.035);
+  padding: 0.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-nav] [id^="nav-"] {
+  min-width: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-quick-actions] button,
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-nav] button {
+  min-height: var(--umbra-remote-phone-touch-target);
+  font-size: 0.875rem;
+  border-radius: 0.875rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-nav] button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-system-section],
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-quick-actions] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-nav] {
+  padding-top: 0.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-nav] > .umbra-sidebar-section:nth-of-type(n+3) {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-nav] > .umbra-sidebar-section:nth-of-type(2) > :nth-child(n+3),
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-nav] button[aria-label="Open ComfyUI in browser"],
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-nav] button[aria-label="Pop out Gallery"] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-nav] button svg,
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-nav] button:hover svg,
+html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-nav] button:active svg {
+  animation: none;
+  filter: none;
+  transform: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-appbar-shell] [role="dialog"],
+html[data-umbra-remote-mode="phone"] [data-umbra-appbar-shell] [data-headlessui-state],
+html[data-umbra-remote-mode="phone"] [data-umbra-appbar-shell] .glass-panel {
+  max-width: calc(100vw - 1rem);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-context-menu-boundary="workspace"] {
+  padding-top: var(--umbra-phone-shell-top);
+}
+
+html[data-umbra-remote-mode="phone"][data-umbra-active-workspace="comfyui"] [data-umbra-context-menu-boundary="workspace"] {
+  padding-top: 0;
+}
+
+html[data-umbra-remote-mode="phone"] .workspace-comfyui iframe,
+html[data-umbra-remote-mode="phone"] iframe[src*="comfy"] {
+  width: 142.857143% !important;
+  height: 142.857143% !important;
+  max-width: none;
+  transform: scale(0.7) translateZ(0) !important;
+  transform-origin: top left;
+}
+
+html[data-umbra-remote-mode="phone"] .workspace-comfyui {
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode="phone"][data-umbra-active-workspace="comfyui"] .workspace-comfyui {
+  inset: 0 !important;
+  height: 100dvh;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root] {
+  flex-direction: column;
+  min-height: 0;
+}
+
+[data-umbra-gallery-mobile-switcher] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-mobile-switcher] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.325rem;
+  margin-top: var(--umbra-phone-shell-top);
+  padding: 0.55rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--umbra-accent) 18%, rgba(255, 255, 255, 0.08));
+  background: rgba(5, 5, 8, 0.96);
+  backdrop-filter: blur(14px);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-mobile-switcher] button {
+  display: inline-flex;
+  min-height: 2.4rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 0.675rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+  color: #a1a1aa;
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-mobile-switcher] button[data-active="1"] {
+  border-color: color-mix(in srgb, var(--umbra-accent) 48%, rgba(255, 255, 255, 0.08));
+  background: color-mix(in srgb, var(--umbra-accent) 18%, rgba(255, 255, 255, 0.035));
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--umbra-accent) 22%, transparent);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator] {
+  width: 100% !important;
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
+  border-right: 0;
+  border-bottom: 1px solid rgb(39 39 42 / 0.8);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content] {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content] > header,
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content] > div > div:first-child {
+  min-height: auto;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.45rem;
+  padding: 0.55rem 0.675rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content] > header > div,
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content] > div > div:first-child > div {
+  min-width: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content] select,
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content] button {
+  min-height: 2rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-virtualized-gallery-grid] {
+  padding-inline: 0.625rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root] {
+  background: #050508;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator] {
+  max-height: none;
+  background: linear-gradient(180deg, rgba(9, 9, 11, 0.98), rgba(5, 5, 8, 0.94));
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="0"],
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="0"] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator] > div:first-child {
+  padding: 0.78rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator] > div:last-child {
+  padding: 0.675rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-library-section-header] {
+  min-height: 1.95rem;
+  margin-bottom: 0.25rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-library-section-toggle] {
+  min-height: 1.95rem !important;
+  padding-block: 0.35rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-library-section-collapse] {
+  width: 1.95rem !important;
+  height: 1.95rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-library-folder-row] {
+  min-height: 2.3rem !important;
+  height: auto !important;
+  padding-block: 0.25rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-library-folder-row] > button,
+html[data-umbra-remote-mode="phone"] [data-umbra-library-root-row] {
+  min-height: 2.3rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-library-root-row] {
+  height: 2.6rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-library-folder-row] > button:first-of-type {
+  min-width: 1.75rem;
+  min-height: 1.75rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-header] {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  border-color: color-mix(in srgb, var(--umbra-accent) 20%, rgba(255, 255, 255, 0.08));
+  background: rgba(5, 5, 8, 0.96);
+  backdrop-filter: blur(14px);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-path-ticker] {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-path-ticker] > span {
+  display: inline-block;
+  min-width: 100%;
+  padding-right: 2.5rem;
+  will-change: transform;
+  animation: umbra-phone-path-ticker 15s linear infinite;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-path-ticker]:hover > span,
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-path-ticker]:focus-within > span {
+  animation-play-state: paused;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-sort-actions],
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-action-bar] > div:last-child {
+  display: flex;
+  width: 100%;
+  overflow-x: auto;
+  padding-bottom: 0.1rem;
+  scrollbar-width: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-action-bar] {
+  position: sticky;
+  top: 3.7rem;
+  z-index: 19;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.45rem;
+  border-color: rgba(255, 255, 255, 0.06);
+  background: rgba(5, 5, 8, 0.94);
+  backdrop-filter: blur(12px);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-action-bar] > div:first-child {
+  min-width: 0;
+  font-size: 0.66rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tag-flyout] {
+  position: fixed !important;
+  inset: auto 0.625rem max(0.75rem, env(safe-area-inset-bottom)) 0.625rem !important;
+  z-index: 230;
+  width: auto !important;
+  max-height: min(52dvh, 26rem);
+  border-color: color-mix(in srgb, var(--umbra-accent) 26%, rgba(255, 255, 255, 0.1));
+  border-radius: 0.875rem;
+  box-shadow: 0 -18px 44px rgba(0, 0, 0, 0.58);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tag-flyout] > div:last-child {
+  max-height: min(40dvh, 20rem);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-mobile-view-toggle] {
+  min-width: 4.75rem;
+  justify-content: center;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-scroll] {
+  padding: 0.875rem !important;
+  scroll-padding-top: 8rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-scroll] [style*="grid-template-columns"] {
+  justify-content: center;
+}
+
+@media (orientation: landscape) and (max-height: 560px) {
+  html[data-umbra-remote-mode="phone"] {
+    --umbra-phone-gallery-landscape-rail: clamp(13.5rem, 31vw, 17.5rem);
+  }
+
+  html[data-umbra-remote-mode="phone"]:has([data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"]) [data-umbra-react-gallery-root] {
+    flex-direction: row;
+    min-height: 100%;
+    background: #050508;
+  }
+
+  html[data-umbra-remote-mode="phone"]:has([data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"]) [data-umbra-react-gallery-root]::before {
+    content: "";
+    position: fixed;
+    inset: var(--umbra-phone-shell-top) auto 0 0;
+    z-index: 28;
+    width: var(--umbra-phone-gallery-landscape-rail);
+    pointer-events: none;
+    border-right: 1px solid color-mix(in srgb, var(--umbra-accent) 22%, rgba(255, 255, 255, 0.08));
+    background: linear-gradient(180deg, rgba(7, 10, 9, 0.98), rgba(5, 5, 8, 0.96));
+    box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.025), 16px 0 34px rgba(0, 0, 0, 0.28);
+  }
+
+  html[data-umbra-remote-mode="phone"]:has([data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"]) [data-umbra-gallery-mobile-switcher] {
+    position: fixed;
+    inset: var(--umbra-phone-shell-top) auto auto 0.45rem;
+    z-index: 32;
+    display: grid;
+    width: calc(var(--umbra-phone-gallery-landscape-rail) - 0.9rem);
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.35rem;
+    margin-top: 0;
+    padding: 0.45rem 0 0;
+    border: 0;
+    background: transparent;
+  }
+
+  html[data-umbra-remote-mode="phone"]:has([data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"]) [data-umbra-gallery-mobile-switcher] button {
+    min-height: 2rem;
+    justify-content: flex-start;
+    padding-inline: 0.7rem;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] {
+    position: fixed;
+    inset: var(--umbra-phone-shell-top) 0 0 var(--umbra-phone-gallery-landscape-rail);
+    z-index: 29;
+    height: auto;
+    margin: 0;
+    min-width: 0;
+    overflow: visible;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] > header {
+    position: fixed;
+    inset: calc(var(--umbra-phone-shell-top) + 4.65rem) auto auto 0.45rem;
+    z-index: 31;
+    width: calc(var(--umbra-phone-gallery-landscape-rail) - 0.9rem);
+    max-height: 8.15rem;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+    padding: 0.55rem;
+    border: 1px solid color-mix(in srgb, var(--umbra-accent) 18%, rgba(255, 255, 255, 0.08));
+    border-radius: 0.85rem;
+    background: linear-gradient(180deg, rgba(12, 16, 15, 0.96), rgba(5, 5, 8, 0.94));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 12px 28px rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(14px);
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-folder-summary] {
+    display: grid;
+    gap: 0.25rem;
+    min-width: 0;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-folder-title] {
+    font-size: 0.74rem;
+    line-height: 1rem;
+    letter-spacing: 0;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-path-ticker] {
+    border: 1px solid rgba(255, 255, 255, 0.055);
+    border-radius: 0.5rem;
+    background: rgba(0, 0, 0, 0.28);
+    padding: 0.18rem 0.35rem;
+    font-size: 0.58rem;
+    line-height: 0.82rem;
+    color: #71717a;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-path-ticker] > span {
+    min-width: 0;
+    max-width: 100%;
+    padding-right: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    animation: none;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-sort-actions] {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) 2.05rem 2.05rem;
+    gap: 0.32rem;
+    overflow: visible;
+    padding-bottom: 0;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-sort-actions] select {
+    grid-column: 1 / 3;
+    min-width: 0;
+    width: 100%;
+    height: 1.95rem;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-sort-actions] button {
+    width: 100%;
+    min-width: 0;
+    height: 1.95rem;
+    min-height: 1.95rem;
+    padding-inline: 0;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-sort-actions] button:nth-of-type(2) {
+    justify-content: center;
+    padding-inline: 0.35rem;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-action-bar] {
+    position: fixed;
+    inset: calc(var(--umbra-phone-shell-top) + 13.1rem) auto 0.45rem 0.45rem;
+    z-index: 30;
+    display: flex;
+    width: calc(var(--umbra-phone-gallery-landscape-rail) - 0.9rem);
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.55rem;
+    overflow-y: auto;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.85rem;
+    padding: 0.6rem;
+    background: rgba(9, 9, 11, 0.72);
+    backdrop-filter: blur(14px);
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-action-bar] > div:last-child {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+    overflow: visible;
+    padding-bottom: 0;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-action-bar] > div:last-child > *,
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-action-bar] > div:last-child button {
+    min-width: 0;
+    width: 100%;
+    justify-content: center;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-mobile-view-toggle],
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-action-bar] button {
+    min-height: 2.15rem;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-scroll] {
+    height: 100%;
+    padding: 0.8rem 0.7rem 0.7rem !important;
+    scroll-padding-top: 0.7rem;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="1"] [data-umbra-gallery-tag-flyout] {
+    inset: auto calc(100vw - var(--umbra-phone-gallery-landscape-rail) + 0.625rem) max(0.75rem, env(safe-area-inset-bottom)) 0.625rem !important;
+    width: calc(var(--umbra-phone-gallery-landscape-rail) - 1.25rem) !important;
+    max-height: min(46dvh, 20rem);
+  }
+
+  html[data-umbra-remote-mode="phone"]:has([data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="1"]) [data-umbra-react-gallery-root] {
+    min-height: 100%;
+    background: #050508;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="1"] {
+    width: 100% !important;
+    height: calc(100dvh - var(--umbra-phone-shell-top) - 3.25rem);
+    min-height: 0;
+    border-right: 0;
+    border-bottom: 0;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="1"] > div:first-child {
+    display: grid;
+    grid-template-columns: minmax(9rem, 0.45fr) minmax(0, 1fr);
+    align-items: end;
+    gap: 0.6rem;
+    padding: 0.55rem 0.7rem;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="1"] > div:first-child > div:first-child {
+    align-self: center;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="1"] > div:first-child > div:nth-child(2) {
+    margin-top: 0;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="1"] > div:first-child > div:last-child {
+    grid-column: 1 / -1;
+    margin-top: 0;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="1"] [data-umbra-library-body] {
+    display: grid;
+    grid-template-columns: minmax(12.5rem, 30vw) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 0.48fr) minmax(0, 0.52fr);
+    gap: 0.7rem;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0.7rem;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="1"] [data-umbra-library-transfer] {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    margin-bottom: 0;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="1"] [data-umbra-library-roots],
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="1"] [data-umbra-library-pinned] {
+    grid-column: 1;
+    margin-bottom: 0;
+    min-height: 0;
+    height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.75rem;
+    background: rgba(9, 9, 11, 0.74);
+    padding: 0.55rem;
+    scrollbar-width: thin;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="1"] [data-umbra-library-roots] {
+    grid-row: 1;
+    max-height: none;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="1"] [data-umbra-library-pinned] {
+    grid-row: 2;
+    max-height: none;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="1"] [data-umbra-library-tree] {
+    grid-column: 2;
+    grid-row: 1 / -1;
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    border: 1px solid color-mix(in srgb, var(--umbra-accent) 18%, rgba(255, 255, 255, 0.08));
+    border-radius: 0.75rem;
+    background: rgba(9, 9, 11, 0.74);
+    padding: 0.55rem;
+    scrollbar-width: thin;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="1"] [data-umbra-library-folder-row],
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="1"] [data-umbra-library-root-row] {
+    min-height: 2.1rem !important;
+  }
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tile] {
+  border-radius: 0.875rem !important;
+  padding: 0.5rem !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tile] .text-xs {
+  font-size: 0.82rem;
+  line-height: 1.15rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tile][data-umbra-gallery-selection-mode="1"],
+html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-tile][data-umbra-gallery-selection-mode="1"] {
+  touch-action: none;
+  user-select: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tile][data-umbra-gallery-selection-mode="1"]::after,
+html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-tile][data-umbra-gallery-selection-mode="1"]::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0.35rem;
+  z-index: 12;
+  border: 1px dashed color-mix(in srgb, var(--umbra-accent) 55%, transparent);
+  border-radius: 0.65rem;
+  opacity: 0.55;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer] {
+  z-index: 240;
+}
+
+html[data-umbra-remote-mode="phone"]:has([data-umbra-gallery-viewer]) [data-umbra-phone-topbar] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-header] {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 245;
+  display: flex;
+  min-height: var(--umbra-phone-shell-top);
+  align-items: center;
+  justify-content: stretch;
+  border-bottom: 1px solid color-mix(in srgb, var(--umbra-accent) 22%, rgba(255, 255, 255, 0.08));
+  background: rgba(5, 5, 8, 0.94);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(16px);
+  padding: max(0.5rem, env(safe-area-inset-top)) max(0.625rem, env(safe-area-inset-right)) 0.5rem max(0.625rem, env(safe-area-inset-left)) !important;
+  pointer-events: auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-title] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-actions] {
+  display: grid !important;
+  grid-template-columns: 2.625rem minmax(0, 1fr) 2.625rem minmax(0, 1fr) 2.625rem;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  max-width: none;
+  overflow: visible;
+  padding: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-actions] button {
+  width: 2.625rem;
+  height: 2.625rem;
+  min-height: 2.625rem;
+  border-color: color-mix(in srgb, var(--umbra-accent) 28%, rgba(255, 255, 255, 0.1));
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-action="previous"],
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-action="next"],
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-action="zoom-out"],
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-action="reset-zoom"],
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-action="zoom-in"],
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-action="reveal"],
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-action="copy"],
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-action="scanner"],
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-action="waifu"],
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-divider],
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-zoom-label] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-action="delete"] {
+  grid-column: 5;
+  justify-self: end;
+  border-color: rgba(239, 68, 68, 0.36);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-action="info"] {
+  grid-column: 3;
+  justify-self: center;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-action="close"] {
+  grid-column: 1;
+  justify-self: start;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-media] {
+  touch-action: pan-y pinch-zoom;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-media] > div {
+  padding: 0.75rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-info] {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 8;
+  width: 100% !important;
+  max-height: min(62dvh, 32rem);
+  border-left: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-top-left-radius: 1rem;
+  border-top-right-radius: 1rem;
+  background: rgba(9, 9, 11, 0.98);
+  box-shadow: 0 -24px 70px rgba(0, 0, 0, 0.62);
+  padding: 1rem 1rem max(1rem, env(safe-area-inset-bottom)) !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-info-handle] {
+  display: block;
+  width: 3rem;
+  height: 0.35rem;
+  margin: 0 auto 0.9rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-root] {
+  flex-direction: column;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-sidebar] {
+  position: fixed;
+  inset: var(--umbra-phone-pp-panel-top) 0 0 0;
+  z-index: 90;
+  width: 100% !important;
+  max-height: none;
+  border-right: 0;
+  border-bottom: 0;
+  background: rgba(5, 5, 8, 0.98);
+  transform: translateY(0);
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.08), 0 -28px 70px rgba(0, 0, 0, 0.42);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-main] {
+  min-height: 0;
+  height: 100%;
+  background:
+    radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--umbra-accent) 18%, transparent), transparent 32rem),
+    #050508;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-left-rail],
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-right-rail] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-search] {
+  display: contents;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-search] > * {
+  position: fixed !important;
+  inset: var(--umbra-phone-pp-panel-top) 0 0 0;
+  z-index: 90;
+  width: 100% !important;
+  max-width: none !important;
+  border-left: 0 !important;
+  background: rgba(5, 5, 8, 0.98);
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.08), 0 -28px 70px rgba(0, 0, 0, 0.42);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-main] > div:first-child {
+  position: sticky;
+  top: 0;
+  z-index: 95;
+  overflow: visible;
+  border-bottom: 1px solid color-mix(in srgb, var(--umbra-accent) 18%, rgba(255, 255, 255, 0.08));
+  background: rgba(5, 5, 8, 0.95);
+  backdrop-filter: blur(14px);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-bar] {
+  min-height: var(--umbra-phone-pp-command-height);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-bar] button,
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-bar] select {
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-bar] > div:last-child {
+  scrollbar-width: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-bar] > div:last-child::-webkit-scrollbar {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-command-bar] {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  flex-wrap: nowrap;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-command-bar] > * {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-command-bar] > div:last-child {
+  margin-left: 0 !important;
+  min-width: max-content;
+  overflow-x: visible;
+  scrollbar-width: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-command-bar]::after {
+  content: "";
+  flex: 0 0 1rem;
+  align-self: stretch;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-main] > div:nth-child(2) {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-main] button {
+  min-height: 2.5rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-main] button[title="Show file sidebar"],
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-main] button[title="Alert effects enabled"],
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-main] button[title="Alert effects disabled"] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] {
+  --umbra-phone-prompter-card-width: calc(100vw - 1rem);
+  height: 100%;
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] > div:first-child,
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] > div:nth-child(2) {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-generation-controls-card],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-powerprompter-side-card],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-recent-outputs-card] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-lane] {
+  overflow-x: hidden;
+  overflow-y: auto;
+  scroll-snap-type: y proximity;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-lane-content] {
+  min-height: 100%;
+  padding: 0.875rem 0.5rem 5.5rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-prompt-card] {
+  width: var(--umbra-phone-prompter-card-width) !important;
+  min-width: var(--umbra-phone-prompter-card-width) !important;
+  max-width: var(--umbra-phone-prompter-card-width) !important;
+  min-height: calc(100dvh - 16.25rem);
+  border-radius: 1rem !important;
+  scroll-snap-align: start;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.36);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-variant-plain-edit="true"] {
+  cursor: default;
+  caret-color: transparent !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title^="Move card"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title="Edit card name"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] select[title="Card name"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title="Card controls"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title^="Shuffle variants"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title="Add variant"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title="Remove card"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title^="Make this"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title^="Unset Skip"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title^="Create Chain"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title^="Create Blocks"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title^="Open larger"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title^="Move variant"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title="Remove variant"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title="Click to edit variant name"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title="Name this variant"] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] .h-11 {
+  min-height: 4rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title^="Go to page"] {
+  min-width: 3rem;
+  min-height: 2.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title^="Toggle Set"] {
+  min-width: 2.75rem;
+  min-height: 2.25rem;
+  font-size: 0.76rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-header] {
+  align-items: flex-start;
+  padding: 0.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-header] > div {
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-header] button {
+  min-height: 2.5rem;
+  justify-content: center;
+}
+
+html[data-umbra-remote-mode="phone"] .workspace-modelmanager aside,
+html[data-umbra-remote-mode="phone"] .workspace-board aside {
+  width: 100% !important;
+  max-height: 32dvh;
+  border-right: 0;
+  border-left: 0;
+  border-bottom: 1px solid rgb(255 255 255 / 0.08);
+}
+
+html[data-umbra-remote-mode="phone"] .workspace-modelmanager [class*="grid-cols-"],
+html[data-umbra-remote-mode="phone"] .workspace-board [class*="grid-cols-"],
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-root] [class*="grid-cols-"] {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+html[data-umbra-remote-mode="phone"] .workspace-modelmanager [class*="w-["],
+html[data-umbra-remote-mode="phone"] .workspace-board [class*="w-["],
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-root] [class*="w-["] {
+  max-width: 100% !important;
+}
+
+html[data-umbra-remote-mode="phone"] .workspace-remote section {
+  padding-top: 0;
+}
+
+html[data-umbra-remote-mode="phone"] .workspace-remote main,
+html[data-umbra-remote-mode="phone"] .workspace-remote [class*="px-6"],
+html[data-umbra-remote-mode="phone"] .workspace-remote [class*="p-6"] {
+  padding-inline: 0.75rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-global-settings] {
+  width: 100vw !important;
+  height: 100dvh !important;
+  max-width: none !important;
+  border-radius: 0 !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-settings-body] {
+  flex-direction: column;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-settings-nav] {
+  width: 100% !important;
+  max-height: 7.5rem;
+  display: flex;
+  gap: 0.375rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-right: 0;
+  border-bottom: 1px solid var(--umbra-border);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-settings-nav] button {
+  width: auto;
+  min-width: 8.5rem;
+  min-height: 2.75rem;
+  flex: 0 0 auto;
+  justify-content: center;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-settings-content] {
+  padding: 0.875rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-global-settings] > div:first-child,
+html[data-umbra-remote-mode="phone"] [data-umbra-global-settings] > div:last-child {
+  padding: 0.75rem !important;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .umbra-sidebar-shell {
+    animation: none;
+  }
+
+  .umbra-sidebar-shell button svg,
+  .umbra-sidebar-shell button:hover svg,
+  .umbra-sidebar-shell button:active svg {
+    animation: none;
+    transform: none;
+  }
+}
+
+@keyframes heartbeat {
+  0%, 100% {
+    transform: scale(1);
+  }
+  14% {
+    transform: scale(1.3);
+  }
+  28% {
+    transform: scale(1);
+  }
+  42% {
+    transform: scale(1.3);
+  }
+  70% {
+    transform: scale(1);
+  }
+}
+
+/* Wiggle animation for selected images */
+@keyframes wiggle {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-0.5deg);
+  }
+  75% {
+    transform: rotate(0.5deg);
+  }
+}
+
+.animate-wiggle {
+  animation: wiggle 0.6s ease-in-out infinite;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+/* Drag-to-reorder insertion indicators (CozyUI style - exact match) */
+
+/* Dragging state for the item being dragged */
+.dragging {
+  opacity: 0.4 !important;
+  transform: scale(0.95) !important;
+  box-shadow: none !important;
+}
+
+/* Drop target indicators - show clear insertion line */
+.drag-over-left,
+.drag-over-right {
+  /* CRITICAL: Allow overflow so insertion indicators are visible */
+  overflow: visible !important;
+}
+
+.drag-over-left {
+  position: relative;
+  transform: translateX(8px);
+  transition: transform 0.15s ease;
+  z-index: 1000; /* Ensure indicator is above other items */
+}
+
+.drag-over-left::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--umbra-accent);
+  border-radius: 2px;
+  box-shadow: 0 0 12px var(--umbra-accent), 0 0 24px var(--umbra-accent-glow);
+  z-index: 100;
+}
+
+/* Top circle indicator */
+.drag-over-left::after {
+  content: '';
+  position: absolute;
+  left: -16px;
+  top: -4px;
+  width: 12px;
+  height: 12px;
+  background: var(--umbra-accent);
+  border-radius: 50%;
+  box-shadow: 0 0 12px var(--umbra-accent);
+  z-index: 100;
+}
+
+.drag-over-right {
+  position: relative;
+  transform: translateX(-8px);
+  transition: transform 0.15s ease;
+  z-index: 1000; /* Ensure indicator is above other items */
+}
+
+.drag-over-right::before {
+  content: '';
+  position: absolute;
+  right: -12px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--umbra-accent);
+  border-radius: 2px;
+  box-shadow: 0 0 12px var(--umbra-accent), 0 0 24px var(--umbra-accent-glow);
+  z-index: 100;
+}
+
+.drag-over-right::after {
+  content: '';
+  position: absolute;
+  right: -16px;
+  top: -4px;
+  width: 12px;
+  height: 12px;
+  background: var(--umbra-accent);
+  border-radius: 50%;
+  box-shadow: 0 0 12px var(--umbra-accent);
+  z-index: 100;
+}
+
+/* Container state when reordering */
+.is-reordering {
+  /* Visual hint that we're in reorder mode */
+}
+
+/* Selection styles with theme accent */
+.selected-image {
+  position: relative;
+  box-shadow: 0 0 0 2px var(--umbra-accent), 
+              0 0 20px var(--umbra-accent-glow);
+  border-radius: 8px;
+}
+
+.selected-image::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  border: 2px solid var(--umbra-accent);
+  border-radius: 8px;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* Settings Modal Inputs */
+.settings-input {
+  width: 100%;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 13px;
+  transition: border-color 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+              background-color 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: var(--umbra-accent);
+  box-shadow: 0 0 0 3px var(--umbra-accent-glow);
+}
+
+.settings-input:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.settings-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+select.settings-input {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+
+input[type="number"].settings-input {
+  font-family: var(--font-mono);
+}
+
+/* Custom Range Slider Styles */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  outline: none;
+  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+}
+
+input[type="range"]:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Webkit browsers (Chrome, Safari, Edge) */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: var(--umbra-accent);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.1),
+              0 0 20px var(--umbra-accent-glow);
+  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.15),
+              0 0 30px var(--umbra-accent-glow);
+}
+
+input[type="range"]::-webkit-slider-thumb:active {
+  transform: scale(1.1);
+  box-shadow: 0 0 0 8px rgba(255, 255, 255, 0.2),
+              0 0 40px var(--umbra-accent-glow);
+}
+
+/* Firefox */
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: var(--umbra-accent);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.1),
+              0 0 20px var(--umbra-accent-glow);
+  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+input[type="range"]::-moz-range-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.15),
+              0 0 30px var(--umbra-accent-glow);
+}
+
+input[type="range"]::-moz-range-thumb:active {
+  transform: scale(1.1);
+  box-shadow: 0 0 0 8px rgba(255, 255, 255, 0.2),
+              0 0 40px var(--umbra-accent-glow);
+}
+
+input[type="range"]::-moz-range-track {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  height: 6px;
+}
+
+/* Add accent color for filled portion (modern browsers) */
+input[type="range"]::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    to right,
+    var(--umbra-accent) 0%,
+    var(--umbra-accent) var(--value, 0%),
+    rgba(255, 255, 255, 0.1) var(--value, 0%),
+    rgba(255, 255, 255, 0.1) 100%
+  );
+  border-radius: 10px;
+  height: 6px;
+}
+
+input[type="range"]::-moz-range-progress {
+  background: var(--umbra-accent);
+  border-radius: 10px;
+  height: 6px;
+}
+
+/* ========================================
+   IMAGE METADATA TOOLTIP WITH TYPEWRITER
+   ======================================== */
+
+.image-metadata-tooltip {
+  position: fixed;
+  z-index: 10000;
+  max-width: min(430px, calc(100vw - 24px));
+  max-height: none !important;
+  overflow: visible !important;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1), visibility 0.2s;
+  background: var(--umbra-panel-bg);
+  backdrop-filter: blur(var(--umbra-blur));
+  -webkit-backdrop-filter: blur(var(--umbra-blur));
+  border: 1px solid var(--umbra-border);
+  border-radius: var(--umbra-radius);
+  box-shadow: var(--umbra-shadow);
+  padding: 8px;
+  font-size: 16px;
+}
+
+.image-metadata-tooltip.visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Tooltip prompt sections */
+.tooltip-prompt {
+  margin-bottom: 10px;
+}
+
+.tooltip-prompt:last-child {
+  margin-bottom: 0;
+}
+
+.tooltip-prompt-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  opacity: 0.9;
+}
+
+.tooltip-prompt-label.positive {
+  color: #22c55e;
+}
+
+.tooltip-prompt-label.negative {
+  color: #ef4444;
+}
+
+.tooltip-prompt-label i {
+  font-size: 15px;
+}
+
+.tooltip-prompt-text {
+  color: var(--umbra-text);
+  line-height: 1.5;
+  font-size: 15px;
+  white-space: nowrap;
+  max-height: none !important;
+  overflow: hidden;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  border-left: 3px solid transparent;
+  scrollbar-width: none;
+}
+
+.tooltip-prompt-text::-webkit-scrollbar {
+  display: none;
+}
+
+.tooltip-prompt-text.negative {
+  border-left-color: #ef4444;
+}
+
+.tooltip-prompt-text:not(.negative) {
+  border-left-color: #22c55e;
+}
+
+/* Typewriter cursor effect */
+/* Quick parameters grid */
+.tooltip-params {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tooltip-param {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.tooltip-param span {
+  color: var(--umbra-text);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.tooltip-param-value {
+  display: block;
+  min-width: 0;
+}
+
+.tooltip-ticker {
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.tooltip-ticker-track {
+  display: inline-flex;
+  align-items: center;
+  gap: 22px;
+  min-width: max-content;
+  animation: tooltip-ticker-scroll 16s linear infinite;
+}
+
+.tooltip-ticker-track span {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.tooltip-ticker.is-static .tooltip-ticker-track {
+  animation: none;
+}
+
+.tooltip-ticker.is-static .tooltip-ticker-track span:nth-child(2) {
+  display: none;
+}
+
+@keyframes tooltip-ticker-scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(calc(-50% - 11px));
+  }
+}
+
+@keyframes move-gradient {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Library Performance Optimizations */
+.library-virtual-container {
+  /* CSS containment for better performance with large lists */
+  contain: layout style paint;
+  /* Hint to browser that this will transform/scroll */
+  will-change: transform;
+  /* Hardware acceleration */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+}
+
+.library-image-card {
+  /* Containment for individual cards */
+  contain: layout style paint;
+  /* Prevent layout shifts */
+  content-visibility: auto;
+}
+
+/* Optimize images for smooth scrolling */
+.library-image-card img {
+  /* Force GPU rendering */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  /* Preserve natural photographic/media sampling. Crisp edges caused CRT-like artifacts. */
+  image-rendering: auto;
+}
+
+/* ========================================
+   NATIVE FOLDER DROP TARGET STYLES
+   Uses data attributes instead of React state
+   for maximum performance (no re-renders!)
+   ======================================== */
+
+.folder-drop-target {
+  position: relative;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+@keyframes folder-pinned-glow {
+  0%, 100% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--umbra-accent) 24%, transparent),
+      0 0 0 color-mix(in srgb, var(--umbra-accent) 0%, transparent);
+    border-color: color-mix(in srgb, var(--umbra-accent) 24%, transparent);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--umbra-accent) 58%, transparent),
+      0 0 16px color-mix(in srgb, var(--umbra-accent) 42%, transparent);
+    border-color: color-mix(in srgb, var(--umbra-accent) 56%, rgba(255, 255, 255, 0.2));
+  }
+}
+
+.folder-drop-target.folder-pinned-glow {
+  animation: folder-pinned-glow 2.2s ease-in-out infinite;
+}
+
+/* Active drop state - highlighted folder */
+.folder-drop-target[data-drop-active="true"] {
+  background: color-mix(in srgb, var(--umbra-accent) 20%, transparent) !important;
+  outline: 2px solid var(--umbra-accent);
+  outline-offset: -2px;
+  border-radius: 6px;
+  animation: folder-pulse 1s ease-in-out infinite;
+}
+
+.folder-drop-target.folder-pinned-glow[data-drop-active="true"] {
+  animation: folder-pulse 1s ease-in-out infinite;
+}
+
+@keyframes folder-pulse {
+  0%, 100% { 
+    outline-color: var(--umbra-accent);
+    box-shadow: 0 0 8px var(--umbra-accent-glow);
+  }
+  50% { 
+    outline-color: color-mix(in srgb, var(--umbra-accent) 70%, white);
+    box-shadow: 0 0 16px var(--umbra-accent-glow);
+  }
+}
+
+/* Count badge - hidden by default, shown when data-drag-count is set */
+.folder-drop-badge {
+  display: none;
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--umbra-accent);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 10px;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  pointer-events: none;
+}
+
+/* Show badge when parent has drop-active and drag-count */
+.folder-drop-target[data-drop-active="true"] .folder-drop-badge {
+  display: flex;
+}
+
+/* Use CSS counter magic to display the count */
+.folder-drop-target[data-drop-active="true"][data-drag-count] .folder-drop-badge::before {
+  content: attr(data-drag-count);
+}
+
+/* Inherit the count from parent */
+.folder-drop-target[data-drop-active="true"][data-drag-count="1"] .folder-drop-badge::before { content: "1"; }
+.folder-drop-target[data-drop-active="true"][data-drag-count="2"] .folder-drop-badge::before { content: "2"; }
+.folder-drop-target[data-drop-active="true"][data-drag-count="3"] .folder-drop-badge::before { content: "3"; }
+.folder-drop-target[data-drop-active="true"][data-drag-count="4"] .folder-drop-badge::before { content: "4"; }
+.folder-drop-target[data-drop-active="true"][data-drag-count="5"] .folder-drop-badge::before { content: "5"; }
+.folder-drop-target[data-drop-active="true"][data-drag-count="6"] .folder-drop-badge::before { content: "6"; }
+.folder-drop-target[data-drop-active="true"][data-drag-count="7"] .folder-drop-badge::before { content: "7"; }
+.folder-drop-target[data-drop-active="true"][data-drag-count="8"] .folder-drop-badge::before { content: "8"; }
+.folder-drop-target[data-drop-active="true"][data-drag-count="9"] .folder-drop-badge::before { content: "9"; }
+.folder-drop-target[data-drop-active="true"][data-drag-count="10"] .folder-drop-badge::before { content: "10"; }
+/* For larger counts, just show the number via attr() */
+.folder-drop-target[data-drop-active="true"]:not([data-drag-count="1"]):not([data-drag-count="2"]):not([data-drag-count="3"]):not([data-drag-count="4"]):not([data-drag-count="5"]):not([data-drag-count="6"]):not([data-drag-count="7"]):not([data-drag-count="8"]):not([data-drag-count="9"]):not([data-drag-count="10"]) .folder-drop-badge::before {
+  content: attr(data-drag-count);
+}
+
+/* ========================================
+   GRID ITEM ANIMATIONS
+   Clean entrance/exit animations for items
+   ======================================== */
+
+/* Grid item entrance animation */
+@keyframes grid-item-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Skeleton loading shimmer animation */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Skeleton fade out animation */
+@keyframes skeleton-fade-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+/* Grid scroll container - smooth scrolling */
+.grid-scroll-container {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Grid items get staggered entrance animation */
+/* NOTE: Only animate opacity - transform conflicts with GridEngine's translate3d positioning */
+.grid-item {
+  animation: grid-item-enter 0.2s ease forwards;
+  opacity: 0;
+}
+
+/* Stagger delays for first 20 items */
+.grid-item:nth-child(1) { animation-delay: 0.02s; }
+.grid-item:nth-child(2) { animation-delay: 0.04s; }
+.grid-item:nth-child(3) { animation-delay: 0.06s; }
+.grid-item:nth-child(4) { animation-delay: 0.08s; }
+.grid-item:nth-child(5) { animation-delay: 0.10s; }
+.grid-item:nth-child(6) { animation-delay: 0.12s; }
+.grid-item:nth-child(7) { animation-delay: 0.14s; }
+.grid-item:nth-child(8) { animation-delay: 0.16s; }
+.grid-item:nth-child(9) { animation-delay: 0.18s; }
+.grid-item:nth-child(10) { animation-delay: 0.20s; }
+.grid-item:nth-child(11) { animation-delay: 0.22s; }
+.grid-item:nth-child(12) { animation-delay: 0.24s; }
+.grid-item:nth-child(13) { animation-delay: 0.26s; }
+.grid-item:nth-child(14) { animation-delay: 0.28s; }
+.grid-item:nth-child(15) { animation-delay: 0.30s; }
+.grid-item:nth-child(16) { animation-delay: 0.32s; }
+.grid-item:nth-child(n+17) { animation-delay: 0.35s; }
+
+/* Hover effect for grid items */
+.grid-item:hover {
+  z-index: 10;
+}
+
+.grid-item:hover .grid-item-inner {
+  transform: scale(1.02);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.grid-item-inner {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.grid-item-theme-fx {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0;
+  transform: translate3d(var(--grid-fx-x, 0px), var(--grid-fx-y, 0px), 0);
+  transition: opacity 0.3s ease, transform 0.18s ease-out;
+}
+
+/* Theme-aware thumbnail polish in Umbra Editor grid */
+.grid-item .grid-item-inner {
+  border-color: color-mix(in srgb, var(--umbra-accent) 8%, var(--umbra-border));
+  background: color-mix(in srgb, var(--umbra-panel) 92%, black 8%);
+}
+
+.grid-item:hover .grid-item-theme-fx {
+  opacity: 1;
+}
+
+/* Glass and liquid styles use real backdrop sampling for dynamic refraction from image/background */
+body[data-dna="glass"] .grid-item-theme-fx,
+body[data-dna="liquid-glass"] .grid-item-theme-fx {
+  opacity: calc(0.2 + (var(--umbra-liquid-specular) * 0.3));
+  backdrop-filter:
+    blur(calc((var(--umbra-frost-intensity) * 0.45) + (var(--umbra-liquid-refraction) * 8px)))
+    saturate(calc(1.05 + (var(--umbra-liquid-refraction) * 0.5)))
+    contrast(calc(1 + (var(--umbra-liquid-specular) * 0.16)));
+  -webkit-backdrop-filter:
+    blur(calc((var(--umbra-frost-intensity) * 0.45) + (var(--umbra-liquid-refraction) * 8px)))
+    saturate(calc(1.05 + (var(--umbra-liquid-refraction) * 0.5)))
+    contrast(calc(1 + (var(--umbra-liquid-specular) * 0.16)));
+  background:
+    radial-gradient(120% 85% at 8% 4%, rgba(255, 255, 255, calc(0.08 + (var(--umbra-liquid-specular) * 0.22))), transparent 42%),
+    radial-gradient(80% 80% at 92% 12%, color-mix(in srgb, var(--umbra-accent) calc(16% + (var(--umbra-liquid-refraction) * 18%)), transparent), transparent 60%);
+}
+
+body[data-dna="liquid-metal"] .grid-item-theme-fx {
+  opacity: calc(0.18 + (var(--umbra-metalness) * 0.35));
+  background:
+    linear-gradient(calc(110deg + (var(--umbra-metal-flow) * 24deg)),
+      rgba(255, 255, 255, calc(0.04 + (var(--umbra-metalness) * 0.25))) 0%,
+      rgba(140, 150, 162, calc(0.08 + (var(--umbra-metalness) * 0.35))) 38%,
+      rgba(255, 255, 255, calc(0.02 + (var(--umbra-metal-flow) * 0.2))) 54%,
+      rgba(70, 78, 92, calc(0.09 + (var(--umbra-metalness) * 0.22))) 100%);
+  mix-blend-mode: screen;
+  backdrop-filter: saturate(calc(1 + (var(--umbra-metalness) * 0.35))) contrast(calc(1 + (var(--umbra-metal-flow) * 0.2)));
+  -webkit-backdrop-filter: saturate(calc(1 + (var(--umbra-metalness) * 0.35))) contrast(calc(1 + (var(--umbra-metal-flow) * 0.2)));
+}
+
+/* Smooth reorder animation during drag */
+.grid-reordering .grid-item {
+  transition: transform 0.25s cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+/* Disable hover scale during drag to prevent visual conflicts */
+.grid-reordering .grid-item:hover .grid-item-inner {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Smooth reorder animation for filmstrip items during drag */
+.filmstrip-reordering [data-filmstrip-id] {
+  will-change: transform;
+  transition: transform 0.14s cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+/* Disable hover effects on filmstrip items during drag */
+.filmstrip-reordering [data-filmstrip-id]:hover {
+  z-index: auto !important;
+}
+
+/* Zoom slider thumb styling (Webkit) */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: var(--umbra-accent);
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+/* Zoom slider thumb styling (Firefox) */
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: var(--umbra-accent);
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+/* ========================================
+   SIMPLE FAST ANIMATIONS - No framer-motion needed
+   ======================================== */
+
+/* Simple fade in */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.15s ease-out forwards;
+}
+
+/* Modal backdrop */
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-backdrop {
+  animation: backdrop-in 0.1s ease-out forwards;
+}
+
+/* Modal content */
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes umbra-phone-path-ticker {
+  0%,
+  16% {
+    transform: translateX(0);
+  }
+  82% {
+    transform: translateX(calc(-100% + min(100%, 100vw - 2rem)));
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.animate-modal {
+  animation: modal-in 0.15s ease-out forwards;
+}
+
+@media (max-width: 820px) {
+  [data-umbra-modal-root] {
+    align-items: stretch;
+    justify-content: center;
+    padding: calc(env(safe-area-inset-top) + 0.75rem) 0.75rem calc(env(safe-area-inset-bottom) + 0.75rem);
+  }
+
+  [data-umbra-modal-panel] {
+    width: min(100%, 44rem) !important;
+    max-width: none !important;
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1.5rem) !important;
+    border-radius: 14px !important;
+  }
+
+  [data-umbra-modal-header] {
+    min-height: 3.5rem;
+    padding: 0.875rem 1rem !important;
+  }
+
+  [data-umbra-modal-header] h2 {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 1rem !important;
+    line-height: 1.25rem !important;
+  }
+
+  [data-umbra-modal-header] button {
+    flex-shrink: 0;
+  }
+
+  [data-umbra-modal-content] {
+    padding: 1rem !important;
+    overscroll-behavior: contain;
+  }
+
+  [data-umbra-gallery-modal-form] {
+    min-height: 100%;
+  }
+
+  [data-umbra-gallery-modal-form] input,
+  [data-umbra-gallery-modal-footer] button {
+    min-height: 2.5rem;
+  }
+
+  [data-umbra-gallery-modal-footer] {
+    position: sticky;
+    bottom: -1rem;
+    z-index: 5;
+    margin: 0 -1rem -1rem;
+    padding: 0.75rem 1rem calc(env(safe-area-inset-bottom) + 0.75rem) !important;
+    background: rgba(0, 0, 0, 0.94);
+    backdrop-filter: blur(16px);
+  }
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-modal-root] {
+  align-items: flex-start;
+  padding: calc(var(--umbra-phone-shell-top) + 0.5rem) 0.5rem calc(env(safe-area-inset-bottom) + 0.75rem);
+  z-index: 260;
+}
+
+html[data-umbra-remote-mode="phone"]:has([data-umbra-modal-root]) [data-umbra-phone-topbar] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"]:has([data-umbra-modal-root]) [data-umbra-modal-root] {
+  padding-top: calc(env(safe-area-inset-top) + 0.5rem);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-modal-panel] {
+  width: 100% !important;
+  max-width: calc(100vw - 1rem) !important;
+  max-height: calc(100dvh - var(--umbra-phone-shell-top) - env(safe-area-inset-bottom) - 1.25rem) !important;
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode="phone"]:has([data-umbra-modal-root]) [data-umbra-modal-panel] {
+  max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1.25rem) !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-modal-header] {
+  min-height: 3rem;
+  padding: 0.7rem 0.875rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-modal-header] button {
+  width: 2.25rem;
+  height: 2.25rem;
+  min-height: 2.25rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-modal-content] {
+  padding: 0.875rem !important;
+  overflow-x: hidden;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-modal-form] {
+  font-size: 0.875rem;
+  min-height: auto;
+  min-width: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-modal-footer] {
+  bottom: 0;
+  margin: 0 -0.875rem -0.875rem;
+  padding: 0.7rem 0.875rem calc(env(safe-area-inset-bottom) + 0.7rem) !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tag-modal] {
+  min-height: auto;
+  overflow-x: hidden;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tag-modal] > * + * {
+  margin-top: 0.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tag-modal] [data-umbra-gallery-modal-footer] {
+  margin: 0 -0.875rem -0.875rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tag-modal] input {
+  min-width: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tag-modal] button {
+  flex-shrink: 0;
+}
+
+/* Context menu */
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-menu {
+  animation: menu-in 0.1s ease-out forwards;
+}
+
+/* Toast notification */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-toast {
+  animation: toast-in 0.15s ease-out forwards;
+}
+
+/* Slide up */
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.15s ease-out forwards;
+}
+
+/* Themed select dropdowns (Power Prompter + generation controls) */
+.umbra-themed-select {
+  color-scheme: dark;
+}
+
+.umbra-themed-select option,
+.umbra-themed-select optgroup {
+  background-color: color-mix(in srgb, var(--umbra-bg) 88%, black);
+  color: color-mix(in srgb, var(--umbra-text) 92%, transparent);
+}
+
+.umbra-themed-select:focus {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--umbra-accent) 45%, transparent);
+}

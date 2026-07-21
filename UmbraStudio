@@ -1,0 +1,19 @@
+#!/bin/bash
+# Umbra Studio - Webapp launcher
+
+cd "$(dirname "${BASH_SOURCE[0]}")"
+export PATH="$HOME/.bun/bin:$PATH"
+
+PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
+BUN_BIN="$(dirname "${BASH_SOURCE[0]}")/Runtime/Bun/${PLATFORM}/bun"
+if [ ! -x "$BUN_BIN" ]; then
+  if command -v bun >/dev/null 2>&1; then
+    BUN_BIN="$(command -v bun)"
+  else
+    echo "[ERROR] Bundled Bun runtime is missing."
+    echo "Run webapp:prepare-runtime from a development checkout, or use a packaged launcher."
+    exit 1
+  fi
+fi
+
+"$BUN_BIN" run webapp:dev

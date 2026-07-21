@@ -1,0 +1,84 @@
+{
+  "name": "umbra-studio",
+  "version": "0.10.3",
+  "description": "Umbra Studio - AI image generation, prompt tooling, and media workflow suite",
+  "author": "Nocturne AI Labs",
+  "homepage": "https://github.com/Nocturne-Ai-Labs/Umbra-Studio",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Nocturne-Ai-Labs/Umbra-Studio.git"
+  },
+  "umbraRuntimeDependencies": [
+    "sharp"
+  ],
+  "license": "MIT",
+  "main": "UmbraServer.ts",
+  "scripts": {
+    "start": "echo '\\nStarting Umbra Studio (Production Mode)\\nOpen: http://localhost:8212\\n' && bun run build:frontend && bun run UmbraServer.ts",
+    "dev": "echo '\\nStarting Umbra Studio (Production Mode)\\nOpen: http://localhost:8212\\n' && bun run build:frontend && bun run UmbraServer.ts",
+    "dev:fullstack": "node scripts/dev-fullstack.mjs",
+    "dev:lan": "node scripts/dev-fullstack.mjs --lan",
+    "dev:ui:0.8.7": "bun run dev:backend",
+    "dev:backend": "echo '\\nStarting Backend Only\\nAPI: http://localhost:8212\\n' && bun run UmbraServer.ts",
+    "dev:watch": "bun run --watch UmbraServer.ts",
+    "build:frontend": "bun scripts/build-frontend-bun.mjs",
+    "checkpoint:metadata": "node scripts/safetensors-metadata.mjs",
+    "dataset:character-tags": "node scripts/dataset-character-tags-csv.mjs",
+    "tags:danbooru": "node scripts/danbooru-tags-csv.mjs",
+    "gpu:telemetry": "node scripts/gpu-telemetry.mjs",
+    "test:source": "bun test backend frontend/src scripts",
+    "test:booru-sources": "bun scripts/test-booru-sources.ts",
+    "audit:umbra-ui-pipelines": "bun scripts/audit-umbra-ui-pipelines.ts",
+    "generate:umbra-ui-img2img": "bun scripts/generate-umbra-ui-img2img-workflows.ts",
+    "generate:umbra-ui-vid2vid": "bun scripts/generate-umbra-ui-vid2vid-workflows.ts",
+    "preflight:umbra-ui-inpaint": "bun scripts/qualify-umbra-ui-inpaint.ts --preflight-only",
+    "dry-run:umbra-ui-inpaint": "bun scripts/qualify-umbra-ui-inpaint.ts --offline-dry-run",
+    "qualify:umbra-ui-inpaint": "bun scripts/qualify-umbra-ui-inpaint.ts",
+    "qualify:umbra-ui-clipseg": "bun scripts/qualify-umbra-ui-clipseg.ts",
+    "drill:umbra-ui-inpaint": "bun scripts/drill-umbra-ui-inpaint-runtime.ts",
+    "drill:umbra-ui-canvas-projects": "bun scripts/drill-umbra-ui-canvas-project-lifecycle.ts",
+    "drill:umbra-ui-hard-stop": "bun scripts/drill-umbra-ui-hard-stop-recovery.ts",
+    "fixture:umbra-ui-large-canvas": "bun scripts/prepare-umbra-ui-large-canvas.ts",
+    "generate:umbra-ui-inpaint-workflows": "bun scripts/generate-umbra-ui-inpaint-workflows.ts",
+    "version:bump": "node scripts/build-webapp-version-bump.mjs",
+    "webapp:prepare-runtime": "node scripts/prepare-runtime-bun.mjs",
+    "webapp:prepare-dependencies": "node scripts/prepare-runtime-dependencies.mjs",
+    "webapp:dev": "bun run build:frontend && bun launcher/UmbraWebLauncher.ts --root .",
+    "webapp:build-launcher": "bun build launcher/UmbraWebLauncher.ts --compile --outfile dist-webapp/UmbraStudio.exe --windows-icon frontend/public/assets/UMBRA.ico --windows-title \"Umbra Studio\" --windows-publisher \"Nocturne AI Labs\" --windows-description \"Umbra Studio\" && node scripts/patch-windows-exe-icon.mjs dist-webapp/UmbraStudio.exe",
+    "webapp:dist:no-bump": "bun run audit:umbra-ui-pipelines && bun run webapp:prepare-runtime && bun run models:waifu:download && bun run models:caption:download && bun run build:frontend && bun run webapp:build-launcher",
+    "webapp:update-folder:no-bump": "bun run audit:umbra-ui-pipelines && node scripts/build-webapp-folder.mjs",
+    "webapp:update-folder": "bun run audit:umbra-ui-pipelines && node scripts/build-webapp-version-bump.mjs",
+    "webapp:publish": "bun run audit:umbra-ui-pipelines && node scripts/build-webapp-version-bump.mjs",
+    "linux:update-folder:no-bump": "bun run audit:umbra-ui-pipelines && node scripts/build-linux-folder.mjs",
+    "linux:update-folder": "bun run audit:umbra-ui-pipelines && node scripts/build-linux-version-bump.mjs",
+    "linux:publish": "bun run audit:umbra-ui-pipelines && node scripts/build-linux-version-bump.mjs",
+    "repository:build": "node scripts/build-repository-source.mjs",
+    "models:waifu:download": "node scripts/download-waifu-models.mjs",
+    "models:caption:download": "node scripts/download-caption-models.mjs"
+  },
+  "workspaces": [
+    "frontend"
+  ],
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@tanstack/react-virtual": "^3.13.18",
+    "@types/node": "^25.0.9",
+    "@types/qrcode": "^1.5.6",
+    "better-sqlite3": "^12.6.2",
+    "chokidar": "^5.0.0",
+    "qrcode": "^1.5.4",
+    "react-router-dom": "^7.12.0",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.6",
+    "esbuild": "^0.27.2",
+    "rcedit": "^5.0.2"
+  },
+  "trustedDependencies": [
+    "sharp"
+  ],
+  "ignoreScripts": [
+    "unrs-resolver"
+  ]
+}

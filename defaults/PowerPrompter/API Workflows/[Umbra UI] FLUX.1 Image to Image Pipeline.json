@@ -1,0 +1,407 @@
+{
+  "1": {
+    "class_type": "UmbraLoadCheckpoint",
+    "inputs": {
+      "model_type": "checkpoint",
+      "checkpoint_name": "flux1-schnell-fp8.safetensors",
+      "diffusers_model": "",
+      "diffusion_model_name": "",
+      "unet_name": "",
+      "gguf_name": "",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Umbra UI FLUX.1",
+      "umbra_model_family": "FLUX.1",
+      "umbra_ui_pipelines": [
+        {
+          "feature": "img2img",
+          "model_family": "FLUX.1",
+          "model_sources": [
+            "checkpoint",
+            "diffusion_model",
+            "unet",
+            "gguf"
+          ],
+          "priority": 100,
+          "defaults": {
+            "modelName": "flux1-schnell-fp8.safetensors",
+            "modelNamesBySource": {
+              "checkpoint": "flux1-schnell-fp8.safetensors"
+            },
+            "steps": 4,
+            "cfg": 1,
+            "samplerName": "euler",
+            "scheduler": "simple",
+            "width": 1024,
+            "height": 1024,
+            "clipSkip": 1,
+            "denoise": 0.3
+          }
+        }
+      ]
+    }
+  },
+  "2": {
+    "class_type": "UmbraPowerPrompterReader",
+    "inputs": {
+      "prompt_text": "masterpiece, best quality, detailed image",
+      "negative_prompt": "",
+      "seed": 123456789,
+      "control_after_generate": "fixed",
+      "increment_step": 1,
+      "style_seed_behavior": "normal",
+      "aspect_ratio": "custom",
+      "swap_dimensions": "Off",
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Umbra Prompt + Generation Controls"
+    }
+  },
+  "3": {
+    "class_type": "DualCLIPLoader",
+    "inputs": {
+      "clip_name1": "t5xxl_fp8_e4m3fn.safetensors",
+      "clip_name2": "clip_l.safetensors",
+      "type": "flux",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "FLUX.1 Text Encoder",
+      "umbra_resources": [
+        {
+          "id": "flux.text_encoder_t5",
+          "label": "FLUX T5 Text Encoder",
+          "kind": "text_encoder",
+          "input": "clip_name1",
+          "required": true,
+          "order": 10
+        },
+        {
+          "id": "flux.text_encoder_clip_l",
+          "label": "FLUX CLIP-L Text Encoder",
+          "kind": "text_encoder",
+          "input": "clip_name2",
+          "required": true,
+          "order": 20
+        }
+      ]
+    }
+  },
+  "4": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "_meta": {
+      "title": "FLUX.1 VAE",
+      "umbra_resources": [
+        {
+          "id": "flux.vae",
+          "label": "FLUX VAE",
+          "kind": "vae",
+          "input": "vae_name",
+          "required": true,
+          "order": 30
+        }
+      ]
+    }
+  },
+  "5": {
+    "class_type": "UmbraA1111LoraSyntax",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "3",
+        0
+      ],
+      "prompt_text": [
+        "2",
+        0
+      ],
+      "lora_syntax_text": "",
+      "lora_name": "[None]",
+      "lora_strength_model": 1,
+      "lora_strength_clip": 1,
+      "strict_mode": false,
+      "strip_lora_tags_from_text": true
+    },
+    "_meta": {
+      "title": "Umbra LoRA Stack"
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncodeFlux",
+    "inputs": {
+      "clip_l": [
+        "5",
+        2
+      ],
+      "t5xxl": [
+        "5",
+        2
+      ],
+      "guidance": 3.5,
+      "clip": [
+        "5",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "FLUX.1 Positive Conditioning",
+      "umbra_role": "inpaint_regional_positive_encoder"
+    }
+  },
+  "7": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "6",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "FLUX.1 Zero Negative Conditioning"
+    }
+  },
+  "8": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": {
+      "width": [
+        "2",
+        4
+      ],
+      "height": [
+        "2",
+        5
+      ],
+      "batch_size": [
+        "2",
+        6
+      ]
+    },
+    "_meta": {
+      "title": "FLUX.1 Latent"
+    }
+  },
+  "9": {
+    "class_type": "UmbraKSamplerHiResFix",
+    "inputs": {
+      "model": [
+        "5",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "latent_image": [
+        "16",
+        0
+      ],
+      "denoise": 0.3,
+      "enabled": false,
+      "upscaler": "Latent",
+      "resize_mode": "upscale by",
+      "scale_by": 2,
+      "resize_width": 0,
+      "resize_height": 0,
+      "hires_steps": 0,
+      "hires_cfg": 0,
+      "hires_sampler_name": "Use same",
+      "hires_scheduler": "Use same",
+      "hires_denoise": 0.35
+    },
+    "_meta": {
+      "title": "Sample + Optional Hires Fix",
+      "umbra_regional_method": "flux_text_encode_masked_conditioning",
+      "umbra_regional_positive_input": "positive",
+      "umbra_regional_max_layers": 16,
+      "umbra_role": "img2img_sampler"
+    }
+  },
+  "10": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "9",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Decode"
+    }
+  },
+  "11": {
+    "class_type": "UmbraImageDetailer",
+    "inputs": {
+      "image": [
+        "10",
+        0
+      ],
+      "model": [
+        "5",
+        0
+      ],
+      "clip": [
+        "5",
+        1
+      ],
+      "vae": [
+        "4",
+        0
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "pipeline_json": "",
+      "person_detail": true,
+      "face_detail": true,
+      "eye_detail": true,
+      "hand_detail": true
+    },
+    "_meta": {
+      "title": "Umbra Detail Pipeline"
+    }
+  },
+  "12": {
+    "class_type": "UmbraImageUpscale",
+    "inputs": {
+      "image": [
+        "11",
+        0
+      ],
+      "upscale_model": "4x-AnimeSharp.pth",
+      "max_dimension": 3840,
+      "enabled": false
+    },
+    "_meta": {
+      "title": "Optional Output Upscale"
+    }
+  },
+  "13": {
+    "class_type": "UmbraLabSaveImage",
+    "inputs": {
+      "images": [
+        "12",
+        0
+      ],
+      "filename_prefix": "UmbraUI_IMG2IMG_Umbra_UI_FLUX_1_Image_Pipeline_json_%date%",
+      "positive_prompt": [
+        "5",
+        2
+      ],
+      "negative_prompt": [
+        "2",
+        8
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "output_folder": "Umbra UI/img2img",
+      "save_to_yyyy_mm_dd_folder": true,
+      "save_to_set_subfolder": false,
+      "set_subfolder": "",
+      "save_set_to_style_subfolder": "",
+      "model_name": [
+        "1",
+        3
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple"
+    },
+    "_meta": {
+      "title": "Save FLUX.1 Image"
+    }
+  },
+  "14": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "umbra-img2img-source.png"
+    },
+    "_meta": {
+      "title": "IMG2IMG Source Image",
+      "umbra_role": "img2img_source"
+    }
+  },
+  "15": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "14",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": 1024,
+      "height": 1024,
+      "crop": "disabled"
+    },
+    "_meta": {
+      "title": "IMG2IMG Working Resolution",
+      "umbra_role": "img2img_resize"
+    }
+  },
+  "16": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "15",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Encode IMG2IMG Source",
+      "umbra_role": "img2img_encode"
+    }
+  }
+}

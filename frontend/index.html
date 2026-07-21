@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en" class="dark overflow-hidden h-screen w-screen">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Umbra Studio - AI Creative Workspace" />
+    <title>Umbra Studio</title>
+    <link rel="icon" href="/assets/UMBRA.ico" type="image/x-icon" />
+
+    <!-- Optional web fonts (app also has strong local fallbacks for offline use) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&family=Inter:wght@400;500;600;700&family=Geist:wght@400;500;600;700&family=Audiowide&family=Quantico:wght@400;700&family=Barriecito&family=Micro+5&display=swap" rel="stylesheet">
+
+    <style>
+      :root {
+        --font-retro: 'VT323', 'Courier New', 'Lucida Console', monospace;
+        --font-system: 'Segoe UI', 'Noto Sans', 'Liberation Sans', Arial, sans-serif;
+        --font-serif: 'Georgia', 'Noto Serif', 'Liberation Serif', 'Times New Roman', serif;
+        --font-mono-clean: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Liberation Mono', monospace;
+        --font-display: 'Franklin Gothic Medium', 'Arial Narrow', 'Trebuchet MS', Impact, fantasy;
+      }
+
+      /* Power Prompter: restore wider cycle slider and wrapped label text */
+      div:has(> input[title="Scale queue diversity from cycle to exhaustive"]) {
+        width: 300px !important;
+        min-width: 300px !important;
+      }
+
+      div:has(> input[title="Scale queue diversity from cycle to exhaustive"]) > div:first-child > span:nth-child(2) {
+        width: 120px !important;
+        white-space: normal !important;
+        line-height: 1.15 !important;
+        overflow-wrap: anywhere !important;
+        text-align: center !important;
+      }
+
+      div:has(> input[title="Scale queue diversity from cycle to exhaustive"]) > div:last-child > span:last-child {
+        white-space: normal !important;
+        line-height: 1.15 !important;
+        overflow-wrap: anywhere !important;
+      }
+
+      /* Sidebar ASCII banner: no animation + fit banner box cleanly */
+      [data-umbra-appbar-shell] .umbra-sidebar-divider div:has(> [aria-label="Umbra Studio ASCII logo"]) {
+        width: 100% !important;
+        max-width: 100% !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        overflow: hidden !important;
+        min-height: 120px !important;
+        max-height: none !important;
+      }
+
+      [data-umbra-appbar-shell] .umbra-sidebar-divider div:has(> div > [aria-label="Umbra Studio ASCII logo"]) {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        min-height: 120px !important;
+        max-height: none !important;
+        padding-top: 12px !important;
+        padding-bottom: 12px !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+        border: 0 !important;
+        outline: 0 !important;
+        box-shadow: none !important;
+        background: transparent !important;
+        border-radius: 0 !important;
+      }
+
+      [data-umbra-appbar-shell] .umbra-sidebar-divider div:has(> div > [aria-label="Umbra Studio ASCII logo"]) > .pointer-events-none {
+        display: none !important;
+      }
+
+      [data-umbra-appbar-shell] [aria-label="Umbra Studio ASCII logo"] {
+        animation: none !important;
+        transition: none !important;
+        transform: none !important;
+        display: block !important;
+        font-size: 5.4px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        white-space: pre !important;
+        text-align: center !important;
+        line-height: 0.93 !important;
+        letter-spacing: -0.01em !important;
+      }
+    </style>
+  </head>
+  <body class="antialiased bg-[#050508] h-screen w-screen overflow-hidden">
+    <div id="root" class="h-screen w-screen"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

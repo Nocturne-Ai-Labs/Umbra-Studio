@@ -1,0 +1,427 @@
+{
+  "1": {
+    "class_type": "UmbraLoadCheckpoint",
+    "inputs": {
+      "model_type": "diffusion_model",
+      "checkpoint_name": "[None]",
+      "diffusers_model": "",
+      "diffusion_model_name": "qwen_image_edit_fp8_e4m3fn.safetensors",
+      "unet_name": "",
+      "gguf_name": "",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Umbra UI Qwen Image Edit Native Inpaint",
+      "umbra_model_family": "Qwen Image Edit",
+      "umbra_ui_pipelines": [
+        {
+          "feature": "inpainting",
+          "model_family": "Qwen Image Edit",
+          "model_sources": [
+            "diffusion_model",
+            "unet"
+          ],
+          "inpaint_adapter": "native_edit",
+          "priority": 100,
+          "defaults": {
+            "modelName": "qwen_image_edit_fp8_e4m3fn.safetensors",
+            "modelNamesBySource": {
+              "diffusion_model": "qwen_image_edit_fp8_e4m3fn.safetensors",
+              "unet": "qwen_image_edit_fp8_e4m3fn.safetensors"
+            },
+            "steps": 20,
+            "cfg": 4,
+            "samplerName": "euler",
+            "scheduler": "simple",
+            "width": 1024,
+            "height": 1024,
+            "clipSkip": 1
+          }
+        }
+      ]
+    }
+  },
+  "2": {
+    "class_type": "UmbraPowerPrompterReader",
+    "inputs": {
+      "prompt_text": "masterpiece, best quality, detailed image",
+      "negative_prompt": "",
+      "seed": 123456789,
+      "control_after_generate": "fixed",
+      "increment_step": 1,
+      "style_seed_behavior": "normal",
+      "aspect_ratio": "custom",
+      "swap_dimensions": "Off",
+      "width": 1328,
+      "height": 1328,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Umbra Prompt + Generation Controls"
+    }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "Qwen Image Text Encoder",
+      "umbra_resources": [
+        {
+          "id": "qwenimage.text_encoder",
+          "label": "Qwen Image Text Encoder",
+          "kind": "text_encoder",
+          "input": "clip_name",
+          "required": true,
+          "order": 10
+        }
+      ]
+    }
+  },
+  "4": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "_meta": {
+      "title": "Qwen Image VAE",
+      "umbra_resources": [
+        {
+          "id": "qwenimage.vae",
+          "label": "Qwen Image VAE",
+          "kind": "vae",
+          "input": "vae_name",
+          "required": true,
+          "order": 20
+        }
+      ],
+      "umbra_role": "inpaint_reference_vae",
+      "umbra_output_index": 0
+    }
+  },
+  "5": {
+    "class_type": "UmbraA1111LoraSyntax",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "3",
+        0
+      ],
+      "prompt_text": [
+        "2",
+        0
+      ],
+      "lora_syntax_text": "",
+      "lora_name": "[None]",
+      "lora_strength_model": 1,
+      "lora_strength_clip": 1,
+      "strict_mode": false,
+      "strip_lora_tags_from_text": true
+    },
+    "_meta": {
+      "title": "Umbra LoRA Stack",
+      "umbra_role": "inpaint_regional_clip_source",
+      "umbra_output_index": 1
+    }
+  },
+  "6": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "umbra-native-source.png"
+    },
+    "_meta": {
+      "title": "Editable Source Image",
+      "umbra_role": "inpaint_source",
+      "umbra_output_index": 0
+    }
+  },
+  "7": {
+    "class_type": "LoadImageMask",
+    "inputs": {
+      "image": "umbra-native-mask.png",
+      "channel": "red"
+    },
+    "_meta": {
+      "title": "Editable Source Mask",
+      "umbra_role": "inpaint_mask",
+      "umbra_output_index": 0
+    }
+  },
+  "8": {
+    "class_type": "INPAINT_ExpandMask",
+    "inputs": {
+      "mask": [
+        "7",
+        0
+      ],
+      "grow": 0,
+      "blur": 0,
+      "blur_type": "gaussian"
+    },
+    "_meta": {
+      "title": "Grow + Feather Qwen Edit Mask",
+      "umbra_role": "inpaint_mask_processor"
+    }
+  },
+  "9": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "inputs": {
+      "prompt": [
+        "5",
+        2
+      ],
+      "clip": [
+        "5",
+        1
+      ],
+      "vae": [
+        "4",
+        0
+      ],
+      "image1": [
+        "6",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Qwen Edit Positive + Source",
+      "umbra_role": "inpaint_reference_positive_encoder",
+      "umbra_roles": [
+        "inpaint_regional_positive_encoder"
+      ],
+      "umbra_reference_method": "qwen_image_reference"
+    }
+  },
+  "10": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "inputs": {
+      "prompt": [
+        "2",
+        8
+      ],
+      "clip": [
+        "5",
+        1
+      ],
+      "vae": [
+        "4",
+        0
+      ],
+      "image1": [
+        "6",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Qwen Edit Negative + Source",
+      "umbra_role": "inpaint_reference_negative_encoder",
+      "umbra_roles": [
+        "inpaint_regional_negative_encoder"
+      ],
+      "umbra_reference_method": "qwen_image_reference"
+    }
+  },
+  "11": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": {
+      "model": [
+        "5",
+        0
+      ],
+      "shift": 3.1
+    },
+    "_meta": {
+      "title": "Qwen Edit Model Sampling"
+    }
+  },
+  "12": {
+    "class_type": "CFGNorm",
+    "inputs": {
+      "model": [
+        "11",
+        0
+      ],
+      "strength": 1
+    },
+    "_meta": {
+      "title": "Qwen Edit CFG Normalization"
+    }
+  },
+  "13": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "6",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Encode Qwen Editable Source"
+    }
+  },
+  "14": {
+    "class_type": "SetLatentNoiseMask",
+    "inputs": {
+      "samples": [
+        "13",
+        0
+      ],
+      "mask": [
+        "8",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Qwen Masked Source Latent"
+    }
+  },
+  "15": {
+    "class_type": "UmbraKSamplerHiResFix",
+    "inputs": {
+      "model": [
+        "12",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "steps": 20,
+      "cfg": 4,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "9",
+        0
+      ],
+      "negative": [
+        "10",
+        0
+      ],
+      "latent_image": [
+        "14",
+        0
+      ],
+      "denoise": 0.8,
+      "enabled": false,
+      "upscaler": "Latent",
+      "resize_mode": "upscale by",
+      "scale_by": 2,
+      "resize_width": 0,
+      "resize_height": 0,
+      "hires_steps": 0,
+      "hires_cfg": 0,
+      "hires_sampler_name": "Use same",
+      "hires_scheduler": "Use same",
+      "hires_denoise": 0.35
+    },
+    "_meta": {
+      "title": "Sample Qwen Masked Edit",
+      "umbra_role": "inpaint_sampler",
+      "umbra_regional_method": "qwen_image_edit_masked_conditioning",
+      "umbra_regional_positive_input": "positive",
+      "umbra_regional_negative_input": "negative",
+      "umbra_regional_max_layers": 16
+    }
+  },
+  "16": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "15",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Decode Qwen Edit"
+    }
+  },
+  "17": {
+    "class_type": "ImageCompositeMasked",
+    "inputs": {
+      "destination": [
+        "6",
+        0
+      ],
+      "source": [
+        "16",
+        0
+      ],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": [
+        "8",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Non-Destructive Qwen Edit Composite"
+    }
+  },
+  "18": {
+    "class_type": "UmbraLabSaveImage",
+    "inputs": {
+      "images": [
+        "17",
+        0
+      ],
+      "filename_prefix": "UmbraUI_Inpaint_QwenEdit_%date%",
+      "positive_prompt": [
+        "5",
+        2
+      ],
+      "negative_prompt": [
+        "2",
+        8
+      ],
+      "positive": [
+        "9",
+        0
+      ],
+      "negative": [
+        "10",
+        0
+      ],
+      "output_folder": "Umbra UI/inpainting",
+      "save_to_yyyy_mm_dd_folder": true,
+      "save_to_set_subfolder": false,
+      "set_subfolder": "",
+      "save_set_to_style_subfolder": "",
+      "model_name": [
+        "1",
+        3
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "steps": 20,
+      "cfg": 4,
+      "sampler_name": "euler",
+      "scheduler": "simple"
+    },
+    "_meta": {
+      "title": "Save Qwen Image Edit",
+      "umbra_role": "inpaint_output"
+    }
+  }
+}

@@ -1,0 +1,425 @@
+{
+  "1": {
+    "class_type": "UmbraLoadCheckpoint",
+    "inputs": {
+      "model_type": "diffusion_model",
+      "checkpoint_name": "[None]",
+      "diffusers_model": "",
+      "diffusion_model_name": "",
+      "unet_name": "",
+      "gguf_name": "",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Umbra UI FLUX.2 Edit Native Inpaint",
+      "umbra_model_family": "FLUX.2 Edit",
+      "umbra_ui_pipelines": [
+        {
+          "feature": "inpainting",
+          "model_family": "FLUX.2 Edit",
+          "model_sources": [
+            "diffusion_model",
+            "unet",
+            "gguf"
+          ],
+          "inpaint_adapter": "native_edit",
+          "priority": 100,
+          "defaults": {
+            "modelName": "",
+            "modelNamesBySource": {},
+            "steps": 20,
+            "cfg": 4,
+            "samplerName": "euler",
+            "scheduler": "simple",
+            "width": 1024,
+            "height": 1024,
+            "clipSkip": 1
+          }
+        }
+      ]
+    }
+  },
+  "2": {
+    "class_type": "UmbraPowerPrompterReader",
+    "inputs": {
+      "prompt_text": "masterpiece, best quality, detailed image",
+      "negative_prompt": "",
+      "seed": 123456789,
+      "control_after_generate": "fixed",
+      "increment_step": 1,
+      "style_seed_behavior": "normal",
+      "aspect_ratio": "custom",
+      "swap_dimensions": "Off",
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Umbra Prompt + Generation Controls"
+    }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "",
+      "type": "flux2",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "FLUX.2 Text Encoder",
+      "umbra_resources": [
+        {
+          "id": "flux2.text_encoder",
+          "label": "FLUX.2 Mistral Text Encoder",
+          "kind": "text_encoder",
+          "input": "clip_name",
+          "required": true,
+          "order": 10
+        }
+      ]
+    }
+  },
+  "4": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "_meta": {
+      "title": "FLUX.2 VAE",
+      "umbra_resources": [
+        {
+          "id": "flux2.vae",
+          "label": "FLUX.2 VAE",
+          "kind": "vae",
+          "input": "vae_name",
+          "required": true,
+          "order": 20
+        }
+      ],
+      "umbra_role": "inpaint_reference_vae",
+      "umbra_output_index": 0
+    }
+  },
+  "5": {
+    "class_type": "UmbraA1111LoraSyntax",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "3",
+        0
+      ],
+      "prompt_text": [
+        "2",
+        0
+      ],
+      "lora_syntax_text": "",
+      "lora_name": "[None]",
+      "lora_strength_model": 1,
+      "lora_strength_clip": 1,
+      "strict_mode": false,
+      "strip_lora_tags_from_text": true
+    },
+    "_meta": {
+      "title": "Umbra LoRA Stack"
+    }
+  },
+  "6": {
+    "class_type": "FluxGuidance",
+    "inputs": {
+      "conditioning": [
+        "5",
+        3
+      ],
+      "guidance": 4
+    },
+    "_meta": {
+      "title": "FLUX.2 Guidance"
+    }
+  },
+  "7": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "6",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "FLUX.2 Zero Negative Conditioning"
+    }
+  },
+  "8": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "umbra-native-source.png"
+    },
+    "_meta": {
+      "title": "Editable Source Image",
+      "umbra_role": "inpaint_source",
+      "umbra_output_index": 0
+    }
+  },
+  "9": {
+    "class_type": "LoadImageMask",
+    "inputs": {
+      "image": "umbra-native-mask.png",
+      "channel": "red"
+    },
+    "_meta": {
+      "title": "Editable Source Mask",
+      "umbra_role": "inpaint_mask",
+      "umbra_output_index": 0
+    }
+  },
+  "10": {
+    "class_type": "INPAINT_ExpandMask",
+    "inputs": {
+      "mask": [
+        "9",
+        0
+      ],
+      "grow": 0,
+      "blur": 0,
+      "blur_type": "gaussian"
+    },
+    "_meta": {
+      "title": "Grow + Feather Native Mask",
+      "umbra_role": "inpaint_mask_processor"
+    }
+  },
+  "11": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "8",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Encode FLUX.2 Editable Source"
+    }
+  },
+  "12": {
+    "class_type": "SetLatentNoiseMask",
+    "inputs": {
+      "samples": [
+        "11",
+        0
+      ],
+      "mask": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "FLUX.2 Masked Source Latent"
+    }
+  },
+  "13": {
+    "class_type": "ReferenceLatent",
+    "inputs": {
+      "conditioning": [
+        "6",
+        0
+      ],
+      "latent": [
+        "11",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "FLUX.2 Editable Source Reference"
+    }
+  },
+  "14": {
+    "class_type": "BasicGuider",
+    "inputs": {
+      "model": [
+        "5",
+        0
+      ],
+      "conditioning": [
+        "13",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "FLUX.2 Edit Guider",
+      "umbra_role": "inpaint_reference_sink",
+      "umbra_reference_method": "flux2_reference"
+    }
+  },
+  "15": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": [
+        "2",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "FLUX.2 Noise"
+    }
+  },
+  "16": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "_meta": {
+      "title": "FLUX.2 Sampler"
+    }
+  },
+  "17": {
+    "class_type": "Flux2Scheduler",
+    "inputs": {
+      "steps": 20,
+      "width": [
+        "2",
+        4
+      ],
+      "height": [
+        "2",
+        5
+      ]
+    },
+    "_meta": {
+      "title": "FLUX.2 Scheduler"
+    }
+  },
+  "18": {
+    "class_type": "SplitSigmasDenoise",
+    "inputs": {
+      "sigmas": [
+        "17",
+        0
+      ],
+      "denoise": 0.8
+    },
+    "_meta": {
+      "title": "FLUX.2 Inpaint Denoise Range",
+      "umbra_role": "inpaint_sampler"
+    }
+  },
+  "19": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "15",
+        0
+      ],
+      "guider": [
+        "14",
+        0
+      ],
+      "sampler": [
+        "16",
+        0
+      ],
+      "sigmas": [
+        "18",
+        1
+      ],
+      "latent_image": [
+        "12",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Sample FLUX.2 Masked Edit"
+    }
+  },
+  "20": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "19",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Decode FLUX.2 Edit"
+    }
+  },
+  "21": {
+    "class_type": "ImageCompositeMasked",
+    "inputs": {
+      "destination": [
+        "8",
+        0
+      ],
+      "source": [
+        "20",
+        0
+      ],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Non-Destructive FLUX.2 Composite"
+    }
+  },
+  "22": {
+    "class_type": "UmbraLabSaveImage",
+    "inputs": {
+      "images": [
+        "21",
+        0
+      ],
+      "filename_prefix": "UmbraUI_Inpaint_FLUX2_%date%",
+      "positive_prompt": [
+        "5",
+        2
+      ],
+      "negative_prompt": [
+        "2",
+        8
+      ],
+      "positive": [
+        "13",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "output_folder": "Umbra UI/inpainting",
+      "save_to_yyyy_mm_dd_folder": true,
+      "save_to_set_subfolder": false,
+      "set_subfolder": "",
+      "save_set_to_style_subfolder": "",
+      "model_name": [
+        "1",
+        3
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "steps": 20,
+      "cfg": 4,
+      "sampler_name": "euler",
+      "scheduler": "simple"
+    },
+    "_meta": {
+      "title": "Save FLUX.2 Inpaint",
+      "umbra_role": "inpaint_output"
+    }
+  }
+}

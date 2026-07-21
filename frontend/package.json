@@ -1,0 +1,58 @@
+{
+  "name": "umbra-studio-frontend",
+  "version": "0.1.0-beta",
+  "description": "Umbra Studio frontend - Bun-built React SPA",
+  "author": "Nocturne AI Labs",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "bun ../scripts/build-frontend-bun.mjs --watch",
+    "build": "bun ../scripts/build-frontend-bun.mjs",
+    "preview": "bun ../scripts/build-frontend-bun.mjs && cd .. && bun run dev:backend",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@headlessui/react": "^2.2.9",
+    "@preact/compat": "^18.3.1",
+    "@tanstack/react-virtual": "^3.13.18",
+    "@types/jszip": "^3.4.1",
+    "@types/qrcode": "^1.5.6",
+    "@types/react-window": "^2.0.0",
+    "ag-psd": "^31.0.2",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.26.2",
+    "jszip": "^3.10.1",
+    "lucide-react": "^0.562.0",
+    "preact": "^10.28.2",
+    "qrcode": "^1.5.4",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router-dom": "^7.12.0",
+    "react-virtuoso": "^4.18.1",
+    "react-window": "^2.2.5",
+    "tailwind-merge": "^3.4.0",
+    "zustand": "^5.0.10"
+  },
+  "devDependencies": {
+    "@typescript-eslint/parser": "^8.53.0",
+    "eslint-config-next": "^15.2.0",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "18.3.18",
+    "@types/react-dom": "18.3.5",
+    "eslint": "^9",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "ignoreScripts": [
+    "sharp",
+    "unrs-resolver"
+  ],
+  "trustedDependencies": [
+    "sharp",
+    "unrs-resolver"
+  ]
+}

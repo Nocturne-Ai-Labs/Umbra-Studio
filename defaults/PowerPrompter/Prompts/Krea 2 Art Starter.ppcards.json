@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "file": "User/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json",
+  "createdAt": "2026-07-20T14:05:00.000Z",
+  "updatedAt": "2026-07-20T14:05:00.000Z",
+  "modelType": "Krea 2",
+  "modelColor": "#22d3ee",
+  "pipeline": {
+    "feature": "txt2img",
+    "modelFamily": "Krea 2",
+    "modelFamilyKey": "krea2",
+    "modelSource": "diffusion_model"
+  },
+  "activeQueueSet": 1,
+  "styleSeedMode": "same",
+  "generation": {
+    "hiresFix": { "enabled": false, "upscaler": "Latent", "resizeMode": "scale", "scaleBy": 2, "targetWidth": 0, "targetHeight": 0, "steps": 0, "denoise": 0.35, "cfg": 0, "samplerName": "use_same", "scheduler": "use_same" },
+    "detailerPipeline": [],
+    "outputUpscale": { "enabled": false, "modelName": "4x-UltraSharp.pth", "maxDimension": 3840 },
+    "negativePrompt": "",
+    "seed": 135790,
+    "controlAfterGenerate": "increment",
+    "steps": 8,
+    "cfg": 1,
+    "clipSkip": 1,
+    "samplerName": "euler",
+    "scheduler": "simple",
+    "modelType": "diffusion_model",
+    "checkpointName": "krea2_turbo_fp8_scaled.safetensors",
+    "workflowResources": {
+      "krea2.text_encoder": "qwen3vl_4b_fp8_scaled.safetensors",
+      "krea2.vae": "qwen_image_vae.safetensors"
+    },
+    "aspectRatio": "SDXL - 3:4 portrait 896x1152",
+    "swapDimensions": false,
+    "width": 896,
+    "height": 1152,
+    "batchSize": 1,
+    "loras": [],
+    "thumbnailOverrides": {}
+  },
+  "cards": [
+    { "id": "krea-style-concept", "slotId": "krea-slot-style", "type": "style", "label": "Art Style", "variantName": "Cinematic Concept Art", "variantTags": ["starter", "pg", "natural-language"], "text": "Rendered as polished cinematic concept art with painterly realism, subtle brush texture, restrained color grading, and carefully observed materials", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "cycle", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 0, "createdAt": "2026-07-20T14:05:00.000Z", "updatedAt": "2026-07-20T14:05:00.000Z" },
+    { "id": "krea-style-editorial", "slotId": "krea-slot-style", "type": "style", "label": "Art Style", "variantName": "Editorial Illustration", "variantTags": ["starter", "pg", "natural-language"], "text": "Created as a sophisticated editorial illustration with elegant shapes, crisp focal details, tactile paper texture, and a contemporary magazine color palette", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "cycle", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 1, "createdAt": "2026-07-20T14:05:00.000Z", "updatedAt": "2026-07-20T14:05:00.000Z" },
+    { "id": "krea-style-gouache", "slotId": "krea-slot-style", "type": "style", "label": "Art Style", "variantName": "Luminous Gouache", "variantTags": ["starter", "pg", "natural-language"], "text": "Painted as a luminous storybook gouache artwork with layered pigment, hand-painted edges, atmospheric depth, and finely controlled highlights", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "cycle", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 2, "createdAt": "2026-07-20T14:05:00.000Z", "updatedAt": "2026-07-20T14:05:00.000Z" },
+
+    { "id": "krea-subject-botanist", "slotId": "krea-slot-subject", "type": "character", "label": "Subject", "variantName": "Field Botanist", "variantTags": ["starter", "adult", "pg"], "text": "A young adult field botanist with curly dark hair studies an unusual flowering plant while holding a weathered journal and a small brass magnifying glass", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "hold", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 3, "createdAt": "2026-07-20T14:05:00.000Z", "updatedAt": "2026-07-20T14:05:00.000Z" },
+    { "id": "krea-subject-musician", "slotId": "krea-slot-subject", "type": "character", "label": "Subject", "variantName": "Traveling Musician", "variantTags": ["starter", "adult", "pg"], "text": "A young adult traveling musician in a tailored blue coat carries a beautifully crafted wooden violin case and pauses to listen to the city around her", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "hold", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 4, "createdAt": "2026-07-20T14:05:00.000Z", "updatedAt": "2026-07-20T14:05:00.000Z" },
+    { "id": "krea-subject-astronomer", "slotId": "krea-slot-subject", "type": "character", "label": "Subject", "variantName": "Apprentice Astronomer", "variantTags": ["starter", "adult", "pg"], "text": "A young adult apprentice astronomer wearing a practical cream coat adjusts a compact telescope while handwritten star charts flutter beside her", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "hold", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 5, "createdAt": "2026-07-20T14:05:00.000Z", "updatedAt": "2026-07-20T14:05:00.000Z" },
+
+    { "id": "krea-scene-greenhouse", "slotId": "krea-slot-scene", "type": "location", "label": "Environment", "variantName": "Hilltop Greenhouse", "variantTags": ["starter", "pg"], "text": "The scene takes place inside a hilltop glasshouse filled with climbing vines, labeled specimens, copper irrigation pipes, and a distant view of rolling valleys", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "cycle", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 6, "createdAt": "2026-07-20T14:05:00.000Z", "updatedAt": "2026-07-20T14:05:00.000Z" },
+    { "id": "krea-scene-old-town", "slotId": "krea-slot-scene", "type": "location", "label": "Environment", "variantName": "Rainy Old Town", "variantTags": ["starter", "pg"], "text": "The setting is a rain-polished old town square with narrow shopfronts, hanging plants, warm cafe windows, and reflections stretching across the stone pavement", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "cycle", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 7, "createdAt": "2026-07-20T14:05:00.000Z", "updatedAt": "2026-07-20T14:05:00.000Z" },
+
+    { "id": "krea-composition-wide", "slotId": "krea-slot-composition", "type": "custom", "label": "Composition", "variantName": "Wide Narrative", "variantTags": ["starter", "pg"], "text": "Use a cinematic wide composition that shows the full figure in relation to the environment, with strong foreground framing and a clear visual path into the distance", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "cycle", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 8, "createdAt": "2026-07-20T14:05:00.000Z", "updatedAt": "2026-07-20T14:05:00.000Z" },
+    { "id": "krea-composition-portrait", "slotId": "krea-slot-composition", "type": "custom", "label": "Composition", "variantName": "Environmental Portrait", "variantTags": ["starter", "pg"], "text": "Use an intimate environmental portrait framed from the waist up, preserving meaningful tools and background details while keeping the face as the primary focal point", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "cycle", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 9, "createdAt": "2026-07-20T14:05:00.000Z", "updatedAt": "2026-07-20T14:05:00.000Z" },
+
+    { "id": "krea-lighting-morning", "slotId": "krea-slot-lighting", "type": "custom", "label": "Lighting", "variantName": "Clear Morning", "variantTags": ["starter", "pg"], "text": "Clear morning light enters from one side, creating soft directional shadows, luminous edge highlights, natural skin tones, and a fresh optimistic atmosphere", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "fast", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 10, "createdAt": "2026-07-20T14:05:00.000Z", "updatedAt": "2026-07-20T14:05:00.000Z" },
+    { "id": "krea-lighting-evening", "slotId": "krea-slot-lighting", "type": "custom", "label": "Lighting", "variantName": "Amber Evening", "variantTags": ["starter", "pg"], "text": "Warm amber evening light mixes with cool ambient shadows, producing gentle rim lighting, rich dimensional color, and a quietly cinematic mood", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "fast", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 11, "createdAt": "2026-07-20T14:05:00.000Z", "updatedAt": "2026-07-20T14:05:00.000Z" },
+
+    { "id": "krea-finish-quality", "slotId": "krea-slot-finish", "type": "custom", "label": "Finish", "variantName": "Gallery Finish", "variantTags": ["starter", "pg"], "text": "The final artwork has coherent anatomy, believable hands, accurate perspective, intentional visual hierarchy, refined edges, and gallery-ready detail without text or logos", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "fast", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 12, "createdAt": "2026-07-20T14:05:00.000Z", "updatedAt": "2026-07-20T14:05:00.000Z" }
+  ],
+  "deletedCardGroups": {}
+}

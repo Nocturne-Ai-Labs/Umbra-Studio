@@ -1,0 +1,217 @@
+/**
+ * Ultra Performance CSS - 165 FPS Target (6ms frame budget)
+ *
+ * Rules for 165 FPS:
+ * 1. Only use transform, opacity, filter (GPU-accelerated)
+ * 2. NEVER use top, left, width, height in animations
+ * 3. Use will-change sparingly (creates GPU layers)
+ * 4. Use contain for layout isolation
+ * 5. Disable pointer events when not needed
+ * 6. Compositor-only animations (no layout/paint)
+ */
+
+/* Smooth scrolling with GPU acceleration */
+.ultra-smooth-scroll {
+  /* Enable GPU scrolling */
+  -webkit-overflow-scrolling: touch;
+  overflow: auto;
+
+  /* Scrollbars are rendered by Umbra surfaces, not browser chrome. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.ultra-smooth-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.ultra-smooth-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ultra-smooth-scroll::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.ultra-smooth-scroll::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+/* Ultra Card - Compositor-only animations */
+.ultra-card {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  user-select: none;
+
+  /* Force GPU layer */
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
+
+  /* Contain layout calculations */
+  contain: layout style paint;
+
+  /* GPU-accelerated transition */
+  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Hover effect - GPU-only transform */
+.ultra-card:hover {
+  /* Scale AND translate in single transform (one GPU operation) */
+  transform: translate3d(0, -4px, 0) scale(1.05);
+}
+
+/* Active/click effect */
+.ultra-card:active {
+  transform: translate3d(0, 0, 0) scale(0.98);
+}
+
+/* Selection indicator - Absolute positioned, no layout impact */
+.ultra-card__selection {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  width: 24px;
+  height: 24px;
+  background: var(--umbra-accent, #00d9ff);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  /* Force GPU layer */
+  transform: translate3d(0, 0, 0);
+
+  /* No pointer events to avoid blocking clicks */
+  pointer-events: none;
+
+  /* Compositor-only animation */
+  animation: ultra-selection-pulse 2s ease-in-out infinite;
+}
+
+@keyframes ultra-selection-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: translate3d(0, 0, 0) scale(1.1);
+  }
+}
+
+/* Image wrapper - Overflow hidden */
+.ultra-card__image-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 2px solid transparent;
+
+  /* Force GPU layer */
+  transform: translate3d(0, 0, 0);
+
+  /* GPU-accelerated border transition */
+  transition: border-color 0.2s;
+
+  /* Contain paint operations */
+  contain: paint;
+}
+
+.ultra-card:hover .ultra-card__image-wrapper {
+  border-color: var(--umbra-accent, #00d9ff);
+}
+
+.ultra-card[data-selected="true"] .ultra-card__image-wrapper {
+  border-color: var(--umbra-accent, #00d9ff);
+  border-width: 3px;
+}
+
+/* Image - GPU-accelerated scale */
+.ultra-card__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+
+  /* Force GPU layer */
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
+
+  /* Smooth scale transition */
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Preserve natural photographic/media sampling. Crisp edges caused CRT-like artifacts. */
+  image-rendering: auto;
+
+  /* Disable drag */
+  pointer-events: none;
+}
+
+.ultra-card:hover .ultra-card__image {
+  /* Subtle zoom on hover */
+  transform: translate3d(0, 0, 0) scale(1.1);
+}
+
+/* Info overlay - Compositor-only opacity */
+.ultra-card__info {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 8px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent);
+  opacity: 0;
+
+  /* Force GPU layer */
+  transform: translate3d(0, 0, 0);
+
+  /* Compositor-only opacity transition */
+  transition: opacity 0.2s;
+
+  /* No pointer events */
+  pointer-events: none;
+
+  /* Contain text layout */
+  contain: layout style;
+}
+
+.ultra-card:hover .ultra-card__info {
+  opacity: 1;
+}
+
+/* Name text */
+.ultra-card__name {
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  /* Text rendering optimization */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Disable text selection globally in grid (performance) */
+.ultra-smooth-scroll * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Force hardware acceleration globally */
+.ultra-smooth-scroll *,
+.ultra-smooth-scroll *::before,
+.ultra-smooth-scroll *::after {
+  backface-visibility: hidden;
+  perspective: 1000px;
+}

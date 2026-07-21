@@ -1,0 +1,456 @@
+{
+  "1": {
+    "class_type": "UmbraLoadCheckpoint",
+    "inputs": {
+      "model_type": "diffusion_model",
+      "checkpoint_name": "[None]",
+      "diffusers_model": "",
+      "diffusion_model_name": "ideogram4_fp8_scaled.safetensors",
+      "unet_name": "",
+      "gguf_name": "",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Umbra UI Ideogram 4",
+      "umbra_model_family": "Ideogram 4",
+      "umbra_ui_pipelines": [
+        {
+          "feature": "txt2img",
+          "model_family": "Ideogram 4",
+          "model_sources": [
+            "diffusion_model",
+            "unet"
+          ],
+          "priority": 100,
+          "defaults": {
+            "modelName": "ideogram4_fp8_scaled.safetensors",
+            "modelNamesBySource": {
+              "diffusion_model": "ideogram4_fp8_scaled.safetensors",
+              "unet": "ideogram4_fp8_scaled.safetensors"
+            },
+            "steps": 20,
+            "cfg": 7,
+            "samplerName": "euler",
+            "scheduler": "simple",
+            "width": 1024,
+            "height": 1024,
+            "clipSkip": 1
+          }
+        }
+      ]
+    }
+  },
+  "2": {
+    "class_type": "UmbraPowerPrompterReader",
+    "inputs": {
+      "prompt_text": "masterpiece, best quality, detailed image",
+      "negative_prompt": "",
+      "seed": 123456789,
+      "control_after_generate": "fixed",
+      "increment_step": 1,
+      "style_seed_behavior": "normal",
+      "aspect_ratio": "custom",
+      "swap_dimensions": "Off",
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Umbra Prompt + Generation Controls"
+    }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_8b_fp8_scaled.safetensors",
+      "type": "ideogram4",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "Ideogram 4 Text Encoder",
+      "umbra_resources": [
+        {
+          "id": "ideogram4.text_encoder",
+          "label": "Ideogram 4 Text Encoder",
+          "kind": "text_encoder",
+          "input": "clip_name",
+          "required": true,
+          "order": 10
+        }
+      ]
+    }
+  },
+  "4": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "_meta": {
+      "title": "Ideogram 4 VAE",
+      "umbra_resources": [
+        {
+          "id": "ideogram4.vae",
+          "label": "Ideogram 4 / Flux 2 VAE",
+          "kind": "vae",
+          "input": "vae_name",
+          "required": true,
+          "order": 20
+        }
+      ]
+    }
+  },
+  "5": {
+    "class_type": "UmbraA1111LoraSyntax",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "3",
+        0
+      ],
+      "prompt_text": [
+        "2",
+        0
+      ],
+      "lora_syntax_text": "",
+      "lora_name": "[None]",
+      "lora_strength_model": 1,
+      "lora_strength_clip": 1,
+      "strict_mode": false,
+      "strip_lora_tags_from_text": true
+    },
+    "_meta": {
+      "title": "Umbra LoRA Stack"
+    }
+  },
+  "6": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "ideogram4_unconditional_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Ideogram 4 Unconditional Model",
+      "umbra_resources": [
+        {
+          "id": "ideogram4.unconditional_model",
+          "label": "Ideogram 4 Unconditional Model",
+          "kind": "diffusion_model",
+          "input": "unet_name",
+          "required": true,
+          "order": 30
+        }
+      ]
+    }
+  },
+  "7": {
+    "class_type": "UmbraA1111LoraSyntax",
+    "inputs": {
+      "model": [
+        "6",
+        0
+      ],
+      "clip": [
+        "3",
+        0
+      ],
+      "prompt_text": [
+        "2",
+        0
+      ],
+      "lora_syntax_text": "",
+      "lora_name": "[None]",
+      "lora_strength_model": 1,
+      "lora_strength_clip": 1,
+      "strict_mode": false,
+      "strip_lora_tags_from_text": true
+    },
+    "_meta": {
+      "title": "Umbra LoRA Stack"
+    }
+  },
+  "8": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "5",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "Ideogram 4 Unconditional Conditioning"
+    }
+  },
+  "9": {
+    "class_type": "CFGOverride",
+    "inputs": {
+      "cfg": 3,
+      "start_percent": 0.7,
+      "end_percent": 1,
+      "model": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Ideogram 4 Late CFG Override"
+    }
+  },
+  "10": {
+    "class_type": "DualModelGuider",
+    "inputs": {
+      "model": [
+        "9",
+        0
+      ],
+      "positive": [
+        "5",
+        3
+      ],
+      "cfg": 7,
+      "model_negative": [
+        "7",
+        0
+      ],
+      "negative": [
+        "8",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Ideogram 4 Paired Model Guider"
+    }
+  },
+  "11": {
+    "class_type": "EmptyFlux2LatentImage",
+    "inputs": {
+      "width": [
+        "2",
+        4
+      ],
+      "height": [
+        "2",
+        5
+      ],
+      "batch_size": [
+        "2",
+        6
+      ]
+    },
+    "_meta": {
+      "title": "Ideogram 4 Latent"
+    }
+  },
+  "12": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": [
+        "2",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "Ideogram 4 Noise"
+    }
+  },
+  "13": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "_meta": {
+      "title": "Ideogram 4 Sampler"
+    }
+  },
+  "14": {
+    "class_type": "Ideogram4Scheduler",
+    "inputs": {
+      "steps": 20,
+      "width": [
+        "2",
+        4
+      ],
+      "height": [
+        "2",
+        5
+      ],
+      "mu": 0,
+      "std": 1.75
+    },
+    "_meta": {
+      "title": "Ideogram 4 Scheduler"
+    }
+  },
+  "15": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "12",
+        0
+      ],
+      "guider": [
+        "10",
+        0
+      ],
+      "sampler": [
+        "13",
+        0
+      ],
+      "sigmas": [
+        "14",
+        0
+      ],
+      "latent_image": [
+        "11",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Sample Ideogram 4"
+    }
+  },
+  "16": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "15",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Decode"
+    }
+  },
+  "17": {
+    "class_type": "UmbraImageDetailer",
+    "inputs": {
+      "image": [
+        "16",
+        0
+      ],
+      "model": [
+        "9",
+        0
+      ],
+      "clip": [
+        "5",
+        1
+      ],
+      "vae": [
+        "4",
+        0
+      ],
+      "positive": [
+        "5",
+        3
+      ],
+      "negative": [
+        "8",
+        0
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "sampling_provider": [
+        "20",
+        0
+      ],
+      "pipeline_json": "",
+      "person_detail": true,
+      "face_detail": true,
+      "eye_detail": true,
+      "hand_detail": true
+    },
+    "_meta": {
+      "title": "Umbra Detail Pipeline"
+    }
+  },
+  "18": {
+    "class_type": "UmbraImageUpscale",
+    "inputs": {
+      "image": [
+        "17",
+        0
+      ],
+      "upscale_model": "4x-AnimeSharp.pth",
+      "max_dimension": 3840,
+      "enabled": false
+    },
+    "_meta": {
+      "title": "Optional Output Upscale"
+    }
+  },
+  "19": {
+    "class_type": "UmbraLabSaveImage",
+    "inputs": {
+      "images": [
+        "18",
+        0
+      ],
+      "filename_prefix": "UmbraUI_txt2img_%date%",
+      "positive_prompt": [
+        "5",
+        2
+      ],
+      "negative_prompt": [
+        "2",
+        8
+      ],
+      "positive": [
+        "5",
+        3
+      ],
+      "negative": [
+        "8",
+        0
+      ],
+      "output_folder": "Umbra UI/txt2img",
+      "save_to_yyyy_mm_dd_folder": true,
+      "save_to_set_subfolder": false,
+      "set_subfolder": "",
+      "save_set_to_style_subfolder": "",
+      "model_name": [
+        "1",
+        3
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "steps": 20,
+      "cfg": 7,
+      "sampler_name": "euler",
+      "scheduler": "simple"
+    },
+    "_meta": {
+      "title": "Save Ideogram 4 Image"
+    }
+  },
+  "20": {
+    "class_type": "UmbraIdeogram4DetailerSamplingProvider",
+    "inputs": {
+      "model": [
+        "9",
+        0
+      ],
+      "model_negative": [
+        "7",
+        0
+      ],
+      "sampler_name": "euler",
+      "mu": 0,
+      "std": 1.75
+    },
+    "_meta": {
+      "title": "Ideogram 4 Detailer Sampling Provider",
+      "umbra_role": "native_detailer_provider"
+    }
+  }
+}

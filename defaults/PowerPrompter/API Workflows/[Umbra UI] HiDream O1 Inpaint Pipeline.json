@@ -1,0 +1,370 @@
+{
+  "1": {
+    "class_type": "UmbraLoadCheckpoint",
+    "inputs": {
+      "model_type": "checkpoint",
+      "checkpoint_name": "hidream_o1_image_dev_fp8_scaled.safetensors",
+      "diffusers_model": "",
+      "diffusion_model_name": "",
+      "unet_name": "",
+      "gguf_name": "",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Umbra UI HiDream O1 Native Inpaint",
+      "umbra_model_family": "HiDream O1",
+      "umbra_ui_pipelines": [
+        {
+          "feature": "inpainting",
+          "model_family": "HiDream O1",
+          "model_sources": [
+            "checkpoint"
+          ],
+          "inpaint_adapter": "native_edit",
+          "priority": 100,
+          "defaults": {
+            "modelName": "hidream_o1_image_dev_fp8_scaled.safetensors",
+            "modelNamesBySource": {
+              "checkpoint": "hidream_o1_image_dev_fp8_scaled.safetensors"
+            },
+            "steps": 28,
+            "cfg": 1,
+            "samplerName": "lcm",
+            "scheduler": "normal",
+            "width": 2048,
+            "height": 2048,
+            "clipSkip": 1
+          }
+        }
+      ]
+    }
+  },
+  "2": {
+    "class_type": "UmbraPowerPrompterReader",
+    "inputs": {
+      "prompt_text": "masterpiece, best quality, detailed image",
+      "negative_prompt": "",
+      "seed": 123456789,
+      "control_after_generate": "fixed",
+      "increment_step": 1,
+      "style_seed_behavior": "normal",
+      "aspect_ratio": "custom",
+      "swap_dimensions": "Off",
+      "width": 2048,
+      "height": 2048,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Umbra Prompt + Generation Controls"
+    }
+  },
+  "3": {
+    "class_type": "UmbraA1111LoraSyntax",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "1",
+        1
+      ],
+      "prompt_text": [
+        "2",
+        0
+      ],
+      "lora_syntax_text": "",
+      "lora_name": "[None]",
+      "lora_strength_model": 1,
+      "lora_strength_clip": 1,
+      "strict_mode": false,
+      "strip_lora_tags_from_text": true
+    },
+    "_meta": {
+      "title": "Umbra LoRA Stack",
+      "umbra_role": "inpaint_regional_clip_source",
+      "umbra_output_index": 1
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": [
+        "2",
+        8
+      ],
+      "clip": [
+        "3",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "HiDream O1 Negative Conditioning"
+    }
+  },
+  "5": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "umbra-native-source.png"
+    },
+    "_meta": {
+      "title": "Editable Source Image",
+      "umbra_role": "inpaint_source",
+      "umbra_output_index": 0
+    }
+  },
+  "6": {
+    "class_type": "LoadImageMask",
+    "inputs": {
+      "image": "umbra-native-mask.png",
+      "channel": "red"
+    },
+    "_meta": {
+      "title": "Editable Source Mask",
+      "umbra_role": "inpaint_mask",
+      "umbra_output_index": 0
+    }
+  },
+  "7": {
+    "class_type": "INPAINT_ExpandMask",
+    "inputs": {
+      "mask": [
+        "6",
+        0
+      ],
+      "grow": 0,
+      "blur": 0,
+      "blur_type": "gaussian"
+    },
+    "_meta": {
+      "title": "Grow + Feather Native Mask",
+      "umbra_role": "inpaint_mask_processor"
+    }
+  },
+  "8": {
+    "class_type": "HiDreamO1ReferenceImages",
+    "inputs": {
+      "positive": [
+        "3",
+        3
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "images.image_1": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "HiDream-O1 Editable Source + References",
+      "umbra_role": "inpaint_reference_sink",
+      "umbra_reference_method": "hidream_o1_reference",
+      "umbra_regional_method": "clip_masked_conditioning",
+      "umbra_regional_positive_input": "positive",
+      "umbra_regional_negative_input": "negative",
+      "umbra_regional_max_layers": 16
+    }
+  },
+  "9": {
+    "class_type": "EmptyHiDreamO1LatentImage",
+    "inputs": {
+      "width": [
+        "2",
+        4
+      ],
+      "height": [
+        "2",
+        5
+      ],
+      "batch_size": [
+        "2",
+        6
+      ]
+    },
+    "_meta": {
+      "title": "HiDream O1 Pixel Latent"
+    }
+  },
+  "10": {
+    "class_type": "SetLatentNoiseMask",
+    "inputs": {
+      "samples": [
+        "9",
+        0
+      ],
+      "mask": [
+        "7",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "HiDream-O1 Masked Pixel Latent"
+    }
+  },
+  "11": {
+    "class_type": "ModelNoiseScale",
+    "inputs": {
+      "model": [
+        "3",
+        0
+      ],
+      "noise_scale": 7.6
+    },
+    "_meta": {
+      "title": "HiDream O1 Dev Noise Scale"
+    }
+  },
+  "12": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "11",
+        0
+      ],
+      "scheduler": "normal",
+      "steps": 28,
+      "denoise": 0.8
+    },
+    "_meta": {
+      "title": "HiDream-O1 Inpaint Scheduler",
+      "umbra_role": "inpaint_sampler"
+    }
+  },
+  "13": {
+    "class_type": "SamplerLCM",
+    "inputs": {
+      "s_noise": 1,
+      "s_noise_end": 1,
+      "noise_clip_std": 2.5
+    },
+    "_meta": {
+      "title": "HiDream O1 LCM Sampler"
+    }
+  },
+  "14": {
+    "class_type": "SamplerCustom",
+    "inputs": {
+      "model": [
+        "11",
+        0
+      ],
+      "add_noise": true,
+      "noise_seed": [
+        "2",
+        3
+      ],
+      "cfg": 1,
+      "positive": [
+        "8",
+        0
+      ],
+      "negative": [
+        "8",
+        1
+      ],
+      "sampler": [
+        "13",
+        0
+      ],
+      "sigmas": [
+        "12",
+        0
+      ],
+      "latent_image": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Sample HiDream-O1 Masked Edit"
+    }
+  },
+  "15": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "14",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Decode HiDream-O1 Edit"
+    }
+  },
+  "16": {
+    "class_type": "ImageCompositeMasked",
+    "inputs": {
+      "destination": [
+        "5",
+        0
+      ],
+      "source": [
+        "15",
+        0
+      ],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": [
+        "7",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Non-Destructive HiDream-O1 Composite"
+    }
+  },
+  "17": {
+    "class_type": "UmbraLabSaveImage",
+    "inputs": {
+      "images": [
+        "16",
+        0
+      ],
+      "filename_prefix": "UmbraUI_Inpaint_HiDreamO1_%date%",
+      "positive_prompt": [
+        "3",
+        2
+      ],
+      "negative_prompt": [
+        "2",
+        8
+      ],
+      "positive": [
+        "8",
+        0
+      ],
+      "negative": [
+        "8",
+        1
+      ],
+      "output_folder": "Umbra UI/inpainting",
+      "save_to_yyyy_mm_dd_folder": true,
+      "save_to_set_subfolder": false,
+      "set_subfolder": "",
+      "save_set_to_style_subfolder": "",
+      "model_name": [
+        "1",
+        3
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "steps": 28,
+      "cfg": 1,
+      "sampler_name": "lcm",
+      "scheduler": "normal"
+    },
+    "_meta": {
+      "title": "Save HiDream-O1 Inpaint",
+      "umbra_role": "inpaint_output"
+    }
+  }
+}

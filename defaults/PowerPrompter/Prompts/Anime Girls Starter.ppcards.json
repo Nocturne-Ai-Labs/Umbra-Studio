@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "file": "User/PowerPrompter/Prompts/Anime Girls Starter.ppcards.json",
+  "createdAt": "2026-07-20T14:00:00.000Z",
+  "updatedAt": "2026-07-20T14:00:00.000Z",
+  "modelType": "Anima",
+  "modelColor": "#ec4899",
+  "pipeline": {
+    "feature": "txt2img",
+    "modelFamily": "Anima",
+    "modelFamilyKey": "anima",
+    "modelSource": "checkpoint"
+  },
+  "activeQueueSet": 1,
+  "styleSeedMode": "same",
+  "generation": {
+    "hiresFix": { "enabled": false, "upscaler": "Latent", "resizeMode": "scale", "scaleBy": 2, "targetWidth": 0, "targetHeight": 0, "steps": 0, "denoise": 0.35, "cfg": 0, "samplerName": "use_same", "scheduler": "use_same" },
+    "detailerPipeline": [],
+    "outputUpscale": { "enabled": false, "modelName": "4x-AnimeSharp.pth", "maxDimension": 3840 },
+    "negativePrompt": "low quality, worst quality, blurry, bad anatomy, malformed hands, extra fingers, text, watermark, logo, mature content, suggestive content",
+    "seed": 246810,
+    "controlAfterGenerate": "increment",
+    "steps": 35,
+    "cfg": 4,
+    "clipSkip": 1,
+    "samplerName": "er_sde",
+    "scheduler": "simple",
+    "modelType": "checkpoint",
+    "checkpointName": "anima_baseV10.safetensors",
+    "workflowResources": {
+      "anima.text_encoder": "qwen_3_06b_base.safetensors",
+      "anima.vae": "qwen_image_vae.safetensors"
+    },
+    "aspectRatio": "SDXL - 3:4 portrait 896x1152",
+    "swapDimensions": false,
+    "width": 896,
+    "height": 1152,
+    "batchSize": 1,
+    "loras": [],
+    "thumbnailOverrides": {}
+  },
+  "cards": [
+    { "id": "anime-style-vibrant", "slotId": "anime-slot-style", "type": "style", "label": "Style", "variantName": "Vibrant Anime", "variantTags": ["starter", "pg"], "text": "polished modern anime illustration, vibrant clean colors, crisp linework, detailed cel shading", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "cycle", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 0, "createdAt": "2026-07-20T14:00:00.000Z", "updatedAt": "2026-07-20T14:00:00.000Z" },
+    { "id": "anime-style-storybook", "slotId": "anime-slot-style", "type": "style", "label": "Style", "variantName": "Soft Storybook", "variantTags": ["starter", "pg"], "text": "soft storybook anime illustration, delicate painted textures, graceful linework, gentle color harmony", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "cycle", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 1, "createdAt": "2026-07-20T14:00:00.000Z", "updatedAt": "2026-07-20T14:00:00.000Z" },
+
+    { "id": "anime-character-akari", "slotId": "anime-slot-character", "type": "character", "label": "Character", "variantName": "Akari", "variantTags": ["starter", "adult", "pg"], "text": "1girl, young adult woman, warm brown skin, long auburn ponytail, green eyes, friendly athletic build", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "hold", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 2, "createdAt": "2026-07-20T14:00:00.000Z", "updatedAt": "2026-07-20T14:00:00.000Z" },
+    { "id": "anime-character-mei", "slotId": "anime-slot-character", "type": "character", "label": "Character", "variantName": "Mei", "variantTags": ["starter", "adult", "pg"], "text": "1girl, young adult woman, short black bob haircut, round glasses, amber eyes, calm bookish appearance", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "hold", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 3, "createdAt": "2026-07-20T14:00:00.000Z", "updatedAt": "2026-07-20T14:00:00.000Z" },
+    { "id": "anime-character-sora", "slotId": "anime-slot-character", "type": "character", "label": "Character", "variantName": "Sora", "variantTags": ["starter", "adult", "pg"], "text": "1girl, young adult woman, shoulder-length silver hair, blue eyes, light freckles, cheerful creative appearance", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "hold", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 4, "createdAt": "2026-07-20T14:00:00.000Z", "updatedAt": "2026-07-20T14:00:00.000Z" },
+
+    { "id": "anime-outfit-jacket", "slotId": "anime-slot-outfit", "type": "custom", "label": "Outfit", "variantName": "Weekend Jacket", "variantTags": ["starter", "pg"], "text": "colorful casual jacket, layered shirt, tailored trousers, clean sneakers", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "cycle", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 5, "createdAt": "2026-07-20T14:00:00.000Z", "updatedAt": "2026-07-20T14:00:00.000Z" },
+    { "id": "anime-outfit-sundress", "slotId": "anime-slot-outfit", "type": "custom", "label": "Outfit", "variantName": "Garden Dress", "variantTags": ["starter", "pg"], "text": "modest knee-length sundress, light cardigan, ankle boots, tasteful accessories", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "cycle", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 6, "createdAt": "2026-07-20T14:00:00.000Z", "updatedAt": "2026-07-20T14:00:00.000Z" },
+
+    { "id": "anime-expression-smile", "slotId": "anime-slot-expression", "type": "expression", "label": "Expression", "variantName": "Confident Smile", "variantTags": ["starter", "pg"], "text": "bright confident smile, lively eyes, warm approachable expression", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "fast", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 7, "createdAt": "2026-07-20T14:00:00.000Z", "updatedAt": "2026-07-20T14:00:00.000Z" },
+    { "id": "anime-expression-thoughtful", "slotId": "anime-slot-expression", "type": "expression", "label": "Expression", "variantName": "Thoughtful", "variantTags": ["starter", "pg"], "text": "gentle thoughtful expression, soft smile, attentive eyes", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "fast", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 8, "createdAt": "2026-07-20T14:00:00.000Z", "updatedAt": "2026-07-20T14:00:00.000Z" },
+
+    { "id": "anime-pose-wave", "slotId": "anime-slot-pose", "type": "action", "label": "Pose", "variantName": "Friendly Wave", "variantTags": ["starter", "pg"], "text": "standing naturally, one hand raised in a friendly wave, relaxed posture, looking at viewer", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "fast", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 9, "createdAt": "2026-07-20T14:00:00.000Z", "updatedAt": "2026-07-20T14:00:00.000Z" },
+    { "id": "anime-pose-seated", "slotId": "anime-slot-pose", "type": "action", "label": "Pose", "variantName": "Relaxed Seat", "variantTags": ["starter", "pg"], "text": "seated comfortably on a bench, hands resting naturally, relaxed three-quarter pose", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "fast", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 10, "createdAt": "2026-07-20T14:00:00.000Z", "updatedAt": "2026-07-20T14:00:00.000Z" },
+
+    { "id": "anime-location-park", "slotId": "anime-slot-location", "type": "location", "label": "Location", "variantName": "City Park", "variantTags": ["starter", "pg"], "text": "sunlit city park, flowering trees, distant modern skyline, peaceful afternoon atmosphere", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "cycle", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 11, "createdAt": "2026-07-20T14:00:00.000Z", "updatedAt": "2026-07-20T14:00:00.000Z" },
+    { "id": "anime-location-bookshop", "slotId": "anime-slot-location", "type": "location", "label": "Location", "variantName": "Bookshop", "variantTags": ["starter", "pg"], "text": "cozy independent bookshop, tall wooden shelves, potted plants, inviting reading corner", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "cycle", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 12, "createdAt": "2026-07-20T14:00:00.000Z", "updatedAt": "2026-07-20T14:00:00.000Z" },
+
+    { "id": "anime-lighting-clean", "slotId": "anime-slot-lighting", "type": "custom", "label": "Lighting", "variantName": "Clean Cinematic", "variantTags": ["starter", "pg"], "text": "clean cinematic lighting, soft rim light, balanced contrast, clear facial details, cohesive background", "randomEnabled": false, "randomSetIds": [], "queueEnabled": true, "queueSetIds": [1], "queueTraversalRole": "fast", "queueCycleWeights": { "1": 1 }, "chainLinks": [], "blockLinks": [], "order": 13, "createdAt": "2026-07-20T14:00:00.000Z", "updatedAt": "2026-07-20T14:00:00.000Z" }
+  ],
+  "deletedCardGroups": {}
+}

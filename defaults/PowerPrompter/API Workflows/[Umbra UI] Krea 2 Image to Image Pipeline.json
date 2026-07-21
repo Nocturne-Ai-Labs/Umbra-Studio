@@ -1,0 +1,373 @@
+{
+  "1": {
+    "class_type": "UmbraLoadCheckpoint",
+    "inputs": {
+      "model_type": "diffusion_model",
+      "checkpoint_name": "[None]",
+      "diffusers_model": "",
+      "diffusion_model_name": "krea2_turbo_fp8_scaled.safetensors",
+      "unet_name": "",
+      "gguf_name": "",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Umbra UI Krea 2",
+      "umbra_model_family": "Krea 2",
+      "umbra_ui_pipelines": [
+        {
+          "feature": "img2img",
+          "model_family": "Krea 2",
+          "model_sources": [
+            "diffusion_model",
+            "unet",
+            "gguf"
+          ],
+          "priority": 100,
+          "defaults": {
+            "modelName": "krea2_turbo_fp8_scaled.safetensors",
+            "modelNamesBySource": {
+              "diffusion_model": "krea2_turbo_fp8_scaled.safetensors",
+              "unet": "krea2_turbo_fp8_scaled.safetensors"
+            },
+            "steps": 8,
+            "cfg": 1,
+            "samplerName": "euler",
+            "scheduler": "simple",
+            "width": 1024,
+            "height": 1024,
+            "clipSkip": 1,
+            "denoise": 0.3
+          }
+        }
+      ]
+    }
+  },
+  "2": {
+    "class_type": "UmbraPowerPrompterReader",
+    "inputs": {
+      "prompt_text": "masterpiece, best quality, detailed image",
+      "negative_prompt": "",
+      "seed": 123456789,
+      "control_after_generate": "fixed",
+      "increment_step": 1,
+      "style_seed_behavior": "normal",
+      "aspect_ratio": "custom",
+      "swap_dimensions": "Off",
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Umbra Prompt + Generation Controls"
+    }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_4b_fp8_scaled.safetensors",
+      "type": "krea2",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "Krea 2 Text Encoder",
+      "umbra_resources": [
+        {
+          "id": "krea2.text_encoder",
+          "label": "Krea 2 Text Encoder",
+          "kind": "text_encoder",
+          "input": "clip_name",
+          "required": true,
+          "order": 10
+        }
+      ]
+    }
+  },
+  "4": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "_meta": {
+      "title": "Krea 2 VAE",
+      "umbra_resources": [
+        {
+          "id": "krea2.vae",
+          "label": "Krea 2 VAE",
+          "kind": "vae",
+          "input": "vae_name",
+          "required": true,
+          "order": 30
+        }
+      ]
+    }
+  },
+  "5": {
+    "class_type": "UmbraA1111LoraSyntax",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "3",
+        0
+      ],
+      "prompt_text": [
+        "2",
+        0
+      ],
+      "lora_syntax_text": "",
+      "lora_name": "[None]",
+      "lora_strength_model": 1,
+      "lora_strength_clip": 1,
+      "strict_mode": false,
+      "strip_lora_tags_from_text": true
+    },
+    "_meta": {
+      "title": "Umbra LoRA Stack"
+    }
+  },
+  "6": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "5",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "Krea 2 Zero Negative Conditioning"
+    }
+  },
+  "7": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": [
+        "2",
+        4
+      ],
+      "height": [
+        "2",
+        5
+      ],
+      "batch_size": [
+        "2",
+        6
+      ]
+    },
+    "_meta": {
+      "title": "Krea 2 Latent"
+    }
+  },
+  "8": {
+    "class_type": "UmbraKSamplerHiResFix",
+    "inputs": {
+      "model": [
+        "5",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "5",
+        3
+      ],
+      "negative": [
+        "6",
+        0
+      ],
+      "latent_image": [
+        "15",
+        0
+      ],
+      "denoise": 0.3,
+      "enabled": false,
+      "upscaler": "Latent",
+      "resize_mode": "upscale by",
+      "scale_by": 2,
+      "resize_width": 0,
+      "resize_height": 0,
+      "hires_steps": 0,
+      "hires_cfg": 0,
+      "hires_sampler_name": "Use same",
+      "hires_scheduler": "Use same",
+      "hires_denoise": 0.35
+    },
+    "_meta": {
+      "title": "Sample + Optional Hires Fix",
+      "umbra_role": "img2img_sampler"
+    }
+  },
+  "9": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "8",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Decode"
+    }
+  },
+  "10": {
+    "class_type": "UmbraImageDetailer",
+    "inputs": {
+      "image": [
+        "9",
+        0
+      ],
+      "model": [
+        "5",
+        0
+      ],
+      "clip": [
+        "5",
+        1
+      ],
+      "vae": [
+        "4",
+        0
+      ],
+      "positive": [
+        "5",
+        3
+      ],
+      "negative": [
+        "6",
+        0
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "pipeline_json": "",
+      "person_detail": true,
+      "face_detail": true,
+      "eye_detail": true,
+      "hand_detail": true
+    },
+    "_meta": {
+      "title": "Umbra Detail Pipeline"
+    }
+  },
+  "11": {
+    "class_type": "UmbraImageUpscale",
+    "inputs": {
+      "image": [
+        "10",
+        0
+      ],
+      "upscale_model": "4x-AnimeSharp.pth",
+      "max_dimension": 3840,
+      "enabled": false
+    },
+    "_meta": {
+      "title": "Optional Output Upscale"
+    }
+  },
+  "12": {
+    "class_type": "UmbraLabSaveImage",
+    "inputs": {
+      "images": [
+        "11",
+        0
+      ],
+      "filename_prefix": "UmbraUI_IMG2IMG_Umbra_UI_Krea_2_Image_Pipeline_json_%date%",
+      "positive_prompt": [
+        "5",
+        2
+      ],
+      "negative_prompt": [
+        "2",
+        8
+      ],
+      "positive": [
+        "5",
+        3
+      ],
+      "negative": [
+        "6",
+        0
+      ],
+      "output_folder": "Umbra UI/img2img",
+      "save_to_yyyy_mm_dd_folder": true,
+      "save_to_set_subfolder": false,
+      "set_subfolder": "",
+      "save_set_to_style_subfolder": "",
+      "model_name": [
+        "1",
+        3
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple"
+    },
+    "_meta": {
+      "title": "Save Krea 2 Image"
+    }
+  },
+  "13": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "umbra-img2img-source.png"
+    },
+    "_meta": {
+      "title": "IMG2IMG Source Image",
+      "umbra_role": "img2img_source"
+    }
+  },
+  "14": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "13",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": 1024,
+      "height": 1024,
+      "crop": "disabled"
+    },
+    "_meta": {
+      "title": "IMG2IMG Working Resolution",
+      "umbra_role": "img2img_resize"
+    }
+  },
+  "15": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "14",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Encode IMG2IMG Source",
+      "umbra_role": "img2img_encode"
+    }
+  }
+}
