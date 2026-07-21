@@ -22,6 +22,7 @@ copying their virtual environments.
 
 ### Release Highlights
 
+- Repacked the Windows portable archive with Explorer-compatible ZIP paths.
 - Introduced the capability-driven Umbra UI generation pipeline system.
 - Added shared Power Prompter pipeline controls, including hires fix,
   configurable detailers, and optional output upscaling.

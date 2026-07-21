@@ -44,8 +44,15 @@ jobs:
           if (!(Test-Path "$packageRoot/resources/app/defaults/DataForge/model-manifest.json")) { throw 'Data Forge model manifest is missing' }
           New-Item -ItemType Directory -Force artifacts | Out-Null
           Copy-Item "$packageRoot/resources/app/defaults/DataForge/model-manifest.json" "artifacts/Data-Forge-Models-v$version.json"
-          & tar.exe -a -c -f "artifacts/Umbra-Studio-v$version-Windows-x64.zip" -C $packageRoot .
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $sourcePath = (Resolve-Path $packageRoot).Path
+          $archivePath = Join-Path (Resolve-Path artifacts).Path "Umbra-Studio-v$version-Windows-x64.zip"
+          [System.IO.Compression.ZipFile]::CreateFromDirectory(
+            $sourcePath,
+            $archivePath,
+            [System.IO.Compression.CompressionLevel]::Optimal,
+            $false
+          )
       - uses: actions/upload-artifact@v4
         with:
           name: umbra-studio-windows
