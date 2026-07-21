@@ -32,6 +32,7 @@ const SOURCE_FILES = [
   '.gitignore',
   'AGENTS.md',
   'bun.lock',
+  'CHANGELOG.md',
   'Credits.md',
   'install-tools.bat',
   'install-tools.sh',
@@ -151,6 +152,7 @@ function writeRuntimeSkeleton() {
 
 function verifyOutput() {
   const required = [
+    'CHANGELOG.md',
     '.github/assets/nocturne-labs-icon.png',
     '.github/assets/nocturne-labs-banner.png',
     '.github/workflows/release.yml',

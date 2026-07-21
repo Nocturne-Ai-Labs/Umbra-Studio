@@ -21,6 +21,9 @@ See [REQUIREMENTS.md](REQUIREMENTS.md) for the supported platforms, recommended
 hardware, Linux packages, ports, per-feature dependencies, caption-model pack,
 and links to every managed upstream tool.
 
+See [CHANGELOG.md](CHANGELOG.md) for release highlights and instructions for
+migrating existing `User/` and `Tools/` folders into a new portable version.
+
 Quick summary:
 
 - Windows 10/11 x64 is the primary platform; Linux x64 portable builds are supported.
