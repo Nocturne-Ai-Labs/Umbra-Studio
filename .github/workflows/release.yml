@@ -72,7 +72,7 @@ jobs:
           test -f "${package_root}/install-data-forge-models.sh"
           test -f "${package_root}/resources/app/defaults/DataForge/model-manifest.json"
           mkdir -p artifacts
-          tar -C "${package_root}" -czf "artifacts/Umbra-Studio-v${version}-Linux-x64.tar.gz" .
+          (cd "${package_root}" && zip -r -9 "${GITHUB_WORKSPACE}/artifacts/Umbra-Studio-v${version}-Linux-x64.zip" .)
       - uses: actions/upload-artifact@v4
         with:
           name: umbra-studio-linux
