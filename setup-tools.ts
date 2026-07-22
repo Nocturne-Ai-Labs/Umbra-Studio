@@ -1863,12 +1863,13 @@ function refreshComfySubmodules(toolDir: string, phase: string): boolean {
 
 const COMFY_NODES = [
     { name: 'ComfyUI-Manager', repo: 'https://github.com/ltdrdata/ComfyUI-Manager.git', required: true },
+    { name: 'ComfyUI-GGUF', repo: 'https://github.com/city96/ComfyUI-GGUF.git', required: true },
     { name: 'comfyui-tooling-nodes', repo: 'https://github.com/Acly/comfyui-tooling-nodes.git', required: true },
     { name: 'comfyui-inpaint-nodes', repo: 'https://github.com/Acly/comfyui-inpaint-nodes.git', required: true },
     { name: 'comfyui_controlnet_aux', repo: 'https://github.com/Fannovel16/comfyui_controlnet_aux.git', required: true },
+    { name: 'ComfyUI_IPAdapter_plus', repo: 'https://github.com/cubiq/ComfyUI_IPAdapter_plus.git', required: true },
     { name: 'ComfyUI-Inpaint-CropAndStitch', repo: 'https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch.git' },
-    { name: 'ComfyUI_JPS-Nodes', repo: 'https://github.com/JPS-GER/ComfyUI_JPS-Nodes.git' },
-    { name: 'ComfyUI_ComfyRoll_CustomNodes', repo: 'https://github.com/Suzie1/ComfyUI_ComfyRoll_CustomNodes.git' },
+    { name: 'ComfyUI_ComfyRoll_CustomNodes', repo: 'https://github.com/Suzie1/ComfyUI_Comfyroll_CustomNodes.git' },
     { name: 'ComfyUI-Inspire-Pack', repo: 'https://github.com/ltdrdata/ComfyUI-Inspire-Pack.git' },
     { name: 'ComfyUI-Impact-Pack', repo: 'https://github.com/ltdrdata/ComfyUI-Impact-Pack.git' },
     { name: 'ComfyUI-Impact-Subpack', repo: 'https://github.com/ltdrdata/ComfyUI-Impact-Subpack.git' },
@@ -1976,15 +1977,28 @@ function installComfyNodes(comfyDir: string): boolean {
 
     let requiredFailure = false;
     for (const node of COMFY_NODES) {
-        if (!('required' in node && node.required)) continue;
+        if ('nvidiaOnly' in node && node.nvidiaOnly && !GPU_NAME) continue;
+
+        const required = 'required' in node && node.required;
+        if (!enabledNodes.has(node.name) && !required) continue;
+
         const nodePath = join(nodesDir, node.name);
         if (!existsSync(nodePath)) {
-            log('X', `Required node ${node.name} is missing`);
-            requiredFailure = true;
+            if (required) {
+                log('X', `Required node ${node.name} is missing`);
+                requiredFailure = true;
+            } else {
+                log(`${c.yellow}WARN${c.reset}`, `Optional node ${node.name} is unavailable`);
+            }
             continue;
         }
+
         if (!installComfyNodeRequirements(comfyDir, nodePath, node.name)) {
-            requiredFailure = true;
+            if (required) {
+                requiredFailure = true;
+            } else {
+                log(`${c.yellow}WARN${c.reset}`, `${node.name} was installed without all optional dependencies`);
+            }
         }
     }
 

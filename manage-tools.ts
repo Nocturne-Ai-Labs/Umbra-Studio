@@ -19,12 +19,13 @@ const COMFY_NODES_FILE = join(import.meta.dir, 'User', 'Config', 'comfy-nodes.js
 // ComfyUI Custom Nodes available for installation
 const COMFY_NODES = [
     { name: 'ComfyUI-Manager', repo: 'https://github.com/ltdrdata/ComfyUI-Manager.git', desc: 'Essential node manager for ComfyUI', required: true },
+    { name: 'ComfyUI-GGUF', repo: 'https://github.com/city96/ComfyUI-GGUF.git', desc: 'GGUF diffusion-model and text-encoder loading', required: true },
     { name: 'comfyui-tooling-nodes', repo: 'https://github.com/Acly/comfyui-tooling-nodes.git', desc: 'Bridge nodes for external editor workflows', required: true },
     { name: 'comfyui-inpaint-nodes', repo: 'https://github.com/Acly/comfyui-inpaint-nodes.git', desc: 'Inpainting and generative fill nodes', required: true },
     { name: 'comfyui_controlnet_aux', repo: 'https://github.com/Fannovel16/comfyui_controlnet_aux.git', desc: 'ControlNet preprocessing and live control workflows', required: true },
+    { name: 'ComfyUI_IPAdapter_plus', repo: 'https://github.com/cubiq/ComfyUI_IPAdapter_plus.git', desc: 'IP-Adapter reference-image conditioning', required: true },
     { name: 'ComfyUI-Inpaint-CropAndStitch', repo: 'https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch.git', desc: 'Crop and stitch nodes for inpainting workflows' },
-    { name: 'ComfyUI_JPS-Nodes', repo: 'https://github.com/JPS-GER/ComfyUI_JPS-Nodes.git', desc: 'Image processing and utility nodes' },
-    { name: 'ComfyUI_ComfyRoll_CustomNodes', repo: 'https://github.com/Suzie1/ComfyUI_ComfyRoll_CustomNodes.git', desc: 'Animation and batch processing nodes' },
+    { name: 'ComfyUI_ComfyRoll_CustomNodes', repo: 'https://github.com/Suzie1/ComfyUI_Comfyroll_CustomNodes.git', desc: 'Animation and batch processing nodes' },
     { name: 'ComfyUI-Inspire-Pack', repo: 'https://github.com/ltdrdata/ComfyUI-Inspire-Pack.git', desc: 'Advanced prompt and regional control' },
     { name: 'ComfyUI-Impact-Pack', repo: 'https://github.com/ltdrdata/ComfyUI-Impact-Pack.git', desc: 'Detailer, face detection, and more' },
     { name: 'ComfyUI-Impact-Subpack', repo: 'https://github.com/ltdrdata/ComfyUI-Impact-Subpack.git', desc: 'Additional Impact Pack features' },
@@ -41,7 +42,12 @@ interface ComfyNodesConfig {
 function loadComfyNodesConfig(): ComfyNodesConfig {
     try {
         if (existsSync(COMFY_NODES_FILE)) {
-            return JSON.parse(readFileSync(COMFY_NODES_FILE, 'utf-8'));
+            const stored = JSON.parse(readFileSync(COMFY_NODES_FILE, 'utf-8')) as Partial<ComfyNodesConfig>;
+            const enabledNodes = new Set(Array.isArray(stored.enabledNodes) ? stored.enabledNodes : []);
+            for (const node of COMFY_NODES) {
+                if ('required' in node && node.required) enabledNodes.add(node.name);
+            }
+            return { enabledNodes: Array.from(enabledNodes) };
         }
     } catch { }
     // Default: all nodes enabled
@@ -83,6 +89,40 @@ function getGPUInfo(): { name: string; vramMB: number } | null {
         }
     } catch { }
     return null;
+}
+
+function installComfyNodeRequirements(comfyPath: string, nodePath: string, nodeName: string): boolean {
+    const requirementsPath = join(nodePath, 'requirements.txt');
+    if (!existsSync(requirementsPath)) return true;
+
+    const venvPython = IS_WINDOWS
+        ? join(comfyPath, 'venv', 'Scripts', 'python.exe')
+        : join(comfyPath, 'venv', 'bin', 'python');
+    if (!existsSync(venvPython)) {
+        log(`${c.red}X${c.reset}`, `ComfyUI virtual environment is unavailable for ${nodeName}`);
+        return false;
+    }
+
+    const requirementsHash = Bun.hash(readFileSync(requirementsPath, 'utf-8')).toString();
+    const markerPath = join(nodePath, '.umbra-requirements-installed');
+    try {
+        if (readFileSync(markerPath, 'utf-8').trim() === requirementsHash) return true;
+    } catch {
+        // Missing or stale marker: install the current requirements.
+    }
+
+    log('->', `Installing requirements for ${nodeName}...`);
+    const result = spawnSync(venvPython, ['-m', 'pip', 'install', '-r', requirementsPath], {
+        cwd: comfyPath,
+        stdio: 'inherit'
+    });
+    if (result.status !== 0) {
+        log(`${c.red}X${c.reset}`, `Failed to install requirements for ${nodeName}`);
+        return false;
+    }
+
+    writeFileSync(markerPath, `${requirementsHash}\n`, 'utf-8');
+    return true;
 }
 
 function isLowVRAM(): boolean {
@@ -622,7 +662,7 @@ async function manageCustomNodes() {
                 log('âˆ’', `${node.name} ${c.dim}(skipped - NVIDIA GPU not detected)${c.reset}`);
                 continue;
             }
-            if (!enabledNodes.has(node.name)) {
+            if (!enabledNodes.has(node.name) && !('required' in node && node.required)) {
                 log('−', `${node.name} ${c.dim}(skipped - not selected)${c.reset}`);
                 continue;
             }
@@ -649,30 +689,16 @@ async function manageCustomNodes() {
                 try {
                     execSync(`git clone ${node.repo} ${node.name}`, { cwd: nodesDir, stdio: 'ignore' });
                     configureGitRepoForPortableUpdates(nodePath);
-
-                    // Install requirements if present
-                    const reqFile = join(nodePath, 'requirements.txt');
-                    if (existsSync(reqFile)) {
-                        const venvPython = IS_WINDOWS
-                            ? join(comfyPath, 'venv', 'Scripts', 'python.exe')
-                            : join(comfyPath, 'venv', 'bin', 'python');
-
-                        if (existsSync(venvPython)) {
-                            log('→', `Installing requirements for ${node.name}...`);
-                            try {
-                                execSync(`"${venvPython}" -m pip install -r "${reqFile}"`, {
-                                    stdio: 'ignore',
-                                    shell: IS_WINDOWS ? 'cmd.exe' : '/bin/bash'
-                                });
-                            } catch {
-                                log(`${c.yellow}⚠${c.reset}`, `Failed to install requirements for ${node.name}`);
-                            }
-                        }
-                    }
                     log(`${c.green}✓${c.reset}`, `${node.name} installed`);
                 } catch {
                     log(`${c.red}✗${c.reset}`, `Failed to install ${node.name}`);
                 }
+            }
+
+            if (existsSync(nodePath) && !installComfyNodeRequirements(comfyPath, nodePath, node.name)) {
+                const required = 'required' in node && node.required;
+                const level = required ? `${c.red}X${c.reset}` : `${c.yellow}WARN${c.reset}`;
+                log(level, `${node.name} is present but its Python dependencies are incomplete`);
             }
         }
 

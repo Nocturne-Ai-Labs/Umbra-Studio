@@ -75,6 +75,8 @@ up of coordinated frontend and backend services.
 
 ### ComfyUI
 - Project: https://github.com/comfyanonymous/ComfyUI
+- Creator / maintainer: comfyanonymous, the Comfy Org team, and contributors
+- License: GPL-3.0
 - Usage in Umbra Studio:
   - Primary workflow-based generation backend
   - Hosts Umbra-managed custom nodes and optional third-party node suites
@@ -213,6 +215,7 @@ application features around the integrated upstream tools.
 ### VideoHelperSuite Attribution
 - Upstream project: https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite
 - Creator / maintainer: Kosinkadink
+- License: GPL-3.0
 - Usage in Umbra Studio:
   - Umbra's video combine wrapper builds on upstream VideoHelperSuite behavior
 
@@ -237,19 +240,125 @@ GitHub core packages install the same revisions with checksum verification.
 - License: Apache-2.0
 - Models:
   - `SmilingWolf/wd-vit-tagger-v3`
+    - Reference: https://huggingface.co/SmilingWolf/wd-vit-tagger-v3
+    - Pinned revision: `7f6b584d0bd3f55c4531f14ba3d4761b2bccdc0f`
   - `SmilingWolf/wd-convnext-tagger-v3`
+    - Reference: https://huggingface.co/SmilingWolf/wd-convnext-tagger-v3
+    - Pinned revision: `d39e46de298d27340111b64965e20b8185c407e6`
   - `SmilingWolf/wd-eva02-large-tagger-v3`
+    - Reference: https://huggingface.co/SmilingWolf/wd-eva02-large-tagger-v3
+    - Pinned revision: `b25b82a03f7282e41aa2f257a52c7583b710bd1c`
   - `SmilingWolf/wd-swinv2-tagger-v3`
+    - Reference: https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3
+    - Pinned revision: `627aef95638667ddcaa3ac8ae625e88ea5b02f51`
 - Usage in Umbra Studio:
   - Structured dataset tagging with user-controlled thresholds and tag-category filtering
 
 ### Qwen2-VL 2B Abliterated Caption
 - Model: https://huggingface.co/prithivMLmods/Qwen2-VL-2B-Abliterated-Caption-it
 - Publisher: prithivMLmods
-- Base architecture: Qwen2-VL
+- Pinned revision: `cb837a2a02d60c7846360701c1b43c9ccf0b1ed6`
+- Base architecture: Qwen2-VL by the Qwen Team / Alibaba Cloud
+- Base-model reference: https://huggingface.co/Qwen/Qwen2-VL-2B-Instruct
+- Project reference: https://github.com/QwenLM/Qwen2-VL
 - License: Apache-2.0
 - Usage in Umbra Studio:
   - Detailed natural-language dataset captions, including uncensored captioning workflows
+
+## Generation Pipeline Model References
+
+Umbra's default pipeline configuration names several detector, segmentation,
+upscale, and interpolation assets. A model appearing in this section does not
+mean that every Umbra package redistributes its weights. The release manifest
+and model installer determine what a particular package includes. Assets with
+non-commercial or source-specific terms are not eligible for automatic core
+redistribution unless a release explicitly documents that decision.
+
+### Detailer Detectors by Bingsu
+- Model collection: https://huggingface.co/Bingsu/adetailer
+- Creator / publisher: Bingsu
+- License: Apache-2.0
+- Default model files used by Umbra:
+  - `face_yolov8m.pt`
+  - `hand_yolov8s.pt`
+  - `person_yolov8m-seg.pt`
+- Usage in Umbra Studio:
+  - Face, hand, and person detection or segmentation for optional detailer stages
+
+### Eyes Detection (ADetailer)
+- Best-known original listing: https://civitai.com/models/150925/eyes-detection-adetailer
+- Creator / publisher: SnowyYukino
+- Model file: `Eyes.pt`
+- Verified mirror: https://huggingface.co/Kevalon/adetailerModels/blob/main/Eyes.pt
+- SHA-256: `c59bb696818ad5dfe58c54a881ffb6895c260bd42b4c34dfc97dff2203f45621`
+- License / permissions:
+  - The source listing uses CivitAI model permissions rather than a standard SPDX license
+  - Automatic redistribution should remain disabled unless those source-specific terms are reviewed for the target release
+- Usage in Umbra Studio:
+  - Optional eye-detailer detection
+
+### Segment Anything ViT-B
+- Project: https://github.com/facebookresearch/segment-anything
+- Model: Segment Anything Model (SAM) ViT-B, `sam_vit_b_01ec64.pth`
+- Creators: Meta AI Research / FAIR; Alexander Kirillov, Eric Mintun, Nikhila Ravi,
+  Hanzi Mao, Chloe Rolland, Laura Gustafson, Tete Xiao, Spencer Whitehead,
+  Alexander C. Berg, Wan-Yen Lo, Piotr Dollar, and Ross Girshick
+- License: Apache-2.0
+- Usage in Umbra Studio:
+  - Mask refinement for optional detailer and segmentation stages
+
+### AnimeSharp
+- Model reference: https://openmodeldb.info/models/4x-AnimeSharp
+- Creator: Kim2091
+- Model file: `4x-AnimeSharp.pth`
+- License: CC-BY-NC-SA-4.0
+- Usage in Umbra Studio:
+  - User-supplied optional anime-focused output upscaling
+
+### UltraSharp
+- Model reference: https://openmodeldb.info/models/4x-UltraSharp
+- Creator: Kim2091
+- Model file: `4x-UltraSharp.pth`
+- License: CC-BY-NC-SA-4.0
+- Usage in Umbra Studio:
+  - User-supplied optional general-purpose output upscaling
+
+### Remacri
+- Model reference: https://openmodeldb.info/models/4x-Remacri
+- Creator: FoolhardyVEVO
+- Model file: `4x_foolhardy_Remacri.pth`
+- License: CC-BY-NC-SA-4.0
+- Usage in Umbra Studio:
+  - User-supplied optional restoration and output upscaling
+
+### ESRGAN
+- Project: https://github.com/xinntao/ESRGAN
+- Authors: Xintao Wang, Ke Yu, Shixiang Wu, Jinjin Gu, Yihao Liu, Chao Dong,
+  Yu Qiao, and Chen Change Loy
+- Model file used when supplied by the user: `ESRGAN_4x.pth`
+- License: Apache-2.0
+- Usage in Umbra Studio:
+  - Optional image upscaling through ComfyUI's model-upscale pipeline
+
+### Real-ESRGAN
+- Project: https://github.com/xinntao/Real-ESRGAN
+- Authors: Xintao Wang, Liangbin Xie, Chao Dong, and Ying Shan
+- Model files used when supplied by the user:
+  - `RealESRGAN_x2.pth`
+  - `RealESRGAN_x4.pth`
+- License: BSD-3-Clause
+- Usage in Umbra Studio:
+  - Optional real-world image restoration and upscaling
+
+### RIFE Frame Interpolation
+- Method project: https://github.com/hzwer/ECCV2022-RIFE
+- ComfyUI implementation reference: https://github.com/Fannovel16/ComfyUI-Frame-Interpolation
+- Authors: Zhewei Huang, Tianyuan Zhang, Wen Heng, Boxin Shi, and Shuchang Zhou
+- ComfyUI implementation maintainer: Fannovel16 and contributors
+- Model file used when supplied by the user: `rife_v4.26.safetensors`
+- Method-project license: MIT
+- Usage in Umbra Studio:
+  - Optional video frame interpolation through ComfyUI's native frame-interpolation loader and Umbra-Nodes wrapper
 
 ## Model Sources
 
@@ -270,90 +379,121 @@ GitHub core packages install the same revisions with checksum verification.
 
 ## Default Installed Custom Nodes
 
-These are the ComfyUI custom-node repositories Umbra Studio installs by default
-through its managed setup flow.
+These are the ComfyUI custom-node repositories available through Umbra's
+managed setup flow. Required nodes are installed for every compatible ComfyUI
+installation. Optional nodes follow the user's node selection, and the NVIDIA
+RTX node is offered only when Umbra detects compatible NVIDIA hardware. These
+projects remain separate upstream works under their own licenses.
 
 ### ComfyUI-Manager
 - Project: https://github.com/ltdrdata/ComfyUI-Manager
 - Creator / maintainer: ltdrdata
+- License: GPL-3.0
 - Original project purpose:
   - Package installation, updates, and environment management for ComfyUI custom nodes
+
+### ComfyUI-GGUF
+- Project: https://github.com/city96/ComfyUI-GGUF
+- Creator / maintainer: city96 and contributors
+- License: Apache-2.0
+- Original project purpose:
+  - GGUF diffusion-model and text-encoder loading for ComfyUI
+- Usage in Umbra Studio:
+  - Required integration for model-family pipelines that use GGUF diffusion models or text encoders
 
 ### comfyui-tooling-nodes
 - Project: https://github.com/Acly/comfyui-tooling-nodes
 - Creator / maintainer: Acly and contributors
+- License: GPL-3.0
 - Original project purpose:
   - Bridge and workflow tooling used by external image editor integrations
 
 ### comfyui-inpaint-nodes
 - Project: https://github.com/Acly/comfyui-inpaint-nodes
 - Creator / maintainer: Acly and contributors
+- License: GPL-3.0
 - Original project purpose:
   - Inpainting, masking, and generative fill workflow nodes
 
 ### comfyui_controlnet_aux
 - Project: https://github.com/Fannovel16/comfyui_controlnet_aux
 - Creator / maintainer: Fannovel16 and contributors
+- License: Apache-2.0
 - Original project purpose:
   - ControlNet preprocessors and supporting image-control nodes
+
+### ComfyUI_IPAdapter_plus
+- Project: https://github.com/cubiq/ComfyUI_IPAdapter_plus
+- Creator / maintainer: cubiq (Matteo) and contributors
+- License: GPL-3.0
+- Original project purpose:
+  - IP-Adapter reference-image conditioning for ComfyUI
+- Usage in Umbra Studio:
+  - Required integration for optional reference-image layers in Umbra UI
 
 ### ComfyUI-Inpaint-CropAndStitch
 - Project: https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch
 - Creator / maintainer: lquesada
+- License: GPL-3.0
 - Original project purpose:
   - Region-focused inpaint crop/stitch workflow support for ComfyUI pipelines
 
-### ComfyUI_JPS-Nodes
-- Project: https://github.com/JPS-GER/ComfyUI_JPS-Nodes
-- Creator / maintainer: JPS-GER
-- Original project purpose:
-  - Image-processing and workflow utility nodes for ComfyUI
-
-### ComfyUI_ComfyRoll_CustomNodes
-- Project: https://github.com/Suzie1/ComfyUI_ComfyRoll_CustomNodes
-- Creator / maintainer: Suzie1
+### ComfyUI_Comfyroll_CustomNodes
+- Project: https://github.com/Suzie1/ComfyUI_Comfyroll_CustomNodes
+- Creators / maintainers: Suzie1, RockOfFire, and contributors
+- License: MIT terms included in the project source headers
 - Original project purpose:
   - Batch, layout, aspect-ratio, and utility workflow nodes for ComfyUI
 
 ### ComfyUI-Inspire-Pack
 - Project: https://github.com/ltdrdata/ComfyUI-Inspire-Pack
 - Creator / maintainer: ltdrdata
+- License: GPL-3.0
 - Original project purpose:
   - Advanced prompt and workflow utility nodes for ComfyUI
 
 ### ComfyUI-Impact-Pack
 - Project: https://github.com/ltdrdata/ComfyUI-Impact-Pack
 - Creator / maintainer: ltdrdata
+- License: GPL-3.0
 - Original project purpose:
   - Detailer, mask, conditioning, and enhancement tooling for ComfyUI
 
 ### ComfyUI-Impact-Subpack
 - Project: https://github.com/ltdrdata/ComfyUI-Impact-Subpack
 - Creator / maintainer: ltdrdata
+- License: AGPL-3.0
 - Original project purpose:
   - Supplemental nodes extending Impact Pack workflows
 
 ### ComfyUI_UltimateSDUpscale
 - Project: https://github.com/ssitu/ComfyUI_UltimateSDUpscale
 - Creator / maintainer: ssitu and contributors
+- License: GPL-3.0
 - Original project purpose:
   - Tiled diffusion upscaling workflows
 
 ### NVIDIA RTX Nodes for ComfyUI
 - Project: https://github.com/Comfy-Org/Nvidia_RTX_Nodes_ComfyUI
 - Creator / maintainer: Comfy Org, NVIDIA, and contributors
+- License: Apache-2.0
+- Runtime dependency: `nvidia-vfx`
 - Original project purpose:
-  - Optional NVIDIA RTX video super-resolution support
+  - Optional NVIDIA RTX image and video super-resolution support
+- Usage in Umbra Studio:
+  - Hardware-gated `RTXVideoSuperResolution` stage in Umbra UI video pipelines
 
 ### was-node-suite-comfyui
 - Project: https://github.com/WASasquatch/was-node-suite-comfyui
 - Creator / maintainer: WASasquatch
+- License: MIT
 - Original project purpose:
   - Broad workflow helper and utility-node suite for ComfyUI
 
 ### ComfyUI-Custom-Scripts
 - Project: https://github.com/pythongosssss/ComfyUI-Custom-Scripts
 - Creator / maintainer: pythongosssss
+- License: MIT
 - Original project purpose:
   - Frontend and workflow UX enhancements for ComfyUI
 
