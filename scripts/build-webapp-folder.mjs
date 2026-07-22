@@ -499,7 +499,7 @@ function writeWindowsLauncher() {
   const script = `@echo off
 setlocal
 cd /d "%~dp0"
-set "BUN_BIN=%~dp0Runtime\\Bun\\win32\\bun.exe"
+set "BUN_BIN=Runtime\\Bun\\win32\\bun.exe"
 if not exist "%BUN_BIN%" (
   echo [ERROR] Bundled Bun runtime missing: %BUN_BIN%
   pause
@@ -509,7 +509,7 @@ set "UMBRA_ROOT=%~dp0"
 set "UMBRA_TERMINAL_MODE=visible"
 set "UMBRA_LAUNCHER_IN_TERMINAL=1"
 set "UMBRA_ALREADY_RUNNING_EXIT_CODE=64"
-"%BUN_BIN%" "%~dp0resources\\app\\launcher\\UmbraWebLauncher.ts" --root "%~dp0" %*
+"%BUN_BIN%" "resources\\app\\launcher\\UmbraWebLauncher.ts" %*
 set "UMBRA_EXIT=%ERRORLEVEL%"
 if "%UMBRA_EXIT%"=="64" exit /b 0
 echo.

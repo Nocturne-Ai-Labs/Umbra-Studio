@@ -234,7 +234,10 @@ function shouldRelaunchInVisibleTerminal(): boolean {
 
 function relaunchInVisibleTerminal() {
   const args = Bun.argv.slice(2);
-  spawn('cmd.exe', ['/c', 'start', 'Umbra Studio Terminal', 'cmd.exe', '/k', process.execPath, ...args], {
+  const executableRoot = dirname(process.execPath);
+  const executableName = process.execPath.slice(executableRoot.length + 1);
+  spawn('cmd.exe', ['/d', '/k', executableName, ...args], {
+    cwd: executableRoot,
     detached: true,
     stdio: 'ignore',
     env: {
