@@ -329,7 +329,7 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
       noiseMaskFeather: 20, tiledEncode: false, tiledDecode: false,
     },
     {
-      id: 'detail-eyes', enabled: true, label: 'Eyes', detectorModel: 'bbox/Eyes.pt',
+      id: 'detail-eyes', enabled: false, label: 'Eyes', detectorModel: 'bbox/Eyes.pt',
       guideSize: 384, guideSizeFor: 'bbox', maxSize: 512, seedOffset: 3, steps: 7, cfg: 4,
       samplerName: 'er_sde', scheduler: 'simple', denoise: 0.16, feather: 4, noiseMask: true,
       forceInpaint: true, bboxThreshold: 0.4, bboxDilation: 5, bboxCropFactor: 2.4, useSam: true,
@@ -353,7 +353,7 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
   ],
   outputUpscale: {
     enabled: false,
-    modelName: '4x-AnimeSharp.pth',
+    modelName: 'RealESRGAN_x4plus.safetensors',
     maxDimension: 3840,
   },
   hiresFix: {

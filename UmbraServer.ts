@@ -15105,7 +15105,7 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
   detailerPipeline: PP_DEFAULT_DETAILER_PIPELINE.map((stage) => ({ ...stage })),
   outputUpscale: {
     enabled: false,
-    modelName: '4x-AnimeSharp.pth',
+    modelName: 'RealESRGAN_x4plus.safetensors',
     maxDimension: 3840,
   },
   hiresFix: {
@@ -16591,7 +16591,7 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
     detailerPipeline: [],
     outputUpscale: {
       enabled: false,
-      modelName: '4x-AnimeSharp.pth',
+      modelName: 'RealESRGAN_x4plus.safetensors',
       maxDimension: 3840,
     },
   };

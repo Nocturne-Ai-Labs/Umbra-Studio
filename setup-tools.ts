@@ -2022,6 +2022,45 @@ function installComfyNodes(comfyDir: string): boolean {
     return true;
 }
 
+function installUmbraUiSupportModels(comfyDir: string): boolean {
+    if (process.env.UMBRA_SKIP_UMBRA_UI_MODELS === '1') {
+        log('->', 'Umbra UI support model installation skipped by environment setting');
+        return true;
+    }
+
+    const scriptPath = join(ROOT_DIR, 'scripts', 'download-umbra-ui-models.mjs');
+    if (!existsSync(scriptPath)) {
+        return failWithVerify(
+            'umbra-ui-model-installer-missing',
+            'Umbra UI support model installer is missing.',
+            [`Expected script: ${scriptPath}`],
+            ['Repair or update Umbra Studio, then retry ComfyUI setup.']
+        );
+    }
+
+    console.log(`\n${c.cyan}--- Installing Umbra UI Core Support Models ---${c.reset}`);
+    const result = spawnSync(process.execPath, [
+        scriptPath,
+        '--profile', 'core',
+        '--comfy-root', comfyDir,
+    ], {
+        cwd: ROOT_DIR,
+        stdio: 'inherit',
+    });
+    if (result.status !== 0) {
+        return failWithVerify(
+            'umbra-ui-model-install-failed',
+            'Umbra UI core support models failed to install or verify.',
+            [`ComfyUI path: ${comfyDir}`, `Manifest: ${join(ROOT_DIR, 'defaults', 'UmbraUI', 'model-manifest.json')}`],
+            [
+                'Check the download error above and retry ComfyUI setup.',
+                'Portable builds can also run Install-Umbra-UI-Models.bat or install-umbra-ui-models.sh.'
+            ]
+        );
+    }
+    return true;
+}
+
 function createRootShortcut(name: string, target: string) {
     const shortcutPath = join(ROOT_DIR, name);
     try {
@@ -2109,6 +2148,7 @@ async function processTool(key: keyof typeof CONFIG, autoInstall = false, nonInt
     if (key === 'comfyui') {
         if (!refreshComfyPinnedPackages(toolDir)) return false;
         if (!installComfyNodes(toolDir)) return false;
+        if (!installUmbraUiSupportModels(toolDir)) return false;
         createRootShortcut('ComfyUI-Models', join(toolDir, 'models'));
         createRootShortcut('ComfyUI-Output', join(toolDir, 'output'));
     } else if (key === 'aitoolkit') {
@@ -2179,6 +2219,9 @@ async function updateTool(key: keyof typeof CONFIG) {
             exitWithExistingVerifyFailure();
         }
         if (!installComfyNodes(toolDir)) {
+            exitWithExistingVerifyFailure();
+        }
+        if (!installUmbraUiSupportModels(toolDir)) {
             exitWithExistingVerifyFailure();
         }
     } else if (key === 'aitoolkit') {
@@ -2400,6 +2443,9 @@ async function setComfyUIVersion(ref: string) {
     }
 
     if (!installComfyNodes(toolDir)) {
+        exitWithExistingVerifyFailure();
+    }
+    if (!installUmbraUiSupportModels(toolDir)) {
         exitWithExistingVerifyFailure();
     }
     createRootShortcut('ComfyUI-Models', join(toolDir, 'models'));
@@ -2738,7 +2784,8 @@ async function main() {
 
     const arg = process.argv[2]?.toLowerCase();
     const pythonNotRequiredActions = new Set([
-        'shortcuts'
+        'shortcuts',
+        'umbra-ui-models'
     ]);
 
     if (!runPlatformPreflight()) {
@@ -2792,6 +2839,22 @@ async function main() {
             );
         }
         if (!installComfyNodes(comfyDir)) {
+            exitWithExistingVerifyFailure();
+        }
+        if (!installUmbraUiSupportModels(comfyDir)) {
+            exitWithExistingVerifyFailure();
+        }
+    } else if (arg === 'umbra-ui-models') {
+        const comfyDir = findToolPath(CONFIG.comfyui.search);
+        if (!comfyDir) {
+            exitWithVerifyFailure(
+                'comfyui-not-found',
+                'ComfyUI must be installed before Umbra UI support models.',
+                [`Expected directory under: ${TOOLS_DIR}`],
+                ['Install ComfyUI first.']
+            );
+        }
+        if (!installUmbraUiSupportModels(comfyDir)) {
             exitWithExistingVerifyFailure();
         }
     } else if (arg === 'update-comfyui') {

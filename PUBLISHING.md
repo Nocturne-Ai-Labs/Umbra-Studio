@@ -62,6 +62,11 @@ generated `Install-Data-Forge-Models.bat` downloader instead. The build verifies
 every bundled model file against the expected size in
 `defaults/DataForge/model-manifest.json`.
 
+Every Windows package also includes `Install-Umbra-UI-Models.bat` and the
+Umbra UI support-model manifest. Managed ComfyUI setup installs the automatic
+`core` profile; the helper remains available for repair and for explicitly
+installing optional profiles.
+
 ## Linux Portable Folder Builds
 
 Run these commands on Linux.
@@ -112,6 +117,9 @@ Linux packages built with `UMBRA_BUNDLE_DATA_FORGE_MODELS=0` include
 `install-data-forge-models.sh`. Local Linux builds bundle the same pinned model
 pack by default and verify it before the publish is accepted.
 
+Every Linux package also includes `install-umbra-ui-models.sh` and the same
+cross-platform support-model manifest used by Windows.
+
 ## Clean Repository Source
 
 The development tree contains personal runtime data and is not itself the
@@ -148,9 +156,14 @@ The GitHub workflow must continue to package:
 - Umbra UI pipeline definitions from `defaults/PowerPrompter/API Workflows/`
 - Power Prompter starter card, CSV sources, and example workflow from `defaults/`
 - Data Forge backend/frontend code and pinned model downloader scripts
+- Umbra UI support-model manifest, downloader, and platform helper scripts
 - AI Toolkit install/update integration, while leaving its checkout in `Tools/`
 - Umbra Nodes installation/integration without committing a user's custom-node folder
 - Bundled Bun runtime, launchers, credits, license, and notices
+
+The workflow publishes both `Data-Forge-Models-v<version>.json` and
+`Umbra-UI-Support-Models-v<version>.json` beside the portable archives so the
+download bill of materials can be inspected without extracting a package.
 
 Portable packages must use the curated `umbraRuntimeDependencies` list from
 `package.json`. `scripts/prepare-runtime-dependencies.mjs` installs those
@@ -167,6 +180,12 @@ AI Toolkit's upstream UI currently requires host Git and Node.js 20 or newer;
 that optional prerequisite must remain visible in release notes until Umbra
 ships a dedicated Node runtime.
 
+ComfyUI custom-node source repositories intentionally follow their latest
+upstream default branches. Do not introduce commit pins for managed custom
+nodes unless the user explicitly changes this release policy. Runtime model
+files are different: automatic model downloads must retain immutable revisions,
+expected byte sizes, and SHA-256 hashes in their manifests.
+
 Linux release notes must also list `python3-dev`, `build-essential`, `libgl1`,
 and `libglib2.0-0` (or the distribution equivalents). Some managed ComfyUI
 custom-node requirements compile Python extensions, and OpenCV-backed nodes
@@ -180,6 +199,8 @@ After publishing:
 - Confirm `http://127.0.0.1:8212/` opens.
 - Confirm Gallery starts.
 - Confirm Umbra UI lists its image/video pipelines and can validate a generation.
+- Run `Install-Umbra-UI-Models.bat --check` or
+  `./install-umbra-ui-models.sh --check` and confirm the core support pack verifies.
 - Confirm Power Prompter loads presets/cards.
 - Confirm Power Prompter and Umbra UI share the packaged pipeline definitions.
 - Confirm Data Forge opens and both model installer scripts resolve their pinned models.

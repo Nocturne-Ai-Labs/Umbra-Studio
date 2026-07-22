@@ -76,7 +76,7 @@ requiring a host Node installation.
 | Feature | Additional requirements |
 | --- | --- |
 | Gallery, Filmstrip, metadata, Local Servers | Core Umbra runtime; FFmpeg recommended for broad video thumbnail support. |
-| Umbra UI | Managed ComfyUI install, compatible generation models, and the required custom nodes installed by Umbra. |
+| Umbra UI | Managed ComfyUI install, the Umbra UI core support-model pack, compatible generation models, and the required custom nodes installed by Umbra. |
 | Power Prompter | Same shared ComfyUI pipeline requirements as Umbra UI; user-created `.ppcards` files and generation models. |
 | Data Forge board search | Internet connection. Danbooru can be used anonymously within its limits; Gelbooru, Rule34, and e621 may require account/API credentials for reliable access. Credentials are stored in the user's runtime config, never in source control. |
 | WD Tagger captions | Pinned Data Forge model pack and Python helper environment. |
@@ -99,6 +99,31 @@ The pinned caption pack is defined in
 The complete pack is more than 6 GB. GitHub core release packages include a
 checksum-verifying downloader instead of embedding the weights in the main
 archive.
+
+## Umbra UI Support Model Pack
+
+The support-model bill of materials is defined in
+`defaults/UmbraUI/model-manifest.json`.
+
+The automatic `core` profile is approximately 566 MB and contains:
+
+- Bingsu face, hand, and person detailer detector/segmentation weights
+- Segment Anything ViT-B for mask refinement
+- Real-ESRGAN x4plus for a permissively licensed general upscale default
+- RIFE 4.26 for optional frame interpolation
+
+Managed ComfyUI setup installs this profile automatically. Portable packages
+also include `Install-Umbra-UI-Models.bat` on Windows and
+`install-umbra-ui-models.sh` on Linux for repair or manual installation.
+
+The optional `reference` profile adds the SDXL IP-Adapter ViT-H model and its
+CLIP Vision encoder. It is kept separate because it is roughly 3 GB. The
+manifest also documents models that must remain manual because their original
+terms are source-specific or non-commercial.
+
+These support files do not include generation checkpoints, LoRAs, VAEs, text
+encoders, ControlNet weights, or video diffusion models. Users choose those
+according to the model families and hardware they intend to run.
 
 ## Source Development
 
@@ -128,7 +153,13 @@ reconfigured.
 - [Tailscale](https://tailscale.com/)
 - [SageAttention](https://github.com/thu-ml/SageAttention)
 - [Data Forge model manifest](defaults/DataForge/model-manifest.json)
+- [Umbra UI support-model manifest](defaults/UmbraUI/model-manifest.json)
 - [Complete third-party credits](Credits.md)
+
+Managed custom nodes follow their latest upstream default branches when Umbra
+installs or updates them. Model artifacts in the two manifests above use fixed
+revisions and checksums because those are distributable runtime inputs, not
+source repositories.
 
 Models and upstream tools retain their own licenses and hardware requirements.
 Review those projects before redistribution or commercial deployment.

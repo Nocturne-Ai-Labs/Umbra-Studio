@@ -10,6 +10,20 @@ Umbra Studio is a desktop-first AI art and workflow application built to unify
 generation backends, prompt tooling, media browsing, metadata handling, model
 management, and portable tool orchestration inside one app-managed environment.
 
+## Built With
+
+- [Bun](https://bun.sh/) powers Umbra's TypeScript backend, local HTTP and
+  WebSocket services, portable runtime, and build tooling.
+- [React](https://react.dev/) and [TypeScript](https://www.typescriptlang.org/)
+  power the frontend workspaces and shared component system.
+- [Python](https://www.python.org/) powers managed AI runtimes and helper
+  environments used by ComfyUI, AI Toolkit, dataset tagging, and captioning.
+- [Tailwind CSS](https://tailwindcss.com/) supports the frontend styling system.
+
+Portable releases bundle Umbra's Bun runtime and can bootstrap isolated Python
+environments for managed tools, so normal users do not need global Bun or
+Python installations just to launch the app.
+
 ## Before You Install
 
 For most users, the recommended path is a portable release package. Extract it,
@@ -135,6 +149,52 @@ caption models are not currently auto-discovered; manually supplied files must
 match one of the supported model folders and file layouts in
 `defaults/DataForge/model-manifest.json`.
 
+### First Run: Umbra UI Support Models
+
+Umbra installs the permissively licensed Umbra UI core support pack when it
+sets up managed ComfyUI. The approximately 566 MB pack contains the default
+face, hand, and person detailer detectors, SAM ViT-B mask refinement,
+Real-ESRGAN x4plus upscaling, and RIFE 4.26 frame interpolation. Generation
+checkpoints, LoRAs, VAEs, text encoders, ControlNet weights, and video models
+remain user-selected downloads.
+
+The same installer can be run or repaired manually from a portable package:
+
+Windows:
+
+```bat
+Install-Umbra-UI-Models.bat
+```
+
+Linux:
+
+```bash
+chmod +x install-umbra-ui-models.sh
+./install-umbra-ui-models.sh
+```
+
+Source checkouts can use:
+
+```bash
+bun run models:umbra-ui:download
+```
+
+Reference-image conditioning is a separate, opt-in download because its SDXL
+IP-Adapter and CLIP Vision weights add roughly 3 GB:
+
+```bat
+Install-Umbra-UI-Models.bat --profile reference
+```
+
+```bash
+./install-umbra-ui-models.sh --profile reference
+```
+
+Every automatic file is fetched from an immutable model revision and checked
+by size and SHA-256 using `defaults/UmbraUI/model-manifest.json`. Models with
+source-specific or non-commercial redistribution terms, including `Eyes.pt`
+and the listed anime upscalers, stay optional and user-installed.
+
 AI Toolkit is optional and currently requires Git plus Node.js 20 or newer for
 its upstream web UI build. Umbra manages its checkout and Python virtual
 environment after those host prerequisites are available.
@@ -231,6 +291,11 @@ scripts. GitHub portable packages include `Install-Data-Forge-Models.bat` or
 `install-data-forge-models.sh` so users can install those weights after
 extracting the core package. Downloads are checked against the byte sizes and
 SHA-256 values in the bundled manifest before installation completes.
+
+Managed ComfyUI custom nodes intentionally track each project's latest
+upstream default branch. Umbra does not pin custom-node commits; setup and
+update actions pull current upstream changes. Downloadable support-model files
+are pinned separately so their integrity and destination remain deterministic.
 
 ## Publish Portable Build
 

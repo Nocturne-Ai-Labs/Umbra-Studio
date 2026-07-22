@@ -42,8 +42,11 @@ jobs:
           $packageRoot = "release/windows/v$version"
           if (!(Test-Path "$packageRoot/Install-Data-Forge-Models.bat")) { throw 'Data Forge model installer is missing' }
           if (!(Test-Path "$packageRoot/resources/app/defaults/DataForge/model-manifest.json")) { throw 'Data Forge model manifest is missing' }
+          if (!(Test-Path "$packageRoot/Install-Umbra-UI-Models.bat")) { throw 'Umbra UI model installer is missing' }
+          if (!(Test-Path "$packageRoot/resources/app/defaults/UmbraUI/model-manifest.json")) { throw 'Umbra UI model manifest is missing' }
           New-Item -ItemType Directory -Force artifacts | Out-Null
           Copy-Item "$packageRoot/resources/app/defaults/DataForge/model-manifest.json" "artifacts/Data-Forge-Models-v$version.json"
+          Copy-Item "$packageRoot/resources/app/defaults/UmbraUI/model-manifest.json" "artifacts/Umbra-UI-Support-Models-v$version.json"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $sourcePath = (Resolve-Path $packageRoot).Path
           $archivePath = Join-Path (Resolve-Path artifacts).Path "Umbra-Studio-v$version-Windows-x64.zip"
@@ -78,6 +81,8 @@ jobs:
           package_root="release/linux/v${version}"
           test -f "${package_root}/install-data-forge-models.sh"
           test -f "${package_root}/resources/app/defaults/DataForge/model-manifest.json"
+          test -f "${package_root}/install-umbra-ui-models.sh"
+          test -f "${package_root}/resources/app/defaults/UmbraUI/model-manifest.json"
           mkdir -p artifacts
           (cd "${package_root}" && zip -r -9 "${GITHUB_WORKSPACE}/artifacts/Umbra-Studio-v${version}-Linux-x64.zip" .)
       - uses: actions/upload-artifact@v4

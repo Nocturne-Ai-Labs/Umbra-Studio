@@ -54,7 +54,11 @@
     "linux:publish": "bun run audit:umbra-ui-pipelines && node scripts/build-linux-version-bump.mjs",
     "repository:build": "node scripts/build-repository-source.mjs",
     "models:waifu:download": "node scripts/download-waifu-models.mjs",
-    "models:caption:download": "node scripts/download-caption-models.mjs"
+    "models:caption:download": "node scripts/download-caption-models.mjs",
+    "models:umbra-ui:download": "bun scripts/download-umbra-ui-models.mjs --profile core",
+    "models:umbra-ui:reference": "bun scripts/download-umbra-ui-models.mjs --profile reference",
+    "models:umbra-ui:check": "bun scripts/download-umbra-ui-models.mjs --profile core --check",
+    "models:umbra-ui:manifest": "bun scripts/download-umbra-ui-models.mjs --manifest-only"
   },
   "workspaces": [
     "frontend"

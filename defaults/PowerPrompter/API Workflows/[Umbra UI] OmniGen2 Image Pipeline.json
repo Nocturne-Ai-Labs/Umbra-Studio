@@ -321,7 +321,7 @@
         "14",
         0
       ],
-      "upscale_model": "4x-AnimeSharp.pth",
+      "upscale_model": "RealESRGAN_x4plus.safetensors",
       "max_dimension": 3840,
       "enabled": false
     },

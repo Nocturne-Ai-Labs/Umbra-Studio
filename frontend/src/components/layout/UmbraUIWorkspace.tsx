@@ -388,7 +388,7 @@ export function UmbraUIWorkspace() {
   );
   const [outputUpscale, setOutputUpscale] = React.useState<PowerPrompterOutputUpscaleControls>({
     enabled: false,
-    modelName: '4x-AnimeSharp.pth',
+    modelName: 'RealESRGAN_x4plus.safetensors',
     maxDimension: 3840,
   });
   const [isQueueing, setIsQueueing] = React.useState(false);
@@ -870,7 +870,7 @@ export function UmbraUIWorkspace() {
       const upscale = inheritedOutputUpscale as Record<string, unknown>;
       setOutputUpscale({
         enabled: upscale.enabled === true,
-        modelName: String(upscale.modelName || '4x-AnimeSharp.pth'),
+        modelName: String(upscale.modelName || 'RealESRGAN_x4plus.safetensors'),
         maxDimension: Math.max(512, Math.min(16384, Number(upscale.maxDimension) || 3840)),
       });
     }

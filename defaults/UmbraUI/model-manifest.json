@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Checksum-pinned support models used by Umbra UI and Power Prompter pipelines",
+  "profiles": {
+    "core": {
+      "label": "Core pipeline support",
+      "description": "Detailer detectors, segmentation, general upscaling, and frame interpolation. Installed with managed ComfyUI setup."
+    },
+    "reference": {
+      "label": "SDXL reference conditioning",
+      "description": "Optional large IP-Adapter and CLIP Vision weights for SDXL reference-image layers."
+    }
+  },
+  "models": [
+    {
+      "id": "detailer-detectors-bingsu",
+      "family": "Detailer",
+      "creator": "Bingsu",
+      "repository": "Bingsu/adetailer",
+      "revision": "53cc19de382014514d9d4038601d261a7faa9b7b",
+      "license": "Apache-2.0",
+      "installPolicy": "automatic",
+      "profiles": ["core"],
+      "purpose": "Default face, hand, and person segmentation stages",
+      "files": [
+        {
+          "sourcePath": "face_yolov8m.pt",
+          "destination": "ultralytics/bbox/face_yolov8m.pt",
+          "bytes": 52026019,
+          "sha256": "717923c19b3f4bbf5250b728f1fa6b2cb72a33aed1d236ea9caf0e21ad943e5f"
+        },
+        {
+          "sourcePath": "hand_yolov8s.pt",
+          "destination": "ultralytics/bbox/hand_yolov8s.pt",
+          "bytes": 22507643,
+          "sha256": "70b540063fbc385736d8258970744a4afbc4cbf7932134bae3b24cdadeadec06"
+        },
+        {
+          "sourcePath": "person_yolov8m-seg.pt",
+          "destination": "ultralytics/segm/person_yolov8m-seg.pt",
+          "bytes": 54827683,
+          "sha256": "c8ab26f517173b1fe8342d336a09f443eb61cb08dcbfc78d53fff4c2547ae81e"
+        }
+      ]
+    },
+    {
+      "id": "segment-anything-vit-b",
+      "family": "Segmentation",
+      "creator": "Meta AI Research / FAIR",
+      "project": "https://github.com/facebookresearch/segment-anything",
+      "license": "Apache-2.0",
+      "installPolicy": "automatic",
+      "profiles": ["core"],
+      "purpose": "SAM mask refinement for detailer stages",
+      "files": [
+        {
+          "url": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth",
+          "destination": "sams/sam_vit_b_01ec64.pth",
+          "bytes": 375042383,
+          "sha256": "ec2df62732614e57411cdcf32a23ffdf28910380d03139ee0f4fcbe91eb8c912"
+        }
+      ]
+    },
+    {
+      "id": "real-esrgan-x4plus",
+      "family": "Upscale",
+      "creator": "Xintao Wang, Liangbin Xie, Chao Dong, Ying Shan, and contributors",
+      "repository": "Comfy-Org/Real-ESRGAN_repackaged",
+      "revision": "612512cf5dfee6e3fda729e422318ebb373e04a1",
+      "license": "BSD-3-Clause",
+      "installPolicy": "automatic",
+      "profiles": ["core"],
+      "purpose": "Permissively licensed general image and video upscaling default",
+      "files": [
+        {
+          "sourcePath": "RealESRGAN_x4plus.safetensors",
+          "destination": "upscale_models/RealESRGAN_x4plus.safetensors",
+          "bytes": 66857836,
+          "sha256": "37f9a931c215f040aa6d50f711f2cb115f713c46df1d0d6469a8bd7bfe9a60bb"
+        }
+      ]
+    },
+    {
+      "id": "rife-v4-26",
+      "family": "FrameInterpolation",
+      "creator": "Zhewei Huang, Tianyuan Zhang, Wen Heng, Boxin Shi, Shuchang Zhou, Kijai, and Comfy Org contributors",
+      "repository": "Comfy-Org/frame_interpolation",
+      "revision": "6475b9bb5a8a9a8bd4c471d6adea35ebe594e9dd",
+      "license": "MIT AND Apache-2.0",
+      "installPolicy": "automatic",
+      "profiles": ["core"],
+      "purpose": "Optional RIFE frame interpolation in video pipelines",
+      "files": [
+        {
+          "sourcePath": "frame_interpolation/rife_v4.26.safetensors",
+          "destination": "frame_interpolation/rife_v4.26.safetensors",
+          "bytes": 22674688,
+          "sha256": "151874592c877740e5db11522f4514df569eeafb0a0fcb2696f16e9e8d317c94"
+        }
+      ]
+    },
+    {
+      "id": "sdxl-ip-adapter-vit-h",
+      "family": "ReferenceConditioning",
+      "creator": "Tencent AI Lab and h94",
+      "repository": "h94/IP-Adapter",
+      "revision": "018e402774aeeddd60609b4ecdb7e298259dc729",
+      "license": "Apache-2.0",
+      "installPolicy": "automatic",
+      "profiles": ["reference"],
+      "purpose": "Optional SDXL IP-Adapter reference-image conditioning",
+      "files": [
+        {
+          "sourcePath": "sdxl_models/ip-adapter_sdxl_vit-h.safetensors",
+          "destination": "ipadapter/ip-adapter_sdxl_vit-h.safetensors",
+          "bytes": 698391064,
+          "sha256": "ebf05d918348aec7abb02a5e9ecef77e0aaea6914a5c4ea13f50d45eb1681831"
+        },
+        {
+          "sourcePath": "models/image_encoder/model.safetensors",
+          "destination": "clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+          "bytes": 2528373448,
+          "sha256": "6ca9667da1ca9e0b0f75e46bb030f7e011f44f86cbfb8d5a36590fcd7507b030"
+        }
+      ]
+    },
+    {
+      "id": "eyes-adetailer",
+      "family": "Detailer",
+      "creator": "SnowyYukino",
+      "reference": "https://civitai.com/models/150925/eyes-detection-adetailer",
+      "license": "Source-specific CivitAI permissions",
+      "installPolicy": "manual",
+      "profiles": [],
+      "purpose": "Optional eye-detailer detector",
+      "files": [
+        {
+          "destination": "ultralytics/bbox/Eyes.pt",
+          "bytes": 22528604,
+          "sha256": "c59bb696818ad5dfe58c54a881ffb6895c260bd42b4c34dfc97dff2203f45621"
+        }
+      ]
+    },
+    {
+      "id": "anime-upscalers",
+      "family": "Upscale",
+      "creator": "Kim2091 and FoolhardyVEVO",
+      "reference": "https://openmodeldb.info/",
+      "license": "CC-BY-NC-SA-4.0",
+      "installPolicy": "manual",
+      "profiles": [],
+      "purpose": "Optional non-commercial anime and restoration upscalers",
+      "files": [
+        { "destination": "upscale_models/4x-AnimeSharp.pth" },
+        { "destination": "upscale_models/4x-UltraSharp.pth" },
+        { "destination": "upscale_models/4x_foolhardy_Remacri.pth" }
+      ]
+    }
+  ]
+}

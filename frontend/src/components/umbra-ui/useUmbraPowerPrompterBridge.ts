@@ -1437,7 +1437,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       detailerPipeline: detailerPipeline.map((stage) => ({ ...stage })),
       outputUpscale: {
         enabled: capabilities.finalModelUpscale.support === 'adjustable' && options.outputUpscale.enabled === true,
-        modelName: outputUpscaleModel || '4x-AnimeSharp.pth',
+        modelName: outputUpscaleModel || 'RealESRGAN_x4plus.safetensors',
         maxDimension: capabilities.finalModelUpscale.maxDimension
           ? toFiniteInteger(options.outputUpscale.maxDimension, 3840, 512, 16384)
           : 3840,

@@ -361,6 +361,22 @@ echo Data Forge models are ready.
   fs.writeFileSync(installerPath, script, 'utf-8');
 }
 
+function writeUmbraUiModelInstaller() {
+  const installerPath = path.join(publishRoot, 'Install-Umbra-UI-Models.bat');
+  const script = `@echo off
+setlocal
+cd /d "%~dp0"
+set "BUN_BIN=%CD%\\Runtime\\Bun\\win32\\bun.exe"
+if not exist "%BUN_BIN%" (
+  echo [ERROR] Bundled Bun runtime is missing: %BUN_BIN%
+  exit /b 1
+)
+"%BUN_BIN%" "%CD%\\resources\\app\\scripts\\download-umbra-ui-models.mjs" %* || exit /b 1
+echo Umbra UI support models are ready.
+`;
+  fs.writeFileSync(installerPath, script, 'utf-8');
+}
+
 function verifyCleanPublishedUser() {
   const userPath = path.join(publishRoot, 'User');
   const dirtyPaths = [
@@ -577,6 +593,7 @@ function verifyPublish() {
     'resources/app/UmbraServer.ts',
     'resources/app/backend',
     'resources/app/defaults/DataForge/model-manifest.json',
+    'resources/app/defaults/UmbraUI/model-manifest.json',
     'resources/app/defaults/PowerPrompter/API Workflows/[Umbra UI] Stable Diffusion Image Pipeline.json',
     'resources/app/defaults/PowerPrompter/Prompts/Anime Girls Starter.ppcards.json',
     'resources/app/defaults/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
@@ -589,6 +606,7 @@ function verifyPublish() {
     'User/PowerPrompter/Prompts/Intro to Powerprompter.ppcards.json',
     'User/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
     'Install-Data-Forge-Models.bat',
+    'Install-Umbra-UI-Models.bat',
     'Start-Umbra.bat',
     'UmbraStudio.bat',
   ];
@@ -716,6 +734,7 @@ function publish() {
   writeWindowsLauncher();
   writeLinuxLauncher();
   writeDataForgeModelInstaller();
+  writeUmbraUiModelInstaller();
   writePortableMarker();
   updateLatestLink();
   verifyPublish();

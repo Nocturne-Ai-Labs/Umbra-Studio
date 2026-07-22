@@ -94,5 +94,6 @@ describe('Power Prompter generation pipeline controls', () => {
       'Hands',
     ]);
     expect(generation.outputUpscale?.enabled).toBe(false);
+    expect(generation.outputUpscale?.modelName).toBe('RealESRGAN_x4plus.safetensors');
   });
 });

@@ -274,6 +274,12 @@ and model installer determine what a particular package includes. Assets with
 non-commercial or source-specific terms are not eligible for automatic core
 redistribution unless a release explicitly documents that decision.
 
+Automatic Umbra UI support-model provisioning is defined in
+`defaults/UmbraUI/model-manifest.json`. Model files use immutable source
+revisions, expected byte sizes, and SHA-256 verification. This pinning applies
+to model artifacts only; managed ComfyUI custom-node repositories intentionally
+follow their latest upstream default branches.
+
 ### Detailer Detectors by Bingsu
 - Model collection: https://huggingface.co/Bingsu/adetailer
 - Creator / publisher: Bingsu
@@ -284,6 +290,7 @@ redistribution unless a release explicitly documents that decision.
   - `person_yolov8m-seg.pt`
 - Usage in Umbra Studio:
   - Face, hand, and person detection or segmentation for optional detailer stages
+  - Automatically installed by the Umbra UI `core` support profile
 
 ### Eyes Detection (ADetailer)
 - Best-known original listing: https://civitai.com/models/150925/eyes-detection-adetailer
@@ -306,6 +313,7 @@ redistribution unless a release explicitly documents that decision.
 - License: Apache-2.0
 - Usage in Umbra Studio:
   - Mask refinement for optional detailer and segmentation stages
+  - Automatically installed by the Umbra UI `core` support profile
 
 ### AnimeSharp
 - Model reference: https://openmodeldb.info/models/4x-AnimeSharp
@@ -342,23 +350,41 @@ redistribution unless a release explicitly documents that decision.
 
 ### Real-ESRGAN
 - Project: https://github.com/xinntao/Real-ESRGAN
+- Packaged model source: https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged
 - Authors: Xintao Wang, Liangbin Xie, Chao Dong, and Ying Shan
-- Model files used when supplied by the user:
+- Automatically installed model file:
+  - `RealESRGAN_x4plus.safetensors`
+- Additional model files supported when supplied by the user:
   - `RealESRGAN_x2.pth`
   - `RealESRGAN_x4.pth`
 - License: BSD-3-Clause
 - Usage in Umbra Studio:
-  - Optional real-world image restoration and upscaling
+  - General image and video upscaling
+  - The x4plus model is installed by the Umbra UI `core` support profile
 
 ### RIFE Frame Interpolation
 - Method project: https://github.com/hzwer/ECCV2022-RIFE
 - ComfyUI implementation reference: https://github.com/Fannovel16/ComfyUI-Frame-Interpolation
 - Authors: Zhewei Huang, Tianyuan Zhang, Wen Heng, Boxin Shi, and Shuchang Zhou
 - ComfyUI implementation maintainer: Fannovel16 and contributors
-- Model file used when supplied by the user: `rife_v4.26.safetensors`
+- Packaged model source: https://huggingface.co/Comfy-Org/frame_interpolation
+- Automatically installed model file: `rife_v4.26.safetensors`
 - Method-project license: MIT
 - Usage in Umbra Studio:
   - Optional video frame interpolation through ComfyUI's native frame-interpolation loader and Umbra-Nodes wrapper
+  - Installed by the Umbra UI `core` support profile
+
+### IP-Adapter SDXL ViT-H and CLIP Vision
+- IP-Adapter project: https://github.com/tencent-ailab/IP-Adapter
+- Packaged model source: https://huggingface.co/h94/IP-Adapter
+- Creators / publishers: Tencent AI Lab and h94
+- Model files:
+  - `ip-adapter_sdxl_vit-h.safetensors`
+  - `CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors`
+- License: Apache-2.0
+- Usage in Umbra Studio:
+  - Optional SDXL reference-image conditioning through ComfyUI_IPAdapter_plus
+  - Installed only when the separate Umbra UI `reference` profile is requested
 
 ## Model Sources
 
@@ -384,6 +410,9 @@ managed setup flow. Required nodes are installed for every compatible ComfyUI
 installation. Optional nodes follow the user's node selection, and the NVIDIA
 RTX node is offered only when Umbra detects compatible NVIDIA hardware. These
 projects remain separate upstream works under their own licenses.
+
+Umbra intentionally installs and updates these repositories from their latest
+upstream default branches. They are not frozen to Umbra-selected commit hashes.
 
 ### ComfyUI-Manager
 - Project: https://github.com/ltdrdata/ComfyUI-Manager
@@ -541,8 +570,9 @@ projects remain separate upstream works under their own licenses.
 Some Umbra Studio features also interoperate with optional third-party ComfyUI
 custom-node repositories and other upstream tools installed by the user.
 
-The managed-tool and model links above mirror the public setup scripts and the
-pinned Data Forge model manifest included in this repository.
+The managed-tool and model links above mirror the public setup scripts, the
+pinned Data Forge model manifest, and the Umbra UI support-model manifest
+included in this repository.
 
 ## Repository Demonstration Media
 
