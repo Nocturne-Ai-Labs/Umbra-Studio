@@ -412,7 +412,7 @@ async function handleBooruImageProxy(req: Request, url: URL): Promise<Response> 
   if (!targetUrl) return json({ error: 'Only configured Data Forge source media can be proxied.' }, 400);
 
   const requestHeaders: Record<string, string> = {
-    'User-Agent': 'UmbraStudio/0.10.4 (Data Forge; local application)',
+    'User-Agent': 'UmbraStudio (Data Forge; local application)',
     'Accept': req.headers.get('accept') || 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
   };
   const range = String(req.headers.get('range') || '').trim();
@@ -28127,7 +28127,7 @@ const server = Bun.serve<any>({
 
           const res = await fetch(autocompleteUrl, {
             headers: {
-              'User-Agent': 'UmbraStudio/0.10.4 (Data Forge; local application)',
+              'User-Agent': 'UmbraStudio (Data Forge; local application)',
               Accept: 'application/json',
             },
             signal: AbortSignal.timeout(10000),
@@ -28201,7 +28201,7 @@ const server = Bun.serve<any>({
             return json({ error: 'The image URL is not from a configured Data Forge source.' }, 400);
           }
           const imgRes = await fetch(sourceUrl, {
-            headers: { 'User-Agent': 'UmbraStudio/0.10.4 (Data Forge; local application)' },
+            headers: { 'User-Agent': 'UmbraStudio (Data Forge; local application)' },
             signal: AbortSignal.timeout(30000),
           });
 

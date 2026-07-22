@@ -41,3 +41,8 @@
 - Keep commits focused and reviewable; avoid mixing refactors with behavior changes.
 - PRs should include: summary, affected areas, validation steps, and screenshots/GIFs for UI changes.
 - Do not commit local runtime/state artifacts from `User/`, model binaries from `User/Models` or `Tools/ComfyUI/models`, or generated build output unless explicitly required.
+
+## Publishing Policy
+- Treat published updates as patch version bumps unless the user explicitly requests a local no-bump build.
+- Bump the version exactly once before building Windows and Linux packages; tagged CI uses the no-bump packagers because source is already versioned.
+- Update `CHANGELOG.md`, validate both archives, then use the same version for the commit, tag, and GitHub release.

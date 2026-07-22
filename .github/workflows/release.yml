@@ -9,7 +9,7 @@ on:
         type: boolean
         default: false
       release_tag:
-        description: Release tag when publishing, for example v0.10.4
+        description: Release tag when publishing, for example v0.10.5
         required: false
         type: string
   push:
@@ -95,6 +95,7 @@ jobs:
     needs: [windows, linux]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: umbra-studio-*
@@ -108,4 +109,14 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           if [ "${GITHUB_REF_TYPE}" != "tag" ]; then tag="${REQUESTED_TAG}"; fi
           if [ -z "${tag}" ]; then echo "release_tag is required" >&2; exit 1; fi
-          gh release create "${tag}" artifacts/* --repo "${GITHUB_REPOSITORY}" --generate-notes --title "Umbra Studio ${tag}"
+          version="${tag#v}"
+          awk -v heading="## v${version}" '
+            $0 == heading { capture=1; next }
+            capture && /^## v/ { exit }
+            capture { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "Release notes for ${tag} were not found in CHANGELOG.md" >&2
+            exit 1
+          fi
+          gh release create "${tag}" artifacts/* --repo "${GITHUB_REPOSITORY}" --notes-file release-notes.md --title "Umbra Studio ${tag}"

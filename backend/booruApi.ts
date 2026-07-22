@@ -23,7 +23,7 @@ export interface BooruImageResult {
   fileExt?: string;
 }
 
-const BOORU_USER_AGENT = 'UmbraStudio/0.10.4 (Data Forge; local application)';
+const BOORU_USER_AGENT = 'UmbraStudio (Data Forge; local application)';
 
 function normalizeRemoteUrl(value: unknown): string {
   const raw = String(value || '').trim();
@@ -214,7 +214,7 @@ export async function fetchE621Posts(tags: string, limit: number, page = 1, apiC
 
   const identity = String(apiConfig?.username || 'local-user').replace(/[^a-zA-Z0-9_.-]/g, '') || 'local-user';
   const headers: Record<string, string> = {
-    'User-Agent': `UmbraStudio/0.10.4 (Data Forge; by ${identity})`,
+    'User-Agent': `UmbraStudio (Data Forge; by ${identity})`,
     Accept: 'application/json',
   };
   if (apiConfig?.username && apiConfig?.apiKey) {

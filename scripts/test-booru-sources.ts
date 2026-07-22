@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   fetchDanbooruPosts,
@@ -8,6 +9,7 @@ import {
 } from '../backend/booruApi';
 
 const root = process.cwd();
+const packageVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
 const config = await loadApiKeys(join(root, 'User', 'Config', 'api-keys.json'));
 const sources = [
   { id: 'danbooru', run: () => fetchDanbooruPosts('1girl', 3, 1, config.danbooru) },
@@ -24,7 +26,7 @@ for (const source of sources) {
     const mediaUrl = posts[0].url || posts[0].fullUrl || '';
     const media = await fetch(mediaUrl, {
       headers: {
-        'User-Agent': 'UmbraStudio/0.10.4 (Data Forge source test)',
+        'User-Agent': `UmbraStudio/${packageVersion} (Data Forge source test)`,
         Range: 'bytes=0-2047',
       },
       signal: AbortSignal.timeout(20000),

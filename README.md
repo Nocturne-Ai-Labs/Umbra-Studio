@@ -299,15 +299,18 @@ are pinned separately so their integrity and destination remain deterministic.
 
 ## Publish Portable Build
 
-Before publishing, confirm the target publish folder and whether the build is a
-no-bump update or a version-bump release. See `PUBLISHING.md` for the full
-agent/developer publishing flow.
+Published updates default to a patch version bump. A no-bump build is reserved
+for local testing or an in-place local update when the user explicitly requests
+it. See `PUBLISHING.md` for the full agent/developer publishing flow.
 
-Future agents should not publish until the user confirms:
+Future agents should confirm any details not already supplied:
 
 - target platform
-- target publish folder
-- no-bump update or version-bump release
+- target publish folder for local builds
+
+The version is bumped once before multi-platform packaging. Tagged GitHub
+Actions builds use the no-bump packaging commands because the source version is
+already final.
 
 GitHub releases are built by `.github/workflows/release.yml`. See
 `PUBLISHING.md` for the clean-source command, model packaging policy, and the

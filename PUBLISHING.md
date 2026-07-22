@@ -8,13 +8,22 @@ Canonical repository: `https://github.com/Nocturne-Ai-Labs/Umbra-Studio`
 Umbra Studio is owned and published by Nocturne AI Labs and developed by
 Minokai.
 
-## Always Ask First
+## Default Release Policy
 
-Before publishing, ask the user:
+Published updates are versioned releases by default. Increment the patch
+version once before building any platform packages, update `CHANGELOG.md`, and
+use that same version for Windows, Linux, the Git tag, and GitHub release.
+
+Use a no-bump build only when the user explicitly asks for a local no-bump
+build or an in-place update of an existing local version folder. GitHub Actions
+uses the no-bump packaging commands intentionally because tagged source has
+already been versioned; it must never bump once per platform.
+
+Before publishing, confirm with the user only when the request does not already
+specify:
 
 1. Which platform are we publishing for: Windows, Linux, or both?
-2. Is this a no-bump update or a version-bump release?
-3. What target publish folder should be used?
+2. What target publish folder should be used for a local build?
 
 Do not guess the target folder. Runtime folders can contain user data, tools,
 models, generated outputs, and local app state.
