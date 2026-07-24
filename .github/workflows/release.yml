@@ -111,7 +111,7 @@ jobs:
           if [ -z "${tag}" ]; then echo "release_tag is required" >&2; exit 1; fi
           version="${tag#v}"
           awk -v heading="## v${version}" '
-            $0 == heading { capture=1; next }
+            $0 == heading || index($0, heading " - ") == 1 { capture=1; next }
             capture && /^## v/ { exit }
             capture { print }
           ' CHANGELOG.md > release-notes.md

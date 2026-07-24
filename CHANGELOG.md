@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.11.0 - Remote, Recovery, And Mobile Milestone
+## v0.11.0
 
 ### Release Theme
 
