@@ -3,11 +3,19 @@ import {
   extractPrompts,
   type ImageMetadata,
 } from '@/utils/metadata';
+import { normalizePowerPrompterGenerationControls } from '@/lib/powerPrompter';
+import type {
+  PowerPrompterDetailerStage,
+  PowerPrompterHiresFixControls,
+  PowerPrompterOutputUpscaleControls,
+  PowerPrompterSeedControlMode,
+  PowerPrompterSeedIncrement,
+} from '@/types/powerPrompter';
 
 export const UMBRA_UI_MEDIA_HANDOFF_KEY = 'umbra-ui:pending-media-handoff';
 export const UMBRA_UI_MEDIA_HANDOFF_EVENT = 'umbra:umbra-ui-media-handoff';
 
-export type UmbraUiMediaHandoffMode = 'img2img' | 'inpaint' | 'video';
+export type UmbraUiMediaHandoffMode = 'txt2img' | 'img2img' | 'inpaint' | 'video';
 export type UmbraUiVideoFrameRole = 'first' | 'middle' | 'last' | 'source_video';
 export type UmbraUiStudioDestinationMode = 'new_artboard' | 'layer_on_artboard' | 'reference' | 'replace_source';
 
@@ -17,6 +25,14 @@ export interface UmbraUiMediaHandoffLora {
   enabled: boolean;
   strengthModel: number;
   strengthClip: number;
+}
+
+export interface UmbraUiMediaPromptSegment {
+  text: string;
+  label?: string;
+  slotType?: string;
+  variantId?: string;
+  variantName?: string;
 }
 
 export interface UmbraUiMediaInpaintSnapshot {
@@ -57,6 +73,7 @@ export interface UmbraUiMediaInpaintSnapshot {
 
 export interface UmbraUiMediaGenerationSnapshot {
   positivePrompt: string;
+  positivePromptSegments?: UmbraUiMediaPromptSegment[];
   negativePrompt: string;
   modelFamily: string;
   modelType: string;
@@ -71,6 +88,11 @@ export interface UmbraUiMediaGenerationSnapshot {
   width?: number;
   height?: number;
   denoise?: number;
+  controlAfterGenerate?: PowerPrompterSeedControlMode;
+  seedIncrement?: PowerPrompterSeedIncrement;
+  hiresFix?: PowerPrompterHiresFixControls;
+  detailerPipeline?: PowerPrompterDetailerStage[];
+  outputUpscale?: PowerPrompterOutputUpscaleControls;
   workflowResources?: Record<string, string>;
   loras: UmbraUiMediaHandoffLora[];
   inpaint?: UmbraUiMediaInpaintSnapshot;
@@ -307,13 +329,39 @@ export function normalizeUmbraUiMediaInpaintSnapshot(value: unknown): UmbraUiMed
 
 export function normalizeUmbraUiMediaGenerationSnapshot(value: unknown): UmbraUiMediaGenerationSnapshot | undefined {
   if (!isRecord(value)) return undefined;
+  const seedControl = value.controlAfterGenerate ?? value.seedMode;
+  const normalizedPipelineControls = normalizePowerPrompterGenerationControls({
+    controlAfterGenerate: seedControl,
+    seedIncrement: value.seedIncrement,
+    hiresFix: value.hiresFix,
+    detailerPipeline: value.detailerPipeline,
+    outputUpscale: value.outputUpscale,
+  });
   const resources = isRecord(value.workflowResources)
     ? Object.fromEntries(Object.entries(value.workflowResources)
       .map(([key, resource]) => [String(key || '').trim(), normalizePath(resource)])
       .filter(([key, resource]) => !!key && !!resource))
     : undefined;
+  const positivePromptSegments = Array.isArray(value.positivePromptSegments)
+    ? value.positivePromptSegments
+      .map((candidate): UmbraUiMediaPromptSegment | null => {
+        const segment = isRecord(candidate) ? candidate : {};
+        const text = cleanPromptText(String(segment.text || '').trim());
+        if (!text) return null;
+        return {
+          text,
+          ...(String(segment.label || '').trim() ? { label: String(segment.label).trim().slice(0, 160) } : {}),
+          ...(String(segment.slotType || '').trim() ? { slotType: String(segment.slotType).trim().slice(0, 80) } : {}),
+          ...(String(segment.variantId || '').trim() ? { variantId: String(segment.variantId).trim().slice(0, 240) } : {}),
+          ...(String(segment.variantName || '').trim() ? { variantName: String(segment.variantName).trim().slice(0, 240) } : {}),
+        };
+      })
+      .filter((segment): segment is UmbraUiMediaPromptSegment => !!segment)
+      .slice(0, 64)
+    : [];
   return {
     positivePrompt: String(value.positivePrompt || '').trim(),
+    ...(positivePromptSegments.length > 0 ? { positivePromptSegments } : {}),
     negativePrompt: String(value.negativePrompt || '').trim(),
     modelFamily: String(value.modelFamily || '').trim().slice(0, 160),
     modelType: String(value.modelType || '').trim().slice(0, 80),
@@ -328,6 +376,11 @@ export function normalizeUmbraUiMediaGenerationSnapshot(value: unknown): UmbraUi
     width: boundedNumber(value.width, 1, 16384, true),
     height: boundedNumber(value.height, 1, 16384, true),
     denoise: boundedNumber(value.denoise, 0.01, 1),
+    ...(seedControl !== undefined ? { controlAfterGenerate: normalizedPipelineControls.controlAfterGenerate } : {}),
+    ...(value.seedIncrement !== undefined ? { seedIncrement: normalizedPipelineControls.seedIncrement } : {}),
+    ...(isRecord(value.hiresFix) ? { hiresFix: normalizedPipelineControls.hiresFix } : {}),
+    ...(Array.isArray(value.detailerPipeline) ? { detailerPipeline: normalizedPipelineControls.detailerPipeline } : {}),
+    ...(isRecord(value.outputUpscale) ? { outputUpscale: normalizedPipelineControls.outputUpscale } : {}),
     workflowResources: resources && Object.keys(resources).length > 0 ? resources : undefined,
     loras: normalizeMetadataLoras(value.loras, 'metadata-handoff-lora'),
     inpaint: normalizeUmbraUiMediaInpaintSnapshot(value.inpaint),
@@ -341,9 +394,30 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
   const powerPrompter = isRecord(metadata.umbra_power_prompter) ? metadata.umbra_power_prompter : {};
   const generation = isRecord(powerPrompter.generation) ? powerPrompter.generation : {};
   const inpaint = isRecord(metadata.umbra_inpaint) ? metadata.umbra_inpaint : {};
+  const normalizedPowerPrompterGeneration = normalizePowerPrompterGenerationControls({
+    ...generation,
+    controlAfterGenerate: generation.controlAfterGenerate ?? generation.seedMode ?? inpaint.seedMode,
+    seedIncrement: generation.seedIncrement ?? inpaint.seedIncrement,
+  });
   const positivePromptWithSyntax = String(prompts.positive || powerPrompter.prompt || '').trim();
   const syntaxLoras = extractPromptSyntaxLoras(positivePromptWithSyntax);
   const positivePrompt = cleanPromptText(positivePromptWithSyntax.replace(/<lora:[^>]+>/gi, ''));
+  const positivePromptSegments = Array.isArray(powerPrompter.segments)
+    ? powerPrompter.segments
+      .map((candidate): UmbraUiMediaPromptSegment | null => {
+        const segment = isRecord(candidate) ? candidate : {};
+        const text = cleanPromptText(String(segment.text || '').replace(/<lora:[^>]+>/gi, ''));
+        if (!text) return null;
+        return {
+          text,
+          ...(String(segment.slotLabel || '').trim() ? { label: String(segment.slotLabel).trim() } : {}),
+          ...(String(segment.slotType || '').trim() ? { slotType: String(segment.slotType).trim() } : {}),
+          ...(String(segment.variantId || '').trim() ? { variantId: String(segment.variantId).trim() } : {}),
+          ...(String(segment.variantName || '').trim() ? { variantName: String(segment.variantName).trim() } : {}),
+        };
+      })
+      .filter((segment): segment is UmbraUiMediaPromptSegment => !!segment)
+    : [];
   const directLoras = Array.isArray(metadata.loras)
     ? metadata.loras.map((entry, index) => {
       const name = normalizePath(entry?.name);
@@ -382,6 +456,7 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
 
   return normalizeUmbraUiMediaGenerationSnapshot({
     positivePrompt,
+    positivePromptSegments,
     negativePrompt,
     modelFamily: String(generation.modelFamily || inpaint.modelFamily || '').trim() || inferModelFamily(checkpointName),
     modelType: String(generation.modelType || inpaint.modelSource || '').trim() || (checkpointName.toLowerCase().endsWith('.gguf') ? 'gguf' : 'checkpoint'),
@@ -396,6 +471,21 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
     width: finiteNumber(generation.width ?? params.width),
     height: finiteNumber(generation.height ?? params.height),
     denoise: finiteNumber(generation.denoise ?? inpaint.denoise ?? params.denoise),
+    ...(generation.controlAfterGenerate !== undefined
+      || generation.seedMode !== undefined
+      || inpaint.seedMode !== undefined
+      ? { controlAfterGenerate: normalizedPowerPrompterGeneration.controlAfterGenerate }
+      : {}),
+    ...(generation.seedIncrement !== undefined || inpaint.seedIncrement !== undefined
+      ? { seedIncrement: normalizedPowerPrompterGeneration.seedIncrement }
+      : {}),
+    ...(isRecord(generation.hiresFix) ? { hiresFix: normalizedPowerPrompterGeneration.hiresFix } : {}),
+    ...(Array.isArray(generation.detailerPipeline)
+      ? { detailerPipeline: normalizedPowerPrompterGeneration.detailerPipeline }
+      : {}),
+    ...(isRecord(generation.outputUpscale)
+      ? { outputUpscale: normalizedPowerPrompterGeneration.outputUpscale }
+      : {}),
     workflowResources,
     loras: mergeLoras(directLoras, extractGraphLoras(metadata), generationLoras, inpaintLoras, syntaxLoras),
     inpaint: normalizeUmbraUiMediaInpaintSnapshot(inpaint),
@@ -405,7 +495,7 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
 export function normalizeUmbraUiMediaHandoff(value: unknown): UmbraUiMediaHandoff | null {
   if (!isRecord(value)) return null;
   const mode = String(value.mode || '').trim().toLowerCase();
-  if (mode !== 'img2img' && mode !== 'inpaint' && mode !== 'video') return null;
+  if (mode !== 'txt2img' && mode !== 'img2img' && mode !== 'inpaint' && mode !== 'video') return null;
   const path = normalizePath(value.path);
   const originalSourcePath = normalizePath(value.originalSourcePath) || path;
   const imageUrl = String(value.imageUrl || '').trim();

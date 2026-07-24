@@ -2328,7 +2328,7 @@ export const Workspace = () => {
       >
         {!isRemoteClient && loadedWorkspaces.remote ? (
           <Suspense fallback={null}>
-            <UmbraRemoteWorkspace />
+            <UmbraRemoteWorkspace isActive={activeWorkspace === 'remote'} />
           </Suspense>
         ) : null}
       </div>

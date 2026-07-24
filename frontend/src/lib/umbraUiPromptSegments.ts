@@ -1,6 +1,10 @@
 export interface UmbraUiPromptSegment {
   id: string;
   text: string;
+  label?: string;
+  slotType?: string;
+  variantId?: string;
+  variantName?: string;
 }
 
 function createSegmentId(): string {
@@ -11,8 +15,18 @@ function createSegmentId(): string {
   }
 }
 
-export function createUmbraUiPromptSegment(text = ''): UmbraUiPromptSegment {
-  return { id: createSegmentId(), text: String(text || '') };
+export function createUmbraUiPromptSegment(
+  text = '',
+  metadata: Partial<Omit<UmbraUiPromptSegment, 'id' | 'text'>> = {},
+): UmbraUiPromptSegment {
+  return {
+    id: createSegmentId(),
+    text: String(text || ''),
+    ...(String(metadata.label || '').trim() ? { label: String(metadata.label).trim() } : {}),
+    ...(String(metadata.slotType || '').trim() ? { slotType: String(metadata.slotType).trim() } : {}),
+    ...(String(metadata.variantId || '').trim() ? { variantId: String(metadata.variantId).trim() } : {}),
+    ...(String(metadata.variantName || '').trim() ? { variantName: String(metadata.variantName).trim() } : {}),
+  };
 }
 
 function splitPromptTerms(value: string): string[] {

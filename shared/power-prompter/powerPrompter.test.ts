@@ -1,7 +1,24 @@
 import { describe, expect, test } from 'bun:test';
-import { normalizePowerPrompterGenerationControls } from './powerPrompter';
+import {
+  createDefaultPowerPrompterCardDocument,
+  createPowerPrompterCardNode,
+  normalizePowerPrompterGenerationControls,
+} from './powerPrompter';
+import { buildQueuePromptsFromCards, resolveSeedForQueuePromptGroup } from './queuePromptBuilder';
 
 describe('Power Prompter generation pipeline controls', () => {
+  test('uses the selected seed increment between prompt groups', () => {
+    const generation = normalizePowerPrompterGenerationControls({
+      seed: 500,
+      controlAfterGenerate: 'increment',
+      seedIncrement: 1000,
+    });
+
+    expect(resolveSeedForQueuePromptGroup(generation, 0, 1)).toBe(500);
+    expect(resolveSeedForQueuePromptGroup(generation, 1, 1)).toBe(1500);
+    expect(resolveSeedForQueuePromptGroup(generation, 3, 1)).toBe(3500);
+  });
+
   test('preserves advanced image stages across shared document normalization', () => {
     const generation = normalizePowerPrompterGenerationControls({
       clipSkip: 2,
@@ -95,5 +112,42 @@ describe('Power Prompter generation pipeline controls', () => {
     ]);
     expect(generation.outputUpscale?.enabled).toBe(false);
     expect(generation.outputUpscale?.modelName).toBe('RealESRGAN_x4plus.safetensors');
+  });
+
+  test('retains card identity and text in queued prompt metadata', () => {
+    const style = {
+      ...createPowerPrompterCardNode('style', 'Style', 'painted anime illustration', 0, 'style-slot'),
+      variantName: 'Painted Anime',
+    };
+    const character = {
+      ...createPowerPrompterCardNode('character', 'Character', 'black-haired heroine', 1, 'character-slot'),
+      variantName: 'Heroine',
+    };
+    const document = {
+      ...createDefaultPowerPrompterCardDocument('Example.ppcards.json'),
+      cards: [style, character],
+    };
+
+    const built = buildQueuePromptsFromCards(document, 'prompt');
+
+    expect(built.prompts).toEqual(['painted anime illustration, black-haired heroine']);
+    expect(built.promptEntries[0]?.tokens).toEqual([
+      {
+        slotId: 'style-slot',
+        slotLabel: 'Style',
+        slotType: 'style',
+        variantId: style.id,
+        variantName: 'Painted Anime',
+        text: 'painted anime illustration',
+      },
+      {
+        slotId: 'character-slot',
+        slotLabel: 'Character',
+        slotType: 'character',
+        variantId: character.id,
+        variantName: 'Heroine',
+        text: 'black-haired heroine',
+      },
+    ]);
   });
 });

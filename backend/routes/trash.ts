@@ -1,6 +1,7 @@
 import { rename, rm, mkdir, stat, writeFile, readFile, readdir, cp } from 'fs/promises';
 import { join, basename, dirname, resolve, relative, sep } from 'path';
 import { existsSync, readdirSync } from 'fs';
+import { spawn } from 'node:child_process';
 import type { FsWorkerService } from '../FsWorkerService';
 // import { db } from '../db';
 
@@ -395,7 +396,7 @@ async function cleanupTrash(context: RouteContext) {
           const { relativePath, fullPath } = resolveWorkspacePath(item.trashPath, context);
           if (isTrashPath(relativePath) && existsSync(fullPath)) {
             try {
-              await sendPathToSystemTrash(fullPath);
+              await sendPathToSystemTrash(fullPath, context);
               console.log(`[Trash] Auto-expired to OS Trash: ${item.name}`);
             } catch (trashErr) {
               console.warn('[Trash] OS trash failed during expiry cleanup, falling back to direct delete:', trashErr);
@@ -1063,14 +1064,37 @@ export async function permanentlyDelete(req: Request, _url: URL, context: RouteC
   }
 }
 
-async function runDetachedCommand(args: string[]): Promise<boolean> {
-  try {
-    const proc = Bun.spawn(args, { stdout: 'ignore', stderr: 'ignore' });
-    const code = await proc.exited;
-    return code === 0;
-  } catch {
-    return false;
-  }
+async function runDetachedCommand(args: string[], timeoutMs = 30_000): Promise<boolean> {
+  if (!args[0]) return false;
+
+  return await new Promise<boolean>((resolveCommand) => {
+    let settled = false;
+    const proc = spawn(args[0], args.slice(1), {
+      detached: false,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+
+    const settle = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolveCommand(ok);
+    };
+
+    const timeout = setTimeout(() => {
+      try {
+        proc.kill('SIGKILL');
+      } catch {
+        // Best-effort cleanup; the command is already considered failed.
+      }
+      settle(false);
+    }, timeoutMs);
+    timeout.unref();
+
+    proc.once('error', () => settle(false));
+    proc.once('exit', (code) => settle(code === 0));
+  });
 }
 
 function escapePowerShellSingleQuoted(value: string): string {
@@ -1081,7 +1105,12 @@ function escapeAppleScriptString(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-async function sendPathToSystemTrash(fullPath: string): Promise<void> {
+async function sendPathToSystemTrash(fullPath: string, context: RouteContext): Promise<void> {
+  if (context.fsWorkerService) {
+    await context.fsWorkerService.systemTrash({ fullPath });
+    return;
+  }
+
   if (process.platform === 'win32') {
     const targetLiteral = escapePowerShellSingleQuoted(fullPath);
     const psScript = [
@@ -1245,7 +1274,7 @@ export async function deleteToSystemTrash(req: Request, _url: URL, context: Rout
       if (!existsSync(fullPath)) return { path: p, success: false, error: 'File not found' };
 
       try {
-        await sendPathToSystemTrash(fullPath);
+        await sendPathToSystemTrash(fullPath, context);
 
         if (context.thumbnailService) await context.thumbnailService.clearCache(fullPath);
         // try { db.exec(`DELETE FROM images WHERE path = '${fullPath.replace(/'/g, "''")}'`); } catch { }

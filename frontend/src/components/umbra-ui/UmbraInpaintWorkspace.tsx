@@ -19,7 +19,6 @@ import {
   Copy,
   Crop,
   Download,
-  Dices,
   Eraser,
   Eye,
   EyeOff,
@@ -41,6 +40,7 @@ import {
   Maximize2,
   Minimize2,
   Move,
+  Paintbrush,
   Palette,
   Pipette,
   Pin,
@@ -80,12 +80,22 @@ import { UmbraRasterCurvesEditor } from '@/components/umbra-ui/UmbraRasterCurves
 import { UmbraRasterFilterDialog } from '@/components/umbra-ui/UmbraRasterFilterDialog';
 import { UmbraLayerUpscaleDialog } from '@/components/umbra-ui/UmbraLayerUpscaleDialog';
 import { UmbraInpaintProjectBrowserModal } from '@/components/umbra-ui/UmbraInpaintProjectBrowserModal';
+import { UmbraMobileWorkspaceSheet } from '@/components/umbra-ui/UmbraMobileWorkspaceSheet';
+import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
 import {
   composeUmbraUiPromptWithLoras,
   type UmbraUiLoraEntry,
 } from '@/lib/umbraUiModels';
 import type { UmbraUiPromptSegment } from '@/lib/umbraUiPromptSegments';
-import type { PowerPrompterModelType } from '@/types/powerPrompter';
+import type {
+  PowerPrompterModelType,
+  PowerPrompterSeedControlMode,
+  PowerPrompterSeedIncrement,
+} from '@/types/powerPrompter';
+import {
+  advanceUmbraUiSeed,
+  resolveUmbraUiQueueSeed,
+} from '@/lib/umbraUiSeed';
 import { getUmbraUiInpaintPrimaryModelIssue } from '../../../../shared/umbra-ui/inpaintModelCompatibility';
 import {
   canResetUmbraCanvasLayerTransform,
@@ -558,6 +568,7 @@ function canvasDocumentHistoryReducer(
 }
 
 export interface UmbraInpaintWorkspaceProps {
+  active?: boolean;
   capabilities: UmbraUiPipelineCapabilities;
   inpaintAdapter: UmbraUiInpaintAdapter;
   modelFamily: string;
@@ -615,6 +626,10 @@ export interface UmbraInpaintWorkspaceProps {
   onNegativePromptChange: (value: string) => void;
   seed: string;
   onSeedChange: (value: string) => void;
+  seedMode: PowerPrompterSeedControlMode;
+  onSeedModeChange: (value: PowerPrompterSeedControlMode) => void;
+  seedIncrement: PowerPrompterSeedIncrement;
+  onSeedIncrementChange: (value: PowerPrompterSeedIncrement) => void;
   steps: string;
   onStepsChange: (value: string) => void;
   cfg: string;
@@ -2389,6 +2404,7 @@ function parsePendingHandoff(value: unknown): UmbraUiInpaintHandoff | null {
 }
 
 export function UmbraInpaintWorkspace({
+  active = true,
   capabilities,
   inpaintAdapter,
   modelFamily,
@@ -2446,6 +2462,10 @@ export function UmbraInpaintWorkspace({
   onNegativePromptChange,
   seed,
   onSeedChange,
+  seedMode,
+  onSeedModeChange,
+  seedIncrement,
+  onSeedIncrementChange,
   steps,
   onStepsChange,
   cfg,
@@ -2465,6 +2485,7 @@ export function UmbraInpaintWorkspace({
   showToast,
 }: UmbraInpaintWorkspaceProps) {
   const studioMode = false;
+  const [mobileControlsTab, setMobileControlsTab] = React.useState<'generation' | 'inpaint'>('generation');
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const viewportRef = React.useRef<HTMLDivElement | null>(null);
   const imageCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -2700,7 +2721,6 @@ export function UmbraInpaintWorkspace({
   const [softInpaintMaskInfluence, setSoftInpaintMaskInfluence] = React.useState(SIMPLE_INPAINT_DEFAULT_MASK_INFLUENCE);
   const [job, setJob] = React.useState<UmbraUiInpaintJob | null>(null);
   const inpaintJobRunning = !!job && !isUmbraUiInpaintJobTerminal(job);
-  const seedIsRandom = !Number.isFinite(Number(seed)) || Number(seed) <= 0;
   const resizeTarget = React.useMemo(() => ({
     width: alignInpaintResizeDimension(Number(resizeWidth) || canvasDocument?.width || 1024, 'width', capabilities.resolution),
     height: alignInpaintResizeDimension(Number(resizeHeight) || canvasDocument?.height || 1024, 'height', capabilities.resolution),
@@ -2952,6 +2972,8 @@ export function UmbraInpaintWorkspace({
       })),
       clipSkip,
       seed,
+      seedMode,
+      seedIncrement,
       steps,
       cfg,
       samplerName,
@@ -3020,6 +3042,8 @@ export function UmbraInpaintWorkspace({
     seamlessX,
     seamlessY,
     seed,
+    seedIncrement,
+    seedMode,
     steps,
   ]);
 
@@ -3938,6 +3962,8 @@ export function UmbraInpaintWorkspace({
     onNegativePromptChange(generation.negativePrompt);
     onClipSkipChange(generation.clipSkip);
     onSeedChange(generation.seed);
+    onSeedModeChange(generation.seedMode);
+    onSeedIncrementChange(generation.seedIncrement);
     onStepsChange(generation.steps);
     onCfgChange(generation.cfg);
     onSamplerNameChange(generation.samplerName);
@@ -3979,6 +4005,8 @@ export function UmbraInpaintWorkspace({
     onSamplerNameChange,
     onSchedulerChange,
     onSeedChange,
+    onSeedIncrementChange,
+    onSeedModeChange,
     onStepsChange,
   ]);
 
@@ -7373,6 +7401,8 @@ export function UmbraInpaintWorkspace({
         strengthClip: lora.strengthClip,
       })),
       seed: outputSeed,
+      seedMode,
+      seedIncrement,
       steps: Number(steps) || 1,
       cfg: Number(cfg) || 0,
       clipSkip: Number(clipSkip) || 1,
@@ -7442,6 +7472,8 @@ export function UmbraInpaintWorkspace({
     samplerName,
     samples,
     scheduler,
+    seedIncrement,
+    seedMode,
     seamlessX,
     seamlessY,
     source,
@@ -9463,7 +9495,11 @@ export function UmbraInpaintWorkspace({
       const denoiseMask = compositeMasks.denoise;
       const noiseMask = compositeMasks.noise;
       if (!denoiseMask || !noiseMask) throw new Error('The inpaint mask modifiers could not be prepared.');
-      const resolvedSeed = resolveCapabilityNumber(capabilities.seed, Number(seedOverride ?? seed), 0);
+      const queuedSeed = resolveUmbraUiQueueSeed(
+        seedOverride ?? seed,
+        seedOverride === undefined ? seedMode : 'fixed',
+      );
+      const resolvedSeed = resolveCapabilityNumber(capabilities.seed, queuedSeed, 0);
       if (findMaskAlphaBounds(noiseMask)) applyMaskedGaussianNoise(workingImage, noiseMask, resolvedSeed);
       const maskDataUrl = workingMask.toDataURL('image/png');
       const processingImage = resizeCanvasForProcessing(
@@ -9502,6 +9538,8 @@ export function UmbraInpaintWorkspace({
         checkpointName,
         clipSkip: resolveCapabilityNumber(capabilities.clipSkip, Number(clipSkip), 1),
         seed: resolvedSeed,
+        seedMode,
+        seedIncrement,
         steps: resolveCapabilityNumber(capabilities.steps, Number(steps), 20),
         cfg: resolveCapabilityNumber(capabilities.guidance, Number(cfg), 1),
         samplerName: resolveCapabilityString(capabilities.sampler, samplerName, 'euler'),
@@ -9561,6 +9599,14 @@ export function UmbraInpaintWorkspace({
         },
       });
       setJob(nextJob);
+      if (capabilities.seed.support === 'adjustable') {
+        onSeedChange(String(advanceUmbraUiSeed(
+          resolvedSeed,
+          seedMode,
+          seedIncrement,
+          samples,
+        )));
+      }
       showToast(`${nextJob.total} inpaint sample${nextJob.total === 1 ? '' : 's'} queued.`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to queue inpaint samples.', 'error');
@@ -9609,6 +9655,9 @@ export function UmbraInpaintWorkspace({
     samples,
     scheduler,
     seed,
+    seedIncrement,
+    seedMode,
+    onSeedChange,
     canvasStudio.activeArtboard,
     canvasStudio.project,
     modelFamily,
@@ -9641,9 +9690,9 @@ export function UmbraInpaintWorkspace({
     const unpinnedStageIds = (canvasDocument?.staging || []).filter((stage) => !stage.pinned).map((stage) => stage.id);
     if (unpinnedStageIds.length > 0) dispatchCanvasDocument({ type: 'discard_stages', stageIds: unpinnedStageIds });
     const rerollSeed = createRandomGenerationSeed();
-    if (!seedIsRandom) onSeedChange(String(rerollSeed));
+    if (seedMode !== 'randomize') onSeedChange(String(rerollSeed));
     void generateSamples(rerollSeed);
-  }, [canvasDocument?.staging, generateSamples, onSeedChange, seedIsRandom]);
+  }, [canvasDocument?.staging, generateSamples, onSeedChange, seedMode]);
 
   const handleFile = React.useCallback((file: File | null | undefined) => {
     if (!file || !file.type.startsWith('image/')) {
@@ -9775,6 +9824,24 @@ export function UmbraInpaintWorkspace({
           : 'grid-cols-[clamp(232px,18vw,280px)_clamp(220px,17vw,260px)_minmax(0,1fr)]',
       )}
     >
+      <div data-umbra-inpaint-mobile-tabs="" className="hidden">
+        <button
+          type="button"
+          data-active={mobileControlsTab === 'generation' ? '1' : '0'}
+          onClick={() => setMobileControlsTab('generation')}
+        >
+          <WandSparkles size={13} />
+          Generation
+        </button>
+        <button
+          type="button"
+          data-active={mobileControlsTab === 'inpaint' ? '1' : '0'}
+          onClick={() => setMobileControlsTab('inpaint')}
+        >
+          <Focus size={13} />
+          Inpaint
+        </button>
+      </div>
       {studioMode ? (
         <UmbraCanvasStudioToolbar
           studio={canvasStudio}
@@ -9784,7 +9851,11 @@ export function UmbraInpaintWorkspace({
           onZoomOut={() => zoomStudioView(1 / 1.2)}
         />
       ) : null}
-      <aside data-umbra-inpaint-generation-sidebar="" className="min-h-0 min-w-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar">
+      <aside
+        data-umbra-inpaint-generation-sidebar=""
+        data-mobile-active={mobileControlsTab === 'generation' ? '1' : '0'}
+        className="min-h-0 min-w-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar"
+      >
         <div className="mb-3 flex items-center gap-2">
           <WandSparkles size={13} className="text-rose-300" />
           <h2 className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-300">Generation</h2>
@@ -9853,33 +9924,15 @@ export function UmbraInpaintWorkspace({
             <span className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-300">Generation Pipeline</span>
           </div>
           {capabilities.seed.support === 'adjustable' ? (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Dices size={11} className="text-rose-300" />
-                <span className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-300">Seed</span>
-                <span className="ml-auto font-mono text-[8px] uppercase text-zinc-600">{seedIsRandom ? 'Random each run' : 'Fixed'}</span>
-              </div>
-              <div className="grid grid-cols-2 border border-white/10 p-0.5">
-                <button type="button" onClick={() => onSeedChange('0')} className={cn('h-7 font-mono text-[8px] font-black uppercase', seedIsRandom ? 'bg-rose-500/15 text-rose-100' : 'text-zinc-600 hover:text-zinc-300')}>Random</button>
-                <button type="button" onClick={() => seedIsRandom && onSeedChange(String(createRandomGenerationSeed()))} className={cn('h-7 font-mono text-[8px] font-black uppercase', !seedIsRandom ? 'bg-cyan-500/15 text-cyan-100' : 'text-zinc-600 hover:text-zinc-300')}>Fixed</button>
-              </div>
-              {!seedIsRandom ? (
-                <div className="grid grid-cols-[minmax(0,1fr)_34px] gap-1.5">
-                  <input
-                    value={seed}
-                    onChange={(event) => onSeedChange(event.target.value.replace(/[^0-9]/g, '').slice(0, 16))}
-                    onBlur={() => {
-                      const numeric = Math.max(1, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(Number(seed) || 1)));
-                      onSeedChange(String(numeric));
-                    }}
-                    inputMode="numeric"
-                    aria-label="Fixed seed"
-                    className={inputClass}
-                  />
-                  <button type="button" onClick={() => onSeedChange(String(createRandomGenerationSeed()))} title="Choose another fixed seed" className="inline-flex h-9 items-center justify-center border border-cyan-300/20 text-cyan-200 hover:bg-cyan-500/[0.07]"><Dices size={11} /></button>
-                </div>
-              ) : null}
-            </div>
+            <UmbraSeedControls
+              seed={seed}
+              mode={seedMode}
+              increment={seedIncrement}
+              onSeedChange={onSeedChange}
+              onModeChange={onSeedModeChange}
+              onIncrementChange={onSeedIncrementChange}
+              accent="fuchsia"
+            />
           ) : null}
 
           {capabilities.steps.support === 'adjustable' || capabilities.guidance.support === 'adjustable' ? (
@@ -9929,7 +9982,11 @@ export function UmbraInpaintWorkspace({
         </div>
       </aside>
 
-      <aside data-umbra-inpaint-settings-sidebar="" className="min-h-0 min-w-0 overflow-y-auto border-r border-white/10 bg-[#07090a] p-3 custom-scrollbar">
+      <aside
+        data-umbra-inpaint-settings-sidebar=""
+        data-mobile-active={mobileControlsTab === 'inpaint' ? '1' : '0'}
+        className="min-h-0 min-w-0 overflow-y-auto border-r border-white/10 bg-[#07090a] p-3 custom-scrollbar"
+      >
         <div className="mb-3 flex items-center gap-2">
           <Focus size={13} className="text-cyan-300" />
           <h2 className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-300">Inpaint Settings</h2>
@@ -10414,10 +10471,20 @@ export function UmbraInpaintWorkspace({
         </div>
       </aside>
 
-      <main
-        className="relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-black/25 transition-[padding-right] duration-150 ease-out"
-        style={{ paddingRight: layersExpanded ? 'clamp(248px, 22vw, 320px)' : '40px' }}
+      <UmbraMobileWorkspaceSheet
+        active={active}
+        title="Inpaint Editor"
+        subtitle={source ? `${source.width}x${source.height} canvas` : 'Open an image to begin'}
+        badge={canvasDocument?.staging.length ? `${canvasDocument.staging.length}` : undefined}
+        icon={<Paintbrush size={14} />}
+        thumbnailUrl={previewStage?.asset.imageUrl || source?.imageUrl}
+        tone="rose"
       >
+        <main
+          data-umbra-inpaint-editor=""
+          className="relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-black/25 transition-[padding-right] duration-150 ease-out"
+          style={{ paddingRight: layersExpanded ? 'clamp(248px, 22vw, 320px)' : '40px' }}
+        >
         <div data-umbra-inpaint-toolbar="" className="relative z-30 shrink-0 border-b border-white/10 bg-[#050708]/95 shadow-md shadow-black/35 backdrop-blur-sm">
           <div className="flex min-h-10 min-w-0 flex-wrap items-center gap-1.5 px-2.5 py-1.5 [&>*]:shrink-0">
           {false ? (
@@ -11495,6 +11562,7 @@ export function UmbraInpaintWorkspace({
         </div>
 
         <div
+          data-umbra-inpaint-layers-panel=""
           className={cn(
             'absolute inset-y-0 right-0 z-40 flex min-h-0 flex-col overflow-hidden border-l border-white/10 bg-[#060809] shadow-xl shadow-black/40 transition-[width] duration-150 ease-out',
             layersExpanded ? '' : 'w-10',
@@ -11996,7 +12064,8 @@ export function UmbraInpaintWorkspace({
             </div>
           ) : null}
         </div>
-      </main>
+        </main>
+      </UmbraMobileWorkspaceSheet>
       {studioMode ? (
         <UmbraCanvasStudioShelf
           studio={canvasStudio}

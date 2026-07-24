@@ -1,7 +1,9 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { dirname, join, relative, resolve } from 'node:path';
 import { platform } from 'node:os';
+import { buildListenerOrigin } from '../backend/remoteNetworkAddress';
 
 type LauncherOptions = {
   noOpen: boolean;
@@ -280,8 +282,8 @@ function normalizeRuntimeRootForCompare(value: string): string {
   return resolve(String(value || '').trim()).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
 
-async function checkReady(portNumber: number): Promise<ReadyCheckResult> {
-  const response = await fetch(`http://127.0.0.1:${portNumber}/api/healthz/ready`, { cache: 'no-store' });
+async function checkReady(localOrigin: string): Promise<ReadyCheckResult> {
+  const response = await fetch(`${localOrigin}/api/healthz/ready`, { cache: 'no-store' });
   if (!response.ok) return { ready: false };
   const body = await response.json().catch(() => ({})) as Record<string, unknown>;
   return {
@@ -290,11 +292,11 @@ async function checkReady(portNumber: number): Promise<ReadyCheckResult> {
   };
 }
 
-async function waitForReady(portNumber: number, timeoutMs: number): Promise<ReadyCheckResult> {
+async function waitForReady(localOrigin: string, timeoutMs: number): Promise<ReadyCheckResult> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     try {
-      const result = await checkReady(portNumber);
+      const result = await checkReady(localOrigin);
       if (result.ready) return result;
     } catch {
       // Server is still starting.
@@ -302,6 +304,25 @@ async function waitForReady(portNumber: number, timeoutMs: number): Promise<Read
     await Bun.sleep(READY_POLL_MS);
   }
   return { ready: false };
+}
+
+async function canBindPort(portNumber: number, host: string): Promise<boolean> {
+  return await new Promise<boolean>((resolveProbe) => {
+    const probe = createServer();
+    let settled = false;
+
+    const settle = (available: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolveProbe(available);
+    };
+
+    probe.unref();
+    probe.once('error', () => settle(false));
+    probe.listen({ port: portNumber, host, exclusive: true }, () => {
+      probe.close(() => settle(true));
+    });
+  });
 }
 
 function openBrowser(url: string) {
@@ -343,14 +364,15 @@ async function main() {
   const serverEntrypoint = findServerEntrypoint(sourceRoot);
   const bunPath = findBunBinary(runtimeRoot);
   const launcherDevMode = !isPortableRuntime(runtimeRoot, sourceRoot) && process.env.UMBRA_DEV_MODE !== '0';
-  const remoteSettings = launcherDevMode ? loadRemoteLauncherSettings(runtimeRoot) : {};
+  const remoteSettings = loadRemoteLauncherSettings(runtimeRoot);
   const effectivePort = options.portExplicit
     ? options.port
     : clampPort(process.env.UMBRA_PORT || remoteSettings.port || options.port, options.port);
   const bindHost = normalizeBindHost(
     process.env.UMBRA_HOST || process.env.HOST || remoteSettings.bindHost || (launcherDevMode ? '0.0.0.0' : '127.0.0.1'),
   );
-  const appUrl = `http://127.0.0.1:${effectivePort}/`;
+  const localOrigin = buildListenerOrigin(bindHost, effectivePort);
+  const appUrl = `${localOrigin}/`;
 
   if (!serverEntrypoint) {
     console.error(`[UmbraWebLauncher] UmbraServer.js or UmbraServer.ts not found under ${sourceRoot}`);
@@ -363,7 +385,7 @@ async function main() {
     return;
   }
 
-  const alreadyRunning = await waitForReady(effectivePort, ALREADY_RUNNING_TIMEOUT_MS);
+  const alreadyRunning = await waitForReady(localOrigin, ALREADY_RUNNING_TIMEOUT_MS);
   if (alreadyRunning.ready) {
     const runningRoot = normalizeRuntimeRootForCompare(alreadyRunning.runtimeRoot || '');
     const expectedRoot = normalizeRuntimeRootForCompare(runtimeRoot);
@@ -380,6 +402,15 @@ async function main() {
     writeLine(`[UmbraWebLauncher] Umbra is already running at ${appUrl} (checked in ${Date.now() - launchStartedAt}ms)`);
     if (!options.noOpen) openBrowser(appUrl);
     process.exit(configuredAlreadyRunningExitCode());
+  }
+
+  if (!(await canBindPort(effectivePort, bindHost))) {
+    writeBanner();
+    writeLine(`[UmbraWebLauncher] Configured port ${effectivePort} is occupied by another or unresponsive process.`);
+    writeLine('[UmbraWebLauncher] Umbra will not change ports automatically because Remote and proxy routes depend on this port.');
+    writeLine('[UmbraWebLauncher] Stop the process using the configured port, then launch Umbra again.');
+    await exitLauncher(1);
+    return;
   }
 
   const logStream = ensureLogStream(runtimeRoot);
@@ -431,7 +462,7 @@ async function main() {
     })();
   });
 
-  const ready = await waitForReady(effectivePort, READY_TIMEOUT_MS);
+  const ready = await waitForReady(localOrigin, READY_TIMEOUT_MS);
   if (ready.ready) {
     writeLine(`[UmbraWebLauncher] Ready in ${Date.now() - launchStartedAt}ms: ${appUrl}`);
     if (!options.noOpen) openBrowser(appUrl);

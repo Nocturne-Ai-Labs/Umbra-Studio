@@ -51,6 +51,7 @@ import {
   setGalleryDirectBaseUrl,
 } from '@/lib/galleryBridgeFs';
 import { galleryMediaCacheKey, galleryMediaRevision } from '@/lib/galleryMediaIdentity';
+import { reconcileGalleryViewerNavigation } from '@/lib/galleryViewerNavigation';
 import { extractGenerationParams, extractPrompts, getWorkflowJsonExport, type ImageMetadata } from '@/utils/metadata';
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import type { ContextMenuItem } from '@/hooks/useContextMenu';
@@ -66,6 +67,7 @@ import {
   type UmbraUiMediaHandoffMode,
   type UmbraUiVideoFrameRole,
 } from '@/lib/umbraUiMediaHandoff';
+import { stagePowerPrompterImageRestoreHandoff } from '@/lib/powerPrompterImageRestoreHandoff';
 import type { Dataset } from '@/components/board/types';
 import { resolveGalleryContextSelectionPaths } from './galleryContextSelection';
 
@@ -427,9 +429,9 @@ const TREE_CACHE_LIMIT = 220;
 const TREE_FETCH_TIMEOUT_MS = 8_000;
 const GRID_MIN_CARD_WIDTH = 216;
 const GRID_CARD_EXTRA_HEIGHT = 72;
-const PHONE_GRID_MIN_CARD_WIDTH = 156;
+const PHONE_GRID_MIN_CARD_WIDTH = 104;
 const PHONE_SINGLE_CARD_EXTRA_HEIGHT = 88;
-const PHONE_GRID_CARD_EXTRA_HEIGHT = 64;
+const PHONE_GRID_CARD_EXTRA_HEIGHT = 0;
 const GRID_GAP = 10;
 const READY_THUMBNAIL_CACHE_LIMIT = 3000;
 const THUMBNAIL_LOAD_CONCURRENCY = 8;
@@ -1174,8 +1176,8 @@ function thumbnailUrl(file: GalleryFile, options?: { defer?: boolean; retry?: nu
   if (file.type === 'folder') return '';
   if (isLiveGenerationPreviewPath(path)) return String(file.thumbnailUrl || file.url || '').trim();
   const remoteClient = isRemoteGalleryClient();
-  const thumbSize = options?.lane === 'filmstrip' ? 'small' : (remoteClient ? 'medium' : 'small');
-  const thumbQuality = options?.lane === 'filmstrip' ? '70' : (remoteClient ? '72' : '70');
+  const thumbSize = 'small';
+  const thumbQuality = remoteClient ? '64' : '70';
   if (isTrashPath(path)) {
     return appendUrlParams(`/api/fs/thumbnail?path=${encodeURIComponent(path)}&size=${thumbSize}&q=${thumbQuality}&fit=contain`, {
       defer: options?.defer ? '1' : undefined,
@@ -2950,7 +2952,10 @@ function GalleryImageTile({
       style={cardStyle}
       title={`${file.name}\n${setLabel ? `${setLabel}\n` : ''}${metadataSnippet ? `Metadata match: ${metadataSnippet}\n` : ''}${path}`}
     >
-      <div className="mb-1 flex h-5 shrink-0 items-center justify-between gap-2 px-0.5">
+      <div
+        data-umbra-gallery-tile-header
+        className="mb-1 flex h-5 shrink-0 items-center justify-between gap-2 px-0.5"
+      >
         <span
           className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400"
           style={effectiveSetColor ? { color: effectiveSetColor } : undefined}
@@ -2995,6 +3000,7 @@ function GalleryImageTile({
         </span>
       </div>
       <div
+        data-umbra-gallery-tile-media
         className={cn(
           'relative min-h-0 flex-1 overflow-hidden rounded-md border bg-black/65',
           selected
@@ -3037,7 +3043,7 @@ function GalleryImageTile({
           <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-emerald-300/18 to-transparent" />
         ) : null}
       </div>
-      <div className="shrink-0 px-0.5 pb-0.5 pt-1.5">
+      <div data-umbra-gallery-tile-footer className="shrink-0 px-0.5 pb-0.5 pt-1.5">
         <div className="truncate text-xs font-medium leading-4 text-zinc-100" title={file.name}>{file.name}</div>
         <div
           className={cn(
@@ -3056,6 +3062,7 @@ function GalleryImageTile({
 function GalleryMediaViewer({
   file,
   files,
+  totalCount,
   remoteMode,
   selectedCount,
   loadingMore,
@@ -3072,6 +3079,7 @@ function GalleryMediaViewer({
 }: {
   file: GalleryFile | null;
   files: GalleryFile[];
+  totalCount: number;
   remoteMode: string;
   selectedCount: number;
   loadingMore: boolean;
@@ -3083,7 +3091,7 @@ function GalleryMediaViewer({
   onCopyPath: () => void;
   onSendScanner: () => void;
   onSendWaifu: () => void;
-  onSendUmbra: (mode: 'img2img' | 'inpaint' | 'video', frameRole?: UmbraUiVideoFrameRole, metadata?: ImageMetadata | null) => void;
+  onSendUmbra: (mode: UmbraUiMediaHandoffMode, frameRole?: UmbraUiVideoFrameRole, metadata?: ImageMetadata | null) => void;
   onDelete: () => void;
 }) {
   const [zoom, setZoom] = useState(1);
@@ -3107,6 +3115,7 @@ function GalleryMediaViewer({
   const viewerIndex = useMemo(() => (
     viewerPath ? files.findIndex((entry) => pathsEqual(entry.path, viewerPath)) : -1
   ), [files, viewerPath]);
+  const viewerTotal = Math.max(files.length, Math.trunc(Number(totalCount || 0)));
   const imageSrc = useMemo(() => (file ? imageUrl(file, { lane: 'gallery', remoteOriginals: remoteViewerOriginals }) : ''), [file, remoteViewerOriginals]);
   const stillSrc = useMemo(() => (file ? thumbnailUrl(file, { lane: 'gallery' }) : ''), [file]);
   const isVideo = file?.type === 'video';
@@ -3337,6 +3346,9 @@ function GalleryMediaViewer({
         <Send size={15} />
       </summary>
       <div className="absolute right-0 top-10 z-30 w-52 overflow-hidden rounded-md border border-cyan-300/25 bg-[#070a0c] p-1 shadow-2xl shadow-black/70">
+        <button type="button" disabled={isVideo} onClick={() => onSendUmbra('txt2img', undefined, metadata)} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
+          <Sparkles size={12} className="text-emerald-300" /> TXT2IMG Parameters
+        </button>
         <button type="button" disabled={isVideo} onClick={() => onSendUmbra('img2img', undefined, metadata)} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Images size={12} className="text-cyan-300" /> IMG2IMG
         </button>
@@ -3378,7 +3390,7 @@ function GalleryMediaViewer({
         <div data-umbra-gallery-viewer-title="" className="min-w-0">
           <div className="truncate text-sm font-semibold text-zinc-100">{file.name || pathLeaf(file.path)}</div>
           <div className="truncate text-[11px] text-zinc-500">
-            {viewerIndex >= 0 ? `${viewerIndex + 1}/${files.length}` : 'Media'}{selectedCount > 1 ? ` - ${selectedCount} selected` : ''}{loadingMore ? ' - loading more...' : ''}
+            {viewerIndex >= 0 ? `${viewerIndex + 1}/${viewerTotal}` : 'Media'}{selectedCount > 1 ? ` - ${selectedCount} selected` : ''}{loadingMore ? ' - loading more...' : ''}
           </div>
         </div>
 
@@ -6102,25 +6114,48 @@ export function ReactGalleryWorkspace() {
         videoFrameRole: frameRole,
         metadata: metadata || undefined,
       });
-      const label = mode === 'img2img'
-        ? 'IMG2IMG source with metadata'
-        : mode === 'inpaint'
-          ? 'Inpaint with metadata'
-        : frameRole === 'source_video'
-          ? 'VID2VID source'
-        : frameRole === 'middle'
-          ? 'Video middle frame'
-          : frameRole === 'last'
-            ? 'Video last frame'
-            : 'IMG2VID first frame';
+      const label = mode === 'txt2img'
+        ? 'TXT2IMG parameters'
+        : mode === 'img2img'
+          ? 'IMG2IMG source with metadata'
+          : mode === 'inpaint'
+            ? 'Inpaint with metadata'
+            : frameRole === 'source_video'
+              ? 'VID2VID source'
+              : frameRole === 'middle'
+                ? 'Video middle frame'
+                : frameRole === 'last'
+                  ? 'Video last frame'
+                  : 'IMG2VID first frame';
       addToast({ type: 'success', message: `${label} loaded in Umbra UI` });
     } catch (error) {
       addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to send the image to Umbra UI' });
     }
   }, [addToast, setActiveWorkspace]);
 
+  const restorePathInPowerPrompter = useCallback((pathValue: string) => {
+    const path = normalizePath(pathValue);
+    try {
+      stagePowerPrompterImageRestoreHandoff({
+        path,
+        name: pathLeaf(path),
+        source: 'gallery-filmstrip',
+      });
+      setActiveWorkspace('powerprompter');
+      addToast({
+        type: 'success',
+        message: 'Opening the image state in Power Prompter',
+      });
+    } catch (error) {
+      addToast({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Failed to restore Power Prompter image',
+      });
+    }
+  }, [addToast, setActiveWorkspace]);
+
   const sendViewerToUmbra = useCallback((
-    mode: 'img2img' | 'inpaint' | 'video',
+    mode: UmbraUiMediaHandoffMode,
     frameRole?: UmbraUiVideoFrameRole,
     metadata?: ImageMetadata | null,
   ) => {
@@ -8682,7 +8717,11 @@ export function ReactGalleryWorkspace() {
   }, [knownFiles]);
   useEffect(() => {
     activeViewerFilesRef.current = activeViewerFiles;
-  }, [activeViewerFiles]);
+    if (!viewerPath || isLiveGenerationPreviewPath(viewerPath)) return;
+    const currentSession = viewerSessionFilesRef.current;
+    const nextSession = reconcileGalleryViewerNavigation(currentSession, activeViewerFiles, viewerPath);
+    if (nextSession !== currentSession) updateViewerSessionFiles(nextSession);
+  }, [activeViewerFiles, updateViewerSessionFiles, viewerPath]);
   useEffect(() => {
     folderPreviewGroupsRef.current = folderPreviewGroups;
   }, [folderPreviewGroups]);
@@ -9433,6 +9472,7 @@ export function ReactGalleryWorkspace() {
     const targetImagePath = targetFile && (targetFile.type === 'image' || targetFile.type === 'gif')
       ? normalizePath(targetFile.path)
       : '';
+    const targetPowerPrompterPngPath = /\.png$/i.test(targetPath) ? targetPath : '';
     const targetVideoPath = targetFile?.type === 'video'
       ? normalizePath(targetFile.path)
       : '';
@@ -9464,6 +9504,14 @@ export function ReactGalleryWorkspace() {
       && reorderPaths.length > 0;
     return [
       { label: 'Open', icon: <ImageIcon size={14} />, disabled: !targetFile, action: () => targetFile && openFile(targetFile) },
+      ...(targetPowerPrompterPngPath ? [
+        {
+          label: 'Restore in Power Prompter',
+          icon: <RotateCcw size={14} />,
+          action: () => restorePathInPowerPrompter(targetPowerPrompterPngPath),
+        },
+      ] satisfies ContextMenuItem[] : []),
+      { label: 'Send Parameters to Umbra UI TXT2IMG', icon: <Sparkles size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'txt2img') },
       ...(isRemoteClient ? [
         { label: downloadablePaths.length > 1 ? `Download ${downloadablePaths.length} Originals` : 'Download Original', icon: <Download size={14} />, disabled: downloadablePaths.length === 0, action: () => downloadOriginalPaths(downloadablePaths) },
       ] satisfies ContextMenuItem[] : []),
@@ -9519,6 +9567,7 @@ export function ReactGalleryWorkspace() {
     renameFolder,
     renamePaths,
     reorderPathsRelativeToTarget,
+    restorePathInPowerPrompter,
     restoreTrashPaths,
     revealPaths,
     refreshDatasetTargets,
@@ -9600,7 +9649,11 @@ export function ReactGalleryWorkspace() {
     : '';
 
   return (
-    <section className="flex h-full min-h-0 w-full bg-zinc-950 text-zinc-100" data-umbra-react-gallery-root>
+    <section
+      className="flex h-full min-h-0 w-full bg-zinc-950 text-zinc-100"
+      data-umbra-react-gallery-root
+      data-umbra-gallery-mobile-media-view={isPhoneRemote ? mobileMediaView : undefined}
+    >
       <div data-umbra-gallery-mobile-switcher="">
         <button
           type="button"
@@ -9813,9 +9866,9 @@ export function ReactGalleryWorkspace() {
                     ? `${displayFiles.length} match${displayFiles.length === 1 ? '' : 'es'} in current folder`
                     : `${displayFiles.length} visible`}
             </div>
-            <div className="flex items-center gap-2">
+            <div data-umbra-gallery-action-controls="" className="flex items-center gap-2">
               {!trashMode ? (
-                <div className="flex min-w-[220px] max-w-[360px] items-center overflow-hidden rounded border border-zinc-800 bg-zinc-950/80 text-zinc-400 focus-within:border-[var(--umbra-accent)]">
+                <div data-umbra-gallery-metadata-search="" className="flex min-w-[220px] max-w-[360px] items-center overflow-hidden rounded border border-zinc-800 bg-zinc-950/80 text-zinc-400 focus-within:border-[var(--umbra-accent)]">
                   <ScanSearch size={13} className="ml-2 shrink-0" />
                   <input
                     value={metadataQuery}
@@ -9903,6 +9956,7 @@ export function ReactGalleryWorkspace() {
                 ) : (
                   <button
                     type="button"
+                    data-umbra-gallery-mobile-select=""
                     disabled={activeViewerFiles.length === 0 && files.length === 0 && total === 0}
                     onClick={() => setTouchSelectionMode(true)}
                     className="inline-flex h-7 items-center gap-1.5 rounded border border-zinc-800 px-2 text-xs text-zinc-400 hover:bg-white/5 hover:text-white disabled:opacity-40"
@@ -10730,6 +10784,7 @@ export function ReactGalleryWorkspace() {
         <GalleryMediaViewer
           file={viewerFile}
           files={viewerFilesForRender}
+          totalCount={globalSearchActive || folderPreviewMode ? viewerFilesForRender.length : total}
           remoteMode={remoteMode}
           selectedCount={viewerSelectionCount}
           loadingMore={loading}

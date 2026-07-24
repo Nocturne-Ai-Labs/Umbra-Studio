@@ -2,8 +2,14 @@
 
 import React from 'react';
 import { Dices } from 'lucide-react';
-import type { PowerPrompterSeedControlMode } from '@/types/powerPrompter';
-import { createUmbraUiRandomSeed } from '@/lib/umbraUiSeed';
+import type {
+  PowerPrompterSeedControlMode,
+  PowerPrompterSeedIncrement,
+} from '@/types/powerPrompter';
+import {
+  createUmbraUiRandomSeed,
+  UMBRA_UI_SEED_INCREMENT_OPTIONS,
+} from '@/lib/umbraUiSeed';
 import { cn } from '@/lib/utils';
 
 const SEED_MODE_OPTIONS: Array<{ value: PowerPrompterSeedControlMode; label: string }> = [
@@ -16,8 +22,10 @@ const SEED_MODE_OPTIONS: Array<{ value: PowerPrompterSeedControlMode; label: str
 interface UmbraSeedControlsProps {
   seed: string;
   mode: PowerPrompterSeedControlMode;
+  increment: PowerPrompterSeedIncrement;
   onSeedChange: (seed: string) => void;
   onModeChange: (mode: PowerPrompterSeedControlMode) => void;
+  onIncrementChange: (increment: PowerPrompterSeedIncrement) => void;
   disabled?: boolean;
   disabledReason?: string;
   accent?: 'cyan' | 'fuchsia';
@@ -26,8 +34,10 @@ interface UmbraSeedControlsProps {
 export function UmbraSeedControls({
   seed,
   mode,
+  increment,
   onSeedChange,
   onModeChange,
+  onIncrementChange,
   disabled = false,
   disabledReason = '',
   accent = 'cyan',
@@ -82,6 +92,31 @@ export function UmbraSeedControls({
       >
         <Dices size={14} />
       </button>
+      {mode === 'increment' ? (
+        <div className="col-span-full space-y-1.5">
+          <span className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-400">Increment By</span>
+          <div className="grid grid-cols-3 gap-1 rounded-md border border-white/10 bg-black/20 p-1">
+            {UMBRA_UI_SEED_INCREMENT_OPTIONS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                disabled={disabled}
+                onClick={() => onIncrementChange(option)}
+                className={cn(
+                  'h-8 rounded border text-[10px] font-black transition-colors disabled:cursor-not-allowed disabled:text-zinc-700',
+                  increment === option
+                    ? accent === 'fuchsia'
+                      ? 'border-fuchsia-300/35 bg-fuchsia-500/15 text-fuchsia-100'
+                      : 'border-cyan-300/35 bg-cyan-500/15 text-cyan-100'
+                    : 'border-transparent text-zinc-500 hover:border-white/10 hover:text-zinc-200',
+                )}
+              >
+                +{option.toLocaleString('en-US')}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

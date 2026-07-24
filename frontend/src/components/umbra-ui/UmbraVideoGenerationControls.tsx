@@ -24,7 +24,13 @@ import {
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { cn } from '@/lib/utils';
-import type { PowerPrompterSeedControlMode, PowerPrompterVideoControls, PowerPrompterVideoFamily, PowerPrompterVideoMode } from '@/types/powerPrompter';
+import type {
+  PowerPrompterSeedControlMode,
+  PowerPrompterSeedIncrement,
+  PowerPrompterVideoControls,
+  PowerPrompterVideoFamily,
+  PowerPrompterVideoMode,
+} from '@/types/powerPrompter';
 import type {
   ApiWorkflowItem,
   UmbraQueuePlacement,
@@ -108,6 +114,7 @@ function createDefaultVideoControls(): PowerPrompterVideoControls {
     fps: 16,
     seed: 0,
     seedMode: 'fixed',
+    seedIncrement: 1,
     outputPrefix: 'video/Umbra',
     format: 'auto',
     codec: 'h264',
@@ -779,8 +786,10 @@ export function UmbraVideoGenerationControls({
         },
         queuePlacement,
       });
-      const nextSeed = advanceUmbraUiSeed(queuedSeed, video.seedMode);
-      setVideo((current) => current.seed === video.seed && current.seedMode === video.seedMode
+      const nextSeed = advanceUmbraUiSeed(queuedSeed, video.seedMode, video.seedIncrement);
+      setVideo((current) => current.seed === video.seed
+        && current.seedMode === video.seedMode
+        && current.seedIncrement === video.seedIncrement
         ? { ...current, seed: nextSeed }
         : current);
       const placementMessage = queuePlacement === 'next'
@@ -803,7 +812,7 @@ export function UmbraVideoGenerationControls({
   const queueDisabled = isQueueing || !queueConnected || !comfyConnected || !pipelineMatch.workflow || !workflowPrompt.trim() || requiredMissing;
 
   return (
-    <section className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar">
+    <section data-umbra-ui-video-controls="" className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar">
       <div className="mb-3 flex items-center gap-2">
         <Clapperboard size={13} className="text-fuchsia-300" />
         <h2 className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-300">Video Generation</h2>
@@ -1028,8 +1037,10 @@ export function UmbraVideoGenerationControls({
             <UmbraSeedControls
               seed={String(video.seed)}
               mode={video.seedMode}
+              increment={video.seedIncrement}
               onSeedChange={(value) => setCommon('seed', normalizeUmbraUiSeed(value, video.seed))}
               onModeChange={(mode: PowerPrompterSeedControlMode) => setCommon('seedMode', mode)}
+              onIncrementChange={(increment: PowerPrompterSeedIncrement) => setCommon('seedIncrement', increment)}
               accent="fuchsia"
             />
           </div>

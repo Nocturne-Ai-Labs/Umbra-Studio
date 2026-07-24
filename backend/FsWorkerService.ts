@@ -137,6 +137,13 @@ type FsWorkerRequest =
         }>;
         force?: boolean;
       };
+    }
+  | {
+      id: string;
+      type: 'system-trash';
+      payload: {
+        fullPath: string;
+      };
     };
 
 type FsWorkerResponse =
@@ -246,6 +253,10 @@ export class FsWorkerService {
 
   async delete(payload: Extract<FsWorkerRequest, { type: 'delete' }>['payload']) {
     return this.sendRequest({ type: 'delete', payload });
+  }
+
+  async systemTrash(payload: Extract<FsWorkerRequest, { type: 'system-trash' }>['payload']) {
+    return this.sendRequest({ type: 'system-trash', payload });
   }
 
   dispose() {

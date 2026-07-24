@@ -11,8 +11,9 @@ Minokai.
 ## Default Release Policy
 
 Published updates are versioned releases by default. Increment the patch
-version once before building any platform packages, update `CHANGELOG.md`, and
-use that same version for Windows, Linux, the Git tag, and GitHub release.
+version once before building any platform packages unless the user explicitly
+requests a minor or major milestone, update `CHANGELOG.md`, and use that same
+version for Windows, Linux, the Git tag, and GitHub release.
 
 Use a no-bump build only when the user explicitly asks for a local no-bump
 build or an in-place update of an existing local version folder. GitHub Actions

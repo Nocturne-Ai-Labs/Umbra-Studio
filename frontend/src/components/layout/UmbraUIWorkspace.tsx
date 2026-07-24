@@ -25,6 +25,7 @@ import type {
   PowerPrompterModelType,
   PowerPrompterOutputUpscaleControls,
   PowerPrompterSeedControlMode,
+  PowerPrompterSeedIncrement,
 } from '@/types/powerPrompter';
 import {
   useUmbraPowerPrompterBridge,
@@ -54,6 +55,7 @@ import { UmbraPositivePromptEditor } from '@/components/umbra-ui/UmbraPositivePr
 import { UmbraAgentPromptPanel } from '@/components/umbra-ui/UmbraAgentPromptPanel';
 import { UmbraInlineAgentPrompt } from '@/components/umbra-ui/UmbraInlineAgentPrompt';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
+import { UmbraMobileWorkspaceSheet } from '@/components/umbra-ui/UmbraMobileWorkspaceSheet';
 import {
   UmbraQueuePlacementControls,
   useUmbraQueuePlacement,
@@ -106,6 +108,7 @@ import {
 import { listUmbraUiPipelineFamilies, resolveUmbraUiPipeline } from '@/lib/umbraUiPipelines';
 import {
   advanceUmbraUiSeed,
+  normalizeUmbraUiSeedIncrement,
   normalizeUmbraUiSeedMode,
   resolveUmbraUiQueueSeed,
 } from '@/lib/umbraUiSeed';
@@ -356,6 +359,7 @@ export function UmbraUIWorkspace() {
   const [clipSkip, setClipSkip] = React.useState('1');
   const [seed, setSeed] = React.useState('0');
   const [seedMode, setSeedMode] = React.useState<PowerPrompterSeedControlMode>('fixed');
+  const [seedIncrement, setSeedIncrement] = React.useState<PowerPrompterSeedIncrement>(1);
   const [steps, setSteps] = React.useState('35');
   const [cfg, setCfg] = React.useState('4');
   const [width, setWidth] = React.useState('896');
@@ -833,6 +837,10 @@ export function UmbraUIWorkspace() {
     if (inheritedSeed) setSeed(inheritedSeed);
     const inheritedSeedMode = readString('controlAfterGenerate');
     if (replace || inheritedSeedMode) setSeedMode(normalizeUmbraUiSeedMode(inheritedSeedMode));
+    const inheritedSeedIncrement = generation.seedIncrement;
+    if (replace || inheritedSeedIncrement !== undefined) {
+      setSeedIncrement(normalizeUmbraUiSeedIncrement(inheritedSeedIncrement));
+    }
     const inheritedSteps = readNumber('steps');
     if (inheritedSteps) setSteps(inheritedSteps);
     const inheritedCfg = readNumber('cfg');
@@ -1136,6 +1144,7 @@ export function UmbraUIWorkspace() {
           : controlNumber('1', imageCapabilities.clipSkip.value),
         seed: queuedSeed,
         seedMode: seedIsAdjustable ? seedMode : 'fixed',
+        seedIncrement: seedIsAdjustable ? seedIncrement : 1,
         steps: controlNumber(steps, imageCapabilities.steps.support === 'adjustable' ? undefined : imageCapabilities.steps.value),
         cfg: controlNumber(cfg, imageCapabilities.guidance.support === 'adjustable' ? undefined : imageCapabilities.guidance.value),
         samplerName: effectiveSampler,
@@ -1184,7 +1193,9 @@ export function UmbraUIWorkspace() {
         if (!originalPath) throw new Error('Umbra could not identify the original Gallery image to replace.');
         img2imgSourceReplacementRequestsRef.current.set(requestId, originalPath);
       }
-      if (seedIsAdjustable) setSeed(String(advanceUmbraUiSeed(queuedSeed, seedMode)));
+      if (seedIsAdjustable) {
+        setSeed(String(advanceUmbraUiSeed(queuedSeed, seedMode, seedIncrement)));
+      }
       const jobLabel = activeImageFeature === 'img2img' ? 'IMG2IMG job' : 'Image';
       const placementMessage = effectivePlacement === 'next'
         ? 'will run after the current Power Prompter image.'
@@ -1232,6 +1243,7 @@ export function UmbraUIWorkspace() {
     samplerName,
     scheduler,
     seed,
+    seedIncrement,
     seedMode,
     showToast,
     steps,
@@ -1345,6 +1357,7 @@ export function UmbraUIWorkspace() {
             clipSkip: Number(clipSkip),
             seed: Number(seed),
             seedMode,
+            seedIncrement,
             steps: Number(steps),
             cfg: Number(cfg),
             width: Number(width),
@@ -1405,6 +1418,7 @@ export function UmbraUIWorkspace() {
     samplerName,
     scheduler,
     seed,
+    seedIncrement,
     seedMode,
     selectedImageWorkflow?.id,
     steps,
@@ -1427,6 +1441,17 @@ export function UmbraUIWorkspace() {
         clearStoredMediaHandoff(handoff);
       }, 250);
       if (handoff.mode === 'video') setActiveMode('video');
+      if (handoff.mode === 'txt2img') {
+        setActiveMode('image');
+        setImg2imgSource({
+          path: '',
+          originalPath: '',
+          name: '',
+          imageUrl: '',
+          width: 0,
+          height: 0,
+        });
+      }
       if (handoff.mode === 'img2img') {
         setActiveMode('img2img');
         setImg2imgSource({
@@ -1445,7 +1470,19 @@ export function UmbraUIWorkspace() {
       const snapshot = handoff.generation;
       if (!snapshot) return;
 
-      if (snapshot.positivePrompt) {
+      if (snapshot.positivePromptSegments?.length) {
+        const segments = snapshot.positivePromptSegments.map((segment) => createUmbraUiPromptSegment(
+          segment.text,
+          {
+            label: segment.label,
+            slotType: segment.slotType,
+            variantId: segment.variantId,
+            variantName: segment.variantName,
+          },
+        ));
+        setPromptSegments(segments);
+        setActivePromptSegmentId(segments[0]?.id || '');
+      } else if (snapshot.positivePrompt) {
         const segment = createUmbraUiPromptSegment(snapshot.positivePrompt);
         setPromptSegments([segment]);
         setActivePromptSegmentId(segment.id);
@@ -1465,6 +1502,8 @@ export function UmbraUIWorkspace() {
         checkpointName: checkpoint,
         negativePrompt: snapshot.negativePrompt,
         seed: snapshot.seed,
+        controlAfterGenerate: snapshot.controlAfterGenerate,
+        seedIncrement: snapshot.seedIncrement,
         steps: snapshot.steps,
         cfg: snapshot.cfg,
         clipSkip: snapshot.clipSkip,
@@ -1474,6 +1513,9 @@ export function UmbraUIWorkspace() {
         height: snapshot.height,
         workflowResources: snapshot.workflowResources,
         loras: inheritedLoras,
+        hiresFix: snapshot.hiresFix,
+        detailerPipeline: snapshot.detailerPipeline,
+        outputUpscale: snapshot.outputUpscale,
       }, { replace: true, modelFamily: snapshot.modelFamily });
 
       if (snapshot.vaeName) {
@@ -1581,11 +1623,11 @@ export function UmbraUIWorkspace() {
 
   return (
     <div data-umbra-ui-workspace="" className="flex h-full min-h-0 flex-col bg-[var(--umbra-bg)] text-zinc-100">
-      <header className="flex min-h-14 flex-wrap items-center gap-3 border-b border-white/10 bg-black/30 px-4 py-1.5 max-[1140px]:gap-2 max-[1140px]:px-3">
+      <header data-umbra-ui-header="" className="flex min-h-14 flex-wrap items-center gap-3 border-b border-white/10 bg-black/30 px-4 py-1.5 max-[1140px]:gap-2 max-[1140px]:px-3">
         <PanelsTopLeft size={16} className="text-[var(--umbra-accent)] max-[1140px]:hidden" />
         <div className="text-xs font-black uppercase tracking-[0.18em] max-[1140px]:hidden">Umbra UI</div>
         <div className="h-4 w-px bg-white/10 max-[1140px]:hidden" />
-        <div className="inline-flex h-9 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/25">
+        <div data-umbra-ui-mode-nav="" className="inline-flex h-9 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/25">
           <button
             type="button"
             onClick={() => setActiveMode('image')}
@@ -1637,14 +1679,15 @@ export function UmbraUIWorkspace() {
             <ImageUp size={13} /> Extras
           </button>
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+        <div data-umbra-ui-header-actions="" className="ml-auto flex shrink-0 items-center gap-2">
           <button
             type="button"
             onClick={() => setAgentPanelOpen(true)}
+            data-umbra-ui-agent-button=""
             className="relative inline-flex h-9 items-center gap-2 rounded-md border border-cyan-300/20 bg-cyan-500/[0.045] px-3 text-[10px] font-black uppercase tracking-[0.11em] text-cyan-100 transition-colors hover:bg-cyan-500/[0.1]"
           >
             <Bot size={13} />
-            Agent
+            <span data-umbra-ui-agent-label="">Agent</span>
             {agentDraftCount > 0 ? (
               <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-cyan-300 px-1 font-mono text-[9px] text-black">{agentDraftCount}</span>
             ) : null}
@@ -1653,16 +1696,17 @@ export function UmbraUIWorkspace() {
             'h-1.5 w-1.5 rounded-full shadow-[0_0_7px_currentColor]',
             comfyConnected ? 'bg-emerald-400 text-emerald-400' : 'bg-zinc-700 text-zinc-700',
           )} />
-          <span className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-400">
+          <span data-umbra-ui-comfy-label="" className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-400">
             {comfyConnected ? 'ComfyUI Ready' : 'ComfyUI Offline'}
           </span>
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(360px,400px)_minmax(320px,1fr)]">
+      <div data-umbra-ui-body="" className="grid min-h-0 flex-1 grid-cols-[minmax(360px,400px)_minmax(320px,1fr)]">
         {modeIsMounted('extras') ? (
           <div className={activeMode === 'extras' ? 'contents' : 'hidden'} aria-hidden={activeMode !== 'extras'}>
             <UmbraExtrasWorkspace
+              active={activeMode === 'extras'}
               upscaleModels={modelCatalog.upscaleModels}
               modelName={outputUpscale.modelName}
               maxDimension={outputUpscale.maxDimension}
@@ -1677,6 +1721,7 @@ export function UmbraUIWorkspace() {
         {modeIsMounted('inpaint') ? (
           <div className={inpaintWorkspaceActive ? 'contents' : 'hidden'} aria-hidden={!inpaintWorkspaceActive}>
             <UmbraInpaintWorkspace
+            active={inpaintWorkspaceActive}
             capabilities={inpaintCapabilities}
             inpaintAdapter={inpaintPipelineMatch.pipeline?.inpaintAdapter || 'native_edit'}
             modelFamily={modelFamily}
@@ -1735,6 +1780,10 @@ export function UmbraUIWorkspace() {
             onNegativePromptChange={setNegativePrompt}
             seed={seed}
             onSeedChange={setSeed}
+            seedMode={seedMode}
+            onSeedModeChange={setSeedMode}
+            seedIncrement={seedIncrement}
+            onSeedIncrementChange={setSeedIncrement}
             steps={steps}
             onStepsChange={setSteps}
             cfg={cfg}
@@ -1762,7 +1811,7 @@ export function UmbraUIWorkspace() {
             className={activeMode === 'image' || activeMode === 'img2img' ? 'contents' : 'hidden'}
             aria-hidden={activeMode !== 'image' && activeMode !== 'img2img'}
           >
-          <section className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-4 custom-scrollbar">
+          <section data-umbra-ui-generation-panel="" className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-4 custom-scrollbar">
           <div className="mb-3 flex items-center gap-2">
             <Sparkles size={14} className="text-cyan-300" />
             <h2 className="text-xs font-black uppercase tracking-[0.14em] text-zinc-200">Generation</h2>
@@ -1883,8 +1932,10 @@ export function UmbraUIWorkspace() {
             <UmbraSeedControls
               seed={seed}
               mode={seedMode}
+              increment={seedIncrement}
               onSeedChange={setSeed}
               onModeChange={setSeedMode}
+              onIncrementChange={setSeedIncrement}
               disabled={imageCapabilities.seed.support !== 'adjustable'}
               disabledReason={imageCapabilities.seed.reason}
             />
@@ -2034,7 +2085,21 @@ export function UmbraUIWorkspace() {
                   : 'Queue this image through the locked Umbra UI pipeline')}
           />
         </section>
-        <main className="flex min-h-0 min-w-0 flex-col">
+        <UmbraMobileWorkspaceSheet
+          active={activeMode === 'image' || activeMode === 'img2img'}
+          title={activeMode === 'img2img' ? 'IMG2IMG Preview' : 'Image Preview'}
+          subtitle={queueSummary.running > 0
+            ? `Generating ${queueSummary.activePosition}/${queueSummary.activeTotal}`
+            : queueSummary.pending > 0
+              ? `${queueSummary.pending} queued`
+              : imagePreviewUrl
+                ? 'Latest result'
+                : 'Waiting for output'}
+          badge={queueSummary.completed > 0 ? `${queueSummary.completed}` : undefined}
+          icon={<ImageIcon size={14} />}
+          thumbnailUrl={imagePreviewUrl}
+        >
+          <main data-umbra-ui-preview-panel="" className="flex min-h-0 min-w-0 flex-col">
           <div className="flex min-h-11 items-center gap-2 border-b border-white/10 px-3">
             {activeMode === 'image' || activeMode === 'img2img'
               ? <ImageIcon size={13} className="text-zinc-500" />
@@ -2127,6 +2192,7 @@ export function UmbraUIWorkspace() {
             ) : null}
           </div>
           </main>
+        </UmbraMobileWorkspaceSheet>
           </div>
         ) : null}
         {modeIsMounted('video') ? (
@@ -2146,14 +2212,23 @@ export function UmbraUIWorkspace() {
               editorDraft={videoEditorDraft}
               onEditorDraftApplied={(draftId) => setVideoEditorDraft((current) => current?.id === draftId ? null : current)}
             />
-            <UmbraVideoQueuePanel
-              jobs={videoJobs}
-              loading={videoJobsLoading}
-              error={videoJobsError}
-              queueVideo={queueVideo}
-              onLoadIntoEditor={setVideoEditorDraft}
-              onRefresh={refreshVideoJobs}
-            />
+            <UmbraMobileWorkspaceSheet
+              active={activeMode === 'video'}
+              title="Video Review"
+              subtitle={videoJobs.length > 0 ? `${videoJobs.length} recent job${videoJobs.length === 1 ? '' : 's'}` : 'Waiting for output'}
+              badge={videoJobs.length > 0 ? `${videoJobs.length}` : undefined}
+              icon={<Clapperboard size={14} />}
+              tone="fuchsia"
+            >
+              <UmbraVideoQueuePanel
+                jobs={videoJobs}
+                loading={videoJobsLoading}
+                error={videoJobsError}
+                queueVideo={queueVideo}
+                onLoadIntoEditor={setVideoEditorDraft}
+                onRefresh={refreshVideoJobs}
+              />
+            </UmbraMobileWorkspaceSheet>
           </div>
         ) : null}
 

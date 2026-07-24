@@ -7,6 +7,7 @@ export type PowerPrompterEditorMode = 'cards' | 'classic';
 export type PowerPrompterCardType = 'character' | 'location' | 'expression' | 'action' | 'style' | 'custom';
 export type PowerPrompterCardSuggestionScope = 'scoped' | 'all';
 export type PowerPrompterSeedControlMode = 'fixed' | 'increment' | 'decrement' | 'randomize';
+export type PowerPrompterSeedIncrement = 1 | 100 | 1000;
 export type PowerPrompterStyleSeedMode = 'same' | 'different';
 export type PowerPrompterModelType = 'checkpoint' | 'diffusers' | 'diffusion_model' | 'unet' | 'gguf';
 export type PowerPrompterQueueTraversalMode = 'cycle' | 'exhaustive';
@@ -109,6 +110,7 @@ export interface PowerPrompterGenerationControls {
   negativePrompt: string;
   seed: number;
   controlAfterGenerate: PowerPrompterSeedControlMode;
+  seedIncrement: PowerPrompterSeedIncrement;
   steps: number;
   cfg: number;
   clipSkip: number;

@@ -196,8 +196,13 @@ export function UmbraPositivePromptEditor({
             <article key={segment.id} className={cn('rounded-md border border-white/10 bg-black/25 p-2 transition-colors', active && activeClasses)}>
               <div className="mb-1.5 flex items-center gap-1.5">
                 <span className="font-mono text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-400">
-                  {index === 0 ? 'Base' : `Segment ${index + 1}`}
+                  {segment.label || (index === 0 ? 'Base' : `Segment ${index + 1}`)}
                 </span>
+                {segment.variantName ? (
+                  <span className="min-w-0 truncate font-mono text-[9px] text-zinc-600" title={segment.variantName}>
+                    {segment.variantName}
+                  </span>
+                ) : null}
                 <div className="ml-auto flex items-center gap-1">
                   <button
                     type="button"

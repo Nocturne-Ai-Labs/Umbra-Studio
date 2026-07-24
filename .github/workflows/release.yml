@@ -9,7 +9,7 @@ on:
         type: boolean
         default: false
       release_tag:
-        description: Release tag when publishing, for example v0.10.5
+        description: Release tag when publishing, for example v0.11.0
         required: false
         type: string
   push:

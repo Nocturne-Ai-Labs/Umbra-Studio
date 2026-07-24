@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import postcss from 'postcss';
 import tailwindPostcss from '@tailwindcss/postcss';
 import * as esbuild from 'esbuild';
@@ -91,7 +92,9 @@ async function buildCss() {
   const result = await postcss([tailwindPostcss()]).process(cssSource, {
     from: cssEntrypoints[0],
   });
-  const css = result.css;
+  const css = isDevelopmentBuild
+    ? result.css
+    : (await esbuild.transform(result.css, { loader: 'css', minify: true })).code;
   const fileName = `index-${hashContent(css)}.css`;
   fs.mkdirSync(activePublicAssetsDir, { recursive: true });
   fs.writeFileSync(path.join(activePublicAssetsDir, fileName), css, 'utf-8');
@@ -223,8 +226,8 @@ async function buildJavaScript() {
     bundle: true,
     target: ['es2020'],
     format: 'esm',
-    splitting: false,
-    minify: false,
+    splitting: !isDevelopmentBuild,
+    minify: !isDevelopmentBuild,
     sourcemap: isDevelopmentBuild ? 'linked' : false,
     define: {
       'import.meta.env.DEV': JSON.stringify(isDevelopmentBuild),
@@ -232,7 +235,7 @@ async function buildJavaScript() {
       'import.meta.env.MODE': JSON.stringify(isDevelopmentBuild ? 'development' : 'production'),
       'import.meta.env.UMBRA_DEV_MODE': JSON.stringify(isDevelopmentBuild),
     },
-    publicPath: '/assets/',
+    publicPath: '/',
     entryNames: 'assets/[name]-[hash]',
     chunkNames: 'assets/[name]-[hash]',
     assetNames: 'assets/[name]-[hash]',
@@ -277,7 +280,7 @@ async function buildQueueWorker() {
     target: 'browser',
     format: 'esm',
     splitting: false,
-    minify: false,
+    minify: !isDevelopmentBuild,
     sourcemap: isDevelopmentBuild ? 'linked' : false,
     publicPath: '/assets/',
     naming: {
@@ -306,7 +309,7 @@ async function buildRasterFilterWorker() {
     target: 'browser',
     format: 'esm',
     splitting: false,
-    minify: false,
+    minify: !isDevelopmentBuild,
     sourcemap: isDevelopmentBuild ? 'linked' : false,
     publicPath: '/assets/',
     naming: {
@@ -335,7 +338,7 @@ async function buildCanvasEncodeWorker() {
     target: 'browser',
     format: 'esm',
     splitting: false,
-    minify: false,
+    minify: !isDevelopmentBuild,
     sourcemap: isDevelopmentBuild ? 'linked' : false,
     publicPath: '/assets/',
     naming: {
@@ -364,7 +367,7 @@ async function buildPsdEncodeWorker() {
     target: 'browser',
     format: 'esm',
     splitting: false,
-    minify: false,
+    minify: !isDevelopmentBuild,
     sourcemap: isDevelopmentBuild ? 'linked' : false,
     publicPath: '/assets/',
     naming: {
@@ -394,6 +397,37 @@ function sanitizeGeneratedJavaScript() {
     const source = fs.readFileSync(filePath, 'utf-8');
     const sanitized = source.replace(/^\/\/ raw:.*(?:\r?\n)/gm, '');
     if (sanitized !== source) fs.writeFileSync(filePath, sanitized, 'utf-8');
+  }
+}
+
+function compressProductionAssets() {
+  if (isDevelopmentBuild || !fs.existsSync(activePublicAssetsDir)) return;
+  const compressibleExtensions = new Set(['.css', '.js', '.json', '.svg']);
+  const pending = [activePublicAssetsDir];
+
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current) continue;
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const filePath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(filePath);
+        continue;
+      }
+      if (!entry.isFile() || !compressibleExtensions.has(path.extname(entry.name).toLowerCase())) continue;
+      const source = fs.readFileSync(filePath);
+      if (source.byteLength < 1024) continue;
+
+      const brotli = brotliCompressSync(source, {
+        params: {
+          [zlibConstants.BROTLI_PARAM_QUALITY]: 9,
+          [zlibConstants.BROTLI_PARAM_MODE]: zlibConstants.BROTLI_MODE_TEXT,
+        },
+      });
+      const gzip = gzipSync(source, { level: 9 });
+      if (brotli.byteLength < source.byteLength) fs.writeFileSync(`${filePath}.br`, brotli);
+      if (gzip.byteLength < source.byteLength) fs.writeFileSync(`${filePath}.gz`, gzip);
+    }
   }
 }
 
@@ -429,6 +463,7 @@ async function buildFrontend() {
     const cssFileName = await buildCss();
     sanitizeGeneratedJavaScript();
     writeIndexHtml(cssFileName, mainBundlePath);
+    compressProductionAssets();
     await withFrontendPublishLock(() => {
       fs.rmSync(publicDir, { recursive: true, force: true });
       fs.renameSync(tempPublicDir, publicDir);

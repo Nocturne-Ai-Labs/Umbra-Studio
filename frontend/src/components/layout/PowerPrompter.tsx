@@ -51,8 +51,15 @@ import { loadAppSettings, pushAppSettingsToBackend } from '@/lib/appSettings';
 import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
 import { subscribeUiSession } from '@/lib/uiSessionSocket';
 import { deletePathsWithSettings } from '@/utils/trashActions';
-import { extractGenerationParams, extractMetadataFromPath } from '@/utils/metadata';
-import type { ImageMetadata } from '@/utils/metadata';
+import { decodePowerPrompterImageRestore } from '@/lib/powerPrompterImageRestore';
+import {
+  clearPendingPowerPrompterImageRestoreHandoff,
+  fetchPowerPrompterImageRestoreMetadata,
+  normalizePowerPrompterImageRestoreHandoff,
+  POWER_PROMPTER_IMAGE_RESTORE_HANDOFF_EVENT,
+  takePendingPowerPrompterImageRestoreHandoff,
+  type PowerPrompterImageRestoreHandoff,
+} from '@/lib/powerPrompterImageRestoreHandoff';
 import {
   DEFAULT_QUEUE_MANAGER_PREVIEW_SPLIT,
   QUEUE_DIVERSITY_MAX,
@@ -474,9 +481,11 @@ type PowerPrompterPresetStore = {
 };
 
 type PowerPrompterPresetSession = {
+  kind?: 'preset' | 'image-restore';
   presetId: string;
   presetName: string;
-  sourceFile: string;
+  sourceFile: string | null;
+  ppuid?: string;
   baseDocument: PowerPrompterCardDocument;
   baseContent: string;
   baseHadPendingChanges: boolean;
@@ -5414,6 +5423,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       promptOutputSubfolders?: unknown[];
       promptStyleNames?: unknown[];
       promptSeedGroupIds?: unknown[];
+      promptEntries?: QueuePromptPreviewEntry[];
+      editorSnapshot?: PersistedQueueEditorSnapshot;
       styleSeedMode?: unknown;
     },
     requestIdOverride?: string,
@@ -5504,6 +5515,10 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       promptOutputSubfolders: normalizedPromptOutputSubfolders,
       promptStyleNames: normalizedPromptStyleNames,
       promptSeedGroupIds: normalizedPromptSeedGroupIds,
+      promptEntries: Array.isArray(stateOverride?.promptEntries)
+        ? stateOverride.promptEntries.slice(0, cleanedPrompts.length)
+        : undefined,
+      editorSnapshot: normalizeQueueEditorSnapshot(stateOverride?.editorSnapshot) || undefined,
       styleSeedMode: normalizedStyleSeedMode,
     };
     logPowerPrompterDebug('queue:websocket:requestPrepared', {
@@ -5590,6 +5605,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       promptOutputSubfolders: cleanedPrompts.map((_, index) => String(meta.promptOutputSubfolders[index] || '').trim()),
       promptStyleNames: cleanedPrompts.map((_, index) => String(meta.promptStyleNames[index] || '').trim()),
       promptSeedGroupIds: cleanedPrompts.map((_, index) => String(meta.promptSeedGroupIds[index] || `${meta.setId}:${index}`).trim()),
+      promptEntries: meta.promptEntries?.slice(0, cleanedPrompts.length),
+      editorSnapshot: meta.editorSnapshot,
       styleSeedMode: String((cardDocumentRef.current as any).styleSeedMode || 'same') === 'different' ? 'different' : 'same',
       pipeline,
       modelFamily: pipeline.modelFamily,
@@ -6394,7 +6411,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         setGlobalSearchQuery(normalizePowerPrompterUiSearchValue(preferences?.globalSearchQuery));
         const nextPanelMode = preferences?.panelMode;
         if (
-          (nextPanelMode === 'editor' || nextPanelMode === 'queue-manager' || nextPanelMode === 'queue-editor')
+          (nextPanelMode === 'editor' || nextPanelMode === 'preset-editor' || nextPanelMode === 'queue-manager' || nextPanelMode === 'queue-editor')
           && !shouldIgnoreIncomingPanelMode(nextPanelMode, preferences)
         ) {
           setPrompterPanelMode(nextPanelMode);
@@ -7597,7 +7614,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     }
     const nextPanelMode = preferences.panelMode;
     if (
-      (nextPanelMode === 'editor' || nextPanelMode === 'queue-manager' || nextPanelMode === 'queue-editor')
+      (nextPanelMode === 'editor' || nextPanelMode === 'preset-editor' || nextPanelMode === 'queue-manager' || nextPanelMode === 'queue-editor')
       && !shouldIgnoreIncomingPanelMode(nextPanelMode, preferences)
     ) {
       setPrompterPanelMode(nextPanelMode);
@@ -7812,6 +7829,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       };
       clearAutosaveTimer();
       const presetSession: PowerPrompterPresetSession = {
+        kind: 'preset',
         presetId: selectedPreset.id,
         presetName: selectedPreset.name,
         sourceFile: activeFile,
@@ -7825,7 +7843,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       handleCardDocumentChange(normalized);
       hasPendingChangesRef.current = false;
       setQueueSetTarget(clampQueueSetId(normalized.activeQueueSet));
-      handlePrompterPanelModeChange('editor');
+      handlePrompterPanelModeChange('preset-editor');
       await persistPowerPrompterPresets(powerPrompterPresets, selectedPreset.id);
       showToast(`Loaded Preset Editor: ${selectedPreset.name}`, 'success');
     } catch (error: any) {
@@ -7842,6 +7860,101 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     selectedPowerPrompterPresetId,
     showToast,
   ]);
+
+  const handleRestorePowerPrompterImage = useCallback(async (
+    handoff: PowerPrompterImageRestoreHandoff,
+  ) => {
+    setPowerPrompterPresetBusy('load');
+    try {
+      const metadata = await fetchPowerPrompterImageRestoreMetadata(handoff.path);
+      const restoredImage = await decodePowerPrompterImageRestore(metadata);
+      const editorSnapshot = normalizeQueueEditorSnapshot(restoredImage.snapshot);
+      if (!editorSnapshot) {
+        throw new Error('The image contains a Power Prompter snapshot, but its card document is invalid.');
+      }
+
+      const currentDocument = normalizePowerPrompterCardDocument(
+        cardDocumentRef.current,
+        currentFileRef.current,
+      );
+      const existingSession = activePowerPrompterPresetSessionRef.current;
+      const baseDocument = existingSession?.baseDocument || currentDocument;
+      const baseContent = existingSession?.baseContent
+        || contentRef.current
+        || composeActivePromptFromCards(currentDocument.cards, currentDocument.activeQueueSet);
+      const baseHadPendingChanges = existingSession?.baseHadPendingChanges ?? hasPendingChangesRef.current;
+      const restoredBase = normalizePowerPrompterCardDocument(
+        editorSnapshot.document,
+        currentFileRef.current,
+      );
+      const restoredDocument: PowerPrompterCardDocument = {
+        ...restoredBase,
+        file: currentFileRef.current || null,
+        cards: normalizeChainCards(restoredBase.cards),
+        updatedAt: new Date().toISOString(),
+      };
+      const shortPpuid = restoredImage.ppuid
+        ? restoredImage.ppuid.replace(/^pp_/, '').slice(0, 12)
+        : `${restoredImage.setId}-${restoredImage.promptIndex + 1}`;
+      const session: PowerPrompterPresetSession = {
+        kind: 'image-restore',
+        presetId: `image-restore-${restoredImage.ppuid || Date.now()}`,
+        presetName: `Image ${shortPpuid}`,
+        sourceFile: currentFileRef.current || null,
+        ppuid: restoredImage.ppuid || undefined,
+        baseDocument,
+        baseContent,
+        baseHadPendingChanges,
+        loadedAt: Date.now(),
+      };
+
+      clearAutosaveTimer();
+      activePowerPrompterPresetSessionRef.current = session;
+      setActivePowerPrompterPresetSession(session);
+      handleCardDocumentChange(restoredDocument);
+      hasPendingChangesRef.current = false;
+      setQueueSetTarget(clampQueueSetId(restoredDocument.activeQueueSet));
+      handlePrompterPanelModeChange('preset-editor');
+      showToast(
+        restoredImage.ppuid
+          ? `Restored Power Prompter image ${restoredImage.ppuid}`
+          : 'Restored Power Prompter image snapshot',
+        'success',
+      );
+    } catch (error: any) {
+      showToast(String(error?.message || 'Failed to restore Power Prompter image'), 'error');
+    } finally {
+      setPowerPrompterPresetBusy(null);
+    }
+  }, [
+    handleCardDocumentChange,
+    handlePrompterPanelModeChange,
+    showToast,
+  ]);
+
+  useEffect(() => {
+    const restoreFromHandoff = (value: unknown) => {
+      const handoff = normalizePowerPrompterImageRestoreHandoff(value);
+      if (!handoff) return;
+      clearPendingPowerPrompterImageRestoreHandoff();
+      void handleRestorePowerPrompterImage(handoff);
+    };
+    const pendingHandoff = takePendingPowerPrompterImageRestoreHandoff();
+    if (pendingHandoff) void handleRestorePowerPrompterImage(pendingHandoff);
+    const onRestoreRequest = (event: Event) => {
+      restoreFromHandoff((event as CustomEvent).detail);
+    };
+    window.addEventListener(
+      POWER_PROMPTER_IMAGE_RESTORE_HANDOFF_EVENT,
+      onRestoreRequest as EventListener,
+    );
+    return () => {
+      window.removeEventListener(
+        POWER_PROMPTER_IMAGE_RESTORE_HANDOFF_EVENT,
+        onRestoreRequest as EventListener,
+      );
+    };
+  }, [handleRestorePowerPrompterImage]);
 
   const handleUnloadPowerPrompterPreset = useCallback(() => {
     const session = activePowerPrompterPresetSessionRef.current;
@@ -7865,7 +7978,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     if (hasPendingChangesRef.current) {
       markPendingChange();
     }
-    showToast(`Unloaded preset: ${session.presetName}`, 'success');
+    showToast(
+      session.kind === 'image-restore'
+        ? `Closed restored image: ${session.presetName}`
+        : `Unloaded preset: ${session.presetName}`,
+      'success',
+    );
   }, [showToast]);
 
   const handleDeletePowerPrompterPreset = useCallback(async () => {
@@ -9100,6 +9218,17 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       String(targetBridgeId || '').trim() || effectiveQueueTargetBridgeId,
       selectedQueueTargetType
     );
+    const editorSnapshot = createQueueEditorSnapshot(
+      cardDocumentRef.current,
+      currentFileRef.current || null,
+      {
+        traversalMode: queueTraversalMode,
+        diversity: queueDiversity,
+        promptLimit: queuePromptLimit,
+        shuffleEnabled: queueShuffleEnabled,
+        shuffleSeed: settings.queueShuffleSeed,
+      },
+    );
     queueRequestMetaRef.current.set(requestId, {
       mode,
       setId,
@@ -9116,6 +9245,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       generationByPrompt: cleanedPrompts.map((_, index) =>
         normalizePowerPrompterGenerationControls(generationByPrompt[index])
       ),
+      editorSnapshot,
     });
     void createQueueHistoryEntryForRequest(requestId);
 
@@ -9162,7 +9292,10 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       generationByPrompt,
       promptSetIds,
       promptOutputSubfolders,
+      promptStyleNames,
       promptSeedGroupIds,
+      promptEntries: promptEntries?.slice(0, cleanedPrompts.length),
+      editorSnapshot,
     }, requestId, resolvedQueueTarget.targetBridgeId, resolvedQueueTarget.queueTargetType);
     if (successToast) {
       showToast(successToast, 'success');
@@ -11294,8 +11427,35 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
 
   const isQueueManagerPanel = prompterPanelMode === 'queue-manager'
     || (POWER_PROMPTER_QUEUE_EDITOR_ENABLED && prompterPanelMode === 'queue-editor');
-  const isEditorPanelActive = prompterPanelMode === 'editor';
+  const isEditorPanelActive = prompterPanelMode === 'editor' || prompterPanelMode === 'preset-editor';
   const isQueueEditorPanelActive = POWER_PROMPTER_QUEUE_EDITOR_ENABLED && prompterPanelMode === 'queue-editor';
+  const powerPrompterPresetBar = (
+    <PowerPrompterPresetBar
+      isPhoneRemote={isPhoneRemote}
+      currentFile={currentFile}
+      presets={powerPrompterPresets}
+      selectedPresetId={selectedPowerPrompterPresetId}
+      setSelectedPresetId={setSelectedPowerPrompterPresetId}
+      presetNameDraft={powerPrompterPresetNameDraft}
+      setPresetNameDraft={setPowerPrompterPresetNameDraft}
+      presetBusy={powerPrompterPresetBusy}
+      onSavePreset={handleSavePowerPrompterPreset}
+      onLoadPreset={handleLoadPowerPrompterPreset}
+      onUnloadPreset={handleUnloadPowerPrompterPreset}
+      onDeletePreset={handleDeletePowerPrompterPreset}
+      onRefreshPresets={() => { void loadPowerPrompterPresets(); }}
+      activePresetSession={activePowerPrompterPresetSession}
+      globalSearchBoxRef={globalSearchBoxRef}
+      globalSearchQuery={globalSearchQuery}
+      setGlobalSearchQuery={setGlobalSearchQuery}
+      globalSearchSuggestionOpen={globalSearchSuggestionOpen}
+      setGlobalSearchSuggestionOpen={setGlobalSearchSuggestionOpen}
+      globalSearchSuggestionIndex={globalSearchSuggestionIndex}
+      setGlobalSearchSuggestionIndex={setGlobalSearchSuggestionIndex}
+      filteredGlobalSearchSuggestions={filteredGlobalSearchSuggestions}
+      applyGlobalSearchSelection={applyGlobalSearchSelection}
+    />
+  );
   const floatingToolMenusEnabled = !isPhoneRemote;
   const setFileMenuCollapsed = useCallback<React.Dispatch<React.SetStateAction<boolean>>>((value) => {
     setLeftPanelCollapsed((previous) => {
@@ -11451,30 +11611,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           handleDeleteSavedQueueSnapshot={handleDeleteSavedQueueSnapshot}
           refreshSavedQueues={refreshSavedQueues}
         />
-        <PowerPrompterPresetBar
-          currentFile={currentFile}
-          presets={powerPrompterPresets}
-          selectedPresetId={selectedPowerPrompterPresetId}
-          setSelectedPresetId={setSelectedPowerPrompterPresetId}
-          presetNameDraft={powerPrompterPresetNameDraft}
-          setPresetNameDraft={setPowerPrompterPresetNameDraft}
-          presetBusy={powerPrompterPresetBusy}
-          onSavePreset={handleSavePowerPrompterPreset}
-          onLoadPreset={handleLoadPowerPrompterPreset}
-          onUnloadPreset={handleUnloadPowerPrompterPreset}
-          onDeletePreset={handleDeletePowerPrompterPreset}
-          onRefreshPresets={() => { void loadPowerPrompterPresets(); }}
-          activePresetSession={activePowerPrompterPresetSession}
-          globalSearchBoxRef={globalSearchBoxRef}
-          globalSearchQuery={globalSearchQuery}
-          setGlobalSearchQuery={setGlobalSearchQuery}
-          globalSearchSuggestionOpen={globalSearchSuggestionOpen}
-          setGlobalSearchSuggestionOpen={setGlobalSearchSuggestionOpen}
-          globalSearchSuggestionIndex={globalSearchSuggestionIndex}
-          setGlobalSearchSuggestionIndex={setGlobalSearchSuggestionIndex}
-          filteredGlobalSearchSuggestions={filteredGlobalSearchSuggestions}
-          applyGlobalSearchSelection={applyGlobalSearchSelection}
-        />
+        {!isPhoneRemote && prompterPanelMode === 'preset-editor' ? powerPrompterPresetBar : null}
         {floatingToolMenusEnabled && (!leftPanelCollapsed || !rightPanelCollapsed) && (
           <div
             data-umbra-powerprompter-menu-shelf=""
@@ -11609,6 +11746,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           mobileSelectionMode={isPhoneRemote}
           touchRemoteMode={isTouchRemote}
         />
+        {isPhoneRemote && prompterPanelMode === 'preset-editor' ? powerPrompterPresetBar : null}
       </div>
 
       {!floatingToolMenusEnabled ? (

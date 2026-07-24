@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Plus, X, Star, Download, CheckSquare, Square, Loader2, FolderPlus, Pencil, History } from 'lucide-react';
+import { Plus, X, Star, Download, CheckSquare, Square, Loader2, FolderPlus, Pencil, History, SlidersHorizontal } from 'lucide-react';
 import { SourceSelector } from './components/SourceSelector';
 import { SearchInput } from './components/SearchInput';
 import { ImageGrid } from './components/ImageGrid';
@@ -51,6 +51,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
 
   // API Keys modal
   const [showApiKeysModal, setShowApiKeysModal] = useState(false);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   // Lightbox state
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -237,9 +238,16 @@ export function SearchTab({ onDownload }: SearchTabProps) {
   const concepts = datasetObj?.concepts || [];
 
   return (
-    <div className="h-full flex flex-col bg-[var(--umbra-bg)] text-[var(--umbra-text)]" style={{ fontFamily: 'var(--font-family)' }}>
+    <div
+      data-umbra-data-forge-search
+      className="h-full flex flex-col bg-[var(--umbra-bg)] text-[var(--umbra-text)]"
+      style={{ fontFamily: 'var(--font-family)' }}
+    >
       {/* Tab bar */}
-      <div className="glass-panel custom-scrollbar flex-shrink-0 flex items-center gap-1 overflow-x-auto rounded-none border-x-0 border-t-0 px-2 py-1">
+      <div
+        data-umbra-data-forge-search-tabs
+        className="glass-panel custom-scrollbar flex-shrink-0 flex items-center gap-1 overflow-x-auto rounded-none border-x-0 border-t-0 px-2 py-1"
+      >
         <button
           onClick={addSearchTab}
           className="umbra-icon-button flex-shrink-0 rounded p-1.5 transition-colors"
@@ -276,9 +284,29 @@ export function SearchTab({ onDownload }: SearchTabProps) {
       </div>
 
       {/* Main content */}
-      <div className="flex-1 flex min-h-0">
+      <div data-umbra-data-forge-search-main className="flex-1 flex min-h-0">
+        {mobileFiltersOpen && (
+          <button
+            type="button"
+            data-umbra-data-forge-filter-backdrop
+            aria-label="Close source filters"
+            onClick={() => setMobileFiltersOpen(false)}
+          />
+        )}
+
         {/* Left sidebar */}
-        <div className="glass-panel custom-scrollbar w-44 flex-shrink-0 space-y-3 overflow-y-auto rounded-none border-y-0 border-l-0 p-2">
+        <div
+          data-umbra-data-forge-sources
+          data-open={mobileFiltersOpen ? 'true' : 'false'}
+          className="glass-panel custom-scrollbar w-44 flex-shrink-0 space-y-3 overflow-y-auto rounded-none border-y-0 border-l-0 p-2"
+        >
+          <div data-umbra-data-forge-filter-header>
+            <span>Search sources</span>
+            <button type="button" onClick={() => setMobileFiltersOpen(false)} aria-label="Close source filters">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
           <SourceSelector
             selected={activeTab?.sources || []}
             onChange={(sources) => updateSearchTab(activeTab.id, { sources })}
@@ -351,10 +379,22 @@ export function SearchTab({ onDownload }: SearchTabProps) {
         </div>
 
         {/* Center content */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div data-umbra-data-forge-results className="flex-1 flex flex-col min-w-0">
           {/* Search bar - compact */}
-          <div className="glass-panel relative z-20 flex-shrink-0 rounded-none border-x-0 border-t-0 px-2 py-1.5">
+          <div
+            data-umbra-data-forge-search-bar
+            className="glass-panel relative z-20 flex-shrink-0 rounded-none border-x-0 border-t-0 px-2 py-1.5"
+          >
             <div className="flex gap-1.5 items-center">
+              <button
+                type="button"
+                data-umbra-data-forge-filter-button
+                aria-label="Choose sources and recent searches"
+                title="Sources and search history"
+                onClick={() => setMobileFiltersOpen(true)}
+              >
+                <SlidersHorizontal className="h-5 w-5" />
+              </button>
               <div className="flex-1">
                 <SearchInput
                   value={activeTab?.tags || ''}
@@ -418,7 +458,12 @@ export function SearchTab({ onDownload }: SearchTabProps) {
           </div>
 
           {/* Image grid with infinite scroll */}
-          <div ref={scrollContainerRef} onScroll={handleScroll} className="custom-scrollbar flex-1 overflow-y-auto">
+          <div
+            ref={scrollContainerRef}
+            onScroll={handleScroll}
+            data-umbra-data-forge-image-results
+            className="custom-scrollbar flex-1 overflow-y-auto"
+          >
             <ImageGrid
               posts={filteredResults}
               selected={activeTab?.selected || new Set()}
@@ -461,11 +506,14 @@ export function SearchTab({ onDownload }: SearchTabProps) {
       </div>
 
       {/* Download bar with concept toggles */}
-      <div className="glass-panel flex-shrink-0 rounded-none border-x-0 border-b-0 px-2 py-1.5">
+      <div
+        data-umbra-data-forge-download-bar
+        className="glass-panel flex-shrink-0 rounded-none border-x-0 border-b-0 px-2 py-1.5"
+      >
         <div className="flex items-center gap-2">
           <span className="text-[11px] flex-shrink-0" style={{ color: 'rgba(255,255,255,0.5)' }}>Download to:</span>
 
-          <div className="flex items-center gap-0.5 flex-shrink-0">
+          <div data-umbra-data-forge-dataset-picker className="flex items-center gap-0.5 flex-shrink-0">
             <select
               value={selectedDataset}
               onChange={(e) => setSelectedDataset(e.target.value)}
@@ -507,7 +555,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
 
           {/* Concept toggles */}
           {selectedDataset && concepts.length > 0 && (
-            <div className="flex items-center gap-1 flex-wrap flex-1 min-w-0">
+            <div data-umbra-data-forge-concepts className="flex items-center gap-1 flex-wrap flex-1 min-w-0">
               {concepts.slice(0, 20).map(c => {
                 const folder = `${c.repeats}_${c.isReg ? 'reg_' : ''}${c.name}`;
                 const isEnabled = enabledConcepts.has(folder);
@@ -532,6 +580,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
 
           {selectedDataset && (
             <button
+              data-umbra-data-forge-add-concept
               onClick={() => setShowNewConceptModal(true)}
               className="p-1 rounded transition-colors flex-shrink-0"
               style={{ color: 'rgba(255,255,255,0.5)' }}
@@ -544,6 +593,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
           )}
 
           <button
+            data-umbra-data-forge-download-button
             onClick={handleDownload}
             disabled={!selectedDataset || enabledConcepts.size === 0 || (activeTab?.selected.size || 0) === 0}
             className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-all disabled:opacity-40 flex-shrink-0"

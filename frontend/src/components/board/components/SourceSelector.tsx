@@ -21,7 +21,7 @@ export function SourceSelector({ selected, onChange, apiConfig, onOpenApiKeys }:
   };
 
   return (
-    <div className="space-y-2">
+    <div data-umbra-data-forge-source-selector className="space-y-2">
       <div className="flex items-center justify-between">
         <div className="text-[10px] font-medium uppercase tracking-wide" style={{ color: 'rgba(255,255,255,0.55)' }}>
           Sources
@@ -47,7 +47,7 @@ export function SourceSelector({ selected, onChange, apiConfig, onOpenApiKeys }:
         )}
       </div>
 
-      <div className="space-y-1">
+      <div data-umbra-data-forge-source-grid className="space-y-1">
         {SOURCE_LIST.map(source => {
           const isSelected = selected.includes(source.id);
           const requiresAuth = AUTH_REQUIRED.has(source.id);

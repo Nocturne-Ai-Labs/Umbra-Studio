@@ -35,6 +35,8 @@ const baseSettings: UmbraUiInpaintSettings = {
   checkpointName: 'model.safetensors',
   clipSkip: 1,
   seed: 42,
+  seedMode: 'fixed',
+  seedIncrement: 1,
   steps: 20,
   cfg: 2.5,
   samplerName: 'euler',

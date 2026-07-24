@@ -204,11 +204,20 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
     ? 'Saved queue snapshots are parked while Queue Manager follows the live queue only'
     : '';
   return (
-    <div className="h-full min-h-0 px-3 pb-3">
-      <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.25fr)_minmax(380px,0.95fr)] gap-3">
-        <div className="min-h-0 rounded-xl border border-white/10 bg-white/[0.04] shadow-lg shadow-black/20 flex flex-col overflow-hidden">
-          <div className="px-4 py-3 border-b border-white/10 flex items-start justify-between gap-3">
-            <div className="min-w-0">
+    <div data-umbra-queue-manager="" className="h-full min-h-0 px-3 pb-3">
+      <div
+        data-umbra-queue-manager-layout=""
+        className="grid h-full min-h-0 grid-cols-[minmax(0,1.25fr)_minmax(380px,0.95fr)] gap-3"
+      >
+        <div
+          data-umbra-queue-manager-list=""
+          className="min-h-0 rounded-xl border border-white/10 bg-white/[0.04] shadow-lg shadow-black/20 flex flex-col overflow-hidden"
+        >
+          <div
+            data-umbra-queue-manager-header=""
+            className="px-4 py-3 border-b border-white/10 flex items-start justify-between gap-3"
+          >
+            <div data-umbra-queue-manager-summary="" className="min-w-0">
               <div className="text-[10px] uppercase tracking-[0.22em] font-black text-zinc-500">Queue Manager</div>
               <div className="mt-1 text-sm font-semibold text-zinc-100">
                 {activeQueuePosition
@@ -217,7 +226,10 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                     ? `${queueRequestGroups.length} queued group${queueRequestGroups.length === 1 ? '' : 's'}`
                     : 'Waiting for queue activity'}
               </div>
-              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-wider text-zinc-400">
+              <div
+                data-umbra-queue-manager-stats=""
+                className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-wider text-zinc-400"
+              >
                 <span className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5">{queueSetGroups.length} sets</span>
                 <span className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5">{queueRequestGroups.length} groups</span>
                 <span className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5">{queueTotalPromptCount} total</span>
@@ -239,7 +251,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                 )}
               </div>
               {queueManagerStyleOptions.length > 0 && (
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <div data-umbra-queue-manager-style-filters="" className="mt-2 flex flex-wrap items-center gap-1.5">
                   <button
                     type="button"
                     onClick={() => setQueueManagerStyleFilter('')}
@@ -273,8 +285,8 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                 </div>
               )}
             </div>
-            <div className="flex shrink-0 flex-col items-end gap-2">
-              <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <div data-umbra-queue-manager-controls="" className="flex shrink-0 flex-col items-end gap-2">
+              <div data-umbra-queue-manager-control-row="" className="flex flex-wrap items-center justify-end gap-1.5">
                 <button
                   type="button"
                   onClick={() => setQueuePromptExpandedMode((prev) => !prev)}
@@ -308,7 +320,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                   </select>
                 </label>
               </div>
-              <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-zinc-600">
+              <div data-umbra-queue-manager-control-note="" className="text-[9px] font-semibold uppercase tracking-[0.16em] text-zinc-600">
                 Applies before the next dispatch
               </div>
             </div>
@@ -555,7 +567,10 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
               </div>
             </div>
           )}
-          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-3">
+          <div
+            data-umbra-queue-manager-scroll=""
+            className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-3"
+          >
             {queueSetGroups.length <= 0 ? (
               <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-white/10 bg-black/20 px-6 text-center">
                 <ListChecks size={26} className="text-zinc-500" />
@@ -603,6 +618,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                   return (
                     <div
                       key={`queue-manager-set-${setKey}`}
+                      data-umbra-queue-set=""
                       className={`rounded-xl border bg-black/20 overflow-hidden transition-colors ${
                         queueManagerDragState?.kind === 'set' && queueManagerDragState?.setGroupId === setKey
                           ? 'border-cyan-300/45'
@@ -623,15 +639,17 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                       }}
                     >
                       <div
+                        data-umbra-queue-set-header=""
                         className="px-3 py-2.5 border-b border-white/10"
                         style={{
                           borderBottomColor: hexToRgba(setColor, 0.18),
                           background: `linear-gradient(90deg, ${hexToRgba(setColor, 0.13)}, rgba(0,0,0,0.08))`,
                         }}
                       >
-                        <div className="flex items-center gap-2">
+                        <div data-umbra-queue-set-header-row="" className="flex items-center gap-2">
                           <button
                             type="button"
+                            data-umbra-queue-drag-handle=""
                             draggable={QUEUE_MANAGER_REORDER_ENABLED && !setLocked}
                             onDragStart={() => {
                               if (!QUEUE_MANAGER_REORDER_ENABLED) return;
@@ -649,6 +667,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                             <GripVertical size={12} />
                           </button>
                           <button
+                            data-umbra-queue-set-toggle=""
                             onClick={() => queueToggleSetExpandedRef.current?.(setKey)}
                             className="inline-flex items-center gap-1 rounded-md border border-cyan-400/25 bg-cyan-500/10 px-2 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-100 hover:border-cyan-300/55"
                             style={{
@@ -684,6 +703,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                             </span>
                           )}
                           <button
+                            data-umbra-queue-set-clear=""
                             onClick={() => { void queueCancelSetGroupRef.current?.(setGroup.setId); }}
                             disabled={queueDestructiveActionBusy || !setCanCancel}
                             className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors ${
@@ -709,8 +729,8 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                         </div>
                       </div>
                       {setExpanded && (
-                        <div className="p-3 pt-2">
-                          <div className="ml-2 flex flex-col gap-2 border-l border-white/10 pl-3">
+                        <div data-umbra-queue-set-groups="" className="p-3 pt-2">
+                          <div data-umbra-queue-set-group-list="" className="ml-2 flex flex-col gap-2 border-l border-white/10 pl-3">
                             {setGroup.groups.map((group) => {
                               const groupExpanded = expandedQueueGroups[group.requestId] ?? false;
                               const groupCanCancel = group.pending > 0 || group.running > 0 || (group.completed + group.failed < group.total);
@@ -745,6 +765,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                               return (
                                 <div
                                   key={`queue-manager-group-${group.requestId}`}
+                                  data-umbra-queue-group=""
                                   className={`rounded-lg border bg-white/[0.04] overflow-hidden transition-colors ${
                                     queueManagerDragState?.kind === 'group' && queueManagerDragState?.requestId === group.requestId
                                       ? 'border-cyan-300/45'
@@ -769,10 +790,11 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                                     clearQueueManagerDragState();
                                   }}
                                 >
-                                  <div className="px-3 py-2 border-b border-white/10">
-                                    <div className="flex items-center gap-2">
+                                  <div data-umbra-queue-group-header="" className="px-3 py-2 border-b border-white/10">
+                                    <div data-umbra-queue-group-header-row="" className="flex items-center gap-2">
                                       <button
                                         type="button"
+                                        data-umbra-queue-drag-handle=""
                                         draggable={QUEUE_MANAGER_REORDER_ENABLED && !groupLocked}
                                         onDragStart={() => {
                                           if (!QUEUE_MANAGER_REORDER_ENABLED) return;
@@ -790,6 +812,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                                         <GripVertical size={11} />
                                       </button>
                                       <button
+                                        data-umbra-queue-group-toggle=""
                                         onClick={() => queueToggleGroupExpandedRef.current?.(group.requestId)}
                                         className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-200 hover:border-white/20"
                                         title={groupExpanded ? 'Collapse group' : 'Expand group'}
@@ -824,7 +847,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                                           {groupSearchMatchCount} match{groupSearchMatchCount === 1 ? '' : 'es'}
                                         </span>
                                       )}
-                                      <span className="ml-auto text-[10px] uppercase tracking-wider text-zinc-500">
+                                      <span data-umbra-queue-group-count="" className="ml-auto text-[10px] uppercase tracking-wider text-zinc-500">
                                         {queueManagerStyleFilter
                                           ? `${filteredGroupItems.length}/${group.items.length} generation${group.items.length === 1 ? '' : 's'}`
                                           : `${group.items.length} generation${group.items.length === 1 ? '' : 's'}`}
@@ -832,6 +855,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                                       {selectedGroupPromptCount > 0 && (
                                         <button
                                           type="button"
+                                          data-umbra-queue-group-clear-selected=""
                                           onClick={() => handleQueueManagerSelectedPromptRemove(group.requestId)}
                                           disabled={!!queueControlBusy}
                                           className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors ${
@@ -847,6 +871,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                                       )}
                                       <button
                                         type="button"
+                                        data-umbra-queue-group-edit=""
                                         onClick={() => handleOpenQueueGroupEditor(group)}
                                         disabled={!!queueControlBusy || !QUEUE_MANAGER_EDITOR_ENABLED}
                                         className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors ${
@@ -860,6 +885,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                                         Edit
                                       </button>
                                       <button
+                                        data-umbra-queue-group-clear=""
                                         onClick={() => { void queueCancelRequestGroupRef.current?.(group.requestId); }}
                                         disabled={queueDestructiveActionBusy || !groupCanCancel}
                                         className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors ${
@@ -917,6 +943,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                                         return (
                                           <div
                                             key={item.id}
+                                            data-umbra-queue-prompt-row=""
                                             style={QUEUE_MANAGER_PROMPT_ROW_VISIBILITY_STYLE}
                                             onDragOver={(event) => {
                                               if (!QUEUE_MANAGER_REORDER_ENABLED) return;
@@ -949,6 +976,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                                             <div className="flex items-start gap-3">
                                               <button
                                                 type="button"
+                                                data-umbra-queue-prompt-select=""
                                                 onClick={(event) => handleQueuePromptSelectionClick(event, group, item)}
                                                 disabled={!itemRemovable}
                                                 className={`inline-flex h-12 w-5 shrink-0 items-center justify-center rounded-md border transition-colors ${
@@ -963,6 +991,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                                                 {itemSelected ? <CheckCircle2 size={11} /> : <span className="h-2.5 w-2.5 rounded-[3px] border border-current/70" />}
                                               </button>
                                               <span
+                                                data-umbra-queue-drag-handle=""
                                                 draggable={QUEUE_MANAGER_REORDER_ENABLED && !itemLocked}
                                                 onDragStart={() => {
                                                   if (!QUEUE_MANAGER_REORDER_ENABLED) return;

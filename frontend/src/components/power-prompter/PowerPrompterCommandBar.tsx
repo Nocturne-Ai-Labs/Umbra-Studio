@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bell, BellOff, ChevronDown, ChevronLeft, ChevronRight, FileText, FolderOpen, ListChecks, ListOrdered, Loader2, PanelsTopLeft, Pause, Play, Power, RefreshCw, Save, Search, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
+import { Bell, BellOff, ChevronDown, ChevronLeft, ChevronRight, FileText, FolderOpen, ListChecks, ListOrdered, Loader2, MoreHorizontal, PanelsTopLeft, Pause, Play, Power, RefreshCw, Save, Search, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
 import { POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME, POWER_PROMPTER_MAX_QUEUE_SETS } from '@/lib/powerPrompter';
 import { PowerPrompterGlobalSearchBox } from './PowerPrompterGlobalSearchBox';
 import { POWER_PROMPTER_SOUND_STYLE_GLASS_TICK, POWER_PROMPTER_SOUND_STYLE_OPTIONS, clampCompletionSoundVolume } from './powerPrompterAudio';
@@ -126,6 +126,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
     : '';
   const [promptSearchMenuOpen, setPromptSearchMenuOpen] = React.useState(false);
   const promptSearchMenuRef = React.useRef<HTMLDivElement | null>(null);
+  const [phoneActionsOpen, setPhoneActionsOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (!queueSettingsMenuOpen) return undefined;
@@ -205,50 +206,19 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
   }, [promptSearchMenuOpen]);
 
   if (isPhoneRemote) {
+    const phonePauseDisabled = !!queueControlBusy || queueStackItems.length <= 0 || hasStagedQueue;
     return (
       <div
         data-umbra-powerprompter-command-bar=""
         data-umbra-powerprompter-phone-bar=""
-        className="border-b border-white/5 bg-black/45 px-3 pb-2 pt-3"
+        data-umbra-powerprompter-panel-mode={prompterPanelMode}
+        className="border-b border-white/5 bg-black/45 px-2 pb-2 pt-2"
       >
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setLeftPanelCollapsed((prev) => !prev)}
-            className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-lg border px-3 text-[11px] font-black uppercase tracking-[0.14em] transition-colors ${
-              !leftPanelCollapsed
-                ? 'border-cyan-300/55 bg-cyan-400/14 text-cyan-50'
-                : 'border-white/12 bg-white/[0.04] text-zinc-300'
-            }`}
-            title={leftPanelCollapsed ? 'Open prompt file drawer' : 'Close prompt file drawer'}
-          >
-            <FileText size={15} />
-            Files
-          </button>
-          <div className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.035] px-3 py-2">
-            <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">Power Prompter</div>
-            <div className="truncate text-sm font-semibold text-zinc-100" title={currentFile || ''}>
-              {currentFileLabel}
-            </div>
-          </div>
-          <button
-            onClick={() => setRightPanelCollapsed((prev) => !prev)}
-            className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-lg border px-3 text-[11px] font-black uppercase tracking-[0.14em] transition-colors ${
-              !rightPanelCollapsed
-                ? 'border-cyan-300/55 bg-cyan-400/14 text-cyan-50'
-                : 'border-white/12 bg-white/[0.04] text-zinc-300'
-            }`}
-            title={rightPanelCollapsed ? 'Show tag browser sidecar' : 'Hide tag browser sidecar'}
-          >
-            <Search size={15} />
-            Tags
-          </button>
-        </div>
-
-        <div className="mt-2 flex items-center gap-2 overflow-x-auto pb-1">
-          <div className="inline-flex shrink-0 items-center rounded-lg border border-white/10 bg-black/25 p-1">
+        <div data-umbra-powerprompter-phone-primary="" className="flex items-center gap-1.5">
+          <div className="inline-flex min-w-0 flex-1 items-center rounded-lg border border-white/10 bg-black/25 p-1">
             <button
               onClick={() => setPrompterPanelMode('editor')}
-              className={`h-9 rounded-md px-3 text-[11px] font-black uppercase tracking-[0.13em] transition-colors ${
+              className={`h-12 min-w-0 flex-1 rounded-md px-2 text-[10px] font-black uppercase tracking-[0.08em] transition-colors ${
                 prompterPanelMode === 'editor'
                   ? 'bg-cyan-500/16 text-cyan-50'
                   : 'text-zinc-400'
@@ -257,23 +227,80 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               Cards
             </button>
             <button
+              onClick={() => setPrompterPanelMode('preset-editor')}
+              className={`h-12 min-w-0 flex-1 rounded-md px-2 text-[10px] font-black uppercase tracking-[0.08em] transition-colors ${
+                prompterPanelMode === 'preset-editor'
+                  ? 'bg-amber-500/16 text-amber-50'
+                  : 'text-zinc-400'
+              }`}
+            >
+              Presets
+            </button>
+            <button
               onClick={() => setPrompterPanelMode('queue-manager')}
-              className={`h-9 rounded-md px-3 text-[11px] font-black uppercase tracking-[0.13em] transition-colors ${
-                prompterPanelMode === 'queue-manager' || prompterPanelMode === 'queue-editor'
+              className={`h-12 min-w-0 flex-1 rounded-md px-2 text-[10px] font-black uppercase tracking-[0.08em] transition-colors ${
+                prompterPanelMode === 'queue-manager'
                   ? 'bg-emerald-500/16 text-emerald-50'
                   : 'text-zinc-400'
               }`}
             >
               Queue
             </button>
+            {queueEditorEnabled && queueEditorDraft ? (
+              <button
+                onClick={() => setPrompterPanelMode('queue-editor')}
+                className={`h-12 min-w-0 flex-1 rounded-md px-2 text-[10px] font-black uppercase tracking-[0.08em] transition-colors ${
+                  prompterPanelMode === 'queue-editor'
+                    ? 'bg-cyan-500/16 text-cyan-50'
+                    : 'text-zinc-400'
+                }`}
+              >
+                Edit
+              </button>
+            ) : null}
           </div>
+          <button
+            onClick={() => setLeftPanelCollapsed((prev) => !prev)}
+            className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+              !leftPanelCollapsed
+                ? 'border-cyan-300/55 bg-cyan-400/14 text-cyan-50'
+                : 'border-white/12 bg-white/[0.04] text-zinc-300'
+            }`}
+            title={leftPanelCollapsed ? 'Open prompt file drawer' : 'Close prompt file drawer'}
+            aria-label={leftPanelCollapsed ? 'Open prompt file drawer' : 'Close prompt file drawer'}
+          >
+            <FileText size={18} />
+          </button>
+          <button
+            onClick={() => setRightPanelCollapsed((prev) => !prev)}
+            className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+              !rightPanelCollapsed
+                ? 'border-cyan-300/55 bg-cyan-400/14 text-cyan-50'
+                : 'border-white/12 bg-white/[0.04] text-zinc-300'
+            }`}
+            title={rightPanelCollapsed ? 'Show tag browser sidecar' : 'Hide tag browser sidecar'}
+            aria-label={rightPanelCollapsed ? 'Show tag browser sidecar' : 'Hide tag browser sidecar'}
+          >
+            <Search size={18} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setPhoneActionsOpen(true)}
+            className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-zinc-300"
+            title="More Power Prompter controls"
+            aria-label="More Power Prompter controls"
+          >
+            <MoreHorizontal size={19} />
+          </button>
+        </div>
 
-          <div className="relative w-[92px] shrink-0">
+        <div data-umbra-powerprompter-phone-queue-row="" className="mt-1.5 grid grid-cols-[76px_minmax(0,1fr)_minmax(0,1fr)_48px] items-center gap-1.5">
+          <div className="relative min-w-0">
             <select
               value={queueSetTarget}
               onChange={(event) => setQueueSetTarget(clampQueueSetId(event.target.value))}
               disabled={!currentFile || !!queueingMode}
-              className="h-11 w-full appearance-none rounded-lg border bg-white/[0.04] pl-3 pr-7 text-xs font-black outline-none disabled:border-white/10 disabled:text-zinc-600"
+              className="h-12 w-full appearance-none rounded-lg border bg-white/[0.04] pl-2 pr-6 text-[10px] font-black outline-none disabled:border-white/10 disabled:text-zinc-600"
               style={!currentFile || !!queueingMode
                 ? undefined
                 : {
@@ -295,51 +322,10 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
             </select>
             <ChevronDown
               size={12}
-              className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2"
+              className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2"
               style={{ color: !currentFile || !!queueingMode ? '#71717a' : queueSetColor }}
             />
           </div>
-
-          <button
-            type="button"
-            onClick={() => { void handleSendActivePromptToUmbraUi?.(); }}
-            disabled={!currentFile || umbraUiHandoffBusy}
-            className="inline-flex h-11 shrink-0 items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 text-xs font-black uppercase tracking-[0.1em] text-cyan-100 transition-colors hover:border-cyan-300/50 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
-            title="Transfer the active set prompt and generation controls to Umbra UI without queueing"
-          >
-            {umbraUiHandoffBusy ? <Loader2 size={14} className="animate-spin" /> : <PanelsTopLeft size={14} />}
-            Umbra UI
-          </button>
-
-          <button
-            onClick={() => { void queueStartActionRef?.current?.(); }}
-            disabled={queueStartDisabled}
-            className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-lg border px-3 text-xs font-black uppercase tracking-[0.1em] transition-colors ${
-              queueStartDisabled
-                ? 'border-white/10 bg-white/[0.03] text-zinc-600 cursor-not-allowed'
-                : 'border-emerald-400/35 bg-emerald-500/10 text-emerald-100 hover:border-emerald-300/55'
-            }`}
-            title="Start sending staged queue prompts to ComfyUI"
-          >
-            {queueControlBusy === 'start' ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-            Start
-          </button>
-
-          <button
-            onClick={() => { void queuePauseActionRef?.current?.(); }}
-            disabled={!!queueControlBusy || queueStackItems.length <= 0 || hasStagedQueue}
-            className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-lg border px-3 text-xs font-black uppercase tracking-[0.1em] transition-colors ${
-              !!queueControlBusy || queueStackItems.length <= 0 || hasStagedQueue
-                ? 'border-white/10 bg-white/[0.03] text-zinc-600 cursor-not-allowed'
-                : queuePaused
-                  ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-100 hover:border-emerald-300/55'
-                  : 'border-sky-400/35 bg-sky-500/10 text-sky-100 hover:border-sky-300/55'
-            }`}
-            title={hasStagedQueue ? 'Use Start to begin dispatching staged prompts' : queuePaused ? 'Resume queued prompt submissions' : 'Pause after the current prompt finishes'}
-          >
-            {queuePaused ? <Play size={14} /> : <Pause size={14} />}
-            {queuePaused ? 'Resume' : 'Pause'}
-          </button>
 
           <button
             onClick={() => {
@@ -351,12 +337,12 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               });
             }}
             disabled={!currentFile || !!queueingMode}
-            className="inline-flex h-11 min-w-[7.5rem] shrink-0 items-center justify-between gap-2 rounded-lg border border-amber-300/25 bg-amber-400/10 px-3 text-xs font-black uppercase tracking-[0.1em] text-amber-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+            className="inline-flex h-12 min-w-0 items-center justify-center gap-1.5 rounded-lg border border-amber-300/25 bg-amber-400/10 px-2 text-[10px] font-black uppercase tracking-[0.06em] text-amber-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
             title={`Queue selected combinations for the chosen set (${queueEstimate.setPromptCount} prompts, ${queueEstimate.setImageCount} images${queueEstimate.setTruncated ? ', capped' : ''})`}
           >
             {queueingMode === 'selected' ? <Loader2 size={14} className="animate-spin" /> : <ListChecks size={14} />}
             <span>Queue</span>
-            <span className="tabular-nums">{queueEstimate.setImageCount}</span>
+            <span className="rounded bg-black/25 px-1 tabular-nums">{queueEstimate.setImageCount}</span>
           </button>
 
           <button
@@ -370,14 +356,107 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               });
             }}
             disabled={!currentFile || !!queueingMode}
-            className="inline-flex h-11 min-w-[8.25rem] shrink-0 items-center justify-between gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 text-xs font-black uppercase tracking-[0.1em] text-cyan-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+            className="inline-flex h-12 min-w-0 items-center justify-center gap-1.5 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-2 text-[10px] font-black uppercase tracking-[0.06em] text-cyan-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
             title={`Queue selected combinations across all sets (${queueEstimate.allPromptCount} prompts, ${queueEstimate.allImageCount} images${queueEstimate.allTruncated ? ', capped' : ''})`}
           >
             {queueingMode === 'variants' ? <Loader2 size={14} className="animate-spin" /> : <ListOrdered size={14} />}
-            <span>All Sets</span>
-            <span className="tabular-nums">{queueEstimate.allImageCount}</span>
+            <span>All</span>
+            <span className="rounded bg-black/25 px-1 tabular-nums">{queueEstimate.allImageCount}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              if (hasStagedQueue || queuePaused) {
+                void queueStartActionRef?.current?.();
+              } else {
+                void queuePauseActionRef?.current?.();
+              }
+            }}
+            disabled={hasStagedQueue || queuePaused ? queueStartDisabled : phonePauseDisabled}
+            className={`inline-flex h-12 w-12 items-center justify-center rounded-lg border transition-colors ${
+              hasStagedQueue || queuePaused
+                ? queueStartDisabled
+                  ? 'cursor-not-allowed border-white/10 bg-white/[0.03] text-zinc-600'
+                  : 'border-emerald-400/35 bg-emerald-500/10 text-emerald-100'
+                : phonePauseDisabled
+                  ? 'cursor-not-allowed border-white/10 bg-white/[0.03] text-zinc-600'
+                  : 'border-sky-400/35 bg-sky-500/10 text-sky-100'
+            }`}
+            title={hasStagedQueue ? 'Start staged queue' : queuePaused ? 'Resume queue' : 'Pause after the current prompt'}
+            aria-label={hasStagedQueue ? 'Start staged queue' : queuePaused ? 'Resume queue' : 'Pause after the current prompt'}
+          >
+            {queueControlBusy ? <Loader2 size={16} className="animate-spin" /> : hasStagedQueue || queuePaused ? <Play size={16} /> : <Pause size={16} />}
           </button>
         </div>
+
+        {phoneActionsOpen ? (
+          <button
+            type="button"
+            data-umbra-powerprompter-phone-actions-backdrop=""
+            onClick={() => setPhoneActionsOpen(false)}
+            aria-label="Close Power Prompter controls"
+          />
+        ) : null}
+        {phoneActionsOpen ? (
+          <section data-umbra-powerprompter-phone-actions="" role="dialog" aria-modal="true" aria-label="Power Prompter controls">
+            <div data-umbra-powerprompter-phone-actions-handle="" />
+            <div data-umbra-powerprompter-phone-actions-header="">
+              <div>
+                <span>Power Prompter</span>
+                <strong title={currentFile || ''}>{currentFileLabel}</strong>
+              </div>
+              <button type="button" onClick={() => setPhoneActionsOpen(false)} aria-label="Close controls">
+                <XCircle size={19} />
+              </button>
+            </div>
+
+            <div data-umbra-powerprompter-phone-actions-status="">
+              <span>{queueSummaryCounts.pending || 0} pending</span>
+              <span>{queueSummaryCounts.running || 0} running</span>
+              <span>{queueSummaryCounts.queued || 0} done</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setPhoneActionsOpen(false);
+                void handleSendActivePromptToUmbraUi?.();
+              }}
+              disabled={!currentFile || umbraUiHandoffBusy}
+              className="col-span-2 inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 text-xs font-black uppercase tracking-[0.08em] text-cyan-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+            >
+              {umbraUiHandoffBusy ? <Loader2 size={15} className="animate-spin" /> : <PanelsTopLeft size={15} />}
+              Send to Umbra UI
+            </button>
+
+            <div data-umbra-powerprompter-phone-actions-grid="">
+              <button
+                type="button"
+                onClick={() => {
+                  setPhoneActionsOpen(false);
+                  void queueStartActionRef?.current?.();
+                }}
+                disabled={queueStartDisabled}
+                className="border-emerald-400/30 bg-emerald-500/10 text-emerald-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+              >
+                {queueControlBusy === 'start' ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
+                {queuePaused ? 'Resume' : 'Start'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPhoneActionsOpen(false);
+                  void queuePauseActionRef?.current?.();
+                }}
+                disabled={phonePauseDisabled}
+                className="border-sky-400/30 bg-sky-500/10 text-sky-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+              >
+                <Pause size={15} />
+                Pause
+              </button>
+            </div>
+          </section>
+        ) : null}
       </div>
     );
   }
@@ -398,9 +477,20 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               Editor
             </button>
             <button
+              onClick={() => setPrompterPanelMode('preset-editor')}
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-colors ${
+                prompterPanelMode === 'preset-editor'
+                  ? 'bg-amber-500/14 text-amber-100'
+                  : 'text-zinc-400 hover:text-zinc-100'
+              }`}
+              title="Open the non-destructive Preset Editor"
+            >
+              Preset Editor
+            </button>
+            <button
               onClick={() => setPrompterPanelMode('queue-manager')}
               className={`inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-colors ${
-                prompterPanelMode === 'queue-manager' || prompterPanelMode === 'queue-editor'
+                prompterPanelMode === 'queue-manager'
                   ? 'bg-emerald-500/14 text-emerald-100'
                   : 'text-zinc-400 hover:text-zinc-100'
               }`}
@@ -628,7 +718,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               </button>
             </div>
 
-            {prompterPanelMode === 'editor' && (
+            {(prompterPanelMode === 'editor' || prompterPanelMode === 'preset-editor') && (
               <div className="hidden min-w-0 items-center gap-1.5 lg:flex">
                 <button
                   onClick={() => {

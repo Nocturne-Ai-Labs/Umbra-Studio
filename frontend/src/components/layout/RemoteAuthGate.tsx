@@ -2,6 +2,12 @@
 
 import React from 'react';
 import { Eye, EyeOff, Laptop, LockKeyhole, LogIn, Monitor, RefreshCw, ShieldAlert, Smartphone, Tablet } from 'lucide-react';
+import {
+  applyUmbraRemoteMode,
+  getPreferredUmbraRemoteMode,
+  readUmbraRemoteModeFromUrl,
+  type UmbraRemoteClientMode,
+} from '@/utils/hostOnly';
 
 type RemoteAuthStatus = {
   ok?: boolean;
@@ -19,26 +25,7 @@ type RemoteAuthStatus = {
   trustedDeviceCount?: number;
 };
 
-type RemoteClientMode = 'desktop' | 'tablet' | 'phone';
-
-function readForcedRemoteMode(): RemoteClientMode | null {
-  if (typeof window === 'undefined') return null;
-  const rawMode = new URLSearchParams(window.location.search).get('remoteMode');
-  if (rawMode === 'desktop' || rawMode === 'tablet' || rawMode === 'phone') return rawMode;
-  return null;
-}
-
-function getPreferredRemoteMode(): RemoteClientMode {
-  if (typeof window === 'undefined') return 'desktop';
-  const forcedMode = readForcedRemoteMode();
-  if (forcedMode) return forcedMode;
-  const width = window.innerWidth || 0;
-  if (width > 0 && width < 680) return 'phone';
-  if (width > 0 && width < 1100) return 'tablet';
-  return 'desktop';
-}
-
-function getModeIcon(mode: RemoteClientMode) {
+function getModeIcon(mode: UmbraRemoteClientMode) {
   if (mode === 'phone') return Smartphone;
   if (mode === 'tablet') return Tablet;
   return Laptop;
@@ -53,8 +40,8 @@ function publishRemoteClientState(remote: unknown) {
 
 function RemoteAuthGateImpl({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = React.useState<RemoteAuthStatus | null>(null);
-  const [remoteMode, setRemoteMode] = React.useState<RemoteClientMode>(() => getPreferredRemoteMode());
-  const [forcedRemoteMode, setForcedRemoteMode] = React.useState<RemoteClientMode | null>(() => readForcedRemoteMode());
+  const [remoteMode, setRemoteMode] = React.useState<UmbraRemoteClientMode>(() => getPreferredUmbraRemoteMode());
+  const [forcedRemoteMode, setForcedRemoteMode] = React.useState<UmbraRemoteClientMode | null>(() => readUmbraRemoteModeFromUrl());
   const [entryReady, setEntryReady] = React.useState(false);
   const [username, setUsername] = React.useState('');
   const [password, setPassword] = React.useState('');
@@ -109,13 +96,17 @@ function RemoteAuthGateImpl({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     const syncForcedMode = () => {
-      const nextForcedMode = readForcedRemoteMode();
+      const nextForcedMode = readUmbraRemoteModeFromUrl();
       setForcedRemoteMode(nextForcedMode);
       if (nextForcedMode) setRemoteMode(nextForcedMode);
     };
     syncForcedMode();
     window.addEventListener('popstate', syncForcedMode);
-    return () => window.removeEventListener('popstate', syncForcedMode);
+    window.addEventListener('umbra:remote-mode-change', syncForcedMode);
+    return () => {
+      window.removeEventListener('popstate', syncForcedMode);
+      window.removeEventListener('umbra:remote-mode-change', syncForcedMode);
+    };
   }, []);
 
   React.useEffect(() => {
@@ -133,8 +124,7 @@ function RemoteAuthGateImpl({ children }: { children: React.ReactNode }) {
       return;
     }
     const nextMode = forcedRemoteMode || remoteMode;
-    document.documentElement.dataset.umbraRemoteMode = nextMode;
-    window.dispatchEvent(new CustomEvent('umbra:remote-mode-change', { detail: { mode: nextMode } }));
+    applyUmbraRemoteMode(nextMode, { persist: true, updateUrl: false });
   }, [forcedRemoteMode, remoteMode, status?.remote]);
 
   const login = async (event: React.FormEvent) => {
@@ -189,10 +179,10 @@ function RemoteAuthGateImpl({ children }: { children: React.ReactNode }) {
   }
 
   const isAuthenticated = Boolean(status.authenticated);
-  const modeOptions: Array<{ id: RemoteClientMode; label: string; description: string }> = [
+  const modeOptions: Array<{ id: UmbraRemoteClientMode; label: string; description: string }> = [
     { id: 'desktop', label: 'Desktop/Laptop', description: 'Full workspace density' },
     { id: 'tablet', label: 'Tablet', description: 'Touch-friendly panels' },
-    { id: 'phone', label: 'Phone', description: 'Compact remote control' },
+    { id: 'phone', label: 'Mobile', description: 'Compact remote control' },
   ];
   const ModeIcon = getModeIcon(remoteMode);
 
@@ -219,7 +209,10 @@ function RemoteAuthGateImpl({ children }: { children: React.ReactNode }) {
               <button
                 key={option.id}
                 type="button"
-                onClick={() => setRemoteMode(option.id)}
+                onClick={() => {
+                  setRemoteMode(option.id);
+                  applyUmbraRemoteMode(option.id, { persist: true, updateUrl: Boolean(forcedRemoteMode) });
+                }}
                 className={[
                   'flex min-h-[74px] flex-col items-start justify-between rounded-lg border px-3 py-2 text-left transition',
                   selected
@@ -244,7 +237,7 @@ function RemoteAuthGateImpl({ children }: { children: React.ReactNode }) {
         ) : isAuthenticated ? (
           <div className="space-y-3">
             <div className="rounded-lg border border-emerald-300/25 bg-emerald-500/10 p-3 text-sm leading-relaxed text-emerald-50">
-              Remote session restored for {status.device?.label || deviceLabel}. Umbra will use {remoteMode === 'desktop' ? 'Desktop/Laptop' : remoteMode === 'tablet' ? 'Tablet' : 'Phone'} Mode for this connection.
+              Remote session restored for {status.device?.label || deviceLabel}. Umbra will use {remoteMode === 'desktop' ? 'Desktop/Laptop' : remoteMode === 'tablet' ? 'Tablet' : 'Mobile'} Mode for this connection.
             </div>
             <button
               type="button"

@@ -8,6 +8,10 @@ import type {
 } from '../../../shared/umbra-ui/pipelineTypes';
 import { resolveUmbraCanvasInteractiveAllocation } from './umbraUiCanvasPerformance';
 import { compileUmbraUiPromptSegments } from './umbraUiPromptSegments';
+import type {
+  PowerPrompterSeedControlMode,
+  PowerPrompterSeedIncrement,
+} from '@/types/powerPrompter';
 
 export const UMBRA_CANVAS_DOCUMENT_VERSION = 19 as const;
 export const UMBRA_CANVAS_PROMPT_HISTORY_LIMIT = 100;
@@ -338,6 +342,8 @@ export interface UmbraCanvasGenerationSettings {
   promptHistory: UmbraCanvasPromptHistoryEntry[];
   clipSkip: string;
   seed: string;
+  seedMode: PowerPrompterSeedControlMode;
+  seedIncrement: PowerPrompterSeedIncrement;
   steps: string;
   cfg: string;
   samplerName: string;
@@ -855,6 +861,14 @@ function normalizeGenerationSettings(value: unknown): UmbraCanvasGenerationSetti
     || source.coherenceMode === 'staged'
     ? source.coherenceMode
     : 'none';
+  const seedMode: PowerPrompterSeedControlMode = source.seedMode === 'increment'
+    || source.seedMode === 'decrement'
+    || source.seedMode === 'randomize'
+    ? source.seedMode
+    : 'fixed';
+  const seedIncrement: PowerPrompterSeedIncrement = Number(source.seedIncrement) === 100
+    ? 100
+    : Number(source.seedIncrement) === 1000 ? 1000 : 1;
   return {
     modelFamily: String(source.modelFamily || ''),
     modelSource: String(source.modelSource || 'checkpoint'),
@@ -866,6 +880,8 @@ function normalizeGenerationSettings(value: unknown): UmbraCanvasGenerationSetti
     promptHistory: normalizePromptHistory(source.promptHistory),
     clipSkip: String(source.clipSkip ?? '1'),
     seed: String(source.seed ?? '-1'),
+    seedMode,
+    seedIncrement,
     steps: String(source.steps ?? '35'),
     cfg: String(source.cfg ?? '4'),
     samplerName: String(source.samplerName || 'er_sde'),

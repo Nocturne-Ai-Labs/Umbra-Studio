@@ -30,7 +30,11 @@ export type QueuePromptBuildEntry = {
 
 export type QueuePromptPreviewToken = {
   slotId: string;
+  slotLabel?: string;
+  slotType?: PowerPrompterCardType;
   variantId: string;
+  variantName?: string;
+  text?: string;
 };
 
 export type QueuePromptPreviewEntry = {

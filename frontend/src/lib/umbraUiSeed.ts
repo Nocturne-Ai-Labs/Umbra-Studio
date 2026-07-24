@@ -1,6 +1,10 @@
-import type { PowerPrompterSeedControlMode } from '@/types/powerPrompter';
+import type {
+  PowerPrompterSeedControlMode,
+  PowerPrompterSeedIncrement,
+} from '@/types/powerPrompter';
 
 export const UMBRA_UI_MAX_SEED = Number.MAX_SAFE_INTEGER;
+export const UMBRA_UI_SEED_INCREMENT_OPTIONS: PowerPrompterSeedIncrement[] = [1, 100, 1000];
 
 export function normalizeUmbraUiSeed(rawSeed: unknown, fallback = 0): number {
   const seed = Number(rawSeed);
@@ -12,6 +16,13 @@ export function normalizeUmbraUiSeedMode(rawMode: unknown): PowerPrompterSeedCon
   const mode = String(rawMode || '').trim().toLowerCase();
   if (mode === 'increment' || mode === 'decrement' || mode === 'randomize') return mode;
   return 'fixed';
+}
+
+export function normalizeUmbraUiSeedIncrement(rawIncrement: unknown): PowerPrompterSeedIncrement {
+  const increment = Number(rawIncrement);
+  return UMBRA_UI_SEED_INCREMENT_OPTIONS.includes(increment as PowerPrompterSeedIncrement)
+    ? increment as PowerPrompterSeedIncrement
+    : 1;
 }
 
 export function createUmbraUiRandomSeed(random: () => number = Math.random): number {
@@ -32,11 +43,19 @@ export function resolveUmbraUiQueueSeed(
 export function advanceUmbraUiSeed(
   queuedSeed: unknown,
   rawMode: unknown,
+  rawIncrement: unknown = 1,
+  rawCount: unknown = 1,
   random: () => number = Math.random,
 ): number {
   const seed = normalizeUmbraUiSeed(queuedSeed);
   const mode = normalizeUmbraUiSeedMode(rawMode);
-  if (mode === 'increment') return Math.min(UMBRA_UI_MAX_SEED, seed + 1);
+  if (mode === 'increment') {
+    const count = Math.max(1, Math.floor(Number(rawCount) || 1));
+    return Math.min(
+      UMBRA_UI_MAX_SEED,
+      seed + normalizeUmbraUiSeedIncrement(rawIncrement) * count,
+    );
+  }
   if (mode === 'decrement') return Math.max(0, seed - 1);
   if (mode === 'randomize') return createUmbraUiRandomSeed(random);
   return seed;

@@ -12,6 +12,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import { exec } from 'child_process';
 import { createHash, randomBytes, pbkdf2Sync, timingSafeEqual } from 'crypto';
+import { gzip } from 'zlib';
 import { promisify } from 'util';
 import { AsyncLocalStorage } from 'async_hooks';
 import { pathToFileURL } from 'url';
@@ -49,6 +50,18 @@ import { UmbraUiCanvasProjectService } from './backend/UmbraUiCanvasProjectServi
 import { replaceUmbraUiImageSource } from './backend/UmbraUiSourceReplacementService';
 import { applyUmbraUiClipSkipToGraph } from './backend/UmbraUiGraphControls';
 import { seedBundledWorkflowDirectory } from './backend/BundledWorkflowService';
+import { upsertPngTextMetadata } from './backend/PngTextMetadata';
+import {
+  createUnavailableTailscaleStatus,
+  parseTailscaleServeStatus,
+  parseTailscaleStatus,
+  shouldRemoteSettingsRequireRestart,
+} from './backend/remoteTailscaleStatus';
+import {
+  buildListenerOrigin,
+  buildTailscaleServeOrigin,
+  formatUrlHost,
+} from './backend/remoteNetworkAddress';
 
 // Route handlers we're keeping (will merge later)
 import * as trashRoutes from './backend/routes/trash';
@@ -111,6 +124,7 @@ import {
 } from './shared/umbra-ui/videoSizing';
 
 const execAsync = promisify(exec);
+const gzipAsync = promisify(gzip);
 
 const SOURCE_DIR = import.meta.dir;
 const ROOT_DIR = process.env.UMBRA_ROOT || import.meta.dir;
@@ -2313,10 +2327,10 @@ function getThumbnailCacheDir(): string {
 // ============================================
 // CORS & RESPONSE HELPERS
 // ============================================
-const DEFAULT_CORS_ORIGIN = `http://127.0.0.1:${PORT}`;
+const DEFAULT_CORS_ORIGIN = buildListenerOrigin(HOST, PORT);
 const LOOPBACK_CORS_ORIGIN_PATTERN = /^https?:\/\/(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d{1,5})?$/i;
-const PRIVATE_LAN_CORS_ORIGIN_PATTERN = /^https?:\/\/((10(?:\.\d{1,3}){3})|(192\.168(?:\.\d{1,3}){2})|(172\.(1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})|(100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])(?:\.\d{1,3}){2})|(\[?fe80:[0-9a-f:]+\]?))(?::\d{1,5})?$/i;
-const TAILSCALE_HTTP_CORS_ORIGIN_PATTERN = /^https?:\/\/100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])(?:\.\d{1,3}){2}(?::\d{1,5})?$/i;
+const PRIVATE_LAN_CORS_ORIGIN_PATTERN = /^https?:\/\/((10(?:\.\d{1,3}){3})|(192\.168(?:\.\d{1,3}){2})|(172\.(1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})|(100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])(?:\.\d{1,3}){2})|(\[(?:fe80|f[cd][0-9a-f]{2}):[0-9a-f:]+\]))(?::\d{1,5})?$/i;
+const TAILSCALE_HTTP_CORS_ORIGIN_PATTERN = /^https?:\/\/(?:100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])(?:\.\d{1,3}){2}|\[fd7a:115c:a1e0:[0-9a-f:]+\])(?::\d{1,5})?$/i;
 const TAILSCALE_HTTPS_CORS_ORIGIN_PATTERN = /^https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net(?::\d{1,5})?$/i;
 const corsOriginContext = new AsyncLocalStorage<string>();
 
@@ -2611,10 +2625,11 @@ type RequestIpServer = {
 };
 
 function normalizeIpAddress(value: unknown): string {
-  const raw = String(value || '').trim().toLowerCase();
+  const raw = String(value || '').trim().toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
   if (!raw) return '';
-  if (raw.startsWith('::ffff:')) return raw.slice('::ffff:'.length);
-  return raw;
+  const withoutScope = raw.split('%')[0] || '';
+  if (withoutScope.startsWith('::ffff:')) return withoutScope.slice('::ffff:'.length);
+  return withoutScope;
 }
 
 function normalizeRequestHostname(value: unknown): string {
@@ -2664,7 +2679,7 @@ function isTailscaleHostname(value: unknown): boolean {
   } catch {
     host = normalizeRequestHostname(value);
   }
-  return host.endsWith('.ts.net') || isTailscaleIpv4(host);
+  return host.endsWith('.ts.net') || isTailscaleIpAddress(host);
 }
 
 function getRequestHostCandidates(req: Request, url: URL): string[] {
@@ -2697,7 +2712,7 @@ function getRequestVisibleOrigin(req: Request, url: URL): string {
 
 function isTailscaleRequest(req: Request, url: URL, server?: RequestIpServer): boolean {
   return getRequestHostCandidates(req, url).some(isTailscaleHostname)
-    || getRequestAddressCandidates(req, server).some(isTailscaleIpv4);
+    || getRequestAddressCandidates(req, server).some(isTailscaleIpAddress);
 }
 
 function isPublishedRemoteRequestAllowed(req: Request, url: URL, server?: RequestIpServer): boolean {
@@ -2710,6 +2725,7 @@ function isHostRequest(req: Request, url: URL, server?: RequestIpServer): boolea
   const localAddresses = getLocalNetworkAddressSet();
   const requestHostname = normalizeRequestHostname(url.hostname || req.headers.get('host'));
   const socketAddress = getRequestSocketAddress(req, server);
+  if (getRequestHostCandidates(req, url).some(isTailscaleHostname)) return false;
   if (isLoopbackHostname(requestHostname)) return true;
   if (localAddresses.has(requestHostname)) {
     return isLoopbackIpAddress(socketAddress) || localAddresses.has(socketAddress);
@@ -3113,6 +3129,10 @@ function clearRemoteSessionCookie(req: Request): string {
   return `${REMOTE_AUTH_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${getRemoteCookieSecuritySuffix(req)}`;
 }
 
+function clearRemoteDeviceCookie(req: Request): string {
+  return `${REMOTE_DEVICE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${getRemoteCookieSecuritySuffix(req)}`;
+}
+
 function createRemoteAuthStatus(req: Request, url: URL, config = loadRemoteAuthConfig(), server?: RequestIpServer) {
   const settings = loadRemoteConnectionSettings();
   const remote = isRemoteRequest(req, url, server);
@@ -3192,7 +3212,7 @@ function sanitizeTelemetryPath(value: unknown): string {
   const raw = String(value || '').trim();
   if (!raw) return '';
   try {
-    const parsed = new URL(raw, `http://${HOST}:${PORT}`);
+    const parsed = new URL(raw, buildListenerOrigin(HOST, PORT));
     return `${parsed.pathname}${parsed.search ? '?...' : ''}`.slice(0, 180);
   } catch {
     return raw.replace(/\?.*$/, '?...').slice(0, 180);
@@ -3400,15 +3420,15 @@ function createRemoteTelemetrySnapshot() {
           eventCount: recentEvents.length,
           pingCount: recent.pingCount,
           lastRttMs: Math.round(recent.lastRttMs),
-          rttAvgMs: Math.round(recent.pingCount ? recent.rttAvgMs : client.rttAvgMs),
-          rttMaxMs: Math.round(recent.pingCount ? recent.rttMaxMs : client.rttMaxMs),
+          rttAvgMs: Math.round(recent.rttAvgMs),
+          rttMaxMs: Math.round(recent.rttMaxMs),
           interactionCount: recent.interactionCount,
-          interactionAvgMs: Math.round(recent.interactionCount ? recent.interactionAvgMs : client.interactionAvgMs),
-          interactionMaxMs: Math.round(recent.interactionCount ? recent.interactionMaxMs : client.interactionMaxMs),
+          interactionAvgMs: Math.round(recent.interactionAvgMs),
+          interactionMaxMs: Math.round(recent.interactionMaxMs),
           resourceCount: recent.resourceCount,
           resourceBytes: recent.resourceBytes,
-          resourceAvgMs: Math.round(recent.resourceCount ? recent.resourceAvgMs : client.resourceAvgMs),
-          resourceMaxMs: Math.round(recent.resourceCount ? recent.resourceMaxMs : client.resourceMaxMs),
+          resourceAvgMs: Math.round(recent.resourceAvgMs),
+          resourceMaxMs: Math.round(recent.resourceMaxMs),
           longTaskCount: recent.longTaskCount,
           longTaskTotalMs: Math.round(recent.longTaskTotalMs),
         };
@@ -3776,6 +3796,45 @@ function rewriteComfyHtml(html: string, options: { directRemoteBaseUrl?: string 
     : `${bridgeScript}${withBase}`;
 }
 
+const REMOTE_PROXY_COMPRESSION_MIN_BYTES = 2048;
+
+function addResponseVary(headers: Headers, value: string): void {
+  const values = String(headers.get('vary') || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!values.some((item) => item.toLowerCase() === value.toLowerCase())) values.push(value);
+  headers.set('vary', values.join(', '));
+}
+
+async function createProxyTextResponse(
+  req: Request,
+  sourceUrl: URL,
+  body: string,
+  status: number,
+  responseHeaders: Headers,
+): Promise<Response> {
+  responseHeaders.delete('content-length');
+  responseHeaders.delete('content-encoding');
+  const bodyBuffer = Buffer.from(body);
+  const acceptsGzip = String(req.headers.get('accept-encoding') || '').toLowerCase().includes('gzip');
+  if (
+    acceptsGzip
+    && isRemoteRequest(req, sourceUrl)
+    && bodyBuffer.byteLength >= REMOTE_PROXY_COMPRESSION_MIN_BYTES
+  ) {
+    try {
+      const compressed = await gzipAsync(bodyBuffer, { level: 6 });
+      responseHeaders.set('content-encoding', 'gzip');
+      addResponseVary(responseHeaders, 'Accept-Encoding');
+      return new Response(compressed, { status, headers: responseHeaders });
+    } catch {
+      // Compression is an optimization; always fall back to a valid response.
+    }
+  }
+  return new Response(bodyBuffer, { status, headers: responseHeaders });
+}
+
 async function proxyComfyHttp(req: Request, sourceUrl: URL, targetPath: string): Promise<Response> {
   const targetUrl = new URL(`${getComfyProxyBaseUrl()}${targetPath || '/'}`);
   targetUrl.search = sourceUrl.search;
@@ -3820,13 +3879,9 @@ async function proxyComfyHttp(req: Request, sourceUrl: URL, targetPath: string):
   if (contentType.includes('text/html')) {
     const html = await upstream.text();
     responseHeaders.set('content-type', 'text/html; charset=utf-8');
-    responseHeaders.delete('content-length');
-    return new Response(rewriteComfyHtml(html, {
+    return createProxyTextResponse(req, sourceUrl, rewriteComfyHtml(html, {
       directRemoteBaseUrl: getComfyDirectRemoteBaseUrl(sourceUrl),
-    }), {
-      status: upstream.status,
-      headers: responseHeaders,
-    });
+    }), upstream.status, responseHeaders);
   }
 
   const contentLength = Number(responseHeaders.get('content-length') || 0);
@@ -4163,10 +4218,13 @@ async function proxyLocalServerHttp(req: Request, sourceUrl: URL): Promise<Respo
   if (contentType.includes('text/html') && req.method !== 'HEAD') {
     const html = await upstream.text();
     responseHeaders.set('content-type', 'text/html; charset=utf-8');
-    return new Response(rewriteLocalServerHtml(html, token, targetUrl), {
-      status: upstream.status,
-      headers: responseHeaders,
-    });
+    return createProxyTextResponse(
+      req,
+      sourceUrl,
+      rewriteLocalServerHtml(html, token, targetUrl),
+      upstream.status,
+      responseHeaders,
+    );
   }
 
   const isRewritableAsset = contentType.includes('javascript')
@@ -4175,10 +4233,13 @@ async function proxyLocalServerHttp(req: Request, sourceUrl: URL): Promise<Respo
     || contentType.includes('text/x-component');
   if (isRewritableAsset && req.method !== 'HEAD') {
     const body = await upstream.text();
-    return new Response(rewriteLocalServerAssetText(body, token, contentType), {
-      status: upstream.status,
-      headers: responseHeaders,
-    });
+    return createProxyTextResponse(
+      req,
+      sourceUrl,
+      rewriteLocalServerAssetText(body, token, contentType),
+      upstream.status,
+      responseHeaders,
+    );
   }
 
   return new Response(upstream.body, {
@@ -4212,6 +4273,7 @@ function logWsLifecycle(message: string): void {
 interface PrompterClientMeta {
   role: 'unknown' | 'powerprompter' | 'comfy_bridge';
   source: string;
+  remote: boolean;
   bridgeId?: string;
   workflowId?: string;
   workflowName?: string;
@@ -4242,6 +4304,14 @@ interface PrompterSyncState {
 }
 
 const prompterClientMeta = new Map<ServerWebSocket<unknown>, PrompterClientMeta>();
+interface RemotePrompterDeliveryState {
+  lastPreviewAt: number;
+  lastProgressAt: number;
+}
+const remotePrompterDeliveryState = new WeakMap<ServerWebSocket<unknown>, RemotePrompterDeliveryState>();
+const REMOTE_PROMPTER_PREVIEW_INTERVAL_MS = 500;
+const REMOTE_PROMPTER_PROGRESS_INTERVAL_MS = 250;
+const REMOTE_WS_COMPRESSION_MIN_BYTES = 2048;
 interface PrompterPendingRequest {
   sourceWs: ServerWebSocket<unknown>;
   targetWs: ServerWebSocket<unknown> | null;
@@ -4264,7 +4334,13 @@ interface BackendPowerPrompterQueueTask {
   promptSetIds: number[];
   promptOutputSubfolders: string[];
   promptStyleNames: string[];
+  promptEntries: unknown[];
   generationByPrompt: PowerPrompterGenerationControls[];
+  editorSnapshot: unknown;
+  restoreMetadataCache: {
+    sourceHash: string;
+    envelope: Record<string, unknown>;
+  } | null;
   loaded: LoadedPPApiWorkflow;
   removedPromptIndices: Set<number>;
   interruptedPromptIndices: Set<number>;
@@ -4587,6 +4663,7 @@ let prompterSyncState: PrompterSyncState = {
     negativePrompt: '',
     seed: 0,
     controlAfterGenerate: 'fixed',
+    seedIncrement: 1,
     steps: 20,
     cfg: 7,
     samplerName: 'euler',
@@ -4607,7 +4684,12 @@ function sendWs(ws: ServerWebSocket<unknown>, data: any): boolean {
   try {
     if (ws.readyState !== 1) return false;
     const serialized = JSON.stringify(data);
-    ws.send(serialized);
+    const eventType = String(data?.type || '').trim();
+    const shouldCompress = (ws.data as any)?.remoteClient === true
+      && serialized.length >= REMOTE_WS_COMPRESSION_MIN_BYTES
+      && eventType !== 'generation_preview'
+      && eventType !== 'comfy_generation_preview';
+    ws.send(serialized, shouldCompress);
     recordRemoteTransport(String((ws.data as any)?.endpoint || '/ws/unknown'), 'out', Buffer.byteLength(serialized));
     return true;
   } catch {
@@ -4640,13 +4722,43 @@ function broadcastUiSessionUpdate(key: string, value: unknown) {
   }
 }
 
+function shouldDeliverPrompterEvent(ws: ServerWebSocket<unknown>, data: any): boolean {
+  if ((ws.data as any)?.remoteClient !== true) return true;
+  const eventType = String(data?.type || '').trim();
+  if (eventType !== 'generation_preview' && eventType !== 'job_progress') return true;
+
+  const now = Date.now();
+  const state = remotePrompterDeliveryState.get(ws) || {
+    lastPreviewAt: 0,
+    lastProgressAt: 0,
+  };
+  remotePrompterDeliveryState.set(ws, state);
+
+  if (eventType === 'generation_preview') {
+    if (now - state.lastPreviewAt < REMOTE_PROMPTER_PREVIEW_INTERVAL_MS) return false;
+    state.lastPreviewAt = now;
+    return true;
+  }
+
+  const step = Math.max(0, Math.floor(Number(data?.step ?? data?.progress) || 0));
+  const maxStep = Math.max(0, Math.floor(Number(data?.maxStep ?? data?.progressMax) || 0));
+  const terminalProgress = maxStep > 0 && step >= maxStep;
+  if (!terminalProgress && now - state.lastProgressAt < REMOTE_PROMPTER_PROGRESS_INTERVAL_MS) return false;
+  state.lastProgressAt = now;
+  return true;
+}
+
+function sendPrompterEventToClient(ws: ServerWebSocket<unknown>, data: any): boolean {
+  return shouldDeliverPrompterEvent(ws, data) && sendWs(ws, data);
+}
+
 function sendPrompterEventToTargets(data: any, preferredSourceWs?: ServerWebSocket<unknown> | null) {
   if (preferredSourceWs && preferredSourceWs.readyState === 1) {
-    sendWs(preferredSourceWs, data);
+    sendPrompterEventToClient(preferredSourceWs, data);
   }
   for (const target of getPowerPrompterTargets()) {
     if (target === preferredSourceWs) continue;
-    sendWs(target, data);
+    sendPrompterEventToClient(target, data);
   }
 }
 
@@ -5033,6 +5145,9 @@ function applyPowerPrompterQueueControllerReorder(data: any, preferredSourceWs?:
       task.promptSetIds.splice(0, task.promptSetIds.length, ...request.prompts.map((prompt) => clampPPQueueSetId(prompt.setId)));
       task.promptOutputSubfolders.splice(0, task.promptOutputSubfolders.length, ...request.prompts.map((prompt) => String(prompt.outputSubfolder || '').trim()));
       task.promptStyleNames.splice(0, task.promptStyleNames.length, ...request.prompts.map((prompt) => String(prompt.styleName || '').trim()));
+      task.promptEntries.splice(0, task.promptEntries.length, ...nextPrompts.map((prompt) =>
+        getByOldIndex(task.promptEntries, prompt.promptIndex, null)
+      ));
       task.generationByPrompt.splice(0, task.generationByPrompt.length, ...nextPrompts.map((prompt) =>
         normalizePPGenerationControls(getByOldIndex(task.generationByPrompt, prompt.promptIndex, { seed: prompt.seed } as PowerPrompterGenerationControls))
       ));
@@ -5134,6 +5249,10 @@ function replacePowerPrompterQueueControllerGroup(
       ? replacement.generationByPrompt[index] ?? replacementGeneration
       : replacementGeneration)
   );
+  const replacementPromptEntries = keptPromptIndices.map(({ index }) => {
+    const entry = Array.isArray(replacement.promptEntries) ? replacement.promptEntries[index] : null;
+    return entry && typeof entry === 'object' ? entry : null;
+  });
 
   const lockedPrompts = request.prompts
     .filter((prompt) => prompt.status !== 'pending')
@@ -5192,30 +5311,66 @@ function replacePowerPrompterQueueControllerGroup(
       });
     });
     const nextGenerationByPrompt = [...lockedGenerationByPrompt, ...replacementGenerationByPrompt];
+    const nextPromptEntries = [
+      ...lockedPrompts.map((prompt) => task.promptEntries[prompt.promptIndex] ?? null),
+      ...replacementPromptEntries,
+    ];
     task.prompts.splice(0, task.prompts.length, ...nextPrompts);
     task.promptSetIds.splice(0, task.promptSetIds.length, ...nextPromptSetIds);
     task.promptOutputSubfolders.splice(0, task.promptOutputSubfolders.length, ...nextOutputSubfolders);
     task.promptStyleNames.splice(0, task.promptStyleNames.length, ...nextStyleNames);
+    task.promptEntries.splice(0, task.promptEntries.length, ...nextPromptEntries);
     task.generationByPrompt.splice(0, task.generationByPrompt.length, ...nextGenerationByPrompt);
     task.promptIds.splice(0, task.promptIds.length, ...nextControllerPrompts.map((prompt) => prompt.promptId || ''));
     task.removedPromptIndices = new Set(Array.from(task.removedPromptIndices).filter((index) => index < lockedPrompts.length));
     task.interruptedPromptIndices = new Set(Array.from(task.interruptedPromptIndices).filter((index) => index < lockedPrompts.length));
+    const replacementEditorSnapshot = replacement.editorSnapshot ?? replacementGroup.editorSnapshot;
+    if (replacementEditorSnapshot && typeof replacementEditorSnapshot === 'object') {
+      task.editorSnapshot = replacementEditorSnapshot;
+      task.restoreMetadataCache = null;
+    }
   }
 
   const queuedWork = backendPowerPrompterQueuedWork.find((entry) => entry.requestId === normalizedRequestId);
-  if (queuedWork && pipelineBinding) {
-    queuedWork.loaded = pipelineBinding.loaded;
+  if (queuedWork) {
+    if (pipelineBinding) queuedWork.loaded = pipelineBinding.loaded;
     const previousState = queuedWork.data?.state && typeof queuedWork.data.state === 'object'
       ? queuedWork.data.state
       : {};
+    const previousPromptEntries = Array.isArray(previousState.promptEntries) ? previousState.promptEntries : [];
+    const nextPromptEntries = [
+      ...lockedPrompts.map((prompt) => previousPromptEntries[prompt.promptIndex] ?? null),
+      ...replacementPromptEntries,
+    ];
+    const replacementEditorSnapshot = replacement.editorSnapshot ?? replacementGroup.editorSnapshot;
+    const nextPrompts = nextControllerPrompts.map((prompt) => prompt.prompt);
+    const nextPromptSetIds = nextControllerPrompts.map((prompt) => clampPPQueueSetId(prompt.setId));
+    const nextPromptOutputSubfolders = nextControllerPrompts.map((prompt) => String(prompt.outputSubfolder || '').trim());
+    const nextPromptStyleNames = nextControllerPrompts.map((prompt) => String(prompt.styleName || '').trim());
+    const nextGenerationByPrompt = nextControllerPrompts.map((prompt) => normalizePPGenerationControls(prompt.generation));
+    queuedWork.prompts = nextPrompts;
     queuedWork.data = {
       ...queuedWork.data,
-      pipeline: pipelineBinding.pipeline,
+      ...(pipelineBinding ? { pipeline: pipelineBinding.pipeline } : {}),
       state: {
         ...previousState,
-        pipeline: pipelineBinding.pipeline,
-        modelFamily: pipelineBinding.pipeline.modelFamily,
-        umbraUiFeature: pipelineBinding.pipeline.feature,
+        ...(pipelineBinding ? {
+          pipeline: pipelineBinding.pipeline,
+          modelFamily: pipelineBinding.pipeline.modelFamily,
+          umbraUiFeature: pipelineBinding.pipeline.feature,
+        } : {}),
+        activePrompt: nextPrompts[0] || '',
+        prompts: nextPrompts,
+        joinedPrompt: nextPrompts.join(', '),
+        promptSetIds: nextPromptSetIds,
+        promptOutputSubfolders: nextPromptOutputSubfolders,
+        promptStyleNames: nextPromptStyleNames,
+        promptEntries: nextPromptEntries,
+        generation: nextGenerationByPrompt[0] ?? replacementGeneration,
+        generationByPrompt: nextGenerationByPrompt,
+        ...(replacementEditorSnapshot && typeof replacementEditorSnapshot === 'object'
+          ? { editorSnapshot: replacementEditorSnapshot }
+          : {}),
       },
     };
   }
@@ -5246,6 +5401,8 @@ function refreshBackendPowerPrompterQueuedWorkFromController(requestId: string):
   }
   const previousState = work.data?.state && typeof work.data.state === 'object' ? work.data.state : {};
   const previousGenerationByPrompt = Array.isArray(previousState.generationByPrompt) ? previousState.generationByPrompt : [];
+  const previousPromptEntries = Array.isArray(previousState.promptEntries) ? previousState.promptEntries : [];
+  const livePromptEntries = task?.promptEntries || previousPromptEntries;
   const generationByPrompt = livePrompts.map((prompt) => normalizePPGenerationControls(
     prompt.generation ?? task?.generationByPrompt[prompt.promptIndex] ?? previousGenerationByPrompt[prompt.promptIndex] ?? {
       ...(previousState.generation && typeof previousState.generation === 'object' ? previousState.generation : {}),
@@ -5271,6 +5428,7 @@ function refreshBackendPowerPrompterQueuedWorkFromController(requestId: string):
       promptSetIds: livePrompts.map((prompt) => prompt.setId),
       promptOutputSubfolders: livePrompts.map((prompt) => prompt.outputSubfolder),
       promptStyleNames: livePrompts.map((prompt) => prompt.styleName),
+      promptEntries: livePrompts.map((prompt) => livePromptEntries[prompt.promptIndex] ?? null),
       generation: generationByPrompt[0] ?? normalizePPGenerationControls(previousState.generation),
       generationByPrompt,
     },
@@ -5610,7 +5768,11 @@ function sanitizePrompterPromptLines(input: unknown, options?: { dedupe?: boolea
 function getPrompterMeta(ws: ServerWebSocket<unknown>): PrompterClientMeta {
   const current = prompterClientMeta.get(ws);
   if (current) return current;
-  const next: PrompterClientMeta = { role: 'unknown', source: 'unknown' };
+  const next: PrompterClientMeta = {
+    role: 'unknown',
+    source: 'unknown',
+    remote: (ws.data as any)?.remoteClient === true,
+  };
   prompterClientMeta.set(ws, next);
   return next;
 }
@@ -7788,6 +7950,47 @@ async function emitBackendPowerPrompterSavedOutputs(
     ...output,
     fullpath: resolveComfySavedOutputPath(output),
   }));
+  const basePowerPrompterMetadata = metadata?.umbra_power_prompter && typeof metadata.umbra_power_prompter === 'object'
+    ? metadata.umbra_power_prompter as Record<string, unknown>
+    : {};
+  const stampedOutputs = await Promise.all(resolvedOutputs.map(async (output, outputIndex) => {
+    const ppuid = createPowerPrompterUid();
+    const outputPowerPrompterMetadata: Record<string, unknown> = {
+      ...basePowerPrompterMetadata,
+      version: 2,
+      ppuid,
+      promptId,
+      promptIndex,
+      outputIndex,
+      outputCount: resolvedOutputs.length,
+      savedAt: new Date().toISOString(),
+    };
+    const fullpath = String(output.fullpath || '').trim();
+    if (fullpath && extname(fullpath).toLowerCase() === '.png') {
+      try {
+        await upsertPngTextMetadata(
+          fullpath,
+          'umbra_power_prompter',
+          JSON.stringify(outputPowerPrompterMetadata),
+        );
+      } catch (error: any) {
+        appendPowerPrompterQueueLog('backend_queue_ppuid_embed_failed', {
+          requestId,
+          promptIndex,
+          promptId,
+          outputIndex,
+          path: fullpath,
+          error: String(error?.message || error || 'Failed to embed Power Prompter metadata.'),
+        });
+      }
+    }
+    return {
+      ...output,
+      ppuid,
+      umbra_power_prompter: outputPowerPrompterMetadata,
+    };
+  }));
+  const primaryPowerPrompterMetadata = stampedOutputs[0]?.umbra_power_prompter || basePowerPrompterMetadata;
   const payload = {
     type: 'queue_saved_outputs',
     requestId,
@@ -7801,8 +8004,8 @@ async function emitBackendPowerPrompterSavedOutputs(
     ...(metadata?.workflow !== undefined ? { workflow: metadata.workflow } : {}),
     ...(metadata?.prompt !== undefined ? { prompt: metadata.prompt } : {}),
     ...(metadata?.umbra_api_workflow !== undefined ? { umbra_api_workflow: metadata.umbra_api_workflow } : {}),
-    ...(metadata?.umbra_power_prompter !== undefined ? { umbra_power_prompter: metadata.umbra_power_prompter } : {}),
-    outputs: resolvedOutputs.map((output) => ({
+    ...(metadata?.umbra_power_prompter !== undefined ? { umbra_power_prompter: primaryPowerPrompterMetadata } : {}),
+    outputs: stampedOutputs.map((output) => ({
       ...output,
       promptSetId,
       setId: promptSetId,
@@ -7812,7 +8015,7 @@ async function emitBackendPowerPrompterSavedOutputs(
       ...(metadata?.workflow !== undefined ? { workflow: metadata.workflow } : {}),
       ...(metadata?.prompt !== undefined ? { prompt: metadata.prompt } : {}),
       ...(metadata?.umbra_api_workflow !== undefined ? { umbra_api_workflow: metadata.umbra_api_workflow } : {}),
-      ...(metadata?.umbra_power_prompter !== undefined ? { umbra_power_prompter: metadata.umbra_power_prompter } : {}),
+      ...(metadata?.umbra_power_prompter !== undefined ? { umbra_power_prompter: output.umbra_power_prompter } : {}),
     })),
   };
   appendPowerPrompterQueueLog('backend_queue_saved_outputs', {
@@ -7820,12 +8023,12 @@ async function emitBackendPowerPrompterSavedOutputs(
     promptIndex,
     promptId,
     promptSetId,
-    outputCount: resolvedOutputs.length,
+    outputCount: stampedOutputs.length,
   });
   const reviewRequest = findPowerPrompterQueueControllerRequest(requestId);
   const reviewPrompt = reviewRequest?.prompts[promptIndex];
   if (reviewRequest && reviewPrompt) {
-    void upsertUmbraUiVideoReviewPrompt(reviewRequest, reviewPrompt, resolvedOutputs);
+    void upsertUmbraUiVideoReviewPrompt(reviewRequest, reviewPrompt, stampedOutputs);
   }
   emitPowerPrompterRuntimeTerminalLog('queue_saved_outputs', payload);
   void tagPowerPrompterSavedOutputs(payload, null);
@@ -8470,6 +8673,92 @@ async function replacePersistedPPQueueGroup(
   };
 }
 
+function createPowerPrompterUid(prefix = 'pp'): string {
+  return `${prefix}_${randomBytes(16).toString('hex')}`;
+}
+
+function normalizePowerPrompterPromptEntries(rawEntries: unknown, promptCount: number): unknown[] {
+  const entries = Array.isArray(rawEntries) ? rawEntries : [];
+  return Array.from({ length: Math.max(0, promptCount) }, (_, index) => {
+    const entry = entries[index];
+    return entry && typeof entry === 'object' ? entry : null;
+  });
+}
+
+function buildPowerPrompterMetadataSegments(
+  promptEntry: unknown,
+  editorSnapshot: unknown,
+  fallbackPrompt: string,
+): Array<Record<string, unknown>> {
+  const entry = promptEntry && typeof promptEntry === 'object'
+    ? promptEntry as Record<string, unknown>
+    : {};
+  const rawTokens = Array.isArray(entry.tokens) ? entry.tokens : [];
+  const snapshot = editorSnapshot && typeof editorSnapshot === 'object'
+    ? editorSnapshot as Record<string, any>
+    : {};
+  const cards = Array.isArray(snapshot?.document?.cards)
+    ? snapshot.document.cards.filter((card: unknown) => !!card && typeof card === 'object')
+    : [];
+  const cardsById = new Map(cards.map((card: any) => [String(card.id || '').trim(), card]));
+
+  const segments = rawTokens.map((rawToken, order) => {
+    const token = rawToken && typeof rawToken === 'object'
+      ? rawToken as Record<string, unknown>
+      : {};
+    const variantId = String(token.variantId || '').trim();
+    const card = cardsById.get(variantId) as Record<string, unknown> | undefined;
+    const text = String(token.text || card?.text || '').trim();
+    if (!text) return null;
+    return {
+      order,
+      slotId: String(token.slotId || card?.slotId || '').trim(),
+      slotLabel: String(token.slotLabel || card?.label || '').trim(),
+      slotType: String(token.slotType || card?.type || '').trim(),
+      variantId,
+      variantName: String(token.variantName || card?.variantName || '').trim(),
+      text,
+    };
+  }).filter((segment): segment is Record<string, unknown> => !!segment);
+
+  if (segments.length > 0) return segments;
+  const prompt = String(fallbackPrompt || entry.prompt || '').trim();
+  return prompt
+    ? [{
+        order: 0,
+        slotId: 'compiled-prompt',
+        slotLabel: 'Prompt',
+        slotType: 'prompt',
+        variantId: '',
+        variantName: '',
+        text: prompt,
+      }]
+    : [];
+}
+
+async function getPowerPrompterRestoreMetadata(
+  task: BackendPowerPrompterQueueTask,
+): Promise<Record<string, unknown> | undefined> {
+  if (!task.editorSnapshot || typeof task.editorSnapshot !== 'object') return undefined;
+  const json = JSON.stringify(task.editorSnapshot);
+  if (!json) return undefined;
+  const sourceHash = createHash('sha256').update(json).digest('hex');
+  if (task.restoreMetadataCache?.sourceHash === sourceHash) {
+    return task.restoreMetadataCache.envelope;
+  }
+  const compressed = await gzipAsync(Buffer.from(json, 'utf8'), { level: 9 });
+  const envelope: Record<string, unknown> = {
+    version: 1,
+    encoding: 'gzip-base64',
+    sha256: sourceHash,
+    uncompressedBytes: Buffer.byteLength(json, 'utf8'),
+    compressedBytes: compressed.length,
+    data: compressed.toString('base64'),
+  };
+  task.restoreMetadataCache = { sourceHash, envelope };
+  return envelope;
+}
+
 async function runBackendPowerPrompterPipelineQueue(
   sourceWs: ServerWebSocket<unknown> | null,
   requestId: string,
@@ -8485,6 +8774,7 @@ async function runBackendPowerPrompterPipelineQueue(
     promptOutputSubfolders = promptOutputSubfolders.map(() => '');
   }
   const promptStyleNames = prompts.map((_, index) => String(Array.isArray(state.promptStyleNames) ? state.promptStyleNames[index] : '').trim());
+  const promptEntries = normalizePowerPrompterPromptEntries(state.promptEntries, prompts.length);
   const generationByPrompt = prompts.map((_, index) => normalizePPGenerationControls(Array.isArray(state.generationByPrompt) ? state.generationByPrompt[index] : state.generation));
   const promptIds: string[] = [];
   const task: BackendPowerPrompterQueueTask = {
@@ -8496,7 +8786,10 @@ async function runBackendPowerPrompterPipelineQueue(
     promptSetIds,
     promptOutputSubfolders,
     promptStyleNames,
+    promptEntries,
     generationByPrompt,
+    editorSnapshot: state.editorSnapshot && typeof state.editorSnapshot === 'object' ? state.editorSnapshot : null,
+    restoreMetadataCache: null,
     loaded,
     removedPromptIndices: new Set<number>(),
     interruptedPromptIndices: new Set<number>(),
@@ -8573,14 +8866,21 @@ async function runBackendPowerPrompterPipelineQueue(
       const outputSubfolder = promptOutputSubfolders[index] || '';
       const styleName = promptStyleNames[index] || '';
       const pipeline = getPowerPrompterPipelineSelection(state, activePipeline);
+      const restore = await getPowerPrompterRestoreMetadata(task);
+      const segments = buildPowerPrompterMetadataSegments(
+        task.promptEntries[index],
+        task.editorSnapshot,
+        prompt,
+      );
       const extraPngInfo: Record<string, unknown> = {
         workflow: queuedWorkflow.workflowPayload,
         prompt: queuedWorkflow.promptGraph,
         umbra_api_workflow: queuedWorkflow.promptGraph,
         umbra_power_prompter: {
-          version: 1,
+          version: 2,
           source: 'power_prompter',
           queueBackend: 'umbra_ui_pipeline',
+          generationUid: createPowerPrompterUid('ppgen'),
           requestId,
           promptIndex: index,
           promptCount: prompts.length,
@@ -8599,6 +8899,8 @@ async function runBackendPowerPrompterPipelineQueue(
           styleName,
           sourceFile,
           source_file: sourceFile,
+          segments,
+          ...(restore ? { restore } : {}),
         },
         ...(sourceFile ? { source_file: sourceFile } : {}),
       };
@@ -10170,7 +10472,11 @@ function handleWsConnection(ws: ServerWebSocket<unknown>, endpoint: string) {
     logWsLifecycle(`[WS] Output client connected (${wsClients.output.size} total)`);
   } else if (endpoint === '/ws/prompter') {
     wsClients.prompter.add(ws);
-    prompterClientMeta.set(ws, { role: 'unknown', source: 'unknown' });
+    prompterClientMeta.set(ws, {
+      role: 'unknown',
+      source: 'unknown',
+      remote: (ws.data as any)?.remoteClient === true,
+    });
     logWsLifecycle(`[WS] Prompter client connected (${wsClients.prompter.size} total)`);
   } else if (endpoint === '/ws/comfy-preview') {
     if (!APPBAR_COMFY_PREVIEW_ENABLED) {
@@ -10359,6 +10665,15 @@ function isTailscaleIpv4(address: string): boolean {
   return /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(address);
 }
 
+function isTailscaleIpv6(address: string): boolean {
+  return /^fd7a:115c:a1e0:/i.test(normalizeIpAddress(address));
+}
+
+function isTailscaleIpAddress(address: string): boolean {
+  const normalized = normalizeIpAddress(address);
+  return isTailscaleIpv4(normalized) || isTailscaleIpv6(normalized);
+}
+
 function isPrivateLanIpv4(address: string): boolean {
   return address.startsWith('10.')
     || address.startsWith('192.168.')
@@ -10371,11 +10686,21 @@ async function getTailscaleUrls(port: number): Promise<string[]> {
   return info.httpUrls;
 }
 
-async function getTailscaleAccessInfo(port: number): Promise<{
+async function getTailscaleAccessInfo(port: number, bindHost = HOST): Promise<{
+  installed: boolean;
+  connected: boolean;
+  online: boolean;
+  backendState: string;
+  health: string[];
   httpUrls: string[];
   httpsUrls: string[];
   suggestedHttpsUrls: string[];
   dnsName: string;
+  knownDnsName: string;
+  serveConfigured: boolean;
+  serveTargets: string[];
+  serveExpectedTarget: string;
+  serveTargetMatches: boolean;
   serveEnabled: boolean;
   serveCommand: string;
 }> {
@@ -10384,36 +10709,64 @@ async function getTailscaleAccessInfo(port: number): Promise<{
       timeout: 2500,
       windowsHide: true,
     });
-    const payload = JSON.parse(stdout || '{}');
-    const ips = Array.isArray(payload?.TailscaleIPs) ? payload.TailscaleIPs : [];
-    const httpUrls = ips
-      .map((value: unknown) => String(value || '').trim())
-      .filter((value: string) => value && isTailscaleIpv4(value))
-      .map((value: string) => `http://${value}:${port}`);
-    const dnsName = String(payload?.Self?.DNSName || '').trim().replace(/\.$/, '');
-    let serveEnabled = false;
+    const runtimeStatus = parseTailscaleStatus(JSON.parse(stdout || '{}'));
+    const httpUrls = [
+      ...runtimeStatus.activeIpv4s.map((value: string) => `http://${value}:${port}`),
+      ...runtimeStatus.activeIpv6s.map((value: string) => `http://${formatUrlHost(value)}:${port}`),
+    ];
+    const expectedTarget = buildTailscaleServeOrigin(bindHost, port);
+    let serveStatus = parseTailscaleServeStatus({}, expectedTarget);
     try {
       const { stdout: serveStdout } = await execAsync('tailscale serve status --json', {
         timeout: 2500,
         windowsHide: true,
       });
-      const servePayload = JSON.parse(serveStdout || '{}');
-      serveEnabled = Boolean(servePayload && Object.keys(servePayload).length > 0);
+      serveStatus = parseTailscaleServeStatus(JSON.parse(serveStdout || '{}'), expectedTarget);
     } catch {
-      serveEnabled = false;
+      serveStatus = parseTailscaleServeStatus({}, expectedTarget);
     }
-    const suggestedHttpsUrls = dnsName ? [`https://${dnsName}`] : [];
+    const serveEnabled = runtimeStatus.connected && serveStatus.targetMatches;
+    const dnsName = runtimeStatus.activeDnsName;
+    const suggestedHttpsUrls = runtimeStatus.connected && dnsName ? [`https://${dnsName}`] : [];
     const httpsUrls = serveEnabled ? suggestedHttpsUrls : [];
     return {
+      installed: runtimeStatus.installed,
+      connected: runtimeStatus.connected,
+      online: runtimeStatus.online,
+      backendState: runtimeStatus.backendState,
+      health: runtimeStatus.health,
       httpUrls,
       httpsUrls,
       suggestedHttpsUrls,
       dnsName,
+      knownDnsName: runtimeStatus.knownDnsName,
+      serveConfigured: serveStatus.configured,
+      serveTargets: serveStatus.proxyTargets,
+      serveExpectedTarget: serveStatus.expectedTarget,
+      serveTargetMatches: serveStatus.targetMatches,
       serveEnabled,
-      serveCommand: dnsName ? `tailscale serve --bg http://127.0.0.1:${port}` : '',
+      serveCommand: runtimeStatus.installed ? `tailscale serve --bg ${serveStatus.expectedTarget}` : '',
     };
   } catch {
-    return { httpUrls: [], httpsUrls: [], suggestedHttpsUrls: [], dnsName: '', serveEnabled: false, serveCommand: '' };
+    const unavailable = createUnavailableTailscaleStatus();
+    return {
+      installed: unavailable.installed,
+      connected: unavailable.connected,
+      online: unavailable.online,
+      backendState: unavailable.backendState,
+      health: unavailable.health,
+      httpUrls: [],
+      httpsUrls: [],
+      suggestedHttpsUrls: [],
+      dnsName: '',
+      knownDnsName: '',
+      serveConfigured: false,
+      serveTargets: [],
+      serveExpectedTarget: buildTailscaleServeOrigin(bindHost, port),
+      serveTargetMatches: false,
+      serveEnabled: false,
+      serveCommand: '',
+    };
   }
 }
 
@@ -14848,6 +15201,7 @@ const PP_GENERATION_ASPECT_OPTIONS = [
   '1536 - 21:9 landscape 1536x656',
 ] as const;
 type PowerPrompterSeedControlMode = 'fixed' | 'increment' | 'decrement' | 'randomize';
+type PowerPrompterSeedIncrement = 1 | 100 | 1000;
 type PowerPrompterModelType = 'checkpoint' | 'diffusers' | 'diffusion_model' | 'unet' | 'gguf';
 type PowerPrompterMediaType = 'image' | 'video';
 type PowerPrompterVideoFamily = 'wan22' | 'ltx23';
@@ -14891,6 +15245,7 @@ interface PowerPrompterVideoControls {
   fps: number;
   seed: number;
   seedMode: PowerPrompterSeedControlMode;
+  seedIncrement: PowerPrompterSeedIncrement;
   outputPrefix: string;
   format: 'auto' | 'mp4';
   codec: 'auto' | 'h264';
@@ -15026,6 +15381,7 @@ interface PowerPrompterGenerationControls {
   negativePrompt: string;
   seed: number;
   controlAfterGenerate: PowerPrompterSeedControlMode;
+  seedIncrement: PowerPrompterSeedIncrement;
   steps: number;
   cfg: number;
   clipSkip?: number;
@@ -15147,6 +15503,7 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
     fps: 16,
     seed: 0,
     seedMode: 'fixed',
+    seedIncrement: 1,
     outputPrefix: 'video/Umbra',
     format: 'auto',
     codec: 'h264',
@@ -15210,6 +15567,7 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
   negativePrompt: '',
   seed: 0,
   controlAfterGenerate: 'fixed',
+  seedIncrement: 1,
   steps: 20,
   cfg: 7,
   clipSkip: 1,
@@ -16130,6 +16488,11 @@ function normalizePPSeedControlMode(rawMode: unknown): PowerPrompterSeedControlM
   return 'fixed';
 }
 
+function normalizePPSeedIncrement(rawIncrement: unknown): PowerPrompterSeedIncrement {
+  const increment = Number(rawIncrement);
+  return increment === 100 || increment === 1000 ? increment : 1;
+}
+
 function normalizePPAspectRatio(rawAspectRatio: unknown): string {
   const candidate = String(rawAspectRatio || '').trim();
   if (!candidate) return PP_DEFAULT_GENERATION_CONTROLS.aspectRatio;
@@ -16266,6 +16629,7 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
     fps: clampPPInteger(video.fps, family === 'ltx23' ? 25 : defaults.fps, 1, 120),
     seed: clampPPInteger(video.seed, defaults.seed, 0, PP_MAX_SEED_SAFE),
     seedMode: normalizePPSeedControlMode(video.seedMode),
+    seedIncrement: normalizePPSeedIncrement(video.seedIncrement),
     outputPrefix: String(video.outputPrefix || defaults.outputPrefix).trim().replace(/\\/g, '/').replace(/^\/+/, '') || defaults.outputPrefix,
     format: String(video.format || '').trim().toLowerCase() === 'mp4' ? 'mp4' : 'auto',
     codec: String(video.codec || '').trim().toLowerCase() === 'h264' ? 'h264' : 'auto',
@@ -16482,6 +16846,7 @@ function normalizePPGenerationControls(rawControls: unknown): PowerPrompterGener
     negativePrompt: String((controls as any).negativePrompt || '').trim(),
     seed: clampPPInteger(controls.seed, PP_DEFAULT_GENERATION_CONTROLS.seed, 0, PP_MAX_SEED_SAFE),
     controlAfterGenerate: normalizePPSeedControlMode(controls.controlAfterGenerate),
+    seedIncrement: normalizePPSeedIncrement(controls.seedIncrement),
     steps: clampPPInteger((controls as any).steps, PP_DEFAULT_GENERATION_CONTROLS.steps, 1, 10000),
     cfg: Math.max(0, Math.min(100, Number((controls as any).cfg) || PP_DEFAULT_GENERATION_CONTROLS.cfg)),
     clipSkip: clampPPInteger((controls as any).clipSkip ?? (controls as any).clip_skip, PP_DEFAULT_GENERATION_CONTROLS.clipSkip || 1, 1, 12),
@@ -16561,7 +16926,8 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
     outputMode: 'inpainting',
     negativePrompt: settings.negativePrompt,
     seed,
-    controlAfterGenerate: 'fixed',
+    controlAfterGenerate: settings.seedMode,
+    seedIncrement: settings.seedIncrement,
     steps: settings.steps,
     cfg: settings.cfg,
     clipSkip: settings.clipSkip,
@@ -17220,6 +17586,8 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
       checkpointName: String(form.get('checkpointName') || '').trim(),
       clipSkip: Math.max(1, Math.min(12, Math.round(finiteNumberOrFallback(form.get('clipSkip'), 1)))),
       seed: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(finiteNumberOrFallback(form.get('seed'), 0)))),
+      seedMode: normalizePPSeedControlMode(form.get('seedMode')),
+      seedIncrement: normalizePPSeedIncrement(form.get('seedIncrement')),
       steps: Math.max(1, Math.min(10000, Math.round(finiteNumberOrFallback(form.get('steps'), 35)))),
       cfg: Math.max(0, Math.min(100, finiteNumberOrFallback(form.get('cfg'), 4))),
       samplerName: String(form.get('samplerName') || 'er_sde').trim() || 'er_sde',
@@ -17593,6 +17961,8 @@ async function handleUmbraUiCanvasSave(req: Request): Promise<Response> {
       modelSource: String(metadata.modelSource || '').trim().slice(0, 80),
       loras,
       seed: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(Number(metadata.seed) || 0))),
+      seedMode: normalizePPSeedControlMode(metadata.seedMode),
+      seedIncrement: normalizePPSeedIncrement(metadata.seedIncrement),
       steps: Math.max(1, Math.min(10000, Math.round(Number(metadata.steps) || 1))),
       cfg: Math.max(0, Math.min(100, Number(metadata.cfg) || 0)),
       clipSkip: Math.max(1, Math.min(12, Math.round(Number(metadata.clipSkip) || 1))),
@@ -22183,7 +22553,7 @@ function pendingThumbnailResponse(): Response {
 
 const REMOTE_GALLERY_IMAGE_MAX_LONG_SIDE = 1536;
 const REMOTE_GALLERY_IMAGE_QUALITY = 78;
-const REMOTE_GALLERY_THUMBNAIL_QUALITY = 72;
+const REMOTE_GALLERY_THUMBNAIL_QUALITY = 64;
 const REMOTE_GALLERY_OPTIMIZABLE_IMAGE_EXTENSIONS = new Set([
   '.bmp',
   '.jpg',
@@ -22232,6 +22602,7 @@ function applyRemoteGalleryBridgeFsOptimization(
   if (!isRemoteGalleryImageOptimizationEnabled(req, sourceUrl, server)) return false;
 
   if (targetPath === '/api/fs/thumbnail') {
+    targetUrl.searchParams.set('size', 'small');
     targetUrl.searchParams.set('q', String(clampRemoteGalleryQuality(targetUrl.searchParams.get('q'), REMOTE_GALLERY_THUMBNAIL_QUALITY, REMOTE_GALLERY_THUMBNAIL_QUALITY)));
     return true;
   }
@@ -26427,16 +26798,39 @@ const server = Bun.serve<any>({
 
         if (method === 'POST' && path === '/api/remote/auth/logout') {
           const config = effectiveRemoteAuthConfig;
+          const body = await req.json().catch(() => ({} as any));
+          const forgetDevice = body?.forgetDevice !== false;
+          const sessionToken = getRemoteSessionToken(req);
+          const sessionHash = sessionToken ? hashRemoteSessionToken(sessionToken) : '';
+          const deviceToken = getRemoteDeviceToken(req);
+          const deviceId = deviceToken ? hashRemoteSessionToken(deviceToken) : '';
           if (config) {
-            const token = getRemoteSessionToken(req);
-            const tokenHash = token ? hashRemoteSessionToken(token) : '';
             saveRemoteAuthConfig({
               ...config,
-              sessions: (config.sessions || []).filter((session) => !tokenHash || !safeEqualHex(session.hash, tokenHash)),
+              sessions: (config.sessions || []).filter((session) => {
+                if (sessionHash && safeEqualHex(session.hash, sessionHash)) return false;
+                if (forgetDevice && deviceId && session.deviceId && safeEqualHex(session.deviceId, deviceId)) return false;
+                return true;
+              }),
+              devices: forgetDevice && deviceId
+                ? (config.devices || []).filter((device) => !safeEqualHex(device.id, deviceId))
+                : (config.devices || []),
               updatedAt: Date.now(),
             });
           }
-          return json({ ok: true }, { headers: { 'Set-Cookie': clearRemoteSessionCookie(req) } });
+          console.log(`[UmbraRemote] Remote session logged out${forgetDevice ? ' and device forgotten' : ''}`);
+          return json({
+            ok: true,
+            deviceForgotten: forgetDevice,
+          }, {
+            headers: {
+              'Cache-Control': 'no-store',
+              'Set-Cookie': [
+                clearRemoteSessionCookie(req),
+                ...(forgetDevice ? [clearRemoteDeviceCookie(req)] : []),
+              ],
+            },
+          });
         }
 
         if (method === 'POST' && path === '/api/remote/settings') {
@@ -26524,7 +26918,26 @@ const server = Bun.serve<any>({
         if (method === 'POST' && path === '/api/remote/tailscale/serve') {
           const guard = withRemoteAdminGuard(req, url, server);
           if (guard) return guard;
-          const command = `tailscale serve --bg http://127.0.0.1:${PORT}`;
+          const tailscaleAccess = await getTailscaleAccessInfo(PORT);
+          const command = tailscaleAccess.serveCommand || `tailscale serve --bg ${buildTailscaleServeOrigin(HOST, PORT)}`;
+          if (!tailscaleAccess.installed) {
+            return json({
+              ok: false,
+              code: 'TAILSCALE_NOT_AVAILABLE',
+              command,
+              message: 'Tailscale is not available on this host.',
+              details: 'Install Tailscale, sign in, and then try again.',
+            }, 409);
+          }
+          if (!tailscaleAccess.connected) {
+            return json({
+              ok: false,
+              code: 'TAILSCALE_OFFLINE',
+              command,
+              message: 'Tailscale is not connected on this host.',
+              details: tailscaleAccess.health[0] || 'Turn on Tailscale, wait for it to connect, and then try again.',
+            }, 409);
+          }
           try {
             const { stdout, stderr } = await execAsync(command, { timeout: 15000, windowsHide: true });
             console.log(`[UmbraRemote] Tailscale Serve configured for port ${PORT}`);
@@ -26685,26 +27098,33 @@ const server = Bun.serve<any>({
           const currentTailscaleOrigin = isTailscaleHostname(requestVisibleOrigin) ? requestVisibleOrigin : '';
           const currentTailscaleHttpsUrl = currentTailscaleOrigin && isHttpsRemoteUrl(currentTailscaleOrigin) ? currentTailscaleOrigin : '';
           const currentTailscaleHttpUrl = currentTailscaleOrigin && !isHttpsRemoteUrl(currentTailscaleOrigin) ? currentTailscaleOrigin : '';
-          const tailscaleUrls = Array.from(new Set([
+          const tailscaleConnected = tailscaleAccess.connected || Boolean(currentTailscaleOrigin);
+          const allowDirectNetworkRemote = IS_LAN_BIND;
+          const detectedTailscaleUrls = tailscaleConnected ? Array.from(new Set([
             ...tailscaleAccess.httpUrls,
             currentTailscaleHttpUrl,
-          ].filter(Boolean) as string[]));
+          ].filter(Boolean) as string[])) : [];
+          const tailscaleUrls = allowDirectNetworkRemote
+            ? detectedTailscaleUrls
+            : currentTailscaleHttpUrl
+              ? [currentTailscaleHttpUrl]
+              : [];
           const tailscaleHttpsUrls = Array.from(new Set([
-            currentTailscaleHttpsUrl,
+            tailscaleConnected ? currentTailscaleHttpsUrl : '',
             tailscaleAccess.serveEnabled ? remoteSettings.tailscaleHttpsUrl : '',
             ...tailscaleAccess.httpsUrls,
           ].filter(Boolean) as string[]));
-          const allowDirectNetworkRemote = IS_LAN_BIND;
-          const allowTailscaleRemote = allowDirectNetworkRemote || tailscaleAccess.serveEnabled || Boolean(currentTailscaleOrigin);
-          const suggestedTailscaleHttpsUrls = Array.from(new Set([
+          const allowTailscaleRemote = tailscaleConnected
+            && (allowDirectNetworkRemote || tailscaleAccess.serveEnabled || Boolean(currentTailscaleOrigin));
+          const suggestedTailscaleHttpsUrls = tailscaleConnected ? Array.from(new Set([
             remoteSettings.tailscaleHttpsUrl,
             ...tailscaleAccess.suggestedHttpsUrls,
-          ].filter(Boolean) as string[]));
+          ].filter(Boolean) as string[])) : [];
           const lanUrls = IS_LAN_BIND && !publishedTailscaleOnly
             ? getPrivateLanUrls(PORT).filter((remoteUrl) => !/^http:\/\/100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(remoteUrl))
             : [];
           const manualLanUrls = IS_LAN_BIND && !publishedTailscaleOnly && remoteSettings.manualLanUrl ? [remoteSettings.manualLanUrl] : [];
-          const publicBaseIsInactiveTailscale = isTailscaleDnsHttpsUrl(remoteSettings.publicBaseUrl || '', tailscaleAccess.dnsName) && !tailscaleAccess.serveEnabled;
+          const publicBaseIsInactiveTailscale = isTailscaleDnsHttpsUrl(remoteSettings.publicBaseUrl || '', tailscaleAccess.knownDnsName) && !tailscaleAccess.serveEnabled;
           const reverseProxyUrls = Array.from(new Set([
             !publishedTailscaleOnly && !publicBaseIsInactiveTailscale ? remoteSettings.publicBaseUrl : '',
             !publishedTailscaleOnly ? remoteSettings.reverseProxyUrl : '',
@@ -26742,16 +27162,32 @@ const server = Bun.serve<any>({
             lanUrls: Array.from(new Set([...advertisedManualLanUrls, ...advertisedLanUrls])),
             reverseProxyUrl: activeReverseProxyUrl,
           });
-          const remoteReady = urls.length > 0;
-          const pendingRestart = (remoteSettings.bindHost !== HOST || remoteSettings.port !== PORT)
-            && !(publishedTailscaleOnly && currentTailscaleOrigin);
+          const remoteReady = tailscaleConnected && allowTailscaleRemote && urls.length > 0;
+          const directRuntimeOverride = process.env.UMBRA_WEB_LAUNCHER !== '1';
+          const runtimeOverrides = {
+            bindHost: directRuntimeOverride && Boolean(process.env.UMBRA_HOST || process.env.HOST),
+            port: directRuntimeOverride && Boolean(process.env.UMBRA_PORT),
+          };
+          const pendingRestart = shouldRemoteSettingsRequireRestart({
+            savedBindHost: remoteSettings.bindHost,
+            savedPort: remoteSettings.port,
+            activeBindHost: HOST,
+            activePort: PORT,
+            runtimeOverrides,
+            suppressRestart: publishedTailscaleOnly && Boolean(currentTailscaleOrigin),
+          });
           return json({
             ok: true,
             bindHost: HOST,
             port: PORT,
-            localUrl: `http://127.0.0.1:${PORT}`,
+            localUrl: buildListenerOrigin(HOST, PORT),
             remoteEnabled: allowTailscaleRemote,
-            tailscaleDetected: tailscaleUrls.length > 0,
+            tailscaleDetected: tailscaleAccess.installed,
+            tailscaleInstalled: tailscaleAccess.installed,
+            tailscaleConnected,
+            tailscaleOnline: tailscaleConnected && tailscaleAccess.online,
+            tailscaleBackendState: tailscaleAccess.backendState,
+            tailscaleHealth: tailscaleAccess.health,
             remoteReady,
             selectedUrl,
             urls,
@@ -26762,6 +27198,11 @@ const server = Bun.serve<any>({
             hiddenHttpUrls,
             suggestedTailscaleHttpsUrls,
             tailscaleDnsName: tailscaleAccess.dnsName,
+            tailscaleKnownDnsName: tailscaleAccess.knownDnsName,
+            tailscaleServeConfigured: tailscaleAccess.serveConfigured,
+            tailscaleServeTargets: tailscaleAccess.serveTargets,
+            tailscaleServeExpectedTarget: tailscaleAccess.serveExpectedTarget,
+            tailscaleServeTargetMatches: tailscaleAccess.serveTargetMatches,
             tailscaleServeEnabled: tailscaleAccess.serveEnabled,
             tailscaleServeCommand: tailscaleAccess.serveCommand,
             reverseProxyUrls,
@@ -26771,6 +27212,7 @@ const server = Bun.serve<any>({
               active: {
                 bindHost: HOST,
                 port: PORT,
+                runtimeOverrides,
               },
               pendingRestart,
             },
@@ -26821,7 +27263,12 @@ const server = Bun.serve<any>({
 
         // WebSocket upgrade
         if (path.startsWith('/ws/')) {
-          const upgraded = server.upgrade(req, { data: { endpoint: path } });
+          const upgraded = server.upgrade(req, {
+            data: {
+              endpoint: path,
+              remoteClient: isRemoteRequest(req, url, server),
+            },
+          });
           if (upgraded) return undefined;
           return new Response('WebSocket upgrade failed', { status: 400 });
         }
@@ -31454,11 +31901,28 @@ const server = Bun.serve<any>({
         if (existsSync(filePath) && statSync(filePath).isFile()) {
           const ext = extname(filePath).toLowerCase();
           const contentType = GALLERY_STATIC_MIME_TYPES[ext] || 'application/octet-stream';
-          return new Response(Bun.file(filePath), {
-            headers: {
-              'Content-Type': contentType,
-              'Cache-Control': 'no-cache, no-store, must-revalidate',
-            },
+          const acceptedEncodings = String(req.headers.get('accept-encoding') || '').toLowerCase();
+          const brotliPath = `${filePath}.br`;
+          const gzipPath = `${filePath}.gz`;
+          const encodedPath = acceptedEncodings.includes('br') && existsSync(brotliPath)
+            ? brotliPath
+            : (acceptedEncodings.includes('gzip') && existsSync(gzipPath) ? gzipPath : filePath);
+          const contentEncoding = encodedPath === brotliPath
+            ? 'br'
+            : (encodedPath === gzipPath ? 'gzip' : '');
+          const immutableAsset = /-[a-z0-9]{8,}\.[^.]+$/i.test(basename(filePath));
+          const headers: Record<string, string> = {
+            'Content-Type': contentType,
+            'Cache-Control': immutableAsset
+              ? 'public, max-age=31536000, immutable'
+              : 'public, max-age=0, must-revalidate',
+          };
+          if (contentEncoding) {
+            headers['Content-Encoding'] = contentEncoding;
+            headers.Vary = 'Accept-Encoding';
+          }
+          return new Response(Bun.file(encodedPath), {
+            headers,
           });
         }
         return new Response('Not found', { status: 404 });
@@ -31564,6 +32028,10 @@ const server = Bun.serve<any>({
   },
 
   websocket: {
+    perMessageDeflate: {
+      compress: 'shared',
+      decompress: 'shared',
+    },
     open(ws) {
       const endpoint = (ws.data as any)?.endpoint || '/ws/unknown';
       if (endpoint === '/comfy/ws') {
@@ -31733,16 +32201,17 @@ const server = Bun.serve<any>({
   }
 });
 
+const localUrl = buildListenerOrigin(HOST, PORT);
+
 console.log(`
 \x1b[36m╔════════════════════════════════════════════════════════════╗
 ║  \x1b[1mUmbra Studio Server\x1b[0m\x1b[36m                                      ║
 ╠════════════════════════════════════════════════════════════╣
-║  Server: http://${HOST === '0.0.0.0' ? '127.0.0.1' : HOST}:${PORT}                            ║
+║  Server: ${localUrl}                            ║
 ║  Runtime: Bun ${Bun.version.padEnd(44)}║
 ╚════════════════════════════════════════════════════════════╝\x1b[0m
 `);
 
-const localUrl = `http://127.0.0.1:${PORT}`;
 const lanUrls = IS_LAN_BIND ? getPrivateLanUrls(PORT) : [];
 console.log(`[Umbra] Bound to ${HOST}:${PORT}`);
 console.log(`[Umbra] Local: ${localUrl}`);

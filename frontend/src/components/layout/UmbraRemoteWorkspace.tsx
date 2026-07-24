@@ -29,6 +29,13 @@ type RemoteStatus = {
   port?: number;
   localUrl?: string;
   remoteEnabled?: boolean;
+  remoteReady?: boolean;
+  tailscaleDetected?: boolean;
+  tailscaleInstalled?: boolean;
+  tailscaleConnected?: boolean;
+  tailscaleOnline?: boolean;
+  tailscaleBackendState?: string;
+  tailscaleHealth?: string[];
   selectedUrl?: string | null;
   urls?: string[];
   lanUrls?: string[];
@@ -36,6 +43,11 @@ type RemoteStatus = {
   tailscaleHttpsUrls?: string[];
   suggestedTailscaleHttpsUrls?: string[];
   tailscaleDnsName?: string;
+  tailscaleKnownDnsName?: string;
+  tailscaleServeConfigured?: boolean;
+  tailscaleServeTargets?: string[];
+  tailscaleServeExpectedTarget?: string;
+  tailscaleServeTargetMatches?: boolean;
   tailscaleServeEnabled?: boolean;
   tailscaleServeCommand?: string;
   httpUrlsHidden?: boolean;
@@ -53,6 +65,10 @@ type RemoteStatus = {
     active?: {
       bindHost?: string;
       port?: number;
+      runtimeOverrides?: {
+        bindHost?: boolean;
+        port?: boolean;
+      };
     };
     pendingRestart?: boolean;
   };
@@ -84,6 +100,10 @@ type RemoteStatus = {
 };
 
 type RemoteTab = 'connection' | 'security' | 'diagnostics' | 'guide';
+
+type UmbraRemoteWorkspaceProps = {
+  isActive?: boolean;
+};
 
 type RemoteDevice = {
   id: string;
@@ -304,7 +324,7 @@ function metricTone(value: number, warn: number, bad: number): string {
   return 'text-emerald-100';
 }
 
-export function UmbraRemoteWorkspace() {
+export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspaceProps) {
   const showToast = useStore((state) => state.showToast);
   const setAppSetting = useStore((state) => state.setAppSetting);
   const syncUiAcrossDevices = useStore((state) => state.appSettings['remote.syncUiAcrossDevices'] !== false);
@@ -342,39 +362,48 @@ export function UmbraRemoteWorkspace() {
   const currentUrl = getCurrentBrowserUrl();
   const telemetryClients = React.useMemo(() => {
     const clients = telemetry?.clients || [];
-    const liveClients = clients.filter((client) => client.live || (client.idleMs || 0) < 30_000);
-    return liveClients.length ? liveClients : clients.slice(0, 2);
+    return clients.filter((client) => client.live || (client.idleMs || 0) < 30_000);
   }, [telemetry?.clients]);
 
-  const refresh = React.useCallback(async () => {
-    setLoading(true);
+  const refresh = React.useCallback(async (options?: { quiet?: boolean; syncForm?: boolean }) => {
+    const quiet = options?.quiet === true;
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const response = await fetch('/api/remote/status', { cache: 'no-store' });
       const payload = await response.json().catch(() => ({} as RemoteStatus & { error?: string }));
       if (!response.ok) throw new Error(String(payload?.error || 'Remote status failed'));
       setStatus(payload);
-      if (payload.auth?.configured && !editingAuthCredentials) {
-        setAuthUsername(payload.auth.username || '');
+      if (options?.syncForm !== false) {
+        if (payload.auth?.configured && !editingAuthCredentials) {
+          setAuthUsername(payload.auth.username || '');
+        }
+        setBindHost(payload.settings?.bindHost || payload.bindHost || '0.0.0.0');
+        setPort(String(payload.settings?.port || payload.port || 8212));
+        setTailscaleHttpsUrl(payload.settings?.tailscaleHttpsUrl || payload.suggestedTailscaleHttpsUrls?.[0] || payload.tailscaleHttpsUrls?.[0] || '');
+        setPreferHttps(payload.settings?.preferHttps !== false);
+        setHideHttpWhenHttpsAvailable(payload.settings?.hideHttpWhenHttpsAvailable !== false);
+        setRequireRemoteAuth(payload.settings?.requireRemoteAuth !== false);
+        setSessionTtlDays(String(payload.settings?.sessionTtlDays || 7));
       }
-      setBindHost(payload.settings?.bindHost || payload.bindHost || '0.0.0.0');
-      setPort(String(payload.settings?.port || payload.port || 8212));
-      setTailscaleHttpsUrl(payload.settings?.tailscaleHttpsUrl || payload.suggestedTailscaleHttpsUrls?.[0] || payload.tailscaleHttpsUrls?.[0] || '');
-      setPreferHttps(payload.settings?.preferHttps !== false);
-      setHideHttpWhenHttpsAvailable(payload.settings?.hideHttpWhenHttpsAvailable !== false);
-      setRequireRemoteAuth(payload.settings?.requireRemoteAuth !== false);
-      setSessionTtlDays(String(payload.settings?.sessionTtlDays || 7));
     } catch (remoteError) {
       const message = remoteError instanceof Error ? remoteError.message : 'Remote status failed';
+      setStatus(null);
+      setTelemetry(null);
       setError(message);
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }, [editingAuthCredentials]);
 
   React.useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (!isActive) return;
+    void refresh({ syncForm: true });
+    const timer = window.setInterval(() => {
+      void refresh({ quiet: true, syncForm: false });
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [isActive, refresh]);
 
   const refreshDevices = React.useCallback(async () => {
     setDevicesLoading(true);
@@ -402,27 +431,28 @@ export function UmbraRemoteWorkspace() {
       const payload = await response.json().catch(() => ({} as RemoteTelemetrySnapshot));
       if (response.ok) setTelemetry(payload);
     } catch {
-      // Telemetry is observational only.
+      setTelemetry(null);
     }
   }, []);
 
   React.useEffect(() => {
+    if (!isActive) return;
     void refreshTelemetry();
     const timer = window.setInterval(() => void refreshTelemetry(), 5000);
     return () => window.clearInterval(timer);
-  }, [refreshTelemetry]);
+  }, [isActive, refreshTelemetry]);
 
-  const privateVpnUrls = React.useMemo(() => {
-    const values = new Set<string>();
-    if (status?.remoteEnabled) {
-      for (const url of status?.tailscaleHttpsUrls || []) values.add(url);
-      for (const url of status?.tailscaleUrls || []) values.add(url);
-    }
-    return Array.from(values);
-  }, [status]);
-
-  const privateVpnConnectionCount = status?.tailscaleDnsName || privateVpnUrls.length > 0 ? 1 : 0;
-  const tailscaleHttpsSuggested = Boolean((status?.suggestedTailscaleHttpsUrls || []).length || status?.tailscaleDnsName);
+  const tailscaleInstalled = status?.tailscaleInstalled === true;
+  const tailscaleConnected = status?.tailscaleConnected === true;
+  const tailscaleBackendState = status?.tailscaleBackendState || (loading ? 'Checking' : 'Unknown');
+  const tailscaleHealthMessage = status?.tailscaleHealth?.[0] || '';
+  const tailscaleHttpsSuggested = tailscaleConnected
+    && Boolean((status?.suggestedTailscaleHttpsUrls || []).length || status?.tailscaleDnsName);
+  const tailscaleServeTargetMismatch = Boolean(
+    tailscaleConnected
+    && status?.tailscaleServeConfigured
+    && status?.tailscaleServeTargetMatches === false,
+  );
 
   const remoteUrls = React.useMemo(() => {
     const values = new Set<string>();
@@ -439,13 +469,57 @@ export function UmbraRemoteWorkspace() {
     return Array.from(values);
   }, [currentUrl, status]);
 
-  const openRemoteReady = Boolean(status?.remoteReady || remoteUrls.length > 0);
-  const tailscaleReady = privateVpnUrls.length > 0;
+  const openRemoteReady = Boolean(tailscaleConnected && status?.remoteReady && remoteUrls.length > 0);
+  const tailscaleReady = tailscaleConnected;
   const authConfigured = Boolean(status?.auth?.configured);
   const authEditable = !status?.auth?.remote;
+  const tailscaleStateLabel = !status
+    ? (loading ? 'Checking' : 'Unavailable')
+    : !tailscaleInstalled
+      ? 'Not Installed'
+      : tailscaleConnected
+        ? 'Connected'
+        : tailscaleBackendState === 'NeedsLogin'
+          ? 'Sign In Required'
+          : tailscaleBackendState === 'Stopped'
+            ? 'Stopped'
+            : tailscaleBackendState;
+  const remoteSummary = openRemoteReady
+    ? {
+      title: 'Remote Ready',
+      message: 'Umbra Remote is available through your live Tailscale connection.',
+      tone: 'ready' as const,
+    }
+    : !status
+      ? {
+        title: loading ? 'Checking Connection' : 'Status Unavailable',
+        message: error || 'Umbra could not read the current remote connection state.',
+        tone: 'error' as const,
+      }
+      : !tailscaleInstalled
+        ? {
+          title: 'Tailscale Not Found',
+          message: 'Install Tailscale on this host before enabling Umbra Remote.',
+          tone: 'error' as const,
+        }
+        : !tailscaleConnected
+          ? {
+            title: tailscaleBackendState === 'NeedsLogin' ? 'Tailscale Sign-In Required' : 'Tailscale Is Off',
+            message: tailscaleHealthMessage || 'Turn on Tailscale on this host, then refresh.',
+            tone: 'offline' as const,
+          }
+          : {
+            title: tailscaleServeTargetMismatch ? 'Remote Route Needs Repair' : 'Remote Route Not Ready',
+            message: tailscaleServeTargetMismatch
+              ? `Tailscale Serve points to ${status?.tailscaleServeTargets?.[0] || 'another service'}, but this Umbra server is listening at ${status?.tailscaleServeExpectedTarget || status?.localUrl || 'a different address'}.`
+              : status?.tailscaleServeConfigured
+                ? 'Tailscale is connected, but its saved Serve route is not active yet.'
+              : 'Tailscale is connected. Enable Tailscale Serve to create the Umbra HTTPS route.',
+            tone: 'offline' as const,
+          };
 
   React.useEffect(() => {
-    const selectedUrl = status?.selectedUrl || '';
+    const selectedUrl = openRemoteReady ? status?.selectedUrl || remoteUrls[0] || '' : '';
     if (!selectedUrl) {
       setQrDataUrl('');
       return;
@@ -467,7 +541,7 @@ export function UmbraRemoteWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [status?.selectedUrl]);
+  }, [openRemoteReady, remoteUrls, status?.selectedUrl]);
 
   const copyTailscaleServeCommand = async () => {
     const command = status?.tailscaleServeCommand || `tailscale serve --bg http://127.0.0.1:${status?.port || 8212}`;
@@ -493,20 +567,24 @@ export function UmbraRemoteWorkspace() {
         enableUrl?: string;
       }));
       if (!response.ok) {
-        if (payload?.code === 'TAILSCALE_SERVE_NOT_ENABLED') {
+        if (
+          payload?.code === 'TAILSCALE_SERVE_NOT_ENABLED'
+          || payload?.code === 'TAILSCALE_OFFLINE'
+          || payload?.code === 'TAILSCALE_NOT_AVAILABLE'
+        ) {
           setTailscaleServeNotice({
             code: payload.code,
-            message: payload.message || 'Tailscale Serve is not enabled yet.',
+            message: payload.message || 'Tailscale Serve needs attention.',
             details: payload.details,
             enableUrl: payload.enableUrl,
           });
-          showToast('Tailscale Serve needs tailnet approval', 'error');
+          showToast(payload.message || 'Tailscale Serve needs attention', 'error');
           return;
         }
         throw new Error(String(payload?.message || payload?.error || 'Tailscale Serve failed'));
       }
       await refresh();
-      showToast('Tailscale HTTPS enabled', 'success');
+      showToast(tailscaleServeTargetMismatch ? 'Tailscale HTTPS route repaired' : 'Tailscale HTTPS enabled', 'success');
     } catch (serveError) {
       setTailscaleServeNotice({
         code: 'TAILSCALE_SERVE_FAILED',
@@ -559,7 +637,7 @@ export function UmbraRemoteWorkspace() {
   };
 
   const copyBestRemoteUrl = async () => {
-    const bestUrl = status?.selectedUrl || remoteUrls[0] || status?.localUrl || currentUrl;
+    const bestUrl = openRemoteReady ? status?.selectedUrl || remoteUrls[0] : '';
     if (!bestUrl) {
       showToast('Remote URL not detected', 'error');
       return;
@@ -573,7 +651,7 @@ export function UmbraRemoteWorkspace() {
   };
 
   const copyPairLink = async () => {
-    const bestUrl = status?.selectedUrl || remoteUrls[0] || status?.localUrl || currentUrl;
+    const bestUrl = openRemoteReady ? status?.selectedUrl || remoteUrls[0] : '';
     if (!bestUrl) {
       showToast('Remote URL not detected', 'error');
       return;
@@ -734,7 +812,8 @@ export function UmbraRemoteWorkspace() {
           <button
             type="button"
             onClick={copyBestRemoteUrl}
-            className="inline-flex h-9 items-center gap-2 rounded-lg border border-cyan-300/30 bg-cyan-500/10 px-3 text-xs font-bold uppercase tracking-widest text-cyan-100 hover:bg-cyan-500/15"
+            disabled={!openRemoteReady}
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-cyan-300/30 bg-cyan-500/10 px-3 text-xs font-bold uppercase tracking-widest text-cyan-100 hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
           >
             <Copy size={14} />
             Copy Best URL
@@ -756,30 +835,32 @@ export function UmbraRemoteWorkspace() {
           <div
             className={cn(
               'rounded-xl border px-4 py-3',
-              openRemoteReady
+              remoteSummary.tone === 'ready'
                 ? 'border-emerald-300/25 bg-emerald-500/10'
-                : 'border-yellow-400/30 bg-yellow-500/10',
+                : remoteSummary.tone === 'error'
+                  ? 'border-red-400/30 bg-red-500/10'
+                  : 'border-yellow-400/30 bg-yellow-500/10',
             )}
           >
             <div className="flex items-start gap-3">
               <div
                 className={cn(
                   'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border',
-                  openRemoteReady
+                  remoteSummary.tone === 'ready'
                     ? 'border-emerald-300/35 bg-emerald-500/10 text-emerald-100'
-                    : 'border-yellow-300/35 bg-yellow-500/10 text-yellow-100',
+                    : remoteSummary.tone === 'error'
+                      ? 'border-red-300/35 bg-red-500/10 text-red-100'
+                      : 'border-yellow-300/35 bg-yellow-500/10 text-yellow-100',
                 )}
               >
-                {openRemoteReady ? <ShieldCheck size={17} /> : <ShieldAlert size={17} />}
+                {remoteSummary.tone === 'ready' ? <ShieldCheck size={17} /> : <ShieldAlert size={17} />}
               </div>
               <div className="min-w-0">
                 <h3 className="text-xs font-black uppercase tracking-[0.18em] text-white">
-                  {openRemoteReady ? 'Remote Ready' : 'Remote Not Listening'}
+                  {remoteSummary.title}
                 </h3>
                 <p className="mt-1 text-sm leading-relaxed text-zinc-300">
-                  {openRemoteReady
-                    ? 'Umbra Remote is available through your Tailscale tailnet. Use the URL shown below.'
-                    : 'Umbra is waiting for a Tailscale route. Enable Tailscale Serve or use the tailnet IP.'}
+                  {remoteSummary.message}
                 </p>
               </div>
             </div>
@@ -787,11 +868,23 @@ export function UmbraRemoteWorkspace() {
 
           <div className="grid gap-3 lg:grid-cols-4">
             {[
-              ['Auth', authConfigured ? 'Configured' : 'Missing', authConfigured],
-              ['HTTPS', status?.selectedUrl?.startsWith('https://') ? 'Preferred' : 'Not selected', Boolean(status?.selectedUrl?.startsWith('https://'))],
-              ['Tailscale', status?.tailscaleDnsName || 'Not detected', Boolean(status?.tailscaleDnsName)],
-              ['Restart', status?.settings?.pendingRestart ? 'Required' : 'Clean', !status?.settings?.pendingRestart],
-            ].map(([label, value, good]) => (
+              { label: 'Auth', value: authConfigured ? 'Configured' : 'Missing', good: authConfigured },
+              {
+                label: 'HTTPS',
+                value: tailscaleServeTargetMismatch
+                  ? 'Wrong target'
+                  : openRemoteReady && status?.selectedUrl?.startsWith('https://')
+                    ? 'Active'
+                    : 'Inactive',
+                good: Boolean(openRemoteReady && status?.selectedUrl?.startsWith('https://')),
+              },
+              { label: 'Tailscale', value: tailscaleStateLabel, good: tailscaleConnected },
+              {
+                label: 'Restart',
+                value: !status ? 'Unknown' : status.settings?.pendingRestart ? 'Required' : 'Not required',
+                good: Boolean(status && !status.settings?.pendingRestart),
+              },
+            ].map(({ label, value, good }) => (
               <div key={String(label)} className={cn(
                 'rounded-xl border bg-black/20 p-3',
                 good ? 'border-emerald-300/20' : 'border-yellow-300/25',
@@ -835,24 +928,33 @@ export function UmbraRemoteWorkspace() {
             <div className="rounded-xl border border-white/10 bg-black/20 p-4">
               <div className="mb-3 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">
                 <CheckCircle2 size={13} className="text-emerald-300" />
-                Server
+                Origin Listener
               </div>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between gap-3">
-                  <span className="text-zinc-500">Bind</span>
-                  <span className="font-mono text-zinc-100">{status?.bindHost || 'unknown'}</span>
+                  <span className="text-zinc-500">Host</span>
+                  <span className="font-mono text-zinc-100">{status?.bindHost || '--'}</span>
                 </div>
                 <div className="flex justify-between gap-3">
                   <span className="text-zinc-500">Port</span>
-                  <span className="font-mono text-zinc-100">{status?.port || 8212}</span>
+                  <span className="font-mono text-zinc-100">{status?.port || '--'}</span>
                 </div>
                 <div className="flex justify-between gap-3">
                   <span className="text-zinc-500">Remote</span>
-                  <span className={status?.remoteEnabled ? 'text-emerald-200' : 'text-yellow-200'}>
-                    {status?.remoteEnabled ? 'Listening' : 'Local only'}
+                  <span className={openRemoteReady ? 'text-emerald-200' : 'text-yellow-200'}>
+                    {openRemoteReady
+                      ? 'Ready'
+                      : tailscaleServeTargetMismatch
+                        ? 'Repair route'
+                        : tailscaleConnected
+                          ? 'Route pending'
+                          : 'Offline'}
                   </span>
                 </div>
               </div>
+              <p className="mt-3 text-xs leading-relaxed text-zinc-600">
+                This is Umbra&apos;s actual listening socket. Tailscale Serve forwards its HTTPS address to this origin.
+              </p>
             </div>
 
             <div
@@ -861,15 +963,18 @@ export function UmbraRemoteWorkspace() {
                 tailscaleReady ? 'border-emerald-300/25 bg-emerald-500/10' : 'border-red-400/30 bg-red-500/10',
               )}
             >
-              <div className="mb-3 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-200">
-                <ShieldCheck size={13} />
+              <div className={cn(
+                'mb-3 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em]',
+                tailscaleReady ? 'text-emerald-200' : 'text-red-100',
+              )}>
+                {tailscaleReady ? <ShieldCheck size={13} /> : <ShieldAlert size={13} />}
                 Tailscale
               </div>
-              <div className="text-2xl font-black text-white">{privateVpnConnectionCount}</div>
+              <div className="text-xl font-black text-white">{tailscaleStateLabel}</div>
               <p className="mt-1 text-xs text-zinc-500">
                 {tailscaleReady
-                  ? 'One Tailscale connection path detected; HTTPS is preferred when enabled.'
-                  : 'Start Tailscale on this host, then refresh.'}
+                  ? status?.tailscaleDnsName || 'Connected to the tailnet.'
+                  : tailscaleHealthMessage || 'Start Tailscale on this host, then refresh.'}
               </p>
             </div>
 
@@ -1048,10 +1153,14 @@ export function UmbraRemoteWorkspace() {
                   className="h-10 w-full rounded-lg border border-white/10 bg-black/40 px-3 text-sm text-white outline-none focus:border-cyan-300/45"
                 >
                   <option value="127.0.0.1">Local only - 127.0.0.1</option>
+                  <option value="::1">Local only IPv6 - ::1</option>
                   <option value="0.0.0.0">All IPv4 interfaces - 0.0.0.0</option>
                   <option value="::">All IPv6 interfaces - ::</option>
                 </select>
-                <span className="mt-1 block text-xs text-zinc-600">Listener changes apply after restart. Current: {status?.settings?.active?.bindHost || status?.bindHost || 'unknown'}.</span>
+                <span className="mt-1 block text-xs text-zinc-600">
+                  Listener changes apply after restart. Current: {status?.settings?.active?.bindHost || status?.bindHost || '--'}
+                  {status?.settings?.active?.runtimeOverrides?.bindHost ? ' (launch override)' : ''}.
+                </span>
               </label>
               <label className="block">
                 <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">Port</span>
@@ -1060,7 +1169,10 @@ export function UmbraRemoteWorkspace() {
                   onChange={(event) => setPort(event.target.value.replace(/[^\d]/g, '').slice(0, 5))}
                   className="h-10 w-full rounded-lg border border-white/10 bg-black/40 px-3 font-mono text-sm text-white outline-none focus:border-cyan-300/45"
                 />
-                <span className="mt-1 block text-xs text-zinc-600">Current: {status?.settings?.active?.port || status?.port || 8212}.</span>
+                <span className="mt-1 block text-xs text-zinc-600">
+                  Current: {status?.settings?.active?.port || status?.port || '--'}
+                  {status?.settings?.active?.runtimeOverrides?.port ? ' (launch override)' : ''}.
+                </span>
               </label>
             </div>
 
@@ -1069,21 +1181,35 @@ export function UmbraRemoteWorkspace() {
                 <div>
                   <h4 className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-100">HTTPS Front Door</h4>
                   <p className="mt-1 text-xs leading-relaxed text-zinc-500">
-                    Use Tailscale Serve for HTTPS inside your tailnet, forwarding to Umbra at http://127.0.0.1:{status?.port || 8212}.
+                    Use Tailscale Serve for HTTPS inside your tailnet, forwarding to Umbra at {status?.tailscaleServeExpectedTarget || status?.localUrl || 'the active local listener'}.
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <button
                     type="button"
                     onClick={runTailscaleServe}
-                    disabled={tailscaleServeRunning}
+                    disabled={tailscaleServeRunning || !tailscaleConnected || status?.tailscaleServeEnabled}
+                    title={tailscaleConnected
+                      ? status?.tailscaleServeEnabled
+                        ? 'The Umbra HTTPS route is active'
+                        : tailscaleServeTargetMismatch
+                          ? 'Repair the Umbra HTTPS route'
+                          : 'Enable the Umbra HTTPS route'
+                      : 'Turn on Tailscale first'}
                     className="inline-flex h-8 items-center rounded border border-emerald-300/25 bg-emerald-500/10 px-2 text-[10px] font-black uppercase tracking-widest text-emerald-100 hover:bg-emerald-500/15 disabled:opacity-60"
                   >
-                    {tailscaleServeRunning ? 'Running' : 'Enable'}
+                    {tailscaleServeRunning
+                      ? 'Running'
+                      : status?.tailscaleServeEnabled
+                        ? 'Active'
+                        : tailscaleServeTargetMismatch
+                          ? 'Repair'
+                          : 'Enable'}
                   </button>
                   <button
                     type="button"
                     onClick={copyTailscaleServeCommand}
+                    disabled={!tailscaleInstalled}
                     className="inline-flex h-8 items-center rounded border border-white/10 px-2 text-[10px] font-black uppercase tracking-widest text-zinc-300 hover:bg-white/5 hover:text-white"
                   >
                     Copy Cmd
@@ -1096,20 +1222,26 @@ export function UmbraRemoteWorkspace() {
                   <input
                     value={tailscaleHttpsUrl}
                     onChange={(event) => setTailscaleHttpsUrl(event.target.value)}
-                    placeholder={status?.tailscaleDnsName ? `https://${status.tailscaleDnsName}` : 'https://machine.tailnet.ts.net'}
+                    placeholder={status?.tailscaleDnsName ? `https://${status.tailscaleDnsName}` : 'Connect Tailscale to detect the HTTPS URL'}
                     className="h-10 w-full rounded-lg border border-white/10 bg-black/40 px-3 font-mono text-sm text-white outline-none focus:border-emerald-300/45"
                   />
                 <span className="mt-1 block text-xs text-zinc-600">Requires Tailscale Serve or another TLS listener on the MagicDNS name.</span>
               </label>
               <div className="rounded-lg border border-white/10 bg-black/25 px-3 py-2">
                 <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">Tailscale Serve</div>
-                <div className="mt-1 truncate font-mono text-xs text-emerald-100">{status?.tailscaleServeCommand || `tailscale serve --bg http://127.0.0.1:${status?.port || 8212}`}</div>
+                <div className="mt-1 truncate font-mono text-xs text-emerald-100">{status?.tailscaleServeCommand || 'Unavailable until Tailscale is installed'}</div>
                 <div className="mt-1 text-xs text-zinc-600">
                   {status?.tailscaleServeEnabled
-                    ? 'Active. Auto can use the HTTPS MagicDNS URL.'
-                    : tailscaleHttpsSuggested
-                      ? 'Not active yet. Auto will use the Tailscale IP fallback until Serve is enabled.'
-                      : 'Run once on the host to expose Umbra as HTTPS inside your tailnet.'}
+                    ? 'Active. Umbra is available at the HTTPS MagicDNS URL.'
+                    : tailscaleServeTargetMismatch
+                      ? `Needs repair. Current target: ${status?.tailscaleServeTargets?.[0] || 'unknown'}. Expected: ${status?.tailscaleServeExpectedTarget || status?.localUrl || 'this Umbra listener'}.`
+                    : status?.tailscaleServeConfigured && !tailscaleConnected
+                      ? 'Configured, but inactive while Tailscale is stopped.'
+                      : tailscaleConnected && tailscaleHttpsSuggested
+                        ? 'Connected, but the saved HTTPS route is not active.'
+                        : tailscaleConnected
+                          ? 'Not configured. Enable it to expose Umbra inside your tailnet.'
+                          : 'Turn on Tailscale before enabling the HTTPS route.'}
                 </div>
               </div>
             </div>
@@ -1137,7 +1269,7 @@ export function UmbraRemoteWorkspace() {
 
             <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_260px]">
               <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 px-3 py-3 text-sm leading-relaxed text-emerald-50">
-                Remote access is limited to loopback on the host and Tailscale clients. Tailscale Serve is the recommended HTTPS path.
+                Umbra accepts remote access only from the host and Tailscale clients. The bind address controls the listening interfaces; Tailscale Serve can securely forward to the loopback listener.
               </div>
               <div className="space-y-3 rounded-lg border border-white/10 bg-black/25 p-3">
                 <label className="flex items-start gap-3 text-sm text-zinc-300">
@@ -1213,7 +1345,7 @@ export function UmbraRemoteWorkspace() {
 
             <div className="mt-4 rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-sm">
               <span className="text-zinc-500">Selected URL</span>
-              <span className="ml-2 font-mono text-cyan-100">{status?.selectedUrl || 'None yet'}</span>
+              <span className="ml-2 font-mono text-cyan-100">{openRemoteReady ? status?.selectedUrl || remoteUrls[0] : 'None'}</span>
             </div>
           </form>
           ) : null}
@@ -1261,7 +1393,7 @@ export function UmbraRemoteWorkspace() {
 
             {!authEditable ? (
               <div className="mb-3 rounded-lg border border-yellow-300/25 bg-yellow-500/10 px-3 py-2 text-xs leading-relaxed text-yellow-50">
-                Account setup is host-only. Open Umbra Remote from <span className="font-mono text-yellow-100">http://127.0.0.1:8212</span> on the main PC to change these credentials.
+                Account setup is host-only. Open Umbra Remote from <span className="font-mono text-yellow-100">{status?.localUrl || 'the local host URL'}</span> on the main PC to change these credentials.
               </div>
             ) : null}
 
@@ -1303,7 +1435,7 @@ export function UmbraRemoteWorkspace() {
                   <button
                     type="button"
                     onClick={copyPairLink}
-                    disabled={pairLinkSaving}
+                    disabled={pairLinkSaving || !openRemoteReady}
                     className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg border border-emerald-300/30 bg-emerald-500/10 px-3 text-xs font-black uppercase tracking-[0.16em] text-emerald-50 hover:bg-emerald-500/20 disabled:opacity-60"
                   >
                     <Copy size={13} />
@@ -1397,7 +1529,11 @@ export function UmbraRemoteWorkspace() {
                 ))}
                 {!remoteUrls.length && !loading ? (
                   <div className="rounded-lg border border-yellow-400/30 bg-yellow-500/10 px-3 py-4 text-sm text-yellow-100">
-                    No Tailscale URL detected. Confirm Tailscale is running, enable Tailscale Serve or bind Umbra to a tailnet-reachable interface, then refresh this panel.
+                    {!tailscaleInstalled
+                      ? 'Tailscale is not installed or could not be queried on this host.'
+                      : !tailscaleConnected
+                        ? tailscaleHealthMessage || 'Tailscale is off. Turn it on, wait for it to connect, then refresh.'
+                        : 'Tailscale is connected, but no Umbra route is active. Enable Tailscale Serve, then refresh.'}
                   </div>
                 ) : null}
               </div>
@@ -1408,7 +1544,7 @@ export function UmbraRemoteWorkspace() {
                 ) : (
                   <div className="flex h-44 items-center justify-center rounded border border-white/10 text-xs text-zinc-600">No URL</div>
                 )}
-                <div className="mt-2 break-all font-mono text-[10px] text-cyan-100">{status?.selectedUrl || 'None'}</div>
+                <div className="mt-2 break-all font-mono text-[10px] text-cyan-100">{openRemoteReady ? status?.selectedUrl || remoteUrls[0] : 'None'}</div>
               </div>
             </div>
           </div>

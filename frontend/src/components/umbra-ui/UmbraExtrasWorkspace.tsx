@@ -34,6 +34,7 @@ import {
   UmbraQueuePlacementControls,
   useUmbraQueuePlacement,
 } from '@/components/umbra-ui/UmbraQueuePlacementControls';
+import { UmbraMobileWorkspaceSheet } from '@/components/umbra-ui/UmbraMobileWorkspaceSheet';
 
 const IMAGE_EXTENSION_PATTERN = /\.(?:avif|bmp|gif|jpe?g|png|tiff?|webp)$/i;
 const MAX_UPSCALE_BATCH_ITEMS = 512;
@@ -51,6 +52,7 @@ interface StagedUpscaleSource {
 }
 
 interface UmbraExtrasWorkspaceProps {
+  active?: boolean;
   upscaleModels: string[];
   modelName: string;
   maxDimension: number;
@@ -94,6 +96,7 @@ function JobStatusIcon({ status }: { status: string }) {
 }
 
 export function UmbraExtrasWorkspace({
+  active = true,
   upscaleModels,
   modelName,
   maxDimension,
@@ -360,8 +363,8 @@ export function UmbraExtrasWorkspace({
   const progress = job?.total ? Math.max(0, Math.min(1, progressUnits / job.total)) : 0;
 
   return (
-    <div className="col-span-2 grid min-h-0 grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
-      <section className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar">
+    <div data-umbra-ui-extras="" className="col-span-2 grid min-h-0 grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
+      <section data-umbra-ui-extras-controls="" className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar">
         <div className="mb-3 flex items-center gap-2">
           <ImageUp size={13} className="text-cyan-300" />
           <h2 className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-300">Upscale</h2>
@@ -514,7 +517,20 @@ export function UmbraExtrasWorkspace({
         ) : null}
       </section>
 
-      <main className="flex min-h-0 min-w-0 flex-col bg-black/20">
+      <UmbraMobileWorkspaceSheet
+        active={active}
+        title="Upscale Batch"
+        subtitle={sources.length > 0
+          ? `${sources.length} image${sources.length === 1 ? '' : 's'} staged`
+          : job
+            ? `${progressUnits}/${job.total} ${job.status}`
+            : 'No images staged'}
+        badge={sources.length > 0 ? `${sources.length}` : undefined}
+        icon={<Layers3 size={14} />}
+        thumbnailUrl={sources[0]?.previewUrl}
+        tone="amber"
+      >
+        <main data-umbra-ui-extras-batch="" className="flex min-h-0 min-w-0 flex-col bg-black/20">
         <div className="flex min-h-10 items-center gap-2 border-b border-white/10 px-3">
           <Layers3 size={13} className="text-zinc-500" />
           <span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400">Batch</span>
@@ -588,7 +604,8 @@ export function UmbraExtrasWorkspace({
             </div>
           </div>
         )}
-      </main>
+        </main>
+      </UmbraMobileWorkspaceSheet>
     </div>
   );
 }

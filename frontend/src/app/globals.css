@@ -799,10 +799,10 @@ html[data-umbra-remote-mode="tablet"] :where(input:focus, textarea:focus, [conte
 }
 
 html[data-umbra-remote-mode="phone"] {
-  --umbra-remote-drawer-width: min(19.5rem, calc(100vw - 3.25rem));
   --umbra-remote-phone-touch-target: 3.25rem;
-  --umbra-phone-shell-top: 3.625rem;
-  --umbra-phone-pp-command-height: 7.45rem;
+  --umbra-phone-shell-top: 0px;
+  --umbra-phone-bottom-nav-height: calc(4.25rem + env(safe-area-inset-bottom));
+  --umbra-phone-pp-command-height: 7.55rem;
   --umbra-phone-pp-panel-top: calc(var(--umbra-phone-shell-top) + var(--umbra-phone-pp-command-height));
 }
 
@@ -827,19 +827,11 @@ html[data-umbra-remote-mode="phone"] [data-umbra-workspace-stage] {
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-appbar] {
-  position: fixed;
-  inset: var(--umbra-phone-shell-top) auto 0 0;
-  width: var(--umbra-remote-drawer-width) !important;
-  height: calc(100dvh - var(--umbra-phone-shell-top)) !important;
-  z-index: 120;
-  transform: translateX(-105%);
-  transition: transform 180ms ease-out;
-  pointer-events: none;
+  display: none !important;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-appbar][data-umbra-phone-open="1"] {
-  transform: translateX(0);
-  pointer-events: auto;
+  display: none !important;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-appbar-shell] {
@@ -862,7 +854,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-appbar-shell] > div:first-child
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-phone-menu-button] {
-  display: inline-flex;
+  display: none;
   width: 2.625rem;
   height: 2.625rem;
   align-items: center;
@@ -888,6 +880,10 @@ html[data-umbra-remote-mode="phone"] [data-umbra-phone-topbar] {
   color: #f4f4f5;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38);
   backdrop-filter: blur(16px);
+}
+
+html[data-umbra-remote-mode="phone"]:not([data-umbra-active-workspace="comfyui"]) [data-umbra-phone-topbar] {
+  display: none;
 }
 
 html:not([data-umbra-remote-mode="phone"]) [data-umbra-phone-topbar] {
@@ -933,6 +929,1049 @@ html[data-umbra-remote-mode="phone"] [data-umbra-phone-topbar-status][data-statu
   box-shadow: 0 0 14px rgba(52, 211, 153, 0.55);
 }
 
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-bottom-nav] {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 190;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  min-height: var(--umbra-phone-bottom-nav-height);
+  padding: 0.35rem max(0.35rem, env(safe-area-inset-right)) max(0.35rem, env(safe-area-inset-bottom)) max(0.35rem, env(safe-area-inset-left));
+  border-top: 1px solid color-mix(in srgb, var(--umbra-accent) 20%, rgba(255, 255, 255, 0.08));
+  background: rgba(5, 5, 8, 0.97);
+  box-shadow: 0 -16px 36px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(18px);
+}
+
+html:not([data-umbra-remote-mode="phone"]) [data-umbra-phone-bottom-nav] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-bottom-nav] button {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 3.45rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  border: 0;
+  border-radius: 0.75rem;
+  background: transparent;
+  color: #71717a;
+  touch-action: manipulation;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-bottom-nav] button::before {
+  content: "";
+  position: absolute;
+  inset: 0.15rem 0.45rem auto;
+  height: 0.16rem;
+  border-radius: 999px;
+  background: transparent;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-bottom-nav] button[data-active="1"] {
+  background: color-mix(in srgb, var(--umbra-accent) 11%, transparent);
+  color: color-mix(in srgb, var(--umbra-accent) 72%, #ffffff);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-bottom-nav] button[data-active="1"]::before {
+  background: var(--umbra-accent);
+  box-shadow: 0 0 12px var(--umbra-accent-glow);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-bottom-nav] button span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.61rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-more-sheet] {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 230;
+  max-height: min(34rem, calc(100dvh - 2.5rem));
+  overflow-y: auto;
+  padding: 0.4rem 0.85rem calc(1rem + env(safe-area-inset-bottom));
+  border: 1px solid color-mix(in srgb, var(--umbra-accent) 24%, rgba(255, 255, 255, 0.1));
+  border-bottom: 0;
+  border-radius: 1.25rem 1.25rem 0 0;
+  background: rgba(8, 9, 13, 0.985);
+  box-shadow: 0 -24px 70px rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(22px);
+  animation: umbra-phone-sheet-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html:not([data-umbra-remote-mode="phone"]) [data-umbra-phone-more-sheet] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-sheet-handle] {
+  width: 2.5rem;
+  height: 0.25rem;
+  margin: 0.1rem auto 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-sheet-header] {
+  display: flex;
+  min-height: 3.25rem;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-sheet-header] > div {
+  min-width: 0;
+  flex: 1 1 auto;
+  line-height: 1.1;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-sheet-header] span {
+  display: block;
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--umbra-accent) 65%, #a1a1aa);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-sheet-header] strong {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 1.1rem;
+  color: #fafafa;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-sheet-header] button {
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: #d4d4d8;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-workspace-grid] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-workspace-grid] button {
+  display: flex;
+  min-width: 0;
+  min-height: 4.5rem;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.035);
+  color: #d4d4d8;
+  text-align: left;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-workspace-grid] button[data-active="1"] {
+  border-color: color-mix(in srgb, var(--umbra-accent) 42%, rgba(255, 255, 255, 0.1));
+  background: color-mix(in srgb, var(--umbra-accent) 12%, transparent);
+  color: #fafafa;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-workspace-grid] button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.77rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-settings-button] {
+  display: flex;
+  width: 100%;
+  min-height: 4rem;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.7rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.035);
+  color: #d4d4d8;
+  text-align: left;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-settings-button] > span {
+  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-settings-button] strong,
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-settings-button] small {
+  display: block;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-settings-button] strong {
+  font-size: 0.78rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-settings-button] small {
+  margin-top: 0.2rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.63rem;
+  color: #71717a;
+  white-space: nowrap;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-sheet-status] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #71717a;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-sheet-status] > span {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: #52525b;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-sheet-status] > span[data-connected="1"] {
+  background: #34d399;
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.55);
+}
+
+@keyframes umbra-phone-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(2rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-workspace] {
+  min-width: 0;
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-header] {
+  position: sticky;
+  top: 0;
+  z-index: 85;
+  display: flex;
+  min-height: 3.45rem !important;
+  flex-wrap: nowrap;
+  gap: 0.35rem !important;
+  padding: 0.35rem 0.4rem !important;
+  background: rgba(5, 5, 8, 0.97);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(16px);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-header] > svg:first-child,
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-header] > div:nth-child(2),
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-header] > div:nth-child(3) {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-mode-nav] {
+  display: grid;
+  width: auto;
+  height: 2.75rem;
+  min-width: 0;
+  flex: 1 1 auto;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border-radius: 0.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-mode-nav] button {
+  display: flex;
+  min-width: 0;
+  min-height: 2.75rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.18rem;
+  overflow: hidden;
+  padding: 0 0.2rem !important;
+  font-size: 0.52rem !important;
+  line-height: 0.7rem;
+  letter-spacing: 0 !important;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-mode-nav] button svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-header-actions] {
+  margin-left: 0 !important;
+  gap: 0 !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-agent-button] {
+  width: 2.75rem;
+  height: 2.75rem;
+  min-height: 2.75rem;
+  justify-content: center;
+  padding: 0 !important;
+  border-radius: 0.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-agent-label],
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-header-actions] > span,
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-comfy-label] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-agent-button] > span:not([data-umbra-ui-agent-label]) {
+  position: absolute;
+  top: -0.2rem;
+  right: -0.2rem;
+  min-width: 1.15rem;
+  min-height: 1.15rem;
+  padding: 0 0.25rem;
+  font-size: 0.58rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-body] {
+  display: flex !important;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-bottom: 5.1rem;
+  scroll-padding-bottom: 5.1rem;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-generation-panel],
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-video-controls],
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-controls] {
+  min-height: auto;
+  flex: 0 0 auto;
+  overflow: visible;
+  border-right: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.8rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-workspace] input:not([type="checkbox"]):not([type="radio"]),
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-workspace] select,
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-workspace] textarea {
+  min-height: 2.75rem;
+  font-size: 0.78rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-workspace] textarea {
+  min-height: 6.5rem;
+  line-height: 1.25rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-workspace] button {
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-generation-panel] button,
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-video-controls] button,
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-controls] button {
+  min-height: 2.6rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-trigger] {
+  position: fixed;
+  inset: auto 0.55rem 0.55rem 0.55rem;
+  z-index: 180;
+  display: flex !important;
+  min-width: 0;
+  min-height: 3.9rem;
+  align-items: center;
+  gap: 0.65rem;
+  overflow: hidden;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--umbra-mobile-sheet-accent, #67e8f9) 34%, rgba(255, 255, 255, 0.1));
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--umbra-panel) 94%, black);
+  color: #e4e4e7;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.58),
+              0 0 18px color-mix(in srgb, var(--umbra-mobile-sheet-accent, #67e8f9) 13%, transparent);
+  backdrop-filter: blur(18px);
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-tone="cyan"] {
+  --umbra-mobile-sheet-accent: #67e8f9;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-tone="rose"] {
+  --umbra-mobile-sheet-accent: #fda4af;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-tone="fuchsia"] {
+  --umbra-mobile-sheet-accent: #f0abfc;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-tone="amber"] {
+  --umbra-mobile-sheet-accent: #fcd34d;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-open="1"] > [data-umbra-mobile-workspace-sheet-trigger] {
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(0.75rem);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-icon] {
+  display: inline-flex;
+  width: 2.35rem;
+  height: 2.35rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--umbra-mobile-sheet-accent, #67e8f9) 30%, rgba(255, 255, 255, 0.08));
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--umbra-mobile-sheet-accent, #67e8f9) 9%, transparent);
+  color: var(--umbra-mobile-sheet-accent, #67e8f9);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-thumbnail] {
+  width: 2.9rem;
+  height: 2.9rem;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--umbra-mobile-sheet-accent, #67e8f9) 30%, rgba(255, 255, 255, 0.08));
+  border-radius: 0.65rem;
+  background: #000;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-thumbnail] img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-copy] {
+  min-width: 0;
+  flex: 1 1 auto;
+  text-align: left;
+  line-height: 1.1;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-copy] strong,
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-copy] small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-copy] strong {
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-copy] small {
+  margin-top: 0.28rem;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.64rem;
+  color: #71717a;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-badge] {
+  display: inline-flex;
+  min-width: 1.55rem;
+  height: 1.55rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--umbra-mobile-sheet-accent, #67e8f9) 30%, rgba(255, 255, 255, 0.08));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--umbra-mobile-sheet-accent, #67e8f9) 9%, transparent);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.65rem;
+  color: var(--umbra-mobile-sheet-accent, #67e8f9);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-backdrop] {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: block !important;
+  width: 100vw;
+  height: 100dvh;
+  border: 0;
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(4px);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-panel] {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 230;
+  display: flex !important;
+  width: 100vw;
+  height: min(88dvh, 54rem);
+  max-height: calc(100dvh - max(0.5rem, env(safe-area-inset-top)));
+  min-height: 18rem;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--umbra-mobile-sheet-accent, #67e8f9) 28%, rgba(255, 255, 255, 0.1));
+  border-bottom: 0;
+  border-radius: 1.2rem 1.2rem 0 0;
+  background: color-mix(in srgb, var(--umbra-panel) 97%, black);
+  box-shadow: 0 -24px 72px rgba(0, 0, 0, 0.72);
+  transform: translateY(calc(100% + 1rem));
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), visibility 220ms;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-panel][data-open="1"] {
+  transform: translateY(0);
+  visibility: visible;
+  pointer-events: auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-header] {
+  position: relative;
+  display: flex !important;
+  min-height: 4rem;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.65rem 0.75rem 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(5, 7, 8, 0.97);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-handle] {
+  position: absolute;
+  top: 0.28rem;
+  left: 50%;
+  width: 2.65rem;
+  height: 0.22rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  transform: translateX(-50%);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-header] > button {
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.7rem;
+  color: #a1a1aa;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-content] {
+  display: flex !important;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-content] > * {
+  width: 100%;
+  min-height: 0 !important;
+  flex: 1 1 auto !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-panel] {
+  height: 100%;
+  min-height: 0;
+  border-top: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-panel] > div:nth-child(2) {
+  min-height: 0;
+  padding: 0.6rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-panel] > div:last-child {
+  min-height: 0;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.6rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-panel] > div:last-child > span:last-of-type {
+  width: calc(100% - 1.5rem);
+  flex: 1 1 auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-panel] > div:last-child > div {
+  display: grid;
+  width: 100%;
+  margin-left: 0 !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-panel] > div:last-child > div button {
+  min-width: 0;
+  min-height: 2.75rem;
+  justify-content: center;
+  padding: 0 0.45rem;
+  font-size: 0.58rem !important;
+  letter-spacing: 0 !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-video-queue] {
+  height: 100%;
+  min-height: 0;
+  border-top: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-video-queue] > div:nth-child(2) {
+  min-height: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-video-queue] > div.fixed section {
+  width: 100vw;
+  max-width: 100vw;
+  border-left: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras] {
+  display: flex !important;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-batch] {
+  height: 100%;
+  min-height: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-workspace] {
+  display: flex !important;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: visible;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-mobile-tabs] {
+  position: sticky;
+  top: 0;
+  z-index: 70;
+  display: grid !important;
+  min-height: 3.4rem;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  padding: 0.4rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(5, 7, 8, 0.97);
+  backdrop-filter: blur(14px);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-mobile-tabs] button {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 2.6rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #71717a;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-mobile-tabs] button[data-active="1"] {
+  border-color: rgba(253, 164, 175, 0.36);
+  background: rgba(244, 63, 94, 0.1);
+  color: #ffe4e6;
+  box-shadow: 0 0 16px rgba(244, 63, 94, 0.08);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-generation-sidebar],
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-settings-sidebar] {
+  min-height: auto;
+  flex: 0 0 auto;
+  overflow: visible;
+  border-right: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.8rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-generation-sidebar][data-mobile-active="0"],
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-settings-sidebar][data-mobile-active="0"] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] {
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding-right: 0 !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] button {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-layers-panel] {
+  inset: auto 0.55rem 0.55rem auto !important;
+  width: 3rem !important;
+  height: 3rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.8rem;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-layers-panel] > div:first-child {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0 !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-layers-panel] > div:first-child > :not(button) {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-layers-panel] > div:first-child button {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0 !important;
+  border: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-layers-panel]:has(button[aria-expanded="true"]) {
+  inset: auto 0 0 0 !important;
+  width: 100% !important;
+  height: min(58dvh, 34rem);
+  max-height: calc(100% - 1rem);
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--umbra-accent) 22%, rgba(255, 255, 255, 0.1));
+  border-radius: 1rem 1rem 0 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-layers-panel]:has(button[aria-expanded="true"]) > div:first-child {
+  width: 100%;
+  height: auto;
+  min-height: 3rem;
+  padding: 0 0.75rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-layers-panel]:has(button[aria-expanded="true"]) > div:first-child > :not(button) {
+  display: initial !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-layers-panel]:has(button[aria-expanded="true"]) > div:first-child button {
+  width: auto;
+  height: 2.3rem;
+  min-height: 2.3rem;
+  margin-left: auto !important;
+  padding: 0 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+[data-umbra-data-forge-mobile-tabs],
+[data-umbra-data-forge-filter-button],
+[data-umbra-data-forge-filter-header],
+[data-umbra-data-forge-filter-backdrop] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-root] {
+  min-width: 0;
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-tabs] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-mobile-tabs] {
+  display: flex;
+  min-height: 3rem;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 0.35rem 0.55rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(5, 5, 8, 0.97);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-mobile-tabs] select {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.3rem;
+  padding: 0 2.35rem 0 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--umbra-accent) 28%, rgba(255, 255, 255, 0.1));
+  border-radius: 0.7rem;
+  background: color-mix(in srgb, var(--umbra-panel) 92%, black);
+  color: #f4f4f5;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-search] {
+  min-width: 0;
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-search-tabs] {
+  min-height: 2.75rem;
+  padding: 0.25rem 0.45rem;
+  scrollbar-width: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-search-tabs] > button {
+  width: 2.5rem;
+  height: 2.5rem;
+  min-height: 2.5rem;
+  padding: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-search-tabs] > div {
+  min-height: 2.5rem;
+  flex: 0 0 auto;
+  padding: 0 0.7rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-search-main],
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-results] {
+  width: 100%;
+  min-width: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-filter-button] {
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  min-height: 2.75rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--umbra-accent) 24%, rgba(255, 255, 255, 0.1));
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: color-mix(in srgb, var(--umbra-accent) 68%, #d4d4d8);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-search-bar] {
+  padding: 0.45rem 0.55rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-search-bar] input {
+  min-width: 0;
+  min-height: 2.75rem;
+  font-size: 0.78rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-search-bar] button {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-image-results] {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-filter-backdrop] {
+  position: fixed;
+  inset: 0 0 var(--umbra-phone-bottom-nav-height);
+  z-index: 205;
+  display: block;
+  width: 100vw;
+  border: 0;
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(3px);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-sources] {
+  position: fixed;
+  inset: auto 0 var(--umbra-phone-bottom-nav-height);
+  z-index: 210;
+  display: none;
+  width: 100% !important;
+  max-height: min(72dvh, 38rem);
+  overflow-y: auto;
+  padding: 0.55rem 0.8rem calc(0.9rem + env(safe-area-inset-bottom)) !important;
+  border: 1px solid color-mix(in srgb, var(--umbra-accent) 24%, rgba(255, 255, 255, 0.1)) !important;
+  border-bottom: 0 !important;
+  border-radius: 1rem 1rem 0 0 !important;
+  background: rgba(8, 9, 13, 0.99);
+  box-shadow: 0 -24px 70px rgba(0, 0, 0, 0.62);
+  animation: umbra-phone-sheet-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-sources][data-open="true"] {
+  display: block;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-filter-header] {
+  display: flex;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #f4f4f5;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-filter-header] button {
+  display: inline-flex;
+  width: 2.6rem;
+  height: 2.6rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: #d4d4d8;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-source-grid] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-source-grid] button {
+  min-width: 0;
+  min-height: 3.6rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-sources] button {
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-sources] > div:nth-of-type(n + 3) button {
+  min-height: 2.65rem;
+  font-size: 0.72rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-download-bar] {
+  padding: 0.4rem 0.55rem calc(0.4rem + env(safe-area-inset-bottom)) !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-download-bar] > div {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-download-bar] > div > span:first-child {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-dataset-picker] {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) 2.6rem 2.6rem;
+  gap: 0.25rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-dataset-picker] select {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 2.6rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-dataset-picker] button,
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-add-concept] {
+  width: 2.6rem;
+  min-height: 2.6rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-concepts] {
+  grid-column: 1 / -1;
+  max-height: 5.5rem;
+  overflow-y: auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-download-button] {
+  min-height: 2.6rem;
+  justify-content: center;
+  padding-inline: 0.8rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-header] {
+  padding: 0.4rem !important;
+  background: rgba(5, 5, 8, 0.97);
+  backdrop-filter: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-header] > div {
+  width: 100%;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-identity] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-tabs] {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-tabs] button {
+  min-width: 0;
+  min-height: 2.75rem;
+  justify-content: center;
+  padding-inline: 0.5rem !important;
+  font-size: 0.62rem !important;
+  letter-spacing: 0.03em !important;
+}
+
 html[data-umbra-remote-mode="phone"][data-umbra-active-workspace="comfyui"] {
   --umbra-phone-shell-top: 0px;
 }
@@ -951,8 +1990,11 @@ html[data-umbra-remote-mode="phone"][data-umbra-active-workspace="comfyui"] [dat
 }
 
 html[data-umbra-remote-mode="phone"][data-umbra-active-workspace="comfyui"] [data-umbra-phone-menu-button] {
+  display: inline-flex !important;
   width: 1.85rem;
   height: 1.85rem;
+  align-items: center;
+  justify-content: center;
   border-radius: 0.55rem;
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(5, 5, 8, 0.58);
@@ -989,10 +2031,10 @@ html[data-umbra-remote-mode="phone"][data-umbra-active-workspace="comfyui"] [dat
 html[data-umbra-remote-mode="phone"] [data-umbra-phone-menu-backdrop] {
   position: fixed;
   inset: 0;
-  z-index: 110;
+  z-index: 215;
   border: 0;
-  background: rgba(0, 0, 0, 0.48);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(3px);
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-sidebar-system-section] {
@@ -1074,11 +2116,27 @@ html[data-umbra-remote-mode="phone"] [data-umbra-appbar-shell] .glass-panel {
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-context-menu-boundary="workspace"] {
-  padding-top: var(--umbra-phone-shell-top);
+  padding: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-context-menu-boundary="workspace"] > [class*="workspace-"] {
+  top: var(--umbra-phone-shell-top) !important;
+  bottom: var(--umbra-phone-bottom-nav-height) !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-context-menu-boundary="workspace"] > div:has([data-umbra-powerprompter-root]) {
+  top: var(--umbra-phone-shell-top) !important;
+  bottom: var(--umbra-phone-bottom-nav-height) !important;
 }
 
 html[data-umbra-remote-mode="phone"][data-umbra-active-workspace="comfyui"] [data-umbra-context-menu-boundary="workspace"] {
   padding-top: 0;
+  padding-bottom: 0;
+}
+
+html[data-umbra-remote-mode="phone"][data-umbra-active-workspace="comfyui"] [data-umbra-context-menu-boundary="workspace"] > [class*="workspace-"] {
+  top: 0 !important;
+  bottom: 0 !important;
 }
 
 html[data-umbra-remote-mode="phone"] .workspace-comfyui iframe,
@@ -1742,6 +2800,94 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-info-handle] {
   background: rgba(255, 255, 255, 0.22);
 }
 
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-action-bar] {
+  display: block;
+  top: 0 !important;
+  padding: 0.55rem 0.65rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-action-bar] > div:first-child {
+  margin-bottom: 0.45rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-action-controls] {
+  display: grid !important;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.4rem;
+  overflow-x: visible !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-metadata-search] {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0 !important;
+  max-width: none !important;
+  min-height: 2.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-mobile-view-toggle],
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-mobile-select] {
+  width: 100%;
+  min-height: 2.75rem;
+  padding-inline: 0.6rem;
+  font-size: 0.67rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-gallery-mobile-media-view="grid"] [data-umbra-gallery-tile] {
+  padding: 0.15rem !important;
+  border-radius: 0.45rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-gallery-mobile-media-view="grid"] [data-umbra-gallery-tile-header] {
+  position: absolute;
+  inset: 0.3rem 0.3rem auto;
+  z-index: 20;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-gallery-mobile-media-view="grid"] [data-umbra-gallery-tile-header] > span:first-child {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-gallery-mobile-media-view="grid"] [data-umbra-gallery-tile-header] > span:last-child {
+  pointer-events: auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-gallery-mobile-media-view="grid"] [data-umbra-gallery-tile-header] button {
+  width: 1.65rem;
+  height: 1.65rem;
+  min-height: 1.65rem;
+  border-radius: 0.45rem;
+  background: rgba(5, 5, 8, 0.78);
+  backdrop-filter: blur(8px);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-gallery-mobile-media-view="grid"] [data-umbra-gallery-tile-header] :where(span:not(:first-child)) {
+  font-size: 0.52rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-gallery-mobile-media-view="grid"] [data-umbra-gallery-tile-media] {
+  width: 100%;
+  height: 100%;
+  flex: 1 1 auto;
+  border-radius: 0.35rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-gallery-mobile-media-view="grid"] [data-umbra-gallery-tile-media] img {
+  object-fit: cover;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-gallery-mobile-media-view="grid"] [data-umbra-gallery-tile-footer] {
+  display: none !important;
+}
+
 html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-root] {
   flex-direction: column;
 }
@@ -1794,7 +2940,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-main] > div:first
   overflow: visible;
   border-bottom: 1px solid color-mix(in srgb, var(--umbra-accent) 18%, rgba(255, 255, 255, 0.08));
   background: rgba(5, 5, 8, 0.95);
-  backdrop-filter: blur(14px);
+  backdrop-filter: none;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-bar] {
@@ -1807,48 +2953,401 @@ html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-bar] select
   touch-action: manipulation;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-bar] > div:last-child {
-  scrollbar-width: none;
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-primary],
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-queue-row] {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-bar] > div:last-child::-webkit-scrollbar {
-  display: none;
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-primary] button,
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-queue-row] button,
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-queue-row] select {
+  min-height: 3rem;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-command-bar] {
   width: 100%;
   min-width: 0;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: visible;
-  flex-wrap: nowrap;
-  scroll-snap-type: x proximity;
-  scrollbar-width: none;
+  flex-wrap: wrap;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-command-bar] > * {
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions-backdrop] {
+  position: fixed;
+  inset: 0;
+  z-index: 225;
+  width: 100vw;
+  height: 100dvh;
+  border: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(3px);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions] {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 230;
+  display: block;
+  max-height: min(30rem, calc(100dvh - 2rem));
+  overflow-y: auto;
+  padding: 0.45rem 0.85rem calc(1rem + env(safe-area-inset-bottom));
+  border: 1px solid color-mix(in srgb, var(--umbra-accent) 24%, rgba(255, 255, 255, 0.1));
+  border-bottom: 0;
+  border-radius: 1.2rem 1.2rem 0 0;
+  background: rgba(8, 9, 13, 0.985);
+  box-shadow: 0 -24px 70px rgba(0, 0, 0, 0.62);
+  animation: umbra-phone-sheet-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions-handle] {
+  width: 2.5rem;
+  height: 0.25rem;
+  margin: 0 auto 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions-header] {
+  display: flex;
+  min-width: 0;
+  min-height: 3.4rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions-header] > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions-header] span,
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions-header] strong {
+  display: block;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions-header] span {
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--umbra-accent) 65%, #a1a1aa);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions-header] strong {
+  margin-top: 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.95rem;
+  color: #fafafa;
+  white-space: nowrap;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions-header] button {
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
   flex: 0 0 auto;
-  scroll-snap-align: start;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: #d4d4d8;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-command-bar] > div:last-child {
-  margin-left: 0 !important;
-  min-width: max-content;
-  overflow-x: visible;
-  scrollbar-width: none;
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions-status] {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin: 0.45rem 0 0.7rem;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-command-bar]::after {
-  content: "";
-  flex: 0 0 1rem;
-  align-self: stretch;
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions-status] span {
+  min-width: 0;
+  padding: 0.5rem 0.35rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  font-size: 0.63rem;
+  font-weight: 800;
+  color: #a1a1aa;
+  white-space: nowrap;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-main] > div:nth-child(2) {
-  display: none !important;
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions] > button {
+  width: 100%;
+  min-height: 3rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions-grid] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin-top: 0.55rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions-grid] button {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-style: solid;
+  border-width: 1px;
+  border-radius: 0.75rem;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-main] button {
   min-height: 2.5rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-bar] {
+  position: relative;
+  z-index: 20;
+  width: 100%;
+  max-height: min(22rem, 42dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top-color: color-mix(in srgb, var(--umbra-accent) 20%, rgba(255, 255, 255, 0.08));
+  box-shadow: 0 -18px 42px rgba(0, 0, 0, 0.38);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-header] {
+  min-height: 2.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-grid] button,
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-grid] select,
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-grid] input {
+  min-height: 3rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-card-workspace="preset-editor"] {
+  min-height: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-card-workspace="preset-editor"] [data-umbra-prompt-card] {
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-card-workspace="preset-editor"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-lane-content] {
+  padding-bottom: 0.6rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-backdrop] {
+  position: fixed;
+  inset: 0;
+  z-index: 245;
+  width: 100vw;
+  height: 100dvh;
+  border: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker] {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 250;
+  display: block;
+  max-height: min(34rem, calc(100dvh - var(--umbra-phone-bottom-nav-height) - 1rem));
+  overflow: hidden;
+  padding: 0.45rem 0.8rem calc(0.9rem + env(safe-area-inset-bottom));
+  border: 1px solid color-mix(in srgb, var(--umbra-accent) 26%, rgba(255, 255, 255, 0.1));
+  border-bottom: 0;
+  border-radius: 1rem 1rem 0 0;
+  background: rgba(7, 8, 12, 0.99);
+  box-shadow: 0 -24px 70px rgba(0, 0, 0, 0.68);
+  animation: umbra-phone-sheet-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-handle] {
+  width: 2.5rem;
+  height: 0.25rem;
+  margin: 0 auto 0.5rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-header] {
+  display: flex;
+  min-height: 3.2rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-header] > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-header] span,
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-header] strong {
+  display: block;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-header] span {
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--umbra-accent) 68%, #a1a1aa);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-header] strong {
+  margin-top: 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 1rem;
+  color: #fafafa;
+  white-space: nowrap;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-header] button {
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: #d4d4d8;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-body] {
+  max-height: min(27rem, calc(100dvh - var(--umbra-phone-bottom-nav-height) - 6rem));
+  overflow-y: auto;
+  padding: 0.35rem 0.1rem 0.2rem;
+  overscroll-behavior-y: contain;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-list] {
+  display: grid;
+  max-height: min(14rem, 34dvh);
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+  overflow-y: auto;
+  padding: 0 0 0.2rem;
+  overscroll-behavior-y: contain;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-list] > button {
+  display: flex;
+  min-width: 0;
+  min-height: 3.25rem;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.035);
+  color: #d4d4d8;
+  text-align: left;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-list] > button[data-active="1"] {
+  border-color: color-mix(in srgb, var(--umbra-accent) 62%, rgba(255, 255, 255, 0.1));
+  background: color-mix(in srgb, var(--umbra-accent) 16%, rgba(255, 255, 255, 0.035));
+  color: #fafafa;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-list] > button span {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-empty] {
+  padding: 1rem;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 0.65rem;
+  color: #71717a;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  text-align: center;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-actions] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-actions] button {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.6rem 0.7rem;
+  border-style: solid;
+  border-width: 1px;
+  border-radius: 0.65rem;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-preset-picker-actions] button:disabled {
+  cursor: not-allowed;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  color: #52525b;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-editor-header] {
+  padding: 0.65rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-editor-header-row] {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.6rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-editor-summary] > div:last-child {
+  white-space: normal;
+  line-height: 1.1rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-editor-actions] {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+  gap: 0.45rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-editor-actions] > button {
+  min-width: 0;
+  min-height: 3rem;
+  justify-content: center;
+  padding: 0.45rem;
+  font-size: 0.62rem;
+  line-height: 0.9rem;
+  text-align: center;
+  touch-action: manipulation;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-main] button[title="Show file sidebar"],
@@ -1863,36 +3362,309 @@ html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-m
   overflow: hidden;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] > div:first-child,
-html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] > div:nth-child(2) {
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] > div:first-child {
   display: none;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-generation-controls-card],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-nav-shell] {
+  display: block;
+  flex: 0 0 auto;
+  padding: 0.45rem 0.5rem;
+  background: rgba(4, 5, 8, 0.98);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-nav-shell] > div {
+  display: flex;
+  min-width: 0;
+  gap: 0.45rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-nav-heading],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-nav-add] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-mobile-generation-toggle] {
+  display: inline-flex !important;
+  min-width: 6.9rem;
+  min-height: 2.75rem;
+  border-radius: 0.7rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-mobile-card-picker-button] {
+  display: flex !important;
+  min-height: 2.75rem;
+  border-radius: 0.7rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-nav-strip] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-nav-strip] > div {
+  height: 2.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-nav-button] {
+  top: 0;
+  height: 2.75rem;
+  scroll-snap-align: start;
+  border-radius: 0.7rem;
+  padding-inline: 0.75rem;
+  font-size: 0.66rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"][data-umbra-mobile-generation-controls="0"] [data-umbra-generation-controls-card],
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-powerprompter-side-card],
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-recent-outputs-card] {
   display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"][data-umbra-mobile-generation-controls="1"] [data-umbra-card-lane-content],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"][data-umbra-mobile-generation-controls="1"] [data-umbra-card-stage-viewport],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"][data-umbra-mobile-generation-controls="1"] [data-umbra-card-stage] {
+  width: 100% !important;
+  min-width: 100% !important;
+  transform: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"][data-umbra-mobile-generation-controls="1"] [data-umbra-card-stage] {
+  height: 100% !important;
+  margin-top: 0 !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"][data-umbra-mobile-generation-controls="1"] [data-umbra-card-slot-rail],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-connector] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"][data-umbra-mobile-generation-controls="1"] [data-umbra-generation-controls-card] {
+  display: flex !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-height: 0;
+  transform: none !important;
+  border-radius: 0.9rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-mobile-generation-close] {
+  display: inline-flex !important;
+  min-height: 2.5rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-generation-controls-card] > div:first-child {
+  min-height: 3.2rem;
+  padding: 0.55rem 0.7rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-generation-controls-card] > div:last-child {
+  padding: 0.7rem;
+  scroll-padding-bottom: 1rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-generation-controls-card] :where(input, select, button) {
+  min-height: 2.75rem;
+  font-size: 0.75rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-generation-controls-card] label,
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-generation-controls-card] span {
+  line-height: 1.35;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-lane] {
   overflow-x: hidden;
   overflow-y: auto;
   scroll-snap-type: y proximity;
+  overscroll-behavior-x: none;
+  touch-action: pan-y;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-lane-content] {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
   min-height: 100%;
-  padding: 0.875rem 0.5rem 5.5rem !important;
+  overflow-x: hidden;
+  padding: 0.6rem 0.5rem !important;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-prompt-card] {
   width: var(--umbra-phone-prompter-card-width) !important;
   min-width: var(--umbra-phone-prompter-card-width) !important;
   max-width: var(--umbra-phone-prompter-card-width) !important;
-  min-height: calc(100dvh - 16.25rem);
+  min-height: max(28rem, calc(100dvh - 22.75rem));
   border-radius: 1rem !important;
   scroll-snap-align: start;
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.36);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-backdrop] {
+  position: fixed;
+  inset: 0;
+  z-index: 235;
+  width: 100vw;
+  height: 100dvh;
+  border: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker] {
+  position: fixed;
+  inset: auto 0 var(--umbra-phone-bottom-nav-height) 0;
+  z-index: 240;
+  display: block;
+  max-height: min(37rem, calc(100dvh - var(--umbra-phone-bottom-nav-height) - 1rem));
+  overflow: hidden;
+  padding: 0.45rem 0.8rem calc(0.9rem + env(safe-area-inset-bottom));
+  border: 1px solid color-mix(in srgb, var(--umbra-accent) 26%, rgba(255, 255, 255, 0.1));
+  border-bottom: 0;
+  border-radius: 1rem 1rem 0 0;
+  background: rgba(7, 8, 12, 0.99);
+  box-shadow: 0 -24px 70px rgba(0, 0, 0, 0.68);
+  animation: umbra-phone-sheet-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-handle] {
+  width: 2.5rem;
+  height: 0.25rem;
+  margin: 0 auto 0.5rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-header] {
+  display: flex;
+  min-height: 3.2rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-header] > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-header] span,
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-header] strong {
+  display: block;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-header] span {
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--umbra-accent) 68%, #a1a1aa);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-header] strong {
+  margin-top: 0.15rem;
+  font-size: 1rem;
+  color: #fafafa;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-header] button {
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: #d4d4d8;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] {
+  display: grid;
+  max-height: min(29rem, calc(100dvh - var(--umbra-phone-bottom-nav-height) - 6rem));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  overflow-y: auto;
+  padding: 0.35rem 0.1rem 0.2rem;
+  overscroll-behavior-y: contain;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] > button {
+  display: flex;
+  min-width: 0;
+  min-height: 4rem;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.035);
+  color: #d4d4d8;
+  text-align: left;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] > button[data-active="1"] {
+  border-color: color-mix(in srgb, var(--umbra-accent) 62%, rgba(255, 255, 255, 0.1));
+  background: color-mix(in srgb, var(--umbra-accent) 13%, rgba(255, 255, 255, 0.03));
+  color: #ffffff;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] strong,
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] strong {
+  font-size: 0.76rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] small {
+  margin-top: 0.2rem;
+  font-size: 0.58rem;
+  color: #71717a;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] > button > span:last-child {
+  display: inline-flex;
+  min-width: 1.8rem;
+  height: 1.8rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.1);
+  font-size: 0.67rem;
+  font-weight: 900;
+  color: #a7f3d0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-prompt-card-header] {
+  display: grid;
+  min-height: 3.35rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.65rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-style-utility-header],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-name-select] {
+  width: 100%;
+  min-width: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-style-utility-header] > div,
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-name-select] {
+  min-height: 2.5rem;
+  height: 2.5rem;
+  font-size: 0.74rem;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-variant-plain-edit="true"] {
@@ -1902,7 +3674,6 @@ html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-m
 
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title^="Move card"],
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title="Edit card name"],
-html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] select[title="Card name"],
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title="Card controls"],
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title^="Shuffle variants"],
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title="Add variant"],
@@ -1929,9 +3700,347 @@ html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-m
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] button[title^="Toggle Set"] {
-  min-width: 2.75rem;
-  min-height: 2.25rem;
-  font-size: 0.76rem;
+  width: 100%;
+  min-width: 0;
+  min-height: 2.35rem;
+  flex: none;
+  font-size: 0.72rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-variant-card] {
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-variant-set-selector] {
+  min-width: 0;
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-mobile-variant-set-button] {
+  display: flex !important;
+  min-height: 2.75rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-variant-set-buttons] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-backdrop] {
+  position: fixed;
+  inset: 0;
+  z-index: 241;
+  width: 100vw;
+  height: 100dvh;
+  border: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker] {
+  position: fixed;
+  inset: auto 0 var(--umbra-phone-bottom-nav-height) 0;
+  z-index: 242;
+  display: block;
+  max-height: min(38rem, calc(100dvh - var(--umbra-phone-bottom-nav-height) - 1rem));
+  overflow: hidden;
+  padding: 0.45rem 0.8rem calc(0.9rem + env(safe-area-inset-bottom));
+  border: 1px solid color-mix(in srgb, var(--umbra-accent) 26%, rgba(255, 255, 255, 0.1));
+  border-bottom: 0;
+  border-radius: 1rem 1rem 0 0;
+  background: rgba(7, 8, 12, 0.99);
+  box-shadow: 0 -24px 70px rgba(0, 0, 0, 0.68);
+  animation: umbra-phone-sheet-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-handle] {
+  width: 2.5rem;
+  height: 0.25rem;
+  margin: 0 auto 0.5rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-header] {
+  display: flex;
+  min-height: 3.2rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-header] > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-header] span,
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-header] strong {
+  display: block;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-header] span {
+  overflow: hidden;
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--umbra-accent) 68%, #a1a1aa);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-header] strong {
+  overflow: hidden;
+  margin-top: 0.15rem;
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fafafa;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-header] button {
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(52, 211, 153, 0.32);
+  border-radius: 0.65rem;
+  background: rgba(16, 185, 129, 0.1);
+  color: #a7f3d0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-list] {
+  display: flex;
+  max-height: min(30rem, calc(100dvh - var(--umbra-phone-bottom-nav-height) - 6rem));
+  flex-direction: column;
+  gap: 0.4rem;
+  overflow-y: auto;
+  padding: 0.35rem 0.1rem 0.2rem;
+  overscroll-behavior-y: contain;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-list] > button {
+  display: flex;
+  width: 100%;
+  min-height: 3.4rem;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.035);
+  color: #d4d4d8;
+  text-align: left;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-list] strong,
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-list] small {
+  display: block;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-list] strong {
+  font-size: 0.78rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-list] small {
+  margin-top: 0.2rem;
+  font-size: 0.6rem;
+  color: #71717a;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-list] [data-checked] {
+  display: inline-flex;
+  width: 1.9rem;
+  height: 1.9rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-list] [data-checked="1"] {
+  border-color: rgba(52, 211, 153, 0.42);
+  background: rgba(16, 185, 129, 0.13);
+  color: #a7f3d0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager] {
+  width: 100%;
+  min-width: 0;
+  padding: 0.5rem;
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-layout] {
+  display: block !important;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-side-pane] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-list] {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  border-radius: 0.65rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-header] {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
+  padding: 0.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-summary],
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-controls],
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-control-row] {
+  width: 100%;
+  min-width: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-summary] > div:nth-child(2) {
+  font-size: 0.88rem;
+  line-height: 1.25rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-stats] {
+  gap: 0.35rem;
+  font-size: 0.64rem;
+  line-height: 1rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-stats] > span {
+  display: inline-flex;
+  min-height: 1.75rem;
+  align-items: center;
+  padding: 0.25rem 0.55rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-style-filters] {
+  gap: 0.4rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-style-filters] > button {
+  min-height: 2.5rem;
+  padding-inline: 0.7rem;
+  font-size: 0.64rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-controls] {
+  align-items: stretch;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-control-row] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-control-row] > button,
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-control-row] > label {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;
+  justify-content: center;
+  padding-inline: 0.65rem;
+  font-size: 0.68rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-control-row] select {
+  min-width: 0;
+  height: 2rem;
+  flex: 1 1 auto;
+  font-size: 0.68rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-control-note] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-scroll] {
+  padding: 0.5rem;
+  overscroll-behavior: contain;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-set-header],
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-group-header] {
+  padding: 0.6rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-set-header-row],
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-group-header-row] {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-drag-handle] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-set-toggle],
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-group-toggle],
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-set-clear],
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-group-clear-selected],
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-group-edit],
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-group-clear] {
+  min-height: 2.75rem;
+  padding-inline: 0.75rem;
+  font-size: 0.68rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-set-clear] {
+  margin-left: auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-set-header-row] > span,
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-group-header-row] > span {
+  display: inline-flex;
+  min-height: 1.8rem;
+  align-items: center;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.63rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-set-groups] {
+  padding: 0.5rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-set-group-list] {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-group-count] {
+  width: 100%;
+  margin-left: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-prompt-row] {
+  padding: 0.6rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-prompt-select] {
+  width: 2.75rem;
+  height: 2.75rem;
+  touch-action: manipulation;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-header] {

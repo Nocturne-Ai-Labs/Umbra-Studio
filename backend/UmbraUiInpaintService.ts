@@ -270,6 +270,8 @@ export interface UmbraUiInpaintSettings {
   checkpointName: string;
   clipSkip: number;
   seed: number;
+  seedMode: 'fixed' | 'increment' | 'decrement' | 'randomize';
+  seedIncrement: 1 | 100 | 1000;
   steps: number;
   cfg: number;
   samplerName: string;
@@ -1256,8 +1258,14 @@ export class UmbraUiInpaintService {
     const prompt = String(settings.prompt || '').trim();
     if (!prompt) throw new Error('Enter an inpaint prompt before generating.');
     const samples = Math.max(1, Math.min(8, Math.round(finiteNumberOrFallback(settings.samples, 1))));
+    const seedIncrement = settings.seedIncrement === 100 || settings.seedIncrement === 1000
+      ? settings.seedIncrement
+      : 1;
     const baseSeed = Number.isFinite(Number(settings.seed)) && Number(settings.seed) > 0
-      ? Math.min(Number.MAX_SAFE_INTEGER - samples, Math.floor(Number(settings.seed)))
+      ? Math.min(
+        Number.MAX_SAFE_INTEGER - seedIncrement * Math.max(0, samples - 1),
+        Math.floor(Number(settings.seed)),
+      )
       : randomSeed();
     const now = Date.now();
     const job: UmbraUiInpaintJob = {
@@ -1275,7 +1283,7 @@ export class UmbraUiInpaintService {
       updatedAt: now,
       items: Array.from({ length: samples }, (_, index) => ({
         id: String(index + 1),
-        seed: baseSeed + index,
+        seed: baseSeed + index * seedIncrement,
         status: 'staging',
         promptId: '',
         outputs: [],
@@ -1772,6 +1780,8 @@ export class UmbraUiInpaintService {
                     prompt,
                     negativePrompt: settings.negativePrompt,
                     seed: item.seed,
+                    seedMode: settings.seedMode,
+                    seedIncrement: settings.seedIncrement,
                     steps: settings.steps,
                     cfg: settings.cfg,
                     clipSkip: settings.clipSkip,

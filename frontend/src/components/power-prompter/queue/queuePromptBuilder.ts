@@ -51,7 +51,10 @@ export function resolveSeedForQueuePromptGroup(
   const normalizedGroupIndex = Math.max(0, Math.floor(Number(groupIndex) || 0));
   const maxSeed = Number.MAX_SAFE_INTEGER;
   if (mode === 'increment') {
-    return Math.max(0, Math.min(maxSeed, baseSeed + normalizedGroupIndex));
+    const increment = generation.seedIncrement === 100 || generation.seedIncrement === 1000
+      ? generation.seedIncrement
+      : 1;
+    return Math.max(0, Math.min(maxSeed, baseSeed + normalizedGroupIndex * increment));
   }
   if (mode === 'decrement') {
     return Math.max(0, baseSeed - normalizedGroupIndex);
@@ -149,6 +152,7 @@ export function composeActivePromptFromCards(cards: PowerPrompterCardNode[], set
         const variant = slot.variants[0];
         return variant ? [{
           text: String(variant.text || '').trim(),
+          slotId: slot.slotId,
           variantId: String(variant.id || '').trim(),
           chainLinks: normalizeChainLinks((variant as any).chainLinks, String(variant.id || '').trim()),
           blockLinks: normalizeBlockLinks((variant as any).blockLinks, String(variant.id || '').trim()),
@@ -161,6 +165,7 @@ export function composeActivePromptFromCards(cards: PowerPrompterCardNode[], set
       });
       return variant ? [{
         text: String(variant.text || '').trim(),
+        slotId: slot.slotId,
         variantId: String(variant.id || '').trim(),
         chainLinks: normalizeChainLinks((variant as any).chainLinks, String(variant.id || '').trim()),
         blockLinks: normalizeBlockLinks((variant as any).blockLinks, String(variant.id || '').trim()),
@@ -384,7 +389,11 @@ export function buildQueuePromptsFromCards(
     tokens: entry.tokens
       .map((token) => ({
         slotId: String(token.slotId || '').trim(),
+        slotLabel: String(token.slotLabel || '').trim(),
+        slotType: token.slotType,
         variantId: String(token.variantId || '').trim(),
+        variantName: String(token.variantName || '').trim(),
+        text: String(token.text || '').trim(),
       }))
       .filter((token) => token.slotId.length > 0 && token.variantId.length > 0),
   });

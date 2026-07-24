@@ -164,6 +164,105 @@ describe('Umbra UI media handoff metadata recovery', () => {
     expect(handoff?.generation?.inpaint?.fillMode).toBeUndefined();
   });
 
+  test('accepts metadata-only TXT2IMG handoffs', () => {
+    expect(normalizeUmbraUiMediaHandoff({
+      mode: 'txt2img',
+      path: 'C:\\outputs\\source.png',
+      imageUrl: '/api/fs/image?path=source.png',
+      generation: {
+        positivePrompt: 'restored prompt',
+        seed: 246810,
+      },
+      createdAt: 321,
+    })).toMatchObject({
+      mode: 'txt2img',
+      path: 'C:/outputs/source.png',
+      originalSourcePath: 'C:/outputs/source.png',
+      generation: {
+        positivePrompt: 'restored prompt',
+        seed: 246810,
+      },
+      createdAt: 321,
+    });
+  });
+
+  test('restores Power Prompter TXT2IMG pipeline controls', () => {
+    const snapshot = buildUmbraUiMediaGenerationSnapshot({
+      type: 'image',
+      positive_prompt: 'polished anime portrait',
+      umbra_power_prompter: {
+        version: 2,
+        prompt: 'polished anime portrait',
+        generation: {
+          seed: 8675309,
+          controlAfterGenerate: 'increment',
+          seedIncrement: 1000,
+          steps: 32,
+          cfg: 4.5,
+          clipSkip: 2,
+          samplerName: 'euler_ancestral',
+          scheduler: 'simple',
+          width: 896,
+          height: 1152,
+          hiresFix: {
+            enabled: true,
+            upscaler: 'Latent',
+            resizeMode: 'scale',
+            scaleBy: 1.5,
+            steps: 12,
+            denoise: 0.32,
+            cfg: 4,
+            samplerName: 'use_same',
+            scheduler: 'use_same',
+          },
+          detailerPipeline: [{
+            id: 'face-detailer',
+            enabled: true,
+            label: 'Face',
+            detectorModel: 'bbox/face_yolov8m.pt',
+          }],
+          outputUpscale: {
+            enabled: true,
+            modelName: 'upscale/anime.safetensors',
+            maxDimension: 4096,
+          },
+        },
+      },
+    });
+
+    expect(snapshot).toMatchObject({
+      seed: 8675309,
+      controlAfterGenerate: 'increment',
+      seedIncrement: 1000,
+      steps: 32,
+      cfg: 4.5,
+      clipSkip: 2,
+      samplerName: 'euler_ancestral',
+      scheduler: 'simple',
+      width: 896,
+      height: 1152,
+      hiresFix: {
+        enabled: true,
+        upscaler: 'Latent',
+        resizeMode: 'scale',
+        scaleBy: 1.5,
+        steps: 12,
+        denoise: 0.32,
+      },
+      detailerPipeline: [{
+        id: 'face-detailer',
+        enabled: true,
+        label: 'Face',
+        detectorModel: 'bbox/face_yolov8m.pt',
+      }],
+      outputUpscale: {
+        enabled: true,
+        modelName: 'upscale/anime.safetensors',
+        maxDimension: 4096,
+      },
+    });
+  });
+
   test('preserves the immutable original source across flattened inpaint handoffs', () => {
     expect(normalizeUmbraUiMediaHandoff({
       mode: 'img2img',
@@ -204,5 +303,67 @@ describe('Umbra UI media handoff metadata recovery', () => {
       controlLayerCount: 2,
       referenceLayerCount: 1,
     });
+  });
+
+  test('restores Power Prompter card segments as separate prompt fields', () => {
+    const snapshot = buildUmbraUiMediaGenerationSnapshot({
+      type: 'image',
+      positive_prompt: 'anime illustration, heroine, hands on hips',
+      umbra_power_prompter: {
+        version: 2,
+        ppuid: 'pp_test',
+        prompt: 'anime illustration, heroine, hands on hips',
+        segments: [
+          {
+            slotId: 'style',
+            slotLabel: 'Style',
+            slotType: 'style',
+            variantId: 'style-1',
+            variantName: 'Anime',
+            text: 'anime illustration',
+          },
+          {
+            slotId: 'character',
+            slotLabel: 'Character',
+            slotType: 'character',
+            variantId: 'character-1',
+            variantName: 'Heroine',
+            text: 'heroine',
+          },
+          {
+            slotId: 'pose',
+            slotLabel: 'Pose',
+            slotType: 'pose',
+            variantId: 'pose-1',
+            variantName: 'Hands on hips',
+            text: 'hands on hips',
+          },
+        ],
+      },
+    });
+
+    expect(snapshot?.positivePromptSegments).toEqual([
+      {
+        text: 'anime illustration',
+        label: 'Style',
+        slotType: 'style',
+        variantId: 'style-1',
+        variantName: 'Anime',
+      },
+      {
+        text: 'heroine',
+        label: 'Character',
+        slotType: 'character',
+        variantId: 'character-1',
+        variantName: 'Heroine',
+      },
+      {
+        text: 'hands on hips',
+        label: 'Pose',
+        slotType: 'pose',
+        variantId: 'pose-1',
+        variantName: 'Hands on hips',
+      },
+    ]);
   });
 });

@@ -15,13 +15,13 @@ export function ImageInspectorWorkspace() {
       {/* Image Inspector Header */}
       <div data-umbra-image-inspector-header="" className="flex items-center justify-between gap-3 border-b border-white/10 bg-black/20 px-4 py-3 backdrop-blur-xl z-10">
         <div className="flex items-center gap-6">
-          <div>
+          <div data-umbra-image-inspector-identity>
             <h2 className="text-sm font-black uppercase tracking-[0.18em] text-white">Image Inspector</h2>
             <p className="mt-0.5 text-xs umbra-text-muted">Analyze metadata and generate booru tags</p>
           </div>
           
           {/* Tab Switcher */}
-          <div className="flex p-1 bg-black/40 rounded-lg border border-white/5">
+          <div data-umbra-image-inspector-tabs className="flex p-1 bg-black/40 rounded-lg border border-white/5">
             <button
               onClick={() => setUI('imageInspectorTab', 'scanner')}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wide transition-all ${

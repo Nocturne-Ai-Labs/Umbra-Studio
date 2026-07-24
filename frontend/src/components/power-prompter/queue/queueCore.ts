@@ -48,7 +48,7 @@ export const SET_COLOR_PALETTE = [
 ];
 
 export type PowerPrompterQueueMode = 'prompt' | 'selected' | 'variants';
-export type PowerPrompterPanelMode = 'editor' | 'queue-manager' | 'queue-editor';
+export type PowerPrompterPanelMode = 'editor' | 'preset-editor' | 'queue-manager' | 'queue-editor';
 export type QueueManagerSequenceMode = 'default' | 'similar' | 'balanced' | 'unique';
 
 export type QueueManagerOutputMenuState = {
@@ -85,7 +85,11 @@ export type QueuePromptBuildEntry = {
 
 export type QueuePromptPreviewToken = {
   slotId: string;
+  slotLabel?: string;
+  slotType?: PowerPrompterCardType;
   variantId: string;
+  variantName?: string;
+  text?: string;
 };
 
 export type QueuePromptPreviewEntry = {

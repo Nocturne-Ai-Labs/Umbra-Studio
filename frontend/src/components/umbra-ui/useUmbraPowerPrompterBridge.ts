@@ -30,6 +30,7 @@ import type {
   PowerPrompterModelType,
   PowerPrompterOutputUpscaleControls,
   PowerPrompterSeedControlMode,
+  PowerPrompterSeedIncrement,
   PowerPrompterVideoControls,
 } from '@/types/powerPrompter';
 import { resolveUmbraVideoTargetDimensions } from '../../../../shared/umbra-ui/videoSizing';
@@ -246,6 +247,7 @@ export interface UmbraImageQueueOptions {
   clipSkip: number;
   seed: number;
   seedMode: PowerPrompterSeedControlMode;
+  seedIncrement: PowerPrompterSeedIncrement;
   steps: number;
   cfg: number;
   samplerName: string;
@@ -1387,6 +1389,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       negativePrompt: String(options.negativePrompt || '').trim(),
       seed: toFiniteInteger(options.seed, 0, 0, Number.MAX_SAFE_INTEGER),
       controlAfterGenerate: options.seedMode,
+      seedIncrement: options.seedIncrement,
       steps: toFiniteInteger(options.steps, 35, 1, 10000),
       cfg: toFiniteNumber(options.cfg, 4, 0, 100),
       clipSkip: toFiniteInteger(options.clipSkip, 1, 1, 12),
@@ -1637,6 +1640,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       negativePrompt: String(options.negativePrompt || '').trim(),
       seed: toFiniteInteger(video.seed, 0, 0, Number.MAX_SAFE_INTEGER),
       controlAfterGenerate: video.seedMode,
+      seedIncrement: video.seedIncrement,
       steps: video.family === 'wan22' ? video.wan.steps : 8,
       cfg: video.family === 'wan22' ? video.wan.cfg : video.ltx.baseCfg,
       samplerName: video.family === 'wan22' ? video.wan.highSamplerName : video.ltx.baseSamplerName,

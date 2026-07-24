@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { useStore } from '@/store/useStore';
 import {
   Image as ImageIcon,
+  Laptop,
   Layers,
   ChevronDown,
   ChevronsLeft,
@@ -29,6 +30,12 @@ import {
   EyeOff,
   GraduationCap,
   Menu,
+  MoreHorizontal,
+  LogOut,
+  Server,
+  Settings2,
+  Smartphone,
+  Tablet,
   X
 } from 'lucide-react';
 import { Disclosure, DisclosureButton, DisclosurePanel, Popover, PopoverButton, PopoverPanel } from '@headlessui/react';
@@ -45,7 +52,13 @@ import { governorShouldRun, governorTryAcquire } from '@/lib/loadGovernor';
 import { DroppableNavItem } from './DroppableNavItem';
 import { UmbraRemoteSidebarSection } from './UmbraRemoteSidebarSection';
 import { LocalServersSidebarSection } from './LocalServersSidebarSection';
-import { isUmbraRemoteClient } from '@/utils/hostOnly';
+import {
+  applyUmbraRemoteMode,
+  getUmbraRemoteMode,
+  isUmbraRemoteClient,
+  normalizeUmbraRemoteMode,
+  type UmbraRemoteClientMode,
+} from '@/utils/hostOnly';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -125,7 +138,16 @@ type ComfyAppPreviewEvent = {
 };
 const APPBAR_COMFY_IMAGE_PREVIEW_ENABLED = true;
 const LIVE_GENERATION_PREVIEW_PATH = 'umbra-live-generation://powerprompter/current.png';
-const PHONE_REMOTE_WORKSPACES = new Set(['powerprompter', 'comfyui', 'library']);
+const PHONE_REMOTE_WORKSPACES = new Set([
+  'umbraui',
+  'powerprompter',
+  'comfyui',
+  'library',
+  'modelmanager',
+  'imageinspector',
+  'board',
+  'localserver',
+]);
 const PHONE_COMFY_MENU_LONG_PRESS_MS = 420;
 const PHONE_COMFY_MENU_CANCEL_MOVE_PX = 10;
 const PHONE_COMFY_MENU_SIZE_PX = 36;
@@ -273,10 +295,12 @@ export const UmbraAppBar = () => {
 
   const [watermarkOpen, setWatermarkOpen] = React.useState(false);
   const [globalSettingsOpen, setGlobalSettingsOpen] = React.useState(false);
-  const [remoteMode, setRemoteMode] = React.useState<string>(() => {
+  const [remoteMode, setRemoteMode] = React.useState<UmbraRemoteClientMode>(() => {
     if (typeof document === 'undefined') return 'desktop';
-    return document.documentElement.dataset.umbraRemoteMode || 'desktop';
+    return normalizeUmbraRemoteMode(getUmbraRemoteMode()) || 'desktop';
   });
+  const [remoteSessionBusy, setRemoteSessionBusy] = React.useState(false);
+  const [remoteSessionError, setRemoteSessionError] = React.useState('');
   const [phoneSidebarOpen, setPhoneSidebarOpen] = React.useState(false);
   const [phoneComfyMenuPosition, setPhoneComfyMenuPosition] = React.useState<PhoneComfyMenuPosition | null>(() => (
     parsePhoneComfyMenuPosition(phoneComfyMenuPositionSetting)
@@ -361,7 +385,7 @@ export const UmbraAppBar = () => {
   React.useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
     const readRemoteMode = () => {
-      const nextMode = document.documentElement.dataset.umbraRemoteMode || 'desktop';
+      const nextMode = normalizeUmbraRemoteMode(document.documentElement.dataset.umbraRemoteMode) || 'desktop';
       setRemoteMode(nextMode);
       if (nextMode !== 'phone') setPhoneSidebarOpen(false);
     };
@@ -403,6 +427,33 @@ export const UmbraAppBar = () => {
     setActiveWorkspace(workspace);
     if (isPhoneRemote) setPhoneSidebarOpen(false);
   }, [isPhoneRemote, setActiveWorkspace]);
+
+  const handleRemoteModeChange = React.useCallback((mode: UmbraRemoteClientMode) => {
+    setRemoteSessionError('');
+    setRemoteMode(mode);
+    applyUmbraRemoteMode(mode);
+  }, []);
+
+  const handleRemoteLogout = React.useCallback(async () => {
+    if (remoteSessionBusy) return;
+    setRemoteSessionBusy(true);
+    setRemoteSessionError('');
+    try {
+      const response = await fetch('/api/remote/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ forgetDevice: true }),
+      });
+      const payload = await response.json().catch(() => ({} as { error?: string }));
+      if (!response.ok) throw new Error(String(payload?.error || `Logout failed (${response.status})`));
+      window.location.reload();
+    } catch (logoutError) {
+      setRemoteSessionError(logoutError instanceof Error ? logoutError.message : 'Logout failed');
+      setRemoteSessionBusy(false);
+    }
+  }, [remoteSessionBusy]);
 
   const clearPhoneComfyMenuLongPress = React.useCallback(() => {
     if (phoneComfyMenuLongPressRef.current !== null) {
@@ -501,8 +552,82 @@ export const UmbraAppBar = () => {
     if (activeWorkspace === 'library') return 'Gallery';
     if (activeWorkspace === 'localserver') return 'Local Server';
     if (activeWorkspace === 'umbraui') return 'Umbra UI';
+    if (activeWorkspace === 'modelmanager') return 'Model Manager';
+    if (activeWorkspace === 'imageinspector') return 'Image Inspector';
+    if (activeWorkspace === 'board') return 'Data Forge';
     return 'Umbra';
   }, [activeWorkspace]);
+  const phoneMoreWorkspaceActive = !['umbraui', 'powerprompter', 'library', 'comfyui'].includes(activeWorkspace);
+  const remoteModeOptions: Array<{
+    id: UmbraRemoteClientMode;
+    label: string;
+    icon: typeof Laptop;
+  }> = [
+    { id: 'desktop', label: 'Desktop', icon: Laptop },
+    { id: 'tablet', label: 'Tablet', icon: Tablet },
+    { id: 'phone', label: 'Mobile', icon: Smartphone },
+  ];
+  const renderRemoteSessionControls = (surface: 'sidebar' | 'phone') => (
+    <section
+      data-umbra-remote-session-controls=""
+      data-surface={surface}
+      className={cn(
+        'border border-cyan-300/15 bg-cyan-500/[0.045]',
+        surface === 'phone'
+          ? 'mt-3 rounded-lg p-3'
+          : 'mx-2 mt-2 rounded-md p-2',
+      )}
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <span className="block text-[9px] font-black uppercase tracking-[0.16em] text-cyan-200">Remote Device</span>
+          <span className="mt-0.5 block truncate text-[10px] text-zinc-500">Choose this browser&apos;s layout</span>
+        </div>
+        <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_9px_rgba(52,211,153,0.55)]" title="Authenticated" />
+      </div>
+      <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Remote device layout">
+        {remoteModeOptions.map((option) => {
+          const Icon = option.icon;
+          const selected = remoteMode === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              data-active={selected ? '1' : '0'}
+              aria-pressed={selected}
+              onClick={() => handleRemoteModeChange(option.id)}
+              className={cn(
+                'inline-flex min-w-0 flex-col items-center justify-center gap-1 rounded border px-1.5 text-[9px] font-black uppercase tracking-[0.08em] transition',
+                surface === 'phone' ? 'min-h-12' : 'min-h-10',
+                selected
+                  ? 'border-cyan-300/45 bg-cyan-500/15 text-cyan-50'
+                  : 'border-white/10 bg-black/20 text-zinc-500 hover:border-white/20 hover:text-zinc-200',
+              )}
+              title={`Use ${option.label} layout`}
+            >
+              <Icon size={surface === 'phone' ? 16 : 14} />
+              <span className="max-w-full truncate">{option.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        onClick={() => void handleRemoteLogout()}
+        disabled={remoteSessionBusy}
+        className={cn(
+          'mt-2 inline-flex w-full items-center justify-center gap-2 rounded border border-red-400/25 bg-red-500/10 font-black uppercase tracking-[0.12em] text-red-200 transition hover:bg-red-500/15 disabled:cursor-wait disabled:opacity-60',
+          surface === 'phone' ? 'min-h-11 text-[10px]' : 'min-h-9 text-[9px]',
+        )}
+      >
+        {remoteSessionBusy ? <Loader2 size={14} className="animate-spin" /> : <LogOut size={14} />}
+        {remoteSessionBusy ? 'Logging out' : 'Log out and forget device'}
+      </button>
+      {remoteSessionError ? (
+        <p className="mt-2 text-[10px] leading-snug text-red-200">{remoteSessionError}</p>
+      ) : null}
+    </section>
+  );
   const [isHoverExpanded, setIsHoverExpanded] = React.useState(false);
   const [systemMonitorReady, setSystemMonitorReady] = React.useState(false);
 
@@ -1697,6 +1822,56 @@ export const UmbraAppBar = () => {
         title={`ComfyUI ${connections.comfyui}`}
       />
     </div>
+    {isPhoneRemote && !isPhoneComfyImmersive ? (
+      <nav data-umbra-phone-bottom-nav="" aria-label="Primary workspace navigation">
+        <button
+          type="button"
+          data-active={activeWorkspace === 'umbraui' ? '1' : '0'}
+          onClick={() => handleWorkspaceSelect('umbraui')}
+          aria-label="Open Umbra UI"
+        >
+          <PanelsTopLeft size={19} />
+          <span>Generate</span>
+        </button>
+        <button
+          type="button"
+          data-active={activeWorkspace === 'powerprompter' ? '1' : '0'}
+          onClick={() => handleWorkspaceSelect('powerprompter')}
+          aria-label="Open Power Prompter"
+        >
+          <Notebook size={19} />
+          <span>Prompter</span>
+        </button>
+        <button
+          type="button"
+          data-active={activeWorkspace === 'library' ? '1' : '0'}
+          onClick={() => handleWorkspaceSelect('library')}
+          aria-label="Open Gallery"
+        >
+          <ImageIcon size={19} />
+          <span>Gallery</span>
+        </button>
+        <button
+          type="button"
+          data-active={activeWorkspace === 'comfyui' ? '1' : '0'}
+          onClick={() => handleWorkspaceSelect('comfyui')}
+          aria-label="Open ComfyUI"
+        >
+          <Layers size={19} />
+          <span>Comfy</span>
+        </button>
+        <button
+          type="button"
+          data-active={phoneSidebarOpen || phoneMoreWorkspaceActive ? '1' : '0'}
+          onClick={() => setPhoneSidebarOpen((open) => !open)}
+          aria-label={phoneSidebarOpen ? 'Close more workspaces' : 'Open more workspaces'}
+          aria-expanded={phoneSidebarOpen}
+        >
+          <MoreHorizontal size={20} />
+          <span>More</span>
+        </button>
+      </nav>
+    ) : null}
     {isPhoneRemote && phoneSidebarOpen ? (
       <button
         type="button"
@@ -1704,6 +1879,83 @@ export const UmbraAppBar = () => {
         onClick={() => setPhoneSidebarOpen(false)}
         aria-label="Close navigation menu"
       />
+    ) : null}
+    {isPhoneRemote && phoneSidebarOpen ? (
+      <section
+        data-umbra-phone-more-sheet=""
+        role="dialog"
+        aria-modal="true"
+        aria-label="More Umbra workspaces"
+      >
+        <div data-umbra-phone-sheet-handle="" aria-hidden="true" />
+        <div data-umbra-phone-sheet-header="">
+          <div>
+            <span>Umbra Studio</span>
+            <strong>More</strong>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPhoneSidebarOpen(false)}
+            aria-label="Close more workspaces"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div data-umbra-phone-workspace-grid="">
+          <button
+            type="button"
+            data-active={activeWorkspace === 'modelmanager' ? '1' : '0'}
+            onClick={() => handleWorkspaceSelect('modelmanager')}
+          >
+            <Boxes size={20} />
+            <span>Model Manager</span>
+          </button>
+          <button
+            type="button"
+            data-active={activeWorkspace === 'imageinspector' ? '1' : '0'}
+            onClick={() => handleWorkspaceSelect('imageinspector')}
+          >
+            <ScanSearch size={20} />
+            <span>Image Inspector</span>
+          </button>
+          <button
+            type="button"
+            data-active={activeWorkspace === 'board' ? '1' : '0'}
+            onClick={() => handleWorkspaceSelect('board')}
+          >
+            <Anvil size={20} />
+            <span>Data Forge</span>
+          </button>
+          <button
+            type="button"
+            data-active={activeWorkspace === 'localserver' ? '1' : '0'}
+            onClick={() => handleWorkspaceSelect('localserver')}
+          >
+            <Server size={20} />
+            <span>Local Servers</span>
+          </button>
+        </div>
+        {isRemoteClient ? renderRemoteSessionControls('phone') : null}
+        <button
+          type="button"
+          data-umbra-phone-settings-button=""
+          onClick={() => {
+            setPhoneSidebarOpen(false);
+            setGlobalSettingsOpen(true);
+          }}
+        >
+          <Settings2 size={19} />
+          <span>
+            <strong>Settings</strong>
+            <small>Theme, storage, remote, and application preferences</small>
+          </span>
+          <ChevronDown size={16} className="-rotate-90" />
+        </button>
+        <div data-umbra-phone-sheet-status="">
+          <span data-connected={connections.comfyui === 'connected' ? '1' : '0'} />
+          ComfyUI {connections.comfyui === 'connected' ? 'ready' : connections.comfyui}
+        </div>
+      </section>
     ) : null}
     <aside
       data-umbra-appbar=""
@@ -2327,6 +2579,7 @@ export const UmbraAppBar = () => {
 
           </div>
         </div>
+        {!isPhoneRemote && isRemoteClient ? renderRemoteSessionControls('sidebar') : null}
       </div>
       </div>
 
@@ -2347,18 +2600,16 @@ export const UmbraAppBar = () => {
         </button>
       </div>
 
-      <WatermarkSettings
-        isOpen={watermarkOpen}
-        onClose={() => setWatermarkOpen(false)}
-      />
-
-      <GlobalSettings
-        isOpen={globalSettingsOpen}
-        onClose={() => setGlobalSettingsOpen(false)}
-      />
-
       </div>
     </aside>
+    <WatermarkSettings
+      isOpen={watermarkOpen}
+      onClose={() => setWatermarkOpen(false)}
+    />
+    <GlobalSettings
+      isOpen={globalSettingsOpen}
+      onClose={() => setGlobalSettingsOpen(false)}
+    />
     </>
   );
 };

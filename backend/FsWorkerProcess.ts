@@ -1,6 +1,7 @@
 import { join, basename, extname, dirname, resolve } from 'path';
 import { existsSync, type Dirent } from 'fs';
 import * as fs from 'fs/promises';
+import { spawn } from 'node:child_process';
 
 type FsFilter = string | null;
 
@@ -162,6 +163,14 @@ type FsDeleteRequest = {
   };
 };
 
+type FsSystemTrashRequest = {
+  id: string;
+  type: 'system-trash';
+  payload: {
+    fullPath: string;
+  };
+};
+
 type FsWorkerRequest =
   | FsWarmupRequest
   | FsInvalidateRequest
@@ -176,7 +185,8 @@ type FsWorkerRequest =
   | FsRenameRequest
   | FsWriteRequest
   | FsReadRequest
-  | FsDeleteRequest;
+  | FsDeleteRequest
+  | FsSystemTrashRequest;
 
 type FsWorkerResponse =
   | { id: string; ok: true; result: unknown }
@@ -1344,6 +1354,104 @@ async function runDelete(payload: FsDeleteRequest['payload']) {
   };
 }
 
+async function runSystemCommand(args: string[], timeoutMs = 30_000): Promise<boolean> {
+  if (!args[0]) return false;
+
+  return await new Promise<boolean>((resolveCommand) => {
+    let settled = false;
+    const proc = spawn(args[0], args.slice(1), {
+      detached: false,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+
+    const settle = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolveCommand(ok);
+    };
+
+    const timeout = setTimeout(() => {
+      try {
+        proc.kill('SIGKILL');
+      } catch {
+        // Best-effort cleanup; the command is already considered failed.
+      }
+      settle(false);
+    }, timeoutMs);
+    timeout.unref();
+
+    proc.once('error', () => settle(false));
+    proc.once('exit', (code) => settle(code === 0));
+  });
+}
+
+function escapePowerShellSingleQuoted(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+function escapeAppleScriptString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+async function runSystemTrash(payload: FsSystemTrashRequest['payload']) {
+  const fullPath = payload.fullPath;
+  if (!existsSync(fullPath)) {
+    throw new Error('Path does not exist');
+  }
+
+  if (process.platform === 'win32') {
+    const targetLiteral = escapePowerShellSingleQuoted(fullPath);
+    const psScript = [
+      '$ErrorActionPreference = "Stop";',
+      'Add-Type -AssemblyName Microsoft.VisualBasic;',
+      '$target = \'' + targetLiteral + '\';',
+      '$ui = [Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs;',
+      '$recycle = [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin;',
+      'if (Test-Path -LiteralPath $target -PathType Container) {',
+      '  [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($target, $ui, $recycle);',
+      '} else {',
+      '  [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($target, $ui, $recycle);',
+      '}',
+    ].join(' ');
+
+    if (!await runSystemCommand(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', psScript])) {
+      throw new Error('Windows Recycle Bin operation failed');
+    }
+  } else if (process.platform === 'darwin') {
+    const escaped = escapeAppleScriptString(fullPath);
+    if (!await runSystemCommand([
+      'osascript',
+      '-e',
+      `tell application "Finder" to delete POSIX file "${escaped}"`,
+    ])) {
+      throw new Error('macOS Trash operation failed');
+    }
+  } else {
+    const fallbackCommands: string[][] = [
+      ['gio', 'trash', fullPath],
+      ['trash-put', fullPath],
+      ['gvfs-trash', fullPath],
+      ['kioclient5', 'move', fullPath, 'trash:/'],
+      ['kioclient', 'move', fullPath, 'trash:/'],
+    ];
+    let moved = false;
+    for (const args of fallbackCommands) {
+      if (await runSystemCommand(args)) {
+        moved = true;
+        break;
+      }
+    }
+    if (!moved) {
+      throw new Error('No supported Linux trash command found (gio/trash-put/gvfs-trash/kioclient)');
+    }
+  }
+
+  invalidateProgressiveSeedCachePath(fullPath);
+  return { success: true };
+}
+
 async function handleRequest(request: FsWorkerRequest) {
   switch (request.type) {
     case 'warmup':
@@ -1374,6 +1482,8 @@ async function handleRequest(request: FsWorkerRequest) {
       return runRead(request.payload);
     case 'delete':
       return runDelete(request.payload);
+    case 'system-trash':
+      return runSystemTrash(request.payload);
     default: {
       const neverRequest: never = request;
       throw new Error(`Unsupported worker request: ${JSON.stringify(neverRequest)}`);

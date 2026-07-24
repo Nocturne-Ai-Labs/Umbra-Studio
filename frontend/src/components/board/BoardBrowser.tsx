@@ -53,9 +53,30 @@ export function BoardBrowser() {
   ];
 
   return (
-    <div className="h-full flex flex-col bg-[var(--umbra-bg)] text-[var(--umbra-text)]" style={{ fontFamily: 'var(--font-family)' }}>
+    <div
+      data-umbra-data-forge-root
+      className="h-full flex flex-col bg-[var(--umbra-bg)] text-[var(--umbra-text)]"
+      style={{ fontFamily: 'var(--font-family)' }}
+    >
+      <div data-umbra-data-forge-mobile-tabs>
+        <select
+          value={activeTab}
+          onChange={(event) => setActiveTab(event.target.value as Tab)}
+          aria-label="Data Forge workspace"
+        >
+          {tabs.map(tab => (
+            <option key={tab.id} value={tab.id}>
+              {tab.label}{tab.badge ? ` (${tab.badge})` : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {/* Tab bar */}
-      <div className="glass-panel flex-shrink-0 flex items-center gap-1 overflow-x-auto rounded-none border-x-0 border-t-0 px-2.5 py-1.5">
+      <div
+        data-umbra-data-forge-tabs
+        className="glass-panel flex-shrink-0 flex items-center gap-1 overflow-x-auto rounded-none border-x-0 border-t-0 px-2.5 py-1.5"
+      >
         {tabs.map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;

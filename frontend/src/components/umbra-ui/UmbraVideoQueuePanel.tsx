@@ -16,7 +16,11 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useStore } from '@/store/useStore';
-import type { PowerPrompterSeedControlMode, PowerPrompterVideoControls } from '@/types/powerPrompter';
+import type {
+  PowerPrompterSeedControlMode,
+  PowerPrompterSeedIncrement,
+  PowerPrompterVideoControls,
+} from '@/types/powerPrompter';
 import type {
   UmbraVideoQueueOptions,
   UmbraVideoReviewJob,
@@ -164,10 +168,11 @@ function ReferenceStrip({ video, large = false }: { video: PowerPrompterVideoCon
   );
 }
 
-function SettingsChips({ video, seed, seedMode }: {
+function SettingsChips({ video, seed, seedMode, seedIncrement }: {
   video: PowerPrompterVideoControls;
   seed: number;
   seedMode: string;
+  seedIncrement: number;
 }) {
   const chips = [
     video.family === 'wan22' ? 'Wan 2.2' : 'LTX-2.3',
@@ -176,7 +181,9 @@ function SettingsChips({ video, seed, seedMode }: {
     `${video.frames}f`,
     `${video.fps} FPS`,
     `Seed ${seed}`,
-    seedMode !== 'fixed' ? `Seed ${seedMode}` : '',
+    seedMode !== 'fixed'
+      ? `Seed ${seedMode}${seedMode === 'increment' ? ` +${seedIncrement.toLocaleString('en-US')}` : ''}`
+      : '',
     video.mode === 'video_to_video' ? `Denoise ${video.denoise.toFixed(2)}` : '',
   ].filter(Boolean);
   return (
@@ -234,7 +241,12 @@ function VideoJobCard({ job, onOpen }: { job: UmbraVideoReviewJob; onOpen: () =>
       </div>
       <div className="space-y-2 border-t border-white/10 p-2.5">
         <p className="line-clamp-3 text-[11px] leading-relaxed text-zinc-300">{job.prompt || 'No prompt recorded.'}</p>
-        <SettingsChips video={video} seed={job.generation.seed} seedMode={job.generation.controlAfterGenerate} />
+        <SettingsChips
+          video={video}
+          seed={job.generation.seed}
+          seedMode={job.generation.controlAfterGenerate}
+          seedIncrement={job.generation.seedIncrement}
+        />
       </div>
     </article>
   );
@@ -306,7 +318,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
   }, [draftNegative, draftPrompt, draftVideo, onRefresh, queueVideo, requeueing, showToast]);
 
   return (
-    <main className="relative flex min-h-0 min-w-0 flex-col bg-black/15">
+    <main data-umbra-ui-video-queue="" className="relative flex min-h-0 min-w-0 flex-col bg-black/15">
       <div className="flex min-h-11 items-center gap-2 border-b border-white/10 px-3">
         <Clapperboard size={13} className="text-fuchsia-300" />
         <span className="text-[11px] font-black uppercase tracking-[0.14em] text-zinc-300">Video Review Queue</span>
@@ -412,8 +424,10 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
                       <UmbraSeedControls
                         seed={String(draftVideo.seed)}
                         mode={draftVideo.seedMode}
+                        increment={draftVideo.seedIncrement}
                         onSeedChange={(value) => patchVideo('seed', normalizeUmbraUiSeed(value, draftVideo.seed))}
                         onModeChange={(mode: PowerPrompterSeedControlMode) => patchVideo('seedMode', mode)}
+                        onIncrementChange={(increment: PowerPrompterSeedIncrement) => patchVideo('seedIncrement', increment)}
                         accent="fuchsia"
                       />
                     </div>

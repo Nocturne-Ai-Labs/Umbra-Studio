@@ -241,7 +241,11 @@ export function normalizePersistedPausedQueueSnapshot(rawValue: unknown): Persis
             ? entry.tokens
               .map((token: any): QueuePromptPreviewToken => ({
                 slotId: String(token?.slotId || '').trim(),
+                ...(String(token?.slotLabel || '').trim() ? { slotLabel: String(token.slotLabel).trim() } : {}),
+                ...(String(token?.slotType || '').trim() ? { slotType: token.slotType } : {}),
                 variantId: String(token?.variantId || '').trim(),
+                ...(String(token?.variantName || '').trim() ? { variantName: String(token.variantName).trim() } : {}),
+                ...(String(token?.text || '').trim() ? { text: String(token.text).trim() } : {}),
               }))
               .filter((token: QueuePromptPreviewToken) => token.slotId.length > 0 && token.variantId.length > 0)
             : [],

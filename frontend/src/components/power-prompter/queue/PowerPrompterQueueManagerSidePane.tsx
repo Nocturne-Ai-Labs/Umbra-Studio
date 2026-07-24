@@ -142,6 +142,7 @@ export function PowerPrompterQueueManagerSidePane({
     <>
         <div
           ref={queueManagerRightPaneRef}
+          data-umbra-queue-manager-side-pane=""
           className="min-h-0 grid gap-3"
           style={{
             gridTemplateRows: `minmax(220px, ${queueManagerPreviewSplit}fr) auto minmax(144px, ${1 - queueManagerPreviewSplit}fr)`,

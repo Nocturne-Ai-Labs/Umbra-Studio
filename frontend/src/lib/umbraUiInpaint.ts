@@ -290,6 +290,8 @@ export interface UmbraUiInpaintSubmitOptions {
   checkpointName: string;
   clipSkip: number;
   seed: number;
+  seedMode: 'fixed' | 'increment' | 'decrement' | 'randomize';
+  seedIncrement: 1 | 100 | 1000;
   steps: number;
   cfg: number;
   samplerName: string;

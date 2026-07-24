@@ -15,7 +15,11 @@ const defaultPublishRoot = fs.existsSync(path.join('D:', 'Development', 'Apps'))
 const publishBaseRoot = process.env.UMBRA_PUBLISH_ROOT
   ? path.resolve(process.env.UMBRA_PUBLISH_ROOT)
   : defaultPublishRoot;
-const publishRoot = path.join(publishBaseRoot, `v${version}`);
+const publishFolderVersion = String(process.env.UMBRA_PUBLISH_FOLDER_VERSION || version).trim();
+if (!/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(publishFolderVersion)) {
+  throw new Error(`[webapp-publish] Invalid UMBRA_PUBLISH_FOLDER_VERSION: ${publishFolderVersion}`);
+}
+const publishRoot = path.join(publishBaseRoot, `v${publishFolderVersion}`);
 const isCleanRelease = process.argv.includes('--clean-release')
   || process.env.UMBRA_WEBAPP_CLEAN_RELEASE === '1';
 const bundleDataForgeModels = process.env.UMBRA_BUNDLE_DATA_FORGE_MODELS !== '0';

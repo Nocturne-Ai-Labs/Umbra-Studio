@@ -17,6 +17,7 @@ import type {
   PowerPrompterQueueTraversalMode,
   PowerPrompterQueueTraversalRole,
   PowerPrompterSeedControlMode,
+  PowerPrompterSeedIncrement,
   PowerPrompterSettings,
   PowerPrompterStyleSeedMode,
   PowerPrompterVideoControls,
@@ -395,6 +396,7 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
     fps: 16,
     seed: 0,
     seedMode: 'fixed',
+    seedIncrement: 1,
     outputPrefix: 'video/Umbra',
     format: 'auto',
     codec: 'h264',
@@ -458,6 +460,7 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
   negativePrompt: '',
   seed: 0,
   controlAfterGenerate: 'fixed',
+  seedIncrement: 1,
   steps: 20,
   cfg: 7,
   clipSkip: 1,
@@ -697,6 +700,11 @@ function normalizeSeedControlMode(rawMode: unknown): PowerPrompterSeedControlMod
   return POWER_PROMPTER_SEED_CONTROL_OPTIONS.includes(mode) ? mode : 'fixed';
 }
 
+function normalizeSeedIncrement(rawIncrement: unknown): PowerPrompterSeedIncrement {
+  const increment = Number(rawIncrement);
+  return increment === 100 || increment === 1000 ? increment : 1;
+}
+
 function normalizeAspectRatio(rawAspectRatio: unknown): string {
   const candidate = String(rawAspectRatio || '').trim();
   if (!candidate) return DEFAULT_POWER_PROMPTER_ASPECT_RATIO;
@@ -831,6 +839,7 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
     fps: clampInteger(video.fps, family === 'ltx23' ? 25 : defaults.fps, 1, 120),
     seed: clampInteger(video.seed, defaults.seed, 0, MAX_JS_SAFE_SEED),
     seedMode: normalizeSeedControlMode(video.seedMode),
+    seedIncrement: normalizeSeedIncrement(video.seedIncrement),
     outputPrefix: String(video.outputPrefix || defaults.outputPrefix).trim().replace(/\\/g, '/').replace(/^\/+/, '') || defaults.outputPrefix,
     format: String(video.format || '').trim().toLowerCase() === 'mp4' ? 'mp4' as const : 'auto' as const,
     codec: String(video.codec || '').trim().toLowerCase() === 'h264' ? 'h264' as const : 'auto' as const,
@@ -1069,6 +1078,7 @@ export function normalizePowerPrompterGenerationControls(rawControls: unknown): 
     negativePrompt: String(controls.negativePrompt || '').replace(/\r\n/g, '\n'),
     seed: clampInteger(controls.seed, DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS.seed, 0, MAX_JS_SAFE_SEED),
     controlAfterGenerate: normalizeSeedControlMode(controls.controlAfterGenerate),
+    seedIncrement: normalizeSeedIncrement(controls.seedIncrement),
     steps: clampInteger(controls.steps, DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS.steps, 1, 10000),
     cfg: clampNumber(controls.cfg, DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS.cfg, 0, 100),
     clipSkip: clampInteger((controls as any).clipSkip ?? (controls as any).clip_skip, DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS.clipSkip, 1, 12),
