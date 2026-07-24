@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.11.1
+
+### Hotfix
+
+- Updated ComfyUI setup to install and update Umbra Nodes from the public
+  Nocturne AI Labs repository:
+  `https://github.com/Nocturne-Ai-Labs/Umbra-Nodes`.
+- Fixed published-build ComfyUI verification so Umbra UI support model setup
+  can find the packaged installer under `resources/app/scripts`.
+- Preserved the bundled Umbra Nodes fallback for offline or failed GitHub
+  installs, while preferring the latest public `main` branch during setup.
+- Updated requirements documentation to point at the new Umbra Nodes repository.
+
 ## v0.11.0
 
 ### Release Theme
