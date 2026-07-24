@@ -1250,7 +1250,7 @@ function resolveComfyExampleWorkflowSource(): string | null {
     return null;
 }
 
-const UMBRA_NODES_REPO = 'https://github.com/Minokai69/umbra-nodes.git';
+const UMBRA_NODES_REPO = 'https://github.com/Nocturne-Ai-Labs/Umbra-Nodes.git';
 
 function isCanvasWorkflowDocumentFile(filePath: string): boolean {
     try {
@@ -1264,7 +1264,7 @@ function isCanvasWorkflowDocumentFile(filePath: string): boolean {
     }
 }
 
-function syncUmbraNodesToComfy(nodesDir: string) {
+function syncBundledUmbraNodesToComfy(nodesDir: string) {
     const sourceUmbraNodes = resolveUmbraNodesSource();
     const targetUmbraNodes = join(nodesDir, 'Umbra-Nodes');
 
@@ -1310,6 +1310,40 @@ function syncUmbraNodesToComfy(nodesDir: string) {
     } catch {
         log(`${c.red}✗${c.reset}`, 'Failed to sync Umbra-Nodes');
     }
+}
+
+function syncUmbraNodesToComfy(nodesDir: string) {
+    const targetUmbraNodes = join(nodesDir, 'Umbra-Nodes');
+
+    try {
+        ensureDir(nodesDir);
+        if (hasUmbraNodesPayload(targetUmbraNodes) && existsSync(join(targetUmbraNodes, '.git'))) {
+            configureGitRepoForPortableUpdates(targetUmbraNodes);
+            execSync(`git remote set-url origin ${UMBRA_NODES_REPO}`, { cwd: targetUmbraNodes, stdio: 'ignore' });
+            execSync('git pull --ff-only origin main', { cwd: targetUmbraNodes, stdio: 'ignore' });
+            pruneDuplicateUmbraVhsCore(nodesDir, targetUmbraNodes);
+            log(`${c.green}OK${c.reset}`, 'Umbra-Nodes updated from public repository');
+            return;
+        }
+
+        if (existsSync(targetUmbraNodes)) {
+            rmSync(targetUmbraNodes, { recursive: true, force: true });
+        }
+
+        log('->', 'Installing Umbra-Nodes from public repository...');
+        execSync(`git clone ${UMBRA_NODES_REPO} Umbra-Nodes`, { cwd: nodesDir, stdio: 'ignore' });
+        configureGitRepoForPortableUpdates(targetUmbraNodes);
+        pruneDuplicateUmbraVhsCore(nodesDir, targetUmbraNodes);
+        if (hasUmbraNodesPayload(targetUmbraNodes)) {
+            log(`${c.green}OK${c.reset}`, 'Umbra-Nodes installed to ComfyUI custom_nodes');
+            return;
+        }
+        log(`${c.yellow}WARN${c.reset}`, 'Umbra-Nodes cloned, but required .py files were not found.');
+    } catch {
+        log(`${c.yellow}WARN${c.reset}`, 'Failed to install Umbra-Nodes from public repository; trying bundled fallback.');
+    }
+
+    syncBundledUmbraNodesToComfy(nodesDir);
 }
 
 function findVideoHelperSuiteDir(nodesDir: string): string | null {
@@ -2028,12 +2062,16 @@ function installUmbraUiSupportModels(comfyDir: string): boolean {
         return true;
     }
 
-    const scriptPath = join(ROOT_DIR, 'scripts', 'download-umbra-ui-models.mjs');
+    const scriptCandidates = [
+        join(ROOT_DIR, 'scripts', 'download-umbra-ui-models.mjs'),
+        join(ROOT_DIR, 'resources', 'app', 'scripts', 'download-umbra-ui-models.mjs')
+    ];
+    const scriptPath = scriptCandidates.find((candidate) => existsSync(candidate)) ?? scriptCandidates[0];
     if (!existsSync(scriptPath)) {
         return failWithVerify(
             'umbra-ui-model-installer-missing',
             'Umbra UI support model installer is missing.',
-            [`Expected script: ${scriptPath}`],
+            scriptCandidates.map((candidate) => `Expected script: ${candidate}`),
             ['Repair or update Umbra Studio, then retry ComfyUI setup.']
         );
     }

@@ -148,7 +148,7 @@ reconfigured.
 ## Managed Tools and Upstream Links
 
 - [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
-- [Umbra Nodes](https://github.com/Minokai69/umbra-nodes)
+- [Umbra Nodes](https://github.com/Nocturne-Ai-Labs/Umbra-Nodes)
 - [AI Toolkit](https://github.com/ostris/ai-toolkit)
 - [Tailscale](https://tailscale.com/)
 - [SageAttention](https://github.com/thu-ml/SageAttention)
