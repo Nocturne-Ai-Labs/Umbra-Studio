@@ -82,4 +82,44 @@ describe('Umbra portable replacement transaction', () => {
       rmSync(temporaryRoot, { recursive: true, force: true });
     }
   });
+
+  test('restores preserved data when the initial application-root rename never succeeded', () => {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'umbra-update-early-rollback-'));
+    try {
+      const runtimeRoot = join(temporaryRoot, 'Umbra Studio');
+      const workspaceRoot = join(temporaryRoot, '.update');
+      const preservedRoot = join(workspaceRoot, 'preserved');
+      mkdirSync(runtimeRoot, { recursive: true });
+      mkdirSync(join(preservedRoot, 'User', 'Config'), { recursive: true });
+      mkdirSync(join(preservedRoot, 'Tools', 'ComfyUI'), { recursive: true });
+      writeFileSync(join(runtimeRoot, 'old-app.txt'), 'old app');
+      writeFileSync(join(preservedRoot, 'User', 'Config', 'personal.json'), '{"kept":true}');
+      writeFileSync(join(preservedRoot, 'Tools', 'ComfyUI', 'model.txt'), 'user model');
+
+      const request = {
+        schemaVersion: 1,
+        runtimeRoot,
+        archivePath: join(workspaceRoot, 'release.zip'),
+        workspaceRoot,
+        requestPath: join(workspaceRoot, 'request.json'),
+        statePath: join(runtimeRoot, 'User', 'Config', 'app-update.json'),
+        serverPid: 0,
+        launcherPid: 0,
+        port: 8212,
+        bindHost: '127.0.0.1',
+        currentVersion: '0.20.3',
+        targetVersion: '0.20.4',
+        targetTag: 'v0.20.4',
+        packageName: 'release.zip',
+        createdAt: new Date(0).toISOString(),
+      } satisfies UmbraUpdateWorkerRequest;
+
+      rollbackSwap(request, join(temporaryRoot, '.missing-backup'), preservedRoot);
+      expect(readFileSync(join(runtimeRoot, 'old-app.txt'), 'utf8')).toBe('old app');
+      expect(readFileSync(join(runtimeRoot, 'User', 'Config', 'personal.json'), 'utf8')).toBe('{"kept":true}');
+      expect(readFileSync(join(runtimeRoot, 'Tools', 'ComfyUI', 'model.txt'), 'utf8')).toBe('user model');
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
 });

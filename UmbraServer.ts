@@ -75,7 +75,11 @@ import { ModelManagerStateDb } from './backend/ModelManagerStateDb';
 import { createDatasetArchive } from './backend/DatasetArchiveService';
 import { FirstRunService } from './backend/FirstRunService';
 import { UMBRA_MIGRATION_EXIT_CODE } from './shared/onboarding/firstRun';
-import { AppUpdateService, compareUmbraVersions } from './backend/AppUpdateService';
+import {
+  AppUpdateService,
+  compareUmbraVersions,
+  readUmbraAppVersion,
+} from './backend/AppUpdateService';
 import {
   UMBRA_UPDATE_EXIT_CODE,
   type UmbraReleaseBuild,
@@ -13252,16 +13256,8 @@ let cachedAppVersion: string | null = null;
 
 function getCurrentAppVersion(): string {
   if (cachedAppVersion) return cachedAppVersion;
-  try {
-    const packageJsonPath = join(ROOT_DIR, 'package.json');
-    const raw = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as Record<string, unknown>;
-    const version = String(raw.version || '').trim();
-    cachedAppVersion = version || '0.0.0';
-    return cachedAppVersion;
-  } catch {
-    cachedAppVersion = '0.0.0';
-    return cachedAppVersion;
-  }
+  cachedAppVersion = readUmbraAppVersion(ROOT_DIR, SOURCE_DIR);
+  return cachedAppVersion;
 }
 
 const appUpdateService = new AppUpdateService(ROOT_DIR, getCurrentAppVersion());

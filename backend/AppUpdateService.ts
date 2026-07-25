@@ -42,6 +42,24 @@ function normalizeVersion(value: unknown): string {
   return String(value || '').trim().replace(/^v/i, '');
 }
 
+export function readUmbraAppVersion(runtimeRoot: string, sourceRoot: string): string {
+  const candidates = [
+    join(resolve(runtimeRoot), 'package.json'),
+    join(resolve(sourceRoot), 'package.json'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (!existsSync(candidate)) continue;
+      const parsed = JSON.parse(readFileSync(candidate, 'utf8')) as Record<string, unknown>;
+      const version = normalizeVersion(parsed.version);
+      if (version) return version;
+    } catch {
+      // Try the next supported portable layout.
+    }
+  }
+  return '0.0.0';
+}
+
 function versionParts(value: string): number[] {
   return normalizeVersion(value)
     .split('.')

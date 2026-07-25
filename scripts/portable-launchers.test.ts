@@ -23,4 +23,11 @@ describe('portable launcher packaging', () => {
     expect(source).toContain("'webapp:build-update-worker'");
     expect(source).toContain("['Start-Umbra.bat', 'UmbraStudio.bat', 'UmbraStudio.exe']");
   });
+
+  test('releases the visible Windows terminal during an external update', () => {
+    const source = readFileSync(join(root, 'launcher', 'UmbraWebLauncher.ts'), 'utf8');
+    expect(source).toContain("spawn('cmd.exe', ['/d', '/c', executableName, ...args]");
+    expect(source).not.toContain("spawn('cmd.exe', ['/d', '/k', executableName, ...args]");
+    expect(source).toContain('await exitLauncher(0, false);');
+  });
 });

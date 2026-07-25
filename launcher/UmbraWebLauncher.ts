@@ -243,7 +243,7 @@ function relaunchInVisibleTerminal() {
   const args = Bun.argv.slice(2);
   const executableRoot = dirname(process.execPath);
   const executableName = process.execPath.slice(executableRoot.length + 1);
-  spawn('cmd.exe', ['/d', '/k', executableName, ...args], {
+  spawn('cmd.exe', ['/d', '/c', executableName, ...args], {
     cwd: executableRoot,
     detached: true,
     stdio: 'ignore',
@@ -272,8 +272,8 @@ async function pauseBeforeExitIfRequested() {
   });
 }
 
-async function exitLauncher(code: number): Promise<void> {
-  await pauseBeforeExitIfRequested();
+async function exitLauncher(code: number, pauseBeforeExit = true): Promise<void> {
+  if (pauseBeforeExit) await pauseBeforeExitIfRequested();
   process.exit(code);
 }
 
@@ -519,7 +519,7 @@ async function main() {
     writeLine(`[UmbraWebLauncher] Umbra server exited with code ${code}.`);
     if (code === UMBRA_UPDATE_EXIT_CODE) {
       writeLine('[UmbraWebLauncher] External updater has control. Closing this launcher so application files can be replaced.');
-      await exitLauncher(0);
+      await exitLauncher(0, false);
       return;
     }
     if (code !== UMBRA_MIGRATION_EXIT_CODE) {

@@ -232,6 +232,15 @@ export function rollbackSwap(
   backupRoot: string,
   preservedRoot: string,
 ) {
+  if (!existsSync(backupRoot)) {
+    if (!existsSync(request.runtimeRoot)) {
+      throw new Error('The original application root and its backup are both missing.');
+    }
+    moveIfPresent(join(preservedRoot, 'User'), join(request.runtimeRoot, 'User'));
+    moveIfPresent(join(preservedRoot, 'Tools'), join(request.runtimeRoot, 'Tools'));
+    return;
+  }
+
   const failedRoot = `${request.runtimeRoot}.failed-${Date.now()}`;
   if (existsSync(request.runtimeRoot)) {
     moveIfPresent(join(request.runtimeRoot, 'User'), join(preservedRoot, 'User'));

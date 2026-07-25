@@ -1,7 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import {
   compareUmbraVersions,
   normalizeGithubRelease,
+  readUmbraAppVersion,
 } from './AppUpdateService';
 
 function release(overrides: Record<string, unknown> = {}) {
@@ -37,6 +46,20 @@ describe('Umbra release versions', () => {
     expect(compareUmbraVersions('0.21.0', '0.20.99')).toBe(1);
     expect(compareUmbraVersions('1.0.0', '0.99.99')).toBe(1);
     expect(compareUmbraVersions('v0.20.1', '0.20.1')).toBe(0);
+  });
+
+  test('reads the packaged version from the source root when the portable root has no package file', () => {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'umbra-update-version-'));
+    try {
+      const runtimeRoot = join(temporaryRoot, 'Umbra Studio');
+      const sourceRoot = join(runtimeRoot, 'resources', 'app');
+      mkdirSync(sourceRoot, { recursive: true });
+      writeFileSync(join(sourceRoot, 'package.json'), JSON.stringify({ version: '0.20.4' }));
+
+      expect(readUmbraAppVersion(runtimeRoot, sourceRoot)).toBe('0.20.4');
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
   });
 });
 

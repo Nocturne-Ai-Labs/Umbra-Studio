@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.20.4
+
+### Windows Self-Updater Recovery Hotfix
+
+- Fixed the Windows launcher waiting for Enter after handing control to the
+  external updater.
+- Changed the visible Windows terminal wrapper to close with the launcher so it
+  cannot keep the Umbra Studio application root locked during replacement.
+- Fixed portable builds reporting their installed version as `0.0.0` by reading
+  the packaged application manifest from `resources/app`.
+- Hardened early rollback so `User/` and `Tools/` are restored immediately when
+  the original application-root rename cannot begin.
+- Added regression coverage for terminal release, packaged version detection,
+  early rollback, and preservation of user data and installed tools.
+
 ## v0.20.3
 
 ### Umbra Remote Onboarding Hotfix
