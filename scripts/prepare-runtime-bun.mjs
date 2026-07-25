@@ -94,18 +94,63 @@ function ensureWindowsBun() {
   }
 }
 
+function ensureLinuxBun() {
+  const targetPath = runtimeBunPath('linux');
+  if (bunMatchesRequestedVersion(targetPath)) return;
+
+  const systemBun = findSystemBun();
+  if (systemBun && fs.existsSync(systemBun) && bunMatchesRequestedVersion(systemBun)) {
+    copyExecutable(systemBun, targetPath);
+    console.log(`Runtime Bun prepared from matching system runtime: ${targetPath}`);
+    return;
+  }
+
+  const releasePath = BUNDLED_BUN_VERSION === 'canary'
+    ? 'canary'
+    : `bun-v${BUNDLED_BUN_VERSION}`;
+  const architecture = process.arch === 'arm64' ? 'aarch64' : 'x64';
+  const archiveName = `bun-linux-${architecture}`;
+  const zipUrl = `https://github.com/oven-sh/bun/releases/download/${releasePath}/${archiveName}.zip`;
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'umbra-runtime-bun-linux-'));
+  const zipPath = path.join(tempDir, `${archiveName}.zip`);
+
+  try {
+    downloadFile(zipUrl, zipPath);
+    const unzipRes = spawnSync('unzip', ['-o', zipPath, '-d', tempDir], { stdio: 'inherit' });
+    if (unzipRes.status !== 0) throw new Error(`Failed to extract ${archiveName}.zip`);
+
+    const candidates = [
+      path.join(tempDir, archiveName, 'bun'),
+      path.join(tempDir, 'bun'),
+    ];
+    const extractedBun = candidates.find((candidate) => fs.existsSync(candidate));
+    if (!extractedBun) throw new Error('Linux Bun executable not found in downloaded archive');
+    copyExecutable(extractedBun, targetPath);
+    if (!bunMatchesRequestedVersion(targetPath)) {
+      throw new Error(`Downloaded Linux Bun does not match requested version: ${BUNDLED_BUN_VERSION}`);
+    }
+    console.log(`Runtime Bun prepared from ${releasePath}: ${targetPath}`);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
 function ensureCurrentPlatformBun() {
   const targetPath = runtimeBunPath(platform);
-  if (fs.existsSync(targetPath)) return;
+  if (bunMatchesRequestedVersion(targetPath)) return;
 
   if (isWindows) {
     ensureWindowsBun();
     return;
   }
+  if (platform === 'linux') {
+    ensureLinuxBun();
+    return;
+  }
 
   const systemBun = findSystemBun();
-  if (!systemBun || !fs.existsSync(systemBun)) {
-    throw new Error('Could not locate Bun in PATH to prepare this platform runtime.');
+  if (!systemBun || !fs.existsSync(systemBun) || !bunMatchesRequestedVersion(systemBun)) {
+    throw new Error(`Could not locate Bun ${BUNDLED_BUN_VERSION} in PATH to prepare this platform runtime.`);
   }
   copyExecutable(systemBun, targetPath);
   console.log(`Runtime Bun prepared: ${targetPath}`);

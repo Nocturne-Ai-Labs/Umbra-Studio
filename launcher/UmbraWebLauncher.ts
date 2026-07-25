@@ -4,6 +4,10 @@ import { createServer } from 'node:net';
 import { dirname, join, relative, resolve } from 'node:path';
 import { platform } from 'node:os';
 import { buildListenerOrigin } from '../backend/remoteNetworkAddress';
+import {
+  UMBRA_MIGRATION_EXIT_CODE,
+  type UmbraFirstRunPhase,
+} from '../shared/onboarding/firstRun';
 
 type LauncherOptions = {
   noOpen: boolean;
@@ -350,6 +354,31 @@ function wireShutdown(child: ChildProcessWithoutNullStreams) {
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
+  return () => {
+    process.off('SIGINT', stop);
+    process.off('SIGTERM', stop);
+  };
+}
+
+function readOnboardingPhase(runtimeRoot: string): UmbraFirstRunPhase | '' {
+  const statePath = join(runtimeRoot, 'User', 'Config', 'onboarding.json');
+  try {
+    const parsed = JSON.parse(readFileSync(statePath, 'utf8')) as { phase?: unknown };
+    const phase = String(parsed.phase || '').trim();
+    return ['pending', 'migrating', 'complete', 'failed'].includes(phase)
+      ? phase as UmbraFirstRunPhase
+      : '';
+  } catch {
+    return '';
+  }
+}
+
+async function waitForExternalMigration(runtimeRoot: string): Promise<'complete' | 'failed'> {
+  while (true) {
+    const phase = readOnboardingPhase(runtimeRoot);
+    if (phase === 'complete' || phase === 'failed') return phase;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 500));
+  }
 }
 
 async function main() {
@@ -413,7 +442,6 @@ async function main() {
     return;
   }
 
-  const logStream = ensureLogStream(runtimeRoot);
   const cacheRoot = join(runtimeRoot, 'Runtime', 'Cache');
   const thumbnailCacheDir = join(cacheRoot, 'thumbnails');
   mkdirSync(thumbnailCacheDir, { recursive: true });
@@ -426,48 +454,78 @@ async function main() {
   writeLine(`[UmbraWebLauncher] Bind host: ${bindHost}`);
   writeLine(`[UmbraWebLauncher] Port: ${effectivePort}`);
 
-  const child = spawn(bunPath, [serverEntrypoint.path], {
-    cwd: sourceRoot,
-    env: {
-      ...process.env,
-      UMBRA_ROOT: runtimeRoot,
-      UMBRA_PORT: String(effectivePort),
-      UMBRA_HOST: bindHost,
-      UMBRA_CACHE_DIR: cacheRoot,
-      UMBRA_THUMBNAIL_CACHE_DIR: thumbnailCacheDir,
-      UMBRA_WEB_LAUNCHER: '1',
-      UMBRA_TERMINAL_MODE: TERMINAL_MODE_ENV,
-      UMBRA_DEV_MODE: launcherDevMode ? '1' : '0',
-      NODE_ENV: launcherDevMode ? (process.env.NODE_ENV || 'development') : 'production',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  wireShutdown(child);
-
-  child.stdout.on('data', (chunk) => {
-    logStream.write(chunk);
-    process.stdout.write(chunk);
-  });
-  child.stderr.on('data', (chunk) => {
-    logStream.write(chunk);
-    process.stderr.write(chunk);
-  });
-  child.on('exit', (code) => {
-    logStream.end();
-    void (async () => {
+  let browserOpened = options.noOpen;
+  let serverLaunchNumber = 0;
+  while (true) {
+    const serverLaunchStartedAt = Date.now();
+    const logStream = ensureLogStream(runtimeRoot);
+    if (serverLaunchNumber > 0) {
       writeLine('');
-      writeLine(`[UmbraWebLauncher] Umbra server exited with code ${code ?? 0}.`);
-      await exitLauncher(code ?? 0);
-    })();
-  });
+      writeLine('[UmbraWebLauncher] Restarting Umbra after migration...');
+    }
+    const child = spawn(bunPath, [serverEntrypoint.path], {
+      cwd: sourceRoot,
+      env: {
+        ...process.env,
+        UMBRA_ROOT: runtimeRoot,
+        UMBRA_PORT: String(effectivePort),
+        UMBRA_HOST: bindHost,
+        UMBRA_CACHE_DIR: cacheRoot,
+        UMBRA_THUMBNAIL_CACHE_DIR: thumbnailCacheDir,
+        UMBRA_WEB_LAUNCHER: '1',
+        UMBRA_TERMINAL_MODE: TERMINAL_MODE_ENV,
+        UMBRA_DEV_MODE: launcherDevMode ? '1' : '0',
+        NODE_ENV: launcherDevMode ? (process.env.NODE_ENV || 'development') : 'production',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
 
-  const ready = await waitForReady(localOrigin, READY_TIMEOUT_MS);
-  if (ready.ready) {
-    writeLine(`[UmbraWebLauncher] Ready in ${Date.now() - launchStartedAt}ms: ${appUrl}`);
-    if (!options.noOpen) openBrowser(appUrl);
-  } else {
-    console.warn(`[UmbraWebLauncher] Server is still starting after ${Date.now() - launchStartedAt}ms. Open ${appUrl} when ready.`);
+    const unwireShutdown = wireShutdown(child);
+    child.stdout.on('data', (chunk) => {
+      logStream.write(chunk);
+      process.stdout.write(chunk);
+    });
+    child.stderr.on('data', (chunk) => {
+      logStream.write(chunk);
+      process.stderr.write(chunk);
+    });
+    const exitPromise = new Promise<number>((resolveExit) => {
+      child.once('exit', (code) => {
+        unwireShutdown();
+        logStream.end();
+        resolveExit(code ?? 0);
+      });
+    });
+    const firstResult = await Promise.race([
+      waitForReady(localOrigin, READY_TIMEOUT_MS).then((ready) => ({ type: 'ready' as const, ready })),
+      exitPromise.then((code) => ({ type: 'exit' as const, code })),
+    ]);
+
+    if (firstResult.type === 'ready') {
+      if (firstResult.ready.ready) {
+        writeLine(`[UmbraWebLauncher] Ready in ${Date.now() - serverLaunchStartedAt}ms: ${appUrl}`);
+        if (!browserOpened) {
+          openBrowser(appUrl);
+          browserOpened = true;
+        }
+      } else {
+        console.warn(`[UmbraWebLauncher] Server is still starting after ${Date.now() - serverLaunchStartedAt}ms. Open ${appUrl} when ready.`);
+      }
+    }
+
+    const code = firstResult.type === 'exit' ? firstResult.code : await exitPromise;
+    writeLine('');
+    writeLine(`[UmbraWebLauncher] Umbra server exited with code ${code}.`);
+    if (code !== UMBRA_MIGRATION_EXIT_CODE) {
+      await exitLauncher(code);
+      return;
+    }
+
+    writeLine('[UmbraWebLauncher] External migration service is moving data.');
+    writeLine('[UmbraWebLauncher] Waiting for migration state; no port checks will run.');
+    const migrationPhase = await waitForExternalMigration(runtimeRoot);
+    writeLine(`[UmbraWebLauncher] Migration reported ${migrationPhase}.`);
+    serverLaunchNumber += 1;
   }
 }
 

@@ -12,6 +12,7 @@ import {
   type LocalServerHealth,
 } from '@/lib/localServerApps';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
+import { useI18n } from '@/i18n';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -36,6 +37,7 @@ export const LocalServersSidebarSection = React.memo(({
   auxButtonClass,
   onClosePhoneSidebar,
 }: LocalServersSidebarSectionProps) => {
+  const { t } = useI18n();
   const selectedLocalServerAppId = useStore((state) => state.selectedLocalServerAppId);
   const setSelectedLocalServerAppId = useStore((state) => state.setSelectedLocalServerAppId);
   const [apps, setApps] = useState<LocalServerApp[]>([]);
@@ -110,7 +112,7 @@ export const LocalServersSidebarSection = React.memo(({
         title="Open Local Servers"
       >
         <Globe2 size={14} />
-        <span>Local Servers</span>
+        <span>{t('nav.localServers')}</span>
         <Plus size={12} className="ml-auto text-zinc-500" />
       </button>
 

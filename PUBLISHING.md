@@ -16,7 +16,7 @@ requests a minor or major milestone, update `CHANGELOG.md`, and use that same
 version for Windows, Linux, the Git tag, and GitHub release.
 
 Use a no-bump build only when the user explicitly asks for a local no-bump
-build or an in-place update of an existing local version folder. GitHub Actions
+build or an in-place update of the existing portable root. GitHub Actions
 uses the no-bump packaging commands intentionally because tagged source has
 already been versioned; it must never bump once per platform.
 
@@ -31,12 +31,14 @@ models, generated outputs, and local app state.
 
 ## Environment Variables
 
-Set the publish root before running a build when the target is not the default.
+Set the exact `Umbra Studio` application root before running a build when the
+target is not the default. The packager no longer creates a nested version
+folder beneath this path.
 
 Windows:
 
 ```powershell
-$env:UMBRA_PUBLISH_ROOT="C:\Path\To\Umbra Builds"
+$env:UMBRA_PUBLISH_ROOT="C:\Path\To\Umbra Studio"
 ```
 
 Linux:
@@ -51,20 +53,22 @@ mixed up.
 
 ## Windows Portable Builds
 
-No-bump update of the current version folder:
+No-bump update of the current portable root:
 
 ```powershell
 bun run webapp:update-folder:no-bump
 ```
 
-Version-bump clean release:
+Version-bump local publish:
 
 ```powershell
 bun run webapp:update-folder
 ```
 
-The Windows publish script preserves `User/` and `Tools/` during no-bump
-updates. Clean releases create a fresh runtime skeleton.
+The Windows publish script preserves `User/` and `Tools/` during both local
+no-bump and version-bump publishes. GitHub Actions creates a clean runtime
+skeleton by supplying an explicit temporary package root and
+`UMBRA_WEBAPP_CLEAN_RELEASE=1`.
 
 Local portable builds bundle the pinned Data Forge models by default. Set
 `UMBRA_BUNDLE_DATA_FORGE_MODELS=0` only for a package that will ship with the
@@ -81,22 +85,22 @@ installing optional profiles.
 
 Run these commands on Linux.
 
-No-bump update of the current version folder:
+No-bump update of the current portable root:
 
 ```bash
 bun run linux:update-folder:no-bump
 ```
 
-Version-bump clean release:
+Version-bump local publish:
 
 ```bash
 bun run linux:update-folder
 ```
 
-The Linux folder build creates:
+The Linux folder build updates the exact application root:
 
 ```text
-<publish-root>/v<version>/
+<publish-root>/
 ```
 
 Important files:
@@ -113,6 +117,11 @@ Tools/
 `Runtime/Python311/` and `Runtime/PythonHelpers/venv/` are created after the
 appropriate managed-tool or Python-helper bootstrap. They are not copied from a
 developer machine into a clean GitHub release.
+
+Linux release packages bundle the official Bun canary runtime and currently
+require the `1.4.x` line. Runtime preparation reuses a matching system Bun or
+downloads the official `bun-linux-x64.zip`; the release workflow rejects a
+package that reports another Bun version.
 
 Python isolation expectations:
 

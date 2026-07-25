@@ -10,6 +10,8 @@ import * as esbuild from 'esbuild';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, '..');
+const appPackage = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const appVersion = String(appPackage.version || '0.0.0').trim();
 const frontendDir = path.join(root, 'frontend');
 const srcDir = path.join(frontendDir, 'src');
 const publicDir = path.join(root, 'public');
@@ -234,6 +236,7 @@ async function buildJavaScript() {
       'import.meta.env.PROD': JSON.stringify(!isDevelopmentBuild),
       'import.meta.env.MODE': JSON.stringify(isDevelopmentBuild ? 'development' : 'production'),
       'import.meta.env.UMBRA_DEV_MODE': JSON.stringify(isDevelopmentBuild),
+      'import.meta.env.UMBRA_APP_VERSION': JSON.stringify(appVersion),
     },
     publicPath: '/',
     entryNames: 'assets/[name]-[hash]',

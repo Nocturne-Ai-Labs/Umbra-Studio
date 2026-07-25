@@ -59,10 +59,13 @@ import {
   normalizeUmbraRemoteMode,
   type UmbraRemoteClientMode,
 } from '@/utils/hostOnly';
+import { useI18n } from '@/i18n';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+const UMBRA_APP_VERSION = String(import.meta.env.UMBRA_APP_VERSION || '').trim();
 
 function runAfterBootIdle(callback: () => void, delayMs = 2500): () => void {
   if (typeof window === 'undefined') return () => {};
@@ -267,6 +270,7 @@ interface ToolVersionCatalogResponse {
 }
 
 export const UmbraAppBar = () => {
+  const { t } = useI18n();
   const activeWorkspace = useStore((state) => state.activeWorkspace);
   const setActiveWorkspace = useStore((state) => state.setActiveWorkspace);
   const gpuUsage = useStore((state) => state.systemStats.gpuUsage);
@@ -547,24 +551,24 @@ export const UmbraAppBar = () => {
     setPhoneSidebarOpen((open) => !open);
   }, []);
   const phoneWorkspaceLabel = React.useMemo(() => {
-    if (activeWorkspace === 'powerprompter') return 'Power Prompter';
-    if (activeWorkspace === 'comfyui') return 'ComfyUI';
-    if (activeWorkspace === 'library') return 'Gallery';
-    if (activeWorkspace === 'umbraui') return 'Umbra UI';
-    if (activeWorkspace === 'modelmanager') return 'Model Manager';
-    if (activeWorkspace === 'imageinspector') return 'Image Inspector';
-    if (activeWorkspace === 'board') return 'Data Forge';
+    if (activeWorkspace === 'powerprompter') return t('nav.powerPrompter');
+    if (activeWorkspace === 'comfyui') return t('nav.comfyUi');
+    if (activeWorkspace === 'library') return t('nav.gallery');
+    if (activeWorkspace === 'umbraui') return t('nav.umbraUi');
+    if (activeWorkspace === 'modelmanager') return t('nav.modelManager');
+    if (activeWorkspace === 'imageinspector') return t('nav.imageInspector');
+    if (activeWorkspace === 'board') return t('nav.dataForge');
     return 'Umbra';
-  }, [activeWorkspace]);
+  }, [activeWorkspace, t]);
   const phoneMoreWorkspaceActive = !['umbraui', 'powerprompter', 'library', 'comfyui'].includes(activeWorkspace);
   const remoteModeOptions: Array<{
     id: UmbraRemoteClientMode;
     label: string;
     icon: typeof Laptop;
   }> = [
-    { id: 'desktop', label: 'Desktop', icon: Laptop },
-    { id: 'tablet', label: 'Tablet', icon: Tablet },
-    { id: 'phone', label: 'Mobile', icon: Smartphone },
+    { id: 'desktop', label: t('nav.desktop'), icon: Laptop },
+    { id: 'tablet', label: t('nav.tablet'), icon: Tablet },
+    { id: 'phone', label: t('nav.mobile'), icon: Smartphone },
   ];
   const renderRemoteSessionControls = (surface: 'sidebar' | 'phone') => (
     <section
@@ -1830,7 +1834,7 @@ export const UmbraAppBar = () => {
           aria-label="Open Umbra UI"
         >
           <PanelsTopLeft size={19} />
-          <span>Generate</span>
+          <span>{t('nav.generate')}</span>
         </button>
         <button
           type="button"
@@ -1839,7 +1843,7 @@ export const UmbraAppBar = () => {
           aria-label="Open Power Prompter"
         >
           <Notebook size={19} />
-          <span>Prompter</span>
+          <span>{t('nav.prompter')}</span>
         </button>
         <button
           type="button"
@@ -1848,7 +1852,7 @@ export const UmbraAppBar = () => {
           aria-label="Open Gallery"
         >
           <ImageIcon size={19} />
-          <span>Gallery</span>
+          <span>{t('nav.gallery')}</span>
         </button>
         <button
           type="button"
@@ -1867,7 +1871,7 @@ export const UmbraAppBar = () => {
           aria-expanded={phoneSidebarOpen}
         >
           <MoreHorizontal size={20} />
-          <span>More</span>
+          <span>{t('nav.more')}</span>
         </button>
       </nav>
     ) : null}
@@ -1890,7 +1894,7 @@ export const UmbraAppBar = () => {
         <div data-umbra-phone-sheet-header="">
           <div>
             <span>Umbra Studio</span>
-            <strong>More</strong>
+            <strong>{t('nav.more')}</strong>
           </div>
           <button
             type="button"
@@ -1907,7 +1911,7 @@ export const UmbraAppBar = () => {
             onClick={() => handleWorkspaceSelect('modelmanager')}
           >
             <Boxes size={20} />
-            <span>Model Manager</span>
+            <span>{t('nav.modelManager')}</span>
           </button>
           <button
             type="button"
@@ -1915,7 +1919,7 @@ export const UmbraAppBar = () => {
             onClick={() => handleWorkspaceSelect('imageinspector')}
           >
             <ScanSearch size={20} />
-            <span>Image Inspector</span>
+            <span>{t('nav.imageInspector')}</span>
           </button>
         </div>
         {isRemoteClient ? renderRemoteSessionControls('phone') : null}
@@ -1929,7 +1933,7 @@ export const UmbraAppBar = () => {
         >
           <Settings2 size={19} />
           <span>
-            <strong>Settings</strong>
+            <strong>{t('common.settings')}</strong>
             <small>Theme, storage, remote, and application preferences</small>
           </span>
           <ChevronDown size={16} className="-rotate-90" />
@@ -2018,7 +2022,7 @@ export const UmbraAppBar = () => {
               aria-label="Open global settings"
             >
               <Sliders size={13} />
-              <span className="text-[10px] font-semibold uppercase tracking-wide">Settings</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wide">{t('common.settings')}</span>
             </button>
 
             <button
@@ -2041,10 +2045,10 @@ export const UmbraAppBar = () => {
             <Popover className="relative">
               <PopoverButton className="h-8 rounded-md border border-white/10 bg-white/[0.04] text-zinc-300 hover:text-white hover:border-white/30 transition-all flex items-center justify-center gap-1 w-full">
                 <Plug size={13} />
-                <span className="text-[10px] font-semibold uppercase tracking-wide">Neural Hub</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wide">{t('nav.neuralHub')}</span>
               </PopoverButton>
               <PopoverPanel anchor="bottom start" className="z-[100] mt-2 w-[30rem] max-h-[80vh] overflow-y-auto glass-panel p-5 space-y-5 shadow-2xl border-white/10 backdrop-blur-3xl [&_button]:text-[10px] [&_button]:py-2 [&_button]:px-2.5 [&_button]:tracking-[0.08em] [&_button]:font-semibold [&_button]:rounded-md [&_.tool-status]:text-[10px] [&_.tool-name]:text-sm">
-                <div className="text-xs uppercase tracking-[0.2em] text-zinc-400 font-black border-b border-white/5 pb-3">Neural Hub Tools</div>
+                <div className="text-xs uppercase tracking-[0.2em] text-zinc-400 font-black border-b border-white/5 pb-3">{t('nav.neuralHubTools')}</div>
                 <button
                   onClick={handleRefreshBrowser}
                   className="w-full bg-white/10 hover:bg-white/20 text-zinc-100 transition-all flex items-center justify-center gap-2"
@@ -2348,7 +2352,7 @@ export const UmbraAppBar = () => {
               className={sidebarNavItemClass(activeWorkspace === 'umbraui', 'w-full')}
             >
               <PanelsTopLeft size={14} />
-              <span>Umbra UI</span>
+              <span>{t('nav.umbraUi')}</span>
             </button>
           ) : null}
 
@@ -2357,7 +2361,7 @@ export const UmbraAppBar = () => {
             className={sidebarNavItemClass(activeWorkspace === 'powerprompter', 'w-full')}
           >
             <Notebook size={14} />
-            <span>Power Prompter</span>
+            <span>{t('nav.powerPrompter')}</span>
           </button>
 
           <div>
@@ -2498,7 +2502,7 @@ export const UmbraAppBar = () => {
               className={sidebarNavItemClass(activeWorkspace === 'library', 'flex-1')}
             >
               <ImageIcon size={14} />
-              <span>Gallery</span>
+              <span>{t('nav.gallery')}</span>
             </button>
             {!isPhoneRemote ? (
               <button
@@ -2520,7 +2524,7 @@ export const UmbraAppBar = () => {
                   className={sidebarNavItemClass(activeWorkspace === 'modelmanager', 'w-full')}
                 >
                   <Boxes size={14} />
-                  <span>Model Manager</span>
+                  <span>{t('nav.modelManager')}</span>
                 </button>
               </DroppableNavItem>
 
@@ -2530,7 +2534,7 @@ export const UmbraAppBar = () => {
                   className={sidebarNavItemClass(activeWorkspace === 'imageinspector', 'w-full')}
                 >
                   <ScanSearch size={14} />
-                  <span>Image Inspector</span>
+                  <span>{t('nav.imageInspector')}</span>
                 </button>
               </DroppableNavItem>
             </>
@@ -2541,7 +2545,7 @@ export const UmbraAppBar = () => {
             className={sidebarNavItemClass(activeWorkspace === 'board', 'w-full')}
           >
             <Anvil size={14} />
-            <span>Data Forge</span>
+            <span>{t('nav.dataForge')}</span>
           </button>
         ) : null}
 
@@ -2570,6 +2574,17 @@ export const UmbraAppBar = () => {
         "umbra-sidebar-divider border-t p-2",
         isSidebarExpanded ? "border-white/10" : "border-transparent p-1"
       )}>
+        {UMBRA_APP_VERSION ? (
+          <div
+            className={cn(
+              "select-none pb-1 font-mono text-[9px] font-bold tracking-[0.12em] text-zinc-600",
+              isSidebarExpanded ? "px-2 text-left" : "px-0 text-center text-[8px]"
+            )}
+            title={`Umbra Studio v${UMBRA_APP_VERSION}`}
+          >
+            v{UMBRA_APP_VERSION}
+          </div>
+        ) : null}
         <button
           onClick={handleSidebarToggle}
           className={cn(

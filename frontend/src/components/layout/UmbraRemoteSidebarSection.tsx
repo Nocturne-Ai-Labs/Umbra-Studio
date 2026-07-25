@@ -1,4 +1,5 @@
 import { Wifi } from 'lucide-react';
+import { useI18n } from '@/i18n';
 
 type UmbraRemoteSidebarSectionProps = {
   active: boolean;
@@ -6,6 +7,7 @@ type UmbraRemoteSidebarSectionProps = {
 };
 
 export function UmbraRemoteSidebarSection({ active, onSelect }: UmbraRemoteSidebarSectionProps) {
+  const { t } = useI18n();
   return (
     <div className="umbra-sidebar-section bg-black/10 rounded-xl border border-transparent p-2 space-y-1">
       <div className="flex items-center gap-3 px-1 pb-1 text-zinc-400">
@@ -23,7 +25,7 @@ export function UmbraRemoteSidebarSection({ active, onSelect }: UmbraRemoteSideb
         ].join(' ')}
       >
         <Wifi size={14} />
-        <span>Umbra Remote</span>
+        <span>{t('nav.umbraRemote')}</span>
       </button>
     </div>
   );

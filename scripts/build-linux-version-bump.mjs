@@ -13,4 +13,4 @@ function run(command, args, label) {
 }
 
 run('node', ['scripts/bump-webapp-version.mjs'], 'version bump');
-run('node', ['scripts/build-linux-folder.mjs', '--clean-release'], 'clean Linux publish');
+run('node', ['scripts/build-linux-folder.mjs'], 'Linux publish');

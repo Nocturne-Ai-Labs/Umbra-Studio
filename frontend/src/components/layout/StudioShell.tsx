@@ -32,9 +32,11 @@ import {
 import {
   DragDropProvider,
 } from '@/lib/dnd';
+import { useI18n } from '@/i18n';
 
 export const StudioShell = ({ children }: { children: React.ReactNode }) => {
   useComponentDebug('StudioShell');
+  const { t } = useI18n();
 
   const { cursorEffects, bootAnimation, bootGraphEnabled, hasHydrated } = useThemeStore();
   const [isBooted, setIsBooted] = useState(false);
@@ -128,14 +130,14 @@ export const StudioShell = ({ children }: { children: React.ReactNode }) => {
   }, [hasHydrated, isBooted]);
 
   const bootHoldStatus = useMemo(() => {
-    if (!bootStatusChecked) return 'CHECKING SERVICES';
-    if (!bootFilesystemWarmComplete) return 'WARMING FILESYSTEM';
+    if (!bootStatusChecked) return t('boot.checkingServices');
+    if (!bootFilesystemWarmComplete) return t('boot.warmingFilesystem');
     if (activeAutoLaunchTargets.length > 0) {
       return `WARMING ${activeAutoLaunchTargets.map((target) => target.label.toUpperCase()).join(' + ')}`;
     }
-    if (autoLaunchTargets.length > 0 && !bootMinElapsed) return 'WAITING FOR STARTUP SERVICES';
-    return 'LOADING INTERFACES';
-  }, [activeAutoLaunchTargets, autoLaunchTargets.length, bootFilesystemWarmComplete, bootMinElapsed, bootStatusChecked]);
+    if (autoLaunchTargets.length > 0 && !bootMinElapsed) return t('boot.waitingStartup');
+    return t('boot.loadingInterfaces');
+  }, [activeAutoLaunchTargets, autoLaunchTargets.length, bootFilesystemWarmComplete, bootMinElapsed, bootStatusChecked, t]);
 
   const shouldHoldBootScreen = !bootMaxElapsed && (
     !bootMinElapsed ||

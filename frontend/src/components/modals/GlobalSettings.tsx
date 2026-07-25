@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Sliders,
@@ -31,6 +31,7 @@ import {
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import {
   AppSettings,
+  APP_LANGUAGES,
   COMFY_ATTENTION_BACKENDS,
   COMFY_SECURITY_LEVELS,
   DEFAULT_APP_SETTINGS,
@@ -41,6 +42,7 @@ import {
   resetAppSettings,
   saveAppSettings,
 } from '@/lib/appSettings';
+import { useI18n } from '@/i18n';
 
 interface GlobalSettingsProps {
   isOpen: boolean;
@@ -84,7 +86,9 @@ function parseThemeStorageSnapshot(): Record<string, unknown> | null {
 }
 
 export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
+  const { t } = useI18n();
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
+  const contentRef = useRef<HTMLDivElement>(null);
   useComponentDebug('GlobalSettings', { activeSection, isOpen });
   const [settings, setSettings] = useState<Settings>({ ...defaultSettings });
 
@@ -93,6 +97,11 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
     if (!isOpen) return;
     loadSettings().catch(() => {});
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    contentRef.current?.scrollTo({ top: 0 });
+  }, [activeSection, isOpen]);
 
   // Handle ESC key
   useEffect(() => {
@@ -357,12 +366,12 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
   };
 
   const sections = [
-    { id: 'general' as SettingsSection, name: 'General', icon: Sliders },
-    { id: 'storage' as SettingsSection, name: 'Storage', icon: Save },
-    { id: 'theme' as SettingsSection, name: 'Theme Studio', icon: Palette },
-    { id: 'comfyui' as SettingsSection, name: 'ComfyUI', icon: Wand2 },
-    { id: 'system' as SettingsSection, name: 'System Monitor', icon: Bolt },
-    { id: 'advanced' as SettingsSection, name: 'Advanced', icon: Code },
+    { id: 'general' as SettingsSection, name: t('settings.general'), icon: Sliders },
+    { id: 'storage' as SettingsSection, name: t('settings.storage'), icon: Save },
+    { id: 'theme' as SettingsSection, name: t('settings.theme'), icon: Palette },
+    { id: 'comfyui' as SettingsSection, name: t('settings.comfyUi'), icon: Wand2 },
+    { id: 'system' as SettingsSection, name: t('settings.system'), icon: Bolt },
+    { id: 'advanced' as SettingsSection, name: t('settings.advanced'), icon: Code },
   ];
 
   const [mounted, setMounted] = useState(false);
@@ -391,7 +400,7 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
             <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--umbra-border)] flex-shrink-0 bg-black/20">
               <div className="flex items-center gap-3">
                 <SettingsIcon className="text-[var(--umbra-accent)]" size={20} />
-                <h2 className="text-xl font-semibold text-white">Umbra Studio Settings</h2>
+                <h2 className="text-xl font-semibold text-white">{t('settings.title')}</h2>
               </div>
               <button
                 onClick={onClose}
@@ -426,7 +435,11 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
               </div>
 
               {/* Content */}
-              <div data-umbra-settings-content="" className="flex-1 overflow-y-auto custom-scrollbar p-6">
+              <div
+                ref={contentRef}
+                data-umbra-settings-content=""
+                className="flex-1 overflow-y-auto custom-scrollbar p-6"
+              >
                 {activeSection === 'general' && (
                   <GeneralSettings settings={settings} updateSetting={updateSetting} />
                 )}
@@ -462,21 +475,21 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
                 className="glass-panel px-4 py-2 bg-white/5 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 text-sm font-medium transition-all flex items-center gap-2 hover:scale-105"
               >
                 <RotateCcw size={14} />
-                Reset to Defaults
+                {t('settings.reset')}
               </button>
               <div className="flex gap-2">
                 <button
                   onClick={onClose}
                   className="glass-panel px-4 py-2 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white text-sm font-medium transition-all hover:scale-105"
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   onClick={saveSettings}
                   className="glass-panel px-4 py-2 bg-[var(--umbra-accent)] hover:brightness-110 text-white text-sm font-medium transition-all flex items-center gap-2 hover:scale-105"
                 >
                   <Save size={14} />
-                  Save Settings
+                  {t('settings.save')}
                 </button>
               </div>
             </div>
@@ -561,16 +574,31 @@ const SettingCheckbox = ({ checked, onChange, label, description }: any) => (
 // Section Components
 const GeneralSettings = ({ settings, updateSetting }: any) => {
   useComponentDebug('GeneralSettings');
+  const { t } = useI18n();
   return (
     <div className="space-y-6">
-      <h3 className="text-lg font-bold text-white uppercase">General Settings</h3>
+      <h3 className="text-lg font-bold text-white uppercase">{t('settings.generalTitle')}</h3>
 
-      <SettingGroup label="Preferences">
+      <SettingGroup label={t('language.current')}>
+        <div className="glass-panel p-4 bg-black/20 space-y-2">
+          <SettingSelect
+            value={settings['ui.language']}
+            onChange={(value: string) => updateSetting('ui.language', value)}
+            options={APP_LANGUAGES.map((value) => ({
+              value,
+              label: value === 'ja' ? t('language.japanese') : t('language.english'),
+            }))}
+          />
+          <SettingHint>{t('language.description')}</SettingHint>
+        </div>
+      </SettingGroup>
+
+      <SettingGroup label={t('settings.preferences')}>
         <div className="space-y-2">
           <SettingCheckbox
             checked={settings.enableToasts}
             onChange={(val: boolean) => updateSetting('enableToasts', val)}
-            label="Show toast notifications"
+            label={t('settings.showToasts')}
           />
         </div>
       </SettingGroup>
@@ -1285,6 +1313,15 @@ const AdvancedSettings = ({ settings, updateSetting, exportSettings, importSetti
   return (
     <div className="space-y-6">
       <h3 className="text-lg font-bold text-white uppercase">Advanced Settings</h3>
+
+      <SettingGroup label="Startup">
+        <SettingCheckbox
+          checked={settings['advanced.showSetupWizardOnLaunch']}
+          onChange={(val: boolean) => updateSetting('advanced.showSetupWizardOnLaunch', val)}
+          label="Show setup wizard on every launch"
+          description="Runs setup once per Umbra server launch. Reloading the browser will not show it again."
+        />
+      </SettingGroup>
 
       <SettingGroup label="Diagnostics">
         <SettingCheckbox

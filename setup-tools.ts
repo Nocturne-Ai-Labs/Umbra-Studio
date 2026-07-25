@@ -1215,7 +1215,7 @@ function hasUmbraNodesPayload(dirPath: string): boolean {
 
 const UMBRA_NODES_REPO = 'https://github.com/Nocturne-Ai-Labs/Umbra-Nodes.git';
 
-function syncUmbraNodesToComfy(nodesDir: string) {
+function syncUmbraNodesToComfy(nodesDir: string): boolean {
     const targetUmbraNodes = join(nodesDir, 'Umbra-Nodes');
 
     try {
@@ -1226,7 +1226,7 @@ function syncUmbraNodesToComfy(nodesDir: string) {
             execSync('git pull --ff-only origin main', { cwd: targetUmbraNodes, stdio: 'ignore' });
             pruneDuplicateUmbraVhsCore(nodesDir, targetUmbraNodes);
             log(`${c.green}OK${c.reset}`, 'Umbra-Nodes updated from public repository');
-            return;
+            return true;
         }
 
         if (existsSync(targetUmbraNodes)) {
@@ -1239,12 +1239,13 @@ function syncUmbraNodesToComfy(nodesDir: string) {
         pruneDuplicateUmbraVhsCore(nodesDir, targetUmbraNodes);
         if (hasUmbraNodesPayload(targetUmbraNodes)) {
             log(`${c.green}OK${c.reset}`, 'Umbra-Nodes installed to ComfyUI custom_nodes');
-            return;
+            return true;
         }
         log(`${c.yellow}WARN${c.reset}`, 'Umbra-Nodes cloned, but required .py files were not found.');
     } catch {
         log(`${c.red}ERROR${c.reset}`, 'Failed to install Umbra-Nodes from the public repository.');
     }
+    return false;
 }
 
 function findVideoHelperSuiteDir(nodesDir: string): string | null {
@@ -2689,7 +2690,8 @@ async function main() {
     const arg = process.argv[2]?.toLowerCase();
     const pythonNotRequiredActions = new Set([
         'shortcuts',
-        'umbra-ui-models'
+        'umbra-ui-models',
+        'umbra-nodes'
     ]);
 
     if (!runPlatformPreflight()) {
@@ -2731,6 +2733,25 @@ async function main() {
     } else if (arg === 'shortcuts') {
         createToolRootShortcuts();
         log(`${c.green}âœ“${c.reset}`, 'Tool shortcuts repaired');
+    } else if (arg === 'umbra-nodes') {
+        const comfyDir = findToolPath(CONFIG.comfyui.search);
+        if (!comfyDir) {
+            exitWithVerifyFailure(
+                'comfyui-not-found',
+                'ComfyUI install not found for Umbra-Nodes setup.',
+                [`Expected directory under: ${TOOLS_DIR}`],
+                ['Install or migrate ComfyUI first.']
+            );
+        }
+        const nodesDir = join(comfyDir, 'custom_nodes');
+        if (!syncUmbraNodesToComfy(nodesDir)) {
+            exitWithVerifyFailure(
+                'umbra-nodes-sync-failed',
+                'Umbra-Nodes could not be installed from the public repository.',
+                [`Target directory: ${join(nodesDir, 'Umbra-Nodes')}`],
+                ['Check the network connection and retry ComfyUI custom-node setup.']
+            );
+        }
     } else if (arg === 'comfy-nodes') {
         const comfyDir = findToolPath(CONFIG.comfyui.search);
         if (!comfyDir) {

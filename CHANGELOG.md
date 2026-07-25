@@ -1,5 +1,153 @@
 # Changelog
 
+## v0.20.0
+
+### Release Theme
+
+Umbra Studio `0.20.0` is the portable-workspace milestone. It brings the
+first-run experience, migration lifecycle, localization foundation, release
+updater, versionless install layout, mobile and remote work, and the latest
+generation tooling into one clean release line.
+
+This release includes the unreleased work developed after the public
+`0.11.2` build. Existing users can migrate their `User` and `Tools` data from
+an older portable build during first-run setup.
+
+### First-Run Setup And Migration
+
+- Added a first-run setup wizard with language selection and previous-build
+  migration.
+- Added English and Japanese localization foundations for onboarding, the
+  application shell, navigation, boot status, and core Global Settings.
+- Added a persistent language selector in Global Settings so the chosen
+  language can be changed after setup.
+- Added an Advanced setting to show the startup wizard again without flashing
+  the wizard during ordinary reloads.
+- Moved migration into a dedicated external Bun worker so the Umbra server and
+  managed services can shut down before files move.
+- Migration now moves `User` and `Tools` data instead of duplicating large
+  models, reports file and byte progress, rewrites stored paths, and returns
+  control to the launcher for restart.
+- Added atomic migration request/state files, recovery logging, source-build
+  validation, and explicit failure reporting under `Runtime/Migration`.
+- Excluded stale Umbra Nodes copies during migration and reinstall the latest
+  public Umbra Nodes source into migrated ComfyUI installations.
+
+### Portable Layout And Updates
+
+- Removed nested version folders from portable installs. `Umbra Studio` is now
+  the stable application root on Windows and Linux.
+- Added the current Umbra Studio version above the sidebar collapse control.
+- Updated local no-bump and version-bump packaging to preserve `User` and
+  `Tools` in the stable application root.
+- Added a release-feed updater mode that compares semantic versions, downloads
+  the platform package into protected staging, verifies an optional SHA-256,
+  records recovery metadata, and preserves `User` and `Tools`.
+- Kept source-checkout updating available for development installations.
+- Expanded first-run discovery so legacy `v0.x` portable folders remain valid
+  migration sources.
+
+### Umbra Remote And Mobile
+
+- Reworked phone layouts across Umbra UI, Power Prompter, Gallery, Model
+  Manager, queue editing, presets, and remote administration.
+- Added touch-sized controls, compact modal selectors, workspace-specific
+  mobile navigation, and dedicated controls/results surfaces for generation.
+- Removed desktop-only Data Forge, embedded ComfyUI, and Local Servers
+  workspaces from the phone interface while retaining ComfyUI install, update,
+  and launch controls.
+- Added authenticated remote logout, trusted-device removal, and persistent
+  Desktop, Tablet, and Mobile presentation selection.
+- Corrected Tailscale online, Serve, restart-required, bind-address, IPv4, and
+  IPv6 reporting.
+- Reduced remote Gallery transfer overhead and preserved active workspace,
+  folder, Power Prompter, and Umbra UI state across browser suspension or
+  reload.
+
+### Gallery And Media
+
+- Removed Gallery pagination on desktop, tablet, and phone while retaining
+  virtualized rendering.
+- Fixed Media Viewer navigation so lazy loading no longer wraps at the first
+  loaded window in large folders.
+- Added nearby-media preloading and swipe transition feedback for mobile.
+- Added consistent Opened-folder badges across presentation modes.
+- Hardened thumbnail and full-media cache revisioning after deletion,
+  regeneration, inpainting, IMG2IMG replacement, and source replacement.
+
+### Umbra UI And Power Prompter
+
+- Unified Power Prompter and Umbra UI around shared model-family pipeline
+  definitions and generation controls.
+- Added model-aware hires fix, ordered detailer stages, optional output
+  upscaling, and compatible sampling/resource controls to Power Prompter.
+- Preserved segmented Power Prompter card prompts when sending work to Umbra
+  UI instead of flattening every card into one field.
+- Added Umbra Power Prompter identity metadata (`ppuid`) so compatible images
+  can restore segmented prompts, generation controls, model family,
+  dimensions, and seed.
+- Added Gallery and Filmstrip actions to restore Power Prompter state or send
+  compatible generation parameters to Umbra UI.
+- Added consistent seed increment choices of `+1`, `+100`, and `+1000` across
+  TXT2IMG, IMG2IMG, Inpaint, and Video.
+- Added configurable Agent Mode providers for Hermes, Ollama, LM Studio, and
+  OpenAI-compatible local endpoints.
+
+### Data Forge, Models, And Managed Tools
+
+- Kept Data Forge dataset creation, tagging, captioning, model installation,
+  and AI Toolkit integration inside the portable workspace.
+- Added packaged manifests and platform installers for Data Forge captioning
+  models and Umbra UI support models without committing personal model data.
+- Kept AI Toolkit and ComfyUI as managed installations with their own
+  environments and user-controlled model libraries.
+- Made the public
+  [Umbra Nodes repository](https://github.com/Nocturne-Ai-Labs/Umbra-Nodes)
+  the single installation and update source for managed ComfyUI.
+- Removed bundled Umbra Nodes payloads and duplicate example workflows from
+  portable packages.
+
+### Linux And Release Engineering
+
+- Updated Linux portable packages to the official Bun `1.4.0` canary runtime
+  and added a release gate that rejects older bundled Bun versions.
+- Verified the versionless Linux package lifecycle in Docker, including
+  executable permissions, runtime dependencies, clean packaging, and
+  preservation of existing `User` and `Tools` data during in-place updates.
+- Updated the clean repository builder and release workflow for versionless
+  Windows and Linux archives.
+- Kept generated checkpoints, LoRAs, VAEs, text encoders, personal datasets,
+  API keys, outputs, installed tools, and other user runtime state out of the
+  public repository and release source.
+
+## v0.11.3
+
+### First-Run Setup And Migration
+
+- Added a first-run setup wizard with English and Japanese language selection.
+- Added a portable-build migration flow that can inspect an older Umbra Studio
+  folder and move/merge its `User` and `Tools` data into the current build
+  without duplicating same-drive model files.
+- Migrations now run in a separate worker after Umbra Studio and its managed
+  services shut down, then relaunch the destination build when complete.
+- Excluded all existing `Umbra-Nodes` folders from migration and reinstall the
+  latest public Umbra Nodes version into migrated ComfyUI installations.
+- Added atomic migration state, source-build validation, progress recovery, and
+  migration logging under `Runtime/Migration`.
+- Simplified migration to one external worker with one shutdown and one
+  launcher-owned restart. The worker does not bind Umbra's port or run a port
+  probe; the original launcher watches the migration state file, restarts the
+  server in place, and lets the browser reconnect after it returns.
+
+### Japanese Localization
+
+- Added the shared localization provider, persistent `ui.language` setting, and
+  Japanese translations for first-run setup, the application shell, primary
+  navigation, boot status, and core Global Settings controls.
+- Added an in-app language selector so users can change languages after setup.
+- Added contributor documentation for extending the translation catalog and
+  preserving the external migration lifecycle.
+
 ## v0.11.2
 
 ### Release Theme

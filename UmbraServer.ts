@@ -10,7 +10,7 @@ import { join, basename, extname, relative, dirname, resolve, isAbsolute } from 
 import { createReadStream, createWriteStream, existsSync, statSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, type Dirent } from 'fs';
 import * as fs from 'fs/promises';
 import * as os from 'os';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { createHash, randomBytes, pbkdf2Sync, timingSafeEqual } from 'crypto';
 import { gzip } from 'zlib';
 import { promisify } from 'util';
@@ -73,6 +73,8 @@ import { ModelIndexWorkerService, type ModelRootDescriptor } from './backend/Mod
 import { ModelDownloadWorkerService } from './backend/ModelDownloadWorkerService';
 import { ModelManagerStateDb } from './backend/ModelManagerStateDb';
 import { createDatasetArchive } from './backend/DatasetArchiveService';
+import { FirstRunService } from './backend/FirstRunService';
+import { UMBRA_MIGRATION_EXIT_CODE } from './shared/onboarding/firstRun';
 import {
   deriveUmbraUiInpaintCanvasCapabilities,
   deriveUmbraUiTxt2ImgCapabilities,
@@ -134,6 +136,8 @@ const PUBLIC_DIR = existsSync(ROOT_PUBLIC_DIR) ? ROOT_PUBLIC_DIR : SOURCE_PUBLIC
 const USER_DIR = join(ROOT_DIR, 'User');
 const REMOTE_BOOTSTRAP_SETTINGS_PATH = join(USER_DIR, 'Config', 'UmbraRemote', 'settings.json');
 const IS_UMBRA_DEV_MODE = process.env.UMBRA_DEV_MODE === '1';
+const firstRunService = new FirstRunService(ROOT_DIR, SOURCE_DIR);
+const UMBRA_SERVER_LAUNCH_ID = randomBytes(16).toString('hex');
 
 function clampPort(value: unknown, fallback = 8212): number {
   const numeric = Math.floor(Number(value));
@@ -178,6 +182,27 @@ const CONFIG_PATH = join(USER_DIR, 'Config', 'api-keys.json');
 const LEGACY_CONFIG_PATH = join(USER_DIR, 'config', 'api-keys.json');
 const COMFY_OUTPUT_ROOT = 'Tools/ComfyUI/output';
 const LEGACY_OUTPUT_ROOT = 'User/Outputs';
+
+function launchFirstRunMigrationWorker(requestPath: string) {
+  const workerPath = join(SOURCE_DIR, 'launcher', 'UmbraMigrationWorker.ts');
+  if (!existsSync(workerPath)) {
+    throw new Error('The external Umbra migration worker is missing from this build.');
+  }
+  const workerArgs = [workerPath, '--request', requestPath];
+  const workerEnv = {
+    ...process.env,
+    UMBRA_ROOT: ROOT_DIR,
+    UMBRA_SOURCE_ROOT: SOURCE_DIR,
+  };
+  const worker = spawn(process.execPath, workerArgs, {
+    cwd: SOURCE_DIR,
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: false,
+    env: workerEnv,
+  });
+  worker.unref();
+}
 const TRASH_ROOT = 'User/Trash';
 const COMFY_PROXY_TIMEOUT_MS = 4000;
 const COMFY_PROXY_WEBSOCKET_ENABLED = process.env.UMBRA_ENABLE_COMFY_WS_PROXY !== '0';
@@ -11603,6 +11628,7 @@ $pids | Sort-Object -Unique | ForEach-Object { Write-Output $_ }
   ], {
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 1500,
   });
   return String(result.stdout || '')
     .split(/\r?\n/)
@@ -30873,6 +30899,94 @@ const server = Bun.serve<any>({
         }
       }
 
+      if (path === '/api/onboarding/status' && method === 'GET') {
+        const state = firstRunService.readState();
+        const hostActionsAvailable = isHostRequest(req, url, server);
+        return json({
+          success: true,
+          required: state.phase !== 'complete',
+          state,
+          hostActionsAvailable,
+          forceSetupOnLaunch: hostActionsAvailable
+            && settingsManager.getAppSettings()['advanced.showSetupWizardOnLaunch'] === true,
+          launchId: UMBRA_SERVER_LAUNCH_ID,
+          runtimeRoot: hostActionsAvailable ? ROOT_DIR : '',
+        });
+      }
+
+      if (path === '/api/onboarding/browse-source' && method === 'POST') {
+        if (!isHostRequest(req, url, server)) {
+          return json({ success: false, error: 'Migration can only be started from the Umbra host PC.' }, 403);
+        }
+        try {
+          const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+          const startDir = String(body.startDir || dirname(ROOT_DIR)).trim() || dirname(ROOT_DIR);
+          const selectedPath = await runNativeFolderPicker(startDir, 'Select Previous Umbra Studio Folder');
+          if (!selectedPath) return json({ success: true, canceled: true });
+          return json({
+            success: true,
+            source: firstRunService.inspectMigrationSource(selectedPath),
+          });
+        } catch (error: any) {
+          return json({ success: false, error: error?.message || 'Failed to select a previous Umbra Studio build.' }, 400);
+        }
+      }
+
+      if (path === '/api/onboarding/inspect-source' && method === 'POST') {
+        if (!isHostRequest(req, url, server)) {
+          return json({ success: false, error: 'Migration can only be started from the Umbra host PC.' }, 403);
+        }
+        try {
+          const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+          return json({
+            success: true,
+            source: firstRunService.inspectMigrationSource(body.sourceRoot),
+          });
+        } catch (error: any) {
+          return json({ success: false, error: error?.message || 'The previous Umbra Studio folder is invalid.' }, 400);
+        }
+      }
+
+      if (path === '/api/onboarding/complete' && method === 'POST') {
+        if (!isHostRequest(req, url, server)) {
+          return json({ success: false, error: 'First-time setup can only be completed from the Umbra host PC.' }, 403);
+        }
+        try {
+          const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+          const state = firstRunService.completeFreshStart(body.language);
+          settingsManager.updateAppSettings({ 'ui.language': state.language });
+          return json({ success: true, state });
+        } catch (error: any) {
+          return json({ success: false, error: error?.message || 'Failed to complete first-time setup.' }, 500);
+        }
+      }
+
+      if (path === '/api/onboarding/migrate' && method === 'POST') {
+        if (!isHostRequest(req, url, server)) {
+          return json({ success: false, error: 'Migration can only be started from the Umbra host PC.' }, 403);
+        }
+        try {
+          const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+          const request = firstRunService.createMigrationRequest(
+            body.sourceRoot,
+            body.language,
+            process.pid,
+            process.env.UMBRA_WEB_LAUNCHER === '1' ? 'launcher' : 'worker',
+          );
+          launchFirstRunMigrationWorker(request.requestPath);
+          setTimeout(() => {
+            void gracefulShutdown('migration');
+          }, 350);
+          return json({
+            success: true,
+            restarting: true,
+            state: firstRunService.readState(),
+          });
+        } catch (error: any) {
+          return json({ success: false, error: error?.message || 'Failed to start migration.' }, 500);
+        }
+      }
+
       if (path === '/api/settings' && method === 'GET') {
         const currentSettings = settingsManager.getAppSettings();
         const portableSettings = normalizeGalleryAppSettingsForStorage(currentSettings);
@@ -32524,20 +32638,51 @@ async function gracefulShutdown(signal: string) {
   stopSystemStatsSampler();
   stopBackendStatusSampler();
 
-  // Stop all running tools
-  const toolsToStop = [
-    { name: 'ComfyUI', stop: stopComfyUI, process: comfyProcess },
-    { name: 'AI-Toolkit', stop: stopAIToolkit, process: aitoolkitProcess },
-    { name: 'Gallery', stop: stopGalleryBridge, process: null }
-  ];
+  if (signal === 'migration') {
+    // First-run migration only needs to stop children owned by this process.
+    // Avoid normal ownership/port discovery while the app is shutting down.
+    galleryBridgeDesired = false;
+    clearGalleryBridgeWatchdog();
+    const trackedTools = [
+      { name: 'ComfyUI', process: comfyProcess },
+      { name: 'AI-Toolkit', process: aitoolkitProcess },
+      { name: 'Gallery', process: galleryBridgeProcess },
+    ];
+    for (const tool of trackedTools) {
+      if (!isChildProcessAlive(tool.process)) continue;
+      console.log(`\x1b[33m[Shutdown]\x1b[0m Stopping tracked ${tool.name} process...`);
+      try {
+        await stopProcessTree(tool.process, tool.name);
+      } catch (err) {
+        console.error(`\x1b[31m[Shutdown]\x1b[0m Failed to stop tracked ${tool.name} process:`, err);
+      }
+    }
+    comfyProcess = null;
+    comfyStartTime = null;
+    comfyOwnershipSnapshotCache = null;
+    clearComfyProcessTelemetry();
+    aitoolkitProcess = null;
+    aitoolkitStartTime = null;
+    galleryBridgeProcess = null;
+    galleryBridgeStartTime = null;
+    clearGalleryProcessTelemetry();
+  } else {
+    // Normal shutdown retains the full ownership checks used by manual tool
+    // lifecycle actions.
+    const toolsToStop = [
+      { name: 'ComfyUI', stop: stopComfyUI },
+      { name: 'AI-Toolkit', stop: stopAIToolkit },
+      { name: 'Gallery', stop: stopGalleryBridge },
+    ];
 
-  for (const tool of toolsToStop) {
-    console.log(`\x1b[33m[Shutdown]\x1b[0m Stopping ${tool.name}...`);
-    try {
-      await tool.stop();
-      console.log(`\x1b[32m[Shutdown]\x1b[0m ${tool.name} stopped`);
-    } catch (err) {
-      console.error(`\x1b[31m[Shutdown]\x1b[0m Failed to stop ${tool.name}:`, err);
+    for (const tool of toolsToStop) {
+      console.log(`\x1b[33m[Shutdown]\x1b[0m Stopping ${tool.name}...`);
+      try {
+        await tool.stop();
+        console.log(`\x1b[32m[Shutdown]\x1b[0m ${tool.name} stopped`);
+      } catch (err) {
+        console.error(`\x1b[31m[Shutdown]\x1b[0m Failed to stop ${tool.name}:`, err);
+      }
     }
   }
 
@@ -32561,13 +32706,13 @@ async function gracefulShutdown(signal: string) {
 
   // Stop the server
   console.log('\x1b[33m[Shutdown]\x1b[0m Stopping server...');
-  server.stop();
+  server.stop(true);
 
   console.log(`\n\x1b[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m`);
   console.log(`  \x1b[1m\x1b[32m✓ Umbra Server shut down cleanly\x1b[0m`);
   console.log(`\x1b[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n`);
 
-  process.exit(0);
+  process.exit(signal === 'migration' ? UMBRA_MIGRATION_EXIT_CODE : 0);
 }
 
 // Handle termination signals

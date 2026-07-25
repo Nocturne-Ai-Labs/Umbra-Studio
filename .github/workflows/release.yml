@@ -9,7 +9,7 @@ on:
         type: boolean
         default: false
       release_tag:
-        description: Release tag when publishing, for example v0.11.0
+        description: Release tag when publishing, for example v0.20.0
         required: false
         type: string
   push:
@@ -31,7 +31,7 @@ jobs:
       - name: Build Windows portable folder
         shell: pwsh
         env:
-          UMBRA_PUBLISH_ROOT: ${{ github.workspace }}\release\windows
+          UMBRA_PUBLISH_ROOT: ${{ github.workspace }}\release\windows\Umbra Studio
           UMBRA_WEBAPP_CLEAN_RELEASE: '1'
           UMBRA_BUNDLE_DATA_FORGE_MODELS: '0'
         run: bun run webapp:update-folder:no-bump
@@ -39,7 +39,7 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $packageRoot = "release/windows/v$version"
+          $packageRoot = "release/windows/Umbra Studio"
           if (!(Test-Path "$packageRoot/Install-Data-Forge-Models.bat")) { throw 'Data Forge model installer is missing' }
           if (!(Test-Path "$packageRoot/resources/app/defaults/DataForge/model-manifest.json")) { throw 'Data Forge model manifest is missing' }
           if (!(Test-Path "$packageRoot/Install-Umbra-UI-Models.bat")) { throw 'Umbra UI model installer is missing' }
@@ -71,18 +71,24 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Build Linux portable folder
         env:
-          UMBRA_LINUX_PUBLISH_ROOT: ${{ github.workspace }}/release/linux
+          UMBRA_LINUX_PUBLISH_ROOT: ${{ github.workspace }}/release/linux/Umbra Studio
           UMBRA_WEBAPP_CLEAN_RELEASE: '1'
           UMBRA_BUNDLE_DATA_FORGE_MODELS: '0'
+          UMBRA_BUNDLED_BUN_VERSION: canary
         run: bun run linux:update-folder:no-bump
       - name: Archive Linux package
         run: |
           version="$(node -p "require('./package.json').version")"
-          package_root="release/linux/v${version}"
+          package_root="release/linux/Umbra Studio"
           test -f "${package_root}/install-data-forge-models.sh"
           test -f "${package_root}/resources/app/defaults/DataForge/model-manifest.json"
           test -f "${package_root}/install-umbra-ui-models.sh"
           test -f "${package_root}/resources/app/defaults/UmbraUI/model-manifest.json"
+          bundled_bun_version="$("${package_root}/Runtime/Bun/linux/bun" --version)"
+          case "${bundled_bun_version}" in
+            1.4.*) ;;
+            *) echo "Expected bundled Linux Bun 1.4.x, got ${bundled_bun_version}" >&2; exit 1 ;;
+          esac
           mkdir -p artifacts
           (cd "${package_root}" && zip -r -9 "${GITHUB_WORKSPACE}/artifacts/Umbra-Studio-v${version}-Linux-x64.zip" .)
       - uses: actions/upload-artifact@v4

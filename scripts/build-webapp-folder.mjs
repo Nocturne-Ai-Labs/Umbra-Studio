@@ -12,20 +12,15 @@ const preferredAppsRoot = path.join('D:', 'Development', 'Apps', 'Umbra Studio')
 const defaultPublishRoot = fs.existsSync(path.join('D:', 'Development', 'Apps'))
   ? preferredAppsRoot
   : path.join(process.env.HOME || process.env.USERPROFILE || '~', 'Documents', 'Umbra Studio');
-const publishBaseRoot = process.env.UMBRA_PUBLISH_ROOT
+const hasExplicitPublishRoot = Boolean(process.env.UMBRA_PUBLISH_ROOT);
+const publishRoot = process.env.UMBRA_PUBLISH_ROOT
   ? path.resolve(process.env.UMBRA_PUBLISH_ROOT)
   : defaultPublishRoot;
-const publishFolderVersion = String(process.env.UMBRA_PUBLISH_FOLDER_VERSION || version).trim();
-if (!/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(publishFolderVersion)) {
-  throw new Error(`[webapp-publish] Invalid UMBRA_PUBLISH_FOLDER_VERSION: ${publishFolderVersion}`);
-}
-const publishRoot = path.join(publishBaseRoot, `v${publishFolderVersion}`);
 const isCleanRelease = process.argv.includes('--clean-release')
   || process.env.UMBRA_WEBAPP_CLEAN_RELEASE === '1';
 const bundleDataForgeModels = process.env.UMBRA_BUNDLE_DATA_FORGE_MODELS !== '0';
 
 const PRESERVED_TOP_LEVEL = new Set(['User', 'Tools']);
-const SEEDED_RUNTIME_TOP_LEVEL = new Set(['Tools']);
 const LEGACY_DESKTOP_NAME = ['elec', 'tron'].join('');
 const LEGACY_DESKTOP_ROOT_ARTIFACTS = [
   'chrome_100_percent.pak',
@@ -102,10 +97,12 @@ function safeRemoveInside(parent, targetPath) {
 }
 
 function safeWipePublishRoot() {
-  const resolvedBase = path.resolve(publishBaseRoot);
   const resolvedTarget = path.resolve(publishRoot);
-  const expectedName = `v${version}`;
-  if (path.basename(resolvedTarget) !== expectedName || !isInside(resolvedBase, resolvedTarget)) {
+  if (
+    !hasExplicitPublishRoot
+    || path.basename(resolvedTarget).toLowerCase() !== 'umbra studio'
+    || resolvedTarget === path.parse(resolvedTarget).root
+  ) {
     throw new Error(`[webapp-publish] Refusing to wipe unsafe publish root: ${resolvedTarget}`);
   }
   if (fs.existsSync(resolvedTarget)) {
@@ -249,7 +246,7 @@ function timestampForPath() {
 
 function moveToDirtyRuntimeBackup(targetPath, label) {
   if (!fs.existsSync(targetPath)) return;
-  const backupRoot = path.join(publishBaseRoot, '.dirty-runtime-backups');
+  const backupRoot = path.join(publishRoot, '.dirty-runtime-backups');
   ensureDir(backupRoot);
   let backupPath = path.join(backupRoot, `v${version}-${label}-${timestampForPath()}`);
   let suffix = 1;
@@ -469,51 +466,6 @@ function runNodeScript(args, label) {
   }
 }
 
-function updateLatestLink() {
-  const latestLinkPath = path.join(publishBaseRoot, 'latest');
-  try {
-    if (fs.existsSync(latestLinkPath) || fs.lstatSync(latestLinkPath)) {
-      const current = fs.lstatSync(latestLinkPath);
-      if (current.isSymbolicLink()) fs.rmSync(latestLinkPath, { force: true });
-      else return;
-    }
-  } catch {
-    // Broken link: replace it.
-  }
-  try {
-    fs.symlinkSync(path.resolve(publishRoot), latestLinkPath, process.platform === 'win32' ? 'junction' : 'dir');
-  } catch {
-    // Non-fatal.
-  }
-}
-
-function resolveLatestRuntimeRoot() {
-  const latestPath = path.join(publishBaseRoot, 'latest');
-  try {
-    if (!fs.existsSync(latestPath)) return null;
-    const resolved = fs.realpathSync(latestPath);
-    if (path.resolve(resolved) === path.resolve(publishRoot)) return null;
-    if (!isInside(publishBaseRoot, resolved)) return null;
-    return resolved;
-  } catch {
-    return null;
-  }
-}
-
-function seedPersistentRuntimeStateFromLatest() {
-  if (isCleanRelease) return;
-  const latestRoot = resolveLatestRuntimeRoot();
-  if (!latestRoot) return;
-
-  for (const name of SEEDED_RUNTIME_TOP_LEVEL) {
-    const source = path.join(latestRoot, name);
-    const target = path.join(publishRoot, name);
-    if (!fs.existsSync(source) || fs.existsSync(target)) continue;
-    console.log(`[webapp-publish] Seeding ${name}/ from previous latest runtime: ${source}`);
-    copyTree(source, target);
-  }
-}
-
 function writeWindowsLauncher() {
   const launcherPath = path.join(publishRoot, 'Start-Umbra.bat');
   const script = `@echo off
@@ -603,6 +555,9 @@ function verifyPublish() {
     'resources/app/defaults/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
     'resources/app/gallery/GalleryServer.ts',
     'resources/app/launcher/UmbraWebLauncher.ts',
+    'resources/app/launcher/UmbraMigrationWorker.ts',
+    'resources/app/backend/FirstRunService.ts',
+    'resources/app/shared/onboarding/firstRun.ts',
     'resources/app/node_modules',
     'Runtime/Bun/win32/bun.exe',
     'User/PowerPrompter/API Workflows/[Umbra UI] Stable Diffusion Image Pipeline.json',
@@ -642,7 +597,7 @@ function publish() {
   ensureDir(publishRoot);
   console.log(`[webapp-publish] Publishing webapp build to ${publishRoot}`);
   console.log(isCleanRelease
-    ? '[webapp-publish] Clean release mode: wiping target version and shipping clean runtime skeletons.'
+    ? '[webapp-publish] Clean release mode: wiping the explicit package root and shipping clean runtime skeletons.'
     : '[webapp-publish] No-bump update mode: preserving existing User/ and Tools/ folders.');
   if (bundleDataForgeModels) {
     run('node', ['scripts/download-waifu-models.mjs'], 'Data Forge WD model preparation');
@@ -650,7 +605,6 @@ function publish() {
   } else {
     console.log('[webapp-publish] GitHub-sized package mode: Data Forge model weights will be installed with Install-Data-Forge-Models.bat.');
   }
-  seedPersistentRuntimeStateFromLatest();
   removeEmptyTopLevelModelsFolder();
   removeLegacyDesktopArtifacts();
 
@@ -737,7 +691,6 @@ function publish() {
   writeDataForgeModelInstaller();
   writeUmbraUiModelInstaller();
   writePortableMarker();
-  updateLatestLink();
   verifyPublish();
   if (isCleanRelease) verifyCleanPublishedUser();
 

@@ -7,6 +7,8 @@ export const COMFY_SECURITY_LEVELS = ['strong', 'normal', 'normal-', 'weak'] as 
 export type ComfySecurityLevel = (typeof COMFY_SECURITY_LEVELS)[number];
 export const COMFY_ATTENTION_BACKENDS = ['default', 'sage', 'flash', 'pytorch', 'split', 'quad'] as const;
 export type ComfyAttentionBackend = (typeof COMFY_ATTENTION_BACKENDS)[number];
+export const APP_LANGUAGES = ['en', 'ja'] as const;
+export type AppLanguage = (typeof APP_LANGUAGES)[number];
 
 export interface AppSettings {
   enableToasts: boolean;
@@ -15,6 +17,7 @@ export interface AppSettings {
   'ui.idleFrameCapEnabled': boolean;
   'ui.idleFrameCapIdleTime': number;
   'ui.idleFrameCapFps': number;
+  'ui.language': AppLanguage;
   'comfyui.path': string;
   'comfyui.url': string;
   'aitoolkit.path': string;
@@ -50,6 +53,7 @@ export interface AppSettings {
   'appUpdate.mode': 'source' | 'release';
   'appUpdate.releaseChannel': 'stable' | 'beta';
   'appUpdate.feedUrl': string;
+  'advanced.showSetupWizardOnLaunch': boolean;
   'advanced.diagnosticLogging': boolean;
   'advanced.consoleMaxLogs': number;
   'advanced.enableWebSocket': boolean;
@@ -62,6 +66,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   'ui.idleFrameCapEnabled': false,
   'ui.idleFrameCapIdleTime': 3,
   'ui.idleFrameCapFps': 18,
+  'ui.language': 'en',
   'comfyui.path': '',
   'comfyui.url': 'http://127.0.0.1:8188',
   'aitoolkit.path': '',
@@ -97,6 +102,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   'appUpdate.mode': 'source',
   'appUpdate.releaseChannel': 'stable',
   'appUpdate.feedUrl': '',
+  'advanced.showSetupWizardOnLaunch': false,
   'advanced.diagnosticLogging': false,
   'advanced.consoleMaxLogs': 1000,
   'advanced.enableWebSocket': true,
@@ -121,6 +127,7 @@ const BOOLEAN_KEYS: Array<keyof AppSettings> = [
   'remote.syncUiAcrossDevices',
   'remote.galleryViewerOriginals',
   'ui.nsfwThumbnailBlurEnabled',
+  'advanced.showSetupWizardOnLaunch',
   'appUpdate.mode',
   'appUpdate.releaseChannel',
   'appUpdate.feedUrl',
@@ -156,6 +163,7 @@ const STRING_KEYS: Array<keyof AppSettings> = [
   'library.trashStoragePath',
   'library.deleteMode',
   'remote.phoneComfyMenuPosition',
+  'ui.language',
   'appUpdate.mode',
   'appUpdate.releaseChannel',
   'appUpdate.feedUrl',
@@ -276,6 +284,9 @@ export function normalizeAppSettings(input: unknown): AppSettings {
   }
   if (!COMFY_ATTENTION_BACKENDS.includes(normalized['comfyui.attentionBackend'])) {
     normalized['comfyui.attentionBackend'] = DEFAULT_APP_SETTINGS['comfyui.attentionBackend'];
+  }
+  if (!APP_LANGUAGES.includes(normalized['ui.language'])) {
+    normalized['ui.language'] = DEFAULT_APP_SETTINGS['ui.language'];
   }
 
   return normalized;

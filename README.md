@@ -35,8 +35,9 @@ See [REQUIREMENTS.md](REQUIREMENTS.md) for the supported platforms, recommended
 hardware, Linux packages, ports, per-feature dependencies, caption-model pack,
 and links to every managed upstream tool.
 
-See [CHANGELOG.md](CHANGELOG.md) for release highlights and instructions for
-migrating existing `User/` and `Tools/` folders into a new portable version.
+See [CHANGELOG.md](CHANGELOG.md) for release highlights. New portable builds
+include a first-time setup wizard that can migrate an older `User/` and
+`Tools/` installation safely.
 
 Quick summary:
 
@@ -106,6 +107,40 @@ When a managed Python tool is installed, Umbra can bootstrap its private Python
 3.11 runtime into `Runtime/Python311`; users do not need to place Python inside
 the application folder manually. The initial GitHub core archive keeps that
 download out of the release asset and creates it on demand.
+
+### First-Time Setup And Migration
+
+The first launch opens a setup wizard before the normal workspace. Choose
+English or Japanese, then either start with the clean portable folders or
+select a previous extracted Umbra Studio version.
+
+Migration is deliberately handled by an external worker:
+
+1. Umbra validates the selected previous portable root.
+2. A standalone migration process starts with the portable
+   `Runtime/Bun` executable, then the server and its tracked managed tools shut
+   down cleanly.
+3. The worker moves and merges the previous `User/` and `Tools/` trees into the
+   new version. Same-drive files use fast filesystem renames; cross-drive files
+   fall back to copy-then-delete.
+4. Stored portable paths are rewritten for the new root.
+5. Every `Umbra-Nodes` directory is excluded and the latest public
+   [Umbra Nodes](https://github.com/Nocturne-Ai-Labs/Umbra-Nodes) checkout is
+   installed instead.
+6. Progress and recovery state are written atomically under
+   `Runtime/Migration`; the browser waits while the main app is offline.
+7. The original Umbra launcher watches the persisted migration state and
+   restarts the server in the same terminal after the external worker finishes.
+   The browser then reconnects automatically.
+
+Migration does not start a temporary web server, rebind Umbra's port, or run a
+port-availability probe. This keeps the shutdown and restart boundary simple
+while large tool and model folders are moving.
+
+Migration intentionally removes migrated data from the previous build to avoid
+duplicating large models. Back up the previous build first if you need to keep
+an independent copy. The excluded legacy `Umbra-Nodes` folder may remain there.
+Language can be changed later under **Settings > General > Language**.
 
 ### First Run: Data Forge Caption Models
 
@@ -318,7 +353,7 @@ full Windows/Linux validation matrix.
 
 Windows portable folder builds:
 
-No-bump update of the current version folder:
+No-bump update of the current portable folder:
 
 ```powershell
 bun run webapp:update-folder:no-bump
@@ -340,15 +375,15 @@ bun run linux:update-folder
 Default local output in the current Windows development scripts:
 
 ```text
-../Apps/Umbra Studio/v<version>/
+../Apps/Umbra Studio/
 ```
 
 ## Runtime Paths
 
-Portable builds keep runtime data next to the app version folder:
+Portable builds keep runtime data in the stable application root:
 
 ```text
-Umbra Studio/v<version>/
+Umbra Studio/
 ```
 
 Important runtime folders:
@@ -362,9 +397,11 @@ Installed tools, model weights, configuration, datasets, and generated media
 remain untracked. The old top-level `Models/` path is not used; Umbra-owned
 models live under `User/Models`, while ComfyUI owns `Tools/ComfyUI/models`.
 
-Do not wipe existing version folders during publishing, updating, or cleanup.
-They can contain model merges, generated outputs, installed tools, and other
-runtime artifacts that are not recoverable from the source tree.
+Do not wipe the existing application root during publishing, updating, or
+cleanup. It can contain model merges, generated outputs, installed tools, and
+other runtime artifacts that are not recoverable from the source tree. Fresh
+release jobs use an explicit temporary `Umbra Studio` package root; local
+publishes preserve `User/` and `Tools/`.
 
 Root shortcuts are created there:
 

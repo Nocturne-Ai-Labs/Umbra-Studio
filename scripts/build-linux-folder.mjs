@@ -12,19 +12,20 @@ if (process.platform !== 'linux') {
 const root = process.cwd();
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8'));
 const version = pkg.version;
-const defaultPublishBase = path.join(os.homedir(), 'Applications', 'Umbra Studio');
-const publishBaseRoot = process.env.UMBRA_LINUX_PUBLISH_ROOT
+const defaultPublishRoot = path.join(os.homedir(), 'Applications', 'Umbra Studio');
+const hasExplicitPublishRoot = Boolean(
+  process.env.UMBRA_LINUX_PUBLISH_ROOT || process.env.UMBRA_PUBLISH_ROOT,
+);
+const publishRoot = process.env.UMBRA_LINUX_PUBLISH_ROOT
   ? path.resolve(process.env.UMBRA_LINUX_PUBLISH_ROOT)
   : process.env.UMBRA_PUBLISH_ROOT
     ? path.resolve(process.env.UMBRA_PUBLISH_ROOT)
-    : defaultPublishBase;
-const publishRoot = path.join(publishBaseRoot, `v${version}`);
+    : defaultPublishRoot;
 const isCleanRelease = process.argv.includes('--clean-release')
   || process.env.UMBRA_WEBAPP_CLEAN_RELEASE === '1';
 const bundleDataForgeModels = process.env.UMBRA_BUNDLE_DATA_FORGE_MODELS !== '0';
 
 const PRESERVED_TOP_LEVEL = new Set(['User', 'Tools']);
-const SEEDED_RUNTIME_TOP_LEVEL = new Set(['Tools']);
 const SKIP_SOURCE_DIRS = new Set([
   '.git',
   '.snapshots',
@@ -79,9 +80,12 @@ function safeRemoveInside(parent, targetPath) {
 }
 
 function safeWipePublishRoot() {
-  const resolvedBase = path.resolve(publishBaseRoot);
   const resolvedTarget = path.resolve(publishRoot);
-  if (path.basename(resolvedTarget) !== `v${version}` || !isInside(resolvedBase, resolvedTarget)) {
+  if (
+    !hasExplicitPublishRoot
+    || path.basename(resolvedTarget).toLowerCase() !== 'umbra studio'
+    || resolvedTarget === path.parse(resolvedTarget).root
+  ) {
     throw new Error(`[linux-publish] Refusing to wipe unsafe publish root: ${resolvedTarget}`);
   }
     fs.rmSync(resolvedTarget, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
@@ -165,31 +169,6 @@ function run(command, args, label) {
   const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', shell: false });
   if (result.status !== 0) {
     throw new Error(`[linux-publish] ${label} failed with status ${result.status ?? 1}`);
-  }
-}
-
-function resolveLatestRuntimeRoot() {
-  const latestPath = path.join(publishBaseRoot, 'latest');
-  try {
-    const resolved = fs.realpathSync(latestPath);
-    if (path.resolve(resolved) === path.resolve(publishRoot)) return null;
-    if (!isInside(publishBaseRoot, resolved)) return null;
-    return resolved;
-  } catch {
-    return null;
-  }
-}
-
-function seedPersistentRuntimeStateFromLatest() {
-  if (isCleanRelease) return;
-  const latestRoot = resolveLatestRuntimeRoot();
-  if (!latestRoot) return;
-  for (const name of SEEDED_RUNTIME_TOP_LEVEL) {
-    const source = path.join(latestRoot, name);
-    const target = path.join(publishRoot, name);
-    if (!fs.existsSync(source) || fs.existsSync(target)) continue;
-    console.log(`[linux-publish] Seeding ${name}/ from previous latest runtime: ${source}`);
-    copyTree(source, target);
   }
 }
 
@@ -327,20 +306,6 @@ Terminal=true
   fs.chmodSync(desktopPath, 0o755);
 }
 
-function updateLatestLink() {
-  const latestPath = path.join(publishBaseRoot, 'latest');
-  try {
-    if (fs.existsSync(latestPath) || fs.lstatSync(latestPath)) fs.rmSync(latestPath, { force: true, recursive: true });
-  } catch {
-    // replace below
-  }
-  try {
-    fs.symlinkSync(path.resolve(publishRoot), latestPath, 'dir');
-  } catch {
-    // non-fatal
-  }
-}
-
 function verifyBundledDataForgeModels() {
   const manifestPath = path.join(root, 'defaults', 'DataForge', 'model-manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
@@ -367,6 +332,9 @@ function verifyPublish() {
     'resources/app/defaults/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
     'resources/app/gallery/GalleryServer.ts',
     'resources/app/launcher/UmbraWebLauncher.ts',
+    'resources/app/launcher/UmbraMigrationWorker.ts',
+    'resources/app/backend/FirstRunService.ts',
+    'resources/app/shared/onboarding/firstRun.ts',
     'resources/app/node_modules',
     'Runtime/Bun/linux/bun',
     'User/PowerPrompter/API Workflows/[Umbra UI] Stable Diffusion Image Pipeline.json',
@@ -392,7 +360,7 @@ function verifyPublish() {
 function publish() {
   console.log(`[linux-publish] Publishing Linux folder build to ${publishRoot}`);
   console.log(isCleanRelease
-    ? '[linux-publish] Clean release mode: wiping target version and shipping clean runtime skeletons.'
+    ? '[linux-publish] Clean release mode: wiping the explicit package root and shipping clean runtime skeletons.'
     : '[linux-publish] No-bump update mode: preserving existing User/ and Tools/ folders.');
   if (bundleDataForgeModels) {
     run('node', ['scripts/download-waifu-models.mjs'], 'Data Forge WD model preparation');
@@ -403,7 +371,6 @@ function publish() {
 
   if (isCleanRelease) safeWipePublishRoot();
   ensureDir(publishRoot);
-  seedPersistentRuntimeStateFromLatest();
 
   run('bun', ['install'], 'dependency install');
   run('bun', ['run', 'webapp:prepare-runtime'], 'runtime preparation');
@@ -483,7 +450,6 @@ function publish() {
   writeUmbraUiModelInstaller();
   writeDesktopFile();
   fs.writeFileSync(path.join(publishRoot, 'portable-mode'), 'portable linux webapp runtime enabled\n', 'utf-8');
-  updateLatestLink();
   verifyPublish();
 
   console.log(`[linux-publish] Linux portable folder build published: ${publishRoot}`);
