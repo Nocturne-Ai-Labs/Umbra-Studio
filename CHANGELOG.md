@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.20.3
+
+### Umbra Remote Onboarding Hotfix
+
+- Fixed established studios without an `onboarding.json` marker being mistaken
+  for brand-new installations when opened through Umbra Remote.
+- Added a one-time backend recovery path that recognizes persisted pre-wizard
+  app settings and creates the completed onboarding marker for every client.
+- Kept first-time setup enabled for genuinely clean installations and preserved
+  the host-only boundary for language selection and migration.
+
 ## v0.20.2
 
 ### Portable Self-Updater

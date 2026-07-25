@@ -40,6 +40,35 @@ describe('FirstRunService', () => {
     });
   });
 
+  test('recovers an established pre-wizard install as complete', () => {
+    const root = createTestRoot('legacy-complete');
+    const configRoot = join(root, 'User', 'Config');
+    mkdirSync(configRoot, { recursive: true });
+    writeFileSync(join(configRoot, 'settings.json'), JSON.stringify({
+      app: {
+        'ui.language': 'ja',
+        'comfyui.autoLaunch': true,
+      },
+    }));
+    const service = new FirstRunService(root, join(root, 'resources', 'app'));
+
+    const state = service.readState();
+    expect(state.phase).toBe('complete');
+    expect(state.language).toBe('ja');
+    expect(state.completedAt).toBeTruthy();
+    expect(service.readState()).toEqual(state);
+  });
+
+  test('does not skip onboarding for a clean default settings file', () => {
+    const root = createTestRoot('clean-defaults');
+    const configRoot = join(root, 'User', 'Config');
+    mkdirSync(configRoot, { recursive: true });
+    writeFileSync(join(configRoot, 'settings.json'), JSON.stringify({ app: {} }));
+    const service = new FirstRunService(root, join(root, 'resources', 'app'));
+
+    expect(service.readState().phase).toBe('pending');
+  });
+
   test('persists a fresh Japanese onboarding choice', () => {
     const root = createTestRoot('fresh');
     const service = new FirstRunService(root, join(root, 'resources', 'app'));

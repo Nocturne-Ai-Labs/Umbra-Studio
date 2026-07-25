@@ -68,10 +68,36 @@ export class FirstRunService {
 
   readState(): UmbraFirstRunState {
     try {
-      if (!existsSync(this.statePath)) return createPendingFirstRunState();
+      if (!existsSync(this.statePath)) {
+        const legacyState = this.readLegacyCompletedState();
+        return legacyState ? this.writeState(legacyState) : createPendingFirstRunState();
+      }
       return normalizeFirstRunState(JSON.parse(readFileSync(this.statePath, 'utf8')));
     } catch {
       return createPendingFirstRunState();
+    }
+  }
+
+  private readLegacyCompletedState(): UmbraFirstRunState | null {
+    const settingsPath = join(this.runtimeRoot, 'User', 'Config', 'settings.json');
+    try {
+      if (!existsSync(settingsPath)) return null;
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as {
+        app?: Record<string, unknown>;
+      };
+      const appSettings = settings?.app;
+      if (!appSettings || Array.isArray(appSettings) || Object.keys(appSettings).length === 0) {
+        return null;
+      }
+      return {
+        schemaVersion: 1,
+        phase: 'complete',
+        language: normalizeUmbraAppLanguage(appSettings['ui.language']),
+        completedAt: new Date().toISOString(),
+        migration: null,
+      };
+    } catch {
+      return null;
     }
   }
 
