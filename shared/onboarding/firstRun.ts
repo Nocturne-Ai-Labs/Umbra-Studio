@@ -1,4 +1,4 @@
-export const UMBRA_APP_LANGUAGES = ['en', 'ja'] as const;
+export const UMBRA_APP_LANGUAGES = ['en', 'ja', 'zh-CN', 'ko'] as const;
 export const UMBRA_MIGRATION_EXIT_CODE = 75;
 
 export type UmbraAppLanguage = (typeof UMBRA_APP_LANGUAGES)[number];
@@ -53,6 +53,8 @@ export function normalizeUmbraAppLanguage(
   fallback: UmbraAppLanguage = 'en',
 ): UmbraAppLanguage {
   const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'zh-cn' || normalized === 'zh-hans') return 'zh-CN';
+  if (normalized === 'ko-kr') return 'ko';
   return (UMBRA_APP_LANGUAGES as readonly string[]).includes(normalized)
     ? normalized as UmbraAppLanguage
     : fallback;

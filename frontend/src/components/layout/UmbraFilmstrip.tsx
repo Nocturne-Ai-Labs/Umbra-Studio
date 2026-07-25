@@ -578,7 +578,7 @@ export function UmbraFilmstrip({
         type: 'error',
         message: workspace === 'scanner'
           ? 'No valid items selected for Metadata Scanner'
-          : 'No valid images selected for Waifu Diffusion',
+          : 'No valid images selected for Visual Analysis',
       });
       return;
     }
@@ -593,7 +593,7 @@ export function UmbraFilmstrip({
       type: 'success',
       message: workspace === 'scanner'
         ? `Sent ${paths.length} item${paths.length === 1 ? '' : 's'} to Metadata Scanner`
-        : `Sent ${paths.length} image${paths.length === 1 ? '' : 's'} to Waifu Diffusion`,
+        : `Sent ${paths.length} image${paths.length === 1 ? '' : 's'} to Visual Analysis`,
     });
   }, [addScannedImport, addToast, setActiveWorkspace]);
 

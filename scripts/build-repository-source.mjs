@@ -54,7 +54,6 @@ const SOURCE_FILES = [
   'tsconfig.json',
   'UmbraServer.ts',
   'UmbraStudio',
-  'UmbraStudio.bat',
   'UMBRA_UI_TOUR.md',
 ];
 

@@ -290,6 +290,13 @@ exec "$BUN_BIN" "$PWD/resources/app/launcher/UmbraWebLauncher.ts" --root "$PWD" 
   fs.chmodSync(launcherPath, 0o755);
 }
 
+function removeWindowsLaunchers() {
+  for (const relativePath of ['Start-Umbra.bat', 'UmbraStudio.bat', 'UmbraStudio.exe']) {
+    const target = path.join(publishRoot, relativePath);
+    if (fs.existsSync(target)) safeRemoveInside(publishRoot, target);
+  }
+}
+
 function writeDesktopFile() {
   const desktopPath = path.join(publishRoot, 'UmbraStudio.desktop');
   const scriptPath = path.join(publishRoot, 'start-umbra.sh');
@@ -371,6 +378,7 @@ function publish() {
 
   if (isCleanRelease) safeWipePublishRoot();
   ensureDir(publishRoot);
+  removeWindowsLaunchers();
 
   run('bun', ['install'], 'dependency install');
   run('bun', ['run', 'webapp:prepare-runtime'], 'runtime preparation');

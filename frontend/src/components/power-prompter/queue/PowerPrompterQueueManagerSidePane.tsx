@@ -381,7 +381,7 @@ export function PowerPrompterQueueManagerSidePane({
               }}
               className="w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] text-fuchsia-200 hover:bg-fuchsia-500/15"
             >
-              Send to Waifu Diffusion
+              Send to Visual Analysis
             </button>
             <button
               onClick={() => {

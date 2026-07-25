@@ -15,6 +15,8 @@ import { UmbraFilmstrip } from './UmbraFilmstrip';
 import { PowerPrompter } from '@/components/layout/PowerPrompter';
 import type { WorkspaceType } from '@/store/useStore';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
+import { useI18n } from '@/i18n';
+import { translateLegacyUiText } from '@/i18n/legacyUiLocalization';
 import {
   buildLocalServerApp,
   getLocalServerFrameUrl,
@@ -293,6 +295,11 @@ const BackendSplash = ({
   icon: string;
   mobileManager?: boolean;
 }) => {
+  const { language } = useI18n();
+  const ui = useCallback(
+    (value: string) => translateLegacyUiText(language, value),
+    [language],
+  );
   const [isChecking, setIsChecking] = useState(false);
   const [startupProgress, setStartupProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
@@ -1170,8 +1177,7 @@ const BackendSplash = ({
         {versionBackend && !isLaunching && (
           <div className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-left">
             <p className="text-[11px] leading-relaxed text-amber-200">
-              If {versionBackendLabel} has issues after updating Umbra Studio or {versionBackendLabel},
-              press <span className="font-bold text-amber-100">Reinstall {versionBackendLabel}</span>. It fixes most startup/runtime problems.
+              {ui(`If ${versionBackendLabel} has issues after updating Umbra Studio or ${versionBackendLabel}, press Reinstall ${versionBackendLabel}. It fixes most startup/runtime problems.`)}
             </p>
           </div>
         )}
@@ -1192,7 +1198,7 @@ const BackendSplash = ({
             </div>
 
             <p className="text-xs text-zinc-300 mb-3">
-              Current: <span className="font-bold text-white">{currentComfyRef || 'Unknown'}</span>
+              {ui('Current')}: <span className="font-bold text-white">{currentComfyRef || ui('Unknown')}</span>
               {currentComfyCommit && <span className="text-zinc-500 ml-2">({currentComfyCommit})</span>}
             </p>
 
@@ -1203,7 +1209,7 @@ const BackendSplash = ({
                 disabled={managementBlocked || isLoadingComfyVersions || isSwitchingComfyVersion || isLaunching || !!toolActionLoading || comfyVersions.length === 0}
                 className="flex-1 min-w-[240px] px-3 py-2 bg-black/40 border border-white/10 rounded-lg text-white text-xs focus:border-[var(--umbra-accent)] outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <option value="">Select {versionBackendLabel} version...</option>
+                <option value="">{ui(`Select ${versionBackendLabel} version...`)}</option>
                 {comfyVersions.map((version) => (
                   <option key={`${version.ref}-${version.commit}`} value={version.ref}>
                     {version.ref}
@@ -1225,7 +1231,7 @@ const BackendSplash = ({
                 }
                 className="px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-bold uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isSwitchingComfyVersion ? 'Switching...' : (toolInstalled ? 'Switch to Selected Version' : 'Install Selected Version')}
+                {isSwitchingComfyVersion ? ui('Switching...') : ui(toolInstalled ? 'Switch to Selected Version' : 'Install Selected Version')}
               </button>
             </div>
             <p className="mt-2 text-xs font-semibold text-red-400">
@@ -1245,11 +1251,11 @@ const BackendSplash = ({
         {!isLaunching && !error && (
           <div className="glass-panel p-4 bg-black/40 border-white/5">
             <p className="text-xs text-zinc-400 leading-relaxed">
-              <strong className="text-white">Launch:</strong> Start {name} automatically from Umbra Studio
+              <strong className="text-white">{ui('Launch')}:</strong> {ui(`Start ${name} automatically from Umbra Studio`)}
               <br />
-              <strong className="text-white">Check Connection:</strong> Detect if {name} is running externally
+              <strong className="text-white">{ui('Check Connection')}:</strong> {ui(`Detect if ${name} is running externally`)}
               <br />
-              <strong className="text-white">Install/Update:</strong> Manage native tool installs directly from Umbra
+              <strong className="text-white">{ui('Install/Update')}:</strong> {ui('Manage native tool installs directly from Umbra')}
               {hasToolUpdate && (
                 <>
                   <br />
@@ -2507,7 +2513,7 @@ export const Workspace = () => {
         ) : null}
       </div>
 
-      {/* Image Inspector Layer (Metadata Scanner + Waifu Diffusion) */}
+      {/* Image Inspector Layer (Metadata Scanner + Visual Analysis) */}
       <div
         className="absolute inset-0"
         style={getWorkspaceLayerStyle('imageinspector')}

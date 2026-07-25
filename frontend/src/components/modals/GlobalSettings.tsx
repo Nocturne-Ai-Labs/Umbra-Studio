@@ -586,7 +586,13 @@ const GeneralSettings = ({ settings, updateSetting }: any) => {
             onChange={(value: string) => updateSetting('ui.language', value)}
             options={APP_LANGUAGES.map((value) => ({
               value,
-              label: value === 'ja' ? t('language.japanese') : t('language.english'),
+              label: value === 'ja'
+                ? t('language.japanese')
+                : value === 'zh-CN'
+                  ? t('language.chinese')
+                  : value === 'ko'
+                    ? t('language.korean')
+                  : t('language.english'),
             }))}
           />
           <SettingHint>{t('language.description')}</SettingHint>

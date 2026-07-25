@@ -1228,7 +1228,7 @@ export const LibraryWorkspaceHost = () => {
         appStore.showToast(
           workspace === 'scanner'
             ? `Sent ${unique.length} item${unique.length > 1 ? 's' : ''} to Metadata Scanner`
-            : `Sent ${unique.length} image${unique.length > 1 ? 's' : ''} to Waifu Diffusion`,
+            : `Sent ${unique.length} image${unique.length > 1 ? 's' : ''} to Visual Analysis`,
           'success',
         );
         return;

@@ -49,6 +49,24 @@ describe('FirstRunService', () => {
     expect(service.readState().completedAt).toBeTruthy();
   });
 
+  test('persists a fresh Simplified Chinese onboarding choice', () => {
+    const root = createTestRoot('fresh-chinese');
+    const service = new FirstRunService(root, join(root, 'resources', 'app'));
+    service.completeFreshStart('zh-cn');
+    expect(service.readState().phase).toBe('complete');
+    expect(service.readState().language).toBe('zh-CN');
+    expect(service.readState().completedAt).toBeTruthy();
+  });
+
+  test('persists a fresh Korean onboarding choice', () => {
+    const root = createTestRoot('fresh-korean');
+    const service = new FirstRunService(root, join(root, 'resources', 'app'));
+    service.completeFreshStart('ko-KR');
+    expect(service.readState().phase).toBe('complete');
+    expect(service.readState().language).toBe('ko');
+    expect(service.readState().completedAt).toBeTruthy();
+  });
+
   test('recognizes a previous portable build and creates a staged request', () => {
     const currentRoot = createTestRoot('current');
     const previousRoot = createTestRoot('previous');

@@ -492,6 +492,32 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
   });
 }
 
+export function applyUmbraUiMediaPromptOverride(
+  generation: UmbraUiMediaGenerationSnapshot | undefined,
+  promptTextValue: string,
+  promptLabelValue = 'Inspector Caption',
+): UmbraUiMediaGenerationSnapshot | undefined {
+  const promptText = cleanPromptText(String(promptTextValue || '').trim());
+  if (!promptText) return generation;
+  return normalizeUmbraUiMediaGenerationSnapshot({
+    ...(generation || {}),
+    positivePrompt: promptText,
+    positivePromptSegments: [{
+      text: promptText,
+      label: String(promptLabelValue || 'Inspector Caption').trim() || 'Inspector Caption',
+      slotType: 'caption',
+    }],
+    negativePrompt: generation?.negativePrompt || '',
+    modelFamily: generation?.modelFamily || '',
+    modelType: generation?.modelType || '',
+    checkpointName: generation?.checkpointName || '',
+    vaeName: generation?.vaeName || '',
+    samplerName: generation?.samplerName || '',
+    scheduler: generation?.scheduler || '',
+    loras: generation?.loras || [],
+  });
+}
+
 export function normalizeUmbraUiMediaHandoff(value: unknown): UmbraUiMediaHandoff | null {
   if (!isRecord(value)) return null;
   const mode = String(value.mode || '').trim().toLowerCase();
@@ -550,6 +576,8 @@ export async function stageUmbraUiMediaHandoff(options: {
   studioArtboardId?: string;
   studioDestination?: UmbraUiStudioDestinationMode;
   metadata?: ImageMetadata | null;
+  promptText?: string;
+  promptLabel?: string;
 }): Promise<UmbraUiMediaHandoff> {
   const path = normalizePath(options.path);
   if (!path) throw new Error('Choose media before sending it to Umbra UI.');
@@ -563,6 +591,12 @@ export async function stageUmbraUiMediaHandoff(options: {
   // still ask the user which Studio project should receive the image.
   const canvasProjectId = String(options.canvasProjectId || '').trim();
   const canvasOperationMode = options.canvasOperationMode || (inpaint.operationMode === 'outpaint' ? 'outpaint' : inpaint.operationMode === 'inpaint' ? 'inpaint' : undefined);
+  const metadataGeneration = buildUmbraUiMediaGenerationSnapshot(metadata);
+  const generation = applyUmbraUiMediaPromptOverride(
+    metadataGeneration,
+    options.promptText || '',
+    options.promptLabel,
+  );
   const payload: UmbraUiMediaHandoff = {
     mode: options.mode,
     path,
@@ -576,7 +610,7 @@ export async function stageUmbraUiMediaHandoff(options: {
     ...(options.studioArtboardId ? { studioArtboardId: options.studioArtboardId } : {}),
     ...(options.studioDestination ? { studioDestination: options.studioDestination } : {}),
     ...(options.mode === 'video' ? { videoFrameRole: options.videoFrameRole || 'first' } : {}),
-    generation: buildUmbraUiMediaGenerationSnapshot(metadata),
+    generation,
     createdAt: Date.now(),
   };
   const target = window as typeof window & { __umbraPendingUmbraUiMediaHandoff?: UmbraUiMediaHandoff | null };

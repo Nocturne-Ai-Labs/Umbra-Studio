@@ -3544,7 +3544,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     }
     showToast(
       workspace === 'waifudiffusion'
-        ? `Sent to Waifu Diffusion: ${item.name}`
+        ? `Sent to Visual Analysis: ${item.name}`
         : `Sent to Metadata Scanner: ${item.name}`,
       'success'
     );

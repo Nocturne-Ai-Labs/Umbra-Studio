@@ -32025,6 +32025,128 @@ const server = Bun.serve<any>({
         }
       }
 
+      if (path === '/api/metadata/caption-image' && method === 'POST') {
+        let cleanupUploadPath: string | null = null;
+        try {
+          const imageExts = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']);
+          const maxUploadBytes = 32 * 1024 * 1024;
+          const defaultModelRepo = 'prithivMLmods/Qwen2-VL-2B-Abliterated-Caption-it';
+          const allowedModelRepos = new Set([defaultModelRepo]);
+          let imagePath = '';
+          let sourcePath = '';
+          let sourceName = '';
+          let modelRepo = defaultModelRepo;
+          let device: 'auto' | 'cpu' | 'cuda' = 'auto';
+          let maxNewTokens = 192;
+
+          const parseDevice = (value: unknown): 'auto' | 'cpu' | 'cuda' => {
+            const candidate = String(value || '').trim().toLowerCase();
+            return candidate === 'cpu' || candidate === 'cuda' ? candidate : 'auto';
+          };
+          const parseMaxNewTokens = (value: unknown): number => {
+            const parsed = Number(String(value ?? '').trim());
+            return Number.isFinite(parsed) ? Math.max(32, Math.min(512, Math.floor(parsed))) : 192;
+          };
+
+          const contentType = req.headers.get('content-type') || '';
+          if (contentType.includes('multipart/form-data')) {
+            const form = await req.formData();
+            const uploaded = form.get('image');
+            if (!(uploaded instanceof Blob)) return json({ error: 'Image file required' }, 400);
+            if (uploaded.size > maxUploadBytes) {
+              return json({ error: 'Upload is too large. Max 32 MB.', size: uploaded.size }, 413);
+            }
+
+            const uploadedName = String((uploaded as any)?.name || 'upload.png').trim() || 'upload.png';
+            sourceName = uploadedName;
+            const uploadedExt = extname(uploadedName).toLowerCase();
+            const safeExt = imageExts.has(uploadedExt) ? uploadedExt : '.png';
+            const fileBuffer = Buffer.from(await uploaded.arrayBuffer());
+            if (!detectWaifuTaggerImageFormat(fileBuffer.subarray(0, 32))) {
+              return json({ error: 'Natural captioning could not identify this upload as an image.' }, 400);
+            }
+            const tempDir = join(os.tmpdir(), 'umbra-natural-captioner');
+            await fs.mkdir(tempDir, { recursive: true });
+            cleanupUploadPath = join(tempDir, `${Date.now()}-${crypto.randomUUID()}${safeExt}`);
+            await fs.writeFile(cleanupUploadPath, fileBuffer);
+            imagePath = cleanupUploadPath;
+            modelRepo = String(form.get('modelRepo') || defaultModelRepo).trim() || defaultModelRepo;
+            device = parseDevice(form.get('device'));
+            maxNewTokens = parseMaxNewTokens(form.get('maxNewTokens'));
+          } else {
+            const body = await req.json() as Record<string, unknown>;
+            const rawPath = String(body.path || '').trim();
+            if (!rawPath) return json({ error: 'Path required' }, 400);
+            sourcePath = rawPath;
+            sourceName = basename(rawPath);
+
+            const resolved = resolvePath(rawPath, { allowOutsideRoot: true });
+            if (resolved?.fullPath) {
+              imagePath = resolved.fullPath;
+            } else {
+              let fullPath = rawPath;
+              if (!isAbsolutePathInput(rawPath)) {
+                fullPath = join(USER_DIR, rawPath);
+                if (!existsSync(fullPath)) fullPath = join(ROOT_DIR, rawPath);
+              }
+              imagePath = fullPath;
+            }
+            modelRepo = String(body.modelRepo || defaultModelRepo).trim() || defaultModelRepo;
+            device = parseDevice(body.device);
+            maxNewTokens = parseMaxNewTokens(body.maxNewTokens);
+          }
+
+          if (!allowedModelRepos.has(modelRepo)) {
+            return json({ error: `Unsupported natural caption model: ${modelRepo}` }, 400);
+          }
+          if (!imagePath || !existsSync(imagePath)) {
+            return json({ error: 'Image file not found', path: sourcePath || imagePath }, 404);
+          }
+          const imageStats = statSync(imagePath);
+          if (!imageStats.isFile()) return json({ error: 'Not a file' }, 400);
+          if (imageStats.size <= 0) return json({ error: 'Image file is empty' }, 400);
+          if (imageStats.size > maxUploadBytes) {
+            return json({ error: 'Image file is too large. Max 32 MB.', size: imageStats.size }, 413);
+          }
+          const imageExt = extname(imagePath).toLowerCase();
+          if (!imageExts.has(imageExt)) {
+            return json({ error: `Unsupported image type: ${imageExt || 'unknown'}` }, 400);
+          }
+          const headerBuffer = await fs.readFile(imagePath)
+            .then((buffer) => buffer.subarray(0, 32))
+            .catch(() => Buffer.alloc(0));
+          if (!detectWaifuTaggerImageFormat(Buffer.from(headerBuffer))) {
+            return json({ error: 'Natural captioning could not identify this image file.' }, 400);
+          }
+
+          const run = await runNaturalCaptioner({
+            imagePaths: [imagePath],
+            modelRepo,
+            device,
+            maxNewTokens,
+          });
+          const result = Array.isArray(run?.results) ? run.results[0] : null;
+          if (!result?.success || !String(result?.caption || '').trim()) {
+            return json({ error: String(result?.error || 'Natural caption result was missing') }, 500);
+          }
+          return json({
+            success: true,
+            sourcePath: sourcePath || sourceName,
+            name: sourceName || basename(imagePath),
+            modelRepo,
+            device: String(run?.device || device),
+            maxNewTokens,
+            caption: String(result.caption).trim(),
+          });
+        } catch (error: any) {
+          return json({ error: error?.message || 'Failed to caption image' }, 500);
+        } finally {
+          if (cleanupUploadPath) {
+            await fs.rm(cleanupUploadPath, { force: true }).catch(() => undefined);
+          }
+        }
+      }
+
       if (path === '/api/metadata/tag-waifu' && method === 'POST') {
         let cleanupUploadPath: string | null = null;
         try {

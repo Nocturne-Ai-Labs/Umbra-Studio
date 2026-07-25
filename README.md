@@ -111,8 +111,8 @@ download out of the release asset and creates it on demand.
 ### First-Time Setup And Migration
 
 The first launch opens a setup wizard before the normal workspace. Choose
-English or Japanese, then either start with the clean portable folders or
-select a previous extracted Umbra Studio version.
+English, Japanese, Simplified Chinese, or Korean, then either start with the
+clean portable folders or select a previous extracted Umbra Studio version.
 
 Migration is deliberately handled by an external worker:
 

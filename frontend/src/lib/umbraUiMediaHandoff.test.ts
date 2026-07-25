@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ImageMetadata } from '../utils/metadata';
 import {
+  applyUmbraUiMediaPromptOverride,
   buildUmbraUiMediaGenerationSnapshot,
   normalizeUmbraUiMediaHandoff,
   normalizeUmbraUiMediaInpaintSnapshot,
@@ -365,5 +366,44 @@ describe('Umbra UI media handoff metadata recovery', () => {
         variantName: 'Hands on hips',
       },
     ]);
+  });
+
+  test('uses an Inspector caption as the positive prompt without dropping generation metadata', () => {
+    const metadataGeneration = {
+      positivePrompt: 'stale embedded prompt',
+      negativePrompt: 'artifact',
+      modelFamily: 'anima',
+      modelType: 'checkpoint',
+      checkpointName: 'models/anima.safetensors',
+      vaeName: '',
+      seed: 91,
+      steps: 24,
+      cfg: 5,
+      samplerName: 'euler',
+      scheduler: 'normal',
+      loras: [],
+    };
+
+    const snapshot = applyUmbraUiMediaPromptOverride(
+      metadataGeneration,
+      'A woman in a red jacket standing under city lights.',
+      'Natural Caption',
+    );
+
+    expect(snapshot).toMatchObject({
+      positivePrompt: 'A woman in a red jacket standing under city lights.',
+      negativePrompt: 'artifact',
+      seed: 91,
+      steps: 24,
+      cfg: 5,
+      samplerName: 'euler',
+      scheduler: 'normal',
+      checkpointName: 'models/anima.safetensors',
+      positivePromptSegments: [{
+        text: 'A woman in a red jacket standing under city lights.',
+        label: 'Natural Caption',
+        slotType: 'caption',
+      }],
+    });
   });
 });

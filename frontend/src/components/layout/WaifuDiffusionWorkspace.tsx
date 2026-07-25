@@ -1,8 +1,26 @@
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Copy, FolderOpen, Loader2, Sparkles, Trash2, Upload, X } from 'lucide-react';
+import {
+  Copy,
+  FileText,
+  Film,
+  FolderOpen,
+  Image as ImageIcon,
+  Images,
+  Loader2,
+  Paintbrush,
+  Sparkles,
+  Tags,
+  Trash2,
+  Upload,
+  X,
+} from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { showInFileExplorer } from '@/utils/fileExplorer';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
+import {
+  stageUmbraUiMediaHandoff,
+  type UmbraUiMediaHandoffMode,
+} from '@/lib/umbraUiMediaHandoff';
 import {
   getWaifuPrependPresetsSnapshot,
   normalizeWaifuPreset,
@@ -39,6 +57,19 @@ interface WaifuTaggerState {
   error?: string;
 }
 
+interface NaturalCaptionResult {
+  modelRepo: string;
+  device: string;
+  maxNewTokens: number;
+  caption: string;
+}
+
+interface NaturalCaptionState {
+  status: 'idle' | 'loading' | 'done' | 'error';
+  result?: NaturalCaptionResult;
+  error?: string;
+}
+
 interface WaifuItem {
   id: string;
   path: string;
@@ -50,6 +81,7 @@ interface WaifuItem {
   size: number;
   isVideo: boolean;
   waifuTagger: WaifuTaggerState;
+  naturalCaption: NaturalCaptionState;
 }
 
 const WAIFU_WORKSPACE_PERSIST_KEY = 'umbra_waifu_workspace_paths_v1';
@@ -99,11 +131,21 @@ const WAIFU_MODEL_OPTIONS = [
   { id: 'SmilingWolf/wd-eva02-large-tagger-v3', label: 'wd-eva02-large-tagger-v3' },
   { id: 'SmilingWolf/wd-swinv2-tagger-v3', label: 'wd-swinv2-tagger-v3' },
 ];
+const NATURAL_MODEL_OPTIONS = [
+  {
+    id: 'prithivMLmods/Qwen2-VL-2B-Abliterated-Caption-it',
+    label: 'Qwen2-VL 2B Uncensored',
+  },
+];
+
+type VisualAnalysisMode = 'tags' | 'caption';
+
 export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: boolean }) {
   const [items, setItems] = useState<WaifuItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [batchTagging, setBatchTagging] = useState(false);
+  const [analysisMode, setAnalysisMode] = useState<VisualAnalysisMode>('tags');
   const itemsRef = useRef<WaifuItem[]>([]);
   const [waifuOptions, setWaifuOptions] = useState(() => ({
     modelRepo: WAIFU_MODEL_OPTIONS[0].id,
@@ -118,14 +160,23 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
     prependTags: '',
   }));
   const [prependPresetDraft, setPrependPresetDraft] = useState('');
-  const { activeWorkspace, showToast, ui, clearScannedImport } = useStore();
+  const [captionOptions, setCaptionOptions] = useState<{
+    modelRepo: string;
+    device: 'auto' | 'cpu' | 'cuda';
+    maxNewTokens: number;
+  }>({
+    modelRepo: NATURAL_MODEL_OPTIONS[0].id,
+    device: 'auto',
+    maxNewTokens: 192,
+  });
+  const { activeWorkspace, setActiveWorkspace, showToast, ui, clearScannedImport } = useStore();
   const prependPresets = useSyncExternalStore(
     subscribeWaifuPrependPresets,
     getWaifuPrependPresetsSnapshot,
     () => []
   );
 
-  const isActive = activeWorkspace === 'waifudiffusion' || (activeWorkspace === 'imageinspector' && ui.imageInspectorTab === 'waifu');
+  const isActive = activeWorkspace === 'imageinspector' && ui.imageInspectorTab === 'waifu';
 
   useEffect(() => {
     itemsRef.current = items;
@@ -158,6 +209,7 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
       size: blob.size,
       isVideo: !!isVideo,
       waifuTagger: { status: 'idle' },
+      naturalCaption: { status: 'idle' },
     };
 
     setItems((prev) => {
@@ -188,6 +240,7 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
         size: 0,
         isVideo,
         waifuTagger: { status: 'idle' },
+        naturalCaption: { status: 'idle' },
       };
 
       setItems((prev) => {
@@ -328,6 +381,12 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
     )));
   }, []);
 
+  const setItemCaptionState = useCallback((itemId: string, nextState: NaturalCaptionState) => {
+    setItems((prev) => prev.map((item) => (
+      item.id === itemId ? { ...item, naturalCaption: nextState } : item
+    )));
+  }, []);
+
   const copyToClipboard = useCallback(async (text: string, successMessage: string) => {
     try {
       if (!text.trim()) return;
@@ -408,26 +467,93 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
     }
   }, [setItemTaggerState, showToast, waifuOptions]);
 
-  const runWaifuTaggerForAll = useCallback(async () => {
-    if (batchTagging) return;
-    const taggableItems = itemsRef.current.filter((item) => (
-      !item.isVideo && item.waifuTagger.status !== 'loading'
-    ));
-    if (taggableItems.length === 0) {
-      showToast('No images ready to tag', 'error');
+  const runNaturalCaptionForItem = useCallback(async (item: WaifuItem) => {
+    if (item.isVideo) {
+      showToast('Natural captioning only supports images', 'error');
       return;
     }
 
+    setItemCaptionState(item.id, { status: 'loading' });
+    try {
+      const normalizedPath = String(item.path || '').trim();
+      const hasPath = normalizedPath.length > 0 && /[\\/]/.test(normalizedPath);
+      let response: Response;
+      if (hasPath) {
+        response = await fetch('/api/metadata/caption-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            path: normalizedPath,
+            modelRepo: captionOptions.modelRepo,
+            device: captionOptions.device,
+            maxNewTokens: captionOptions.maxNewTokens,
+          }),
+        });
+      } else {
+        if (!item.blob) {
+          throw new Error('This image is no longer available in memory. Drop it again or use a saved file path.');
+        }
+        const formData = new FormData();
+        formData.append('image', item.blob, item.name);
+        formData.append('modelRepo', captionOptions.modelRepo);
+        formData.append('device', captionOptions.device);
+        formData.append('maxNewTokens', String(captionOptions.maxNewTokens));
+        response = await fetch('/api/metadata/caption-image', { method: 'POST', body: formData });
+      }
+
+      const payload = await response.json().catch(() => null) as (NaturalCaptionResult & {
+        error?: string;
+        success?: boolean;
+      }) | null;
+      if (!response.ok || !payload || payload.error || payload.success === false) {
+        throw new Error(payload?.error || `Captioning failed (${response.status})`);
+      }
+      setItemCaptionState(item.id, { status: 'done', result: payload });
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Captioning failed';
+      setItemCaptionState(item.id, { status: 'error', error: errorMessage });
+      showToast(errorMessage, 'error');
+    }
+  }, [captionOptions, setItemCaptionState, showToast]);
+
+  const runSelectedAnalysis = useCallback(async () => {
+    if (!selectedItem) return;
+    if (analysisMode === 'caption') {
+      await runNaturalCaptionForItem(selectedItem);
+    } else {
+      await runWaifuTaggerForItem(selectedItem);
+    }
+  }, [analysisMode, runNaturalCaptionForItem, runWaifuTaggerForItem, selectedItem]);
+
+  const runAnalysisForAll = useCallback(async () => {
+    if (batchTagging) return;
+    const analyzableItems = itemsRef.current.filter((item) => (
+      !item.isVideo
+      && (analysisMode === 'caption'
+        ? item.naturalCaption.status !== 'loading'
+        : item.waifuTagger.status !== 'loading')
+    ));
+    if (analyzableItems.length === 0) {
+      showToast('No images ready to analyze', 'error');
+      return;
+    }
     setBatchTagging(true);
     try {
-      for (const item of taggableItems) {
-        await runWaifuTaggerForItem(item);
+      for (const item of analyzableItems) {
+        if (analysisMode === 'caption') {
+          await runNaturalCaptionForItem(item);
+        } else {
+          await runWaifuTaggerForItem(item);
+        }
       }
-      showToast(`Tagged ${taggableItems.length} image${taggableItems.length === 1 ? '' : 's'}`, 'success');
+      showToast(
+        `${analysisMode === 'caption' ? 'Captioned' : 'Tagged'} ${analyzableItems.length} image${analyzableItems.length === 1 ? '' : 's'}`,
+        'success',
+      );
     } finally {
       setBatchTagging(false);
     }
-  }, [batchTagging, runWaifuTaggerForItem, showToast]);
+  }, [analysisMode, batchTagging, runNaturalCaptionForItem, runWaifuTaggerForItem, showToast]);
 
   const getBooruExportString = useCallback((result: WaifuTagResult): string => {
     const toTagArray = (raw: string): string[] => {
@@ -465,6 +591,66 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
   const booruExportString = selectedItem?.waifuTagger.result
     ? getBooruExportString(selectedItem.waifuTagger.result)
     : '';
+  const naturalCaptionText = String(selectedItem?.naturalCaption.result?.caption || '').trim();
+  const inspectorPromptText = naturalCaptionText || booruExportString;
+
+  const ensureHandoffPath = useCallback(async (item: WaifuItem): Promise<string> => {
+    const normalizedPath = String(item.path || '').trim();
+    if (normalizedPath && /[\\/]/.test(normalizedPath)) return normalizedPath;
+    if (!item.blob) throw new Error('Drop the image again before sending it to Umbra UI.');
+
+    const formData = new FormData();
+    formData.append('files', item.blob, item.name);
+    formData.append('destination', 'User/Temp/ImageInspector');
+    formData.append('checkDuplicates', 'false');
+    const response = await fetch('/api/fs/upload', { method: 'POST', body: formData });
+    const payload = await response.json().catch(() => null) as {
+      error?: string;
+      results?: Array<{ success?: boolean; path?: string; error?: string }>;
+    } | null;
+    const uploaded = payload?.results?.find((entry) => entry.success && entry.path);
+    if (!response.ok || !uploaded?.path) {
+      throw new Error(payload?.error || payload?.results?.find((entry) => entry.error)?.error || 'Failed to stage the image');
+    }
+    setItems((prev) => prev.map((entry) => (
+      entry.id === item.id ? { ...entry, path: String(uploaded.path) } : entry
+    )));
+    return String(uploaded.path);
+  }, []);
+
+  const sendSelectedToUmbraUi = useCallback(async (mode: UmbraUiMediaHandoffMode) => {
+    if (!selectedItem || selectedItem.isVideo) return;
+    try {
+      const path = await ensureHandoffPath(selectedItem);
+      setActiveWorkspace('umbraui');
+      await stageUmbraUiMediaHandoff({
+        mode,
+        path,
+        name: selectedItem.name,
+        imageUrl: `/api/fs/image?${new URLSearchParams({ path }).toString()}`,
+        source: 'image-inspector',
+        promptText: inspectorPromptText || undefined,
+        promptLabel: naturalCaptionText ? 'Natural Caption' : 'Booru Tags',
+      });
+      const label = mode === 'txt2img'
+        ? 'TXT2IMG'
+        : mode === 'img2img'
+          ? 'IMG2IMG'
+          : mode === 'inpaint'
+            ? 'Inpaint'
+            : 'IMG2VID';
+      showToast(`Sent image and ${inspectorPromptText ? 'analysis prompt' : 'metadata'} to ${label}`, 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to send image to Umbra UI', 'error');
+    }
+  }, [
+    ensureHandoffPath,
+    inspectorPromptText,
+    naturalCaptionText,
+    selectedItem,
+    setActiveWorkspace,
+    showToast,
+  ]);
 
   const addPrependPreset = useCallback((rawPreset: string) => {
     const preset = normalizeWaifuPreset(rawPreset);
@@ -537,9 +723,9 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
             ) : (
               <img src={item.previewUrl || item.blobUrl} alt={item.name} className="h-full w-full object-cover" loading="lazy" decoding="async" />
             )}
-            {item.waifuTagger.status !== 'idle' ? (
+            {(analysisMode === 'caption' ? item.naturalCaption.status : item.waifuTagger.status) !== 'idle' ? (
               <div className="absolute bottom-1 right-1 rounded border border-black/40 bg-black/70 px-1 text-[9px] font-semibold uppercase tracking-wide text-zinc-200">
-                {item.waifuTagger.status}
+                {analysisMode === 'caption' ? item.naturalCaption.status : item.waifuTagger.status}
               </div>
             ) : null}
           </div>
@@ -557,26 +743,38 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
               <div>
                 <h2 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.18em] text-[var(--umbra-text)]">
                   <Sparkles size={16} className="text-[var(--umbra-accent)]" />
-                  Waifu Diffusion
+                  Visual Analysis
                 </h2>
-                <p className="mt-0.5 text-xs umbra-text-muted">Dedicated WD tagger workspace for booru-ready tags</p>
+                <p className="mt-0.5 text-xs umbra-text-muted">Booru tagging and natural-language captions for generation</p>
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => selectedItem && runWaifuTaggerForItem(selectedItem)}
-                  disabled={batchTagging || !selectedItem || selectedItem.waifuTagger.status === 'loading' || selectedItem.isVideo}
+                  onClick={() => void runSelectedAnalysis()}
+                  disabled={batchTagging || !selectedItem || selectedItem.isVideo || (
+                    analysisMode === 'caption'
+                      ? selectedItem.naturalCaption.status === 'loading'
+                      : selectedItem.waifuTagger.status === 'loading'
+                  )}
                   className="inline-flex items-center gap-1.5 rounded border border-[var(--umbra-accent)]/45 bg-[var(--umbra-accent)]/25 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:brightness-110 disabled:border-white/10 disabled:bg-zinc-800/60 disabled:text-zinc-500"
                 >
-                  {selectedItem?.waifuTagger.status === 'loading' ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-                  {selectedItem?.waifuTagger.status === 'loading' ? 'Tagging' : 'Tag Selected'}
+                  {(analysisMode === 'caption'
+                    ? selectedItem?.naturalCaption.status
+                    : selectedItem?.waifuTagger.status) === 'loading'
+                    ? <Loader2 size={13} className="animate-spin" />
+                    : analysisMode === 'caption' ? <FileText size={13} /> : <Tags size={13} />}
+                  {(analysisMode === 'caption'
+                    ? selectedItem?.naturalCaption.status
+                    : selectedItem?.waifuTagger.status) === 'loading'
+                    ? 'Analyzing'
+                    : analysisMode === 'caption' ? 'Caption Selected' : 'Tag Selected'}
                 </button>
                 <button
-                  onClick={() => void runWaifuTaggerForAll()}
-                  disabled={batchTagging || items.every((item) => item.isVideo || item.waifuTagger.status === 'loading')}
+                  onClick={() => void runAnalysisForAll()}
+                  disabled={batchTagging || items.every((item) => item.isVideo)}
                   className="inline-flex items-center gap-1.5 rounded border border-white/15 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition umbra-surface-soft hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {batchTagging ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-                  {batchTagging ? 'Tagging Batch' : 'Tag All'}
+                  {batchTagging ? 'Analyzing Batch' : analysisMode === 'caption' ? 'Caption All' : 'Tag All'}
                 </button>
                 {!isUmbraRemoteClient() ? (
                   <button
@@ -602,20 +800,32 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
           {hideHeader && (
             <div className="flex items-center justify-end gap-2 border-b border-white/10 bg-black/20 px-3 py-1.5 backdrop-blur-xl z-10">
               <button
-                onClick={() => selectedItem && runWaifuTaggerForItem(selectedItem)}
-                disabled={batchTagging || !selectedItem || selectedItem.waifuTagger.status === 'loading' || selectedItem.isVideo}
+                onClick={() => void runSelectedAnalysis()}
+                disabled={batchTagging || !selectedItem || selectedItem.isVideo || (
+                  analysisMode === 'caption'
+                    ? selectedItem.naturalCaption.status === 'loading'
+                    : selectedItem.waifuTagger.status === 'loading'
+                )}
                 className="inline-flex items-center gap-1.5 rounded border border-[var(--umbra-accent)]/45 bg-[var(--umbra-accent)]/25 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white transition hover:brightness-110 disabled:border-white/10 disabled:bg-zinc-800/60 disabled:text-zinc-500"
               >
-                {selectedItem?.waifuTagger.status === 'loading' ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                {selectedItem?.waifuTagger.status === 'loading' ? 'Tagging' : 'Tag Selected'}
+                {(analysisMode === 'caption'
+                  ? selectedItem?.naturalCaption.status
+                  : selectedItem?.waifuTagger.status) === 'loading'
+                  ? <Loader2 size={12} className="animate-spin" />
+                  : analysisMode === 'caption' ? <FileText size={12} /> : <Tags size={12} />}
+                {(analysisMode === 'caption'
+                  ? selectedItem?.naturalCaption.status
+                  : selectedItem?.waifuTagger.status) === 'loading'
+                  ? 'Analyzing'
+                  : analysisMode === 'caption' ? 'Caption' : 'Tag Selected'}
               </button>
               <button
-                onClick={() => void runWaifuTaggerForAll()}
-                disabled={batchTagging || items.every((item) => item.isVideo || item.waifuTagger.status === 'loading')}
+                onClick={() => void runAnalysisForAll()}
+                disabled={batchTagging || items.every((item) => item.isVideo)}
                 className="inline-flex items-center gap-1.5 rounded border border-white/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide transition umbra-surface-soft hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {batchTagging ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                {batchTagging ? 'Batch' : 'Tag All'}
+                {batchTagging ? 'Batch' : analysisMode === 'caption' ? 'Caption All' : 'Tag All'}
               </button>
               {!isUmbraRemoteClient() ? (
                 <button
@@ -643,8 +853,8 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
             {!selectedItem ? (
               <div className="text-center umbra-text-faint">
                 <Upload size={56} className="mx-auto mb-3 opacity-30" />
-                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Drag images into Waifu Diffusion</p>
-                <p className="mt-1 text-xs umbra-text-muted">Then run Tag Selected</p>
+                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Drag Images Into Visual Analysis</p>
+                <p className="mt-1 text-xs umbra-text-muted">Then choose tags or a natural caption</p>
               </div>
             ) : selectedItem.isVideo ? (
               <video src={selectedItem.blobUrl} controls className="h-full max-h-full w-full max-w-full rounded-md border border-white/10 object-contain shadow-2xl shadow-black/50 umbra-surface-soft" preload="metadata" />
@@ -672,104 +882,180 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
               </div>
             )}
 
-            <div className="glass-panel rounded-lg p-3 border-white/10 umbra-surface-soft">
-              <p className="text-[11px] umbra-text-faint uppercase tracking-wide mb-2">Model & Thresholds</p>
+            <div className="glass-panel rounded-lg border-white/10 p-3 umbra-surface-soft">
+              <p className="mb-2 text-[11px] uppercase tracking-wide umbra-text-faint">Analysis Type</p>
+              <div className="mb-3 grid grid-cols-2 rounded border border-white/10 bg-black/30 p-1">
+                <button
+                  type="button"
+                  onClick={() => setAnalysisMode('tags')}
+                  className={`inline-flex min-h-9 items-center justify-center gap-2 rounded px-3 text-xs font-semibold uppercase tracking-wide transition ${
+                    analysisMode === 'tags'
+                      ? 'bg-[var(--umbra-accent)]/25 text-white'
+                      : 'umbra-text-muted hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <Tags size={14} />
+                  Booru Tags
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAnalysisMode('caption')}
+                  className={`inline-flex min-h-9 items-center justify-center gap-2 rounded px-3 text-xs font-semibold uppercase tracking-wide transition ${
+                    analysisMode === 'caption'
+                      ? 'bg-[var(--umbra-accent)]/25 text-white'
+                      : 'umbra-text-muted hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <FileText size={14} />
+                  Natural Caption
+                </button>
+              </div>
 
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                <label className="text-[11px] umbra-text-faint">
-                  Model
-                  <select
-                    value={waifuOptions.modelRepo}
-                    onChange={(e) => setWaifuOptions((prev) => ({ ...prev, modelRepo: e.target.value }))}
-                    className="umbra-input umbra-themed-select mt-1 w-full rounded px-2 py-1 text-xs"
-                  >
-                    {WAIFU_MODEL_OPTIONS.map((option) => (
-                      <option key={option.id} value={option.id}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-[11px] umbra-text-faint">
-                  Max Tags
-                  <input
-                    type="number"
-                    min={1}
-                    max={500}
-                    value={waifuOptions.maxTags}
-                    onChange={(e) => {
-                      const next = Number(e.target.value);
-                      setWaifuOptions((prev) => ({
+              {analysisMode === 'caption' ? (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <label className="text-[11px] umbra-text-faint sm:col-span-3">
+                    Caption Model
+                    <select
+                      value={captionOptions.modelRepo}
+                      onChange={(event) => setCaptionOptions((prev) => ({ ...prev, modelRepo: event.target.value }))}
+                      className="umbra-input umbra-themed-select mt-1 w-full rounded px-2 py-2 text-xs"
+                    >
+                      {NATURAL_MODEL_OPTIONS.map((option) => (
+                        <option key={option.id} value={option.id}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-[11px] umbra-text-faint">
+                    Device
+                    <select
+                      value={captionOptions.device}
+                      onChange={(event) => setCaptionOptions((prev) => ({
                         ...prev,
-                        maxTags: Number.isFinite(next) ? Math.max(1, Math.min(500, Math.floor(next))) : prev.maxTags,
-                      }));
-                    }}
-                    className="umbra-input mt-1 w-full rounded px-2 py-1 text-xs"
-                  />
-                </label>
-              </div>
+                        device: event.target.value as 'auto' | 'cpu' | 'cuda',
+                      }))}
+                      className="umbra-input umbra-themed-select mt-1 w-full rounded px-2 py-2 text-xs"
+                    >
+                      <option value="auto">Auto</option>
+                      <option value="cpu">CPU</option>
+                      <option value="cuda">GPU</option>
+                    </select>
+                  </label>
+                  <label className="text-[11px] umbra-text-faint sm:col-span-2">
+                    Caption Length
+                    <input
+                      type="number"
+                      min={32}
+                      max={512}
+                      step={8}
+                      value={captionOptions.maxNewTokens}
+                      onChange={(event) => setCaptionOptions((prev) => ({
+                        ...prev,
+                        maxNewTokens: Math.max(32, Math.min(512, Math.floor(Number(event.target.value) || 32))),
+                      }))}
+                      className="umbra-input mt-1 w-full rounded px-2 py-2 text-xs"
+                    />
+                  </label>
+                </div>
+              ) : (
+                <>
+                  <div className="mb-3 grid grid-cols-2 gap-2">
+                    <label className="text-[11px] umbra-text-faint">
+                      Model
+                      <select
+                        value={waifuOptions.modelRepo}
+                        onChange={(event) => setWaifuOptions((prev) => ({ ...prev, modelRepo: event.target.value }))}
+                        className="umbra-input umbra-themed-select mt-1 w-full rounded px-2 py-1 text-xs"
+                      >
+                        {WAIFU_MODEL_OPTIONS.map((option) => (
+                          <option key={option.id} value={option.id}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-[11px] umbra-text-faint">
+                      Max Tags
+                      <input
+                        type="number"
+                        min={1}
+                        max={500}
+                        value={waifuOptions.maxTags}
+                        onChange={(event) => {
+                          const next = Number(event.target.value);
+                          setWaifuOptions((prev) => ({
+                            ...prev,
+                            maxTags: Number.isFinite(next) ? Math.max(1, Math.min(500, Math.floor(next))) : prev.maxTags,
+                          }));
+                        }}
+                        className="umbra-input mt-1 w-full rounded px-2 py-1 text-xs"
+                      />
+                    </label>
+                  </div>
 
-              <div className="space-y-2 mb-3">
-                <label className="block text-[11px] umbra-text-faint">
-                  General Threshold: {waifuOptions.generalThreshold.toFixed(2)}
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={waifuOptions.generalThreshold}
-                    onChange={(e) => setWaifuOptions((prev) => ({ ...prev, generalThreshold: Number(e.target.value) }))}
-                    className="w-full mt-1 accent-[var(--umbra-accent)]"
-                    disabled={waifuOptions.generalMcutEnabled}
-                  />
-                </label>
-                <label className="block text-[11px] umbra-text-faint">
-                  Character Threshold: {waifuOptions.characterThreshold.toFixed(2)}
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={waifuOptions.characterThreshold}
-                    onChange={(e) => setWaifuOptions((prev) => ({ ...prev, characterThreshold: Number(e.target.value) }))}
-                    className="w-full mt-1 accent-[var(--umbra-accent)]"
-                    disabled={waifuOptions.characterMcutEnabled}
-                  />
-                </label>
-                <label className="block text-[11px] umbra-text-faint">
-                  Rating Threshold: {waifuOptions.ratingThreshold.toFixed(2)}
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={waifuOptions.ratingThreshold}
-                    onChange={(e) => setWaifuOptions((prev) => ({ ...prev, ratingThreshold: Number(e.target.value) }))}
-                    className="w-full mt-1 accent-[var(--umbra-accent)]"
-                  />
-                </label>
-              </div>
+                  <div className="mb-3 space-y-2">
+                    <label className="block text-[11px] umbra-text-faint">
+                      General Threshold: {waifuOptions.generalThreshold.toFixed(2)}
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={waifuOptions.generalThreshold}
+                        onChange={(event) => setWaifuOptions((prev) => ({ ...prev, generalThreshold: Number(event.target.value) }))}
+                        className="mt-1 w-full accent-[var(--umbra-accent)]"
+                        disabled={waifuOptions.generalMcutEnabled}
+                      />
+                    </label>
+                    <label className="block text-[11px] umbra-text-faint">
+                      Character Threshold: {waifuOptions.characterThreshold.toFixed(2)}
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={waifuOptions.characterThreshold}
+                        onChange={(event) => setWaifuOptions((prev) => ({ ...prev, characterThreshold: Number(event.target.value) }))}
+                        className="mt-1 w-full accent-[var(--umbra-accent)]"
+                        disabled={waifuOptions.characterMcutEnabled}
+                      />
+                    </label>
+                    <label className="block text-[11px] umbra-text-faint">
+                      Rating Threshold: {waifuOptions.ratingThreshold.toFixed(2)}
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={waifuOptions.ratingThreshold}
+                        onChange={(event) => setWaifuOptions((prev) => ({ ...prev, ratingThreshold: Number(event.target.value) }))}
+                        className="mt-1 w-full accent-[var(--umbra-accent)]"
+                      />
+                    </label>
+                  </div>
 
-              <div className="flex flex-wrap gap-3 text-[11px] umbra-text-muted">
-                <label className="inline-flex items-center gap-1.5">
-                  <input
-                    type="checkbox"
-                    checked={waifuOptions.generalMcutEnabled}
-                    onChange={(e) => setWaifuOptions((prev) => ({ ...prev, generalMcutEnabled: e.target.checked }))}
-                    className="accent-[var(--umbra-accent)]"
-                  />
-                  Auto general threshold (MCut)
-                </label>
-                <label className="inline-flex items-center gap-1.5">
-                  <input
-                    type="checkbox"
-                    checked={waifuOptions.characterMcutEnabled}
-                    onChange={(e) => setWaifuOptions((prev) => ({ ...prev, characterMcutEnabled: e.target.checked }))}
-                    className="accent-[var(--umbra-accent)]"
-                  />
-                  Auto character threshold (MCut)
-                </label>
-              </div>
+                  <div className="flex flex-wrap gap-3 text-[11px] umbra-text-muted">
+                    <label className="inline-flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={waifuOptions.generalMcutEnabled}
+                        onChange={(event) => setWaifuOptions((prev) => ({ ...prev, generalMcutEnabled: event.target.checked }))}
+                        className="accent-[var(--umbra-accent)]"
+                      />
+                      Auto general threshold (MCut)
+                    </label>
+                    <label className="inline-flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={waifuOptions.characterMcutEnabled}
+                        onChange={(event) => setWaifuOptions((prev) => ({ ...prev, characterMcutEnabled: event.target.checked }))}
+                        className="accent-[var(--umbra-accent)]"
+                      />
+                      Auto character threshold (MCut)
+                    </label>
+                  </div>
+                </>
+              )}
             </div>
 
+            {analysisMode === 'tags' ? (
             <div className="glass-panel rounded-lg p-3 border-white/10 umbra-surface-soft">
               <p className="text-[11px] umbra-text-faint uppercase tracking-wide mb-2">Booru Export Format</p>
               <div className="flex flex-wrap gap-3 text-[11px] umbra-text-muted mb-2">
@@ -857,6 +1143,86 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
                 )}
               </div>
             </div>
+            ) : null}
+
+            {selectedItem?.naturalCaption.status === 'error' ? (
+              <div className="rounded border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">
+                {selectedItem.naturalCaption.error || 'Captioning failed'}
+              </div>
+            ) : null}
+
+            {selectedItem?.naturalCaption.status === 'done' && naturalCaptionText ? (
+              <div className="glass-panel rounded-lg border-white/10 p-3 umbra-surface-soft">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide umbra-text-faint">Natural Caption</p>
+                    <p className="mt-0.5 text-[10px] umbra-text-faint">
+                      {selectedItem.naturalCaption.result?.device?.toUpperCase()} · {selectedItem.naturalCaption.result?.maxNewTokens} tokens max
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void copyToClipboard(naturalCaptionText, 'Copied natural caption')}
+                    className="rounded p-1.5 transition umbra-icon-button"
+                    title="Copy natural caption"
+                  >
+                    <Copy size={15} />
+                  </button>
+                </div>
+                <p className="mt-2 break-words text-sm leading-6 text-[var(--umbra-text)]">{naturalCaptionText}</p>
+              </div>
+            ) : null}
+
+            {selectedItem && !selectedItem.isVideo ? (
+              <div className="glass-panel rounded-lg border-[var(--umbra-accent)]/25 p-3 umbra-surface-soft">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--umbra-accent)]">Send To Umbra UI</p>
+                    <p className="mt-0.5 text-[10px] umbra-text-faint">
+                      {inspectorPromptText ? 'Uses the current caption or tags as the positive prompt.' : 'Uses embedded image metadata when available.'}
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void sendSelectedToUmbraUi('txt2img')}
+                    className="inline-flex min-h-9 items-center justify-center gap-2 rounded border border-white/10 px-2 text-xs font-semibold uppercase tracking-wide transition hover:border-[var(--umbra-accent)]/45 hover:bg-[var(--umbra-accent)]/10"
+                    title="Use this analysis prompt in TXT2IMG"
+                  >
+                    <ImageIcon size={14} />
+                    TXT2IMG
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void sendSelectedToUmbraUi('img2img')}
+                    className="inline-flex min-h-9 items-center justify-center gap-2 rounded border border-white/10 px-2 text-xs font-semibold uppercase tracking-wide transition hover:border-[var(--umbra-accent)]/45 hover:bg-[var(--umbra-accent)]/10"
+                    title="Use this image as the IMG2IMG source"
+                  >
+                    <Images size={14} />
+                    IMG2IMG
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void sendSelectedToUmbraUi('inpaint')}
+                    className="inline-flex min-h-9 items-center justify-center gap-2 rounded border border-white/10 px-2 text-xs font-semibold uppercase tracking-wide transition hover:border-[var(--umbra-accent)]/45 hover:bg-[var(--umbra-accent)]/10"
+                    title="Open this image in Inpaint"
+                  >
+                    <Paintbrush size={14} />
+                    Inpaint
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void sendSelectedToUmbraUi('video')}
+                    className="inline-flex min-h-9 items-center justify-center gap-2 rounded border border-white/10 px-2 text-xs font-semibold uppercase tracking-wide transition hover:border-[var(--umbra-accent)]/45 hover:bg-[var(--umbra-accent)]/10"
+                    title="Use this image as the first IMG2VID frame"
+                  >
+                    <Film size={14} />
+                    IMG2VID
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             {selectedItem && selectedItem.waifuTagger.status === 'error' && (
               <div className="rounded bg-red-500/10 border border-red-500/30 p-2 text-xs text-red-300">

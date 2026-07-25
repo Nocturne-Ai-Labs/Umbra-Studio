@@ -74,9 +74,10 @@ function removeBrowserStorage(key: string) {
 }
 
 function languageName(language: UmbraAppLanguage, target: UmbraAppLanguage) {
-  return target === 'ja'
-    ? translate(language, 'language.japanese')
-    : translate(language, 'language.english');
+  if (target === 'ja') return translate(language, 'language.japanese');
+  if (target === 'zh-CN') return translate(language, 'language.chinese');
+  if (target === 'ko') return translate(language, 'language.korean');
+  return translate(language, 'language.english');
 }
 
 export function FirstRunGate({ children }: { children: React.ReactNode }) {
@@ -477,8 +478,8 @@ function FirstRunWizard({
                 <h2 className="mt-10 text-xs font-black uppercase tracking-[0.2em] text-zinc-400">
                   {t('onboarding.chooseLanguage')}
                 </h2>
-                <div className="mt-4 grid max-w-3xl gap-3 sm:grid-cols-2">
-                  {(['en', 'ja'] as UmbraAppLanguage[]).map((option) => {
+                <div className="mt-4 grid max-w-5xl gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  {(['en', 'ja', 'zh-CN', 'ko'] as UmbraAppLanguage[]).map((option) => {
                     const selected = language === option;
                     return (
                       <button
@@ -493,7 +494,15 @@ function FirstRunWizard({
                       >
                         <div>
                           <div className="text-base font-bold">{languageName(option, option)}</div>
-                          <div className="mt-1 text-xs text-zinc-500">{option === 'ja' ? 'Japanese' : 'English'}</div>
+                          <div className="mt-1 text-xs text-zinc-500">
+                            {option === 'ja'
+                              ? 'Japanese'
+                              : option === 'zh-CN'
+                                ? 'Simplified Chinese'
+                                : option === 'ko'
+                                  ? 'Korean'
+                                  : 'English'}
+                          </div>
                         </div>
                         {selected && <Check size={18} className="text-[var(--umbra-accent)]" />}
                       </button>

@@ -3631,7 +3631,7 @@ function GalleryMediaViewer({
                   <button type="button" data-umbra-gallery-viewer-action="scanner" onClick={onSendScanner} className="flex h-8 w-8 items-center justify-center rounded border border-white/10 text-zinc-300 hover:bg-white/10" title="Send to Metadata Scanner">
                     <ScanSearch size={15} />
                   </button>
-                  <button type="button" data-umbra-gallery-viewer-action="waifu" disabled={!canSendWaifu} onClick={onSendWaifu} className="flex h-8 w-8 items-center justify-center rounded border border-white/10 text-zinc-300 hover:bg-white/10 disabled:opacity-35" title="Send to Waifu Diffusion">
+                  <button type="button" data-umbra-gallery-viewer-action="waifu" disabled={!canSendWaifu} onClick={onSendWaifu} className="flex h-8 w-8 items-center justify-center rounded border border-white/10 text-zinc-300 hover:bg-white/10 disabled:opacity-35" title="Send to Visual Analysis">
                     <Sparkles size={15} />
                   </button>
                 </>
@@ -6200,7 +6200,7 @@ export function ReactGalleryWorkspace() {
         type: 'error',
         message: workspace === 'scanner'
           ? 'No valid items selected for Metadata Scanner'
-          : 'No valid images selected for Waifu Diffusion',
+          : 'No valid images selected for Visual Analysis',
       });
       return;
     }
@@ -6211,7 +6211,7 @@ export function ReactGalleryWorkspace() {
       type: 'success',
       message: workspace === 'scanner'
         ? `Sent ${normalizedPaths.length} item${normalizedPaths.length === 1 ? '' : 's'} to Metadata Scanner`
-        : `Sent ${normalizedPaths.length} image${normalizedPaths.length === 1 ? '' : 's'} to Waifu Diffusion`,
+        : `Sent ${normalizedPaths.length} image${normalizedPaths.length === 1 ? '' : 's'} to Visual Analysis`,
     });
   }, [addScannedImport, addToast, setActiveWorkspace]);
 
@@ -9506,7 +9506,7 @@ export function ReactGalleryWorkspace() {
         { label: 'Send to Umbra UI VID2VID', icon: <Video size={14} />, disabled: !targetVideoPath, action: () => void sendPathToUmbraUi(targetVideoPath, 'video', 'source_video') },
         { separator: true },
         { label: paths.length > 1 ? `Metadata Scanner (${paths.length})` : 'Metadata Scanner', icon: <ScanSearch size={14} />, action: () => sendSelectionToWorkspace(paths, 'scanner') },
-        { label: selectedImagePaths.length > 1 ? `Send to Waifu Diffusion (${selectedImagePaths.length})` : 'Send to Waifu Diffusion', icon: <Send size={14} />, disabled: selectedImagePaths.length === 0, action: () => sendSelectionToWorkspace(selectedImagePaths, 'waifudiffusion') },
+        { label: selectedImagePaths.length > 1 ? `Send to Visual Analysis (${selectedImagePaths.length})` : 'Send to Visual Analysis', icon: <Send size={14} />, disabled: selectedImagePaths.length === 0, action: () => sendSelectionToWorkspace(selectedImagePaths, 'waifudiffusion') },
         { separator: true },
       ] satisfies ContextMenuItem[] : []),
       { label: reorderPaths.length > 0 ? `Reorder ${reorderPaths.length > 1 ? `${reorderPaths.length} Items` : 'Selected'} Before` : 'Reorder Before', icon: <RotateCcw size={14} />, disabled: !canReorder, action: () => void reorderPathsRelativeToTarget(reorderPaths, targetPath, 'before') },

@@ -1079,7 +1079,7 @@ export function Filmstrip({
         onClick: () => onSendToScanner?.(ids),
       },
       {
-        label: 'Send to Waifu Diffusion',
+        label: 'Send to Visual Analysis',
         icon: <Send size={14} />,
         disabled: !onSendToWaifu || selectedImagePaths.length === 0,
         onClick: () => {

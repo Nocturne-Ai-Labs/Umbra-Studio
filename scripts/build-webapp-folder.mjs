@@ -466,53 +466,10 @@ function runNodeScript(args, label) {
   }
 }
 
-function writeWindowsLauncher() {
-  const launcherPath = path.join(publishRoot, 'Start-Umbra.bat');
-  const script = `@echo off
-setlocal
-cd /d "%~dp0"
-set "BUN_BIN=Runtime\\Bun\\win32\\bun.exe"
-if not exist "%BUN_BIN%" (
-  echo [ERROR] Bundled Bun runtime missing: %BUN_BIN%
-  pause
-  exit /b 1
-)
-set "UMBRA_ROOT=%~dp0"
-set "UMBRA_TERMINAL_MODE=visible"
-set "UMBRA_LAUNCHER_IN_TERMINAL=1"
-set "UMBRA_ALREADY_RUNNING_EXIT_CODE=64"
-"%BUN_BIN%" "resources\\app\\launcher\\UmbraWebLauncher.ts" %*
-set "UMBRA_EXIT=%ERRORLEVEL%"
-if "%UMBRA_EXIT%"=="64" exit /b 0
-echo.
-echo [Umbra] Launcher closed with exit code %UMBRA_EXIT%.
-echo Press any key to close this terminal.
-pause >nul
-exit /b %UMBRA_EXIT%
-`;
-  fs.writeFileSync(launcherPath, script, 'utf-8');
-  fs.copyFileSync(launcherPath, path.join(publishRoot, 'UmbraStudio.bat'));
-}
-
-function writeLinuxLauncher() {
-  const launcherPath = path.join(publishRoot, 'start-umbra.sh');
-  const script = `#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")"
-BUN_BIN="$PWD/Runtime/Bun/linux/bun"
-if [ ! -x "$BUN_BIN" ]; then
-  echo "[ERROR] Bundled Bun runtime missing: $BUN_BIN"
-  exit 1
-fi
-export UMBRA_ROOT="$PWD"
-export UMBRA_TERMINAL_MODE=visible
-exec "$BUN_BIN" "$PWD/resources/app/launcher/UmbraWebLauncher.ts" --root "$PWD" "$@"
-`;
-  fs.writeFileSync(launcherPath, script, 'utf-8');
-  try {
-    fs.chmodSync(launcherPath, 0o755);
-  } catch {
-    // ignore chmod failures on Windows
+function removeRedundantLaunchers() {
+  for (const relativePath of ['Start-Umbra.bat', 'UmbraStudio.bat', 'start-umbra.sh']) {
+    const target = path.join(publishRoot, relativePath);
+    if (fs.existsSync(target)) safeRemoveInside(publishRoot, target);
   }
 }
 
@@ -566,8 +523,7 @@ function verifyPublish() {
     'User/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
     'Install-Data-Forge-Models.bat',
     'Install-Umbra-UI-Models.bat',
-    'Start-Umbra.bat',
-    'UmbraStudio.bat',
+    'UmbraStudio.exe',
   ];
   if (bundleDataForgeModels) {
     required.push(
@@ -607,6 +563,7 @@ function publish() {
   }
   removeEmptyTopLevelModelsFolder();
   removeLegacyDesktopArtifacts();
+  removeRedundantLaunchers();
 
   run('bun', ['run', 'webapp:prepare-runtime'], 'runtime preparation');
   run('bun', ['run', 'webapp:prepare-dependencies'], 'runtime dependency preparation');
@@ -686,8 +643,6 @@ function publish() {
   createShortcutLink(path.join(publishRoot, 'ComfyUI-Output'), path.join(publishRoot, 'Tools', 'ComfyUI', 'output'));
   createShortcutLink(path.join(publishRoot, 'ComfyUI-Nodes'), path.join(publishRoot, 'Tools', 'ComfyUI', 'custom_nodes'));
 
-  writeWindowsLauncher();
-  writeLinuxLauncher();
   writeDataForgeModelInstaller();
   writeUmbraUiModelInstaller();
   writePortableMarker();

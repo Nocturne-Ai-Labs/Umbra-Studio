@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.20.1
+
+### Localization
+
+- Expanded Japanese localization across the application shell, Umbra UI,
+  Power Prompter, Gallery, Model Manager, Data Forge, Umbra Remote, onboarding,
+  and Global Settings.
+- Added app-wide Simplified Chinese localization with persistent first-run and
+  Global Settings language selection.
+- Added app-wide Korean localization with the same onboarding, settings, core
+  workspace, and dynamic legacy-interface coverage.
+- Added static localization audits and regression tests for Japanese,
+  Simplified Chinese, and Korean while preserving prompts, filenames, model
+  names, and other user-authored or technical content.
+
+### Image Inspector
+
+- Added natural-language caption model selection alongside WD Tagger analysis
+  so inspected images can produce reusable generation-ready captions.
+- Added direct handoff actions from Image Inspector to TXT2IMG, IMG2IMG,
+  Inpaint, and IMG2VID while retaining compatible metadata and generation
+  parameters.
+
+### Portable Packaging
+
+- Simplified Windows portable packages to the compiled `UmbraStudio.exe`
+  launcher and removed duplicate batch and shell launchers.
+- Kept the Linux package focused on its native `start-umbra.sh` launcher while
+  removing Windows-only launcher artifacts.
+- Added packaging regression tests for the platform-specific launcher layouts.
+
 ## v0.20.0
 
 ### Release Theme

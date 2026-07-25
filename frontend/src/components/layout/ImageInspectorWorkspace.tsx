@@ -17,7 +17,7 @@ export function ImageInspectorWorkspace() {
         <div className="flex items-center gap-6">
           <div data-umbra-image-inspector-identity>
             <h2 className="text-sm font-black uppercase tracking-[0.18em] text-white">Image Inspector</h2>
-            <p className="mt-0.5 text-xs umbra-text-muted">Analyze metadata and generate booru tags</p>
+            <p className="mt-0.5 text-xs umbra-text-muted">Inspect metadata, tags, and natural-language captions</p>
           </div>
           
           {/* Tab Switcher */}
@@ -42,7 +42,7 @@ export function ImageInspectorWorkspace() {
               }`}
             >
               <Sparkles size={12} />
-              Waifu Diffusion
+              Visual Analysis
             </button>
           </div>
         </div>

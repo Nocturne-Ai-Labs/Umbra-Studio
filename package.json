@@ -1,6 +1,6 @@
 {
   "name": "umbra-studio",
-  "version": "0.20.0",
+  "version": "0.20.1",
   "description": "Umbra Studio - AI image generation, prompt tooling, and media workflow suite",
   "author": "Nocturne AI Labs",
   "homepage": "https://github.com/Nocturne-Ai-Labs/Umbra-Studio",
@@ -29,6 +29,9 @@
     "test:source": "bun test backend frontend/src scripts",
     "test:booru-sources": "bun scripts/test-booru-sources.ts",
     "audit:umbra-ui-pipelines": "bun scripts/audit-umbra-ui-pipelines.ts",
+    "audit:i18n:ja": "bun scripts/audit-japanese-localization.ts",
+    "audit:i18n:zh-CN": "bun scripts/audit-chinese-localization.ts",
+    "audit:i18n:ko": "bun scripts/audit-korean-localization.ts",
     "generate:umbra-ui-img2img": "bun scripts/generate-umbra-ui-img2img-workflows.ts",
     "generate:umbra-ui-vid2vid": "bun scripts/generate-umbra-ui-vid2vid-workflows.ts",
     "preflight:umbra-ui-inpaint": "bun scripts/qualify-umbra-ui-inpaint.ts --preflight-only",
