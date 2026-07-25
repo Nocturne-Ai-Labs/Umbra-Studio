@@ -1,6 +1,6 @@
 {
   "name": "umbra-studio",
-  "version": "0.20.1",
+  "version": "0.20.2",
   "description": "Umbra Studio - AI image generation, prompt tooling, and media workflow suite",
   "author": "Nocturne AI Labs",
   "homepage": "https://github.com/Nocturne-Ai-Labs/Umbra-Studio",
@@ -48,6 +48,7 @@
     "webapp:prepare-dependencies": "node scripts/prepare-runtime-dependencies.mjs",
     "webapp:dev": "bun run build:frontend && bun launcher/UmbraWebLauncher.ts --root .",
     "webapp:build-launcher": "bun build launcher/UmbraWebLauncher.ts --compile --outfile dist-webapp/UmbraStudio.exe --windows-icon frontend/public/assets/UMBRA.ico --windows-title \"Umbra Studio\" --windows-publisher \"Nocturne AI Labs\" --windows-description \"Umbra Studio\" && node scripts/patch-windows-exe-icon.mjs dist-webapp/UmbraStudio.exe",
+    "webapp:build-update-worker": "bun build launcher/UmbraUpdateWorker.ts --target=bun --outfile dist-webapp/UmbraUpdateWorker.js",
     "webapp:dist:no-bump": "bun run audit:umbra-ui-pipelines && bun run webapp:prepare-runtime && bun run models:waifu:download && bun run models:caption:download && bun run build:frontend && bun run webapp:build-launcher",
     "webapp:update-folder:no-bump": "bun run audit:umbra-ui-pipelines && node scripts/build-webapp-folder.mjs",
     "webapp:update-folder": "bun run audit:umbra-ui-pipelines && node scripts/build-webapp-version-bump.mjs",
@@ -75,7 +76,8 @@
     "chokidar": "^5.0.0",
     "qrcode": "^1.5.4",
     "react-router-dom": "^7.12.0",
-    "sharp": "^0.34.5"
+    "sharp": "^0.34.5",
+    "yauzl": "^3.4.0"
   },
   "devDependencies": {
     "@types/bun": "^1.3.6",

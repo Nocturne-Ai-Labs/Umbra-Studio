@@ -545,6 +545,7 @@ upstream default branches. They are not frozen to Umbra-selected commit hashes.
 - Chokidar: https://github.com/paulmillr/chokidar
 - Sharp: https://sharp.pixelplumbing.com
 - better-sqlite3: https://github.com/WiseLibs/better-sqlite3
+- yauzl: https://github.com/thejoshwolfe/yauzl
 
 ## Optional Runtime Integrations
 

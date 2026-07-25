@@ -45,6 +45,7 @@ import { twMerge } from 'tailwind-merge';
 import { WatermarkSettings } from '@/components/ui/WatermarkSettings';
 import type { PowerPrompterQueueTooltipStatus } from '@/components/ui/GenerationTooltip';
 import { GlobalSettings } from '@/components/modals/GlobalSettings';
+import { UmbraUpdaterModal } from '@/components/modals/UmbraUpdaterModal';
 
 import { SystemMonitor } from '@/components/SystemMonitor';
 import { useComponentDebug } from '@/hooks/useComponentDebug';
@@ -299,6 +300,10 @@ export const UmbraAppBar = () => {
 
   const [watermarkOpen, setWatermarkOpen] = React.useState(false);
   const [globalSettingsOpen, setGlobalSettingsOpen] = React.useState(false);
+  const [updaterOpen, setUpdaterOpen] = React.useState(() => (
+    typeof window !== 'undefined' && window.sessionStorage.getItem('umbra-update-resume') === '1'
+  ));
+  const [appUpdateCount, setAppUpdateCount] = React.useState(0);
   const [remoteMode, setRemoteMode] = React.useState<UmbraRemoteClientMode>(() => {
     if (typeof document === 'undefined') return 'desktop';
     return normalizeUmbraRemoteMode(getUmbraRemoteMode()) || 'desktop';
@@ -404,6 +409,16 @@ export const UmbraAppBar = () => {
     window.addEventListener('umbra:remote-client-change', readRemoteClient);
     return () => window.removeEventListener('umbra:remote-client-change', readRemoteClient);
   }, []);
+
+  React.useEffect(() => runAfterBootIdle(() => {
+    void fetch('/api/app/releases', { cache: 'no-store' })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.success) return;
+        setAppUpdateCount(Math.max(0, Number(payload.updateCount) || 0));
+      })
+      .catch(() => undefined);
+  }, 3500), []);
 
   React.useEffect(() => {
     setPhoneComfyMenuPosition(parsePhoneComfyMenuPosition(phoneComfyMenuPositionSetting));
@@ -2575,15 +2590,30 @@ export const UmbraAppBar = () => {
         isSidebarExpanded ? "border-white/10" : "border-transparent p-1"
       )}>
         {UMBRA_APP_VERSION ? (
-          <div
+          <button
+            type="button"
+            onClick={() => setUpdaterOpen(true)}
             className={cn(
-              "select-none pb-1 font-mono text-[9px] font-bold tracking-[0.12em] text-zinc-600",
-              isSidebarExpanded ? "px-2 text-left" : "px-0 text-center text-[8px]"
+              "mb-1 flex min-h-9 w-full items-center rounded-md border font-mono font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--umbra-accent)]/60",
+              appUpdateCount > 0
+                ? "border-[var(--umbra-accent)]/45 bg-[var(--umbra-accent)]/12 text-[var(--umbra-accent)] shadow-[0_0_16px_color-mix(in_srgb,var(--umbra-accent)_16%,transparent)] hover:border-[var(--umbra-accent)]/75 hover:bg-[var(--umbra-accent)]/20 hover:text-white"
+                : "border-white/10 bg-white/[0.025] text-zinc-500 hover:border-white/25 hover:bg-white/[0.055] hover:text-zinc-200",
+              isSidebarExpanded
+                ? "justify-start gap-2 px-2.5 text-left text-[9px] tracking-[0.1em]"
+                : "flex-col justify-center gap-0 px-0 text-center text-[7px] tracking-normal"
             )}
-            title={`Umbra Studio v${UMBRA_APP_VERSION}`}
+            title={
+              appUpdateCount > 0
+                ? `${appUpdateCount} Umbra Studio update${appUpdateCount === 1 ? '' : 's'} available`
+                : `Umbra Studio v${UMBRA_APP_VERSION} - Open updater`
+            }
+            aria-label={`Umbra Studio v${UMBRA_APP_VERSION}${appUpdateCount > 0 ? `, ${appUpdateCount} updates available` : ''}. Open updater.`}
           >
-            v{UMBRA_APP_VERSION}
-          </div>
+            <RefreshCw size={isSidebarExpanded ? 12 : 10} />
+            <span className="min-w-0 truncate">
+              v{UMBRA_APP_VERSION}{appUpdateCount > 0 ? ` (+${appUpdateCount})` : ''}
+            </span>
+          </button>
         ) : null}
         <button
           onClick={handleSidebarToggle}
@@ -2607,6 +2637,11 @@ export const UmbraAppBar = () => {
     <GlobalSettings
       isOpen={globalSettingsOpen}
       onClose={() => setGlobalSettingsOpen(false)}
+    />
+    <UmbraUpdaterModal
+      open={updaterOpen}
+      onClose={() => setUpdaterOpen(false)}
+      onUpdateCountChange={setAppUpdateCount}
     />
     </>
   );

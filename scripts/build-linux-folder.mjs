@@ -340,6 +340,7 @@ function verifyPublish() {
     'resources/app/gallery/GalleryServer.ts',
     'resources/app/launcher/UmbraWebLauncher.ts',
     'resources/app/launcher/UmbraMigrationWorker.ts',
+    'resources/app/launcher/UmbraUpdateWorker.js',
     'resources/app/backend/FirstRunService.ts',
     'resources/app/shared/onboarding/firstRun.ts',
     'resources/app/node_modules',
@@ -385,6 +386,7 @@ function publish() {
   run('bun', ['run', 'webapp:prepare-dependencies'], 'runtime dependency preparation');
   run('bun', ['run', 'build:frontend'], 'frontend build');
   run('bun', ['build', 'UmbraServer.ts', '--target=bun', '--outfile', path.join('dist-webapp', 'UmbraServer.js')], 'backend build');
+  run('bun', ['run', 'webapp:build-update-worker'], 'external update worker build');
 
   const packagedAppDir = path.join(publishRoot, 'resources', 'app');
   ensureDir(packagedAppDir);
@@ -426,6 +428,10 @@ function publish() {
   );
   copyTree(path.join(root, 'Runtime', 'Bun', 'linux'), path.join(publishRoot, 'Runtime', 'Bun', 'linux'));
   copyExplicitFile(path.join(root, 'dist-webapp', 'UmbraServer.js'), path.join(packagedAppDir, 'UmbraServer.js'));
+  copyExplicitFile(
+    path.join(root, 'dist-webapp', 'UmbraUpdateWorker.js'),
+    path.join(packagedAppDir, 'launcher', 'UmbraUpdateWorker.js'),
+  );
 
   for (const file of ['Credits.md', 'LICENSE', 'NOTICE']) {
     copyTree(path.join(root, file), path.join(publishRoot, file));

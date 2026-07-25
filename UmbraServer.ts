@@ -75,6 +75,13 @@ import { ModelManagerStateDb } from './backend/ModelManagerStateDb';
 import { createDatasetArchive } from './backend/DatasetArchiveService';
 import { FirstRunService } from './backend/FirstRunService';
 import { UMBRA_MIGRATION_EXIT_CODE } from './shared/onboarding/firstRun';
+import { AppUpdateService, compareUmbraVersions } from './backend/AppUpdateService';
+import {
+  UMBRA_UPDATE_EXIT_CODE,
+  type UmbraReleaseBuild,
+  type UmbraUpdateState,
+  type UmbraUpdateWorkerRequest,
+} from './shared/appUpdate';
 import {
   deriveUmbraUiInpaintCanvasCapabilities,
   deriveUmbraUiTxt2ImgCapabilities,
@@ -13254,6 +13261,141 @@ function getCurrentAppVersion(): string {
   } catch {
     cachedAppVersion = '0.0.0';
     return cachedAppVersion;
+  }
+}
+
+const appUpdateService = new AppUpdateService(ROOT_DIR, getCurrentAppVersion());
+let activeAppUpdatePromise: Promise<void> | null = null;
+
+function isPortableAppUpdateAvailable(): boolean {
+  if (IS_UMBRA_DEV_MODE) return false;
+  return existsSync(join(ROOT_DIR, 'portable-mode'))
+    && existsSync(join(SOURCE_DIR, 'launcher', 'UmbraUpdateWorker.js'));
+}
+
+async function prepareExternalAppUpdateWorker(
+  release: UmbraReleaseBuild,
+  workspaceRoot: string,
+  archivePath: string,
+): Promise<UmbraUpdateWorkerRequest> {
+  const bundledWorkerPath = join(SOURCE_DIR, 'launcher', 'UmbraUpdateWorker.js');
+  if (!existsSync(bundledWorkerPath)) {
+    throw new Error('The external Umbra update worker is missing from this build.');
+  }
+  if (!existsSync(process.execPath)) {
+    throw new Error('The running Bun executable could not be copied for the external updater.');
+  }
+
+  const workerPath = join(workspaceRoot, 'UmbraUpdateWorker.js');
+  const bunName = process.platform === 'win32' ? 'bun.exe' : 'bun';
+  const bunPath = join(workspaceRoot, bunName);
+  await fs.copyFile(bundledWorkerPath, workerPath);
+  await fs.copyFile(process.execPath, bunPath);
+  if (process.platform !== 'win32') await fs.chmod(bunPath, 0o755);
+
+  const requestPath = join(workspaceRoot, 'update-request.json');
+  const request: UmbraUpdateWorkerRequest = {
+    schemaVersion: 1,
+    runtimeRoot: resolve(ROOT_DIR),
+    archivePath: resolve(archivePath),
+    workspaceRoot: resolve(workspaceRoot),
+    requestPath: resolve(requestPath),
+    statePath: appUpdateService.statePath,
+    serverPid: process.pid,
+    launcherPid: process.env.UMBRA_WEB_LAUNCHER === '1' ? Math.max(0, process.ppid) : 0,
+    port: PORT,
+    bindHost: HOST,
+    currentVersion: getCurrentAppVersion(),
+    targetVersion: release.version,
+    targetTag: release.tag,
+    packageName: release.packageName,
+    createdAt: new Date().toISOString(),
+  };
+  writeFileSync(requestPath, `${JSON.stringify(request, null, 2)}\n`, 'utf8');
+
+  const worker = spawn(bunPath, [workerPath, '--request', requestPath], {
+    cwd: workspaceRoot,
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: false,
+    env: {
+      ...process.env,
+      UMBRA_ROOT: ROOT_DIR,
+      UMBRA_SOURCE_ROOT: SOURCE_DIR,
+    },
+  });
+  worker.unref();
+  return request;
+}
+
+async function runPortableAppUpdate(release: UmbraReleaseBuild) {
+  const startedAt = new Date().toISOString();
+  const workspaceRoot = appUpdateService.createWorkspace(release);
+  let state: UmbraUpdateState = appUpdateService.writeState({
+    ...appUpdateService.readState(),
+    phase: 'downloading',
+    currentVersion: getCurrentAppVersion(),
+    targetVersion: release.version,
+    targetTag: release.tag,
+    packageName: release.packageName,
+    totalBytes: release.packageBytes,
+    processedBytes: 0,
+    currentItem: release.packageName,
+    startedAt,
+    completedAt: null,
+    nodeUpdate: 'pending',
+    warning: '',
+    error: '',
+  });
+
+  try {
+    let lastProgressWriteAt = 0;
+    const downloaded = await appUpdateService.downloadRelease(
+      release,
+      workspaceRoot,
+      (processedBytes, totalBytes) => {
+        const now = Date.now();
+        if (now - lastProgressWriteAt < 250 && processedBytes < totalBytes) return;
+        lastProgressWriteAt = now;
+        state = appUpdateService.writeState({
+          ...state,
+          phase: 'downloading',
+          processedBytes,
+          totalBytes: totalBytes || release.packageBytes,
+          currentItem: release.packageName,
+        });
+      },
+    );
+    state = appUpdateService.writeState({
+      ...state,
+      phase: 'staged',
+      processedBytes: downloaded.totalBytes,
+      totalBytes: downloaded.totalBytes,
+      currentItem: 'Preparing external updater',
+    });
+    await prepareExternalAppUpdateWorker(release, workspaceRoot, downloaded.archivePath);
+    appUpdateService.writeState({
+      ...state,
+      phase: 'stopping',
+      currentItem: 'Stopping Umbra Studio and managed tools',
+    });
+    setTimeout(() => {
+      void gracefulShutdown('update');
+    }, 500);
+    await new Promise<void>(() => {
+      // Keep the update lock held until graceful shutdown transfers control to
+      // the external worker and terminates this server process.
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appUpdateService.writeState({
+      ...state,
+      phase: 'failed',
+      completedAt: new Date().toISOString(),
+      currentItem: '',
+      error: message,
+    });
+    throw error;
   }
 }
 
@@ -31071,6 +31213,80 @@ const server = Bun.serve<any>({
         }
       }
 
+      if (path === '/api/app/releases' && method === 'GET') {
+        try {
+          const refresh = url.searchParams.get('refresh') === 'true';
+          const includePrerelease = url.searchParams.get('channel') === 'prerelease';
+          const summary = await appUpdateService.listReleases({ refresh, includePrerelease });
+          return json({
+            success: true,
+            ...summary,
+            portableUpdaterAvailable: isPortableAppUpdateAvailable(),
+            hostActionsAvailable: isHostRequest(req, url, server),
+          });
+        } catch (error: any) {
+          return json({ success: false, error: error?.message || 'Failed to load Umbra Studio releases.' }, 502);
+        }
+      }
+
+      if (path === '/api/app/update/state' && method === 'GET') {
+        return json({
+          success: true,
+          state: appUpdateService.readState(),
+          portableUpdaterAvailable: isPortableAppUpdateAvailable(),
+          hostActionsAvailable: isHostRequest(req, url, server),
+        });
+      }
+
+      if (path === '/api/app/update/start' && method === 'POST') {
+        if (!isHostRequest(req, url, server)) {
+          return json({ success: false, error: 'Umbra Studio updates can only be started from the host PC.' }, 403);
+        }
+        if (!isPortableAppUpdateAvailable()) {
+          return json({
+            success: false,
+            error: IS_UMBRA_DEV_MODE
+              ? 'Portable self-updates are disabled in the development source.'
+              : 'This build does not include the external Umbra update worker.',
+          }, 400);
+        }
+        if (activeAppUpdatePromise) {
+          return json({ success: false, error: 'An Umbra Studio update is already in progress.' }, 409);
+        }
+        try {
+          const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+          const requestedTag = String(body.tag || '').trim();
+          const summary = await appUpdateService.listReleases({
+            refresh: true,
+            includePrerelease: body.includePrerelease === true,
+          });
+          const release = summary.releases.find((entry) => (
+            entry.tag === requestedTag || entry.version === requestedTag.replace(/^v/i, '')
+          ));
+          if (!release) {
+            return json({ success: false, error: 'The selected Umbra Studio release is unavailable for this platform.' }, 404);
+          }
+          if (compareUmbraVersions(release.version, getCurrentAppVersion()) <= 0) {
+            return json({ success: false, error: 'Select a release newer than the installed Umbra Studio version.' }, 400);
+          }
+          activeAppUpdatePromise = runPortableAppUpdate(release)
+            .catch((error) => {
+              console.error('[UmbraUpdater] Update preparation failed:', error);
+            })
+            .finally(() => {
+              activeAppUpdatePromise = null;
+            });
+          return json({
+            success: true,
+            accepted: true,
+            targetVersion: release.version,
+            state: appUpdateService.readState(),
+          }, 202);
+        } catch (error: any) {
+          return json({ success: false, error: error?.message || 'Failed to start Umbra Studio update.' }, 500);
+        }
+      }
+
       if (path === '/api/app/update/status' && method === 'GET') {
         try {
           const refresh = url.searchParams.get('refresh') === 'true';
@@ -32760,8 +32976,8 @@ async function gracefulShutdown(signal: string) {
   stopSystemStatsSampler();
   stopBackendStatusSampler();
 
-  if (signal === 'migration') {
-    // First-run migration only needs to stop children owned by this process.
+  if (signal === 'migration' || signal === 'update') {
+    // External maintenance only needs to stop children owned by this process.
     // Avoid normal ownership/port discovery while the app is shutting down.
     galleryBridgeDesired = false;
     clearGalleryBridgeWatchdog();
@@ -32834,7 +33050,13 @@ async function gracefulShutdown(signal: string) {
   console.log(`  \x1b[1m\x1b[32m✓ Umbra Server shut down cleanly\x1b[0m`);
   console.log(`\x1b[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n`);
 
-  process.exit(signal === 'migration' ? UMBRA_MIGRATION_EXIT_CODE : 0);
+  process.exit(
+    signal === 'migration'
+      ? UMBRA_MIGRATION_EXIT_CODE
+      : signal === 'update'
+        ? UMBRA_UPDATE_EXIT_CODE
+        : 0,
+  );
 }
 
 // Handle termination signals

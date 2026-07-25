@@ -513,6 +513,7 @@ function verifyPublish() {
     'resources/app/gallery/GalleryServer.ts',
     'resources/app/launcher/UmbraWebLauncher.ts',
     'resources/app/launcher/UmbraMigrationWorker.ts',
+    'resources/app/launcher/UmbraUpdateWorker.js',
     'resources/app/backend/FirstRunService.ts',
     'resources/app/shared/onboarding/firstRun.ts',
     'resources/app/node_modules',
@@ -570,6 +571,7 @@ function publish() {
   run('bun', ['run', 'build:frontend'], 'frontend build');
   run('bun', ['build', 'UmbraServer.ts', '--target=bun', '--outfile', path.join('dist-webapp', 'UmbraServer.js')], 'backend build');
   run('bun', ['run', 'webapp:build-launcher'], 'launcher build');
+  run('bun', ['run', 'webapp:build-update-worker'], 'external update worker build');
 
   for (const relativePath of ['public', path.join('resources', 'app', 'public')]) {
     const target = path.join(publishRoot, relativePath);
@@ -621,6 +623,10 @@ function publish() {
   copyExplicitFile(path.join(root, 'dist-webapp', 'UmbraStudio.exe'), path.join(publishRoot, 'UmbraStudio.exe'));
   runNodeScript(['scripts/patch-windows-exe-icon.mjs', path.join(publishRoot, 'UmbraStudio.exe')], 'published launcher icon patch');
   copyExplicitFile(path.join(root, 'dist-webapp', 'UmbraServer.js'), path.join(packagedAppDir, 'UmbraServer.js'));
+  copyExplicitFile(
+    path.join(root, 'dist-webapp', 'UmbraUpdateWorker.js'),
+    path.join(packagedAppDir, 'launcher', 'UmbraUpdateWorker.js'),
+  );
 
   for (const file of ['Credits.md', 'LICENSE', 'NOTICE']) {
     copyTree(path.join(root, file), path.join(publishRoot, file));

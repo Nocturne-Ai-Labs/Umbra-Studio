@@ -8,6 +8,7 @@ import {
   UMBRA_MIGRATION_EXIT_CODE,
   type UmbraFirstRunPhase,
 } from '../shared/onboarding/firstRun';
+import { UMBRA_UPDATE_EXIT_CODE } from '../shared/appUpdate';
 
 type LauncherOptions = {
   noOpen: boolean;
@@ -516,6 +517,11 @@ async function main() {
     const code = firstResult.type === 'exit' ? firstResult.code : await exitPromise;
     writeLine('');
     writeLine(`[UmbraWebLauncher] Umbra server exited with code ${code}.`);
+    if (code === UMBRA_UPDATE_EXIT_CODE) {
+      writeLine('[UmbraWebLauncher] External updater has control. Closing this launcher so application files can be replaced.');
+      await exitLauncher(0);
+      return;
+    }
     if (code !== UMBRA_MIGRATION_EXIT_CODE) {
       await exitLauncher(code);
       return;

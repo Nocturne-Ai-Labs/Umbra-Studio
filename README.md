@@ -39,6 +39,14 @@ See [CHANGELOG.md](CHANGELOG.md) for release highlights. New portable builds
 include a first-time setup wizard that can migrate an older `User/` and
 `Tools/` installation safely.
 
+After installation, the version number at the bottom-left of Umbra is also the
+updater button. `(+x)` reports the number of newer compatible GitHub releases.
+The updater shows each build and its changelog, downloads the complete portable
+package, shuts down Umbra and its managed tools, preserves `User/` and `Tools/`,
+updates Umbra Nodes when needed, and restarts Umbra automatically. It keeps the
+same application root and port; it does not use fallback servers or alternate
+ports.
+
 Quick summary:
 
 - Windows 10/11 x64 is the primary platform; Linux x64 portable builds are supported.

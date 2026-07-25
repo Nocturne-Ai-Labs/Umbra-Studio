@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.20.2
+
+### Portable Self-Updater
+
+- Turned the version display at the bottom of the sidebar into a large,
+  clearly styled updater button.
+- Added a `(+x)` indicator showing the number of newer compatible releases
+  available for the current platform.
+- Added an in-app build browser with GitHub release changelogs, package
+  details, manual refresh, download progress, and update status.
+- Replaced the legacy configured-feed flow with direct discovery from the
+  official Nocturne AI Labs GitHub Releases.
+- Added a dedicated external Bun update worker so Umbra, ComfyUI, AI Toolkit,
+  Gallery, and the launcher can shut down before application files change.
+- Portable updates now install the complete platform package while preserving
+  the existing `User/` and `Tools/` trees in the stable Umbra Studio root.
+- Added release package version validation, SHA-256 verification when supplied
+  by GitHub, ZIP path-traversal protection, and atomic update-state files.
+- Added automatic Umbra Nodes synchronization from the public repository when
+  a managed ComfyUI installation is present.
+- Added automatic launcher restart, browser reconnection, fixed-port health
+  validation, and rollback to the previous build when the new build cannot
+  start successfully.
+- Kept update behavior on Umbra's configured root and port without alternate
+  ports, fallback servers, or partial source patches.
+- Added cross-platform packaging checks and transaction tests proving that
+  application replacement preserves personal data and can restore the previous
+  build.
+
 ## v0.20.1
 
 ### Localization

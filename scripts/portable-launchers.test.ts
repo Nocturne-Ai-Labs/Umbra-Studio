@@ -9,6 +9,8 @@ describe('portable launcher packaging', () => {
     const source = readFileSync(join(root, 'scripts', 'build-webapp-folder.mjs'), 'utf8');
     expect(source).toContain("'UmbraStudio.exe'");
     expect(source).toContain("['Start-Umbra.bat', 'UmbraStudio.bat', 'start-umbra.sh']");
+    expect(source).toContain("'resources/app/launcher/UmbraUpdateWorker.js'");
+    expect(source).toContain("'webapp:build-update-worker'");
     expect(source).not.toContain('function writeWindowsLauncher()');
     expect(source).not.toContain('function writeLinuxLauncher()');
   });
@@ -17,6 +19,8 @@ describe('portable launcher packaging', () => {
     const source = readFileSync(join(root, 'scripts', 'build-linux-folder.mjs'), 'utf8');
     expect(source).toContain('function writeLinuxLauncher()');
     expect(source).toContain("'start-umbra.sh'");
+    expect(source).toContain("'resources/app/launcher/UmbraUpdateWorker.js'");
+    expect(source).toContain("'webapp:build-update-worker'");
     expect(source).toContain("['Start-Umbra.bat', 'UmbraStudio.bat', 'UmbraStudio.exe']");
   });
 });
