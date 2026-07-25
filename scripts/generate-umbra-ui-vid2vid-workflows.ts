@@ -14,10 +14,6 @@ const workflowDirectory = join(root, 'defaults', 'PowerPrompter', 'API Workflows
 const targetDirectories = [
   workflowDirectory,
   join(root, 'User', 'PowerPrompter', 'API Workflows'),
-  join(root, 'Umbra-Nodes', 'example_workflows'),
-  join(root, 'Umbra-Nodes', 'examples'),
-  join(root, 'Tools', 'ComfyUI', 'custom_nodes', 'Umbra-Nodes', 'example_workflows'),
-  join(root, 'Tools', 'ComfyUI', 'custom_nodes', 'Umbra-Nodes', 'examples'),
 ];
 
 const sources = [

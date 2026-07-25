@@ -46,6 +46,7 @@ import {
   useUmbraQueuePlacement,
 } from '@/components/umbra-ui/UmbraQueuePlacementControls';
 import { resolveUmbraUiPipeline } from '@/lib/umbraUiPipelines';
+import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import { advanceUmbraUiSeed, normalizeUmbraUiSeed, resolveUmbraUiQueueSeed } from '@/lib/umbraUiSeed';
 import {
   normalizeUmbraUiMediaHandoff,
@@ -85,6 +86,13 @@ export interface UmbraVideoEditorDraft {
   prompt: string;
   negativePrompt: string;
   video: PowerPrompterVideoControls;
+}
+
+interface UmbraVideoDeviceResume {
+  prompt?: string;
+  agentModeEnabled?: boolean;
+  agentPrompt?: string;
+  negativePrompt?: string;
 }
 
 function createDefaultVideoControls(): PowerPrompterVideoControls {
@@ -412,11 +420,12 @@ export function UmbraVideoGenerationControls({
   onEditorDraftApplied,
 }: UmbraVideoGenerationControlsProps) {
   const showToast = useStore((state) => state.showToast);
-  const [prompt, setPrompt] = React.useState('');
-  const [agentModeEnabled, setAgentModeEnabled] = React.useState(false);
-  const [agentPrompt, setAgentPrompt] = React.useState('');
+  const [initialDeviceResume] = React.useState(() => readDeviceUiResume<UmbraVideoDeviceResume>('umbra-ui-video'));
+  const [prompt, setPrompt] = React.useState(initialDeviceResume?.prompt || '');
+  const [agentModeEnabled, setAgentModeEnabled] = React.useState(initialDeviceResume?.agentModeEnabled === true);
+  const [agentPrompt, setAgentPrompt] = React.useState(initialDeviceResume?.agentPrompt || '');
   const workflowPrompt = agentModeEnabled ? agentPrompt.trim() : prompt;
-  const [negativePrompt, setNegativePrompt] = React.useState('');
+  const [negativePrompt, setNegativePrompt] = React.useState(initialDeviceResume?.negativePrompt || '');
   const [video, setVideo] = React.useState<PowerPrompterVideoControls>(() => createDefaultVideoControls());
   const [sourcePreviewUrl, setSourcePreviewUrl] = React.useState('');
   const [isQueueing, setIsQueueing] = React.useState(false);
@@ -502,6 +511,18 @@ export function UmbraVideoGenerationControls({
     }, 350);
     return () => window.clearTimeout(timer);
   }, [settingsLoaded, video]);
+
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => {
+      writeDeviceUiResume<UmbraVideoDeviceResume>('umbra-ui-video', {
+        prompt,
+        agentModeEnabled,
+        agentPrompt,
+        negativePrompt,
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [agentModeEnabled, agentPrompt, negativePrompt, prompt]);
 
   React.useEffect(() => {
     if (!agentDraft || agentDraft.mediaType !== 'video') return;

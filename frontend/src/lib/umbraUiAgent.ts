@@ -18,9 +18,22 @@ export type {
   UmbraUiAgentVideoContext,
 };
 
+export type UmbraUiAgentProvider = 'hermes' | 'ollama' | 'lmstudio' | 'openai-compatible';
+
+export interface UmbraUiAgentGenerationSettings {
+  provider: UmbraUiAgentProvider;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  temperature: number;
+  maxTokens: number;
+  timeoutMs: number;
+}
+
 export interface UmbraUiAgentConnectionSettings {
   endpoint: string;
   token: string;
+  generation: UmbraUiAgentGenerationSettings;
   updatedAt: number;
   hermesConfig: {
     mcp_servers: {
@@ -124,7 +137,27 @@ export async function loadUmbraUiAgentSettings(): Promise<UmbraUiAgentConnection
   return payload;
 }
 
-export async function regenerateUmbraUiAgentToken(): Promise<{ token: string; updatedAt: number }> {
+export async function saveUmbraUiAgentSettings(
+  generation: UmbraUiAgentGenerationSettings,
+): Promise<UmbraUiAgentConnectionSettings> {
+  return readAgentApi<UmbraUiAgentConnectionSettings & { success: boolean }>('/api/umbra-ui/agent/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ generation }),
+  });
+}
+
+export async function testUmbraUiAgentSettings(
+  generation: UmbraUiAgentGenerationSettings,
+): Promise<{ provider: UmbraUiAgentProvider; model: string; prompt: string; durationMs: number }> {
+  return readAgentApi('/api/umbra-ui/agent/settings/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ generation }),
+  });
+}
+
+export async function regenerateUmbraUiAgentToken(): Promise<{ token: string; generation: UmbraUiAgentGenerationSettings; updatedAt: number }> {
   return readAgentApi('/api/umbra-ui/agent/settings/regenerate-token', { method: 'POST' });
 }
 

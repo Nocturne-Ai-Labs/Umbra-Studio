@@ -629,6 +629,9 @@ function verifyPublish() {
       throw new Error(`[webapp-publish] Missing required runtime path: ${targetPath}`);
     }
   }
+  if (fs.existsSync(path.join(publishRoot, 'Umbra-Nodes'))) {
+    throw new Error('[webapp-publish] Bundled Umbra-Nodes payload must not be present; setup installs it from GitHub.');
+  }
   if (bundleDataForgeModels) verifyBundledDataForgeModels();
 }
 
@@ -722,14 +725,8 @@ function publish() {
   if (bundleDataForgeModels) seedBundledDataForgeModels();
   else prepareDataForgeModelDestination();
   ensureDir(path.join(publishRoot, 'Tools'));
-  const umbraNodesSource = path.join(root, 'Umbra-Nodes');
   const umbraNodesTarget = path.join(publishRoot, 'Umbra-Nodes');
-  if (fs.existsSync(path.join(umbraNodesSource, '__init__.py')) && fs.existsSync(path.join(umbraNodesSource, 'nodes.py'))) {
-    copyTree(umbraNodesSource, umbraNodesTarget);
-  } else if (fs.existsSync(umbraNodesTarget)
-    && (!fs.existsSync(path.join(umbraNodesTarget, '__init__.py')) || !fs.existsSync(path.join(umbraNodesTarget, 'nodes.py')))) {
-    safeRemoveInside(publishRoot, umbraNodesTarget);
-  }
+  if (fs.existsSync(umbraNodesTarget)) safeRemoveInside(publishRoot, umbraNodesTarget);
 
   createShortcutLink(path.join(publishRoot, 'ComfyUI-Models'), path.join(publishRoot, 'Tools', 'ComfyUI', 'models'));
   createShortcutLink(path.join(publishRoot, 'ComfyUI-Output'), path.join(publishRoot, 'Tools', 'ComfyUI', 'output'));

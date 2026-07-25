@@ -15804,9 +15804,22 @@ const UMBRA_UI_AGENT_GENERATION_TIMEOUT_MS = 3 * 60 * 1000;
 const UMBRA_UI_AGENT_GENERATION_PROMPT_LIMIT = 12_000;
 const UMBRA_UI_AGENT_GENERATION_CONTEXT_LIMIT = 6_000;
 
+type UmbraUiAgentProvider = 'hermes' | 'ollama' | 'lmstudio' | 'openai-compatible';
+
+interface UmbraUiAgentGenerationSettings {
+  provider: UmbraUiAgentProvider;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  temperature: number;
+  maxTokens: number;
+  timeoutMs: number;
+}
+
 interface UmbraUiAgentSettings {
-  version: 1;
+  version: 2;
   token: string;
+  generation: UmbraUiAgentGenerationSettings;
   updatedAt: number;
 }
 
@@ -15830,6 +15843,16 @@ const EMPTY_UMBRA_UI_AGENT_CONTEXT: UmbraUiAgentContext = {
     mode: '',
     controls: {},
   },
+};
+
+const DEFAULT_UMBRA_UI_AGENT_GENERATION_SETTINGS: UmbraUiAgentGenerationSettings = {
+  provider: 'hermes',
+  baseUrl: '',
+  model: '',
+  apiKey: '',
+  temperature: 0.7,
+  maxTokens: 1200,
+  timeoutMs: UMBRA_UI_AGENT_GENERATION_TIMEOUT_MS,
 };
 
 let umbraUiAgentContext: UmbraUiAgentContext = EMPTY_UMBRA_UI_AGENT_CONTEXT;
@@ -15945,20 +15968,208 @@ function prepareUmbraUiInlineAgentInstruction(value: string): string {
     .slice(0, 8_000);
 }
 
-async function generateUmbraUiPromptWithHermes(value: unknown): Promise<{
+function normalizeUmbraUiAgentProvider(value: unknown): UmbraUiAgentProvider {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'ollama' || normalized === 'lmstudio' || normalized === 'openai-compatible') return normalized;
+  return 'hermes';
+}
+
+function normalizeUmbraUiAgentGenerationSettings(value: unknown): UmbraUiAgentGenerationSettings {
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const provider = normalizeUmbraUiAgentProvider(raw.provider);
+  const defaultBaseUrl = provider === 'ollama'
+    ? 'http://127.0.0.1:11434'
+    : provider === 'lmstudio'
+      ? 'http://127.0.0.1:1234/v1'
+      : '';
+  const temperature = Number(raw.temperature);
+  const maxTokens = Number(raw.maxTokens);
+  const timeoutMs = Number(raw.timeoutMs);
+  return {
+    provider,
+    baseUrl: clampUmbraUiAgentText(raw.baseUrl, 500) || defaultBaseUrl,
+    model: clampUmbraUiAgentText(raw.model, 240),
+    apiKey: clampUmbraUiAgentText(raw.apiKey, 2000),
+    temperature: Number.isFinite(temperature) ? Math.max(0, Math.min(2, temperature)) : DEFAULT_UMBRA_UI_AGENT_GENERATION_SETTINGS.temperature,
+    maxTokens: Number.isFinite(maxTokens) ? Math.max(64, Math.min(8192, Math.floor(maxTokens))) : DEFAULT_UMBRA_UI_AGENT_GENERATION_SETTINGS.maxTokens,
+    timeoutMs: Number.isFinite(timeoutMs) ? Math.max(10_000, Math.min(10 * 60_000, Math.floor(timeoutMs))) : DEFAULT_UMBRA_UI_AGENT_GENERATION_TIMEOUT_MS,
+  };
+}
+
+function buildUmbraUiAgentRequestPrompt(
+  mediaType: 'image' | 'video',
+  sourcePrompt: string,
+  instructionName: string,
+  inlineInstruction: string,
+  context: string,
+): string {
+  return [
+    `You are the prompt composer for Umbra UI ${mediaType} generation.`,
+    'Turn the user request into one production-ready positive generation prompt.',
+    'Follow the visual and formatting guidance below. Never write or call umbra_ui_stage_prompt, never stage a draft, and do not discuss your work or include Markdown.',
+    'Return only the final positive prompt text that should be sent directly to the generation workflow.',
+    '',
+    `PROMPTING GUIDANCE (${instructionName}):`,
+    inlineInstruction,
+    '',
+    'USER REQUEST:',
+    sourcePrompt,
+    ...(context ? ['', 'UMBRA GENERATION CONTEXT:', context] : []),
+  ].join('\n');
+}
+
+async function readAgentResponseText(response: Response, providerLabel: string): Promise<string> {
+  const text = await response.text();
+  let payload: any = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    // Some local servers return plain text on errors.
+  }
+  if (!response.ok) {
+    const reason = payload?.error?.message || payload?.error || payload?.message || text;
+    throw new Error(`${providerLabel} request failed (${response.status}): ${clampUmbraUiAgentText(reason, 600) || 'Unknown error'}`);
+  }
+  if (payload?.choices?.[0]?.message?.content) return String(payload.choices[0].message.content);
+  if (payload?.choices?.[0]?.text) return String(payload.choices[0].text);
+  if (payload?.message?.content) return String(payload.message.content);
+  if (payload?.response) return String(payload.response);
+  if (typeof payload === 'string') return payload;
+  return text;
+}
+
+async function generateUmbraUiPromptWithOpenAiCompatible(
+  settings: UmbraUiAgentGenerationSettings,
+  agentRequest: string,
+): Promise<string> {
+  const baseUrl = clampUmbraUiAgentText(settings.baseUrl, 500).replace(/\/+$/, '');
+  if (!baseUrl) throw new Error('Agent base URL is required for OpenAI-compatible providers.');
+  if (!settings.model) throw new Error('Agent model name is required.');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), settings.timeoutMs);
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: settings.model,
+        temperature: settings.temperature,
+        max_tokens: settings.maxTokens,
+        stream: false,
+        messages: [
+          { role: 'system', content: 'Return only the final generation prompt. Do not include Markdown or explanations.' },
+          { role: 'user', content: agentRequest },
+        ],
+      }),
+    });
+    return await readAgentResponseText(response, settings.provider === 'lmstudio' ? 'LM Studio' : 'OpenAI-compatible agent');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function generateUmbraUiPromptWithOllama(
+  settings: UmbraUiAgentGenerationSettings,
+  agentRequest: string,
+): Promise<string> {
+  const baseUrl = clampUmbraUiAgentText(settings.baseUrl, 500).replace(/\/+$/, '') || 'http://127.0.0.1:11434';
+  if (!settings.model) throw new Error('Ollama model name is required.');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), settings.timeoutMs);
+  try {
+    const response = await fetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: settings.model,
+        stream: false,
+        options: {
+          temperature: settings.temperature,
+          num_predict: settings.maxTokens,
+        },
+        messages: [
+          { role: 'system', content: 'Return only the final generation prompt. Do not include Markdown or explanations.' },
+          { role: 'user', content: agentRequest },
+        ],
+      }),
+    });
+    return await readAgentResponseText(response, 'Ollama');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function generateUmbraUiPromptWithHermesCli(agentRequest: string, timeoutMs: number): Promise<string> {
+  const executable = resolveHermesExecutable();
+  const proc = Bun.spawn([executable, '--ignore-rules', '--oneshot', agentRequest], {
+    cwd: ROOT_DIR,
+    env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' },
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+    windowsHide: true,
+  });
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<number>((resolveTimeout) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      try { proc.kill(); } catch { /* process already exited */ }
+      resolveTimeout(-1);
+    }, timeoutMs);
+  });
+  const stdoutPromise = new Response(proc.stdout).text();
+  const stderrPromise = new Response(proc.stderr).text();
+  const [exitCode, stdout, stderr] = await Promise.all([
+    Promise.race([proc.exited, timeout]),
+    stdoutPromise,
+    stderrPromise,
+  ]);
+  if (timer) clearTimeout(timer);
+  if (timedOut) throw new Error(`Hermes prompt generation timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
+  if (exitCode !== 0) {
+    const reason = cleanHermesPromptOutput(stderr) || cleanHermesPromptOutput(stdout);
+    throw new Error(reason || `Hermes exited with code ${exitCode}.`);
+  }
+  return stdout;
+}
+
+async function generateUmbraUiPromptWithConfiguredAgent(
+  settings: UmbraUiAgentGenerationSettings,
+  agentRequest: string,
+): Promise<string> {
+  if (settings.provider === 'ollama') return generateUmbraUiPromptWithOllama(settings, agentRequest);
+  if (settings.provider === 'lmstudio' || settings.provider === 'openai-compatible') {
+    return generateUmbraUiPromptWithOpenAiCompatible(settings, agentRequest);
+  }
+  try {
+    return await generateUmbraUiPromptWithHermesCli(agentRequest, settings.timeoutMs);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      throw new Error('Hermes Agent is not installed or could not be found. Install Hermes or set UMBRA_HERMES_EXECUTABLE, or choose Ollama/LM Studio in Agent Settings.');
+    }
+    throw error;
+  }
+}
+
+async function generateUmbraUiPromptWithAgent(value: unknown): Promise<{
   prompt: string;
   instructionId: string;
   instructionName: string;
   durationMs: number;
 }> {
   if (umbraUiAgentGenerationActive) {
-    throw new Error('Hermes is already composing another Umbra UI prompt.');
+    throw new Error('The configured agent is already composing another Umbra UI prompt.');
   }
   const request = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const mediaType = String(request.mediaType || '').trim().toLowerCase();
   if (mediaType !== 'image' && mediaType !== 'video') throw new Error('mediaType must be image or video.');
   const sourcePrompt = clampUmbraUiAgentText(request.prompt, UMBRA_UI_AGENT_GENERATION_PROMPT_LIMIT);
-  if (!sourcePrompt) throw new Error('Enter a prompt request before asking Hermes to compose it.');
+  if (!sourcePrompt) throw new Error('Enter a prompt request before asking the agent to compose it.');
   const instructions = await loadUmbraUiAgentInstructions();
   const requestedInstructionId = clampUmbraUiAgentText(request.instructionId, 120);
   const compatibleInstructions = instructions.filter((entry) => entry.mediaType === 'both' || entry.mediaType === mediaType);
@@ -15969,87 +16180,56 @@ async function generateUmbraUiPromptWithHermes(value: unknown): Promise<{
   const context = serializeUmbraUiAgentGenerationContext(request.context);
   const inlineInstruction = prepareUmbraUiInlineAgentInstruction(instruction.instruction)
     || 'Faithfully convert the request into a clear, production-ready generation prompt.';
-  const agentRequest = [
-    `You are the prompt composer for Umbra UI ${mediaType} generation.`,
-    'Turn the user request into one production-ready positive generation prompt.',
-    'Follow the visual and formatting guidance below. Never write or call umbra_ui_stage_prompt, never stage a draft, and do not discuss your work or include Markdown.',
-    'Return only the final positive prompt text that should be sent directly to the generation workflow.',
-    '',
-    `PROMPTING GUIDANCE (${instruction.name}):`,
-    inlineInstruction,
-    '',
-    'USER REQUEST:',
-    sourcePrompt,
-    ...(context ? ['', 'UMBRA GENERATION CONTEXT:', context] : []),
-  ].join('\n');
+  const agentRequest = buildUmbraUiAgentRequestPrompt(mediaType, sourcePrompt, instruction.name, inlineInstruction, context);
 
-  const executable = resolveHermesExecutable();
   const startedAt = Date.now();
   umbraUiAgentGenerationActive = true;
   try {
-    const proc = Bun.spawn([executable, '--ignore-rules', '--oneshot', agentRequest], {
-      cwd: ROOT_DIR,
-      env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' },
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-      windowsHide: true,
-    });
-    let timedOut = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const timeout = new Promise<number>((resolveTimeout) => {
-      timer = setTimeout(() => {
-        timedOut = true;
-        try { proc.kill(); } catch { /* process already exited */ }
-        resolveTimeout(-1);
-      }, UMBRA_UI_AGENT_GENERATION_TIMEOUT_MS);
-    });
-    const stdoutPromise = new Response(proc.stdout).text();
-    const stderrPromise = new Response(proc.stderr).text();
-    const [exitCode, stdout, stderr] = await Promise.all([
-      Promise.race([proc.exited, timeout]),
-      stdoutPromise,
-      stderrPromise,
-    ]);
-    if (timer) clearTimeout(timer);
-    if (timedOut) throw new Error('Hermes prompt generation timed out after three minutes.');
-    if (exitCode !== 0) {
-      const reason = cleanHermesPromptOutput(stderr) || cleanHermesPromptOutput(stdout);
-      throw new Error(reason || `Hermes exited with code ${exitCode}.`);
-    }
-    const prompt = cleanHermesPromptOutput(stdout);
-    if (!prompt) throw new Error('Hermes returned an empty prompt.');
+    const settings = await loadUmbraUiAgentSettings();
+    const rawPrompt = await generateUmbraUiPromptWithConfiguredAgent(settings.generation, agentRequest);
+    const prompt = cleanHermesPromptOutput(rawPrompt);
+    if (!prompt) throw new Error('The configured agent returned an empty prompt.');
     return {
       prompt,
       instructionId: instruction.id,
       instructionName: instruction.name,
       durationMs: Date.now() - startedAt,
     };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
-      throw new Error('Hermes Agent is not installed or could not be found. Install Hermes or set UMBRA_HERMES_EXECUTABLE.');
-    }
-    throw error;
   } finally {
     umbraUiAgentGenerationActive = false;
   }
 }
 
 async function loadUmbraUiAgentSettings(forceNewToken = false): Promise<UmbraUiAgentSettings> {
-  if (!forceNewToken && existsSync(UMBRA_UI_AGENT_SETTINGS_PATH)) {
+  let parsed: Record<string, unknown> = {};
+  if (existsSync(UMBRA_UI_AGENT_SETTINGS_PATH)) {
     try {
-      const parsed = JSON.parse(await fs.readFile(UMBRA_UI_AGENT_SETTINGS_PATH, 'utf-8')) as Partial<UmbraUiAgentSettings>;
-      const token = clampUmbraUiAgentText(parsed.token, 256);
-      if (parsed.version === 1 && token.length >= 32) {
-        return { version: 1, token, updatedAt: Math.max(0, Number(parsed.updatedAt) || 0) };
-      }
+      const raw = JSON.parse(await fs.readFile(UMBRA_UI_AGENT_SETTINGS_PATH, 'utf-8'));
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) parsed = raw as Record<string, unknown>;
     } catch (error) {
       console.warn('[Umbra UI Agent] Replacing unreadable MCP settings.', error);
     }
   }
+  const existingToken = clampUmbraUiAgentText(parsed.token, 256);
   const settings: UmbraUiAgentSettings = {
-    version: 1,
-    token: randomBytes(32).toString('hex'),
+    version: 2,
+    token: !forceNewToken && existingToken.length >= 32 ? existingToken : randomBytes(32).toString('hex'),
+    generation: normalizeUmbraUiAgentGenerationSettings(parsed.generation),
+    updatedAt: Date.now(),
+  };
+  await fs.mkdir(dirname(UMBRA_UI_AGENT_SETTINGS_PATH), { recursive: true });
+  await fs.writeFile(UMBRA_UI_AGENT_SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`, 'utf-8');
+  return settings;
+}
+
+async function saveUmbraUiAgentGenerationSettings(value: unknown): Promise<UmbraUiAgentSettings> {
+  const current = await loadUmbraUiAgentSettings();
+  const request = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const generationSource = request.generation && typeof request.generation === 'object' ? request.generation : request;
+  const settings: UmbraUiAgentSettings = {
+    version: 2,
+    token: current.token,
+    generation: normalizeUmbraUiAgentGenerationSettings(generationSource),
     updatedAt: Date.now(),
   };
   await fs.mkdir(dirname(UMBRA_UI_AGENT_SETTINGS_PATH), { recursive: true });
@@ -21900,8 +22080,8 @@ async function handleFsList(url: URL): Promise<Response> {
 async function handleFsListProgressive(url: URL): Promise<Response> {
   const requestStartedAt = Date.now();
   const path = url.searchParams.get('path');
-  const limit = Math.min(240, Math.max(20, parseInt(url.searchParams.get('limit') || '120', 10) || 120));
-  const cursor = Math.max(0, parseInt(url.searchParams.get('cursor') || '0', 10) || 0);
+  const limit = 0;
+  const cursor = 0;
   const filter = url.searchParams.get('filter');
   const sortBy = String(url.searchParams.get('sortBy') || '').trim();
   const sortOrder = String(url.searchParams.get('sortOrder') || '').trim();
@@ -30488,6 +30668,7 @@ const server = Bun.serve<any>({
             success: true,
             endpoint,
             token: settings.token,
+            generation: settings.generation,
             updatedAt: settings.updatedAt,
             hermesConfig: {
               mcp_servers: {
@@ -30503,12 +30684,67 @@ const server = Bun.serve<any>({
         }
       }
 
+      if (path === '/api/umbra-ui/agent/settings' && (method === 'POST' || method === 'PUT')) {
+        const guard = withRemoteAdminGuard(req, url, server);
+        if (guard) return guard;
+        try {
+          const settings = await saveUmbraUiAgentGenerationSettings(await req.json());
+          const endpoint = `http://127.0.0.1:${PORT}/api/umbra-ui/mcp`;
+          return json({
+            success: true,
+            endpoint,
+            token: settings.token,
+            generation: settings.generation,
+            updatedAt: settings.updatedAt,
+            hermesConfig: {
+              mcp_servers: {
+                umbra_ui: {
+                  url: endpoint,
+                  headers: { Authorization: `Bearer ${settings.token}` },
+                },
+              },
+            },
+          });
+        } catch (error: any) {
+          return json({ success: false, error: error?.message || 'Failed to save Umbra UI agent settings.' }, 400);
+        }
+      }
+
+      if (path === '/api/umbra-ui/agent/settings/test' && method === 'POST') {
+        const guard = withRemoteAdminGuard(req, url, server);
+        if (guard) return guard;
+        try {
+          const body = await req.json().catch(() => ({}));
+          const settings = normalizeUmbraUiAgentGenerationSettings((body as any)?.generation || body);
+          const startedAt = Date.now();
+          const rawPrompt = await generateUmbraUiPromptWithConfiguredAgent(settings, [
+            'Write one short production-ready positive image prompt.',
+            'Return only the prompt text, no Markdown.',
+            '',
+            'USER REQUEST:',
+            'a polished nocturne-themed creative studio dashboard icon, clean lighting, crisp details',
+          ].join('\n'));
+          const prompt = cleanHermesPromptOutput(rawPrompt);
+          if (!prompt) throw new Error('The configured agent returned an empty test prompt.');
+          return json({
+            success: true,
+            provider: settings.provider,
+            model: settings.model,
+            prompt,
+            durationMs: Date.now() - startedAt,
+          });
+        } catch (error: any) {
+          const status = /required|not installed|could not be found|failed \(\d+\)/i.test(error?.message || '') ? 400 : 500;
+          return json({ success: false, error: error?.message || 'Agent test failed.' }, status);
+        }
+      }
+
       if (path === '/api/umbra-ui/agent/settings/regenerate-token' && method === 'POST') {
         const guard = withRemoteAdminGuard(req, url, server);
         if (guard) return guard;
         try {
           const settings = await loadUmbraUiAgentSettings(true);
-          return json({ success: true, token: settings.token, updatedAt: settings.updatedAt });
+          return json({ success: true, token: settings.token, generation: settings.generation, updatedAt: settings.updatedAt });
         } catch (error: any) {
           return json({ success: false, error: error?.message || 'Failed to regenerate the Umbra UI MCP token.' }, 500);
         }
@@ -30533,10 +30769,10 @@ const server = Bun.serve<any>({
         const contentLength = Math.max(0, Number(req.headers.get('content-length')) || 0);
         if (contentLength > 100_000) return json({ success: false, error: 'Agent prompt request is too large.' }, 413);
         try {
-          const result = await generateUmbraUiPromptWithHermes(await req.json());
+          const result = await generateUmbraUiPromptWithAgent(await req.json());
           return json({ success: true, ...result });
         } catch (error: any) {
-          const message = error?.message || 'Hermes failed to compose the prompt.';
+          const message = error?.message || 'The configured agent failed to compose the prompt.';
           const status = /already composing/i.test(message) ? 409 : /required|must be|enter a prompt/i.test(message) ? 400 : 500;
           return json({ success: false, error: message }, status);
         }

@@ -1,5 +1,101 @@
 # Changelog
 
+## v0.11.2
+
+### Release Theme
+
+Umbra Studio `0.11.2` is a focused remote-workflow and portability update. It
+finishes the first serious mobile pass for Umbra Remote, removes Gallery
+pagination boundaries, preserves workspace state across browser reloads, and
+tightens the installation boundary between Umbra Studio and Umbra Nodes.
+
+### Umbra Remote And Mobile
+
+- Reworked the phone layouts for Umbra UI, Power Prompter, Gallery, and Model
+  Manager around touch-sized controls, compact selectors, and vertical
+  navigation.
+- Added dedicated mobile controls and preview surfaces for Umbra UI workflows,
+  including the inverse editor-first arrangement used by Inpaint.
+- Replaced Power Prompter's horizontal card and set strips with modal selectors
+  so phone gestures do not trigger accidental browser navigation.
+- Added mobile-ready Power Prompter Cards, Presets, Queue, and Queue Editor
+  views while removing preview/output clutter from the mobile queue.
+- Added a focused mobile Model Manager with model/discovery tabs, folder and
+  action sheets, touch-sized search, and compact model browsing.
+- Kept Data Forge, embedded ComfyUI, and Local Servers out of the phone
+  workspace while retaining mobile controls to install, update, and launch
+  managed ComfyUI.
+- Added remote device logout, device-forget behavior, and desktop/tablet/phone
+  presentation switching.
+- Corrected Remote status reporting for Tailscale connectivity, bind addresses,
+  IPv4/IPv6 addresses, Serve state, and restart-required state.
+- Reduced Umbra Remote media transfer overhead so large Gallery folders no
+  longer generate excessive background traffic.
+
+### Durable Workspace Resume
+
+- Added per-device, per-presentation local workspace snapshots for desktop,
+  tablet, and phone clients.
+- Restored the active workspace and selected Local Server app after browser
+  suspension or reload.
+- Restored Gallery folder, sort, grouping, focus, and mobile Folders/Media mode
+  before the first visible render.
+- Restored Power Prompter file, panel, target set, search, filters, split,
+  collapsed panels, and editor state.
+- Restored Umbra UI image controls, prompt segments, model resources, LoRAs,
+  seed, sampling, dimensions, hires fix, detailers, upscale, IMG2IMG, video
+  prompt, and Inpaint mobile-panel state.
+
+### Gallery And Media Viewer
+
+- Removed Gallery pagination across desktop, tablet, and phone. Folder listings
+  now expose the complete media collection while retaining virtualized
+  rendering.
+- Fixed Media Viewer navigation stopping at the currently lazy-loaded Gallery
+  window. Arrow and swipe navigation can now move through the full folder.
+- Added previous/next media preloading around the active mobile item for faster
+  swipe navigation.
+- Added a consistent Opened badge for the active Gallery folder on every
+  presentation mode.
+- Simplified the phone Gallery to a compact multi-thumbnail grid and improved
+  swipe transition feedback.
+
+### Umbra UI And Agent Mode
+
+- Added configurable Agent Mode providers for Hermes, Ollama, LM Studio, and
+  OpenAI-compatible local endpoints.
+- Added saved provider, endpoint, model, temperature, token limit, timeout, and
+  optional API-key settings with an in-app connection test.
+- Improved generated-prompt cleanup so agent responses are sent directly to
+  image or video pipelines without staging syntax or explanatory text.
+- Added consistent seed increment choices of `+1`, `+100`, and `+1000` across
+  TXT2IMG, IMG2IMG, Inpaint, and Video generation.
+- Improved Power Prompter handoff so card segments remain separate Umbra UI
+  prompt fields instead of being flattened into one prompt.
+
+### Power Prompter Metadata
+
+- Added Umbra Power Prompter identity metadata (`ppuid`) to generated media so
+  Umbra can associate an image with the exact prompt/card state that produced
+  it.
+- Added Gallery and Filmstrip restore actions for compatible Umbra images.
+- Preserved segmented prompts, generation controls, dimensions, model family,
+  and seed when compatible media is sent to Umbra UI workflows.
+
+### Umbra Nodes And Packaging
+
+- Removed bundled Umbra Nodes payloads and duplicate example workflows from
+  Windows and Linux portable builds.
+- Made the public
+  [Umbra Nodes repository](https://github.com/Nocturne-Ai-Labs/Umbra-Nodes)
+  the single installation and update source used by managed ComfyUI setup.
+- Added package validation that rejects a stale top-level `Umbra-Nodes` folder
+  in repository-ready, Windows, or Linux outputs.
+- Cleaned the Umbra Nodes repository package so runtime installs exclude tests,
+  caches, empty dependency manifests, and development-only workflow examples.
+- Kept Umbra UI pipeline definitions inside Umbra Studio instead of duplicating
+  them in the custom-node repository.
+
 ## v0.11.1
 
 ### Hotfix

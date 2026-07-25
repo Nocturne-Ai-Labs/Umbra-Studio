@@ -32,11 +32,15 @@ import {
   loadUmbraUiAgentInstructions,
   loadUmbraUiAgentSettings,
   regenerateUmbraUiAgentToken,
+  saveUmbraUiAgentSettings,
   saveUmbraUiAgentInstructions,
+  testUmbraUiAgentSettings,
   type UmbraUiAgentConnectionSettings,
   type UmbraUiAgentDraft,
+  type UmbraUiAgentGenerationSettings,
   type UmbraUiAgentInstruction,
   type UmbraUiAgentMediaType,
+  type UmbraUiAgentProvider,
 } from '@/lib/umbraUiAgent';
 import { createDefaultUmbraUiAgentInstructions } from '../../../../shared/umbra-ui/agentTypes';
 
@@ -51,6 +55,30 @@ interface UmbraAgentPromptPanelProps {
 
 const inputClass = 'w-full rounded-md border border-white/10 bg-black/45 px-2.5 py-2 text-xs text-zinc-100 outline-none placeholder:text-zinc-700 focus:border-cyan-300/45';
 const labelClass = 'text-[9px] font-black uppercase tracking-[0.15em] text-zinc-500';
+
+const DEFAULT_AGENT_GENERATION_SETTINGS: UmbraUiAgentGenerationSettings = {
+  provider: 'hermes',
+  baseUrl: '',
+  model: '',
+  apiKey: '',
+  temperature: 0.7,
+  maxTokens: 1200,
+  timeoutMs: 180_000,
+};
+
+const PROVIDER_LABELS: Record<UmbraUiAgentProvider, string> = {
+  hermes: 'Hermes CLI',
+  ollama: 'Ollama',
+  lmstudio: 'LM Studio',
+  'openai-compatible': 'OpenAI API',
+};
+
+function defaultBaseUrlForProvider(provider: UmbraUiAgentProvider): string {
+  if (provider === 'ollama') return 'http://127.0.0.1:11434';
+  if (provider === 'lmstudio') return 'http://127.0.0.1:1234/v1';
+  if (provider === 'openai-compatible') return 'http://127.0.0.1:8000/v1';
+  return '';
+}
 
 function tabButtonClass(active: boolean): string {
   return cn(
@@ -85,8 +113,12 @@ export function UmbraAgentPromptPanel({
   const [instructions, setInstructions] = React.useState<UmbraUiAgentInstruction[]>([]);
   const [selectedInstructionId, setSelectedInstructionId] = React.useState('');
   const [settings, setSettings] = React.useState<UmbraUiAgentConnectionSettings | null>(null);
+  const [generationSettings, setGenerationSettings] = React.useState<UmbraUiAgentGenerationSettings>(DEFAULT_AGENT_GENERATION_SETTINGS);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [savingAgentSettings, setSavingAgentSettings] = React.useState(false);
+  const [testingAgentSettings, setTestingAgentSettings] = React.useState(false);
+  const [agentTestPrompt, setAgentTestPrompt] = React.useState('');
   const [showToken, setShowToken] = React.useState(false);
   const knownDraftIdsRef = React.useRef<Set<string> | null>(null);
 
@@ -95,7 +127,7 @@ export function UmbraAgentPromptPanel({
     const nextIds = new Set(next.map((draft) => draft.id));
     const previousIds = knownDraftIdsRef.current;
     if (announce && previousIds && next.some((draft) => !previousIds.has(draft.id))) {
-      showToast('Hermes staged a new Umbra UI prompt draft.', 'success');
+      showToast('An agent staged a new Umbra UI prompt draft.', 'success');
     }
     knownDraftIdsRef.current = nextIds;
     setDrafts(next);
@@ -140,6 +172,7 @@ export function UmbraAgentPromptPanel({
           : nextInstructions[0]?.id || ''
       ));
       setSettings(nextSettings);
+      setGenerationSettings(nextSettings.generation || DEFAULT_AGENT_GENERATION_SETTINGS);
     }).catch((error) => {
       if (!canceled) showToast(error instanceof Error ? error.message : 'Failed to open the agent prompt panel.', 'error');
     }).finally(() => {
@@ -155,6 +188,18 @@ export function UmbraAgentPromptPanel({
   const displayedHermesConfig = settings
     ? formatHermesMcpConfig(showToken ? settings : { ...settings, token: '<hidden>' })
     : '';
+
+  const updateGenerationSettings = (patch: Partial<UmbraUiAgentGenerationSettings>) => {
+    setGenerationSettings((current) => {
+      const nextProvider = patch.provider || current.provider;
+      const providerChanged = patch.provider && patch.provider !== current.provider;
+      return {
+        ...current,
+        ...patch,
+        baseUrl: providerChanged ? defaultBaseUrlForProvider(nextProvider) : (patch.baseUrl ?? current.baseUrl),
+      };
+    });
+  };
 
   const updateSelectedInstruction = (patch: Partial<UmbraUiAgentInstruction>) => {
     setInstructions((current) => current.map((entry) => entry.id === selectedInstructionId
@@ -252,12 +297,13 @@ export function UmbraAgentPromptPanel({
   };
 
   const regenerateToken = async () => {
-    if (!settings || !window.confirm('Regenerate the MCP token? Hermes will need the updated configuration.')) return;
+    if (!settings || !window.confirm('Regenerate the MCP token? Connected agent clients will need the updated configuration.')) return;
     try {
       const next = await regenerateUmbraUiAgentToken();
       setSettings({
         ...settings,
         token: next.token,
+        generation: next.generation || settings.generation,
         updatedAt: next.updatedAt,
         hermesConfig: {
           mcp_servers: {
@@ -271,6 +317,34 @@ export function UmbraAgentPromptPanel({
       showToast('Umbra UI MCP token regenerated.', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to regenerate the MCP token.', 'error');
+    }
+  };
+
+  const handleSaveAgentSettings = async () => {
+    setSavingAgentSettings(true);
+    try {
+      const saved = await saveUmbraUiAgentSettings(generationSettings);
+      setSettings(saved);
+      setGenerationSettings(saved.generation);
+      showToast('Umbra UI agent model settings saved.', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to save agent model settings.', 'error');
+    } finally {
+      setSavingAgentSettings(false);
+    }
+  };
+
+  const handleTestAgentSettings = async () => {
+    setTestingAgentSettings(true);
+    setAgentTestPrompt('');
+    try {
+      const result = await testUmbraUiAgentSettings(generationSettings);
+      setAgentTestPrompt(result.prompt);
+      showToast(`Agent test completed in ${(result.durationMs / 1000).toFixed(1)}s.`, 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Agent test failed.', 'error');
+    } finally {
+      setTestingAgentSettings(false);
     }
   };
 
@@ -289,7 +363,7 @@ export function UmbraAgentPromptPanel({
           <Bot size={16} className="text-cyan-300" />
           <div className="min-w-0">
             <h2 className="text-xs font-black uppercase tracking-[0.16em] text-zinc-100">Agent Prompts</h2>
-            <div className="font-mono text-[9px] text-zinc-600">Hermes MCP prompt authoring</div>
+            <div className="font-mono text-[9px] text-zinc-600">Prompt authoring and MCP staging</div>
           </div>
           <div className="ml-4 flex h-full items-end">
             <button type="button" onClick={() => setTab('drafts')} className={tabButtonClass(tab === 'drafts')}>
@@ -520,13 +594,145 @@ export function UmbraAgentPromptPanel({
               <div className="flex items-center gap-3 border-b border-white/10 pb-4">
                 <KeyRound size={15} className="text-emerald-300" />
                 <div>
-                  <h3 className="text-xs font-black uppercase tracking-[0.14em] text-zinc-200">Hermes MCP Connection</h3>
-                  <div className="mt-1 font-mono text-[9px] text-zinc-600">Host-only Streamable HTTP / prompt staging only</div>
+                  <h3 className="text-xs font-black uppercase tracking-[0.14em] text-zinc-200">Agent Settings</h3>
+                  <div className="mt-1 font-mono text-[9px] text-zinc-600">Prompt model selection / MCP bridge / host-only settings</div>
                 </div>
               </div>
 
               {settings ? (
                 <>
+                  <section className="space-y-4 rounded-md border border-white/10 bg-white/[0.02] p-3">
+                    <div className="flex items-center gap-2">
+                      <Settings2 size={13} className="text-cyan-300" />
+                      <div>
+                        <div className="text-[10px] font-black uppercase tracking-[0.14em] text-zinc-200">Prompt Composer Model</div>
+                        <div className="mt-0.5 font-mono text-[8px] text-zinc-600">Used by Agent Mode in txt2img, img2img, inpaint, and video</div>
+                      </div>
+                      <div className="ml-auto flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleTestAgentSettings()}
+                          disabled={testingAgentSettings || (generationSettings.provider !== 'hermes' && !generationSettings.model.trim())}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-cyan-300/20 px-2.5 text-[9px] font-black uppercase tracking-[0.11em] text-cyan-100 hover:bg-cyan-500/[0.08] disabled:border-white/10 disabled:text-zinc-700"
+                        >
+                          {testingAgentSettings ? <Loader2 size={10} className="animate-spin" /> : <WandSparkles size={10} />} Test
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleSaveAgentSettings()}
+                          disabled={savingAgentSettings || (generationSettings.provider !== 'hermes' && !generationSettings.model.trim())}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-300/25 bg-emerald-500/[0.08] px-2.5 text-[9px] font-black uppercase tracking-[0.11em] text-emerald-100 hover:bg-emerald-500/[0.13] disabled:border-white/10 disabled:bg-transparent disabled:text-zinc-700"
+                        >
+                          {savingAgentSettings ? <Loader2 size={10} className="animate-spin" /> : <Save size={10} />} Save
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {(['hermes', 'ollama', 'lmstudio', 'openai-compatible'] as UmbraUiAgentProvider[]).map((provider) => (
+                        <button
+                          type="button"
+                          key={provider}
+                          onClick={() => updateGenerationSettings({ provider })}
+                          className={cn(
+                            'h-8 rounded-md border text-[9px] font-black uppercase tracking-[0.11em]',
+                            generationSettings.provider === provider
+                              ? 'border-cyan-300/35 bg-cyan-500/[0.1] text-cyan-100'
+                              : 'border-white/10 text-zinc-600 hover:text-zinc-300',
+                          )}
+                        >
+                          {PROVIDER_LABELS[provider]}
+                        </button>
+                      ))}
+                    </div>
+
+                    {generationSettings.provider === 'hermes' ? (
+                      <div className="rounded-md border border-emerald-300/15 bg-emerald-500/[0.045] px-3 py-2 font-mono text-[10px] leading-relaxed text-emerald-100/75">
+                        Hermes CLI uses the local Hermes executable. No model field is needed here because Hermes owns its own model routing.
+                      </div>
+                    ) : (
+                      <div className="grid gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+                        <label className="block space-y-1.5">
+                          <span className={labelClass}>Base URL</span>
+                          <input
+                            value={generationSettings.baseUrl}
+                            onChange={(event) => updateGenerationSettings({ baseUrl: event.target.value })}
+                            placeholder={defaultBaseUrlForProvider(generationSettings.provider)}
+                            className={`${inputClass} font-mono`}
+                          />
+                        </label>
+                        <label className="block space-y-1.5">
+                          <span className={labelClass}>Model</span>
+                          <input
+                            value={generationSettings.model}
+                            onChange={(event) => updateGenerationSettings({ model: event.target.value })}
+                            placeholder={generationSettings.provider === 'ollama' ? 'qwen2.5:7b' : 'loaded-model-name'}
+                            className={`${inputClass} font-mono`}
+                          />
+                        </label>
+                      </div>
+                    )}
+
+                    {generationSettings.provider === 'lmstudio' || generationSettings.provider === 'openai-compatible' ? (
+                      <label className="block space-y-1.5">
+                        <span className={labelClass}>API Key Optional</span>
+                        <input
+                          type="password"
+                          value={generationSettings.apiKey}
+                          onChange={(event) => updateGenerationSettings({ apiKey: event.target.value })}
+                          placeholder="Leave blank for local servers that do not require auth"
+                          className={`${inputClass} font-mono`}
+                        />
+                      </label>
+                    ) : null}
+
+                    <div className="grid grid-cols-3 gap-3">
+                      <label className="block space-y-1.5">
+                        <span className={labelClass}>Temperature</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={2}
+                          step={0.05}
+                          value={generationSettings.temperature}
+                          onChange={(event) => updateGenerationSettings({ temperature: Number(event.target.value) })}
+                          className={inputClass}
+                        />
+                      </label>
+                      <label className="block space-y-1.5">
+                        <span className={labelClass}>Max Tokens</span>
+                        <input
+                          type="number"
+                          min={64}
+                          max={8192}
+                          step={64}
+                          value={generationSettings.maxTokens}
+                          onChange={(event) => updateGenerationSettings({ maxTokens: Number(event.target.value) })}
+                          className={inputClass}
+                        />
+                      </label>
+                      <label className="block space-y-1.5">
+                        <span className={labelClass}>Timeout Seconds</span>
+                        <input
+                          type="number"
+                          min={10}
+                          max={600}
+                          step={5}
+                          value={Math.round(generationSettings.timeoutMs / 1000)}
+                          onChange={(event) => updateGenerationSettings({ timeoutMs: Math.max(10, Number(event.target.value) || 180) * 1000 })}
+                          className={inputClass}
+                        />
+                      </label>
+                    </div>
+
+                    {agentTestPrompt ? (
+                      <div className="space-y-1.5">
+                        <span className={labelClass}>Last Test Prompt</span>
+                        <div className="whitespace-pre-wrap rounded-md border border-white/10 bg-black/35 p-3 text-[11px] leading-relaxed text-zinc-300">{agentTestPrompt}</div>
+                      </div>
+                    ) : null}
+                  </section>
+
                   <div className="space-y-1.5">
                     <span className={labelClass}>Endpoint</span>
                     <div className="flex gap-2">

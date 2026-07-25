@@ -204,9 +204,8 @@ application features around the integrated upstream tools.
 ## Umbra Node / Runtime Integration
 
 ### Umbra-Nodes
-- Path:
-  - `Umbra-Nodes/`
-  - `Tools/ComfyUI/custom_nodes/Umbra-Nodes/`
+- Repository: https://github.com/Nocturne-Ai-Labs/Umbra-Nodes
+- Installed path: `Tools/ComfyUI/custom_nodes/Umbra-Nodes/`
 - Usage in Umbra Studio:
   - Umbra metadata save nodes
   - Umbra Power Prompter reader integration

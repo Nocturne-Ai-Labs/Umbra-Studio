@@ -22,6 +22,7 @@ import {
   Image as ImageIcon,
   KeyRound,
   Loader2,
+  Menu,
   Move,
   Pencil,
   RefreshCw,
@@ -1019,6 +1020,9 @@ export function ModelManagerWorkspace() {
   });
 
   const [sourceTab, setSourceTab] = React.useState<SourceTab>('local');
+  const [isPhoneRemote, setIsPhoneRemote] = React.useState(false);
+  const [mobileFolderSheetOpen, setMobileFolderSheetOpen] = React.useState(false);
+  const [mobileActionsSheetOpen, setMobileActionsSheetOpen] = React.useState(false);
   const [browserSite, setBrowserSite] = React.useState<CivitaiBrowserSite>('pg');
   const [browserUrl, setBrowserUrl] = React.useState(CIVITAI_BROWSER_SITES.pg);
   const [browserAddressInput, setBrowserAddressInput] = React.useState(CIVITAI_BROWSER_SITES.pg);
@@ -1071,6 +1075,28 @@ export function ModelManagerWorkspace() {
   const [actionDialog, setActionDialog] = React.useState<LocalActionDialogState>(null);
   const [draggingPaths, setDraggingPaths] = React.useState<string[]>([]);
   const [dropTargetPath, setDropTargetPath] = React.useState('');
+
+  React.useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const root = document.documentElement;
+    const syncRemoteMode = () => {
+      setIsPhoneRemote(root.dataset.umbraRemoteMode === 'phone');
+    };
+    syncRemoteMode();
+    const observer = new MutationObserver(syncRemoteMode);
+    observer.observe(root, {
+      attributes: true,
+      attributeFilter: ['data-umbra-remote-mode'],
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  React.useEffect(() => {
+    if (!isPhoneRemote) {
+      setMobileFolderSheetOpen(false);
+      setMobileActionsSheetOpen(false);
+    }
+  }, [isPhoneRemote]);
 
   const [civitaiLinkInput, setCivitaiLinkInput] = React.useState('');
   const [civitaiModels, setCivitaiModels] = React.useState<CivitAIModel[]>([]);
@@ -3538,9 +3564,151 @@ export function ModelManagerWorkspace() {
   };
 
   return (
-    <div className="relative h-full w-full bg-[var(--umbra-bg)] text-[var(--umbra-text)]">
+    <div
+      data-umbra-model-manager
+      data-umbra-model-manager-phone={isPhoneRemote ? '1' : '0'}
+      className="relative h-full w-full bg-[var(--umbra-bg)] text-[var(--umbra-text)]"
+    >
       <div className="flex h-full min-h-0 flex-col">
-        <div className="border-b border-[var(--umbra-border)] bg-black/20 px-4 py-3">
+        {isPhoneRemote ? (
+          <div data-umbra-model-manager-mobile-header className="shrink-0 border-b border-[var(--umbra-border)] bg-black/30 px-3 pb-3 pt-2">
+            <div className="grid grid-cols-2 rounded-lg border border-white/10 bg-black/30 p-1">
+              <button
+                type="button"
+                onClick={() => setSourceTab('local')}
+                className={cn(
+                  'flex min-h-11 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold',
+                  sourceTab === 'local'
+                    ? 'bg-[var(--umbra-accent)]/25 text-white'
+                    : 'text-zinc-400',
+                )}
+              >
+                <Boxes size={17} />
+                Models
+              </button>
+              <button
+                type="button"
+                onClick={() => setSourceTab('civitai')}
+                className={cn(
+                  'flex min-h-11 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold',
+                  sourceTab === 'civitai'
+                    ? 'bg-[var(--umbra-accent)]/25 text-white'
+                    : 'text-zinc-400',
+                )}
+              >
+                <Cloud size={17} />
+                Discover
+              </button>
+            </div>
+
+            {sourceTab === 'local' ? (
+              <>
+                <div className="mt-2 flex items-stretch gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMobileFolderSheetOpen(true)}
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-white/10 bg-black/25 px-3 text-left"
+                  >
+                    <FolderOpen size={18} className="shrink-0 text-[var(--umbra-accent)]" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[10px] font-semibold uppercase text-zinc-500">Location</span>
+                      <span className="block truncate text-sm font-semibold text-zinc-100">
+                        {breadcrumbPaths.at(-1)?.label || effectiveLocalRoot?.label || 'Models'}
+                      </span>
+                    </span>
+                    <ChevronDown size={16} className="shrink-0 text-zinc-500" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void refreshLocalView()}
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-black/25 text-zinc-300"
+                    title="Refresh models"
+                  >
+                    <RefreshCw size={18} className={localLoading ? 'animate-spin' : ''} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMobileActionsSheetOpen(true)}
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-black/25 text-zinc-300"
+                    title="Model actions"
+                  >
+                    <Menu size={19} />
+                  </button>
+                </div>
+                <div className="relative mt-2">
+                  <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type="search"
+                    value={localFilterQuery}
+                    onChange={(event) => setLocalFilterQuery(event.target.value)}
+                    placeholder="Search this folder"
+                    className="h-11 w-full rounded-lg border border-white/10 bg-black/35 pl-10 pr-3 text-base text-white outline-none focus:border-[var(--umbra-accent)]/70"
+                  />
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-3 text-xs text-zinc-500">
+                  <span>{rootSummary.folders} folders - {rootSummary.files} models</span>
+                  {availableUpdateCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setMobileActionsSheetOpen(true)}
+                      className="font-semibold text-cyan-200"
+                    >
+                      {availableUpdateCount} updates
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void checkLocalModelUpdates()}
+                      disabled={checkingModelUpdates || !effectiveLocalRoot}
+                      className="font-semibold text-emerald-200 disabled:opacity-50"
+                    >
+                      {checkingModelUpdates ? 'Checking...' : 'Check updates'}
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="mt-2 flex gap-2">
+                <input
+                  ref={civitaiLinkInputRef}
+                  type="text"
+                  value={civitaiLinkInput}
+                  onChange={(event) => setCivitaiLinkInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') void openModelFromLink();
+                  }}
+                  placeholder="CivitAI URL or model ID"
+                  className="h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-black/35 px-3 text-base text-zinc-100 outline-none focus:border-[var(--umbra-accent)]/70"
+                />
+                <button
+                  type="button"
+                  onClick={() => void openModelFromLink()}
+                  className="flex h-11 shrink-0 items-center gap-2 rounded-lg border border-[var(--umbra-accent)]/50 bg-[var(--umbra-accent)]/20 px-4 text-sm font-semibold text-white"
+                >
+                  <ExternalLink size={16} />
+                  Open
+                </button>
+              </div>
+            )}
+
+            {sourceTab === 'local' && modelUpdateProgress.active ? (
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-emerald-400 transition-all"
+                  style={{ width: `${modelUpdatePercent}%` }}
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div
+          data-umbra-model-manager-desktop-header
+          className={cn(
+            'border-b border-[var(--umbra-border)] bg-black/20 px-4 py-3',
+            isPhoneRemote ? 'hidden' : '',
+          )}
+        >
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -3840,8 +4008,14 @@ export function ModelManagerWorkspace() {
         </div>
 
         {sourceTab === 'local' ? (
-          <div className="flex min-h-0 flex-1">
-            <aside className="w-[320px] shrink-0 border-r border-[var(--umbra-border)] bg-black/20">
+          <div data-umbra-model-manager-local className="flex min-h-0 flex-1">
+            <aside
+              data-umbra-model-manager-folder-tree
+              className={cn(
+                'w-[320px] shrink-0 border-r border-[var(--umbra-border)] bg-black/20',
+                isPhoneRemote ? 'hidden' : '',
+              )}
+            >
               <div className="h-full overflow-y-auto custom-scrollbar p-2">
                 {rootsLoading ? (
                   <div className="flex items-center gap-2 px-2 py-2 text-xs text-zinc-400">
@@ -3928,8 +4102,14 @@ export function ModelManagerWorkspace() {
               </div>
             </aside>
 
-            <main className="flex min-h-0 flex-1 flex-col">
-              <div className="border-b border-[var(--umbra-border)] bg-black/10 px-3 py-2">
+            <main data-umbra-model-manager-list className="flex min-h-0 flex-1 flex-col">
+              <div
+                data-umbra-model-manager-desktop-local-toolbar
+                className={cn(
+                  'border-b border-[var(--umbra-border)] bg-black/10 px-3 py-2',
+                  isPhoneRemote ? 'hidden' : '',
+                )}
+              >
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
@@ -4039,13 +4219,21 @@ export function ModelManagerWorkspace() {
                       <button
                         key={path}
                         type="button"
-                        onClick={(event) => handleSelectEntry(entry, event)}
+                        data-umbra-model-entry
+                        data-umbra-model-entry-kind={entry.kind}
+                        onClick={(event) => {
+                          if (isPhoneRemote && entry.kind === 'folder') {
+                            handleOpenFolder(entry.path);
+                            return;
+                          }
+                          handleSelectEntry(entry, event);
+                        }}
                         onDoubleClick={() => {
                           if (entry.kind === 'folder') handleOpenFolder(entry.path);
                           else void handleReveal(entry.path);
                         }}
                         onContextMenu={(event) => handleContextMenu(event, entry)}
-                        draggable
+                        draggable={!isPhoneRemote}
                         onDragStart={(event) => handleEntryDragStart(event, entry)}
                         onDragEnd={handleEntryDragEnd}
                         onDragOver={entry.kind === 'folder' ? (event) => handleFolderDragOver(event, entry.path) : undefined}
@@ -4055,7 +4243,10 @@ export function ModelManagerWorkspace() {
                         } : undefined}
                         onDrop={entry.kind === 'folder' ? (event) => { void handleFolderDrop(event, entry.path); } : undefined}
                         className={cn(
-                          'grid w-full grid-cols-[64px_minmax(260px,2fr)_120px_130px_140px_190px] items-center gap-3 px-3 py-2 text-left text-sm transition-colors',
+                          'w-full items-center gap-3 text-left text-sm transition-colors',
+                          isPhoneRemote
+                            ? 'flex min-h-[78px] px-3 py-2.5'
+                            : 'grid grid-cols-[64px_minmax(260px,2fr)_120px_130px_140px_190px] px-3 py-2',
                           isSelected ? 'bg-[var(--umbra-accent)]/20 text-white' : 'text-zinc-300 hover:bg-white/5 hover:text-white',
                           isDropTarget ? 'ring-1 ring-[var(--umbra-accent)] bg-[var(--umbra-accent)]/25 text-white' : '',
                         )}
@@ -4078,9 +4269,9 @@ export function ModelManagerWorkspace() {
                             <Boxes size={20} className="text-zinc-500" />
                           )}
                         </div>
-                        <div className="min-w-0 truncate font-medium">
+                        <div className={cn('min-w-0 truncate font-medium', isPhoneRemote ? 'flex-1' : '')}>
                           <span className="inline-flex items-center gap-2">
-                            {entry.kind === 'folder' ? <Folder size={14} /> : <Boxes size={14} />}
+                            {!isPhoneRemote ? (entry.kind === 'folder' ? <Folder size={14} /> : <Boxes size={14} />) : null}
                             <span className="truncate">{entry.name}</span>
                             {entry.kind === 'file' && entry.snapshot ? (
                               <span className="rounded bg-emerald-500/20 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200">
@@ -4093,16 +4284,23 @@ export function ModelManagerWorkspace() {
                               </span>
                             ) : null}
                           </span>
+                          {isPhoneRemote ? (
+                            <span className="mt-1 block truncate text-xs font-normal text-zinc-500">
+                              {entry.kind === 'folder'
+                                ? formatFolderSummary(entry)
+                                : `${String(entry.modelType || entry.extension || 'Model')} · ${formatBytes(entry.size)}`}
+                            </span>
+                          ) : null}
                         </div>
-                        <div className="text-xs text-zinc-400">
+                        <div className={cn('text-xs text-zinc-400', isPhoneRemote ? 'hidden' : '')}>
                           {entry.kind === 'folder'
                             ? formatFolderSummary(entry)
                             : String(entry.modelType || entry.extension || 'file')}
                         </div>
-                        <div className="text-xs text-zinc-400">
+                        <div className={cn('text-xs text-zinc-400', isPhoneRemote ? 'hidden' : '')}>
                           {entry.kind === 'folder' ? '-' : formatBytes(entry.size)}
                         </div>
-                        <div className="text-xs text-zinc-400">
+                        <div className={cn('text-xs text-zinc-400', isPhoneRemote ? 'hidden' : '')}>
                           {entry.kind === 'folder'
                             ? '-'
                             : modelUpdateByPath[path]?.status === 'available'
@@ -4113,9 +4311,10 @@ export function ModelManagerWorkspace() {
                                   ? 'Not checked'
                                   : '-'}
                         </div>
-                        <div className="text-xs text-zinc-500">
+                        <div className={cn('text-xs text-zinc-500', isPhoneRemote ? 'hidden' : '')}>
                           {entry.kind === 'folder' ? '-' : formatDateTime(entry.modifiedMs)}
                         </div>
+                        {isPhoneRemote ? <ChevronRight size={18} className="shrink-0 text-zinc-600" /> : null}
                       </button>
                     );
                   })}
@@ -4130,7 +4329,15 @@ export function ModelManagerWorkspace() {
             </main>
 
             {localInfoPanelOpen ? (
-              <aside className="flex w-[420px] shrink-0 flex-col border-l border-[var(--umbra-border)] bg-black/25">
+              <aside
+                data-umbra-model-manager-details
+                className={cn(
+                  'flex shrink-0 flex-col bg-[var(--umbra-bg)]',
+                  isPhoneRemote
+                    ? 'fixed inset-0 z-[1500] w-full pb-[env(safe-area-inset-bottom)]'
+                    : 'w-[420px] border-l border-[var(--umbra-border)] bg-black/25',
+                )}
+              >
                 <div className="flex items-start gap-3 border-b border-[var(--umbra-border)] p-3">
                   {getModelThumbnailSrc(selectedLocalSnapshot) ? (
                     <div className="h-20 w-28 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/40">
@@ -4163,14 +4370,17 @@ export function ModelManagerWorkspace() {
                   <button
                     type="button"
                     onClick={() => setLocalInfoPanelClosed(true)}
-                    className="rounded-md border border-white/10 bg-black/25 p-1 text-zinc-400 hover:text-white"
+                    className={cn(
+                      'flex items-center justify-center rounded-md border border-white/10 bg-black/25 text-zinc-400 hover:text-white',
+                      isPhoneRemote ? 'h-11 w-11' : 'p-1',
+                    )}
                     title="Close"
                   >
-                    <X size={14} />
+                    {isPhoneRemote ? <ArrowLeft size={20} /> : <X size={14} />}
                   </button>
                 </div>
 
-                <div className="flex flex-wrap gap-1.5 border-b border-[var(--umbra-border)] p-3">
+                <div data-umbra-model-manager-detail-actions className="flex flex-wrap gap-1.5 border-b border-[var(--umbra-border)] p-3">
                   <button
                     type="button"
                     onClick={() => selectedLocalFile && void checkLocalModelUpdates([selectedLocalFile.path])}
@@ -4445,7 +4655,7 @@ export function ModelManagerWorkspace() {
             ) : null}
           </div>
         ) : sourceTab === 'browser' ? (
-          <div className="flex min-h-0 flex-1 flex-col bg-black/20">
+          <div data-umbra-model-manager-browser className="flex min-h-0 flex-1 flex-col bg-black/20">
             <div className="flex items-center justify-between gap-2 border-b border-[var(--umbra-border)] px-3 py-2">
               <div className="min-w-0 text-xs text-zinc-400">
                 <span className="font-semibold text-zinc-200">Inline CivitAI Browser</span>
@@ -4821,7 +5031,7 @@ export function ModelManagerWorkspace() {
             </div>
           </div>
         ) : (
-          <div className="relative min-h-0 flex-1 overflow-y-auto custom-scrollbar p-4">
+          <div data-umbra-model-manager-civitai className="relative min-h-0 flex-1 overflow-y-auto custom-scrollbar p-4">
             <div className="rounded-xl border border-white/10 bg-black/20 p-4">
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,460px)]">
                 <div>
@@ -5003,10 +5213,212 @@ export function ModelManagerWorkspace() {
           </div>
         )}
 
+        {isPhoneRemote && mobileFolderSheetOpen ? (
+          <div className="fixed inset-0 z-[1600] flex items-end bg-black/65" onClick={() => setMobileFolderSheetOpen(false)}>
+            <div
+              data-umbra-model-manager-folder-sheet
+              className="flex max-h-[82dvh] w-full flex-col rounded-t-xl border border-b-0 border-white/10 bg-zinc-950 pb-[env(safe-area-inset-bottom)] shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mx-auto mt-2 h-1 w-12 rounded-full bg-white/20" />
+              <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+                <div>
+                  <div className="text-base font-semibold text-white">Model folders</div>
+                  <div className="mt-0.5 text-xs text-zinc-500">Choose a library, then drill into a folder.</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMobileFolderSheetOpen(false)}
+                  className="flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 text-zinc-300"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="border-b border-white/10 p-3">
+                <div className="grid grid-cols-3 gap-2">
+                  {sortedRoots.map((root) => (
+                    <button
+                      key={`mobile-root:${root.key}`}
+                      type="button"
+                      onClick={() => handleOpenFolder(root.path)}
+                      className={cn(
+                        'min-h-11 rounded-lg border px-2 text-xs font-semibold',
+                        effectiveLocalRootKey === root.key
+                          ? 'border-[var(--umbra-accent)]/60 bg-[var(--umbra-accent)]/20 text-white'
+                          : 'border-white/10 bg-black/25 text-zinc-400',
+                      )}
+                    >
+                      {root.label.replace(' Models', '')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2">
+                <button
+                  type="button"
+                  disabled={!canNavigateUp}
+                  onClick={() => {
+                    const currentPath = normalizePath(currentFolderPath || '');
+                    const parentPath = currentPath.includes('/') ? currentPath.slice(0, currentPath.lastIndexOf('/')) : '';
+                    if (parentPath) handleOpenFolder(parentPath);
+                  }}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 text-zinc-300 disabled:opacity-35"
+                >
+                  <ArrowUp size={19} />
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-zinc-100">
+                    {breadcrumbPaths.at(-1)?.label || effectiveLocalRoot?.label || 'Models'}
+                  </div>
+                  <div className="truncate text-xs text-zinc-500">
+                    {breadcrumbPaths.map((crumb) => crumb.label).join(' / ')}
+                  </div>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto p-2 custom-scrollbar">
+                {localLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-8 text-sm text-zinc-500">
+                    <Loader2 size={18} className="animate-spin" />
+                    Loading folders...
+                  </div>
+                ) : localList.folders.length > 0 ? (
+                  <div className="space-y-1">
+                    {localList.folders.map((folder) => (
+                      <button
+                        key={`mobile-folder:${normalizePath(folder.path)}`}
+                        type="button"
+                        onClick={() => handleOpenFolder(folder.path)}
+                        className="flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left text-zinc-200 active:bg-white/10"
+                      >
+                        <Folder size={20} className="shrink-0 text-[var(--umbra-accent)]" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-semibold">{folder.name}</span>
+                          <span className="block text-xs text-zinc-500">{formatFolderSummary(folder)}</span>
+                        </span>
+                        <ChevronRight size={18} className="shrink-0 text-zinc-600" />
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-10 text-center text-sm text-zinc-500">No folders here.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isPhoneRemote && mobileActionsSheetOpen ? (
+          <div className="fixed inset-0 z-[1600] flex items-end bg-black/65" onClick={() => setMobileActionsSheetOpen(false)}>
+            <div
+              data-umbra-model-manager-actions-sheet
+              className="w-full rounded-t-xl border border-b-0 border-white/10 bg-zinc-950 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2 shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mx-auto mb-2 h-1 w-12 rounded-full bg-white/20" />
+              <div className="flex items-center justify-between px-1 py-2">
+                <div>
+                  <div className="text-base font-semibold text-white">Model actions</div>
+                  <div className="text-xs text-zinc-500">
+                    {selectedPathsArray.length > 0 ? `${selectedPathsArray.length} selected` : 'Current folder'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMobileActionsSheetOpen(false)}
+                  className="flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 text-zinc-300"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileActionsSheetOpen(false);
+                    handleCreateFolder();
+                  }}
+                  className="flex min-h-12 items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-3 text-sm font-semibold text-zinc-200"
+                >
+                  <FolderPlus size={19} />
+                  New folder
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedPathsArray.length !== 1}
+                  onClick={() => {
+                    setMobileActionsSheetOpen(false);
+                    handleRename();
+                  }}
+                  className="flex min-h-12 items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-3 text-sm font-semibold text-zinc-200 disabled:opacity-35"
+                >
+                  <Pencil size={19} />
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileActionsSheetOpen(false);
+                    void checkLocalModelUpdates();
+                  }}
+                  disabled={checkingModelUpdates || !effectiveLocalRoot}
+                  className="flex min-h-12 items-center gap-3 rounded-lg border border-emerald-400/25 bg-emerald-500/10 px-3 text-sm font-semibold text-emerald-100 disabled:opacity-35"
+                >
+                  {checkingModelUpdates ? <Loader2 size={19} className="animate-spin" /> : <RefreshCw size={19} />}
+                  Check updates
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedPathsArray.length === 0}
+                  onClick={() => {
+                    setMobileActionsSheetOpen(false);
+                    handleDelete();
+                  }}
+                  className="flex min-h-12 items-center gap-3 rounded-lg border border-red-400/25 bg-red-500/10 px-3 text-sm font-semibold text-red-100 disabled:opacity-35"
+                >
+                  <Trash2 size={19} />
+                  Delete
+                </button>
+              </div>
+              {availableUpdateCount > 0 ? (
+                <div className="mt-3 overflow-hidden rounded-lg border border-cyan-400/20 bg-cyan-500/10">
+                  <div className="border-b border-cyan-300/10 px-3 py-2 text-sm font-semibold text-cyan-100">
+                    {availableUpdateCount} model update{availableUpdateCount === 1 ? '' : 's'} available
+                  </div>
+                  <div className="max-h-48 overflow-y-auto p-1 custom-scrollbar">
+                    {availableUpdateEntries.map(({ path, name, entry }) => (
+                      <button
+                        key={`mobile-update:${path}`}
+                        type="button"
+                        onClick={() => {
+                          setMobileActionsSheetOpen(false);
+                          void openModelUpdateTarget(path);
+                        }}
+                        className="flex min-h-12 w-full items-center gap-3 rounded-lg px-2 text-left active:bg-white/10"
+                      >
+                        <Boxes size={17} className="shrink-0 text-cyan-200" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-semibold text-zinc-100">{name}</span>
+                          <span className="block truncate text-xs text-cyan-100/70">
+                            {entry.currentVersionName || `#${entry.currentVersionId}`} {'->'} {entry.latestVersionName || `#${entry.latestVersionId}`}
+                          </span>
+                        </span>
+                        <ChevronRight size={17} className="shrink-0 text-cyan-100/50" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
         {activeModel ? (
-          <div className="absolute inset-0 z-[1500] bg-black/72">
+          <div data-umbra-model-manager-viewer className="absolute inset-0 z-[1500] bg-black/72">
             <div className="flex h-full w-full flex-col overflow-hidden bg-[#0f1118] shadow-2xl shadow-black/60">
-              <div className="flex items-center justify-between gap-2 border-b border-white/10 px-4 py-3">
+              <div data-umbra-model-manager-viewer-header className="flex items-center justify-between gap-2 border-b border-white/10 px-4 py-3">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold text-white">{activeModel.name}</div>
                   <div className="text-xs text-zinc-400">
@@ -5062,7 +5474,7 @@ export function ModelManagerWorkspace() {
                 </div>
               </div>
 
-              <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] gap-3 p-3">
+              <div data-umbra-model-manager-viewer-body className="grid min-h-0 flex-1 grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] gap-3 p-3">
                 <div className="min-h-0 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
                   <div className="relative flex h-[clamp(210px,28vh,360px)] items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-black/50">
                     {activeModelImageUrl ? (

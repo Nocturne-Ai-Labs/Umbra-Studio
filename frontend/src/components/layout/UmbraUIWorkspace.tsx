@@ -67,6 +67,7 @@ import {
 } from '@/components/umbra-ui/UmbraModelPickerModal';
 import { stageUmbraUiUpscaleHandoff } from '@/lib/umbraUiUpscale';
 import { stageUmbraUiInpaintHandoff } from '@/lib/umbraUiInpaint';
+import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import {
   resolveUmbraUiInpaintControlAvailability,
   resolveUmbraUiInpaintReferenceAvailability,
@@ -128,14 +129,59 @@ type UmbraGenerationMode = 'image' | 'img2img' | 'inpaint' | 'video' | 'extras';
 const UMBRA_UI_ACTIVE_MODE_STORAGE_KEY = 'umbra-ui:active-mode';
 const UMBRA_UI_GENERATION_MODES: UmbraGenerationMode[] = ['image', 'img2img', 'inpaint', 'video', 'extras'];
 
+interface UmbraUiDeviceResume {
+  activeMode?: UmbraGenerationMode;
+  promptSegments?: UmbraUiPromptSegment[];
+  activePromptSegmentId?: string;
+  imageAgentModeEnabled?: boolean;
+  imageAgentPrompt?: string;
+  negativePrompt?: string;
+  modelType?: PowerPrompterModelType;
+  modelFamily?: string;
+  checkpointName?: string;
+  workflowResourceValues?: Record<string, string>;
+  loras?: UmbraUiLoraEntry[];
+  clipSkip?: string;
+  seed?: string;
+  seedMode?: PowerPrompterSeedControlMode;
+  seedIncrement?: PowerPrompterSeedIncrement;
+  steps?: string;
+  cfg?: string;
+  width?: string;
+  height?: string;
+  img2imgSource?: UmbraImg2ImgSourceValue;
+  img2imgDenoise?: number;
+  replaceImg2ImgSourceOnComplete?: boolean;
+  samplerName?: string;
+  scheduler?: string;
+  hiresEnabled?: boolean;
+  hiresUpscaler?: string;
+  hiresResizeMode?: 'scale' | 'dimensions';
+  hiresScaleBy?: number;
+  hiresTargetWidth?: string;
+  hiresTargetHeight?: string;
+  hiresSteps?: string;
+  hiresDenoise?: number;
+  hiresCfg?: string;
+  hiresSamplerName?: string;
+  hiresScheduler?: string;
+  detailerPipeline?: PowerPrompterDetailerStage[];
+  outputUpscale?: PowerPrompterOutputUpscaleControls;
+}
+
+function normalizeUmbraGenerationMode(value: unknown): UmbraGenerationMode {
+  return value === 'canvas'
+    ? 'inpaint'
+    : UMBRA_UI_GENERATION_MODES.includes(value as UmbraGenerationMode)
+      ? value as UmbraGenerationMode
+      : 'image';
+}
+
 function readPersistedUmbraGenerationMode(): UmbraGenerationMode {
   if (typeof window === 'undefined') return 'image';
   try {
     const stored = window.localStorage.getItem(UMBRA_UI_ACTIVE_MODE_STORAGE_KEY);
-    if (stored === 'canvas') return 'inpaint';
-    return UMBRA_UI_GENERATION_MODES.includes(stored as UmbraGenerationMode)
-      ? stored as UmbraGenerationMode
-      : 'image';
+    return normalizeUmbraGenerationMode(stored);
   } catch {
     return 'image';
   }
@@ -324,25 +370,39 @@ export function UmbraUIWorkspace() {
     queueImage,
     queueVideo,
   } = useUmbraPowerPrompterBridge(comfyConnected);
-  const [activeMode, setActiveMode] = React.useState<UmbraGenerationMode>(readPersistedUmbraGenerationMode);
+  const [initialDeviceResume] = React.useState(() => readDeviceUiResume<UmbraUiDeviceResume>('umbra-ui'));
+  const [activeMode, setActiveMode] = React.useState<UmbraGenerationMode>(() => (
+    initialDeviceResume?.activeMode
+      ? normalizeUmbraGenerationMode(initialDeviceResume.activeMode)
+      : readPersistedUmbraGenerationMode()
+  ));
   const [mountedModes, setMountedModes] = React.useState<Set<UmbraGenerationMode>>(
     () => new Set([activeMode]),
   );
-  const [promptSegments, setPromptSegments] = React.useState<UmbraUiPromptSegment[]>(() => [createUmbraUiPromptSegment()]);
-  const [activePromptSegmentId, setActivePromptSegmentId] = React.useState('');
+  const [promptSegments, setPromptSegments] = React.useState<UmbraUiPromptSegment[]>(() => (
+    Array.isArray(initialDeviceResume?.promptSegments) && initialDeviceResume.promptSegments.length > 0
+      ? initialDeviceResume.promptSegments
+      : [createUmbraUiPromptSegment()]
+  ));
+  const [activePromptSegmentId, setActivePromptSegmentId] = React.useState(initialDeviceResume?.activePromptSegmentId || '');
   const prompt = React.useMemo(() => compileUmbraUiPromptSegments(promptSegments), [promptSegments]);
-  const [imageAgentModeEnabled, setImageAgentModeEnabled] = React.useState(false);
-  const [imageAgentPrompt, setImageAgentPrompt] = React.useState('');
+  const [imageAgentModeEnabled, setImageAgentModeEnabled] = React.useState(initialDeviceResume?.imageAgentModeEnabled === true);
+  const [imageAgentPrompt, setImageAgentPrompt] = React.useState(initialDeviceResume?.imageAgentPrompt || '');
   const workflowImagePrompt = imageAgentModeEnabled ? imageAgentPrompt.trim() : prompt;
-  const [negativePrompt, setNegativePrompt] = React.useState('');
-  const [modelType, setModelType] = React.useState<PowerPrompterModelType>('checkpoint');
+  const [negativePrompt, setNegativePrompt] = React.useState(initialDeviceResume?.negativePrompt || '');
+  const [modelType, setModelType] = React.useState<PowerPrompterModelType>(initialDeviceResume?.modelType || 'checkpoint');
   const [modelFamily, setModelFamily] = React.useState(() => {
+    if (initialDeviceResume?.modelFamily) return initialDeviceResume.modelFamily;
     if (typeof window === 'undefined') return 'Anima';
     try { return window.localStorage.getItem('umbra-ui:model-pipeline') || 'Anima'; } catch { return 'Anima'; }
   });
-  const [checkpointName, setCheckpointName] = React.useState('anima_baseV10.safetensors');
-  const [workflowResourceValues, setWorkflowResourceValues] = React.useState<Record<string, string>>({});
-  const [loras, setLoras] = React.useState<UmbraUiLoraEntry[]>([]);
+  const [checkpointName, setCheckpointName] = React.useState(initialDeviceResume?.checkpointName || 'anima_baseV10.safetensors');
+  const [workflowResourceValues, setWorkflowResourceValues] = React.useState<Record<string, string>>(
+    initialDeviceResume?.workflowResourceValues || {},
+  );
+  const [loras, setLoras] = React.useState<UmbraUiLoraEntry[]>(
+    Array.isArray(initialDeviceResume?.loras) ? initialDeviceResume.loras : [],
+  );
   const activeLoraFamilyKey = React.useMemo(
     () => normalizeUmbraUiModelFamilyKey(modelFamily),
     [modelFamily],
@@ -356,14 +416,14 @@ export function UmbraUIWorkspace() {
   }, [activeLoraFamilyKey]);
   const [modelPickerKind, setModelPickerKind] = React.useState<UmbraModelPickerKind | null>(null);
   const [resourcePickerId, setResourcePickerId] = React.useState<string | null>(null);
-  const [clipSkip, setClipSkip] = React.useState('1');
-  const [seed, setSeed] = React.useState('0');
-  const [seedMode, setSeedMode] = React.useState<PowerPrompterSeedControlMode>('fixed');
-  const [seedIncrement, setSeedIncrement] = React.useState<PowerPrompterSeedIncrement>(1);
-  const [steps, setSteps] = React.useState('35');
-  const [cfg, setCfg] = React.useState('4');
-  const [width, setWidth] = React.useState('896');
-  const [height, setHeight] = React.useState('1152');
+  const [clipSkip, setClipSkip] = React.useState(initialDeviceResume?.clipSkip || '1');
+  const [seed, setSeed] = React.useState(initialDeviceResume?.seed || '0');
+  const [seedMode, setSeedMode] = React.useState<PowerPrompterSeedControlMode>(initialDeviceResume?.seedMode || 'fixed');
+  const [seedIncrement, setSeedIncrement] = React.useState<PowerPrompterSeedIncrement>(initialDeviceResume?.seedIncrement || 1);
+  const [steps, setSteps] = React.useState(initialDeviceResume?.steps || '35');
+  const [cfg, setCfg] = React.useState(initialDeviceResume?.cfg || '4');
+  const [width, setWidth] = React.useState(initialDeviceResume?.width || '896');
+  const [height, setHeight] = React.useState(initialDeviceResume?.height || '1152');
   const [img2imgSource, setImg2imgSource] = React.useState<UmbraImg2ImgSourceValue>({
     path: '',
     originalPath: '',
@@ -371,29 +431,37 @@ export function UmbraUIWorkspace() {
     imageUrl: '',
     width: 0,
     height: 0,
+    ...(initialDeviceResume?.img2imgSource || {}),
   });
-  const [img2imgDenoise, setImg2imgDenoise] = React.useState(0.3);
-  const [replaceImg2ImgSourceOnComplete, setReplaceImg2ImgSourceOnComplete] = React.useState(false);
-  const [samplerName, setSamplerName] = React.useState('er_sde');
-  const [scheduler, setScheduler] = React.useState('simple');
-  const [hiresEnabled, setHiresEnabled] = React.useState(false);
-  const [hiresUpscaler, setHiresUpscaler] = React.useState('Latent');
-  const [hiresResizeMode, setHiresResizeMode] = React.useState<'scale' | 'dimensions'>('scale');
-  const [hiresScaleBy, setHiresScaleBy] = React.useState(2);
-  const [hiresTargetWidth, setHiresTargetWidth] = React.useState('0');
-  const [hiresTargetHeight, setHiresTargetHeight] = React.useState('0');
-  const [hiresSteps, setHiresSteps] = React.useState('0');
-  const [hiresDenoise, setHiresDenoise] = React.useState(0.35);
-  const [hiresCfg, setHiresCfg] = React.useState('0');
-  const [hiresSamplerName, setHiresSamplerName] = React.useState('use_same');
-  const [hiresScheduler, setHiresScheduler] = React.useState('use_same');
+  const [img2imgDenoise, setImg2imgDenoise] = React.useState(initialDeviceResume?.img2imgDenoise ?? 0.3);
+  const [replaceImg2ImgSourceOnComplete, setReplaceImg2ImgSourceOnComplete] = React.useState(
+    initialDeviceResume?.replaceImg2ImgSourceOnComplete === true,
+  );
+  const [samplerName, setSamplerName] = React.useState(initialDeviceResume?.samplerName || 'er_sde');
+  const [scheduler, setScheduler] = React.useState(initialDeviceResume?.scheduler || 'simple');
+  const [hiresEnabled, setHiresEnabled] = React.useState(initialDeviceResume?.hiresEnabled === true);
+  const [hiresUpscaler, setHiresUpscaler] = React.useState(initialDeviceResume?.hiresUpscaler || 'Latent');
+  const [hiresResizeMode, setHiresResizeMode] = React.useState<'scale' | 'dimensions'>(
+    initialDeviceResume?.hiresResizeMode === 'dimensions' ? 'dimensions' : 'scale',
+  );
+  const [hiresScaleBy, setHiresScaleBy] = React.useState(initialDeviceResume?.hiresScaleBy ?? 2);
+  const [hiresTargetWidth, setHiresTargetWidth] = React.useState(initialDeviceResume?.hiresTargetWidth || '0');
+  const [hiresTargetHeight, setHiresTargetHeight] = React.useState(initialDeviceResume?.hiresTargetHeight || '0');
+  const [hiresSteps, setHiresSteps] = React.useState(initialDeviceResume?.hiresSteps || '0');
+  const [hiresDenoise, setHiresDenoise] = React.useState(initialDeviceResume?.hiresDenoise ?? 0.35);
+  const [hiresCfg, setHiresCfg] = React.useState(initialDeviceResume?.hiresCfg || '0');
+  const [hiresSamplerName, setHiresSamplerName] = React.useState(initialDeviceResume?.hiresSamplerName || 'use_same');
+  const [hiresScheduler, setHiresScheduler] = React.useState(initialDeviceResume?.hiresScheduler || 'use_same');
   const [detailerPipeline, setDetailerPipeline] = React.useState<PowerPrompterDetailerStage[]>(
-    () => DEFAULT_POWER_PROMPTER_DETAILER_PIPELINE.map((stage) => ({ ...stage })),
+    () => Array.isArray(initialDeviceResume?.detailerPipeline)
+      ? initialDeviceResume.detailerPipeline.map((stage) => ({ ...stage }))
+      : DEFAULT_POWER_PROMPTER_DETAILER_PIPELINE.map((stage) => ({ ...stage })),
   );
   const [outputUpscale, setOutputUpscale] = React.useState<PowerPrompterOutputUpscaleControls>({
     enabled: false,
     modelName: 'RealESRGAN_x4plus.safetensors',
     maxDimension: 3840,
+    ...(initialDeviceResume?.outputUpscale || {}),
   });
   const [isQueueing, setIsQueueing] = React.useState(false);
   const [agentPanelOpen, setAgentPanelOpen] = React.useState(false);
@@ -433,6 +501,89 @@ export function UmbraUIWorkspace() {
     });
     try { window.localStorage.setItem(UMBRA_UI_ACTIVE_MODE_STORAGE_KEY, activeMode); } catch { /* best effort */ }
   }, [activeMode]);
+
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => {
+      writeDeviceUiResume<UmbraUiDeviceResume>('umbra-ui', {
+        activeMode,
+        promptSegments,
+        activePromptSegmentId,
+        imageAgentModeEnabled,
+        imageAgentPrompt,
+        negativePrompt,
+        modelType,
+        modelFamily,
+        checkpointName,
+        workflowResourceValues,
+        loras,
+        clipSkip,
+        seed,
+        seedMode,
+        seedIncrement,
+        steps,
+        cfg,
+        width,
+        height,
+        img2imgSource,
+        img2imgDenoise,
+        replaceImg2ImgSourceOnComplete,
+        samplerName,
+        scheduler,
+        hiresEnabled,
+        hiresUpscaler,
+        hiresResizeMode,
+        hiresScaleBy,
+        hiresTargetWidth,
+        hiresTargetHeight,
+        hiresSteps,
+        hiresDenoise,
+        hiresCfg,
+        hiresSamplerName,
+        hiresScheduler,
+        detailerPipeline,
+        outputUpscale,
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeMode,
+    activePromptSegmentId,
+    cfg,
+    checkpointName,
+    clipSkip,
+    detailerPipeline,
+    height,
+    hiresCfg,
+    hiresDenoise,
+    hiresEnabled,
+    hiresResizeMode,
+    hiresSamplerName,
+    hiresScaleBy,
+    hiresScheduler,
+    hiresSteps,
+    hiresTargetHeight,
+    hiresTargetWidth,
+    hiresUpscaler,
+    imageAgentModeEnabled,
+    imageAgentPrompt,
+    img2imgDenoise,
+    img2imgSource,
+    loras,
+    modelFamily,
+    modelType,
+    negativePrompt,
+    outputUpscale,
+    promptSegments,
+    replaceImg2ImgSourceOnComplete,
+    samplerName,
+    scheduler,
+    seed,
+    seedIncrement,
+    seedMode,
+    steps,
+    width,
+    workflowResourceValues,
+  ]);
 
   const modeIsMounted = React.useCallback(
     (mode: UmbraGenerationMode) => activeMode === mode || mountedModes.has(mode),
@@ -912,8 +1063,21 @@ export function UmbraUIWorkspace() {
     const applyHandoff = (handoff: UmbraUiPowerPrompterHandoff | null) => {
       if (!handoff) return;
       setActiveMode('image');
-      setPromptSegments([createUmbraUiPromptSegment(handoff.prompt)]);
-      setActivePromptSegmentId('');
+      const handoffSegments = Array.isArray(handoff.positivePromptSegments)
+        ? handoff.positivePromptSegments
+          .map((segment) => createUmbraUiPromptSegment(segment.text, {
+            label: segment.label,
+            slotType: segment.slotType,
+            variantId: segment.variantId,
+            variantName: segment.variantName,
+          }))
+          .filter((segment) => segment.text.trim())
+        : [];
+      const nextSegments = handoffSegments.length > 0
+        ? handoffSegments
+        : [createUmbraUiPromptSegment(handoff.prompt)];
+      setPromptSegments(nextSegments);
+      setActivePromptSegmentId(nextSegments[0]?.id || '');
       applyPowerPrompterGenerationControls(handoff.generation, {
         replace: true,
         modelFamily: handoff.modelFamily,

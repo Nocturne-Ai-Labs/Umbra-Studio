@@ -178,7 +178,7 @@ function verifyOutput() {
     }
   }
 
-  for (const forbidden of ['Models', 'Runtime', 'node_modules', 'public', 'dist-webapp', '.snapshots']) {
+  for (const forbidden of ['Models', 'Runtime', 'Umbra-Nodes', 'node_modules', 'public', 'dist-webapp', '.snapshots']) {
     if (fs.existsSync(path.join(outputRoot, forbidden))) {
       throw new Error(`Clean repository source contains forbidden runtime path: ${forbidden}`);
     }

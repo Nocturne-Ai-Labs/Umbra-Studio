@@ -66,7 +66,7 @@ export function UmbraInlineAgentPrompt({
   const handleGenerate = async () => {
     const request = sourcePrompt.trim();
     if (!request) {
-      showToast('Enter a prompt request before enabling Hermes composition.', 'error');
+      showToast('Enter a prompt request before enabling agent composition.', 'error');
       return;
     }
     if (generating) return;
@@ -81,9 +81,9 @@ export function UmbraInlineAgentPrompt({
       onAgentPromptChange(result.prompt);
       setGeneratedFrom(request);
       if (result.instructionId) setSelectedInstructionId(result.instructionId);
-      showToast(`Hermes composed the ${mediaType} prompt in ${(result.durationMs / 1000).toFixed(1)}s.`, 'success');
+      showToast(`Agent composed the ${mediaType} prompt in ${(result.durationMs / 1000).toFixed(1)}s.`, 'success');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Hermes failed to compose the prompt.', 'error');
+      showToast(error instanceof Error ? error.message : 'Agent failed to compose the prompt.', 'error');
     } finally {
       setGenerating(false);
     }
@@ -102,7 +102,7 @@ export function UmbraInlineAgentPrompt({
         <Bot size={13} className={enabled ? (accent === 'fuchsia' ? 'text-fuchsia-300' : 'text-cyan-300') : 'text-zinc-600'} />
         <div className="min-w-0">
           <div className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">Agent Mode</div>
-          <div className="font-mono text-[9px] text-zinc-500">Hermes prompt composition</div>
+          <div className="font-mono text-[9px] text-zinc-500">Configured prompt composer</div>
         </div>
         <button
           type="button"
@@ -112,7 +112,7 @@ export function UmbraInlineAgentPrompt({
             enabled ? activeButtonClasses : 'border-white/10 bg-black/25 text-zinc-600 hover:text-zinc-300',
           )}
           aria-pressed={enabled}
-          title={enabled ? 'Use the agent prompt for generation' : 'Use Hermes to compose the generation prompt'}
+          title={enabled ? 'Use the agent prompt for generation' : 'Use the configured agent to compose the generation prompt'}
         >
           {enabled ? 'Enabled' : 'Enable'}
         </button>
@@ -126,7 +126,7 @@ export function UmbraInlineAgentPrompt({
               onChange={(event) => setSelectedInstructionId(event.target.value)}
               disabled={loadingInstructions || instructions.length <= 0}
               className={`${inputClass} h-9 py-1.5 text-[11px] disabled:text-zinc-700`}
-              title="Hermes prompting instruction"
+              title="Agent prompting instruction"
             >
               {instructions.length <= 0 ? <option value="">Default instruction</option> : null}
               {instructions.map((instruction) => <option key={instruction.id} value={instruction.id}>{instruction.name}</option>)}
@@ -141,7 +141,7 @@ export function UmbraInlineAgentPrompt({
                   ? 'border-fuchsia-300/30 text-fuchsia-100 hover:bg-fuchsia-500/[0.1]'
                   : 'border-cyan-300/30 text-cyan-100 hover:bg-cyan-500/[0.1]',
               )}
-              title="Send the request to Hermes"
+              title="Send the request to the configured agent"
             >
               {generating ? <Loader2 size={12} className="animate-spin" /> : <WandSparkles size={12} />}
               {generating ? 'Composing' : agentPrompt.trim() ? 'Regenerate' : 'Compose'}
@@ -157,7 +157,7 @@ export function UmbraInlineAgentPrompt({
               value={agentPrompt}
               onChange={(event) => onAgentPromptChange(event.target.value)}
               maxLength={40_000}
-              placeholder="Hermes output appears here. You can edit it before generation."
+              placeholder="Agent output appears here. You can edit it before generation."
               className={`${inputClass} min-h-28 resize-y leading-relaxed`}
             />
           </label>

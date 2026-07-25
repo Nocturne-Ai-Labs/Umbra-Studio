@@ -369,7 +369,7 @@ export const UmbraAppBar = () => {
   const [remoteClientRevision, setRemoteClientRevision] = React.useState(0);
   const isRemoteClient = React.useMemo(() => isUmbraRemoteClient(), [remoteClientRevision]);
   const isPhoneRemote = remoteMode === 'phone' || liveRemoteMode === 'phone';
-  const isPhoneComfyImmersive = isPhoneRemote && activeWorkspace === 'comfyui';
+  const isPhoneComfyImmersive = false;
   const phoneComfyMenuDragRef = React.useRef<{
     active: boolean;
     pointerId: number;
@@ -550,7 +550,6 @@ export const UmbraAppBar = () => {
     if (activeWorkspace === 'powerprompter') return 'Power Prompter';
     if (activeWorkspace === 'comfyui') return 'ComfyUI';
     if (activeWorkspace === 'library') return 'Gallery';
-    if (activeWorkspace === 'localserver') return 'Local Server';
     if (activeWorkspace === 'umbraui') return 'Umbra UI';
     if (activeWorkspace === 'modelmanager') return 'Model Manager';
     if (activeWorkspace === 'imageinspector') return 'Image Inspector';
@@ -1917,22 +1916,6 @@ export const UmbraAppBar = () => {
           >
             <ScanSearch size={20} />
             <span>Image Inspector</span>
-          </button>
-          <button
-            type="button"
-            data-active={activeWorkspace === 'board' ? '1' : '0'}
-            onClick={() => handleWorkspaceSelect('board')}
-          >
-            <Anvil size={20} />
-            <span>Data Forge</span>
-          </button>
-          <button
-            type="button"
-            data-active={activeWorkspace === 'localserver' ? '1' : '0'}
-            onClick={() => handleWorkspaceSelect('localserver')}
-          >
-            <Server size={20} />
-            <span>Local Servers</span>
           </button>
         </div>
         {isRemoteClient ? renderRemoteSessionControls('phone') : null}

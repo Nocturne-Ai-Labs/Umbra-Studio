@@ -3,6 +3,7 @@ import { debugMiddleware } from './debugMiddleware';
 import { AppSettings, loadAppSettings, pushAppSettingsToBackend, saveAppSettings } from '@/lib/appSettings';
 import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
 import { subscribeUiSession } from '@/lib/uiSessionSocket';
+import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import {
   reconcileComfyLaunchRuntimeState,
   reduceComfyLaunchRuntimeState,
@@ -22,6 +23,8 @@ interface SharedUiSession {
   updatedAt?: number;
   clientId?: string;
 }
+
+type DeviceShellResume = Pick<SharedUiSession, 'activeWorkspace' | 'selectedLocalServerAppId'>;
 
 function normalizeWorkspace(value: unknown): WorkspaceType {
   const workspace = String(value || '').trim() === 'browser' ? 'comfyui' : String(value || '').trim();
@@ -193,12 +196,23 @@ export const useStore = create<AppState>()(
       };
       const shouldPublishSharedUiSession = () => shouldUseSharedUiSession() && !isAuthoritativeRemoteClient();
       const normalizeLocalServerAppId = (value: unknown) => String(value || '').trim() || null;
+      const readDeviceShellResume = () => readDeviceUiResume<DeviceShellResume>('shell');
+      const persistDeviceShellResume = (
+        activeWorkspace: WorkspaceType,
+        selectedLocalServerAppId: string | null = get()?.selectedLocalServerAppId || null,
+      ) => {
+        writeDeviceUiResume<DeviceShellResume>('shell', {
+          activeWorkspace,
+          selectedLocalServerAppId: normalizeLocalServerAppId(selectedLocalServerAppId),
+        });
+      };
       const applySharedUiSession = (session: SharedUiSession | null | undefined) => {
         if (!shouldUseSharedUiSession() || !session || typeof session !== 'object') return;
         const updatedAt = Math.max(0, Math.floor(Number(session.updatedAt) || 0));
         if (updatedAt <= sharedUiSessionUpdatedAt) return;
         const activeWorkspace = normalizeWorkspace(session.activeWorkspace);
         sharedUiSessionUpdatedAt = updatedAt;
+        persistDeviceShellResume(activeWorkspace, normalizeLocalServerAppId(session.selectedLocalServerAppId));
         set({
           activeWorkspace,
           selectedLocalServerAppId: normalizeLocalServerAppId(session.selectedLocalServerAppId),
@@ -250,17 +264,22 @@ export const useStore = create<AppState>()(
         initialSettings = loadAppSettings();
         startSharedUiSessionSync();
       }
+      const deviceShellResume = readDeviceShellResume();
+      const initialWorkspace = normalizeWorkspace(deviceShellResume?.activeWorkspace);
+      const initialLocalServerAppId = normalizeLocalServerAppId(deviceShellResume?.selectedLocalServerAppId);
 
       return {
-        activeWorkspace: 'umbraui',
-        selectedLocalServerAppId: null,
+        activeWorkspace: initialWorkspace,
+        selectedLocalServerAppId: initialLocalServerAppId,
         setActiveWorkspace: (workspace) => {
           const activeWorkspace = normalizeWorkspace(workspace);
+          persistDeviceShellResume(activeWorkspace);
           persistSharedUiSession(activeWorkspace);
           set({ activeWorkspace });
         },
         setSelectedLocalServerAppId: (id) => {
           const selectedLocalServerAppId = normalizeLocalServerAppId(id);
+          persistDeviceShellResume('localserver', selectedLocalServerAppId);
           persistSharedUiSession('localserver', selectedLocalServerAppId);
           set({ activeWorkspace: 'localserver', selectedLocalServerAppId });
         },

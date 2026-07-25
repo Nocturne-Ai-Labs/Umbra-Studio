@@ -164,7 +164,7 @@ model bill of materials is visible without extracting either platform package.
 The GitHub workflow must continue to package:
 
 - Umbra UI pipeline definitions from `defaults/PowerPrompter/API Workflows/`
-- Power Prompter starter card, CSV sources, and example workflow from `defaults/`
+- Power Prompter starter cards, CSV sources, and Umbra UI pipeline definitions from `defaults/`
 - Data Forge backend/frontend code and pinned model downloader scripts
 - Umbra UI support-model manifest, downloader, and platform helper scripts
 - AI Toolkit install/update integration, while leaving its checkout in `Tools/`

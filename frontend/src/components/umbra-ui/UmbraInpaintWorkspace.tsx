@@ -82,6 +82,7 @@ import { UmbraLayerUpscaleDialog } from '@/components/umbra-ui/UmbraLayerUpscale
 import { UmbraInpaintProjectBrowserModal } from '@/components/umbra-ui/UmbraInpaintProjectBrowserModal';
 import { UmbraMobileWorkspaceSheet } from '@/components/umbra-ui/UmbraMobileWorkspaceSheet';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
+import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import {
   composeUmbraUiPromptWithLoras,
   type UmbraUiLoraEntry,
@@ -2485,7 +2486,13 @@ export function UmbraInpaintWorkspace({
   showToast,
 }: UmbraInpaintWorkspaceProps) {
   const studioMode = false;
-  const [mobileControlsTab, setMobileControlsTab] = React.useState<'generation' | 'inpaint'>('generation');
+  const [mobileControlsTab, setMobileControlsTab] = React.useState<'generation' | 'inpaint'>(() => {
+    const saved = readDeviceUiResume<{ controlsTab?: 'generation' | 'inpaint' }>('umbra-ui-inpaint');
+    return saved?.controlsTab === 'inpaint' ? 'inpaint' : 'generation';
+  });
+  React.useEffect(() => {
+    writeDeviceUiResume('umbra-ui-inpaint', { controlsTab: mobileControlsTab });
+  }, [mobileControlsTab]);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const viewportRef = React.useRef<HTMLDivElement | null>(null);
   const imageCanvasRef = React.useRef<HTMLCanvasElement | null>(null);

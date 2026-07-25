@@ -423,10 +423,10 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                 void handleSendActivePromptToUmbraUi?.();
               }}
               disabled={!currentFile || umbraUiHandoffBusy}
-              className="col-span-2 inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 text-xs font-black uppercase tracking-[0.08em] text-cyan-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+              className="ml-auto inline-flex min-h-9 w-fit items-center justify-center gap-1.5 rounded-md border border-cyan-300/20 bg-cyan-400/[0.06] px-2.5 text-[10px] font-bold uppercase tracking-[0.08em] text-cyan-200 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
             >
-              {umbraUiHandoffBusy ? <Loader2 size={15} className="animate-spin" /> : <PanelsTopLeft size={15} />}
-              Send to Umbra UI
+              {umbraUiHandoffBusy ? <Loader2 size={13} className="animate-spin" /> : <PanelsTopLeft size={13} />}
+              Umbra UI
             </button>
 
             <div data-umbra-powerprompter-phone-actions-grid="">

@@ -760,16 +760,14 @@ async function runList(payload: FsListRequest['payload']) {
 
 async function runListProgressive(payload: FsListProgressiveRequest['payload']) {
   const requestStartedAt = Date.now();
-  const { fullPath, targetPath, limit, cursor, force } = payload;
+  const { fullPath, targetPath, force } = payload;
   const folders: any[] = [];
   const files: any[] = [];
-  const safeCursor = Math.max(0, Math.floor(cursor || 0));
-  const safeLimit = Math.max(1, Math.min(256, Math.floor(limit || 1)));
   const seedStartedAt = Date.now();
   const snapshot = await getProgressiveSeedSnapshot(fullPath, force === true);
   const seedMs = Date.now() - seedStartedAt;
   const entries = snapshot.entries;
-  const chunk = entries.slice(safeCursor, safeCursor + safeLimit);
+  const chunk = entries;
 
   for (const entry of chunk) {
     const itemPath = normalizeRelPath(join(targetPath, entry.name));
@@ -802,19 +800,16 @@ async function runListProgressive(payload: FsListProgressiveRequest['payload']) 
     });
   }
 
-  const nextCursor = safeCursor + chunk.length;
-  const done = nextCursor >= entries.length;
-
   return {
     path: targetPath,
     folders,
     files,
     total: snapshot.totalMedia,
-    done,
-    nextCursor: done ? null : nextCursor,
+    done: true,
+    nextCursor: null,
     debug: {
-      cursor: safeCursor,
-      limit: safeLimit,
+      cursor: 0,
+      limit: 0,
       seedSource: snapshot.seedSource,
       seedMs,
       seedWaitMs: snapshot.seedWaitMs,

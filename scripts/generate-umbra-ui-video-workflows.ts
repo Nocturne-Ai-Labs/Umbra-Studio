@@ -13,8 +13,6 @@ const ROOT = join(import.meta.dir, '..');
 const TARGET_DIRS = [
   join(ROOT, 'defaults', 'PowerPrompter', 'API Workflows'),
   join(ROOT, 'User', 'PowerPrompter', 'API Workflows'),
-  join(ROOT, 'Umbra-Nodes', 'example_workflows'),
-  join(ROOT, 'Umbra-Nodes', 'examples'),
 ];
 
 function meta(title: string, role?: string, descriptor?: { family: 'wan22' | 'ltx23'; mode: 'text_to_video' | 'image_to_video' }) {

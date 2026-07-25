@@ -50,6 +50,7 @@ import { governorShouldRun, governorTryAcquire } from '@/lib/loadGovernor';
 import { loadAppSettings, pushAppSettingsToBackend } from '@/lib/appSettings';
 import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
 import { subscribeUiSession } from '@/lib/uiSessionSocket';
+import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import { deletePathsWithSettings } from '@/utils/trashActions';
 import { decodePowerPrompterImageRestore } from '@/lib/powerPrompterImageRestore';
 import {
@@ -184,6 +185,7 @@ import {
   hasBackendQueueSnapshotMismatch,
 } from '@/components/power-prompter/queue/queueManagerModel';
 import {
+  buildQueuePromptsFromCards,
   composeActivePromptFromCards,
   resolveSeedForQueuePromptGroup,
 } from '@/components/power-prompter/queue/queuePromptBuilder';
@@ -1502,11 +1504,26 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       showToast('Tag this PPCard file with a model family before sending it to Umbra UI.', 'error');
       return;
     }
-    const prompt = composeActivePromptFromCards(document.cards, document.activeQueueSet).trim();
+    const builtPrompt = buildQueuePromptsFromCards(document, 'prompt', {
+      setIdOverride: document.activeQueueSet,
+      promptLimit: 1,
+      shuffleEnabled: false,
+    });
+    const promptEntry = builtPrompt.promptEntries[0] || null;
+    const prompt = String(promptEntry?.prompt || builtPrompt.prompts[0] || composeActivePromptFromCards(document.cards, document.activeQueueSet)).trim();
     if (!prompt) {
       showToast(`Set ${document.activeQueueSet} does not have an active prompt to send.`, 'error');
       return;
     }
+    const positivePromptSegments = (promptEntry?.tokens || [])
+      .map((token) => ({
+        text: String(token.text || '').trim(),
+        label: String(token.slotLabel || '').trim(),
+        slotType: String(token.slotType || '').trim(),
+        variantId: String(token.variantId || '').trim(),
+        variantName: String(token.variantName || '').trim(),
+      }))
+      .filter((segment) => segment.text.length > 0);
 
     setUmbraUiHandoffBusy(true);
     try {
@@ -1526,6 +1543,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       setSelectedBridgeId(targetId);
       stageUmbraUiPowerPrompterHandoff({
         prompt,
+        positivePromptSegments,
         modelFamily,
         generation: generation as unknown as Record<string, unknown>,
         sourceFile: String(currentFileRef.current || document.file || '').trim(),
@@ -6385,15 +6403,23 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
   }, [currentFile, loadPowerPrompterPresets]);
 
   useEffect(() => {
-    void readUserConfig<PowerPrompterUiPreferences>('powerprompter-ui', {})
+    void (async () => {
+      const localPreferences = readDeviceUiResume<PowerPrompterUiPreferences>('powerprompter');
+      const sharedPreferences = syncUiAcrossDevices
+        ? await readUserConfig<PowerPrompterUiPreferences>('powerprompter-ui', {})
+        : null;
+      return getPowerPrompterUiPreferenceUpdatedAt(sharedPreferences) > getPowerPrompterUiPreferenceUpdatedAt(localPreferences)
+        ? sharedPreferences || {}
+        : localPreferences || sharedPreferences || {};
+    })()
       .then((preferences) => {
         powerPrompterUiSessionUpdatedAtRef.current = getPowerPrompterUiPreferenceUpdatedAt(preferences);
         powerPrompterUiSuppressPersistUntilRef.current = Date.now() + 1000;
         const next = String(preferences?.selectedBridgeId || '').trim();
         if (parseApiWorkflowTargetId(next)) setSelectedBridgeId(next);
         setQueueManagerPreviewSplit(normalizeQueueManagerPreviewSplit(preferences?.queueManagerPreviewSplit));
-        setLeftPanelCollapsed(isPhoneRemote ? preferences?.leftPanelCollapsed !== false : true);
-        setRightPanelCollapsed(isPhoneRemote ? preferences?.rightPanelCollapsed !== false : true);
+        setLeftPanelCollapsed(preferences?.leftPanelCollapsed !== false);
+        setRightPanelCollapsed(preferences?.rightPanelCollapsed !== false);
         if (Number.isFinite(Number(preferences?.activeQueueSet))) {
           setQueueSetTarget(clampQueueSetId(preferences?.activeQueueSet));
         }
@@ -6424,7 +6450,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         powerPrompterUiHydratedRef.current = true;
         setPowerPrompterUiHydrationTick((value) => value + 1);
       });
-  }, [isPhoneRemote, setGlobalSearchQuery, shouldIgnoreIncomingPanelMode]);
+  }, [setGlobalSearchQuery, shouldIgnoreIncomingPanelMode, syncUiAcrossDevices]);
 
   useEffect(() => {
     try {
@@ -6432,11 +6458,11 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     } catch {
       // Legacy cleanup only.
     }
-    if (!powerPrompterUiHydratedRef.current || !syncUiAcrossDevices) return;
+    if (!powerPrompterUiHydratedRef.current) return;
     if (Date.now() < powerPrompterUiSuppressPersistUntilRef.current) return;
     const updatedAt = Date.now();
     powerPrompterUiSessionUpdatedAtRef.current = updatedAt;
-    void writeUserConfig('powerprompter-ui', {
+    const preferences = {
       selectedBridgeId,
       queueManagerPreviewSplit,
       activeQueueSet: queueSetTarget,
@@ -6452,7 +6478,10 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       panelMode: prompterPanelMode,
       uiClientId: powerPrompterUiClientIdRef.current,
       updatedAt,
-    } satisfies PowerPrompterUiPreferences).catch((error) => {
+    } satisfies PowerPrompterUiPreferences;
+    writeDeviceUiResume('powerprompter', preferences);
+    if (!syncUiAcrossDevices) return;
+    void writeUserConfig('powerprompter-ui', preferences).catch((error) => {
       console.warn('[PowerPrompter] Failed to persist selected bridge:', error);
     });
   }, [

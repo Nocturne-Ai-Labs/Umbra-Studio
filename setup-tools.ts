@@ -1213,104 +1213,7 @@ function hasUmbraNodesPayload(dirPath: string): boolean {
     }
 }
 
-function resolveUmbraNodesSource(): string | null {
-    const candidates = [
-        join(ROOT_DIR, 'Umbra-Nodes'),
-        join(ROOT_DIR, 'resources', 'app', 'Umbra-Nodes')
-    ];
-
-    for (const candidate of candidates) {
-        if (hasUmbraNodesPayload(candidate)) return candidate;
-    }
-
-    return null;
-}
-
-function resolveComfyExampleWorkflowSource(): string | null {
-    const candidates = [
-        join(ROOT_DIR, 'Umbra-Nodes', 'Example_Workflows', 'ComfyUI'),
-        join(ROOT_DIR, 'Umbra-Nodes', 'example_workflows'),
-        join(ROOT_DIR, 'Umbra-Nodes', 'examples'),
-        join(ROOT_DIR, 'resources', 'app', 'Umbra-Nodes', 'Example_Workflows', 'ComfyUI'),
-        join(ROOT_DIR, 'resources', 'app', 'Umbra-Nodes', 'example_workflows'),
-        join(ROOT_DIR, 'resources', 'app', 'Umbra-Nodes', 'examples'),
-        join(TOOLS_DIR, 'ComfyUI', 'custom_nodes', 'Umbra-Nodes', 'Example_Workflows', 'ComfyUI'),
-        join(TOOLS_DIR, 'ComfyUI', 'custom_nodes', 'Umbra-Nodes', 'example_workflows'),
-        join(TOOLS_DIR, 'ComfyUI', 'custom_nodes', 'Umbra-Nodes', 'examples')
-    ];
-    for (const candidate of candidates) {
-        if (!existsSync(candidate)) continue;
-        try {
-            const hasJson = readdirSync(candidate).some((entry) => entry.toLowerCase().endsWith('.json'));
-            if (hasJson) return candidate;
-        } catch {
-            // ignore read errors and continue checking fallbacks
-        }
-    }
-    return null;
-}
-
 const UMBRA_NODES_REPO = 'https://github.com/Nocturne-Ai-Labs/Umbra-Nodes.git';
-
-function isCanvasWorkflowDocumentFile(filePath: string): boolean {
-    try {
-        const raw = readFileSync(filePath, 'utf-8');
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed?.nodes)) return true;
-        if (parsed?.workflow && Array.isArray(parsed.workflow.nodes)) return true;
-        return false;
-    } catch {
-        return false;
-    }
-}
-
-function syncBundledUmbraNodesToComfy(nodesDir: string) {
-    const sourceUmbraNodes = resolveUmbraNodesSource();
-    const targetUmbraNodes = join(nodesDir, 'Umbra-Nodes');
-
-    if (!sourceUmbraNodes) {
-        try {
-            ensureDir(nodesDir);
-            if (existsSync(targetUmbraNodes) && !hasUmbraNodesPayload(targetUmbraNodes)) {
-                rmSync(targetUmbraNodes, { recursive: true, force: true });
-            }
-            if (hasUmbraNodesPayload(targetUmbraNodes)) {
-                try {
-                    configureGitRepoForPortableUpdates(targetUmbraNodes);
-                    execSync('git pull --ff-only', { cwd: targetUmbraNodes, stdio: 'ignore' });
-                    log(`${c.green}✓${c.reset}`, 'Umbra-Nodes updated from public repository');
-                } catch {
-                    log(`${c.green}✓${c.reset}`, 'Umbra-Nodes detected');
-                }
-                return;
-            }
-            log('→', 'Installing Umbra-Nodes from public repository...');
-            execSync(`git clone ${UMBRA_NODES_REPO} Umbra-Nodes`, { cwd: nodesDir, stdio: 'ignore' });
-            configureGitRepoForPortableUpdates(targetUmbraNodes);
-            if (hasUmbraNodesPayload(targetUmbraNodes)) {
-                log(`${c.green}✓${c.reset}`, 'Umbra-Nodes installed to ComfyUI custom_nodes');
-            } else {
-                log(`${c.yellow}⚠${c.reset}`, 'Umbra-Nodes cloned, but required .py files were not found.');
-            }
-        } catch {
-            log(`${c.red}✗${c.reset}`, 'Failed to install Umbra-Nodes from public repository');
-        }
-        return;
-    }
-
-    try {
-        ensureDir(nodesDir);
-        cpSync(sourceUmbraNodes, targetUmbraNodes, { recursive: true, force: true });
-        pruneDuplicateUmbraVhsCore(nodesDir, targetUmbraNodes);
-        if (hasUmbraNodesPayload(targetUmbraNodes)) {
-            log(`${c.green}✓${c.reset}`, 'Umbra-Nodes synced to ComfyUI custom_nodes');
-        } else {
-            log(`${c.yellow}⚠${c.reset}`, 'Umbra-Nodes synced, but required .py files were not found.');
-        }
-    } catch {
-        log(`${c.red}✗${c.reset}`, 'Failed to sync Umbra-Nodes');
-    }
-}
 
 function syncUmbraNodesToComfy(nodesDir: string) {
     const targetUmbraNodes = join(nodesDir, 'Umbra-Nodes');
@@ -1340,10 +1243,8 @@ function syncUmbraNodesToComfy(nodesDir: string) {
         }
         log(`${c.yellow}WARN${c.reset}`, 'Umbra-Nodes cloned, but required .py files were not found.');
     } catch {
-        log(`${c.yellow}WARN${c.reset}`, 'Failed to install Umbra-Nodes from public repository; trying bundled fallback.');
+        log(`${c.red}ERROR${c.reset}`, 'Failed to install Umbra-Nodes from the public repository.');
     }
-
-    syncBundledUmbraNodesToComfy(nodesDir);
 }
 
 function findVideoHelperSuiteDir(nodesDir: string): string | null {
@@ -1363,40 +1264,6 @@ function pruneDuplicateUmbraVhsCore(nodesDir: string, umbraNodesDir: string): vo
         rmSync(duplicateShimPath, { force: true });
     } catch {
         // Ignore cleanup failure; syncing the main node payload matters more.
-    }
-}
-
-
-function seedComfyExampleWorkflows(comfyDir: string) {
-    const sourceDir = resolveComfyExampleWorkflowSource();
-    if (!sourceDir) {
-        log(`${c.yellow}⚠${c.reset}`, 'ComfyUI example workflow source not found.');
-        return;
-    }
-
-    const targetDir = join(comfyDir, 'user', 'default', 'workflows');
-    ensureDir(targetDir);
-
-    let copied = 0;
-    try {
-        for (const entry of readdirSync(sourceDir)) {
-            if (!entry.toLowerCase().endsWith('.json')) continue;
-            const sourcePath = join(sourceDir, entry);
-            if (!isCanvasWorkflowDocumentFile(sourcePath)) continue;
-            const targetPath = join(targetDir, entry);
-            if (existsSync(targetPath)) continue;
-            cpSync(sourcePath, targetPath, { recursive: false, force: false });
-            copied += 1;
-        }
-    } catch {
-        log(`${c.red}✗${c.reset}`, 'Failed to seed ComfyUI example workflows.');
-        return;
-    }
-
-    if (copied > 0) {
-        log(`${c.green}✓${c.reset}`, `Seeded ${copied} ComfyUI example workflow(s)`);
-    } else {
-        log('→', 'ComfyUI example workflows already present');
     }
 }
 
@@ -1965,7 +1832,6 @@ function installComfyNodes(comfyDir: string): boolean {
 
     console.log(`\n${c.cyan}━━━ Installing ComfyUI Custom Nodes ━━━${c.reset}`);
     syncUmbraNodesToComfy(nodesDir);
-    seedComfyExampleWorkflows(comfyDir);
 
     // Get enabled nodes from config
     const enabledNodes = getEnabledNodes();
@@ -2041,7 +1907,7 @@ function installComfyNodes(comfyDir: string): boolean {
     if (hasUmbraNodesPayload(umbraNodesPath)) {
         log(`${c.green}✓${c.reset}`, 'Umbra-Nodes detected');
     } else {
-        log(`${c.yellow}⚠${c.reset}`, 'Umbra-Nodes not found (will be created by Umbra Studio)');
+        log(`${c.red}X${c.reset}`, 'Umbra-Nodes installation failed');
     }
 
     if (!hasUmbraNodesPayload(umbraNodesPath)) requiredFailure = true;

@@ -4,6 +4,13 @@ export const UMBRA_UI_POWER_PROMPTER_HANDOFF_EVENT = 'umbra:umbra-ui-power-promp
 export interface UmbraUiPowerPrompterHandoff {
   version: 1;
   prompt: string;
+  positivePromptSegments?: Array<{
+    text: string;
+    label?: string;
+    slotType?: string;
+    variantId?: string;
+    variantName?: string;
+  }>;
   modelFamily: string;
   generation: Record<string, unknown>;
   sourceFile: string;
@@ -20,10 +27,27 @@ export function normalizeUmbraUiPowerPrompterHandoff(value: unknown): UmbraUiPow
   const source = normalizeRecord(value);
   const prompt = String(source.prompt || '').trim();
   const modelFamily = String(source.modelFamily || '').trim();
+  const positivePromptSegments = Array.isArray(source.positivePromptSegments)
+    ? source.positivePromptSegments
+      .map((entry) => {
+        const segment = normalizeRecord(entry);
+        const text = String(segment.text || '').trim();
+        if (!text) return null;
+        return {
+          text,
+          ...(String(segment.label || '').trim() ? { label: String(segment.label).trim() } : {}),
+          ...(String(segment.slotType || '').trim() ? { slotType: String(segment.slotType).trim() } : {}),
+          ...(String(segment.variantId || '').trim() ? { variantId: String(segment.variantId).trim() } : {}),
+          ...(String(segment.variantName || '').trim() ? { variantName: String(segment.variantName).trim() } : {}),
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => !!entry)
+    : [];
   if (!prompt || !modelFamily) return null;
   return {
     version: 1,
     prompt,
+    ...(positivePromptSegments.length > 0 ? { positivePromptSegments } : {}),
     modelFamily,
     generation: normalizeRecord(source.generation),
     sourceFile: String(source.sourceFile || '').trim(),

@@ -4289,7 +4289,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   }, [onChainLinkFeedback]);
 
   const startEditingVariantText = useCallback((slotId: string, variant: PowerPrompterCardNode) => {
-    if (mobileSelectionMode) return;
     const currentText = String(variant.text || '');
     setActiveSlotId(slotId);
     setActiveVariantId(variant.id);
@@ -4301,21 +4300,9 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       }
       return { ...prev, [variant.id]: currentText };
     });
-  }, [mobileSelectionMode]);
+  }, []);
 
   const commitVariantTextEdit = useCallback((slotId: string, variant: PowerPrompterCardNode, rawValue?: string) => {
-    if (mobileSelectionMode) {
-      const variantId = String(variant.id || '').trim();
-      setEditingPromptChip(null);
-      setEditingVariantId((prev) => (prev === variantId ? '' : prev));
-      setVariantTextDrafts((prev) => {
-        if (!(variantId in prev)) return prev;
-        const next = { ...prev };
-        delete next[variantId];
-        return next;
-      });
-      return;
-    }
     const variantId = String(variant.id || '').trim();
     if (!variantId) return;
     const source = rawValue !== undefined
@@ -4335,7 +4322,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       delete next[variantId];
       return next;
     });
-  }, [mobileSelectionMode, patchVariant, variantTextDrafts]);
+  }, [patchVariant, variantTextDrafts]);
 
   const cancelVariantTextEdit = useCallback((variantId: string) => {
     setEditingPromptChip(null);
@@ -8154,9 +8141,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
               <div className="relative mt-1">
                 <textarea
                   value={negativePromptValue}
-                  readOnly={mobileSelectionMode}
                   onChange={(event) => {
-                    if (mobileSelectionMode) return;
                     updateGeneration({ negativePrompt: String(event.target.value || '') });
                   }}
                   placeholder="Type negative prompt..."
@@ -9660,10 +9645,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                     onClick={(event) => {
                                       event.preventDefault();
                                       event.stopPropagation();
-                                      if (chainLinkModeActive || mobileSelectionMode) return;
+                                      if (chainLinkModeActive) return;
                                       openExpandedVariantEditor(slot.slotId, variant, slotIndex, variantIdx);
                                     }}
-                                    disabled={chainLinkModeActive || mobileSelectionMode}
+                                    disabled={chainLinkModeActive}
                                     className="p-0.5 rounded border border-white/10 text-zinc-500 hover:text-zinc-200 hover:border-white/25 disabled:opacity-40 disabled:cursor-not-allowed"
                                     title="Open larger prompt editor"
                                   >
@@ -9765,10 +9750,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                     onClick={(event) => {
                                       event.preventDefault();
                                       event.stopPropagation();
-                                      if (chainLinkModeActive || mobileSelectionMode) return;
+                                      if (chainLinkModeActive) return;
                                       openExpandedVariantEditor(slot.slotId, variant, slotIndex, variantIdx);
                                     }}
-                                    disabled={chainLinkModeActive || mobileSelectionMode}
+                                    disabled={chainLinkModeActive}
                                     className="p-0.5 rounded border border-white/10 text-zinc-500 hover:text-zinc-200 hover:border-white/25 disabled:opacity-40 disabled:cursor-not-allowed"
                                     title="Open larger prompt editor"
                                   >
@@ -9972,17 +9957,17 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                 data-variant-plain-edit="true"
                                 data-no-variant-drag="true"
                                 draggable={false}
-                                readOnly={mobileSelectionMode || chainLinkModeActive || isSkipVariant}
+                                readOnly={chainLinkModeActive || isSkipVariant}
                                 value={plainEditDraft}
                                 onChange={(event) => {
-                                  if (mobileSelectionMode || chainLinkModeActive) return;
+                                  if (chainLinkModeActive) return;
                                   const rawDraft = String(event.target.value || '');
                                   setEditingVariantId(variant.id);
                                   setVariantTextDrafts((prev) => ({ ...prev, [variant.id]: rawDraft }));
                                 }}
                                 onKeyDown={(event) => {
                                   event.stopPropagation();
-                                  if (mobileSelectionMode || chainLinkModeActive) return;
+                                  if (chainLinkModeActive) return;
                                   if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
                                     const weighted = applyPromptWeightShortcutToTextarea(
                                       event.currentTarget,
@@ -10045,13 +10030,13 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                   setActiveSlotId(slot.slotId);
                                   setActiveVariantId(variant.id);
                                   setEditingPromptChip(null);
-                                  if (!mobileSelectionMode && !chainLinkModeActive && !isEditing) {
+                                  if (!chainLinkModeActive && !isEditing) {
                                     startEditingVariantText(slot.slotId, variant);
                                   }
                                 }}
                                 onBlur={(event) => {
                                   suppressedVariantDragIdRef.current = '';
-                                  if (!mobileSelectionMode && !chainLinkModeActive) {
+                                  if (!chainLinkModeActive) {
                                     commitVariantTextEdit(slot.slotId, variant, event.currentTarget.value);
                                   }
                                   resetVariantTextareaHeight(event.currentTarget);
@@ -10505,10 +10490,18 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
 
       {expandedVariantEditor && typeof window !== 'undefined' && window.document?.body && createPortal(
         <div
-          className="pointer-events-none fixed inset-x-0 top-20 z-[12028] flex justify-center px-4"
+          className={
+            mobileSelectionMode
+              ? 'pointer-events-none fixed inset-x-0 bottom-0 z-[12028] flex justify-center px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]'
+              : 'pointer-events-none fixed inset-x-0 top-20 z-[12028] flex justify-center px-4'
+          }
         >
           <div
-            className="pointer-events-auto w-[min(860px,calc(100vw-380px))] max-w-[calc(100vw-32px)] min-w-[420px] overflow-hidden rounded-2xl border border-white/15 bg-[#07080c]/98 shadow-2xl shadow-black/70"
+            className={
+              mobileSelectionMode
+                ? 'pointer-events-auto flex max-h-[calc(100dvh-5.5rem)] w-[calc(100vw-1rem)] min-w-0 flex-col overflow-hidden rounded-t-2xl border border-white/15 bg-[#07080c]/98 shadow-2xl shadow-black/70'
+                : 'pointer-events-auto w-[min(860px,calc(100vw-380px))] max-w-[calc(100vw-32px)] min-w-[420px] overflow-hidden rounded-2xl border border-white/15 bg-[#07080c]/98 shadow-2xl shadow-black/70'
+            }
             onPointerDown={(event) => {
               event.stopPropagation();
             }}
@@ -10525,9 +10518,9 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
               event.stopPropagation();
             }}
           >
-            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+            <div className={`${mobileSelectionMode ? 'px-3 py-2.5' : 'px-4 py-3'} flex items-center justify-between gap-3 border-b border-white/10`}>
               <div className="min-w-0">
-                <div className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-500">Expanded Variant Editor</div>
+                <div className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-500">{mobileSelectionMode ? 'Variant Editor' : 'Expanded Variant Editor'}</div>
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
                   <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-100">
                     {expandedVariantEditorTarget?.slot.label || expandedVariantEditor.slotLabel || 'Card'}
@@ -10549,8 +10542,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 <X size={14} />
               </button>
             </div>
-            <div className="border-b border-white/8 px-4 py-3">
-              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+            <div className={`${mobileSelectionMode ? 'px-3 py-2.5' : 'px-4 py-3'} border-b border-white/8`}>
+              <div className={`grid gap-3 ${mobileSelectionMode ? 'grid-cols-1' : 'lg:grid-cols-[minmax(0,1fr)_auto]'}`}>
                 <div className="min-w-0">
                   <div className="mb-1 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Variant Name</div>
                   <input
@@ -10599,7 +10592,13 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 </div>
               </div>
             </div>
-            <div className="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_300px]">
+            <div
+              className={
+                mobileSelectionMode
+                  ? 'grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto overscroll-contain px-3 py-3 custom-scrollbar'
+                  : 'grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_300px]'
+              }
+            >
               <div className="min-w-0">
                 <textarea
                   ref={setExpandedVariantTextareaNode}
@@ -10696,7 +10695,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   onSelect={(event) => {
                     syncExpandedVariantEditorCaret(event.currentTarget);
                   }}
-                  className="min-h-[260px] max-h-[42vh] w-full resize-y rounded-xl border border-white/10 bg-black/35 px-3 py-3 text-[13px] leading-6 text-zinc-100 outline-none focus:border-cyan-300/60"
+                  className={`${mobileSelectionMode ? 'min-h-[170px] max-h-[30vh]' : 'min-h-[260px] max-h-[42vh]'} w-full resize-y rounded-xl border border-white/10 bg-black/35 px-3 py-3 text-[13px] leading-6 text-zinc-100 outline-none focus:border-cyan-300/60`}
                   placeholder="Variant text..."
                 />
               </div>
@@ -10763,7 +10762,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     <div className="text-[10px] text-zinc-600">{effectiveExpandedVariantCsvSourceIds.length} CSV{effectiveExpandedVariantCsvSourceIds.length === 1 ? '' : 's'}</div>
                   </div>
                   <div
-                    className="max-h-[42vh] min-h-[260px] overflow-y-auto overscroll-contain custom-scrollbar"
+                    className={`${mobileSelectionMode ? 'max-h-[24vh] min-h-[140px]' : 'max-h-[42vh] min-h-[260px]'} overflow-y-auto overscroll-contain custom-scrollbar`}
                     onWheel={(event) => {
                       event.stopPropagation();
                     }}
@@ -10818,7 +10817,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   </div>
                 </div>
               </div>
-              <div className="lg:col-span-2 mt-1 flex items-center justify-between gap-3 text-[10px] text-zinc-500">
+              <div className={`${mobileSelectionMode ? 'hidden' : 'flex'} lg:col-span-2 mt-1 items-center justify-between gap-3 text-[10px] text-zinc-500`}>
                 <span>Tag browser and inline suggestions append a trailing comma here, but prompt export stays unchanged.</span>
                 <span>Press Ctrl+Enter to save</span>
               </div>
@@ -10828,7 +10827,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 </div>
               ) : null}
             </div>
-            <div className="flex items-center justify-end gap-2 border-t border-white/10 px-4 py-3">
+            <div className={`${mobileSelectionMode ? 'px-3 py-2.5' : 'px-4 py-3'} flex items-center justify-end gap-2 border-t border-white/10`}>
               <button
                 onClick={() => {
                   setExpandedVariantEditor(null);

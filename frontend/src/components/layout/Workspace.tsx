@@ -282,7 +282,17 @@ const openExternal = (url: string, label = 'external link') => {
   }
 };
 
-const BackendSplash = ({ name, backend, icon }: { name: string, backend: 'comfyui', icon: string }) => {
+const BackendSplash = ({
+  name,
+  backend,
+  icon,
+  mobileManager = false,
+}: {
+  name: string;
+  backend: 'comfyui';
+  icon: string;
+  mobileManager?: boolean;
+}) => {
   const [isChecking, setIsChecking] = useState(false);
   const [startupProgress, setStartupProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
@@ -301,6 +311,8 @@ const BackendSplash = ({ name, backend, icon }: { name: string, backend: 'comfyu
   const [comfyVersionError, setComfyVersionError] = useState<string | null>(null);
   const fetchSystemStatus = useStore((state) => state.fetchSystemStatus);
   const isLaunching = useStore((state) => state.booting[backend]);
+  const backendConnection = useStore((state) => state.connections[backend]);
+  const backendHealthy = useStore((state) => state.backendHealth[backend] === true);
   const setBooting = useStore((state) => state.setBooting);
   const setComfyLaunchPhase = useStore((state) => state.setComfyLaunchPhase);
   const versionBackend: VersionManagedBackend | null = backend === 'comfyui'
@@ -310,6 +322,10 @@ const BackendSplash = ({ name, backend, icon }: { name: string, backend: 'comfyu
     ? 'ComfyUI'
     : name;
   const isRemoteClient = isUmbraRemoteClient();
+  const managementBlocked = isRemoteClient && !mobileManager;
+  const isBackendRunning = backendConnection === 'connected';
+  const isBackendReady = backendConnection === 'connected' && backendHealthy;
+  const [isStopping, setIsStopping] = useState(false);
 
   const setIsLaunching = (value: boolean) => setBooting(backend, value);
   const consoleScrollRef = React.useRef<HTMLDivElement>(null);
@@ -625,8 +641,38 @@ const BackendSplash = ({ name, backend, icon }: { name: string, backend: 'comfyu
     setStatusText('');
   };
 
+  const handleStop = async () => {
+    if (isStopping) return;
+    setIsStopping(true);
+    setError(null);
+    setStatusText(`Stopping ${name}...`);
+    setConsoleLines((prev) => [...prev, `[Umbra] Stopping ${name}...`]);
+    try {
+      const response = await fetch('/api/umbrabridge/backend/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backend }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || payload?.success === false) {
+        throw new Error(payload?.error || payload?.message || `Failed to stop ${name}`);
+      }
+      setComfyLaunchPhase('offline');
+      setStatusText('Stopped');
+      setConsoleLines((prev) => [...prev, `[Umbra] ${name} stopped.`]);
+      await fetchSystemStatus({ force: true });
+    } catch (err: any) {
+      const message = err?.message || `Failed to stop ${name}`;
+      setError(message);
+      setStatusText('Stop failed');
+      setConsoleLines((prev) => [...prev, `[Umbra] ERROR: ${message}`]);
+    } finally {
+      setIsStopping(false);
+    }
+  };
+
   const handleToolAction = async (action: 'install' | 'update' | 'custom_nodes' | 'update_pytorch' | 'install_sageattention') => {
-    if (isRemoteClient) {
+    if (managementBlocked) {
       setError('Install and update actions are only available from the host PC.');
       setStatusText('Host-only action blocked');
       return;
@@ -700,7 +746,7 @@ const BackendSplash = ({ name, backend, icon }: { name: string, backend: 'comfyu
 
   const handleComfyVersionSwitch = async () => {
     if (!versionBackend) return;
-    if (isRemoteClient) {
+    if (managementBlocked) {
       const message = 'Version switching is only available from the host PC.';
       setComfyVersionError(message);
       setError(message);
@@ -772,6 +818,184 @@ const BackendSplash = ({ name, backend, icon }: { name: string, backend: 'comfyu
   };
 
   const showConsolePanel = isLaunching || !!toolActionLoading || isSwitchingComfyVersion || !!error || consoleLines.length > 0;
+  const mobileManagerBusy = isLaunching || isStopping || isChecking || !!toolActionLoading || isSwitchingComfyVersion;
+
+  if (mobileManager) {
+    return (
+      <div
+        data-umbra-mobile-comfy-manager
+        className="h-full w-full overflow-y-auto bg-[var(--umbra-bg)] px-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-3 text-zinc-100 custom-scrollbar"
+      >
+        <div className="mx-auto w-full max-w-xl space-y-3">
+          <section className="rounded-lg border border-white/10 bg-black/25 p-4">
+            <div className="flex items-center gap-3">
+              <div
+                className={cn(
+                  'flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border',
+                  error
+                    ? 'border-red-400/30 bg-red-500/10 text-red-300'
+                    : isBackendReady
+                      ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-300'
+                      : isBackendRunning || isLaunching || isStopping
+                        ? 'border-amber-400/30 bg-amber-500/10 text-amber-300'
+                        : 'border-white/10 bg-white/5 text-zinc-400',
+                )}
+              >
+                {mobileManagerBusy ? <Loader2 size={22} className="animate-spin" /> : <Power size={22} />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-semibold text-white">{name}</h2>
+                  <span
+                    className={cn(
+                      'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase',
+                      error
+                        ? 'bg-red-500/15 text-red-200'
+                        : isBackendReady
+                          ? 'bg-emerald-500/15 text-emerald-200'
+                          : isBackendRunning || isLaunching || isStopping
+                            ? 'bg-amber-500/15 text-amber-200'
+                            : 'bg-white/5 text-zinc-500',
+                    )}
+                  >
+                    {error ? 'Error' : isStopping ? 'Stopping' : isLaunching ? 'Starting' : isBackendReady ? 'Online' : isBackendRunning ? 'Warming Up' : 'Offline'}
+                  </span>
+                </div>
+                <p className="mt-1 truncate text-xs text-zinc-500">
+                  {statusText || currentComfyRef || (toolInstalled === false ? 'Not installed' : 'Managed service')}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCheckConnection}
+                disabled={mobileManagerBusy}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-zinc-300 disabled:opacity-40"
+                aria-label="Refresh ComfyUI status"
+              >
+                <RefreshCw size={18} className={isChecking ? 'animate-spin' : ''} />
+              </button>
+            </div>
+
+            {(isLaunching || isStopping || toolActionLoading) ? (
+              <div className="mt-4">
+                <div className="mb-1.5 flex items-center justify-between text-xs text-zinc-500">
+                  <span>{statusText || 'Working...'}</span>
+                  {isLaunching ? <span>{startupProgress}%</span> : null}
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className={cn(
+                      'h-full rounded-full transition-all duration-300',
+                      toolActionLoading || isStopping ? 'w-1/2 animate-pulse bg-amber-300' : 'bg-[var(--umbra-accent)]',
+                    )}
+                    style={isLaunching ? { width: `${startupProgress}%` } : undefined}
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {error ? (
+              <div className="mt-3 rounded-lg border border-red-400/25 bg-red-500/10 px-3 py-2 text-sm text-red-100">
+                {error}
+              </div>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={isBackendRunning ? handleStop : (error ? handleRetry : handleLaunch)}
+              disabled={mobileManagerBusy}
+              className={cn(
+                'mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-lg border text-sm font-semibold disabled:opacity-40',
+                isBackendRunning
+                  ? 'border-red-400/30 bg-red-500/10 text-red-100'
+                  : 'border-[var(--umbra-accent)]/45 bg-[var(--umbra-accent)]/20 text-white',
+              )}
+            >
+              {mobileManagerBusy ? <Loader2 size={18} className="animate-spin" /> : <Power size={18} />}
+              {error ? 'Clear Error' : isBackendRunning ? 'Stop ComfyUI' : 'Launch ComfyUI'}
+            </button>
+          </section>
+
+          <section className="rounded-lg border border-white/10 bg-black/25 p-3">
+            <div className="mb-3 flex items-center justify-between px-1">
+              <h3 className="text-sm font-semibold text-white">Installation</h3>
+              <span className="text-xs text-zinc-500">
+                {toolInstalled === null ? 'Checking' : toolInstalled ? 'Installed' : 'Missing'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleToolAction('install')}
+                disabled={mobileManagerBusy}
+                className="flex min-h-12 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2 text-sm font-semibold text-zinc-200 disabled:opacity-40"
+              >
+                {toolActionLoading === 'install' ? <Loader2 size={17} className="animate-spin" /> : <FolderOpen size={17} />}
+                {toolInstalled ? 'Repair' : 'Install'}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToolAction('update')}
+                disabled={mobileManagerBusy || toolInstalled === false}
+                className="relative flex min-h-12 items-center justify-center gap-2 rounded-lg border border-amber-400/25 bg-amber-500/10 px-2 text-sm font-semibold text-amber-100 disabled:opacity-40"
+              >
+                {toolActionLoading === 'update' ? <Loader2 size={17} className="animate-spin" /> : <RefreshCw size={17} />}
+                Update
+                {hasToolUpdate ? <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-amber-300" /> : null}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToolAction('custom_nodes')}
+                disabled={mobileManagerBusy || toolInstalled === false}
+                className="flex min-h-12 items-center justify-center gap-2 rounded-lg border border-emerald-400/25 bg-emerald-500/10 px-2 text-sm font-semibold text-emerald-100 disabled:opacity-40"
+              >
+                {toolActionLoading === 'custom_nodes' ? <Loader2 size={17} className="animate-spin" /> : <Zap size={17} />}
+                Custom Nodes
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToolAction('update_pytorch')}
+                disabled={mobileManagerBusy || toolInstalled === false}
+                className="relative flex min-h-12 items-center justify-center gap-2 rounded-lg border border-cyan-400/25 bg-cyan-500/10 px-2 text-sm font-semibold text-cyan-100 disabled:opacity-40"
+              >
+                {toolActionLoading === 'update_pytorch' ? <Loader2 size={17} className="animate-spin" /> : <RefreshCw size={17} />}
+                PyTorch
+                {hasPyTorchUpdate ? <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-cyan-300" /> : null}
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleToolAction('install_sageattention')}
+              disabled={mobileManagerBusy || toolInstalled === false}
+              className="mt-2 flex min-h-12 w-full items-center justify-center gap-2 rounded-lg border border-fuchsia-400/25 bg-fuchsia-500/10 px-3 text-sm font-semibold text-fuchsia-100 disabled:opacity-40"
+            >
+              {toolActionLoading === 'install_sageattention' ? <Loader2 size={17} className="animate-spin" /> : <Zap size={17} />}
+              Install SageAttention
+            </button>
+          </section>
+
+          {(currentComfyRef || currentComfyCommit) ? (
+            <section className="rounded-lg border border-white/10 bg-black/25 px-4 py-3">
+              <div className="text-[10px] font-semibold uppercase text-zinc-500">Installed Version</div>
+              <div className="mt-1 truncate text-sm font-semibold text-zinc-100">{currentComfyRef || 'Unknown'}</div>
+              {currentComfyCommit ? <div className="mt-0.5 truncate font-mono text-xs text-zinc-500">{currentComfyCommit}</div> : null}
+            </section>
+          ) : null}
+
+          {consoleLines.length > 0 ? (
+            <section className="rounded-lg border border-white/10 bg-black/40 p-3">
+              <div className="mb-2 text-[10px] font-semibold uppercase text-zinc-500">Recent Activity</div>
+              <div className="space-y-1 font-mono text-[11px] leading-relaxed text-zinc-400">
+                {consoleLines.slice(-8).map((line, index) => (
+                  <div key={`${index}:${line}`} className="break-words">{line}</div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-full text-zinc-500 bg-black/60 backdrop-blur-3xl relative overflow-hidden">
@@ -902,14 +1126,14 @@ const BackendSplash = ({ name, backend, icon }: { name: string, backend: 'comfyu
         <div className="flex flex-wrap gap-3 justify-center mb-6">
           <button
             onClick={() => handleToolAction('install')}
-            disabled={isRemoteClient || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+            disabled={managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
             className="glass-panel px-4 py-2 bg-white/5 hover:bg-white/10 border-white/10 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
           >
             {toolActionLoading === 'install' ? 'Installing...' : (toolInstalled ? `Reinstall ${name}` : `Install ${name}`)}
           </button>
           <button
             onClick={() => handleToolAction('update')}
-            disabled={isRemoteClient || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+            disabled={managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
             className="glass-panel px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
           >
             {toolActionLoading === 'update' ? 'Updating...' : `Update ${name}`}
@@ -917,7 +1141,7 @@ const BackendSplash = ({ name, backend, icon }: { name: string, backend: 'comfyu
           {(backend === 'comfyui') && (
             <button
               onClick={() => handleToolAction('custom_nodes')}
-              disabled={isRemoteClient || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+              disabled={managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
               className="glass-panel px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
             >
               {toolActionLoading === 'custom_nodes' ? 'Installing Nodes...' : 'Install Custom Nodes'}
@@ -926,7 +1150,7 @@ const BackendSplash = ({ name, backend, icon }: { name: string, backend: 'comfyu
           {backend === 'comfyui' && (
             <button
               onClick={() => handleToolAction('update_pytorch')}
-              disabled={isRemoteClient || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+              disabled={managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
               className="glass-panel px-4 py-2 bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
             >
               {toolActionLoading === 'update_pytorch' ? 'Updating Torch...' : 'Update CUDA/PyTorch'}
@@ -935,7 +1159,7 @@ const BackendSplash = ({ name, backend, icon }: { name: string, backend: 'comfyu
           {backend === 'comfyui' && (
             <button
               onClick={() => handleToolAction('install_sageattention')}
-              disabled={isRemoteClient || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+              disabled={managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
               className="glass-panel px-4 py-2 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 border-fuchsia-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
             >
               {toolActionLoading === 'install_sageattention' ? 'Installing Sage...' : 'Install SageAttention'}
@@ -959,7 +1183,7 @@ const BackendSplash = ({ name, backend, icon }: { name: string, backend: 'comfyu
               <button
                 type="button"
                 onClick={() => loadComfyVersions()}
-                disabled={isRemoteClient || isLoadingComfyVersions || isSwitchingComfyVersion || isLaunching || !!toolActionLoading}
+                disabled={managementBlocked || isLoadingComfyVersions || isSwitchingComfyVersion || isLaunching || !!toolActionLoading}
                 className="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
               >
                 <RefreshCw className={`w-3 h-3 ${isLoadingComfyVersions ? 'animate-spin' : ''}`} />
@@ -976,7 +1200,7 @@ const BackendSplash = ({ name, backend, icon }: { name: string, backend: 'comfyu
               <select
                 value={selectedComfyRef}
                 onChange={(event) => setSelectedComfyRef(event.target.value)}
-                disabled={isRemoteClient || isLoadingComfyVersions || isSwitchingComfyVersion || isLaunching || !!toolActionLoading || comfyVersions.length === 0}
+                disabled={managementBlocked || isLoadingComfyVersions || isSwitchingComfyVersion || isLaunching || !!toolActionLoading || comfyVersions.length === 0}
                 className="flex-1 min-w-[240px] px-3 py-2 bg-black/40 border border-white/10 rounded-lg text-white text-xs focus:border-[var(--umbra-accent)] outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="">Select {versionBackendLabel} version...</option>
@@ -992,7 +1216,7 @@ const BackendSplash = ({ name, backend, icon }: { name: string, backend: 'comfyu
                 onClick={handleComfyVersionSwitch}
                 disabled={
                   isLoadingComfyVersions ||
-                  isRemoteClient ||
+                  managementBlocked ||
                   isSwitchingComfyVersion ||
                   isLaunching ||
                   !!toolActionLoading ||
@@ -2191,6 +2415,10 @@ export const Workspace = () => {
   }, [activeWorkspace]);
 
   useEffect(() => {
+    if (remoteMode === 'phone' && (activeWorkspace === 'board' || activeWorkspace === 'localserver')) {
+      setActiveWorkspace('library');
+      return;
+    }
     if (isRemoteClient && activeWorkspace === 'remote') {
       setActiveWorkspace('comfyui');
       return;
@@ -2199,14 +2427,16 @@ export const Workspace = () => {
       if (prev[activeWorkspace]) return prev;
       return { ...prev, [activeWorkspace]: true };
     });
-  }, [activeWorkspace, isRemoteClient, setActiveWorkspace]);
+  }, [activeWorkspace, isRemoteClient, remoteMode, setActiveWorkspace]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const warmLazyWorkspaces = () => {
       void loadImageInspectorWorkspaceModule().catch(() => {});
       void loadModelManagerWorkspaceModule().catch(() => {});
-      void loadBoardBrowserModule().catch(() => {});
+      if (remoteMode !== 'phone') {
+        void loadBoardBrowserModule().catch(() => {});
+      }
       if (!isRemoteClient) {
         void loadUmbraRemoteWorkspaceModule().catch(() => {});
       }
@@ -2221,7 +2451,7 @@ export const Workspace = () => {
     }
     const timer = window.setTimeout(warmLazyWorkspaces, 250);
     return () => window.clearTimeout(timer);
-  }, [isRemoteClient]);
+  }, [isRemoteClient, remoteMode]);
 
   const effectiveShowFilmstrip = showFilmstrip && remoteMode !== 'phone';
 
@@ -2258,7 +2488,11 @@ export const Workspace = () => {
         className="absolute inset-0 workspace-comfyui"
         style={getWorkspaceLayerStyle('comfyui')}
       >
-        {loadedWorkspaces.comfyui ? <ComfyUIWorkspace isActive={activeWorkspace === 'comfyui'} /> : null}
+        {loadedWorkspaces.comfyui ? (
+          remoteMode === 'phone'
+            ? <BackendSplash name="ComfyUI" backend="comfyui" icon="" mobileManager />
+            : <ComfyUIWorkspace isActive={activeWorkspace === 'comfyui'} />
+        ) : null}
       </div>
 
       {/* Umbra UI Layer */}
@@ -2314,7 +2548,7 @@ export const Workspace = () => {
         className="absolute inset-0 workspace-board"
         style={getWorkspaceLayerStyle('board')}
       >
-        {loadedWorkspaces.board ? (
+        {remoteMode !== 'phone' && loadedWorkspaces.board ? (
           <Suspense fallback={null}>
             <BoardBrowser />
           </Suspense>
@@ -2338,7 +2572,9 @@ export const Workspace = () => {
         className="absolute inset-0 workspace-localserver"
         style={getWorkspaceLayerStyle('localserver')}
       >
-        {loadedWorkspaces.localserver ? <LocalServerWorkspace isActive={activeWorkspace === 'localserver'} /> : null}
+        {remoteMode !== 'phone' && loadedWorkspaces.localserver ? (
+          <LocalServerWorkspace isActive={activeWorkspace === 'localserver'} />
+        ) : null}
       </div>
 
       {/* Power Prompter Layer */}

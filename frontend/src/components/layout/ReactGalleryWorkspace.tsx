@@ -60,6 +60,7 @@ import { deletePathsWithSettings } from '@/utils/trashActions';
 import { POWER_PROMPTER_MAX_QUEUE_SETS } from '@/lib/powerPrompter';
 import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
 import { subscribeUiSession } from '@/lib/uiSessionSocket';
+import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import { isDiagnosticLoggingEnabled, logDiagnostic } from '@/lib/diagnostics';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import {
@@ -85,7 +86,6 @@ type GalleryUiSession = {
   sortOrder?: GallerySortOrder;
   groupBySet?: boolean;
   mobileView?: 'folders' | 'media';
-  mobileMediaView?: GalleryMobileMediaView;
   updatedAt?: number;
   clientId?: string;
 };
@@ -414,14 +414,11 @@ type GalleryPageCacheEntry = {
 const DEFAULT_OUTPUT_ROOT = 'Tools/ComfyUI/output';
 const TRASH_ROOT = 'User/Trash';
 const TRASH_RETENTION_OPTIONS = [1, 3, 7, 14, 30, 60, 90, 180, 365] as const;
-const PAGE_SIZE = 72;
 const FOLDER_PREVIEW_PAGE_SIZE = 36;
-const FOLDER_PREVIEW_EXPANDED_SIZE = FOLDER_PREVIEW_PAGE_SIZE * 2;
 const FOLDER_PREVIEW_CONCURRENCY = 3;
 const FOLDER_PREVIEW_MAX_DEPTH = 2;
 const FOLDER_PREVIEW_MAX_GROUPS = 160;
 const GALLERY_DRAG_PATHS_MIME = 'application/x-umbra-gallery-paths';
-const SELECT_ALL_PAGE_SIZE = 256;
 const PAGE_CACHE_LIMIT = 18;
 const PAGE_CACHE_TTL_MS = 90_000;
 const PAGE_CACHE_KEY_SEPARATOR = '\u0001';
@@ -430,9 +427,10 @@ const TREE_FETCH_TIMEOUT_MS = 8_000;
 const GRID_MIN_CARD_WIDTH = 216;
 const GRID_CARD_EXTRA_HEIGHT = 72;
 const PHONE_GRID_MIN_CARD_WIDTH = 104;
-const PHONE_SINGLE_CARD_EXTRA_HEIGHT = 88;
 const PHONE_GRID_CARD_EXTRA_HEIGHT = 0;
 const GRID_GAP = 10;
+const MOBILE_VIEWER_PRELOAD_RADIUS = 5;
+const MOBILE_VIEWER_PRELOAD_CACHE_LIMIT = 24;
 const READY_THUMBNAIL_CACHE_LIMIT = 3000;
 const THUMBNAIL_LOAD_CONCURRENCY = 8;
 const OPENED_FOLDER_LIMIT = 10;
@@ -441,13 +439,11 @@ const VIEWER_METADATA_CACHE_LIMIT = 300;
 const CURRENT_FOLDER_SUMMARY_POLL_MS = 5_000;
 const CURRENT_FOLDER_RECONCILE_DEBOUNCE_MS = 180;
 const CURRENT_FOLDER_RECONCILE_COOLDOWN_MS = 1_200;
-const CURRENT_FOLDER_RECONCILE_MAX_LIMIT = 240;
 const GALLERY_UI_SESSION_LOCAL_NAVIGATION_GUARD_MS = 30_000;
 const RENAME_TEMPLATE_TOKENS = ['{original}', '{sequence}', '{yyyy}', '{mm}', '{dd}', '{hh}', '{min}'] as const;
 const GLOBAL_SEARCH_MIN_QUERY_LENGTH = 2;
 const SEARCH_CONTAINS_MIN_QUERY_LENGTH = 3;
 const GLOBAL_SEARCH_DEBOUNCE_MS = 120;
-const GLOBAL_SEARCH_PAGE_SIZE = 120;
 const GLOBAL_SEARCH_MAX_FOLDERS = 100_000;
 const SEARCH_SUGGESTION_MAX_ITEMS = 12;
 const GALLERY_SET_COLOR_PALETTE = [
@@ -466,6 +462,7 @@ const MS_PER_HOUR = 60 * 60 * 1000;
 const MS_PER_DAY = 24 * MS_PER_HOUR;
 
 const readyThumbnailCache = new Set<string>();
+const mobileViewerPreloadCache = new Map<string, HTMLImageElement | HTMLVideoElement>();
 const viewerMetadataCache = new Map<string, { value: GalleryViewerMetadata; cachedAt: number }>();
 
 class ThumbnailLoadScheduler {
@@ -588,8 +585,6 @@ type GalleryEmptyFolderCleanupModalState = {
   folders: string[];
   submitting: boolean;
 };
-
-type GalleryMobileMediaView = 'single' | 'grid';
 
 type GalleryRenamePreviewItem = {
   path: string;
@@ -756,14 +751,12 @@ function galleryFoldersToTreeNodes(folders: GalleryFolder[]): GalleryFolderTreeN
 
 function galleryPageCacheKey(
   folderPath: string,
-  cursor: number,
   sortBy: GallerySortBy,
   sortOrder: GallerySortOrder,
 ): string {
   return [
     normalizePath(folderPath).toLowerCase(),
-    Math.max(0, Math.trunc(Number(cursor || 0))),
-    PAGE_SIZE,
+    'all',
     sortBy,
     sortOrder,
   ].join(PAGE_CACHE_KEY_SEPARATOR);
@@ -2149,6 +2142,7 @@ function LibraryFolderRow({
         >
           {isOpen ? <FolderOpen size={14} className="shrink-0" /> : <Folder size={14} className="shrink-0" />}
           <span className="truncate">{node.name || pathLeaf(folderPath) || folderPath}</span>
+          {isOpen ? <span data-umbra-gallery-opened-folder-badge="">Opened</span> : null}
         </button>
         {pinned ? <Pin size={11} className="relative z-10 shrink-0 text-zinc-500" /> : null}
         {dropActive && draggingCount > 0 ? (
@@ -2354,6 +2348,7 @@ function LibraryNavigator({
             {options.icon || <Folder size={14} />}
           </span>
           <span className="truncate">{pathLeaf(normalized) || normalized}</span>
+          {isOpen ? <span data-umbra-gallery-opened-folder-badge="">Opened</span> : null}
         </button>
         {dropActive && draggingCount > 0 ? (
           <span className="rounded border border-[var(--umbra-accent)]/40 bg-zinc-950/80 px-1.5 py-0.5 text-[10px] text-zinc-100">
@@ -3065,8 +3060,6 @@ function GalleryMediaViewer({
   totalCount,
   remoteMode,
   selectedCount,
-  loadingMore,
-  canLoadMore,
   remoteViewerOriginals,
   onClose,
   onStep,
@@ -3082,8 +3075,6 @@ function GalleryMediaViewer({
   totalCount: number;
   remoteMode: string;
   selectedCount: number;
-  loadingMore: boolean;
-  canLoadMore: boolean;
   remoteViewerOriginals: boolean;
   onClose: () => void;
   onStep: (delta: number) => void;
@@ -3108,8 +3099,16 @@ function GalleryMediaViewer({
   const [metadataLoading, setMetadataLoading] = useState(false);
   const [metadataError, setMetadataError] = useState('');
   const [skipLivePreviewBusy, setSkipLivePreviewBusy] = useState(false);
+  const [mobileSendMenuOpen, setMobileSendMenuOpen] = useState(false);
   const touchStartRef = useRef<{ x: number; y: number; at: number; axis: 'x' | 'y' | null; cancelled: boolean } | null>(null);
   const touchLastRef = useRef<{ x: number; y: number } | null>(null);
+  const pendingSwipeRef = useRef<{ delta: number; fromPath: string } | null>(null);
+  const swipeNavigationTimerRef = useRef<number | null>(null);
+  const swipeSettleTimerRef = useRef<number | null>(null);
+  const swipeFrameRef = useRef<number | null>(null);
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const [swipeAnimating, setSwipeAnimating] = useState(false);
+  const [swipeDragging, setSwipeDragging] = useState(false);
   const viewerPath = normalizePath(file?.path || '');
   const isLivePreview = isLiveGenerationPreviewPath(viewerPath);
   const viewerIndex = useMemo(() => (
@@ -3146,6 +3145,68 @@ function GalleryMediaViewer({
     ['VAE', metadataParams.vae],
   ] as Array<[string, unknown]>).filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== ''), [metadataParams]);
 
+  useEffect(() => {
+    if (!isPhoneViewer || viewerIndex < 0 || typeof window === 'undefined') return;
+
+    const candidates: GalleryFile[] = [];
+    for (let offset = 1; offset <= MOBILE_VIEWER_PRELOAD_RADIUS; offset += 1) {
+      const next = files[viewerIndex + offset];
+      const previous = files[viewerIndex - offset];
+      if (next) candidates.push(next);
+      if (previous) candidates.push(previous);
+    }
+
+    for (const candidate of candidates) {
+      const candidatePath = normalizePath(candidate.path);
+      if (!candidatePath || isLiveGenerationPreviewPath(candidatePath)) continue;
+      const source = imageUrl(candidate, { lane: 'gallery', remoteOriginals: remoteViewerOriginals });
+      if (!source) continue;
+
+      const cached = mobileViewerPreloadCache.get(source);
+      if (cached) {
+        mobileViewerPreloadCache.delete(source);
+        mobileViewerPreloadCache.set(source, cached);
+        continue;
+      }
+
+      if (candidate.type === 'video') {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.muted = true;
+        video.playsInline = true;
+        video.src = source;
+        video.load();
+        mobileViewerPreloadCache.set(source, video);
+
+        const posterSource = thumbnailUrl(candidate, { lane: 'gallery' });
+        if (posterSource && !mobileViewerPreloadCache.has(posterSource)) {
+          const poster = new Image();
+          poster.decoding = 'async';
+          poster.src = posterSource;
+          mobileViewerPreloadCache.set(posterSource, poster);
+        }
+      } else {
+        const image = new Image();
+        image.decoding = 'async';
+        image.fetchPriority = 'low';
+        image.src = source;
+        mobileViewerPreloadCache.set(source, image);
+      }
+    }
+
+    while (mobileViewerPreloadCache.size > MOBILE_VIEWER_PRELOAD_CACHE_LIMIT) {
+      const oldestSource = mobileViewerPreloadCache.keys().next().value;
+      if (typeof oldestSource !== 'string') break;
+      const oldest = mobileViewerPreloadCache.get(oldestSource);
+      mobileViewerPreloadCache.delete(oldestSource);
+      if (oldest instanceof HTMLVideoElement) {
+        oldest.pause();
+        oldest.removeAttribute('src');
+        oldest.load();
+      }
+    }
+  }, [files, isPhoneViewer, remoteViewerOriginals, viewerIndex]);
+
   const handleSkipLivePreview = useCallback(async () => {
     if (skipLivePreviewBusy) return;
     setSkipLivePreviewBusy(true);
@@ -3167,10 +3228,60 @@ function GalleryMediaViewer({
     }
   }, [addToast, skipLivePreviewBusy]);
 
+  const clearSwipeTimers = useCallback(() => {
+    if (swipeNavigationTimerRef.current !== null) {
+      window.clearTimeout(swipeNavigationTimerRef.current);
+      swipeNavigationTimerRef.current = null;
+    }
+    if (swipeSettleTimerRef.current !== null) {
+      window.clearTimeout(swipeSettleTimerRef.current);
+      swipeSettleTimerRef.current = null;
+    }
+    if (swipeFrameRef.current !== null) {
+      window.cancelAnimationFrame(swipeFrameRef.current);
+      swipeFrameRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     setZoom(1);
     if (isPhoneViewer) setShowInfo(false);
-  }, [isPhoneViewer, viewerPath]);
+    setMobileSendMenuOpen(false);
+
+    const pendingSwipe = pendingSwipeRef.current;
+    if (!pendingSwipe || pendingSwipe.fromPath === viewerPath) {
+      if (!pendingSwipe) {
+        setSwipeOffset(0);
+        setSwipeAnimating(false);
+        setSwipeDragging(false);
+      }
+      return;
+    }
+
+    clearSwipeTimers();
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 390;
+    const entryOffset = pendingSwipe.delta > 0 ? viewportWidth : -viewportWidth;
+    setSwipeAnimating(false);
+    setSwipeDragging(false);
+    setSwipeOffset(entryOffset);
+
+    swipeFrameRef.current = window.requestAnimationFrame(() => {
+      swipeFrameRef.current = window.requestAnimationFrame(() => {
+        setSwipeAnimating(true);
+        setSwipeOffset(0);
+        swipeSettleTimerRef.current = window.setTimeout(() => {
+          pendingSwipeRef.current = null;
+          setSwipeAnimating(false);
+          swipeSettleTimerRef.current = null;
+        }, 220);
+      });
+    });
+  }, [clearSwipeTimers, isPhoneViewer, viewerPath]);
+
+  useEffect(() => () => {
+    clearSwipeTimers();
+    pendingSwipeRef.current = null;
+  }, [clearSwipeTimers]);
 
   const touchTargetIsInteractive = useCallback((target: EventTarget | null) => (
     target instanceof Element
@@ -3184,7 +3295,7 @@ function GalleryMediaViewer({
   }, []);
 
   const handleMediaTouchStart = useCallback((event: React.TouchEvent) => {
-    if (!isTouchViewer || touchTargetIsInteractive(event.target) || event.touches.length !== 1) {
+    if (pendingSwipeRef.current || !isTouchViewer || touchTargetIsInteractive(event.target) || event.touches.length !== 1) {
       resetTouchNavigation();
       return;
     }
@@ -3192,6 +3303,9 @@ function GalleryMediaViewer({
     if (!touch) return;
     touchStartRef.current = { x: touch.clientX, y: touch.clientY, at: Date.now(), axis: null, cancelled: zoom > 1.05 };
     touchLastRef.current = { x: touch.clientX, y: touch.clientY };
+    setSwipeAnimating(false);
+    setSwipeDragging(true);
+    setSwipeOffset(0);
   }, [isTouchViewer, resetTouchNavigation, touchTargetIsInteractive, zoom]);
 
   const handleMediaTouchMove = useCallback((event: React.TouchEvent) => {
@@ -3213,7 +3327,12 @@ function GalleryMediaViewer({
     if (!start.axis && (absX >= 12 || absY >= 12)) {
       start.axis = absX > absY * 1.15 ? 'x' : 'y';
     }
-    if (start.axis === 'x') event.preventDefault();
+    if (start.axis === 'x') {
+      event.preventDefault();
+      const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 390;
+      const maxOffset = Math.max(120, viewportWidth * 0.92);
+      setSwipeOffset(Math.max(-maxOffset, Math.min(maxOffset, dx)));
+    }
   }, [isTouchViewer]);
 
   const handleMediaTouchEnd = useCallback((event: React.TouchEvent) => {
@@ -3233,14 +3352,53 @@ function GalleryMediaViewer({
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 390;
     const horizontalThreshold = Math.max(44, Math.min(92, viewportWidth * 0.12));
     if (zoom <= 1.05 && absX >= horizontalThreshold && absX > absY * 1.25) {
-      onStep(dx < 0 ? 1 : -1);
+      const delta = dx < 0 ? 1 : -1;
+      pendingSwipeRef.current = { delta, fromPath: viewerPath };
+      setSwipeDragging(false);
+      setSwipeAnimating(true);
+      setSwipeOffset(delta > 0 ? -viewportWidth : viewportWidth);
+      swipeNavigationTimerRef.current = window.setTimeout(() => {
+        swipeNavigationTimerRef.current = null;
+        onStep(delta);
+        swipeSettleTimerRef.current = window.setTimeout(() => {
+          if (pendingSwipeRef.current?.fromPath !== viewerPath) return;
+          pendingSwipeRef.current = null;
+          setSwipeAnimating(true);
+          setSwipeOffset(0);
+          swipeSettleTimerRef.current = window.setTimeout(() => {
+            setSwipeAnimating(false);
+            swipeSettleTimerRef.current = null;
+          }, 180);
+        }, 650);
+      }, 150);
       return;
     }
 
     if (absY >= 64 && absY > absX * 1.15) {
       setShowInfo(dy > 0);
     }
-  }, [isTouchViewer, onStep, resetTouchNavigation, zoom]);
+    setSwipeDragging(false);
+    setSwipeAnimating(true);
+    setSwipeOffset(0);
+    swipeSettleTimerRef.current = window.setTimeout(() => {
+      setSwipeAnimating(false);
+      swipeSettleTimerRef.current = null;
+    }, 180);
+  }, [isTouchViewer, onStep, resetTouchNavigation, viewerPath, zoom]);
+
+  const handleMediaTouchCancel = useCallback(() => {
+    resetTouchNavigation();
+    setSwipeDragging(false);
+    setSwipeAnimating(true);
+    setSwipeOffset(0);
+    if (swipeSettleTimerRef.current !== null) {
+      window.clearTimeout(swipeSettleTimerRef.current);
+    }
+    swipeSettleTimerRef.current = window.setTimeout(() => {
+      setSwipeAnimating(false);
+      swipeSettleTimerRef.current = null;
+    }, 180);
+  }, [resetTouchNavigation]);
 
   useEffect(() => {
     if (!viewerPath || !file) {
@@ -3337,7 +3495,24 @@ function GalleryMediaViewer({
     }
   }, [addToast, apiWorkflowOpenInfo, file?.name, metadata, setActiveWorkspace, workflowJsonExport]);
 
-  const renderUmbraSendMenu = () => (
+  const sendToUmbra = useCallback((mode: UmbraUiMediaHandoffMode, frameRole?: UmbraUiVideoFrameRole) => {
+    setMobileSendMenuOpen(false);
+    onSendUmbra(mode, frameRole, metadata);
+  }, [metadata, onSendUmbra]);
+
+  const renderUmbraSendMenu = () => isPhoneViewer ? (
+    <button
+      type="button"
+      data-umbra-gallery-viewer-action="send"
+      onClick={() => setMobileSendMenuOpen(true)}
+      className="flex h-8 w-8 items-center justify-center rounded border border-cyan-300/25 text-cyan-200 hover:bg-cyan-400/10"
+      title="Send to Umbra UI"
+      aria-label="Send to Umbra UI"
+      aria-expanded={mobileSendMenuOpen}
+    >
+      <Send size={15} />
+    </button>
+  ) : (
     <details className="group relative">
       <summary
         className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded border border-cyan-300/20 text-cyan-200 hover:bg-cyan-400/10 [&::-webkit-details-marker]:hidden"
@@ -3346,25 +3521,25 @@ function GalleryMediaViewer({
         <Send size={15} />
       </summary>
       <div className="absolute right-0 top-10 z-30 w-52 overflow-hidden rounded-md border border-cyan-300/25 bg-[#070a0c] p-1 shadow-2xl shadow-black/70">
-        <button type="button" disabled={isVideo} onClick={() => onSendUmbra('txt2img', undefined, metadata)} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
+        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('txt2img')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Sparkles size={12} className="text-emerald-300" /> TXT2IMG Parameters
         </button>
-        <button type="button" disabled={isVideo} onClick={() => onSendUmbra('img2img', undefined, metadata)} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
+        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('img2img')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Images size={12} className="text-cyan-300" /> IMG2IMG
         </button>
-        <button type="button" disabled={isVideo} onClick={() => onSendUmbra('inpaint', undefined, metadata)} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
+        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('inpaint')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Paintbrush size={12} className="text-rose-300" /> Inpaint
         </button>
-        <button type="button" disabled={isVideo} onClick={() => onSendUmbra('video', 'first', metadata)} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
+        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Clapperboard size={12} className="text-fuchsia-300" /> IMG2VID / First Frame
         </button>
-        <button type="button" disabled={isVideo} onClick={() => onSendUmbra('video', 'middle', metadata)} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
+        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'middle')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Clapperboard size={12} className="text-cyan-300" /> Video Middle Frame
         </button>
-        <button type="button" disabled={isVideo} onClick={() => onSendUmbra('video', 'last', metadata)} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
+        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'last')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Clapperboard size={12} className="text-amber-300" /> Video Last Frame
         </button>
-        <button type="button" disabled={!isVideo} onClick={() => onSendUmbra('video', 'source_video', metadata)} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
+        <button type="button" disabled={!isVideo} onClick={() => sendToUmbra('video', 'source_video')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Video size={12} className="text-emerald-300" /> VID2VID Source
         </button>
       </div>
@@ -3390,7 +3565,7 @@ function GalleryMediaViewer({
         <div data-umbra-gallery-viewer-title="" className="min-w-0">
           <div className="truncate text-sm font-semibold text-zinc-100">{file.name || pathLeaf(file.path)}</div>
           <div className="truncate text-[11px] text-zinc-500">
-            {viewerIndex >= 0 ? `${viewerIndex + 1}/${viewerTotal}` : 'Media'}{selectedCount > 1 ? ` - ${selectedCount} selected` : ''}{loadingMore ? ' - loading more...' : ''}
+            {viewerIndex >= 0 ? `${viewerIndex + 1}/${viewerTotal}` : 'Media'}{selectedCount > 1 ? ` - ${selectedCount} selected` : ''}
           </div>
         </div>
 
@@ -3403,7 +3578,7 @@ function GalleryMediaViewer({
               <button type="button" data-umbra-gallery-viewer-action="info" onClick={() => setShowInfo((current) => !current)} className="flex h-8 w-8 items-center justify-center rounded border border-white/10 text-zinc-300 hover:bg-white/10" title={showInfo ? 'Hide info' : 'Show info'}>
                 <Info size={15} />
               </button>
-              {!isLivePreview && canSendWaifu ? renderUmbraSendMenu() : null}
+              {!isLivePreview ? renderUmbraSendMenu() : null}
               <button
                 type="button"
                 data-umbra-gallery-viewer-action={isLivePreview ? 'skip-live-preview' : 'delete'}
@@ -3449,7 +3624,7 @@ function GalleryMediaViewer({
               ) : null}
               {!isLivePreview ? (
                 <>
-                  {canSendWaifu ? renderUmbraSendMenu() : null}
+                  {renderUmbraSendMenu()}
                   <button type="button" data-umbra-gallery-viewer-action="copy" onClick={onCopyPath} className="flex h-8 w-8 items-center justify-center rounded border border-white/10 text-zinc-300 hover:bg-white/10" title="Copy path">
                     <Copy size={15} />
                   </button>
@@ -3496,16 +3671,26 @@ function GalleryMediaViewer({
           onTouchStart={handleMediaTouchStart}
           onTouchMove={handleMediaTouchMove}
           onTouchEnd={handleMediaTouchEnd}
-          onTouchCancel={resetTouchNavigation}
+          onTouchCancel={handleMediaTouchCancel}
           style={isTouchViewer && zoom <= 1.05 ? { touchAction: 'pan-y pinch-zoom' } : undefined}
         >
           <div
+            data-umbra-gallery-viewer-swipe-surface=""
+            data-umbra-gallery-viewer-swipe-dragging={swipeDragging ? '1' : '0'}
             className={cn(
               'flex p-4 sm:p-6',
               zoom > 1
                 ? 'min-h-full min-w-full items-start justify-start'
                 : 'absolute inset-0 items-center justify-center',
             )}
+            style={isTouchViewer && zoom <= 1.05 ? {
+              transform: `translate3d(${swipeOffset}px, 0, 0) scale(${swipeDragging ? 0.992 : 1})`,
+              opacity: Math.max(0.48, 1 - (Math.abs(swipeOffset) / Math.max(1, typeof window !== 'undefined' ? window.innerWidth : 390)) * 0.42),
+              transition: swipeAnimating
+                ? 'transform 190ms cubic-bezier(0.22, 0.8, 0.24, 1), opacity 190ms ease-out'
+                : 'none',
+              willChange: swipeDragging || swipeAnimating ? 'transform, opacity' : undefined,
+            } : undefined}
           >
             {isVideo ? (
               <video key={imageSrc} src={imageSrc} controls autoPlay playsInline preload="metadata" className="h-full max-h-full w-full max-w-full object-contain" />
@@ -3524,11 +3709,6 @@ function GalleryMediaViewer({
               </div>
             )}
           </div>
-          {canLoadMore ? (
-            <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded border border-white/10 bg-black/70 px-2 py-1 text-[11px] text-zinc-400">
-              More items will load as you step forward
-            </div>
-          ) : null}
         </main>
 
         {showInfo ? (
@@ -3632,6 +3812,62 @@ function GalleryMediaViewer({
           </aside>
         ) : null}
       </div>
+      {isPhoneViewer && mobileSendMenuOpen ? (
+        <div
+          className="fixed inset-0 z-[270] flex items-end"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Send media to Umbra UI"
+          data-umbra-gallery-send-sheet=""
+        >
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/70 backdrop-blur-[2px]"
+            onClick={() => setMobileSendMenuOpen(false)}
+            aria-label="Close send menu"
+          />
+          <section className="relative w-full rounded-t-2xl border-t border-cyan-300/25 bg-[#080b0d] px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-24px_70px_rgba(0,0,0,0.72)]">
+            <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-white/20" />
+            <div className="mb-3 flex items-center justify-between gap-3 px-1">
+              <div>
+                <div className="text-sm font-semibold text-zinc-100">Send to Umbra UI</div>
+                <div className="mt-0.5 text-[11px] text-zinc-500">Choose the destination for this media.</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileSendMenuOpen(false)}
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-zinc-400 active:bg-white/10"
+                aria-label="Close send menu"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('txt2img')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-emerald-400/15 disabled:opacity-30">
+                <Sparkles size={17} className="shrink-0 text-emerald-300" /> TXT2IMG settings
+              </button>
+              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('img2img')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-cyan-400/20 bg-cyan-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-cyan-400/15 disabled:opacity-30">
+                <Images size={17} className="shrink-0 text-cyan-300" /> IMG2IMG
+              </button>
+              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('inpaint')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-rose-400/15 disabled:opacity-30">
+                <Paintbrush size={17} className="shrink-0 text-rose-300" /> Inpaint
+              </button>
+              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-fuchsia-400/20 bg-fuchsia-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-fuchsia-400/15 disabled:opacity-30">
+                <Clapperboard size={17} className="shrink-0 text-fuchsia-300" /> Video first frame
+              </button>
+              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'middle')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-sky-400/20 bg-sky-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-sky-400/15 disabled:opacity-30">
+                <Clapperboard size={17} className="shrink-0 text-sky-300" /> Video middle frame
+              </button>
+              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'last')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-amber-400/15 disabled:opacity-30">
+                <Clapperboard size={17} className="shrink-0 text-amber-300" /> Video last frame
+              </button>
+              <button type="button" disabled={!isVideo} onClick={() => sendToUmbra('video', 'source_video')} className="col-span-2 flex min-h-14 items-center justify-center gap-2.5 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] px-3 text-xs font-semibold text-zinc-200 active:bg-emerald-400/15 disabled:opacity-30">
+                <Video size={17} className="shrink-0 text-emerald-300" /> Send video to VID2VID
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
   return typeof document !== 'undefined' ? createPortal(viewerElement, document.body) : viewerElement;
@@ -4397,12 +4633,14 @@ export function ReactGalleryWorkspace() {
   const { addToast } = useToastStore();
   const syncUiAcrossDevices = appSettings['remote.syncUiAcrossDevices'] !== false;
   const remoteViewerOriginals = appSettings['remote.galleryViewerOriginals'] === true;
+  const [initialGalleryDeviceResume] = useState(() => readDeviceUiResume<GalleryUiSession>('gallery'));
   const [remoteMode, setRemoteMode] = useState<string>(() => {
     if (typeof document === 'undefined') return 'desktop';
     return document.documentElement.dataset.umbraRemoteMode || 'desktop';
   });
-  const [galleryMobileView, setGalleryMobileView] = useState<'folders' | 'media'>('folders');
-  const galleryMobileViewRef = useRef<'folders' | 'media'>('folders');
+  const initialGalleryMobileView = initialGalleryDeviceResume?.mobileView === 'media' ? 'media' : 'folders';
+  const [galleryMobileView, setGalleryMobileView] = useState<'folders' | 'media'>(initialGalleryMobileView);
+  const galleryMobileViewRef = useRef<'folders' | 'media'>(initialGalleryMobileView);
   const isPhoneRemote = remoteMode === 'phone';
   const isRemoteClient = isRemoteGalleryClient();
 
@@ -4439,9 +4677,11 @@ export function ReactGalleryWorkspace() {
     },
   ], [externalRoots, rootPath]);
 
-  const [currentFolder, setCurrentFolder] = useState(rootPath);
+  const [currentFolder, setCurrentFolder] = useState(() => normalizePath(initialGalleryDeviceResume?.currentFolder) || rootPath);
   const trashMode = isTrashPath(currentFolder);
-  const [focusedFolder, setFocusedFolder] = useState(rootPath);
+  const [focusedFolder, setFocusedFolder] = useState(
+    () => normalizePath(initialGalleryDeviceResume?.focusedFolder) || normalizePath(initialGalleryDeviceResume?.currentFolder) || rootPath,
+  );
   const [, setOpenedFolders] = useState<string[]>([rootPath]);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set([rootPath]));
   const [treeChildrenByPath, setTreeChildrenByPath] = useState<Record<string, GalleryFolderTreeNode[]>>({});
@@ -4451,7 +4691,6 @@ export function ReactGalleryWorkspace() {
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [lastSelectedPath, setLastSelectedPath] = useState('');
   const [touchSelectionMode, setTouchSelectionMode] = useState(false);
-  const [mobileMediaView, setMobileMediaView] = useState<GalleryMobileMediaView>('single');
   const [viewerPath, setViewerPath] = useState('');
   const [viewerSessionFiles, setViewerSessionFilesState] = useState<GalleryFile[]>([]);
   const [viewerFileFallback, setViewerFileFallback] = useState<GalleryFile | null>(null);
@@ -4463,9 +4702,14 @@ export function ReactGalleryWorkspace() {
   const [folderNameModal, setFolderNameModal] = useState<GalleryFolderNameModalState | null>(null);
   const [deleteWarningModal, setDeleteWarningModal] = useState<GalleryDeleteWarningModalState | null>(null);
   const [emptyFolderCleanupModal, setEmptyFolderCleanupModal] = useState<GalleryEmptyFolderCleanupModalState | null>(null);
-  const [sortBy, setSortBy] = useState<GallerySortBy>('created');
-  const [sortOrder, setSortOrder] = useState<GallerySortOrder>('asc');
-  const [groupBySet, setGroupBySet] = useState(false);
+  const [sortBy, setSortBy] = useState<GallerySortBy>(() => {
+    const saved = initialGalleryDeviceResume?.sortBy;
+    return saved === 'modified' || saved === 'name' || saved === 'custom' ? saved : 'created';
+  });
+  const [sortOrder, setSortOrder] = useState<GallerySortOrder>(
+    initialGalleryDeviceResume?.sortOrder === 'desc' ? 'desc' : 'asc',
+  );
+  const [groupBySet, setGroupBySet] = useState(initialGalleryDeviceResume?.groupBySet === true);
   const [setSortRules, setSetSortRules] = useState<Record<string, GallerySetSortRule>>({});
   const [galleryUiSessionHydrated, setGalleryUiSessionHydrated] = useState(false);
   const galleryUiSessionHydratedRef = useRef(false);
@@ -4501,8 +4745,6 @@ export function ReactGalleryWorkspace() {
   const [selectAllLoading, setSelectAllLoading] = useState(false);
   const [openingFolder, setOpeningFolder] = useState('');
   const [error, setError] = useState('');
-  const [nextCursor, setNextCursor] = useState<number | null>(0);
-  const [done, setDone] = useState(false);
   const [total, setTotal] = useState(0);
   const [, setGalleryDirectBaseVersion] = useState(0);
   const loadSeqRef = useRef(0);
@@ -4523,9 +4765,6 @@ export function ReactGalleryWorkspace() {
     lastPath: string;
   } | null>(null);
   const skipNextSortReloadRef = useRef(false);
-  const appendRequestKeyRef = useRef('');
-  const pendingFilmstripLoadMoreRef = useRef(false);
-  const viewportLoadMoreKeyRef = useRef('');
   const contentRefreshKeyRef = useRef('');
   const transferProgressHideTimerRef = useRef<number | null>(null);
   const pendingTrashUndoToastRef = useRef<{ timer: number | null; items: GalleryTrashUndoItem[] }>({
@@ -4584,13 +4823,6 @@ export function ReactGalleryWorkspace() {
   useEffect(() => {
     if (!isTouchRemote) setTouchSelectionMode(false);
   }, [isTouchRemote]);
-
-  useEffect(() => {
-    if (isTouchRemote && touchSelectionMode) {
-      markGalleryUiSessionDirty();
-      setMobileMediaView('grid');
-    }
-  }, [isTouchRemote, markGalleryUiSessionDirty, touchSelectionMode]);
 
   const setGalleryMobileViewWithHistory = useCallback((
     nextView: 'folders' | 'media',
@@ -5007,15 +5239,15 @@ export function ReactGalleryWorkspace() {
         folderPath,
         files: nextFiles.map(galleryFileForFilmstrip),
         mode: payload?.mode || 'replace',
-        done: payload?.done ?? done,
-        nextCursor: payload?.nextCursor ?? nextCursor,
+        done: true,
+        nextCursor: null,
         total: payload?.total ?? total,
         sortBy,
         sortOrder,
         source: 'react-gallery',
       },
     }));
-  }, [done, nextCursor, sortBy, sortOrder, total]);
+  }, [sortBy, sortOrder, total]);
 
   const emitSelectionChanged = useCallback((paths: string[], primaryPath?: string) => {
     window.dispatchEvent(new CustomEvent('umbra:gallery-selection-changed', {
@@ -5043,7 +5275,6 @@ export function ReactGalleryWorkspace() {
 
   const fetchTrashListPayload = useCallback(async (
     folderPath: string,
-    cursor: number,
     signal?: AbortSignal,
   ): Promise<GalleryListPayload> => {
     const normalizedFolder = normalizePath(folderPath);
@@ -5064,10 +5295,9 @@ export function ReactGalleryWorkspace() {
           });
       }
       const allFiles = trashAllFilesRef.current || [];
-      const page = cursor <= 0 ? allFiles : [];
       return {
         folders: [],
-        files: page,
+        files: allFiles,
         total: allFiles.length,
         done: true,
         nextCursor: null,
@@ -5076,15 +5306,13 @@ export function ReactGalleryWorkspace() {
 
     const params = new URLSearchParams({
       path: normalizedFolder,
-      offset: String(cursor),
-      limit: String(PAGE_SIZE),
       recursive: 'false',
     });
     const response = await fetch(`/api/fs/list?${params.toString()}`, { cache: 'no-store', signal });
     const payload = await response.json().catch(() => ({} as GalleryListPayload & { error?: string; hasMore?: boolean }));
     if (!response.ok) throw new Error(String(payload?.error || 'Failed to load Trash folder'));
     const files = Array.isArray(payload.files)
-      ? payload.files.map((file, index) => normalizeGalleryFile(file, cursor + index))
+      ? payload.files.map((file, index) => normalizeGalleryFile(file, index))
       : [];
     const foldersAsFiles = Array.isArray(payload.folders)
       ? payload.folders.map((folder, index) => normalizeGalleryFile({
@@ -5093,20 +5321,19 @@ export function ReactGalleryWorkspace() {
         name: folder.name || pathLeaf(folder.path),
         path: normalizePath(folder.path),
         type: 'folder',
-        customOrder: cursor + index,
+        customOrder: index,
         trashOriginalPath: (folder as any).trashOriginalPath,
         trashDeletedAt: (folder as any).trashDeletedAt,
         trashExpiresAt: (folder as any).trashExpiresAt,
-      }, cursor + index))
+      }, index))
       : [];
-    const combined = cursor === 0 ? [...foldersAsFiles, ...files] : files;
-    const hasMore = Boolean((payload as any).hasMore);
+    const combined = [...foldersAsFiles, ...files];
     return {
       folders: [],
       files: combined,
-      total: Math.max(Number(payload.total || combined.length), cursor + combined.length),
-      done: !hasMore,
-      nextCursor: hasMore ? cursor + files.length : null,
+      total: Math.max(Number(payload.total || combined.length), combined.length),
+      done: true,
+      nextCursor: null,
     };
   }, []);
 
@@ -5130,8 +5357,6 @@ export function ReactGalleryWorkspace() {
 
   const loadFolder = useCallback(async (options?: {
     folder?: string;
-    append?: boolean;
-    cursor?: number;
     keepSelection?: boolean;
     forceRefresh?: boolean;
     preserveScroll?: boolean;
@@ -5139,46 +5364,30 @@ export function ReactGalleryWorkspace() {
   }) => {
     const folderPath = normalizePath(options?.folder || currentFolder || rootPath);
     if (!folderPath) return;
-    const cursor = Math.max(0, Math.trunc(Number(options?.cursor ?? 0)));
-    const append = options?.append === true;
+    const cursor = 0;
     const preserveScroll = options?.preserveScroll === true && pathsEqual(folderPath, currentFolder);
     const preservedScrollTop = preserveScroll ? (scrollParentRef.current?.scrollTop ?? 0) : 0;
-    const appendRequestKey = append ? `${folderPath}|${cursor}|${sortBy}|${sortOrder}` : '';
-    if (appendRequestKey && appendRequestKeyRef.current === appendRequestKey) return;
-    if (appendRequestKey) appendRequestKeyRef.current = appendRequestKey;
     const seq = ++loadSeqRef.current;
     const loadSource = options?.source || 'system';
-    if (!append && loadSource === 'local') {
+    if (loadSource === 'local') {
       const navigationAt = Date.now();
       latestLocalFolderNavigationAtRef.current = navigationAt;
       pendingLocalFolderNavigationRef.current = { folder: folderPath, at: navigationAt };
       markGalleryUiSessionDirty();
     }
     const loadStartedAt = nowMs();
-    const cacheKey = galleryPageCacheKey(folderPath, cursor, sortBy, sortOrder);
+    const cacheKey = galleryPageCacheKey(folderPath, sortBy, sortOrder);
     const isTrashFolder = isTrashPath(folderPath);
-    const cachedPayload = !isTrashFolder && !options?.forceRefresh && !append && cursor === 0 ? readCachedPage(cacheKey) : null;
+    const cachedPayload = !isTrashFolder && !options?.forceRefresh ? readCachedPage(cacheKey) : null;
     let abortController: AbortController | null = null;
 
     const applyPayload = (payload: GalleryListPayload) => {
       const incomingFiles = Array.isArray(payload.files) ? payload.files : [];
       const incomingFolders = Array.isArray(payload.folders) ? payload.folders : [];
-      const currentFiles = filesRef.current;
-      let nextFiles = incomingFiles;
-      let appendedFiles = incomingFiles.length;
-      if (append) {
-        const seen = new Set(currentFiles.map((file) => normalizePath(file.path).toLowerCase()));
-        const additions = incomingFiles.filter((file) => {
-          const key = normalizePath(file.path).toLowerCase();
-          if (!key || seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-        nextFiles = additions.length > 0 ? [...currentFiles, ...additions] : currentFiles;
-        appendedFiles = additions.length;
-      }
+      const nextFiles = incomingFiles;
+      const appendedFiles = incomingFiles.length;
 
-      if (!append && seq !== loadSeqRef.current) {
+      if (seq !== loadSeqRef.current) {
         return {
           incomingFiles,
           appendedFiles: 0,
@@ -5194,47 +5403,17 @@ export function ReactGalleryWorkspace() {
         pendingLocalFolderNavigationRef.current = null;
       }
       const incomingTreeNodes = galleryFoldersToTreeNodes(incomingFolders);
-      if (!append) {
-        writeTreeChildrenCache(folderPath, incomingTreeNodes);
-      } else if (incomingTreeNodes.length > 0) {
-        const existing = treeCacheRef.current.get(folderPath) || treeChildrenRef.current[folderPath] || [];
-        const seen = new Set(existing.map((folder) => normalizePath(folder.path).toLowerCase()));
-        const additions = incomingTreeNodes.filter((folder) => {
-          const key = normalizePath(folder.path).toLowerCase();
-          if (!key || seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-        if (additions.length > 0) writeTreeChildrenCache(folderPath, [...existing, ...additions]);
-      }
+      writeTreeChildrenCache(folderPath, incomingTreeNodes);
       setTreeChildrenByPath((current) => {
-        if (!append) {
-          return {
-            ...current,
-            [folderPath]: incomingTreeNodes,
-          };
-        }
-        if (incomingFolders.length === 0) return current;
-        const existing = current[folderPath] || [];
-        const seen = new Set(existing.map((folder) => normalizePath(folder.path).toLowerCase()));
-        const additions = incomingTreeNodes.filter((folder) => {
-          const key = normalizePath(folder.path).toLowerCase();
-          if (!key || seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-        if (additions.length === 0) return current;
         return {
           ...current,
-          [folderPath]: [...existing, ...additions],
+          [folderPath]: incomingTreeNodes,
         };
       });
       filesRef.current = nextFiles;
       setFiles(nextFiles);
-      setDone(payload.done === true);
-      setNextCursor(typeof payload.nextCursor === 'number' ? payload.nextCursor : null);
       setTotal(Math.max(0, Math.trunc(Number(payload.total || nextFiles.length))));
-      if (!append && options?.keepSelection !== true) {
+      if (options?.keepSelection !== true) {
         setSelectedPaths(new Set());
         setLastSelectedPath('');
         emitSelectionChanged([]);
@@ -5242,7 +5421,9 @@ export function ReactGalleryWorkspace() {
       emitFolderChanged(folderPath);
       emitFilmstripFeed(folderPath, incomingFiles, {
         ...payload,
-        mode: append ? 'append' : 'replace',
+        done: true,
+        nextCursor: null,
+        mode: 'replace',
       });
       if (preserveScroll) {
         window.requestAnimationFrame(() => {
@@ -5254,33 +5435,31 @@ export function ReactGalleryWorkspace() {
       return { incomingFiles, appendedFiles, nextFiles, stale: false };
     };
 
-    if (!append) {
-      setFocusedFolder((current) => (pathsEqual(current, folderPath) ? current : folderPath));
-      addOpenedFolder(folderPath);
-      if (!preserveScroll) scrollParentRef.current?.scrollTo({ top: 0 });
-      setOpeningFolder((current) => (pathsEqual(current, folderPath) ? current : folderPath));
-      if (cachedPayload) {
-        const cachedResult = applyPayload(cachedPayload);
-        if (cachedResult.stale) return;
-        traceGalleryLoad({
-          event: 'cache_hit',
-          folderPath,
-          cursor,
-          limit: PAGE_SIZE,
-          durationMs: nowMs() - loadStartedAt,
-          incomingFiles: cachedResult.incomingFiles.length,
-          loadedFiles: cachedResult.nextFiles.length,
-          total: cachedPayload.total ?? cachedResult.nextFiles.length,
-        });
-        if (!options?.forceRefresh) {
-          return;
-        }
+    setFocusedFolder((current) => (pathsEqual(current, folderPath) ? current : folderPath));
+    addOpenedFolder(folderPath);
+    if (!preserveScroll) scrollParentRef.current?.scrollTo({ top: 0 });
+    setOpeningFolder((current) => (pathsEqual(current, folderPath) ? current : folderPath));
+    if (cachedPayload) {
+      const cachedResult = applyPayload(cachedPayload);
+      if (cachedResult.stale) return;
+      traceGalleryLoad({
+        event: 'cache_hit',
+        folderPath,
+        cursor,
+        limit: 0,
+        durationMs: nowMs() - loadStartedAt,
+        incomingFiles: cachedResult.incomingFiles.length,
+        loadedFiles: cachedResult.nextFiles.length,
+        total: cachedPayload.total ?? cachedResult.nextFiles.length,
+      });
+      if (!options?.forceRefresh) {
+        return;
       }
     }
     abortController = new AbortController();
     folderLoadAbortRef.current?.abort();
     folderLoadAbortRef.current = abortController;
-    if (!cachedPayload || append) setLoading(true);
+    if (!cachedPayload) setLoading(true);
     setError('');
     try {
       const fetchStartedAt = nowMs();
@@ -5292,13 +5471,11 @@ export function ReactGalleryWorkspace() {
       let payload: GalleryListPayload;
       if (isTrashFolder) {
         const responseStartedAt = nowMs();
-        payload = await fetchTrashListPayload(folderPath, cursor, abortController.signal);
+        payload = await fetchTrashListPayload(folderPath, abortController.signal);
         jsonMs = nowMs() - responseStartedAt;
       } else {
         const params = new URLSearchParams({
           path: folderPath,
-          cursor: String(cursor),
-          limit: String(PAGE_SIZE),
           sortBy,
           sortOrder,
           fast: '1',
@@ -5325,10 +5502,10 @@ export function ReactGalleryWorkspace() {
       const applied = applyPayload(payload);
       if (applied.stale) return;
       traceGalleryLoad({
-        event: append ? 'append_complete' : 'replace_complete',
+        event: 'replace_complete',
         folderPath,
         cursor,
-        limit: PAGE_SIZE,
+        limit: 0,
         fetchMs: Math.round(fetchMs * 10) / 10,
         jsonMs: Math.round(jsonMs * 10) / 10,
         status,
@@ -5370,7 +5547,7 @@ export function ReactGalleryWorkspace() {
             event: 'missing_folder_cleared',
             folderPath,
             cursor,
-            limit: PAGE_SIZE,
+            limit: 0,
             durationMs: nowMs() - loadStartedAt,
             error: message,
           });
@@ -5385,19 +5562,16 @@ export function ReactGalleryWorkspace() {
         }
       }
       traceGalleryLoad({
-        event: append ? 'append_error' : 'replace_error',
+        event: 'replace_error',
         folderPath,
         cursor,
-        limit: PAGE_SIZE,
+        limit: 0,
         durationMs: nowMs() - loadStartedAt,
         error: message,
       });
       setError(message);
       addToast({ type: 'error', message });
     } finally {
-      if (appendRequestKey && appendRequestKeyRef.current === appendRequestKey) {
-        appendRequestKeyRef.current = '';
-      }
       if (abortController && folderLoadAbortRef.current === abortController) {
         folderLoadAbortRef.current = null;
       }
@@ -5474,14 +5648,8 @@ export function ReactGalleryWorkspace() {
         return true;
       }
 
-      const requestLimit = Math.min(
-        CURRENT_FOLDER_RECONCILE_MAX_LIMIT,
-        Math.max(PAGE_SIZE, Math.min(currentFiles.length + PAGE_SIZE, CURRENT_FOLDER_RECONCILE_MAX_LIMIT)),
-      );
       const params = new URLSearchParams({
         path: folderPath,
-        cursor: '0',
-        limit: String(requestLimit),
         sortBy,
         sortOrder,
         fast: '1',
@@ -5532,10 +5700,7 @@ export function ReactGalleryWorkspace() {
       }
 
       const nextTotal = Math.max(summaryTotal, Number(payload.total || 0), nextFiles.length);
-      const nextDone = nextTotal <= nextFiles.length || payload.done === true;
       setTotal(nextTotal);
-      setDone(nextDone);
-      setNextCursor(nextDone ? null : nextFiles.length);
       clearPageCacheForFolder(folderPath);
 
       if (added > 0 || updated > 0) {
@@ -5543,8 +5708,8 @@ export function ReactGalleryWorkspace() {
           mode: added > 0 ? 'append' : 'replace',
           files: added > 0 ? additions : nextFiles,
           total: nextTotal,
-          done: nextDone,
-          nextCursor: nextDone ? null : nextFiles.length,
+          done: true,
+          nextCursor: null,
         });
       }
 
@@ -5726,7 +5891,6 @@ export function ReactGalleryWorkspace() {
     const nextSortBy = session.sortBy;
     const nextSortOrder = session.sortOrder;
     const nextMobileView = session.mobileView;
-    const nextMobileMediaView = session.mobileMediaView;
     if (nextSortBy === 'created' || nextSortBy === 'modified' || nextSortBy === 'name' || nextSortBy === 'custom') {
       setSortBy(nextSortBy);
     }
@@ -5739,9 +5903,6 @@ export function ReactGalleryWorkspace() {
     if (nextMobileView === 'folders' || nextMobileView === 'media') {
       setGalleryMobileView(nextMobileView);
       galleryMobileViewRef.current = nextMobileView;
-    }
-    if (nextMobileMediaView === 'single' || nextMobileMediaView === 'grid') {
-      setMobileMediaView(nextMobileMediaView);
     }
     if (nextFocusedFolder) {
       setFocusedFolder(nextFocusedFolder);
@@ -5757,14 +5918,18 @@ export function ReactGalleryWorkspace() {
   useEffect(() => {
     if (galleryUiSessionHydratedRef.current) return;
     let cancelled = false;
-    void readUserConfig<GalleryUiSession | null>('gallery-ui-session', null)
-      .then((session) => {
-        if (cancelled) return;
-        applyGalleryUiSession(session, { localRestore: true });
+    void (async () => {
+      const localSession = readDeviceUiResume<GalleryUiSession>('gallery');
+      if (!cancelled) applyGalleryUiSession(localSession, { localRestore: true });
+      if (syncUiAcrossDevices) {
+        const sharedSession = await readUserConfig<GalleryUiSession | null>('gallery-ui-session', null);
+        if (!cancelled) applyGalleryUiSession(sharedSession, { localRestore: true });
+      }
+      if (!cancelled) {
         galleryUiSessionHydratedRef.current = true;
         setGalleryUiSessionHydrated(true);
-      })
-      .catch(() => {
+      }
+    })().catch(() => {
         if (!cancelled) {
           galleryUiSessionHydratedRef.current = true;
           setGalleryUiSessionHydrated(true);
@@ -5773,7 +5938,7 @@ export function ReactGalleryWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [applyGalleryUiSession]);
+  }, [applyGalleryUiSession, syncUiAcrossDevices]);
 
   useEffect(() => subscribeUiSession((event) => {
     if (event.type === 'ui_session_state') {
@@ -5784,32 +5949,37 @@ export function ReactGalleryWorkspace() {
   }), [applyGalleryUiSession]);
 
   useEffect(() => {
-    if (!galleryUiSessionHydratedRef.current || typeof window === 'undefined' || !syncUiAcrossDevices) return;
+    if (!galleryUiSessionHydratedRef.current || typeof window === 'undefined') return;
     if (!galleryUiSessionDirtyRef.current) return;
+    const updatedAt = Date.now();
+    const pendingLocalNavigation = pendingLocalFolderNavigationRef.current;
+    const pendingFolder = pendingLocalNavigation
+      && Date.now() - pendingLocalNavigation.at < GALLERY_UI_SESSION_LOCAL_NAVIGATION_GUARD_MS
+      ? pendingLocalNavigation.folder
+      : '';
+    const session = {
+      currentFolder: pendingFolder || currentFolder,
+      focusedFolder,
+      sortBy,
+      sortOrder,
+      groupBySet,
+      mobileView: galleryMobileView,
+      updatedAt,
+      clientId: galleryUiSessionClientIdRef.current,
+    } satisfies GalleryUiSession;
+    writeDeviceUiResume('gallery', session);
+    latestAppliedGalleryUiSessionAtRef.current = Math.max(latestAppliedGalleryUiSessionAtRef.current, updatedAt);
+    if (!syncUiAcrossDevices) {
+      galleryUiSessionDirtyRef.current = false;
+      return;
+    }
     if (galleryUiSessionSaveTimerRef.current !== null) {
       window.clearTimeout(galleryUiSessionSaveTimerRef.current);
     }
     galleryUiSessionSaveTimerRef.current = window.setTimeout(() => {
       galleryUiSessionSaveTimerRef.current = null;
-      const updatedAt = Date.now();
-      const pendingLocalNavigation = pendingLocalFolderNavigationRef.current;
-      const pendingFolder = pendingLocalNavigation
-        && Date.now() - pendingLocalNavigation.at < GALLERY_UI_SESSION_LOCAL_NAVIGATION_GUARD_MS
-        ? pendingLocalNavigation.folder
-        : '';
-      latestAppliedGalleryUiSessionAtRef.current = Math.max(latestAppliedGalleryUiSessionAtRef.current, updatedAt);
       galleryUiSessionDirtyRef.current = false;
-      void writeUserConfig('gallery-ui-session', {
-        currentFolder: pendingFolder || currentFolder,
-        focusedFolder,
-        sortBy,
-        sortOrder,
-        groupBySet,
-        mobileView: galleryMobileView,
-        mobileMediaView,
-        updatedAt,
-        clientId: galleryUiSessionClientIdRef.current,
-      } satisfies GalleryUiSession).catch((error) => {
+      void writeUserConfig('gallery-ui-session', session).catch((error) => {
         galleryUiSessionDirtyRef.current = true;
         console.warn('[ReactGalleryWorkspace] Failed to persist gallery UI session:', error);
       });
@@ -5820,7 +5990,7 @@ export function ReactGalleryWorkspace() {
         galleryUiSessionSaveTimerRef.current = null;
       }
     };
-  }, [currentFolder, focusedFolder, galleryMobileView, groupBySet, mobileMediaView, sortBy, sortOrder, syncUiAcrossDevices]);
+  }, [currentFolder, focusedFolder, galleryMobileView, groupBySet, sortBy, sortOrder, syncUiAcrossDevices]);
 
   const selectFile = useCallback((file: GalleryFile, event: React.MouseEvent) => {
     const path = normalizePath(file.path);
@@ -6617,10 +6787,6 @@ export function ReactGalleryWorkspace() {
     if (ordered.length === 0) return;
     const current = normalizePath(viewerPath || lastSelectedPath || ordered[0]?.path);
     const index = Math.max(0, ordered.findIndex((file) => pathsEqual(file.path, current)));
-    const nearEnd = delta > 0 && ordered.length - index <= 10;
-    if (nearEnd && !done && nextCursor != null && !loading) {
-      void loadFolder({ folder: currentFolder, cursor: nextCursor, append: true, keepSelection: true });
-    }
     const nextIndex = index + delta;
     if (nextIndex < 0 || nextIndex >= ordered.length) return;
     const nextFile = ordered[nextIndex];
@@ -6634,7 +6800,7 @@ export function ReactGalleryWorkspace() {
     window.dispatchEvent(new CustomEvent('umbra:gallery-reveal-path', {
       detail: { path: currentFolder, folderPath: currentFolder, imagePath: nextPath, source: 'react-gallery' },
     }));
-  }, [currentFolder, done, emitSelectionChanged, getViewerOrderedFiles, lastSelectedPath, loadFolder, loading, nextCursor, viewerPath]);
+  }, [currentFolder, emitSelectionChanged, getViewerOrderedFiles, lastSelectedPath, viewerPath]);
 
   const setPinnedFolders = useCallback((next: string[]) => {
     const clean = Array.from(new Set(next.map((entry) => normalizePath(entry)).filter(Boolean)));
@@ -7608,8 +7774,8 @@ export function ReactGalleryWorkspace() {
       mode: 'replace',
       files: reordered.files,
       total: Math.max(total, reordered.files.length),
-      done,
-      nextCursor,
+      done: true,
+      nextCursor: null,
       sortBy: 'custom',
       sortOrder: 'asc',
     });
@@ -7634,14 +7800,14 @@ export function ReactGalleryWorkspace() {
         mode: 'replace',
         files: previousFiles,
         total: Math.max(total, previousFiles.length),
-        done,
-        nextCursor,
+        done: true,
+        nextCursor: null,
         sortBy: previousSortBy,
         sortOrder: previousSortOrder,
       });
       addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to reorder items' });
     }
-  }, [addToast, clearPageCacheForFolder, currentFolder, done, emitFilmstripFeed, groupBySet, markGalleryUiSessionDirty, nextCursor, setSortRules, sortBy, sortOrder, total]);
+  }, [addToast, clearPageCacheForFolder, currentFolder, emitFilmstripFeed, groupBySet, markGalleryUiSessionDirty, setSortRules, sortBy, sortOrder, total]);
 
   const selectAllInFolder = useCallback(async () => {
     const folderPath = normalizePath(currentFolder);
@@ -7667,38 +7833,20 @@ export function ReactGalleryWorkspace() {
         return;
       }
 
+      const params = new URLSearchParams({
+        path: folderPath,
+        sortBy,
+        sortOrder,
+        fast: '1',
+        recursive: 'false',
+      });
+      const response = await fetchGalleryFs('/list-progressive', params);
+      const payload = await response.json().catch(() => ({} as GalleryListPayload & { error?: string }));
+      if (!response.ok) throw new Error(String(payload?.error || 'Failed to select folder media'));
       const selected = new Set<string>();
-      let cursor = 0;
-      let pageCount = 0;
-      let nextCursorValue: number | null = 0;
-
-      while (nextCursorValue != null && pageCount < 2000) {
-        const params = new URLSearchParams({
-          path: folderPath,
-          cursor: String(cursor),
-          limit: String(SELECT_ALL_PAGE_SIZE),
-          sortBy,
-          sortOrder,
-          fast: '1',
-          recursive: 'false',
-        });
-        const response = await fetchGalleryFs('/list-progressive', params);
-        const payload = await response.json().catch(() => ({} as GalleryListPayload & { error?: string }));
-        if (!response.ok) throw new Error(String(payload?.error || 'Failed to select folder media'));
-
-        for (const file of Array.isArray(payload.files) ? payload.files : []) {
-          const path = normalizePath(file.path);
-          if (path) selected.add(path);
-        }
-
-        const incomingNextCursor = typeof payload.nextCursor === 'number' ? payload.nextCursor : null;
-        if (payload.done === true || incomingNextCursor == null || incomingNextCursor <= cursor) {
-          nextCursorValue = null;
-        } else {
-          nextCursorValue = incomingNextCursor;
-          cursor = incomingNextCursor;
-        }
-        pageCount += 1;
+      for (const file of Array.isArray(payload.files) ? payload.files : []) {
+        const path = normalizePath(file.path);
+        if (path) selected.add(path);
       }
 
       const paths = Array.from(selected);
@@ -7803,7 +7951,6 @@ export function ReactGalleryWorkspace() {
     filesRef.current = nextFiles;
     setFiles(nextFiles);
     setTotal((current) => Math.max(current, nextFiles.length));
-    setDone((current) => current || nextCursor == null);
     clearPageCacheForFolder(normalizedCurrentFolder);
     const dirtyAfterDeleteAt = dirtyAfterDeleteFoldersRef.current.get(normalizedCurrentFolder.toLowerCase()) || 0;
     const shouldReconcileAfterDelete = dirtyAfterDeleteAt > 0 && now - dirtyAfterDeleteAt < 30_000;
@@ -7840,34 +7987,10 @@ export function ReactGalleryWorkspace() {
     invalidateTreeChildrenCache,
     loadFolder,
     loadTreeChildren,
-    nextCursor,
     sortBy,
     sortOrder,
     total,
   ]);
-
-  const requestFilmstripLoadMore = useCallback(() => {
-    if (done || nextCursor == null) {
-      pendingFilmstripLoadMoreRef.current = false;
-      return;
-    }
-    if (loading) {
-      pendingFilmstripLoadMoreRef.current = true;
-      return;
-    }
-    pendingFilmstripLoadMoreRef.current = false;
-    void loadFolder({
-      folder: currentFolder,
-      cursor: nextCursor,
-      append: true,
-      keepSelection: true,
-    });
-  }, [currentFolder, done, loadFolder, loading, nextCursor]);
-
-  useEffect(() => {
-    if (loading || !pendingFilmstripLoadMoreRef.current) return;
-    requestFilmstripLoadMore();
-  }, [loading, requestFilmstripLoadMore]);
 
   useEffect(() => {
     const onOpenPath = (event: Event) => {
@@ -7962,7 +8085,6 @@ export function ReactGalleryWorkspace() {
       }
       setSortOrder(nextSortOrder === 'desc' ? 'desc' : 'asc');
     };
-    const onLoadMore = () => requestFilmstripLoadMore();
     const onPowerPrompterOutputSaved = (event: Event) => {
       const savedFiles = collectSavedOutputFiles((event as CustomEvent<unknown>)?.detail);
       if (savedFiles.length === 0) return;
@@ -8133,7 +8255,6 @@ export function ReactGalleryWorkspace() {
     window.addEventListener('umbra:gallery-request-filmstrip-feed', onRequestFeed as EventListener);
     window.addEventListener('umbra:gallery-set-selection', onSetSelection as EventListener);
     window.addEventListener('umbra:gallery-set-sort', onSetSort as EventListener);
-    window.addEventListener('umbra:gallery-load-more', onLoadMore as EventListener);
     window.addEventListener('umbra:powerprompter-output-saved', onPowerPrompterOutputSaved as EventListener);
     window.addEventListener('umbra:powerprompter-generation-preview', onPowerPrompterGenerationPreview as EventListener);
     window.addEventListener('umbra:gallery-remove-paths', onRemovePaths as EventListener);
@@ -8146,7 +8267,6 @@ export function ReactGalleryWorkspace() {
       window.removeEventListener('umbra:gallery-request-filmstrip-feed', onRequestFeed as EventListener);
       window.removeEventListener('umbra:gallery-set-selection', onSetSelection as EventListener);
       window.removeEventListener('umbra:gallery-set-sort', onSetSort as EventListener);
-      window.removeEventListener('umbra:gallery-load-more', onLoadMore as EventListener);
       window.removeEventListener('umbra:powerprompter-output-saved', onPowerPrompterOutputSaved as EventListener);
       window.removeEventListener('umbra:powerprompter-generation-preview', onPowerPrompterGenerationPreview as EventListener);
       window.removeEventListener('umbra:gallery-remove-paths', onRemovePaths as EventListener);
@@ -8154,7 +8274,7 @@ export function ReactGalleryWorkspace() {
       window.removeEventListener('umbra:gallery-trash-updated', onTrashUpdated as EventListener);
       window.removeEventListener('umbra:gallery-content-changed', onContentChanged as EventListener);
     };
-  }, [addOpenedFolder, clearPageCacheForFolder, clearTrashCache, currentFolder, emitFilmstripFeed, emitSelectionChanged, files, getSelectionOrderedFiles, invalidateTreeChildrenCache, liveGenerationPreviewFile, loadFolder, loadTreeChildren, rememberRestoredHighlights, requestFilmstripLoadMore, trashMode, updateViewerSessionFiles, upsertDirectSavedOutputs, viewerFileFallback]);
+  }, [addOpenedFolder, clearPageCacheForFolder, clearTrashCache, currentFolder, emitFilmstripFeed, emitSelectionChanged, files, getSelectionOrderedFiles, invalidateTreeChildrenCache, liveGenerationPreviewFile, loadFolder, loadTreeChildren, rememberRestoredHighlights, trashMode, updateViewerSessionFiles, upsertDirectSavedOutputs, viewerFileFallback]);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('umbra:gallery-sort-changed', {
@@ -8423,49 +8543,34 @@ export function ReactGalleryWorkspace() {
             matchedFolders.push({ name: pathLeaf(folderPath) || folderPath, path: folderPath });
           }
 
-          let cursor = 0;
-          let doneLoadingFiles = false;
-          let safety = 0;
-          while (!doneLoadingFiles && safety < 500) {
-            if (controller.signal.aborted) return;
-            const params = new URLSearchParams({
-              path: folderPath,
-              cursor: String(cursor),
-              limit: String(GLOBAL_SEARCH_PAGE_SIZE),
-              sortBy,
-              sortOrder,
-              fast: '1',
-              recursive: 'false',
+          if (controller.signal.aborted) return;
+          const params = new URLSearchParams({
+            path: folderPath,
+            sortBy,
+            sortOrder,
+            fast: '1',
+            recursive: 'false',
+          });
+          const response = await fetchGalleryFs('/list-progressive', params, {
+            cache: 'no-store',
+            signal: controller.signal,
+          });
+          const payload = await response.json().catch(() => ({} as GalleryListPayload & { error?: string }));
+          if (!response.ok) throw new Error(String(payload?.error || 'Gallery search failed'));
+          const folderFiles = Array.isArray(payload.files)
+            ? payload.files
+              .map((file, index) => normalizeGalleryFile(file, index))
+              .filter((file) => fileMatchesSearch(file, searchNeedle))
+            : [];
+          if (folderFiles.length > 0 || matchedFolders.length > 0) {
+            appendResults({
+              files: folderFiles,
+              folders: matchedFolders,
+              scannedFolders,
+              done: false,
             });
-            const response = await fetchGalleryFs('/list-progressive', params, {
-              cache: 'no-store',
-              signal: controller.signal,
-            });
-            const payload = await response.json().catch(() => ({} as GalleryListPayload & { error?: string }));
-            if (!response.ok) throw new Error(String(payload?.error || 'Gallery search failed'));
-            const pageFiles = Array.isArray(payload.files)
-              ? payload.files
-                .map((file, index) => normalizeGalleryFile(file, cursor + index))
-                .filter((file) => fileMatchesSearch(file, searchNeedle))
-              : [];
-            if (pageFiles.length > 0 || matchedFolders.length > 0) {
-              appendResults({
-                files: pageFiles,
-                folders: matchedFolders,
-                scannedFolders,
-                done: false,
-              });
-              matchedFolders.length = 0;
-            } else {
-              appendResults({ scannedFolders, done: false });
-            }
-            const nextCursor = typeof payload.nextCursor === 'number' ? payload.nextCursor : null;
-            if (payload.done === true || nextCursor == null || nextCursor === cursor) {
-              doneLoadingFiles = true;
-            } else {
-              cursor = nextCursor;
-            }
-            safety += 1;
+          } else {
+            appendResults({ scannedFolders, done: false });
           }
 
           const children = await loadTreeChildren(folderPath);
@@ -8898,8 +9003,6 @@ export function ReactGalleryWorkspace() {
       try {
         const params = new URLSearchParams({
           path: folder.path,
-          cursor: '0',
-          limit: String(FOLDER_PREVIEW_PAGE_SIZE),
           sortBy,
           sortOrder,
           fast: '1',
@@ -8977,109 +9080,18 @@ export function ReactGalleryWorkspace() {
     const currentGroup = folderPreviewGroupsRef.current.find((group) => pathsEqual(group.folder.path, normalized));
     if (!currentGroup || currentGroup.loading || currentGroup.loadingMore) return;
 
-    const currentLevel = Math.min(2, Math.max(0, Math.trunc(Number(currentGroup.expansionLevel ?? 0)))) as 0 | 1 | 2;
-    const targetLevel: 1 | 2 = currentLevel <= 0 ? 1 : 2;
-    const targetVisibleCount = targetLevel === 1 ? FOLDER_PREVIEW_EXPANDED_SIZE : Number.POSITIVE_INFINITY;
-    const canRevealAlreadyLoaded = currentGroup.files.length > getFolderPreviewVisibleCount(currentGroup);
-    const needsFetch = currentGroup.done !== true
-      && currentGroup.nextCursor != null
-      && currentGroup.files.length < targetVisibleCount;
-
-    if (!needsFetch) {
-      setFolderPreviewGroups((current) => current.map((group) => {
-        if (!pathsEqual(group.folder.path, normalized)) return group;
-        const nextGroup: GalleryFolderPreviewGroup = {
-          ...group,
-          expansionLevel: targetLevel,
-          visibleCount: targetLevel === 2 || group.done === true
-            ? group.files.length
-            : Math.min(group.files.length, FOLDER_PREVIEW_EXPANDED_SIZE),
-          error: undefined,
-        };
-        folderPreviewCacheRef.current.set(cacheKey, nextGroup);
-        return nextGroup;
-      }));
-      return;
-    }
-
-    if (!canRevealAlreadyLoaded && currentGroup.nextCursor == null) return;
-
-    setFolderPreviewGroups((current) => current.map((group) => (
-      pathsEqual(group.folder.path, normalized)
-        ? { ...group, loadingMore: true, error: undefined }
-        : group
-    )));
-
-    try {
-      const byPath = new Map(currentGroup.files.map((file) => [normalizePath(file.path).toLowerCase(), file]));
-      let nextCursorValue = typeof currentGroup.nextCursor === 'number' ? currentGroup.nextCursor : null;
-      let doneValue = currentGroup.done === true || nextCursorValue == null;
-      let totalValue = currentGroup.total;
-      let pageCount = 0;
-
-      while (!doneValue && nextCursorValue != null && byPath.size < targetVisibleCount && pageCount < 2000) {
-        const cursor = Math.max(0, Math.trunc(Number(nextCursorValue)));
-        const remainingForStep = targetLevel === 1 ? Math.max(1, FOLDER_PREVIEW_EXPANDED_SIZE - byPath.size) : SELECT_ALL_PAGE_SIZE;
-        const params = new URLSearchParams({
-          path: normalized,
-          cursor: String(cursor),
-          limit: String(targetLevel === 1 ? Math.min(FOLDER_PREVIEW_PAGE_SIZE, remainingForStep) : SELECT_ALL_PAGE_SIZE),
-          sortBy,
-          sortOrder,
-          fast: '1',
-          recursive: 'false',
-        });
-        const response = await fetchGalleryFs('/list-progressive', params, { cache: 'no-store' });
-        const payload = await response.json().catch(() => ({} as GalleryListPayload & { error?: string }));
-        if (!response.ok) throw new Error(String(payload?.error || 'Failed to load more media'));
-
-        for (const file of Array.isArray(payload.files) ? payload.files : []) {
-          const normalizedFile = normalizeGalleryFile(file, byPath.size);
-          const key = normalizePath(normalizedFile.path).toLowerCase();
-          if (key) byPath.set(key, normalizedFile);
-        }
-
-        totalValue = Math.max(totalValue, Math.trunc(Number(payload.total || 0)) || byPath.size);
-        const incomingNextCursor = typeof payload.nextCursor === 'number' ? payload.nextCursor : null;
-        if (payload.done === true || incomingNextCursor == null || incomingNextCursor <= cursor) {
-          doneValue = true;
-          nextCursorValue = null;
-        } else {
-          nextCursorValue = incomingNextCursor;
-        }
-        pageCount += 1;
-      }
-
-      setFolderPreviewGroups((current) => current.map((group) => {
-        if (!pathsEqual(group.folder.path, normalized)) return group;
-        const mergedFiles = Array.from(byPath.values());
-        const nextGroup: GalleryFolderPreviewGroup = {
-          ...group,
-          files: mergedFiles,
-          loading: false,
-          loadingMore: false,
-          expansionLevel: targetLevel,
-          visibleCount: targetLevel === 2 || doneValue
-            ? mergedFiles.length
-            : Math.min(mergedFiles.length, FOLDER_PREVIEW_EXPANDED_SIZE),
-          total: Math.max(group.total, totalValue, mergedFiles.length),
-          nextCursor: nextCursorValue,
-          done: doneValue,
-          error: undefined,
-        };
-        folderPreviewCacheRef.current.set(cacheKey, nextGroup);
-        return nextGroup;
-      }));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to load more media';
-      setFolderPreviewGroups((current) => current.map((group) => (
-        pathsEqual(group.folder.path, normalized)
-          ? { ...group, loading: false, loadingMore: false, error: message }
-          : group
-      )));
-      addToast({ type: 'error', message });
-    }
-  }, [addToast, sortBy, sortOrder]);
+    setFolderPreviewGroups((current) => current.map((group) => {
+      if (!pathsEqual(group.folder.path, normalized)) return group;
+      const nextGroup: GalleryFolderPreviewGroup = {
+        ...group,
+        expansionLevel: 2,
+        visibleCount: group.files.length,
+        error: undefined,
+      };
+      folderPreviewCacheRef.current.set(cacheKey, nextGroup);
+      return nextGroup;
+    }));
+  }, [sortBy, sortOrder]);
 
   const collapseFolderPreview = useCallback((folderPath: string) => {
     const normalized = normalizePath(folderPath);
@@ -9145,27 +9157,20 @@ export function ReactGalleryWorkspace() {
   const columnCount = useMemo(() => {
     const available = Math.max(1, effectiveGridWidth - 24);
     if (isPhoneRemote) {
-      if (mobileMediaView === 'single') return 1;
       return Math.max(2, Math.floor((available + GRID_GAP) / (PHONE_GRID_MIN_CARD_WIDTH + GRID_GAP)));
     }
     return Math.max(1, Math.floor((available + GRID_GAP) / (GRID_MIN_CARD_WIDTH + GRID_GAP)));
-  }, [effectiveGridWidth, isPhoneRemote, mobileMediaView]);
+  }, [effectiveGridWidth, isPhoneRemote]);
 
   const cardSize = useMemo(() => {
-    const minCardWidth = isPhoneRemote && mobileMediaView === 'grid' ? PHONE_GRID_MIN_CARD_WIDTH : GRID_MIN_CARD_WIDTH;
+    const minCardWidth = isPhoneRemote ? PHONE_GRID_MIN_CARD_WIDTH : GRID_MIN_CARD_WIDTH;
     const available = Math.max(minCardWidth, effectiveGridWidth - 24);
     return Math.max(
       minCardWidth,
       Math.floor((available - GRID_GAP * Math.max(0, columnCount - 1)) / columnCount),
     );
-  }, [columnCount, effectiveGridWidth, isPhoneRemote, mobileMediaView]);
-  const cardHeight = cardSize + (
-    isPhoneRemote
-      ? mobileMediaView === 'single'
-        ? PHONE_SINGLE_CARD_EXTRA_HEIGHT
-        : PHONE_GRID_CARD_EXTRA_HEIGHT
-      : GRID_CARD_EXTRA_HEIGHT
-  );
+  }, [columnCount, effectiveGridWidth, isPhoneRemote]);
+  const cardHeight = cardSize + (isPhoneRemote ? PHONE_GRID_CARD_EXTRA_HEIGHT : GRID_CARD_EXTRA_HEIGHT);
 
   const fileRowCount = Math.ceil(displayFiles.length / columnCount);
   const rowVirtualizer = useVirtualizer({
@@ -9175,7 +9180,6 @@ export function ReactGalleryWorkspace() {
     overscan: 4,
   });
   const virtualRows = rowVirtualizer.getVirtualItems();
-  const lastVirtualRowIndex = virtualRows.length > 0 ? virtualRows[virtualRows.length - 1]?.index ?? -1 : -1;
 
   useEffect(() => {
     if (!isPhoneRemote || galleryMobileView !== 'media') return;
@@ -9194,7 +9198,7 @@ export function ReactGalleryWorkspace() {
       window.cancelAnimationFrame(frame);
       if (secondFrame) window.cancelAnimationFrame(secondFrame);
     };
-  }, [displayFiles.length, galleryMobileView, isPhoneRemote, mobileMediaView, rowVirtualizer]);
+  }, [displayFiles.length, galleryMobileView, isPhoneRemote, rowVirtualizer]);
 
   useEffect(() => {
     const pendingPath = normalizePath(pendingRevealPathRef.current);
@@ -9236,38 +9240,6 @@ export function ReactGalleryWorkspace() {
       : [viewerFile, ...orderedFiles];
   }, [activeViewerFiles, viewerFile, viewerSessionFiles]);
   const viewerSelectionCount = selectedPaths.size > 0 ? selectedPaths.size : (viewerPath ? 1 : 0);
-
-  useEffect(() => {
-    if (globalSearchActive || loading || done || nextCursor == null || !currentFolder || fileRowCount === 0) return;
-    const scrollElement = scrollParentRef.current;
-    const underfilled = Boolean(scrollElement && scrollElement.scrollHeight <= scrollElement.clientHeight + cardHeight);
-    const nearEnd = lastVirtualRowIndex >= Math.max(0, fileRowCount - 3);
-    if (!underfilled && !nearEnd) return;
-
-    const key = [
-      normalizePath(currentFolder).toLowerCase(),
-      nextCursor,
-      sortBy,
-      sortOrder,
-      displayFiles.length,
-    ].join('|');
-    if (viewportLoadMoreKeyRef.current === key) return;
-    viewportLoadMoreKeyRef.current = key;
-    void loadFolder({ folder: currentFolder, cursor: nextCursor, append: true, keepSelection: true });
-  }, [
-    cardHeight,
-    currentFolder,
-    displayFiles.length,
-    done,
-    fileRowCount,
-    globalSearchActive,
-    lastVirtualRowIndex,
-    loadFolder,
-    loading,
-    nextCursor,
-    sortBy,
-    sortOrder,
-  ]);
 
   const openMediaContextMenu = useCallback((event: GalleryContextMenuEvent, file: GalleryFile) => {
     event.preventDefault();
@@ -9652,7 +9624,7 @@ export function ReactGalleryWorkspace() {
     <section
       className="flex h-full min-h-0 w-full bg-zinc-950 text-zinc-100"
       data-umbra-react-gallery-root
-      data-umbra-gallery-mobile-media-view={isPhoneRemote ? mobileMediaView : undefined}
+      data-umbra-gallery-mobile-media-view={isPhoneRemote ? 'grid' : undefined}
     >
       <div data-umbra-gallery-mobile-switcher="">
         <button
@@ -9905,22 +9877,6 @@ export function ReactGalleryWorkspace() {
                 >
                   <CheckSquare size={13} />
                   Highlighted
-                </button>
-              ) : null}
-              {isPhoneRemote ? (
-                <button
-                  type="button"
-                  data-umbra-gallery-mobile-view-toggle=""
-                  data-mode={mobileMediaView}
-                  onClick={() => {
-                    markGalleryUiSessionDirty();
-                    setMobileMediaView((current) => current === 'single' ? 'grid' : 'single');
-                  }}
-                  className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded border border-zinc-800 bg-zinc-950/80 px-2 text-xs text-zinc-400 hover:bg-white/5 hover:text-white"
-                  title={mobileMediaView === 'single' ? 'Switch to grid browsing view' : 'Switch to single card view'}
-                >
-                  {mobileMediaView === 'single' ? <Grid3X3 size={13} /> : <ImageIcon size={13} />}
-                  {mobileMediaView === 'single' ? 'Grid' : 'Single'}
                 </button>
               ) : null}
               {isTouchRemote ? (
@@ -10787,8 +10743,6 @@ export function ReactGalleryWorkspace() {
           totalCount={globalSearchActive || folderPreviewMode ? viewerFilesForRender.length : total}
           remoteMode={remoteMode}
           selectedCount={viewerSelectionCount}
-          loadingMore={loading}
-          canLoadMore={!done && nextCursor != null}
           remoteViewerOriginals={remoteViewerOriginals}
           onClose={closeViewer}
           onStep={stepViewer}
