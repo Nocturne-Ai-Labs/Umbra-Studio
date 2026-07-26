@@ -9948,6 +9948,15 @@ export function UmbraInpaintWorkspace({
             onRemoveHistory={removePromptHistoryEntry}
             onClearHistory={clearPromptHistory}
             accent="rose"
+            agentContext={{
+              mode: 'inpaint',
+              modelFamily,
+              modelSource,
+              checkpointName,
+              width: resizeTarget.width,
+              height: resizeTarget.height,
+              enabledLoras: loras.filter((entry) => entry.enabled).map((entry) => entry.name),
+            }}
           />
           {capabilities.negativePrompt.support === 'adjustable' ? (
             <label className="block space-y-1.5">
@@ -10527,6 +10536,16 @@ export function UmbraInpaintWorkspace({
           className="relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-black/25 transition-[padding-right] duration-150 ease-out"
           style={{ paddingRight: layersExpanded ? 'clamp(248px, 22vw, 320px)' : '40px' }}
         >
+        <div data-umbra-inpaint-mobile-job-controls="" className="hidden">
+          <button
+            type="button"
+            onClick={() => void cancelActiveJob()}
+            disabled={!running}
+            title={running ? 'Stop the active inpaint job and all remaining samples' : 'No inpaint job is running'}
+          >
+            <X size={12} /> Stop All Samples
+          </button>
+        </div>
         <div data-umbra-inpaint-toolbar="" className="relative z-30 shrink-0 border-b border-white/10 bg-[#050708]/95 shadow-md shadow-black/35 backdrop-blur-sm">
           <div className="flex min-h-10 min-w-0 flex-wrap items-center gap-1.5 px-2.5 py-1.5 [&>*]:shrink-0">
           {false ? (

@@ -34,6 +34,7 @@ import type {
   PowerPrompterVideoControls,
 } from '@/types/powerPrompter';
 import { resolveUmbraVideoTargetDimensions } from '../../../../shared/umbra-ui/videoSizing';
+import { resolveUmbraUiQueueControlTargets } from '@/lib/umbraUiQueueControls';
 
 const RECONNECT_DELAY_MS = 1500;
 const QUEUE_ACK_TIMEOUT_MS = 15000;
@@ -187,6 +188,11 @@ export interface UmbraQueueSummary {
   powerPrompterActive: boolean;
   powerPrompterRunning: number;
   powerPrompterRemaining: number;
+  umbraUiActive: boolean;
+  umbraUiRunning: number;
+  umbraUiRemaining: number;
+  umbraUiActiveRequestId: string;
+  umbraUiRequestIds: string[];
 }
 
 export interface UmbraGenerationPreview {
@@ -304,6 +310,11 @@ const EMPTY_QUEUE_SUMMARY: UmbraQueueSummary = {
   powerPrompterActive: false,
   powerPrompterRunning: 0,
   powerPrompterRemaining: 0,
+  umbraUiActive: false,
+  umbraUiRunning: 0,
+  umbraUiRemaining: 0,
+  umbraUiActiveRequestId: '',
+  umbraUiRequestIds: [],
 };
 
 const EMPTY_MODEL_CATALOG: UmbraModelCatalog = {
@@ -549,6 +560,9 @@ function summarizeQueue(snapshot: QueueSnapshot | null): UmbraQueueSummary {
   )).length;
   const powerPrompterPending = powerPrompterPrompts.filter((prompt) => prompt.status === 'pending').length;
   const powerPrompterRemaining = powerPrompterRunning + powerPrompterPending;
+  const umbraUiTargets = resolveUmbraUiQueueControlTargets(snapshot.activeRequestId, snapshot.requests);
+  const umbraUiRunning = umbraUiTargets.running;
+  const umbraUiRemaining = umbraUiTargets.running + umbraUiTargets.pending;
 
   return {
     groups: snapshot.requests.filter((request) => request.prompts.some((prompt) => (
@@ -570,6 +584,11 @@ function summarizeQueue(snapshot: QueueSnapshot | null): UmbraQueueSummary {
     powerPrompterActive: powerPrompterRemaining > 0 && !snapshot.paused,
     powerPrompterRunning,
     powerPrompterRemaining,
+    umbraUiActive: !!umbraUiTargets.activeRequestId,
+    umbraUiRunning,
+    umbraUiRemaining,
+    umbraUiActiveRequestId: umbraUiTargets.activeRequestId,
+    umbraUiRequestIds: umbraUiTargets.requestIds,
   };
 }
 
@@ -1057,7 +1076,12 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
           return;
         }
-        if (type === 'queue_forwarded' || type === 'queue_result') {
+        if (
+          type === 'queue_forwarded'
+          || type === 'queue_result'
+          || type === 'queue_interrupt_result'
+          || type === 'queue_cancel_result'
+        ) {
           const requestId = String(payload?.requestId || '').trim();
           const pending = pendingQueueAcksRef.current.get(requestId);
           if (!pending) return;
@@ -1215,6 +1239,62 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   }, [connected, refreshLoraCatalog, videoModelCatalog.loras]);
 
   const queueSummary = React.useMemo(() => summarizeQueue(queueSnapshot), [queueSnapshot]);
+
+  const sendQueueControl = React.useCallback((
+    type: 'queue_interrupt_active' | 'queue_cancel',
+    requestIds: string[],
+    activeRequestId = '',
+  ) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !connected) {
+      return Promise.reject(new Error('Umbra UI is still connecting to the queue service.'));
+    }
+    const normalizedRequestIds = Array.from(new Set(
+      requestIds.map((requestId) => String(requestId || '').trim()).filter(Boolean),
+    ));
+    if (normalizedRequestIds.length <= 0) {
+      return Promise.reject(new Error(type === 'queue_interrupt_active'
+        ? 'No Umbra UI generation is active.'
+        : 'No Umbra UI generations are queued.'));
+    }
+    const requestId = createRequestId();
+    return new Promise<string>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        pendingQueueAcksRef.current.delete(requestId);
+        reject(new Error(type === 'queue_interrupt_active'
+          ? 'Umbra UI skip request timed out.'
+          : 'Umbra UI stop request timed out.'));
+      }, QUEUE_ACK_TIMEOUT_MS);
+      pendingQueueAcksRef.current.set(requestId, { resolve, reject, timer });
+      try {
+        ws.send(JSON.stringify({
+          type,
+          requestId,
+          queueTargetType: 'pipeline',
+          requestIds: normalizedRequestIds,
+          ...(activeRequestId ? { activeRequestId } : {}),
+        }));
+      } catch (error) {
+        window.clearTimeout(timer);
+        pendingQueueAcksRef.current.delete(requestId);
+        reject(error instanceof Error ? error : new Error('Failed to send the Umbra UI queue control.'));
+      }
+    });
+  }, [connected]);
+
+  const skipActiveUmbraJob = React.useCallback(() => {
+    const activeRequestId = queueSummary.umbraUiActiveRequestId;
+    return sendQueueControl('queue_interrupt_active', activeRequestId ? [activeRequestId] : [], activeRequestId);
+  }, [queueSummary.umbraUiActiveRequestId, sendQueueControl]);
+
+  const stopAllUmbraJobs = React.useCallback(async () => {
+    const requestIds = queueSummary.umbraUiRequestIds;
+    const activeRequestId = queueSummary.umbraUiActiveRequestId;
+    await sendQueueControl('queue_cancel', requestIds, activeRequestId);
+    if (activeRequestId) {
+      await sendQueueControl('queue_interrupt_active', [activeRequestId], activeRequestId);
+    }
+  }, [queueSummary.umbraUiActiveRequestId, queueSummary.umbraUiRequestIds, sendQueueControl]);
 
   const submitQueueBatchRequest = React.useCallback((
     prompts: string[],
@@ -1689,6 +1769,8 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     refreshVideoJobs,
     generationPreview,
     latestSavedImage,
+    skipActiveUmbraJob,
+    stopAllUmbraJobs,
     queueImage,
     queueVideo,
   };

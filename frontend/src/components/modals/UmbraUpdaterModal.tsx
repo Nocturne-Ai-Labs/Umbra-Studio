@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { ExternalLink, Loader2, RefreshCw, X } from 'lucide-react';
+import { AlertTriangle, ExternalLink, Loader2, RefreshCw, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 
 type ReleaseSummary = {
@@ -69,10 +69,8 @@ export function UmbraUpdaterModal({
       launchAttemptRef.current += 1;
       setLaunching(false);
       setError('');
-      return;
     }
-    void launchUpdater();
-  }, [launchUpdater, open]);
+  }, [open]);
 
   if (!open || typeof document === 'undefined') return null;
 
@@ -101,18 +99,29 @@ export function UmbraUpdaterModal({
           <div className="flex items-start gap-3">
             {launching ? (
               <Loader2 size={20} className="mt-0.5 shrink-0 animate-spin text-[var(--umbra-accent)]" />
-            ) : (
+            ) : error ? (
               <ExternalLink size={20} className="mt-0.5 shrink-0 text-red-300" />
+            ) : (
+              <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-300" />
             )}
             <div>
               <div className="text-sm font-black text-white">
-                {launching ? 'Starting the standalone updater' : 'Updater launch failed'}
+                {launching
+                  ? 'Starting the standalone updater'
+                  : error
+                    ? 'Updater launch failed'
+                    : 'Open the Umbra updater?'}
               </div>
               <p className="mt-2 text-xs leading-5 text-zinc-500">
                 {launching
                   ? 'Umbra will open a dedicated updater page on port 8214, then close itself and its managed tools cleanly.'
-                  : error}
+                  : error || 'Umbra Studio and ComfyUI will shut down before the updater opens. Save any work in progress before continuing.'}
               </p>
+              {!launching && !error ? (
+                <p className="mt-3 text-xs font-semibold leading-5 text-zinc-300">
+                  Are you sure you want to continue?
+                </p>
+              ) : null}
             </div>
           </div>
         </div>
@@ -125,15 +134,15 @@ export function UmbraUpdaterModal({
                 onClick={onClose}
                 className="inline-flex min-h-10 items-center justify-center border border-white/10 px-4 font-mono text-[10px] font-black uppercase text-zinc-400 hover:border-white/25 hover:text-white"
               >
-                Close
+                {error ? 'Close' : 'Cancel'}
               </button>
               <button
                 type="button"
                 onClick={() => void launchUpdater()}
                 className="inline-flex min-h-10 items-center justify-center gap-2 border border-[var(--umbra-accent)]/55 bg-[var(--umbra-accent)]/12 px-4 font-mono text-[10px] font-black uppercase text-white hover:bg-[var(--umbra-accent)]/20"
               >
-                <RefreshCw size={14} />
-                Retry
+                {error ? <RefreshCw size={14} /> : <ExternalLink size={14} />}
+                {error ? 'Retry' : 'Open Updater'}
               </button>
             </>
           ) : null}

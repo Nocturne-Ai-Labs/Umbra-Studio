@@ -1251,6 +1251,10 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-comfy-label] {
   display: none !important;
 }
 
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-header-actions] > [data-umbra-ui-queue-emergency-controls] {
+  display: none !important;
+}
+
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-agent-button] > span:not([data-umbra-ui-agent-label]) {
   position: absolute;
   top: -0.2rem;
@@ -1538,6 +1542,22 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-status] {
   flex: 1 1 100%;
 }
 
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-queue-emergency-controls][data-mobile-only="1"] {
+  display: grid !important;
+  width: 100%;
+  flex: 1 1 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-queue-emergency-controls][data-mobile-only="1"] button {
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0 0.55rem;
+  font-size: 0.64rem !important;
+  letter-spacing: 0.04em !important;
+}
+
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-actions] {
   display: grid;
   width: 100%;
@@ -1559,6 +1579,55 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-video-queue] {
   height: 100%;
   min-height: 0;
   border-top: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-video-review-drawer] {
+  display: flex !important;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-video-review-drawer] > [data-umbra-ui-queue-emergency-controls] {
+  flex: 0 0 auto;
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(0, 0, 0, 0.26);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-mobile-job-controls] {
+  position: relative;
+  z-index: 35;
+  display: flex !important;
+  flex: 0 0 auto;
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(0, 0, 0, 0.35);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-mobile-job-controls] button {
+  display: inline-flex;
+  min-height: 2.75rem;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(252, 165, 165, 0.28);
+  border-radius: 0.55rem;
+  background: rgba(239, 68, 68, 0.08);
+  color: #fecaca;
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-mobile-job-controls] button:disabled {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  color: #3f3f46;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-video-queue] > div:nth-child(2) {

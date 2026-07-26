@@ -675,6 +675,33 @@ const GeneralSettings = ({ settings, updateSetting }: any) => {
           )}
         </div>
       </SettingGroup>
+
+      <SettingGroup label="Support Umbra Studio">
+        <div className="glass-panel flex flex-wrap items-center justify-between gap-4 bg-black/20 p-4">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-zinc-200">Support development on Ko-fi</p>
+            <SettingHint>
+              Contributions help fund continued development, testing, and release maintenance.
+            </SettingHint>
+          </div>
+          <a
+            href="https://ko-fi.com/G2G11SL0X3"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Support Umbra Studio on Ko-fi"
+            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md border border-[#72a4f2]/40 bg-[#72a4f2]/10 px-3 transition-colors hover:border-[#72a4f2]/70 hover:bg-[#72a4f2]/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#72a4f2]"
+          >
+            <img
+              src="https://storage.ko-fi.com/cdn/kofi3.png?v=6"
+              alt="Buy Me a Coffee at ko-fi.com"
+              height={36}
+              loading="lazy"
+              decoding="async"
+              className="h-9 w-auto border-0"
+            />
+          </a>
+        </div>
+      </SettingGroup>
     </div>
   );
 };

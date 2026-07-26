@@ -5,6 +5,7 @@ export interface UmbraUiPromptSegment {
   slotType?: string;
   variantId?: string;
   variantName?: string;
+  agentEnabled?: boolean;
 }
 
 function createSegmentId(): string {
@@ -26,6 +27,7 @@ export function createUmbraUiPromptSegment(
     ...(String(metadata.slotType || '').trim() ? { slotType: String(metadata.slotType).trim() } : {}),
     ...(String(metadata.variantId || '').trim() ? { variantId: String(metadata.variantId).trim() } : {}),
     ...(String(metadata.variantName || '').trim() ? { variantName: String(metadata.variantName).trim() } : {}),
+    ...(metadata.agentEnabled === true ? { agentEnabled: true } : {}),
   };
 }
 
@@ -105,6 +107,34 @@ export function compileUmbraUiPromptSegments(segments: UmbraUiPromptSegment[]): 
   const terms = (Array.isArray(segments) ? segments : [])
     .flatMap((segment) => splitPromptTerms(String(segment?.text || '')));
   return dedupeTerms(terms).join(', ');
+}
+
+export function mergeUmbraUiPromptSegmentEnhancements(
+  segments: UmbraUiPromptSegment[],
+  sourceTextById: ReadonlyMap<string, string>,
+  enhancedTextById: ReadonlyMap<string, string>,
+): {
+  segments: UmbraUiPromptSegment[];
+  applied: number;
+  skipped: number;
+} {
+  let applied = 0;
+  let skipped = 0;
+  const next = segments.map((segment) => {
+    if (!enhancedTextById.has(segment.id)) return segment;
+    if (segment.text !== sourceTextById.get(segment.id)) {
+      skipped += 1;
+      return segment;
+    }
+    const enhancedText = String(enhancedTextById.get(segment.id) || '').trim();
+    if (!enhancedText) {
+      skipped += 1;
+      return segment;
+    }
+    applied += 1;
+    return { ...segment, text: enhancedText };
+  });
+  return { segments: next, applied, skipped };
 }
 
 export function appendUmbraUiPromptToken(

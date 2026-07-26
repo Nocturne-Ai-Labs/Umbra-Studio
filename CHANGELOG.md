@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.20.8
+
+### Selective Agent Prompt Enhancement
+
+- Added an agent toggle to every Umbra UI positive-prompt field so users can
+  enhance only the subject, pose, environment, or other segments they choose.
+- Added a single action that processes all enabled fields while preserving
+  disabled style prompts, trained tokens, weights, LoRA syntax, and unrelated
+  prompt segments.
+- Prevented asynchronous agent results from overwriting a field that the user
+  edited while enhancement was still running.
+- Added field-role and generation context to enhancement requests while keeping
+  the agent response limited to the selected field.
+
+### Model And LoRA Browser
+
+- Reworked the Umbra UI model picker into a responsive card browser with
+  checkpoint and LoRA previews, trained-token counts, and clearer selection
+  state.
+- Added lazy preview metadata hydration, multiple rotating previews, video
+  preview support, CivitAI thumbnail sizing, and local thumbnail overrides.
+- Improved matching across model paths, filenames, extensions, and catalog
+  aliases so existing Power Prompter metadata and thumbnails resolve reliably.
+- Added regression coverage for model alias matching and preview behavior.
+
+### Umbra UI Queue Controls
+
+- Added `Skip` and `Stop All` controls for Umbra UI image and video queues.
+- Kept queue controls scoped to Umbra UI requests so Power Prompter batches are
+  not canceled accidentally.
+- Made Skip interrupt the active ComfyUI generation after updating backend queue
+  state, and made Stop All clear both the active request and remaining Umbra UI
+  work.
+- Added the same controls to mobile generation-preview drawers and a dedicated
+  stop action for active inpainting samples.
+- Added queue-target and control-state regression coverage.
+
+### Release And Project Polish
+
+- Added a confirmation step before Umbra Studio hands control to the standalone
+  updater, clearly warning that Umbra Studio and ComfyUI will shut down.
+- Added the official Ko-fi support button to Global Settings and the project
+  README without loading Ko-fi's third-party widget script.
+
 ## v0.20.7
 
 ### Standalone Umbra Updater

@@ -6,6 +6,8 @@
 
 **An original Nocturne AI Labs project, developed by Minokai.**
 
+[<img src="https://storage.ko-fi.com/cdn/kofi3.png?v=6" alt="Support Umbra Studio on Ko-fi" height="36">](https://ko-fi.com/G2G11SL0X3)
+
 Umbra Studio is a desktop-first AI art and workflow application built to unify
 generation backends, prompt tooling, media browsing, metadata handling, model
 management, and portable tool orchestration inside one app-managed environment.

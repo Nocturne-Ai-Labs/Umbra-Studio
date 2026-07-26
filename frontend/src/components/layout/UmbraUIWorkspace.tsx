@@ -57,6 +57,7 @@ import { UmbraInlineAgentPrompt } from '@/components/umbra-ui/UmbraInlineAgentPr
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
 import { UmbraImageResolutionControls } from '@/components/umbra-ui/UmbraImageResolutionControls';
 import { UmbraMobileWorkspaceSheet } from '@/components/umbra-ui/UmbraMobileWorkspaceSheet';
+import { UmbraQueueEmergencyControls } from '@/components/umbra-ui/UmbraQueueEmergencyControls';
 import {
   UmbraQueuePlacementControls,
   useUmbraQueuePlacement,
@@ -388,9 +389,12 @@ export function UmbraUIWorkspace() {
     refreshVideoJobs,
     generationPreview,
     latestSavedImage,
+    skipActiveUmbraJob,
+    stopAllUmbraJobs,
     queueImage,
     queueVideo,
   } = useUmbraPowerPrompterBridge(comfyConnected);
+  const [queueControlBusy, setQueueControlBusy] = React.useState<'skip' | 'stop' | ''>('');
   const [initialDeviceResume] = React.useState(() => readDeviceUiResume<UmbraUiDeviceResume>('umbra-ui'));
   const [activeMode, setActiveMode] = React.useState<UmbraGenerationMode>(() => (
     initialDeviceResume?.activeMode
@@ -1952,6 +1956,30 @@ export function UmbraUIWorkspace() {
       ? `Use ${primaryModelLabel}`
       : undefined;
   const activeImageModelFamilies = imageModelFamilies;
+  const handleSkipUmbraJob = React.useCallback(async () => {
+    if (queueControlBusy) return;
+    setQueueControlBusy('skip');
+    try {
+      await skipActiveUmbraJob();
+      showToast('Skipped the current Umbra UI generation.', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to skip the current generation.', 'error');
+    } finally {
+      setQueueControlBusy('');
+    }
+  }, [queueControlBusy, showToast, skipActiveUmbraJob]);
+  const handleStopAllUmbraJobs = React.useCallback(async () => {
+    if (queueControlBusy) return;
+    setQueueControlBusy('stop');
+    try {
+      await stopAllUmbraJobs();
+      showToast('Stopped all Umbra UI generations.', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to stop Umbra UI generations.', 'error');
+    } finally {
+      setQueueControlBusy('');
+    }
+  }, [queueControlBusy, showToast, stopAllUmbraJobs]);
 
   return (
     <div data-umbra-ui-workspace="" className="flex h-full min-h-0 flex-col bg-[var(--umbra-bg)] text-zinc-100">
@@ -2012,6 +2040,12 @@ export function UmbraUIWorkspace() {
           </button>
         </div>
         <div data-umbra-ui-header-actions="" className="ml-auto flex shrink-0 items-center gap-2">
+          <UmbraQueueEmergencyControls
+            queueSummary={queueSummary}
+            busyAction={queueControlBusy}
+            onSkip={() => void handleSkipUmbraJob()}
+            onStopAll={() => void handleStopAllUmbraJobs()}
+          />
           <button
             type="button"
             onClick={() => setAgentPanelOpen(true)}
@@ -2237,6 +2271,20 @@ export function UmbraUIWorkspace() {
               onRemoveHistory={removePromptHistoryEntry}
               onClearHistory={clearPromptHistory}
               onSubmit={() => { void handleQueueImage(); }}
+              agentContext={{
+                mode: activeMode,
+                modelFamily,
+                modelType,
+                pipeline: selectedImageWorkflow?.name || '',
+                checkpointName,
+                width: Number(width),
+                height: Number(height),
+                enabledLoras: activeLoras.filter((entry) => entry.enabled).map((entry) => entry.name),
+              }}
+              onAgentEnhancementApplied={() => {
+                setImageAgentModeEnabled(false);
+                setImageAgentPrompt('');
+              }}
             />
 
             <UmbraInlineAgentPrompt
@@ -2478,6 +2526,13 @@ export function UmbraUIWorkspace() {
             </div>
           </div>
           <div className="flex min-h-11 items-center gap-3 border-t border-white/10 bg-black/20 px-3">
+            <UmbraQueueEmergencyControls
+              queueSummary={queueSummary}
+              busyAction={queueControlBusy}
+              onSkip={() => void handleSkipUmbraJob()}
+              onStopAll={() => void handleStopAllUmbraJobs()}
+              mobileOnly
+            />
             <div data-umbra-ui-preview-status="" className="min-w-0 flex-1 py-2">
               <div className="flex min-w-0 items-center gap-2">
                 <Activity size={12} className={queueSummary.running > 0 ? 'shrink-0 text-cyan-300' : 'shrink-0 text-zinc-600'} />
@@ -2575,14 +2630,23 @@ export function UmbraUIWorkspace() {
               icon={<Clapperboard size={14} />}
               tone="fuchsia"
             >
-              <UmbraVideoQueuePanel
-                jobs={videoJobs}
-                loading={videoJobsLoading}
-                error={videoJobsError}
-                queueVideo={queueVideo}
-                onLoadIntoEditor={setVideoEditorDraft}
-                onRefresh={refreshVideoJobs}
-              />
+              <div data-umbra-ui-video-review-drawer="" className="contents">
+                <UmbraQueueEmergencyControls
+                  queueSummary={queueSummary}
+                  busyAction={queueControlBusy}
+                  onSkip={() => void handleSkipUmbraJob()}
+                  onStopAll={() => void handleStopAllUmbraJobs()}
+                  mobileOnly
+                />
+                <UmbraVideoQueuePanel
+                  jobs={videoJobs}
+                  loading={videoJobsLoading}
+                  error={videoJobsError}
+                  queueVideo={queueVideo}
+                  onLoadIntoEditor={setVideoEditorDraft}
+                  onRefresh={refreshVideoJobs}
+                />
+              </div>
             </UmbraMobileWorkspaceSheet>
           </div>
         ) : null}

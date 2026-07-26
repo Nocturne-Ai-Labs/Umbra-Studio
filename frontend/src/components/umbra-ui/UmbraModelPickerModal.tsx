@@ -13,7 +13,9 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { readUserConfig } from '@/lib/userConfig';
 import type {
+  PowerPrompterInfoRequestOptions,
   PowerPrompterLoraInfoPayload,
   PowerPrompterModelInfoPayload,
 } from '@/components/power-prompter/powerPrompterSupport';
@@ -29,7 +31,7 @@ interface UmbraModelPickerModalProps {
   catalogLoading?: boolean;
   onClose: () => void;
   onRefresh?: () => void | Promise<unknown>;
-  onRequestInfo?: (name: string) => Promise<UmbraModelPickerInfo>;
+  onRequestInfo?: (name: string, options?: PowerPrompterInfoRequestOptions) => Promise<UmbraModelPickerInfo>;
   onConfirm: (name: string, info: UmbraModelPickerInfo | null) => void;
   titleOverride?: string;
   searchPlaceholder?: string;
@@ -55,9 +57,53 @@ function getFileLabel(path: string): string {
   return (path.split('/').pop() || path).replace(/\.(?:ckpt|pt|pth|safetensors)$/i, '');
 }
 
+function stripFileExtension(value: string): string {
+  return String(value || '').replace(/\.[^/.]+$/, '');
+}
+
+function getCatalogAliasKeys(rawPath: unknown): string[] {
+  const normalized = normalizeCatalogPath(rawPath);
+  if (!normalized) return [];
+  const fileName = normalized.split('/').pop() || normalized;
+  const withoutKnownPrefix = normalized.replace(/^(?:checkpoints|diffusers|diffusion_models|unet|loras)\//i, '');
+  return Array.from(new Set([
+    normalized,
+    stripFileExtension(normalized),
+    fileName,
+    stripFileExtension(fileName),
+    withoutKnownPrefix,
+    stripFileExtension(withoutKnownPrefix),
+  ].map((entry) => normalizeCatalogPath(entry).toLowerCase()).filter(Boolean)));
+}
+
 function normalizeHttpUrl(value: unknown): string {
   const url = String(value || '').trim();
   return /^https?:\/\//i.test(url) ? url : '';
+}
+
+function isVideoPreviewUrl(value: string): boolean {
+  return /\.(?:mp4|webm|mov|m4v)(?:$|[?#])/i.test(value);
+}
+
+function toCivitaiSizedImageUrl(rawValue: unknown, longEdge = 640): string {
+  const normalized = normalizeHttpUrl(rawValue);
+  if (!normalized || isVideoPreviewUrl(normalized)) return normalized;
+  try {
+    const parsed = new URL(normalized);
+    if (!String(parsed.hostname || '').toLowerCase().includes('civitai.com')) return normalized;
+    const target = Math.max(256, Math.min(1280, Math.floor(Number(longEdge) || 640)));
+    if (/\/width=\d+/i.test(parsed.pathname)) {
+      parsed.pathname = parsed.pathname.replace(/\/width=\d+/i, `/width=${target}`);
+    } else if (/\/w=\d+/i.test(parsed.pathname)) {
+      parsed.pathname = parsed.pathname.replace(/\/w=\d+/i, `/w=${target}`);
+    } else {
+      parsed.searchParams.set('width', String(target));
+    }
+    parsed.searchParams.delete('height');
+    return parsed.href;
+  } catch {
+    return normalized;
+  }
 }
 
 function extractPreviewUrls(info: UmbraModelPickerInfo | null): string[] {
@@ -76,16 +122,92 @@ function extractPreviewUrls(info: UmbraModelPickerInfo | null): string[] {
     .filter((entry): entry is Record<string, unknown> => !!entry)
     .filter((entry) => {
       const type = String(entry.type || '').trim().toLowerCase();
-      return type === '' || type === 'image';
+      return type === '' || type === 'image' || type === 'video';
     })
-    .map((entry) => normalizeHttpUrl(entry.url))
+    .map((entry) => {
+      const url = normalizeHttpUrl(entry.url);
+      const type = String(entry.type || '').trim().toLowerCase();
+      return type === 'video' || isVideoPreviewUrl(url) ? url : toCivitaiSizedImageUrl(url);
+    })
     .filter(Boolean)))
-    .slice(0, 6);
+    .slice(0, 4);
 }
 
 function infoName(info: UmbraModelPickerInfo | null): string {
   if (!info) return '';
   return normalizeCatalogPath('loraName' in info ? info.loraName : info.modelName);
+}
+
+function infoMatchesPath(info: UmbraModelPickerInfo | null, path: string): boolean {
+  if (!info || !path) return false;
+  const pathAliases = new Set(getCatalogAliasKeys(path));
+  return getCatalogAliasKeys(infoName(info)).some((alias) => pathAliases.has(alias));
+}
+
+function getInfoCacheKey(kind: UmbraModelPickerKind, alias: string): string {
+  return `${kind}:${alias}`;
+}
+
+function findCachedInfo(
+  cache: Record<string, UmbraModelPickerInfo>,
+  kind: UmbraModelPickerKind,
+  path: string,
+): UmbraModelPickerInfo | null {
+  for (const alias of getCatalogAliasKeys(path)) {
+    const cached = cache[getInfoCacheKey(kind, alias)];
+    if (cached) return cached;
+  }
+  return null;
+}
+
+function normalizeThumbnailOverrides(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== 'object') return {};
+  const normalized: Record<string, string[]> = {};
+  for (const [rawKey, rawSources] of Object.entries(value as Record<string, unknown>)) {
+    const aliases = getCatalogAliasKeys(rawKey);
+    if (aliases.length === 0) continue;
+    const sources = (Array.isArray(rawSources) ? rawSources : [rawSources])
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean)
+      .slice(0, 4);
+    if (sources.length === 0) continue;
+    const uniqueSources = Array.from(new Set(sources));
+    for (const alias of aliases) normalized[alias] = uniqueSources;
+  }
+  return normalized;
+}
+
+function findThumbnailOverrides(overrides: Record<string, string[]>, path: string): string[] {
+  for (const alias of getCatalogAliasKeys(path)) {
+    const sources = overrides[alias];
+    if (sources?.length) return sources;
+  }
+  return [];
+}
+
+function renderPreviewMedia(url: string, alt: string, className: string): React.ReactNode {
+  if (isVideoPreviewUrl(url)) {
+    return (
+      <video
+        src={url}
+        className={className}
+        muted
+        loop
+        autoPlay
+        playsInline
+        preload="metadata"
+      />
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt={alt}
+      className={className}
+      loading="lazy"
+      referrerPolicy="no-referrer"
+    />
+  );
 }
 
 export function UmbraModelPickerModal({
@@ -108,6 +230,28 @@ export function UmbraModelPickerModal({
   const [info, setInfo] = React.useState<UmbraModelPickerInfo | null>(null);
   const [infoLoading, setInfoLoading] = React.useState(false);
   const [infoError, setInfoError] = React.useState('');
+  const [infoCache, setInfoCache] = React.useState<Record<string, UmbraModelPickerInfo>>({});
+  const [previewTick, setPreviewTick] = React.useState(0);
+  const [thumbnailOverrides, setThumbnailOverrides] = React.useState<Record<string, string[]>>({});
+  const pendingPreviewInfoRef = React.useRef(new Set<string>());
+  const infoCacheRef = React.useRef(infoCache);
+  infoCacheRef.current = infoCache;
+
+  const cacheInfo = React.useCallback((requestedPath: string, nextInfo: UmbraModelPickerInfo) => {
+    const aliases = Array.from(new Set([
+      ...getCatalogAliasKeys(requestedPath),
+      ...getCatalogAliasKeys(infoName(nextInfo)),
+    ]));
+    if (aliases.length <= 0) return;
+    setInfoCache((current) => {
+      const patch = Object.fromEntries(
+        aliases.map((alias) => [getInfoCacheKey(kind, alias), nextInfo]),
+      );
+      const merged = { ...current, ...patch };
+      infoCacheRef.current = merged;
+      return merged;
+    });
+  }, [kind]);
 
   const files = React.useMemo<CatalogFile[]>(() => Array.from(new Set(items
     .map(normalizeCatalogPath)
@@ -141,8 +285,24 @@ export function UmbraModelPickerModal({
 
   React.useEffect(() => {
     if (!open) return;
+    let disposed = false;
+    void readUserConfig<Record<string, unknown>>('powerprompter-thumbnail-overrides', {})
+      .then((value) => {
+        if (!disposed) setThumbnailOverrides(normalizeThumbnailOverrides(value));
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [open]);
+
+  React.useEffect(() => {
+    if (!open) return;
     const normalizedSelected = normalizeCatalogPath(selectedValue);
-    setSelection(files.some((file) => file.path === normalizedSelected) ? normalizedSelected : '');
+    const selectedAliases = new Set(getCatalogAliasKeys(normalizedSelected));
+    const matchedSelection = files.find((file) => (
+      getCatalogAliasKeys(file.path).some((alias) => selectedAliases.has(alias))
+    ));
+    setSelection(matchedSelection?.path || '');
     setSearch('');
     setFolder('');
     setInfo(null);
@@ -160,7 +320,10 @@ export function UmbraModelPickerModal({
     setInfoError('');
     void onRequestInfo(selection)
       .then((nextInfo) => {
-        if (!canceled) setInfo(nextInfo);
+        if (!canceled) {
+          setInfo(nextInfo);
+          cacheInfo(selection, nextInfo);
+        }
       })
       .catch((error) => {
         if (!canceled) {
@@ -174,7 +337,47 @@ export function UmbraModelPickerModal({
     return () => {
       canceled = true;
     };
-  }, [onRequestInfo, open, selection]);
+  }, [cacheInfo, onRequestInfo, open, selection]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const timer = window.setInterval(() => {
+      setPreviewTick((current) => current + 1);
+    }, 2400);
+    return () => window.clearInterval(timer);
+  }, [open]);
+
+  React.useEffect(() => {
+    if (!open || !onRequestInfo) return;
+    const targets = Array.from(new Set([
+      ...visibleFiles.slice(0, 24).map((file) => file.path),
+      selection,
+    ].map(normalizeCatalogPath).filter(Boolean)));
+    if (targets.length <= 0) return;
+
+    let canceled = false;
+    const hydrate = async () => {
+      for (const path of targets) {
+        if (canceled) return;
+        const pendingKey = getInfoCacheKey(kind, path.toLowerCase());
+        if (findCachedInfo(infoCacheRef.current, kind, path)) continue;
+        if (pendingPreviewInfoRef.current.has(pendingKey)) continue;
+        pendingPreviewInfoRef.current.add(pendingKey);
+        try {
+          const nextInfo = await onRequestInfo(path, { previewOnly: true });
+          if (!canceled) cacheInfo(path, nextInfo);
+        } catch {
+          // Preview metadata is optional; selection still works without it.
+        } finally {
+          pendingPreviewInfoRef.current.delete(pendingKey);
+        }
+      }
+    };
+    void hydrate();
+    return () => {
+      canceled = true;
+    };
+  }, [cacheInfo, kind, onRequestInfo, open, selection, visibleFiles]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -188,8 +391,15 @@ export function UmbraModelPickerModal({
   if (!open) return null;
 
   const title = titleOverride || (kind === 'checkpoint' ? 'Checkpoint Browser' : 'LoRA Browser');
-  const previewUrls = extractPreviewUrls(info);
-  const displayedInfoMatches = infoName(info).toLowerCase() === selection.toLowerCase();
+  const displayedInfoMatches = infoMatchesPath(info, selection);
+  const selectedInfo = displayedInfoMatches ? info : findCachedInfo(infoCache, kind, selection);
+  const previewUrls = Array.from(new Set([
+    ...findThumbnailOverrides(thumbnailOverrides, selection),
+    ...extractPreviewUrls(selectedInfo),
+  ]));
+  const selectedPreview = previewUrls.length > 0
+    ? previewUrls[previewTick % previewUrls.length]
+    : '';
 
   return (
     <div className="fixed inset-0 z-[12200] flex items-center justify-center bg-black/78 p-4 backdrop-blur-sm" onMouseDown={onClose}>
@@ -197,7 +407,7 @@ export function UmbraModelPickerModal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="flex h-[76vh] min-h-[520px] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-cyan-300/25 bg-[#05070a] shadow-2xl shadow-black/80"
+        className="flex h-[min(78vh,780px)] min-h-0 w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-cyan-300/25 bg-[#05070a] shadow-2xl shadow-black/80 max-md:h-[calc(100dvh-1rem)]"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="flex min-h-14 items-center gap-3 border-b border-white/10 px-4">
@@ -232,8 +442,8 @@ export function UmbraModelPickerModal({
           </label>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(0,1fr)_260px]">
-          <aside className="overflow-y-auto border-r border-white/10 p-2 custom-scrollbar">
+        <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] max-md:grid-cols-1 max-md:grid-rows-[128px_minmax(0,1fr)]">
+          <aside className="overflow-y-auto border-r border-white/10 p-2 custom-scrollbar max-md:border-b max-md:border-r-0">
             <div className="px-2 pb-1 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">Folders</div>
             <div className="space-y-0.5">
               {folders.map((entry) => (
@@ -261,10 +471,22 @@ export function UmbraModelPickerModal({
             {visibleFiles.length <= 0 ? (
               <div className="flex h-full items-center justify-center text-[10px] uppercase tracking-[0.14em] text-zinc-700">No matching files</div>
             ) : (
-              <div className="grid grid-cols-2 gap-2 xl:grid-cols-3">
+              <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
                 {visibleFiles.map((file) => {
                   const active = selection === file.path;
-                  const activePreview = active && displayedInfoMatches ? previewUrls[0] : '';
+                  const cardInfo = active && displayedInfoMatches
+                    ? info
+                    : findCachedInfo(infoCache, kind, file.path);
+                  const cardPreviews = Array.from(new Set([
+                    ...findThumbnailOverrides(thumbnailOverrides, file.path),
+                    ...extractPreviewUrls(cardInfo),
+                  ]));
+                  const activePreview = cardPreviews.length > 0
+                    ? cardPreviews[previewTick % cardPreviews.length]
+                    : '';
+                  const cardInfoPending = pendingPreviewInfoRef.current.has(
+                    getInfoCacheKey(kind, file.path.toLowerCase()),
+                  );
                   return (
                     <button
                       type="button"
@@ -272,24 +494,42 @@ export function UmbraModelPickerModal({
                       onClick={() => setSelection(file.path)}
                       onDoubleClick={() => onConfirm(file.path, active && displayedInfoMatches ? info : null)}
                       className={cn(
-                        'min-w-0 overflow-hidden rounded-md border bg-black/30 text-left transition-colors',
-                        active ? 'border-cyan-300/50 bg-cyan-500/[0.08]' : 'border-white/10 hover:border-white/25',
+                        'min-w-0 overflow-hidden rounded-lg border bg-black/30 text-left transition-colors',
+                        active ? 'border-cyan-300/55 bg-cyan-500/[0.1]' : 'border-white/10 hover:border-white/25',
                       )}
                       title={file.path}
                     >
-                      <div className="relative flex h-24 items-center justify-center overflow-hidden border-b border-white/10 bg-black/35">
+                      <div className="relative flex h-36 items-center justify-center overflow-hidden border-b border-white/10 bg-black/45">
                         {activePreview ? (
-                          <img src={activePreview} alt="" className="h-full w-full object-cover" loading="lazy" />
-                        ) : active && infoLoading ? (
+                          renderPreviewMedia(activePreview, `${file.name} preview`, 'h-full w-full object-contain')
+                        ) : (active && infoLoading) || cardInfoPending ? (
                           <Loader2 size={17} className="animate-spin text-cyan-300" />
                         ) : (
-                          <ImageIcon size={17} className="text-zinc-700" />
+                          <div className="flex flex-col items-center justify-center gap-1 text-zinc-600">
+                            <ImageIcon size={18} />
+                            <span className="text-[9px] font-black uppercase tracking-[0.12em]">No Preview</span>
+                          </div>
                         )}
                         {active ? <Check size={12} className="absolute right-2 top-2 text-cyan-200" /> : null}
                       </div>
                       <div className="p-2">
                         <div className="truncate text-[11px] font-bold text-zinc-100">{file.name}</div>
                         <div className="mt-0.5 truncate font-mono text-[9px] text-zinc-500">{file.folder || 'Root'}</div>
+                        <div className="mt-1 flex min-w-0 items-center gap-1">
+                          {cardPreviews.length > 1 ? (
+                            <span className="rounded-sm border border-cyan-300/25 bg-cyan-500/[0.08] px-1.5 py-0.5 font-mono text-[8px] text-cyan-100">
+                              {cardPreviews.length} previews
+                            </span>
+                          ) : null}
+                          <span className="truncate rounded-sm border border-white/10 bg-white/[0.025] px-1.5 py-0.5 font-mono text-[8px] text-zinc-500">
+                            {kind === 'checkpoint' ? 'Model' : 'LoRA'}
+                          </span>
+                          {cardInfo?.trainedTags?.length ? (
+                            <span className="ml-auto shrink-0 rounded-sm border border-emerald-300/20 bg-emerald-500/[0.06] px-1.5 py-0.5 font-mono text-[8px] text-emerald-100">
+                              {cardInfo.trainedTags.length} tokens
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                     </button>
                   );
@@ -297,41 +537,19 @@ export function UmbraModelPickerModal({
               </div>
             )}
           </main>
-
-          <aside className="min-h-0 overflow-y-auto border-l border-white/10 bg-black/15 p-3 custom-scrollbar">
-            <div className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">Selection</div>
-            {selection ? (
-              <>
-                <div className="mt-2 break-words font-mono text-[10px] text-zinc-200">{selection}</div>
-                <div className="mt-3 aspect-square overflow-hidden rounded-md border border-white/10 bg-black/35">
-                  {previewUrls[0] && displayedInfoMatches ? (
-                    <img src={previewUrls[0]} alt={`${getFileLabel(selection)} preview`} className="h-full w-full object-contain" />
-                  ) : (
-                    <div className="flex h-full items-center justify-center">
-                      {infoLoading ? <Loader2 size={18} className="animate-spin text-cyan-300" /> : <ImageIcon size={20} className="text-zinc-700" />}
-                    </div>
-                  )}
-                </div>
-                {infoError ? <div className="mt-2 text-[10px] leading-relaxed text-amber-200/80">{infoError}</div> : null}
-                {displayedInfoMatches && info?.trainedTags?.length ? (
-                  <div className="mt-3">
-                    <div className="mb-1.5 text-[10px] font-black uppercase tracking-[0.11em] text-zinc-500">Trained Tokens</div>
-                    <div className="flex max-h-36 flex-wrap gap-1 overflow-y-auto custom-scrollbar">
-                      {info.trainedTags.slice(0, 40).map((tag) => (
-                        <span key={tag} className="max-w-full truncate rounded-sm border border-emerald-300/20 bg-emerald-500/[0.07] px-1.5 py-1 font-mono text-[9px] text-emerald-100" title={tag}>{tag}</span>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <div className="mt-3 text-[10px] leading-relaxed text-zinc-500">Choose an item to inspect its metadata and preview.</div>
-            )}
-          </aside>
         </div>
 
-        <footer className="flex min-h-14 items-center gap-3 border-t border-white/10 px-4">
-          <div className="min-w-0 flex-1 truncate font-mono text-[10px] text-zinc-500">{selection ? `Selected: ${selection}` : 'Nothing selected'}</div>
+        <footer className="flex min-h-14 items-center gap-3 border-t border-white/10 px-4 max-md:flex-wrap max-md:py-2">
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-mono text-[10px] text-zinc-400">{selection ? `Selected: ${selection}` : 'Nothing selected'}</div>
+            {infoError ? <div className="truncate text-[9px] text-amber-200/75">{infoError}</div> : null}
+            {selection && selectedPreview ? (
+              <div className="font-mono text-[8px] uppercase tracking-[0.1em] text-cyan-200/65">
+                Preview {previewUrls.length > 1 ? `${(previewTick % previewUrls.length) + 1}/${previewUrls.length}` : 'ready'}
+                {selectedInfo?.trainedTags?.length ? ` / ${selectedInfo.trainedTags.length} trained tokens` : ''}
+              </div>
+            ) : null}
+          </div>
           <button type="button" onClick={onClose} className="h-10 rounded-md border border-white/10 px-4 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:text-zinc-100">Cancel</button>
           <button
             type="button"
@@ -346,3 +564,11 @@ export function UmbraModelPickerModal({
     </div>
   );
 }
+
+export {
+  extractPreviewUrls as extractUmbraModelPickerPreviewUrls,
+  findThumbnailOverrides as findUmbraModelPickerThumbnailOverrides,
+  getCatalogAliasKeys as getUmbraModelPickerCatalogAliasKeys,
+  normalizeThumbnailOverrides as normalizeUmbraModelPickerThumbnailOverrides,
+  infoMatchesPath as umbraModelPickerInfoMatchesPath,
+};

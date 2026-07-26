@@ -9554,6 +9554,14 @@ function forwardPrompterQueueControlToComfyTarget(
     }
 
     if (type === 'queue_interrupt_active') {
+      if (backendAffectedRequestIds.length > 0) {
+        void requestBackendComfyPromptInterrupt('umbra_ui_skip').catch((error: any) => {
+          appendPowerPrompterQueueLog('backend_queue_comfy_interrupt_failed', {
+            requestIds: backendAffectedRequestIds,
+            error: String(error?.message || error || 'Failed to interrupt ComfyUI.'),
+          });
+        });
+      }
       sendWs(ws, {
         type: 'queue_interrupt_result',
         requestId,
@@ -16098,7 +16106,26 @@ function buildUmbraUiAgentRequestPrompt(
   instructionName: string,
   inlineInstruction: string,
   context: string,
+  task: 'compose' | 'enhance-field' = 'compose',
+  fieldLabel = '',
 ): string {
+  if (task === 'enhance-field') {
+    return [
+      `You are enhancing exactly one positive prompt field for Umbra UI ${mediaType} generation.`,
+      `The field role is "${fieldLabel || 'Prompt field'}". Improve only the text already present in this field.`,
+      'Preserve its intent, syntax, weights, trained tokens, character names, and LoRA syntax.',
+      'Do not add unrelated style, subject, pose, environment, camera, lighting, or quality content that belongs in another prompt field.',
+      'Never discuss your work, include Markdown, stage a draft, or return labels.',
+      'Return only the complete replacement text for this one field.',
+      '',
+      `PROMPTING GUIDANCE (${instructionName}):`,
+      inlineInstruction,
+      '',
+      'FIELD TEXT:',
+      sourcePrompt,
+      ...(context ? ['', 'UMBRA GENERATION CONTEXT:', context] : []),
+    ].join('\n');
+  }
   return [
     `You are the prompt composer for Umbra UI ${mediaType} generation.`,
     'Turn the user request into one production-ready positive generation prompt.',
@@ -16264,6 +16291,8 @@ async function generateUmbraUiPromptWithAgent(value: unknown): Promise<{
   const request = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const mediaType = String(request.mediaType || '').trim().toLowerCase();
   if (mediaType !== 'image' && mediaType !== 'video') throw new Error('mediaType must be image or video.');
+  const task = request.task === 'enhance-field' ? 'enhance-field' : 'compose';
+  const fieldLabel = clampUmbraUiAgentText(request.fieldLabel, 120);
   const sourcePrompt = clampUmbraUiAgentText(request.prompt, UMBRA_UI_AGENT_GENERATION_PROMPT_LIMIT);
   if (!sourcePrompt) throw new Error('Enter a prompt request before asking the agent to compose it.');
   const instructions = await loadUmbraUiAgentInstructions();
@@ -16276,7 +16305,15 @@ async function generateUmbraUiPromptWithAgent(value: unknown): Promise<{
   const context = serializeUmbraUiAgentGenerationContext(request.context);
   const inlineInstruction = prepareUmbraUiInlineAgentInstruction(instruction.instruction)
     || 'Faithfully convert the request into a clear, production-ready generation prompt.';
-  const agentRequest = buildUmbraUiAgentRequestPrompt(mediaType, sourcePrompt, instruction.name, inlineInstruction, context);
+  const agentRequest = buildUmbraUiAgentRequestPrompt(
+    mediaType,
+    sourcePrompt,
+    instruction.name,
+    inlineInstruction,
+    context,
+    task,
+    fieldLabel,
+  );
 
   const startedAt = Date.now();
   umbraUiAgentGenerationActive = true;
