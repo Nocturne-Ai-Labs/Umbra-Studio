@@ -88,6 +88,11 @@ import {
   type UmbraUiLoraEntry,
 } from '@/lib/umbraUiModels';
 import type { UmbraUiPromptSegment } from '@/lib/umbraUiPromptSegments';
+import {
+  applyUmbraPromptWeightToTextarea,
+  isUmbraPromptWeightShortcut,
+  isUmbraQueueShortcut,
+} from '@/lib/umbraUiPromptShortcuts';
 import type {
   PowerPrompterModelType,
   PowerPrompterSeedControlMode,
@@ -9693,6 +9698,30 @@ export function UmbraInpaintWorkspace({
     }
   }, [job, showToast]);
 
+  const handleNegativePromptKeyDown = React.useCallback((
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
+  ) => {
+    if (isUmbraPromptWeightShortcut(event.nativeEvent)) {
+      const textarea = event.currentTarget;
+      const weighted = applyUmbraPromptWeightToTextarea(
+        textarea,
+        event.key === 'ArrowUp' ? 0.1 : -0.1,
+      );
+      if (!weighted) return;
+      event.preventDefault();
+      onNegativePromptChange(weighted.nextValue);
+      window.requestAnimationFrame(() => {
+        textarea.focus({ preventScroll: true });
+        textarea.setSelectionRange(weighted.selectionStart, weighted.selectionEnd);
+      });
+      return;
+    }
+    if (isUmbraQueueShortcut(event.nativeEvent)) {
+      event.preventDefault();
+      void generateSamples();
+    }
+  }, [generateSamples, onNegativePromptChange]);
+
   const rerollSamples = React.useCallback(() => {
     const unpinnedStageIds = (canvasDocument?.staging || []).filter((stage) => !stage.pinned).map((stage) => stage.id);
     if (unpinnedStageIds.length > 0) dispatchCanvasDocument({ type: 'discard_stages', stageIds: unpinnedStageIds });
@@ -9912,6 +9941,7 @@ export function UmbraInpaintWorkspace({
             activeSegmentId={activePromptSegmentId}
             onChange={onPromptSegmentsChange}
             onActiveSegmentChange={onActivePromptSegmentChange}
+            onSubmit={() => { void generateSamples(); }}
             history={canvasDocument?.generation.promptHistory || []}
             onRememberCurrent={() => { rememberCurrentPrompt(); }}
             onRestoreHistory={restorePromptHistoryEntry}
@@ -9922,7 +9952,12 @@ export function UmbraInpaintWorkspace({
           {capabilities.negativePrompt.support === 'adjustable' ? (
             <label className="block space-y-1.5">
               <span className={labelClass}>Negative Prompt</span>
-              <textarea value={negativePrompt} onChange={(event) => onNegativePromptChange(event.target.value)} className={`${inputClass} min-h-16 resize-y leading-relaxed`} />
+              <textarea
+                value={negativePrompt}
+                onChange={(event) => onNegativePromptChange(event.target.value)}
+                onKeyDown={handleNegativePromptKeyDown}
+                className={`${inputClass} min-h-16 resize-y leading-relaxed`}
+              />
             </label>
           ) : null}
 

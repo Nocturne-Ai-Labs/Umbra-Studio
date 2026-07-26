@@ -254,6 +254,7 @@ export interface UmbraImageQueueOptions {
   scheduler: string;
   width: number;
   height: number;
+  batchSize: number;
   hiresFix: PowerPrompterHiresFixControls;
   detailerPipeline: PowerPrompterDetailerStage[];
   outputUpscale: PowerPrompterOutputUpscaleControls;
@@ -1402,7 +1403,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       swapDimensions: false,
       width: toFiniteInteger(options.width, 896, 64, 8192),
       height: toFiniteInteger(options.height, 1152, 64, 8192),
-      batchSize: 1,
+      batchSize: toFiniteInteger(options.batchSize, 1, 1, 64),
       loras: enabledLoras.map((lora) => ({
         id: lora.id,
         name: lora.name,

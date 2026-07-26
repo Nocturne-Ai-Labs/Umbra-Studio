@@ -13,26 +13,35 @@ import {
   Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { UmbraCanvasPromptHistoryEntry } from '@/lib/umbraUiCanvasDocument';
+import {
+  getUmbraUiPromptHistoryFieldCount,
+  type UmbraUiPromptHistoryEntry,
+} from '@/lib/umbraUiPromptHistory';
 import {
   compileUmbraUiPromptSegments,
   createUmbraUiPromptSegment,
   normalizeUmbraUiPromptSegmentText,
   type UmbraUiPromptSegment,
 } from '@/lib/umbraUiPromptSegments';
+import {
+  applyUmbraPromptWeightToTextarea,
+  isUmbraPromptWeightShortcut,
+  isUmbraQueueShortcut,
+} from '@/lib/umbraUiPromptShortcuts';
 
 interface UmbraPositivePromptEditorProps {
   segments: UmbraUiPromptSegment[];
   activeSegmentId: string;
   onChange: (segments: UmbraUiPromptSegment[]) => void;
   onActiveSegmentChange: (segmentId: string) => void;
-  history?: UmbraCanvasPromptHistoryEntry[];
+  history?: UmbraUiPromptHistoryEntry[];
   onRememberCurrent?: () => void;
-  onRestoreHistory?: (entry: UmbraCanvasPromptHistoryEntry) => void;
+  onRestoreHistory?: (entry: UmbraUiPromptHistoryEntry) => void;
   onRemoveHistory?: (entryId: string) => void;
   onClearHistory?: () => void;
   accent?: 'cyan' | 'rose';
   heading?: string;
+  onSubmit?: () => void;
 }
 
 const MAX_PROMPT_SEGMENTS = 24;
@@ -49,6 +58,7 @@ export function UmbraPositivePromptEditor({
   onClearHistory,
   accent = 'cyan',
   heading = 'Positive Prompt',
+  onSubmit,
 }: UmbraPositivePromptEditorProps) {
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const textareaRefs = React.useRef(new Map<string, HTMLTextAreaElement>());
@@ -115,7 +125,7 @@ export function UmbraPositivePromptEditor({
             onClick={onRememberCurrent}
             disabled={!compiledPrompt || !onRememberCurrent}
             className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-400 hover:border-cyan-300/25 hover:text-cyan-100 disabled:text-zinc-800"
-            title="Save the current prompt to this canvas project"
+            title="Save the current prompt to history"
           >
             <BookmarkPlus size={12} />
           </button>
@@ -126,7 +136,7 @@ export function UmbraPositivePromptEditor({
               'inline-flex h-7 items-center gap-1.5 rounded-sm border px-2 font-mono text-[9px] font-black uppercase',
               historyOpen ? 'border-cyan-300/30 bg-cyan-500/[0.08] text-cyan-100' : 'border-white/10 text-zinc-500 hover:text-zinc-200',
             )}
-            title="Show prompt history for this canvas project"
+            title="Show prompt history"
           >
             <History size={11} /> {history.length}
           </button>
@@ -145,13 +155,13 @@ export function UmbraPositivePromptEditor({
       {historyOpen ? (
         <div className="border-t border-white/10 bg-black/15 p-2">
           <div className="mb-1.5 flex items-center gap-2 px-0.5">
-            <span className="font-mono text-[9px] font-black uppercase tracking-[0.1em] text-zinc-400">Project History</span>
+            <span className="font-mono text-[9px] font-black uppercase tracking-[0.1em] text-zinc-400">Prompt History</span>
             <button
               type="button"
               onClick={onClearHistory}
               disabled={history.length <= 0 || !onClearHistory}
               className="ml-auto inline-flex h-7 items-center gap-1 rounded-sm border border-red-300/15 px-2 font-mono text-[9px] font-black uppercase text-red-200/65 hover:text-red-100 disabled:text-zinc-800"
-              title="Clear prompt history for this canvas project"
+              title="Clear prompt history"
             >
               <Trash2 size={10} /> Clear
             </button>
@@ -160,6 +170,10 @@ export function UmbraPositivePromptEditor({
             <div className="max-h-56 space-y-1 overflow-y-auto pr-1 custom-scrollbar">
               {history.map((entry) => {
                 const historyPrompt = compileUmbraUiPromptSegments(entry.promptSegments);
+                const fieldCount = getUmbraUiPromptHistoryFieldCount(entry);
+                const fieldLabels = entry.promptSegments
+                  .map((segment, index) => segment.label || `Field ${index + 1}`)
+                  .join(' + ');
                 return (
                   <div key={entry.id} className="flex min-w-0 items-center gap-1.5 border border-white/[0.07] bg-black/25 px-2 py-1.5">
                     <button
@@ -169,9 +183,15 @@ export function UmbraPositivePromptEditor({
                       className="min-w-0 flex-1 text-left"
                       title={historyPrompt}
                     >
-                      <span className="block truncate font-mono text-[10px] text-zinc-200">{historyPrompt}</span>
-                      <span className="mt-0.5 block font-mono text-[9px] text-zinc-600">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-zinc-200">{historyPrompt}</span>
+                        <span className="shrink-0 rounded-sm border border-cyan-300/20 bg-cyan-500/[0.06] px-1.5 py-0.5 font-mono text-[8px] font-black uppercase text-cyan-100/80">
+                          {fieldCount} field{fieldCount === 1 ? '' : 's'}
+                        </span>
+                      </span>
+                      <span className="mt-0.5 block truncate font-mono text-[9px] text-zinc-600">
                         {entry.createdAt > 0 ? new Date(entry.createdAt).toLocaleString() : 'Imported prompt'}
+                        {fieldLabels ? ` / ${fieldLabels}` : ''}
                         {entry.negativePrompt ? ' / negative saved' : ''}
                       </span>
                     </button>
@@ -240,6 +260,28 @@ export function UmbraPositivePromptEditor({
                 value={segment.text}
                 onFocus={() => onActiveSegmentChange(segment.id)}
                 onChange={(event) => updateSegment(segment.id, event.target.value)}
+                onKeyDown={(event) => {
+                  if (isUmbraPromptWeightShortcut(event.nativeEvent)) {
+                    const weighted = applyUmbraPromptWeightToTextarea(
+                      event.currentTarget,
+                      event.key === 'ArrowUp' ? 0.1 : -0.1,
+                    );
+                    if (!weighted) return;
+                    event.preventDefault();
+                    updateSegment(segment.id, weighted.nextValue);
+                    window.requestAnimationFrame(() => {
+                      const textarea = textareaRefs.current.get(segment.id);
+                      if (!textarea) return;
+                      textarea.focus({ preventScroll: true });
+                      textarea.setSelectionRange(weighted.selectionStart, weighted.selectionEnd);
+                    });
+                    return;
+                  }
+                  if (onSubmit && isUmbraQueueShortcut(event.nativeEvent)) {
+                    event.preventDefault();
+                    onSubmit();
+                  }
+                }}
                 onBlur={() => normalizeSegment(segment.id)}
                 placeholder={index === 0 ? 'Main subject and composition' : 'Additional details, style, pose, or environment'}
                 className={cn(

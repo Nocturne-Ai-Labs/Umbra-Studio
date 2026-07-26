@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Boxes, FolderSearch, X } from 'lucide-react';
+import { Boxes, ChevronDown, ChevronRight, FolderSearch, X } from 'lucide-react';
 import type { UmbraWorkflowResourceSelector } from '@/components/umbra-ui/useUmbraPowerPrompterBridge';
 
 interface UmbraWorkflowResourceControlsProps {
@@ -40,22 +40,39 @@ export function UmbraWorkflowResourceControls({
   onChoose,
   onChange,
 }: UmbraWorkflowResourceControlsProps) {
+  const [expanded, setExpanded] = React.useState(false);
   if (resources.length <= 0) return null;
+  const selectedCount = resources.filter((resource) => (
+    String(values[resource.id] || resource.defaultValue || '').trim()
+  )).length;
+  const requiredMissing = resources.filter((resource) => (
+    resource.required
+    && !String(values[resource.id] || resource.defaultValue || '').trim()
+  )).length;
 
   return (
     <section className="overflow-hidden rounded-md border border-white/10 bg-white/[0.02]">
-      <div className="flex min-h-10 items-center gap-2 border-b border-white/10 px-2.5">
+      <button
+        type="button"
+        onClick={() => setExpanded((current) => !current)}
+        className={`flex min-h-9 w-full items-center gap-2 px-2.5 text-left transition-colors hover:bg-white/[0.025] ${expanded ? 'border-b border-white/10' : ''}`}
+        aria-expanded={expanded}
+        title={expanded ? 'Collapse workflow resources' : 'Expand workflow resources'}
+      >
+        {expanded ? <ChevronDown size={13} className="text-zinc-500" /> : <ChevronRight size={13} className="text-zinc-500" />}
         <Boxes size={13} className="text-violet-300" />
-        <span className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">Workflow Resources</span>
+        <span className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-200">Workflow Resources</span>
         {modelFamily ? (
           <span className="rounded-sm border border-violet-300/20 bg-violet-500/[0.07] px-1.5 py-0.5 font-mono text-[9px] text-violet-100">
             {modelFamily}
           </span>
         ) : null}
-        <span className="ml-auto font-mono text-[9px] text-zinc-500">{resources.length} selectors</span>
-      </div>
+        <span className={`ml-auto font-mono text-[9px] ${requiredMissing > 0 ? 'text-amber-200' : 'text-zinc-500'}`}>
+          {selectedCount}/{resources.length}{requiredMissing > 0 ? ` · ${requiredMissing} required` : ''}
+        </span>
+      </button>
 
-      <div className="divide-y divide-white/[0.07]">
+      {expanded ? <div className="divide-y divide-white/[0.07]">
         {resources.map((resource) => {
           const value = String(values[resource.id] || resource.defaultValue || '').trim();
           const availableCount = getOptions(resource).length;
@@ -97,11 +114,11 @@ export function UmbraWorkflowResourceControls({
             </div>
           );
         })}
-      </div>
+      </div> : null}
 
-      <div className="truncate border-t border-white/[0.07] px-2.5 py-1.5 font-mono text-[9px] text-zinc-600" title={workflowName}>
+      {expanded ? <div className="truncate border-t border-white/[0.07] px-2.5 py-1.5 font-mono text-[9px] text-zinc-600" title={workflowName}>
         Defined by {workflowName}
-      </div>
+      </div> : null}
     </section>
   );
 }

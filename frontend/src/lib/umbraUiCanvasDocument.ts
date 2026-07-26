@@ -7,14 +7,20 @@ import type {
   UmbraUiIpAdapterWeightType,
 } from '../../../shared/umbra-ui/pipelineTypes';
 import { resolveUmbraCanvasInteractiveAllocation } from './umbraUiCanvasPerformance';
-import { compileUmbraUiPromptSegments } from './umbraUiPromptSegments';
+import {
+  normalizeUmbraUiPromptHistory,
+  recordUmbraUiPromptHistory,
+  UMBRA_UI_PROMPT_HISTORY_LIMIT,
+  type UmbraUiPromptHistoryEntry,
+} from './umbraUiPromptHistory';
+import type { UmbraUiPromptSegment } from './umbraUiPromptSegments';
 import type {
   PowerPrompterSeedControlMode,
   PowerPrompterSeedIncrement,
 } from '@/types/powerPrompter';
 
 export const UMBRA_CANVAS_DOCUMENT_VERSION = 19 as const;
-export const UMBRA_CANVAS_PROMPT_HISTORY_LIMIT = 100;
+export const UMBRA_CANVAS_PROMPT_HISTORY_LIMIT = UMBRA_UI_PROMPT_HISTORY_LIMIT;
 
 export type UmbraCanvasOperationMode = 'inpaint' | 'outpaint';
 export type UmbraCanvasProcessingScaleMode = 'none' | 'auto' | 'manual';
@@ -316,12 +322,7 @@ export interface UmbraCanvasPendingJob {
   createdAt: number;
 }
 
-export interface UmbraCanvasPromptHistoryEntry {
-  id: string;
-  promptSegments: Array<{ id: string; text: string }>;
-  negativePrompt: string;
-  createdAt: number;
-}
+export type UmbraCanvasPromptHistoryEntry = UmbraUiPromptHistoryEntry;
 
 export interface UmbraCanvasGenerationSettings {
   modelFamily: string;
@@ -761,76 +762,17 @@ function resetUmbraCanvasLayerTransform(layer: UmbraCanvasLayer): UmbraCanvasLay
   };
 }
 
-function normalizePromptHistorySegments(value: unknown, entryIndex: number): Array<{ id: string; text: string }> {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((segment: Record<string, any>, segmentIndex: number) => ({
-      id: String(segment?.id || `umbra-history-${entryIndex + 1}-prompt-${segmentIndex + 1}`),
-      text: String(segment?.text || '').trim(),
-    }))
-    .filter((segment) => !!segment.text)
-    .slice(0, 24);
-}
-
-function promptHistoryEntryKey(
-  promptSegments: Array<{ id: string; text: string }>,
-  negativePrompt: string,
-): string {
-  return `${compileUmbraUiPromptSegments(promptSegments).toLowerCase()}\n${String(negativePrompt || '').replace(/\s+/g, ' ').trim().toLowerCase()}`;
-}
-
 function normalizePromptHistory(value: unknown): UmbraCanvasPromptHistoryEntry[] {
-  if (!Array.isArray(value)) return [];
-  const candidates = value
-    .map((entry: Record<string, any>, index: number) => {
-      const promptSegments = normalizePromptHistorySegments(entry?.promptSegments, index);
-      const negativePrompt = String(entry?.negativePrompt || '').trim();
-      return {
-        id: String(entry?.id || '').trim(),
-        promptSegments,
-        negativePrompt,
-        createdAt: Math.max(0, Number(entry?.createdAt) || 0),
-        index,
-        key: promptHistoryEntryKey(promptSegments, negativePrompt),
-      };
-    })
-    .filter((entry) => !!compileUmbraUiPromptSegments(entry.promptSegments))
-    .sort((left, right) => right.createdAt - left.createdAt || left.index - right.index);
-  const seenKeys = new Set<string>();
-  const seenIds = new Set<string>();
-  const normalized: UmbraCanvasPromptHistoryEntry[] = [];
-  for (const candidate of candidates) {
-    if (seenKeys.has(candidate.key)) continue;
-    seenKeys.add(candidate.key);
-    let id = candidate.id || `umbra-prompt-history-${candidate.createdAt || candidate.index + 1}`;
-    if (seenIds.has(id)) id = `${id}-${candidate.index + 1}`;
-    seenIds.add(id);
-    normalized.push({
-      id,
-      promptSegments: candidate.promptSegments,
-      negativePrompt: candidate.negativePrompt,
-      createdAt: candidate.createdAt,
-    });
-    if (normalized.length >= UMBRA_CANVAS_PROMPT_HISTORY_LIMIT) break;
-  }
-  return normalized;
+  return normalizeUmbraUiPromptHistory(value, UMBRA_CANVAS_PROMPT_HISTORY_LIMIT);
 }
 
 export function recordUmbraCanvasPromptHistory(
   history: readonly UmbraCanvasPromptHistoryEntry[] | undefined,
-  promptSegments: Array<{ id: string; text: string }>,
+  promptSegments: UmbraUiPromptSegment[],
   negativePrompt: string,
   createdAt = Date.now(),
 ): UmbraCanvasPromptHistoryEntry[] {
-  const normalizedSegments = normalizePromptHistorySegments(promptSegments, 0);
-  if (!compileUmbraUiPromptSegments(normalizedSegments)) return normalizePromptHistory(history);
-  const entry: UmbraCanvasPromptHistoryEntry = {
-    id: createId('canvas-prompt-history'),
-    promptSegments: normalizedSegments,
-    negativePrompt: String(negativePrompt || '').trim(),
-    createdAt: Math.max(0, Number(createdAt) || Date.now()),
-  };
-  return normalizePromptHistory([entry, ...(history || [])]);
+  return recordUmbraUiPromptHistory(history, promptSegments, negativePrompt, createdAt);
 }
 
 function normalizeGenerationSettings(value: unknown): UmbraCanvasGenerationSettings {

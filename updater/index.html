@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Umbra Studio Updater</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #06080a;
+      --panel: #0b0f12;
+      --panel-2: #10161a;
+      --line: #273038;
+      --muted: #84909a;
+      --text: #eef4f7;
+      --accent: #38d9a9;
+      --danger: #ff6b77;
+      --warning: #f5c451;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: 0;
+    }
+    button, select { font: inherit; letter-spacing: 0; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .42; }
+    .shell { min-height: 100vh; display: grid; grid-template-rows: auto 1fr auto; }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 70px;
+      padding: 14px clamp(16px, 3vw, 36px);
+      border-bottom: 1px solid var(--line);
+      background: #080b0d;
+    }
+    .eyebrow { color: var(--accent); font-size: 11px; font-weight: 900; text-transform: uppercase; }
+    h1 { margin: 4px 0 0; font-size: clamp(18px, 3vw, 26px); }
+    .status-pill {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+    main {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      padding: clamp(16px, 3vw, 32px);
+      display: grid;
+      grid-template-columns: 290px minmax(0, 1fr);
+      gap: 16px;
+      min-height: 0;
+    }
+    .panel { border: 1px solid var(--line); background: var(--panel); min-width: 0; }
+    .panel-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 44px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    #release-list { padding: 8px; display: grid; gap: 7px; max-height: calc(100vh - 190px); overflow: auto; }
+    .release {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #090d10;
+      color: var(--muted);
+      padding: 12px;
+      text-align: left;
+    }
+    .release:hover, .release.active { border-color: var(--accent); color: var(--text); background: #0c1715; }
+    .release strong { display: block; font-size: 13px; }
+    .release span { display: block; margin-top: 5px; font-size: 10px; }
+    .content { padding: clamp(16px, 3vw, 28px); overflow: auto; }
+    .version { color: var(--accent); font-size: 12px; font-weight: 900; text-transform: uppercase; }
+    h2 { margin: 8px 0; font-size: clamp(22px, 4vw, 34px); }
+    .meta { color: var(--muted); font-size: 11px; line-height: 1.7; }
+    .notes {
+      margin-top: 20px;
+      min-height: 240px;
+      border: 1px solid var(--line);
+      background: #070a0c;
+      padding: 16px;
+      white-space: pre-wrap;
+      color: #c4cdd3;
+      font-family: system-ui, sans-serif;
+      font-size: 14px;
+      line-height: 1.65;
+    }
+    .progress-panel { display: none; margin-top: 16px; border: 1px solid var(--line); padding: 14px; background: var(--panel-2); }
+    .progress-panel.visible { display: block; }
+    .progress-head { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; font-weight: 900; }
+    .progress-item { margin-top: 8px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+    .track { height: 8px; margin-top: 12px; background: #20282e; overflow: hidden; }
+    .fill { width: 0; height: 100%; background: var(--accent); transition: width .18s linear; }
+    .message { margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .message.error { color: var(--danger); }
+    .message.warning { color: var(--warning); }
+    footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      min-height: 68px;
+      padding: 12px clamp(16px, 3vw, 36px);
+      border-top: 1px solid var(--line);
+      background: #080b0d;
+    }
+    .hint { color: var(--muted); font-size: 11px; }
+    .actions { display: flex; gap: 8px; }
+    .button {
+      min-height: 42px;
+      border: 1px solid var(--line);
+      background: #0d1215;
+      color: var(--text);
+      padding: 0 16px;
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .button:hover { border-color: #66737c; }
+    .button.primary { border-color: var(--accent); background: #0c201a; color: #d8fff3; }
+    @media (max-width: 760px) {
+      main { grid-template-columns: 1fr; }
+      #release-list { max-height: 210px; }
+      footer { align-items: stretch; flex-direction: column; }
+      .actions, .button { width: 100%; }
+      .actions { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div>
+        <div class="eyebrow">Nocturne AI Labs</div>
+        <h1>Umbra Studio Updater</h1>
+      </div>
+      <div id="status-pill" class="status-pill">Standalone service</div>
+    </header>
+    <main>
+      <aside class="panel">
+        <div class="panel-title">
+          <span>Available builds</span>
+          <button id="refresh" class="button" type="button">Refresh</button>
+        </div>
+        <div id="release-list"></div>
+      </aside>
+      <section class="panel content">
+        <div id="selected-version" class="version">Select a build</div>
+        <h2 id="selected-name">Release notes</h2>
+        <div id="selected-meta" class="meta">The updater runs independently from Umbra Studio.</div>
+        <div id="progress-panel" class="progress-panel">
+          <div class="progress-head">
+            <span id="phase">Ready</span>
+            <span id="progress-text"></span>
+          </div>
+          <div id="current-item" class="progress-item"></div>
+          <div class="track"><div id="fill" class="fill"></div></div>
+          <div id="state-message" class="message"></div>
+        </div>
+        <div id="notes" class="notes">Choose a release from the left. Umbra Studio, ComfyUI, AI-Toolkit, and the gallery service will close only when installation begins. User and Tools remain preserved.</div>
+      </section>
+    </main>
+    <footer>
+      <div id="hint" class="hint">This page is served by the external updater, not Umbra Studio.</div>
+      <div class="actions">
+        <button id="relaunch" class="button" type="button">Open Umbra</button>
+        <button id="update" class="button primary" type="button" disabled>Install selected update</button>
+      </div>
+    </footer>
+  </div>
+  <script>
+    const token = new URLSearchParams(location.search).get('token') || '';
+    const api = (path, options = {}) => fetch(`${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`, {
+      cache: 'no-store',
+      ...options,
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    }).then(async (response) => {
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.success === false) throw new Error(payload.error || `Request failed (${response.status}).`);
+      return payload;
+    });
+    const list = document.querySelector('#release-list');
+    const updateButton = document.querySelector('#update');
+    const relaunchButton = document.querySelector('#relaunch');
+    const refreshButton = document.querySelector('#refresh');
+    const progressPanel = document.querySelector('#progress-panel');
+    const stateMessage = document.querySelector('#state-message');
+    let summary = null;
+    let selected = null;
+    let stateTimer = 0;
+    const activePhases = new Set(['downloading', 'staged', 'stopping', 'extracting', 'applying', 'updating_nodes', 'restarting']);
+    const phaseNames = {
+      downloading: 'Downloading release',
+      staged: 'Verifying package',
+      stopping: 'Stopping Umbra Studio',
+      extracting: 'Extracting package',
+      applying: 'Replacing application files',
+      updating_nodes: 'Updating Umbra Nodes',
+      restarting: 'Restarting Umbra Studio',
+      complete: 'Update complete',
+      failed: 'Update failed',
+    };
+    const formatBytes = (value) => {
+      let size = Math.max(0, Number(value) || 0);
+      const units = ['B', 'KB', 'MB', 'GB'];
+      let index = 0;
+      while (size >= 1024 && index < units.length - 1) { size /= 1024; index += 1; }
+      return `${size.toFixed(index === 0 ? 0 : size >= 100 ? 0 : 1)} ${units[index]}`;
+    };
+    const versionParts = (value) => String(value || '').replace(/^v/i, '').split('.').map((part) => Number.parseInt(part, 10) || 0);
+    const compare = (left, right) => {
+      const a = versionParts(left); const b = versionParts(right);
+      for (let i = 0; i < Math.max(a.length, b.length, 3); i += 1) {
+        if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0) ? 1 : -1;
+      }
+      return 0;
+    };
+    function selectRelease(release) {
+      selected = release;
+      document.querySelector('#selected-version').textContent = `Umbra Studio v${release.version}`;
+      document.querySelector('#selected-name').textContent = release.name || release.tag;
+      document.querySelector('#selected-meta').textContent = `${release.packageName} | ${formatBytes(release.packageBytes)} | ${release.channel}`;
+      document.querySelector('#notes').textContent = release.notes || 'No release notes were provided.';
+      for (const button of list.querySelectorAll('.release')) button.classList.toggle('active', button.dataset.tag === release.tag);
+      updateButton.disabled = compare(release.version, summary.currentVersion) <= 0;
+    }
+    function renderReleases() {
+      list.replaceChildren();
+      for (const release of summary.releases) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'release';
+        button.dataset.tag = release.tag;
+        const title = document.createElement('strong');
+        title.textContent = `v${release.version}${compare(release.version, summary.currentVersion) > 0 ? '  UPDATE' : release.version === summary.currentVersion ? '  INSTALLED' : ''}`;
+        const date = document.createElement('span');
+        date.textContent = release.publishedAt ? new Date(release.publishedAt).toLocaleDateString() : release.channel;
+        button.append(title, date);
+        button.addEventListener('click', () => selectRelease(release));
+        list.append(button);
+      }
+      const preferred = summary.releases.find((release) => compare(release.version, summary.currentVersion) > 0) || summary.releases[0];
+      if (preferred) selectRelease(preferred);
+    }
+    async function loadReleases(refresh = false) {
+      refreshButton.disabled = true;
+      stateMessage.className = 'message';
+      stateMessage.textContent = '';
+      try {
+        summary = await api(`/api/releases${refresh ? '?refresh=true' : ''}`);
+        renderReleases();
+        document.querySelector('#status-pill').textContent = `Installed v${summary.currentVersion}`;
+      } catch (error) {
+        stateMessage.className = 'message error';
+        stateMessage.textContent = error.message;
+        progressPanel.classList.add('visible');
+      } finally {
+        refreshButton.disabled = false;
+      }
+    }
+    async function pollState() {
+      try {
+        const payload = await api('/api/state');
+        const state = payload.state;
+        const active = activePhases.has(state.phase);
+        progressPanel.classList.toggle('visible', active || state.phase === 'complete' || state.phase === 'failed');
+        document.querySelector('#phase').textContent = phaseNames[state.phase] || 'Ready';
+        document.querySelector('#current-item').textContent = state.currentItem || '';
+        const ratio = state.totalBytes > 0 ? Math.min(100, state.processedBytes / state.totalBytes * 100) : 0;
+        document.querySelector('#fill').style.width = `${ratio}%`;
+        document.querySelector('#progress-text').textContent = state.phase === 'downloading'
+          ? `${formatBytes(state.processedBytes)} / ${formatBytes(state.totalBytes)}`
+          : '';
+        stateMessage.className = `message${state.error ? ' error' : state.warning ? ' warning' : ''}`;
+        stateMessage.textContent = state.error || state.warning || (state.phase === 'complete' ? 'The updated build is ready.' : '');
+        updateButton.disabled = active || !selected || compare(selected.version, summary.currentVersion) <= 0;
+        if (active) {
+          updateButton.textContent = phaseNames[state.phase] || 'Updating';
+          clearTimeout(stateTimer);
+          stateTimer = setTimeout(pollState, 350);
+        } else {
+          updateButton.textContent = 'Install selected update';
+        }
+      } catch (error) {
+        stateMessage.className = 'message error';
+        stateMessage.textContent = error.message;
+      }
+    }
+    refreshButton.addEventListener('click', () => loadReleases(true));
+    updateButton.addEventListener('click', async () => {
+      if (!selected) return;
+      updateButton.disabled = true;
+      try {
+        await api('/api/update', { method: 'POST', body: JSON.stringify({ tag: selected.tag, includePrerelease: selected.channel === 'prerelease' }) });
+        await pollState();
+      } catch (error) {
+        stateMessage.className = 'message error';
+        stateMessage.textContent = error.message;
+        progressPanel.classList.add('visible');
+        updateButton.disabled = false;
+      }
+    });
+    relaunchButton.addEventListener('click', async () => {
+      relaunchButton.disabled = true;
+      try {
+        const result = await api('/api/relaunch', { method: 'POST', body: '{}' });
+        document.querySelector('#hint').textContent = 'Umbra Studio is starting.';
+        setTimeout(() => location.assign(result.appUrl), 500);
+      } catch (error) {
+        stateMessage.className = 'message error';
+        stateMessage.textContent = error.message;
+        progressPanel.classList.add('visible');
+      } finally {
+        relaunchButton.disabled = false;
+      }
+    });
+    void loadReleases().then(pollState);
+  </script>
+</body>
+</html>

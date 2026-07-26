@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.20.7
+
+### Standalone Umbra Updater
+
+- Replaced the in-app self-update lifecycle with a dedicated localhost updater
+  page that remains available while Umbra Studio and its managed tools are
+  stopped.
+- Added `UmbraUpdater.bat` for Windows and `umbra-updater.sh` for Linux so the
+  updater can be launched without starting Umbra Studio.
+- Moved release selection, changelogs, package download, progress, failure
+  reporting, relaunch, and temporary-workspace cleanup into the external
+  updater service.
+- Kept the existing transactional application swap, `User/` and `Tools/`
+  preservation, rollback, package validation, and Umbra Nodes update checks.
+- Reserved fixed local port `8214` for updater sessions and removed the
+  in-app blank-page reconnect loop.
+
+### Prompt History
+
+- Added persistent Umbra UI prompt history for TXT2IMG and IMG2IMG submissions.
+- Preserved exact multi-field prompt grouping, field labels, metadata, and
+  intentionally empty field slots when saving and restoring prompts.
+- Added per-entry field-count indicators, individual removal, manual saving,
+  and a clear-history action.
+- Made prompt restoration update only positive and negative prompt fields
+  without changing the selected model, pipeline, seed, resolution, hires fix,
+  detailers, or other generation settings.
+- Stored shared prompt history in the portable `User/UmbraUI` directory so it
+  survives application restarts and remains available to Umbra Remote clients.
+- Reused the same normalized, bounded, and duplicate-resistant history model
+  for inpainting project prompts.
+
+### Generation Preview Polish
+
+- Removed the sampling progress overlay from the generated image preview.
+- Moved sampling progress and step counts into the compact queue status area
+  beside the active generation position and prompt.
+- Kept the mobile preview status and action controls separated with dedicated
+  responsive layout selectors.
+
 ## v0.20.6
 
 ### Umbra UI Agent MCP

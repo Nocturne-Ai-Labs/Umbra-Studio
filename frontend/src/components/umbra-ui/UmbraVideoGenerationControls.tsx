@@ -61,6 +61,11 @@ import {
   resolveUmbraVideoSizing,
   resolveUmbraVideoTargetDimensions,
 } from '../../../../shared/umbra-ui/videoSizing';
+import {
+  applyUmbraPromptWeightToTextarea,
+  isUmbraPromptWeightShortcut,
+  isUmbraQueueShortcut,
+} from '@/lib/umbraUiPromptShortcuts';
 
 const inputClass = 'w-full rounded-md border border-white/10 bg-black/35 px-2.5 py-2 text-xs text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-cyan-300/45';
 const labelClass = 'text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500';
@@ -828,6 +833,31 @@ export function UmbraVideoGenerationControls({
     }
   };
 
+  const handlePromptKeyDown = (
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
+    onValueChange: (value: string) => void,
+  ) => {
+    if (isUmbraPromptWeightShortcut(event.nativeEvent)) {
+      const textarea = event.currentTarget;
+      const weighted = applyUmbraPromptWeightToTextarea(
+        textarea,
+        event.key === 'ArrowUp' ? 0.1 : -0.1,
+      );
+      if (!weighted) return;
+      event.preventDefault();
+      onValueChange(weighted.nextValue);
+      window.requestAnimationFrame(() => {
+        textarea.focus({ preventScroll: true });
+        textarea.setSelectionRange(weighted.selectionStart, weighted.selectionEnd);
+      });
+      return;
+    }
+    if (isUmbraQueueShortcut(event.nativeEvent)) {
+      event.preventDefault();
+      void handleQueue();
+    }
+  };
+
   const samplerOptions = catalog.samplers.length > 0 ? catalog.samplers : ['euler', 'uni_pc'];
   const schedulerOptions = catalog.schedulers.length > 0 ? catalog.schedulers : ['simple', 'beta'];
   const queueDisabled = isQueueing || !queueConnected || !comfyConnected || !pipelineMatch.workflow || !workflowPrompt.trim() || requiredMissing;
@@ -980,7 +1010,13 @@ export function UmbraVideoGenerationControls({
 
         <label className="block space-y-1.5">
           <span className={labelClass}>{agentModeEnabled ? 'Prompt Request' : 'Prompt'}</span>
-          <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Describe motion, camera, subject, and scene continuity" className={`${inputClass} min-h-28 resize-y leading-relaxed`} />
+          <textarea
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            onKeyDown={(event) => handlePromptKeyDown(event, setPrompt)}
+            placeholder="Describe motion, camera, subject, and scene continuity"
+            className={`${inputClass} min-h-28 resize-y leading-relaxed`}
+          />
         </label>
         <UmbraInlineAgentPrompt
           mediaType="video"
@@ -989,6 +1025,7 @@ export function UmbraVideoGenerationControls({
           onEnabledChange={setAgentModeEnabled}
           agentPrompt={agentPrompt}
           onAgentPromptChange={setAgentPrompt}
+          onSubmit={() => { void handleQueue(); }}
           accent="fuchsia"
           context={{
             family: video.family,
@@ -1003,7 +1040,13 @@ export function UmbraVideoGenerationControls({
         />
         <label className="block space-y-1.5">
           <span className={labelClass}>Negative Prompt</span>
-          <textarea value={negativePrompt} onChange={(event) => setNegativePrompt(event.target.value)} placeholder="Artifacts and motion failures to avoid" className={`${inputClass} min-h-20 resize-y leading-relaxed`} />
+          <textarea
+            value={negativePrompt}
+            onChange={(event) => setNegativePrompt(event.target.value)}
+            onKeyDown={(event) => handlePromptKeyDown(event, setNegativePrompt)}
+            placeholder="Artifacts and motion failures to avoid"
+            className={`${inputClass} min-h-20 resize-y leading-relaxed`}
+          />
         </label>
 
         <div className="grid grid-cols-2 gap-2">

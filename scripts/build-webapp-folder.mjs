@@ -468,6 +468,29 @@ function writePortableMarker() {
   fs.writeFileSync(path.join(publishRoot, 'portable-mode'), 'portable webapp runtime enabled\n', 'utf-8');
 }
 
+function writeUmbraUpdaterLauncher() {
+  const launcherPath = path.join(publishRoot, 'UmbraUpdater.bat');
+  const script = `@echo off
+setlocal
+cd /d "%~dp0"
+set "BUN_BIN=%CD%\\Runtime\\Bun\\win32\\bun.exe"
+set "UPDATER_BOOTSTRAP=%CD%\\resources\\app\\launcher\\UmbraUpdaterBootstrap.js"
+if not exist "%BUN_BIN%" (
+  echo [ERROR] Bundled Bun runtime is missing: %BUN_BIN%
+  pause
+  exit /b 1
+)
+if not exist "%UPDATER_BOOTSTRAP%" (
+  echo [ERROR] Standalone updater is missing: %UPDATER_BOOTSTRAP%
+  pause
+  exit /b 1
+)
+"%BUN_BIN%" "%UPDATER_BOOTSTRAP%" --root "%CD%"
+if errorlevel 1 pause
+`;
+  fs.writeFileSync(launcherPath, script, 'utf-8');
+}
+
 function removeLegacyDesktopArtifacts() {
   for (const relativePath of LEGACY_DESKTOP_ROOT_ARTIFACTS) {
     const target = path.join(publishRoot, relativePath);
@@ -505,6 +528,9 @@ function verifyPublish() {
     'resources/app/launcher/UmbraWebLauncher.ts',
     'resources/app/launcher/UmbraMigrationWorker.ts',
     'resources/app/launcher/UmbraUpdateWorker.js',
+    'resources/app/launcher/UmbraUpdaterBootstrap.js',
+    'resources/app/updater/UmbraUpdaterApp.js',
+    'resources/app/updater/index.html',
     'resources/app/backend/FirstRunService.ts',
     'resources/app/shared/onboarding/firstRun.ts',
     'resources/app/node_modules',
@@ -515,6 +541,7 @@ function verifyPublish() {
     'User/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
     'Install-Data-Forge-Models.bat',
     'Install-Umbra-UI-Models.bat',
+    'UmbraUpdater.bat',
     'UmbraStudio.exe',
   ];
   if (bundleDataForgeModels) {
@@ -562,7 +589,7 @@ function publish() {
   run('bun', ['run', 'build:frontend'], 'frontend build');
   run('bun', ['build', 'UmbraServer.ts', '--target=bun', '--outfile', path.join('dist-webapp', 'UmbraServer.js')], 'backend build');
   run('bun', ['run', 'webapp:build-launcher'], 'launcher build');
-  run('bun', ['run', 'webapp:build-update-worker'], 'external update worker build');
+  run('bun', ['run', 'webapp:build-updater'], 'standalone updater build');
 
   for (const relativePath of ['public', path.join('resources', 'app', 'public')]) {
     const target = path.join(publishRoot, relativePath);
@@ -583,6 +610,7 @@ function publish() {
     'backend',
     'gallery',
     'launcher',
+    'updater',
     'scripts',
     'shared',
     'defaults',
@@ -618,6 +646,14 @@ function publish() {
     path.join(root, 'dist-webapp', 'UmbraUpdateWorker.js'),
     path.join(packagedAppDir, 'launcher', 'UmbraUpdateWorker.js'),
   );
+  copyExplicitFile(
+    path.join(root, 'dist-webapp', 'UmbraUpdaterBootstrap.js'),
+    path.join(packagedAppDir, 'launcher', 'UmbraUpdaterBootstrap.js'),
+  );
+  copyExplicitFile(
+    path.join(root, 'dist-webapp', 'UmbraUpdaterApp.js'),
+    path.join(packagedAppDir, 'updater', 'UmbraUpdaterApp.js'),
+  );
 
   for (const file of ['Credits.md', 'LICENSE', 'NOTICE']) {
     copyTree(path.join(root, file), path.join(publishRoot, file));
@@ -642,6 +678,7 @@ function publish() {
 
   writeDataForgeModelInstaller();
   writeUmbraUiModelInstaller();
+  writeUmbraUpdaterLauncher();
   writePortableMarker();
   verifyPublish();
   if (isCleanRelease) verifyCleanPublishedUser();

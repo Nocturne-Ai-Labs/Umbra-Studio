@@ -142,8 +142,9 @@ bun run dev:fullstack
 
 Umbra serves the application at `http://127.0.0.1:8212`. The managed defaults
 also use `127.0.0.1:8188` for ComfyUI, `127.0.0.1:8313` for the Gallery bridge,
-and `127.0.0.1:8675` for AI Toolkit. These ports must be available or explicitly
-reconfigured.
+`127.0.0.1:8675` for AI Toolkit, and fixed local port `127.0.0.1:8214` while
+the standalone updater is open. These ports must be available or explicitly
+reconfigured where the corresponding tool supports it.
 
 ## Managed Tools and Upstream Links
 

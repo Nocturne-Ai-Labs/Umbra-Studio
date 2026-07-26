@@ -9,6 +9,11 @@ import {
   loadUmbraUiAgentInstructions,
   type UmbraUiAgentInstruction,
 } from '@/lib/umbraUiAgent';
+import {
+  applyUmbraPromptWeightToTextarea,
+  isUmbraPromptWeightShortcut,
+  isUmbraQueueShortcut,
+} from '@/lib/umbraUiPromptShortcuts';
 
 interface UmbraInlineAgentPromptProps {
   mediaType: 'image' | 'video';
@@ -17,6 +22,7 @@ interface UmbraInlineAgentPromptProps {
   onEnabledChange: (enabled: boolean) => void;
   agentPrompt: string;
   onAgentPromptChange: (prompt: string) => void;
+  onSubmit?: () => void;
   context?: Record<string, unknown>;
   accent?: 'cyan' | 'fuchsia';
 }
@@ -30,6 +36,7 @@ export function UmbraInlineAgentPrompt({
   onEnabledChange,
   agentPrompt,
   onAgentPromptChange,
+  onSubmit,
   context,
   accent = 'cyan',
 }: UmbraInlineAgentPromptProps) {
@@ -95,6 +102,28 @@ export function UmbraInlineAgentPrompt({
   const activeButtonClasses = accent === 'fuchsia'
     ? 'border-fuchsia-300/35 bg-fuchsia-500/[0.12] text-fuchsia-100'
     : 'border-cyan-300/35 bg-cyan-500/[0.12] text-cyan-100';
+  const handlePromptKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isUmbraPromptWeightShortcut(event)) {
+      event.preventDefault();
+      const textarea = event.currentTarget;
+      const weighted = applyUmbraPromptWeightToTextarea(
+        textarea.value,
+        textarea.selectionStart,
+        textarea.selectionEnd,
+        event.key === 'ArrowUp' ? 0.1 : -0.1,
+      );
+      onAgentPromptChange(weighted.value);
+      requestAnimationFrame(() => {
+        textarea.focus({ preventScroll: true });
+        textarea.setSelectionRange(weighted.selectionStart, weighted.selectionEnd);
+      });
+      return;
+    }
+    if (onSubmit && isUmbraQueueShortcut(event)) {
+      event.preventDefault();
+      onSubmit();
+    }
+  };
 
   return (
     <div className={cn('rounded-md border px-2.5 py-2', enabled ? accentClasses : 'border-white/10 bg-white/[0.02]')}>
@@ -156,6 +185,7 @@ export function UmbraInlineAgentPrompt({
             <textarea
               value={agentPrompt}
               onChange={(event) => onAgentPromptChange(event.target.value)}
+              onKeyDown={handlePromptKeyDown}
               maxLength={40_000}
               placeholder="Agent output appears here. You can edit it before generation."
               className={`${inputClass} min-h-28 resize-y leading-relaxed`}

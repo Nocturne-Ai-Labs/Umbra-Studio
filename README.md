@@ -41,11 +41,13 @@ include a first-time setup wizard that can migrate an older `User/` and
 
 After installation, the version number at the bottom-left of Umbra is also the
 updater button. `(+x)` reports the number of newer compatible GitHub releases.
-The updater shows each build and its changelog, downloads the complete portable
-package, shuts down Umbra and its managed tools, preserves `User/` and `Tools/`,
-updates Umbra Nodes when needed, and restarts Umbra automatically. It keeps the
-same application root and port; it does not use fallback servers or alternate
-ports.
+The button hands control to a standalone updater page on local port `8214`
+before Umbra shuts down. That external service shows builds and changelogs,
+downloads the complete portable package, closes Umbra and its managed tools,
+preserves `User/` and `Tools/`, updates Umbra Nodes when needed, and restarts
+Umbra automatically. The updater can also be opened directly with
+`UmbraUpdater.bat` on Windows or `umbra-updater.sh` on Linux. Umbra itself keeps
+its normal application root and fixed port.
 
 Quick summary:
 

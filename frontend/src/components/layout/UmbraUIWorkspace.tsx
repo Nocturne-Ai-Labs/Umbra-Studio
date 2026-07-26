@@ -55,6 +55,7 @@ import { UmbraPositivePromptEditor } from '@/components/umbra-ui/UmbraPositivePr
 import { UmbraAgentPromptPanel } from '@/components/umbra-ui/UmbraAgentPromptPanel';
 import { UmbraInlineAgentPrompt } from '@/components/umbra-ui/UmbraInlineAgentPrompt';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
+import { UmbraImageResolutionControls } from '@/components/umbra-ui/UmbraImageResolutionControls';
 import { UmbraMobileWorkspaceSheet } from '@/components/umbra-ui/UmbraMobileWorkspaceSheet';
 import {
   UmbraQueuePlacementControls,
@@ -68,6 +69,7 @@ import {
 import { stageUmbraUiUpscaleHandoff } from '@/lib/umbraUiUpscale';
 import { stageUmbraUiInpaintHandoff } from '@/lib/umbraUiInpaint';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
+import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
 import {
   resolveUmbraUiInpaintControlAvailability,
   resolveUmbraUiInpaintReferenceAvailability,
@@ -95,6 +97,12 @@ import {
   type UmbraUiPromptSegment,
 } from '@/lib/umbraUiPromptSegments';
 import {
+  mergeUmbraUiPromptHistories,
+  normalizeUmbraUiPromptHistory,
+  recordUmbraUiPromptHistory,
+  type UmbraUiPromptHistoryEntry,
+} from '@/lib/umbraUiPromptHistory';
+import {
   clearPendingUmbraUiPowerPrompterHandoff,
   normalizeUmbraUiPowerPrompterHandoff,
   takePendingUmbraUiPowerPrompterHandoff,
@@ -113,6 +121,16 @@ import {
   normalizeUmbraUiSeedMode,
   resolveUmbraUiQueueSeed,
 } from '@/lib/umbraUiSeed';
+import {
+  inferUmbraImageAspectRatio,
+  inferUmbraImageBaseResolution,
+  type UmbraImageAspectPresetId,
+} from '@/lib/umbraUiImageResolution';
+import {
+  applyUmbraPromptWeightToTextarea,
+  isUmbraPromptWeightShortcut,
+  isUmbraQueueShortcut,
+} from '@/lib/umbraUiPromptShortcuts';
 import {
   filterUmbraUiDetailerStages,
   matchUmbraUiResourceCatalog,
@@ -149,6 +167,9 @@ interface UmbraUiDeviceResume {
   cfg?: string;
   width?: string;
   height?: string;
+  imageAspectRatio?: UmbraImageAspectPresetId;
+  imageBaseResolution?: number;
+  batchSize?: number;
   img2imgSource?: UmbraImg2ImgSourceValue;
   img2imgDenoise?: number;
   replaceImg2ImgSourceOnComplete?: boolean;
@@ -385,6 +406,11 @@ export function UmbraUIWorkspace() {
       : [createUmbraUiPromptSegment()]
   ));
   const [activePromptSegmentId, setActivePromptSegmentId] = React.useState(initialDeviceResume?.activePromptSegmentId || '');
+  const [promptHistory, setPromptHistory] = React.useState<UmbraUiPromptHistoryEntry[]>([]);
+  const promptHistoryLoadedRef = React.useRef(false);
+  const promptHistoryDirtyRef = React.useRef(false);
+  const promptHistoryRevisionRef = React.useRef(0);
+  const promptHistoryWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const prompt = React.useMemo(() => compileUmbraUiPromptSegments(promptSegments), [promptSegments]);
   const [imageAgentModeEnabled, setImageAgentModeEnabled] = React.useState(initialDeviceResume?.imageAgentModeEnabled === true);
   const [imageAgentPrompt, setImageAgentPrompt] = React.useState(initialDeviceResume?.imageAgentPrompt || '');
@@ -424,6 +450,17 @@ export function UmbraUIWorkspace() {
   const [cfg, setCfg] = React.useState(initialDeviceResume?.cfg || '4');
   const [width, setWidth] = React.useState(initialDeviceResume?.width || '896');
   const [height, setHeight] = React.useState(initialDeviceResume?.height || '1152');
+  const [imageAspectRatio, setImageAspectRatio] = React.useState<UmbraImageAspectPresetId>(() => (
+    initialDeviceResume?.imageAspectRatio
+      || inferUmbraImageAspectRatio(Number(initialDeviceResume?.width || 896), Number(initialDeviceResume?.height || 1152))
+  ));
+  const [imageBaseResolution, setImageBaseResolution] = React.useState(
+    initialDeviceResume?.imageBaseResolution
+      || inferUmbraImageBaseResolution(Number(initialDeviceResume?.width || 896), Number(initialDeviceResume?.height || 1152)),
+  );
+  const [batchSize, setBatchSize] = React.useState(
+    Math.max(1, Math.min(64, Math.round(initialDeviceResume?.batchSize || 1))),
+  );
   const [img2imgSource, setImg2imgSource] = React.useState<UmbraImg2ImgSourceValue>({
     path: '',
     originalPath: '',
@@ -482,6 +519,14 @@ export function UmbraUIWorkspace() {
   const img2imgSourceReplacementRequestsRef = React.useRef(new Map<string, string>());
   const appliedImagePipelineDefaultsRef = React.useRef('');
 
+  const syncImageDimensions = React.useCallback((nextWidth: number, nextHeight: number) => {
+    if (!Number.isFinite(nextWidth) || !Number.isFinite(nextHeight) || nextWidth <= 0 || nextHeight <= 0) return;
+    setWidth(String(Math.round(nextWidth)));
+    setHeight(String(Math.round(nextHeight)));
+    setImageAspectRatio(inferUmbraImageAspectRatio(nextWidth, nextHeight));
+    setImageBaseResolution(inferUmbraImageBaseResolution(nextWidth, nextHeight));
+  }, []);
+
   const clearStoredMediaHandoff = React.useCallback((handoff: UmbraUiMediaHandoff) => {
     const target = window as typeof window & { __umbraPendingUmbraUiMediaHandoff?: unknown };
     const pending = normalizeUmbraUiMediaHandoff(target.__umbraPendingUmbraUiMediaHandoff);
@@ -501,6 +546,38 @@ export function UmbraUIWorkspace() {
     });
     try { window.localStorage.setItem(UMBRA_UI_ACTIVE_MODE_STORAGE_KEY, activeMode); } catch { /* best effort */ }
   }, [activeMode]);
+
+  React.useEffect(() => {
+    let canceled = false;
+    void readUserConfig<unknown>('umbra-ui-prompt-history', [])
+      .then((storedHistory) => {
+        if (canceled) return;
+        setPromptHistory((current) => mergeUmbraUiPromptHistories(
+          normalizeUmbraUiPromptHistory(storedHistory),
+          current,
+        ));
+        promptHistoryLoadedRef.current = true;
+      });
+    return () => {
+      canceled = true;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!promptHistoryLoadedRef.current || !promptHistoryDirtyRef.current) return;
+    const revision = promptHistoryRevisionRef.current;
+    promptHistoryWriteQueueRef.current = promptHistoryWriteQueueRef.current
+      .catch(() => undefined)
+      .then(() => writeUserConfig('umbra-ui-prompt-history', promptHistory))
+      .then(() => {
+        if (promptHistoryRevisionRef.current === revision) {
+          promptHistoryDirtyRef.current = false;
+        }
+      })
+      .catch((error) => {
+        console.warn('[Umbra UI] Failed to persist prompt history:', error);
+      });
+  }, [promptHistory]);
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -524,6 +601,9 @@ export function UmbraUIWorkspace() {
         cfg,
         width,
         height,
+        imageAspectRatio,
+        imageBaseResolution,
+        batchSize,
         img2imgSource,
         img2imgDenoise,
         replaceImg2ImgSourceOnComplete,
@@ -548,11 +628,14 @@ export function UmbraUIWorkspace() {
   }, [
     activeMode,
     activePromptSegmentId,
+    batchSize,
     cfg,
     checkpointName,
     clipSkip,
     detailerPipeline,
     height,
+    imageAspectRatio,
+    imageBaseResolution,
     hiresCfg,
     hiresDenoise,
     hiresEnabled,
@@ -830,13 +913,18 @@ export function UmbraUIWorkspace() {
     if (typeof guidanceDefault === 'number' && Number.isFinite(guidanceDefault)) setCfg(String(guidanceDefault));
     if (samplerDefault) setSamplerName(samplerDefault);
     if (schedulerDefault) setScheduler(schedulerDefault);
-    if (typeof widthDefault === 'number' && Number.isFinite(widthDefault)) setWidth(String(widthDefault));
-    if (typeof heightDefault === 'number' && Number.isFinite(heightDefault)) setHeight(String(heightDefault));
+    if (typeof widthDefault === 'number' && Number.isFinite(widthDefault)
+      && typeof heightDefault === 'number' && Number.isFinite(heightDefault)) {
+      syncImageDimensions(widthDefault, heightDefault);
+    } else {
+      if (typeof widthDefault === 'number' && Number.isFinite(widthDefault)) setWidth(String(widthDefault));
+      if (typeof heightDefault === 'number' && Number.isFinite(heightDefault)) setHeight(String(heightDefault));
+    }
     if (typeof clipSkipDefault === 'number' && Number.isFinite(clipSkipDefault)) setClipSkip(String(clipSkipDefault));
     if (activeMode === 'img2img' && typeof denoiseDefault === 'number' && Number.isFinite(denoiseDefault)) {
       setImg2imgDenoise(Math.max(0.01, Math.min(1, denoiseDefault)));
     }
-  }, [activeMode, inpaintWorkspaceActive, modelCatalog, modelFamily, modelType, selectedFamilyPipelines, selectedInpaintFamilyPipelines]);
+  }, [activeMode, inpaintWorkspaceActive, modelCatalog, modelFamily, modelType, selectedFamilyPipelines, selectedInpaintFamilyPipelines, syncImageDimensions]);
 
   React.useEffect(() => {
     if (!inpaintWorkspaceActive || inpaintModelFamilies.length <= 0) return;
@@ -999,9 +1087,17 @@ export function UmbraUIWorkspace() {
     const inheritedClipSkip = readNumber('clipSkip') || readNumber('clip_skip');
     if (inheritedClipSkip) setClipSkip(inheritedClipSkip);
     const inheritedWidth = readNumber('width');
-    if (inheritedWidth) setWidth(inheritedWidth);
     const inheritedHeight = readNumber('height');
-    if (inheritedHeight) setHeight(inheritedHeight);
+    if (inheritedWidth && inheritedHeight) {
+      syncImageDimensions(Number(inheritedWidth), Number(inheritedHeight));
+    } else {
+      if (inheritedWidth) setWidth(inheritedWidth);
+      if (inheritedHeight) setHeight(inheritedHeight);
+    }
+    const inheritedBatchSize = Number(generation.batchSize);
+    if (replace || Number.isFinite(inheritedBatchSize)) {
+      setBatchSize(Math.max(1, Math.min(64, Math.round(inheritedBatchSize) || 1)));
+    }
     const inheritedSampler = readString('samplerName');
     if (inheritedSampler) setSamplerName(inheritedSampler);
     const inheritedScheduler = readString('scheduler');
@@ -1051,7 +1147,7 @@ export function UmbraUIWorkspace() {
       const denoise = Number(img2img.denoise);
       if (Number.isFinite(denoise)) setImg2imgDenoise(Math.max(0.01, Math.min(1, denoise)));
     }
-  }, []);
+  }, [syncImageDimensions]);
 
   React.useEffect(() => {
     if (!inheritedGeneration || inheritedControlsAppliedRef.current) return;
@@ -1144,6 +1240,43 @@ export function UmbraUIWorkspace() {
   const addPromptToken = React.useCallback((token: string) => {
     setPromptSegments((current) => appendUmbraUiPromptToken(current, activePromptSegmentId, token));
   }, [activePromptSegmentId]);
+
+  const rememberCurrentPrompt = React.useCallback(() => {
+    if (!prompt) {
+      showToast('Enter a positive prompt before saving it to history.', 'error');
+      return;
+    }
+    promptHistoryDirtyRef.current = true;
+    promptHistoryRevisionRef.current += 1;
+    setPromptHistory((current) => recordUmbraUiPromptHistory(
+      current,
+      promptSegments,
+      negativePrompt,
+    ));
+    showToast('Prompt saved to history.', 'success');
+  }, [negativePrompt, prompt, promptSegments, showToast]);
+
+  const restorePromptHistoryEntry = React.useCallback((entry: UmbraUiPromptHistoryEntry) => {
+    const restoredSegments = entry.promptSegments.map((segment) => ({ ...segment }));
+    if (restoredSegments.length <= 0) return;
+    setPromptSegments(restoredSegments);
+    setActivePromptSegmentId(restoredSegments[0].id);
+    setNegativePrompt(entry.negativePrompt);
+    showToast(`Restored ${restoredSegments.length} prompt field${restoredSegments.length === 1 ? '' : 's'}.`, 'success');
+  }, [showToast]);
+
+  const removePromptHistoryEntry = React.useCallback((entryId: string) => {
+    promptHistoryDirtyRef.current = true;
+    promptHistoryRevisionRef.current += 1;
+    setPromptHistory((current) => current.filter((entry) => entry.id !== entryId));
+  }, []);
+
+  const clearPromptHistory = React.useCallback(() => {
+    promptHistoryDirtyRef.current = true;
+    promptHistoryRevisionRef.current += 1;
+    setPromptHistory([]);
+    showToast('Prompt history cleared.', 'success');
+  }, [showToast]);
 
   const applyAgentDraft = React.useCallback((draft: UmbraUiAgentDraft) => {
     if (draft.mediaType === 'video') {
@@ -1319,6 +1452,7 @@ export function UmbraUIWorkspace() {
         height: imageCapabilities.resolution.support === 'adjustable'
           ? Number(height)
           : imageCapabilities.resolution.defaultHeight || Number(height),
+        batchSize,
         outputMode: activeImageFeature,
         sourceImagePath: img2imgSource.path,
         sourceImageName: img2imgSource.name,
@@ -1352,13 +1486,20 @@ export function UmbraUIWorkspace() {
         loras: imageCapabilities.loras.support === 'adjustable' ? activeLoras : [],
         queuePlacement: effectivePlacement,
       });
+      promptHistoryDirtyRef.current = true;
+      promptHistoryRevisionRef.current += 1;
+      setPromptHistory((current) => recordUmbraUiPromptHistory(
+        current,
+        promptSegments,
+        negativePrompt,
+      ));
       if (activeImageFeature === 'img2img' && replaceImg2ImgSourceOnComplete && requestId) {
         const originalPath = String(img2imgSource.originalPath || img2imgSource.path || '').trim();
         if (!originalPath) throw new Error('Umbra could not identify the original Gallery image to replace.');
         img2imgSourceReplacementRequestsRef.current.set(requestId, originalPath);
       }
       if (seedIsAdjustable) {
-        setSeed(String(advanceUmbraUiSeed(queuedSeed, seedMode, seedIncrement)));
+        setSeed(String(advanceUmbraUiSeed(queuedSeed, seedMode, seedIncrement, batchSize)));
       }
       const jobLabel = activeImageFeature === 'img2img' ? 'IMG2IMG job' : 'Image';
       const placementMessage = effectivePlacement === 'next'
@@ -1376,6 +1517,7 @@ export function UmbraUIWorkspace() {
     }
   }, [
     activeImageFeature,
+    batchSize,
     cfg,
     checkpointName,
     clipSkip,
@@ -1401,6 +1543,7 @@ export function UmbraUIWorkspace() {
     modelType,
     negativePrompt,
     outputUpscale,
+    promptSegments,
     queueImage,
     queueSummary.powerPrompterActive,
     replaceImg2ImgSourceOnComplete,
@@ -1415,6 +1558,31 @@ export function UmbraUIWorkspace() {
     workflowImagePrompt,
     workflowResourceValues,
   ]);
+
+  const handleImagePromptKeyDown = React.useCallback((
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
+    onValueChange: (value: string) => void,
+  ) => {
+    if (isUmbraPromptWeightShortcut(event.nativeEvent)) {
+      const textarea = event.currentTarget;
+      const weighted = applyUmbraPromptWeightToTextarea(
+        textarea,
+        event.key === 'ArrowUp' ? 0.1 : -0.1,
+      );
+      if (!weighted) return;
+      event.preventDefault();
+      onValueChange(weighted.nextValue);
+      window.requestAnimationFrame(() => {
+        textarea.focus({ preventScroll: true });
+        textarea.setSelectionRange(weighted.selectionStart, weighted.selectionEnd);
+      });
+      return;
+    }
+    if (isUmbraQueueShortcut(event.nativeEvent)) {
+      event.preventDefault();
+      void handleQueueImage();
+    }
+  }, [handleQueueImage]);
 
   React.useEffect(() => {
     if (!latestSavedImage?.requestId) return;
@@ -2010,8 +2178,10 @@ export function UmbraUIWorkspace() {
                 onReplaceSourceOnCompleteChange={setReplaceImg2ImgSourceOnComplete}
                 onUseSourceSize={(sourceWidth, sourceHeight) => {
                   if (sourceWidth <= 0 || sourceHeight <= 0) return;
-                  setWidth(String(Math.max(64, Math.round(sourceWidth / 8) * 8)));
-                  setHeight(String(Math.max(64, Math.round(sourceHeight / 8) * 8)));
+                  syncImageDimensions(
+                    Math.max(64, Math.round(sourceWidth / 8) * 8),
+                    Math.max(64, Math.round(sourceHeight / 8) * 8),
+                  );
                 }}
                 showToast={showToast}
               />
@@ -2061,6 +2231,12 @@ export function UmbraUIWorkspace() {
               onChange={setPromptSegments}
               onActiveSegmentChange={setActivePromptSegmentId}
               heading={imageAgentModeEnabled ? 'Prompt Request' : 'Positive Prompt'}
+              history={promptHistory}
+              onRememberCurrent={rememberCurrentPrompt}
+              onRestoreHistory={restorePromptHistoryEntry}
+              onRemoveHistory={removePromptHistoryEntry}
+              onClearHistory={clearPromptHistory}
+              onSubmit={() => { void handleQueueImage(); }}
             />
 
             <UmbraInlineAgentPrompt
@@ -2070,6 +2246,7 @@ export function UmbraUIWorkspace() {
               onEnabledChange={setImageAgentModeEnabled}
               agentPrompt={imageAgentPrompt}
               onAgentPromptChange={setImageAgentPrompt}
+              onSubmit={() => { void handleQueueImage(); }}
               context={{
                 modelFamily,
                 modelType,
@@ -2087,6 +2264,7 @@ export function UmbraUIWorkspace() {
                 <textarea
                   value={negativePrompt}
                   onChange={(event) => setNegativePrompt(event.target.value)}
+                  onKeyDown={(event) => handleImagePromptKeyDown(event, setNegativePrompt)}
                   placeholder="Negative prompt"
                   className={`${inputClass} min-h-20 resize-y leading-relaxed`}
                 />
@@ -2122,18 +2300,28 @@ export function UmbraUIWorkspace() {
                 </div>
               ) : null}
 
-            {imageCapabilities.resolution.support === 'adjustable' ? (
-              <div className="grid grid-cols-2 gap-2">
-                <label className="space-y-1.5">
-                  <span className={labelClass}>Width</span>
-                  <input value={width} onChange={(event) => setWidth(event.target.value)} inputMode="numeric" className={inputClass} />
-                </label>
-                <label className="space-y-1.5">
-                  <span className={labelClass}>Height</span>
-                  <input value={height} onChange={(event) => setHeight(event.target.value)} inputMode="numeric" className={inputClass} />
-                </label>
-              </div>
-            ) : null}
+            <UmbraImageResolutionControls
+              aspectRatio={imageAspectRatio}
+              baseResolution={imageBaseResolution}
+              width={imageCapabilities.resolution.support === 'adjustable'
+                ? width
+                : String(imageCapabilities.resolution.defaultWidth || width)}
+              height={imageCapabilities.resolution.support === 'adjustable'
+                ? height
+                : String(imageCapabilities.resolution.defaultHeight || height)}
+              batchSize={batchSize}
+              resolution={imageCapabilities.resolution}
+              onAspectRatioChange={setImageAspectRatio}
+              onBaseResolutionChange={setImageBaseResolution}
+              onBatchSizeChange={setBatchSize}
+              onDimensionsChange={(nextWidth, nextHeight, manual) => {
+                setWidth(nextWidth);
+                setHeight(nextHeight);
+                if (!manual) return;
+                setImageAspectRatio('custom');
+                setImageBaseResolution(inferUmbraImageBaseResolution(Number(nextWidth), Number(nextHeight)));
+              }}
+            />
 
             {imageCapabilities.sampler.support === 'adjustable' || imageCapabilities.scheduler.support === 'adjustable' ? (
               <div className={imageCapabilities.sampler.support === 'adjustable' && imageCapabilities.scheduler.support === 'adjustable'
@@ -2287,35 +2475,38 @@ export function UmbraUIWorkspace() {
                   <div className="text-[10px] font-black uppercase tracking-[0.16em]">Waiting for output</div>
                 </div>
               )}
+            </div>
+          </div>
+          <div className="flex min-h-11 items-center gap-3 border-t border-white/10 bg-black/20 px-3">
+            <div data-umbra-ui-preview-status="" className="min-w-0 flex-1 py-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <Activity size={12} className={queueSummary.running > 0 ? 'shrink-0 text-cyan-300' : 'shrink-0 text-zinc-600'} />
+                <span className="shrink-0 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-400">
+                  {queueSummary.paused
+                    ? 'Queue paused'
+                    : queueSummary.running > 0
+                      ? `Generating ${queueSummary.activePosition}/${queueSummary.activeTotal}`
+                      : queueSummary.pending > 0
+                        ? `${queueSummary.pending} queued`
+                        : 'Idle'}
+                </span>
+                {queueSummary.activePrompt ? (
+                  <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-zinc-500">{queueSummary.activePrompt}</span>
+                ) : null}
+              </div>
               {showingLivePreview && generationPreview && generationPreview.maxStep > 0 ? (
-                <div className="absolute inset-x-3 bottom-3 border border-white/10 bg-black/80 px-2.5 py-2 backdrop-blur-sm">
-                  <div className="mb-1 flex items-center justify-between font-mono text-[9px] text-zinc-300">
-                    <span>Sampling</span>
-                    <span>{generationPreview.step}/{generationPreview.maxStep}</span>
-                  </div>
-                  <div className="h-1 overflow-hidden bg-white/10">
+                <div className="mt-1.5 flex max-w-xl items-center gap-2 pl-5">
+                  <div className="h-1 min-w-16 flex-1 overflow-hidden bg-white/10">
                     <div className="h-full bg-cyan-300 transition-[width] duration-150" style={{ width: `${previewProgress * 100}%` }} />
                   </div>
+                  <span className="shrink-0 font-mono text-[9px] text-cyan-100/75">
+                    {generationPreview.step}/{generationPreview.maxStep}
+                  </span>
                 </div>
               ) : null}
             </div>
-          </div>
-          <div className="flex min-h-11 items-center gap-2 border-t border-white/10 bg-black/20 px-3">
-            <Activity size={12} className={queueSummary.running > 0 ? 'text-cyan-300' : 'text-zinc-600'} />
-            <span className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-400">
-              {queueSummary.paused
-                ? 'Queue paused'
-                : queueSummary.running > 0
-                  ? `Generating ${queueSummary.activePosition}/${queueSummary.activeTotal}`
-                  : queueSummary.pending > 0
-                    ? `${queueSummary.pending} queued`
-                    : 'Idle'}
-            </span>
-            {queueSummary.activePrompt ? (
-              <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-zinc-500">{queueSummary.activePrompt}</span>
-            ) : null}
             {activeMode === 'image' || activeMode === 'img2img' ? (
-              <div className="ml-auto flex shrink-0 items-center gap-1.5">
+              <div data-umbra-ui-preview-actions="" className="flex shrink-0 items-center gap-1.5">
                 <button
                   type="button"
                   onClick={sendLatestToImg2Img}

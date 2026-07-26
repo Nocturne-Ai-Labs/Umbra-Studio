@@ -61,6 +61,7 @@ export interface UmbraUpdateWorkerRequest {
   targetTag: string;
   packageName: string;
   createdAt: string;
+  keepWorkspaceAlive?: boolean;
 }
 
 export function normalizeUmbraVersion(value: unknown): string {

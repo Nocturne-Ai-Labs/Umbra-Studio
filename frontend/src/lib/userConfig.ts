@@ -10,6 +10,7 @@ export type UserConfigKey =
   | 'powerprompter-thumbnail-overrides'
   | 'local-server-apps'
   | 'umbra-ui-agent-instructions'
+  | 'umbra-ui-prompt-history'
   | 'model-manager-browser'
   | 'board-preferences'
   | 'remote-ui-session';

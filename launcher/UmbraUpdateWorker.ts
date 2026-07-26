@@ -204,13 +204,19 @@ function verifyPayload(payloadRoot: string, request: UmbraUpdateWorkerRequest) {
     join(payloadRoot, 'resources', 'app', 'package.json'),
     join(payloadRoot, 'resources', 'app', 'UmbraServer.js'),
     join(payloadRoot, 'resources', 'app', 'launcher', 'UmbraUpdateWorker.js'),
+    join(payloadRoot, 'resources', 'app', 'launcher', 'UmbraUpdaterBootstrap.js'),
+    join(payloadRoot, 'resources', 'app', 'updater', 'UmbraUpdaterApp.js'),
+    join(payloadRoot, 'resources', 'app', 'updater', 'index.html'),
     process.platform === 'win32'
       ? join(payloadRoot, 'UmbraStudio.exe')
       : join(payloadRoot, 'start-umbra.sh'),
+    process.platform === 'win32'
+      ? join(payloadRoot, 'UmbraUpdater.bat')
+      : join(payloadRoot, 'umbra-updater.sh'),
   ];
   const missing = required.filter((candidate) => !existsSync(candidate));
   if (missing.length > 0) {
-    throw new Error(`Release package is incomplete: ${missing.map(basename).join(', ')}`);
+    throw new Error(`Release package is incomplete: ${missing.map((candidate) => basename(candidate)).join(', ')}`);
   }
   const packageJson = JSON.parse(readFileSync(required[0], 'utf8')) as Record<string, unknown>;
   const packagedVersion = String(packageJson.version || '').trim().replace(/^v/i, '');
@@ -448,7 +454,7 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
       }
     }
     log(request, `Umbra Studio ${request.targetVersion} is healthy.`);
-    scheduleWorkspaceCleanup(request.workspaceRoot);
+    if (!request.keepWorkspaceAlive) scheduleWorkspaceCleanup(request.workspaceRoot);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (launchedPid > 0) await stopLaunchedProcessTree(launchedPid);

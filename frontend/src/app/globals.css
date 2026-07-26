@@ -1533,12 +1533,12 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-panel] > div:last-ch
   padding: 0.6rem !important;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-panel] > div:last-child > span:last-of-type {
-  width: calc(100% - 1.5rem);
-  flex: 1 1 auto;
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-status] {
+  width: 100%;
+  flex: 1 1 100%;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-panel] > div:last-child > div {
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-actions] {
   display: grid;
   width: 100%;
   margin-left: 0 !important;
@@ -1546,7 +1546,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-panel] > div:last-ch
   gap: 0.45rem;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-panel] > div:last-child > div button {
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-actions] button {
   min-width: 0;
   min-height: 2.75rem;
   justify-content: center;

@@ -122,6 +122,7 @@ export function UmbraDetailerPipelineControls({
   showOutputModelSelection = true,
   showOutputMaxDimension = true,
 }: UmbraDetailerPipelineControlsProps) {
+  const [pipelineExpanded, setPipelineExpanded] = React.useState(false);
   const [expandedStageId, setExpandedStageId] = React.useState<string | null>(null);
   const activeCount = stages.filter((stage) => stage.enabled).length;
   const detectorChoices = React.useMemo(() => Array.from(new Set([
@@ -156,6 +157,7 @@ export function UmbraDetailerPipelineControls({
       seedOffset: stages.length + 1,
     });
     onStagesChange([...stages, stage]);
+    setPipelineExpanded(true);
     setExpandedStageId(stage.id);
   }, [detectorChoices, onStagesChange, stages]);
 
@@ -177,11 +179,26 @@ export function UmbraDetailerPipelineControls({
     <section className="rounded-md border border-white/10 bg-white/[0.02] p-2.5">
       {showDetailer ? (
         <>
-      <div className="flex items-center gap-2">
+      <div className="flex min-h-8 items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setPipelineExpanded((current) => !current)}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center text-zinc-500 hover:text-zinc-100"
+          title={pipelineExpanded ? 'Collapse detailer pipeline' : 'Expand detailer pipeline'}
+          aria-expanded={pipelineExpanded}
+        >
+          {pipelineExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </button>
         <WandSparkles size={13} className="text-emerald-300" />
-        <span className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">Detailer Pipeline</span>
+        <button
+          type="button"
+          onClick={() => setPipelineExpanded((current) => !current)}
+          className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-200 hover:text-white"
+        >
+          Detailer Pipeline
+        </button>
         <span className="font-mono text-[10px] text-zinc-500">{activeCount}/{stages.length}</span>
-        {activeCount > 0 ? (
+        {pipelineExpanded && activeCount > 0 ? (
           <button
             type="button"
             onClick={() => onStagesChange(stages.map((stage) => ({ ...stage, enabled: false })))}
@@ -189,7 +206,7 @@ export function UmbraDetailerPipelineControls({
           >
             Disable all
           </button>
-        ) : stages.length > 0 ? (
+        ) : pipelineExpanded && stages.length > 0 ? (
           <button
             type="button"
             onClick={() => onStagesChange(stages.map((stage) => ({ ...stage, enabled: true })))}
@@ -198,14 +215,14 @@ export function UmbraDetailerPipelineControls({
             Enable all
           </button>
         ) : <span className="ml-auto" />}
-        {allowCustomStages ? (
+        {pipelineExpanded && allowCustomStages ? (
           <button type="button" onClick={addStage} className={iconButtonClass} title="Add detailer stage">
             <Plus size={12} />
           </button>
         ) : null}
       </div>
 
-      <div className="mt-2 space-y-1.5">
+      {pipelineExpanded ? <div className="mt-2 space-y-1.5">
         {stages.map((stage, index) => {
           const expanded = expandedStageId === stage.id;
           return (
@@ -406,7 +423,7 @@ export function UmbraDetailerPipelineControls({
             <Plus size={12} /> Add Detailer
           </button>
         ) : null}
-      </div>
+      </div> : null}
         </>
       ) : null}
 
