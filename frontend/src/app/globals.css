@@ -1279,6 +1279,14 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-body] {
   -webkit-overflow-scrolling: touch;
 }
 
+html[data-umbra-remote-mode="phone"] [data-umbra-ltx-storyboard] {
+  min-height: auto;
+  flex: 0 0 auto;
+  overflow: visible;
+  border-right: 0;
+  border-bottom: 1px solid rgba(103, 232, 249, 0.15);
+}
+
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-generation-panel],
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-video-controls],
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-controls] {

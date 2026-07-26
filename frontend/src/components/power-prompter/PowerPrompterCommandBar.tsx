@@ -571,7 +571,10 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
             Browser
             {rightPanelCollapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
           </button>
-          <div className="hidden" ref={promptSearchMenuRef}>
+          <div
+            className={prompterPanelMode === 'editor' ? 'relative shrink-0' : 'hidden'}
+            ref={promptSearchMenuRef}
+          >
             <button
               type="button"
               onClick={() => setPromptSearchMenuOpen((prev) => !prev)}

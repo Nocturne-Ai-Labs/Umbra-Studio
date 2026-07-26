@@ -6,7 +6,10 @@ export type ContextMenuItem =
   | {
       label: string;
       icon?: React.ReactNode;
-      action: () => void;
+      action?: () => void;
+      children?: ContextMenuItem[];
+      description?: string;
+      badge?: string | number;
       separator?: false;
       danger?: boolean;
       disabled?: boolean;
@@ -16,6 +19,9 @@ export type ContextMenuItem =
       label?: never;
       icon?: never;
       action?: never;
+      children?: never;
+      description?: never;
+      badge?: never;
       danger?: never;
       disabled?: never;
     };

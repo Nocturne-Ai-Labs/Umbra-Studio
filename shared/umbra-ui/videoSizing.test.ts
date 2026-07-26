@@ -87,9 +87,30 @@ describe('resolveUmbraVideoSizing', () => {
     expect(sizing.targetWidth).toBe(1920);
     expect(sizing.targetHeight).toBe(1080);
     expect(sizing.samplingWidth).toBe(480);
-    expect(sizing.samplingHeight).toBe(272);
+    expect(sizing.samplingHeight).toBe(256);
     expect(sizing.decodedWidth).toBe(960);
-    expect(sizing.decodedHeight).toBe(544);
+    expect(sizing.decodedHeight).toBe(512);
+  });
+
+  test('keeps a two-stage LTX target when its half-size height is not 32px aligned', () => {
+    expect(resolveUmbraVideoSizing({
+      width: 640,
+      height: 352,
+      family: 'ltx23',
+      ltxTwoStage: true,
+      upscaleMode: 'none',
+      upscaleScale: 2,
+    })).toEqual({
+      targetWidth: 640,
+      targetHeight: 352,
+      samplingWidth: 320,
+      samplingHeight: 192,
+      decodedWidth: 640,
+      decodedHeight: 384,
+      latentScale: 2,
+      postprocessScale: 1,
+      requiresFinalResize: true,
+    });
   });
 
   test('only performs an alignment correction when postprocessing is disabled', () => {

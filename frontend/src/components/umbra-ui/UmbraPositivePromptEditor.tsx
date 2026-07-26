@@ -10,9 +10,11 @@ import {
   History,
   ListPlus,
   Loader2,
+  Redo2,
   RotateCcw,
   Sparkles,
   Trash2,
+  Undo2,
   WandSparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -34,6 +36,13 @@ import {
   isUmbraPromptWeightShortcut,
   isUmbraQueueShortcut,
 } from '@/lib/umbraUiPromptShortcuts';
+import {
+  cloneUmbraUiPromptFieldHistory,
+  recordUmbraUiPromptFieldCheckpoint,
+  redoUmbraUiPromptField,
+  undoUmbraUiPromptField,
+  type UmbraUiPromptFieldHistory,
+} from '@/lib/umbraUiPromptFieldHistory';
 
 interface UmbraPositivePromptEditorProps {
   segments: UmbraUiPromptSegment[];
@@ -45,14 +54,19 @@ interface UmbraPositivePromptEditorProps {
   onRestoreHistory?: (entry: UmbraUiPromptHistoryEntry) => void;
   onRemoveHistory?: (entryId: string) => void;
   onClearHistory?: () => void;
-  accent?: 'cyan' | 'rose';
+  accent?: 'cyan' | 'rose' | 'fuchsia';
   heading?: string;
   onSubmit?: () => void;
   agentContext?: Record<string, unknown>;
   onAgentEnhancementApplied?: () => void;
+  mediaType?: 'image' | 'video';
 }
 
 const MAX_PROMPT_SEGMENTS = 24;
+
+function getPromptSegmentTextSignature(segments: UmbraUiPromptSegment[]): string {
+  return JSON.stringify(segments.map((segment) => [segment.id, segment.text]));
+}
 
 export function UmbraPositivePromptEditor({
   segments,
@@ -69,11 +83,17 @@ export function UmbraPositivePromptEditor({
   onSubmit,
   agentContext,
   onAgentEnhancementApplied,
+  mediaType = 'image',
 }: UmbraPositivePromptEditorProps) {
   const showToast = useStore((state) => state.showToast);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [enhancingFields, setEnhancingFields] = React.useState(false);
   const textareaRefs = React.useRef(new Map<string, HTMLTextAreaElement>());
+  const fieldHistoriesRef = React.useRef(new Map<string, UmbraUiPromptFieldHistory>());
+  const typingCheckpointIdsRef = React.useRef(new Set<string>());
+  const expectedInternalSignatureRef = React.useRef<string | null>(null);
+  const previousSegmentsRef = React.useRef(segments);
+  const [, forceHistoryRender] = React.useState(0);
   const segmentsRef = React.useRef(segments);
   segmentsRef.current = segments;
   const compiledPrompt = React.useMemo(() => compileUmbraUiPromptSegments(segments), [segments]);
@@ -83,58 +103,156 @@ export function UmbraPositivePromptEditor({
   );
   const activeClasses = accent === 'rose'
     ? 'border-rose-300/35 bg-rose-500/[0.045]'
-    : 'border-cyan-300/35 bg-cyan-500/[0.045]';
+    : accent === 'fuchsia'
+      ? 'border-fuchsia-300/35 bg-fuchsia-500/[0.045]'
+      : 'border-cyan-300/35 bg-cyan-500/[0.045]';
 
-  const updateSegment = React.useCallback((id: string, text: string) => {
-    onChange(segments.map((segment) => segment.id === id ? { ...segment, text } : segment));
-  }, [onChange, segments]);
+  const emitSegments = React.useCallback((next: UmbraUiPromptSegment[]) => {
+    expectedInternalSignatureRef.current = getPromptSegmentTextSignature(next);
+    previousSegmentsRef.current = next;
+    segmentsRef.current = next;
+    onChange(next);
+  }, [onChange]);
+
+  const recordFieldCheckpoint = React.useCallback((
+    id: string,
+    previousText: string,
+    inheritedHistory?: UmbraUiPromptFieldHistory,
+  ) => {
+    fieldHistoriesRef.current.set(
+      id,
+      recordUmbraUiPromptFieldCheckpoint(
+        inheritedHistory || fieldHistoriesRef.current.get(id),
+        previousText,
+      ),
+    );
+    forceHistoryRender((revision) => revision + 1);
+  }, []);
+
+  const updateSegment = React.useCallback((
+    id: string,
+    text: string,
+    mode: 'typing' | 'action' | 'silent' = 'typing',
+  ) => {
+    const currentSegments = segmentsRef.current;
+    const current = currentSegments.find((segment) => segment.id === id);
+    if (!current || current.text === text) return;
+    if (mode === 'action') {
+      recordFieldCheckpoint(id, current.text);
+      typingCheckpointIdsRef.current.delete(id);
+    } else if (mode === 'typing' && !typingCheckpointIdsRef.current.has(id)) {
+      recordFieldCheckpoint(id, current.text);
+      typingCheckpointIdsRef.current.add(id);
+    }
+    emitSegments(currentSegments.map((segment) => (
+      segment.id === id ? { ...segment, text } : segment
+    )));
+  }, [emitSegments, recordFieldCheckpoint]);
 
   const normalizeSegment = React.useCallback((id: string) => {
-    onChange(segments.map((segment) => segment.id === id
-      ? { ...segment, text: normalizeUmbraUiPromptSegmentText(segment.text) }
-      : segment));
-  }, [onChange, segments]);
+    typingCheckpointIdsRef.current.delete(id);
+    const current = segmentsRef.current.find((segment) => segment.id === id);
+    if (!current) return;
+    updateSegment(id, normalizeUmbraUiPromptSegmentText(current.text), 'silent');
+  }, [updateSegment]);
 
-  const addSegment = React.useCallback(() => {
-    if (segments.length >= MAX_PROMPT_SEGMENTS) return;
-    const nextSegment = createUmbraUiPromptSegment();
-    const activeIndex = Math.max(0, segments.findIndex((segment) => segment.id === activeSegmentId));
-    const insertAt = segments.length <= 0 ? 0 : activeIndex + 1;
-    const next = [...segments.slice(0, insertAt), nextSegment, ...segments.slice(insertAt)];
-    onChange(next);
-    onActiveSegmentChange(nextSegment.id);
-    window.requestAnimationFrame(() => textareaRefs.current.get(nextSegment.id)?.focus());
-  }, [activeSegmentId, onActiveSegmentChange, onChange, segments]);
+  const undoField = React.useCallback((id: string) => {
+    const current = segmentsRef.current.find((segment) => segment.id === id);
+    if (!current) return;
+    const result = undoUmbraUiPromptField(fieldHistoriesRef.current.get(id), current.text);
+    if (!result) return;
+    fieldHistoriesRef.current.set(id, result.history);
+    typingCheckpointIdsRef.current.delete(id);
+    forceHistoryRender((revision) => revision + 1);
+    updateSegment(id, result.text, 'silent');
+    window.requestAnimationFrame(() => textareaRefs.current.get(id)?.focus({ preventScroll: true }));
+  }, [updateSegment]);
 
-  const removeSegment = React.useCallback((id: string) => {
-    const index = segments.findIndex((segment) => segment.id === id);
-    if (index < 0) return;
-    if (segments.length <= 1) {
-      onChange([{ ...segments[0], text: '' }]);
+  const redoField = React.useCallback((id: string) => {
+    const current = segmentsRef.current.find((segment) => segment.id === id);
+    if (!current) return;
+    const result = redoUmbraUiPromptField(fieldHistoriesRef.current.get(id), current.text);
+    if (!result) return;
+    fieldHistoriesRef.current.set(id, result.history);
+    typingCheckpointIdsRef.current.delete(id);
+    forceHistoryRender((revision) => revision + 1);
+    updateSegment(id, result.text, 'silent');
+    window.requestAnimationFrame(() => textareaRefs.current.get(id)?.focus({ preventScroll: true }));
+  }, [updateSegment]);
+
+  React.useEffect(() => {
+    const signature = getPromptSegmentTextSignature(segments);
+    if (expectedInternalSignatureRef.current === signature) {
+      expectedInternalSignatureRef.current = null;
+      previousSegmentsRef.current = segments;
       return;
     }
-    const next = segments.filter((segment) => segment.id !== id);
-    onChange(next);
+
+    expectedInternalSignatureRef.current = null;
+    const previousSegments = previousSegmentsRef.current;
+    if (getPromptSegmentTextSignature(previousSegments) === signature) return;
+    const previousById = new Map(previousSegments.map((segment) => [segment.id, segment]));
+    let historyChanged = false;
+    segments.forEach((segment, index) => {
+      const previous = previousById.get(segment.id) || previousSegments[index];
+      if (!previous || previous.text === segment.text) return;
+      const inheritedHistory = previous.id === segment.id
+        ? fieldHistoriesRef.current.get(segment.id)
+        : cloneUmbraUiPromptFieldHistory(fieldHistoriesRef.current.get(previous.id));
+      fieldHistoriesRef.current.set(
+        segment.id,
+        recordUmbraUiPromptFieldCheckpoint(inheritedHistory, previous.text),
+      );
+      historyChanged = true;
+    });
+    typingCheckpointIdsRef.current.clear();
+    previousSegmentsRef.current = segments;
+    if (historyChanged) forceHistoryRender((revision) => revision + 1);
+  }, [segments]);
+
+  const addSegment = React.useCallback(() => {
+    const currentSegments = segmentsRef.current;
+    if (currentSegments.length >= MAX_PROMPT_SEGMENTS) return;
+    const nextSegment = createUmbraUiPromptSegment();
+    const activeIndex = Math.max(0, currentSegments.findIndex((segment) => segment.id === activeSegmentId));
+    const insertAt = currentSegments.length <= 0 ? 0 : activeIndex + 1;
+    const next = [...currentSegments.slice(0, insertAt), nextSegment, ...currentSegments.slice(insertAt)];
+    emitSegments(next);
+    onActiveSegmentChange(nextSegment.id);
+    window.requestAnimationFrame(() => textareaRefs.current.get(nextSegment.id)?.focus());
+  }, [activeSegmentId, emitSegments, onActiveSegmentChange]);
+
+  const removeSegment = React.useCallback((id: string) => {
+    const currentSegments = segmentsRef.current;
+    const index = currentSegments.findIndex((segment) => segment.id === id);
+    if (index < 0) return;
+    if (currentSegments.length <= 1) {
+      updateSegment(id, '', 'action');
+      return;
+    }
+    const next = currentSegments.filter((segment) => segment.id !== id);
+    emitSegments(next);
     if (activeSegmentId === id) {
       onActiveSegmentChange(next[Math.max(0, index - 1)]?.id || next[0]?.id || '');
     }
-  }, [activeSegmentId, onActiveSegmentChange, onChange, segments]);
+  }, [activeSegmentId, emitSegments, onActiveSegmentChange, updateSegment]);
 
   const moveSegment = React.useCallback((id: string, direction: -1 | 1) => {
-    const index = segments.findIndex((segment) => segment.id === id);
+    const currentSegments = segmentsRef.current;
+    const index = currentSegments.findIndex((segment) => segment.id === id);
     const targetIndex = index + direction;
-    if (index < 0 || targetIndex < 0 || targetIndex >= segments.length) return;
-    const next = [...segments];
+    if (index < 0 || targetIndex < 0 || targetIndex >= currentSegments.length) return;
+    const next = [...currentSegments];
     [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
-    onChange(next);
-  }, [onChange, segments]);
+    emitSegments(next);
+  }, [emitSegments]);
 
   const toggleAgentSegment = React.useCallback((id: string) => {
     if (enhancingFields) return;
-    onChange(segments.map((segment) => segment.id === id
+    emitSegments(segmentsRef.current.map((segment) => segment.id === id
       ? { ...segment, agentEnabled: segment.agentEnabled !== true }
       : segment));
-  }, [enhancingFields, onChange, segments]);
+  }, [emitSegments, enhancingFields]);
 
   const enhanceSelectedSegments = React.useCallback(async () => {
     if (enhancingFields) return;
@@ -155,7 +273,7 @@ export function UmbraPositivePromptEditor({
         const index = segments.findIndex((entry) => entry.id === segment.id);
         const fieldLabel = segment.label || (index === 0 ? 'Base' : `Segment ${index + 1}`);
         const result = await generateUmbraUiAgentPrompt({
-          mediaType: 'image',
+          mediaType,
           task: 'enhance-field',
           fieldLabel,
           prompt: segment.text,
@@ -179,7 +297,14 @@ export function UmbraPositivePromptEditor({
         enhancedTextById,
       );
       if (merged.applied > 0) {
-        onChange(merged.segments);
+        const currentById = new Map(segmentsRef.current.map((segment) => [segment.id, segment]));
+        merged.segments.forEach((segment) => {
+          const current = currentById.get(segment.id);
+          if (current && current.text !== segment.text) {
+            recordFieldCheckpoint(segment.id, current.text);
+          }
+        });
+        emitSegments(merged.segments);
         onAgentEnhancementApplied?.();
       }
       const skippedMessage = merged.skipped > 0
@@ -199,8 +324,10 @@ export function UmbraPositivePromptEditor({
   }, [
     agentContext,
     enhancingFields,
+    emitSegments,
     onAgentEnhancementApplied,
-    onChange,
+    recordFieldCheckpoint,
+    mediaType,
     segments,
     showToast,
   ]);
@@ -208,7 +335,7 @@ export function UmbraPositivePromptEditor({
   return (
     <section className="rounded-md border border-white/10 bg-white/[0.02]">
       <header className="flex min-h-10 flex-wrap items-center gap-2 px-2.5 py-1.5">
-        <Sparkles size={13} className={accent === 'rose' ? 'text-rose-300' : 'text-cyan-300'} />
+        <Sparkles size={13} className={accent === 'rose' ? 'text-rose-300' : accent === 'fuchsia' ? 'text-fuchsia-300' : 'text-cyan-300'} />
         <span className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">{heading}</span>
         <span className="rounded-sm border border-white/10 bg-black/25 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400">
           {segments.length} field{segments.length === 1 ? '' : 's'}
@@ -223,7 +350,9 @@ export function UmbraPositivePromptEditor({
               selectedAgentSegments.length > 0
                 ? accent === 'rose'
                   ? 'border-rose-300/30 bg-rose-500/[0.08] text-rose-100'
-                  : 'border-cyan-300/30 bg-cyan-500/[0.08] text-cyan-100'
+                  : accent === 'fuchsia'
+                    ? 'border-fuchsia-300/30 bg-fuchsia-500/[0.08] text-fuchsia-100'
+                    : 'border-cyan-300/30 bg-cyan-500/[0.08] text-cyan-100'
                 : 'border-white/10 text-zinc-700',
             )}
             title="Enhance only the prompt fields with an enabled agent icon"
@@ -323,6 +452,7 @@ export function UmbraPositivePromptEditor({
       <div className="space-y-2 border-t border-white/10 p-2.5">
         {segments.map((segment, index) => {
           const active = segment.id === activeSegmentId;
+          const fieldHistory = fieldHistoriesRef.current.get(segment.id);
           return (
             <article key={segment.id} className={cn('rounded-md border border-white/10 bg-black/25 p-2 transition-colors', active && activeClasses)}>
               <div className="mb-1.5 flex items-center gap-1.5">
@@ -337,6 +467,26 @@ export function UmbraPositivePromptEditor({
                 <div className="ml-auto flex items-center gap-1">
                   <button
                     type="button"
+                    onClick={() => undoField(segment.id)}
+                    disabled={!fieldHistory?.undo.length}
+                    aria-label="Undo the last change to this prompt field"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 transition-colors hover:border-cyan-300/25 hover:text-cyan-100 disabled:text-zinc-800"
+                    title="Undo the last change to this prompt field"
+                  >
+                    <Undo2 size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => redoField(segment.id)}
+                    disabled={!fieldHistory?.redo.length}
+                    aria-label="Redo the last change to this prompt field"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 transition-colors hover:border-cyan-300/25 hover:text-cyan-100 disabled:text-zinc-800"
+                    title="Redo the last change to this prompt field"
+                  >
+                    <Redo2 size={12} />
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => toggleAgentSegment(segment.id)}
                     disabled={enhancingFields}
                     aria-pressed={segment.agentEnabled === true}
@@ -345,7 +495,9 @@ export function UmbraPositivePromptEditor({
                       segment.agentEnabled === true
                         ? accent === 'rose'
                           ? 'border-rose-300/40 bg-rose-500/[0.12] text-rose-100'
-                          : 'border-cyan-300/40 bg-cyan-500/[0.12] text-cyan-100'
+                          : accent === 'fuchsia'
+                            ? 'border-fuchsia-300/40 bg-fuchsia-500/[0.12] text-fuchsia-100'
+                            : 'border-cyan-300/40 bg-cyan-500/[0.12] text-cyan-100'
                         : 'border-white/10 text-zinc-600 hover:text-zinc-300',
                     )}
                     title={segment.agentEnabled === true
@@ -398,7 +550,7 @@ export function UmbraPositivePromptEditor({
                     );
                     if (!weighted) return;
                     event.preventDefault();
-                    updateSegment(segment.id, weighted.nextValue);
+                    updateSegment(segment.id, weighted.nextValue, 'action');
                     window.requestAnimationFrame(() => {
                       const textarea = textareaRefs.current.get(segment.id);
                       if (!textarea) return;
@@ -416,7 +568,9 @@ export function UmbraPositivePromptEditor({
                 placeholder={index === 0 ? 'Main subject and composition' : 'Additional details, style, pose, or environment'}
                 className={cn(
                   'min-h-20 w-full resize-y rounded-sm border bg-black/35 px-2.5 py-2 text-xs leading-relaxed text-zinc-100 outline-none placeholder:text-zinc-600',
-                  accent === 'rose' ? 'focus:border-rose-300/45' : 'focus:border-cyan-300/45',
+                  accent === 'rose'
+                    ? 'focus:border-rose-300/45'
+                    : accent === 'fuchsia' ? 'focus:border-fuchsia-300/45' : 'focus:border-cyan-300/45',
                 )}
               />
             </article>

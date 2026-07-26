@@ -1,4 +1,9 @@
 import type { UmbraUiPipelineSelection } from '../../../shared/umbra-ui/pipelineTypes';
+import type { UmbraLtxStoryboardControls } from '../../../shared/umbra-ui/videoStoryboard';
+import type {
+  UmbraLtxExtendedControls,
+  UmbraLtxExtendedSequenceMetadata,
+} from '../../../shared/umbra-ui/videoExtension';
 
 export type PowerPrompterSourceType = 'tag' | 'character';
 export type PowerPrompterAutocompleteMode = 'tags' | 'characters' | 'mixed';
@@ -93,6 +98,8 @@ export interface PowerPrompterLtxVideoControls {
   imageStrength: number;
   imageCompression: number;
   keyframes: PowerPrompterLtxVideoKeyframe[];
+  storyboard: UmbraLtxStoryboardControls;
+  extended: UmbraLtxExtendedControls;
 }
 
 export interface PowerPrompterLtxVideoKeyframe {
@@ -226,6 +233,7 @@ export interface PowerPrompterGenerationControls {
   outputMode?: UmbraUiOutputMode;
   img2img?: PowerPrompterImg2ImgControls;
   video?: PowerPrompterVideoControls;
+  videoSequence?: UmbraLtxExtendedSequenceMetadata;
   hiresFix?: PowerPrompterHiresFixControls;
   detailerPipeline?: PowerPrompterDetailerStage[];
   outputUpscale?: PowerPrompterOutputUpscaleControls;

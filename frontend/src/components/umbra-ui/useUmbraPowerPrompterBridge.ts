@@ -34,6 +34,18 @@ import type {
   PowerPrompterVideoControls,
 } from '@/types/powerPrompter';
 import { resolveUmbraVideoTargetDimensions } from '../../../../shared/umbra-ui/videoSizing';
+import {
+  resolveUmbraLtxStoryboardTimeline,
+  resolveUmbraVideoFramesForDuration,
+} from '../../../../shared/umbra-ui/videoStoryboard';
+import {
+  normalizeUmbraLtxExtendedControls,
+  normalizeUmbraLtxExtendedSequenceMetadata,
+  resolveUmbraLtxExtendedTotalSeconds,
+  UMBRA_LTX_EXTENDED_MAX_CLIPS,
+  UMBRA_LTX_EXTENDED_MAX_TOTAL_SECONDS,
+  type UmbraLtxExtendedSequenceMetadata,
+} from '../../../../shared/umbra-ui/videoExtension';
 import { resolveUmbraUiQueueControlTargets } from '@/lib/umbraUiQueueControls';
 
 const RECONNECT_DELAY_MS = 1500;
@@ -164,6 +176,7 @@ export interface UmbraVideoModelCatalog {
   frameInterpolationModels: string[];
   upscaleModels: string[];
   rtxAvailable: boolean;
+  umbraDirectorAvailable: boolean;
   samplers: string[];
   schedulers: string[];
   loading: boolean;
@@ -236,6 +249,7 @@ export interface UmbraVideoReviewJob {
   apiWorkflowId: string;
   apiWorkflowName: string;
   generation: PowerPrompterGenerationControls;
+  sequence?: UmbraLtxExtendedSequenceMetadata;
   outputs: UmbraVideoReviewOutput[];
   createdAt: number;
   updatedAt: number;
@@ -353,6 +367,7 @@ const EMPTY_VIDEO_MODEL_CATALOG: UmbraVideoModelCatalog = {
   frameInterpolationModels: [],
   upscaleModels: [],
   rtxAvailable: false,
+  umbraDirectorAvailable: false,
   samplers: [],
   schedulers: [],
   loading: true,
@@ -460,6 +475,9 @@ function normalizeVideoReviewJob(value: unknown): UmbraVideoReviewJob | null {
     ? rawStatus
     : 'pending';
   const createdAt = toFiniteInteger(source.createdAt, Date.now(), 0, Number.MAX_SAFE_INTEGER);
+  const sequence = normalizeUmbraLtxExtendedSequenceMetadata(
+    source.sequence || generation.videoSequence,
+  );
   return {
     version: 1,
     id,
@@ -473,6 +491,7 @@ function normalizeVideoReviewJob(value: unknown): UmbraVideoReviewJob | null {
     apiWorkflowId: String(source.apiWorkflowId || '').trim(),
     apiWorkflowName: String(source.apiWorkflowName || '').trim(),
     generation,
+    ...(sequence ? { sequence } : {}),
     outputs: (Array.isArray(source.outputs) ? source.outputs : [])
       .map(normalizeVideoReviewOutput)
       .filter((entry): entry is UmbraVideoReviewOutput => !!entry),
@@ -615,6 +634,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   const [videoJobs, setVideoJobs] = React.useState<UmbraVideoReviewJob[]>([]);
   const [videoJobsLoading, setVideoJobsLoading] = React.useState(true);
   const [videoJobsError, setVideoJobsError] = React.useState('');
+  const videoJobsMutationRevisionRef = React.useRef(0);
   const [workflows, setWorkflows] = React.useState<ApiWorkflowItem[]>([]);
   const [inheritedGeneration, setInheritedGeneration] = React.useState<Record<string, unknown> | null>(null);
   const [modelCatalog, setModelCatalog] = React.useState<UmbraModelCatalog>(EMPTY_MODEL_CATALOG);
@@ -627,16 +647,48 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   const modelInfoCacheRef = React.useRef(new Map<string, PowerPrompterModelInfoPayload>());
 
   const refreshVideoJobs = React.useCallback(async () => {
+    const mutationRevision = videoJobsMutationRevisionRef.current;
     try {
       const jobs = await fetchVideoReviewJobs();
-      setVideoJobs(jobs);
-      setVideoJobsError('');
+      if (mutationRevision === videoJobsMutationRevisionRef.current) {
+        setVideoJobs(jobs);
+        setVideoJobsError('');
+      }
       return jobs;
     } catch (error) {
-      setVideoJobsError(error instanceof Error ? error.message : 'Failed to load video review queue.');
+      if (mutationRevision === videoJobsMutationRevisionRef.current) {
+        setVideoJobsError(error instanceof Error ? error.message : 'Failed to load video review queue.');
+      }
       return [];
     } finally {
+      if (mutationRevision === videoJobsMutationRevisionRef.current) {
+        setVideoJobsLoading(false);
+      }
+    }
+  }, []);
+
+  const clearVideoJobs = React.useCallback(async () => {
+    videoJobsMutationRevisionRef.current += 1;
+    try {
+      const response = await fetch('/api/umbra-ui/video-jobs/clear', {
+        method: 'POST',
+        cache: 'no-store',
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.success === false) {
+        throw new Error(String(payload?.error || 'Failed to clear the video review queue.'));
+      }
+      videoJobsMutationRevisionRef.current += 1;
+      setVideoJobs([]);
+      setVideoJobsError('');
       setVideoJobsLoading(false);
+      return Math.max(0, Number(payload?.removed) || 0);
+    } catch (error) {
+      videoJobsMutationRevisionRef.current += 1;
+      const message = error instanceof Error ? error.message : 'Failed to clear the video review queue.';
+      setVideoJobsError(message);
+      setVideoJobsLoading(false);
+      throw error;
     }
   }, []);
 
@@ -821,6 +873,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       fetchNodeRequiredInputs('FrameInterpolationModelLoader').catch(() => ({})),
       fetchNodeRequiredInputs('UpscaleModelLoader').catch(() => ({})),
       fetchNodeAvailable('RTXVideoSuperResolution').catch(() => false),
+      fetchNodeAvailable('UmbraLTXDirector').catch(() => false),
       fetchNodeRequiredInputs('KSamplerAdvanced'),
     ]).then(([
       unetInputs,
@@ -835,6 +888,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       frameInterpolationInputs,
       upscaleInputs,
       rtxAvailable,
+      umbraDirectorAvailable,
       samplerInputs,
     ]) => {
       if (canceled) return;
@@ -855,6 +909,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         frameInterpolationModels: readObjectInfoChoices(frameInterpolationInputs, 'model_name'),
         upscaleModels: readObjectInfoChoices(upscaleInputs, 'model_name'),
         rtxAvailable,
+        umbraDirectorAvailable,
         samplers: readObjectInfoChoices(samplerInputs, 'sampler_name'),
         schedulers: readObjectInfoChoices(samplerInputs, 'scheduler'),
         loading: false,
@@ -1565,8 +1620,16 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   }, [prepareImageQueueRequest, submitQueueRequest]);
 
   const queueVideo = React.useCallback(async (options: UmbraVideoQueueOptions) => {
-    const prompt = String(options.prompt || '').trim();
-    if (!prompt) throw new Error('Enter a video prompt before queueing.');
+    const requestedExtended = normalizeUmbraLtxExtendedControls(options.video.ltx.extended);
+    const extendedEnabled = options.video.family === 'ltx23'
+      && requestedExtended.enabled
+      && options.video.ltx.storyboard?.enabled !== true;
+    const prompt = extendedEnabled
+      ? String(requestedExtended.clips[0]?.prompt || '').trim()
+      : String(options.prompt || '').trim();
+    if (!prompt) throw new Error(extendedEnabled
+      ? 'Enter a prompt for every LTX Extended clip before queueing.'
+      : 'Enter a video prompt before queueing.');
     const video: PowerPrompterVideoControls = {
       ...options.video,
       postprocess: { ...options.video.postprocess },
@@ -1574,6 +1637,18 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       ltx: {
         ...options.video.ltx,
         keyframes: options.video.ltx.keyframes.map((keyframe) => ({ ...keyframe })),
+        storyboard: {
+          enabled: !extendedEnabled && options.video.ltx.storyboard?.enabled === true,
+          epsilon: options.video.ltx.storyboard?.epsilon ?? 0.001,
+          shots: Array.isArray(options.video.ltx.storyboard?.shots)
+            ? options.video.ltx.storyboard.shots.map((shot) => ({ ...shot }))
+            : [],
+        },
+        extended: {
+          ...requestedExtended,
+          enabled: extendedEnabled,
+          clips: requestedExtended.clips.map((clip) => ({ ...clip })),
+        },
       },
       sourceImagePath: String(options.video.sourceImagePath || '').trim(),
       sourceImageName: String(options.video.sourceImageName || '').trim(),
@@ -1586,7 +1661,12 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       sourceAudioPath: String(options.video.sourceAudioPath || '').trim(),
       sourceAudioName: String(options.video.sourceAudioName || '').trim(),
     };
-    if (video.mode !== 'text_to_video' && (!video.sourceWidth || !video.sourceHeight)) {
+    const extendedStartsFromImage = extendedEnabled
+      && !!(video.sourceImagePath || video.sourceImageName);
+    if (extendedEnabled) {
+      video.mode = extendedStartsFromImage ? 'image_to_video' : 'text_to_video';
+    }
+    if (!extendedEnabled && video.mode !== 'text_to_video' && (!video.sourceWidth || !video.sourceHeight)) {
       throw new Error('Umbra could not read the source media dimensions. Reload the source before queueing.');
     }
     const targetDimensions = resolveUmbraVideoTargetDimensions({
@@ -1597,6 +1677,32 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     });
     video.width = targetDimensions.targetWidth;
     video.height = targetDimensions.targetHeight;
+    if (video.family === 'ltx23' && video.ltx.extended.enabled) {
+      const totalDurationSeconds = resolveUmbraLtxExtendedTotalSeconds(video.ltx.extended);
+      if (video.ltx.extended.clips.length < 1 || video.ltx.extended.clips.length > UMBRA_LTX_EXTENDED_MAX_CLIPS) {
+        throw new Error(`LTX Extended requires between 1 and ${UMBRA_LTX_EXTENDED_MAX_CLIPS} clips.`);
+      }
+      if (totalDurationSeconds > UMBRA_LTX_EXTENDED_MAX_TOTAL_SECONDS) {
+        throw new Error(`LTX Extended sequences cannot exceed ${UMBRA_LTX_EXTENDED_MAX_TOTAL_SECONDS} seconds.`);
+      }
+      for (const [index, clip] of video.ltx.extended.clips.entries()) {
+        clip.prompt = String(clip.prompt || '').trim().replace(/\|/g, ',');
+        if (!clip.prompt) throw new Error(`Enter a prompt for LTX Extended clip ${index + 1}.`);
+        if (clip.durationSeconds < 1 || clip.durationSeconds > 10) {
+          throw new Error(`LTX Extended clip ${index + 1} must be between 1 and 10 seconds.`);
+        }
+      }
+      video.mode = extendedStartsFromImage ? 'image_to_video' : 'text_to_video';
+      video.frames = resolveUmbraVideoFramesForDuration(
+        video.ltx.extended.clips[0].durationSeconds,
+        video.fps,
+        8,
+      );
+      video.ltx.keyframes = [];
+    } else if (video.family === 'ltx23' && video.ltx.storyboard.enabled) {
+      const timeline = resolveUmbraLtxStoryboardTimeline(video.ltx.storyboard, video.fps, video.frames);
+      video.frames = timeline.frames;
+    }
     const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : 'LTX-2.3';
     const feature: UmbraUiPipelineFeature = video.mode === 'video_to_video'
       ? 'vid2vid'
@@ -1631,7 +1737,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       }
     }
 
-    if (video.family === 'ltx23' && video.ltx.keyframes.length > 0) {
+    if (video.family === 'ltx23' && !video.ltx.extended.enabled && video.ltx.keyframes.length > 0) {
       for (const keyframe of video.ltx.keyframes) {
         keyframe.sourceImagePath = String(keyframe.sourceImagePath || '').trim();
         keyframe.sourceImageName = String(keyframe.sourceImageName || '').trim();
@@ -1649,6 +1755,37 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           keyframe.sourceImageName = String(payload?.filename || '').trim();
         }
         if (!keyframe.sourceImageName) throw new Error(`ComfyUI did not stage the LTX guide at frame ${keyframe.frameIndex}.`);
+      }
+    }
+
+    if (video.family === 'ltx23' && !video.ltx.extended.enabled && video.ltx.storyboard.enabled) {
+      if (!videoModelCatalog.umbraDirectorAvailable) {
+        throw new Error('Umbra Director is not installed in the managed ComfyUI runtime.');
+      }
+      if (video.ltx.storyboard.shots.length < 2) {
+        throw new Error('Add at least two storyboard shots before queueing.');
+      }
+      for (const [index, shot] of video.ltx.storyboard.shots.entries()) {
+        shot.prompt = String(shot.prompt || '').trim().replace(/\|/g, ',');
+        shot.sourceImagePath = String(shot.sourceImagePath || '').trim();
+        shot.sourceImageName = String(shot.sourceImageName || '').trim();
+        if (!shot.prompt) throw new Error(`Enter a prompt for storyboard shot ${index + 1}.`);
+        if (!shot.sourceImagePath && !shot.sourceImageName) continue;
+        if (!shot.sourceImageName) {
+          const response = await fetch('/api/comfy/copy-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sourcePath: shot.sourceImagePath }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || payload?.success === false) {
+            throw new Error(String(payload?.error || `Failed to stage the guide image for storyboard shot ${index + 1}.`));
+          }
+          shot.sourceImageName = String(payload?.filename || '').trim();
+        }
+        if (!shot.sourceImageName) {
+          throw new Error(`ComfyUI did not stage the guide image for storyboard shot ${index + 1}.`);
+        }
       }
     }
 
@@ -1736,16 +1873,78 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       loras: [],
       video,
     };
-    const requestId = await submitQueueRequest(
-      prompt,
-      generation,
-      video.family === 'wan22' ? 'Umbra UI Wan 2.2 Video' : 'Umbra UI LTX-2.3 Video',
-      { feature, modelFamily },
-      options.queuePlacement,
-    );
+    let requestId = '';
+    if (video.family === 'ltx23' && video.ltx.extended.enabled) {
+      const clips = video.ltx.extended.clips;
+      const totalDurationSeconds = resolveUmbraLtxExtendedTotalSeconds(video.ltx.extended);
+      const sessionId = `ltx-extended-${createRequestId()}`;
+      const prompts = clips.map((clip) => clip.prompt);
+      const generations = clips.map((clip, clipIndex) => {
+        const sequence: UmbraLtxExtendedSequenceMetadata = {
+          kind: 'ltx_extended',
+          sessionId,
+          clipId: clip.id,
+          clipIndex,
+          clipCount: clips.length,
+          clipDurationSeconds: clip.durationSeconds,
+          totalDurationSeconds,
+          finalClip: clipIndex === clips.length - 1,
+        };
+        const startsFromImage = clipIndex === 0 && extendedStartsFromImage;
+        return {
+          ...generation,
+          outputMode: startsFromImage ? 'img2vid' : 'txt2vid',
+          videoSequence: sequence,
+          video: {
+            ...video,
+            mode: startsFromImage ? 'image_to_video' as const : 'text_to_video' as const,
+            sourceImagePath: startsFromImage ? video.sourceImagePath : '',
+            sourceImageName: startsFromImage ? video.sourceImageName : '',
+            sourceWidth: startsFromImage ? video.sourceWidth : 0,
+            sourceHeight: startsFromImage ? video.sourceHeight : 0,
+            frames: resolveUmbraVideoFramesForDuration(clip.durationSeconds, video.fps, 8),
+            ltx: {
+              ...video.ltx,
+              keyframes: [],
+              storyboard: {
+                ...video.ltx.storyboard,
+                enabled: false,
+                shots: video.ltx.storyboard.shots.map((shot) => ({ ...shot })),
+              },
+              extended: {
+                ...video.ltx.extended,
+                clips: clips.map((entry) => ({ ...entry })),
+              },
+            },
+          },
+        };
+      });
+      requestId = await submitQueueBatchRequest(
+        prompts,
+        generations,
+        clips.map((_, index) => `Umbra UI LTX Extended ${index + 1}/${clips.length}`),
+        { feature: extendedStartsFromImage ? 'img2vid' : 'txt2vid', modelFamily },
+        options.queuePlacement,
+      );
+    } else {
+      requestId = await submitQueueRequest(
+        prompt,
+        generation,
+        video.family === 'wan22' ? 'Umbra UI Wan 2.2 Video' : 'Umbra UI LTX-2.3 Video',
+        { feature, modelFamily },
+        options.queuePlacement,
+      );
+    }
     await refreshVideoJobs();
     return requestId;
-  }, [refreshVideoJobs, submitQueueRequest, videoModelCatalog.rtxAvailable, workflows]);
+  }, [
+    refreshVideoJobs,
+    submitQueueBatchRequest,
+    submitQueueRequest,
+    videoModelCatalog.umbraDirectorAvailable,
+    videoModelCatalog.rtxAvailable,
+    workflows,
+  ]);
 
   return {
     connected,
@@ -1767,6 +1966,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     videoJobsLoading,
     videoJobsError,
     refreshVideoJobs,
+    clearVideoJobs,
     generationPreview,
     latestSavedImage,
     skipActiveUmbraJob,

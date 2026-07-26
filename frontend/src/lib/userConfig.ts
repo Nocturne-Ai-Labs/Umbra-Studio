@@ -11,6 +11,7 @@ export type UserConfigKey =
   | 'local-server-apps'
   | 'umbra-ui-agent-instructions'
   | 'umbra-ui-prompt-history'
+  | 'umbra-ui-video-prompt-history'
   | 'model-manager-browser'
   | 'board-preferences'
   | 'remote-ui-session';

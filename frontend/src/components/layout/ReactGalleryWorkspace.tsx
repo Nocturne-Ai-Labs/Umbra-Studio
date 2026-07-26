@@ -9372,13 +9372,7 @@ export function ReactGalleryWorkspace() {
         ];
       }
       const pinned = pinnedFolders.some((entry) => pathsEqual(entry, targetPath));
-      return [
-        { label: 'Open Folder', icon: <FolderOpen size={14} />, action: () => openFolder(targetPath) },
-        ...(!isRemoteClient ? [
-          { label: 'Show in File Explorer', icon: <FolderOpen size={14} />, action: () => void revealPaths([targetPath]) },
-        ] satisfies ContextMenuItem[] : []),
-        { label: 'Copy Path', icon: <Copy size={14} />, action: () => void copyPaths([targetPath]) },
-        { separator: true },
+      const transferItems: ContextMenuItem[] = [
         {
           label: selectedPaths.size > 1 ? `Move ${selectedPaths.size} Selected Here` : 'Move Selected Here',
           icon: <FolderOpen size={14} />,
@@ -9391,11 +9385,45 @@ export function ReactGalleryWorkspace() {
           disabled: getValidTransferPathsForDestination(Array.from(selectedPaths), targetPath).length === 0 || transferInProgress,
           action: () => void transferPathsToFolder(Array.from(selectedPaths), targetPath, 'copy'),
         },
-        { separator: true },
-        { label: 'New Subfolder...', icon: <Folder size={14} />, action: () => void createSubfolder(targetPath) },
+      ];
+      const folderFileItems: ContextMenuItem[] = [
+        ...(!isRemoteClient ? [
+          { label: 'Show in File Explorer', icon: <FolderOpen size={14} />, action: () => void revealPaths([targetPath]) },
+        ] satisfies ContextMenuItem[] : []),
+        { label: 'Copy Path', icon: <Copy size={14} />, action: () => void copyPaths([targetPath]) },
         { label: 'Rename Folder...', icon: <MoreHorizontal size={14} />, action: () => void renameFolder(targetPath) },
-        { label: pinned ? 'Unpin Folder' : 'Pin Folder', icon: <Pin size={14} />, action: () => togglePinnedFolder(targetPath) },
-        { label: 'Clear Empty Subfolders...', icon: <Trash2 size={14} />, action: () => void previewEmptyFolderCleanup(targetPath) },
+      ];
+      return [
+        { label: 'Open Folder', icon: <FolderOpen size={14} />, action: () => openFolder(targetPath) },
+        {
+          label: pinned ? 'Unpin Folder' : 'Pin Folder',
+          icon: <Pin size={14} />,
+          action: () => togglePinnedFolder(targetPath),
+        },
+        {
+          label: 'New Subfolder...',
+          icon: <Folder size={14} />,
+          action: () => void createSubfolder(targetPath),
+        },
+        { separator: true },
+        {
+          label: 'Transfer Selected',
+          icon: <Images size={14} />,
+          badge: selectedPaths.size || undefined,
+          children: transferItems,
+        },
+        {
+          label: 'Folder Tools',
+          icon: <MoreHorizontal size={14} />,
+          children: folderFileItems,
+        },
+        {
+          label: 'Maintenance',
+          icon: <Trash2 size={14} />,
+          children: [
+            { label: 'Clear Empty Subfolders...', icon: <Trash2 size={14} />, action: () => void previewEmptyFolderCleanup(targetPath) },
+          ],
+        },
         { separator: true },
         { label: 'Move Folder to Trash', icon: <Trash2 size={14} />, danger: true, action: () => void movePathsToTrash([targetPath]) },
       ];
@@ -9413,8 +9441,7 @@ export function ReactGalleryWorkspace() {
         const file = knownFiles.find((entry) => pathsEqual(entry.path, path));
         return !file || file.type === 'image' || file.type === 'gif';
       });
-      return [
-        { label: 'Open', icon: targetFile?.type === 'folder' ? <FolderOpen size={14} /> : <ImageIcon size={14} />, disabled: !targetFile, action: () => targetFile && openFile(targetFile) },
+      const trashExportItems: ContextMenuItem[] = [
         ...(isRemoteClient ? [
           { label: downloadablePaths.length > 1 ? `Download ${downloadablePaths.length} Originals` : 'Download Original', icon: <Download size={14} />, disabled: downloadablePaths.length === 0, action: () => downloadOriginalPaths(downloadablePaths) },
         ] satisfies ContextMenuItem[] : []),
@@ -9425,9 +9452,18 @@ export function ReactGalleryWorkspace() {
         ] satisfies ContextMenuItem[] : []),
         ...(!isPhoneRemote ? [
           { label: paths.length > 1 ? `Copy ${paths.length} Paths` : 'Copy Path', icon: <Copy size={14} />, action: () => void copyPaths(paths) },
-          { separator: true },
         ] satisfies ContextMenuItem[] : []),
+      ];
+      return [
+        { label: 'Open', icon: targetFile?.type === 'folder' ? <FolderOpen size={14} /> : <ImageIcon size={14} />, disabled: !targetFile, action: () => targetFile && openFile(targetFile) },
         { label: paths.length > 1 ? `Restore ${paths.length} Items` : 'Restore', icon: <RotateCcw size={14} />, action: () => void restoreTrashPaths(paths) },
+        {
+          label: 'Export & File Tools',
+          icon: <Download size={14} />,
+          badge: paths.length > 1 ? paths.length : undefined,
+          children: trashExportItems,
+        },
+        { separator: true },
         { label: paths.length > 1 ? `Delete Permanently (${paths.length})` : 'Delete Permanently', icon: <Trash2 size={14} />, danger: true, action: () => void deleteTrashPathsForever(paths) },
       ];
     }
@@ -9474,16 +9510,23 @@ export function ReactGalleryWorkspace() {
     const canReorder = !globalSearchActive
       && orderablePathSet.has(targetPath.toLowerCase())
       && reorderPaths.length > 0;
-    return [
-      { label: 'Open', icon: <ImageIcon size={14} />, disabled: !targetFile, action: () => targetFile && openFile(targetFile) },
-      ...(targetPowerPrompterPngPath ? [
-        {
-          label: 'Restore in Power Prompter',
-          icon: <RotateCcw size={14} />,
-          action: () => restorePathInPowerPrompter(targetPowerPrompterPngPath),
-        },
-      ] satisfies ContextMenuItem[] : []),
-      { label: 'Send Parameters to Umbra UI TXT2IMG', icon: <Sparkles size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'txt2img') },
+    const umbraUiImageItems: ContextMenuItem[] = [
+      { label: 'TXT2IMG From Parameters', icon: <Sparkles size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'txt2img') },
+      { label: 'IMG2IMG', icon: <Images size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'img2img') },
+      { label: 'Inpaint', icon: <Paintbrush size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'inpaint') },
+    ];
+    const umbraUiVideoItems: ContextMenuItem[] = [
+      { label: 'Use as First Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'first') },
+      { label: 'Use as Middle Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'middle') },
+      { label: 'Use as Last Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'last') },
+      { label: 'VID2VID Source', icon: <Video size={14} />, disabled: !targetVideoPath, action: () => void sendPathToUmbraUi(targetVideoPath, 'video', 'source_video') },
+    ];
+    const analysisItems: ContextMenuItem[] = [
+      { label: 'Open Workflow in ComfyUI', icon: <FileJson size={14} />, action: () => void openOrCopyComfyWorkflow(paths) },
+      { label: paths.length > 1 ? `Metadata Scanner (${paths.length})` : 'Metadata Scanner', icon: <ScanSearch size={14} />, action: () => sendSelectionToWorkspace(paths, 'scanner') },
+      { label: selectedImagePaths.length > 1 ? `Visual Analysis (${selectedImagePaths.length})` : 'Visual Analysis', icon: <Send size={14} />, disabled: selectedImagePaths.length === 0, action: () => sendSelectionToWorkspace(selectedImagePaths, 'waifudiffusion') },
+    ];
+    const exportItems: ContextMenuItem[] = [
       ...(isRemoteClient ? [
         { label: downloadablePaths.length > 1 ? `Download ${downloadablePaths.length} Originals` : 'Download Original', icon: <Download size={14} />, disabled: downloadablePaths.length === 0, action: () => downloadOriginalPaths(downloadablePaths) },
       ] satisfies ContextMenuItem[] : []),
@@ -9494,27 +9537,50 @@ export function ReactGalleryWorkspace() {
       ] satisfies ContextMenuItem[] : []),
       ...(!isPhoneRemote ? [
         { label: paths.length > 1 ? `Copy ${paths.length} Paths` : 'Copy Path', icon: <Copy size={14} />, action: () => void copyPaths(paths) },
-        { label: 'Open Workflow in ComfyUI', icon: <FileJson size={14} />, action: () => void openOrCopyComfyWorkflow(paths) },
-        { separator: true },
-        ...datasetImportItems,
-        ...(datasetImportItems.length > 0 ? [{ separator: true } satisfies ContextMenuItem] : []),
-        { label: 'Send to Umbra UI IMG2IMG', icon: <Images size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'img2img') },
-        { label: 'Send to Umbra UI Inpaint', icon: <Paintbrush size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'inpaint') },
-        { label: 'Send to IMG2VID / First Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'first') },
-        { label: 'Set as Video Middle Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'middle') },
-        { label: 'Set as Video Last Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'last') },
-        { label: 'Send to Umbra UI VID2VID', icon: <Video size={14} />, disabled: !targetVideoPath, action: () => void sendPathToUmbraUi(targetVideoPath, 'video', 'source_video') },
-        { separator: true },
-        { label: paths.length > 1 ? `Metadata Scanner (${paths.length})` : 'Metadata Scanner', icon: <ScanSearch size={14} />, action: () => sendSelectionToWorkspace(paths, 'scanner') },
-        { label: selectedImagePaths.length > 1 ? `Send to Visual Analysis (${selectedImagePaths.length})` : 'Send to Visual Analysis', icon: <Send size={14} />, disabled: selectedImagePaths.length === 0, action: () => sendSelectionToWorkspace(selectedImagePaths, 'waifudiffusion') },
-        { separator: true },
       ] satisfies ContextMenuItem[] : []),
-      { label: reorderPaths.length > 0 ? `Reorder ${reorderPaths.length > 1 ? `${reorderPaths.length} Items` : 'Selected'} Before` : 'Reorder Before', icon: <RotateCcw size={14} />, disabled: !canReorder, action: () => void reorderPathsRelativeToTarget(reorderPaths, targetPath, 'before') },
-      { label: reorderPaths.length > 0 ? `Reorder ${reorderPaths.length > 1 ? `${reorderPaths.length} Items` : 'Selected'} After` : 'Reorder After', icon: <RotateCcw size={14} />, disabled: !canReorder, action: () => void reorderPathsRelativeToTarget(reorderPaths, targetPath, 'after') },
+    ];
+    const arrangeItems: ContextMenuItem[] = [
+      { label: reorderPaths.length > 0 ? `Place ${reorderPaths.length > 1 ? `${reorderPaths.length} Items` : 'Selection'} Before` : 'Place Before', icon: <RotateCcw size={14} />, disabled: !canReorder, action: () => void reorderPathsRelativeToTarget(reorderPaths, targetPath, 'before') },
+      { label: reorderPaths.length > 0 ? `Place ${reorderPaths.length > 1 ? `${reorderPaths.length} Items` : 'Selection'} After` : 'Place After', icon: <RotateCcw size={14} />, disabled: !canReorder, action: () => void reorderPathsRelativeToTarget(reorderPaths, targetPath, 'after') },
       { label: 'Rename', icon: <MoreHorizontal size={14} />, action: () => void renamePaths(paths) },
+    ];
+    return [
+      { label: 'Open', icon: <ImageIcon size={14} />, disabled: !targetFile, action: () => targetFile && openFile(targetFile) },
+      ...(targetPowerPrompterPngPath ? [
+        {
+          label: 'Restore in Power Prompter',
+          icon: <RotateCcw size={14} />,
+          action: () => restorePathInPowerPrompter(targetPowerPrompterPngPath),
+        },
+      ] satisfies ContextMenuItem[] : []),
+      {
+        label: 'Send to Umbra UI',
+        icon: <Sparkles size={14} />,
+        children: [
+          ...umbraUiImageItems,
+          { separator: true },
+          {
+            label: 'Video',
+            icon: <Clapperboard size={14} />,
+            children: umbraUiVideoItems,
+          },
+        ],
+      },
+      ...datasetImportItems,
       { label: paths.length > 1 ? `Edit Tags (${paths.length})...` : 'Edit Tags...', icon: <Tags size={14} />, action: () => openTagEditor(paths) },
       { separator: true },
-      { label: paths.length > 1 ? `Delete (${paths.length})` : 'Delete', icon: <Trash2 size={14} />, danger: true, action: () => void movePathsToTrash(paths) },
+      ...(!isPhoneRemote ? [
+        { label: 'Metadata & Workflow', icon: <ScanSearch size={14} />, children: analysisItems },
+        { label: 'Arrange & Rename', icon: <MoreHorizontal size={14} />, children: arrangeItems },
+      ] satisfies ContextMenuItem[] : []),
+      {
+        label: 'Export & File Tools',
+        icon: <Download size={14} />,
+        badge: paths.length > 1 ? paths.length : undefined,
+        children: exportItems,
+      },
+      { separator: true },
+      { label: paths.length > 1 ? `Move ${paths.length} Items to Trash` : 'Move to Trash', icon: <Trash2 size={14} />, danger: true, action: () => void movePathsToTrash(paths) },
     ];
   }, [
     contextMenu,
@@ -9552,6 +9618,19 @@ export function ReactGalleryWorkspace() {
     transferPathsToFolder,
     viewerFileFallback,
   ]);
+  const contextMenuHeader = useMemo(() => {
+    if (!contextMenu) return { title: '', subtitle: '' };
+    const targetPath = normalizePath(contextMenu.targetPath);
+    const title = pathLeaf(targetPath) || 'Selection';
+    if (contextMenu.kind === 'folder') return { title, subtitle: 'Folder' };
+    if (contextMenu.kind === 'transfer') {
+      const count = contextMenu.paths?.length || 0;
+      return { title, subtitle: `${count} item${count === 1 ? '' : 's'} ready to transfer` };
+    }
+    if (isLiveGenerationPreviewPath(targetPath)) return { title: 'Live Generation Preview', subtitle: 'Current generation' };
+    const count = selectedPathsForContext(contextMenu).length;
+    return { title, subtitle: `${Math.max(1, count)} selected` };
+  }, [contextMenu, selectedPathsForContext]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -10805,6 +10884,8 @@ export function ReactGalleryWorkspace() {
         items={contextMenuItems}
         onClose={() => setContextMenu(null)}
         boundarySelector="[data-umbra-react-gallery-root]"
+        title={contextMenuHeader.title}
+        subtitle={contextMenuHeader.subtitle}
       />
       <GalleryDatasetTargetPicker
         state={datasetPicker}

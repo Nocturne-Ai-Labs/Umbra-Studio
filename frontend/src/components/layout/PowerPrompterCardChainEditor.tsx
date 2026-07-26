@@ -463,7 +463,6 @@ const LORA_DESCRIPTION_ALLOWED_TAGS = new Set([
   'a',
 ]);
 const LORA_DESCRIPTION_ALLOWED_PROTOCOLS = new Set(['http:', 'https:']);
-const DRAG_PROMPT_TOKEN_MIME = 'application/x-umbra-prompt-token';
 const DRAG_LORA_FILE_MIME = 'text/x-umbra-lora-path';
 const UMBRA_THEMED_SELECT_CLASS = 'umbra-themed-select';
 let outputPreviewRootsCache: string[] | null = null;
@@ -921,36 +920,6 @@ function formatLoraSyntaxToken(entry: PowerPrompterLoraEntry): string {
   const model = Number.isFinite(entry.strengthModel) ? entry.strengthModel : 1;
   const clip = Number.isFinite(entry.strengthClip) ? entry.strengthClip : model;
   return `<lora:${name}:${model}:${clip}>`;
-}
-
-function readDraggedPromptToken(event: React.DragEvent): string {
-  const dt = event.dataTransfer;
-  if (!dt) return '';
-  const types = Array.from(dt.types || []);
-  if (!types.includes(DRAG_PROMPT_TOKEN_MIME)) return '';
-  return String(dt.getData(DRAG_PROMPT_TOKEN_MIME) || '').trim();
-}
-
-function hasDraggedPromptTokenType(event: React.DragEvent): boolean {
-  const dt = event.dataTransfer;
-  if (!dt) return false;
-  const types = Array.from(dt.types || []);
-  return types.includes(DRAG_PROMPT_TOKEN_MIME);
-}
-
-function insertPromptTokenAtCursor(currentText: string, token: string, selectionStart: number, selectionEnd: number): string {
-  const cleanToken = String(token || '').trim();
-  if (!cleanToken) return String(currentText || '');
-  const text = String(currentText || '');
-  const start = Math.max(0, Math.min(selectionStart, text.length));
-  const end = Math.max(start, Math.min(selectionEnd, text.length));
-
-  const before = text.slice(0, start);
-  const after = text.slice(end);
-  const needsLeadingSpace = before.length > 0 && !/[,\s]$/.test(before);
-  const needsTrailingSpace = after.length > 0 && !/^[,\s]/.test(after);
-  const inserted = `${needsLeadingSpace ? ', ' : ''}${cleanToken}${needsTrailingSpace ? ', ' : ''}`;
-  return normalizePowerPrompterPromptText(`${before}${inserted}${after}`);
 }
 
 function insertPromptTokenIntoDraftAtCursor(
@@ -1894,14 +1863,6 @@ function getPromptSearchText(rawText: unknown): string {
     .trim();
 }
 
-function extractLoraSyntaxChipName(rawChip: unknown): string {
-  const token = String(rawChip || '').trim();
-  if (!token) return '';
-  const match = token.match(/^<\s*lora\s*:\s*([^:>]+?)\s*:\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:\s*:\s*[-+]?(?:\d+\.?\d*|\.\d+))?\s*>$/i);
-  if (!match) return '';
-  return normalizeLoraSyntaxName(match[1] || '').toLowerCase();
-}
-
 function variantMatchesGlobalChipSearch(variantName: unknown, _variantTags: unknown, variantText: unknown, terms: string[]): boolean {
   if (!Array.isArray(terms) || terms.length === 0) return false;
   const promptText = getPromptSearchText(variantText);
@@ -2192,22 +2153,6 @@ function tokenizePromptForMatch(rawPrompt: string): string[] {
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean);
-}
-
-function promptTokenPartsMatch(promptTokens: string[], tokenParts: string[]): boolean {
-  if (!Array.isArray(promptTokens) || promptTokens.length === 0) return false;
-  if (!Array.isArray(tokenParts) || tokenParts.length === 0) return false;
-  return tokenParts.every((part) => promptTokens.includes(part));
-}
-
-function promptHasToken(prompt: string, token: string) {
-  const loraName = extractLoraSyntaxChipName(token);
-  if (loraName) {
-    return tokenizePromptForMatch(prompt).some((promptToken) => extractLoraSyntaxChipName(promptToken) === loraName);
-  }
-  const promptTokens = tokenizePromptForMatch(prompt);
-  const tokenParts = tokenizePromptForMatch(token);
-  return promptTokenPartsMatch(promptTokens, tokenParts);
 }
 
 async function listOutputPreviewPath(path: string, limit: number): Promise<{ files: any[]; folders: any[] }> {
@@ -2631,7 +2576,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const [mobileCardPickerOpen, setMobileCardPickerOpen] = useState(false);
   const [mobileVariantSetPicker, setMobileVariantSetPicker] = useState<{ slotId: string; variantId: string } | null>(null);
   const [variantDropSlotId, setVariantDropSlotId] = useState<string | null>(null);
-  const [variantPromptDropId, setVariantPromptDropId] = useState<string | null>(null);
   const [chainLinkEditor, setChainLinkEditor] = useState<ChainLinkEditorState | null>(null);
   const [promptFieldsMinimized, setPromptFieldsMinimized] = useState(false);
   const [isLoadingLoraInfo, setIsLoadingLoraInfo] = useState(false);
@@ -3053,68 +2997,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     clearTimeout(modelBrowserInfoClickTimerRef.current);
     modelBrowserInfoClickTimerRef.current = null;
   }, []);
-
-  const revealVariantForToken = useCallback((rawToken: string) => {
-    const token = String(rawToken || '').trim();
-    if (!token) return;
-
-    const matches: Array<{ slotId: string; slotLabel: string; variantId: string; variantIndex: number; slotIndex: number }> = [];
-    for (let slotIndex = 0; slotIndex < slots.length; slotIndex += 1) {
-      const slot = slots[slotIndex];
-      for (let idx = 0; idx < slot.variants.length; idx += 1) {
-        const variant = slot.variants[idx];
-        if (promptHasToken(String(variant.text || ''), token)) {
-          matches.push({
-            slotId: slot.slotId,
-            slotLabel: slot.label,
-            variantId: variant.id,
-            variantIndex: idx,
-            slotIndex,
-          });
-        }
-      }
-    }
-
-    if (matches.length <= 0) {
-      showToast(`Token not found in any variant: ${token}`, 'error');
-      return;
-    }
-
-    const found = matches[0];
-    const revealedIds = Array.from(new Set(matches.map((match) => match.variantId).filter(Boolean)));
-    setActiveSlotId(found.slotId);
-    setActiveVariantId(found.variantId);
-    setRevealedVariantIds(revealedIds);
-    clearTokenRevealTimer();
-    tokenRevealTimerRef.current = setTimeout(() => {
-      tokenRevealTimerRef.current = null;
-      setRevealedVariantIds((current) => (
-        current.length === revealedIds.length && current.every((id, index) => id === revealedIds[index])
-          ? []
-          : current
-      ));
-    }, 1600);
-
-    if (typeof window !== 'undefined') {
-      window.requestAnimationFrame(() => {
-        slotSurfaceRefMap.current.get(found!.slotId)?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'nearest',
-          inline: 'center',
-        });
-        window.requestAnimationFrame(() => {
-          scrollVariantIndexIntoView(found!.slotId, found!.variantIndex, 'smooth');
-        });
-      });
-    }
-
-    showToast(
-      matches.length === 1
-        ? `Revealed ${found.slotLabel} ${formatVariantPositionLabel(found.variantIndex)}`
-        : `Revealed ${matches.length} matching variants`,
-      'success'
-    );
-  }, [clearTokenRevealTimer, scrollVariantIndexIntoView, showToast, slots]);
 
   useEffect(() => {
     const focusNonce = Number(globalSearchFocusNonce);
@@ -4791,68 +4673,16 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     patchVariant(slotId, variant.id, { variantTags: nextTags });
   }, [patchVariant]);
 
-  const setPromptTokenDragData = useCallback((event: React.DragEvent, token: string) => {
-    const value = String(token || '').trim();
-    if (!value) return;
-    event.dataTransfer.effectAllowed = 'copy';
-    event.dataTransfer.setData(DRAG_PROMPT_TOKEN_MIME, value);
-    event.dataTransfer.setData('text/plain', value);
-    const sourceNode = event.currentTarget as HTMLElement | null;
-    if (sourceNode) {
-      const rect = sourceNode.getBoundingClientRect();
-      const offsetX = Math.max(8, Math.min(rect.width - 8, rect.width / 2));
-      const offsetY = Math.max(8, Math.min(rect.height - 8, rect.height / 2));
-      event.dataTransfer.setDragImage(sourceNode, offsetX, offsetY);
-    }
-  }, []);
-
-  const applyDroppedTokenToVariant = useCallback((
-    event: React.DragEvent<HTMLElement | HTMLTextAreaElement | HTMLInputElement>,
-    slotId: string,
-    variant: PowerPrompterCardNode | null | undefined,
-  ) => {
-    if (!variant) return;
-    const variantId = String(variant.id || '').trim();
-    if (!variantId) return;
-    const token = readDraggedPromptToken(event);
+  const copyLoraToken = useCallback(async (rawToken: string) => {
+    const token = String(rawToken || '').trim();
     if (!token) return;
-    event.preventDefault();
-    event.stopPropagation();
-    suppressedVariantDragIdRef.current = '';
-    const eventTarget = event.target;
-    const directSelectionTarget = eventTarget instanceof HTMLTextAreaElement || eventTarget instanceof HTMLInputElement
-      ? eventTarget
-      : null;
-    const selectionTarget = directSelectionTarget || inlineVariantTextareaRefs.current[variantId] || null;
-    const hasSelection = !!selectionTarget && typeof selectionTarget.selectionStart === 'number';
-    const isDrafting = editingVariantId === variantId || Object.prototype.hasOwnProperty.call(variantTextDrafts, variantId);
-    const sourceText = isDrafting
-      ? String(variantTextDrafts[variantId] ?? variant.text ?? '')
-      : String(variant.text || '');
-    const start = hasSelection ? Number(selectionTarget.selectionStart) : sourceText.length;
-    const end = hasSelection && typeof selectionTarget.selectionEnd === 'number' ? Number(selectionTarget.selectionEnd) : start;
-    const nextText = insertPromptTokenAtCursor(sourceText, token, start, end);
-    const nextCaret = Math.min(nextText.length, start + token.length + 2);
-    setVariantPromptDropId(null);
-    setActiveSlotId(slotId);
-    setActiveVariantId(variantId);
-    setEditingPromptChip(null);
-    setEditingVariantId(variantId);
-    setVariantTextDrafts((prev) => ({ ...prev, [variantId]: nextText }));
-    window.requestAnimationFrame(() => {
-      const textarea = inlineVariantTextareaRefs.current[variantId] || selectionTarget;
-      if (!textarea) return;
-      textarea.focus({ preventScroll: true });
-      try {
-        textarea.setSelectionRange(nextCaret, nextCaret);
-      } catch {
-        // ignore selection restore failures
-      }
-      if (textarea instanceof HTMLTextAreaElement) {
-        resetVariantTextareaHeight(textarea);
-      }
-    });
-  }, [editingVariantId, variantTextDrafts]);
+    try {
+      await navigator.clipboard.writeText(token);
+      showToast('LoRA token copied.', 'success');
+    } catch {
+      showToast('Failed to copy LoRA token.', 'error');
+    }
+  }, [showToast]);
 
   const patchLoraEntry = useCallback((entryId: string, patch: Partial<PowerPrompterLoraEntry>) => {
     const nextLoras = loraEntries.map((entry) => {
@@ -9155,44 +8985,44 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                 void loadLoraTags(entry.name);
                               }}
                               className="px-2 py-0.5 rounded border border-white/15 text-[10px] uppercase tracking-wider text-zinc-300 hover:text-zinc-100 hover:border-white/30"
-                              title="Load trained tags for drag/click reveal"
+                              title="Load trained LoRA tokens"
                             >
                               Load Tags
                             </button>
                           </div>
                           <div className="text-[10px] text-zinc-500">
-                            Drag tokens to variants, or click to reveal where they are used.
+                            Click a token to copy it, then paste it wherever you need it.
                           </div>
                           {syntaxToken && (
-                            <span
-                              draggable
-                              onDragStart={(event) => setPromptTokenDragData(event, syntaxToken)}
+                            <button
+                              type="button"
                               onClick={(event) => {
                                 event.stopPropagation();
-                                revealVariantForToken(syntaxToken);
+                                void copyLoraToken(syntaxToken);
                               }}
-                              className="inline-flex items-center px-1.5 py-0.5 rounded border border-purple-400/45 bg-purple-500/15 text-purple-200 text-[10px] font-semibold cursor-grab active:cursor-grabbing hover:border-purple-300/70"
-                              title="Drag token to a variant, or click to reveal its variant card"
+                              className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded border border-purple-400/45 bg-purple-500/15 text-purple-200 text-[10px] font-semibold hover:border-purple-300/70"
+                              title="Copy LoRA syntax"
                             >
+                              <Copy size={10} className="shrink-0" />
                               {syntaxToken}
-                            </span>
+                            </button>
                           )}
                           {trainedTags.length > 0 && (
                             <div className="flex flex-wrap gap-1">
                               {trainedTags.slice(0, 28).map((tag) => (
-                                <span
-                                  key={`${entry.id}-drag-tag-${tag}`}
-                                  draggable
-                                  onDragStart={(event) => setPromptTokenDragData(event, tag)}
+                                <button
+                                  type="button"
+                                  key={`${entry.id}-copy-tag-${tag}`}
                                   onClick={(event) => {
                                     event.stopPropagation();
-                                    revealVariantForToken(tag);
+                                    void copyLoraToken(tag);
                                   }}
-                                  className="inline-flex items-center px-1.5 py-0.5 rounded border border-cyan-400/35 bg-cyan-500/10 text-cyan-200 text-[10px] cursor-grab active:cursor-grabbing hover:border-cyan-300/60"
-                                  title="Drag trained tag to a variant, or click to reveal where it is used"
+                                  className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded border border-cyan-400/35 bg-cyan-500/10 text-cyan-200 text-[10px] hover:border-cyan-300/60"
+                                  title={`Copy "${tag}"`}
                                 >
+                                  <Copy size={9} className="shrink-0" />
                                   {tag}
-                                </span>
+                                </button>
                               ))}
                             </div>
                           )}
@@ -9653,7 +9483,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                               event.dataTransfer.setData('text/plain', `variant:${slot.slotId}:${variant.id}`);
                             }}
                             onDragOver={(event) => {
-                              if (hasDraggedPromptTokenType(event)) return;
                               const dragging = variantDragRef.current;
                               if (!dragging) return;
                               if (dragging.variantId === variant.id && dragging.slotId === slot.slotId) return;
@@ -9662,7 +9491,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                               setVariantDropSlotId(slot.slotId);
                             }}
                             onDrop={(event) => {
-                              if (hasDraggedPromptTokenType(event)) return;
                               const dragging = variantDragRef.current;
                               if (!dragging) return;
                               event.preventDefault();
@@ -10068,11 +9896,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                               ref={(node) => setVariantPromptFieldRef(variant.id, node)}
                               data-no-variant-drag="true"
                               draggable={false}
-                              className={`relative z-30 mt-1 w-full min-w-0 rounded border px-2 py-1 h-[50px] max-h-[50px] flex flex-wrap items-start gap-1 overflow-hidden transition-colors ${chainLinkModeActive ? 'cursor-pointer' : 'cursor-text'} ${
-                                variantPromptDropId === variant.id
-                                  ? 'border-cyan-300/70 bg-cyan-950/95'
-                                  : 'border-white/10 bg-black'
-                              }`}
+                              className={`relative z-30 mt-1 flex h-[50px] max-h-[50px] w-full min-w-0 flex-wrap items-start gap-1 overflow-hidden rounded border border-white/10 bg-black px-2 py-1 transition-colors ${chainLinkModeActive ? 'cursor-pointer' : 'cursor-text'}`}
                               onPointerDownCapture={(event) => {
                                 event.stopPropagation();
                                 suppressedVariantDragIdRef.current = variant.id;
@@ -10101,35 +9925,12 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                 }
                               }}
                               onDragStartCapture={(event) => {
-                                if (hasDraggedPromptTokenType(event)) return;
                                 event.preventDefault();
                                 event.stopPropagation();
                               }}
                               onDragStart={(event) => {
-                                if (hasDraggedPromptTokenType(event)) return;
                                 event.preventDefault();
                                 event.stopPropagation();
-                              }}
-                              onDragOver={(event) => {
-                                if (mobileSelectionMode || chainLinkModeActive) return;
-                                if (!hasDraggedPromptTokenType(event)) return;
-                                event.preventDefault();
-                                event.stopPropagation();
-                                event.dataTransfer.dropEffect = 'copy';
-                                setVariantPromptDropId(variant.id);
-                              }}
-                              onDragLeave={(event) => {
-                                const nextTarget = event.relatedTarget as Node | null;
-                                if (nextTarget && event.currentTarget.contains(nextTarget)) return;
-                                setVariantPromptDropId((prev) => (prev === variant.id ? null : prev));
-                              }}
-                              onDrop={(event) => {
-                                if (mobileSelectionMode || chainLinkModeActive) {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  return;
-                                }
-                                applyDroppedTokenToVariant(event as React.DragEvent<HTMLElement | HTMLTextAreaElement | HTMLInputElement>, slot.slotId, variant);
                               }}
                             >
                               <textarea
@@ -10225,23 +10026,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                     commitVariantTextEdit(slot.slotId, variant, event.currentTarget.value);
                                   }
                                   resetVariantTextareaHeight(event.currentTarget);
-                                }}
-                                onDragOver={(event) => {
-                                  if (mobileSelectionMode || chainLinkModeActive) return;
-                                  if (!hasDraggedPromptTokenType(event)) return;
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  event.dataTransfer.dropEffect = 'copy';
-                                  setVariantPromptDropId(variant.id);
-                                }}
-                                onDrop={(event) => {
-                                  if (mobileSelectionMode || chainLinkModeActive) {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    return;
-                                  }
-                                  suppressedVariantDragIdRef.current = '';
-                                  applyDroppedTokenToVariant(event, slot.slotId, variant);
                                 }}
                                 rows={2}
                                 aria-label="Variant prompt text"
@@ -11857,15 +11641,16 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                         <>
                           <div className="flex flex-wrap gap-1.5">
                             {loraInfoModal.trainedTags.map((tag) => (
-                              <span
+                              <button
+                                type="button"
                                 key={`${loraInfoModal.loraName}-${tag}`}
-                                draggable
-                                onDragStart={(event) => setPromptTokenDragData(event, tag)}
-                                className="px-1.5 py-0.5 rounded border border-cyan-400/35 bg-cyan-500/10 text-cyan-200 text-[10px] cursor-grab active:cursor-grabbing"
-                                title="Drag trained tag to a prompt card"
+                                onClick={() => { void copyLoraToken(tag); }}
+                                className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded border border-cyan-400/35 bg-cyan-500/10 text-cyan-200 text-[10px] hover:border-cyan-300/60"
+                                title={`Copy "${tag}"`}
                               >
+                                <Copy size={9} className="shrink-0" />
                                 {tag}
-                              </span>
+                              </button>
                             ))}
                           </div>
                           <button

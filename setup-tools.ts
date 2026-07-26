@@ -1788,7 +1788,11 @@ function getEnabledNodes(): Set<string> {
     try {
         if (existsSync(COMFY_NODES_CONFIG)) {
             const config = JSON.parse(readFileSync(COMFY_NODES_CONFIG, 'utf-8'));
-            return new Set(config.enabledNodes || COMFY_NODES.map(n => n.name));
+            const enabledNodes = new Set<string>(config.enabledNodes || COMFY_NODES.map(n => n.name));
+            for (const node of COMFY_NODES) {
+                if ('required' in node && node.required) enabledNodes.add(node.name);
+            }
+            return enabledNodes;
         }
     } catch { }
     // Default: all nodes enabled

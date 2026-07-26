@@ -53,6 +53,7 @@ type RemoteStatus = {
   httpUrlsHidden?: boolean;
   hiddenHttpUrls?: string[];
   settings?: {
+    enabled?: boolean;
     bindHost?: string;
     port?: number;
     preferredMode?: string;
@@ -337,6 +338,7 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
   const [authSaving, setAuthSaving] = React.useState(false);
   const [pairLinkSaving, setPairLinkSaving] = React.useState(false);
   const [editingAuthCredentials, setEditingAuthCredentials] = React.useState(false);
+  const [remoteEnabled, setRemoteEnabled] = React.useState(false);
   const [bindHost, setBindHost] = React.useState('0.0.0.0');
   const [port, setPort] = React.useState('8212');
   const [tailscaleHttpsUrl, setTailscaleHttpsUrl] = React.useState('');
@@ -378,6 +380,7 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
         if (payload.auth?.configured && !editingAuthCredentials) {
           setAuthUsername(payload.auth.username || '');
         }
+        setRemoteEnabled(payload.settings?.enabled === true);
         setBindHost(payload.settings?.bindHost || payload.bindHost || '0.0.0.0');
         setPort(String(payload.settings?.port || payload.port || 8212));
         setTailscaleHttpsUrl(payload.settings?.tailscaleHttpsUrl || payload.suggestedTailscaleHttpsUrls?.[0] || payload.tailscaleHttpsUrls?.[0] || '');
@@ -496,6 +499,12 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
         message: error || 'Umbra could not read the current remote connection state.',
         tone: 'error' as const,
       }
+      : status.remoteEnabled !== true
+        ? {
+          title: 'Umbra Remote Is Off',
+          message: 'Enable Umbra Remote in Connection Settings when you are ready to allow private Tailscale access.',
+          tone: 'offline' as const,
+        }
       : !tailscaleInstalled
         ? {
           title: 'Tailscale Not Found',
@@ -568,6 +577,8 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
       }));
       if (!response.ok) {
         if (
+          payload?.code === 'REMOTE_DISABLED'
+          ||
           payload?.code === 'TAILSCALE_SERVE_NOT_ENABLED'
           || payload?.code === 'TAILSCALE_OFFLINE'
           || payload?.code === 'TAILSCALE_NOT_AVAILABLE'
@@ -773,6 +784,7 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          enabled: remoteEnabled,
           bindHost,
           port: Number(port),
           preferredMode: 'private-vpn',
@@ -1144,6 +1156,30 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
               </div>
             </div>
 
+            <label
+              className={cn(
+                'mb-4 flex items-center justify-between gap-4 rounded-lg border px-4 py-3',
+                remoteEnabled
+                  ? 'border-emerald-300/30 bg-emerald-500/10'
+                  : 'border-white/10 bg-black/30',
+              )}
+            >
+              <span className="min-w-0">
+                <span className="block text-xs font-black uppercase tracking-[0.18em] text-white">
+                  Enable Umbra Remote
+                </span>
+                <span className="mt-1 block text-xs leading-relaxed text-zinc-500">
+                  Off by default. When enabled, published builds accept remote clients through your private Tailscale network only.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                checked={remoteEnabled}
+                onChange={(event) => setRemoteEnabled(event.target.checked)}
+                className="h-5 w-5 shrink-0 accent-emerald-400"
+              />
+            </label>
+
             <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_0.5fr]">
               <label className="block">
                 <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">Bind Address</span>
@@ -1188,7 +1224,7 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
                   <button
                     type="button"
                     onClick={runTailscaleServe}
-                    disabled={tailscaleServeRunning || !tailscaleConnected || status?.tailscaleServeEnabled}
+                    disabled={!remoteEnabled || tailscaleServeRunning || !tailscaleConnected || status?.tailscaleServeEnabled}
                     title={tailscaleConnected
                       ? status?.tailscaleServeEnabled
                         ? 'The Umbra HTTPS route is active'

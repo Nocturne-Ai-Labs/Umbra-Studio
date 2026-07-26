@@ -1,5 +1,72 @@
 # Changelog
 
+## v0.21.0
+
+### Umbra Director
+
+- Added a dedicated LTX multi-shot director for building one generated video
+  from individually timed shots with independent prompts and optional reference
+  images.
+- Added per-shot duration controls in seconds while preserving a separate
+  project frame-rate selector and exact frame calculations for LTX.
+- Added agent-assisted prompt enhancement for individual shots, shot
+  reordering, review details, and drag-and-drop media intake from Gallery and
+  the filmstrip.
+- Kept Director dispatch distinct from ordinary TXT2VID, IMG2VID, first/last
+  frame, and middle-frame generation so incompatible controls are not mixed
+  into the graph.
+- Added an Umbra-owned storyboard compiler and runtime contract rather than
+  depending on a third-party director node or API.
+
+### Extended Video
+
+- Added sequential LTX continuation for one to twelve clips, producing videos
+  up to two minutes long from a single reviewed queue submission.
+- Added optional IMG2VID starting-frame support while retaining a TXT2VID start
+  when no image is selected.
+- Made every continuation use the exact decoded last frame from the previous
+  clip, with independent prompts and durations for each segment.
+- Added backend-owned continuation staging, progress reporting, cancellation,
+  failure recovery, final MP4 assembly, and cleanup of temporary handoff media.
+- Completed a real twelve-clip acceptance run that produced a valid 120.5
+  second, 24 FPS H.264 video with all clips generated and joined successfully.
+
+### Video Workflow Polish
+
+- Added explicit video-model selection and clearer separation between LTX, Wan,
+  Director, Extended, and ordinary video generation flows.
+- Reworked source sizing so image and video inputs drive the generated aspect
+  ratio and target-size calculation without requiring manual width and height.
+- Improved the video review queue with correctly contained playback, reference
+  media, prompts, generation settings, edit-and-requeue actions, and a clear
+  control for completed review entries.
+- Added context-aware seconds, frames, FPS, source-media, and post-processing
+  controls while keeping unsupported settings disabled for the active flow.
+
+### Prompt And Workflow Handoffs
+
+- Added per-field prompt history and undo/redo behavior so restored history or
+  agent output cannot permanently overwrite prompt text being edited.
+- Added generation-control transfer from Umbra UI TXT2IMG to Power Prompter.
+- Preserved Power Prompter card segments when sending prompts into Umbra UI
+  instead of flattening every card into one positive-prompt field.
+- Restored prompt search to the main Power Prompter editor and kept searched
+  variant highlighting available in both editor and preset modes.
+- Replaced legacy LoRA drag insertion with click-to-copy token actions across
+  Umbra UI and Power Prompter.
+
+### Media And Remote Access
+
+- Rebuilt Gallery and filmstrip context menus with compact primary actions and
+  nested workflow destinations for Umbra UI image and video tools.
+- Added Director-aware media drag handling and smarter source-type routing.
+- Added a shared remote-access policy that keeps Umbra Remote disabled for new
+  installations until the user enables it.
+- Corrected Tailscale-only reporting and suppressed public forwarding details
+  when private tailnet access is the active remote mode.
+- Improved remote workspace status accuracy for connection, bind-address, and
+  restart-required states.
+
 ## v0.20.9
 
 ### Power Prompter Agent Enhancement

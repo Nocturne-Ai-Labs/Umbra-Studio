@@ -15,13 +15,13 @@ import {
   buildUmbraUiLoraSyntax,
   type UmbraUiLoraEntry,
 } from '@/lib/umbraUiModels';
+import { useStore } from '@/store/useStore';
 
 interface UmbraLoraStackControlsProps {
   loras: UmbraUiLoraEntry[];
   availableCount: number;
   onChange: (loras: UmbraUiLoraEntry[]) => void;
   onOpenPicker: () => void;
-  onAddPromptToken: (token: string) => void;
 }
 
 const labelClass = 'text-[9px] font-black uppercase tracking-[0.11em] text-zinc-500';
@@ -37,10 +37,33 @@ export function UmbraLoraStackControls({
   availableCount,
   onChange,
   onOpenPicker,
-  onAddPromptToken,
 }: UmbraLoraStackControlsProps) {
+  const showToast = useStore((state) => state.showToast);
   const [expanded, setExpanded] = React.useState(false);
+  const [copiedToken, setCopiedToken] = React.useState('');
+  const copiedTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const enabledLoras = loras.filter((lora) => lora.enabled);
+
+  React.useEffect(() => () => {
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+  }, []);
+
+  const copyToken = React.useCallback(async (rawToken: string) => {
+    const token = String(rawToken || '').trim();
+    if (!token) return;
+    try {
+      await navigator.clipboard.writeText(token);
+      setCopiedToken(token);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => {
+        copiedTimerRef.current = null;
+        setCopiedToken((current) => current === token ? '' : current);
+      }, 1400);
+      showToast('LoRA token copied.', 'success');
+    } catch {
+      showToast('Failed to copy LoRA token.', 'error');
+    }
+  }, [showToast]);
 
   const updateLora = React.useCallback((id: string, patch: Partial<UmbraUiLoraEntry>) => {
     onChange(loras.map((lora) => lora.id === id ? { ...lora, ...patch } : lora));
@@ -128,11 +151,11 @@ export function UmbraLoraStackControls({
                 <div className="mt-2 grid grid-cols-[minmax(0,1fr)_62px_62px] gap-1.5">
                   <button
                     type="button"
-                    onClick={() => void navigator.clipboard.writeText(syntax)}
+                    onClick={() => { void copyToken(syntax); }}
                     className="flex min-w-0 items-center gap-1.5 rounded-sm border border-cyan-300/18 bg-cyan-500/[0.05] px-2 text-left font-mono text-[9px] text-cyan-100/90 hover:border-cyan-300/35"
                     title="Copy LoRA syntax"
                   >
-                    <Copy size={10} className="shrink-0" />
+                    {copiedToken === syntax ? <Check size={10} className="shrink-0 text-emerald-300" /> : <Copy size={10} className="shrink-0" />}
                     <span className="truncate">{syntax}</span>
                   </button>
                   <label className="space-y-1">
@@ -165,11 +188,12 @@ export function UmbraLoraStackControls({
                         <button
                           type="button"
                           key={tag}
-                          onClick={() => onAddPromptToken(tag)}
-                          className="max-w-full truncate rounded-sm border border-emerald-300/18 bg-emerald-500/[0.055] px-2 py-1.5 font-mono text-[9px] text-emerald-100/90 hover:border-emerald-300/40 hover:bg-emerald-500/[0.1]"
-                          title={`Add "${tag}" to the prompt`}
+                          onClick={() => { void copyToken(tag); }}
+                          className="inline-flex max-w-full items-center gap-1.5 truncate rounded-sm border border-emerald-300/18 bg-emerald-500/[0.055] px-2 py-1.5 font-mono text-[9px] text-emerald-100/90 hover:border-emerald-300/40 hover:bg-emerald-500/[0.1]"
+                          title={`Copy "${tag}"`}
                         >
-                          {tag}
+                          {copiedToken === tag ? <Check size={9} className="shrink-0" /> : <Copy size={9} className="shrink-0" />}
+                          <span className="truncate">{tag}</span>
                         </button>
                       ))}
                     </div>

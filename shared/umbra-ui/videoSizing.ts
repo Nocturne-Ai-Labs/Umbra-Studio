@@ -173,7 +173,10 @@ export function resolveUmbraVideoSizing(input: UmbraVideoSizingInput): UmbraVide
   const postprocessScale = input.upscaleMode === 'none'
     ? 1
     : clamp(Number(input.upscaleScale) || 2, 1, 4);
-  const samplingMultiple = input.family === 'ltx23' ? 8 : 16;
+  // LTX's spatial latent upscaler requires a 32px-aligned base canvas.
+  // Smaller alignment can be silently truncated by the node (for example,
+  // 320x176 becomes 320x160 and produces a cropped 640x320 result).
+  const samplingMultiple = input.family === 'ltx23' ? 32 : 16;
   const samplingWidth = alignDimension(targetWidth / (latentScale * postprocessScale), samplingMultiple);
   const samplingHeight = alignDimension(targetHeight / (latentScale * postprocessScale), samplingMultiple);
   const decodedWidth = samplingWidth * latentScale;

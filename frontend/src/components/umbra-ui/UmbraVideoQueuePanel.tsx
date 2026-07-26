@@ -12,6 +12,7 @@ import {
   RefreshCw,
   RotateCcw,
   Settings2,
+  Trash2,
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -29,6 +30,16 @@ import type {
 import type { UmbraVideoEditorDraft } from '@/components/umbra-ui/UmbraVideoGenerationControls';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
 import { normalizeUmbraUiSeed } from '@/lib/umbraUiSeed';
+import {
+  resolveUmbraLtxStoryboardTimeline,
+  resolveUmbraVideoDurationSeconds,
+  resolveUmbraVideoFrameIndexForSeconds,
+  resolveUmbraVideoFramesForDuration,
+} from '../../../../shared/umbra-ui/videoStoryboard';
+import {
+  resolveUmbraLtxExtendedTotalSeconds,
+  type UmbraLtxExtendedSequenceMetadata,
+} from '../../../../shared/umbra-ui/videoExtension';
 
 interface UmbraVideoQueuePanelProps {
   jobs: UmbraVideoReviewJob[];
@@ -37,6 +48,7 @@ interface UmbraVideoQueuePanelProps {
   queueVideo: (options: UmbraVideoQueueOptions) => Promise<string>;
   onLoadIntoEditor: (draft: UmbraVideoEditorDraft) => void;
   onRefresh: () => Promise<UmbraVideoReviewJob[]>;
+  onClear: () => Promise<number>;
 }
 
 const inputClass = 'w-full rounded-md border border-white/10 bg-black/45 px-3 py-2.5 text-xs text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-fuchsia-300/45';
@@ -95,6 +107,19 @@ function cloneVideo(video: PowerPrompterVideoControls): PowerPrompterVideoContro
     ltx: {
       ...video.ltx,
       keyframes: video.ltx.keyframes.map((keyframe) => ({ ...keyframe })),
+      storyboard: {
+        enabled: video.ltx.storyboard?.enabled === true,
+        epsilon: video.ltx.storyboard?.epsilon ?? 0.001,
+        shots: Array.isArray(video.ltx.storyboard?.shots)
+          ? video.ltx.storyboard.shots.map((shot) => ({ ...shot }))
+          : [],
+      },
+      extended: {
+        ...video.ltx.extended,
+        clips: Array.isArray(video.ltx.extended?.clips)
+          ? video.ltx.extended.clips.map((clip) => ({ ...clip }))
+          : [],
+      },
     },
   };
 }
@@ -106,14 +131,28 @@ function getReferences(video: PowerPrompterVideoControls) {
     video.lastImagePath ? { id: 'last', label: 'Last', path: video.lastImagePath, type: 'image' as const } : null,
     ...video.ltx.keyframes
       .filter((keyframe) => keyframe.sourceImagePath)
-      .map((keyframe) => ({ id: keyframe.id, label: `F${keyframe.frameIndex}`, path: keyframe.sourceImagePath, type: 'image' as const })),
+      .map((keyframe) => ({
+        id: keyframe.id,
+        label: `${resolveUmbraVideoDurationSeconds(keyframe.frameIndex + 1, video.fps).toFixed(1)}s`,
+        path: keyframe.sourceImagePath,
+        type: 'image' as const,
+      })),
+    ...(video.ltx.storyboard?.shots || [])
+      .filter((shot) => shot.sourceImagePath)
+      .map((shot, index) => ({
+        id: shot.id,
+        label: `Shot ${index + 1}`,
+        path: shot.sourceImagePath,
+        type: 'image' as const,
+      })),
     video.sourceVideoPath ? { id: 'video', label: 'Video', path: video.sourceVideoPath, type: 'video' as const } : null,
     video.sourceAudioPath ? { id: 'audio', label: 'Audio', path: video.sourceAudioPath, type: 'audio' as const } : null,
   ].filter((entry): entry is NonNullable<typeof entry> => !!entry);
 }
 
 function getPrimaryOutput(outputs: UmbraVideoReviewOutput[]): UmbraVideoReviewOutput | null {
-  return outputs.find((output) => output.type === 'video')
+  return outputs.find((output) => output.mediaKind === 'extended_final')
+    || outputs.find((output) => output.type === 'video')
     || outputs.find((output) => output.type === 'image')
     || outputs[0]
     || null;
@@ -130,6 +169,36 @@ function CardOutputPreview({ output }: { output: UmbraVideoReviewOutput }) {
     return <div className="flex h-full items-center justify-center"><Music2 size={18} className="text-cyan-300/65" /></div>;
   }
   return <div className="flex h-full items-center justify-center font-mono text-[9px] text-zinc-600">FILE</div>;
+}
+
+function ReviewOutputPreview({ output }: { output: UmbraVideoReviewOutput }) {
+  if (output.type === 'video') {
+    return (
+      <div className="flex min-h-64 w-full items-center justify-center overflow-hidden bg-black p-2">
+        <video
+          src={mediaUrl(output.path)}
+          controls
+          preload="metadata"
+          className="block h-auto max-h-[min(68dvh,760px)] w-auto max-w-full object-contain"
+        />
+      </div>
+    );
+  }
+  if (output.type === 'image') {
+    return (
+      <div className="flex min-h-64 w-full items-center justify-center overflow-hidden bg-black p-2">
+        <img
+          src={mediaUrl(output.path)}
+          alt={output.name}
+          className="block h-auto max-h-[min(68dvh,760px)] w-auto max-w-full object-contain"
+        />
+      </div>
+    );
+  }
+  if (output.type === 'audio') {
+    return <div className="flex min-h-24 items-center p-3"><audio src={mediaUrl(output.path)} controls className="w-full" /></div>;
+  }
+  return <div className="flex min-h-24 items-center justify-center font-mono text-[10px] text-zinc-500">{output.name}</div>;
 }
 
 function statusTone(status: UmbraVideoReviewJob['status']) {
@@ -168,17 +237,23 @@ function ReferenceStrip({ video, large = false }: { video: PowerPrompterVideoCon
   );
 }
 
-function SettingsChips({ video, seed, seedMode, seedIncrement }: {
+function SettingsChips({ video, sequence, seed, seedMode, seedIncrement }: {
   video: PowerPrompterVideoControls;
+  sequence?: UmbraLtxExtendedSequenceMetadata;
   seed: number;
   seedMode: string;
   seedIncrement: number;
 }) {
   const chips = [
     video.family === 'wan22' ? 'Wan 2.2' : 'LTX-2.3',
+    sequence ? 'LTX Extended' : '',
+    sequence ? `Clip ${sequence.clipIndex + 1}/${sequence.clipCount}` : '',
+    sequence ? `${sequence.totalDurationSeconds.toFixed(1)}s total` : '',
+    sequence?.finalClip ? 'Final Clip' : '',
+    video.family === 'ltx23' && video.ltx.storyboard?.enabled ? 'Umbra Director' : '',
     video.mode === 'video_to_video' ? 'VID2VID' : video.mode === 'image_to_video' ? 'IMG2VID' : 'TXT2VID',
     `${video.width}x${video.height}`,
-    `${video.frames}f`,
+    `${resolveUmbraVideoDurationSeconds(video.frames, video.fps).toFixed(1)} seconds`,
     `${video.fps} FPS`,
     `Seed ${seed}`,
     seedMode !== 'fixed'
@@ -216,9 +291,9 @@ function VideoJobCard({ job, onOpen }: { job: UmbraVideoReviewJob; onOpen: () =>
         {job.outputs.length > 1 ? <span className="font-mono text-[9px] text-fuchsia-200">{job.outputs.length} outputs</span> : null}
       </div>
       <ReferenceStrip video={video} />
-      <div className={cn('relative bg-black/45', visibleOutputs.length > 1 ? 'grid grid-cols-2 gap-px bg-white/10' : 'aspect-video min-h-36')}>
+      <div className={cn('relative bg-black/45', visibleOutputs.length > 1 ? 'grid grid-cols-2 gap-px bg-white/10' : 'h-56')}>
         {visibleOutputs.length > 0 ? visibleOutputs.map((output) => (
-          <div key={output.id} className={cn('relative min-h-28 bg-black/70', visibleOutputs.length > 1 && 'aspect-video')}>
+          <div key={output.id} className={cn('relative overflow-hidden bg-black/70', visibleOutputs.length > 1 ? 'h-40' : 'h-full')}>
             <CardOutputPreview output={output} />
             <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/65 px-1.5 py-1 font-mono text-[8px] text-zinc-400">{output.name}</span>
           </div>
@@ -243,6 +318,7 @@ function VideoJobCard({ job, onOpen }: { job: UmbraVideoReviewJob; onOpen: () =>
         <p className="line-clamp-3 text-[11px] leading-relaxed text-zinc-300">{job.prompt || 'No prompt recorded.'}</p>
         <SettingsChips
           video={video}
+          sequence={job.sequence}
           seed={job.generation.seed}
           seedMode={job.generation.controlAfterGenerate}
           seedIncrement={job.generation.seedIncrement}
@@ -267,7 +343,7 @@ function NumberEditor({ label, value, onChange, min = 0, step = 1 }: {
   );
 }
 
-export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadIntoEditor, onRefresh }: UmbraVideoQueuePanelProps) {
+export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadIntoEditor, onRefresh, onClear }: UmbraVideoQueuePanelProps) {
   const showToast = useStore((state) => state.showToast);
   const [selected, setSelected] = React.useState<UmbraVideoReviewJob | null>(null);
   const [drawerVisible, setDrawerVisible] = React.useState(false);
@@ -275,12 +351,20 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
   const [draftNegative, setDraftNegative] = React.useState('');
   const [draftVideo, setDraftVideo] = React.useState<PowerPrompterVideoControls | null>(null);
   const [requeueing, setRequeueing] = React.useState(false);
+  const [clearPending, setClearPending] = React.useState(false);
+  const [clearing, setClearing] = React.useState(false);
+  const clearPendingRef = React.useRef(false);
+  const clearConfirmTimerRef = React.useRef<number | null>(null);
 
   const openJob = React.useCallback((job: UmbraVideoReviewJob) => {
+    const clonedVideo = cloneVideo(job.generation.video!);
+    const selectedClip = job.sequence
+      ? clonedVideo.ltx.extended.clips.find((clip) => clip.id === job.sequence?.clipId)
+      : null;
     setSelected(job);
-    setDraftPrompt(job.prompt);
+    setDraftPrompt(selectedClip?.prompt || job.prompt);
     setDraftNegative(job.negativePrompt);
-    setDraftVideo(cloneVideo(job.generation.video!));
+    setDraftVideo(clonedVideo);
     setDrawerVisible(false);
     window.requestAnimationFrame(() => setDrawerVisible(true));
   }, []);
@@ -299,15 +383,131 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [closeDrawer, selected]);
 
+  React.useEffect(() => () => {
+    if (clearConfirmTimerRef.current !== null) window.clearTimeout(clearConfirmTimerRef.current);
+  }, []);
+
+  const handleClear = React.useCallback(async () => {
+    if (clearing || jobs.length <= 0) return;
+    if (!clearPendingRef.current) {
+      clearPendingRef.current = true;
+      setClearPending(true);
+      if (clearConfirmTimerRef.current !== null) window.clearTimeout(clearConfirmTimerRef.current);
+      clearConfirmTimerRef.current = window.setTimeout(() => {
+        clearConfirmTimerRef.current = null;
+        clearPendingRef.current = false;
+        setClearPending(false);
+      }, 4000);
+      return;
+    }
+    if (clearConfirmTimerRef.current !== null) {
+      window.clearTimeout(clearConfirmTimerRef.current);
+      clearConfirmTimerRef.current = null;
+    }
+    clearPendingRef.current = false;
+    setClearPending(false);
+    setClearing(true);
+    try {
+      const removed = await onClear();
+      showToast(`Cleared ${removed} video review ${removed === 1 ? 'job' : 'jobs'}.`, 'success');
+    } catch (clearError) {
+      showToast(clearError instanceof Error ? clearError.message : 'Failed to clear the video review queue.', 'error');
+    } finally {
+      setClearing(false);
+    }
+  }, [clearing, jobs.length, onClear, showToast]);
+
   const patchVideo = React.useCallback(<K extends keyof PowerPrompterVideoControls>(key: K, value: PowerPrompterVideoControls[K]) => {
     setDraftVideo((current) => current ? { ...current, [key]: value } : current);
+  }, []);
+  const patchDuration = React.useCallback((durationSeconds: number) => {
+    setDraftVideo((current) => {
+      if (!current) return current;
+      if (current.family === 'ltx23' && current.ltx.extended?.enabled) {
+        return current;
+      }
+      const storyboardShots = current.ltx.storyboard?.shots || [];
+      if (current.family === 'ltx23' && current.ltx.storyboard?.enabled && storyboardShots.length > 0) {
+        const target = Math.max(storyboardShots.length * 0.5, Math.min(600, durationSeconds));
+        const currentTotal = storyboardShots.reduce((sum, shot) => sum + shot.durationSeconds, 0);
+        return {
+          ...current,
+          ltx: {
+            ...current.ltx,
+            storyboard: {
+              ...current.ltx.storyboard,
+              shots: storyboardShots.map((shot) => ({
+                ...shot,
+                durationSeconds: Math.max(
+                  0.5,
+                  Math.min(60, shot.durationSeconds * target / Math.max(0.5, currentTotal)),
+                ),
+              })),
+            },
+          },
+        };
+      }
+      return {
+        ...current,
+        frames: resolveUmbraVideoFramesForDuration(
+          durationSeconds,
+          current.fps,
+          current.family === 'ltx23' ? 8 : 4,
+        ),
+      };
+    });
+  }, []);
+  const patchOutputFps = React.useCallback((fpsInput: number) => {
+    setDraftVideo((current) => {
+      if (!current) return current;
+      const fps = Math.max(1, Math.min(120, Math.round(fpsInput || current.fps)));
+      const directorEnabled = current.family === 'ltx23' && current.ltx.storyboard?.enabled;
+      const extendedEnabled = current.family === 'ltx23' && current.ltx.extended?.enabled;
+      const durationSeconds = extendedEnabled
+        ? current.ltx.extended.clips[0]?.durationSeconds || 10
+        : directorEnabled
+        ? current.ltx.storyboard.shots.reduce((sum, shot) => sum + shot.durationSeconds, 0)
+        : resolveUmbraVideoDurationSeconds(current.frames, current.fps);
+      const frames = extendedEnabled
+        ? resolveUmbraVideoFramesForDuration(durationSeconds, fps, 8)
+        : directorEnabled
+        ? resolveUmbraLtxStoryboardTimeline(current.ltx.storyboard, fps, current.frames).frames
+        : resolveUmbraVideoFramesForDuration(
+          durationSeconds,
+          fps,
+          current.family === 'ltx23' ? 8 : 4,
+        );
+      return {
+        ...current,
+        fps,
+        frames,
+        ltx: {
+          ...current.ltx,
+          keyframes: current.ltx.keyframes.map((keyframe) => ({
+            ...keyframe,
+            frameIndex: resolveUmbraVideoFrameIndexForSeconds(
+              keyframe.frameIndex / Math.max(1, current.fps),
+              fps,
+              8,
+              Math.max(0, frames - 1),
+            ),
+          })),
+        },
+      };
+    });
   }, []);
 
   const requeue = React.useCallback(async () => {
     if (!draftVideo || !draftPrompt.trim() || requeueing) return;
     setRequeueing(true);
     try {
-      await queueVideo({ prompt: draftPrompt, negativePrompt: draftNegative, video: draftVideo });
+      const videoForQueue = cloneVideo(draftVideo);
+      if (selected?.sequence && videoForQueue.ltx.extended.enabled) {
+        videoForQueue.ltx.extended.clips = videoForQueue.ltx.extended.clips.map((clip) => (
+          clip.id === selected.sequence?.clipId ? { ...clip, prompt: draftPrompt.trim() } : clip
+        ));
+      }
+      await queueVideo({ prompt: draftPrompt, negativePrompt: draftNegative, video: videoForQueue });
       await onRefresh();
       showToast('Edited video added to the shared queue.', 'success');
     } catch (queueError) {
@@ -315,7 +515,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
     } finally {
       setRequeueing(false);
     }
-  }, [draftNegative, draftPrompt, draftVideo, onRefresh, queueVideo, requeueing, showToast]);
+  }, [draftNegative, draftPrompt, draftVideo, onRefresh, queueVideo, requeueing, selected?.sequence, showToast]);
 
   return (
     <main data-umbra-ui-video-queue="" className="relative flex min-h-0 min-w-0 flex-col bg-black/15">
@@ -325,9 +525,25 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
         <span className="font-mono text-[10px] text-zinc-600">{jobs.length}</span>
         <button
           type="button"
+          data-umbra-video-review-clear=""
+          onClick={() => void handleClear()}
+          disabled={loading || clearing || jobs.length <= 0}
+          className={cn(
+            'ml-auto inline-flex h-7 min-w-16 items-center justify-center gap-1 rounded-md border px-2 text-[9px] font-black uppercase tracking-[0.08em] transition-colors disabled:opacity-35',
+            clearPending
+              ? 'border-red-300/40 bg-red-500/10 text-red-200'
+              : 'border-white/10 text-zinc-500 hover:border-red-300/25 hover:text-red-200',
+          )}
+          title={clearPending ? 'Click again to confirm' : 'Clear video review queue'}
+        >
+          {clearing ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+          {clearPending ? 'Confirm' : 'Clear'}
+        </button>
+        <button
+          type="button"
           onClick={() => void onRefresh()}
           disabled={loading}
-          className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:border-fuchsia-300/25 hover:text-fuchsia-200 disabled:opacity-40"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:border-fuchsia-300/25 hover:text-fuchsia-200 disabled:opacity-40"
           title="Refresh video review queue"
         >
           <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
@@ -373,18 +589,10 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
 
             <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
               <ReferenceStrip video={draftVideo} large />
-              <div className="grid gap-2 border-b border-white/10 bg-black/25 p-3 sm:grid-cols-2">
+              <div className="grid gap-3 border-b border-white/10 bg-black/25 p-3">
                 {selected.outputs.length > 0 ? selected.outputs.map((output) => (
                   <div key={output.id} className="overflow-hidden rounded-md border border-white/10 bg-black/45">
-                    {output.type === 'video' ? (
-                      <video src={mediaUrl(output.path)} controls preload="metadata" className="aspect-video h-auto w-full bg-black object-contain" />
-                    ) : output.type === 'image' ? (
-                      <img src={mediaUrl(output.path)} alt={output.name} className="aspect-video h-auto w-full object-contain" />
-                    ) : output.type === 'audio' ? (
-                      <div className="flex min-h-24 items-center p-3"><audio src={mediaUrl(output.path)} controls className="w-full" /></div>
-                    ) : (
-                      <div className="flex min-h-24 items-center justify-center font-mono text-[10px] text-zinc-500">{output.name}</div>
-                    )}
+                    <ReviewOutputPreview output={output} />
                     <div className="truncate border-t border-white/10 px-2 py-1.5 font-mono text-[9px] text-zinc-500">{output.name}</div>
                   </div>
                 )) : (
@@ -396,10 +604,86 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
 
               <div className="space-y-4 p-4">
                 {selected.error ? <div className="border border-red-300/20 bg-red-500/[0.04] p-3 text-[11px] text-red-200/80">{selected.error}</div> : null}
-                <label className="block space-y-1.5">
-                  <span className={labelClass}>Prompt</span>
-                  <textarea value={draftPrompt} onChange={(event) => setDraftPrompt(event.target.value)} className={`${inputClass} min-h-32 resize-y leading-relaxed`} />
-                </label>
+                {selected.sequence && draftVideo.ltx.extended.enabled ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className={labelClass}>Extended Sequence Prompts</span>
+                      <span className="ml-auto font-mono text-[9px] text-cyan-200">
+                        {draftVideo.ltx.extended.clips.length} clips / {resolveUmbraLtxExtendedTotalSeconds(draftVideo.ltx.extended).toFixed(1)}s
+                      </span>
+                    </div>
+                    {draftVideo.ltx.extended.clips.map((clip, index) => {
+                      const selectedClip = clip.id === selected.sequence?.clipId;
+                      return (
+                        <div
+                          key={clip.id}
+                          className={cn(
+                            'rounded-md border p-2.5',
+                            selectedClip
+                              ? 'border-cyan-300/30 bg-cyan-500/[0.045]'
+                              : 'border-white/10 bg-black/25',
+                          )}
+                        >
+                          <div className="mb-2 flex items-center gap-2">
+                            <span className="font-mono text-[9px] font-bold text-cyan-100">Clip {index + 1}</span>
+                            {selectedClip ? <span className="font-mono text-[8px] uppercase text-cyan-300/70">reviewed output</span> : null}
+                            <label className="ml-auto flex items-center gap-1.5">
+                              <span className={labelClass}>Seconds</span>
+                              <input
+                                type="number"
+                                min={1}
+                                max={10}
+                                step={0.5}
+                                value={clip.durationSeconds}
+                                onChange={(event) => {
+                                  const durationSeconds = Math.max(1, Math.min(10, Number(event.target.value) || 1));
+                                  setDraftVideo((current) => current ? {
+                                    ...current,
+                                    ltx: {
+                                      ...current.ltx,
+                                      extended: {
+                                        ...current.ltx.extended,
+                                        clips: current.ltx.extended.clips.map((entry) => (
+                                          entry.id === clip.id ? { ...entry, durationSeconds } : entry
+                                        )),
+                                      },
+                                    },
+                                  } : current);
+                                }}
+                                className="h-8 w-16 rounded-sm border border-white/10 bg-black/45 px-2 font-mono text-[10px] text-zinc-200 outline-none focus:border-cyan-300/40"
+                              />
+                            </label>
+                          </div>
+                          <textarea
+                            value={selectedClip ? draftPrompt : clip.prompt}
+                            onChange={(event) => {
+                              const promptValue = event.target.value;
+                              if (selectedClip) setDraftPrompt(promptValue);
+                              setDraftVideo((current) => current ? {
+                                ...current,
+                                ltx: {
+                                  ...current.ltx,
+                                  extended: {
+                                    ...current.ltx.extended,
+                                    clips: current.ltx.extended.clips.map((entry) => (
+                                      entry.id === clip.id ? { ...entry, prompt: promptValue } : entry
+                                    )),
+                                  },
+                                },
+                              } : current);
+                            }}
+                            className={`${inputClass} min-h-24 resize-y leading-relaxed`}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <label className="block space-y-1.5">
+                    <span className={labelClass}>Prompt</span>
+                    <textarea value={draftPrompt} onChange={(event) => setDraftPrompt(event.target.value)} className={`${inputClass} min-h-32 resize-y leading-relaxed`} />
+                  </label>
+                )}
                 <label className="block space-y-1.5">
                   <span className={labelClass}>Negative Prompt</span>
                   <textarea value={draftNegative} onChange={(event) => setDraftNegative(event.target.value)} className={`${inputClass} min-h-20 resize-y leading-relaxed`} />
@@ -410,8 +694,30 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     <NumberEditor label="Width" value={draftVideo.width} min={64} step={16} onChange={(value) => patchVideo('width', value)} />
                     <NumberEditor label="Height" value={draftVideo.height} min={64} step={16} onChange={(value) => patchVideo('height', value)} />
-                    <NumberEditor label="Frames" value={draftVideo.frames} min={1} step={draftVideo.family === 'ltx23' ? 8 : 4} onChange={(value) => patchVideo('frames', value)} />
-                    <NumberEditor label="FPS" value={draftVideo.fps} min={1} onChange={(value) => patchVideo('fps', value)} />
+                    {draftVideo.family === 'ltx23' && draftVideo.ltx.extended.enabled ? (
+                      <div className="space-y-1.5">
+                        <span className={labelClass}>Sequence Duration</span>
+                        <div className="flex h-10 items-center rounded-md border border-cyan-300/15 bg-cyan-500/[0.035] px-3 font-mono text-xs text-cyan-100">
+                          {resolveUmbraLtxExtendedTotalSeconds(draftVideo.ltx.extended).toFixed(1)} seconds
+                        </div>
+                      </div>
+                    ) : <NumberEditor
+                      label="Duration (seconds)"
+                      value={Number((
+                        draftVideo.family === 'ltx23' && draftVideo.ltx.storyboard?.enabled
+                          ? draftVideo.ltx.storyboard.shots.reduce((sum, shot) => sum + shot.durationSeconds, 0)
+                          : resolveUmbraVideoDurationSeconds(draftVideo.frames, draftVideo.fps)
+                      ).toFixed(2))}
+                      min={0.5}
+                      step={0.5}
+                      onChange={patchDuration}
+                    />}
+                    <NumberEditor
+                      label="Frame Rate (FPS)"
+                      value={draftVideo.fps}
+                      min={1}
+                      onChange={patchOutputFps}
+                    />
                     {draftVideo.mode === 'video_to_video' ? (
                       <NumberEditor label="Denoise" value={draftVideo.denoise} min={0.01} step={0.01} onChange={(value) => patchVideo('denoise', Math.min(1, value))} />
                     ) : null}

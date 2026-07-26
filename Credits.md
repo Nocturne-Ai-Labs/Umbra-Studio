@@ -210,6 +210,11 @@ application features around the integrated upstream tools.
   - Umbra metadata save nodes
   - Umbra Power Prompter reader integration
   - Umbra-specific workflow/runtime bridging for ComfyUI
+  - Umbra Director timed-prompt runtime for LTX Storyboard generation
+- Technique reference:
+  - Prompt Relay research and project page: https://gordonchen19.github.io/Prompt-Relay/
+  - LTX Video Director custom node by WhatDreamsCost: https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI
+    - Inspiration for Umbra Director's timed, multi-shot prompting workflow. Umbra Director is an independent implementation and does not require the upstream node pack at runtime.
 
 ### VideoHelperSuite Attribution
 - Upstream project: https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite

@@ -68,6 +68,7 @@ Quick summary:
 - Model Manager for local model organization and snapshot-based CivitAI import
 - Data Forge for dataset collection and curation workflows
 - Umbra UI for model-aware image, video, img2img, inpaint, and upscale pipelines
+- Optional LTX 2.3 Storyboard mode for timed per-shot prompts, multiple guide images, and selective agent prompt enhancement
 - Managed tool runtime support for ComfyUI and AI Toolkit
 - Local Servers for opening localhost/LAN tools inside Umbra
 
@@ -343,6 +344,11 @@ Managed ComfyUI custom nodes intentionally track each project's latest
 upstream default branch. Umbra does not pin custom-node commits; setup and
 update actions pull current upstream changes. Downloadable support-model files
 are pinned separately so their integrity and destination remain deterministic.
+LTX Storyboard mode uses Umbra Director, maintained inside
+[Umbra-Nodes](https://github.com/Nocturne-Ai-Labs/Umbra-Nodes). Umbra owns the
+editor, persisted storyboard contract, temporal prompt scheduler, queue
+integration, and workflow compiler. Guide images continue through ComfyUI's
+native LTX guide nodes.
 
 ## Publish Portable Build
 

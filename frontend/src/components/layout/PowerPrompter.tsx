@@ -62,6 +62,14 @@ import {
   type PowerPrompterImageRestoreHandoff,
 } from '@/lib/powerPrompterImageRestoreHandoff';
 import {
+  applyUmbraUiGenerationControlsToPowerPrompterDocument,
+  clearPendingUmbraUiGenerationControlsHandoff,
+  normalizeUmbraUiGenerationControlsHandoff,
+  takePendingUmbraUiGenerationControlsHandoff,
+  UMBRA_UI_GENERATION_CONTROLS_HANDOFF_EVENT,
+  type UmbraUiGenerationControlsHandoff,
+} from '@/lib/umbraUiGenerationControlsHandoff';
+import {
   DEFAULT_QUEUE_MANAGER_PREVIEW_SPLIT,
   QUEUE_DIVERSITY_MAX,
   QUEUE_DIVERSITY_MIN,
@@ -7742,6 +7750,77 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       schedulePowerPrompterDocumentSessionUpdate(normalized);
     }
   };
+
+  const applyUmbraUiGenerationControlsHandoff = useCallback((value: unknown): boolean => {
+    const handoff = normalizeUmbraUiGenerationControlsHandoff(value);
+    if (!handoff) return false;
+    const activeFile = currentFileRef.current;
+    if (!activeFile) {
+      showToast('Open a PPCard file before sending Umbra UI generation controls.', 'error');
+      return false;
+    }
+
+    const nextDocument = applyUmbraUiGenerationControlsToPowerPrompterDocument(
+      cardDocumentRef.current,
+      handoff,
+      activeFile,
+    );
+    if (!nextDocument) return false;
+
+    const activePresetSession = activePowerPrompterPresetSessionRef.current;
+    if (activePresetSession) {
+      const baseDocument = applyUmbraUiGenerationControlsToPowerPrompterDocument(
+        activePresetSession.baseDocument,
+        handoff,
+        activeFile,
+      );
+      if (!baseDocument) return false;
+      const nextSession: PowerPrompterPresetSession = {
+        ...activePresetSession,
+        baseDocument,
+        baseHadPendingChanges: true,
+      };
+      activePowerPrompterPresetSessionRef.current = nextSession;
+      setActivePowerPrompterPresetSession(nextSession);
+    }
+
+    handleCardDocumentChange(nextDocument);
+    if (activePresetSession) {
+      hasPendingChangesRef.current = true;
+      markPendingChange();
+      schedulePowerPrompterDocumentSessionUpdate(nextDocument);
+    }
+    handlePrompterPanelModeChange('editor');
+    showToast(
+      `Applied ${handoff.pipelineName || handoff.modelFamily} controls to the active PPCard.`,
+      'success',
+    );
+    return true;
+  }, [handlePrompterPanelModeChange, showToast]);
+
+  useEffect(() => {
+    const consumeHandoff = (value: unknown) => {
+      const handoff = normalizeUmbraUiGenerationControlsHandoff(value);
+      if (!handoff) return;
+      clearPendingUmbraUiGenerationControlsHandoff();
+      applyUmbraUiGenerationControlsHandoff(handoff);
+    };
+    const pendingHandoff = takePendingUmbraUiGenerationControlsHandoff();
+    if (pendingHandoff) applyUmbraUiGenerationControlsHandoff(pendingHandoff);
+    const onHandoff = (event: Event) => {
+      consumeHandoff((event as CustomEvent<UmbraUiGenerationControlsHandoff>).detail);
+    };
+    window.addEventListener(
+      UMBRA_UI_GENERATION_CONTROLS_HANDOFF_EVENT,
+      onHandoff as EventListener,
+    );
+    return () => {
+      window.removeEventListener(
+        UMBRA_UI_GENERATION_CONTROLS_HANDOFF_EVENT,
+        onHandoff as EventListener,
+      );
+    };
+  }, [applyUmbraUiGenerationControlsHandoff]);
 
   const handleQueueEditorDocumentChange = (nextDocument: PowerPrompterCardDocument) => {
     const previousDocument = queueEditorDocumentRef.current;

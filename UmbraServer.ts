@@ -48,6 +48,10 @@ import {
 } from './backend/UmbraUiInpaintService';
 import { UmbraUiCanvasProjectService } from './backend/UmbraUiCanvasProjectService';
 import { replaceUmbraUiImageSource } from './backend/UmbraUiSourceReplacementService';
+import {
+  concatenateUmbraExtendedVideoClips,
+  isUmbraExtendedVideoOutputPath,
+} from './backend/UmbraUiExtendedVideoService';
 import { applyUmbraUiClipSkipToGraph } from './backend/UmbraUiGraphControls';
 import { seedBundledWorkflowDirectory } from './backend/BundledWorkflowService';
 import { upsertPngTextMetadata } from './backend/PngTextMetadata';
@@ -62,6 +66,12 @@ import {
   buildTailscaleServeOrigin,
   formatUrlHost,
 } from './backend/remoteNetworkAddress';
+import {
+  isTailscaleOnlyRemoteAccess,
+  resolveRemoteListenerHost,
+  resolveRemoteRequestAccess,
+  resolveSavedRemoteEnabled,
+} from './backend/remoteAccessPolicy';
 
 // Route handlers we're keeping (will merge later)
 import * as trashRoutes from './backend/routes/trash';
@@ -132,6 +142,19 @@ import {
   resolveUmbraVideoSizing,
   resolveUmbraVideoTargetDimensions,
 } from './shared/umbra-ui/videoSizing';
+import {
+  buildUmbraLtxDirectorInputContract,
+  normalizeUmbraLtxStoryboardControls,
+  resolveUmbraLtxStoryboardTimeline,
+  type UmbraLtxStoryboardControls,
+} from './shared/umbra-ui/videoStoryboard';
+import {
+  UMBRA_LTX_EXTENDED_MAX_TOTAL_SECONDS,
+  normalizeUmbraLtxExtendedControls,
+  normalizeUmbraLtxExtendedSequenceMetadata,
+  type UmbraLtxExtendedControls,
+  type UmbraLtxExtendedSequenceMetadata,
+} from './shared/umbra-ui/videoExtension';
 
 const execAsync = promisify(exec);
 const gzipAsync = promisify(gzip);
@@ -172,8 +195,9 @@ function loadRemoteBootstrapSettings(): { bindHost?: string; port?: number } {
   try {
     if (!existsSync(REMOTE_BOOTSTRAP_SETTINGS_PATH)) return {};
     const parsed = JSON.parse(readFileSync(REMOTE_BOOTSTRAP_SETTINGS_PATH, 'utf-8')) as Record<string, unknown>;
+    const enabled = resolveSavedRemoteEnabled(parsed.enabled, true);
     return {
-      bindHost: normalizeBindHost(parsed.bindHost, ''),
+      bindHost: resolveRemoteListenerHost(enabled, normalizeBindHost(parsed.bindHost, '')),
       port: parsed.port ? clampPort(parsed.port) : undefined,
     };
   } catch {
@@ -2509,6 +2533,7 @@ interface RemoteAuthConfig {
 
 interface RemoteConnectionSettings {
   version: 1;
+  enabled: boolean;
   bindHost: string;
   port: number;
   preferredMode: RemoteConnectionMode;
@@ -2589,6 +2614,7 @@ function normalizeSessionTtlDays(value: unknown): number {
 function loadRemoteConnectionSettings(): RemoteConnectionSettings {
   const fallback: RemoteConnectionSettings = {
     version: 1,
+    enabled: false,
     bindHost: HOST,
     port: PORT,
     preferredMode: 'auto',
@@ -2605,6 +2631,7 @@ function loadRemoteConnectionSettings(): RemoteConnectionSettings {
     const parsed = JSON.parse(readFileSync(REMOTE_SETTINGS_PATH, 'utf-8').replace(/^\uFEFF/, '')) as Partial<RemoteConnectionSettings>;
     return {
       version: 1,
+      enabled: resolveSavedRemoteEnabled(parsed.enabled, true),
       bindHost: normalizeBindHost(parsed.bindHost, HOST),
       port: clampPort(parsed.port || PORT, PORT),
       preferredMode: isRemoteConnectionMode(parsed.preferredMode) ? parsed.preferredMode : 'auto',
@@ -4668,6 +4695,15 @@ async function deleteUmbraUiVideoReviewJob(idRaw: unknown): Promise<boolean> {
   return true;
 }
 
+async function clearUmbraUiVideoReviewJobs(): Promise<number> {
+  await ensureUmbraUiVideoReviewLoaded();
+  const removed = umbraUiVideoReviewJobs.length;
+  if (removed <= 0) return 0;
+  umbraUiVideoReviewJobs = [];
+  scheduleUmbraUiVideoReviewSave();
+  return removed;
+}
+
 interface LoadedPPApiWorkflow {
   item: PPApiWorkflowListItem;
   document: unknown;
@@ -6598,6 +6634,7 @@ function applyPPLtxVideoTopology(
   promptGraph: Record<string, unknown>,
   roleEntries: Map<string, { id: string; node: any }>,
   generation: PowerPrompterGenerationControls,
+  activePrompt: string,
 ) {
   const video = generation.video;
   if (generation.mediaType !== 'video' || !video || video.family !== 'ltx23') return;
@@ -6615,6 +6652,40 @@ function applyPPLtxVideoTopology(
     const inputs = ensurePPApiNodeInputs(roleEntries.get(role)?.node);
     if (inputs) delete inputs[inputName];
   };
+
+  const storyboardContract = buildUmbraLtxDirectorInputContract(
+    video.ltx.storyboard,
+    video.fps,
+    video.frames,
+    activePrompt,
+  );
+  const storyboardTimeline = storyboardContract.timeline;
+  if (storyboardTimeline.enabled) {
+    if (storyboardTimeline.shots.length < 2 || storyboardTimeline.shots.some((shot) => !shot.prompt.trim())) {
+      throw new Error('The LTX storyboard requires at least two shots with prompts.');
+    }
+    const promptModel = ref('ltx_prompt_lora');
+    const promptClip = ref('ltx_prompt_lora', 1);
+    const promptLatent = ref('ltx_base_video_latent');
+    const conditioningNode = roleEntries.get('ltx_conditioning')?.node;
+    if (!promptModel || !promptClip || !promptLatent || !conditioningNode) {
+      throw new Error('The locked LTX pipeline is missing the Umbra Director inputs required by Storyboard mode.');
+    }
+    const directorId = addPPApiPromptNode(
+      promptGraph,
+      'UmbraLTXDirector',
+      {
+        model: promptModel,
+        clip: promptClip,
+        latent: promptLatent,
+        ...storyboardContract.inputs,
+      },
+      'Umbra Director',
+    );
+    setPPApiNodeInput(conditioningNode, 'positive', [directorId, 1]);
+    setRef('ltx_base_cfg', 'model', [directorId, 0]);
+    setRef('ltx_refine_cfg', 'model', [directorId, 0]);
+  }
 
   const baseVideo = ref('ltx_base_video_latent');
   const baseSampler = ref('ltx_base_sample');
@@ -6634,7 +6705,27 @@ function applyPPLtxVideoTopology(
     if (baseSigmas) setPPApiNodeInput(baseSigmas, 'sigmas', trimPPVideoSigmas(video.ltx.baseSigmas, video.denoise));
     if (refineSigmas) setPPApiNodeInput(refineSigmas, 'sigmas', trimPPVideoSigmas(video.ltx.refineSigmas, video.denoise));
   }
-  const configuredKeyframes = video.ltx.keyframes.filter((keyframe) => keyframe.sourceImageName);
+  const configuredKeyframes = storyboardTimeline.enabled
+    ? []
+    : video.ltx.keyframes.filter((keyframe) => keyframe.sourceImageName);
+  if (storyboardTimeline.enabled) {
+    for (const shot of storyboardTimeline.shots) {
+      if (!shot.sourceImageName) continue;
+      configuredKeyframes.push({
+        id: `umbra-storyboard-${shot.id}`,
+        sourceImagePath: shot.sourceImagePath,
+        sourceImageName: shot.sourceImageName,
+        frameIndex: Math.max(
+          0,
+          Math.min(
+            video.frames - 1,
+            Math.round(shot.startFrame / 8) * 8,
+          ),
+        ),
+        strength: shot.strength,
+      });
+    }
+  }
   if (video.mode === 'image_to_video' && video.frameGuideMode === 'first_middle_last' && video.middleImageName) {
     configuredKeyframes.push({
       id: 'umbra-middle-frame',
@@ -6736,14 +6827,16 @@ function applyPPLtxVideoTopology(
   setRef('ltx_base_cfg', 'negative', baseGuides.negative);
   setRef('ltx_base_concat', 'video_latent', baseGuides.latent);
   setRef('ltx_base_concat', 'audio_latent', emptyAudio);
-  setRef('ltx_base_sample', 'latent_image', generateAudio ? ref('ltx_base_concat') : baseGuides.latent);
+  // LTX 2.3 AV checkpoints require a time-aligned audio latent during sampling,
+  // even when the user does not want an audio stream in the saved video.
+  setRef('ltx_base_sample', 'latent_image', ref('ltx_base_concat'));
   setRef('ltx_base_separate', 'av_latent', baseSampler);
 
   const baseCropped = cropGuideLatent(
     'Base',
     baseGuides.positive,
     baseGuides.negative,
-    generateAudio ? baseSeparateVideo : baseSampler,
+    baseSeparateVideo,
   );
   const baseVideoResult = baseCropped.latent;
   setRef('ltx_upscale', 'samples', baseVideoResult);
@@ -6760,14 +6853,14 @@ function applyPPLtxVideoTopology(
   setRef('ltx_refine_cfg', 'negative', refineGuides.negative);
   setRef('ltx_refine_concat', 'video_latent', refineGuides.latent);
   setRef('ltx_refine_concat', 'audio_latent', baseSeparateAudio);
-  setRef('ltx_refine_sample', 'latent_image', generateAudio ? ref('ltx_refine_concat') : refineGuides.latent);
+  setRef('ltx_refine_sample', 'latent_image', ref('ltx_refine_concat'));
   setRef('ltx_refine_separate', 'av_latent', refineSampler);
 
   const refineCropped = cropGuideLatent(
     'Refine',
     refineGuides.positive,
     refineGuides.negative,
-    generateAudio ? refineSeparateVideo : refineSampler,
+    refineSeparateVideo,
   );
   const finalVideo = video.ltx.twoStage ? refineCropped.latent : baseVideoResult;
   const finalAudio = video.ltx.twoStage ? refineSeparateAudio : baseSeparateAudio;
@@ -6986,10 +7079,15 @@ function compileUmbraUiPipelineWorkflow(
   const shouldFreezeRepeatSeeds = styleSeedMode === 'same' && outputSubfolder.length > 0;
   const videoRoleEntries = new Map<string, { id: string; node: any }>();
 
+  const workflowResourceValues = resolvePPWorkflowResourceValues(
+    workflowDescriptor.resources,
+    generation.workflowResources,
+    generation,
+  );
   if (workflowDescriptor.mediaType === 'image') {
-    assertRequiredPPWorkflowResources(workflowDescriptor.resources, generation.workflowResources);
+    assertRequiredPPWorkflowResources(workflowDescriptor.resources, workflowResourceValues);
   }
-  applyPPWorkflowResourceValues(promptGraph, workflowDescriptor.resources, generation.workflowResources);
+  applyPPWorkflowResourceValues(promptGraph, workflowDescriptor.resources, workflowResourceValues);
 
   for (const [nodeId, node] of Object.entries(promptGraph) as Array<[string, any]>) {
     const classType = String(node?.class_type || '').trim();
@@ -7339,7 +7437,7 @@ function compileUmbraUiPipelineWorkflow(
 
   applyPPWanVideoTopology(promptGraph, videoRoleEntries, generation);
   applyPPWanVid2VidTopology(videoRoleEntries, generation);
-  applyPPLtxVideoTopology(promptGraph, videoRoleEntries, generation);
+  applyPPLtxVideoTopology(promptGraph, videoRoleEntries, generation, activePrompt);
   applyPPVideoSourceAudio(promptGraph, videoRoleEntries, generation);
   applyPPVideoPostProcessing(promptGraph, videoRoleEntries, generation);
 
@@ -7839,7 +7937,7 @@ function collectComfyHistorySavedOutputs(historyPayload: any, promptId: string):
 
   const saved: Array<Record<string, unknown>> = [];
   const outputKeys = ['images', 'gifs', 'videos', 'animated', 'audio', 'audios', 'files'];
-  for (const nodeOutput of Object.values(outputs as Record<string, unknown>)) {
+  for (const [nodeId, nodeOutput] of Object.entries(outputs as Record<string, unknown>)) {
     if (!nodeOutput || typeof nodeOutput !== 'object') continue;
     for (const key of outputKeys) {
       const items = (nodeOutput as Record<string, unknown>)[key];
@@ -7851,6 +7949,7 @@ function collectComfyHistorySavedOutputs(historyPayload: any, promptId: string):
         if (!filename && !fullPath) continue;
         saved.push({
           ...(item as Record<string, unknown>),
+          nodeId,
           filename,
           fullpath: fullPath,
           mediaKind: key,
@@ -7976,9 +8075,9 @@ async function emitBackendPowerPrompterSavedOutputs(
   sourceFile: string,
   metadata?: Record<string, unknown> | null,
   sourceWs?: ServerWebSocket<unknown> | null,
-) {
+): Promise<Array<Record<string, unknown>>> {
   const outputs = await fetchBackendPowerPrompterSavedOutputs(promptId);
-  if (outputs.length === 0) return;
+  if (outputs.length === 0) return [];
   const resolvedOutputs = outputs.map((output) => ({
     ...output,
     fullpath: resolveComfySavedOutputPath(output),
@@ -8066,6 +8165,7 @@ async function emitBackendPowerPrompterSavedOutputs(
   emitPowerPrompterRuntimeTerminalLog('queue_saved_outputs', payload);
   void tagPowerPrompterSavedOutputs(payload, null);
   sendPrompterEventToTargets(payload, sourceWs);
+  return stampedOutputs;
 }
 
 function markBackendPowerPrompterQueueStopAfterCurrent(requestId: string, reason: string): boolean {
@@ -8792,6 +8892,201 @@ async function getPowerPrompterRestoreMetadata(
   return envelope;
 }
 
+interface BackendUmbraLtxExtendedSession {
+  sessionId: string;
+  clipCount: number;
+  totalDurationSeconds: number;
+}
+
+function readBackendUmbraLtxExtendedSession(
+  generations: PowerPrompterGenerationControls[],
+): BackendUmbraLtxExtendedSession | null {
+  const sequence = generations[0]?.videoSequence;
+  if (!sequence || sequence.kind !== 'ltx_extended') return null;
+  const sessionId = sequence.sessionId;
+  const clipCount = sequence.clipCount;
+  let totalDurationSeconds = 0;
+  if (clipCount !== generations.length) {
+    throw new Error(`Umbra Extended expected ${clipCount} clips but received ${generations.length}.`);
+  }
+  for (let index = 0; index < generations.length; index += 1) {
+    const generation = generations[index];
+    const current = generation.videoSequence;
+    if (!generation.video || generation.video.family !== 'ltx23') {
+      throw new Error(`Umbra Extended clip ${index + 1} is not an LTX-2.3 video generation.`);
+    }
+    if (!current
+      || current.kind !== 'ltx_extended'
+      || current.sessionId !== sessionId
+      || current.clipCount !== clipCount
+      || current.clipIndex !== index) {
+      throw new Error(`Umbra Extended clip ${index + 1} has inconsistent sequence metadata.`);
+    }
+    totalDurationSeconds += current.clipDurationSeconds;
+  }
+  if (totalDurationSeconds > UMBRA_LTX_EXTENDED_MAX_TOTAL_SECONDS) {
+    throw new Error(`Umbra Extended sequences cannot exceed ${UMBRA_LTX_EXTENDED_MAX_TOTAL_SECONDS} seconds.`);
+  }
+  if (Math.abs(totalDurationSeconds - sequence.totalDurationSeconds) > 0.01) {
+    throw new Error('Umbra Extended clip durations do not match the sequence total.');
+  }
+  return {
+    sessionId,
+    clipCount,
+    totalDurationSeconds,
+  };
+}
+
+function sanitizeUmbraExtendedSessionName(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .replace(/[^a-z0-9_-]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'extended-video';
+}
+
+function injectUmbraExtendedContinuationPreview(
+  promptGraph: Record<string, any>,
+  frameCount: number,
+  sessionId: string,
+  clipIndex: number,
+): string {
+  const decodeEntry = Object.entries(promptGraph).find(([, node]) => (
+    getPPApiNodeRole(node) === 'video_decode'
+  ));
+  if (!decodeEntry) {
+    throw new Error('The LTX pipeline has no decoded video output for Umbra Extended continuation.');
+  }
+  const sessionName = sanitizeUmbraExtendedSessionName(sessionId);
+  const selectNodeId = `umbra_extended_select_${clipIndex + 1}`;
+  const previewNodeId = `umbra_extended_preview_${clipIndex + 1}`;
+  promptGraph[selectNodeId] = {
+    class_type: 'ImageFromBatch',
+    inputs: {
+      image: [decodeEntry[0], 0],
+      batch_index: Math.max(0, frameCount - 1),
+      length: 1,
+    },
+    _meta: {
+      title: `Umbra Extended continuation ${clipIndex + 1}`,
+      umbra_role: 'extended_continuation_select',
+      umbra_extended_session: sessionName,
+    },
+  };
+  promptGraph[previewNodeId] = {
+    class_type: 'PreviewImage',
+    inputs: {
+      images: [selectNodeId, 0],
+    },
+    _meta: {
+      title: `Umbra Extended continuation preview ${clipIndex + 1}`,
+      umbra_role: 'extended_continuation_preview',
+      umbra_extended_session: sessionName,
+    },
+  };
+  return previewNodeId;
+}
+
+function resolveUmbraExtendedOutputAbsolutePath(output: Record<string, unknown>): string {
+  const rawPath = String(output.fullpath || output.fullPath || output.path || '').trim();
+  if (!rawPath) return '';
+  return isAbsolute(rawPath) ? resolve(rawPath) : resolve(ROOT_DIR, rawPath);
+}
+
+async function stageUmbraExtendedContinuationFrame(options: {
+  outputs: Array<Record<string, unknown>>;
+  previewNodeId: string;
+  sessionId: string;
+  clipIndex: number;
+}): Promise<string> {
+  const preview = options.outputs.find((output) => String(output.nodeId || '') === options.previewNodeId)
+    || options.outputs.find((output) => (
+      String(output.mediaKind || '').toLowerCase() === 'images'
+      && extname(String(output.filename || output.fullpath || '')).toLowerCase() === '.png'
+    ));
+  if (!preview) {
+    throw new Error(`Umbra Extended clip ${options.clipIndex + 1} did not publish its continuation frame.`);
+  }
+  const sourcePath = resolveUmbraExtendedOutputAbsolutePath(preview);
+  if (!sourcePath || !existsSync(sourcePath)) {
+    throw new Error(`Umbra Extended continuation frame is missing for clip ${options.clipIndex + 1}.`);
+  }
+  const sessionName = sanitizeUmbraExtendedSessionName(options.sessionId);
+  const relativeDirectory = join('UmbraExtended', sessionName);
+  const inputDirectory = join(getComfyInputRootFast(), relativeDirectory);
+  const filename = `clip-${String(options.clipIndex + 1).padStart(2, '0')}-last.png`;
+  await fs.mkdir(inputDirectory, { recursive: true });
+  await fs.copyFile(sourcePath, join(inputDirectory, filename));
+  return join(relativeDirectory, filename).replace(/\\/g, '/');
+}
+
+async function finalizeUmbraExtendedVideo(options: {
+  session: BackendUmbraLtxExtendedSession;
+  requestId: string;
+  clipPaths: string[];
+  sourceWs: ServerWebSocket<unknown> | null;
+}): Promise<string> {
+  if (options.clipPaths.length !== options.session.clipCount) {
+    throw new Error(`Umbra Extended completed ${options.clipPaths.length} of ${options.session.clipCount} clips.`);
+  }
+  const firstPath = options.clipPaths[0];
+  const outputDirectory = dirname(options.clipPaths[options.clipPaths.length - 1] || firstPath);
+  const sessionName = sanitizeUmbraExtendedSessionName(options.session.sessionId);
+  const outputPath = join(outputDirectory, `Umbra_Extended_${sessionName}.mp4`);
+  const workDirectory = join(USER_DIR, 'UmbraUI', 'Queue', 'Extended', sessionName);
+  if (options.clipPaths.length === 1) {
+    await fs.copyFile(options.clipPaths[0], outputPath);
+  } else {
+    await concatenateUmbraExtendedVideoClips({
+      comfyRoot: getComfyToolRootFast() || join(ROOT_DIR, 'Tools', 'ComfyUI'),
+      clipPaths: options.clipPaths,
+      outputPath,
+      workDirectory,
+    });
+  }
+  const portablePath = relative(ROOT_DIR, outputPath).replace(/\\/g, '/');
+  const reviewRequest = findPowerPrompterQueueControllerRequest(options.requestId);
+  const finalPrompt = reviewRequest?.prompts[options.session.clipCount - 1];
+  if (reviewRequest && finalPrompt) {
+    const reviewId = getUmbraUiVideoReviewJobId(options.requestId, finalPrompt.promptIndex);
+    const current = umbraUiVideoReviewJobs.find((job) => job.id === reviewId);
+    await upsertUmbraUiVideoReviewPrompt(reviewRequest, finalPrompt, [
+      ...(current?.outputs || []),
+      {
+        id: `${portablePath}:extended-final`,
+        filename: basename(outputPath),
+        fullpath: portablePath,
+        mediaKind: 'extended_final',
+      },
+    ]);
+  }
+  sendPrompterEventToTargets({
+    type: 'queue_saved_outputs',
+    requestId: options.requestId,
+    promptIndex: options.session.clipCount - 1,
+    promptId: finalPrompt?.promptId || '',
+    source: 'backend_pipeline',
+    extended: {
+      sessionId: options.session.sessionId,
+      clipCount: options.session.clipCount,
+      totalDurationSeconds: options.session.totalDurationSeconds,
+    },
+    outputs: [{
+      id: `${portablePath}:extended-final`,
+      filename: basename(outputPath),
+      fullpath: portablePath,
+      mediaKind: 'extended_final',
+    }],
+  }, options.sourceWs);
+  appendPowerPrompterQueueLog('backend_queue_extended_video_completed', {
+    requestId: options.requestId,
+    sessionId: options.session.sessionId,
+    clipCount: options.session.clipCount,
+    outputPath: portablePath,
+  });
+  return portablePath;
+}
+
 async function runBackendPowerPrompterPipelineQueue(
   sourceWs: ServerWebSocket<unknown> | null,
   requestId: string,
@@ -8809,6 +9104,7 @@ async function runBackendPowerPrompterPipelineQueue(
   const promptStyleNames = prompts.map((_, index) => String(Array.isArray(state.promptStyleNames) ? state.promptStyleNames[index] : '').trim());
   const promptEntries = normalizePowerPrompterPromptEntries(state.promptEntries, prompts.length);
   const generationByPrompt = prompts.map((_, index) => normalizePPGenerationControls(Array.isArray(state.generationByPrompt) ? state.generationByPrompt[index] : state.generation));
+  let extendedSession: BackendUmbraLtxExtendedSession | null = null;
   const promptIds: string[] = [];
   const task: BackendPowerPrompterQueueTask = {
     abortController: new AbortController(),
@@ -8858,7 +9154,24 @@ async function runBackendPowerPrompterPipelineQueue(
   }, sourceWs);
   let queueAcceptedSent = false;
   let failedPromptCount = 0;
+  let extendedImg2VideoPipeline: LoadedPPApiWorkflow | null = null;
+  let extendedContinuationImageName = '';
+  const extendedClipPaths: string[] = [];
   try {
+    extendedSession = readBackendUmbraLtxExtendedSession(generationByPrompt);
+    if (extendedSession) {
+      const firstPipelineFeature = task.loaded.selectedPipeline?.feature;
+      if (firstPipelineFeature && firstPipelineFeature !== 'txt2vid' && firstPipelineFeature !== 'img2vid') {
+        throw new Error('Umbra Extended must begin with a locked LTX-2.3 text-to-video or image-to-video pipeline.');
+      }
+      if (extendedSession.clipCount > 1) {
+        extendedImg2VideoPipeline = firstPipelineFeature === 'img2vid'
+          ? task.loaded
+          : (
+            await resolveUmbraUiPipeline('img2vid', 'LTX-2.3', generationByPrompt[0]?.modelType || 'checkpoint')
+          ).loaded;
+      }
+    }
     for (let index = 0; index < prompts.length; index += 1) {
       throwIfBackendPowerPrompterQueueCanceled(task);
       await waitForBackendPowerPrompterQueueResume(task, requestId, sourceWs);
@@ -8877,14 +9190,43 @@ async function runBackendPowerPrompterPipelineQueue(
         continue;
       }
       const prompt = prompts[index] || '';
-      const generation = generationByPrompt[index] || normalizePPGenerationControls(state.generation);
+      let generation = generationByPrompt[index] || normalizePPGenerationControls(state.generation);
+      let activePipeline = task.loaded;
+      if (extendedSession && index > 0) {
+        if (!extendedContinuationImageName) {
+          throw new Error(`Umbra Extended cannot start clip ${index + 1} because clip ${index} has no continuation frame.`);
+        }
+        generation = clonePPSerializable(generation);
+        generation.outputMode = 'txt2vid';
+        generation.video = {
+          ...generation.video!,
+          mode: 'image_to_video',
+          frameGuideMode: 'first',
+          sourceImagePath: '',
+          sourceImageName: extendedContinuationImageName,
+          middleImagePath: '',
+          middleImageName: '',
+          lastImagePath: '',
+          lastImageName: '',
+          sourceWidth: generation.video!.width,
+          sourceHeight: generation.video!.height,
+          ltx: {
+            ...generation.video!.ltx,
+            keyframes: [],
+            storyboard: {
+              ...generation.video!.ltx.storyboard,
+              enabled: false,
+            },
+          },
+        };
+        activePipeline = extendedImg2VideoPipeline!;
+      }
       updatePowerPrompterQueueControllerPrompt(requestId, index, {
         status: 'submitting',
         startedAt: Date.now(),
         seed: Math.max(0, Math.floor(Number(generation.seed) || 0)),
       }, 'prompt_submitting', sourceWs);
       await task.previewReady?.catch(() => undefined);
-      const activePipeline = task.loaded;
       await assertPPApiWorkflowExecutionReady(activePipeline, generation);
       const queuedWorkflow = compileUmbraUiPipelineWorkflow(activePipeline.document, state, {
         prompt,
@@ -8894,6 +9236,14 @@ async function runBackendPowerPrompterPipelineQueue(
         styleSeedMode: state.styleSeedMode,
         selectedPipeline: activePipeline.selectedPipeline,
       });
+      const continuationPreviewNodeId = extendedSession && index < prompts.length - 1
+        ? injectUmbraExtendedContinuationPreview(
+          queuedWorkflow.promptGraph,
+          generation.video?.frames || 1,
+          extendedSession.sessionId,
+          index,
+        )
+        : '';
       const sourceFile = state.sourceFile ? String(state.sourceFile) : '';
       const promptSetId = promptSetIds[index] ?? 1;
       const outputSubfolder = promptOutputSubfolders[index] || '';
@@ -9032,6 +9382,9 @@ async function runBackendPowerPrompterPipelineQueue(
           promptId,
           total: prompts.length,
         });
+        if (extendedSession) {
+          throw new Error(`Umbra Extended stopped because clip ${index + 1} was interrupted.`);
+        }
         continue;
       }
       const historyOutcome = await waitForBackendPowerPrompterHistoryOutcome(promptId);
@@ -9063,9 +9416,12 @@ async function runBackendPowerPrompterPipelineQueue(
           total: prompts.length,
           error: historyOutcome.error,
         });
+        if (extendedSession) {
+          throw new Error(`Umbra Extended stopped at clip ${index + 1}: ${historyOutcome.error}`);
+        }
         continue;
       }
-      await emitBackendPowerPrompterSavedOutputs(
+      const savedOutputs = await emitBackendPowerPrompterSavedOutputs(
         requestId,
         index,
         promptId,
@@ -9074,6 +9430,24 @@ async function runBackendPowerPrompterPipelineQueue(
         extraPngInfo,
         sourceWs,
       );
+      if (extendedSession) {
+        const videoOutput = savedOutputs.find((output) => (
+          isUmbraExtendedVideoOutputPath(String(output.filename || output.fullpath || ''))
+        ));
+        const videoPath = videoOutput ? resolveUmbraExtendedOutputAbsolutePath(videoOutput) : '';
+        if (!videoPath || !existsSync(videoPath)) {
+          throw new Error(`Umbra Extended clip ${index + 1} completed without a saved video output.`);
+        }
+        extendedClipPaths.push(videoPath);
+        if (continuationPreviewNodeId) {
+          extendedContinuationImageName = await stageUmbraExtendedContinuationFrame({
+            outputs: savedOutputs,
+            previewNodeId: continuationPreviewNodeId,
+            sessionId: extendedSession.sessionId,
+            clipIndex: index,
+          });
+        }
+      }
       throwIfBackendPowerPrompterQueueCanceled(task);
       updatePowerPrompterQueueControllerPrompt(requestId, index, {
         status: 'completed',
@@ -9112,6 +9486,15 @@ async function runBackendPowerPrompterPipelineQueue(
         finishPowerPrompterQueueControllerRequest(requestId, 'canceled', 'stopped_after_current', task.cancelReason || 'cancel', sourceWs);
         return;
       }
+    }
+
+    if (extendedSession && failedPromptCount <= 0) {
+      await finalizeUmbraExtendedVideo({
+        session: extendedSession,
+        requestId,
+        clipPaths: extendedClipPaths,
+        sourceWs,
+      });
     }
 
     sendPrompterEventToTargets({
@@ -15248,6 +15631,7 @@ const USER_CONFIG_FILES: Record<string, string> = {
   'local-server-apps': 'local-server-apps.json',
   'umbra-ui-agent-instructions': join('..', 'UmbraUI', 'Agent', 'prompt-instructions.json'),
   'umbra-ui-prompt-history': join('..', 'UmbraUI', 'prompt-history.json'),
+  'umbra-ui-video-prompt-history': join('..', 'UmbraUI', 'video-prompt-history.json'),
   'model-manager-browser': 'model-manager-browser.json',
   'board-preferences': 'board-preferences.json',
   'remote-ui-session': join('UmbraRemote', 'ui-session.json'),
@@ -15414,6 +15798,8 @@ interface PowerPrompterVideoControls {
       frameIndex: number;
       strength: number;
     }>;
+    storyboard: UmbraLtxStoryboardControls;
+    extended: UmbraLtxExtendedControls;
   };
 }
 interface PowerPrompterDetailerStage {
@@ -15463,6 +15849,7 @@ interface PowerPrompterGenerationControls {
     denoise: number;
   };
   video?: PowerPrompterVideoControls;
+  videoSequence?: UmbraLtxExtendedSequenceMetadata;
   hiresFix?: {
     enabled: boolean;
     upscaler: string;
@@ -15666,6 +16053,12 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
       imageStrength: 0.7,
       imageCompression: 18,
       keyframes: [],
+      storyboard: {
+        enabled: false,
+        epsilon: 0.001,
+        shots: [],
+      },
+      extended: normalizeUmbraLtxExtendedControls(null),
     },
   },
   negativePrompt: '',
@@ -16856,6 +17249,31 @@ function normalizePPWorkflowResources(rawResources: unknown): Record<string, str
   return normalized;
 }
 
+function resolvePPWorkflowResourceValues(
+  descriptors: PPApiWorkflowResourceSelector[],
+  rawResources: unknown,
+  generation: PowerPrompterGenerationControls,
+): Record<string, string> {
+  const values = normalizePPWorkflowResources(rawResources);
+  const modelType = normalizePPGenerationModelType(
+    (generation as any).modelType ?? (generation as any).model_type,
+  );
+  const modelName = stripPPModelFolderPrefixForType(generation.checkpointName, modelType);
+  if (!modelName) return values;
+
+  const primaryKinds = new Set<PPApiWorkflowResourceKind>(
+    modelType === 'unet'
+      ? ['unet', 'diffusion_model']
+      : modelType === 'diffusion_model'
+        ? ['diffusion_model', 'unet']
+        : [modelType],
+  );
+  for (const descriptor of descriptors) {
+    if (primaryKinds.has(descriptor.kind)) values[descriptor.id] = modelName;
+  }
+  return values;
+}
+
 function clampPPNumber(value: unknown, fallback: number, min: number, max: number): number {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
@@ -16893,6 +17311,17 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
     : {};
   const steps = clampPPInteger(wan.steps, defaults.wan.steps, 1, 10000);
   const normalizedFrames = normalizePPVideoFrames(video.frames, family === 'ltx23' ? 121 : defaults.frames, family === 'ltx23' ? 8 : 4);
+  const normalizedFps = clampPPInteger(video.fps, family === 'ltx23' ? 25 : defaults.fps, 1, 120);
+  const storyboard = normalizeUmbraLtxStoryboardControls(ltx.storyboard);
+  const extended = normalizeUmbraLtxExtendedControls(ltx.extended);
+  if (family !== 'ltx23' || storyboard.enabled) extended.enabled = false;
+  const storyboardTimeline = resolveUmbraLtxStoryboardTimeline(storyboard, normalizedFps, normalizedFrames);
+  const resolvedFrames = family === 'ltx23' && storyboardTimeline.enabled
+    ? storyboardTimeline.frames
+    : normalizedFrames;
+  const resolvedMode: PowerPrompterVideoMode = family === 'ltx23' && storyboardTimeline.enabled
+    ? 'text_to_video'
+    : mode;
   const decodeModeRaw = String(video.decodeMode || '').trim().toLowerCase();
   const decodeMode: PowerPrompterVideoDecodeMode = decodeModeRaw === 'full' || decodeModeRaw === 'tiled'
     ? decodeModeRaw
@@ -16916,7 +17345,7 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
         id: String(keyframe.id || `ltx-keyframe-${index + 1}`).trim().slice(0, 160) || `ltx-keyframe-${index + 1}`,
         sourceImagePath: String(keyframe.sourceImagePath || '').trim().replace(/\\/g, '/'),
         sourceImageName: String(keyframe.sourceImageName || '').trim().replace(/\\/g, '/'),
-        frameIndex: clampPPInteger(keyframe.frameIndex, Math.min(normalizedFrames - 1, Math.max(1, Math.floor(normalizedFrames / 2))), 0, Math.max(0, normalizedFrames - 1)),
+        frameIndex: clampPPInteger(keyframe.frameIndex, Math.min(resolvedFrames - 1, Math.max(1, Math.floor(resolvedFrames / 2))), 0, Math.max(0, resolvedFrames - 1)),
         strength: clampPPNumber(keyframe.strength, 1, 0, 1),
       };
     })
@@ -16930,13 +17359,13 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
   const sourceHeight = clampPPInteger(video.sourceHeight, 0, 0, 32768);
   const targetDimensions = resolveUmbraVideoTargetDimensions({
     resolutionPreset,
-    sourceWidth: mode === 'text_to_video' ? 0 : sourceWidth,
-    sourceHeight: mode === 'text_to_video' ? 0 : sourceHeight,
+    sourceWidth: resolvedMode === 'text_to_video' ? 0 : sourceWidth,
+    sourceHeight: resolvedMode === 'text_to_video' ? 0 : sourceHeight,
     fallbackAspect: aspectRatio,
   });
   return {
     family,
-    mode,
+    mode: resolvedMode,
     frameGuideMode,
     sourceImagePath: String(video.sourceImagePath || '').trim().replace(/\\/g, '/'),
     sourceImageName: String(video.sourceImageName || '').trim().replace(/\\/g, '/'),
@@ -16956,8 +17385,8 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
     sourceHeight,
     width: targetDimensions.targetWidth,
     height: targetDimensions.targetHeight,
-    frames: normalizedFrames,
-    fps: clampPPInteger(video.fps, family === 'ltx23' ? 25 : defaults.fps, 1, 120),
+    frames: resolvedFrames,
+    fps: normalizedFps,
     seed: clampPPInteger(video.seed, defaults.seed, 0, PP_MAX_SEED_SAFE),
     seedMode: normalizePPSeedControlMode(video.seedMode),
     seedIncrement: normalizePPSeedIncrement(video.seedIncrement),
@@ -17019,6 +17448,8 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
       imageStrength: clampPPNumber(ltx.imageStrength, defaults.ltx.imageStrength, 0, 1),
       imageCompression: clampPPInteger(ltx.imageCompression, defaults.ltx.imageCompression, 0, 100),
       keyframes,
+      storyboard,
+      extended,
     },
   };
 }
@@ -17155,6 +17586,7 @@ function normalizePPGenerationControls(rawControls: unknown): PowerPrompterGener
       denoise: clampPPNumber((controls as any).img2img?.denoise, 0.3, 0.01, 1),
     },
     video: normalizePPVideoControls((controls as any).video),
+    videoSequence: normalizeUmbraLtxExtendedSequenceMetadata((controls as any).videoSequence),
     hiresFix: {
       enabled: hiresFix.enabled === true,
       upscaler: String(hiresFix.upscaler || defaultHiresFix.upscaler).trim() || defaultHiresFix.upscaler,
@@ -20088,9 +20520,14 @@ async function assertPPApiWorkflowExecutionReady(
 
   const catalog = buildPPComfyResourceCatalog(objectInfo);
   const generation = normalizePPGenerationControls(generationInput);
-  const requiredIssues = listUmbraUiRequiredResourceIssues(
+  const workflowResourceValues = resolvePPWorkflowResourceValues(
     loaded.item.resources,
     generation.workflowResources,
+    generation,
+  );
+  const requiredIssues = listUmbraUiRequiredResourceIssues(
+    loaded.item.resources,
+    workflowResourceValues,
     catalog,
   );
   if (requiredIssues[0]) throw new Error(formatUmbraUiQueueResourceIssue(requiredIssues[0]));
@@ -26962,12 +27399,28 @@ const server = Bun.serve<any>({
         // CORS preflight
         if (method === 'OPTIONS') return new Response(null, { headers: getCorsHeaders() });
 
-        if (!IS_UMBRA_DEV_MODE && isRemoteRequest(req, url, server) && !isTailscaleRequest(req, url, server)) {
-          return json({ ok: false, remoteDisabled: true, error: 'Umbra Remote is available through Tailscale only in published builds.' }, 403);
-        }
-
-        if (!isPublishedRemoteRequestAllowed(req, url, server) && (path === '/api/remote' || path.startsWith('/api/remote/'))) {
-          return json({ ok: false, remoteDisabled: true, error: 'Umbra Remote is available through Tailscale only in published builds.' }, 404);
+        const hostRequest = isHostRequest(req, url, server);
+        const tailscaleRequest = !hostRequest && isTailscaleRequest(req, url, server);
+        const remoteConnectionSettings = loadRemoteConnectionSettings();
+        const remoteAccess = resolveRemoteRequestAccess({
+          enabled: remoteConnectionSettings.enabled,
+          hostRequest,
+          tailscaleRequest,
+          tailscaleOnly: isTailscaleOnlyRemoteAccess(
+            !IS_UMBRA_DEV_MODE,
+            remoteConnectionSettings.preferredMode,
+          ),
+        });
+        if (!remoteAccess.allowed) {
+          const error = remoteAccess.reason === 'remote-disabled'
+            ? 'Umbra Remote is disabled on this host.'
+            : 'Umbra Remote is available through Tailscale only in published builds.';
+          return json({
+            ok: false,
+            remoteDisabled: remoteAccess.reason === 'remote-disabled',
+            tailscaleRequired: remoteAccess.reason === 'tailscale-required',
+            error,
+          }, 403);
         }
 
         const loadedRemoteAuthConfig = loadRemoteAuthConfig();
@@ -27173,6 +27626,7 @@ const server = Bun.serve<any>({
           const publishedTailscaleOnly = !IS_UMBRA_DEV_MODE;
           const settings: RemoteConnectionSettings = {
             version: 1,
+            enabled: body?.enabled === true,
             bindHost: normalizeBindHost(body?.bindHost, HOST),
             port: clampPort(body?.port || PORT, PORT),
             preferredMode: publishedTailscaleOnly ? 'private-vpn' : (isRemoteConnectionMode(body?.preferredMode) ? body.preferredMode : 'auto'),
@@ -27249,6 +27703,14 @@ const server = Bun.serve<any>({
         if (method === 'POST' && path === '/api/remote/tailscale/serve') {
           const guard = withRemoteAdminGuard(req, url, server);
           if (guard) return guard;
+          if (!loadRemoteConnectionSettings().enabled) {
+            return json({
+              ok: false,
+              code: 'REMOTE_DISABLED',
+              message: 'Umbra Remote is disabled.',
+              details: 'Enable Umbra Remote in Connection Settings, save, and then create the Tailscale route.',
+            }, 409);
+          }
           const tailscaleAccess = await getTailscaleAccessInfo(PORT);
           const command = tailscaleAccess.serveCommand || `tailscale serve --bg ${buildTailscaleServeOrigin(HOST, PORT)}`;
           if (!tailscaleAccess.installed) {
@@ -27418,6 +27880,10 @@ const server = Bun.serve<any>({
         if (path === '/api/remote/status' && method === 'GET') {
           const remoteSettings = loadRemoteConnectionSettings();
           const publishedTailscaleOnly = !IS_UMBRA_DEV_MODE;
+          const tailscaleOnlyAccess = isTailscaleOnlyRemoteAccess(
+            publishedTailscaleOnly,
+            remoteSettings.preferredMode,
+          );
           const remoteStatusRequest = isRemoteRequest(req, url, server);
           if (remoteStatusRequest && remoteSettings.requireRemoteAuth !== false) {
             if (!effectiveRemoteAuthConfig || !isRemoteRequestAuthenticated(req, effectiveRemoteAuthConfig)) {
@@ -27445,20 +27911,21 @@ const server = Bun.serve<any>({
             tailscaleAccess.serveEnabled ? remoteSettings.tailscaleHttpsUrl : '',
             ...tailscaleAccess.httpsUrls,
           ].filter(Boolean) as string[]));
-          const allowTailscaleRemote = tailscaleConnected
+          const allowTailscaleRemote = remoteSettings.enabled
+            && tailscaleConnected
             && (allowDirectNetworkRemote || tailscaleAccess.serveEnabled || Boolean(currentTailscaleOrigin));
           const suggestedTailscaleHttpsUrls = tailscaleConnected ? Array.from(new Set([
             remoteSettings.tailscaleHttpsUrl,
             ...tailscaleAccess.suggestedHttpsUrls,
           ].filter(Boolean) as string[])) : [];
-          const lanUrls = IS_LAN_BIND && !publishedTailscaleOnly
+          const lanUrls = IS_LAN_BIND && !tailscaleOnlyAccess
             ? getPrivateLanUrls(PORT).filter((remoteUrl) => !/^http:\/\/100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(remoteUrl))
             : [];
-          const manualLanUrls = IS_LAN_BIND && !publishedTailscaleOnly && remoteSettings.manualLanUrl ? [remoteSettings.manualLanUrl] : [];
+          const manualLanUrls = IS_LAN_BIND && !tailscaleOnlyAccess && remoteSettings.manualLanUrl ? [remoteSettings.manualLanUrl] : [];
           const publicBaseIsInactiveTailscale = isTailscaleDnsHttpsUrl(remoteSettings.publicBaseUrl || '', tailscaleAccess.knownDnsName) && !tailscaleAccess.serveEnabled;
           const reverseProxyUrls = Array.from(new Set([
-            !publishedTailscaleOnly && !publicBaseIsInactiveTailscale ? remoteSettings.publicBaseUrl : '',
-            !publishedTailscaleOnly ? remoteSettings.reverseProxyUrl : '',
+            !tailscaleOnlyAccess && !publicBaseIsInactiveTailscale ? remoteSettings.publicBaseUrl : '',
+            !tailscaleOnlyAccess ? remoteSettings.reverseProxyUrl : '',
           ].filter(Boolean) as string[]));
           const activeReverseProxyUrl = reverseProxyUrls[0] || '';
           const httpsAvailable = [...tailscaleHttpsUrls, ...reverseProxyUrls].some(isHttpsRemoteUrl);
@@ -27477,22 +27944,22 @@ const server = Bun.serve<any>({
               ...manualLanUrls,
             ].filter((remoteUrl) => remoteUrl && !isHttpsRemoteUrl(remoteUrl))))
             : [];
-          const urls = Array.from(new Set([
+          const urls = remoteSettings.enabled ? Array.from(new Set([
             ...(allowTailscaleRemote ? tailscaleHttpsUrls : []),
             ...(allowDirectNetworkRemote ? advertisedTailscaleUrls : []),
             ...(IS_LAN_BIND ? advertisedLanUrls : []),
             ...advertisedManualLanUrls,
             ...reverseProxyUrls,
-          ]));
-          const selectedUrl = pickRemoteConnectionUrl({
+          ])) : [];
+          const selectedUrl = remoteSettings.enabled ? pickRemoteConnectionUrl({
             ...remoteSettings,
-            preferredMode: publishedTailscaleOnly ? 'private-vpn' : remoteSettings.preferredMode,
+            preferredMode: tailscaleOnlyAccess ? 'private-vpn' : remoteSettings.preferredMode,
           }, {
             tailscaleUrls: allowDirectNetworkRemote ? advertisedTailscaleUrls : [],
             tailscaleHttpsUrls: allowTailscaleRemote ? tailscaleHttpsUrls : [],
             lanUrls: Array.from(new Set([...advertisedManualLanUrls, ...advertisedLanUrls])),
             reverseProxyUrl: activeReverseProxyUrl,
-          });
+          }) : null;
           const remoteReady = tailscaleConnected && allowTailscaleRemote && urls.length > 0;
           const directRuntimeOverride = process.env.UMBRA_WEB_LAUNCHER !== '1';
           const runtimeOverrides = {
@@ -27500,7 +27967,7 @@ const server = Bun.serve<any>({
             port: directRuntimeOverride && Boolean(process.env.UMBRA_PORT),
           };
           const pendingRestart = shouldRemoteSettingsRequireRestart({
-            savedBindHost: remoteSettings.bindHost,
+            savedBindHost: resolveRemoteListenerHost(remoteSettings.enabled, remoteSettings.bindHost) || '127.0.0.1',
             savedPort: remoteSettings.port,
             activeBindHost: HOST,
             activePort: PORT,
@@ -27512,7 +27979,7 @@ const server = Bun.serve<any>({
             bindHost: HOST,
             port: PORT,
             localUrl: buildListenerOrigin(HOST, PORT),
-            remoteEnabled: allowTailscaleRemote,
+            remoteEnabled: remoteSettings.enabled,
             tailscaleDetected: tailscaleAccess.installed,
             tailscaleInstalled: tailscaleAccess.installed,
             tailscaleConnected,
@@ -27547,7 +28014,7 @@ const server = Bun.serve<any>({
               },
               pendingRestart,
             },
-            accessModes: publishedTailscaleOnly ? [
+            accessModes: tailscaleOnlyAccess ? [
               {
                 id: 'private-vpn',
                 label: 'Private VPN',
@@ -31433,6 +31900,10 @@ const server = Bun.serve<any>({
         const id = url.searchParams.get('id');
         if (!id) return json({ success: false, error: 'Video job id is required.' }, 400);
         return json({ success: true, removed: await deleteUmbraUiVideoReviewJob(id) });
+      }
+
+      if (path === '/api/umbra-ui/video-jobs/clear' && method === 'POST') {
+        return json({ success: true, removed: await clearUmbraUiVideoReviewJobs() });
       }
 
       if (path === '/api/umbra-ui/catalog' && method === 'GET') {

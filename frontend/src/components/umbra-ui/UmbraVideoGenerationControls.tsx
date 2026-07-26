@@ -2,12 +2,15 @@
 
 import React from 'react';
 import {
+  ChevronDown,
   Clapperboard,
+  Clock3,
   Database,
   Film,
   Gauge,
   Image as ImageIcon,
   ImagePlus,
+  PanelRight,
   ListPlus,
   Loader2,
   Music2,
@@ -40,14 +43,29 @@ import type {
 } from '@/components/umbra-ui/useUmbraPowerPrompterBridge';
 import type { UmbraUiAgentDraft, UmbraUiAgentVideoContext } from '@/lib/umbraUiAgent';
 import { UmbraInlineAgentPrompt } from '@/components/umbra-ui/UmbraInlineAgentPrompt';
+import { UmbraPositivePromptEditor } from '@/components/umbra-ui/UmbraPositivePromptEditor';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
+import { UmbraLtxStoryboardPanel } from '@/components/umbra-ui/UmbraLtxStoryboardPanel';
+import { UmbraLtxExtendedPanel } from '@/components/umbra-ui/UmbraLtxExtendedPanel';
 import {
   UmbraQueuePlacementControls,
   useUmbraQueuePlacement,
 } from '@/components/umbra-ui/UmbraQueuePlacementControls';
 import { resolveUmbraUiPipeline } from '@/lib/umbraUiPipelines';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
+import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
 import { advanceUmbraUiSeed, normalizeUmbraUiSeed, resolveUmbraUiQueueSeed } from '@/lib/umbraUiSeed';
+import {
+  mergeUmbraUiPromptHistories,
+  normalizeUmbraUiPromptHistory,
+  recordUmbraUiPromptHistory,
+  type UmbraUiPromptHistoryEntry,
+} from '@/lib/umbraUiPromptHistory';
+import {
+  compileUmbraUiPromptSegments,
+  createUmbraUiPromptSegment,
+  type UmbraUiPromptSegment,
+} from '@/lib/umbraUiPromptSegments';
 import {
   normalizeUmbraUiMediaHandoff,
   UMBRA_UI_MEDIA_HANDOFF_EVENT,
@@ -61,6 +79,20 @@ import {
   resolveUmbraVideoSizing,
   resolveUmbraVideoTargetDimensions,
 } from '../../../../shared/umbra-ui/videoSizing';
+import {
+  resolveUmbraLtxStoryboardTimeline,
+  resolveUmbraVideoDurationSeconds,
+  resolveUmbraVideoFrameIndexForSeconds,
+  resolveUmbraVideoFramesForDuration,
+  type UmbraLtxStoryboardShot,
+} from '../../../../shared/umbra-ui/videoStoryboard';
+import {
+  createDefaultUmbraLtxExtendedControls,
+  resolveUmbraLtxExtendedTotalSeconds,
+  UMBRA_LTX_EXTENDED_MAX_CLIPS,
+  UMBRA_LTX_EXTENDED_MAX_TOTAL_SECONDS,
+  type UmbraLtxExtendedClip,
+} from '../../../../shared/umbra-ui/videoExtension';
 import {
   applyUmbraPromptWeightToTextarea,
   isUmbraPromptWeightShortcut,
@@ -84,6 +116,7 @@ interface UmbraVideoGenerationControlsProps {
   onAgentContextChange?: (context: UmbraUiAgentVideoContext) => void;
   editorDraft?: UmbraVideoEditorDraft | null;
   onEditorDraftApplied?: (draftId: string) => void;
+  onStoryboardOpenChange?: (open: boolean) => void;
 }
 
 export interface UmbraVideoEditorDraft {
@@ -95,6 +128,8 @@ export interface UmbraVideoEditorDraft {
 
 interface UmbraVideoDeviceResume {
   prompt?: string;
+  promptSegments?: UmbraUiPromptSegment[];
+  activePromptSegmentId?: string;
   agentModeEnabled?: boolean;
   agentPrompt?: string;
   negativePrompt?: string;
@@ -186,6 +221,12 @@ function createDefaultVideoControls(): PowerPrompterVideoControls {
       imageStrength: 0.7,
       imageCompression: 18,
       keyframes: [],
+      storyboard: {
+        enabled: false,
+        epsilon: 0.001,
+        shots: [],
+      },
+      extended: createDefaultUmbraLtxExtendedControls(),
     },
   };
 }
@@ -206,6 +247,30 @@ function createLtxKeyframe(frameCount: number, existingCount: number) {
   };
 }
 
+function createLtxStoryboardShot(index: number): UmbraLtxStoryboardShot {
+  return {
+    id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? `ltx-storyboard-${crypto.randomUUID()}`
+      : `ltx-storyboard-${Date.now()}-${index}`,
+    prompt: '',
+    durationSeconds: 4,
+    sourceImagePath: '',
+    sourceImageName: '',
+    strength: 1,
+    agentEnabled: false,
+  };
+}
+
+function createLtxExtendedClip(index: number): UmbraLtxExtendedClip {
+  return {
+    id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? `ltx-extended-${crypto.randomUUID()}`
+      : `ltx-extended-${Date.now()}-${index}`,
+    prompt: '',
+    durationSeconds: 10,
+  };
+}
+
 function optionList(current: string, values: string[]) {
   return Array.from(new Set([current, ...values].filter(Boolean)));
 }
@@ -221,9 +286,56 @@ function SelectField({ label, value, values, onChange, emptyLabel = 'Not install
   return (
     <label className="min-w-0 space-y-1.5">
       <span className={labelClass}>{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)} className={inputClass}>
+      <select
+        aria-label={label}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={inputClass}
+      >
         <option value="">{emptyLabel}</option>
         {options.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function VideoModelField({
+  label,
+  family,
+  value,
+  values,
+  onChange,
+}: {
+  label: string;
+  family: PowerPrompterVideoFamily;
+  value: string;
+  values: string[];
+  onChange: (value: string) => void;
+}) {
+  const allOptions = optionList(value, values);
+  const familyPattern = family === 'ltx23' ? /(?:^|[/_. -])ltx|dasiwa.*ltx/i : /(?:^|[/_. -])wan/i;
+  const preferred = allOptions.filter((option) => familyPattern.test(option));
+  const other = allOptions.filter((option) => !familyPattern.test(option));
+  return (
+    <label className="min-w-0 space-y-1.5">
+      <span className={labelClass}>{label}</span>
+      <select
+        aria-label={label}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={`${inputClass} min-h-10 font-semibold`}
+      >
+        <option value="">Select a video model</option>
+        {preferred.length > 0 ? (
+          <optgroup label={family === 'ltx23' ? 'LTX video models' : 'Wan video models'}>
+            {preferred.map((option) => <option key={option} value={option}>{option}</option>)}
+          </optgroup>
+        ) : null}
+        {other.length > 0 ? (
+          <optgroup label="Other installed models">
+            {other.map((option) => <option key={option} value={option}>{option}</option>)}
+          </optgroup>
+        ) : null}
       </select>
     </label>
   );
@@ -275,6 +387,48 @@ function ToggleButton({ active, label, onClick, disabled = false, title }: {
     >
       {label}
     </button>
+  );
+}
+
+function VideoAccordion({
+  title,
+  icon,
+  children,
+  defaultOpen = false,
+  summary,
+  accent = 'zinc',
+}: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  summary?: string;
+  accent?: 'zinc' | 'cyan' | 'fuchsia' | 'amber';
+}) {
+  const [open, setOpen] = React.useState(defaultOpen);
+  const tone = accent === 'fuchsia'
+    ? 'border-fuchsia-300/18 bg-fuchsia-500/[0.025]'
+    : accent === 'cyan'
+      ? 'border-cyan-300/18 bg-cyan-500/[0.025]'
+      : accent === 'amber'
+        ? 'border-amber-300/18 bg-amber-500/[0.025]'
+        : 'border-white/10 bg-black/20';
+  return (
+    <details
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      className={cn('overflow-hidden rounded-md border', tone)}
+    >
+      <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 px-2.5 py-2 text-[9px] font-black uppercase tracking-[0.14em] text-zinc-300 hover:bg-white/[0.025]">
+        {icon}
+        <span>{title}</span>
+        {summary ? <span className="ml-auto truncate font-mono text-[8px] font-normal normal-case tracking-normal text-zinc-600">{summary}</span> : null}
+        <ChevronDown size={11} className={cn('shrink-0 text-zinc-600 transition-transform', open && 'rotate-180', !summary && 'ml-auto')} />
+      </summary>
+      <div className="space-y-3 border-t border-white/[0.08] p-2.5">
+        {children}
+      </div>
+    </details>
   );
 }
 
@@ -423,15 +577,30 @@ export function UmbraVideoGenerationControls({
   onAgentContextChange,
   editorDraft,
   onEditorDraftApplied,
+  onStoryboardOpenChange,
 }: UmbraVideoGenerationControlsProps) {
   const showToast = useStore((state) => state.showToast);
   const [initialDeviceResume] = React.useState(() => readDeviceUiResume<UmbraVideoDeviceResume>('umbra-ui-video'));
-  const [prompt, setPrompt] = React.useState(initialDeviceResume?.prompt || '');
+  const [promptSegments, setPromptSegments] = React.useState<UmbraUiPromptSegment[]>(() => (
+    Array.isArray(initialDeviceResume?.promptSegments) && initialDeviceResume.promptSegments.length > 0
+      ? initialDeviceResume.promptSegments.map((segment) => ({ ...segment }))
+      : [createUmbraUiPromptSegment(initialDeviceResume?.prompt || '', { label: 'Video Prompt' })]
+  ));
+  const [activePromptSegmentId, setActivePromptSegmentId] = React.useState(
+    initialDeviceResume?.activePromptSegmentId || promptSegments[0]?.id || '',
+  );
+  const [promptHistory, setPromptHistory] = React.useState<UmbraUiPromptHistoryEntry[]>([]);
+  const promptHistoryLoadedRef = React.useRef(false);
+  const promptHistoryDirtyRef = React.useRef(false);
+  const promptHistoryRevisionRef = React.useRef(0);
+  const promptHistoryWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+  const prompt = React.useMemo(() => compileUmbraUiPromptSegments(promptSegments), [promptSegments]);
   const [agentModeEnabled, setAgentModeEnabled] = React.useState(initialDeviceResume?.agentModeEnabled === true);
   const [agentPrompt, setAgentPrompt] = React.useState(initialDeviceResume?.agentPrompt || '');
   const workflowPrompt = agentModeEnabled ? agentPrompt.trim() : prompt;
   const [negativePrompt, setNegativePrompt] = React.useState(initialDeviceResume?.negativePrompt || '');
   const [video, setVideo] = React.useState<PowerPrompterVideoControls>(() => createDefaultVideoControls());
+  const [selectedStoryboardShotId, setSelectedStoryboardShotId] = React.useState('');
   const [sourcePreviewUrl, setSourcePreviewUrl] = React.useState('');
   const [isQueueing, setIsQueueing] = React.useState(false);
   const { placement, setPlacement, effectivePlacement } = useUmbraQueuePlacement(queueSummary);
@@ -444,6 +613,35 @@ export function UmbraVideoGenerationControls({
     sourceHeight: video.mode === 'text_to_video' ? 0 : video.sourceHeight,
     fallbackAspect: video.aspectRatio,
   }), [video.aspectRatio, video.mode, video.resolutionPreset, video.sourceHeight, video.sourceWidth]);
+  const storyboardTimeline = React.useMemo(
+    () => resolveUmbraLtxStoryboardTimeline(video.ltx.storyboard, video.fps, video.frames),
+    [video.fps, video.frames, video.ltx.storyboard],
+  );
+  const storyboardOpen = video.family === 'ltx23' && video.ltx.storyboard.enabled;
+  const extendedOpen = video.family === 'ltx23' && video.ltx.extended.enabled;
+  const extendedTotalSeconds = React.useMemo(
+    () => resolveUmbraLtxExtendedTotalSeconds(video.ltx.extended),
+    [video.ltx.extended],
+  );
+  const videoDurationSeconds = extendedOpen
+    ? extendedTotalSeconds
+    : storyboardOpen
+    ? storyboardTimeline.durationSeconds
+    : resolveUmbraVideoDurationSeconds(video.frames, video.fps);
+  const queuePrompt = extendedOpen
+    ? String(video.ltx.extended.clips[0]?.prompt || '').trim()
+    : workflowPrompt;
+
+  const replacePromptSegments = React.useCallback((
+    text: string,
+    segments?: UmbraUiPromptSegment[],
+  ) => {
+    const nextSegments = Array.isArray(segments) && segments.length > 0
+      ? segments.map((segment) => ({ ...segment }))
+      : [createUmbraUiPromptSegment(text, { label: 'Video Prompt' })];
+    setPromptSegments(nextSegments);
+    setActivePromptSegmentId(nextSegments[0]?.id || '');
+  }, []);
 
   React.useEffect(() => {
     setVideo((current) => (
@@ -452,6 +650,29 @@ export function UmbraVideoGenerationControls({
         : { ...current, width: targetDimensions.targetWidth, height: targetDimensions.targetHeight }
     ));
   }, [targetDimensions.targetHeight, targetDimensions.targetWidth]);
+
+  React.useEffect(() => {
+    onStoryboardOpenChange?.(storyboardOpen || extendedOpen);
+    return () => onStoryboardOpenChange?.(false);
+  }, [extendedOpen, onStoryboardOpenChange, storyboardOpen]);
+
+  React.useEffect(() => {
+    if (!storyboardOpen || video.frames === storyboardTimeline.frames) return;
+    setVideo((current) => ({
+      ...current,
+      frames: resolveUmbraLtxStoryboardTimeline(
+        current.ltx.storyboard,
+        current.fps,
+        current.frames,
+      ).frames,
+    }));
+  }, [storyboardOpen, storyboardTimeline.frames, video.frames]);
+
+  React.useEffect(() => {
+    if (!storyboardOpen || video.ltx.storyboard.shots.length <= 0) return;
+    if (video.ltx.storyboard.shots.some((shot) => shot.id === selectedStoryboardShotId)) return;
+    setSelectedStoryboardShotId(video.ltx.storyboard.shots[0].id);
+  }, [selectedStoryboardShotId, storyboardOpen, video.ltx.storyboard.shots]);
 
   React.useEffect(() => {
     let canceled = false;
@@ -474,6 +695,20 @@ export function UmbraVideoGenerationControls({
               ...defaults.ltx,
               ...(savedVideo.ltx || {}),
               keyframes: Array.isArray(savedVideo.ltx?.keyframes) ? savedVideo.ltx.keyframes : [],
+              storyboard: {
+                ...defaults.ltx.storyboard,
+                ...(savedVideo.ltx?.storyboard || {}),
+                shots: Array.isArray(savedVideo.ltx?.storyboard?.shots)
+                  ? savedVideo.ltx.storyboard.shots.map((shot) => ({ ...shot }))
+                  : [],
+              },
+              extended: {
+                ...defaults.ltx.extended,
+                ...(savedVideo.ltx?.extended || {}),
+                clips: Array.isArray(savedVideo.ltx?.extended?.clips)
+                  ? savedVideo.ltx.extended.clips.map((clip) => ({ ...clip }))
+                  : defaults.ltx.extended.clips.map((clip) => ({ ...clip })),
+              },
             },
           };
           setVideo((current) => handoffAppliedRef.current
@@ -518,16 +753,50 @@ export function UmbraVideoGenerationControls({
   }, [settingsLoaded, video]);
 
   React.useEffect(() => {
+    let canceled = false;
+    void readUserConfig<unknown>('umbra-ui-video-prompt-history', [])
+      .then((storedHistory) => {
+        if (canceled) return;
+        setPromptHistory((current) => mergeUmbraUiPromptHistories(
+          normalizeUmbraUiPromptHistory(storedHistory),
+          current,
+        ));
+        promptHistoryLoadedRef.current = true;
+      });
+    return () => {
+      canceled = true;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!promptHistoryLoadedRef.current || !promptHistoryDirtyRef.current) return;
+    const revision = promptHistoryRevisionRef.current;
+    promptHistoryWriteQueueRef.current = promptHistoryWriteQueueRef.current
+      .catch(() => undefined)
+      .then(() => writeUserConfig('umbra-ui-video-prompt-history', promptHistory))
+      .then(() => {
+        if (promptHistoryRevisionRef.current === revision) {
+          promptHistoryDirtyRef.current = false;
+        }
+      })
+      .catch((error) => {
+        console.warn('[Umbra UI] Failed to persist video prompt history:', error);
+      });
+  }, [promptHistory]);
+
+  React.useEffect(() => {
     const timer = window.setTimeout(() => {
       writeDeviceUiResume<UmbraVideoDeviceResume>('umbra-ui-video', {
         prompt,
+        promptSegments,
+        activePromptSegmentId,
         agentModeEnabled,
         agentPrompt,
         negativePrompt,
       });
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [agentModeEnabled, agentPrompt, negativePrompt, prompt]);
+  }, [activePromptSegmentId, agentModeEnabled, agentPrompt, negativePrompt, prompt, promptSegments]);
 
   React.useEffect(() => {
     if (!agentDraft || agentDraft.mediaType !== 'video') return;
@@ -540,7 +809,7 @@ export function UmbraVideoGenerationControls({
   React.useEffect(() => {
     if (!editorDraft) return;
     const defaults = createDefaultVideoControls();
-    setPrompt(editorDraft.prompt);
+    replacePromptSegments(editorDraft.prompt);
     setAgentModeEnabled(false);
     setAgentPrompt('');
     setNegativePrompt(editorDraft.negativePrompt);
@@ -553,13 +822,27 @@ export function UmbraVideoGenerationControls({
         ...defaults.ltx,
         ...editorDraft.video.ltx,
         keyframes: editorDraft.video.ltx.keyframes.map((keyframe) => ({ ...keyframe })),
+        storyboard: {
+          ...defaults.ltx.storyboard,
+          ...(editorDraft.video.ltx.storyboard || {}),
+          shots: Array.isArray(editorDraft.video.ltx.storyboard?.shots)
+            ? editorDraft.video.ltx.storyboard.shots.map((shot) => ({ ...shot }))
+            : [],
+        },
+        extended: {
+          ...defaults.ltx.extended,
+          ...(editorDraft.video.ltx.extended || {}),
+          clips: Array.isArray(editorDraft.video.ltx.extended?.clips)
+            ? editorDraft.video.ltx.extended.clips.map((clip) => ({ ...clip }))
+            : defaults.ltx.extended.clips.map((clip) => ({ ...clip })),
+        },
       },
     });
     setSourcePreviewUrl(editorDraft.video.sourceImagePath
       ? `/api/fs/image?path=${encodeURIComponent(editorDraft.video.sourceImagePath)}`
       : '');
     onEditorDraftApplied?.(editorDraft.id);
-  }, [editorDraft, onEditorDraftApplied]);
+  }, [editorDraft, onEditorDraftApplied, replacePromptSegments]);
 
   React.useEffect(() => {
     const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : 'LTX-2.3';
@@ -645,6 +928,48 @@ export function UmbraVideoGenerationControls({
     [modelFamily, pipelineFeature, pipelineModelSource, workflows],
   );
 
+  React.useEffect(() => {
+    if (promptSegments.some((segment) => segment.id === activePromptSegmentId)) return;
+    setActivePromptSegmentId(promptSegments[0]?.id || '');
+  }, [activePromptSegmentId, promptSegments]);
+
+  const rememberCurrentPrompt = React.useCallback(() => {
+    if (!prompt) {
+      showToast('Enter a video prompt before saving it to history.', 'error');
+      return;
+    }
+    promptHistoryDirtyRef.current = true;
+    promptHistoryRevisionRef.current += 1;
+    setPromptHistory((current) => recordUmbraUiPromptHistory(
+      current,
+      promptSegments,
+      negativePrompt,
+    ));
+    showToast('Video prompt saved to history.', 'success');
+  }, [negativePrompt, prompt, promptSegments, showToast]);
+
+  const restorePromptHistoryEntry = React.useCallback((entry: UmbraUiPromptHistoryEntry) => {
+    const restoredSegments = entry.promptSegments.map((segment) => ({ ...segment }));
+    if (restoredSegments.length <= 0) return;
+    setPromptSegments(restoredSegments);
+    setActivePromptSegmentId(restoredSegments[0].id);
+    setNegativePrompt(entry.negativePrompt);
+    showToast(`Restored ${restoredSegments.length} video prompt field${restoredSegments.length === 1 ? '' : 's'}.`, 'success');
+  }, [showToast]);
+
+  const removePromptHistoryEntry = React.useCallback((entryId: string) => {
+    promptHistoryDirtyRef.current = true;
+    promptHistoryRevisionRef.current += 1;
+    setPromptHistory((current) => current.filter((entry) => entry.id !== entryId));
+  }, []);
+
+  const clearPromptHistory = React.useCallback(() => {
+    promptHistoryDirtyRef.current = true;
+    promptHistoryRevisionRef.current += 1;
+    setPromptHistory([]);
+    showToast('Video prompt history cleared.', 'success');
+  }, [showToast]);
+
   const applyHandoff = React.useCallback((detail: UmbraUiMediaHandoff | null) => {
     if (!detail || detail.mode !== 'video' || !detail.path) return;
     if (detail.createdAt <= handoffAppliedAtRef.current) return;
@@ -692,9 +1017,19 @@ export function UmbraVideoGenerationControls({
       };
     });
     if (role === 'first') setSourcePreviewUrl(detail.imageUrl || `/api/fs/image?path=${encodeURIComponent(detail.path)}`);
-    if (detail.generation?.positivePrompt) setPrompt(detail.generation.positivePrompt);
+    if (detail.generation?.positivePrompt) {
+      const handoffSegments = Array.isArray(detail.generation.positivePromptSegments)
+        ? detail.generation.positivePromptSegments.map((segment) => createUmbraUiPromptSegment(segment.text, {
+          label: segment.label,
+          slotType: segment.slotType,
+          variantId: segment.variantId,
+          variantName: segment.variantName,
+        }))
+        : [];
+      replacePromptSegments(detail.generation.positivePrompt, handoffSegments);
+    }
     if (detail.generation?.negativePrompt) setNegativePrompt(detail.generation.negativePrompt);
-  }, []);
+  }, [replacePromptSegments]);
 
   React.useEffect(() => {
     const target = window as typeof window & { __umbraPendingUmbraUiMediaHandoff?: unknown };
@@ -711,14 +1046,44 @@ export function UmbraVideoGenerationControls({
   }, [applyHandoff]);
 
   const setFamily = (family: PowerPrompterVideoFamily) => {
-    setVideo((current) => ({
-      ...current,
-      family,
-      frames: family === 'ltx23' ? 121 : 81,
-      fps: family === 'ltx23' ? 25 : 16,
-    }));
+    setVideo((current) => {
+      const fps = family === 'ltx23' ? 25 : 16;
+      const frameStride = family === 'ltx23' ? 8 : 4;
+      const durationSeconds = resolveUmbraVideoDurationSeconds(current.frames, current.fps);
+      return {
+        ...current,
+        family,
+        fps,
+        frames: resolveUmbraVideoFramesForDuration(durationSeconds, fps, frameStride),
+        ltx: {
+          ...current.ltx,
+          storyboard: {
+            ...current.ltx.storyboard,
+            enabled: family === 'ltx23' && current.ltx.storyboard.enabled,
+          },
+          extended: {
+            ...current.ltx.extended,
+            enabled: family === 'ltx23' && current.ltx.extended.enabled,
+          },
+        },
+      };
+    });
   };
-  const setMode = (mode: PowerPrompterVideoMode) => setVideo((current) => ({ ...current, mode }));
+  const setMode = (mode: PowerPrompterVideoMode) => setVideo((current) => ({
+    ...current,
+    mode,
+    ltx: {
+      ...current.ltx,
+      storyboard: {
+        ...current.ltx.storyboard,
+        enabled: false,
+      },
+      extended: {
+        ...current.ltx.extended,
+        enabled: false,
+      },
+    },
+  }));
   const setCommon = <K extends keyof PowerPrompterVideoControls>(key: K, value: PowerPrompterVideoControls[K]) => {
     setVideo((current) => ({ ...current, [key]: value }));
   };
@@ -728,6 +1093,156 @@ export function UmbraVideoGenerationControls({
   const setLtx = <K extends keyof PowerPrompterVideoControls['ltx']>(key: K, value: PowerPrompterVideoControls['ltx'][K]) => {
     setVideo((current) => ({ ...current, ltx: { ...current.ltx, [key]: value } }));
   };
+  const setStoryboardShots = React.useCallback((shots: UmbraLtxStoryboardShot[]) => {
+    setVideo((current) => ({
+      ...current,
+      ltx: {
+        ...current.ltx,
+        storyboard: {
+          ...current.ltx.storyboard,
+          shots: shots.map((shot) => ({ ...shot })),
+        },
+      },
+    }));
+  }, []);
+  const setStoryboardEnabled = React.useCallback((enabled: boolean) => {
+    setVideo((current) => {
+      const shots = current.ltx.storyboard.shots.length >= 2
+        ? current.ltx.storyboard.shots
+        : [createLtxStoryboardShot(0), createLtxStoryboardShot(1)];
+      return {
+        ...current,
+        mode: enabled ? 'text_to_video' : current.mode,
+        ltx: {
+          ...current.ltx,
+          storyboard: {
+            ...current.ltx.storyboard,
+            enabled,
+            shots,
+          },
+          extended: {
+            ...current.ltx.extended,
+            enabled: false,
+          },
+        },
+      };
+    });
+  }, []);
+  const setExtendedEnabled = React.useCallback((enabled: boolean) => {
+    setVideo((current) => {
+      const clips = current.ltx.extended.clips.length > 0
+        ? current.ltx.extended.clips
+        : createDefaultUmbraLtxExtendedControls().clips;
+      return {
+        ...current,
+        mode: enabled
+          ? current.sourceImagePath ? 'image_to_video' : 'text_to_video'
+          : current.mode,
+        ltx: {
+          ...current.ltx,
+          keyframes: enabled ? [] : current.ltx.keyframes,
+          storyboard: {
+            ...current.ltx.storyboard,
+            enabled: false,
+          },
+          extended: {
+            ...current.ltx.extended,
+            enabled,
+            clips: clips.map((clip) => ({ ...clip })),
+          },
+        },
+      };
+    });
+  }, []);
+  const setExtendedClips = React.useCallback((clips: UmbraLtxExtendedClip[]) => {
+    setVideo((current) => ({
+      ...current,
+      ltx: {
+        ...current.ltx,
+        extended: {
+          ...current.ltx.extended,
+          clips: clips.slice(0, UMBRA_LTX_EXTENDED_MAX_CLIPS).map((clip) => ({ ...clip })),
+        },
+      },
+    }));
+  }, []);
+  const addExtendedClip = React.useCallback(() => {
+    setVideo((current) => {
+      if (current.ltx.extended.clips.length >= UMBRA_LTX_EXTENDED_MAX_CLIPS) return current;
+      return {
+        ...current,
+        ltx: {
+          ...current.ltx,
+          extended: {
+            ...current.ltx.extended,
+            clips: [
+              ...current.ltx.extended.clips,
+              createLtxExtendedClip(current.ltx.extended.clips.length),
+            ],
+          },
+        },
+      };
+    });
+  }, []);
+  const setDurationSeconds = React.useCallback((durationSeconds: number) => {
+    setVideo((current) => ({
+      ...current,
+      frames: resolveUmbraVideoFramesForDuration(
+        durationSeconds,
+        current.fps,
+        current.family === 'ltx23' ? 8 : 4,
+      ),
+    }));
+  }, []);
+  const setOutputFps = React.useCallback((fpsInput: number) => {
+    setVideo((current) => {
+      const fps = Math.max(1, Math.min(120, Math.round(fpsInput || current.fps)));
+      const frameStride = current.family === 'ltx23' ? 8 : 4;
+      const durationSeconds = current.family === 'ltx23' && current.ltx.extended.enabled
+        ? current.ltx.extended.clips[0]?.durationSeconds || 10
+        : current.family === 'ltx23' && current.ltx.storyboard.enabled
+        ? current.ltx.storyboard.shots.reduce((sum, shot) => sum + shot.durationSeconds, 0)
+        : resolveUmbraVideoDurationSeconds(current.frames, current.fps);
+      const frames = current.family === 'ltx23' && current.ltx.extended.enabled
+        ? resolveUmbraVideoFramesForDuration(durationSeconds, fps, frameStride)
+        : current.family === 'ltx23' && current.ltx.storyboard.enabled
+        ? resolveUmbraLtxStoryboardTimeline(current.ltx.storyboard, fps, current.frames).frames
+        : resolveUmbraVideoFramesForDuration(durationSeconds, fps, frameStride);
+      return {
+        ...current,
+        fps,
+        frames,
+        ltx: {
+          ...current.ltx,
+          keyframes: current.ltx.keyframes.map((keyframe) => ({
+            ...keyframe,
+            frameIndex: resolveUmbraVideoFrameIndexForSeconds(
+              keyframe.frameIndex / Math.max(1, current.fps),
+              fps,
+              8,
+              Math.max(0, frames - 1),
+            ),
+          })),
+        },
+      };
+    });
+  }, []);
+  const addStoryboardShot = React.useCallback(() => {
+    setVideo((current) => {
+      if (current.ltx.storyboard.shots.length >= 24) return current;
+      const shot = createLtxStoryboardShot(current.ltx.storyboard.shots.length);
+      return {
+        ...current,
+        ltx: {
+          ...current.ltx,
+          storyboard: {
+            ...current.ltx.storyboard,
+            shots: [...current.ltx.storyboard.shots, shot],
+          },
+        },
+      };
+    });
+  }, []);
   const setPostprocess = <K extends keyof PowerPrompterVideoControls['postprocess']>(key: K, value: PowerPrompterVideoControls['postprocess'][K]) => {
     setVideo((current) => ({ ...current, postprocess: { ...current.postprocess, [key]: value } }));
   };
@@ -756,6 +1271,7 @@ export function UmbraVideoGenerationControls({
   };
 
   const sourceDimensionsMissing = video.mode !== 'text_to_video'
+    && !extendedOpen
     && (!video.sourceWidth || !video.sourceHeight);
   const requiredMissing = React.useMemo(() => {
     const sourceVideoMissing = video.mode === 'video_to_video'
@@ -777,7 +1293,17 @@ export function UmbraVideoGenerationControls({
         ...(video.mode === 'image_to_video' ? [video.wan.clipVision, video.sourceImagePath] : []),
       ].some((value) => !String(value || '').trim());
     }
-    return sourceVideoMissing || frameGuideMissing || sourceDimensionsMissing || [
+    const extendedMissing = extendedOpen && (
+      video.ltx.extended.clips.length < 1
+      || video.ltx.extended.clips.length > UMBRA_LTX_EXTENDED_MAX_CLIPS
+      || extendedTotalSeconds > UMBRA_LTX_EXTENDED_MAX_TOTAL_SECONDS
+      || video.ltx.extended.clips.some((clip) => (
+        !clip.prompt.trim()
+        || clip.durationSeconds < 1
+        || clip.durationSeconds > 10
+      ))
+    );
+    return sourceVideoMissing || frameGuideMissing || sourceDimensionsMissing || extendedMissing || [
       video.ltx.checkpoint,
       video.ltx.textEncoder,
       video.ltx.distilledLora,
@@ -786,11 +1312,16 @@ export function UmbraVideoGenerationControls({
       ...(video.ltx.audioEnabled && !(video.mode === 'video_to_video' && video.preserveSourceAudio) ? [video.ltx.audioVae] : []),
       ...(video.mode === 'image_to_video' ? [video.sourceImagePath] : []),
     ].some((value) => !String(value || '').trim());
-  }, [video])
+  }, [extendedOpen, extendedTotalSeconds, video])
     || (video.postprocess.interpolationEnabled && !video.postprocess.interpolationModel)
     || (video.postprocess.upscaleMode === 'model' && !video.postprocess.upscaleModel)
     || (video.postprocess.upscaleMode === 'rtx' && !catalog.rtxAvailable)
-    || (video.family === 'ltx23' && video.ltx.keyframes.some((keyframe) => !keyframe.sourceImagePath && !keyframe.sourceImageName));
+    || (video.family === 'ltx23' && !storyboardOpen && !extendedOpen && video.ltx.keyframes.some((keyframe) => !keyframe.sourceImagePath && !keyframe.sourceImageName))
+    || (storyboardOpen && (
+      !catalog.umbraDirectorAvailable
+      || video.ltx.storyboard.shots.length < 2
+      || video.ltx.storyboard.shots.some((shot) => !shot.prompt.trim())
+    ));
 
   const handleQueue = async (requestedPlacement: UmbraQueuePlacement = effectivePlacement) => {
     if (isQueueing) return;
@@ -802,7 +1333,7 @@ export function UmbraVideoGenerationControls({
     try {
       const queuedSeed = resolveUmbraUiQueueSeed(video.seed, video.seedMode);
       await queueVideo({
-        prompt: workflowPrompt,
+        prompt: queuePrompt,
         negativePrompt,
         video: {
           ...video,
@@ -860,9 +1391,10 @@ export function UmbraVideoGenerationControls({
 
   const samplerOptions = catalog.samplers.length > 0 ? catalog.samplers : ['euler', 'uni_pc'];
   const schedulerOptions = catalog.schedulers.length > 0 ? catalog.schedulers : ['simple', 'beta'];
-  const queueDisabled = isQueueing || !queueConnected || !comfyConnected || !pipelineMatch.workflow || !workflowPrompt.trim() || requiredMissing;
+  const queueDisabled = isQueueing || !queueConnected || !comfyConnected || !pipelineMatch.workflow || !queuePrompt || requiredMissing;
 
   return (
+    <>
     <section data-umbra-ui-video-controls="" className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar">
       <div className="mb-3 flex items-center gap-2">
         <Clapperboard size={13} className="text-fuchsia-300" />
@@ -882,22 +1414,122 @@ export function UmbraVideoGenerationControls({
         <ToggleButton active={video.family === 'wan22'} label="Wan 2.2" onClick={() => setFamily('wan22')} />
         <ToggleButton active={video.family === 'ltx23'} label="LTX-2.3" onClick={() => setFamily('ltx23')} />
       </div>
-      <div className="mb-3 grid grid-cols-3 gap-1.5">
-        <ToggleButton active={video.mode === 'text_to_video'} label="Text to Video" onClick={() => setMode('text_to_video')} />
-        <ToggleButton active={video.mode === 'image_to_video'} label="Image to Video" onClick={() => setMode('image_to_video')} />
-        <ToggleButton active={video.mode === 'video_to_video'} label="Video to Video" onClick={() => setMode('video_to_video')} />
+      <div className="mb-3 rounded-md border border-fuchsia-300/20 bg-fuchsia-500/[0.045] p-2.5">
+        <div className="mb-2 flex items-center gap-2">
+          <Database size={12} className="text-fuchsia-300" />
+          <span className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-300">
+            Video Model
+          </span>
+          <span className="ml-auto font-mono text-[8px] text-zinc-600">
+            {video.family === 'ltx23' ? 'LTX-2.3' : 'Wan 2.2'}
+          </span>
+        </div>
+        {video.family === 'ltx23' ? (
+          <VideoModelField
+            label="LTX Checkpoint"
+            family="ltx23"
+            value={video.ltx.checkpoint}
+            values={catalog.checkpoints}
+            onChange={(value) => setLtx('checkpoint', value)}
+          />
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <VideoModelField
+              label="High Noise Model"
+              family="wan22"
+              value={video.wan.highModel}
+              values={catalog.diffusionModels}
+              onChange={(value) => setWan('highModel', value)}
+            />
+            <VideoModelField
+              label="Low Noise Model"
+              family="wan22"
+              value={video.wan.lowModel}
+              values={catalog.diffusionModels}
+              onChange={(value) => setWan('lowModel', value)}
+            />
+          </div>
+        )}
+      </div>
+      <div className={cn('mb-3 grid gap-1.5', video.family === 'ltx23' ? 'grid-cols-2' : 'grid-cols-3')}>
+        <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'text_to_video'} label="Text to Video" onClick={() => setMode('text_to_video')} />
+        <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'image_to_video'} label="Image to Video" onClick={() => setMode('image_to_video')} />
+        <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'video_to_video'} label="Video to Video" onClick={() => setMode('video_to_video')} />
+        {video.family === 'ltx23' ? (
+          <ToggleButton
+            active={storyboardOpen}
+            label="Umbra Director"
+            onClick={() => setStoryboardEnabled(!storyboardOpen)}
+            title="Use an exclusive timed-shot LTX pipeline"
+          />
+        ) : null}
+        {video.family === 'ltx23' ? (
+          <div className="col-span-2 [&>button]:w-full">
+            <ToggleButton
+              active={extendedOpen}
+              label="LTX Extended"
+              onClick={() => setExtendedEnabled(!extendedOpen)}
+              title="Continue up to 12 clips from each preceding final frame"
+            />
+          </div>
+        ) : null}
       </div>
 
       <div className="space-y-3">
         {pipelineMatch.error ? <div className="font-mono text-[9px] leading-relaxed text-red-300/80">{pipelineMatch.error}</div> : null}
 
-        {video.mode === 'image_to_video' ? (
-          <div className="border border-fuchsia-300/20 bg-fuchsia-500/[0.04] p-2.5">
-            <div className="mb-2 flex items-center gap-2">
-              <ImageIcon size={12} className="text-fuchsia-300" />
-              <span className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-300">Frame Guidance</span>
-              <span className="ml-auto font-mono text-[8px] text-zinc-600">ordered anchors</span>
-            </div>
+        {extendedOpen ? (
+          <VideoAccordion
+            title="Extended Starting Frame"
+            icon={<ImageIcon size={12} className="text-fuchsia-300" />}
+            summary={video.sourceImagePath ? 'image guided' : 'text only'}
+            accent="fuchsia"
+            defaultOpen={!video.sourceImagePath}
+          >
+            <FrameSourceField
+              label="Optional First Frame"
+              path={video.sourceImagePath}
+              previewUrl={sourcePreviewUrl}
+              onChange={(path) => {
+                setVideo((current) => ({
+                  ...current,
+                  mode: path ? 'image_to_video' : 'text_to_video',
+                  sourceImagePath: path,
+                  sourceImageName: '',
+                  sourceWidth: 0,
+                  sourceHeight: 0,
+                }));
+                setSourcePreviewUrl(path ? `/api/fs/image?path=${encodeURIComponent(path)}` : '');
+              }}
+              onDimensions={(width, height) => setVideo((current) => ({
+                ...current,
+                sourceWidth: width,
+                sourceHeight: height,
+              }))}
+              onClear={() => {
+                setVideo((current) => ({
+                  ...current,
+                  mode: 'text_to_video',
+                  sourceImagePath: '',
+                  sourceImageName: '',
+                  sourceWidth: 0,
+                  sourceHeight: 0,
+                }));
+                setSourcePreviewUrl('');
+              }}
+            />
+            <p className="mt-2 font-mono text-[8px] leading-relaxed text-zinc-600">
+              Leave empty for text-to-video. When selected, clip 1 starts from this image and every later clip starts from the preceding final frame.
+            </p>
+          </VideoAccordion>
+        ) : video.mode === 'image_to_video' ? (
+          <VideoAccordion
+            title="Frame Guidance"
+            icon={<ImageIcon size={12} className="text-fuchsia-300" />}
+            summary={video.frameGuideMode.replaceAll('_', ' ')}
+            accent="fuchsia"
+            defaultOpen={!video.sourceImagePath}
+          >
             <div className="mb-2 grid grid-cols-3 gap-1">
               <ToggleButton active={video.frameGuideMode === 'first'} label="First" onClick={() => setCommon('frameGuideMode', 'first')} />
               <ToggleButton active={video.frameGuideMode === 'first_last'} label="First + Last" onClick={() => setCommon('frameGuideMode', 'first_last')} />
@@ -941,14 +1573,16 @@ export function UmbraVideoGenerationControls({
               onChange={(path) => setVideo((current) => ({ ...current, lastImagePath: path, lastImageName: '' }))}
               onClear={() => setVideo((current) => ({ ...current, lastImagePath: '', lastImageName: '' }))}
             /> : null}
-          </div>
+          </VideoAccordion>
         ) : null}
 
-        <div className="border border-cyan-300/15 bg-cyan-500/[0.025] p-2.5">
-          <div className="mb-1 flex items-center gap-2">
-            <Video size={12} className="text-cyan-300" />
-            <span className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-300">Media Inputs</span>
-          </div>
+        <VideoAccordion
+          title="Media Inputs"
+          icon={<Video size={12} className="text-cyan-300" />}
+          summary={video.sourceAudioPath ? 'audio attached' : video.mode === 'video_to_video' ? 'source video' : 'optional audio'}
+          accent="cyan"
+          defaultOpen={video.mode === 'video_to_video' && !video.sourceVideoPath}
+        >
           {video.mode === 'video_to_video' ? <>
             <MediaSourceField
               kind="video"
@@ -1006,18 +1640,47 @@ export function UmbraVideoGenerationControls({
             onUploaded={(path, name) => setVideo((current) => ({ ...current, sourceAudioPath: path, sourceAudioName: name }))}
             onClear={() => setVideo((current) => ({ ...current, sourceAudioPath: '', sourceAudioName: '' }))}
           />
-        </div>
+        </VideoAccordion>
 
-        <label className="block space-y-1.5">
-          <span className={labelClass}>{agentModeEnabled ? 'Prompt Request' : 'Prompt'}</span>
-          <textarea
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            onKeyDown={(event) => handlePromptKeyDown(event, setPrompt)}
-            placeholder="Describe motion, camera, subject, and scene continuity"
-            className={`${inputClass} min-h-28 resize-y leading-relaxed`}
-          />
-        </label>
+        {extendedOpen ? (
+          <div className="border border-cyan-300/15 bg-cyan-500/[0.035] px-3 py-2.5">
+            <span className="block text-[9px] font-black uppercase tracking-[0.14em] text-cyan-100">
+              Sequence prompts are edited in LTX Extended
+            </span>
+            <span className="mt-1 block font-mono text-[8px] leading-relaxed text-zinc-500">
+              Every clip has its own exact prompt and duration. The negative prompt below applies to the complete sequence.
+            </span>
+          </div>
+        ) : <>
+        <UmbraPositivePromptEditor
+          segments={promptSegments}
+          activeSegmentId={activePromptSegmentId}
+          onChange={setPromptSegments}
+          onActiveSegmentChange={setActivePromptSegmentId}
+          heading={agentModeEnabled ? 'Video Prompt Request' : 'Video Prompt'}
+          history={promptHistory}
+          onRememberCurrent={rememberCurrentPrompt}
+          onRestoreHistory={restorePromptHistoryEntry}
+          onRemoveHistory={removePromptHistoryEntry}
+          onClearHistory={clearPromptHistory}
+          onSubmit={() => { void handleQueue(); }}
+          mediaType="video"
+          accent="fuchsia"
+          agentContext={{
+            family: video.family,
+            mode: video.mode,
+            pipeline: pipelineMatch.workflow?.name || '',
+            width: targetDimensions.targetWidth,
+            height: targetDimensions.targetHeight,
+            frames: video.frames,
+            fps: video.fps,
+            frameGuideMode: video.frameGuideMode,
+          }}
+          onAgentEnhancementApplied={() => {
+            setAgentModeEnabled(false);
+            setAgentPrompt('');
+          }}
+        />
         <UmbraInlineAgentPrompt
           mediaType="video"
           sourcePrompt={prompt}
@@ -1038,6 +1701,7 @@ export function UmbraVideoGenerationControls({
             frameGuideMode: video.frameGuideMode,
           }}
         />
+        </>}
         <label className="block space-y-1.5">
           <span className={labelClass}>Negative Prompt</span>
           <textarea
@@ -1049,7 +1713,14 @@ export function UmbraVideoGenerationControls({
           />
         </label>
 
-        <div className="grid grid-cols-2 gap-2">
+        <VideoAccordion
+          title="Generation Settings"
+          icon={<SlidersHorizontal size={12} className="text-fuchsia-300" />}
+          summary={`${sizing.targetWidth}x${sizing.targetHeight} / ${videoDurationSeconds.toFixed(1)} seconds / ${video.fps} fps`}
+          accent="fuchsia"
+          defaultOpen
+        >
+          <div className="grid grid-cols-2 gap-2">
           <label className="col-span-2 space-y-1.5">
             <span className={labelClass}>Target Resolution</span>
             <select
@@ -1095,8 +1766,37 @@ export function UmbraVideoGenerationControls({
             <span className="text-zinc-700">/</span>
             <span className="ml-auto text-cyan-200/80">{sizing.targetWidth}x{sizing.targetHeight} final</span>
           </div>
-          <NumberField label={`Frames (${video.family === 'ltx23' ? '8n+1' : '4n+1'})`} value={video.frames} min={1} max={16385} step={video.family === 'ltx23' ? 8 : 4} onChange={(value) => setCommon('frames', value)} />
-          <NumberField label="FPS" value={video.fps} min={1} max={120} onChange={(value) => setCommon('fps', value)} />
+          {extendedOpen ? (
+            <div className="space-y-1.5">
+              <span className={labelClass}>Sequence Duration</span>
+              <div className="flex h-9 items-center rounded-md border border-cyan-300/15 bg-cyan-500/[0.035] px-2.5 font-mono text-xs text-cyan-100">
+                {extendedTotalSeconds.toFixed(1)} seconds / {video.ltx.extended.clips.length} clips
+              </div>
+            </div>
+          ) : storyboardOpen ? (
+            <div className="space-y-1.5">
+              <span className={labelClass}>Duration (from shots)</span>
+              <div className="flex h-9 items-center rounded-md border border-cyan-300/15 bg-cyan-500/[0.035] px-2.5 font-mono text-xs text-cyan-100">
+                {storyboardTimeline.durationSeconds.toFixed(1)} seconds
+              </div>
+            </div>
+          ) : (
+            <NumberField
+              label="Duration (seconds)"
+              value={Number(videoDurationSeconds.toFixed(2))}
+              min={0.5}
+              max={600}
+              step={0.5}
+              onChange={setDurationSeconds}
+            />
+          )}
+          <NumberField
+            label="Frame Rate (FPS)"
+            value={video.fps}
+            min={1}
+            max={120}
+            onChange={setOutputFps}
+          />
           <div className="col-span-2">
             <UmbraSeedControls
               seed={String(video.seed)}
@@ -1112,15 +1812,24 @@ export function UmbraVideoGenerationControls({
             <span className={labelClass}>Output Prefix</span>
             <input value={video.outputPrefix} onChange={(event) => setCommon('outputPrefix', event.target.value)} className={inputClass} />
           </label>
-        </div>
+          </div>
+        </VideoAccordion>
 
-        {video.family === 'wan22' ? (
-          <div className="space-y-3 border-t border-white/10 pt-3">
-            <div className="flex items-center gap-2"><Database size={12} className="text-amber-300" /><span className={labelClass}>Wan Dual Stage</span></div>
-            <SelectField label="High Noise Model (FP8 / GGUF)" value={video.wan.highModel} values={catalog.diffusionModels} onChange={(value) => setWan('highModel', value)} />
+        <VideoAccordion
+          title={video.family === 'wan22' ? 'Wan Dual Stage Pipeline' : 'LTX-2.3 Pipeline'}
+          icon={video.family === 'wan22'
+            ? <Database size={12} className="text-amber-300" />
+            : <Film size={12} className="text-cyan-300" />}
+          summary={video.family === 'wan22' ? 'high + low noise' : video.ltx.twoStage ? 'two stage' : 'single stage'}
+          accent={video.family === 'wan22' ? 'amber' : 'cyan'}
+          defaultOpen={video.family === 'wan22'
+            ? !video.wan.highModel || !video.wan.lowModel || !video.wan.textEncoder || !video.wan.vae
+            : !video.ltx.checkpoint || !video.ltx.textEncoder || !video.ltx.distilledLora || !video.ltx.promptLora}
+        >
+          {video.family === 'wan22' ? (
+            <>
             <SelectField label="High Noise LoRA" value={video.wan.highLora} values={catalog.loras} onChange={(value) => setWan('highLora', value)} />
             <NumberField label="High LoRA Strength" value={video.wan.highLoraStrength} step={0.05} onChange={(value) => setWan('highLoraStrength', value)} />
-            <SelectField label="Low Noise Model (FP8 / GGUF)" value={video.wan.lowModel} values={catalog.diffusionModels} onChange={(value) => setWan('lowModel', value)} />
             <SelectField label="Low Noise LoRA" value={video.wan.lowLora} values={catalog.loras} onChange={(value) => setWan('lowLora', value)} />
             <NumberField label="Low LoRA Strength" value={video.wan.lowLoraStrength} step={0.05} onChange={(value) => setWan('lowLoraStrength', value)} />
             <SelectField label="Text Encoder" value={video.wan.textEncoder} values={catalog.textEncoders} onChange={(value) => setWan('textEncoder', value)} />
@@ -1138,11 +1847,9 @@ export function UmbraVideoGenerationControls({
               <SelectField label="Low Sampler" value={video.wan.lowSamplerName} values={samplerOptions} onChange={(value) => setWan('lowSamplerName', value)} />
               <SelectField label="Low Scheduler" value={video.wan.lowScheduler} values={schedulerOptions} onChange={(value) => setWan('lowScheduler', value)} />
             </div>
-          </div>
-        ) : (
-          <div className="space-y-3 border-t border-white/10 pt-3">
-            <div className="flex items-center gap-2"><Film size={12} className="text-cyan-300" /><span className={labelClass}>LTX-2.3 Pipeline</span></div>
-            <SelectField label="Checkpoint" value={video.ltx.checkpoint} values={catalog.checkpoints} onChange={(value) => setLtx('checkpoint', value)} />
+            </>
+          ) : (
+            <>
             <SelectField label="Text Encoder" value={video.ltx.textEncoder} values={catalog.textEncoders} onChange={(value) => setLtx('textEncoder', value)} />
             <div className="grid grid-cols-[minmax(0,1fr)_90px] gap-2">
               <SelectField label="Distilled Model LoRA" value={video.ltx.distilledLora} values={catalog.loras} onChange={(value) => setLtx('distilledLora', value)} />
@@ -1154,6 +1861,36 @@ export function UmbraVideoGenerationControls({
               <ToggleButton active={video.ltx.twoStage} label="Two Stage" onClick={() => setLtx('twoStage', !video.ltx.twoStage)} />
               <ToggleButton active={video.ltx.audioEnabled} label="Audio" onClick={() => setLtx('audioEnabled', !video.ltx.audioEnabled)} />
             </div>
+            {extendedOpen ? (
+              <div className="flex items-center gap-2 rounded-md border border-cyan-300/20 bg-cyan-500/[0.055] px-2.5 py-2">
+                <Clock3 size={12} className="text-cyan-200" />
+                <div className="min-w-0">
+                  <span className="block text-[9px] font-black uppercase tracking-[0.11em] text-cyan-100">
+                    {video.ltx.extended.clips.length} continuation clips
+                  </span>
+                  <span className="block font-mono text-[8px] text-zinc-500">
+                    {extendedTotalSeconds.toFixed(1)} seconds total
+                  </span>
+                </div>
+              </div>
+            ) : storyboardOpen ? (
+              <div className="flex items-center gap-2 rounded-md border border-cyan-300/20 bg-cyan-500/[0.055] px-2.5 py-2">
+                <PanelRight size={12} className="text-cyan-200" />
+                <div className="min-w-0">
+                  <span className="block text-[9px] font-black uppercase tracking-[0.11em] text-cyan-100">
+                    {video.ltx.storyboard.shots.length} timed shots
+                  </span>
+                  <span className="block font-mono text-[8px] text-zinc-500">
+                    {storyboardTimeline.durationSeconds.toFixed(1)} seconds total
+                  </span>
+                </div>
+                {!catalog.umbraDirectorAvailable ? (
+                  <span className="ml-auto text-right font-mono text-[8px] text-red-300">
+                    Umbra Director missing
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             {video.ltx.twoStage ? <SelectField label="Latent Upscale Model" value={video.ltx.latentUpscaleModel} values={catalog.latentUpscaleModels} onChange={(value) => setLtx('latentUpscaleModel', value)} /> : null}
             {video.ltx.audioEnabled ? <SelectField label="Audio VAE" value={video.ltx.audioVae} values={catalog.checkpoints} onChange={(value) => setLtx('audioVae', value)} /> : null}
             {video.mode === 'image_to_video' ? (
@@ -1162,7 +1899,7 @@ export function UmbraVideoGenerationControls({
                 <NumberField label="Image Compression" value={video.ltx.imageCompression} min={0} max={100} onChange={(value) => setLtx('imageCompression', value)} />
               </div>
             ) : null}
-            <div className="border-t border-white/10 pt-3">
+            {!storyboardOpen && !extendedOpen ? <div className="border-t border-white/10 pt-3">
               <div className="mb-2 flex items-center gap-2">
                 <ImagePlus size={12} className="text-cyan-300" />
                 <span className={labelClass}>Keyframe Guides</span>
@@ -1201,13 +1938,28 @@ export function UmbraVideoGenerationControls({
                       </button>
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-2">
-                      <NumberField label="Frame" value={keyframe.frameIndex} min={0} max={Math.max(0, video.frames - 1)} onChange={(value) => updateLtxKeyframe(keyframe.id, { frameIndex: value })} />
+                      <NumberField
+                        label="Time (seconds)"
+                        value={Number((keyframe.frameIndex / video.fps).toFixed(2))}
+                        min={0}
+                        max={videoDurationSeconds}
+                        step={0.5}
+                        onChange={(value) => updateLtxKeyframe(keyframe.id, {
+                          frameIndex: Math.max(
+                            0,
+                            Math.min(
+                              video.frames - 1,
+                              Math.round((value * video.fps) / 8) * 8,
+                            ),
+                          ),
+                        })}
+                      />
                       <NumberField label="Strength" value={keyframe.strength} min={0} max={1} step={0.05} onChange={(value) => updateLtxKeyframe(keyframe.id, { strength: value })} />
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
+            </div> : null}
             <div className="grid grid-cols-2 gap-2">
               <NumberField label="Base CFG" value={video.ltx.baseCfg} min={0} max={100} step={0.1} onChange={(value) => setLtx('baseCfg', value)} />
               <NumberField label="Refine CFG" value={video.ltx.refineCfg} min={0} max={100} step={0.1} onChange={(value) => setLtx('refineCfg', value)} />
@@ -1216,14 +1968,16 @@ export function UmbraVideoGenerationControls({
             </div>
             <label className="block space-y-1.5"><span className={labelClass}>Base Sigmas</span><textarea value={video.ltx.baseSigmas} onChange={(event) => setLtx('baseSigmas', event.target.value)} className={`${inputClass} min-h-16 resize-y font-mono text-[10px]`} /></label>
             <label className="block space-y-1.5"><span className={labelClass}>Refine Sigmas</span><textarea value={video.ltx.refineSigmas} onChange={(event) => setLtx('refineSigmas', event.target.value)} className={`${inputClass} min-h-14 resize-y font-mono text-[10px]`} /></label>
-          </div>
-        )}
+            </>
+          )}
+        </VideoAccordion>
 
-        <details className="border-t border-white/10 pt-3">
-          <summary className="flex cursor-pointer list-none items-center gap-2 text-[9px] font-black uppercase tracking-[0.14em] text-zinc-500 hover:text-zinc-300">
-            <Gauge size={11} /> Decode Memory
-          </summary>
-          <div className="mt-3 space-y-2">
+        <VideoAccordion
+          title="Decode Memory"
+          icon={<Gauge size={11} className="text-zinc-500" />}
+          summary={video.decodeMode}
+        >
+          <div className="space-y-2">
             <div className="grid grid-cols-3 gap-1.5">
               <ToggleButton active={video.decodeMode === 'auto'} label="Auto" onClick={() => setCommon('decodeMode', 'auto')} />
               <ToggleButton active={video.decodeMode === 'full'} label="Full" onClick={() => setCommon('decodeMode', 'full')} />
@@ -1238,13 +1992,17 @@ export function UmbraVideoGenerationControls({
               </div>
             ) : null}
           </div>
-        </details>
+        </VideoAccordion>
 
-        <details className="border-t border-white/10 pt-3">
-          <summary className="flex cursor-pointer list-none items-center gap-2 text-[9px] font-black uppercase tracking-[0.14em] text-zinc-500 hover:text-zinc-300">
-            <SlidersHorizontal size={11} /> Post Processing
-          </summary>
-          <div className="mt-3 space-y-3">
+        <VideoAccordion
+          title="Post Processing"
+          icon={<SlidersHorizontal size={11} className="text-zinc-500" />}
+          summary={[
+            video.postprocess.interpolationEnabled ? 'interpolation' : '',
+            video.postprocess.upscaleMode !== 'none' ? video.postprocess.upscaleMode : '',
+          ].filter(Boolean).join(' + ') || 'off'}
+        >
+          <div className="space-y-3">
             <ToggleButton
               active={video.postprocess.interpolationEnabled}
               label="Frame Interpolation"
@@ -1287,7 +2045,7 @@ export function UmbraVideoGenerationControls({
               </div>
             ) : null}
           </div>
-        </details>
+        </VideoAccordion>
 
         {catalog.error ? <div className="border border-amber-300/20 bg-amber-500/[0.04] px-2.5 py-2 font-mono text-[9px] text-amber-200/70">{catalog.error}</div> : null}
         {!catalog.loading && requiredMissing ? (
@@ -1320,7 +2078,7 @@ export function UmbraVideoGenerationControls({
               : requiredMissing ? 'Select all required video models first' : 'Queue this video through the shared Power Prompter queue'}
           >
             {isQueueing ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-            Generate Video
+            {extendedOpen ? 'Generate Extended Video' : 'Generate Video'}
           </button>
             <button
               type="button"
@@ -1334,6 +2092,33 @@ export function UmbraVideoGenerationControls({
         </div>
       </div>
     </section>
+    {storyboardOpen ? (
+      <UmbraLtxStoryboardPanel
+        shots={video.ltx.storyboard.shots}
+        selectedShotId={selectedStoryboardShotId}
+        agentContext={{
+          prompt: workflowPrompt,
+          negativePrompt,
+          family: video.family,
+          mode: video.mode,
+          width: targetDimensions.targetWidth,
+          height: targetDimensions.targetHeight,
+        }}
+        onSelectedShotChange={setSelectedStoryboardShotId}
+        onShotsChange={setStoryboardShots}
+        onAddShot={addStoryboardShot}
+        onClose={() => setStoryboardEnabled(false)}
+      />
+    ) : null}
+    {extendedOpen ? (
+      <UmbraLtxExtendedPanel
+        clips={video.ltx.extended.clips}
+        onClipsChange={setExtendedClips}
+        onAddClip={addExtendedClip}
+        onClose={() => setExtendedEnabled(false)}
+      />
+    ) : null}
+    </>
   );
 }
 

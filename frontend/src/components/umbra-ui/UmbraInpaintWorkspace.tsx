@@ -620,7 +620,6 @@ export interface UmbraInpaintWorkspaceProps {
   onLorasChange: (loras: UmbraUiLoraEntry[]) => void;
   loraAvailableCount: number;
   onOpenLoraPicker: () => void;
-  onAddPromptToken: (token: string) => void;
   clipSkip: string;
   onClipSkipChange: (value: string) => void;
   prompt: string;
@@ -2456,7 +2455,6 @@ export function UmbraInpaintWorkspace({
   onLorasChange,
   loraAvailableCount,
   onOpenLoraPicker,
-  onAddPromptToken,
   clipSkip,
   onClipSkipChange,
   prompt,
@@ -9932,7 +9930,6 @@ export function UmbraInpaintWorkspace({
               availableCount={loraAvailableCount}
               onChange={onLorasChange}
               onOpenPicker={onOpenLoraPicker}
-              onAddPromptToken={onAddPromptToken}
             />
           ) : null}
 

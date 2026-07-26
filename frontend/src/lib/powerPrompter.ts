@@ -28,6 +28,16 @@ import {
   normalizeUmbraVideoResolutionPreset,
   resolveUmbraVideoTargetDimensions,
 } from '../../../shared/umbra-ui/videoSizing';
+import {
+  normalizeUmbraLtxStoryboardControls,
+  resolveUmbraVideoFramesForDuration,
+  resolveUmbraLtxStoryboardTimeline,
+} from '../../../shared/umbra-ui/videoStoryboard';
+import {
+  createDefaultUmbraLtxExtendedControls,
+  normalizeUmbraLtxExtendedControls,
+  normalizeUmbraLtxExtendedSequenceMetadata,
+} from '../../../shared/umbra-ui/videoExtension';
 import { normalizeUmbraUiPipelineSelection } from '../../../shared/umbra-ui/pipelineTypes';
 
 interface PowerPrompterBaseCardConfig {
@@ -455,6 +465,12 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
       imageStrength: 0.7,
       imageCompression: 18,
       keyframes: [],
+      storyboard: {
+        enabled: false,
+        epsilon: 0.001,
+        shots: [],
+      },
+      extended: createDefaultUmbraLtxExtendedControls(),
     },
   },
   negativePrompt: '',
@@ -773,6 +789,27 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
     : {};
   const steps = clampInteger(wan.steps, defaults.wan.steps, 1, 10000);
   const normalizedFrames = normalizeVideoFrames(video.frames, family === 'ltx23' ? 121 : defaults.frames, family === 'ltx23' ? 8 : 4);
+  const normalizedFps = clampInteger(video.fps, family === 'ltx23' ? 25 : defaults.fps, 1, 120);
+  const normalizedStoryboard = normalizeUmbraLtxStoryboardControls(ltx.storyboard);
+  const storyboard = {
+    ...normalizedStoryboard,
+    enabled: family === 'ltx23' && normalizedStoryboard.enabled,
+  };
+  const normalizedExtended = normalizeUmbraLtxExtendedControls(ltx.extended);
+  const extended = {
+    ...normalizedExtended,
+    enabled: family === 'ltx23' && !storyboard.enabled && normalizedExtended.enabled,
+  };
+  const storyboardTimeline = resolveUmbraLtxStoryboardTimeline(storyboard, normalizedFps, normalizedFrames);
+  const resolvedFrames = extended.enabled
+    ? resolveUmbraVideoFramesForDuration(extended.clips[0]?.durationSeconds || 10, normalizedFps, 8)
+    : family === 'ltx23' && storyboardTimeline.enabled
+      ? storyboardTimeline.frames
+      : normalizedFrames;
+  const resolvedMode: PowerPrompterVideoControls['mode'] = family === 'ltx23'
+    && (storyboardTimeline.enabled || extended.enabled)
+    ? 'text_to_video'
+    : mode;
   const decodeModeRaw = String(video.decodeMode || '').trim().toLowerCase();
   const decodeMode: PowerPrompterVideoControls['decodeMode'] = decodeModeRaw === 'full' || decodeModeRaw === 'tiled'
     ? decodeModeRaw
@@ -796,7 +833,7 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
         id: String(keyframe.id || `ltx-keyframe-${index + 1}`).trim().slice(0, 160) || `ltx-keyframe-${index + 1}`,
         sourceImagePath: String(keyframe.sourceImagePath || '').trim().replace(/\\/g, '/'),
         sourceImageName: String(keyframe.sourceImageName || '').trim().replace(/\\/g, '/'),
-        frameIndex: clampInteger(keyframe.frameIndex, Math.min(normalizedFrames - 1, Math.max(1, Math.floor(normalizedFrames / 2))), 0, Math.max(0, normalizedFrames - 1)),
+        frameIndex: clampInteger(keyframe.frameIndex, Math.min(resolvedFrames - 1, Math.max(1, Math.floor(resolvedFrames / 2))), 0, Math.max(0, resolvedFrames - 1)),
         strength: clampNumber(keyframe.strength, 1, 0, 1),
       };
     })
@@ -810,13 +847,13 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
   const sourceHeight = clampInteger(video.sourceHeight, 0, 0, 32768);
   const targetDimensions = resolveUmbraVideoTargetDimensions({
     resolutionPreset,
-    sourceWidth: mode === 'text_to_video' ? 0 : sourceWidth,
-    sourceHeight: mode === 'text_to_video' ? 0 : sourceHeight,
+    sourceWidth: resolvedMode === 'text_to_video' ? 0 : sourceWidth,
+    sourceHeight: resolvedMode === 'text_to_video' ? 0 : sourceHeight,
     fallbackAspect: aspectRatio,
   });
   return {
     family,
-    mode,
+    mode: resolvedMode,
     frameGuideMode,
     sourceImagePath: String(video.sourceImagePath || '').trim().replace(/\\/g, '/'),
     sourceImageName: String(video.sourceImageName || '').trim().replace(/\\/g, '/'),
@@ -836,8 +873,8 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
     sourceHeight,
     width: targetDimensions.targetWidth,
     height: targetDimensions.targetHeight,
-    frames: normalizedFrames,
-    fps: clampInteger(video.fps, family === 'ltx23' ? 25 : defaults.fps, 1, 120),
+    frames: resolvedFrames,
+    fps: normalizedFps,
     seed: clampInteger(video.seed, defaults.seed, 0, MAX_JS_SAFE_SEED),
     seedMode: normalizeSeedControlMode(video.seedMode),
     seedIncrement: normalizeSeedIncrement(video.seedIncrement),
@@ -899,6 +936,8 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
       imageStrength: clampNumber(ltx.imageStrength, defaults.ltx.imageStrength, 0, 1),
       imageCompression: clampInteger(ltx.imageCompression, defaults.ltx.imageCompression, 0, 100),
       keyframes,
+      storyboard,
+      extended,
     },
   };
 }
@@ -1070,6 +1109,7 @@ export function normalizePowerPrompterGenerationControls(rawControls: unknown): 
       denoise: clampNumber((controls as any).img2img?.denoise, 0.3, 0.01, 1),
     },
     video: normalizePowerPrompterVideoControls((controls as any).video),
+    videoSequence: normalizeUmbraLtxExtendedSequenceMetadata((controls as any).videoSequence),
     hiresFix: normalizePowerPrompterHiresFixControls((controls as any).hiresFix),
     detailerPipeline: normalizePowerPrompterDetailerPipeline(
       (controls as any).detailerPipeline,

@@ -5,6 +5,10 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { platform } from 'node:os';
 import { buildListenerOrigin } from '../backend/remoteNetworkAddress';
 import {
+  resolveRemoteListenerHost,
+  resolveSavedRemoteEnabled,
+} from '../backend/remoteAccessPolicy';
+import {
   UMBRA_MIGRATION_EXIT_CODE,
   type UmbraFirstRunPhase,
 } from '../shared/onboarding/firstRun';
@@ -173,8 +177,9 @@ function loadRemoteLauncherSettings(runtimeRoot: string): { bindHost?: string; p
     const settingsPath = join(runtimeRoot, 'User', 'Config', 'UmbraRemote', 'settings.json');
     if (!existsSync(settingsPath)) return {};
     const parsed = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
+    const enabled = resolveSavedRemoteEnabled(parsed.enabled, true);
     return {
-      bindHost: normalizeBindHost(parsed.bindHost, ''),
+      bindHost: resolveRemoteListenerHost(enabled, normalizeBindHost(parsed.bindHost, '')),
       port: parsed.port ? clampPort(parsed.port, DEFAULT_PORT) : undefined,
     };
   } catch {
@@ -399,7 +404,7 @@ async function main() {
     ? options.port
     : clampPort(process.env.UMBRA_PORT || remoteSettings.port || options.port, options.port);
   const bindHost = normalizeBindHost(
-    process.env.UMBRA_HOST || process.env.HOST || remoteSettings.bindHost || (launcherDevMode ? '0.0.0.0' : '127.0.0.1'),
+    process.env.UMBRA_HOST || process.env.HOST || remoteSettings.bindHost || '127.0.0.1',
   );
   const localOrigin = buildListenerOrigin(bindHost, effectivePort);
   const appUrl = `${localOrigin}/`;

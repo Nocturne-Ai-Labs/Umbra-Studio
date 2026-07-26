@@ -15,13 +15,18 @@ import {
   PanelsTopLeft,
   Play,
   Radio,
+  SlidersHorizontal,
   Sparkles,
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { cn } from '@/lib/utils';
-import { DEFAULT_POWER_PROMPTER_DETAILER_PIPELINE } from '@/lib/powerPrompter';
+import {
+  DEFAULT_POWER_PROMPTER_DETAILER_PIPELINE,
+  normalizePowerPrompterGenerationControls,
+} from '@/lib/powerPrompter';
 import type {
   PowerPrompterDetailerStage,
+  PowerPrompterGenerationControls,
   PowerPrompterModelType,
   PowerPrompterOutputUpscaleControls,
   PowerPrompterSeedControlMode,
@@ -92,7 +97,6 @@ import {
   type UmbraUiLoraEntry,
 } from '@/lib/umbraUiModels';
 import {
-  appendUmbraUiPromptToken,
   compileUmbraUiPromptSegments,
   createUmbraUiPromptSegment,
   type UmbraUiPromptSegment,
@@ -110,6 +114,7 @@ import {
   UMBRA_UI_POWER_PROMPTER_HANDOFF_EVENT,
   type UmbraUiPowerPrompterHandoff,
 } from '@/lib/umbraUiPowerPrompterHandoff';
+import { stageUmbraUiGenerationControlsHandoff } from '@/lib/umbraUiGenerationControlsHandoff';
 import {
   publishUmbraUiAgentContext,
   type UmbraUiAgentDraft,
@@ -287,6 +292,9 @@ interface PipelineControlsProps {
   queueSummary: UmbraQueueSummary;
   onQueueImage: (placement: UmbraQueuePlacement) => void;
   onOpenPowerPrompter: () => void;
+  onSendControlsToPowerPrompter?: () => void;
+  sendControlsDisabled?: boolean;
+  sendControlsTitle?: string;
   isQueueing: boolean;
   queueDisabled: boolean;
   queueTitle: string;
@@ -297,6 +305,9 @@ function PipelineControls({
   queueSummary,
   onQueueImage,
   onOpenPowerPrompter,
+  onSendControlsToPowerPrompter,
+  sendControlsDisabled = false,
+  sendControlsTitle = 'Apply these TXT2IMG generation controls to the active PPCard file',
   isQueueing,
   queueDisabled,
   queueTitle,
@@ -353,6 +364,18 @@ function PipelineControls({
           {isQueueing ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
           {queueLabel}
         </button>
+        {onSendControlsToPowerPrompter ? (
+          <button
+            type="button"
+            onClick={onSendControlsToPowerPrompter}
+            disabled={sendControlsDisabled}
+            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-cyan-300/25 bg-cyan-500/[0.07] text-[10px] font-black uppercase tracking-[0.12em] text-cyan-100 transition-colors hover:border-cyan-200/45 hover:bg-cyan-500/[0.12] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.025] disabled:text-zinc-600"
+            title={sendControlsTitle}
+          >
+            <SlidersHorizontal size={13} />
+            Send Controls to Power Prompter
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onOpenPowerPrompter}
@@ -387,6 +410,7 @@ export function UmbraUIWorkspace() {
     videoJobsLoading,
     videoJobsError,
     refreshVideoJobs,
+    clearVideoJobs,
     generationPreview,
     latestSavedImage,
     skipActiveUmbraJob,
@@ -507,6 +531,7 @@ export function UmbraUIWorkspace() {
   const [isQueueing, setIsQueueing] = React.useState(false);
   const [agentPanelOpen, setAgentPanelOpen] = React.useState(false);
   const [agentDraftCount, setAgentDraftCount] = React.useState(0);
+  const [videoStoryboardOpen, setVideoStoryboardOpen] = React.useState(false);
   const [pendingVideoAgentDraft, setPendingVideoAgentDraft] = React.useState<UmbraUiAgentDraft | null>(null);
   const [videoEditorDraft, setVideoEditorDraft] = React.useState<UmbraVideoEditorDraft | null>(null);
   const [videoAgentContext, setVideoAgentContext] = React.useState<UmbraUiAgentVideoContext>({
@@ -1241,10 +1266,6 @@ export function UmbraUIWorkspace() {
     setActivePromptSegmentId(promptSegments[0]?.id || '');
   }, [activePromptSegmentId, promptSegments]);
 
-  const addPromptToken = React.useCallback((token: string) => {
-    setPromptSegments((current) => appendUmbraUiPromptToken(current, activePromptSegmentId, token));
-  }, [activePromptSegmentId]);
-
   const rememberCurrentPrompt = React.useCallback(() => {
     if (!prompt) {
       showToast('Enter a positive prompt before saving it to history.', 'error');
@@ -1401,6 +1422,158 @@ export function UmbraUIWorkspace() {
         .catch(() => undefined);
     }
   }, [loras, requestLoraInfo]);
+
+  const buildPowerPrompterGenerationControls = React.useCallback((): PowerPrompterGenerationControls => {
+    const controlNumber = (
+      value: string,
+      capabilityValue: string | number | boolean | undefined,
+      fallback: number,
+    ) => {
+      if (typeof capabilityValue === 'number' && Number.isFinite(capabilityValue)) return capabilityValue;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : fallback;
+    };
+    const effectiveSampler = imageCapabilities.sampler.support === 'adjustable'
+      ? samplerName
+      : typeof imageCapabilities.sampler.value === 'string'
+        ? imageCapabilities.sampler.value
+        : samplerName;
+    const effectiveScheduler = imageCapabilities.scheduler.support === 'adjustable'
+      ? scheduler
+      : typeof imageCapabilities.scheduler.value === 'string'
+        ? imageCapabilities.scheduler.value
+        : scheduler;
+    const effectiveHiresResizeMode = resolveUmbraUiHiresResizeMode(
+      imageCapabilities.hiresFix,
+      hiresResizeMode,
+    );
+    const effectiveDetailerPipeline = filterUmbraUiDetailerStages(
+      imageCapabilities.detailerStages,
+      detailerPipeline,
+    );
+    const outputUpscaleModel = imageCapabilities.finalModelUpscale.modelSelection
+      ? outputUpscale.modelName
+      : typeof imageCapabilities.finalModelUpscale.value === 'string'
+        ? imageCapabilities.finalModelUpscale.value
+        : outputUpscale.modelName;
+    const seedIsAdjustable = imageCapabilities.seed.support === 'adjustable';
+
+    return normalizePowerPrompterGenerationControls({
+      mediaType: 'image',
+      outputOwner: 'power_prompter',
+      outputMode: 'txt2img',
+      negativePrompt: imageCapabilities.negativePrompt.support === 'adjustable' ? negativePrompt : '',
+      seed: controlNumber(seed, seedIsAdjustable ? undefined : imageCapabilities.seed.value, 0),
+      controlAfterGenerate: seedIsAdjustable ? seedMode : 'fixed',
+      seedIncrement: seedIsAdjustable ? seedIncrement : 1,
+      steps: controlNumber(
+        steps,
+        imageCapabilities.steps.support === 'adjustable' ? undefined : imageCapabilities.steps.value,
+        35,
+      ),
+      cfg: controlNumber(
+        cfg,
+        imageCapabilities.guidance.support === 'adjustable' ? undefined : imageCapabilities.guidance.value,
+        4,
+      ),
+      clipSkip: imageCapabilities.clipSkip.support === 'adjustable'
+        ? Number(clipSkip)
+        : controlNumber('1', imageCapabilities.clipSkip.value, 1),
+      samplerName: effectiveSampler,
+      scheduler: effectiveScheduler,
+      modelType,
+      checkpointName,
+      workflowResources: workflowResourceValues,
+      aspectRatio: 'custom',
+      swapDimensions: false,
+      width: imageCapabilities.resolution.support === 'adjustable'
+        ? Number(width)
+        : imageCapabilities.resolution.defaultWidth || Number(width),
+      height: imageCapabilities.resolution.support === 'adjustable'
+        ? Number(height)
+        : imageCapabilities.resolution.defaultHeight || Number(height),
+      batchSize,
+      loras: imageCapabilities.loras.support === 'adjustable' ? activeLoras : [],
+      hiresFix: {
+        enabled: imageCapabilities.hiresFix.support === 'adjustable' && !!effectiveHiresResizeMode && hiresEnabled,
+        upscaler: imageCapabilities.hiresFix.controls.upscaler ? hiresUpscaler : 'Latent',
+        resizeMode: effectiveHiresResizeMode || 'scale',
+        scaleBy: hiresScaleBy,
+        targetWidth: Number(hiresTargetWidth),
+        targetHeight: Number(hiresTargetHeight),
+        steps: imageCapabilities.hiresFix.controls.steps ? Number(hiresSteps) : 0,
+        denoise: imageCapabilities.hiresFix.controls.denoise ? hiresDenoise : 0.35,
+        cfg: imageCapabilities.hiresFix.controls.cfg ? Number(hiresCfg) : 0,
+        samplerName: imageCapabilities.hiresFix.controls.sampler ? hiresSamplerName : 'use_same',
+        scheduler: imageCapabilities.hiresFix.controls.scheduler ? hiresScheduler : 'use_same',
+      },
+      detailerPipeline: effectiveDetailerPipeline,
+      outputUpscale: {
+        enabled: imageCapabilities.finalModelUpscale.support === 'adjustable' && outputUpscale.enabled,
+        modelName: outputUpscaleModel,
+        maxDimension: imageCapabilities.finalModelUpscale.maxDimension
+          ? outputUpscale.maxDimension
+          : 3840,
+      },
+    });
+  }, [
+    activeLoras,
+    batchSize,
+    cfg,
+    checkpointName,
+    clipSkip,
+    detailerPipeline,
+    height,
+    hiresCfg,
+    hiresDenoise,
+    hiresEnabled,
+    hiresResizeMode,
+    hiresSamplerName,
+    hiresScaleBy,
+    hiresScheduler,
+    hiresSteps,
+    hiresTargetHeight,
+    hiresTargetWidth,
+    hiresUpscaler,
+    imageCapabilities,
+    modelType,
+    negativePrompt,
+    outputUpscale,
+    samplerName,
+    scheduler,
+    seed,
+    seedIncrement,
+    seedMode,
+    steps,
+    width,
+    workflowResourceValues,
+  ]);
+
+  const handleSendGenerationControlsToPowerPrompter = React.useCallback(() => {
+    try {
+      if (!selectedImagePipeline || !modelFamily.trim()) {
+        throw new Error('Select a TXT2IMG model pipeline before sending its controls.');
+      }
+      stageUmbraUiGenerationControlsHandoff({
+        modelFamily,
+        pipelineName: selectedImageWorkflow?.name || `${modelFamily} TXT2IMG`,
+        generation: buildPowerPrompterGenerationControls(),
+      });
+      setActiveWorkspace('powerprompter');
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : 'Failed to send generation controls to Power Prompter.',
+        'error',
+      );
+    }
+  }, [
+    buildPowerPrompterGenerationControls,
+    modelFamily,
+    selectedImagePipeline,
+    selectedImageWorkflow?.name,
+    setActiveWorkspace,
+    showToast,
+  ]);
 
   const handleQueueImage = React.useCallback(async (placement: UmbraQueuePlacement = 'end') => {
     if (isQueueing) return;
@@ -2068,7 +2241,15 @@ export function UmbraUIWorkspace() {
         </div>
       </header>
 
-      <div data-umbra-ui-body="" className="grid min-h-0 flex-1 grid-cols-[minmax(360px,400px)_minmax(320px,1fr)]">
+      <div
+        data-umbra-ui-body=""
+        className={cn(
+          'grid min-h-0 flex-1',
+          activeMode === 'video' && videoStoryboardOpen
+            ? 'grid-cols-[minmax(340px,400px)_minmax(320px,380px)_minmax(320px,1fr)]'
+            : 'grid-cols-[minmax(360px,400px)_minmax(320px,1fr)]',
+        )}
+      >
         {modeIsMounted('extras') ? (
           <div className={activeMode === 'extras' ? 'contents' : 'hidden'} aria-hidden={activeMode !== 'extras'}>
             <UmbraExtrasWorkspace
@@ -2134,7 +2315,6 @@ export function UmbraUIWorkspace() {
             onLorasChange={replaceActiveLoras}
             loraAvailableCount={loraCatalog.length}
             onOpenLoraPicker={openLoraPicker}
-            onAddPromptToken={addPromptToken}
             clipSkip={clipSkip}
             onClipSkipChange={setClipSkip}
             prompt={prompt}
@@ -2255,7 +2435,6 @@ export function UmbraUIWorkspace() {
                 availableCount={loraCatalog.length}
                 onChange={replaceActiveLoras}
                 onOpenPicker={openLoraPicker}
-                onAddPromptToken={addPromptToken}
               />
             ) : null}
 
@@ -2459,6 +2638,15 @@ export function UmbraUIWorkspace() {
             queueSummary={queueSummary}
             onQueueImage={(placement) => void handleQueueImage(placement)}
             onOpenPowerPrompter={() => setActiveWorkspace('powerprompter')}
+            onSendControlsToPowerPrompter={activeMode === 'image'
+              ? handleSendGenerationControlsToPowerPrompter
+              : undefined}
+            sendControlsDisabled={!selectedImagePipeline || !checkpointName}
+            sendControlsTitle={!selectedImagePipeline
+              ? 'Select a TXT2IMG model pipeline first'
+              : !checkpointName
+                ? 'Select a model first'
+                : 'Apply this TXT2IMG pipeline, model, LoRAs, seed, resolution, hires fix, detailers, and upscale settings to the active PPCard'}
             isQueueing={isQueueing}
             queueLabel={activeMode === 'img2img' ? 'Generate IMG2IMG' : 'Generate Image'}
             queueDisabled={isQueueing
@@ -2621,6 +2809,7 @@ export function UmbraUIWorkspace() {
               onAgentContextChange={setVideoAgentContext}
               editorDraft={videoEditorDraft}
               onEditorDraftApplied={(draftId) => setVideoEditorDraft((current) => current?.id === draftId ? null : current)}
+              onStoryboardOpenChange={setVideoStoryboardOpen}
             />
             <UmbraMobileWorkspaceSheet
               active={activeMode === 'video'}
@@ -2645,6 +2834,7 @@ export function UmbraUIWorkspace() {
                   queueVideo={queueVideo}
                   onLoadIntoEditor={setVideoEditorDraft}
                   onRefresh={refreshVideoJobs}
+                  onClear={clearVideoJobs}
                 />
               </div>
             </UmbraMobileWorkspaceSheet>
