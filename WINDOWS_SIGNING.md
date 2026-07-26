@@ -1,8 +1,10 @@
 # Windows Code Signing
 
-Umbra Studio signs the final Windows `UmbraStudio.exe` with Microsoft Artifact
-Signing before the portable ZIP is created. Tagged releases fail if signing is
-not configured or if the resulting Authenticode signature cannot be verified.
+Umbra Studio can sign the final Windows `UmbraStudio.exe` with Microsoft
+Artifact Signing before the portable ZIP is created. Signing is currently
+opt-in so unsigned portable releases can be published while the publisher
+identity is being configured. When signing is enabled, tagged releases fail if
+the configuration is incomplete or the resulting signature cannot be verified.
 
 ## Publisher Identity
 
@@ -45,6 +47,8 @@ Add these repository **secrets**:
 
 Add these repository **variables**:
 
+- `ENABLE_WINDOWS_SIGNING`
+  - Set to `true` only after every signing secret and variable below is ready.
 - `ARTIFACT_SIGNING_ENDPOINT`
   - Example: `https://eus.codesigning.azure.net/`
 - `ARTIFACT_SIGNING_ACCOUNT_NAME`

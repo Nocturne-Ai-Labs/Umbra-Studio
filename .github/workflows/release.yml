@@ -19,6 +19,8 @@ on:
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      WINDOWS_SIGNING_ENABLED: ${{ vars.ENABLE_WINDOWS_SIGNING == 'true' }}
     permissions:
       contents: read
       id-token: write
@@ -36,6 +38,7 @@ jobs:
           UMBRA_BUNDLE_DATA_FORGE_MODELS: '0'
         run: bun run webapp:update-folder:no-bump
       - name: Validate Windows signing configuration
+        if: env.WINDOWS_SIGNING_ENABLED == 'true'
         shell: pwsh
         env:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -62,12 +65,14 @@ jobs:
             throw "Windows release signing is required. Configure these repository secrets/variables: $($missing -join ', ')"
           }
       - name: Sign in to Azure
+        if: env.WINDOWS_SIGNING_ENABLED == 'true'
         uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: Sign Umbra Studio launcher
+        if: env.WINDOWS_SIGNING_ENABLED == 'true'
         uses: azure/artifact-signing-action@v2
         with:
           endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
@@ -80,6 +85,7 @@ jobs:
           description: Umbra Studio
           description-url: https://github.com/Nocturne-Ai-Labs/Umbra-Studio
       - name: Verify Umbra Studio signature
+        if: env.WINDOWS_SIGNING_ENABLED == 'true'
         shell: pwsh
         env:
           WINDOWS_SIGNING_SUBJECT: ${{ vars.WINDOWS_SIGNING_SUBJECT }}
@@ -93,6 +99,10 @@ jobs:
             throw "UmbraStudio.exe signer '$($signature.SignerCertificate.Subject)' does not match '$env:WINDOWS_SIGNING_SUBJECT'."
           }
           Write-Host "Verified signed launcher: $($signature.SignerCertificate.Subject)"
+      - name: Report unsigned Windows build
+        if: env.WINDOWS_SIGNING_ENABLED != 'true'
+        shell: pwsh
+        run: Write-Warning "Publishing Umbra Studio without Authenticode signing. Set ENABLE_WINDOWS_SIGNING=true after configuring Artifact Signing to enable the signed release path."
       - name: Archive Windows package
         shell: pwsh
         run: |

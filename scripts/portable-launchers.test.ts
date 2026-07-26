@@ -48,18 +48,22 @@ describe('portable launcher packaging', () => {
     expect(serverSource).not.toContain('repair_shortcuts');
   });
 
-  test('requires and verifies Authenticode signing before archiving Windows releases', () => {
+  test('supports opt-in Authenticode signing before archiving Windows releases', () => {
     const workflow = readFileSync(join(root, '.github', 'workflows', 'release.yml'), 'utf8');
     const signIndex = workflow.indexOf('name: Sign Umbra Studio launcher');
     const verifyIndex = workflow.indexOf('name: Verify Umbra Studio signature');
     const archiveIndex = workflow.indexOf('name: Archive Windows package');
 
+    expect(workflow).toContain("WINDOWS_SIGNING_ENABLED: ${{ vars.ENABLE_WINDOWS_SIGNING == 'true' }}");
+    expect(workflow).toContain("if: env.WINDOWS_SIGNING_ENABLED == 'true'");
+    expect(workflow).toContain("if: env.WINDOWS_SIGNING_ENABLED != 'true'");
     expect(workflow).toContain('uses: azure/login@v3');
     expect(workflow).toContain('uses: azure/artifact-signing-action@v2');
     expect(workflow).toContain('files: ${{ github.workspace }}\\release\\windows\\Umbra Studio\\UmbraStudio.exe');
     expect(workflow).toContain('timestamp-rfc3161: http://timestamp.acs.microsoft.com');
     expect(workflow).toContain('Get-AuthenticodeSignature');
     expect(workflow).toContain('WINDOWS_SIGNING_SUBJECT');
+    expect(workflow).toContain('Publishing Umbra Studio without Authenticode signing.');
     expect(signIndex).toBeGreaterThan(-1);
     expect(verifyIndex).toBeGreaterThan(signIndex);
     expect(archiveIndex).toBeGreaterThan(verifyIndex);

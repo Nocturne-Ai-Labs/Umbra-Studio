@@ -16,6 +16,10 @@
   preservation, rollback, package validation, and Umbra Nodes update checks.
 - Reserved fixed local port `8214` for updater sessions and removed the
   in-app blank-page reconnect loop.
+- Made Windows Authenticode signing opt-in for release builds so unsigned
+  portable packages can ship until the publisher identity is configured;
+  setting `ENABLE_WINDOWS_SIGNING=true` restores the existing fail-closed
+  Azure Artifact Signing and signature verification path.
 
 ### Prompt History
 
