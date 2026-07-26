@@ -23,6 +23,7 @@ import {
   POWER_PROMPTER_SCHEDULER_OPTIONS,
 } from '@/lib/powerPrompter';
 import { writePowerPrompterCardClipboard } from '@/lib/powerPrompterCardClipboard';
+import { generateUmbraUiAgentPrompt } from '@/lib/umbraUiAgent';
 import {
   buildPowerPrompterActivePromptBlocks,
 } from '@/lib/powerPrompterActivePrompt';
@@ -2616,6 +2617,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const [activeVariantId, setActiveVariantId] = useState('');
   const [editingVariantId, setEditingVariantId] = useState('');
   const [variantTextDrafts, setVariantTextDrafts] = useState<Record<string, string>>({});
+  const [variantAgentBusyId, setVariantAgentBusyId] = useState('');
   const [editingVariantNameId, setEditingVariantNameId] = useState('');
   const [variantNameDrafts, setVariantNameDrafts] = useState<Record<string, string>>({});
   const [editingPromptChip, setEditingPromptChip] = useState<PromptChipEditState | null>(null);
@@ -2678,6 +2680,14 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const [isModelBrowserFsBusy, setIsModelBrowserFsBusy] = useState(false);
   const [modelBrowserThumbTick, setModelBrowserThumbTick] = useState(0);
   const [outputPreviewItems, setOutputPreviewItems] = useState<OutputPreviewItem[]>([]);
+  const documentRef = useRef(document);
+  const onChangeRef = useRef(onChange);
+  const variantTextDraftsRef = useRef(variantTextDrafts);
+  const expandedVariantEditorRef = useRef(expandedVariantEditor);
+  documentRef.current = document;
+  onChangeRef.current = onChange;
+  variantTextDraftsRef.current = variantTextDrafts;
+  expandedVariantEditorRef.current = expandedVariantEditor;
   const [isLoadingOutputPreview, setIsLoadingOutputPreview] = useState(false);
   const [outputPreviewError, setOutputPreviewError] = useState<string | null>(null);
   const [forgeMetadataSourceName, setForgeMetadataSourceName] = useState('');
@@ -4208,6 +4218,139 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     });
     emitSlots(next);
   }, [slots, emitSlots]);
+
+  const patchVariantFromLatestDocument = useCallback((
+    slotId: string,
+    variantId: string,
+    patch: Partial<PowerPrompterCardNode>,
+  ) => {
+    const latestDocument = documentRef.current;
+    const nextSlots = buildSlots(latestDocument.cards).map((slot) => {
+      if (slot.slotId !== slotId) return slot;
+      return {
+        ...slot,
+        variants: slot.variants.map((variant) => {
+          if (variant.id !== variantId) return variant;
+          const merged = {
+            ...variant,
+            ...patch,
+            variantName: patch.variantName !== undefined
+              ? normalizeVariantName(patch.variantName)
+              : normalizeVariantName(variant.variantName),
+            variantTags: patch.variantTags !== undefined
+              ? normalizeVariantTags(patch.variantTags)
+              : normalizeVariantTags((variant as any).variantTags),
+            updatedAt: getNowIso(),
+          };
+          const queueSetIds = normalizeQueueSetIds(merged.queueSetIds, false);
+          return {
+            ...merged,
+            queueSetIds,
+            queueCycleWeights: normalizeQueueCycleWeights((merged as any).queueCycleWeights, queueSetIds),
+            queueEnabled: queueSetIds.length > 0,
+            chainLinks: normalizeChainLinks((merged as any).chainLinks, variantId),
+          };
+        }),
+      };
+    });
+    onChangeRef.current({
+      ...latestDocument,
+      activeQueueSet: clampQueueSetId(latestDocument.activeQueueSet),
+      updatedAt: getNowIso(),
+      cards: flattenSlots(coalesceSlotsByGrouping(nextSlots)),
+      deletedCardGroups: normalizeDeletedCardGroups((latestDocument as any).deletedCardGroups),
+    });
+  }, []);
+
+  const enhanceVariantWithAgent = useCallback(async (
+    slotId: string,
+    variant: PowerPrompterCardNode,
+    slotLabel = '',
+  ) => {
+    const variantId = String(variant.id || '').trim();
+    if (!variantId || variantAgentBusyId) return;
+    const expanded = expandedVariantEditorRef.current;
+    const isExpandedTarget = expanded?.slotId === slotId && expanded.variantId === variantId;
+    const hasInlineDraft = Object.prototype.hasOwnProperty.call(variantTextDraftsRef.current, variantId);
+    const sourceText = String(
+      isExpandedTarget
+        ? expanded?.draft
+        : hasInlineDraft
+          ? variantTextDraftsRef.current[variantId]
+          : variant.text
+    || '').trim();
+    if (!sourceText) {
+      showToast('Enter variant prompt text before asking the agent to enhance it.', 'error');
+      return;
+    }
+    const sourceDocumentText = String(variant.text || '');
+    setVariantAgentBusyId(variantId);
+    try {
+      const result = await generateUmbraUiAgentPrompt({
+        mediaType: 'image',
+        task: 'enhance-field',
+        fieldLabel: [
+          String(slotLabel || variant.label || 'Power Prompter card').trim(),
+          normalizeVariantName(variant.variantName),
+        ].filter(Boolean).join(' - '),
+        prompt: sourceText,
+        context: {
+          powerPrompter: {
+            slotId,
+            variantId,
+            slotLabel: String(slotLabel || variant.label || '').trim(),
+            variantName: normalizeVariantName(variant.variantName),
+          },
+        },
+      });
+      const enhancedText = String(result.prompt || '').trim();
+      if (!enhancedText) throw new Error('The agent returned an empty variant prompt.');
+
+      const latestExpanded = expandedVariantEditorRef.current;
+      if (latestExpanded?.slotId === slotId && latestExpanded.variantId === variantId) {
+        if (String(latestExpanded.draft || '').trim() !== sourceText) {
+          showToast('Variant text changed while the agent was working, so the newer text was preserved.', 'error');
+          return;
+        }
+        setExpandedVariantEditor((current) => (
+          current?.slotId === slotId && current.variantId === variantId
+            ? { ...current, draft: enhancedText, dirty: true }
+            : current
+        ));
+        showToast('Agent enhancement is ready to review. Save the expanded editor to apply it.', 'success');
+        return;
+      }
+
+      const latestSlots = buildSlots(documentRef.current.cards);
+      const latestVariant = latestSlots
+        .find((slot) => slot.slotId === slotId)
+        ?.variants.find((entry) => entry.id === variantId);
+      const latestInlineDraft = Object.prototype.hasOwnProperty.call(variantTextDraftsRef.current, variantId)
+        ? String(variantTextDraftsRef.current[variantId] || '').trim()
+        : null;
+      if (
+        !latestVariant
+        || String(latestVariant.text || '') !== sourceDocumentText
+        || (hasInlineDraft && latestInlineDraft !== sourceText)
+      ) {
+        showToast('Variant text changed while the agent was working, so the newer text was preserved.', 'error');
+        return;
+      }
+      patchVariantFromLatestDocument(slotId, variantId, { text: enhancedText });
+      setEditingVariantId((current) => (current === variantId ? '' : current));
+      setVariantTextDrafts((current) => {
+        if (!(variantId in current)) return current;
+        const next = { ...current };
+        delete next[variantId];
+        return next;
+      });
+      showToast('Variant prompt enhanced by the configured agent.', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Agent failed to enhance this variant.', 'error');
+    } finally {
+      setVariantAgentBusyId((current) => (current === variantId ? '' : current));
+    }
+  }, [patchVariantFromLatestDocument, showToast, variantAgentBusyId]);
 
   const beginChainLinkEdit = useCallback((slotId: string, variant: PowerPrompterCardNode, mode: 'link' | 'block' = 'link') => {
     const anchorVariantId = String(variant.id || '').trim();
@@ -9593,6 +9736,28 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                     type="button"
                                     draggable={false}
                                     data-no-variant-drag="true"
+                                    onMouseDown={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                    }}
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      if (chainLinkModeActive) return;
+                                      void enhanceVariantWithAgent(slot.slotId, variant, slot.label);
+                                    }}
+                                    disabled={chainLinkModeActive || !!variantAgentBusyId}
+                                    className="p-0.5 rounded border border-violet-300/30 bg-violet-500/8 text-violet-200 hover:border-violet-200/60 hover:bg-violet-500/14 disabled:cursor-not-allowed disabled:opacity-40"
+                                    title="Enhance this variant with the configured agent"
+                                  >
+                                    {variantAgentBusyId === variant.id
+                                      ? <Loader2 size={12} className="animate-spin" />
+                                      : <Sparkles size={12} />}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    draggable={false}
+                                    data-no-variant-drag="true"
                                     onMouseDown={(event) => event.stopPropagation()}
                                     onClick={(event) => {
                                       event.preventDefault();
@@ -9694,6 +9859,28 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                               )}
                               {slot.variants.length <= 1 && (
                                 <div className="ml-auto flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    draggable={false}
+                                    data-no-variant-drag="true"
+                                    onMouseDown={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                    }}
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      if (chainLinkModeActive) return;
+                                      void enhanceVariantWithAgent(slot.slotId, variant, slot.label);
+                                    }}
+                                    disabled={chainLinkModeActive || !!variantAgentBusyId}
+                                    className="p-0.5 rounded border border-violet-300/30 bg-violet-500/8 text-violet-200 hover:border-violet-200/60 hover:bg-violet-500/14 disabled:cursor-not-allowed disabled:opacity-40"
+                                    title="Enhance this variant with the configured agent"
+                                  >
+                                    {variantAgentBusyId === variant.id
+                                      ? <Loader2 size={12} className="animate-spin" />
+                                      : <Sparkles size={12} />}
+                                  </button>
                                   <button
                                     type="button"
                                     draggable={false}
@@ -9955,7 +10142,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                 data-variant-plain-edit="true"
                                 data-no-variant-drag="true"
                                 draggable={false}
-                                readOnly={chainLinkModeActive || isSkipVariant}
+                                readOnly={chainLinkModeActive || isSkipVariant || variantAgentBusyId === variant.id}
                                 value={plainEditDraft}
                                 onChange={(event) => {
                                   if (chainLinkModeActive) return;
@@ -10528,17 +10715,38 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   </span>
                 </div>
               </div>
-              <button
-                onClick={() => {
-                  setExpandedVariantEditor(null);
-                  setExpandedVariantSuggestions([]);
-                  setExpandedVariantSuggestionOpen(false);
-                }}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/[0.05] text-zinc-300 hover:text-zinc-100 hover:border-white/25"
-                title="Close expanded editor"
-              >
-                <X size={14} />
-              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!expandedVariantEditorTarget) return;
+                    void enhanceVariantWithAgent(
+                      expandedVariantEditorTarget.slot.slotId,
+                      expandedVariantEditorTarget.variant,
+                      expandedVariantEditorTarget.slot.label,
+                    );
+                  }}
+                  disabled={!expandedVariantEditorTarget || !!variantAgentBusyId}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-violet-300/30 bg-violet-500/10 px-2.5 text-[10px] font-bold uppercase tracking-wider text-violet-100 hover:border-violet-200/60 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Enhance this variant draft with the configured agent"
+                >
+                  {variantAgentBusyId === expandedVariantEditor.variantId
+                    ? <Loader2 size={13} className="animate-spin" />
+                    : <Sparkles size={13} />}
+                  Agent
+                </button>
+                <button
+                  onClick={() => {
+                    setExpandedVariantEditor(null);
+                    setExpandedVariantSuggestions([]);
+                    setExpandedVariantSuggestionOpen(false);
+                  }}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/[0.05] text-zinc-300 hover:text-zinc-100 hover:border-white/25"
+                  title="Close expanded editor"
+                >
+                  <X size={14} />
+                </button>
+              </div>
             </div>
             <div className={`${mobileSelectionMode ? 'px-3 py-2.5' : 'px-4 py-3'} border-b border-white/8`}>
               <div className={`grid gap-3 ${mobileSelectionMode ? 'grid-cols-1' : 'lg:grid-cols-[minmax(0,1fr)_auto]'}`}>

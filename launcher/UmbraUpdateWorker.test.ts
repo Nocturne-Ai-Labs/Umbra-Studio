@@ -5,12 +5,14 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   applyPayload,
+  findPayloadRoot,
   rollbackSwap,
   safeArchiveEntryName,
 } from './UmbraUpdateWorker';
@@ -28,6 +30,18 @@ describe('Umbra update archive paths', () => {
     expect(() => safeArchiveEntryName('resources/../../outside.txt')).toThrow();
     expect(() => safeArchiveEntryName('C:\\Windows\\system.ini')).toThrow();
     expect(() => safeArchiveEntryName('/etc/passwd')).toThrow();
+  });
+
+  test('finds a portable payload wrapped in an Umbra Studio folder', () => {
+    const extractionRoot = mkdtempSync(join(tmpdir(), 'umbra-wrapped-payload-'));
+    try {
+      const wrappedRoot = join(extractionRoot, 'Umbra Studio');
+      mkdirSync(join(wrappedRoot, 'resources', 'app'), { recursive: true });
+      writeFileSync(join(wrappedRoot, 'resources', 'app', 'package.json'), '{"version":"0.20.8"}');
+      expect(findPayloadRoot(extractionRoot)).toBe(wrappedRoot);
+    } finally {
+      rmSync(extractionRoot, { recursive: true, force: true });
+    }
   });
 });
 
@@ -48,6 +62,8 @@ describe('Umbra portable replacement transaction', () => {
       writeFileSync(join(payloadRoot, 'new-app.txt'), 'new app');
       writeFileSync(join(payloadRoot, 'User', 'release-placeholder.txt'), 'discard');
       writeFileSync(join(payloadRoot, 'Tools', 'release-placeholder.txt'), 'discard');
+      const originalUserDirectoryId = statSync(join(runtimeRoot, 'User')).ino;
+      const originalToolsDirectoryId = statSync(join(runtimeRoot, 'Tools')).ino;
 
       const request = {
         schemaVersion: 1,
@@ -73,11 +89,16 @@ describe('Umbra portable replacement transaction', () => {
       expect(readFileSync(join(runtimeRoot, 'Tools', 'ComfyUI', 'model.txt'), 'utf8')).toBe('user model');
       expect(existsSync(join(runtimeRoot, 'User', 'release-placeholder.txt'))).toBe(false);
       expect(existsSync(join(runtimeRoot, 'Tools', 'release-placeholder.txt'))).toBe(false);
+      expect(statSync(join(runtimeRoot, 'User')).ino).toBe(originalUserDirectoryId);
+      expect(statSync(join(runtimeRoot, 'Tools')).ino).toBe(originalToolsDirectoryId);
+      expect(existsSync(transaction.preservedRoot)).toBe(false);
 
       rollbackSwap(request, transaction.backupRoot, transaction.preservedRoot);
       expect(readFileSync(join(runtimeRoot, 'old-app.txt'), 'utf8')).toBe('old app');
       expect(readFileSync(join(runtimeRoot, 'User', 'Config', 'personal.json'), 'utf8')).toBe('{"kept":true}');
       expect(readFileSync(join(runtimeRoot, 'Tools', 'ComfyUI', 'model.txt'), 'utf8')).toBe('user model');
+      expect(statSync(join(runtimeRoot, 'User')).ino).toBe(originalUserDirectoryId);
+      expect(statSync(join(runtimeRoot, 'Tools')).ino).toBe(originalToolsDirectoryId);
     } finally {
       rmSync(temporaryRoot, { recursive: true, force: true });
     }

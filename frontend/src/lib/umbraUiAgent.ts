@@ -174,7 +174,7 @@ export interface UmbraUiAgentGenerateRequest {
   prompt: string;
   instructionId?: string;
   context?: Record<string, unknown>;
-  task?: 'compose' | 'enhance-field';
+  task?: 'compose' | 'enhance-field' | 'enhance-complete-prompt';
   fieldLabel?: string;
 }
 

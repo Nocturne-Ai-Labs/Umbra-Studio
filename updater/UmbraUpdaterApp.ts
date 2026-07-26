@@ -133,7 +133,16 @@ async function isUmbraReady(session: UpdaterSession): Promise<boolean> {
 
 function scheduleWorkspaceCleanup(workspaceRoot: string) {
   if (process.platform === 'win32') {
-    spawn('cmd.exe', ['/d', '/c', `ping 127.0.0.1 -n 4 >nul & rmdir /s /q "${workspaceRoot}"`], {
+    spawn('powershell.exe', [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-WindowStyle',
+      'Hidden',
+      '-Command',
+      'Start-Sleep -Seconds 3; Remove-Item -LiteralPath $args[0] -Recurse -Force -ErrorAction SilentlyContinue',
+      workspaceRoot,
+    ], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,

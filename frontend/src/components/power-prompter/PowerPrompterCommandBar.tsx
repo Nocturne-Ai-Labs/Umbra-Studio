@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bell, BellOff, ChevronDown, ChevronLeft, ChevronRight, FileText, FolderOpen, ListChecks, ListOrdered, Loader2, MoreHorizontal, PanelsTopLeft, Pause, Play, Power, RefreshCw, Save, Search, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
+import { Bell, BellOff, Bot, ChevronDown, ChevronLeft, ChevronRight, FileText, FolderOpen, ListChecks, ListOrdered, Loader2, MoreHorizontal, PanelsTopLeft, Pause, Play, Power, RefreshCw, Save, Search, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
 import { POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME, POWER_PROMPTER_MAX_QUEUE_SETS } from '@/lib/powerPrompter';
 import { PowerPrompterGlobalSearchBox } from './PowerPrompterGlobalSearchBox';
 import { POWER_PROMPTER_SOUND_STYLE_GLASS_TICK, POWER_PROMPTER_SOUND_STYLE_OPTIONS, clampCompletionSoundVolume } from './powerPrompterAudio';
@@ -46,6 +46,9 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
     totalQueueSetAssignmentCount,
     handleToggleQueueShuffle,
     queueShuffleEnabled,
+    completePromptAgentEnabled = false,
+    handleToggleCompletePromptAgent,
+    queueAgentEnhancementProgress = null,
     hasLiveQueue,
     estimatedBatchSize,
     handleQueuePrompts,
@@ -389,6 +392,16 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
           </button>
         </div>
 
+        {queueAgentEnhancementProgress ? (
+          <div className="mt-1.5 flex min-h-10 items-center gap-2 rounded-lg border border-violet-300/25 bg-violet-500/10 px-3 text-[10px] font-bold uppercase tracking-wider text-violet-100">
+            <Loader2 size={14} className="animate-spin" />
+            <span className="min-w-0 flex-1 truncate">Enhancing complete prompts</span>
+            <span className="tabular-nums">
+              {queueAgentEnhancementProgress.completed}/{queueAgentEnhancementProgress.total}
+            </span>
+          </div>
+        ) : null}
+
         {phoneActionsOpen ? (
           <button
             type="button"
@@ -429,6 +442,22 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               Umbra UI
             </button>
 
+            <button
+              type="button"
+              onClick={() => { void handleToggleCompletePromptAgent?.(); }}
+              disabled={!currentFile || !!queueingMode}
+              className={`inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border px-3 text-[10px] font-black uppercase tracking-[0.1em] ${
+                !currentFile || !!queueingMode
+                  ? 'border-white/10 bg-white/[0.03] text-zinc-600'
+                  : completePromptAgentEnabled
+                    ? 'border-violet-300/45 bg-violet-500/14 text-violet-100'
+                    : 'border-white/12 bg-white/[0.04] text-zinc-300'
+              }`}
+            >
+              <Bot size={15} />
+              {completePromptAgentEnabled ? 'Complete Prompt Agent On' : 'Complete Prompt Agent Off'}
+            </button>
+
             <div data-umbra-powerprompter-phone-actions-grid="">
               <button
                 type="button"
@@ -464,6 +493,12 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
   return (
         <div data-umbra-powerprompter-command-bar="" className="min-h-12 border-b border-white/5 px-3 py-2 flex items-center gap-2.5 bg-black/20 relative">
           <span className="text-[10px] uppercase tracking-widest font-black text-zinc-500 shrink-0">Card Chain</span>
+          {queueAgentEnhancementProgress ? (
+            <div className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-violet-300/30 bg-violet-500/12 px-3 text-[10px] font-black uppercase tracking-wider text-violet-100">
+              <Loader2 size={13} className="animate-spin" />
+              <span>Agent {queueAgentEnhancementProgress.completed}/{queueAgentEnhancementProgress.total}</span>
+            </div>
+          ) : null}
           <div className="inline-flex shrink-0 items-center rounded-lg border border-white/10 bg-black/25 p-1">
             <button
               onClick={() => setPrompterPanelMode('editor')}
@@ -1315,6 +1350,24 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                         : 'Shuffle enabled prompts across all cards for queue generation'}
                     >
                       {queueShuffleEnabled ? 'Shuffle On' : 'Shuffle Off'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { void handleToggleCompletePromptAgent?.(); }}
+                      disabled={!currentFile || !!queueingMode}
+                      className={`rounded-md border px-2.5 py-2 text-[10px] font-bold uppercase tracking-[0.13em] transition-all ${
+                        !currentFile || !!queueingMode
+                          ? 'border-white/10 bg-white/[0.03] text-zinc-600 cursor-not-allowed'
+                          : completePromptAgentEnabled
+                            ? 'border-violet-400/45 bg-violet-500/14 text-violet-100 hover:border-violet-300/65'
+                            : 'border-white/12 bg-white/[0.04] text-zinc-300 hover:border-white/25 hover:text-zinc-100'
+                      }`}
+                      title="Enhance every complete assembled prompt with the configured agent before staging the queue"
+                    >
+                      <span className="inline-flex items-center gap-1.5">
+                        <Bot size={12} />
+                        {completePromptAgentEnabled ? 'Prompt Agent On' : 'Prompt Agent Off'}
+                      </span>
                     </button>
                     <button
                       onClick={() => { void handleExportSetAsTxt(); }}

@@ -169,6 +169,9 @@ installer that downloads the exact pinned model revisions into `User/Models`
 and rejects incomplete or checksum-mismatched downloads. The workflow also
 publishes `Data-Forge-Models-v<version>.json` as a release asset so the exact
 model bill of materials is visible without extracting either platform package.
+Both platform archives contain one top-level `Umbra Studio/` directory so users
+can extract them without scattering portable application files into the chosen
+destination.
 
 Windows release signing is mandatory. The Windows job signs the final
 `UmbraStudio.exe` after all launcher resource and icon changes, verifies its

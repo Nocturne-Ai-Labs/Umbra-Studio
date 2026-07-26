@@ -16106,9 +16106,25 @@ function buildUmbraUiAgentRequestPrompt(
   instructionName: string,
   inlineInstruction: string,
   context: string,
-  task: 'compose' | 'enhance-field' = 'compose',
+  task: 'compose' | 'enhance-field' | 'enhance-complete-prompt' = 'compose',
   fieldLabel = '',
 ): string {
+  if (task === 'enhance-complete-prompt') {
+    return [
+      `You are enhancing one complete assembled Power Prompter prompt for Umbra UI ${mediaType} generation.`,
+      'Preserve every subject, character identity, pose, outfit, expression, environment, style, camera instruction, weight, trained token, and LoRA tag already present.',
+      'Improve clarity, cohesion, and useful visual detail without deleting requested content or inventing a different scene.',
+      'Keep generation syntax valid. Never discuss your work, include Markdown, stage a draft, or return labels.',
+      'Return only the complete replacement prompt.',
+      '',
+      `PROMPTING GUIDANCE (${instructionName}):`,
+      inlineInstruction,
+      '',
+      'COMPLETE PROMPT:',
+      sourcePrompt,
+      ...(context ? ['', 'UMBRA GENERATION CONTEXT:', context] : []),
+    ].join('\n');
+  }
   if (task === 'enhance-field') {
     return [
       `You are enhancing exactly one positive prompt field for Umbra UI ${mediaType} generation.`,
@@ -16291,7 +16307,9 @@ async function generateUmbraUiPromptWithAgent(value: unknown): Promise<{
   const request = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const mediaType = String(request.mediaType || '').trim().toLowerCase();
   if (mediaType !== 'image' && mediaType !== 'video') throw new Error('mediaType must be image or video.');
-  const task = request.task === 'enhance-field' ? 'enhance-field' : 'compose';
+  const task = request.task === 'enhance-field' || request.task === 'enhance-complete-prompt'
+    ? request.task
+    : 'compose';
   const fieldLabel = clampUmbraUiAgentText(request.fieldLabel, 120);
   const sourcePrompt = clampUmbraUiAgentText(request.prompt, UMBRA_UI_AGENT_GENERATION_PROMPT_LIMIT);
   if (!sourcePrompt) throw new Error('Enter a prompt request before asking the agent to compose it.');

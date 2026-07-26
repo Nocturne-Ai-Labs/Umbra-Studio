@@ -122,7 +122,7 @@ jobs:
             $sourcePath,
             $archivePath,
             [System.IO.Compression.CompressionLevel]::Optimal,
-            $false
+            $true
           )
       - uses: actions/upload-artifact@v4
         with:
@@ -160,7 +160,7 @@ jobs:
             *) echo "Expected bundled Linux Bun 1.4.x, got ${bundled_bun_version}" >&2; exit 1 ;;
           esac
           mkdir -p artifacts
-          (cd "${package_root}" && zip -r -9 "${GITHUB_WORKSPACE}/artifacts/Umbra-Studio-v${version}-Linux-x64.zip" .)
+          (cd "release/linux" && zip -r -9 "${GITHUB_WORKSPACE}/artifacts/Umbra-Studio-v${version}-Linux-x64.zip" "Umbra Studio")
       - uses: actions/upload-artifact@v4
         with:
           name: umbra-studio-linux

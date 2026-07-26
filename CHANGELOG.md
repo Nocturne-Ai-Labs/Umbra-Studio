@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.20.9
+
+### Power Prompter Agent Enhancement
+
+- Added per-variant agent enhancement controls so individual card variants can
+  be refined without changing unrelated prompt segments.
+- Added complete-prompt agent enhancement before queue submission, processing
+  each generated prompt independently while preserving the queue's exact
+  ordering and group structure.
+- Added visible enhancement progress, cancellation, timeout handling, and
+  validation so a failed agent request cannot silently queue partial work.
+- Preserved Power Prompter prompt metadata and segment boundaries through
+  enhancement and queue dispatch.
+
+### Updater Reliability
+
+- Reworked the portable update transaction so the live `User/` and `Tools/`
+  directories never move during an update.
+- Limited transactional replacement and rollback to application-owned files,
+  preventing Windows directory locks from aborting updates while gallery
+  databases, models, or tool files are still held open.
+- Preserved recovery compatibility with update transactions created by older
+  builds.
+- Removed the updater's legacy network-based cleanup delay.
+
+### Portable Release Layout
+
+- Wrapped Windows and Linux portable release contents in a single
+  `Umbra Studio/` directory so extracting a release no longer scatters files
+  into the selected destination.
+- Kept the automatic updater compatible with the new wrapped archive layout.
+- Added release regression coverage for both platform archives and nested
+  updater payload discovery.
+
 ## v0.20.8
 
 ### Selective Agent Prompt Enhancement

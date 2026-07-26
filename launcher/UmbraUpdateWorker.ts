@@ -2,13 +2,11 @@ import {
   chmodSync,
   createWriteStream,
   existsSync,
-  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   renameSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
@@ -189,7 +187,7 @@ async function extractZip(
   });
 }
 
-function findPayloadRoot(extractionRoot: string): string {
+export function findPayloadRoot(extractionRoot: string): string {
   if (existsSync(join(extractionRoot, 'resources', 'app', 'package.json'))) return extractionRoot;
   const directories = readdirSync(extractionRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
@@ -225,12 +223,37 @@ function verifyPayload(payloadRoot: string, request: UmbraUpdateWorkerRequest) {
   }
 }
 
-function moveIfPresent(sourcePath: string, destinationPath: string) {
-  if (!existsSync(sourcePath)) return false;
-  if (existsSync(destinationPath)) rmSync(destinationPath, { recursive: true, force: true });
-  mkdirSync(dirname(destinationPath), { recursive: true });
+const PROTECTED_RUNTIME_ENTRIES = new Set(['user', 'tools']);
+
+function isProtectedRuntimeEntry(name: string): boolean {
+  return PROTECTED_RUNTIME_ENTRIES.has(name.trim().toLowerCase());
+}
+
+function moveApplicationEntries(sourceRoot: string, destinationRoot: string) {
+  if (!existsSync(sourceRoot)) return;
+  mkdirSync(destinationRoot, { recursive: true });
+  for (const entry of readdirSync(sourceRoot, { withFileTypes: true })) {
+    if (isProtectedRuntimeEntry(entry.name)) continue;
+    const sourcePath = join(sourceRoot, entry.name);
+    const destinationPath = join(destinationRoot, entry.name);
+    if (existsSync(destinationPath)) rmSync(destinationPath, { recursive: true, force: true });
+    renameSync(sourcePath, destinationPath);
+  }
+}
+
+function restoreLegacyPreservedEntry(
+  request: UmbraUpdateWorkerRequest,
+  preservedRoot: string,
+  name: 'User' | 'Tools',
+) {
+  const sourcePath = join(preservedRoot, name);
+  if (!existsSync(sourcePath)) return;
+  const destinationPath = join(request.runtimeRoot, name);
+  if (existsSync(destinationPath)) {
+    throw new Error(`Refusing to overwrite the live ${name} directory while recovering an older update transaction.`);
+  }
+  mkdirSync(request.runtimeRoot, { recursive: true });
   renameSync(sourcePath, destinationPath);
-  return true;
 }
 
 export function rollbackSwap(
@@ -242,21 +265,19 @@ export function rollbackSwap(
     if (!existsSync(request.runtimeRoot)) {
       throw new Error('The original application root and its backup are both missing.');
     }
-    moveIfPresent(join(preservedRoot, 'User'), join(request.runtimeRoot, 'User'));
-    moveIfPresent(join(preservedRoot, 'Tools'), join(request.runtimeRoot, 'Tools'));
+    restoreLegacyPreservedEntry(request, preservedRoot, 'User');
+    restoreLegacyPreservedEntry(request, preservedRoot, 'Tools');
     return;
   }
 
   const failedRoot = `${request.runtimeRoot}.failed-${Date.now()}`;
-  if (existsSync(request.runtimeRoot)) {
-    moveIfPresent(join(request.runtimeRoot, 'User'), join(preservedRoot, 'User'));
-    moveIfPresent(join(request.runtimeRoot, 'Tools'), join(preservedRoot, 'Tools'));
-    renameSync(request.runtimeRoot, failedRoot);
-  }
-  if (existsSync(backupRoot)) renameSync(backupRoot, request.runtimeRoot);
-  moveIfPresent(join(preservedRoot, 'User'), join(request.runtimeRoot, 'User'));
-  moveIfPresent(join(preservedRoot, 'Tools'), join(request.runtimeRoot, 'Tools'));
+  mkdirSync(request.runtimeRoot, { recursive: true });
+  moveApplicationEntries(request.runtimeRoot, failedRoot);
+  moveApplicationEntries(backupRoot, request.runtimeRoot);
+  restoreLegacyPreservedEntry(request, preservedRoot, 'User');
+  restoreLegacyPreservedEntry(request, preservedRoot, 'Tools');
   if (existsSync(failedRoot)) rmSync(failedRoot, { recursive: true, force: true });
+  if (existsSync(backupRoot)) rmSync(backupRoot, { recursive: true, force: true });
 }
 
 export function applyPayload(
@@ -267,17 +288,12 @@ export function applyPayload(
   const safeCurrentVersion = request.currentVersion.replace(/[^a-z0-9._-]+/gi, '-');
   const backupRoot = join(parentRoot, `.umbra-backup-${safeCurrentVersion}-${Date.now()}`);
   const preservedRoot = join(request.workspaceRoot, 'preserved');
-  mkdirSync(preservedRoot, { recursive: true });
 
-  moveIfPresent(join(request.runtimeRoot, 'User'), join(preservedRoot, 'User'));
-  moveIfPresent(join(request.runtimeRoot, 'Tools'), join(preservedRoot, 'Tools'));
+  mkdirSync(request.runtimeRoot, { recursive: true });
+  mkdirSync(backupRoot, { recursive: false });
   try {
-    renameSync(request.runtimeRoot, backupRoot);
-    rmSync(join(payloadRoot, 'User'), { recursive: true, force: true });
-    rmSync(join(payloadRoot, 'Tools'), { recursive: true, force: true });
-    renameSync(payloadRoot, request.runtimeRoot);
-    moveIfPresent(join(preservedRoot, 'User'), join(request.runtimeRoot, 'User'));
-    moveIfPresent(join(preservedRoot, 'Tools'), join(request.runtimeRoot, 'Tools'));
+    moveApplicationEntries(request.runtimeRoot, backupRoot);
+    moveApplicationEntries(payloadRoot, request.runtimeRoot);
     mkdirSync(join(request.runtimeRoot, 'User'), { recursive: true });
     mkdirSync(join(request.runtimeRoot, 'Tools'), { recursive: true });
     return { backupRoot, preservedRoot };
@@ -382,7 +398,16 @@ async function stopLaunchedProcessTree(pid: number) {
 
 function scheduleWorkspaceCleanup(workspaceRoot: string) {
   if (process.platform === 'win32') {
-    spawn('cmd.exe', ['/d', '/c', `ping 127.0.0.1 -n 4 >nul & rmdir /s /q "${workspaceRoot}"`], {
+    spawn('powershell.exe', [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-WindowStyle',
+      'Hidden',
+      '-Command',
+      'Start-Sleep -Seconds 3; Remove-Item -LiteralPath $args[0] -Recurse -Force -ErrorAction SilentlyContinue',
+      workspaceRoot,
+    ], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,

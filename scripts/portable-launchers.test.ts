@@ -69,6 +69,20 @@ describe('portable launcher packaging', () => {
     expect(archiveIndex).toBeGreaterThan(verifyIndex);
   });
 
+  test('wraps Windows and Linux release contents in an Umbra Studio folder', () => {
+    const workflow = readFileSync(join(root, '.github', 'workflows', 'release.yml'), 'utf8');
+    const windowsArchiveStart = workflow.indexOf('- name: Archive Windows package');
+    const windowsArchiveBlock = workflow.slice(
+      windowsArchiveStart,
+      workflow.indexOf('- uses: actions/upload-artifact@v4', windowsArchiveStart),
+    );
+
+    expect(windowsArchiveBlock).toContain('$packageRoot = "release/windows/Umbra Studio"');
+    expect(windowsArchiveBlock).toContain('$true');
+    expect(workflow).toContain('(cd "release/linux" && zip -r -9 "${GITHUB_WORKSPACE}/artifacts/Umbra-Studio-v${version}-Linux-x64.zip" "Umbra Studio")');
+    expect(workflow).not.toContain('(cd "${package_root}" && zip -r -9');
+  });
+
   test('releases the visible Windows terminal during an external update', () => {
     const source = readFileSync(join(root, 'launcher', 'UmbraWebLauncher.ts'), 'utf8');
     expect(source).toContain("spawn('cmd.exe', ['/d', '/c', executableName, ...args]");
