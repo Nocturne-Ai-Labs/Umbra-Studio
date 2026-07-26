@@ -170,6 +170,14 @@ and rejects incomplete or checksum-mismatched downloads. The workflow also
 publishes `Data-Forge-Models-v<version>.json` as a release asset so the exact
 model bill of materials is visible without extracting either platform package.
 
+Windows release signing is mandatory. The Windows job signs the final
+`UmbraStudio.exe` after all launcher resource and icon changes, verifies its
+Authenticode signature and expected publisher, and only then creates the ZIP.
+Configure Microsoft Artifact Signing and the GitHub OIDC values described in
+[`WINDOWS_SIGNING.md`](WINDOWS_SIGNING.md)
+before creating a release tag. The job intentionally fails rather than
+publishing an unsigned Windows launcher when signing is not configured.
+
 The GitHub workflow must continue to package:
 
 - Umbra UI pipeline definitions from `defaults/PowerPrompter/API Workflows/`

@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.20.6
+
+### Umbra UI Agent MCP
+
+- Fixed legacy Umbra UI agent settings failing to load when they did not yet
+  contain a generation timeout.
+- Restored MCP authentication and connection setup for existing installations
+  while preserving their saved access token.
+- Added regression coverage for the default agent generation timeout and
+  settings migration path.
+
+### Signed Windows Releases
+
+- Added mandatory Microsoft Artifact Signing to the Windows GitHub release
+  workflow using short-lived GitHub OIDC authentication.
+- Added fail-closed checks for every required Azure signing setting so an
+  unsigned Windows executable cannot be published accidentally.
+- Added Authenticode signature and expected publisher verification before the
+  Windows portable archive is created.
+- Documented the Azure identity, certificate profile, GitHub configuration,
+  verification, and troubleshooting flow for release maintainers.
+
 ## v0.20.5
 
 ### Updater Accuracy

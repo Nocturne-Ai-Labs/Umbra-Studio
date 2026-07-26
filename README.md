@@ -359,6 +359,11 @@ GitHub releases are built by `.github/workflows/release.yml`. See
 `PUBLISHING.md` for the clean-source command, model packaging policy, and the
 full Windows/Linux validation matrix.
 
+Windows release launchers are Authenticode-signed through Microsoft Artifact
+Signing. The required verified publisher and GitHub OIDC configuration are
+documented in
+[`WINDOWS_SIGNING.md`](WINDOWS_SIGNING.md).
+
 Windows portable folder builds:
 
 No-bump update of the current portable folder:
