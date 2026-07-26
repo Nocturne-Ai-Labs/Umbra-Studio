@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.20.5
+
+### Updater Accuracy
+
+- Fixed the sidebar `(+n)` badge so it counts only compatible releases that
+  are strictly newer than the installed Umbra Studio build.
+- Made portable version detection prefer the canonical packaged manifest in
+  `resources/app` over stale root-level manifests.
+- Added an independent frontend version check so a malformed backend count
+  cannot turn the complete release history into available updates.
+- Made unknown versions fail closed with no numeric badge instead of treating
+  every published release as newer.
+
+### Portable Root Cleanup
+
+- Removed the `ComfyUI-Models`, `ComfyUI-Output`, and `ComfyUI-Nodes` root
+  shortcuts from Windows and Linux packages.
+- Removed shortcut creation and repair behavior from managed tool setup and
+  backend actions.
+- Updated Power Prompter to use the canonical `Tools/ComfyUI/models` paths
+  directly.
+- Added conservative cleanup for legacy junctions and symlinks while leaving
+  ordinary folders untouched.
+
 ## v0.20.4
 
 ### Windows Self-Updater Recovery Hotfix

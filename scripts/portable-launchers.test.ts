@@ -24,6 +24,20 @@ describe('portable launcher packaging', () => {
     expect(source).toContain("['Start-Umbra.bat', 'UmbraStudio.bat', 'UmbraStudio.exe']");
   });
 
+  test('does not package root shortcuts for ComfyUI folders', () => {
+    const windowsSource = readFileSync(join(root, 'scripts', 'build-webapp-folder.mjs'), 'utf8');
+    const linuxSource = readFileSync(join(root, 'scripts', 'build-linux-folder.mjs'), 'utf8');
+    const setupSource = readFileSync(join(root, 'setup-tools.ts'), 'utf8');
+    const serverSource = readFileSync(join(root, 'UmbraServer.ts'), 'utf8');
+
+    expect(windowsSource).not.toContain('createShortcutLink');
+    expect(windowsSource).not.toContain('fs.symlinkSync');
+    expect(linuxSource).not.toContain('fs.symlinkSync');
+    expect(setupSource).not.toContain('createToolRootShortcuts');
+    expect(setupSource).not.toContain('createRootShortcut');
+    expect(serverSource).not.toContain('repair_shortcuts');
+  });
+
   test('releases the visible Windows terminal during an external update', () => {
     const source = readFileSync(join(root, 'launcher', 'UmbraWebLauncher.ts'), 'utf8');
     expect(source).toContain("spawn('cmd.exe', ['/d', '/c', executableName, ...args]");

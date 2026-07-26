@@ -451,12 +451,15 @@ function publish() {
   const umbraNodesTarget = path.join(publishRoot, 'Umbra-Nodes');
   if (fs.existsSync(umbraNodesTarget)) safeRemoveInside(publishRoot, umbraNodesTarget);
 
-  try {
-    fs.symlinkSync(path.join(publishRoot, 'Tools', 'ComfyUI', 'models'), path.join(publishRoot, 'ComfyUI-Models'), 'dir');
-    fs.symlinkSync(path.join(publishRoot, 'Tools', 'ComfyUI', 'output'), path.join(publishRoot, 'ComfyUI-Output'), 'dir');
-    fs.symlinkSync(path.join(publishRoot, 'Tools', 'ComfyUI', 'custom_nodes'), path.join(publishRoot, 'ComfyUI-Nodes'), 'dir');
-  } catch {
-    // Shortcuts are convenience only.
+  for (const name of ['ComfyUI-Models', 'ComfyUI-Output', 'ComfyUI-Nodes']) {
+    const legacyShortcut = path.join(publishRoot, name);
+    try {
+      if (fs.lstatSync(legacyShortcut).isSymbolicLink()) {
+        safeRemoveInside(publishRoot, legacyShortcut);
+      }
+    } catch {
+      // Missing entries and real directories are intentionally left alone.
+    }
   }
 
   writeLinuxLauncher();

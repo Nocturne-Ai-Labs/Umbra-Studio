@@ -411,12 +411,6 @@ other runtime artifacts that are not recoverable from the source tree. Fresh
 release jobs use an explicit temporary `Umbra Studio` package root; local
 publishes preserve `User/` and `Tools/`.
 
-Root shortcuts are created there:
-
-- `ComfyUI-Models`
-- `ComfyUI-Output`
-- `ComfyUI-Nodes`
-
 Tools are intentionally **not** stored in `resources/app`.
 
 ## Documentation

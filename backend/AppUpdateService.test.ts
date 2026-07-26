@@ -12,6 +12,10 @@ import {
   normalizeGithubRelease,
   readUmbraAppVersion,
 } from './AppUpdateService';
+import {
+  filterNewerUmbraReleases,
+  isKnownUmbraVersion,
+} from '../shared/appUpdate';
 
 function release(overrides: Record<string, unknown> = {}) {
   return {
@@ -60,6 +64,41 @@ describe('Umbra release versions', () => {
     } finally {
       rmSync(temporaryRoot, { recursive: true, force: true });
     }
+  });
+
+  test('prefers the packaged source version over a stale portable-root manifest', () => {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'umbra-update-version-'));
+    try {
+      const runtimeRoot = join(temporaryRoot, 'Umbra Studio');
+      const sourceRoot = join(runtimeRoot, 'resources', 'app');
+      mkdirSync(sourceRoot, { recursive: true });
+      writeFileSync(join(runtimeRoot, 'package.json'), JSON.stringify({ version: '0.10.4' }));
+      writeFileSync(join(sourceRoot, 'package.json'), JSON.stringify({ version: '0.20.4' }));
+
+      expect(readUmbraAppVersion(runtimeRoot, sourceRoot)).toBe('0.20.4');
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('counts only releases strictly newer than the installed build', () => {
+    const releases = [
+      { version: '0.20.5' },
+      { version: '0.20.4' },
+      { version: '0.20.3' },
+      { version: '0.10.4' },
+    ];
+
+    expect(filterNewerUmbraReleases(releases, '0.20.4')).toEqual([{ version: '0.20.5' }]);
+    expect(filterNewerUmbraReleases(releases, '0.20.5')).toEqual([]);
+  });
+
+  test('does not turn an unknown installed version into an all-releases badge', () => {
+    expect(isKnownUmbraVersion('0.0.0')).toBe(false);
+    expect(filterNewerUmbraReleases([
+      { version: '0.20.4' },
+      { version: '0.20.3' },
+    ], '0.0.0')).toEqual([]);
   });
 });
 

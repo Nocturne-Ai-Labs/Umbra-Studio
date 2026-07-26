@@ -433,22 +433,13 @@ function verifyCleanPublishedUser() {
   }
 }
 
-function createShortcutLink(linkPath, targetPath) {
-  ensureDir(targetPath);
+function removeLegacyRootShortcut(linkPath) {
   try {
-    if (fs.existsSync(linkPath) || fs.lstatSync(linkPath)) {
-      const current = fs.lstatSync(linkPath);
-      if (current.isDirectory() && !current.isSymbolicLink()) return;
+    if (fs.lstatSync(linkPath).isSymbolicLink()) {
       safeRemoveInside(publishRoot, linkPath);
     }
   } catch {
-    // Missing or broken link, replace below.
-  }
-  try {
-    const type = process.platform === 'win32' ? 'junction' : 'dir';
-    fs.symlinkSync(path.resolve(targetPath), linkPath, type);
-  } catch {
-    // Shortcuts are convenience only.
+    // Missing entries and real directories are intentionally left alone.
   }
 }
 
@@ -645,9 +636,9 @@ function publish() {
   const umbraNodesTarget = path.join(publishRoot, 'Umbra-Nodes');
   if (fs.existsSync(umbraNodesTarget)) safeRemoveInside(publishRoot, umbraNodesTarget);
 
-  createShortcutLink(path.join(publishRoot, 'ComfyUI-Models'), path.join(publishRoot, 'Tools', 'ComfyUI', 'models'));
-  createShortcutLink(path.join(publishRoot, 'ComfyUI-Output'), path.join(publishRoot, 'Tools', 'ComfyUI', 'output'));
-  createShortcutLink(path.join(publishRoot, 'ComfyUI-Nodes'), path.join(publishRoot, 'Tools', 'ComfyUI', 'custom_nodes'));
+  for (const name of ['ComfyUI-Models', 'ComfyUI-Output', 'ComfyUI-Nodes']) {
+    removeLegacyRootShortcut(path.join(publishRoot, name));
+  }
 
   writeDataForgeModelInstaller();
   writeUmbraUiModelInstaller();

@@ -4,13 +4,12 @@ REM Umbra Studio - Universal Installer (Windows)
 REM ============================================
 REM
 REM Usage: install.bat [action]
-REM   No args           = Install/update all tools + shortcuts
+REM   No args           = Install/update all tools
 REM   comfyui           = Install/update ComfyUI
 REM   aitoolkit         = Install/update AI-Toolkit
 REM   update-comfyui    = Force update ComfyUI
 REM   update-aitoolkit  = Force update AI-Toolkit
 REM   comfy-nodes       = Install/update preferred ComfyUI custom nodes
-REM   shortcuts         = Rebuild root shortcuts
 REM
 REM Requirements:
 REM   - Bun runtime (https://bun.sh)

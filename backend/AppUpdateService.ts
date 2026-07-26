@@ -11,7 +11,10 @@ import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
+  compareUmbraVersions as compareSharedUmbraVersions,
   createIdleUmbraUpdateState,
+  filterNewerUmbraReleases,
+  normalizeUmbraVersion,
   normalizeUmbraUpdateState,
   type UmbraReleaseBuild,
   type UmbraUpdateState,
@@ -38,20 +41,16 @@ type GithubRelease = {
   assets?: unknown;
 };
 
-function normalizeVersion(value: unknown): string {
-  return String(value || '').trim().replace(/^v/i, '');
-}
-
 export function readUmbraAppVersion(runtimeRoot: string, sourceRoot: string): string {
   const candidates = [
-    join(resolve(runtimeRoot), 'package.json'),
     join(resolve(sourceRoot), 'package.json'),
+    join(resolve(runtimeRoot), 'package.json'),
   ];
   for (const candidate of candidates) {
     try {
       if (!existsSync(candidate)) continue;
       const parsed = JSON.parse(readFileSync(candidate, 'utf8')) as Record<string, unknown>;
-      const version = normalizeVersion(parsed.version);
+      const version = normalizeUmbraVersion(parsed.version);
       if (version) return version;
     } catch {
       // Try the next supported portable layout.
@@ -60,24 +59,8 @@ export function readUmbraAppVersion(runtimeRoot: string, sourceRoot: string): st
   return '0.0.0';
 }
 
-function versionParts(value: string): number[] {
-  return normalizeVersion(value)
-    .split('.')
-    .map((entry) => Number.parseInt(entry.replace(/[^\d].*$/, ''), 10))
-    .map((entry) => Number.isFinite(entry) ? entry : 0);
-}
-
 export function compareUmbraVersions(left: string, right: string): number {
-  const leftParts = versionParts(left);
-  const rightParts = versionParts(right);
-  const length = Math.max(3, leftParts.length, rightParts.length);
-  for (let index = 0; index < length; index += 1) {
-    const leftValue = leftParts[index] || 0;
-    const rightValue = rightParts[index] || 0;
-    if (leftValue > rightValue) return 1;
-    if (leftValue < rightValue) return -1;
-  }
-  return 0;
+  return compareSharedUmbraVersions(left, right);
 }
 
 function releaseAssetPattern(platform: NodeJS.Platform, arch: string): RegExp {
@@ -99,7 +82,7 @@ export function normalizeGithubRelease(
 ): UmbraReleaseBuild | null {
   if (!value || value.draft === true) return null;
   const tag = String(value.tag_name || '').trim();
-  const version = normalizeVersion(tag);
+  const version = normalizeUmbraVersion(tag);
   if (!tag || !/^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i.test(version)) return null;
   const assets = Array.isArray(value.assets) ? value.assets as GithubAsset[] : [];
   const packagePattern = releaseAssetPattern(platform, arch);
@@ -137,7 +120,7 @@ export class AppUpdateService {
 
   constructor(runtimeRoot: string, currentVersion: string) {
     this.runtimeRoot = resolve(runtimeRoot);
-    this.currentVersion = normalizeVersion(currentVersion);
+    this.currentVersion = normalizeUmbraVersion(currentVersion);
     this.statePath = join(this.runtimeRoot, 'User', 'Config', 'app-update.json');
   }
 
@@ -188,7 +171,7 @@ export class AppUpdateService {
 
   private summarizeReleases(releases: UmbraReleaseBuild[], includePrerelease: boolean) {
     const visible = releases.filter((entry) => includePrerelease || entry.channel === 'stable');
-    const updates = visible.filter((entry) => compareUmbraVersions(entry.version, this.currentVersion) > 0);
+    const updates = filterNewerUmbraReleases(visible, this.currentVersion);
     return {
       currentVersion: this.currentVersion,
       platform: process.platform,

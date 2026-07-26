@@ -2,6 +2,11 @@
 
 import React from 'react';
 import {
+  compareUmbraVersions,
+  filterNewerUmbraReleases,
+  isKnownUmbraVersion,
+} from '../../../../shared/appUpdate';
+import {
   CheckCircle2,
   Download,
   ExternalLink,
@@ -93,19 +98,6 @@ function formatDate(value: string): string {
     : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-function compareVersions(left: string, right: string): number {
-  const parts = (value: string) => value.replace(/^v/i, '').split('.').map((entry) => (
-    Number.parseInt(entry.replace(/[^\d].*$/, ''), 10) || 0
-  ));
-  const a = parts(left);
-  const b = parts(right);
-  for (let index = 0; index < Math.max(3, a.length, b.length); index += 1) {
-    if ((a[index] || 0) > (b[index] || 0)) return 1;
-    if ((a[index] || 0) < (b[index] || 0)) return -1;
-  }
-  return 0;
-}
-
 function phaseLabel(state: UpdateState): string {
   switch (state.phase) {
     case 'downloading': return 'Downloading release';
@@ -147,12 +139,21 @@ export function UmbraUpdaterModal({
       const response = await fetch(`/api/app/releases${refresh ? '?refresh=true' : ''}`, { cache: 'no-store' });
       const payload = await response.json();
       if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Failed to load releases.');
-      const next = payload as ReleaseSummary;
+      const received = payload as ReleaseSummary;
+      const embeddedVersion = String(import.meta.env.UMBRA_APP_VERSION || '').trim();
+      const currentVersion = isKnownUmbraVersion(embeddedVersion)
+        ? embeddedVersion
+        : received.currentVersion;
+      const next: ReleaseSummary = {
+        ...received,
+        currentVersion,
+        updateCount: filterNewerUmbraReleases(received.releases, currentVersion).length,
+      };
       setSummary(next);
       onUpdateCountChange?.(Math.max(0, Number(next.updateCount) || 0));
       setSelectedTag((current) => {
         if (current && next.releases.some((entry) => entry.tag === current)) return current;
-        return next.releases.find((entry) => compareVersions(entry.version, next.currentVersion) > 0)?.tag
+        return next.releases.find((entry) => compareUmbraVersions(entry.version, next.currentVersion) > 0)?.tag
           || next.releases[0]?.tag
           || '';
       });
@@ -216,7 +217,7 @@ export function UmbraUpdaterModal({
   const newerSelected = Boolean(
     selectedRelease
     && summary
-    && compareVersions(selectedRelease.version, summary.currentVersion) > 0,
+    && compareUmbraVersions(selectedRelease.version, summary.currentVersion) > 0,
   );
   const active = Boolean(updateState && ACTIVE_PHASES.has(updateState.phase));
   const progress = updateState && updateState.totalBytes > 0
@@ -296,7 +297,7 @@ export function UmbraUpdaterModal({
             <div className="space-y-1.5">
               {summary?.releases.map((release) => {
                 const isSelected = release.tag === selectedTag;
-                const isNewer = compareVersions(release.version, summary.currentVersion) > 0;
+                const isNewer = compareUmbraVersions(release.version, summary.currentVersion) > 0;
                 return (
                   <button
                     key={release.tag}

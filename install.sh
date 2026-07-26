@@ -4,13 +4,12 @@
 # ============================================
 #
 # Usage: ./install.sh [action]
-#   No args           = Install/update all tools + shortcuts
+#   No args           = Install/update all tools
 #   comfyui           = Install/update ComfyUI
 #   aitoolkit         = Install/update AI-Toolkit
 #   update-comfyui    = Force update ComfyUI
 #   update-aitoolkit  = Force update AI-Toolkit
 #   comfy-nodes       = Install/update preferred ComfyUI custom nodes
-#   shortcuts         = Rebuild root shortcuts
 #
 # Requirements:
 #   - Bun runtime (https://bun.sh)

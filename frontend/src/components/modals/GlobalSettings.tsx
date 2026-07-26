@@ -779,7 +779,7 @@ const StorageSettings = ({ settings, updateSetting }: any) => {
           checked={settings['library.showDefaultOutputRoot']}
           onChange={(val: boolean) => updateSetting('library.showDefaultOutputRoot', val)}
           label="Show built-in Comfy output root"
-          description="When disabled and an external output path is set, Output Browser hides Tools/ComfyUI/output from root shortcuts."
+          description="When disabled and an external output path is set, Output Browser hides Tools/ComfyUI/output from its folder tree."
         />
 
         <SettingCheckbox

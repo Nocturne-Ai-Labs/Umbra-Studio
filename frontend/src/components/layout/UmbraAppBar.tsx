@@ -1,6 +1,10 @@
 ﻿'use client';
 
 import React from 'react';
+import {
+  filterNewerUmbraReleases,
+  isKnownUmbraVersion,
+} from '../../../../shared/appUpdate';
 import { motion } from 'framer-motion';
 import { useStore } from '@/store/useStore';
 import {
@@ -415,7 +419,11 @@ export const UmbraAppBar = () => {
       .then(async (response) => {
         const payload = await response.json().catch(() => null);
         if (!response.ok || !payload?.success) return;
-        setAppUpdateCount(Math.max(0, Number(payload.updateCount) || 0));
+        const currentVersion = isKnownUmbraVersion(UMBRA_APP_VERSION)
+          ? UMBRA_APP_VERSION
+          : String(payload.currentVersion || '');
+        const releases = Array.isArray(payload.releases) ? payload.releases : [];
+        setAppUpdateCount(filterNewerUmbraReleases(releases, currentVersion).length);
       })
       .catch(() => undefined);
   }, 3500), []);

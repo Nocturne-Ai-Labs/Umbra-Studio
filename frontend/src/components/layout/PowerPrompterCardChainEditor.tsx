@@ -368,13 +368,11 @@ const OUTPUT_PREVIEW_REFRESH_MS = 120000;
 const OUTPUT_PREVIEW_DEFAULT_ROOTS = ['Tools/ComfyUI/output', 'User/Outputs'];
 const LORA_BROWSER_ROOT_CANDIDATES = [
   'Tools/ComfyUI/models/loras',
-  'ComfyUI-Models/loras',
   'User/Models/loras',
   'resources/app/Tools/ComfyUI/models/loras',
 ];
 const MODEL_BROWSER_ROOT_CANDIDATES = [
   'Tools/ComfyUI/models',
-  'ComfyUI-Models',
   'User/Models',
   'resources/app/Tools/ComfyUI/models',
 ];

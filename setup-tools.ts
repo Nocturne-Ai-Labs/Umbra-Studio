@@ -1966,34 +1966,18 @@ function installUmbraUiSupportModels(comfyDir: string): boolean {
     return true;
 }
 
-function createRootShortcut(name: string, target: string) {
-    const shortcutPath = join(ROOT_DIR, name);
-    try {
-        if (!existsSync(target)) {
-            mkdirSync(target, { recursive: true });
-        }
-
-        if (existsSync(shortcutPath)) {
-            const current = lstatSync(shortcutPath);
-            if (!current.isSymbolicLink()) {
-                log('->', `${name} already exists; leaving it in place`);
-                return;
+function removeLegacyToolRootShortcuts() {
+    for (const name of ['ComfyUI-Models', 'ComfyUI-Output', 'ComfyUI-Nodes']) {
+        const shortcutPath = join(ROOT_DIR, name);
+        try {
+            if (lstatSync(shortcutPath).isSymbolicLink()) {
+                unlinkSync(shortcutPath);
+                log(`${c.green}OK${c.reset}`, `Removed legacy root shortcut: ${name}`);
             }
-            unlinkSync(shortcutPath);
+        } catch {
+            // Missing entries and real directories are intentionally left alone.
         }
-
-        symlinkSync(target, shortcutPath, IS_WINDOWS ? 'junction' : 'dir');
-        log(`${c.green}OK${c.reset}`, `${name} -> ${target}`);
-    } catch (error: any) {
-        log(`${c.yellow}!${c.reset}`, `Could not create ${name}: ${error?.message || error}`);
     }
-}
-
-function createToolRootShortcuts() {
-    const comfyDir = findToolPath(CONFIG.comfyui.search) || join(TOOLS_DIR, CONFIG.comfyui.dir);
-    createRootShortcut('ComfyUI-Models', join(comfyDir, 'models'));
-    createRootShortcut('ComfyUI-Output', join(comfyDir, 'output'));
-    createRootShortcut('ComfyUI-Nodes', join(comfyDir, 'custom_nodes'));
 }
 
 // ============================================
@@ -2054,8 +2038,6 @@ async function processTool(key: keyof typeof CONFIG, autoInstall = false, nonInt
         if (!refreshComfyPinnedPackages(toolDir)) return false;
         if (!installComfyNodes(toolDir)) return false;
         if (!installUmbraUiSupportModels(toolDir)) return false;
-        createRootShortcut('ComfyUI-Models', join(toolDir, 'models'));
-        createRootShortcut('ComfyUI-Output', join(toolDir, 'output'));
     } else if (key === 'aitoolkit') {
         ensureAIToolkitDatasetsLink(toolDir);
         if (!setupAIToolkitUI(toolDir)) return false;
@@ -2136,7 +2118,6 @@ async function updateTool(key: keyof typeof CONFIG) {
         }
     }
 
-    createToolRootShortcuts();
     log(c.green + 'OK' + c.reset, cfg.name + ' updated');
 }
 
@@ -2353,10 +2334,6 @@ async function setComfyUIVersion(ref: string) {
     if (!installUmbraUiSupportModels(toolDir)) {
         exitWithExistingVerifyFailure();
     }
-    createRootShortcut('ComfyUI-Models', join(toolDir, 'models'));
-    createRootShortcut('ComfyUI-Output', join(toolDir, 'output'));
-    createToolRootShortcuts();
-
     const currentCommit = spawnSync('git', ['rev-parse', '--short', 'HEAD'], {
         cwd: toolDir,
         encoding: 'utf-8'
@@ -2689,7 +2666,6 @@ async function main() {
 
     const arg = process.argv[2]?.toLowerCase();
     const pythonNotRequiredActions = new Set([
-        'shortcuts',
         'umbra-ui-models',
         'umbra-nodes'
     ]);
@@ -2718,6 +2694,7 @@ async function main() {
     }
 
     if (!existsSync(TOOLS_DIR)) mkdirSync(TOOLS_DIR);
+    removeLegacyToolRootShortcuts();
     const runRequiredTool = async (toolKey: keyof typeof CONFIG, autoInstall = false, nonInteractive = false) => {
         const ok = await processTool(toolKey, autoInstall, nonInteractive);
         if (!ok) exitWithExistingVerifyFailure();
@@ -2726,13 +2703,10 @@ async function main() {
     if (arg === 'all') {
         if (!setupUmbraPythonHelpersVenv()) exitWithExistingVerifyFailure();
         await runRequiredTool('comfyui', true, true);
-
-        createToolRootShortcuts();
     } else if (arg === 'python-helpers' || arg === 'waifu-tagger') {
         if (!setupUmbraPythonHelpersVenv()) exitWithExistingVerifyFailure();
     } else if (arg === 'shortcuts') {
-        createToolRootShortcuts();
-        log(`${c.green}âœ“${c.reset}`, 'Tool shortcuts repaired');
+        throw new Error('The shortcuts action was removed. Use Umbra to manage ComfyUI models, output, and nodes.');
     } else if (arg === 'umbra-nodes') {
         const comfyDir = findToolPath(CONFIG.comfyui.search);
         if (!comfyDir) {
@@ -2797,10 +2771,8 @@ async function main() {
         installSageAttentionForComfyUIEnhanced();
     } else if (arg && arg in CONFIG) {
         await runRequiredTool(arg as keyof typeof CONFIG, true, true);
-        createToolRootShortcuts();
     } else {
         await runRequiredTool('comfyui');
-        createToolRootShortcuts();
     }
 
     console.log('UMBRA_VERIFY_OK|setup-tools');

@@ -63,6 +63,47 @@ export interface UmbraUpdateWorkerRequest {
   createdAt: string;
 }
 
+export function normalizeUmbraVersion(value: unknown): string {
+  return String(value || '').trim().replace(/^v/i, '');
+}
+
+function umbraVersionParts(value: string): number[] {
+  return normalizeUmbraVersion(value)
+    .split('.')
+    .map((entry) => Number.parseInt(entry.replace(/[^\d].*$/, ''), 10))
+    .map((entry) => Number.isFinite(entry) ? entry : 0);
+}
+
+export function isKnownUmbraVersion(value: unknown): boolean {
+  const normalized = normalizeUmbraVersion(value);
+  if (!/^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i.test(normalized)) return false;
+  return umbraVersionParts(normalized).some((entry) => entry > 0);
+}
+
+export function compareUmbraVersions(left: string, right: string): number {
+  const leftParts = umbraVersionParts(left);
+  const rightParts = umbraVersionParts(right);
+  const length = Math.max(3, leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftValue = leftParts[index] || 0;
+    const rightValue = rightParts[index] || 0;
+    if (leftValue > rightValue) return 1;
+    if (leftValue < rightValue) return -1;
+  }
+  return 0;
+}
+
+export function filterNewerUmbraReleases<T extends { version: string }>(
+  releases: readonly T[],
+  currentVersion: string,
+): T[] {
+  if (!isKnownUmbraVersion(currentVersion)) return [];
+  return releases.filter((release) => (
+    isKnownUmbraVersion(release.version)
+    && compareUmbraVersions(release.version, currentVersion) > 0
+  ));
+}
+
 export function createIdleUmbraUpdateState(currentVersion = ''): UmbraUpdateState {
   return {
     schemaVersion: 1,

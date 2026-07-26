@@ -28482,7 +28482,7 @@ const server = Bun.serve<any>({
           return json({ error: 'Tool install and update actions are only available from the host PC.' }, 403);
         }
         const body = await req.json() as {
-          action: 'install' | 'update' | 'custom_nodes' | 'repair_shortcuts' | 'update_pytorch' | 'install_sageattention';
+          action: 'install' | 'update' | 'custom_nodes' | 'update_pytorch' | 'install_sageattention';
           tool?: 'comfyui' | 'aitoolkit';
         };
         const rawAction = String((body as any)?.action || '').toLowerCase();
@@ -28501,11 +28501,6 @@ const server = Bun.serve<any>({
               rawAction === 'sage_attention'
               ? 'install_sageattention'
             : rawAction;
-
-        if (normalizedAction === 'repair_shortcuts') {
-          const job = createToolAction('repair_shortcuts', ['shortcuts']);
-          return json({ success: true, actionId: job.id, status: job.status });
-        }
 
         if (!body.tool) {
           return json({ error: 'Tool is required for this action' }, 400);
