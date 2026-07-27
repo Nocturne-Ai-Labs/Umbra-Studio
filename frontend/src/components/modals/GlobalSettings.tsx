@@ -383,7 +383,7 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
   if (!mounted || !isOpen) return null;
 
   const modalContent = (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
+    <div data-umbra-global-settings-shell className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/85 backdrop-blur-md animate-backdrop"
@@ -393,17 +393,22 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
       {/* Modal */}
       <div
         data-umbra-global-settings=""
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('settings.title')}
         className="glass-panel relative w-[95%] max-w-[1400px] h-[95vh] flex flex-col overflow-hidden z-10 animate-slide-up"
         onClick={(e) => e.stopPropagation()}
       >
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--umbra-border)] flex-shrink-0 bg-black/20">
+            <div data-umbra-settings-header className="flex items-center justify-between px-6 py-5 border-b border-[var(--umbra-border)] flex-shrink-0 bg-black/20">
               <div className="flex items-center gap-3">
                 <SettingsIcon className="text-[var(--umbra-accent)]" size={20} />
                 <h2 className="text-xl font-semibold text-white">{t('settings.title')}</h2>
               </div>
               <button
                 onClick={onClose}
+                aria-label="Close"
+                title="Close"
                 className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-[var(--umbra-accent)] hover:scale-110 text-zinc-400 hover:text-white transition-all"
               >
                 <X size={16} />
@@ -412,6 +417,21 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
 
             {/* Body: Sidebar + Content */}
             <div data-umbra-settings-body="" className="flex flex-1 overflow-hidden">
+              <label data-umbra-settings-mobile-nav className="hidden">
+                <span>Section</span>
+                <select
+                  value={activeSection}
+                  onChange={(event) => setActiveSection(event.target.value as SettingsSection)}
+                  aria-label="Settings section"
+                >
+                  {sections.map((section) => (
+                    <option key={`mobile-settings-${section.id}`} value={section.id}>
+                      {section.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               {/* Sidebar */}
               <div data-umbra-settings-nav="" className="w-[220px] bg-black/20 border-r border-[var(--umbra-border)] p-2 overflow-y-auto custom-scrollbar flex-shrink-0">
                 {sections.map((section) => {
@@ -469,22 +489,26 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-between px-6 py-4 border-t border-[var(--umbra-border)] bg-black/20 flex-shrink-0">
+            <div data-umbra-settings-footer className="flex items-center justify-between px-6 py-4 border-t border-[var(--umbra-border)] bg-black/20 flex-shrink-0">
               <button
+                data-umbra-settings-reset
                 onClick={resetSettings}
                 className="glass-panel px-4 py-2 bg-white/5 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 text-sm font-medium transition-all flex items-center gap-2 hover:scale-105"
+                title={t('settings.reset')}
               >
                 <RotateCcw size={14} />
-                {t('settings.reset')}
+                <span>{t('settings.reset')}</span>
               </button>
-              <div className="flex gap-2">
+              <div data-umbra-settings-footer-actions className="flex gap-2">
                 <button
+                  data-umbra-settings-cancel
                   onClick={onClose}
                   className="glass-panel px-4 py-2 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white text-sm font-medium transition-all hover:scale-105"
                 >
                   {t('common.cancel')}
                 </button>
                 <button
+                  data-umbra-settings-save
                   onClick={saveSettings}
                   className="glass-panel px-4 py-2 bg-[var(--umbra-accent)] hover:brightness-110 text-white text-sm font-medium transition-all flex items-center gap-2 hover:scale-105"
                 >

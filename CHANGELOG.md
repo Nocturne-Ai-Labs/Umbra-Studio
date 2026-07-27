@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.21.3
+
+### Mobile Settings And Model Selection
+
+- Redesigned Global Settings as a full-screen phone workspace with a compact
+  section selector, touch-friendly controls, a stable action footer, and no
+  horizontal clipping across General, Storage, Theme Studio, ComfyUI, System
+  Monitor, or Advanced settings.
+- Reworked Power Prompter checkpoint and LoRA selection for mobile with
+  full-screen pickers, responsive model cards, visible confirmation actions,
+  and the same thumbnail catalog behavior used by Umbra UI.
+- Prevented phone model pickers from summoning the software keyboard until the
+  user explicitly selects search.
+
+### Umbra UI Agent Controls
+
+- Rebuilt the Umbra UI agent settings modal for narrow screens with
+  phone-native tab scaffolding, stacked configuration panes, larger actions,
+  and reliable scrolling.
+- Added focused regression coverage for the mobile Global Settings, Power
+  Prompter model pickers, shared model catalog, and agent settings layouts.
+
 ## v0.21.2
 
 ### Umbra Remote Mobile Polish

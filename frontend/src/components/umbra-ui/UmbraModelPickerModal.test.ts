@@ -1,5 +1,6 @@
 import React from 'react';
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   UmbraModelPickerModal,
@@ -82,5 +83,17 @@ describe('Umbra model picker catalog previews', () => {
     expect(shouldAutoFocusUmbraModelPickerSearch('phone')).toBe(false);
     expect(shouldAutoFocusUmbraModelPickerSearch('tablet')).toBe(true);
     expect(shouldAutoFocusUmbraModelPickerSearch('desktop')).toBe(true);
+  });
+
+  test('keeps mobile confirmation controls above the persistent phone navigation', () => {
+    const styles = readFileSync(new URL('../../app/globals.css', import.meta.url), 'utf8');
+
+    expect(styles).toContain(
+      'html[data-umbra-remote-mode="phone"] [data-umbra-model-picker] {\n'
+      + '  width: 100vw;\n'
+      + '  max-width: none;\n'
+      + '  height: 100%;\n'
+      + '  max-height: 100%;',
+    );
   });
 });

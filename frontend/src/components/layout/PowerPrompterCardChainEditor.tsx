@@ -11304,11 +11304,19 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       )}
 
       {isLoraBrowserOpen && (
-        <div className="fixed inset-0 z-[12010] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-6xl h-[72vh] max-h-[calc(100vh-180px)] min-h-[560px] rounded-xl border border-white/15 bg-[#050508] shadow-2xl shadow-black/80 overflow-hidden flex flex-col">
-            <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between gap-3">
+        <div
+          data-umbra-model-picker-backdrop
+          data-power-prompter-picker-backdrop
+          className="fixed inset-0 z-[12010] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div
+            data-umbra-model-picker
+            data-power-prompter-picker="lora"
+            className="w-full max-w-6xl h-[72vh] max-h-[calc(100vh-180px)] min-h-[560px] rounded-xl border border-white/15 bg-[#050508] shadow-2xl shadow-black/80 overflow-hidden flex flex-col"
+          >
+            <div data-umbra-model-picker-header className="px-4 py-3 border-b border-white/10 flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-sm font-bold text-zinc-100 uppercase tracking-widest">LoRA Browser</div>
+                <h2 className="text-sm font-bold text-zinc-100 uppercase tracking-widest">LoRA Browser</h2>
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500">
                   Safetensors only - {loraBrowserAllFiles.length} file{loraBrowserAllFiles.length === 1 ? '' : 's'}
                 </div>
@@ -11324,7 +11332,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   title="Refresh LoRA catalog"
                 >
                   <RefreshCw size={11} />
-                  Refresh
+                  <span data-umbra-model-picker-refresh-label>Refresh</span>
                 </button>
                 <button
                   onClick={() => setIsLoraBrowserOpen(false)}
@@ -11335,7 +11343,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 </button>
               </div>
             </div>
-            <div className="px-4 py-2 border-b border-white/10">
+            <div data-umbra-model-picker-filters className="px-4 py-2 border-b border-white/10">
               <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-2">
                 <input
                   value={loraBrowserSearch}
@@ -11352,9 +11360,24 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   </div>
                 </div>
               </div>
+              <label data-umbra-model-picker-mobile-folder className="relative mt-2 hidden items-center">
+                <FolderOpen size={14} className="pointer-events-none absolute left-3 text-zinc-500" />
+                <select
+                  value={loraBrowserFolder}
+                  onChange={(event) => setLoraBrowserFolder(event.target.value)}
+                  className="w-full appearance-none rounded-md border border-white/15 bg-black/40 py-2 pl-9 pr-8 text-[12px] text-zinc-200 focus:border-cyan-300 focus:outline-none"
+                  aria-label="LoRA folder"
+                >
+                  {loraBrowserFolderRows.map((folderEntry) => (
+                    <option key={`lora-mobile-folder-${folderEntry.path || 'all'}`} value={folderEntry.path}>
+                      {folderEntry.path || 'All LoRAs'} ({folderEntry.fileCount})
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
-              <div className="flex-1 min-h-0 flex">
-              <div className="w-[280px] border-r border-white/10 p-2 overflow-y-auto custom-scrollbar">
+            <div data-umbra-model-picker-catalog className="flex-1 min-h-0 flex">
+              <div data-umbra-model-picker-folders className="w-[280px] border-r border-white/10 p-2 overflow-y-auto custom-scrollbar">
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 px-2 pb-1">Folders</div>
                 <div className="space-y-1">
                   {loraBrowserFolderRows.map((folderEntry) => {
@@ -11401,13 +11424,13 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   })}
                 </div>
               </div>
-              <div className="flex-1 min-h-0 p-3 overflow-y-auto custom-scrollbar">
+              <div data-umbra-model-picker-results className="flex-1 min-h-0 p-3 overflow-y-auto custom-scrollbar">
                 {loraBrowserVisibleFiles.length === 0 ? (
                   <div className="h-full flex items-center justify-center text-[12px] text-zinc-500">
                     No safetensors found for this folder/search.
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
+                  <div data-umbra-model-picker-grid className="grid grid-cols-2 xl:grid-cols-3 gap-3">
                     {loraBrowserVisibleFiles.map((fileEntry) => {
                       const active = fileEntry.path === loraBrowserSelectedPath;
                       const meta = loraCardMetaByName[fileEntry.path.toLowerCase()];
@@ -11424,6 +11447,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                         : '';
                       return (
                         <button
+                          data-umbra-model-picker-card
+                          data-selected={active ? '1' : '0'}
                           key={`lora-browser-file-${fileEntry.path}`}
                           onClick={() => handleLoraBrowserFileClick(fileEntry.path)}
                           onDoubleClick={() => handleLoraBrowserFileDoubleClick(fileEntry.path)}
@@ -11435,7 +11460,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                           }`}
                           title={`${fileEntry.path} (left click: select, double click: info, right click: options)`}
                         >
-                          <div className="h-36 bg-black/45 border-b border-white/10 flex items-center justify-center overflow-hidden">
+                          <div data-umbra-model-picker-preview className="h-36 bg-black/45 border-b border-white/10 flex items-center justify-center overflow-hidden">
                             {activeThumbnail ? (
                               renderPreviewMedia(
                                 activeThumbnail,
@@ -11471,20 +11496,22 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 )}
               </div>
             </div>
-            <div className="px-4 py-3 border-t border-white/10 flex items-center justify-between gap-3">
-              <div className="text-[11px] text-zinc-400 truncate">
+            <div data-umbra-model-picker-footer className="px-4 py-3 border-t border-white/10 flex items-center justify-between gap-3">
+              <div data-umbra-model-picker-selection className="text-[11px] text-zinc-400 truncate">
                   {loraBrowserSelectedFile
                     ? `Selected: ${loraBrowserSelectedFile.path}`
                     : 'Select a LoRA file from the ComfyUI catalog'}
               </div>
-              <div className="flex items-center gap-2">
+              <div data-umbra-model-picker-actions className="flex items-center gap-2">
                 <button
+                  data-umbra-model-picker-cancel
                   onClick={() => setIsLoraBrowserOpen(false)}
                   className="px-3 py-1.5 rounded-md border border-white/15 bg-white/[0.04] text-[11px] font-semibold text-zinc-300 hover:text-zinc-100 hover:border-white/30"
                 >
                   Cancel
                 </button>
                 <button
+                  data-umbra-model-picker-confirm
                   onClick={confirmLoraBrowserSelection}
                   disabled={!loraBrowserSelectedFile}
                   className={`px-3 py-1.5 rounded-md border text-[11px] font-semibold ${
@@ -11502,11 +11529,19 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       )}
 
       {isModelBrowserOpen && (
-        <div className="fixed inset-0 z-[12010] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-6xl h-[72vh] max-h-[calc(100vh-180px)] min-h-[560px] rounded-xl border border-white/15 bg-[#050508] shadow-2xl shadow-black/80 overflow-hidden flex flex-col">
-            <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between gap-3">
+        <div
+          data-umbra-model-picker-backdrop
+          data-power-prompter-picker-backdrop
+          className="fixed inset-0 z-[12010] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div
+            data-umbra-model-picker
+            data-power-prompter-picker="model"
+            className="w-full max-w-6xl h-[72vh] max-h-[calc(100vh-180px)] min-h-[560px] rounded-xl border border-white/15 bg-[#050508] shadow-2xl shadow-black/80 overflow-hidden flex flex-col"
+          >
+            <div data-umbra-model-picker-header className="px-4 py-3 border-b border-white/10 flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-sm font-bold text-zinc-100 uppercase tracking-widest">Model Browser</div>
+                <h2 className="text-sm font-bold text-zinc-100 uppercase tracking-widest">Model Browser</h2>
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500">
                   {POWER_PROMPTER_MODEL_BROWSER_LABELS[modelBrowserType]} - {modelBrowserAllFiles.length} item{modelBrowserAllFiles.length === 1 ? '' : 's'}
                 </div>
@@ -11520,7 +11555,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   title="Refresh model catalog"
                 >
                   <RefreshCw size={11} />
-                  Refresh
+                  <span data-umbra-model-picker-refresh-label>Refresh</span>
                 </button>
                 <button
                   onClick={() => setIsModelBrowserOpen(false)}
@@ -11531,7 +11566,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 </button>
               </div>
             </div>
-            <div className="px-4 py-2 border-b border-white/10">
+            <div data-umbra-model-picker-filters className="px-4 py-2 border-b border-white/10">
               <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-2">
                 <input
                   value={modelBrowserSearch}
@@ -11565,9 +11600,24 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   </div>
                 </div>
               </div>
+              <label data-umbra-model-picker-mobile-folder className="relative mt-2 hidden items-center">
+                <FolderOpen size={14} className="pointer-events-none absolute left-3 text-zinc-500" />
+                <select
+                  value={modelBrowserFolder}
+                  onChange={(event) => setModelBrowserFolder(event.target.value)}
+                  className="w-full appearance-none rounded-md border border-white/15 bg-black/40 py-2 pl-9 pr-8 text-[12px] text-zinc-200 focus:border-cyan-300 focus:outline-none"
+                  aria-label="Model folder"
+                >
+                  {modelBrowserFolderRows.map((folderEntry) => (
+                    <option key={`model-mobile-folder-${folderEntry.path || 'all'}`} value={folderEntry.path}>
+                      {folderEntry.path || 'All Models'} ({folderEntry.fileCount})
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
-            <div className="flex-1 min-h-0 flex">
-              <div className="w-[280px] border-r border-white/10 p-2 overflow-y-auto custom-scrollbar">
+            <div data-umbra-model-picker-catalog className="flex-1 min-h-0 flex">
+              <div data-umbra-model-picker-folders className="w-[280px] border-r border-white/10 p-2 overflow-y-auto custom-scrollbar">
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 px-2 pb-1">Folders</div>
                 <div className="space-y-1">
                   {modelBrowserFolderRows.map((folderEntry) => {
@@ -11613,13 +11663,13 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   })}
                 </div>
               </div>
-              <div className="flex-1 min-h-0 p-3 overflow-y-auto custom-scrollbar">
+              <div data-umbra-model-picker-results className="flex-1 min-h-0 p-3 overflow-y-auto custom-scrollbar">
                 {modelBrowserVisibleFiles.length === 0 ? (
                   <div className="h-full flex items-center justify-center text-[12px] text-zinc-500">
                     No model files found for this folder/search.
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
+                  <div data-umbra-model-picker-grid className="grid grid-cols-2 xl:grid-cols-3 gap-3">
                     {modelBrowserVisibleFiles.map((fileEntry) => {
                       const active = fileEntry.path === modelBrowserSelectedPath;
                       const meta = modelCardMetaByName[fileEntry.path.toLowerCase()];
@@ -11636,6 +11686,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                         : '';
                       return (
                         <button
+                          data-umbra-model-picker-card
+                          data-selected={active ? '1' : '0'}
                           key={`model-browser-file-${fileEntry.modelType || 'checkpoint'}-${fileEntry.path}`}
                           onClick={() => handleModelBrowserFileClick(fileEntry.path)}
                           onDoubleClick={() => handleModelBrowserFileDoubleClick(fileEntry.path)}
@@ -11646,7 +11698,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                           }`}
                           title={`${fileEntry.path} (single click: select${modelBrowserType === 'checkpoint' ? ', double click: info' : ''}, Use Selected: apply)`}
                         >
-                          <div className="h-36 bg-black/45 border-b border-white/10 flex items-center justify-center overflow-hidden">
+                          <div data-umbra-model-picker-preview className="h-36 bg-black/45 border-b border-white/10 flex items-center justify-center overflow-hidden">
                             {activeThumbnail ? (
                               renderPreviewMedia(
                                 activeThumbnail,
@@ -11682,20 +11734,22 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 )}
               </div>
             </div>
-            <div className="px-4 py-3 border-t border-white/10 flex items-center justify-between gap-3">
-              <div className="text-[11px] text-zinc-400 truncate">
+            <div data-umbra-model-picker-footer className="px-4 py-3 border-t border-white/10 flex items-center justify-between gap-3">
+              <div data-umbra-model-picker-selection className="text-[11px] text-zinc-400 truncate">
                   {modelBrowserSelectedFile
                     ? `Selected ${POWER_PROMPTER_MODEL_BROWSER_LABELS[modelBrowserSelectedFile.modelType || modelBrowserType]}: ${modelBrowserSelectedFile.path}`
                     : `Select a ${POWER_PROMPTER_MODEL_BROWSER_LABELS[modelBrowserType].toLowerCase()} item from the ComfyUI catalog`}
               </div>
-              <div className="flex items-center gap-2">
+              <div data-umbra-model-picker-actions className="flex items-center gap-2">
                 <button
+                  data-umbra-model-picker-cancel
                   onClick={() => setIsModelBrowserOpen(false)}
                   className="px-3 py-1.5 rounded-md border border-white/15 bg-white/[0.04] text-[11px] font-semibold text-zinc-300 hover:text-zinc-100 hover:border-white/30"
                 >
                   Cancel
                 </button>
                 <button
+                  data-umbra-model-picker-confirm
                   onClick={() => {
                     if (!modelBrowserSelectedFile?.path) return;
                     const selectedModelType = normalizePowerPrompterModelType(modelBrowserSelectedFile.modelType || modelBrowserType);

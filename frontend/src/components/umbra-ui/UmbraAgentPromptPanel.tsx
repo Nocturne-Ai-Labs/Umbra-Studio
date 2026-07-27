@@ -351,21 +351,22 @@ export function UmbraAgentPromptPanel({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[12300] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onMouseDown={onClose}>
+    <div data-umbra-agent-panel-backdrop className="fixed inset-0 z-[12300] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onMouseDown={onClose}>
       <div
+        data-umbra-agent-panel
         role="dialog"
         aria-modal="true"
         aria-label="Umbra UI Agent Prompts"
         className="flex h-[82vh] min-h-[580px] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-cyan-300/25 bg-[#05070a] shadow-2xl shadow-black/80"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <header className="flex min-h-14 items-center gap-3 border-b border-white/10 px-4">
+        <header data-umbra-agent-panel-header className="flex min-h-14 items-center gap-3 border-b border-white/10 px-4">
           <Bot size={16} className="text-cyan-300" />
-          <div className="min-w-0">
+          <div data-umbra-agent-panel-title className="min-w-0">
             <h2 className="text-xs font-black uppercase tracking-[0.16em] text-zinc-100">Agent Prompts</h2>
             <div className="font-mono text-[9px] text-zinc-600">Prompt authoring and MCP staging</div>
           </div>
-          <div className="ml-4 flex h-full items-end">
+          <div data-umbra-agent-panel-tabs className="ml-4 flex h-full items-end">
             <button type="button" onClick={() => setTab('drafts')} className={tabButtonClass(tab === 'drafts')}>
               <Clipboard size={11} /> Drafts {drafts.length > 0 ? <span className="text-cyan-300">{drafts.length}</span> : null}
             </button>
@@ -376,7 +377,7 @@ export function UmbraAgentPromptPanel({
               <Settings2 size={11} /> Connect
             </button>
           </div>
-          <button type="button" onClick={onClose} className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-zinc-100" title="Close">
+          <button data-umbra-agent-panel-close type="button" onClick={onClose} className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-zinc-100" title="Close">
             <X size={13} />
           </button>
         </header>
@@ -384,8 +385,8 @@ export function UmbraAgentPromptPanel({
         {loading ? (
           <div className="flex min-h-0 flex-1 items-center justify-center text-zinc-600"><Loader2 size={20} className="animate-spin" /></div>
         ) : tab === 'drafts' ? (
-          <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)]">
-            <aside className="min-h-0 overflow-y-auto border-r border-white/10 p-2 custom-scrollbar">
+          <div data-umbra-agent-drafts data-has-selection={selectedDraft ? '1' : '0'} className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)]">
+            <aside data-umbra-agent-drafts-list className="min-h-0 overflow-y-auto border-r border-white/10 p-2 custom-scrollbar">
               <div className="mb-1 flex items-center px-2 py-1">
                 <span className={labelClass}>Review Inbox</span>
                 <button type="button" onClick={() => void refreshDrafts(false)} className="ml-auto inline-flex h-6 w-6 items-center justify-center text-zinc-600 hover:text-cyan-200" title="Refresh drafts">
@@ -420,12 +421,12 @@ export function UmbraAgentPromptPanel({
               )}
             </aside>
 
-            <main className="min-h-0 overflow-y-auto p-4 custom-scrollbar">
+            <main data-umbra-agent-drafts-editor className="min-h-0 overflow-y-auto p-4 custom-scrollbar">
               {!selectedDraft ? (
                 <div className="flex h-full items-center justify-center text-[10px] uppercase tracking-[0.14em] text-zinc-700">Select a staged prompt</div>
               ) : (
                 <div className="mx-auto max-w-4xl space-y-4">
-                  <div className="flex items-start gap-3 border-b border-white/10 pb-3">
+                  <div data-umbra-agent-draft-header className="flex items-start gap-3 border-b border-white/10 pb-3">
                     <span className={selectedDraft.mediaType === 'video' ? 'text-fuchsia-300' : 'text-cyan-300'}>{mediaIcon(selectedDraft.mediaType, 16)}</span>
                     <div className="min-w-0">
                       <h3 className="text-sm font-black text-zinc-100">{selectedDraft.title}</h3>
@@ -433,7 +434,7 @@ export function UmbraAgentPromptPanel({
                         {selectedDraft.mediaType.toUpperCase()} {selectedDraft.instructionName ? ` / ${selectedDraft.instructionName}` : ''}
                       </div>
                     </div>
-                    <div className="ml-auto flex gap-2">
+                    <div data-umbra-agent-draft-actions className="ml-auto flex gap-2">
                       <button type="button" onClick={() => void handleDiscardDraft()} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-300/20 px-3 text-[9px] font-black uppercase tracking-[0.12em] text-red-200 hover:bg-red-500/[0.08]">
                         <Trash2 size={11} /> Discard
                       </button>
@@ -483,9 +484,9 @@ export function UmbraAgentPromptPanel({
             </main>
           </div>
         ) : tab === 'instructions' ? (
-          <div className="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)]">
-            <aside className="flex min-h-0 flex-col border-r border-white/10">
-              <div className="flex min-h-11 items-center gap-1 border-b border-white/10 px-2">
+          <div data-umbra-agent-instructions className="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)]">
+            <aside data-umbra-agent-instructions-list className="flex min-h-0 flex-col border-r border-white/10">
+              <div data-umbra-agent-instructions-toolbar className="flex min-h-11 items-center gap-1 border-b border-white/10 px-2">
                 <button type="button" onClick={handleAddInstruction} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-cyan-300/20 px-2 text-[9px] font-black uppercase tracking-[0.11em] text-cyan-100 hover:bg-cyan-500/[0.08]">
                   <Plus size={11} /> Add
                 </button>
@@ -502,7 +503,7 @@ export function UmbraAgentPromptPanel({
                   <Trash2 size={11} />
                 </button>
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto p-2 custom-scrollbar">
+              <div data-umbra-agent-instructions-scroll className="min-h-0 flex-1 overflow-y-auto p-2 custom-scrollbar">
                 <div className="space-y-1">
                   {instructions.map((entry) => (
                     <button
@@ -525,10 +526,10 @@ export function UmbraAgentPromptPanel({
               </div>
             </aside>
 
-            <main className="min-h-0 overflow-y-auto p-4 custom-scrollbar">
+            <main data-umbra-agent-instructions-editor className="min-h-0 overflow-y-auto p-4 custom-scrollbar">
               {selectedInstruction ? (
                 <div className="mx-auto max-w-4xl space-y-4">
-                  <div className="flex items-center gap-2 border-b border-white/10 pb-3">
+                  <div data-umbra-agent-instructions-header className="flex items-center gap-2 border-b border-white/10 pb-3">
                     <FileText size={14} className="text-cyan-300" />
                     <span className="text-[10px] font-black uppercase tracking-[0.14em] text-zinc-300">Prompting Instruction</span>
                     <button
@@ -577,6 +578,7 @@ export function UmbraAgentPromptPanel({
                   <label className="block space-y-1.5">
                     <span className={labelClass}>Instruction</span>
                     <textarea
+                      data-umbra-agent-instruction-textarea
                       value={selectedInstruction.instruction}
                       onChange={(event) => updateSelectedInstruction({ instruction: event.target.value })}
                       maxLength={24_000}
@@ -589,7 +591,7 @@ export function UmbraAgentPromptPanel({
             </main>
           </div>
         ) : (
-          <main className="min-h-0 flex-1 overflow-y-auto p-5 custom-scrollbar">
+          <main data-umbra-agent-connect className="min-h-0 flex-1 overflow-y-auto p-5 custom-scrollbar">
             <div className="mx-auto max-w-4xl space-y-5">
               <div className="flex items-center gap-3 border-b border-white/10 pb-4">
                 <KeyRound size={15} className="text-emerald-300" />
@@ -601,14 +603,14 @@ export function UmbraAgentPromptPanel({
 
               {settings ? (
                 <>
-                  <section className="space-y-4 rounded-md border border-white/10 bg-white/[0.02] p-3">
-                    <div className="flex items-center gap-2">
+                  <section data-umbra-agent-composer className="space-y-4 rounded-md border border-white/10 bg-white/[0.02] p-3">
+                    <div data-umbra-agent-composer-header className="flex items-center gap-2">
                       <Settings2 size={13} className="text-cyan-300" />
                       <div>
                         <div className="text-[10px] font-black uppercase tracking-[0.14em] text-zinc-200">Prompt Composer Model</div>
                         <div className="mt-0.5 font-mono text-[8px] text-zinc-600">Used by Agent Mode in txt2img, img2img, inpaint, and video</div>
                       </div>
-                      <div className="ml-auto flex gap-2">
+                      <div data-umbra-agent-composer-actions className="ml-auto flex gap-2">
                         <button
                           type="button"
                           onClick={() => void handleTestAgentSettings()}
@@ -628,7 +630,7 @@ export function UmbraAgentPromptPanel({
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-4 gap-1.5">
+                    <div data-umbra-agent-providers className="grid grid-cols-4 gap-1.5">
                       {(['hermes', 'ollama', 'lmstudio', 'openai-compatible'] as UmbraUiAgentProvider[]).map((provider) => (
                         <button
                           type="button"
@@ -686,7 +688,7 @@ export function UmbraAgentPromptPanel({
                       </label>
                     ) : null}
 
-                    <div className="grid grid-cols-3 gap-3">
+                    <div data-umbra-agent-tuning className="grid grid-cols-3 gap-3">
                       <label className="block space-y-1.5">
                         <span className={labelClass}>Temperature</span>
                         <input
@@ -763,7 +765,7 @@ export function UmbraAgentPromptPanel({
                     <pre className="overflow-x-auto border border-white/10 bg-black/45 p-3 font-mono text-[10px] leading-relaxed text-zinc-300 custom-scrollbar">{displayedHermesConfig}</pre>
                   </div>
 
-                  <div className="grid grid-cols-3 border border-white/10 bg-white/[0.02]">
+                  <div data-umbra-agent-capabilities className="grid grid-cols-3 border border-white/10 bg-white/[0.02]">
                     {['Read prompt context', 'Read saved instructions', 'Stage reviewed drafts'].map((label) => (
                       <div key={label} className="flex min-h-12 items-center justify-center gap-2 border-r border-white/10 px-3 text-center text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500 last:border-r-0">
                         <Check size={10} className="text-emerald-300" /> {label}
