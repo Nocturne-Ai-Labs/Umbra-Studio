@@ -52,6 +52,7 @@ import {
 } from '@/lib/galleryBridgeFs';
 import { galleryMediaCacheKey, galleryMediaRevision } from '@/lib/galleryMediaIdentity';
 import { reconcileGalleryViewerNavigation } from '@/lib/galleryViewerNavigation';
+import { isGalleryDoubleTap, type GalleryTapSample } from '@/lib/galleryTouchNavigation';
 import { extractGenerationParams, extractPrompts, getWorkflowJsonExport, type ImageMetadata } from '@/utils/metadata';
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import type { ContextMenuItem } from '@/hooks/useContextMenu';
@@ -3102,6 +3103,7 @@ function GalleryMediaViewer({
   const [mobileSendMenuOpen, setMobileSendMenuOpen] = useState(false);
   const touchStartRef = useRef<{ x: number; y: number; at: number; axis: 'x' | 'y' | null; cancelled: boolean } | null>(null);
   const touchLastRef = useRef<{ x: number; y: number } | null>(null);
+  const lastViewerTapRef = useRef<GalleryTapSample | null>(null);
   const pendingSwipeRef = useRef<{ delta: number; fromPath: string } | null>(null);
   const swipeNavigationTimerRef = useRef<number | null>(null);
   const swipeSettleTimerRef = useRef<number | null>(null);
@@ -3283,6 +3285,10 @@ function GalleryMediaViewer({
     pendingSwipeRef.current = null;
   }, [clearSwipeTimers]);
 
+  useEffect(() => {
+    lastViewerTapRef.current = null;
+  }, [viewerPath]);
+
   const touchTargetIsInteractive = useCallback((target: EventTarget | null) => (
     target instanceof Element
       ? Boolean(target.closest('button, a, input, textarea, select, video, [role="button"], [data-umbra-gallery-viewer-info]'))
@@ -3340,13 +3346,43 @@ function GalleryMediaViewer({
     const start = touchStartRef.current;
     const last = touchLastRef.current;
     resetTouchNavigation();
-    if (!start || !last || start.cancelled || event.changedTouches.length !== 1) return;
+    if (!start || !last || event.changedTouches.length !== 1) return;
 
     const dx = last.x - start.x;
     const dy = last.y - start.y;
     const absX = Math.abs(dx);
     const absY = Math.abs(dy);
     const durationMs = Date.now() - start.at;
+    const changedTouch = event.changedTouches[0];
+    const isStationaryTap = !isVideo
+      && durationMs <= 320
+      && absX <= 14
+      && absY <= 14
+      && Boolean(changedTouch);
+    if (isStationaryTap && changedTouch) {
+      const tap = {
+        x: changedTouch.clientX,
+        y: changedTouch.clientY,
+        at: Date.now(),
+      };
+      if (isGalleryDoubleTap(lastViewerTapRef.current, tap)) {
+        event.preventDefault();
+        lastViewerTapRef.current = null;
+        setSwipeDragging(false);
+        setSwipeAnimating(false);
+        setSwipeOffset(0);
+        setZoom((current) => current > 1.05 ? 1 : 2);
+        return;
+      }
+      lastViewerTapRef.current = tap;
+    } else {
+      lastViewerTapRef.current = null;
+    }
+
+    if (start.cancelled) {
+      setSwipeDragging(false);
+      return;
+    }
     if (durationMs > 900) return;
 
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 390;
@@ -3384,7 +3420,7 @@ function GalleryMediaViewer({
       setSwipeAnimating(false);
       swipeSettleTimerRef.current = null;
     }, 180);
-  }, [isTouchViewer, onStep, resetTouchNavigation, viewerPath, zoom]);
+  }, [isTouchViewer, isVideo, onStep, resetTouchNavigation, viewerPath, zoom]);
 
   const handleMediaTouchCancel = useCallback(() => {
     resetTouchNavigation();
@@ -3672,7 +3708,7 @@ function GalleryMediaViewer({
           onTouchMove={handleMediaTouchMove}
           onTouchEnd={handleMediaTouchEnd}
           onTouchCancel={handleMediaTouchCancel}
-          style={isTouchViewer && zoom <= 1.05 ? { touchAction: 'pan-y pinch-zoom' } : undefined}
+          style={isTouchViewer ? { touchAction: zoom <= 1.05 ? 'pan-y' : 'pan-x pan-y' } : undefined}
         >
           <div
             data-umbra-gallery-viewer-swipe-surface=""

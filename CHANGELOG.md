@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.21.2
+
+### Umbra Remote Mobile Polish
+
+- Redesigned checkpoint and LoRA selection for phone layouts with full-screen
+  pickers, touch-friendly model cards, folder filtering, stable action bars,
+  and responsive thumbnail presentation.
+- Prevented mobile model pickers from opening the software keyboard
+  automatically while preserving search when the user explicitly selects it.
+- Fixed the mobile ComfyUI management workspace crash caused by a missing UI
+  helper, while keeping ComfyUI itself desktop-only.
+- Improved Gallery touch navigation so double-tap and swipe gestures no longer
+  fight browser zoom or leave the mobile client in a broken interaction state.
+
+### Power Prompter And Queue Controls
+
+- Restored Power Prompter's mobile card actions, including cycle, shuffle,
+  variant creation and deletion, card rename/copy/cut/delete, and set
+  randomization controls.
+- Added compact mobile sheets for card actions and card controls so the full
+  toolset remains available without crowding the active card.
+- Changed the mobile Queue Manager header and progress summary to scroll with
+  the queue list, reclaiming screen space while keeping them available when
+  the user returns to the top.
+
 ## v0.21.1
 
 ### Standalone Setup

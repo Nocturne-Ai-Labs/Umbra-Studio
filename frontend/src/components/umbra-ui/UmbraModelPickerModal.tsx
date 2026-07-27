@@ -3,6 +3,7 @@
 import React from 'react';
 import {
   Check,
+  ChevronDown,
   Database,
   FolderOpen,
   Image as ImageIcon,
@@ -14,6 +15,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { readUserConfig } from '@/lib/userConfig';
+import { getUmbraRemoteMode } from '@/utils/hostOnly';
 import type {
   PowerPrompterInfoRequestOptions,
   PowerPrompterLoraInfoPayload,
@@ -22,6 +24,10 @@ import type {
 
 export type UmbraModelPickerKind = 'checkpoint' | 'lora';
 export type UmbraModelPickerInfo = PowerPrompterLoraInfoPayload | PowerPrompterModelInfoPayload;
+
+export function shouldAutoFocusUmbraModelPickerSearch(remoteMode: string): boolean {
+  return remoteMode !== 'phone';
+}
 
 interface UmbraModelPickerModalProps {
   open: boolean;
@@ -400,17 +406,25 @@ export function UmbraModelPickerModal({
   const selectedPreview = previewUrls.length > 0
     ? previewUrls[previewTick % previewUrls.length]
     : '';
+  const remoteMode = getUmbraRemoteMode();
+  const isPhoneRemote = remoteMode === 'phone';
 
   return (
-    <div className="fixed inset-0 z-[12200] flex items-center justify-center bg-black/78 p-4 backdrop-blur-sm" onMouseDown={onClose}>
+    <div
+      data-umbra-model-picker-backdrop
+      className="fixed inset-0 z-[12200] flex items-center justify-center bg-black/78 p-4 backdrop-blur-sm"
+      onMouseDown={onClose}
+    >
       <div
+        data-umbra-model-picker
+        data-umbra-model-picker-kind={kind}
         role="dialog"
         aria-modal="true"
         aria-label={title}
         className="flex h-[min(78vh,780px)] min-h-0 w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-cyan-300/25 bg-[#05070a] shadow-2xl shadow-black/80 max-md:h-[calc(100dvh-1rem)]"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <header className="flex min-h-14 items-center gap-3 border-b border-white/10 px-4">
+        <header data-umbra-model-picker-header className="flex min-h-14 items-center gap-3 border-b border-white/10 px-4">
           {kind === 'checkpoint' ? <Database size={15} className="text-cyan-300" /> : <Library size={15} className="text-emerald-300" />}
           <div className="min-w-0">
             <h2 className="text-xs font-black uppercase tracking-[0.16em] text-zinc-100">{title}</h2>
@@ -422,28 +436,45 @@ export function UmbraModelPickerModal({
             disabled={!onRefresh || catalogLoading}
             className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.03] px-3 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:border-cyan-300/30 hover:text-cyan-100 disabled:text-zinc-700"
           >
-            <RefreshCw size={12} className={catalogLoading ? 'animate-spin' : ''} /> Refresh
+            <RefreshCw size={12} className={catalogLoading ? 'animate-spin' : ''} />
+            <span data-umbra-model-picker-refresh-label>Refresh</span>
           </button>
           <button type="button" onClick={onClose} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-zinc-100" title="Close">
             <X size={14} />
           </button>
         </header>
 
-        <div className="border-b border-white/10 p-3">
+        <div data-umbra-model-picker-filters className="border-b border-white/10 p-3">
           <label className="relative block">
             <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
             <input
-              autoFocus
+              autoFocus={shouldAutoFocusUmbraModelPickerSearch(remoteMode)}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={searchPlaceholder || `Search ${kind === 'checkpoint' ? 'checkpoints' : 'LoRAs'} by name or folder...`}
               className="h-10 w-full rounded-md border border-white/10 bg-black/40 pl-9 pr-3 text-[13px] text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-300/45"
             />
           </label>
+          <label data-umbra-model-picker-mobile-folder className="relative mt-2 hidden items-center">
+            <span className="sr-only">Model folder</span>
+            <FolderOpen size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <select
+              value={folder}
+              onChange={(event) => setFolder(event.target.value)}
+              className="h-11 w-full appearance-none rounded-md border border-white/10 bg-black/55 pl-9 pr-9 text-sm font-semibold text-zinc-100 outline-none focus:border-cyan-300/45"
+            >
+              {folders.map((entry) => (
+                <option key={entry.path || 'all'} value={entry.path}>
+                  {entry.path ? entry.path : 'All folders'} ({entry.count})
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+          </label>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] max-md:grid-cols-1 max-md:grid-rows-[128px_minmax(0,1fr)]">
-          <aside className="overflow-y-auto border-r border-white/10 p-2 custom-scrollbar max-md:border-b max-md:border-r-0">
+        <div data-umbra-model-picker-catalog className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] max-md:grid-cols-1 max-md:grid-rows-[128px_minmax(0,1fr)]">
+          <aside data-umbra-model-picker-folders className="overflow-y-auto border-r border-white/10 p-2 custom-scrollbar max-md:border-b max-md:border-r-0">
             <div className="px-2 pb-1 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">Folders</div>
             <div className="space-y-0.5">
               {folders.map((entry) => (
@@ -467,11 +498,11 @@ export function UmbraModelPickerModal({
             </div>
           </aside>
 
-          <main className="min-h-0 overflow-y-auto p-3 custom-scrollbar">
+          <main data-umbra-model-picker-results className="min-h-0 overflow-y-auto p-3 custom-scrollbar">
             {visibleFiles.length <= 0 ? (
               <div className="flex h-full items-center justify-center text-[10px] uppercase tracking-[0.14em] text-zinc-700">No matching files</div>
             ) : (
-              <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
+              <div data-umbra-model-picker-grid className="grid grid-cols-2 gap-3 xl:grid-cols-3">
                 {visibleFiles.map((file) => {
                   const active = selection === file.path;
                   const cardInfo = active && displayedInfoMatches
@@ -489,17 +520,19 @@ export function UmbraModelPickerModal({
                   );
                   return (
                     <button
+                      data-umbra-model-picker-card
+                      data-selected={active ? '1' : '0'}
                       type="button"
                       key={file.path}
                       onClick={() => setSelection(file.path)}
-                      onDoubleClick={() => onConfirm(file.path, active && displayedInfoMatches ? info : null)}
+                      onDoubleClick={isPhoneRemote ? undefined : () => onConfirm(file.path, active && displayedInfoMatches ? info : null)}
                       className={cn(
                         'min-w-0 overflow-hidden rounded-lg border bg-black/30 text-left transition-colors',
                         active ? 'border-cyan-300/55 bg-cyan-500/[0.1]' : 'border-white/10 hover:border-white/25',
                       )}
                       title={file.path}
                     >
-                      <div className="relative flex h-36 items-center justify-center overflow-hidden border-b border-white/10 bg-black/45">
+                      <div data-umbra-model-picker-preview className="relative flex h-36 items-center justify-center overflow-hidden border-b border-white/10 bg-black/45">
                         {activePreview ? (
                           renderPreviewMedia(activePreview, `${file.name} preview`, 'h-full w-full object-contain')
                         ) : (active && infoLoading) || cardInfoPending ? (
@@ -539,8 +572,8 @@ export function UmbraModelPickerModal({
           </main>
         </div>
 
-        <footer className="flex min-h-14 items-center gap-3 border-t border-white/10 px-4 max-md:flex-wrap max-md:py-2">
-          <div className="min-w-0 flex-1">
+        <footer data-umbra-model-picker-footer className="flex min-h-14 items-center gap-3 border-t border-white/10 px-4 max-md:flex-wrap max-md:py-2">
+          <div data-umbra-model-picker-selection className="min-w-0 flex-1">
             <div className="truncate font-mono text-[10px] text-zinc-400">{selection ? `Selected: ${selection}` : 'Nothing selected'}</div>
             {infoError ? <div className="truncate text-[9px] text-amber-200/75">{infoError}</div> : null}
             {selection && selectedPreview ? (
@@ -550,8 +583,9 @@ export function UmbraModelPickerModal({
               </div>
             ) : null}
           </div>
-          <button type="button" onClick={onClose} className="h-10 rounded-md border border-white/10 px-4 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:text-zinc-100">Cancel</button>
+          <button data-umbra-model-picker-cancel type="button" onClick={onClose} className="h-10 rounded-md border border-white/10 px-4 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:text-zinc-100">Cancel</button>
           <button
+            data-umbra-model-picker-confirm
             type="button"
             disabled={!selection}
             onClick={() => onConfirm(selection, displayedInfoMatches ? info : null)}

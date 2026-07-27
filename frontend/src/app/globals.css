@@ -2864,7 +2864,8 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-action="close"] 
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-media] {
-  touch-action: pan-y pinch-zoom;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-gallery-viewer-media] > div {
@@ -3762,6 +3763,19 @@ html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-m
   font-size: 0.74rem;
 }
 
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-cycle] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-mobile-card-actions-row] {
+  display: flex !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-mobile-card-actions-row] > button {
+  min-height: 2.75rem;
+  touch-action: manipulation;
+}
+
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-variant-plain-edit="true"] {
   cursor: default;
   caret-color: transparent !important;
@@ -3820,6 +3834,25 @@ html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-m
 
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-variant-set-buttons] {
   display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-actions-menu][data-mobile="1"] button,
+html[data-umbra-remote-mode="phone"] [data-umbra-card-random-menu][data-mobile="1"] button {
+  min-height: 3rem;
+  font-size: 0.75rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-random-menu][data-mobile="1"] input[type="range"] {
+  min-height: 2.75rem;
+  touch-action: pan-x;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-random-menu][data-mobile="1"] > div:last-child {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  padding: 0.75rem;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-mobile-set-picker-backdrop] {
@@ -3989,9 +4022,14 @@ html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-list] {
   min-width: 0;
   height: 100%;
   border-radius: 0.65rem;
+  display: block;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-header] {
+  position: static;
   flex-direction: column;
   align-items: stretch;
   gap: 0.75rem;
@@ -4068,8 +4106,10 @@ html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-control-note] {
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-queue-manager-scroll] {
+  min-height: 0;
+  overflow: visible;
   padding: 0.5rem;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-queue-set-header],
@@ -4310,6 +4350,129 @@ html[data-umbra-remote-mode="phone"] [data-umbra-model-manager-viewer-body] > di
 html[data-umbra-remote-mode="phone"] [data-umbra-model-manager-viewer-body] > div:last-child {
   margin-top: 0.75rem;
   overflow: visible;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-backdrop] {
+  align-items: stretch;
+  padding: 0;
+  backdrop-filter: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker] {
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: 100dvh;
+  border-width: 0;
+  border-radius: 0 !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-header] {
+  min-height: calc(3.5rem + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 0.7rem 0;
+  gap: 0.55rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-header] > div {
+  flex: 1;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-header] > div > div {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-header] button {
+  width: 2.75rem;
+  min-width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  justify-content: center;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-refresh-label] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-filters] {
+  padding: 0.6rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-filters] input,
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-filters] select {
+  height: 2.75rem;
+  min-height: 2.75rem;
+  font-size: 1rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-mobile-folder] {
+  display: flex;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-catalog] {
+  display: block;
+  min-height: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-folders] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-results] {
+  height: 100%;
+  padding: 0.55rem;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: 1rem;
+  touch-action: pan-y;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-grid] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-card] {
+  min-width: 0;
+  border-radius: 0.65rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-card][data-selected="1"] {
+  box-shadow: 0 0 0 1px rgba(103, 232, 249, 0.42), 0 0 18px rgba(34, 211, 238, 0.12);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-preview] {
+  height: auto;
+  aspect-ratio: 4 / 3;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-footer] {
+  display: grid;
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+  gap: 0.5rem;
+  min-height: 0;
+  padding: 0.55rem 0.65rem max(0.55rem, env(safe-area-inset-bottom));
+  background: rgba(5, 7, 10, 0.98);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-selection] {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-selection] > div:first-child {
+  font-size: 0.7rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-cancel],
+html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-confirm] {
+  width: 100%;
+  min-width: 0;
+  height: 2.75rem;
+  padding-inline: 0.55rem;
+  justify-content: center;
+  font-size: 0.68rem;
+  touch-action: manipulation;
 }
 
 @keyframes umbra-mobile-sheet-in {

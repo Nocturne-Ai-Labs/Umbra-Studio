@@ -11,6 +11,7 @@ import { extractMetadataFromPath } from '@/utils/metadata';
 import { copyImagesToWorkspace, type WorkspaceCopyResult } from '@/lib/workspaceFileActions';
 import { governorShouldRun, governorTryAcquire } from '@/lib/loadGovernor';
 import { logDiagnostic } from '@/lib/diagnostics';
+import { cn } from '@/lib/utils';
 import { UmbraFilmstrip } from './UmbraFilmstrip';
 import { PowerPrompter } from '@/components/layout/PowerPrompter';
 import type { WorkspaceType } from '@/store/useStore';
@@ -284,7 +285,7 @@ const openExternal = (url: string, label = 'external link') => {
   }
 };
 
-const BackendSplash = ({
+export const BackendSplash = ({
   name,
   backend,
   icon,

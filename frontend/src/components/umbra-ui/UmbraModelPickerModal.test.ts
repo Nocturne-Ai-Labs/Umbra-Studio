@@ -1,9 +1,13 @@
+import React from 'react';
 import { describe, expect, test } from 'bun:test';
+import { renderToStaticMarkup } from 'react-dom/server';
 import {
+  UmbraModelPickerModal,
   extractUmbraModelPickerPreviewUrls,
   findUmbraModelPickerThumbnailOverrides,
   getUmbraModelPickerCatalogAliasKeys,
   normalizeUmbraModelPickerThumbnailOverrides,
+  shouldAutoFocusUmbraModelPickerSearch,
   umbraModelPickerInfoMatchesPath,
 } from './UmbraModelPickerModal';
 
@@ -56,5 +60,27 @@ describe('Umbra model picker catalog previews', () => {
       overrides,
       'Characters/hero.safetensors',
     )).toEqual(['/api/fs/thumbnail?path=hero.webp']);
+  });
+
+  test('renders the shared checkpoint and LoRA picker scaffolding for mobile layout', () => {
+    const markup = renderToStaticMarkup(React.createElement(UmbraModelPickerModal, {
+      open: true,
+      kind: 'lora',
+      items: ['Characters/hero.safetensors', 'Styles/ink.safetensors'],
+      selectedValue: '',
+      onClose: () => {},
+      onConfirm: () => {},
+    }));
+
+    expect(markup).toContain('data-umbra-model-picker-kind="lora"');
+    expect(markup).toContain('data-umbra-model-picker-mobile-folder');
+    expect(markup.match(/data-umbra-model-picker-card/g)?.length).toBe(2);
+    expect(markup).toContain('data-umbra-model-picker-confirm');
+  });
+
+  test('does not summon the software keyboard when a phone picker opens', () => {
+    expect(shouldAutoFocusUmbraModelPickerSearch('phone')).toBe(false);
+    expect(shouldAutoFocusUmbraModelPickerSearch('tablet')).toBe(true);
+    expect(shouldAutoFocusUmbraModelPickerSearch('desktop')).toBe(true);
   });
 });

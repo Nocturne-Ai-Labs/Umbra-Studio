@@ -1,7 +1,7 @@
 
 import React, { forwardRef, useCallback, useDeferredValue, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowRight, Ban, Check, ChevronDown, ChevronRight, ChevronUp, Copy, Folder, FolderOpen, ImageIcon, Info, Link2, Loader2, Maximize2, Minimize2, Pencil, Plus, RefreshCw, RotateCw, Scissors, Shuffle, Sparkles, Trash2, X, Zap } from 'lucide-react';
+import { ArrowRight, Ban, Check, ChevronDown, ChevronRight, ChevronUp, Copy, EllipsisVertical, Folder, FolderOpen, ImageIcon, Info, Link2, Loader2, Maximize2, Minimize2, Pencil, Plus, RefreshCw, RotateCw, Scissors, Shuffle, Sparkles, Trash2, X, Zap } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
 import { fetchAppSettingsFromBackend, loadAppSettings, pushAppSettingsToBackend } from '@/lib/appSettings';
@@ -7257,6 +7257,12 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     if (!cardMenu) return null;
     return slots.find((slot) => slot.slotId === cardMenu.slotId) || null;
   }, [cardMenu, slots]);
+  const menuCardActiveVariant = useMemo(() => {
+    if (!menuCardSlot) return null;
+    return menuCardSlot.variants.find((variant) => variant.id === activeVariantId)
+      || menuCardSlot.variants[0]
+      || null;
+  }, [activeVariantId, menuCardSlot]);
   const randomMenuSlot = useMemo(() => {
     if (!cardRandomMenu) return null;
     return slots.find((slot) => slot.slotId === cardRandomMenu.slotId) || null;
@@ -9276,6 +9282,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       </>
                     )}
                     <button
+                      data-umbra-card-cycle=""
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();
@@ -9300,6 +9307,53 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                           : <RotateCw size={11} />}
                       {getQueueTraversalRoleLabel(slotQueueTraversalRole)}
                     </button>
+                    <div data-umbra-mobile-card-actions-row="" className="hidden shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (chainLinkModeActive) return;
+                          cycleSlotQueueTraversalRole(slot.slotId);
+                        }}
+                        disabled={chainLinkModeActive}
+                        className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                          slotQueueTraversalRole === 'hold'
+                            ? 'border-amber-300/45 bg-amber-500/12 text-amber-100'
+                            : slotQueueTraversalRole === 'fast'
+                              ? 'border-fuchsia-300/45 bg-fuchsia-500/12 text-fuchsia-100'
+                              : 'border-cyan-300/40 bg-cyan-500/10 text-cyan-100'
+                        }`}
+                        title={getQueueTraversalRoleTitle(slotQueueTraversalRole)}
+                        aria-label={`Change card cycle mode. ${getQueueTraversalRoleTitle(slotQueueTraversalRole)}`}
+                      >
+                        {slotQueueTraversalRole === 'hold'
+                          ? <Info size={16} />
+                          : slotQueueTraversalRole === 'fast'
+                            ? <Zap size={16} />
+                            : <RotateCw size={16} />}
+                      </button>
+                      <button
+                        type="button"
+                        data-umbra-mobile-card-actions=""
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (chainLinkModeActive) return;
+                          setActiveSlotId(slot.slotId);
+                          openCardContextMenu(
+                            slot.slotId,
+                            Math.max(8, window.innerWidth - CARD_MENU_WIDTH_PX - 8),
+                            Math.max(8, window.innerHeight - CARD_MENU_HEIGHT_PX - CARD_MENU_BOTTOM_SAFE_PX),
+                            true
+                          );
+                        }}
+                        disabled={chainLinkModeActive}
+                        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/[0.06] text-zinc-200 transition-colors hover:border-white/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                        title="Card actions"
+                        aria-label={`Open actions for ${slot.label} card`}
+                      >
+                        <EllipsisVertical size={17} />
+                      </button>
+                    </div>
                     <button
                       onClick={(event) => {
                         event.stopPropagation();
@@ -10335,9 +10389,23 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       )}
 
       {cardRandomMenu && randomMenuSlot && typeof window !== 'undefined' && window.document?.body && createPortal(
+        <>
+          {mobileSelectionMode && (
+            <button
+              type="button"
+              data-umbra-mobile-card-menu-backdrop=""
+              aria-label="Close card controls"
+              onClick={() => setCardRandomMenu(null)}
+              className="fixed inset-0 z-[235] border-0 bg-black/70 backdrop-blur-[2px]"
+            />
+          )}
         <div
-          className="fixed z-[120] w-[380px] rounded-xl border border-white/15 bg-[#050508] shadow-2xl shadow-black/70"
-          style={{ left: `${randomMenuLeft}px`, top: `${randomMenuTop}px` }}
+          data-umbra-card-random-menu=""
+          data-mobile={mobileSelectionMode ? '1' : '0'}
+          className={mobileSelectionMode
+            ? 'fixed inset-x-2 bottom-[calc(var(--umbra-phone-bottom-nav-height)+0.5rem)] z-[240] max-h-[calc(100dvh-var(--umbra-phone-bottom-nav-height)-1rem)] overflow-y-auto rounded-t-2xl border border-white/15 bg-[#050508] shadow-2xl shadow-black/70 custom-scrollbar'
+            : 'fixed z-[120] w-[380px] rounded-xl border border-white/15 bg-[#050508] shadow-2xl shadow-black/70'}
+          style={mobileSelectionMode ? undefined : { left: `${randomMenuLeft}px`, top: `${randomMenuTop}px` }}
           onMouseDown={(event) => {
             event.stopPropagation();
             event.preventDefault();
@@ -10453,7 +10521,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
               Close
             </button>
           </div>
-        </div>,
+        </div>
+        </>,
         window.document.body
       )}
 
@@ -10842,18 +10911,45 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       )}
 
       {cardMenu && menuCardSlot && typeof window !== 'undefined' && window.document?.body && createPortal(
+        <>
+          {mobileSelectionMode && (
+            <button
+              type="button"
+              data-umbra-mobile-card-menu-backdrop=""
+              aria-label="Close card actions"
+              onClick={() => setCardMenu(null)}
+              className="fixed inset-0 z-[235] border-0 bg-black/70 backdrop-blur-[2px]"
+            />
+          )}
         <div
-          className="fixed z-[120] w-[320px] overflow-hidden rounded-xl border border-white/15 bg-[#050508] shadow-2xl shadow-black/70"
-          style={{ left: `${cardMenuLeft}px`, top: `${cardMenuTop}px` }}
+          data-umbra-card-actions-menu=""
+          data-mobile={mobileSelectionMode ? '1' : '0'}
+          className={mobileSelectionMode
+            ? 'fixed inset-x-2 bottom-[calc(var(--umbra-phone-bottom-nav-height)+0.5rem)] z-[240] max-h-[calc(100dvh-var(--umbra-phone-bottom-nav-height)-1rem)] overflow-y-auto rounded-t-2xl border border-white/15 bg-[#050508] shadow-2xl shadow-black/70 custom-scrollbar'
+            : 'fixed z-[120] w-[320px] overflow-hidden rounded-xl border border-white/15 bg-[#050508] shadow-2xl shadow-black/70'}
+          style={mobileSelectionMode ? undefined : { left: `${cardMenuLeft}px`, top: `${cardMenuTop}px` }}
           onMouseDown={(event) => {
             event.stopPropagation();
             event.preventDefault();
           }}
           onContextMenu={(event) => event.preventDefault()}
         >
-          <div className="border-b border-white/10 px-4 py-3">
-            <div className="truncate text-[12px] font-bold text-zinc-100">{menuCardSlot.label} Card</div>
-            <div className="mt-0.5 truncate text-[10px] uppercase tracking-[0.14em] text-zinc-500">{menuCardSlot.variants.length} position{menuCardSlot.variants.length === 1 ? '' : 's'}</div>
+          <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[12px] font-bold text-zinc-100">{menuCardSlot.label} Card</div>
+              <div className="mt-0.5 truncate text-[10px] uppercase tracking-[0.14em] text-zinc-500">{menuCardSlot.variants.length} position{menuCardSlot.variants.length === 1 ? '' : 's'}</div>
+            </div>
+            {mobileSelectionMode && (
+              <button
+                type="button"
+                onClick={() => setCardMenu(null)}
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-zinc-300"
+                title="Close card actions"
+                aria-label="Close card actions"
+              >
+                <X size={17} />
+              </button>
+            )}
           </div>
           <div className="py-2">
             {!isStyleUtilitySlot(menuCardSlot) && (
@@ -10911,6 +11007,23 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
               <Plus size={15} />
               Add Variant Prompt
             </button>
+            {menuCardActiveVariant && menuCardSlot.variants.length > 1 && (
+              <button
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onClick={() => {
+                  removeVariant(menuCardSlot.slotId, menuCardActiveVariant.id);
+                  setCardMenu(null);
+                }}
+                className="flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-[12px] font-semibold text-red-200 hover:bg-red-500/10"
+                title={`Delete selected variant from ${menuCardSlot.label}`}
+              >
+                <Trash2 size={15} />
+                Delete Selected Variant
+              </button>
+            )}
             {!isStyleUtilitySlot(menuCardSlot) && (
               <button
                 onMouseDown={(event) => {
@@ -10959,7 +11072,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
               Delete Card
             </button>
           </div>
-        </div>,
+        </div>
+        </>,
         window.document.body
       )}
 
