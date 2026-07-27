@@ -112,6 +112,8 @@ jobs:
           if (!(Test-Path "$packageRoot/resources/app/defaults/DataForge/model-manifest.json")) { throw 'Data Forge model manifest is missing' }
           if (!(Test-Path "$packageRoot/Install-Umbra-UI-Models.bat")) { throw 'Umbra UI model installer is missing' }
           if (!(Test-Path "$packageRoot/resources/app/defaults/UmbraUI/model-manifest.json")) { throw 'Umbra UI model manifest is missing' }
+          if (!(Test-Path "$packageRoot/UmbraSetup.bat")) { throw 'Standalone Umbra setup launcher is missing' }
+          if (!(Test-Path "$packageRoot/resources/app/setup/UmbraSetupApp.js")) { throw 'Standalone Umbra setup service is missing' }
           New-Item -ItemType Directory -Force artifacts | Out-Null
           Copy-Item "$packageRoot/resources/app/defaults/DataForge/model-manifest.json" "artifacts/Data-Forge-Models-v$version.json"
           Copy-Item "$packageRoot/resources/app/defaults/UmbraUI/model-manifest.json" "artifacts/Umbra-UI-Support-Models-v$version.json"
@@ -154,6 +156,8 @@ jobs:
           test -f "${package_root}/resources/app/defaults/DataForge/model-manifest.json"
           test -f "${package_root}/install-umbra-ui-models.sh"
           test -f "${package_root}/resources/app/defaults/UmbraUI/model-manifest.json"
+          test -f "${package_root}/umbra-setup.sh"
+          test -f "${package_root}/resources/app/setup/UmbraSetupApp.js"
           bundled_bun_version="$("${package_root}/Runtime/Bun/linux/bun" --version)"
           case "${bundled_bun_version}" in
             1.4.*) ;;

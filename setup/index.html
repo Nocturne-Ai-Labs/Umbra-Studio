@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Umbra Studio Setup</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #06080a;
+      --panel: #0b0f12;
+      --panel-2: #10161a;
+      --line: #273038;
+      --muted: #84909a;
+      --text: #eef4f7;
+      --accent: #38d9a9;
+      --danger: #ff6b77;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: 0;
+    }
+    button, select { font: inherit; letter-spacing: 0; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .42; }
+    .shell { min-height: 100vh; display: grid; grid-template-rows: auto 1fr auto; }
+    header, footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px clamp(16px, 3vw, 36px);
+      background: #080b0d;
+    }
+    header { min-height: 70px; border-bottom: 1px solid var(--line); }
+    footer { min-height: 68px; border-top: 1px solid var(--line); }
+    .eyebrow, .section-label {
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    h1 { margin: 4px 0 0; font-size: clamp(18px, 3vw, 26px); }
+    main {
+      width: min(1080px, 100%);
+      margin: 0 auto;
+      padding: clamp(16px, 3vw, 32px);
+      display: grid;
+      gap: 16px;
+      align-content: start;
+    }
+    .panel { border: 1px solid var(--line); background: var(--panel); padding: clamp(16px, 3vw, 24px); }
+    .panel-head { display: flex; justify-content: space-between; gap: 14px; align-items: start; }
+    h2 { margin: 6px 0; font-size: 19px; }
+    p { margin: 0; color: var(--muted); font-family: system-ui, sans-serif; font-size: 14px; line-height: 1.55; }
+    .language-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin-top: 16px; }
+    select, .button {
+      min-height: 44px;
+      border: 1px solid var(--line);
+      background: #0d1215;
+      color: var(--text);
+      padding: 0 14px;
+    }
+    .button { font-size: 11px; font-weight: 900; text-transform: uppercase; }
+    .button:hover { border-color: #66737c; }
+    .button.primary { border-color: var(--accent); background: #0c201a; color: #d8fff3; }
+    .packs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+    .pack { border: 1px solid var(--line); background: #080c0f; padding: 16px; }
+    .pack h3 { margin: 0 0 8px; font-size: 14px; }
+    .pack p { min-height: 66px; }
+    .pack .button { width: 100%; margin-top: 14px; }
+    .progress { display: none; border: 1px solid var(--line); background: var(--panel-2); padding: 14px; }
+    .progress.visible { display: block; }
+    .progress-head { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; font-weight: 900; }
+    .track { height: 8px; margin-top: 12px; background: #20282e; overflow: hidden; }
+    .fill { height: 100%; width: 34%; background: var(--accent); animation: travel 1.2s ease-in-out infinite alternate; }
+    .progress.done .fill { width: 100%; animation: none; }
+    .progress.failed .fill { width: 100%; animation: none; background: var(--danger); }
+    @keyframes travel { from { transform: translateX(-90%); } to { transform: translateX(285%); } }
+    pre {
+      max-height: 220px;
+      overflow: auto;
+      margin: 12px 0 0;
+      padding: 12px;
+      border: 1px solid var(--line);
+      background: #050708;
+      color: #bbc5cb;
+      font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .status { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+    .status.error { color: var(--danger); }
+    .actions { display: flex; gap: 8px; }
+    @media (max-width: 720px) {
+      .packs { grid-template-columns: 1fr; }
+      .language-row { grid-template-columns: 1fr; }
+      footer { align-items: stretch; flex-direction: column; }
+      .actions, footer .button { width: 100%; }
+      .actions { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div>
+        <div class="eyebrow">Nocturne AI Labs</div>
+        <h1>Umbra Studio Setup</h1>
+      </div>
+      <div id="status" class="status">Standalone service</div>
+    </header>
+    <main>
+      <section class="panel">
+        <div class="section-label">Language</div>
+        <h2>Choose your preferred language</h2>
+        <p>This preference is stored in your portable User folder and can be changed later in Umbra Studio settings.</p>
+        <div class="language-row">
+          <select id="language" aria-label="Umbra Studio language">
+            <option value="en">English</option>
+            <option value="ja">日本語</option>
+            <option value="zh-CN">简体中文</option>
+            <option value="ko">한국어</option>
+          </select>
+          <button id="save-language" class="button primary" type="button">Save Language</button>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="section-label">Optional Model Packs</div>
+            <h2>Install feature support</h2>
+            <p>Install only what you plan to use. Existing valid files are verified and kept.</p>
+          </div>
+        </div>
+        <div class="packs">
+          <article class="pack">
+            <h3>Data Forge Models</h3>
+            <p>WD taggers and the natural-language caption model used by datasets and Image Inspector.</p>
+            <button class="button" data-install="data-forge" type="button">Install Data Forge Models</button>
+          </article>
+          <article class="pack">
+            <h3>Umbra UI Support Models</h3>
+            <p>Core detector, segmentation, and upscale resources used by Umbra UI pipelines. Install ComfyUI first.</p>
+            <button class="button" data-install="umbra-ui" type="button">Install Umbra UI Models</button>
+          </article>
+        </div>
+      </section>
+      <section id="progress" class="progress">
+        <div class="progress-head">
+          <span id="job-step">Preparing installer</span>
+          <span id="job-phase">Running</span>
+        </div>
+        <div class="track"><div class="fill"></div></div>
+        <pre id="job-log">Waiting for installer output...</pre>
+      </section>
+    </main>
+    <footer>
+      <div class="status">No migration is performed by this utility.</div>
+      <div class="actions">
+        <button id="close" class="button" type="button">Close Setup</button>
+        <button id="launch" class="button primary" type="button">Launch Umbra Studio</button>
+      </div>
+    </footer>
+  </div>
+  <script>
+    const token = new URLSearchParams(location.search).get('token') || '';
+    const api = (path, options = {}) => fetch(path, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Umbra-Setup-Token': token,
+        ...(options.headers || {}),
+      },
+    }).then(async (response) => {
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.success === false) throw new Error(body.error || `Request failed (${response.status})`);
+      return body;
+    });
+    const status = document.getElementById('status');
+    const language = document.getElementById('language');
+    const progress = document.getElementById('progress');
+    const jobStep = document.getElementById('job-step');
+    const jobPhase = document.getElementById('job-phase');
+    const jobLog = document.getElementById('job-log');
+    const installButtons = Array.from(document.querySelectorAll('[data-install]'));
+    let polling = false;
+
+    function setBusy(busy) {
+      installButtons.forEach((button) => { button.disabled = busy; });
+      document.getElementById('launch').disabled = busy;
+      document.getElementById('close').disabled = busy;
+    }
+
+    function renderJob(job) {
+      if (!job) return;
+      progress.classList.add('visible');
+      progress.classList.toggle('done', job.phase === 'complete');
+      progress.classList.toggle('failed', job.phase === 'failed');
+      jobStep.textContent = job.step;
+      jobPhase.textContent = job.phase;
+      jobLog.textContent = (job.lines || []).join('\n') || 'Waiting for installer output...';
+      jobLog.scrollTop = jobLog.scrollHeight;
+      setBusy(job.phase === 'running');
+      status.textContent = job.phase === 'running' ? 'Installing models' : job.step;
+      status.classList.toggle('error', job.phase === 'failed');
+    }
+
+    async function poll() {
+      if (polling) return;
+      polling = true;
+      try {
+        const result = await api('/api/status');
+        language.value = result.language || language.value;
+        renderJob(result.job);
+        if (result.job?.phase === 'running') setTimeout(() => { polling = false; poll(); }, 600);
+        else polling = false;
+      } catch (error) {
+        polling = false;
+        status.textContent = error.message;
+        status.classList.add('error');
+      }
+    }
+
+    document.getElementById('save-language').addEventListener('click', async () => {
+      try {
+        await api('/api/language', { method: 'POST', body: JSON.stringify({ language: language.value }) });
+        status.textContent = 'Language saved';
+        status.classList.remove('error');
+      } catch (error) {
+        status.textContent = error.message;
+        status.classList.add('error');
+      }
+    });
+
+    installButtons.forEach((button) => button.addEventListener('click', async () => {
+      try {
+        const result = await api('/api/install', {
+          method: 'POST',
+          body: JSON.stringify({ kind: button.dataset.install }),
+        });
+        renderJob(result.job);
+        polling = false;
+        poll();
+      } catch (error) {
+        status.textContent = error.message;
+        status.classList.add('error');
+      }
+    }));
+
+    document.getElementById('launch').addEventListener('click', async () => {
+      try {
+        await api('/api/language', { method: 'POST', body: JSON.stringify({ language: language.value }) });
+        await api('/api/launch', { method: 'POST', body: '{}' });
+        status.textContent = 'Launching Umbra Studio';
+      } catch (error) {
+        status.textContent = error.message;
+        status.classList.add('error');
+      }
+    });
+
+    document.getElementById('close').addEventListener('click', async () => {
+      try {
+        await api('/api/close', { method: 'POST', body: '{}' });
+        status.textContent = 'Setup closed';
+        window.close();
+      } catch (error) {
+        status.textContent = error.message;
+        status.classList.add('error');
+      }
+    });
+
+    poll();
+  </script>
+</body>
+</html>

@@ -25,6 +25,7 @@ const SOURCE_DIRECTORIES = [
   'launcher',
   'scripts',
   'shared',
+  'setup',
   'updater',
 ];
 
@@ -54,8 +55,10 @@ const SOURCE_FILES = [
   'test-sqlite.ts',
   'tsconfig.json',
   'UmbraServer.ts',
+  'UmbraSetup.bat',
   'UmbraStudio',
   'UmbraUpdater.bat',
+  'umbra-setup.sh',
   'umbra-updater.sh',
   'UMBRA_UI_TOUR.md',
   'WINDOWS_SIGNING.md',

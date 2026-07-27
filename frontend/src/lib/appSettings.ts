@@ -53,7 +53,6 @@ export interface AppSettings {
   'appUpdate.mode': 'source' | 'release';
   'appUpdate.releaseChannel': 'stable' | 'beta';
   'appUpdate.feedUrl': string;
-  'advanced.showSetupWizardOnLaunch': boolean;
   'advanced.diagnosticLogging': boolean;
   'advanced.consoleMaxLogs': number;
   'advanced.enableWebSocket': boolean;
@@ -102,7 +101,6 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   'appUpdate.mode': 'source',
   'appUpdate.releaseChannel': 'stable',
   'appUpdate.feedUrl': '',
-  'advanced.showSetupWizardOnLaunch': false,
   'advanced.diagnosticLogging': false,
   'advanced.consoleMaxLogs': 1000,
   'advanced.enableWebSocket': true,
@@ -127,7 +125,6 @@ const BOOLEAN_KEYS: Array<keyof AppSettings> = [
   'remote.syncUiAcrossDevices',
   'remote.galleryViewerOriginals',
   'ui.nsfwThumbnailBlurEnabled',
-  'advanced.showSetupWizardOnLaunch',
   'appUpdate.mode',
   'appUpdate.releaseChannel',
   'appUpdate.feedUrl',

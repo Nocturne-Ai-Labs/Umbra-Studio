@@ -491,6 +491,29 @@ if errorlevel 1 pause
   fs.writeFileSync(launcherPath, script, 'utf-8');
 }
 
+function writeUmbraSetupLauncher() {
+  const launcherPath = path.join(publishRoot, 'UmbraSetup.bat');
+  const script = `@echo off
+setlocal
+cd /d "%~dp0"
+set "BUN_BIN=%CD%\\Runtime\\Bun\\win32\\bun.exe"
+set "SETUP_APP=%CD%\\resources\\app\\setup\\UmbraSetupApp.js"
+if not exist "%BUN_BIN%" (
+  echo [ERROR] Bundled Bun runtime is missing: %BUN_BIN%
+  pause
+  exit /b 1
+)
+if not exist "%SETUP_APP%" (
+  echo [ERROR] Standalone setup utility is missing: %SETUP_APP%
+  pause
+  exit /b 1
+)
+"%BUN_BIN%" "%SETUP_APP%" --root "%CD%"
+if errorlevel 1 pause
+`;
+  fs.writeFileSync(launcherPath, script, 'utf-8');
+}
+
 function removeLegacyDesktopArtifacts() {
   for (const relativePath of LEGACY_DESKTOP_ROOT_ARTIFACTS) {
     const target = path.join(publishRoot, relativePath);
@@ -531,6 +554,8 @@ function verifyPublish() {
     'resources/app/launcher/UmbraUpdaterBootstrap.js',
     'resources/app/updater/UmbraUpdaterApp.js',
     'resources/app/updater/index.html',
+    'resources/app/setup/UmbraSetupApp.js',
+    'resources/app/setup/index.html',
     'resources/app/backend/FirstRunService.ts',
     'resources/app/shared/onboarding/firstRun.ts',
     'resources/app/node_modules',
@@ -541,6 +566,7 @@ function verifyPublish() {
     'User/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
     'Install-Data-Forge-Models.bat',
     'Install-Umbra-UI-Models.bat',
+    'UmbraSetup.bat',
     'UmbraUpdater.bat',
     'UmbraStudio.exe',
   ];
@@ -590,6 +616,7 @@ function publish() {
   run('bun', ['build', 'UmbraServer.ts', '--target=bun', '--outfile', path.join('dist-webapp', 'UmbraServer.js')], 'backend build');
   run('bun', ['run', 'webapp:build-launcher'], 'launcher build');
   run('bun', ['run', 'webapp:build-updater'], 'standalone updater build');
+  run('bun', ['run', 'webapp:build-setup'], 'standalone setup build');
 
   for (const relativePath of ['public', path.join('resources', 'app', 'public')]) {
     const target = path.join(publishRoot, relativePath);
@@ -611,6 +638,7 @@ function publish() {
     'gallery',
     'launcher',
     'updater',
+    'setup',
     'scripts',
     'shared',
     'defaults',
@@ -654,6 +682,10 @@ function publish() {
     path.join(root, 'dist-webapp', 'UmbraUpdaterApp.js'),
     path.join(packagedAppDir, 'updater', 'UmbraUpdaterApp.js'),
   );
+  copyExplicitFile(
+    path.join(root, 'dist-webapp', 'UmbraSetupApp.js'),
+    path.join(packagedAppDir, 'setup', 'UmbraSetupApp.js'),
+  );
 
   for (const file of ['Credits.md', 'LICENSE', 'NOTICE']) {
     copyTree(path.join(root, file), path.join(publishRoot, file));
@@ -678,6 +710,7 @@ function publish() {
 
   writeDataForgeModelInstaller();
   writeUmbraUiModelInstaller();
+  writeUmbraSetupLauncher();
   writeUmbraUpdaterLauncher();
   writePortableMarker();
   verifyPublish();

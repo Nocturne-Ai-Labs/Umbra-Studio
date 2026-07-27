@@ -9,13 +9,18 @@ describe('portable launcher packaging', () => {
     const source = readFileSync(join(root, 'scripts', 'build-webapp-folder.mjs'), 'utf8');
     expect(source).toContain("'UmbraStudio.exe'");
     expect(source).toContain("'UmbraUpdater.bat'");
+    expect(source).toContain("'UmbraSetup.bat'");
     expect(source).toContain("['Start-Umbra.bat', 'UmbraStudio.bat', 'start-umbra.sh']");
     expect(source).toContain("'resources/app/launcher/UmbraUpdateWorker.js'");
     expect(source).toContain("'resources/app/launcher/UmbraUpdaterBootstrap.js'");
     expect(source).toContain("'resources/app/updater/UmbraUpdaterApp.js'");
     expect(source).toContain("'resources/app/updater/index.html'");
+    expect(source).toContain("'resources/app/setup/UmbraSetupApp.js'");
+    expect(source).toContain("'resources/app/setup/index.html'");
     expect(source).toContain("'webapp:build-updater'");
+    expect(source).toContain("'webapp:build-setup'");
     expect(source).toContain('function writeUmbraUpdaterLauncher()');
+    expect(source).toContain('function writeUmbraSetupLauncher()');
     expect(source).not.toContain('function writeWindowsLauncher()');
     expect(source).not.toContain('function writeLinuxLauncher()');
   });
@@ -25,12 +30,17 @@ describe('portable launcher packaging', () => {
     expect(source).toContain('function writeLinuxLauncher()');
     expect(source).toContain("'start-umbra.sh'");
     expect(source).toContain("'umbra-updater.sh'");
+    expect(source).toContain("'umbra-setup.sh'");
     expect(source).toContain("'resources/app/launcher/UmbraUpdateWorker.js'");
     expect(source).toContain("'resources/app/launcher/UmbraUpdaterBootstrap.js'");
     expect(source).toContain("'resources/app/updater/UmbraUpdaterApp.js'");
     expect(source).toContain("'resources/app/updater/index.html'");
+    expect(source).toContain("'resources/app/setup/UmbraSetupApp.js'");
+    expect(source).toContain("'resources/app/setup/index.html'");
     expect(source).toContain("'webapp:build-updater'");
+    expect(source).toContain("'webapp:build-setup'");
     expect(source).toContain('function writeLinuxUpdaterLauncher()');
+    expect(source).toContain('function writeLinuxSetupLauncher()');
     expect(source).toContain("['Start-Umbra.bat', 'UmbraStudio.bat', 'UmbraStudio.exe']");
   });
 

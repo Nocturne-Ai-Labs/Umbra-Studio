@@ -1347,15 +1347,6 @@ const AdvancedSettings = ({ settings, updateSetting, exportSettings, importSetti
     <div className="space-y-6">
       <h3 className="text-lg font-bold text-white uppercase">Advanced Settings</h3>
 
-      <SettingGroup label="Startup">
-        <SettingCheckbox
-          checked={settings['advanced.showSetupWizardOnLaunch']}
-          onChange={(val: boolean) => updateSetting('advanced.showSetupWizardOnLaunch', val)}
-          label="Show setup wizard on every launch"
-          description="Runs setup once per Umbra server launch. Reloading the browser will not show it again."
-        />
-      </SettingGroup>
-
       <SettingGroup label="Diagnostics">
         <SettingCheckbox
           checked={settings['advanced.diagnosticLogging']}

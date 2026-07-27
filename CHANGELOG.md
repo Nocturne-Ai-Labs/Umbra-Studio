@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.21.1
+
+### Standalone Setup
+
+- Replaced the startup-blocking first-run wizard with an optional standalone
+  setup utility that runs independently from Umbra Studio on
+  `127.0.0.1:8215`.
+- Added `UmbraSetup.bat` for Windows and `umbra-setup.sh` for Linux, using the
+  bundled Bun runtime without starting Umbra, ComfyUI, AI Toolkit, or the
+  Gallery service.
+- Added preferred-language selection with atomic settings persistence for
+  English, Japanese, Simplified Chinese, and Korean.
+- Added guided installation and live output for the Data Forge WD tagger and
+  natural-language caption model pack.
+- Added guided installation and verification for Umbra UI core support models
+  through the managed ComfyUI installation.
+- Added launch and close actions so users can finish setup and enter Umbra
+  without leaving a background setup service running.
+
+### Startup And Remote Reliability
+
+- Removed the first-run gate from the React application so normal startup and
+  browser refreshes open Umbra directly.
+- Removed the obsolete global setting that could force the setup wizard on
+  every launch.
+- Made the compatibility onboarding endpoint always report setup complete so
+  stale remote clients cannot be redirected into the retired migration flow.
+- Removed the unused in-app first-run wizard component and its startup-time
+  network dependency.
+- Kept language selection available later from Global Settings.
+
+### Packaging And Documentation
+
+- Added the standalone setup app, page, and platform launchers to Windows,
+  Linux, and clean repository-source packaging.
+- Added package verification and tests that reject releases missing the setup
+  service or launcher.
+- Replaced the previous-build migration walkthrough with the standalone setup
+  and updater workflow. Umbra Updater remains responsible for preserving the
+  active `User/` and `Tools/` directories during upgrades.
+
 ## v0.21.0
 
 ### Umbra Director

@@ -31487,15 +31487,20 @@ const server = Bun.serve<any>({
       }
 
       if (path === '/api/onboarding/status' && method === 'GET') {
-        const state = firstRunService.readState();
         const hostActionsAvailable = isHostRequest(req, url, server);
+        const language = String(settingsManager.getAppSettings()['ui.language'] || 'en');
         return json({
           success: true,
-          required: state.phase !== 'complete',
-          state,
+          required: false,
+          state: {
+            schemaVersion: 1,
+            phase: 'complete',
+            language,
+            completedAt: null,
+            migration: null,
+          },
           hostActionsAvailable,
-          forceSetupOnLaunch: hostActionsAvailable
-            && settingsManager.getAppSettings()['advanced.showSetupWizardOnLaunch'] === true,
+          forceSetupOnLaunch: false,
           launchId: UMBRA_SERVER_LAUNCH_ID,
           runtimeRoot: hostActionsAvailable ? ROOT_DIR : '',
         });

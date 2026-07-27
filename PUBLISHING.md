@@ -81,6 +81,11 @@ Umbra UI support-model manifest. Managed ComfyUI setup installs the automatic
 `core` profile; the helper remains available for repair and for explicitly
 installing optional profiles.
 
+Every Windows package must also include `UmbraSetup.bat` and
+`resources/app/setup/UmbraSetupApp.js`. The standalone setup service owns
+language selection and optional model-pack installation without gating normal
+Umbra startup.
+
 ## Linux Portable Folder Builds
 
 Run these commands on Linux.
@@ -138,6 +143,9 @@ pack by default and verify it before the publish is accepted.
 
 Every Linux package also includes `install-umbra-ui-models.sh` and the same
 cross-platform support-model manifest used by Windows.
+
+Every Linux package must also include `umbra-setup.sh` and
+`resources/app/setup/UmbraSetupApp.js`.
 
 ## Clean Repository Source
 
@@ -238,6 +246,8 @@ After publishing:
 - Confirm ComfyUI can install/update/start.
 - Confirm Local Servers open local/LAN URLs.
 - Confirm Windows and Linux packages contain no personal `User/` files or installed `Tools/` checkouts.
+- Confirm `UmbraSetup.bat` and `umbra-setup.sh` open the local-only setup page,
+  preserve unrelated settings, and do not invoke migration.
 - Confirm no runtime data was wiped during no-bump updates.
 
 ## Public Release Gate
