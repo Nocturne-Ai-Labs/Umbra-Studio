@@ -4,7 +4,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { useThemeStore, TypographyStyle, BootTextVariant, BootAnimation, BootRainContent, BootLogoStyle } from '@/store/useThemeStore';
 import { BOOT_IMAGE_BACKGROUND_RANDOM_ID, BOOT_IMAGE_BACKGROUNDS } from '@/lib/bootBackgrounds';
-import { Palette } from 'lucide-react';
+import { Minus, Palette, Plus, Type } from 'lucide-react';
 
 // Helper Components
 const SettingGroup = ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -93,6 +93,44 @@ export const ThemeStudioSettings = () => {
           </div>
           <SettingHint>Choose typography style across the entire app</SettingHint>
 
+        </SettingGroup>
+
+        <SettingGroup label="Text Size">
+          <div className="flex w-fit items-center overflow-hidden rounded-md border border-white/10 bg-black/40">
+            <button
+              type="button"
+              onClick={() => theme.setTextScale(theme.textScale - 5)}
+              disabled={theme.textScale <= 85}
+              className="inline-flex h-10 w-10 items-center justify-center border-r border-white/10 text-zinc-500 hover:bg-white/[0.05] hover:text-white disabled:text-zinc-800"
+              title="Decrease text size"
+            >
+              <Minus size={14} />
+            </button>
+            <label className="flex h-10 items-center gap-2 px-3">
+              <Type size={13} className="text-[var(--umbra-accent)]" />
+              <input
+                type="number"
+                min={85}
+                max={140}
+                step={5}
+                value={theme.textScale}
+                onChange={(event) => theme.setTextScale(Number(event.target.value) || 100)}
+                className="w-14 bg-transparent text-right font-mono text-sm font-bold text-zinc-100 outline-none"
+                aria-label="Application text size percentage"
+              />
+              <span className="text-xs font-bold text-zinc-500">%</span>
+            </label>
+            <button
+              type="button"
+              onClick={() => theme.setTextScale(theme.textScale + 5)}
+              disabled={theme.textScale >= 140}
+              className="inline-flex h-10 w-10 items-center justify-center border-l border-white/10 text-zinc-500 hover:bg-white/[0.05] hover:text-white disabled:text-zinc-800"
+              title="Increase text size"
+            >
+              <Plus size={14} />
+            </button>
+          </div>
+          <SettingHint>Adjust text from 85% to 140%. Controls and media keep their intended size.</SettingHint>
         </SettingGroup>
 
         {/* Hex Accent Editor */}

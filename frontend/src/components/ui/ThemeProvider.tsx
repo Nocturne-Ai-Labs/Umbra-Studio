@@ -287,15 +287,15 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
                    theme.typography === 'serif' ? 'var(--font-serif)' :
                    theme.typography === 'mono' ? 'var(--font-mono-clean)' :
                    theme.typography === 'display' ? 'var(--font-display)' :
-                   'var(--font-mono-clean)';
+                   'var(--font-system)';
 
-    // Font metrics differ by family; normalize perceived size/spacing across styles.
+    // A shared x-height target keeps the families visually comparable.
     const typographyMetrics = {
-      system: { scale: 1.0, letterSpacing: '0em', lineHeight: '1.5', sizeAdjust: '0.52' },
-      serif: { scale: 0.99, letterSpacing: '0.002em', lineHeight: '1.55', sizeAdjust: '0.5' },
-      retro: { scale: 0.95, letterSpacing: '0.008em', lineHeight: '1.45', sizeAdjust: '0.49' },
-      mono: { scale: 0.98, letterSpacing: '0.003em', lineHeight: '1.48', sizeAdjust: '0.54' },
-      display: { scale: 0.96, letterSpacing: '0.006em', lineHeight: '1.46', sizeAdjust: '0.52' },
+      system: { scale: 1, letterSpacing: '0em', lineHeight: '1.5', sizeAdjust: '0.52' },
+      serif: { scale: 1, letterSpacing: '0em', lineHeight: '1.5', sizeAdjust: '0.52' },
+      retro: { scale: 1, letterSpacing: '0em', lineHeight: '1.5', sizeAdjust: '0.52' },
+      mono: { scale: 1, letterSpacing: '0em', lineHeight: '1.5', sizeAdjust: '0.52' },
+      display: { scale: 1, letterSpacing: '0em', lineHeight: '1.5', sizeAdjust: '0.52' },
     } as const;
     const metrics = typographyMetrics[theme.typography] ?? typographyMetrics.system;
 
@@ -305,7 +305,7 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
     root.style.setProperty('--font-line-height', metrics.lineHeight);
     root.style.setProperty('--font-size-adjust', metrics.sizeAdjust);
     root.style.setProperty('--ui-scale', '1');
-    root.style.setProperty('--text-scale', '1');
+    root.style.setProperty('--text-scale', `${Math.max(85, Math.min(140, theme.textScale || 100)) / 100}`);
     document.body.setAttribute('data-typography', theme.typography);
 
   }, [theme]);

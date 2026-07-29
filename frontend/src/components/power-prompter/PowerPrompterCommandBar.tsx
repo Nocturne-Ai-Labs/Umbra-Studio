@@ -48,6 +48,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
     queueShuffleEnabled,
     completePromptAgentEnabled = false,
     handleToggleCompletePromptAgent,
+    openAgentPromptPanel,
     queueAgentEnhancementProgress = null,
     hasLiveQueue,
     estimatedBatchSize,
@@ -440,6 +441,18 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
             >
               {umbraUiHandoffBusy ? <Loader2 size={13} className="animate-spin" /> : <PanelsTopLeft size={13} />}
               Umbra UI
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setPhoneActionsOpen(false);
+                openAgentPromptPanel?.();
+              }}
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-violet-300/25 bg-violet-500/[0.08] px-3 text-[10px] font-black uppercase tracking-[0.1em] text-violet-100"
+            >
+              <FileText size={15} />
+              Agent Drafts & Instructions
             </button>
 
             <button
@@ -1353,6 +1366,17 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                         : 'Shuffle enabled prompts across all cards for queue generation'}
                     >
                       {queueShuffleEnabled ? 'Shuffle On' : 'Shuffle Off'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openAgentPromptPanel?.()}
+                      className="rounded-md border border-violet-400/30 bg-violet-500/10 px-2.5 py-2 text-[10px] font-bold uppercase tracking-[0.13em] text-violet-100 transition-all hover:border-violet-300/55 hover:bg-violet-500/15"
+                      title="Review shared agent drafts and edit reusable prompting instructions"
+                    >
+                      <span className="inline-flex items-center gap-1.5">
+                        <FileText size={12} />
+                        Agent Panel
+                      </span>
                     </button>
                     <button
                       type="button"

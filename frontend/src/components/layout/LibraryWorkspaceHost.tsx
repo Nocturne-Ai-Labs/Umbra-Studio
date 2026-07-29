@@ -23,6 +23,8 @@ const GALLERY_THEME_VARS = [
   '--umbra-accent-glow',
   '--umbra-library-tree-line',
   '--font-family',
+  '--font-size-adjust',
+  '--text-scale',
 ] as const;
 
 type GalleryThemeMessage = {

@@ -225,6 +225,16 @@ application features around the integrated upstream tools.
 
 ## Tagging / Metadata Inspiration
 
+### Multilingual Danbooru Tag Aliases
+- Data source: https://huggingface.co/datasets/newtextdoc1111/danbooru-tag-csv
+- Related project: https://github.com/newtextdoc1111/ComfyUI-Autocomplete-Plus
+- Project creator / maintainer: newtextdoc1111
+- Related project license: MIT
+- Usage in Umbra Studio:
+  - Optional Japanese and Chinese alias columns for Data Forge-generated Danbooru CSVs
+  - Localized Power Prompter search and display while canonical Danbooru prompt tokens remain unchanged
+  - Alias data is downloaded only when the optional localized CSV mode is selected and is cached under `User/`
+
 ### WD Tagger / SmilingWolf
 - Reference project: https://github.com/toriato/stable-diffusion-webui-wd14-tagger
 - Original reference maintainer: toriato

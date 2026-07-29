@@ -194,6 +194,42 @@ function prepareCleanUser() {
   );
 }
 
+function verifyCleanPublishedUser() {
+  const userPath = path.join(publishRoot, 'User');
+  const forbiddenCredentials = path.join(userPath, 'Config', 'api-keys.json');
+  if (fs.existsSync(forbiddenCredentials)) {
+    throw new Error('[linux-publish] Clean release contains forbidden API credentials: User/Config/api-keys.json');
+  }
+
+  const allowedUserFile = (relativePath) => {
+    const normalized = relativePath.split(path.sep).join('/');
+    return normalized.startsWith('PowerPrompter/API Workflows/')
+      || normalized.startsWith('PowerPrompter/CSV/')
+      || normalized.startsWith('Models/WaifuTagger/')
+      || normalized.startsWith('Models/DataForgeCaption/')
+      || normalized.startsWith('PowerPrompter/Prompts/');
+  };
+  const unexpectedFiles = [];
+  const visit = (directory) => {
+    if (!fs.existsSync(directory)) return;
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const fullPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(fullPath);
+        continue;
+      }
+      const relativePath = path.relative(userPath, fullPath);
+      if (!entry.isFile() || !allowedUserFile(relativePath)) {
+        unexpectedFiles.push(`User/${relativePath.split(path.sep).join('/')}`);
+      }
+    }
+  };
+  visit(userPath);
+  if (unexpectedFiles.length > 0) {
+    throw new Error(`[linux-publish] Unexpected User/ files in clean release: ${unexpectedFiles.join(', ')}`);
+  }
+}
+
 function seedBundledDataForgeModels() {
   const modelFamilies = ['WaifuTagger', 'DataForgeCaption'];
   for (const family of modelFamilies) {
@@ -534,6 +570,7 @@ function publish() {
   writeDesktopFile();
   fs.writeFileSync(path.join(publishRoot, 'portable-mode'), 'portable linux webapp runtime enabled\n', 'utf-8');
   verifyPublish();
+  if (isCleanRelease) verifyCleanPublishedUser();
 
   console.log(`[linux-publish] Linux portable folder build published: ${publishRoot}`);
 }

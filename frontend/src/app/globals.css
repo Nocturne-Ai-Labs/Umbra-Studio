@@ -115,7 +115,7 @@ body {
   background: var(--umbra-bg);
   color: var(--umbra-text);
   font-family: var(--font-family);
-  font-size-adjust: calc(var(--font-size-adjust) / var(--text-scale));
+  font-size-adjust: calc(var(--font-size-adjust) * var(--text-scale));
   letter-spacing: var(--font-letter-spacing);
   line-height: var(--font-line-height);
   overflow: hidden;
@@ -3739,6 +3739,35 @@ html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] > butt
   font-size: 0.67rem;
   font-weight: 900;
   color: #a7f3d0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-actions] {
+  display: flex;
+  padding: 0.65rem 0.1rem 0.05rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-add] {
+  display: inline-flex;
+  width: 100%;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  border: 1px solid rgba(52, 211, 153, 0.42);
+  border-radius: 0.7rem;
+  background: rgba(16, 185, 129, 0.12);
+  color: #a7f3d0;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-add]:active {
+  background: rgba(16, 185, 129, 0.22);
+  color: #ecfdf5;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-prompt-card-header] {

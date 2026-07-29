@@ -44,13 +44,16 @@ import {
 } from '@/lib/umbraUiAgent';
 import { createDefaultUmbraUiAgentInstructions } from '../../../../shared/umbra-ui/agentTypes';
 
-type AgentPanelTab = 'drafts' | 'instructions' | 'connect';
+type AgentPanelTab = 'drafts' | 'instructions';
 
 interface UmbraAgentPromptPanelProps {
   open: boolean;
   onClose: () => void;
   onApplyDraft: (draft: UmbraUiAgentDraft) => void | Promise<void>;
   onPendingCountChange?: (count: number) => void;
+  title?: string;
+  subtitle?: string;
+  applySuccessMessage?: string;
 }
 
 const inputClass = 'w-full rounded-md border border-white/10 bg-black/45 px-2.5 py-2 text-xs text-zinc-100 outline-none placeholder:text-zinc-700 focus:border-cyan-300/45';
@@ -60,6 +63,7 @@ const DEFAULT_AGENT_GENERATION_SETTINGS: UmbraUiAgentGenerationSettings = {
   provider: 'hermes',
   baseUrl: '',
   model: '',
+  hermesProvider: '',
   apiKey: '',
   temperature: 0.7,
   maxTokens: 1200,
@@ -105,6 +109,9 @@ export function UmbraAgentPromptPanel({
   onClose,
   onApplyDraft,
   onPendingCountChange,
+  title = 'Agent Prompts',
+  subtitle = 'Prompt drafts and reusable instructions',
+  applySuccessMessage,
 }: UmbraAgentPromptPanelProps) {
   const showToast = useStore((state) => state.showToast);
   const [tab, setTab] = React.useState<AgentPanelTab>('drafts');
@@ -270,7 +277,10 @@ export function UmbraAgentPromptPanel({
       await onApplyDraft(selectedDraft);
       await discardUmbraUiAgentDraft(selectedDraft.id);
       await refreshDrafts(false);
-      showToast(`${selectedDraft.mediaType === 'video' ? 'Video' : 'Image'} prompt draft applied.`, 'success');
+      showToast(
+        applySuccessMessage || `${selectedDraft.mediaType === 'video' ? 'Video' : 'Image'} prompt draft applied.`,
+        'success',
+      );
       onClose();
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to apply the agent draft.', 'error');
@@ -363,8 +373,8 @@ export function UmbraAgentPromptPanel({
         <header data-umbra-agent-panel-header className="flex min-h-14 items-center gap-3 border-b border-white/10 px-4">
           <Bot size={16} className="text-cyan-300" />
           <div data-umbra-agent-panel-title className="min-w-0">
-            <h2 className="text-xs font-black uppercase tracking-[0.16em] text-zinc-100">Agent Prompts</h2>
-            <div className="font-mono text-[9px] text-zinc-600">Prompt authoring and MCP staging</div>
+            <h2 className="text-xs font-black uppercase tracking-[0.16em] text-zinc-100">{title}</h2>
+            <div className="font-mono text-[9px] text-zinc-600">{subtitle}</div>
           </div>
           <div data-umbra-agent-panel-tabs className="ml-4 flex h-full items-end">
             <button type="button" onClick={() => setTab('drafts')} className={tabButtonClass(tab === 'drafts')}>
@@ -372,9 +382,6 @@ export function UmbraAgentPromptPanel({
             </button>
             <button type="button" onClick={() => setTab('instructions')} className={tabButtonClass(tab === 'instructions')}>
               <FileText size={11} /> Instructions
-            </button>
-            <button type="button" onClick={() => setTab('connect')} className={tabButtonClass(tab === 'connect')}>
-              <Settings2 size={11} /> Connect
             </button>
           </div>
           <button data-umbra-agent-panel-close type="button" onClick={onClose} className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-zinc-100" title="Close">
@@ -649,8 +656,46 @@ export function UmbraAgentPromptPanel({
                     </div>
 
                     {generationSettings.provider === 'hermes' ? (
-                      <div className="rounded-md border border-emerald-300/15 bg-emerald-500/[0.045] px-3 py-2 font-mono text-[10px] leading-relaxed text-emerald-100/75">
-                        Hermes CLI uses the local Hermes executable. No model field is needed here because Hermes owns its own model routing.
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between gap-3 rounded-md border border-emerald-300/15 bg-emerald-500/[0.045] px-3 py-2">
+                          <div className="font-mono text-[10px] leading-relaxed text-emerald-100/75">
+                            {generationSettings.hermesProvider.trim() || generationSettings.model.trim()
+                              ? 'Umbra will use this model only for its Hermes prompt requests.'
+                              : 'Using the provider and model already selected in Hermes.'}
+                          </div>
+                          {generationSettings.hermesProvider.trim() || generationSettings.model.trim() ? (
+                            <button
+                              type="button"
+                              onClick={() => updateGenerationSettings({ hermesProvider: '', model: '' })}
+                              className="shrink-0 rounded-md border border-white/10 px-2 py-1 text-[9px] font-black uppercase tracking-[0.1em] text-zinc-400 hover:text-emerald-100"
+                            >
+                              Use Hermes Default
+                            </button>
+                          ) : null}
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <label className="block space-y-1.5">
+                            <span className={labelClass}>Hermes Provider Optional</span>
+                            <input
+                              value={generationSettings.hermesProvider}
+                              onChange={(event) => updateGenerationSettings({ hermesProvider: event.target.value })}
+                              placeholder="openrouter"
+                              className={`${inputClass} font-mono`}
+                            />
+                          </label>
+                          <label className="block space-y-1.5">
+                            <span className={labelClass}>Hermes Model Optional</span>
+                            <input
+                              value={generationSettings.model}
+                              onChange={(event) => updateGenerationSettings({ model: event.target.value })}
+                              placeholder="anthropic/claude-sonnet-4.6"
+                              className={`${inputClass} font-mono`}
+                            />
+                          </label>
+                        </div>
+                        <p className="text-[10px] leading-relaxed text-zinc-600">
+                          Leave both blank for automatic Hermes routing. Model identifiers are passed directly to Hermes.
+                        </p>
                       </div>
                     ) : (
                       <div className="grid gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">

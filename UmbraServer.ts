@@ -22,6 +22,7 @@ import { ThumbnailService } from './backend/ThumbnailService';
 import { settingsManager } from './backend/settings/SettingsManager';
 import { FsWorkerService } from './backend/FsWorkerService';
 import {
+  buildBooruMediaRequestHeaders,
   loadApiKeys,
   saveApiKeys,
   fetchDanbooruPosts,
@@ -72,6 +73,15 @@ import {
   resolveRemoteRequestAccess,
   resolveSavedRemoteEnabled,
 } from './backend/remoteAccessPolicy';
+import {
+  parsePowerPrompterCsv,
+  type PowerPrompterCsvItem,
+} from './backend/powerPrompterCsv';
+import {
+  buildHermesPromptCommand,
+  isMissingHermesPromptSession,
+  parseHermesPromptSessionId,
+} from './backend/hermesPromptCommand';
 
 // Route handlers we're keeping (will merge later)
 import * as trashRoutes from './backend/routes/trash';
@@ -109,12 +119,14 @@ import {
 import { buildQueuePromptsFromCards } from './shared/power-prompter/queuePromptBuilder';
 import {
   createDefaultUmbraUiAgentInstructions,
+  mergeRequiredUmbraUiAgentInstructions,
   type UmbraUiAgentContext,
   type UmbraUiAgentDraft,
   type UmbraUiAgentDraftRequest,
   type UmbraUiAgentInstruction,
   type UmbraUiAgentMediaType,
 } from './shared/umbra-ui/agentTypes';
+import { buildUmbraUiAgentCsvGrounding } from './backend/umbraUiAgentCsvGrounding';
 import {
   UMBRA_UI_AUTO_PIPELINE_ID,
   matchUmbraUiPipelineDescriptors,
@@ -482,12 +494,11 @@ async function handleBooruImageProxy(req: Request, url: URL): Promise<Response> 
   const targetUrl = normalizeBooruMediaUrl(url.searchParams.get('url'));
   if (!targetUrl) return json({ error: 'Only configured Data Forge source media can be proxied.' }, 400);
 
-  const requestHeaders: Record<string, string> = {
-    'User-Agent': 'UmbraStudio (Data Forge; local application)',
-    'Accept': req.headers.get('accept') || 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-  };
-  const range = String(req.headers.get('range') || '').trim();
-  if (range) requestHeaders.Range = range;
+  const requestHeaders = buildBooruMediaRequestHeaders(
+    targetUrl,
+    req.headers.get('accept') || undefined,
+    req.headers.get('range') || '',
+  );
 
   let upstream: Response;
   try {
@@ -721,23 +732,33 @@ type DanbooruDatasetGeneratorJob = {
   mode: string;
   outFile: string;
   outputPath: string;
+  controlPath: string;
   args: string[];
   stdout: string;
   stderr: string;
   preview: string;
   running: boolean;
+  paused: boolean;
+  stopRequested: boolean;
+  status: 'running' | 'paused' | 'stopping' | 'stopped' | 'completed' | 'failed';
   startedAt: number;
   finishedAt: number | null;
   exitCode: number | null;
   error: string;
   animaArtistTokens: boolean;
   tagCategory: string;
+  process: ReturnType<typeof Bun.spawn> | null;
 };
 
 const danbooruDatasetGeneratorJobs = new Map<string, DanbooruDatasetGeneratorJob>();
 
 function buildDanbooruDatasetGeneratorCommand(body: Record<string, unknown>) {
   const mode = String(body.mode || 'character-attributes');
+  const requestedOutputLanguage = String(body.outputLanguage || 'canonical').trim().toLowerCase();
+  if (!['canonical', 'ja', 'zh-cn'].includes(requestedOutputLanguage)) {
+    throw new Error('Localized search aliases must be canonical, Japanese, or Chinese.');
+  }
+  const outputLanguage = requestedOutputLanguage === 'zh-cn' ? 'zh-CN' : requestedOutputLanguage;
   const args: string[] = [];
   const outputDir = mode === 'tags'
     ? join(USER_DIR, 'PowerPrompter', 'CSV', 'tags')
@@ -791,6 +812,7 @@ function buildDanbooruDatasetGeneratorCommand(body: Record<string, unknown>) {
   }
 
   if (body.removeUnderscores === true) args.push('--remove-underscores');
+  args.push('--output-language', outputLanguage);
   args.push('--out-file', outFile);
 
   return {
@@ -846,6 +868,7 @@ async function runDanbooruDatasetGeneratorJob(job: DanbooruDatasetGeneratorJob) 
       stdout: 'pipe',
       stderr: 'pipe',
     });
+    job.process = proc;
     const previewTimer = setInterval(() => {
       void updateDanbooruDatasetGeneratorPreview(job).catch(() => {});
     }, 1000);
@@ -856,22 +879,37 @@ async function runDanbooruDatasetGeneratorJob(job: DanbooruDatasetGeneratorJob) 
     ]);
     clearInterval(previewTimer);
     job.exitCode = exitCode;
-    if (exitCode === 0 && job.animaArtistTokens && existsSync(job.outFile)) {
+    if ((exitCode === 0 || exitCode === 75 || job.stopRequested) && job.animaArtistTokens && existsSync(job.outFile)) {
       await applyAnimaArtistTokenTransform(job.outFile);
     }
     await updateDanbooruDatasetGeneratorPreview(job).catch(() => {});
-    if (exitCode !== 0) {
+    if (job.stopRequested || exitCode === 75) {
+      job.status = 'stopped';
+      job.error = '';
+      console.log(`[Booru] Dataset generator stopped id=${job.id} ms=${Date.now() - startedAt}`);
+    } else if (exitCode !== 0) {
+      job.status = 'failed';
       job.error = job.stderr.trim() || job.stdout.trim() || `Generator exited with code ${exitCode}`;
       console.error(`[Booru] Dataset generator failed id=${job.id} exit=${exitCode} ms=${Date.now() - startedAt}: ${job.error.slice(0, 180)}`);
     } else {
+      job.status = 'completed';
       console.log(`[Booru] Dataset generator completed id=${job.id} ms=${Date.now() - startedAt}`);
     }
   } catch (error: any) {
-    job.error = error?.message || 'Danbooru Dataset Generator failed';
-    console.error(`[Booru] Dataset generator failed id=${job.id} ms=${Date.now() - startedAt}: ${job.error}`);
+    if (job.stopRequested) {
+      job.status = 'stopped';
+      job.error = '';
+    } else {
+      job.status = 'failed';
+      job.error = error?.message || 'Danbooru Dataset Generator failed';
+      console.error(`[Booru] Dataset generator failed id=${job.id} ms=${Date.now() - startedAt}: ${job.error}`);
+    }
   } finally {
     job.running = false;
+    job.paused = false;
+    job.process = null;
     job.finishedAt = Date.now();
+    await fs.rm(job.controlPath, { force: true }).catch(() => {});
   }
 }
 
@@ -881,6 +919,9 @@ function serializeDanbooruDatasetGeneratorJob(job: DanbooruDatasetGeneratorJob) 
     id: job.id,
     mode: job.mode,
     running: job.running,
+    paused: job.paused,
+    stopRequested: job.stopRequested,
+    status: job.status,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
     exitCode: job.exitCode,
@@ -899,22 +940,31 @@ async function handleBooruDatasetGeneratorRun(req: Request): Promise<Response> {
     const command = buildDanbooruDatasetGeneratorCommand(body);
     await fs.mkdir(command.outputDir, { recursive: true });
     const id = crypto.randomUUID();
+    const controlDir = join(USER_DIR, 'Temp', 'danbooru-dataset-generator');
+    const controlPath = join(controlDir, `${id}.json`);
+    await fs.mkdir(controlDir, { recursive: true });
+    await fs.writeFile(controlPath, JSON.stringify({ paused: false, stopRequested: false }), 'utf8');
     const job: DanbooruDatasetGeneratorJob = {
       id,
       mode: command.mode,
       outFile: command.outFile,
       outputPath: toClientPath(command.outFile),
-      args: command.args,
+      controlPath,
+      args: [...command.args, '--control-file', controlPath],
       stdout: '',
       stderr: '',
       preview: '',
       running: true,
+      paused: false,
+      stopRequested: false,
+      status: 'running',
       startedAt: Date.now(),
       finishedAt: null,
       exitCode: null,
       error: '',
       animaArtistTokens: command.animaArtistTokens,
       tagCategory: command.tagCategory,
+      process: null,
     };
     danbooruDatasetGeneratorJobs.set(id, job);
     void runDanbooruDatasetGeneratorJob(job);
@@ -931,6 +981,52 @@ async function handleBooruDatasetGeneratorStatus(url: URL): Promise<Response> {
   if (!job) return json({ error: 'Generator job not found' }, 404);
   await updateDanbooruDatasetGeneratorPreview(job).catch(() => {});
   return json(serializeDanbooruDatasetGeneratorJob(job));
+}
+
+async function handleBooruDatasetGeneratorControl(req: Request): Promise<Response> {
+  try {
+    const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+    const id = String(body.id || '').trim();
+    const action = String(body.action || '').trim().toLowerCase();
+    const job = danbooruDatasetGeneratorJobs.get(id);
+    if (!job) return json({ error: 'Generator job not found' }, 404);
+    if (!job.running) return json(serializeDanbooruDatasetGeneratorJob(job));
+    if (!['pause', 'resume', 'stop'].includes(action)) {
+      return json({ error: 'Action must be pause, resume, or stop.' }, 400);
+    }
+
+    if (action === 'pause') {
+      job.paused = true;
+      job.status = 'paused';
+    } else if (action === 'resume') {
+      job.paused = false;
+      job.status = 'running';
+    } else {
+      job.paused = false;
+      job.stopRequested = true;
+      job.status = 'stopping';
+    }
+
+    await fs.writeFile(job.controlPath, JSON.stringify({
+      paused: job.paused,
+      stopRequested: job.stopRequested,
+    }), 'utf8');
+
+    if (action === 'stop') {
+      setTimeout(() => {
+        if (!job.running || !job.process) return;
+        try {
+          job.process.kill();
+        } catch {
+          // The cooperative stop may have already completed.
+        }
+      }, 5000);
+    }
+
+    return json(serializeDanbooruDatasetGeneratorJob(job));
+  } catch (error: any) {
+    return json({ error: error?.message || 'Failed to control generator job' }, 500);
+  }
 }
 
 const {
@@ -16294,6 +16390,7 @@ async function deleteUserConfigValue(key: unknown): Promise<void> {
 }
 
 const UMBRA_UI_AGENT_SETTINGS_PATH = join(USER_DIR, 'Config', 'UmbraUI', 'agent-mcp.json');
+const UMBRA_UI_HERMES_SESSION_PATH = join(USER_DIR, 'Config', 'UmbraUI', 'hermes-session.json');
 const UMBRA_UI_AGENT_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const UMBRA_UI_AGENT_MAX_DRAFTS = 50;
 const UMBRA_UI_AGENT_TEXT_LIMIT = 40_000;
@@ -16307,6 +16404,7 @@ interface UmbraUiAgentGenerationSettings {
   provider: UmbraUiAgentProvider;
   baseUrl: string;
   model: string;
+  hermesProvider: string;
   apiKey: string;
   temperature: number;
   maxTokens: number;
@@ -16346,6 +16444,7 @@ const DEFAULT_UMBRA_UI_AGENT_GENERATION_SETTINGS: UmbraUiAgentGenerationSettings
   provider: 'hermes',
   baseUrl: '',
   model: '',
+  hermesProvider: '',
   apiKey: '',
   temperature: 0.7,
   maxTokens: 1200,
@@ -16355,6 +16454,33 @@ const DEFAULT_UMBRA_UI_AGENT_GENERATION_SETTINGS: UmbraUiAgentGenerationSettings
 let umbraUiAgentContext: UmbraUiAgentContext = EMPTY_UMBRA_UI_AGENT_CONTEXT;
 const umbraUiAgentDrafts = new Map<string, UmbraUiAgentDraft>();
 let umbraUiAgentGenerationActive = false;
+
+async function loadUmbraUiHermesSessionId(): Promise<string> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(UMBRA_UI_HERMES_SESSION_PATH, 'utf8'));
+    const sessionId = clampUmbraUiAgentText(parsed?.sessionId, 200);
+    return /^[a-z0-9._-]{4,200}$/i.test(sessionId) ? sessionId : '';
+  } catch {
+    return '';
+  }
+}
+
+async function saveUmbraUiHermesSessionId(sessionId: string): Promise<void> {
+  const normalized = clampUmbraUiAgentText(sessionId, 200);
+  if (!/^[a-z0-9._-]{4,200}$/i.test(normalized)) return;
+  await fs.mkdir(dirname(UMBRA_UI_HERMES_SESSION_PATH), { recursive: true });
+  await fs.writeFile(UMBRA_UI_HERMES_SESSION_PATH, `${JSON.stringify({
+    version: 1,
+    sessionId: normalized,
+    updatedAt: Date.now(),
+  }, null, 2)}\n`, 'utf8');
+}
+
+async function clearUmbraUiHermesSession(): Promise<void> {
+  await fs.unlink(UMBRA_UI_HERMES_SESSION_PATH).catch((error: NodeJS.ErrnoException) => {
+    if (error?.code !== 'ENOENT') throw error;
+  });
+}
 
 function clampUmbraUiAgentText(value: unknown, maxLength = UMBRA_UI_AGENT_TEXT_LIMIT): string {
   return String(value || '').replace(/\u0000/g, '').trim().slice(0, maxLength);
@@ -16400,7 +16526,13 @@ async function loadUmbraUiAgentInstructions(): Promise<UmbraUiAgentInstruction[]
   try {
     const stored = await readUserConfigValue('umbra-ui-agent-instructions');
     const normalized = normalizeUmbraUiAgentInstructions(stored);
-    if (normalized.length > 0) return normalized;
+    if (normalized.length > 0) {
+      const merged = mergeRequiredUmbraUiAgentInstructions(normalized);
+      if (merged.length !== normalized.length) {
+        await writeUserConfigValue('umbra-ui-agent-instructions', merged);
+      }
+      return merged;
+    }
   } catch (error) {
     console.warn('[Umbra UI Agent] Failed to load prompt instructions; restoring defaults.', error);
   }
@@ -16486,6 +16618,7 @@ function normalizeUmbraUiAgentGenerationSettings(value: unknown): UmbraUiAgentGe
     provider,
     baseUrl: clampUmbraUiAgentText(raw.baseUrl, 500) || defaultBaseUrl,
     model: clampUmbraUiAgentText(raw.model, 240),
+    hermesProvider: clampUmbraUiAgentText(raw.hermesProvider, 120),
     apiKey: clampUmbraUiAgentText(raw.apiKey, 2000),
     temperature: Number.isFinite(temperature) ? Math.max(0, Math.min(2, temperature)) : DEFAULT_UMBRA_UI_AGENT_GENERATION_SETTINGS.temperature,
     maxTokens: Number.isFinite(maxTokens) ? Math.max(64, Math.min(8192, Math.floor(maxTokens))) : DEFAULT_UMBRA_UI_AGENT_GENERATION_SETTINGS.maxTokens,
@@ -16501,6 +16634,7 @@ function buildUmbraUiAgentRequestPrompt(
   context: string,
   task: 'compose' | 'enhance-field' | 'enhance-complete-prompt' = 'compose',
   fieldLabel = '',
+  csvGrounding = '',
 ): string {
   if (task === 'enhance-complete-prompt') {
     return [
@@ -16515,6 +16649,7 @@ function buildUmbraUiAgentRequestPrompt(
       '',
       'COMPLETE PROMPT:',
       sourcePrompt,
+      ...(csvGrounding ? ['', csvGrounding] : []),
       ...(context ? ['', 'UMBRA GENERATION CONTEXT:', context] : []),
     ].join('\n');
   }
@@ -16532,6 +16667,7 @@ function buildUmbraUiAgentRequestPrompt(
       '',
       'FIELD TEXT:',
       sourcePrompt,
+      ...(csvGrounding ? ['', csvGrounding] : []),
       ...(context ? ['', 'UMBRA GENERATION CONTEXT:', context] : []),
     ].join('\n');
   }
@@ -16546,6 +16682,7 @@ function buildUmbraUiAgentRequestPrompt(
     '',
     'USER REQUEST:',
     sourcePrompt,
+    ...(csvGrounding ? ['', csvGrounding] : []),
     ...(context ? ['', 'UMBRA GENERATION CONTEXT:', context] : []),
   ].join('\n');
 }
@@ -16635,39 +16772,54 @@ async function generateUmbraUiPromptWithOllama(
   }
 }
 
-async function generateUmbraUiPromptWithHermesCli(agentRequest: string, timeoutMs: number): Promise<string> {
+async function generateUmbraUiPromptWithHermesCli(
+  settings: UmbraUiAgentGenerationSettings,
+  agentRequest: string,
+): Promise<string> {
   const executable = resolveHermesExecutable();
-  const proc = Bun.spawn([executable, '--ignore-rules', '--oneshot', agentRequest], {
-    cwd: ROOT_DIR,
-    env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' },
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'pipe',
-    windowsHide: true,
-  });
-  let timedOut = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const timeout = new Promise<number>((resolveTimeout) => {
-    timer = setTimeout(() => {
-      timedOut = true;
-      try { proc.kill(); } catch { /* process already exited */ }
-      resolveTimeout(-1);
-    }, timeoutMs);
-  });
-  const stdoutPromise = new Response(proc.stdout).text();
-  const stderrPromise = new Response(proc.stderr).text();
-  const [exitCode, stdout, stderr] = await Promise.all([
-    Promise.race([proc.exited, timeout]),
-    stdoutPromise,
-    stderrPromise,
-  ]);
-  if (timer) clearTimeout(timer);
-  if (timedOut) throw new Error(`Hermes prompt generation timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
-  if (exitCode !== 0) {
-    const reason = cleanHermesPromptOutput(stderr) || cleanHermesPromptOutput(stdout);
-    throw new Error(reason || `Hermes exited with code ${exitCode}.`);
+  const runHermesTurn = async (sessionId: string): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
+    const proc = Bun.spawn(buildHermesPromptCommand(executable, settings, agentRequest, sessionId), {
+      cwd: ROOT_DIR,
+      env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      windowsHide: true,
+    });
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const timeout = new Promise<number>((resolveTimeout) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        try { proc.kill(); } catch { /* process already exited */ }
+        resolveTimeout(-1);
+      }, settings.timeoutMs);
+    });
+    const [exitCode, stdout, stderr] = await Promise.all([
+      Promise.race([proc.exited, timeout]),
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (timedOut) throw new Error(`Hermes prompt generation timed out after ${Math.round(settings.timeoutMs / 1000)} seconds.`);
+    return { exitCode, stdout, stderr };
+  };
+
+  const savedSessionId = await loadUmbraUiHermesSessionId();
+  let result = await runHermesTurn(savedSessionId);
+  if (result.exitCode !== 0 && savedSessionId && isMissingHermesPromptSession(result.stderr)) {
+    await clearUmbraUiHermesSession();
+    result = await runHermesTurn('');
   }
-  return stdout;
+  if (result.exitCode !== 0) {
+    const reason = cleanHermesPromptOutput(result.stderr) || cleanHermesPromptOutput(result.stdout);
+    throw new Error(reason || `Hermes exited with code ${result.exitCode}.`);
+  }
+  const nextSessionId = parseHermesPromptSessionId(result.stderr);
+  if (nextSessionId && nextSessionId !== savedSessionId) {
+    await saveUmbraUiHermesSessionId(nextSessionId);
+  }
+  return result.stdout;
 }
 
 async function generateUmbraUiPromptWithConfiguredAgent(
@@ -16679,7 +16831,7 @@ async function generateUmbraUiPromptWithConfiguredAgent(
     return generateUmbraUiPromptWithOpenAiCompatible(settings, agentRequest);
   }
   try {
-    return await generateUmbraUiPromptWithHermesCli(agentRequest, settings.timeoutMs);
+    return await generateUmbraUiPromptWithHermesCli(settings, agentRequest);
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
       throw new Error('Hermes Agent is not installed or could not be found. Install Hermes or set UMBRA_HERMES_EXECUTABLE, or choose Ollama/LM Studio in Agent Settings.');
@@ -16716,6 +16868,13 @@ async function generateUmbraUiPromptWithAgent(value: unknown): Promise<{
   const context = serializeUmbraUiAgentGenerationContext(request.context);
   const inlineInstruction = prepareUmbraUiInlineAgentInstruction(instruction.instruction)
     || 'Faithfully convert the request into a clear, production-ready generation prompt.';
+  let csvGrounding = '';
+  if (mediaType === 'image' && instruction.id === 'image-anima-sdxl-csv-tags') {
+    if (ppIndex.length === 0) {
+      await indexPowerPrompterCSVs();
+    }
+    csvGrounding = buildUmbraUiAgentCsvGrounding(sourcePrompt, ppIndex).text;
+  }
   const agentRequest = buildUmbraUiAgentRequestPrompt(
     mediaType,
     sourcePrompt,
@@ -16724,6 +16883,7 @@ async function generateUmbraUiPromptWithAgent(value: unknown): Promise<{
     context,
     task,
     fieldLabel,
+    csvGrounding,
   );
 
   const startedAt = Date.now();
@@ -21003,14 +21163,7 @@ async function savePPSelections(selections: PPSelectionsMap) {
   await fs.writeFile(PP_SELECTIONS_PATH, JSON.stringify(selections, null, 2));
 }
 
-interface PPItem {
-  tag: string;
-  category: number;
-  extra?: string; // trigger tags for characters
-  source: string;
-  sourceId: string;
-  type: 'tag' | 'character';
-}
+type PPItem = PowerPrompterCsvItem;
 
 type PowerPrompterCardType = 'character' | 'location' | 'expression' | 'action' | 'style' | 'custom';
 type PowerPrompterSearchScope = 'scoped' | 'all';
@@ -21782,10 +21935,6 @@ async function savePPSettings(settings: PowerPrompterSettings) {
   await fs.writeFile(PP_SETTINGS_PATH, JSON.stringify(normalized, null, 2));
 }
 
-function cleanCSVValue(val: string): string {
-  return val.replace(/^["']|["']$/g, '').trim();
-}
-
 function getPPCsvSourceId(type: 'tag' | 'character', fileName: string): string {
   return `${type}:${String(fileName || '').trim()}`;
 }
@@ -21827,34 +21976,10 @@ async function indexPowerPrompterCSVs() {
       for (const file of files) {
         const filePath = join(dir, file);
         const content = await fs.readFile(filePath, 'utf-8');
-        const lines = content.split('\n');
-        let processedLines = 0;
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const parts = line.split(',').map(cleanCSVValue);
-
-          if (type === 'tag' && parts.length >= 2) {
-            newIndex.push({
-              tag: parts[0],
-              category: parseInt(parts[1]) || 0,
-              source: file,
-              sourceId: getPPCsvSourceId(type, file),
-              type: 'tag'
-            });
-          } else if (type === 'character' && parts.length >= 2) {
-            newIndex.push({
-              tag: parts[0],
-              category: 4, // Character
-              extra: parts.slice(1).join(', '),
-              source: file,
-              sourceId: getPPCsvSourceId(type, file),
-              type: 'character'
-            });
-          }
-
-          processedLines += 1;
-          if (processedLines % 2000 === 0) {
+        const items = parsePowerPrompterCsv(content, type, file);
+        for (let index = 0; index < items.length; index += 1) {
+          newIndex.push(items[index]);
+          if ((index + 1) % 2000 === 0) {
             // Keep request handling responsive while indexing large CSV corpora.
             await new Promise<void>((resolve) => setTimeout(resolve, 0));
           }
@@ -21913,8 +22038,15 @@ function matchesPPSearchQuery(item: PPItem, rawQuery: string): boolean {
   const queryTokens = normalizedQuery.split(' ').filter(Boolean);
   const tag = normalizePPSearchText(item.tag);
   const extra = normalizePPSearchText(item.extra || '');
+  const displayTag = normalizePPSearchText(item.displayTag || '');
+  const searchAliases = normalizePPSearchText(item.searchAliases || '');
 
-  if (tag.includes(normalizedQuery) || extra.includes(normalizedQuery)) {
+  if (
+    tag.includes(normalizedQuery)
+    || extra.includes(normalizedQuery)
+    || displayTag.includes(normalizedQuery)
+    || searchAliases.includes(normalizedQuery)
+  ) {
     return true;
   }
 
@@ -21925,7 +22057,7 @@ function matchesPPSearchQuery(item: PPItem, rawQuery: string): boolean {
     && queryTokens.every((token) => value.includes(token))
   );
 
-  return tokenMatch(tag) || tokenMatch(extra);
+  return tokenMatch(tag) || tokenMatch(extra) || tokenMatch(displayTag) || tokenMatch(searchAliases);
 }
 
 function matchesPPSearchCardScope(item: PPItem, cardType: PowerPrompterCardType | null, scope: PowerPrompterSearchScope): boolean {
@@ -29346,6 +29478,10 @@ const server = Bun.serve<any>({
         return handleBooruDatasetGeneratorStatus(url);
       }
 
+      if (path === '/api/booru/dataset-generator/control' && method === 'POST') {
+        return handleBooruDatasetGeneratorControl(req);
+      }
+
       // Booru autocomplete proxy
       if (path === '/api/booru/autocomplete' && method === 'GET') {
         const source = String(url.searchParams.get('source') || 'danbooru').toLowerCase();
@@ -31349,6 +31485,17 @@ const server = Bun.serve<any>({
         } catch (error: any) {
           const status = /required|not installed|could not be found|failed \(\d+\)/i.test(error?.message || '') ? 400 : 500;
           return json({ success: false, error: error?.message || 'Agent test failed.' }, status);
+        }
+      }
+
+      if (path === '/api/umbra-ui/agent/hermes-session' && method === 'DELETE') {
+        const guard = withRemoteAdminGuard(req, url, server);
+        if (guard) return guard;
+        try {
+          await clearUmbraUiHermesSession();
+          return json({ success: true });
+        } catch (error: any) {
+          return json({ success: false, error: error?.message || 'Failed to reset the Umbra Hermes conversation.' }, 500);
         }
       }
 

@@ -381,6 +381,7 @@ echo Umbra UI support models are ready.
 function verifyCleanPublishedUser() {
   const userPath = path.join(publishRoot, 'User');
   const dirtyPaths = [
+    'User/Config/api-keys.json',
     'User/Config/settings.json',
     'User/Config/umbra-user-settings.json',
     'User/Config/GalleryDb.db',

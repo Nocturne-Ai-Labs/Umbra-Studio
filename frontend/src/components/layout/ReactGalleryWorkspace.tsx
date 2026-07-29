@@ -51,6 +51,7 @@ import {
   setGalleryDirectBaseUrl,
 } from '@/lib/galleryBridgeFs';
 import { galleryMediaCacheKey, galleryMediaRevision } from '@/lib/galleryMediaIdentity';
+import { buildTrashThumbnailUrl } from '@/lib/galleryTrashMedia';
 import { reconcileGalleryViewerNavigation } from '@/lib/galleryViewerNavigation';
 import { isGalleryDoubleTap, type GalleryTapSample } from '@/lib/galleryTouchNavigation';
 import { extractGenerationParams, extractPrompts, getWorkflowJsonExport, type ImageMetadata } from '@/utils/metadata';
@@ -148,6 +149,10 @@ type TrashMetadataItem = {
   size?: number;
   deletedAt?: string;
   expiresAt?: string;
+  url?: string;
+  thumbnailUrl?: string;
+  createdMs?: number;
+  modifiedMs?: number;
 };
 
 type GallerySavedOutputFile = {
@@ -995,13 +1000,15 @@ function toTrashGalleryFile(entry: TrashMetadataItem, index: number): GalleryFil
     uid: id,
     id,
     path: trashPath,
+    url: String(entry?.url || '').trim() || undefined,
+    thumbnailUrl: String(entry?.thumbnailUrl || '').trim() || undefined,
     originalPath,
     trashOriginalPath: originalPath,
     name,
     type,
     size: Number(entry?.size || 0),
     createdMs: deletedMs,
-    modifiedMs: expiresMs || deletedMs,
+    modifiedMs: Number(entry?.modifiedMs || 0) || expiresMs || deletedMs,
     expiresMs: expiresMs || deletedMs,
     customOrder: index,
     metadataReady: false,
@@ -1173,10 +1180,12 @@ function thumbnailUrl(file: GalleryFile, options?: { defer?: boolean; retry?: nu
   const thumbSize = 'small';
   const thumbQuality = remoteClient ? '64' : '70';
   if (isTrashPath(path)) {
-    return appendUrlParams(`/api/fs/thumbnail?path=${encodeURIComponent(path)}&size=${thumbSize}&q=${thumbQuality}&fit=contain`, {
-      defer: options?.defer ? '1' : undefined,
-      rev: revisionParamFor(file),
-      retry: options?.retry && options.retry > 0 ? options.retry : undefined,
+    return buildTrashThumbnailUrl(file, {
+      size: thumbSize,
+      quality: Number(thumbQuality),
+      defer: options?.defer,
+      retry: options?.retry,
+      fallbackRevision: revisionParamFor(file),
     });
   }
   const baseUrl = normalizeGalleryFsUrl(

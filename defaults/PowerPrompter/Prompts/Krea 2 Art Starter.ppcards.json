@@ -15,7 +15,6 @@
   "styleSeedMode": "same",
   "generation": {
     "hiresFix": { "enabled": false, "upscaler": "Latent", "resizeMode": "scale", "scaleBy": 2, "targetWidth": 0, "targetHeight": 0, "steps": 0, "denoise": 0.35, "cfg": 0, "samplerName": "use_same", "scheduler": "use_same" },
-    "detailerPipeline": [],
     "outputUpscale": { "enabled": false, "modelName": "4x-UltraSharp.pth", "maxDimension": 3840 },
     "negativePrompt": "",
     "seed": 135790,

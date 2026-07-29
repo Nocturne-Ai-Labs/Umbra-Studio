@@ -11,6 +11,8 @@ describe('Global Settings mobile layout', () => {
     expect(source).toContain('data-umbra-settings-footer-actions');
     expect(source).toContain('aria-modal="true"');
     expect(source).toContain('<span>Section</span>');
+    expect(source).toContain("{ id: 'agent' as SettingsSection");
+    expect(source).toContain('<UmbraAgentSettings />');
   });
 
   test('removes the horizontal desktop navigation from phone mode', () => {

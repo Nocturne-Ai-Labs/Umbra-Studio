@@ -1440,6 +1440,38 @@ const JAPANESE_EXACT_ENTRIES: Array<readonly [string, string]> = [
   ["Lowers the entire app's animation/render frame rate after inactivity to reduce idle GPU usage.", '操作がない状態が続くとアプリ全体のアニメーションと描画フレームレートを下げ、待機中のGPU使用量を抑えます。'],
 ];
 
+const JAPANESE_DANBOORU_GENERATOR_ENTRIES: Array<readonly [string, string]> = [
+  ['Character Tag', 'キャラクタータグ'],
+  ['Series / Copyright Tag', 'シリーズ / 作品タグ'],
+  ['Characters', 'キャラクター数'],
+  ['Posts Per Character', 'キャラクターごとの投稿数'],
+  ['Max Attributes', '最大属性数'],
+  ['Min Character Posts', 'キャラクターの最小投稿数'],
+  ['Min Frequency', '最小出現率'],
+  ['Post Filter', '投稿フィルター'],
+  ['Append copyright to ambiguous character names', '曖昧なキャラクター名に作品名を追加'],
+  ['Min Tag Posts', 'タグの最小投稿数'],
+  ['Concurrency', '同時処理数'],
+  ['Output tags with spaces instead of underscores', 'アンダースコアの代わりにスペースでタグを出力'],
+  ['Output File Name', '出力ファイル名'],
+  ['Generator Paused', 'ジェネレーター一時停止中'],
+  ['Stopping Generator', 'ジェネレーターを停止中'],
+  ['Generator Stopped', 'ジェネレーターを停止しました'],
+  ['Generator Failed', 'ジェネレーターでエラーが発生しました'],
+  ['Stopping', '停止中'],
+  ['Paused. Completed rows are saved.', '一時停止中です。完了した行は保存されています。'],
+  ['Stopping after the current request...', '現在のリクエスト完了後に停止します...'],
+  ['Stopped. Completed rows remain in the CSV.', '停止しました。完了した行はCSVに残っています。'],
+  ['Finished successfully', '正常に完了しました'],
+  ['Runs Umbra\'s Danbooru CSV generator and writes directly into the PowerPrompter CSV folders.', 'UmbraのDanbooru CSVジェネレーターを実行し、Power PrompterのCSVフォルダーへ直接保存します。'],
+  ['Use a number, or type all to process every matching character.', '数値を入力するか、allで一致するすべてのキャラクターを処理します。'],
+  ['Capped at 200 to match Danbooru/API safety limits.', 'Danbooru APIの安全上限に合わせて200件までです。'],
+  ['Capped at 5 to reduce Danbooru rate-limit errors.', 'Danbooruのレート制限エラーを減らすため最大5です。'],
+  ['Configure the generator and run it.', 'ジェネレーターを設定して実行してください。'],
+  ['The interface follows your Umbra language. CSV tags stay in canonical Danbooru format for model compatibility.', '画面表示にはUmbraの言語設定が使われます。モデルとの互換性を保つため、CSVタグはDanbooruの標準形式で出力されます。'],
+];
+
 export const JAPANESE_UI_TEXT = new Map<string, string>(
-  JAPANESE_EXACT_ENTRIES.map(([english, japanese]) => [english.toLocaleLowerCase('en-US'), japanese]),
+  [...JAPANESE_EXACT_ENTRIES, ...JAPANESE_DANBOORU_GENERATOR_ENTRIES]
+    .map(([english, japanese]) => [english.toLocaleLowerCase('en-US'), japanese]),
 );

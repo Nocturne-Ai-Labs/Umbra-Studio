@@ -1,6 +1,7 @@
 import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
 import {
   createDefaultUmbraUiAgentInstructions,
+  mergeRequiredUmbraUiAgentInstructions,
   type UmbraUiAgentContext,
   type UmbraUiAgentDraft,
   type UmbraUiAgentImageContext,
@@ -24,6 +25,7 @@ export interface UmbraUiAgentGenerationSettings {
   provider: UmbraUiAgentProvider;
   baseUrl: string;
   model: string;
+  hermesProvider: string;
   apiKey: string;
   temperature: number;
   maxTokens: number;
@@ -106,7 +108,13 @@ export async function loadUmbraUiAgentInstructions(): Promise<UmbraUiAgentInstru
   const defaults = createDefaultUmbraUiAgentInstructions();
   const stored = await readUserConfig<unknown>('umbra-ui-agent-instructions', defaults);
   const normalized = normalizeInstructions(stored);
-  if (normalized.length > 0) return normalized;
+  if (normalized.length > 0) {
+    const merged = mergeRequiredUmbraUiAgentInstructions(normalized);
+    if (merged.length !== normalized.length) {
+      await writeUserConfig('umbra-ui-agent-instructions', merged);
+    }
+    return merged;
+  }
   await writeUserConfig('umbra-ui-agent-instructions', defaults);
   return defaults;
 }
@@ -155,6 +163,10 @@ export async function testUmbraUiAgentSettings(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ generation }),
   });
+}
+
+export async function resetUmbraUiHermesSession(): Promise<void> {
+  await readAgentApi('/api/umbra-ui/agent/hermes-session', { method: 'DELETE' });
 }
 
 export async function regenerateUmbraUiAgentToken(): Promise<{ token: string; generation: UmbraUiAgentGenerationSettings; updatedAt: number }> {

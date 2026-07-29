@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { enhancePowerPrompterQueuePrompts } from './powerPrompterAgent';
+import {
+  applyAgentDraftToPowerPrompterDocument,
+  enhancePowerPrompterQueuePrompts,
+} from './powerPrompterAgent';
+import { createDefaultPowerPrompterCardDocument } from './powerPrompter';
 
 describe('enhancePowerPrompterQueuePrompts', () => {
   test('enhances prompts sequentially while preserving structured variant tokens', async () => {
@@ -41,5 +45,54 @@ describe('enhancePowerPrompterQueuePrompts', () => {
       },
     )).rejects.toThrow('agent unavailable');
     expect(calls).toBe(2);
+  });
+});
+
+describe('Power Prompter shared agent drafts', () => {
+  test('turns structured image segments into editable active-set cards', () => {
+    const source = createDefaultPowerPrompterCardDocument('Example.ppcards.json');
+    const result = applyAgentDraftToPowerPrompterDocument(source, {
+      id: 'draft-1',
+      mediaType: 'image',
+      title: 'Rain Portrait',
+      instructionId: 'image-general-director',
+      instructionName: 'General Image Director',
+      segments: ['woman in a red jacket', 'rainy cyberpunk street', 'cinematic rim lighting'],
+      prompt: 'woman in a red jacket, rainy cyberpunk street, cinematic rim lighting',
+      negativePrompt: 'blurry, malformed hands',
+      notes: '',
+      warnings: [],
+      createdAt: Date.now(),
+    }, 4);
+
+    const added = result.document.cards.slice(source.cards.length);
+    expect(result.addedCardCount).toBe(3);
+    expect(added.map((card) => card.label)).toEqual(['Agent Segment 1', 'Agent Segment 2', 'Agent Segment 3']);
+    expect(added.map((card) => card.text)).toEqual([
+      'woman in a red jacket',
+      'rainy cyberpunk street',
+      'cinematic rim lighting',
+    ]);
+    expect(added.every((card) => card.queueSetIds?.[0] === 4)).toBe(true);
+    expect(result.document.generation.negativePrompt).toBe('blurry, malformed hands');
+    expect(source.cards).toHaveLength(5);
+  });
+
+  test('rejects video drafts without mutating the source document', () => {
+    const source = createDefaultPowerPrompterCardDocument('Example.ppcards.json');
+    expect(() => applyAgentDraftToPowerPrompterDocument(source, {
+      id: 'draft-video',
+      mediaType: 'video',
+      title: 'Motion',
+      instructionId: '',
+      instructionName: '',
+      segments: [],
+      prompt: 'camera moves forward',
+      negativePrompt: '',
+      notes: '',
+      warnings: [],
+      createdAt: Date.now(),
+    }, 1)).toThrow('image prompt drafts only');
+    expect(source.cards).toHaveLength(5);
   });
 });

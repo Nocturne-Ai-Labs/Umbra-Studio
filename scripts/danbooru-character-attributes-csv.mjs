@@ -5,6 +5,11 @@ import path from 'node:path';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { fileURLToPath } from 'node:url';
+import {
+  getLocalizedTag,
+  loadDanbooruLocalizationMap,
+  normalizeOutputLanguage,
+} from './lib/danbooru-localization.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -13,11 +18,15 @@ const DANBOORU_POSTS_URL = 'https://danbooru.donmai.us/posts.json';
 const DEFAULT_CHARACTER_TAGS_CSV = path.join(repoRoot, 'User', 'DanbooruTags', 'danbooru-character-tags.csv');
 const DEFAULT_OUT_FILE = path.join(repoRoot, 'User', 'PowerPrompter', 'CSV', 'Characters', 'danbooru-character-attributes.csv');
 const DEFAULT_TAG_LIST_OUT_FILE = path.join(repoRoot, 'User', 'PowerPrompter', 'CSV', 'tags', 'danbooru-tags.csv');
+const DEFAULT_LOCALIZATION_CACHE_FILE = path.join(repoRoot, 'User', 'Cache', 'Danbooru', 'danbooru-tags-multilingual.csv');
 const DANBOORU_MAX_TAG_LIMIT = 1000;
 const DEFAULT_GENERAL_TAG_MIN_POSTS = 150;
 const DEFAULT_ARTIST_TAG_MIN_POSTS = 100;
 const MAX_POST_LIMIT = 200;
 const MAX_FETCH_ATTEMPTS = 10;
+const GENERATOR_STOP_EXIT_CODE = 75;
+let runtimeControlFile = '';
+let pauseWasAnnounced = false;
 const TAG_CATEGORIES = {
   general: 0,
   artist: 1,
@@ -220,6 +229,7 @@ function parseArgs(argv) {
   const options = {
     characterTagsCsv: DEFAULT_CHARACTER_TAGS_CSV,
     characterSource: 'danbooru',
+    controlFile: '',
     appendCopyright: true,
     concurrency: 4,
     delayMs: 0,
@@ -229,6 +239,7 @@ function parseArgs(argv) {
     minFrequency: 0.12,
     minTagPosts: null,
     outFile: DEFAULT_OUT_FILE,
+    outputLanguage: 'canonical',
     pageConcurrency: 2,
     postFilter: 'solo',
     postSample: 100,
@@ -262,6 +273,11 @@ function parseArgs(argv) {
       options.interactive = true;
     } else if (arg === '--remove-underscores') {
       options.removeUnderscores = true;
+    } else if (arg === '--output-language' && next) {
+      options.outputLanguage = normalizeOutputLanguage(next);
+      i += 1;
+    } else if (arg.startsWith('--output-language=')) {
+      options.outputLanguage = normalizeOutputLanguage(arg.slice('--output-language='.length));
     } else if (arg === '--no-append-copyright') {
       options.appendCopyright = false;
     } else if (arg === '--tag-category' && next) {
@@ -286,6 +302,11 @@ function parseArgs(argv) {
       i += 1;
     } else if (arg.startsWith('--out-file=')) {
       options.outFile = path.resolve(arg.slice('--out-file='.length));
+    } else if (arg === '--control-file' && next) {
+      options.controlFile = path.resolve(next);
+      i += 1;
+    } else if (arg.startsWith('--control-file=')) {
+      options.controlFile = path.resolve(arg.slice('--control-file='.length));
     } else if (arg === '--limit' && next) {
       options.limit = parseLimit(next);
       i += 1;
@@ -399,6 +420,17 @@ function parseCharacterSource(value) {
   throw new Error('--character-source must be "danbooru", "csv", or "series".');
 }
 
+async function promptForOutputLanguage(rl) {
+  console.log('\nOptional localized search aliases:');
+  console.log('  1. Off - canonical tags only');
+  console.log('  2. Japanese');
+  console.log('  3. Chinese');
+  const choice = (await ask(rl, 'Choice [1]: ', '1')).trim();
+  if (choice === '2') return 'ja';
+  if (choice === '3') return 'zh-CN';
+  return 'canonical';
+}
+
 function parsePositiveInt(value, name) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed < 1) {
@@ -449,6 +481,7 @@ Options:
   --tags                       Shortcut for --mode tags
   --tag-category <0|1|5>       Tag CSV Danbooru category. Use 0 general, 1 artist, or 5 meta
   --remove-underscores         Output tags with spaces instead of underscores
+  --output-language <value>    Optional search aliases: canonical (default), ja, or zh-CN
   --no-append-copyright        Do not append copyright to ambiguous character names
   --character-source <value>   Character list source: danbooru or csv. Default: danbooru
   --character-tags-csv <path>  Input character tag CSV when using --character-source csv
@@ -473,6 +506,7 @@ Options:
 Output format:
   character mode: character,attributes
   tags mode: tag,category,color
+  ja/zh-CN add localized_name and localized_aliases columns while preserving canonical prompt columns
 
 Examples:
   bun scripts/danbooru-character-attributes-csv.mjs --interactive
@@ -506,6 +540,7 @@ async function promptForOptions(options) {
       options.limit = parseLimit(await ask(rl, `How many tags? Type all for everything. [${formatLimit(options.limit)}]: `, formatLimit(options.limit)));
       options.minTagPosts = parseNonNegativeInt(await ask(rl, `Minimum tag post count [${options.minTagPosts}]: `, String(options.minTagPosts)), 'min-tag-posts');
       options.removeUnderscores = parseYesNo(await ask(rl, 'Output tags with spaces instead of underscores? [y/N]: ', 'n'));
+      options.outputLanguage = await promptForOutputLanguage(rl);
       const outFile = await ask(rl, `Output CSV path [${path.relative(repoRoot, options.outFile)}]: `, options.outFile);
       options.outFile = path.resolve(outFile);
       console.log('\nReady to scan.');
@@ -514,6 +549,7 @@ async function promptForOptions(options) {
       console.log(`Tags: ${formatLimit(options.limit)}`);
       console.log(`Minimum tag post count: ${options.minTagPosts}`);
       console.log(`Remove underscores: ${options.removeUnderscores ? 'yes' : 'no'}`);
+      console.log(`Localized aliases: ${options.outputLanguage}`);
       console.log(`Output: ${path.relative(repoRoot, options.outFile)}\n`);
       const confirm = (await ask(rl, 'Run now? [Y/n]: ', 'y')).trim().toLowerCase();
       if (confirm && confirm !== 'y' && confirm !== 'yes') {
@@ -583,6 +619,7 @@ async function promptForOptions(options) {
       formatPostFilterForPrompt(options.postFilter)
     );
     options.removeUnderscores = parseYesNo(await ask(rl, '\nOutput tags with spaces instead of underscores? [y/N]: ', 'n'));
+    options.outputLanguage = await promptForOutputLanguage(rl);
     options.appendCopyright = parseYesNo(await ask(rl, 'Append copyright to character names when missing? [Y/n]: ', 'y'));
 
     const outFile = await ask(rl, `Output CSV path [${path.relative(repoRoot, options.outFile)}]: `, options.outFile);
@@ -600,6 +637,7 @@ async function promptForOptions(options) {
     if (options.characterSource === 'series') console.log(`Parallel series pages: ${options.pageConcurrency}`);
     console.log(`Filters: ${normalizePostFilter(options.postFilter) || '(none)'}`);
     console.log(`Remove underscores: ${options.removeUnderscores ? 'yes' : 'no'}`);
+    console.log(`Localized aliases: ${options.outputLanguage}`);
     console.log(`Append copyright: ${options.appendCopyright ? 'yes' : 'no'}`);
     console.log(`Output: ${path.relative(repoRoot, options.outFile)}\n`);
 
@@ -655,6 +693,7 @@ async function fetchCharacterTagsFromDanbooru(limit, options) {
 
   console.log(`Loading ${formatLimit(limit)} character tags from Danbooru...`);
   while (tags.length < limit) {
+    await waitForGeneratorControl();
     const remaining = Number.isFinite(limit) ? limit - tags.length : DANBOORU_MAX_TAG_LIMIT;
     const pageLimit = Math.min(DANBOORU_MAX_TAG_LIMIT, remaining);
     const url = new URL(DANBOORU_TAGS_URL);
@@ -699,6 +738,7 @@ async function fetchTagRowsFromDanbooru(options) {
     console.log(`  minimum post count: ${minPostCount.toLocaleString()}`);
   }
   while (rows.length < options.limit) {
+    await waitForGeneratorControl();
     const remaining = Number.isFinite(options.limit) ? options.limit - rows.length : DANBOORU_MAX_TAG_LIMIT;
     const pageLimit = Math.min(DANBOORU_MAX_TAG_LIMIT, remaining);
     const url = new URL(DANBOORU_TAGS_URL);
@@ -729,6 +769,7 @@ async function fetchTagRowsFromDanbooru(options) {
     }
 
     console.log(`  tag page ${page}: ${rows.length.toLocaleString()} found`);
+    if (typeof options.writeRows === 'function') await options.writeRows(rows);
     if (tags.length < pageLimit) break;
     page += 1;
   }
@@ -773,6 +814,7 @@ async function fetchCharacterTagsFromSeries(seriesTag, options) {
   console.log(`  parallel pages: ${options.pageConcurrency}`);
 
   while (!stop && seenPosts < options.seriesPostSample) {
+    await waitForGeneratorControl();
     const pageJobs = [];
     for (let i = 0; i < options.pageConcurrency; i += 1) {
       if (Number.isFinite(options.seriesPostSample) && seenPosts + (i * MAX_POST_LIMIT) >= options.seriesPostSample) break;
@@ -857,6 +899,7 @@ async function fetchPostsForCharacter(characterTag, options) {
 }
 
 async function danbooruFetch(url, label, attempt = 1) {
+  await waitForGeneratorControl();
   const response = await fetch(url, {
     headers: {
       'Accept': 'application/json',
@@ -873,7 +916,7 @@ async function danbooruFetch(url, label, attempt = 1) {
         ? Math.min(60_000, 5_000 * attempt)
         : Math.min(20_000, 1_000 * attempt);
     console.warn(`Danbooru returned ${response.status} for ${label}; retrying in ${Math.round(waitMs / 1000)}s (${attempt + 1}/${MAX_FETCH_ATTEMPTS})...`);
-    await sleep(waitMs);
+    await controlledSleep(waitMs);
     return danbooruFetch(url, label, attempt + 1);
   }
 
@@ -963,28 +1006,54 @@ function isOutfitTag(tag) {
   });
 }
 
-function toCsv(rows) {
-  const headers = ['character', 'attributes'];
+function toCsv(rows, fallbackOptions = {}) {
+  const localized = (rows[0]?.options || fallbackOptions).outputLanguage !== 'canonical';
+  const headers = localized
+    ? ['character', 'attributes', 'localized_name', 'localized_aliases']
+    : ['character', 'attributes'];
   const lines = [
     headers.join(','),
-    ...rows.map((row) => [
-      csvCell(displayTag(row.character, row.options)),
-      csvCell(row.attributes.map(([tag]) => displayTag(tag, row.options)).join(', ')),
-    ].join(',')),
+    ...rows.map((row) => {
+      const canonicalCells = [
+        csvCell(displayTag(row.character, row.options)),
+        csvCell(row.attributes.map(([tag]) => displayTag(tag, row.options)).join(', ')),
+      ];
+      if (!localized) return canonicalCells.join(',');
+
+      const characterLocalization = getLocalizedTag(row.options.localizationMap, row.localizationTag || row.character);
+      const attributeAliases = row.attributes.flatMap(([tag]) => getLocalizedTag(row.options.localizationMap, tag).aliases);
+      return [
+        ...canonicalCells,
+        csvCell(characterLocalization.name),
+        csvCell(Array.from(new Set([...characterLocalization.aliases, ...attributeAliases])).join(', ')),
+      ].join(',');
+    }),
   ];
 
   return `${lines.join('\n')}\n`;
 }
 
-function tagRowsToCsv(rows) {
-  const headers = ['tag', 'category', 'color'];
+function tagRowsToCsv(rows, fallbackOptions = {}) {
+  const localized = (rows[0]?.options || fallbackOptions).outputLanguage !== 'canonical';
+  const headers = localized
+    ? ['tag', 'category', 'color', 'localized_name', 'localized_aliases']
+    : ['tag', 'category', 'color'];
   const lines = [
     headers.join(','),
-    ...rows.map((row) => [
-      csvCell(displayTag(row.tag, row.options)),
-      csvCell(row.category),
-      csvCell(row.color),
-    ].join(',')),
+    ...rows.map((row) => {
+      const canonicalCells = [
+        csvCell(displayTag(row.tag, row.options)),
+        csvCell(row.category),
+        csvCell(row.color),
+      ];
+      if (!localized) return canonicalCells.join(',');
+      const localization = getLocalizedTag(row.options.localizationMap, row.tag);
+      return [
+        ...canonicalCells,
+        csvCell(localization.name),
+        csvCell(localization.aliases.join(', ')),
+      ].join(',');
+    }),
   ];
 
   return `${lines.join('\n')}\n`;
@@ -1012,16 +1081,64 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function mapWithConcurrency(items, concurrency, worker) {
+class GeneratorStoppedError extends Error {
+  constructor() {
+    super('Generator stopped by user.');
+    this.name = 'GeneratorStoppedError';
+  }
+}
+
+async function readGeneratorControl() {
+  if (!runtimeControlFile) return { paused: false, stopRequested: false };
+  try {
+    const parsed = JSON.parse(await readFile(runtimeControlFile, 'utf8'));
+    return {
+      paused: parsed?.paused === true,
+      stopRequested: parsed?.stopRequested === true,
+    };
+  } catch {
+    return { paused: false, stopRequested: false };
+  }
+}
+
+async function waitForGeneratorControl() {
+  let control = await readGeneratorControl();
+  if (control.stopRequested) throw new GeneratorStoppedError();
+  while (control.paused) {
+    if (!pauseWasAnnounced) {
+      console.log('Generator paused. Completed rows are safely checkpointed.');
+      pauseWasAnnounced = true;
+    }
+    await sleep(250);
+    control = await readGeneratorControl();
+    if (control.stopRequested) throw new GeneratorStoppedError();
+  }
+  if (pauseWasAnnounced) {
+    console.log('Generator resumed.');
+    pauseWasAnnounced = false;
+  }
+}
+
+async function controlledSleep(ms) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    await waitForGeneratorControl();
+    await sleep(Math.min(250, Math.max(0, deadline - Date.now())));
+  }
+}
+
+async function mapWithConcurrency(items, concurrency, worker, onResult) {
   const results = new Array(items.length);
   let nextIndex = 0;
   const workerCount = Math.max(1, Math.min(concurrency, items.length));
 
   async function runWorker() {
     while (nextIndex < items.length) {
+      await waitForGeneratorControl();
       const index = nextIndex;
       nextIndex += 1;
       results[index] = await worker(items[index], index);
+      if (typeof onResult === 'function') await onResult(results.filter(Boolean));
     }
   }
 
@@ -1031,6 +1148,7 @@ async function mapWithConcurrency(items, concurrency, worker) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  runtimeControlFile = options.controlFile;
   if (options.help) {
     printHelp();
     return;
@@ -1042,11 +1160,18 @@ async function main() {
     console.log('Cancelled.');
     return;
   }
+  options.localizationMap = await loadDanbooruLocalizationMap({
+    cacheFile: DEFAULT_LOCALIZATION_CACHE_FILE,
+    outputLanguage: options.outputLanguage,
+    waitForControl: waitForGeneratorControl,
+  });
 
   if (options.mode === 'tags') {
-    const rows = await fetchTagRowsFromDanbooru(options);
     await mkdir(path.dirname(options.outFile), { recursive: true });
-    await writeFile(options.outFile, tagRowsToCsv(rows), 'utf8');
+    await writeFile(options.outFile, tagRowsToCsv([], options), 'utf8');
+    options.writeRows = (rows) => writeFile(options.outFile, tagRowsToCsv(rows, options), 'utf8');
+    const rows = await fetchTagRowsFromDanbooru(options);
+    await writeFile(options.outFile, tagRowsToCsv(rows, options), 'utf8');
     console.log(`Wrote ${rows.length.toLocaleString()} tag rows to ${path.relative(repoRoot, options.outFile)}`);
     return;
   }
@@ -1058,7 +1183,11 @@ async function main() {
       : options.characterSource === 'series'
         ? await fetchCharacterTagsFromSeries(options.seriesTag, options)
         : await fetchCharacterTagsFromDanbooru(options.limit, options);
+  await mkdir(path.dirname(options.outFile), { recursive: true });
+  await writeFile(options.outFile, toCsv([], options), 'utf8');
+  let checkpointWrite = Promise.resolve();
   const rows = await mapWithConcurrency(characters, options.concurrency, async (character, i) => {
+    await waitForGeneratorControl();
     const posts = await fetchPostsForCharacter(character, options);
     const attributes = getCommonAttributes(character, posts, options);
     const copyright = options.characterSource === 'series' && options.seriesTag
@@ -1068,17 +1197,25 @@ async function main() {
     console.log(`${i + 1}/${characters.length} ${character}: ${attributes.map(([tag]) => tag).join(', ') || '(no attributes)'}`);
 
     if (options.delayMs > 0) {
-      await sleep(options.delayMs);
+      await controlledSleep(options.delayMs);
     }
-    return { character: outputCharacter, attributes, options };
+    return { character: outputCharacter, localizationTag: character, attributes, options };
+  }, (completedRows) => {
+    const csv = toCsv(completedRows, options);
+    checkpointWrite = checkpointWrite.then(() => writeFile(options.outFile, csv, 'utf8'));
+    return checkpointWrite;
   });
 
-  await mkdir(path.dirname(options.outFile), { recursive: true });
-  await writeFile(options.outFile, toCsv(rows), 'utf8');
+  await writeFile(options.outFile, toCsv(rows, options), 'utf8');
   console.log(`Wrote ${rows.length.toLocaleString()} character rows to ${path.relative(repoRoot, options.outFile)}`);
 }
 
 main().catch((error) => {
+  if (error instanceof GeneratorStoppedError) {
+    console.log('Generator stopped. The completed rows remain in the output CSV.');
+    process.exitCode = GENERATOR_STOP_EXIT_CODE;
+    return;
+  }
   console.error(error.message);
   process.exitCode = 1;
 });

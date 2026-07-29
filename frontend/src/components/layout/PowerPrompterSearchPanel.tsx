@@ -6,6 +6,8 @@ interface SearchResult {
   tag: string;
   category: number;
   extra?: string;
+  displayTag?: string;
+  searchAliases?: string;
   source?: string;
   type: 'tag' | 'character';
 }
@@ -250,8 +252,10 @@ export const PowerPrompterSearchPanel = React.memo(({ onInsert, enabledCSVs, onT
 
   const renderItem = (item: SearchResult, idx: number, showFavoriteStar: boolean = true) => {
     const favorited = isFavorite(item);
-    const displayTag = cleanTag(item.tag);
+    const canonicalTag = cleanTag(item.tag);
+    const displayTag = item.displayTag?.trim() || canonicalTag;
     const displayExtra = item.extra ? cleanTag(item.extra) : null;
+    const displayAliases = item.searchAliases?.trim() || null;
 
     return (
       <div
@@ -280,6 +284,16 @@ export const PowerPrompterSearchPanel = React.memo(({ onInsert, enabledCSVs, onT
             {displayExtra}
           </div>
         )}
+        {displayTag !== canonicalTag ? (
+          <div className="truncate border-l border-cyan-300/15 pl-2 text-[10px] text-cyan-100/55">
+            {canonicalTag}
+          </div>
+        ) : null}
+        {displayAliases ? (
+          <div className="truncate pl-2 text-[9px] text-zinc-600" title={displayAliases}>
+            {displayAliases}
+          </div>
+        ) : null}
       </div>
     );
   };

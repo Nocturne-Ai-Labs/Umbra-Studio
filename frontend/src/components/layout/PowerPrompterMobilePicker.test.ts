@@ -26,4 +26,19 @@ describe('Power Prompter mobile model pickers', () => {
       + '  grid-column: 1 / -1;',
     );
   });
+
+  test('exposes card creation inside the mobile card picker', () => {
+    const source = readFileSync(
+      new URL('./PowerPrompterCardChainEditor.tsx', import.meta.url),
+      'utf8',
+    );
+    const styles = readFileSync(new URL('../../app/globals.css', import.meta.url), 'utf8');
+
+    expect(source).toContain('data-umbra-mobile-card-picker-add=""');
+    expect(source).toContain('<span>New Card</span>');
+    expect(source).toContain('addSlot();');
+    expect(styles).toContain('[data-umbra-mobile-card-picker-add]');
+    expect(styles).toContain('min-height: 3rem;');
+    expect(styles).toContain('touch-action: manipulation;');
+  });
 });

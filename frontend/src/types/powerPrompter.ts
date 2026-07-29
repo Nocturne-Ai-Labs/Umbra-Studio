@@ -356,6 +356,8 @@ export interface PowerPrompterSearchResult {
   count?: number;
   aliases?: string;
   extra?: string;
+  displayTag?: string;
+  searchAliases?: string;
   sourceId: string;
   sourceName: string;
   type: PowerPrompterSourceType;

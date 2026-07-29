@@ -110,6 +110,18 @@ describe('Power Prompter generation pipeline controls', () => {
       'Eyes',
       'Hands',
     ]);
+    expect(generation.detailerPipeline?.map((stage) => stage.enabled)).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect(generation.detailerPipeline?.map((stage) => stage.wildcard)).toEqual([
+      '[CONCAT] coherent anatomy, natural body proportions, coherent clothing folds',
+      '',
+      '[CONCAT] detailed symmetrical eyes, sharp irises, natural pupils',
+      '[CONCAT] detailed hands, anatomically correct hands, five fingers, natural finger spacing',
+    ]);
     expect(generation.outputUpscale?.enabled).toBe(false);
     expect(generation.outputUpscale?.modelName).toBe('RealESRGAN_x4plus.safetensors');
   });

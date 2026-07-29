@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  buildBooruMediaRequestHeaders,
   parseDanbooruPosts,
   parseE621Posts,
   parseGelbooruPosts,
@@ -7,6 +8,27 @@ import {
 } from './booruApi';
 
 describe('Data Forge booru response adapters', () => {
+  test('adds Gelbooru hotlink headers only for Gelbooru media', () => {
+    const gelbooru = buildBooruMediaRequestHeaders(
+      new URL('https://img4.gelbooru.com/thumbnails/example.jpg'),
+      'image/*',
+      'bytes=0-4095',
+    );
+    const rule34 = buildBooruMediaRequestHeaders(
+      new URL('https://wimg.rule34.xxx/preview.jpg'),
+      'image/*',
+    );
+
+    expect(gelbooru).toMatchObject({
+      Accept: 'image/*',
+      Referer: 'https://gelbooru.com/',
+      Range: 'bytes=0-4095',
+    });
+    expect(gelbooru['User-Agent']).toContain('Mozilla/5.0');
+    expect(rule34.Referer).toBeUndefined();
+    expect(rule34.Range).toBeUndefined();
+  });
+
   test('normalizes Danbooru posts', () => {
     const posts = parseDanbooruPosts([{
       id: 1,

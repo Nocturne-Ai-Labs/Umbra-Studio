@@ -25,6 +25,7 @@ import { PowerPrompterQueueTrackerCard } from '@/components/power-prompter/queue
 import { PowerPrompterQueueHistoryModal } from '@/components/power-prompter/queue/PowerPrompterQueueHistoryModal';
 import { PowerPrompterQueueConfirmModal, PowerPrompterSaveQueueModal } from '@/components/power-prompter/queue/PowerPrompterQueueDialogs';
 import { PowerPrompterSettingsModal } from '@/components/modals/PowerPrompterSettingsModal';
+import { UmbraAgentPromptPanel } from '@/components/umbra-ui/UmbraAgentPromptPanel';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
 import type {
@@ -249,8 +250,12 @@ import {
 } from '@/components/power-prompter/powerPrompterDiagnostics';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import { stageUmbraUiPowerPrompterHandoff } from '@/lib/umbraUiPowerPrompterHandoff';
-import { generateUmbraUiAgentPrompt } from '@/lib/umbraUiAgent';
 import {
+  generateUmbraUiAgentPrompt,
+  type UmbraUiAgentDraft,
+} from '@/lib/umbraUiAgent';
+import {
+  applyAgentDraftToPowerPrompterDocument,
   enhancePowerPrompterQueuePrompts,
   type PowerPrompterAgentProgress,
 } from '@/lib/powerPrompterAgent';
@@ -743,6 +748,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
   const powerPrompterUiSuppressPersistUntilRef = useRef(0);
   const [, setPowerPrompterUiHydrationTick] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [agentPromptPanelOpen, setAgentPromptPanelOpen] = useState(false);
   const [settings, setSettings] = useState<PowerPrompterSettings>(DEFAULT_POWER_PROMPTER_SETTINGS);
   const [queueDiversityDraft, setQueueDiversityDraft] = useState<number>(() =>
     normalizeQueueDiversity(DEFAULT_POWER_PROMPTER_SETTINGS.queueDiversity, DEFAULT_POWER_PROMPTER_SETTINGS.queueTraversalMode)
@@ -7751,6 +7757,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     }
   };
 
+  const handleApplyAgentDraftToPowerPrompter = useCallback(async (draft: UmbraUiAgentDraft) => {
+    const targetSetId = clampQueueSetId(queueSetTarget);
+    const applied = applyAgentDraftToPowerPrompterDocument(cardDocumentRef.current, draft, targetSetId);
+    handleCardDocumentChange(applied.document);
+  }, [handleCardDocumentChange, queueSetTarget]);
+
   const applyUmbraUiGenerationControlsHandoff = useCallback((value: unknown): boolean => {
     const handoff = normalizeUmbraUiGenerationControlsHandoff(value);
     if (!handoff) return false;
@@ -11775,6 +11787,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           queueShuffleEnabled={queueShuffleEnabled}
           completePromptAgentEnabled={settings.agentEnhanceCompletePrompts === true}
           handleToggleCompletePromptAgent={handleToggleCompletePromptAgent}
+          openAgentPromptPanel={() => setAgentPromptPanelOpen(true)}
           queueAgentEnhancementProgress={queueAgentEnhancementProgress}
           hasLiveQueue={hasLiveQueue}
           estimatedBatchSize={estimatedBatchSize}
@@ -12004,6 +12017,14 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         onClose={() => setSettingsOpen(false)}
         settings={settings}
         onSave={saveSettings}
+      />
+      <UmbraAgentPromptPanel
+        open={agentPromptPanelOpen}
+        onClose={() => setAgentPromptPanelOpen(false)}
+        onApplyDraft={handleApplyAgentDraftToPowerPrompter}
+        title="Power Prompter Agent"
+        subtitle="Shared prompt drafts and reusable instructions"
+        applySuccessMessage="Agent draft added to Power Prompter."
       />
 
     </div>

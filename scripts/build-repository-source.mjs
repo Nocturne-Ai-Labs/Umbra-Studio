@@ -190,6 +190,9 @@ function verifyOutput() {
       throw new Error(`Clean repository source contains forbidden runtime path: ${forbidden}`);
     }
   }
+  if (fs.existsSync(path.join(outputRoot, 'User', 'Config', 'api-keys.json'))) {
+    throw new Error('Clean repository source contains forbidden API credentials: User/Config/api-keys.json');
+  }
 
   const allowedRuntimeFiles = new Set([
     'User/README.md',

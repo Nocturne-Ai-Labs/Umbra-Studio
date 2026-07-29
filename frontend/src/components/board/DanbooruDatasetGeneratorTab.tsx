@@ -1,14 +1,30 @@
 import { useEffect, useState } from 'react';
-import { Database, FileText, FolderOpen, Loader2, Play } from 'lucide-react';
+import { Database, FileText, FolderOpen, Pause, Play, Square } from 'lucide-react';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 
 type GeneratorMode = 'character-attributes' | 'tags';
 type CharacterSource = 'danbooru' | 'single' | 'series';
+type OutputLanguage = 'canonical' | 'ja' | 'zh-CN';
+
+const getDefaultOutputFileName = (mode: GeneratorMode, outputLanguage: OutputLanguage) => {
+  const base = mode === 'tags' ? 'danbooru-tags' : 'danbooru-character-attributes';
+  const suffix = outputLanguage === 'canonical' ? '' : outputLanguage === 'ja' ? '-ja' : '-zh-cn';
+  return `${base}${suffix}.csv`;
+};
+
+const DEFAULT_OUTPUT_FILE_NAMES = new Set(
+  (['character-attributes', 'tags'] as GeneratorMode[]).flatMap((mode) => (
+    (['canonical', 'ja', 'zh-CN'] as OutputLanguage[]).map((language) => getDefaultOutputFileName(mode, language))
+  )),
+);
 
 type GeneratorResult = {
   ok: boolean;
   id: string;
   running: boolean;
+  paused: boolean;
+  stopRequested: boolean;
+  status: 'running' | 'paused' | 'stopping' | 'stopped' | 'completed' | 'failed';
   exitCode: number | null;
   error?: string;
   outputPath: string;
@@ -35,8 +51,10 @@ export function DanbooruDatasetGeneratorTab() {
   const [removeUnderscores, setRemoveUnderscores] = useState(false);
   const [appendCopyright, setAppendCopyright] = useState(true);
   const [animaArtistTokens, setAnimaArtistTokens] = useState(false);
+  const [outputLanguage, setOutputLanguage] = useState<OutputLanguage>('canonical');
   const [outputFileName, setOutputFileName] = useState('danbooru-character-attributes.csv');
   const [running, setRunning] = useState(false);
+  const [controlling, setControlling] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<GeneratorResult | null>(null);
 
@@ -66,6 +84,7 @@ export function DanbooruDatasetGeneratorTab() {
           removeUnderscores,
           appendCopyright,
           animaArtistTokens,
+          outputLanguage,
           outputFileName,
         }),
       });
@@ -75,6 +94,27 @@ export function DanbooruDatasetGeneratorTab() {
     } catch (err: any) {
       setError(err?.message || 'Generator failed');
       setRunning(false);
+    }
+  };
+
+  const controlGenerator = async (action: 'pause' | 'resume' | 'stop') => {
+    if (!result?.id || controlling) return;
+    setControlling(true);
+    setError('');
+    try {
+      const response = await fetch('/api/booru/dataset-generator/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: result.id, action }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || `Failed to ${action} generator`);
+      setResult(data);
+      setRunning(data.running === true);
+    } catch (err: any) {
+      setError(err?.message || `Failed to ${action} generator`);
+    } finally {
+      setControlling(false);
     }
   };
 
@@ -117,7 +157,14 @@ export function DanbooruDatasetGeneratorTab() {
 
   const setModeAndDefaultOutput = (nextMode: GeneratorMode) => {
     setMode(nextMode);
-    setOutputFileName(nextMode === 'tags' ? 'danbooru-tags.csv' : 'danbooru-character-attributes.csv');
+    setOutputFileName(getDefaultOutputFileName(nextMode, outputLanguage));
+  };
+
+  const setOutputLanguageAndDefault = (nextLanguage: OutputLanguage) => {
+    setOutputLanguage(nextLanguage);
+    if (DEFAULT_OUTPUT_FILE_NAMES.has(outputFileName)) {
+      setOutputFileName(getDefaultOutputFileName(mode, nextLanguage));
+    }
   };
 
   const previewRows = parseCsvPreview(result?.preview || '');
@@ -133,6 +180,9 @@ export function DanbooruDatasetGeneratorTab() {
         </div>
         <p className="mt-2 text-xs leading-5 text-zinc-500">
           Runs Umbra's Danbooru CSV generator and writes directly into the PowerPrompter CSV folders.
+        </p>
+        <p className="mt-1 text-[10px] leading-4 text-zinc-600">
+          The interface follows your Umbra language. CSV tags stay in canonical Danbooru format for model compatibility.
         </p>
 
         <div className="mt-5 space-y-4">
@@ -183,16 +233,52 @@ export function DanbooruDatasetGeneratorTab() {
 
           <NumberInput label="Concurrency" value={concurrency} onChange={setConcurrency} min={1} max={5} help="Capped at 5 to reduce Danbooru rate-limit errors." />
           <Checkbox label="Output tags with spaces instead of underscores" checked={removeUnderscores} onChange={setRemoveUnderscores} />
+          <div>
+            <label className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-zinc-500">Localized Search Aliases</label>
+            <select
+              value={outputLanguage}
+              onChange={(event) => setOutputLanguageAndDefault(event.target.value as OutputLanguage)}
+              className="settings-input !py-2 text-sm"
+            >
+              <option value="canonical">Off - canonical tags</option>
+              <option value="ja">Japanese aliases (best effort)</option>
+              <option value="zh-CN">Chinese aliases (best effort)</option>
+            </select>
+            <p className="mt-1 text-[10px] leading-4 text-zinc-600">
+              Adds localized display and search columns. Copied prompt tokens remain canonical Danbooru tags.
+            </p>
+          </div>
           <TextInput label="Output File Name" value={outputFileName} onChange={setOutputFileName} placeholder="danbooru-character-attributes.csv" />
 
-          <button
-            onClick={() => void runGenerator()}
-            disabled={running}
-            className="flex w-full items-center justify-center gap-2 rounded-md border border-emerald-400/35 bg-emerald-500/15 px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-40"
-          >
-            {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            Run Generator
-          </button>
+          {running && result ? (
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => void controlGenerator(result.paused ? 'resume' : 'pause')}
+                disabled={controlling || result.stopRequested}
+                className="flex items-center justify-center gap-2 rounded-md border border-amber-400/35 bg-amber-500/10 px-3 py-3 text-xs font-black uppercase tracking-[0.12em] text-amber-100 hover:bg-amber-500/15 disabled:opacity-40"
+              >
+                {result.paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+                {result.paused ? 'Resume' : 'Pause'}
+              </button>
+              <button
+                onClick={() => void controlGenerator('stop')}
+                disabled={controlling || result.stopRequested}
+                className="flex items-center justify-center gap-2 rounded-md border border-red-400/35 bg-red-500/10 px-3 py-3 text-xs font-black uppercase tracking-[0.12em] text-red-100 hover:bg-red-500/15 disabled:opacity-40"
+              >
+                <Square className="h-3.5 w-3.5" />
+                {result.stopRequested ? 'Stopping' : 'Stop'}
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => void runGenerator()}
+              disabled={running}
+              className="flex w-full items-center justify-center gap-2 rounded-md border border-emerald-400/35 bg-emerald-500/15 px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-40"
+            >
+              <Play className="h-4 w-4" />
+              Run Generator
+            </button>
+          )}
         </div>
       </aside>
 
@@ -211,10 +297,20 @@ export function DanbooruDatasetGeneratorTab() {
             <section className="rounded-md border border-white/10 bg-white/[0.03] p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-200">{result.running ? 'Generating CSV' : 'Generated CSV'}</div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-200">{generatorStatusLabel(result)}</div>
                   <h2 className="mt-1 truncate text-lg font-black text-zinc-100">{result.outputPath}</h2>
                   <div className="mt-1 text-xs text-zinc-500">
-                    {result.running ? 'Running...' : result.exitCode === 0 ? 'Finished successfully' : `Finished with exit code ${result.exitCode ?? 'unknown'}`}
+                    {result.paused
+                      ? 'Paused. Completed rows are saved.'
+                      : result.status === 'stopping'
+                        ? 'Stopping after the current request...'
+                        : result.status === 'stopped'
+                          ? 'Stopped. Completed rows remain in the CSV.'
+                          : result.running
+                            ? 'Running...'
+                            : result.exitCode === 0
+                              ? 'Finished successfully'
+                              : `Finished with exit code ${result.exitCode ?? 'unknown'}`}
                   </div>
                 </div>
                 {!isUmbraRemoteClient() ? (
@@ -224,7 +320,7 @@ export function DanbooruDatasetGeneratorTab() {
                   </button>
                 ) : null}
               </div>
-              {result.running ? <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full w-1/3 animate-pulse rounded-full bg-emerald-300" /></div> : null}
+              {result.running ? <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/10"><div className={`h-full w-1/3 rounded-full ${result.paused ? 'bg-amber-300' : 'animate-pulse bg-emerald-300'}`} /></div> : null}
             </section>
             <section className="rounded-md border border-white/10 bg-black/25 p-4">
               <div className="mb-2 flex items-center justify-between gap-2">
@@ -269,6 +365,14 @@ export function DanbooruDatasetGeneratorTab() {
       </main>
     </div>
   );
+}
+
+function generatorStatusLabel(result: GeneratorResult): string {
+  if (result.status === 'paused') return 'Generator Paused';
+  if (result.status === 'stopping') return 'Stopping Generator';
+  if (result.status === 'stopped') return 'Generator Stopped';
+  if (result.status === 'failed') return 'Generator Failed';
+  return result.running ? 'Generating CSV' : 'Generated CSV';
 }
 
 function parseCsvPreview(csv: string): string[][] {

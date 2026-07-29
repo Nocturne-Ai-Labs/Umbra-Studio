@@ -25,6 +25,23 @@ export interface BooruImageResult {
 
 const BOORU_USER_AGENT = 'UmbraStudio (Data Forge; local application)';
 
+export function buildBooruMediaRequestHeaders(
+  targetUrl: URL,
+  accept = 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+  range = '',
+): Record<string, string> {
+  const isGelbooru = targetUrl.hostname === 'gelbooru.com' || targetUrl.hostname.endsWith('.gelbooru.com');
+  const headers: Record<string, string> = {
+    'User-Agent': isGelbooru
+      ? 'Mozilla/5.0 (compatible; UmbraStudio/DataForge)'
+      : BOORU_USER_AGENT,
+    Accept: accept,
+  };
+  if (isGelbooru) headers.Referer = 'https://gelbooru.com/';
+  if (range.trim()) headers.Range = range.trim();
+  return headers;
+}
+
 function normalizeRemoteUrl(value: unknown): string {
   const raw = String(value || '').trim();
   if (!raw) return '';

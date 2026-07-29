@@ -39,6 +39,12 @@ const normalizeTypography = (value: unknown): TypographyStyle => {
   return TYPOGRAPHY_STYLES.includes(mapped) ? mapped : 'mono';
 };
 
+export const normalizeThemeTextScale = (value: unknown, fallback = 100): number => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(85, Math.min(140, Math.round(numeric / 5) * 5));
+};
+
 const ACTIVE_BOOT_ANIMATIONS = new Set<BootAnimation>(['none', 'matrix', 'hex', 'image', 'fade', 'comfy']);
 const normalizeBootAnimation = (value: unknown): BootAnimation => {
   if (typeof value !== 'string') return 'matrix';
@@ -124,6 +130,7 @@ interface ThemeState {
   hasHydrated: boolean;
   dna: DNAStyle;
   typography: TypographyStyle;
+  textScale: number; // 85-140 percent
   bootAnimation: BootAnimation;
   bootGraphEnabled: boolean;
   bootRainContent: BootRainContent;
@@ -158,6 +165,7 @@ interface ThemeState {
   setHasHydrated: (hydrated: boolean) => void;
   setDNA: (dna: DNAStyle) => void;
   setTypography: (typography: TypographyStyle) => void;
+  setTextScale: (scale: number) => void;
   setBootAnimation: (animation: BootAnimation) => void;
   setBootGraphEnabled: (enabled: boolean) => void;
   setBootRainContent: (content: BootRainContent) => void;
@@ -235,6 +243,7 @@ const defaultCursorSettings: CursorSettings = {
 const createDefaultThemeValues = () => ({
   dna: 'terminal' as DNAStyle,
   typography: 'mono' as TypographyStyle,
+  textScale: 100,
   bootAnimation: 'matrix' as BootAnimation,
   bootGraphEnabled: false,
   bootRainContent: 'kanji' as BootRainContent,
@@ -266,6 +275,7 @@ export const useThemeStore = create<ThemeState>()(
         setHasHydrated: (hasHydrated) => set({ hasHydrated }),
         setDNA: () => set({ dna: 'terminal' }),
         setTypography: (typography) => set({ typography: normalizeTypography(typography) }),
+        setTextScale: (textScale) => set({ textScale: normalizeThemeTextScale(textScale) }),
         setBootAnimation: (bootAnimation) => set(() => {
           const normalized = normalizeBootAnimation(bootAnimation);
           return normalized === 'image'
@@ -496,7 +506,7 @@ export const useThemeStore = create<ThemeState>()(
 
 const THEME_PERSIST_STORAGE_KEY = 'umbra-studio-theme';
 const THEME_LIVE_STORAGE_KEY = 'umbra-studio-theme-live';
-const THEME_PERSIST_VERSION = 15;
+const THEME_PERSIST_VERSION = 16;
 
 type ThemePersistedValues = ReturnType<typeof createDefaultThemeValues>;
 
@@ -523,6 +533,7 @@ function normalizeThemeSettingsPayload(raw: unknown): ThemePersistedValues {
     ...defaults,
     dna: normalizeDNA(payload.dna),
     typography: normalizeTypography(payload.typography),
+    textScale: normalizeThemeTextScale(payload.textScale, defaults.textScale),
     bootAnimation: normalizeBootAnimation(payload.bootAnimation),
     bootGraphEnabled: normalizeBootAnimation(payload.bootAnimation) === 'image'
       ? false
@@ -559,6 +570,7 @@ export function getThemeSettingsSnapshot(): Record<string, unknown> {
   const snapshot: ThemePersistedValues = {
     dna: 'terminal',
     typography: state.typography,
+    textScale: state.textScale,
     bootAnimation: state.bootAnimation,
     bootGraphEnabled: state.bootGraphEnabled,
     bootRainContent: state.bootRainContent,

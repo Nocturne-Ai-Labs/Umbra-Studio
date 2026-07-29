@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.21.4
+
+### Agent And Prompt Workflows
+
+- Kept Hermes prompt enhancement inside one reusable conversation instead of
+  creating a new Hermes chat for every request.
+- Added explicit agent model selection, connection guidance, reusable
+  instructions, and prompt drafts to the shared Global Settings agent panel.
+- Added Power Prompter agent controls for enhancing individual variants or
+  complete generated prompts before queue submission.
+- Added default Anima and SDXL instructions that ground agent output in the
+  user's Danbooru CSV libraries and request valid tag-style prompts.
+
+### Data Forge And Gallery Reliability
+
+- Expanded Data Forge source authentication and validation for Gelbooru,
+  Rule34, and e621 while keeping credentials in user-owned configuration.
+- Added pause, resume, and stop controls to dataset generation and optional
+  Japanese and Simplified Chinese tag localization.
+- Improved trash media resolution so Gallery thumbnails and previews continue
+  to load from their actual trash locations.
+- Hardened missing-file and stale-media handling across Gallery operations.
+
+### Power Prompter Polish
+
+- Restored mobile card creation and improved mobile model-selection behavior.
+- Added reusable default detailer prompt concatenation settings to packaged
+  Power Prompter cards and generation controls.
+- Improved prompt search, agent instructions, CSV grounding, and queue prompt
+  construction across editor and generated variants.
+
+### Typography And Packaging
+
+- Normalized typography metrics so System, Serif, Retro, Mono, and Display
+  choices render at comparable perceived sizes.
+- Added a persistent Text Size stepper in Theme Studio with 85% to 140% sizing
+  in five-percent increments, including Gallery theme propagation.
+- Updated packaging, credits, localization catalogs, and regression coverage
+  for the included agent, Data Forge, Gallery, and Power Prompter changes.
+
 ## v0.21.3
 
 ### Mobile Settings And Model Selection

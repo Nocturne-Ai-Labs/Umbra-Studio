@@ -10310,6 +10310,20 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 );
               })}
             </div>
+            <div data-umbra-mobile-card-picker-actions="">
+              <button
+                type="button"
+                data-umbra-mobile-card-picker-add=""
+                onClick={() => {
+                  addSlot();
+                  setMobileCardPickerOpen(false);
+                }}
+                title="Add a new prompt card"
+              >
+                <Plus size={15} />
+                <span>New Card</span>
+              </button>
+            </div>
           </section>
         </>,
         window.document.body

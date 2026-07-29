@@ -101,6 +101,19 @@ const DEFAULT_INSTRUCTION_TEMPLATES: UmbraUiAgentInstructionTemplate[] = [
     ].join(' '),
   },
   {
+    id: 'image-anima-sdxl-csv-tags',
+    name: 'Anima / SDXL CSV Tag Composer',
+    mediaType: 'image',
+    instruction: [
+      'Compose a concise comma-separated prompt for Anima and SDXL-family anime models using real Danbooru tags.',
+      'Umbra will attach a CSV TAG VOCABULARY selected from the tag and character CSV files in User/PowerPrompter/CSV. For ordinary visual concepts, use only the exact tag spellings from that vocabulary, including underscores and qualifiers; never invent a plausible-looking tag or silently rewrite one into prose.',
+      'Preserve user-provided character trigger tokens, LoRA syntax, embeddings, prompt weights, and custom identity tokens exactly even when they are not present in the CSV vocabulary.',
+      'Prefer concrete visible tags, remove duplicates and contradictions, and omit an uncertain concept when no matching CSV tag is supplied.',
+      'Segment the result into subject and identity, appearance and clothing, pose and expression, scene and composition, then lighting and style.',
+      'Stage the result as an image draft through umbra_ui_stage_prompt.',
+    ].join(' '),
+  },
+  {
     id: 'image-character-consistency',
     name: 'Character Consistency',
     mediaType: 'image',
@@ -161,6 +174,10 @@ const DEFAULT_INSTRUCTION_TEMPLATES: UmbraUiAgentInstructionTemplate[] = [
   },
 ];
 
+const REQUIRED_DEFAULT_INSTRUCTION_IDS = new Set([
+  'image-anima-sdxl-csv-tags',
+]);
+
 export function createDefaultUmbraUiAgentInstructions(now = Date.now()): UmbraUiAgentInstruction[] {
   return DEFAULT_INSTRUCTION_TEMPLATES.map((template, order) => ({
     ...template,
@@ -168,4 +185,16 @@ export function createDefaultUmbraUiAgentInstructions(now = Date.now()): UmbraUi
     updatedAt: now,
     order,
   }));
+}
+
+export function mergeRequiredUmbraUiAgentInstructions(
+  instructions: UmbraUiAgentInstruction[],
+  now = Date.now(),
+): UmbraUiAgentInstruction[] {
+  const existingIds = new Set(instructions.map((entry) => entry.id));
+  const requiredDefaults = createDefaultUmbraUiAgentInstructions(now)
+    .filter((entry) => REQUIRED_DEFAULT_INSTRUCTION_IDS.has(entry.id) && !existingIds.has(entry.id));
+  if (requiredDefaults.length === 0) return instructions;
+  return [...instructions, ...requiredDefaults]
+    .map((entry, order) => ({ ...entry, order }));
 }

@@ -63,6 +63,13 @@ interface TrashMetadata {
   }>;
 }
 
+type TrashListItem = TrashMetadata['items'][number] & {
+  url?: string;
+  thumbnailUrl?: string;
+  createdMs?: number;
+  modifiedMs?: number;
+};
+
 function getTrashDir(context: RouteContext) {
   // Use configured Trash location, while API path remains virtual User/Trash.
   if (typeof context.getTrashDir === 'function') {
@@ -466,13 +473,46 @@ export async function runTrashCleanup(context: RouteContext) {
   return cleanupTrash(context);
 }
 
+export async function enrichTrashListItem(
+  item: TrashMetadata['items'][number],
+  context: RouteContext,
+): Promise<TrashListItem> {
+  if (item.type === 'folder') return item;
+
+  try {
+    const resolved = resolveWorkspacePath(item.trashPath, context);
+    const stats = await stat(resolved.fullPath);
+    if (!stats.isFile()) return item;
+
+    const revision = `m${Math.max(0, Math.floor(stats.mtimeMs))}-s${Math.max(0, Math.floor(stats.size))}`;
+    const encodedPath = encodeURIComponent(item.trashPath);
+    return {
+      ...item,
+      size: stats.size,
+      createdMs: stats.birthtimeMs || stats.ctimeMs || stats.mtimeMs,
+      modifiedMs: stats.mtimeMs,
+      url: `/api/fs/image?path=${encodedPath}&rev=${encodeURIComponent(revision)}`,
+      thumbnailUrl: `/api/fs/thumbnail?path=${encodedPath}&size=small&q=70&rev=${encodeURIComponent(revision)}`,
+    };
+  } catch {
+    // Cleanup owns stale-entry removal. Keep the metadata item usable if the
+    // file changes between cleanup and this stat.
+    return item;
+  }
+}
+
 export async function listTrash(_req: Request, _url: URL, context: RouteContext) {
   try {
     // Auto-cleanup before listing
     await cleanupTrash(context);
 
     const metadata = await loadMetadata(context);
-    return json(metadata, 200, context.corsHeaders);
+    const items = await mapWithConcurrency(
+      metadata.items,
+      24,
+      (item) => enrichTrashListItem(item, context),
+    );
+    return json({ items }, 200, context.corsHeaders);
   } catch (error: any) {
     console.error('[Trash] List error:', error);
     return json({ error: error.message }, 500, context.corsHeaders);
