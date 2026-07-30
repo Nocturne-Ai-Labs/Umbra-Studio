@@ -50,9 +50,11 @@ import { WatermarkSettings } from '@/components/ui/WatermarkSettings';
 import type { PowerPrompterQueueTooltipStatus } from '@/components/ui/GenerationTooltip';
 import { GlobalSettings } from '@/components/modals/GlobalSettings';
 import { UmbraUpdaterModal } from '@/components/modals/UmbraUpdaterModal';
+import { NotificationBellButton } from '@/components/ui/NotificationCenter';
 
 import { SystemMonitor } from '@/components/SystemMonitor';
 import { useComponentDebug } from '@/hooks/useComponentDebug';
+import { useToastStore } from '@/store/useToastStore';
 import { governorShouldRun, governorTryAcquire } from '@/lib/loadGovernor';
 import { DroppableNavItem } from './DroppableNavItem';
 import { UmbraRemoteSidebarSection } from './UmbraRemoteSidebarSection';
@@ -291,6 +293,9 @@ export const UmbraAppBar = () => {
   const nsfwThumbnailBlurIntensitySetting = useStore((state) => state.appSettings['ui.nsfwThumbnailBlurIntensity']);
   const setUI = useStore((state) => state.setUI);
   const setAppSetting = useStore((state) => state.setAppSetting);
+  const unreadIssueCount = useToastStore((state) => state.notifications
+    .filter((notification) => !notification.read)
+    .reduce((total, notification) => total + notification.count, 0));
   const connections = React.useMemo(() => ({
     comfyui: comfyConnection,
   }), [comfyConnection]);
@@ -1889,12 +1894,18 @@ export const UmbraAppBar = () => {
         <button
           type="button"
           data-active={phoneSidebarOpen || phoneMoreWorkspaceActive ? '1' : '0'}
+          data-has-unread-issues={unreadIssueCount > 0 ? '1' : '0'}
           onClick={() => setPhoneSidebarOpen((open) => !open)}
           aria-label={phoneSidebarOpen ? 'Close more workspaces' : 'Open more workspaces'}
           aria-expanded={phoneSidebarOpen}
         >
           <MoreHorizontal size={20} />
           <span>{t('nav.more')}</span>
+          {unreadIssueCount > 0 ? (
+            <span data-umbra-phone-notification-badge="" aria-hidden="true">
+              {unreadIssueCount > 99 ? '99+' : unreadIssueCount}
+            </span>
+          ) : null}
         </button>
       </nav>
     ) : null}
@@ -1945,6 +1956,11 @@ export const UmbraAppBar = () => {
             <span>{t('nav.imageInspector')}</span>
           </button>
         </div>
+        <NotificationBellButton
+          label="Issues"
+          description={unreadIssueCount > 0 ? `${unreadIssueCount} unread issue${unreadIssueCount === 1 ? '' : 's'}` : 'Review action errors and retries'}
+          className="mb-3 w-full justify-start border-white/10 bg-white/[0.035] px-3 py-2.5"
+        />
         {isRemoteClient ? renderRemoteSessionControls('phone') : null}
         <button
           type="button"
@@ -2597,6 +2613,16 @@ export const UmbraAppBar = () => {
         "umbra-sidebar-divider border-t p-2",
         isSidebarExpanded ? "border-white/10" : "border-transparent p-1"
       )}>
+        <NotificationBellButton
+          compact={!isSidebarExpanded}
+          label="Issues"
+          className={cn(
+            'mb-1 w-full',
+            isSidebarExpanded
+              ? 'justify-start px-2.5'
+              : 'justify-center px-0',
+          )}
+        />
         {UMBRA_APP_VERSION ? (
           <button
             type="button"

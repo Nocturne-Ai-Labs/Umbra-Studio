@@ -270,7 +270,7 @@ below has been reviewed in a clean packaged build:
   bypassed and do not load models or leave invalid graph inputs.
 - [ ] Confirm TXT2IMG, IMG2IMG, Inpaint, Video, and Extras retain their state
   while switching Umbra Studio workspaces.
-- [ ] Run the repository source audit, frontend build, lint, source tests, and
+- [ ] Run the repository source audit, frontend build, lint, development-source tests, and
   Umbra UI pipeline audit from the clean repository candidate.
 
 ## Safety Rules

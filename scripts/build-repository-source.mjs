@@ -50,9 +50,6 @@ const SOURCE_FILES = [
   'setup-tools.ts',
   'start_umbra.bat',
   'start_umbra.sh',
-  'test-better-sqlite.ts',
-  'test-node-sqlite.js',
-  'test-sqlite.ts',
   'tsconfig.json',
   'UmbraServer.ts',
   'UmbraSetup.bat',
@@ -120,6 +117,10 @@ const SKIP_NAMES = new Set([
   'public',
 ]);
 
+function isTestSourceName(name) {
+  return /\.test\./i.test(name) || /^test-.*\.(?:[cm]?[jt]sx?)$/i.test(name);
+}
+
 function copyTree(source, target, allowGeneratedPublic = false) {
   const stat = fs.lstatSync(source);
   if (stat.isSymbolicLink()) throw new Error(`Refusing to copy symlink into repository source: ${source}`);
@@ -132,7 +133,7 @@ function copyTree(source, target, allowGeneratedPublic = false) {
   fs.mkdirSync(target, { recursive: true });
   for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
     const environmentFile = /^\.env(?:\.|$)/i.test(entry.name);
-    if (environmentFile || (SKIP_NAMES.has(entry.name) && !(allowGeneratedPublic && entry.name === 'public'))) continue;
+    if (environmentFile || isTestSourceName(entry.name) || (SKIP_NAMES.has(entry.name) && !(allowGeneratedPublic && entry.name === 'public'))) continue;
     copyTree(path.join(source, entry.name), path.join(target, entry.name), allowGeneratedPublic);
   }
 }
@@ -245,6 +246,21 @@ function verifyOutput() {
   findEnvironmentFiles(outputRoot);
   if (environmentFiles.length > 0) {
     throw new Error(`Clean repository source contains environment files: ${environmentFiles.join(', ')}`);
+  }
+
+  const testFiles = [];
+  const findTestFiles = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const fullPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) findTestFiles(fullPath);
+      else if (entry.isFile() && isTestSourceName(entry.name)) {
+        testFiles.push(path.relative(outputRoot, fullPath));
+      }
+    }
+  };
+  findTestFiles(outputRoot);
+  if (testFiles.length > 0) {
+    throw new Error(`Clean repository source contains internal test files: ${testFiles.join(', ')}`);
   }
 }
 

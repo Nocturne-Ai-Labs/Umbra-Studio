@@ -10,6 +10,7 @@ import { DebugErrorBoundary } from '@/components/debug/DebugErrorBoundary';
 import { ModalProvider } from '@/contexts/ModalContext';
 import { DuplicateModalProvider } from '@/components/providers/DuplicateModalProvider';
 import { Toaster } from '@/components/ui/Toaster';
+import { NotificationCenter } from '@/components/ui/NotificationCenter';
 import { ThemeProvider } from '@/components/ui/ThemeProvider';
 import { IdleFrameCap } from '@/components/ui/IdleFrameCap';
 import { PowerPrompter } from '@/components/layout/PowerPrompter';
@@ -97,6 +98,7 @@ export function App() {
                   </Suspense>
                 </div>
               </RemoteAuthGate>
+              <NotificationCenter />
               <Toaster />
             </DuplicateModalProvider>
           </ModalProvider>
@@ -120,6 +122,7 @@ export function App() {
                   </Suspense>
                 </div>
               </RemoteAuthGate>
+              <NotificationCenter />
               <Toaster />
             </DuplicateModalProvider>
           </ModalProvider>
@@ -157,6 +160,7 @@ export function App() {
               <Toaster />
             </BrowserRouter>
           </RemoteAuthGate>
+          <NotificationCenter />
         </DuplicateModalProvider>
       </ModalProvider>
     </DebugErrorBoundary>

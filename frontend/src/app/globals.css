@@ -85,29 +85,21 @@
   --umbra-scrollbar-thumb-idle: transparent;
 }
 
-/* Global NSFW mode: blur thumbnail surfaces across the app */
-body.umbra-nsfw-thumbnail-blur-enabled img[src*="umbra-media://thumb"],
-body.umbra-nsfw-thumbnail-blur-enabled img[src*="/api/fs/thumbnail"],
-body.umbra-nsfw-thumbnail-blur-enabled video[src*="umbra-media://preview"],
-body.umbra-nsfw-thumbnail-blur-enabled video[src*="/api/fs/preview"],
-body.umbra-nsfw-thumbnail-blur-enabled .filmstrip-container img,
-body.umbra-nsfw-thumbnail-blur-enabled .filmstrip-container video,
-body.umbra-nsfw-thumbnail-blur-enabled .umbra-editor-grid img,
-body.umbra-nsfw-thumbnail-blur-enabled .umbra-editor-grid video,
-body.umbra-nsfw-thumbnail-blur-enabled [class*="thumbnail"] img,
-body.umbra-nsfw-thumbnail-blur-enabled [class*="thumbnail"] video,
-body.umbra-nsfw-thumbnail-blur-enabled .p-3.grid img,
-body.umbra-nsfw-thumbnail-blur-enabled .p-3.grid video {
+/*
+ * Global NSFW mode covers media regardless of its source. Generation previews
+ * commonly use data/blob URLs, while datasets and model browsers may use
+ * remote proxy URLs, so URL-specific selectors leave unsafe gaps.
+ */
+body.umbra-nsfw-thumbnail-blur-enabled img:not([data-umbra-nsfw-exempt]),
+body.umbra-nsfw-thumbnail-blur-enabled video:not([data-umbra-nsfw-exempt]),
+body.umbra-nsfw-thumbnail-blur-enabled canvas[data-umbra-inpaint-image],
+body.umbra-nsfw-thumbnail-blur-enabled canvas[data-umbra-inpaint-paint],
+body.umbra-nsfw-thumbnail-blur-enabled canvas[data-umbra-inpaint-minimap],
+body.umbra-nsfw-thumbnail-blur-enabled canvas[data-umbra-media-preview] {
   filter: blur(var(--umbra-nsfw-thumbnail-blur)) !important;
 }
 
-body.umbra-nsfw-thumbnail-blur-enabled .umbra-power-prompter-generation-preview {
-  filter: blur(var(--umbra-nsfw-thumbnail-blur)) !important;
-}
-
-/* Keep full-size viewer media clear; NSFW mode targets thumbnails only */
-body.umbra-nsfw-thumbnail-blur-enabled [data-umbra-lightbox-root] img,
-body.umbra-nsfw-thumbnail-blur-enabled [data-umbra-lightbox-root] video {
+body.umbra-nsfw-thumbnail-blur-enabled [data-umbra-nsfw-exempt] {
   filter: none !important;
 }
 
@@ -983,6 +975,31 @@ html[data-umbra-remote-mode="phone"] [data-umbra-phone-bottom-nav] button[data-a
   box-shadow: 0 0 12px var(--umbra-accent-glow);
 }
 
+@keyframes umbra-phone-issues-attention {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(251, 191, 36, 0);
+  }
+  14% {
+    transform: scale(1.035);
+    box-shadow: 0 0 0.85rem rgba(251, 191, 36, 0.18);
+  }
+  28% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(251, 191, 36, 0);
+  }
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-bottom-nav] button[data-has-unread-issues="1"] {
+  color: #fcd34d;
+  animation: umbra-phone-issues-attention 2.8s ease-in-out infinite;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-bottom-nav] button[data-has-unread-issues="1"]::before {
+  background: #fbbf24;
+  box-shadow: 0 0 0.7rem rgba(251, 191, 36, 0.42);
+}
+
 html[data-umbra-remote-mode="phone"] [data-umbra-phone-bottom-nav] button span {
   max-width: 100%;
   overflow: hidden;
@@ -991,6 +1008,31 @@ html[data-umbra-remote-mode="phone"] [data-umbra-phone-bottom-nav] button span {
   font-weight: 800;
   letter-spacing: 0;
   white-space: nowrap;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-phone-bottom-nav] [data-umbra-phone-notification-badge] {
+  position: absolute;
+  top: 0.22rem;
+  right: 0.38rem;
+  display: inline-flex;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.22rem;
+  border-radius: 999px;
+  background: #fbbf24;
+  color: #18181b;
+  font-size: 0.56rem;
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-umbra-remote-mode="phone"] [data-umbra-phone-bottom-nav] button[data-has-unread-issues="1"] {
+    animation: none;
+  }
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-phone-more-sheet] {
@@ -2466,6 +2508,62 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-scroll] {
 
 html[data-umbra-remote-mode="phone"] [data-umbra-gallery-scroll] [style*="grid-template-columns"] {
   justify-content: center;
+}
+
+@media (orientation: portrait) {
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-mobile-switcher],
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-header],
+  html[data-umbra-remote-mode="phone"] [data-umbra-gallery-action-bar] {
+    max-height: 100dvh;
+    overflow: hidden;
+    transform: translateY(0);
+    transform-origin: top;
+    opacity: 1;
+    transition: max-height 180ms ease, margin 180ms ease, padding 180ms ease, border-color 180ms ease, opacity 140ms ease, transform 180ms ease;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-gallery-mobile-chrome-hidden="1"] [data-umbra-gallery-mobile-switcher] {
+    max-height: 0;
+    margin-top: 0;
+    padding-block: 0;
+    border-bottom-color: transparent;
+    opacity: 0;
+    transform: translateY(-0.75rem);
+    pointer-events: none;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-gallery-mobile-chrome-hidden="1"] [data-umbra-gallery-header] {
+    min-height: 0 !important;
+    max-height: 0;
+    padding-block: 0;
+    border-bottom-color: transparent;
+    opacity: 0;
+    transform: translateY(-0.75rem);
+    pointer-events: none;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-gallery-mobile-chrome-hidden="1"] [data-umbra-gallery-action-bar] {
+    min-height: 0;
+    max-height: 0;
+    margin: 0;
+    padding-block: 0;
+    border-bottom-color: transparent;
+    opacity: 0;
+    transform: translateY(-0.75rem);
+    pointer-events: none;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-gallery-mobile-chrome-hidden="1"] [data-umbra-gallery-scroll] {
+    scroll-padding-top: 0.875rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html[data-umbra-remote-mode="phone"] [data-umbra-gallery-mobile-switcher],
+    html[data-umbra-remote-mode="phone"] [data-umbra-gallery-header],
+    html[data-umbra-remote-mode="phone"] [data-umbra-gallery-action-bar] {
+      transition: none;
+    }
+  }
 }
 
 @media (orientation: landscape) and (max-height: 560px) {

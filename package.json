@@ -1,6 +1,6 @@
 {
   "name": "umbra-studio",
-  "version": "0.21.4",
+  "version": "0.21.5",
   "description": "Umbra Studio - AI image generation, prompt tooling, and media workflow suite",
   "author": "Nocturne AI Labs",
   "homepage": "https://github.com/Nocturne-Ai-Labs/Umbra-Studio",
@@ -26,8 +26,6 @@
     "dataset:character-tags": "node scripts/dataset-character-tags-csv.mjs",
     "tags:danbooru": "node scripts/danbooru-tags-csv.mjs",
     "gpu:telemetry": "node scripts/gpu-telemetry.mjs",
-    "test:source": "bun test backend frontend/src scripts",
-    "test:booru-sources": "bun scripts/test-booru-sources.ts",
     "audit:umbra-ui-pipelines": "bun scripts/audit-umbra-ui-pipelines.ts",
     "audit:i18n:ja": "bun scripts/audit-japanese-localization.ts",
     "audit:i18n:zh-CN": "bun scripts/audit-chinese-localization.ts",

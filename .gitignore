@@ -36,6 +36,12 @@ dist-webapp/
 *.appimage
 *.tsbuildinfo
 
+# Internal test sources stay in the development tree only. Repository-ready
+# source and public releases intentionally omit them.
+*.test.*
+/test-*.ts
+/test-*.js
+
 # Logs and temporary files
 /logs/
 dev-logs/

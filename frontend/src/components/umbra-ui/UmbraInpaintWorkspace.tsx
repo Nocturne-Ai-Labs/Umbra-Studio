@@ -11604,7 +11604,7 @@ export function UmbraInpaintWorkspace({
           {source ? (
             <div className="sticky bottom-2 z-20 ml-auto mr-2 w-fit border border-white/15 bg-black/85 p-1 shadow-lg shadow-black/60">
               <div className="relative">
-                <canvas ref={minimapCanvasRef} onPointerDown={navigateMinimap} className="block max-h-24 max-w-36 cursor-crosshair" title="Navigate canvas" />
+                <canvas data-umbra-inpaint-minimap="" ref={minimapCanvasRef} onPointerDown={navigateMinimap} className="block max-h-24 max-w-36 cursor-crosshair" title="Navigate canvas" />
                 <span
                   className="pointer-events-none absolute border border-cyan-200/80 bg-cyan-300/10"
                   style={{

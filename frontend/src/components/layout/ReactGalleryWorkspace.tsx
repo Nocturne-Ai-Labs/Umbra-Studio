@@ -4688,6 +4688,7 @@ export function ReactGalleryWorkspace() {
   const galleryMobileViewRef = useRef<'folders' | 'media'>(initialGalleryMobileView);
   const isPhoneRemote = remoteMode === 'phone';
   const isRemoteClient = isRemoteGalleryClient();
+  const [mobileGalleryChromeHidden, setMobileGalleryChromeHidden] = useState(false);
 
   const rootPath = DEFAULT_OUTPUT_ROOT;
   const externalRoots = useMemo(() => uniqueNormalizedPaths([
@@ -4794,6 +4795,7 @@ export function ReactGalleryWorkspace() {
   const [, setGalleryDirectBaseVersion] = useState(0);
   const loadSeqRef = useRef(0);
   const scrollParentRef = useRef<HTMLDivElement | null>(null);
+  const mobileGalleryChromeScrollTopRef = useRef(0);
   const filesRef = useRef<GalleryFile[]>([]);
   const knownFilesRef = useRef<GalleryFile[]>([]);
   const activeViewerFilesRef = useRef<GalleryFile[]>([]);
@@ -4823,6 +4825,30 @@ export function ReactGalleryWorkspace() {
   const folderSummaryPollInFlightRef = useRef(false);
   const currentFolderReconcileTimerRef = useRef<number | null>(null);
   const currentFolderReconcileInFlightRef = useRef<Promise<boolean> | null>(null);
+
+  useEffect(() => {
+    if (isPhoneRemote && galleryMobileView === 'media') return;
+    mobileGalleryChromeScrollTopRef.current = 0;
+    setMobileGalleryChromeHidden(false);
+  }, [galleryMobileView, isPhoneRemote]);
+
+  const handleGalleryMediaScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    if (!isPhoneRemote || galleryMobileView !== 'media') return;
+    const nextScrollTop = Math.max(0, event.currentTarget.scrollTop);
+    const previousScrollTop = mobileGalleryChromeScrollTopRef.current;
+    const scrollDelta = nextScrollTop - previousScrollTop;
+    mobileGalleryChromeScrollTopRef.current = nextScrollTop;
+
+    if (nextScrollTop <= 20) {
+      setMobileGalleryChromeHidden(false);
+      return;
+    }
+    if (scrollDelta >= 12) {
+      setMobileGalleryChromeHidden(true);
+    } else if (scrollDelta <= -8) {
+      setMobileGalleryChromeHidden(false);
+    }
+  }, [galleryMobileView, isPhoneRemote]);
   const currentFolderReconcileFolderRef = useRef('');
   const currentFolderLastReconcileAtRef = useRef(0);
   const treeChildrenRef = useRef<Record<string, GalleryFolderTreeNode[]>>({});
@@ -9749,6 +9775,7 @@ export function ReactGalleryWorkspace() {
       className="flex h-full min-h-0 w-full bg-zinc-950 text-zinc-100"
       data-umbra-react-gallery-root
       data-umbra-gallery-mobile-media-view={isPhoneRemote ? 'grid' : undefined}
+      data-umbra-gallery-mobile-chrome-hidden={isPhoneRemote && galleryMobileView === 'media' && mobileGalleryChromeHidden ? '1' : '0'}
     >
       <div data-umbra-gallery-mobile-switcher="">
         <button
@@ -10182,7 +10209,12 @@ export function ReactGalleryWorkspace() {
             </div>
           </div>
 
-          <div ref={scrollParentRef} data-umbra-gallery-scroll="" className="min-h-0 flex-1 overflow-y-auto p-3">
+          <div
+            ref={scrollParentRef}
+            data-umbra-gallery-scroll=""
+            onScroll={handleGalleryMediaScroll}
+            className="min-h-0 flex-1 overflow-y-auto p-3"
+          >
             {openingDifferentFolder ? (
               <div className="flex h-full flex-col items-center justify-center gap-2 text-zinc-500">
                 <div className="flex items-center text-sm">

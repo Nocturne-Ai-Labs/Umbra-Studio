@@ -472,7 +472,7 @@ export const useStore = create<AppState>()(
 
         toast: null,
         showToast: (message, type) => {
-          if (get().appSettings.enableToasts === false) return;
+          if (get().appSettings.enableToasts === false && type !== 'error') return;
           useToastStore.getState().addToast({ message, type });
         },
         clearToast: () => {

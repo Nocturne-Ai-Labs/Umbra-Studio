@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.21.5
+
+### Mobile Gallery And Notifications
+
+- Made the phone Gallery chrome slide away during a downward media scroll and
+  return on an upward scroll or at the top, giving the media grid more usable
+  screen space without losing its controls.
+- Replaced transient error-only feedback with a persistent session Issues
+  center. Desktop exposes it from the sidebar; phone mode keeps errors out of
+  the workspace, surfaces an unread badge in More, and adds a restrained
+  attention pulse until issues are reviewed.
+- Grouped repeated errors in the Issues center so a failing action does not
+  stack duplicate notifications over the application.
+
+### Defaults And Repository Hygiene
+
+- Changed the optional Eyes detailer stage to ship disabled, so a fresh setup
+  does not report a missing user-supplied model before generation starts.
+- Kept existing users' explicitly enabled optional Eyes detailer setting intact
+  during default migration.
+- Excluded internal test sources from generated repository-ready trees and
+  ignored future `.test.*` files in the public repository checkout, including
+  removal of test-only commands that would otherwise reference omitted files.
+
 ## v0.21.4
 
 ### Agent And Prompt Workflows

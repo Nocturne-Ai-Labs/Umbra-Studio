@@ -723,6 +723,7 @@ const GeneralSettings = ({ settings, updateSetting }: any) => {
             className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md border border-[#72a4f2]/40 bg-[#72a4f2]/10 px-3 transition-colors hover:border-[#72a4f2]/70 hover:bg-[#72a4f2]/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#72a4f2]"
           >
             <img
+              data-umbra-nsfw-exempt=""
               src="https://storage.ko-fi.com/cdn/kofi3.png?v=6"
               alt="Buy Me a Coffee at ko-fi.com"
               height={36}

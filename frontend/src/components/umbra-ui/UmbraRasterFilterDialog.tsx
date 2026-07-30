@@ -376,7 +376,7 @@ export function UmbraRasterFilterDialog({
             )}
           </div>
           <div className="flex min-h-[360px] items-center justify-center overflow-auto bg-[linear-gradient(45deg,#111_25%,transparent_25%),linear-gradient(-45deg,#111_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#111_75%),linear-gradient(-45deg,transparent_75%,#111_75%)] bg-[length:16px_16px] p-4 custom-scrollbar">
-            {loading || processing ? <Loader2 size={20} className="animate-spin text-zinc-600" /> : error ? <span className="max-w-md text-center font-mono text-[9px] text-red-300">{error}</span> : filterMode === 'preprocessor' ? <img src={processedPreview?.url || layer.asset.imageUrl} alt="Layer filter preview" className="max-h-[62vh] max-w-full object-contain shadow-xl shadow-black/70" /> : <canvas ref={previewRef} className="max-h-[62vh] max-w-full object-contain shadow-xl shadow-black/70" />}
+            {loading || processing ? <Loader2 size={20} className="animate-spin text-zinc-600" /> : error ? <span className="max-w-md text-center font-mono text-[9px] text-red-300">{error}</span> : filterMode === 'preprocessor' ? <img src={processedPreview?.url || layer.asset.imageUrl} alt="Layer filter preview" className="max-h-[62vh] max-w-full object-contain shadow-xl shadow-black/70" /> : <canvas data-umbra-media-preview="" ref={previewRef} className="max-h-[62vh] max-w-full object-contain shadow-xl shadow-black/70" />}
           </div>
         </div>
         <div className="flex h-12 shrink-0 items-center justify-end gap-2 border-t border-white/10 px-3">

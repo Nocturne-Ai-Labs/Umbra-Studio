@@ -24,8 +24,11 @@
 - Run `cd frontend && bun run lint` before opening a PR.
 
 ## Testing Guidelines
-- No unified automated suite is configured yet; use targeted smoke checks plus manual UI verification.
-- Add tests next to new logic where practical (for example `*.test.ts` in feature folders).
+- The development source keeps internal tests locally; repository-ready source
+  intentionally omits them. Use targeted smoke checks plus manual UI
+  verification for the public checkout.
+- Keep new tests in the development source when practical, but do not add them
+  to repository-ready or release packages.
 - For backend/data changes, verify startup and affected API routes locally.
 - For frontend changes, verify impacted flows in `dev:fullstack` mode and check browser console for warnings.
 

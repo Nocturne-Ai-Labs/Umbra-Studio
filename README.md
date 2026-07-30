@@ -208,8 +208,8 @@ match one of the supported model folders and file layouts in
 ### First Run: Umbra UI Support Models
 
 Umbra installs the permissively licensed Umbra UI core support pack when it
-sets up managed ComfyUI. The approximately 566 MB pack contains the default
-face, hand, and person detailer detectors, SAM ViT-B mask refinement,
+sets up managed ComfyUI. The approximately 566 MB pack contains every
+default-enabled detailer detector: person, face, and hands, plus SAM ViT-B mask refinement,
 Real-ESRGAN x4plus upscaling, and RIFE 4.26 frame interpolation. Generation
 checkpoints, LoRAs, VAEs, text encoders, ControlNet weights, and video models
 remain user-selected downloads.
@@ -247,9 +247,11 @@ Install-Umbra-UI-Models.bat --profile reference
 ```
 
 Every automatic file is fetched from an immutable model revision and checked
-by size and SHA-256 using `defaults/UmbraUI/model-manifest.json`. Models with
-source-specific or non-commercial redistribution terms, including `Eyes.pt`
-and the listed anime upscalers, stay optional and user-installed.
+by size and SHA-256 using `defaults/UmbraUI/model-manifest.json`. The eye
+detailer remains saved as an optional disabled stage because `Eyes.pt` has
+source-specific CivitAI permissions. Users who provide that detector can turn
+the stage on. The listed anime upscalers likewise stay optional and
+user-installed.
 
 AI Toolkit is optional and currently requires Git plus Node.js 20 or newer for
 its upstream web UI build. Umbra manages its checkout and Python virtual

@@ -4,7 +4,7 @@
   "profiles": {
     "core": {
       "label": "Core pipeline support",
-      "description": "Detailer detectors, segmentation, general upscaling, and frame interpolation. Installed with managed ComfyUI setup."
+      "description": "Default person, face, and hand detailer detectors, SAM refinement, general upscaling, and frame interpolation. Installed with managed ComfyUI setup."
     },
     "reference": {
       "label": "SDXL reference conditioning",
@@ -21,7 +21,7 @@
       "license": "Apache-2.0",
       "installPolicy": "automatic",
       "profiles": ["core"],
-      "purpose": "Default face, hand, and person segmentation stages",
+      "purpose": "All automatically enabled person, face, and hand detailer stages",
       "files": [
         {
           "sourcePath": "face_yolov8m.pt",

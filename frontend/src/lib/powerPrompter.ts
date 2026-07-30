@@ -340,7 +340,7 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
       noiseMaskFeather: 20, tiledEncode: false, tiledDecode: false,
     },
     {
-      id: 'detail-eyes', enabled: true, label: 'Eyes', detectorModel: 'bbox/Eyes.pt',
+      id: 'detail-eyes', enabled: false, label: 'Eyes (optional)', detectorModel: 'bbox/Eyes.pt',
       guideSize: 384, guideSizeFor: 'bbox', maxSize: 512, seedOffset: 3, steps: 7, cfg: 4,
       samplerName: 'er_sde', scheduler: 'simple', denoise: 0.16, feather: 4, noiseMask: true,
       forceInpaint: true, bboxThreshold: 0.4, bboxDilation: 5, bboxCropFactor: 2.4, useSam: true,
@@ -996,7 +996,7 @@ function normalizePowerPrompterDetailerPipeline(
       ...stage,
       enabled: legacyStages
         ? normalizeDetailerBoolean(
-          legacyStages[stage.label === 'Eyes' ? 'eyes' : stage.label.toLowerCase()],
+          legacyStages[stage.id === 'detail-eyes' ? 'eyes' : stage.label.toLowerCase()],
           stage.enabled,
         )
         : stage.enabled,
@@ -1012,6 +1012,8 @@ function normalizePowerPrompterDetailerPipeline(
       candidate.detectorModel.toLowerCase() === detectorModel.toLowerCase()
       || candidate.label.toLowerCase() === String(stage.label || '').trim().toLowerCase()
     )) || DEFAULT_POWER_PROMPTER_DETAILER_PIPELINE[1] || DEFAULT_POWER_PROMPTER_DETAILER_PIPELINE[0];
+    const isLegacyDefaultEyeStage = detectorModel.toLowerCase() === 'bbox/eyes.pt'
+      && String(stage.label || '').trim().toLowerCase() === 'eyes';
     let id = String(stage.id || `detail-stage-${index + 1}`).trim().slice(0, 128) || `detail-stage-${index + 1}`;
     if (usedIds.has(id)) id = `${id}-${index + 1}`;
     usedIds.add(id);
@@ -1026,8 +1028,8 @@ function normalizePowerPrompterDetailerPipeline(
     const samDetectionHint = String(stage.samDetectionHint || preset.samDetectionHint).trim();
     return [{
       id,
-      enabled: normalizeDetailerBoolean(stage.enabled, preset.enabled),
-      label: String(stage.label || preset.label).trim().slice(0, 80) || preset.label,
+      enabled: isLegacyDefaultEyeStage ? false : normalizeDetailerBoolean(stage.enabled, preset.enabled),
+      label: isLegacyDefaultEyeStage ? preset.label : String(stage.label || preset.label).trim().slice(0, 80) || preset.label,
       detectorModel: detectorModel || preset.detectorModel,
       guideSize: normalizeDetailerDimension(stage.guideSize, preset.guideSize),
       guideSizeFor: String(stage.guideSizeFor || '').trim().toLowerCase() === 'crop_region' ? 'crop_region' : 'bbox',
