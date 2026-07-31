@@ -17,8 +17,13 @@ import {
   type UmbraUpdateState,
   type UmbraUpdateWorkerRequest,
 } from '../shared/appUpdate';
+import {
+  isUmbraShutdownMarkerForProcess,
+  readUmbraShutdownMarker,
+} from '../shared/umbraShutdownMarker';
 
-const UPDATE_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
+const UPDATE_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 12_000;
+const UPDATE_FORCED_SHUTDOWN_TIMEOUT_MS = 30_000;
 const STARTUP_HEALTH_TIMEOUT_MS = 2 * 60 * 1000;
 
 function log(request: UmbraUpdateWorkerRequest, message: string) {
@@ -81,15 +86,126 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-async function waitForProcesses(request: UmbraUpdateWorkerRequest) {
-  const pids = [request.serverPid, request.launcherPid]
-    .filter((pid, index, all) => pid > 0 && all.indexOf(pid) === index);
+function collectRequestedProcessPids(request: UmbraUpdateWorkerRequest): number[] {
+  return [request.serverPid, request.launcherPid]
+    .filter((pid, index, all) => (
+      Number.isFinite(pid)
+      && pid > 0
+      && pid !== process.pid
+      && all.indexOf(pid) === index
+    ));
+}
+
+async function waitForProcessesToExit(
+  pids: number[],
+  timeoutMs: number,
+  pollIntervalMs = 250,
+): Promise<boolean> {
   const startedAt = Date.now();
   while (pids.some(isProcessAlive)) {
-    if (Date.now() - startedAt > UPDATE_WAIT_TIMEOUT_MS) {
-      throw new Error('Umbra did not fully shut down within ten minutes. No application files were replaced.');
+    if (Date.now() - startedAt > timeoutMs) return false;
+    await Bun.sleep(pollIntervalMs);
+  }
+  return true;
+}
+
+function forceStopExactProcess(pid: number, label: string) {
+  if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid || !isProcessAlive(pid)) return;
+  try {
+    if (process.platform === 'win32') {
+      // Do not use /T for the server or launcher: the updater itself was
+      // intentionally spawned from Umbra and must survive this escalation.
+      spawnSync('taskkill.exe', ['/PID', String(pid), '/F'], {
+        stdio: 'ignore',
+        windowsHide: true,
+        timeout: 10_000,
+      });
+      return;
     }
-    await Bun.sleep(250);
+    process.kill(pid, 'SIGKILL');
+  } catch (error) {
+    console.warn(`[UmbraUpdater] Could not force-stop ${label} PID ${pid}:`, error);
+  }
+}
+
+function forceStopTrackedToolProcess(pid: number, label: string) {
+  if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid || !isProcessAlive(pid)) return;
+  try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
+        stdio: 'ignore',
+        windowsHide: true,
+        timeout: 15_000,
+      });
+      return;
+    }
+    spawnSync('pkill', ['-KILL', '-P', String(pid)], { stdio: 'ignore', timeout: 5_000 });
+    process.kill(pid, 'SIGKILL');
+  } catch (error) {
+    console.warn(`[UmbraUpdater] Could not force-stop ${label} PID ${pid}:`, error);
+  }
+}
+
+function getTrackedShutdownToolPids(request: UmbraUpdateWorkerRequest): number[] {
+  const marker = readUmbraShutdownMarker(request.runtimeRoot);
+  if (!isUmbraShutdownMarkerForProcess(marker, request.serverPid)) return [];
+  return marker.managedProcessPids.filter((pid) => (
+    pid !== request.serverPid
+    && pid !== request.launcherPid
+    && pid !== process.pid
+  ));
+}
+
+async function forceStopOwnedUmbraProcesses(request: UmbraUpdateWorkerRequest, pids: number[]) {
+  const trackedToolPids = getTrackedShutdownToolPids(request);
+  for (const pid of trackedToolPids) {
+    forceStopTrackedToolProcess(pid, 'tracked Umbra tool');
+  }
+
+  // Stop the actual Bun server before its launcher. The launcher observes the
+  // child exit and then releases itself without needing an aggressive tree kill.
+  if (request.serverPid > 0) forceStopExactProcess(request.serverPid, 'Umbra server');
+  await Bun.sleep(750);
+  if (request.launcherPid > 0 && isProcessAlive(request.launcherPid)) {
+    forceStopExactProcess(request.launcherPid, 'Umbra launcher');
+  }
+
+  // Requests created by older updater sessions may carry only one PID.
+  for (const pid of pids) forceStopExactProcess(pid, 'Umbra process');
+}
+
+export type UmbraUpdateShutdownWaitOptions = {
+  gracefulTimeoutMs?: number;
+  forcedTimeoutMs?: number;
+  pollIntervalMs?: number;
+};
+
+export async function waitForProcesses(
+  request: UmbraUpdateWorkerRequest,
+  options: UmbraUpdateShutdownWaitOptions = {},
+) {
+  const pids = collectRequestedProcessPids(request);
+  if (pids.length === 0) return;
+  const gracefulTimeoutMs = Math.max(1, Number(options.gracefulTimeoutMs) || UPDATE_GRACEFUL_SHUTDOWN_TIMEOUT_MS);
+  const forcedTimeoutMs = Math.max(1, Number(options.forcedTimeoutMs) || UPDATE_FORCED_SHUTDOWN_TIMEOUT_MS);
+  const pollIntervalMs = Math.max(10, Number(options.pollIntervalMs) || 250);
+  const graceful = await waitForProcessesToExit(pids, gracefulTimeoutMs, pollIntervalMs);
+  if (graceful) {
+    await Bun.sleep(750);
+    return;
+  }
+
+  const remaining = pids.filter(isProcessAlive);
+  log(request, `Umbra did not exit gracefully. Force-stopping owned PID(s): ${remaining.join(', ')}.`);
+  writeState(request, {
+    phase: 'stopping',
+    currentItem: 'Stopping a hung Umbra process',
+  });
+  await forceStopOwnedUmbraProcesses(request, remaining);
+  const forced = await waitForProcessesToExit(pids, forcedTimeoutMs, pollIntervalMs);
+  if (!forced) {
+    const stillRunning = pids.filter(isProcessAlive);
+    throw new Error(`Umbra process${stillRunning.length === 1 ? '' : 'es'} ${stillRunning.join(', ')} did not exit after the forced shutdown attempt. No application files were replaced.`);
   }
   await Bun.sleep(750);
 }

@@ -114,62 +114,131 @@
         <div class="eyebrow">Nocturne AI Labs</div>
         <h1>Umbra Studio Setup</h1>
       </div>
-      <div id="status" class="status">Standalone service</div>
+      <div id="status" class="status" data-i18n="standaloneService">Standalone service</div>
     </header>
     <main>
       <section class="panel">
-        <div class="section-label">Language</div>
-        <h2>Choose your preferred language</h2>
-        <p>This preference is stored in your portable User folder and can be changed later in Umbra Studio settings.</p>
+        <div class="section-label" data-i18n="languageLabel">Language</div>
+        <h2 data-i18n="languageTitle">Choose your preferred language</h2>
+        <p data-i18n="languageDescription">This preference is stored in your portable User folder and can be changed later in Umbra Studio settings.</p>
         <div class="language-row">
           <select id="language" aria-label="Umbra Studio language">
             <option value="en">English</option>
             <option value="ja">日本語</option>
             <option value="zh-CN">简体中文</option>
             <option value="ko">한국어</option>
+            <option value="de">Deutsch</option>
           </select>
-          <button id="save-language" class="button primary" type="button">Save Language</button>
+          <button id="save-language" class="button primary" type="button" data-i18n="saveLanguage">Save Language</button>
         </div>
       </section>
       <section class="panel">
         <div class="panel-head">
           <div>
-            <div class="section-label">Optional Model Packs</div>
-            <h2>Install feature support</h2>
-            <p>Install only what you plan to use. Existing valid files are verified and kept.</p>
+            <div class="section-label" data-i18n="optionalModelPacks">Optional Model Packs</div>
+            <h2 data-i18n="installFeatureSupport">Install feature support</h2>
+            <p data-i18n="installFeatureDescription">Install only what you plan to use. Existing valid files are verified and kept.</p>
           </div>
         </div>
         <div class="packs">
           <article class="pack">
-            <h3>Data Forge Models</h3>
-            <p>WD taggers and the natural-language caption model used by datasets and Image Inspector.</p>
-            <button class="button" data-install="data-forge" type="button">Install Data Forge Models</button>
+            <h3 data-i18n="dataForgeModels">Data Forge Models</h3>
+            <p data-i18n="dataForgeModelsDescription">WD taggers and the natural-language caption model used by datasets and Image Inspector.</p>
+            <button class="button" data-install="data-forge" type="button" data-i18n="installDataForgeModels">Install Data Forge Models</button>
           </article>
           <article class="pack">
-            <h3>Umbra UI Support Models</h3>
-            <p>Default person, face, and hand detailers, SAM refinement, and upscale resources used by Umbra UI pipelines. Install ComfyUI first.</p>
-            <button class="button" data-install="umbra-ui" type="button">Install Umbra UI Models</button>
+            <h3 data-i18n="umbraUiSupportModels">Umbra UI Support Models</h3>
+            <p data-i18n="umbraUiSupportDescription">Default person, face, and hand detailers, SAM refinement, and upscale resources used by Umbra UI pipelines. Install ComfyUI first.</p>
+            <button class="button" data-install="umbra-ui" type="button" data-i18n="installUmbraUiModels">Install Umbra UI Models</button>
           </article>
         </div>
       </section>
       <section id="progress" class="progress">
         <div class="progress-head">
-          <span id="job-step">Preparing installer</span>
-          <span id="job-phase">Running</span>
+          <span id="job-step" data-i18n="preparingInstaller">Preparing installer</span>
+          <span id="job-phase" data-i18n="running">Running</span>
         </div>
         <div class="track"><div class="fill"></div></div>
-        <pre id="job-log">Waiting for installer output...</pre>
+        <pre id="job-log" data-i18n="waitingForInstallerOutput">Waiting for installer output...</pre>
       </section>
     </main>
     <footer>
-      <div class="status">No migration is performed by this utility.</div>
+      <div class="status" data-i18n="noMigration">No migration is performed by this utility.</div>
       <div class="actions">
-        <button id="close" class="button" type="button">Close Setup</button>
-        <button id="launch" class="button primary" type="button">Launch Umbra Studio</button>
+        <button id="close" class="button" type="button" data-i18n="closeSetup">Close Setup</button>
+        <button id="launch" class="button primary" type="button" data-i18n="launchUmbra">Launch Umbra Studio</button>
       </div>
     </footer>
   </div>
   <script>
+    const SETUP_TRANSLATIONS = {
+      en: {
+        standaloneService: 'Standalone service',
+        languageLabel: 'Language',
+        languageTitle: 'Choose your preferred language',
+        languageDescription: 'This preference is stored in your portable User folder and can be changed later in Umbra Studio settings.',
+        saveLanguage: 'Save Language',
+        optionalModelPacks: 'Optional Model Packs',
+        installFeatureSupport: 'Install feature support',
+        installFeatureDescription: 'Install only what you plan to use. Existing valid files are verified and kept.',
+        dataForgeModels: 'Data Forge Models',
+        dataForgeModelsDescription: 'WD taggers and the natural-language caption model used by datasets and Image Inspector.',
+        installDataForgeModels: 'Install Data Forge Models',
+        umbraUiSupportModels: 'Umbra UI Support Models',
+        umbraUiSupportDescription: 'Default person, face, and hand detailers, SAM refinement, and upscale resources used by Umbra UI pipelines. Install ComfyUI first.',
+        installUmbraUiModels: 'Install Umbra UI Models',
+        preparingInstaller: 'Preparing installer',
+        running: 'Running',
+        complete: 'Complete',
+        failed: 'Failed',
+        waitingForInstallerOutput: 'Waiting for installer output...',
+        noMigration: 'No migration is performed by this utility.',
+        closeSetup: 'Close Setup',
+        launchUmbra: 'Launch Umbra Studio',
+        languageSaved: 'Language saved',
+        launchingUmbra: 'Launching Umbra Studio',
+        setupClosed: 'Setup closed',
+        installingModels: 'Installing models',
+        installationComplete: 'Installation complete',
+        installationFailed: 'Installation failed',
+        installingWdTaggers: 'Installing WD tagger models',
+        installingCaptionModels: 'Installing natural-language caption models',
+        installingUmbraUiModels: 'Installing Umbra UI support models',
+      },
+      de: {
+        standaloneService: 'Eigenständiger Dienst',
+        languageLabel: 'Sprache',
+        languageTitle: 'Wählen Sie Ihre bevorzugte Sprache',
+        languageDescription: 'Diese Einstellung wird in Ihrem portablen User-Ordner gespeichert und kann später in den Umbra-Studio-Einstellungen geändert werden.',
+        saveLanguage: 'Sprache speichern',
+        optionalModelPacks: 'Optionale Modellpakete',
+        installFeatureSupport: 'Funktionsunterstützung installieren',
+        installFeatureDescription: 'Installieren Sie nur, was Sie verwenden möchten. Vorhandene gültige Dateien werden geprüft und beibehalten.',
+        dataForgeModels: 'Data-Forge-Modelle',
+        dataForgeModelsDescription: 'WD-Tagger und das Modell für natürliche Bildbeschreibungen, die von Datensätzen und dem Bildinspektor verwendet werden.',
+        installDataForgeModels: 'Data-Forge-Modelle installieren',
+        umbraUiSupportModels: 'Umbra-UI-Unterstützungsmodelle',
+        umbraUiSupportDescription: 'Standard-Detailer für Personen, Gesichter und Hände, SAM-Verfeinerung und Upscale-Ressourcen für Umbra-UI-Pipelines. Installieren Sie zuerst ComfyUI.',
+        installUmbraUiModels: 'Umbra-UI-Modelle installieren',
+        preparingInstaller: 'Installer wird vorbereitet',
+        running: 'Wird ausgeführt',
+        complete: 'Abgeschlossen',
+        failed: 'Fehlgeschlagen',
+        waitingForInstallerOutput: 'Warten auf Installer-Ausgabe...',
+        noMigration: 'Dieses Hilfsprogramm führt keine Migration durch.',
+        closeSetup: 'Einrichtung schließen',
+        launchUmbra: 'Umbra Studio starten',
+        languageSaved: 'Sprache gespeichert',
+        launchingUmbra: 'Umbra Studio wird gestartet',
+        setupClosed: 'Einrichtung geschlossen',
+        installingModels: 'Modelle werden installiert',
+        installationComplete: 'Installation abgeschlossen',
+        installationFailed: 'Installation fehlgeschlagen',
+        installingWdTaggers: 'WD-Tagger-Modelle werden installiert',
+        installingCaptionModels: 'Modelle für natürliche Bildbeschreibungen werden installiert',
+        installingUmbraUiModels: 'Umbra-UI-Unterstützungsmodelle werden installiert',
+      },
+    };
     const token = new URLSearchParams(location.search).get('token') || '';
     const api = (path, options = {}) => fetch(path, {
       ...options,
@@ -191,6 +260,35 @@
     const jobLog = document.getElementById('job-log');
     const installButtons = Array.from(document.querySelectorAll('[data-install]'));
     let polling = false;
+    let currentLanguage = 'en';
+    let languageDirty = false;
+
+    function tr(key) {
+      return SETUP_TRANSLATIONS[currentLanguage]?.[key] || SETUP_TRANSLATIONS.en[key] || key;
+    }
+
+    function setSetupLanguage(value, markDirty = false) {
+      currentLanguage = value === 'de' ? 'de' : 'en';
+      language.value = value;
+      document.documentElement.lang = currentLanguage;
+      document.querySelectorAll('[data-i18n]').forEach((element) => {
+        const key = element.dataset.i18n;
+        if (key) element.textContent = tr(key);
+      });
+      languageDirty = markDirty || languageDirty;
+    }
+
+    function localizeJobStep(step) {
+      const jobSteps = {
+        'Preparing installer': 'preparingInstaller',
+        'Installing WD tagger models': 'installingWdTaggers',
+        'Installing natural-language caption models': 'installingCaptionModels',
+        'Installing Umbra UI support models': 'installingUmbraUiModels',
+        'Installation complete': 'installationComplete',
+        'Installation failed': 'installationFailed',
+      };
+      return tr(jobSteps[step] || step);
+    }
 
     function setBusy(busy) {
       installButtons.forEach((button) => { button.disabled = busy; });
@@ -203,12 +301,12 @@
       progress.classList.add('visible');
       progress.classList.toggle('done', job.phase === 'complete');
       progress.classList.toggle('failed', job.phase === 'failed');
-      jobStep.textContent = job.step;
-      jobPhase.textContent = job.phase;
-      jobLog.textContent = (job.lines || []).join('\n') || 'Waiting for installer output...';
+      jobStep.textContent = localizeJobStep(job.step);
+      jobPhase.textContent = tr(job.phase);
+      jobLog.textContent = (job.lines || []).join('\n') || tr('waitingForInstallerOutput');
       jobLog.scrollTop = jobLog.scrollHeight;
       setBusy(job.phase === 'running');
-      status.textContent = job.phase === 'running' ? 'Installing models' : job.step;
+      status.textContent = job.phase === 'running' ? tr('installingModels') : localizeJobStep(job.step);
       status.classList.toggle('error', job.phase === 'failed');
     }
 
@@ -217,7 +315,7 @@
       polling = true;
       try {
         const result = await api('/api/status');
-        language.value = result.language || language.value;
+        if (!languageDirty) setSetupLanguage(result.language || language.value);
         renderJob(result.job);
         if (result.job?.phase === 'running') setTimeout(() => { polling = false; poll(); }, 600);
         else polling = false;
@@ -231,7 +329,9 @@
     document.getElementById('save-language').addEventListener('click', async () => {
       try {
         await api('/api/language', { method: 'POST', body: JSON.stringify({ language: language.value }) });
-        status.textContent = 'Language saved';
+        setSetupLanguage(language.value);
+        languageDirty = false;
+        status.textContent = tr('languageSaved');
         status.classList.remove('error');
       } catch (error) {
         status.textContent = error.message;
@@ -257,8 +357,10 @@
     document.getElementById('launch').addEventListener('click', async () => {
       try {
         await api('/api/language', { method: 'POST', body: JSON.stringify({ language: language.value }) });
+        setSetupLanguage(language.value);
+        languageDirty = false;
         await api('/api/launch', { method: 'POST', body: '{}' });
-        status.textContent = 'Launching Umbra Studio';
+        status.textContent = tr('launchingUmbra');
       } catch (error) {
         status.textContent = error.message;
         status.classList.add('error');
@@ -268,7 +370,7 @@
     document.getElementById('close').addEventListener('click', async () => {
       try {
         await api('/api/close', { method: 'POST', body: '{}' });
-        status.textContent = 'Setup closed';
+        status.textContent = tr('setupClosed');
         window.close();
       } catch (error) {
         status.textContent = error.message;
@@ -276,6 +378,8 @@
       }
     });
 
+    language.addEventListener('change', () => setSetupLanguage(language.value, true));
+    setSetupLanguage(language.value);
     poll();
   </script>
 </body>

@@ -55,10 +55,15 @@ Quick summary:
 
 - Windows 10/11 x64 is the primary platform; Linux x64 portable builds are supported.
 - Git and internet access are required to install or update managed tools.
-- An NVIDIA GPU with current drivers is the best-supported generation/training path.
+- Generation and training in current portable releases require an NVIDIA GPU with
+  current drivers. AMD and Intel GPU acceleration are not supported yet.
 - Generation checkpoints, LoRAs, VAEs, text encoders, and video models are supplied by the user.
 - AI Toolkit currently requires host Node.js 20 or newer for its upstream web UI.
 - Umbra Remote requires the user's own Tailscale account and private tailnet.
+
+Umbra Studio is open source. Forks or contributions that establish reliable AMD
+or Intel GPU support are welcome, but those platforms are not supported by the
+current releases.
 
 ## Feature Highlights
 

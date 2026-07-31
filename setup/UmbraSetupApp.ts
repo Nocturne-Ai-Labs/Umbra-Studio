@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 const DEFAULT_SETUP_PORT = 8215;
-const SUPPORTED_LANGUAGES = new Set(['en', 'ja', 'zh-CN', 'ko']);
+const SUPPORTED_LANGUAGES = new Set(['en', 'ja', 'zh-CN', 'ko', 'de']);
 const MAX_LOG_LINES = 500;
 
 type SetupJobKind = 'data-forge' | 'umbra-ui';

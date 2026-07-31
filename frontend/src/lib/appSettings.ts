@@ -7,7 +7,7 @@ export const COMFY_SECURITY_LEVELS = ['strong', 'normal', 'normal-', 'weak'] as 
 export type ComfySecurityLevel = (typeof COMFY_SECURITY_LEVELS)[number];
 export const COMFY_ATTENTION_BACKENDS = ['default', 'sage', 'flash', 'pytorch', 'split', 'quad'] as const;
 export type ComfyAttentionBackend = (typeof COMFY_ATTENTION_BACKENDS)[number];
-export const APP_LANGUAGES = ['en', 'ja', 'zh-CN', 'ko'] as const;
+export const APP_LANGUAGES = ['en', 'ja', 'zh-CN', 'ko', 'de'] as const;
 export type AppLanguage = (typeof APP_LANGUAGES)[number];
 
 export interface AppSettings {

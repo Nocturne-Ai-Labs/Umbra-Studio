@@ -104,6 +104,10 @@ import {
   UMBRA_UPDATE_EXIT_CODE,
 } from './shared/appUpdate';
 import {
+  clearUmbraShutdownMarker,
+  writeUmbraShutdownMarker,
+} from './shared/umbraShutdownMarker';
+import {
   deriveUmbraUiInpaintCanvasCapabilities,
   deriveUmbraUiTxt2ImgCapabilities,
   listUmbraUiImg2ImgPipelineGraphIssues,
@@ -15726,6 +15730,7 @@ const USER_CONFIG_FILES: Record<string, string> = {
   'powerprompter-thumbnail-overrides': 'powerprompter-thumbnail-overrides.json',
   'local-server-apps': 'local-server-apps.json',
   'umbra-ui-agent-instructions': join('..', 'UmbraUI', 'Agent', 'prompt-instructions.json'),
+  'umbra-ui-image-controls': join('..', 'UmbraUI', 'image-controls.json'),
   'umbra-ui-prompt-history': join('..', 'UmbraUI', 'prompt-history.json'),
   'umbra-ui-video-prompt-history': join('..', 'UmbraUI', 'video-prompt-history.json'),
   'model-manager-browser': 'model-manager-browser.json',
@@ -33482,6 +33487,11 @@ const server = Bun.serve<any>({
 
 const localUrl = buildListenerOrigin(HOST, PORT);
 
+// A previous process may have been terminated after recording its shutdown
+// intent. A successfully bound replacement is authoritative, so clear that
+// stale marker before the launcher can supervise this process.
+clearUmbraShutdownMarker(ROOT_DIR);
+
 console.log(`
 \x1b[36m╔════════════════════════════════════════════════════════════╗
 ║  \x1b[1mUmbra Studio Server\x1b[0m\x1b[36m                                      ║
@@ -33551,6 +33561,20 @@ async function gracefulShutdown(signal: string) {
     return;
   }
   isShuttingDown = true;
+
+  try {
+    writeUmbraShutdownMarker(ROOT_DIR, {
+      serverPid: process.pid,
+      managedProcessPids: uniquePositivePids([
+        comfyProcess?.pid,
+        aitoolkitProcess?.pid,
+        galleryBridgeProcess?.pid,
+      ]),
+      reason: signal,
+    });
+  } catch (error) {
+    console.warn('[Shutdown] Could not record the shutdown marker:', error);
+  }
 
   console.log(`\n\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m`);
   console.log(`  \x1b[1mGraceful Shutdown (${signal})\x1b[0m`);

@@ -1,4 +1,4 @@
-export const UMBRA_APP_LANGUAGES = ['en', 'ja', 'zh-CN', 'ko'] as const;
+export const UMBRA_APP_LANGUAGES = ['en', 'ja', 'zh-CN', 'ko', 'de'] as const;
 export const UMBRA_MIGRATION_EXIT_CODE = 75;
 
 export type UmbraAppLanguage = (typeof UMBRA_APP_LANGUAGES)[number];

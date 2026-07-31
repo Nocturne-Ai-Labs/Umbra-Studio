@@ -17,19 +17,29 @@ the Git repository.
 
 - 16 GB system RAM; 32 GB or more is recommended for large galleries, training,
   video workflows, or running several managed tools together.
-- An NVIDIA GPU with current drivers is the best-supported generation and
-  training path. VRAM requirements are determined by the selected ComfyUI model
-  and workflow. Umbra does not override ComfyUI's model loading or VRAM policy.
+- An NVIDIA GPU with current drivers is required for the currently supported
+  generation and training path. VRAM requirements are determined by the selected
+  ComfyUI model and workflow. Umbra does not override ComfyUI's model loading or
+  VRAM policy.
 - At least 15 GB free for the core app, managed runtimes, and caption helpers.
   Reserve 50 GB or more when installing ComfyUI, AI Toolkit, caption models, and
   generation checkpoints. A serious local model library can require far more.
 - A modern Chromium- or Firefox-based browser with WebSocket, WebGL, and IndexedDB
   support.
 
-CPU-only use is suitable for Gallery and general file/dataset organization.
-Generation, natural-language captioning, and training may technically run on
-other hardware supported by their upstream tools, but those paths are not the
-primary qualified configuration.
+## GPU Support
+
+| Hardware | Current release status |
+| --- | --- |
+| NVIDIA GPU | Supported for Umbra's managed ComfyUI and AI Toolkit generation/training workflows. |
+| AMD GPU | Not supported yet. The current portable runtime and managed-tool flow are not qualified for AMD acceleration. |
+| Intel GPU | Not supported yet. The current portable runtime and managed-tool flow are not qualified for Intel acceleration. |
+| CPU only | Suitable for Gallery and general file/dataset organization, but not a supported generation or training configuration. |
+
+Umbra Studio is open source, and independent forks or contributions that add
+reliable AMD or Intel support are welcome. Those platforms will remain
+unsupported until their complete portable runtime and managed-tool workflows are
+qualified and documented.
 
 ## Portable Release Requirements
 

@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.21.6
+
+### German Localization
+
+- Added German (`Deutsch`) as a selectable Umbra Studio language across Global
+  Settings, the mobile interface, onboarding, and the standalone setup utility.
+- Localized the static interface catalog and dynamic UI labels while preserving
+  product names, model identifiers, file paths, prompts, and user-authored data.
+- Added German localization coverage and a static catalog audit to help keep
+  future interface work ready for translation.
+
+### Reliability And Workflow Polish
+
+- Persisted Umbra UI image controls in the portable User configuration so
+  updates keep a creator's selected resources, LoRAs, generation settings,
+  detailer pipeline, Hires Fix, and output-upscale preferences intact.
+- Improved the Power Prompter card overview so enabled variants remain visible
+  and easier to review when a project contains many cards.
+- Hardened shutdown supervision for Umbra-owned processes so the launcher and
+  updater can recover more reliably when a managed Bun server does not exit
+  cleanly.
+
 ## v0.21.5
 
 ### Mobile Gallery And Notifications

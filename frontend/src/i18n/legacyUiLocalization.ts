@@ -1,5 +1,6 @@
 import type { AppLanguage } from '@/lib/appSettings';
 import { CHINESE_UI_TEXT } from './chineseUiCatalog';
+import { GERMAN_UI_TEXT } from './germanUiCatalog';
 import { JAPANESE_UI_TEXT } from './japaneseUiCatalog';
 import { KOREAN_UI_TEXT } from './koreanUiCatalog';
 
@@ -108,6 +109,39 @@ const KOREAN_ACTION_SUFFIXES = new Map<string, string>([
   ['upload', '업로드'],
 ]);
 
+const GERMAN_ACTION_SUFFIXES = new Map<string, string>([
+  ['add', 'hinzufügen'],
+  ['apply', 'anwenden'],
+  ['cancel', 'abbrechen'],
+  ['choose', 'auswählen'],
+  ['clear', 'leeren'],
+  ['close', 'schließen'],
+  ['copy', 'kopieren'],
+  ['create', 'erstellen'],
+  ['delete', 'löschen'],
+  ['disable', 'deaktivieren'],
+  ['download', 'herunterladen'],
+  ['edit', 'bearbeiten'],
+  ['enable', 'aktivieren'],
+  ['export', 'exportieren'],
+  ['hide', 'ausblenden'],
+  ['import', 'importieren'],
+  ['load', 'laden'],
+  ['open', 'öffnen'],
+  ['refresh', 'aktualisieren'],
+  ['remove', 'entfernen'],
+  ['rename', 'umbenennen'],
+  ['save', 'speichern'],
+  ['search', 'suchen'],
+  ['select', 'auswählen'],
+  ['show', 'anzeigen'],
+  ['start', 'starten'],
+  ['stop', 'stoppen'],
+  ['test', 'testen'],
+  ['update', 'aktualisieren'],
+  ['upload', 'hochladen'],
+]);
+
 const JAPANESE_NOUN_SUFFIXES = new Map<string, string>([
   ['browser', 'ブラウザー'],
   ['controls', '操作'],
@@ -177,11 +211,35 @@ const KOREAN_NOUN_SUFFIXES = new Map<string, string>([
   ['workspace', '작업 공간'],
 ]);
 
+const GERMAN_NOUN_SUFFIXES = new Map<string, string>([
+  ['browser', 'Browser'],
+  ['controls', 'Steuerung'],
+  ['editor', 'Editor'],
+  ['folder', 'Ordner'],
+  ['history', 'Verlauf'],
+  ['manager', 'Manager'],
+  ['menu', 'Menü'],
+  ['mode', 'Modus'],
+  ['model', 'Modell'],
+  ['name', 'Name'],
+  ['panel', 'Bereich'],
+  ['path', 'Pfad'],
+  ['pipeline', 'Pipeline'],
+  ['preview', 'Vorschau'],
+  ['prompt', 'Prompt'],
+  ['queue', 'Warteschlange'],
+  ['settings', 'Einstellungen'],
+  ['source', 'Quelle'],
+  ['status', 'Status'],
+  ['workspace', 'Arbeitsbereich'],
+]);
+
 function lookupLocalized(language: AppLanguage, value: string): string | null {
   const key = value.trim().toLocaleLowerCase('en-US');
   if (language === 'ja') return JAPANESE_UI_TEXT.get(key) || null;
   if (language === 'zh-CN') return CHINESE_UI_TEXT.get(key) || null;
   if (language === 'ko') return KOREAN_UI_TEXT.get(key) || null;
+  if (language === 'de') return GERMAN_UI_TEXT.get(key) || null;
   return null;
 }
 
@@ -201,9 +259,11 @@ function translateNounPhrase(language: AppLanguage, value: string): string | nul
     ? CHINESE_NOUN_SUFFIXES
     : language === 'ko'
       ? KOREAN_NOUN_SUFFIXES
+      : language === 'de'
+        ? GERMAN_NOUN_SUFFIXES
       : JAPANESE_NOUN_SUFFIXES;
   const suffix = suffixes.get(suffixMatch[2].toLocaleLowerCase('en-US'));
-  return head && suffix ? `${head}${language === 'ko' ? ' ' : ''}${suffix}` : null;
+  return head && suffix ? `${head}${language === 'ko' || language === 'de' ? ' ' : ''}${suffix}` : null;
 }
 
 function translateDynamicUi(language: AppLanguage, value: string): string | null {
@@ -221,7 +281,9 @@ function translateDynamicUi(language: AppLanguage, value: string): string | null
       ? `已加载 ${loadedCountMatch[1]}/${loadedCountMatch[2]}`
       : language === 'ko'
         ? `${loadedCountMatch[1]}/${loadedCountMatch[2]} 불러옴`
-      : `${loadedCountMatch[1]}/${loadedCountMatch[2]} 読み込み済み`;
+        : language === 'de'
+          ? `${loadedCountMatch[1]}/${loadedCountMatch[2]} geladen`
+        : `${loadedCountMatch[1]}/${loadedCountMatch[2]} 読み込み済み`;
   }
 
   const positionMatch = value.match(/^(Running|Queue|Set|Group|Image|Prompt)\s+(\d[\d,.]*)\s+(?:of|\/)\s+(\d[\d,.]*)$/i);
@@ -242,7 +304,9 @@ function translateDynamicUi(language: AppLanguage, value: string): string | null
       ? `集合 ${enabledPromptCountMatch[2]} 已启用 ${enabledPromptCountMatch[1]} 个提示词`
       : language === 'ko'
         ? `세트 ${enabledPromptCountMatch[2]}에서 프롬프트 ${enabledPromptCountMatch[1]}개 사용`
-      : `セット ${enabledPromptCountMatch[2]} で ${enabledPromptCountMatch[1]} 件のプロンプトが有効`;
+        : language === 'de'
+          ? `Set ${enabledPromptCountMatch[2]}: ${enabledPromptCountMatch[1]} Prompts aktiviert`
+        : `セット ${enabledPromptCountMatch[2]} で ${enabledPromptCountMatch[1]} 件のプロンプトが有効`;
   }
 
   const mixedCountMatch = value.match(/^(\d[\d,.]*)\s+(media|images?|items?),\s+(\d[\d,.]*)\s+(folders?)$/i);
@@ -251,7 +315,7 @@ function translateDynamicUi(language: AppLanguage, value: string): string | null
     const secondNoun = lookupLocalized(language, mixedCountMatch[4]);
     return firstNoun && secondNoun
       ? `${mixedCountMatch[1]} ${firstNoun}${
-        language === 'zh-CN' ? '，' : language === 'ko' ? ', ' : '、'
+        language === 'zh-CN' ? '，' : language === 'ko' || language === 'de' ? ', ' : '、'
       }${mixedCountMatch[3]} ${secondNoun}`
       : null;
   }
@@ -277,6 +341,10 @@ function translateDynamicUi(language: AppLanguage, value: string): string | null
       const suffix = KOREAN_ACTION_SUFFIXES.get(action);
       return suffix ? `${object} ${suffix}` : null;
     }
+    if (language === 'de') {
+      const suffix = GERMAN_ACTION_SUFFIXES.get(action);
+      return suffix ? `${object} ${suffix}` : null;
+    }
     const suffix = JAPANESE_ACTION_AFFIXES.get(action);
     return suffix ? `${object}${suffix}` : null;
   }
@@ -289,6 +357,8 @@ function translateDynamicUi(language: AppLanguage, value: string): string | null
       ? `发送到${destination}`
       : language === 'ko'
         ? `${destination}로 보내기`
+        : language === 'de'
+          ? `An ${destination} senden`
         : `${destination}へ送る`;
   }
 
@@ -304,7 +374,9 @@ function translateDynamicUi(language: AppLanguage, value: string): string | null
       ? `由 ${definedByMatch[1]} 定义`
       : language === 'ko'
         ? `${definedByMatch[1]}에서 정의`
-      : `${definedByMatch[1]}で定義`;
+        : language === 'de'
+          ? `Definiert von ${definedByMatch[1]}`
+        : `${definedByMatch[1]}で定義`;
   }
 
   const missingPipelineMatch = value.match(/^No locked Umbra UI\s+(.+?)\s+pipeline is installed for\s+(.+)\.$/i);
@@ -316,7 +388,9 @@ function translateDynamicUi(language: AppLanguage, value: string): string | null
       ? `未安装适用于 ${missingPipelineMatch[2]} 的锁定 Umbra UI ${feature} 流水线。`
       : language === 'ko'
         ? `${missingPipelineMatch[2]}용 잠긴 Umbra UI ${feature} 파이프라인이 설치되어 있지 않습니다.`
-      : `${missingPipelineMatch[2]}用のロック済みUmbra UI ${feature}パイプラインがインストールされていません。`;
+        : language === 'de'
+          ? `Für ${missingPipelineMatch[2]} ist keine gesperrte Umbra UI ${feature}-Pipeline installiert.`
+        : `${missingPipelineMatch[2]}用のロック済みUmbra UI ${feature}パイプラインがインストールされていません。`;
   }
 
   const catalogErrorMatch = value.match(/^(.+?)\s+catalog returned\s+(\d+)\.$/i);
@@ -325,14 +399,16 @@ function translateDynamicUi(language: AppLanguage, value: string): string | null
       ? `${catalogErrorMatch[1]}目录返回了 ${catalogErrorMatch[2]}。`
       : language === 'ko'
         ? `${catalogErrorMatch[1]} 카탈로그가 ${catalogErrorMatch[2]}을(를) 반환했습니다.`
-      : `${catalogErrorMatch[1]}カタログが${catalogErrorMatch[2]}を返しました。`;
+        : language === 'de'
+          ? `${catalogErrorMatch[1]}-Katalog hat ${catalogErrorMatch[2]} zurückgegeben.`
+        : `${catalogErrorMatch[1]}カタログが${catalogErrorMatch[2]}を返しました。`;
   }
 
   return null;
 }
 
 export function translateLegacyUiText(language: AppLanguage, value: string): string {
-  if ((language !== 'ja' && language !== 'zh-CN' && language !== 'ko') || !/[A-Za-z]/.test(value)) return value;
+  if ((language !== 'ja' && language !== 'zh-CN' && language !== 'ko' && language !== 'de') || !/[A-Za-z]/.test(value)) return value;
   const leading = value.match(/^\s*/)?.[0] || '';
   const trailing = value.match(/\s*$/)?.[0] || '';
   const core = value.slice(leading.length, value.length - trailing.length);

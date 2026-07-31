@@ -426,10 +426,7 @@ const POWER_PROMPTER_CARD_STAGE_OFFSET_Y = 15;
 const POWER_PROMPTER_CARD_STAGE_BOTTOM_GAP = 0;
 const POWER_PROMPTER_SIDE_CARD_BREATHING_ROOM = 10;
 const CARD_NAV_BAR_HEIGHT_PX = 56;
-const CARD_NAV_CHIP_WIDTH = 148;
-const CARD_NAV_CHIP_GAP = 8;
-const CARD_NAV_CHIP_STRIDE = CARD_NAV_CHIP_WIDTH + CARD_NAV_CHIP_GAP;
-const CARD_NAV_CHIP_OVERSCAN = 4;
+const POWER_PROMPTER_CARD_NAV_PREVIEW_LIMIT = 5;
 const CARD_MENU_BOTTOM_SAFE_PX = 132;
 const MENU_VIEWPORT_MARGIN_PX = 8;
 const CARD_MENU_WIDTH_PX = 320;
@@ -2638,7 +2635,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const [forgeMetadataApplying, setForgeMetadataApplying] = useState(false);
   const [revealedVariantIds, setRevealedVariantIds] = useState<string[]>([]);
   const [laneMetrics, setLaneMetrics] = useState({ clientWidth: 0, scrollWidth: 0, scrollLeft: 0 });
-  const [cardNavMetrics, setCardNavMetrics] = useState({ clientWidth: 0, scrollLeft: 0 });
   const [variantViewportMetricsBySlotId, setVariantViewportMetricsBySlotId] = useState<Record<string, VariantViewportMetrics>>({});
   const [slotChipDragId, setSlotChipDragId] = useState('');
   const [slotChipDropId, setSlotChipDropId] = useState('');
@@ -2657,7 +2653,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const laneScrollRef = useRef<HTMLDivElement | null>(null);
   const laneBottomScrollRef = useRef<HTMLDivElement | null>(null);
   const laneContentRef = useRef<HTMLDivElement | null>(null);
-  const cardNavScrollRef = useRef<HTMLDivElement | null>(null);
   const touchHorizontalPanRef = useRef<{
     pointerId: number;
     startX: number;
@@ -2668,9 +2663,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     syncLaneBottom: boolean;
   } | null>(null);
   const suppressTouchPanClickUntilRef = useRef(0);
-  const cardNavButtonRefMap = useRef(new Map<string, HTMLButtonElement>());
   const laneMetricsRafRef = useRef<number | null>(null);
-  const cardNavMetricsRafRef = useRef<number | null>(null);
   const variantViewportMetricsRafRef = useRef<number | null>(null);
   const pendingVariantViewportMetricsRef = useRef(new Map<string, VariantViewportMetrics>());
   const slotSurfaceRefMap = useRef(new Map<string, HTMLDivElement>());
@@ -2916,56 +2909,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     if (Math.abs(nextTop - viewportTop) < 1) return;
     viewport.scrollTo({ top: nextTop, behavior });
   }, []);
-  const setCardNavButtonRef = useCallback((slotId: string, node: HTMLButtonElement | null) => {
-    if (node) {
-      cardNavButtonRefMap.current.set(slotId, node);
-      return;
-    }
-    cardNavButtonRefMap.current.delete(slotId);
-  }, []);
-  const setCardNavMetricsIfChanged = useCallback((next: { clientWidth: number; scrollLeft: number }) => {
-    setCardNavMetrics((prev) => (
-      Math.abs(prev.clientWidth - next.clientWidth) < 1
-      && Math.abs(prev.scrollLeft - next.scrollLeft) < 1
-        ? prev
-        : next
-    ));
-  }, []);
-  const readCardNavMetrics = useCallback(() => {
-    const container = cardNavScrollRef.current;
-    if (!container) return;
-    setCardNavMetricsIfChanged({
-      clientWidth: container.clientWidth,
-      scrollLeft: Math.max(0, container.scrollLeft),
-    });
-  }, [setCardNavMetricsIfChanged]);
-  const scheduleCardNavMetricsRead = useCallback(() => {
-    if (typeof window === 'undefined') return;
-    if (cardNavMetricsRafRef.current !== null) return;
-    cardNavMetricsRafRef.current = window.requestAnimationFrame(() => {
-      cardNavMetricsRafRef.current = null;
-      readCardNavMetrics();
-    });
-  }, [readCardNavMetrics]);
-  const handleCardNavScroll = useCallback(() => {
-    scheduleCardNavMetricsRead();
-  }, [scheduleCardNavMetricsRead]);
-  const scrollCardNavButtonIntoView = useCallback((slotId: string, behavior: ScrollBehavior = 'smooth') => {
-    const container = cardNavScrollRef.current;
-    if (!container) return;
-    const slotIndex = slots.findIndex((slot) => slot.slotId === slotId);
-    if (slotIndex < 0) return;
-    const maxLeft = Math.max(0, container.scrollWidth - container.clientWidth);
-    if (maxLeft <= 0) return;
-    const targetLeft = Math.max(
-      0,
-      Math.min(
-        maxLeft,
-        (slotIndex * CARD_NAV_CHIP_STRIDE) - ((container.clientWidth - CARD_NAV_CHIP_WIDTH) / 2)
-      )
-    );
-    container.scrollTo({ left: targetLeft, behavior });
-  }, [slots]);
   const setVariantSurfaceRef = useCallback((variantId: string, node: HTMLDivElement | null) => {
     if (node) {
       variantSurfaceRefMap.current.set(variantId, node);
@@ -3249,10 +3192,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       setIds: normalizeQueueSetIds(variant.queueSetIds, false),
     };
   }, [mobileVariantSetPicker, slots]);
-  useLayoutEffect(() => {
-    if (!activeSlotId) return;
-    scrollCardNavButtonIntoView(activeSlotId, 'smooth');
-  }, [activeSlotId, scrollCardNavButtonIntoView]);
   const deletedCardGroups = useMemo(
     () => normalizeDeletedCardGroups((document as any).deletedCardGroups),
     [document]
@@ -7598,29 +7537,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   }, [readLaneMetrics, slots.length, outputPreviewItems.length]);
 
   useEffect(() => {
-    readCardNavMetrics();
-    const nav = cardNavScrollRef.current;
-    if (!nav) return;
-    const onResize = () => {
-      readCardNavMetrics();
-    };
-    window.addEventListener('resize', onResize);
-
-    let resizeObserver: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== 'undefined') {
-      resizeObserver = new ResizeObserver(() => {
-        readCardNavMetrics();
-      });
-      resizeObserver.observe(nav);
-    }
-
-    return () => {
-      window.removeEventListener('resize', onResize);
-      resizeObserver?.disconnect();
-    };
-  }, [readCardNavMetrics, slots.length]);
-
-  useEffect(() => {
     if (!isActive || typeof window === 'undefined') return;
     readLaneMetrics();
     const rafA = window.requestAnimationFrame(() => {
@@ -7651,13 +7567,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     if (laneMetricsRafRef.current === null) return;
     window.cancelAnimationFrame(laneMetricsRafRef.current);
     laneMetricsRafRef.current = null;
-  }, []);
-
-  useEffect(() => () => {
-    if (typeof window === 'undefined') return;
-    if (cardNavMetricsRafRef.current === null) return;
-    window.cancelAnimationFrame(cardNavMetricsRafRef.current);
-    cardNavMetricsRafRef.current = null;
   }, []);
 
   useEffect(() => () => {
@@ -8037,33 +7946,51 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     }
     return count;
   }, [activeQueueSet]);
-  const cardNavVirtualWidth = useMemo(
-    () => slots.length > 0
-      ? (slots.length * CARD_NAV_CHIP_WIDTH) + (Math.max(0, slots.length - 1) * CARD_NAV_CHIP_GAP)
-      : 0,
-    [slots.length]
-  );
-  const cardNavWindow = useMemo(() => {
-    const slotCount = slots.length;
-    if (slotCount <= 0) return { startIndex: 0, endIndex: -1 };
-    if (cardNavMetrics.clientWidth <= 0 || slotCount <= 8) {
-      return { startIndex: 0, endIndex: slotCount - 1 };
+  const getSlotEnabledVariantNames = useCallback((slot: ChainSlot) => {
+    const names: string[] = [];
+    for (const variant of slot.variants) {
+      if (!String(variant.text || '').trim()) continue;
+      const setIds = normalizeQueueSetIds(variant.queueSetIds, false);
+      if (!setIds.includes(activeQueueSet)) continue;
+      names.push(
+        normalizeVariantName(variant.variantName)
+        || normalizePowerPrompterPromptText(variant.text).slice(0, 80)
+        || 'Untitled variant'
+      );
     }
-    const rawStart = Math.floor(cardNavMetrics.scrollLeft / CARD_NAV_CHIP_STRIDE) - CARD_NAV_CHIP_OVERSCAN;
-    const rawEnd = Math.ceil((cardNavMetrics.scrollLeft + cardNavMetrics.clientWidth) / CARD_NAV_CHIP_STRIDE) + CARD_NAV_CHIP_OVERSCAN;
-    const startIndex = Math.max(0, Math.min(slotCount - 1, rawStart));
-    const endIndex = Math.max(startIndex, Math.min(slotCount - 1, rawEnd));
-    return { startIndex, endIndex };
-  }, [cardNavMetrics.clientWidth, cardNavMetrics.scrollLeft, slots.length]);
-  const visibleCardNavSlots = useMemo(
-    () => cardNavWindow.endIndex >= cardNavWindow.startIndex
-      ? slots.slice(cardNavWindow.startIndex, cardNavWindow.endIndex + 1).map((slot, index) => ({
-        slot,
-        slotIndex: cardNavWindow.startIndex + index,
-      }))
-      : [],
-    [cardNavWindow.endIndex, cardNavWindow.startIndex, slots]
+    return names;
+  }, [activeQueueSet]);
+  const activeCardCount = useMemo(
+    () => slots.reduce((count, slot) => count + (getSlotActivePromptCount(slot) > 0 ? 1 : 0), 0),
+    [getSlotActivePromptCount, slots]
   );
+  const activeVariantCount = useMemo(
+    () => slots.reduce((count, slot) => count + getSlotActivePromptCount(slot), 0),
+    [getSlotActivePromptCount, slots]
+  );
+  const cardNavPreviewSlots = useMemo(
+    () => slots.slice(0, POWER_PROMPTER_CARD_NAV_PREVIEW_LIMIT),
+    [slots]
+  );
+  const cardNavOverflowSlots = useMemo(
+    () => slots.slice(POWER_PROMPTER_CARD_NAV_PREVIEW_LIMIT),
+    [slots]
+  );
+  const hiddenActiveVariantCount = useMemo(
+    () => cardNavOverflowSlots.reduce((count, slot) => count + getSlotActivePromptCount(slot), 0),
+    [cardNavOverflowSlots, getSlotActivePromptCount]
+  );
+  const selectPromptCard = useCallback((slot: ChainSlot, slotIndex: number) => {
+    setMobileGenerationControlsOpen(false);
+    setMobileCardPickerOpen(false);
+    setMobileVariantSetPicker(null);
+    setActiveSlotId(slot.slotId);
+    const firstVariant = slot.variants[0];
+    if (firstVariant?.id) setActiveVariantId(firstVariant.id);
+    window.requestAnimationFrame(() => {
+      scrollSlotIndexIntoView(slotIndex, 'smooth');
+    });
+  }, [scrollSlotIndexIntoView]);
   return (
     <div
       ref={editorRootRef}
@@ -8183,46 +8110,48 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
             ) : null}
             <ChevronDown size={14} className="shrink-0 text-zinc-400" />
           </button>
-          <div
-            ref={cardNavScrollRef}
-            data-umbra-card-nav-strip=""
-            onPointerDownCapture={(event) => beginTouchHorizontalPan(event)}
-            onPointerMoveCapture={updateTouchHorizontalPan}
-            onPointerUpCapture={finishTouchHorizontalPan}
-            onPointerCancelCapture={finishTouchHorizontalPan}
-            onScroll={handleCardNavScroll}
-            onClickCapture={suppressTouchHorizontalPanClick}
-            className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden custom-scrollbar pb-2"
-            title="Shift+Scroll to move along the card nav bar"
-          >
-            <div
-              className="relative h-10 whitespace-nowrap"
-              style={{ width: `${cardNavVirtualWidth}px`, minWidth: `${cardNavVirtualWidth}px` }}
+          <div data-umbra-card-nav-overview="" className="flex min-w-0 flex-1 items-center gap-1.5">
+            <button
+              type="button"
+              data-umbra-card-overview-button=""
+              data-active={mobileCardPickerOpen ? '1' : '0'}
+              aria-expanded={mobileCardPickerOpen}
+              onClick={() => {
+                setMobileGenerationControlsOpen(false);
+                setMobileVariantSetPicker(null);
+                setMobileCardPickerOpen(true);
+              }}
+              className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-md border border-cyan-400/35 bg-cyan-500/[0.08] px-3 text-left text-cyan-100 hover:border-cyan-300/65 hover:bg-cyan-500/[0.14]"
+              title={`Review ${activeVariantCount} enabled variant${activeVariantCount === 1 ? '' : 's'} across all cards`}
             >
-              {visibleCardNavSlots.map(({ slot, slotIndex }) => {
+              <span className="min-w-0">
+                <span className="block text-[9px] font-black uppercase tracking-[0.15em] text-cyan-200/65">All Cards</span>
+                <strong className="mt-0.5 block text-[10px] font-black uppercase tracking-[0.08em] text-cyan-50">
+                  {slots.length} card{slots.length === 1 ? '' : 's'} / {activeCardCount} active
+                </strong>
+              </span>
+              <ChevronDown size={14} className="shrink-0 text-cyan-200/80" />
+            </button>
+            <div data-umbra-card-nav-preview="" className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+              {cardNavPreviewSlots.map((slot, slotIndex) => {
                 const isActiveSlot = activeSlot?.slotId === slot.slotId;
                 const activePromptCount = getSlotActivePromptCount(slot);
+                const enabledVariantNames = getSlotEnabledVariantNames(slot);
                 const hasActivePrompt = activePromptCount > 0;
                 const isDropTarget = !!slotChipDragId && slotChipDropId === slot.slotId && slotChipDragId !== slot.slotId;
                 const label = String(slot.label || `Card ${slotIndex + 1}`).trim() || `Card ${slotIndex + 1}`;
+                const enabledSummary = enabledVariantNames.length > 0
+                  ? enabledVariantNames.slice(0, 2).join(', ') + (enabledVariantNames.length > 2 ? ` +${enabledVariantNames.length - 2}` : '')
+                  : 'No enabled variants';
                 return (
                   <button
-                    key={`slot-top-chip-${slot.slotId}`}
-                    ref={(node) => setCardNavButtonRef(slot.slotId, node)}
+                    key={`slot-card-summary-${slot.slotId}`}
+                    type="button"
                     data-umbra-card-nav-button={slot.slotId}
+                    data-active={isActiveSlot ? '1' : '0'}
+                    data-enabled={hasActivePrompt ? '1' : '0'}
                     draggable={!mobileSelectionMode && !touchRemoteMode}
-                    onClick={() => {
-                      setMobileCardPickerOpen(false);
-                      setMobileGenerationControlsOpen(false);
-                      setMobileVariantSetPicker(null);
-                      setActiveSlotId(slot.slotId);
-                      const top = slot.variants[0];
-                      if (top?.id) setActiveVariantId(top.id);
-                      window.requestAnimationFrame(() => {
-                        scrollCardNavButtonIntoView(slot.slotId);
-                        scrollSlotIndexIntoView(slotIndex, 'smooth');
-                      });
-                    }}
+                    onClick={() => selectPromptCard(slot, slotIndex)}
                     onDragStart={(event) => {
                       event.stopPropagation();
                       setSlotChipDragId(slot.slotId);
@@ -8243,9 +8172,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       const raw = String(event.dataTransfer.getData('text/plain') || '');
                       const parsed = raw.startsWith('slot-chip:') ? raw.slice('slot-chip:'.length).trim() : '';
                       const dragId = slotChipDragId || parsed;
-                      if (dragId && dragId !== slot.slotId) {
-                        moveSlotByChipDrag(dragId, slot.slotId);
-                      }
+                      if (dragId && dragId !== slot.slotId) moveSlotByChipDrag(dragId, slot.slotId);
                       setSlotChipDragId('');
                       setSlotChipDropId('');
                     }}
@@ -8256,53 +8183,62 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     onContextMenu={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      if (mobileSelectionMode) return;
-                      setActiveSlotId(slot.slotId);
-                      scrollCardNavButtonIntoView(slot.slotId);
-                      const top = slot.variants[0];
-                      if (top?.id) setActiveVariantId(top.id);
+                      selectPromptCard(slot, slotIndex);
                       const anchor = getElementContextMenuPoint(event, 'below');
                       openCardContextMenu(slot.slotId, anchor.x, anchor.y);
                     }}
-                    className={`absolute top-0 h-10 w-[148px] rounded-md border px-3.5 py-2 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+                    className={`inline-flex min-h-10 min-w-0 max-w-44 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors ${
                       isActiveSlot
-                        ? 'border-emerald-400/60 bg-emerald-500/16 text-emerald-100'
-                        : 'border-white/15 bg-white/[0.04] text-zinc-300 hover:text-zinc-100 hover:border-white/30'
+                        ? 'border-emerald-400/65 bg-emerald-500/16 text-emerald-100'
+                        : 'border-white/15 bg-white/[0.04] text-zinc-300 hover:border-white/30 hover:text-zinc-100'
                     } ${isDropTarget ? 'border-emerald-300/80 bg-emerald-500/14 text-emerald-100' : ''}`}
-                    style={{
-                      left: `${slotIndex * CARD_NAV_CHIP_STRIDE}px`,
-                      ...(hasActivePrompt ? {
-                        boxShadow: `0 0 0 1px ${hexToRgba(activeSetAccentColor, 0.32)}, 0 0 12px ${hexToRgba(activeSetAccentColor, 0.32)}`,
-                        borderColor: isActiveSlot ? undefined : hexToRgba(activeSetAccentColor, 0.44),
-                      } : {}),
-                    }}
-                    title={`${label} - Drag to reorder`}
+                    style={hasActivePrompt ? {
+                      boxShadow: `0 0 0 1px ${hexToRgba(activeSetAccentColor, 0.26)}`,
+                      borderColor: isActiveSlot ? undefined : hexToRgba(activeSetAccentColor, 0.44),
+                    } : undefined}
+                    title={`${label}: ${enabledSummary}. Drag to reorder.`}
                   >
-                      <span className="flex items-center justify-between gap-2.5">
-                        <span className="truncate">{label}</span>
-                        <span
-                        className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black leading-none ${
-                          hasActivePrompt
-                            ? ''
-                            : 'border-white/10 bg-white/[0.04] text-zinc-500'
-                        }`}
-                        style={hasActivePrompt ? {
-                          color: activeSetAccentColor,
-                          borderColor: hexToRgba(activeSetAccentColor, 0.5),
-                          backgroundColor: hexToRgba(activeSetAccentColor, 0.16),
-                        } : undefined}
-                        title={`${activePromptCount} prompt${activePromptCount === 1 ? '' : 's'} enabled for Set ${activeQueueSet}`}
-                      >
-                        {activePromptCount}
-                      </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[10px] font-bold uppercase tracking-[0.08em]">{label}</span>
+                      <span className={`mt-0.5 block truncate text-[9px] ${hasActivePrompt ? 'text-zinc-400' : 'text-zinc-600'}`}>{enabledSummary}</span>
+                    </span>
+                    <span
+                      className={`inline-flex min-w-5 shrink-0 items-center justify-center rounded-full border px-1.5 py-0.5 text-[9px] font-black leading-none ${
+                        hasActivePrompt ? '' : 'border-white/10 bg-white/[0.04] text-zinc-500'
+                      }`}
+                      style={hasActivePrompt ? {
+                        color: activeSetAccentColor,
+                        borderColor: hexToRgba(activeSetAccentColor, 0.5),
+                        backgroundColor: hexToRgba(activeSetAccentColor, 0.16),
+                      } : undefined}
+                    >
+                      {activePromptCount}
                     </span>
                   </button>
                 );
               })}
+              {cardNavOverflowSlots.length > 0 ? (
+                <button
+                  type="button"
+                  data-umbra-card-nav-overflow=""
+                  data-enabled={hiddenActiveVariantCount > 0 ? '1' : '0'}
+                  onClick={() => {
+                    setMobileGenerationControlsOpen(false);
+                    setMobileVariantSetPicker(null);
+                    setMobileCardPickerOpen(true);
+                  }}
+                  className={`inline-flex min-h-10 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[10px] font-black uppercase tracking-[0.08em] ${
+                    hiddenActiveVariantCount > 0
+                      ? 'border-amber-300/45 bg-amber-500/10 text-amber-100 hover:bg-amber-500/16'
+                      : 'border-white/15 bg-white/[0.04] text-zinc-400 hover:border-white/30 hover:text-zinc-100'
+                  }`}
+                  title={`${cardNavOverflowSlots.length} more card${cardNavOverflowSlots.length === 1 ? '' : 's'}${hiddenActiveVariantCount > 0 ? `, with ${hiddenActiveVariantCount} enabled variant${hiddenActiveVariantCount === 1 ? '' : 's'}` : ''}`}
+                >
+                  +{cardNavOverflowSlots.length}
+                  {hiddenActiveVariantCount > 0 ? <span className="text-[9px] text-amber-200/75">{hiddenActiveVariantCount} on</span> : null}
+                </button>
+              ) : null}
             </div>
-          </div>
-          <div className="hidden shrink-0 text-[9px] font-bold uppercase tracking-[0.18em] text-zinc-600 xl:block">
-            {laneHasOverflow ? 'Shift+Wheel Cards' : `${slots.length} Card${slots.length === 1 ? '' : 's'}`}
           </div>
           <button
             onClick={addSlot}
@@ -10252,65 +10188,86 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
         </div>
       </div>
 
-      {mobileSelectionMode && mobileCardPickerOpen && typeof window !== 'undefined' && window.document?.body && createPortal(
+      {mobileCardPickerOpen && typeof window !== 'undefined' && window.document?.body && createPortal(
         <>
           <button
             type="button"
             data-umbra-mobile-card-picker-backdrop=""
+            data-umbra-card-picker-backdrop=""
             aria-label="Close card picker"
             onClick={() => setMobileCardPickerOpen(false)}
+            className={mobileSelectionMode ? undefined : 'fixed inset-0 z-[235] border-0 bg-black/70 backdrop-blur-sm'}
           />
           <section
             data-umbra-mobile-card-picker=""
+            data-umbra-card-picker=""
+            data-desktop={mobileSelectionMode ? undefined : '1'}
             role="dialog"
             aria-modal="true"
-            aria-label="Choose prompt card"
+            aria-label="Choose a prompt card and review enabled variants"
+            className={mobileSelectionMode ? undefined : 'fixed left-1/2 top-1/2 z-[240] flex max-h-[min(42rem,calc(100dvh-4rem))] w-[min(56rem,calc(100vw-3rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-white/15 bg-[#07080c]/[0.99] shadow-2xl shadow-black/70'}
           >
-            <div data-umbra-mobile-card-picker-handle="" />
-            <div data-umbra-mobile-card-picker-header="">
+            <div data-umbra-mobile-card-picker-handle="" className={mobileSelectionMode ? undefined : 'hidden'} />
+            <div data-umbra-mobile-card-picker-header="" className={mobileSelectionMode ? undefined : 'flex min-h-16 items-center gap-3 border-b border-white/10 px-4 py-3'}>
               <div>
-                <span>Power Prompter</span>
-                <strong>Choose a card</strong>
+                <span className={mobileSelectionMode ? undefined : 'block text-[10px] font-black uppercase tracking-[0.16em] text-cyan-200/70'}>Power Prompter / Set {activeQueueSet}</span>
+                <strong className={mobileSelectionMode ? undefined : 'mt-1 block text-sm font-black uppercase tracking-[0.08em] text-zinc-50'}>Cards and enabled variants</strong>
+                {!mobileSelectionMode ? (
+                  <small className="mt-1 block text-[11px] text-zinc-400">
+                    {activeVariantCount} enabled variant{activeVariantCount === 1 ? '' : 's'} across {activeCardCount} card{activeCardCount === 1 ? '' : 's'}.
+                  </small>
+                ) : null}
               </div>
               <button
                 type="button"
                 onClick={() => setMobileCardPickerOpen(false)}
                 title="Close card picker"
+                className={mobileSelectionMode ? undefined : 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-zinc-300 hover:border-white/25 hover:text-white'}
               >
                 <X size={16} />
               </button>
             </div>
-            <div data-umbra-mobile-card-picker-grid="">
+            <div data-umbra-mobile-card-picker-grid="" className={mobileSelectionMode ? undefined : 'grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-y-auto overscroll-contain p-3 custom-scrollbar sm:grid-cols-2 xl:grid-cols-3'}>
               {slots.map((slot, slotIndex) => {
                 const isActive = activeSlot?.slotId === slot.slotId;
                 const activePromptCount = getSlotActivePromptCount(slot);
+                const enabledVariantNames = getSlotEnabledVariantNames(slot);
+                const enabledSummary = enabledVariantNames.length > 0
+                  ? enabledVariantNames.slice(0, 3).join(', ') + (enabledVariantNames.length > 3 ? ` +${enabledVariantNames.length - 3}` : '')
+                  : 'No enabled variants in this set';
                 return (
                   <button
                     key={`mobile-card-picker-${slot.slotId}`}
                     type="button"
                     data-active={isActive ? '1' : '0'}
-                    onClick={() => {
-                      setMobileGenerationControlsOpen(false);
-                      setMobileCardPickerOpen(false);
-                      setMobileVariantSetPicker(null);
-                      setActiveSlotId(slot.slotId);
-                      const top = slot.variants[0];
-                      if (top?.id) setActiveVariantId(top.id);
-                      window.requestAnimationFrame(() => {
-                        scrollSlotIndexIntoView(slotIndex, 'smooth');
-                      });
-                    }}
+                    data-enabled={activePromptCount > 0 ? '1' : '0'}
+                    onClick={() => selectPromptCard(slot, slotIndex)}
+                    className={mobileSelectionMode ? undefined : `flex min-w-0 min-h-[5.4rem] items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
+                      isActive
+                        ? 'border-emerald-400/65 bg-emerald-500/[0.14] text-white'
+                        : activePromptCount > 0
+                          ? 'border-amber-300/40 bg-amber-500/[0.07] text-zinc-100 hover:border-amber-200/70'
+                          : 'border-white/10 bg-white/[0.035] text-zinc-300 hover:border-white/25'
+                    }`}
+                    title={`${String(slot.label || `Card ${slotIndex + 1}`)}: ${enabledSummary}`}
                   >
                     <span className="min-w-0 flex-1">
-                      <strong>{String(slot.label || `Card ${slotIndex + 1}`)}</strong>
-                      <small>{activePromptCount} enabled in Set {activeQueueSet}</small>
+                      <strong className={mobileSelectionMode ? undefined : 'block truncate text-[12px] font-bold'}>{String(slot.label || `Card ${slotIndex + 1}`)}</strong>
+                      <small className={mobileSelectionMode ? undefined : 'mt-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500'}>{activePromptCount} enabled in Set {activeQueueSet}</small>
+                      <small data-umbra-card-picker-variant-summary="" className={mobileSelectionMode ? undefined : `mt-1 block truncate text-[10px] ${activePromptCount > 0 ? 'text-amber-100/80' : 'text-zinc-600'}`}>
+                        {enabledSummary}
+                      </small>
                     </span>
-                    <span>{activePromptCount}</span>
+                    <span className={mobileSelectionMode ? undefined : `inline-flex min-w-8 h-8 shrink-0 items-center justify-center rounded-full border text-[11px] font-black ${
+                      activePromptCount > 0
+                        ? 'border-amber-300/40 bg-amber-500/10 text-amber-100'
+                        : 'border-white/10 bg-white/[0.04] text-zinc-500'
+                    }`}>{activePromptCount}</span>
                   </button>
                 );
               })}
             </div>
-            <div data-umbra-mobile-card-picker-actions="">
+            <div data-umbra-mobile-card-picker-actions="" className={mobileSelectionMode ? undefined : 'flex justify-end border-t border-white/[0.08] px-3 py-3'}>
               <button
                 type="button"
                 data-umbra-mobile-card-picker-add=""
@@ -10319,6 +10276,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   setMobileCardPickerOpen(false);
                 }}
                 title="Add a new prompt card"
+                className={mobileSelectionMode ? undefined : 'inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-emerald-400/45 bg-emerald-500/[0.12] px-4 text-[11px] font-black uppercase tracking-[0.1em] text-emerald-100 hover:border-emerald-300/70 hover:bg-emerald-500/[0.18]'}
               >
                 <Plus size={15} />
                 <span>New Card</span>

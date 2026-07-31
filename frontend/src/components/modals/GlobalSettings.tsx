@@ -623,7 +623,9 @@ const GeneralSettings = ({ settings, updateSetting }: any) => {
                   ? t('language.chinese')
                   : value === 'ko'
                     ? t('language.korean')
-                  : t('language.english'),
+                    : value === 'de'
+                      ? t('language.german')
+                    : t('language.english'),
             }))}
           />
           <SettingHint>{t('language.description')}</SettingHint>

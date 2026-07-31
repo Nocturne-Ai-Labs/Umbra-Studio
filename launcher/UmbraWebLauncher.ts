@@ -13,6 +13,12 @@ import {
   type UmbraFirstRunPhase,
 } from '../shared/onboarding/firstRun';
 import { UMBRA_UPDATE_EXIT_CODE } from '../shared/appUpdate';
+import {
+  clearUmbraShutdownMarker,
+  isUmbraShutdownMarkerForProcess,
+  readUmbraShutdownMarker,
+  type UmbraShutdownMarker,
+} from '../shared/umbraShutdownMarker';
 
 type LauncherOptions = {
   noOpen: boolean;
@@ -36,6 +42,9 @@ const DEFAULT_PORT = 8212;
 const ALREADY_RUNNING_TIMEOUT_MS = 5_000;
 const READY_TIMEOUT_MS = 120_000;
 const READY_POLL_MS = 350;
+const SHUTDOWN_MARKER_POLL_MS = 250;
+const SHUTDOWN_GRACE_TIMEOUT_MS = 12_000;
+const SHUTDOWN_FORCE_EXIT_TIMEOUT_MS = 6_000;
 const TERMINAL_MODE_ENV = 'visible';
 const TERMINAL_CHILD_ENV = 'UMBRA_TERMINAL_CHILD';
 const LAUNCHER_IN_TERMINAL_ENV = 'UMBRA_LAUNCHER_IN_TERMINAL';
@@ -347,8 +356,80 @@ function openBrowser(url: string) {
   spawn('xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
 }
 
+function forceTerminateExactProcess(pid: number, label: string) {
+  if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid) return;
+  try {
+    if (platform() === 'win32') {
+      spawnSync('taskkill.exe', ['/PID', String(pid), '/F'], {
+        stdio: 'ignore',
+        windowsHide: true,
+        timeout: 10_000,
+      });
+      return;
+    }
+    process.kill(pid, 'SIGKILL');
+  } catch (error) {
+    console.warn(`[UmbraWebLauncher] Could not force-stop ${label} PID ${pid}:`, error);
+  }
+}
+
+async function waitForExitWithin(exitPromise: Promise<number>, timeoutMs: number): Promise<number | null> {
+  return await Promise.race([
+    exitPromise,
+    Bun.sleep(timeoutMs).then(() => null),
+  ]);
+}
+
+type SupervisedChildExit = {
+  code: number;
+  forced: boolean;
+  shutdownMarker: UmbraShutdownMarker | null;
+};
+
+async function waitForChildExitWithShutdownSupervision(
+  child: ChildProcessWithoutNullStreams,
+  exitPromise: Promise<number>,
+  runtimeRoot: string,
+): Promise<SupervisedChildExit> {
+  let marker: UmbraShutdownMarker | null = null;
+  let markerObserved = false;
+
+  while (true) {
+    const currentMarker = readUmbraShutdownMarker(runtimeRoot);
+    if (isUmbraShutdownMarkerForProcess(currentMarker, child.pid || 0)) {
+      marker = currentMarker;
+      if (!markerObserved) {
+        markerObserved = true;
+        writeLine(`[UmbraWebLauncher] Umbra requested ${marker.reason} shutdown; waiting for Bun PID ${marker.serverPid}.`);
+      }
+      if (Date.now() - marker.requestedAtMs >= SHUTDOWN_GRACE_TIMEOUT_MS) {
+        writeLine(`[UmbraWebLauncher] Bun PID ${marker.serverPid} did not exit gracefully. Terminating the owned server process.`);
+        forceTerminateExactProcess(marker.serverPid, 'Umbra server');
+        const forcedCode = await waitForExitWithin(exitPromise, SHUTDOWN_FORCE_EXIT_TIMEOUT_MS);
+        if (forcedCode !== null) {
+          return { code: forcedCode, forced: true, shutdownMarker: marker };
+        }
+        throw new Error(`Umbra Bun process ${marker.serverPid} remained alive after the forced shutdown attempt.`);
+      }
+    }
+
+    const exited = await waitForExitWithin(exitPromise, SHUTDOWN_MARKER_POLL_MS);
+    if (exited !== null) {
+      return { code: exited, forced: false, shutdownMarker: marker };
+    }
+  }
+}
+
+function shutdownExitCodeForMarker(marker: UmbraShutdownMarker | null): number | null {
+  if (!marker) return null;
+  if (marker.reason === 'update') return UMBRA_UPDATE_EXIT_CODE;
+  if (marker.reason === 'migration') return UMBRA_MIGRATION_EXIT_CODE;
+  return null;
+}
+
 function wireShutdown(child: ChildProcessWithoutNullStreams) {
   let shuttingDown = false;
+  let forceTimer: ReturnType<typeof setTimeout> | null = null;
   const stop = () => {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -357,10 +438,15 @@ function wireShutdown(child: ChildProcessWithoutNullStreams) {
     } catch {
       // Best-effort shutdown only.
     }
+    forceTimer = setTimeout(() => {
+      forceTerminateExactProcess(child.pid || 0, 'Umbra server');
+    }, SHUTDOWN_GRACE_TIMEOUT_MS);
+    forceTimer.unref?.();
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
   return () => {
+    if (forceTimer) clearTimeout(forceTimer);
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
   };
@@ -469,6 +555,7 @@ async function main() {
       writeLine('');
       writeLine('[UmbraWebLauncher] Restarting Umbra after migration...');
     }
+    clearUmbraShutdownMarker(runtimeRoot);
     const child = spawn(bunPath, [serverEntrypoint.path], {
       cwd: sourceRoot,
       env: {
@@ -519,7 +606,12 @@ async function main() {
       }
     }
 
-    const code = firstResult.type === 'exit' ? firstResult.code : await exitPromise;
+    const supervisedExit = firstResult.type === 'exit'
+      ? { code: firstResult.code, forced: false, shutdownMarker: null }
+      : await waitForChildExitWithShutdownSupervision(child, exitPromise, runtimeRoot);
+    const code = supervisedExit.forced
+      ? shutdownExitCodeForMarker(supervisedExit.shutdownMarker) ?? supervisedExit.code
+      : supervisedExit.code;
     writeLine('');
     writeLine(`[UmbraWebLauncher] Umbra server exited with code ${code}.`);
     if (code === UMBRA_UPDATE_EXIT_CODE) {

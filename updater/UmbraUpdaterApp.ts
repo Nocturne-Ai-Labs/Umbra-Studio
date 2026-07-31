@@ -27,6 +27,9 @@ type UpdaterSession = {
   createdAt: string;
 };
 
+const UMBRA_LISTENER_STOP_TIMEOUT_MS = 8_000;
+const UMBRA_SHUTDOWN_REQUEST_TIMEOUT_MS = 3_000;
+
 function readArg(name: string): string {
   const args = Bun.argv.slice(2);
   const index = args.indexOf(name);
@@ -90,31 +93,37 @@ function writeState(service: AppUpdateService, session: UpdaterSession, patch: P
 
 async function requestUmbraShutdown(session: UpdaterSession) {
   const host = session.appHost === '::1' ? '[::1]' : '127.0.0.1';
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UMBRA_SHUTDOWN_REQUEST_TIMEOUT_MS);
   try {
     await fetch(`http://${host}:${session.appPort}/api/app/updater/shutdown`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
+      signal: controller.signal,
     });
   } catch {
-    // Umbra may already be stopped, which is the desired state.
+    // The external worker still owns the exact server PID and will escalate if
+    // the listener did not accept this graceful request.
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
-async function waitForUmbraToStop(session: UpdaterSession) {
+async function waitForUmbraListenerToStop(session: UpdaterSession): Promise<boolean> {
   const host = session.appHost === '::1' ? '[::1]' : '127.0.0.1';
   const healthUrl = `http://${host}:${session.appPort}/api/healthz/ready`;
   const startedAt = Date.now();
-  while (Date.now() - startedAt < 10 * 60 * 1000) {
+  while (Date.now() - startedAt < UMBRA_LISTENER_STOP_TIMEOUT_MS) {
     try {
       const response = await fetch(healthUrl, { cache: 'no-store' });
-      if (!response.ok) return;
+      if (!response.ok) return true;
     } catch {
-      return;
+      return true;
     }
     await Bun.sleep(250);
   }
-  throw new Error('Umbra Studio did not shut down within ten minutes.');
+  return false;
 }
 
 function appOrigin(session: UpdaterSession): string {
@@ -162,7 +171,10 @@ async function runWorker(
   archivePath: string,
 ) {
   await requestUmbraShutdown(session);
-  await waitForUmbraToStop(session);
+  const listenerStopped = await waitForUmbraListenerToStop(session);
+  if (!listenerStopped) {
+    console.warn('[UmbraUpdaterApp] Umbra listener remained available after the graceful shutdown window. The worker will force-stop the owned Bun process if needed.');
+  }
   const requestPath = join(session.workspaceRoot, 'update-request.json');
   const request: UmbraUpdateWorkerRequest = {
     schemaVersion: 1,
@@ -171,7 +183,10 @@ async function runWorker(
     workspaceRoot: resolve(session.workspaceRoot),
     requestPath: resolve(requestPath),
     statePath: service.statePath,
-    serverPid: 0,
+    // The worker must retain the live Bun server PID. The listener can stop
+    // before Bun exits, and replacing application files while that process is
+    // hung is what leaves the updater stranded.
+    serverPid: session.serverPid,
     launcherPid: session.launcherPid,
     port: session.appPort,
     bindHost: session.appHost,

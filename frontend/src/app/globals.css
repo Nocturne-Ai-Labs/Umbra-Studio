@@ -3574,7 +3574,8 @@ html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-m
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-nav-heading],
-html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-nav-add] {
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-nav-add],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-card-nav-overview] {
   display: none !important;
 }
 
