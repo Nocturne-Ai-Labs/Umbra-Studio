@@ -426,6 +426,23 @@ function getPortableInstallRootFromBinary(pythonBinaryPath: string): string {
     return parent;
 }
 
+function ensurePortablePythonPip(pythonPath: string): boolean {
+    if (hasVenvPip(pythonPath)) return true;
+
+    log('->', 'Portable Python is missing pip. Bootstrapping it...');
+    if (runCmd(`"${pythonPath}" -m ensurepip --upgrade --default-pip`, dirname(pythonPath)) && hasVenvPip(pythonPath)) {
+        log('OK', 'Portable Python pip is ready.');
+        return true;
+    }
+
+    return failWithVerify(
+        'portable-python-pip-unavailable',
+        'Umbra portable Python could not bootstrap pip.',
+        [`Python runtime: ${pythonPath}`],
+        ['Retry setup with internet access. If it persists, remove Runtime/Python311 and retry setup.']
+    );
+}
+
 function installPortablePython311Linux(): boolean {
     if (!IS_LINUX) return false;
     try {
@@ -513,6 +530,8 @@ function installPortablePython311Linux(): boolean {
                 ['Delete Runtime/Python311 and retry install.']
             );
         }
+
+        if (!ensurePortablePythonPip(finalPython)) return false;
 
         try {
             execSync(`chmod +x "${finalPython}"`, { shell: '/bin/bash' });
@@ -620,6 +639,8 @@ function installPortablePython311Windows(): boolean {
             );
         }
 
+        if (!ensurePortablePythonPip(finalPython)) return false;
+
         log(`${c.green}OK${c.reset}`, `Portable Python installed: ${PORTABLE_PY311_HOME}`);
         rmSync(bootstrapDir, { recursive: true, force: true });
         return true;
@@ -644,6 +665,7 @@ function findPython311Runtime(): boolean {
                 const versionOutput = `${result.stdout || ''}${result.stderr || ''}`.trim();
                 const parsed = parsePythonVersion(versionOutput);
                 if (parsed && isPython311Version(parsed)) {
+                    if (!ensurePortablePythonPip(portablePython)) return false;
                     PYTHON_CMD = `"${portablePython}"`;
                     PYTHON_VERSION = `${parsed.major}.${parsed.minor}.${parsed.patch}`;
                     return true;
@@ -692,6 +714,7 @@ function findPython311Runtime(): boolean {
                         const versionOutput = `${result.stdout || ''}${result.stderr || ''}`.trim();
                         const parsed = parsePythonVersion(versionOutput);
                         if (parsed && isPython311Version(parsed)) {
+                            if (!ensurePortablePythonPip(installedPython)) return false;
                             PYTHON_CMD = `"${installedPython}"`;
                             PYTHON_VERSION = `${parsed.major}.${parsed.minor}.${parsed.patch}`;
                             return true;
@@ -824,6 +847,45 @@ function getVenvPython(toolPath: string): string | null {
     return null;
 }
 
+function hasVenvPip(venvPython: string): boolean {
+    try {
+        const result = spawnSync(venvPython, ['-m', 'pip', '--version'], {
+            encoding: 'utf-8',
+            shell: false,
+            timeout: 30000
+        });
+        return result.status === 0;
+    } catch {
+        return false;
+    }
+}
+
+function ensureVenvPip(venvPython: string, workingDirectory: string, label: string): boolean {
+    if (hasVenvPip(venvPython)) return true;
+
+    log('->', `Pip is missing from the ${label} virtual environment. Repairing it...`);
+    if (runCmd(`"${venvPython}" -m ensurepip --upgrade --default-pip`, workingDirectory) && hasVenvPip(venvPython)) {
+        log('OK', `${label} virtual environment pip restored.`);
+        return true;
+    }
+
+    // A partially-created venv can have python.exe but not pip. Re-run venv's
+    // upgrade step using Umbra's selected runtime without deleting user files.
+    const venvRoot = dirname(dirname(venvPython));
+    log('->', `Refreshing the ${label} virtual environment...`);
+    if (runCmd(`${PYTHON_CMD} -m venv --upgrade "${venvRoot}"`, workingDirectory) && hasVenvPip(venvPython)) {
+        log('OK', `${label} virtual environment repaired.`);
+        return true;
+    }
+
+    return failWithVerify(
+        'venv-pip-bootstrap-failed',
+        `The ${label} virtual environment is missing pip and could not be repaired.`,
+        [`Virtual environment: ${venvRoot}`],
+        ['Retry setup once. If it still fails, remove this tool virtual environment and retry setup.']
+    );
+}
+
 function setupUmbraPythonHelpersVenv(): boolean {
     ensureDir(PYTHON_HELPERS_DIR);
     if (!getVenvPython(PYTHON_HELPERS_DIR)) {
@@ -846,6 +908,10 @@ function setupUmbraPythonHelpersVenv(): boolean {
             [`Helper path: ${PYTHON_HELPERS_DIR}`],
             ['Delete Runtime/PythonHelpers and retry install.']
         );
+    }
+
+    if (!ensureVenvPip(py, PYTHON_HELPERS_DIR, 'Umbra Python helper')) {
+        return false;
     }
 
     const markerPath = join(PYTHON_HELPERS_DIR, '.helper_requirements_installed');
@@ -1437,6 +1503,10 @@ function setupPythonEnv(dir: string, toolId: string) {
         );
     }
 
+    if (!ensureVenvPip(py, dir, CONFIG[toolId]?.name || toolId)) {
+        return false;
+    }
+
     // Do not activate a hard-coded venv path. Managed tools can use venv, env,
     // or .venv, and invoking the discovered interpreter works without shell state.
     const runInVenv = (pythonArguments: string) => runCmd(`"${py}" ${pythonArguments}`, dir);
@@ -1674,6 +1744,8 @@ function refreshComfyFrontendPackages(toolDir: string): boolean {
         );
     }
 
+    if (!ensureVenvPip(py, toolDir, 'ComfyUI')) return false;
+
     const frontendSpecs = getPinnedComfyFrontendRequirementSpecs(toolDir);
     if (frontendSpecs.length <= 0) {
         log(`${c.yellow}!${c.reset}`, 'No ComfyUI frontend package pins found in requirements.txt');
@@ -1723,6 +1795,8 @@ function refreshComfyRuntimePackages(toolDir: string): boolean {
             ['Run install or repair ComfyUI before updating.']
         );
     }
+
+    if (!ensureVenvPip(py, toolDir, 'ComfyUI')) return false;
 
     const runtimeSpecs = getPinnedComfyRuntimeRequirementSpecs(toolDir);
     if (runtimeSpecs.length <= 0) {
@@ -1814,6 +1888,8 @@ function installComfyNodeRequirements(comfyDir: string, nodePath: string, nodeNa
         log('X', `Python venv is unavailable for ${nodeName} requirements`);
         return false;
     }
+
+    if (!ensureVenvPip(py, comfyDir, 'ComfyUI')) return false;
 
     const requirementsHash = Bun.hash(readFileSync(requirementsPath, 'utf-8')).toString();
     const markerPath = join(nodePath, '.umbra-requirements-installed');
@@ -2376,6 +2452,10 @@ function updatePyTorchForTool(key: keyof typeof CONFIG) {
         );
     }
 
+    if (!ensureVenvPip(py, toolDir, cfg.name)) {
+        exitWithExistingVerifyFailure();
+    }
+
     log('->', `Updating ${cfg.name} to latest available PyTorch...`);
     if (!upgradePyTorchPackages((pipArguments) => runCmd(`"${py}" -m pip ${pipArguments}`, toolDir))) {
         log(`${c.red}X${c.reset}`, 'PyTorch update failed');
@@ -2415,6 +2495,10 @@ function installSageAttentionForComfyUI() {
             [`Tool path: ${toolDir}`],
             ['Run install action for this tool first.']
         );
+    }
+
+    if (!ensureVenvPip(py, toolDir, cfg.name)) {
+        exitWithExistingVerifyFailure();
     }
 
     log('->', 'Installing SageAttention prerequisites...');
@@ -2544,6 +2628,10 @@ function installSageAttentionForComfyUIEnhanced() {
             [`Tool path: ${toolDir}`],
             ['Run install action for this tool first.']
         );
+    }
+
+    if (!ensureVenvPip(py, toolDir, cfg.name)) {
+        exitWithExistingVerifyFailure();
     }
 
     log('->', 'Installing SageAttention prerequisites...');

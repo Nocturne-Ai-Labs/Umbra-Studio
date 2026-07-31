@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.21.8
+
+### Portable Python Pip Repair Hotfix
+
+- Fixed portable ComfyUI setup when a partially created virtual environment
+  contains Python but is missing its `pip` module.
+- Umbra now verifies and repairs `pip` with Python's offline `ensurepip`
+  bootstrap before installing PyTorch, requirements, custom-node packages, or
+  SageAttention dependencies.
+- Added the same protection to AI-Toolkit, Umbra's Python helper environment,
+  and portable Python runtime provisioning.
+
 ## v0.21.7
 
 ### Portable ComfyUI Setup Hotfix
