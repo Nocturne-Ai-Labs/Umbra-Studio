@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.21.7
+
+### Portable ComfyUI Setup Hotfix
+
+- Fixed managed ComfyUI and AI-Toolkit setup when an existing virtual
+  environment is named `env` or `.venv` instead of `venv`.
+- PyTorch and requirements installation now invoke the discovered virtual
+  environment Python executable directly, so a separately installed system
+  Python is not required.
+- Replaced setup-console glyphs with portable ASCII output to keep Windows
+  setup logs readable across console code pages.
+
 ## v0.21.6
 
 ### German Localization

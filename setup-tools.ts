@@ -127,12 +127,12 @@ function printVerifyFailureSummary() {
     };
 
     console.log(`\n${c.red}${c.bold}Verification failed${c.reset}`);
-    log(`${c.red}✗${c.reset}`, `${failure.title} (${failure.code})`);
+    log(`${c.red}X${c.reset}`, `${failure.title} (${failure.code})`);
     for (const detail of failure.details) {
         log('-', detail);
     }
     if (failure.nextSteps.length > 0) {
-        log('→', 'Suggested next steps:');
+        log('->', 'Suggested next steps:');
         for (const step of failure.nextSteps) {
             log('  -', step);
         }
@@ -174,8 +174,8 @@ function runPlatformPreflight(): boolean {
 
     // Explicitly support Windows + Linux for tool bootstrap/update flow.
     if (!IS_WINDOWS && !IS_LINUX) {
-        log(`${c.red}✗${c.reset}`, `Unsupported platform: ${platform} (${arch})`);
-        log('→', 'Tool installer currently supports Windows and Linux only.');
+        log(`${c.red}X${c.reset}`, `Unsupported platform: ${platform} (${arch})`);
+        log('->', 'Tool installer currently supports Windows and Linux only.');
         return failWithVerify(
             'unsupported-platform',
             'Unsupported operating system for Umbra tool installer.',
@@ -184,11 +184,11 @@ function runPlatformPreflight(): boolean {
         );
     }
 
-    log(`${c.green}✓${c.reset}`, `Platform detected: ${platform} (${arch})`);
+    log(`${c.green}OK${c.reset}`, `Platform detected: ${platform} (${arch})`);
 
     // Required for repository bootstrap/update in all supported environments.
     if (!hasCommand('git')) {
-        log(`${c.red}✗${c.reset}`, 'Missing required command: git');
+        log(`${c.red}X${c.reset}`, 'Missing required command: git');
         return failWithVerify(
             'missing-git',
             'Required command is missing: git.',
@@ -199,7 +199,7 @@ function runPlatformPreflight(): boolean {
 
     // Required for portable Python bootstrap (Linux + Windows path).
     if (!hasCommand('curl')) {
-        log(`${c.red}✗${c.reset}`, 'Missing required command: curl');
+        log(`${c.red}X${c.reset}`, 'Missing required command: curl');
         return failWithVerify(
             'missing-curl',
             'Required command is missing: curl.',
@@ -210,7 +210,7 @@ function runPlatformPreflight(): boolean {
 
     // Required to extract portable Python archives.
     if (!hasCommand('tar')) {
-        log(`${c.red}✗${c.reset}`, 'Missing required command: tar');
+        log(`${c.red}X${c.reset}`, 'Missing required command: tar');
         return failWithVerify(
             'missing-tar',
             'Required command is missing: tar.',
@@ -274,12 +274,12 @@ function getPyTorchIndexCandidates(): string[] {
     ];
 }
 
-function upgradePyTorchPackages(runPipCommand: (pipCommand: string) => boolean): boolean {
+function upgradePyTorchPackages(runPipCommand: (pipArguments: string) => boolean): boolean {
     const packages = 'torch torchvision torchaudio';
     for (const indexUrl of getPyTorchIndexCandidates()) {
         log('->', `Trying PyTorch wheel index: ${indexUrl}`);
-        const installCommand = `pip install --upgrade ${packages} --index-url ${indexUrl}`;
-        if (runPipCommand(installCommand)) {
+        const installArguments = `install --upgrade ${packages} --index-url ${indexUrl}`;
+        if (runPipCommand(installArguments)) {
             return true;
         }
     }
@@ -331,7 +331,7 @@ function restoreAIToolkitCudaPyTorch(
         const cudaTag = indexUrl.split('/').pop() || '';
         log('->', `Restoring AI-Toolkit CUDA wheels from ${cudaTag} without changing its pinned Torch versions...`);
         const installCommand = [
-            'python -m pip install --upgrade --force-reinstall --no-deps',
+            '-m pip install --upgrade --force-reinstall --no-deps',
             `"torch==${torchVersion}+${cudaTag}"`,
             `"torchvision==${torchvisionVersion}+${cudaTag}"`,
             `--index-url ${indexUrl}`
@@ -459,7 +459,7 @@ function installPortablePython311Linux(): boolean {
         );
 
         if (candidates.length === 0) {
-            log(`${c.red}✗${c.reset}`, 'Unable to find a portable Python 3.11 Linux build asset.');
+            log(`${c.red}X${c.reset}`, 'Unable to find a portable Python 3.11 Linux build asset.');
             return failWithVerify(
                 'python311-asset-missing-linux',
                 'Portable Python 3.11 asset lookup failed.',
@@ -475,7 +475,7 @@ function installPortablePython311Linux(): boolean {
         })[0];
 
         const archivePath = join(bootstrapDir, selected.name!);
-        log('→', `Downloading portable Python 3.11 (${selected.name})...`);
+        log('->', `Downloading portable Python 3.11 (${selected.name})...`);
         execSync(`curl -fL "${selected.browser_download_url}" -o "${archivePath}"`, {
             stdio: 'inherit',
             shell: '/bin/bash'
@@ -490,7 +490,7 @@ function installPortablePython311Linux(): boolean {
 
         const extractedPython = findPortablePython311Binary(extractDir);
         if (!extractedPython) {
-            log(`${c.red}✗${c.reset}`, 'Portable Python archive did not contain python3.11.');
+            log(`${c.red}X${c.reset}`, 'Portable Python archive did not contain python3.11.');
             return failWithVerify(
                 'python311-archive-invalid-linux',
                 'Portable Python 3.11 archive verification failed.',
@@ -505,7 +505,7 @@ function installPortablePython311Linux(): boolean {
 
         const finalPython = findPortablePython311Binary(PORTABLE_PY311_HOME);
         if (!finalPython) {
-            log(`${c.red}✗${c.reset}`, 'Portable Python install failed (python3.11 missing after extract).');
+            log(`${c.red}X${c.reset}`, 'Portable Python install failed (python3.11 missing after extract).');
             return failWithVerify(
                 'python311-install-invalid-linux',
                 'Portable Python 3.11 install verification failed.',
@@ -518,11 +518,11 @@ function installPortablePython311Linux(): boolean {
             execSync(`chmod +x "${finalPython}"`, { shell: '/bin/bash' });
         } catch { }
 
-        log(`${c.green}✓${c.reset}`, `Portable Python installed: ${PORTABLE_PY311_HOME}`);
+        log(`${c.green}OK${c.reset}`, `Portable Python installed: ${PORTABLE_PY311_HOME}`);
         rmSync(bootstrapDir, { recursive: true, force: true });
         return true;
     } catch {
-        log(`${c.red}✗${c.reset}`, 'Failed to download/install portable Python 3.11 runtime.');
+        log(`${c.red}X${c.reset}`, 'Failed to download/install portable Python 3.11 runtime.');
         return failWithVerify(
             'python311-bootstrap-failed-linux',
             'Portable Python 3.11 bootstrap failed.',
@@ -565,7 +565,7 @@ function installPortablePython311Windows(): boolean {
         );
 
         if (candidates.length === 0) {
-            log(`${c.red}✗${c.reset}`, 'Unable to find a portable Python 3.11 Windows build asset.');
+            log(`${c.red}X${c.reset}`, 'Unable to find a portable Python 3.11 Windows build asset.');
             return failWithVerify(
                 'python311-asset-missing-windows',
                 'Portable Python 3.11 asset lookup failed.',
@@ -581,7 +581,7 @@ function installPortablePython311Windows(): boolean {
         })[0];
 
         const archivePath = join(bootstrapDir, selected.name!);
-        log('→', `Downloading portable Python 3.11 (${selected.name})...`);
+        log('->', `Downloading portable Python 3.11 (${selected.name})...`);
         execSync(`curl -fL "${selected.browser_download_url}" -o "${archivePath}"`, {
             stdio: 'inherit',
             shell: 'cmd.exe'
@@ -596,7 +596,7 @@ function installPortablePython311Windows(): boolean {
 
         const extractedPython = findPortablePython311Binary(extractDir);
         if (!extractedPython) {
-            log(`${c.red}✗${c.reset}`, 'Portable Python archive did not contain python.exe.');
+            log(`${c.red}X${c.reset}`, 'Portable Python archive did not contain python.exe.');
             return failWithVerify(
                 'python311-archive-invalid-windows',
                 'Portable Python 3.11 archive verification failed.',
@@ -611,7 +611,7 @@ function installPortablePython311Windows(): boolean {
 
         const finalPython = findPortablePython311Binary(PORTABLE_PY311_HOME);
         if (!finalPython) {
-            log(`${c.red}✗${c.reset}`, 'Portable Python install failed (python.exe missing after extract).');
+            log(`${c.red}X${c.reset}`, 'Portable Python install failed (python.exe missing after extract).');
             return failWithVerify(
                 'python311-install-invalid-windows',
                 'Portable Python 3.11 install verification failed.',
@@ -620,11 +620,11 @@ function installPortablePython311Windows(): boolean {
             );
         }
 
-        log(`${c.green}✓${c.reset}`, `Portable Python installed: ${PORTABLE_PY311_HOME}`);
+        log(`${c.green}OK${c.reset}`, `Portable Python installed: ${PORTABLE_PY311_HOME}`);
         rmSync(bootstrapDir, { recursive: true, force: true });
         return true;
     } catch {
-        log(`${c.red}✗${c.reset}`, 'Failed to download/install portable Python 3.11 runtime.');
+        log(`${c.red}X${c.reset}`, 'Failed to download/install portable Python 3.11 runtime.');
         return failWithVerify(
             'python311-bootstrap-failed-windows',
             'Portable Python 3.11 bootstrap failed.',
@@ -681,7 +681,7 @@ function findPython311Runtime(): boolean {
 
     // OS fallback: bootstrap private Python 3.11 runtime without touching system packages.
     if (IS_LINUX || IS_WINDOWS) {
-        log('→', 'System Python 3.11 not found. Bootstrapping portable Python 3.11 runtime...');
+        log('->', 'System Python 3.11 not found. Bootstrapping portable Python 3.11 runtime...');
         const installedOk = IS_LINUX ? installPortablePython311Linux() : installPortablePython311Windows();
         if (installedOk) {
             const installedPython = findPortablePython311Binary(PORTABLE_PY311_HOME);
@@ -808,7 +808,7 @@ function removeComfyModelPlaceholderCheckoutCollisions(dir: string): void {
 
     visit(modelsDir);
     if (removed > 0) {
-        log('→', `Removed ${removed} zero-byte ComfyUI model placeholder file(s) before git checkout.`);
+        log('->', `Removed ${removed} zero-byte ComfyUI model placeholder file(s) before git checkout.`);
     }
 }
 
@@ -827,7 +827,7 @@ function getVenvPython(toolPath: string): string | null {
 function setupUmbraPythonHelpersVenv(): boolean {
     ensureDir(PYTHON_HELPERS_DIR);
     if (!getVenvPython(PYTHON_HELPERS_DIR)) {
-        log('→', 'Creating Umbra Python helper venv...');
+        log('->', 'Creating Umbra Python helper venv...');
         if (!runCmd(`${PYTHON_CMD} -m venv venv`, PYTHON_HELPERS_DIR)) {
             return failWithVerify(
                 'python-helper-venv-create-failed',
@@ -853,7 +853,7 @@ function setupUmbraPythonHelpersVenv(): boolean {
     if (existsSync(markerPath)) {
         try {
             if (readFileSync(markerPath, 'utf-8') === requirementsKey) {
-                log('✓', 'Umbra Python helper venv already prepared. Skipping.');
+                log('OK', 'Umbra Python helper venv already prepared. Skipping.');
                 return true;
             }
         } catch {
@@ -861,7 +861,7 @@ function setupUmbraPythonHelpersVenv(): boolean {
         }
     }
 
-    log('→', 'Installing Umbra Python helper packages...');
+    log('->', 'Installing Umbra Python helper packages...');
     const packages = PYTHON_HELPER_PACKAGES.map((pkg) => `"${pkg}"`).join(' ');
     if (!runCmd(`"${py}" -m pip install --upgrade pip ${packages}`, PYTHON_HELPERS_DIR)) {
         return failWithVerify(
@@ -873,7 +873,7 @@ function setupUmbraPythonHelpersVenv(): boolean {
     }
 
     writeFileSync(markerPath, requirementsKey, 'utf-8');
-    log(`${c.green}✓${c.reset}`, `Umbra Python helper venv ready: ${PYTHON_HELPERS_DIR}`);
+    log(`${c.green}OK${c.reset}`, `Umbra Python helper venv ready: ${PYTHON_HELPERS_DIR}`);
     return true;
 }
 
@@ -1147,7 +1147,7 @@ function ensureRepoSourceAndBranch(dir: string, repoUrl: string, branch?: string
         if (!originUrl) {
             execSync(`git remote add origin "${repoUrl}"`, { cwd: dir, stdio: 'inherit' });
         } else if (normalizeGitUrl(originUrl) !== normalizeGitUrl(repoUrl)) {
-            log('→', `Switching repository origin to ${repoUrl}`);
+            log('->', `Switching repository origin to ${repoUrl}`);
             execSync(`git remote set-url origin "${repoUrl}"`, { cwd: dir, stdio: 'inherit' });
         }
 
@@ -1313,7 +1313,7 @@ async function checkUpdates(dir: string, repoUrl: string) {
         const status = execSync('git status -uno', { cwd: dir, encoding: 'utf-8' });
 
         if (status.includes('behind')) {
-            console.log(`\n${c.yellow}⚠ Update available for ${basename(dir)}!${c.reset}`);
+            console.log(`\n${c.yellow}! Update available for ${basename(dir)}!${c.reset}`);
             console.log(`  Changelog: ${repoUrl}`);
 
             // Allow user to see this
@@ -1321,11 +1321,11 @@ async function checkUpdates(dir: string, repoUrl: string) {
             const doUpdate = answer?.toLowerCase().startsWith('y') || false;
 
             if (doUpdate) {
-                log('→', 'Updating...');
+                log('->', 'Updating...');
                 if (!pullRepoWithRecovery(dir)) { throw new Error('git pull failed'); }
-                log(`${c.green}✓${c.reset}`, 'Updated successfully');
+                log(`${c.green}OK${c.reset}`, 'Updated successfully');
             } else {
-                log('→', 'Skipping update.');
+                log('->', 'Skipping update.');
             }
         }
     } catch {
@@ -1352,19 +1352,19 @@ function prompt(question: string): Promise<string> {
 }
 
 function cloneRepo(url: string, targetDir: string, branch?: string) {
-    log('→', `Cloning ${url}${branch ? `#${branch}` : ''}...`);
+    log('->', `Cloning ${url}${branch ? `#${branch}` : ''}...`);
     try {
         if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
         const hasGitDir = existsSync(join(targetDir, '.git'));
 
         if (hasValidGitCheckout(targetDir)) {
-            log('✓', 'Git repository already present. Skipping clone.');
+            log('OK', 'Git repository already present. Skipping clone.');
             if (!ensureRepoSourceAndBranch(targetDir, url, branch)) return false;
         } else if (isDirectoryEmpty(targetDir) && !hasGitDir) {
             const branchArgs = branch ? ` --branch "${branch}" --single-branch` : '';
             execSync(`git clone${branchArgs} "${url}" .`, { cwd: targetDir, stdio: 'inherit' });
         } else {
-            log('→', 'Existing folder detected; initializing repository in place...');
+            log('->', 'Existing folder detected; initializing repository in place...');
             if (!hasGitDir) execSync('git init', { cwd: targetDir, stdio: 'inherit' });
             try {
                 execSync('git remote remove origin', { cwd: targetDir, stdio: 'ignore' });
@@ -1399,10 +1399,10 @@ function cloneRepo(url: string, targetDir: string, branch?: string) {
         if (!ensureRepoSourceAndBranch(targetDir, url, branch)) return false;
         configureGitRepoForPortableUpdates(targetDir);
 
-        log(`${c.green}✓${c.reset}`, 'Cloned successfully');
+        log(`${c.green}OK${c.reset}`, 'Cloned successfully');
         return true;
     } catch {
-        log(`${c.red}✗${c.reset}`, 'Git clone failed');
+        log(`${c.red}X${c.reset}`, 'Git clone failed');
         return failWithVerify(
             'repo-clone-failed',
             'Repository clone/bootstrap failed.',
@@ -1415,9 +1415,9 @@ function cloneRepo(url: string, targetDir: string, branch?: string) {
 function setupPythonEnv(dir: string, toolId: string) {
     // 1. Create Venv
     if (!getVenvPython(dir)) {
-        log('→', 'Creating venv...');
+        log('->', 'Creating venv...');
         if (!runCmd(`${PYTHON_CMD} -m venv venv`, dir)) {
-            log(`${c.red}✗${c.reset}`, 'Failed to create venv');
+            log(`${c.red}X${c.reset}`, 'Failed to create venv');
             return failWithVerify(
                 'venv-create-failed',
                 'Failed to create tool virtual environment.',
@@ -1427,13 +1427,19 @@ function setupPythonEnv(dir: string, toolId: string) {
         }
     }
 
-    // Helper to run in venv
-    const runInVenv = (command: string) => {
-        const activate = IS_WINDOWS ? `call venv\\Scripts\\activate.bat` : `source venv/bin/activate`;
-        return runCmd(`${activate} && ${command}`, dir);
-    };
+    const py = getVenvPython(dir);
+    if (!py) {
+        return failWithVerify(
+            'venv-python-missing',
+            'The tool virtual environment was created but its Python executable could not be found.',
+            [`Tool path: ${dir}`],
+            ['Remove the tool virtual environment and retry setup.']
+        );
+    }
 
-    const py = getVenvPython(dir)!;
+    // Do not activate a hard-coded venv path. Managed tools can use venv, env,
+    // or .venv, and invoking the discovered interpreter works without shell state.
+    const runInVenv = (pythonArguments: string) => runCmd(`"${py}" ${pythonArguments}`, dir);
     // 2. Check if PyTorch exists
     // Use a marker file to avoid slow CUDA checks on every launch
     const torchMarker = join(dir, '.torch_installed');
@@ -1445,12 +1451,12 @@ function setupPythonEnv(dir: string, toolId: string) {
     }
 
     if (!hasTorch) {
-        log('→', 'PyTorch not found. Installing...');
-        runInVenv('python -m pip install --upgrade pip');
+        log('->', 'PyTorch not found. Installing...');
+        runInVenv('-m pip install --upgrade pip');
 
         // Install newest available torch/vision/audio with CUDA-first fallback.
-        if (!upgradePyTorchPackages(runInVenv)) {
-            log(`${c.red}✗${c.reset}`, 'PyTorch install failed');
+        if (!upgradePyTorchPackages((pipArguments) => runInVenv(`-m pip ${pipArguments}`))) {
+            log(`${c.red}X${c.reset}`, 'PyTorch install failed');
             return failWithVerify(
                 'pytorch-install-failed',
                 'Failed to install PyTorch stack for tool.',
@@ -1460,14 +1466,14 @@ function setupPythonEnv(dir: string, toolId: string) {
         }
         const torchInfo = getInstalledTorchInfo(py);
         if (torchInfo) {
-            log(`${c.green}✓${c.reset}`, `Installed torch ${torchInfo.version} (CUDA ${torchInfo.cuda})`);
+            log(`${c.green}OK${c.reset}`, `Installed torch ${torchInfo.version} (CUDA ${torchInfo.cuda})`);
         }
         // Create marker file to skip check next time
         try {
             writeFileSync(torchMarker, 'installed');
         } catch { }
     } else {
-        log('✓', 'PyTorch already installed. Skipping.');
+        log('OK', 'PyTorch already installed. Skipping.');
     }
 
     // 3. Install Requirements (if requirements.txt exists)
@@ -1484,15 +1490,15 @@ function setupPythonEnv(dir: string, toolId: string) {
                 // Simple hash comparison to detect changes
                 const reqHash = Bun.hash(reqContent).toString();
                 if (markerContent === reqHash) {
-                    log('✓', 'Requirements already installed. Skipping.');
+                    log('OK', 'Requirements already installed. Skipping.');
                     needsInstall = false;
                 }
             } catch { }
         }
 
         if (needsInstall) {
-            log('→', 'Installing requirements...');
-            if (!runInVenv('python -m pip install -r requirements.txt')) {
+            log('->', 'Installing requirements...');
+            if (!runInVenv('-m pip install -r requirements.txt')) {
                 return failWithVerify(
                     'requirements-install-failed',
                     'Failed to install tool requirements.',
@@ -1670,11 +1676,11 @@ function refreshComfyFrontendPackages(toolDir: string): boolean {
 
     const frontendSpecs = getPinnedComfyFrontendRequirementSpecs(toolDir);
     if (frontendSpecs.length <= 0) {
-        log(`${c.yellow}âš ${c.reset}`, 'No ComfyUI frontend package pins found in requirements.txt');
+        log(`${c.yellow}!${c.reset}`, 'No ComfyUI frontend package pins found in requirements.txt');
         return true;
     }
 
-    log('â†’', `Refreshing ComfyUI frontend packages: ${frontendSpecs.join(', ')}`);
+    log('->', `Refreshing ComfyUI frontend packages: ${frontendSpecs.join(', ')}`);
     const quotedSpecs = frontendSpecs.map((spec) => `"${escapeShellDoubleQuotes(spec)}"`).join(' ');
     const ok = runCmd(`"${py}" -m pip install --upgrade --force-reinstall ${quotedSpecs}`, toolDir);
     if (!ok) {
@@ -1686,7 +1692,7 @@ function refreshComfyFrontendPackages(toolDir: string): boolean {
         );
     }
 
-    log(`${c.green}âœ“${c.reset}`, 'ComfyUI frontend packages refreshed');
+    log(`${c.green}OK${c.reset}`, 'ComfyUI frontend packages refreshed');
     return true;
 }
 
@@ -1835,7 +1841,7 @@ function installComfyNodes(comfyDir: string): boolean {
     const nodesDir = join(comfyDir, 'custom_nodes');
     if (!existsSync(nodesDir)) mkdirSync(nodesDir, { recursive: true });
 
-    console.log(`\n${c.cyan}━━━ Installing ComfyUI Custom Nodes ━━━${c.reset}`);
+    console.log(`\n${c.cyan}--- Installing ComfyUI Custom Nodes ---${c.reset}`);
     syncUmbraNodesToComfy(nodesDir);
 
     // Get enabled nodes from config
@@ -1843,25 +1849,25 @@ function installComfyNodes(comfyDir: string): boolean {
 
     for (const node of COMFY_NODES) {
         if ('nvidiaOnly' in node && node.nvidiaOnly && !GPU_NAME) {
-            log('âˆ’', `${node.name} ${c.dim}(skipped - NVIDIA GPU not detected)${c.reset}`);
+            log('-', `${node.name} ${c.dim}(skipped - NVIDIA GPU not detected)${c.reset}`);
             continue;
         }
         // Skip if not enabled (unless required)
         if (!enabledNodes.has(node.name) && !('required' in node && node.required)) {
-            log('−', `${node.name} ${c.dim}(skipped - not selected)${c.reset}`);
+            log('-', `${node.name} ${c.dim}(skipped - not selected)${c.reset}`);
             continue;
         }
 
         const nodePath = join(nodesDir, node.name);
         if (!existsSync(nodePath)) {
-            log('→', `Installing ${node.name}...`);
+            log('->', `Installing ${node.name}...`);
             try {
                 execSync(`git clone ${node.repo} ${node.name}`, { cwd: nodesDir, stdio: 'ignore' });
                 configureGitRepoForPortableUpdates(nodePath);
 
-                log(`${c.green}✓${c.reset}`, `${node.name} installed`);
+                log(`${c.green}OK${c.reset}`, `${node.name} installed`);
             } catch {
-                log(`${c.red}✗${c.reset}`, `Failed to install ${node.name}`);
+                log(`${c.red}X${c.reset}`, `Failed to install ${node.name}`);
             }
         } else {
             // Check for updates
@@ -1870,11 +1876,11 @@ function installComfyNodes(comfyDir: string): boolean {
                 execSync('git fetch', { cwd: nodePath, stdio: 'ignore' });
                 const status = execSync('git status -uno', { cwd: nodePath, encoding: 'utf-8' });
                 if (status.includes('behind')) {
-                    log('→', `Updating ${node.name}...`);
+                    log('->', `Updating ${node.name}...`);
                     execSync('git pull', { cwd: nodePath, stdio: 'ignore' });
-                    log(`${c.green}✓${c.reset}`, `${node.name} updated`);
+                    log(`${c.green}OK${c.reset}`, `${node.name} updated`);
                 } else {
-                    log('✓', `${node.name} is up to date`);
+                    log('OK', `${node.name} is up to date`);
                 }
             } catch { }
         }
@@ -1910,7 +1916,7 @@ function installComfyNodes(comfyDir: string): boolean {
     // Confirm Umbra-Nodes exists in ComfyUI custom_nodes.
     const umbraNodesPath = join(nodesDir, 'Umbra-Nodes');
     if (hasUmbraNodesPayload(umbraNodesPath)) {
-        log(`${c.green}✓${c.reset}`, 'Umbra-Nodes detected');
+        log(`${c.green}OK${c.reset}`, 'Umbra-Nodes detected');
     } else {
         log(`${c.red}X${c.reset}`, 'Umbra-Nodes installation failed');
     }
@@ -2211,7 +2217,7 @@ async function setComfyUIVersion(ref: string) {
     if (!toolDir) {
         toolDir = join(TOOLS_DIR, cfg.dir);
         ensureDir(toolDir);
-        log('→', 'ComfyUI is not installed. Installing selected version from scratch...');
+        log('->', 'ComfyUI is not installed. Installing selected version from scratch...');
     }
     if (!cfg.repo) {
         exitWithVerifyFailure(
@@ -2225,7 +2231,7 @@ async function setComfyUIVersion(ref: string) {
     const escapedRef = targetRef.replace(/"/g, '\\"');
     if (hasValidGitCheckout(toolDir)) {
         configureGitRepoForPortableUpdates(toolDir);
-        log('→', 'Fetching ComfyUI references...');
+        log('->', 'Fetching ComfyUI references...');
         runCmd('git fetch --tags --force --prune origin', toolDir, true);
         const hasRef = runCmd(`git rev-parse --verify --quiet "${escapedRef}^{commit}"`, toolDir, true);
         if (!hasRef) {
@@ -2237,7 +2243,7 @@ async function setComfyUIVersion(ref: string) {
             );
         }
     } else {
-        log('→', 'ComfyUI git metadata missing. Will validate target ref after clean clone.');
+        log('->', 'ComfyUI git metadata missing. Will validate target ref after clean clone.');
     }
 
     const preserveRoot = join(ROOT_DIR, 'User', 'Config', 'ComfyUI-Preserve');
@@ -2246,26 +2252,26 @@ async function setComfyUIVersion(ref: string) {
     let preserveRestoreStatus = '';
 
     try {
-        log('→', 'Preserving ComfyUI user data before clean source rebuild...');
+        log('->', 'Preserving ComfyUI user data before clean source rebuild...');
         ensureDir(preserveRoot);
         ensureDir(preserveDir);
         preservedEntries = moveComfyUserDataEntries(toolDir, preserveDir, COMFY_USER_DATA_ENTRIES);
         if (preservedEntries.length > 0) {
-            log(`${c.green}✓${c.reset}`, `Preserved user data: ${preservedEntries.join(', ')}`);
+            log(`${c.green}OK${c.reset}`, `Preserved user data: ${preservedEntries.join(', ')}`);
         } else {
-            log('→', 'No existing ComfyUI user data folders/files needed preservation.');
+            log('->', 'No existing ComfyUI user data folders/files needed preservation.');
         }
 
-        log('→', 'Removing current ComfyUI source checkout...');
+        log('->', 'Removing current ComfyUI source checkout...');
         rmSync(toolDir, { recursive: true, force: true });
         ensureDir(toolDir);
 
-        log('→', 'Cloning clean ComfyUI repository...');
+        log('->', 'Cloning clean ComfyUI repository...');
         if (!cloneRepo(cfg.repo, toolDir, cfg.branch)) {
             throw new Error('ComfyUI source clone failed.');
         }
 
-        log('→', 'Refreshing ComfyUI git references...');
+        log('->', 'Refreshing ComfyUI git references...');
         configureGitRepoForPortableUpdates(toolDir);
         runCmd('git fetch --tags --force --prune origin', toolDir, true);
         const hasRefAfterClone = runCmd(`git rev-parse --verify --quiet "${escapedRef}^{commit}"`, toolDir, true);
@@ -2273,7 +2279,7 @@ async function setComfyUIVersion(ref: string) {
             throw new Error(`Requested ComfyUI version reference was not found after clone: ${targetRef}`);
         }
 
-        log('→', `Checking out ${targetRef}...`);
+        log('->', `Checking out ${targetRef}...`);
         if (!runCmd(`git checkout -f "${escapedRef}"`, toolDir)) {
             throw new Error(`Failed to checkout requested ComfyUI version: ${targetRef}`);
         }
@@ -2285,7 +2291,7 @@ async function setComfyUIVersion(ref: string) {
         if (preservedEntries.length > 0) {
             const restoredEntries = moveComfyUserDataEntries(preserveDir, toolDir, preservedEntries, true);
             preserveRestoreStatus = `Restored preserved user data: ${restoredEntries.join(', ')}`;
-            log(`${c.green}✓${c.reset}`, preserveRestoreStatus);
+            log(`${c.green}OK${c.reset}`, preserveRestoreStatus);
         }
 
         rmSync(preserveDir, { recursive: true, force: true });
@@ -2298,7 +2304,7 @@ async function setComfyUIVersion(ref: string) {
                 const recoveredEntries = moveComfyUserDataEntries(preserveDir, toolDir, preservedEntries, true);
                 if (recoveredEntries.length > 0) {
                     recoveryNote = `Recovered preserved user data after failure: ${recoveredEntries.join(', ')}`;
-                    log(`${c.yellow}⚠${c.reset}`, recoveryNote);
+                    log(`${c.yellow}!${c.reset}`, recoveryNote);
                 }
             }
             if (existsSync(preserveDir)) {
@@ -2323,7 +2329,7 @@ async function setComfyUIVersion(ref: string) {
 
     const setupOk = setupPythonEnv(toolDir, cfg.id);
     if (!setupOk) {
-        log(c.red + '✗' + c.reset, 'ComfyUI setup failed after version switch');
+        log(c.red + 'X' + c.reset, 'ComfyUI setup failed after version switch');
         exitWithExistingVerifyFailure();
     }
 
@@ -2343,14 +2349,14 @@ async function setComfyUIVersion(ref: string) {
         encoding: 'utf-8'
     });
     const resolvedCommit = currentCommit.status === 0 ? currentCommit.stdout.trim() : '';
-    log(`${c.green}✓${c.reset}`, `ComfyUI switched to ${targetRef}${resolvedCommit ? ` (${resolvedCommit})` : ''}`);
+    log(`${c.green}OK${c.reset}`, `ComfyUI switched to ${targetRef}${resolvedCommit ? ` (${resolvedCommit})` : ''}`);
 }
 
 function updatePyTorchForTool(key: keyof typeof CONFIG) {
     const cfg = CONFIG[key];
     const toolDir = findToolPath(cfg.search);
     if (!toolDir) {
-        log(`${c.red}✗${c.reset}`, `${cfg.name} not found. Install it first.`);
+        log(`${c.red}X${c.reset}`, `${cfg.name} not found. Install it first.`);
         exitWithVerifyFailure(
             'tool-not-found',
             `${cfg.name} is not installed.`,
@@ -2361,7 +2367,7 @@ function updatePyTorchForTool(key: keyof typeof CONFIG) {
 
     const py = getVenvPython(toolDir);
     if (!py) {
-        log(`${c.red}✗${c.reset}`, `${cfg.name} venv not found. Install it first.`);
+        log(`${c.red}X${c.reset}`, `${cfg.name} venv not found. Install it first.`);
         exitWithVerifyFailure(
             'venv-not-found',
             `${cfg.name} virtual environment is missing.`,
@@ -2370,9 +2376,9 @@ function updatePyTorchForTool(key: keyof typeof CONFIG) {
         );
     }
 
-    log('→', `Updating ${cfg.name} to latest available PyTorch...`);
-    if (!upgradePyTorchPackages((pipCmd) => runCmd(`"${py}" -m ${pipCmd}`, toolDir))) {
-        log(`${c.red}✗${c.reset}`, 'PyTorch update failed');
+    log('->', `Updating ${cfg.name} to latest available PyTorch...`);
+    if (!upgradePyTorchPackages((pipArguments) => runCmd(`"${py}" -m pip ${pipArguments}`, toolDir))) {
+        log(`${c.red}X${c.reset}`, 'PyTorch update failed');
         exitWithVerifyFailure(
             'pytorch-update-failed',
             `Failed to update PyTorch for ${cfg.name}.`,
@@ -2382,16 +2388,16 @@ function updatePyTorchForTool(key: keyof typeof CONFIG) {
     }
     const torchInfo = getInstalledTorchInfo(py);
     if (torchInfo) {
-        log(`${c.green}✓${c.reset}`, `Now using torch ${torchInfo.version} (CUDA ${torchInfo.cuda})`);
+        log(`${c.green}OK${c.reset}`, `Now using torch ${torchInfo.version} (CUDA ${torchInfo.cuda})`);
     }
-    log(`${c.green}✓${c.reset}`, `${cfg.name} PyTorch stack updated`);
+    log(`${c.green}OK${c.reset}`, `${cfg.name} PyTorch stack updated`);
 }
 
 function installSageAttentionForComfyUI() {
     const cfg = CONFIG.comfyui;
     const toolDir = findToolPath(cfg.search);
     if (!toolDir) {
-        log(`${c.red}âœ—${c.reset}`, `${cfg.name} not found. Install it first.`);
+        log(`${c.red}X${c.reset}`, `${cfg.name} not found. Install it first.`);
         exitWithVerifyFailure(
             'tool-not-found',
             `${cfg.name} is not installed.`,
@@ -2402,7 +2408,7 @@ function installSageAttentionForComfyUI() {
 
     const py = getVenvPython(toolDir);
     if (!py) {
-        log(`${c.red}âœ—${c.reset}`, `${cfg.name} venv not found. Install it first.`);
+        log(`${c.red}X${c.reset}`, `${cfg.name} venv not found. Install it first.`);
         exitWithVerifyFailure(
             'venv-not-found',
             `${cfg.name} virtual environment is missing.`,
@@ -2411,7 +2417,7 @@ function installSageAttentionForComfyUI() {
         );
     }
 
-    log('â†’', 'Installing SageAttention prerequisites...');
+    log('->', 'Installing SageAttention prerequisites...');
     if (!runCmd(`"${py}" -m pip install --upgrade pip "setuptools<82" wheel packaging ninja`, toolDir)) {
         exitWithVerifyFailure(
             'sageattention-prereqs-failed',
@@ -2439,7 +2445,7 @@ function installSageAttentionForComfyUI() {
 
     let installed = false;
     for (const cmd of candidates) {
-        log('â†’', `Trying: ${cmd}`);
+        log('->', `Trying: ${cmd}`);
         if (runCmdAllowFailure(cmd, toolDir)) {
             installed = true;
             break;
@@ -2468,7 +2474,7 @@ function installSageAttentionForComfyUI() {
         ];
     let tritonInstalled = false;
     for (const cmd of tritonCandidates) {
-        log('â†’', `Trying Triton runtime: ${cmd}`);
+        log('->', `Trying Triton runtime: ${cmd}`);
         if (runCmdAllowFailure(cmd, toolDir)) {
             tritonInstalled = true;
             break;
@@ -2512,8 +2518,8 @@ function installSageAttentionForComfyUI() {
         );
     }
 
-    log(`${c.green}âœ“${c.reset}`, 'SageAttention dependencies installed for ComfyUI');
-    log('â†’', 'Restart ComfyUI to apply SageAttention runtime changes.');
+    log(`${c.green}OK${c.reset}`, 'SageAttention dependencies installed for ComfyUI');
+    log('->', 'Restart ComfyUI to apply SageAttention runtime changes.');
 }
 
 function installSageAttentionForComfyUIEnhanced() {
@@ -2664,9 +2670,9 @@ function installSageAttentionForComfyUIEnhanced() {
 }
 
 async function main() {
-    console.log(`\n${c.cyan}â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—${c.reset}`);
-    console.log(`${c.cyan}â•‘${c.reset}  ${c.bold}Umbra Studio - Universal Setup${c.reset}                  ${c.cyan}â•‘${c.reset}`);
-    console.log(`${c.cyan}â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•${c.reset}\n`);
+    console.log(`\n${c.cyan}+------------------------------------------------+${c.reset}`);
+    console.log(`${c.cyan}|${c.reset}  ${c.bold}Umbra Studio - Universal Setup${c.reset}                  ${c.cyan}|${c.reset}`);
+    console.log(`${c.cyan}+------------------------------------------------+${c.reset}\n`);
 
     const arg = process.argv[2]?.toLowerCase();
     const pythonNotRequiredActions = new Set([
@@ -2682,7 +2688,7 @@ async function main() {
         if (!findPython311Runtime()) {
             exitWithExistingVerifyFailure();
         }
-        log(`${c.green}âœ“${c.reset}`, `Using Python 3.11 (${PYTHON_VERSION}): ${PYTHON_CMD}`);
+        log(`${c.green}OK${c.reset}`, `Using Python 3.11 (${PYTHON_VERSION}): ${PYTHON_CMD}`);
     } else {
         log('->', 'Python runtime bootstrap skipped for desktop-only action');
     }
@@ -2690,7 +2696,7 @@ async function main() {
     if (!arg || !pythonNotRequiredActions.has(arg)) {
         detectGPU();
         if (GPU_NAME) {
-            log(`${c.green}âœ“${c.reset}`, `Detected GPU: ${GPU_NAME}`);
+            log(`${c.green}OK${c.reset}`, `Detected GPU: ${GPU_NAME}`);
             if (isBlackwellGPU()) {
                 log('->', 'Blackwell GPU detected - will use CUDA 13.0');
             }
@@ -2733,7 +2739,7 @@ async function main() {
     } else if (arg === 'comfy-nodes') {
         const comfyDir = findToolPath(CONFIG.comfyui.search);
         if (!comfyDir) {
-            log(`${c.red}âœ—${c.reset}`, 'ComfyUI not found');
+            log(`${c.red}X${c.reset}`, 'ComfyUI not found');
             exitWithVerifyFailure(
                 'comfyui-not-found',
                 'ComfyUI install not found for custom node setup.',
