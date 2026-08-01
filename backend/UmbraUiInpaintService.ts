@@ -20,6 +20,7 @@ import {
 import {
   resolveUmbraUiInpaintRegionalConditioningContractForAdapter,
 } from './UmbraUiPipelineCapabilities';
+import { upsertPngTextMetadata } from './PngTextMetadata';
 
 const IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);
 const JOB_RETENTION_MS = 6 * 60 * 60 * 1000;
@@ -266,7 +267,10 @@ export interface UmbraUiInpaintSettings {
   inpaintAdapter: UmbraUiInpaintAdapter;
   adapterModelName: string;
   prompt: string;
+  promptSegments?: UmbraUiInpaintPromptSegment[];
   negativePrompt: string;
+  loras?: UmbraUiInpaintLora[];
+  workflowResources?: Record<string, string>;
   checkpointName: string;
   clipSkip: number;
   seed: number;
@@ -313,6 +317,23 @@ export interface UmbraUiInpaintSettings {
   regionalGuidance: UmbraUiInpaintRegionalGuidance[];
   controlLayers: UmbraUiInpaintControlLayer[];
   referenceLayers: UmbraUiInpaintReferenceLayer[];
+}
+
+export interface UmbraUiInpaintPromptSegment {
+  id: string;
+  text: string;
+  label: string;
+  slotType: string;
+  variantId: string;
+  variantName: string;
+}
+
+export interface UmbraUiInpaintLora {
+  id: string;
+  name: string;
+  enabled: boolean;
+  strengthModel: number;
+  strengthClip: number;
 }
 
 export function validateUmbraUiInpaintLayerProviderContract(
@@ -422,6 +443,7 @@ export interface UmbraUiInpaintOutput {
 
 export interface UmbraUiInpaintJobItem {
   id: string;
+  ppuid?: string;
   seed: number;
   status: UmbraUiInpaintItemStatus;
   promptId: string;
@@ -452,6 +474,7 @@ interface UmbraUiInpaintBaseWorkflow {
 interface UmbraUiInpaintServiceOptions {
   getComfyBaseUrl: () => string;
   getComfyInputRoot?: () => string;
+  getComfyOutputRoot?: () => string;
   jobStatePath?: string;
   historyPollIntervalMs?: number;
   queueCheckIntervalMs?: number;
@@ -930,10 +953,93 @@ function randomSeed(): number {
   return Number(((BigInt(bytes[0]) << 21n) ^ BigInt(bytes[1])) % BigInt(Number.MAX_SAFE_INTEGER));
 }
 
+export function buildUmbraUiInpaintPowerPrompterMetadata(
+  settings: UmbraUiInpaintSettings,
+  item: Pick<UmbraUiInpaintJobItem, 'id' | 'ppuid' | 'seed'>,
+  promptCount: number,
+): Record<string, unknown> {
+  const enabledLoras = (Array.isArray(settings.loras) ? settings.loras : [])
+    .filter((lora) => lora?.enabled !== false && String(lora?.name || '').trim())
+    .map((lora) => ({
+      id: String(lora.id || '').trim(),
+      name: String(lora.name || '').trim().replace(/\\/g, '/'),
+      enabled: true,
+      queueEnabled: true,
+      queueSetIds: [1],
+      strengthModel: finiteNumberOrFallback(lora.strengthModel, 1),
+      strengthClip: finiteNumberOrFallback(lora.strengthClip, finiteNumberOrFallback(lora.strengthModel, 1)),
+    }));
+  const workflowResources = Object.fromEntries(Object.entries(settings.workflowResources || {})
+    .map(([key, value]) => [String(key || '').trim(), String(value || '').trim().replace(/\\/g, '/')])
+    .filter(([key, value]) => key.length > 0 && value.length > 0));
+  const generation = {
+    mediaType: 'image',
+    outputOwner: 'umbra_ui',
+    outputMode: 'inpainting',
+    modelFamily: settings.modelFamily,
+    modelType: settings.modelSource,
+    checkpointName: settings.checkpointName,
+    workflowResources,
+    negativePrompt: settings.negativePrompt,
+    seed: item.seed,
+    controlAfterGenerate: settings.seedMode,
+    seedIncrement: settings.seedIncrement,
+    steps: settings.steps,
+    cfg: settings.cfg,
+    clipSkip: settings.clipSkip,
+    samplerName: settings.samplerName,
+    scheduler: settings.scheduler,
+    denoise: settings.denoise,
+    aspectRatio: 'custom',
+    swapDimensions: false,
+    width: settings.width,
+    height: settings.height,
+    batchSize: 1,
+    loras: enabledLoras,
+    tiledVae: settings.tiledVae ? { ...settings.tiledVae } : undefined,
+  };
+  const segments = (Array.isArray(settings.promptSegments) ? settings.promptSegments : [])
+    .map((segment, order) => ({
+      order,
+      slotId: String(segment?.id || `umbra-ui-prompt-${order + 1}`).trim(),
+      slotLabel: String(segment?.label || `Prompt ${order + 1}`).trim(),
+      slotType: String(segment?.slotType || 'umbra_ui_prompt').trim(),
+      variantId: String(segment?.variantId || '').trim(),
+      variantName: String(segment?.variantName || '').trim(),
+      text: String(segment?.text || '').trim(),
+    }))
+    .filter((segment) => segment.text.length > 0);
+  return {
+    version: 2,
+    source: 'umbra_ui',
+    queueBackend: 'umbra_ui_inpaint',
+    ppuid: item.ppuid || createId('pp').replace(/-/g, '_'),
+    generationUid: createId('ppgen').replace(/-/g, '_'),
+    promptIndex: Math.max(0, Number(item.id) - 1),
+    promptCount: Math.max(1, promptCount),
+    promptSetId: 1,
+    setId: 1,
+    prompt: settings.prompt,
+    negativePrompt: settings.negativePrompt,
+    generation,
+    pipeline: {
+      feature: 'inpainting',
+      modelFamily: settings.modelFamily,
+      modelSource: settings.modelSource,
+    },
+    pipelineId: `inpainting:${settings.modelFamily}:${settings.modelSource}`,
+    pipelineName: settings.modelFamily,
+    apiWorkflowId: settings.workflowId,
+    apiWorkflowName: settings.workflowId,
+    segments,
+  };
+}
+
 export class UmbraUiInpaintService {
   private readonly jobs = new Map<string, UmbraUiInpaintJob>();
   private readonly getComfyBaseUrl: () => string;
   private readonly getComfyInputRoot?: () => string;
+  private readonly getComfyOutputRoot?: () => string;
   private readonly buildBaseWorkflow: UmbraUiInpaintServiceOptions['buildBaseWorkflow'];
   private readonly jobStatePath: string;
   private readonly historyPollIntervalMs: number;
@@ -942,10 +1048,12 @@ export class UmbraUiInpaintService {
   private readonly atomicReplacementHooks?: UmbraUiInpaintServiceOptions['atomicReplacementHooks'];
   private persistQueue = Promise.resolve();
   private nodeTypesCache: { fetchedAt: number; values: Set<string>; objectInfo: Record<string, any> } | null = null;
+  private readonly outputMetadataByPpuid = new Map<string, Record<string, unknown>>();
 
   constructor(options: UmbraUiInpaintServiceOptions) {
     this.getComfyBaseUrl = options.getComfyBaseUrl;
     this.getComfyInputRoot = options.getComfyInputRoot;
+    this.getComfyOutputRoot = options.getComfyOutputRoot;
     this.buildBaseWorkflow = options.buildBaseWorkflow;
     this.jobStatePath = String(options.jobStatePath || '').trim();
     this.historyPollIntervalMs = Math.max(1, Math.round(Number(options.historyPollIntervalMs) || HISTORY_POLL_INTERVAL_MS));
@@ -1306,6 +1414,7 @@ export class UmbraUiInpaintService {
       updatedAt: now,
       items: Array.from({ length: samples }, (_, index) => ({
         id: String(index + 1),
+        ppuid: createId('pp').replace(/-/g, '_'),
         seed: baseSeed + index * seedIncrement,
         status: 'staging',
         promptId: '',
@@ -1763,6 +1872,8 @@ export class UmbraUiInpaintService {
       const queuedItems: UmbraUiInpaintJobItem[] = [];
       for (const item of job.items) {
         try {
+          item.ppuid ||= createId('pp').replace(/-/g, '_');
+          const powerPrompterMetadata = buildUmbraUiInpaintPowerPrompterMetadata(settings, item, job.total);
           const base = await this.buildBaseWorkflow(settings, item.seed);
           const graph = this.buildWorkflow(base.promptGraph, sourceInputName, maskInputName, uploadedRegionalGuidance, uploadedControlLayers, uploadedReferenceLayers, source.name, settings, item.seed, nodeTypes);
           const response = await fetch(`${this.getComfyBaseUrl()}/prompt`, {
@@ -1774,6 +1885,7 @@ export class UmbraUiInpaintService {
               extra_data: {
                 extra_pnginfo: {
                   workflow: graph,
+                  umbra_power_prompter: powerPrompterMetadata,
                   umbra_inpaint: {
                     version: 4,
                     source: 'umbra_ui_inpaint',
@@ -1806,7 +1918,10 @@ export class UmbraUiInpaintService {
                     },
                     sourceName: source.name,
                     prompt,
+                    promptSegments: settings.promptSegments,
                     negativePrompt: settings.negativePrompt,
+                    loras: settings.loras,
+                    workflowResources: settings.workflowResources,
                     seed: item.seed,
                     seedMode: settings.seedMode,
                     seedIncrement: settings.seedIncrement,
@@ -1842,6 +1957,7 @@ export class UmbraUiInpaintService {
                     softInpaintPreservation: settings.softInpaintPreservation,
                     softInpaintTransitionContrast: settings.softInpaintTransitionContrast,
                     softInpaintMaskInfluence: settings.softInpaintMaskInfluence,
+                    tiledVae: settings.tiledVae,
                     width: job.width,
                     height: job.height,
                     regionalGuidance: uploadedRegionalGuidance.map((region) => ({
@@ -1908,6 +2024,7 @@ export class UmbraUiInpaintService {
           if (!promptId) throw new Error('ComfyUI did not return an inpaint prompt id.');
           item.promptId = promptId;
           item.status = 'queued';
+          this.outputMetadataByPpuid.set(item.ppuid, powerPrompterMetadata);
           queuedItems.push(item);
         } catch (error: any) {
           item.status = 'failed';
@@ -3125,6 +3242,29 @@ export class UmbraUiInpaintService {
     return graph;
   }
 
+  private resolveComfyOutputPath(output: UmbraUiInpaintOutput): string {
+    const outputRootValue = String(this.getComfyOutputRoot?.() || '').trim();
+    if (!outputRootValue) return '';
+    const outputRoot = resolve(outputRootValue);
+    const declaredFullPath = String(output.fullpath || '').trim();
+    const candidate = declaredFullPath
+      ? resolve(declaredFullPath)
+      : resolve(join(outputRoot, String(output.subfolder || ''), String(output.filename || '')));
+    if (candidate !== outputRoot && !candidate.startsWith(`${outputRoot}${sep}`)) return '';
+    return extname(candidate).toLowerCase() === '.png' ? candidate : '';
+  }
+
+  private async stampPowerPrompterMetadata(item: UmbraUiInpaintJobItem): Promise<void> {
+    const ppuid = String(item.ppuid || '').trim();
+    const metadata = ppuid ? this.outputMetadataByPpuid.get(ppuid) : null;
+    if (!metadata) return;
+    await Promise.all(item.outputs.map(async (output) => {
+      const path = this.resolveComfyOutputPath(output);
+      if (!path) return;
+      await upsertPngTextMetadata(path, 'umbra_power_prompter', JSON.stringify(metadata)).catch(() => undefined);
+    }));
+  }
+
   private async monitor(job: UmbraUiInpaintJob, items: UmbraUiInpaintJobItem[]) {
     if (job.status === 'canceled') return;
     job.status = 'running';
@@ -3142,6 +3282,7 @@ export class UmbraUiInpaintService {
         if (executionError || status === 'error') throw new Error(executionError || 'ComfyUI inpaint execution failed.');
         item.outputs = collectOutputs(record);
         if (item.outputs.length <= 0) throw new Error('ComfyUI finished the inpaint sample without reporting a saved output.');
+        await this.stampPowerPrompterMetadata(item);
         item.status = 'completed';
       } catch (error: any) {
         if (job.status !== 'canceled' && item.status !== 'canceled') {
@@ -3153,6 +3294,7 @@ export class UmbraUiInpaintService {
       job.failed = job.items.filter((candidate) => candidate.status === 'failed').length;
       job.updatedAt = Date.now();
       this.persistJobs();
+      if (item.ppuid) this.outputMetadataByPpuid.delete(item.ppuid);
     }));
     if (job.status === 'canceled') return;
     job.status = job.completed === job.total
@@ -3274,6 +3416,12 @@ export class UmbraUiInpaintService {
         }
         const persistedStatus = job.status;
         const activeItems: UmbraUiInpaintJobItem[] = [];
+        for (const item of job.items) {
+          if (!String(item.ppuid || '').trim()) {
+            item.ppuid = createId('pp').replace(/-/g, '_');
+            changed = true;
+          }
+        }
         if (persistedStatus === 'canceled') {
           for (const item of job.items) {
             if (item.status === 'staging' || item.status === 'queued' || item.status === 'running') {

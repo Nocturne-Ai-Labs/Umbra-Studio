@@ -48,6 +48,7 @@ import {
   Plus,
   Power,
   Redo2,
+  RefreshCw,
   Ruler,
   RotateCcw,
   RotateCw,
@@ -338,6 +339,7 @@ interface CanvasPreferences {
   stagingAutoSwitch: UmbraCanvasStagingAutoSwitch;
   preserveMask: boolean;
   pressureSensitivity: boolean;
+  replaceOriginalSourceOnAccept: boolean;
   ruleOfThirds: boolean;
   rulersEnabled: boolean;
   snapEnabled: boolean;
@@ -620,6 +622,7 @@ export interface UmbraInpaintWorkspaceProps {
   onRefreshModelCatalog: () => void;
   loras: UmbraUiLoraEntry[];
   onLorasChange: (loras: UmbraUiLoraEntry[]) => void;
+  workflowResources: Record<string, string>;
   loraAvailableCount: number;
   onOpenLoraPicker: () => void;
   clipSkip: string;
@@ -769,6 +772,7 @@ const DEFAULT_CANVAS_PREFERENCES: CanvasPreferences = {
   stagingAutoSwitch: 'start',
   preserveMask: false,
   pressureSensitivity: true,
+  replaceOriginalSourceOnAccept: false,
   ruleOfThirds: false,
   rulersEnabled: true,
   snapEnabled: true,
@@ -835,6 +839,7 @@ function loadCanvasPreferences(): CanvasPreferences {
       stagingAutoSwitch,
       preserveMask: stored.preserveMask === true,
       pressureSensitivity: stored.pressureSensitivity !== false,
+      replaceOriginalSourceOnAccept: stored.replaceOriginalSourceOnAccept === true,
       ruleOfThirds: stored.ruleOfThirds === true,
       rulersEnabled: stored.rulersEnabled !== false,
       snapEnabled: stored.snapEnabled !== false,
@@ -2457,6 +2462,7 @@ export function UmbraInpaintWorkspace({
   onRefreshModelCatalog,
   loras,
   onLorasChange,
+  workflowResources,
   loraAvailableCount,
   onOpenLoraPicker,
   clipSkip,
@@ -2523,6 +2529,12 @@ export function UmbraInpaintWorkspace({
   const projectSaveRequestRef = React.useRef(0);
   const projectAutoSaveTimerRef = React.useRef<number | null>(null);
   const projectAutoSaveSnapshotRef = React.useRef<UmbraCanvasDocument | null>(null);
+  const pendingOriginalSourceReplacementRef = React.useRef<{
+    documentId: string;
+    sourceId: string;
+    originalPath: string;
+    stageIds: string[];
+  } | null>(null);
   const generationRestoreProjectIdRef = React.useRef('');
   const maskSnapshotUrlsRef = React.useRef(new Set<string>());
   const maskSnapshotLeaseRef = React.useRef(new Map<string, number>());
@@ -2557,6 +2569,8 @@ export function UmbraInpaintWorkspace({
   const assistedSelectionPreviewUrlRef = React.useRef('');
 
   const [source, setSource] = React.useState<InpaintSource | null>(null);
+  const originalSourcePath = String(source?.originalPath || source?.path || '').trim();
+  const canReplaceOriginalSource = !!originalSourcePath && !source?.objectUrl;
   const [imageDropActive, setImageDropActive] = React.useState(false);
   const [rasterFilterLayerId, setRasterFilterLayerId] = React.useState('');
   const [layerUpscaleLayerId, setLayerUpscaleLayerId] = React.useState('');
@@ -7525,6 +7539,72 @@ export function UmbraInpaintWorkspace({
     });
   }, [buildCanvasSaveMetadata, canvasDocument, isSavingCanvas, renderCommittedCanvas, runFullResolutionOperation, seed, showToast]);
 
+  const replaceOriginalSourceWithAcceptedCanvas = React.useCallback(async (
+    originalPath: string,
+    sourceId: string,
+  ) => {
+    if (!canvasDocument || !source || source.id !== sourceId || isSavingCanvas) return;
+    await runFullResolutionOperation('Replace original image', async ({ signal, setPhase }) => {
+      setIsSavingCanvas(true);
+      try {
+        const output = await renderCommittedCanvas({ signal });
+        setPhase('encoding');
+        const blob = await encodeFullResolutionCanvas(output, { signal });
+        setPhase('saving');
+        const result = await saveUmbraUiCanvasToGallery(
+          blob,
+          `${canvasDocument.name} Inpaint Replacement`,
+          { ...buildCanvasSaveMetadata(output.width, output.height, Number(seed) || 0), regionOnly: false },
+          signal,
+        );
+        if (!result.path) throw new Error('Umbra could not save the accepted inpaint result for replacement.');
+
+        const response = await fetch('/api/umbra-ui/image/replace-source', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ originalPath, resultPath: result.path }),
+          signal,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.success === false) {
+          throw new Error(String(payload?.error || 'Failed to replace the original image.'));
+        }
+
+        const replacedPath = String(payload?.path || originalPath).trim() || originalPath;
+        const revision = String(payload?.revision || Date.now()).trim();
+        const replacedFolderPath = replacedPath.replace(/[\\/][^\\/]+$/, '');
+        setSource((current) => current?.id === sourceId ? {
+          ...current,
+          path: replacedPath,
+          originalPath: replacedPath,
+          imageUrl: `/api/fs/image?${new URLSearchParams({ path: replacedPath, rev: revision }).toString()}`,
+        } : current);
+        window.dispatchEvent(new CustomEvent('umbra:gallery-content-changed', {
+          detail: {
+            path: replacedPath,
+            mediaPath: replacedPath,
+            folderPath: replacedFolderPath,
+            reason: 'replace-source',
+            source: 'umbra-ui-inpaint',
+            revision,
+            modifiedMs: Number(payload?.modifiedMs || Date.now()),
+            size: Number(payload?.size || 0),
+          },
+        }));
+        window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
+        const backupPath = String(payload?.backupPath || '').trim();
+        showToast(
+          backupPath
+            ? `Original image replaced. Recovery copy: ${backupPath}`
+            : 'Original image replaced and a recovery copy was saved.',
+          'success',
+        );
+      } finally {
+        setIsSavingCanvas(false);
+      }
+    });
+  }, [buildCanvasSaveMetadata, canvasDocument, isSavingCanvas, renderCommittedCanvas, runFullResolutionOperation, seed, showToast, source]);
+
   const sendCanvasToImg2Img = React.useCallback(async () => {
     if (!canvasDocument || isSavingCanvas) return;
     if (previewStage) {
@@ -9554,7 +9634,10 @@ export function UmbraInpaintWorkspace({
         modelFamily,
         modelSource,
         prompt: promptWithLoras,
+        promptSegments,
         negativePrompt: capabilities.negativePrompt.support === 'adjustable' ? negativePrompt : '',
+        loras: loras.filter((lora) => lora.enabled !== false),
+        workflowResources,
         checkpointName,
         clipSkip: resolveCapabilityNumber(capabilities.clipSkip, Number(clipSkip), 1),
         seed: resolvedSeed,
@@ -9673,6 +9756,7 @@ export function UmbraInpaintWorkspace({
     maskedFillAvailable,
     negativePrompt,
     prompt,
+    promptSegments,
     samplerName,
     samples,
     scheduler,
@@ -9697,6 +9781,7 @@ export function UmbraInpaintWorkspace({
     studioArtboardPosition,
     studioMode,
     visibleGenerationRegion,
+    workflowResources,
   ]);
 
   const cancelActiveJob = React.useCallback(async () => {
@@ -9781,12 +9866,37 @@ export function UmbraInpaintWorkspace({
   const acceptStages = React.useCallback((stageIds: string[], mode: 'replace_region' | 'new_layer' = 'replace_region') => {
     const ids = Array.from(new Set(stageIds)).filter(Boolean);
     if (ids.length <= 0) return;
+    if (mode === 'replace_region'
+      && canvasPreferences.replaceOriginalSourceOnAccept
+      && canvasDocument
+      && source
+      && canReplaceOriginalSource) {
+      pendingOriginalSourceReplacementRef.current = {
+        documentId: canvasDocument.id,
+        sourceId: source.id,
+        originalPath: originalSourcePath,
+        stageIds: ids,
+      };
+    }
     dispatchCanvasDocument({ type: 'accept_stages', stageIds: ids, mode, preserveMask: canvasPreferences.preserveMask });
     if (!canvasPreferences.preserveMask) clearActiveMaskAfterAccept();
     setSelectedStageIds((current) => current.filter((stageId) => !ids.includes(stageId)));
     setCompareStages(false);
     showToast(`${ids.length} staged result${ids.length === 1 ? '' : 's'} accepted ${mode === 'new_layer' ? 'as masked layers' : 'as opaque replacements'}.`, 'success');
-  }, [canvasPreferences.preserveMask, clearActiveMaskAfterAccept, showToast]);
+  }, [canReplaceOriginalSource, canvasDocument, canvasPreferences.preserveMask, canvasPreferences.replaceOriginalSourceOnAccept, clearActiveMaskAfterAccept, originalSourcePath, showToast, source]);
+
+  React.useEffect(() => {
+    const pending = pendingOriginalSourceReplacementRef.current;
+    if (!pending) return;
+    if (canvasDocument?.id !== pending.documentId || source?.id !== pending.sourceId) {
+      pendingOriginalSourceReplacementRef.current = null;
+      return;
+    }
+    if (canvasDocument.staging.some((stage) => pending.stageIds.includes(stage.id))) return;
+    if (fullResolutionOperation || isSavingCanvas) return;
+    pendingOriginalSourceReplacementRef.current = null;
+    void replaceOriginalSourceWithAcceptedCanvas(pending.originalPath, pending.sourceId);
+  }, [canvasDocument, fullResolutionOperation, isSavingCanvas, replaceOriginalSourceWithAcceptedCanvas, source?.id]);
 
   const discardStages = React.useCallback((stageIds: string[]) => {
     const ids = Array.from(new Set(stageIds)).filter(Boolean);
@@ -10072,12 +10182,37 @@ export function UmbraInpaintWorkspace({
             <Upload size={12} /> {source ? 'Replace Source Image' : 'Open Image'}
           </button>
           {source ? (
-            <div className="flex items-center gap-2 border-y border-white/10 py-2">
-              <FileImage size={12} className="shrink-0 text-cyan-300" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-[9px] text-zinc-300" title={source.name}>{source.name}</div>
-                <div className="font-mono text-[8px] text-zinc-600">{source.width}x{source.height} source</div>
+            <div className="space-y-2 border-y border-white/10 py-2">
+              <div className="flex items-center gap-2">
+                <FileImage size={12} className="shrink-0 text-cyan-300" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-mono text-[9px] text-zinc-300" title={source.name}>{source.name}</div>
+                  <div className="font-mono text-[8px] text-zinc-600">{source.width}x{source.height} source</div>
+                </div>
               </div>
+              <label
+                className={cn(
+                  'flex min-h-9 items-center gap-2 border bg-black/20 px-2.5 transition-colors',
+                  canvasPreferences.replaceOriginalSourceOnAccept ? 'border-amber-300/30 bg-amber-500/[0.06]' : 'border-white/10',
+                  canReplaceOriginalSource ? 'cursor-pointer hover:border-amber-300/30' : 'cursor-not-allowed opacity-40',
+                )}
+                title={canReplaceOriginalSource
+                  ? 'After you accept an inpaint result as a replacement, overwrite the original Gallery image. Umbra saves a recovery copy first.'
+                  : 'Only Gallery or output images can be replaced. Uploaded local files are kept as new inpaint results.'}
+              >
+                <input
+                  type="checkbox"
+                  checked={canvasPreferences.replaceOriginalSourceOnAccept}
+                  disabled={!canReplaceOriginalSource}
+                  onChange={(event) => setCanvasPreferences((current) => ({ ...current, replaceOriginalSourceOnAccept: event.target.checked }))}
+                  className="accent-amber-300"
+                />
+                <RefreshCw size={11} className="text-amber-300/80" />
+                <span className="text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300">Replace original after accept</span>
+                <span className={cn('ml-auto font-mono text-[8px] uppercase', canvasPreferences.replaceOriginalSourceOnAccept ? 'text-amber-200' : 'text-zinc-600')}>
+                  {!canReplaceOriginalSource ? 'Unavailable' : canvasPreferences.replaceOriginalSourceOnAccept ? 'Backup on' : 'Off'}
+                </span>
+              </label>
             </div>
           ) : null}
 

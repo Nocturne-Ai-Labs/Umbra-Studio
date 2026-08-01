@@ -3,12 +3,13 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { CheckCircle2, ChevronDown, ChevronRight, FolderOpen, GripVertical, ListChecks, ListOrdered, Loader2, Pause, Pencil, Play, Power, RefreshCw, Save, Search, Trash2, XCircle } from 'lucide-react';
 import { PowerPrompterActivePromptInline } from '@/components/layout/PowerPrompterActivePromptInline';
 import { PowerPrompterQueueManagerSidePane } from './PowerPrompterQueueManagerSidePane';
-import { QUEUE_MANAGER_DISPATCH_DELAY_OPTIONS, QUEUE_MANAGER_PROMPT_ROW_VISIBILITY_STYLE, formatQueueEtaDuration, getSetColor, hexToRgba } from './queueCore';
+import { QUEUE_MANAGER_DISPATCH_DELAY_OPTIONS, formatQueueEtaDuration, getSetColor, hexToRgba } from './queueCore';
 
 type PowerPrompterQueueManagerViewProps = Record<string, any>;
 type QueueManagerPromptRowsProps = {
   items: any[];
   emptyContent?: React.ReactNode;
+  layoutKey: string;
   renderItem: (item: any) => React.ReactNode;
 };
 
@@ -917,6 +918,19 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                                   {groupExpanded && (
                                     <QueueManagerPromptRows
                                       items={visibleGroupItems}
+                                      layoutKey={[
+                                        queuePromptExpandedMode ? 'expanded' : 'compact',
+                                        queueManagerStyleFilter,
+                                        visibleGroupItems.length,
+                                        visibleGroupItems[0]?.id || '',
+                                        visibleGroupItems[visibleGroupItems.length - 1]?.id || '',
+                                        queuePromptExpandedMode
+                                          ? 'all'
+                                          : visibleGroupItems
+                                            .filter((entry) => expandedQueuePromptRows[getQueuePromptSelectionKey(group.requestId, entry.promptIndex)] === true)
+                                            .map((entry) => `${entry.requestId}:${entry.promptIndex}`)
+                                            .join(','),
+                                      ].join('|')}
                                       emptyContent={filteredGroupItems.length <= 0 ? (
                                         <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
                                           No prompts for {queueManagerStyleFilter} in this group
@@ -944,7 +958,6 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                                           <div
                                             key={item.id}
                                             data-umbra-queue-prompt-row=""
-                                            style={QUEUE_MANAGER_PROMPT_ROW_VISIBILITY_STYLE}
                                             onDragOver={(event) => {
                                               if (!QUEUE_MANAGER_REORDER_ENABLED) return;
                                               if (queueManagerDragState?.kind !== 'prompt' || itemLocked || queueManagerDragState.requestId !== group.requestId) return;
@@ -1152,7 +1165,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
   );
 });
 
-function QueueManagerPromptRows({ items, emptyContent = null, renderItem }: QueueManagerPromptRowsProps) {
+function QueueManagerPromptRows({ items, emptyContent = null, layoutKey, renderItem }: QueueManagerPromptRowsProps) {
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const shouldVirtualize = items.length > QUEUE_MANAGER_PROMPT_VIRTUALIZE_THRESHOLD;
   const rowVirtualizer = useVirtualizer({
@@ -1163,10 +1176,15 @@ function QueueManagerPromptRows({ items, emptyContent = null, renderItem }: Queu
     overscan: 4,
   });
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!shouldVirtualize) return;
     rowVirtualizer.measure();
-  }, [items.length, rowVirtualizer, shouldVirtualize]);
+    const frame = window.requestAnimationFrame(() => {
+      const rows = scrollRef.current?.querySelectorAll<HTMLElement>('[data-umbra-queue-virtual-row]');
+      rows?.forEach((row) => rowVirtualizer.measureElement(row));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [items.length, layoutKey, rowVirtualizer, shouldVirtualize]);
 
   if (!shouldVirtualize) {
     return (
@@ -1197,6 +1215,7 @@ function QueueManagerPromptRows({ items, emptyContent = null, renderItem }: Queu
                 key={key}
                 ref={rowVirtualizer.measureElement}
                 data-index={virtualRow.index}
+                data-umbra-queue-virtual-row=""
                 className="absolute left-0 top-0 w-full pb-2"
                 style={{ transform: `translateY(${virtualRow.start}px)` }}
               >

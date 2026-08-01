@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bell, BellOff, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, FolderOpen, GripVertical, ImageIcon, ListChecks, ListOrdered, Loader2, Pause, Pencil, Play, Plus, Power, RefreshCw, Save, Search, Shuffle, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { PowerPrompterSidebar } from './PowerPrompterSidebar';
@@ -53,10 +53,14 @@ import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
 import { subscribeUiSession } from '@/lib/uiSessionSocket';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import { deletePathsWithSettings } from '@/utils/trashActions';
-import { decodePowerPrompterImageRestore } from '@/lib/powerPrompterImageRestore';
+import {
+  decodePowerPrompterImageRestore,
+  type PowerPrompterImageRestoreResult,
+} from '@/lib/powerPrompterImageRestore';
 import {
   clearPendingPowerPrompterImageRestoreHandoff,
   fetchPowerPrompterImageRestoreMetadata,
+  fetchPowerPrompterRestoreMetadataByPpuid,
   normalizePowerPrompterImageRestoreHandoff,
   POWER_PROMPTER_IMAGE_RESTORE_HANDOFF_EVENT,
   takePendingPowerPrompterImageRestoreHandoff,
@@ -181,6 +185,7 @@ import {
   cleanupQueueSnapshotWorker,
 } from '@/components/power-prompter/queue/queueSnapshotWorker';
 import type { QueueSnapshotWorkerPending } from '@/components/power-prompter/queue/queueSnapshotWorker';
+import { expandPowerPrompterQueueForResolutionSplit } from '@/components/power-prompter/queue/queueResolutionSplit';
 import {
   buildActiveQueuePosition,
   buildQueueManagerOutputBuckets,
@@ -301,9 +306,11 @@ function downloadTextThroughBrowser(text: string, fileName: string): void {
 const POWER_PROMPTER_RIGHT_PANEL_STORAGE_KEY = 'umbra.powerPrompter.rightPanelCollapsed';
 const POWER_PROMPTER_QUEUE_MANAGER_SPLIT_STORAGE_KEY = 'umbra.powerPrompter.queueManagerRightPaneSplit';
 const POWER_PROMPTER_SETTINGS_SYNC_CHANNEL = 'umbra-powerprompter-settings-sync';
-const QUEUE_PROGRESS_REACT_COMMIT_MS = 0;
-const QUEUE_PROGRESS_REACT_COMMIT_STEP = 0;
-const GENERATION_PREVIEW_REACT_COMMIT_MS = 0;
+// Queue events can arrive far faster than the UI needs to paint them. Keeping
+// this modest cadence leaves typing and card editing responsive with large queues.
+const QUEUE_PROGRESS_REACT_COMMIT_MS = 150;
+const QUEUE_PROGRESS_REACT_COMMIT_STEP = 0.02;
+const GENERATION_PREVIEW_REACT_COMMIT_MS = 150;
 const waitForNextUiPaint = (timeoutMs = 250): Promise<void> => new Promise((resolve) => {
   let settled = false;
   const finish = () => {
@@ -1513,11 +1520,14 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     }
     return workflowTargets[0]?.bridgeId || '';
   }, [workflowTargets, selectedBridgeId, apiWorkflowItems]);
-  const handleSendActivePromptToUmbraUi = useCallback(async () => {
+  const handleSendActivePromptToUmbraUi = useCallback(async (
+    target: 'txt2img' | 'img2img' | 'inpaint' = 'txt2img',
+    sourceDocument?: PowerPrompterCardDocument,
+  ) => {
     if (umbraUiHandoffBusy) return;
     const document = normalizePowerPrompterCardDocument(
-      cardDocumentRef.current,
-      currentFileRef.current || null,
+      sourceDocument || cardDocumentRef.current,
+      sourceDocument?.file || currentFileRef.current || null,
     );
     const modelFamily = String(document.modelType || '').trim();
     if (!modelFamily) {
@@ -1549,7 +1559,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     try {
       const generation = normalizePowerPrompterGenerationControls(document.generation);
       const params = new URLSearchParams({
-        feature: 'txt2img',
+        feature: target === 'inpaint' ? 'inpainting' : target,
         modelFamily,
         modelSource: generation.modelType,
       });
@@ -1565,11 +1575,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         prompt,
         positivePromptSegments,
         modelFamily,
+        target,
         generation: generation as unknown as Record<string, unknown>,
-        sourceFile: String(currentFileRef.current || document.file || '').trim(),
+        sourceFile: String(sourceDocument?.file || currentFileRef.current || document.file || '').trim(),
       });
       setActiveWorkspace('umbraui');
-      showToast(`Sent Set ${document.activeQueueSet} to Umbra UI for review.`, 'success');
+      const targetLabel = target === 'inpaint' ? 'Inpaint' : target === 'img2img' ? 'IMG2IMG' : 'TXT2IMG';
+      showToast(`Sent Set ${document.activeQueueSet} controls to Umbra UI ${targetLabel}.`, 'success');
     } catch (error: any) {
       showToast(String(error?.message || 'Failed to send the active prompt to Umbra UI.'), 'error');
     } finally {
@@ -1635,6 +1647,11 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         .filter((item) => !item.exiting && item.status === 'pending')
         .map((item) => `${String(item.requestId || '').trim()}:${Math.max(0, Math.floor(Number(item.promptIndex) || 0))}`)
     );
+    const liveExpandedKeys = new Set(
+      queueStackItems
+        .filter((item) => !item.exiting && (item.status === 'pending' || item.status === 'running'))
+        .map((item) => `${String(item.requestId || '').trim()}:${Math.max(0, Math.floor(Number(item.promptIndex) || 0))}`)
+    );
     setSelectedQueuePromptKeys((prev) => {
       let changed = false;
       const next: Record<string, boolean> = {};
@@ -1650,6 +1667,18 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     setQueuePromptSelectionAnchor((prev) => {
       if (!prev) return prev;
       return liveKeys.has(`${prev.requestId}:${prev.promptIndex}`) ? prev : null;
+    });
+    setExpandedQueuePromptRows((prev) => {
+      const next: Record<string, boolean> = {};
+      let changed = false;
+      for (const [key, expanded] of Object.entries(prev)) {
+        if (liveExpandedKeys.has(key)) {
+          next[key] = expanded;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
     });
   }, [queueStackItems]);
   useEffect(() => {
@@ -1759,6 +1788,32 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     () => savedQueues.find((entry) => entry.id === selectedSavedQueueId) || null,
     [savedQueues, selectedSavedQueueId]
   );
+  // The editor only needs identity, active prompt, and seed changes. Excluding
+  // progress timestamps keeps a 1,000-prompt queue from re-rendering the whole
+  // card workspace for every WebSocket progress event.
+  const editorQueueVisualState = useMemo<QueueVisualState | null>(() => {
+    if (!queueVisualState) return null;
+    return {
+      requestId: queueVisualState.requestId,
+      mode: queueVisualState.mode,
+      activeSetId: queueVisualState.activeSetId,
+      prompts: queueVisualState.prompts,
+      promptEntries: queueVisualState.promptEntries,
+      promptIds: queueVisualState.promptIds,
+      promptSeeds: queueVisualState.promptSeeds,
+      activeIndex: queueVisualState.activeIndex,
+      jobProgress: 0,
+    };
+  }, [
+    queueVisualState?.requestId,
+    queueVisualState?.mode,
+    queueVisualState?.activeSetId,
+    queueVisualState?.prompts,
+    queueVisualState?.promptEntries,
+    queueVisualState?.promptIds,
+    queueVisualState?.promptSeeds,
+    queueVisualState?.activeIndex,
+  ]);
   const hasLiveQueue = Boolean(queueVisualState && queueVisualState.prompts.length > 0);
   const queueTrackerPreviewUrl = useMemo(() => {
     const imageDataUrl = String(generationPreview?.imageDataUrl || '').trim();
@@ -6766,16 +6821,18 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
             key: previewCommitKey,
             committedAt: previewCommitNow,
           };
-          setGenerationPreview({
-            requestId: event.requestId,
-            promptId: event.promptId,
-            promptIndex: event.promptIndex,
-            prompt: normalizePowerPrompterPromptText(String(requestMeta?.prompts?.[event.promptIndex] || '')),
-            imageDataUrl: event.imageDataUrl,
-            step: event.step,
-            maxStep: event.maxStep,
-            status: 'running',
-            updatedAt: Date.now(),
+          startTransition(() => {
+            setGenerationPreview({
+              requestId: event.requestId,
+              promptId: event.promptId,
+              promptIndex: event.promptIndex,
+              prompt: normalizePowerPrompterPromptText(String(requestMeta?.prompts?.[event.promptIndex] || '')),
+              imageDataUrl: event.imageDataUrl,
+              step: event.step,
+              maxStep: event.maxStep,
+              status: 'running',
+              updatedAt: Date.now(),
+            });
           });
           return;
         }
@@ -7150,6 +7207,41 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           if (requestId && requestMeta) {
             markQueueStackPromptRunning(requestId, nextActiveIndex);
           }
+          const currentVisual = queueVisualStateRef.current;
+          const visualNeedsActivePromptSync = Boolean(
+            requestId
+            && requestMeta
+            && (
+              !currentVisual
+              || currentVisual.requestId !== requestId
+              || currentVisual.activeIndex !== Math.min(requestMeta.prompts.length - 1, nextActiveIndex)
+            )
+          );
+          if (visualNeedsActivePromptSync && requestId && requestMeta) {
+            startTransition(() => {
+              setQueueVisualState((prev) => {
+                const clampedActiveIndex = Math.min(requestMeta.prompts.length - 1, nextActiveIndex);
+                if (
+                  prev
+                  && prev.requestId === requestId
+                  && prev.activeIndex === clampedActiveIndex
+                ) {
+                  return prev;
+                }
+                return {
+                  requestId,
+                  mode: requestMeta.mode,
+                  activeSetId: clampQueueSetId(requestMeta.promptSetIds[clampedActiveIndex] ?? requestMeta.setId),
+                  prompts: requestMeta.prompts,
+                  promptEntries: requestMeta.promptEntries,
+                  promptIds: prev?.requestId === requestId ? prev.promptIds : requestMeta.prompts.map(() => ''),
+                  promptSeeds: prev?.requestId === requestId ? prev.promptSeeds : requestMeta.prompts.map(() => 0),
+                  activeIndex: clampedActiveIndex,
+                  jobProgress: 0,
+                };
+              });
+            });
+          }
           const progressCommitKey = `${requestId}:${nextActiveIndex}`;
           const progressCommitNow = Date.now();
           const lastProgressCommit = lastJobProgressCommitRef.current;
@@ -7172,47 +7264,23 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
             activeIndex: nextActiveIndex,
             committedAt: progressCommitNow,
           };
-          setQueueVisualState((prev) => {
-            if ((!prev || prev.requestId !== requestId) && requestId && requestMeta) {
-              const clampedActiveIndex = Math.min(requestMeta.prompts.length - 1, nextActiveIndex);
-              return {
-                requestId,
-                mode: requestMeta.mode,
-                activeSetId: clampQueueSetId(requestMeta.promptSetIds[clampedActiveIndex] ?? requestMeta.setId),
-                prompts: [...requestMeta.prompts],
-                promptEntries: requestMeta.promptEntries ? [...requestMeta.promptEntries] : undefined,
-                promptIds: requestMeta.prompts.map(() => ''),
-                promptSeeds: requestMeta.prompts.map(() => 0),
-                activeIndex: clampedActiveIndex,
-                jobProgress: nextProgress,
-                updatedAt: Date.now(),
-              };
-            }
-            if (!prev) return prev;
-            if (requestId && prev.requestId !== requestId) return prev;
-            const clampedActiveIndex = Math.min(prev.prompts.length - 1, nextActiveIndex);
-            return {
-              ...prev,
-              activeIndex: clampedActiveIndex,
-              jobProgress: nextProgress,
-              updatedAt: Date.now(),
-            };
-          });
           if (requestId && requestMeta) {
             clearGenerationPreviewHideTimer();
-            setGenerationPreview((prev) => {
-              const clampedIndex = Math.min(requestMeta.prompts.length - 1, nextActiveIndex);
-              if (!prev || !String(prev.imageDataUrl || '').trim()) return prev;
-              if (String(prev.requestId || '').trim() === requestId && Math.max(0, Math.floor(Number(prev.promptIndex) || 0)) === clampedIndex) {
-                return {
-                  ...prev,
-                  step: Number.isFinite(progressRaw) ? Math.max(0, Math.floor(progressRaw)) : prev.step,
-                  maxStep: Number.isFinite(progressMaxRaw) ? Math.max(0, Math.floor(progressMaxRaw)) : prev.maxStep,
-                  status: 'running',
-                  updatedAt: Date.now(),
-                };
-              }
-              return prev;
+            startTransition(() => {
+              setGenerationPreview((prev) => {
+                const clampedIndex = Math.min(requestMeta.prompts.length - 1, nextActiveIndex);
+                if (!prev || !String(prev.imageDataUrl || '').trim()) return prev;
+                if (String(prev.requestId || '').trim() === requestId && Math.max(0, Math.floor(Number(prev.promptIndex) || 0)) === clampedIndex) {
+                  return {
+                    ...prev,
+                    step: Number.isFinite(progressRaw) ? Math.max(0, Math.floor(progressRaw)) : prev.step,
+                    maxStep: Number.isFinite(progressMaxRaw) ? Math.max(0, Math.floor(progressMaxRaw)) : prev.maxStep,
+                    status: 'running',
+                    updatedAt: Date.now(),
+                  };
+                }
+                return prev;
+              });
             });
           }
           scheduleRecoverableQueueSnapshotPersist({ clearWhenEmpty: false, delayMs: 750 });
@@ -7987,6 +8055,68 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     showToast,
   ]);
 
+  const applyRestoredPowerPrompterSnapshot = useCallback((
+    restoredImage: PowerPrompterImageRestoreResult,
+  ) => {
+    const editorSnapshot = normalizeQueueEditorSnapshot(restoredImage.snapshot);
+    if (!editorSnapshot) {
+      throw new Error('The image contains a Power Prompter snapshot, but its card document is invalid.');
+    }
+
+    const currentDocument = normalizePowerPrompterCardDocument(
+      cardDocumentRef.current,
+      currentFileRef.current,
+    );
+    const existingSession = activePowerPrompterPresetSessionRef.current;
+    const baseDocument = existingSession?.baseDocument || currentDocument;
+    const baseContent = existingSession?.baseContent
+      || contentRef.current
+      || composeActivePromptFromCards(currentDocument.cards, currentDocument.activeQueueSet);
+    const baseHadPendingChanges = existingSession?.baseHadPendingChanges ?? hasPendingChangesRef.current;
+    const restoredBase = normalizePowerPrompterCardDocument(
+      editorSnapshot.document,
+      currentFileRef.current,
+    );
+    const restoredDocument: PowerPrompterCardDocument = {
+      ...restoredBase,
+      file: currentFileRef.current || null,
+      cards: normalizeChainCards(restoredBase.cards),
+      updatedAt: new Date().toISOString(),
+    };
+    const shortPpuid = restoredImage.ppuid
+      ? restoredImage.ppuid.replace(/^pp_/, '').slice(0, 12)
+      : `${restoredImage.setId}-${restoredImage.promptIndex + 1}`;
+    const session: PowerPrompterPresetSession = {
+      kind: 'image-restore',
+      presetId: `image-restore-${restoredImage.ppuid || Date.now()}`,
+      presetName: `Image ${shortPpuid}`,
+      sourceFile: currentFileRef.current || null,
+      ppuid: restoredImage.ppuid || undefined,
+      baseDocument,
+      baseContent,
+      baseHadPendingChanges,
+      loadedAt: Date.now(),
+    };
+
+    clearAutosaveTimer();
+    activePowerPrompterPresetSessionRef.current = session;
+    setActivePowerPrompterPresetSession(session);
+    handleCardDocumentChange(restoredDocument);
+    hasPendingChangesRef.current = false;
+    setQueueSetTarget(clampQueueSetId(restoredDocument.activeQueueSet));
+    handlePrompterPanelModeChange('preset-editor');
+    showToast(
+      restoredImage.ppuid
+        ? `Restored exact Power Prompter state for ${restoredImage.ppuid}`
+        : 'Restored Power Prompter image snapshot',
+      'success',
+    );
+  }, [
+    handleCardDocumentChange,
+    handlePrompterPanelModeChange,
+    showToast,
+  ]);
+
   const handleRestorePowerPrompterImage = useCallback(async (
     handoff: PowerPrompterImageRestoreHandoff,
   ) => {
@@ -7994,69 +8124,30 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     try {
       const metadata = await fetchPowerPrompterImageRestoreMetadata(handoff.path);
       const restoredImage = await decodePowerPrompterImageRestore(metadata);
-      const editorSnapshot = normalizeQueueEditorSnapshot(restoredImage.snapshot);
-      if (!editorSnapshot) {
-        throw new Error('The image contains a Power Prompter snapshot, but its card document is invalid.');
-      }
-
-      const currentDocument = normalizePowerPrompterCardDocument(
-        cardDocumentRef.current,
-        currentFileRef.current,
-      );
-      const existingSession = activePowerPrompterPresetSessionRef.current;
-      const baseDocument = existingSession?.baseDocument || currentDocument;
-      const baseContent = existingSession?.baseContent
-        || contentRef.current
-        || composeActivePromptFromCards(currentDocument.cards, currentDocument.activeQueueSet);
-      const baseHadPendingChanges = existingSession?.baseHadPendingChanges ?? hasPendingChangesRef.current;
-      const restoredBase = normalizePowerPrompterCardDocument(
-        editorSnapshot.document,
-        currentFileRef.current,
-      );
-      const restoredDocument: PowerPrompterCardDocument = {
-        ...restoredBase,
-        file: currentFileRef.current || null,
-        cards: normalizeChainCards(restoredBase.cards),
-        updatedAt: new Date().toISOString(),
-      };
-      const shortPpuid = restoredImage.ppuid
-        ? restoredImage.ppuid.replace(/^pp_/, '').slice(0, 12)
-        : `${restoredImage.setId}-${restoredImage.promptIndex + 1}`;
-      const session: PowerPrompterPresetSession = {
-        kind: 'image-restore',
-        presetId: `image-restore-${restoredImage.ppuid || Date.now()}`,
-        presetName: `Image ${shortPpuid}`,
-        sourceFile: currentFileRef.current || null,
-        ppuid: restoredImage.ppuid || undefined,
-        baseDocument,
-        baseContent,
-        baseHadPendingChanges,
-        loadedAt: Date.now(),
-      };
-
-      clearAutosaveTimer();
-      activePowerPrompterPresetSessionRef.current = session;
-      setActivePowerPrompterPresetSession(session);
-      handleCardDocumentChange(restoredDocument);
-      hasPendingChangesRef.current = false;
-      setQueueSetTarget(clampQueueSetId(restoredDocument.activeQueueSet));
-      handlePrompterPanelModeChange('preset-editor');
-      showToast(
-        restoredImage.ppuid
-          ? `Restored Power Prompter image ${restoredImage.ppuid}`
-          : 'Restored Power Prompter image snapshot',
-        'success',
-      );
+      applyRestoredPowerPrompterSnapshot(restoredImage);
     } catch (error: any) {
       showToast(String(error?.message || 'Failed to restore Power Prompter image'), 'error');
     } finally {
       setPowerPrompterPresetBusy(null);
     }
   }, [
-    handleCardDocumentChange,
-    handlePrompterPanelModeChange,
+    applyRestoredPowerPrompterSnapshot,
     showToast,
   ]);
+
+  const handleRestorePowerPrompterPpuid = useCallback(async (ppuid: string) => {
+    setPowerPrompterPresetBusy('load');
+    try {
+      const metadata = await fetchPowerPrompterRestoreMetadataByPpuid(ppuid);
+      const restoredImage = await decodePowerPrompterImageRestore(metadata);
+      applyRestoredPowerPrompterSnapshot(restoredImage);
+    } catch (error: any) {
+      showToast(String(error?.message || 'Failed to restore Power Prompter state'), 'error');
+      throw error;
+    } finally {
+      setPowerPrompterPresetBusy(null);
+    }
+  }, [applyRestoredPowerPrompterSnapshot, showToast]);
 
   useEffect(() => {
     const restoreFromHandoff = (value: unknown) => {
@@ -9653,7 +9744,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       ? createQueueShuffleSeed()
       : buildSettings.shuffleSeed;
     const seedGroupIndexById = new Map<string, number>();
-    const generationByPrompt = built.prompts.map((_, promptIndex) => {
+    let generationByPrompt = built.prompts.map((_, promptIndex) => {
       const promptSetId = clampQueueSetId(built.promptSetIds[promptIndex] ?? queueEditorDraft.activeSetId);
       const seedGroupId = String(built.promptSeedGroupIds[promptIndex] || `${promptSetId}:${promptIndex}`).trim();
       if (!seedGroupIndexById.has(seedGroupId)) seedGroupIndexById.set(seedGroupId, seedGroupIndexById.size);
@@ -9664,6 +9755,25 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         loras: [],
       });
     });
+    const resolutionQueue = expandPowerPrompterQueueForResolutionSplit({
+      prompts: built.prompts,
+      promptEntries: built.promptEntries,
+      promptSetIds: built.promptSetIds,
+      promptOutputSubfolders: built.promptOutputSubfolders,
+      promptStyleNames: built.promptStyleNames,
+      promptSeedGroupIds: built.promptSeedGroupIds,
+      generationByPrompt,
+    });
+    built = {
+      ...built,
+      prompts: resolutionQueue.prompts,
+      promptEntries: resolutionQueue.promptEntries,
+      promptSetIds: resolutionQueue.promptSetIds,
+      promptOutputSubfolders: resolutionQueue.promptOutputSubfolders,
+      promptStyleNames: resolutionQueue.promptStyleNames,
+      promptSeedGroupIds: resolutionQueue.promptSeedGroupIds,
+    };
+    generationByPrompt = resolutionQueue.generationByPrompt.map(normalizePowerPrompterGenerationControls);
     return {
       editorDocument,
       buildSettings,
@@ -11383,7 +11493,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         }
       );
       const seedGroupIndexById = new Map<string, number>();
-      const generationByPrompt = prompts.map((_, promptIndex) => {
+      let generationByPrompt = prompts.map((_, promptIndex) => {
         const promptSetId = clampQueueSetId(promptSetIds[promptIndex] ?? targetSetId);
         const seedGroupId = String(promptSeedGroupIds[promptIndex] || `${promptSetId}:${promptIndex}`).trim();
         if (!seedGroupIndexById.has(seedGroupId)) {
@@ -11401,6 +11511,32 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           loras: [],
         });
       });
+      const resolutionQueue = expandPowerPrompterQueueForResolutionSplit({
+        prompts,
+        promptEntries,
+        promptSetIds,
+        promptOutputSubfolders,
+        promptStyleNames,
+        promptSeedGroupIds,
+        generationByPrompt,
+      });
+      prompts = resolutionQueue.prompts;
+      promptEntries = resolutionQueue.promptEntries;
+      promptSetIds = resolutionQueue.promptSetIds;
+      promptOutputSubfolders = resolutionQueue.promptOutputSubfolders;
+      promptStyleNames = resolutionQueue.promptStyleNames;
+      promptSeedGroupIds = resolutionQueue.promptSeedGroupIds;
+      generationByPrompt = resolutionQueue.generationByPrompt.map(normalizePowerPrompterGenerationControls);
+      if (resolutionQueue.splitApplied) {
+        logPowerPrompterDebug('queue:stage:resolutionDistribution', {
+          mode,
+          targetSetId,
+          splitMode: normalizedGeneration.resolutionSplit?.mode || 'queue',
+          logicalPromptCount: resolutionQueue.logicalPromptCount,
+          submittedJobCount: prompts.length,
+          imageCount: resolutionQueue.imageCount,
+        }, { includeQueue: true });
+      }
       logPowerPrompterDebug('randomization:generationSeeds:resolved', {
         mode,
         targetSetId,
@@ -11726,6 +11862,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         ) : (
           <PowerPrompterSidebar
             currentFile={currentFile}
+            onLoadFromPpuid={handleRestorePowerPrompterPpuid}
+            ppuidRestoreBusy={powerPrompterPresetBusy === 'load'}
             onFileOpenStart={(path) => {
               if (isPhoneRemote) {
                 setLeftPanelCollapsed(true);
@@ -11853,6 +11991,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
               <div className="pointer-events-auto h-[min(52vh,620px)] min-h-[300px] w-[min(92vw,560px)] overflow-hidden rounded-xl border border-cyan-300/25 bg-[#050508]/98 shadow-[0_18px_46px_rgba(0,0,0,0.65)] backdrop-blur-md">
                 <PowerPrompterSidebar
                   currentFile={currentFile}
+                  onLoadFromPpuid={handleRestorePowerPrompterPpuid}
+                  ppuidRestoreBusy={powerPrompterPresetBusy === 'load'}
                   onFileOpenStart={handleFileOpenStart}
                   onFileOpenFailed={handleFileOpenFailed}
                   onSelectFile={(path, fileContent) => {
@@ -11937,14 +12077,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           isActive={isActive}
           isEditorPanelActive={isEditorPanelActive}
           prompterPanelMode={prompterPanelMode}
-          queueVisualState={queueVisualState}
+          queueVisualState={editorQueueVisualState}
           queueEstimate={queueEstimate}
           queueShuffleEnabled={queueShuffleEnabled}
           settings={settings}
           queueTraversalMode={queueTraversalMode}
           queueSetTarget={queueSetTarget}
           queueCompletionTick={queueCompletionTick}
-          generationPreview={generationPreview}
           generationPreviewHoldMs={generationPreviewHoldMs}
           handleSetGenerationPreviewHoldMs={handleSetGenerationPreviewHoldMs}
           editorInteractionResetTick={editorInteractionResetTick}
@@ -11955,6 +12094,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           refreshModelCatalog={refreshModelCatalog}
           requestModelInfoThroughWebSocket={requestModelInfoThroughWebSocket}
           handleCardDocumentChange={handleCardDocumentChange}
+          handleSendGenerationControlsToUmbraUi={handleSendActivePromptToUmbraUi}
           handleActivePromptTypeProgress={handleActivePromptTypeProgress}
           handleChainLinkFeedback={handleChainLinkFeedback}
           enabledCSVs={enabledCSVs}

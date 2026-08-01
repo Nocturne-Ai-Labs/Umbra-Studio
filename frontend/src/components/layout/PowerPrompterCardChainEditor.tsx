@@ -1,7 +1,7 @@
 
 import React, { forwardRef, useCallback, useDeferredValue, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowRight, Ban, Check, ChevronDown, ChevronRight, ChevronUp, Copy, EllipsisVertical, Folder, FolderOpen, ImageIcon, Info, Link2, Loader2, Maximize2, Minimize2, Pencil, Plus, RefreshCw, RotateCw, Scissors, Shuffle, Sparkles, Trash2, X, Zap } from 'lucide-react';
+import { ArrowRight, Ban, Check, ChevronDown, ChevronRight, ChevronUp, Copy, EllipsisVertical, Folder, FolderOpen, GripVertical, ImageIcon, Info, Link2, Loader2, Maximize2, Minimize2, Pencil, Plus, RefreshCw, RotateCw, Scissors, Shuffle, Sparkles, Trash2, X, Zap } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
 import { fetchAppSettingsFromBackend, loadAppSettings, pushAppSettingsToBackend } from '@/lib/appSettings';
@@ -19,6 +19,7 @@ import {
   POWER_PROMPTER_ASPECT_RATIO_OPTIONS,
   POWER_PROMPTER_MAX_QUEUE_CYCLE_WEIGHT,
   POWER_PROMPTER_MAX_QUEUE_SETS,
+  POWER_PROMPTER_MAX_RESOLUTION_SPLIT_TARGETS,
   POWER_PROMPTER_SAMPLER_OPTIONS,
   POWER_PROMPTER_SCHEDULER_OPTIONS,
 } from '@/lib/powerPrompter';
@@ -44,6 +45,7 @@ import type {
   PowerPrompterModelType,
   PowerPrompterQueueTraversalMode,
   PowerPrompterQueueTraversalRole,
+  PowerPrompterResolutionSplitTarget,
   PowerPrompterSeedIncrement,
 } from '@/types/powerPrompter';
 import type { PowerPrompterPipelineItem } from '@/components/power-prompter/pipelines/usePowerPrompterPipelines';
@@ -97,17 +99,6 @@ interface PowerPrompterQueueVisualState {
   jobProgress: number;
 }
 
-interface PowerPrompterGenerationPreviewState {
-  requestId: string;
-  promptId: string;
-  promptIndex: number;
-  imageDataUrl: string;
-  step: number;
-  maxStep: number;
-  status: 'running' | 'idle';
-  updatedAt: number;
-}
-
 interface PowerPrompterCardChainEditorProps {
   document: PowerPrompterCardDocument;
   queueTargetType?: 'pipeline';
@@ -124,7 +115,6 @@ interface PowerPrompterCardChainEditorProps {
   queuePreviewSetId?: number;
   queueCompletionTick?: number;
   outputPreviewActive?: boolean;
-  generationPreview?: PowerPrompterGenerationPreviewState | null;
   generationPreviewHoldMs?: number | null;
   onChangeGenerationPreviewHoldMs?: (nextMs: number | null) => void;
   queueSetTarget?: number;
@@ -139,6 +129,10 @@ interface PowerPrompterCardChainEditorProps {
   onRefreshModelCatalog?: (showFeedback?: boolean) => void | Promise<void>;
   onRequestModelInfo?: (modelName: string, options?: { previewOnly?: boolean }) => Promise<PowerPrompterModelInfoPayload>;
   onChange: (nextDocument: PowerPrompterCardDocument) => void;
+  onSendGenerationControlsToUmbraUi?: (
+    target: 'txt2img' | 'img2img' | 'inpaint',
+    document: PowerPrompterCardDocument,
+  ) => void | Promise<void>;
   onActivePromptTypeProgress?: (charsAdded: number) => void;
   onChainLinkFeedback?: (event: 'anchor' | 'toggle' | 'save' | 'clear' | 'done') => void;
   path: string | null;
@@ -426,7 +420,7 @@ const POWER_PROMPTER_CARD_STAGE_OFFSET_Y = 15;
 const POWER_PROMPTER_CARD_STAGE_BOTTOM_GAP = 0;
 const POWER_PROMPTER_SIDE_CARD_BREATHING_ROOM = 10;
 const CARD_NAV_BAR_HEIGHT_PX = 56;
-const POWER_PROMPTER_CARD_NAV_PREVIEW_LIMIT = 5;
+const POWER_PROMPTER_CARD_NAV_PREVIEW_LIMIT = 8;
 const CARD_MENU_BOTTOM_SAFE_PX = 132;
 const MENU_VIEWPORT_MARGIN_PX = 8;
 const CARD_MENU_WIDTH_PX = 320;
@@ -822,6 +816,29 @@ function normalizeCardQueueSetIds(card: Pick<PowerPrompterCardNode, 'queueSetIds
   return [clampQueueSetId(fallbackSetId)];
 }
 
+function normalizeQueueSetOrders(
+  rawOrders: unknown,
+  allowedSetIds: number[],
+  fallbackOrder: number,
+): Record<string, number> {
+  const source = rawOrders && typeof rawOrders === 'object' && !Array.isArray(rawOrders)
+    ? rawOrders as Record<string, unknown>
+    : {};
+  const fallback = Math.max(0, Math.floor(Number(fallbackOrder) || 0));
+  const normalized: Record<string, number> = {};
+  for (const setId of allowedSetIds) {
+    const value = Math.floor(Number(source[String(setId)]));
+    normalized[String(setId)] = Number.isFinite(value) && value >= 0 ? value : fallback;
+  }
+  return normalized;
+}
+
+function getQueueSetOrder(variant: PowerPrompterCardNode, setId: number): number {
+  const value = Math.floor(Number((variant as any).queueSetOrders?.[String(setId)]));
+  if (Number.isFinite(value) && value >= 0) return value;
+  return Math.max(0, Math.floor(Number(variant.order) || 0));
+}
+
 function getSlotQueueSetIds(slot: Pick<ChainSlot, 'variants'>): number[] {
   return Array.from(new Set(
     (slot.variants || []).flatMap((variant) => normalizeQueueSetIds(variant.queueSetIds, false))
@@ -861,23 +878,25 @@ function normalizeBlockLinks(rawLinks: unknown, selfId = ''): string[] {
   return normalizeChainLinks(rawLinks, selfId);
 }
 
-function stableShuffleDisplayItems<T>(items: T[], salt: string, getKey: (item: T) => string): T[] {
-  const hashValue = (input: string) => {
-    let hash = 2166136261;
-    for (let index = 0; index < input.length; index += 1) {
-      hash ^= input.charCodeAt(index);
-      hash = Math.imul(hash, 16777619);
+function orderSlotVariantsByQueueSet(
+  variants: PowerPrompterCardNode[],
+  activeSetId: number,
+): PowerPrompterCardNode[] {
+  const enabled: PowerPrompterCardNode[] = [];
+  const disabled: PowerPrompterCardNode[] = [];
+  for (const variant of variants) {
+    if (normalizeQueueSetIds(variant.queueSetIds, false).includes(activeSetId)) {
+      enabled.push(variant);
+    } else {
+      disabled.push(variant);
     }
-    return hash >>> 0;
-  };
-  return [...items]
-    .map((item, index) => ({
-      item,
-      index,
-      order: hashValue(`${salt}|${index}|${getKey(item)}`),
-    }))
-    .sort((a, b) => a.order - b.order || a.index - b.index)
-    .map(({ item }) => item);
+  }
+  enabled.sort((left, right) => (
+    getQueueSetOrder(left, activeSetId) - getQueueSetOrder(right, activeSetId)
+    || Number(left.order) - Number(right.order)
+    || String(left.createdAt || '').localeCompare(String(right.createdAt || ''))
+  ));
+  return [...enabled, ...disabled];
 }
 
 function shuffleItemsRandomly<T>(items: T[]): T[] {
@@ -1053,15 +1072,56 @@ function getCsvSourceTypeLabel(sourceId: string): string {
 }
 
 function getExpandedVariantSuggestionQuery(text: string, caret: number): string {
-  const source = String(text || '');
-  const clampedCaret = Math.max(0, Math.min(Number.isFinite(caret) ? caret : source.length, source.length));
-  const beforeCaret = source.slice(0, clampedCaret);
-  const segment = beforeCaret.split(',').pop() || '';
-  const query = segment.trim();
+  const tokenRange = getExpandedVariantSuggestionTokenRange(text, caret);
+  const query = tokenRange.text.slice(0, tokenRange.caret - tokenRange.start).trim();
   if (query.length < 3 || query.length > 80) return '';
   if (/^\d+$/.test(query)) return '';
   if (!/[a-z_]/i.test(query)) return '';
   return query;
+}
+
+function getExpandedVariantSuggestionTokenRange(text: string, caret: number): {
+  start: number;
+  end: number;
+  caret: number;
+  text: string;
+} {
+  const source = String(text || '');
+  const clampedCaret = Math.max(0, Math.min(Number.isFinite(caret) ? caret : source.length, source.length));
+  const leftComma = source.lastIndexOf(',', Math.max(0, clampedCaret - 1));
+  const leftNewline = source.lastIndexOf('\n', Math.max(0, clampedCaret - 1));
+  const start = Math.max(leftComma, leftNewline) + 1;
+  const rightComma = source.indexOf(',', clampedCaret);
+  const rightNewline = source.indexOf('\n', clampedCaret);
+  const rightBoundaries = [rightComma, rightNewline].filter((index) => index >= 0);
+  const end = rightBoundaries.length > 0 ? Math.min(...rightBoundaries) : source.length;
+  return {
+    start,
+    end,
+    caret: clampedCaret,
+    text: source.slice(start, end),
+  };
+}
+
+function replaceExpandedVariantSuggestionToken(
+  text: string,
+  caret: number,
+  replacement: string,
+): { nextValue: string; selectionStart: number; selectionEnd: number } | null {
+  const cleanReplacement = String(replacement || '').trim().replace(/(?:\s*,\s*)+$/g, '');
+  if (!cleanReplacement) return null;
+  const source = String(text || '');
+  const tokenRange = getExpandedVariantSuggestionTokenRange(source, caret);
+  const leadingWhitespace = tokenRange.text.match(/^\s*/)?.[0] || '';
+  const trailingWhitespace = tokenRange.text.match(/\s*$/)?.[0] || '';
+  const insertionStart = tokenRange.start + leadingWhitespace.length;
+  const nextValue = `${source.slice(0, insertionStart)}${cleanReplacement}${trailingWhitespace}${source.slice(tokenRange.end)}`;
+  const nextCaret = insertionStart + cleanReplacement.length;
+  return {
+    nextValue,
+    selectionStart: nextCaret,
+    selectionEnd: nextCaret,
+  };
 }
 
 function resolveExpandedVariantEditorTarget(
@@ -1632,6 +1692,7 @@ function createCard(
     randomSetIds: normalizeRandomSetIds(randomSetIds),
     queueEnabled: queueSetIds.length > 0,
     queueSetIds,
+    queueSetOrders: { [String(setId)]: Math.max(0, Math.floor(Number(order) || 0)) },
     queueTraversalRole: 'cycle',
     queueCycleWeights: {},
     chainLinks: [],
@@ -1670,6 +1731,7 @@ function buildSlots(cards: PowerPrompterCardNode[]): ChainSlot[] {
       randomEnabled: card.randomEnabled === true,
       randomSetIds: normalizeRandomSetIds(card.randomSetIds),
       queueSetIds,
+      queueSetOrders: normalizeQueueSetOrders((card as any).queueSetOrders, queueSetIds, Number(card.order)),
       queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
       queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
       queueEnabled: queueSetIds.length > 0,
@@ -1726,6 +1788,7 @@ function flattenSlots(slots: ChainSlot[]): PowerPrompterCardNode[] {
         randomEnabled: variant.randomEnabled === true,
         randomSetIds,
         queueSetIds,
+        queueSetOrders: normalizeQueueSetOrders((variant as any).queueSetOrders, queueSetIds, flattened.length),
         queueTraversalRole: normalizeQueueTraversalRole((variant as any).queueTraversalRole),
         queueCycleWeights: normalizeQueueCycleWeights((variant as any).queueCycleWeights, queueSetIds),
         queueEnabled: queueSetIds.length > 0,
@@ -1751,6 +1814,7 @@ function cloneSlots(slots: ChainSlot[]): ChainSlot[] {
         skipVariant: (variant as any).skipVariant === true,
         randomSetIds: [...normalizeRandomSetIds(variant.randomSetIds)],
         queueSetIds: [...queueSetIds],
+        queueSetOrders: { ...normalizeQueueSetOrders((variant as any).queueSetOrders, queueSetIds, Number(variant.order)) },
         queueTraversalRole: normalizeQueueTraversalRole((variant as any).queueTraversalRole),
         queueCycleWeights: normalizeQueueCycleWeights((variant as any).queueCycleWeights, queueSetIds),
         chainLinks: [...normalizeChainLinks((variant as any).chainLinks, String(variant.id || '').trim())],
@@ -2522,8 +2586,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   queuePreviewEntries = [],
   queueCyclePreviewPrompts = [],
   queueCyclePreviewEntries = [],
-  queueShuffleEnabled = false,
-  queueShuffleSeed = 0,
   queueTraversalMode = 'cycle',
   queuePreviewSetId = 1,
   queueCompletionTick = 0,
@@ -2540,6 +2602,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   onRefreshModelCatalog,
   onRequestModelInfo,
   onChange,
+  onSendGenerationControlsToUmbraUi,
   onChainLinkFeedback,
   path,
   enabledCSVs,
@@ -2570,6 +2633,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const [cardLabelModal, setCardLabelModal] = useState<CardLabelModalState | null>(null);
   const [cardRandomMenu, setCardRandomMenu] = useState<CardRandomMenuState | null>(null);
   const [mobileGenerationControlsOpen, setMobileGenerationControlsOpen] = useState(false);
+  const [umbraUiTargetMenuOpen, setUmbraUiTargetMenuOpen] = useState(false);
   const [mobileCardPickerOpen, setMobileCardPickerOpen] = useState(false);
   const [mobileVariantSetPicker, setMobileVariantSetPicker] = useState<{ slotId: string; variantId: string } | null>(null);
   const [variantDropSlotId, setVariantDropSlotId] = useState<string | null>(null);
@@ -2648,6 +2712,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const inlineVariantTextareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
   const expandedVariantSuggestionAbortRef = useRef<AbortController | null>(null);
   const expandedVariantSuggestionSeqRef = useRef(0);
+  const suppressNextExpandedVariantSuggestionLookupRef = useRef(false);
   const expandedVariantFocusKeyRef = useRef('');
   const editorRootRef = useRef<HTMLDivElement | null>(null);
   const laneScrollRef = useRef<HTMLDivElement | null>(null);
@@ -2694,19 +2759,19 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const [globalThumbnailOverrides, setGlobalThumbnailOverrides] = useState<Record<string, string[]>>({});
 
   const activeQueueSet = clampQueueSetId(queueSetTarget ?? document.activeQueueSet);
-  const documentShuffleSalt = useMemo(() => normalizePowerPrompterPromptText(JSON.stringify({
-    queueShuffleSeed,
-    activeQueueSet: document.activeQueueSet,
-    cards: document.cards.map((card) => ({
-      id: card.id,
-      text: card.text,
-      queueSetIds: normalizeQueueSetIds(card.queueSetIds, false),
-    })),
-  })), [queueShuffleSeed, document.activeQueueSet, document.cards]);
   const generation = useMemo(
     () => normalizePowerPrompterGenerationControls(document.generation),
     [document.generation]
   );
+  const resolutionSplit = generation.resolutionSplit || DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS.resolutionSplit!;
+  const resolutionSplitShareById = useMemo(() => {
+    const activeTargets = resolutionSplit.targets.filter((target) => target.enabled !== false);
+    const totalWeight = activeTargets.reduce((sum, target) => sum + Math.max(1, Number(target.weight) || 1), 0);
+    return new Map(activeTargets.map((target) => [
+      target.id,
+      totalWeight > 0 ? Math.round((Math.max(1, Number(target.weight) || 1) / totalWeight) * 100) : 0,
+    ]));
+  }, [resolutionSplit.targets]);
   const styleSeedMode = String((document as any).styleSeedMode || 'same') === 'different' ? 'different' : 'same';
   const estimatedBatchSize = Math.max(1, Math.floor(Number(generation.batchSize) || 1));
   const slots = useMemo(() => buildSlots(document.cards), [document.cards]);
@@ -2772,36 +2837,9 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     }
     return matches;
   }, [slots, deferredGlobalSearchTerms]);
-  const getSlotDisplayVariants = useCallback((slot: ChainSlot, slotIndex: number) => {
-    let prioritized: Array<{ variant: PowerPrompterCardNode; actualIndex: number }> = [];
-    const remainder: Array<{ variant: PowerPrompterCardNode; actualIndex: number }> = [];
-    for (let idx = 0; idx < slot.variants.length; idx += 1) {
-      const variant = slot.variants[idx];
-      const entry = { variant, actualIndex: idx };
-      const setIds = normalizeQueueSetIds(variant.queueSetIds, false);
-      if (setIds.includes(activeQueueSet)) prioritized.push(entry);
-      else remainder.push(entry);
-    }
-    if (queueShuffleEnabled && prioritized.length > 1) {
-      const shuffledEntries = stableShuffleDisplayItems(
-        prioritized,
-        `${documentShuffleSalt}|set:${activeQueueSet}|slot:${slotIndex}`,
-        (entry) => `${normalizePowerPrompterPromptText(entry.variant.text)}|${entry.variant.id}`
-      );
-      const firstAppearanceByVariantId = new Map<string, number>();
-      shuffledEntries.forEach((entry, index) => {
-        if (!firstAppearanceByVariantId.has(entry.variant.id)) {
-          firstAppearanceByVariantId.set(entry.variant.id, index);
-        }
-      });
-      prioritized = [...prioritized].sort((a, b) => {
-        const aIndex = firstAppearanceByVariantId.get(a.variant.id) ?? Number.MAX_SAFE_INTEGER;
-        const bIndex = firstAppearanceByVariantId.get(b.variant.id) ?? Number.MAX_SAFE_INTEGER;
-        return aIndex - bIndex || a.actualIndex - b.actualIndex;
-      });
-    }
-    return [...prioritized, ...remainder];
-  }, [activeQueueSet, documentShuffleSalt, queueShuffleEnabled]);
+  const getSlotDisplayVariants = useCallback((slot: ChainSlot) => (
+    orderSlotVariantsByQueueSet(slot.variants, activeQueueSet)
+  ), [activeQueueSet]);
   const slotSurfaceStyle = useMemo<React.CSSProperties | undefined>(() => {
     const next: React.CSSProperties = {};
     if (shouldUseRenderContainment) {
@@ -3519,6 +3557,50 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     });
   }, [document, generation, onChange]);
 
+  const updateResolutionSplitTarget = useCallback((
+    targetId: string,
+    patch: Partial<PowerPrompterResolutionSplitTarget>,
+  ) => {
+    updateGeneration({
+      resolutionSplit: {
+        ...resolutionSplit,
+        targets: resolutionSplit.targets.map((target) => (
+          target.id === targetId ? { ...target, ...patch } : target
+        )),
+      },
+    });
+  }, [resolutionSplit, updateGeneration]);
+
+  const addResolutionSplitTarget = useCallback(() => {
+    if (resolutionSplit.targets.length >= POWER_PROMPTER_MAX_RESOLUTION_SPLIT_TARGETS) return;
+    updateGeneration({
+      resolutionSplit: {
+        ...resolutionSplit,
+        targets: [
+          ...resolutionSplit.targets,
+          {
+            id: `resolution-${Date.now().toString(36)}-${resolutionSplit.targets.length + 1}`,
+            enabled: true,
+            aspectRatio: generation.aspectRatio,
+            width: generation.width,
+            height: generation.height,
+            weight: 25,
+          },
+        ],
+      },
+    });
+  }, [generation.aspectRatio, generation.height, generation.width, resolutionSplit, updateGeneration]);
+
+  const removeResolutionSplitTarget = useCallback((targetId: string) => {
+    if (resolutionSplit.targets.length <= 2) return;
+    updateGeneration({
+      resolutionSplit: {
+        ...resolutionSplit,
+        targets: resolutionSplit.targets.filter((target) => target.id !== targetId),
+      },
+    });
+  }, [resolutionSplit, updateGeneration]);
+
   const applyGenerationParamsFromMetadata = useCallback((metadata: ImageMetadata | null, sourceLabel: string) => {
     if (!metadata) {
       showToast('No metadata found for selected output', 'error');
@@ -4015,26 +4097,38 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const patchVariant = useCallback((slotId: string, variantId: string, patch: Partial<PowerPrompterCardNode>) => {
     const next = cloneSlots(slots).map((slot) => {
       if (slot.slotId !== slotId) return slot;
+      const updatedVariants = slot.variants.map((variant) => {
+        if (variant.id !== variantId) return variant;
+        const merged = {
+          ...variant,
+          ...patch,
+          variantName: patch.variantName !== undefined
+            ? normalizeVariantName(patch.variantName)
+            : normalizeVariantName(variant.variantName),
+          variantTags: patch.variantTags !== undefined
+            ? normalizeVariantTags(patch.variantTags)
+            : normalizeVariantTags((variant as any).variantTags),
+          updatedAt: getNowIso(),
+        };
+        const queueSetIds = normalizeQueueSetIds(merged.queueSetIds, false);
+        const queueCycleWeights = normalizeQueueCycleWeights((merged as any).queueCycleWeights, queueSetIds);
+        const chainLinks = normalizeChainLinks((merged as any).chainLinks, variantId);
+        const queueSetOrders = normalizeQueueSetOrders((merged as any).queueSetOrders, queueSetIds, Number(variant.order));
+        const previousSetIds = normalizeQueueSetIds(variant.queueSetIds, false);
+        for (const setId of queueSetIds) {
+          if (previousSetIds.includes(setId)) continue;
+          const maxOrder = slot.variants.reduce((currentMax, otherVariant) => {
+            if (otherVariant.id === variantId) return currentMax;
+            if (!normalizeQueueSetIds(otherVariant.queueSetIds, false).includes(setId)) return currentMax;
+            return Math.max(currentMax, getQueueSetOrder(otherVariant, setId));
+          }, -1);
+          queueSetOrders[String(setId)] = maxOrder + 1;
+        }
+        return { ...merged, queueSetIds, queueSetOrders, queueCycleWeights, queueEnabled: queueSetIds.length > 0, chainLinks };
+      });
       return {
         ...slot,
-        variants: slot.variants.map((variant) => {
-          if (variant.id !== variantId) return variant;
-          const merged = {
-            ...variant,
-            ...patch,
-            variantName: patch.variantName !== undefined
-              ? normalizeVariantName(patch.variantName)
-              : normalizeVariantName(variant.variantName),
-            variantTags: patch.variantTags !== undefined
-              ? normalizeVariantTags(patch.variantTags)
-              : normalizeVariantTags((variant as any).variantTags),
-            updatedAt: getNowIso(),
-          };
-          const queueSetIds = normalizeQueueSetIds(merged.queueSetIds, false);
-          const queueCycleWeights = normalizeQueueCycleWeights((merged as any).queueCycleWeights, queueSetIds);
-          const chainLinks = normalizeChainLinks((merged as any).chainLinks, variantId);
-          return { ...merged, queueSetIds, queueCycleWeights, queueEnabled: queueSetIds.length > 0, chainLinks };
-        }),
+        variants: updatedVariants,
       };
     });
     emitSlots(next);
@@ -4067,6 +4161,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
           return {
             ...merged,
             queueSetIds,
+            queueSetOrders: normalizeQueueSetOrders((merged as any).queueSetOrders, queueSetIds, Number(variant.order)),
             queueCycleWeights: normalizeQueueCycleWeights((merged as any).queueCycleWeights, queueSetIds),
             queueEnabled: queueSetIds.length > 0,
             chainLinks: normalizeChainLinks((merged as any).chainLinks, variantId),
@@ -6077,13 +6172,24 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     const next = cloneSlots(slots).map((slot) => {
       if (slot.slotId !== slotId) return slot;
       const styleUtilitySlot = isStyleUtilitySlot(slot);
-      return {
-        ...slot,
-        variants: slot.variants.map((variant) => {
-          if (variant.id !== variantId) return variant;
+      const updatedVariants = slot.variants.map((variant) => {
+        if (variant.id !== variantId) return variant;
           const previousSetIds = normalizeQueueSetIds(variant.queueSetIds, false);
           const addedSetIds = normalized.filter((setId) => !previousSetIds.includes(setId));
           const nextWeights = normalizeQueueCycleWeights((variant as any).queueCycleWeights, normalized);
+          const nextQueueSetOrders = normalizeQueueSetOrders(
+            (variant as any).queueSetOrders,
+            normalized,
+            Number(variant.order),
+          );
+          for (const setId of addedSetIds) {
+            const maxOrder = slot.variants.reduce((currentMax, otherVariant) => {
+              if (otherVariant.id === variantId) return currentMax;
+              if (!normalizeQueueSetIds(otherVariant.queueSetIds, false).includes(setId)) return currentMax;
+              return Math.max(currentMax, getQueueSetOrder(otherVariant, setId));
+            }, -1);
+            nextQueueSetOrders[String(setId)] = maxOrder + 1;
+          }
           if (styleUtilitySlot) {
             for (const setId of addedSetIds) {
               const matchedWeight = slot.variants.reduce((maxWeight, otherVariant) => {
@@ -6099,15 +6205,19 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
           return {
             ...variant,
             queueSetIds: [...normalized],
+            queueSetOrders: nextQueueSetOrders,
             queueCycleWeights: nextWeights,
             queueEnabled: normalized.length > 0,
             updatedAt: getNowIso(),
           };
-        }),
+      });
+      return {
+        ...slot,
+        variants: updatedVariants,
       };
     });
     emitSlotsPreserveLaneScroll(next);
-  }, [slots, emitSlotsPreserveLaneScroll]);
+  }, [activeQueueSet, slots, emitSlotsPreserveLaneScroll]);
 
   const adjustVariantQueueCycleWeight = useCallback((slotId: string, variantId: string, setIdRaw: number, delta: number) => {
     const setId = clampQueueSetId(setIdRaw);
@@ -6619,20 +6729,34 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     const next = cloneSlots(slots);
     const slot = next.find((entry) => entry.slotId === slotId);
     if (!slot || slot.variants.length <= 1) return;
-    const fromIndex = slot.variants.findIndex((variant) => variant.id === variantId);
+    const enabledVariants = orderSlotVariantsByQueueSet(slot.variants, activeQueueSet)
+      .filter((variant) => normalizeQueueSetIds(variant.queueSetIds, false).includes(activeQueueSet));
+    const fromIndex = enabledVariants.findIndex((variant) => variant.id === variantId);
     if (fromIndex < 0) return;
-    const targetIndex = Math.max(0, Math.min(slot.variants.length - 1, Math.floor(rawIndex)));
+    const targetIndex = Math.max(0, Math.min(enabledVariants.length - 1, Math.floor(rawIndex)));
     if (fromIndex === targetIndex) return;
 
-    const list = [...slot.variants];
-    const [moving] = list.splice(fromIndex, 1);
-    list.splice(targetIndex, 0, { ...moving, updatedAt: getNowIso() });
-    slot.variants = list.map((variant, idx) => ({ ...variant, order: idx }));
+    const [moving] = enabledVariants.splice(fromIndex, 1);
+    enabledVariants.splice(targetIndex, 0, moving);
+    const orderByVariantId = new Map(enabledVariants.map((variant, index) => [variant.id, index]));
+    slot.variants = slot.variants.map((variant) => {
+      const nextOrder = orderByVariantId.get(variant.id);
+      if (nextOrder === undefined) return variant;
+      const queueSetIds = normalizeQueueSetIds(variant.queueSetIds, false);
+      return {
+        ...variant,
+        queueSetOrders: {
+          ...normalizeQueueSetOrders((variant as any).queueSetOrders, queueSetIds, Number(variant.order)),
+          [String(activeQueueSet)]: nextOrder,
+        },
+        updatedAt: getNowIso(),
+      };
+    });
 
     setActiveSlotId(slot.slotId);
     setActiveVariantId(moving.id);
     emitSlots(next);
-  }, [slots, emitSlots]);
+  }, [activeQueueSet, slots, emitSlots]);
 
   const moveVariantToSlot = useCallback((sourceSlotId: string, variantId: string, targetSlotId: string, rawTargetIndex?: number) => {
     if (!sourceSlotId || !targetSlotId) return;
@@ -6692,11 +6816,29 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       updatedAt: getNowIso(),
       order: targetSlot.variants.length,
     };
-    const targetIndex = Number.isFinite(rawTargetIndex)
-      ? Math.max(0, Math.min(targetSlot.variants.length, Math.floor(Number(rawTargetIndex))))
-      : targetSlot.variants.length;
-    const targetVariants = [...targetSlot.variants];
-    targetVariants.splice(targetIndex, 0, movedVariant);
+    let targetVariants = [...targetSlot.variants, movedVariant];
+    if (movedSetIds.includes(activeQueueSet)) {
+      const activeVariants = orderSlotVariantsByQueueSet(targetVariants, activeQueueSet)
+        .filter((variant) => normalizeQueueSetIds(variant.queueSetIds, false).includes(activeQueueSet))
+        .filter((variant) => variant.id !== movedVariant.id);
+      const targetIndex = Number.isFinite(rawTargetIndex)
+        ? Math.max(0, Math.min(activeVariants.length, Math.floor(Number(rawTargetIndex))))
+        : activeVariants.length;
+      activeVariants.splice(targetIndex, 0, movedVariant);
+      const orderByVariantId = new Map(activeVariants.map((variant, index) => [variant.id, index]));
+      targetVariants = targetVariants.map((variant) => {
+        const nextOrder = orderByVariantId.get(variant.id);
+        if (nextOrder === undefined) return variant;
+        const queueSetIds = normalizeQueueSetIds(variant.queueSetIds, false);
+        return {
+          ...variant,
+          queueSetOrders: {
+            ...normalizeQueueSetOrders((variant as any).queueSetOrders, queueSetIds, Number(variant.order)),
+            [String(activeQueueSet)]: nextOrder,
+          },
+        };
+      });
+    }
     targetSlot.variants = targetVariants.map((variant, idx) => ({
       ...variant,
       randomEnabled: targetRandomEnabled,
@@ -7107,6 +7249,18 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       }
       return;
     }
+    if (suppressNextExpandedVariantSuggestionLookupRef.current) {
+      suppressNextExpandedVariantSuggestionLookupRef.current = false;
+      setExpandedVariantSuggestions([]);
+      setExpandedVariantSuggestionOpen(false);
+      setExpandedVariantSuggestionIndex(0);
+      setExpandedVariantSuggestionLoading(false);
+      if (expandedVariantSuggestionAbortRef.current) {
+        expandedVariantSuggestionAbortRef.current.abort();
+        expandedVariantSuggestionAbortRef.current = null;
+      }
+      return;
+    }
     const query = getExpandedVariantSuggestionQuery(expandedVariantEditorDraft, expandedVariantEditorCaret.start);
     if (!query) {
       setExpandedVariantSuggestions([]);
@@ -7189,9 +7343,35 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const applyExpandedVariantSuggestion = useCallback((entry: ExpandedVariantSuggestionEntry) => {
     const insertionText = buildSuggestionInsertionText(entry);
     if (!insertionText) return;
-    applyDraftTokenToExpandedVariantEditor(insertionText, { appendComma: true });
+    const textarea = expandedVariantTextareaRef.current;
+    const caret = textarea && typeof textarea.selectionStart === 'number'
+      ? textarea.selectionStart
+      : expandedVariantEditorCaret.start;
+    setExpandedVariantEditor((prev) => {
+      if (!prev) return prev;
+      const replacement = replaceExpandedVariantSuggestionToken(prev.draft, caret, insertionText);
+      if (!replacement) return prev;
+      suppressNextExpandedVariantSuggestionLookupRef.current = true;
+      setExpandedVariantEditorCaret({
+        start: replacement.selectionStart,
+        end: replacement.selectionEnd,
+      });
+      window.requestAnimationFrame(() => {
+        const nextTextarea = expandedVariantTextareaRef.current;
+        if (!nextTextarea) return;
+        nextTextarea.focus();
+        try {
+          nextTextarea.setSelectionRange(replacement.selectionStart, replacement.selectionEnd);
+        } catch {
+          // ignore selection restore failures
+        }
+      });
+      return { ...prev, draft: replacement.nextValue, dirty: true };
+    });
+    setExpandedVariantSuggestions([]);
     setExpandedVariantSuggestionOpen(false);
-  }, [applyDraftTokenToExpandedVariantEditor]);
+    setExpandedVariantSuggestionIndex(0);
+  }, [expandedVariantEditorCaret.start]);
   const menuCardSlot = useMemo(() => {
     if (!cardMenu) return null;
     return slots.find((slot) => slot.slotId === cardMenu.slotId) || null;
@@ -7936,49 +8116,37 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     mobileSelectionMode,
     renderedSlots.length,
   ]);
-  const getSlotActivePromptCount = useCallback((slot: ChainSlot) => {
-    let count = 0;
-    for (const variant of slot.variants) {
-      const text = String(variant.text || '').trim();
-      if (!text) continue;
-      const setIds = normalizeQueueSetIds(variant.queueSetIds, false);
-      if (setIds.includes(activeQueueSet)) count += 1;
-    }
-    return count;
-  }, [activeQueueSet]);
-  const getSlotEnabledVariantNames = useCallback((slot: ChainSlot) => {
-    const names: string[] = [];
+  const cardNavEntries = useMemo(() => slots.map((slot, slotIndex) => {
+    let activePromptCount = 0;
     for (const variant of slot.variants) {
       if (!String(variant.text || '').trim()) continue;
-      const setIds = normalizeQueueSetIds(variant.queueSetIds, false);
-      if (!setIds.includes(activeQueueSet)) continue;
-      names.push(
-        normalizeVariantName(variant.variantName)
-        || normalizePowerPrompterPromptText(variant.text).slice(0, 80)
-        || 'Untitled variant'
-      );
+      if (normalizeQueueSetIds(variant.queueSetIds, false).includes(activeQueueSet)) activePromptCount += 1;
     }
-    return names;
-  }, [activeQueueSet]);
+    return { slot, slotIndex, activePromptCount };
+  }), [activeQueueSet, slots]);
+  const activeCardEntry = useMemo(
+    () => cardNavEntries.find((entry) => entry.slot.slotId === activeSlot?.slotId) || null,
+    [activeSlot?.slotId, cardNavEntries],
+  );
   const activeCardCount = useMemo(
-    () => slots.reduce((count, slot) => count + (getSlotActivePromptCount(slot) > 0 ? 1 : 0), 0),
-    [getSlotActivePromptCount, slots]
+    () => cardNavEntries.reduce((count, entry) => count + (entry.activePromptCount > 0 ? 1 : 0), 0),
+    [cardNavEntries]
   );
   const activeVariantCount = useMemo(
-    () => slots.reduce((count, slot) => count + getSlotActivePromptCount(slot), 0),
-    [getSlotActivePromptCount, slots]
+    () => cardNavEntries.reduce((count, entry) => count + entry.activePromptCount, 0),
+    [cardNavEntries]
   );
-  const cardNavPreviewSlots = useMemo(
-    () => slots.slice(0, POWER_PROMPTER_CARD_NAV_PREVIEW_LIMIT),
-    [slots]
+  const cardNavPreviewEntries = useMemo(
+    () => cardNavEntries.slice(0, POWER_PROMPTER_CARD_NAV_PREVIEW_LIMIT),
+    [cardNavEntries]
   );
-  const cardNavOverflowSlots = useMemo(
-    () => slots.slice(POWER_PROMPTER_CARD_NAV_PREVIEW_LIMIT),
-    [slots]
+  const cardNavOverflowEntries = useMemo(
+    () => cardNavEntries.slice(POWER_PROMPTER_CARD_NAV_PREVIEW_LIMIT),
+    [cardNavEntries]
   );
   const hiddenActiveVariantCount = useMemo(
-    () => cardNavOverflowSlots.reduce((count, slot) => count + getSlotActivePromptCount(slot), 0),
-    [cardNavOverflowSlots, getSlotActivePromptCount]
+    () => cardNavOverflowEntries.reduce((count, entry) => count + entry.activePromptCount, 0),
+    [cardNavOverflowEntries]
   );
   const selectPromptCard = useCallback((slot: ChainSlot, slotIndex: number) => {
     setMobileGenerationControlsOpen(false);
@@ -8105,7 +8273,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
             </span>
             {activeSlot ? (
               <span className="shrink-0 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-black text-emerald-200">
-                {getSlotActivePromptCount(activeSlot)}
+                {activeCardEntry?.activePromptCount || 0}
               </span>
             ) : null}
             <ChevronDown size={14} className="shrink-0 text-zinc-400" />
@@ -8132,17 +8300,12 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
               </span>
               <ChevronDown size={14} className="shrink-0 text-cyan-200/80" />
             </button>
-            <div data-umbra-card-nav-preview="" className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-              {cardNavPreviewSlots.map((slot, slotIndex) => {
+            <div data-umbra-card-nav-preview="" className="grid min-w-0 flex-1 grid-flow-col auto-cols-fr items-stretch gap-1.5">
+              {cardNavPreviewEntries.map(({ slot, slotIndex, activePromptCount }) => {
                 const isActiveSlot = activeSlot?.slotId === slot.slotId;
-                const activePromptCount = getSlotActivePromptCount(slot);
-                const enabledVariantNames = getSlotEnabledVariantNames(slot);
                 const hasActivePrompt = activePromptCount > 0;
                 const isDropTarget = !!slotChipDragId && slotChipDropId === slot.slotId && slotChipDragId !== slot.slotId;
                 const label = String(slot.label || `Card ${slotIndex + 1}`).trim() || `Card ${slotIndex + 1}`;
-                const enabledSummary = enabledVariantNames.length > 0
-                  ? enabledVariantNames.slice(0, 2).join(', ') + (enabledVariantNames.length > 2 ? ` +${enabledVariantNames.length - 2}` : '')
-                  : 'No enabled variants';
                 return (
                   <button
                     key={`slot-card-summary-${slot.slotId}`}
@@ -8187,7 +8350,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       const anchor = getElementContextMenuPoint(event, 'below');
                       openCardContextMenu(slot.slotId, anchor.x, anchor.y);
                     }}
-                    className={`inline-flex min-h-10 min-w-0 max-w-44 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors ${
+                    className={`inline-flex min-h-10 min-w-0 w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors ${
                       isActiveSlot
                         ? 'border-emerald-400/65 bg-emerald-500/16 text-emerald-100'
                         : 'border-white/15 bg-white/[0.04] text-zinc-300 hover:border-white/30 hover:text-zinc-100'
@@ -8196,11 +8359,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       boxShadow: `0 0 0 1px ${hexToRgba(activeSetAccentColor, 0.26)}`,
                       borderColor: isActiveSlot ? undefined : hexToRgba(activeSetAccentColor, 0.44),
                     } : undefined}
-                    title={`${label}: ${enabledSummary}. Drag to reorder.`}
+                    title={`${label}: ${activePromptCount} enabled variant${activePromptCount === 1 ? '' : 's'} in Set ${activeQueueSet}. Drag to reorder.`}
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[10px] font-bold uppercase tracking-[0.08em]">{label}</span>
-                      <span className={`mt-0.5 block truncate text-[9px] ${hasActivePrompt ? 'text-zinc-400' : 'text-zinc-600'}`}>{enabledSummary}</span>
                     </span>
                     <span
                       className={`inline-flex min-w-5 shrink-0 items-center justify-center rounded-full border px-1.5 py-0.5 text-[9px] font-black leading-none ${
@@ -8217,7 +8379,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   </button>
                 );
               })}
-              {cardNavOverflowSlots.length > 0 ? (
+              {cardNavOverflowEntries.length > 0 ? (
                 <button
                   type="button"
                   data-umbra-card-nav-overflow=""
@@ -8232,9 +8394,9 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       ? 'border-amber-300/45 bg-amber-500/10 text-amber-100 hover:bg-amber-500/16'
                       : 'border-white/15 bg-white/[0.04] text-zinc-400 hover:border-white/30 hover:text-zinc-100'
                   }`}
-                  title={`${cardNavOverflowSlots.length} more card${cardNavOverflowSlots.length === 1 ? '' : 's'}${hiddenActiveVariantCount > 0 ? `, with ${hiddenActiveVariantCount} enabled variant${hiddenActiveVariantCount === 1 ? '' : 's'}` : ''}`}
+                  title={`${cardNavOverflowEntries.length} more card${cardNavOverflowEntries.length === 1 ? '' : 's'}${hiddenActiveVariantCount > 0 ? `, with ${hiddenActiveVariantCount} enabled variant${hiddenActiveVariantCount === 1 ? '' : 's'}` : ''}`}
                 >
-                  +{cardNavOverflowSlots.length}
+                  +{cardNavOverflowEntries.length}
                   {hiddenActiveVariantCount > 0 ? <span className="text-[9px] text-amber-200/75">{hiddenActiveVariantCount} on</span> : null}
                 </button>
               ) : null}
@@ -8280,14 +8442,48 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
             style={{ transform: `translateX(${POWER_PROMPTER_SIDE_CARD_BREATHING_ROOM}px)` }}
             className="h-full max-h-full min-h-0 w-[412px] rounded-xl border border-cyan-400/35 bg-cyan-500/[0.06] shadow-lg shadow-cyan-900/20 flex flex-col overflow-hidden"
           >
-            <div className="px-3 py-2 border-b border-cyan-400/30 flex items-center justify-between gap-2">
+            <div className="relative px-3 py-2 border-b border-cyan-400/30 flex items-center justify-between gap-2">
               <span className="text-[10px] font-black uppercase tracking-widest text-cyan-200">
                 Generation Controls
               </span>
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] uppercase tracking-widest text-cyan-300/80 px-1.5 py-1 rounded-md border border-cyan-400/30 bg-cyan-500/10">
-                  Node Sync
-                </span>
+                {onSendGenerationControlsToUmbraUi ? (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setUmbraUiTargetMenuOpen((current) => !current)}
+                      className="inline-flex h-7 items-center gap-1 rounded-md border border-cyan-400/35 bg-cyan-500/10 px-2 text-[9px] font-black uppercase tracking-[0.09em] text-cyan-100 transition-colors hover:border-cyan-300/65 hover:bg-cyan-500/15"
+                      title="Send the selected pipeline and generation controls to Umbra UI"
+                      aria-expanded={umbraUiTargetMenuOpen}
+                    >
+                      <ArrowRight size={11} />
+                      Umbra UI
+                      <ChevronDown size={10} />
+                    </button>
+                    {umbraUiTargetMenuOpen ? (
+                      <div className="absolute right-0 z-50 mt-1 w-44 overflow-hidden rounded-md border border-cyan-400/30 bg-[#071117] p-1 shadow-xl shadow-black/60">
+                        {([
+                          ['txt2img', 'Text to Image'],
+                          ['img2img', 'Image to Image'],
+                          ['inpaint', 'Inpaint'],
+                        ] as const).map(([target, label]) => (
+                          <button
+                            key={target}
+                            type="button"
+                            onClick={() => {
+                              setUmbraUiTargetMenuOpen(false);
+                              void onSendGenerationControlsToUmbraUi(target, document);
+                            }}
+                            className="flex w-full items-center rounded px-2 py-2 text-left text-[10px] font-bold uppercase tracking-[0.08em] text-zinc-200 hover:bg-cyan-500/12 hover:text-cyan-100"
+                            title={`Send pipeline, checkpoint, LoRAs, and generation controls to Umbra UI ${label}`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   data-umbra-mobile-generation-close=""
@@ -8680,6 +8876,214 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   >
                     Swap Dimensions: {generation.swapDimensions ? 'On' : 'Off'}
                   </button>
+
+                  <div className="rounded-md border border-white/15 bg-black/25 p-2 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-cyan-200">
+                          Resolution Distribution
+                        </div>
+                        <div className="mt-0.5 text-[10px] leading-4 text-zinc-500">
+                          Mix up to five output sizes without increasing the image total.
+                        </div>
+                      </div>
+                      <label className="inline-flex shrink-0 items-center gap-1.5 text-[10px] font-semibold text-zinc-300">
+                        <input
+                          type="checkbox"
+                          checked={resolutionSplit.enabled}
+                          onChange={(event) => updateGeneration({
+                            resolutionSplit: { ...resolutionSplit, enabled: event.target.checked },
+                          })}
+                          onClick={(event) => event.stopPropagation()}
+                          className="h-4 w-4 accent-cyan-400"
+                        />
+                        Enable
+                      </label>
+                    </div>
+
+                    {resolutionSplit.enabled ? (
+                      <>
+                        <div className="grid grid-cols-2 gap-1 rounded border border-white/10 bg-black/30 p-1">
+                          {([
+                            ['queue', 'Across queue'],
+                            ['batch', 'Split each batch'],
+                          ] as const).map(([mode, label]) => (
+                            <button
+                              key={`resolution-split-mode-${mode}`}
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                updateGeneration({ resolutionSplit: { ...resolutionSplit, mode } });
+                              }}
+                              className={`min-h-8 rounded px-2 text-[10px] font-bold transition-colors ${
+                                resolutionSplit.mode === mode
+                                  ? 'bg-cyan-400/20 text-cyan-100'
+                                  : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-200'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="text-[10px] leading-4 text-zinc-400">
+                          {resolutionSplit.mode === 'batch'
+                            ? `Batch ${generation.batchSize} becomes ${generation.batchSize} one-image job${generation.batchSize === 1 ? '' : 's'} per prompt. Prompt, seed, and pipeline settings stay identical.`
+                            : 'Each prompt keeps one job and its original batch. Umbra assigns one weighted resolution to that prompt.'}
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[9px] uppercase tracking-widest text-zinc-500">
+                            {resolutionSplit.targets.filter((target) => target.enabled !== false).length} active targets
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              updateGeneration({
+                                resolutionSplit: {
+                                  ...resolutionSplit,
+                                  targets: resolutionSplit.targets.map((target) => (
+                                    target.enabled === false ? target : { ...target, weight: 100 }
+                                  )),
+                                },
+                              });
+                            }}
+                            className="rounded border border-white/15 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400 hover:border-cyan-300/40 hover:text-cyan-100"
+                          >
+                            Equalize
+                          </button>
+                        </div>
+
+                        <div className="space-y-2">
+                          {resolutionSplit.targets.map((target, targetIndex) => (
+                            <div
+                              key={target.id}
+                              className={`rounded border p-2 space-y-2 ${
+                                target.enabled
+                                  ? 'border-cyan-400/25 bg-cyan-400/[0.04]'
+                                  : 'border-white/10 bg-black/20 opacity-60'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={target.enabled}
+                                  onChange={(event) => updateResolutionSplitTarget(target.id, { enabled: event.target.checked })}
+                                  onClick={(event) => event.stopPropagation()}
+                                  className="h-4 w-4 shrink-0 accent-cyan-400"
+                                  aria-label={`Enable resolution target ${targetIndex + 1}`}
+                                />
+                                <span className="shrink-0 text-[10px] font-black text-zinc-300">
+                                  {targetIndex + 1}
+                                </span>
+                                <div className="relative min-w-0 flex-1">
+                                  <select
+                                    value={target.aspectRatio}
+                                    onChange={(event) => {
+                                      const aspectRatio = event.target.value;
+                                      const dimensions = getDimensionsFromAspectRatioOption(aspectRatio);
+                                      updateResolutionSplitTarget(
+                                        target.id,
+                                        dimensions ? { aspectRatio, ...dimensions } : { aspectRatio },
+                                      );
+                                    }}
+                                    onClick={(event) => event.stopPropagation()}
+                                    onMouseDown={(event) => event.stopPropagation()}
+                                    className={`w-full appearance-none rounded border border-white/15 bg-black/45 px-2 py-1.5 pr-7 text-[10px] text-zinc-200 focus:border-cyan-300 focus:outline-none ${UMBRA_THEMED_SELECT_CLASS}`}
+                                  >
+                                    {POWER_PROMPTER_ASPECT_RATIO_OPTIONS.map((option) => (
+                                      <option key={`${target.id}-${option}`} value={option}>{option}</option>
+                                    ))}
+                                  </select>
+                                  <ChevronDown size={11} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500" />
+                                </div>
+                                <span className="w-9 shrink-0 text-right text-[10px] font-black text-cyan-200">
+                                  {target.enabled ? resolutionSplitShareById.get(target.id) || 0 : 0}%
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    removeResolutionSplitTarget(target.id);
+                                  }}
+                                  disabled={resolutionSplit.targets.length <= 2}
+                                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-white/10 text-zinc-500 hover:border-rose-400/40 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-25"
+                                  title="Remove resolution target"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+
+                              <div className="grid grid-cols-[minmax(0,1fr)_52px_52px] items-end gap-2">
+                                <label className="text-[9px] uppercase tracking-wider text-zinc-500">
+                                  Weight {target.weight}
+                                  <input
+                                    type="range"
+                                    min={1}
+                                    max={100}
+                                    step={1}
+                                    value={target.weight}
+                                    disabled={!target.enabled}
+                                    onChange={(event) => updateResolutionSplitTarget(target.id, {
+                                      weight: parseIntegerInput(event.target.value, target.weight),
+                                    })}
+                                    onClick={(event) => event.stopPropagation()}
+                                    className="mt-1 block w-full accent-cyan-400"
+                                  />
+                                </label>
+                                <label className="text-[9px] uppercase tracking-wider text-zinc-500">
+                                  W
+                                  <input
+                                    type="number"
+                                    min={64}
+                                    max={8192}
+                                    step={8}
+                                    value={target.width}
+                                    onChange={(event) => updateResolutionSplitTarget(target.id, {
+                                      aspectRatio: 'custom',
+                                      width: parseIntegerInput(event.target.value, target.width),
+                                    })}
+                                    onClick={(event) => event.stopPropagation()}
+                                    className="mt-1 w-full rounded border border-white/15 bg-black/40 px-1.5 py-1 text-[10px] text-zinc-200 focus:border-cyan-300 focus:outline-none"
+                                  />
+                                </label>
+                                <label className="text-[9px] uppercase tracking-wider text-zinc-500">
+                                  H
+                                  <input
+                                    type="number"
+                                    min={64}
+                                    max={8192}
+                                    step={8}
+                                    value={target.height}
+                                    onChange={(event) => updateResolutionSplitTarget(target.id, {
+                                      aspectRatio: 'custom',
+                                      height: parseIntegerInput(event.target.value, target.height),
+                                    })}
+                                    onClick={(event) => event.stopPropagation()}
+                                    className="mt-1 w-full rounded border border-white/15 bg-black/40 px-1.5 py-1 text-[10px] text-zinc-200 focus:border-cyan-300 focus:outline-none"
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            addResolutionSplitTarget();
+                          }}
+                          disabled={resolutionSplit.targets.length >= POWER_PROMPTER_MAX_RESOLUTION_SPLIT_TARGETS}
+                          className="inline-flex min-h-8 w-full items-center justify-center gap-1.5 rounded border border-dashed border-white/20 text-[10px] font-bold text-zinc-400 hover:border-cyan-300/40 hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                          <Plus size={12} />
+                          Add Resolution ({resolutionSplit.targets.length}/{POWER_PROMPTER_MAX_RESOLUTION_SPLIT_TARGETS})
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
 
                   {showHiresFix ? (
                     <UmbraHiresFixControls
@@ -9325,7 +9729,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       className="h-full min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar rounded-lg border border-white/5 bg-black/20 p-1.5 pr-1"
                     >
                       {(() => {
-                        const displayVariants = getSlotDisplayVariants(slot, slotIndex);
+                        const displayVariants = getSlotDisplayVariants(slot);
+                        const activeQueueVariantCount = displayVariants.filter((variant) => (
+                          normalizeQueueSetIds(variant.queueSetIds, false).includes(activeQueueSet)
+                        )).length;
                         const viewportMetrics = variantViewportMetricsBySlotId[slot.slotId];
                         const shouldVirtualizeVariants = !chainLinkModeActive
                           && !slotHasEditingVariant
@@ -9366,7 +9773,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                   style={{ height: `${variantWindow.beforeHeight}px` }}
                                 />
                               )}
-                              {visibleDisplayVariants.map(({ variant, actualIndex: variantIdx }) => {
+                              {visibleDisplayVariants.map((variant, visibleVariantIndex) => {
+                        const variantIdx = variantWindow.startIndex + visibleVariantIndex;
                         const isEditing = editingVariantId === variant.id;
                         const isRevealed = revealedVariantIds.includes(variant.id);
                         const variantTitle = normalizeVariantName(variant.variantName);
@@ -9382,6 +9790,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                         const queueVariantState = getQueueVariantState(variant);
                         const status = queueVariantState.status;
                         const setIds = normalizeQueueSetIds(variant.queueSetIds, false);
+                        const isInActiveQueueSet = setIds.includes(activeQueueSet);
                         const activeSetIdForVariant = setIds.includes(activeQueueSet)
                           ? activeQueueSet
                           : (setIds[0] || activeQueueSet);
@@ -9642,7 +10051,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                       moveVariantWithinSlot(slot.slotId, variant.id, variantIdx - 1);
                                     }}
                                     onMouseDown={(event) => event.stopPropagation()}
-                                    disabled={chainLinkModeActive || mobileSelectionMode || variantIdx <= 0}
+                                    disabled={chainLinkModeActive || mobileSelectionMode || !isInActiveQueueSet || variantIdx <= 0}
                                     className="p-0.5 rounded border border-white/10 text-zinc-500 hover:text-zinc-200 hover:border-white/25 disabled:opacity-40 disabled:cursor-not-allowed"
                                     title="Move variant up"
                                   >
@@ -9655,7 +10064,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                       moveVariantWithinSlot(slot.slotId, variant.id, variantIdx + 1);
                                     }}
                                     onMouseDown={(event) => event.stopPropagation()}
-                                    disabled={chainLinkModeActive || mobileSelectionMode || variantIdx >= slot.variants.length - 1}
+                                    disabled={chainLinkModeActive || mobileSelectionMode || !isInActiveQueueSet || variantIdx >= activeQueueVariantCount - 1}
                                     className="p-0.5 rounded border border-white/10 text-zinc-500 hover:text-zinc-200 hover:border-white/25 disabled:opacity-40 disabled:cursor-not-allowed"
                                     title="Move variant down"
                                   >
@@ -10196,7 +10605,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
             data-umbra-card-picker-backdrop=""
             aria-label="Close card picker"
             onClick={() => setMobileCardPickerOpen(false)}
-            className={mobileSelectionMode ? undefined : 'fixed inset-0 z-[235] border-0 bg-black/70 backdrop-blur-sm'}
+            className={mobileSelectionMode ? undefined : 'fixed inset-0 z-[235] border-0 bg-black/75'}
           />
           <section
             data-umbra-mobile-card-picker=""
@@ -10228,42 +10637,70 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
               </button>
             </div>
             <div data-umbra-mobile-card-picker-grid="" className={mobileSelectionMode ? undefined : 'grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-y-auto overscroll-contain p-3 custom-scrollbar sm:grid-cols-2 xl:grid-cols-3'}>
-              {slots.map((slot, slotIndex) => {
+              {cardNavEntries.map(({ slot, slotIndex, activePromptCount }) => {
                 const isActive = activeSlot?.slotId === slot.slotId;
-                const activePromptCount = getSlotActivePromptCount(slot);
-                const enabledVariantNames = getSlotEnabledVariantNames(slot);
-                const enabledSummary = enabledVariantNames.length > 0
-                  ? enabledVariantNames.slice(0, 3).join(', ') + (enabledVariantNames.length > 3 ? ` +${enabledVariantNames.length - 3}` : '')
-                  : 'No enabled variants in this set';
+                const isDropTarget = !!slotChipDragId && slotChipDropId === slot.slotId && slotChipDragId !== slot.slotId;
+                const label = String(slot.label || `Card ${slotIndex + 1}`).trim() || `Card ${slotIndex + 1}`;
                 return (
-                  <button
+                  <div
                     key={`mobile-card-picker-${slot.slotId}`}
-                    type="button"
+                    draggable={!mobileSelectionMode && !touchRemoteMode}
                     data-active={isActive ? '1' : '0'}
                     data-enabled={activePromptCount > 0 ? '1' : '0'}
-                    onClick={() => selectPromptCard(slot, slotIndex)}
-                    className={mobileSelectionMode ? undefined : `flex min-w-0 min-h-[5.4rem] items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
+                    onDragStart={(event) => {
+                      event.stopPropagation();
+                      setSlotChipDragId(slot.slotId);
+                      setSlotChipDropId(slot.slotId);
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('text/plain', `slot-chip:${slot.slotId}`);
+                    }}
+                    onDragOver={(event) => {
+                      if (!slotChipDragId || slotChipDragId === slot.slotId) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      event.dataTransfer.dropEffect = 'move';
+                      setSlotChipDropId(slot.slotId);
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const raw = String(event.dataTransfer.getData('text/plain') || '');
+                      const parsed = raw.startsWith('slot-chip:') ? raw.slice('slot-chip:'.length).trim() : '';
+                      const dragId = slotChipDragId || parsed;
+                      if (dragId && dragId !== slot.slotId) moveSlotByChipDrag(dragId, slot.slotId);
+                      setSlotChipDragId('');
+                      setSlotChipDropId('');
+                    }}
+                    onDragEnd={() => {
+                      setSlotChipDragId('');
+                      setSlotChipDropId('');
+                    }}
+                    className={mobileSelectionMode ? undefined : `min-w-0 rounded-lg transition-colors ${isDropTarget ? 'ring-2 ring-emerald-300/75' : ''}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => selectPromptCard(slot, slotIndex)}
+                      className={mobileSelectionMode ? undefined : `flex min-h-[4.4rem] w-full min-w-0 items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
                       isActive
                         ? 'border-emerald-400/65 bg-emerald-500/[0.14] text-white'
                         : activePromptCount > 0
                           ? 'border-amber-300/40 bg-amber-500/[0.07] text-zinc-100 hover:border-amber-200/70'
                           : 'border-white/10 bg-white/[0.035] text-zinc-300 hover:border-white/25'
                     }`}
-                    title={`${String(slot.label || `Card ${slotIndex + 1}`)}: ${enabledSummary}`}
-                  >
+                      title={`${label}: ${activePromptCount} enabled variant${activePromptCount === 1 ? '' : 's'} in Set ${activeQueueSet}. Drag this card to reorder.`}
+                    >
+                      {!mobileSelectionMode ? <GripVertical size={14} className="shrink-0 text-zinc-600" /> : null}
                     <span className="min-w-0 flex-1">
-                      <strong className={mobileSelectionMode ? undefined : 'block truncate text-[12px] font-bold'}>{String(slot.label || `Card ${slotIndex + 1}`)}</strong>
+                      <strong className={mobileSelectionMode ? undefined : 'block truncate text-[12px] font-bold'}>{label}</strong>
                       <small className={mobileSelectionMode ? undefined : 'mt-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500'}>{activePromptCount} enabled in Set {activeQueueSet}</small>
-                      <small data-umbra-card-picker-variant-summary="" className={mobileSelectionMode ? undefined : `mt-1 block truncate text-[10px] ${activePromptCount > 0 ? 'text-amber-100/80' : 'text-zinc-600'}`}>
-                        {enabledSummary}
-                      </small>
                     </span>
                     <span className={mobileSelectionMode ? undefined : `inline-flex min-w-8 h-8 shrink-0 items-center justify-center rounded-full border text-[11px] font-black ${
                       activePromptCount > 0
                         ? 'border-amber-300/40 bg-amber-500/10 text-amber-100'
                         : 'border-white/10 bg-white/[0.04] text-zinc-500'
                     }`}>{activePromptCount}</span>
-                  </button>
+                    </button>
+                  </div>
                 );
               })}
             </div>

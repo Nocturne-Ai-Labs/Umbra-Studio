@@ -82,6 +82,11 @@ import {
   isMissingHermesPromptSession,
   parseHermesPromptSessionId,
 } from './backend/hermesPromptCommand';
+import {
+  normalizePowerPrompterReceiptUid,
+  readPowerPrompterReceipt,
+  writePowerPrompterReceipt,
+} from './backend/PowerPrompterReceiptService';
 
 // Route handlers we're keeping (will merge later)
 import * as trashRoutes from './backend/routes/trash';
@@ -181,6 +186,7 @@ const ROOT_PUBLIC_DIR = join(ROOT_DIR, 'public');
 const SOURCE_PUBLIC_DIR = join(SOURCE_DIR, 'public');
 const PUBLIC_DIR = existsSync(ROOT_PUBLIC_DIR) ? ROOT_PUBLIC_DIR : SOURCE_PUBLIC_DIR;
 const USER_DIR = join(ROOT_DIR, 'User');
+const POWER_PROMPTER_RECEIPT_DIR = join(USER_DIR, 'PowerPrompter', 'Receipts');
 const REMOTE_BOOTSTRAP_SETTINGS_PATH = join(USER_DIR, 'Config', 'UmbraRemote', 'settings.json');
 const IS_UMBRA_DEV_MODE = process.env.UMBRA_DEV_MODE === '1';
 const firstRunService = new FirstRunService(ROOT_DIR, SOURCE_DIR);
@@ -295,6 +301,7 @@ const umbraUiUpscaleService = new UmbraUiUpscaleService({
 const umbraUiInpaintService = new UmbraUiInpaintService({
   getComfyBaseUrl: () => getComfyProxyBaseUrl(),
   getComfyInputRoot: () => join(getComfyToolRootFast() || join(ROOT_DIR, 'Tools', 'ComfyUI'), 'input'),
+  getComfyOutputRoot: () => join(getComfyToolRootFast() || join(ROOT_DIR, 'Tools', 'ComfyUI'), 'output'),
   jobStatePath: join(USER_DIR, 'UmbraUI', 'inpaint-jobs.json'),
   buildBaseWorkflow: (settings, seed) => buildUmbraUiInpaintBaseWorkflow(settings, seed),
 });
@@ -4495,6 +4502,7 @@ interface BackendPowerPrompterQueueTask {
   promptOutputSubfolders: string[];
   promptStyleNames: string[];
   promptEntries: unknown[];
+  origin: PowerPrompterQueueRequestOrigin;
   generationByPrompt: PowerPrompterGenerationControls[];
   editorSnapshot: unknown;
   restoreMetadataCache: {
@@ -8261,6 +8269,23 @@ async function emitBackendPowerPrompterSavedOutputs(
         });
       }
     }
+    try {
+      await writePowerPrompterReceipt(POWER_PROMPTER_RECEIPT_DIR, {
+        ppuid,
+        outputPath: fullpath,
+        savedAt: String(outputPowerPrompterMetadata.savedAt || ''),
+        metadata: outputPowerPrompterMetadata,
+      });
+    } catch (error: any) {
+      appendPowerPrompterQueueLog('backend_queue_ppuid_receipt_failed', {
+        requestId,
+        promptIndex,
+        promptId,
+        outputIndex,
+        ppuid,
+        error: String(error?.message || error || 'Failed to index the Power Prompter receipt.'),
+      });
+    }
     return {
       ...output,
       ppuid,
@@ -9261,6 +9286,7 @@ async function runBackendPowerPrompterPipelineQueue(
     promptOutputSubfolders,
     promptStyleNames,
     promptEntries,
+    origin: normalizePowerPrompterQueueRequestOrigin(data?.queueOrigin ?? state.queueOrigin),
     generationByPrompt,
     editorSnapshot: state.editorSnapshot && typeof state.editorSnapshot === 'object' ? state.editorSnapshot : null,
     restoreMetadataCache: null,
@@ -9409,7 +9435,7 @@ async function runBackendPowerPrompterPipelineQueue(
         umbra_api_workflow: queuedWorkflow.promptGraph,
         umbra_power_prompter: {
           version: 2,
-          source: 'power_prompter',
+          source: task.origin,
           queueBackend: 'umbra_ui_pipeline',
           generationUid: createPowerPrompterUid('ppgen'),
           requestId,
@@ -17922,6 +17948,7 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
     mediaType: 'image',
     outputOwner: 'umbra_ui',
     outputMode: 'inpainting',
+    modelFamily: settings.modelFamily,
     negativePrompt: settings.negativePrompt,
     seed,
     controlAfterGenerate: settings.seedMode,
@@ -17933,12 +17960,23 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
     scheduler: settings.scheduler,
     modelType: settings.modelSource,
     checkpointName: settings.checkpointName,
+    workflowResources: { ...(settings.workflowResources || {}) },
     aspectRatio: 'custom',
     swapDimensions: false,
     width: settings.width,
     height: settings.height,
     batchSize: 1,
-    loras: [],
+    loras: (settings.loras || [])
+      .filter((lora) => lora.enabled !== false)
+      .map((lora) => ({
+        id: lora.id,
+        name: lora.name,
+        strengthModel: lora.strengthModel,
+        strengthClip: lora.strengthClip,
+        enabled: true,
+        queueEnabled: true,
+        queueSetIds: [1],
+      })),
     hiresFix: {
       enabled: false,
       upscaler: 'Latent',
@@ -17958,6 +17996,7 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
       modelName: 'RealESRGAN_x4plus.safetensors',
       maxDimension: 3840,
     },
+    tiledVae: settings.tiledVae ? { ...settings.tiledVae } : undefined,
   };
   const state = {
     sourceFile: '',
@@ -18547,6 +18586,55 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
         ipAdapterEmbedsScaling: (ipAdapterScalingModes.has(ipAdapterEmbedsScalingRaw) ? ipAdapterEmbedsScalingRaw : 'V only') as UmbraUiInpaintReferenceLayer['ipAdapterEmbedsScaling'],
       };
     });
+    const parseInpaintJsonField = (name: string, fallback: unknown) => {
+      try {
+        const parsed = JSON.parse(String(form.get(name) || ''));
+        return parsed === null || parsed === undefined ? fallback : parsed;
+      } catch {
+        return fallback;
+      }
+    };
+    const rawPromptSegments = parseInpaintJsonField('promptSegments', []);
+    const promptSegments = (Array.isArray(rawPromptSegments) ? rawPromptSegments : [])
+      .slice(0, 64)
+      .map((segment, index) => ({
+        id: String(segment?.id || `umbra-ui-prompt-${index + 1}`).trim().slice(0, 160),
+        text: String(segment?.text || '').trim().slice(0, 32000),
+        label: String(segment?.label || `Prompt ${index + 1}`).trim().slice(0, 160),
+        slotType: String(segment?.slotType || 'umbra_ui_prompt').trim().slice(0, 160),
+        variantId: String(segment?.variantId || '').trim().slice(0, 160),
+        variantName: String(segment?.variantName || '').trim().slice(0, 320),
+      }))
+      .filter((segment) => segment.text.length > 0);
+    const rawLoras = parseInpaintJsonField('loras', []);
+    const loras = (Array.isArray(rawLoras) ? rawLoras : [])
+      .slice(0, 128)
+      .map((lora, index) => {
+        const strengthModel = Math.max(-10, Math.min(10, finiteNumberOrFallback(lora?.strengthModel, 1)));
+        return {
+          id: String(lora?.id || `umbra-ui-inpaint-lora-${index + 1}`).trim().slice(0, 160),
+          name: String(lora?.name || '').trim().replace(/\\/g, '/').slice(0, 500),
+          enabled: lora?.enabled !== false,
+          strengthModel,
+          strengthClip: Math.max(-10, Math.min(10, finiteNumberOrFallback(lora?.strengthClip, strengthModel))),
+        };
+      })
+      .filter((lora) => lora.name.length > 0);
+    const rawWorkflowResources = parseInpaintJsonField('workflowResources', {});
+    const workflowResources = rawWorkflowResources && typeof rawWorkflowResources === 'object' && !Array.isArray(rawWorkflowResources)
+      ? Object.fromEntries(Object.entries(rawWorkflowResources as Record<string, unknown>)
+        .slice(0, 64)
+        .map(([key, value]) => [String(key || '').trim().slice(0, 160), String(value || '').trim().replace(/\\/g, '/').slice(0, 500)])
+        .filter(([key, value]) => key.length > 0 && value.length > 0))
+      : {};
+    const rawTiledVae = parseInpaintJsonField('tiledVae', {});
+    const tiledVae = rawTiledVae && typeof rawTiledVae === 'object' && !Array.isArray(rawTiledVae)
+      ? {
+        enabled: rawTiledVae.enabled === true,
+        tileSize: Math.max(128, Math.min(2048, Math.round(finiteNumberOrFallback(rawTiledVae.tileSize, 512)))),
+        overlap: Math.max(0, Math.min(256, Math.round(finiteNumberOrFallback(rawTiledVae.overlap, 64)))),
+      }
+      : { enabled: false, tileSize: 512, overlap: 64 };
     const requestedWidth = Math.max(64, Math.min(16384, Math.round(finiteNumberOrFallback(form.get('width'), 1024))));
     const requestedHeight = Math.max(64, Math.min(16384, Math.round(finiteNumberOrFallback(form.get('height'), 1024))));
     const resolutionCapability = resolvedPipeline.pipeline.capabilities?.resolution;
@@ -18580,7 +18668,10 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
         || (modelSource === 'checkpoint' ? 'classic_conditioning' : 'native_edit'),
       adapterModelName: String(resolvedPipeline.pipeline.defaults?.adapterModelName || '').trim(),
       prompt: String(form.get('prompt') || '').trim(),
+      promptSegments,
       negativePrompt: String(form.get('negativePrompt') || '').trim(),
+      loras,
+      workflowResources,
       checkpointName: String(form.get('checkpointName') || '').trim(),
       clipSkip: Math.max(1, Math.min(12, Math.round(finiteNumberOrFallback(form.get('clipSkip'), 1)))),
       seed: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(finiteNumberOrFallback(form.get('seed'), 0)))),
@@ -18631,6 +18722,7 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
       softInpaintPreservation: Math.max(0, Math.min(1, finiteNumberOrFallback(form.get('softInpaintPreservation'), 0.5))),
       softInpaintTransitionContrast: Math.max(0.25, Math.min(8, finiteNumberOrFallback(form.get('softInpaintTransitionContrast'), 2))),
       softInpaintMaskInfluence: Math.max(0, Math.min(1, finiteNumberOrFallback(form.get('softInpaintMaskInfluence'), 0))),
+      tiledVae,
       regionalGuidance,
       controlLayers,
       referenceLayers,
@@ -24338,6 +24430,18 @@ async function handleFsMetadata(url: URL): Promise<Response> {
 
     const stat = statSync(fullPath);
     const parsed = (await MetadataParser.parse(fullPath)) || {};
+    const parsedPowerPrompter = (parsed as any).umbra_power_prompter;
+    const parsedPpuid = normalizePowerPrompterReceiptUid(parsedPowerPrompter?.ppuid);
+    if (parsedPpuid && parsedPowerPrompter && typeof parsedPowerPrompter === 'object') {
+      await writePowerPrompterReceipt(POWER_PROMPTER_RECEIPT_DIR, {
+        ppuid: parsedPpuid,
+        outputPath: fullPath,
+        savedAt: String(parsedPowerPrompter.savedAt || stat.mtime.toISOString()),
+        metadata: parsedPowerPrompter as Record<string, unknown>,
+      }).catch((error: any) => {
+        console.warn('[PowerPrompterReceipt] Failed to backfill receipt:', error?.message || error);
+      });
+    }
     let imageMetadata: any = {};
     try {
       const sharp = (await import('sharp')).default;
@@ -24361,6 +24465,32 @@ async function handleFsMetadata(url: URL): Promise<Response> {
     console.error('[Metadata] Error:', error);
     return json({ error: error.message }, 500);
   }
+}
+
+async function handlePowerPrompterReceiptLookup(url: URL): Promise<Response> {
+  const requestedPpuid = String(url.searchParams.get('ppuid') || '').trim();
+  const ppuid = normalizePowerPrompterReceiptUid(requestedPpuid);
+  if (!ppuid) {
+    return json({ error: 'Enter a valid Power Prompter UID beginning with pp_.' }, 400);
+  }
+
+  const receipt = await readPowerPrompterReceipt(POWER_PROMPTER_RECEIPT_DIR, ppuid);
+  if (!receipt) {
+    return json({
+      error: 'No Power Prompter state was found for that PPUID. For older images, open its Gallery details once to index it, then try again.',
+    }, 404);
+  }
+
+  return json({
+    success: true,
+    ppuid: receipt.ppuid,
+    outputPath: receipt.outputPath,
+    savedAt: receipt.savedAt,
+    metadata: {
+      type: 'image',
+      umbra_power_prompter: receipt.metadata,
+    },
+  });
 }
 
 async function handleFsRead(url: URL): Promise<Response> {
@@ -28372,6 +28502,7 @@ const server = Bun.serve<any>({
       if (path === '/api/fs/download-zip' && method === 'POST') return handleFsDownloadZip(req);
       if (path === '/api/fs/download-jpeg-zip' && method === 'POST') return handleFsDownloadJpegZip(req);
       if (path === '/api/fs/metadata' && method === 'GET') return handleFsMetadata(url);
+      if (path === '/api/powerprompter/receipt' && method === 'GET') return handlePowerPrompterReceiptLookup(url);
       if (path === '/api/fs/read' && method === 'GET') return handleFsRead(url);
       if (path === '/api/fs/tree' && method === 'GET') return handleFsTree(url);
       if (path === '/api/fs/folder-summary' && method === 'GET') return handleFsFolderSummary(url);

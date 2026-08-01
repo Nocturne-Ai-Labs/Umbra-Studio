@@ -39,6 +39,7 @@ const PP_BASE_CARD_CONFIG: PowerPrompterBaseCardConfig[] = [
 export const POWER_PROMPTER_CARD_DOC_VERSION = 1;
 export const POWER_PROMPTER_MAX_QUEUE_SETS = 10;
 export const POWER_PROMPTER_MAX_QUEUE_CYCLE_WEIGHT = 99;
+export const POWER_PROMPTER_MAX_RESOLUTION_SPLIT_TARGETS = 5;
 export const POWER_PROMPTER_ASPECT_RATIO_OPTIONS = [
   'custom',
   'SD1.5 - 1:1 square 512x512',
@@ -342,6 +343,14 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
     modelName: 'RealESRGAN_x4plus.safetensors',
     maxDimension: 3840,
   },
+  resolutionSplit: {
+    enabled: false,
+    mode: 'queue',
+    targets: [
+      { id: 'resolution-1', enabled: true, aspectRatio: 'SDXL - 3:4 portrait 896x1152', width: 896, height: 1152, weight: 50 },
+      { id: 'resolution-2', enabled: true, aspectRatio: 'SDXL - 16:9 landscape 1344x768', width: 1344, height: 768, weight: 50 },
+    ],
+  },
   hiresFix: {
     enabled: false,
     upscaler: 'Latent',
@@ -527,6 +536,23 @@ function normalizeCardQueueSetIds(rawSets: unknown, queueEnabled: unknown, fallb
   if (Array.isArray(rawSets) || normalized.length > 0 || queueEnabled === false) return normalized;
   const fallback = Math.max(1, Math.min(POWER_PROMPTER_MAX_QUEUE_SETS, Math.floor(Number(fallbackSetId) || 1)));
   return [fallback];
+}
+
+function normalizeQueueSetOrders(
+  rawOrders: unknown,
+  allowedSetIds: number[],
+  fallbackOrder: number,
+): Record<string, number> {
+  const source = rawOrders && typeof rawOrders === 'object' && !Array.isArray(rawOrders)
+    ? rawOrders as Record<string, unknown>
+    : {};
+  const normalized: Record<string, number> = {};
+  const fallback = Math.max(0, Math.floor(Number(fallbackOrder) || 0));
+  for (const setId of allowedSetIds) {
+    const order = Math.floor(Number(source[String(setId)]));
+    normalized[String(setId)] = Number.isFinite(order) && order >= 0 ? order : fallback;
+  }
+  return normalized;
 }
 
 function normalizeRandomSetIds(rawSets: unknown): number[] {
@@ -764,6 +790,40 @@ function normalizePowerPrompterOutputUpscaleControls(rawValue: unknown): PowerPr
   };
 }
 
+function normalizePowerPrompterResolutionSplitControls(rawValue: unknown): NonNullable<PowerPrompterGenerationControls['resolutionSplit']> {
+  const defaults = DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS.resolutionSplit!;
+  const value = rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue)
+    ? rawValue as Record<string, unknown>
+    : {};
+  const rawTargets = Array.isArray(value.targets) ? value.targets : defaults.targets;
+  const targets = rawTargets
+    .slice(0, POWER_PROMPTER_MAX_RESOLUTION_SPLIT_TARGETS)
+    .map((rawTarget, index) => {
+      const target = rawTarget && typeof rawTarget === 'object' && !Array.isArray(rawTarget)
+        ? rawTarget as Record<string, unknown>
+        : {};
+      const fallback = defaults.targets[index] || defaults.targets[defaults.targets.length - 1];
+      return {
+        id: String(target.id || `resolution-${index + 1}`).trim().slice(0, 64) || `resolution-${index + 1}`,
+        enabled: target.enabled !== false,
+        aspectRatio: normalizeAspectRatio(target.aspectRatio ?? fallback.aspectRatio),
+        width: clampInteger(target.width, fallback.width, 64, 8192),
+        height: clampInteger(target.height, fallback.height, 64, 8192),
+        weight: clampInteger(target.weight, fallback.weight, 1, 100),
+      };
+    });
+  while (targets.length < 2) {
+    const index = targets.length;
+    const fallback = defaults.targets[index] || defaults.targets[0];
+    targets.push({ ...fallback, id: `resolution-${index + 1}` });
+  }
+  return {
+    enabled: value.enabled === true,
+    mode: String(value.mode || '').trim().toLowerCase() === 'batch' ? 'batch' : 'queue',
+    targets,
+  };
+}
+
 export function normalizePowerPrompterGenerationControls(rawControls: unknown): PowerPrompterGenerationControls {
   const controls = (rawControls && typeof rawControls === 'object')
     ? rawControls as Partial<PowerPrompterGenerationControls> & { loras?: unknown }
@@ -777,6 +837,7 @@ export function normalizePowerPrompterGenerationControls(rawControls: unknown): 
       (controls as any).umbraUiDetailStages,
     ),
     outputUpscale: normalizePowerPrompterOutputUpscaleControls((controls as any).outputUpscale),
+    resolutionSplit: normalizePowerPrompterResolutionSplitControls((controls as any).resolutionSplit),
     negativePrompt: String(controls.negativePrompt || '').replace(/\r\n/g, '\n'),
     seed: clampInteger(controls.seed, DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS.seed, 0, MAX_JS_SAFE_SEED),
     controlAfterGenerate: normalizeSeedControlMode(controls.controlAfterGenerate),
@@ -830,6 +891,7 @@ export function createPowerPrompterCardNode(
     randomSetIds: [],
     queueEnabled: true,
     queueSetIds,
+    queueSetOrders: { '1': Math.max(0, Math.floor(Number(order) || 0)) },
     queueTraversalRole: 'cycle',
     queueCycleWeights: {},
     chainLinks: [],
@@ -904,6 +966,7 @@ export function importLegacyPromptToCardDocument(
       randomSetIds: normalizeRandomSetIds(card.randomSetIds),
       queueEnabled: queueSetIds.length > 0,
       queueSetIds,
+      queueSetOrders: normalizeQueueSetOrders((card as any).queueSetOrders, queueSetIds, idx),
       queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
       queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
       chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
@@ -974,6 +1037,7 @@ function normalizeDeletedCardGroups(rawGroups: unknown, now: string): Record<str
         randomSetIds: normalizeRandomSetIds(card.randomSetIds),
         queueEnabled: queueSetIds.length > 0,
         queueSetIds,
+        queueSetOrders: normalizeQueueSetOrders((card as any).queueSetOrders, queueSetIds, idx),
         queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
         queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
         chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
@@ -1027,6 +1091,7 @@ export function normalizePowerPrompterCardDocument(
       randomSetIds: normalizeRandomSetIds(card.randomSetIds),
       queueEnabled: queueSetIds.length > 0,
       queueSetIds,
+      queueSetOrders: normalizeQueueSetOrders((card as any).queueSetOrders, queueSetIds, idx),
       queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
       queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
       chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),

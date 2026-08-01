@@ -1,5 +1,61 @@
 # Changelog
 
+## v0.22.5
+
+### Power Prompter Resolution Distribution
+
+- Added an optional weighted resolution distribution for Power Prompter queues
+  with up to five independently configurable aspect ratios or custom sizes.
+- Added queue-wide and per-batch distribution modes while keeping every mixed
+  resolution as its own ComfyUI job, avoiding invalid mixed latent batches.
+- Preserved logical prompt totals while assigning deterministic resolution
+  targets across prompts, seeds, sets, output folders, and generation controls.
+
+### PPUID Restore And Gallery Metadata
+
+- Added durable, deduplicated Power Prompter receipts under the user's data
+  folder so a PPUID can restore the exact cards, sets, pipeline, checkpoint,
+  LoRAs, generation controls, style, and utility state used for an image.
+- Added a prominent `Load from PPUID` action to Power Prompter's Files panel and
+  an API lookup for restoring images even when their original folder is closed.
+- Added automatic receipt backfilling when older compatible images are inspected
+  in the Gallery.
+- Added a copyable PPUID field and combined/modular positive-prompt views to
+  Gallery details, including the original card badges and LoRA syntax chips.
+- Extended Umbra UI image metadata and handoffs so compatible generations retain
+  their modular prompts, LoRA stack, resources, seed, model family, and PPUID.
+
+### Power Prompter Editing And Handoffs
+
+- Added direct generation-control handoff from Power Prompter to Umbra UI
+  TXT2IMG, IMG2IMG, or Inpaint.
+- Made enabled variant ordering independent per set, with predictable insertion
+  and movement instead of inheriting stale positions from another set.
+- Fixed expanded-editor suggestions so selecting one replaces the partial token
+  currently being typed instead of appending after it.
+- Reworked the desktop card navigator to use the full row, summarize enabled
+  variants, and retain fast selection and drag reordering for larger card files.
+
+### Inpaint Source Replacement
+
+- Added an optional `Replace original after accept` workflow for Gallery and
+  output images, matching IMG2IMG's source-replacement flow.
+- The accepted full-resolution inpaint is stitched before replacement, refreshes
+  Gallery and filmstrip metadata immediately, and keeps a recovery copy.
+- Inpaint outputs now carry complete Umbra/Power Prompter generation metadata for
+  later restoration and cross-workspace handoff.
+
+### Queue And Preview Performance
+
+- Separated high-frequency generation progress from the heavier Power Prompter
+  editor state so thousand-prompt queues no longer repaint the full editor on
+  every progress event.
+- Fixed expanded Queue Manager rows overlapping after completed prompts leave a
+  running group by remeasuring virtual rows and removing stale expansion state.
+- Added a global option to disable live generation frames in the filmstrip while
+  keeping completed outputs visible, reducing duplicate preview work during
+  large queues.
+
 ## v0.22.4
 
 ### Umbra UI LoRA Controls

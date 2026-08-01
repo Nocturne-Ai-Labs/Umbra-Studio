@@ -26,6 +26,7 @@ export interface AppSettings {
   'comfyui.attentionBackend': ComfyAttentionBackend;
   'comfyui.autoLaunch': boolean;
   'comfyui.showFilmstrip': boolean;
+  'comfyui.showFilmstripLivePreviews': boolean;
   'library.metadataHoverTooltips': boolean;
   'comfyui.externalOutputPath': string;
   'library.enableExternalRoots': boolean;
@@ -74,6 +75,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   'comfyui.attentionBackend': 'default',
   'comfyui.autoLaunch': false,
   'comfyui.showFilmstrip': true,
+  'comfyui.showFilmstripLivePreviews': true,
   'library.metadataHoverTooltips': false,
   'comfyui.externalOutputPath': '',
   'library.enableExternalRoots': true,
@@ -112,6 +114,7 @@ const BOOLEAN_KEYS: Array<keyof AppSettings> = [
   'ui.idleFrameCapEnabled',
   'comfyui.autoLaunch',
   'comfyui.showFilmstrip',
+  'comfyui.showFilmstripLivePreviews',
   'library.metadataHoverTooltips',
   'library.enableExternalRoots',
   'library.showDefaultOutputRoot',

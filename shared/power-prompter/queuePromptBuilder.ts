@@ -264,7 +264,16 @@ export function buildQueuePromptsFromCards(
       const sets = normalizeQueueSetIds(card.queueSetIds, false);
       return sets.includes(setId);
     });
-    return inSet;
+    return [...inSet].sort((left, right) => {
+      const leftOrder = Math.floor(Number((left as any).queueSetOrders?.[String(setId)]));
+      const rightOrder = Math.floor(Number((right as any).queueSetOrders?.[String(setId)]));
+      const leftFallback = Math.max(0, Math.floor(Number(left.order) || 0));
+      const rightFallback = Math.max(0, Math.floor(Number(right.order) || 0));
+      const orderDelta = (Number.isFinite(leftOrder) && leftOrder >= 0 ? leftOrder : leftFallback)
+        - (Number.isFinite(rightOrder) && rightOrder >= 0 ? rightOrder : rightFallback);
+      if (orderDelta !== 0) return orderDelta;
+      return String(left.createdAt || '').localeCompare(String(right.createdAt || ''));
+    });
   };
   let documentShuffleSalt = '';
   const getDocumentShuffleSalt = () => {

@@ -224,6 +224,23 @@ export interface PowerPrompterTiledVaeControls {
   overlap: number;
 }
 
+export type PowerPrompterResolutionSplitMode = 'queue' | 'batch';
+
+export interface PowerPrompterResolutionSplitTarget {
+  id: string;
+  enabled: boolean;
+  aspectRatio: string;
+  width: number;
+  height: number;
+  weight: number;
+}
+
+export interface PowerPrompterResolutionSplitControls {
+  enabled: boolean;
+  mode: PowerPrompterResolutionSplitMode;
+  targets: PowerPrompterResolutionSplitTarget[];
+}
+
 export interface PowerPrompterImg2ImgControls {
   sourceImagePath: string;
   sourceImageName: string;
@@ -244,6 +261,7 @@ export interface PowerPrompterGenerationControls {
   detailerPipeline?: PowerPrompterDetailerStage[];
   outputUpscale?: PowerPrompterOutputUpscaleControls;
   tiledVae?: PowerPrompterTiledVaeControls;
+  resolutionSplit?: PowerPrompterResolutionSplitControls;
   negativePrompt: string;
   seed: number;
   controlAfterGenerate: PowerPrompterSeedControlMode;
@@ -316,6 +334,7 @@ export interface PowerPrompterCardNode {
   randomSetIds: number[];
   queueEnabled: boolean;
   queueSetIds: number[];
+  queueSetOrders?: Record<string, number>;
   queueTraversalRole?: PowerPrompterQueueTraversalRole;
   queueCycleWeights?: Record<string, number>;
   chainLinks?: string[];

@@ -391,6 +391,7 @@ export function UmbraFilmstrip({
   const pinnedFoldersSetting = useStore((state) => state.appSettings['library.pinnedFolders']);
   const recentFoldersSetting = useStore((state) => state.appSettings['library.recentFolders']);
   const metadataTooltipEnabled = useStore((state) => state.appSettings['library.metadataHoverTooltips'] !== false);
+  const liveGenerationPreviewsEnabled = useStore((state) => state.appSettings['comfyui.showFilmstripLivePreviews'] !== false);
   const { addToast } = useToastStore();
 
   const rootPath = DEFAULT_OUTPUT_ROOT;
@@ -483,7 +484,7 @@ export function UmbraFilmstrip({
   const recentGenerationLaneImages = useMemo(() => {
     const recentLimit = recentGenerationsExpanded ? 10 : 3;
     const lane = [
-      ...(liveGenerationPreviewImage ? [liveGenerationPreviewImage] : []),
+      ...(liveGenerationPreviewsEnabled && liveGenerationPreviewImage ? [liveGenerationPreviewImage] : []),
       ...recentGenerationOutputImages.slice(0, recentLimit),
     ];
     const seen = new Set<string>();
@@ -493,7 +494,11 @@ export function UmbraFilmstrip({
       seen.add(key);
       return true;
     });
-  }, [liveGenerationPreviewImage, recentGenerationOutputImages, recentGenerationsExpanded]);
+  }, [liveGenerationPreviewImage, liveGenerationPreviewsEnabled, recentGenerationOutputImages, recentGenerationsExpanded]);
+
+  useEffect(() => {
+    if (!liveGenerationPreviewsEnabled) setLiveGenerationPreviewImage(null);
+  }, [liveGenerationPreviewsEnabled]);
 
   const selectableImages = useMemo(() => {
     if (recentGenerationLaneImages.length === 0) return displayedImages;
@@ -1005,6 +1010,7 @@ export function UmbraFilmstrip({
     };
 
     const onPowerPrompterGenerationPreview = (event: Event) => {
+      if (!liveGenerationPreviewsEnabled) return;
       const liveImage = filmstripImageFromGenerationPreview((event as CustomEvent<unknown>)?.detail);
       if (!liveImage) return;
       setLiveGenerationPreviewImage(liveImage);
@@ -1032,20 +1038,24 @@ export function UmbraFilmstrip({
     };
 
     window.addEventListener('umbra:powerprompter-output-saved', onPowerPrompterOutputSaved as EventListener);
-    window.addEventListener('umbra:powerprompter-generation-preview', onPowerPrompterGenerationPreview as EventListener);
+    if (liveGenerationPreviewsEnabled) {
+      window.addEventListener('umbra:powerprompter-generation-preview', onPowerPrompterGenerationPreview as EventListener);
+    }
     window.addEventListener('umbra:gallery-generation-complete', onGenerationComplete as EventListener);
     window.addEventListener('focus', onWake);
     document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
       window.removeEventListener('umbra:powerprompter-output-saved', onPowerPrompterOutputSaved as EventListener);
-      window.removeEventListener('umbra:powerprompter-generation-preview', onPowerPrompterGenerationPreview as EventListener);
+      if (liveGenerationPreviewsEnabled) {
+        window.removeEventListener('umbra:powerprompter-generation-preview', onPowerPrompterGenerationPreview as EventListener);
+      }
       window.removeEventListener('umbra:gallery-generation-complete', onGenerationComplete as EventListener);
       window.removeEventListener('focus', onWake);
       document.removeEventListener('visibilitychange', onVisibilityChange);
       retryTimers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [currentFolder, refreshImages, rememberRecentFolders, rootPath]);
+  }, [currentFolder, liveGenerationPreviewsEnabled, refreshImages, rememberRecentFolders, rootPath]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {

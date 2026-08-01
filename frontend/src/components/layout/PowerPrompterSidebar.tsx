@@ -12,7 +12,9 @@ import {
   ChevronRight,
   ChevronDown,
   FilePlus as FilePlusIcon,
-  ClipboardPaste
+  ClipboardPaste,
+  Fingerprint,
+  Loader2,
 } from 'lucide-react';
 import { useContextMenu, type ContextMenuItem } from '@/hooks/useContextMenu';
 import { ContextMenu } from '@/components/ui/ContextMenu';
@@ -79,6 +81,8 @@ interface PowerPrompterSidebarProps {
   onFileOpenFailed?: () => void;
   onSelectFile: (path: string, content: string) => void;
   onDeleteFile: (path: string) => void;
+  onLoadFromPpuid: (ppuid: string) => Promise<void> | void;
+  ppuidRestoreBusy?: boolean;
   overlayMode?: boolean;
   menuMode?: boolean;
 }
@@ -89,6 +93,8 @@ export const PowerPrompterSidebar = React.memo(({
   onFileOpenFailed,
   onSelectFile,
   onDeleteFile,
+  onLoadFromPpuid,
+  ppuidRestoreBusy = false,
   overlayMode = false,
   menuMode = false,
 }: PowerPrompterSidebarProps) => {
@@ -98,6 +104,7 @@ export const PowerPrompterSidebar = React.memo(({
   const [cardClipboard, setCardClipboard] = useState<PowerPrompterCardClipboardPayload | null>(null);
   const [fileMetaByPath, setFileMetaByPath] = useState<Record<string, FileModelMeta>>({});
   const [fileTagEditor, setFileTagEditor] = useState<FileTagEditorState | null>(null);
+  const [ppuidDraft, setPpuidDraft] = useState('');
   const fileMetaByPathRef = useRef<Record<string, FileModelMeta>>({});
   const pendingMetaLoadsRef = useRef(new Map<string, Promise<FileModelMeta | null>>());
   const metadataHydrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1058,6 +1065,54 @@ export const PowerPrompterSidebar = React.memo(({
           </div>
         </div>
       </div>
+
+      <form
+        className="border-b border-cyan-300/15 bg-cyan-400/[0.035] px-3 py-3"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          const ppuid = ppuidDraft.trim();
+          if (!ppuid || ppuidRestoreBusy) return;
+          try {
+            await onLoadFromPpuid(ppuid);
+            setPpuidDraft('');
+          } catch {
+            // The parent reports restore errors through Umbra notifications.
+          }
+        }}
+      >
+        <div className="mb-2 flex items-center gap-2">
+          <span className="grid size-7 shrink-0 place-items-center rounded-md border border-cyan-300/25 bg-cyan-400/10 text-cyan-200">
+            <Fingerprint size={15} />
+          </span>
+          <div className="min-w-0">
+            <div className="text-[11px] font-black uppercase tracking-wider text-cyan-100">
+              Load from PPUID
+            </div>
+            <div className="text-[10px] leading-4 text-zinc-500">
+              Restore the exact cards, model, pipeline, and generation controls.
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-1.5">
+          <input
+            value={ppuidDraft}
+            onChange={(event) => setPpuidDraft(event.target.value)}
+            placeholder="pp_..."
+            spellCheck={false}
+            autoCapitalize="none"
+            autoCorrect="off"
+            className="min-w-0 flex-1 rounded-md border border-white/10 bg-black/40 px-2.5 py-2 font-mono text-[11px] text-zinc-100 outline-none placeholder:text-zinc-700 focus:border-cyan-300/45"
+          />
+          <button
+            type="submit"
+            disabled={!ppuidDraft.trim() || ppuidRestoreBusy}
+            className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border border-cyan-300/30 bg-cyan-400/10 px-3 text-[10px] font-black uppercase tracking-wider text-cyan-100 transition-colors hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {ppuidRestoreBusy ? <Loader2 size={13} className="animate-spin" /> : <Fingerprint size={13} />}
+            Load
+          </button>
+        </div>
+      </form>
 
       <div
         className={`flex-1 overflow-y-auto p-2.5 space-y-1 custom-scrollbar transition-colors ${dropTarget === ROOT_PATH ? 'bg-cyan-400/10' : ''}`}

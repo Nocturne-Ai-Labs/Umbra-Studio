@@ -77,6 +77,23 @@ function normalizeCardQueueSetIds(card: Pick<PowerPrompterCardNode, 'queueSetIds
   return normalizeQueueSetIds([fallbackSetId], true);
 }
 
+function normalizeQueueSetOrders(
+  rawOrders: unknown,
+  allowedSetIds: number[],
+  fallbackOrder: number,
+): Record<string, number> {
+  const source = rawOrders && typeof rawOrders === 'object' && !Array.isArray(rawOrders)
+    ? rawOrders as Record<string, unknown>
+    : {};
+  const fallback = Math.max(0, Math.floor(Number(fallbackOrder) || 0));
+  const normalized: Record<string, number> = {};
+  for (const setId of allowedSetIds) {
+    const value = Math.floor(Number(source[String(setId)]));
+    normalized[String(setId)] = Number.isFinite(value) && value >= 0 ? value : fallback;
+  }
+  return normalized;
+}
+
 export function normalizeChainCards(cards: PowerPrompterCardNode[]): PowerPrompterCardNode[] {
   const now = new Date().toISOString();
   return sortPowerPrompterCards(cards).map((card, idx) => {
@@ -97,6 +114,7 @@ export function normalizeChainCards(cards: PowerPrompterCardNode[]): PowerPrompt
       randomEnabled: card.randomEnabled === true,
       randomSetIds,
       queueSetIds,
+      queueSetOrders: normalizeQueueSetOrders((card as any).queueSetOrders, queueSetIds, idx),
       queueCycleWeights,
       chainLinks: normalizeChainLinks((card as any).chainLinks, id),
       blockLinks: normalizeBlockLinks((card as any).blockLinks, id),
@@ -157,6 +175,7 @@ export function flattenChainSlots(slots: PrompterChainSlot[]): PowerPrompterCard
         randomEnabled: variant.randomEnabled === true,
         randomSetIds,
         queueSetIds,
+        queueSetOrders: normalizeQueueSetOrders((variant as any).queueSetOrders, queueSetIds, flattened.length),
         queueCycleWeights,
         chainLinks: normalizeChainLinks((variant as any).chainLinks, id),
         blockLinks: normalizeBlockLinks((variant as any).blockLinks, id),

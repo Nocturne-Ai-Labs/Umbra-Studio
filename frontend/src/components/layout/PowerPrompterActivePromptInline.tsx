@@ -51,9 +51,11 @@ export const PowerPrompterActivePromptInline = React.memo(function PowerPrompter
               <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-100">
                 {block.cardLabel}
               </span>
-              <span className="rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-300">
-                {block.variantLabel}
-              </span>
+              {block.variantLabel ? (
+                <span className="rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-300">
+                  {block.variantLabel}
+                </span>
+              ) : null}
               <span className="min-w-0 leading-relaxed text-zinc-200">
                 <PowerPrompterPromptChips text={text} config={chipConfig} />
               </span>

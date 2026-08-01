@@ -1248,6 +1248,12 @@ const ComfyUISettings = ({ settings, updateSetting }: any) => {
           label="Show filmstrip in generate view"
           description="Display recent generations in a filmstrip at the bottom"
         />
+        <SettingCheckbox
+          checked={settings['comfyui.showFilmstripLivePreviews']}
+          onChange={(val: boolean) => updateSetting('comfyui.showFilmstripLivePreviews', val)}
+          label="Show live previews in filmstrip"
+          description="Stream in-progress generation frames into the filmstrip. Disable this to reduce UI work during large queues; completed outputs still appear."
+        />
       </div>
     </div>
   );

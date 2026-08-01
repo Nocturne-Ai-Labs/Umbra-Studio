@@ -393,6 +393,7 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
   const params = extractGenerationParams(metadata);
   const powerPrompter = isRecord(metadata.umbra_power_prompter) ? metadata.umbra_power_prompter : {};
   const generation = isRecord(powerPrompter.generation) ? powerPrompter.generation : {};
+  const pipeline = isRecord(powerPrompter.pipeline) ? powerPrompter.pipeline : {};
   const inpaint = isRecord(metadata.umbra_inpaint) ? metadata.umbra_inpaint : {};
   const normalizedPowerPrompterGeneration = normalizePowerPrompterGenerationControls({
     ...generation,
@@ -458,8 +459,8 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
     positivePrompt,
     positivePromptSegments,
     negativePrompt,
-    modelFamily: String(generation.modelFamily || inpaint.modelFamily || '').trim() || inferModelFamily(checkpointName),
-    modelType: String(generation.modelType || inpaint.modelSource || '').trim() || (checkpointName.toLowerCase().endsWith('.gguf') ? 'gguf' : 'checkpoint'),
+    modelFamily: String(generation.modelFamily || pipeline.modelFamily || inpaint.modelFamily || '').trim() || inferModelFamily(checkpointName),
+    modelType: String(generation.modelType || pipeline.modelSource || inpaint.modelSource || '').trim() || (checkpointName.toLowerCase().endsWith('.gguf') ? 'gguf' : 'checkpoint'),
     checkpointName,
     vaeName: normalizePath(generation.vaeName || params.vae),
     seed: finiteNumber(generation.seed ?? inpaint.seed ?? params.seed),

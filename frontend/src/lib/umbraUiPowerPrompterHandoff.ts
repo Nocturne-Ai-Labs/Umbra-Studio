@@ -1,8 +1,11 @@
 export const UMBRA_UI_POWER_PROMPTER_HANDOFF_KEY = 'umbra-ui:pending-power-prompter-handoff';
 export const UMBRA_UI_POWER_PROMPTER_HANDOFF_EVENT = 'umbra:umbra-ui-power-prompter-handoff';
 
+export type UmbraUiPowerPrompterTarget = 'txt2img' | 'img2img' | 'inpaint';
+
 export interface UmbraUiPowerPrompterHandoff {
   version: 1;
+  target: UmbraUiPowerPrompterTarget;
   prompt: string;
   positivePromptSegments?: Array<{
     text: string;
@@ -27,6 +30,9 @@ export function normalizeUmbraUiPowerPrompterHandoff(value: unknown): UmbraUiPow
   const source = normalizeRecord(value);
   const prompt = String(source.prompt || '').trim();
   const modelFamily = String(source.modelFamily || '').trim();
+  const target = source.target === 'img2img' || source.target === 'inpaint'
+    ? source.target
+    : 'txt2img';
   const positivePromptSegments = Array.isArray(source.positivePromptSegments)
     ? source.positivePromptSegments
       .map((entry) => {
@@ -46,6 +52,7 @@ export function normalizeUmbraUiPowerPrompterHandoff(value: unknown): UmbraUiPow
   if (!prompt || !modelFamily) return null;
   return {
     version: 1,
+    target,
     prompt,
     ...(positivePromptSegments.length > 0 ? { positivePromptSegments } : {}),
     modelFamily,

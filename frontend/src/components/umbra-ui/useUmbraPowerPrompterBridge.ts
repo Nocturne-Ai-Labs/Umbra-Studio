@@ -48,6 +48,7 @@ import {
   type UmbraLtxExtendedSequenceMetadata,
 } from '../../../../shared/umbra-ui/videoExtension';
 import { resolveUmbraUiQueueControlTargets } from '@/lib/umbraUiQueueControls';
+import type { UmbraUiPromptSegment } from '@/lib/umbraUiPromptSegments';
 
 const RECONNECT_DELAY_MS = 1500;
 const QUEUE_ACK_TIMEOUT_MS = 15000;
@@ -260,6 +261,7 @@ export interface UmbraVideoReviewJob {
 
 export interface UmbraImageQueueOptions {
   prompt: string;
+  promptSegments?: UmbraUiPromptSegment[];
   negativePrompt: string;
   modelFamily: string;
   modelType: PowerPrompterModelType;
@@ -1362,6 +1364,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       modelFamily: string;
     },
     queuePlacement: UmbraQueuePlacement = 'end',
+    promptEntries: unknown[] = [],
   ) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN || !connected) {
@@ -1389,6 +1392,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       promptSetIds: prompts.map(() => 1),
       promptOutputSubfolders: prompts.map(() => ''),
       promptStyleNames: normalizedStyleNames,
+      promptEntries: prompts.map((prompt, index) => promptEntries[index] || { prompt, tokens: [] }),
       promptSeedGroupIds: prompts.map((_, index) => `umbra-ui:${requestId}:${index}`),
       styleSeedMode: 'same',
       modelFamily: routing.modelFamily,
@@ -1437,12 +1441,14 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       modelFamily: string;
     },
     queuePlacement: UmbraQueuePlacement = 'end',
+    promptEntry?: unknown,
   ) => submitQueueBatchRequest(
     [prompt],
     [generation],
     [styleName],
     routing,
     queuePlacement,
+    promptEntry ? [promptEntry] : [],
   ), [submitQueueBatchRequest]);
 
   const prepareImageQueueRequest = React.useCallback((options: UmbraImageQueueOptions) => {
@@ -1533,6 +1539,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       clipSkip: toFiniteInteger(options.clipSkip, 1, 1, 12),
       samplerName: String(options.samplerName || 'er_sde').trim() || 'er_sde',
       scheduler: String(options.scheduler || 'simple').trim() || 'simple',
+      modelFamily,
       modelType: options.modelType,
       checkpointName,
       workflowResources,
@@ -1589,8 +1596,23 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         overlap: toFiniteInteger(options.tiledVae.overlap, 64, 0, 256),
       },
     };
+    const promptEntry = {
+      prompt: promptWithLoras,
+      tokens: (Array.isArray(options.promptSegments) ? options.promptSegments : [])
+        .map((segment, order) => ({
+          order,
+          slotId: String(segment?.id || `umbra-ui-prompt-${order + 1}`).trim(),
+          slotLabel: String(segment?.label || `Prompt ${order + 1}`).trim(),
+          slotType: String(segment?.slotType || 'umbra_ui_prompt').trim(),
+          variantId: String(segment?.variantId || '').trim(),
+          variantName: String(segment?.variantName || '').trim(),
+          text: String(segment?.text || '').trim(),
+        }))
+        .filter((segment) => segment.text.length > 0),
+    };
     return {
       prompt: promptWithLoras,
+      promptEntry,
       generation,
       styleName: String(options.styleName || (feature === 'img2img' ? 'Umbra UI IMG2IMG' : 'Umbra UI Image')).trim()
         || (feature === 'img2img' ? 'Umbra UI IMG2IMG' : 'Umbra UI Image'),
@@ -1623,7 +1645,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     return submitQueueRequest(prepared.prompt, prepared.generation, prepared.styleName, {
       feature: prepared.feature,
       modelFamily: prepared.modelFamily,
-    }, preparedOptions.queuePlacement);
+    }, preparedOptions.queuePlacement, prepared.promptEntry);
   }, [prepareImageQueueRequest, submitQueueRequest]);
 
   const queueVideo = React.useCallback(async (options: UmbraVideoQueueOptions) => {

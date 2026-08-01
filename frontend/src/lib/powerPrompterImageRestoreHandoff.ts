@@ -104,3 +104,21 @@ export async function fetchPowerPrompterImageRestoreMetadata(
   }
   return payload as ImageMetadata;
 }
+
+export async function fetchPowerPrompterRestoreMetadataByPpuid(
+  ppuidValue: string,
+): Promise<ImageMetadata> {
+  const ppuid = String(ppuidValue || '').trim().toLowerCase();
+  if (!/^pp_[a-z0-9][a-z0-9_-]{7,127}$/i.test(ppuid)) {
+    throw new Error('Enter a valid Power Prompter UID beginning with pp_.');
+  }
+  const response = await fetch(
+    `/api/powerprompter/receipt?${new URLSearchParams({ ppuid }).toString()}`,
+    { cache: 'no-store' },
+  );
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(String(payload?.error || 'Failed to load the Power Prompter state.'));
+  }
+  return payload?.metadata as ImageMetadata;
+}

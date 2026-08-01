@@ -25,7 +25,6 @@ export function PowerPrompterWorkspacePanels(props: PowerPrompterWorkspacePanels
     queueTraversalMode,
     queueSetTarget,
     queueCompletionTick,
-    generationPreview,
     generationPreviewHoldMs,
     handleSetGenerationPreviewHoldMs,
     editorInteractionResetTick,
@@ -36,6 +35,7 @@ export function PowerPrompterWorkspacePanels(props: PowerPrompterWorkspacePanels
     refreshModelCatalog,
     requestModelInfoThroughWebSocket,
     handleCardDocumentChange,
+    handleSendGenerationControlsToUmbraUi,
     handleActivePromptTypeProgress,
     handleChainLinkFeedback,
     enabledCSVs,
@@ -88,7 +88,6 @@ export function PowerPrompterWorkspacePanels(props: PowerPrompterWorkspacePanels
                 queueTraversalMode={queueTraversalMode}
                 queuePreviewSetId={queueSetTarget}
                 queueCompletionTick={isEditorPanelActive ? queueCompletionTick : 0}
-                generationPreview={isEditorPanelActive ? generationPreview : null}
                 generationPreviewHoldMs={generationPreviewHoldMs}
                 onChangeGenerationPreviewHoldMs={handleSetGenerationPreviewHoldMs}
                 queueSetTarget={queueSetTarget}
@@ -100,6 +99,7 @@ export function PowerPrompterWorkspacePanels(props: PowerPrompterWorkspacePanels
                 onRefreshModelCatalog={refreshModelCatalog}
                 onRequestModelInfo={requestModelInfoThroughWebSocket}
                 onChange={handleCardDocumentChange}
+                onSendGenerationControlsToUmbraUi={handleSendGenerationControlsToUmbraUi}
                 onActivePromptTypeProgress={handleActivePromptTypeProgress}
                 onChainLinkFeedback={handleChainLinkFeedback}
                 path={currentFile}
@@ -187,7 +187,6 @@ export function PowerPrompterWorkspacePanels(props: PowerPrompterWorkspacePanels
                   queueTraversalMode={queueEditorDraft.queueBuildSettings.traversalMode}
                   queuePreviewSetId={queueEditorDraft.activeSetId}
                   queueCompletionTick={isQueueEditorPanelActive ? queueCompletionTick : 0}
-                  generationPreview={isQueueEditorPanelActive ? generationPreview : null}
                   generationPreviewHoldMs={generationPreviewHoldMs}
                   onChangeGenerationPreviewHoldMs={handleSetGenerationPreviewHoldMs}
                   queueSetTarget={queueEditorDraft.activeSetId}
@@ -199,6 +198,7 @@ export function PowerPrompterWorkspacePanels(props: PowerPrompterWorkspacePanels
                   onRefreshModelCatalog={refreshModelCatalog}
                   onRequestModelInfo={requestModelInfoThroughWebSocket}
                   onChange={handleQueueEditorDocumentChange}
+                  onSendGenerationControlsToUmbraUi={handleSendGenerationControlsToUmbraUi}
                   onActivePromptTypeProgress={handleActivePromptTypeProgress}
                   onChainLinkFeedback={handleChainLinkFeedback}
                   path={queueEditorDraft.sourceFile || currentFile || ''}

@@ -56,6 +56,7 @@ const PP_BASE_CARD_CONFIG: PowerPrompterBaseCardConfig[] = [
 export const POWER_PROMPTER_CARD_DOC_VERSION = 1;
 export const POWER_PROMPTER_MAX_QUEUE_SETS = 10;
 export const POWER_PROMPTER_MAX_QUEUE_CYCLE_WEIGHT = 99;
+export const POWER_PROMPTER_MAX_RESOLUTION_SPLIT_TARGETS = 5;
 export const POWER_PROMPTER_ASPECT_RATIO_OPTIONS = [
   'custom',
   'SD1.5 - 1:1 square 512x512',
@@ -366,6 +367,14 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
     enabled: false,
     modelName: 'RealESRGAN_x4plus.safetensors',
     maxDimension: 3840,
+  },
+  resolutionSplit: {
+    enabled: false,
+    mode: 'queue',
+    targets: [
+      { id: 'resolution-1', enabled: true, aspectRatio: 'SDXL - 3:4 portrait 896x1152', width: 896, height: 1152, weight: 50 },
+      { id: 'resolution-2', enabled: true, aspectRatio: 'SDXL - 16:9 landscape 1344x768', width: 1344, height: 768, weight: 50 },
+    ],
   },
   tiledVae: {
     enabled: false,
@@ -1082,6 +1091,40 @@ function normalizePowerPrompterOutputUpscaleControls(rawOutputUpscale: unknown):
   };
 }
 
+function normalizePowerPrompterResolutionSplitControls(rawValue: unknown): NonNullable<PowerPrompterGenerationControls['resolutionSplit']> {
+  const defaults = DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS.resolutionSplit!;
+  const value = rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue)
+    ? rawValue as Record<string, unknown>
+    : {};
+  const rawTargets = Array.isArray(value.targets) ? value.targets : defaults.targets;
+  const targets = rawTargets
+    .slice(0, POWER_PROMPTER_MAX_RESOLUTION_SPLIT_TARGETS)
+    .map((rawTarget, index) => {
+      const target = rawTarget && typeof rawTarget === 'object' && !Array.isArray(rawTarget)
+        ? rawTarget as Record<string, unknown>
+        : {};
+      const fallback = defaults.targets[index] || defaults.targets[defaults.targets.length - 1];
+      return {
+        id: String(target.id || `resolution-${index + 1}`).trim().slice(0, 64) || `resolution-${index + 1}`,
+        enabled: target.enabled !== false,
+        aspectRatio: normalizeAspectRatio(target.aspectRatio ?? fallback.aspectRatio),
+        width: clampInteger(target.width, fallback.width, 64, 8192),
+        height: clampInteger(target.height, fallback.height, 64, 8192),
+        weight: clampInteger(target.weight, fallback.weight, 1, 100),
+      };
+    });
+  while (targets.length < 2) {
+    const index = targets.length;
+    const fallback = defaults.targets[index] || defaults.targets[0];
+    targets.push({ ...fallback, id: `resolution-${index + 1}` });
+  }
+  return {
+    enabled: value.enabled === true,
+    mode: String(value.mode || '').trim().toLowerCase() === 'batch' ? 'batch' : 'queue',
+    targets,
+  };
+}
+
 function normalizePowerPrompterWorkflowResources(rawResources: unknown): Record<string, string> {
   if (!rawResources || typeof rawResources !== 'object' || Array.isArray(rawResources)) return {};
   const normalized: Record<string, string> = {};
@@ -1126,6 +1169,7 @@ export function normalizePowerPrompterGenerationControls(rawControls: unknown): 
       (controls as any).umbraUiDetailStages,
     ),
     outputUpscale: normalizePowerPrompterOutputUpscaleControls((controls as any).outputUpscale),
+    resolutionSplit: normalizePowerPrompterResolutionSplitControls((controls as any).resolutionSplit),
     tiledVae: {
       enabled: tiledVae.enabled === true,
       tileSize: clampInteger(tiledVae.tileSize, tiledVaeDefaults.tileSize, 128, 2048),

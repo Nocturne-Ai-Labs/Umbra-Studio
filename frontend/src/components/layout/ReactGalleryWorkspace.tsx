@@ -71,6 +71,8 @@ import {
   type UmbraUiVideoFrameRole,
 } from '@/lib/umbraUiMediaHandoff';
 import { stagePowerPrompterImageRestoreHandoff } from '@/lib/powerPrompterImageRestoreHandoff';
+import { buildGalleryGenerationPromptDetails } from '@/lib/galleryGenerationPrompt';
+import { PowerPrompterActivePromptInline } from './PowerPrompterActivePromptInline';
 import type { Dataset } from '@/components/board/types';
 import { resolveGalleryContextSelectionPaths } from './galleryContextSelection';
 
@@ -3108,6 +3110,7 @@ function GalleryMediaViewer({
   const [metadata, setMetadata] = useState<GalleryViewerMetadata | null>(null);
   const [metadataLoading, setMetadataLoading] = useState(false);
   const [metadataError, setMetadataError] = useState('');
+  const [positivePromptView, setPositivePromptView] = useState<'combined' | 'modular'>('combined');
   const [skipLivePreviewBusy, setSkipLivePreviewBusy] = useState(false);
   const [mobileSendMenuOpen, setMobileSendMenuOpen] = useState(false);
   const touchStartRef = useRef<{ x: number; y: number; at: number; axis: 'x' | 'y' | null; cancelled: boolean } | null>(null);
@@ -3142,6 +3145,7 @@ function GalleryMediaViewer({
   const metadataFormat = String(metadata?.format || file?.metadataFormat || '').trim();
   const positivePrompt = String(metadataPrompts.positive || '').trim();
   const negativePrompt = String(metadataPrompts.negative || '').trim();
+  const promptDetails = useMemo(() => buildGalleryGenerationPromptDetails(metadata), [metadata]);
   const workflowJsonExport = useMemo(() => getWorkflowJsonExport(metadata), [metadata]);
   const apiWorkflowOpenInfo = useMemo(() => getGalleryApiWorkflowInfo(metadata), [metadata]);
   const hostRevealAvailable = !isUmbraRemoteClient();
@@ -3540,6 +3544,16 @@ function GalleryMediaViewer({
     }
   }, [addToast, apiWorkflowOpenInfo, file?.name, metadata, setActiveWorkspace, workflowJsonExport]);
 
+  const copyPpuid = useCallback(async () => {
+    if (!promptDetails.ppuid) return;
+    try {
+      await navigator.clipboard.writeText(promptDetails.ppuid);
+      addToast({ type: 'success', message: 'Copied PPUID' });
+    } catch (error) {
+      addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to copy PPUID' });
+    }
+  }, [addToast, promptDetails.ppuid]);
+
   const sendToUmbra = useCallback((mode: UmbraUiMediaHandoffMode, frameRole?: UmbraUiVideoFrameRole) => {
     setMobileSendMenuOpen(false);
     onSendUmbra(mode, frameRole, metadata);
@@ -3798,10 +3812,58 @@ function GalleryMediaViewer({
                   ))}
                 </dl>
               ) : null}
+              {promptDetails.ppuid ? (
+                <div className="mt-4 rounded border border-cyan-400/20 bg-cyan-500/[0.05] p-2">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-300">PPUID</div>
+                    <button
+                      type="button"
+                      onClick={() => void copyPpuid()}
+                      className="inline-flex h-6 shrink-0 items-center gap-1 rounded border border-cyan-400/25 bg-black/20 px-2 text-[10px] font-semibold uppercase tracking-wide text-cyan-200 transition hover:border-cyan-300/50 hover:bg-cyan-500/10"
+                      title="Copy Power Prompter unique image ID"
+                    >
+                      <Copy size={11} />
+                      Copy
+                    </button>
+                  </div>
+                  <div className="break-all font-mono text-[11px] leading-4 text-zinc-300">{promptDetails.ppuid}</div>
+                </div>
+              ) : null}
               {positivePrompt ? (
                 <div className="mt-4">
-                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Positive</div>
-                  <div className="custom-scrollbar max-h-64 overflow-auto whitespace-pre-wrap rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs leading-5 text-zinc-300">{positivePrompt}</div>
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Positive</div>
+                    {promptDetails.blocks.length > 0 ? (
+                      <div className="inline-flex rounded border border-white/10 bg-black/25 p-0.5" role="group" aria-label="Positive prompt view">
+                        {(['combined', 'modular'] as const).map((view) => (
+                          <button
+                            key={view}
+                            type="button"
+                            onClick={() => setPositivePromptView(view)}
+                            className={cn(
+                              'h-6 rounded-sm px-2 text-[9px] font-semibold uppercase tracking-[0.1em] transition',
+                              positivePromptView === view
+                                ? 'bg-cyan-500/15 text-cyan-200'
+                                : 'text-zinc-500 hover:text-zinc-300',
+                            )}
+                          >
+                            {view}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  {positivePromptView === 'modular' && promptDetails.blocks.length > 0 ? (
+                    <div className="custom-scrollbar max-h-72 overflow-auto rounded border border-white/10 bg-white/[0.03] p-2 text-xs leading-5">
+                      <PowerPrompterActivePromptInline
+                        blocks={promptDetails.blocks}
+                        fallbackText={positivePrompt}
+                        className="gap-y-2.5"
+                      />
+                    </div>
+                  ) : (
+                    <div className="custom-scrollbar max-h-64 overflow-auto whitespace-pre-wrap rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs leading-5 text-zinc-300">{positivePrompt}</div>
+                  )}
                 </div>
               ) : null}
               {negativePrompt ? (

@@ -1410,7 +1410,11 @@ export function UmbraUIWorkspace() {
   React.useEffect(() => {
     const applyHandoff = (handoff: UmbraUiPowerPrompterHandoff | null) => {
       if (!handoff) return;
-      setActiveMode('image');
+      setActiveMode(handoff.target === 'inpaint'
+        ? 'inpaint'
+        : handoff.target === 'img2img'
+          ? 'img2img'
+          : 'image');
       const handoffSegments = Array.isArray(handoff.positivePromptSegments)
         ? handoff.positivePromptSegments
           .map((segment) => createUmbraUiPromptSegment(segment.text, {
@@ -1853,6 +1857,7 @@ export function UmbraUIWorkspace() {
         : controlNumber(seed, imageCapabilities.seed.value);
       const requestId = await queueImage({
         prompt: workflowImagePrompt,
+        promptSegments,
         negativePrompt: imageCapabilities.negativePrompt.support === 'adjustable' ? negativePrompt : '',
         modelFamily,
         modelType,
@@ -2560,6 +2565,7 @@ export function UmbraUIWorkspace() {
             onRefreshModelCatalog={refreshModelCatalog}
             loras={activeLoras}
             onLorasChange={replaceActiveLoras}
+            workflowResources={workflowResourceValues}
             loraAvailableCount={loraCatalog.length}
             onOpenLoraPicker={openLoraPicker}
             clipSkip={clipSkip}

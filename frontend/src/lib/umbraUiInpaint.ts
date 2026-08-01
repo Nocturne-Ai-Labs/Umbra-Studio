@@ -7,6 +7,8 @@ import type {
   UmbraUiIpAdapterWeightType,
 } from '../../../shared/umbra-ui/pipelineTypes';
 import type { UmbraUiMediaGenerationSnapshot, UmbraUiStudioDestinationMode } from './umbraUiMediaHandoff';
+import type { UmbraUiPromptSegment } from './umbraUiPromptSegments';
+import type { UmbraUiLoraEntry } from './umbraUiModels';
 
 export type UmbraUiInpaintItemStatus = 'staging' | 'queued' | 'running' | 'completed' | 'failed' | 'canceled';
 export type UmbraUiInpaintJobStatus = 'staging' | 'queued' | 'running' | 'completed' | 'partial' | 'failed' | 'canceled';
@@ -286,7 +288,10 @@ export interface UmbraUiInpaintSubmitOptions {
   modelFamily: string;
   modelSource: 'checkpoint' | 'diffusers' | 'diffusion_model' | 'unet' | 'gguf';
   prompt: string;
+  promptSegments: UmbraUiPromptSegment[];
   negativePrompt: string;
+  loras: UmbraUiLoraEntry[];
+  workflowResources: Record<string, string>;
   checkpointName: string;
   clipSkip: number;
   seed: number;
@@ -325,6 +330,11 @@ export interface UmbraUiInpaintSubmitOptions {
   softInpaintPreservation: number;
   softInpaintTransitionContrast: number;
   softInpaintMaskInfluence: number;
+  tiledVae: {
+    enabled: boolean;
+    tileSize: number;
+    overlap: number;
+  };
   regionalGuidance: UmbraUiInpaintRegionalGuidanceInput[];
   controlLayers: UmbraUiInpaintControlInput[];
   referenceLayers: UmbraUiInpaintReferenceInput[];
@@ -335,9 +345,13 @@ export async function submitUmbraUiInpaintJob(options: UmbraUiInpaintSubmitOptio
   form.append('source', options.source, options.sourceName || 'inpaint-source.png');
   form.append('mask', options.mask, 'inpaint-mask.png');
   for (const [key, value] of Object.entries(options)) {
-    if (key === 'source' || key === 'sourceName' || key === 'mask' || key === 'regionalGuidance' || key === 'controlLayers' || key === 'referenceLayers') continue;
+    if (key === 'source' || key === 'sourceName' || key === 'mask' || key === 'promptSegments' || key === 'loras' || key === 'workflowResources' || key === 'tiledVae' || key === 'regionalGuidance' || key === 'controlLayers' || key === 'referenceLayers') continue;
     form.append(key, String(value));
   }
+  form.append('promptSegments', JSON.stringify(options.promptSegments));
+  form.append('loras', JSON.stringify(options.loras));
+  form.append('workflowResources', JSON.stringify(options.workflowResources));
+  form.append('tiledVae', JSON.stringify(options.tiledVae));
   form.append('regionalGuidance', JSON.stringify(options.regionalGuidance.map((region) => ({
     id: region.id,
     name: region.name,
