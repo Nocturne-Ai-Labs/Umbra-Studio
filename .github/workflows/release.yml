@@ -55,8 +55,8 @@ jobs:
           if (Test-Path "$batPackageRoot/UmbraStudio.exe") { throw 'BAT package must not include the EXE launcher' }
           $comfyRoot = [System.IO.Path]::GetFullPath("$batPackageRoot/Tools/ComfyUI")
           [System.IO.Directory]::CreateDirectory($comfyRoot) | Out-Null
-          $installerOutput = (& cmd.exe /d /c "`"$batPackageRoot/Install-Umbra-UI-Models.bat`" --check --family anima" 2>&1 | Out-String)
-          if ($LASTEXITCODE -ne 1) { throw "Packaged model installer returned unexpected status $LASTEXITCODE`n$installerOutput" }
+          $installerOutput = (& cmd.exe /d /c "`"$batPackageRoot/Install-Umbra-UI-Models.bat`" --verify-target --family anima" 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) { throw "Packaged model installer returned unexpected status $LASTEXITCODE`n$installerOutput" }
           $expectedModelsRoot = [System.IO.Path]::Combine($comfyRoot, 'models')
           if ($installerOutput -notlike "*$expectedModelsRoot*") {
             throw "Packaged model installer did not target root ComfyUI models: $expectedModelsRoot`n$installerOutput"

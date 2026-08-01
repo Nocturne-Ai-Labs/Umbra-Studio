@@ -33,6 +33,7 @@ const requestedProfile = requestedProfiles.length > 0 ? requestedProfiles.join('
 const stateFileName = readArg('--state-file') || 'support-models.json';
 const checkOnly = process.argv.includes('--check');
 const testDownloads = process.argv.includes('--test-downloads');
+const verifyTarget = process.argv.includes('--verify-target');
 const manifestOnly = process.argv.includes('--manifest-only');
 const listOnly = process.argv.includes('--list');
 const comfyRoot = path.resolve(
@@ -261,6 +262,12 @@ async function main() {
 
   const models = selectedModels(manifest);
   if (models.length === 0) throw new Error(`No automatic models belong to profile ${requestedProfile}`);
+  if (verifyTarget) {
+    if (!fs.existsSync(comfyRoot)) throw new Error(`ComfyUI is not installed at ${comfyRoot}`);
+    console.log(`[umbra-ui-models] target: ${modelsRoot}`);
+    console.log(`UMBRA_VERIFY_OK|umbra-ui-model-target|${modelsRoot}`);
+    return;
+  }
   if (testDownloads) {
     console.log(`[umbra-ui-models] testing download sources for profile: ${requestedProfile}`);
     for (const model of models) {

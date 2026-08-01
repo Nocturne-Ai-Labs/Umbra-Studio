@@ -30,6 +30,7 @@ const installAllFamilies = process.argv.includes('--all');
 const listOnly = process.argv.includes('--list');
 const checkOnly = process.argv.includes('--check');
 const testDownloads = process.argv.includes('--test-downloads');
+const verifyTarget = process.argv.includes('--verify-target');
 const assumeYes = process.argv.includes('--yes');
 const comfyRootArgIndex = process.argv.indexOf('--comfy-root');
 const comfyRoot = path.resolve(
@@ -121,6 +122,7 @@ function runDownloader(families) {
   ];
   if (checkOnly) args.push('--check');
   if (testDownloads) args.push('--test-downloads');
+  if (verifyTarget) args.push('--verify-target');
   args.push('--comfy-root', comfyRoot);
 
   return new Promise((resolve, reject) => {
@@ -161,7 +163,7 @@ async function main() {
   console.log(`Prerequisites: ${files.length} file(s), ${formatBytes(totalBytes)} total`);
   console.log(`Destination: ${path.join(comfyRoot, 'models')} (the exact ComfyUI folder for each file)`);
 
-  if (!checkOnly && !testDownloads && !assumeYes && process.stdin.isTTY) {
+  if (!checkOnly && !testDownloads && !verifyTarget && !assumeYes && process.stdin.isTTY) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     try {
       const answer = (await rl.question('Continue? [y/N]: ')).trim();
