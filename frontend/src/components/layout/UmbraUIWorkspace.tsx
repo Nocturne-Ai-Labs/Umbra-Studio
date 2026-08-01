@@ -97,6 +97,7 @@ import {
   getUmbraUiLorasForFamily,
   replaceUmbraUiLorasForFamily,
   type UmbraUiLoraEntry,
+  type UmbraUiLoraVisualMeta,
 } from '@/lib/umbraUiModels';
 import {
   compileUmbraUiPromptSegments,
@@ -309,6 +310,35 @@ function getInstalledWorkflowResourceItems(
   if (resource.kind === 'model') return catalog.modelPatches;
   if (resource.kind === 'upscale_model') return catalog.upscaleModels;
   return [];
+}
+
+function getUmbraUiLoraVisualMeta(info: UmbraModelPickerInfo | null): UmbraUiLoraVisualMeta {
+  if (!info || !('loraName' in info) || !info.civitai || typeof info.civitai !== 'object') return {};
+  const civitai = info.civitai as Record<string, unknown>;
+  const model = civitai.model && typeof civitai.model === 'object'
+    ? civitai.model as Record<string, unknown>
+    : {};
+  const imageRecords = [
+    ...(Array.isArray(civitai.images) ? civitai.images : []),
+    ...(Array.isArray(model.images) ? model.images : []),
+  ];
+  const thumbnailUrls = Array.from(new Set(imageRecords
+    .map((image) => image && typeof image === 'object' ? String((image as Record<string, unknown>).url || '').trim() : '')
+    .filter((url) => /^https?:\/\//i.test(url))))
+    .slice(0, 4);
+  const parseId = (value: unknown) => {
+    const numeric = Number(value);
+    return Number.isInteger(numeric) && numeric > 0 ? numeric : 0;
+  };
+  const modelId = parseId(civitai.modelId ?? model.id ?? info.metadata.modelId ?? info.metadata.civitaiModelId);
+  const versionId = parseId(civitai.modelVersionId ?? civitai.id ?? info.metadata.modelVersionId ?? info.metadata.civitaiVersionId);
+  const civitaiUrl = modelId > 0
+    ? `https://civitai.com/models/${modelId}${versionId > 0 ? `?modelVersionId=${versionId}` : ''}`
+    : '';
+  return {
+    ...(thumbnailUrls.length > 0 ? { thumbnailUrl: thumbnailUrls[0], thumbnailUrls } : {}),
+    ...(civitaiUrl ? { civitaiUrl } : {}),
+  };
 }
 
 interface PipelineControlsProps {
@@ -1586,6 +1616,7 @@ export function UmbraUIWorkspace() {
       const loraInfo = info && 'loraName' in info
         ? info
         : await requestLoraInfo(normalizedName);
+      const visualMeta = getUmbraUiLoraVisualMeta(loraInfo);
       setLoras((current) => {
         const existing = current.find((entry) => (
           String(entry.modelFamilyKey || '').toLowerCase() === activeLoraFamilyKey
@@ -1593,10 +1624,15 @@ export function UmbraUIWorkspace() {
         ));
         if (existing) {
           return current.map((entry) => entry.id === existing.id
-            ? { ...entry, enabled: true, trainedTags: loraInfo.trainedTags }
+            ? { ...entry, enabled: true, trainedTags: loraInfo.trainedTags, ...visualMeta }
             : entry);
         }
-        return [...current, createUmbraUiLoraEntry(normalizedName, loraInfo.trainedTags, activeLoraFamilyKey)];
+        return [...current, createUmbraUiLoraEntry(
+          normalizedName,
+          loraInfo.trainedTags,
+          activeLoraFamilyKey,
+          visualMeta,
+        )];
       });
       closeModelPicker();
     } catch (error) {
@@ -1612,7 +1648,7 @@ export function UmbraUIWorkspace() {
   React.useEffect(() => {
     const unresolved = loras.filter((lora) => {
       const key = lora.name.toLowerCase();
-      return lora.trainedTags.length <= 0 && !attemptedLoraInfoRef.current.has(key);
+      return (lora.trainedTags.length <= 0 || !lora.thumbnailUrl) && !attemptedLoraInfoRef.current.has(key);
     });
     if (unresolved.length <= 0) return;
     for (const lora of unresolved) {
@@ -1620,9 +1656,10 @@ export function UmbraUIWorkspace() {
       attemptedLoraInfoRef.current.add(key);
       void requestLoraInfo(lora.name)
         .then((info) => {
-          if (info.trainedTags.length <= 0) return;
+          const visualMeta = getUmbraUiLoraVisualMeta(info);
+          if (info.trainedTags.length <= 0 && !visualMeta.thumbnailUrl) return;
           setLoras((current) => current.map((entry) => entry.name.toLowerCase() === key
-            ? { ...entry, trainedTags: info.trainedTags }
+            ? { ...entry, trainedTags: info.trainedTags, ...visualMeta }
             : entry));
         })
         .catch(() => undefined);

@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.22.4
+
+### Umbra UI LoRA Controls
+
+- Aligned Umbra UI LoRA tokens with Power Prompter's complete syntax format:
+  `<lora:name:model_strength:clip_strength>`, including when both strengths
+  are the same.
+- Rebuilt the Umbra UI LoRA stack cards with preview thumbnails, explicit
+  model and CLIP strength controls, and precise `0.05` increment buttons.
+- Persisted LoRA preview metadata from the model browser so LoRA cards remain
+  identifiable across TXT2IMG, IMG2IMG, and Inpaint workflows.
+
 ## v0.22.3
 
 ### Updater Shutdown Hotfix

@@ -6,6 +6,15 @@ export interface UmbraUiLoraEntry {
   strengthModel: number;
   strengthClip: number;
   trainedTags: string[];
+  thumbnailUrl?: string;
+  thumbnailUrls?: string[];
+  civitaiUrl?: string;
+}
+
+export interface UmbraUiLoraVisualMeta {
+  thumbnailUrl?: string;
+  thumbnailUrls?: string[];
+  civitaiUrl?: string;
 }
 
 function clampStrength(value: unknown, fallback = 1): number {
@@ -23,9 +32,6 @@ export function buildUmbraUiLoraSyntax(lora: UmbraUiLoraEntry): string {
   if (!name) return '';
   const modelStrength = clampStrength(lora.strengthModel);
   const clipStrength = clampStrength(lora.strengthClip, modelStrength);
-  if (Math.abs(modelStrength - clipStrength) < 0.0005) {
-    return `<lora:${name}:${formatStrength(modelStrength)}>`;
-  }
   return `<lora:${name}:${formatStrength(modelStrength)}:${formatStrength(clipStrength)}>`;
 }
 
@@ -42,9 +48,18 @@ export function createUmbraUiLoraEntry(
   name: string,
   trainedTags: string[] = [],
   modelFamilyKey = '',
+  visualMeta: UmbraUiLoraVisualMeta = {},
 ): UmbraUiLoraEntry {
   const normalizedName = String(name || '').trim().replace(/\\/g, '/');
   const normalizedModelFamilyKey = String(modelFamilyKey || '').trim().toLowerCase();
+  const thumbnailUrls = Array.from(new Set(
+    (Array.isArray(visualMeta.thumbnailUrls) ? visualMeta.thumbnailUrls : [])
+      .map((url) => String(url || '').trim())
+      .filter(Boolean),
+  ));
+  const thumbnailUrl = String(visualMeta.thumbnailUrl || thumbnailUrls[0] || '').trim();
+  if (thumbnailUrl && !thumbnailUrls.includes(thumbnailUrl)) thumbnailUrls.unshift(thumbnailUrl);
+  const civitaiUrl = String(visualMeta.civitaiUrl || '').trim();
   let id = '';
   try {
     id = crypto.randomUUID();
@@ -61,6 +76,9 @@ export function createUmbraUiLoraEntry(
     trainedTags: Array.from(new Set(
       trainedTags.map((tag) => String(tag || '').trim()).filter(Boolean),
     )),
+    ...(thumbnailUrl ? { thumbnailUrl } : {}),
+    ...(thumbnailUrls.length > 0 ? { thumbnailUrls } : {}),
+    ...(civitaiUrl ? { civitaiUrl } : {}),
   };
 }
 

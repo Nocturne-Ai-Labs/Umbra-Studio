@@ -5,7 +5,9 @@ import {
   Check,
   ChevronDown,
   Copy,
+  Image as ImageIcon,
   Library,
+  Minus,
   Plus,
   Tags,
   Trash2,
@@ -30,6 +32,14 @@ function clampStrength(value: string, fallback: number): number {
   if (value.trim() === '' || value.trim() === '-' || value.trim() === '.') return fallback;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? Math.max(-10, Math.min(10, numeric)) : fallback;
+}
+
+function roundStrengthToStep(value: number): number {
+  return Math.max(-10, Math.min(10, Math.round(value / 0.05) * 0.05));
+}
+
+function formatStrength(value: number): string {
+  return Number(roundStrengthToStep(value).toFixed(2)).toString();
 }
 
 export function UmbraLoraStackControls({
@@ -72,6 +82,16 @@ export function UmbraLoraStackControls({
   const removeLora = React.useCallback((id: string) => {
     onChange(loras.filter((lora) => lora.id !== id));
   }, [loras, onChange]);
+
+  const adjustStrength = React.useCallback((
+    id: string,
+    key: 'strengthModel' | 'strengthClip',
+    delta: number,
+  ) => {
+    const target = loras.find((lora) => lora.id === id);
+    if (!target) return;
+    updateLora(id, { [key]: roundStrengthToStep(target[key] + delta) });
+  }, [loras, updateLora]);
 
   return (
     <section className="rounded-md border border-white/10 bg-white/[0.02]">
@@ -121,6 +141,7 @@ export function UmbraLoraStackControls({
             </button>
           ) : loras.map((lora) => {
             const syntax = buildUmbraUiLoraSyntax(lora);
+            const thumbnail = String(lora.thumbnailUrls?.[0] || lora.thumbnailUrl || '').trim();
             return (
               <div key={lora.id} className={cn('rounded-md border border-white/10 bg-black/25 p-2', !lora.enabled && 'opacity-55')}>
                 <div className="flex min-w-0 items-center gap-2">
@@ -137,6 +158,15 @@ export function UmbraLoraStackControls({
                   >
                     {lora.enabled ? <Check size={12} /> : null}
                   </button>
+                  <div className="h-9 w-9 shrink-0 overflow-hidden rounded-sm border border-white/10 bg-black/45">
+                    {thumbnail ? (
+                      <img src={thumbnail} alt="" className="h-full w-full object-cover" loading="lazy" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-zinc-700">
+                        <ImageIcon size={13} />
+                      </div>
+                    )}
+                  </div>
                   <div className="min-w-0 flex-1 truncate font-mono text-[10px] text-zinc-100" title={lora.name}>{lora.name}</div>
                   <button
                     type="button"
@@ -148,7 +178,7 @@ export function UmbraLoraStackControls({
                   </button>
                 </div>
 
-                <div className="mt-2 grid grid-cols-[minmax(0,1fr)_62px_62px] gap-1.5">
+                <div className="mt-2 space-y-1.5">
                   <button
                     type="button"
                     onClick={() => { void copyToken(syntax); }}
@@ -158,24 +188,47 @@ export function UmbraLoraStackControls({
                     {copiedToken === syntax ? <Check size={10} className="shrink-0 text-emerald-300" /> : <Copy size={10} className="shrink-0" />}
                     <span className="truncate">{syntax}</span>
                   </button>
-                  <label className="space-y-1">
-                    <span className={labelClass}>Model</span>
-                    <input
-                      value={lora.strengthModel}
-                      onChange={(event) => updateLora(lora.id, { strengthModel: clampStrength(event.target.value, lora.strengthModel) })}
-                      inputMode="decimal"
-                      className="h-8 w-full rounded-sm border border-white/10 bg-black/35 px-1.5 text-center font-mono text-[10px] text-zinc-100 outline-none focus:border-emerald-300/35"
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className={labelClass}>CLIP</span>
-                    <input
-                      value={lora.strengthClip}
-                      onChange={(event) => updateLora(lora.id, { strengthClip: clampStrength(event.target.value, lora.strengthClip) })}
-                      inputMode="decimal"
-                      className="h-8 w-full rounded-sm border border-white/10 bg-black/35 px-1.5 text-center font-mono text-[10px] text-zinc-100 outline-none focus:border-emerald-300/35"
-                    />
-                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {([
+                      ['strengthModel', 'Model'],
+                      ['strengthClip', 'CLIP'],
+                    ] as const).map(([key, label]) => (
+                      <label key={key} className="space-y-1">
+                        <span className={labelClass}>{label}</span>
+                        <div className="flex h-8 overflow-hidden rounded-sm border border-white/10 bg-black/35 focus-within:border-emerald-300/35">
+                          <button
+                            type="button"
+                            onClick={() => adjustStrength(lora.id, key, -0.05)}
+                            className="flex w-7 shrink-0 items-center justify-center border-r border-white/10 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100"
+                            title={`Decrease ${label} strength by 0.05`}
+                            aria-label={`Decrease ${label} strength by 0.05`}
+                          >
+                            <Minus size={11} />
+                          </button>
+                          <input
+                            type="number"
+                            min={-10}
+                            max={10}
+                            step={0.05}
+                            value={formatStrength(lora[key])}
+                            onChange={(event) => updateLora(lora.id, { [key]: clampStrength(event.target.value, lora[key]) })}
+                            onBlur={(event) => updateLora(lora.id, { [key]: roundStrengthToStep(clampStrength(event.target.value, lora[key])) })}
+                            inputMode="decimal"
+                            className="min-w-0 flex-1 bg-transparent px-1 text-center font-mono text-[10px] text-zinc-100 outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => adjustStrength(lora.id, key, 0.05)}
+                            className="flex w-7 shrink-0 items-center justify-center border-l border-white/10 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100"
+                            title={`Increase ${label} strength by 0.05`}
+                            aria-label={`Increase ${label} strength by 0.05`}
+                          >
+                            <Plus size={11} />
+                          </button>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
                 </div>
 
                 {lora.trainedTags.length > 0 ? (
