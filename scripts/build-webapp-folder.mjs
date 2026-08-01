@@ -351,14 +351,15 @@ function windowsInstallerScript({ title, commands, successMessage }) {
   return `@echo off
 setlocal EnableExtensions
 title ${title}
-cd /d "%~dp0"
+set "APP_ROOT=%~dp0"
+cd /d "%APP_ROOT%"
 set "EXIT_CODE=0"
-set "BUN_BIN=%~dp0Runtime\\Bun\\win32\\bun.exe"
+set "BUN_BIN=%APP_ROOT%Runtime\\Bun\\win32\\bun.exe"
 
 echo ============================================================
 echo ${title}
 echo ============================================================
-echo App root: %~dp0
+echo App root: %APP_ROOT%
 echo.
 
 if not exist "%BUN_BIN%" (
@@ -407,7 +408,7 @@ function writeDataForgeModelInstaller() {
   const installerPath = path.join(publishRoot, 'Install-Data-Forge-Models.bat');
   const script = windowsInstallerScript({
     title: 'Umbra Studio - Data Forge Model Installer',
-    commands: `set "INSTALLER=%~dp0resources\\app\\scripts\\download-waifu-models.mjs"
+    commands: `set "INSTALLER=%APP_ROOT%resources\\app\\scripts\\download-waifu-models.mjs"
 if not exist "%INSTALLER%" (
   echo [ERROR] The Data Forge installer is missing:
   echo         %INSTALLER%
@@ -419,7 +420,7 @@ if errorlevel 1 (
   set "EXIT_CODE=%ERRORLEVEL%"
   goto :finish
 )
-set "INSTALLER=%~dp0resources\\app\\scripts\\download-caption-models.mjs"
+set "INSTALLER=%APP_ROOT%resources\\app\\scripts\\download-caption-models.mjs"
 if not exist "%INSTALLER%" (
   echo [ERROR] The Data Forge caption installer is missing:
   echo         %INSTALLER%
@@ -437,7 +438,7 @@ function writeUmbraUiModelInstaller() {
   const installerPath = path.join(publishRoot, 'Install-Umbra-UI-Models.bat');
   const script = windowsInstallerScript({
     title: 'Umbra Studio - Model Requirements Installer',
-    commands: `set "INSTALLER=%~dp0resources\\app\\scripts\\download-umbra-model-requirements.mjs"
+    commands: `set "INSTALLER=%APP_ROOT%resources\\app\\scripts\\download-umbra-model-requirements.mjs"
 if not exist "%INSTALLER%" (
   echo [ERROR] The model requirements installer is missing:
   echo         %INSTALLER%
@@ -454,7 +455,7 @@ function writeUmbraUiSupportModelInstaller() {
   const installerPath = path.join(publishRoot, 'Install-Umbra-UI-Support-Models.bat');
   const script = windowsInstallerScript({
     title: 'Umbra Studio - Support Model Installer',
-    commands: `set "INSTALLER=%~dp0resources\\app\\scripts\\download-umbra-ui-models.mjs"
+    commands: `set "INSTALLER=%APP_ROOT%resources\\app\\scripts\\download-umbra-ui-models.mjs"
 if not exist "%INSTALLER%" (
   echo [ERROR] The support-model installer is missing:
   echo         %INSTALLER%
@@ -471,7 +472,7 @@ function writeModelRequirementsInstaller() {
   const installerPath = path.join(publishRoot, 'Install-Model-Requirements.bat');
   const script = windowsInstallerScript({
     title: 'Umbra Studio - Model Requirements Installer',
-    commands: `set "INSTALLER=%~dp0resources\\app\\scripts\\download-umbra-model-requirements.mjs"
+    commands: `set "INSTALLER=%APP_ROOT%resources\\app\\scripts\\download-umbra-model-requirements.mjs"
 if not exist "%INSTALLER%" (
   echo [ERROR] The model requirements installer is missing:
   echo         %INSTALLER%
