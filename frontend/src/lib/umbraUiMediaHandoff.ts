@@ -400,11 +400,19 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
     controlAfterGenerate: generation.controlAfterGenerate ?? generation.seedMode ?? inpaint.seedMode,
     seedIncrement: generation.seedIncrement ?? inpaint.seedIncrement,
   });
+  const powerPrompterSegments = Array.isArray(powerPrompter.segments) ? powerPrompter.segments : [];
   const positivePromptWithSyntax = String(prompts.positive || powerPrompter.prompt || '').trim();
-  const syntaxLoras = extractPromptSyntaxLoras(positivePromptWithSyntax);
+  const syntaxLoras = extractPromptSyntaxLoras([
+    positivePromptWithSyntax,
+    String(powerPrompter.prompt || '').trim(),
+    ...powerPrompterSegments.map((candidate) => {
+      const segment = isRecord(candidate) ? candidate : {};
+      return String(segment.text || '').trim();
+    }),
+  ].filter(Boolean).join(', '));
   const positivePrompt = cleanPromptText(positivePromptWithSyntax.replace(/<lora:[^>]+>/gi, ''));
-  const positivePromptSegments = Array.isArray(powerPrompter.segments)
-    ? powerPrompter.segments
+  const positivePromptSegments = powerPrompterSegments.length > 0
+    ? powerPrompterSegments
       .map((candidate): UmbraUiMediaPromptSegment | null => {
         const segment = isRecord(candidate) ? candidate : {};
         const text = cleanPromptText(String(segment.text || '').replace(/<lora:[^>]+>/gi, ''));

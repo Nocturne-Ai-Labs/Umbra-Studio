@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.22.7
+
+### Power Prompter LoRA Handoff Hotfix
+
+- Fixed Gallery and filmstrip `Send parameters to TXT2IMG` handoffs omitting
+  LoRAs whose syntax was stored inside individual Power Prompter card segments
+  rather than the combined positive prompt.
+- Restored the complete Umbra UI LoRA stack with the original model and CLIP
+  strengths while keeping modular prompt fields clean and preventing duplicate
+  LoRA application.
+- Added extension-aware LoRA catalog matching so Power Prompter syntax such as
+  `Anima/Styles/model` resolves to installed files such as
+  `Anima/Styles/model.safetensors` instead of being silently discarded.
+- Preserved unresolved receipt LoRAs in the handoff state so temporarily stale
+  model catalogs cannot erase generation metadata.
+
 ## v0.22.6
 
 ### Updater Recovery Hotfix

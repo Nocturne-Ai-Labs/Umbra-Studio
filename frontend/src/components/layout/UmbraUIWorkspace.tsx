@@ -263,6 +263,23 @@ function resolveCatalogMatch(value: string, catalog: string[]): string {
   return match.status === 'available' ? match.match : '';
 }
 
+function resolveLoraCatalogMatch(value: string, catalog: string[]): string {
+  const normalized = String(value || '').trim().replace(/\\/g, '/');
+  if (!normalized) return '';
+  const direct = resolveCatalogMatch(normalized, catalog);
+  if (direct) return direct;
+
+  const withoutModelExtension = (entry: string) => entry
+    .toLowerCase()
+    .replace(/\.(?:safetensors|ckpt|pt|pth|bin)$/i, '');
+  const expected = withoutModelExtension(normalized);
+  const matches = catalog
+    .map((entry) => String(entry || '').trim().replace(/\\/g, '/'))
+    .filter(Boolean)
+    .filter((entry) => withoutModelExtension(entry) === expected);
+  return matches.length === 1 ? matches[0] : normalized;
+}
+
 function getPrimaryModelItems(catalog: UmbraModelCatalog, modelType: PowerPrompterModelType): string[] {
   if (modelType === 'diffusers') return catalog.diffusersModels;
   if (modelType === 'diffusion_model') return catalog.diffusionModels;
@@ -2255,7 +2272,7 @@ export function UmbraUIWorkspace() {
       const checkpoint = resolveCatalogMatch(snapshot.checkpointName, modelItems);
       const inheritedLoras = snapshot.loras.map((entry) => ({
         ...entry,
-        name: resolveCatalogMatch(entry.name, loraCatalog),
+        name: resolveLoraCatalogMatch(entry.name, loraCatalog),
       }));
       applyPowerPrompterGenerationControls({
         modelType: requestedModelType,
