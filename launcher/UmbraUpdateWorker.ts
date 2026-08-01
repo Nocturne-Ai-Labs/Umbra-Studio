@@ -9,7 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import yauzl from 'yauzl';
 import {
@@ -29,7 +29,6 @@ import {
 
 const UPDATE_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 12_000;
 const UPDATE_FORCED_SHUTDOWN_TIMEOUT_MS = 30_000;
-const STARTUP_HEALTH_TIMEOUT_MS = 2 * 60 * 1000;
 
 function log(request: UmbraUpdateWorkerRequest, message: string) {
   const line = `[${new Date().toISOString()}] ${message}`;
@@ -460,97 +459,9 @@ function updateUmbraNodes(request: UmbraUpdateWorkerRequest): { status: UmbraUpd
   };
 }
 
-export function launcherCommand(request: UmbraUpdateWorkerRequest): { command: string; args: string[]; launcherPath: string } {
-  if (process.platform === 'win32') {
-    const bunBinary = join(request.runtimeRoot, 'Runtime', 'Bun', 'win32', 'bun.exe');
-    const webLauncher = join(request.runtimeRoot, 'resources', 'app', 'launcher', 'UmbraWebLauncher.ts');
-    if (existsSync(bunBinary) && existsSync(webLauncher)) {
-      return {
-        command: bunBinary,
-        args: [
-          webLauncher,
-          '--root',
-          request.runtimeRoot,
-          '--no-open',
-          '--port',
-          String(request.port),
-        ],
-        launcherPath: webLauncher,
-      };
-    }
-    const launcher = resolveUmbraWindowsLauncher(request.runtimeRoot);
-    if (!launcher) throw new Error('Updated Umbra Studio launcher is missing.');
-    return {
-      ...launcher,
-      args: [...launcher.args, '--no-open', '--port', String(request.port)],
-    };
-  }
-  const launcher = join(request.runtimeRoot, 'start-umbra.sh');
-  try {
-    chmodSync(launcher, 0o755);
-    chmodSync(join(request.runtimeRoot, 'Runtime', 'Bun', 'linux', 'bun'), 0o755);
-  } catch {
-    // The launch attempt below provides the actionable failure.
-  }
-  return {
-    command: launcher,
-    args: ['--no-open', '--port', String(request.port)],
-    launcherPath: launcher,
-  };
-}
-
-function healthOrigin(request: UmbraUpdateWorkerRequest): string {
-  const host = request.bindHost === '::1' ? '[::1]' : '127.0.0.1';
-  return `http://${host}:${request.port}`;
-}
-
-async function waitForHealthyRestart(request: UmbraUpdateWorkerRequest): Promise<boolean> {
-  const startedAt = Date.now();
-  const url = `${healthOrigin(request)}/api/healthz/ready`;
-  while (Date.now() - startedAt < STARTUP_HEALTH_TIMEOUT_MS) {
-    try {
-      const response = await fetch(url, { cache: 'no-store' });
-      if (response.ok) {
-        const body = await response.json().catch(() => ({})) as Record<string, unknown>;
-        if (String(body.runtimeRoot || '').trim().toLowerCase() === request.runtimeRoot.toLowerCase()) return true;
-      }
-    } catch {
-      // The new server is still starting.
-    }
-    await Bun.sleep(500);
-  }
-  return false;
-}
-
-async function stopLaunchedProcessTree(pid: number) {
-  if (!Number.isFinite(pid) || pid <= 0) return;
-  if (process.platform === 'win32') {
-    spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
-      stdio: 'ignore',
-      windowsHide: true,
-      timeout: 30_000,
-    });
-  } else {
-    try {
-      process.kill(-pid, 'SIGTERM');
-    } catch {
-      try {
-        process.kill(pid, 'SIGTERM');
-      } catch {
-        // The failed launch may already have exited.
-      }
-    }
-  }
-  const startedAt = Date.now();
-  while (isProcessAlive(pid) && Date.now() - startedAt < 30_000) {
-    await Bun.sleep(200);
-  }
-}
-
 export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
   let backupRoot = '';
   let preservedRoot = '';
-  let launchedPid = 0;
   try {
     log(request, `Waiting for Umbra ${request.currentVersion} to close.`);
     await waitForProcesses(request);
@@ -566,32 +477,10 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
     writeState(request, { phase: 'updating_nodes', currentItem: 'Updating Umbra Nodes' });
     const nodeResult = updateUmbraNodes(request);
     writeState(request, {
-      phase: 'restarting',
-      nodeUpdate: nodeResult.status,
-      warning: nodeResult.warning,
-      currentItem: 'Restarting Umbra Studio',
-    });
-
-    const launch = launcherCommand(request);
-    const launched = spawn(launch.command, launch.args, {
-      cwd: request.runtimeRoot,
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: false,
-    });
-    launchedPid = launched.pid || 0;
-    launched.unref();
-
-    const healthy = await waitForHealthyRestart(request);
-    if (!healthy) {
-      await stopLaunchedProcessTree(launchedPid);
-      launchedPid = 0;
-      throw new Error('The updated build did not report ready within two minutes. The previous build was restored.');
-    }
-
-    writeState(request, {
       phase: 'complete',
       currentVersion: request.targetVersion,
+      nodeUpdate: nodeResult.status,
+      warning: nodeResult.warning,
       completedAt: new Date().toISOString(),
       currentItem: '',
       error: '',
@@ -605,11 +494,10 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
         }`);
       }
     }
-    log(request, `Umbra Studio ${request.targetVersion} is healthy.`);
+    log(request, `Umbra Studio ${request.targetVersion} was installed. Start Umbra Studio manually.`);
     if (!request.keepWorkspaceAlive) requestUmbraUpdaterWorkspaceCleanup(request.workspaceRoot);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (launchedPid > 0) await stopLaunchedProcessTree(launchedPid);
     try {
       if (backupRoot && existsSync(backupRoot)) rollbackSwap(request, backupRoot, preservedRoot);
     } catch (rollbackError) {
@@ -622,15 +510,6 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
       error: message,
     });
     log(request, `Update failed: ${message}`);
-    const currentLauncher = launcherCommand(request);
-    if (existsSync(currentLauncher.launcherPath)) {
-      spawn(currentLauncher.command, currentLauncher.args, {
-        cwd: request.runtimeRoot,
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: false,
-      }).unref();
-    }
     throw error;
   }
 }

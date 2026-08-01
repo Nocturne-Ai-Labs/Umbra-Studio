@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.22.3
+
+### Updater Shutdown Hotfix
+
+- Removed automatic Umbra Studio relaunching after both successful and failed
+  update attempts. The updater now finishes independently and asks the user to
+  start Umbra Studio manually.
+- Removed the post-update health wait that could leave a blank launcher
+  terminal, a hung Bun process, or an unavailable application port.
+- Replaced the updater's `Open Umbra` action with a clean `Close updater`
+  action that cannot interrupt an active installation.
+- Added Windows and Linux package gates that reject updater bundles if an
+  automatic relaunch path returns.
+
 ## v0.22.2
 
 ### Model Installer Hotfix

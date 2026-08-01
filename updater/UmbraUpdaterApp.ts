@@ -13,7 +13,6 @@ import {
   type UmbraUpdateState,
   type UmbraUpdateWorkerRequest,
 } from '../shared/appUpdate';
-import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
 import {
   isUmbraUpdaterWorkspace,
   requestUmbraUpdaterWorkspaceCleanup,
@@ -130,20 +129,6 @@ async function waitForUmbraListenerToStop(session: UpdaterSession): Promise<bool
     await Bun.sleep(250);
   }
   return false;
-}
-
-function appOrigin(session: UpdaterSession): string {
-  const host = session.appHost === '::1' ? '[::1]' : '127.0.0.1';
-  return `http://${host}:${session.appPort}`;
-}
-
-async function isUmbraReady(session: UpdaterSession): Promise<boolean> {
-  try {
-    const response = await fetch(`${appOrigin(session)}/api/healthz/ready`, { cache: 'no-store' });
-    return response.ok;
-  } catch {
-    return false;
-  }
 }
 
 async function runWorker(
@@ -320,39 +305,14 @@ async function main() {
           return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
         }
       }
-      if (url.pathname === '/api/relaunch' && request.method === 'POST') {
-        const appUrl = `${appOrigin(session)}/`;
-        if (await isUmbraReady(session)) {
-          setTimeout(() => {
-            server.stop(true);
-            requestUmbraUpdaterWorkspaceCleanup(session.workspaceRoot);
-            process.exit(0);
-          }, 750);
-          return json({ success: true, appUrl, alreadyRunning: true });
-        }
-        const windowsLauncher = process.platform === 'win32'
-          ? resolveUmbraWindowsLauncher(session.runtimeRoot)
-          : null;
-        const launcher = process.platform === 'win32'
-          ? windowsLauncher?.launcherPath || ''
-          : join(session.runtimeRoot, 'start-umbra.sh');
-        if (!launcher || !existsSync(launcher)) return json({ success: false, error: 'Umbra launcher is missing.' }, 404);
-        spawn(
-          process.platform === 'win32' ? windowsLauncher!.command : launcher,
-          process.platform === 'win32' ? windowsLauncher!.args : [],
-          {
-            cwd: session.runtimeRoot,
-            detached: true,
-            stdio: 'ignore',
-            windowsHide: false,
-          },
-        ).unref();
+      if (url.pathname === '/api/close' && request.method === 'POST') {
+        if (activeUpdate) return json({ success: false, error: 'Wait for the current update to finish before closing the updater.' }, 409);
         setTimeout(() => {
           server.stop(true);
           requestUmbraUpdaterWorkspaceCleanup(session.workspaceRoot);
           process.exit(0);
-        }, 750);
-        return json({ success: true, appUrl, alreadyRunning: false });
+        }, 250);
+        return json({ success: true });
       }
       if (url.pathname === '/' || url.pathname === '/index.html') {
         return new Response(html, {

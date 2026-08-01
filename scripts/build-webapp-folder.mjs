@@ -721,6 +721,24 @@ function verifyPublish() {
   if (fs.existsSync(path.join(publishRoot, 'UmbraStudio.exe'))) {
     throw new Error('[webapp-publish] BAT-only Windows packages must not include UmbraStudio.exe.');
   }
+  const updaterWorker = fs.readFileSync(
+    path.join(publishRoot, 'resources', 'app', 'launcher', 'UmbraUpdateWorker.js'),
+    'utf8',
+  );
+  const updaterApp = fs.readFileSync(
+    path.join(publishRoot, 'resources', 'app', 'updater', 'UmbraUpdaterApp.js'),
+    'utf8',
+  );
+  const updaterHtml = fs.readFileSync(
+    path.join(publishRoot, 'resources', 'app', 'updater', 'index.html'),
+    'utf8',
+  );
+  if (updaterWorker.includes('waitForHealthyRestart') || updaterApp.includes('/api/relaunch')) {
+    throw new Error('[webapp-publish] Updater must not restart Umbra Studio automatically.');
+  }
+  if (!updaterApp.includes('/api/close') || !updaterHtml.includes('start Umbra Studio manually')) {
+    throw new Error('[webapp-publish] Updater manual-restart completion flow is missing.');
+  }
   if (bundleDataForgeModels) verifyBundledDataForgeModels();
 }
 

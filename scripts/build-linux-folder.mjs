@@ -484,6 +484,24 @@ function verifyPublish() {
   if (fs.existsSync(path.join(publishRoot, 'Umbra-Nodes'))) {
     throw new Error('[linux-publish] Bundled Umbra-Nodes payload must not be present; setup installs it from GitHub.');
   }
+  const updaterWorker = fs.readFileSync(
+    path.join(publishRoot, 'resources', 'app', 'launcher', 'UmbraUpdateWorker.js'),
+    'utf8',
+  );
+  const updaterApp = fs.readFileSync(
+    path.join(publishRoot, 'resources', 'app', 'updater', 'UmbraUpdaterApp.js'),
+    'utf8',
+  );
+  const updaterHtml = fs.readFileSync(
+    path.join(publishRoot, 'resources', 'app', 'updater', 'index.html'),
+    'utf8',
+  );
+  if (updaterWorker.includes('waitForHealthyRestart') || updaterApp.includes('/api/relaunch')) {
+    throw new Error('[linux-publish] Updater must not restart Umbra Studio automatically.');
+  }
+  if (!updaterApp.includes('/api/close') || !updaterHtml.includes('start Umbra Studio manually')) {
+    throw new Error('[linux-publish] Updater manual-restart completion flow is missing.');
+  }
   if (bundleDataForgeModels) verifyBundledDataForgeModels();
 }
 

@@ -179,7 +179,7 @@
     <footer>
       <div id="hint" class="hint">This page is served by the external updater, not Umbra Studio.</div>
       <div class="actions">
-        <button id="relaunch" class="button" type="button">Open Umbra</button>
+        <button id="close-updater" class="button" type="button">Close updater</button>
         <button id="update" class="button primary" type="button" disabled>Install selected update</button>
       </div>
     </footer>
@@ -197,14 +197,14 @@
     });
     const list = document.querySelector('#release-list');
     const updateButton = document.querySelector('#update');
-    const relaunchButton = document.querySelector('#relaunch');
+    const closeUpdaterButton = document.querySelector('#close-updater');
     const refreshButton = document.querySelector('#refresh');
     const progressPanel = document.querySelector('#progress-panel');
     const stateMessage = document.querySelector('#state-message');
     let summary = null;
     let selected = null;
     let stateTimer = 0;
-    const activePhases = new Set(['downloading', 'staged', 'stopping', 'extracting', 'applying', 'updating_nodes', 'restarting']);
+    const activePhases = new Set(['downloading', 'staged', 'stopping', 'extracting', 'applying', 'updating_nodes']);
     const phaseNames = {
       downloading: 'Downloading release',
       staged: 'Verifying package',
@@ -212,7 +212,7 @@
       extracting: 'Extracting package',
       applying: 'Replacing application files',
       updating_nodes: 'Updating Umbra Nodes',
-      restarting: 'Restarting Umbra Studio',
+      restarting: 'Finishing legacy update',
       complete: 'Update complete',
       failed: 'Update failed',
     };
@@ -287,9 +287,17 @@
         document.querySelector('#progress-text').textContent = state.phase === 'downloading'
           ? `${formatBytes(state.processedBytes)} / ${formatBytes(state.totalBytes)}`
           : '';
+        if (state.phase === 'complete' && summary && state.currentVersion) {
+          summary.currentVersion = state.currentVersion;
+          document.querySelector('#status-pill').textContent = `Installed v${state.currentVersion}`;
+        }
         stateMessage.className = `message${state.error ? ' error' : state.warning ? ' warning' : ''}`;
-        stateMessage.textContent = state.error || state.warning || (state.phase === 'complete' ? 'The updated build is ready.' : '');
+        const completionMessage = state.phase === 'complete'
+          ? 'Update complete. Close the updater, then start Umbra Studio manually.'
+          : '';
+        stateMessage.textContent = state.error || [state.warning, completionMessage].filter(Boolean).join(' ');
         updateButton.disabled = active || !selected || compare(selected.version, summary.currentVersion) <= 0;
+        closeUpdaterButton.disabled = active;
         if (active) {
           updateButton.textContent = phaseNames[state.phase] || 'Updating';
           clearTimeout(stateTimer);
@@ -316,18 +324,17 @@
         updateButton.disabled = false;
       }
     });
-    relaunchButton.addEventListener('click', async () => {
-      relaunchButton.disabled = true;
+    closeUpdaterButton.addEventListener('click', async () => {
+      closeUpdaterButton.disabled = true;
       try {
-        const result = await api('/api/relaunch', { method: 'POST', body: '{}' });
-        document.querySelector('#hint').textContent = 'Umbra Studio is starting.';
-        setTimeout(() => location.assign(result.appUrl), 500);
+        await api('/api/close', { method: 'POST', body: '{}' });
+        document.querySelector('#hint').textContent = 'Updater closed. Start Umbra Studio when you are ready.';
+        document.querySelector('#phase').textContent = 'Updater closed';
       } catch (error) {
         stateMessage.className = 'message error';
         stateMessage.textContent = error.message;
         progressPanel.classList.add('visible');
-      } finally {
-        relaunchButton.disabled = false;
+        closeUpdaterButton.disabled = false;
       }
     });
     void loadReleases().then(pollState);
