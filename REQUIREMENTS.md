@@ -123,8 +123,8 @@ The automatic `core` profile is approximately 566 MB and contains:
 - RIFE 4.26 for optional frame interpolation
 
 Managed ComfyUI setup installs this profile automatically. Portable packages
-also include `Install-Umbra-UI-Models.bat` on Windows and
-`install-umbra-ui-models.sh` on Linux for repair or manual installation.
+also include `Install-Umbra-UI-Support-Models.bat` on Windows and
+`install-umbra-ui-support-models.sh` on Linux for repair or manual installation.
 
 The optional `reference` profile adds the SDXL IP-Adapter ViT-H model and its
 CLIP Vision encoder. It is kept separate because it is roughly 3 GB. The

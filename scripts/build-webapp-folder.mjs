@@ -374,7 +374,23 @@ if not exist "%BUN_BIN%" (
   echo [ERROR] Bundled Bun runtime is missing: %BUN_BIN%
   exit /b 1
 )
-"%BUN_BIN%" "%CD%\\resources\\app\\scripts\\download-umbra-ui-models.mjs" %* || exit /b 1
+"%BUN_BIN%" "%CD%\\resources\\app\\scripts\\download-umbra-model-requirements.mjs" %* || exit /b 1
+echo Umbra UI model requirements are ready.
+`;
+  fs.writeFileSync(installerPath, script, 'utf-8');
+}
+
+function writeUmbraUiSupportModelInstaller() {
+  const installerPath = path.join(publishRoot, 'Install-Umbra-UI-Support-Models.bat');
+  const script = `@echo off
+setlocal
+cd /d "%~dp0"
+set "BUN_BIN=%CD%\\Runtime\\Bun\\win32\\bun.exe"
+if not exist "%BUN_BIN%" (
+  echo [ERROR] Bundled Bun runtime is missing: %BUN_BIN%
+  exit /b 1
+)
+"%BUN_BIN%" "%CD%\\resources\\app\\scripts\\download-umbra-ui-models.mjs" --profile core %* || exit /b 1
 echo Umbra UI support models are ready.
 `;
   fs.writeFileSync(installerPath, script, 'utf-8');
@@ -606,6 +622,7 @@ function verifyPublish() {
     'User/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
     'Install-Data-Forge-Models.bat',
     'Install-Umbra-UI-Models.bat',
+    'Install-Umbra-UI-Support-Models.bat',
     'Install-Model-Requirements.bat',
     primaryWindowsLauncher,
     'UmbraSetup.bat',
@@ -752,6 +769,7 @@ function publish() {
 
   writeDataForgeModelInstaller();
   writeUmbraUiModelInstaller();
+  writeUmbraUiSupportModelInstaller();
   writeModelRequirementsInstaller();
   writeUmbraStudioBatchLauncher();
   writeUmbraSetupLauncher();

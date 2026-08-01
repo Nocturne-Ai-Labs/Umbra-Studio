@@ -23,6 +23,7 @@ const requestedFamilies = [...readValues('--family'), ...readValues('--profile')
 const installAllFamilies = process.argv.includes('--all');
 const listOnly = process.argv.includes('--list');
 const checkOnly = process.argv.includes('--check');
+const testDownloads = process.argv.includes('--test-downloads');
 const assumeYes = process.argv.includes('--yes');
 const comfyRootArgIndex = process.argv.indexOf('--comfy-root');
 const comfyRoot = comfyRootArgIndex >= 0 ? String(process.argv[comfyRootArgIndex + 1] || '').trim() : '';
@@ -109,6 +110,7 @@ function runDownloader(families) {
     '--state-file', 'model-requirements.json',
   ];
   if (checkOnly) args.push('--check');
+  if (testDownloads) args.push('--test-downloads');
   if (comfyRoot) args.push('--comfy-root', comfyRoot);
 
   return new Promise((resolve, reject) => {
@@ -149,7 +151,7 @@ async function main() {
   console.log(`Prerequisites: ${files.length} file(s), ${formatBytes(totalBytes)} total`);
   console.log('Destination: Tools\\ComfyUI\\models\\... (the exact ComfyUI folder for each file)');
 
-  if (!checkOnly && !assumeYes && process.stdin.isTTY) {
+  if (!checkOnly && !testDownloads && !assumeYes && process.stdin.isTTY) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     try {
       const answer = (await rl.question('Continue? [y/N]: ')).trim();

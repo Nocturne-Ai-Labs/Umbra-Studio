@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.22.1
+
+### Model Installers
+
+- Made `Install-Umbra-UI-Models.bat` open the complete interactive image-model
+  prerequisite selector instead of the separate core support-model downloader.
+- Added explicitly named Windows and Linux support-model launchers for the
+  detailer, SAM, upscaling, interpolation, and reference-conditioning packs.
+- Added bounded remote-source validation for every model requirement without
+  downloading the complete weights.
+- Made cancellation discard the entire incomplete download instead of retaining
+  resumable partial model data. Valid size/hash matches are kept, while invalid
+  existing files are replaced from byte zero.
+
 ## v0.22.0
 
 ### BAT-First Windows Release

@@ -43,6 +43,7 @@ jobs:
             if (!(Test-Path "$packageRoot/Install-Data-Forge-Models.bat")) { throw 'Data Forge model installer is missing' }
             if (!(Test-Path "$packageRoot/resources/app/defaults/DataForge/model-manifest.json")) { throw 'Data Forge model manifest is missing' }
             if (!(Test-Path "$packageRoot/Install-Umbra-UI-Models.bat")) { throw 'Umbra UI model installer is missing' }
+            if (!(Test-Path "$packageRoot/Install-Umbra-UI-Support-Models.bat")) { throw 'Umbra UI support-model installer is missing' }
             if (!(Test-Path "$packageRoot/resources/app/defaults/UmbraUI/model-manifest.json")) { throw 'Umbra UI model manifest is missing' }
             if (!(Test-Path "$packageRoot/Install-Model-Requirements.bat")) { throw 'Model requirements installer is missing' }
             if (!(Test-Path "$packageRoot/resources/app/defaults/UmbraUI/model-requirements-manifest.json")) { throw 'Model requirements manifest is missing' }
@@ -88,6 +89,7 @@ jobs:
           test -f "${package_root}/install-data-forge-models.sh"
           test -f "${package_root}/resources/app/defaults/DataForge/model-manifest.json"
           test -f "${package_root}/install-umbra-ui-models.sh"
+          test -f "${package_root}/install-umbra-ui-support-models.sh"
           test -f "${package_root}/resources/app/defaults/UmbraUI/model-manifest.json"
           test -f "${package_root}/install-model-requirements.sh"
           test -f "${package_root}/resources/app/defaults/UmbraUI/model-requirements-manifest.json"

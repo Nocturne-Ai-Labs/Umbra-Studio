@@ -237,14 +237,14 @@ The same installer can be run or repaired manually from a portable package:
 Windows:
 
 ```bat
-Install-Umbra-UI-Models.bat
+Install-Umbra-UI-Support-Models.bat
 ```
 
 Linux:
 
 ```bash
-chmod +x install-umbra-ui-models.sh
-./install-umbra-ui-models.sh
+chmod +x install-umbra-ui-support-models.sh
+./install-umbra-ui-support-models.sh
 ```
 
 Source checkouts can use:
@@ -257,11 +257,11 @@ Reference-image conditioning is a separate, opt-in download because its SDXL
 IP-Adapter and CLIP Vision weights add roughly 3 GB:
 
 ```bat
-Install-Umbra-UI-Models.bat --profile reference
+Install-Umbra-UI-Support-Models.bat --profile reference
 ```
 
 ```bash
-./install-umbra-ui-models.sh --profile reference
+./install-umbra-ui-support-models.sh --profile reference
 ```
 
 Every automatic file is fetched from an immutable model revision and checked
@@ -285,6 +285,10 @@ Windows:
 Install-Model-Requirements.bat
 ```
 
+`Install-Umbra-UI-Models.bat` opens this same complete selector under the
+more obvious Umbra UI name. `Install-Model-Requirements.bat` remains as a
+compatibility alias.
+
 Linux:
 
 ```bash
@@ -298,6 +302,12 @@ explains when a model family such as HiDream-O1 or checkpoint-based SD/SDXL
 needs no standalone prerequisite files. Use `--list` to review the menu,
 `--family anima` to run a family non-interactively, or `--check` to verify a
 previous selection without downloading.
+Use `--test-downloads` to validate the selected remote files with tiny ranged
+requests without downloading the model weights.
+
+During a download, press `Q` or `Ctrl+C` to cancel. Umbra deletes the incomplete
+file completely; a later run starts that file again from byte zero. Existing
+files that already match both the pinned size and SHA-256 are retained.
 
 Source checkouts can run the same helper with:
 

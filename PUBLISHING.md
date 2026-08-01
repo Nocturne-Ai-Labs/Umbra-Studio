@@ -89,15 +89,16 @@ generated `Install-Data-Forge-Models.bat` downloader instead. The build verifies
 every bundled model file against the expected size in
 `defaults/DataForge/model-manifest.json`.
 
-Every Windows package also includes `Install-Umbra-UI-Models.bat` and the
+Every Windows package also includes `Install-Umbra-UI-Support-Models.bat` and the
 Umbra UI support-model manifest. Managed ComfyUI setup installs the automatic
 `core` profile; the helper remains available for repair and for explicitly
 installing optional profiles.
 
 Every Windows package also includes `Install-Model-Requirements.bat`. It opens
-an interactive family selector for optional image-model VAEs and text encoders,
-installs each selected file directly below `Tools/ComfyUI/models/`, and never
-downloads base checkpoints or diffusion models.
+the same complete family selector as `Install-Umbra-UI-Models.bat` for optional
+image-model VAEs and text encoders, installs each selected file directly below
+`Tools/ComfyUI/models/`, and never downloads base checkpoints or diffusion
+models.
 
 Every Windows package must include exactly one primary launcher:
 `UmbraStudio.bat`. It also includes `UmbraSetup.bat` and
@@ -164,7 +165,7 @@ Linux packages built with `UMBRA_BUNDLE_DATA_FORGE_MODELS=0` include
 `install-data-forge-models.sh`. Local Linux builds bundle the same pinned model
 pack by default and verify it before the publish is accepted.
 
-Every Linux package also includes `install-umbra-ui-models.sh` and the same
+Every Linux package also includes `install-umbra-ui-support-models.sh` and the same
 cross-platform support-model manifest used by Windows.
 
 Every Linux package also includes `install-model-requirements.sh`, the
@@ -267,8 +268,8 @@ After publishing:
   removes the completed transaction.
 - Confirm Gallery starts.
 - Confirm Umbra UI lists its image/video pipelines and can validate a generation.
-- Run `Install-Umbra-UI-Models.bat --check` or
-  `./install-umbra-ui-models.sh --check` and confirm the core support pack verifies.
+- Run `Install-Umbra-UI-Support-Models.bat --check` or
+  `./install-umbra-ui-support-models.sh --check` and confirm the core support pack verifies.
 - Confirm Power Prompter loads presets/cards.
 - Confirm Power Prompter and Umbra UI share the packaged pipeline definitions.
 - Confirm Data Forge opens and both model installer scripts resolve their pinned models.

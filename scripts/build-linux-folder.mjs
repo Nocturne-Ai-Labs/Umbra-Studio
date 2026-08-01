@@ -301,7 +301,24 @@ if [ ! -x "$BUN_BIN" ]; then
   echo "[ERROR] Bundled Bun runtime is missing: $BUN_BIN"
   exit 1
 fi
-"$BUN_BIN" "$PWD/resources/app/scripts/download-umbra-ui-models.mjs" "$@"
+"$BUN_BIN" "$PWD/resources/app/scripts/download-umbra-model-requirements.mjs" "$@"
+echo "Umbra UI model requirements are ready."
+`;
+  fs.writeFileSync(installerPath, script, 'utf-8');
+  fs.chmodSync(installerPath, 0o755);
+}
+
+function writeUmbraUiSupportModelInstaller() {
+  const installerPath = path.join(publishRoot, 'install-umbra-ui-support-models.sh');
+  const script = `#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+BUN_BIN="$PWD/Runtime/Bun/linux/bun"
+if [ ! -x "$BUN_BIN" ]; then
+  echo "[ERROR] Bundled Bun runtime is missing: $BUN_BIN"
+  exit 1
+fi
+"$BUN_BIN" "$PWD/resources/app/scripts/download-umbra-ui-models.mjs" --profile core "$@"
 echo "Umbra UI support models are ready."
 `;
   fs.writeFileSync(installerPath, script, 'utf-8');
@@ -452,6 +469,7 @@ function verifyPublish() {
     'User/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
     'install-data-forge-models.sh',
     'install-umbra-ui-models.sh',
+    'install-umbra-ui-support-models.sh',
     'install-model-requirements.sh',
     'umbra-setup.sh',
     'umbra-updater.sh',
@@ -586,6 +604,7 @@ function publish() {
   writeLinuxUpdaterLauncher();
   writeDataForgeModelInstaller();
   writeUmbraUiModelInstaller();
+  writeUmbraUiSupportModelInstaller();
   writeModelRequirementsInstaller();
   writeDesktopFile();
   fs.writeFileSync(path.join(publishRoot, 'portable-mode'), 'portable linux webapp runtime enabled\n', 'utf-8');
