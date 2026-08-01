@@ -19,6 +19,7 @@ import {
   type UmbraReleaseBuild,
   type UmbraUpdateState,
 } from '../shared/appUpdate';
+import { resolveUmbraUpdaterCacheRoot } from '../shared/umbraUpdaterWorkspace';
 import {
   detectUmbraWindowsLauncherFlavor,
   type UmbraWindowsLauncherFlavor,
@@ -205,9 +206,10 @@ export class AppUpdateService {
   }
 
   createWorkspace(release: UmbraReleaseBuild): string {
-    const parentRoot = dirname(this.runtimeRoot);
+    const cacheRoot = resolveUmbraUpdaterCacheRoot(this.runtimeRoot);
+    mkdirSync(cacheRoot, { recursive: true });
     const safeVersion = release.version.replace(/[^a-z0-9._-]+/gi, '-');
-    const workspaceRoot = join(parentRoot, `.umbra-update-${safeVersion}-${Date.now()}`);
+    const workspaceRoot = join(cacheRoot, `session-${safeVersion}-${Date.now()}`);
     mkdirSync(workspaceRoot, { recursive: false });
     return workspaceRoot;
   }

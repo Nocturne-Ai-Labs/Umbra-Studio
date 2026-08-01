@@ -107,6 +107,12 @@ BAT package. Both include `UmbraSetup.bat` and
 language selection and optional model-pack installation without gating normal
 Umbra startup.
 
+The standard EXE is compiled from `launcher/windows/UmbraStudioLauncher.cs`
+with the Windows .NET Framework compiler and must remain below 2 MB. It only
+starts the packaged Bun runtime and launcher script. Updater transactions must
+remain below `User/Cache/UmbraUpdater`; release code must not create sibling
+`.umbra-updater-*`, `.umbra-update-*`, or `.umbra-backup-*` directories.
+
 ## Linux Portable Folder Builds
 
 Run these commands on Linux.
@@ -262,6 +268,8 @@ After publishing:
 - Confirm `http://127.0.0.1:8212/` opens.
 - Confirm the EXE package launches from `UmbraStudio.exe` and does not contain
   a root `UmbraStudio.bat`.
+- Confirm `UmbraStudio.exe` is below 2 MB and update staging stays under
+  `User/Cache/UmbraUpdater` until Umbra removes the completed transaction.
 - When explicitly producing the emergency BAT package, confirm it launches
   from `UmbraStudio.bat` and does not contain a root `UmbraStudio.exe`.
 - Confirm Gallery starts.

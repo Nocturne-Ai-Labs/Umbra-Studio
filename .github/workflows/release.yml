@@ -52,6 +52,7 @@ jobs:
           }
           Assert-CommonPackage $exePackageRoot
           if (!(Test-Path "$exePackageRoot/UmbraStudio.exe")) { throw 'Umbra Studio EXE launcher is missing' }
+          if ((Get-Item "$exePackageRoot/UmbraStudio.exe").Length -gt 2MB) { throw 'Umbra Studio lightweight EXE launcher was not packaged' }
           if (Test-Path "$exePackageRoot/UmbraStudio.bat") { throw 'EXE package must not include the batch launcher' }
           New-Item -ItemType Directory -Force artifacts | Out-Null
           Copy-Item "$exePackageRoot/resources/app/defaults/DataForge/model-manifest.json" "artifacts/Data-Forge-Models-v$version.json"

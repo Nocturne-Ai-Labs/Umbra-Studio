@@ -14,6 +14,10 @@ import {
   type UmbraUpdateWorkerRequest,
 } from '../shared/appUpdate';
 import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
+import {
+  isUmbraUpdaterWorkspace,
+  requestUmbraUpdaterWorkspaceCleanup,
+} from '../shared/umbraUpdaterWorkspace';
 
 type UpdaterSession = {
   runtimeRoot: string;
@@ -26,6 +30,7 @@ type UpdaterSession = {
   appPort: number;
   appHost: string;
   createdAt: string;
+  updaterPid?: number;
 };
 
 const UMBRA_LISTENER_STOP_TIMEOUT_MS = 8_000;
@@ -139,30 +144,6 @@ async function isUmbraReady(session: UpdaterSession): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function scheduleWorkspaceCleanup(workspaceRoot: string) {
-  if (process.platform === 'win32') {
-    spawn('powershell.exe', [
-      '-NoLogo',
-      '-NoProfile',
-      '-NonInteractive',
-      '-WindowStyle',
-      'Hidden',
-      '-Command',
-      'Start-Sleep -Seconds 3; Remove-Item -LiteralPath $args[0] -Recurse -Force -ErrorAction SilentlyContinue',
-      workspaceRoot,
-    ], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    }).unref();
-    return;
-  }
-  spawn('/bin/sh', ['-c', 'sleep 2; rm -rf -- "$1"', 'umbra-updater-cleanup', workspaceRoot], {
-    detached: true,
-    stdio: 'ignore',
-  }).unref();
 }
 
 async function runWorker(
@@ -279,9 +260,12 @@ async function main() {
   if (
     resolve(session.workspaceRoot) !== resolve(join(sessionPath, '..'))
     || resolve(session.runtimeRoot) === resolve(session.workspaceRoot)
+    || !isUmbraUpdaterWorkspace(session.runtimeRoot, session.workspaceRoot)
   ) {
     throw new Error('The updater session failed path safety validation.');
   }
+  session.updaterPid = process.pid;
+  writeJsonAtomic(sessionPath, session);
   const currentVersion = readUmbraAppVersion(session.runtimeRoot, session.sourceRoot);
   const service = new AppUpdateService(session.runtimeRoot, currentVersion);
   const html = readFileSync(join(session.workspaceRoot, 'index.html'), 'utf8');
@@ -341,7 +325,7 @@ async function main() {
         if (await isUmbraReady(session)) {
           setTimeout(() => {
             server.stop(true);
-            scheduleWorkspaceCleanup(session.workspaceRoot);
+            requestUmbraUpdaterWorkspaceCleanup(session.workspaceRoot);
             process.exit(0);
           }, 750);
           return json({ success: true, appUrl, alreadyRunning: true });
@@ -365,7 +349,7 @@ async function main() {
         ).unref();
         setTimeout(() => {
           server.stop(true);
-          scheduleWorkspaceCleanup(session.workspaceRoot);
+          requestUmbraUpdaterWorkspaceCleanup(session.workspaceRoot);
           process.exit(0);
         }, 750);
         return json({ success: true, appUrl, alreadyRunning: false });
@@ -391,7 +375,7 @@ async function main() {
         return;
       }
       server.stop(true);
-      scheduleWorkspaceCleanup(session.workspaceRoot);
+      requestUmbraUpdaterWorkspaceCleanup(session.workspaceRoot);
       process.exit(0);
     }, 30 * 60 * 1000);
   };

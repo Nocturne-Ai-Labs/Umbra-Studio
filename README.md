@@ -49,7 +49,9 @@ downloads the complete portable package, closes Umbra and its managed tools,
 preserves `User/` and `Tools/`, updates Umbra Nodes when needed, and restarts
 Umbra automatically. The updater can also be opened directly with
 `UmbraUpdater.bat` on Windows or `umbra-updater.sh` on Linux. Umbra itself keeps
-its normal application root and fixed port.
+its normal application root and fixed port. Downloads, extraction, rollback
+backups, and updater logs stay below `User/Cache/UmbraUpdater` inside the Umbra
+Studio folder and are removed after the standalone updater exits.
 
 Quick summary:
 
@@ -111,6 +113,10 @@ Prompter handoff.
 Normal users should download a portable release zip, extract it, and run the
 platform launcher. `Umbra-Studio-v<version>-Windows-x64.zip` starts from
 `UmbraStudio.exe`.
+
+The Windows EXE is a small native bootstrapper. It starts the packaged Bun
+runtime and Umbra launcher script from the same extracted folder; it does not
+contain a second packed copy of the application.
 
 Linux releases start from `start-umbra.sh`. Users should not need to clone the
 repository or install Bun. The BAT-first Windows packager remains available to

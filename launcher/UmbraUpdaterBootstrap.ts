@@ -7,7 +7,11 @@ import {
 } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import {
+  cleanupInactiveUmbraUpdaterWorkspaces,
+  resolveUmbraUpdaterCacheRoot,
+} from '../shared/umbraUpdaterWorkspace';
 
 const DEFAULT_UPDATER_PORT = 8214;
 const READY_TIMEOUT_MS = 20_000;
@@ -69,8 +73,10 @@ async function main() {
   const launcherPid = Math.max(0, Number.parseInt(readArg('--launcher-pid', '0'), 10) || 0);
   const appPort = Math.max(1, Number.parseInt(readArg('--app-port', '8212'), 10) || 8212);
   const appHost = readArg('--app-host', '127.0.0.1');
-  const parentRoot = dirname(runtimeRoot);
-  const workspaceRoot = join(parentRoot, `.umbra-updater-${Date.now()}`);
+  cleanupInactiveUmbraUpdaterWorkspaces(runtimeRoot);
+  const cacheRoot = resolveUmbraUpdaterCacheRoot(runtimeRoot);
+  mkdirSync(cacheRoot, { recursive: true });
+  const workspaceRoot = join(cacheRoot, `session-${Date.now()}-${randomUUID()}`);
   mkdirSync(workspaceRoot, { recursive: false });
 
   const bunName = process.platform === 'win32' ? 'bun.exe' : 'bun';
@@ -87,7 +93,7 @@ async function main() {
   }
 
   const sessionPath = join(workspaceRoot, 'session.json');
-  writeFileSync(sessionPath, `${JSON.stringify({
+  const session = {
     runtimeRoot,
     sourceRoot,
     workspaceRoot,
@@ -98,7 +104,9 @@ async function main() {
     appPort,
     appHost,
     createdAt: new Date().toISOString(),
-  }, null, 2)}\n`, 'utf8');
+    updaterPid: 0,
+  };
+  writeFileSync(sessionPath, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
 
   const child = spawn(bunPath, [updaterPath, '--session', sessionPath], {
     cwd: workspaceRoot,
@@ -110,6 +118,7 @@ async function main() {
       UMBRA_ROOT: runtimeRoot,
     },
   });
+  if (!child.pid) throw new Error('The standalone updater process did not start.');
   child.unref();
 
   const origin = `http://127.0.0.1:${port}`;

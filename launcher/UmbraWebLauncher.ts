@@ -19,6 +19,7 @@ import {
   readUmbraShutdownMarker,
   type UmbraShutdownMarker,
 } from '../shared/umbraShutdownMarker';
+import { cleanupInactiveUmbraUpdaterWorkspaces } from '../shared/umbraUpdaterWorkspace';
 
 type LauncherOptions = {
   noOpen: boolean;
@@ -482,6 +483,19 @@ async function main() {
   const launchStartedAt = Date.now();
   const options = parseArgs(Bun.argv.slice(2));
   const { runtimeRoot, sourceRoot } = findRuntimeLayout(options);
+  const cleanUpdaterWorkspaces = () => {
+    try {
+      const removed = cleanupInactiveUmbraUpdaterWorkspaces(runtimeRoot);
+      if (removed.length > 0) {
+        writeLine(`[UmbraWebLauncher] Cleaned ${removed.length} finished updater workspace${removed.length === 1 ? '' : 's'}.`);
+      }
+    } catch (error) {
+      console.warn('[UmbraWebLauncher] Could not clean a finished updater workspace:', error);
+    }
+  };
+  cleanUpdaterWorkspaces();
+  const updaterCleanupTimer = setInterval(cleanUpdaterWorkspaces, 5_000);
+  updaterCleanupTimer.unref?.();
   const serverEntrypoint = findServerEntrypoint(sourceRoot);
   const bunPath = findBunBinary(runtimeRoot);
   const launcherDevMode = !isPortableRuntime(runtimeRoot, sourceRoot) && process.env.UMBRA_DEV_MODE !== '0';

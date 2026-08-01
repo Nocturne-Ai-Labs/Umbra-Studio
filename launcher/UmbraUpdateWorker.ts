@@ -22,6 +22,10 @@ import {
   isUmbraShutdownMarkerForProcess,
   readUmbraShutdownMarker,
 } from '../shared/umbraShutdownMarker';
+import {
+  isUmbraUpdaterWorkspace,
+  requestUmbraUpdaterWorkspaceCleanup,
+} from '../shared/umbraUpdaterWorkspace';
 
 const UPDATE_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 12_000;
 const UPDATE_FORCED_SHUTDOWN_TIMEOUT_MS = 30_000;
@@ -393,7 +397,7 @@ export function rollbackSwap(
     return;
   }
 
-  const failedRoot = `${request.runtimeRoot}.failed-${Date.now()}`;
+  const failedRoot = join(request.workspaceRoot, `failed-app-${Date.now()}`);
   mkdirSync(request.runtimeRoot, { recursive: true });
   moveApplicationEntries(request.runtimeRoot, failedRoot);
   moveApplicationEntries(backupRoot, request.runtimeRoot);
@@ -407,9 +411,8 @@ export function applyPayload(
   request: UmbraUpdateWorkerRequest,
   payloadRoot: string,
 ): { backupRoot: string; preservedRoot: string } {
-  const parentRoot = dirname(request.runtimeRoot);
   const safeCurrentVersion = request.currentVersion.replace(/[^a-z0-9._-]+/gi, '-');
-  const backupRoot = join(parentRoot, `.umbra-backup-${safeCurrentVersion}-${Date.now()}`);
+  const backupRoot = join(request.workspaceRoot, `backup-${safeCurrentVersion}-${Date.now()}`);
   const preservedRoot = join(request.workspaceRoot, 'preserved');
 
   mkdirSync(request.runtimeRoot, { recursive: true });
@@ -457,11 +460,30 @@ function updateUmbraNodes(request: UmbraUpdateWorkerRequest): { status: UmbraUpd
   };
 }
 
-function launcherCommand(request: UmbraUpdateWorkerRequest): { command: string; args: string[]; launcherPath: string } {
+export function launcherCommand(request: UmbraUpdateWorkerRequest): { command: string; args: string[]; launcherPath: string } {
   if (process.platform === 'win32') {
+    const bunBinary = join(request.runtimeRoot, 'Runtime', 'Bun', 'win32', 'bun.exe');
+    const webLauncher = join(request.runtimeRoot, 'resources', 'app', 'launcher', 'UmbraWebLauncher.ts');
+    if (existsSync(bunBinary) && existsSync(webLauncher)) {
+      return {
+        command: bunBinary,
+        args: [
+          webLauncher,
+          '--root',
+          request.runtimeRoot,
+          '--no-open',
+          '--port',
+          String(request.port),
+        ],
+        launcherPath: webLauncher,
+      };
+    }
     const launcher = resolveUmbraWindowsLauncher(request.runtimeRoot);
     if (!launcher) throw new Error('Updated Umbra Studio launcher is missing.');
-    return launcher;
+    return {
+      ...launcher,
+      args: [...launcher.args, '--no-open', '--port', String(request.port)],
+    };
   }
   const launcher = join(request.runtimeRoot, 'start-umbra.sh');
   try {
@@ -470,7 +492,11 @@ function launcherCommand(request: UmbraUpdateWorkerRequest): { command: string; 
   } catch {
     // The launch attempt below provides the actionable failure.
   }
-  return { command: launcher, args: [], launcherPath: launcher };
+  return {
+    command: launcher,
+    args: ['--no-open', '--port', String(request.port)],
+    launcherPath: launcher,
+  };
 }
 
 function healthOrigin(request: UmbraUpdateWorkerRequest): string {
@@ -519,30 +545,6 @@ async function stopLaunchedProcessTree(pid: number) {
   while (isProcessAlive(pid) && Date.now() - startedAt < 30_000) {
     await Bun.sleep(200);
   }
-}
-
-function scheduleWorkspaceCleanup(workspaceRoot: string) {
-  if (process.platform === 'win32') {
-    spawn('powershell.exe', [
-      '-NoLogo',
-      '-NoProfile',
-      '-NonInteractive',
-      '-WindowStyle',
-      'Hidden',
-      '-Command',
-      'Start-Sleep -Seconds 3; Remove-Item -LiteralPath $args[0] -Recurse -Force -ErrorAction SilentlyContinue',
-      workspaceRoot,
-    ], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    }).unref();
-    return;
-  }
-  spawn('/bin/sh', ['-c', `sleep 2; rm -rf -- "$1"`, 'umbra-update-cleanup', workspaceRoot], {
-    detached: true,
-    stdio: 'ignore',
-  }).unref();
 }
 
 export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
@@ -604,7 +606,7 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
       }
     }
     log(request, `Umbra Studio ${request.targetVersion} is healthy.`);
-    if (!request.keepWorkspaceAlive) scheduleWorkspaceCleanup(request.workspaceRoot);
+    if (!request.keepWorkspaceAlive) requestUmbraUpdaterWorkspaceCleanup(request.workspaceRoot);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (launchedPid > 0) await stopLaunchedProcessTree(launchedPid);
@@ -648,6 +650,7 @@ async function main() {
     request.schemaVersion !== 1
     || resolve(request.requestPath) !== requestPath
     || resolve(request.workspaceRoot) !== dirname(requestPath)
+    || !isUmbraUpdaterWorkspace(request.runtimeRoot, request.workspaceRoot)
     || resolve(request.runtimeRoot) === resolve(request.workspaceRoot)
     || resolve(request.runtimeRoot).startsWith(`${resolve(request.workspaceRoot)}${sep}`)
   ) {

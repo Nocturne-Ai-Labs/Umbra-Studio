@@ -612,6 +612,7 @@ function verifyPublish() {
     'resources/app/defaults/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
     'resources/app/gallery/GalleryServer.ts',
     'resources/app/launcher/UmbraWebLauncher.ts',
+    'resources/app/shared/umbraUpdaterWorkspace.ts',
     'resources/app/launcher/UmbraMigrationWorker.ts',
     'resources/app/launcher/UmbraUpdateWorker.js',
     'resources/app/launcher/UmbraUpdaterBootstrap.js',
@@ -651,6 +652,12 @@ function verifyPublish() {
   }
   if (fs.existsSync(path.join(publishRoot, 'Umbra-Nodes'))) {
     throw new Error('[webapp-publish] Bundled Umbra-Nodes payload must not be present; setup installs it from GitHub.');
+  }
+  if (windowsLauncherFlavor === 'exe') {
+    const launcherBytes = fs.statSync(path.join(publishRoot, 'UmbraStudio.exe')).size;
+    if (launcherBytes > 2 * 1024 * 1024) {
+      throw new Error(`[webapp-publish] UmbraStudio.exe is unexpectedly large (${launcherBytes} bytes); the lightweight native launcher was not packaged.`);
+    }
   }
   const secondaryWindowsLauncher = windowsLauncherFlavor === 'exe' ? 'UmbraStudio.bat' : 'UmbraStudio.exe';
   if (fs.existsSync(path.join(publishRoot, secondaryWindowsLauncher))) {

@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.21.10
+
+### Windows Startup And Updating
+
+- Moved update downloads, extraction, rollback backups, logs, and worker files
+  under `User/Cache/UmbraUpdater` inside the Umbra Studio installation.
+- Replaced hidden external PowerShell cleanup with Umbra-owned cleanup after
+  the standalone updater exits, including recovery of abandoned sessions.
+- Replaced the large Bun-compiled Windows launcher with a lightweight native
+  bootstrapper that starts Umbra through the verified bundled Bun runtime.
+- Preserved the active Umbra listener port across updater-controlled restarts
+  instead of silently falling back to the default port.
+- Made unattended updater restarts own the real Bun launcher process and
+  removed the unreachable terminal pause that could leave Bun running after
+  Umbra had shut down.
+- Added package guards that prevent the standard Windows release from silently
+  regressing to the former packed launcher.
+
 ## v0.21.9
 
 ### Generation And Pipeline Polish
