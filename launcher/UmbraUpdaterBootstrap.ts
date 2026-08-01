@@ -15,6 +15,7 @@ import {
 
 const DEFAULT_UPDATER_PORT = 8214;
 const READY_TIMEOUT_MS = 20_000;
+const ABANDONED_WORKSPACE_AGE_MS = 60_000;
 
 function readArg(name: string, fallback = ''): string {
   const args = Bun.argv.slice(2);
@@ -73,7 +74,9 @@ async function main() {
   const launcherPid = Math.max(0, Number.parseInt(readArg('--launcher-pid', '0'), 10) || 0);
   const appPort = Math.max(1, Number.parseInt(readArg('--app-port', '8212'), 10) || 8212);
   const appHost = readArg('--app-host', '127.0.0.1');
-  cleanupInactiveUmbraUpdaterWorkspaces(runtimeRoot);
+  cleanupInactiveUmbraUpdaterWorkspaces(runtimeRoot, {
+    staleAfterMs: ABANDONED_WORKSPACE_AGE_MS,
+  });
   const cacheRoot = resolveUmbraUpdaterCacheRoot(runtimeRoot);
   mkdirSync(cacheRoot, { recursive: true });
   const workspaceRoot = join(cacheRoot, `session-${Date.now()}-${randomUUID()}`);
@@ -105,6 +108,7 @@ async function main() {
     appHost,
     createdAt: new Date().toISOString(),
     updaterPid: 0,
+    workerPid: 0,
   };
   writeFileSync(sessionPath, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
 

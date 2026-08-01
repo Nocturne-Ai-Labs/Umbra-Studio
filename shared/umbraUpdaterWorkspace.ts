@@ -10,9 +10,11 @@ import { basename, join, relative, resolve, sep } from 'node:path';
 
 export const UMBRA_UPDATER_CACHE_RELATIVE_PATH = join('User', 'Cache', 'UmbraUpdater');
 export const UMBRA_UPDATER_CLEANUP_MARKER = 'cleanup-requested';
+export const UMBRA_UPDATER_HEARTBEAT_MAX_AGE_MS = 15_000;
 
 type UpdaterSessionRecord = {
   updaterPid?: unknown;
+  workerPid?: unknown;
 };
 
 export function resolveUmbraUpdaterCacheRoot(runtimeRoot: string): string {
@@ -36,13 +38,62 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-function readUpdaterPid(workspaceRoot: string): number {
+type UmbraUpdaterProcessKind = 'updater' | 'worker';
+
+function heartbeatPath(workspaceRoot: string, kind: UmbraUpdaterProcessKind): string {
+  return join(workspaceRoot, `${kind}-heartbeat`);
+}
+
+export function markUmbraUpdaterProcessHeartbeat(
+  workspaceRoot: string,
+  kind: UmbraUpdaterProcessKind,
+) {
+  writeFileSync(heartbeatPath(workspaceRoot, kind), `${Date.now()}\n`, 'utf8');
+}
+
+function isUmbraUpdaterProcessActive(
+  workspaceRoot: string,
+  kind: UmbraUpdaterProcessKind,
+  pid: number,
+): boolean {
+  if (!isProcessAlive(pid)) return false;
   try {
-    const session = JSON.parse(readFileSync(join(workspaceRoot, 'session.json'), 'utf8')) as UpdaterSessionRecord;
-    return Math.max(0, Math.floor(Number(session.updaterPid) || 0));
+    const heartbeatAt = Number.parseInt(readFileSync(heartbeatPath(workspaceRoot, kind), 'utf8'), 10);
+    return Number.isFinite(heartbeatAt)
+      && Date.now() - heartbeatAt <= UMBRA_UPDATER_HEARTBEAT_MAX_AGE_MS;
   } catch {
-    return 0;
+    return false;
   }
+}
+
+function hasActiveWorkspaceProcess(workspaceRoot: string): boolean {
+  let session: UpdaterSessionRecord;
+  try {
+    session = JSON.parse(readFileSync(join(workspaceRoot, 'session.json'), 'utf8')) as UpdaterSessionRecord;
+  } catch {
+    return false;
+  }
+  const updaterPid = Math.max(0, Math.floor(Number(session.updaterPid) || 0));
+  const workerPid = Math.max(0, Math.floor(Number(session.workerPid) || 0));
+  return isUmbraUpdaterProcessActive(workspaceRoot, 'updater', updaterPid)
+    || isUmbraUpdaterProcessActive(workspaceRoot, 'worker', workerPid);
+}
+
+export function hasActiveUmbraUpdaterProcess(
+  runtimeRoot: string,
+  excludedWorkspaceRoot = '',
+): boolean {
+  const cacheRoot = resolveUmbraUpdaterCacheRoot(runtimeRoot);
+  if (!existsSync(cacheRoot)) return false;
+  const excluded = excludedWorkspaceRoot ? resolve(excludedWorkspaceRoot) : '';
+
+  for (const entry of readdirSync(cacheRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^session-[a-z0-9-]+$/i.test(entry.name)) continue;
+    const workspaceRoot = resolve(cacheRoot, entry.name);
+    if (workspaceRoot === excluded || !isUmbraUpdaterWorkspace(runtimeRoot, workspaceRoot)) continue;
+    if (hasActiveWorkspaceProcess(workspaceRoot)) return true;
+  }
+  return false;
 }
 
 export function requestUmbraUpdaterWorkspaceCleanup(workspaceRoot: string) {
@@ -62,8 +113,7 @@ export function cleanupInactiveUmbraUpdaterWorkspaces(
     if (!entry.isDirectory() || !/^session-[a-z0-9-]+$/i.test(entry.name)) continue;
     const workspaceRoot = resolve(cacheRoot, entry.name);
     if (!isUmbraUpdaterWorkspace(runtimeRoot, workspaceRoot)) continue;
-    const updaterPid = readUpdaterPid(workspaceRoot);
-    if (isProcessAlive(updaterPid)) continue;
+    if (hasActiveWorkspaceProcess(workspaceRoot)) continue;
     const cleanupRequested = existsSync(join(workspaceRoot, UMBRA_UPDATER_CLEANUP_MARKER));
     let stale = false;
     try {

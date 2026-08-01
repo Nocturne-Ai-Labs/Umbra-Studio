@@ -64,6 +64,17 @@ export interface UmbraUpdateWorkerRequest {
   keepWorkspaceAlive?: boolean;
 }
 
+export const UMBRA_ACTIVE_UPDATE_PHASES: ReadonlySet<UmbraUpdatePhase> = new Set([
+  'checking',
+  'downloading',
+  'staged',
+  'stopping',
+  'extracting',
+  'applying',
+  'updating_nodes',
+  'restarting',
+]);
+
 export function normalizeUmbraVersion(value: unknown): string {
   return String(value || '').trim().replace(/^v/i, '');
 }
@@ -164,5 +175,30 @@ export function normalizeUmbraUpdateState(
       : 'pending',
     warning: String(source.warning || ''),
     error: String(source.error || ''),
+  };
+}
+
+export function isUmbraUpdateStateActive(value: unknown): boolean {
+  const phase = value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Partial<UmbraUpdateState>).phase
+    : undefined;
+  return UMBRA_ACTIVE_UPDATE_PHASES.has(phase as UmbraUpdatePhase);
+}
+
+export function recoverInterruptedUmbraUpdateState(
+  value: unknown,
+  currentVersion = '',
+  completedAt = new Date().toISOString(),
+): UmbraUpdateState {
+  const state = normalizeUmbraUpdateState(value, currentVersion);
+  if (!isUmbraUpdateStateActive(state)) return state;
+  return {
+    ...state,
+    phase: 'failed',
+    currentVersion: normalizeUmbraVersion(currentVersion) || state.currentVersion,
+    currentItem: '',
+    completedAt,
+    warning: '',
+    error: 'The previous updater session ended before it completed. No update is running. Select a release and try again.',
   };
 }

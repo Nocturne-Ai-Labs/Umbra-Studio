@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.22.6
+
+### Updater Recovery Hotfix
+
+- Fixed the standalone updater remaining permanently stuck on `Stopping Umbra
+  Studio` after an interrupted update, reboot, or updater crash.
+- Added automatic recovery for abandoned active states so a dead update becomes
+  a clear, retryable failure instead of disabling the updater indefinitely.
+- Moved Umbra shutdown ownership into the detached external update worker. The
+  update request and worker now exist before shutdown begins, closing the handoff
+  gap that could leave no worker, request, or failure log behind.
+- Added session heartbeats for the updater and worker so Windows PID reuse after
+  a reboot cannot be mistaken for a still-running update.
+- Added exact-process shutdown safeguards. A standalone updater refuses to
+  replace application files when an unknown Umbra listener is still active.
+- Reduced abandoned updater workspace retention to one minute while preserving
+  any session with a live heartbeat, preventing old release archives and bundled
+  runtimes from accumulating under `User/Cache/UmbraUpdater`.
+
 ## v0.22.5
 
 ### Power Prompter Resolution Distribution

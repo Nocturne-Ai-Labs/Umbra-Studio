@@ -8,13 +8,17 @@ import { spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { AppUpdateService, compareUmbraVersions, readUmbraAppVersion } from '../backend/AppUpdateService';
 import {
+  isUmbraUpdateStateActive,
   normalizeUmbraUpdateState,
+  recoverInterruptedUmbraUpdateState,
   type UmbraReleaseBuild,
   type UmbraUpdateState,
   type UmbraUpdateWorkerRequest,
 } from '../shared/appUpdate';
 import {
+  hasActiveUmbraUpdaterProcess,
   isUmbraUpdaterWorkspace,
+  markUmbraUpdaterProcessHeartbeat,
   requestUmbraUpdaterWorkspaceCleanup,
 } from '../shared/umbraUpdaterWorkspace';
 
@@ -30,10 +34,8 @@ type UpdaterSession = {
   appHost: string;
   createdAt: string;
   updaterPid?: number;
+  workerPid?: number;
 };
-
-const UMBRA_LISTENER_STOP_TIMEOUT_MS = 8_000;
-const UMBRA_SHUTDOWN_REQUEST_TIMEOUT_MS = 3_000;
 
 function readArg(name: string): string {
   const args = Bun.argv.slice(2);
@@ -96,52 +98,12 @@ function writeState(service: AppUpdateService, session: UpdaterSession, patch: P
   return next;
 }
 
-async function requestUmbraShutdown(session: UpdaterSession) {
-  const host = session.appHost === '::1' ? '[::1]' : '127.0.0.1';
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), UMBRA_SHUTDOWN_REQUEST_TIMEOUT_MS);
-  try {
-    await fetch(`http://${host}:${session.appPort}/api/app/updater/shutdown`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
-      signal: controller.signal,
-    });
-  } catch {
-    // The external worker still owns the exact server PID and will escalate if
-    // the listener did not accept this graceful request.
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function waitForUmbraListenerToStop(session: UpdaterSession): Promise<boolean> {
-  const host = session.appHost === '::1' ? '[::1]' : '127.0.0.1';
-  const healthUrl = `http://${host}:${session.appPort}/api/healthz/ready`;
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < UMBRA_LISTENER_STOP_TIMEOUT_MS) {
-    try {
-      const response = await fetch(healthUrl, { cache: 'no-store' });
-      if (!response.ok) return true;
-    } catch {
-      return true;
-    }
-    await Bun.sleep(250);
-  }
-  return false;
-}
-
 async function runWorker(
   service: AppUpdateService,
   session: UpdaterSession,
   release: UmbraReleaseBuild,
   archivePath: string,
 ) {
-  await requestUmbraShutdown(session);
-  const listenerStopped = await waitForUmbraListenerToStop(session);
-  if (!listenerStopped) {
-    console.warn('[UmbraUpdaterApp] Umbra listener remained available after the graceful shutdown window. The worker will force-stop the owned Bun process if needed.');
-  }
   const requestPath = join(session.workspaceRoot, 'update-request.json');
   const request: UmbraUpdateWorkerRequest = {
     schemaVersion: 1,
@@ -172,9 +134,12 @@ async function runWorker(
     requestPath,
   ], {
     cwd: session.workspaceRoot,
+    detached: true,
     stdio: 'ignore',
     windowsHide: true,
   });
+  session.workerPid = Number(worker.pid || 0);
+  writeJsonAtomic(join(session.workspaceRoot, 'session.json'), session);
   const code = await new Promise<number>((resolveExit) => {
     worker.once('exit', (value) => resolveExit(value ?? 1));
     worker.once('error', () => resolveExit(1));
@@ -251,8 +216,25 @@ async function main() {
   }
   session.updaterPid = process.pid;
   writeJsonAtomic(sessionPath, session);
+  markUmbraUpdaterProcessHeartbeat(session.workspaceRoot, 'updater');
+  const heartbeat = setInterval(() => {
+    try {
+      markUmbraUpdaterProcessHeartbeat(session.workspaceRoot, 'updater');
+    } catch {
+      // The worker may be completing cleanup as this updater exits.
+    }
+  }, 2_500);
+  heartbeat.unref();
   const currentVersion = readUmbraAppVersion(session.runtimeRoot, session.sourceRoot);
   const service = new AppUpdateService(session.runtimeRoot, currentVersion);
+  const persistedState = service.readState();
+  if (
+    isUmbraUpdateStateActive(persistedState)
+    && !hasActiveUmbraUpdaterProcess(session.runtimeRoot, session.workspaceRoot)
+  ) {
+    writeState(service, session, recoverInterruptedUmbraUpdateState(persistedState, currentVersion));
+    console.warn(`[UmbraUpdaterApp] Recovered abandoned ${persistedState.phase} state from a previous updater session.`);
+  }
   const html = readFileSync(join(session.workspaceRoot, 'index.html'), 'utf8');
   let activeUpdate: Promise<void> | null = null;
 
@@ -277,7 +259,13 @@ async function main() {
         }
       }
       if (url.pathname === '/api/state' && request.method === 'GET') {
-        return json({ success: true, state: readState(service, session) });
+        const persisted = readState(service, session);
+        const state = !activeUpdate
+          && isUmbraUpdateStateActive(persisted)
+          && !hasActiveUmbraUpdaterProcess(session.runtimeRoot, session.workspaceRoot)
+          ? writeState(service, session, recoverInterruptedUmbraUpdateState(persisted, currentVersion))
+          : persisted;
+        return json({ success: true, state });
       }
       if (url.pathname === '/api/update' && request.method === 'POST') {
         if (activeUpdate) return json({ success: false, error: 'An update is already running.' }, 409);

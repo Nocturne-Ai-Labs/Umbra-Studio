@@ -24,11 +24,14 @@ import {
 } from '../shared/umbraShutdownMarker';
 import {
   isUmbraUpdaterWorkspace,
+  markUmbraUpdaterProcessHeartbeat,
   requestUmbraUpdaterWorkspaceCleanup,
 } from '../shared/umbraUpdaterWorkspace';
 
 const UPDATE_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 12_000;
 const UPDATE_FORCED_SHUTDOWN_TIMEOUT_MS = 30_000;
+const UMBRA_LISTENER_STOP_TIMEOUT_MS = 8_000;
+const UMBRA_SHUTDOWN_REQUEST_TIMEOUT_MS = 3_000;
 
 function log(request: UmbraUpdateWorkerRequest, message: string) {
   const line = `[${new Date().toISOString()}] ${message}`;
@@ -98,6 +101,44 @@ function collectRequestedProcessPids(request: UmbraUpdateWorkerRequest): number[
       && pid !== process.pid
       && all.indexOf(pid) === index
     ));
+}
+
+async function requestUmbraShutdown(request: UmbraUpdateWorkerRequest) {
+  const host = request.bindHost === '::1' ? '[::1]' : '127.0.0.1';
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UMBRA_SHUTDOWN_REQUEST_TIMEOUT_MS);
+  try {
+    await fetch(`http://${host}:${request.port}/api/app/updater/shutdown`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+      signal: controller.signal,
+    });
+  } catch {
+    // A missing listener means Umbra is already stopped. A live owned process
+    // is handled by the exact-PID shutdown path below.
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function waitForUmbraListenerToStop(
+  request: UmbraUpdateWorkerRequest,
+  timeoutMs = UMBRA_LISTENER_STOP_TIMEOUT_MS,
+): Promise<boolean> {
+  const host = request.bindHost === '::1' ? '[::1]' : '127.0.0.1';
+  const healthUrl = `http://${host}:${request.port}/api/healthz/ready`;
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const response = await fetch(healthUrl, { cache: 'no-store' });
+      if (!response.ok) return true;
+    } catch {
+      return true;
+    }
+    await Bun.sleep(250);
+  }
+  return false;
 }
 
 async function waitForProcessesToExit(
@@ -463,8 +504,18 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
   let backupRoot = '';
   let preservedRoot = '';
   try {
+    log(request, `Requesting Umbra ${request.currentVersion} shutdown.`);
+    await requestUmbraShutdown(request);
+    const listenerStoppedGracefully = await waitForUmbraListenerToStop(request);
+    const trackedPids = collectRequestedProcessPids(request);
+    if (!listenerStoppedGracefully && trackedPids.length === 0) {
+      throw new Error(`Umbra is still listening on port ${request.port}, but this standalone updater does not own that process. Close Umbra Studio and try again. No application files were replaced.`);
+    }
     log(request, `Waiting for Umbra ${request.currentVersion} to close.`);
     await waitForProcesses(request);
+    if (!listenerStoppedGracefully && !(await waitForUmbraListenerToStop(request, 3_000))) {
+      throw new Error(`Umbra is still listening on port ${request.port} after its owned processes stopped. No application files were replaced.`);
+    }
     writeState(request, { phase: 'extracting', currentItem: 'Opening release package' });
 
     const extractionRoot = join(request.workspaceRoot, 'payload');
@@ -535,6 +586,15 @@ async function main() {
   ) {
     throw new Error('The update request failed its path safety validation.');
   }
+  markUmbraUpdaterProcessHeartbeat(request.workspaceRoot, 'worker');
+  const heartbeat = setInterval(() => {
+    try {
+      markUmbraUpdaterProcessHeartbeat(request.workspaceRoot, 'worker');
+    } catch {
+      // The updater cleanup pass may remove a completed workspace during exit.
+    }
+  }, 2_500);
+  heartbeat.unref();
   await runUpdateRequest(request);
 }
 
