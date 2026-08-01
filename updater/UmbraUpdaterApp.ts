@@ -13,6 +13,7 @@ import {
   type UmbraUpdateState,
   type UmbraUpdateWorkerRequest,
 } from '../shared/appUpdate';
+import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
 
 type UpdaterSession = {
   runtimeRoot: string;
@@ -345,16 +346,23 @@ async function main() {
           }, 750);
           return json({ success: true, appUrl, alreadyRunning: true });
         }
+        const windowsLauncher = process.platform === 'win32'
+          ? resolveUmbraWindowsLauncher(session.runtimeRoot)
+          : null;
         const launcher = process.platform === 'win32'
-          ? join(session.runtimeRoot, 'UmbraStudio.exe')
+          ? windowsLauncher?.launcherPath || ''
           : join(session.runtimeRoot, 'start-umbra.sh');
-        if (!existsSync(launcher)) return json({ success: false, error: 'Umbra launcher is missing.' }, 404);
-        spawn(launcher, [], {
-          cwd: session.runtimeRoot,
-          detached: true,
-          stdio: 'ignore',
-          windowsHide: false,
-        }).unref();
+        if (!launcher || !existsSync(launcher)) return json({ success: false, error: 'Umbra launcher is missing.' }, 404);
+        spawn(
+          process.platform === 'win32' ? windowsLauncher!.command : launcher,
+          process.platform === 'win32' ? windowsLauncher!.args : [],
+          {
+            cwd: session.runtimeRoot,
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: false,
+          },
+        ).unref();
         setTimeout(() => {
           server.stop(true);
           scheduleWorkspaceCleanup(session.workspaceRoot);

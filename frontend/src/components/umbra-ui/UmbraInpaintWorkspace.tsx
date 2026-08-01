@@ -82,6 +82,7 @@ import { UmbraLayerUpscaleDialog } from '@/components/umbra-ui/UmbraLayerUpscale
 import { UmbraInpaintProjectBrowserModal } from '@/components/umbra-ui/UmbraInpaintProjectBrowserModal';
 import { UmbraMobileWorkspaceSheet } from '@/components/umbra-ui/UmbraMobileWorkspaceSheet';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
+import { UmbraTiledVaeControls } from '@/components/umbra-ui/UmbraTiledVaeControls';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import {
   composeUmbraUiPromptWithLoras,
@@ -97,6 +98,7 @@ import type {
   PowerPrompterModelType,
   PowerPrompterSeedControlMode,
   PowerPrompterSeedIncrement,
+  PowerPrompterTiledVaeControls,
 } from '@/types/powerPrompter';
 import {
   advanceUmbraUiSeed,
@@ -649,6 +651,8 @@ export interface UmbraInpaintWorkspaceProps {
   upscaleModels: string[];
   img2imgDetailerActiveCount: number;
   img2imgDetailerStageCount: number;
+  tiledVae: PowerPrompterTiledVaeControls;
+  onTiledVaeChange: (value: PowerPrompterTiledVaeControls) => void;
   onImg2imgDetailersEnabledChange: (enabled: boolean) => void;
   comfyConnected: boolean;
   showToast: (message: string, type: 'success' | 'error') => void;
@@ -2484,6 +2488,8 @@ export function UmbraInpaintWorkspace({
   upscaleModels,
   img2imgDetailerActiveCount,
   img2imgDetailerStageCount,
+  tiledVae,
+  onTiledVaeChange,
   onImg2imgDetailersEnabledChange,
   comfyConnected,
   showToast,
@@ -3013,6 +3019,7 @@ export function UmbraInpaintWorkspace({
       softInpaintPreservation,
       softInpaintTransitionContrast,
       softInpaintMaskInfluence,
+      tiledVae,
   }), [
     activePromptSegmentId,
     canvasDocument?.generation.promptHistory,
@@ -3030,6 +3037,7 @@ export function UmbraInpaintWorkspace({
     softInpaintMaskInfluence,
     softInpaintPreservation,
     softInpaintTransitionContrast,
+    tiledVae,
     fillMode,
     infillColor,
     infillTileSize,
@@ -4002,6 +4010,7 @@ export function UmbraInpaintWorkspace({
     setSoftInpaintPreservation(generation.softInpaintPreservation);
     setSoftInpaintTransitionContrast(generation.softInpaintTransitionContrast);
     setSoftInpaintMaskInfluence(generation.softInpaintMaskInfluence);
+    onTiledVaeChange(generation.tiledVae);
   }, [
     modelSourceOptions,
     onActivePromptSegmentChange,
@@ -6432,7 +6441,8 @@ export function UmbraInpaintWorkspace({
       context.putImageData(pixels, 0, tileY);
     }
     commitMask();
-  }, [commitMask, maskEditingLocked]);
+    showToast('Inpaint mask inverted. Undo restores the previous mask.', 'success');
+  }, [commitMask, maskEditingLocked, showToast]);
 
   const adjustActiveMask = React.useCallback(async (amount: number) => {
     const canvas = maskCanvasRef.current;
@@ -9588,6 +9598,7 @@ export function UmbraInpaintWorkspace({
         softInpaintPreservation,
         softInpaintTransitionContrast,
         softInpaintMaskInfluence,
+        tiledVae,
         regionalGuidance: [],
         controlLayers: [],
         referenceLayers: [],
@@ -9643,6 +9654,7 @@ export function UmbraInpaintWorkspace({
     softInpaintMaskInfluence,
     softInpaintPreservation,
     softInpaintTransitionContrast,
+    tiledVae,
     semanticCutout,
     semanticCutoutAvailable,
     outputOnlyMaskedRegions,
@@ -10148,6 +10160,14 @@ export function UmbraInpaintWorkspace({
               ) : null}
             </div>
           ) : null}
+
+          <div className="border-t border-white/10 pt-3">
+            <UmbraTiledVaeControls
+              value={tiledVae}
+              onChange={onTiledVaeChange}
+              mode="inpaint"
+            />
+          </div>
 
           <div className="space-y-3 border-t border-white/10 pt-3">
             <div className="space-y-1.5">
@@ -10703,7 +10723,7 @@ export function UmbraInpaintWorkspace({
           <div className="h-5 w-px bg-white/10" />
           <button type="button" onClick={undoDocument} disabled={documentHistory.past.length <= 0} title="Undo canvas edit" className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 disabled:text-zinc-800"><Undo2 size={12} /></button>
           <button type="button" onClick={redoDocument} disabled={documentHistory.future.length <= 0} title="Redo canvas edit" className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 disabled:text-zinc-800"><Redo2 size={12} /></button>
-          <button type="button" onClick={invertMask} disabled={!source || maskEditingLocked || maskProcessing} title={maskEditingLocked ? 'Unlock the active mask before editing it' : 'Invert mask'} className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 disabled:text-zinc-800"><RotateCcw size={12} /></button>
+          <button type="button" onClick={invertMask} disabled={!source || maskEditingLocked || maskProcessing} title={maskEditingLocked ? 'Unlock the active mask before editing it' : 'Invert the active mask'} aria-label="Invert active mask" className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-rose-200 disabled:text-zinc-800"><ArrowRightLeft size={12} /></button>
           <button type="button" onClick={() => void adjustActiveMask(-8)} disabled={!source || maskEditingLocked || maskProcessing} title={maskEditingLocked ? 'Unlock the active mask before editing it' : 'Shrink mask by 8 pixels'} className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-cyan-200 disabled:text-zinc-800"><Minimize2 size={12} /></button>
           <button type="button" onClick={() => void adjustActiveMask(8)} disabled={!source || maskEditingLocked || maskProcessing} title={maskEditingLocked ? 'Unlock the active mask before editing it' : 'Grow mask by 8 pixels'} className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-cyan-200 disabled:text-zinc-800"><Maximize2 size={12} /></button>
           <button type="button" onClick={() => void featherActiveMask(8)} disabled={!source || maskEditingLocked || maskProcessing} title={maskEditingLocked ? 'Unlock the active mask before editing it' : 'Feather mask by 8 pixels'} className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-cyan-200 disabled:text-zinc-800">{maskProcessing ? <Loader2 size={12} className="animate-spin" /> : <Focus size={12} />}</button>
@@ -10827,7 +10847,7 @@ export function UmbraInpaintWorkspace({
               <div className="h-5 w-px bg-white/10" />
               <button type="button" onClick={undoDocument} disabled={documentHistory.past.length <= 0} title="Undo last edit" className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 disabled:text-zinc-800"><Undo2 size={13} /></button>
               <button type="button" onClick={redoDocument} disabled={documentHistory.future.length <= 0} title="Redo last edit" className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 disabled:text-zinc-800"><Redo2 size={13} /></button>
-              <button type="button" onClick={invertMask} disabled={!source || maskEditingLocked || maskProcessing} title="Invert mask" className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 disabled:text-zinc-800"><RotateCcw size={13} /></button>
+              <button type="button" onClick={invertMask} disabled={!source || maskEditingLocked || maskProcessing} title="Invert the active mask" aria-label="Invert active mask" className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 hover:text-rose-200 disabled:text-zinc-800"><ArrowRightLeft size={13} /></button>
               <button type="button" onClick={() => void adjustActiveMask(-8)} disabled={!source || maskEditingLocked || maskProcessing} title="Shrink mask" className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 hover:text-cyan-200 disabled:text-zinc-800"><Minimize2 size={13} /></button>
               <button type="button" onClick={() => void adjustActiveMask(8)} disabled={!source || maskEditingLocked || maskProcessing} title="Grow mask" className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 hover:text-cyan-200 disabled:text-zinc-800"><Maximize2 size={13} /></button>
               <button type="button" onClick={() => void featherActiveMask(8)} disabled={!source || maskEditingLocked || maskProcessing} title="Feather mask" className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 hover:text-cyan-200 disabled:text-zinc-800">{maskProcessing ? <Loader2 size={13} className="animate-spin" /> : <Focus size={13} />}</button>
@@ -11680,6 +11700,19 @@ export function UmbraInpaintWorkspace({
                   >
                     <Plus size={9} /> New Mask
                   </button>
+                  <button
+                    type="button"
+                    onClick={invertMask}
+                    disabled={!source || !activeInpaintMaskLayer || maskEditingLocked || maskProcessing}
+                    title={!activeInpaintMaskLayer
+                      ? 'Select an inpaint mask to invert it'
+                      : maskEditingLocked
+                        ? 'Unlock the active mask before inverting it'
+                        : 'Invert the active mask; Undo restores the previous mask'}
+                    className="inline-flex h-7 items-center justify-center gap-1.5 rounded-sm border border-rose-300/20 bg-rose-500/[0.04] px-2 text-[8px] font-black uppercase text-rose-200 hover:bg-rose-500/[0.09] disabled:border-white/[0.06] disabled:text-zinc-800"
+                  >
+                    <ArrowRightLeft size={9} /> Invert
+                  </button>
                 </div>
                 <div data-umbra-simple-layers="" className="flex min-h-[104px] flex-col gap-2 pb-1">
                   {[...simpleInpaintLayerRows].reverse().map((layer) => {
@@ -12231,7 +12264,7 @@ export function UmbraInpaintWorkspace({
             <CanvasMenuButton icon={<Save size={9} />} label="Save to Gallery" disabled={!source || isSavingCanvas} onClick={() => { setCanvasContextMenu(null); void saveCanvasToGallery(false); }} />
             <CanvasMenuButton icon={<ImagePlus size={9} />} label="Continue in IMG2IMG" disabled={!source || isSavingCanvas || !!fullResolutionOperation} onClick={() => { setCanvasContextMenu(null); void sendCanvasToImg2Img(); }} />
             <div className="my-1 h-px bg-white/[0.06]" />
-            <CanvasMenuButton icon={<RotateCcw size={9} />} label="Invert Mask" disabled={!source || maskEditingLocked || maskProcessing} onClick={() => { setCanvasContextMenu(null); invertMask(); }} />
+            <CanvasMenuButton icon={<ArrowRightLeft size={9} />} label="Invert Mask" disabled={!source || maskEditingLocked || maskProcessing} onClick={() => { setCanvasContextMenu(null); invertMask(); }} />
             <CanvasMenuButton icon={<Trash2 size={9} />} label="Clear Mask" disabled={!source || maskEditingLocked || maskProcessing} onClick={() => { setCanvasContextMenu(null); clearMask(); }} />
           </>}
         </div>

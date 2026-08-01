@@ -17,6 +17,7 @@ import type { UmbraUiPromptSegment } from './umbraUiPromptSegments';
 import type {
   PowerPrompterSeedControlMode,
   PowerPrompterSeedIncrement,
+  PowerPrompterTiledVaeControls,
 } from '@/types/powerPrompter';
 
 export const UMBRA_CANVAS_DOCUMENT_VERSION = 19 as const;
@@ -373,6 +374,7 @@ export interface UmbraCanvasGenerationSettings {
   softInpaintPreservation: number;
   softInpaintTransitionContrast: number;
   softInpaintMaskInfluence: number;
+  tiledVae: PowerPrompterTiledVaeControls;
 }
 
 export interface UmbraCanvasDocument {
@@ -852,6 +854,11 @@ function normalizeGenerationSettings(value: unknown): UmbraCanvasGenerationSetti
     softInpaintPreservation: clamp(source.softInpaintPreservation ?? 0.5, 0, 1),
     softInpaintTransitionContrast: clamp(source.softInpaintTransitionContrast ?? 2, 0.25, 8),
     softInpaintMaskInfluence: clamp(source.softInpaintMaskInfluence ?? 0, 0, 1),
+    tiledVae: {
+      enabled: source.tiledVae?.enabled === true,
+      tileSize: clamp(Math.round(Number(source.tiledVae?.tileSize) || 512), 128, 2048),
+      overlap: clamp(Math.round(Number(source.tiledVae?.overlap) || 64), 0, 256),
+    },
   };
 }
 

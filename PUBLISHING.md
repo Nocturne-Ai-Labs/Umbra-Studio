@@ -59,6 +59,20 @@ No-bump update of the current portable root:
 bun run webapp:update-folder:no-bump
 ```
 
+The default command preserves a BAT-only portable root when updating it and
+otherwise uses the established EXE layout. To create a BAT-only portable root
+explicitly:
+
+```powershell
+bun run webapp:update-folder:bat:no-bump
+```
+
+For a versioned BAT-first local publish:
+
+```powershell
+bun run webapp:update-folder:bat
+```
+
 Version-bump local publish:
 
 ```powershell
@@ -81,7 +95,14 @@ Umbra UI support-model manifest. Managed ComfyUI setup installs the automatic
 `core` profile; the helper remains available for repair and for explicitly
 installing optional profiles.
 
-Every Windows package must also include `UmbraSetup.bat` and
+Every Windows package also includes `Install-Model-Requirements.bat`. It opens
+an interactive family selector for optional image-model VAEs and text encoders,
+installs each selected file directly below `Tools/ComfyUI/models/`, and never
+downloads base checkpoints or diffusion models.
+
+Every Windows package must include exactly one primary launcher:
+`UmbraStudio.exe` for the standard EXE package or `UmbraStudio.bat` for the
+BAT package. Both include `UmbraSetup.bat` and
 `resources/app/setup/UmbraSetupApp.js`. The standalone setup service owns
 language selection and optional model-pack installation without gating normal
 Umbra startup.
@@ -144,6 +165,9 @@ pack by default and verify it before the publish is accepted.
 Every Linux package also includes `install-umbra-ui-models.sh` and the same
 cross-platform support-model manifest used by Windows.
 
+Every Linux package also includes `install-model-requirements.sh`, the
+cross-platform interactive selector for optional image-model prerequisites.
+
 Every Linux package must also include `umbra-setup.sh` and
 `resources/app/setup/UmbraSetupApp.js`.
 
@@ -177,17 +201,18 @@ installer that downloads the exact pinned model revisions into `User/Models`
 and rejects incomplete or checksum-mismatched downloads. The workflow also
 publishes `Data-Forge-Models-v<version>.json` as a release asset so the exact
 model bill of materials is visible without extracting either platform package.
-Both platform archives contain one top-level `Umbra Studio/` directory so users
+Every portable archive contains one top-level `Umbra Studio/` directory so users
 can extract them without scattering portable application files into the chosen
 destination.
 
-Windows release signing is mandatory. The Windows job signs the final
-`UmbraStudio.exe` after all launcher resource and icon changes, verifies its
-Authenticode signature and expected publisher, and only then creates the ZIP.
-Configure Microsoft Artifact Signing and the GitHub OIDC values described in
-[`WINDOWS_SIGNING.md`](WINDOWS_SIGNING.md)
-before creating a release tag. The job intentionally fails rather than
-publishing an unsigned Windows launcher when signing is not configured.
+Each GitHub release publishes the established
+`Umbra-Studio-v<version>-Windows-x64.zip` EXE package. Keep this asset name
+stable so existing installs continue to update normally.
+
+The BAT-first Windows packager remains maintained as an emergency/manual
+compatibility option, but do not publish its archive unless the user explicitly
+requests it for a specific release. Existing BAT installs retain launcher-aware
+update and restart support so the fallback remains usable when needed.
 
 The GitHub workflow must continue to package:
 
@@ -235,6 +260,10 @@ After publishing:
 
 - Launch the app from the published folder, not the source tree.
 - Confirm `http://127.0.0.1:8212/` opens.
+- Confirm the EXE package launches from `UmbraStudio.exe` and does not contain
+  a root `UmbraStudio.bat`.
+- When explicitly producing the emergency BAT package, confirm it launches
+  from `UmbraStudio.bat` and does not contain a root `UmbraStudio.exe`.
 - Confirm Gallery starts.
 - Confirm Umbra UI lists its image/video pipelines and can validate a generation.
 - Run `Install-Umbra-UI-Models.bat --check` or

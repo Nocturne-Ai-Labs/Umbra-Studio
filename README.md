@@ -108,8 +108,14 @@ Prompter handoff.
 
 ## User Release Model
 
-Normal users should download a portable release zip, extract it, and run
-`UmbraStudio.exe`. They should not need to clone the repository or install Bun.
+Normal users should download a portable release zip, extract it, and run the
+platform launcher. `Umbra-Studio-v<version>-Windows-x64.zip` starts from
+`UmbraStudio.exe`.
+
+Linux releases start from `start-umbra.sh`. Users should not need to clone the
+repository or install Bun. The BAT-first Windows packager remains available to
+developers as an emergency compatibility option, but it is not part of the
+normal GitHub release.
 
 The portable app bundles the Bun runtime under:
 
@@ -258,6 +264,40 @@ source-specific CivitAI permissions. Users who provide that detector can turn
 the stage on. The listed anime upscalers likewise stay optional and
 user-installed.
 
+### Optional: Image Model Prerequisites
+
+Umbra does not bundle large VAEs and text encoders in the release archives.
+Use the interactive requirements helper to install only the shared resources
+for the image-model families you actually use. It never downloads a base
+checkpoint or diffusion model, and each verified file goes straight into its
+correct `Tools/ComfyUI/models/` subfolder.
+
+Windows:
+
+```bat
+Install-Model-Requirements.bat
+```
+
+Linux:
+
+```bash
+chmod +x install-model-requirements.sh
+./install-model-requirements.sh
+```
+
+The menu covers Anima, FLUX.1, FLUX.2, Qwen Image, Krea 2, ERNIE Image,
+Z-Image, Chroma 1, Ideogram 4, and the shared OmniGen 2/Ovis AE VAE. It also
+explains when a model family such as HiDream-O1 or checkpoint-based SD/SDXL
+needs no standalone prerequisite files. Use `--list` to review the menu,
+`--family anima` to run a family non-interactively, or `--check` to verify a
+previous selection without downloading.
+
+Source checkouts can run the same helper with:
+
+```bash
+bun scripts/download-umbra-model-requirements.mjs
+```
+
 AI Toolkit is optional and currently requires Git plus Node.js 20 or newer for
 its upstream web UI build. Umbra manages its checkout and Python virtual
 environment after those host prerequisites are available.
@@ -384,17 +424,18 @@ GitHub releases are built by `.github/workflows/release.yml`. See
 `PUBLISHING.md` for the clean-source command, model packaging policy, and the
 full Windows/Linux validation matrix.
 
-Windows release launchers are Authenticode-signed through Microsoft Artifact
-Signing. The required verified publisher and GitHub OIDC configuration are
-documented in
-[`WINDOWS_SIGNING.md`](WINDOWS_SIGNING.md).
-
 Windows portable folder builds:
 
 No-bump update of the current portable folder:
 
 ```powershell
 bun run webapp:update-folder:no-bump
+```
+
+Build the alternate BAT-first Windows portable folder explicitly:
+
+```powershell
+bun run webapp:update-folder:bat:no-bump
 ```
 
 Versioned publish:

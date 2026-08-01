@@ -19,6 +19,10 @@ import {
   type UmbraReleaseBuild,
   type UmbraUpdateState,
 } from '../shared/appUpdate';
+import {
+  detectUmbraWindowsLauncherFlavor,
+  type UmbraWindowsLauncherFlavor,
+} from '../shared/portableLauncher';
 
 const RELEASES_API_URL = 'https://api.github.com/repos/Nocturne-Ai-Labs/Umbra-Studio/releases?per_page=30';
 const RELEASE_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -63,9 +67,17 @@ export function compareUmbraVersions(left: string, right: string): number {
   return compareSharedUmbraVersions(left, right);
 }
 
-function releaseAssetPattern(platform: NodeJS.Platform, arch: string): RegExp {
+function releaseAssetPattern(
+  platform: NodeJS.Platform,
+  arch: string,
+  windowsLauncherFlavor: UmbraWindowsLauncherFlavor = 'exe',
+): RegExp {
   if (arch !== 'x64') return /$a/;
-  if (platform === 'win32') return /^Umbra-Studio-v.+-Windows-x64\.zip$/i;
+  if (platform === 'win32') {
+    return windowsLauncherFlavor === 'bat'
+      ? /^Umbra-Studio-v.+-Windows-x64-BAT\.zip$/i
+      : /^Umbra-Studio-v.+-Windows-x64\.zip$/i;
+  }
   if (platform === 'linux') return /^Umbra-Studio-v.+-Linux-x64\.zip$/i;
   return /$a/;
 }
@@ -79,13 +91,14 @@ export function normalizeGithubRelease(
   value: GithubRelease,
   platform: NodeJS.Platform,
   arch: string,
+  windowsLauncherFlavor: UmbraWindowsLauncherFlavor = 'exe',
 ): UmbraReleaseBuild | null {
   if (!value || value.draft === true) return null;
   const tag = String(value.tag_name || '').trim();
   const version = normalizeUmbraVersion(tag);
   if (!tag || !/^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i.test(version)) return null;
   const assets = Array.isArray(value.assets) ? value.assets as GithubAsset[] : [];
-  const packagePattern = releaseAssetPattern(platform, arch);
+  const packagePattern = releaseAssetPattern(platform, arch, windowsLauncherFlavor);
   const asset = assets.find((entry) => packagePattern.test(String(entry.name || '').trim()));
   if (!asset) return null;
   const packageUrl = String(asset.browser_download_url || '').trim();
@@ -116,12 +129,16 @@ export class AppUpdateService {
   readonly runtimeRoot: string;
   readonly currentVersion: string;
   readonly statePath: string;
+  readonly windowsLauncherFlavor: UmbraWindowsLauncherFlavor;
   private releaseCache: { expiresAt: number; releases: UmbraReleaseBuild[] } | null = null;
 
   constructor(runtimeRoot: string, currentVersion: string) {
     this.runtimeRoot = resolve(runtimeRoot);
     this.currentVersion = normalizeUmbraVersion(currentVersion);
     this.statePath = join(this.runtimeRoot, 'User', 'Config', 'app-update.json');
+    this.windowsLauncherFlavor = process.platform === 'win32'
+      ? detectUmbraWindowsLauncherFlavor(this.runtimeRoot) || 'exe'
+      : 'exe';
   }
 
   readState(): UmbraUpdateState {
@@ -159,7 +176,12 @@ export class AppUpdateService {
     }
     const payload = await response.json();
     const releases = (Array.isArray(payload) ? payload : [])
-      .map((entry) => normalizeGithubRelease(entry as GithubRelease, process.platform, process.arch))
+      .map((entry) => normalizeGithubRelease(
+        entry as GithubRelease,
+        process.platform,
+        process.arch,
+        this.windowsLauncherFlavor,
+      ))
       .filter((entry): entry is UmbraReleaseBuild => Boolean(entry))
       .sort((left, right) => compareUmbraVersions(right.version, left.version));
     this.releaseCache = {

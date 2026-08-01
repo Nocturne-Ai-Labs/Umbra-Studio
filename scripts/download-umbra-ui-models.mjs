@@ -7,7 +7,6 @@ import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MANIFEST_PATH = path.join(APP_ROOT, 'defaults', 'UmbraUI', 'model-manifest.json');
 const HF_BASE = String(process.env.HF_BASE_URL || 'https://huggingface.co').replace(/\/$/, '');
 
 function readArg(name) {
@@ -15,7 +14,23 @@ function readArg(name) {
   return index >= 0 ? String(process.argv[index + 1] || '').trim() : '';
 }
 
-const requestedProfile = readArg('--profile') || 'core';
+function readArgs(name) {
+  const values = [];
+  for (let index = 0; index < process.argv.length; index += 1) {
+    if (process.argv[index] !== name) continue;
+    const value = String(process.argv[index + 1] || '').trim();
+    if (value) values.push(...value.split(',').map(entry => entry.trim()).filter(Boolean));
+  }
+  return values;
+}
+
+const manifestArgument = readArg('--manifest');
+const MANIFEST_PATH = manifestArgument
+  ? path.resolve(APP_ROOT, manifestArgument)
+  : path.join(APP_ROOT, 'defaults', 'UmbraUI', 'model-manifest.json');
+const requestedProfiles = readArgs('--profile');
+const requestedProfile = requestedProfiles.length > 0 ? requestedProfiles.join(',') : 'core';
+const stateFileName = readArg('--state-file') || 'support-models.json';
 const checkOnly = process.argv.includes('--check');
 const manifestOnly = process.argv.includes('--manifest-only');
 const listOnly = process.argv.includes('--list');
@@ -33,6 +48,14 @@ function loadManifest() {
 function normalizedRelative(value, label) {
   const normalized = String(value || '').replace(/\\/g, '/').replace(/^\.\//, '');
   if (!normalized || path.posix.isAbsolute(normalized) || normalized.split('/').includes('..')) {
+    throw new Error(`Unsafe ${label}: ${value}`);
+  }
+  return normalized;
+}
+
+function normalizedFileName(value, label) {
+  const normalized = String(value || '').trim();
+  if (!normalized || path.basename(normalized) !== normalized || normalized !== path.normalize(normalized)) {
     throw new Error(`Unsafe ${label}: ${value}`);
   }
   return normalized;
@@ -137,9 +160,15 @@ async function downloadFile(url, outputPath, expected) {
 }
 
 function selectedModels(manifest) {
-  if (requestedProfile === 'all') return manifest.models.filter(model => model.installPolicy === 'automatic');
-  if (!manifest.profiles[requestedProfile]) throw new Error(`Unknown model profile: ${requestedProfile}`);
-  return manifest.models.filter(model => model.installPolicy === 'automatic' && model.profiles.includes(requestedProfile));
+  if (requestedProfiles.includes('all')) return manifest.models.filter(model => model.installPolicy === 'automatic');
+  const profiles = requestedProfiles.length > 0 ? requestedProfiles : ['core'];
+  for (const profile of profiles) {
+    if (!manifest.profiles[profile]) throw new Error(`Unknown model profile: ${profile}`);
+  }
+  return manifest.models.filter(model => (
+    model.installPolicy === 'automatic'
+    && model.profiles.some(profile => profiles.includes(profile))
+  ));
 }
 
 function printManifest(manifest) {
@@ -197,7 +226,7 @@ async function main() {
   if (missing.length > 0) throw new Error(`Missing ${missing.length} support model file(s): ${missing.join(', ')}`);
   const stateDir = path.join(modelsRoot, '.umbra');
   fs.mkdirSync(stateDir, { recursive: true });
-  fs.writeFileSync(path.join(stateDir, 'support-models.json'), `${JSON.stringify({
+  fs.writeFileSync(path.join(stateDir, normalizedFileName(stateFileName, 'state file')), `${JSON.stringify({
     schemaVersion: 1,
     manifestSchemaVersion: manifest.schemaVersion,
     profile: requestedProfile,

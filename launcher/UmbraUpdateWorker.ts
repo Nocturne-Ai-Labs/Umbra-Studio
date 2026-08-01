@@ -17,6 +17,7 @@ import {
   type UmbraUpdateState,
   type UmbraUpdateWorkerRequest,
 } from '../shared/appUpdate';
+import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
 import {
   isUmbraShutdownMarkerForProcess,
   readUmbraShutdownMarker,
@@ -314,6 +315,12 @@ export function findPayloadRoot(extractionRoot: string): string {
 }
 
 function verifyPayload(payloadRoot: string, request: UmbraUpdateWorkerRequest) {
+  const currentWindowsLauncher = process.platform === 'win32'
+    ? resolveUmbraWindowsLauncher(request.runtimeRoot)
+    : null;
+  if (process.platform === 'win32' && !currentWindowsLauncher) {
+    throw new Error('The installed Umbra Studio launcher is missing. Re-extract the matching Windows package before updating.');
+  }
   const required = [
     join(payloadRoot, 'resources', 'app', 'package.json'),
     join(payloadRoot, 'resources', 'app', 'UmbraServer.js'),
@@ -322,7 +329,7 @@ function verifyPayload(payloadRoot: string, request: UmbraUpdateWorkerRequest) {
     join(payloadRoot, 'resources', 'app', 'updater', 'UmbraUpdaterApp.js'),
     join(payloadRoot, 'resources', 'app', 'updater', 'index.html'),
     process.platform === 'win32'
-      ? join(payloadRoot, 'UmbraStudio.exe')
+      ? join(payloadRoot, currentWindowsLauncher!.flavor === 'exe' ? 'UmbraStudio.exe' : 'UmbraStudio.bat')
       : join(payloadRoot, 'start-umbra.sh'),
     process.platform === 'win32'
       ? join(payloadRoot, 'UmbraUpdater.bat')
@@ -450,9 +457,11 @@ function updateUmbraNodes(request: UmbraUpdateWorkerRequest): { status: UmbraUpd
   };
 }
 
-function launcherCommand(request: UmbraUpdateWorkerRequest): { command: string; args: string[] } {
+function launcherCommand(request: UmbraUpdateWorkerRequest): { command: string; args: string[]; launcherPath: string } {
   if (process.platform === 'win32') {
-    return { command: join(request.runtimeRoot, 'UmbraStudio.exe'), args: [] };
+    const launcher = resolveUmbraWindowsLauncher(request.runtimeRoot);
+    if (!launcher) throw new Error('Updated Umbra Studio launcher is missing.');
+    return launcher;
   }
   const launcher = join(request.runtimeRoot, 'start-umbra.sh');
   try {
@@ -461,7 +470,7 @@ function launcherCommand(request: UmbraUpdateWorkerRequest): { command: string; 
   } catch {
     // The launch attempt below provides the actionable failure.
   }
-  return { command: launcher, args: [] };
+  return { command: launcher, args: [], launcherPath: launcher };
 }
 
 function healthOrigin(request: UmbraUpdateWorkerRequest): string {
@@ -612,7 +621,7 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
     });
     log(request, `Update failed: ${message}`);
     const currentLauncher = launcherCommand(request);
-    if (existsSync(currentLauncher.command)) {
+    if (existsSync(currentLauncher.launcherPath)) {
       spawn(currentLauncher.command, currentLauncher.args, {
         cwd: request.runtimeRoot,
         detached: true,

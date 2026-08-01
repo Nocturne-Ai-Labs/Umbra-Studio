@@ -4508,6 +4508,9 @@ interface BackendPowerPrompterQueueTask {
   activePromptIndex: number;
   previewWs: WebSocket | null;
   previewReady: Promise<void> | null;
+  previewReconnectTimer: ReturnType<typeof setTimeout> | null;
+  previewReconnectAttempts: number;
+  previewMonitorClosed: boolean;
   lastPreviewFrameAt: number;
   previewProgressSignatures: Map<string, string>;
 }
@@ -7076,6 +7079,27 @@ function applyPPWorkflowResourceValues(
   }
 }
 
+function applyPPTiledVaeToGraph(
+  promptGraph: Record<string, any>,
+  tiledVae: PowerPrompterGenerationControls['tiledVae'] | undefined,
+) {
+  if (!tiledVae?.enabled) return;
+  const tileSize = clampPPInteger(tiledVae.tileSize, 512, 128, 2048);
+  const overlap = clampPPInteger(tiledVae.overlap, 64, 0, Math.min(256, tileSize - 1));
+  for (const node of Object.values(promptGraph)) {
+    if (!node || typeof node !== 'object') continue;
+    const classType = String((node as any).class_type || '').trim();
+    const inputs = (node as any).inputs && typeof (node as any).inputs === 'object' ? (node as any).inputs : {};
+    if (classType === 'VAEEncode') {
+      (node as any).class_type = 'VAEEncodeTiled';
+      (node as any).inputs = { pixels: inputs.pixels, vae: inputs.vae, tile_size: tileSize, overlap };
+    } else if (classType === 'VAEDecode') {
+      (node as any).class_type = 'VAEDecodeTiled';
+      (node as any).inputs = { samples: inputs.samples, vae: inputs.vae, tile_size: tileSize, overlap };
+    }
+  }
+}
+
 function assertRequiredPPWorkflowResources(
   descriptors: PPApiWorkflowResourceSelector[],
   rawValues: unknown,
@@ -7533,6 +7557,7 @@ function compileUmbraUiPipelineWorkflow(
 
   if (workflowDescriptor.mediaType === 'image') {
     applyUmbraUiClipSkipToGraph(promptGraph, supportsClipSkip ? generation.clipSkip : 1);
+    applyPPTiledVaeToGraph(promptGraph, generation.tiledVae);
   }
 
   applyPPWanVideoTopology(promptGraph, videoRoleEntries, generation);
@@ -7890,6 +7915,7 @@ function startBackendPowerPrompterPreviewMonitor(
   task: BackendPowerPrompterQueueTask,
   sourceWs?: ServerWebSocket<unknown> | null,
 ) {
+  if (task.previewMonitorClosed || task.canceled || task.abortController.signal.aborted || task.previewWs) return;
   const clientId = `umbra-backend-powerprompter-${requestId}`;
   const wsUrl = getComfyProxyWsUrl(`?clientId=${encodeURIComponent(clientId)}`);
   let readySettled = false;
@@ -7905,6 +7931,7 @@ function startBackendPowerPrompterPreviewMonitor(
       task.previewWs = ws;
       ws.binaryType = 'arraybuffer';
       ws.onopen = () => {
+        task.previewReconnectAttempts = 0;
         appendPowerPrompterQueueLog('backend_preview_ws_open', { requestId });
         finish();
       };
@@ -7972,6 +7999,19 @@ function startBackendPowerPrompterPreviewMonitor(
       };
       ws.onclose = () => {
         if (task.previewWs === ws) task.previewWs = null;
+        finish();
+        if (task.previewMonitorClosed || task.canceled || task.abortController.signal.aborted || task.previewReconnectTimer) return;
+        task.previewReconnectAttempts += 1;
+        const delayMs = Math.min(8000, 1000 * task.previewReconnectAttempts);
+        appendPowerPrompterQueueLog('backend_preview_ws_reconnect_scheduled', {
+          requestId,
+          attempt: task.previewReconnectAttempts,
+          delayMs,
+        });
+        task.previewReconnectTimer = setTimeout(() => {
+          task.previewReconnectTimer = null;
+          startBackendPowerPrompterPreviewMonitor(requestId, task, sourceWs);
+        }, delayMs);
       };
     } catch (error: any) {
       appendPowerPrompterQueueLog('backend_preview_ws_start_failed', {
@@ -7984,6 +8024,11 @@ function startBackendPowerPrompterPreviewMonitor(
 }
 
 function closeBackendPowerPrompterPreviewMonitor(task: BackendPowerPrompterQueueTask) {
+  task.previewMonitorClosed = true;
+  if (task.previewReconnectTimer) {
+    clearTimeout(task.previewReconnectTimer);
+    task.previewReconnectTimer = null;
+  }
   const ws = task.previewWs;
   task.previewWs = null;
   if (!ws) return;
@@ -9226,6 +9271,9 @@ async function runBackendPowerPrompterPipelineQueue(
     activePromptIndex: 0,
     previewWs: null,
     previewReady: null,
+    previewReconnectTimer: null,
+    previewReconnectAttempts: 0,
+    previewMonitorClosed: false,
     lastPreviewFrameAt: 0,
     previewProgressSignatures: new Map<string, string>(),
   };
@@ -15970,6 +16018,11 @@ interface PowerPrompterGenerationControls {
     modelName: string;
     maxDimension: number;
   };
+  tiledVae?: {
+    enabled: boolean;
+    tileSize: number;
+    overlap: number;
+  };
   negativePrompt: string;
   seed: number;
   controlAfterGenerate: PowerPrompterSeedControlMode;
@@ -16055,6 +16108,11 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
     enabled: false,
     modelName: 'RealESRGAN_x4plus.safetensors',
     maxDimension: 3840,
+  },
+  tiledVae: {
+    enabled: false,
+    tileSize: 512,
+    overlap: 64,
   },
   hiresFix: {
     enabled: false,
@@ -17738,6 +17796,11 @@ function normalizePPGenerationControls(rawControls: unknown): PowerPrompterGener
   const outputUpscale = rawOutputUpscale && typeof rawOutputUpscale === 'object'
     ? rawOutputUpscale as Record<string, unknown>
     : {};
+  const defaultTiledVae = PP_DEFAULT_GENERATION_CONTROLS.tiledVae!;
+  const rawTiledVae = (controls as any).tiledVae;
+  const tiledVae = rawTiledVae && typeof rawTiledVae === 'object'
+    ? rawTiledVae as Record<string, unknown>
+    : {};
   const outputModeRaw = String((controls as any).outputMode || '').trim().toLowerCase();
   const outputMode = (['txt2img', 'img2img', 'img2vid', 'txt2vid', 'vid2vid', 'inpainting', 'extras'] as const)
     .find((candidate) => candidate === outputModeRaw) || 'txt2img';
@@ -17772,6 +17835,11 @@ function normalizePPGenerationControls(rawControls: unknown): PowerPrompterGener
       enabled: outputUpscale.enabled === true,
       modelName: String(outputUpscale.modelName || defaultOutputUpscale.modelName).trim().replace(/\\/g, '/') || defaultOutputUpscale.modelName,
       maxDimension: clampPPInteger(outputUpscale.maxDimension, defaultOutputUpscale.maxDimension, 512, 16384),
+    },
+    tiledVae: {
+      enabled: tiledVae.enabled === true,
+      tileSize: clampPPInteger(tiledVae.tileSize, defaultTiledVae.tileSize, 128, 2048),
+      overlap: clampPPInteger(tiledVae.overlap, defaultTiledVae.overlap, 0, 256),
     },
     negativePrompt: String((controls as any).negativePrompt || '').trim(),
     seed: clampPPInteger(controls.seed, PP_DEFAULT_GENERATION_CONTROLS.seed, 0, PP_MAX_SEED_SAFE),

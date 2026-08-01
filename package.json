@@ -1,6 +1,6 @@
 {
   "name": "umbra-studio",
-  "version": "0.21.8",
+  "version": "0.21.9",
   "description": "Umbra Studio - AI image generation, prompt tooling, and media workflow suite",
   "author": "Nocturne AI Labs",
   "homepage": "https://github.com/Nocturne-Ai-Labs/Umbra-Studio",
@@ -46,13 +46,16 @@
     "webapp:prepare-runtime": "node scripts/prepare-runtime-bun.mjs",
     "webapp:prepare-dependencies": "node scripts/prepare-runtime-dependencies.mjs",
     "webapp:dev": "bun run build:frontend && bun launcher/UmbraWebLauncher.ts --root .",
-    "webapp:build-launcher": "bun build launcher/UmbraWebLauncher.ts --compile --outfile dist-webapp/UmbraStudio.exe --windows-icon frontend/public/assets/UMBRA.ico --windows-title \"Umbra Studio\" --windows-publisher \"Nocturne AI Labs\" --windows-description \"Umbra Studio\" && node scripts/patch-windows-exe-icon.mjs dist-webapp/UmbraStudio.exe",
     "webapp:build-update-worker": "bun build launcher/UmbraUpdateWorker.ts --target=bun --outfile dist-webapp/UmbraUpdateWorker.js",
     "webapp:build-updater": "bun run webapp:build-update-worker && bun build launcher/UmbraUpdaterBootstrap.ts --target=bun --outfile dist-webapp/UmbraUpdaterBootstrap.js && bun build updater/UmbraUpdaterApp.ts --target=bun --outfile dist-webapp/UmbraUpdaterApp.js",
     "webapp:build-setup": "bun build setup/UmbraSetupApp.ts --target=bun --outfile dist-webapp/UmbraSetupApp.js",
+    "webapp:build-launcher": "bun build launcher/UmbraWebLauncher.ts --compile --outfile dist-webapp/UmbraStudio.exe --windows-icon frontend/public/assets/UMBRA.ico --windows-title \"Umbra Studio\" --windows-publisher \"Nocturne AI Labs\" --windows-description \"Umbra Studio\"",
     "webapp:dist:no-bump": "bun run audit:umbra-ui-pipelines && bun run webapp:prepare-runtime && bun run models:waifu:download && bun run models:caption:download && bun run build:frontend && bun run webapp:build-launcher",
     "webapp:update-folder:no-bump": "bun run audit:umbra-ui-pipelines && node scripts/build-webapp-folder.mjs",
+    "webapp:update-folder:exe:no-bump": "bun run audit:umbra-ui-pipelines && node scripts/build-webapp-folder.mjs --launcher=exe",
+    "webapp:update-folder:bat:no-bump": "bun run audit:umbra-ui-pipelines && node scripts/build-webapp-folder.mjs --launcher=bat",
     "webapp:update-folder": "bun run audit:umbra-ui-pipelines && node scripts/build-webapp-version-bump.mjs",
+    "webapp:update-folder:bat": "bun run audit:umbra-ui-pipelines && node scripts/build-webapp-version-bump.mjs --launcher=bat",
     "webapp:publish": "bun run audit:umbra-ui-pipelines && node scripts/build-webapp-version-bump.mjs",
     "linux:update-folder:no-bump": "bun run audit:umbra-ui-pipelines && node scripts/build-linux-folder.mjs",
     "linux:update-folder": "bun run audit:umbra-ui-pipelines && node scripts/build-linux-version-bump.mjs",
@@ -82,8 +85,7 @@
   },
   "devDependencies": {
     "@types/bun": "^1.3.6",
-    "esbuild": "^0.27.2",
-    "rcedit": "^5.0.2"
+    "esbuild": "^0.27.2"
   },
   "trustedDependencies": [
     "sharp"

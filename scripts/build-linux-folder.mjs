@@ -308,6 +308,23 @@ echo "Umbra UI support models are ready."
   fs.chmodSync(installerPath, 0o755);
 }
 
+function writeModelRequirementsInstaller() {
+  const installerPath = path.join(publishRoot, 'install-model-requirements.sh');
+  const script = `#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+BUN_BIN="$PWD/Runtime/Bun/linux/bun"
+if [ ! -x "$BUN_BIN" ]; then
+  echo "[ERROR] Bundled Bun runtime is missing: $BUN_BIN"
+  exit 1
+fi
+"$BUN_BIN" "$PWD/resources/app/scripts/download-umbra-model-requirements.mjs" "$@"
+echo "Model requirements are ready."
+`;
+  fs.writeFileSync(installerPath, script, 'utf-8');
+  fs.chmodSync(installerPath, 0o755);
+}
+
 function writeLinuxLauncher() {
   const launcherPath = path.join(publishRoot, 'start-umbra.sh');
   const script = `#!/usr/bin/env bash
@@ -412,6 +429,7 @@ function verifyPublish() {
     'resources/app/backend',
     'resources/app/defaults/DataForge/model-manifest.json',
     'resources/app/defaults/UmbraUI/model-manifest.json',
+    'resources/app/defaults/UmbraUI/model-requirements-manifest.json',
     'resources/app/defaults/PowerPrompter/API Workflows/[Umbra UI] Stable Diffusion Image Pipeline.json',
     'resources/app/defaults/PowerPrompter/Prompts/Anime Girls Starter.ppcards.json',
     'resources/app/defaults/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
@@ -434,6 +452,7 @@ function verifyPublish() {
     'User/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
     'install-data-forge-models.sh',
     'install-umbra-ui-models.sh',
+    'install-model-requirements.sh',
     'umbra-setup.sh',
     'umbra-updater.sh',
     'start-umbra.sh',
@@ -567,6 +586,7 @@ function publish() {
   writeLinuxUpdaterLauncher();
   writeDataForgeModelInstaller();
   writeUmbraUiModelInstaller();
+  writeModelRequirementsInstaller();
   writeDesktopFile();
   fs.writeFileSync(path.join(publishRoot, 'portable-mode'), 'portable linux webapp runtime enabled\n', 'utf-8');
   verifyPublish();

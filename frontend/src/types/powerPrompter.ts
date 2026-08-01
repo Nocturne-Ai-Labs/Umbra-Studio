@@ -218,6 +218,12 @@ export interface PowerPrompterOutputUpscaleControls {
   maxDimension: number;
 }
 
+export interface PowerPrompterTiledVaeControls {
+  enabled: boolean;
+  tileSize: number;
+  overlap: number;
+}
+
 export interface PowerPrompterImg2ImgControls {
   sourceImagePath: string;
   sourceImageName: string;
@@ -237,6 +243,7 @@ export interface PowerPrompterGenerationControls {
   hiresFix?: PowerPrompterHiresFixControls;
   detailerPipeline?: PowerPrompterDetailerStage[];
   outputUpscale?: PowerPrompterOutputUpscaleControls;
+  tiledVae?: PowerPrompterTiledVaeControls;
   negativePrompt: string;
   seed: number;
   controlAfterGenerate: PowerPrompterSeedControlMode;

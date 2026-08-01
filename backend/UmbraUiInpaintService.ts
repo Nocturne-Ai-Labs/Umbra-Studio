@@ -305,6 +305,11 @@ export interface UmbraUiInpaintSettings {
   softInpaintPreservation: number;
   softInpaintTransitionContrast: number;
   softInpaintMaskInfluence: number;
+  tiledVae?: {
+    enabled: boolean;
+    tileSize: number;
+    overlap: number;
+  };
   regionalGuidance: UmbraUiInpaintRegionalGuidance[];
   controlLayers: UmbraUiInpaintControlLayer[];
   referenceLayers: UmbraUiInpaintReferenceLayer[];
@@ -780,6 +785,24 @@ function findUmbraInpaintBindings(graph: Record<string, any>): UmbraUiInpaintGra
     throw new Error('The selected locked pipeline is missing model, VAE, or conditioning bindings required by inpainting.');
   }
   return { model, clip, vae, positive, negative };
+}
+
+function applyUmbraUiInpaintTiledVae(graph: Record<string, any>, tiledVae: UmbraUiInpaintSettings['tiledVae']) {
+  if (!tiledVae?.enabled) return;
+  const tileSize = Math.max(128, Math.min(2048, Math.round(finiteNumberOrFallback(tiledVae.tileSize, 512))));
+  const overlap = Math.max(0, Math.min(Math.min(256, tileSize - 1), Math.round(finiteNumberOrFallback(tiledVae.overlap, 64))));
+  for (const node of Object.values(graph)) {
+    if (!node || typeof node !== 'object') continue;
+    const classType = String((node as any).class_type || '').trim();
+    const inputs = (node as any).inputs && typeof (node as any).inputs === 'object' ? (node as any).inputs : {};
+    if (classType === 'VAEEncode') {
+      (node as any).class_type = 'VAEEncodeTiled';
+      (node as any).inputs = { pixels: inputs.pixels, vae: inputs.vae, tile_size: tileSize, overlap };
+    } else if (classType === 'VAEDecode') {
+      (node as any).class_type = 'VAEDecodeTiled';
+      (node as any).inputs = { samples: inputs.samples, vae: inputs.vae, tile_size: tileSize, overlap };
+    }
+  }
 }
 
 function createNodeAllocator(graph: Record<string, any>) {
@@ -1390,6 +1413,11 @@ export class UmbraUiInpaintService {
         : ['LoadImage', 'LoadImageMask', 'InpaintModelConditioning', 'KSampler', 'VAEDecode', 'ImageCompositeMasked', 'UmbraLabSaveImage'];
       for (const required of requiredNodes) {
         if (!nodeTypes.has(required)) throw new Error(`ComfyUI is missing the required inpaint node: ${required}.`);
+      }
+      if (settings.tiledVae?.enabled) {
+        for (const required of ['VAEEncodeTiled', 'VAEDecodeTiled']) {
+          if (!nodeTypes.has(required)) throw new Error(`ComfyUI is missing the required tiled VAE node: ${required}.`);
+        }
       }
       if ((Number(settings.maskGrow) > 0 || Number(settings.maskFeather) > 0) && !nodeTypes.has('INPAINT_ExpandMask')) {
         throw new Error('ComfyUI is missing the required mask grow/feather node: INPAINT_ExpandMask.');
@@ -2581,6 +2609,7 @@ export class UmbraUiInpaintService {
       },
       _meta: { title: 'Umbra UI Inpainting Output' },
     });
+    applyUmbraUiInpaintTiledVae(graph, settings.tiledVae);
     return graph;
   }
 
@@ -3092,6 +3121,7 @@ export class UmbraUiInpaintService {
       || ['UmbraLabSaveImage', 'SaveImage', 'PreviewImage'].includes(String(node?.class_type || ''))
     ));
     if (!hasOutput) throw new Error('The native edit workflow does not expose an inpaint_output or image output node.');
+    applyUmbraUiInpaintTiledVae(graph, settings.tiledVae);
     return graph;
   }
 

@@ -114,8 +114,8 @@ function findServerEntrypoint(root: string): ServerEntrypoint | null {
 
 function isCompiledUmbraExecutable(): boolean {
   if (platform() !== 'win32') return false;
-  const execName = process.execPath.replace(/\\/g, '/').split('/').pop()?.toLowerCase() || '';
-  return execName === 'umbrastudio.exe';
+  const executableName = process.execPath.replace(/\\/g, '/').split('/').pop()?.toLowerCase() || '';
+  return executableName === 'umbrastudio.exe';
 }
 
 function findRuntimeLayout(options: LauncherOptions): RuntimeLayout {

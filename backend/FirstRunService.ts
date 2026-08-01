@@ -42,8 +42,10 @@ function readPackageVersion(rootPath: string): string {
 
 function isUmbraPortableRoot(rootPath: string): boolean {
   const markers = [
+    join(rootPath, 'UmbraStudio.bat'),
+    // Older portable releases used this launcher; retain detection so their
+    // User and Tools folders can still be migrated into the batch-only layout.
     join(rootPath, 'UmbraStudio.exe'),
-    join(rootPath, 'Start-Umbra.bat'),
     join(rootPath, 'start-umbra.sh'),
     join(rootPath, 'resources', 'app', 'UmbraServer.js'),
     join(rootPath, 'resources', 'app', 'UmbraServer.ts'),

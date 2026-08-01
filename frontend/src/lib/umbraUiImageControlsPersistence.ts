@@ -5,6 +5,7 @@ import type {
   PowerPrompterOutputUpscaleControls,
   PowerPrompterSeedControlMode,
   PowerPrompterSeedIncrement,
+  PowerPrompterTiledVaeControls,
 } from '@/types/powerPrompter';
 import type { UmbraUiLoraEntry } from '@/lib/umbraUiModels';
 import {
@@ -47,12 +48,21 @@ export interface UmbraUiImageGenerationControls {
   };
   detailerPipeline: PowerPrompterDetailerStage[];
   outputUpscale: PowerPrompterOutputUpscaleControls;
+  tiledVae: PowerPrompterTiledVaeControls;
 }
+
+/**
+ * A primary model is specific to a pipeline family and source kind. Keeping
+ * this separate from the active generation state lets a user return to, for
+ * example, their Flux diffusion model after working with an Anima checkpoint.
+ */
+export type UmbraUiPipelineModelSelections = Record<string, string>;
 
 export interface UmbraUiImageControlsSnapshot {
   version: typeof UMBRA_UI_IMAGE_CONTROLS_VERSION;
   updatedAt: number;
   modelFamily: string;
+  pipelineModelSelections: UmbraUiPipelineModelSelections;
   workflowResourceValues: Record<string, string>;
   loras: UmbraUiLoraEntry[];
   imageAspectRatio: UmbraImageAspectPresetId;
@@ -68,6 +78,8 @@ const MAX_LORA_TAG_LENGTH = 512;
 const MAX_WORKFLOW_RESOURCES = 128;
 const MAX_WORKFLOW_RESOURCE_ID_LENGTH = 240;
 const MAX_WORKFLOW_RESOURCE_VALUE_LENGTH = 4096;
+const MAX_PIPELINE_MODEL_SELECTIONS = 128;
+const MAX_PIPELINE_MODEL_SELECTION_KEY_LENGTH = 512;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -99,6 +111,19 @@ function normalizeWorkflowResources(value: unknown): Record<string, string> {
     .filter(([id, resource]) => id.length > 0 && resource.length > 0)
     .sort(([left], [right]) => left.localeCompare(right))
     .slice(0, MAX_WORKFLOW_RESOURCES);
+  return Object.fromEntries(entries);
+}
+
+function normalizePipelineModelSelections(value: unknown): UmbraUiPipelineModelSelections {
+  if (!isRecord(value)) return {};
+  const entries = Object.entries(value)
+    .map(([rawKey, rawValue]) => [
+      String(rawKey || '').trim().slice(0, MAX_PIPELINE_MODEL_SELECTION_KEY_LENGTH),
+      String(rawValue || '').trim().replace(/\\/g, '/').slice(0, MAX_WORKFLOW_RESOURCE_VALUE_LENGTH),
+    ] as const)
+    .filter(([key, model]) => key.length > 0 && model.length > 0)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(0, MAX_PIPELINE_MODEL_SELECTIONS);
   return Object.fromEntries(entries);
 }
 
@@ -180,6 +205,7 @@ export function normalizeUmbraUiImageControlsSnapshot(
     version: UMBRA_UI_IMAGE_CONTROLS_VERSION,
     updatedAt: normalizeUpdatedAt(value.updatedAt, fallbackUpdatedAt),
     modelFamily: normalizeModelFamily(value.modelFamily),
+    pipelineModelSelections: normalizePipelineModelSelections(value.pipelineModelSelections),
     workflowResourceValues,
     loras: normalizeLoras(value.loras ?? source.loras),
     imageAspectRatio: aspectRatio,
@@ -219,6 +245,11 @@ export function normalizeUmbraUiImageControlsSnapshot(
         modelName: normalizedGeneration.outputUpscale?.modelName || 'RealESRGAN_x4plus.safetensors',
         maxDimension: normalizedGeneration.outputUpscale?.maxDimension ?? 3840,
       },
+      tiledVae: {
+        enabled: normalizedGeneration.tiledVae?.enabled === true,
+        tileSize: normalizedGeneration.tiledVae?.tileSize ?? 512,
+        overlap: normalizedGeneration.tiledVae?.overlap ?? 64,
+      },
     },
   };
 }
@@ -228,6 +259,7 @@ export function hasUmbraUiImageControls(value: unknown): boolean {
   const generation = isRecord(value.generation) ? value.generation : value;
   return [
     value.modelFamily,
+    value.pipelineModelSelections,
     value.workflowResourceValues,
     value.loras,
     value.imageAspectRatio,

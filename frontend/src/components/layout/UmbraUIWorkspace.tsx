@@ -31,6 +31,7 @@ import type {
   PowerPrompterOutputUpscaleControls,
   PowerPrompterSeedControlMode,
   PowerPrompterSeedIncrement,
+  PowerPrompterTiledVaeControls,
 } from '@/types/powerPrompter';
 import {
   useUmbraPowerPrompterBridge,
@@ -42,6 +43,7 @@ import {
 } from '@/components/umbra-ui/useUmbraPowerPrompterBridge';
 import { UmbraDetailerPipelineControls } from '@/components/umbra-ui/UmbraDetailerPipelineControls';
 import { UmbraHiresFixControls } from '@/components/umbra-ui/UmbraHiresFixControls';
+import { UmbraTiledVaeControls } from '@/components/umbra-ui/UmbraTiledVaeControls';
 import {
   UmbraImg2ImgSourceControls,
   type UmbraImg2ImgSourceValue,
@@ -137,6 +139,7 @@ import {
   hasUmbraUiImageControls,
   normalizeUmbraUiImageControlsSnapshot,
   type UmbraUiImageControlsSnapshot,
+  type UmbraUiPipelineModelSelections,
 } from '@/lib/umbraUiImageControlsPersistence';
 import {
   applyUmbraPromptWeightToTextarea,
@@ -169,6 +172,7 @@ interface UmbraUiDeviceResume {
   modelType?: PowerPrompterModelType;
   modelFamily?: string;
   checkpointName?: string;
+  pipelineModelSelections?: UmbraUiPipelineModelSelections;
   workflowResourceValues?: Record<string, string>;
   loras?: UmbraUiLoraEntry[];
   clipSkip?: string;
@@ -200,6 +204,7 @@ interface UmbraUiDeviceResume {
   hiresScheduler?: string;
   detailerPipeline?: PowerPrompterDetailerStage[];
   outputUpscale?: PowerPrompterOutputUpscaleControls;
+  tiledVae?: PowerPrompterTiledVaeControls;
 }
 
 function normalizeUmbraGenerationMode(value: unknown): UmbraGenerationMode {
@@ -218,6 +223,18 @@ function readPersistedUmbraGenerationMode(): UmbraGenerationMode {
   } catch {
     return 'image';
   }
+}
+
+function getUmbraUiPipelineModelSelectionKey(
+  feature: 'txt2img' | 'img2img' | 'inpainting',
+  modelFamily: string,
+  modelType: PowerPrompterModelType,
+): string {
+  // TXT2IMG and IMG2IMG intentionally share a model selection. Inpaint uses
+  // distinct compatible models, even when it has the same family label.
+  const scope = feature === 'inpainting' ? 'inpaint' : 'image';
+  const family = normalizeUmbraUiModelFamilyKey(modelFamily) || 'unknown';
+  return `${scope}:${family}:${modelType}`;
 }
 
 const inputClass = 'w-full rounded-md border border-white/10 bg-black/35 px-2.5 py-2 text-xs text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-cyan-300/45';
@@ -457,6 +474,9 @@ export function UmbraUIWorkspace() {
     try { return window.localStorage.getItem('umbra-ui:model-pipeline') || 'Anima'; } catch { return 'Anima'; }
   });
   const [checkpointName, setCheckpointName] = React.useState(initialDeviceResume?.checkpointName || 'anima_baseV10.safetensors');
+  const [pipelineModelSelections, setPipelineModelSelections] = React.useState<UmbraUiPipelineModelSelections>(
+    initialDeviceResume?.pipelineModelSelections || {},
+  );
   const [workflowResourceValues, setWorkflowResourceValues] = React.useState<Record<string, string>>(
     initialDeviceResume?.workflowResourceValues || {},
   );
@@ -534,6 +554,12 @@ export function UmbraUIWorkspace() {
     maxDimension: 3840,
     ...(initialDeviceResume?.outputUpscale || {}),
   });
+  const [tiledVae, setTiledVae] = React.useState<PowerPrompterTiledVaeControls>({
+    enabled: false,
+    tileSize: 512,
+    overlap: 64,
+    ...(initialDeviceResume?.tiledVae || {}),
+  });
   const [isQueueing, setIsQueueing] = React.useState(false);
   const [agentPanelOpen, setAgentPanelOpen] = React.useState(false);
   const [agentDraftCount, setAgentDraftCount] = React.useState(0);
@@ -553,15 +579,15 @@ export function UmbraUIWorkspace() {
   const mediaHandoffAppliedAtRef = React.useRef(0);
   const img2imgSourceReplacementRequestsRef = React.useRef(new Map<string, string>());
   const appliedImagePipelineDefaultsRef = React.useRef('');
+  const imagePipelineDefaultsInitializedRef = React.useRef(
+    hasUmbraUiImageControls(initialDeviceResume),
+  );
   const [imageControlsHydrated, setImageControlsHydrated] = React.useState(false);
   const imageControlsPreserveHydratedBaselineRef = React.useRef(
     hasUmbraUiImageControls(initialDeviceResume),
   );
   const imageControlsBaselineExistsRef = React.useRef(
     hasUmbraUiImageControls(initialDeviceResume),
-  );
-  const detailerPipelineConfiguredRef = React.useRef(
-    Array.isArray(initialDeviceResume?.detailerPipeline),
   );
   const imageControlsPersistedFingerprintRef = React.useRef('');
   const imageControlsWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
@@ -579,10 +605,12 @@ export function UmbraUIWorkspace() {
     // Do not let a newly packaged pipeline default replace a saved baseline.
     imageControlsPreserveHydratedBaselineRef.current = true;
     imageControlsBaselineExistsRef.current = true;
+    imagePipelineDefaultsInitializedRef.current = true;
     appliedImagePipelineDefaultsRef.current = '';
     if (snapshot.modelFamily) setModelFamily(snapshot.modelFamily);
     setModelType(generation.modelType);
     setCheckpointName(generation.checkpointName);
+    setPipelineModelSelections({ ...snapshot.pipelineModelSelections });
     setWorkflowResourceValues({ ...snapshot.workflowResourceValues });
     setLoras(snapshot.loras.map((lora) => ({
       ...lora,
@@ -613,13 +641,12 @@ export function UmbraUIWorkspace() {
     setHiresCfg(String(generation.hiresFix.cfg));
     setHiresSamplerName(generation.hiresFix.samplerName);
     setHiresScheduler(generation.hiresFix.scheduler);
-    detailerPipelineConfiguredRef.current = true;
     setDetailerPipeline(generation.detailerPipeline.map((stage) => ({ ...stage })));
     setOutputUpscale({ ...generation.outputUpscale });
+    setTiledVae({ ...generation.tiledVae });
   }, [syncImageDimensions]);
 
   const handleDetailerPipelineChange = React.useCallback((stages: PowerPrompterDetailerStage[]) => {
-    detailerPipelineConfiguredRef.current = true;
     setDetailerPipeline(stages.map((stage) => ({ ...stage })));
   }, []);
 
@@ -708,6 +735,7 @@ export function UmbraUIWorkspace() {
         modelType,
         modelFamily,
         checkpointName,
+        pipelineModelSelections,
         workflowResourceValues,
         loras,
         clipSkip,
@@ -739,6 +767,7 @@ export function UmbraUIWorkspace() {
         hiresScheduler,
         detailerPipeline,
         outputUpscale,
+        tiledVae,
       });
     }, 250);
     return () => window.clearTimeout(timer);
@@ -773,6 +802,8 @@ export function UmbraUIWorkspace() {
     modelType,
     negativePrompt,
     outputUpscale,
+    tiledVae,
+    pipelineModelSelections,
     promptSegments,
     replaceImg2ImgSourceOnComplete,
     samplerName,
@@ -789,6 +820,7 @@ export function UmbraUIWorkspace() {
     version: 1,
     updatedAt: 0,
     modelFamily,
+    pipelineModelSelections,
     workflowResourceValues,
     loras,
     imageAspectRatio,
@@ -827,6 +859,7 @@ export function UmbraUIWorkspace() {
       },
       detailerPipeline,
       outputUpscale,
+      tiledVae,
     },
   }), [
     batchSize,
@@ -854,6 +887,8 @@ export function UmbraUIWorkspace() {
     modelType,
     negativePrompt,
     outputUpscale,
+    tiledVae,
+    pipelineModelSelections,
     samplerName,
     scheduler,
     seed,
@@ -1006,6 +1041,11 @@ export function UmbraUIWorkspace() {
     () => [...(selectedImageWorkflow?.resources || [])].sort((left, right) => left.order - right.order),
     [selectedImageWorkflow],
   );
+  const activePipelineModelSelectionKey = React.useMemo(() => getUmbraUiPipelineModelSelectionKey(
+    inpaintWorkspaceActive ? 'inpainting' : activeImageFeature,
+    modelFamily,
+    modelType,
+  ), [activeImageFeature, inpaintWorkspaceActive, modelFamily, modelType]);
   const primaryModelItems = React.useMemo(
     () => getPrimaryModelItems(modelCatalog, modelType),
     [modelCatalog, modelType],
@@ -1105,6 +1145,13 @@ export function UmbraUIWorkspace() {
       ? resolveCatalogMatch(preferredModelName, modelItems)
       : '';
     const hasPreferredModel = !!preferredModel && modelItems.includes(preferredModel);
+    const modelSelectionKey = getUmbraUiPipelineModelSelectionKey(
+      inpaintWorkspaceActive ? 'inpainting' : activeImageFeature,
+      modelFamily,
+      nextModelType,
+    );
+    const rememberedModel = resolveCatalogMatch(pipelineModelSelections[modelSelectionKey] || '', modelItems);
+    const hasRememberedModel = !!rememberedModel && modelItems.includes(rememberedModel);
     const defaultsKey = [
       selected.workflow.id,
       selected.pipeline.modelFamilyKey,
@@ -1112,21 +1159,23 @@ export function UmbraUIWorkspace() {
       JSON.stringify(defaults || {}),
     ].join(':');
     if (appliedImagePipelineDefaultsRef.current === defaultsKey) return;
-    if (imageControlsPreserveHydratedBaselineRef.current) {
-      appliedImagePipelineDefaultsRef.current = defaultsKey;
-      imageControlsPreserveHydratedBaselineRef.current = false;
-      return;
-    }
 
     setCheckpointName((current) => {
+      if (hasRememberedModel) return current === rememberedModel ? current : rememberedModel;
       if (hasPreferredModel) return current === preferredModel ? current : preferredModel;
       return modelItems.includes(current) ? current : '';
     });
+    const shouldApplyPipelineDefaults = !imagePipelineDefaultsInitializedRef.current
+      && !imageControlsPreserveHydratedBaselineRef.current;
+    imageControlsPreserveHydratedBaselineRef.current = false;
     if (!defaults) {
       appliedImagePipelineDefaultsRef.current = defaultsKey;
+      imagePipelineDefaultsInitializedRef.current = true;
       return;
     }
     appliedImagePipelineDefaultsRef.current = defaultsKey;
+    if (!shouldApplyPipelineDefaults) return;
+    imagePipelineDefaultsInitializedRef.current = true;
     const capabilities = normalizeUmbraUiPipelineCapabilities(selected.pipeline.capabilities, selected.pipeline.modelSources);
     const stepDefault = typeof capabilities.steps.value === 'number' ? capabilities.steps.value : defaults.steps;
     const guidanceDefault = typeof capabilities.guidance.value === 'number' ? capabilities.guidance.value : defaults.cfg;
@@ -1153,7 +1202,7 @@ export function UmbraUIWorkspace() {
     if (activeMode === 'img2img' && typeof denoiseDefault === 'number' && Number.isFinite(denoiseDefault)) {
       setImg2imgDenoise(Math.max(0.01, Math.min(1, denoiseDefault)));
     }
-  }, [activeMode, imageControlsHydrated, inpaintWorkspaceActive, modelCatalog, modelFamily, modelType, selectedFamilyPipelines, selectedInpaintFamilyPipelines, syncImageDimensions]);
+  }, [activeImageFeature, activeMode, imageControlsHydrated, inpaintWorkspaceActive, modelCatalog, modelFamily, modelType, pipelineModelSelections, selectedFamilyPipelines, selectedInpaintFamilyPipelines, syncImageDimensions]);
 
   React.useEffect(() => {
     if (!inpaintWorkspaceActive || inpaintModelFamilies.length <= 0) return;
@@ -1177,81 +1226,18 @@ export function UmbraUIWorkspace() {
 
   React.useEffect(() => {
     setWorkflowResourceValues((current) => {
-      const next: Record<string, string> = {};
+      const next = { ...current };
+      let changed = false;
       for (const resource of selectedWorkflowResources) {
-        const value = String(current[resource.id] || resource.defaultValue || '').trim().replace(/\\/g, '/');
-        if (value) next[resource.id] = value;
+        const value = String(current[resource.id] || '').trim().replace(/\\/g, '/');
+        if (!value && resource.defaultValue) {
+          next[resource.id] = String(resource.defaultValue).trim().replace(/\\/g, '/');
+          changed = true;
+        }
       }
-      const currentEntries = Object.entries(current);
-      const nextEntries = Object.entries(next);
-      if (currentEntries.length === nextEntries.length && nextEntries.every(([id, value]) => current[id] === value)) {
-        return current;
-      }
-      return next;
+      return changed ? next : current;
     });
   }, [selectedWorkflowResources]);
-
-  React.useEffect(() => {
-    const resizeMode = resolveUmbraUiHiresResizeMode(imageCapabilities.hiresFix, hiresResizeMode);
-    if (!resizeMode) setHiresEnabled(false);
-    else if (resizeMode !== hiresResizeMode) setHiresResizeMode(resizeMode);
-    if (!imageCapabilities.hiresFix.controls.upscaler) setHiresUpscaler('Latent');
-    if (!imageCapabilities.hiresFix.controls.steps) setHiresSteps('0');
-    if (!imageCapabilities.hiresFix.controls.denoise) setHiresDenoise(0.35);
-    if (!imageCapabilities.hiresFix.controls.cfg) setHiresCfg('0');
-    if (!imageCapabilities.hiresFix.controls.sampler) setHiresSamplerName('use_same');
-    if (!imageCapabilities.hiresFix.controls.scheduler) setHiresScheduler('use_same');
-
-    setDetailerPipeline((current) => {
-      if (imageCapabilities.detailerStages.support !== 'adjustable') return current.length > 0 ? [] : current;
-      if (detailerPipelineConfiguredRef.current && current.length === 0) return current;
-      if (imageCapabilities.detailerStages.customStages) {
-        return current.length > 0
-          ? current
-          : DEFAULT_POWER_PROMPTER_DETAILER_PIPELINE.map((stage) => ({ ...stage }));
-      }
-      const available = [...current, ...DEFAULT_POWER_PROMPTER_DETAILER_PIPELINE]
-        .filter((stage, index, stages) => {
-          const stageName = normalizeUmbraUiDetailerStageName(stage.label);
-          return !!stageName && stages.findIndex((candidate) => (
-            normalizeUmbraUiDetailerStageName(candidate.label) === stageName
-          )) === index;
-        });
-      const filtered = filterUmbraUiDetailerStages(imageCapabilities.detailerStages, available);
-      return filtered.length === current.length
-        && filtered.every((stage, index) => stage.id === current[index]?.id)
-        ? current
-        : filtered.map((stage) => ({ ...stage }));
-    });
-
-    setOutputUpscale((current) => {
-      const next = {
-        enabled: imageCapabilities.finalModelUpscale.support === 'adjustable' && current.enabled,
-        modelName: imageCapabilities.finalModelUpscale.modelSelection
-        ? current.modelName
-        : typeof imageCapabilities.finalModelUpscale.value === 'string'
-          ? imageCapabilities.finalModelUpscale.value
-          : current.modelName,
-        maxDimension: imageCapabilities.finalModelUpscale.maxDimension ? current.maxDimension : 3840,
-      };
-      return next.enabled === current.enabled
-        && next.modelName === current.modelName
-        && next.maxDimension === current.maxDimension
-        ? current
-        : next;
-    });
-  }, [
-    detailerPipeline,
-    hiresCfg,
-    hiresDenoise,
-    hiresResizeMode,
-    hiresSamplerName,
-    hiresScheduler,
-    hiresSteps,
-    hiresUpscaler,
-    imageCapabilities,
-    outputUpscale,
-  ]);
 
   const applyPowerPrompterGenerationControls = React.useCallback((
     source: Record<string, unknown>,
@@ -1259,6 +1245,7 @@ export function UmbraUIWorkspace() {
   ) => {
     imageControlsBaselineExistsRef.current = true;
     imageControlsPreserveHydratedBaselineRef.current = true;
+    imagePipelineDefaultsInitializedRef.current = true;
     appliedImagePipelineDefaultsRef.current = '';
     const generation = source && typeof source === 'object' ? source : {};
     const replace = options.replace === true;
@@ -1351,7 +1338,6 @@ export function UmbraUIWorkspace() {
       setHiresScheduler(String(hiresFix.scheduler || 'use_same'));
     }
     if (Array.isArray(generation.detailerPipeline)) {
-      detailerPipelineConfiguredRef.current = true;
       setDetailerPipeline((generation.detailerPipeline as PowerPrompterDetailerStage[]).map((stage) => ({ ...stage })));
     }
     const inheritedOutputUpscale = generation.outputUpscale;
@@ -1522,17 +1508,27 @@ export function UmbraUIWorkspace() {
     setActiveMode((current) => current === 'inpaint' || current === 'img2img' ? current : 'image');
   }, []);
 
+  const rememberCurrentPipelineModelSelection = React.useCallback(() => {
+    const modelName = String(checkpointName || '').trim().replace(/\\/g, '/');
+    if (!modelName) return;
+    setPipelineModelSelections((current) => current[activePipelineModelSelectionKey] === modelName
+      ? current
+      : { ...current, [activePipelineModelSelectionKey]: modelName });
+  }, [activePipelineModelSelectionKey, checkpointName]);
+
+  const handleModelFamilyChange = React.useCallback((nextFamily: string) => {
+    if (!nextFamily || nextFamily === modelFamily) return;
+    rememberCurrentPipelineModelSelection();
+    setModelFamily(nextFamily);
+  }, [modelFamily, rememberCurrentPipelineModelSelection]);
+
   const handleModelTypeChange = React.useCallback((nextType: PowerPrompterModelType) => {
-    const discoveredItems = getPrimaryModelItems(modelCatalog, nextType);
-    const nextItems = inpaintWorkspaceActive
-      ? filterUmbraUiInpaintPrimaryModels(
-        discoveredItems,
-        inpaintPipelineMatch.pipeline?.inpaintAdapter || 'native_edit',
-      )
-      : discoveredItems;
+    if (nextType === modelType) return;
+    rememberCurrentPipelineModelSelection();
+    // The pipeline effect restores a remembered compatible model first, then
+    // falls back to its declared default only when the user has none saved.
     setModelType(nextType);
-    setCheckpointName((current) => nextItems.includes(current) ? current : nextItems[0] || '');
-  }, [inpaintPipelineMatch.pipeline?.inpaintAdapter, inpaintWorkspaceActive, modelCatalog]);
+  }, [modelType, rememberCurrentPipelineModelSelection]);
 
   const updateWorkflowResource = React.useCallback((resourceId: string, value: string) => {
     const normalizedId = String(resourceId || '').trim();
@@ -1580,6 +1576,9 @@ export function UmbraUIWorkspace() {
     }
     if (modelPickerKind === 'checkpoint') {
       setCheckpointName(normalizedName);
+      setPipelineModelSelections((current) => current[activePipelineModelSelectionKey] === normalizedName
+        ? current
+        : { ...current, [activePipelineModelSelectionKey]: normalizedName });
       closeModelPicker();
       return;
     }
@@ -1608,7 +1607,7 @@ export function UmbraUIWorkspace() {
       closeModelPicker();
       showToast(error instanceof Error ? `${error.message} Added without trained tokens.` : 'LoRA added without trained tokens.', 'error');
     }
-  }, [activeLoraFamilyKey, activeResourcePicker, closeModelPicker, modelPickerKind, requestLoraInfo, showToast, updateWorkflowResource]);
+  }, [activeLoraFamilyKey, activePipelineModelSelectionKey, activeResourcePicker, closeModelPicker, modelPickerKind, requestLoraInfo, showToast, updateWorkflowResource]);
 
   React.useEffect(() => {
     const unresolved = loras.filter((lora) => {
@@ -1722,6 +1721,7 @@ export function UmbraUIWorkspace() {
           ? outputUpscale.maxDimension
           : 3840,
       },
+      tiledVae,
     });
   }, [
     activeLoras,
@@ -1746,6 +1746,7 @@ export function UmbraUIWorkspace() {
     modelType,
     negativePrompt,
     outputUpscale,
+    tiledVae,
     samplerName,
     scheduler,
     seed,
@@ -1867,6 +1868,7 @@ export function UmbraUIWorkspace() {
             ? outputUpscale.maxDimension
             : 3840,
         },
+        tiledVae,
         loras: imageCapabilities.loras.support === 'adjustable' ? activeLoras : [],
         queuePlacement: effectivePlacement,
       });
@@ -1927,6 +1929,7 @@ export function UmbraUIWorkspace() {
     modelType,
     negativePrompt,
     outputUpscale,
+    tiledVae,
     promptSegments,
     queueImage,
     queueSummary.powerPrompterActive,
@@ -2480,7 +2483,7 @@ export function UmbraUIWorkspace() {
             inpaintAdapter={inpaintPipelineMatch.pipeline?.inpaintAdapter || 'native_edit'}
             modelFamily={modelFamily}
             modelFamilyOptions={inpaintModelFamilies}
-            onModelFamilyChange={setModelFamily}
+            onModelFamilyChange={handleModelFamilyChange}
             modelSource={modelType}
             modelSourceOptions={inpaintModelTypeOptions}
             onModelSourceChange={handleModelTypeChange}
@@ -2551,8 +2554,9 @@ export function UmbraUIWorkspace() {
             upscaleModels={modelCatalog.upscaleModels}
             img2imgDetailerActiveCount={detailerPipeline.filter((stage) => stage.enabled).length}
             img2imgDetailerStageCount={detailerPipeline.length}
+            tiledVae={tiledVae}
+            onTiledVaeChange={setTiledVae}
             onImg2imgDetailersEnabledChange={(enabled) => {
-              detailerPipelineConfiguredRef.current = true;
               setDetailerPipeline((current) => current.map((stage) => ({ ...stage, enabled })));
             }}
             comfyConnected={comfyConnected}
@@ -2576,7 +2580,7 @@ export function UmbraUIWorkspace() {
               <span className={labelClass}>Model Pipeline</span>
               <select
                 value={modelFamily}
-                onChange={(event) => setModelFamily(event.target.value)}
+                onChange={(event) => handleModelFamilyChange(event.target.value)}
                 className={inputClass}
               >
                 {activeImageModelFamilies.length <= 0 ? <option value="">No compatible image pipeline</option> : null}
@@ -2819,6 +2823,12 @@ export function UmbraUIWorkspace() {
               showScheduler={imageCapabilities.hiresFix.controls.scheduler}
               />
             ) : null}
+
+            <UmbraTiledVaeControls
+              value={tiledVae}
+              onChange={setTiledVae}
+              mode={activeMode === 'img2img' ? 'img2img' : 'txt2img'}
+            />
 
             {imageCapabilities.detailerStages.support === 'adjustable'
               || imageCapabilities.finalModelUpscale.support === 'adjustable' ? (

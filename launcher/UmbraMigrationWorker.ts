@@ -20,6 +20,7 @@ import {
   normalizeUmbraAppLanguage,
   type UmbraMigrationRequest,
 } from '../shared/onboarding/firstRun';
+import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
 
 const UMBRA_NODES_DIRECTORY_NAME = 'umbra-nodes';
 const MIGRATION_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
@@ -371,10 +372,12 @@ function syncLatestUmbraNodes(request: UmbraMigrationRequest): { synced: boolean
 }
 
 function relaunchUmbra(request: UmbraMigrationRequest) {
-  const executablePath = join(request.destinationRoot, 'UmbraStudio.exe');
+  const windowsLauncher = process.platform === 'win32'
+    ? resolveUmbraWindowsLauncher(request.destinationRoot)
+    : null;
   const linuxLauncher = join(request.destinationRoot, 'start-umbra.sh');
-  if (process.platform === 'win32' && existsSync(executablePath)) {
-    spawn(executablePath, [], {
+  if (windowsLauncher) {
+    spawn(windowsLauncher.command, windowsLauncher.args, {
       cwd: request.destinationRoot,
       detached: true,
       stdio: 'ignore',

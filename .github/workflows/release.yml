@@ -19,113 +19,47 @@ on:
 jobs:
   windows:
     runs-on: windows-latest
-    env:
-      WINDOWS_SIGNING_ENABLED: ${{ vars.ENABLE_WINDOWS_SIGNING == 'true' }}
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: canary
       - run: bun install --frozen-lockfile
-      - name: Build Windows portable folder
+      - name: Build Windows EXE portable folder
         shell: pwsh
         env:
-          UMBRA_PUBLISH_ROOT: ${{ github.workspace }}\release\windows\Umbra Studio
+          UMBRA_PUBLISH_ROOT: ${{ github.workspace }}\release\windows-exe\Umbra Studio
           UMBRA_WEBAPP_CLEAN_RELEASE: '1'
           UMBRA_BUNDLE_DATA_FORGE_MODELS: '0'
+          UMBRA_WINDOWS_LAUNCHER: exe
         run: bun run webapp:update-folder:no-bump
-      - name: Validate Windows signing configuration
-        if: env.WINDOWS_SIGNING_ENABLED == 'true'
-        shell: pwsh
-        env:
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARTIFACT_SIGNING_ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
-          ARTIFACT_SIGNING_ACCOUNT_NAME: ${{ vars.ARTIFACT_SIGNING_ACCOUNT_NAME }}
-          ARTIFACT_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ vars.ARTIFACT_SIGNING_CERTIFICATE_PROFILE_NAME }}
-          WINDOWS_SIGNING_SUBJECT: ${{ vars.WINDOWS_SIGNING_SUBJECT }}
-        run: |
-          $required = @{
-            AZURE_CLIENT_ID = $env:AZURE_CLIENT_ID
-            AZURE_TENANT_ID = $env:AZURE_TENANT_ID
-            AZURE_SUBSCRIPTION_ID = $env:AZURE_SUBSCRIPTION_ID
-            ARTIFACT_SIGNING_ENDPOINT = $env:ARTIFACT_SIGNING_ENDPOINT
-            ARTIFACT_SIGNING_ACCOUNT_NAME = $env:ARTIFACT_SIGNING_ACCOUNT_NAME
-            ARTIFACT_SIGNING_CERTIFICATE_PROFILE_NAME = $env:ARTIFACT_SIGNING_CERTIFICATE_PROFILE_NAME
-            WINDOWS_SIGNING_SUBJECT = $env:WINDOWS_SIGNING_SUBJECT
-          }
-          $missing = @($required.GetEnumerator() | Where-Object {
-            [string]::IsNullOrWhiteSpace([string]$_.Value)
-          } | ForEach-Object Key)
-          if ($missing.Count -gt 0) {
-            throw "Windows release signing is required. Configure these repository secrets/variables: $($missing -join ', ')"
-          }
-      - name: Sign in to Azure
-        if: env.WINDOWS_SIGNING_ENABLED == 'true'
-        uses: azure/login@v3
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Sign Umbra Studio launcher
-        if: env.WINDOWS_SIGNING_ENABLED == 'true'
-        uses: azure/artifact-signing-action@v2
-        with:
-          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_CERTIFICATE_PROFILE_NAME }}
-          files: ${{ github.workspace }}\release\windows\Umbra Studio\UmbraStudio.exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-          description: Umbra Studio
-          description-url: https://github.com/Nocturne-Ai-Labs/Umbra-Studio
-      - name: Verify Umbra Studio signature
-        if: env.WINDOWS_SIGNING_ENABLED == 'true'
-        shell: pwsh
-        env:
-          WINDOWS_SIGNING_SUBJECT: ${{ vars.WINDOWS_SIGNING_SUBJECT }}
-        run: |
-          $launcher = (Resolve-Path "release/windows/Umbra Studio/UmbraStudio.exe").Path
-          $signature = Get-AuthenticodeSignature -LiteralPath $launcher
-          if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
-            throw "UmbraStudio.exe Authenticode signature is not valid: $($signature.StatusMessage)"
-          }
-          if ($signature.SignerCertificate.Subject -notlike "*$env:WINDOWS_SIGNING_SUBJECT*") {
-            throw "UmbraStudio.exe signer '$($signature.SignerCertificate.Subject)' does not match '$env:WINDOWS_SIGNING_SUBJECT'."
-          }
-          Write-Host "Verified signed launcher: $($signature.SignerCertificate.Subject)"
-      - name: Report unsigned Windows build
-        if: env.WINDOWS_SIGNING_ENABLED != 'true'
-        shell: pwsh
-        run: Write-Warning "Publishing Umbra Studio without Authenticode signing. Set ENABLE_WINDOWS_SIGNING=true after configuring Artifact Signing to enable the signed release path."
-      - name: Archive Windows package
+      - name: Archive Windows EXE package
         shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $packageRoot = "release/windows/Umbra Studio"
-          if (!(Test-Path "$packageRoot/Install-Data-Forge-Models.bat")) { throw 'Data Forge model installer is missing' }
-          if (!(Test-Path "$packageRoot/resources/app/defaults/DataForge/model-manifest.json")) { throw 'Data Forge model manifest is missing' }
-          if (!(Test-Path "$packageRoot/Install-Umbra-UI-Models.bat")) { throw 'Umbra UI model installer is missing' }
-          if (!(Test-Path "$packageRoot/resources/app/defaults/UmbraUI/model-manifest.json")) { throw 'Umbra UI model manifest is missing' }
-          if (!(Test-Path "$packageRoot/UmbraSetup.bat")) { throw 'Standalone Umbra setup launcher is missing' }
-          if (!(Test-Path "$packageRoot/resources/app/setup/UmbraSetupApp.js")) { throw 'Standalone Umbra setup service is missing' }
+          $exePackageRoot = "release/windows-exe/Umbra Studio"
+          function Assert-CommonPackage([string] $packageRoot) {
+            if (!(Test-Path "$packageRoot/Install-Data-Forge-Models.bat")) { throw 'Data Forge model installer is missing' }
+            if (!(Test-Path "$packageRoot/resources/app/defaults/DataForge/model-manifest.json")) { throw 'Data Forge model manifest is missing' }
+            if (!(Test-Path "$packageRoot/Install-Umbra-UI-Models.bat")) { throw 'Umbra UI model installer is missing' }
+            if (!(Test-Path "$packageRoot/resources/app/defaults/UmbraUI/model-manifest.json")) { throw 'Umbra UI model manifest is missing' }
+            if (!(Test-Path "$packageRoot/Install-Model-Requirements.bat")) { throw 'Model requirements installer is missing' }
+            if (!(Test-Path "$packageRoot/resources/app/defaults/UmbraUI/model-requirements-manifest.json")) { throw 'Model requirements manifest is missing' }
+            if (!(Test-Path "$packageRoot/UmbraSetup.bat")) { throw 'Standalone Umbra setup launcher is missing' }
+            if (!(Test-Path "$packageRoot/resources/app/setup/UmbraSetupApp.js")) { throw 'Standalone Umbra setup service is missing' }
+          }
+          Assert-CommonPackage $exePackageRoot
+          if (!(Test-Path "$exePackageRoot/UmbraStudio.exe")) { throw 'Umbra Studio EXE launcher is missing' }
+          if (Test-Path "$exePackageRoot/UmbraStudio.bat") { throw 'EXE package must not include the batch launcher' }
           New-Item -ItemType Directory -Force artifacts | Out-Null
-          Copy-Item "$packageRoot/resources/app/defaults/DataForge/model-manifest.json" "artifacts/Data-Forge-Models-v$version.json"
-          Copy-Item "$packageRoot/resources/app/defaults/UmbraUI/model-manifest.json" "artifacts/Umbra-UI-Support-Models-v$version.json"
+          Copy-Item "$exePackageRoot/resources/app/defaults/DataForge/model-manifest.json" "artifacts/Data-Forge-Models-v$version.json"
+          Copy-Item "$exePackageRoot/resources/app/defaults/UmbraUI/model-manifest.json" "artifacts/Umbra-UI-Support-Models-v$version.json"
+          Copy-Item "$exePackageRoot/resources/app/defaults/UmbraUI/model-requirements-manifest.json" "artifacts/Umbra-UI-Model-Requirements-v$version.json"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $sourcePath = (Resolve-Path $packageRoot).Path
-          $archivePath = Join-Path (Resolve-Path artifacts).Path "Umbra-Studio-v$version-Windows-x64.zip"
-          [System.IO.Compression.ZipFile]::CreateFromDirectory(
-            $sourcePath,
-            $archivePath,
-            [System.IO.Compression.CompressionLevel]::Optimal,
-            $true
-          )
+          $artifactsRoot = (Resolve-Path artifacts).Path
+          [System.IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path $exePackageRoot).Path, (Join-Path $artifactsRoot "Umbra-Studio-v$version-Windows-x64.zip"), [System.IO.Compression.CompressionLevel]::Optimal, $true)
       - uses: actions/upload-artifact@v4
         with:
           name: umbra-studio-windows
@@ -156,6 +90,8 @@ jobs:
           test -f "${package_root}/resources/app/defaults/DataForge/model-manifest.json"
           test -f "${package_root}/install-umbra-ui-models.sh"
           test -f "${package_root}/resources/app/defaults/UmbraUI/model-manifest.json"
+          test -f "${package_root}/install-model-requirements.sh"
+          test -f "${package_root}/resources/app/defaults/UmbraUI/model-requirements-manifest.json"
           test -f "${package_root}/umbra-setup.sh"
           test -f "${package_root}/resources/app/setup/UmbraSetupApp.js"
           bundled_bun_version="$("${package_root}/Runtime/Bun/linux/bun" --version)"

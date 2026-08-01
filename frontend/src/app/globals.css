@@ -1363,15 +1363,18 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-controls] button {
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-trigger] {
-  position: fixed;
-  inset: auto 0.55rem 0.55rem 0.55rem;
-  z-index: 180;
+  position: relative;
+  inset: auto;
+  z-index: 30;
   display: flex !important;
+  width: calc(100% - 1.1rem);
   min-width: 0;
   min-height: 3.9rem;
+  flex: 0 0 auto;
   align-items: center;
   gap: 0.65rem;
   overflow: hidden;
+  margin: 0.65rem 0.55rem 0.75rem;
   padding: 0.45rem 0.7rem;
   border: 1px solid color-mix(in srgb, var(--umbra-mobile-sheet-accent, #67e8f9) 34%, rgba(255, 255, 255, 0.1));
   border-radius: 0.9rem;
@@ -1401,8 +1404,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-to
 
 html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-open="1"] > [data-umbra-mobile-workspace-sheet-trigger] {
   pointer-events: none;
-  opacity: 0;
-  transform: translateY(0.75rem);
+  opacity: 0.45;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-icon] {

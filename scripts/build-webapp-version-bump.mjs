@@ -13,4 +13,4 @@ function run(command, args, label) {
 }
 
 run('node', ['scripts/bump-webapp-version.mjs'], 'version bump');
-run('node', ['scripts/build-webapp-folder.mjs'], 'webapp publish');
+run('node', ['scripts/build-webapp-folder.mjs', ...process.argv.slice(2)], 'webapp publish');

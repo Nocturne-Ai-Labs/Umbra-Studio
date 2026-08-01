@@ -20,6 +20,32 @@ const isCleanRelease = process.argv.includes('--clean-release')
   || process.env.UMBRA_WEBAPP_CLEAN_RELEASE === '1';
 const bundleDataForgeModels = process.env.UMBRA_BUNDLE_DATA_FORGE_MODELS !== '0';
 
+function readOption(name) {
+  const optionIndex = process.argv.indexOf(name);
+  if (optionIndex >= 0) return String(process.argv[optionIndex + 1] || '').trim();
+  const inlineOption = process.argv.find((entry) => entry.startsWith(`${name}=`));
+  return inlineOption ? inlineOption.slice(name.length + 1).trim() : '';
+}
+
+function resolveWindowsLauncherFlavor() {
+  const requested = (readOption('--launcher') || process.env.UMBRA_WINDOWS_LAUNCHER || '').trim().toLowerCase();
+  if (requested) {
+    if (requested === 'exe' || requested === 'bat') return requested;
+    throw new Error(`[webapp-publish] Unknown Windows launcher flavor: ${requested}. Use exe or bat.`);
+  }
+
+  if (!isCleanRelease) {
+    const existingBatch = path.join(publishRoot, 'UmbraStudio.bat');
+    const existingExecutable = path.join(publishRoot, 'UmbraStudio.exe');
+    if (fs.existsSync(existingBatch) && !fs.existsSync(existingExecutable)) return 'bat';
+  }
+
+  return 'exe';
+}
+
+const windowsLauncherFlavor = resolveWindowsLauncherFlavor();
+const primaryWindowsLauncher = windowsLauncherFlavor === 'exe' ? 'UmbraStudio.exe' : 'UmbraStudio.bat';
+
 const PRESERVED_TOP_LEVEL = new Set(['User', 'Tools']);
 const LEGACY_DESKTOP_NAME = ['elec', 'tron'].join('');
 const LEGACY_DESKTOP_ROOT_ARTIFACTS = [
@@ -378,6 +404,23 @@ echo Umbra UI support models are ready.
   fs.writeFileSync(installerPath, script, 'utf-8');
 }
 
+function writeModelRequirementsInstaller() {
+  const installerPath = path.join(publishRoot, 'Install-Model-Requirements.bat');
+  const script = `@echo off
+setlocal
+cd /d "%~dp0"
+set "BUN_BIN=%CD%\\Runtime\\Bun\\win32\\bun.exe"
+if not exist "%BUN_BIN%" (
+  echo [ERROR] Bundled Bun runtime is missing: %BUN_BIN%
+  exit /b 1
+)
+"%BUN_BIN%" "%CD%\\resources\\app\\scripts\\download-umbra-model-requirements.mjs" %*
+if errorlevel 1 exit /b 1
+echo Model requirements are ready.
+`;
+  fs.writeFileSync(installerPath, script, 'utf-8');
+}
+
 function verifyCleanPublishedUser() {
   const userPath = path.join(publishRoot, 'User');
   const dirtyPaths = [
@@ -451,15 +494,8 @@ function run(command, args, label) {
   }
 }
 
-function runNodeScript(args, label) {
-  const result = spawnSync(process.execPath, args, { cwd: root, stdio: 'inherit', shell: false });
-  if (result.status !== 0) {
-    throw new Error(`[webapp-publish] ${label} failed with status ${result.status ?? 1}`);
-  }
-}
-
 function removeRedundantLaunchers() {
-  for (const relativePath of ['Start-Umbra.bat', 'UmbraStudio.bat', 'start-umbra.sh']) {
+  for (const relativePath of ['Start-Umbra.bat', 'UmbraStudio.bat', 'UmbraStudio.exe', 'start-umbra.sh']) {
     const target = path.join(publishRoot, relativePath);
     if (fs.existsSync(target)) safeRemoveInside(publishRoot, target);
   }
@@ -467,6 +503,31 @@ function removeRedundantLaunchers() {
 
 function writePortableMarker() {
   fs.writeFileSync(path.join(publishRoot, 'portable-mode'), 'portable webapp runtime enabled\n', 'utf-8');
+}
+
+function writeUmbraStudioBatchLauncher() {
+  const launcherPath = path.join(publishRoot, 'UmbraStudio.bat');
+  const script = `@echo off
+setlocal
+cd /d "%~dp0"
+set "BUN_BIN=%CD%\\Runtime\\Bun\\win32\\bun.exe"
+set "WEB_LAUNCHER=%CD%\\resources\\app\\launcher\\UmbraWebLauncher.ts"
+if not exist "%BUN_BIN%" (
+  echo [ERROR] Bundled Bun runtime is missing: %BUN_BIN%
+  pause
+  exit /b 1
+)
+if not exist "%WEB_LAUNCHER%" (
+  echo [ERROR] Umbra Studio launcher is missing: %WEB_LAUNCHER%
+  pause
+  exit /b 1
+)
+"%BUN_BIN%" "%WEB_LAUNCHER%" --root "%CD%" %*
+set "EXIT_CODE=%ERRORLEVEL%"
+if not "%EXIT_CODE%"=="0" pause
+exit /b %EXIT_CODE%
+`;
+  fs.writeFileSync(launcherPath, script, 'utf-8');
 }
 
 function writeUmbraUpdaterLauncher() {
@@ -545,6 +606,7 @@ function verifyPublish() {
     'resources/app/backend',
     'resources/app/defaults/DataForge/model-manifest.json',
     'resources/app/defaults/UmbraUI/model-manifest.json',
+    'resources/app/defaults/UmbraUI/model-requirements-manifest.json',
     'resources/app/defaults/PowerPrompter/API Workflows/[Umbra UI] Stable Diffusion Image Pipeline.json',
     'resources/app/defaults/PowerPrompter/Prompts/Anime Girls Starter.ppcards.json',
     'resources/app/defaults/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
@@ -567,9 +629,10 @@ function verifyPublish() {
     'User/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
     'Install-Data-Forge-Models.bat',
     'Install-Umbra-UI-Models.bat',
+    'Install-Model-Requirements.bat',
+    primaryWindowsLauncher,
     'UmbraSetup.bat',
     'UmbraUpdater.bat',
-    'UmbraStudio.exe',
   ];
   if (bundleDataForgeModels) {
     required.push(
@@ -589,6 +652,10 @@ function verifyPublish() {
   if (fs.existsSync(path.join(publishRoot, 'Umbra-Nodes'))) {
     throw new Error('[webapp-publish] Bundled Umbra-Nodes payload must not be present; setup installs it from GitHub.');
   }
+  const secondaryWindowsLauncher = windowsLauncherFlavor === 'exe' ? 'UmbraStudio.bat' : 'UmbraStudio.exe';
+  if (fs.existsSync(path.join(publishRoot, secondaryWindowsLauncher))) {
+    throw new Error(`[webapp-publish] ${windowsLauncherFlavor.toUpperCase()} package must not include ${secondaryWindowsLauncher}.`);
+  }
   if (bundleDataForgeModels) verifyBundledDataForgeModels();
 }
 
@@ -598,6 +665,7 @@ function publish() {
   }
   ensureDir(publishRoot);
   console.log(`[webapp-publish] Publishing webapp build to ${publishRoot}`);
+  console.log(`[webapp-publish] Windows launcher flavor: ${windowsLauncherFlavor.toUpperCase()}.`);
   console.log(isCleanRelease
     ? '[webapp-publish] Clean release mode: wiping the explicit package root and shipping clean runtime skeletons.'
     : '[webapp-publish] No-bump update mode: preserving existing User/ and Tools/ folders.');
@@ -615,7 +683,9 @@ function publish() {
   run('bun', ['run', 'webapp:prepare-dependencies'], 'runtime dependency preparation');
   run('bun', ['run', 'build:frontend'], 'frontend build');
   run('bun', ['build', 'UmbraServer.ts', '--target=bun', '--outfile', path.join('dist-webapp', 'UmbraServer.js')], 'backend build');
-  run('bun', ['run', 'webapp:build-launcher'], 'launcher build');
+  if (windowsLauncherFlavor === 'exe') {
+    run('bun', ['run', 'webapp:build-launcher'], 'compiled launcher build');
+  }
   run('bun', ['run', 'webapp:build-updater'], 'standalone updater build');
   run('bun', ['run', 'webapp:build-setup'], 'standalone setup build');
 
@@ -668,8 +738,9 @@ function publish() {
     path.join(packagedAppDir, 'node_modules'),
   );
   copyTree(path.join(root, 'Runtime'), path.join(publishRoot, 'Runtime'));
-  copyExplicitFile(path.join(root, 'dist-webapp', 'UmbraStudio.exe'), path.join(publishRoot, 'UmbraStudio.exe'));
-  runNodeScript(['scripts/patch-windows-exe-icon.mjs', path.join(publishRoot, 'UmbraStudio.exe')], 'published launcher icon patch');
+  if (windowsLauncherFlavor === 'exe') {
+    copyExplicitFile(path.join(root, 'dist-webapp', 'UmbraStudio.exe'), path.join(publishRoot, 'UmbraStudio.exe'));
+  }
   copyExplicitFile(path.join(root, 'dist-webapp', 'UmbraServer.js'), path.join(packagedAppDir, 'UmbraServer.js'));
   copyExplicitFile(
     path.join(root, 'dist-webapp', 'UmbraUpdateWorker.js'),
@@ -711,6 +782,8 @@ function publish() {
 
   writeDataForgeModelInstaller();
   writeUmbraUiModelInstaller();
+  writeModelRequirementsInstaller();
+  if (windowsLauncherFlavor === 'bat') writeUmbraStudioBatchLauncher();
   writeUmbraSetupLauncher();
   writeUmbraUpdaterLauncher();
   writePortableMarker();

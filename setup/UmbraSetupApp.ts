@@ -8,6 +8,7 @@ import {
 import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
 
 const DEFAULT_SETUP_PORT = 8215;
 const SUPPORTED_LANGUAGES = new Set(['en', 'ja', 'zh-CN', 'ko', 'de']);
@@ -162,16 +163,23 @@ async function runModelInstall(
 }
 
 function launchUmbra(runtimeRoot: string) {
+  const windowsLauncher = process.platform === 'win32'
+    ? resolveUmbraWindowsLauncher(runtimeRoot)
+    : null;
   const launcher = process.platform === 'win32'
-    ? join(runtimeRoot, 'UmbraStudio.exe')
+    ? windowsLauncher?.launcherPath || ''
     : join(runtimeRoot, 'start-umbra.sh');
-  if (!existsSync(launcher)) throw new Error('Umbra Studio launcher is missing.');
-  spawn(launcher, [], {
-    cwd: runtimeRoot,
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: false,
-  }).unref();
+  if (!launcher || !existsSync(launcher)) throw new Error('Umbra Studio launcher is missing.');
+  spawn(
+    process.platform === 'win32' ? windowsLauncher!.command : launcher,
+    process.platform === 'win32' ? windowsLauncher!.args : [],
+    {
+      cwd: runtimeRoot,
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false,
+    },
+  ).unref();
 }
 
 async function main() {

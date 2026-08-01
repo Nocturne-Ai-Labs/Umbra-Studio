@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.21.9
+
+### Generation And Pipeline Polish
+
+- Added optional tiled VAE encode/decode controls to TXT2IMG, IMG2IMG, and
+  Inpaint for lower-memory image workflows.
+- Preserved detailer stages and per-pipeline model/resource selections while
+  switching image pipeline families.
+- Fixed live generation previews after changing pipelines so progress images
+  continue updating before the final output completes.
+- Added an explicit Invert Mask action to the Inpaint editor.
+
+### Mobile Umbra UI
+
+- Moved the mobile generation-preview and Inpaint-editor launcher into normal
+  scroll flow beneath the generation controls.
+- Fixed the preview launcher covering Generate Image and Generate Inpaint near
+  the bottom of phone workspaces.
+
+### Packaging
+
+- Added interactive Windows and Linux model-requirement installers for shared
+  VAEs and text encoders used by supported image-model families. Downloads are
+  verified and placed directly into the appropriate ComfyUI model folders.
+- Added the model-requirement manifest to clean portable packages and release
+  assets so optional prerequisites can be inspected independently.
+- GitHub releases continue to publish the established Windows EXE archive;
+  BAT-first packaging remains maintained as an emergency/manual option but is
+  no longer uploaded as a normal release asset.
+
 ## v0.21.8
 
 ### Portable Python Pip Repair Hotfix
@@ -359,11 +389,6 @@
   preservation, rollback, package validation, and Umbra Nodes update checks.
 - Reserved fixed local port `8214` for updater sessions and removed the
   in-app blank-page reconnect loop.
-- Made Windows Authenticode signing opt-in for release builds so unsigned
-  portable packages can ship until the publisher identity is configured;
-  setting `ENABLE_WINDOWS_SIGNING=true` restores the existing fail-closed
-  Azure Artifact Signing and signature verification path.
-
 ### Prompt History
 
 - Added persistent Umbra UI prompt history for TXT2IMG and IMG2IMG submissions.
@@ -397,17 +422,6 @@
   while preserving their saved access token.
 - Added regression coverage for the default agent generation timeout and
   settings migration path.
-
-### Signed Windows Releases
-
-- Added mandatory Microsoft Artifact Signing to the Windows GitHub release
-  workflow using short-lived GitHub OIDC authentication.
-- Added fail-closed checks for every required Azure signing setting so an
-  unsigned Windows executable cannot be published accidentally.
-- Added Authenticode signature and expected publisher verification before the
-  Windows portable archive is created.
-- Documented the Azure identity, certificate profile, GitHub configuration,
-  verification, and troubleshooting flow for release maintainers.
 
 ## v0.20.5
 
@@ -513,8 +527,6 @@
 
 ### Portable Packaging
 
-- Simplified Windows portable packages to the compiled `UmbraStudio.exe`
-  launcher and removed duplicate batch and shell launchers.
 - Kept the Linux package focused on its native `start-umbra.sh` launcher while
   removing Windows-only launcher artifacts.
 - Added packaging regression tests for the platform-specific launcher layouts.

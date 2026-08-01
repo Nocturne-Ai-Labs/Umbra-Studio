@@ -103,10 +103,21 @@ export interface PowerPrompterOutputUpscaleControls {
   maxDimension: number;
 }
 
+/**
+ * Uses ComfyUI's standard tiled VAE nodes when a pipeline exposes ordinary
+ * VAE encode/decode steps. This is deliberately separate from tiled sampling.
+ */
+export interface PowerPrompterTiledVaeControls {
+  enabled: boolean;
+  tileSize: number;
+  overlap: number;
+}
+
 export interface PowerPrompterGenerationControls {
   hiresFix?: PowerPrompterHiresFixControls;
   detailerPipeline?: PowerPrompterDetailerStage[];
   outputUpscale?: PowerPrompterOutputUpscaleControls;
+  tiledVae?: PowerPrompterTiledVaeControls;
   negativePrompt: string;
   seed: number;
   controlAfterGenerate: PowerPrompterSeedControlMode;

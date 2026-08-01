@@ -367,6 +367,11 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
     modelName: 'RealESRGAN_x4plus.safetensors',
     maxDimension: 3840,
   },
+  tiledVae: {
+    enabled: false,
+    tileSize: 512,
+    overlap: 64,
+  },
   hiresFix: {
     enabled: false,
     upscaler: 'Latent',
@@ -1099,6 +1104,9 @@ export function normalizePowerPrompterGenerationControls(rawControls: unknown): 
   const outputModeRaw = String((controls as any).outputMode || '').trim().toLowerCase();
   const outputMode = (['txt2img', 'img2img', 'img2vid', 'txt2vid', 'vid2vid', 'inpainting', 'extras'] as const)
     .find((candidate) => candidate === outputModeRaw) || 'txt2img';
+  const tiledVaeDefaults = DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS.tiledVae!;
+  const rawTiledVae = (controls as any).tiledVae;
+  const tiledVae = rawTiledVae && typeof rawTiledVae === 'object' ? rawTiledVae : {};
   return {
     mediaType: String((controls as any).mediaType || '').trim().toLowerCase() === 'video' ? 'video' : 'image',
     outputOwner: String((controls as any).outputOwner || '').trim().toLowerCase() === 'umbra_ui'
@@ -1118,6 +1126,11 @@ export function normalizePowerPrompterGenerationControls(rawControls: unknown): 
       (controls as any).umbraUiDetailStages,
     ),
     outputUpscale: normalizePowerPrompterOutputUpscaleControls((controls as any).outputUpscale),
+    tiledVae: {
+      enabled: tiledVae.enabled === true,
+      tileSize: clampInteger(tiledVae.tileSize, tiledVaeDefaults.tileSize, 128, 2048),
+      overlap: clampInteger(tiledVae.overlap, tiledVaeDefaults.overlap, 0, 256),
+    },
     negativePrompt: String(controls.negativePrompt || '').replace(/\r\n/g, '\n'),
     seed: clampInteger(controls.seed, DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS.seed, 0, MAX_JS_SAFE_SEED),
     controlAfterGenerate: normalizeSeedControlMode(controls.controlAfterGenerate),

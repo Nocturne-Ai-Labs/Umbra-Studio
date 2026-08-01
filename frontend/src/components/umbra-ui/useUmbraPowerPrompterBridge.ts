@@ -31,6 +31,7 @@ import type {
   PowerPrompterOutputUpscaleControls,
   PowerPrompterSeedControlMode,
   PowerPrompterSeedIncrement,
+  PowerPrompterTiledVaeControls,
   PowerPrompterVideoControls,
 } from '@/types/powerPrompter';
 import { resolveUmbraVideoTargetDimensions } from '../../../../shared/umbra-ui/videoSizing';
@@ -278,6 +279,7 @@ export interface UmbraImageQueueOptions {
   hiresFix: PowerPrompterHiresFixControls;
   detailerPipeline: PowerPrompterDetailerStage[];
   outputUpscale: PowerPrompterOutputUpscaleControls;
+  tiledVae: PowerPrompterTiledVaeControls;
   loras: UmbraUiLoraEntry[];
   outputMode?: 'txt2img' | 'img2img';
   sourceImagePath?: string;
@@ -1580,6 +1582,11 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         maxDimension: capabilities.finalModelUpscale.maxDimension
           ? toFiniteInteger(options.outputUpscale.maxDimension, 3840, 512, 16384)
           : 3840,
+      },
+      tiledVae: {
+        enabled: options.tiledVae.enabled === true,
+        tileSize: toFiniteInteger(options.tiledVae.tileSize, 512, 128, 2048),
+        overlap: toFiniteInteger(options.tiledVae.overlap, 64, 0, 256),
       },
     };
     return {
