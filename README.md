@@ -111,17 +111,18 @@ Prompter handoff.
 ## User Release Model
 
 Normal users should download a portable release zip, extract it, and run the
-platform launcher. `Umbra-Studio-v<version>-Windows-x64.zip` starts from
-`UmbraStudio.exe`.
+platform launcher. `Umbra-Studio-v<version>-Windows-x64-BAT.zip` starts from
+`UmbraStudio.bat` using the bundled Bun runtime. Windows users do not need to
+install Bun separately.
 
-The Windows EXE is a small native bootstrapper. It starts the packaged Bun
-runtime and Umbra launcher script from the same extracted folder; it does not
-contain a second packed copy of the application.
+v0.22.0 is a one-time manual migration boundary for older Windows EXE builds.
+Close Umbra Studio and its managed tools, extract the new BAT package, then move
+only the old `User` and `Tools` folders into the new `Umbra Studio` folder. Do
+not copy the old `UmbraStudio.exe`. Once migrated, Umbra Updater can install
+future BAT releases normally while preserving `User` and `Tools`.
 
 Linux releases start from `start-umbra.sh`. Users should not need to clone the
-repository or install Bun. The BAT-first Windows packager remains available to
-developers as an emergency compatibility option, but it is not part of the
-normal GitHub release.
+repository or install Bun.
 
 The portable app bundles the Bun runtime under:
 
@@ -438,7 +439,7 @@ No-bump update of the current portable folder:
 bun run webapp:update-folder:no-bump
 ```
 
-Build the alternate BAT-first Windows portable folder explicitly:
+The explicit BAT alias remains available for older developer instructions:
 
 ```powershell
 bun run webapp:update-folder:bat:no-bump

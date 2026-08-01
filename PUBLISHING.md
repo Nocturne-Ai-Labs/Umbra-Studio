@@ -59,15 +59,14 @@ No-bump update of the current portable root:
 bun run webapp:update-folder:no-bump
 ```
 
-The default command preserves a BAT-only portable root when updating it and
-otherwise uses the established EXE layout. To create a BAT-only portable root
-explicitly:
+The default command always creates or updates the BAT-only Windows layout.
+The explicit BAT alias remains available for older developer instructions:
 
 ```powershell
 bun run webapp:update-folder:bat:no-bump
 ```
 
-For a versioned BAT-first local publish:
+For the equivalent versioned BAT alias:
 
 ```powershell
 bun run webapp:update-folder:bat
@@ -101,15 +100,12 @@ installs each selected file directly below `Tools/ComfyUI/models/`, and never
 downloads base checkpoints or diffusion models.
 
 Every Windows package must include exactly one primary launcher:
-`UmbraStudio.exe` for the standard EXE package or `UmbraStudio.bat` for the
-BAT package. Both include `UmbraSetup.bat` and
+`UmbraStudio.bat`. It also includes `UmbraSetup.bat` and
 `resources/app/setup/UmbraSetupApp.js`. The standalone setup service owns
 language selection and optional model-pack installation without gating normal
 Umbra startup.
 
-The standard EXE is compiled from `launcher/windows/UmbraStudioLauncher.cs`
-with the Windows .NET Framework compiler and must remain below 2 MB. It only
-starts the packaged Bun runtime and launcher script. Updater transactions must
+Windows packages must not include `UmbraStudio.exe`. Updater transactions must
 remain below `User/Cache/UmbraUpdater`; release code must not create sibling
 `.umbra-updater-*`, `.umbra-update-*`, or `.umbra-backup-*` directories.
 
@@ -211,14 +207,13 @@ Every portable archive contains one top-level `Umbra Studio/` directory so users
 can extract them without scattering portable application files into the chosen
 destination.
 
-Each GitHub release publishes the established
-`Umbra-Studio-v<version>-Windows-x64.zip` EXE package. Keep this asset name
-stable so existing installs continue to update normally.
-
-The BAT-first Windows packager remains maintained as an emergency/manual
-compatibility option, but do not publish its archive unless the user explicitly
-requests it for a specific release. Existing BAT installs retain launcher-aware
-update and restart support so the fallback remains usable when needed.
+Each GitHub release publishes
+`Umbra-Studio-v<version>-Windows-x64-BAT.zip`. The distinct BAT suffix is part
+of the updater compatibility contract: older EXE installs must not select the
+BAT archive as an in-place update. Users moving from v0.21.10 or earlier must
+extract v0.22.0, move only `User` and `Tools` into the new `Umbra Studio`
+folder, and leave the old executable behind. BAT installs retain launcher-aware
+update and restart support for subsequent releases.
 
 The GitHub workflow must continue to package:
 
@@ -266,12 +261,10 @@ After publishing:
 
 - Launch the app from the published folder, not the source tree.
 - Confirm `http://127.0.0.1:8212/` opens.
-- Confirm the EXE package launches from `UmbraStudio.exe` and does not contain
-  a root `UmbraStudio.bat`.
-- Confirm `UmbraStudio.exe` is below 2 MB and update staging stays under
-  `User/Cache/UmbraUpdater` until Umbra removes the completed transaction.
-- When explicitly producing the emergency BAT package, confirm it launches
-  from `UmbraStudio.bat` and does not contain a root `UmbraStudio.exe`.
+- Confirm the Windows package launches from `UmbraStudio.bat` and does not
+  contain a root `UmbraStudio.exe`.
+- Confirm update staging stays under `User/Cache/UmbraUpdater` until Umbra
+  removes the completed transaction.
 - Confirm Gallery starts.
 - Confirm Umbra UI lists its image/video pipelines and can validate a generation.
 - Run `Install-Umbra-UI-Models.bat --check` or

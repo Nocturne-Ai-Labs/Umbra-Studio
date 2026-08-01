@@ -71,7 +71,7 @@ export function compareUmbraVersions(left: string, right: string): number {
 function releaseAssetPattern(
   platform: NodeJS.Platform,
   arch: string,
-  windowsLauncherFlavor: UmbraWindowsLauncherFlavor = 'exe',
+  windowsLauncherFlavor: UmbraWindowsLauncherFlavor = 'bat',
 ): RegExp {
   if (arch !== 'x64') return /$a/;
   if (platform === 'win32') {
@@ -92,7 +92,7 @@ export function normalizeGithubRelease(
   value: GithubRelease,
   platform: NodeJS.Platform,
   arch: string,
-  windowsLauncherFlavor: UmbraWindowsLauncherFlavor = 'exe',
+  windowsLauncherFlavor: UmbraWindowsLauncherFlavor = 'bat',
 ): UmbraReleaseBuild | null {
   if (!value || value.draft === true) return null;
   const tag = String(value.tag_name || '').trim();
@@ -138,8 +138,8 @@ export class AppUpdateService {
     this.currentVersion = normalizeUmbraVersion(currentVersion);
     this.statePath = join(this.runtimeRoot, 'User', 'Config', 'app-update.json');
     this.windowsLauncherFlavor = process.platform === 'win32'
-      ? detectUmbraWindowsLauncherFlavor(this.runtimeRoot) || 'exe'
-      : 'exe';
+      ? detectUmbraWindowsLauncherFlavor(this.runtimeRoot) || 'bat'
+      : 'bat';
   }
 
   readState(): UmbraUpdateState {

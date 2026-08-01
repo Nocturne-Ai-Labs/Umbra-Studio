@@ -12,16 +12,6 @@ export type UmbraWindowsLauncher = {
 
 export function resolveUmbraWindowsLauncher(runtimeRoot: string): UmbraWindowsLauncher | null {
   const root = resolve(runtimeRoot);
-  const executablePath = join(root, 'UmbraStudio.exe');
-  if (existsSync(executablePath)) {
-    return {
-      flavor: 'exe',
-      launcherPath: executablePath,
-      command: executablePath,
-      args: [],
-    };
-  }
-
   const batchPath = join(root, 'UmbraStudio.bat');
   if (existsSync(batchPath)) {
     return {
@@ -29,6 +19,18 @@ export function resolveUmbraWindowsLauncher(runtimeRoot: string): UmbraWindowsLa
       launcherPath: batchPath,
       command: 'cmd.exe',
       args: ['/d', '/c', 'call', 'UmbraStudio.bat'],
+    };
+  }
+
+  // Keep recognizing older portable builds so users can migrate their User
+  // and Tools folders into the BAT-only layout.
+  const executablePath = join(root, 'UmbraStudio.exe');
+  if (existsSync(executablePath)) {
+    return {
+      flavor: 'exe',
+      launcherPath: executablePath,
+      command: executablePath,
+      args: [],
     };
   }
 

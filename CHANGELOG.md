@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.22.0
+
+### BAT-First Windows Release
+
+- Replaced the Windows EXE release with a BAT-only portable package that starts
+  Umbra through the bundled Bun runtime.
+- Removed the native Windows launcher compiler and executable from the source,
+  package builder, release workflow, and release archive.
+- Changed the Windows release asset to
+  `Umbra-Studio-v0.22.0-Windows-x64-BAT.zip` so legacy EXE updaters cannot
+  mistake the launcher transition for an in-place compatible update.
+- Made BAT the preferred launcher when an older executable is also present,
+  while retaining EXE detection solely for migration from older portable builds.
+- Existing EXE installations require a one-time manual migration: extract the
+  v0.22.0 BAT package and move the previous `User` and `Tools` folders into its
+  `Umbra Studio` folder. Future BAT releases can then use Umbra Updater normally.
+
 ## v0.21.10
 
 ### Windows Startup And Updating

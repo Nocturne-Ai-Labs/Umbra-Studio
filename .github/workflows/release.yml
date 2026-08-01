@@ -27,19 +27,18 @@ jobs:
         with:
           bun-version: canary
       - run: bun install --frozen-lockfile
-      - name: Build Windows EXE portable folder
+      - name: Build Windows BAT portable folder
         shell: pwsh
         env:
-          UMBRA_PUBLISH_ROOT: ${{ github.workspace }}\release\windows-exe\Umbra Studio
+          UMBRA_PUBLISH_ROOT: ${{ github.workspace }}\release\windows-bat\Umbra Studio
           UMBRA_WEBAPP_CLEAN_RELEASE: '1'
           UMBRA_BUNDLE_DATA_FORGE_MODELS: '0'
-          UMBRA_WINDOWS_LAUNCHER: exe
         run: bun run webapp:update-folder:no-bump
-      - name: Archive Windows EXE package
+      - name: Archive Windows BAT package
         shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $exePackageRoot = "release/windows-exe/Umbra Studio"
+          $batPackageRoot = "release/windows-bat/Umbra Studio"
           function Assert-CommonPackage([string] $packageRoot) {
             if (!(Test-Path "$packageRoot/Install-Data-Forge-Models.bat")) { throw 'Data Forge model installer is missing' }
             if (!(Test-Path "$packageRoot/resources/app/defaults/DataForge/model-manifest.json")) { throw 'Data Forge model manifest is missing' }
@@ -50,17 +49,16 @@ jobs:
             if (!(Test-Path "$packageRoot/UmbraSetup.bat")) { throw 'Standalone Umbra setup launcher is missing' }
             if (!(Test-Path "$packageRoot/resources/app/setup/UmbraSetupApp.js")) { throw 'Standalone Umbra setup service is missing' }
           }
-          Assert-CommonPackage $exePackageRoot
-          if (!(Test-Path "$exePackageRoot/UmbraStudio.exe")) { throw 'Umbra Studio EXE launcher is missing' }
-          if ((Get-Item "$exePackageRoot/UmbraStudio.exe").Length -gt 2MB) { throw 'Umbra Studio lightweight EXE launcher was not packaged' }
-          if (Test-Path "$exePackageRoot/UmbraStudio.bat") { throw 'EXE package must not include the batch launcher' }
+          Assert-CommonPackage $batPackageRoot
+          if (!(Test-Path "$batPackageRoot/UmbraStudio.bat")) { throw 'Umbra Studio BAT launcher is missing' }
+          if (Test-Path "$batPackageRoot/UmbraStudio.exe") { throw 'BAT package must not include the EXE launcher' }
           New-Item -ItemType Directory -Force artifacts | Out-Null
-          Copy-Item "$exePackageRoot/resources/app/defaults/DataForge/model-manifest.json" "artifacts/Data-Forge-Models-v$version.json"
-          Copy-Item "$exePackageRoot/resources/app/defaults/UmbraUI/model-manifest.json" "artifacts/Umbra-UI-Support-Models-v$version.json"
-          Copy-Item "$exePackageRoot/resources/app/defaults/UmbraUI/model-requirements-manifest.json" "artifacts/Umbra-UI-Model-Requirements-v$version.json"
+          Copy-Item "$batPackageRoot/resources/app/defaults/DataForge/model-manifest.json" "artifacts/Data-Forge-Models-v$version.json"
+          Copy-Item "$batPackageRoot/resources/app/defaults/UmbraUI/model-manifest.json" "artifacts/Umbra-UI-Support-Models-v$version.json"
+          Copy-Item "$batPackageRoot/resources/app/defaults/UmbraUI/model-requirements-manifest.json" "artifacts/Umbra-UI-Model-Requirements-v$version.json"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $artifactsRoot = (Resolve-Path artifacts).Path
-          [System.IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path $exePackageRoot).Path, (Join-Path $artifactsRoot "Umbra-Studio-v$version-Windows-x64.zip"), [System.IO.Compression.CompressionLevel]::Optimal, $true)
+          [System.IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path $batPackageRoot).Path, (Join-Path $artifactsRoot "Umbra-Studio-v$version-Windows-x64-BAT.zip"), [System.IO.Compression.CompressionLevel]::Optimal, $true)
       - uses: actions/upload-artifact@v4
         with:
           name: umbra-studio-windows
