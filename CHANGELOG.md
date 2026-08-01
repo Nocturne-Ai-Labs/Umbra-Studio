@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.22.8
+
+### ComfyUI Auto-Start Hotfix
+
+- Fixed the global `Launch ComfyUI on startup` setting being persisted but never
+  dispatched during Umbra Studio startup.
+- Added a delayed backend-owned launch after Umbra binds its server, preserving
+  responsive startup while using the same managed portable ComfyUI lifecycle as
+  the workspace Launch control.
+- Added isolated auto-launch handling so a failed optional backend cannot block
+  Umbra Studio startup or other configured startup work.
+
 ## v0.22.7
 
 ### Power Prompter LoRA Handoff Hotfix

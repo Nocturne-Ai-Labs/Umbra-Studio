@@ -87,6 +87,7 @@ import {
   readPowerPrompterReceipt,
   writePowerPrompterReceipt,
 } from './backend/PowerPrompterReceiptService';
+import { runConfiguredStartupAutoLaunches } from './backend/startupAutoLaunch';
 
 // Route handlers we're keeping (will merge later)
 import * as trashRoutes from './backend/routes/trash';
@@ -33724,31 +33725,24 @@ setTimeout(() => {
 
 async function autoLaunchConfiguredBackends() {
   const appSettings = settingsManager.getAppSettings();
-  const shouldAutoLaunch = (key: string) => appSettings[key] === true;
   const launchQueue: Array<{ key: string; label: string; launch: () => Promise<any> }> = [
     { key: 'comfyui.autoLaunch', label: 'ComfyUI', launch: startComfyUI },
   ];
 
-  for (const item of launchQueue) {
-    if (!shouldAutoLaunch(item.key)) continue;
-    try {
-      console.log(`[Startup] Auto-launch enabled for ${item.label}`);
-      const result = await item.launch();
-      if (!result?.success) {
-        console.warn(`[Startup] Failed to auto-launch ${item.label}:`, result?.error || result?.message || 'Unknown error');
-      }
-    } catch (error) {
-      console.warn(`[Startup] Failed to auto-launch ${item.label}:`, error);
+  const results = await runConfiguredStartupAutoLaunches(appSettings, launchQueue);
+  for (const result of results) {
+    if (result.status === 'started') {
+      console.log(`[Startup] Auto-launch requested for ${result.label}: ${result.message}`);
+    } else {
+      console.warn(`[Startup] Failed to auto-launch ${result.label}: ${result.message}`);
     }
   }
 }
 
-setTimeout(() => {
-  const appSettings = settingsManager.getAppSettings();
-  if (appSettings['comfyui.autoLaunch'] === true) {
-    console.warn('[Startup] ComfyUI auto-launch is deferred; start it from the app to keep the web server responsive.');
-  }
-}, 60000);
+const backendAutoLaunchTimer = setTimeout(() => {
+  void autoLaunchConfiguredBackends();
+}, 1_500);
+backendAutoLaunchTimer.unref?.();
 
 // ============================================
 // GRACEFUL SHUTDOWN
