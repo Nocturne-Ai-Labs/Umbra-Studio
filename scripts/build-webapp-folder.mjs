@@ -347,69 +347,140 @@ function ensureBundledPowerPrompterStarterCards() {
   }
 }
 
+function windowsInstallerScript({ title, commands, successMessage }) {
+  return `@echo off
+setlocal EnableExtensions
+title ${title}
+cd /d "%~dp0"
+set "EXIT_CODE=0"
+set "BUN_BIN=%~dp0Runtime\\Bun\\win32\\bun.exe"
+
+echo ============================================================
+echo ${title}
+echo ============================================================
+echo App root: %~dp0
+echo.
+
+if not exist "%BUN_BIN%" (
+  echo [ERROR] The bundled Bun runtime is missing:
+  echo         %BUN_BIN%
+  echo.
+  echo Your antivirus may have quarantined bun.exe. Repair or extract
+  echo Umbra Studio again, then add the Umbra Studio folder as an exception.
+  set "EXIT_CODE=2"
+  goto :finish
+)
+
+"%BUN_BIN%" --version >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] The bundled Bun runtime exists but Windows could not start it:
+  echo         %BUN_BIN%
+  echo.
+  echo Check Windows Security or third-party antivirus quarantine history.
+  set "EXIT_CODE=3"
+  goto :finish
+)
+
+${commands}
+if errorlevel 1 (
+  set "EXIT_CODE=%ERRORLEVEL%"
+  echo.
+  echo [ERROR] The installer stopped with exit code %ERRORLEVEL%.
+  goto :finish
+)
+
+echo.
+echo ${successMessage}
+
+:finish
+if not "%EXIT_CODE%"=="0" echo Installer exit code: %EXIT_CODE%
+if "%~1"=="" (
+  echo.
+  echo Press any key to close this window.
+  pause >nul
+)
+exit /b %EXIT_CODE%
+`;
+}
+
 function writeDataForgeModelInstaller() {
   const installerPath = path.join(publishRoot, 'Install-Data-Forge-Models.bat');
-  const script = `@echo off
-setlocal
-cd /d "%~dp0"
-set "BUN_BIN=%CD%\\Runtime\\Bun\\win32\\bun.exe"
-if not exist "%BUN_BIN%" (
-  echo [ERROR] Bundled Bun runtime is missing: %BUN_BIN%
-  exit /b 1
+  const script = windowsInstallerScript({
+    title: 'Umbra Studio - Data Forge Model Installer',
+    commands: `set "INSTALLER=%~dp0resources\\app\\scripts\\download-waifu-models.mjs"
+if not exist "%INSTALLER%" (
+  echo [ERROR] The Data Forge installer is missing:
+  echo         %INSTALLER%
+  set "EXIT_CODE=4"
+  goto :finish
 )
-"%BUN_BIN%" "%CD%\\resources\\app\\scripts\\download-waifu-models.mjs" || exit /b 1
-"%BUN_BIN%" "%CD%\\resources\\app\\scripts\\download-caption-models.mjs" || exit /b 1
-echo Data Forge models are ready.
-`;
+"%BUN_BIN%" "%INSTALLER%"
+if errorlevel 1 (
+  set "EXIT_CODE=%ERRORLEVEL%"
+  goto :finish
+)
+set "INSTALLER=%~dp0resources\\app\\scripts\\download-caption-models.mjs"
+if not exist "%INSTALLER%" (
+  echo [ERROR] The Data Forge caption installer is missing:
+  echo         %INSTALLER%
+  set "EXIT_CODE=4"
+  goto :finish
+)
+"%BUN_BIN%" "%INSTALLER%"
+`,
+    successMessage: 'Data Forge models are ready.',
+  });
   fs.writeFileSync(installerPath, script, 'utf-8');
 }
 
 function writeUmbraUiModelInstaller() {
   const installerPath = path.join(publishRoot, 'Install-Umbra-UI-Models.bat');
-  const script = `@echo off
-setlocal
-cd /d "%~dp0"
-set "BUN_BIN=%CD%\\Runtime\\Bun\\win32\\bun.exe"
-if not exist "%BUN_BIN%" (
-  echo [ERROR] Bundled Bun runtime is missing: %BUN_BIN%
-  exit /b 1
+  const script = windowsInstallerScript({
+    title: 'Umbra Studio - Model Requirements Installer',
+    commands: `set "INSTALLER=%~dp0resources\\app\\scripts\\download-umbra-model-requirements.mjs"
+if not exist "%INSTALLER%" (
+  echo [ERROR] The model requirements installer is missing:
+  echo         %INSTALLER%
+  set "EXIT_CODE=4"
+  goto :finish
 )
-"%BUN_BIN%" "%CD%\\resources\\app\\scripts\\download-umbra-model-requirements.mjs" %* || exit /b 1
-echo Umbra UI model requirements are ready.
-`;
+"%BUN_BIN%" "%INSTALLER%" %*`,
+    successMessage: 'Umbra UI model requirements are ready.',
+  });
   fs.writeFileSync(installerPath, script, 'utf-8');
 }
 
 function writeUmbraUiSupportModelInstaller() {
   const installerPath = path.join(publishRoot, 'Install-Umbra-UI-Support-Models.bat');
-  const script = `@echo off
-setlocal
-cd /d "%~dp0"
-set "BUN_BIN=%CD%\\Runtime\\Bun\\win32\\bun.exe"
-if not exist "%BUN_BIN%" (
-  echo [ERROR] Bundled Bun runtime is missing: %BUN_BIN%
-  exit /b 1
+  const script = windowsInstallerScript({
+    title: 'Umbra Studio - Support Model Installer',
+    commands: `set "INSTALLER=%~dp0resources\\app\\scripts\\download-umbra-ui-models.mjs"
+if not exist "%INSTALLER%" (
+  echo [ERROR] The support-model installer is missing:
+  echo         %INSTALLER%
+  set "EXIT_CODE=4"
+  goto :finish
 )
-"%BUN_BIN%" "%CD%\\resources\\app\\scripts\\download-umbra-ui-models.mjs" --profile core %* || exit /b 1
-echo Umbra UI support models are ready.
-`;
+"%BUN_BIN%" "%INSTALLER%" --profile core %*`,
+    successMessage: 'Umbra UI support models are ready.',
+  });
   fs.writeFileSync(installerPath, script, 'utf-8');
 }
 
 function writeModelRequirementsInstaller() {
   const installerPath = path.join(publishRoot, 'Install-Model-Requirements.bat');
-  const script = `@echo off
-setlocal
-cd /d "%~dp0"
-set "BUN_BIN=%CD%\\Runtime\\Bun\\win32\\bun.exe"
-if not exist "%BUN_BIN%" (
-  echo [ERROR] Bundled Bun runtime is missing: %BUN_BIN%
-  exit /b 1
+  const script = windowsInstallerScript({
+    title: 'Umbra Studio - Model Requirements Installer',
+    commands: `set "INSTALLER=%~dp0resources\\app\\scripts\\download-umbra-model-requirements.mjs"
+if not exist "%INSTALLER%" (
+  echo [ERROR] The model requirements installer is missing:
+  echo         %INSTALLER%
+  set "EXIT_CODE=4"
+  goto :finish
 )
-"%BUN_BIN%" "%CD%\\resources\\app\\scripts\\download-umbra-model-requirements.mjs" %*
-if errorlevel 1 exit /b 1
-echo Model requirements are ready.
-`;
+"%BUN_BIN%" "%INSTALLER%" %*`,
+    successMessage: 'Model requirements are ready.',
+  });
   fs.writeFileSync(installerPath, script, 'utf-8');
 }
 

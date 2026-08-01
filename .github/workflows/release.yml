@@ -53,6 +53,18 @@ jobs:
           Assert-CommonPackage $batPackageRoot
           if (!(Test-Path "$batPackageRoot/UmbraStudio.bat")) { throw 'Umbra Studio BAT launcher is missing' }
           if (Test-Path "$batPackageRoot/UmbraStudio.exe") { throw 'BAT package must not include the EXE launcher' }
+          $comfyRoot = [System.IO.Path]::GetFullPath("$batPackageRoot/Tools/ComfyUI")
+          [System.IO.Directory]::CreateDirectory($comfyRoot) | Out-Null
+          $installerOutput = (& cmd.exe /d /c "`"$batPackageRoot/Install-Umbra-UI-Models.bat`" --check --family anima" 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 1) { throw "Packaged model installer returned unexpected status $LASTEXITCODE`n$installerOutput" }
+          $expectedModelsRoot = [System.IO.Path]::Combine($comfyRoot, 'models')
+          if ($installerOutput -notlike "*$expectedModelsRoot*") {
+            throw "Packaged model installer did not target root ComfyUI models: $expectedModelsRoot`n$installerOutput"
+          }
+          if ($installerOutput -like '*resources\app\Tools\ComfyUI*') {
+            throw "Packaged model installer incorrectly targeted resources/app/Tools/ComfyUI`n$installerOutput"
+          }
+          [System.IO.Directory]::Delete($comfyRoot, $true)
           New-Item -ItemType Directory -Force artifacts | Out-Null
           Copy-Item "$batPackageRoot/resources/app/defaults/DataForge/model-manifest.json" "artifacts/Data-Forge-Models-v$version.json"
           Copy-Item "$batPackageRoot/resources/app/defaults/UmbraUI/model-manifest.json" "artifacts/Umbra-UI-Support-Models-v$version.json"

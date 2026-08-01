@@ -6,6 +6,12 @@ import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const RUNTIME_ROOT = (
+  path.basename(APP_ROOT).toLowerCase() === 'app'
+  && path.basename(path.dirname(APP_ROOT)).toLowerCase() === 'resources'
+)
+  ? path.dirname(path.dirname(APP_ROOT))
+  : APP_ROOT;
 const MANIFEST_PATH = path.join(APP_ROOT, 'defaults', 'UmbraUI', 'model-requirements-manifest.json');
 const DOWNLOADER_PATH = path.join(APP_ROOT, 'scripts', 'download-umbra-ui-models.mjs');
 
@@ -26,7 +32,11 @@ const checkOnly = process.argv.includes('--check');
 const testDownloads = process.argv.includes('--test-downloads');
 const assumeYes = process.argv.includes('--yes');
 const comfyRootArgIndex = process.argv.indexOf('--comfy-root');
-const comfyRoot = comfyRootArgIndex >= 0 ? String(process.argv[comfyRootArgIndex + 1] || '').trim() : '';
+const comfyRoot = path.resolve(
+  comfyRootArgIndex >= 0
+    ? String(process.argv[comfyRootArgIndex + 1] || '').trim()
+    : process.env.UMBRA_COMFYUI_ROOT || path.join(RUNTIME_ROOT, 'Tools', 'ComfyUI'),
+);
 
 function formatBytes(value) {
   const bytes = Math.max(0, Number(value) || 0);
@@ -111,7 +121,7 @@ function runDownloader(families) {
   ];
   if (checkOnly) args.push('--check');
   if (testDownloads) args.push('--test-downloads');
-  if (comfyRoot) args.push('--comfy-root', comfyRoot);
+  args.push('--comfy-root', comfyRoot);
 
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, { cwd: APP_ROOT, stdio: 'inherit' });
@@ -149,7 +159,7 @@ async function main() {
   const totalBytes = files.reduce((sum, file) => sum + Number(file.bytes || 0), 0);
   console.log(`\nSelected: ${installFamilies.map(id => manifest.profiles[id].label).join(', ')}`);
   console.log(`Prerequisites: ${files.length} file(s), ${formatBytes(totalBytes)} total`);
-  console.log('Destination: Tools\\ComfyUI\\models\\... (the exact ComfyUI folder for each file)');
+  console.log(`Destination: ${path.join(comfyRoot, 'models')} (the exact ComfyUI folder for each file)`);
 
   if (!checkOnly && !testDownloads && !assumeYes && process.stdin.isTTY) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });

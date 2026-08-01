@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.22.2
+
+### Model Installer Hotfix
+
+- Fixed the packaged model-requirements installer resolving ComfyUI beneath
+  `resources/app/Tools/ComfyUI` instead of the portable installation's root
+  `Tools/ComfyUI` folder.
+- Added startup diagnostics for missing, quarantined, or non-runnable bundled
+  Bun runtimes and missing installer scripts.
+- Kept interactively opened Windows installer terminals visible after success,
+  cancellation, or failure so errors and exit codes can be read.
+- Added a release gate that executes the packaged Windows installer and verifies
+  that its resolved model destination is the root ComfyUI installation.
+
 ## v0.22.1
 
 ### Model Installers
