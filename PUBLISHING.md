@@ -29,6 +29,26 @@ specify:
 Do not guess the target folder. Runtime folders can contain user data, tools,
 models, generated outputs, and local app state.
 
+## Release Notes Requirements
+
+Every release that adds a feature requiring user action must begin its changelog
+entry and GitHub release notes with a short `TL;DR - Setup After Updating`
+section. Put it before the feature summary so it remains visible without
+expanding or reading the full release notes.
+
+The TL;DR must state, when applicable:
+
+- the exact Windows and Linux launcher, installer, or in-app action to use;
+- which downloads are required, which are optional, and the feature or model
+  family that needs each one;
+- approximate download sizes for large resources;
+- whether ComfyUI, custom nodes, or Umbra Studio must be updated or restarted;
+- any migration, backup, compatibility, or license warning the user needs before
+  proceeding.
+
+Do not rely on a later changelog bullet to communicate required setup. Assume
+many users will read only the first few lines of a release.
+
 ## Environment Variables
 
 Set the exact `Umbra Studio` application root before running a build when the

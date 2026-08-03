@@ -2,6 +2,28 @@
 
 ## v0.23.0
 
+### TL;DR - Setup After Updating
+
+Canvas Studio can generate with your existing supported checkpoints. Its new
+model-specific **Control** and **Reference** layers need optional resources that
+are not bundled in the portable ZIP:
+
+1. From the extracted `Umbra Studio` folder, run
+   `Install-Umbra-UI-Models.bat` on Windows or
+   `./install-umbra-ui-models.sh` on Linux.
+2. Select only the Canvas packs for the model families you use:
+   - **Canvas Control - Anima:** Anima LLLite inpaint and pose models (~89 MB).
+   - **Canvas Control - Qwen Image:** InstantX inpaint ControlNet (~4.23 GB).
+   - **Canvas Control - Z-Image Turbo:** Union ControlNet (~6.71 GB).
+   - **Canvas Reference - SDXL:** IP-Adapter plus CLIP Vision (~3.23 GB).
+   - **Canvas Reference - FLUX.1:** FLUX Redux plus SigLIP (~986 MB).
+3. For Anima Control, install or update managed ComfyUI from Umbra's Neural Hub
+   so the required latest `ComfyUI-Anima-LLLite` custom node is present.
+
+These downloads are only required for their matching Canvas Control or
+Reference workflow. Users who do not use those layers can skip them. Review the
+installer's license and large-download notices before confirming a pack.
+
 ### Canvas Studio Revival
 
 - Reintroduced Canvas Studio as a focused AI compositing workspace backed by
