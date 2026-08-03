@@ -9,6 +9,7 @@ import type {
 import type { UmbraUiMediaGenerationSnapshot, UmbraUiStudioDestinationMode } from './umbraUiMediaHandoff';
 import type { UmbraUiPromptSegment } from './umbraUiPromptSegments';
 import type { UmbraUiLoraEntry } from './umbraUiModels';
+import type { PowerPrompterDetailerStage, PowerPrompterHiresFixControls } from '@/types/powerPrompter';
 
 export type UmbraUiInpaintItemStatus = 'staging' | 'queued' | 'running' | 'completed' | 'failed' | 'canceled';
 export type UmbraUiInpaintJobStatus = 'staging' | 'queued' | 'running' | 'completed' | 'partial' | 'failed' | 'canceled';
@@ -43,6 +44,20 @@ export interface UmbraUiInpaintJobItem {
   error: string;
 }
 
+export interface UmbraUiInpaintPreview {
+  jobId: string;
+  itemId: string;
+  promptId: string;
+  imageDataUrl: string;
+  step: number;
+  maxStep: number;
+  updatedAt: number;
+}
+
+export interface UmbraUiInpaintPreviewEvent extends UmbraUiInpaintPreview {
+  active: boolean;
+}
+
 export interface UmbraUiInpaintJob {
   id: string;
   status: UmbraUiInpaintJobStatus;
@@ -57,6 +72,7 @@ export interface UmbraUiInpaintJob {
   createdAt: number;
   updatedAt: number;
   items: UmbraUiInpaintJobItem[];
+  preview?: UmbraUiInpaintPreview | null;
 }
 
 export class UmbraUiInpaintRequestError extends Error {
@@ -275,6 +291,7 @@ export interface UmbraUiInpaintSubmitOptions {
   source: Blob;
   sourceName: string;
   canvasProjectId: string;
+  sourceFreeGeneration?: boolean;
   operationMode: 'inpaint' | 'outpaint';
   generationRegionX: number;
   generationRegionY: number;
@@ -335,6 +352,8 @@ export interface UmbraUiInpaintSubmitOptions {
     tileSize: number;
     overlap: number;
   };
+  hiresFix?: PowerPrompterHiresFixControls;
+  detailerPipeline: PowerPrompterDetailerStage[];
   regionalGuidance: UmbraUiInpaintRegionalGuidanceInput[];
   controlLayers: UmbraUiInpaintControlInput[];
   referenceLayers: UmbraUiInpaintReferenceInput[];
@@ -345,13 +364,15 @@ export async function submitUmbraUiInpaintJob(options: UmbraUiInpaintSubmitOptio
   form.append('source', options.source, options.sourceName || 'inpaint-source.png');
   form.append('mask', options.mask, 'inpaint-mask.png');
   for (const [key, value] of Object.entries(options)) {
-    if (key === 'source' || key === 'sourceName' || key === 'mask' || key === 'promptSegments' || key === 'loras' || key === 'workflowResources' || key === 'tiledVae' || key === 'regionalGuidance' || key === 'controlLayers' || key === 'referenceLayers') continue;
+    if (key === 'source' || key === 'sourceName' || key === 'mask' || key === 'promptSegments' || key === 'loras' || key === 'workflowResources' || key === 'tiledVae' || key === 'hiresFix' || key === 'detailerPipeline' || key === 'regionalGuidance' || key === 'controlLayers' || key === 'referenceLayers') continue;
     form.append(key, String(value));
   }
   form.append('promptSegments', JSON.stringify(options.promptSegments));
   form.append('loras', JSON.stringify(options.loras));
   form.append('workflowResources', JSON.stringify(options.workflowResources));
   form.append('tiledVae', JSON.stringify(options.tiledVae));
+  if (options.hiresFix) form.append('hiresFix', JSON.stringify(options.hiresFix));
+  form.append('detailerPipeline', JSON.stringify(options.detailerPipeline));
   form.append('regionalGuidance', JSON.stringify(options.regionalGuidance.map((region) => ({
     id: region.id,
     name: region.name,

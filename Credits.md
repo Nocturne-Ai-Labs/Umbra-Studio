@@ -398,7 +398,49 @@ follow their latest upstream default branches.
 - License: Apache-2.0
 - Usage in Umbra Studio:
   - Optional SDXL reference-image conditioning through ComfyUI_IPAdapter_plus
-  - Installed only when the separate Umbra UI `reference` profile is requested
+  - Installed when `Canvas Reference - SDXL` is selected in the Umbra UI model installer
+
+### FLUX.1 Redux and SigLIP Vision
+- FLUX.1 Redux project: https://huggingface.co/black-forest-labs/FLUX.1-Redux-dev
+- ComfyUI packaged sources:
+  - https://huggingface.co/Comfy-Org/Flux1-Redux-Dev
+  - https://huggingface.co/Comfy-Org/sigclip_vision_384
+- Creators / publishers: Black Forest Labs, Google, and Comfy Org contributors
+- Model files:
+  - `flux1-redux-dev.safetensors`
+  - `sigclip_vision_patch14_384.safetensors`
+- License: FLUX.1 dev non-commercial model license and the applicable upstream SigLIP terms
+- Usage in Umbra Studio:
+  - Optional FLUX.1 reference-image conditioning in Canvas
+  - Installed when `Canvas Reference - FLUX.1` is selected in the Umbra UI model installer
+
+### Anima ControlNet-LLLite
+- Original model source: https://huggingface.co/kohya-ss/Anima-LLLite
+- ComfyUI packaged source: https://huggingface.co/Comfy-Org/Anima-LLLite
+- Creator / maintainer: kohya-ss; ComfyUI packaging by Comfy Org contributors
+- Model files installed by Umbra:
+  - `anima-lllite-inpainting-v2.safetensors`
+  - `anima-lllite-pose-1.safetensors`
+- License: Circlestone Labs non-commercial model license
+- Usage in Umbra Studio:
+  - Optional Anima inpainting and pose guidance in Canvas
+
+### Qwen Image InstantX Inpainting ControlNet
+- Original model source: https://huggingface.co/InstantX/Qwen-Image-ControlNet-Inpainting
+- ComfyUI packaged source: https://huggingface.co/Comfy-Org/Qwen-Image-InstantX-ControlNets
+- Creators / publishers: InstantX and Comfy Org contributors
+- Model file: `Qwen-Image-InstantX-ControlNet-Inpainting.safetensors`
+- License: Apache-2.0
+- Usage in Umbra Studio:
+  - Optional Qwen Image inpainting and regional generation control in Canvas
+
+### Z-Image Turbo Fun ControlNet Union 2.1
+- Model source: https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1
+- Creator / publisher: Alibaba PAI
+- Model file: `Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors`
+- License: Apache-2.0
+- Usage in Umbra Studio:
+  - Optional Z-Image Turbo inpaint and multi-control guidance in Canvas
 
 ## Model Sources
 
@@ -473,6 +515,15 @@ upstream default branches. They are not frozen to Umbra-selected commit hashes.
   - IP-Adapter reference-image conditioning for ComfyUI
 - Usage in Umbra Studio:
   - Required integration for optional reference-image layers in Umbra UI
+
+### ComfyUI-Anima-LLLite
+- Project: https://github.com/kohya-ss/ComfyUI-Anima-LLLite
+- Creator / maintainer: kohya-ss and contributors
+- License: Apache-2.0
+- Original project purpose:
+  - Loads and applies ControlNet-LLLite weights to Anima models in ComfyUI
+- Usage in Umbra Studio:
+  - Required integration for Anima control and inpainting adapters in Canvas
 
 ### ComfyUI-Inpaint-CropAndStitch
 - Project: https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch

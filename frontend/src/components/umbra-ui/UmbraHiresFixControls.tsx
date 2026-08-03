@@ -1,8 +1,10 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import { Maximize2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import type { PowerPrompterHiresResizeMode } from '@/types/powerPrompter';
 
 const inputClass = 'w-full rounded-md border border-white/10 bg-black/35 px-2.5 py-2 text-xs text-zinc-100 outline-none transition-colors focus:border-cyan-300/45';
@@ -184,9 +186,9 @@ export function UmbraHiresFixControls({
           {showUpscaler ? (
             <label className="block space-y-1.5">
               <span className={labelClass}>Upscaler</span>
-              <select value={upscaler} onChange={(event) => onUpscalerChange(event.target.value)} className={inputClass}>
+              <UmbraSelectControl value={upscaler} onChange={(event) => onUpscalerChange(event.target.value)} className={inputClass}>
                 {upscalerOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-              </select>
+              </UmbraSelectControl>
             </label>
           ) : null}
 
@@ -288,19 +290,13 @@ export function UmbraHiresFixControls({
               {showSampler ? (
                 <label className="min-w-0 space-y-1.5">
                   <span className={labelClass}>Hires Sampler</span>
-                  <select value={samplerName} onChange={(event) => onSamplerNameChange(event.target.value)} className={inputClass}>
-                    <option value="use_same">Use same</option>
-                    {samplerOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                  </select>
+                  <UmbraSelect value={samplerName} onValueChange={onSamplerNameChange} ariaLabel="Hires Sampler" menuTitle="Hires Sampler" options={Array.from(new Set(['use_same', ...samplerOptions])).map((option) => ({ value: option, label: option === 'use_same' ? 'Use same' : option }))} />
                 </label>
               ) : null}
               {showScheduler ? (
                 <label className="min-w-0 space-y-1.5">
                   <span className={labelClass}>Hires Scheduler</span>
-                  <select value={scheduler} onChange={(event) => onSchedulerChange(event.target.value)} className={inputClass}>
-                    <option value="use_same">Use same</option>
-                    {schedulerOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                  </select>
+                  <UmbraSelect value={scheduler} onValueChange={onSchedulerChange} ariaLabel="Hires Scheduler" menuTitle="Hires Scheduler" options={Array.from(new Set(['use_same', ...schedulerOptions])).map((option) => ({ value: option, label: option === 'use_same' ? 'Use same' : option }))} />
                 </label>
               ) : null}
             </div>

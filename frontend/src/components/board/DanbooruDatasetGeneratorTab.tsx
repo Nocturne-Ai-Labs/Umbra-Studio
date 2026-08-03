@@ -1,3 +1,4 @@
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { useEffect, useState } from 'react';
 import { Database, FileText, FolderOpen, Pause, Play, Square } from 'lucide-react';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
@@ -198,11 +199,11 @@ export function DanbooruDatasetGeneratorTab() {
             <>
               <div>
                 <label className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-zinc-500">Character Source</label>
-                <select value={characterSource} onChange={(event) => setCharacterSource(event.target.value as CharacterSource)} className="settings-input !py-2 text-sm">
+                <UmbraSelectControl value={characterSource} onChange={(event) => setCharacterSource(event.target.value as CharacterSource)} className="settings-input !py-2 text-sm">
                   <option value="danbooru">Top Danbooru characters</option>
                   <option value="single">Single character tag</option>
                   <option value="series">Characters from series/copyright</option>
-                </select>
+                </UmbraSelectControl>
               </div>
               {characterSource === 'single' ? <TextInput label="Character Tag" value={tag} onChange={setTag} placeholder="hatsune_miku" /> : null}
               {characterSource === 'series' ? <TextInput label="Series / Copyright Tag" value={seriesTag} onChange={setSeriesTag} placeholder="zenless_zone_zero" /> : null}
@@ -219,11 +220,11 @@ export function DanbooruDatasetGeneratorTab() {
             <>
               <div>
                 <label className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-zinc-500">Tag Category</label>
-                <select value={tagCategory} onChange={(event) => setTagCategory(event.target.value)} className="settings-input !py-2 text-sm">
+                <UmbraSelectControl value={tagCategory} onChange={(event) => setTagCategory(event.target.value)} className="settings-input !py-2 text-sm">
                   <option value="0">General</option>
                   <option value="1">Artist</option>
                   <option value="5">Meta</option>
-                </select>
+                </UmbraSelectControl>
               </div>
               <TextInput label="Tags" value={limit} onChange={setLimit} placeholder="1000 or all" help="Use a number, or type all to fetch every matching tag Danbooru returns." />
               <NumberInput label="Min Tag Posts" value={minTagPosts} onChange={setMinTagPosts} min={0} max={10000000} />
@@ -235,7 +236,7 @@ export function DanbooruDatasetGeneratorTab() {
           <Checkbox label="Output tags with spaces instead of underscores" checked={removeUnderscores} onChange={setRemoveUnderscores} />
           <div>
             <label className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-zinc-500">Localized Search Aliases</label>
-            <select
+            <UmbraSelectControl
               value={outputLanguage}
               onChange={(event) => setOutputLanguageAndDefault(event.target.value as OutputLanguage)}
               className="settings-input !py-2 text-sm"
@@ -243,7 +244,7 @@ export function DanbooruDatasetGeneratorTab() {
               <option value="canonical">Off - canonical tags</option>
               <option value="ja">Japanese aliases (best effort)</option>
               <option value="zh-CN">Chinese aliases (best effort)</option>
-            </select>
+            </UmbraSelectControl>
             <p className="mt-1 text-[10px] leading-4 text-zinc-600">
               Adds localized display and search columns. Copied prompt tokens remain canonical Danbooru tags.
             </p>

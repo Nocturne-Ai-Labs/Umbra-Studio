@@ -331,18 +331,22 @@ async function main(): Promise<void> {
       && recoveredStoredJob.total === 1
       && recoveredStoredJob.completed === 1
       && recoveredStoredJob.failed === 0);
+    const recoveredLedgerHash = await hashFile(statePath);
     assertCheck(
       checks,
-      'ledgerRecoveredIntendedDurableBytes',
-      await hashFile(statePath) === ledgerInterruption.stateAtBoundary.temporaryHash,
+      'ledgerRejectedInterruptedReplacement',
+      recoveredLedgerHash !== ledgerInterruption.stateAtBoundary.temporaryHash,
     );
+    assertCheck(checks, 'ledgerPersistedRecoveredPpuid', Boolean(recoveredStoredJob?.items[0]?.ppuid));
     assertCheck(checks, 'ledgerRecoveryRemovedArtifacts', (await atomicArtifacts(dirname(statePath))).length === 0);
     const secondLedgerService = new UmbraUiInpaintService({
       getComfyBaseUrl: () => 'http://127.0.0.1:1',
       jobStatePath: statePath,
       buildBaseWorkflow: async () => ({ promptGraph: {} }),
     });
+    await secondLedgerService.flushPersistence();
     assertCheck(checks, 'ledgerRecoveryIsIdempotent', secondLedgerService.getJob(originalJob.id)?.items[0]?.promptId === originalJob.items[0].promptId
+      && await hashFile(statePath) === recoveredLedgerHash
       && (await atomicArtifacts(dirname(statePath))).length === 0);
     jobLedger.recoveredJob = recoveredJob;
   } catch (caught) {

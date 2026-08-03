@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import { Dices } from 'lucide-react';
 import type {
@@ -66,7 +67,7 @@ export function UmbraSeedControls({
       </label>
       <label className="min-w-0 space-y-1.5">
         <span className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-400">After Generation</span>
-        <select
+        <UmbraSelectControl
           value={mode}
           disabled={disabled}
           onChange={(event) => onModeChange(event.target.value as PowerPrompterSeedControlMode)}
@@ -78,7 +79,7 @@ export function UmbraSeedControls({
           {SEED_MODE_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>{option.label}</option>
           ))}
-        </select>
+        </UmbraSelectControl>
       </label>
       <button
         type="button"
@@ -92,9 +93,11 @@ export function UmbraSeedControls({
       >
         <Dices size={14} />
       </button>
-      {mode === 'increment' ? (
+      {mode === 'increment' || mode === 'decrement' ? (
         <div className="col-span-full space-y-1.5">
-          <span className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-400">Increment By</span>
+          <span className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-400">
+            {mode === 'decrement' ? 'Decrement By' : 'Increment By'}
+          </span>
           <div className="grid grid-cols-3 gap-1 rounded-md border border-white/10 bg-black/20 p-1">
             {UMBRA_UI_SEED_INCREMENT_OPTIONS.map((option) => (
               <button
@@ -111,7 +114,7 @@ export function UmbraSeedControls({
                     : 'border-transparent text-zinc-500 hover:border-white/10 hover:text-zinc-200',
                 )}
               >
-                +{option.toLocaleString('en-US')}
+                {mode === 'decrement' ? '-' : '+'}{option.toLocaleString('en-US')}
               </button>
             ))}
           </div>

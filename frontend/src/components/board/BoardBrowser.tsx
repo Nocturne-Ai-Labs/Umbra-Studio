@@ -1,3 +1,4 @@
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { useEffect, useState } from 'react';
 import { BarChart3, Database, Search, Download, FolderOpen, GraduationCap } from 'lucide-react';
 import { SearchTab } from './SearchTab';
@@ -59,7 +60,7 @@ export function BoardBrowser() {
       style={{ fontFamily: 'var(--font-family)' }}
     >
       <div data-umbra-data-forge-mobile-tabs>
-        <select
+        <UmbraSelectControl
           value={activeTab}
           onChange={(event) => setActiveTab(event.target.value as Tab)}
           aria-label="Data Forge workspace"
@@ -69,7 +70,7 @@ export function BoardBrowser() {
               {tab.label}{tab.badge ? ` (${tab.badge})` : ''}
             </option>
           ))}
-        </select>
+        </UmbraSelectControl>
       </div>
 
       {/* Tab bar */}

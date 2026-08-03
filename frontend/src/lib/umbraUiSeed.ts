@@ -56,7 +56,10 @@ export function advanceUmbraUiSeed(
       seed + normalizeUmbraUiSeedIncrement(rawIncrement) * count,
     );
   }
-  if (mode === 'decrement') return Math.max(0, seed - 1);
+  if (mode === 'decrement') {
+    const count = Math.max(1, Math.floor(Number(rawCount) || 1));
+    return Math.max(0, seed - normalizeUmbraUiSeedIncrement(rawIncrement) * count);
+  }
   if (mode === 'randomize') return createUmbraUiRandomSeed(random);
   return seed;
 }

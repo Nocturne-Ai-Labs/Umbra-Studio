@@ -1,3 +1,4 @@
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { useState, useEffect, type DragEvent } from 'react';
 import { Archive, Trash2, Move, Tag, Check, CheckSquare, Square, Loader2, Upload, X, Flag, Sparkles, Copy, FolderOpen } from 'lucide-react';
 import { useStore } from '@/store/useStore';
@@ -935,7 +936,7 @@ export function DatasetsTab() {
                     Natural
                   </button>
                 </div>
-                <select
+                <UmbraSelectControl
                   value={captionMode === 'natural' ? naturalModel : taggerModel}
                   onChange={(e) => captionMode === 'natural' ? setNaturalModel(e.target.value) : setTaggerModel(e.target.value)}
                   className="umbra-input h-8 w-full rounded px-2 text-xs focus:border-cyan-400/60 focus:outline-none"
@@ -944,7 +945,7 @@ export function DatasetsTab() {
                   {(captionMode === 'natural' ? NATURAL_MODEL_OPTIONS : WAIFU_MODEL_OPTIONS).map(option => (
                     <option key={option.id} value={option.id}>{option.label}</option>
                   ))}
-                </select>
+                </UmbraSelectControl>
               </div>
               <div className="col-span-full flex flex-wrap items-center justify-end gap-2">
                 <label className="flex h-8 items-center gap-1.5 rounded border border-white/10 px-2 text-[10px] font-bold uppercase tracking-[0.12em] text-zinc-400">
@@ -1110,7 +1111,7 @@ export function DatasetsTab() {
               <div className="mt-2 flex flex-wrap items-end gap-2 rounded border border-cyan-400/15 bg-cyan-500/5 p-2">
                 <label className="w-32">
                   <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Device</span>
-                  <select
+                  <UmbraSelectControl
                     value={naturalDevice}
                     onChange={(e) => setNaturalDevice(e.target.value as 'auto' | 'cpu' | 'cuda')}
                     className="umbra-input h-8 w-full rounded px-2 text-xs"
@@ -1118,7 +1119,7 @@ export function DatasetsTab() {
                     <option value="auto">Auto</option>
                     <option value="cuda">GPU</option>
                     <option value="cpu">CPU</option>
-                  </select>
+                  </UmbraSelectControl>
                 </label>
                 <label className="w-32">
                   <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Max tokens</span>
@@ -1422,7 +1423,7 @@ export function DatasetsTab() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="glass-panel w-80 border-white/10 p-4">
             <h3 className="mb-4 text-sm font-bold uppercase tracking-[0.16em] text-zinc-200">Move {selectedImages.size} Images</h3>
-            <select
+            <UmbraSelectControl
               value={moveToConcept}
               onChange={(e) => setMoveToConcept(e.target.value)}
               className="umbra-input w-full rounded px-3 py-2 text-white focus:border-cyan-400/60 focus:outline-none"
@@ -1434,7 +1435,7 @@ export function DatasetsTab() {
                   <option key={folder} value={folder}>{folder}</option>
                 );
               })}
-            </select>
+            </UmbraSelectControl>
             <div className="flex justify-end gap-2 mt-4">
               <button
                 onClick={() => { setShowMoveModal(false); setMoveToConcept(''); }}

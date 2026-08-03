@@ -66,9 +66,6 @@ jobs:
           }
           [System.IO.Directory]::Delete($comfyRoot, $true)
           New-Item -ItemType Directory -Force artifacts | Out-Null
-          Copy-Item "$batPackageRoot/resources/app/defaults/DataForge/model-manifest.json" "artifacts/Data-Forge-Models-v$version.json"
-          Copy-Item "$batPackageRoot/resources/app/defaults/UmbraUI/model-manifest.json" "artifacts/Umbra-UI-Support-Models-v$version.json"
-          Copy-Item "$batPackageRoot/resources/app/defaults/UmbraUI/model-requirements-manifest.json" "artifacts/Umbra-UI-Model-Requirements-v$version.json"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $artifactsRoot = (Resolve-Path artifacts).Path
           [System.IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path $batPackageRoot).Path, (Join-Path $artifactsRoot "Umbra-Studio-v$version-Windows-x64-BAT.zip"), [System.IO.Compression.CompressionLevel]::Optimal, $true)

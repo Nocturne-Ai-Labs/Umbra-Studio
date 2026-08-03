@@ -1,3 +1,4 @@
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import { Check, ChevronDown, Download, Loader2, RefreshCw, Save, Trash2, X, XCircle } from 'lucide-react';
 import { PowerPrompterGlobalSearchBox } from './PowerPrompterGlobalSearchBox';
@@ -266,7 +267,7 @@ export function PowerPrompterPresetBar(props: PowerPrompterPresetBarProps) {
         )}
 
         <div className="relative min-w-[210px] max-w-[340px] flex-1">
-          <select
+          <UmbraSelectControl
             value={selectedPresetId || ''}
             onChange={(event) => setSelectedPresetId(String(event.currentTarget.value || ''))}
             disabled={!hasPresets || isBusy}
@@ -287,7 +288,7 @@ export function PowerPrompterPresetBar(props: PowerPrompterPresetBarProps) {
                 {preset.name}
               </option>
             ))}
-          </select>
+          </UmbraSelectControl>
           <ChevronDown
             size={13}
             className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500"

@@ -323,7 +323,7 @@ export function PowerPrompterQueueManagerSidePane({
         <Portal>
         <div
           ref={outputMenuRef}
-          className="fixed z-[10000] w-[min(300px,calc(100vw-16px))] overflow-y-auto rounded-xl border border-white/15 bg-[#050508] shadow-2xl shadow-black/70"
+          className="umbra-context-menu-panel fixed z-[10000] w-[min(300px,calc(100vw-16px))] overflow-y-auto p-1"
           style={outputMenuStyle}
           onMouseDown={(event) => {
             event.stopPropagation();
@@ -331,17 +331,17 @@ export function PowerPrompterQueueManagerSidePane({
           }}
           onContextMenu={(event) => event.preventDefault()}
         >
-          <div className="px-3 py-2 border-b border-white/10">
-            <div className="text-[11px] font-bold text-zinc-200 truncate">{queueOutputMenu.item.name}</div>
-            <div className="text-[10px] text-zinc-500 truncate">{queueOutputMenu.item.path}</div>
+          <div className="umbra-context-menu-header -mx-1 -mt-1 mb-1 px-3 py-2.5">
+            <div className="umbra-context-menu-title truncate">{queueOutputMenu.item.name}</div>
+            <div className="umbra-context-menu-subtitle mt-0.5 truncate normal-case tracking-normal">{queueOutputMenu.item.path}</div>
           </div>
-          <div className="px-2 py-2 space-y-1">
+          <div className="umbra-context-menu-legacy-actions space-y-0.5">
             <button
               onClick={() => {
                 openQueueManagerOutputInLibrary(queueOutputMenu.item);
                 setQueueOutputMenu(null);
               }}
-              className="w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] text-zinc-200 hover:bg-white/10"
+              className="w-full px-2.5 py-2 text-left text-zinc-200"
             >
               Open in Gallery
             </button>
@@ -350,7 +350,7 @@ export function PowerPrompterQueueManagerSidePane({
                 pinQueueManagerOutputFolder(queueOutputMenu.item);
                 setQueueOutputMenu(null);
               }}
-              className="w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] text-amber-200 hover:bg-amber-500/15"
+              className="w-full px-2.5 py-2 text-left text-amber-200"
             >
               Pin Folder (Gallery + Filmstrip)
             </button>
@@ -360,7 +360,7 @@ export function PowerPrompterQueueManagerSidePane({
                   void openQueueManagerOutputInExplorer(queueOutputMenu.item);
                   setQueueOutputMenu(null);
                 }}
-                className="w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] text-zinc-300 hover:bg-white/10"
+                className="w-full px-2.5 py-2 text-left text-zinc-300"
               >
                 Reveal Folder in Explorer
               </button>
@@ -370,7 +370,7 @@ export function PowerPrompterQueueManagerSidePane({
                 void sendQueueManagerOutputToTrash(queueOutputMenu.item);
                 setQueueOutputMenu(null);
               }}
-              className="w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] text-red-300 hover:bg-red-500/15"
+              className="w-full px-2.5 py-2 text-left text-red-300 hover:!bg-red-500/15"
             >
               Send to Trash
             </button>
@@ -379,7 +379,7 @@ export function PowerPrompterQueueManagerSidePane({
                 sendQueueManagerOutputToWorkspace(queueOutputMenu.item, 'waifudiffusion');
                 setQueueOutputMenu(null);
               }}
-              className="w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] text-fuchsia-200 hover:bg-fuchsia-500/15"
+              className="w-full px-2.5 py-2 text-left text-fuchsia-200"
             >
               Send to Visual Analysis
             </button>
@@ -388,7 +388,7 @@ export function PowerPrompterQueueManagerSidePane({
                 sendQueueManagerOutputToWorkspace(queueOutputMenu.item, 'scanner');
                 setQueueOutputMenu(null);
               }}
-              className="w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] text-cyan-200 hover:bg-cyan-500/15"
+              className="w-full px-2.5 py-2 text-left text-cyan-200"
             >
               Send to Metadata Scanner
             </button>

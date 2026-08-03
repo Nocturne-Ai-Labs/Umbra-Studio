@@ -1,6 +1,23 @@
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 
 import React, { forwardRef, useCallback, useDeferredValue, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  rectSortingStrategy,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { ArrowRight, Ban, Check, ChevronDown, ChevronRight, ChevronUp, Copy, EllipsisVertical, Folder, FolderOpen, GripVertical, ImageIcon, Info, Link2, Loader2, Maximize2, Minimize2, Pencil, Plus, RefreshCw, RotateCw, Scissors, Shuffle, Sparkles, Trash2, X, Zap } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
@@ -52,6 +69,7 @@ import type { PowerPrompterPipelineItem } from '@/components/power-prompter/pipe
 import { usePowerPrompterStageCatalog } from '@/components/power-prompter/pipelines/usePowerPrompterStageCatalog';
 import { UmbraHiresFixControls } from '@/components/umbra-ui/UmbraHiresFixControls';
 import { UmbraDetailerPipelineControls } from '@/components/umbra-ui/UmbraDetailerPipelineControls';
+import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import {
   normalizeUmbraUiPipelineCapabilities,
   normalizeUmbraUiPipelineSelection,
@@ -193,6 +211,82 @@ interface ChainSlot {
   type: PowerPrompterCardType;
   label: string;
   variants: PowerPrompterCardNode[];
+}
+
+interface CardPickerSortableItemProps {
+  activePromptCount: number;
+  activeQueueSet: number;
+  disabled: boolean;
+  isActive: boolean;
+  label: string;
+  mobileSelectionMode: boolean;
+  onSelect: () => void;
+  slotId: string;
+}
+
+function CardPickerSortableItem({
+  activePromptCount,
+  activeQueueSet,
+  disabled,
+  isActive,
+  label,
+  mobileSelectionMode,
+  onSelect,
+  slotId,
+}: CardPickerSortableItemProps) {
+  const {
+    attributes,
+    isDragging,
+    isOver,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id: slotId, disabled });
+
+  return (
+    <div
+      data-active={isActive ? '1' : '0'}
+      data-enabled={activePromptCount > 0 ? '1' : '0'}
+      className={mobileSelectionMode ? undefined : `min-w-0 rounded-lg transition-colors ${isOver && !isDragging ? 'ring-2 ring-emerald-300/75' : ''}`}
+      style={{
+        opacity: isDragging ? 0.72 : 1,
+        position: 'relative',
+        transform: CSS.Transform.toString(transform),
+        transition,
+        zIndex: isDragging ? 2 : 1,
+      }}
+    >
+      <button
+        ref={setNodeRef}
+        type="button"
+        onClick={onSelect}
+        className={mobileSelectionMode ? undefined : `flex min-h-[4.4rem] w-full min-w-0 items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
+          isActive
+            ? 'border-emerald-400/65 bg-emerald-500/[0.14] text-white'
+            : activePromptCount > 0
+              ? 'border-amber-300/40 bg-amber-500/[0.07] text-zinc-100 hover:border-amber-200/70'
+              : 'border-white/10 bg-white/[0.035] text-zinc-300 hover:border-white/25'
+        } ${disabled ? '' : 'cursor-grab touch-none active:cursor-grabbing'}`}
+        title={`${label}: ${activePromptCount} enabled variant${activePromptCount === 1 ? '' : 's'} in Set ${activeQueueSet}. Drag this card to reorder.`}
+        {...attributes}
+        {...listeners}
+      >
+        {!mobileSelectionMode ? <GripVertical size={14} className="pointer-events-none shrink-0 text-zinc-500" /> : null}
+        <span className="min-w-0 flex-1">
+          <strong className={mobileSelectionMode ? undefined : 'block truncate text-[12px] font-bold'}>{label}</strong>
+          <small className={mobileSelectionMode ? undefined : 'mt-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500'}>
+            {activePromptCount} enabled in Set {activeQueueSet}
+          </small>
+        </span>
+        <span className={mobileSelectionMode ? undefined : `inline-flex min-w-8 h-8 shrink-0 items-center justify-center rounded-full border text-[11px] font-black ${
+          activePromptCount > 0
+            ? 'border-amber-300/40 bg-amber-500/10 text-amber-100'
+            : 'border-white/10 bg-white/[0.04] text-zinc-500'
+        }`}>{activePromptCount}</span>
+      </button>
+    </div>
+  );
 }
 
 const QUEUE_TRAVERSAL_ROLE_ORDER: PowerPrompterQueueTraversalRole[] = ['hold', 'cycle', 'fast'];
@@ -2702,6 +2796,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const [variantViewportMetricsBySlotId, setVariantViewportMetricsBySlotId] = useState<Record<string, VariantViewportMetrics>>({});
   const [slotChipDragId, setSlotChipDragId] = useState('');
   const [slotChipDropId, setSlotChipDropId] = useState('');
+  const cardPickerSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
   const variantDragRef = useRef<VariantDragState | null>(null);
   const outputPreviewLoadSeqRef = useRef(0);
   const outputPreviewItemsRef = useRef<OutputPreviewItem[]>([]);
@@ -5388,12 +5486,20 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
 
   const openModelBrowser = useCallback(() => {
     clearModelBrowserInfoClickTimer();
+    const currentModel = normalizeLoraCatalogPath(generation.checkpointName || '');
+    const currentAliases = new Set(getCatalogAliasKeys(currentModel));
+    const catalogMatch = currentModel
+      ? modelCatalogEntries.find((entry) => getCatalogAliasKeys(entry.path).some((alias) => currentAliases.has(alias)))
+      : null;
+    const detectedType = normalizePowerPrompterModelType(
+      catalogMatch?.modelType || (currentModel ? inferModelTypeFromCatalogPath(currentModel) : generation.modelType),
+    );
     setIsModelBrowserOpen(true);
-    setModelBrowserType(normalizePowerPrompterModelType(generation.modelType));
+    setModelBrowserType(detectedType);
     setModelBrowserSearch('');
     setModelBrowserRootPath('');
     setModelBrowserFolder('');
-    setModelBrowserSelectedPath(generation.checkpointName || '');
+    setModelBrowserSelectedPath(catalogMatch?.path || currentModel);
     setModelBrowserAvailableRoots([]);
     setModelBrowserFsFolders([]);
     setModelBrowserExpandedFolders(['']);
@@ -5402,7 +5508,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     if (modelCatalogEntries.length === 0) {
       void onRefreshModelCatalog?.(false);
     }
-  }, [clearModelBrowserInfoClickTimer, generation.checkpointName, generation.modelType, modelCatalogEntries.length, onRefreshModelCatalog]);
+  }, [clearModelBrowserInfoClickTimer, generation.checkpointName, generation.modelType, modelCatalogEntries, onRefreshModelCatalog]);
 
   const toggleModelFolderExpanded = useCallback((folderPath: string) => {
     const normalized = normalizeLoraCatalogPath(folderPath);
@@ -5665,9 +5771,11 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     clearModelBrowserInfoClickTimer();
     const normalized = normalizeLoraCatalogPath(filePath);
     setModelBrowserSelectedPath(normalized);
-    if (modelBrowserType !== 'checkpoint') return;
+    const selectedEntry = modelBrowserVisibleFiles.find((entry) => entry.path === normalized);
+    const selectedType = normalizePowerPrompterModelType(selectedEntry?.modelType || inferModelTypeFromCatalogPath(normalized));
+    if (selectedType !== 'checkpoint') return;
     void openModelInfo(normalized);
-  }, [clearModelBrowserInfoClickTimer, modelBrowserType, openModelInfo]);
+  }, [clearModelBrowserInfoClickTimer, modelBrowserVisibleFiles, openModelInfo]);
 
   const resolveCatalogPathByName = useCallback((rawPath: string, catalogPaths: string[]): string => {
     const normalized = normalizeLoraCatalogPath(rawPath);
@@ -5704,6 +5812,31 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
 
     return normalizeForRoute(normalized);
   }, [modelBrowserType, modelCatalogEntries]);
+
+  const applyModelBrowserSelection = useCallback((entry: LoraBrowserFileEntry) => {
+    const selectedModelType = normalizePowerPrompterModelType(
+      entry.modelType || inferModelTypeFromCatalogPath(entry.path),
+    );
+    const resolvedModel = resolveModelSelection(entry.path, selectedModelType);
+    const nextPipeline = normalizeUmbraUiPipelineSelection({
+      ...document.pipeline,
+      modelSource: selectedModelType,
+    }, {
+      feature: 'txt2img',
+      modelFamily: document.modelType,
+      modelSource: selectedModelType,
+    });
+    onChange({
+      ...document,
+      pipeline: nextPipeline,
+      generation: normalizePowerPrompterGenerationControls({
+        ...generation,
+        modelType: selectedModelType,
+        checkpointName: resolvedModel || entry.path,
+      }),
+      updatedAt: getNowIso(),
+    });
+  }, [document, generation, onChange, resolveModelSelection]);
 
   const requestLoraThumbnailPick = useCallback((loraPath: string) => {
     const normalized = resolveCatalogPathByName(loraPath, loraCatalogSafetensors);
@@ -6720,8 +6853,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     const fromIndex = slots.findIndex((slot) => slot.slotId === dragSlotId);
     const dropIndex = slots.findIndex((slot) => slot.slotId === dropSlotId);
     if (fromIndex < 0 || dropIndex < 0 || fromIndex === dropIndex) return;
-    const targetIndex = fromIndex < dropIndex ? Math.max(0, dropIndex - 1) : dropIndex;
-    moveSlot(dragSlotId, targetIndex);
+    moveSlot(dragSlotId, dropIndex);
   }, [slots, moveSlot]);
 
   const moveVariantWithinSlot = useCallback((slotId: string, variantId: string, rawIndex: number) => {
@@ -7927,9 +8059,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     () => imagePipelines.filter((entry) => entry.modelFamilyKey === pipelineSelection.modelFamilyKey),
     [imagePipelines, pipelineSelection.modelFamilyKey],
   );
-  const supportedPipelineSources = useMemo(() => Array.from(new Set(
-    selectedFamilyPipelines.flatMap((entry) => entry.modelSources),
-  )), [selectedFamilyPipelines]);
   const selectedPipeline = useMemo(() => selectedFamilyPipelines
     .filter((entry) => entry.modelSources.includes(pipelineSelection.modelSource))
     .sort((left, right) => right.priority - left.priority)[0] || null,
@@ -8510,7 +8639,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 <label className="block text-[10px] uppercase tracking-widest text-zinc-400">
                   Model Family
                   <div className="relative mt-1">
-                    <select
+                    <UmbraSelectControl
                       value={pipelineSelection.modelFamilyKey}
                       onChange={(event) => updatePipelineSelection(event.target.value)}
                       onClick={(event) => event.stopPropagation()}
@@ -8521,28 +8650,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       {pipelineFamilies.map((family) => (
                         <option key={`pipeline-family-${family.key}`} value={family.key}>{family.label}</option>
                       ))}
-                    </select>
-                    <ChevronDown size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400" />
-                  </div>
-                </label>
-                <label className="block text-[10px] uppercase tracking-widest text-zinc-400">
-                  Model Source
-                  <div className="relative mt-1">
-                    <select
-                      value={pipelineSelection.modelSource}
-                      disabled={!pipelineSelection.modelFamilyKey || supportedPipelineSources.length <= 0}
-                      onChange={(event) => updatePipelineSelection(
-                        pipelineSelection.modelFamilyKey,
-                        event.target.value as UmbraUiPipelineModelSource,
-                      )}
-                      onClick={(event) => event.stopPropagation()}
-                      onMouseDown={(event) => event.stopPropagation()}
-                      className={`w-full appearance-none rounded border border-white/20 bg-black/45 px-2 py-1.5 pr-7 text-[11px] text-zinc-200 focus:border-cyan-300 focus:outline-none disabled:cursor-not-allowed disabled:opacity-45 ${UMBRA_THEMED_SELECT_CLASS}`}
-                    >
-                      {supportedPipelineSources.map((source) => (
-                        <option key={`pipeline-source-${source}`} value={source}>{POWER_PROMPTER_MODEL_BROWSER_LABELS[source]}</option>
-                      ))}
-                    </select>
+                    </UmbraSelectControl>
                     <ChevronDown size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400" />
                   </div>
                 </label>
@@ -8665,7 +8773,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     <label className="text-[10px] uppercase tracking-widest text-zinc-400">
                       Mode
                       <div className="relative mt-1">
-                        <select
+                        <UmbraSelectControl
                           value={generation.controlAfterGenerate}
                           onChange={(event) => updateGeneration({ controlAfterGenerate: event.target.value as PowerPrompterGenerationControls['controlAfterGenerate'] })}
                           onClick={(event) => event.stopPropagation()}
@@ -8676,16 +8784,16 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                           <option value="increment">Increment</option>
                           <option value="decrement">Decrement</option>
                           <option value="randomize">Randomize</option>
-                        </select>
+                        </UmbraSelectControl>
                         <ChevronDown size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400" />
                       </div>
                     </label>
                   </div>
 
-                  {generation.controlAfterGenerate === 'increment' ? (
+                  {generation.controlAfterGenerate === 'increment' || generation.controlAfterGenerate === 'decrement' ? (
                     <div className="space-y-1">
                       <span className="text-[10px] uppercase tracking-widest text-zinc-400">
-                        Increment By
+                        {generation.controlAfterGenerate === 'decrement' ? 'Decrement By' : 'Increment By'}
                       </span>
                       <div className="grid grid-cols-3 gap-1 rounded border border-white/10 bg-black/20 p-1">
                         {([1, 100, 1000] as PowerPrompterSeedIncrement[]).map((increment) => (
@@ -8702,7 +8810,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                 : 'border-transparent text-zinc-500 hover:border-white/15 hover:text-zinc-200'
                             }`}
                           >
-                            +{increment.toLocaleString('en-US')}
+                            {generation.controlAfterGenerate === 'decrement' ? '-' : '+'}{increment.toLocaleString('en-US')}
                           </button>
                         ))}
                       </div>
@@ -8756,41 +8864,27 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   <div className="grid grid-cols-2 gap-2">
                     <label className="text-[10px] uppercase tracking-widest text-zinc-400">
                       Sampler
-                      <div className="relative mt-1">
-                        <select
-                          value={generation.samplerName}
-                          onChange={(event) => updateGeneration({ samplerName: event.target.value })}
-                          onClick={(event) => event.stopPropagation()}
-                          onMouseDown={(event) => event.stopPropagation()}
-                          className={`w-full appearance-none bg-black/45 border border-white/20 rounded px-2 py-1.5 pr-7 text-[11px] text-zinc-200 focus:outline-none focus:border-cyan-300 ${UMBRA_THEMED_SELECT_CLASS}`}
-                        >
-                          {POWER_PROMPTER_SAMPLER_OPTIONS.map((option) => (
-                            <option key={`generation-sampler-${option}`} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400" />
-                      </div>
+                      <UmbraSelect
+                        className="mt-1"
+                        value={generation.samplerName}
+                        onValueChange={(samplerName) => updateGeneration({ samplerName })}
+                        ariaLabel="Sampler"
+                        menuTitle="Sampler"
+                        options={POWER_PROMPTER_SAMPLER_OPTIONS.map((option) => ({ value: option, label: option }))}
+                        size="sm"
+                      />
                     </label>
                     <label className="text-[10px] uppercase tracking-widest text-zinc-400">
                       Scheduler
-                      <div className="relative mt-1">
-                        <select
-                          value={generation.scheduler}
-                          onChange={(event) => updateGeneration({ scheduler: event.target.value })}
-                          onClick={(event) => event.stopPropagation()}
-                          onMouseDown={(event) => event.stopPropagation()}
-                          className={`w-full appearance-none bg-black/45 border border-white/20 rounded px-2 py-1.5 pr-7 text-[11px] text-zinc-200 focus:outline-none focus:border-cyan-300 ${UMBRA_THEMED_SELECT_CLASS}`}
-                        >
-                          {POWER_PROMPTER_SCHEDULER_OPTIONS.map((option) => (
-                            <option key={`generation-scheduler-${option}`} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400" />
-                      </div>
+                      <UmbraSelect
+                        className="mt-1"
+                        value={generation.scheduler}
+                        onValueChange={(scheduler) => updateGeneration({ scheduler })}
+                        ariaLabel="Scheduler"
+                        menuTitle="Scheduler"
+                        options={POWER_PROMPTER_SCHEDULER_OPTIONS.map((option) => ({ value: option, label: option }))}
+                        size="sm"
+                      />
                     </label>
                   </div>
 
@@ -8812,7 +8906,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   <label className="block text-[10px] uppercase tracking-widest text-zinc-400">
                     Aspect Ratio
                     <div className="relative mt-1">
-                      <select
+                      <UmbraSelectControl
                         value={generation.aspectRatio}
                         onChange={(event) => {
                           const aspectRatio = event.target.value;
@@ -8828,7 +8922,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                             {option}
                           </option>
                         ))}
-                      </select>
+                      </UmbraSelectControl>
                       <ChevronDown size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400" />
                     </div>
                   </label>
@@ -8978,7 +9072,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                   {targetIndex + 1}
                                 </span>
                                 <div className="relative min-w-0 flex-1">
-                                  <select
+                                  <UmbraSelectControl
                                     value={target.aspectRatio}
                                     onChange={(event) => {
                                       const aspectRatio = event.target.value;
@@ -8995,7 +9089,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                     {POWER_PROMPTER_ASPECT_RATIO_OPTIONS.map((option) => (
                                       <option key={`${target.id}-${option}`} value={option}>{option}</option>
                                     ))}
-                                  </select>
+                                  </UmbraSelectControl>
                                   <ChevronDown size={11} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500" />
                                 </div>
                                 <span className="w-9 shrink-0 text-right text-[10px] font-black text-cyan-200">
@@ -9539,7 +9633,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                             const cardNameOptionsForSlot = cardNameSelectOptions.filter((entry) => !isReservedStyleLabel(entry));
                             const hasExactOption = cardNameOptionsForSlot.some((entry) => normalizeCustomGroupName(entry) === normalizeCustomGroupName(slotNameValue));
                             return (
-                          <select
+                          <UmbraSelectControl
                             data-umbra-card-name-select=""
                             value={slotNameValue}
                             onChange={(event) => {
@@ -9566,7 +9660,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                 {optionLabel}
                               </option>
                             ))}
-                          </select>
+                          </UmbraSelectControl>
                             );
                           })()}
                           <ChevronDown size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400" />
@@ -10636,74 +10730,41 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 <X size={16} />
               </button>
             </div>
-            <div data-umbra-mobile-card-picker-grid="" className={mobileSelectionMode ? undefined : 'grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-y-auto overscroll-contain p-3 custom-scrollbar sm:grid-cols-2 xl:grid-cols-3'}>
-              {cardNavEntries.map(({ slot, slotIndex, activePromptCount }) => {
-                const isActive = activeSlot?.slotId === slot.slotId;
-                const isDropTarget = !!slotChipDragId && slotChipDropId === slot.slotId && slotChipDragId !== slot.slotId;
-                const label = String(slot.label || `Card ${slotIndex + 1}`).trim() || `Card ${slotIndex + 1}`;
-                return (
-                  <div
-                    key={`mobile-card-picker-${slot.slotId}`}
-                    draggable={!mobileSelectionMode && !touchRemoteMode}
-                    data-active={isActive ? '1' : '0'}
-                    data-enabled={activePromptCount > 0 ? '1' : '0'}
-                    onDragStart={(event) => {
-                      event.stopPropagation();
-                      setSlotChipDragId(slot.slotId);
-                      setSlotChipDropId(slot.slotId);
-                      event.dataTransfer.effectAllowed = 'move';
-                      event.dataTransfer.setData('text/plain', `slot-chip:${slot.slotId}`);
-                    }}
-                    onDragOver={(event) => {
-                      if (!slotChipDragId || slotChipDragId === slot.slotId) return;
-                      event.preventDefault();
-                      event.stopPropagation();
-                      event.dataTransfer.dropEffect = 'move';
-                      setSlotChipDropId(slot.slotId);
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      const raw = String(event.dataTransfer.getData('text/plain') || '');
-                      const parsed = raw.startsWith('slot-chip:') ? raw.slice('slot-chip:'.length).trim() : '';
-                      const dragId = slotChipDragId || parsed;
-                      if (dragId && dragId !== slot.slotId) moveSlotByChipDrag(dragId, slot.slotId);
-                      setSlotChipDragId('');
-                      setSlotChipDropId('');
-                    }}
-                    onDragEnd={() => {
-                      setSlotChipDragId('');
-                      setSlotChipDropId('');
-                    }}
-                    className={mobileSelectionMode ? undefined : `min-w-0 rounded-lg transition-colors ${isDropTarget ? 'ring-2 ring-emerald-300/75' : ''}`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => selectPromptCard(slot, slotIndex)}
-                      className={mobileSelectionMode ? undefined : `flex min-h-[4.4rem] w-full min-w-0 items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
-                      isActive
-                        ? 'border-emerald-400/65 bg-emerald-500/[0.14] text-white'
-                        : activePromptCount > 0
-                          ? 'border-amber-300/40 bg-amber-500/[0.07] text-zinc-100 hover:border-amber-200/70'
-                          : 'border-white/10 bg-white/[0.035] text-zinc-300 hover:border-white/25'
-                    }`}
-                      title={`${label}: ${activePromptCount} enabled variant${activePromptCount === 1 ? '' : 's'} in Set ${activeQueueSet}. Drag this card to reorder.`}
-                    >
-                      {!mobileSelectionMode ? <GripVertical size={14} className="shrink-0 text-zinc-600" /> : null}
-                    <span className="min-w-0 flex-1">
-                      <strong className={mobileSelectionMode ? undefined : 'block truncate text-[12px] font-bold'}>{label}</strong>
-                      <small className={mobileSelectionMode ? undefined : 'mt-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500'}>{activePromptCount} enabled in Set {activeQueueSet}</small>
-                    </span>
-                    <span className={mobileSelectionMode ? undefined : `inline-flex min-w-8 h-8 shrink-0 items-center justify-center rounded-full border text-[11px] font-black ${
-                      activePromptCount > 0
-                        ? 'border-amber-300/40 bg-amber-500/10 text-amber-100'
-                        : 'border-white/10 bg-white/[0.04] text-zinc-500'
-                    }`}>{activePromptCount}</span>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+            <DndContext
+              collisionDetection={closestCenter}
+              sensors={cardPickerSensors}
+              onDragEnd={({ active, over }: DragEndEvent) => {
+                const dragSlotId = String(active.id || '');
+                const dropSlotId = String(over?.id || '');
+                if (dragSlotId && dropSlotId && dragSlotId !== dropSlotId) {
+                  moveSlotByChipDrag(dragSlotId, dropSlotId);
+                }
+              }}
+            >
+              <SortableContext
+                items={cardNavEntries.map(({ slot }) => slot.slotId)}
+                strategy={rectSortingStrategy}
+              >
+                <div data-umbra-mobile-card-picker-grid="" className={mobileSelectionMode ? undefined : 'grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-y-auto overscroll-contain p-3 custom-scrollbar sm:grid-cols-2 xl:grid-cols-3'}>
+                  {cardNavEntries.map(({ slot, slotIndex, activePromptCount }) => {
+                    const label = String(slot.label || `Card ${slotIndex + 1}`).trim() || `Card ${slotIndex + 1}`;
+                    return (
+                      <CardPickerSortableItem
+                        key={`mobile-card-picker-${slot.slotId}`}
+                        activePromptCount={activePromptCount}
+                        activeQueueSet={activeQueueSet}
+                        disabled={mobileSelectionMode || touchRemoteMode}
+                        isActive={activeSlot?.slotId === slot.slotId}
+                        label={label}
+                        mobileSelectionMode={mobileSelectionMode}
+                        onSelect={() => selectPromptCard(slot, slotIndex)}
+                        slotId={slot.slotId}
+                      />
+                    );
+                  })}
+                </div>
+              </SortableContext>
+            </DndContext>
             <div data-umbra-mobile-card-picker-actions="" className={mobileSelectionMode ? undefined : 'flex justify-end border-t border-white/[0.08] px-3 py-3'}>
               <button
                 type="button"
@@ -11622,7 +11683,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
 
       {loraBrowserFileMenu && loraBrowserMenuFile && (
         <div
-          className="fixed z-[12021] w-[300px] rounded-xl border border-white/15 bg-[#050508] shadow-2xl shadow-black/70"
+          className="umbra-context-menu-panel fixed z-[12021] w-[300px] p-1"
           style={{ left: `${loraBrowserFileMenuLeft}px`, top: `${loraBrowserFileMenuTop}px` }}
           onMouseDown={(event) => {
             event.stopPropagation();
@@ -11630,11 +11691,11 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
           }}
           onContextMenu={(event) => event.preventDefault()}
         >
-          <div className="px-3 py-2 border-b border-white/10">
-            <div className="text-[11px] font-bold text-zinc-200 truncate">{loraBrowserMenuFile.name}</div>
-            <div className="text-[10px] text-zinc-500 truncate">{loraBrowserMenuFile.path}</div>
+          <div className="umbra-context-menu-header -mx-1 -mt-1 mb-1 px-3 py-2.5">
+            <div className="umbra-context-menu-title truncate">{loraBrowserMenuFile.name}</div>
+            <div className="umbra-context-menu-subtitle mt-0.5 truncate normal-case tracking-normal">{loraBrowserMenuFile.path}</div>
           </div>
-          <div className="py-1.5">
+          <div className="umbra-context-menu-legacy-actions space-y-0.5">
             <button
               onMouseDown={(event) => {
                 event.preventDefault();
@@ -11644,7 +11705,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 void openLoraInfo(loraBrowserMenuFile.path);
                 setLoraBrowserFileMenu(null);
               }}
-              className="w-full px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 hover:bg-white/5"
+              className="w-full px-2.5 py-2 text-left text-zinc-200"
             >
               View LoRA Info
             </button>
@@ -11657,7 +11718,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 addLoraEntry(loraBrowserMenuFile.path);
                 setLoraBrowserFileMenu(null);
               }}
-              className="w-full px-3 py-2 text-left text-[11px] font-semibold text-cyan-200 hover:bg-cyan-500/10"
+              className="w-full px-2.5 py-2 text-left text-cyan-200"
             >
               Add LoRA
             </button>
@@ -11667,7 +11728,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
 
       {loraBrowserFolderMenu && loraBrowserMenuFolder && (
         <div
-          className="fixed z-[12021] w-[300px] rounded-xl border border-white/15 bg-[#050508] shadow-2xl shadow-black/70"
+          className="umbra-context-menu-panel fixed z-[12021] w-[300px] p-1"
           style={{ left: `${loraBrowserFolderMenuLeft}px`, top: `${loraBrowserFolderMenuTop}px` }}
           onMouseDown={(event) => {
             event.stopPropagation();
@@ -11675,11 +11736,11 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
           }}
           onContextMenu={(event) => event.preventDefault()}
         >
-          <div className="px-3 py-2 border-b border-white/10">
-            <div className="text-[11px] font-bold text-zinc-200 truncate">{loraBrowserMenuFolder.label}</div>
-            <div className="text-[10px] text-zinc-500 truncate">{loraBrowserMenuFolder.path || 'Root'}</div>
+          <div className="umbra-context-menu-header -mx-1 -mt-1 mb-1 px-3 py-2.5">
+            <div className="umbra-context-menu-title truncate">{loraBrowserMenuFolder.label}</div>
+            <div className="umbra-context-menu-subtitle mt-0.5 truncate normal-case tracking-normal">{loraBrowserMenuFolder.path || 'Root'}</div>
           </div>
-          <div className="py-1.5">
+          <div className="umbra-context-menu-legacy-actions space-y-0.5">
             <button
               onMouseDown={(event) => {
                 event.preventDefault();
@@ -11689,7 +11750,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 setLoraBrowserFolder(loraBrowserMenuFolder.path);
                 setLoraBrowserFolderMenu(null);
               }}
-              className="w-full px-3 py-2 text-left text-[11px] font-semibold text-cyan-200 hover:bg-cyan-500/10"
+              className="w-full px-2.5 py-2 text-left text-cyan-200"
             >
               Select Folder
             </button>
@@ -11703,7 +11764,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   void openLoraFolderInExplorer(loraBrowserMenuFolder.path);
                   setLoraBrowserFolderMenu(null);
                 }}
-                className="w-full px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 hover:bg-white/5"
+                className="w-full px-2.5 py-2 text-left text-zinc-200"
               >
                 Show in File Explorer
               </button>
@@ -11771,7 +11832,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
               </div>
               <label data-umbra-model-picker-mobile-folder className="relative mt-2 hidden items-center">
                 <FolderOpen size={14} className="pointer-events-none absolute left-3 text-zinc-500" />
-                <select
+                <UmbraSelectControl
                   value={loraBrowserFolder}
                   onChange={(event) => setLoraBrowserFolder(event.target.value)}
                   className="w-full appearance-none rounded-md border border-white/15 bg-black/40 py-2 pl-9 pr-8 text-[12px] text-zinc-200 focus:border-cyan-300 focus:outline-none"
@@ -11782,7 +11843,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       {folderEntry.path || 'All LoRAs'} ({folderEntry.fileCount})
                     </option>
                   ))}
-                </select>
+                </UmbraSelectControl>
               </label>
             </div>
             <div data-umbra-model-picker-catalog className="flex-1 min-h-0 flex">
@@ -12011,7 +12072,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
               </div>
               <label data-umbra-model-picker-mobile-folder className="relative mt-2 hidden items-center">
                 <FolderOpen size={14} className="pointer-events-none absolute left-3 text-zinc-500" />
-                <select
+                <UmbraSelectControl
                   value={modelBrowserFolder}
                   onChange={(event) => setModelBrowserFolder(event.target.value)}
                   className="w-full appearance-none rounded-md border border-white/15 bg-black/40 py-2 pl-9 pr-8 text-[12px] text-zinc-200 focus:border-cyan-300 focus:outline-none"
@@ -12022,7 +12083,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       {folderEntry.path || 'All Models'} ({folderEntry.fileCount})
                     </option>
                   ))}
-                </select>
+                </UmbraSelectControl>
               </label>
             </div>
             <div data-umbra-model-picker-catalog className="flex-1 min-h-0 flex">
@@ -12160,13 +12221,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 <button
                   data-umbra-model-picker-confirm
                   onClick={() => {
-                    if (!modelBrowserSelectedFile?.path) return;
-                    const selectedModelType = normalizePowerPrompterModelType(modelBrowserSelectedFile.modelType || modelBrowserType);
-                    const resolvedModel = resolveModelSelection(modelBrowserSelectedFile.path, selectedModelType);
-                    updateGeneration({
-                      modelType: selectedModelType,
-                      checkpointName: resolvedModel || modelBrowserSelectedFile.path,
-                    });
+                    if (!modelBrowserSelectedFile) return;
+                    applyModelBrowserSelection(modelBrowserSelectedFile);
                     setIsModelBrowserOpen(false);
                   }}
                   disabled={!modelBrowserSelectedFile}

@@ -284,6 +284,7 @@ export interface UmbraImageQueueOptions {
   tiledVae: PowerPrompterTiledVaeControls;
   loras: UmbraUiLoraEntry[];
   outputMode?: 'txt2img' | 'img2img';
+  outputFolder?: string;
   sourceImagePath?: string;
   sourceImageName?: string;
   denoise?: number;
@@ -1525,6 +1526,9 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       mediaType: 'image',
       outputOwner: 'umbra_ui',
       outputMode: feature,
+      outputFolder: feature === 'txt2img'
+        ? String(options.outputFolder || '').trim().replace(/\\/g, '/')
+        : '',
       img2img: {
         sourceImagePath: String(options.sourceImagePath || '').trim().replace(/\\/g, '/'),
         sourceImageName: String(options.sourceImageName || '').trim().replace(/\\/g, '/'),

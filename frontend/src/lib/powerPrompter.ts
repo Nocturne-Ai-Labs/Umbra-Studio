@@ -313,6 +313,7 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
   mediaType: 'image',
   outputOwner: 'power_prompter',
   outputMode: 'txt2img',
+  outputFolder: '',
   img2img: {
     sourceImagePath: '',
     sourceImageName: '',
@@ -1156,6 +1157,7 @@ export function normalizePowerPrompterGenerationControls(rawControls: unknown): 
       ? 'umbra_ui'
       : 'power_prompter',
     outputMode,
+    outputFolder: String((controls as any).outputFolder || '').trim().replace(/\\/g, '/').slice(0, 4096),
     img2img: {
       sourceImagePath: String((controls as any).img2img?.sourceImagePath || '').trim().replace(/\\/g, '/'),
       sourceImageName: String((controls as any).img2img?.sourceImageName || '').trim().replace(/\\/g, '/'),

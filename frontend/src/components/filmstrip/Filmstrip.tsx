@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
@@ -564,15 +565,15 @@ function FilmstripMenu({
   return (
     <div
       ref={menuRef}
-      className="fixed z-[10010] w-64 overflow-hidden rounded border border-zinc-700 bg-zinc-950/98 p-1 shadow-2xl backdrop-blur-md"
+      className="umbra-context-menu-panel fixed z-[10010] w-64 overflow-hidden p-1"
       style={{ left: state.x, top: state.y, visibility: 'hidden' }}
       role="menu"
     >
-      <div className="border-b border-zinc-800 px-2.5 py-2">
-        <div className="truncate text-xs font-medium text-zinc-100">{target?.name || 'Selection'}</div>
-        <div className="mt-0.5 text-[11px] text-zinc-500">{count} selected</div>
+      <div className="umbra-context-menu-header -mx-1 -mt-1 mb-1 px-3 py-2.5">
+        <div className="umbra-context-menu-title truncate">{target?.name || 'Selection'}</div>
+        <div className="umbra-context-menu-subtitle mt-0.5">{count} selected</div>
       </div>
-      <div className="py-1">
+      <div className="space-y-0.5">
         {actions.map((action, index) => (
           <button
             key={`${action.label}-${index}`}
@@ -584,15 +585,13 @@ function FilmstripMenu({
               onClose();
             }}
             className={cn(
-              'flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs transition-colors',
-              action.danger
-                ? 'text-red-300 hover:bg-red-500/12 hover:text-red-100'
-                : 'text-zinc-300 hover:bg-white/7 hover:text-white',
+              'umbra-context-menu-item flex w-full items-center gap-2 px-2.5 py-2 text-left',
               action.disabled && 'cursor-not-allowed opacity-40 hover:bg-transparent',
             )}
+            data-danger={action.danger ? 'true' : 'false'}
             role="menuitem"
           >
-            <span className="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-500">
+            <span className="umbra-context-menu-icon flex h-4 w-4 shrink-0 items-center justify-center">
               {action.icon || <MoreHorizontal size={14} />}
             </span>
             <span className="truncate">{action.label}</span>
@@ -1329,7 +1328,7 @@ export function Filmstrip({
             </button>
           )}
 
-          <select
+          <UmbraSelectControl
             value={sortField}
             onChange={(event) => onSortChange?.(event.target.value as SortField, sortDirection)}
             className="h-7 rounded border border-zinc-800 bg-zinc-900 px-2 text-xs text-zinc-200 outline-none focus:border-[var(--umbra-accent)]"
@@ -1338,7 +1337,7 @@ export function Filmstrip({
             {SORT_OPTIONS.map((option) => (
               <option key={option.field} value={option.field}>{option.label}</option>
             ))}
-          </select>
+          </UmbraSelectControl>
 
           <button
             type="button"

@@ -24,6 +24,7 @@ const COMFY_NODES = [
     { name: 'comfyui-inpaint-nodes', repo: 'https://github.com/Acly/comfyui-inpaint-nodes.git', desc: 'Inpainting and generative fill nodes', required: true },
     { name: 'comfyui_controlnet_aux', repo: 'https://github.com/Fannovel16/comfyui_controlnet_aux.git', desc: 'ControlNet preprocessing and live control workflows', required: true },
     { name: 'ComfyUI_IPAdapter_plus', repo: 'https://github.com/cubiq/ComfyUI_IPAdapter_plus.git', desc: 'IP-Adapter reference-image conditioning', required: true },
+    { name: 'ComfyUI-Anima-LLLite', repo: 'https://github.com/kohya-ss/ComfyUI-Anima-LLLite.git', desc: 'Anima LLLite control and inpainting adapters', required: true },
     { name: 'ComfyUI-Inpaint-CropAndStitch', repo: 'https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch.git', desc: 'Crop and stitch nodes for inpainting workflows' },
     { name: 'ComfyUI_ComfyRoll_CustomNodes', repo: 'https://github.com/Suzie1/ComfyUI_Comfyroll_CustomNodes.git', desc: 'Animation and batch processing nodes' },
     { name: 'ComfyUI-Inspire-Pack', repo: 'https://github.com/ltdrdata/ComfyUI-Inspire-Pack.git', desc: 'Advanced prompt and regional control' },

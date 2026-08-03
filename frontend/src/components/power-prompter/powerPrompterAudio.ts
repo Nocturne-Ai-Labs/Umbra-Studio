@@ -2,7 +2,7 @@ import type { PowerPrompterCompletionSoundStyle } from '@/types/powerPrompter';
 import { DEFAULT_POWER_PROMPTER_SETTINGS, POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME } from '@/lib/powerPrompter';
 
 export const POWER_PROMPTER_SOUND_STYLE_GLASS_TICK: PowerPrompterCompletionSoundStyle = 'glass_tick';
-export const POWER_PROMPTER_ALERT_MAX_LINEAR_GAIN = 10 ** (-15 / 20);
+export const POWER_PROMPTER_ALERT_MAX_LINEAR_GAIN = 10 ** (-1 / 20);
 export const POWER_PROMPTER_SOUND_STYLE_OPTIONS: Array<{ id: PowerPrompterCompletionSoundStyle; label: string }> = [
   { id: 'glass_tick', label: 'Glass Tick' },
   { id: 'soft_chime', label: 'Soft Chime' },

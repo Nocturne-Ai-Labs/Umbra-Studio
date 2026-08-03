@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Copy, FolderOpen, Loader2, Send, Sparkles, X } from 'lucide-react';
 import { useStore } from '@/store/useStore';
@@ -393,7 +394,7 @@ export function WaifuTaggerPanel({ imagePath, imageName, onSendToWaifuDiffusion 
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   <label className="text-[11px] umbra-text-faint">
                     Model
-                    <select
+                    <UmbraSelectControl
                       value={waifuOptions.modelRepo}
                       onChange={(e) => setWaifuOptions((prev) => ({ ...prev, modelRepo: e.target.value }))}
                       className="umbra-input mt-1 w-full rounded px-2 py-1 text-xs"
@@ -401,7 +402,7 @@ export function WaifuTaggerPanel({ imagePath, imageName, onSendToWaifuDiffusion 
                       {WAIFU_MODEL_OPTIONS.map((option) => (
                         <option key={option.id} value={option.id}>{option.label}</option>
                       ))}
-                    </select>
+                    </UmbraSelectControl>
                   </label>
                   <label className="text-[11px] umbra-text-faint">
                     Max Tags

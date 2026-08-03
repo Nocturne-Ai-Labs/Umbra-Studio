@@ -5,10 +5,6 @@
     "core": {
       "label": "Core pipeline support",
       "description": "Default person, face, and hand detailer detectors, SAM refinement, general upscaling, and frame interpolation. Installed with managed ComfyUI setup."
-    },
-    "reference": {
-      "label": "SDXL reference conditioning",
-      "description": "Optional large IP-Adapter and CLIP Vision weights for SDXL reference-image layers."
     }
   },
   "models": [
@@ -96,31 +92,6 @@
           "destination": "frame_interpolation/rife_v4.26.safetensors",
           "bytes": 22674688,
           "sha256": "151874592c877740e5db11522f4514df569eeafb0a0fcb2696f16e9e8d317c94"
-        }
-      ]
-    },
-    {
-      "id": "sdxl-ip-adapter-vit-h",
-      "family": "ReferenceConditioning",
-      "creator": "Tencent AI Lab and h94",
-      "repository": "h94/IP-Adapter",
-      "revision": "018e402774aeeddd60609b4ecdb7e298259dc729",
-      "license": "Apache-2.0",
-      "installPolicy": "automatic",
-      "profiles": ["reference"],
-      "purpose": "Optional SDXL IP-Adapter reference-image conditioning",
-      "files": [
-        {
-          "sourcePath": "sdxl_models/ip-adapter_sdxl_vit-h.safetensors",
-          "destination": "ipadapter/ip-adapter_sdxl_vit-h.safetensors",
-          "bytes": 698391064,
-          "sha256": "ebf05d918348aec7abb02a5e9ecef77e0aaea6914a5c4ea13f50d45eb1681831"
-        },
-        {
-          "sourcePath": "models/image_encoder/model.safetensors",
-          "destination": "clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
-          "bytes": 2528373448,
-          "sha256": "6ca9667da1ca9e0b0f75e46bb030f7e011f44f86cbfb8d5a36590fcd7507b030"
         }
       ]
     },

@@ -1,3 +1,4 @@
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Plus, X, Star, Download, CheckSquare, Square, Loader2, FolderPlus, Pencil, History, SlidersHorizontal } from 'lucide-react';
 import { SourceSelector } from './components/SourceSelector';
@@ -514,7 +515,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
           <span className="text-[11px] flex-shrink-0" style={{ color: 'rgba(255,255,255,0.5)' }}>Download to:</span>
 
           <div data-umbra-data-forge-dataset-picker className="flex items-center gap-0.5 flex-shrink-0">
-            <select
+            <UmbraSelectControl
               value={selectedDataset}
               onChange={(e) => setSelectedDataset(e.target.value)}
               className="settings-input !py-1 !text-xs !w-auto min-w-[100px]"
@@ -523,7 +524,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
               {datasets.map(d => (
                 <option key={d.name} value={d.name}>{d.name}</option>
               ))}
-            </select>
+            </UmbraSelectControl>
 
             <button
               onClick={() => setShowNewDatasetModal(true)}

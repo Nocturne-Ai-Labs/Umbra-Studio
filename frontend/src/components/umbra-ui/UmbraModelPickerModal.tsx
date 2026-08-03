@@ -3,7 +3,6 @@
 import React from 'react';
 import {
   Check,
-  ChevronDown,
   Database,
   FolderOpen,
   Image as ImageIcon,
@@ -21,9 +20,15 @@ import type {
   PowerPrompterLoraInfoPayload,
   PowerPrompterModelInfoPayload,
 } from '@/components/power-prompter/powerPrompterSupport';
+import type { PowerPrompterModelType } from '@/types/powerPrompter';
 
 export type UmbraModelPickerKind = 'checkpoint' | 'lora';
 export type UmbraModelPickerInfo = PowerPrompterLoraInfoPayload | PowerPrompterModelInfoPayload;
+
+export interface UmbraModelPickerCatalogItem {
+  path: string;
+  source?: PowerPrompterModelType;
+}
 
 export function shouldAutoFocusUmbraModelPickerSearch(remoteMode: string): boolean {
   return remoteMode !== 'phone';
@@ -32,23 +37,42 @@ export function shouldAutoFocusUmbraModelPickerSearch(remoteMode: string): boole
 interface UmbraModelPickerModalProps {
   open: boolean;
   kind: UmbraModelPickerKind;
-  items: string[];
+  items: Array<string | UmbraModelPickerCatalogItem>;
   selectedValue: string;
+  selectedSource?: PowerPrompterModelType;
   catalogLoading?: boolean;
   onClose: () => void;
   onRefresh?: () => void | Promise<unknown>;
   onRequestInfo?: (name: string, options?: PowerPrompterInfoRequestOptions) => Promise<UmbraModelPickerInfo>;
-  onConfirm: (name: string, info: UmbraModelPickerInfo | null) => void;
+  onConfirm: (name: string, info: UmbraModelPickerInfo | null, source?: PowerPrompterModelType) => void;
   titleOverride?: string;
   searchPlaceholder?: string;
   confirmLabel?: string;
 }
 
 interface CatalogFile {
+  key: string;
   path: string;
   folder: string;
   name: string;
+  source?: PowerPrompterModelType;
 }
+
+const MODEL_SOURCE_LABELS: Record<PowerPrompterModelType, string> = {
+  checkpoint: 'Checkpoints',
+  diffusers: 'Diffusers',
+  diffusion_model: 'Diffusion Models',
+  unet: 'UNet',
+  gguf: 'GGUF',
+};
+
+const MODEL_SOURCE_ORDER: PowerPrompterModelType[] = [
+  'checkpoint',
+  'diffusers',
+  'diffusion_model',
+  'unet',
+  'gguf',
+];
 
 function normalizeCatalogPath(value: unknown): string {
   return String(value || '').trim().replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/{2,}/g, '/');
@@ -221,6 +245,7 @@ export function UmbraModelPickerModal({
   kind,
   items,
   selectedValue,
+  selectedSource,
   catalogLoading = false,
   onClose,
   onRefresh,
@@ -232,6 +257,7 @@ export function UmbraModelPickerModal({
 }: UmbraModelPickerModalProps) {
   const [search, setSearch] = React.useState('');
   const [folder, setFolder] = React.useState('');
+  const [activeSource, setActiveSource] = React.useState<PowerPrompterModelType | undefined>(selectedSource);
   const [selection, setSelection] = React.useState('');
   const [info, setInfo] = React.useState<UmbraModelPickerInfo | null>(null);
   const [infoLoading, setInfoLoading] = React.useState(false);
@@ -259,16 +285,52 @@ export function UmbraModelPickerModal({
     });
   }, [kind]);
 
-  const files = React.useMemo<CatalogFile[]>(() => Array.from(new Set(items
-    .map(normalizeCatalogPath)
-    .filter(Boolean)))
-    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }))
-    .map((path) => ({ path, folder: getFolder(path), name: getFileLabel(path) })), [items]);
+  const files = React.useMemo<CatalogFile[]>(() => {
+    const merged = new Map<string, CatalogFile>();
+    for (const item of items) {
+      const path = normalizeCatalogPath(typeof item === 'string' ? item : item.path);
+      if (!path) continue;
+      const source = typeof item === 'string' ? undefined : item.source;
+      const key = `${source || 'unspecified'}:${path.toLowerCase()}`;
+      merged.set(key, { key, path, folder: getFolder(path), name: getFileLabel(path), source });
+    }
+    return Array.from(merged.values()).sort((a, b) => (
+      a.path.localeCompare(b.path, undefined, { sensitivity: 'base', numeric: true })
+      || String(a.source || '').localeCompare(String(b.source || ''))
+    ));
+  }, [items]);
+
+  const selectedFile = React.useMemo(
+    () => files.find((file) => file.key === selection) || null,
+    [files, selection],
+  );
+  const selectedPath = selectedFile?.path || '';
+
+  const sourceCounts = React.useMemo(() => {
+    const counts = new Map<PowerPrompterModelType, number>();
+    for (const source of MODEL_SOURCE_ORDER) counts.set(source, 0);
+    for (const file of files) {
+      if (file.source) counts.set(file.source, (counts.get(file.source) || 0) + 1);
+    }
+    return counts;
+  }, [files]);
+
+  const availableSources = React.useMemo(
+    () => MODEL_SOURCE_ORDER.filter((source) => (sourceCounts.get(source) || 0) > 0),
+    [sourceCounts],
+  );
+
+  const sourceFiles = React.useMemo(
+    () => kind === 'checkpoint' && activeSource
+      ? files.filter((file) => file.source === activeSource)
+      : files,
+    [activeSource, files, kind],
+  );
 
   const folders = React.useMemo(() => {
     const counts = new Map<string, number>();
-    counts.set('', files.length);
-    for (const file of files) {
+    counts.set('', sourceFiles.length);
+    for (const file of sourceFiles) {
       if (!file.folder) continue;
       const parts = file.folder.split('/');
       for (let index = 1; index <= parts.length; index += 1) {
@@ -279,15 +341,15 @@ export function UmbraModelPickerModal({
     return Array.from(counts.entries())
       .map(([path, count]) => ({ path, count, label: path ? path.split('/').pop() || path : 'All' }))
       .sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: 'base', numeric: true }));
-  }, [files]);
+  }, [sourceFiles]);
 
   const visibleFiles = React.useMemo(() => {
     const query = search.trim().toLowerCase();
-    return files.filter((file) => {
+    return sourceFiles.filter((file) => {
       if (folder && file.folder !== folder && !file.folder.startsWith(`${folder}/`)) return false;
       return !query || file.path.toLowerCase().includes(query);
     });
-  }, [files, folder, search]);
+  }, [folder, search, sourceFiles]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -305,18 +367,31 @@ export function UmbraModelPickerModal({
     if (!open) return;
     const normalizedSelected = normalizeCatalogPath(selectedValue);
     const selectedAliases = new Set(getCatalogAliasKeys(normalizedSelected));
-    const matchedSelection = files.find((file) => (
+    const matchingFiles = files.filter((file) => (
       getCatalogAliasKeys(file.path).some((alias) => selectedAliases.has(alias))
     ));
-    setSelection(matchedSelection?.path || '');
+    const matchedSelection = matchingFiles.find((file) => !selectedSource || file.source === selectedSource)
+      || matchingFiles[0];
+    const nextSource = kind === 'checkpoint'
+      ? matchedSelection?.source || (selectedSource && availableSources.includes(selectedSource) ? selectedSource : availableSources[0])
+      : undefined;
+    setSelection(matchedSelection?.key || '');
+    setActiveSource(nextSource);
     setSearch('');
     setFolder('');
     setInfo(null);
     setInfoError('');
-  }, [files, open, selectedValue]);
+  }, [availableSources, files, kind, open, selectedSource, selectedValue]);
 
   React.useEffect(() => {
-    if (!open || !selection || !onRequestInfo) {
+    if (!open || kind !== 'checkpoint' || !activeSource) return;
+    const selectedInSource = files.some((file) => file.key === selection && file.source === activeSource);
+    if (selectedInSource) return;
+    setSelection(files.find((file) => file.source === activeSource)?.key || '');
+  }, [activeSource, files, kind, open, selection]);
+
+  React.useEffect(() => {
+    if (!open || !selectedFile || !onRequestInfo || (kind === 'checkpoint' && selectedFile.source && selectedFile.source !== 'checkpoint')) {
       setInfo(null);
       setInfoLoading(false);
       return;
@@ -324,11 +399,11 @@ export function UmbraModelPickerModal({
     let canceled = false;
     setInfoLoading(true);
     setInfoError('');
-    void onRequestInfo(selection)
+    void onRequestInfo(selectedPath)
       .then((nextInfo) => {
         if (!canceled) {
           setInfo(nextInfo);
-          cacheInfo(selection, nextInfo);
+          cacheInfo(selectedPath, nextInfo);
         }
       })
       .catch((error) => {
@@ -343,7 +418,7 @@ export function UmbraModelPickerModal({
     return () => {
       canceled = true;
     };
-  }, [cacheInfo, onRequestInfo, open, selection]);
+  }, [cacheInfo, kind, onRequestInfo, open, selectedFile, selectedPath]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -356,8 +431,13 @@ export function UmbraModelPickerModal({
   React.useEffect(() => {
     if (!open || !onRequestInfo) return;
     const targets = Array.from(new Set([
-      ...visibleFiles.slice(0, 24).map((file) => file.path),
-      selection,
+      ...visibleFiles
+        .filter((file) => kind !== 'checkpoint' || !file.source || file.source === 'checkpoint')
+        .slice(0, 24)
+        .map((file) => file.path),
+      ...(selectedFile && (kind !== 'checkpoint' || !selectedFile.source || selectedFile.source === 'checkpoint')
+        ? [selectedFile.path]
+        : []),
     ].map(normalizeCatalogPath).filter(Boolean)));
     if (targets.length <= 0) return;
 
@@ -383,7 +463,7 @@ export function UmbraModelPickerModal({
     return () => {
       canceled = true;
     };
-  }, [cacheInfo, kind, onRequestInfo, open, selection, visibleFiles]);
+  }, [cacheInfo, kind, onRequestInfo, open, selectedFile, visibleFiles]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -397,10 +477,10 @@ export function UmbraModelPickerModal({
   if (!open) return null;
 
   const title = titleOverride || (kind === 'checkpoint' ? 'Checkpoint Browser' : 'LoRA Browser');
-  const displayedInfoMatches = infoMatchesPath(info, selection);
-  const selectedInfo = displayedInfoMatches ? info : findCachedInfo(infoCache, kind, selection);
+  const displayedInfoMatches = infoMatchesPath(info, selectedPath);
+  const selectedInfo = displayedInfoMatches ? info : findCachedInfo(infoCache, kind, selectedPath);
   const previewUrls = Array.from(new Set([
-    ...findThumbnailOverrides(thumbnailOverrides, selection),
+    ...findThumbnailOverrides(thumbnailOverrides, selectedPath),
     ...extractPreviewUrls(selectedInfo),
   ]));
   const selectedPreview = previewUrls.length > 0
@@ -444,7 +524,8 @@ export function UmbraModelPickerModal({
           </button>
         </header>
 
-        <div data-umbra-model-picker-filters className="border-b border-white/10 p-3">
+        <div data-umbra-model-picker-filters className="border-b border-white/10 px-4 py-2">
+          <div className="grid grid-cols-1 gap-2 xl:grid-cols-[1fr_auto]">
           <label className="relative block">
             <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
             <input
@@ -455,22 +536,39 @@ export function UmbraModelPickerModal({
               className="h-10 w-full rounded-md border border-white/10 bg-black/40 pl-9 pr-3 text-[13px] text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-300/45"
             />
           </label>
-          <label data-umbra-model-picker-mobile-folder className="relative mt-2 hidden items-center">
-            <span className="sr-only">Model folder</span>
-            <FolderOpen size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-            <select
-              value={folder}
-              onChange={(event) => setFolder(event.target.value)}
-              className="h-11 w-full appearance-none rounded-md border border-white/10 bg-black/55 pl-9 pr-9 text-sm font-semibold text-zinc-100 outline-none focus:border-cyan-300/45"
-            >
-              {folders.map((entry) => (
-                <option key={entry.path || 'all'} value={entry.path}>
-                  {entry.path ? entry.path : 'All folders'} ({entry.count})
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-          </label>
+          {kind === 'checkpoint' ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-1">
+              {MODEL_SOURCE_ORDER.map((source) => {
+                const count = sourceCounts.get(source) || 0;
+                return (
+                  <button
+                    key={source}
+                    type="button"
+                    disabled={count <= 0}
+                    onClick={() => {
+                      setActiveSource(source);
+                      setFolder('');
+                    }}
+                    className={cn(
+                      'h-10 rounded-md border px-3 text-[10px] font-black uppercase tracking-[0.08em] transition-colors',
+                      activeSource === source
+                        ? 'border-cyan-300/45 bg-cyan-500/[0.12] text-cyan-100'
+                        : 'border-white/10 bg-white/[0.025] text-zinc-500 hover:border-white/25 hover:text-zinc-200',
+                      count <= 0 && 'cursor-not-allowed opacity-35',
+                    )}
+                  >
+                    {MODEL_SOURCE_LABELS[source]} ({count})
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          </div>
+          {kind === 'checkpoint' && activeSource ? (
+            <div className="mt-2 font-mono text-[9px] uppercase tracking-[0.1em] text-zinc-500" title="The selected catalog route is applied with the model">
+              Route: {MODEL_SOURCE_LABELS[activeSource]} via ComfyUI catalog
+            </div>
+          ) : null}
         </div>
 
         <div data-umbra-model-picker-catalog className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] max-md:grid-cols-1 max-md:grid-rows-[128px_minmax(0,1fr)]">
@@ -504,7 +602,7 @@ export function UmbraModelPickerModal({
             ) : (
               <div data-umbra-model-picker-grid className="grid grid-cols-2 gap-3 xl:grid-cols-3">
                 {visibleFiles.map((file) => {
-                  const active = selection === file.path;
+                  const active = selection === file.key;
                   const cardInfo = active && displayedInfoMatches
                     ? info
                     : findCachedInfo(infoCache, kind, file.path);
@@ -523,9 +621,9 @@ export function UmbraModelPickerModal({
                       data-umbra-model-picker-card
                       data-selected={active ? '1' : '0'}
                       type="button"
-                      key={file.path}
-                      onClick={() => setSelection(file.path)}
-                      onDoubleClick={isPhoneRemote ? undefined : () => onConfirm(file.path, active && displayedInfoMatches ? info : null)}
+                      key={file.key}
+                      onClick={() => setSelection(file.key)}
+                      onDoubleClick={isPhoneRemote ? undefined : () => onConfirm(file.path, active && displayedInfoMatches ? info : null, file.source)}
                       className={cn(
                         'min-w-0 overflow-hidden rounded-lg border bg-black/30 text-left transition-colors',
                         active ? 'border-cyan-300/55 bg-cyan-500/[0.1]' : 'border-white/10 hover:border-white/25',
@@ -555,7 +653,7 @@ export function UmbraModelPickerModal({
                             </span>
                           ) : null}
                           <span className="truncate rounded-sm border border-white/10 bg-white/[0.025] px-1.5 py-0.5 font-mono text-[8px] text-zinc-500">
-                            {kind === 'checkpoint' ? 'Model' : 'LoRA'}
+                            {file.source ? MODEL_SOURCE_LABELS[file.source] : kind === 'checkpoint' ? 'Model' : 'LoRA'}
                           </span>
                           {cardInfo?.trainedTags?.length ? (
                             <span className="ml-auto shrink-0 rounded-sm border border-emerald-300/20 bg-emerald-500/[0.06] px-1.5 py-0.5 font-mono text-[8px] text-emerald-100">
@@ -574,9 +672,11 @@ export function UmbraModelPickerModal({
 
         <footer data-umbra-model-picker-footer className="flex min-h-14 items-center gap-3 border-t border-white/10 px-4 max-md:flex-wrap max-md:py-2">
           <div data-umbra-model-picker-selection className="min-w-0 flex-1">
-            <div className="truncate font-mono text-[10px] text-zinc-400">{selection ? `Selected: ${selection}` : 'Nothing selected'}</div>
+            <div className="truncate font-mono text-[10px] text-zinc-400">
+              {selectedFile ? `Selected${selectedFile.source ? ` ${MODEL_SOURCE_LABELS[selectedFile.source]}` : ''}: ${selectedFile.path}` : 'Nothing selected'}
+            </div>
             {infoError ? <div className="truncate text-[9px] text-amber-200/75">{infoError}</div> : null}
-            {selection && selectedPreview ? (
+            {selectedFile && selectedPreview ? (
               <div className="font-mono text-[8px] uppercase tracking-[0.1em] text-cyan-200/65">
                 Preview {previewUrls.length > 1 ? `${(previewTick % previewUrls.length) + 1}/${previewUrls.length}` : 'ready'}
                 {selectedInfo?.trainedTags?.length ? ` / ${selectedInfo.trainedTags.length} trained tokens` : ''}
@@ -587,8 +687,8 @@ export function UmbraModelPickerModal({
           <button
             data-umbra-model-picker-confirm
             type="button"
-            disabled={!selection}
-            onClick={() => onConfirm(selection, displayedInfoMatches ? info : null)}
+            disabled={!selectedFile}
+            onClick={() => selectedFile && onConfirm(selectedFile.path, displayedInfoMatches ? info : null, selectedFile.source)}
             className="inline-flex h-10 items-center gap-1.5 rounded-md border border-cyan-300/30 bg-cyan-500/[0.1] px-4 text-[10px] font-black uppercase tracking-[0.1em] text-cyan-100 hover:bg-cyan-500/[0.16] disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-700"
           >
             <Check size={12} /> {confirmLabel || (kind === 'checkpoint' ? 'Use Checkpoint' : 'Add LoRA')}

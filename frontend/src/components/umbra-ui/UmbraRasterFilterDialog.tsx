@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import { Check, Loader2, WandSparkles, X } from 'lucide-react';
 import type { UmbraCanvasControlLayer, UmbraCanvasRasterLayer } from '@/lib/umbraUiCanvasDocument';
@@ -333,14 +334,14 @@ export function UmbraRasterFilterDialog({
               <>
             <label className="space-y-1">
               <span className="block text-[7px] font-black uppercase text-zinc-600">Filter</span>
-              <select value={config.type} onChange={(event) => update('type', event.target.value as UmbraRasterFilterType)} className="h-8 w-full border border-white/10 bg-black/35 px-2 font-mono text-[8px] text-zinc-300 outline-none">
+              <UmbraSelectControl value={config.type} onChange={(event) => update('type', event.target.value as UmbraRasterFilterType)} className="h-8 w-full border border-white/10 bg-black/35 px-2 font-mono text-[8px] text-zinc-300 outline-none">
                 {FILTERS.map((filter) => <option key={filter.id} value={filter.id}>{filter.label}</option>)}
-              </select>
+              </UmbraSelectControl>
             </label>
             {config.type === 'blur' ? <RangeControl label="Radius" value={config.blurRadius} minimum={0} maximum={64} step={1} onChange={(value) => update('blurRadius', value)} /> : null}
             {config.type === 'noise' ? (
               <>
-                <label className="mt-3 block space-y-1"><span className="block text-[7px] font-black uppercase text-zinc-600">Noise Type</span><select value={config.noiseMode} onChange={(event) => update('noiseMode', event.target.value as UmbraRasterFilterConfig['noiseMode'])} className="h-8 w-full border border-white/10 bg-black/35 px-2 font-mono text-[8px] text-zinc-300"><option value="gaussian">Gaussian</option><option value="salt_pepper">Salt & Pepper</option></select></label>
+                <label className="mt-3 block space-y-1"><span className="block text-[7px] font-black uppercase text-zinc-600">Noise Type</span><UmbraSelectControl value={config.noiseMode} onChange={(event) => update('noiseMode', event.target.value as UmbraRasterFilterConfig['noiseMode'])} className="h-8 w-full border border-white/10 bg-black/35 px-2 font-mono text-[8px] text-zinc-300"><option value="gaussian">Gaussian</option><option value="salt_pepper">Salt & Pepper</option></UmbraSelectControl></label>
                 <RangeControl label="Amount" value={config.noiseAmount} minimum={0} maximum={1} step={0.01} onChange={(value) => update('noiseAmount', value)} />
                 <label className="mt-3 flex h-8 items-center gap-2 border border-white/10 px-2 font-mono text-[8px] text-zinc-400"><input type="checkbox" checked={config.noiseColor} onChange={(event) => update('noiseColor', event.target.checked)} className="accent-rose-300" /> Color Noise</label>
                 <label className="mt-3 block space-y-1"><span className="block text-[7px] font-black uppercase text-zinc-600">Seed</span><input type="number" value={config.seed} onChange={(event) => update('seed', Number(event.target.value) || 0)} className="h-8 w-full border border-white/10 bg-black/35 px-2 font-mono text-[8px] text-zinc-300" /></label>
@@ -359,9 +360,9 @@ export function UmbraRasterFilterDialog({
               <div className="mt-3 space-y-3">
                 <label className="space-y-1">
                   <span className="block text-[7px] font-black uppercase text-zinc-600">Preprocessor</span>
-                  <select value={preprocessor.type} onChange={(event) => updatePreprocessor('type', event.target.value as UmbraRasterPreprocessorType)} className="h-8 w-full border border-white/10 bg-black/35 px-2 font-mono text-[8px] text-zinc-300 outline-none">
+                  <UmbraSelectControl value={preprocessor.type} onChange={(event) => updatePreprocessor('type', event.target.value as UmbraRasterPreprocessorType)} className="h-8 w-full border border-white/10 bg-black/35 px-2 font-mono text-[8px] text-zinc-300 outline-none">
                     {preprocessorOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
+                  </UmbraSelectControl>
                 </label>
                 <NumberControl label="Resolution" value={preprocessor.processorResolution} minimum={64} maximum={4096} step={64} onChange={(value) => updatePreprocessor('processorResolution', value)} />
                 {preprocessor.type === 'canny' ? <div className="grid grid-cols-2 gap-1.5"><NumberControl label="Low" value={preprocessor.lowThreshold} minimum={0} maximum={255} step={1} onChange={(value) => updatePreprocessor('lowThreshold', value)} /><NumberControl label="High" value={preprocessor.highThreshold} minimum={0} maximum={255} step={1} onChange={(value) => updatePreprocessor('highThreshold', value)} /></div> : null}

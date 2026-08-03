@@ -898,6 +898,7 @@ async function enqueuePowerPrompterSurvivor(
     steps: number;
     seed: number;
     checkpointName: string;
+    modelFamily: string;
   },
 ): Promise<any> {
   const batchRequestId = `shared-queue-batch-${crypto.randomUUID()}`;
@@ -918,6 +919,7 @@ async function enqueuePowerPrompterSurvivor(
         promptStyleNames: ['Runtime shared-queue survivor'],
         promptOutputSubfolders: ['Qualification/shared-queue'],
         generation: {
+          modelFamily: options.modelFamily,
           modelType: 'checkpoint',
           checkpointName: options.checkpointName,
           seed: options.seed,
@@ -1395,6 +1397,7 @@ async function runSharedQueueIsolation(
       steps: sharedSteps,
       seed,
       checkpointName: String(item.checkpointName || 'Illustrious-XL-v2.0.safetensors'),
+      modelFamily: String(item.modelFamily || 'Anima'),
     });
     const powerPrompterAcceptedAt = Date.now();
     const powerPrompterQueued = await waitForPowerPrompterQueuedBehindTarget(

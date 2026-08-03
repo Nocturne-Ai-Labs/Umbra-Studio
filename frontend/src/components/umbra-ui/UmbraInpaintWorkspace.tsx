@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import type { BlendMode as PsdBlendMode, Layer as PsdLayer, Psd } from 'ag-psd';
 import {
@@ -73,6 +74,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import { UmbraCheckpointControls } from '@/components/umbra-ui/UmbraCheckpointControls';
 import { UmbraLoraStackControls } from '@/components/umbra-ui/UmbraLoraStackControls';
 import { UmbraPositivePromptEditor } from '@/components/umbra-ui/UmbraPositivePromptEditor';
@@ -96,6 +98,7 @@ import {
   isUmbraQueueShortcut,
 } from '@/lib/umbraUiPromptShortcuts';
 import type {
+  PowerPrompterDetailerStage,
   PowerPrompterModelType,
   PowerPrompterSeedControlMode,
   PowerPrompterSeedIncrement,
@@ -654,6 +657,7 @@ export interface UmbraInpaintWorkspaceProps {
   upscaleModels: string[];
   img2imgDetailerActiveCount: number;
   img2imgDetailerStageCount: number;
+  detailerPipeline: PowerPrompterDetailerStage[];
   tiledVae: PowerPrompterTiledVaeControls;
   onTiledVaeChange: (value: PowerPrompterTiledVaeControls) => void;
   onImg2imgDetailersEnabledChange: (enabled: boolean) => void;
@@ -2494,6 +2498,7 @@ export function UmbraInpaintWorkspace({
   upscaleModels,
   img2imgDetailerActiveCount,
   img2imgDetailerStageCount,
+  detailerPipeline,
   tiledVae,
   onTiledVaeChange,
   onImg2imgDetailersEnabledChange,
@@ -9682,6 +9687,7 @@ export function UmbraInpaintWorkspace({
         softInpaintTransitionContrast,
         softInpaintMaskInfluence,
         tiledVae,
+        detailerPipeline: detailerPipeline.map((stage) => ({ ...stage })),
         regionalGuidance: [],
         controlLayers: [],
         referenceLayers: [],
@@ -10021,10 +10027,10 @@ export function UmbraInpaintWorkspace({
         <div className="space-y-3">
           <label className="block space-y-1.5">
             <span className={labelClass}>Model Pipeline</span>
-            <select value={modelFamily} onChange={(event) => onModelFamilyChange(event.target.value)} className={inputClass}>
+            <UmbraSelectControl value={modelFamily} onChange={(event) => onModelFamilyChange(event.target.value)} className={inputClass}>
               {modelFamilyOptions.length <= 0 ? <option value="">No installed inpaint pipeline</option> : null}
               {modelFamilyOptions.map((family) => <option key={family} value={family}>{family}</option>)}
-            </select>
+            </UmbraSelectControl>
           </label>
           {pipelineError ? <div className="font-mono text-[9px] leading-relaxed text-red-300/80">{pipelineError}</div> : null}
           <UmbraCheckpointControls
@@ -10113,8 +10119,8 @@ export function UmbraInpaintWorkspace({
           ) : null}
           {capabilities.sampler.support === 'adjustable' || capabilities.scheduler.support === 'adjustable' ? (
             <div className="grid grid-cols-2 gap-2">
-              {capabilities.sampler.support === 'adjustable' ? <label className="space-y-1.5"><span className={labelClass}>Sampler</span><select value={samplerName} onChange={(event) => onSamplerNameChange(event.target.value)} className={inputClass}>{samplerOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></label> : null}
-              {capabilities.scheduler.support === 'adjustable' ? <label className="space-y-1.5"><span className={labelClass}>Scheduler</span><select value={scheduler} onChange={(event) => onSchedulerChange(event.target.value)} className={inputClass}>{schedulerOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></label> : null}
+              {capabilities.sampler.support === 'adjustable' ? <label className="space-y-1.5"><span className={labelClass}>Sampler</span><UmbraSelect value={samplerName} onValueChange={onSamplerNameChange} ariaLabel="Sampler" menuTitle="Sampler" options={samplerOptions.map((option) => ({ value: option, label: option }))} /></label> : null}
+              {capabilities.scheduler.support === 'adjustable' ? <label className="space-y-1.5"><span className={labelClass}>Scheduler</span><UmbraSelect value={scheduler} onValueChange={onSchedulerChange} ariaLabel="Scheduler" menuTitle="Scheduler" options={schedulerOptions.map((option) => ({ value: option, label: option }))} /></label> : null}
             </div>
           ) : null}
 
@@ -10281,7 +10287,7 @@ export function UmbraInpaintWorkspace({
               </div>
               {resizeEnabled ? (
                 <div className="space-y-2">
-                  <label className="block space-y-1.5"><span className={labelClass}>Aspect Ratio</span><select value={resizeAspectRatio} onChange={(event) => updateResizeAspectRatio(event.target.value as InpaintResizeAspectValue)} className={inputClass}>{INPAINT_RESIZE_ASPECT_RATIO_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+                  <label className="block space-y-1.5"><span className={labelClass}>Aspect Ratio</span><UmbraSelectControl value={resizeAspectRatio} onChange={(event) => updateResizeAspectRatio(event.target.value as InpaintResizeAspectValue)} className={inputClass}>{INPAINT_RESIZE_ASPECT_RATIO_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</UmbraSelectControl></label>
                   <div className="grid grid-cols-2 gap-2">
                     <label className="space-y-1.5"><span className={labelClass}>Width</span><input value={resizeWidth} onChange={(event) => updateResizeWidth(event.target.value.replace(/[^0-9]/g, ''))} onBlur={normalizeResizeFields} inputMode="numeric" className={inputClass} /></label>
                     <label className="space-y-1.5"><span className={labelClass}>Height</span><input value={resizeHeight} onChange={(event) => updateResizeHeight(event.target.value.replace(/[^0-9]/g, ''))} onBlur={normalizeResizeFields} inputMode="numeric" className={inputClass} /></label>
@@ -10545,12 +10551,12 @@ export function UmbraInpaintWorkspace({
               </div>
               <div className="space-y-1.5 border-t border-white/[0.06] pt-2">
                 <span className={labelClass}>Coherence Pass</span>
-                <select value={coherenceMode} onChange={(event) => setCoherenceMode(event.target.value as UmbraCanvasCoherenceMode)} className={inputClass}>
+                <UmbraSelectControl value={coherenceMode} onChange={(event) => setCoherenceMode(event.target.value as UmbraCanvasCoherenceMode)} className={inputClass}>
                   <option value="none">Off</option>
                   <option value="gaussian">Gaussian Falloff</option>
                   <option value="box">Box Falloff</option>
                   <option value="staged">Staged Edge</option>
-                </select>
+                </UmbraSelectControl>
                 {coherenceMode !== 'none' ? (
                   <div className="grid grid-cols-2 gap-2">
                     <label className="space-y-1.5">
@@ -10584,14 +10590,14 @@ export function UmbraInpaintWorkspace({
               </label>
               <label className="block space-y-1.5">
                 <span className={labelClass}>Masked Fill</span>
-                <select value={fillMode} onChange={(event) => setFillMode(event.target.value as UmbraUiInpaintFillMode)} className={inputClass}>
+                <UmbraSelectControl value={fillMode} onChange={(event) => setFillMode(event.target.value as UmbraUiInpaintFillMode)} className={inputClass}>
                   <option value="navier-stokes" disabled={!maskedFillAvailable}>Navier-Stokes{maskedFillAvailable ? '' : ' (Unavailable)'}</option>
                   <option value="telea" disabled={!maskedFillAvailable}>Telea{maskedFillAvailable ? '' : ' (Unavailable)'}</option>
                   <option value="neutral">Neutral</option>
                   <option value="color" disabled={!colorPrefillAvailable}>Solid Color{colorPrefillAvailable ? '' : ' (Unavailable)'}</option>
                   <option value="tile" disabled={!tilePrefillAvailable}>Source Tiles{tilePrefillAvailable ? '' : ' (Unavailable)'}</option>
                   <option value="lama" disabled={!modelInfillAvailable}>LaMa / MAT Model{modelInfillAvailable ? '' : ' (Unavailable)'}</option>
-                </select>
+                </UmbraSelectControl>
               </label>
               {fillMode === 'color' ? (
                 <label className="flex items-center gap-2 border border-white/10 px-2.5 py-2">
@@ -10609,10 +10615,10 @@ export function UmbraInpaintWorkspace({
               {fillMode === 'lama' ? (
                 <label className="block space-y-1.5">
                   <span className={labelClass}>Infill Model</span>
-                  <select value={inpaintModelName} onChange={(event) => setInpaintModelName(event.target.value)} disabled={!modelInfillAvailable} className={inputClass}>
+                  <UmbraSelectControl value={inpaintModelName} onChange={(event) => setInpaintModelName(event.target.value)} disabled={!modelInfillAvailable} className={inputClass}>
                     {inpaintModels.length <= 0 ? <option value="">No LaMa / MAT models installed</option> : null}
                     {inpaintModels.map((model) => <option key={model} value={model}>{model}</option>)}
-                  </select>
+                  </UmbraSelectControl>
                 </label>
               ) : null}
               <label className="block space-y-1.5">
@@ -10724,11 +10730,11 @@ export function UmbraInpaintWorkspace({
           <div className="ml-1 h-5 w-px bg-white/10" />
           {tool === 'transform' ? (
             <>
-              <select value={transformFitMode} onChange={(event) => setTransformFitMode(event.target.value as UmbraCanvasFitMode)} title="Fit mode" className="h-7 border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none">
+              <UmbraSelectControl value={transformFitMode} onChange={(event) => setTransformFitMode(event.target.value as UmbraCanvasFitMode)} title="Fit mode" className="h-7 border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none">
                 <option value="contain">Contain</option>
                 <option value="cover">Cover</option>
                 <option value="fill">Fill</option>
-              </select>
+              </UmbraSelectControl>
               <button type="button" onClick={() => void fitActiveLayerToGenerationRegion(transformFitMode)} disabled={!activeTransformLayer || activeTransformLayer.locked || (activeTransformLayer.kind === 'raster' && activeTransformLayer.role === 'source')} title="Fit active layer to the generation region, or the whole canvas when no region is set" className="inline-flex h-7 items-center gap-1.5 border border-cyan-300/20 px-2 font-mono text-[7px] font-black uppercase text-cyan-200 disabled:border-white/5 disabled:text-zinc-800"><Maximize2 size={9} /> Fit</button>
               <button type="button" onClick={resetActiveLayerTransform} disabled={!canResetUmbraCanvasLayerTransform(activeTransformLayer)} title="Restore the active layer's original size, orientation, and mirroring while preserving its center" className="inline-flex h-7 items-center gap-1.5 border border-white/10 px-2 font-mono text-[7px] font-black uppercase text-zinc-400 disabled:border-white/5 disabled:text-zinc-800"><RotateCcw size={9} /> Reset</button>
               <div className="h-5 w-px bg-white/10" />
@@ -10744,7 +10750,7 @@ export function UmbraInpaintWorkspace({
           {tool === 'gradient' ? (
             <>
               <CanvasColorPair primary={paintColor} secondary={secondaryPaintColor} onPrimaryChange={setPaintColor} onSecondaryChange={setSecondaryPaintColor} onSwap={() => { setPaintColor(secondaryPaintColor); setSecondaryPaintColor(paintColor); }} />
-              <select
+              <UmbraSelectControl
                 value={activeGradientLayer?.gradientType || 'linear'}
                 onChange={(event) => activeGradientLayer && dispatchCanvasDocument({ type: 'update_gradient_layer', layerId: activeGradientLayer.id, changes: { gradientType: event.target.value as 'linear' | 'radial' } })}
                 disabled={!activeGradientLayer}
@@ -10753,7 +10759,7 @@ export function UmbraInpaintWorkspace({
               >
                 <option value="linear">Linear</option>
                 <option value="radial">Radial</option>
-              </select>
+              </UmbraSelectControl>
               <button
                 type="button"
                 aria-pressed={canvasPreferences.gradientClip}
@@ -10768,7 +10774,7 @@ export function UmbraInpaintWorkspace({
           ) : null}
           {tool === 'shape' ? (
             <>
-              <select value={shapeType} onChange={(event) => { setShapePoints([]); setBoxPreview(null); setShapeType(event.target.value as RasterShapeType); }} title="Raster shape type" className="h-7 border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none"><option value="rectangle">Rectangle</option><option value="ellipse">Ellipse</option><option value="line">Line</option><option value="polygon">Polygon</option><option value="freehand">Freehand</option></select>
+              <UmbraSelectControl value={shapeType} onChange={(event) => { setShapePoints([]); setBoxPreview(null); setShapeType(event.target.value as RasterShapeType); }} title="Raster shape type" className="h-7 border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none"><option value="rectangle">Rectangle</option><option value="ellipse">Ellipse</option><option value="line">Line</option><option value="polygon">Polygon</option><option value="freehand">Freehand</option></UmbraSelectControl>
               <CanvasColorPair primary={paintColor} secondary={secondaryPaintColor} onPrimaryChange={setPaintColor} onSecondaryChange={setSecondaryPaintColor} onSwap={() => { setPaintColor(secondaryPaintColor); setSecondaryPaintColor(paintColor); }} />
               {shapeType !== 'line' ? <label className="flex h-7 items-center gap-1.5 border border-white/10 px-2 font-mono text-[7px] uppercase text-zinc-400"><input type="checkbox" checked={shapeFilled} onChange={(event) => setShapeFilled(event.target.checked)} className="accent-cyan-300" /> Fill</label> : null}
               {!shapeFilled || shapeType === 'line' ? <label className="flex items-center gap-1.5"><span className="font-mono text-[7px] uppercase text-zinc-600">Stroke</span><input type="number" min={1} max={256} value={shapeStrokeWidth} onChange={(event) => setShapeStrokeWidth(Math.max(1, Math.min(256, Number(event.target.value) || 1)))} className="h-7 w-12 border border-white/10 bg-black/35 px-1 text-center font-mono text-[8px] text-zinc-400 outline-none" /></label> : null}
@@ -10838,7 +10844,7 @@ export function UmbraInpaintWorkspace({
               ))}
               <label className="mt-1 flex flex-col gap-1 border-t border-white/[0.06] px-1 pt-2 font-mono text-[7px] font-black uppercase text-zinc-500">
                 Staging auto-switch
-                <select
+                <UmbraSelectControl
                   value={canvasPreferences.stagingAutoSwitch}
                   onChange={(event) => setCanvasPreferences((current) => ({ ...current, stagingAutoSwitch: event.target.value as UmbraCanvasStagingAutoSwitch }))}
                   className="h-8 border border-white/10 bg-black/35 px-2 font-mono text-[8px] text-zinc-300 outline-none focus:border-cyan-300/30"
@@ -10846,7 +10852,7 @@ export function UmbraInpaintWorkspace({
                   <option value="off">Off</option>
                   <option value="start">On first result</option>
                   <option value="finish">When batch finishes</option>
-                </select>
+                </UmbraSelectControl>
               </label>
               <button type="button" onClick={() => setHotkeyEditorOpen(true)} className="mt-1 flex h-8 w-full items-center justify-center border border-cyan-300/20 font-mono text-[7px] font-black uppercase text-cyan-200">Keyboard Shortcuts</button>
               <div className="mt-1 grid grid-cols-2 gap-1">
@@ -11154,30 +11160,30 @@ export function UmbraInpaintWorkspace({
               {samGuideMode === 'prompt' ? (
                 <input value={clipSegPrompt} onChange={(event) => setClipSegPrompt(event.target.value)} maxLength={500} disabled={samRunning || clipSegInstalling} placeholder="person, coat, sky..." title={clipSegModelId || clipSegError || 'Text selection prompt'} className="h-6 min-w-48 flex-1 border border-white/10 bg-black/40 px-2 font-mono text-[8px] text-zinc-300 outline-none placeholder:text-zinc-700" />
               ) : (
-                <select value={samModelName} onChange={(event) => setSamModelName(event.target.value)} disabled={samModels.length <= 0 || samRunning} title="SAM model" className="h-6 min-w-0 max-w-44 border border-white/10 bg-black/40 px-1.5 font-mono text-[7px] text-zinc-400 outline-none disabled:text-zinc-700">
+                <UmbraSelectControl value={samModelName} onChange={(event) => setSamModelName(event.target.value)} disabled={samModels.length <= 0 || samRunning} title="SAM model" className="h-6 min-w-0 max-w-44 border border-white/10 bg-black/40 px-1.5 font-mono text-[7px] text-zinc-400 outline-none disabled:text-zinc-700">
                   {samModels.length <= 0 ? <option value="">No SAM models</option> : null}
                   {samModels.map((model) => <option key={model} value={model}>{model}</option>)}
-                </select>
+                </UmbraSelectControl>
               )}
               {samGuideMode === 'prompt' && !clipSegAvailable ? (
                 <button type="button" onClick={() => void installClipSeg()} disabled={clipSegInstalling || samRunning || !comfyConnected} title={clipSegError || 'Download the vetted CLIPSeg text-selection model'} className="inline-flex h-6 items-center gap-1 border border-amber-300/30 px-2 text-[7px] font-black uppercase text-amber-100 disabled:text-zinc-800">
                   {clipSegInstalling ? <Loader2 size={9} className="animate-spin" /> : <Download size={9} />} Install Model
                 </button>
               ) : null}
-              <select value={samOutputMode} onChange={(event) => setSamOutputMode(event.target.value as SamOutputMode)} disabled={samRunning} title="Choose where the segmented result is saved" className="h-6 min-w-0 max-w-40 border border-white/10 bg-black/40 px-1.5 font-mono text-[7px] text-zinc-400 outline-none">
+              <UmbraSelectControl value={samOutputMode} onChange={(event) => setSamOutputMode(event.target.value as SamOutputMode)} disabled={samRunning} title="Choose where the segmented result is saved" className="h-6 min-w-0 max-w-40 border border-white/10 bg-black/40 px-1.5 font-mono text-[7px] text-zinc-400 outline-none">
                 <option value="active_mask">Active Mask</option>
                 <option value="replace_layer" disabled={samSourceMode !== 'layer' || !activeRasterLayer && !activeControlLayer}>Replace Layer</option>
                 <option value="new_mask">New Mask</option>
                 <option value="regional_guidance" disabled={!regionalGuidanceAvailable || regionalGuidanceLayers.length >= regionalGuidanceMaxLayers}>Regional Guide</option>
                 <option value="raster">Raster Layer</option>
                 <option value="control" disabled={!controlLayersAvailable || getUmbraCanvasControlLayers(canvasDocument).length >= controlLayersMaxLayers}>Control Layer</option>
-              </select>
+              </UmbraSelectControl>
               <button type="button" aria-pressed={samInvert} onClick={() => setSamInvert((value) => !value)} disabled={samRunning} title="Invert the segmented selection before applying it" className={cn('h-6 border px-2 text-[7px] font-black uppercase disabled:text-zinc-800', samInvert ? 'border-violet-300/35 bg-violet-500/10 text-violet-100' : 'border-white/10 text-zinc-600')}>Invert</button>
-              <select value={samDeviceMode} onChange={(event) => setSamDeviceMode(event.target.value as UmbraSamDeviceMode)} disabled={samRunning} title="SAM compute device" className="h-6 border border-white/10 bg-black/40 px-1.5 font-mono text-[7px] text-zinc-400 outline-none">
+              <UmbraSelectControl value={samDeviceMode} onChange={(event) => setSamDeviceMode(event.target.value as UmbraSamDeviceMode)} disabled={samRunning} title="SAM compute device" className="h-6 border border-white/10 bg-black/40 px-1.5 font-mono text-[7px] text-zinc-400 outline-none">
                 <option value="CPU">CPU</option>
                 <option value="AUTO">Auto</option>
                 <option value="Prefer GPU">GPU</option>
-              </select>
+              </UmbraSelectControl>
               <label className="flex items-center gap-1" title={samGuideMode === 'prompt' ? 'CLIPSeg prompt-mask cutoff; independent from SAM confidence' : 'SAM mask confidence; independent from prompt cutoff'}>
                 <span className="font-mono text-[7px] font-black uppercase text-zinc-600">{samGuideMode === 'prompt' ? 'Cutoff' : 'Confidence'}</span>
                 <input
@@ -12102,22 +12108,22 @@ export function UmbraInpaintWorkspace({
                     </label>
                     <label className="min-w-0 space-y-1">
                       <span className="block text-[7px] font-black uppercase text-zinc-700">Blend</span>
-                      <select value={activeRasterLayer.blendMode} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_blend_mode', layerId: activeRasterLayer.id, blendMode: event.target.value as UmbraCanvasBlendMode })} className="h-7 w-full border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none">
+                      <UmbraSelectControl value={activeRasterLayer.blendMode} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_blend_mode', layerId: activeRasterLayer.id, blendMode: event.target.value as UmbraCanvasBlendMode })} className="h-7 w-full border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none">
                         {UMBRA_CANVAS_BLEND_MODES.map((mode) => <option key={mode} value={mode}>{mode === 'source-over' ? 'Normal' : mode}</option>)}
-                      </select>
+                      </UmbraSelectControl>
                     </label>
                     <label className="min-w-0 space-y-1">
                       <span className="block text-[7px] font-black uppercase text-zinc-700">Group</span>
-                      <select value={activeRasterLayer.groupId || ''} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_group', layerId: activeRasterLayer.id, groupId: event.target.value })} disabled={activeRasterLayer.role === 'source'} className="h-7 w-full border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none disabled:text-zinc-700">
+                      <UmbraSelectControl value={activeRasterLayer.groupId || ''} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_group', layerId: activeRasterLayer.id, groupId: event.target.value })} disabled={activeRasterLayer.role === 'source'} className="h-7 w-full border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none disabled:text-zinc-700">
                         <option value="">Ungrouped</option>
                         {groupLayers.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-                      </select>
+                      </UmbraSelectControl>
                     </label>
                     <label className="min-w-0 space-y-1">
                       <span className="block text-[7px] font-black uppercase text-zinc-700">Smoothing</span>
-                      <select value={activeRasterLayer.smoothing} onChange={(event) => dispatchCanvasDocument({ type: 'set_raster_smoothing', layerId: activeRasterLayer.id, smoothing: event.target.value as UmbraCanvasRasterLayer['smoothing'] })} className="h-7 w-full border border-white/10 bg-black/35 px-1 font-mono text-[8px] text-zinc-300 outline-none">
+                      <UmbraSelectControl value={activeRasterLayer.smoothing} onChange={(event) => dispatchCanvasDocument({ type: 'set_raster_smoothing', layerId: activeRasterLayer.id, smoothing: event.target.value as UmbraCanvasRasterLayer['smoothing'] })} className="h-7 w-full border border-white/10 bg-black/35 px-1 font-mono text-[8px] text-zinc-300 outline-none">
                         <option value="none">None</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
-                      </select>
+                      </UmbraSelectControl>
                     </label>
                     {([
                       ['X', 'x'],
@@ -12185,7 +12191,7 @@ export function UmbraInpaintWorkspace({
                   >
                     <label className="space-y-1"><span className="block text-[7px] font-black uppercase text-zinc-700">Group Name</span><input value={activeGroupLayer.name} disabled={activeGroupLayer.locked} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_name', layerId: activeGroupLayer.id, name: event.target.value })} className="h-8 w-full border border-white/10 bg-black/35 px-2 font-mono text-[8px] text-zinc-200 outline-none disabled:opacity-35" /></label>
                     <label className="space-y-1"><span className="block text-[7px] font-black uppercase text-zinc-700">Opacity</span><input type="range" min={0} max={1} step={0.01} value={activeGroupLayer.opacity} disabled={activeGroupLayer.locked} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_opacity', layerId: activeGroupLayer.id, opacity: Number(event.target.value) })} className="h-8 w-full accent-rose-300 disabled:opacity-35" /></label>
-                    <label className="space-y-1"><span className="block text-[7px] font-black uppercase text-zinc-700">Blend</span><select value={activeGroupLayer.blendMode} disabled={activeGroupLayer.locked} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_blend_mode', layerId: activeGroupLayer.id, blendMode: event.target.value as UmbraCanvasBlendMode })} className="h-8 w-full border border-white/10 bg-black/35 px-1 font-mono text-[8px] text-zinc-300 outline-none disabled:opacity-35">{UMBRA_CANVAS_BLEND_MODES.map((mode) => <option key={mode} value={mode}>{mode === 'source-over' ? 'Normal' : mode}</option>)}</select></label>
+                    <label className="space-y-1"><span className="block text-[7px] font-black uppercase text-zinc-700">Blend</span><UmbraSelectControl value={activeGroupLayer.blendMode} disabled={activeGroupLayer.locked} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_blend_mode', layerId: activeGroupLayer.id, blendMode: event.target.value as UmbraCanvasBlendMode })} className="h-8 w-full border border-white/10 bg-black/35 px-1 font-mono text-[8px] text-zinc-300 outline-none disabled:opacity-35">{UMBRA_CANVAS_BLEND_MODES.map((mode) => <option key={mode} value={mode}>{mode === 'source-over' ? 'Normal' : mode}</option>)}</UmbraSelectControl></label>
                     <button type="button" onClick={() => dispatchCanvasDocument({ type: 'toggle_group_collapsed', layerId: activeGroupLayer.id })} className="inline-flex h-8 items-center justify-center gap-1 border border-white/10 text-[7px] font-black uppercase text-zinc-400">{activeGroupLayer.collapsed ? <ChevronRight size={9} /> : <ChevronDown size={9} />}{activeGroupLayer.collapsed ? 'Expand' : 'Collapse'}</button>
                     <button type="button" onClick={() => void mergeActiveGroup()} disabled={!canvasReady || activeGroupMergeMutationLocked} title={activeGroupMergeMutationLocked ? 'Unlock the group and its children before merging' : 'Merge the group into one raster layer'} className="inline-flex h-8 items-center justify-center gap-1 border border-cyan-300/20 text-[7px] font-black uppercase text-cyan-200 disabled:text-zinc-800"><Combine size={9} /> Merge</button>
                   </div>
@@ -12324,7 +12330,7 @@ export function UmbraInpaintWorkspace({
           ref={canvasContextMenuRef}
           role="menu"
           aria-label="Inpaint actions"
-          className="fixed z-[200] w-56 overflow-y-auto border border-white/15 bg-[#090a0c] p-1.5 shadow-2xl shadow-black/80 custom-scrollbar"
+          className="umbra-context-menu-panel umbra-context-menu-legacy-actions fixed z-[200] w-60 overflow-y-auto p-1 custom-scrollbar"
           style={{
             left: canvasContextMenu.x,
             top: canvasContextMenu.y,
@@ -12542,18 +12548,18 @@ function CanvasMaskOverlayControls({
     </label>
     <label className="min-w-0 space-y-1">
       <span className="block text-[7px] font-black uppercase text-zinc-700">Overlay Fill</span>
-      <select
+      <UmbraSelectControl
         value={layer.overlayStyle}
         onChange={(event) => onChange({ overlayStyle: event.target.value as UmbraCanvasMaskOverlayStyle })}
         disabled={disabled}
         className="h-8 w-full border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none disabled:text-zinc-700"
       >
         {UMBRA_CANVAS_MASK_OVERLAY_STYLES.map((style) => <option key={style} value={style}>{style.replace('_', ' ')}</option>)}
-      </select>
+      </UmbraSelectControl>
     </label>
   </>;
 }
 
 function CanvasMenuButton({ disabled = false, icon, label, onClick }: { disabled?: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
-  return <button type="button" onClick={onClick} disabled={disabled} className="flex h-7 w-full items-center gap-2 px-2 text-left font-mono text-[8px] text-zinc-400 hover:bg-white/[0.04] hover:text-cyan-100 disabled:text-zinc-800">{icon}<span>{label}</span></button>;
+  return <button type="button" onClick={onClick} disabled={disabled} className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-zinc-300 hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-35"><span className="umbra-context-menu-icon flex h-4 w-4 items-center justify-center">{icon}</span><span className="truncate">{label}</span></button>;
 }

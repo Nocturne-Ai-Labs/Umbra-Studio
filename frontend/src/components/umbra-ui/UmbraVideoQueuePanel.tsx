@@ -257,7 +257,11 @@ function SettingsChips({ video, sequence, seed, seedMode, seedIncrement }: {
     `${video.fps} FPS`,
     `Seed ${seed}`,
     seedMode !== 'fixed'
-      ? `Seed ${seedMode}${seedMode === 'increment' ? ` +${seedIncrement.toLocaleString('en-US')}` : ''}`
+      ? `Seed ${seedMode}${seedMode === 'increment'
+        ? ` +${seedIncrement.toLocaleString('en-US')}`
+        : seedMode === 'decrement'
+          ? ` -${seedIncrement.toLocaleString('en-US')}`
+          : ''}`
       : '',
     video.mode === 'video_to_video' ? `Denoise ${video.denoise.toFixed(2)}` : '',
   ].filter(Boolean);

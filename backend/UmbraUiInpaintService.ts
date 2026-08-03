@@ -30,11 +30,70 @@ const QUEUE_CHECK_INTERVAL_MS = 2_400;
 const ORPHANED_PROMPT_GRACE_MS = 15_000;
 const MAX_SOURCE_BYTES = 256 * 1024 * 1024;
 const MAX_GENERATION_PIXELS = 64 * 1024 * 1024;
+const MAX_PREVIEW_DATA_URL_LENGTH = 8 * 1024 * 1024;
 
 function finiteNumberOrFallback(value: unknown, fallback: number): number {
   if (value === null || value === undefined || value === '') return fallback;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function buildComfyWebSocketUrl(baseUrl: string, clientId: string): string {
+  const url = new URL(String(baseUrl || '').trim());
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.pathname = `${url.pathname.replace(/\/$/, '')}/ws`;
+  url.search = new URLSearchParams({ clientId }).toString();
+  return url.toString();
+}
+
+function sniffComfyPreviewMime(bytes: Uint8Array): string {
+  if (bytes.byteLength >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+  if (bytes.byteLength >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'image/png';
+  if (bytes.byteLength >= 12) {
+    const header = new TextDecoder('ascii').decode(bytes.subarray(0, 12));
+    if (header.startsWith('RIFF') && header.slice(8, 12) === 'WEBP') return 'image/webp';
+  }
+  return '';
+}
+
+async function decodeComfyPreviewFrame(data: unknown): Promise<{ mimeType: string; bytes: Uint8Array } | null> {
+  let bytes: Uint8Array;
+  if (data instanceof ArrayBuffer) bytes = new Uint8Array(data);
+  else if (ArrayBuffer.isView(data)) bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  else if (typeof Blob !== 'undefined' && data instanceof Blob) bytes = new Uint8Array(await data.arrayBuffer());
+  else return null;
+  if (bytes.byteLength < 8) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const eventType = view.getUint32(0, false);
+  if (eventType === 1) {
+    const imageType = view.getUint32(4, false);
+    let image = bytes.subarray(8);
+    if (bytes.byteLength > 32 && sniffComfyPreviewMime(bytes.subarray(32))) image = bytes.subarray(32);
+    if (image.byteLength <= 0) return null;
+    return {
+      mimeType: sniffComfyPreviewMime(image) || (imageType === 2 ? 'image/png' : imageType === 3 ? 'image/webp' : 'image/jpeg'),
+      bytes: image,
+    };
+  }
+  if (eventType !== 4) return null;
+  const metadataLength = view.getUint32(4, false);
+  const imageStart = 8 + Math.max(0, metadataLength);
+  if (imageStart >= bytes.byteLength) return null;
+  let mimeType = 'image/jpeg';
+  try {
+    const metadata = JSON.parse(new TextDecoder().decode(bytes.subarray(8, imageStart)));
+    mimeType = String(metadata?.image_type || metadata?.mimeType || mimeType).trim() || mimeType;
+  } catch {
+    // Preview metadata is optional; the image payload remains usable.
+  }
+  const image = bytes.subarray(imageStart);
+  return { mimeType: sniffComfyPreviewMime(image) || mimeType, bytes: image };
+}
+
+function comfyPreviewDataUrl(frame: { mimeType: string; bytes: Uint8Array } | null): string {
+  if (!frame || frame.bytes.byteLength <= 0) return '';
+  const dataUrl = `data:${frame.mimeType || 'image/jpeg'};base64,${Buffer.from(frame.bytes).toString('base64')}`;
+  return dataUrl.length <= MAX_PREVIEW_DATA_URL_LENGTH ? dataUrl : '';
 }
 
 export function readComfyNodeInputChoices(input: unknown): string[] {
@@ -253,6 +312,7 @@ export interface UmbraUiInpaintReferenceLayer {
 export interface UmbraUiInpaintSettings {
   workflowId: string;
   canvasProjectId: string;
+  sourceFreeGeneration?: boolean;
   operationMode: 'inpaint' | 'outpaint';
   generationRegionX: number;
   generationRegionY: number;
@@ -314,6 +374,20 @@ export interface UmbraUiInpaintSettings {
     tileSize: number;
     overlap: number;
   };
+  hiresFix?: {
+    enabled: boolean;
+    upscaler: string;
+    resizeMode: 'scale' | 'dimensions';
+    scaleBy: number;
+    targetWidth: number;
+    targetHeight: number;
+    steps: number;
+    denoise: number;
+    cfg: number;
+    samplerName: string;
+    scheduler: string;
+  };
+  detailerPipeline?: Array<Record<string, unknown>>;
   regionalGuidance: UmbraUiInpaintRegionalGuidance[];
   controlLayers: UmbraUiInpaintControlLayer[];
   referenceLayers: UmbraUiInpaintReferenceLayer[];
@@ -467,6 +541,20 @@ export interface UmbraUiInpaintJob {
   items: UmbraUiInpaintJobItem[];
 }
 
+export interface UmbraUiInpaintPreview {
+  jobId: string;
+  itemId: string;
+  promptId: string;
+  imageDataUrl: string;
+  step: number;
+  maxStep: number;
+  updatedAt: number;
+}
+
+export interface UmbraUiInpaintPreviewEvent extends UmbraUiInpaintPreview {
+  active: boolean;
+}
+
 interface UmbraUiInpaintBaseWorkflow {
   promptGraph: Record<string, any>;
 }
@@ -479,6 +567,7 @@ interface UmbraUiInpaintServiceOptions {
   historyPollIntervalMs?: number;
   queueCheckIntervalMs?: number;
   orphanedPromptGraceMs?: number;
+  onPreview?: (preview: UmbraUiInpaintPreviewEvent) => void;
   atomicReplacementHooks?: {
     forceBackupPath?: boolean;
     afterBackupCreated?: (paths: {
@@ -997,6 +1086,8 @@ export function buildUmbraUiInpaintPowerPrompterMetadata(
     batchSize: 1,
     loras: enabledLoras,
     tiledVae: settings.tiledVae ? { ...settings.tiledVae } : undefined,
+    hiresFix: settings.hiresFix ? { ...settings.hiresFix } : undefined,
+    detailerPipeline: (settings.detailerPipeline || []).map((stage) => ({ ...stage })),
   };
   const segments = (Array.isArray(settings.promptSegments) ? settings.promptSegments : [])
     .map((segment, order) => ({
@@ -1022,6 +1113,7 @@ export function buildUmbraUiInpaintPowerPrompterMetadata(
     prompt: settings.prompt,
     negativePrompt: settings.negativePrompt,
     generation,
+    detailerPipeline: (settings.detailerPipeline || []).map((stage) => ({ ...stage })),
     pipeline: {
       feature: 'inpainting',
       modelFamily: settings.modelFamily,
@@ -1045,10 +1137,13 @@ export class UmbraUiInpaintService {
   private readonly historyPollIntervalMs: number;
   private readonly queueCheckIntervalMs: number;
   private readonly orphanedPromptGraceMs: number;
+  private readonly onPreview?: UmbraUiInpaintServiceOptions['onPreview'];
   private readonly atomicReplacementHooks?: UmbraUiInpaintServiceOptions['atomicReplacementHooks'];
   private persistQueue = Promise.resolve();
   private nodeTypesCache: { fetchedAt: number; values: Set<string>; objectInfo: Record<string, any> } | null = null;
   private readonly outputMetadataByPpuid = new Map<string, Record<string, unknown>>();
+  private readonly previews = new Map<string, UmbraUiInpaintPreview>();
+  private readonly previewSockets = new Map<string, WebSocket>();
 
   constructor(options: UmbraUiInpaintServiceOptions) {
     this.getComfyBaseUrl = options.getComfyBaseUrl;
@@ -1059,6 +1154,7 @@ export class UmbraUiInpaintService {
     this.historyPollIntervalMs = Math.max(1, Math.round(Number(options.historyPollIntervalMs) || HISTORY_POLL_INTERVAL_MS));
     this.queueCheckIntervalMs = Math.max(1, Math.round(Number(options.queueCheckIntervalMs) || QUEUE_CHECK_INTERVAL_MS));
     this.orphanedPromptGraceMs = Math.max(1, Math.round(Number(options.orphanedPromptGraceMs) || ORPHANED_PROMPT_GRACE_MS));
+    this.onPreview = options.onPreview;
     this.atomicReplacementHooks = options.atomicReplacementHooks;
     if (this.jobStatePath) recoverInterruptedAtomicReplacementSync(this.jobStatePath);
     const hydration = this.hydrateJobs();
@@ -1076,6 +1172,89 @@ export class UmbraUiInpaintService {
     this.prune();
     const job = this.jobs.get(String(jobId || '').trim());
     return job ? cloneJob(job) : null;
+  }
+
+  getPreview(jobId: string): UmbraUiInpaintPreview | null {
+    const preview = this.previews.get(String(jobId || '').trim());
+    return preview ? { ...preview } : null;
+  }
+
+  private stopPreviewMonitor(jobId: string, itemId?: string): void {
+    const prefix = `${jobId}:`;
+    for (const [key, socket] of this.previewSockets) {
+      if ((!itemId && key.startsWith(prefix)) || key === `${jobId}:${itemId}`) {
+        this.previewSockets.delete(key);
+        try { socket.close(); } catch { /* The monitor is already gone. */ }
+      }
+    }
+    if (!itemId) {
+      const preview = this.previews.get(jobId);
+      if (preview) this.onPreview?.({ ...preview, active: false });
+      this.previews.delete(jobId);
+    }
+  }
+
+  private async startPreviewMonitor(job: UmbraUiInpaintJob, item: UmbraUiInpaintJobItem, clientId: string): Promise<void> {
+    const key = `${job.id}:${item.id}`;
+    this.stopPreviewMonitor(job.id, item.id);
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(buildComfyWebSocketUrl(this.getComfyBaseUrl(), clientId));
+      socket.binaryType = 'arraybuffer';
+    } catch {
+      return;
+    }
+    this.previewSockets.set(key, socket);
+    const update = (change: Partial<UmbraUiInpaintPreview>) => {
+      if (this.previewSockets.get(key) !== socket) return;
+      const current = this.previews.get(job.id);
+      const nextPreview = {
+        jobId: job.id,
+        itemId: item.id,
+        promptId: item.promptId || current?.promptId || '',
+        imageDataUrl: current?.itemId === item.id ? current.imageDataUrl : '',
+        step: current?.itemId === item.id ? current.step : 0,
+        maxStep: current?.itemId === item.id ? current.maxStep : 0,
+        updatedAt: Date.now(),
+        ...change,
+      };
+      this.previews.set(job.id, nextPreview);
+      this.onPreview?.({ ...nextPreview, active: true });
+    };
+    socket.onmessage = (event) => {
+      void (async () => {
+        if (typeof event.data === 'string') {
+          let message: any;
+          try { message = JSON.parse(event.data); } catch { return; }
+          const type = String(message?.type || message?.event || '').trim();
+          const data = message?.data && typeof message.data === 'object' ? message.data : message;
+          const promptId = String(data?.prompt_id ?? data?.promptId ?? '').trim();
+          if (item.promptId && promptId && promptId !== item.promptId) return;
+          if (type === 'progress') {
+            update({
+              promptId: item.promptId || promptId,
+              step: Math.max(0, Math.floor(Number(data?.value ?? data?.step ?? 0) || 0)),
+              maxStep: Math.max(0, Math.floor(Number(data?.max ?? data?.maxStep ?? 0) || 0)),
+            });
+          }
+          return;
+        }
+        const imageDataUrl = comfyPreviewDataUrl(await decodeComfyPreviewFrame(event.data));
+        if (imageDataUrl) update({ promptId: item.promptId, imageDataUrl });
+      })().catch(() => undefined);
+    };
+    socket.onclose = () => {
+      if (this.previewSockets.get(key) === socket) this.previewSockets.delete(key);
+    };
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 1_000);
+      const finish = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      socket.addEventListener('open', finish, { once: true });
+      socket.addEventListener('error', finish, { once: true });
+    });
   }
 
   async flushPersistence(): Promise<void> {
@@ -1355,6 +1534,7 @@ export class UmbraUiInpaintService {
       }
     }
     job.updatedAt = Date.now();
+    this.stopPreviewMonitor(job.id);
     this.persistJobs();
     try {
       let runningOwnPrompt = false;
@@ -1876,11 +2056,13 @@ export class UmbraUiInpaintService {
           const powerPrompterMetadata = buildUmbraUiInpaintPowerPrompterMetadata(settings, item, job.total);
           const base = await this.buildBaseWorkflow(settings, item.seed);
           const graph = this.buildWorkflow(base.promptGraph, sourceInputName, maskInputName, uploadedRegionalGuidance, uploadedControlLayers, uploadedReferenceLayers, source.name, settings, item.seed, nodeTypes);
+          const previewClientId = `umbra-ui-inpaint-${job.id}-${item.id}`;
+          await this.startPreviewMonitor(job, item, previewClientId);
           const response = await fetch(`${this.getComfyBaseUrl()}/prompt`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              client_id: `umbra-ui-inpaint-${job.id}-${item.id}`,
+              client_id: previewClientId,
               prompt: graph,
               extra_data: {
                 extra_pnginfo: {
@@ -1890,6 +2072,7 @@ export class UmbraUiInpaintService {
                     version: 4,
                     source: 'umbra_ui_inpaint',
                     canvasProjectId: settings.canvasProjectId,
+                    sourceFreeGeneration: settings.sourceFreeGeneration === true,
                     operationMode: settings.operationMode,
                     workflowId: settings.workflowId,
                     modelFamily: settings.modelFamily,
@@ -2027,6 +2210,7 @@ export class UmbraUiInpaintService {
           this.outputMetadataByPpuid.set(item.ppuid, powerPrompterMetadata);
           queuedItems.push(item);
         } catch (error: any) {
+          this.stopPreviewMonitor(job.id, item.id);
           item.status = 'failed';
           item.error = String(error?.message || error || 'Failed to queue inpaint sample.');
         }
@@ -2092,6 +2276,23 @@ export class UmbraUiInpaintService {
     seed: number,
     nodeTypes: Set<string>,
   ): Record<string, any> {
+    if (settings.sourceFreeGeneration) {
+      const graph = structuredClone(sourceGraph);
+      const sourceStem = sanitizeFilename(sourceName, 'canvas.png').replace(/\.[^.]+$/, '');
+      for (const node of Object.values(graph)) {
+        if (!node || typeof node !== 'object' || String((node as any).class_type || '') !== 'UmbraLabSaveImage') continue;
+        const inputs = (node as any).inputs && typeof (node as any).inputs === 'object'
+          ? { ...(node as any).inputs }
+          : {};
+        (node as any).inputs = {
+          ...inputs,
+          filename_prefix: `UmbraUI_Canvas_${sourceStem}_%date%`,
+          output_folder: 'Umbra UI/canvas',
+        };
+        (node as any)._meta = { ...((node as any)._meta || {}), title: 'Umbra UI Canvas Output' };
+      }
+      return graph;
+    }
     if (settings.inpaintAdapter === 'native_edit') {
       return this.buildNativeEditWorkflow(
         sourceGraph,
@@ -2701,6 +2902,85 @@ export class UmbraUiInpaintService {
       });
       outputRef = ref(compositeId);
     }
+
+    const hiresFix = settings.hiresFix;
+    if (hiresFix?.enabled) {
+      if (!nodeTypes.has('UmbraKSamplerHiResFix')) {
+        throw new Error('Canvas Hires Fix requires the current Umbra-Nodes build. Update Umbra-Nodes and try again.');
+      }
+      const encodeCompositeId = addNode({
+        class_type: 'VAEEncode',
+        inputs: { pixels: outputRef, vae: vaeRef },
+        _meta: { title: 'Encode Canvas Composite For Hires Fix' },
+      });
+      const hiresSamplerId = addNode({
+        class_type: 'UmbraKSamplerHiResFix',
+        inputs: {
+          model: modelRef,
+          vae: vaeRef,
+          positive: samplerPositiveRef,
+          negative: samplerNegativeRef,
+          latent_image: ref(encodeCompositeId),
+          seed,
+          steps: Math.max(1, Math.min(10000, Math.round(finiteNumberOrFallback(settings.steps, 35)))),
+          cfg: Math.max(0, Math.min(100, finiteNumberOrFallback(settings.cfg, 4))),
+          sampler_name: String(settings.samplerName || 'er_sde').trim() || 'er_sde',
+          scheduler: String(settings.scheduler || 'simple').trim() || 'simple',
+          denoise: 0,
+          enabled: true,
+          upscaler: String(hiresFix.upscaler || 'Latent').trim() || 'Latent',
+          resize_mode: hiresFix.resizeMode === 'dimensions' ? 'resize to' : 'upscale by',
+          scale_by: Math.max(1, Math.min(8, finiteNumberOrFallback(hiresFix.scaleBy, 2))),
+          resize_width: Math.max(0, Math.min(16384, Math.round(finiteNumberOrFallback(hiresFix.targetWidth, 0)))),
+          resize_height: Math.max(0, Math.min(16384, Math.round(finiteNumberOrFallback(hiresFix.targetHeight, 0)))),
+          hires_steps: Math.max(0, Math.min(10000, Math.round(finiteNumberOrFallback(hiresFix.steps, 0)))),
+          hires_cfg: Math.max(0, Math.min(100, finiteNumberOrFallback(hiresFix.cfg, 0))),
+          hires_sampler_name: String(hiresFix.samplerName || 'use_same').trim().toLowerCase() === 'use_same'
+            ? 'Use same'
+            : String(hiresFix.samplerName || settings.samplerName),
+          hires_scheduler: String(hiresFix.scheduler || 'use_same').trim().toLowerCase() === 'use_same'
+            ? 'Use same'
+            : String(hiresFix.scheduler || settings.scheduler),
+          hires_denoise: Math.max(0, Math.min(1, finiteNumberOrFallback(hiresFix.denoise, 0.35))),
+        },
+        _meta: { title: 'Canvas Hires Fix' },
+      });
+      const decodeHiresId = addNode({
+        class_type: 'VAEDecode',
+        inputs: { samples: ref(hiresSamplerId), vae: vaeRef },
+        _meta: { title: 'Decode Canvas Hires Fix' },
+      });
+      outputRef = ref(decodeHiresId);
+    }
+
+    const enabledDetailerStages = (settings.detailerPipeline || []).filter((stage) => stage?.enabled !== false);
+    if (enabledDetailerStages.length > 0) {
+      if (!nodeTypes.has('UmbraImageDetailer')) {
+        throw new Error('Canvas detailers require the current Umbra-Nodes build. Update Umbra-Nodes and try again.');
+      }
+      if (!bindings.clip) {
+        throw new Error('The selected Canvas pipeline does not expose the CLIP connection required by detailers.');
+      }
+      const detailerId = addNode({
+        class_type: 'UmbraImageDetailer',
+        inputs: {
+          image: outputRef,
+          model: modelRef,
+          clip: bindings.clip,
+          vae: vaeRef,
+          positive: samplerPositiveRef,
+          negative: samplerNegativeRef,
+          seed,
+          pipeline_json: JSON.stringify(settings.detailerPipeline || []),
+          person_detail: false,
+          face_detail: false,
+          eye_detail: false,
+          hand_detail: false,
+        },
+        _meta: { title: 'Canvas Detailer Pipeline' },
+      });
+      outputRef = ref(detailerId);
+    }
     const sourceStem = sanitizeFilename(sourceName, 'image.png').replace(/\.[^.]+$/, '');
     const outputModeLabel = settings.operationMode === 'outpaint' ? 'Outpaint' : 'Inpaint';
     addNode({
@@ -3301,6 +3581,7 @@ export class UmbraUiInpaintService {
       ? 'completed'
       : job.completed > 0 ? 'partial' : 'failed';
     job.updatedAt = Date.now();
+    this.stopPreviewMonitor(job.id);
     this.persistJobs();
   }
 

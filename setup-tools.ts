@@ -1850,6 +1850,7 @@ const COMFY_NODES = [
     { name: 'comfyui-inpaint-nodes', repo: 'https://github.com/Acly/comfyui-inpaint-nodes.git', required: true },
     { name: 'comfyui_controlnet_aux', repo: 'https://github.com/Fannovel16/comfyui_controlnet_aux.git', required: true },
     { name: 'ComfyUI_IPAdapter_plus', repo: 'https://github.com/cubiq/ComfyUI_IPAdapter_plus.git', required: true },
+    { name: 'ComfyUI-Anima-LLLite', repo: 'https://github.com/kohya-ss/ComfyUI-Anima-LLLite.git', required: true },
     { name: 'ComfyUI-Inpaint-CropAndStitch', repo: 'https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch.git' },
     { name: 'ComfyUI_ComfyRoll_CustomNodes', repo: 'https://github.com/Suzie1/ComfyUI_Comfyroll_CustomNodes.git' },
     { name: 'ComfyUI-Inspire-Pack', repo: 'https://github.com/ltdrdata/ComfyUI-Inspire-Pack.git' },

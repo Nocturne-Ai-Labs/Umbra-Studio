@@ -1,3 +1,4 @@
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
@@ -47,7 +48,7 @@ export function UmbraCanvasStudioToolbar({ studio, onFitView, onResetView, onZoo
     <div data-umbra-canvas-studio-toolbar="" className="col-span-full flex min-h-11 min-w-0 flex-wrap items-center gap-2 border-b border-cyan-300/15 bg-[#050809] px-3 py-1.5">
       <Grid3X3 size={13} className="shrink-0 text-cyan-300" />
       <span className="shrink-0 text-[10px] font-black uppercase tracking-[0.14em] text-cyan-100">Canvas Studio</span>
-      <select
+      <UmbraSelectControl
         value={studio.project?.id || ''}
         onChange={(event) => event.target.value && void studio.openProject(event.target.value)}
         disabled={studio.loading || studio.projects.length <= 0}
@@ -61,7 +62,7 @@ export function UmbraCanvasStudioToolbar({ studio, onFitView, onResetView, onZoo
         {studio.projects.map((project) => (
           <option key={project.id} value={project.id}>{project.name} / {project.artboardCount} artboards</option>
         ))}
-      </select>
+      </UmbraSelectControl>
       <button type="button" onClick={() => void studio.createProject()} title="Create a project from the current canvas" className="inline-flex h-8 w-8 items-center justify-center border border-cyan-300/20 text-cyan-200 hover:bg-cyan-500/10"><Plus size={11} /></button>
       <button type="button" onClick={() => void studio.saveNow()} disabled={!studio.project || studio.saveState === 'saving'} title="Save the Studio manifest now" className="inline-flex h-8 w-8 items-center justify-center border border-white/10 text-zinc-400 hover:text-cyan-200 disabled:text-zinc-800">{studio.saveState === 'saving' ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}</button>
       <div className="flex items-center border border-white/[0.07] bg-black/25 p-0.5" aria-label="Studio canvas history">
@@ -69,7 +70,7 @@ export function UmbraCanvasStudioToolbar({ studio, onFitView, onResetView, onZoo
         <button type="button" onClick={() => void studio.redoArtboardChange()} disabled={!studio.canRedoArtboardChange || studio.loading} title="Redo the last generation-canvas change" className="inline-flex h-7 w-7 items-center justify-center text-zinc-500 hover:bg-white/[0.04] hover:text-cyan-200 disabled:text-zinc-800"><Redo2 size={11} /></button>
       </div>
       <div className="h-5 w-px bg-white/10" />
-      <select
+      <UmbraSelectControl
         value={studio.activeArtboard?.id || ''}
         onChange={(event) => event.target.value && void studio.selectArtboard(event.target.value)}
         disabled={!studio.project?.artboards.length}
@@ -78,7 +79,7 @@ export function UmbraCanvasStudioToolbar({ studio, onFitView, onResetView, onZoo
       >
         {!studio.activeArtboard ? <option value="">No artboard</option> : null}
         {studio.project?.artboards.map((artboard) => <option key={artboard.id} value={artboard.id}>{artboard.name}</option>)}
-      </select>
+      </UmbraSelectControl>
       <button type="button" onClick={() => void studio.addCurrentArtboard()} title="Add the current canvas document as an artboard" className="inline-flex h-8 items-center gap-1.5 border border-white/10 px-2 font-mono text-[8px] font-black uppercase text-zinc-400 hover:text-cyan-200"><Layers3 size={10} /> Add</button>
       <button type="button" onClick={() => void studio.duplicateCurrentArtboard()} disabled={!studio.activeArtboard} title="Duplicate the current artboard and its editable document" className="inline-flex h-8 w-8 items-center justify-center border border-white/10 text-zinc-400 hover:text-cyan-200 disabled:text-zinc-800"><Copy size={10} /></button>
       <div className="ml-auto flex items-center gap-2">
@@ -297,7 +298,7 @@ export function UmbraCanvasStudioShelf({ studio, onSelectRegion, onCreateRegion,
                   </div>
                   {active ? (
                     <div className="mt-2 grid grid-cols-2 gap-1.5">
-                      <select value={region.mode} onChange={(event) => {
+                      <UmbraSelectControl value={region.mode} onChange={(event) => {
                         const mode = event.target.value as UmbraCanvasStudioRegion['mode'];
                         studio.updateRegion(region.id, { mode });
                         onSelectRegion({ ...region, mode });
@@ -307,15 +308,15 @@ export function UmbraCanvasStudioShelf({ studio, onSelectRegion, onCreateRegion,
                         <option value="blend">Blend / Morph</option>
                         <option value="extend">Extend / Outpaint</option>
                         <option value="inpaint">Inpaint</option>
-                      </select>
-                      <select value={region.outputMode} onChange={(event) => {
+                      </UmbraSelectControl>
+                      <UmbraSelectControl value={region.outputMode} onChange={(event) => {
                         const outputMode = event.target.value as UmbraCanvasStudioRegion['outputMode'];
                         studio.updateRegion(region.id, { outputMode });
                         onSelectRegion({ ...region, outputMode });
                       }} className={smallInput} title="Region output mode">
                         <option value="raster">Raster Layer</option>
                         <option value="cutout">Transparent Cutout</option>
-                      </select>
+                      </UmbraSelectControl>
                       <textarea
                         value={region.promptSegments.map((segment) => segment.text).filter(Boolean).join(', ')}
                         readOnly

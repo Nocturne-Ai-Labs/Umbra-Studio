@@ -254,6 +254,7 @@ export interface PowerPrompterGenerationControls {
   mediaType?: PowerPrompterMediaType;
   outputOwner?: PowerPrompterOutputOwner;
   outputMode?: UmbraUiOutputMode;
+  outputFolder?: string;
   img2img?: PowerPrompterImg2ImgControls;
   video?: PowerPrompterVideoControls;
   videoSequence?: UmbraLtxExtendedSequenceMetadata;

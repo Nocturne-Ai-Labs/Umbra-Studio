@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -35,6 +36,7 @@ import {
   APP_LANGUAGES,
   COMFY_ATTENTION_BACKENDS,
   COMFY_SECURITY_LEVELS,
+  COMFY_VRAM_MODES,
   DEFAULT_APP_SETTINGS,
   fetchAppSettingsFromBackend,
   loadAppSettings,
@@ -423,7 +425,7 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
             <div data-umbra-settings-body="" className="flex flex-1 overflow-hidden">
               <label data-umbra-settings-mobile-nav className="hidden">
                 <span>Section</span>
-                <select
+                <UmbraSelectControl
                   value={activeSection}
                   onChange={(event) => setActiveSection(event.target.value as SettingsSection)}
                   aria-label="Settings section"
@@ -433,7 +435,7 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
                       {section.name}
                     </option>
                   ))}
-                </select>
+                </UmbraSelectControl>
               </label>
 
               {/* Sidebar */}
@@ -562,7 +564,7 @@ const SettingInput = ({ value, onChange, placeholder, type = 'text', disabled = 
 );
 
 const SettingSelect = ({ value, onChange, options, disabled = false }: any) => (
-  <select
+  <UmbraSelectControl
     value={value}
     disabled={disabled}
     onChange={(e) => onChange(e.target.value)}
@@ -573,7 +575,7 @@ const SettingSelect = ({ value, onChange, options, disabled = false }: any) => (
         {option.label}
       </option>
     ))}
-  </select>
+  </UmbraSelectControl>
 );
 
 const SettingsActionButton = ({ onClick, children, disabled = false }: { onClick: () => void; children: React.ReactNode; disabled?: boolean }) => (
@@ -1099,7 +1101,7 @@ const ToolVersionManager = ({
           </button>
         </div>
 
-        <select
+        <UmbraSelectControl
           value={selectedRef}
           onChange={(event) => setSelectedRef(event.target.value)}
           disabled={isRemoteClient || isLoading || isSwitching || versions.length === 0}
@@ -1112,7 +1114,7 @@ const ToolVersionManager = ({
               {version.date ? ` • ${formatVersionDate(version.date)}` : ''}
             </option>
           ))}
-        </select>
+        </UmbraSelectControl>
 
         <button
           type="button"
@@ -1141,6 +1143,17 @@ const ToolVersionManager = ({
 
 const ComfyUISettings = ({ settings, updateSetting }: any) => {
   useComponentDebug('ComfyUISettings');
+  const vramModeDescriptions: Record<(typeof COMFY_VRAM_MODES)[number], string> = {
+    auto: 'ComfyUI chooses Dynamic VRAM behavior automatically. Recommended for most systems.',
+    'gpu-only': 'Keeps text encoders, CLIP, models, and execution on the GPU. Uses the most VRAM.',
+    highvram: 'Keeps models in GPU memory instead of unloading them to system RAM after use.',
+    lowvram: 'Uses ComfyUI\'s Low VRAM flag. Current Dynamic VRAM behavior may supersede this mode.',
+    novram: 'Uses aggressive model offloading when Low VRAM is not enough.',
+    cpu: 'Runs everything on the CPU. This is the slowest compatibility mode.',
+  };
+  const selectedVramMode = COMFY_VRAM_MODES.includes(settings['comfyui.vramMode'])
+    ? settings['comfyui.vramMode'] as (typeof COMFY_VRAM_MODES)[number]
+    : 'auto';
   return (
     <div className="space-y-6">
       <h3 className="text-lg font-bold text-white uppercase">ComfyUI Settings</h3>
@@ -1166,6 +1179,45 @@ const ComfyUISettings = ({ settings, updateSetting }: any) => {
             placeholder="http://127.0.0.1:8188"
           />
           <SettingHint>Used for the embedded ComfyUI view and backend launch host/port</SettingHint>
+        </SettingGroup>
+
+        <SettingGroup label="ComfyUI VRAM Mode">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {COMFY_VRAM_MODES.map((mode) => {
+              const selected = selectedVramMode === mode;
+              const label = mode === 'auto'
+                ? 'Auto / Dynamic'
+                : mode === 'gpu-only'
+                  ? 'GPU Only'
+                  : mode === 'highvram'
+                    ? 'High VRAM'
+                    : mode === 'lowvram'
+                      ? 'Low VRAM'
+                      : mode === 'novram'
+                        ? 'No VRAM'
+                        : 'CPU';
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => updateSetting('comfyui.vramMode', mode)}
+                  className={cn(
+                    'min-h-10 rounded-md border px-3 py-2 text-xs font-bold uppercase tracking-wide transition-colors',
+                    selected
+                      ? 'border-cyan-300/55 bg-cyan-400/15 text-cyan-50'
+                      : 'border-white/10 bg-black/20 text-zinc-300 hover:border-cyan-300/30 hover:bg-cyan-400/[0.06] hover:text-white'
+                  )}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <SettingHint>{vramModeDescriptions[selectedVramMode]}</SettingHint>
+          <SettingHint>
+            Applied on the next Umbra-managed ComfyUI launch or restart. The modes are mutually exclusive.
+          </SettingHint>
         </SettingGroup>
 
         <SettingGroup label="ComfyUI Security Level">

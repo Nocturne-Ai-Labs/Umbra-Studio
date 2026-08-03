@@ -1,5 +1,62 @@
 # Changelog
 
+## v0.23.0
+
+### Canvas Studio Revival
+
+- Reintroduced Canvas Studio as a focused AI compositing workspace backed by
+  Umbra UI and ComfyUI, with projects, editable image layers, mask layers,
+  control layers, reference layers, and durable per-region generation state.
+- Added movable and resizable generation regions for fresh generation,
+  inpainting, overlap-aware outpainting, and expanding artwork beyond the
+  current image bounds without treating the entire workspace as one flat image.
+- Added preset aspect ratios and manual generation-region resolutions, 8-pixel
+  grid snapping, alignment assistance, canvas pan and zoom, layer transforms,
+  undo and redo, and visible keyboard-shortcut labels.
+- Added automatic live sampling previews inside the active generation region so
+  progress is visible directly where the result will be composited.
+- Added alpha-aware source masking for transparent artwork and logos, including
+  an inverted-alpha workflow that preserves the visible source while generating
+  around it.
+- Added focused dual sidebars for model, prompt, generation, inpaint, Hires Fix,
+  and detailer controls while keeping nonessential shape, gradient, polygon,
+  and color-picking tools out of the current user-facing scope.
+
+### Canvas Control And Reference Resources
+
+- Added optional Canvas resource profiles to the interactive Umbra UI model
+  installer for Anima LLLite inpaint and pose control, Qwen inpaint control,
+  Z-Image union control, SDXL IP-Adapter reference conditioning, and FLUX Redux
+  reference conditioning.
+- Added pinned filenames, sizes, checksums, source links, license labels, and
+  large-download notices for every new Canvas control and reference resource.
+- Added managed installation and update support for the latest
+  `ComfyUI-Anima-LLLite` custom node required by the Anima Canvas adapters.
+- Moved the existing SDXL reference resource into the unified requirements
+  manifest so every optional Canvas dependency is selected from the same model
+  family installer on Windows and Linux.
+
+### Model Selection And Interface Polish
+
+- Unified the Umbra UI and Power Prompter model browsers, including model-folder
+  subdirectories, thumbnails, metadata, and consistent selection behavior.
+- Model selection now applies the correct checkpoint, diffusion, UNet, or GGUF
+  source automatically, removing the separate model-source selector and a
+  common source-mismatch failure mode.
+- Replaced native select menus across the application with Umbra's consistent
+  context-menu-style selector for clearer keyboard, mouse, and touch use.
+- Improved Power Prompter's all-cards drag targets and reordering reliability,
+  removed the redundant active-prompt handoff control, and increased alert
+  playback gain so completion sounds remain audible at normal system volume.
+
+### Packaging And Release Hygiene
+
+- GitHub releases now publish only the Windows BAT and Linux portable ZIPs;
+  internal model manifests remain inside each package and are no longer exposed
+  as separate JSON download assets.
+- Expanded package validation for Canvas model profiles, required custom-node
+  integration, portable launchers, and repository-ready source generation.
+
 ## v0.22.8
 
 ### ComfyUI Auto-Start Hotfix

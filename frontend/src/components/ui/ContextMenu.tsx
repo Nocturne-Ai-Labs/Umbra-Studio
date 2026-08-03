@@ -204,7 +204,7 @@ function MenuPanel({
     <div
       ref={panelRef}
       data-umbra-context-menu-layer="true"
-      className="fixed min-w-[232px] max-w-[min(336px,calc(100vw-16px))] overflow-y-auto rounded-md border border-[var(--umbra-border)] bg-[#05080a]/98 shadow-2xl shadow-black/70 backdrop-blur-xl"
+      className="umbra-context-menu-panel fixed min-w-[232px] max-w-[min(336px,calc(100vw-16px))] overflow-y-auto p-1"
       style={{ ...style, zIndex: 10000 + depth * 2 }}
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
@@ -236,15 +236,15 @@ function MenuPanel({
       aria-orientation="vertical"
     >
       {depth === 0 && (title || subtitle) ? (
-        <div className="border-b border-[var(--umbra-border)] px-3 py-2.5">
-          {title ? <div className="truncate text-xs font-bold text-zinc-100">{title}</div> : null}
-          {subtitle ? <div className="mt-0.5 truncate text-[10px] uppercase tracking-[0.12em] text-zinc-500">{subtitle}</div> : null}
+        <div className="umbra-context-menu-header -mx-1 -mt-1 mb-1 px-3 py-2.5">
+          {title ? <div className="umbra-context-menu-title truncate">{title}</div> : null}
+          {subtitle ? <div className="umbra-context-menu-subtitle mt-0.5 truncate">{subtitle}</div> : null}
         </div>
       ) : null}
-      <div className="py-1.5">
+      <div className="space-y-0.5">
         {items.map((item, index) => {
           if (item.separator) {
-            return <div key={`separator-${index}`} className="mx-2 my-1.5 h-px bg-[var(--umbra-border)]" role="separator" />;
+            return <div key={`separator-${index}`} className="umbra-context-menu-separator mx-2 my-1.5" role="separator" />;
           }
           const hasChildren = Boolean(item.children?.length);
           const isOpen = openIndex === index;
@@ -259,38 +259,36 @@ function MenuPanel({
                   setOpenIndex(hasChildren ? index : -1);
                 }}
                 disabled={item.disabled}
-                className={`
-                  flex min-h-10 w-full items-center gap-3 px-3 py-2 text-left text-sm font-medium transition-colors
+                data-active={isOpen ? 'true' : 'false'}
+                data-danger={item.danger ? 'true' : 'false'}
+                className={`umbra-context-menu-item
+                  flex w-full items-center gap-2.5 px-2.5 py-2 text-left
                   ${item.disabled
                     ? 'cursor-not-allowed opacity-40'
-                    : item.danger
-                      ? 'text-red-400 hover:bg-red-500/15 hover:text-red-200'
-                      : isOpen
-                        ? 'bg-[var(--umbra-accent-glow)] text-white'
-                        : 'text-zinc-200 hover:bg-[var(--umbra-accent-glow)] hover:text-white'
+                    : ''
                   }
                 `}
                 role="menuitem"
                 aria-haspopup={hasChildren ? 'menu' : undefined}
                 aria-expanded={hasChildren ? isOpen : undefined}
               >
-                <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center text-zinc-400">
+                <span className="umbra-context-menu-icon flex h-4 w-4 flex-shrink-0 items-center justify-center">
                   {item.icon}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate">{item.label}</span>
                   {item.description ? (
-                    <span className="mt-0.5 block truncate text-[10px] font-normal text-zinc-500">
+                    <span className="umbra-context-menu-description mt-0.5 block truncate">
                       {item.description}
                     </span>
                   ) : null}
                 </span>
                 {item.badge !== undefined ? (
-                  <span className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                  <span className="umbra-context-menu-badge px-1.5 py-0.5">
                     {item.badge}
                   </span>
                 ) : null}
-                {hasChildren ? <ChevronRight size={14} className="shrink-0 text-zinc-500" /> : null}
+                {hasChildren ? <ChevronRight size={14} className="umbra-context-menu-icon shrink-0" /> : null}
               </button>
               {hasChildren && isOpen && typeof document !== 'undefined'
                 ? createPortal(

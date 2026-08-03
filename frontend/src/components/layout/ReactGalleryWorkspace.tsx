@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -3572,14 +3573,16 @@ function GalleryMediaViewer({
       <Send size={15} />
     </button>
   ) : (
-    <details className="group relative">
+    <details className="group relative" data-umbra-gallery-viewer-send-menu="">
       <summary
+        data-umbra-gallery-viewer-action="send"
         className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded border border-cyan-300/20 text-cyan-200 hover:bg-cyan-400/10 [&::-webkit-details-marker]:hidden"
         title="Send to Umbra UI"
+        aria-label="Send to Umbra UI"
       >
         <Send size={15} />
       </summary>
-      <div className="absolute right-0 top-10 z-30 w-52 overflow-hidden rounded-md border border-cyan-300/25 bg-[#070a0c] p-1 shadow-2xl shadow-black/70">
+      <div data-umbra-gallery-viewer-send-menu-panel="" className="absolute right-0 top-10 z-[120] w-52 overflow-hidden rounded-md border border-cyan-300/25 bg-[#070a0c] p-1 shadow-2xl shadow-black/70">
         <button type="button" disabled={isVideo} onClick={() => sendToUmbra('txt2img')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Sparkles size={12} className="text-emerald-300" /> TXT2IMG Parameters
         </button>
@@ -3588,6 +3591,9 @@ function GalleryMediaViewer({
         </button>
         <button type="button" disabled={isVideo} onClick={() => sendToUmbra('inpaint')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Paintbrush size={12} className="text-rose-300" /> Inpaint
+        </button>
+        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('canvas')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
+          <Grid3X3 size={12} className="text-cyan-300" /> Canvas
         </button>
         <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Clapperboard size={12} className="text-fuchsia-300" /> IMG2VID / First Frame
@@ -3620,7 +3626,7 @@ function GalleryMediaViewer({
         onClick={onClose}
       />
 
-      <header data-umbra-gallery-viewer-header="" className="relative z-10 flex min-h-12 items-center justify-between gap-3 border-b border-white/10 bg-zinc-950/90 px-3">
+      <header data-umbra-gallery-viewer-header="" className="relative z-[80] flex min-h-12 items-center justify-between gap-3 border-b border-white/10 bg-zinc-950/90 px-3">
         <div data-umbra-gallery-viewer-title="" className="min-w-0">
           <div className="truncate text-sm font-semibold text-zinc-100">{file.name || pathLeaf(file.path)}</div>
           <div className="truncate text-[11px] text-zinc-500">
@@ -3958,6 +3964,9 @@ function GalleryMediaViewer({
               </button>
               <button type="button" disabled={isVideo} onClick={() => sendToUmbra('inpaint')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-rose-400/15 disabled:opacity-30">
                 <Paintbrush size={17} className="shrink-0 text-rose-300" /> Inpaint
+              </button>
+              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('canvas')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-cyan-400/20 bg-cyan-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-cyan-400/15 disabled:opacity-30">
+                <Grid3X3 size={17} className="shrink-0 text-cyan-300" /> Canvas
               </button>
               <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-fuchsia-400/20 bg-fuchsia-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-fuchsia-400/15 disabled:opacity-30">
                 <Clapperboard size={17} className="shrink-0 text-fuchsia-300" /> Video first frame
@@ -9647,6 +9656,7 @@ export function ReactGalleryWorkspace() {
       { label: 'TXT2IMG From Parameters', icon: <Sparkles size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'txt2img') },
       { label: 'IMG2IMG', icon: <Images size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'img2img') },
       { label: 'Inpaint', icon: <Paintbrush size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'inpaint') },
+      { label: 'Canvas', icon: <Grid3X3 size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'canvas') },
     ];
     const umbraUiVideoItems: ContextMenuItem[] = [
       { label: 'Use as First Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'first') },
@@ -9924,8 +9934,9 @@ export function ReactGalleryWorkspace() {
           <div data-umbra-gallery-sort-actions="" className="flex min-w-0 items-center gap-2">
             {!trashMode ? (
               <>
-                <select
+                <UmbraSelectControl
                   value={sortBy}
+                  aria-label="Sort gallery"
                   onChange={(event) => {
                     markGalleryUiSessionDirty();
                     setSortBy(event.target.value as GallerySortBy);
@@ -9936,7 +9947,7 @@ export function ReactGalleryWorkspace() {
                   <option value="modified">Modified</option>
                   <option value="name">Name</option>
                   <option value="custom">Custom</option>
-                </select>
+                </UmbraSelectControl>
                 <button
                   type="button"
                   onClick={() => {
@@ -10147,7 +10158,7 @@ export function ReactGalleryWorkspace() {
               )}
               {trashMode ? (
                 <>
-                  <select
+                  <UmbraSelectControl
                     value={trashRetentionDays}
                     disabled={savingTrashSettings}
                     onChange={(event) => setTrashRetentionDays(clampTrashRetentionDays(event.target.value))}
@@ -10157,7 +10168,7 @@ export function ReactGalleryWorkspace() {
                     {TRASH_RETENTION_OPTIONS.map((days) => (
                       <option key={days} value={days}>{days} day{days === 1 ? '' : 's'}</option>
                     ))}
-                  </select>
+                  </UmbraSelectControl>
                   <button
                     type="button"
                     disabled={savingTrashSettings}
@@ -10355,7 +10366,7 @@ export function ReactGalleryWorkspace() {
                         </span>
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
-                        <select
+                        <UmbraSelectControl
                           value={group.rule.sortBy}
                           onChange={(event) => updateSetSortRule(group.setId, { sortBy: event.target.value as GallerySortBy })}
                           className="h-7 rounded border border-white/10 bg-zinc-950/70 px-2 text-xs text-zinc-200 outline-none focus:border-[var(--umbra-accent)]"
@@ -10365,7 +10376,7 @@ export function ReactGalleryWorkspace() {
                           <option value="modified">Modified</option>
                           <option value="name">Name</option>
                           <option value="custom">Custom</option>
-                        </select>
+                        </UmbraSelectControl>
                         <button
                           type="button"
                           onClick={() => updateSetSortRule(group.setId, { sortOrder: group.rule.sortOrder === 'asc' ? 'desc' : 'asc' })}

@@ -362,6 +362,35 @@ async function buildCanvasEncodeWorker() {
   }
 }
 
+async function buildCanvasMaskWorker() {
+  const result = await Bun.build({
+    entrypoints: [path.join(srcDir, 'workers', 'UmbraCanvasMaskWorker.ts')],
+    outdir: activePublicDir,
+    root: srcDir,
+    target: 'browser',
+    format: 'esm',
+    splitting: false,
+    minify: !isDevelopmentBuild,
+    sourcemap: isDevelopmentBuild ? 'linked' : false,
+    publicPath: '/assets/',
+    naming: {
+      entry: 'assets/UmbraCanvasMaskWorker.js',
+      asset: 'assets/[name]-[hash].[ext]',
+    },
+    plugins: [frontendPlugin],
+  });
+
+  if (!result.success) {
+    for (const log of result.logs) console.error(log);
+    throw new Error('[frontend-build] Bun Canvas mask worker bundle failed.');
+  }
+
+  const workerOutput = path.join(activePublicAssetsDir, 'UmbraCanvasMaskWorker.js');
+  if (!fs.existsSync(workerOutput)) {
+    throw new Error('[frontend-build] Could not locate generated Canvas mask worker bundle.');
+  }
+}
+
 async function buildPsdEncodeWorker() {
   const result = await Bun.build({
     entrypoints: [path.join(srcDir, 'workers', 'UmbraPsdEncodeWorker.ts')],
@@ -462,6 +491,7 @@ async function buildFrontend() {
     await buildQueueWorker();
     await buildRasterFilterWorker();
     await buildCanvasEncodeWorker();
+    await buildCanvasMaskWorker();
     await buildPsdEncodeWorker();
     const cssFileName = await buildCss();
     sanitizeGeneratedJavaScript();

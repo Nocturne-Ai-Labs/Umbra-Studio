@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import { ImageUp, Loader2, X } from 'lucide-react';
 import type { UmbraCanvasRasterLayer } from '@/lib/umbraUiCanvasDocument';
@@ -70,10 +71,10 @@ export function UmbraLayerUpscaleDialog({
           <div className="space-y-3">
             <label className="block space-y-1">
               <span className="block text-[7px] font-black uppercase text-zinc-600">Upscale Model</span>
-              <select value={modelName} onChange={(event) => setModelName(event.target.value)} disabled={busy} className={inputClass}>
+              <UmbraSelectControl value={modelName} onChange={(event) => setModelName(event.target.value)} disabled={busy} className={inputClass}>
                 {models.length <= 0 ? <option value="">No upscale models installed</option> : null}
                 {models.map((model) => <option key={model} value={model}>{model}</option>)}
-              </select>
+              </UmbraSelectControl>
             </label>
             <label className="block space-y-1">
               <span className="flex text-[7px] font-black uppercase text-zinc-600"><span>Maximum Dimension</span><span className="ml-auto font-mono text-zinc-500">{maxDimension}px</span></span>

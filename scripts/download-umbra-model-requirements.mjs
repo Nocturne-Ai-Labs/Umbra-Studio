@@ -56,8 +56,8 @@ function loadManifest() {
 
 function printFamilies(manifest) {
   console.log('\nUmbra Studio model requirements');
-  console.log('Choose only the prerequisite resources for model families you plan to use.');
-  console.log('Base checkpoints and diffusion models are never downloaded by this tool.\n');
+  console.log('Choose model-family prerequisites and optional Canvas Control / Reference resources.');
+  console.log('Base generation checkpoints and diffusion models are never downloaded by this tool.\n');
   Object.entries(manifest.profiles).forEach(([id, profile], index) => {
     const models = manifest.models.filter(model => model.profiles.includes(id));
     const bytes = models.flatMap(model => model.files).reduce((sum, file) => sum + Number(file.bytes || 0), 0);
@@ -65,7 +65,7 @@ function printFamilies(manifest) {
     console.log(`  ${index + 1}. ${profile.label} (${suffix})`);
     console.log(`     ${profile.description}`);
   });
-  console.log('\n  A. Install every downloadable prerequisite');
+  console.log('\n  A. Install every downloadable prerequisite and Canvas resource');
   console.log('  Q. Quit');
 }
 

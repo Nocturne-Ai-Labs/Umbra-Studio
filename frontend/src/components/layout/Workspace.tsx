@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '@/store/useStore';
 import { ArrowDown, ArrowUp, Power, Zap, RefreshCw, Loader2, ExternalLink, Pencil, Globe2, Plus, Save, Trash2, FolderOpen } from 'lucide-react';
@@ -1204,7 +1205,7 @@ export const BackendSplash = ({
             </p>
 
             <div className="flex flex-wrap gap-2">
-              <select
+              <UmbraSelectControl
                 value={selectedComfyRef}
                 onChange={(event) => setSelectedComfyRef(event.target.value)}
                 disabled={managementBlocked || isLoadingComfyVersions || isSwitchingComfyVersion || isLaunching || !!toolActionLoading || comfyVersions.length === 0}
@@ -1217,7 +1218,7 @@ export const BackendSplash = ({
                     {version.date ? ` • ${formatComfyVersionDate(version.date)}` : ''}
                   </option>
                 ))}
-              </select>
+              </UmbraSelectControl>
               <button
                 type="button"
                 onClick={handleComfyVersionSwitch}

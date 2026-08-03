@@ -490,7 +490,7 @@ export const PowerPrompterSearchPanel = React.memo(({ onInsert, enabledCSVs, onT
       {/* Context Menu */}
       {contextMenu && (
         <div
-          className="fixed z-[100] bg-[#1a1a1f] border border-white/10 rounded-lg shadow-xl py-1 min-w-[160px]"
+          className="umbra-context-menu-panel umbra-context-menu-legacy-actions fixed z-[100] min-w-[188px] p-1"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -500,14 +500,14 @@ export const PowerPrompterSearchPanel = React.memo(({ onInsert, enabledCSVs, onT
               onInsert(text);
               setContextMenu(null);
             }}
-            className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-white/10 transition-colors flex items-center gap-2"
+            className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-zinc-300"
           >
-            <span className="w-4 h-4 flex items-center justify-center text-zinc-500">+</span>
+            <span className="umbra-context-menu-icon flex h-4 w-4 items-center justify-center">+</span>
             Insert Tag
           </button>
           <button
             onClick={() => handleCopyTag(contextMenu.item)}
-            className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-white/10 transition-colors flex items-center gap-2"
+            className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-zinc-300"
           >
             <Copy size={14} className="text-zinc-500" />
             Copy Tag
@@ -517,19 +517,19 @@ export const PowerPrompterSearchPanel = React.memo(({ onInsert, enabledCSVs, onT
             target="_blank"
             rel="noopener noreferrer"
             onClick={() => setContextMenu(null)}
-            className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-white/10 transition-colors flex items-center gap-2"
+            className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-zinc-300"
           >
             <ExternalLink size={14} className="text-zinc-500" />
             Search Danbooru
           </a>
-          <div className="border-t border-white/5 my-1" />
+          <div className="umbra-context-menu-separator mx-2 my-1.5" />
           {isFavorite(contextMenu.item) ? (
             <button
               onClick={() => {
                 removeFavorite(contextMenu.item);
                 setContextMenu(null);
               }}
-              className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-white/10 transition-colors flex items-center gap-2"
+              className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-red-400 hover:!bg-red-500/15"
             >
               <Trash2 size={14} />
               Remove from Favorites
@@ -540,7 +540,7 @@ export const PowerPrompterSearchPanel = React.memo(({ onInsert, enabledCSVs, onT
                 addFavorite(contextMenu.item);
                 setContextMenu(null);
               }}
-              className="w-full text-left px-3 py-2 text-xs text-yellow-400 hover:bg-white/10 transition-colors flex items-center gap-2"
+              className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-amber-300"
             >
               <Star size={14} />
               Add to Favorites

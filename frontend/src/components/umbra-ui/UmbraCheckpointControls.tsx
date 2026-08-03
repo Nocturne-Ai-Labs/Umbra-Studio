@@ -43,9 +43,6 @@ export function UmbraCheckpointControls({
   heading = 'Checkpoint',
   modelLabel = 'Model',
   emptyLabel = 'Choose checkpoint',
-  modelType,
-  modelTypeOptions = [],
-  onModelTypeChange,
   showClipSkip = true,
 }: UmbraCheckpointControlsProps) {
   const selectionRequired = !String(checkpointName || '').trim();
@@ -72,29 +69,7 @@ export function UmbraCheckpointControls({
           </button>
         ) : null}
       </div>
-      <div className={modelType && onModelTypeChange
-        ? showClipSkip
-          ? 'grid grid-cols-[100px_minmax(0,1fr)_76px] gap-2'
-          : 'grid grid-cols-[100px_minmax(0,1fr)] gap-2'
-        : showClipSkip
-          ? 'grid grid-cols-[minmax(0,1fr)_76px] gap-2'
-          : 'grid grid-cols-1 gap-2'}>
-        {modelType && onModelTypeChange ? (
-          <label className="min-w-0 space-y-1.5">
-            <span className={labelClass}>Source</span>
-            <select
-              value={modelType}
-              onChange={(event) => onModelTypeChange(event.target.value as PowerPrompterModelType)}
-              disabled={modelTypeOptions.length <= 1}
-              title={modelTypeOptions.length <= 1 ? 'Model source is fixed by this pipeline' : 'Model source'}
-              className="h-10 w-full min-w-0 rounded-md border border-white/10 bg-black/35 px-2.5 font-mono text-[10px] text-zinc-100 outline-none focus:border-cyan-300/45"
-            >
-              {modelTypeOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-        ) : null}
+      <div className={showClipSkip ? 'grid grid-cols-[minmax(0,1fr)_76px] gap-2' : 'grid grid-cols-1 gap-2'}>
         <div className="min-w-0 space-y-1.5">
           <span className={labelClass}>{modelLabel}</span>
           <button

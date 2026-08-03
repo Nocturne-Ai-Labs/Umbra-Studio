@@ -234,7 +234,7 @@ export function UmbraLoraStackControls({
                 {lora.trainedTags.length > 0 ? (
                   <div className="mt-2">
                     <div className="mb-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500">
-                      <Tags size={10} /> Trained Tokens
+                      <Tags size={10} /> Trigger Tags
                     </div>
                     <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto custom-scrollbar">
                       {lora.trainedTags.map((tag) => (

@@ -50,14 +50,14 @@ export function resolveSeedForQueuePromptGroup(
   const mode = String(generation.controlAfterGenerate || 'fixed').trim().toLowerCase();
   const normalizedGroupIndex = Math.max(0, Math.floor(Number(groupIndex) || 0));
   const maxSeed = Number.MAX_SAFE_INTEGER;
+  const increment = generation.seedIncrement === 100 || generation.seedIncrement === 1000
+    ? generation.seedIncrement
+    : 1;
   if (mode === 'increment') {
-    const increment = generation.seedIncrement === 100 || generation.seedIncrement === 1000
-      ? generation.seedIncrement
-      : 1;
     return Math.max(0, Math.min(maxSeed, baseSeed + normalizedGroupIndex * increment));
   }
   if (mode === 'decrement') {
-    return Math.max(0, baseSeed - normalizedGroupIndex);
+    return Math.max(0, baseSeed - normalizedGroupIndex * increment);
   }
   if (mode === 'randomize') {
     const salt = `${Number(shuffleSeed) || Date.now()}|${baseSeed}|${normalizedGroupIndex}`;

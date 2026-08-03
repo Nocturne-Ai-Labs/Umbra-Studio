@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import { Bot, Loader2, WandSparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -150,7 +151,7 @@ export function UmbraInlineAgentPrompt({
       {enabled ? (
         <div className="mt-2 space-y-2 border-t border-white/10 pt-2">
           <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-            <select
+            <UmbraSelectControl
               value={selectedInstructionId}
               onChange={(event) => setSelectedInstructionId(event.target.value)}
               disabled={loadingInstructions || instructions.length <= 0}
@@ -159,7 +160,7 @@ export function UmbraInlineAgentPrompt({
             >
               {instructions.length <= 0 ? <option value="">Default instruction</option> : null}
               {instructions.map((instruction) => <option key={instruction.id} value={instruction.id}>{instruction.name}</option>)}
-            </select>
+            </UmbraSelectControl>
             <button
               type="button"
               onClick={() => void handleGenerate()}

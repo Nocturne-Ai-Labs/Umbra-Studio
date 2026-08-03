@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import {
   ArrowLeft,
@@ -4748,27 +4749,27 @@ export function ModelManagerWorkspace() {
                           </button>
                         ))}
                       </div>
-                      <select
+                      <UmbraSelectControl
                         value={civitaiDiscoverySort}
                         onChange={(event) => setCivitaiDiscoverySort(event.target.value)}
                         className="h-8 rounded-md border border-white/10 bg-black/30 px-2 text-xs font-semibold text-zinc-200 outline-none"
                       >
                         {CIVITAI_DISCOVERY_SORTS.map((option) => <option key={option} value={option}>{option}</option>)}
-                      </select>
-                      <select
+                      </UmbraSelectControl>
+                      <UmbraSelectControl
                         value={civitaiDiscoveryPeriod}
                         onChange={(event) => setCivitaiDiscoveryPeriod(event.target.value)}
                         className="h-8 rounded-md border border-white/10 bg-black/30 px-2 text-xs font-semibold text-zinc-200 outline-none"
                       >
                         {CIVITAI_DISCOVERY_PERIODS.map((option) => <option key={option} value={option}>{option}</option>)}
-                      </select>
-                      <select
+                      </UmbraSelectControl>
+                      <UmbraSelectControl
                         value={civitaiDiscoveryBaseModel}
                         onChange={(event) => setCivitaiDiscoveryBaseModel(event.target.value)}
                         className="h-8 rounded-md border border-white/10 bg-black/30 px-2 text-xs font-semibold text-zinc-200 outline-none"
                       >
                         {CIVITAI_DISCOVERY_BASE_MODELS.map((option) => <option key={option} value={option}>{option}</option>)}
-                      </select>
+                      </UmbraSelectControl>
                       <button
                         type="button"
                         onClick={() => void searchCivitaiDiscovery()}
@@ -4912,7 +4913,7 @@ export function ModelManagerWorkspace() {
                     }}
                   />
                   <div
-                    className="fixed z-50 w-56 overflow-hidden rounded-lg border border-white/10 bg-zinc-950/95 py-1 text-sm shadow-2xl shadow-black/60 backdrop-blur"
+                    className="umbra-context-menu-panel umbra-context-menu-legacy-actions fixed z-50 w-60 overflow-hidden p-1"
                     style={{ left: browserContextMenu.x, top: browserContextMenu.y }}
                     onClick={(event) => event.stopPropagation()}
                     onContextMenu={(event) => event.preventDefault()}
@@ -5873,7 +5874,7 @@ export function ModelManagerWorkspace() {
 
         {contextMenu ? (
           <div
-            className="fixed z-[1500] w-max min-w-0 rounded-lg border border-white/15 bg-[#0f1118] p-1.5 shadow-xl shadow-black/60"
+            className="umbra-context-menu-panel umbra-context-menu-legacy-actions fixed z-[1500] w-max min-w-[188px] p-1"
             style={{ left: contextMenu.x, top: contextMenu.y }}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}

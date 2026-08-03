@@ -1,3 +1,4 @@
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   Copy,
@@ -915,7 +916,7 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <label className="text-[11px] umbra-text-faint sm:col-span-3">
                     Caption Model
-                    <select
+                    <UmbraSelectControl
                       value={captionOptions.modelRepo}
                       onChange={(event) => setCaptionOptions((prev) => ({ ...prev, modelRepo: event.target.value }))}
                       className="umbra-input umbra-themed-select mt-1 w-full rounded px-2 py-2 text-xs"
@@ -923,11 +924,11 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
                       {NATURAL_MODEL_OPTIONS.map((option) => (
                         <option key={option.id} value={option.id}>{option.label}</option>
                       ))}
-                    </select>
+                    </UmbraSelectControl>
                   </label>
                   <label className="text-[11px] umbra-text-faint">
                     Device
-                    <select
+                    <UmbraSelectControl
                       value={captionOptions.device}
                       onChange={(event) => setCaptionOptions((prev) => ({
                         ...prev,
@@ -938,7 +939,7 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
                       <option value="auto">Auto</option>
                       <option value="cpu">CPU</option>
                       <option value="cuda">GPU</option>
-                    </select>
+                    </UmbraSelectControl>
                   </label>
                   <label className="text-[11px] umbra-text-faint sm:col-span-2">
                     Caption Length
@@ -961,7 +962,7 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
                   <div className="mb-3 grid grid-cols-2 gap-2">
                     <label className="text-[11px] umbra-text-faint">
                       Model
-                      <select
+                      <UmbraSelectControl
                         value={waifuOptions.modelRepo}
                         onChange={(event) => setWaifuOptions((prev) => ({ ...prev, modelRepo: event.target.value }))}
                         className="umbra-input umbra-themed-select mt-1 w-full rounded px-2 py-1 text-xs"
@@ -969,7 +970,7 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
                         {WAIFU_MODEL_OPTIONS.map((option) => (
                           <option key={option.id} value={option.id}>{option.label}</option>
                         ))}
-                      </select>
+                      </UmbraSelectControl>
                     </label>
                     <label className="text-[11px] umbra-text-faint">
                       Max Tags

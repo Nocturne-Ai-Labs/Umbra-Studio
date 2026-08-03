@@ -121,6 +121,10 @@ export interface QualificationCase {
   outputOnlyMaskedRegions?: boolean;
   colorMatch?: number;
   differentialStrength?: number;
+  softInpaintEnabled?: boolean;
+  softInpaintPreservation?: number;
+  softInpaintTransitionContrast?: number;
+  softInpaintMaskInfluence?: number;
   regionalGuidance?: GuidanceCase[];
   controlLayers?: ControlCase[];
   referenceLayers?: ReferenceCase[];
@@ -256,6 +260,7 @@ async function preparePrimaryFixtures(
 }
 
 function appendScalarSettings(form: FormData, item: QualificationCase): void {
+  const softInpaintEnabled = item.softInpaintEnabled ?? item.expectedAdapter !== 'native_edit';
   const settings: Record<string, string | number | boolean> = {
     canvasProjectId: `qualification-${item.id}`,
     operationMode: item.operationMode,
@@ -302,6 +307,10 @@ function appendScalarSettings(form: FormData, item: QualificationCase): void {
     outputOnlyMaskedRegions: item.outputOnlyMaskedRegions === true,
     colorMatch: item.colorMatch ?? 0,
     differentialStrength: item.differentialStrength ?? 1,
+    softInpaintEnabled,
+    softInpaintPreservation: item.softInpaintPreservation ?? 0.5,
+    softInpaintTransitionContrast: item.softInpaintTransitionContrast ?? 2,
+    softInpaintMaskInfluence: item.softInpaintMaskInfluence ?? 0,
   };
   for (const [key, value] of Object.entries(settings)) form.append(key, String(value));
 }
@@ -399,9 +408,14 @@ function readinessWarnings(pipeline: any): string[] {
 }
 
 export function requiredPromptNodeClasses(item: QualificationCase, adapter: string, modelFamily: string): string[] {
-  const required = new Set(['LoadImage', 'LoadImageMask', 'ImageCompositeMasked', 'UmbraLabSaveImage']);
+  const required = new Set(['LoadImage', 'LoadImageMask', 'UmbraLabSaveImage']);
   if (adapter === 'classic_conditioning' || adapter === 'flux_fill') required.add('InpaintModelConditioning');
-  if (adapter === 'flux_fill') required.add('DifferentialDiffusion');
+  const softInpaintEnabled = item.softInpaintEnabled ?? adapter !== 'native_edit';
+  if (softInpaintEnabled) required.add('UmbraSoftInpaintComposite');
+  else if (!item.outputOnlyMaskedRegions) required.add('ImageCompositeMasked');
+  if (softInpaintEnabled && adapter !== 'qwen_image_controlnet' && (item.differentialStrength ?? 1) > 0) {
+    required.add('DifferentialDiffusion');
+  }
   if (adapter === 'qwen_image_controlnet') {
     required.add('ControlNetLoader');
     required.add('ControlNetInpaintingAliMamaApply');

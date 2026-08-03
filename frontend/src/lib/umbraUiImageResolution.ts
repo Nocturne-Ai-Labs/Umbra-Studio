@@ -39,15 +39,19 @@ export function resolveUmbraImageDimensions(
 ): { width: number; height: number } | null {
   const preset = UMBRA_IMAGE_ASPECT_PRESETS.find((entry) => entry.id === aspectRatio);
   if (!preset) return null;
-  const scale = Math.max(0.25, Math.min(4, finiteInteger(baseResolution, 1024) / 1024));
   const step = Math.max(1, finiteInteger(bounds.step, 8));
   const minimumWidth = Math.max(step, finiteInteger(bounds.minimumWidth, 64));
   const minimumHeight = Math.max(step, finiteInteger(bounds.minimumHeight, 64));
   const maximumWidth = Math.max(minimumWidth, finiteInteger(bounds.maximumWidth, 8192));
   const maximumHeight = Math.max(minimumHeight, finiteInteger(bounds.maximumHeight, 8192));
+  const longSide = Math.max(512, Math.min(2048, finiteInteger(baseResolution, 1024)));
+  const [ratioWidth, ratioHeight] = preset.id.split(':').map(Number);
+  const ratio = ratioWidth / ratioHeight;
+  const requestedWidth = ratio >= 1 ? longSide : longSide * ratio;
+  const requestedHeight = ratio >= 1 ? longSide / ratio : longSide;
   return {
-    width: alignDimension(preset.baseWidth * scale, minimumWidth, maximumWidth, step),
-    height: alignDimension(preset.baseHeight * scale, minimumHeight, maximumHeight, step),
+    width: alignDimension(requestedWidth, minimumWidth, maximumWidth, step),
+    height: alignDimension(requestedHeight, minimumHeight, maximumHeight, step),
   };
 }
 
@@ -64,6 +68,6 @@ export function inferUmbraImageAspectRatio(width: number, height: number): Umbra
 
 export function inferUmbraImageBaseResolution(width: number, height: number): number {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return 1024;
-  const squareEquivalent = Math.sqrt(width * height);
-  return Math.max(512, Math.min(2048, Math.round(squareEquivalent / 64) * 64));
+  const longSide = Math.max(width, height);
+  return Math.max(512, Math.min(2048, Math.round(longSide / 64) * 64));
 }

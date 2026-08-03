@@ -1,5 +1,6 @@
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
-import { Bell, BellOff, Bot, ChevronDown, ChevronLeft, ChevronRight, FileText, FolderOpen, ListChecks, ListOrdered, Loader2, MoreHorizontal, PanelsTopLeft, Pause, Play, Power, RefreshCw, Save, Search, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
+import { Bell, BellOff, Bot, ChevronDown, ChevronLeft, ChevronRight, FileText, FolderOpen, ListChecks, ListOrdered, Loader2, MoreHorizontal, Pause, Play, Power, RefreshCw, Save, Search, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
 import { POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME, POWER_PROMPTER_MAX_QUEUE_SETS } from '@/lib/powerPrompter';
 import { PowerPrompterGlobalSearchBox } from './PowerPrompterGlobalSearchBox';
 import { POWER_PROMPTER_SOUND_STYLE_GLASS_TICK, POWER_PROMPTER_SOUND_STYLE_OPTIONS, clampCompletionSoundVolume } from './powerPrompterAudio';
@@ -25,8 +26,6 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
     handleToggleCompletionSound,
     handleSetCompletionSoundStyle,
     handleSetCompletionSoundVolume,
-    handleSendActivePromptToUmbraUi,
-    umbraUiHandoffBusy = false,
     queueSetTarget,
     setQueueSetTarget,
     currentFile,
@@ -300,7 +299,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
 
         <div data-umbra-powerprompter-phone-queue-row="" className="mt-1.5 grid grid-cols-[76px_minmax(0,1fr)_minmax(0,1fr)_48px] items-center gap-1.5">
           <div className="relative min-w-0">
-            <select
+            <UmbraSelectControl
               value={queueSetTarget}
               onChange={(event) => setQueueSetTarget(clampQueueSetId(event.target.value))}
               disabled={!currentFile || !!queueingMode}
@@ -323,7 +322,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                   Set {setId}
                 </option>
               ))}
-            </select>
+            </UmbraSelectControl>
             <ChevronDown
               size={12}
               className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2"
@@ -429,19 +428,6 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               <span>{queueSummaryCounts.running || 0} running</span>
               <span>{queueSummaryCounts.queued || 0} done</span>
             </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setPhoneActionsOpen(false);
-                void handleSendActivePromptToUmbraUi?.();
-              }}
-              disabled={!currentFile || umbraUiHandoffBusy}
-              className="ml-auto inline-flex min-h-9 w-fit items-center justify-center gap-1.5 rounded-md border border-cyan-300/20 bg-cyan-400/[0.06] px-2.5 text-[10px] font-bold uppercase tracking-[0.08em] text-cyan-200 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
-            >
-              {umbraUiHandoffBusy ? <Loader2 size={13} className="animate-spin" /> : <PanelsTopLeft size={13} />}
-              Umbra UI
-            </button>
 
             <button
               type="button"
@@ -998,7 +984,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                       </div>
                       <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto]">
                         <div className="relative min-w-0">
-                          <select
+                          <UmbraSelectControl
                             value={selectedSavedQueueId}
                             onChange={(event) => setSelectedSavedQueueId?.(String(event.currentTarget.value || '').trim())}
                             disabled={savedQueueSnapshotsParked || savedQueueBusy === 'list' || savedQueues.length <= 0}
@@ -1022,7 +1008,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                                 {`${queue.name} - ${queue.promptCount} prompts - Set ${queue.activeSetId}`}
                               </option>
                             ))}
-                          </select>
+                          </UmbraSelectControl>
                           <ChevronDown
                             size={12}
                             className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400"
@@ -1153,7 +1139,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                         {settings.generationCompleteSoundEnabled !== false ? <Volume2 size={12} /> : <VolumeX size={12} />}
                         Complete
                       </button>
-                      <select
+                      <UmbraSelectControl
                         value={settings.generationCompleteSoundStyle || POWER_PROMPTER_SOUND_STYLE_GLASS_TICK}
                         onChange={(event) => { void handleSetCompletionSoundStyle(event.currentTarget.value); }}
                         className="min-h-9 rounded-lg border border-white/10 bg-black/30 px-2.5 text-xs font-semibold text-zinc-200 outline-none transition-colors hover:border-white/25 focus:border-emerald-400/45 umbra-themed-select"
@@ -1164,7 +1150,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                             {option.label}
                           </option>
                         ))}
-                      </select>
+                      </UmbraSelectControl>
                       <input
                         type="range"
                         min={0}
@@ -1184,23 +1170,6 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                   </div>
 
                   <div className="mb-3 grid gap-2 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setQueueSettingsMenuOpen(false);
-                        void handleSendActivePromptToUmbraUi?.();
-                      }}
-                      disabled={!currentFile || umbraUiHandoffBusy}
-                      className={`sm:col-span-2 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border px-3 text-[10px] font-black uppercase tracking-[0.13em] transition-colors ${
-                        !currentFile || umbraUiHandoffBusy
-                          ? 'border-white/10 bg-white/[0.03] text-zinc-600 cursor-not-allowed'
-                          : 'border-cyan-300/40 bg-cyan-500/10 text-cyan-100 hover:border-cyan-200/65 hover:bg-cyan-500/15'
-                      }`}
-                      title="Transfer the active set prompt and generation controls to Umbra UI without queueing or starting"
-                    >
-                      {umbraUiHandoffBusy ? <Loader2 size={13} className="animate-spin" /> : <PanelsTopLeft size={13} />}
-                      Send Active Prompt to Umbra UI
-                    </button>
                     <button
                       onClick={openQueueHistoryPanel}
                       className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-3 text-[10px] font-black uppercase tracking-[0.13em] text-cyan-100 transition-colors hover:border-cyan-300/55"
@@ -1254,7 +1223,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                     <label className="block">
                       <span className="mb-1 block text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">Queue Set</span>
                       <div className="relative">
-                        <select
+                        <UmbraSelectControl
                           value={queueSetTarget}
                           onChange={(event) => setQueueSetTarget(clampQueueSetId(event.target.value))}
                           disabled={!currentFile || !!queueingMode}
@@ -1285,7 +1254,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                               Set {setId}
                             </option>
                           ))}
-                        </select>
+                        </UmbraSelectControl>
                         <ChevronDown
                           size={13}
                           className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2"
@@ -1429,7 +1398,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               )}
             </div>
             <div className="relative w-[92px] shrink-0">
-              <select
+              <UmbraSelectControl
                 value={queueSetTarget}
                 onChange={(event) => setQueueSetTarget(clampQueueSetId(event.target.value))}
                 disabled={!currentFile || !!queueingMode}
@@ -1460,7 +1429,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                     Set {setId}
                   </option>
                 ))}
-              </select>
+              </UmbraSelectControl>
               <span
                 aria-hidden="true"
                 className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-black"

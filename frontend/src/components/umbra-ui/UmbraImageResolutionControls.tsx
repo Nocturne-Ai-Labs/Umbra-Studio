@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Images, Ratio } from 'lucide-react';
+import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import type { UmbraUiPipelineResolutionCapability } from '../../../../shared/umbra-ui/pipelineTypes';
 import {
   UMBRA_IMAGE_ASPECT_PRESETS,
@@ -70,16 +71,17 @@ export function UmbraImageResolutionControls({
           {resolutionAdjustable ? (
             <label className="min-w-0 space-y-1.5">
               <span className={labelClass}>Aspect Ratio</span>
-              <select
+              <UmbraSelect
                 value={aspectRatio}
-                onChange={(event) => handleAspectChange(event.target.value as UmbraImageAspectPresetId)}
-                className={inputClass}
-              >
-                {UMBRA_IMAGE_ASPECT_PRESETS.map((preset) => (
-                  <option key={preset.id} value={preset.id}>{preset.label}</option>
-                ))}
-                <option value="custom">Custom</option>
-              </select>
+                onValueChange={(value) => handleAspectChange(value as UmbraImageAspectPresetId)}
+                ariaLabel="Aspect Ratio"
+                menuTitle="Aspect Ratio"
+                options={[
+                  ...UMBRA_IMAGE_ASPECT_PRESETS.map((preset) => ({ value: preset.id, label: preset.label })),
+                  { value: 'custom', label: 'Custom' },
+                ]}
+                size="md"
+              />
             </label>
           ) : null}
           <label className="space-y-1.5">
@@ -100,7 +102,7 @@ export function UmbraImageResolutionControls({
         {resolutionAdjustable ? (
           <label className="block space-y-1.5">
             <span className="flex items-center gap-2">
-              <span className={labelClass}>Base Resolution</span>
+              <span className={labelClass}>Long Side Resolution</span>
               <span className="ml-auto font-mono text-[10px] text-zinc-300">{baseResolution}px</span>
             </span>
             <input

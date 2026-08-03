@@ -1,3 +1,4 @@
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { CheckCircle2, ChevronDown, ChevronRight, FolderOpen, GripVertical, ListChecks, ListOrdered, Loader2, Pause, Pencil, Play, Power, RefreshCw, Save, Search, Trash2, XCircle } from 'lucide-react';
@@ -303,7 +304,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                 </button>
                 <label className="flex h-7 items-center gap-1.5 rounded-md border border-white/10 bg-black/25 px-2 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
                   <span className="whitespace-nowrap">Delay</span>
-                  <select
+                  <UmbraSelectControl
                     value={queueDispatchDelayMs}
                     onChange={(event) => handleQueueDispatchDelayChange(Number(event.currentTarget.value) || 0)}
                     className="h-5 min-w-[82px] rounded border border-white/10 bg-black/40 px-1.5 text-[10px] font-black uppercase tracking-wider text-zinc-100 outline-none transition-colors focus:border-cyan-300/50 umbra-themed-select"
@@ -318,7 +319,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                         {option.label}
                       </option>
                     ))}
-                  </select>
+                  </UmbraSelectControl>
                 </label>
               </div>
               <div data-umbra-queue-manager-control-note="" className="text-[9px] font-semibold uppercase tracking-[0.16em] text-zinc-600">
@@ -466,7 +467,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
             <div className="flex flex-wrap items-center gap-2">
               <span className="shrink-0 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">Saved Queues</span>
               <div className="relative min-w-[260px] flex-1">
-                <select
+                <UmbraSelectControl
                   value={selectedSavedQueueId}
                   onChange={(event) => setSelectedSavedQueueId(String(event.currentTarget.value || '').trim())}
                   disabled={savedQueueSnapshotsParked || savedQueueBusy === 'list' || savedQueues.length <= 0}
@@ -490,7 +491,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                       {`${queue.name} · ${queue.promptCount} prompts · Set ${queue.activeSetId}`}
                     </option>
                   ))}
-                </select>
+                </UmbraSelectControl>
                 <ChevronDown
                   size={12}
                   className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400"

@@ -15,7 +15,7 @@ import type {
 export const UMBRA_UI_MEDIA_HANDOFF_KEY = 'umbra-ui:pending-media-handoff';
 export const UMBRA_UI_MEDIA_HANDOFF_EVENT = 'umbra:umbra-ui-media-handoff';
 
-export type UmbraUiMediaHandoffMode = 'txt2img' | 'img2img' | 'inpaint' | 'video';
+export type UmbraUiMediaHandoffMode = 'txt2img' | 'img2img' | 'inpaint' | 'canvas' | 'video';
 export type UmbraUiVideoFrameRole = 'first' | 'middle' | 'last' | 'source_video';
 export type UmbraUiStudioDestinationMode = 'new_artboard' | 'layer_on_artboard' | 'reference' | 'replace_source';
 
@@ -395,8 +395,12 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
   const generation = isRecord(powerPrompter.generation) ? powerPrompter.generation : {};
   const pipeline = isRecord(powerPrompter.pipeline) ? powerPrompter.pipeline : {};
   const inpaint = isRecord(metadata.umbra_inpaint) ? metadata.umbra_inpaint : {};
+  const metadataDetailerPipeline = Array.isArray(generation.detailerPipeline)
+    ? generation.detailerPipeline
+    : Array.isArray(powerPrompter.detailerPipeline) ? powerPrompter.detailerPipeline : undefined;
   const normalizedPowerPrompterGeneration = normalizePowerPrompterGenerationControls({
     ...generation,
+    ...(metadataDetailerPipeline ? { detailerPipeline: metadataDetailerPipeline } : {}),
     controlAfterGenerate: generation.controlAfterGenerate ?? generation.seedMode ?? inpaint.seedMode,
     seedIncrement: generation.seedIncrement ?? inpaint.seedIncrement,
   });
@@ -489,7 +493,7 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
       ? { seedIncrement: normalizedPowerPrompterGeneration.seedIncrement }
       : {}),
     ...(isRecord(generation.hiresFix) ? { hiresFix: normalizedPowerPrompterGeneration.hiresFix } : {}),
-    ...(Array.isArray(generation.detailerPipeline)
+    ...(metadataDetailerPipeline
       ? { detailerPipeline: normalizedPowerPrompterGeneration.detailerPipeline }
       : {}),
     ...(isRecord(generation.outputUpscale)
@@ -530,7 +534,7 @@ export function applyUmbraUiMediaPromptOverride(
 export function normalizeUmbraUiMediaHandoff(value: unknown): UmbraUiMediaHandoff | null {
   if (!isRecord(value)) return null;
   const mode = String(value.mode || '').trim().toLowerCase();
-  if (mode !== 'txt2img' && mode !== 'img2img' && mode !== 'inpaint' && mode !== 'video') return null;
+  if (mode !== 'txt2img' && mode !== 'img2img' && mode !== 'inpaint' && mode !== 'canvas' && mode !== 'video') return null;
   const path = normalizePath(value.path);
   const originalSourcePath = normalizePath(value.originalSourcePath) || path;
   const imageUrl = String(value.imageUrl || '').trim();

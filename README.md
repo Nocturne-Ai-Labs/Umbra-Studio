@@ -253,19 +253,25 @@ Source checkouts can use:
 bun run models:umbra-ui:download
 ```
 
-Reference-image conditioning is a separate, opt-in download because its SDXL
-IP-Adapter and CLIP Vision weights add roughly 3 GB:
+Canvas Control and Reference models are opt-in because several are large or
+use model-specific non-commercial licenses. Run the main Umbra UI model
+installer and choose only the Canvas resources for the pipelines you use:
 
 ```bat
-Install-Umbra-UI-Support-Models.bat --profile reference
+Install-Umbra-UI-Models.bat
 ```
 
 ```bash
-./install-umbra-ui-support-models.sh --profile reference
+./install-umbra-ui-models.sh
 ```
 
+The interactive menu includes Anima, Qwen Image, and Z-Image Canvas controls,
+plus SDXL IP-Adapter and FLUX.1 Redux reference conditioning. The menu shows
+the exact download size and identifies non-commercial model terms before a
+user confirms the selection.
+
 Every automatic file is fetched from an immutable model revision and checked
-by size and SHA-256 using `defaults/UmbraUI/model-manifest.json`. The eye
+by size and SHA-256 using the Umbra UI manifests. The eye
 detailer remains saved as an optional disabled stage because `Eyes.pt` has
 source-specific CivitAI permissions. Users who provide that detector can turn
 the stage on. The listed anime upscalers likewise stay optional and

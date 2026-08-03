@@ -4,7 +4,7 @@ import { create } from 'zustand';
 const DEFAULT_TOAST_DURATION_MS = 6500;
 const DEFAULT_ERROR_TOAST_DURATION_MS = 10000;
 const DEFAULT_ACTION_TOAST_DURATION_MS = 12000;
-const ERROR_NOTIFICATION_DEDUP_MS = 12000;
+const ERROR_NOTIFICATION_DEDUP_MS = 5 * 60_000;
 const MAX_ERROR_NOTIFICATIONS = 50;
 
 export interface Toast {
@@ -61,7 +61,7 @@ export const useToastStore = create<ToastState>((set) => ({
                 ...notification,
                 count: notification.count + 1,
                 updatedAt: now,
-                read: false,
+                read: notification.read,
               }
               : notification
           ));

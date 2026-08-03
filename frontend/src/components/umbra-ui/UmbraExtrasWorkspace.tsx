@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
@@ -374,9 +375,9 @@ export function UmbraExtrasWorkspace({
         <div className="space-y-3">
           <label className="block space-y-1.5">
             <span className={labelClass}>Upscale Model</span>
-            <select value={modelName} onChange={(event) => onModelNameChange(event.target.value)} className={inputClass}>
+            <UmbraSelectControl value={modelName} onChange={(event) => onModelNameChange(event.target.value)} className={inputClass}>
               {modelChoices.map((model) => <option key={model} value={model}>{model}</option>)}
-            </select>
+            </UmbraSelectControl>
           </label>
           <label className="block space-y-1.5">
             <span className={labelClass}>Maximum Edge</span>

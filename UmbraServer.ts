@@ -19,6 +19,7 @@ import { pathToFileURL } from 'url';
 import { createConnection } from 'net';
 import { ServerWebSocket } from 'bun';
 import { ThumbnailService } from './backend/ThumbnailService';
+import { seedBundledWorkflowDirectory } from './backend/BundledWorkflowService';
 import { settingsManager } from './backend/settings/SettingsManager';
 import { FsWorkerService } from './backend/FsWorkerService';
 import {
@@ -48,13 +49,13 @@ import {
   type UmbraUiLayerUpscaleSettings,
 } from './backend/UmbraUiInpaintService';
 import { UmbraUiCanvasProjectService } from './backend/UmbraUiCanvasProjectService';
+import { UmbraUiCanvasWorkspaceProjectService } from './backend/UmbraUiCanvasWorkspaceProjectService';
 import { replaceUmbraUiImageSource } from './backend/UmbraUiSourceReplacementService';
 import {
   concatenateUmbraExtendedVideoClips,
   isUmbraExtendedVideoOutputPath,
 } from './backend/UmbraUiExtendedVideoService';
 import { applyUmbraUiClipSkipToGraph } from './backend/UmbraUiGraphControls';
-import { seedBundledWorkflowDirectory } from './backend/BundledWorkflowService';
 import { upsertPngTextMetadata } from './backend/PngTextMetadata';
 import {
   createUnavailableTailscaleStatus,
@@ -88,6 +89,9 @@ import {
   writePowerPrompterReceipt,
 } from './backend/PowerPrompterReceiptService';
 import { runConfiguredStartupAutoLaunches } from './backend/startupAutoLaunch';
+import { extractUmbraUiTrainedTags } from './backend/UmbraUiLoraMetadata';
+import { resolveUmbraUiPinnedOutputFolder } from './backend/UmbraUiPinnedOutput';
+import { getComfyVramLaunchArguments } from './backend/comfyLaunchArguments';
 
 // Route handlers we're keeping (will merge later)
 import * as trashRoutes from './backend/routes/trash';
@@ -304,9 +308,11 @@ const umbraUiInpaintService = new UmbraUiInpaintService({
   getComfyInputRoot: () => join(getComfyToolRootFast() || join(ROOT_DIR, 'Tools', 'ComfyUI'), 'input'),
   getComfyOutputRoot: () => join(getComfyToolRootFast() || join(ROOT_DIR, 'Tools', 'ComfyUI'), 'output'),
   jobStatePath: join(USER_DIR, 'UmbraUI', 'inpaint-jobs.json'),
+  onPreview: (preview) => broadcastUmbraUiInpaintPreview(preview),
   buildBaseWorkflow: (settings, seed) => buildUmbraUiInpaintBaseWorkflow(settings, seed),
 });
 const umbraUiCanvasProjectService = new UmbraUiCanvasProjectService(USER_DIR);
+const umbraUiCanvasWorkspaceProjectService = new UmbraUiCanvasWorkspaceProjectService(USER_DIR);
 void fsWorkerService.warmup();
 void galleryFsWorkerService.warmup();
 void galleryRefreshWorkerService.warmup();
@@ -4426,6 +4432,7 @@ const wsClients = {
   output: new Set<ServerWebSocket<unknown>>(),
   prompter: new Set<ServerWebSocket<unknown>>(),
   comfyPreview: new Set<ServerWebSocket<unknown>>(),
+  inpaintPreview: new Set<ServerWebSocket<unknown>>(),
   uiSession: new Set<ServerWebSocket<unknown>>()
 };
 const DEBUG_WS_LIFECYCLE = process.env.UMBRA_DEBUG_WS === '1';
@@ -4437,6 +4444,12 @@ const UI_SESSION_CONFIG_KEYS = new Set([
 
 function logWsLifecycle(message: string): void {
   if (DEBUG_WS_LIFECYCLE) console.debug(message);
+}
+
+function broadcastUmbraUiInpaintPreview(preview: unknown): void {
+  for (const ws of wsClients.inpaintPreview) {
+    sendWs(ws, { type: 'umbra_ui_inpaint_preview', data: preview });
+  }
 }
 interface PrompterClientMeta {
   role: 'unknown' | 'powerprompter' | 'comfy_bridge';
@@ -7199,6 +7212,15 @@ function compileUmbraUiPipelineWorkflow(
   const setLabel = `Set ${promptSetId}`;
   const isUmbraUiOutput = generation.outputOwner === 'umbra_ui';
   const umbraUiOutputMode = getUmbraUiOutputMode(generation);
+  const requestedPinnedOutputFolder = isUmbraUiOutput && umbraUiOutputMode === 'txt2img'
+    ? generation.outputFolder
+    : '';
+  const pinnedOutputFolder = resolveUmbraUiPinnedOutputFolder(
+    requestedPinnedOutputFolder,
+    settingsManager.getAppSettings()['library.pinnedFolders'],
+    resolvePathCandidate,
+  );
+  let pinnedOutputFolderApplied = false;
   const isImg2Img = isUmbraUiOutput && umbraUiOutputMode === 'img2img';
   const isVid2Vid = isUmbraUiOutput && umbraUiOutputMode === 'vid2vid';
   const img2img = generation.img2img || PP_DEFAULT_GENERATION_CONTROLS.img2img!;
@@ -7540,12 +7562,13 @@ function compileUmbraUiPipelineWorkflow(
       setPPApiNodeInput(node, 'sampler_name', generation.samplerName);
       setPPApiNodeInput(node, 'scheduler', generation.scheduler);
       if (isUmbraUiOutput) {
-        setPPApiNodeInput(node, 'output_folder', `Umbra UI/${umbraUiOutputMode}`);
-        setPPApiNodeInput(node, 'save_to_yyyy_mm_dd_folder', true);
+        setPPApiNodeInput(node, 'output_folder', pinnedOutputFolder || `Umbra UI/${umbraUiOutputMode}`);
+        setPPApiNodeInput(node, 'save_to_yyyy_mm_dd_folder', !pinnedOutputFolder);
         setPPApiNodeInput(node, 'save_to_set_subfolder', false);
         setPPApiNodeInput(node, 'set_subfolder', '');
         setPPApiNodeInput(node, 'save_set_to_style_subfolder', '');
         setPPApiNodeInput(node, 'filename_prefix', `UmbraUI_${umbraUiOutputMode}_%date%`);
+        if (pinnedOutputFolder) pinnedOutputFolderApplied = true;
       } else {
         setPPApiNodeInput(node, 'save_to_yyyy_mm_dd_folder', true);
         setPPApiNodeInput(node, 'save_to_set_subfolder', true);
@@ -7562,6 +7585,10 @@ function compileUmbraUiPipelineWorkflow(
         `Umbra UI/${umbraUiOutputMode}/${formatUmbraUiLocalDate()}/UmbraUI_${umbraUiOutputMode}_%date%`,
       );
     }
+  }
+
+  if (pinnedOutputFolder && !pinnedOutputFolderApplied) {
+    throw new Error('The selected TXT2IMG pipeline does not support pinned output folders.');
   }
 
   if (workflowDescriptor.mediaType === 'image') {
@@ -9447,6 +9474,9 @@ async function runBackendPowerPrompterPipelineQueue(
           prompt,
           negativePrompt: generation.negativePrompt || '',
           generation,
+          detailerPipeline: Array.isArray(generation.detailerPipeline)
+            ? generation.detailerPipeline.map((stage) => ({ ...stage }))
+            : [],
           pipeline,
           pipelineId: createUmbraUiPipelineTargetId(pipeline),
           pipelineName: activePipeline.selectedPipeline?.modelFamily || '',
@@ -11090,6 +11120,9 @@ function handleWsConnection(ws: ServerWebSocket<unknown>, endpoint: string) {
         data: appbarComfyPreviewLastPayload,
       });
     }
+  } else if (endpoint === '/ws/inpaint-preview') {
+    wsClients.inpaintPreview.add(ws);
+    logWsLifecycle(`[WS] Inpaint preview client connected (${wsClients.inpaintPreview.size} total)`);
   } else if (endpoint === '/ws/ui-session') {
     wsClients.uiSession.add(ws);
     logWsLifecycle(`[WS] UI session client connected (${wsClients.uiSession.size} total)`);
@@ -11127,6 +11160,9 @@ function handleWsDisconnection(ws: ServerWebSocket<unknown>, endpoint: string) {
   } else if (endpoint === '/ws/comfy-preview') {
     wsClients.comfyPreview.delete(ws);
     logWsLifecycle(`[WS] Comfy preview client disconnected (${wsClients.comfyPreview.size} remaining)`);
+  } else if (endpoint === '/ws/inpaint-preview') {
+    wsClients.inpaintPreview.delete(ws);
+    logWsLifecycle(`[WS] Inpaint preview client disconnected (${wsClients.inpaintPreview.size} remaining)`);
   } else if (endpoint === '/ws/ui-session') {
     wsClients.uiSession.delete(ws);
     logWsLifecycle(`[WS] UI session client disconnected (${wsClients.uiSession.size} remaining)`);
@@ -11151,6 +11187,7 @@ interface ComfyLaunchCapability {
   key: string;
   supportsCorsHeader: boolean;
   supportsDisableAutoLaunch: boolean;
+  supportsPreviewMethod: boolean;
   checkedAt: number;
 }
 
@@ -13218,6 +13255,7 @@ function resolveComfyLaunchCapability(comfy: DetectedTool): ComfyLaunchCapabilit
 
   let supportsCorsHeader = true;
   let supportsDisableAutoLaunch = true;
+  let supportsPreviewMethod = true;
 
   try {
     const helpResult = spawnSync(comfy.pythonPath, [comfy.mainScript, '--help'], {
@@ -13229,6 +13267,7 @@ function resolveComfyLaunchCapability(comfy: DetectedTool): ComfyLaunchCapabilit
     if (helpText.trim()) {
       supportsCorsHeader = helpText.includes('--enable-cors-header');
       supportsDisableAutoLaunch = helpText.includes('--disable-auto-launch');
+      supportsPreviewMethod = helpText.includes('--preview-method');
     }
   } catch {
     // Keep defaults (true) so launch behavior stays permissive if capability probing fails.
@@ -13238,6 +13277,7 @@ function resolveComfyLaunchCapability(comfy: DetectedTool): ComfyLaunchCapabilit
     key: cacheKey,
     supportsCorsHeader,
     supportsDisableAutoLaunch,
+    supportsPreviewMethod,
     checkedAt: Date.now()
   };
   comfyLaunchCapabilityCache = resolved;
@@ -13247,6 +13287,9 @@ function resolveComfyLaunchCapability(comfy: DetectedTool): ComfyLaunchCapabilit
   }
   if (!supportsDisableAutoLaunch) {
     console.warn('[ComfyUI] Selected build does not expose --disable-auto-launch; launching without this flag.');
+  }
+  if (!supportsPreviewMethod) {
+    console.warn('[ComfyUI] Selected build does not expose --preview-method; Canvas sampling previews will be unavailable.');
   }
 
   return resolved;
@@ -14448,7 +14491,11 @@ function getBackendConfig() {
   if (comfy.detected && (comfyLaunchCapability?.supportsDisableAutoLaunch ?? true)) {
     comfyArgs.push('--disable-auto-launch');
   }
+  if (comfy.detected && (comfyLaunchCapability?.supportsPreviewMethod ?? true)) {
+    comfyArgs.push('--preview-method', 'auto');
+  }
   if (comfy.detected) {
+    comfyArgs.push(...getComfyVramLaunchArguments(getAppSettings()['comfyui.vramMode']));
     const requestedAttentionBackend = normalizeComfyAttentionBackend(getAppSettings()['comfyui.attentionBackend']);
     const attentionBackend = requestedAttentionBackend === 'default' && isComfySageAttentionAvailable(comfy)
       ? 'sage'
@@ -16019,6 +16066,7 @@ interface PowerPrompterGenerationControls {
   mediaType?: PowerPrompterMediaType;
   outputOwner?: 'power_prompter' | 'umbra_ui';
   outputMode?: 'txt2img' | 'img2img' | 'img2vid' | 'txt2vid' | 'vid2vid' | 'inpainting' | 'extras';
+  outputFolder?: string;
   img2img?: {
     sourceImagePath: string;
     sourceImageName: string;
@@ -16125,6 +16173,7 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
   mediaType: 'image',
   outputOwner: 'power_prompter',
   outputMode: 'txt2img',
+  outputFolder: '',
   img2img: {
     sourceImagePath: '',
     sourceImageName: '',
@@ -17837,6 +17886,7 @@ function normalizePPGenerationControls(rawControls: unknown): PowerPrompterGener
       ? 'umbra_ui'
       : 'power_prompter',
     outputMode,
+    outputFolder: String((controls as any).outputFolder || '').trim().replace(/\\/g, '/').slice(0, 4096),
     img2img: {
       sourceImagePath: String((controls as any).img2img?.sourceImagePath || '').trim().replace(/\\/g, '/'),
       sourceImageName: String((controls as any).img2img?.sourceImageName || '').trim().replace(/\\/g, '/'),
@@ -17978,20 +18028,10 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
         queueEnabled: true,
         queueSetIds: [1],
       })),
-    hiresFix: {
-      enabled: false,
-      upscaler: 'Latent',
-      resizeMode: 'scale',
-      scaleBy: 1,
-      targetWidth: 0,
-      targetHeight: 0,
-      steps: 0,
-      denoise: 0.35,
-      cfg: 0,
-      samplerName: 'use_same',
-      scheduler: 'use_same',
-    },
-    detailerPipeline: [],
+    hiresFix: settings.hiresFix
+      ? { ...settings.hiresFix }
+      : { ...PP_DEFAULT_GENERATION_CONTROLS.hiresFix!, enabled: false },
+    detailerPipeline: (settings.detailerPipeline || []).map((stage) => ({ ...stage })),
     outputUpscale: {
       enabled: false,
       modelName: 'RealESRGAN_x4plus.safetensors',
@@ -18147,18 +18187,6 @@ async function fetchUmbraUiCivitaiInfo(
   } catch {
     return null;
   }
-}
-
-function extractUmbraUiTrainedTags(civitai: Record<string, unknown> | null, metadata: Record<string, unknown>): string[] {
-  const trainedWords = civitai?.trainedWords;
-  const rawTags = Array.isArray(trainedWords)
-    ? trainedWords
-    : typeof trainedWords === 'string'
-      ? trainedWords.split(',')
-      : typeof metadata['modelspec.tags'] === 'string'
-        ? String(metadata['modelspec.tags']).split(',')
-        : [];
-  return Array.from(new Set(rawTags.map((tag) => String(tag || '').trim()).filter(Boolean))).slice(0, 120);
 }
 
 async function handleUmbraUiCatalog(url: URL): Promise<Response> {
@@ -18636,6 +18664,27 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
         overlap: Math.max(0, Math.min(256, Math.round(finiteNumberOrFallback(rawTiledVae.overlap, 64)))),
       }
       : { enabled: false, tileSize: 512, overlap: 64 };
+    const defaultHiresFix = PP_DEFAULT_GENERATION_CONTROLS.hiresFix!;
+    const rawHiresFix = parseInpaintJsonField('hiresFix', {});
+    const hiresFix = rawHiresFix && typeof rawHiresFix === 'object' && !Array.isArray(rawHiresFix)
+      ? {
+        enabled: rawHiresFix.enabled === true,
+        upscaler: String(rawHiresFix.upscaler || defaultHiresFix.upscaler).trim() || defaultHiresFix.upscaler,
+        resizeMode: String(rawHiresFix.resizeMode || '').trim().toLowerCase() === 'dimensions' ? 'dimensions' as const : 'scale' as const,
+        scaleBy: clampPPNumber(rawHiresFix.scaleBy, defaultHiresFix.scaleBy, 1, 8),
+        targetWidth: Math.max(0, Math.min(16384, Math.round(finiteNumberOrFallback(rawHiresFix.targetWidth, defaultHiresFix.targetWidth)))),
+        targetHeight: Math.max(0, Math.min(16384, Math.round(finiteNumberOrFallback(rawHiresFix.targetHeight, defaultHiresFix.targetHeight)))),
+        steps: clampPPInteger(rawHiresFix.steps, defaultHiresFix.steps, 0, 10000),
+        denoise: clampPPNumber(rawHiresFix.denoise, defaultHiresFix.denoise, 0, 1),
+        cfg: clampPPNumber(rawHiresFix.cfg, defaultHiresFix.cfg, 0, 100),
+        samplerName: String(rawHiresFix.samplerName || defaultHiresFix.samplerName).trim() || defaultHiresFix.samplerName,
+        scheduler: String(rawHiresFix.scheduler || defaultHiresFix.scheduler).trim() || defaultHiresFix.scheduler,
+      }
+      : { ...defaultHiresFix, enabled: false };
+    const detailerPipeline = normalizePPDetailerPipeline(
+      parseInpaintJsonField('detailerPipeline', []),
+      undefined,
+    );
     const requestedWidth = Math.max(64, Math.min(16384, Math.round(finiteNumberOrFallback(form.get('width'), 1024))));
     const requestedHeight = Math.max(64, Math.min(16384, Math.round(finiteNumberOrFallback(form.get('height'), 1024))));
     const resolutionCapability = resolvedPipeline.pipeline.capabilities?.resolution;
@@ -18654,6 +18703,7 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
     const settings: UmbraUiInpaintSettings = {
       workflowId: resolvedPipeline.loaded.item.id,
       canvasProjectId: String(form.get('canvasProjectId') || '').trim().slice(0, 160),
+      sourceFreeGeneration: String(form.get('sourceFreeGeneration') || '').trim().toLowerCase() === 'true',
       operationMode: String(form.get('operationMode') || '').trim() === 'outpaint' ? 'outpaint' : 'inpaint',
       generationRegionX: Math.max(0, Math.min(16384, Math.round(finiteNumberOrFallback(form.get('generationRegionX'), 0)))),
       generationRegionY: Math.max(0, Math.min(16384, Math.round(finiteNumberOrFallback(form.get('generationRegionY'), 0)))),
@@ -18724,6 +18774,8 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
       softInpaintTransitionContrast: Math.max(0.25, Math.min(8, finiteNumberOrFallback(form.get('softInpaintTransitionContrast'), 2))),
       softInpaintMaskInfluence: Math.max(0, Math.min(1, finiteNumberOrFallback(form.get('softInpaintMaskInfluence'), 0))),
       tiledVae,
+      hiresFix,
+      detailerPipeline: detailerPipeline.map((stage) => ({ ...stage }) as Record<string, unknown>),
       regionalGuidance,
       controlLayers,
       referenceLayers,
@@ -18782,7 +18834,7 @@ function handleUmbraUiInpaintJob(path: string): Response {
   if (!jobId) return json({ success: false, error: 'Inpaint job id is required.' }, 400);
   const job = umbraUiInpaintService.getJob(jobId);
   if (!job) return json({ success: false, error: 'Inpaint job was not found.' }, 404);
-  return json({ success: true, job });
+  return json({ success: true, job: { ...job, preview: umbraUiInpaintService.getPreview(jobId) } });
 }
 
 async function handleUmbraUiInpaintJobCancel(path: string): Promise<Response> {
@@ -18909,6 +18961,157 @@ async function handleUmbraUiInpaintProjectAsset(projectId: string, filename: str
       headers: {
         'Cache-Control': 'private, max-age=0, must-revalidate',
         'Content-Length': String(asset.size),
+      },
+    });
+  } catch {
+    return new Response('Not found', { status: 404 });
+  }
+}
+
+async function handleUmbraUiCanvasWorkspaceProjectList(): Promise<Response> {
+  try {
+    return json({ success: true, projects: await umbraUiCanvasWorkspaceProjectService.list() });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || error || 'Failed to list Canvas projects.') }, 500);
+  }
+}
+
+async function handleUmbraUiCanvasWorkspaceProjectSave(req: Request, projectId: string): Promise<Response> {
+  try {
+    const form = await req.formData();
+    const rawDocument = form.get('document');
+    if (typeof rawDocument !== 'string' || !rawDocument.trim()) {
+      return json({ success: false, error: 'The Canvas project document is missing.' }, 400);
+    }
+    const assets: Array<{ key: string; name: string; bytes: Uint8Array }> = [];
+    for (const [field, value] of form.entries()) {
+      if (!field.startsWith('asset:') || typeof value === 'string') continue;
+      const key = decodeURIComponent(field.slice('asset:'.length)).trim();
+      if (!key || typeof (value as any).arrayBuffer !== 'function') continue;
+      assets.push({
+        key,
+        name: String((value as any).name || `${key}.png`),
+        bytes: new Uint8Array(await (value as any).arrayBuffer()),
+      });
+      if (assets.length > 1024) throw new Error('A Canvas project cannot contain more than 1024 uploaded assets.');
+    }
+    const thumbnailValue = form.get('thumbnail');
+    const thumbnail = thumbnailValue && typeof thumbnailValue !== 'string' && typeof (thumbnailValue as any).arrayBuffer === 'function'
+      ? new Uint8Array(await (thumbnailValue as any).arrayBuffer())
+      : undefined;
+    const project = await umbraUiCanvasWorkspaceProjectService.save(projectId, JSON.parse(rawDocument), assets, thumbnail);
+    return json({ success: true, project });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || error || 'Failed to save the Canvas project.') }, 400);
+  }
+}
+
+async function handleUmbraUiCanvasWorkspaceRestorePointList(projectId: string): Promise<Response> {
+  try {
+    return json({ success: true, restorePoints: await umbraUiCanvasWorkspaceProjectService.listRestorePoints(projectId) });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || error || 'Failed to list Canvas restore points.') }, 400);
+  }
+}
+
+async function handleUmbraUiCanvasWorkspaceRestorePointCreate(req: Request, projectId: string): Promise<Response> {
+  try {
+    const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+    const restorePoint = await umbraUiCanvasWorkspaceProjectService.createRestorePoint(projectId, body.name);
+    return json({ success: true, restorePoint });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || error || 'Failed to create the Canvas restore point.') }, 400);
+  }
+}
+
+async function handleUmbraUiCanvasWorkspaceRestorePointRestore(projectId: string, restorePointId: string): Promise<Response> {
+  try {
+    const project = await umbraUiCanvasWorkspaceProjectService.restoreRestorePoint(projectId, restorePointId);
+    return json({ success: true, project });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || error || 'Failed to restore the Canvas restore point.') }, 400);
+  }
+}
+
+async function handleUmbraUiCanvasWorkspaceRestorePointDelete(projectId: string, restorePointId: string): Promise<Response> {
+  try {
+    await umbraUiCanvasWorkspaceProjectService.deleteRestorePoint(projectId, restorePointId);
+    return json({ success: true });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || error || 'Failed to delete the Canvas restore point.') }, 400);
+  }
+}
+
+async function handleUmbraUiCanvasWorkspaceProjectGet(projectId: string): Promise<Response> {
+  try {
+    const project = await umbraUiCanvasWorkspaceProjectService.get(projectId);
+    return project
+      ? json({ success: true, project })
+      : json({ success: false, error: 'The Canvas project was not found.' }, 404);
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || error || 'Failed to load the Canvas project.') }, 400);
+  }
+}
+
+async function handleUmbraUiCanvasWorkspaceProjectDelete(projectId: string): Promise<Response> {
+  try {
+    await umbraUiCanvasWorkspaceProjectService.delete(projectId);
+    return json({ success: true });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || error || 'Failed to delete the Canvas project.') }, 400);
+  }
+}
+
+async function handleUmbraUiCanvasWorkspaceProjectFork(req: Request, projectId: string): Promise<Response> {
+  try {
+    const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+    const project = await umbraUiCanvasWorkspaceProjectService.fork(projectId, body.name);
+    return json({ success: true, project });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || error || 'Failed to copy the Canvas project.') }, 400);
+  }
+}
+
+async function handleUmbraUiCanvasWorkspaceProjectAsset(projectId: string, filename: string, thumbnailMode = false): Promise<Response> {
+  try {
+    const asset = await umbraUiCanvasWorkspaceProjectService.resolveAsset(projectId, filename);
+    if (!asset) return new Response('Not found', { status: 404 });
+    if (thumbnailMode) {
+      const thumbnail = await thumbnailService.generateThumbnail(asset.path, {
+        size: 'small',
+        quality: 82,
+        format: 'webp',
+      });
+      if (thumbnail) {
+        return new Response(new Uint8Array(thumbnail), {
+          headers: {
+            'Cache-Control': 'private, max-age=86400',
+            'Content-Length': String(thumbnail.byteLength),
+            'Content-Type': 'image/webp',
+          },
+        });
+      }
+    }
+    return new Response(Bun.file(asset.path), {
+      headers: {
+        'Cache-Control': 'private, max-age=0, must-revalidate',
+        'Content-Length': String(asset.size),
+      },
+    });
+  } catch {
+    return new Response('Not found', { status: 404 });
+  }
+}
+
+async function handleUmbraUiCanvasWorkspaceProjectThumbnail(projectId: string): Promise<Response> {
+  try {
+    const thumbnail = await umbraUiCanvasWorkspaceProjectService.resolveThumbnail(projectId);
+    if (!thumbnail) return new Response('Not found', { status: 404 });
+    return new Response(Bun.file(thumbnail.path), {
+      headers: {
+        'Cache-Control': 'private, max-age=0, must-revalidate',
+        'Content-Length': String(thumbnail.size),
+        'Content-Type': 'image/png',
       },
     });
   } catch {
@@ -32346,6 +32549,44 @@ const server = Bun.serve<any>({
 
       if (path === '/api/umbra-ui/inpaint/projects' && method === 'GET') {
         return handleUmbraUiInpaintProjectList();
+      }
+
+      if (path === '/api/umbra-ui/canvas/projects' && method === 'GET') {
+        return handleUmbraUiCanvasWorkspaceProjectList();
+      }
+
+      if (path.startsWith('/api/umbra-ui/canvas/projects/')) {
+        const projectSuffix = path.slice('/api/umbra-ui/canvas/projects/'.length);
+        const assetMarker = '/assets/';
+        const assetIndex = projectSuffix.indexOf(assetMarker);
+        if (assetIndex > 0 && method === 'GET') {
+          return handleUmbraUiCanvasWorkspaceProjectAsset(
+            decodeURIComponent(projectSuffix.slice(0, assetIndex)),
+            decodeURIComponent(projectSuffix.slice(assetIndex + assetMarker.length)),
+            url.searchParams.get('thumb') === '1',
+          );
+        }
+        const projectSegments = projectSuffix.split('/').filter(Boolean).map((segment) => decodeURIComponent(segment));
+        if (projectSegments.length === 2 && projectSegments[1] === 'thumbnail' && method === 'GET') {
+          return handleUmbraUiCanvasWorkspaceProjectThumbnail(projectSegments[0]);
+        }
+        if (projectSegments.length === 2 && projectSegments[1] === 'fork' && method === 'POST') {
+          return handleUmbraUiCanvasWorkspaceProjectFork(req, projectSegments[0]);
+        }
+        if (projectSegments.length >= 2 && projectSegments[1] === 'restore-points') {
+          const projectId = projectSegments[0];
+          if (projectSegments.length === 2 && method === 'GET') return handleUmbraUiCanvasWorkspaceRestorePointList(projectId);
+          if (projectSegments.length === 2 && method === 'POST') return handleUmbraUiCanvasWorkspaceRestorePointCreate(req, projectId);
+          if (projectSegments.length === 3 && method === 'DELETE') return handleUmbraUiCanvasWorkspaceRestorePointDelete(projectId, projectSegments[2]);
+          if (projectSegments.length === 4 && projectSegments[3] === 'restore' && method === 'POST') {
+            return handleUmbraUiCanvasWorkspaceRestorePointRestore(projectId, projectSegments[2]);
+          }
+          return json({ success: false, error: 'Unsupported Canvas restore-point operation.' }, 405);
+        }
+        const projectId = decodeURIComponent(projectSuffix).trim();
+        if (method === 'GET') return handleUmbraUiCanvasWorkspaceProjectGet(projectId);
+        if (method === 'PUT' || method === 'POST') return handleUmbraUiCanvasWorkspaceProjectSave(req, projectId);
+        if (method === 'DELETE') return handleUmbraUiCanvasWorkspaceProjectDelete(projectId);
       }
 
       if (path.startsWith('/api/umbra-ui/inpaint/projects/')) {

@@ -1,5 +1,6 @@
-﻿'use client';
+'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import {
   filterNewerUmbraReleases,
@@ -1710,7 +1711,7 @@ export const UmbraAppBar = () => {
     return (
       <div className="space-y-1.5">
         <div className="flex items-center gap-1.5">
-          <select
+          <UmbraSelectControl
             value={selectedRef}
             onChange={(event) => setToolSelectedRef((prev) => ({ ...prev, [tool]: event.target.value }))}
             disabled={disabled || versions.length === 0}
@@ -1722,7 +1723,7 @@ export const UmbraAppBar = () => {
                 {version.ref}{version.date ? ` • ${formatToolVersionDate(version.date)}` : ''}
               </option>
             ))}
-          </select>
+          </UmbraSelectControl>
           <button
             onClick={() => void loadToolVersions(tool, true)}
             disabled={disabled}

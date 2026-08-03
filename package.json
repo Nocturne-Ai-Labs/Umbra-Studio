@@ -1,6 +1,6 @@
 {
   "name": "umbra-studio",
-  "version": "0.22.8",
+  "version": "0.23.0",
   "description": "Umbra Studio - AI image generation, prompt tooling, and media workflow suite",
   "author": "Nocturne AI Labs",
   "homepage": "https://github.com/Nocturne-Ai-Labs/Umbra-Studio",
@@ -39,6 +39,8 @@
     "qualify:umbra-ui-clipseg": "bun scripts/qualify-umbra-ui-clipseg.ts",
     "drill:umbra-ui-inpaint": "bun scripts/drill-umbra-ui-inpaint-runtime.ts",
     "drill:umbra-ui-canvas-projects": "bun scripts/drill-umbra-ui-canvas-project-lifecycle.ts",
+    "drill:umbra-ui-canvas-archive": "bun scripts/drill-umbra-ui-canvas-archive.ts",
+    "drill:umbra-ui-canvas-selection": "bun scripts/drill-umbra-ui-canvas-selection.ts",
     "drill:umbra-ui-hard-stop": "bun scripts/drill-umbra-ui-hard-stop-recovery.ts",
     "fixture:umbra-ui-large-canvas": "bun scripts/prepare-umbra-ui-large-canvas.ts",
     "generate:umbra-ui-inpaint-workflows": "bun scripts/generate-umbra-ui-inpaint-workflows.ts",
@@ -62,7 +64,7 @@
     "models:waifu:download": "node scripts/download-waifu-models.mjs",
     "models:caption:download": "node scripts/download-caption-models.mjs",
     "models:umbra-ui:download": "bun scripts/download-umbra-ui-models.mjs --profile core",
-    "models:umbra-ui:reference": "bun scripts/download-umbra-ui-models.mjs --profile reference",
+    "models:umbra-ui:reference": "bun scripts/download-umbra-model-requirements.mjs --profile canvas-reference-sdxl",
     "models:umbra-ui:check": "bun scripts/download-umbra-ui-models.mjs --profile core --check",
     "models:umbra-ui:manifest": "bun scripts/download-umbra-ui-models.mjs --manifest-only"
   },

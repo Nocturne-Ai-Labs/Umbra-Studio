@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { useState, useEffect } from 'react';
 import {
     Download,
@@ -326,7 +327,7 @@ export const ModelBrowser = () => {
                     </div>
 
                     {/* Sort */}
-                    <select
+                    <UmbraSelectControl
                         value={sortBy}
                         onChange={(e) => { setSortBy(e.target.value); searchCivitAI(); }}
                         className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold text-white outline-none"
@@ -334,10 +335,10 @@ export const ModelBrowser = () => {
                         {SORT_OPTIONS.map(opt => (
                             <option key={opt.value} value={opt.value}>{opt.label}</option>
                         ))}
-                    </select>
+                    </UmbraSelectControl>
 
                     {/* Period */}
-                    <select
+                    <UmbraSelectControl
                         value={period}
                         onChange={(e) => { setPeriod(e.target.value); searchCivitAI(); }}
                         className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold text-white outline-none"
@@ -345,10 +346,10 @@ export const ModelBrowser = () => {
                         {PERIOD_OPTIONS.map(opt => (
                             <option key={opt.value} value={opt.value}>{opt.label}</option>
                         ))}
-                    </select>
+                    </UmbraSelectControl>
 
                     {/* Base Model */}
-                    <select
+                    <UmbraSelectControl
                         value={baseModel}
                         onChange={(e) => { setBaseModel(e.target.value); searchCivitAI(); }}
                         className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold text-white outline-none"
@@ -356,7 +357,7 @@ export const ModelBrowser = () => {
                         {BASE_MODELS.map(opt => (
                             <option key={opt.value} value={opt.value}>{opt.label}</option>
                         ))}
-                    </select>
+                    </UmbraSelectControl>
                 </div>
             )}
 

@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { Grid3X3 } from 'lucide-react';
 import type { PowerPrompterTiledVaeControls } from '@/types/powerPrompter';
 
@@ -41,15 +42,15 @@ export function UmbraTiledVaeControls({ value, onChange, mode }: UmbraTiledVaeCo
           <div className="grid grid-cols-2 gap-2">
             <label className="space-y-1.5">
               <span className="text-[9px] font-black uppercase tracking-[0.12em] text-zinc-500">Tile size</span>
-              <select value={value.tileSize} onChange={(event) => update({ tileSize: Number(event.target.value) })} className={inputClass}>
+              <UmbraSelectControl value={value.tileSize} onChange={(event) => update({ tileSize: Number(event.target.value) })} className={inputClass}>
                 {[256, 384, 512, 768, 1024, 1536].map((size) => <option key={size} value={size}>{size}px</option>)}
-              </select>
+              </UmbraSelectControl>
             </label>
             <label className="space-y-1.5">
               <span className="text-[9px] font-black uppercase tracking-[0.12em] text-zinc-500">Overlap</span>
-              <select value={value.overlap} onChange={(event) => update({ overlap: Number(event.target.value) })} className={inputClass}>
+              <UmbraSelectControl value={value.overlap} onChange={(event) => update({ overlap: Number(event.target.value) })} className={inputClass}>
                 {[0, 32, 64, 96, 128, 192, 256].map((size) => <option key={size} value={size}>{size}px</option>)}
-              </select>
+              </UmbraSelectControl>
             </label>
           </div>
         ) : null}

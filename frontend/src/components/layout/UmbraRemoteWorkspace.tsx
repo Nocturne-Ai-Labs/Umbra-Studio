@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import {
   Activity,
@@ -1183,7 +1184,7 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
             <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_0.5fr]">
               <label className="block">
                 <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">Bind Address</span>
-                <select
+                <UmbraSelectControl
                   value={bindHost}
                   onChange={(event) => setBindHost(event.target.value)}
                   className="h-10 w-full rounded-lg border border-white/10 bg-black/40 px-3 text-sm text-white outline-none focus:border-cyan-300/45"
@@ -1192,7 +1193,7 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
                   <option value="::1">Local only IPv6 - ::1</option>
                   <option value="0.0.0.0">All IPv4 interfaces - 0.0.0.0</option>
                   <option value="::">All IPv6 interfaces - ::</option>
-                </select>
+                </UmbraSelectControl>
                 <span className="mt-1 block text-xs text-zinc-600">
                   Listener changes apply after restart. Current: {status?.settings?.active?.bindHost || status?.bindHost || '--'}
                   {status?.settings?.active?.runtimeOverrides?.bindHost ? ' (launch override)' : ''}.

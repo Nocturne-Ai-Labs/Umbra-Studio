@@ -50,6 +50,26 @@
       "label": "SD / SDXL / SD3.5 / Illustrious",
       "description": "No separate download: these checkpoint-based pipelines load their VAE and text encoder from the selected checkpoint.",
       "noDownload": true
+    },
+    "canvas-control-anima": {
+      "label": "Canvas Control - Anima",
+      "description": "Anima LLLite inpainting and pose controls. Uses the Circlestone Labs non-commercial model license."
+    },
+    "canvas-control-qwen": {
+      "label": "Canvas Control - Qwen Image",
+      "description": "InstantX inpainting ControlNet used by Qwen Image canvas generation. Large download."
+    },
+    "canvas-control-z-image": {
+      "label": "Canvas Control - Z-Image Turbo",
+      "description": "Distilled union control model for inpaint, pose, depth, lineart, scribble, and gray guidance. Very large download."
+    },
+    "canvas-reference-sdxl": {
+      "label": "Canvas Reference - SDXL",
+      "description": "IP-Adapter SDXL ViT-H and its CLIP Vision encoder for reference-image layers. Large download."
+    },
+    "canvas-reference-flux": {
+      "label": "Canvas Reference - FLUX.1",
+      "description": "FLUX.1 Redux and its SigLIP vision encoder. Uses the FLUX.1 dev non-commercial model license."
     }
   },
   "models": [
@@ -230,6 +250,132 @@
           "sourcePath": "text_encoders/qwen3vl_8b_fp8_scaled.safetensors",
           "bytes": 10588637512,
           "sha256": "4ba424cf62e51392e4d1a39933e803706f4e823c1065f36aaf149c6453f66bcd"
+        }
+      ]
+    },
+    {
+      "id": "canvas-anima-lllite-controls",
+      "family": "CanvasControl",
+      "creator": "kohya-ss / Comfy Org",
+      "repository": "Comfy-Org/Anima-LLLite",
+      "revision": "c86dcd08419193651fc21394eb8e933deabae438",
+      "license": "circlestone-labs-non-commercial-license",
+      "installPolicy": "automatic",
+      "profiles": ["canvas-control-anima"],
+      "purpose": "Anima canvas inpainting and pose guidance",
+      "files": [
+        {
+          "destination": "controlnet/anima-lllite-inpainting-v2.safetensors",
+          "sourcePath": "model_patches/anima-lllite-inpainting-v2.safetensors",
+          "bytes": 65772872,
+          "sha256": "5242e677d2be34ee70ca7c97c3b14ff5ee49838c03fc1e60ac4852a180db6ef5"
+        },
+        {
+          "destination": "controlnet/anima-lllite-pose-1.safetensors",
+          "sourcePath": "model_patches/anima-lllite-pose-1.safetensors",
+          "bytes": 23310040,
+          "sha256": "ddb543be5e74ce8ca79ae45807aa0c1328a4888e00706727c6fd7100dde7c864"
+        }
+      ]
+    },
+    {
+      "id": "canvas-qwen-image-inpaint-controlnet",
+      "family": "CanvasControl",
+      "creator": "InstantX / Comfy Org",
+      "repository": "Comfy-Org/Qwen-Image-InstantX-ControlNets",
+      "revision": "f9a43b42da8cec16926a1cebb245aae17a94960e",
+      "license": "Apache-2.0",
+      "installPolicy": "automatic",
+      "profiles": ["canvas-control-qwen"],
+      "purpose": "Qwen Image canvas inpainting and regional generation control",
+      "files": [
+        {
+          "destination": "controlnet/Qwen-Image-InstantX-ControlNet-Inpainting.safetensors",
+          "sourcePath": "split_files/controlnet/Qwen-Image-InstantX-ControlNet-Inpainting.safetensors",
+          "bytes": 4234599432,
+          "sha256": "49c01aafe6545c1f6e7627a724c8fb13357fe74efee235622158f0a8f30e5458"
+        }
+      ]
+    },
+    {
+      "id": "canvas-z-image-union-controlnet",
+      "family": "CanvasControl",
+      "creator": "Alibaba PAI",
+      "repository": "alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1",
+      "revision": "5155fc56d17821007d6f62ac192c09e0f0e72016",
+      "license": "Apache-2.0",
+      "installPolicy": "automatic",
+      "profiles": ["canvas-control-z-image"],
+      "purpose": "Z-Image Turbo canvas inpaint and multi-control guidance",
+      "files": [
+        {
+          "destination": "model_patches/Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors",
+          "sourcePath": "Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors",
+          "bytes": 6712485600,
+          "sha256": "d1251cc7bc3486bc61d25c3be498ef394c31c85ddf4ee9137d2e933411f4a689"
+        }
+      ]
+    },
+    {
+      "id": "canvas-sdxl-ip-adapter",
+      "family": "CanvasReference",
+      "creator": "Tencent AI Lab and h94",
+      "repository": "h94/IP-Adapter",
+      "revision": "018e402774aeeddd60609b4ecdb7e298259dc729",
+      "license": "Apache-2.0",
+      "installPolicy": "automatic",
+      "profiles": ["canvas-reference-sdxl"],
+      "purpose": "SDXL reference-image conditioning in Canvas",
+      "files": [
+        {
+          "sourcePath": "sdxl_models/ip-adapter_sdxl_vit-h.safetensors",
+          "destination": "ipadapter/ip-adapter_sdxl_vit-h.safetensors",
+          "bytes": 698391064,
+          "sha256": "ebf05d918348aec7abb02a5e9ecef77e0aaea6914a5c4ea13f50d45eb1681831"
+        },
+        {
+          "sourcePath": "models/image_encoder/model.safetensors",
+          "destination": "clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+          "bytes": 2528373448,
+          "sha256": "6ca9667da1ca9e0b0f75e46bb030f7e011f44f86cbfb8d5a36590fcd7507b030"
+        }
+      ]
+    },
+    {
+      "id": "canvas-flux-redux",
+      "family": "CanvasReference",
+      "creator": "Black Forest Labs / Comfy Org",
+      "repository": "Comfy-Org/Flux1-Redux-Dev",
+      "revision": "f814ed6f4813c8c2bbc86210b7e414cfca087f2b",
+      "license": "flux-1-dev-non-commercial-license",
+      "installPolicy": "automatic",
+      "profiles": ["canvas-reference-flux"],
+      "purpose": "FLUX.1 Redux reference-image conditioning in Canvas",
+      "files": [
+        {
+          "sourcePath": "flux1-redux-dev.safetensors",
+          "destination": "style_models/flux1-redux-dev.safetensors",
+          "bytes": 129063232,
+          "sha256": "a1b3bdcb4bdc58ce04874b9ca776d61fc3e914bb6beab41efb63e4e2694dca45"
+        }
+      ]
+    },
+    {
+      "id": "canvas-flux-siglip-vision",
+      "family": "CanvasReference",
+      "creator": "Google / Comfy Org",
+      "repository": "Comfy-Org/sigclip_vision_384",
+      "revision": "f44ecf2517296ea3d06aa1e9b6c6446beda90094",
+      "license": "Upstream model terms",
+      "installPolicy": "automatic",
+      "profiles": ["canvas-reference-flux"],
+      "purpose": "SigLIP vision encoder used by FLUX.1 Redux reference conditioning",
+      "files": [
+        {
+          "sourcePath": "sigclip_vision_patch14_384.safetensors",
+          "destination": "clip_vision/sigclip_vision_patch14_384.safetensors",
+          "bytes": 856505640,
+          "sha256": "1fee501deabac72f0ed17610307d7131e3e9d1e838d0363aa3c2b97a6e03fb33"
         }
       ]
     }

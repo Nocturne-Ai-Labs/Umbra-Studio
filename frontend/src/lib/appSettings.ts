@@ -7,6 +7,8 @@ export const COMFY_SECURITY_LEVELS = ['strong', 'normal', 'normal-', 'weak'] as 
 export type ComfySecurityLevel = (typeof COMFY_SECURITY_LEVELS)[number];
 export const COMFY_ATTENTION_BACKENDS = ['default', 'sage', 'flash', 'pytorch', 'split', 'quad'] as const;
 export type ComfyAttentionBackend = (typeof COMFY_ATTENTION_BACKENDS)[number];
+export const COMFY_VRAM_MODES = ['auto', 'gpu-only', 'highvram', 'lowvram', 'novram', 'cpu'] as const;
+export type ComfyVramMode = (typeof COMFY_VRAM_MODES)[number];
 export const APP_LANGUAGES = ['en', 'ja', 'zh-CN', 'ko', 'de'] as const;
 export type AppLanguage = (typeof APP_LANGUAGES)[number];
 
@@ -24,6 +26,7 @@ export interface AppSettings {
   'aitoolkit.url': string;
   'comfyui.securityLevel': ComfySecurityLevel;
   'comfyui.attentionBackend': ComfyAttentionBackend;
+  'comfyui.vramMode': ComfyVramMode;
   'comfyui.autoLaunch': boolean;
   'comfyui.showFilmstrip': boolean;
   'comfyui.showFilmstripLivePreviews': boolean;
@@ -73,6 +76,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   'aitoolkit.url': 'http://127.0.0.1:8675',
   'comfyui.securityLevel': 'normal',
   'comfyui.attentionBackend': 'default',
+  'comfyui.vramMode': 'auto',
   'comfyui.autoLaunch': false,
   'comfyui.showFilmstrip': true,
   'comfyui.showFilmstripLivePreviews': true,
@@ -159,6 +163,7 @@ const STRING_KEYS: Array<keyof AppSettings> = [
   'aitoolkit.url',
   'comfyui.securityLevel',
   'comfyui.attentionBackend',
+  'comfyui.vramMode',
   'comfyui.externalOutputPath',
   'library.trashStoragePath',
   'library.deleteMode',
@@ -284,6 +289,9 @@ export function normalizeAppSettings(input: unknown): AppSettings {
   }
   if (!COMFY_ATTENTION_BACKENDS.includes(normalized['comfyui.attentionBackend'])) {
     normalized['comfyui.attentionBackend'] = DEFAULT_APP_SETTINGS['comfyui.attentionBackend'];
+  }
+  if (!COMFY_VRAM_MODES.includes(normalized['comfyui.vramMode'])) {
+    normalized['comfyui.vramMode'] = DEFAULT_APP_SETTINGS['comfyui.vramMode'];
   }
   if (!APP_LANGUAGES.includes(normalized['ui.language'])) {
     normalized['ui.language'] = DEFAULT_APP_SETTINGS['ui.language'];

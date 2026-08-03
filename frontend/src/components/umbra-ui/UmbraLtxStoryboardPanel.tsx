@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import {
   ArrowDown,
@@ -311,7 +312,7 @@ export function UmbraLtxStoryboardPanel({
       </label>
 
       <div className="mb-3 flex items-center gap-2">
-        <select
+        <UmbraSelectControl
           value={instructionId}
           onChange={(event) => setInstructionId(event.target.value)}
           className={`${inputClass} h-9 min-w-0 flex-1 py-1.5 text-[10px]`}
@@ -321,7 +322,7 @@ export function UmbraLtxStoryboardPanel({
           {instructions.map((instruction) => (
             <option key={instruction.id} value={instruction.id}>{instruction.name}</option>
           ))}
-        </select>
+        </UmbraSelectControl>
         <button
           type="button"
           onClick={() => void enhanceShots()}

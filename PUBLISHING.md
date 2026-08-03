@@ -201,12 +201,11 @@ It can run manually without publishing, or publish from a `v*` tag. The GitHub
 packages intentionally omit the 6+ GB Data Forge model weights because GitHub
 release assets have practical per-file limits. Each package includes a model
 installer that downloads the exact pinned model revisions into `User/Models`
-and rejects incomplete or checksum-mismatched downloads. The workflow also
-publishes `Data-Forge-Models-v<version>.json` as a release asset so the exact
-model bill of materials is visible without extracting either platform package.
-Every portable archive contains one top-level `Umbra Studio/` directory so users
-can extract them without scattering portable application files into the chosen
-destination.
+and rejects incomplete or checksum-mismatched downloads. Model manifests remain
+inside each portable package and must not be uploaded as separate GitHub release
+assets. Every portable archive contains one top-level `Umbra Studio/` directory
+so users can extract it without scattering portable application files into the
+chosen destination.
 
 Each GitHub release publishes
 `Umbra-Studio-v<version>-Windows-x64-BAT.zip`. The distinct BAT suffix is part
@@ -226,9 +225,9 @@ The GitHub workflow must continue to package:
 - Umbra Nodes installation/integration without committing a user's custom-node folder
 - Bundled Bun runtime, launchers, credits, license, and notices
 
-The workflow publishes both `Data-Forge-Models-v<version>.json` and
-`Umbra-UI-Support-Models-v<version>.json` beside the portable archives so the
-download bill of materials can be inspected without extracting a package.
+The release workflow must publish only the Windows and Linux portable ZIPs.
+Do not add standalone JSON manifests to the release asset list; the manifests
+are implementation resources included inside both archives.
 
 Portable packages must use the curated `umbraRuntimeDependencies` list from
 `package.json`. `scripts/prepare-runtime-dependencies.mjs` installs those

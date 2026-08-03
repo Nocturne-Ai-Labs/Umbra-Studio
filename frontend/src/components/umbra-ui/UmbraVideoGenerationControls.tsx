@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import {
   ChevronDown,
@@ -27,6 +28,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { cn } from '@/lib/utils';
+import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import type {
   PowerPrompterSeedControlMode,
   PowerPrompterSeedIncrement,
@@ -286,15 +288,16 @@ function SelectField({ label, value, values, onChange, emptyLabel = 'Not install
   return (
     <label className="min-w-0 space-y-1.5">
       <span className={labelClass}>{label}</span>
-      <select
-        aria-label={label}
+      <UmbraSelect
+        ariaLabel={label}
+        menuTitle={label}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className={inputClass}
-      >
-        <option value="">{emptyLabel}</option>
-        {options.map((option) => <option key={option} value={option}>{option}</option>)}
-      </select>
+        onValueChange={onChange}
+        options={[
+          { value: '', label: emptyLabel },
+          ...options.map((option) => ({ value: option, label: option })),
+        ]}
+      />
     </label>
   );
 }
@@ -319,7 +322,7 @@ function VideoModelField({
   return (
     <label className="min-w-0 space-y-1.5">
       <span className={labelClass}>{label}</span>
-      <select
+      <UmbraSelectControl
         aria-label={label}
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -336,7 +339,7 @@ function VideoModelField({
             {other.map((option) => <option key={option} value={option}>{option}</option>)}
           </optgroup>
         ) : null}
-      </select>
+      </UmbraSelectControl>
     </label>
   );
 }
@@ -1723,7 +1726,7 @@ export function UmbraVideoGenerationControls({
           <div className="grid grid-cols-2 gap-2">
           <label className="col-span-2 space-y-1.5">
             <span className={labelClass}>Target Resolution</span>
-            <select
+            <UmbraSelectControl
               value={video.resolutionPreset}
               onChange={(event) => setCommon('resolutionPreset', event.target.value)}
               className={inputClass}
@@ -1738,16 +1741,12 @@ export function UmbraVideoGenerationControls({
                   .filter((preset) => preset.group === 'budget')
                   .map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
               </optgroup>
-            </select>
+            </UmbraSelectControl>
           </label>
           {video.mode === 'text_to_video' ? (
             <label className="col-span-2 space-y-1.5">
               <span className={labelClass}>Frame Aspect</span>
-              <select value={video.aspectRatio} onChange={(event) => setCommon('aspectRatio', event.target.value)} className={inputClass}>
-                {UMBRA_VIDEO_ASPECT_PRESETS.map((preset) => (
-                  <option key={preset.id} value={preset.id}>{preset.label}</option>
-                ))}
-              </select>
+              <UmbraSelect value={video.aspectRatio} onValueChange={(value) => setCommon('aspectRatio', value)} ariaLabel="Frame Aspect" menuTitle="Frame Aspect" options={UMBRA_VIDEO_ASPECT_PRESETS.map((preset) => ({ value: preset.id, label: preset.label }))} />
             </label>
           ) : (
             <div className="col-span-2 flex min-w-0 items-center gap-2 border border-white/10 bg-black/25 px-2.5 py-2">

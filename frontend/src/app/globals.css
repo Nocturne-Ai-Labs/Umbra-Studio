@@ -1251,6 +1251,10 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-mode-nav] {
   border-radius: 0.75rem;
 }
 
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-mode-nav][data-umbra-ui-canvas-enabled="true"] {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-mode-nav] button {
   display: flex;
   min-width: 0;
@@ -1330,6 +1334,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ltx-storyboard] {
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-generation-panel],
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-prompt-panel],
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-video-controls],
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-controls] {
   min-height: auto;
@@ -1357,6 +1362,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-workspace] button {
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-generation-panel] button,
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-prompt-panel] button,
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-video-controls] button,
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-controls] button {
   min-height: 2.6rem;
@@ -1627,6 +1633,34 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-actions] button {
   letter-spacing: 0 !important;
 }
 
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-generate] {
+  width: 100%;
+  grid-column: 1 / -1;
+  margin: 0 0 0.1rem !important;
+  padding: 0 0 0.55rem !important;
+  border-right: 0 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-generate] button {
+  width: 100%;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-output] {
+  width: 100%;
+  grid-column: 1 / -1;
+  justify-content: space-between;
+  margin: 0 0 0.1rem !important;
+  padding: 0 0 0.55rem !important;
+  border-right: 0 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-output] select {
+  width: min(62vw, 15rem);
+  min-height: 2.75rem;
+}
+
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-video-queue] {
   height: 100%;
   min-height: 0;
@@ -1697,6 +1731,42 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras] {
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-canvas-workspace] {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  width: 100%;
+  min-width: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-canvas-tool-rail] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-canvas-center] {
+  grid-column: 1 !important;
+  min-width: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-canvas-generation-panel] {
+  left: 0 !important;
+  width: min(100%, 28rem) !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-canvas-layers-panel] {
+  width: min(100%, 28rem) !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-canvas-staging-strip] {
+  min-height: 9rem;
+  scroll-snap-type: x proximity;
+  overscroll-behavior-inline: contain;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-canvas-staging-strip] article {
+  width: min(82vw, 20rem);
+  scroll-snap-align: start;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-batch] {
@@ -5950,6 +6020,128 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tag-modal] button {
 
 .animate-menu {
   animation: menu-in 0.1s ease-out forwards;
+}
+
+.umbra-context-menu-panel {
+  color-scheme: dark;
+  border: 1px solid rgb(103 232 249 / 0.25);
+  border-radius: 0.375rem;
+  background:
+    linear-gradient(180deg, rgb(34 211 238 / 0.045), transparent 4rem),
+    rgb(7 10 12 / 0.985);
+  box-shadow:
+    0 20px 50px rgb(0 0 0 / 0.72),
+    0 0 0 1px rgb(255 255 255 / 0.025) inset;
+  backdrop-filter: blur(18px) saturate(1.12);
+  animation: menu-in 0.11s ease-out forwards;
+}
+
+.umbra-context-menu-header {
+  border-bottom: 1px solid rgb(103 232 249 / 0.16);
+  background: rgb(34 211 238 / 0.035);
+}
+
+.umbra-context-menu-title {
+  color: color-mix(in srgb, var(--umbra-text) 96%, white);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.umbra-context-menu-subtitle {
+  color: rgb(103 232 249 / 0.7);
+  font-size: 0.56rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.umbra-context-menu-item {
+  min-height: 2rem;
+  border-radius: 0.2rem;
+  color: color-mix(in srgb, var(--umbra-text) 83%, transparent);
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  line-height: 1.15;
+  text-transform: uppercase;
+  transition: color 100ms ease, background-color 100ms ease, box-shadow 100ms ease;
+  outline: none;
+}
+
+.umbra-context-menu-item:not(:disabled):hover,
+.umbra-context-menu-item[data-active="true"],
+.umbra-context-menu-item:not(:disabled):focus-visible {
+  color: color-mix(in srgb, var(--umbra-text) 96%, white);
+  background: rgb(34 211 238 / 0.1);
+  box-shadow: 2px 0 0 rgb(103 232 249 / 0.68) inset;
+}
+
+.umbra-context-menu-item[data-danger="true"] {
+  color: rgb(252 165 165);
+}
+
+.umbra-context-menu-item[data-danger="true"]:not(:disabled):hover {
+  color: rgb(254 202 202);
+  background: rgb(239 68 68 / 0.13);
+  box-shadow: 2px 0 0 rgb(248 113 113 / 0.72) inset;
+}
+
+.umbra-context-menu-icon {
+  color: rgb(103 232 249 / 0.82);
+}
+
+.umbra-context-menu-item[data-danger="true"] .umbra-context-menu-icon {
+  color: rgb(248 113 113);
+}
+
+.umbra-context-menu-description {
+  color: color-mix(in srgb, var(--umbra-muted) 86%, transparent);
+  font-size: 0.56rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.umbra-context-menu-separator {
+  height: 1px;
+  background: rgb(103 232 249 / 0.13);
+}
+
+.umbra-context-menu-badge {
+  border: 1px solid rgb(103 232 249 / 0.18);
+  border-radius: 0.2rem;
+  background: rgb(34 211 238 / 0.065);
+  color: rgb(165 243 252 / 0.82);
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.umbra-context-menu-legacy-actions button,
+.umbra-context-menu-legacy-actions a {
+  min-height: 2rem;
+  border-radius: 0.2rem;
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  line-height: 1.15;
+  text-transform: uppercase;
+}
+
+.umbra-context-menu-legacy-actions button:not(:disabled):hover,
+.umbra-context-menu-legacy-actions a:hover {
+  background: rgb(34 211 238 / 0.1);
+  box-shadow: 2px 0 0 rgb(103 232 249 / 0.68) inset;
+}
+
+.umbra-context-menu-legacy-actions svg {
+  color: rgb(103 232 249 / 0.82);
+}
+
+/* Older native selects supplied a separate decorative chevron. */
+.umbra-select-control-adapter + svg.pointer-events-none {
+  display: none;
 }
 
 /* Toast notification */

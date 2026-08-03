@@ -41,7 +41,7 @@ export interface UmbraUiAgentVideoContext {
 
 export interface UmbraUiAgentContext {
   updatedAt: number;
-  activeMode: 'image' | 'img2img' | 'inpaint' | 'video' | 'extras';
+  activeMode: 'image' | 'img2img' | 'inpaint' | 'canvas' | 'video' | 'extras';
   image: UmbraUiAgentImageContext;
   video: UmbraUiAgentVideoContext;
 }

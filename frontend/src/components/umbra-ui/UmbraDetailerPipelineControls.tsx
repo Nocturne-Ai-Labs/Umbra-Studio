@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import {
   ArrowDown,
@@ -13,6 +14,7 @@ import {
   WandSparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import { createPowerPrompterDetailerStage } from '@/lib/powerPrompter';
 import type {
   PowerPrompterDetailerStage,
@@ -286,9 +288,9 @@ export function UmbraDetailerPipelineControls({
                     </label>
                     <label className="min-w-0 space-y-1.5">
                       <span className={labelClass}>Detector</span>
-                      <select value={stage.detectorModel} onChange={(event) => updateStage(stage.id, { detectorModel: event.target.value })} className={inputClass}>
+                      <UmbraSelectControl value={stage.detectorModel} onChange={(event) => updateStage(stage.id, { detectorModel: event.target.value })} className={inputClass}>
                         {detectorChoices.map((model) => <option key={model} value={model}>{model}</option>)}
-                      </select>
+                      </UmbraSelectControl>
                     </label>
                   </div>
 
@@ -297,10 +299,10 @@ export function UmbraDetailerPipelineControls({
                     <NumberField label="Max Size" value={stage.maxSize} min={64} max={16384} step={8} onChange={(maxSize) => updateStage(stage.id, { maxSize })} />
                     <label className="min-w-0 space-y-1.5">
                       <span className={labelClass}>Guide Basis</span>
-                      <select value={stage.guideSizeFor} onChange={(event) => updateStage(stage.id, { guideSizeFor: event.target.value === 'crop_region' ? 'crop_region' : 'bbox' })} className={inputClass}>
+                      <UmbraSelectControl value={stage.guideSizeFor} onChange={(event) => updateStage(stage.id, { guideSizeFor: event.target.value === 'crop_region' ? 'crop_region' : 'bbox' })} className={inputClass}>
                         <option value="bbox">Bounding box</option>
                         <option value="crop_region">Crop region</option>
-                      </select>
+                      </UmbraSelectControl>
                     </label>
                   </div>
 
@@ -313,15 +315,11 @@ export function UmbraDetailerPipelineControls({
                   <div className="grid grid-cols-2 gap-2">
                     <label className="min-w-0 space-y-1.5">
                       <span className={labelClass}>Sampler</span>
-                      <select value={stage.samplerName} onChange={(event) => updateStage(stage.id, { samplerName: event.target.value })} className={inputClass}>
-                        {Array.from(new Set([stage.samplerName, ...samplerOptions])).map((option) => <option key={option} value={option}>{option}</option>)}
-                      </select>
+                      <UmbraSelect value={stage.samplerName} onValueChange={(samplerName) => updateStage(stage.id, { samplerName })} ariaLabel="Detailer Sampler" menuTitle="Detailer Sampler" options={Array.from(new Set([stage.samplerName, ...samplerOptions])).map((option) => ({ value: option, label: option }))} />
                     </label>
                     <label className="min-w-0 space-y-1.5">
                       <span className={labelClass}>Scheduler</span>
-                      <select value={stage.scheduler} onChange={(event) => updateStage(stage.id, { scheduler: event.target.value })} className={inputClass}>
-                        {Array.from(new Set([stage.scheduler, ...schedulerOptions])).map((option) => <option key={option} value={option}>{option}</option>)}
-                      </select>
+                      <UmbraSelect value={stage.scheduler} onValueChange={(scheduler) => updateStage(stage.id, { scheduler })} ariaLabel="Detailer Scheduler" menuTitle="Detailer Scheduler" options={Array.from(new Set([stage.scheduler, ...schedulerOptions])).map((option) => ({ value: option, label: option }))} />
                     </label>
                   </div>
 
@@ -343,25 +341,25 @@ export function UmbraDetailerPipelineControls({
                       <div className="grid grid-cols-2 gap-2">
                         <label className="min-w-0 space-y-1.5">
                           <span className={labelClass}>SAM Model</span>
-                          <select value={stage.samModel} disabled={!stage.useSam} onChange={(event) => updateStage(stage.id, { samModel: event.target.value })} className={inputClass}>
+                          <UmbraSelectControl value={stage.samModel} disabled={!stage.useSam} onChange={(event) => updateStage(stage.id, { samModel: event.target.value })} className={inputClass}>
                             {samChoices.map((model) => <option key={model} value={model}>{model}</option>)}
-                          </select>
+                          </UmbraSelectControl>
                         </label>
                         <label className="min-w-0 space-y-1.5">
                           <span className={labelClass}>SAM Device</span>
-                          <select value={stage.samDeviceMode} disabled={!stage.useSam} onChange={(event) => updateStage(stage.id, { samDeviceMode: event.target.value as PowerPrompterDetailerStage['samDeviceMode'] })} className={inputClass}>
+                          <UmbraSelectControl value={stage.samDeviceMode} disabled={!stage.useSam} onChange={(event) => updateStage(stage.id, { samDeviceMode: event.target.value as PowerPrompterDetailerStage['samDeviceMode'] })} className={inputClass}>
                             <option value="AUTO">Auto</option>
                             <option value="Prefer GPU">Prefer GPU</option>
                             <option value="CPU">CPU</option>
-                          </select>
+                          </UmbraSelectControl>
                         </label>
                       </div>
                       <div className="grid grid-cols-3 gap-2">
                         <label className="min-w-0 space-y-1.5">
                           <span className={labelClass}>SAM Hint</span>
-                          <select value={stage.samDetectionHint} disabled={!stage.useSam} onChange={(event) => updateStage(stage.id, { samDetectionHint: event.target.value })} className={inputClass}>
+                          <UmbraSelectControl value={stage.samDetectionHint} disabled={!stage.useSam} onChange={(event) => updateStage(stage.id, { samDetectionHint: event.target.value })} className={inputClass}>
                             {SAM_HINTS.map((hint) => <option key={hint} value={hint}>{hint}</option>)}
-                          </select>
+                          </UmbraSelectControl>
                         </label>
                         <NumberField label="SAM Threshold" value={stage.samThreshold} min={0} max={1} step={0.01} onChange={(samThreshold) => updateStage(stage.id, { samThreshold })} />
                         <NumberField label="SAM Dilation" value={stage.samDilation} min={-512} max={512} onChange={(samDilation) => updateStage(stage.id, { samDilation })} />
@@ -369,11 +367,11 @@ export function UmbraDetailerPipelineControls({
                         <NumberField label="Hint Threshold" value={stage.samMaskHintThreshold} min={0} max={1} step={0.01} onChange={(samMaskHintThreshold) => updateStage(stage.id, { samMaskHintThreshold })} />
                         <label className="min-w-0 space-y-1.5">
                           <span className={labelClass}>Negative Hint</span>
-                          <select value={stage.samMaskHintUseNegative} disabled={!stage.useSam} onChange={(event) => updateStage(stage.id, { samMaskHintUseNegative: event.target.value as PowerPrompterDetailerStage['samMaskHintUseNegative'] })} className={inputClass}>
+                          <UmbraSelectControl value={stage.samMaskHintUseNegative} disabled={!stage.useSam} onChange={(event) => updateStage(stage.id, { samMaskHintUseNegative: event.target.value as PowerPrompterDetailerStage['samMaskHintUseNegative'] })} className={inputClass}>
                             <option value="False">Off</option>
                             <option value="Small">Small</option>
                             <option value="Outter">Outer</option>
-                          </select>
+                          </UmbraSelectControl>
                         </label>
                       </div>
                       <div className="grid grid-cols-2 gap-1.5 text-[10px] text-zinc-300">
@@ -450,9 +448,9 @@ export function UmbraDetailerPipelineControls({
             {showOutputModelSelection ? (
               <label className="min-w-0 space-y-1.5">
                 <span className={labelClass}>Upscale Model</span>
-                <select value={outputUpscale.modelName} onChange={(event) => onOutputUpscaleChange({ ...outputUpscale, modelName: event.target.value })} className={inputClass}>
+                <UmbraSelectControl value={outputUpscale.modelName} onChange={(event) => onOutputUpscaleChange({ ...outputUpscale, modelName: event.target.value })} className={inputClass}>
                   {upscaleChoices.map((model) => <option key={model} value={model}>{model}</option>)}
-                </select>
+                </UmbraSelectControl>
               </label>
             ) : null}
             {showOutputMaxDimension ? (

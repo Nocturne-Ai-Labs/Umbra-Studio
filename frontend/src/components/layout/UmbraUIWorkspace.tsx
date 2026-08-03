@@ -1,10 +1,13 @@
 'use client';
 
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import {
   Activity,
   Bot,
   Clapperboard,
+  FolderOutput,
+  Info,
   Image as ImageIcon,
   Images,
   ImageUp,
@@ -20,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { cn } from '@/lib/utils';
+import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import {
   DEFAULT_POWER_PROMPTER_DETAILER_PIPELINE,
   normalizePowerPrompterGenerationControls,
@@ -55,6 +59,7 @@ import {
 import { UmbraVideoQueuePanel } from '@/components/umbra-ui/UmbraVideoQueuePanel';
 import { UmbraExtrasWorkspace } from '@/components/umbra-ui/UmbraExtrasWorkspace';
 import { UmbraInpaintWorkspace } from '@/components/umbra-ui/UmbraInpaintWorkspace';
+import { UmbraCanvasWorkspace } from '@/features/canvas/UmbraCanvasWorkspace';
 import { UmbraCheckpointControls } from '@/components/umbra-ui/UmbraCheckpointControls';
 import { UmbraWorkflowResourceControls } from '@/components/umbra-ui/UmbraWorkflowResourceControls';
 import { UmbraLoraStackControls } from '@/components/umbra-ui/UmbraLoraStackControls';
@@ -63,6 +68,10 @@ import { UmbraAgentPromptPanel } from '@/components/umbra-ui/UmbraAgentPromptPan
 import { UmbraInlineAgentPrompt } from '@/components/umbra-ui/UmbraInlineAgentPrompt';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
 import { UmbraImageResolutionControls } from '@/components/umbra-ui/UmbraImageResolutionControls';
+import {
+  UmbraImageGenerationInfoDrawer,
+  type UmbraImageGenerationInfo,
+} from '@/components/umbra-ui/UmbraImageGenerationInfoDrawer';
 import { UmbraMobileWorkspaceSheet } from '@/components/umbra-ui/UmbraMobileWorkspaceSheet';
 import { UmbraQueueEmergencyControls } from '@/components/umbra-ui/UmbraQueueEmergencyControls';
 import {
@@ -71,6 +80,7 @@ import {
 } from '@/components/umbra-ui/UmbraQueuePlacementControls';
 import {
   UmbraModelPickerModal,
+  type UmbraModelPickerCatalogItem,
   type UmbraModelPickerInfo,
   type UmbraModelPickerKind,
 } from '@/components/umbra-ui/UmbraModelPickerModal';
@@ -158,13 +168,34 @@ import {
   resolveUmbraUiHiresResizeMode,
 } from '../../../../shared/umbra-ui/pipelineTypes';
 
-type UmbraGenerationMode = 'image' | 'img2img' | 'inpaint' | 'video' | 'extras';
+type UmbraGenerationMode = 'image' | 'img2img' | 'inpaint' | 'canvas' | 'video' | 'extras';
 
 const UMBRA_UI_ACTIVE_MODE_STORAGE_KEY = 'umbra-ui:active-mode';
-const UMBRA_UI_GENERATION_MODES: UmbraGenerationMode[] = ['image', 'img2img', 'inpaint', 'video', 'extras'];
+const UMBRA_UI_GENERATION_MODES: UmbraGenerationMode[] = ['image', 'img2img', 'inpaint', 'canvas', 'video', 'extras'];
+const UMBRA_CANVAS_DEVELOPMENT_STORAGE_KEY = 'umbra-canvas-development-enabled';
+
+function snapshotUmbraImageGenerationInfo(
+  workflowName: string,
+  options: UmbraImageQueueOptions,
+): UmbraImageGenerationInfo {
+  return {
+    workflowName: String(workflowName || options.modelFamily || '').trim(),
+    options: {
+      ...options,
+      promptSegments: options.promptSegments?.map((segment) => ({ ...segment })),
+      workflowResources: { ...options.workflowResources },
+      hiresFix: { ...options.hiresFix },
+      detailerPipeline: options.detailerPipeline.map((stage) => ({ ...stage })),
+      outputUpscale: { ...options.outputUpscale },
+      tiledVae: { ...options.tiledVae },
+      loras: options.loras.map((lora) => ({ ...lora, trainedTags: [...lora.trainedTags] })),
+    },
+  };
+}
 
 interface UmbraUiDeviceResume {
   activeMode?: UmbraGenerationMode;
+  txt2imgOutputFolder?: string;
   promptSegments?: UmbraUiPromptSegment[];
   activePromptSegmentId?: string;
   imageAgentModeEnabled?: boolean;
@@ -209,11 +240,20 @@ interface UmbraUiDeviceResume {
 }
 
 function normalizeUmbraGenerationMode(value: unknown): UmbraGenerationMode {
-  return value === 'canvas'
-    ? 'inpaint'
-    : UMBRA_UI_GENERATION_MODES.includes(value as UmbraGenerationMode)
-      ? value as UmbraGenerationMode
-      : 'image';
+  if (value === 'canvas' && !isUmbraCanvasDevelopmentEnabled()) return 'image';
+  return UMBRA_UI_GENERATION_MODES.includes(value as UmbraGenerationMode)
+    ? value as UmbraGenerationMode
+    : 'image';
+}
+
+function isUmbraCanvasDevelopmentEnabled(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return new URLSearchParams(window.location.search).get('canvas-revival') === '1'
+      || window.localStorage.getItem(UMBRA_CANVAS_DEVELOPMENT_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
 function readPersistedUmbraGenerationMode(): UmbraGenerationMode {
@@ -224,6 +264,16 @@ function readPersistedUmbraGenerationMode(): UmbraGenerationMode {
   } catch {
     return 'image';
   }
+}
+
+function normalizeUmbraUiPinnedFolder(value: unknown): string {
+  return String(value || '').trim().replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function getUmbraUiPinnedFolderLabel(value: string): string {
+  const parts = normalizeUmbraUiPinnedFolder(value).split('/').filter(Boolean);
+  if (parts.length <= 1) return parts[0] || value;
+  return `${parts.at(-1)} - ${parts.at(-2)}`;
 }
 
 function getUmbraUiPipelineModelSelectionKey(
@@ -288,8 +338,13 @@ function getPrimaryModelItems(catalog: UmbraModelCatalog, modelType: PowerPrompt
   return catalog.checkpoints;
 }
 
-function getPrimaryModelLabel(modelType: PowerPrompterModelType): string {
-  return PRIMARY_MODEL_TYPE_OPTIONS.find((option) => option.value === modelType)?.label || 'Model';
+function getPrimaryModelPickerItems(
+  catalog: UmbraModelCatalog,
+  sources: PowerPrompterModelType[],
+): UmbraModelPickerCatalogItem[] {
+  return sources.flatMap((source) => (
+    getPrimaryModelItems(catalog, source).map((path) => ({ path, source }))
+  ));
 }
 
 function getWorkflowResourceItems(
@@ -361,6 +416,9 @@ function getUmbraUiLoraVisualMeta(info: UmbraModelPickerInfo | null): UmbraUiLor
 interface PipelineControlsProps {
   queueSummary: UmbraQueueSummary;
   onQueueImage: (placement: UmbraQueuePlacement) => void;
+  placement: UmbraQueuePlacement;
+  onPlacementChange: (placement: UmbraQueuePlacement) => void;
+  effectivePlacement: UmbraQueuePlacement;
   onOpenPowerPrompter: () => void;
   onSendControlsToPowerPrompter?: () => void;
   sendControlsDisabled?: boolean;
@@ -369,11 +427,16 @@ interface PipelineControlsProps {
   queueDisabled: boolean;
   queueTitle: string;
   queueLabel?: string;
+  showGenerateButton?: boolean;
+  flushTop?: boolean;
 }
 
 function PipelineControls({
   queueSummary,
   onQueueImage,
+  placement,
+  onPlacementChange,
+  effectivePlacement,
   onOpenPowerPrompter,
   onSendControlsToPowerPrompter,
   sendControlsDisabled = false,
@@ -382,11 +445,11 @@ function PipelineControls({
   queueDisabled,
   queueTitle,
   queueLabel = 'Generate Image',
+  showGenerateButton = true,
+  flushTop = false,
 }: PipelineControlsProps) {
-  const { placement, setPlacement, effectivePlacement } = useUmbraQueuePlacement(queueSummary);
-
   return (
-    <div className="mt-4 border-t border-white/10 pt-3">
+    <div className={cn(flushTop ? 'mt-0' : 'mt-4 border-t border-white/10 pt-3')}>
       <div className="mb-3 flex items-center gap-2">
         <ListPlus size={13} className="text-emerald-300" />
         <h2 className="text-xs font-black uppercase tracking-[0.14em] text-zinc-200">Queue</h2>
@@ -421,19 +484,21 @@ function PipelineControls({
         <UmbraQueuePlacementControls
           queueSummary={queueSummary}
           value={placement}
-          onChange={setPlacement}
+          onChange={onPlacementChange}
           subject="image"
         />
-        <button
-          type="button"
-          onClick={() => onQueueImage(effectivePlacement)}
-          disabled={queueDisabled}
-          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md border border-emerald-300/30 bg-emerald-500/[0.1] text-[11px] font-black uppercase tracking-[0.13em] text-emerald-100 transition-colors hover:bg-emerald-500/[0.16] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
-          title={queueTitle}
-        >
-          {isQueueing ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-          {queueLabel}
-        </button>
+        {showGenerateButton ? (
+          <button
+            type="button"
+            onClick={() => onQueueImage(effectivePlacement)}
+            disabled={queueDisabled}
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md border border-emerald-300/30 bg-emerald-500/[0.1] text-[11px] font-black uppercase tracking-[0.13em] text-emerald-100 transition-colors hover:bg-emerald-500/[0.16] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+            title={queueTitle}
+          >
+            {isQueueing ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+            {queueLabel}
+          </button>
+        ) : null}
         {onSendControlsToPowerPrompter ? (
           <button
             type="button"
@@ -463,6 +528,7 @@ export function UmbraUIWorkspace() {
   const comfyConnected = useStore((state) => state.connections.comfyui === 'connected');
   const setActiveWorkspace = useStore((state) => state.setActiveWorkspace);
   const showToast = useStore((state) => state.showToast);
+  const pinnedFolderSetting = useStore((state) => state.appSettings['library.pinnedFolders']);
   const {
     connected: queueConnected,
     workflows,
@@ -488,8 +554,28 @@ export function UmbraUIWorkspace() {
     queueImage,
     queueVideo,
   } = useUmbraPowerPrompterBridge(comfyConnected);
+  const imageQueuePlacement = useUmbraQueuePlacement(queueSummary);
   const [queueControlBusy, setQueueControlBusy] = React.useState<'skip' | 'stop' | ''>('');
   const [initialDeviceResume] = React.useState(() => readDeviceUiResume<UmbraUiDeviceResume>('umbra-ui'));
+  const pinnedOutputFolders = React.useMemo(() => {
+    const seen = new Set<string>();
+    return (Array.isArray(pinnedFolderSetting) ? pinnedFolderSetting : [])
+      .map(normalizeUmbraUiPinnedFolder)
+      .filter((folder) => {
+        const key = folder.toLowerCase();
+        if (!folder || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }, [pinnedFolderSetting]);
+  const [txt2imgOutputFolder, setTxt2imgOutputFolder] = React.useState(
+    normalizeUmbraUiPinnedFolder(initialDeviceResume?.txt2imgOutputFolder),
+  );
+  const activeTxt2imgOutputFolder = React.useMemo(() => {
+    const selectedKey = txt2imgOutputFolder.toLowerCase();
+    return pinnedOutputFolders.find((folder) => folder.toLowerCase() === selectedKey) || '';
+  }, [pinnedOutputFolders, txt2imgOutputFolder]);
+  const canvasDevelopmentEnabled = isUmbraCanvasDevelopmentEnabled();
   const [activeMode, setActiveMode] = React.useState<UmbraGenerationMode>(() => (
     initialDeviceResume?.activeMode
       ? normalizeUmbraGenerationMode(initialDeviceResume.activeMode)
@@ -608,6 +694,9 @@ export function UmbraUIWorkspace() {
     ...(initialDeviceResume?.tiledVae || {}),
   });
   const [isQueueing, setIsQueueing] = React.useState(false);
+  const [imageGenerationInfoOpen, setImageGenerationInfoOpen] = React.useState(false);
+  const [queuedImageGenerationInfo, setQueuedImageGenerationInfo] = React.useState<Record<string, UmbraImageGenerationInfo>>({});
+  const [lastImageGenerationInfo, setLastImageGenerationInfo] = React.useState<UmbraImageGenerationInfo | null>(null);
   const [agentPanelOpen, setAgentPanelOpen] = React.useState(false);
   const [agentDraftCount, setAgentDraftCount] = React.useState(0);
   const [videoStoryboardOpen, setVideoStoryboardOpen] = React.useState(false);
@@ -624,6 +713,8 @@ export function UmbraUIWorkspace() {
   const inheritedControlsAppliedRef = React.useRef(false);
   const attemptedLoraInfoRef = React.useRef(new Set<string>());
   const mediaHandoffAppliedAtRef = React.useRef(0);
+  const [canvasMediaHandoff, setCanvasMediaHandoff] = React.useState<UmbraUiMediaHandoff | null>(null);
+  const clearCanvasMediaHandoff = React.useCallback(() => setCanvasMediaHandoff(null), []);
   const img2imgSourceReplacementRequestsRef = React.useRef(new Map<string, string>());
   const appliedImagePipelineDefaultsRef = React.useRef('');
   const imagePipelineDefaultsInitializedRef = React.useRef(
@@ -774,6 +865,7 @@ export function UmbraUIWorkspace() {
     const timer = window.setTimeout(() => {
       writeDeviceUiResume<UmbraUiDeviceResume>('umbra-ui', {
         activeMode,
+        txt2imgOutputFolder,
         promptSegments,
         activePromptSegmentId,
         imageAgentModeEnabled,
@@ -850,6 +942,7 @@ export function UmbraUIWorkspace() {
     negativePrompt,
     outputUpscale,
     tiledVae,
+    txt2imgOutputFolder,
     pipelineModelSelections,
     promptSegments,
     replaceImg2ImgSourceOnComplete,
@@ -1104,6 +1197,21 @@ export function UmbraUIWorkspace() {
     ),
     [inpaintPipelineMatch.pipeline?.inpaintAdapter, primaryModelItems],
   );
+  const primaryModelPickerItems = React.useMemo(() => {
+    const sourceOptions = inpaintWorkspaceActive ? inpaintModelTypeOptions : imageModelTypeOptions;
+    const entries = getPrimaryModelPickerItems(modelCatalog, sourceOptions.map((option) => option.value));
+    if (!inpaintWorkspaceActive) return entries;
+    return entries.filter((entry) => {
+      const source = entry.source || 'checkpoint';
+      const pipeline = [...selectedInpaintFamilyPipelines]
+        .filter(({ pipeline: candidate }) => candidate.modelSources.includes(source))
+        .sort((left, right) => right.pipeline.priority - left.pipeline.priority)[0]?.pipeline;
+      return filterUmbraUiInpaintPrimaryModels(
+        [entry.path],
+        pipeline?.inpaintAdapter || 'native_edit',
+      ).length > 0;
+    });
+  }, [imageModelTypeOptions, inpaintModelTypeOptions, inpaintWorkspaceActive, modelCatalog, selectedInpaintFamilyPipelines]);
   const primaryModelRuntimeIssue = React.useMemo(() => {
     if (!checkpointName || primaryModelItems.length <= 0) return '';
     const match = matchUmbraUiResourceCatalog(checkpointName, primaryModelItems);
@@ -1323,7 +1431,10 @@ export function UmbraUIWorkspace() {
         .map((entry) => {
           const name = String(entry?.name || '').trim();
           if (!name) return null;
-          const baseEntry = createUmbraUiLoraEntry(name, [], inheritedModelFamilyKey);
+          const trainedTags = Array.isArray(entry.trainedTags)
+            ? entry.trainedTags.map((tag) => String(tag || '').trim()).filter(Boolean)
+            : [];
+          const baseEntry = createUmbraUiLoraEntry(name, trainedTags, inheritedModelFamilyKey);
           return {
             ...baseEntry,
             id: String(entry.id || '').trim() || baseEntry.id,
@@ -1617,7 +1728,11 @@ export function UmbraUIWorkspace() {
     setResourcePickerId(null);
   }, []);
 
-  const handleModelPickerConfirm = React.useCallback(async (name: string, info: UmbraModelPickerInfo | null) => {
+  const handleModelPickerConfirm = React.useCallback(async (
+    name: string,
+    info: UmbraModelPickerInfo | null,
+    source?: PowerPrompterModelType,
+  ) => {
     const normalizedName = String(name || '').trim().replace(/\\/g, '/');
     if (!normalizedName) return;
     if (activeResourcePicker) {
@@ -1626,10 +1741,18 @@ export function UmbraUIWorkspace() {
       return;
     }
     if (modelPickerKind === 'checkpoint') {
+      const selectedSource = source || modelType;
+      if (selectedSource !== modelType) rememberCurrentPipelineModelSelection();
+      const selectionKey = getUmbraUiPipelineModelSelectionKey(
+        inpaintWorkspaceActive ? 'inpainting' : activeImageFeature,
+        modelFamily,
+        selectedSource,
+      );
+      setModelType(selectedSource);
       setCheckpointName(normalizedName);
-      setPipelineModelSelections((current) => current[activePipelineModelSelectionKey] === normalizedName
+      setPipelineModelSelections((current) => current[selectionKey] === normalizedName
         ? current
-        : { ...current, [activePipelineModelSelectionKey]: normalizedName });
+        : { ...current, [selectionKey]: normalizedName });
       closeModelPicker();
       return;
     }
@@ -1664,7 +1787,7 @@ export function UmbraUIWorkspace() {
       closeModelPicker();
       showToast(error instanceof Error ? `${error.message} Added without trained tokens.` : 'LoRA added without trained tokens.', 'error');
     }
-  }, [activeLoraFamilyKey, activePipelineModelSelectionKey, activeResourcePicker, closeModelPicker, modelPickerKind, requestLoraInfo, showToast, updateWorkflowResource]);
+  }, [activeImageFeature, activeLoraFamilyKey, activeResourcePicker, closeModelPicker, inpaintWorkspaceActive, modelFamily, modelPickerKind, modelType, rememberCurrentPipelineModelSelection, requestLoraInfo, showToast, updateWorkflowResource]);
 
   React.useEffect(() => {
     const unresolved = loras.filter((lora) => {
@@ -1683,7 +1806,9 @@ export function UmbraUIWorkspace() {
             ? { ...entry, trainedTags: info.trainedTags, ...visualMeta }
             : entry));
         })
-        .catch(() => undefined);
+        .catch(() => {
+          attemptedLoraInfoRef.current.delete(key);
+        });
     }
   }, [loras, requestLoraInfo]);
 
@@ -1872,7 +1997,7 @@ export function UmbraUIWorkspace() {
       const queuedSeed = seedIsAdjustable
         ? resolveUmbraUiQueueSeed(seed, seedMode)
         : controlNumber(seed, imageCapabilities.seed.value);
-      const requestId = await queueImage({
+      const queueOptions: UmbraImageQueueOptions = {
         prompt: workflowImagePrompt,
         promptSegments,
         negativePrompt: imageCapabilities.negativePrompt.support === 'adjustable' ? negativePrompt : '',
@@ -1898,6 +2023,7 @@ export function UmbraUIWorkspace() {
           : imageCapabilities.resolution.defaultHeight || Number(height),
         batchSize,
         outputMode: activeImageFeature,
+        outputFolder: activeImageFeature === 'txt2img' ? activeTxt2imgOutputFolder : '',
         sourceImagePath: img2imgSource.path,
         sourceImageName: img2imgSource.name,
         denoise: img2imgDenoise,
@@ -1930,7 +2056,19 @@ export function UmbraUIWorkspace() {
         tiledVae,
         loras: imageCapabilities.loras.support === 'adjustable' ? activeLoras : [],
         queuePlacement: effectivePlacement,
-      });
+      };
+      const requestId = await queueImage(queueOptions);
+      const generationInfo = snapshotUmbraImageGenerationInfo(
+        selectedImageWorkflow?.name || `${modelFamily} ${activeImageFeature === 'img2img' ? 'IMG2IMG' : 'TXT2IMG'}`,
+        queueOptions,
+      );
+      setLastImageGenerationInfo(generationInfo);
+      if (requestId) {
+        setQueuedImageGenerationInfo((current) => {
+          const entries = [...Object.entries(current), [requestId, generationInfo] as const].slice(-20);
+          return Object.fromEntries(entries);
+        });
+      }
       promptHistoryDirtyRef.current = true;
       promptHistoryRevisionRef.current += 1;
       setPromptHistory((current) => recordUmbraUiPromptHistory(
@@ -1984,6 +2122,7 @@ export function UmbraUIWorkspace() {
     img2imgSource,
     isQueueing,
     activeLoras,
+    activeTxt2imgOutputFolder,
     modelFamily,
     modelType,
     negativePrompt,
@@ -1998,6 +2137,7 @@ export function UmbraUIWorkspace() {
     seed,
     seedIncrement,
     seedMode,
+    selectedImageWorkflow?.name,
     showToast,
     steps,
     width,
@@ -2245,6 +2385,10 @@ export function UmbraUIWorkspace() {
         }
       }
       if (handoff.mode === 'inpaint') setActiveMode('inpaint');
+      if (handoff.mode === 'canvas') {
+        setActiveMode('canvas');
+        setCanvasMediaHandoff(handoff);
+      }
       const snapshot = handoff.generation;
       if (!snapshot) return;
 
@@ -2375,27 +2519,27 @@ export function UmbraUIWorkspace() {
     ? getWorkflowResourceItems(activeResourcePicker, modelCatalog)
     : modelPickerKind === 'lora'
       ? loraCatalog
-      : inpaintWorkspaceActive ? inpaintPrimaryModelItems : primaryModelItems;
+      : primaryModelPickerItems;
   const activePickerSelection = activeResourcePicker
     ? String(workflowResourceValues[activeResourcePicker.id] || activeResourcePicker.defaultValue || '')
     : modelPickerKind === 'checkpoint'
       ? checkpointName
       : '';
-  const primaryModelLabel = getPrimaryModelLabel(modelType);
+  const primaryModelLabel = 'Model';
   const activePickerTitle = activeResourcePicker
     ? `${activeResourcePicker.label} Browser`
-    : modelPickerKind === 'checkpoint' && modelType !== 'checkpoint'
-      ? `${primaryModelLabel} Browser`
+    : modelPickerKind === 'checkpoint'
+      ? 'Model Browser'
       : undefined;
   const activePickerSearchPlaceholder = activeResourcePicker
     ? `Search ${activeResourcePicker.label.toLowerCase()} files...`
-    : modelPickerKind === 'checkpoint' && modelType !== 'checkpoint'
-      ? `Search ${primaryModelLabel.toLowerCase()} models...`
+    : modelPickerKind === 'checkpoint'
+      ? 'Search models by name or folder...'
       : undefined;
   const activePickerConfirmLabel = activeResourcePicker
     ? `Use ${activeResourcePicker.label}`
-    : modelPickerKind === 'checkpoint' && modelType !== 'checkpoint'
-      ? `Use ${primaryModelLabel}`
+    : modelPickerKind === 'checkpoint'
+      ? 'Use Model'
       : undefined;
   const activeImageModelFamilies = imageModelFamilies;
   const handleSkipUmbraJob = React.useCallback(async () => {
@@ -2423,13 +2567,134 @@ export function UmbraUIWorkspace() {
     }
   }, [queueControlBusy, showToast, stopAllUmbraJobs]);
 
+  const imageQueueDisabled = isQueueing
+    || !queueConnected
+    || !comfyConnected
+    || !selectedImageWorkflow
+    || !checkpointName
+    || !!missingWorkflowResource
+    || !!imagePipelineRuntimeIssue
+    || (activeMode === 'img2img' && !img2imgSource.path && !img2imgSource.name)
+    || !workflowImagePrompt.trim();
+  const imageQueueTitle = !queueConnected
+    ? 'Connecting to the shared queue'
+    : (activeMode === 'image' || activeMode === 'img2img') && imageAgentModeEnabled && !imageAgentPrompt.trim()
+      ? 'Compose or enter an agent prompt first'
+      : activeMode === 'img2img' && !img2imgSource.path && !img2imgSource.name
+        ? 'Choose a source image for IMG2IMG'
+        : imagePipelineRuntimeIssue
+          ? imagePipelineRuntimeIssue
+          : missingWorkflowResource
+            ? `Select ${missingWorkflowResource.label}`
+            : imagePipelineMatch.error || (activeMode === 'img2img'
+              ? 'Queue this source through the locked Umbra UI IMG2IMG pipeline'
+              : 'Queue this image through the locked Umbra UI pipeline');
+  const imagePromptControls = (
+    <>
+      <UmbraPositivePromptEditor
+        segments={promptSegments}
+        activeSegmentId={activePromptSegmentId}
+        onChange={setPromptSegments}
+        onActiveSegmentChange={setActivePromptSegmentId}
+        heading={imageAgentModeEnabled ? 'Prompt Request' : 'Positive Prompt'}
+        history={promptHistory}
+        onRememberCurrent={rememberCurrentPrompt}
+        onRestoreHistory={restorePromptHistoryEntry}
+        onRemoveHistory={removePromptHistoryEntry}
+        onClearHistory={clearPromptHistory}
+        onSubmit={() => { void handleQueueImage(imageQueuePlacement.effectivePlacement); }}
+        agentContext={{
+          mode: activeMode,
+          modelFamily,
+          modelType,
+          pipeline: selectedImageWorkflow?.name || '',
+          checkpointName,
+          width: Number(width),
+          height: Number(height),
+          enabledLoras: activeLoras.filter((entry) => entry.enabled).map((entry) => entry.name),
+        }}
+        onAgentEnhancementApplied={() => {
+          setImageAgentModeEnabled(false);
+          setImageAgentPrompt('');
+        }}
+      />
+
+      <UmbraInlineAgentPrompt
+        mediaType="image"
+        sourcePrompt={prompt}
+        enabled={imageAgentModeEnabled}
+        onEnabledChange={setImageAgentModeEnabled}
+        agentPrompt={imageAgentPrompt}
+        onAgentPromptChange={setImageAgentPrompt}
+        onSubmit={() => { void handleQueueImage(imageQueuePlacement.effectivePlacement); }}
+        context={{
+          modelFamily,
+          modelType,
+          pipeline: selectedImageWorkflow?.name || '',
+          checkpointName,
+          width: Number(width),
+          height: Number(height),
+          enabledLoras: activeLoras.filter((entry) => entry.enabled).map((entry) => entry.name),
+        }}
+      />
+
+      {imageCapabilities.negativePrompt.support === 'adjustable' ? (
+        <label className="block space-y-1.5">
+          <span className={labelClass}>Negative Prompt</span>
+          <textarea
+            value={negativePrompt}
+            onChange={(event) => setNegativePrompt(event.target.value)}
+            onKeyDown={(event) => handleImagePromptKeyDown(event, setNegativePrompt)}
+            placeholder="Negative prompt"
+            className={`${inputClass} min-h-20 resize-y leading-relaxed`}
+          />
+        </label>
+      ) : null}
+    </>
+  );
+
+  const imageQueueControls = (
+    <PipelineControls
+      queueSummary={queueSummary}
+      onQueueImage={(placement) => void handleQueueImage(placement)}
+      placement={imageQueuePlacement.placement}
+      onPlacementChange={imageQueuePlacement.setPlacement}
+      effectivePlacement={imageQueuePlacement.effectivePlacement}
+      onOpenPowerPrompter={() => setActiveWorkspace('powerprompter')}
+      onSendControlsToPowerPrompter={activeMode === 'image'
+        ? handleSendGenerationControlsToPowerPrompter
+        : undefined}
+      sendControlsDisabled={!selectedImagePipeline || !checkpointName}
+      sendControlsTitle={!selectedImagePipeline
+        ? 'Select a TXT2IMG model pipeline first'
+        : !checkpointName
+          ? 'Select a model first'
+          : 'Apply this TXT2IMG pipeline, model, LoRAs, seed, resolution, hires fix, detailers, and upscale settings to the active PPCard'}
+      isQueueing={isQueueing}
+      queueLabel={activeMode === 'img2img' ? 'Generate IMG2IMG' : 'Generate Image'}
+      queueDisabled={imageQueueDisabled}
+      queueTitle={imageQueueTitle}
+      showGenerateButton={activeMode === 'img2img'}
+      flushTop={activeMode === 'image'}
+    />
+  );
+  const activeImageGenerationInfo = (
+    queueSummary.umbraUiRunning > 0 && queueSummary.umbraUiActiveRequestId
+      ? queuedImageGenerationInfo[queueSummary.umbraUiActiveRequestId]
+      : null
+  ) || (queueSummary.running > 0 ? null : lastImageGenerationInfo);
+
   return (
     <div data-umbra-ui-workspace="" className="flex h-full min-h-0 flex-col bg-[var(--umbra-bg)] text-zinc-100">
       <header data-umbra-ui-header="" className="flex min-h-14 flex-wrap items-center gap-3 border-b border-white/10 bg-black/30 px-4 py-1.5 max-[1140px]:gap-2 max-[1140px]:px-3">
         <PanelsTopLeft size={16} className="text-[var(--umbra-accent)] max-[1140px]:hidden" />
         <div className="text-xs font-black uppercase tracking-[0.18em] max-[1140px]:hidden">Umbra UI</div>
         <div className="h-4 w-px bg-white/10 max-[1140px]:hidden" />
-        <div data-umbra-ui-mode-nav="" className="inline-flex h-9 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/25">
+        <div
+          data-umbra-ui-mode-nav=""
+          data-umbra-ui-canvas-enabled={canvasDevelopmentEnabled ? 'true' : 'false'}
+          className="inline-flex h-9 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/25"
+        >
           <button
             type="button"
             onClick={() => setActiveMode('image')}
@@ -2460,6 +2725,18 @@ export function UmbraUIWorkspace() {
           >
             <Paintbrush size={13} /> Inpaint
           </button>
+          {canvasDevelopmentEnabled ? (
+            <button
+              type="button"
+              onClick={() => setActiveMode('canvas')}
+              className={cn(
+                'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
+                activeMode === 'canvas' ? 'bg-cyan-500/[0.12] text-cyan-100' : 'text-zinc-600 hover:text-zinc-300',
+              )}
+            >
+              <Layers3 size={13} /> Canvas
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => setActiveMode('video')}
@@ -2516,9 +2793,131 @@ export function UmbraUIWorkspace() {
           'grid min-h-0 flex-1',
           activeMode === 'video' && videoStoryboardOpen
             ? 'grid-cols-[minmax(340px,400px)_minmax(320px,380px)_minmax(320px,1fr)]'
-            : 'grid-cols-[minmax(360px,400px)_minmax(320px,1fr)]',
+            : activeMode === 'canvas'
+              ? 'grid-cols-[minmax(0,1fr)]'
+            : activeMode === 'image'
+              ? 'grid-cols-[clamp(300px,24vw,380px)_clamp(280px,22vw,360px)_minmax(300px,1fr)]'
+              : 'grid-cols-[minmax(360px,400px)_minmax(320px,1fr)]',
         )}
       >
+        {canvasDevelopmentEnabled && modeIsMounted('canvas') ? (
+          <div className={activeMode === 'canvas' ? 'contents' : 'hidden'} aria-hidden={activeMode !== 'canvas'}>
+            <UmbraCanvasWorkspace
+              active={activeMode === 'canvas'}
+              capabilities={inpaintCapabilities}
+              canvasCapabilities={inpaintCanvasCapabilities}
+              controlLayersAvailable={inpaintControlLayersAvailable}
+              controlLayersReason={inpaintControlLayersReason}
+              controlAdapterTypes={inpaintControlAdapterTypes}
+              controlModes={inpaintCanvasCapabilities.controlLayers.modes}
+              controlModels={modelCatalog.controlnets}
+              animaLlliteModels={modelCatalog.animaLlliteModels}
+              modelPatchModels={modelCatalog.modelPatches}
+              referenceLayersAvailable={inpaintReferenceLayersAvailable}
+              referenceLayersReason={inpaintReferenceLayersReason}
+              referenceMethods={inpaintReferenceAvailability.methods}
+              styleModels={modelCatalog.styleModels}
+              ipAdapterModels={compatibleIpAdapterModels}
+              visionModels={modelCatalog.clipVision}
+              inpaintAdapter={inpaintPipelineMatch.pipeline?.inpaintAdapter || 'native_edit'}
+              modelFamily={modelFamily}
+              modelFamilyOptions={inpaintModelFamilies}
+              onModelFamilyChange={handleModelFamilyChange}
+              modelSource={modelType}
+              modelSourceOptions={inpaintModelTypeOptions}
+              onModelSourceChange={handleModelTypeChange}
+              modelLabel={primaryModelLabel}
+              pipelineError={inpaintPipelineMatch.error}
+              checkpointName={checkpointName}
+              checkpointAvailableCount={primaryModelPickerItems.length}
+              checkpointLoading={modelCatalog.loading}
+              checkpointError={modelCatalog.error}
+              onOpenCheckpointPicker={openPrimaryModelPicker}
+              onRefreshModelCatalog={refreshModelCatalog}
+              loras={activeLoras}
+              onLorasChange={replaceActiveLoras}
+              workflowResources={workflowResourceValues}
+              loraAvailableCount={loraCatalog.length}
+              onOpenLoraPicker={openLoraPicker}
+              clipSkip={clipSkip}
+              onClipSkipChange={setClipSkip}
+              promptSegments={promptSegments}
+              activePromptSegmentId={activePromptSegmentId}
+              onPromptSegmentsChange={setPromptSegments}
+              onActivePromptSegmentChange={setActivePromptSegmentId}
+              negativePrompt={negativePrompt}
+              onNegativePromptChange={setNegativePrompt}
+              seed={seed}
+              seedMode={seedMode}
+              seedIncrement={seedIncrement}
+              onSeedChange={setSeed}
+              onSeedModeChange={setSeedMode}
+              onSeedIncrementChange={setSeedIncrement}
+              steps={steps}
+              onStepsChange={setSteps}
+              cfg={cfg}
+              onCfgChange={setCfg}
+              samplerName={samplerName}
+              onSamplerNameChange={setSamplerName}
+              scheduler={scheduler}
+              onSchedulerChange={setScheduler}
+              samplerOptions={samplerOptions}
+              schedulerOptions={schedulerOptions}
+              tiledVae={tiledVae}
+              onTiledVaeChange={setTiledVae}
+              hiresFix={{
+                enabled: hiresEnabled,
+                upscaler: hiresUpscaler,
+                resizeMode: hiresResizeMode,
+                scaleBy: hiresScaleBy,
+                targetWidth: Number(hiresTargetWidth) || 0,
+                targetHeight: Number(hiresTargetHeight) || 0,
+                steps: Number(hiresSteps) || 0,
+                denoise: hiresDenoise,
+                cfg: Number(hiresCfg) || 0,
+                samplerName: hiresSamplerName,
+                scheduler: hiresScheduler,
+              }}
+              onHiresFixChange={(next) => {
+                setHiresEnabled(next.enabled);
+                setHiresUpscaler(next.upscaler);
+                setHiresResizeMode(next.resizeMode);
+                setHiresScaleBy(next.scaleBy);
+                setHiresTargetWidth(String(next.targetWidth));
+                setHiresTargetHeight(String(next.targetHeight));
+                setHiresSteps(String(next.steps));
+                setHiresDenoise(next.denoise);
+                setHiresCfg(String(next.cfg));
+                setHiresSamplerName(next.samplerName);
+                setHiresScheduler(next.scheduler);
+              }}
+              upscaleModels={modelCatalog.upscaleModels}
+              detailerPipeline={detailerPipeline}
+              onDetailerPipelineChange={handleDetailerPipelineChange}
+              detectorModels={modelCatalog.detectorModels}
+              samModels={modelCatalog.samModels}
+              outputUpscale={outputUpscale}
+              onOutputUpscaleChange={setOutputUpscale}
+              pinnedOutputFolders={pinnedOutputFolders}
+              comfyConnected={comfyConnected}
+              mediaHandoff={canvasMediaHandoff}
+              onMediaHandoffConsumed={clearCanvasMediaHandoff}
+              onRestoreGenerationSettings={(settings) => {
+                const restoredSegments = settings.promptSegments.map((segment) => ({ ...segment }));
+                if (restoredSegments.length > 0) {
+                  setPromptSegments(restoredSegments);
+                  setActivePromptSegmentId(restoredSegments[0].id);
+                }
+                applyPowerPrompterGenerationControls({
+                  ...settings,
+                  modelType: settings.modelSource,
+                  controlAfterGenerate: settings.seedMode,
+                }, { replace: true, modelFamily: settings.modelFamily });
+                setTiledVae(settings.tiledVae as unknown as PowerPrompterTiledVaeControls);
+              }}
+            />
+          </div>
+        ) : null}
         {modeIsMounted('extras') ? (
           <div className={activeMode === 'extras' ? 'contents' : 'hidden'} aria-hidden={activeMode !== 'extras'}>
             <UmbraExtrasWorkspace
@@ -2575,7 +2974,7 @@ export function UmbraUIWorkspace() {
             seamlessReason={inpaintCanvasCapabilities.seamless.reason}
             seamlessAxes={inpaintCanvasCapabilities.seamless.axes}
             checkpointName={checkpointName}
-            checkpointAvailableCount={inpaintPrimaryModelItems.length}
+            checkpointAvailableCount={primaryModelPickerItems.length}
             checkpointLoading={modelCatalog.loading}
             checkpointError={modelCatalog.error}
             onOpenCheckpointPicker={openPrimaryModelPicker}
@@ -2614,6 +3013,7 @@ export function UmbraUIWorkspace() {
             upscaleModels={modelCatalog.upscaleModels}
             img2imgDetailerActiveCount={detailerPipeline.filter((stage) => stage.enabled).length}
             img2imgDetailerStageCount={detailerPipeline.length}
+            detailerPipeline={detailerPipeline}
             tiledVae={tiledVae}
             onTiledVaeChange={setTiledVae}
             onImg2imgDetailersEnabledChange={(enabled) => {
@@ -2638,14 +3038,14 @@ export function UmbraUIWorkspace() {
           <div className="space-y-3">
             <label className="block space-y-1.5">
               <span className={labelClass}>Model Pipeline</span>
-              <select
+              <UmbraSelectControl
                 value={modelFamily}
                 onChange={(event) => handleModelFamilyChange(event.target.value)}
                 className={inputClass}
               >
                 {activeImageModelFamilies.length <= 0 ? <option value="">No compatible image pipeline</option> : null}
                 {activeImageModelFamilies.map((family) => <option key={family} value={family}>{family}</option>)}
-              </select>
+              </UmbraSelectControl>
             </label>
 
             {imagePipelineMatch.error || imagePipelineRuntimeIssue ? (
@@ -2675,7 +3075,7 @@ export function UmbraUIWorkspace() {
 
             <UmbraCheckpointControls
               checkpointName={checkpointName}
-              availableCount={primaryModelItems.length}
+              availableCount={primaryModelPickerItems.length}
               loading={modelCatalog.loading}
               clipSkip={clipSkip}
               onClipSkipChange={setClipSkip}
@@ -2710,65 +3110,7 @@ export function UmbraUIWorkspace() {
               />
             ) : null}
 
-            <UmbraPositivePromptEditor
-              segments={promptSegments}
-              activeSegmentId={activePromptSegmentId}
-              onChange={setPromptSegments}
-              onActiveSegmentChange={setActivePromptSegmentId}
-              heading={imageAgentModeEnabled ? 'Prompt Request' : 'Positive Prompt'}
-              history={promptHistory}
-              onRememberCurrent={rememberCurrentPrompt}
-              onRestoreHistory={restorePromptHistoryEntry}
-              onRemoveHistory={removePromptHistoryEntry}
-              onClearHistory={clearPromptHistory}
-              onSubmit={() => { void handleQueueImage(); }}
-              agentContext={{
-                mode: activeMode,
-                modelFamily,
-                modelType,
-                pipeline: selectedImageWorkflow?.name || '',
-                checkpointName,
-                width: Number(width),
-                height: Number(height),
-                enabledLoras: activeLoras.filter((entry) => entry.enabled).map((entry) => entry.name),
-              }}
-              onAgentEnhancementApplied={() => {
-                setImageAgentModeEnabled(false);
-                setImageAgentPrompt('');
-              }}
-            />
-
-            <UmbraInlineAgentPrompt
-              mediaType="image"
-              sourcePrompt={prompt}
-              enabled={imageAgentModeEnabled}
-              onEnabledChange={setImageAgentModeEnabled}
-              agentPrompt={imageAgentPrompt}
-              onAgentPromptChange={setImageAgentPrompt}
-              onSubmit={() => { void handleQueueImage(); }}
-              context={{
-                modelFamily,
-                modelType,
-                pipeline: selectedImageWorkflow?.name || '',
-                checkpointName,
-                width: Number(width),
-                height: Number(height),
-                enabledLoras: activeLoras.filter((entry) => entry.enabled).map((entry) => entry.name),
-              }}
-            />
-
-            {imageCapabilities.negativePrompt.support === 'adjustable' ? (
-              <label className="block space-y-1.5">
-                <span className={labelClass}>Negative Prompt</span>
-                <textarea
-                  value={negativePrompt}
-                  onChange={(event) => setNegativePrompt(event.target.value)}
-                  onKeyDown={(event) => handleImagePromptKeyDown(event, setNegativePrompt)}
-                  placeholder="Negative prompt"
-                  className={`${inputClass} min-h-20 resize-y leading-relaxed`}
-                />
-              </label>
-            ) : null}
+            {activeMode === 'img2img' ? imagePromptControls : null}
 
             <UmbraSeedControls
               seed={seed}
@@ -2829,17 +3171,13 @@ export function UmbraUIWorkspace() {
                 {imageCapabilities.sampler.support === 'adjustable' ? (
                   <label className="space-y-1.5">
                     <span className={labelClass}>Sampler</span>
-                    <select value={samplerName} onChange={(event) => setSamplerName(event.target.value)} className={inputClass}>
-                      {samplerOptions.map((sampler) => <option key={sampler} value={sampler}>{sampler}</option>)}
-                    </select>
+                    <UmbraSelect value={samplerName} onValueChange={setSamplerName} ariaLabel="Sampler" menuTitle="Sampler" options={samplerOptions.map((sampler) => ({ value: sampler, label: sampler }))} />
                   </label>
                 ) : null}
                 {imageCapabilities.scheduler.support === 'adjustable' ? (
                   <label className="space-y-1.5">
                     <span className={labelClass}>Scheduler</span>
-                    <select value={scheduler} onChange={(event) => setScheduler(event.target.value)} className={inputClass}>
-                      {schedulerOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                    </select>
+                    <UmbraSelect value={scheduler} onValueChange={setScheduler} ariaLabel="Scheduler" menuTitle="Scheduler" options={schedulerOptions.map((option) => ({ value: option, label: option }))} />
                   </label>
                 ) : null}
               </div>
@@ -2912,45 +3250,26 @@ export function UmbraUIWorkspace() {
             ) : null}
           </div>
 
-          <PipelineControls
-            queueSummary={queueSummary}
-            onQueueImage={(placement) => void handleQueueImage(placement)}
-            onOpenPowerPrompter={() => setActiveWorkspace('powerprompter')}
-            onSendControlsToPowerPrompter={activeMode === 'image'
-              ? handleSendGenerationControlsToPowerPrompter
-              : undefined}
-            sendControlsDisabled={!selectedImagePipeline || !checkpointName}
-            sendControlsTitle={!selectedImagePipeline
-              ? 'Select a TXT2IMG model pipeline first'
-              : !checkpointName
-                ? 'Select a model first'
-                : 'Apply this TXT2IMG pipeline, model, LoRAs, seed, resolution, hires fix, detailers, and upscale settings to the active PPCard'}
-            isQueueing={isQueueing}
-            queueLabel={activeMode === 'img2img' ? 'Generate IMG2IMG' : 'Generate Image'}
-            queueDisabled={isQueueing
-              || !queueConnected
-              || !comfyConnected
-              || !selectedImageWorkflow
-              || !checkpointName
-              || !!missingWorkflowResource
-              || !!imagePipelineRuntimeIssue
-              || (activeMode === 'img2img' && !img2imgSource.path && !img2imgSource.name)
-              || !workflowImagePrompt.trim()}
-            queueTitle={!queueConnected
-              ? 'Connecting to the shared queue'
-              : (activeMode === 'image' || activeMode === 'img2img') && imageAgentModeEnabled && !imageAgentPrompt.trim()
-                ? 'Compose or enter an agent prompt first'
-                : activeMode === 'img2img' && !img2imgSource.path && !img2imgSource.name
-                  ? 'Choose a source image for IMG2IMG'
-                : imagePipelineRuntimeIssue
-                  ? imagePipelineRuntimeIssue
-                : missingWorkflowResource
-                ? `Select ${missingWorkflowResource.label}`
-                : imagePipelineMatch.error || (activeMode === 'img2img'
-                  ? 'Queue this source through the locked Umbra UI IMG2IMG pipeline'
-                  : 'Queue this image through the locked Umbra UI pipeline')}
-          />
+          {activeMode === 'img2img' ? imageQueueControls : null}
         </section>
+        {activeMode === 'image' ? (
+          <aside
+            data-umbra-ui-prompt-panel=""
+            className="min-h-0 min-w-0 overflow-y-auto border-r border-white/10 bg-[#07090a] p-4 custom-scrollbar"
+          >
+            {imageQueueControls}
+            <div className="mt-4 border-t border-white/10 pt-4">
+              <div className="mb-3 flex items-center gap-2">
+                <Sparkles size={14} className="text-cyan-300" />
+                <h2 className="text-xs font-black uppercase tracking-[0.14em] text-zinc-200">Prompt</h2>
+                <span className="ml-auto font-mono text-[9px] text-zinc-600">{promptSegments.length} field{promptSegments.length === 1 ? '' : 's'}</span>
+              </div>
+              <div className="space-y-3">
+                {imagePromptControls}
+              </div>
+            </div>
+          </aside>
+        ) : null}
         <UmbraMobileWorkspaceSheet
           active={activeMode === 'image' || activeMode === 'img2img'}
           title={activeMode === 'img2img' ? 'IMG2IMG Preview' : 'Image Preview'}
@@ -2965,7 +3284,7 @@ export function UmbraUIWorkspace() {
           icon={<ImageIcon size={14} />}
           thumbnailUrl={imagePreviewUrl}
         >
-          <main data-umbra-ui-preview-panel="" className="flex min-h-0 min-w-0 flex-col">
+          <main data-umbra-ui-preview-panel="" className="relative flex min-h-0 min-w-0 flex-col">
           <div className="flex min-h-11 items-center gap-2 border-b border-white/10 px-3">
             {activeMode === 'image' || activeMode === 'img2img'
               ? <ImageIcon size={13} className="text-zinc-500" />
@@ -2991,7 +3310,7 @@ export function UmbraUIWorkspace() {
               )}
             </div>
           </div>
-          <div className="flex min-h-11 items-center gap-3 border-t border-white/10 bg-black/20 px-3">
+          <div className="flex min-h-11 flex-wrap items-center gap-2 border-t border-white/10 bg-black/20 px-3 py-2">
             <UmbraQueueEmergencyControls
               queueSummary={queueSummary}
               busyAction={queueControlBusy}
@@ -2999,7 +3318,7 @@ export function UmbraUIWorkspace() {
               onStopAll={() => void handleStopAllUmbraJobs()}
               mobileOnly
             />
-            <div data-umbra-ui-preview-status="" className="min-w-0 flex-1 py-2">
+            <div data-umbra-ui-preview-status="" className="min-w-0 flex-1 basis-full">
               <div className="flex min-w-0 items-center gap-2">
                 <Activity size={12} className={queueSummary.running > 0 ? 'shrink-0 text-cyan-300' : 'shrink-0 text-zinc-600'} />
                 <span className="shrink-0 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-400">
@@ -3011,9 +3330,15 @@ export function UmbraUIWorkspace() {
                         ? `${queueSummary.pending} queued`
                         : 'Idle'}
                 </span>
-                {queueSummary.activePrompt ? (
-                  <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-zinc-500">{queueSummary.activePrompt}</span>
-                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setImageGenerationInfoOpen(true)}
+                  disabled={!activeImageGenerationInfo}
+                  className="ml-auto inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-cyan-300/20 bg-cyan-500/[0.045] px-2 text-[9px] font-black uppercase tracking-[0.1em] text-cyan-100 transition-colors hover:border-cyan-300/40 hover:bg-cyan-500/[0.09] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.02] disabled:text-zinc-700"
+                  title={activeImageGenerationInfo ? 'Show complete generation information' : 'Queue an image to capture generation information'}
+                >
+                  <Info size={11} /> Info
+                </button>
               </div>
               {showingLivePreview && generationPreview && generationPreview.maxStep > 0 ? (
                 <div className="mt-1.5 flex max-w-xl items-center gap-2 pl-5">
@@ -3027,7 +3352,47 @@ export function UmbraUIWorkspace() {
               ) : null}
             </div>
             {activeMode === 'image' || activeMode === 'img2img' ? (
-              <div data-umbra-ui-preview-actions="" className="flex shrink-0 items-center gap-1.5">
+              <div data-umbra-ui-preview-actions="" className="flex w-full min-w-0 flex-wrap items-center justify-end gap-1.5">
+                {activeMode === 'image' ? (
+                  <div data-umbra-ui-preview-generate="" className="mr-0.5 border-r border-white/10 pr-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleQueueImage(imageQueuePlacement.effectivePlacement)}
+                      disabled={imageQueueDisabled}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-emerald-300/30 bg-emerald-500/[0.1] px-3 text-[10px] font-black uppercase tracking-[0.1em] text-emerald-100 transition-colors hover:bg-emerald-500/[0.16] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.025] disabled:text-zinc-600"
+                      title={imageQueueTitle}
+                    >
+                      {isQueueing ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+                      Generate
+                    </button>
+                  </div>
+                ) : null}
+                {activeMode === 'image' ? (
+                  <label
+                    data-umbra-ui-preview-output=""
+                    className="mr-0.5 flex min-w-0 items-center gap-2 border-r border-white/10 pr-2"
+                    title={activeTxt2imgOutputFolder
+                      ? `Save directly to pinned Gallery folder: ${activeTxt2imgOutputFolder}`
+                      : pinnedOutputFolders.length > 0
+                        ? 'Choose one of your Gallery pinned folders, or keep the default dated Umbra UI output.'
+                        : 'Pin a folder in Gallery to make it available here.'}
+                  >
+                    <span className="flex shrink-0 items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.1em] text-cyan-200">
+                      <FolderOutput size={12} /> Pinned Folder
+                    </span>
+                    <UmbraSelectControl
+                      value={activeTxt2imgOutputFolder}
+                      onChange={(event) => setTxt2imgOutputFolder(event.target.value)}
+                      className="h-8 min-w-0 w-44 rounded-sm border border-cyan-300/20 bg-black/35 px-2 font-mono text-[9px] text-zinc-300 outline-none focus:border-cyan-300/45"
+                      aria-label="Pinned folder output"
+                    >
+                      <option value="">Default dated output</option>
+                      {pinnedOutputFolders.map((folder) => (
+                        <option key={folder} value={folder}>{getUmbraUiPinnedFolderLabel(folder)}</option>
+                      ))}
+                    </UmbraSelectControl>
+                  </label>
+                ) : null}
                 <button
                   type="button"
                   onClick={sendLatestToImg2Img}
@@ -3067,6 +3432,11 @@ export function UmbraUIWorkspace() {
               </div>
             ) : null}
           </div>
+          <UmbraImageGenerationInfoDrawer
+            open={imageGenerationInfoOpen}
+            info={activeImageGenerationInfo}
+            onClose={() => setImageGenerationInfoOpen(false)}
+          />
           </main>
         </UmbraMobileWorkspaceSheet>
           </div>
@@ -3126,6 +3496,7 @@ export function UmbraUIWorkspace() {
         kind={modelPickerKind || 'checkpoint'}
         items={activePickerItems}
         selectedValue={activePickerSelection}
+        selectedSource={modelPickerKind === 'checkpoint' ? modelType : undefined}
         catalogLoading={modelPickerKind === 'lora' ? loraCatalogLoading : modelCatalog.loading}
         onClose={closeModelPicker}
         onRefresh={modelPickerKind === 'lora' ? refreshLoraCatalog : refreshModelCatalog}
@@ -3133,10 +3504,8 @@ export function UmbraUIWorkspace() {
           ? undefined
           : modelPickerKind === 'lora'
             ? requestLoraInfo
-            : modelType === 'checkpoint'
-              ? requestModelInfo
-              : undefined}
-        onConfirm={(name, info) => void handleModelPickerConfirm(name, info)}
+            : requestModelInfo}
+        onConfirm={(name, info, source) => void handleModelPickerConfirm(name, info, source)}
         titleOverride={activePickerTitle}
         searchPlaceholder={activePickerSearchPlaceholder}
         confirmLabel={activePickerConfirmLabel}
