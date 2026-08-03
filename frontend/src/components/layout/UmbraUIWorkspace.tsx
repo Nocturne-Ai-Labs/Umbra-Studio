@@ -172,7 +172,6 @@ type UmbraGenerationMode = 'image' | 'img2img' | 'inpaint' | 'canvas' | 'video' 
 
 const UMBRA_UI_ACTIVE_MODE_STORAGE_KEY = 'umbra-ui:active-mode';
 const UMBRA_UI_GENERATION_MODES: UmbraGenerationMode[] = ['image', 'img2img', 'inpaint', 'canvas', 'video', 'extras'];
-const UMBRA_CANVAS_DEVELOPMENT_STORAGE_KEY = 'umbra-canvas-development-enabled';
 
 function snapshotUmbraImageGenerationInfo(
   workflowName: string,
@@ -240,20 +239,9 @@ interface UmbraUiDeviceResume {
 }
 
 function normalizeUmbraGenerationMode(value: unknown): UmbraGenerationMode {
-  if (value === 'canvas' && !isUmbraCanvasDevelopmentEnabled()) return 'image';
   return UMBRA_UI_GENERATION_MODES.includes(value as UmbraGenerationMode)
     ? value as UmbraGenerationMode
     : 'image';
-}
-
-function isUmbraCanvasDevelopmentEnabled(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return new URLSearchParams(window.location.search).get('canvas-revival') === '1'
-      || window.localStorage.getItem(UMBRA_CANVAS_DEVELOPMENT_STORAGE_KEY) === '1';
-  } catch {
-    return false;
-  }
 }
 
 function readPersistedUmbraGenerationMode(): UmbraGenerationMode {
@@ -575,7 +563,7 @@ export function UmbraUIWorkspace() {
     const selectedKey = txt2imgOutputFolder.toLowerCase();
     return pinnedOutputFolders.find((folder) => folder.toLowerCase() === selectedKey) || '';
   }, [pinnedOutputFolders, txt2imgOutputFolder]);
-  const canvasDevelopmentEnabled = isUmbraCanvasDevelopmentEnabled();
+  const canvasEnabled = true;
   const [activeMode, setActiveMode] = React.useState<UmbraGenerationMode>(() => (
     initialDeviceResume?.activeMode
       ? normalizeUmbraGenerationMode(initialDeviceResume.activeMode)
@@ -2692,7 +2680,7 @@ export function UmbraUIWorkspace() {
         <div className="h-4 w-px bg-white/10 max-[1140px]:hidden" />
         <div
           data-umbra-ui-mode-nav=""
-          data-umbra-ui-canvas-enabled={canvasDevelopmentEnabled ? 'true' : 'false'}
+          data-umbra-ui-canvas-enabled={canvasEnabled ? 'true' : 'false'}
           className="inline-flex h-9 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/25"
         >
           <button
@@ -2725,7 +2713,7 @@ export function UmbraUIWorkspace() {
           >
             <Paintbrush size={13} /> Inpaint
           </button>
-          {canvasDevelopmentEnabled ? (
+          {canvasEnabled ? (
             <button
               type="button"
               onClick={() => setActiveMode('canvas')}
@@ -2800,7 +2788,7 @@ export function UmbraUIWorkspace() {
               : 'grid-cols-[minmax(360px,400px)_minmax(320px,1fr)]',
         )}
       >
-        {canvasDevelopmentEnabled && modeIsMounted('canvas') ? (
+        {canvasEnabled && modeIsMounted('canvas') ? (
           <div className={activeMode === 'canvas' ? 'contents' : 'hidden'} aria-hidden={activeMode !== 'canvas'}>
             <UmbraCanvasWorkspace
               active={activeMode === 'canvas'}

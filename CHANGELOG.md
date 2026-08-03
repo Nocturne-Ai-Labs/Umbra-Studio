@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.30.2
+
+### TL;DR - Setup After Updating
+
+No additional downloads or model setup are needed. Update normally, then open
+**Umbra UI > Canvas**. Canvas Studio is available in every regular portable
+installation; no URL flag or developer setting is required.
+
+### Canvas Studio Visibility Hotfix
+
+- Restored Canvas Studio as a permanent Umbra UI workspace tab in portable,
+  desktop, tablet, and remote-capable installations.
+- Removed the temporary development-only gate that incorrectly required
+  `canvas-revival=1` or a browser-local flag to display Canvas.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Canvas Studio no longer disappears from normal release builds.
+
 ## v0.30.1
 
 ### TL;DR - Setup After Updating
