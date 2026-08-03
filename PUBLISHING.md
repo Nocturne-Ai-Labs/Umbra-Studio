@@ -49,6 +49,18 @@ The TL;DR must state, when applicable:
 Do not rely on a later changelog bullet to communicate required setup. Assume
 many users will read only the first few lines of a release.
 
+Every release entry and GitHub release must also end with a
+`Fixes And Quality-of-Life Recap` section. Keep it at the very bottom, after all
+feature, setup, compatibility, and packaging sections. Use concise, user-facing
+bullets prefixed with `Fixed:` or `Improved:` to summarize:
+
+- bugs and regressions corrected by the release;
+- reliability, performance, and compatibility improvements;
+- workflow and interface quality-of-life changes.
+
+Include only verified changes shipped in that release. This closing section is
+a scannable recap, not a replacement for the detailed notes above it.
+
 ## Environment Variables
 
 Set the exact `Umbra Studio` application root before running a build when the

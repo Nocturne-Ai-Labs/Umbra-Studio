@@ -79,6 +79,23 @@ installer's license and large-download notices before confirming a pack.
 - Expanded package validation for Canvas model profiles, required custom-node
   integration, portable launchers, and repository-ready source generation.
 
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Selecting a model from the browser now applies its actual source
+  type automatically, preventing checkpoint, diffusion, UNet, and GGUF source
+  mismatches after switching models or pipelines.
+- **Fixed:** Power Prompter's all-cards view now has dependable drag activation
+  zones, making card reordering respond consistently on the first attempt.
+- **Improved:** Umbra UI and Power Prompter now share the same polished model
+  browser, including subfolders, thumbnails, metadata, and selection behavior.
+- **Improved:** Native drop-downs were replaced app-wide with Umbra's consistent
+  context-menu-style selector for clearer mouse, keyboard, and touch use.
+- **Improved:** Completion alerts are substantially louder, and the redundant
+  active-prompt handoff control was removed from Power Prompter.
+- **Improved:** Canvas generation progress appears automatically inside the
+  active region, while its focused sidebars keep generation, inpaint, Hires Fix,
+  and detailer controls accessible without unrelated drawing-tool clutter.
+
 ## v0.22.8
 
 ### ComfyUI Auto-Start Hotfix
