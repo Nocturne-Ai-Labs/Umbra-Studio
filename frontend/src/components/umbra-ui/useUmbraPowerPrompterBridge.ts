@@ -95,7 +95,7 @@ export interface ApiWorkflowItem {
   modelFamily?: string;
   umbraUiPipelines?: UmbraUiPipelineDescriptor[];
   resources?: UmbraWorkflowResourceSelector[];
-  videoFamily?: 'wan22' | 'ltx23';
+  videoFamily?: 'wan22' | 'ltx23' | 'minimax_h3';
   videoMode?: 'text_to_video' | 'image_to_video' | 'video_to_video';
 }
 
@@ -1667,6 +1667,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       ...options.video,
       postprocess: { ...options.video.postprocess },
       wan: { ...options.video.wan },
+      minimaxH3: { ...options.video.minimaxH3 },
       ltx: {
         ...options.video.ltx,
         keyframes: options.video.ltx.keyframes.map((keyframe) => ({ ...keyframe })),
@@ -1736,11 +1737,11 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       const timeline = resolveUmbraLtxStoryboardTimeline(video.ltx.storyboard, video.fps, video.frames);
       video.frames = timeline.frames;
     }
-    const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : 'LTX-2.3';
+    const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : 'MiniMax H3';
     const feature: UmbraUiPipelineFeature = video.mode === 'video_to_video'
       ? 'vid2vid'
       : video.mode === 'image_to_video' ? 'img2vid' : 'txt2vid';
-    const modelSource = video.family === 'wan22' ? 'unet' : 'checkpoint';
+    const modelSource = video.family === 'ltx23' ? 'checkpoint' : 'unet';
     const pipelineMatch = resolveUmbraUiPipeline(workflows, feature, modelFamily, modelSource);
     if (!pipelineMatch.workflow) throw new Error(pipelineMatch.error || 'No compatible video pipeline is available.');
 
@@ -1855,6 +1856,15 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       ];
       const missing = required.find(([, value]) => !String(value || '').trim());
       if (missing) throw new Error(`Select a Wan ${missing[0]} before queueing.`);
+    } else if (video.family === 'minimax_h3') {
+      const required = [
+        ['diffusion model', video.minimaxH3.model],
+        ['text encoder', video.minimaxH3.textEncoder],
+        ['video VAE', video.minimaxH3.videoVae],
+        ['audio VAE', video.minimaxH3.audioVae],
+      ];
+      const missing = required.find(([, value]) => !String(value || '').trim());
+      if (missing) throw new Error(`Select a MiniMax H3 ${missing[0]} before queueing.`);
     } else {
       const required = [
         ['checkpoint', video.ltx.checkpoint],
@@ -1892,12 +1902,12 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       seed: toFiniteInteger(video.seed, 0, 0, Number.MAX_SAFE_INTEGER),
       controlAfterGenerate: video.seedMode,
       seedIncrement: video.seedIncrement,
-      steps: video.family === 'wan22' ? video.wan.steps : 8,
+      steps: video.family === 'wan22' ? video.wan.steps : video.family === 'minimax_h3' ? video.minimaxH3.steps : 8,
       cfg: video.family === 'wan22' ? video.wan.cfg : video.ltx.baseCfg,
-      samplerName: video.family === 'wan22' ? video.wan.highSamplerName : video.ltx.baseSamplerName,
-      scheduler: video.family === 'wan22' ? video.wan.highScheduler : 'normal',
-      modelType: video.family === 'wan22' ? 'unet' : 'checkpoint',
-      checkpointName: video.family === 'wan22' ? video.wan.highModel : video.ltx.checkpoint,
+      samplerName: video.family === 'wan22' ? video.wan.highSamplerName : video.family === 'minimax_h3' ? video.minimaxH3.samplerName : video.ltx.baseSamplerName,
+      scheduler: video.family === 'wan22' ? video.wan.highScheduler : video.family === 'minimax_h3' ? video.minimaxH3.scheduler : 'normal',
+      modelType: video.family === 'ltx23' ? 'checkpoint' : 'unet',
+      checkpointName: video.family === 'wan22' ? video.wan.highModel : video.family === 'minimax_h3' ? video.minimaxH3.model : video.ltx.checkpoint,
       aspectRatio: 'custom',
       swapDimensions: false,
       width: video.width,

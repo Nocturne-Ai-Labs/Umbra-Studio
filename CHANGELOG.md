@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.30.1
+
+### TL;DR - Setup After Updating
+
+MiniMax H3 video generation needs the current managed ComfyUI release and its
+official model resources. From the extracted `Umbra Studio` folder, first use
+**Neural Hub > Update ComfyUI**. Then run `Install-Umbra-UI-Models.bat` on
+Windows or `./install-umbra-ui-models.sh` on Linux and choose **MiniMax H3**.
+
+The optional H3 package is approximately **39.55 GB** and installs the H3 INT8
+ConvRot diffusion model, the Qwen3-VL 32B text encoder, and H3 video and audio
+VAEs in the correct ComfyUI model folders. It is required only for MiniMax H3
+text-to-video or image-to-video, not for existing Umbra video pipelines.
+
+### MiniMax H3 Video
+
+- Added native MiniMax H3 text-to-video and image-to-video pipelines using
+  ComfyUI's official H3 nodes and workflow structure.
+- Added first-frame and first-plus-last-frame image guidance, including
+  native 24 FPS output and duration controls from 5 to 15 seconds.
+- Added the official MiniMax H3 INT8 ConvRot profile to the Umbra UI model
+  installer, with pinned sources, byte-size validation, and SHA-256 checks for
+  all four required H3 resources.
+- Kept H3-specific controls honest: LTX Director, chained extension, video
+  denoise, tiled VAE, and unsupported guide modes remain unavailable when H3
+  is selected.
+- Updated the managed ComfyUI integration to the native H3-capable `0.30.0`
+  release and refreshed the required `comfy-kitchen` dependency path.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** MiniMax H3 image-to-video no longer retains an invalid optional
+  last-frame path during first-frame-only generations.
+- **Fixed:** H3 video graphs now identify their locked Umbra pipeline and
+  validate their native H3 conditioning role correctly before dispatch.
+- **Improved:** H3 generation outputs preserve the requested aspect ratio,
+  duration, frame rate, and audio/video decode flow in a single portable
+  Umbra-managed workflow.
+
 ## v0.23.0
 
 ### TL;DR - Setup After Updating

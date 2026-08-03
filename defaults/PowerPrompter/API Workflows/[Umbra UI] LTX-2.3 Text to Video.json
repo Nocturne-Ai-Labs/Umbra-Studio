@@ -14,8 +14,18 @@
       "umbra_ui_pipeline": {
         "feature": "txt2vid",
         "model_family": "LTX-2.3",
-        "model_sources": ["checkpoint"],
-        "priority": 100
+        "model_sources": [
+          "checkpoint"
+        ],
+        "priority": 100,
+        "defaults": {
+          "modelName": "ltx-2.3-22b-dev.safetensors",
+          "modelNamesBySource": {
+            "checkpoint": "ltx-2.3-22b-dev.safetensors"
+          },
+          "width": 640,
+          "height": 360
+        }
       }
     }
   },

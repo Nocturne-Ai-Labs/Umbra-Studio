@@ -230,6 +230,15 @@ function createDefaultVideoControls(): PowerPrompterVideoControls {
       },
       extended: createDefaultUmbraLtxExtendedControls(),
     },
+    minimaxH3: {
+      model: '',
+      textEncoder: '',
+      videoVae: '',
+      audioVae: '',
+      steps: 20,
+      scheduler: 'simple',
+      samplerName: 'res_multistep',
+    },
   };
 }
 
@@ -271,6 +280,12 @@ function createLtxExtendedClip(index: number): UmbraLtxExtendedClip {
     prompt: '',
     durationSeconds: 10,
   };
+}
+
+function resolveMiniMaxH3FramesForDuration(durationSeconds: number): number {
+  const requested = Math.max(5, Math.min(3600, Math.round(Math.max(0.25, durationSeconds) * 24)));
+  const remainder = requested % 17;
+  return remainder === 5 ? requested : Math.min(3600, requested + ((5 - remainder + 17) % 17));
 }
 
 function optionList(current: string, values: string[]) {
@@ -316,7 +331,11 @@ function VideoModelField({
   onChange: (value: string) => void;
 }) {
   const allOptions = optionList(value, values);
-  const familyPattern = family === 'ltx23' ? /(?:^|[/_. -])ltx|dasiwa.*ltx/i : /(?:^|[/_. -])wan/i;
+  const familyPattern = family === 'ltx23'
+    ? /(?:^|[/_. -])ltx|dasiwa.*ltx/i
+    : family === 'minimax_h3'
+      ? /(?:^|[/_. -])minimax|h3/i
+      : /(?:^|[/_. -])wan/i;
   const preferred = allOptions.filter((option) => familyPattern.test(option));
   const other = allOptions.filter((option) => !familyPattern.test(option));
   return (
@@ -330,7 +349,7 @@ function VideoModelField({
       >
         <option value="">Select a video model</option>
         {preferred.length > 0 ? (
-          <optgroup label={family === 'ltx23' ? 'LTX video models' : 'Wan video models'}>
+          <optgroup label={family === 'ltx23' ? 'LTX video models' : family === 'minimax_h3' ? 'MiniMax H3 video models' : 'Wan video models'}>
             {preferred.map((option) => <option key={option} value={option}>{option}</option>)}
           </optgroup>
         ) : null}
@@ -840,6 +859,10 @@ export function UmbraVideoGenerationControls({
             : defaults.ltx.extended.clips.map((clip) => ({ ...clip })),
         },
       },
+      minimaxH3: {
+        ...defaults.minimaxH3,
+        ...(editorDraft.video.minimaxH3 || {}),
+      },
     });
     setSourcePreviewUrl(editorDraft.video.sourceImagePath
       ? `/api/fs/image?path=${encodeURIComponent(editorDraft.video.sourceImagePath)}`
@@ -848,11 +871,11 @@ export function UmbraVideoGenerationControls({
   }, [editorDraft, onEditorDraftApplied, replacePromptSegments]);
 
   React.useEffect(() => {
-    const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : 'LTX-2.3';
+    const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : 'MiniMax H3';
     const feature = video.mode === 'video_to_video'
       ? 'vid2vid'
       : video.mode === 'image_to_video' ? 'img2vid' : 'txt2vid';
-    const modelSource = video.family === 'wan22' ? 'unet' : 'checkpoint';
+    const modelSource = video.family === 'ltx23' ? 'checkpoint' : 'unet';
     const pipelineMatch = resolveUmbraUiPipeline(workflows, feature, modelFamily, modelSource);
     onAgentContextChange?.({
       prompt: workflowPrompt,
@@ -921,11 +944,11 @@ export function UmbraVideoGenerationControls({
     return () => controller.abort();
   }, [video.mode, video.sourceImagePath, video.sourceVideoPath]);
 
-  const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : 'LTX-2.3';
+  const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : 'MiniMax H3';
   const pipelineFeature = video.mode === 'video_to_video'
     ? 'vid2vid'
     : video.mode === 'image_to_video' ? 'img2vid' : 'txt2vid';
-  const pipelineModelSource = video.family === 'wan22' ? 'unet' : 'checkpoint';
+  const pipelineModelSource = video.family === 'ltx23' ? 'checkpoint' : 'unet';
   const pipelineMatch = React.useMemo(
     () => resolveUmbraUiPipeline(workflows, pipelineFeature, modelFamily, pipelineModelSource),
     [modelFamily, pipelineFeature, pipelineModelSource, workflows],
@@ -1050,14 +1073,18 @@ export function UmbraVideoGenerationControls({
 
   const setFamily = (family: PowerPrompterVideoFamily) => {
     setVideo((current) => {
-      const fps = family === 'ltx23' ? 25 : 16;
+      const fps = family === 'minimax_h3' ? 24 : family === 'ltx23' ? 25 : 16;
       const frameStride = family === 'ltx23' ? 8 : 4;
       const durationSeconds = resolveUmbraVideoDurationSeconds(current.frames, current.fps);
       return {
         ...current,
         family,
         fps,
-        frames: resolveUmbraVideoFramesForDuration(durationSeconds, fps, frameStride),
+        mode: family === 'minimax_h3' && current.mode === 'video_to_video' ? 'text_to_video' : current.mode,
+        frameGuideMode: family === 'minimax_h3' ? 'first' : current.frameGuideMode,
+        frames: family === 'minimax_h3'
+          ? resolveMiniMaxH3FramesForDuration(durationSeconds)
+          : resolveUmbraVideoFramesForDuration(durationSeconds, fps, frameStride),
         ltx: {
           ...current.ltx,
           storyboard: {
@@ -1095,6 +1122,9 @@ export function UmbraVideoGenerationControls({
   };
   const setLtx = <K extends keyof PowerPrompterVideoControls['ltx']>(key: K, value: PowerPrompterVideoControls['ltx'][K]) => {
     setVideo((current) => ({ ...current, ltx: { ...current.ltx, [key]: value } }));
+  };
+  const setMiniMaxH3 = <K extends keyof PowerPrompterVideoControls['minimaxH3']>(key: K, value: PowerPrompterVideoControls['minimaxH3'][K]) => {
+    setVideo((current) => ({ ...current, minimaxH3: { ...current.minimaxH3, [key]: value } }));
   };
   const setStoryboardShots = React.useCallback((shots: UmbraLtxStoryboardShot[]) => {
     setVideo((current) => ({
@@ -1190,15 +1220,20 @@ export function UmbraVideoGenerationControls({
   const setDurationSeconds = React.useCallback((durationSeconds: number) => {
     setVideo((current) => ({
       ...current,
-      frames: resolveUmbraVideoFramesForDuration(
-        durationSeconds,
-        current.fps,
-        current.family === 'ltx23' ? 8 : 4,
-      ),
+      frames: current.family === 'minimax_h3'
+        ? resolveMiniMaxH3FramesForDuration(Math.max(5, Math.min(15, durationSeconds)))
+        : resolveUmbraVideoFramesForDuration(
+          durationSeconds,
+          current.fps,
+          current.family === 'ltx23' ? 8 : 4,
+        ),
     }));
   }, []);
   const setOutputFps = React.useCallback((fpsInput: number) => {
     setVideo((current) => {
+      if (current.family === 'minimax_h3') {
+        return { ...current, fps: 24 };
+      }
       const fps = Math.max(1, Math.min(120, Math.round(fpsInput || current.fps)));
       const frameStride = current.family === 'ltx23' ? 8 : 4;
       const durationSeconds = current.family === 'ltx23' && current.ltx.extended.enabled
@@ -1296,6 +1331,15 @@ export function UmbraVideoGenerationControls({
         ...(video.mode === 'image_to_video' ? [video.wan.clipVision, video.sourceImagePath] : []),
       ].some((value) => !String(value || '').trim());
     }
+    if (video.family === 'minimax_h3') {
+      return frameGuideMissing || sourceDimensionsMissing || [
+        video.minimaxH3.model,
+        video.minimaxH3.textEncoder,
+        video.minimaxH3.videoVae,
+        video.minimaxH3.audioVae,
+        ...(video.mode === 'image_to_video' ? [video.sourceImagePath] : []),
+      ].some((value) => !String(value || '').trim());
+    }
     const extendedMissing = extendedOpen && (
       video.ltx.extended.clips.length < 1
       || video.ltx.extended.clips.length > UMBRA_LTX_EXTENDED_MAX_CLIPS
@@ -1359,7 +1403,7 @@ export function UmbraVideoGenerationControls({
           : queueSummary.powerPrompterActive
             ? 'was added to the end of the Power Prompter queue.'
             : 'was submitted for generation.';
-      showToast(`${video.family === 'wan22' ? 'Wan 2.2' : 'LTX-2.3'} video ${placementMessage}`, 'success');
+      showToast(`${video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : 'MiniMax H3'} video ${placementMessage}`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to queue video.', 'error');
     } finally {
@@ -1413,9 +1457,10 @@ export function UmbraVideoGenerationControls({
         </button>
       </div>
 
-      <div className="mb-3 grid grid-cols-2 gap-1.5">
+      <div className="mb-3 grid grid-cols-3 gap-1.5">
         <ToggleButton active={video.family === 'wan22'} label="Wan 2.2" onClick={() => setFamily('wan22')} />
         <ToggleButton active={video.family === 'ltx23'} label="LTX-2.3" onClick={() => setFamily('ltx23')} />
+        <ToggleButton active={video.family === 'minimax_h3'} label="MiniMax H3" onClick={() => setFamily('minimax_h3')} />
       </div>
       <div className="mb-3 rounded-md border border-fuchsia-300/20 bg-fuchsia-500/[0.045] p-2.5">
         <div className="mb-2 flex items-center gap-2">
@@ -1424,7 +1469,7 @@ export function UmbraVideoGenerationControls({
             Video Model
           </span>
           <span className="ml-auto font-mono text-[8px] text-zinc-600">
-            {video.family === 'ltx23' ? 'LTX-2.3' : 'Wan 2.2'}
+            {video.family === 'ltx23' ? 'LTX-2.3' : video.family === 'minimax_h3' ? 'MiniMax H3' : 'Wan 2.2'}
           </span>
         </div>
         {video.family === 'ltx23' ? (
@@ -1434,6 +1479,14 @@ export function UmbraVideoGenerationControls({
             value={video.ltx.checkpoint}
             values={catalog.checkpoints}
             onChange={(value) => setLtx('checkpoint', value)}
+          />
+        ) : video.family === 'minimax_h3' ? (
+          <VideoModelField
+            label="MiniMax H3 Model"
+            family="minimax_h3"
+            value={video.minimaxH3.model}
+            values={catalog.diffusionModels}
+            onChange={(value) => setMiniMaxH3('model', value)}
           />
         ) : (
           <div className="grid gap-2 sm:grid-cols-2">
@@ -1454,10 +1507,10 @@ export function UmbraVideoGenerationControls({
           </div>
         )}
       </div>
-      <div className={cn('mb-3 grid gap-1.5', video.family === 'ltx23' ? 'grid-cols-2' : 'grid-cols-3')}>
+      <div className={cn('mb-3 grid gap-1.5', video.family === 'ltx23' ? 'grid-cols-2' : video.family === 'minimax_h3' ? 'grid-cols-2' : 'grid-cols-3')}>
         <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'text_to_video'} label="Text to Video" onClick={() => setMode('text_to_video')} />
         <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'image_to_video'} label="Image to Video" onClick={() => setMode('image_to_video')} />
-        <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'video_to_video'} label="Video to Video" onClick={() => setMode('video_to_video')} />
+        {video.family !== 'minimax_h3' ? <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'video_to_video'} label="Video to Video" onClick={() => setMode('video_to_video')} /> : null}
         {video.family === 'ltx23' ? (
           <ToggleButton
             active={storyboardOpen}
@@ -1533,11 +1586,14 @@ export function UmbraVideoGenerationControls({
             accent="fuchsia"
             defaultOpen={!video.sourceImagePath}
           >
-            <div className="mb-2 grid grid-cols-3 gap-1">
+            {video.family === 'minimax_h3' ? <div className="mb-2 grid grid-cols-2 gap-1">
+              <ToggleButton active={video.frameGuideMode === 'first'} label="First" onClick={() => setCommon('frameGuideMode', 'first')} />
+              <ToggleButton active={video.frameGuideMode === 'first_last'} label="First + Last" onClick={() => setCommon('frameGuideMode', 'first_last')} />
+            </div> : <div className="mb-2 grid grid-cols-3 gap-1">
               <ToggleButton active={video.frameGuideMode === 'first'} label="First" onClick={() => setCommon('frameGuideMode', 'first')} />
               <ToggleButton active={video.frameGuideMode === 'first_last'} label="First + Last" onClick={() => setCommon('frameGuideMode', 'first_last')} />
               <ToggleButton active={video.frameGuideMode === 'first_middle_last'} label="First + Mid + Last" onClick={() => setCommon('frameGuideMode', 'first_middle_last')} />
-            </div>
+            </div>}
             <FrameSourceField
               label="First Frame"
               path={video.sourceImagePath}
@@ -1564,7 +1620,7 @@ export function UmbraVideoGenerationControls({
                 setSourcePreviewUrl('');
               }}
             />
-            {video.frameGuideMode === 'first_middle_last' ? <FrameSourceField
+            {video.family !== 'minimax_h3' && video.frameGuideMode === 'first_middle_last' ? <FrameSourceField
               label="Middle Frame"
               path={video.middleImagePath}
               onChange={(path) => setVideo((current) => ({ ...current, middleImagePath: path, middleImageName: '' }))}
@@ -1705,16 +1761,22 @@ export function UmbraVideoGenerationControls({
           }}
         />
         </>}
-        <label className="block space-y-1.5">
-          <span className={labelClass}>Negative Prompt</span>
-          <textarea
-            value={negativePrompt}
-            onChange={(event) => setNegativePrompt(event.target.value)}
-            onKeyDown={(event) => handlePromptKeyDown(event, setNegativePrompt)}
-            placeholder="Artifacts and motion failures to avoid"
-            className={`${inputClass} min-h-20 resize-y leading-relaxed`}
-          />
-        </label>
+        {video.family === 'minimax_h3' ? (
+          <div className="border border-fuchsia-300/15 bg-fuchsia-500/[0.035] px-2.5 py-2 font-mono text-[9px] leading-relaxed text-fuchsia-100/70">
+            MiniMax H3 uses one native audio-video prompt. Negative prompting is not part of this workflow.
+          </div>
+        ) : (
+          <label className="block space-y-1.5">
+            <span className={labelClass}>Negative Prompt</span>
+            <textarea
+              value={negativePrompt}
+              onChange={(event) => setNegativePrompt(event.target.value)}
+              onKeyDown={(event) => handlePromptKeyDown(event, setNegativePrompt)}
+              placeholder="Artifacts and motion failures to avoid"
+              className={`${inputClass} min-h-20 resize-y leading-relaxed`}
+            />
+          </label>
+        )}
 
         <VideoAccordion
           title="Generation Settings"
@@ -1783,19 +1845,26 @@ export function UmbraVideoGenerationControls({
             <NumberField
               label="Duration (seconds)"
               value={Number(videoDurationSeconds.toFixed(2))}
-              min={0.5}
-              max={600}
+              min={video.family === 'minimax_h3' ? 5 : 0.5}
+              max={video.family === 'minimax_h3' ? 15 : 600}
               step={0.5}
               onChange={setDurationSeconds}
             />
           )}
-          <NumberField
-            label="Frame Rate (FPS)"
-            value={video.fps}
-            min={1}
-            max={120}
-            onChange={setOutputFps}
-          />
+          {video.family === 'minimax_h3' ? (
+            <div className="space-y-1.5">
+              <span className={labelClass}>Frame Rate (FPS)</span>
+              <div className="flex h-9 items-center rounded-md border border-fuchsia-300/15 bg-fuchsia-500/[0.035] px-2.5 font-mono text-xs text-fuchsia-100">24 (native)</div>
+            </div>
+          ) : (
+            <NumberField
+              label="Frame Rate (FPS)"
+              value={video.fps}
+              min={1}
+              max={120}
+              onChange={setOutputFps}
+            />
+          )}
           <div className="col-span-2">
             <UmbraSeedControls
               seed={String(video.seed)}
@@ -1815,15 +1884,17 @@ export function UmbraVideoGenerationControls({
         </VideoAccordion>
 
         <VideoAccordion
-          title={video.family === 'wan22' ? 'Wan Dual Stage Pipeline' : 'LTX-2.3 Pipeline'}
+          title={video.family === 'wan22' ? 'Wan Dual Stage Pipeline' : video.family === 'minimax_h3' ? 'MiniMax H3 Pipeline' : 'LTX-2.3 Pipeline'}
           icon={video.family === 'wan22'
             ? <Database size={12} className="text-amber-300" />
-            : <Film size={12} className="text-cyan-300" />}
-          summary={video.family === 'wan22' ? 'high + low noise' : video.ltx.twoStage ? 'two stage' : 'single stage'}
-          accent={video.family === 'wan22' ? 'amber' : 'cyan'}
+            : video.family === 'minimax_h3' ? <Film size={12} className="text-fuchsia-300" /> : <Film size={12} className="text-cyan-300" />}
+          summary={video.family === 'wan22' ? 'high + low noise' : video.family === 'minimax_h3' ? 'native AV sampling' : video.ltx.twoStage ? 'two stage' : 'single stage'}
+          accent={video.family === 'wan22' ? 'amber' : video.family === 'minimax_h3' ? 'fuchsia' : 'cyan'}
           defaultOpen={video.family === 'wan22'
             ? !video.wan.highModel || !video.wan.lowModel || !video.wan.textEncoder || !video.wan.vae
-            : !video.ltx.checkpoint || !video.ltx.textEncoder || !video.ltx.distilledLora || !video.ltx.promptLora}
+            : video.family === 'minimax_h3'
+              ? !video.minimaxH3.model || !video.minimaxH3.textEncoder || !video.minimaxH3.videoVae || !video.minimaxH3.audioVae
+              : !video.ltx.checkpoint || !video.ltx.textEncoder || !video.ltx.distilledLora || !video.ltx.promptLora}
         >
           {video.family === 'wan22' ? (
             <>
@@ -1846,6 +1917,20 @@ export function UmbraVideoGenerationControls({
               <SelectField label="Low Sampler" value={video.wan.lowSamplerName} values={samplerOptions} onChange={(value) => setWan('lowSamplerName', value)} />
               <SelectField label="Low Scheduler" value={video.wan.lowScheduler} values={schedulerOptions} onChange={(value) => setWan('lowScheduler', value)} />
             </div>
+            </>
+          ) : video.family === 'minimax_h3' ? (
+            <>
+              <SelectField label="Text Encoder" value={video.minimaxH3.textEncoder} values={catalog.textEncoders} onChange={(value) => setMiniMaxH3('textEncoder', value)} />
+              <SelectField label="Video VAE" value={video.minimaxH3.videoVae} values={catalog.vaes} onChange={(value) => setMiniMaxH3('videoVae', value)} />
+              <SelectField label="Audio VAE" value={video.minimaxH3.audioVae} values={catalog.vaes} onChange={(value) => setMiniMaxH3('audioVae', value)} />
+              <div className="grid grid-cols-2 gap-2">
+                <NumberField label="Sampling Steps" value={video.minimaxH3.steps} min={1} max={1000} onChange={(value) => setMiniMaxH3('steps', value)} />
+                <SelectField label="Sampler" value={video.minimaxH3.samplerName} values={['res_multistep']} onChange={(value) => setMiniMaxH3('samplerName', value)} />
+              </div>
+              <SelectField label="Scheduler" value={video.minimaxH3.scheduler} values={['simple']} onChange={(value) => setMiniMaxH3('scheduler', value)} />
+              <p className="rounded-md border border-fuchsia-300/15 bg-fuchsia-500/[0.045] px-2.5 py-2 font-mono text-[9px] leading-relaxed text-zinc-400">
+                MiniMax H3 generates video and audio together at 24 FPS. Duration snaps to its required frame grid.
+              </p>
             </>
           ) : (
             <>
@@ -2051,7 +2136,7 @@ export function UmbraVideoGenerationControls({
           <div className="border border-amber-300/20 bg-amber-500/[0.04] px-2.5 py-2 font-mono text-[9px] text-amber-100/70">
             {sourceDimensionsMissing
               ? 'Waiting for the uploaded source dimensions before calculating the video resolution.'
-              : `Install and select the required ${video.family === 'wan22' ? 'Wan high/low models, LoRAs, encoders, and VAE' : 'LTX checkpoint, encoders, LoRAs, and optional stage models'} to enable queueing.`}
+              : `Install and select the required ${video.family === 'wan22' ? 'Wan high/low models, LoRAs, encoders, and VAE' : video.family === 'ltx23' ? 'LTX checkpoint, encoders, LoRAs, and optional stage models' : 'MiniMax H3 diffusion model, text encoder, and video/audio VAEs'} to enable queueing.`}
           </div>
         ) : null}
 

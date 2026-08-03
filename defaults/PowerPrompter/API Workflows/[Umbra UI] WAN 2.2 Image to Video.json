@@ -15,8 +15,21 @@
       "umbra_ui_pipeline": {
         "feature": "img2vid",
         "model_family": "Wan 2.2",
-        "model_sources": ["unet"],
-        "priority": 100
+        "model_sources": [
+          "unet"
+        ],
+        "priority": 100,
+        "defaults": {
+          "modelName": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+          "modelNamesBySource": {
+            "unet": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors"
+          },
+          "steps": 4,
+          "samplerName": "euler",
+          "scheduler": "simple",
+          "width": 832,
+          "height": 480
+        }
       }
     }
   },

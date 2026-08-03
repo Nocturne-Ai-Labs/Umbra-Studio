@@ -15,7 +15,7 @@ const TARGET_DIRS = [
   join(ROOT, 'User', 'PowerPrompter', 'API Workflows'),
 ];
 
-function meta(title: string, role?: string, descriptor?: { family: 'wan22' | 'ltx23'; mode: 'text_to_video' | 'image_to_video' }) {
+function meta(title: string, role?: string, descriptor?: { family: 'wan22' | 'ltx23' | 'minimax_h3'; mode: 'text_to_video' | 'image_to_video' }) {
   return {
     title,
     ...(role ? { umbra_role: role } : {}),
@@ -27,7 +27,7 @@ function meta(title: string, role?: string, descriptor?: { family: 'wan22' | 'lt
   };
 }
 
-function node(classType: string, inputs: NodeInputs, title: string, role?: string, descriptor?: { family: 'wan22' | 'ltx23'; mode: 'text_to_video' | 'image_to_video' }): PromptNode {
+function node(classType: string, inputs: NodeInputs, title: string, role?: string, descriptor?: { family: 'wan22' | 'ltx23' | 'minimax_h3'; mode: 'text_to_video' | 'image_to_video' }): PromptNode {
   return { class_type: classType, inputs, _meta: meta(title, role, descriptor) };
 }
 
@@ -78,6 +78,25 @@ function buildWanWorkflow(mode: 'text_to_video' | 'image_to_video'): PromptGraph
   } else {
     graph['11'] = node('EmptyHunyuanLatentVideo', { width: 832, height: 480, length: 81, batch_size: 1 }, 'Wan Video Latent', 'wan_video_latent');
   }
+  graph['1']._meta = {
+    ...graph['1']._meta,
+    umbra_model_family: 'Wan 2.2',
+    umbra_ui_pipeline: {
+      feature: i2v ? 'img2vid' : 'txt2vid',
+      model_family: 'Wan 2.2',
+      model_sources: ['unet'],
+      priority: 100,
+      defaults: {
+        modelName: highModel,
+        modelNamesBySource: { unet: highModel },
+        steps: 4,
+        samplerName: 'euler',
+        scheduler: 'simple',
+        width: 832,
+        height: 480,
+      },
+    },
+  };
   return graph;
 }
 
@@ -129,6 +148,80 @@ function buildLtxWorkflow(mode: 'text_to_video' | 'image_to_video'): PromptGraph
     graph['33'] = node('LTXVImgToVideoInplace', { vae: ['1', 2], image: ['35', 0], latent: ['8', 0], strength: 0.7, bypass: false }, 'LTX Base Image Conditioning', 'ltx_base_video_latent');
     graph['34'] = node('LTXVImgToVideoInplace', { vae: ['1', 2], image: ['35', 0], latent: ['19', 0], strength: 1, bypass: false }, 'LTX Refine Image Conditioning', 'ltx_refine_video_latent');
   }
+  graph['1']._meta = {
+    ...graph['1']._meta,
+    umbra_model_family: 'LTX-2.3',
+    umbra_ui_pipeline: {
+      feature: i2v ? 'img2vid' : 'txt2vid',
+      model_family: 'LTX-2.3',
+      model_sources: ['checkpoint'],
+      priority: 100,
+      defaults: {
+        modelName: 'ltx-2.3-22b-dev.safetensors',
+        modelNamesBySource: { checkpoint: 'ltx-2.3-22b-dev.safetensors' },
+        width: 640,
+        height: 360,
+      },
+    },
+  };
+  return graph;
+}
+
+function buildMiniMaxH3Workflow(mode: 'text_to_video' | 'image_to_video'): PromptGraph {
+  const descriptor = { family: 'minimax_h3' as const, mode };
+  const graph: PromptGraph = {
+    '1': node('UNETLoader', {
+      unet_name: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', weight_dtype: 'default',
+    }, 'MiniMax H3 Diffusion Model', 'minimax_h3_model', descriptor),
+    '2': node('CLIPLoader', {
+      clip_name: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', type: 'minimax', device: 'default',
+    }, 'MiniMax H3 Text Encoder', 'minimax_h3_text_encoder'),
+    '3': node('VAELoader', {
+      vae_name: 'minimax_h3_video_vae_fp16.safetensors',
+    }, 'MiniMax H3 Video VAE', 'minimax_h3_video_vae'),
+    '4': node('VAELoader', {
+      vae_name: 'minimax_h3_audio_vae_fp32.safetensors',
+    }, 'MiniMax H3 Audio VAE', 'minimax_h3_audio_vae'),
+    '5': node('MiniMaxH3ImageToVideo', {
+      clip: ['2', 0], vae: ['3', 0], prompt: 'A cinematic subject moving naturally through the scene.',
+      width: 1344, height: 768, length: 124,
+    }, 'MiniMax H3 Conditioning', 'minimax_h3_conditioning'),
+    '6': node('RandomNoise', { noise_seed: 0 }, 'MiniMax H3 Noise', 'minimax_h3_noise'),
+    '7': node('BasicGuider', { model: ['1', 0], conditioning: ['5', 0] }, 'MiniMax H3 Guidance', 'minimax_h3_guider'),
+    '8': node('KSamplerSelect', { sampler_name: 'res_multistep' }, 'MiniMax H3 Sampler', 'minimax_h3_sampler'),
+    '9': node('BasicScheduler', { model: ['1', 0], scheduler: 'simple', steps: 20, denoise: 1 }, 'MiniMax H3 Scheduler', 'minimax_h3_scheduler'),
+    '10': node('SamplerCustomAdvanced', {
+      noise: ['6', 0], guider: ['7', 0], sampler: ['8', 0], sigmas: ['9', 0], latent_image: ['5', 1],
+    }, 'MiniMax H3 Sample', 'minimax_h3_sample'),
+    '11': node('VAEDecode', { samples: ['10', 0], vae: ['3', 0] }, 'MiniMax H3 Video Decode', 'video_decode'),
+    '12': node('VAEDecodeAudio', { samples: ['10', 0], vae: ['4', 0] }, 'MiniMax H3 Audio Decode', 'minimax_h3_audio_decode'),
+    '13': node('CreateVideo', { images: ['11', 0], audio: ['12', 0], fps: 24 }, 'Create MiniMax H3 Video', 'video_create'),
+    '14': node('SaveVideo', { video: ['13', 0], filename_prefix: 'video/Umbra_MiniMaxH3', format: 'auto', codec: 'h264' }, 'Save MiniMax H3 Video', 'video_output'),
+  };
+  if (mode === 'image_to_video') {
+    graph['15'] = node('LoadImage', { image: 'example.png' }, 'Source Image', 'source_image');
+    graph['5'].inputs.first_frame = ['15', 0];
+    graph['16'] = node('LoadImage', { image: 'example-last-frame.png' }, 'Last Frame', 'last_image');
+    graph['5'].inputs.last_frame = ['16', 0];
+  }
+  graph['1']._meta = {
+    ...graph['1']._meta,
+    umbra_ui_pipeline: {
+      feature: mode === 'image_to_video' ? 'img2vid' : 'txt2vid',
+      modelFamily: 'MiniMax H3',
+      modelSources: ['unet'],
+      priority: 100,
+      defaults: {
+        modelName: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors',
+        modelNamesBySource: { unet: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors' },
+        steps: 20,
+        samplerName: 'res_multistep',
+        scheduler: 'simple',
+        width: 1344,
+        height: 768,
+      },
+    },
+  };
   return graph;
 }
 
@@ -137,6 +230,8 @@ const workflows: Array<[string, PromptGraph]> = [
   ['[Umbra UI] WAN 2.2 Image to Video.json', buildWanWorkflow('image_to_video')],
   ['[Umbra UI] LTX-2.3 Text to Video.json', buildLtxWorkflow('text_to_video')],
   ['[Umbra UI] LTX-2.3 Image to Video.json', buildLtxWorkflow('image_to_video')],
+  ['[Umbra UI] MiniMax H3 Text to Video.json', buildMiniMaxH3Workflow('text_to_video')],
+  ['[Umbra UI] MiniMax H3 Image to Video.json', buildMiniMaxH3Workflow('image_to_video')],
 ];
 
 for (const targetDir of TARGET_DIRS) {

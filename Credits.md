@@ -223,6 +223,17 @@ application features around the integrated upstream tools.
 - Usage in Umbra Studio:
   - Umbra's video combine wrapper builds on upstream VideoHelperSuite behavior
 
+### MiniMax H3 Video
+- Model publisher: MiniMax
+- ComfyUI distribution: https://huggingface.co/Comfy-Org/MiniMax-H3
+- Official ComfyUI workflows:
+  - https://github.com/Comfy-Org/workflow_templates/tree/main/templates
+- License: MiniMax H3 Community License Agreement
+- Usage in Umbra Studio:
+  - Optional native MiniMax H3 text-to-video and first-frame image-to-video pipelines
+  - Uses ComfyUI's built-in `MiniMaxH3ImageToVideo` node and the official MiniMax H3 model, Qwen 3 VL text encoder, video VAE, and audio VAE
+  - The four required files are downloaded only when the user selects the `MiniMax H3 Video` prerequisites profile
+
 ## Tagging / Metadata Inspiration
 
 ### Multilingual Danbooru Tag Aliases

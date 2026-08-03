@@ -245,7 +245,7 @@ function SettingsChips({ video, sequence, seed, seedMode, seedIncrement }: {
   seedIncrement: number;
 }) {
   const chips = [
-    video.family === 'wan22' ? 'Wan 2.2' : 'LTX-2.3',
+    video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : 'MiniMax H3',
     sequence ? 'LTX Extended' : '',
     sequence ? `Clip ${sequence.clipIndex + 1}/${sequence.clipCount}` : '',
     sequence ? `${sequence.totalDurationSeconds.toFixed(1)}s total` : '',
@@ -270,6 +270,12 @@ function SettingsChips({ video, sequence, seed, seedMode, seedIncrement }: {
       {chips.map((chip) => <span key={chip} className="border border-white/10 bg-black/25 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500">{chip}</span>)}
     </div>
   );
+}
+
+function resolveMiniMaxH3FramesForDuration(durationSeconds: number): number {
+  const requested = Math.max(124, Math.min(362, Math.round(Math.max(5, Math.min(15, durationSeconds)) * 24)));
+  const remainder = requested % 17;
+  return remainder === 5 ? requested : requested + ((5 - remainder + 17) % 17);
 }
 
 function VideoJobCard({ job, onOpen }: { job: UmbraVideoReviewJob; onOpen: () => void }) {
@@ -453,17 +459,20 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
       }
       return {
         ...current,
-        frames: resolveUmbraVideoFramesForDuration(
-          durationSeconds,
-          current.fps,
-          current.family === 'ltx23' ? 8 : 4,
-        ),
+        frames: current.family === 'minimax_h3'
+          ? resolveMiniMaxH3FramesForDuration(durationSeconds)
+          : resolveUmbraVideoFramesForDuration(
+            durationSeconds,
+            current.fps,
+            current.family === 'ltx23' ? 8 : 4,
+          ),
       };
     });
   }, []);
   const patchOutputFps = React.useCallback((fpsInput: number) => {
     setDraftVideo((current) => {
       if (!current) return current;
+      if (current.family === 'minimax_h3') return { ...current, fps: 24 };
       const fps = Math.max(1, Math.min(120, Math.round(fpsInput || current.fps)));
       const directorEnabled = current.family === 'ltx23' && current.ltx.storyboard?.enabled;
       const extendedEnabled = current.family === 'ltx23' && current.ltx.extended?.enabled;
@@ -712,21 +721,29 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
                           ? draftVideo.ltx.storyboard.shots.reduce((sum, shot) => sum + shot.durationSeconds, 0)
                           : resolveUmbraVideoDurationSeconds(draftVideo.frames, draftVideo.fps)
                       ).toFixed(2))}
-                      min={0.5}
+                      min={draftVideo.family === 'minimax_h3' ? 5 : 0.5}
+                      max={draftVideo.family === 'minimax_h3' ? 15 : undefined}
                       step={0.5}
                       onChange={patchDuration}
                     />}
-                    <NumberEditor
+                    {draftVideo.family === 'minimax_h3' ? (
+                      <div className="space-y-1.5">
+                        <span className={labelClass}>Frame Rate (FPS)</span>
+                        <div className="flex h-10 items-center rounded-md border border-fuchsia-300/15 bg-fuchsia-500/[0.035] px-3 font-mono text-xs text-fuchsia-100">24 (native)</div>
+                      </div>
+                    ) : <NumberEditor
                       label="Frame Rate (FPS)"
                       value={draftVideo.fps}
                       min={1}
                       onChange={patchOutputFps}
-                    />
+                    />}
                     {draftVideo.mode === 'video_to_video' ? (
                       <NumberEditor label="Denoise" value={draftVideo.denoise} min={0.01} step={0.01} onChange={(value) => patchVideo('denoise', Math.min(1, value))} />
                     ) : null}
                     {draftVideo.family === 'wan22' ? (
                       <NumberEditor label="Steps" value={draftVideo.wan.steps} min={2} onChange={(value) => setDraftVideo((current) => current ? { ...current, wan: { ...current.wan, steps: value } } : current)} />
+                    ) : draftVideo.family === 'minimax_h3' ? (
+                      <NumberEditor label="Steps" value={draftVideo.minimaxH3.steps} min={1} onChange={(value) => setDraftVideo((current) => current ? { ...current, minimaxH3: { ...current.minimaxH3, steps: value } } : current)} />
                     ) : (
                       <NumberEditor label="Base CFG" value={draftVideo.ltx.baseCfg} min={0} step={0.1} onChange={(value) => setDraftVideo((current) => current ? { ...current, ltx: { ...current.ltx, baseCfg: value } } : current)} />
                     )}

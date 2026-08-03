@@ -6236,6 +6236,7 @@ function applyPPVideoRoleToApiNode(
   const activeSeed = Math.max(0, Math.min(PP_MAX_SEED_SAFE, Math.floor(Number(generation.seed) || 0)));
   const wan = video.wan;
   const ltx = video.ltx;
+  const minimaxH3 = video.minimaxH3;
   const sizing = resolveUmbraVideoSizing({
     width: video.width,
     height: video.height,
@@ -6255,6 +6256,9 @@ function applyPPVideoRoleToApiNode(
       return true;
     case 'source_image':
       setPPApiNodeInput(node, 'image', video.sourceImageName || 'example.png');
+      return true;
+    case 'last_image':
+      setPPApiNodeInput(node, 'image', video.lastImageName || 'example-last-frame.png');
       return true;
     case 'source_video':
       setPPApiNodeInput(node, 'file', video.sourceVideoName || 'umbra-vid2vid-source.mp4');
@@ -6289,6 +6293,10 @@ function applyPPVideoRoleToApiNode(
       return true;
     case 'video_decode':
       {
+        if (video.family === 'minimax_h3') {
+          node.class_type = 'VAEDecode';
+          return true;
+        }
         const currentInputs = ensurePPApiNodeInputs(node) || {};
         const estimatedPixels = sizing.decodedWidth * sizing.decodedHeight * video.frames;
         const useTiledDecode = video.decodeMode === 'tiled'
@@ -6372,6 +6380,44 @@ function applyPPVideoRoleToApiNode(
       setPPApiNodeInput(node, 'start_at_step', wan.splitStep);
       setPPApiNodeInput(node, 'end_at_step', wan.steps);
       setPPApiNodeInput(node, 'return_with_leftover_noise', 'disable');
+      return true;
+    case 'minimax_h3_model':
+      node.class_type = minimaxH3.model.toLowerCase().endsWith('.gguf') ? 'UnetLoaderGGUF' : 'UNETLoader';
+      node.inputs = node.class_type === 'UnetLoaderGGUF'
+        ? { unet_name: minimaxH3.model }
+        : { unet_name: minimaxH3.model, weight_dtype: 'default' };
+      return true;
+    case 'minimax_h3_text_encoder':
+      node.class_type = minimaxH3.textEncoder.toLowerCase().endsWith('.gguf') ? 'CLIPLoaderGGUF' : 'CLIPLoader';
+      node.inputs = node.class_type === 'CLIPLoaderGGUF'
+        ? { clip_name: minimaxH3.textEncoder, type: 'minimax' }
+        : { clip_name: minimaxH3.textEncoder, type: 'minimax', device: 'default' };
+      return true;
+    case 'minimax_h3_video_vae':
+      setPPApiNodeInput(node, 'vae_name', minimaxH3.videoVae);
+      return true;
+    case 'minimax_h3_audio_vae':
+      setPPApiNodeInput(node, 'vae_name', minimaxH3.audioVae);
+      return true;
+    case 'minimax_h3_conditioning':
+      setPPApiNodeInput(node, 'prompt', activePrompt);
+      setPPApiNodeInput(node, 'width', sizing.samplingWidth);
+      setPPApiNodeInput(node, 'height', sizing.samplingHeight);
+      setPPApiNodeInput(node, 'length', normalizeMiniMaxH3VideoFrames(video.frames));
+      if (video.frameGuideMode !== 'first_last' || !video.lastImageName) {
+        delete node.inputs.last_frame;
+      }
+      return true;
+    case 'minimax_h3_noise':
+      setPPApiNodeInput(node, 'noise_seed', activeSeed);
+      return true;
+    case 'minimax_h3_sampler':
+      setPPApiNodeInput(node, 'sampler_name', minimaxH3.samplerName);
+      return true;
+    case 'minimax_h3_scheduler':
+      setPPApiNodeInput(node, 'scheduler', minimaxH3.scheduler);
+      setPPApiNodeInput(node, 'steps', minimaxH3.steps);
+      setPPApiNodeInput(node, 'denoise', 1);
       return true;
     case 'ltx_checkpoint':
       setPPApiNodeInput(node, 'ckpt_name', ltx.checkpoint);
@@ -15915,7 +15961,7 @@ type PowerPrompterSeedControlMode = 'fixed' | 'increment' | 'decrement' | 'rando
 type PowerPrompterSeedIncrement = 1 | 100 | 1000;
 type PowerPrompterModelType = 'checkpoint' | 'diffusers' | 'diffusion_model' | 'unet' | 'gguf';
 type PowerPrompterMediaType = 'image' | 'video';
-type PowerPrompterVideoFamily = 'wan22' | 'ltx23';
+type PowerPrompterVideoFamily = 'wan22' | 'ltx23' | 'minimax_h3';
 type PowerPrompterVideoMode = 'text_to_video' | 'image_to_video' | 'video_to_video';
 type PowerPrompterVideoFrameGuideMode = 'first' | 'first_last' | 'first_middle_last';
 type PowerPrompterVideoDecodeMode = 'auto' | 'full' | 'tiled';
@@ -16023,6 +16069,15 @@ interface PowerPrompterVideoControls {
     }>;
     storyboard: UmbraLtxStoryboardControls;
     extended: UmbraLtxExtendedControls;
+  };
+  minimaxH3: {
+    model: string;
+    textEncoder: string;
+    videoVae: string;
+    audioVae: string;
+    steps: number;
+    scheduler: string;
+    samplerName: string;
   };
 }
 interface PowerPrompterDetailerStage {
@@ -16294,6 +16349,15 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
         shots: [],
       },
       extended: normalizeUmbraLtxExtendedControls(null),
+    },
+    minimaxH3: {
+      model: '',
+      textEncoder: '',
+      videoVae: '',
+      audioVae: '',
+      steps: 20,
+      scheduler: 'simple',
+      samplerName: 'res_multistep',
     },
   },
   negativePrompt: '',
@@ -17589,28 +17653,43 @@ function normalizePPVideoFrames(value: unknown, fallback: number, stride: number
   return Math.max(1, Math.round((clamped - 1) / stride) * stride + 1);
 }
 
+function normalizeMiniMaxH3VideoFrames(value: unknown, fallback = 124): number {
+  const clamped = clampPPInteger(value, fallback, 124, 362);
+  const remainder = clamped % 17;
+  return remainder === 5 ? clamped : Math.min(362, clamped + ((5 - remainder + 17) % 17));
+}
+
 function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls {
   const defaults = PP_DEFAULT_GENERATION_CONTROLS.video!;
   const video = rawVideo && typeof rawVideo === 'object' ? rawVideo as Record<string, any> : {};
-  const family: PowerPrompterVideoFamily = String(video.family || '').trim().toLowerCase() === 'ltx23' ? 'ltx23' : 'wan22';
+  const familyRaw = String(video.family || '').trim().toLowerCase();
+  const family: PowerPrompterVideoFamily = familyRaw === 'ltx23'
+    ? 'ltx23'
+    : familyRaw === 'minimax_h3' ? 'minimax_h3' : 'wan22';
   const modeRaw = String(video.mode || '').trim().toLowerCase();
   const mode: PowerPrompterVideoMode = modeRaw === 'video_to_video'
     ? 'video_to_video'
     : modeRaw === 'image_to_video' ? 'image_to_video' : 'text_to_video';
   const frameGuideModeRaw = String(video.frameGuideMode || '').trim().toLowerCase();
-  const frameGuideMode: PowerPrompterVideoFrameGuideMode = frameGuideModeRaw === 'first_middle_last'
+  const parsedFrameGuideMode: PowerPrompterVideoFrameGuideMode = frameGuideModeRaw === 'first_middle_last'
     ? 'first_middle_last'
     : frameGuideModeRaw === 'first_last'
       ? 'first_last'
       : 'first';
+  const frameGuideMode: PowerPrompterVideoFrameGuideMode = family === 'minimax_h3' && parsedFrameGuideMode === 'first_middle_last'
+    ? 'first_last'
+    : parsedFrameGuideMode;
   const wan = video.wan && typeof video.wan === 'object' ? video.wan as Record<string, any> : {};
   const ltx = video.ltx && typeof video.ltx === 'object' ? video.ltx as Record<string, any> : {};
+  const minimaxH3 = video.minimaxH3 && typeof video.minimaxH3 === 'object' ? video.minimaxH3 as Record<string, any> : {};
   const postprocess = video.postprocess && typeof video.postprocess === 'object'
     ? video.postprocess as Record<string, any>
     : {};
   const steps = clampPPInteger(wan.steps, defaults.wan.steps, 1, 10000);
-  const normalizedFrames = normalizePPVideoFrames(video.frames, family === 'ltx23' ? 121 : defaults.frames, family === 'ltx23' ? 8 : 4);
-  const normalizedFps = clampPPInteger(video.fps, family === 'ltx23' ? 25 : defaults.fps, 1, 120);
+  const normalizedFrames = family === 'minimax_h3'
+    ? normalizeMiniMaxH3VideoFrames(video.frames, 124)
+    : normalizePPVideoFrames(video.frames, family === 'ltx23' ? 121 : defaults.frames, family === 'ltx23' ? 8 : 4);
+  const normalizedFps = family === 'minimax_h3' ? 24 : clampPPInteger(video.fps, family === 'ltx23' ? 25 : defaults.fps, 1, 120);
   const storyboard = normalizeUmbraLtxStoryboardControls(ltx.storyboard);
   const extended = normalizeUmbraLtxExtendedControls(ltx.extended);
   if (family !== 'ltx23' || storyboard.enabled) extended.enabled = false;
@@ -17618,7 +17697,9 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
   const resolvedFrames = family === 'ltx23' && storyboardTimeline.enabled
     ? storyboardTimeline.frames
     : normalizedFrames;
-  const resolvedMode: PowerPrompterVideoMode = family === 'ltx23' && storyboardTimeline.enabled
+  const resolvedMode: PowerPrompterVideoMode = family === 'minimax_h3' && mode === 'video_to_video'
+    ? 'text_to_video'
+    : family === 'ltx23' && storyboardTimeline.enabled
     ? 'text_to_video'
     : mode;
   const decodeModeRaw = String(video.decodeMode || '').trim().toLowerCase();
@@ -17749,6 +17830,15 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
       keyframes,
       storyboard,
       extended,
+    },
+    minimaxH3: {
+      model: String(minimaxH3.model || '').trim().replace(/\\/g, '/'),
+      textEncoder: String(minimaxH3.textEncoder || '').trim().replace(/\\/g, '/'),
+      videoVae: String(minimaxH3.videoVae || '').trim().replace(/\\/g, '/'),
+      audioVae: String(minimaxH3.audioVae || '').trim().replace(/\\/g, '/'),
+      steps: clampPPInteger(minimaxH3.steps, defaults.minimaxH3.steps, 1, 1000),
+      scheduler: String(minimaxH3.scheduler || defaults.minimaxH3.scheduler).trim() || 'simple',
+      samplerName: String(minimaxH3.samplerName || defaults.minimaxH3.samplerName).trim() || 'res_multistep',
     },
   };
 }
@@ -20822,7 +20912,7 @@ function describePPApiWorkflow(rawDoc: unknown): {
       ...(effectiveModelFamily ? { modelFamily: effectiveModelFamily } : {}),
       ...(umbraUiPipelines.length > 0 ? { umbraUiPipelines } : {}),
       resources,
-      videoFamily: familyRaw === 'ltx23' ? 'ltx23' : 'wan22',
+      videoFamily: familyRaw === 'ltx23' ? 'ltx23' : familyRaw === 'minimax_h3' ? 'minimax_h3' : 'wan22',
       videoMode: modeRaw === 'video_to_video'
         ? 'video_to_video'
         : modeRaw === 'image_to_video' ? 'image_to_video' : 'text_to_video',
@@ -20913,7 +21003,11 @@ function validatePPApiWorkflowDocument(
         .map((entry) => getPPApiNodeRole(entry))
         .filter(Boolean)
     );
-    if (!roles.has('positive_prompt')) graphIssues.push('Umbra video role: positive_prompt');
+    // MiniMax H3 receives its prompt through the native conditioning node rather
+    // than a standalone CLIPTextEncode node.
+    if (!roles.has('positive_prompt') && !roles.has('minimax_h3_conditioning')) {
+      graphIssues.push('Umbra video role: positive_prompt');
+    }
     if (!roles.has('video_output')) graphIssues.push('Umbra video role: video_output');
     if (!classTypes.has('SaveVideo') && !classTypes.has('VHS_VideoCombine')) {
       graphIssues.push('SaveVideo/VHS_VideoCombine');

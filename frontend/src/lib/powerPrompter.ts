@@ -487,6 +487,15 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
       },
       extended: createDefaultUmbraLtxExtendedControls(),
     },
+    minimaxH3: {
+      model: '',
+      textEncoder: '',
+      videoVae: '',
+      audioVae: '',
+      steps: 20,
+      scheduler: 'simple',
+      samplerName: 'res_multistep',
+    },
   },
   negativePrompt: '',
   seed: 0,
@@ -783,28 +792,43 @@ function normalizeVideoFrames(value: unknown, fallback: number, stride: number):
   return Math.max(1, Math.round((clamped - 1) / stride) * stride + 1);
 }
 
+function normalizeMiniMaxH3VideoFrames(value: unknown, fallback = 124): number {
+  const clamped = clampInteger(value, fallback, 124, 362);
+  const remainder = clamped % 17;
+  return remainder === 5 ? clamped : Math.min(362, clamped + ((5 - remainder + 17) % 17));
+}
+
 function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVideoControls {
   const defaults = DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS.video!;
   const video = rawVideo && typeof rawVideo === 'object' ? rawVideo as Record<string, any> : {};
-  const family: PowerPrompterVideoControls['family'] = String(video.family || '').trim().toLowerCase() === 'ltx23' ? 'ltx23' : 'wan22';
+  const familyRaw = String(video.family || '').trim().toLowerCase();
+  const family: PowerPrompterVideoControls['family'] = familyRaw === 'ltx23'
+    ? 'ltx23'
+    : familyRaw === 'minimax_h3' ? 'minimax_h3' : 'wan22';
   const modeRaw = String(video.mode || '').trim().toLowerCase();
   const mode: PowerPrompterVideoControls['mode'] = modeRaw === 'video_to_video'
     ? 'video_to_video'
     : modeRaw === 'image_to_video' ? 'image_to_video' : 'text_to_video';
   const frameGuideModeRaw = String(video.frameGuideMode || '').trim().toLowerCase();
-  const frameGuideMode: PowerPrompterVideoControls['frameGuideMode'] = frameGuideModeRaw === 'first_middle_last'
+  const parsedFrameGuideMode: PowerPrompterVideoControls['frameGuideMode'] = frameGuideModeRaw === 'first_middle_last'
     ? 'first_middle_last'
     : frameGuideModeRaw === 'first_last'
       ? 'first_last'
       : 'first';
+  const frameGuideMode: PowerPrompterVideoControls['frameGuideMode'] = family === 'minimax_h3' && parsedFrameGuideMode === 'first_middle_last'
+    ? 'first_last'
+    : parsedFrameGuideMode;
   const wan = video.wan && typeof video.wan === 'object' ? video.wan as Record<string, any> : {};
   const ltx = video.ltx && typeof video.ltx === 'object' ? video.ltx as Record<string, any> : {};
+  const minimaxH3 = video.minimaxH3 && typeof video.minimaxH3 === 'object' ? video.minimaxH3 as Record<string, any> : {};
   const postprocess = video.postprocess && typeof video.postprocess === 'object'
     ? video.postprocess as Record<string, any>
     : {};
   const steps = clampInteger(wan.steps, defaults.wan.steps, 1, 10000);
-  const normalizedFrames = normalizeVideoFrames(video.frames, family === 'ltx23' ? 121 : defaults.frames, family === 'ltx23' ? 8 : 4);
-  const normalizedFps = clampInteger(video.fps, family === 'ltx23' ? 25 : defaults.fps, 1, 120);
+  const normalizedFrames = family === 'minimax_h3'
+    ? normalizeMiniMaxH3VideoFrames(video.frames, 124)
+    : normalizeVideoFrames(video.frames, family === 'ltx23' ? 121 : defaults.frames, family === 'ltx23' ? 8 : 4);
+  const normalizedFps = family === 'minimax_h3' ? 24 : clampInteger(video.fps, family === 'ltx23' ? 25 : defaults.fps, 1, 120);
   const normalizedStoryboard = normalizeUmbraLtxStoryboardControls(ltx.storyboard);
   const storyboard = {
     ...normalizedStoryboard,
@@ -821,7 +845,9 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
     : family === 'ltx23' && storyboardTimeline.enabled
       ? storyboardTimeline.frames
       : normalizedFrames;
-  const resolvedMode: PowerPrompterVideoControls['mode'] = family === 'ltx23'
+  const resolvedMode: PowerPrompterVideoControls['mode'] = family === 'minimax_h3' && mode === 'video_to_video'
+    ? 'text_to_video'
+    : family === 'ltx23'
     && (storyboardTimeline.enabled || extended.enabled)
     ? 'text_to_video'
     : mode;
@@ -953,6 +979,15 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
       keyframes,
       storyboard,
       extended,
+    },
+    minimaxH3: {
+      model: String(minimaxH3.model || '').trim().replace(/\\/g, '/'),
+      textEncoder: String(minimaxH3.textEncoder || '').trim().replace(/\\/g, '/'),
+      videoVae: String(minimaxH3.videoVae || '').trim().replace(/\\/g, '/'),
+      audioVae: String(minimaxH3.audioVae || '').trim().replace(/\\/g, '/'),
+      steps: clampInteger(minimaxH3.steps, defaults.minimaxH3.steps, 1, 1000),
+      scheduler: String(minimaxH3.scheduler || defaults.minimaxH3.scheduler).trim() || 'simple',
+      samplerName: String(minimaxH3.samplerName || defaults.minimaxH3.samplerName).trim() || 'res_multistep',
     },
   };
 }

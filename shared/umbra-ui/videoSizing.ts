@@ -1,4 +1,4 @@
-export type UmbraVideoSizingFamily = 'wan22' | 'ltx23';
+export type UmbraVideoSizingFamily = 'wan22' | 'ltx23' | 'minimax_h3';
 export type UmbraVideoSizingUpscaleMode = 'none' | 'lanczos' | 'model' | 'rtx';
 
 export const UMBRA_VIDEO_RESOLUTION_PRESETS = [
@@ -176,7 +176,7 @@ export function resolveUmbraVideoSizing(input: UmbraVideoSizingInput): UmbraVide
   // LTX's spatial latent upscaler requires a 32px-aligned base canvas.
   // Smaller alignment can be silently truncated by the node (for example,
   // 320x176 becomes 320x160 and produces a cropped 640x320 result).
-  const samplingMultiple = input.family === 'ltx23' ? 32 : 16;
+  const samplingMultiple = input.family === 'ltx23' || input.family === 'minimax_h3' ? 32 : 16;
   const samplingWidth = alignDimension(targetWidth / (latentScale * postprocessScale), samplingMultiple);
   const samplingHeight = alignDimension(targetHeight / (latentScale * postprocessScale), samplingMultiple);
   const decodedWidth = samplingWidth * latentScale;

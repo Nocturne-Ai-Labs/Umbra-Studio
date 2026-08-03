@@ -17,7 +17,7 @@ export type PowerPrompterStyleSeedMode = 'same' | 'different';
 export type PowerPrompterModelType = 'checkpoint' | 'diffusers' | 'diffusion_model' | 'unet' | 'gguf';
 export type PowerPrompterMediaType = 'image' | 'video';
 export type PowerPrompterHiresResizeMode = 'scale' | 'dimensions';
-export type PowerPrompterVideoFamily = 'wan22' | 'ltx23';
+export type PowerPrompterVideoFamily = 'wan22' | 'ltx23' | 'minimax_h3';
 export type PowerPrompterVideoMode = 'text_to_video' | 'image_to_video' | 'video_to_video';
 export type PowerPrompterVideoFrameGuideMode = 'first' | 'first_last' | 'first_middle_last';
 export type PowerPrompterVideoDecodeMode = 'auto' | 'full' | 'tiled';
@@ -102,6 +102,16 @@ export interface PowerPrompterLtxVideoControls {
   extended: UmbraLtxExtendedControls;
 }
 
+export interface PowerPrompterMiniMaxH3VideoControls {
+  model: string;
+  textEncoder: string;
+  videoVae: string;
+  audioVae: string;
+  steps: number;
+  scheduler: string;
+  samplerName: string;
+}
+
 export interface PowerPrompterLtxVideoKeyframe {
   id: string;
   sourceImagePath: string;
@@ -159,6 +169,7 @@ export interface PowerPrompterVideoControls {
   postprocess: PowerPrompterVideoPostprocessControls;
   wan: PowerPrompterWanVideoControls;
   ltx: PowerPrompterLtxVideoControls;
+  minimaxH3: PowerPrompterMiniMaxH3VideoControls;
 }
 
 export interface PowerPrompterHiresFixControls {
