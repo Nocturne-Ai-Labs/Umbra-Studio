@@ -16776,6 +16776,18 @@ function cleanHermesPromptOutput(value: string): string {
     .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
     .replace(/\r\n/g, '\n')
     .trim();
+  // Hermes can print its terminal reasoning/status chrome alongside the answer.
+  // Keep the cleanup conservative so legitimate prompt prose is preserved.
+  output = output
+    .replace(/┌─\s*Reasoning[\s\S]*?┐/i, '')
+    .replace(/[┌└]─[^\n]*(?:┐|┘)/g, '')
+    .replace(/(^|\n)\s*[│|]\s*/g, '$1')
+    .replace(/\*{1,3}\s*(?:composing|drafting|writing)\s+(?:a\s+)?(?:concise\s+)?(?:image-to-video|video)\s+prompt\s*\*{1,3}/gi, '')
+    .replace(/\b(?:composing|drafting|writing)\s+(?:a\s+)?(?:concise\s+)?(?:image-to-video|video)\s+prompt\b/gi, '')
+    .replace(/(^|\n)\s*(?:reasoning|thinking|composing\s+prompt)\s*:?\s*$/gim, '$1')
+    .replace(/(^|\n)\s*[┌└│─|_]+\s*(?=\n|$)/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
   output = output.replace(/^```(?:text|markdown|md)?\s*/i, '').replace(/\s*```$/i, '').trim();
   output = output.replace(/^(?:final\s+)?(?:positive\s+)?prompt\s*:\s*/i, '').trim();
   if (/^umbra_ui_stage_prompt\b/i.test(output)) {
@@ -17649,14 +17661,14 @@ function normalizePPVideoDimension(value: unknown, fallback: number, multiple: n
 }
 
 function normalizePPVideoFrames(value: unknown, fallback: number, stride: number): number {
-  const clamped = clampPPInteger(value, fallback, 1, 16385);
+  const clamped = clampPPInteger(value, fallback, 1, Number.MAX_SAFE_INTEGER);
   return Math.max(1, Math.round((clamped - 1) / stride) * stride + 1);
 }
 
 function normalizeMiniMaxH3VideoFrames(value: unknown, fallback = 124): number {
-  const clamped = clampPPInteger(value, fallback, 124, 362);
+  const clamped = clampPPInteger(value, fallback, 5, Number.MAX_SAFE_INTEGER);
   const remainder = clamped % 17;
-  return remainder === 5 ? clamped : Math.min(362, clamped + ((5 - remainder + 17) % 17));
+  return remainder === 5 ? clamped : clamped + ((5 - remainder + 17) % 17);
 }
 
 function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls {

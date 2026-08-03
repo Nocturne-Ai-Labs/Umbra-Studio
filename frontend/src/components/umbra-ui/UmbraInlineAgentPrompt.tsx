@@ -57,7 +57,14 @@ export function UmbraInlineAgentPrompt({
         if (canceled) return;
         const compatible = entries.filter((entry) => entry.mediaType === 'both' || entry.mediaType === mediaType);
         setInstructions(compatible);
-        setSelectedInstructionId((current) => compatible.some((entry) => entry.id === current) ? current : compatible[0]?.id || '');
+        const preferredId = mediaType === 'video' && context?.family === 'minimax_h3'
+          ? 'video-minimax-h3-director'
+          : mediaType === 'video' && context?.family === 'ltx23'
+            ? 'video-ltx-director'
+            : '';
+        setSelectedInstructionId((current) => compatible.some((entry) => entry.id === current)
+          ? current
+          : compatible.find((entry) => entry.id === preferredId)?.id || compatible[0]?.id || '');
       })
       .catch((error) => {
         if (!canceled) showToast(error instanceof Error ? error.message : 'Failed to load agent instructions.', 'error');
@@ -68,7 +75,7 @@ export function UmbraInlineAgentPrompt({
     return () => {
       canceled = true;
     };
-  }, [enabled, instructions.length, mediaType, showToast]);
+  }, [context?.family, enabled, instructions.length, mediaType, showToast]);
 
   const sourceChanged = Boolean(agentPrompt.trim() && generatedFrom && generatedFrom !== sourcePrompt.trim());
   const handleGenerate = async () => {

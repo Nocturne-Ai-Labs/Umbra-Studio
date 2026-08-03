@@ -273,9 +273,30 @@ function SettingsChips({ video, sequence, seed, seedMode, seedIncrement }: {
 }
 
 function resolveMiniMaxH3FramesForDuration(durationSeconds: number): number {
-  const requested = Math.max(124, Math.min(362, Math.round(Math.max(5, Math.min(15, durationSeconds)) * 24)));
+  const requested = Math.max(5, Math.round(Math.max(0.25, durationSeconds) * 24));
   const remainder = requested % 17;
   return remainder === 5 ? requested : requested + ((5 - remainder + 17) % 17);
+}
+
+function resolveVideoFramesForDurationChange(
+  durationSeconds: number,
+  currentFrames: number,
+  currentFps: number,
+  family: PowerPrompterVideoControls['family'],
+): number {
+  const stride = family === 'minimax_h3' ? 17 : family === 'ltx23' ? 8 : 4;
+  const minimumFrames = family === 'minimax_h3' ? 5 : stride + 1;
+  const requestedFrames = family === 'minimax_h3'
+    ? resolveMiniMaxH3FramesForDuration(durationSeconds)
+    : resolveUmbraVideoFramesForDuration(durationSeconds, currentFps, stride);
+  const currentDuration = resolveUmbraVideoDurationSeconds(currentFrames, currentFps);
+  if (durationSeconds < currentDuration && requestedFrames >= currentFrames) {
+    return Math.max(minimumFrames, currentFrames - stride);
+  }
+  if (durationSeconds > currentDuration && requestedFrames <= currentFrames) {
+    return currentFrames + stride;
+  }
+  return requestedFrames;
 }
 
 function VideoJobCard({ job, onOpen }: { job: UmbraVideoReviewJob; onOpen: () => void }) {
@@ -345,10 +366,32 @@ function NumberEditor({ label, value, onChange, min = 0, step = 1 }: {
   min?: number;
   step?: number;
 }) {
+  const [draft, setDraft] = React.useState(String(value));
+  const [editing, setEditing] = React.useState(false);
+  React.useEffect(() => {
+    if (!editing) setDraft(String(value));
+  }, [editing, value]);
   return (
     <label className="space-y-1.5">
       <span className={labelClass}>{label}</span>
-      <input type="number" min={min} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} className={inputClass} />
+      <input
+        type="number"
+        min={min}
+        step={step}
+        value={draft}
+        onFocus={() => setEditing(true)}
+        onChange={(event) => {
+          const next = event.target.value;
+          setDraft(next);
+          if (next.trim() !== '' && Number.isFinite(Number(next))) onChange(Number(next));
+        }}
+        onBlur={() => {
+          setEditing(false);
+          if (draft.trim() === '' || !Number.isFinite(Number(draft))) setDraft(String(value));
+          else onChange(Number(draft));
+        }}
+        className={inputClass}
+      />
     </label>
   );
 }
@@ -438,7 +481,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
       }
       const storyboardShots = current.ltx.storyboard?.shots || [];
       if (current.family === 'ltx23' && current.ltx.storyboard?.enabled && storyboardShots.length > 0) {
-        const target = Math.max(storyboardShots.length * 0.5, Math.min(600, durationSeconds));
+        const target = Math.max(storyboardShots.length * 0.5, durationSeconds);
         const currentTotal = storyboardShots.reduce((sum, shot) => sum + shot.durationSeconds, 0);
         return {
           ...current,
@@ -459,13 +502,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
       }
       return {
         ...current,
-        frames: current.family === 'minimax_h3'
-          ? resolveMiniMaxH3FramesForDuration(durationSeconds)
-          : resolveUmbraVideoFramesForDuration(
-            durationSeconds,
-            current.fps,
-            current.family === 'ltx23' ? 8 : 4,
-          ),
+        frames: resolveVideoFramesForDurationChange(durationSeconds, current.frames, current.fps, current.family),
       };
     });
   }, []);
@@ -721,8 +758,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
                           ? draftVideo.ltx.storyboard.shots.reduce((sum, shot) => sum + shot.durationSeconds, 0)
                           : resolveUmbraVideoDurationSeconds(draftVideo.frames, draftVideo.fps)
                       ).toFixed(2))}
-                      min={draftVideo.family === 'minimax_h3' ? 5 : 0.5}
-                      max={draftVideo.family === 'minimax_h3' ? 15 : undefined}
+                      min={0.25}
                       step={0.5}
                       onChange={patchDuration}
                     />}

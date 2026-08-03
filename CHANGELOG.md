@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.30.3
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, or setup steps are required for this
+update. Update Umbra Studio normally, restart it, and refresh the Umbra UI
+video workspace. The new MiniMax H3 agent instruction is included automatically
+and follows the active video model family.
+
+### Video Agent Prompting
+
+- Added a dedicated **MiniMax H3 Motion Prompt** instruction for concise,
+  continuous-shot text-to-video and image-to-video prompts.
+- MiniMax H3 now selects its matching agent instruction by default while still
+  allowing users to choose another saved video instruction.
+- LTX-2.3 continues to use its separate natural-language director instruction.
+
+### Duration Controls And Prompt Cleanup
+
+- Removed the accidental duration ceiling from MiniMax H3 and LTX-2.3 video
+  controls and the video review queue editor.
+- Fixed duration decrement controls getting stuck when a requested value mapped
+  back to the same model-valid frame count.
+- Numeric duration fields now support direct editing without clearing or
+  overwriting partially typed values.
+- Removed Hermes terminal reasoning boxes, status borders, and prompt-composing
+  text from agent output before it reaches the generation workflow.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** MiniMax H3 and LTX-2.3 duration controls could stop responding
+  around a frame-grid boundary.
+- **Fixed:** Directly typing a duration could be interrupted by controlled-field
+  updates.
+- **Fixed:** Hermes reasoning/status output could leak into generated prompts.
+- **Improved:** MiniMax H3 video prompting now has a model-specific default
+  instruction.
+
 ## v0.30.2
 
 ### TL;DR - Setup After Updating

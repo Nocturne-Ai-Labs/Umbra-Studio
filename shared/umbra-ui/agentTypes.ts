@@ -163,6 +163,18 @@ const DEFAULT_INSTRUCTION_TEMPLATES: UmbraUiAgentInstructionTemplate[] = [
     ].join(' '),
   },
   {
+    id: 'video-minimax-h3-director',
+    name: 'MiniMax H3 Motion Prompt',
+    mediaType: 'video',
+    instruction: [
+      'Write one concise, natural-language MiniMax H3 video prompt for a single continuous shot.',
+      'Describe the visible subject first, then the primary action, environmental response, camera movement, pacing, and the intended ending state.',
+      'Keep identity, wardrobe, anatomy, lighting, and spatial relationships consistent across the clip. Prefer physically achievable motion over a list of unrelated events or hard cuts.',
+      'For image-to-video, treat the supplied image as the visual starting point and animate what is already visible instead of redesigning the subject or scene.',
+      'Return only the final prompt text with no reasoning, Markdown, labels, status messages, or tool instructions. Stage a video draft only after the prompt is complete.',
+    ].join(' '),
+  },
+  {
     id: 'video-image-continuity',
     name: 'Image-to-Video Continuity',
     mediaType: 'video',
@@ -176,6 +188,7 @@ const DEFAULT_INSTRUCTION_TEMPLATES: UmbraUiAgentInstructionTemplate[] = [
 
 const REQUIRED_DEFAULT_INSTRUCTION_IDS = new Set([
   'image-anima-sdxl-csv-tags',
+  'video-minimax-h3-director',
 ]);
 
 export function createDefaultUmbraUiAgentInstructions(now = Date.now()): UmbraUiAgentInstruction[] {

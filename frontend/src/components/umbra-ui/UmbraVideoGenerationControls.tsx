@@ -283,9 +283,30 @@ function createLtxExtendedClip(index: number): UmbraLtxExtendedClip {
 }
 
 function resolveMiniMaxH3FramesForDuration(durationSeconds: number): number {
-  const requested = Math.max(5, Math.min(3600, Math.round(Math.max(0.25, durationSeconds) * 24)));
+  const requested = Math.max(5, Math.round(Math.max(0.25, durationSeconds) * 24));
   const remainder = requested % 17;
-  return remainder === 5 ? requested : Math.min(3600, requested + ((5 - remainder + 17) % 17));
+  return remainder === 5 ? requested : requested + ((5 - remainder + 17) % 17);
+}
+
+function resolveVideoFramesForDurationChange(
+  durationSeconds: number,
+  currentFrames: number,
+  currentFps: number,
+  family: PowerPrompterVideoControls['family'],
+): number {
+  const stride = family === 'minimax_h3' ? 17 : family === 'ltx23' ? 8 : 4;
+  const minimumFrames = family === 'minimax_h3' ? 5 : stride + 1;
+  const requestedFrames = family === 'minimax_h3'
+    ? resolveMiniMaxH3FramesForDuration(durationSeconds)
+    : resolveUmbraVideoFramesForDuration(durationSeconds, currentFps, stride);
+  const currentDuration = resolveUmbraVideoDurationSeconds(currentFrames, currentFps);
+  if (durationSeconds < currentDuration && requestedFrames >= currentFrames) {
+    return Math.max(minimumFrames, currentFrames - stride);
+  }
+  if (durationSeconds > currentDuration && requestedFrames <= currentFrames) {
+    return currentFrames + stride;
+  }
+  return requestedFrames;
 }
 
 function optionList(current: string, values: string[]) {
@@ -371,16 +392,31 @@ function NumberField({ label, value, onChange, min, max, step = 1 }: {
   max?: number;
   step?: number;
 }) {
+  const [draft, setDraft] = React.useState(String(value));
+  const [editing, setEditing] = React.useState(false);
+  React.useEffect(() => {
+    if (!editing) setDraft(String(value));
+  }, [editing, value]);
   return (
     <label className="space-y-1.5">
       <span className={labelClass}>{label}</span>
       <input
         type="number"
-        value={value}
+        value={draft}
         min={min}
         max={max}
         step={step}
-        onChange={(event) => onChange(Number(event.target.value))}
+        onFocus={() => setEditing(true)}
+        onChange={(event) => {
+          const next = event.target.value;
+          setDraft(next);
+          if (next.trim() !== '' && Number.isFinite(Number(next))) onChange(Number(next));
+        }}
+        onBlur={() => {
+          setEditing(false);
+          if (draft.trim() === '' || !Number.isFinite(Number(draft))) setDraft(String(value));
+          else onChange(Number(draft));
+        }}
         className={inputClass}
       />
     </label>
@@ -1220,13 +1256,7 @@ export function UmbraVideoGenerationControls({
   const setDurationSeconds = React.useCallback((durationSeconds: number) => {
     setVideo((current) => ({
       ...current,
-      frames: current.family === 'minimax_h3'
-        ? resolveMiniMaxH3FramesForDuration(Math.max(5, Math.min(15, durationSeconds)))
-        : resolveUmbraVideoFramesForDuration(
-          durationSeconds,
-          current.fps,
-          current.family === 'ltx23' ? 8 : 4,
-        ),
+      frames: resolveVideoFramesForDurationChange(durationSeconds, current.frames, current.fps, current.family),
     }));
   }, []);
   const setOutputFps = React.useCallback((fpsInput: number) => {
@@ -1845,8 +1875,7 @@ export function UmbraVideoGenerationControls({
             <NumberField
               label="Duration (seconds)"
               value={Number(videoDurationSeconds.toFixed(2))}
-              min={video.family === 'minimax_h3' ? 5 : 0.5}
-              max={video.family === 'minimax_h3' ? 15 : 600}
+              min={0.25}
               step={0.5}
               onChange={setDurationSeconds}
             />
