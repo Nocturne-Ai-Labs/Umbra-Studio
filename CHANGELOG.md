@@ -26,6 +26,8 @@ installer's license and large-download notices before confirming a pack.
 
 ### Canvas Studio Revival
 
+![Umbra Studio Canvas Studio](https://raw.githubusercontent.com/Nocturne-Ai-Labs/Umbra-Studio/main/.github/screenshots/canvas-studio-v0.23.0.png)
+
 - Reintroduced Canvas Studio as a focused AI compositing workspace backed by
   Umbra UI and ComfyUI, with projects, editable image layers, mask layers,
   control layers, reference layers, and durable per-region generation state.
