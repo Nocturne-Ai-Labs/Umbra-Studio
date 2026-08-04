@@ -6871,18 +6871,24 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     const [moving] = enabledVariants.splice(fromIndex, 1);
     enabledVariants.splice(targetIndex, 0, moving);
     const orderByVariantId = new Map(enabledVariants.map((variant, index) => [variant.id, index]));
-    slot.variants = slot.variants.map((variant) => {
-      const nextOrder = orderByVariantId.get(variant.id);
-      if (nextOrder === undefined) return variant;
+    const updatedActiveVariants = enabledVariants.map((variant) => {
       const queueSetIds = normalizeQueueSetIds(variant.queueSetIds, false);
       return {
         ...variant,
         queueSetOrders: {
           ...normalizeQueueSetOrders((variant as any).queueSetOrders, queueSetIds, Number(variant.order)),
-          [String(activeQueueSet)]: nextOrder,
+          [String(activeQueueSet)]: orderByVariantId.get(variant.id) ?? 0,
         },
         updatedAt: getNowIso(),
       };
+    });
+    const updatedActiveById = new Map(updatedActiveVariants.map((variant) => [variant.id, variant]));
+    const inactiveVariants = slot.variants.filter((variant) => !orderByVariantId.has(variant.id));
+    slot.variants = [...updatedActiveVariants, ...inactiveVariants].map((variant, index) => {
+      const updatedActive = updatedActiveById.get(variant.id);
+      if (updatedActive) return { ...updatedActive, order: index };
+      const nextOrder = orderByVariantId.get(variant.id);
+      return nextOrder === undefined ? { ...variant, order: index } : variant;
     });
 
     setActiveSlotId(slot.slotId);
@@ -9885,6 +9891,9 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                         const status = queueVariantState.status;
                         const setIds = normalizeQueueSetIds(variant.queueSetIds, false);
                         const isInActiveQueueSet = setIds.includes(activeQueueSet);
+                        const activeVariantIdx = displayVariants
+                          .filter((candidate) => normalizeQueueSetIds(candidate.queueSetIds, false).includes(activeQueueSet))
+                          .findIndex((candidate) => candidate.id === variant.id);
                         const activeSetIdForVariant = setIds.includes(activeQueueSet)
                           ? activeQueueSet
                           : (setIds[0] || activeQueueSet);
@@ -9991,7 +10000,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                               variantDragRef.current = null;
                               setVariantDropSlotId(null);
                               if (dragging.slotId === slot.slotId) {
-                                moveVariantWithinSlot(slot.slotId, dragging.variantId, variantIdx);
+                                moveVariantWithinSlot(slot.slotId, dragging.variantId, activeVariantIdx);
                               } else {
                                 moveVariantToSlot(dragging.slotId, dragging.variantId, slot.slotId, variantIdx);
                               }
@@ -10142,10 +10151,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                     onClick={(event) => {
                                       event.stopPropagation();
                                       if (chainLinkModeActive || mobileSelectionMode) return;
-                                      moveVariantWithinSlot(slot.slotId, variant.id, variantIdx - 1);
+                                      moveVariantWithinSlot(slot.slotId, variant.id, activeVariantIdx - 1);
                                     }}
                                     onMouseDown={(event) => event.stopPropagation()}
-                                    disabled={chainLinkModeActive || mobileSelectionMode || !isInActiveQueueSet || variantIdx <= 0}
+                                    disabled={chainLinkModeActive || mobileSelectionMode || !isInActiveQueueSet || activeVariantIdx <= 0}
                                     className="p-0.5 rounded border border-white/10 text-zinc-500 hover:text-zinc-200 hover:border-white/25 disabled:opacity-40 disabled:cursor-not-allowed"
                                     title="Move variant up"
                                   >
@@ -10155,10 +10164,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                     onClick={(event) => {
                                       event.stopPropagation();
                                       if (chainLinkModeActive || mobileSelectionMode) return;
-                                      moveVariantWithinSlot(slot.slotId, variant.id, variantIdx + 1);
+                                      moveVariantWithinSlot(slot.slotId, variant.id, activeVariantIdx + 1);
                                     }}
                                     onMouseDown={(event) => event.stopPropagation()}
-                                    disabled={chainLinkModeActive || mobileSelectionMode || !isInActiveQueueSet || variantIdx >= activeQueueVariantCount - 1}
+                                    disabled={chainLinkModeActive || mobileSelectionMode || !isInActiveQueueSet || activeVariantIdx >= activeQueueVariantCount - 1}
                                     className="p-0.5 rounded border border-white/10 text-zinc-500 hover:text-zinc-200 hover:border-white/25 disabled:opacity-40 disabled:cursor-not-allowed"
                                     title="Move variant down"
                                   >

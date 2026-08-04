@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.30.4
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, or setup steps are required for this
+update. Update Umbra Studio normally and restart it if it is already open.
+
+### Power Prompter Reordering
+
+- Fixed the Power Prompter variant Up and Down controls so enabled variants
+  move reliably within the active queue set.
+- Preserved each set's independent variant positions when a card belongs to
+  more than one set.
+- Kept the first and last variant boundary controls disabled in the correct
+  direction.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Power Prompter arrow moves could be discarded during document
+  normalization, causing the card to snap back to its previous position.
+- **Fixed:** Reordering could use a card's global position instead of its
+  position among enabled variants in the active set.
+- **Improved:** Up and Down movement now updates the visible card order and
+  the persisted per-set order together.
+
 ## v0.30.3
 
 ### TL;DR - Setup After Updating
