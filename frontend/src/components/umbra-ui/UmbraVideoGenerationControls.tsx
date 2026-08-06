@@ -8,6 +8,7 @@ import {
   Clock3,
   Database,
   Film,
+  FolderOpen,
   Gauge,
   Image as ImageIcon,
   ImagePlus,
@@ -29,6 +30,7 @@ import {
 import { useStore } from '@/store/useStore';
 import { cn } from '@/lib/utils';
 import { UmbraSelect } from '@/components/ui/UmbraSelect';
+import { UmbraModelPickerModal, type UmbraModelPickerKind } from '@/components/umbra-ui/UmbraModelPickerModal';
 import type {
   PowerPrompterSeedControlMode,
   PowerPrompterSeedIncrement,
@@ -134,6 +136,8 @@ interface UmbraVideoDeviceResume {
   activePromptSegmentId?: string;
   agentModeEnabled?: boolean;
   agentPrompt?: string;
+  autoPrompterEnabled?: boolean;
+  autoPrompterPrompt?: string;
   negativePrompt?: string;
 }
 
@@ -181,6 +185,7 @@ function createDefaultVideoControls(): PowerPrompterVideoControls {
       upscaleModel: '',
       upscaleScale: 2,
       maxDimension: 3840,
+      rtxVsrEnabled: false,
       rtxQuality: 'ULTRA',
     },
     wan: {
@@ -235,6 +240,16 @@ function createDefaultVideoControls(): PowerPrompterVideoControls {
       textEncoder: '',
       videoVae: '',
       audioVae: '',
+      shiftVideo: 10,
+      shiftAudio: 5,
+      referenceImageSize: 'match',
+      referenceNotes: ['', '', ''],
+      sageAttention: 'auto',
+      allowCompile: true,
+      easyCacheEnabled: true,
+      easyCacheReuseThreshold: 0.2,
+      easyCacheStartPercent: 0.15,
+      easyCacheEndPercent: 0.95,
       steps: 20,
       scheduler: 'simple',
       samplerName: 'res_multistep',
@@ -338,49 +353,46 @@ function SelectField({ label, value, values, onChange, emptyLabel = 'Not install
   );
 }
 
-function VideoModelField({
+interface VideoResourcePicker {
+  label: string;
+  value: string;
+  values: string[];
+  kind: UmbraModelPickerKind;
+  onChange: (value: string) => void;
+}
+
+function VideoResourceField({
   label,
-  family,
   value,
   values,
   onChange,
+  onChoose,
+  kind = 'checkpoint',
 }: {
   label: string;
-  family: PowerPrompterVideoFamily;
   value: string;
   values: string[];
   onChange: (value: string) => void;
+  onChoose: (picker: VideoResourcePicker) => void;
+  kind?: UmbraModelPickerKind;
 }) {
-  const allOptions = optionList(value, values);
-  const familyPattern = family === 'ltx23'
-    ? /(?:^|[/_. -])ltx|dasiwa.*ltx/i
-    : family === 'minimax_h3'
-      ? /(?:^|[/_. -])minimax|h3/i
-      : /(?:^|[/_. -])wan/i;
-  const preferred = allOptions.filter((option) => familyPattern.test(option));
-  const other = allOptions.filter((option) => !familyPattern.test(option));
+  const available = optionList(value, values);
   return (
-    <label className="min-w-0 space-y-1.5">
+    <div className="min-w-0 space-y-1.5">
       <span className={labelClass}>{label}</span>
-      <UmbraSelectControl
-        aria-label={label}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className={`${inputClass} min-h-10 font-semibold`}
+      <button
+        type="button"
+        onClick={() => onChoose({ label, value, values: available, kind, onChange })}
+        className="flex min-h-10 w-full min-w-0 items-center gap-2 rounded-md border border-white/10 bg-black/30 px-2.5 text-left transition-colors hover:border-cyan-300/40 hover:bg-cyan-500/[0.055]"
+        title={`Browse ${label.toLowerCase()}`}
       >
-        <option value="">Select a video model</option>
-        {preferred.length > 0 ? (
-          <optgroup label={family === 'ltx23' ? 'LTX video models' : family === 'minimax_h3' ? 'MiniMax H3 video models' : 'Wan video models'}>
-            {preferred.map((option) => <option key={option} value={option}>{option}</option>)}
-          </optgroup>
-        ) : null}
-        {other.length > 0 ? (
-          <optgroup label="Other installed models">
-            {other.map((option) => <option key={option} value={option}>{option}</option>)}
-          </optgroup>
-        ) : null}
-      </UmbraSelectControl>
-    </label>
+        <FolderOpen size={12} className="shrink-0 text-cyan-300" />
+        <span className={cn('min-w-0 flex-1 truncate font-mono text-[10px]', value ? 'text-zinc-100' : 'text-zinc-600')}>
+          {value || 'Choose file...'}
+        </span>
+        <span className="shrink-0 rounded-sm border border-cyan-300/15 bg-cyan-500/[0.055] px-1.5 py-0.5 font-mono text-[8px] text-cyan-100/75">{available.length}</span>
+      </button>
+    </div>
   );
 }
 
@@ -655,12 +667,15 @@ export function UmbraVideoGenerationControls({
   const prompt = React.useMemo(() => compileUmbraUiPromptSegments(promptSegments), [promptSegments]);
   const [agentModeEnabled, setAgentModeEnabled] = React.useState(initialDeviceResume?.agentModeEnabled === true);
   const [agentPrompt, setAgentPrompt] = React.useState(initialDeviceResume?.agentPrompt || '');
-  const workflowPrompt = agentModeEnabled ? agentPrompt.trim() : prompt;
+  const [autoPrompterEnabled, setAutoPrompterEnabled] = React.useState(initialDeviceResume?.autoPrompterEnabled === true);
+  const [autoPrompterPrompt, setAutoPrompterPrompt] = React.useState(initialDeviceResume?.autoPrompterPrompt || '');
+  const workflowPrompt = autoPrompterEnabled ? autoPrompterPrompt.trim() : agentModeEnabled ? agentPrompt.trim() : prompt;
   const [negativePrompt, setNegativePrompt] = React.useState(initialDeviceResume?.negativePrompt || '');
   const [video, setVideo] = React.useState<PowerPrompterVideoControls>(() => createDefaultVideoControls());
   const [selectedStoryboardShotId, setSelectedStoryboardShotId] = React.useState('');
   const [sourcePreviewUrl, setSourcePreviewUrl] = React.useState('');
   const [isQueueing, setIsQueueing] = React.useState(false);
+  const [resourcePicker, setResourcePicker] = React.useState<VideoResourcePicker | null>(null);
   const { placement, setPlacement, effectivePlacement } = useUmbraQueuePlacement(queueSummary);
   const [settingsLoaded, setSettingsLoaded] = React.useState(false);
   const handoffAppliedRef = React.useRef(false);
@@ -850,11 +865,13 @@ export function UmbraVideoGenerationControls({
         activePromptSegmentId,
         agentModeEnabled,
         agentPrompt,
+        autoPrompterEnabled,
+        autoPrompterPrompt,
         negativePrompt,
       });
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [activePromptSegmentId, agentModeEnabled, agentPrompt, negativePrompt, prompt, promptSegments]);
+  }, [activePromptSegmentId, agentModeEnabled, agentPrompt, autoPrompterEnabled, autoPrompterPrompt, negativePrompt, prompt, promptSegments]);
 
   React.useEffect(() => {
     if (!agentDraft || agentDraft.mediaType !== 'video') return;
@@ -910,6 +927,7 @@ export function UmbraVideoGenerationControls({
     const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : 'MiniMax H3';
     const feature = video.mode === 'video_to_video'
       ? 'vid2vid'
+      : video.mode === 'reference_to_video' ? 'ref2vid'
       : video.mode === 'image_to_video' ? 'img2vid' : 'txt2vid';
     const modelSource = video.family === 'ltx23' ? 'checkpoint' : 'unet';
     const pipelineMatch = resolveUmbraUiPipeline(workflows, feature, modelFamily, modelSource);
@@ -925,12 +943,14 @@ export function UmbraVideoGenerationControls({
         height: targetDimensions.targetHeight,
         agentModeEnabled,
         agentPrompt,
+        autoPrompterEnabled,
+        autoPrompterPrompt,
       },
     });
-  }, [agentModeEnabled, agentPrompt, negativePrompt, onAgentContextChange, targetDimensions.targetHeight, targetDimensions.targetWidth, video, workflowPrompt, workflows]);
+  }, [agentModeEnabled, agentPrompt, autoPrompterEnabled, autoPrompterPrompt, negativePrompt, onAgentContextChange, targetDimensions.targetHeight, targetDimensions.targetWidth, video, workflowPrompt, workflows]);
 
   React.useEffect(() => {
-    if (video.mode !== 'image_to_video' || !video.sourceImagePath || video.sourceImageName) return;
+    if ((video.mode !== 'image_to_video' && video.mode !== 'reference_to_video') || !video.sourceImagePath || video.sourceImageName) return;
     const controller = new AbortController();
     const sourcePath = video.sourceImagePath;
     const timer = window.setTimeout(() => {
@@ -954,7 +974,7 @@ export function UmbraVideoGenerationControls({
   }, [video.mode, video.sourceImageName, video.sourceImagePath]);
 
   React.useEffect(() => {
-    const sourcePath = video.mode === 'image_to_video'
+    const sourcePath = video.mode === 'image_to_video' || video.mode === 'reference_to_video'
       ? video.sourceImagePath
       : video.mode === 'video_to_video' ? video.sourceVideoPath : '';
     if (!sourcePath) return;
@@ -969,7 +989,7 @@ export function UmbraVideoGenerationControls({
       const height = Math.max(0, Math.round(Number(payload?.height) || 0));
       if (!width || !height) return;
       setVideo((current) => {
-        const currentPath = current.mode === 'image_to_video'
+        const currentPath = current.mode === 'image_to_video' || current.mode === 'reference_to_video'
           ? current.sourceImagePath
           : current.mode === 'video_to_video' ? current.sourceVideoPath : '';
         return currentPath === sourcePath
@@ -983,6 +1003,7 @@ export function UmbraVideoGenerationControls({
   const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : 'MiniMax H3';
   const pipelineFeature = video.mode === 'video_to_video'
     ? 'vid2vid'
+    : video.mode === 'reference_to_video' ? 'ref2vid'
     : video.mode === 'image_to_video' ? 'img2vid' : 'txt2vid';
   const pipelineModelSource = video.family === 'ltx23' ? 'checkpoint' : 'unet';
   const pipelineMatch = React.useMemo(
@@ -1116,7 +1137,11 @@ export function UmbraVideoGenerationControls({
         ...current,
         family,
         fps,
-        mode: family === 'minimax_h3' && current.mode === 'video_to_video' ? 'text_to_video' : current.mode,
+        mode: family === 'minimax_h3' && current.mode === 'video_to_video'
+          ? 'text_to_video'
+          : family !== 'minimax_h3' && current.mode === 'reference_to_video'
+            ? 'text_to_video'
+            : current.mode,
         frameGuideMode: family === 'minimax_h3' ? 'first' : current.frameGuideMode,
         frames: family === 'minimax_h3'
           ? resolveMiniMaxH3FramesForDuration(durationSeconds)
@@ -1161,6 +1186,13 @@ export function UmbraVideoGenerationControls({
   };
   const setMiniMaxH3 = <K extends keyof PowerPrompterVideoControls['minimaxH3']>(key: K, value: PowerPrompterVideoControls['minimaxH3'][K]) => {
     setVideo((current) => ({ ...current, minimaxH3: { ...current.minimaxH3, [key]: value } }));
+  };
+  const setMiniMaxReferenceNote = (index: 0 | 1 | 2, value: string) => {
+    setVideo((current) => {
+      const referenceNotes = [...current.minimaxH3.referenceNotes] as [string, string, string];
+      referenceNotes[index] = value.slice(0, 500);
+      return { ...current, minimaxH3: { ...current.minimaxH3, referenceNotes } };
+    });
   };
   const setStoryboardShots = React.useCallback((shots: UmbraLtxStoryboardShot[]) => {
     setVideo((current) => ({
@@ -1321,6 +1353,7 @@ export function UmbraVideoGenerationControls({
     ltxTwoStage: video.ltx.twoStage,
     upscaleMode: video.postprocess.upscaleMode,
     upscaleScale: video.postprocess.upscaleScale,
+    rtxVsrEnabled: video.postprocess.rtxVsrEnabled,
   });
   const updateLtxKeyframe = (id: string, patch: Partial<PowerPrompterVideoControls['ltx']['keyframes'][number]>) => {
     setVideo((current) => ({
@@ -1362,12 +1395,13 @@ export function UmbraVideoGenerationControls({
       ].some((value) => !String(value || '').trim());
     }
     if (video.family === 'minimax_h3') {
-      return frameGuideMissing || sourceDimensionsMissing || [
+      const referenceMissing = video.mode === 'reference_to_video' && !video.sourceImagePath;
+      return frameGuideMissing || referenceMissing || sourceDimensionsMissing || [
         video.minimaxH3.model,
         video.minimaxH3.textEncoder,
         video.minimaxH3.videoVae,
         video.minimaxH3.audioVae,
-        ...(video.mode === 'image_to_video' ? [video.sourceImagePath] : []),
+        ...((video.mode === 'image_to_video' || video.mode === 'reference_to_video') ? [video.sourceImagePath] : []),
       ].some((value) => !String(value || '').trim());
     }
     const extendedMissing = extendedOpen && (
@@ -1392,7 +1426,7 @@ export function UmbraVideoGenerationControls({
   }, [extendedOpen, extendedTotalSeconds, video])
     || (video.postprocess.interpolationEnabled && !video.postprocess.interpolationModel)
     || (video.postprocess.upscaleMode === 'model' && !video.postprocess.upscaleModel)
-    || (video.postprocess.upscaleMode === 'rtx' && !catalog.rtxAvailable)
+    || (video.postprocess.rtxVsrEnabled && !catalog.rtxAvailable)
     || (video.family === 'ltx23' && !storyboardOpen && !extendedOpen && video.ltx.keyframes.some((keyframe) => !keyframe.sourceImagePath && !keyframe.sourceImageName))
     || (storyboardOpen && (
       !catalog.umbraDirectorAvailable
@@ -1503,43 +1537,44 @@ export function UmbraVideoGenerationControls({
           </span>
         </div>
         {video.family === 'ltx23' ? (
-          <VideoModelField
+          <VideoResourceField
             label="LTX Checkpoint"
-            family="ltx23"
             value={video.ltx.checkpoint}
             values={catalog.checkpoints}
             onChange={(value) => setLtx('checkpoint', value)}
+            onChoose={setResourcePicker}
           />
         ) : video.family === 'minimax_h3' ? (
-          <VideoModelField
+          <VideoResourceField
             label="MiniMax H3 Model"
-            family="minimax_h3"
             value={video.minimaxH3.model}
             values={catalog.diffusionModels}
             onChange={(value) => setMiniMaxH3('model', value)}
+            onChoose={setResourcePicker}
           />
         ) : (
           <div className="grid gap-2 sm:grid-cols-2">
-            <VideoModelField
+            <VideoResourceField
               label="High Noise Model"
-              family="wan22"
               value={video.wan.highModel}
               values={catalog.diffusionModels}
               onChange={(value) => setWan('highModel', value)}
+              onChoose={setResourcePicker}
             />
-            <VideoModelField
+            <VideoResourceField
               label="Low Noise Model"
-              family="wan22"
               value={video.wan.lowModel}
               values={catalog.diffusionModels}
               onChange={(value) => setWan('lowModel', value)}
+              onChoose={setResourcePicker}
             />
           </div>
         )}
       </div>
-      <div className={cn('mb-3 grid gap-1.5', video.family === 'ltx23' ? 'grid-cols-2' : video.family === 'minimax_h3' ? 'grid-cols-2' : 'grid-cols-3')}>
+      <div className={cn('mb-3 grid gap-1.5', video.family === 'ltx23' ? 'grid-cols-2' : video.family === 'minimax_h3' ? 'grid-cols-3' : 'grid-cols-3')}>
         <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'text_to_video'} label="Text to Video" onClick={() => setMode('text_to_video')} />
         <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'image_to_video'} label="Image to Video" onClick={() => setMode('image_to_video')} />
+        {video.family === 'minimax_h3' ? <ToggleButton active={video.mode === 'reference_to_video'} label="Reference to Video" onClick={() => setMode('reference_to_video')} /> : null}
         {video.family !== 'minimax_h3' ? <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'video_to_video'} label="Video to Video" onClick={() => setMode('video_to_video')} /> : null}
         {video.family === 'ltx23' ? (
           <ToggleButton
@@ -1607,6 +1642,61 @@ export function UmbraVideoGenerationControls({
             <p className="mt-2 font-mono text-[8px] leading-relaxed text-zinc-600">
               Leave empty for text-to-video. When selected, clip 1 starts from this image and every later clip starts from the preceding final frame.
             </p>
+          </VideoAccordion>
+        ) : video.mode === 'reference_to_video' ? (
+          <VideoAccordion
+            title="Reference Images"
+            icon={<ImageIcon size={12} className="text-fuchsia-300" />}
+            summary={[video.sourceImagePath, video.middleImagePath, video.lastImagePath].filter(Boolean).length ? `${[video.sourceImagePath, video.middleImagePath, video.lastImagePath].filter(Boolean).length} attached` : '1 to 3 images'}
+            accent="fuchsia"
+            defaultOpen={!video.sourceImagePath}
+          >
+            <p className="mb-2 rounded-md border border-fuchsia-300/20 bg-fuchsia-500/[0.045] px-2.5 py-2 font-mono text-[9px] leading-relaxed text-zinc-400">
+              One continuous MiniMax H3 shot. Reference notes preserve identity, wardrobe, style, or environment; the shot direction below controls camera and motion.
+            </p>
+            <FrameSourceField
+              label="Reference Image 1"
+              path={video.sourceImagePath}
+              previewUrl={sourcePreviewUrl}
+              onChange={(path) => {
+                setVideo((current) => ({ ...current, sourceImagePath: path, sourceImageName: '', sourceWidth: 0, sourceHeight: 0 }));
+                setSourcePreviewUrl(path ? `/api/fs/image?path=${encodeURIComponent(path)}` : '');
+              }}
+              onDimensions={(width, height) => setVideo((current) => ({ ...current, sourceWidth: width, sourceHeight: height }))}
+              onClear={() => { setVideo((current) => ({ ...current, sourceImagePath: '', sourceImageName: '', sourceWidth: 0, sourceHeight: 0 })); setSourcePreviewUrl(''); }}
+            />
+            <label className="mb-2 block pl-[80px] pr-7">
+              <span className={labelClass}>Reference note (optional)</span>
+              <input value={video.minimaxH3.referenceNotes[0]} onChange={(event) => setMiniMaxReferenceNote(0, event.target.value)} placeholder="e.g. preserve character identity and jacket" className={inputClass} />
+            </label>
+            <FrameSourceField
+              label="Reference Image 2 (optional)"
+              path={video.middleImagePath}
+              onChange={(path) => setVideo((current) => ({ ...current, middleImagePath: path, middleImageName: '' }))}
+              onClear={() => setVideo((current) => ({ ...current, middleImagePath: '', middleImageName: '' }))}
+            />
+            <label className="mb-2 block pl-[80px] pr-7">
+              <span className={labelClass}>Reference note (optional)</span>
+              <input value={video.minimaxH3.referenceNotes[1]} onChange={(event) => setMiniMaxReferenceNote(1, event.target.value)} placeholder="e.g. preserve the environment and lighting" className={inputClass} />
+            </label>
+            <FrameSourceField
+              label="Reference Image 3 (optional)"
+              path={video.lastImagePath}
+              onChange={(path) => setVideo((current) => ({ ...current, lastImagePath: path, lastImageName: '' }))}
+              onClear={() => setVideo((current) => ({ ...current, lastImagePath: '', lastImageName: '' }))}
+            />
+            <label className="mb-2 block pl-[80px] pr-7">
+              <span className={labelClass}>Reference note (optional)</span>
+              <input value={video.minimaxH3.referenceNotes[2]} onChange={(event) => setMiniMaxReferenceNote(2, event.target.value)} placeholder="e.g. preserve the color palette and set dressing" className={inputClass} />
+            </label>
+            <div className="mt-2 max-w-xs">
+              <SelectField
+                label="Reference Image Fit"
+                value={video.minimaxH3.referenceImageSize}
+                values={['match', 'max']}
+                onChange={(value) => setMiniMaxH3('referenceImageSize', value === 'max' ? 'max' : 'match')}
+              />
+            </div>
           </VideoAccordion>
         ) : video.mode === 'image_to_video' ? (
           <VideoAccordion
@@ -1746,7 +1836,7 @@ export function UmbraVideoGenerationControls({
           activeSegmentId={activePromptSegmentId}
           onChange={setPromptSegments}
           onActiveSegmentChange={setActivePromptSegmentId}
-          heading={agentModeEnabled ? 'Video Prompt Request' : 'Video Prompt'}
+          heading={video.mode === 'reference_to_video' ? 'Reference Shot Direction' : agentModeEnabled ? 'Video Prompt Request' : 'Video Prompt'}
           history={promptHistory}
           onRememberCurrent={rememberCurrentPrompt}
           onRestoreHistory={restorePromptHistoryEntry}
@@ -1764,12 +1854,38 @@ export function UmbraVideoGenerationControls({
             frames: video.frames,
             fps: video.fps,
             frameGuideMode: video.frameGuideMode,
+            referenceNotes: video.mode === 'reference_to_video' ? video.minimaxH3.referenceNotes : [],
+            referenceImageSize: video.mode === 'reference_to_video' ? video.minimaxH3.referenceImageSize : '',
           }}
           onAgentEnhancementApplied={() => {
             setAgentModeEnabled(false);
             setAgentPrompt('');
           }}
         />
+        {video.family === 'minimax_h3' ? <UmbraInlineAgentPrompt
+          mediaType="video"
+          sourcePrompt={agentModeEnabled && agentPrompt.trim() ? agentPrompt : prompt}
+          enabled={autoPrompterEnabled}
+          onEnabledChange={setAutoPrompterEnabled}
+          agentPrompt={autoPrompterPrompt}
+          onAgentPromptChange={setAutoPrompterPrompt}
+          onSubmit={() => { void handleQueue(); }}
+          accent="fuchsia"
+          title="Auto Prompter"
+          subtitle="Optional MiniMax H3 prompt pass"
+          context={{
+            family: video.family,
+            mode: video.mode,
+            pipeline: pipelineMatch.workflow?.name || '',
+            width: targetDimensions.targetWidth,
+            height: targetDimensions.targetHeight,
+            frames: video.frames,
+            fps: video.fps,
+            frameGuideMode: video.frameGuideMode,
+            referenceNotes: video.mode === 'reference_to_video' ? video.minimaxH3.referenceNotes : [],
+            referenceImageSize: video.mode === 'reference_to_video' ? video.minimaxH3.referenceImageSize : '',
+          }}
+        /> : null}
         <UmbraInlineAgentPrompt
           mediaType="video"
           sourcePrompt={prompt}
@@ -1788,6 +1904,8 @@ export function UmbraVideoGenerationControls({
             frames: video.frames,
             fps: video.fps,
             frameGuideMode: video.frameGuideMode,
+            referenceNotes: video.mode === 'reference_to_video' ? video.minimaxH3.referenceNotes : [],
+            referenceImageSize: video.mode === 'reference_to_video' ? video.minimaxH3.referenceImageSize : '',
           }}
         />
         </>}
@@ -1927,13 +2045,13 @@ export function UmbraVideoGenerationControls({
         >
           {video.family === 'wan22' ? (
             <>
-            <SelectField label="High Noise LoRA" value={video.wan.highLora} values={catalog.loras} onChange={(value) => setWan('highLora', value)} />
+            <VideoResourceField label="High Noise LoRA" value={video.wan.highLora} values={catalog.loras} kind="lora" onChange={(value) => setWan('highLora', value)} onChoose={setResourcePicker} />
             <NumberField label="High LoRA Strength" value={video.wan.highLoraStrength} step={0.05} onChange={(value) => setWan('highLoraStrength', value)} />
-            <SelectField label="Low Noise LoRA" value={video.wan.lowLora} values={catalog.loras} onChange={(value) => setWan('lowLora', value)} />
+            <VideoResourceField label="Low Noise LoRA" value={video.wan.lowLora} values={catalog.loras} kind="lora" onChange={(value) => setWan('lowLora', value)} onChoose={setResourcePicker} />
             <NumberField label="Low LoRA Strength" value={video.wan.lowLoraStrength} step={0.05} onChange={(value) => setWan('lowLoraStrength', value)} />
-            <SelectField label="Text Encoder" value={video.wan.textEncoder} values={catalog.textEncoders} onChange={(value) => setWan('textEncoder', value)} />
-            <SelectField label="VAE" value={video.wan.vae} values={catalog.vaes} onChange={(value) => setWan('vae', value)} />
-            {video.mode === 'image_to_video' ? <SelectField label="Vision Encoder" value={video.wan.clipVision} values={catalog.clipVision} onChange={(value) => setWan('clipVision', value)} /> : null}
+            <VideoResourceField label="Text Encoder" value={video.wan.textEncoder} values={catalog.textEncoders} onChange={(value) => setWan('textEncoder', value)} onChoose={setResourcePicker} />
+            <VideoResourceField label="VAE" value={video.wan.vae} values={catalog.vaes} onChange={(value) => setWan('vae', value)} onChoose={setResourcePicker} />
+            {video.mode === 'image_to_video' ? <VideoResourceField label="Vision Encoder" value={video.wan.clipVision} values={catalog.clipVision} onChange={(value) => setWan('clipVision', value)} onChoose={setResourcePicker} /> : null}
             <div className="grid grid-cols-2 gap-2">
               <NumberField label="Total Steps" value={video.wan.steps} min={2} max={10000} onChange={(value) => setWan('steps', value)} />
               <NumberField label="Split Step" value={video.wan.splitStep} min={1} max={Math.max(1, video.wan.steps - 1)} onChange={(value) => setWan('splitStep', value)} />
@@ -1949,12 +2067,16 @@ export function UmbraVideoGenerationControls({
             </>
           ) : video.family === 'minimax_h3' ? (
             <>
-              <SelectField label="Text Encoder" value={video.minimaxH3.textEncoder} values={catalog.textEncoders} onChange={(value) => setMiniMaxH3('textEncoder', value)} />
-              <SelectField label="Video VAE" value={video.minimaxH3.videoVae} values={catalog.vaes} onChange={(value) => setMiniMaxH3('videoVae', value)} />
-              <SelectField label="Audio VAE" value={video.minimaxH3.audioVae} values={catalog.vaes} onChange={(value) => setMiniMaxH3('audioVae', value)} />
+              <VideoResourceField label="Text Encoder" value={video.minimaxH3.textEncoder} values={catalog.textEncoders} onChange={(value) => setMiniMaxH3('textEncoder', value)} onChoose={setResourcePicker} />
+              <VideoResourceField label="Video VAE" value={video.minimaxH3.videoVae} values={catalog.vaes} onChange={(value) => setMiniMaxH3('videoVae', value)} onChoose={setResourcePicker} />
+              <VideoResourceField label="Audio VAE" value={video.minimaxH3.audioVae} values={catalog.vaes} onChange={(value) => setMiniMaxH3('audioVae', value)} onChoose={setResourcePicker} />
               <div className="grid grid-cols-2 gap-2">
                 <NumberField label="Sampling Steps" value={video.minimaxH3.steps} min={1} max={1000} onChange={(value) => setMiniMaxH3('steps', value)} />
                 <SelectField label="Sampler" value={video.minimaxH3.samplerName} values={['res_multistep']} onChange={(value) => setMiniMaxH3('samplerName', value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <NumberField label="Video Shift" value={video.minimaxH3.shiftVideo} min={0.01} max={100} step={0.01} onChange={(value) => setMiniMaxH3('shiftVideo', value)} />
+                <NumberField label="Audio Shift" value={video.minimaxH3.shiftAudio} min={0.01} max={100} step={0.01} onChange={(value) => setMiniMaxH3('shiftAudio', value)} />
               </div>
               <SelectField label="Scheduler" value={video.minimaxH3.scheduler} values={['simple']} onChange={(value) => setMiniMaxH3('scheduler', value)} />
               <p className="rounded-md border border-fuchsia-300/15 bg-fuchsia-500/[0.045] px-2.5 py-2 font-mono text-[9px] leading-relaxed text-zinc-400">
@@ -1963,11 +2085,11 @@ export function UmbraVideoGenerationControls({
             </>
           ) : (
             <>
-            <SelectField label="Text Encoder" value={video.ltx.textEncoder} values={catalog.textEncoders} onChange={(value) => setLtx('textEncoder', value)} />
+            <VideoResourceField label="Text Encoder" value={video.ltx.textEncoder} values={catalog.textEncoders} onChange={(value) => setLtx('textEncoder', value)} onChoose={setResourcePicker} />
             <div className="grid grid-cols-[minmax(0,1fr)_90px] gap-2">
-              <SelectField label="Distilled Model LoRA" value={video.ltx.distilledLora} values={catalog.loras} onChange={(value) => setLtx('distilledLora', value)} />
+              <VideoResourceField label="Distilled Model LoRA" value={video.ltx.distilledLora} values={catalog.loras} kind="lora" onChange={(value) => setLtx('distilledLora', value)} onChoose={setResourcePicker} />
               <NumberField label="Strength" value={video.ltx.distilledLoraStrength} step={0.05} onChange={(value) => setLtx('distilledLoraStrength', value)} />
-              <SelectField label="Prompt LoRA" value={video.ltx.promptLora} values={catalog.loras} onChange={(value) => setLtx('promptLora', value)} />
+              <VideoResourceField label="Prompt LoRA" value={video.ltx.promptLora} values={catalog.loras} kind="lora" onChange={(value) => setLtx('promptLora', value)} onChoose={setResourcePicker} />
               <NumberField label="Strength" value={video.ltx.promptLoraStrength} step={0.05} onChange={(value) => setLtx('promptLoraStrength', value)} />
             </div>
             <div className="grid grid-cols-2 gap-1.5">
@@ -2004,8 +2126,8 @@ export function UmbraVideoGenerationControls({
                 ) : null}
               </div>
             ) : null}
-            {video.ltx.twoStage ? <SelectField label="Latent Upscale Model" value={video.ltx.latentUpscaleModel} values={catalog.latentUpscaleModels} onChange={(value) => setLtx('latentUpscaleModel', value)} /> : null}
-            {video.ltx.audioEnabled ? <SelectField label="Audio VAE" value={video.ltx.audioVae} values={catalog.checkpoints} onChange={(value) => setLtx('audioVae', value)} /> : null}
+            {video.ltx.twoStage ? <VideoResourceField label="Latent Upscale Model" value={video.ltx.latentUpscaleModel} values={catalog.latentUpscaleModels} onChange={(value) => setLtx('latentUpscaleModel', value)} onChoose={setResourcePicker} /> : null}
+            {video.ltx.audioEnabled ? <VideoResourceField label="Audio VAE" value={video.ltx.audioVae} values={catalog.vaes} onChange={(value) => setLtx('audioVae', value)} onChoose={setResourcePicker} /> : null}
             {video.mode === 'image_to_video' ? (
               <div className="grid grid-cols-2 gap-2">
                 <NumberField label="Image Strength" value={video.ltx.imageStrength} min={0} max={1} step={0.05} onChange={(value) => setLtx('imageStrength', value)} />
@@ -2085,6 +2207,32 @@ export function UmbraVideoGenerationControls({
           )}
         </VideoAccordion>
 
+        {video.family === 'minimax_h3' ? <VideoAccordion
+          title="MiniMax Acceleration"
+          icon={<Gauge size={11} className="text-fuchsia-300" />}
+          summary={[
+            video.minimaxH3.sageAttention === 'auto' ? 'sage' : '',
+            video.minimaxH3.easyCacheEnabled ? 'cache' : '',
+            video.minimaxH3.allowCompile ? 'compile' : '',
+          ].filter(Boolean).join(' + ') || 'off'}
+        >
+          <div className="space-y-2.5">
+            <div className="grid grid-cols-2 gap-1.5">
+              <ToggleButton active={video.minimaxH3.sageAttention === 'auto'} label="Sage Attention" onClick={() => setMiniMaxH3('sageAttention', video.minimaxH3.sageAttention === 'auto' ? 'disabled' : 'auto')} />
+              <ToggleButton active={video.minimaxH3.allowCompile} label="Compile" onClick={() => setMiniMaxH3('allowCompile', !video.minimaxH3.allowCompile)} />
+            </div>
+            <ToggleButton active={video.minimaxH3.easyCacheEnabled} label="EasyCache" onClick={() => setMiniMaxH3('easyCacheEnabled', !video.minimaxH3.easyCacheEnabled)} />
+            {video.minimaxH3.easyCacheEnabled ? <div className="grid grid-cols-3 gap-2">
+              <NumberField label="Threshold" value={video.minimaxH3.easyCacheReuseThreshold} min={0} max={3} step={0.01} onChange={(value) => setMiniMaxH3('easyCacheReuseThreshold', value)} />
+              <NumberField label="Start" value={video.minimaxH3.easyCacheStartPercent} min={0} max={1} step={0.01} onChange={(value) => setMiniMaxH3('easyCacheStartPercent', value)} />
+              <NumberField label="End" value={video.minimaxH3.easyCacheEndPercent} min={0} max={1} step={0.01} onChange={(value) => setMiniMaxH3('easyCacheEndPercent', value)} />
+            </div> : null}
+            <p className="rounded-md border border-fuchsia-300/15 bg-fuchsia-500/[0.045] px-2.5 py-2 font-mono text-[9px] leading-relaxed text-zinc-400">
+              Mirrors the accelerated MiniMax workflow. Compile can improve repeat-run speed after an initial warmup; disable it when diagnosing compatibility or memory pressure.
+            </p>
+          </div>
+        </VideoAccordion> : null}
+
         <VideoAccordion
           title="Decode Memory"
           icon={<Gauge size={11} className="text-zinc-500" />}
@@ -2113,6 +2261,7 @@ export function UmbraVideoGenerationControls({
           summary={[
             video.postprocess.interpolationEnabled ? 'interpolation' : '',
             video.postprocess.upscaleMode !== 'none' ? video.postprocess.upscaleMode : '',
+            video.postprocess.rtxVsrEnabled ? 'rtx vsr' : '',
           ].filter(Boolean).join(' + ') || 'off'}
         >
           <div className="space-y-3">
@@ -2123,31 +2272,31 @@ export function UmbraVideoGenerationControls({
             />
             {video.postprocess.interpolationEnabled ? (
               <div className="grid grid-cols-[minmax(0,1fr)_90px] gap-2">
-                <SelectField label="Interpolation Model" value={video.postprocess.interpolationModel} values={catalog.frameInterpolationModels} onChange={(value) => setPostprocess('interpolationModel', value)} />
+                <VideoResourceField label="Interpolation Model" value={video.postprocess.interpolationModel} values={catalog.frameInterpolationModels} onChange={(value) => setPostprocess('interpolationModel', value)} onChoose={setResourcePicker} />
                 <NumberField label="Multiplier" value={video.postprocess.interpolationMultiplier} min={2} max={16} onChange={(value) => setPostprocess('interpolationMultiplier', value)} />
               </div>
             ) : null}
             <div className="space-y-1.5">
               <div className="flex items-center gap-2"><Scaling size={11} className="text-zinc-600" /><span className={labelClass}>Upscale</span></div>
-              <div className="grid grid-cols-4 gap-1.5">
+              <div className="grid grid-cols-3 gap-1.5">
                 <ToggleButton active={video.postprocess.upscaleMode === 'none'} label="None" onClick={() => setPostprocess('upscaleMode', 'none')} />
                 <ToggleButton active={video.postprocess.upscaleMode === 'lanczos'} label="Lanczos" onClick={() => setPostprocess('upscaleMode', 'lanczos')} />
                 <ToggleButton active={video.postprocess.upscaleMode === 'model'} label="Model" onClick={() => setPostprocess('upscaleMode', 'model')} />
-                <ToggleButton
-                  active={video.postprocess.upscaleMode === 'rtx'}
-                  label="NVIDIA RTX"
-                  onClick={() => setPostprocess('upscaleMode', 'rtx')}
-                  disabled={!catalog.rtxAvailable}
-                  title={catalog.rtxAvailable ? 'NVIDIA RTX Video Super Resolution' : 'Install NVIDIA RTX Nodes in the managed ComfyUI runtime'}
-                />
               </div>
+              <ToggleButton
+                active={video.postprocess.rtxVsrEnabled}
+                label="NVIDIA RTX VSR"
+                onClick={() => setPostprocess('rtxVsrEnabled', !video.postprocess.rtxVsrEnabled)}
+                disabled={!catalog.rtxAvailable}
+                title={catalog.rtxAvailable ? 'Apply NVIDIA RTX Video Super Resolution after the selected upscale stage.' : 'Install NVIDIA RTX Nodes in the managed ComfyUI runtime'}
+              />
             </div>
             {video.postprocess.upscaleMode !== 'none' ? (
               <div className="space-y-2">
                 {video.postprocess.upscaleMode === 'model' ? (
-                  <SelectField label="Upscale Model" value={video.postprocess.upscaleModel} values={catalog.upscaleModels} onChange={(value) => setPostprocess('upscaleModel', value)} />
+                  <VideoResourceField label="Upscale Model" value={video.postprocess.upscaleModel} values={catalog.upscaleModels} onChange={(value) => setPostprocess('upscaleModel', value)} onChoose={setResourcePicker} />
                 ) : null}
-                {video.postprocess.upscaleMode === 'rtx' ? (
+                {video.postprocess.rtxVsrEnabled ? (
                   <SelectField
                     label="RTX Quality"
                     value={video.postprocess.rtxQuality}
@@ -2231,6 +2380,23 @@ export function UmbraVideoGenerationControls({
         onClose={() => setExtendedEnabled(false)}
       />
     ) : null}
+    <UmbraModelPickerModal
+      open={resourcePicker !== null}
+      kind={resourcePicker?.kind || 'checkpoint'}
+      items={resourcePicker?.values || []}
+      selectedValue={resourcePicker?.value || ''}
+      catalogLoading={catalog.loading}
+      onClose={() => setResourcePicker(null)}
+      onRefresh={onRefreshCatalog}
+      onConfirm={(name) => {
+        resourcePicker?.onChange(name);
+        setResourcePicker(null);
+      }}
+      titleOverride={resourcePicker ? `${resourcePicker.label} Browser` : undefined}
+      searchPlaceholder={resourcePicker ? `Search ${resourcePicker.label.toLowerCase()} files...` : undefined}
+      confirmLabel={resourcePicker ? `Use ${resourcePicker.label}` : undefined}
+      showSourceFilter={false}
+    />
     </>
   );
 }

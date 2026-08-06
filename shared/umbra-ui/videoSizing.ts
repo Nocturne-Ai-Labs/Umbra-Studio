@@ -77,6 +77,7 @@ export interface UmbraVideoSizingInput {
   ltxTwoStage: boolean;
   upscaleMode: UmbraVideoSizingUpscaleMode;
   upscaleScale: number;
+  rtxVsrEnabled?: boolean;
 }
 
 export interface UmbraVideoSizingResult {
@@ -170,7 +171,7 @@ export function resolveUmbraVideoSizing(input: UmbraVideoSizingInput): UmbraVide
   const targetWidth = alignDimension(input.width, 8);
   const targetHeight = alignDimension(input.height, 8);
   const latentScale = input.family === 'ltx23' && input.ltxTwoStage ? 2 : 1;
-  const postprocessScale = input.upscaleMode === 'none'
+  const postprocessScale = input.upscaleMode === 'none' && !input.rtxVsrEnabled
     ? 1
     : clamp(Number(input.upscaleScale) || 2, 1, 4);
   // LTX's spatial latent upscaler requires a 32px-aligned base canvas.

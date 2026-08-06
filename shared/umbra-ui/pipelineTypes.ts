@@ -7,6 +7,7 @@ export type UmbraUiPipelineFeature =
   | 'inpainting'
   | 'txt2vid'
   | 'img2vid'
+  | 'ref2vid'
   | 'vid2vid'
   | 'upscale';
 
@@ -323,12 +324,16 @@ export function normalizeUmbraUiPipelineFeature(value: unknown): UmbraUiPipeline
     text2video: 'txt2vid',
     image_to_video: 'img2vid',
     image2video: 'img2vid',
+    reference_to_video: 'ref2vid',
+    reference2video: 'ref2vid',
+    ref_to_video: 'ref2vid',
+    ref2video: 'ref2vid',
     video_to_video: 'vid2vid',
     video2video: 'vid2vid',
     extras: 'upscale',
   };
   const candidate = aliases[normalized] || normalized;
-  return ['txt2img', 'img2img', 'inpainting', 'txt2vid', 'img2vid', 'vid2vid', 'upscale'].includes(candidate)
+  return ['txt2img', 'img2img', 'inpainting', 'txt2vid', 'img2vid', 'ref2vid', 'vid2vid', 'upscale'].includes(candidate)
     ? candidate as UmbraUiPipelineFeature
     : null;
 }

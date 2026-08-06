@@ -18,7 +18,7 @@ export type PowerPrompterModelType = 'checkpoint' | 'diffusers' | 'diffusion_mod
 export type PowerPrompterMediaType = 'image' | 'video';
 export type PowerPrompterHiresResizeMode = 'scale' | 'dimensions';
 export type PowerPrompterVideoFamily = 'wan22' | 'ltx23' | 'minimax_h3';
-export type PowerPrompterVideoMode = 'text_to_video' | 'image_to_video' | 'video_to_video';
+export type PowerPrompterVideoMode = 'text_to_video' | 'image_to_video' | 'reference_to_video' | 'video_to_video';
 export type PowerPrompterVideoFrameGuideMode = 'first' | 'first_last' | 'first_middle_last';
 export type PowerPrompterVideoDecodeMode = 'auto' | 'full' | 'tiled';
 export type PowerPrompterVideoUpscaleMode = 'none' | 'lanczos' | 'model' | 'rtx';
@@ -107,6 +107,16 @@ export interface PowerPrompterMiniMaxH3VideoControls {
   textEncoder: string;
   videoVae: string;
   audioVae: string;
+  shiftVideo: number;
+  shiftAudio: number;
+  referenceImageSize: 'match' | 'max';
+  referenceNotes: [string, string, string];
+  sageAttention: 'auto' | 'disabled';
+  allowCompile: boolean;
+  easyCacheEnabled: boolean;
+  easyCacheReuseThreshold: number;
+  easyCacheStartPercent: number;
+  easyCacheEndPercent: number;
   steps: number;
   scheduler: string;
   samplerName: string;
@@ -128,6 +138,7 @@ export interface PowerPrompterVideoPostprocessControls {
   upscaleModel: string;
   upscaleScale: number;
   maxDimension: number;
+  rtxVsrEnabled: boolean;
   rtxQuality: PowerPrompterVideoRtxQuality;
 }
 
@@ -259,7 +270,7 @@ export interface PowerPrompterImg2ImgControls {
 }
 
 export type PowerPrompterOutputOwner = 'power_prompter' | 'umbra_ui';
-export type UmbraUiOutputMode = 'txt2img' | 'img2img' | 'img2vid' | 'txt2vid' | 'vid2vid' | 'inpainting' | 'extras';
+export type UmbraUiOutputMode = 'txt2img' | 'img2img' | 'img2vid' | 'ref2vid' | 'txt2vid' | 'vid2vid' | 'inpainting' | 'extras';
 
 export interface PowerPrompterGenerationControls {
   mediaType?: PowerPrompterMediaType;

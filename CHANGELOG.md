@@ -1,67 +1,60 @@
 # Changelog
 
-## v0.30.4
+## v0.30.5
 
 ### TL;DR - Setup After Updating
 
-No additional models, custom nodes, or setup steps are required for this
-update. Update Umbra Studio normally and restart it if it is already open.
+**Umbra UI Video is now marked Beta.** It is ready for feedback, but advanced
+or production-specific video work may still be better served by a custom
+ComfyUI workflow. MiniMax H3 users should update managed ComfyUI from
+**Neural Hub**, then run `Install-Umbra-UI-Models.bat` on Windows or
+`./install-umbra-ui-models.sh` on Linux and select **MiniMax H3**. Install the
+optional RTX video resources only when using NVIDIA RTX VSR or frame
+interpolation.
 
-### Power Prompter Reordering
+### MiniMax H3 Video Pipeline
 
-- Fixed the Power Prompter variant Up and Down controls so enabled variants
-  move reliably within the active queue set.
-- Preserved each set's independent variant positions when a card belongs to
-  more than one set.
-- Kept the first and last variant boundary controls disabled in the correct
-  direction.
+- Added explicit MiniMax H3 video and audio sigma-shift controls, defaulting
+  to video shift `10` and audio shift `5`.
+- Added staged video post-processing: model or Lanczos upscale can run before
+  NVIDIA RTX Video Super Resolution, with the requested output size preserved.
+- Added the MiniMax H3 image-to-video workflow's accelerated attention and
+  cache topology to Umbra-managed pipeline generation.
+- Marked the Umbra UI Video workspace with a visible **Beta** tag so its
+  current feedback-stage status is clear before entering the workflow.
 
 ### Fixes And Quality-of-Life Recap
 
-- **Fixed:** Power Prompter arrow moves could be discarded during document
-  normalization, causing the card to snap back to its previous position.
-- **Fixed:** Reordering could use a card's global position instead of its
-  position among enabled variants in the active set.
-- **Improved:** Up and Down movement now updates the visible card order and
-  the persisted per-set order together.
+- **Fixed:** MiniMax H3 video and audio shift settings are now included in the
+  dispatched ComfyUI workflow.
+- **Fixed:** RTX VSR can follow the selected model/Lanczos video upscale stage
+  instead of replacing it.
+- **Improved:** Video output sizing now keeps the requested final resolution
+  while sampling at the lower post-process base resolution where appropriate.
 
-## v0.30.3
+## v0.30.4 - Hotfix
 
 ### TL;DR - Setup After Updating
 
-No additional models, custom nodes, or setup steps are required for this
-update. Update Umbra Studio normally, restart it, and refresh the Umbra UI
-video workspace. The new MiniMax H3 agent instruction is included automatically
-and follows the active video model family.
+No additional model downloads are required for this update. **Agent Settings
+is still work in progress**: Hermes/Ollama provider selection, model catalogs,
+thinking levels, and persistence are present for testing but may still need
+polish and should not be treated as a finalized production workflow.
 
-### Video Agent Prompting
+### Agent Settings Work In Progress
 
-- Added a dedicated **MiniMax H3 Motion Prompt** instruction for concise,
-  continuous-shot text-to-video and image-to-video prompts.
-- MiniMax H3 now selects its matching agent instruction by default while still
-  allowing users to choose another saved video instruction.
-- LTX-2.3 continues to use its separate natural-language director instruction.
-
-### Duration Controls And Prompt Cleanup
-
-- Removed the accidental duration ceiling from MiniMax H3 and LTX-2.3 video
-  controls and the video review queue editor.
-- Fixed duration decrement controls getting stuck when a requested value mapped
-  back to the same model-valid frame count.
-- Numeric duration fields now support direct editing without clearing or
-  overwriting partially typed values.
-- Removed Hermes terminal reasoning boxes, status borders, and prompt-composing
-  text from agent output before it reaches the generation workflow.
+- Added provider-aware model catalog refresh for Ollama and Hermes.
+- Added selectable thinking levels where the selected provider/model supports
+  them.
+- Improved preservation of the server-provided model catalog when a refresh is
+  unavailable.
 
 ### Fixes And Quality-of-Life Recap
 
-- **Fixed:** MiniMax H3 and LTX-2.3 duration controls could stop responding
-  around a frame-grid boundary.
-- **Fixed:** Directly typing a duration could be interrupted by controlled-field
-  updates.
-- **Fixed:** Hermes reasoning/status output could leak into generated prompts.
-- **Improved:** MiniMax H3 video prompting now has a model-specific default
-  instruction.
+- **Fixed:** Switching agent providers now refreshes the selected provider's
+  model catalog instead of only refreshing Ollama.
+- **Improved:** Agent model selection remains available when a provider refresh
+  temporarily returns no models.
 
 ## v0.30.2
 

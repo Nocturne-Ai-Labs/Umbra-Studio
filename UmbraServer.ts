@@ -2942,6 +2942,11 @@ function withRemoteAdminGuard(req: Request, url: URL, server?: RequestIpServer):
   return json({ error: 'Remote administration is only available from the host browser.' }, 403);
 }
 
+function withRemoteAgentGuard(req: Request, url: URL, server?: RequestIpServer): Response | null {
+  if (isPublishedRemoteRequestAllowed(req, url, server)) return null;
+  return json({ error: 'Umbra agent access is available only to the host and trusted Umbra Remote clients.' }, 403);
+}
+
 function buildRemoteHealthCheckUrl(rawUrl: unknown): { baseUrl: string; checkUrl: string } | null {
   const baseUrl = normalizeRemoteUrl(rawUrl);
   if (!baseUrl) return null;
@@ -6200,7 +6205,7 @@ function getPPApiNodeRole(node: any): string {
   return String(node?._meta?.umbra_role || '').trim().toLowerCase();
 }
 
-const UMBRA_UI_OUTPUT_MODES = new Set(['txt2img', 'img2img', 'img2vid', 'txt2vid', 'vid2vid', 'inpainting', 'pose', 'extras']);
+const UMBRA_UI_OUTPUT_MODES = new Set(['txt2img', 'img2img', 'img2vid', 'ref2vid', 'txt2vid', 'vid2vid', 'inpainting', 'pose', 'extras']);
 
 function getUmbraUiOutputMode(generation: PowerPrompterGenerationControls): string {
   const requested = String(generation.outputMode || '').trim().toLowerCase();
@@ -6208,6 +6213,7 @@ function getUmbraUiOutputMode(generation: PowerPrompterGenerationControls): stri
   if (generation.mediaType === 'video') {
     return generation.video?.mode === 'video_to_video'
       ? 'vid2vid'
+      : generation.video?.mode === 'reference_to_video' ? 'ref2vid'
       : generation.video?.mode === 'image_to_video' ? 'img2vid' : 'txt2vid';
   }
   return 'txt2img';
@@ -6244,6 +6250,7 @@ function applyPPVideoRoleToApiNode(
     ltxTwoStage: ltx.twoStage,
     upscaleMode: video.postprocess.upscaleMode,
     upscaleScale: video.postprocess.upscaleScale,
+    rtxVsrEnabled: video.postprocess.rtxVsrEnabled,
   });
   switch (role) {
     case 'positive_prompt':
@@ -6259,6 +6266,15 @@ function applyPPVideoRoleToApiNode(
       return true;
     case 'last_image':
       setPPApiNodeInput(node, 'image', video.lastImageName || 'example-last-frame.png');
+      return true;
+    case 'reference_image_0':
+      setPPApiNodeInput(node, 'image', video.sourceImageName || 'reference-1.png');
+      return true;
+    case 'reference_image_1':
+      setPPApiNodeInput(node, 'image', video.middleImageName || 'reference-2.png');
+      return true;
+    case 'reference_image_2':
+      setPPApiNodeInput(node, 'image', video.lastImageName || 'reference-3.png');
       return true;
     case 'source_video':
       setPPApiNodeInput(node, 'file', video.sourceVideoName || 'umbra-vid2vid-source.mp4');
@@ -6404,9 +6420,17 @@ function applyPPVideoRoleToApiNode(
       setPPApiNodeInput(node, 'width', sizing.samplingWidth);
       setPPApiNodeInput(node, 'height', sizing.samplingHeight);
       setPPApiNodeInput(node, 'length', normalizeMiniMaxH3VideoFrames(video.frames));
-      if (video.frameGuideMode !== 'first_last' || !video.lastImageName) {
+      if (video.mode === 'reference_to_video') {
+        setPPApiNodeInput(node, 'ref_image_size', minimaxH3.referenceImageSize);
+      }
+      if (video.mode === 'image_to_video' && (video.frameGuideMode !== 'first_last' || !video.lastImageName)) {
         delete node.inputs.last_frame;
       }
+      return true;
+    case 'minimax_h3_sage_attention':
+    case 'minimax_h3_easycache':
+      // These nodes are wired after roles are collected so either acceleration
+      // stage can be removed from the active path without changing the graph.
       return true;
     case 'minimax_h3_noise':
       setPPApiNodeInput(node, 'noise_seed', activeSeed);
@@ -6554,6 +6578,7 @@ function applyPPVideoPostProcessing(
     ltxTwoStage: video.ltx.twoStage,
     upscaleMode: postprocess.upscaleMode,
     upscaleScale: postprocess.upscaleScale,
+    rtxVsrEnabled: postprocess.rtxVsrEnabled,
   });
 
   if (postprocess.interpolationEnabled && postprocess.interpolationModel) {
@@ -6577,21 +6602,7 @@ function applyPPVideoPostProcessing(
     outputFps *= postprocess.interpolationMultiplier;
   }
 
-  if (postprocess.upscaleMode === 'rtx') {
-    const upscaleId = addPPApiPromptNode(
-      promptGraph,
-      'RTXVideoSuperResolution',
-      {
-        images: currentImages,
-        resize_type: 'target dimensions',
-        'resize_type.width': sizing.targetWidth,
-        'resize_type.height': sizing.targetHeight,
-        quality: postprocess.rtxQuality,
-      },
-      'Umbra NVIDIA RTX Video Super Resolution',
-    );
-    currentImages = [upscaleId, 0];
-  } else if (postprocess.upscaleMode !== 'none' || sizing.requiresFinalResize) {
+  if (postprocess.upscaleMode !== 'none' || (!postprocess.rtxVsrEnabled && sizing.requiresFinalResize)) {
     const resolvedMode = postprocess.upscaleMode === 'model' ? 'model' : 'lanczos';
     const upscaleInputs: Record<string, unknown> = {
       images: currentImages,
@@ -6610,6 +6621,22 @@ function applyPPVideoPostProcessing(
       'UmbraVideoUpscale',
       upscaleInputs,
       postprocess.upscaleMode === 'none' ? 'Umbra Video Target Fit' : 'Umbra Video Upscale',
+    );
+    currentImages = [upscaleId, 0];
+  }
+
+  if (postprocess.rtxVsrEnabled) {
+    const upscaleId = addPPApiPromptNode(
+      promptGraph,
+      'RTXVideoSuperResolution',
+      {
+        images: currentImages,
+        resize_type: 'target dimensions',
+        'resize_type.width': sizing.targetWidth,
+        'resize_type.height': sizing.targetHeight,
+        quality: postprocess.rtxQuality,
+      },
+      'Umbra NVIDIA RTX Video Super Resolution',
     );
     currentImages = [upscaleId, 0];
   }
@@ -6787,6 +6814,69 @@ function applyPPWanVid2VidTopology(
   }
   setPPApiNodeInput(low.node, 'end_at_step', steps);
   setPPApiNodeInput(low.node, 'return_with_leftover_noise', 'disable');
+}
+
+function applyPPMiniMaxH3ReferenceTopology(
+  roleEntries: Map<string, { id: string; node: any }>,
+  generation: PowerPrompterGenerationControls,
+) {
+  const video = generation.video;
+  if (generation.mediaType !== 'video' || !video || video.family !== 'minimax_h3' || video.mode !== 'reference_to_video') return;
+  const conditioning = roleEntries.get('minimax_h3_conditioning');
+  const first = roleEntries.get('reference_image_0');
+  if (!conditioning || !first) throw new Error('The locked MiniMax H3 reference pipeline is missing its conditioning or first reference image role.');
+  const references: Record<string, unknown> = { ref_image_0: [first.id, 0] };
+  const optionalReferences: Array<[string, string, string]> = [
+    ['reference_image_1', 'ref_image_1', video.middleImageName],
+    ['reference_image_2', 'ref_image_2', video.lastImageName],
+  ];
+  for (const [role, inputName, imageName] of optionalReferences) {
+    const reference = roleEntries.get(role);
+    if (reference && imageName) references[inputName] = [reference.id, 0];
+  }
+  setPPApiNodeInput(conditioning.node, 'ref_images', references);
+}
+
+function applyPPMiniMaxH3AccelerationTopology(
+  roleEntries: Map<string, { id: string; node: any }>,
+  generation: PowerPrompterGenerationControls,
+) {
+  const video = generation.video;
+  if (generation.mediaType !== 'video' || !video || video.family !== 'minimax_h3') return;
+
+  const source = roleEntries.get('minimax_h3_model');
+  const sageAttention = roleEntries.get('minimax_h3_sage_attention');
+  const sigmaShift = roleEntries.get('minimax_h3_sigma_shift');
+  const easyCache = roleEntries.get('minimax_h3_easycache');
+  const guider = roleEntries.get('minimax_h3_guider');
+  const scheduler = roleEntries.get('minimax_h3_scheduler');
+  if (!source || !guider || !scheduler) {
+    throw new Error('The locked MiniMax H3 pipeline is missing its model, guider, or scheduler roles.');
+  }
+
+  let activeModel: [string, number] = [source.id, 0];
+  if (video.minimaxH3.sageAttention !== 'disabled' && sageAttention) {
+    setPPApiNodeInput(sageAttention.node, 'model', activeModel);
+    setPPApiNodeInput(sageAttention.node, 'sage_attention', 'auto');
+    setPPApiNodeInput(sageAttention.node, 'allow_compile', video.minimaxH3.allowCompile);
+    activeModel = [sageAttention.id, 0];
+  }
+  if (sigmaShift) {
+    setPPApiNodeInput(sigmaShift.node, 'model', activeModel);
+    setPPApiNodeInput(sigmaShift.node, 'shift_video', video.minimaxH3.shiftVideo);
+    setPPApiNodeInput(sigmaShift.node, 'shift_audio', video.minimaxH3.shiftAudio);
+    activeModel = [sigmaShift.id, 0];
+  }
+  if (video.minimaxH3.easyCacheEnabled && easyCache) {
+    setPPApiNodeInput(easyCache.node, 'model', activeModel);
+    setPPApiNodeInput(easyCache.node, 'reuse_threshold', video.minimaxH3.easyCacheReuseThreshold);
+    setPPApiNodeInput(easyCache.node, 'start_percent', video.minimaxH3.easyCacheStartPercent);
+    setPPApiNodeInput(easyCache.node, 'end_percent', video.minimaxH3.easyCacheEndPercent);
+    setPPApiNodeInput(easyCache.node, 'verbose', false);
+    activeModel = [easyCache.id, 0];
+  }
+  setPPApiNodeInput(guider.node, 'model', activeModel);
+  setPPApiNodeInput(scheduler.node, 'model', activeModel);
 }
 
 function trimPPVideoSigmas(rawSigmas: unknown, denoise: number): string {
@@ -7644,6 +7734,8 @@ function compileUmbraUiPipelineWorkflow(
 
   applyPPWanVideoTopology(promptGraph, videoRoleEntries, generation);
   applyPPWanVid2VidTopology(videoRoleEntries, generation);
+  applyPPMiniMaxH3AccelerationTopology(videoRoleEntries, generation);
+  applyPPMiniMaxH3ReferenceTopology(videoRoleEntries, generation);
   applyPPLtxVideoTopology(promptGraph, videoRoleEntries, generation, activePrompt);
   applyPPVideoSourceAudio(promptGraph, videoRoleEntries, generation);
   applyPPVideoPostProcessing(promptGraph, videoRoleEntries, generation);
@@ -15962,7 +16054,7 @@ type PowerPrompterSeedIncrement = 1 | 100 | 1000;
 type PowerPrompterModelType = 'checkpoint' | 'diffusers' | 'diffusion_model' | 'unet' | 'gguf';
 type PowerPrompterMediaType = 'image' | 'video';
 type PowerPrompterVideoFamily = 'wan22' | 'ltx23' | 'minimax_h3';
-type PowerPrompterVideoMode = 'text_to_video' | 'image_to_video' | 'video_to_video';
+type PowerPrompterVideoMode = 'text_to_video' | 'image_to_video' | 'reference_to_video' | 'video_to_video';
 type PowerPrompterVideoFrameGuideMode = 'first' | 'first_last' | 'first_middle_last';
 type PowerPrompterVideoDecodeMode = 'auto' | 'full' | 'tiled';
 type PowerPrompterVideoUpscaleMode = 'none' | 'lanczos' | 'model' | 'rtx';
@@ -16019,6 +16111,7 @@ interface PowerPrompterVideoControls {
     upscaleModel: string;
     upscaleScale: number;
     maxDimension: number;
+    rtxVsrEnabled: boolean;
     rtxQuality: PowerPrompterVideoRtxQuality;
   };
   wan: {
@@ -16075,6 +16168,16 @@ interface PowerPrompterVideoControls {
     textEncoder: string;
     videoVae: string;
     audioVae: string;
+    shiftVideo: number;
+    shiftAudio: number;
+    referenceImageSize: 'match' | 'max';
+    referenceNotes: [string, string, string];
+    sageAttention: 'auto' | 'disabled';
+    allowCompile: boolean;
+    easyCacheEnabled: boolean;
+    easyCacheReuseThreshold: number;
+    easyCacheStartPercent: number;
+    easyCacheEndPercent: number;
     steps: number;
     scheduler: string;
     samplerName: string;
@@ -16120,7 +16223,7 @@ interface PowerPrompterDetailerStage {
 interface PowerPrompterGenerationControls {
   mediaType?: PowerPrompterMediaType;
   outputOwner?: 'power_prompter' | 'umbra_ui';
-  outputMode?: 'txt2img' | 'img2img' | 'img2vid' | 'txt2vid' | 'vid2vid' | 'inpainting' | 'extras';
+  outputMode?: 'txt2img' | 'img2img' | 'img2vid' | 'ref2vid' | 'txt2vid' | 'vid2vid' | 'inpainting' | 'extras';
   outputFolder?: string;
   img2img?: {
     sourceImagePath: string;
@@ -16301,6 +16404,7 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
       upscaleModel: '',
       upscaleScale: 2,
       maxDimension: 3840,
+      rtxVsrEnabled: false,
       rtxQuality: 'ULTRA',
     },
     wan: {
@@ -16355,6 +16459,16 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
       textEncoder: '',
       videoVae: '',
       audioVae: '',
+      shiftVideo: 10,
+      shiftAudio: 5,
+      referenceImageSize: 'match',
+      referenceNotes: ['', '', ''],
+      sageAttention: 'auto',
+      allowCompile: true,
+      easyCacheEnabled: true,
+      easyCacheReuseThreshold: 0.2,
+      easyCacheStartPercent: 0.15,
+      easyCacheEndPercent: 0.95,
       steps: 20,
       scheduler: 'simple',
       samplerName: 'res_multistep',
@@ -16608,6 +16722,7 @@ interface UmbraUiAgentGenerationSettings {
   baseUrl: string;
   model: string;
   hermesProvider: string;
+  thinkingLevel: string;
   apiKey: string;
   temperature: number;
   maxTokens: number;
@@ -16648,6 +16763,7 @@ const DEFAULT_UMBRA_UI_AGENT_GENERATION_SETTINGS: UmbraUiAgentGenerationSettings
   baseUrl: '',
   model: '',
   hermesProvider: '',
+  thinkingLevel: '',
   apiKey: '',
   temperature: 0.7,
   maxTokens: 1200,
@@ -16771,13 +16887,31 @@ function serializeUmbraUiAgentGenerationContext(value: unknown): string {
   }
 }
 
-function cleanHermesPromptOutput(value: string): string {
+function cleanUmbraUiAgentPromptOutput(value: string): string {
   let output = String(value || '')
     .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
     .replace(/\r\n/g, '\n')
     .trim();
-  // Hermes can print its terminal reasoning/status chrome alongside the answer.
-  // Keep the cleanup conservative so legitimate prompt prose is preserved.
+  // Local agents may return hidden reasoning, terminal chrome, or status text
+  // alongside the answer. Strip those transport artifacts before generation.
+  const hasAgentReasoning = /\b(?:the user wants|i need to|let me|i should|context:|return only|that's good|let's refine)\b/i.test(output);
+  if (hasAgentReasoning) {
+    const paragraphs = output
+      .split(/\n\s*\n+/)
+      .map((paragraph) => paragraph.trim())
+      .filter(Boolean);
+    const finalParagraph = [...paragraphs]
+      .reverse()
+      .find((paragraph) => !/^(?:the user wants|context:|i need to|let me|i should|return only|prompt(?:ing)? guidance|complete prompt|umbra generation context|that's good|the subject:)/i.test(paragraph));
+    if (finalParagraph) output = finalParagraph;
+    if (/\b(?:the user wants|i need to|let me|return only|just the prompt text)\b/i.test(output)) {
+      const finalLine = [...output.split('\n')]
+        .map((line) => line.trim())
+        .reverse()
+        .find((line) => line.length >= 40 && !/^(?:the user wants|context:|i need to|let me|i should|return only|prompt(?:ing)? guidance|complete prompt|umbra generation context|that's good|the subject:)/i.test(line));
+      if (finalLine) output = finalLine;
+    }
+  }
   output = output
     .replace(/┌─\s*Reasoning[\s\S]*?┐/i, '')
     .replace(/[┌└]─[^\n]*(?:┐|┘)/g, '')
@@ -16786,6 +16920,14 @@ function cleanHermesPromptOutput(value: string): string {
     .replace(/\b(?:composing|drafting|writing)\s+(?:a\s+)?(?:concise\s+)?(?:image-to-video|video)\s+prompt\b/gi, '')
     .replace(/(^|\n)\s*(?:reasoning|thinking|composing\s+prompt)\s*:?\s*$/gim, '$1')
     .replace(/(^|\n)\s*[┌└│─|_]+\s*(?=\n|$)/g, '$1')
+    .replace(/<\/?(?:think|thinking|reasoning)>[\s\S]*?<\/(?:think|thinking|reasoning)>/gi, '')
+    .replace(/<think(?:ing)?\b[^>]*>[\s\S]*?(?:<\/think(?:ing)?>|$)/gi, '')
+    .replace(/(?:^|\n)\s*[\u250c\u256d]\u2500+\s*(?:reasoning|thinking|analysis)\b[\s\S]*?(?=\n\s*[\u2514\u256f]\u2500+|\n\s*(?:final(?:\s+answer)?|answer)\s*[:\uFF1A])/gi, '\n')
+    .replace(/(^|\n)\s*[\u2502|]\s*/g, '$1')
+    .replace(/(^|\n)\s*(?:[*#_`-]*\s*)?(?:reasoning|thinking|analysis|chain\s+of\s+thought|composing\s+prompt)\s*:?\s*(?:[*#_`-]*\s*)?$/gim, '$1')
+    .replace(/(^|\n)\s*(?:final(?:\s+answer)?|answer|response)\s*[:\uFF1A]\s*/i, '$1')
+    .replace(/[\u2500-\u257f]/g, '')
+    .replace(/(^|\n)\s*[*#_`-]{2,}\s*(?=\n|$)/g, '$1')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   output = output.replace(/^```(?:text|markdown|md)?\s*/i, '').replace(/\s*```$/i, '').trim();
@@ -16829,11 +16971,14 @@ function normalizeUmbraUiAgentGenerationSettings(value: unknown): UmbraUiAgentGe
   const temperature = Number(raw.temperature);
   const maxTokens = Number(raw.maxTokens);
   const timeoutMs = Number(raw.timeoutMs);
+  const thinkingLevel = String(raw.thinkingLevel || '').trim().toLowerCase();
+  const supportedThinkingLevels = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
   return {
     provider,
     baseUrl: clampUmbraUiAgentText(raw.baseUrl, 500) || defaultBaseUrl,
     model: clampUmbraUiAgentText(raw.model, 240),
     hermesProvider: clampUmbraUiAgentText(raw.hermesProvider, 120),
+    thinkingLevel: supportedThinkingLevels.has(thinkingLevel) ? thinkingLevel : '',
     apiKey: clampUmbraUiAgentText(raw.apiKey, 2000),
     temperature: Number.isFinite(temperature) ? Math.max(0, Math.min(2, temperature)) : DEFAULT_UMBRA_UI_AGENT_GENERATION_SETTINGS.temperature,
     maxTokens: Number.isFinite(maxTokens) ? Math.max(64, Math.min(8192, Math.floor(maxTokens))) : DEFAULT_UMBRA_UI_AGENT_GENERATION_SETTINGS.maxTokens,
@@ -16975,6 +17120,9 @@ async function generateUmbraUiPromptWithOllama(
           temperature: settings.temperature,
           num_predict: settings.maxTokens,
         },
+        ...(settings.thinkingLevel
+          ? { think: /gpt[-_ ]?oss/i.test(settings.model) ? settings.thinkingLevel : settings.thinkingLevel === 'none' ? false : true }
+          : {}),
         messages: [
           { role: 'system', content: 'Return only the final generation prompt. Do not include Markdown or explanations.' },
           { role: 'user', content: agentRequest },
@@ -17027,7 +17175,7 @@ async function generateUmbraUiPromptWithHermesCli(
     result = await runHermesTurn('');
   }
   if (result.exitCode !== 0) {
-    const reason = cleanHermesPromptOutput(result.stderr) || cleanHermesPromptOutput(result.stdout);
+    const reason = cleanUmbraUiAgentPromptOutput(result.stderr) || cleanUmbraUiAgentPromptOutput(result.stdout);
     throw new Error(reason || `Hermes exited with code ${result.exitCode}.`);
   }
   const nextSessionId = parseHermesPromptSessionId(result.stderr);
@@ -17053,6 +17201,132 @@ async function generateUmbraUiPromptWithConfiguredAgent(
     }
     throw error;
   }
+}
+
+type UmbraUiAgentModelOption = {
+  id: string;
+  model?: string;
+  label: string;
+  detail?: string;
+  provider?: string;
+};
+
+function resolveHermesDataDirectories(): string[] {
+  const homeDir = os.homedir();
+  const localAppData = process.env.LOCALAPPDATA?.trim() || join(homeDir, 'AppData', 'Local');
+  const xdgDataHome = process.env.XDG_DATA_HOME?.trim() || join(homeDir, '.local', 'share');
+  return Array.from(new Set([
+    process.env.HERMES_HOME?.trim(),
+    join(localAppData, 'hermes'),
+    join(xdgDataHome, 'hermes'),
+    join(homeDir, '.hermes'),
+  ].filter(Boolean) as string[]));
+}
+
+async function readHermesJsonFile(path: string): Promise<Record<string, any> | null> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(path, 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readHermesModelCatalogs(): Promise<UmbraUiAgentModelOption[]> {
+  const models = new Map<string, UmbraUiAgentModelOption>();
+  const providerDisplayName = (provider: string): string => {
+    if (provider === 'openai-codex') return 'ChatGPT / OpenAI Codex';
+    if (provider === 'copilot') return 'GitHub Copilot';
+    if (provider === 'xai-oauth') return 'xAI';
+    return provider;
+  };
+  const addModel = (provider: string, id: unknown, detail = '') => {
+    const normalizedProvider = clampUmbraUiAgentText(provider, 120);
+    const normalizedId = clampUmbraUiAgentText(id, 240);
+    if (!normalizedProvider || !normalizedId) return;
+    const key = `${normalizedProvider}\u0000${normalizedId}`;
+    if (!models.has(key)) {
+      models.set(key, {
+        id: `${normalizedProvider}::${normalizedId}`,
+        model: normalizedId,
+        label: `${detail || providerDisplayName(normalizedProvider)} - ${normalizedId}`,
+        detail: `Hermes provider: ${normalizedProvider}`,
+        provider: normalizedProvider,
+      });
+    }
+  };
+
+  for (const directory of resolveHermesDataDirectories()) {
+    const cache = await readHermesJsonFile(join(directory, 'provider_models_cache.json'));
+    for (const [provider, entry] of Object.entries(cache || {})) {
+      const cachedModels = entry && typeof entry === 'object' && Array.isArray((entry as any).models)
+        ? (entry as any).models
+        : [];
+      for (const model of cachedModels) addModel(provider, model);
+    }
+
+    const catalog = await readHermesJsonFile(join(directory, 'cache', 'model_catalog.json'));
+    const providers = catalog?.providers && typeof catalog.providers === 'object' ? catalog.providers : {};
+    for (const [provider, entry] of Object.entries(providers)) {
+      const metadata = entry && typeof entry === 'object' && (entry as any).metadata;
+      const providerLabel = clampUmbraUiAgentText(metadata?.display_name, 120) || provider;
+      const catalogModels = entry && typeof entry === 'object' && Array.isArray((entry as any).models)
+        ? (entry as any).models
+        : [];
+      for (const model of catalogModels) {
+        addModel(provider, typeof model === 'string' ? model : model?.id, providerLabel);
+      }
+    }
+  }
+
+  return [...models.values()].sort((left, right) => (
+    (left.detail || '').localeCompare(right.detail || '') || left.label.localeCompare(right.label)
+  ));
+}
+
+async function listUmbraUiAgentModels(
+  provider: UmbraUiAgentProvider,
+  requestedBaseUrl = '',
+): Promise<{ provider: UmbraUiAgentProvider; models: UmbraUiAgentModelOption[]; source: string }> {
+  if (provider === 'ollama') {
+    const baseUrl = clampUmbraUiAgentText(requestedBaseUrl, 500).replace(/\/+$/, '').replace(/\/v1$/i, '') || 'http://127.0.0.1:11434';
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const response = await fetch(`${baseUrl}/api/tags`, { signal: controller.signal, cache: 'no-store' });
+      if (!response.ok) throw new Error(`Ollama model list failed (${response.status}).`);
+      const payload = await response.json().catch(() => ({}));
+      const models = Array.isArray(payload?.models)
+        ? payload.models
+          .map((entry: any) => {
+            const id = clampUmbraUiAgentText(entry?.name, 240);
+            if (!id) return null;
+            const size = Number(entry?.size);
+            return {
+              id,
+              label: id,
+              detail: Number.isFinite(size) && size > 0 ? `${(size / 1_000_000_000).toFixed(1)} GB` : undefined,
+            } satisfies UmbraUiAgentModelOption;
+          })
+          .filter((entry: UmbraUiAgentModelOption | null): entry is UmbraUiAgentModelOption => !!entry)
+        : [];
+      return { provider, models, source: 'ollama /api/tags' };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  const settings = await loadUmbraUiAgentSettings();
+  const models: UmbraUiAgentModelOption[] = [
+    { id: '', label: 'Hermes default routing', detail: 'Uses Hermes native configuration' },
+    ...(await readHermesModelCatalogs()),
+  ];
+  const configuredModel = clampUmbraUiAgentText(settings.generation.model, 240);
+  if (configuredModel && !models.some((model) => model.id === configuredModel && model.provider === settings.generation.hermesProvider)) {
+    const configuredProvider = settings.generation.hermesProvider || 'hermes';
+    models.push({ id: `${configuredProvider}::${configuredModel}`, model: configuredModel, label: configuredModel, detail: 'Current Hermes override', provider: configuredProvider });
+  }
+  return { provider: 'hermes', models, source: 'Hermes native configuration' };
 }
 
 async function generateUmbraUiPromptWithAgent(value: unknown): Promise<{
@@ -17106,7 +17380,7 @@ async function generateUmbraUiPromptWithAgent(value: unknown): Promise<{
   try {
     const settings = await loadUmbraUiAgentSettings();
     const rawPrompt = await generateUmbraUiPromptWithConfiguredAgent(settings.generation, agentRequest);
-    const prompt = cleanHermesPromptOutput(rawPrompt);
+    const prompt = cleanUmbraUiAgentPromptOutput(rawPrompt);
     if (!prompt) throw new Error('The configured agent returned an empty prompt.');
     return {
       prompt,
@@ -17681,6 +17955,7 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
   const modeRaw = String(video.mode || '').trim().toLowerCase();
   const mode: PowerPrompterVideoMode = modeRaw === 'video_to_video'
     ? 'video_to_video'
+    : modeRaw === 'reference_to_video' ? 'reference_to_video'
     : modeRaw === 'image_to_video' ? 'image_to_video' : 'text_to_video';
   const frameGuideModeRaw = String(video.frameGuideMode || '').trim().toLowerCase();
   const parsedFrameGuideMode: PowerPrompterVideoFrameGuideMode = frameGuideModeRaw === 'first_middle_last'
@@ -17719,7 +17994,7 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
     ? decodeModeRaw
     : 'auto';
   const upscaleModeRaw = String(postprocess.upscaleMode || '').trim().toLowerCase();
-  const upscaleMode: PowerPrompterVideoUpscaleMode = upscaleModeRaw === 'lanczos' || upscaleModeRaw === 'model' || upscaleModeRaw === 'rtx'
+  const upscaleMode: PowerPrompterVideoUpscaleMode = upscaleModeRaw === 'lanczos' || upscaleModeRaw === 'model'
     ? upscaleModeRaw
     : 'none';
   const rtxQualityRaw = String(postprocess.rtxQuality || '').trim().toUpperCase();
@@ -17798,6 +18073,7 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
       upscaleModel: String(postprocess.upscaleModel || '').trim().replace(/\\/g, '/'),
       upscaleScale: clampPPNumber(postprocess.upscaleScale, defaults.postprocess.upscaleScale, 1, 4),
       maxDimension: normalizePPVideoDimension(postprocess.maxDimension, defaults.postprocess.maxDimension, 8),
+      rtxVsrEnabled: postprocess.rtxVsrEnabled === true || upscaleModeRaw === 'rtx',
       rtxQuality,
     },
     wan: {
@@ -17848,6 +18124,16 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
       textEncoder: String(minimaxH3.textEncoder || '').trim().replace(/\\/g, '/'),
       videoVae: String(minimaxH3.videoVae || '').trim().replace(/\\/g, '/'),
       audioVae: String(minimaxH3.audioVae || '').trim().replace(/\\/g, '/'),
+      shiftVideo: clampPPNumber(minimaxH3.shiftVideo, 10, 0.01, 100),
+      shiftAudio: clampPPNumber(minimaxH3.shiftAudio, 5, 0.01, 100),
+      referenceImageSize: String(minimaxH3.referenceImageSize || '').trim().toLowerCase() === 'max' ? 'max' : 'match',
+      referenceNotes: [0, 1, 2].map((index) => String(Array.isArray(minimaxH3.referenceNotes) ? minimaxH3.referenceNotes[index] || '' : '').trim().slice(0, 500)) as [string, string, string],
+      sageAttention: String(minimaxH3.sageAttention || '').trim().toLowerCase() === 'disabled' ? 'disabled' : 'auto',
+      allowCompile: minimaxH3.allowCompile !== false,
+      easyCacheEnabled: minimaxH3.easyCacheEnabled !== false,
+      easyCacheReuseThreshold: clampPPNumber(minimaxH3.easyCacheReuseThreshold, 0.2, 0, 3),
+      easyCacheStartPercent: clampPPNumber(minimaxH3.easyCacheStartPercent, 0.15, 0, 1),
+      easyCacheEndPercent: clampPPNumber(minimaxH3.easyCacheEndPercent, 0.95, 0, 1),
       steps: clampPPInteger(minimaxH3.steps, defaults.minimaxH3.steps, 1, 1000),
       scheduler: String(minimaxH3.scheduler || defaults.minimaxH3.scheduler).trim() || 'simple',
       samplerName: String(minimaxH3.samplerName || defaults.minimaxH3.samplerName).trim() || 'res_multistep',
@@ -17980,7 +18266,7 @@ function normalizePPGenerationControls(rawControls: unknown): PowerPrompterGener
     ? rawTiledVae as Record<string, unknown>
     : {};
   const outputModeRaw = String((controls as any).outputMode || '').trim().toLowerCase();
-  const outputMode = (['txt2img', 'img2img', 'img2vid', 'txt2vid', 'vid2vid', 'inpainting', 'extras'] as const)
+  const outputMode = (['txt2img', 'img2img', 'img2vid', 'ref2vid', 'txt2vid', 'vid2vid', 'inpainting', 'extras'] as const)
     .find((candidate) => candidate === outputModeRaw) || 'txt2img';
   return {
     mediaType: String((controls as any).mediaType || '').trim().toLowerCase() === 'video' ? 'video' : 'image',
@@ -20927,6 +21213,7 @@ function describePPApiWorkflow(rawDoc: unknown): {
       videoFamily: familyRaw === 'ltx23' ? 'ltx23' : familyRaw === 'minimax_h3' ? 'minimax_h3' : 'wan22',
       videoMode: modeRaw === 'video_to_video'
         ? 'video_to_video'
+        : modeRaw === 'reference_to_video' ? 'reference_to_video'
         : modeRaw === 'image_to_video' ? 'image_to_video' : 'text_to_video',
     };
   }
@@ -31923,17 +32210,19 @@ const server = Bun.serve<any>({
       }
 
       if (path === '/api/umbra-ui/agent/settings' && method === 'GET') {
-        const guard = withRemoteAdminGuard(req, url, server);
+        const guard = withRemoteAgentGuard(req, url, server);
         if (guard) return guard;
         try {
           await loadUmbraUiAgentInstructions();
           const settings = await loadUmbraUiAgentSettings();
+          const agentModels = await listUmbraUiAgentModels(settings.generation.provider, settings.generation.baseUrl);
           const endpoint = `http://127.0.0.1:${PORT}/api/umbra-ui/mcp`;
           return json({
             success: true,
             endpoint,
             token: settings.token,
             generation: settings.generation,
+            agentModels: agentModels.models,
             updatedAt: settings.updatedAt,
             hermesConfig: {
               mcp_servers: {
@@ -31950,7 +32239,7 @@ const server = Bun.serve<any>({
       }
 
       if (path === '/api/umbra-ui/agent/settings' && (method === 'POST' || method === 'PUT')) {
-        const guard = withRemoteAdminGuard(req, url, server);
+        const guard = withRemoteAgentGuard(req, url, server);
         if (guard) return guard;
         try {
           const settings = await saveUmbraUiAgentGenerationSettings(await req.json());
@@ -31976,7 +32265,7 @@ const server = Bun.serve<any>({
       }
 
       if (path === '/api/umbra-ui/agent/settings/test' && method === 'POST') {
-        const guard = withRemoteAdminGuard(req, url, server);
+        const guard = withRemoteAgentGuard(req, url, server);
         if (guard) return guard;
         try {
           const body = await req.json().catch(() => ({}));
@@ -31989,7 +32278,7 @@ const server = Bun.serve<any>({
             'USER REQUEST:',
             'a polished nocturne-themed creative studio dashboard icon, clean lighting, crisp details',
           ].join('\n'));
-          const prompt = cleanHermesPromptOutput(rawPrompt);
+          const prompt = cleanUmbraUiAgentPromptOutput(rawPrompt);
           if (!prompt) throw new Error('The configured agent returned an empty test prompt.');
           return json({
             success: true,
@@ -32004,8 +32293,20 @@ const server = Bun.serve<any>({
         }
       }
 
+      if (path === '/api/umbra-ui/agent/models' && method === 'GET') {
+        const guard = withRemoteAgentGuard(req, url, server);
+        if (guard) return guard;
+        try {
+          const provider = normalizeUmbraUiAgentProvider(url.searchParams.get('provider'));
+          const result = await listUmbraUiAgentModels(provider, url.searchParams.get('baseUrl') || '');
+          return json({ success: true, ...result });
+        } catch (error: any) {
+          return json({ success: false, error: error?.message || 'Failed to load agent models.' }, 502);
+        }
+      }
+
       if (path === '/api/umbra-ui/agent/hermes-session' && method === 'DELETE') {
-        const guard = withRemoteAdminGuard(req, url, server);
+        const guard = withRemoteAgentGuard(req, url, server);
         if (guard) return guard;
         try {
           await clearUmbraUiHermesSession();
@@ -32016,7 +32317,7 @@ const server = Bun.serve<any>({
       }
 
       if (path === '/api/umbra-ui/agent/settings/regenerate-token' && method === 'POST') {
-        const guard = withRemoteAdminGuard(req, url, server);
+        const guard = withRemoteAgentGuard(req, url, server);
         if (guard) return guard;
         try {
           const settings = await loadUmbraUiAgentSettings(true);
@@ -32027,7 +32328,7 @@ const server = Bun.serve<any>({
       }
 
       if (path === '/api/umbra-ui/agent/context' && method === 'POST') {
-        const guard = withRemoteAdminGuard(req, url, server);
+        const guard = withRemoteAgentGuard(req, url, server);
         if (guard) return guard;
         try {
           const body = await req.json();
@@ -32055,13 +32356,13 @@ const server = Bun.serve<any>({
       }
 
       if (path === '/api/umbra-ui/agent/drafts' && method === 'GET') {
-        const guard = withRemoteAdminGuard(req, url, server);
+        const guard = withRemoteAgentGuard(req, url, server);
         if (guard) return guard;
         return json({ success: true, drafts: listUmbraUiAgentDrafts() });
       }
 
       if (path.startsWith('/api/umbra-ui/agent/drafts/') && method === 'DELETE') {
-        const guard = withRemoteAdminGuard(req, url, server);
+        const guard = withRemoteAgentGuard(req, url, server);
         if (guard) return guard;
         const draftId = decodeURIComponent(path.slice('/api/umbra-ui/agent/drafts/'.length)).trim();
         if (!draftId) return json({ success: false, error: 'Draft id is required.' }, 400);

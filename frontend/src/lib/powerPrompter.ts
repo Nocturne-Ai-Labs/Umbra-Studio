@@ -438,6 +438,7 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
       upscaleModel: '',
       upscaleScale: 2,
       maxDimension: 3840,
+      rtxVsrEnabled: false,
       rtxQuality: 'ULTRA',
     },
     wan: {
@@ -492,6 +493,16 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
       textEncoder: '',
       videoVae: '',
       audioVae: '',
+      shiftVideo: 10,
+      shiftAudio: 5,
+      referenceImageSize: 'match',
+      referenceNotes: ['', '', ''],
+      sageAttention: 'auto',
+      allowCompile: true,
+      easyCacheEnabled: true,
+      easyCacheReuseThreshold: 0.2,
+      easyCacheStartPercent: 0.15,
+      easyCacheEndPercent: 0.95,
       steps: 20,
       scheduler: 'simple',
       samplerName: 'res_multistep',
@@ -808,6 +819,7 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
   const modeRaw = String(video.mode || '').trim().toLowerCase();
   const mode: PowerPrompterVideoControls['mode'] = modeRaw === 'video_to_video'
     ? 'video_to_video'
+    : modeRaw === 'reference_to_video' ? 'reference_to_video'
     : modeRaw === 'image_to_video' ? 'image_to_video' : 'text_to_video';
   const frameGuideModeRaw = String(video.frameGuideMode || '').trim().toLowerCase();
   const parsedFrameGuideMode: PowerPrompterVideoControls['frameGuideMode'] = frameGuideModeRaw === 'first_middle_last'
@@ -856,7 +868,7 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
     ? decodeModeRaw
     : 'auto';
   const upscaleModeRaw = String(postprocess.upscaleMode || '').trim().toLowerCase();
-  const upscaleMode: PowerPrompterVideoControls['postprocess']['upscaleMode'] = upscaleModeRaw === 'lanczos' || upscaleModeRaw === 'model' || upscaleModeRaw === 'rtx'
+  const upscaleMode: PowerPrompterVideoControls['postprocess']['upscaleMode'] = upscaleModeRaw === 'lanczos' || upscaleModeRaw === 'model'
     ? upscaleModeRaw
     : 'none';
   const rtxQualityRaw = String(postprocess.rtxQuality || '').trim().toUpperCase();
@@ -935,6 +947,7 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
       upscaleModel: String(postprocess.upscaleModel || '').trim().replace(/\\/g, '/'),
       upscaleScale: clampNumber(postprocess.upscaleScale, defaults.postprocess.upscaleScale, 1, 4),
       maxDimension: normalizeVideoDimension(postprocess.maxDimension, defaults.postprocess.maxDimension, 8),
+      rtxVsrEnabled: postprocess.rtxVsrEnabled === true || upscaleModeRaw === 'rtx',
       rtxQuality,
     },
     wan: {
@@ -985,6 +998,16 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
       textEncoder: String(minimaxH3.textEncoder || '').trim().replace(/\\/g, '/'),
       videoVae: String(minimaxH3.videoVae || '').trim().replace(/\\/g, '/'),
       audioVae: String(minimaxH3.audioVae || '').trim().replace(/\\/g, '/'),
+      shiftVideo: clampNumber(minimaxH3.shiftVideo, 10, 0.01, 100),
+      shiftAudio: clampNumber(minimaxH3.shiftAudio, 5, 0.01, 100),
+      referenceImageSize: String(minimaxH3.referenceImageSize || '').trim().toLowerCase() === 'max' ? 'max' : 'match',
+      referenceNotes: [0, 1, 2].map((index) => String(Array.isArray(minimaxH3.referenceNotes) ? minimaxH3.referenceNotes[index] || '' : '').trim().slice(0, 500)) as [string, string, string],
+      sageAttention: String(minimaxH3.sageAttention || '').trim().toLowerCase() === 'disabled' ? 'disabled' : 'auto',
+      allowCompile: minimaxH3.allowCompile !== false,
+      easyCacheEnabled: minimaxH3.easyCacheEnabled !== false,
+      easyCacheReuseThreshold: clampNumber(minimaxH3.easyCacheReuseThreshold, 0.2, 0, 3),
+      easyCacheStartPercent: clampNumber(minimaxH3.easyCacheStartPercent, 0.15, 0, 1),
+      easyCacheEndPercent: clampNumber(minimaxH3.easyCacheEndPercent, 0.95, 0, 1),
       steps: clampInteger(minimaxH3.steps, defaults.minimaxH3.steps, 1, 1000),
       scheduler: String(minimaxH3.scheduler || defaults.minimaxH3.scheduler).trim() || 'simple',
       samplerName: String(minimaxH3.samplerName || defaults.minimaxH3.samplerName).trim() || 'res_multistep',
@@ -1181,7 +1204,7 @@ export function normalizePowerPrompterGenerationControls(rawControls: unknown): 
   const swapRaw = controls.swapDimensions as unknown;
   const swapDimensions = swapRaw === true || String(swapRaw || '').trim().toLowerCase() === 'on';
   const outputModeRaw = String((controls as any).outputMode || '').trim().toLowerCase();
-  const outputMode = (['txt2img', 'img2img', 'img2vid', 'txt2vid', 'vid2vid', 'inpainting', 'extras'] as const)
+  const outputMode = (['txt2img', 'img2img', 'img2vid', 'ref2vid', 'txt2vid', 'vid2vid', 'inpainting', 'extras'] as const)
     .find((candidate) => candidate === outputModeRaw) || 'txt2img';
   const tiledVaeDefaults = DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS.tiledVae!;
   const rawTiledVae = (controls as any).tiledVae;

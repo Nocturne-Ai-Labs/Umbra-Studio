@@ -26,6 +26,8 @@ interface UmbraInlineAgentPromptProps {
   onSubmit?: () => void;
   context?: Record<string, unknown>;
   accent?: 'cyan' | 'fuchsia';
+  title?: string;
+  subtitle?: string;
 }
 
 const inputClass = 'w-full rounded-md border border-white/10 bg-black/45 px-2.5 py-2 text-xs text-zinc-100 outline-none placeholder:text-zinc-700 focus:border-cyan-300/45';
@@ -40,6 +42,8 @@ export function UmbraInlineAgentPrompt({
   onSubmit,
   context,
   accent = 'cyan',
+  title = 'Agent Mode',
+  subtitle = 'Configured prompt composer',
 }: UmbraInlineAgentPromptProps) {
   const showToast = useStore((state) => state.showToast);
   const [instructions, setInstructions] = React.useState<UmbraUiAgentInstruction[]>([]);
@@ -138,8 +142,8 @@ export function UmbraInlineAgentPrompt({
       <div className="flex items-center gap-2">
         <Bot size={13} className={enabled ? (accent === 'fuchsia' ? 'text-fuchsia-300' : 'text-cyan-300') : 'text-zinc-600'} />
         <div className="min-w-0">
-          <div className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">Agent Mode</div>
-          <div className="font-mono text-[9px] text-zinc-500">Configured prompt composer</div>
+          <div className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">{title}</div>
+          <div className="font-mono text-[9px] text-zinc-500">{subtitle}</div>
         </div>
         <button
           type="button"

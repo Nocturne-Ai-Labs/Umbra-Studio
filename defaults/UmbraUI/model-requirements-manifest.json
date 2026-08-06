@@ -74,6 +74,14 @@
     "minimax-h3": {
       "label": "MiniMax H3 Video",
       "description": "MiniMax H3 diffusion model, Qwen 3 VL text encoder, and video/audio VAEs for Umbra UI text-to-video and image-to-video. Very large download."
+    },
+    "minimax-h3-reference": {
+      "label": "MiniMax H3 Reference Video",
+      "description": "Adds the MiniMax H3 Ref2VA INT8 ConvRot model for Umbra UI reference-to-video. Requires the MiniMax H3 Video support files and adds a 20.96 GB model download."
+    },
+    "video-postprocess": {
+      "label": "Video Post-Processing",
+      "description": "RIFE v4.26 frame interpolation for Umbra UI video post-processing. NVIDIA RTX Video Super Resolution is installed with ComfyUI custom nodes on NVIDIA systems and needs no separate model download."
     }
   },
   "models": [
@@ -384,6 +392,25 @@
       ]
     },
     {
+      "id": "rife-v4-26-video-interpolation",
+      "family": "Video",
+      "creator": "Zhewei Huang, Tianyuan Zhang, Wen Heng, Boxin Shi, Shuchang Zhou, Kijai, and Comfy Org contributors",
+      "repository": "Comfy-Org/frame_interpolation",
+      "revision": "6475b9bb5a8a9a8bd4c471d6adea35ebe594e9dd",
+      "license": "MIT AND Apache-2.0",
+      "installPolicy": "automatic",
+      "profiles": ["minimax-h3", "video-postprocess"],
+      "purpose": "RIFE frame interpolation for Umbra UI video pipelines",
+      "files": [
+        {
+          "destination": "frame_interpolation/rife_v4.26.safetensors",
+          "sourcePath": "frame_interpolation/rife_v4.26.safetensors",
+          "bytes": 22674688,
+          "sha256": "151874592c877740e5db11522f4514df569eeafb0a0fcb2696f16e9e8d317c94"
+        }
+      ]
+    },
+    {
       "id": "minimax-h3-video",
       "family": "Video",
       "creator": "MiniMax / Comfy Org",
@@ -417,6 +444,25 @@
           "sourcePath": "vae/minimax_h3_audio_vae_fp32.safetensors",
           "bytes": 605254808,
           "sha256": "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48"
+        }
+      ]
+    },
+    {
+      "id": "minimax-h3-reference-video",
+      "family": "Video",
+      "creator": "MiniMax / Comfy Org",
+      "repository": "Comfy-Org/MiniMax-H3",
+      "revision": "3f57e8291d2ef846f9a074b1b76d2767db434abe",
+      "license": "minimax-h3-community-license-agreement",
+      "installPolicy": "automatic",
+      "profiles": ["minimax-h3-reference"],
+      "purpose": "MiniMax H3 native reference-to-video generation for Umbra UI",
+      "files": [
+        {
+          "destination": "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+          "sourcePath": "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+          "bytes": 20970379616,
+          "sha256": "9255f52b6677845ad238f20dfaafa94727053694127ab7f255c048f0f9365779"
         }
       ]
     }

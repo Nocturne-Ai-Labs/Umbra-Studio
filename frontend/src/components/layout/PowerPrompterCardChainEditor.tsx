@@ -2714,6 +2714,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const addToast = useToastStore((state) => state.addToast);
   const [activeSlotId, setActiveSlotId] = useState('');
   const [activeVariantId, setActiveVariantId] = useState('');
+  const [reorderPulseVariantId, setReorderPulseVariantId] = useState('');
   const [editingVariantId, setEditingVariantId] = useState('');
   const [variantTextDrafts, setVariantTextDrafts] = useState<Record<string, string>>({});
   const [variantAgentBusyId, setVariantAgentBusyId] = useState('');
@@ -2730,7 +2731,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const [umbraUiTargetMenuOpen, setUmbraUiTargetMenuOpen] = useState(false);
   const [mobileCardPickerOpen, setMobileCardPickerOpen] = useState(false);
   const [mobileVariantSetPicker, setMobileVariantSetPicker] = useState<{ slotId: string; variantId: string } | null>(null);
-  const [variantDropSlotId, setVariantDropSlotId] = useState<string | null>(null);
   const [chainLinkEditor, setChainLinkEditor] = useState<ChainLinkEditorState | null>(null);
   const [promptFieldsMinimized, setPromptFieldsMinimized] = useState(false);
   const [isLoadingLoraInfo, setIsLoadingLoraInfo] = useState(false);
@@ -2847,6 +2847,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const loraBrowserFolderRef = useRef('');
   const forgeMetadataInputRef = useRef<HTMLInputElement | null>(null);
   const tokenRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reorderPulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loraBrowserInfoClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modelBrowserInfoClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastHandledGlobalSearchFocusNonceRef = useRef(0);
@@ -6768,7 +6769,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     if (!slot) return;
     variantDragRef.current = null;
     suppressedVariantDragIdRef.current = '';
-    setVariantDropSlotId(null);
     setSlotChipDragId('');
     setSlotChipDropId('');
     setCardRandomMenu(null);
@@ -6893,6 +6893,12 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
 
     setActiveSlotId(slot.slotId);
     setActiveVariantId(moving.id);
+    if (reorderPulseTimerRef.current) clearTimeout(reorderPulseTimerRef.current);
+    setReorderPulseVariantId(moving.id);
+    reorderPulseTimerRef.current = setTimeout(() => {
+      setReorderPulseVariantId((current) => current === moving.id ? '' : current);
+      reorderPulseTimerRef.current = null;
+    }, 260);
     emitSlots(next);
   }, [activeQueueSet, slots, emitSlots]);
 
@@ -6990,6 +6996,9 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   }, [activeQueueSet, slots, emitSlots, moveVariantWithinSlot]);
 
   useEffect(() => () => { clearTokenRevealTimer(); }, [clearTokenRevealTimer]);
+  useEffect(() => () => {
+    if (reorderPulseTimerRef.current) clearTimeout(reorderPulseTimerRef.current);
+  }, []);
   useEffect(() => () => { clearLoraBrowserInfoClickTimer(); }, [clearLoraBrowserInfoClickTimer]);
   useEffect(() => () => { clearModelBrowserInfoClickTimer(); }, [clearModelBrowserInfoClickTimer]);
 
@@ -8008,7 +8017,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     if (!editorResetTick) return;
     variantDragRef.current = null;
     suppressedVariantDragIdRef.current = '';
-    setVariantDropSlotId(null);
     setExpandedVariantEditor(null);
     setExpandedVariantSuggestions([]);
     setExpandedVariantSuggestionOpen(false);
@@ -9532,12 +9540,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     if (chainLinkModeActive) return;
                     if (variantDragRef.current) {
                       event.preventDefault();
-                      const dragging = variantDragRef.current;
                       variantDragRef.current = null;
-                      setVariantDropSlotId(null);
-                      if (dragging.slotId !== slot.slotId) {
-                        moveVariantToSlot(dragging.slotId, dragging.variantId, slot.slotId);
-                      }
                       return;
                     }
                   }}
@@ -9553,15 +9556,13 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     openCardContextMenu(slot.slotId, anchor.x, anchor.y);
                   }}
                   className={`relative h-full max-h-full min-h-0 w-[448px] overflow-hidden rounded-xl border transition-[border-color,background-color,box-shadow,opacity,transform] duration-200 flex flex-col ${
-                    variantDropSlotId === slot.slotId
-                      ? 'border-emerald-400 bg-emerald-400/10 shadow-lg shadow-emerald-500/20'
-                      : styleUtilitySlot
-                        ? activeSlot?.slotId === slot.slotId
-                          ? 'border-emerald-300/80 bg-emerald-500/12 shadow-lg shadow-emerald-500/20'
-                          : 'border-emerald-400/35 bg-emerald-500/8 hover:border-emerald-300/60'
-                        : activeSlot?.slotId === slot.slotId
-                          ? 'border-[var(--umbra-accent)] bg-white/10 shadow-lg shadow-[var(--umbra-accent-glow)]'
-                          : 'border-white/10 bg-white/[0.04] hover:border-white/20'
+                    styleUtilitySlot
+                      ? activeSlot?.slotId === slot.slotId
+                        ? 'border-emerald-300/80 bg-emerald-500/12 shadow-lg shadow-emerald-500/20'
+                        : 'border-emerald-400/35 bg-emerald-500/8 hover:border-emerald-300/60'
+                      : activeSlot?.slotId === slot.slotId
+                        ? 'border-[var(--umbra-accent)] bg-white/10 shadow-lg shadow-[var(--umbra-accent-glow)]'
+                        : 'border-white/10 bg-white/[0.04] hover:border-white/20'
                   }`}
                 >
                   <div data-umbra-prompt-card-header="" className="px-3 py-2 border-b border-white/10 flex flex-wrap items-center gap-1.5">
@@ -9875,6 +9876,9 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                               )}
                               {visibleDisplayVariants.map((variant, visibleVariantIndex) => {
                         const variantIdx = variantWindow.startIndex + visibleVariantIndex;
+                        const activeVariantIdx = displayVariants
+                          .filter((candidate) => normalizeQueueSetIds(candidate.queueSetIds, false).includes(activeQueueSet))
+                          .findIndex((candidate) => candidate.id === variant.id);
                         const isEditing = editingVariantId === variant.id;
                         const isRevealed = revealedVariantIds.includes(variant.id);
                         const variantTitle = normalizeVariantName(variant.variantName);
@@ -9891,9 +9895,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                         const status = queueVariantState.status;
                         const setIds = normalizeQueueSetIds(variant.queueSetIds, false);
                         const isInActiveQueueSet = setIds.includes(activeQueueSet);
-                        const activeVariantIdx = displayVariants
-                          .filter((candidate) => normalizeQueueSetIds(candidate.queueSetIds, false).includes(activeQueueSet))
-                          .findIndex((candidate) => candidate.id === variant.id);
                         const activeSetIdForVariant = setIds.includes(activeQueueSet)
                           ? activeQueueSet
                           : (setIds[0] || activeQueueSet);
@@ -9988,9 +9989,9 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                               const dragging = variantDragRef.current;
                               if (!dragging) return;
                               if (dragging.variantId === variant.id && dragging.slotId === slot.slotId) return;
+                              if (dragging.slotId !== slot.slotId) return;
                               event.preventDefault();
                               event.dataTransfer.dropEffect = 'move';
-                              setVariantDropSlotId(slot.slotId);
                             }}
                             onDrop={(event) => {
                               const dragging = variantDragRef.current;
@@ -9998,17 +9999,13 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                               event.preventDefault();
                               event.stopPropagation();
                               variantDragRef.current = null;
-                              setVariantDropSlotId(null);
                               if (dragging.slotId === slot.slotId) {
                                 moveVariantWithinSlot(slot.slotId, dragging.variantId, activeVariantIdx);
-                              } else {
-                                moveVariantToSlot(dragging.slotId, dragging.variantId, slot.slotId, variantIdx);
                               }
                             }}
                             onDragEnd={(event) => {
                               event.stopPropagation();
                               variantDragRef.current = null;
-                              setVariantDropSlotId(null);
                             }}
                             onClick={(event) => {
                               event.stopPropagation();
@@ -10028,6 +10025,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                               openCardContextMenu(slot.slotId, anchor.x, anchor.y);
                             }}
                             data-umbra-variant-card=""
+                            data-reorder-pulse={reorderPulseVariantId === variant.id ? 'true' : undefined}
                             className={`h-[148px] min-h-[148px] overflow-visible rounded-md border px-2 py-1.5 text-[11px] ${isEditing ? 'cursor-text' : chainLinkEditor ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'} transition-colors ${
                               isRelationshipAnchor
                                 ? isBlockLinkMode

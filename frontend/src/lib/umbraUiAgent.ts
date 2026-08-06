@@ -26,6 +26,7 @@ export interface UmbraUiAgentGenerationSettings {
   baseUrl: string;
   model: string;
   hermesProvider: string;
+  thinkingLevel: string;
   apiKey: string;
   temperature: number;
   maxTokens: number;
@@ -36,6 +37,7 @@ export interface UmbraUiAgentConnectionSettings {
   endpoint: string;
   token: string;
   generation: UmbraUiAgentGenerationSettings;
+  agentModels?: UmbraUiAgentModelOption[];
   updatedAt: number;
   hermesConfig: {
     mcp_servers: {
@@ -45,6 +47,14 @@ export interface UmbraUiAgentConnectionSettings {
       };
     };
   };
+}
+
+export interface UmbraUiAgentModelOption {
+  id: string;
+  model?: string;
+  label: string;
+  detail?: string;
+  provider?: string;
 }
 
 function createInstructionId(): string {
@@ -163,6 +173,15 @@ export async function testUmbraUiAgentSettings(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ generation }),
   });
+}
+
+export async function loadUmbraUiAgentModels(
+  provider: UmbraUiAgentProvider,
+  baseUrl = '',
+): Promise<{ provider: UmbraUiAgentProvider; models: UmbraUiAgentModelOption[]; source: string }> {
+  const query = new URLSearchParams({ provider });
+  if (baseUrl.trim()) query.set('baseUrl', baseUrl.trim());
+  return readAgentApi(`/api/umbra-ui/agent/models?${query.toString()}`);
 }
 
 export async function resetUmbraUiHermesSession(): Promise<void> {

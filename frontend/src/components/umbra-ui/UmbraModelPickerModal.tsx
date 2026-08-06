@@ -48,6 +48,7 @@ interface UmbraModelPickerModalProps {
   titleOverride?: string;
   searchPlaceholder?: string;
   confirmLabel?: string;
+  showSourceFilter?: boolean;
 }
 
 interface CatalogFile {
@@ -254,6 +255,7 @@ export function UmbraModelPickerModal({
   titleOverride,
   searchPlaceholder,
   confirmLabel,
+  showSourceFilter = true,
 }: UmbraModelPickerModalProps) {
   const [search, setSearch] = React.useState('');
   const [folder, setFolder] = React.useState('');
@@ -321,10 +323,10 @@ export function UmbraModelPickerModal({
   );
 
   const sourceFiles = React.useMemo(
-    () => kind === 'checkpoint' && activeSource
+    () => showSourceFilter && kind === 'checkpoint' && activeSource
       ? files.filter((file) => file.source === activeSource)
       : files,
-    [activeSource, files, kind],
+    [activeSource, files, kind, showSourceFilter],
   );
 
   const folders = React.useMemo(() => {
@@ -372,7 +374,7 @@ export function UmbraModelPickerModal({
     ));
     const matchedSelection = matchingFiles.find((file) => !selectedSource || file.source === selectedSource)
       || matchingFiles[0];
-    const nextSource = kind === 'checkpoint'
+    const nextSource = showSourceFilter && kind === 'checkpoint'
       ? matchedSelection?.source || (selectedSource && availableSources.includes(selectedSource) ? selectedSource : availableSources[0])
       : undefined;
     setSelection(matchedSelection?.key || '');
@@ -381,14 +383,14 @@ export function UmbraModelPickerModal({
     setFolder('');
     setInfo(null);
     setInfoError('');
-  }, [availableSources, files, kind, open, selectedSource, selectedValue]);
+  }, [availableSources, files, kind, open, selectedSource, selectedValue, showSourceFilter]);
 
   React.useEffect(() => {
-    if (!open || kind !== 'checkpoint' || !activeSource) return;
+    if (!open || !showSourceFilter || kind !== 'checkpoint' || !activeSource) return;
     const selectedInSource = files.some((file) => file.key === selection && file.source === activeSource);
     if (selectedInSource) return;
     setSelection(files.find((file) => file.source === activeSource)?.key || '');
-  }, [activeSource, files, kind, open, selection]);
+  }, [activeSource, files, kind, open, selection, showSourceFilter]);
 
   React.useEffect(() => {
     if (!open || !selectedFile || !onRequestInfo || (kind === 'checkpoint' && selectedFile.source && selectedFile.source !== 'checkpoint')) {
@@ -536,7 +538,7 @@ export function UmbraModelPickerModal({
               className="h-10 w-full rounded-md border border-white/10 bg-black/40 pl-9 pr-3 text-[13px] text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-300/45"
             />
           </label>
-          {kind === 'checkpoint' ? (
+          {showSourceFilter && kind === 'checkpoint' ? (
             <div className="flex min-w-0 flex-wrap items-center gap-1">
               {MODEL_SOURCE_ORDER.map((source) => {
                 const count = sourceCounts.get(source) || 0;
@@ -564,7 +566,7 @@ export function UmbraModelPickerModal({
             </div>
           ) : null}
           </div>
-          {kind === 'checkpoint' && activeSource ? (
+          {showSourceFilter && kind === 'checkpoint' && activeSource ? (
             <div className="mt-2 font-mono text-[9px] uppercase tracking-[0.1em] text-zinc-500" title="The selected catalog route is applied with the model">
               Route: {MODEL_SOURCE_LABELS[activeSource]} via ComfyUI catalog
             </div>

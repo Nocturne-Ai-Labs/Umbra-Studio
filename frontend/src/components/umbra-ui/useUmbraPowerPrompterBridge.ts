@@ -96,7 +96,7 @@ export interface ApiWorkflowItem {
   umbraUiPipelines?: UmbraUiPipelineDescriptor[];
   resources?: UmbraWorkflowResourceSelector[];
   videoFamily?: 'wan22' | 'ltx23' | 'minimax_h3';
-  videoMode?: 'text_to_video' | 'image_to_video' | 'video_to_video';
+  videoMode?: 'text_to_video' | 'image_to_video' | 'reference_to_video' | 'video_to_video';
 }
 
 export type UmbraWorkflowResourceKind =
@@ -1740,12 +1740,13 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : 'MiniMax H3';
     const feature: UmbraUiPipelineFeature = video.mode === 'video_to_video'
       ? 'vid2vid'
+      : video.mode === 'reference_to_video' ? 'ref2vid'
       : video.mode === 'image_to_video' ? 'img2vid' : 'txt2vid';
     const modelSource = video.family === 'ltx23' ? 'checkpoint' : 'unet';
     const pipelineMatch = resolveUmbraUiPipeline(workflows, feature, modelFamily, modelSource);
     if (!pipelineMatch.workflow) throw new Error(pipelineMatch.error || 'No compatible video pipeline is available.');
 
-    if (video.mode === 'image_to_video') {
+    if (video.mode === 'image_to_video' || video.mode === 'reference_to_video') {
       if (!video.sourceImagePath) throw new Error('Choose a source image for image-to-video.');
       const stageFrame = async (label: string, path: string, name: string): Promise<string> => {
         if (name) return name;
@@ -1761,9 +1762,16 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         }
         return String(payload?.filename || '').trim();
       };
-      video.sourceImageName = await stageFrame('first frame', video.sourceImagePath, video.sourceImageName);
+      video.sourceImageName = await stageFrame(video.mode === 'reference_to_video' ? 'reference image 1' : 'first frame', video.sourceImagePath, video.sourceImageName);
       if (!video.sourceImageName) throw new Error('ComfyUI did not return a staged source image name.');
-      if (video.frameGuideMode === 'first_middle_last') {
+      if (video.mode === 'reference_to_video') {
+        if (video.middleImagePath || video.middleImageName) {
+          video.middleImageName = await stageFrame('reference image 2', video.middleImagePath, video.middleImageName);
+        }
+        if (video.lastImagePath || video.lastImageName) {
+          video.lastImageName = await stageFrame('reference image 3', video.lastImagePath, video.lastImageName);
+        }
+      } else if (video.frameGuideMode === 'first_middle_last') {
         video.middleImageName = await stageFrame('middle frame', video.middleImagePath, video.middleImageName);
       }
       if (video.frameGuideMode === 'first_last' || video.frameGuideMode === 'first_middle_last') {
@@ -1888,7 +1896,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     if (video.postprocess.upscaleMode === 'model' && !video.postprocess.upscaleModel) {
       throw new Error('Select a video upscale model before queueing.');
     }
-    if (video.postprocess.upscaleMode === 'rtx' && !videoModelCatalog.rtxAvailable) {
+    if (video.postprocess.rtxVsrEnabled && !videoModelCatalog.rtxAvailable) {
       throw new Error('NVIDIA RTX Video Super Resolution is not installed in the managed ComfyUI runtime.');
     }
 
@@ -1897,6 +1905,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       outputOwner: 'umbra_ui',
       outputMode: video.mode === 'video_to_video'
         ? 'vid2vid'
+        : video.mode === 'reference_to_video' ? 'ref2vid'
         : video.mode === 'image_to_video' ? 'img2vid' : 'txt2vid',
       negativePrompt: String(options.negativePrompt || '').trim(),
       seed: toFiniteInteger(video.seed, 0, 0, Number.MAX_SAFE_INTEGER),

@@ -517,6 +517,9 @@ export function UmbraUIWorkspace() {
   const setActiveWorkspace = useStore((state) => state.setActiveWorkspace);
   const showToast = useStore((state) => state.showToast);
   const pinnedFolderSetting = useStore((state) => state.appSettings['library.pinnedFolders']);
+  const [remoteMode, setRemoteMode] = React.useState(() => (
+    typeof document === 'undefined' ? 'desktop' : document.documentElement.dataset.umbraRemoteMode || 'desktop'
+  ));
   const {
     connected: queueConnected,
     workflows,
@@ -563,7 +566,7 @@ export function UmbraUIWorkspace() {
     const selectedKey = txt2imgOutputFolder.toLowerCase();
     return pinnedOutputFolders.find((folder) => folder.toLowerCase() === selectedKey) || '';
   }, [pinnedOutputFolders, txt2imgOutputFolder]);
-  const canvasEnabled = true;
+  const canvasEnabled = remoteMode !== 'phone';
   const [activeMode, setActiveMode] = React.useState<UmbraGenerationMode>(() => (
     initialDeviceResume?.activeMode
       ? normalizeUmbraGenerationMode(initialDeviceResume.activeMode)
@@ -572,6 +575,19 @@ export function UmbraUIWorkspace() {
   const [mountedModes, setMountedModes] = React.useState<Set<UmbraGenerationMode>>(
     () => new Set([activeMode]),
   );
+
+  React.useEffect(() => {
+    const root = document.documentElement;
+    const syncRemoteMode = () => setRemoteMode(root.dataset.umbraRemoteMode || 'desktop');
+    syncRemoteMode();
+    const observer = new MutationObserver(syncRemoteMode);
+    observer.observe(root, { attributes: true, attributeFilter: ['data-umbra-remote-mode'] });
+    return () => observer.disconnect();
+  }, []);
+
+  React.useEffect(() => {
+    if (!canvasEnabled && activeMode === 'canvas') setActiveMode('image');
+  }, [activeMode, canvasEnabled]);
   const [promptSegments, setPromptSegments] = React.useState<UmbraUiPromptSegment[]>(() => (
     Array.isArray(initialDeviceResume?.promptSegments) && initialDeviceResume.promptSegments.length > 0
       ? initialDeviceResume.promptSegments
@@ -2734,6 +2750,7 @@ export function UmbraUIWorkspace() {
             )}
           >
             <Clapperboard size={13} /> Video
+            <span className="border border-fuchsia-300/35 bg-fuchsia-400/[0.10] px-1 py-px font-mono text-[7px] leading-3 text-fuchsia-200">BETA</span>
           </button>
           <button
             type="button"

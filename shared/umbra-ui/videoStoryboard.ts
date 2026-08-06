@@ -38,7 +38,7 @@ export const UMBRA_LTX_STORYBOARD_MAX_SHOTS = 24;
 export const UMBRA_LTX_STORYBOARD_MIN_DURATION_SECONDS = 0.5;
 export const UMBRA_LTX_STORYBOARD_MAX_DURATION_SECONDS = 60;
 export const UMBRA_VIDEO_MIN_DURATION_SECONDS = 0.5;
-export const UMBRA_VIDEO_MAX_DURATION_SECONDS = 600;
+export const UMBRA_VIDEO_MAX_DURATION_SECONDS = Number.MAX_SAFE_INTEGER;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -94,7 +94,7 @@ export function normalizeUmbraLtxStoryboardControls(
 }
 
 export function snapUmbraLtxFrameCount(value: unknown, fallback = 121): number {
-  const numeric = Math.max(1, Math.min(16_385, Math.ceil(finiteNumber(value, fallback))));
+  const numeric = Math.max(1, Math.ceil(finiteNumber(value, fallback)));
   return Math.max(1, Math.ceil((numeric - 1) / 8) * 8 + 1);
 }
 
@@ -102,7 +102,7 @@ export function resolveUmbraVideoDurationSeconds(
   framesInput: unknown,
   fpsInput: unknown,
 ): number {
-  const frames = clamp(Math.round(finiteNumber(framesInput, 1)), 1, 16_385);
+  const frames = Math.max(1, Math.round(finiteNumber(framesInput, 1)));
   const fps = clamp(finiteNumber(fpsInput, 25), 1, 240);
   return Math.max(0, frames - 1) / fps;
 }
@@ -123,7 +123,7 @@ export function resolveUmbraVideoFramesForDuration(
     frameStride,
     Math.round((durationSeconds * fps) / frameStride) * frameStride,
   );
-  return clamp(timelineFrames + 1, 1, 16_385);
+  return timelineFrames + 1;
 }
 
 export function resolveUmbraVideoFrameIndexForSeconds(

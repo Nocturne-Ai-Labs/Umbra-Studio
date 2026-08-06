@@ -20,6 +20,7 @@
 - Language: TypeScript first; use ES modules.
 - Indentation: 2 spaces; keep semicolon/style consistent with surrounding file.
 - Components/classes: `PascalCase` (`LibraryPanel.tsx`), variables/functions: `camelCase`, constants: `UPPER_SNAKE_CASE` when truly constant.
+- Selection controls: never add native HTML `<select>` elements. Use the shared Umbra selection-menu system (`UmbraSelect` / `UmbraSelectControl`) for every new or modified selector.
 - Keep backend route handlers focused; move reusable logic into `backend/*Service`-style modules.
 - Run `cd frontend && bun run lint` before opening a PR.
 

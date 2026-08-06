@@ -6022,6 +6022,27 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tag-modal] button {
   animation: menu-in 0.1s ease-out forwards;
 }
 
+@keyframes power-prompter-variant-reorder {
+  from {
+    transform: translateY(-4px);
+    box-shadow: 0 0 0 1px rgb(34 211 238 / 0.18), 0 0 18px rgb(34 211 238 / 0.14);
+  }
+  to {
+    transform: translateY(0);
+    box-shadow: none;
+  }
+}
+
+[data-umbra-variant-card][data-reorder-pulse='true'] {
+  animation: power-prompter-variant-reorder 260ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-umbra-variant-card][data-reorder-pulse='true'] {
+    animation: none;
+  }
+}
+
 .umbra-context-menu-panel {
   color-scheme: dark;
   border: 1px solid rgb(103 232 249 / 0.25);

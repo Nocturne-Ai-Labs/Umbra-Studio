@@ -1,6 +1,7 @@
 export interface HermesPromptCommandSettings {
   hermesProvider?: string;
   model?: string;
+  thinkingLevel?: string;
 }
 
 export function buildHermesPromptCommand(
@@ -12,8 +13,10 @@ export function buildHermesPromptCommand(
   const args = [executable, 'chat'];
   const provider = String(settings.hermesProvider || '').trim();
   const model = String(settings.model || '').trim();
+  const thinkingLevel = String(settings.thinkingLevel || '').trim().toLowerCase();
   if (provider) args.push('--provider', provider);
   if (model) args.push('--model', model);
+  if (thinkingLevel) args.push('--reasoning', thinkingLevel);
   args.push(
     '--ignore-rules',
     '--source',

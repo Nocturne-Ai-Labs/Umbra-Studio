@@ -24,12 +24,14 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useStore } from '@/store/useStore';
+import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import {
   createUmbraUiAgentInstruction,
   discardUmbraUiAgentDraft,
   formatHermesMcpConfig,
   loadUmbraUiAgentDrafts,
   loadUmbraUiAgentInstructions,
+  loadUmbraUiAgentModels,
   loadUmbraUiAgentSettings,
   regenerateUmbraUiAgentToken,
   saveUmbraUiAgentSettings,
@@ -40,11 +42,12 @@ import {
   type UmbraUiAgentGenerationSettings,
   type UmbraUiAgentInstruction,
   type UmbraUiAgentMediaType,
+  type UmbraUiAgentModelOption,
   type UmbraUiAgentProvider,
 } from '@/lib/umbraUiAgent';
 import { createDefaultUmbraUiAgentInstructions } from '../../../../shared/umbra-ui/agentTypes';
 
-type AgentPanelTab = 'drafts' | 'instructions';
+type AgentPanelTab = 'drafts' | 'instructions' | 'settings';
 
 interface UmbraAgentPromptPanelProps {
   open: boolean;
@@ -64,6 +67,7 @@ const DEFAULT_AGENT_GENERATION_SETTINGS: UmbraUiAgentGenerationSettings = {
   baseUrl: '',
   model: '',
   hermesProvider: '',
+  thinkingLevel: '',
   apiKey: '',
   temperature: 0.7,
   maxTokens: 1200,
@@ -82,6 +86,26 @@ function defaultBaseUrlForProvider(provider: UmbraUiAgentProvider): string {
   if (provider === 'lmstudio') return 'http://127.0.0.1:1234/v1';
   if (provider === 'openai-compatible') return 'http://127.0.0.1:8000/v1';
   return '';
+}
+
+function thinkingOptions(provider: UmbraUiAgentProvider, model: string) {
+  if (provider === 'hermes') {
+    return ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'].map((value) => ({
+      value,
+      label: value ? value[0].toUpperCase() + value.slice(1) : 'Provider default',
+    }));
+  }
+  if (provider === 'ollama' && /gpt[-_ ]?oss/i.test(model)) {
+    return ['', 'low', 'medium', 'high'].map((value) => ({
+      value,
+      label: value ? value[0].toUpperCase() + value.slice(1) : 'Model default',
+    }));
+  }
+  return [
+    { value: '', label: 'Model default' },
+    { value: 'none', label: 'Off' },
+    { value: 'medium', label: 'On' },
+  ];
 }
 
 function tabButtonClass(active: boolean): string {
@@ -127,6 +151,8 @@ export function UmbraAgentPromptPanel({
   const [testingAgentSettings, setTestingAgentSettings] = React.useState(false);
   const [agentTestPrompt, setAgentTestPrompt] = React.useState('');
   const [showToken, setShowToken] = React.useState(false);
+  const [agentModels, setAgentModels] = React.useState<UmbraUiAgentModelOption[]>([]);
+  const [loadingAgentModels, setLoadingAgentModels] = React.useState(false);
   const knownDraftIdsRef = React.useRef<Set<string> | null>(null);
 
   const refreshDrafts = React.useCallback(async (announce = false) => {
@@ -179,7 +205,13 @@ export function UmbraAgentPromptPanel({
           : nextInstructions[0]?.id || ''
       ));
       setSettings(nextSettings);
-      setGenerationSettings(nextSettings.generation || DEFAULT_AGENT_GENERATION_SETTINGS);
+        const nextGeneration = nextSettings.generation || DEFAULT_AGENT_GENERATION_SETTINGS;
+      setGenerationSettings(nextGeneration);
+      void loadUmbraUiAgentModels(nextGeneration.provider, nextGeneration.baseUrl)
+        .then((result) => {
+          if (!canceled && (result.models || []).length > 0) setAgentModels(result.models);
+        })
+        .catch(() => undefined);
     }).catch((error) => {
       if (!canceled) showToast(error instanceof Error ? error.message : 'Failed to open the agent prompt panel.', 'error');
     }).finally(() => {
@@ -207,6 +239,19 @@ export function UmbraAgentPromptPanel({
       };
     });
   };
+
+  const refreshAgentModels = React.useCallback(async (provider = generationSettings.provider, baseUrl = generationSettings.baseUrl) => {
+    setLoadingAgentModels(true);
+    try {
+      const result = await loadUmbraUiAgentModels(provider, baseUrl);
+      setAgentModels(result.models || []);
+    } catch (error) {
+      setAgentModels([]);
+      showToast(error instanceof Error ? error.message : 'Failed to load agent models.', 'error');
+    } finally {
+      setLoadingAgentModels(false);
+    }
+  }, [generationSettings.baseUrl, generationSettings.provider, showToast]);
 
   const updateSelectedInstruction = (patch: Partial<UmbraUiAgentInstruction>) => {
     setInstructions((current) => current.map((entry) => entry.id === selectedInstructionId
@@ -382,6 +427,9 @@ export function UmbraAgentPromptPanel({
             </button>
             <button type="button" onClick={() => setTab('instructions')} className={tabButtonClass(tab === 'instructions')}>
               <FileText size={11} /> Instructions
+            </button>
+            <button type="button" onClick={() => setTab('settings')} className={tabButtonClass(tab === 'settings')}>
+              <Settings2 size={11} /> Models
             </button>
           </div>
           <button data-umbra-agent-panel-close type="button" onClick={onClose} className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-zinc-100" title="Close">
@@ -637,12 +685,16 @@ export function UmbraAgentPromptPanel({
                       </div>
                     </div>
 
-                    <div data-umbra-agent-providers className="grid grid-cols-4 gap-1.5">
-                      {(['hermes', 'ollama', 'lmstudio', 'openai-compatible'] as UmbraUiAgentProvider[]).map((provider) => (
+                    <div data-umbra-agent-providers className="grid grid-cols-2 gap-1.5">
+                      {(['hermes', 'ollama'] as UmbraUiAgentProvider[]).map((provider) => (
                         <button
                           type="button"
                           key={provider}
-                          onClick={() => updateGenerationSettings({ provider })}
+                          onClick={() => {
+                            updateGenerationSettings({ provider, model: provider === 'hermes' ? '' : generationSettings.model });
+                            setAgentModels([]);
+                            void refreshAgentModels(provider, defaultBaseUrlForProvider(provider));
+                          }}
                           className={cn(
                             'h-8 rounded-md border text-[9px] font-black uppercase tracking-[0.11em]',
                             generationSettings.provider === provider
@@ -673,32 +725,36 @@ export function UmbraAgentPromptPanel({
                             </button>
                           ) : null}
                         </div>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <label className="block space-y-1.5">
-                            <span className={labelClass}>Hermes Provider Optional</span>
-                            <input
-                              value={generationSettings.hermesProvider}
-                              onChange={(event) => updateGenerationSettings({ hermesProvider: event.target.value })}
-                              placeholder="openrouter"
-                              className={`${inputClass} font-mono`}
+                        <div className="space-y-1.5">
+                            <span className={labelClass}>Hermes Model</span>
+                            <UmbraSelect
+                              value={agentModels.find((model) => model.provider === generationSettings.hermesProvider && model.model === generationSettings.model)?.id || ''}
+                              onValueChange={(value) => {
+                                const selected = agentModels.find((model) => model.id === value);
+                                updateGenerationSettings({
+                                  model: selected?.model || '',
+                                  hermesProvider: selected?.provider || '',
+                                });
+                              }}
+                              ariaLabel="Hermes model"
+                              menuTitle="Hermes Model"
+                              options={[
+                                { value: '', label: 'Hermes default routing', description: 'Use Hermes native selection' },
+                                ...agentModels.map((model) => ({ value: model.id, label: model.label, description: model.detail })),
+                                ...(generationSettings.model && !agentModels.some((model) => model.provider === generationSettings.hermesProvider && model.model === generationSettings.model)
+                                  ? [{ value: `${generationSettings.hermesProvider}::${generationSettings.model}`, label: generationSettings.model, description: 'Current Hermes override' }]
+                                  : []),
+                              ]}
+                              size="sm"
+                              buttonClassName="w-full font-mono"
                             />
-                          </label>
-                          <label className="block space-y-1.5">
-                            <span className={labelClass}>Hermes Model Optional</span>
-                            <input
-                              value={generationSettings.model}
-                              onChange={(event) => updateGenerationSettings({ model: event.target.value })}
-                              placeholder="anthropic/claude-sonnet-4.6"
-                              className={`${inputClass} font-mono`}
-                            />
-                          </label>
                         </div>
                         <p className="text-[10px] leading-relaxed text-zinc-600">
-                          Leave both blank for automatic Hermes routing. Model identifiers are passed directly to Hermes.
+                          Hermes&apos; native model picker is interactive, so Umbra uses its configured model or default routing without requiring a model name here. Use <code>hermes model</code> when you want to change that native selection.
                         </p>
                       </div>
                     ) : (
-                      <div className="grid gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+                      <div className="space-y-3">
                         <label className="block space-y-1.5">
                           <span className={labelClass}>Base URL</span>
                           <input
@@ -708,32 +764,43 @@ export function UmbraAgentPromptPanel({
                             className={`${inputClass} font-mono`}
                           />
                         </label>
-                        <label className="block space-y-1.5">
-                          <span className={labelClass}>Model</span>
-                          <input
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className={labelClass}>Ollama Model</span>
+                            <button type="button" onClick={() => void refreshAgentModels()} disabled={loadingAgentModels} className="ml-auto inline-flex h-6 items-center gap-1 rounded-md border border-cyan-300/20 px-2 text-[8px] font-black uppercase tracking-[0.1em] text-cyan-100 disabled:text-zinc-700">
+                              {loadingAgentModels ? <Loader2 size={9} className="animate-spin" /> : <RefreshCw size={9} />} Refresh
+                            </button>
+                          </div>
+                          <UmbraSelect
                             value={generationSettings.model}
-                            onChange={(event) => updateGenerationSettings({ model: event.target.value })}
-                            placeholder={generationSettings.provider === 'ollama' ? 'qwen2.5:7b' : 'loaded-model-name'}
-                            className={`${inputClass} font-mono`}
+                            onValueChange={(value) => updateGenerationSettings({ model: value })}
+                            ariaLabel="Ollama model"
+                            menuTitle="Ollama Model"
+                            options={[
+                              { value: '', label: 'Select an installed Ollama model' },
+                              ...agentModels.map((model) => ({ value: model.id, label: model.label, description: model.detail })),
+                            ]}
+                            size="sm"
+                            buttonClassName="w-full font-mono"
                           />
-                        </label>
+                          <p className="text-[10px] leading-relaxed text-zinc-600">Models are read from Ollama on this machine. Start Ollama, then refresh the list.</p>
+                        </div>
                       </div>
                     )}
 
-                    {generationSettings.provider === 'lmstudio' || generationSettings.provider === 'openai-compatible' ? (
-                      <label className="block space-y-1.5">
-                        <span className={labelClass}>API Key Optional</span>
-                        <input
-                          type="password"
-                          value={generationSettings.apiKey}
-                          onChange={(event) => updateGenerationSettings({ apiKey: event.target.value })}
-                          placeholder="Leave blank for local servers that do not require auth"
-                          className={`${inputClass} font-mono`}
+                    <div data-umbra-agent-tuning className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                      <div className="space-y-1.5">
+                        <span className={labelClass}>Thinking Level</span>
+                        <UmbraSelect
+                          value={generationSettings.thinkingLevel}
+                          onValueChange={(value) => updateGenerationSettings({ thinkingLevel: value })}
+                          ariaLabel="Thinking level"
+                          menuTitle="Thinking Level"
+                          options={thinkingOptions(generationSettings.provider, generationSettings.model)}
+                          size="sm"
+                          buttonClassName="w-full font-mono"
                         />
-                      </label>
-                    ) : null}
-
-                    <div data-umbra-agent-tuning className="grid grid-cols-3 gap-3">
+                      </div>
                       <label className="block space-y-1.5">
                         <span className={labelClass}>Temperature</span>
                         <input
