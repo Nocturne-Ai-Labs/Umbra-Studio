@@ -97,6 +97,10 @@ import {
 import { runConfiguredStartupAutoLaunches } from './backend/startupAutoLaunch';
 import { extractUmbraUiTrainedTags } from './backend/UmbraUiLoraMetadata';
 import { resolveUmbraUiPinnedOutputFolder } from './backend/UmbraUiPinnedOutput';
+import {
+  applyUmbraUiPrompterOutputLayout,
+  resolveUmbraUiPrompterOutputLayout,
+} from './backend/UmbraUiPrompterOutputLayout';
 import { getComfyVramLaunchArguments } from './backend/comfyLaunchArguments';
 
 // Route handlers we're keeping (will merge later)
@@ -7330,6 +7334,7 @@ function compileUmbraUiPipelineWorkflow(
     generation: unknown;
     promptSetId: number;
     outputSubfolder: string;
+    queueOrigin?: PowerPrompterQueueRequestOrigin;
     styleSeedMode?: unknown;
     selectedPipeline?: UmbraUiPipelineDescriptor;
   }
@@ -7380,7 +7385,14 @@ function compileUmbraUiPipelineWorkflow(
   const setLabel = `Set ${promptSetId}`;
   const isUmbraUiOutput = generation.outputOwner === 'umbra_ui';
   const umbraUiOutputMode = getUmbraUiOutputMode(generation);
-  const requestedPinnedOutputFolder = isUmbraUiOutput && umbraUiOutputMode === 'txt2img'
+  const prompterOutputLayout = resolveUmbraUiPrompterOutputLayout({
+    queueOrigin: options.queueOrigin,
+    outputMode: activeImagePipeline?.feature || umbraUiOutputMode,
+    promptSetId,
+    outputSubfolder,
+    dateFolder: formatUmbraUiLocalDate(),
+  });
+  const requestedPinnedOutputFolder = !prompterOutputLayout && isUmbraUiOutput && umbraUiOutputMode === 'txt2img'
     ? generation.outputFolder
     : '';
   const pinnedOutputFolder = resolveUmbraUiPinnedOutputFolder(
@@ -7729,7 +7741,9 @@ function compileUmbraUiPipelineWorkflow(
       setPPApiNodeInput(node, 'cfg', generation.cfg);
       setPPApiNodeInput(node, 'sampler_name', generation.samplerName);
       setPPApiNodeInput(node, 'scheduler', generation.scheduler);
-      if (isUmbraUiOutput) {
+      if (prompterOutputLayout) {
+        applyUmbraUiPrompterOutputLayout(classType, node, prompterOutputLayout);
+      } else if (isUmbraUiOutput) {
         setPPApiNodeInput(node, 'output_folder', pinnedOutputFolder || `Umbra UI/${umbraUiOutputMode}`);
         setPPApiNodeInput(node, 'save_to_yyyy_mm_dd_folder', !pinnedOutputFolder);
         setPPApiNodeInput(node, 'save_to_set_subfolder', false);
@@ -7746,7 +7760,9 @@ function compileUmbraUiPipelineWorkflow(
       continue;
     }
 
-    if (isUmbraUiOutput && classType === 'SaveImage') {
+    if (prompterOutputLayout && classType === 'SaveImage') {
+      applyUmbraUiPrompterOutputLayout(classType, node, prompterOutputLayout);
+    } else if (isUmbraUiOutput && classType === 'SaveImage') {
       setPPApiNodeInput(
         node,
         'filename_prefix',
@@ -9605,6 +9621,7 @@ async function runBackendPowerPrompterPipelineQueue(
         generation,
         promptSetId: promptSetIds[index] ?? 1,
         outputSubfolder: promptOutputSubfolders[index] || '',
+        queueOrigin: task.origin,
         styleSeedMode: state.styleSeedMode,
         selectedPipeline: activePipeline.selectedPipeline,
       });

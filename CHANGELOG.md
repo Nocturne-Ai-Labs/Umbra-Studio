@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.30.8
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, migrations, or manual configuration are
+required. Update normally, then new Power Prompter generations will use Umbra
+UI's text-to-image output root automatically.
+
+### Unified Prompter Outputs
+
+- Moved Power Prompter's generated images from the legacy
+  `Power Prompter Outputs` root to `Umbra UI/txt2img`.
+- Preserved the established date, set, and style organization beneath the new
+  root: `Umbra UI/txt2img/YYYY-MM-DD/Set N/<Style>`.
+- Made the queue origin and selected TXT2IMG pipeline authoritative, preventing
+  older saved cards, transferred controls, or pinned Umbra UI destinations from
+  flattening or redirecting Power Prompter output.
+- Updated the bundled Anima image workflow to use the unified output root.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Integrated Power Prompter jobs no longer lose their set and style
+  subfolders when their generation controls carry Umbra UI output state.
+- **Fixed:** Stale pinned-folder data can no longer override the Prompter's
+  structured TXT2IMG destination.
+- **Improved:** Power Prompter and Umbra UI now share one predictable image
+  library root while retaining Prompter-specific organization.
+
 ## v0.30.7
 
 ### TL;DR - Setup After Updating
