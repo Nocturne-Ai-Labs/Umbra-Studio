@@ -24,6 +24,8 @@ export interface UmbraUiUpscaleJob {
   status: UmbraUiUpscaleJobStatus;
   modelName: string;
   maxDimension: number;
+  outputFormat: 'png' | 'jpeg' | 'webp';
+  quality: number;
   outputFolder: string;
   queuePlacement: UmbraUiUpscaleQueuePlacement;
   total: number;
@@ -39,6 +41,11 @@ export interface UmbraUiUpscaleHandoff {
   name: string;
   imageUrl?: string;
   autoStart?: boolean;
+  createdAt: number;
+}
+
+export interface UmbraUiUpscaleBatchHandoff {
+  items: Array<Omit<UmbraUiUpscaleHandoff, 'createdAt'>>;
   createdAt: number;
 }
 
@@ -85,6 +92,8 @@ export async function submitUmbraUiUpscaleJob(options: {
   files?: File[];
   modelName: string;
   maxDimension: number;
+  outputFormat: 'png' | 'jpeg' | 'webp';
+  quality: number;
   outputFolder?: string;
   queuePlacement?: UmbraUiUpscaleQueuePlacement;
   onStageProgress?: (completed: number, total: number) => void;
@@ -107,6 +116,8 @@ export async function submitUmbraUiUpscaleJob(options: {
   form.set('staged', JSON.stringify(staged));
   form.set('modelName', options.modelName);
   form.set('maxDimension', String(options.maxDimension));
+  form.set('outputFormat', options.outputFormat);
+  form.set('quality', String(options.quality));
   form.set('outputFolder', String(options.outputFolder || '').trim());
   form.set('queuePlacement', String(options.queuePlacement || 'end'));
   const response = await fetch('/api/umbra-ui/upscale', { method: 'POST', body: form });
@@ -134,4 +145,15 @@ export function stageUmbraUiUpscaleHandoff(detail: Omit<UmbraUiUpscaleHandoff, '
   const payload: UmbraUiUpscaleHandoff = { ...detail, createdAt: Date.now() };
   try { window.sessionStorage.setItem(UMBRA_UI_UPSCALE_HANDOFF_KEY, JSON.stringify(payload)); } catch { /* best effort */ }
   window.dispatchEvent(new CustomEvent('umbra:umbra-ui-upscale-handoff', { detail: payload }));
+}
+
+export function stageUmbraUiUpscaleBatchHandoff(items: Array<Omit<UmbraUiUpscaleHandoff, 'createdAt'>>) {
+  const payload: UmbraUiUpscaleBatchHandoff = {
+    items: items.filter((item) => String(item.path || '').trim()),
+    createdAt: Date.now(),
+  };
+  if (payload.items.length === 0) throw new Error('Select at least one image to upscale.');
+  try { window.sessionStorage.setItem(UMBRA_UI_UPSCALE_HANDOFF_KEY, JSON.stringify(payload)); } catch { /* best effort */ }
+  window.dispatchEvent(new CustomEvent('umbra:umbra-ui-upscale-handoff', { detail: payload }));
+  return payload;
 }

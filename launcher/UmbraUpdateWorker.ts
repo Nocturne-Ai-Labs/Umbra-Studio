@@ -131,7 +131,11 @@ async function waitForUmbraListenerToStop(
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     try {
-      const response = await fetch(healthUrl, { cache: 'no-store' });
+      const remainingMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
+      const response = await fetch(healthUrl, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(Math.min(1_000, remainingMs)),
+      });
       if (!response.ok) return true;
     } catch {
       return true;
@@ -504,18 +508,21 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
   let backupRoot = '';
   let preservedRoot = '';
   try {
-    log(request, `Requesting Umbra ${request.currentVersion} shutdown.`);
-    await requestUmbraShutdown(request);
-    const listenerStoppedGracefully = await waitForUmbraListenerToStop(request);
     const trackedPids = collectRequestedProcessPids(request);
+    const hasLiveTrackedProcess = trackedPids.some(isProcessAlive);
+    let listenerStoppedGracefully = true;
+    if (hasLiveTrackedProcess || trackedPids.length === 0) {
+      log(request, `Requesting Umbra ${request.currentVersion} shutdown.`);
+      await requestUmbraShutdown(request);
+      listenerStoppedGracefully = await waitForUmbraListenerToStop(request);
+    } else {
+      log(request, `Umbra ${request.currentVersion} already closed before the update worker started.`);
+    }
     if (!listenerStoppedGracefully && trackedPids.length === 0) {
       throw new Error(`Umbra is still listening on port ${request.port}, but this standalone updater does not own that process. Close Umbra Studio and try again. No application files were replaced.`);
     }
     log(request, `Waiting for Umbra ${request.currentVersion} to close.`);
     await waitForProcesses(request);
-    if (!listenerStoppedGracefully && !(await waitForUmbraListenerToStop(request, 3_000))) {
-      throw new Error(`Umbra is still listening on port ${request.port} after its owned processes stopped. No application files were replaced.`);
-    }
     writeState(request, { phase: 'extracting', currentItem: 'Opening release package' });
 
     const extractionRoot = join(request.workspaceRoot, 'payload');

@@ -28,7 +28,6 @@ import {
   RotateCcw,
   Square,
   Loader2,
-  Notebook,
   PanelsTopLeft,
   ExternalLink,
   Eye,
@@ -453,7 +452,7 @@ export const UmbraAppBar = () => {
 
   React.useEffect(() => {
     if (!isPhoneRemote || PHONE_REMOTE_WORKSPACES.has(activeWorkspace)) return;
-    setActiveWorkspace('powerprompter');
+    setActiveWorkspace('umbraui');
   }, [activeWorkspace, isPhoneRemote, setActiveWorkspace]);
 
   const handleWorkspaceSelect = React.useCallback((workspace: Parameters<typeof setActiveWorkspace>[0]) => {
@@ -1858,21 +1857,12 @@ export const UmbraAppBar = () => {
       <nav data-umbra-phone-bottom-nav="" aria-label="Primary workspace navigation">
         <button
           type="button"
-          data-active={activeWorkspace === 'umbraui' ? '1' : '0'}
+          data-active={activeWorkspace === 'umbraui' || activeWorkspace === 'powerprompter' ? '1' : '0'}
           onClick={() => handleWorkspaceSelect('umbraui')}
           aria-label="Open Umbra UI"
         >
           <PanelsTopLeft size={19} />
           <span>{t('nav.generate')}</span>
-        </button>
-        <button
-          type="button"
-          data-active={activeWorkspace === 'powerprompter' ? '1' : '0'}
-          onClick={() => handleWorkspaceSelect('powerprompter')}
-          aria-label="Open Power Prompter"
-        >
-          <Notebook size={19} />
-          <span>{t('nav.prompter')}</span>
         </button>
         <button
           type="button"
@@ -2389,20 +2379,12 @@ export const UmbraAppBar = () => {
           {!isPhoneRemote ? (
             <button
               onClick={() => handleWorkspaceSelect('umbraui')}
-              className={sidebarNavItemClass(activeWorkspace === 'umbraui', 'w-full')}
+              className={sidebarNavItemClass(activeWorkspace === 'umbraui' || activeWorkspace === 'powerprompter', 'w-full')}
             >
               <PanelsTopLeft size={14} />
               <span>{t('nav.umbraUi')}</span>
             </button>
           ) : null}
-
-          <button
-            onClick={() => handleWorkspaceSelect('powerprompter')}
-            className={sidebarNavItemClass(activeWorkspace === 'powerprompter', 'w-full')}
-          >
-            <Notebook size={14} />
-            <span>{t('nav.powerPrompter')}</span>
-          </button>
 
           <div>
             <div className="flex items-stretch gap-1">

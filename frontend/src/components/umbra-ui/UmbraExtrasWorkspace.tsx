@@ -6,14 +6,17 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   AlertTriangle,
   CheckCircle2,
+  Copy,
+  Film,
   FolderOpen,
   ImageUp,
   Layers3,
-  ListPlus,
   Loader2,
   Plus,
+  Stamp,
   Trash2,
   Upload,
+  Video,
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -36,11 +39,26 @@ import {
   useUmbraQueuePlacement,
 } from '@/components/umbra-ui/UmbraQueuePlacementControls';
 import { UmbraMobileWorkspaceSheet } from '@/components/umbra-ui/UmbraMobileWorkspaceSheet';
+import {
+  UmbraExtrasMediaTools,
+  type UmbraExtrasMediaToolMode,
+} from '@/components/umbra-ui/UmbraExtrasMediaTools';
+import {
+  normalizeUmbraUiMediaToolsHandoff,
+  UMBRA_UI_MEDIA_TOOLS_HANDOFF_EVENT,
+  UMBRA_UI_MEDIA_TOOLS_HANDOFF_KEY,
+} from '@/lib/umbraUiMediaToolsHandoff';
+import {
+  UmbraImageExportControls,
+  type UmbraImageExportSettings,
+} from '@/components/umbra-ui/UmbraImageExportControls';
+import { browseUmbraUiMediaToolsSourceFiles } from '@/lib/umbraUiMediaTools';
 
 const IMAGE_EXTENSION_PATTERN = /\.(?:avif|bmp|gif|jpe?g|png|tiff?|webp)$/i;
 const MAX_UPSCALE_BATCH_ITEMS = 512;
 const TERMINAL_JOB_STATUSES = new Set(['completed', 'partial', 'failed']);
-const OUTPUT_FOLDER_STORAGE_KEY = 'umbra-ui:extras-output-folder';
+const OUTPUT_FOLDER_STORAGE_KEY = 'umbra-ui:extras-output-folder-v2';
+const UPSCALE_EXPORT_SETTINGS_KEY = 'umbra-ui:upscale-export-settings';
 const inputClass = 'w-full rounded-md border border-white/10 bg-black/35 px-2.5 py-2 text-xs text-zinc-100 outline-none transition-colors focus:border-cyan-300/45';
 const labelClass = 'text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500';
 
@@ -61,7 +79,43 @@ interface UmbraExtrasWorkspaceProps {
   onMaxDimensionChange: (value: number) => void;
   comfyConnected: boolean;
   queueSummary: UmbraQueueSummary;
-  onOpenPowerPrompter: () => void;
+}
+
+type UmbraExtrasToolMode = 'upscale' | UmbraExtrasMediaToolMode;
+
+function ExtrasToolNavigation({
+  value,
+  onChange,
+}: {
+  value: UmbraExtrasToolMode;
+  onChange: (value: UmbraExtrasToolMode) => void;
+}) {
+  const tools: Array<{ id: UmbraExtrasToolMode; label: string; icon: React.ReactNode }> = [
+    { id: 'upscale', label: 'Upscale', icon: <ImageUp size={12} /> },
+    { id: 'watermark', label: 'Image Watermark', icon: <Stamp size={12} /> },
+    { id: 'video-watermark', label: 'Video Watermark', icon: <Video size={12} /> },
+    { id: 'gif', label: 'Video to GIF', icon: <Film size={12} /> },
+  ];
+  return (
+    <div data-umbra-ui-extras-tool-nav="" className="flex min-h-11 shrink-0 items-center gap-1 border-b border-white/10 bg-black/30 px-3">
+      {tools.map((tool) => (
+        <button
+          key={tool.id}
+          type="button"
+          onClick={() => onChange(tool.id)}
+          className={cn(
+            'inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[9px] font-black uppercase tracking-[0.12em] transition-colors',
+            value === tool.id
+              ? 'border-cyan-300/30 bg-cyan-500/[0.1] text-cyan-100'
+              : 'border-transparent text-zinc-600 hover:border-white/10 hover:text-zinc-300',
+          )}
+        >
+          {tool.icon}
+          {tool.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function createSourceId(): string {
@@ -72,18 +126,21 @@ function buildPathPreview(path: string): string {
   return `/api/fs/thumbnail?${new URLSearchParams({ path, size: 'small', q: '90', fit: 'cover', lane: 'umbra-ui-extras' }).toString()}`;
 }
 
-function normalizeHandoff(value: unknown): UmbraUiUpscaleHandoff | null {
-  if (!value || typeof value !== 'object') return null;
+function normalizeHandoff(value: unknown): UmbraUiUpscaleHandoff[] {
+  if (!value || typeof value !== 'object') return [];
   const source = value as Record<string, unknown>;
+  if (Array.isArray(source.items)) {
+    return source.items.flatMap((item) => normalizeHandoff(item));
+  }
   const path = String(source.path || '').trim();
-  if (!path || !IMAGE_EXTENSION_PATTERN.test(path)) return null;
-  return {
+  if (!path || !IMAGE_EXTENSION_PATTERN.test(path)) return [];
+  return [{
     path,
     name: String(source.name || path.replace(/\\/g, '/').split('/').pop() || 'Image').trim(),
     imageUrl: String(source.imageUrl || '').trim(),
     autoStart: source.autoStart === true,
     createdAt: Number(source.createdAt) || Date.now(),
-  };
+  }];
 }
 
 function isTerminalJob(job: UmbraUiUpscaleJob | null): boolean {
@@ -105,12 +162,16 @@ export function UmbraExtrasWorkspace({
   onMaxDimensionChange,
   comfyConnected,
   queueSummary,
-  onOpenPowerPrompter,
 }: UmbraExtrasWorkspaceProps) {
   const showToast = useStore((state) => state.showToast);
   const [sources, setSources] = React.useState<StagedUpscaleSource[]>([]);
+  const [activeTool, setActiveTool] = React.useState<UmbraExtrasToolMode>('upscale');
   const [job, setJob] = React.useState<UmbraUiUpscaleJob | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
+  const [exportSettings, setExportSettings] = React.useState<UmbraImageExportSettings>(() => {
+    const fallback: UmbraImageExportSettings = { resizeEnabled: true, longEdge: maxDimension, format: 'png', quality: 90 };
+    try { return { ...fallback, ...JSON.parse(window.localStorage.getItem(UPSCALE_EXPORT_SETTINGS_KEY) || '{}'), resizeEnabled: true, longEdge: maxDimension }; } catch { return fallback; }
+  });
   const { placement, setPlacement, effectivePlacement } = useUmbraQueuePlacement(queueSummary);
   const [stageProgress, setStageProgress] = React.useState({ completed: 0, total: 0 });
   const [pendingAutoStartPath, setPendingAutoStartPath] = React.useState('');
@@ -119,12 +180,55 @@ export function UmbraExtrasWorkspace({
     try { return window.localStorage.getItem(OUTPUT_FOLDER_STORAGE_KEY) || ''; } catch { return ''; }
   });
   const [browsingOutputFolder, setBrowsingOutputFolder] = React.useState(false);
+  const [browsingSourceFiles, setBrowsingSourceFiles] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const folderInputRef = React.useRef<HTMLInputElement | null>(null);
   const sourceListRef = React.useRef<HTMLDivElement | null>(null);
   const objectUrlsRef = React.useRef(new Set<string>());
   const modelChoices = React.useMemo(() => Array.from(new Set([modelName, ...upscaleModels].filter(Boolean))), [modelName, upscaleModels]);
   const remoteClient = isUmbraRemoteClient();
+  const upscalePresetExtra = React.useMemo<Record<string, unknown>>(() => ({
+    modelName,
+    outputFolder,
+    placement,
+  }), [modelName, outputFolder, placement]);
+  const applyUpscalePresetExtra = React.useCallback((value: Record<string, unknown>) => {
+    const nextModel = String(value.modelName || '').trim();
+    if (nextModel && modelChoices.includes(nextModel)) {
+      onModelNameChange(nextModel);
+    } else if (nextModel) {
+      showToast(`Upscale model "${nextModel}" is not installed. The current model was kept.`, 'error');
+    }
+    if (!remoteClient) setOutputFolder(String(value.outputFolder || '').trim());
+    const nextPlacement = String(value.placement || 'end');
+    if (nextPlacement === 'next' || nextPlacement === 'end' || nextPlacement === 'interrupt') {
+      setPlacement(nextPlacement as UmbraQueuePlacement);
+    }
+  }, [modelChoices, onModelNameChange, remoteClient, setPlacement, showToast]);
+
+  React.useEffect(() => {
+    setExportSettings((current) => current.longEdge === maxDimension ? current : { ...current, longEdge: maxDimension });
+  }, [maxDimension]);
+
+  React.useEffect(() => {
+    try { window.localStorage.setItem(UPSCALE_EXPORT_SETTINGS_KEY, JSON.stringify(exportSettings)); } catch { /* best effort */ }
+  }, [exportSettings]);
+
+  const updateExportSettings = React.useCallback((next: UmbraImageExportSettings) => {
+    setExportSettings({ ...next, resizeEnabled: true });
+    if (next.longEdge !== maxDimension) onMaxDimensionChange(next.longEdge);
+  }, [maxDimension, onMaxDimensionChange]);
+
+  React.useEffect(() => {
+    const consume = (rawValue: unknown) => {
+      const handoff = normalizeUmbraUiMediaToolsHandoff(rawValue);
+      if (handoff) setActiveTool(handoff.mode);
+    };
+    try { consume(JSON.parse(window.sessionStorage.getItem(UMBRA_UI_MEDIA_TOOLS_HANDOFF_KEY) || 'null')); } catch { /* best effort */ }
+    const onHandoff = (event: Event) => consume((event as CustomEvent).detail);
+    window.addEventListener(UMBRA_UI_MEDIA_TOOLS_HANDOFF_EVENT, onHandoff);
+    return () => window.removeEventListener(UMBRA_UI_MEDIA_TOOLS_HANDOFF_EVENT, onHandoff);
+  }, []);
 
   React.useEffect(() => {
     if (remoteClient) return;
@@ -164,10 +268,35 @@ export function UmbraExtrasWorkspace({
     if (handoff.autoStart) setPendingAutoStartPath(handoff.path);
   }, []);
 
+  const browseSourceFiles = React.useCallback(async () => {
+    if (remoteClient) {
+      fileInputRef.current?.click();
+      return;
+    }
+    if (browsingSourceFiles) return;
+    setBrowsingSourceFiles(true);
+    try {
+      const paths = await browseUmbraUiMediaToolsSourceFiles('image', sources[0]?.path || outputFolder);
+      for (const path of paths) {
+        addHandoff({
+          path,
+          name: path.replace(/\\/g, '/').split('/').pop() || 'Image',
+          createdAt: Date.now(),
+        });
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to select source images.', 'error');
+    } finally {
+      setBrowsingSourceFiles(false);
+    }
+  }, [addHandoff, browsingSourceFiles, outputFolder, remoteClient, showToast, sources]);
+
   React.useEffect(() => {
     const consume = (rawValue: unknown) => {
-      const handoff = normalizeHandoff(rawValue);
-      if (handoff) addHandoff(handoff);
+      const handoffs = normalizeHandoff(rawValue);
+      if (handoffs.length === 0) return;
+      setActiveTool('upscale');
+      handoffs.forEach(addHandoff);
     };
     try {
       consume(JSON.parse(window.sessionStorage.getItem(UMBRA_UI_UPSCALE_HANDOFF_KEY) || 'null'));
@@ -204,10 +333,11 @@ export function UmbraExtrasWorkspace({
         setJob(nextJob);
         if (isTerminalJob(nextJob)) {
           window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
+          const firstFailure = nextJob.items.find((item) => item.error)?.error || '';
           showToast(
             nextJob.status === 'completed'
               ? `${nextJob.completed} image${nextJob.completed === 1 ? '' : 's'} upscaled.`
-              : `Upscale finished with ${nextJob.failed} failed item${nextJob.failed === 1 ? '' : 's'}.`,
+              : `Upscale failed: ${firstFailure || `${nextJob.failed} item${nextJob.failed === 1 ? '' : 's'} failed.`}`,
             nextJob.status === 'completed' ? 'success' : 'error',
           );
           return;
@@ -312,6 +442,8 @@ export function UmbraExtrasWorkspace({
         files: selectedSources.map((source) => source.file).filter((file): file is File => !!file),
         modelName,
         maxDimension,
+        outputFormat: exportSettings.format,
+        quality: exportSettings.quality,
         outputFolder: remoteClient ? '' : outputFolder,
         queuePlacement,
         onStageProgress: (completed, total) => setStageProgress({ completed, total }),
@@ -336,6 +468,8 @@ export function UmbraExtrasWorkspace({
   }, [
     comfyConnected,
     effectivePlacement,
+    exportSettings.format,
+    exportSettings.quality,
     maxDimension,
     modelName,
     outputFolder,
@@ -362,9 +496,33 @@ export function UmbraExtrasWorkspace({
   });
   const progressUnits = job ? job.completed + job.failed : 0;
   const progress = job?.total ? Math.max(0, Math.min(1, progressUnits / job.total)) : 0;
+  const failureMessages = React.useMemo(() => Array.from(new Set(
+    (job?.items || []).map((item) => item.error.trim()).filter(Boolean),
+  )), [job?.items]);
+
+  const copyFailureDetails = React.useCallback(async () => {
+    if (failureMessages.length === 0) return;
+    try {
+      await navigator.clipboard.writeText(failureMessages.join('\n\n'));
+      showToast('Upscale failure details copied.', 'success');
+    } catch {
+      showToast('Could not copy the failure details.', 'error');
+    }
+  }, [failureMessages, showToast]);
+
+  if (activeTool !== 'upscale') {
+    return (
+      <div data-umbra-ui-extras="" className="col-span-2 flex min-h-0 flex-col">
+        <ExtrasToolNavigation value={activeTool} onChange={setActiveTool} />
+        <UmbraExtrasMediaTools mode={activeTool} />
+      </div>
+    );
+  }
 
   return (
-    <div data-umbra-ui-extras="" className="col-span-2 grid min-h-0 grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
+    <div data-umbra-ui-extras="" className="col-span-2 flex min-h-0 flex-col">
+      <ExtrasToolNavigation value={activeTool} onChange={setActiveTool} />
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
       <section data-umbra-ui-extras-controls="" className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar">
         <div className="mb-3 flex items-center gap-2">
           <ImageUp size={13} className="text-cyan-300" />
@@ -379,31 +537,32 @@ export function UmbraExtrasWorkspace({
               {modelChoices.map((model) => <option key={model} value={model}>{model}</option>)}
             </UmbraSelectControl>
           </label>
-          <label className="block space-y-1.5">
-            <span className={labelClass}>Maximum Edge</span>
-            <input
-              type="number"
-              min={512}
-              max={16384}
-              step={8}
-              value={maxDimension}
-              onChange={(event) => onMaxDimensionChange(Math.max(512, Math.min(16384, Number(event.target.value) || 512)))}
-              className={inputClass}
-            />
-          </label>
+          <UmbraImageExportControls
+            value={exportSettings}
+            onChange={updateExportSettings}
+            resizeLocked
+            presetScope="upscale"
+            presetLabel="Upscale Preset"
+            presetExtra={upscalePresetExtra}
+            onPresetExtraChange={applyUpscalePresetExtra}
+          />
+          <div className="rounded-md border border-amber-300/15 bg-amber-500/[0.05] px-2.5 py-2 font-mono text-[8px] leading-relaxed text-amber-100/70">
+            Long Edge is the final output size. A source already larger than this value will be reduced after upscaling.
+          </div>
 
           <div className={cn('space-y-1.5', remoteClient && 'opacity-45')}>
             <div className="flex items-center gap-2">
               <span className={labelClass}>Output Folder</span>
-              {remoteClient ? <span className="ml-auto rounded-sm border border-white/10 px-1.5 py-0.5 font-mono text-[8px] uppercase text-zinc-600">Host only</span> : null}
+              {!outputFolder ? <span className="ml-auto font-mono text-[8px] uppercase text-emerald-300/70">Automatic by source</span> : null}
+              {remoteClient ? <span className="rounded-sm border border-white/10 px-1.5 py-0.5 font-mono text-[8px] uppercase text-zinc-600">Host only</span> : null}
             </div>
             <div className="grid grid-cols-[minmax(0,1fr)_34px_34px] gap-1.5">
               <input
-                value={outputFolder || 'Umbra UI/extras (dated)'}
+                value={outputFolder || '[Source Folder]/Upscaled'}
                 readOnly
                 disabled={remoteClient}
                 className={cn(inputClass, 'truncate font-mono text-[10px]', !outputFolder && 'text-zinc-500')}
-                title={outputFolder || 'Default Umbra UI extras output'}
+                title={outputFolder || 'Automatic Upscaled subfolder beside each source image'}
               />
               <button
                 type="button"
@@ -419,7 +578,7 @@ export function UmbraExtrasWorkspace({
                 onClick={() => setOutputFolder('')}
                 disabled={remoteClient || !outputFolder}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-zinc-500 hover:border-red-300/25 hover:text-red-200 disabled:cursor-not-allowed disabled:text-zinc-700"
-                title="Use default dated output folder"
+                title="Use automatic Upscaled subfolders"
               >
                 <X size={12} />
               </button>
@@ -450,10 +609,11 @@ export function UmbraExtrasWorkspace({
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => void browseSourceFiles()}
+              disabled={browsingSourceFiles}
               className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-white/10 bg-white/[0.03] text-[9px] font-black uppercase tracking-[0.12em] text-zinc-300 hover:border-cyan-300/30 hover:text-cyan-100"
             >
-              <Plus size={11} /> Add Images
+              {browsingSourceFiles ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />} Add Images
             </button>
             <button
               type="button"
@@ -489,14 +649,6 @@ export function UmbraExtrasWorkspace({
                 ? `Staging ${stageProgress.completed}/${stageProgress.total}`
                 : 'Run Upscale Batch'}
             </button>
-            <button
-              type="button"
-              onClick={onOpenPowerPrompter}
-              className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-white/10 bg-white/[0.025] text-[9px] font-black uppercase tracking-[0.12em] text-zinc-400 transition-colors hover:border-cyan-300/30 hover:text-cyan-100"
-            >
-              <ListPlus size={12} />
-              Open Power Prompter
-            </button>
           </div>
         </div>
 
@@ -514,6 +666,18 @@ export function UmbraExtrasWorkspace({
               <span>{job.status}</span>
               <span>{job.failed > 0 ? `${job.failed} failed` : job.modelName}</span>
             </div>
+            {failureMessages.length > 0 ? (
+              <div data-umbra-ui-upscale-errors="" className="mt-3 rounded-md border border-red-300/25 bg-red-500/[0.07] p-2.5">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle size={12} className="text-red-300" />
+                  <span className="text-[9px] font-black uppercase tracking-[0.12em] text-red-200">Why it failed</span>
+                  <button type="button" onClick={() => void copyFailureDetails()} title="Copy failure details" className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded border border-red-300/15 text-red-200/70 hover:bg-red-500/10 hover:text-red-100"><Copy size={11} /></button>
+                </div>
+                <div className="mt-2 max-h-36 space-y-2 overflow-y-auto custom-scrollbar">
+                  {failureMessages.map((message, index) => <p key={`${index}-${message}`} className="break-words font-mono text-[9px] normal-case leading-relaxed text-red-100/80">{message}</p>)}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -582,7 +746,7 @@ export function UmbraExtrasWorkspace({
                   <JobStatusIcon status={item.status} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[9px] font-bold text-zinc-300">{item.name}</div>
-                    <div className={cn('truncate font-mono text-[8px] uppercase', item.error ? 'text-red-300/70' : 'text-zinc-600')}>
+                    <div className={cn('font-mono text-[8px]', item.error ? 'break-words normal-case leading-relaxed text-red-300/80' : 'uppercase text-zinc-600')}>
                       {item.error || item.status}
                     </div>
                   </div>
@@ -607,6 +771,7 @@ export function UmbraExtrasWorkspace({
         )}
         </main>
       </UmbraMobileWorkspaceSheet>
+      </div>
     </div>
   );
 }

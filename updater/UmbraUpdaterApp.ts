@@ -1,4 +1,5 @@
 import {
+  appendFileSync,
   existsSync,
   readFileSync,
   renameSync,
@@ -127,6 +128,14 @@ async function runWorker(
     keepWorkspaceAlive: true,
   };
   writeJsonAtomic(requestPath, request);
+  const workerProcessLogPath = join(session.workspaceRoot, 'worker-process.log');
+  const appendWorkerOutput = (value: unknown) => {
+    try {
+      appendFileSync(workerProcessLogPath, String(value), 'utf8');
+    } catch {
+      // The update transaction can briefly move application paths on Windows.
+    }
+  };
   const bunName = process.platform === 'win32' ? 'bun.exe' : 'bun';
   const worker = spawn(join(session.workspaceRoot, bunName), [
     join(session.workspaceRoot, 'UmbraUpdateWorker.js'),
@@ -135,9 +144,11 @@ async function runWorker(
   ], {
     cwd: session.workspaceRoot,
     detached: true,
-    stdio: 'ignore',
+    stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
+  worker.stdout?.on('data', appendWorkerOutput);
+  worker.stderr?.on('data', appendWorkerOutput);
   session.workerPid = Number(worker.pid || 0);
   writeJsonAtomic(join(session.workspaceRoot, 'session.json'), session);
   const code = await new Promise<number>((resolveExit) => {

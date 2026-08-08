@@ -1,5 +1,5 @@
-import { rm } from 'fs/promises';
-import { extname, join, resolve, sep } from 'path';
+import { mkdir, rm } from 'fs/promises';
+import { dirname, extname, join, resolve, sep } from 'path';
 
 const IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);
 const JOB_RETENTION_MS = 6 * 60 * 60 * 1000;
@@ -9,6 +9,7 @@ const MAX_SOURCE_BYTES = 512 * 1024 * 1024;
 export type UmbraUiUpscaleItemStatus = 'staging' | 'queued' | 'running' | 'completed' | 'failed';
 export type UmbraUiUpscaleJobStatus = 'staging' | 'queued' | 'running' | 'completed' | 'partial' | 'failed';
 export type UmbraUiUpscaleQueuePlacement = 'next' | 'end' | 'interrupt';
+export type UmbraUiUpscaleOutputFormat = 'png' | 'jpeg' | 'webp';
 
 export interface UmbraUiUpscaleSource {
   name: string;
@@ -39,6 +40,8 @@ export interface UmbraUiUpscaleJob {
   status: UmbraUiUpscaleJobStatus;
   modelName: string;
   maxDimension: number;
+  outputFormat: UmbraUiUpscaleOutputFormat;
+  quality: number;
   outputFolder: string;
   queuePlacement: UmbraUiUpscaleQueuePlacement;
   total: number;
@@ -52,6 +55,7 @@ export interface UmbraUiUpscaleJob {
 interface UmbraUiUpscaleServiceOptions {
   getComfyBaseUrl: () => string;
   getComfyInputRoot?: () => string;
+  getDefaultOutputRoot?: () => string;
   prepareExecution?: (context: {
     jobId: string;
     queuePlacement: UmbraUiUpscaleQueuePlacement;
@@ -99,10 +103,40 @@ function readExecutionError(record: any): string {
     if (!Array.isArray(entry) || String(entry[0] || '') !== 'execution_error') continue;
     const detail = entry[1] && typeof entry[1] === 'object' ? entry[1] : {};
     const nodeType = String(detail.node_type || '').trim();
+    const nodeId = String(detail.node_id || '').trim();
     const message = String(detail.exception_message || detail.error || '').trim();
-    return `${nodeType ? `${nodeType}: ` : ''}${message || 'ComfyUI upscale execution failed.'}`;
+    const nodeLabel = [nodeType, nodeId ? `node ${nodeId}` : ''].filter(Boolean).join(' · ');
+    return `${nodeLabel ? `${nodeLabel}: ` : ''}${message || 'ComfyUI upscale execution failed.'}`;
   }
   return '';
+}
+
+function readPromptRejection(detailText: string, status: number): string {
+  let payload: any = null;
+  try { payload = JSON.parse(detailText); } catch { /* plain text response */ }
+  const nodeErrors = payload?.node_errors && typeof payload.node_errors === 'object'
+    ? payload.node_errors as Record<string, any>
+    : {};
+  const details: string[] = [];
+  for (const [nodeId, nodeError] of Object.entries(nodeErrors)) {
+    const nodeType = String(nodeError?.class_type || '').trim();
+    const errors = Array.isArray(nodeError?.errors) ? nodeError.errors : [];
+    for (const error of errors) {
+      const inputName = String(error?.extra_info?.input_name || '').trim();
+      const received = error?.extra_info?.received_value;
+      const errorType = String(error?.type || '').trim();
+      let message = String(error?.message || error?.details || '').trim() || 'Workflow validation failed.';
+      if (errorType === 'value_not_in_list' && inputName) {
+        message = `${inputName}: ${JSON.stringify(received)} is not installed or is no longer available. Refresh the model list and select an installed model.`;
+      } else if (inputName) {
+        message = `${inputName}: ${message}`;
+      }
+      details.push(`${nodeType || 'ComfyUI node'} ${nodeId}: ${message}`);
+    }
+  }
+  if (details.length > 0) return details.join(' ');
+  const rootMessage = String(payload?.error?.message || payload?.message || detailText || '').trim();
+  return rootMessage || `ComfyUI rejected the upscale workflow (${status}).`;
 }
 
 function collectOutputs(record: any): UmbraUiUpscaleOutput[] {
@@ -146,12 +180,14 @@ export class UmbraUiUpscaleService {
   private readonly jobs = new Map<string, UmbraUiUpscaleJob>();
   private readonly getComfyBaseUrl: () => string;
   private readonly getComfyInputRoot?: () => string;
+  private readonly getDefaultOutputRoot?: () => string;
   private readonly prepareExecution?: UmbraUiUpscaleServiceOptions['prepareExecution'];
   private executionTail: Promise<void> = Promise.resolve();
 
   constructor(options: UmbraUiUpscaleServiceOptions) {
     this.getComfyBaseUrl = options.getComfyBaseUrl;
     this.getComfyInputRoot = options.getComfyInputRoot;
+    this.getDefaultOutputRoot = options.getDefaultOutputRoot;
     this.prepareExecution = options.prepareExecution;
   }
 
@@ -174,6 +210,8 @@ export class UmbraUiUpscaleService {
     settings: {
       modelName: string;
       maxDimension: number;
+      outputFormat?: UmbraUiUpscaleOutputFormat;
+      quality?: number;
       outputFolder?: string;
       queuePlacement?: UmbraUiUpscaleQueuePlacement;
     },
@@ -183,6 +221,8 @@ export class UmbraUiUpscaleService {
     const modelName = String(settings.modelName || '').trim().replace(/\\/g, '/');
     if (!modelName) throw new Error('Choose an upscale model.');
     const maxDimension = Math.max(512, Math.min(16384, Math.round(Number(settings.maxDimension) || 3840)));
+    const outputFormat: UmbraUiUpscaleOutputFormat = settings.outputFormat === 'jpeg' || settings.outputFormat === 'webp' ? settings.outputFormat : 'png';
+    const quality = Math.max(1, Math.min(100, Math.round(Number(settings.quality) || 90)));
     const outputFolder = String(settings.outputFolder || '').trim();
     const queuePlacement = normalizeQueuePlacement(settings.queuePlacement);
     const now = Date.now();
@@ -191,6 +231,8 @@ export class UmbraUiUpscaleService {
       status: 'staging',
       modelName,
       maxDimension,
+      outputFormat,
+      quality,
       outputFolder,
       queuePlacement,
       total: sources.length,
@@ -216,7 +258,7 @@ export class UmbraUiUpscaleService {
       try {
         const preparedRelease = await this.prepareExecution?.({ jobId: job.id, queuePlacement });
         if (typeof preparedRelease === 'function') releaseExecution = preparedRelease;
-        await this.processSerialJob(job, sources, modelName, maxDimension, outputFolder, queuePlacement);
+        await this.processSerialJob(job, sources, modelName, maxDimension, outputFormat, quality, outputFolder, queuePlacement);
       } catch (error: any) {
         const message = String(error?.message || error || 'Upscale scheduling failed.');
         for (let index = 0; index < job.items.length; index += 1) {
@@ -258,7 +300,7 @@ export class UmbraUiUpscaleService {
     return returnedSubfolder ? `${returnedSubfolder}/${returnedName}` : returnedName;
   }
 
-  private buildWorkflow(inputName: string, sourceName: string, modelName: string, maxDimension: number, outputFolder: string) {
+  private buildWorkflow(inputName: string, sourceName: string, modelName: string, maxDimension: number, outputFormat: UmbraUiUpscaleOutputFormat, quality: number, outputFolder: string) {
     const sourceStem = sanitizeFilename(sourceName, 'image').replace(/\.[^.]+$/, '');
     return {
       '1': {
@@ -294,6 +336,8 @@ export class UmbraUiUpscaleService {
           cfg: 0,
           sampler_name: 'upscale',
           scheduler: 'none',
+          output_format: outputFormat,
+          output_quality: quality,
         },
         _meta: { title: 'Umbra UI Extras Output' },
       },
@@ -305,6 +349,8 @@ export class UmbraUiUpscaleService {
     sources: UmbraUiUpscaleSource[],
     modelName: string,
     maxDimension: number,
+    outputFormat: UmbraUiUpscaleOutputFormat,
+    quality: number,
     outputFolder: string,
     queuePlacement: UmbraUiUpscaleQueuePlacement,
   ) {
@@ -321,7 +367,13 @@ export class UmbraUiUpscaleService {
         if (bytes.byteLength <= 0) throw new Error('The source image is empty.');
         if (bytes.byteLength > MAX_SOURCE_BYTES) throw new Error('The source image exceeds the 512 MB upscale limit.');
         const inputName = await this.uploadInput(job.id, index, item.name, bytes);
-        const graph = this.buildWorkflow(inputName, item.name, modelName, maxDimension, outputFolder);
+        const sourcePath = String(item.sourcePath || '').trim();
+        const automaticRoot = sourcePath
+          ? dirname(resolve(sourcePath))
+          : resolve(this.getDefaultOutputRoot?.() || join(process.cwd(), 'output'));
+        const resolvedOutputFolder = outputFolder || join(automaticRoot, 'Upscaled');
+        await mkdir(resolvedOutputFolder, { recursive: true });
+        const graph = this.buildWorkflow(inputName, item.name, modelName, maxDimension, outputFormat, quality, resolvedOutputFolder);
         item.status = 'queued';
         job.updatedAt = Date.now();
         const response = await fetch(`${this.getComfyBaseUrl()}/prompt`, {
@@ -341,7 +393,9 @@ export class UmbraUiUpscaleService {
                   sourcePath: item.sourcePath,
                   modelName,
                   maxDimension,
-                  outputFolder,
+                  outputFormat,
+                  quality,
+                  outputFolder: resolvedOutputFolder,
                   queuePlacement,
                 },
               },
@@ -350,7 +404,7 @@ export class UmbraUiUpscaleService {
         });
         if (!response.ok) {
           const detail = await response.text().catch(() => '');
-          throw new Error(detail || `ComfyUI rejected the upscale workflow (${response.status}).`);
+          throw new Error(readPromptRejection(detail, response.status));
         }
         const promptId = readPromptId(await response.json().catch(() => ({})));
         if (!promptId) throw new Error('ComfyUI did not return an upscale prompt id.');

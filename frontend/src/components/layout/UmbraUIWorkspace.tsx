@@ -14,6 +14,7 @@ import {
   Layers3,
   ListPlus,
   Loader2,
+  Notebook,
   Paintbrush,
   PanelsTopLeft,
   Play,
@@ -60,6 +61,7 @@ import { UmbraVideoQueuePanel } from '@/components/umbra-ui/UmbraVideoQueuePanel
 import { UmbraExtrasWorkspace } from '@/components/umbra-ui/UmbraExtrasWorkspace';
 import { UmbraInpaintWorkspace } from '@/components/umbra-ui/UmbraInpaintWorkspace';
 import { UmbraCanvasWorkspace } from '@/features/canvas/UmbraCanvasWorkspace';
+import { PowerPrompter } from '@/components/layout/PowerPrompter';
 import { UmbraCheckpointControls } from '@/components/umbra-ui/UmbraCheckpointControls';
 import { UmbraWorkflowResourceControls } from '@/components/umbra-ui/UmbraWorkflowResourceControls';
 import { UmbraLoraStackControls } from '@/components/umbra-ui/UmbraLoraStackControls';
@@ -168,10 +170,10 @@ import {
   resolveUmbraUiHiresResizeMode,
 } from '../../../../shared/umbra-ui/pipelineTypes';
 
-type UmbraGenerationMode = 'image' | 'img2img' | 'inpaint' | 'canvas' | 'video' | 'extras';
+type UmbraGenerationMode = 'prompter' | 'image' | 'img2img' | 'inpaint' | 'canvas' | 'video' | 'extras';
 
 const UMBRA_UI_ACTIVE_MODE_STORAGE_KEY = 'umbra-ui:active-mode';
-const UMBRA_UI_GENERATION_MODES: UmbraGenerationMode[] = ['image', 'img2img', 'inpaint', 'canvas', 'video', 'extras'];
+const UMBRA_UI_GENERATION_MODES: UmbraGenerationMode[] = ['prompter', 'image', 'img2img', 'inpaint', 'canvas', 'video', 'extras'];
 
 function snapshotUmbraImageGenerationInfo(
   workflowName: string,
@@ -513,6 +515,7 @@ function PipelineControls({
 }
 
 export function UmbraUIWorkspace() {
+  const activeWorkspace = useStore((state) => state.activeWorkspace);
   const comfyConnected = useStore((state) => state.connections.comfyui === 'connected');
   const setActiveWorkspace = useStore((state) => state.setActiveWorkspace);
   const showToast = useStore((state) => state.showToast);
@@ -575,6 +578,33 @@ export function UmbraUIWorkspace() {
   const [mountedModes, setMountedModes] = React.useState<Set<UmbraGenerationMode>>(
     () => new Set([activeMode]),
   );
+  const previousShellWorkspaceRef = React.useRef<typeof activeWorkspace | null>(null);
+  const shellPrompterSyncPendingRef = React.useRef(false);
+  const activeModeRef = React.useRef(activeMode);
+  activeModeRef.current = activeMode;
+
+  React.useEffect(() => {
+    const previousWorkspace = previousShellWorkspaceRef.current;
+    previousShellWorkspaceRef.current = activeWorkspace;
+    if (previousWorkspace === activeWorkspace) return;
+    if (activeWorkspace === 'powerprompter' && activeModeRef.current !== 'prompter') {
+      shellPrompterSyncPendingRef.current = true;
+      setActiveMode('prompter');
+    }
+  }, [activeWorkspace]);
+
+  React.useEffect(() => {
+    if (shellPrompterSyncPendingRef.current) {
+      if (activeMode !== 'prompter') return;
+      shellPrompterSyncPendingRef.current = false;
+      return;
+    }
+    const targetWorkspace = activeMode === 'prompter' ? 'powerprompter' : 'umbraui';
+    const currentWorkspace = useStore.getState().activeWorkspace;
+    if (currentWorkspace !== 'umbraui' && currentWorkspace !== 'powerprompter') return;
+    if (currentWorkspace === targetWorkspace) return;
+    setActiveWorkspace(targetWorkspace);
+  }, [activeMode, setActiveWorkspace]);
 
   React.useEffect(() => {
     const root = document.documentElement;
@@ -2457,6 +2487,7 @@ export function UmbraUIWorkspace() {
       applyMediaHandoff(normalizeUmbraUiMediaHandoff((event as CustomEvent).detail));
     };
     const onUpscaleHandoff = () => setActiveMode('extras');
+    const onMediaToolsHandoff = () => setActiveMode('extras');
     const target = window as typeof window & { __umbraPendingUmbraUiMediaHandoff?: unknown };
     let storedHandoff: UmbraUiMediaHandoff | null = null;
     try {
@@ -2465,9 +2496,11 @@ export function UmbraUIWorkspace() {
     applyMediaHandoff(normalizeUmbraUiMediaHandoff(target.__umbraPendingUmbraUiMediaHandoff) || storedHandoff);
     window.addEventListener(UMBRA_UI_MEDIA_HANDOFF_EVENT, onHandoff);
     window.addEventListener('umbra:umbra-ui-upscale-handoff', onUpscaleHandoff);
+    window.addEventListener('umbra:umbra-ui-media-tools-handoff', onMediaToolsHandoff);
     return () => {
       window.removeEventListener(UMBRA_UI_MEDIA_HANDOFF_EVENT, onHandoff);
       window.removeEventListener('umbra:umbra-ui-upscale-handoff', onUpscaleHandoff);
+      window.removeEventListener('umbra:umbra-ui-media-tools-handoff', onMediaToolsHandoff);
     };
   }, [applyPowerPrompterGenerationControls, clearStoredMediaHandoff, loraCatalog, modelCatalog, selectedWorkflowResources]);
 
@@ -2711,6 +2744,16 @@ export function UmbraUIWorkspace() {
           </button>
           <button
             type="button"
+            onClick={() => setActiveMode('prompter')}
+            className={cn(
+              'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
+              activeMode === 'prompter' ? 'bg-emerald-500/[0.12] text-emerald-100' : 'text-zinc-600 hover:text-zinc-300',
+            )}
+          >
+            <Notebook size={13} /> Prompter
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveMode('img2img')}
             className={cn(
               'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
@@ -2798,13 +2841,22 @@ export function UmbraUIWorkspace() {
           'grid min-h-0 flex-1',
           activeMode === 'video' && videoStoryboardOpen
             ? 'grid-cols-[minmax(340px,400px)_minmax(320px,380px)_minmax(320px,1fr)]'
-            : activeMode === 'canvas'
+            : activeMode === 'canvas' || activeMode === 'prompter'
               ? 'grid-cols-[minmax(0,1fr)]'
             : activeMode === 'image'
               ? 'grid-cols-[clamp(300px,24vw,380px)_clamp(280px,22vw,360px)_minmax(300px,1fr)]'
               : 'grid-cols-[minmax(360px,400px)_minmax(320px,1fr)]',
         )}
       >
+        {modeIsMounted('prompter') ? (
+          <div
+            data-umbra-ui-power-prompter=""
+            className={activeMode === 'prompter' ? 'min-h-0 min-w-0 overflow-hidden' : 'hidden'}
+            aria-hidden={activeMode !== 'prompter'}
+          >
+            <PowerPrompter overlayMode={false} isActive={activeMode === 'prompter'} />
+          </div>
+        ) : null}
         {canvasEnabled && modeIsMounted('canvas') ? (
           <div className={activeMode === 'canvas' ? 'contents' : 'hidden'} aria-hidden={activeMode !== 'canvas'}>
             <UmbraCanvasWorkspace
@@ -2934,7 +2986,6 @@ export function UmbraUIWorkspace() {
               onMaxDimensionChange={(maxDimension) => setOutputUpscale((current) => ({ ...current, maxDimension }))}
               comfyConnected={comfyConnected}
               queueSummary={queueSummary}
-              onOpenPowerPrompter={() => setActiveWorkspace('powerprompter')}
             />
           </div>
         ) : null}

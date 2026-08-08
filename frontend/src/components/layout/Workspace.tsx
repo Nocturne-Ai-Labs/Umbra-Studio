@@ -14,7 +14,6 @@ import { governorShouldRun, governorTryAcquire } from '@/lib/loadGovernor';
 import { logDiagnostic } from '@/lib/diagnostics';
 import { cn } from '@/lib/utils';
 import { UmbraFilmstrip } from './UmbraFilmstrip';
-import { PowerPrompter } from '@/components/layout/PowerPrompter';
 import type { WorkspaceType } from '@/store/useStore';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import { useI18n } from '@/i18n';
@@ -2323,7 +2322,6 @@ export const Workspace = () => {
   });
   const [remoteClientRevision, setRemoteClientRevision] = useState(0);
   const isRemoteClient = useMemo(() => isUmbraRemoteClient(), [remoteClientRevision]);
-  const isPowerPrompterWorkspace = activeWorkspace === 'powerprompter';
   const previousWorkspaceRef = useRef(activeWorkspace);
   const [workspaceTransition, setWorkspaceTransition] = useState<{
     from: WorkspaceType;
@@ -2332,7 +2330,9 @@ export const Workspace = () => {
     key: number;
   } | null>(null);
   const getWorkspaceLayerStyle = (workspace: WorkspaceType): React.CSSProperties => {
-    const isActive = activeWorkspace === workspace;
+    const isActive = workspace === 'umbraui'
+      ? activeWorkspace === 'umbraui' || activeWorkspace === 'powerprompter'
+      : activeWorkspace === workspace;
     const isTransitionFrom = workspaceTransition?.from === workspace;
     const isTransitionTo = workspaceTransition?.to === workspace;
     const isTransitionLayer = isTransitionFrom || isTransitionTo;
@@ -2370,6 +2370,7 @@ export const Workspace = () => {
   });
   const [loadedWorkspaces, setLoadedWorkspaces] = useState<Record<string, boolean>>(() => ({
     [activeWorkspace]: true,
+    umbraui: activeWorkspace === 'umbraui' || activeWorkspace === 'powerprompter',
     library: true,
   }));
   useComponentDebug('Workspace', { activeWorkspace });
@@ -2404,6 +2405,12 @@ export const Workspace = () => {
     if (previousWorkspace === activeWorkspace) return;
 
     previousWorkspaceRef.current = activeWorkspace;
+    const stayedInsideUmbraUi = (previousWorkspace === 'umbraui' || previousWorkspace === 'powerprompter')
+      && (activeWorkspace === 'umbraui' || activeWorkspace === 'powerprompter');
+    if (stayedInsideUmbraUi) {
+      setWorkspaceTransition(null);
+      return;
+    }
     const direction = getWorkspaceNavRank(activeWorkspace) < getWorkspaceNavRank(previousWorkspace)
       ? 'down'
       : 'up';
@@ -2432,8 +2439,9 @@ export const Workspace = () => {
       return;
     }
     setLoadedWorkspaces((prev) => {
-      if (prev[activeWorkspace]) return prev;
-      return { ...prev, [activeWorkspace]: true };
+      const workspaceToLoad = activeWorkspace === 'powerprompter' ? 'umbraui' : activeWorkspace;
+      if (prev[workspaceToLoad]) return prev;
+      return { ...prev, [workspaceToLoad]: true };
     });
   }, [activeWorkspace, isRemoteClient, remoteMode, setActiveWorkspace]);
 
@@ -2585,17 +2593,6 @@ export const Workspace = () => {
         ) : null}
       </div>
 
-      {/* Power Prompter Layer */}
-      <div
-        className="absolute inset-0"
-        style={getWorkspaceLayerStyle('powerprompter')}
-      >
-        {loadedWorkspaces.powerprompter ? (
-          <Suspense fallback={null}>
-            <PowerPrompter overlayMode={false} isActive={isPowerPrompterWorkspace} />
-          </Suspense>
-        ) : null}
-      </div>
       </div>
 
       {effectiveShowFilmstrip ? (

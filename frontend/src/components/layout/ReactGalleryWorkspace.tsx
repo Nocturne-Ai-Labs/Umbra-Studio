@@ -16,11 +16,13 @@ import {
   Copy,
   Download,
   FileJson,
+  Film,
   Folder,
   FolderOpen,
   Grid3X3,
   HardDrive,
   Image as ImageIcon,
+  ImageUp,
   Images,
   Info,
   Loader2,
@@ -72,6 +74,8 @@ import {
   type UmbraUiVideoFrameRole,
 } from '@/lib/umbraUiMediaHandoff';
 import { stagePowerPrompterImageRestoreHandoff } from '@/lib/powerPrompterImageRestoreHandoff';
+import { stageUmbraUiMediaToolsHandoff, type UmbraUiMediaToolsHandoffMode } from '@/lib/umbraUiMediaToolsHandoff';
+import { stageUmbraUiUpscaleBatchHandoff } from '@/lib/umbraUiUpscale';
 import { buildGalleryGenerationPromptDetails } from '@/lib/galleryGenerationPrompt';
 import { PowerPrompterActivePromptInline } from './PowerPrompterActivePromptInline';
 import type { Dataset } from '@/components/board/types';
@@ -6445,6 +6449,43 @@ export function ReactGalleryWorkspace() {
     }
   }, [addToast, setActiveWorkspace]);
 
+  const sendPathsToUmbraUiExtras = useCallback((pathValues: string[], mode: UmbraUiMediaToolsHandoffMode) => {
+    try {
+      const previewUrls = Object.fromEntries(pathValues.flatMap((path) => {
+        const file = knownFilesRef.current.find((entry) => pathsEqual(entry.path, path));
+        return file ? [[path, imageUrl(file, { lane: 'gallery', remoteOriginals: true })]] : [];
+      }));
+      const handoff = stageUmbraUiMediaToolsHandoff(mode, pathValues, previewUrls);
+      setActiveWorkspace('umbraui');
+      addToast({
+        type: 'success',
+        message: `${handoff.paths.length} item${handoff.paths.length === 1 ? '' : 's'} staged in Umbra UI Extras. Choose an output destination to continue.`,
+      });
+    } catch (error) {
+      addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to stage media in Extras.' });
+    }
+  }, [addToast, setActiveWorkspace]);
+
+  const sendPathsToUmbraUiUpscale = useCallback((pathValues: string[]) => {
+    try {
+      const handoff = stageUmbraUiUpscaleBatchHandoff(pathValues.map((path) => {
+        const file = knownFilesRef.current.find((entry) => pathsEqual(entry.path, path));
+        return {
+          path,
+          name: file?.name || pathLeaf(path),
+          imageUrl: file ? thumbnailUrl(file, { lane: 'gallery' }) : undefined,
+        };
+      }));
+      setActiveWorkspace('umbraui');
+      addToast({
+        type: 'success',
+        message: `${handoff.items.length} image${handoff.items.length === 1 ? '' : 's'} staged in Umbra UI Upscale.`,
+      });
+    } catch (error) {
+      addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to stage images for upscale.' });
+    }
+  }, [addToast, setActiveWorkspace]);
+
   const restorePathInPowerPrompter = useCallback((pathValue: string) => {
     const path = normalizePath(pathValue);
     try {
@@ -9619,6 +9660,14 @@ export function ReactGalleryWorkspace() {
       const file = knownFiles.find((entry) => pathsEqual(entry.path, path));
       return !file || file.type === 'image' || file.type === 'gif';
     });
+    const selectedWatermarkImagePaths = paths.filter((path) => {
+      const file = knownFiles.find((entry) => pathsEqual(entry.path, path));
+      return !!file && file.type === 'image';
+    });
+    const selectedVideoPaths = paths.filter((path) => {
+      const file = knownFiles.find((entry) => pathsEqual(entry.path, path));
+      return !!file && file.type === 'video';
+    });
     const targetImagePath = targetFile && (targetFile.type === 'image' || targetFile.type === 'gif')
       ? normalizePath(targetFile.path)
       : '';
@@ -9664,6 +9713,32 @@ export function ReactGalleryWorkspace() {
       { label: 'Use as Last Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'last') },
       { label: 'VID2VID Source', icon: <Video size={14} />, disabled: !targetVideoPath, action: () => void sendPathToUmbraUi(targetVideoPath, 'video', 'source_video') },
     ];
+    const umbraUiExtrasItems: ContextMenuItem[] = [
+      {
+        label: selectedImagePaths.length > 1 ? `Upscale (${selectedImagePaths.length})` : 'Upscale',
+        icon: <ImageUp size={14} />,
+        disabled: selectedImagePaths.length === 0,
+        action: () => sendPathsToUmbraUiUpscale(selectedImagePaths),
+      },
+      {
+        label: selectedWatermarkImagePaths.length > 1 ? `Image Watermark (${selectedWatermarkImagePaths.length})` : 'Image Watermark',
+        icon: <ImageIcon size={14} />,
+        disabled: selectedWatermarkImagePaths.length === 0,
+        action: () => sendPathsToUmbraUiExtras(selectedWatermarkImagePaths, 'watermark'),
+      },
+      {
+        label: selectedVideoPaths.length > 1 ? `Video Watermark (${selectedVideoPaths.length})` : 'Video Watermark',
+        icon: <Video size={14} />,
+        disabled: selectedVideoPaths.length === 0,
+        action: () => sendPathsToUmbraUiExtras(selectedVideoPaths, 'video-watermark'),
+      },
+      {
+        label: selectedVideoPaths.length > 1 ? `Video to GIF (${selectedVideoPaths.length})` : 'Video to GIF',
+        icon: <Film size={14} />,
+        disabled: selectedVideoPaths.length === 0,
+        action: () => sendPathsToUmbraUiExtras(selectedVideoPaths, 'gif'),
+      },
+    ];
     const analysisItems: ContextMenuItem[] = [
       { label: 'Open Workflow in ComfyUI', icon: <FileJson size={14} />, action: () => void openOrCopyComfyWorkflow(paths) },
       { label: paths.length > 1 ? `Metadata Scanner (${paths.length})` : 'Metadata Scanner', icon: <ScanSearch size={14} />, action: () => sendSelectionToWorkspace(paths, 'scanner') },
@@ -9706,6 +9781,11 @@ export function ReactGalleryWorkspace() {
             label: 'Video',
             icon: <Clapperboard size={14} />,
             children: umbraUiVideoItems,
+          },
+          {
+            label: 'Extras',
+            icon: <Sparkles size={14} />,
+            children: umbraUiExtrasItems,
           },
         ],
       },
@@ -9755,6 +9835,8 @@ export function ReactGalleryWorkspace() {
     selectedPathsForContext,
     selectedPaths,
     sendPathToUmbraUi,
+    sendPathsToUmbraUiExtras,
+    sendPathsToUmbraUiUpscale,
     sendSelectionToWorkspace,
     togglePinnedFolder,
     transferInProgress,

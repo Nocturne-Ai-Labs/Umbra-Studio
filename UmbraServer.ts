@@ -6,7 +6,7 @@
  * reduce runtime confusion and make the packaged app easier to maintain.
  */
 
-import { join, basename, extname, relative, dirname, resolve, isAbsolute } from 'path';
+import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { createReadStream, createWriteStream, existsSync, statSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, type Dirent } from 'fs';
 import * as fs from 'fs/promises';
 import * as os from 'os';
@@ -55,6 +55,11 @@ import {
   concatenateUmbraExtendedVideoClips,
   isUmbraExtendedVideoOutputPath,
 } from './backend/UmbraUiExtendedVideoService';
+import {
+  applyUmbraUiWatermark,
+  convertUmbraUiVideoToGif,
+  isUmbraUiWatermarkVideo,
+} from './backend/UmbraUiMediaToolsService';
 import { applyUmbraUiClipSkipToGraph } from './backend/UmbraUiGraphControls';
 import { upsertPngTextMetadata } from './backend/PngTextMetadata';
 import {
@@ -303,6 +308,7 @@ const modelManagerStateDb = new ModelManagerStateDb(ROOT_DIR);
 const umbraUiUpscaleService = new UmbraUiUpscaleService({
   getComfyBaseUrl: () => getComfyProxyBaseUrl(),
   getComfyInputRoot: () => join(getComfyToolRootFast() || join(ROOT_DIR, 'Tools', 'ComfyUI'), 'input'),
+  getDefaultOutputRoot: () => resolvePathCandidate(getDefaultOutputRootPath()) || join(ROOT_DIR, 'User', 'Output'),
   prepareExecution: prepareUmbraUiUpscaleExecution,
 });
 const umbraUiInpaintService = new UmbraUiInpaintService({
@@ -11370,7 +11376,10 @@ const IS_WINDOWS = process.platform === 'win32';
 const TOOLS_DIR = join(ROOT_DIR, 'Tools');
 const GALLERY_IN_PROCESS_WORKSPACE_URL = '/gallery/index.html';
 const GALLERY_BRIDGE_HOST = String(process.env.UMBRA_GALLERY_HOST || '127.0.0.1').trim() || '127.0.0.1';
-const GALLERY_BRIDGE_PORT = Number(process.env.UMBRA_GALLERY_PORT || 8313) || 8313;
+const DEFAULT_GALLERY_BRIDGE_PORT = PORT === 8212
+  ? 8313
+  : PORT + 100 <= 65535 ? PORT + 100 : PORT - 100;
+const GALLERY_BRIDGE_PORT = Number(process.env.UMBRA_GALLERY_PORT || DEFAULT_GALLERY_BRIDGE_PORT) || DEFAULT_GALLERY_BRIDGE_PORT;
 const GALLERY_BRIDGE_HEALTH_TIMEOUT_MS = 1200;
 const GALLERY_BRIDGE_HEALTH_CACHE_MS = 1500;
 const GALLERY_BRIDGE_START_TIMEOUT_MS = 20000;
@@ -14038,7 +14047,7 @@ function getCurrentAppVersion(): string {
 }
 
 const appUpdateService = new AppUpdateService(ROOT_DIR, getCurrentAppVersion());
-const STANDALONE_UPDATER_PORT = 8214;
+const STANDALONE_UPDATER_PORT = clampPort(process.env.UMBRA_UPDATER_PORT || 8214, 8214);
 
 function isPortableAppUpdateAvailable(): boolean {
   if (IS_UMBRA_DEV_MODE) return false;
@@ -19772,6 +19781,281 @@ const UMBRA_UI_UPSCALE_IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.gif', '.jp
 const UMBRA_UI_UPSCALE_UPLOAD_ROOT = join(USER_DIR, 'Temp', 'UmbraUiUpscale');
 const UMBRA_UI_UPSCALE_MAX_ITEMS = 512;
 const UMBRA_UI_UPSCALE_MAX_SOURCE_BYTES = 512 * 1024 * 1024;
+const UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);
+const UMBRA_UI_MEDIA_TOOL_VIDEO_EXTENSIONS = new Set(['.avi', '.m4v', '.mkv', '.mov', '.mp4', '.webm', '.wmv']);
+const UMBRA_UI_MEDIA_TOOL_SOURCE_EXTENSIONS = new Set([
+  ...UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS,
+  ...UMBRA_UI_MEDIA_TOOL_VIDEO_EXTENSIONS,
+]);
+const UMBRA_UI_MEDIA_TOOL_TEMP_ROOT = join(USER_DIR, 'Temp', 'UmbraUiMediaTools');
+const UMBRA_UI_WATERMARK_ASSET_ROOT = join(USER_DIR, 'UmbraUI', 'Watermarks');
+const UMBRA_UI_MEDIA_TOOL_MAX_SOURCE_BYTES = 4 * 1024 * 1024 * 1024;
+const UMBRA_UI_MEDIA_TOOL_MAX_WATERMARK_BYTES = 64 * 1024 * 1024;
+
+function sanitizeUmbraUiMediaToolName(value: unknown, fallback: string): string {
+  const rawName = basename(String(value || '').trim().replace(/\\/g, '/')) || fallback;
+  const extension = extname(rawName).toLowerCase();
+  const stem = rawName.slice(0, extension ? -extension.length : undefined)
+    .replace(/[^a-z0-9._ -]+/gi, '_')
+    .replace(/^[-_. ]+|[-_. ]+$/g, '')
+    .slice(0, 120) || fallback;
+  return `${stem}${extension}`;
+}
+
+function resolveUmbraUiWatermarkAssetPath(value: unknown): string {
+  const rawPath = String(value || '').trim();
+  if (!rawPath) return '';
+  const resolvedPath = isAbsolute(rawPath) ? resolve(rawPath) : resolve(ROOT_DIR, rawPath);
+  const assetRoot = resolve(UMBRA_UI_WATERMARK_ASSET_ROOT);
+  if (resolvedPath !== assetRoot && !resolvedPath.startsWith(`${assetRoot}${sep}`)) {
+    throw new Error('The saved watermark is outside the Umbra UI watermark library.');
+  }
+  if (!existsSync(resolvedPath) || !statSync(resolvedPath).isFile()) {
+    throw new Error('The saved watermark file is missing. Choose it again or update the preset.');
+  }
+  if (!UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS.has(extname(resolvedPath).toLowerCase())) {
+    throw new Error('The saved watermark uses an unsupported image format.');
+  }
+  return resolvedPath;
+}
+
+async function handleUmbraUiWatermarkAssetUpload(req: Request): Promise<Response> {
+  try {
+    const form = await req.formData();
+    const watermark = form.get('watermark') as any;
+    if (!watermark || typeof watermark.name !== 'string' || typeof watermark.arrayBuffer !== 'function' || Number(watermark.size) <= 0) {
+      return json({ success: false, error: 'Choose a watermark image to save.' }, 400);
+    }
+    if (Number(watermark.size) > UMBRA_UI_MEDIA_TOOL_MAX_WATERMARK_BYTES) {
+      return json({ success: false, error: 'The watermark image exceeds the 64 MB limit.' }, 400);
+    }
+    const extension = extname(watermark.name).toLowerCase();
+    if (!UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS.has(extension)) {
+      return json({ success: false, error: `Unsupported watermark image: ${watermark.name}` }, 400);
+    }
+    const safeName = sanitizeUmbraUiMediaToolName(watermark.name, `watermark${extension}`);
+    const stem = safeName.slice(0, -extension.length) || 'watermark';
+    const filename = `${stem}-${Date.now()}-${randomBytes(3).toString('hex')}${extension}`;
+    const outputPath = join(UMBRA_UI_WATERMARK_ASSET_ROOT, filename);
+    await fs.mkdir(UMBRA_UI_WATERMARK_ASSET_ROOT, { recursive: true });
+    await fs.writeFile(outputPath, Buffer.from(await watermark.arrayBuffer()));
+    const clientPath = toClientPath(outputPath);
+    return json({
+      success: true,
+      path: clientPath,
+      filename,
+      previewUrl: `/api/fs/image?${new URLSearchParams({ path: clientPath }).toString()}`,
+    });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || error || 'Failed to save watermark asset.') }, 400);
+  }
+}
+
+function resolveUmbraUiMediaToolOutputFolder(
+  value: unknown,
+  allowExternal: boolean,
+  sourcePath: string,
+  automaticSubfolder: 'Watermarked' | 'GIF',
+): string {
+  const rawPath = String(value || '').trim();
+  if (!rawPath) {
+    const sourceFolder = sourcePath && existsSync(sourcePath) ? dirname(sourcePath) : '';
+    const fallbackRoot = resolvePathCandidate(getDefaultOutputRootPath()) || join(ROOT_DIR, 'User', 'Output');
+    const automaticFolder = join(sourceFolder || fallbackRoot, automaticSubfolder);
+    mkdirSync(automaticFolder, { recursive: true });
+    return automaticFolder;
+  }
+  const resolved = resolvePath(rawPath, { allowOutsideRoot: true });
+  if (!resolved || (!allowExternal && !isPathInsideAllowedRoots(resolved.fullPath))) {
+    throw new Error('The selected output destination is not available to this client.');
+  }
+  if (!existsSync(resolved.fullPath) || !statSync(resolved.fullPath).isDirectory()) {
+    throw new Error('The selected output destination does not exist.');
+  }
+  return resolved.fullPath;
+}
+
+async function reserveUmbraUiMediaToolSequencePath(
+  outputFolder: string,
+  prefix: 'image-sequence' | 'video-sequence' | 'gif-sequence',
+  extension: '.png' | '.mp4' | '.gif',
+  requestedSequence: number,
+): Promise<{ outputPath: string; filename: string }> {
+  let sequence = Number.isInteger(requestedSequence) && requestedSequence > 0 ? requestedSequence : 1;
+  while (sequence < 1_000_000) {
+    const filename = `${prefix}-${String(sequence).padStart(4, '0')}${extension}`;
+    const outputPath = join(outputFolder, filename);
+    try {
+      const reservation = await fs.open(outputPath, 'wx');
+      await reservation.close();
+      return { outputPath, filename };
+    } catch (error: any) {
+      if (error?.code !== 'EEXIST') throw error;
+      sequence += 1;
+    }
+  }
+  throw new Error('Could not reserve a sequence filename in the selected destination.');
+}
+
+function resolveUmbraUiMediaToolSourcePath(value: unknown, supportedExtensions: Set<string>, allowExternal = false): string {
+  const rawPath = String(value || '').trim();
+  if (!rawPath) return '';
+  const resolved = resolvePath(rawPath, { allowOutsideRoot: true });
+  if (!resolved || (!allowExternal && !isPathInsideAllowedRoots(resolved.fullPath))) {
+    throw new Error('The selected Gallery source is outside Umbra Studio folders.');
+  }
+  if (!existsSync(resolved.fullPath) || !statSync(resolved.fullPath).isFile()) {
+    throw new Error(`The selected Gallery source was not found: ${rawPath}`);
+  }
+  if (!supportedExtensions.has(extname(resolved.fullPath).toLowerCase())) {
+    throw new Error(`Unsupported media source: ${basename(resolved.fullPath)}`);
+  }
+  return resolved.fullPath;
+}
+
+async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean): Promise<Response> {
+  const jobId = `${Date.now()}-${randomBytes(5).toString('hex')}`;
+  const workDirectory = join(UMBRA_UI_MEDIA_TOOL_TEMP_ROOT, jobId);
+  let reservedOutputPath = '';
+  try {
+    const form = await req.formData();
+    const source = form.get('source') as any;
+    const watermark = form.get('watermark') as any;
+    const hasSourceUpload = source && typeof source.name === 'string' && typeof source.arrayBuffer === 'function' && Number(source.size) > 0;
+    const hasWatermarkUpload = watermark && typeof watermark.name === 'string' && typeof watermark.arrayBuffer === 'function' && Number(watermark.size) > 0;
+    const gallerySourcePath = resolveUmbraUiMediaToolSourcePath(form.get('sourcePath'), UMBRA_UI_MEDIA_TOOL_SOURCE_EXTENSIONS, allowExternalOutput);
+    const savedWatermarkPath = resolveUmbraUiWatermarkAssetPath(form.get('watermarkPath'));
+    if (!hasSourceUpload && !gallerySourcePath) {
+      return json({ success: false, error: 'Choose an image or video to watermark.' }, 400);
+    }
+    if (!hasWatermarkUpload && !savedWatermarkPath) {
+      return json({ success: false, error: 'Choose a watermark image.' }, 400);
+    }
+    if (hasSourceUpload && Number(source.size) > UMBRA_UI_MEDIA_TOOL_MAX_SOURCE_BYTES) {
+      return json({ success: false, error: 'The source media exceeds the 4 GB processing limit.' }, 400);
+    }
+    if (hasWatermarkUpload && Number(watermark.size) > UMBRA_UI_MEDIA_TOOL_MAX_WATERMARK_BYTES) {
+      return json({ success: false, error: 'The watermark image exceeds the 64 MB limit.' }, 400);
+    }
+    const sourceName = hasSourceUpload ? source.name : basename(gallerySourcePath);
+    const sourceExtension = extname(sourceName).toLowerCase();
+    const watermarkExtension = hasWatermarkUpload ? extname(watermark.name).toLowerCase() : extname(savedWatermarkPath).toLowerCase();
+    if (!UMBRA_UI_MEDIA_TOOL_SOURCE_EXTENSIONS.has(sourceExtension)) {
+      return json({ success: false, error: `Unsupported watermark source: ${sourceName}` }, 400);
+    }
+    if (hasWatermarkUpload && !UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS.has(watermarkExtension)) {
+      return json({ success: false, error: `Unsupported watermark image: ${watermark.name}` }, 400);
+    }
+
+    await fs.mkdir(workDirectory, { recursive: true });
+    const sourcePath = hasSourceUpload ? join(workDirectory, `source${sourceExtension}`) : gallerySourcePath;
+    const watermarkPath = hasWatermarkUpload ? join(workDirectory, `watermark${watermarkExtension}`) : savedWatermarkPath;
+    await Promise.all([
+      ...(hasSourceUpload ? [fs.writeFile(sourcePath, Buffer.from(await source.arrayBuffer()))] : []),
+      ...(hasWatermarkUpload ? [fs.writeFile(watermarkPath, Buffer.from(await watermark.arrayBuffer()))] : []),
+    ]);
+    const outputFolder = resolveUmbraUiMediaToolOutputFolder(
+      form.get('outputFolder'),
+      allowExternalOutput,
+      gallerySourcePath,
+      'Watermarked',
+    );
+    const imageFormatInput = String(form.get('imageFormat') || '').trim().toLowerCase();
+    const imageFormat = imageFormatInput === 'jpeg' || imageFormatInput === 'jpg'
+      ? 'jpeg'
+      : imageFormatInput === 'webp' ? 'webp' : 'png';
+    const outputExtension = isUmbraUiWatermarkVideo(sourcePath)
+      ? '.mp4'
+      : imageFormat === 'jpeg' ? '.jpg' : `.${imageFormat}`;
+    const reserved = await reserveUmbraUiMediaToolSequencePath(
+      outputFolder,
+      outputExtension === '.mp4' ? 'video-sequence' : 'image-sequence',
+      outputExtension,
+      Number(form.get('sequenceNumber')),
+    );
+    const { outputPath, filename } = reserved;
+    reservedOutputPath = outputPath;
+    const mediaType = await applyUmbraUiWatermark({
+      comfyRoot: join(ROOT_DIR, 'Tools', 'ComfyUI'),
+      sourcePath,
+      watermarkPath,
+      outputPath,
+      workDirectory,
+      placement: {
+        x: Number(form.get('x')),
+        y: Number(form.get('y')),
+        scale: Number(form.get('scale')),
+        opacity: Number(form.get('opacity')),
+      },
+      exportSettings: {
+        resizeEnabled: String(form.get('resizeEnabled') || '').trim().toLowerCase() === 'true',
+        longEdge: Number(form.get('longEdge')),
+        format: imageFormat,
+        quality: Number(form.get('quality')),
+      },
+      outputWidth: Number(form.get('outputWidth')),
+    });
+    reservedOutputPath = '';
+    return json({ success: true, path: toClientPath(outputPath), filename, mediaType });
+  } catch (error: any) {
+    console.error('[UmbraUI Media Tools] Watermark failed:', error);
+    return json({ success: false, error: String(error?.message || error || 'Failed to apply watermark.') }, 400);
+  } finally {
+    if (reservedOutputPath) await fs.rm(reservedOutputPath, { force: true }).catch(() => undefined);
+    await fs.rm(workDirectory, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+async function handleUmbraUiVideoToGif(req: Request, allowExternalOutput: boolean): Promise<Response> {
+  const jobId = `${Date.now()}-${randomBytes(5).toString('hex')}`;
+  const workDirectory = join(UMBRA_UI_MEDIA_TOOL_TEMP_ROOT, jobId);
+  let reservedOutputPath = '';
+  try {
+    const form = await req.formData();
+    const source = form.get('source') as any;
+    const hasSourceUpload = source && typeof source.name === 'string' && typeof source.arrayBuffer === 'function' && Number(source.size) > 0;
+    const gallerySourcePath = resolveUmbraUiMediaToolSourcePath(form.get('sourcePath'), UMBRA_UI_MEDIA_TOOL_VIDEO_EXTENSIONS, allowExternalOutput);
+    if (!hasSourceUpload && !gallerySourcePath) {
+      return json({ success: false, error: 'Choose a video to convert.' }, 400);
+    }
+    if (hasSourceUpload && Number(source.size) > UMBRA_UI_MEDIA_TOOL_MAX_SOURCE_BYTES) {
+      return json({ success: false, error: 'The source video exceeds the 4 GB processing limit.' }, 400);
+    }
+    const sourceName = hasSourceUpload ? source.name : basename(gallerySourcePath);
+    const sourceExtension = extname(sourceName).toLowerCase();
+    if (!UMBRA_UI_MEDIA_TOOL_VIDEO_EXTENSIONS.has(sourceExtension)) {
+      return json({ success: false, error: `Unsupported GIF source: ${sourceName}` }, 400);
+    }
+
+    await fs.mkdir(workDirectory, { recursive: true });
+    const sourcePath = hasSourceUpload ? join(workDirectory, `source${sourceExtension}`) : gallerySourcePath;
+    if (hasSourceUpload) await fs.writeFile(sourcePath, Buffer.from(await source.arrayBuffer()));
+    const outputFolder = resolveUmbraUiMediaToolOutputFolder(
+      form.get('outputFolder'),
+      allowExternalOutput,
+      gallerySourcePath,
+      'GIF',
+    );
+    const reserved = await reserveUmbraUiMediaToolSequencePath(outputFolder, 'gif-sequence', '.gif', Number(form.get('sequenceNumber')));
+    const { outputPath, filename } = reserved;
+    reservedOutputPath = outputPath;
+    await convertUmbraUiVideoToGif({
+      comfyRoot: join(ROOT_DIR, 'Tools', 'ComfyUI'),
+      sourcePath,
+      outputPath,
+      workDirectory,
+      width: Number(form.get('width')),
+    });
+    reservedOutputPath = '';
+    return json({ success: true, path: toClientPath(outputPath), filename, mediaType: 'gif' });
+  } catch (error: any) {
+    console.error('[UmbraUI Media Tools] GIF conversion failed:', error);
+    return json({ success: false, error: String(error?.message || error || 'Failed to convert video to GIF.') }, 400);
+  } finally {
+    if (reservedOutputPath) await fs.rm(reservedOutputPath, { force: true }).catch(() => undefined);
+    await fs.rm(workDirectory, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
 
 function normalizeUmbraUiUpscaleBatchId(value: unknown): string {
   const batchId = String(value || '').trim();
@@ -19869,6 +20153,74 @@ async function runNativeFolderPicker(startDir: string, title: string): Promise<s
   return fullPath;
 }
 
+async function runNativeFilePicker(
+  startDir: string,
+  title: string,
+  kind: 'image' | 'video' | 'media',
+): Promise<string[]> {
+  const windowsFilter = kind === 'image'
+    ? 'Images|*.avif;*.bmp;*.gif;*.jpeg;*.jpg;*.png;*.tif;*.tiff;*.webp|All files|*.*'
+    : kind === 'video'
+      ? 'Videos|*.avi;*.m4v;*.mkv;*.mov;*.mp4;*.webm;*.wmv|All files|*.*'
+      : 'Images and videos|*.avif;*.avi;*.bmp;*.gif;*.jpeg;*.jpg;*.m4v;*.mkv;*.mov;*.mp4;*.png;*.tif;*.tiff;*.webm;*.webp;*.wmv|All files|*.*';
+  let proc: ReturnType<typeof Bun.spawn> | null = null;
+  if (process.platform === 'win32') {
+    const script = [
+      'Add-Type -AssemblyName System.Windows.Forms',
+      '$dialog = New-Object System.Windows.Forms.OpenFileDialog',
+      `$dialog.Title = ${quotePowerShellLiteral(title)}`,
+      `$dialog.InitialDirectory = ${quotePowerShellLiteral(startDir)}`,
+      `$dialog.Filter = ${quotePowerShellLiteral(windowsFilter)}`,
+      '$dialog.Multiselect = $true',
+      '$dialog.CheckFileExists = $true',
+      'if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {',
+      '  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+      '  $dialog.FileNames | ForEach-Object { Write-Output $_ }',
+      '}',
+      '$dialog.Dispose()',
+    ].join('; ');
+    proc = Bun.spawn(['powershell.exe', '-NoProfile', '-STA', '-WindowStyle', 'Hidden', '-Command', script]);
+  } else if (process.platform === 'darwin') {
+    const prompt = title.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    proc = Bun.spawn(['osascript', '-e', `set chosenFiles to choose file with prompt "${prompt}" with multiple selections allowed`, '-e', 'repeat with chosenFile in chosenFiles', '-e', 'log POSIX path of chosenFile', '-e', 'end repeat']);
+  } else {
+    try {
+      proc = Bun.spawn(['kdialog', '--getopenfilename', startDir, '*', '--multiple', '--separate-output', '--title', title]);
+      await proc.exited;
+    } catch {
+      proc = Bun.spawn(['zenity', '--file-selection', '--multiple', '--separator=\n', `--title=${title}`, `--filename=${startDir}/`]);
+    }
+  }
+
+  if (!proc) return [];
+  if (proc.exitCode === null) await proc.exited;
+  if (proc.exitCode !== 0) return [];
+  const output = await new Response(proc.stdout).text();
+  const supported = kind === 'image'
+    ? UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS
+    : kind === 'video' ? UMBRA_UI_MEDIA_TOOL_VIDEO_EXTENSIONS : UMBRA_UI_MEDIA_TOOL_SOURCE_EXTENSIONS;
+  return output.split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry && existsSync(entry) && statSync(entry).isFile() && supported.has(extname(entry).toLowerCase()));
+}
+
+async function handleNativeMediaFileBrowse(req: Request): Promise<Response> {
+  try {
+    const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+    const kind = body.kind === 'video' || body.kind === 'image' ? body.kind : 'media';
+    const requestedStartDir = String(body.startDir || '').trim();
+    const defaultStartDir = resolvePathCandidate(getDefaultOutputRootPath()) || ROOT_DIR;
+    const requestedResolved = requestedStartDir ? resolve(requestedStartDir) : '';
+    const startDir = requestedResolved && existsSync(requestedResolved)
+      ? (statSync(requestedResolved).isDirectory() ? requestedResolved : dirname(requestedResolved))
+      : defaultStartDir;
+    const paths = await runNativeFilePicker(startDir, kind === 'video' ? 'Select Videos' : kind === 'image' ? 'Select Images' : 'Select Images or Videos', kind);
+    return json({ paths: paths.map(toClientPath) });
+  } catch (error: any) {
+    return json({ error: String(error?.message || error || 'File picker failed.') }, 500);
+  }
+}
+
 async function handleNativeFolderBrowse(req: Request, defaultTitle: string): Promise<Response> {
   try {
     const body = await req.json().catch(() => ({})) as Record<string, unknown>;
@@ -19939,6 +20291,9 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
     const form = await req.formData();
     const modelName = String(form.get('modelName') || '').trim().replace(/\\/g, '/');
     const maxDimension = Math.max(512, Math.min(16384, Math.round(Number(form.get('maxDimension')) || 3840)));
+    const outputFormatInput = String(form.get('outputFormat') || '').trim().toLowerCase();
+    const outputFormat = outputFormatInput === 'jpeg' || outputFormatInput === 'webp' ? outputFormatInput : 'png';
+    const quality = Math.max(1, Math.min(100, Math.round(Number(form.get('quality')) || 90)));
     const queuePlacement = normalizePowerPrompterQueuePlacement(form.get('queuePlacement'));
     const requestedOutputFolder = String(form.get('outputFolder') || '').trim();
     let outputFolder = '';
@@ -19997,7 +20352,7 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
       const fullPath = resolve(fullPathInput);
       const uploadRelative = relative(uploadRoot, fullPath);
       const isStagedUpload = !!uploadRelative && !uploadRelative.startsWith('..') && !isAbsolute(uploadRelative);
-      if (temporary ? !isStagedUpload : !isPathInsideAllowedRoots(fullPath)) {
+      if (temporary ? !isStagedUpload : (!allowCustomOutputFolder && !isPathInsideAllowedRoots(fullPath))) {
         throw new Error(`Upscale source is outside Umbra's allowed folders: ${fullPathInput}`);
       }
       if (!existsSync(fullPath) || !statSync(fullPath).isFile()) {
@@ -20033,7 +20388,7 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
     }
     for (const rawFolder of folders) {
       const resolved = resolvePath(rawFolder, { allowOutsideRoot: true });
-      if (!resolved || !isPathInsideAllowedRoots(resolved.fullPath)) {
+      if (!resolved || (!allowCustomOutputFolder && !isPathInsideAllowedRoots(resolved.fullPath))) {
         throw new Error(`Upscale folder is outside Umbra's allowed folders: ${rawFolder}`);
       }
       if (!existsSync(resolved.fullPath) || !statSync(resolved.fullPath).isDirectory()) {
@@ -20070,6 +20425,8 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
     const job = await umbraUiUpscaleService.submit(sources, {
       modelName,
       maxDimension,
+      outputFormat,
+      quality,
       outputFolder,
       queuePlacement,
     });
@@ -32938,6 +33295,32 @@ const server = Bun.serve<any>({
 
       if (path === '/api/umbra-ui/upscale' && method === 'POST') {
         return handleUmbraUiUpscaleSubmit(req, isHostRequest(req, url, server));
+      }
+
+      if (path === '/api/umbra-ui/media-tools/watermark' && method === 'POST') {
+        return handleUmbraUiWatermark(req, isHostRequest(req, url, server));
+      }
+
+      if (path === '/api/umbra-ui/media-tools/watermark-assets' && method === 'POST') {
+        return handleUmbraUiWatermarkAssetUpload(req);
+      }
+
+      if (path === '/api/umbra-ui/media-tools/video-to-gif' && method === 'POST') {
+        return handleUmbraUiVideoToGif(req, isHostRequest(req, url, server));
+      }
+
+      if (path === '/api/umbra-ui/media-tools/browse-output-folder' && method === 'POST') {
+        if (!isHostRequest(req, url, server)) {
+          return json({ error: 'Native folder selection is only available from the host PC.' }, 403);
+        }
+        return handleNativeFolderBrowse(req, 'Select Extras Output Folder');
+      }
+
+      if (path === '/api/umbra-ui/media-tools/browse-source-files' && method === 'POST') {
+        if (!isHostRequest(req, url, server)) {
+          return json({ error: 'Native file selection is only available from the host PC.' }, 403);
+        }
+        return handleNativeMediaFileBrowse(req);
       }
 
       if (path === '/api/umbra-ui/upscale/browse-output-folder' && method === 'POST') {

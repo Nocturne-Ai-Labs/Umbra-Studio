@@ -1,5 +1,70 @@
 # Changelog
 
+## v0.30.7
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, migrations, or setup steps are required.
+Update or extract the portable package normally. Existing `User` and `Tools`
+content remains user-owned and is preserved by the updater.
+
+### Unified Umbra UI Workspace
+
+- Moved Power Prompter into Umbra UI as the dedicated **Prompter** workflow tab,
+  positioned between text-to-image and image-to-image.
+- Kept Power Prompter's queue, cards, presets, generation controls, and output
+  ownership intact while removing the redundant standalone application entry.
+- Improved workflow handoffs so prompt work and media refinement remain inside
+  one consistent creation workspace.
+
+### Extras Media Workflows
+
+- Added dedicated **Image Watermark** and **Video Watermark** workspaces with
+  live placement previews, nine anchor points, free placement, size, opacity,
+  automatic output destinations, and serial-safe batch processing.
+- Added complete operation presets for upscaling, image watermarking, video
+  watermarking, and video-to-GIF conversion. Presets retain the selected
+  watermark asset, placement, opacity, scale, export settings, output width,
+  and destination where applicable.
+- Added image export controls for long-edge resizing, PNG, JPEG, or WebP output,
+  and quality selection, making clean public copies possible without PNG
+  generation metadata.
+- Added video-to-GIF batch conversion using the full source duration and source
+  frame timing, with output width as the only conversion control.
+- Added automatic `Upscaled`, `Watermarked`, and `GIF` subfolders beside each
+  source when no custom destination is selected.
+- Added Gallery context-menu routes for multi-selected images and videos to
+  Upscale, Image Watermark, Video Watermark, and Video-to-GIF workflows.
+
+### Media Reliability
+
+- Made watermark placement use the source media's true aspect ratio in the
+  preview and rendered output.
+- Made video watermarking preserve the complete source duration, frame count,
+  frame rate, and audio while applying the requested output width.
+- Kept video batches strictly serial and image batches capped at 25 concurrent
+  items to avoid unnecessary memory pressure.
+- Improved missing-source failures so stale Gallery paths report the exact file
+  that could not be resolved instead of failing without useful context.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Video watermarking no longer truncates clips during FFmpeg overlay
+  processing.
+- **Fixed:** Video watermark output retains source audio, frame rate, frame
+  count, and duration.
+- **Fixed:** Watermark placement and anchor previews now follow the true media
+  dimensions for portrait, landscape, and video sources.
+- **Fixed:** Extras no longer tries to process stale media from a different
+  Umbra Studio root without identifying the missing source.
+- **Improved:** Power Prompter is now part of the primary Umbra UI workflow bar.
+- **Improved:** Every Extras operation can save and restore its complete working
+  configuration.
+- **Improved:** Gallery selections can be staged directly into the appropriate
+  Extras batch workflow.
+- **Improved:** Automatic per-source output folders remove repetitive folder
+  selection while keeping generated media organized.
+
 ## v0.30.6
 
 ### TL;DR - Setup After Updating
