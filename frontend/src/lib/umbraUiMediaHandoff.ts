@@ -66,7 +66,6 @@ export interface UmbraUiMediaInpaintSnapshot {
   softInpaintPreservation?: number;
   softInpaintTransitionContrast?: number;
   softInpaintMaskInfluence?: number;
-  regionalGuidanceCount: number;
   controlLayerCount: number;
   referenceLayerCount: number;
 }
@@ -321,7 +320,6 @@ export function normalizeUmbraUiMediaInpaintSnapshot(value: unknown): UmbraUiMed
     softInpaintPreservation: boundedNumber(value.softInpaintPreservation, 0, 1),
     softInpaintTransitionContrast: boundedNumber(value.softInpaintTransitionContrast, 0.25, 8),
     softInpaintMaskInfluence: boundedNumber(value.softInpaintMaskInfluence, 0, 1),
-    regionalGuidanceCount: countLayers(value.regionalGuidance, value.regionalGuidanceCount),
     controlLayerCount: countLayers(value.controlLayers, value.controlLayerCount),
     referenceLayerCount: countLayers(value.referenceLayers, value.referenceLayerCount),
   };

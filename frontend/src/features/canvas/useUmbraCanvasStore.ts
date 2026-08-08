@@ -21,7 +21,6 @@ import {
   type UmbraCanvasTextEntity,
   type UmbraCanvasGradientEntity,
   type UmbraCanvasPathEntity,
-  type UmbraCanvasRegionalGuidanceEntity,
   type UmbraCanvasControlEntity,
   type UmbraCanvasReferenceEntity,
   type UmbraCanvasRect,
@@ -97,7 +96,7 @@ function trimProjectHistory(
 
 function duplicateCanvasEntity(source: UmbraCanvasEntity, offset = 24): UmbraCanvasEntity {
   const now = Date.now();
-  if (source.kind === 'regional-guidance' || source.kind === 'control' || source.kind === 'reference') {
+  if (source.kind === 'control' || source.kind === 'reference') {
     return {
       ...structuredClone(source),
       id: `${source.kind}-${crypto.randomUUID()}`,
@@ -165,13 +164,11 @@ interface UmbraCanvasStore extends UmbraCanvasHistory {
   addRasterStroke: (entityId: string, stroke: UmbraCanvasRasterStroke) => void;
   clearRasterStrokes: (entityId: string) => void;
   addMask: (entity: UmbraCanvasMaskEntity) => void;
-  addRegionalGuidance: (entity: UmbraCanvasRegionalGuidanceEntity) => void;
   addControl: (entity: UmbraCanvasControlEntity) => void;
   addReference: (entity: UmbraCanvasReferenceEntity) => void;
   addMaskStroke: (entityId: string, stroke: UmbraCanvasMaskStroke) => void;
   clearMask: (entityId: string) => void;
   updateMask: (entityId: string, patch: Partial<Pick<UmbraCanvasMaskEntity, 'name' | 'imageUrl' | 'sourcePath' | 'inverted' | 'feather' | 'grow' | 'operation'>>) => void;
-  updateRegionalGuidance: (entityId: string, patch: Partial<Pick<UmbraCanvasRegionalGuidanceEntity, 'name' | 'maskEntityId' | 'positivePrompt' | 'negativePrompt' | 'autoNegative' | 'weight' | 'beginStepPercent' | 'endStepPercent'>>) => void;
   updateControl: (entityId: string, patch: Partial<Omit<UmbraCanvasControlEntity, 'id' | 'kind' | 'createdAt'>>) => void;
   updateReference: (entityId: string, patch: Partial<Omit<UmbraCanvasReferenceEntity, 'id' | 'kind' | 'createdAt'>>) => void;
   duplicateEntity: (entityId: string) => void;
@@ -356,11 +353,6 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
     entities: [...project.entities, entity],
     activeEntityId: entity.id,
   }))),
-  addRegionalGuidance: (entity) => set((state) => revise(state, (project) => ({
-    ...project,
-    entities: [...project.entities, entity],
-    activeEntityId: entity.id,
-  }))),
   addControl: (entity) => set((state) => revise(state, (project) => ({ ...project, entities: [...project.entities, entity], activeEntityId: entity.id }))),
   addReference: (entity) => set((state) => revise(state, (project) => ({ ...project, entities: [...project.entities, entity], activeEntityId: entity.id }))),
   addMaskStroke: (entityId, stroke) => set((state) => revise(state, (project) => updateEntity(
@@ -392,20 +384,6 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
       name: patch.name === undefined ? entity.name : String(patch.name || '').trim().slice(0, 240) || 'Inpaint Mask',
       feather: patch.feather === undefined ? entity.feather : Math.max(0, Math.min(512, Number(patch.feather) || 0)),
       grow: patch.grow === undefined ? entity.grow : Math.max(-512, Math.min(512, Number(patch.grow) || 0)),
-      revision: entity.revision + 1,
-      updatedAt: Date.now(),
-    },
-  ))),
-  updateRegionalGuidance: (entityId, patch) => set((state) => revise(state, (project) => updateEntity(
-    project,
-    entityId,
-    (entity) => entity.kind !== 'regional-guidance' || entity.locked ? entity : {
-      ...entity,
-      ...patch,
-      name: patch.name === undefined ? entity.name : String(patch.name || '').trim().slice(0, 240) || 'Regional Guide',
-      weight: patch.weight === undefined ? entity.weight : Math.max(-10, Math.min(10, Number(patch.weight) || 0)),
-      beginStepPercent: patch.beginStepPercent === undefined ? entity.beginStepPercent : Math.max(0, Math.min(1, Number(patch.beginStepPercent) || 0)),
-      endStepPercent: patch.endStepPercent === undefined ? entity.endStepPercent : Math.max(0, Math.min(1, Number(patch.endStepPercent) || 0)),
       revision: entity.revision + 1,
       updatedAt: Date.now(),
     },
@@ -598,11 +576,6 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
   deleteEntity: (entityId) => set((state) => revise(state, (project) => {
     const source = project.entities.find((entity) => entity.id === entityId);
     const deletedIds = new Set([entityId]);
-    if (source?.kind === 'mask') {
-      project.entities.forEach((entity) => {
-        if (entity.kind === 'regional-guidance' && entity.maskEntityId === entityId) deletedIds.add(entity.id);
-      });
-    }
     if (source?.kind === 'raster') {
       project.entities.forEach((entity) => {
         if ((entity.kind === 'control' || entity.kind === 'reference') && entity.rasterEntityId === entityId) deletedIds.add(entity.id);
@@ -618,7 +591,6 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
     const deletedIds = new Set(entityIds.filter((entityId) => project.entities.some((entity) => entity.id === entityId)));
     if (deletedIds.size === 0) return project;
     for (const entity of project.entities) {
-      if (entity.kind === 'regional-guidance' && deletedIds.has(entity.maskEntityId)) deletedIds.add(entity.id);
       if ((entity.kind === 'control' || entity.kind === 'reference') && deletedIds.has(entity.rasterEntityId)) deletedIds.add(entity.id);
     }
     return {

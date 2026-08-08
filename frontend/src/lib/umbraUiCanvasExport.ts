@@ -41,7 +41,6 @@ export interface UmbraUiCanvasSaveMetadata {
   inpaintModelName: string;
   colorMatch: number;
   differentialStrength: number;
-  regionalGuidanceCount: number;
   controlLayerCount: number;
   referenceLayerCount: number;
   width: number;

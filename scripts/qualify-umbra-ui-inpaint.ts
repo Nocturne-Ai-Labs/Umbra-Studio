@@ -13,18 +13,6 @@ import {
 type ModelSource = 'checkpoint' | 'diffusers' | 'diffusion_model' | 'unet' | 'gguf';
 type OperationMode = 'inpaint' | 'outpaint';
 
-interface GuidanceCase {
-  id: string;
-  name?: string;
-  maskPath?: string;
-  positivePrompt?: string;
-  negativePrompt?: string;
-  autoNegative?: boolean;
-  weight?: number;
-  beginStepPercent?: number;
-  endStepPercent?: number;
-}
-
 interface ControlCase {
   id: string;
   name?: string;
@@ -125,7 +113,6 @@ export interface QualificationCase {
   softInpaintPreservation?: number;
   softInpaintTransitionContrast?: number;
   softInpaintMaskInfluence?: number;
-  regionalGuidance?: GuidanceCase[];
   controlLayers?: ControlCase[];
   referenceLayers?: ReferenceCase[];
 }
@@ -325,25 +312,6 @@ export async function buildForm(manifest: QualificationManifest, item: Qualifica
   form.append('mask', fixtures.mask, 'qualification-mask.png');
   appendScalarSettings(form, item);
 
-  const regions = item.regionalGuidance || [];
-  form.append('regionalGuidance', JSON.stringify(regions.map((region) => ({
-    id: region.id,
-    name: region.name || region.id,
-    positivePrompt: region.positivePrompt || '',
-    negativePrompt: region.negativePrompt || '',
-    autoNegative: region.autoNegative === true,
-    weight: region.weight ?? 1,
-    beginStepPercent: region.beginStepPercent ?? 0,
-    endStepPercent: region.endStepPercent ?? 1,
-  }))));
-  for (const region of regions) {
-    const regionalMask = region.maskPath ? await requireFile(region.maskPath) : fixtures.mask;
-    const regionalMaskName = region.maskPath
-      ? imageName(region.maskPath, region.id)
-      : `${region.id || 'region'}-qualification-mask.png`;
-    form.append(`regionalMask:${region.id}`, regionalMask, regionalMaskName);
-  }
-
   const controls = item.controlLayers || [];
   form.append('controlLayers', JSON.stringify(controls.map((control) => ({
     id: control.id,
@@ -420,20 +388,6 @@ export function requiredPromptNodeClasses(item: QualificationCase, adapter: stri
     required.add('ControlNetLoader');
     required.add('ControlNetInpaintingAliMamaApply');
     required.add('SetLatentNoiseMask');
-  }
-  if ((item.regionalGuidance?.length || 0) > 0) {
-    required.add('ConditioningSetMask');
-    const hasRestrictedStepRange = item.regionalGuidance?.some((region) => {
-      const begin = Number(region.beginStepPercent ?? 0);
-      const end = Number(region.endStepPercent ?? 1);
-      return (Number.isFinite(begin) ? begin : 0) > 0.0001
-        || (Number.isFinite(end) ? end : 1) < 0.9999;
-    });
-    if (hasRestrictedStepRange) required.add('ConditioningSetTimestepRange');
-    required.add('ConditioningCombine');
-    if (item.regionalGuidance?.some((region) => region.autoNegative === true)) required.add('InvertMask');
-    if (adapter === 'flux_fill') required.add('CLIPTextEncodeFlux');
-    if (adapter === 'native_edit' && /flux\.?2/i.test(modelFamily)) required.add('FluxGuidance');
   }
   for (const control of item.controlLayers || []) {
     if (control.adapterType === 'anima_lllite') required.add('AnimaLLLiteApply');
@@ -652,19 +606,8 @@ for (const item of cases) {
         outputOnlyMaskedRegions: item.outputOnlyMaskedRegions === true,
         colorMatch: item.colorMatch ?? 0,
         differentialStrength: item.differentialStrength ?? 1,
-        regionalGuidanceIds: (item.regionalGuidance || []).map((entry) => entry.id),
         controlLayerIds: (item.controlLayers || []).map((entry) => entry.id),
         referenceLayerIds: (item.referenceLayers || []).map((entry) => entry.id),
-        regionalGuidance: (item.regionalGuidance || []).map((entry) => ({
-          id: entry.id,
-          name: entry.name || entry.id,
-          positivePrompt: entry.positivePrompt || '',
-          negativePrompt: entry.negativePrompt || '',
-          autoNegative: entry.autoNegative === true,
-          weight: entry.weight ?? 1,
-          beginStepPercent: entry.beginStepPercent ?? 0,
-          endStepPercent: entry.endStepPercent ?? 1,
-        })),
         controlLayers: (item.controlLayers || []).map((entry) => ({
           id: entry.id,
           name: entry.name || entry.id,

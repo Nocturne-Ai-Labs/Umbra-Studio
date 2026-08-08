@@ -1,5 +1,7 @@
 export type UmbraUiAgentMediaType = 'image' | 'video' | 'both';
 
+export const UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID = 'image-anima-sdxl-csv-tags';
+
 export interface UmbraUiAgentInstruction {
   id: string;
   name: string;
@@ -101,12 +103,13 @@ const DEFAULT_INSTRUCTION_TEMPLATES: UmbraUiAgentInstructionTemplate[] = [
     ].join(' '),
   },
   {
-    id: 'image-anima-sdxl-csv-tags',
+    id: UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
     name: 'Anima / SDXL CSV Tag Composer',
     mediaType: 'image',
     instruction: [
       'Compose a concise comma-separated prompt for Anima and SDXL-family anime models using real Danbooru tags.',
       'Umbra will attach a CSV TAG VOCABULARY selected from the tag and character CSV files in User/PowerPrompter/CSV. For ordinary visual concepts, use only the exact tag spellings from that vocabulary, including underscores and qualifiers; never invent a plausible-looking tag or silently rewrite one into prose.',
+      'When editing existing tags, preserve their intent, correct partial or noncanonical ordinary terms to the closest relevant exact tags in the supplied vocabulary, and add only closely related visible details appropriate to that prompt field.',
       'Preserve user-provided character trigger tokens, LoRA syntax, embeddings, prompt weights, and custom identity tokens exactly even when they are not present in the CSV vocabulary.',
       'Prefer concrete visible tags, remove duplicates and contradictions, and omit an uncertain concept when no matching CSV tag is supplied.',
       'Segment the result into subject and identity, appearance and clothing, pose and expression, scene and composition, then lighting and style.',
@@ -187,7 +190,7 @@ const DEFAULT_INSTRUCTION_TEMPLATES: UmbraUiAgentInstructionTemplate[] = [
 ];
 
 const REQUIRED_DEFAULT_INSTRUCTION_IDS = new Set([
-  'image-anima-sdxl-csv-tags',
+  UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
   'video-minimax-h3-director',
 ]);
 

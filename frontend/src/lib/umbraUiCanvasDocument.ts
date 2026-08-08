@@ -63,7 +63,7 @@ export const UMBRA_CANVAS_BLEND_MODES: UmbraCanvasBlendMode[] = [
   'color',
   'luminosity',
 ];
-export type UmbraCanvasLayerKind = 'raster' | 'mask' | 'regional_guidance' | 'control' | 'reference' | 'group' | 'text' | 'gradient';
+export type UmbraCanvasLayerKind = 'raster' | 'mask' | 'control' | 'reference' | 'group' | 'text' | 'gradient';
 export const UMBRA_CANVAS_CONTROL_TYPES = [
   'raw',
   'canny',
@@ -180,7 +180,7 @@ export type UmbraCanvasCurves = Record<UmbraCanvasCurveChannel, UmbraCanvasCurve
 export interface UmbraCanvasMaskLayer extends UmbraCanvasLayerBase {
   kind: 'mask';
   enabled: boolean;
-  purpose: 'inpaint' | 'regional_guidance' | 'reference' | 'layer';
+  purpose: 'inpaint' | 'reference' | 'layer';
   dataUrl: string;
   frozen: boolean;
   noiseLevel: number;
@@ -191,18 +191,6 @@ export interface UmbraCanvasMaskLayer extends UmbraCanvasLayerBase {
 
 export const UMBRA_CANVAS_MASK_OVERLAY_STYLES = ['solid', 'grid', 'crosshatch', 'diagonal', 'horizontal', 'vertical'] as const;
 export type UmbraCanvasMaskOverlayStyle = typeof UMBRA_CANVAS_MASK_OVERLAY_STYLES[number];
-
-export interface UmbraCanvasRegionalGuidanceLayer extends UmbraCanvasLayerBase {
-  kind: 'regional_guidance';
-  enabled: boolean;
-  maskLayerId: string;
-  positivePrompt: string;
-  negativePrompt: string;
-  autoNegative: boolean;
-  weight: number;
-  beginStepPercent: number;
-  endStepPercent: number;
-}
 
 export interface UmbraCanvasControlLayer extends UmbraCanvasLayerBase {
   kind: 'control';
@@ -248,7 +236,6 @@ export interface UmbraCanvasReferenceLayer extends UmbraCanvasLayerBase {
   ipAdapterCombineEmbeds: UmbraUiIpAdapterCombineEmbeds;
   ipAdapterEmbedsScaling: UmbraUiIpAdapterEmbedsScaling;
   maskLayerId?: string;
-  regionLayerId?: string;
 }
 
 export interface UmbraCanvasGroupLayer extends UmbraCanvasLayerBase {
@@ -294,7 +281,6 @@ export interface UmbraCanvasGradientLayer extends UmbraCanvasLayerBase {
 export type UmbraCanvasLayer =
   | UmbraCanvasRasterLayer
   | UmbraCanvasMaskLayer
-  | UmbraCanvasRegionalGuidanceLayer
   | UmbraCanvasControlLayer
   | UmbraCanvasReferenceLayer
   | UmbraCanvasGroupLayer
@@ -460,32 +446,23 @@ export type UmbraCanvasDocumentAction =
   | { type: 'merge_down'; upperLayerId: string; lowerLayerId: string; asset: UmbraCanvasImageAsset; name?: string }
   | { type: 'merge_control_down'; upperLayerId: string; lowerLayerId: string; asset: UmbraCanvasImageAsset; name?: string }
   | { type: 'merge_inpaint_masks_down'; upperLayerId: string; lowerLayerId: string; dataUrl: string; name?: string }
-  | { type: 'merge_regional_guidance_down'; upperLayerId: string; lowerLayerId: string; dataUrl: string; name?: string }
   | { type: 'merge_visible_controls'; layerIds: string[]; asset: UmbraCanvasImageAsset; name?: string }
   | { type: 'merge_visible_inpaint_masks'; layerIds: string[]; dataUrl: string; name?: string }
-  | { type: 'merge_visible_regional_guidance'; layerIds: string[]; dataUrl: string; name?: string }
   | { type: 'boolean_raster_layers'; lowerLayerId: string; upperLayerId: string; operation: UmbraCanvasBooleanOperation; asset: UmbraCanvasImageAsset; name?: string }
   | { type: 'group_layers'; layerIds: string[]; name?: string }
   | { type: 'merge_selected'; layerIds: string[]; asset: UmbraCanvasImageAsset; name?: string }
   | { type: 'merge_group'; groupId: string; asset: UmbraCanvasImageAsset; name?: string }
   | { type: 'flatten_visible'; asset: UmbraCanvasImageAsset; name?: string }
-  | { type: 'add_regional_guidance'; dataUrl: string; name?: string; positivePrompt?: string; negativePrompt?: string; autoNegative?: boolean }
-  | { type: 'update_regional_guidance'; layerId: string; changes: Partial<Pick<UmbraCanvasRegionalGuidanceLayer, 'positivePrompt' | 'negativePrompt' | 'autoNegative' | 'weight' | 'beginStepPercent' | 'endStepPercent'>> }
   | { type: 'add_control_layer'; asset: UmbraCanvasImageAsset; name?: string; modelName?: string; controlType?: UmbraCanvasControlType; adapterType?: UmbraUiInpaintControlAdapterType; controlMode?: UmbraUiInpaintControlMode; transform?: Partial<UmbraCanvasLayerBase['transform']> }
   | { type: 'update_control_layer'; layerId: string; changes: Partial<Pick<UmbraCanvasControlLayer, 'adapterType' | 'controlMode' | 'controlType' | 'modelName' | 'weight' | 'beginStepPercent' | 'endStepPercent' | 'processorResolution' | 'lowThreshold' | 'highThreshold' | 'detectBody' | 'detectFace' | 'detectHands' | 'maxFaces' | 'minimumConfidence' | 'scoreThreshold' | 'distanceThreshold' | 'normalStrength' | 'backgroundThreshold' | 'safeMode' | 'processorSeed' | 'lightnessToAlpha'>> }
   | { type: 'bake_control_preprocessor'; layerId: string; asset: UmbraCanvasImageAsset; name?: string }
   | { type: 'convert_raster_to_control'; layerId: string; asset: UmbraCanvasImageAsset; name?: string; modelName?: string; adapterType?: UmbraUiInpaintControlAdapterType; controlMode?: UmbraUiInpaintControlMode }
   | { type: 'convert_control_to_raster'; layerId: string; name?: string }
   | { type: 'convert_layer_to_inpaint_mask'; layerId: string; dataUrl: string; name?: string }
-  | { type: 'convert_layer_to_regional_guidance'; layerId: string; dataUrl: string; name?: string }
-  | { type: 'convert_inpaint_mask_to_regional_guidance'; layerId: string; name?: string }
-  | { type: 'convert_regional_guidance_to_inpaint_mask'; layerId: string; name?: string }
   | { type: 'add_reference_layer'; asset: UmbraCanvasImageAsset; name?: string; modelName?: string; visionModelName?: string; method?: UmbraUiInpaintReferenceMethod; transform?: Partial<UmbraCanvasLayerBase['transform']> }
-  | { type: 'add_regional_reference_layer'; asset: UmbraCanvasImageAsset; regionDataUrl: string; name?: string; modelName?: string; visionModelName?: string; transform?: Partial<UmbraCanvasLayerBase['transform']> }
   | { type: 'replace_reference_asset'; layerId: string; asset: UmbraCanvasImageAsset; transform: UmbraCanvasLayerBase['transform']; name?: string }
   | { type: 'update_reference_layer'; layerId: string; changes: Partial<Pick<UmbraCanvasReferenceLayer, 'method' | 'modelName' | 'visionModelName' | 'crop' | 'strengthType' | 'weight' | 'beginStepPercent' | 'endStepPercent' | 'ipAdapterWeightType' | 'ipAdapterCombineEmbeds' | 'ipAdapterEmbedsScaling'>> }
   | { type: 'attach_reference_mask'; layerId: string; dataUrl: string; name?: string }
-  | { type: 'link_reference_region'; layerId: string; regionLayerId: string }
   | { type: 'detach_reference_mask'; layerId: string }
   | { type: 'add_group_layer'; name?: string }
   | { type: 'toggle_group_collapsed'; layerId: string }
@@ -517,7 +494,6 @@ function normalizeRotation(value: number): number {
 }
 
 function defaultMaskOverlayColor(purpose: UmbraCanvasMaskLayer['purpose']): string {
-  if (purpose === 'regional_guidance') return '#a855f7';
   if (purpose === 'reference') return '#22d3ee';
   if (purpose === 'layer') return '#ffffff';
   return '#ff304c';
@@ -594,19 +570,14 @@ function shouldRejectProtectedLayerMutation(
     case 'replace_raster_asset':
     case 'apply_raster_filter':
     case 'apply_control_filter':
-    case 'update_regional_guidance':
     case 'update_control_layer':
     case 'bake_control_preprocessor':
     case 'convert_raster_to_control':
     case 'convert_control_to_raster':
     case 'convert_layer_to_inpaint_mask':
-    case 'convert_layer_to_regional_guidance':
-    case 'convert_inpaint_mask_to_regional_guidance':
-    case 'convert_regional_guidance_to_inpaint_mask':
     case 'replace_reference_asset':
     case 'update_reference_layer':
     case 'attach_reference_mask':
-    case 'link_reference_region':
     case 'detach_reference_mask':
     case 'set_layer_group':
     case 'update_text_layer':
@@ -629,11 +600,9 @@ function shouldRejectProtectedLayerMutation(
     }
     case 'merge_control_down':
     case 'merge_inpaint_masks_down':
-    case 'merge_regional_guidance_down':
       return hasProtectedLayer(document, [action.upperLayerId, action.lowerLayerId]);
     case 'merge_visible_controls':
     case 'merge_visible_inpaint_masks':
-    case 'merge_visible_regional_guidance':
       return hasProtectedLayer(document, action.layerIds);
     case 'group_layers':
       return document.layers.some((layer) => (
@@ -1014,7 +983,14 @@ export function migrateUmbraCanvasDocument(input: unknown): UmbraCanvasDocument 
   source.previewStageId = stagingIds.has(String(source.previewStageId || '').trim())
     ? String(source.previewStageId || '').trim()
     : '';
-  source.layers = source.layers.map((layer: Record<string, any>) => {
+  const obsoleteRegionalMaskIds = new Set(source.layers
+    .filter((layer: Record<string, any>) => layer.kind === 'regional_guidance')
+    .map((layer: Record<string, any>) => String(layer.maskLayerId || ''))
+    .filter(Boolean));
+  source.layers = source.layers
+    .filter((layer: Record<string, any>) => layer.kind !== 'regional_guidance')
+    .filter((layer: Record<string, any>) => !(layer.kind === 'mask' && obsoleteRegionalMaskIds.has(String(layer.id || ''))))
+    .map((layer: Record<string, any>) => {
     const migrated = { ...layer };
     migrated.visible = layer.visible !== false;
     migrated.locked = layer.locked === true;
@@ -1092,9 +1068,7 @@ export function migrateUmbraCanvasDocument(input: unknown): UmbraCanvasDocument 
     }
     if (layer.kind === 'mask') {
       migrated.enabled = version >= 16 ? layer.enabled !== false : layer.visible !== false;
-      migrated.purpose = layer.purpose === 'regional_guidance'
-        ? 'regional_guidance'
-        : layer.purpose === 'reference'
+      migrated.purpose = layer.purpose === 'reference'
           ? 'reference'
         : layer.purpose === 'layer'
           ? 'layer'
@@ -1126,22 +1100,13 @@ export function migrateUmbraCanvasDocument(input: unknown): UmbraCanvasDocument 
         ? layer.ipAdapterEmbedsScaling
         : 'V only';
       migrated.maskLayerId = String(layer.maskLayerId || '').trim() || undefined;
-      migrated.regionLayerId = String(layer.regionLayerId || '').trim() || undefined;
-    }
-    if (layer.kind === 'regional_guidance') {
-      migrated.enabled = version >= 16 ? layer.enabled !== false : layer.visible !== false;
-      migrated.autoNegative = layer.autoNegative === true;
     }
     return migrated;
   });
-  const regionalLayerIds = new Set(source.layers
-    .filter((layer: Record<string, any>) => layer.kind === 'regional_guidance')
-    .map((layer: Record<string, any>) => String(layer.id || '')));
   source.layers = source.layers.map((layer: Record<string, any>) => {
     if (layer.kind !== 'reference') return layer;
-    if (layer.method !== 'ip_adapter') return { ...layer, maskLayerId: undefined, regionLayerId: undefined };
-    if (layer.regionLayerId && regionalLayerIds.has(layer.regionLayerId)) return { ...layer, maskLayerId: undefined };
-    return { ...layer, regionLayerId: undefined };
+    if (layer.method !== 'ip_adapter') return { ...layer, maskLayerId: undefined };
+    return layer;
   });
   const referencedMaskIds = new Set(source.layers.flatMap((layer: Record<string, any>) => (
     typeof layer.maskLayerId === 'string' && layer.maskLayerId ? [layer.maskLayerId] : []
@@ -1497,13 +1462,6 @@ export function umbraCanvasDocumentReducer(
             updatedAt: now,
           } as UmbraCanvasLayer;
         }
-        if (layer.kind === 'regional_guidance' && flattenedMaskIds.has(layer.maskLayerId)) {
-          return {
-            ...layer,
-            transform: { x: 0, y: 0, width, height, rotation: 0, scaleX: 1, scaleY: 1 },
-            updatedAt: now,
-          } as UmbraCanvasLayer;
-        }
         return layer;
       });
       return commit(state, {
@@ -1675,7 +1633,7 @@ export function umbraCanvasDocumentReducer(
       const target = state.layers.find((layer) => layer.id === action.layerId);
       if (target?.kind === 'mask' && target.purpose === 'inpaint' && target.locked) return state;
       return patchLayer(state, action.layerId, (layer) => (
-        layer.kind === 'mask' && (layer.purpose === 'inpaint' || layer.purpose === 'regional_guidance')
+        layer.kind === 'mask' && layer.purpose === 'inpaint'
           ? {
             ...layer,
             dataUrl: String(action.dataUrl || ''),
@@ -1813,13 +1771,11 @@ export function umbraCanvasDocumentReducer(
     case 'toggle_layer_enabled': {
       const target = state.layers.find((layer) => layer.id === action.layerId);
       const canToggle = target?.kind === 'mask' && target.purpose === 'inpaint'
-        || target?.kind === 'regional_guidance'
         || target?.kind === 'control'
         || target?.kind === 'reference';
       if (!canToggle) return state;
       return patchLayer(state, action.layerId, (layer) => (
         layer.kind === 'mask' && layer.purpose === 'inpaint'
-          || layer.kind === 'regional_guidance'
           || layer.kind === 'control'
           || layer.kind === 'reference'
           ? { ...layer, enabled: !layer.enabled }
@@ -1849,14 +1805,8 @@ export function umbraCanvasDocumentReducer(
         scaleX: action.transform.scaleX === undefined ? source.transform.scaleX : Number(action.transform.scaleX) || 1,
         scaleY: action.transform.scaleY === undefined ? source.transform.scaleY : Number(action.transform.scaleY) || 1,
       };
-      const linkedLayerIds = new Set([source.id]);
-      if (source.kind === 'regional_guidance') linkedLayerIds.add(source.maskLayerId);
-      if (source.kind === 'mask' && source.purpose === 'regional_guidance') {
-        const region = state.layers.find((layer) => layer.kind === 'regional_guidance' && layer.maskLayerId === source.id);
-        if (region) linkedLayerIds.add(region.id);
-      }
       const now = Date.now();
-      const layers = state.layers.map((layer) => linkedLayerIds.has(layer.id)
+      const layers = state.layers.map((layer) => layer.id === source.id
         ? { ...layer, transform: { ...transform }, updatedAt: now }
         : layer) as UmbraCanvasLayer[];
       return commit(state, { layers });
@@ -1872,26 +1822,11 @@ export function umbraCanvasDocumentReducer(
     }
     case 'set_layers_transforms': {
       const transforms = new Map(action.transforms.map((entry) => [entry.layerId, entry.transform]));
-      const forcedLinkedTransforms = new Set<string>();
-      for (const entry of action.transforms) {
-        const source = state.layers.find((layer) => layer.id === entry.layerId);
-        if (!source || isLayerProtectedFromMutation(source)) continue;
-        if (source?.kind === 'regional_guidance') {
-          transforms.set(source.maskLayerId, entry.transform);
-          forcedLinkedTransforms.add(source.maskLayerId);
-        } else if (source?.kind === 'mask' && source.purpose === 'regional_guidance') {
-          const region = state.layers.find((layer) => layer.kind === 'regional_guidance' && layer.maskLayerId === source.id);
-          if (region) {
-            transforms.set(region.id, entry.transform);
-            forcedLinkedTransforms.add(region.id);
-          }
-        }
-      }
       let changed = false;
       const now = Date.now();
       const layers = state.layers.map((layer) => {
         const transform = transforms.get(layer.id);
-        if (!transform || layer.locked && !forcedLinkedTransforms.has(layer.id) || layer.kind === 'raster' && layer.role === 'source') return layer;
+        if (!transform || layer.locked || layer.kind === 'raster' && layer.role === 'source') return layer;
         changed = true;
         return {
           ...layer,
@@ -2160,55 +2095,6 @@ export function umbraCanvasDocumentReducer(
         previewStageId: '',
       });
     }
-    case 'merge_regional_guidance_down': {
-      const upperIndex = state.layers.findIndex((layer) => layer.id === action.upperLayerId);
-      const lowerIndex = state.layers.findIndex((layer) => layer.id === action.lowerLayerId);
-      const upper = state.layers[upperIndex];
-      const lower = state.layers[lowerIndex];
-      const dataUrl = String(action.dataUrl || '').trim();
-      if (upperIndex < 0 || lowerIndex < 0 || upperIndex <= lowerIndex || upper?.kind !== 'regional_guidance' || lower?.kind !== 'regional_guidance' || !dataUrl) return state;
-      const upperMask = state.layers.find((layer) => layer.id === upper.maskLayerId);
-      const lowerMask = state.layers.find((layer) => layer.id === lower.maskLayerId);
-      const now = Date.now();
-      const name = String(action.name || `${lower.name} + ${upper.name}`).trim() || 'Merged Region';
-      const privateMask: UmbraCanvasMaskLayer = {
-        ...baseLayer('mask', `${name} Mask`, state.width, state.height, now),
-        kind: 'mask',
-        enabled: true,
-        purpose: 'regional_guidance',
-        dataUrl,
-        frozen: true,
-        noiseLevel: Math.max(lowerMask?.kind === 'mask' ? lowerMask.noiseLevel : 0, upperMask?.kind === 'mask' ? upperMask.noiseLevel : 0),
-        denoiseLimit: Math.min(lowerMask?.kind === 'mask' ? lowerMask.denoiseLimit : 1, upperMask?.kind === 'mask' ? upperMask.denoiseLimit : 1),
-        overlayColor: defaultMaskOverlayColor('regional_guidance'),
-        overlayStyle: 'solid',
-        locked: true,
-        visible: false,
-        groupId: upper.groupId === lower.groupId ? upper.groupId : undefined,
-      };
-      const merged: UmbraCanvasRegionalGuidanceLayer = {
-        ...upper,
-        id: createId('canvas-regional_guidance'),
-        name,
-        maskLayerId: privateMask.id,
-        visible: true,
-        enabled: upper.enabled || lower.enabled,
-        locked: false,
-        groupId: upper.groupId === lower.groupId ? upper.groupId : undefined,
-        transform: { x: 0, y: 0, width: state.width, height: state.height, rotation: 0, scaleX: 1, scaleY: 1 },
-        createdAt: now,
-        updatedAt: now,
-      };
-      const removed = new Set([upper.id, lower.id, upper.maskLayerId, lower.maskLayerId]);
-      const insertionIndex = state.layers.slice(0, lowerIndex).filter((layer) => !removed.has(layer.id)).length;
-      const layers = state.layers
-        .filter((layer) => !removed.has(layer.id))
-        .map((layer) => layer.kind === 'reference' && (layer.regionLayerId === upper.id || layer.regionLayerId === lower.id)
-          ? { ...layer, regionLayerId: merged.id, updatedAt: now }
-          : layer) as UmbraCanvasLayer[];
-      layers.splice(insertionIndex, 0, privateMask, merged);
-      return commit(state, { layers, activeLayerId: merged.id, previewStageId: '' });
-    }
     case 'merge_visible_controls': {
       const requestedIds = new Set(action.layerIds);
       const selected = state.layers.filter((layer): layer is UmbraCanvasControlLayer => requestedIds.has(layer.id) && layer.kind === 'control');
@@ -2273,58 +2159,6 @@ export function umbraCanvasDocumentReducer(
         activeMaskLayerId: merged.id,
         previewStageId: '',
       });
-    }
-    case 'merge_visible_regional_guidance': {
-      const requestedIds = new Set(action.layerIds);
-      const selected = state.layers.filter((layer): layer is UmbraCanvasRegionalGuidanceLayer => requestedIds.has(layer.id) && layer.kind === 'regional_guidance');
-      const dataUrl = String(action.dataUrl || '').trim();
-      if (selected.length < 2 || selected.some((layer) => !layer.visible) || !dataUrl) return state;
-      const selectedIds = new Set(selected.map((layer) => layer.id));
-      const top = selected[selected.length - 1];
-      const firstSelectedIndex = state.layers.findIndex((layer) => selectedIds.has(layer.id));
-      if (!top || firstSelectedIndex < 0) return state;
-      const selectedMaskIds = new Set(selected.map((layer) => layer.maskLayerId));
-      const selectedMasks = state.layers.filter((layer): layer is UmbraCanvasMaskLayer => selectedMaskIds.has(layer.id) && layer.kind === 'mask');
-      const now = Date.now();
-      const name = String(action.name || `Merged ${selected.length} Regions`).trim() || `Merged ${selected.length} Regions`;
-      const commonGroupId = selected.every((layer) => layer.groupId === selected[0]?.groupId) ? selected[0]?.groupId : undefined;
-      const privateMask: UmbraCanvasMaskLayer = {
-        ...baseLayer('mask', `${name} Mask`, state.width, state.height, now),
-        kind: 'mask',
-        enabled: true,
-        purpose: 'regional_guidance',
-        dataUrl,
-        frozen: true,
-        noiseLevel: Math.max(0, ...selectedMasks.map((mask) => mask.noiseLevel)),
-        denoiseLimit: Math.min(1, ...selectedMasks.map((mask) => mask.denoiseLimit)),
-        overlayColor: defaultMaskOverlayColor('regional_guidance'),
-        overlayStyle: 'solid',
-        locked: true,
-        visible: false,
-        groupId: commonGroupId,
-      };
-      const merged: UmbraCanvasRegionalGuidanceLayer = {
-        ...top,
-        id: createId('canvas-regional_guidance'),
-        name,
-        maskLayerId: privateMask.id,
-        visible: true,
-        enabled: selected.some((layer) => layer.enabled),
-        locked: false,
-        groupId: commonGroupId,
-        transform: { x: 0, y: 0, width: state.width, height: state.height, rotation: 0, scaleX: 1, scaleY: 1 },
-        createdAt: now,
-        updatedAt: now,
-      };
-      const removedIds = new Set([...selectedIds, ...selectedMaskIds]);
-      const layers = state.layers
-        .filter((layer) => !removedIds.has(layer.id))
-        .map((layer) => layer.kind === 'reference' && layer.regionLayerId && selectedIds.has(layer.regionLayerId)
-          ? { ...layer, regionLayerId: merged.id, updatedAt: now }
-          : layer) as UmbraCanvasLayer[];
-      const insertionIndex = state.layers.slice(0, firstSelectedIndex).filter((layer) => !removedIds.has(layer.id)).length;
-      layers.splice(insertionIndex, 0, privateMask, merged);
-      return commit(state, { layers, activeLayerId: merged.id, previewStageId: '' });
     }
     case 'boolean_raster_layers': {
       const lowerIndex = state.layers.findIndex((layer) => layer.id === action.lowerLayerId);
@@ -2497,64 +2331,6 @@ export function umbraCanvasDocumentReducer(
       layers.splice(activeMaskIndex >= 0 ? activeMaskIndex : layers.length, 0, flattened);
       return commit(state, { layers, activeLayerId: flattened.id, previewStageId: '' });
     }
-    case 'add_regional_guidance': {
-      const dataUrl = String(action.dataUrl || '').trim();
-      if (!dataUrl) return state;
-      const now = Date.now();
-      const regionIndex = state.layers.filter((layer) => layer.kind === 'regional_guidance').length + 1;
-      const regionName = String(action.name || `Region ${regionIndex}`).trim() || `Region ${regionIndex}`;
-      const maskLayer: UmbraCanvasMaskLayer = {
-        ...baseLayer('mask', `${regionName} Mask`, state.width, state.height, now),
-        kind: 'mask',
-        enabled: true,
-        purpose: 'regional_guidance',
-        dataUrl,
-        frozen: true,
-        noiseLevel: 0,
-        denoiseLimit: 1,
-        overlayColor: defaultMaskOverlayColor('regional_guidance'),
-        overlayStyle: 'solid',
-        locked: true,
-        visible: false,
-      };
-      const guidanceLayer: UmbraCanvasRegionalGuidanceLayer = {
-        ...baseLayer('regional_guidance', regionName, state.width, state.height, now),
-        kind: 'regional_guidance',
-        enabled: true,
-        maskLayerId: maskLayer.id,
-        positivePrompt: String(action.positivePrompt || '').trim(),
-        negativePrompt: String(action.negativePrompt || '').trim(),
-        autoNegative: action.autoNegative === true,
-        weight: 1,
-        beginStepPercent: 0,
-        endStepPercent: 1,
-      };
-      const activeMaskIndex = state.layers.findIndex((candidate) => candidate.id === state.activeMaskLayerId);
-      const insertionIndex = activeMaskIndex >= 0 ? activeMaskIndex : state.layers.length;
-      const layers = [...state.layers];
-      layers.splice(insertionIndex, 0, maskLayer, guidanceLayer);
-      return commit(state, { layers, activeLayerId: guidanceLayer.id, previewStageId: '' });
-    }
-    case 'update_regional_guidance':
-      return patchLayer(state, action.layerId, (layer) => {
-        if (layer.kind !== 'regional_guidance') return layer;
-        const beginStepPercent = action.changes.beginStepPercent === undefined
-          ? layer.beginStepPercent
-          : clamp(action.changes.beginStepPercent, 0, 1);
-        const endStepPercent = action.changes.endStepPercent === undefined
-          ? layer.endStepPercent
-          : clamp(action.changes.endStepPercent, 0, 1);
-        return {
-          ...layer,
-          ...action.changes,
-          positivePrompt: action.changes.positivePrompt === undefined ? layer.positivePrompt : String(action.changes.positivePrompt),
-          negativePrompt: action.changes.negativePrompt === undefined ? layer.negativePrompt : String(action.changes.negativePrompt),
-          autoNegative: action.changes.autoNegative === undefined ? layer.autoNegative : action.changes.autoNegative === true,
-          weight: action.changes.weight === undefined ? layer.weight : clamp(action.changes.weight, 0, 10),
-          beginStepPercent: Math.min(beginStepPercent, endStepPercent),
-          endStepPercent: Math.max(beginStepPercent, endStepPercent),
-        };
-      });
     case 'add_control_layer': {
       const now = Date.now();
       const controlIndex = state.layers.filter((layer) => layer.kind === 'control').length + 1;
@@ -2755,163 +2531,6 @@ export function umbraCanvasDocumentReducer(
         previewStageId: '',
       });
     }
-    case 'convert_layer_to_regional_guidance': {
-      const index = state.layers.findIndex((layer) => layer.id === action.layerId);
-      const source = state.layers[index];
-      const dataUrl = String(action.dataUrl || '').trim();
-      const convertible = source?.kind === 'control'
-        || source?.kind === 'text'
-        || source?.kind === 'gradient'
-        || source?.kind === 'raster' && source.role !== 'source';
-      if (index < 0 || !source || !convertible || !dataUrl) return state;
-      const now = Date.now();
-      const name = String(action.name || `${source.name} Region`).trim() || `${source.name} Region`;
-      const maskLayer: UmbraCanvasMaskLayer = {
-        ...baseLayer('mask', `${name} Mask`, state.width, state.height, now),
-        kind: 'mask',
-        enabled: true,
-        purpose: 'regional_guidance',
-        dataUrl,
-        frozen: true,
-        noiseLevel: 0,
-        denoiseLimit: 1,
-        overlayColor: defaultMaskOverlayColor('regional_guidance'),
-        overlayStyle: 'solid',
-        locked: true,
-        visible: false,
-        groupId: source.groupId,
-      };
-      const guidanceLayer: UmbraCanvasRegionalGuidanceLayer = {
-        ...convertedLayerBase(source, 'regional_guidance', name, now, {
-          x: 0,
-          y: 0,
-          width: state.width,
-          height: state.height,
-          rotation: 0,
-          scaleX: 1,
-          scaleY: 1,
-        }),
-        kind: 'regional_guidance',
-        enabled: 'enabled' in source ? source.enabled : true,
-        maskLayerId: maskLayer.id,
-        positivePrompt: '',
-        negativePrompt: '',
-        autoNegative: false,
-        weight: 1,
-        beginStepPercent: 0,
-        endStepPercent: 1,
-      };
-      const removedMaskId = source.kind === 'raster' ? source.maskLayerId || '' : '';
-      const layers = state.layers.filter((layer) => layer.id !== removedMaskId);
-      const replacementIndex = layers.findIndex((layer) => layer.id === source.id);
-      layers.splice(replacementIndex, 1, maskLayer, guidanceLayer);
-      return commit(state, {
-        layers,
-        activeLayerId: guidanceLayer.id,
-        previewStageId: '',
-      });
-    }
-    case 'convert_inpaint_mask_to_regional_guidance': {
-      const index = state.layers.findIndex((layer) => layer.id === action.layerId);
-      const source = state.layers[index];
-      if (index < 0 || source?.kind !== 'mask' || source.purpose !== 'inpaint' || source.frozen) return state;
-      const now = Date.now();
-      const name = String(action.name || source.name.replace(/\s+Mask$/i, '') || 'Region').trim() || 'Region';
-      const privateMask: UmbraCanvasMaskLayer = {
-        ...baseLayer('mask', `${name} Mask`, state.width, state.height, now),
-        kind: 'mask',
-        enabled: true,
-        purpose: 'regional_guidance',
-        dataUrl: source.dataUrl,
-        frozen: true,
-        noiseLevel: source.noiseLevel,
-        denoiseLimit: source.denoiseLimit,
-        overlayColor: defaultMaskOverlayColor('regional_guidance'),
-        overlayStyle: source.overlayStyle,
-        locked: true,
-        visible: false,
-        groupId: source.groupId,
-      };
-      const guidanceLayer: UmbraCanvasRegionalGuidanceLayer = {
-        ...convertedLayerBase(source, 'regional_guidance', name, now),
-        kind: 'regional_guidance',
-        enabled: source.enabled,
-        maskLayerId: privateMask.id,
-        positivePrompt: '',
-        negativePrompt: '',
-        autoNegative: false,
-        weight: 1,
-        beginStepPercent: 0,
-        endStepPercent: 1,
-      };
-      const alternateMask = state.layers.find((layer) => (
-        layer.id !== source.id && layer.kind === 'mask' && layer.purpose === 'inpaint' && !layer.frozen
-      )) as UmbraCanvasMaskLayer | undefined;
-      const freshMask: UmbraCanvasMaskLayer | null = alternateMask ? null : {
-        ...baseLayer('mask', 'Inpaint Mask', state.width, state.height, now),
-        kind: 'mask',
-        enabled: true,
-        purpose: 'inpaint',
-        dataUrl: '',
-        frozen: false,
-        noiseLevel: 0,
-        denoiseLimit: 1,
-        overlayColor: defaultMaskOverlayColor('inpaint'),
-        overlayStyle: 'solid',
-      };
-      const layers = [...state.layers];
-      layers.splice(index, 1, privateMask, guidanceLayer);
-      if (freshMask) layers.push(freshMask);
-      return commit(state, {
-        layers,
-        activeLayerId: guidanceLayer.id,
-        activeMaskLayerId: alternateMask?.id || freshMask!.id,
-        previewStageId: '',
-      });
-    }
-    case 'convert_regional_guidance_to_inpaint_mask': {
-      const index = state.layers.findIndex((layer) => layer.id === action.layerId);
-      const source = state.layers[index];
-      if (index < 0 || source?.kind !== 'regional_guidance') return state;
-      const privateMask = state.layers.find((layer) => layer.id === source.maskLayerId);
-      if (privateMask?.kind !== 'mask') return state;
-      const now = Date.now();
-      const name = String(action.name || `${source.name} Mask`).trim() || `${source.name} Mask`;
-      const mask: UmbraCanvasMaskLayer = {
-        ...convertedLayerBase(source, 'mask', name, now, {
-          x: 0,
-          y: 0,
-          width: state.width,
-          height: state.height,
-          rotation: 0,
-          scaleX: 1,
-          scaleY: 1,
-        }),
-        kind: 'mask',
-        enabled: source.enabled,
-        purpose: 'inpaint',
-        dataUrl: privateMask.dataUrl,
-        frozen: false,
-        noiseLevel: privateMask.noiseLevel,
-        denoiseLimit: privateMask.denoiseLimit,
-        overlayColor: defaultMaskOverlayColor('inpaint'),
-        overlayStyle: privateMask.overlayStyle,
-        locked: false,
-      };
-      const layers = state.layers
-        .filter((layer) => layer.id !== privateMask.id)
-        .map((layer) => layer.kind === 'reference' && layer.regionLayerId === source.id
-          ? { ...layer, regionLayerId: undefined, updatedAt: now }
-          : layer) as UmbraCanvasLayer[];
-      const replacementIndex = layers.findIndex((layer) => layer.id === source.id);
-      layers.splice(replacementIndex, 1, mask);
-      return commit(state, {
-        layers,
-        activeLayerId: mask.id,
-        activeMaskLayerId: mask.id,
-        previewStageId: '',
-      });
-    }
     case 'add_reference_layer': {
       const now = Date.now();
       const referenceIndex = state.layers.filter((layer) => layer.kind === 'reference').length + 1;
@@ -2938,62 +2557,6 @@ export function umbraCanvasDocumentReducer(
       const layers = [...state.layers];
       layers.splice(activeMaskIndex >= 0 ? activeMaskIndex : layers.length, 0, layer);
       return commit(state, { layers, activeLayerId: layer.id, previewStageId: '' });
-    }
-    case 'add_regional_reference_layer': {
-      const regionDataUrl = String(action.regionDataUrl || '').trim();
-      if (!regionDataUrl) return state;
-      const now = Date.now();
-      const referenceIndex = state.layers.filter((layer) => layer.kind === 'reference').length + 1;
-      const name = String(action.name || `Regional Reference ${referenceIndex}`).trim() || `Regional Reference ${referenceIndex}`;
-      const maskLayer: UmbraCanvasMaskLayer = {
-        ...baseLayer('mask', `${name} Region Mask`, state.width, state.height, now),
-        kind: 'mask',
-        enabled: true,
-        purpose: 'regional_guidance',
-        dataUrl: regionDataUrl,
-        frozen: true,
-        noiseLevel: 0,
-        denoiseLimit: 1,
-        overlayColor: defaultMaskOverlayColor('regional_guidance'),
-        overlayStyle: 'solid',
-        locked: true,
-        visible: false,
-      };
-      const regionLayer: UmbraCanvasRegionalGuidanceLayer = {
-        ...baseLayer('regional_guidance', `${name} Region`, state.width, state.height, now),
-        kind: 'regional_guidance',
-        enabled: true,
-        maskLayerId: maskLayer.id,
-        positivePrompt: '',
-        negativePrompt: '',
-        autoNegative: false,
-        weight: 1,
-        beginStepPercent: 0,
-        endStepPercent: 1,
-      };
-      const referenceLayer: UmbraCanvasReferenceLayer = {
-        ...baseLayer('reference', name, action.asset.width, action.asset.height, now),
-        kind: 'reference',
-        enabled: true,
-        asset: action.asset,
-        method: 'ip_adapter',
-        modelName: String(action.modelName || '').trim(),
-        visionModelName: String(action.visionModelName || '').trim(),
-        crop: 'center',
-        strengthType: 'multiply',
-        weight: 1,
-        beginStepPercent: 0,
-        endStepPercent: 1,
-        ipAdapterWeightType: 'linear',
-        ipAdapterCombineEmbeds: 'concat',
-        ipAdapterEmbedsScaling: 'V only',
-        regionLayerId: regionLayer.id,
-      };
-      referenceLayer.transform = { ...referenceLayer.transform, ...action.transform };
-      const activeMaskIndex = state.layers.findIndex((candidate) => candidate.id === state.activeMaskLayerId);
-      const layers = [...state.layers];
-      layers.splice(activeMaskIndex >= 0 ? activeMaskIndex : layers.length, 0, maskLayer, regionLayer, referenceLayer);
-      return commit(state, { layers, activeLayerId: referenceLayer.id, previewStageId: '' });
     }
     case 'replace_reference_asset':
       return patchLayer(state, action.layerId, (layer) => layer.kind === 'reference' ? {
@@ -3045,7 +2608,6 @@ export function umbraCanvasDocumentReducer(
             ? layer.ipAdapterEmbedsScaling
             : UMBRA_IP_ADAPTER_EMBEDS_SCALING.includes(action.changes.ipAdapterEmbedsScaling) ? action.changes.ipAdapterEmbedsScaling : 'V only',
           maskLayerId: method === 'ip_adapter' ? layer.maskLayerId : undefined,
-          regionLayerId: method === 'ip_adapter' ? layer.regionLayerId : undefined,
         };
       });
       if (previous?.kind !== 'reference' || !previous.maskLayerId || action.changes.method === undefined || action.changes.method === 'ip_adapter') return updated;
@@ -3062,7 +2624,7 @@ export function umbraCanvasDocumentReducer(
         const patched = patchLayer(state, reference.maskLayerId, (layer) => (
           layer.kind === 'mask' ? { ...layer, dataUrl } : layer
         ));
-        return patchLayer(patched, reference.id, (layer) => layer.kind === 'reference' ? { ...layer, regionLayerId: undefined } : layer);
+        return patched;
       }
       const now = Date.now();
       const mask: UmbraCanvasMaskLayer = {
@@ -3078,31 +2640,19 @@ export function umbraCanvasDocumentReducer(
         overlayStyle: 'solid',
       };
       const layers = state.layers.map((layer) => layer.id === reference.id
-        ? { ...layer, maskLayerId: mask.id, regionLayerId: undefined, updatedAt: now }
+        ? { ...layer, maskLayerId: mask.id, updatedAt: now }
         : layer) as UmbraCanvasLayer[];
       layers.splice(referenceIndex, 0, mask);
       return commit(state, { layers, activeLayerId: reference.id, previewStageId: '' });
     }
-    case 'link_reference_region': {
-      const reference = state.layers.find((layer) => layer.id === action.layerId);
-      const region = state.layers.find((layer) => layer.id === action.regionLayerId);
-      if (reference?.kind !== 'reference' || reference.method !== 'ip_adapter' || region?.kind !== 'regional_guidance') return state;
-      const now = Date.now();
-      const layers = state.layers
-        .filter((layer) => !reference.maskLayerId || layer.id !== reference.maskLayerId)
-        .map((layer) => layer.id === reference.id
-          ? { ...layer, maskLayerId: undefined, regionLayerId: region.id, updatedAt: now }
-          : layer) as UmbraCanvasLayer[];
-      return commit(state, { layers, activeLayerId: reference.id, previewStageId: '' });
-    }
     case 'detach_reference_mask': {
       const reference = state.layers.find((layer) => layer.id === action.layerId);
-      if (reference?.kind !== 'reference' || (!reference.maskLayerId && !reference.regionLayerId)) return state;
+      if (reference?.kind !== 'reference' || !reference.maskLayerId) return state;
       const maskLayerId = reference.maskLayerId;
       const now = Date.now();
       const layers = state.layers
         .filter((layer) => !maskLayerId || layer.id !== maskLayerId)
-        .map((layer) => layer.id === reference.id ? { ...layer, maskLayerId: undefined, regionLayerId: undefined, updatedAt: now } : layer) as UmbraCanvasLayer[];
+        .map((layer) => layer.id === reference.id ? { ...layer, maskLayerId: undefined, updatedAt: now } : layer) as UmbraCanvasLayer[];
       return commit(state, { layers, activeLayerId: reference.id, previewStageId: '' });
     }
     case 'add_group_layer': {
@@ -3314,30 +2864,6 @@ export function umbraCanvasDocumentReducer(
           previewStageId: '',
         });
       }
-      if (source.kind === 'regional_guidance') {
-        const sourceMask = state.layers.find((layer) => layer.id === source.maskLayerId && layer.kind === 'mask') as UmbraCanvasMaskLayer | undefined;
-        if (!sourceMask) return state;
-        const maskCopy: UmbraCanvasMaskLayer = {
-          ...sourceMask,
-          id: createId('canvas-mask'),
-          name: `${sourceMask.name} Copy`,
-          createdAt: now,
-          updatedAt: now,
-        };
-        const guidanceCopy: UmbraCanvasRegionalGuidanceLayer = {
-          ...source,
-          id: createId('canvas-regional_guidance'),
-          name: `${source.name} Copy`,
-          maskLayerId: maskCopy.id,
-          locked: false,
-          createdAt: now,
-          updatedAt: now,
-        };
-        const index = state.layers.findIndex((layer) => layer.id === source.id);
-        const layers = [...state.layers];
-        layers.splice(index + 1, 0, maskCopy, guidanceCopy);
-        return commit(state, { layers, activeLayerId: guidanceCopy.id, previewStageId: '' });
-      }
       if (source.kind === 'reference' && source.maskLayerId) {
         const sourceMask = state.layers.find((layer) => layer.id === source.maskLayerId && layer.kind === 'mask') as UmbraCanvasMaskLayer | undefined;
         if (!sourceMask) return state;
@@ -3405,7 +2931,7 @@ export function umbraCanvasDocumentReducer(
       if (layer.kind === 'mask') {
         if (layer.frozen || layer.purpose !== 'inpaint') return state;
         if (state.layers.some((candidate) => (
-          (candidate.kind === 'raster' || candidate.kind === 'regional_guidance' || candidate.kind === 'reference')
+          (candidate.kind === 'raster' || candidate.kind === 'reference')
           && candidate.maskLayerId === layer.id
         ))) return state;
         const editableMasks = state.layers.filter((candidate) => (
@@ -3451,15 +2977,12 @@ export function umbraCanvasDocumentReducer(
             : state.activeLayerId,
         });
       }
-      const linkedMaskId = layer.kind === 'raster' || layer.kind === 'regional_guidance' || layer.kind === 'reference' ? layer.maskLayerId : '';
+      const linkedMaskId = layer.kind === 'raster' || layer.kind === 'reference' ? layer.maskLayerId : '';
       const layers = state.layers
         .filter((candidate) => (
           candidate.id !== action.layerId
           && (!linkedMaskId || candidate.id !== linkedMaskId)
-        ))
-        .map((candidate) => candidate.kind === 'reference' && candidate.regionLayerId === action.layerId
-          ? { ...candidate, regionLayerId: undefined, updatedAt: Date.now() }
-          : candidate) as UmbraCanvasLayer[];
+        ));
       return commit(state, {
         layers,
         activeMaskLayerId: alternateActiveMask?.id || state.activeMaskLayerId,
@@ -3484,11 +3007,6 @@ export function getUmbraCanvasMaskLayer(
 ): UmbraCanvasMaskLayer | null {
   const layer = document?.layers.find((candidate) => candidate.id === layerId);
   return layer?.kind === 'mask' ? layer : null;
-}
-
-export function getUmbraCanvasRegionalGuidanceLayers(document: UmbraCanvasDocument | null): UmbraCanvasRegionalGuidanceLayer[] {
-  if (!document) return [];
-  return document.layers.filter((layer): layer is UmbraCanvasRegionalGuidanceLayer => layer.kind === 'regional_guidance');
 }
 
 export function getUmbraCanvasControlLayers(document: UmbraCanvasDocument | null): UmbraCanvasControlLayer[] {
@@ -3529,12 +3047,6 @@ export function validateUmbraCanvasDocument(document: UmbraCanvasDocument): stri
     ids.add(layer.id);
     if (layer.opacity < 0 || layer.opacity > 1) issues.push(`Invalid opacity on ${layer.name}`);
     if (layer.transform.width <= 0 || layer.transform.height <= 0) issues.push(`Invalid bounds on ${layer.name}`);
-    if (layer.kind === 'regional_guidance') {
-      if (typeof layer.enabled !== 'boolean') issues.push(`Invalid enabled state on ${layer.name}`);
-      const mask = document.layers.find((candidate) => candidate.id === layer.maskLayerId);
-      if (!mask || mask.kind !== 'mask') issues.push(`Regional mask missing for ${layer.name}`);
-      if (layer.beginStepPercent > layer.endStepPercent) issues.push(`Invalid step range on ${layer.name}`);
-    }
     if (layer.kind === 'mask') {
       if (typeof layer.enabled !== 'boolean') issues.push(`Invalid enabled state on ${layer.name}`);
       if (!/^#[0-9a-f]{6}$/i.test(layer.overlayColor)) issues.push(`Invalid overlay color on ${layer.name}`);
@@ -3556,15 +3068,10 @@ export function validateUmbraCanvasDocument(document: UmbraCanvasDocument): stri
     if (layer.kind === 'reference') {
       if (typeof layer.enabled !== 'boolean') issues.push(`Invalid enabled state on ${layer.name}`);
       if (!layer.asset?.imageUrl) issues.push(`Reference image missing for ${layer.name}`);
-      if (layer.maskLayerId && layer.regionLayerId) issues.push(`Reference has conflicting influence masks for ${layer.name}`);
-      if (layer.method !== 'ip_adapter' && (layer.maskLayerId || layer.regionLayerId)) issues.push(`Unsupported regional influence on ${layer.name}`);
+      if (layer.method !== 'ip_adapter' && layer.maskLayerId) issues.push(`Unsupported reference influence mask on ${layer.name}`);
       if (layer.maskLayerId) {
         const mask = document.layers.find((candidate) => candidate.id === layer.maskLayerId);
         if (!mask || mask.kind !== 'mask' || mask.purpose !== 'reference') issues.push(`Reference mask missing for ${layer.name}`);
-      }
-      if (layer.regionLayerId) {
-        const region = document.layers.find((candidate) => candidate.id === layer.regionLayerId);
-        if (!region || region.kind !== 'regional_guidance') issues.push(`Reference region missing for ${layer.name}`);
       }
       if (layer.beginStepPercent > layer.endStepPercent) issues.push(`Invalid reference step range on ${layer.name}`);
     }

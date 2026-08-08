@@ -22,6 +22,7 @@ import type {
   PowerPrompterStyleSeedMode,
   PowerPrompterVideoControls,
 } from '@/types/powerPrompter';
+import { UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID } from '../../../shared/umbra-ui/agentTypes';
 import {
   inferUmbraVideoResolutionPreset,
   normalizeUmbraVideoAspectPreset,
@@ -603,6 +604,41 @@ export function normalizePowerPrompterPromptText(rawPrompt: string): string {
     .join(', ');
 }
 
+export function cleanPowerPrompterTagText(rawPrompt: string): string {
+  const protectedTokens: string[] = [];
+  const protectedTokenIndices = new Map<string, number>();
+  const protectedText = String(rawPrompt || '').replace(
+    /<[^>]+>|\bembedding:[^,\s]+|__[^,\s]+__/gi,
+    (token) => {
+      const tokenKey = token.toLocaleLowerCase();
+      let tokenIndex = protectedTokenIndices.get(tokenKey);
+      if (tokenIndex === undefined) {
+        tokenIndex = protectedTokens.length;
+        protectedTokens.push(token);
+        protectedTokenIndices.set(tokenKey, tokenIndex);
+      }
+      const placeholder = `ZXQPROTECTED${tokenIndex}QXZ`;
+      return placeholder;
+    },
+  );
+  const seen = new Set<string>();
+  const cleaned = protectedText
+    .split(',')
+    .map((segment) => segment.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .filter((segment) => {
+      const key = segment.toLocaleLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(', ');
+
+  return cleaned.replace(/ZXQPROTECTED(\d+)QXZ/g, (_placeholder, index) => (
+    protectedTokens[Number(index)] || ''
+  ));
+}
+
 export const DEFAULT_POWER_PROMPTER_SETTINGS: PowerPrompterSettings = {
   colors: {
     general: '#0073ff',
@@ -620,6 +656,7 @@ export const DEFAULT_POWER_PROMPTER_SETTINGS: PowerPrompterSettings = {
   queueShuffleEnabled: false,
   queueShuffleSeed: 0,
   agentEnhanceCompletePrompts: false,
+  agentInstructionId: UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
   generationCompleteSoundEnabled: true,
   generationCompleteSoundStyle: 'glass_tick',
   generationCompleteSoundVolume: 0.42,
@@ -1702,6 +1739,8 @@ export function normalizePowerPrompterSettings(
     queueShuffleEnabled: settings.queueShuffleEnabled === true,
     queueShuffleSeed: normalizeQueueShuffleSeed((settings as any).queueShuffleSeed),
     agentEnhanceCompletePrompts: settings.agentEnhanceCompletePrompts === true,
+    agentInstructionId: String(settings.agentInstructionId || UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID).trim().slice(0, 120)
+      || UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
     generationCompleteSoundEnabled: settings.generationCompleteSoundEnabled !== false,
     generationCompleteSoundStyle: normalizeCompletionSoundStyle(settings.generationCompleteSoundStyle),
     generationCompleteSoundVolume: normalizeCompletionSoundVolume(settings.generationCompleteSoundVolume),

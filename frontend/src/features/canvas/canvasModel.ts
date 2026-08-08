@@ -130,25 +130,6 @@ export interface UmbraCanvasMaskEntity {
   updatedAt: number;
 }
 
-export interface UmbraCanvasRegionalGuidanceEntity {
-  id: string;
-  kind: 'regional-guidance';
-  name: string;
-  maskEntityId: string;
-  positivePrompt: string;
-  negativePrompt: string;
-  autoNegative: boolean;
-  weight: number;
-  beginStepPercent: number;
-  endStepPercent: number;
-  visible: boolean;
-  generationEnabled: boolean;
-  locked: boolean;
-  revision: number;
-  createdAt: number;
-  updatedAt: number;
-}
-
 export interface UmbraCanvasControlEntity {
   id: string;
   kind: 'control';
@@ -284,7 +265,7 @@ export const UMBRA_CANVAS_BLEND_MODES: Array<{ value: UmbraCanvasBlendMode; labe
 ];
 
 export type UmbraCanvasDrawableEntity = UmbraCanvasRasterEntity | UmbraCanvasShapeEntity | UmbraCanvasTextEntity | UmbraCanvasGradientEntity | UmbraCanvasPathEntity;
-export type UmbraCanvasConditioningEntity = UmbraCanvasRegionalGuidanceEntity | UmbraCanvasControlEntity | UmbraCanvasReferenceEntity;
+export type UmbraCanvasConditioningEntity = UmbraCanvasControlEntity | UmbraCanvasReferenceEntity;
 export type UmbraCanvasEntity = UmbraCanvasDrawableEntity | UmbraCanvasMaskEntity | UmbraCanvasConditioningEntity;
 
 export function isUmbraCanvasDrawableEntity(entity: UmbraCanvasEntity): entity is UmbraCanvasDrawableEntity {
@@ -293,10 +274,6 @@ export function isUmbraCanvasDrawableEntity(entity: UmbraCanvasEntity): entity i
 
 export function isUmbraCanvasSpatialEntity(entity: UmbraCanvasEntity): entity is UmbraCanvasDrawableEntity | UmbraCanvasMaskEntity {
   return isUmbraCanvasDrawableEntity(entity) || entity.kind === 'mask';
-}
-
-export function isUmbraCanvasRegionalGuidanceEntity(entity: UmbraCanvasEntity): entity is UmbraCanvasRegionalGuidanceEntity {
-  return entity.kind === 'regional-guidance';
 }
 
 export function isUmbraCanvasControlEntity(entity: UmbraCanvasEntity): entity is UmbraCanvasControlEntity {
@@ -401,9 +378,7 @@ export function buildUmbraCanvasSnapshotSignature(project: UmbraCanvasProjectDoc
   const bbox = project.generationBbox;
   const entities = project.entities
     .filter((entity) => entity.visible && entity.generationEnabled)
-    .map((entity) => entity.kind === 'regional-guidance'
-      ? [entity.id, entity.kind, entity.revision, entity.maskEntityId, entity.weight, entity.beginStepPercent, entity.endStepPercent, entity.autoNegative].join(':')
-      : entity.kind === 'control'
+    .map((entity) => entity.kind === 'control'
         ? [entity.id, entity.kind, entity.revision, entity.rasterEntityId, entity.adapterType, entity.controlMode, entity.controlType, entity.modelName, entity.weight, entity.beginStepPercent, entity.endStepPercent].join(':')
         : entity.kind === 'reference'
           ? [entity.id, entity.kind, entity.revision, entity.rasterEntityId, entity.method, entity.modelName, entity.visionModelName, entity.weight, entity.beginStepPercent, entity.endStepPercent, entity.maskEntityId].join(':')
@@ -587,31 +562,6 @@ export function createUmbraCanvasMaskStroke(options: {
     opacity: Math.max(0.01, Math.min(1, Number(options.opacity) || 1)),
     closed: options.closed === true,
     createdAt: Date.now(),
-  };
-}
-
-export function createUmbraCanvasRegionalGuidanceEntity(options: {
-  maskEntityId: string;
-  name?: string;
-}): UmbraCanvasRegionalGuidanceEntity {
-  const now = Date.now();
-  return {
-    id: createId('regional-guide'),
-    kind: 'regional-guidance',
-    name: String(options.name || 'Regional Guide').trim() || 'Regional Guide',
-    maskEntityId: options.maskEntityId,
-    positivePrompt: '',
-    negativePrompt: '',
-    autoNegative: false,
-    weight: 1,
-    beginStepPercent: 0,
-    endStepPercent: 1,
-    visible: true,
-    generationEnabled: true,
-    locked: false,
-    revision: 0,
-    createdAt: now,
-    updatedAt: now,
   };
 }
 

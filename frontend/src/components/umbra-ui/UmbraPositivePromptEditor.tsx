@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useStore } from '@/store/useStore';
+import { PromptWildcardLibrary } from '@/components/shared/PromptWildcardLibrary';
 import { generateUmbraUiAgentPrompt } from '@/lib/umbraUiAgent';
 import {
   getUmbraUiPromptHistoryFieldCount,
@@ -222,6 +223,16 @@ export function UmbraPositivePromptEditor({
     window.requestAnimationFrame(() => textareaRefs.current.get(nextSegment.id)?.focus());
   }, [activeSegmentId, emitSegments, onActiveSegmentChange]);
 
+  const insertWildcard = React.useCallback((token: string) => {
+    const target = segmentsRef.current.find((segment) => segment.id === activeSegmentId)
+      || segmentsRef.current[0];
+    if (!target) return;
+    const separator = target.text.trim() && !/[\s,]$/.test(target.text) ? ', ' : '';
+    updateSegment(target.id, `${target.text}${separator}${token}`, 'action');
+    onActiveSegmentChange(target.id);
+    window.requestAnimationFrame(() => textareaRefs.current.get(target.id)?.focus());
+  }, [activeSegmentId, onActiveSegmentChange, updateSegment]);
+
   const removeSegment = React.useCallback((id: string) => {
     const currentSegments = segmentsRef.current;
     const index = currentSegments.findIndex((segment) => segment.id === id);
@@ -341,6 +352,7 @@ export function UmbraPositivePromptEditor({
           {segments.length} field{segments.length === 1 ? '' : 's'}
         </span>
         <div className="ml-auto flex items-center gap-1">
+          <PromptWildcardLibrary onInsert={insertWildcard} compact />
           <button
             type="button"
             onClick={() => void enhanceSelectedSegments()}

@@ -6,7 +6,6 @@ import type {
   UmbraCanvasProjectDocument,
   UmbraCanvasRasterEntity,
   UmbraCanvasRect,
-  UmbraCanvasRegionalGuidanceEntity,
   UmbraCanvasReferenceEntity,
 } from './canvasModel';
 import { renderUmbraCanvasRasterSurface } from './canvasRasterRenderer';
@@ -368,9 +367,7 @@ export async function composeUmbraCanvasGenerationRegion(
   explicitMaskContext.fillStyle = '#000000';
   explicitMaskContext.fillRect(0, 0, width, height);
   const conditioningMaskIds = new Set(project.entities
-    .filter((entity): entity is UmbraCanvasRegionalGuidanceEntity | UmbraCanvasReferenceEntity => (
-      (entity.kind === 'regional-guidance' || entity.kind === 'reference') && entity.generationEnabled
-    ))
+    .filter((entity): entity is UmbraCanvasReferenceEntity => entity.kind === 'reference' && entity.generationEnabled)
     .map((entity) => entity.maskEntityId)
     .filter(Boolean));
   const maskEntities = project.entities.filter((entity): entity is UmbraCanvasMaskEntity => (
@@ -486,11 +483,11 @@ export async function composeUmbraCanvasMaskBlob(
   const mask = project.entities.find((entity): entity is UmbraCanvasMaskEntity => (
     entity.kind === 'mask' && entity.id === maskEntityId
   ));
-  if (!mask) throw new Error('The regional guidance mask no longer exists.');
+  if (!mask) throw new Error('The conditioning mask no longer exists.');
   const bbox = project.generationBbox;
   const canvas = createCanvas(bbox.width, bbox.height);
   const context = canvas.getContext('2d', { willReadFrequently: true });
-  if (!context) throw new Error('The regional guidance mask could not be rendered.');
+  if (!context) throw new Error('The conditioning mask could not be rendered.');
   context.fillStyle = '#000000';
   context.fillRect(0, 0, canvas.width, canvas.height);
   await drawMask(context, { ...mask, operation: 'replace' }, bbox);

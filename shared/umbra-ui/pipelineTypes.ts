@@ -155,12 +155,6 @@ export interface UmbraUiInpaintLayerCapability extends UmbraUiPipelineControlCap
   maxLayers: number;
 }
 
-export interface UmbraUiInpaintRegionalGuidanceCapability extends UmbraUiInpaintLayerCapability {
-  positivePrompt: boolean;
-  negativePrompt: boolean;
-  autoNegative: boolean;
-}
-
 export interface UmbraUiInpaintControlLayerCapability extends UmbraUiInpaintLayerCapability {
   adapterTypes: UmbraUiInpaintControlAdapterType[];
   modes: UmbraUiInpaintControlMode[];
@@ -176,7 +170,6 @@ export interface UmbraUiInpaintSeamlessCapability extends UmbraUiPipelineControl
 
 export interface UmbraUiInpaintCanvasCapabilities {
   version: 1;
-  regionalGuidance: UmbraUiInpaintRegionalGuidanceCapability;
   controlLayers: UmbraUiInpaintControlLayerCapability;
   referenceLayers: UmbraUiInpaintReferenceLayerCapability;
   seamless: UmbraUiInpaintSeamlessCapability;
@@ -291,6 +284,11 @@ export function normalizeUmbraUiModelFamilyKey(value: unknown): string {
     ideogram: 'ideogram4',
     illustrious: 'illustriousxl',
     illustriousxl20: 'illustriousxl',
+    noobai: 'noobaixlvpred',
+    noobaixl: 'noobaixlvpred',
+    noobaixlvpred10: 'noobaixlvpred',
+    nubeai: 'noobaixlvpred',
+    nubeaixl: 'noobaixlvpred',
     krea2turbo: 'krea2',
     omnigen: 'omnigen2',
     ovis: 'ovisimage',
@@ -666,22 +664,6 @@ function normalizeInpaintControlCapability(value: unknown, fallbackReason: strin
   };
 }
 
-function normalizeInpaintRegionalCapability(value: unknown, fallbackReason: string): UmbraUiInpaintRegionalGuidanceCapability {
-  const base = normalizeInpaintLayerCapability(value, fallbackReason);
-  const raw = toPipelineRecord(value);
-  const supported = base.support !== 'unsupported';
-  const enabledByDefault = (camelCase: string, snakeCase: string) => {
-    const declared = raw[camelCase] ?? raw[snakeCase];
-    return supported && (declared === undefined ? true : declared === true);
-  };
-  return {
-    ...base,
-    positivePrompt: enabledByDefault('positivePrompt', 'positive_prompt'),
-    negativePrompt: enabledByDefault('negativePrompt', 'negative_prompt'),
-    autoNegative: enabledByDefault('autoNegative', 'auto_negative'),
-  };
-}
-
 function normalizeInpaintReferenceCapability(value: unknown, fallbackReason: string): UmbraUiInpaintReferenceLayerCapability {
   const base = normalizeInpaintLayerCapability(value, fallbackReason);
   const raw = toPipelineRecord(value);
@@ -716,12 +698,6 @@ export function createUnsupportedUmbraUiInpaintCanvasCapabilities(
   });
   return {
     version: 1,
-    regionalGuidance: {
-      ...unsupportedLayer(),
-      positivePrompt: false,
-      negativePrompt: false,
-      autoNegative: false,
-    },
     controlLayers: { ...unsupportedLayer(), adapterTypes: [], modes: [] },
     referenceLayers: { ...unsupportedLayer(), methods: [] },
     seamless: { support: 'unsupported', reason, nodeClassTypes: [], axes: [] },
@@ -736,7 +712,6 @@ export function normalizeUmbraUiInpaintCanvasCapabilities(
   if (Object.keys(raw).length <= 0) return createUnsupportedUmbraUiInpaintCanvasCapabilities(fallbackReason);
   return {
     version: 1,
-    regionalGuidance: normalizeInpaintRegionalCapability(raw.regionalGuidance ?? raw.regional_guidance, fallbackReason),
     controlLayers: normalizeInpaintControlCapability(raw.controlLayers ?? raw.control_layers, fallbackReason),
     referenceLayers: normalizeInpaintReferenceCapability(raw.referenceLayers ?? raw.reference_layers, fallbackReason),
     seamless: normalizeInpaintSeamlessCapability(raw.seamless, fallbackReason),

@@ -17,9 +17,6 @@ import {
   inferUmbraUiClassicModelArchitecture,
   inferUmbraUiIpAdapterArchitecture,
 } from '../shared/umbra-ui/inpaintModelCompatibility';
-import {
-  resolveUmbraUiInpaintRegionalConditioningContractForAdapter,
-} from './UmbraUiPipelineCapabilities';
 import { upsertPngTextMetadata } from './PngTextMetadata';
 
 const IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);
@@ -207,18 +204,6 @@ export interface UmbraUiInpaintSource {
   read: () => Promise<ArrayBuffer | Uint8Array>;
 }
 
-export interface UmbraUiInpaintRegionalGuidance {
-  id: string;
-  name: string;
-  mask: UmbraUiInpaintSource;
-  positivePrompt: string;
-  negativePrompt: string;
-  autoNegative: boolean;
-  weight: number;
-  beginStepPercent: number;
-  endStepPercent: number;
-}
-
 export interface UmbraUiInpaintControlLayer {
   id: string;
   name: string;
@@ -388,7 +373,6 @@ export interface UmbraUiInpaintSettings {
     scheduler: string;
   };
   detailerPipeline?: Array<Record<string, unknown>>;
-  regionalGuidance: UmbraUiInpaintRegionalGuidance[];
   controlLayers: UmbraUiInpaintControlLayer[];
   referenceLayers: UmbraUiInpaintReferenceLayer[];
 }
@@ -493,10 +477,6 @@ export function validateUmbraUiInpaintLayerProviderContract(
       + 'but this inpaint graph only declares classic style-model or IP Adapter references.',
     );
   }
-}
-
-interface UploadedRegionalGuidance extends Omit<UmbraUiInpaintRegionalGuidance, 'mask'> {
-  maskInputName: string;
 }
 
 interface UploadedControlLayer extends Omit<UmbraUiInpaintControlLayer, 'image'> {
@@ -1617,7 +1597,6 @@ export class UmbraUiInpaintService {
       }
       const primaryModelIssue = getUmbraUiInpaintPrimaryModelIssue(settings.inpaintAdapter, settings.checkpointName);
       if (primaryModelIssue) throw new Error(primaryModelIssue);
-      const requestedRegionalGuidance = Array.isArray(settings.regionalGuidance) ? settings.regionalGuidance : [];
       const requestedControlLayers = Array.isArray(settings.controlLayers) ? settings.controlLayers : [];
       const requestedReferenceLayers = Array.isArray(settings.referenceLayers) ? settings.referenceLayers : [];
       const requestedReferenceMethod = requestedReferenceLayers[0]?.method;
@@ -1625,7 +1604,6 @@ export class UmbraUiInpaintService {
         ? 9
         : requestedReferenceMethod === 'qwen_image_reference' ? 2 : 8;
       const controlLimit = requestedControlLayers[0]?.adapterType === 'z_image_control' ? 4 : 8;
-      if (requestedRegionalGuidance.length > 16) throw new Error('The selected pipeline supports at most 16 regional guidance layers.');
       if (requestedControlLayers.length > controlLimit) throw new Error(`The selected provider supports at most ${controlLimit} control layers.`);
       if (requestedReferenceLayers.length > referenceLimit) throw new Error(`The selected provider supports at most ${referenceLimit} reference layers.`);
       validateUmbraUiInpaintLayerProviderContract(
@@ -1634,11 +1612,6 @@ export class UmbraUiInpaintService {
         settings.inpaintAdapter,
         settings.modelFamily,
       );
-      const regionalGuidance = requestedRegionalGuidance
-        .filter((region) => (
-          Number(region.weight) > 0
-          && (!!String(region.positivePrompt || '').trim() || !!String(region.negativePrompt || '').trim())
-        ));
       const controlLayers = requestedControlLayers
         .filter((control) => Number(control.weight) > 0 && !!String(control.modelName || '').trim());
       const referenceLayers = requestedReferenceLayers
@@ -1656,11 +1629,10 @@ export class UmbraUiInpaintService {
         && referenceLayers.length > 0) {
         throw new Error(`Reference layers are not compatible with the ${settings.inpaintAdapter} provider.`);
       }
-      const [sourceBytesRaw, maskBytesRaw, nodeTypes, regionalMaskBytesRaw, controlImageBytesRaw, referenceImageBytesRaw, referenceMaskBytesRaw] = await Promise.all([
+      const [sourceBytesRaw, maskBytesRaw, nodeTypes, controlImageBytesRaw, referenceImageBytesRaw, referenceMaskBytesRaw] = await Promise.all([
         source.read(),
         mask.read(),
         this.getNodeTypes(),
-        Promise.all(regionalGuidance.map((region) => region.mask.read())),
         Promise.all(controlLayers.map((control) => control.image.read())),
         Promise.all(referenceLayers.map((reference) => reference.image.read())),
         Promise.all(referenceLayers.map((reference) => reference.mask?.read() || Promise.resolve(null))),
@@ -1670,12 +1642,6 @@ export class UmbraUiInpaintService {
       if (sourceBytes.byteLength <= 0 || maskBytes.byteLength <= 0) throw new Error('The inpaint source or mask is empty.');
       if (sourceBytes.byteLength > MAX_SOURCE_BYTES || maskBytes.byteLength > MAX_SOURCE_BYTES) {
         throw new Error('The inpaint source or mask exceeds the 256 MB limit.');
-      }
-      const regionalMaskBytes = regionalMaskBytesRaw.map((bytes) => (
-        bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
-      ));
-      if (regionalMaskBytes.some((bytes) => bytes.byteLength <= 0 || bytes.byteLength > MAX_SOURCE_BYTES)) {
-        throw new Error('A regional guidance mask is empty or exceeds the 256 MB limit.');
       }
       const controlImageBytes = controlImageBytesRaw.map((bytes) => (
         bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
@@ -1805,14 +1771,6 @@ export class UmbraUiInpaintService {
         const availableControlNets = await this.getNodeInputChoices('ControlNetLoader', 'control_net_name');
         if (!availableControlNets.includes(settings.adapterModelName)) {
           throw new Error(`The Qwen Image inpainting ControlNet is not installed: ${settings.adapterModelName}.`);
-        }
-      }
-      if (regionalGuidance.length > 0) {
-        for (const required of ['CLIPTextEncode', 'ConditioningSetMask', 'ConditioningSetTimestepRange', 'ConditioningCombine']) {
-          if (!nodeTypes.has(required)) throw new Error(`ComfyUI is missing the required regional guidance node: ${required}.`);
-        }
-        if (regionalGuidance.some((region) => region.autoNegative) && !nodeTypes.has('InvertMask')) {
-          throw new Error('ComfyUI is missing the required regional auto-negative node: InvertMask.');
         }
       }
       if (controlLayers.length > 0) {
@@ -1961,15 +1919,9 @@ export class UmbraUiInpaintService {
           if (unavailableResource) throw new Error(`A model required by ${unavailableResource.name} is not installed.`);
         }
       }
-      const [sourceInputName, maskInputName, regionalMaskInputNames, controlImageInputNames, referenceImageInputNames, referenceMaskInputNames] = await Promise.all([
+      const [sourceInputName, maskInputName, controlImageInputNames, referenceImageInputNames, referenceMaskInputNames] = await Promise.all([
         this.uploadInput(job.id, 'source', source.name, sourceBytes),
         this.uploadInput(job.id, 'mask', mask.name, maskBytes),
-        Promise.all(regionalGuidance.map((region, index) => this.uploadInput(
-          job.id,
-          `regional_${index + 1}`,
-          region.mask.name,
-          regionalMaskBytes[index],
-        ))),
         Promise.all(controlLayers.map((control, index) => this.uploadInput(
           job.id,
           `control_${index + 1}`,
@@ -1986,17 +1938,6 @@ export class UmbraUiInpaintService {
           ? this.uploadInput(job.id, `reference_mask_${index + 1}`, reference.mask.name, referenceMaskBytes[index]!)
           : Promise.resolve(''))),
       ]);
-      const uploadedRegionalGuidance: UploadedRegionalGuidance[] = regionalGuidance.map((region, index) => ({
-        id: region.id,
-        name: region.name,
-        positivePrompt: String(region.positivePrompt || '').trim(),
-        negativePrompt: String(region.negativePrompt || '').trim(),
-        autoNegative: region.autoNegative === true,
-        weight: Math.max(0, Math.min(10, finiteNumberOrFallback(region.weight, 0))),
-        beginStepPercent: Math.max(0, Math.min(1, finiteNumberOrFallback(region.beginStepPercent, 0))),
-        endStepPercent: Math.max(0, Math.min(1, finiteNumberOrFallback(region.endStepPercent, 1))),
-        maskInputName: regionalMaskInputNames[index],
-      }));
       const uploadedControlLayers: UploadedControlLayer[] = controlLayers.map((control, index) => ({
         id: control.id,
         name: control.name,
@@ -2055,7 +1996,7 @@ export class UmbraUiInpaintService {
           item.ppuid ||= createId('pp').replace(/-/g, '_');
           const powerPrompterMetadata = buildUmbraUiInpaintPowerPrompterMetadata(settings, item, job.total);
           const base = await this.buildBaseWorkflow(settings, item.seed);
-          const graph = this.buildWorkflow(base.promptGraph, sourceInputName, maskInputName, uploadedRegionalGuidance, uploadedControlLayers, uploadedReferenceLayers, source.name, settings, item.seed, nodeTypes);
+          const graph = this.buildWorkflow(base.promptGraph, sourceInputName, maskInputName, uploadedControlLayers, uploadedReferenceLayers, source.name, settings, item.seed, nodeTypes);
           const previewClientId = `umbra-ui-inpaint-${job.id}-${item.id}`;
           await this.startPreviewMonitor(job, item, previewClientId);
           const response = await fetch(`${this.getComfyBaseUrl()}/prompt`, {
@@ -2143,16 +2084,6 @@ export class UmbraUiInpaintService {
                     tiledVae: settings.tiledVae,
                     width: job.width,
                     height: job.height,
-                    regionalGuidance: uploadedRegionalGuidance.map((region) => ({
-                      id: region.id,
-                      name: region.name,
-                      positivePrompt: region.positivePrompt,
-                      negativePrompt: region.negativePrompt,
-                      autoNegative: region.autoNegative,
-                      weight: region.weight,
-                      beginStepPercent: region.beginStepPercent,
-                      endStepPercent: region.endStepPercent,
-                    })),
                     controlLayers: uploadedControlLayers.map((control) => ({
                       id: control.id,
                       name: control.name,
@@ -2268,7 +2199,6 @@ export class UmbraUiInpaintService {
     sourceGraph: Record<string, any>,
     sourceInputName: string,
     maskInputName: string,
-    regionalGuidance: UploadedRegionalGuidance[],
     controlLayers: UploadedControlLayer[],
     referenceLayers: UploadedReferenceLayer[],
     sourceName: string,
@@ -2298,24 +2228,11 @@ export class UmbraUiInpaintService {
         sourceGraph,
         sourceInputName,
         maskInputName,
-        regionalGuidance,
         controlLayers,
         referenceLayers,
         settings,
         seed,
       );
-    }
-    const regionalContract = resolveUmbraUiInpaintRegionalConditioningContractForAdapter(
-      sourceGraph,
-      settings.inpaintAdapter,
-    );
-    if (regionalGuidance.length > 0 && settings.inpaintAdapter !== 'classic_conditioning') {
-      if (!regionalContract) {
-        throw new Error(`The ${settings.inpaintAdapter} workflow does not declare an exact regional-conditioning contract.`);
-      }
-      if (regionalGuidance.length > regionalContract.maxLayers) {
-        throw new Error(`The ${settings.inpaintAdapter} workflow supports at most ${regionalContract.maxLayers} regional guidance layers.`);
-      }
     }
     const bindings = findUmbraInpaintBindings(sourceGraph);
     const retained = collectDependencyClosure(sourceGraph, Array.from(new Set([
@@ -2447,136 +2364,6 @@ export class UmbraUiInpaintService {
 
     let positiveConditioningRef = bindings.positive;
     let negativeConditioningRef = bindings.negative;
-    const encodeRegionalPrompt = (
-      text: string,
-      region: UploadedRegionalGuidance,
-      polarity: 'Positive' | 'Negative' | 'Auto-Negative',
-    ): UmbraUiGraphRef => {
-      if (settings.inpaintAdapter === 'classic_conditioning') {
-        if (!bindings.clip) {
-          throw new Error('The selected locked pipeline does not expose a compatible CLIP binding for regional guidance.');
-        }
-        const encodeId = addNode({
-          class_type: 'CLIPTextEncode',
-          inputs: { text, clip: bindings.clip },
-          _meta: { title: `${region.name} ${polarity} Prompt` },
-        });
-        return ref(encodeId);
-      }
-      if (!regionalContract) {
-        throw new Error(`The ${settings.inpaintAdapter} workflow does not declare an exact regional-conditioning contract.`);
-      }
-      if (regionalContract.method === 'clip_masked_conditioning') {
-        const encodeId = addNode({
-          class_type: 'CLIPTextEncode',
-          inputs: {
-            text,
-            clip: [regionalContract.clipSourceNodeId, regionalContract.clipSourceOutput],
-          },
-          _meta: { title: `${region.name} ${polarity} Prompt` },
-        });
-        return ref(encodeId);
-      }
-      if (regionalContract.method === 'flux_text_encode_masked_conditioning') {
-        const template = graph[regionalContract.positiveEncoderNodeId];
-        if (!template || String(template.class_type || '') !== 'CLIPTextEncodeFlux') {
-          throw new Error('The FLUX regional encoder template is unavailable.');
-        }
-        const encoder = structuredClone(template);
-        encoder.inputs = encoder.inputs && typeof encoder.inputs === 'object' ? encoder.inputs : {};
-        encoder.inputs.clip_l = text;
-        encoder.inputs.t5xxl = text;
-        const meta = encoder._meta && typeof encoder._meta === 'object' ? { ...encoder._meta } : {};
-        delete meta.umbra_role;
-        for (const key of Object.keys(meta)) {
-          if (key.startsWith('umbra_regional_')) delete meta[key];
-        }
-        encoder._meta = { ...meta, title: `${region.name} ${polarity} Prompt` };
-        return ref(addNode(encoder));
-      }
-      throw new Error(`The ${regionalContract.method} regional contract is not valid for the ${settings.inpaintAdapter} builder.`);
-    };
-    const appendRegionalConditioning = (
-      current: [string, number],
-      text: string,
-      regionalMaskRef: [string, number],
-      region: UploadedRegionalGuidance,
-      polarity: 'Positive' | 'Negative' | 'Auto-Negative',
-    ): [string, number] => {
-      if (!text) return current;
-      let regionalRef = encodeRegionalPrompt(text, region, polarity);
-      const begin = Math.max(0, Math.min(1, region.beginStepPercent));
-      const end = Math.max(begin, Math.min(1, region.endStepPercent));
-      if (begin > 0 || end < 1) {
-        const rangeId = addNode({
-          class_type: 'ConditioningSetTimestepRange',
-          inputs: { conditioning: regionalRef, start: begin, end },
-          _meta: { title: `${region.name} Step Range` },
-        });
-        regionalRef = ref(rangeId);
-      }
-      const maskedId = addNode({
-        class_type: 'ConditioningSetMask',
-        inputs: {
-          conditioning: regionalRef,
-          mask: regionalMaskRef,
-          strength: region.weight,
-          set_cond_area: 'default',
-        },
-        _meta: { title: `${region.name} ${polarity} Mask` },
-      });
-      const combineId = addNode({
-        class_type: 'ConditioningCombine',
-        inputs: { conditioning_1: current, conditioning_2: ref(maskedId) },
-        _meta: { title: `Combine ${region.name} ${polarity}` },
-      });
-      return ref(combineId);
-    };
-    for (const region of regionalGuidance) {
-      if (region.positivePrompt && regionalContract && !regionalContract.positivePrompt) {
-        throw new Error(`The ${settings.inpaintAdapter} workflow does not support positive regional prompts.`);
-      }
-      if (region.negativePrompt && regionalContract && !regionalContract.negativePrompt) {
-        throw new Error(`The ${settings.inpaintAdapter} workflow does not support negative regional prompts.`);
-      }
-      if (region.autoNegative && regionalContract && !regionalContract.autoNegative) {
-        throw new Error(`The ${settings.inpaintAdapter} workflow does not support regional auto-negative conditioning.`);
-      }
-      const regionalMaskId = addNode({
-        class_type: 'LoadImageMask',
-        inputs: { image: region.maskInputName, channel: 'red' },
-        _meta: { title: `${region.name} Regional Mask` },
-      });
-      const regionalMaskRef = ref(regionalMaskId);
-      positiveConditioningRef = appendRegionalConditioning(
-        positiveConditioningRef,
-        region.positivePrompt,
-        regionalMaskRef,
-        region,
-        'Positive',
-      );
-      negativeConditioningRef = appendRegionalConditioning(
-        negativeConditioningRef,
-        region.negativePrompt,
-        regionalMaskRef,
-        region,
-        'Negative',
-      );
-      if (region.autoNegative && region.positivePrompt) {
-        const invertedMaskId = addNode({
-          class_type: 'InvertMask',
-          inputs: { mask: regionalMaskRef },
-          _meta: { title: `${region.name} Auto-Negative Inverted Mask` },
-        });
-        negativeConditioningRef = appendRegionalConditioning(
-          negativeConditioningRef,
-          region.positivePrompt,
-          ref(invertedMaskId),
-          region,
-          'Auto-Negative',
-        );
-      }
-    }
 
     for (const reference of referenceLayers) {
       if (reference.method === 'ip_adapter') validateClassicIpAdapterArchitecture(reference, settings);
@@ -3014,7 +2801,6 @@ export class UmbraUiInpaintService {
     sourceGraph: Record<string, any>,
     sourceInputName: string,
     maskInputName: string,
-    regionalGuidance: UploadedRegionalGuidance[],
     controlLayers: UploadedControlLayer[],
     referenceLayers: UploadedReferenceLayer[],
     settings: UmbraUiInpaintSettings,
@@ -3267,169 +3053,6 @@ export class UmbraUiInpaintService {
         sinkInputs[sinkField] = currentConditioning;
         sinkEntry[1].inputs = sinkInputs;
       }
-    }
-
-    if (regionalGuidance.length > 0) {
-      const contract = resolveUmbraUiInpaintRegionalConditioningContractForAdapter(graph, 'native_edit');
-      if (!contract) {
-        throw new Error('The native edit workflow does not declare an exact regional-conditioning contract.');
-      }
-      if (regionalGuidance.length > contract.maxLayers) {
-        throw new Error(`The native edit workflow supports at most ${contract.maxLayers} regional guidance layers.`);
-      }
-      const sinkNode = graph[contract.sinkNodeId];
-      const sinkInputs = sinkNode?.inputs && typeof sinkNode.inputs === 'object' ? sinkNode.inputs : {};
-      let positiveRef = normalizeGraphReference(sinkInputs[contract.positiveSinkInput], graph);
-      let negativeRef = contract.negativeSinkInput
-        ? normalizeGraphReference(sinkInputs[contract.negativeSinkInput], graph)
-        : null;
-      if (!positiveRef) throw new Error('The native regional-conditioning sink lost its positive binding.');
-      if (contract.negativePrompt && !negativeRef) {
-        throw new Error('The native regional-conditioning sink lost its negative binding.');
-      }
-
-      const cleanClonedMeta = (node: any, title: string) => {
-        const meta = node?._meta && typeof node._meta === 'object' ? { ...node._meta } : {};
-        for (const key of Object.keys(meta)) {
-          if (key === 'umbra_role' || key.startsWith('umbra_regional_')) delete meta[key];
-        }
-        return { ...meta, title };
-      };
-      const encodePrompt = (
-        text: string,
-        polarity: 'positive' | 'negative',
-        regionName: string,
-      ): UmbraUiGraphRef => {
-        if (contract.method === 'qwen_image_edit_masked_conditioning') {
-          const templateId = polarity === 'positive'
-            ? contract.positiveEncoderNodeId
-            : contract.negativeEncoderNodeId;
-          const template = graph[templateId];
-          if (!template || String(template.class_type || '') !== 'TextEncodeQwenImageEditPlus') {
-            throw new Error(`The native Qwen ${polarity} regional encoder template is unavailable.`);
-          }
-          const encoder = structuredClone(template);
-          encoder.inputs = encoder.inputs && typeof encoder.inputs === 'object' ? encoder.inputs : {};
-          encoder.inputs.prompt = text;
-          encoder._meta = cleanClonedMeta(encoder, `${regionName} ${polarity === 'positive' ? 'Positive' : 'Negative'} Prompt`);
-          return [addNode(encoder), 0];
-        }
-        if (!contract.clipSourceNodeId) {
-          throw new Error('The native regional-conditioning contract does not expose its CLIP source.');
-        }
-        const encodeId = addNode({
-          class_type: 'CLIPTextEncode',
-          inputs: {
-            text,
-            clip: [contract.clipSourceNodeId, contract.clipSourceOutput],
-          },
-          _meta: { title: `${regionName} ${polarity === 'positive' ? 'Positive' : 'Negative'} Prompt` },
-        });
-        let encodedRef: UmbraUiGraphRef = [encodeId, 0];
-        if (polarity === 'positive' && contract.method === 'flux_guidance_masked_conditioning') {
-          const transformTemplate = graph[contract.positiveTransformNodeId];
-          if (!transformTemplate || String(transformTemplate.class_type || '') !== 'FluxGuidance') {
-            throw new Error('The native FLUX regional guidance transform is unavailable.');
-          }
-          const transform = structuredClone(transformTemplate);
-          transform.inputs = transform.inputs && typeof transform.inputs === 'object' ? transform.inputs : {};
-          transform.inputs.conditioning = encodedRef;
-          transform._meta = cleanClonedMeta(transform, `${regionName} FLUX Guidance`);
-          encodedRef = [addNode(transform), 0];
-        }
-        return encodedRef;
-      };
-      const appendRegion = (
-        current: UmbraUiGraphRef,
-        text: string,
-        maskRef: UmbraUiGraphRef,
-        region: UploadedRegionalGuidance,
-        polarity: 'positive' | 'negative',
-        titlePolarity: 'Positive' | 'Negative' | 'Auto-Negative',
-      ): UmbraUiGraphRef => {
-        if (!text) return current;
-        let encodedRef = encodePrompt(text, polarity, region.name);
-        const begin = Math.max(0, Math.min(1, region.beginStepPercent));
-        const end = Math.max(begin, Math.min(1, region.endStepPercent));
-        if (begin > 0 || end < 1) {
-          const rangeId = addNode({
-            class_type: 'ConditioningSetTimestepRange',
-            inputs: { conditioning: encodedRef, start: begin, end },
-            _meta: { title: `${region.name} ${titlePolarity} Step Range` },
-          });
-          encodedRef = [rangeId, 0];
-        }
-        const maskedId = addNode({
-          class_type: 'ConditioningSetMask',
-          inputs: {
-            conditioning: encodedRef,
-            mask: maskRef,
-            strength: region.weight,
-            set_cond_area: 'default',
-          },
-          _meta: { title: `${region.name} ${titlePolarity} Mask` },
-        });
-        const combineId = addNode({
-          class_type: 'ConditioningCombine',
-          inputs: { conditioning_1: current, conditioning_2: [maskedId, 0] },
-          _meta: { title: `Combine ${region.name} ${titlePolarity}` },
-        });
-        return [combineId, 0];
-      };
-
-      for (const region of regionalGuidance) {
-        if (region.positivePrompt && !contract.positivePrompt) {
-          throw new Error('The native edit workflow does not support positive regional prompts.');
-        }
-        if (region.negativePrompt && !contract.negativePrompt) {
-          throw new Error('The native edit workflow does not support negative regional prompts.');
-        }
-        if (region.autoNegative && !contract.autoNegative) {
-          throw new Error('The native edit workflow does not support regional auto-negative conditioning.');
-        }
-        const maskId = addNode({
-          class_type: 'LoadImageMask',
-          inputs: { image: region.maskInputName, channel: 'red' },
-          _meta: { title: `${region.name} Regional Mask` },
-        });
-        const maskRef: UmbraUiGraphRef = [maskId, 0];
-        positiveRef = appendRegion(
-          positiveRef,
-          region.positivePrompt,
-          maskRef,
-          region,
-          'positive',
-          'Positive',
-        );
-        if (region.negativePrompt && negativeRef) {
-          negativeRef = appendRegion(
-            negativeRef,
-            region.negativePrompt,
-            maskRef,
-            region,
-            'negative',
-            'Negative',
-          );
-        }
-        if (region.autoNegative && region.positivePrompt && negativeRef) {
-          const invertedMaskId = addNode({
-            class_type: 'InvertMask',
-            inputs: { mask: maskRef },
-            _meta: { title: `${region.name} Auto-Negative Inverted Mask` },
-          });
-          negativeRef = appendRegion(
-            negativeRef,
-            region.positivePrompt,
-            [invertedMaskId, 0],
-            region,
-            'negative',
-            'Auto-Negative',
-          );
-        }
-      }
-      sinkInputs[contract.positiveSinkInput] = positiveRef;
-      if (contract.negativeSinkInput && negativeRef) sinkInputs[contract.negativeSinkInput] = negativeRef;
-      sinkNode.inputs = sinkInputs;
     }
 
     if (controlLayers.length > 0) {

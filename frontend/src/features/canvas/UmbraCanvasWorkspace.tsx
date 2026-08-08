@@ -118,12 +118,11 @@ import {
   createUmbraCanvasTextEntity,
   createUmbraCanvasGradientEntity,
   createUmbraCanvasPathEntity,
-  createUmbraCanvasRegionalGuidanceEntity,
+  createUmbraCanvasMaskStroke,
   createUmbraCanvasControlEntity,
   createUmbraCanvasReferenceEntity,
   isUmbraCanvasDrawableEntity,
   isUmbraCanvasSpatialEntity,
-  isUmbraCanvasRegionalGuidanceEntity,
   isUmbraCanvasControlEntity,
   isUmbraCanvasReferenceEntity,
   getUmbraCanvasSpatialBounds,
@@ -375,13 +374,11 @@ export function UmbraCanvasWorkspace({
   const addRasterStroke = useUmbraCanvasStore((state) => state.addRasterStroke);
   const clearRasterStrokes = useUmbraCanvasStore((state) => state.clearRasterStrokes);
   const addMask = useUmbraCanvasStore((state) => state.addMask);
-  const addRegionalGuidance = useUmbraCanvasStore((state) => state.addRegionalGuidance);
   const addControl = useUmbraCanvasStore((state) => state.addControl);
   const addReference = useUmbraCanvasStore((state) => state.addReference);
   const addMaskStroke = useUmbraCanvasStore((state) => state.addMaskStroke);
   const clearMask = useUmbraCanvasStore((state) => state.clearMask);
   const updateMask = useUmbraCanvasStore((state) => state.updateMask);
-  const updateRegionalGuidance = useUmbraCanvasStore((state) => state.updateRegionalGuidance);
   const updateControl = useUmbraCanvasStore((state) => state.updateControl);
   const updateReference = useUmbraCanvasStore((state) => state.updateReference);
   const duplicateEntities = useUmbraCanvasStore((state) => state.duplicateEntities);
@@ -531,8 +528,15 @@ export function UmbraCanvasWorkspace({
     setLiveSamplingPreview(liveSamplingPreviewsRef.current.get(job.id) || null);
   }, [job?.id, job?.status]);
 
+  const persistedGenerationSettingsPayload = React.useMemo(
+    () => JSON.stringify(project.generation.settings || null),
+    [project.generation.settings],
+  );
+
   React.useEffect(() => {
-    const settings = project.generation.settings;
+    const settings = persistedGenerationSettingsPayload
+      ? JSON.parse(persistedGenerationSettingsPayload) as UmbraCanvasGenerationSettingsSnapshot | null
+      : null;
     if (!settings) return;
     setDenoise(Math.max(0, Math.min(1, Number(settings.denoise) || 0)));
     setSamples(Math.max(1, Math.min(16, Math.round(Number(settings.samples) || 1))));
@@ -545,12 +549,12 @@ export function UmbraCanvasWorkspace({
     setSoftInpaintPreservation(Math.max(0, Math.min(1, Number(settings.softInpaintPreservation) || 0)));
     setSoftInpaintTransitionContrast(Math.max(0.25, Math.min(8, Number(settings.softInpaintTransitionContrast) || 0.25)));
     setSoftInpaintMaskInfluence(Math.max(0, Math.min(1, Number(settings.softInpaintMaskInfluence) || 0)));
-  }, [project.generation.settings]);
+  }, [persistedGenerationSettingsPayload]);
 
   const applyEntitySelection = React.useCallback((entityIds: Iterable<string>, primaryEntityId?: string) => {
     const available = new Set(useUmbraCanvasStore.getState().present.entities.map((entity) => entity.id));
     const next = new Set([...entityIds].filter((entityId) => available.has(entityId)));
-    const primary = primaryEntityId && next.has(primaryEntityId) ? primaryEntityId : [...next].at(-1) || '';
+    const primary = primaryEntityId && available.has(primaryEntityId) ? primaryEntityId : [...next].at(-1) || '';
     selectedEntityIdsRef.current = next;
     setSelectedEntityIds(next);
     managerRef.current?.setSelectedEntityIds([...next]);
@@ -569,7 +573,8 @@ export function UmbraCanvasWorkspace({
     const next = new Set(selectedEntityIdsRef.current);
     if (next.has(entityId)) next.delete(entityId);
     else next.add(entityId);
-    applyEntitySelection(next, next.has(entityId) ? entityId : [...next].at(-1));
+    const fallbackId = [...next].at(-1) || '';
+    applyEntitySelection(next, next.has(entityId) ? entityId : fallbackId);
   }, [applyEntitySelection]);
 
   const duplicateSelection = React.useCallback(() => {
@@ -656,7 +661,6 @@ export function UmbraCanvasWorkspace({
   }, [addDrawable, addMaskStroke, addRasterStroke, handleSelectEntity, setGenerationBbox, setViewport, showToast, updateDrawableTransforms]);
 
   const canvasSceneKey = React.useMemo(() => JSON.stringify({
-    activeEntityId: project.activeEntityId,
     bbox: project.generationBbox,
     entities: project.entities
       .filter(isUmbraCanvasSpatialEntity)
@@ -1383,6 +1387,7 @@ export function UmbraCanvasWorkspace({
 
   const submitPreparedRegion = React.useCallback(async () => {
     if (!preparedRegion || submitting) return;
+    const submissionProject = useUmbraCanvasStore.getState().present;
     const compiledPrompt = compileUmbraUiPromptSegments(promptSegments);
     if (!compiledPrompt.trim()) {
       showToast('Enter a Canvas prompt before generating.', 'error');
@@ -1438,31 +1443,13 @@ export function UmbraCanvasWorkspace({
       const promptWithLoras = capabilities.loras.support === 'adjustable'
         ? composeUmbraUiPromptWithLoras(compiledPrompt, loras)
         : compiledPrompt;
-      const enabledRegionalGuides = project.entities.filter(isUmbraCanvasRegionalGuidanceEntity).filter((entity) => entity.generationEnabled);
-      if (enabledRegionalGuides.length > 0 && canvasCapabilities.regionalGuidance.support === 'unsupported') {
-        throw new Error(canvasCapabilities.regionalGuidance.reason || 'Regional guidance is unavailable for this pipeline.');
-      }
-      if (enabledRegionalGuides.length > canvasCapabilities.regionalGuidance.maxLayers) {
-        throw new Error(`This pipeline supports up to ${canvasCapabilities.regionalGuidance.maxLayers} regional guides.`);
-      }
-      const regionalGuidance = await Promise.all(enabledRegionalGuides.map(async (guide) => ({
-        id: guide.id,
-        name: guide.name,
-        mask: await composeUmbraCanvasMaskBlob(project, guide.maskEntityId),
-        positivePrompt: canvasCapabilities.regionalGuidance.positivePrompt ? guide.positivePrompt : '',
-        negativePrompt: canvasCapabilities.regionalGuidance.negativePrompt ? guide.negativePrompt : '',
-        autoNegative: canvasCapabilities.regionalGuidance.autoNegative && guide.autoNegative,
-        weight: guide.weight,
-        beginStepPercent: Math.min(guide.beginStepPercent, guide.endStepPercent),
-        endStepPercent: Math.max(guide.beginStepPercent, guide.endStepPercent),
-      })));
-      const enabledControlLayers = project.entities.filter(isUmbraCanvasControlEntity).filter((entity) => entity.generationEnabled);
+      const enabledControlLayers = submissionProject.entities.filter(isUmbraCanvasControlEntity).filter((entity) => entity.generationEnabled);
       if (enabledControlLayers.length > 0 && !controlLayersAvailable) throw new Error(controlLayersReason || 'Control layers are unavailable for this pipeline.');
       if (enabledControlLayers.length > canvasCapabilities.controlLayers.maxLayers) throw new Error(`This pipeline supports up to ${canvasCapabilities.controlLayers.maxLayers} control layers.`);
       const submittedControlLayers = await Promise.all(enabledControlLayers.map(async (control) => ({
         id: control.id,
         name: control.name,
-        image: await composeUmbraCanvasRasterBlob(project, control.rasterEntityId),
+        image: await composeUmbraCanvasRasterBlob(submissionProject, control.rasterEntityId),
         adapterType: control.adapterType,
         controlMode: control.controlMode,
         controlType: control.controlType,
@@ -1485,14 +1472,14 @@ export function UmbraCanvasWorkspace({
         safeMode: true,
         processorSeed: 0,
       })));
-      const enabledReferenceLayers = project.entities.filter(isUmbraCanvasReferenceEntity).filter((entity) => entity.generationEnabled);
+      const enabledReferenceLayers = submissionProject.entities.filter(isUmbraCanvasReferenceEntity).filter((entity) => entity.generationEnabled);
       if (enabledReferenceLayers.length > 0 && !referenceLayersAvailable) throw new Error(referenceLayersReason || 'Reference layers are unavailable for this pipeline.');
       if (enabledReferenceLayers.length > canvasCapabilities.referenceLayers.maxLayers) throw new Error(`This pipeline supports up to ${canvasCapabilities.referenceLayers.maxLayers} reference layers.`);
       const submittedReferenceLayers = await Promise.all(enabledReferenceLayers.map(async (reference) => ({
         id: reference.id,
         name: reference.name,
-        image: await composeUmbraCanvasRasterBlob(project, reference.rasterEntityId),
-        mask: reference.maskEntityId ? await composeUmbraCanvasMaskBlob(project, reference.maskEntityId) : undefined,
+        image: await composeUmbraCanvasRasterBlob(submissionProject, reference.rasterEntityId),
+        mask: reference.maskEntityId ? await composeUmbraCanvasMaskBlob(submissionProject, reference.maskEntityId) : undefined,
         method: reference.method,
         modelName: reference.modelName,
         visionModelName: reference.visionModelName,
@@ -1505,14 +1492,18 @@ export function UmbraCanvasWorkspace({
         ipAdapterCombineEmbeds: reference.ipAdapterCombineEmbeds,
         ipAdapterEmbedsScaling: reference.ipAdapterEmbedsScaling,
       })));
-      const sourceFreeGeneration = preparedRegion.drawableLayerCount === 0
-        && regionalGuidance.length === 0
+      const hasCanvasDrawableContent = submissionProject.entities.some((entity) => (
+        entity.visible
+        && entity.generationEnabled
+        && (entity.kind === 'raster' || entity.kind === 'shape' || entity.kind === 'text' || entity.kind === 'gradient' || entity.kind === 'path')
+      ));
+      const sourceFreeGeneration = !hasCanvasDrawableContent
         && submittedControlLayers.length === 0
         && submittedReferenceLayers.length === 0;
       const nextJob = await submitUmbraUiInpaintJob({
         source: preparedRegion.sourceBlob,
-        sourceName: `${project.name || 'umbra-canvas'}.png`,
-        canvasProjectId: project.id,
+        sourceName: `${submissionProject.name || 'umbra-canvas'}.png`,
+        canvasProjectId: submissionProject.id,
         sourceFreeGeneration,
         operationMode: preparedRegion.automaticMaskPixels > 0 ? 'outpaint' : 'inpaint',
         generationRegionX: preparedRegion.bbox.x,
@@ -1571,7 +1562,6 @@ export function UmbraCanvasWorkspace({
         tiledVae,
         hiresFix,
         detailerPipeline: detailerPipeline.map((stage) => ({ ...stage })),
-        regionalGuidance,
         controlLayers: submittedControlLayers,
         referenceLayers: submittedReferenceLayers,
       });
@@ -1608,7 +1598,6 @@ export function UmbraCanvasWorkspace({
   }, [
     capabilities.loras.support,
     capabilities.negativePrompt.support,
-    canvasCapabilities.regionalGuidance,
     canvasCapabilities.controlLayers.maxLayers,
     canvasCapabilities.referenceLayers.maxLayers,
     cfg,
@@ -1634,11 +1623,8 @@ export function UmbraCanvasWorkspace({
     onSeedChange,
     pipelineError,
     preparedRegion,
-    project,
     referenceLayersAvailable,
     referenceLayersReason,
-    project.id,
-    project.name,
     promptSegments,
     samplerName,
     samples,
@@ -1670,6 +1656,8 @@ export function UmbraCanvasWorkspace({
     if (!job) return;
     const frozen = jobBboxesRef.current.get(job.id);
     if (!frozen) return;
+    const persistedPending = projectRef.current.generation.pending.find((entry) => entry.jobId === job.id);
+    const acceptanceMaskUrl = persistedPending?.acceptanceMaskUrl || frozen.acceptanceMaskUrl;
     const nextStages: UmbraCanvasStagedGeneration[] = [];
     for (const item of job.items) {
       const output = item.outputs[item.outputs.length - 1];
@@ -1687,7 +1675,7 @@ export function UmbraCanvasWorkspace({
         bbox: { ...frozen.bbox },
         projectRevision: frozen.projectRevision,
         snapshotSignature: frozen.snapshotSignature,
-        acceptanceMaskUrl: frozen.acceptanceMaskUrl,
+        acceptanceMaskUrl,
         acceptedEntityId: '',
         pinned: false,
         createdAt: job.updatedAt,
@@ -1791,7 +1779,6 @@ export function UmbraCanvasWorkspace({
   }, [acceptStagedGeneration, saveProject, showToast]);
 
   const activeEntity = project.entities.find((entity) => entity.id === project.activeEntityId) || null;
-  const regionalGuides = project.entities.filter((entity) => entity.kind === 'regional-guidance');
   const controlLayers = project.entities.filter((entity) => entity.kind === 'control');
   const referenceLayers = project.entities.filter((entity) => entity.kind === 'reference');
 
@@ -1806,24 +1793,6 @@ export function UmbraCanvasWorkspace({
   const referenceModelOptionsFor = React.useCallback((method: UmbraUiInpaintReferenceMethod) => (
     method === 'style_model' ? styleModels : method === 'ip_adapter' ? ipAdapterModels : modelPatchModels
   ), [ipAdapterModels, modelPatchModels, styleModels]);
-
-  const createRegionalGuideFromMask = React.useCallback((maskEntityId: string) => {
-    if (canvasCapabilities.regionalGuidance.support === 'unsupported') {
-      showToast(canvasCapabilities.regionalGuidance.reason || 'Regional guidance is unavailable for this pipeline.', 'error');
-      return;
-    }
-    if (regionalGuides.length >= canvasCapabilities.regionalGuidance.maxLayers) {
-      showToast(`This pipeline supports up to ${canvasCapabilities.regionalGuidance.maxLayers} regional guides.`, 'error');
-      return;
-    }
-    const mask = project.entities.find((entity) => entity.kind === 'mask' && entity.id === maskEntityId);
-    if (!mask) return;
-    addRegionalGuidance(createUmbraCanvasRegionalGuidanceEntity({
-      maskEntityId,
-      name: `${mask.name} Guide`,
-    }));
-    showToast('Regional guide created from the active mask.', 'success');
-  }, [addRegionalGuidance, canvasCapabilities.regionalGuidance, project.entities, regionalGuides.length, showToast]);
 
   const createControlFromRaster = React.useCallback((rasterEntityId: string) => {
     if (!controlLayersAvailable || controlAdapterTypes.length === 0 || controlModes.length === 0) {
@@ -2478,12 +2447,12 @@ export function UmbraCanvasWorkspace({
               <button type="button" onClick={(event) => handleSelectEntity(entity.id, event.shiftKey || event.ctrlKey || event.metaKey)} aria-label={`Select ${entity.name}`} className="col-span-2 grid min-w-0 grid-cols-[32px_minmax(0,1fr)] items-center gap-2 text-left">
                 {entity.kind === 'raster'
                   ? <img src={entity.imageUrl} alt="" className="h-8 w-8 rounded-sm border border-white/10 object-cover" draggable={false} />
-                  : <span className={cn('inline-flex h-8 w-8 items-center justify-center rounded-sm border', entity.kind === 'mask' ? 'border-rose-300/20 bg-rose-500/10 text-rose-200' : entity.kind === 'regional-guidance' ? 'border-violet-300/20 bg-violet-500/10 text-violet-200' : entity.kind === 'control' ? 'border-amber-300/20 bg-amber-500/10 text-amber-200' : entity.kind === 'reference' ? 'border-emerald-300/20 bg-emerald-500/10 text-emerald-200' : 'border-cyan-300/20 bg-cyan-500/10 text-cyan-200')}>
-                      {entity.kind === 'mask' ? <Brush size={13} /> : entity.kind === 'regional-guidance' ? <Sparkles size={13} /> : entity.kind === 'control' ? <ScanLine size={13} /> : entity.kind === 'reference' ? <ImagePlus size={13} /> : entity.kind === 'shape' ? (entity.shape === 'ellipse' ? <Circle size={13} /> : <Square size={13} />) : entity.kind === 'text' ? <Type size={13} /> : entity.kind === 'path' ? <Spline size={13} /> : <Blend size={13} />}
+                  : <span className={cn('inline-flex h-8 w-8 items-center justify-center rounded-sm border', entity.kind === 'mask' ? 'border-rose-300/20 bg-rose-500/10 text-rose-200' : entity.kind === 'control' ? 'border-amber-300/20 bg-amber-500/10 text-amber-200' : entity.kind === 'reference' ? 'border-emerald-300/20 bg-emerald-500/10 text-emerald-200' : 'border-cyan-300/20 bg-cyan-500/10 text-cyan-200')}>
+                      {entity.kind === 'mask' ? <Brush size={13} /> : entity.kind === 'control' ? <ScanLine size={13} /> : entity.kind === 'reference' ? <ImagePlus size={13} /> : entity.kind === 'shape' ? (entity.shape === 'ellipse' ? <Circle size={13} /> : <Square size={13} />) : entity.kind === 'text' ? <Type size={13} /> : entity.kind === 'path' ? <Spline size={13} /> : <Blend size={13} />}
                     </span>}
                 <span className="min-w-0">
                   <strong className="block truncate text-[9px] font-black uppercase text-zinc-300">{entity.name}</strong>
-                  <small className="block truncate font-mono text-[8px] text-zinc-600">{entity.kind === 'mask' ? `${entity.strokes.length} strokes` : entity.kind === 'regional-guidance' ? 'Regional guidance' : entity.kind === 'control' ? `${entity.adapterType} / ${entity.controlType}` : entity.kind === 'reference' ? entity.method : `${entity.width} x ${entity.height}`}</small>
+                  <small className="block truncate font-mono text-[8px] text-zinc-600">{entity.kind === 'mask' ? `${entity.strokes.length} strokes` : entity.kind === 'control' ? `${entity.adapterType} / ${entity.controlType}` : entity.kind === 'reference' ? entity.method : `${entity.width} x ${entity.height}`}</small>
                 </span>
               </button>
               <span className="flex items-center gap-0.5">
@@ -2578,27 +2547,6 @@ export function UmbraCanvasWorkspace({
                   <button type="button" disabled={activeEntity.locked || activeEntity.strokes.length === 0} onClick={() => clearMask(activeEntity.id)} className="h-8 rounded-md border border-rose-300/15 text-[8px] font-black uppercase text-rose-300/60 disabled:text-zinc-800">Clear brush edits</button>
                   <button type="button" disabled={activeEntity.locked || !activeEntity.imageUrl} onClick={() => updateMask(activeEntity.id, { imageUrl: '', sourcePath: '' })} className="h-8 rounded-md border border-rose-300/15 text-[8px] font-black uppercase text-rose-300/60 disabled:text-zinc-800">Remove imported mask</button>
                 </div>
-                <button
-                  type="button"
-                  disabled={activeEntity.locked || (!activeEntity.imageUrl && activeEntity.strokes.length === 0) || canvasCapabilities.regionalGuidance.support === 'unsupported' || regionalGuides.length >= canvasCapabilities.regionalGuidance.maxLayers}
-                  title={canvasCapabilities.regionalGuidance.reason || 'Use this mask for regional prompting'}
-                  onClick={() => createRegionalGuideFromMask(activeEntity.id)}
-                  className="inline-flex h-8 w-full items-center justify-center gap-1 rounded-md border border-violet-300/20 text-[8px] font-black uppercase text-violet-200 disabled:text-zinc-800"
-                ><Sparkles size={11} /> Use as regional guide</button>
-              </>
-            ) : activeEntity.kind === 'regional-guidance' ? (
-              <>
-                <input value={activeEntity.name} disabled={activeEntity.locked} onChange={(event) => updateRegionalGuidance(activeEntity.id, { name: event.target.value })} aria-label="Regional guide name" className="h-8 w-full rounded-md border border-violet-300/20 bg-black/35 px-2 font-mono text-[9px] uppercase text-violet-100 outline-none focus:border-violet-300/45 disabled:text-zinc-700" />
-                <label className="block font-mono text-[8px] uppercase text-zinc-600">Mask<UmbraSelect className="mt-1" value={activeEntity.maskEntityId} disabled={activeEntity.locked} onValueChange={(maskEntityId) => updateRegionalGuidance(activeEntity.id, { maskEntityId })} ariaLabel="Regional guidance mask" menuTitle="Regional Guidance Mask" options={project.entities.filter((entity) => entity.kind === 'mask').map((mask) => ({ value: mask.id, label: mask.name }))} size="sm" /></label>
-                <label className="block font-mono text-[8px] uppercase text-zinc-600">Positive prompt<textarea value={activeEntity.positivePrompt} disabled={activeEntity.locked || !canvasCapabilities.regionalGuidance.positivePrompt} onChange={(event) => updateRegionalGuidance(activeEntity.id, { positivePrompt: event.target.value })} className="mt-1 min-h-16 w-full resize-y rounded-md border border-white/10 bg-black/35 p-2 text-xs text-zinc-100 outline-none focus:border-violet-300/35 disabled:text-zinc-700" /></label>
-                {canvasCapabilities.regionalGuidance.negativePrompt ? <label className="block font-mono text-[8px] uppercase text-zinc-600">Negative prompt<textarea value={activeEntity.negativePrompt} disabled={activeEntity.locked} onChange={(event) => updateRegionalGuidance(activeEntity.id, { negativePrompt: event.target.value })} className="mt-1 min-h-14 w-full resize-y rounded-md border border-white/10 bg-black/35 p-2 text-xs text-zinc-100 outline-none focus:border-violet-300/35" /></label> : null}
-                <label className="block font-mono text-[8px] uppercase text-zinc-600">Weight <span className="float-right text-violet-200">{activeEntity.weight.toFixed(2)}</span><input type="range" min="-2" max="2" step="0.05" value={activeEntity.weight} disabled={activeEntity.locked} onChange={(event) => updateRegionalGuidance(activeEntity.id, { weight: Number(event.target.value) })} className="mt-1 w-full accent-violet-400" /></label>
-                <div className="grid grid-cols-2 gap-1">
-                  <label className="font-mono text-[8px] uppercase text-zinc-600">Begin %<input type="number" min="0" max="100" value={Math.round(activeEntity.beginStepPercent * 100)} disabled={activeEntity.locked} onChange={(event) => updateRegionalGuidance(activeEntity.id, { beginStepPercent: Number(event.target.value) / 100 })} className="mt-1 h-8 w-full rounded-md border border-white/10 bg-black/35 px-2 text-[9px] text-zinc-300" /></label>
-                  <label className="font-mono text-[8px] uppercase text-zinc-600">End %<input type="number" min="0" max="100" value={Math.round(activeEntity.endStepPercent * 100)} disabled={activeEntity.locked} onChange={(event) => updateRegionalGuidance(activeEntity.id, { endStepPercent: Number(event.target.value) / 100 })} className="mt-1 h-8 w-full rounded-md border border-white/10 bg-black/35 px-2 text-[9px] text-zinc-300" /></label>
-                </div>
-                {canvasCapabilities.regionalGuidance.autoNegative ? <label className="flex items-center justify-between rounded-md border border-white/10 px-2 py-2 font-mono text-[8px] uppercase text-zinc-500">Auto negative<input type="checkbox" checked={activeEntity.autoNegative} disabled={activeEntity.locked} onChange={(event) => updateRegionalGuidance(activeEntity.id, { autoNegative: event.target.checked })} className="accent-violet-400" /></label> : null}
-                <p className="font-mono text-[8px] leading-relaxed text-zinc-600">This guide affects only its linked mask and is not merged into the inpaint mask.</p>
               </>
             ) : activeEntity.kind === 'control' ? (
               <>

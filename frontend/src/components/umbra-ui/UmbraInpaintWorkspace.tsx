@@ -118,7 +118,6 @@ import {
   getUmbraCanvasControlLayers,
   getUmbraCanvasGenerationRegion,
   getUmbraCanvasMaskLayer,
-  getUmbraCanvasRegionalGuidanceLayers,
   getUmbraCanvasReferenceLayers,
   recordUmbraCanvasPromptHistory,
   umbraCanvasDocumentReducer,
@@ -142,7 +141,6 @@ import {
   type UmbraCanvasProcessingScaleMode,
   type UmbraCanvasPromptHistoryEntry,
   type UmbraCanvasRect,
-  type UmbraCanvasRegionalGuidanceLayer,
   type UmbraCanvasReferenceLayer,
   type UmbraCanvasRasterLayer,
   type UmbraCanvasStage,
@@ -235,7 +233,6 @@ import {
   type UmbraUiInpaintHandoff,
   type UmbraUiInpaintControlInput,
   type UmbraUiInpaintJob,
-  type UmbraUiInpaintRegionalGuidanceInput,
   type UmbraUiInpaintReferenceInput,
 } from '@/lib/umbraUiInpaint';
 import {
@@ -322,7 +319,7 @@ type TransformDragMode = 'move' | 'resize-nw' | 'resize-ne' | 'resize-sw' | 'res
 type RegionDragMode = 'move' | 'resize-nw' | 'resize-ne' | 'resize-sw' | 'resize-se';
 type CanvasImageDropTarget = 'raster' | 'control' | 'resized_control' | 'reference' | 'mask';
 type SamGuideMode = 'points' | 'box' | 'prompt';
-type SamOutputMode = 'active_mask' | 'replace_layer' | 'new_mask' | 'regional_guidance' | 'raster' | 'control';
+type SamOutputMode = 'active_mask' | 'replace_layer' | 'new_mask' | 'raster' | 'control';
 
 interface AssistedSelectionPreview {
   imageUrl: string;
@@ -349,7 +346,6 @@ interface CanvasPreferences {
   snapSize: number;
   showGuidanceOverlays: boolean;
   showInpaintMaskOverlays: boolean;
-  showRegionalGuidanceOverlays: boolean;
   showControlLayerOverlays: boolean;
   showReferenceLayerOverlays: boolean;
   showGenerationRegionOverlay: boolean;
@@ -367,7 +363,6 @@ interface CanvasToolSettings {
 type GuidanceOverlayVisibility = Pick<CanvasPreferences,
   | 'showGuidanceOverlays'
   | 'showInpaintMaskOverlays'
-  | 'showRegionalGuidanceOverlays'
   | 'showControlLayerOverlays'
   | 'showReferenceLayerOverlays'
 >;
@@ -592,12 +587,6 @@ export interface UmbraInpaintWorkspaceProps {
   onModelSourceChange: (value: PowerPrompterModelType) => void;
   modelLabel: string;
   pipelineError: string;
-  regionalGuidanceAvailable: boolean;
-  regionalGuidanceReason: string;
-  regionalGuidanceMaxLayers: number;
-  regionalPositivePromptAvailable: boolean;
-  regionalNegativePromptAvailable: boolean;
-  regionalAutoNegativeAvailable: boolean;
   controlLayersAvailable: boolean;
   controlLayersReason: string;
   controlLayersMaxLayers: number;
@@ -783,7 +772,6 @@ const DEFAULT_CANVAS_PREFERENCES: CanvasPreferences = {
   snapSize: 8,
   showGuidanceOverlays: true,
   showInpaintMaskOverlays: true,
-  showRegionalGuidanceOverlays: true,
   showControlLayerOverlays: true,
   showReferenceLayerOverlays: true,
   showGenerationRegionOverlay: true,
@@ -850,7 +838,6 @@ function loadCanvasPreferences(): CanvasPreferences {
       snapSize: Number.isFinite(Number(stored.snapSize)) ? Math.max(1, Math.min(256, Math.round(Number(stored.snapSize)))) : 8,
       showGuidanceOverlays: stored.showGuidanceOverlays !== false,
       showInpaintMaskOverlays: stored.showInpaintMaskOverlays !== false,
-      showRegionalGuidanceOverlays: stored.showRegionalGuidanceOverlays !== false,
       showControlLayerOverlays: stored.showControlLayerOverlays !== false,
       showReferenceLayerOverlays: stored.showReferenceLayerOverlays !== false,
       showGenerationRegionOverlay: stored.showGenerationRegionOverlay !== false,
@@ -1434,7 +1421,7 @@ async function renderImageTransformIntoRegion(
   output.width = Math.max(1, Math.round(region.width));
   output.height = Math.max(1, Math.round(region.height));
   const context = output.getContext('2d');
-  if (!context) throw new Error('The regional canvas input could not be prepared.');
+  if (!context) throw new Error('The Canvas generation input could not be prepared.');
   if (fill) {
     context.fillStyle = fill;
     context.fillRect(0, 0, output.width, output.height);
@@ -1519,7 +1506,7 @@ function calculateMaskAlphaCoverage(canvas: HTMLCanvasElement): number {
 }
 
 type UmbraVisualCanvasLayer = UmbraCanvasRasterLayer | UmbraCanvasTextLayer | UmbraCanvasGradientLayer;
-type UmbraTransformableCanvasLayer = UmbraVisualCanvasLayer | UmbraCanvasControlLayer | UmbraCanvasReferenceLayer | UmbraCanvasRegionalGuidanceLayer | UmbraCanvasMaskLayer;
+type UmbraTransformableCanvasLayer = UmbraVisualCanvasLayer | UmbraCanvasControlLayer | UmbraCanvasReferenceLayer | UmbraCanvasMaskLayer;
 
 function visualLayerBounds(layer: UmbraVisualCanvasLayer): UmbraCanvasRect {
   const { x, y, width, height, rotation, scaleX, scaleY } = layer.transform;
@@ -1558,22 +1545,12 @@ function buildGuidanceOverlayKey(
       transform: layer.transform,
       asset: canvasResourceRevision(layer.asset.imageUrl),
       maskLayerId: layer.kind === 'reference' ? layer.maskLayerId : undefined,
-      regionLayerId: layer.kind === 'reference' ? layer.regionLayerId : undefined,
-      updatedAt: layer.updatedAt,
-    }];
-    if (layer.kind === 'regional_guidance' && visibility.showRegionalGuidanceOverlays) return [{
-      id: layer.id,
-      kind: layer.kind,
-      visible: layer.visible,
-      opacity: layer.opacity,
-      maskLayerId: layer.maskLayerId,
       updatedAt: layer.updatedAt,
     }];
     const maskOverlayVisible = layer.kind === 'mask' && (
       layer.purpose === 'inpaint' ? visibility.showInpaintMaskOverlays
-        : layer.purpose === 'regional_guidance' ? visibility.showRegionalGuidanceOverlays
-          : layer.purpose === 'reference' ? visibility.showReferenceLayerOverlays
-            : false
+        : layer.purpose === 'reference' ? visibility.showReferenceLayerOverlays
+          : false
     );
     if (layer.kind === 'mask' && maskOverlayVisible) return [{
       id: layer.id,
@@ -1784,22 +1761,6 @@ async function renderCanvasGuidanceOverlays(
           0.42,
           influenceMask.overlayColor,
           influenceMask.overlayStyle,
-          previewScale,
-        );
-      }
-      continue;
-    }
-    if (visibility.showRegionalGuidanceOverlays && layer.kind === 'regional_guidance' && layer.visible) {
-      const mask = masks.get(layer.maskLayerId);
-      if (mask?.dataUrl) {
-        await drawGuidanceMaskOverlay(
-          context,
-          maskScratch,
-          mask.dataUrl,
-          mask.transform,
-          Math.min(0.7, layer.opacity * 0.5),
-          mask.overlayColor,
-          mask.overlayStyle,
           previewScale,
         );
       }
@@ -2433,12 +2394,6 @@ export function UmbraInpaintWorkspace({
   onModelSourceChange,
   modelLabel,
   pipelineError,
-  regionalGuidanceAvailable,
-  regionalGuidanceReason,
-  regionalGuidanceMaxLayers,
-  regionalPositivePromptAvailable,
-  regionalNegativePromptAvailable,
-  regionalAutoNegativeAvailable,
   controlLayersAvailable,
   controlLayersReason,
   controlLayersMaxLayers,
@@ -2976,7 +2931,6 @@ export function UmbraInpaintWorkspace({
   const guidanceOverlayVisibility = React.useMemo<GuidanceOverlayVisibility>(() => ({
     showGuidanceOverlays: canvasPreferences.showGuidanceOverlays && !canvasDocument?.previewStageId,
     showInpaintMaskOverlays: canvasPreferences.showInpaintMaskOverlays && !canvasDocument?.previewStageId,
-    showRegionalGuidanceOverlays: canvasPreferences.showRegionalGuidanceOverlays,
     showControlLayerOverlays: canvasPreferences.showControlLayerOverlays,
     showReferenceLayerOverlays: canvasPreferences.showReferenceLayerOverlays,
   }), [
@@ -2985,7 +2939,6 @@ export function UmbraInpaintWorkspace({
     canvasPreferences.showGuidanceOverlays,
     canvasPreferences.showInpaintMaskOverlays,
     canvasPreferences.showReferenceLayerOverlays,
-    canvasPreferences.showRegionalGuidanceOverlays,
   ]);
   const guidanceOverlayKey = buildGuidanceOverlayKey(
     canvasDocument,
@@ -3475,15 +3428,6 @@ export function UmbraInpaintWorkspace({
       || visibleLayerRows[0];
     if (fallback) dispatchCanvasDocument({ type: 'select_layer', layerId: fallback.id });
   }, [canvasDocument, dispatchCanvasDocument, visibleLayerRows]);
-  const activeRegionalGuidanceLayer = React.useMemo<UmbraCanvasRegionalGuidanceLayer | null>(() => {
-    const layer = canvasDocument?.layers.find((candidate) => candidate.id === canvasDocument.activeLayerId);
-    return layer?.kind === 'regional_guidance' ? layer : null;
-  }, [canvasDocument]);
-  const activeRegionalMaskLayer = React.useMemo<UmbraCanvasMaskLayer | null>(() => (
-    activeRegionalGuidanceLayer && canvasDocument
-      ? getUmbraCanvasMaskLayer(canvasDocument, activeRegionalGuidanceLayer.maskLayerId)
-      : null
-  ), [activeRegionalGuidanceLayer, canvasDocument]);
   const activeControlLayer = React.useMemo<UmbraCanvasControlLayer | null>(() => {
     const layer = canvasDocument?.layers.find((candidate) => candidate.id === canvasDocument.activeLayerId);
     return layer?.kind === 'control' ? layer : null;
@@ -3505,19 +3449,17 @@ export function UmbraInpaintWorkspace({
   }, [canvasDocument]);
   const activeImageLayer = activeRasterLayer || activeControlLayer || activeReferenceLayer;
   const activeTransformLayer = React.useMemo<UmbraTransformableCanvasLayer | null>(() => (
-    activeVisualLayer || activeControlLayer || activeReferenceLayer || activeRegionalGuidanceLayer || activeInpaintMaskLayer
-  ), [activeControlLayer, activeInpaintMaskLayer, activeReferenceLayer, activeRegionalGuidanceLayer, activeVisualLayer]);
+    activeVisualLayer || activeControlLayer || activeReferenceLayer || activeInpaintMaskLayer
+  ), [activeControlLayer, activeInpaintMaskLayer, activeReferenceLayer, activeVisualLayer]);
   const guidanceMergeDownTarget = React.useMemo(() => {
     if (!canvasDocument || !activeCanvasLayer) return null;
     const isMergeable = activeCanvasLayer.kind === 'control'
-      || activeCanvasLayer.kind === 'regional_guidance'
       || activeCanvasLayer.kind === 'mask' && activeCanvasLayer.purpose === 'inpaint' && !activeCanvasLayer.frozen;
     if (!isMergeable) return null;
     const activeIndex = canvasDocument.layers.findIndex((layer) => layer.id === activeCanvasLayer.id);
     for (let index = activeIndex - 1; index >= 0; index -= 1) {
       const candidate = canvasDocument.layers[index];
       if (activeCanvasLayer.kind === 'control' && candidate.kind === 'control') return candidate;
-      if (activeCanvasLayer.kind === 'regional_guidance' && candidate.kind === 'regional_guidance') return candidate;
       if (activeCanvasLayer.kind === 'mask' && candidate.kind === 'mask' && candidate.purpose === 'inpaint' && !candidate.frozen) return candidate;
     }
     return null;
@@ -3529,13 +3471,10 @@ export function UmbraInpaintWorkspace({
   const guidanceMergeDownMutationLocked = !!activeCanvasLayer && (
     activeCanvasLayer.locked || guidanceMergeDownTarget?.locked === true
   );
-  const visibleGuidanceMergeLayers = React.useMemo<Array<UmbraCanvasControlLayer | UmbraCanvasMaskLayer | UmbraCanvasRegionalGuidanceLayer>>(() => {
+  const visibleGuidanceMergeLayers = React.useMemo<Array<UmbraCanvasControlLayer | UmbraCanvasMaskLayer>>(() => {
     if (!canvasDocument || !activeCanvasLayer) return [];
     if (activeCanvasLayer.kind === 'control') {
       return canvasDocument.layers.filter((layer): layer is UmbraCanvasControlLayer => layer.kind === 'control' && layer.visible);
-    }
-    if (activeCanvasLayer.kind === 'regional_guidance') {
-      return canvasDocument.layers.filter((layer): layer is UmbraCanvasRegionalGuidanceLayer => layer.kind === 'regional_guidance' && layer.visible);
     }
     if (activeCanvasLayer.kind === 'mask' && activeCanvasLayer.purpose === 'inpaint' && !activeCanvasLayer.frozen) {
       return canvasDocument.layers.filter((layer): layer is UmbraCanvasMaskLayer => (
@@ -3564,20 +3503,10 @@ export function UmbraInpaintWorkspace({
       return layer.locked || group?.locked === true;
     });
   }, [canvasDocument]);
-  const regionalGuidanceLayers = React.useMemo(
-    () => getUmbraCanvasRegionalGuidanceLayers(canvasDocument),
-    [canvasDocument],
-  );
-  const activeReferenceRegion = activeReferenceLayer?.regionLayerId
-    ? regionalGuidanceLayers.find((layer) => layer.id === activeReferenceLayer.regionLayerId) || null
-    : null;
   const activeReferenceUsesStyleModel = activeReferenceLayer?.method === 'style_model' || activeReferenceLayer?.method === 'flux_redux';
   const activeReferenceUsesIpAdapter = activeReferenceLayer?.method === 'ip_adapter';
   const activeReferenceHasModelResources = activeReferenceUsesStyleModel || activeReferenceUsesIpAdapter;
   const activeReferenceModels = activeReferenceUsesIpAdapter ? ipAdapterModels : styleModels;
-  const regionalReferenceCaptureAvailable = regionalGuidanceAvailable
-    && referenceLayersAvailable
-    && referenceMethods.includes('ip_adapter');
   const displayDocument = React.useMemo(() => {
     if (!visualDocument) return null;
     const isolateStage = canvasPreferences.isolatedStagingPreview && !!previewStage;
@@ -4539,8 +4468,7 @@ export function UmbraInpaintWorkspace({
       dispatchCanvasDocument({ type: 'set_operation_mode', mode: 'inpaint' });
       applyRecoveredInpaintSettings(handoff.generation);
       const omittedLayerCount = handoff.generation?.inpaint
-        ? handoff.generation.inpaint.regionalGuidanceCount
-          + handoff.generation.inpaint.controlLayerCount
+        ? handoff.generation.inpaint.controlLayerCount
           + handoff.generation.inpaint.referenceLayerCount
         : 0;
       showToast(
@@ -7054,13 +6982,6 @@ export function UmbraInpaintWorkspace({
       if (signal?.aborted) throw new DOMException('Layer rendering was canceled.', 'AbortError');
       return output;
     }
-    if (layer.kind === 'regional_guidance') {
-      const mask = getUmbraCanvasMaskLayer(canvasDocument, layer.maskLayerId);
-      if (!mask?.dataUrl) throw new Error(`${layer.name} has no regional mask.`);
-      const output = await renderImageTransformIntoRegion(mask.dataUrl, mask.transform, fullCanvas);
-      if (signal?.aborted) throw new DOMException('Layer rendering was canceled.', 'AbortError');
-      return output;
-    }
     if (layer.kind === 'group') {
       const isolated: UmbraCanvasDocument = {
         ...structuredClone(canvasDocument),
@@ -7125,9 +7046,7 @@ export function UmbraInpaintWorkspace({
     ? !maskEditingLocked
     : samOutputMode === 'replace_layer'
       ? samSourceMode === 'layer' && Boolean(activeRasterLayer || activeControlLayer)
-      : samOutputMode === 'regional_guidance'
-        ? regionalGuidanceAvailable && regionalGuidanceLayers.length < regionalGuidanceMaxLayers
-        : samOutputMode === 'control'
+      : samOutputMode === 'control'
           ? controlLayersAvailable
             && Boolean(canvasDocument)
             && getUmbraCanvasControlLayers(canvasDocument).length < controlLayersMaxLayers
@@ -7136,9 +7055,7 @@ export function UmbraInpaintWorkspace({
     ? 'Unlock the active mask or choose a different destination.'
     : samOutputMode === 'replace_layer' && (samSourceMode !== 'layer' || !activeRasterLayer && !activeControlLayer)
       ? 'Replace Layer requires Layer source mode with an active raster or Control layer.'
-      : samOutputMode === 'regional_guidance' && !assistedSelectionOutputAvailable
-        ? regionalGuidanceReason || `This pipeline supports at most ${regionalGuidanceMaxLayers} regional guidance layers.`
-        : samOutputMode === 'control' && !assistedSelectionOutputAvailable
+      : samOutputMode === 'control' && !assistedSelectionOutputAvailable
           ? controlLayersReason || `This pipeline supports at most ${controlLayersMaxLayers} control layers.`
           : '';
 
@@ -7226,20 +7143,11 @@ export function UmbraInpaintWorkspace({
         applyMaskSelection((target) => target.drawImage(selectionMask, 0, 0));
         commitMask();
         showToast(`${selectionLabel} selection added to the active mask.`, 'success');
-      } else if (samOutputMode === 'new_mask' || samOutputMode === 'regional_guidance') {
-        if (samOutputMode === 'regional_guidance'
-          && (!regionalGuidanceAvailable || regionalGuidanceLayers.length >= regionalGuidanceMaxLayers)) {
-          throw new Error(regionalGuidanceReason || `This pipeline supports at most ${regionalGuidanceMaxLayers} regional guidance layers.`);
-        }
+      } else if (samOutputMode === 'new_mask') {
         const imageUrl = URL.createObjectURL(await canvasToBlob(selectionMask));
         layerAssetObjectUrlsRef.current.add(imageUrl);
-        if (samOutputMode === 'new_mask') {
-          dispatchCanvasDocument({ type: 'add_inpaint_mask', name: `${selectionLabel} Selection`, dataUrl: imageUrl });
-          showToast(`${selectionLabel} selection saved as a new inpaint mask.`, 'success');
-        } else {
-          dispatchCanvasDocument({ type: 'add_regional_guidance', name: `${selectionLabel} Region`, dataUrl: imageUrl });
-          showToast(`${selectionLabel} selection saved as regional guidance.`, 'success');
-        }
+        dispatchCanvasDocument({ type: 'add_inpaint_mask', name: `${selectionLabel} Selection`, dataUrl: imageUrl });
+        showToast(`${selectionLabel} selection saved as a new inpaint mask.`, 'success');
       } else {
         const adapterType = controlAdapterTypes[0];
         const controlMode = controlModes[0];
@@ -7312,7 +7220,7 @@ export function UmbraInpaintWorkspace({
     } finally {
       setSamRunning(false);
     }
-  }, [activeCanvasLayer, activeControlLayer, activeRasterLayer, applyMaskSelection, assistedSelectionPreview, assistedSelectionSignature, canvasDocument, canvasReady, clearAssistedSelectionPreview, commitMask, controlAdapterTypes, controlLayersAvailable, controlLayersMaxLayers, controlLayersReason, controlModes, dispatchCanvasDocument, maskEditingLocked, regionalGuidanceAvailable, regionalGuidanceLayers.length, regionalGuidanceMaxLayers, regionalGuidanceReason, renderFullCommittedCanvas, renderLayerToFullCanvas, samOutputMode, samRunning, samSourceMode, showToast, source]);
+  }, [activeCanvasLayer, activeControlLayer, activeRasterLayer, applyMaskSelection, assistedSelectionPreview, assistedSelectionSignature, canvasDocument, canvasReady, clearAssistedSelectionPreview, commitMask, controlAdapterTypes, controlLayersAvailable, controlLayersMaxLayers, controlLayersReason, controlModes, dispatchCanvasDocument, maskEditingLocked, renderFullCommittedCanvas, renderLayerToFullCanvas, samOutputMode, samRunning, samSourceMode, showToast, source]);
 
   React.useEffect(() => {
     if (!canvasPreferences.autoProcessAssistedSelection
@@ -7471,7 +7379,6 @@ export function UmbraInpaintWorkspace({
       softInpaintPreservation,
       softInpaintTransitionContrast,
       softInpaintMaskInfluence,
-      regionalGuidanceCount: getUmbraCanvasRegionalGuidanceLayers(canvasDocument).filter((layer) => layer.enabled !== false).length,
       controlLayerCount: getUmbraCanvasControlLayers(canvasDocument).filter((layer) => layer.enabled !== false).length,
       referenceLayerCount: getUmbraCanvasReferenceLayers(canvasDocument).filter((layer) => layer.enabled !== false).length,
       width,
@@ -8379,7 +8286,7 @@ export function UmbraInpaintWorkspace({
 
   const cropActiveMaskToGenerationRegion = React.useCallback(async () => {
     const region = canvasDocument?.generationRegion;
-    const maskLayer = activeInpaintMaskLayer || activeRegionalMaskLayer;
+    const maskLayer = activeInpaintMaskLayer;
     if (!canvasDocument || !region || !maskLayer || activeInpaintMaskLayer?.locked || !canvasReady) return;
     try {
       const rendered = await renderLayerToFullCanvas(maskLayer);
@@ -8402,11 +8309,11 @@ export function UmbraInpaintWorkspace({
       const dataUrl = URL.createObjectURL(await canvasToBlob(clipped));
       maskSnapshotUrlsRef.current.add(dataUrl);
       dispatchCanvasDocument({ type: 'crop_mask_to_region', layerId: maskLayer.id, dataUrl });
-      showToast(`${activeRegionalGuidanceLayer ? 'Regional guidance' : 'Inpaint mask'} cropped to the generation region.`, 'success');
+      showToast('Inpaint mask cropped to the generation region.', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to crop the active mask.', 'error');
     }
-  }, [activeInpaintMaskLayer, activeRegionalGuidanceLayer, activeRegionalMaskLayer, canvasDocument, canvasReady, dispatchCanvasDocument, renderLayerToFullCanvas, showToast]);
+  }, [activeInpaintMaskLayer, canvasDocument, canvasReady, dispatchCanvasDocument, renderLayerToFullCanvas, showToast]);
 
   const trimActiveImageLayerToContent = React.useCallback(async () => {
     if (!activeCanvasLayer || !canvasDocument || !canvasReady) return;
@@ -8503,8 +8410,6 @@ export function UmbraInpaintWorkspace({
         });
       } else if (activeCanvasLayer.kind === 'mask' && guidanceMergeDownTarget.kind === 'mask') {
         dispatchCanvasDocument({ type: 'merge_inpaint_masks_down', upperLayerId: activeCanvasLayer.id, lowerLayerId: guidanceMergeDownTarget.id, name, dataUrl: imageUrl });
-      } else if (activeCanvasLayer.kind === 'regional_guidance' && guidanceMergeDownTarget.kind === 'regional_guidance') {
-        dispatchCanvasDocument({ type: 'merge_regional_guidance_down', upperLayerId: activeCanvasLayer.id, lowerLayerId: guidanceMergeDownTarget.id, name, dataUrl: imageUrl });
       } else {
         throw new Error('Only matching guidance layer types can be merged.');
       }
@@ -8548,12 +8453,10 @@ export function UmbraInpaintWorkspace({
         });
       } else if (activeCanvasLayer.kind === 'mask' && activeCanvasLayer.purpose === 'inpaint' && !activeCanvasLayer.frozen) {
         dispatchCanvasDocument({ type: 'merge_visible_inpaint_masks', layerIds, name: `Merged ${count} Inpaint Masks`, dataUrl: imageUrl });
-      } else if (activeCanvasLayer.kind === 'regional_guidance') {
-        dispatchCanvasDocument({ type: 'merge_visible_regional_guidance', layerIds, name: `Merged ${count} Regions`, dataUrl: imageUrl });
       } else {
         throw new Error('The active layer type does not support merge visible.');
       }
-      showToast(`${count} visible ${activeCanvasLayer.kind === 'control' ? 'controls' : activeCanvasLayer.kind === 'regional_guidance' ? 'regions' : 'masks'} merged as one undoable edit.`, 'success');
+      showToast(`${count} visible ${activeCanvasLayer.kind === 'control' ? 'controls' : 'masks'} merged as one undoable edit.`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to merge the visible guidance layers.', 'error');
     }
@@ -8772,80 +8675,6 @@ export function UmbraInpaintWorkspace({
     }
   }, [activeGroupLayer, activeGroupMergeMutationLocked, canvasDocument, canvasReady, showToast]);
 
-  const createRegionalGuidance = React.useCallback(async () => {
-    const maskCanvas = maskCanvasRef.current;
-    if (!canvasDocument || !maskCanvas || !canvasReady) return;
-    if (!regionalGuidanceAvailable) {
-      showToast(regionalGuidanceReason || 'Regional guidance is unavailable for this model pipeline.', 'error');
-      return;
-    }
-    if (getUmbraCanvasRegionalGuidanceLayers(canvasDocument).length >= regionalGuidanceMaxLayers) {
-      showToast(`This pipeline supports up to ${regionalGuidanceMaxLayers} regional guidance layers.`, 'error');
-      return;
-    }
-    if (!maskHasContent(null)) {
-      showToast('Paint or select a mask before creating a region.', 'error');
-      return;
-    }
-    try {
-      const blob = await canvasToBlob(maskCanvas);
-      const dataUrl = URL.createObjectURL(blob);
-      layerAssetObjectUrlsRef.current.add(dataUrl);
-      dispatchCanvasDocument({ type: 'add_regional_guidance', dataUrl });
-      showToast('Regional guidance layer created from the current mask.', 'success');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Failed to create regional guidance.', 'error');
-    }
-  }, [canvasDocument, canvasReady, maskHasContent, regionalGuidanceAvailable, regionalGuidanceMaxLayers, regionalGuidanceReason, showToast]);
-
-  const invertRegionalGuidanceMask = React.useCallback(async () => {
-    if (!canvasDocument || !activeRegionalGuidanceLayer) return;
-    const maskLayer = getUmbraCanvasMaskLayer(canvasDocument, activeRegionalGuidanceLayer.maskLayerId);
-    if (!maskLayer?.dataUrl) return;
-    try {
-      const image = await loadHtmlImage(maskLayer.dataUrl);
-      const output = document.createElement('canvas');
-      output.width = image.naturalWidth;
-      output.height = image.naturalHeight;
-      const context = output.getContext('2d', { willReadFrequently: true });
-      if (!context) throw new Error('The regional mask could not be inverted.');
-      context.drawImage(image, 0, 0);
-      for (let tileY = 0; tileY < output.height; tileY += PIXEL_READBACK_TILE_ROWS) {
-        const tileHeight = Math.min(PIXEL_READBACK_TILE_ROWS, output.height - tileY);
-        const pixels = context.getImageData(0, tileY, output.width, tileHeight);
-        for (let index = 0; index < pixels.data.length; index += 4) {
-          pixels.data[index] = 255;
-          pixels.data[index + 1] = 48;
-          pixels.data[index + 2] = 76;
-          pixels.data[index + 3] = 255 - pixels.data[index + 3];
-        }
-        context.putImageData(pixels, 0, tileY);
-      }
-      const dataUrl = URL.createObjectURL(await canvasToBlob(output));
-      layerAssetObjectUrlsRef.current.add(dataUrl);
-      dispatchCanvasDocument({ type: 'set_mask_layer_snapshot', layerId: maskLayer.id, dataUrl });
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Failed to invert the regional mask.', 'error');
-    }
-  }, [activeRegionalGuidanceLayer, canvasDocument, showToast]);
-
-  const replaceRegionalGuidanceMask = React.useCallback(async () => {
-    const maskCanvas = maskCanvasRef.current;
-    if (!canvasDocument || !activeRegionalGuidanceLayer || !maskCanvas) return;
-    if (!maskHasContent(null)) {
-      showToast('Paint or select a mask before replacing the region.', 'error');
-      return;
-    }
-    try {
-      const dataUrl = URL.createObjectURL(await canvasToBlob(maskCanvas));
-      layerAssetObjectUrlsRef.current.add(dataUrl);
-      dispatchCanvasDocument({ type: 'set_mask_layer_snapshot', layerId: activeRegionalGuidanceLayer.maskLayerId, dataUrl });
-      showToast('Regional guidance mask replaced.', 'success');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Failed to replace the regional mask.', 'error');
-    }
-  }, [activeRegionalGuidanceLayer, canvasDocument, maskHasContent, showToast]);
-
   const attachIpAdapterMask = React.useCallback(async () => {
     const maskCanvas = maskCanvasRef.current;
     if (!canvasDocument || !activeReferenceLayer || activeReferenceLayer.method !== 'ip_adapter' || !maskCanvas) return;
@@ -8864,47 +8693,10 @@ export function UmbraInpaintWorkspace({
   }, [activeReferenceLayer, canvasDocument, maskHasContent, showToast]);
 
   const detachIpAdapterMask = React.useCallback(() => {
-    if (!activeReferenceLayer?.maskLayerId && !activeReferenceLayer?.regionLayerId) return;
+    if (!activeReferenceLayer?.maskLayerId) return;
     dispatchCanvasDocument({ type: 'detach_reference_mask', layerId: activeReferenceLayer.id });
-    showToast('IP Adapter regional influence removed.', 'success');
+    showToast('IP Adapter influence mask removed.', 'success');
   }, [activeReferenceLayer, showToast]);
-
-  const buildRegionalGuidanceInputs = React.useCallback(async (
-    generationRegion: UmbraCanvasRect,
-    outputSize: { width: number; height: number },
-  ): Promise<UmbraUiInpaintRegionalGuidanceInput[]> => {
-    if (!canvasDocument || !regionalGuidanceAvailable) return [];
-    const regions = getUmbraCanvasRegionalGuidanceLayers(canvasDocument)
-      .filter((layer) => layer.enabled
-        && layer.weight > 0
-        && ((regionalPositivePromptAvailable && !!layer.positivePrompt.trim())
-          || (regionalNegativePromptAvailable && !!layer.negativePrompt.trim())));
-    if (regions.length > regionalGuidanceMaxLayers) {
-      throw new Error(`This pipeline supports up to ${regionalGuidanceMaxLayers} active regional guidance layers.`);
-    }
-    const inputs: UmbraUiInpaintRegionalGuidanceInput[] = [];
-    for (const layer of regions) {
-      const maskLayer = getUmbraCanvasMaskLayer(canvasDocument, layer.maskLayerId);
-      if (!maskLayer?.dataUrl) continue;
-      const croppedMask = resizeCanvasForProcessing(
-        await renderImageTransformIntoRegion(maskLayer.dataUrl, maskLayer.transform, generationRegion, '#000000'),
-        outputSize.width,
-        outputSize.height,
-      );
-      inputs.push({
-        id: layer.id,
-        name: layer.name,
-        mask: await canvasToBlob(encodeMaskCanvasForComfy(croppedMask)),
-        positivePrompt: regionalPositivePromptAvailable ? layer.positivePrompt : '',
-        negativePrompt: regionalNegativePromptAvailable ? layer.negativePrompt : '',
-        autoNegative: regionalAutoNegativeAvailable && layer.autoNegative,
-        weight: layer.weight,
-        beginStepPercent: layer.beginStepPercent,
-        endStepPercent: layer.endStepPercent,
-      });
-    }
-    return inputs;
-  }, [canvasDocument, regionalAutoNegativeAvailable, regionalGuidanceAvailable, regionalGuidanceMaxLayers, regionalNegativePromptAvailable, regionalPositivePromptAvailable]);
 
   const addControlLayerFromBlob = React.useCallback(async (blob: Blob, name: string, transform?: UmbraCanvasRect, announce = true) => {
     if (!canvasDocument || !controlLayersAvailable) return false;
@@ -9102,65 +8894,6 @@ export function UmbraInpaintWorkspace({
     }
   }, [addControlLayerFromBlob, addReferenceLayerFromBlob, canvasDocument, canvasReady, renderCommittedCanvas, showToast]);
 
-  const captureGenerationRegionAsRegionalReference = React.useCallback(async () => {
-    const region = canvasDocument?.generationRegion;
-    if (!canvasDocument || !region || !canvasReady) {
-      showToast('Set a generation region before capturing a regional reference.', 'error');
-      return;
-    }
-    if (!regionalReferenceCaptureAvailable) {
-      showToast('This pipeline does not declare regional IP Adapter references.', 'error');
-      return;
-    }
-    if (getUmbraCanvasReferenceLayers(canvasDocument).length >= referenceLayersMaxLayers) {
-      showToast(`This pipeline supports up to ${referenceLayersMaxLayers} reference layers.`, 'error');
-      return;
-    }
-    if (getUmbraCanvasRegionalGuidanceLayers(canvasDocument).length >= regionalGuidanceMaxLayers) {
-      showToast(`This pipeline supports up to ${regionalGuidanceMaxLayers} regional layers.`, 'error');
-      return;
-    }
-    const modelName = ipAdapterModels[0] || '';
-    const visionModelName = visionModels[0] || '';
-    if (!modelName || !visionModelName) {
-      showToast('Install and select an IP Adapter model and vision encoder before creating a regional reference.', 'error');
-      return;
-    }
-    try {
-      const cropped = cropCanvas(await renderCommittedCanvas(), region);
-      const imageUrl = URL.createObjectURL(await canvasToBlob(cropped));
-      layerAssetObjectUrlsRef.current.add(imageUrl);
-      const regionMask = document.createElement('canvas');
-      regionMask.width = canvasDocument.width;
-      regionMask.height = canvasDocument.height;
-      const maskContext = regionMask.getContext('2d');
-      if (!maskContext) throw new Error('The regional reference mask could not be created.');
-      maskContext.fillStyle = '#ffffff';
-      maskContext.fillRect(region.x, region.y, region.width, region.height);
-      const regionDataUrl = URL.createObjectURL(await canvasToBlob(regionMask));
-      maskSnapshotUrlsRef.current.add(regionDataUrl);
-      dispatchCanvasDocument({
-        type: 'add_regional_reference_layer',
-        name: 'Generation Region Reference',
-        modelName,
-        visionModelName,
-        regionDataUrl,
-        transform: region,
-        asset: createUmbraCanvasImageAsset({
-          name: `generation_region_reference_${Date.now()}.png`,
-          path: '',
-          imageUrl,
-          width: region.width,
-          height: region.height,
-          objectUrl: true,
-        }),
-      });
-      showToast('Generation region captured as an IP Adapter reference with a linked influence region.', 'success');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Failed to capture the regional reference.', 'error');
-    }
-  }, [canvasDocument, canvasReady, dispatchCanvasDocument, ipAdapterModels, referenceLayersMaxLayers, regionalGuidanceMaxLayers, regionalReferenceCaptureAvailable, renderCommittedCanvas, showToast, visionModels]);
-
   const captureGenerationRegionAsRaster = React.useCallback(async () => {
     const region = canvasDocument?.generationRegion;
     if (!canvasDocument || !region || !canvasReady) {
@@ -9320,36 +9053,6 @@ export function UmbraInpaintWorkspace({
     }
   }, [loadSource, showToast]);
 
-  const copyActiveLayerToGuidance = React.useCallback(async (target: 'mask' | 'region') => {
-    if (!activeCanvasLayer || !canvasDocument || !canvasReady) return;
-    const convertible = activeCanvasLayer.kind === 'control'
-      || activeCanvasLayer.kind === 'regional_guidance'
-      || activeCanvasLayer.kind === 'mask' && activeCanvasLayer.purpose === 'inpaint'
-      || activeCanvasLayer.kind === 'raster'
-      || activeCanvasLayer.kind === 'text'
-      || activeCanvasLayer.kind === 'gradient';
-    if (!convertible) return;
-    if (target === 'region') {
-      if (!regionalGuidanceAvailable) {
-        showToast(regionalGuidanceReason || 'Regional guidance is unavailable for this model pipeline.', 'error');
-        return;
-      }
-      if (getUmbraCanvasRegionalGuidanceLayers(canvasDocument).length >= regionalGuidanceMaxLayers) {
-        showToast(`This pipeline supports up to ${regionalGuidanceMaxLayers} regional guidance layers.`, 'error');
-        return;
-      }
-    }
-    try {
-      const dataUrl = await convertCanvasToMaskObjectUrl(await renderLayerToFullCanvas(activeCanvasLayer));
-      dispatchCanvasDocument(target === 'region'
-        ? { type: 'add_regional_guidance', name: `${activeCanvasLayer.name} Region`, dataUrl }
-        : { type: 'add_inpaint_mask', name: `${activeCanvasLayer.name} Mask`, dataUrl });
-      showToast(`Layer copied to ${target === 'region' ? 'regional guidance' : 'a new editable inpaint mask'}.`, 'success');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : `Failed to copy the layer to ${target === 'region' ? 'regional guidance' : 'an inpaint mask'}.`, 'error');
-    }
-  }, [activeCanvasLayer, canvasDocument, canvasReady, convertCanvasToMaskObjectUrl, regionalGuidanceAvailable, regionalGuidanceMaxLayers, regionalGuidanceReason, renderLayerToFullCanvas, showToast]);
-
   const copyActiveControlToRaster = React.useCallback(() => {
     if (!activeControlLayer) return;
     dispatchCanvasDocument({
@@ -9425,66 +9128,15 @@ export function UmbraInpaintWorkspace({
     }
   }, [activeCanvasLayer, canvasDocument, canvasReady, convertCanvasToMaskObjectUrl, renderLayerToFullCanvas, showToast]);
 
-  const convertActiveLayerToRegion = React.useCallback(async () => {
-    if (!activeCanvasLayer || !canvasDocument || !canvasReady) return;
-    const convertible = activeCanvasLayer.kind === 'control'
-      || activeCanvasLayer.kind === 'text'
-      || activeCanvasLayer.kind === 'gradient'
-      || activeCanvasLayer.kind === 'raster' && activeCanvasLayer.role !== 'source';
-    if (!convertible) return;
-    if (!regionalGuidanceAvailable) {
-      showToast(regionalGuidanceReason || 'Regional guidance is unavailable for this model pipeline.', 'error');
-      return;
-    }
-    if (getUmbraCanvasRegionalGuidanceLayers(canvasDocument).length >= regionalGuidanceMaxLayers) {
-      showToast(`This pipeline supports up to ${regionalGuidanceMaxLayers} regional guidance layers.`, 'error');
-      return;
-    }
-    try {
-      const dataUrl = await convertCanvasToMaskObjectUrl(await renderLayerToFullCanvas(activeCanvasLayer));
-      dispatchCanvasDocument({
-        type: 'convert_layer_to_regional_guidance',
-        layerId: activeCanvasLayer.id,
-        name: `${activeCanvasLayer.name} Region`,
-        dataUrl,
-      });
-      showToast('Layer converted to regional guidance. Undo restores the original layer.', 'success');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Failed to convert the layer to regional guidance.', 'error');
-    }
-  }, [activeCanvasLayer, canvasDocument, canvasReady, convertCanvasToMaskObjectUrl, regionalGuidanceAvailable, regionalGuidanceMaxLayers, regionalGuidanceReason, renderLayerToFullCanvas, showToast]);
-
-  const convertActiveMaskToRegion = React.useCallback(() => {
-    if (!activeInpaintMaskLayer || !canvasDocument) return;
-    if (!regionalGuidanceAvailable) {
-      showToast(regionalGuidanceReason || 'Regional guidance is unavailable for this model pipeline.', 'error');
-      return;
-    }
-    if (getUmbraCanvasRegionalGuidanceLayers(canvasDocument).length >= regionalGuidanceMaxLayers) {
-      showToast(`This pipeline supports up to ${regionalGuidanceMaxLayers} regional guidance layers.`, 'error');
-      return;
-    }
-    dispatchCanvasDocument({ type: 'convert_inpaint_mask_to_regional_guidance', layerId: activeInpaintMaskLayer.id });
-    showToast('Inpaint mask converted to regional guidance. A replacement paint mask remains active.', 'success');
-  }, [activeInpaintMaskLayer, canvasDocument, regionalGuidanceAvailable, regionalGuidanceMaxLayers, regionalGuidanceReason, showToast]);
-
-  const convertActiveRegionToMask = React.useCallback(() => {
-    if (!activeRegionalGuidanceLayer) return;
-    dispatchCanvasDocument({ type: 'convert_regional_guidance_to_inpaint_mask', layerId: activeRegionalGuidanceLayer.id });
-    showToast('Regional guidance converted to an editable inpaint mask.', 'success');
-  }, [activeRegionalGuidanceLayer, showToast]);
-
   const buildReferenceInputs = React.useCallback(async (
     generationRegion: UmbraCanvasRect,
     outputSize: { width: number; height: number },
   ): Promise<UmbraUiInpaintReferenceInput[]> => {
     if (!canvasDocument || !referenceLayersAvailable) return [];
-    const regionsById = new Map(getUmbraCanvasRegionalGuidanceLayers(canvasDocument).map((region) => [region.id, region]));
     const references = getUmbraCanvasReferenceLayers(canvasDocument)
       .filter((layer) => (
         layer.enabled
         && (layer.method === 'ip_adapter' ? layer.weight !== 0 : layer.weight > 0)
-        && (!layer.regionLayerId || regionsById.get(layer.regionLayerId)?.enabled === true)
       ));
     if (references.length > referenceLayersMaxLayers) {
       throw new Error(`This pipeline supports up to ${referenceLayersMaxLayers} active reference layers.`);
@@ -9508,10 +9160,8 @@ export function UmbraInpaintWorkspace({
       if (!context) continue;
       context.drawImage(image, 0, 0);
       let mask: Blob | undefined;
-      if (layer.method === 'ip_adapter' && (layer.maskLayerId || layer.regionLayerId)) {
-        const linkedRegion = layer.regionLayerId ? regionsById.get(layer.regionLayerId) : null;
-        const influenceMaskLayerId = layer.maskLayerId || linkedRegion?.maskLayerId || '';
-        const maskLayer = getUmbraCanvasMaskLayer(canvasDocument, influenceMaskLayerId);
+      if (layer.method === 'ip_adapter' && layer.maskLayerId) {
+        const maskLayer = getUmbraCanvasMaskLayer(canvasDocument, layer.maskLayerId);
         if (!maskLayer?.dataUrl) throw new Error(`${layer.name} is missing its IP Adapter influence mask.`);
         const croppedMask = await renderImageTransformIntoRegion(maskLayer.dataUrl, maskLayer.transform, generationRegion, '#000000');
         const processingMask = resizeCanvasForProcessing(croppedMask, outputSize.width, outputSize.height);
@@ -9688,7 +9338,6 @@ export function UmbraInpaintWorkspace({
         softInpaintMaskInfluence,
         tiledVae,
         detailerPipeline: detailerPipeline.map((stage) => ({ ...stage })),
-        regionalGuidance: [],
         controlLayers: [],
         referenceLayers: [],
       });
@@ -10904,7 +10553,7 @@ export function UmbraInpaintWorkspace({
               <CanvasMenuButton icon={<BoxSelect size={9} />} label="Fit Region to Selection" disabled={selectedVisualLayers.length <= 0} onClick={fitGenerationRegionToSelectedLayers} />
               <CanvasMenuButton icon={<Layers3 size={9} />} label="Fit Region to Layers" onClick={fitGenerationRegionToVisibleLayers} />
               <CanvasMenuButton icon={<Crop size={9} />} label="Crop Active Image Layer to Region" disabled={!activeImageLayer || !canvasDocument?.generationRegion || !canvasReady} onClick={() => void cropActiveImageLayerToGenerationRegion()} />
-              <CanvasMenuButton icon={<SquareDashed size={9} />} label="Crop Active Mask to Region" disabled={!activeInpaintMaskLayer && !activeRegionalGuidanceLayer || Boolean(activeInpaintMaskLayer?.locked) || !canvasDocument?.generationRegion || !canvasReady} onClick={() => void cropActiveMaskToGenerationRegion()} />
+              <CanvasMenuButton icon={<SquareDashed size={9} />} label="Crop Active Mask to Region" disabled={!activeInpaintMaskLayer || activeInpaintMaskLayer.locked || !canvasDocument?.generationRegion || !canvasReady} onClick={() => void cropActiveMaskToGenerationRegion()} />
             </div>
           </details>
           <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1 border border-white/[0.06] bg-black/25 p-0.5">
@@ -11174,7 +10823,6 @@ export function UmbraInpaintWorkspace({
                 <option value="active_mask">Active Mask</option>
                 <option value="replace_layer" disabled={samSourceMode !== 'layer' || !activeRasterLayer && !activeControlLayer}>Replace Layer</option>
                 <option value="new_mask">New Mask</option>
-                <option value="regional_guidance" disabled={!regionalGuidanceAvailable || regionalGuidanceLayers.length >= regionalGuidanceMaxLayers}>Regional Guide</option>
                 <option value="raster">Raster Layer</option>
                 <option value="control" disabled={!controlLayersAvailable || getUmbraCanvasControlLayers(canvasDocument).length >= controlLayersMaxLayers}>Control Layer</option>
               </UmbraSelectControl>
@@ -11951,12 +11599,12 @@ export function UmbraInpaintWorkspace({
                     >
                       <Combine size={9} /> Merge
                     </button>
-                    {activeControlLayer || activeInpaintMaskLayer || activeRegionalGuidanceLayer ? (
+                    {activeControlLayer || activeInpaintMaskLayer ? (
                       <button
                         type="button"
                         onClick={() => void mergeVisibleGuidanceLayers()}
                         disabled={visibleGuidanceMergeLayers.length < 2 || visibleGuidanceMergeMutationLocked || !canvasReady}
-                        title={`Merge all visible ${activeControlLayer ? 'controls' : activeRegionalGuidanceLayer ? 'regions' : 'inpaint masks'} into one layer`}
+                        title={`Merge all visible ${activeControlLayer ? 'controls' : 'inpaint masks'} into one layer`}
                         className="inline-flex h-6 w-6 items-center justify-center border border-emerald-300/20 text-emerald-200 disabled:border-white/5 disabled:text-zinc-800"
                       >
                         <Layers3 size={9} />
@@ -12004,12 +11652,8 @@ export function UmbraInpaintWorkspace({
                     const isActiveMask = layer.id === canvasDocument.activeMaskLayerId;
                     const isEditingLayerMask = layer.id === editingLayerMaskId;
                     const canToggleGeneration = layer.kind === 'mask' && layer.purpose === 'inpaint'
-                      || layer.kind === 'regional_guidance'
                       || layer.kind === 'control'
                       || layer.kind === 'reference';
-                    const regionalMask = layer.kind === 'regional_guidance'
-                      ? getUmbraCanvasMaskLayer(canvasDocument, layer.maskLayerId)
-                      : null;
                     const thumbnail = layer.kind === 'raster'
                       ? layer.asset.imageUrl
                       : layer.kind === 'control'
@@ -12018,7 +11662,7 @@ export function UmbraInpaintWorkspace({
                         ? layer.asset.imageUrl
                       : layer.kind === 'mask'
                         ? layer.dataUrl
-                        : regionalMask?.dataUrl || '';
+                        : '';
                     return (
                       <div
                         key={layer.id}

@@ -54,6 +54,9 @@ interface UmbraAgentPromptPanelProps {
   onClose: () => void;
   onApplyDraft: (draft: UmbraUiAgentDraft) => void | Promise<void>;
   onPendingCountChange?: (count: number) => void;
+  activeInstructionId?: string;
+  onActiveInstructionChange?: (instructionId: string) => void | Promise<void>;
+  activeInstructionLabel?: string;
   title?: string;
   subtitle?: string;
   applySuccessMessage?: string;
@@ -133,6 +136,9 @@ export function UmbraAgentPromptPanel({
   onClose,
   onApplyDraft,
   onPendingCountChange,
+  activeInstructionId = '',
+  onActiveInstructionChange,
+  activeInstructionLabel = 'Active Instruction',
   title = 'Agent Prompts',
   subtitle = 'Prompt drafts and reusable instructions',
   applySuccessMessage,
@@ -153,7 +159,13 @@ export function UmbraAgentPromptPanel({
   const [showToken, setShowToken] = React.useState(false);
   const [agentModels, setAgentModels] = React.useState<UmbraUiAgentModelOption[]>([]);
   const [loadingAgentModels, setLoadingAgentModels] = React.useState(false);
+  const [savingActiveInstruction, setSavingActiveInstruction] = React.useState(false);
   const knownDraftIdsRef = React.useRef<Set<string> | null>(null);
+  const activeInstructionIdRef = React.useRef(activeInstructionId);
+
+  React.useEffect(() => {
+    activeInstructionIdRef.current = activeInstructionId;
+  }, [activeInstructionId]);
 
   const refreshDrafts = React.useCallback(async (announce = false) => {
     const next = await loadUmbraUiAgentDrafts();
@@ -202,7 +214,9 @@ export function UmbraAgentPromptPanel({
       setSelectedInstructionId((current) => (
         current && nextInstructions.some((entry) => entry.id === current)
           ? current
-          : nextInstructions[0]?.id || ''
+          : nextInstructions.find((entry) => entry.id === activeInstructionIdRef.current)?.id
+            || nextInstructions[0]?.id
+            || ''
       ));
       setSettings(nextSettings);
         const nextGeneration = nextSettings.generation || DEFAULT_AGENT_GENERATION_SETTINGS;
@@ -224,6 +238,7 @@ export function UmbraAgentPromptPanel({
 
   const selectedDraft = drafts.find((draft) => draft.id === selectedDraftId) || null;
   const selectedInstruction = instructions.find((entry) => entry.id === selectedInstructionId) || null;
+  const selectableImageInstructions = instructions.filter((entry) => entry.mediaType === 'image' || entry.mediaType === 'both');
   const displayedHermesConfig = settings
     ? formatHermesMcpConfig(showToken ? settings : { ...settings, token: '<hidden>' })
     : '';
@@ -314,6 +329,24 @@ export function UmbraAgentPromptPanel({
       [next[index], next[target]] = [next[target], next[index]];
       return next.map((entry, order) => ({ ...entry, order }));
     });
+  };
+
+  const handleActiveInstructionChange = async (instructionId: string) => {
+    if (!onActiveInstructionChange || instructionId === activeInstructionId) return;
+    if (instructions.some((entry) => !entry.name.trim() || !entry.instruction.trim())) {
+      showToast('Finish or remove empty instruction entries before making one active.', 'error');
+      return;
+    }
+    setSavingActiveInstruction(true);
+    try {
+      const saved = await saveUmbraUiAgentInstructions(instructions);
+      setInstructions(saved);
+      await onActiveInstructionChange(instructionId);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to select the active agent instruction.', 'error');
+    } finally {
+      setSavingActiveInstruction(false);
+    }
   };
 
   const handleApplyDraft = async () => {
@@ -574,6 +607,9 @@ export function UmbraAgentPromptPanel({
                     >
                       <span className={entry.mediaType === 'video' ? 'text-fuchsia-300' : 'text-cyan-300'}>{mediaIcon(entry.mediaType)}</span>
                       <span className="min-w-0 flex-1 truncate text-[10px] font-bold">{entry.name || 'Untitled instruction'}</span>
+                      {onActiveInstructionChange && activeInstructionId === entry.id ? (
+                        <span className="rounded border border-emerald-300/25 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[7px] font-black uppercase tracking-wider text-emerald-200">Active</span>
+                      ) : null}
                       <span className="font-mono text-[8px] uppercase text-zinc-700">{entry.mediaType}</span>
                     </button>
                   ))}
@@ -582,6 +618,36 @@ export function UmbraAgentPromptPanel({
             </aside>
 
             <main data-umbra-agent-instructions-editor className="min-h-0 overflow-y-auto p-4 custom-scrollbar">
+              {onActiveInstructionChange ? (
+                <section className="mx-auto mb-4 max-w-4xl rounded-md border border-emerald-300/20 bg-emerald-500/[0.045] p-3">
+                  <div className="flex items-center gap-2">
+                    <Bot size={13} className="text-emerald-300" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[9px] font-black uppercase tracking-[0.14em] text-emerald-100">{activeInstructionLabel}</div>
+                      <div className="mt-0.5 font-mono text-[8px] text-zinc-600">Used for variant and complete-prompt enhancement</div>
+                    </div>
+                    {savingActiveInstruction ? <Loader2 size={12} className="animate-spin text-emerald-300" /> : null}
+                  </div>
+                  <UmbraSelect
+                    value={activeInstructionId}
+                    options={selectableImageInstructions.map((entry) => ({
+                      value: entry.id,
+                      label: entry.name,
+                      description: entry.mediaType === 'both' ? 'Image and video instruction' : 'Image instruction',
+                      badge: entry.mediaType,
+                      icon: mediaIcon(entry.mediaType),
+                    }))}
+                    onValueChange={(value) => { void handleActiveInstructionChange(value); }}
+                    ariaLabel={activeInstructionLabel}
+                    placeholder="Choose an image instruction"
+                    disabled={savingActiveInstruction || selectableImageInstructions.length <= 0}
+                    className="mt-3"
+                    size="md"
+                    menuTitle={activeInstructionLabel}
+                    menuSubtitle="Choose how Power Prompter's configured agent should edit prompts"
+                  />
+                </section>
+              ) : null}
               {selectedInstruction ? (
                 <div className="mx-auto max-w-4xl space-y-4">
                   <div data-umbra-agent-instructions-header className="flex items-center gap-2 border-b border-white/10 pb-3">

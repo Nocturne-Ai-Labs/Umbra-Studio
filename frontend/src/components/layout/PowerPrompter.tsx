@@ -9710,6 +9710,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
             const result = await generateUmbraUiAgentPrompt({
               mediaType: 'image',
               task: 'enhance-complete-prompt',
+              instructionId: settings.agentInstructionId,
               fieldLabel: 'Complete assembled Power Prompter prompt',
               prompt,
               context: {
@@ -9782,7 +9783,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       generationByPrompt,
       editorSnapshot: createQueueEditorSnapshot(editorDocument, queueEditorDraft.sourceFile, buildSettings),
     };
-  }, [queueEditorDraft, settings.agentEnhanceCompletePrompts]);
+  }, [queueEditorDraft, settings.agentEnhanceCompletePrompts, settings.agentInstructionId]);
 
   const handleSaveQueueEditorDraft = useCallback(async () => {
     if (!POWER_PROMPTER_QUEUE_EDITOR_ENABLED) {
@@ -11169,6 +11170,20 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     );
   };
 
+  const handleSetAgentInstruction = async (instructionId: string) => {
+    const nextSettings = normalizePowerPrompterSettings({
+      ...settings,
+      agentInstructionId,
+    });
+    setSettings(nextSettings);
+    const persisted = await persistSettings(nextSettings, { silent: true });
+    if (!persisted) {
+      setSettings(settings);
+      throw new Error('Failed to save the active Power Prompter agent instruction.');
+    }
+    showToast('Power Prompter agent instruction updated.', 'success');
+  };
+
   const resolveQueuePrompts = async (
     mode: PowerPrompterQueueMode,
     options?: {
@@ -11448,6 +11463,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
             const result = await generateUmbraUiAgentPrompt({
               mediaType: 'image',
               task: 'enhance-complete-prompt',
+              instructionId: settings.agentInstructionId,
               fieldLabel: 'Complete assembled Power Prompter prompt',
               prompt,
               context: {
@@ -12162,8 +12178,11 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         open={agentPromptPanelOpen}
         onClose={() => setAgentPromptPanelOpen(false)}
         onApplyDraft={handleApplyAgentDraftToPowerPrompter}
+        activeInstructionId={settings.agentInstructionId}
+        onActiveInstructionChange={handleSetAgentInstruction}
+        activeInstructionLabel="Active in Power Prompter"
         title="Power Prompter Agent"
-        subtitle="Shared prompt drafts and reusable instructions"
+        subtitle="Choose the active instruction, review drafts, and manage reusable instructions"
         applySuccessMessage="Agent draft added to Power Prompter."
       />
 

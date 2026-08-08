@@ -28,7 +28,6 @@ export interface UmbraUiQualificationPreflightCase {
   modelSource: UmbraUiQualificationModelSource;
   checkpointName: string;
   inpaintModelName?: string;
-  regionalGuidance?: UmbraUiQualificationFileReference[];
   controlLayers?: UmbraUiQualificationControlReference[];
   referenceLayers?: UmbraUiQualificationModelReference[];
 }
@@ -200,9 +199,6 @@ export async function preflightUmbraUiInpaintQualification(
     const fixtures: Array<{ label: string; path: string }> = [];
     addOptionalFixture(fixtures, 'Source image', item.sourceImage || manifest.sourceImage);
     addOptionalFixture(fixtures, 'Mask image', item.maskImage || manifest.maskImage);
-    for (const region of item.regionalGuidance || []) {
-      addOptionalFixture(fixtures, `Regional guidance ${region.id || 'unnamed'} mask`, region.maskPath);
-    }
     for (const control of item.controlLayers || []) {
       addOptionalFixture(fixtures, `Control ${control.id || 'unnamed'} image`, control.imagePath);
     }

@@ -145,32 +145,21 @@ function normalizeProject(rawProject: unknown): Record<string, any> {
   const alignment = Math.max(1, Math.min(256, Math.round(Number(source.generationAlignment) || 8)));
   const bbox = asRecord(source.generationBbox);
   const viewport = asRecord(source.viewport);
-  const rawEntities = Array.isArray(source.entities) ? source.entities : [];
+  const sourceEntities = Array.isArray(source.entities) ? source.entities : [];
+  const removedMaskIds = new Set(sourceEntities
+    .map((rawEntity: unknown) => asRecord(rawEntity))
+    .filter((entity) => entity.kind === 'regional-guidance')
+    .map((entity) => safeId(entity.maskEntityId))
+    .filter(Boolean));
+  const rawEntities = sourceEntities.filter((rawEntity: unknown) => {
+    const entity = asRecord(rawEntity);
+    return entity.kind !== 'regional-guidance' && !(entity.kind === 'mask' && removedMaskIds.has(safeId(entity.id)));
+  });
   if (rawEntities.length > MAX_ENTITIES) throw new Error(`A Canvas project cannot contain more than ${MAX_ENTITIES} entities.`);
   const entities = rawEntities.map((rawEntity: unknown, index: number) => {
     const entity = asRecord(rawEntity);
     const entityId = safeId(entity.id);
-    if (!entityId || !['raster', 'mask', 'shape', 'text', 'gradient', 'path', 'regional-guidance', 'control', 'reference'].includes(String(entity.kind || ''))) throw new Error(`Canvas entity ${index + 1} is invalid or unsupported.`);
-    if (entity.kind === 'regional-guidance') {
-      return {
-        id: entityId,
-        kind: 'regional-guidance',
-        name: String(entity.name || `Regional Guide ${index + 1}`).trim().slice(0, 240) || `Regional Guide ${index + 1}`,
-        maskEntityId: safeId(entity.maskEntityId),
-        positivePrompt: String(entity.positivePrompt || '').slice(0, 1_000_000),
-        negativePrompt: String(entity.negativePrompt || '').slice(0, 1_000_000),
-        autoNegative: entity.autoNegative === true,
-        weight: finiteNumber(entity.weight, 1, -10, 10),
-        beginStepPercent: finiteNumber(entity.beginStepPercent, 0, 0, 1),
-        endStepPercent: finiteNumber(entity.endStepPercent, 1, 0, 1),
-        visible: entity.visible !== false,
-        generationEnabled: entity.generationEnabled !== false,
-        locked: entity.locked === true,
-        revision: Math.max(0, Math.round(Number(entity.revision) || 0)),
-        createdAt: Math.max(0, Math.round(Number(entity.createdAt) || Date.now())),
-        updatedAt: Math.max(0, Math.round(Number(entity.updatedAt) || Date.now())),
-      };
-    }
+    if (!entityId || !['raster', 'mask', 'shape', 'text', 'gradient', 'path', 'control', 'reference'].includes(String(entity.kind || ''))) throw new Error(`Canvas entity ${index + 1} is invalid or unsupported.`);
     if (entity.kind === 'control') {
       return {
         id: entityId,

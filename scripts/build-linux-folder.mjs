@@ -192,6 +192,10 @@ function prepareCleanUser() {
     path.join(root, 'defaults', 'PowerPrompter', 'Prompts'),
     path.join(userPath, 'PowerPrompter', 'Prompts'),
   );
+  copyTree(
+    path.join(root, 'defaults', 'PowerPrompter', 'Wildcards'),
+    path.join(userPath, 'PowerPrompter', 'Wildcards'),
+  );
 }
 
 function verifyCleanPublishedUser() {
@@ -207,7 +211,8 @@ function verifyCleanPublishedUser() {
       || normalized.startsWith('PowerPrompter/CSV/')
       || normalized.startsWith('Models/WaifuTagger/')
       || normalized.startsWith('Models/DataForgeCaption/')
-      || normalized.startsWith('PowerPrompter/Prompts/');
+      || normalized.startsWith('PowerPrompter/Prompts/')
+      || normalized.startsWith('PowerPrompter/Wildcards/');
   };
   const unexpectedFiles = [];
   const visit = (directory) => {

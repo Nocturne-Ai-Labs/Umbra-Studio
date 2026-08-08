@@ -53,28 +53,6 @@ interface PipelineNode {
   meta: Record<string, unknown>;
 }
 
-export type UmbraUiInpaintRegionalConditioningMethod =
-  | 'clip_masked_conditioning'
-  | 'flux_guidance_masked_conditioning'
-  | 'flux_text_encode_masked_conditioning'
-  | 'qwen_image_edit_masked_conditioning';
-
-export interface UmbraUiInpaintRegionalConditioningContract {
-  method: UmbraUiInpaintRegionalConditioningMethod;
-  maxLayers: number;
-  positivePrompt: boolean;
-  negativePrompt: boolean;
-  autoNegative: boolean;
-  sinkNodeId: string;
-  positiveSinkInput: string;
-  negativeSinkInput: string;
-  clipSourceNodeId: string;
-  clipSourceOutput: number;
-  positiveTransformNodeId: string;
-  positiveEncoderNodeId: string;
-  negativeEncoderNodeId: string;
-}
-
 const SAMPLER_CONTROL_CLASSES = new Set([
   'UmbraPowerPrompter',
   'UmbraKSamplerHiResFix',
@@ -183,138 +161,6 @@ function uniqueNodeClassTypes(nodes: PipelineNode[]): string[] {
   return Array.from(new Set(nodes.map((node) => node.classType).filter(Boolean))).sort();
 }
 
-function boundedRegionalLayerLimit(value: unknown): number {
-  const numeric = Math.floor(Number(value));
-  return Number.isFinite(numeric) ? Math.max(1, Math.min(16, numeric)) : 16;
-}
-
-export function resolveUmbraUiInpaintRegionalConditioningContract(
-  promptGraph: Record<string, unknown>,
-): UmbraUiInpaintRegionalConditioningContract | null {
-  const nodes = listPipelineNodes(promptGraph);
-  const nodeMap = new Map(nodes.map((node) => [node.id, node] as const));
-  const methods = new Set<UmbraUiInpaintRegionalConditioningMethod>([
-    'clip_masked_conditioning',
-    'flux_guidance_masked_conditioning',
-    'flux_text_encode_masked_conditioning',
-    'qwen_image_edit_masked_conditioning',
-  ]);
-  const sinks = nodes.filter((node) => methods.has(
-    String(node.meta.umbra_regional_method || '').trim().toLowerCase() as UmbraUiInpaintRegionalConditioningMethod,
-  ));
-  if (sinks.length !== 1) return null;
-  const sink = sinks[0];
-  const method = String(sink.meta.umbra_regional_method || '').trim().toLowerCase() as UmbraUiInpaintRegionalConditioningMethod;
-  const positiveSinkInput = String(sink.meta.umbra_regional_positive_input || '').trim();
-  const negativeSinkInput = String(sink.meta.umbra_regional_negative_input || '').trim();
-  if (!positiveSinkInput || !connectedNodeId(sink, positiveSinkInput)) return null;
-  if (negativeSinkInput && !connectedNodeId(sink, negativeSinkInput)) return null;
-
-  const base = {
-    method,
-    maxLayers: boundedRegionalLayerLimit(sink.meta.umbra_regional_max_layers),
-    positivePrompt: true,
-    negativePrompt: !!negativeSinkInput,
-    autoNegative: !!negativeSinkInput,
-    sinkNodeId: sink.id,
-    positiveSinkInput,
-    negativeSinkInput,
-    clipSourceNodeId: '',
-    clipSourceOutput: 0,
-    positiveTransformNodeId: '',
-    positiveEncoderNodeId: '',
-    negativeEncoderNodeId: '',
-  } satisfies UmbraUiInpaintRegionalConditioningContract;
-
-  if (method === 'qwen_image_edit_masked_conditioning') {
-    const source = nodes.find((node) => hasNodeRole(node, 'inpaint_source'));
-    const positiveEncoder = nodes.find((node) => hasNodeRole(node, 'inpaint_regional_positive_encoder'));
-    const negativeEncoder = nodes.find((node) => hasNodeRole(node, 'inpaint_regional_negative_encoder'));
-    const encoderReady = (node: PipelineNode | undefined): node is PipelineNode => !!node
-      && node.classType === 'TextEncodeQwenImageEditPlus'
-      && !!connectedNodeId(node, 'clip')
-      && !!connectedNodeId(node, 'vae')
-      && connectedNodeId(node, 'image1') === source?.id
-      && hasInput(node, 'prompt');
-    if (!source || !encoderReady(positiveEncoder) || !encoderReady(negativeEncoder)) return null;
-    if (connectedNodeId(sink, positiveSinkInput) !== positiveEncoder?.id
-      || connectedNodeId(sink, negativeSinkInput) !== negativeEncoder?.id) return null;
-    return {
-      ...base,
-      positiveEncoderNodeId: positiveEncoder.id,
-      negativeEncoderNodeId: negativeEncoder.id,
-    };
-  }
-
-  if (method === 'flux_text_encode_masked_conditioning') {
-    const encoders = nodes.filter((node) => hasNodeRole(node, 'inpaint_regional_positive_encoder'));
-    if (encoders.length !== 1) return null;
-    const encoder = encoders[0];
-    if (encoder.classType !== 'CLIPTextEncodeFlux'
-      || !connectedNodeId(encoder, 'clip')
-      || !hasInput(encoder, 'clip_l')
-      || !hasInput(encoder, 't5xxl')
-      || !hasInput(encoder, 'guidance')
-      || connectedNodeId(sink, positiveSinkInput) !== encoder.id) return null;
-    return {
-      ...base,
-      negativePrompt: false,
-      autoNegative: false,
-      positiveEncoderNodeId: encoder.id,
-    };
-  }
-
-  const clipSources = nodes.filter((node) => hasNodeRole(node, 'inpaint_regional_clip_source'));
-  if (clipSources.length !== 1) return null;
-  const clipSource = clipSources[0];
-  const clipSourceOutput = Math.max(0, Math.floor(Number(clipSource.meta.umbra_output_index) || 0));
-  if (method === 'flux_guidance_masked_conditioning') {
-    const transforms = nodes.filter((node) => hasNodeRole(node, 'inpaint_regional_positive_transform'));
-    if (transforms.length !== 1) return null;
-    const transform = transforms[0];
-    if (transform.classType !== 'FluxGuidance'
-      || !connectedNodeId(transform, 'conditioning')
-      || !Object.prototype.hasOwnProperty.call(transform.inputs, 'guidance')
-      || connectedNodeId(sink, positiveSinkInput) !== transform.id) return null;
-    return {
-      ...base,
-      negativePrompt: false,
-      autoNegative: false,
-      clipSourceNodeId: clipSource.id,
-      clipSourceOutput,
-      positiveTransformNodeId: transform.id,
-    };
-  }
-  if (!nodeMap.has(connectedNodeId(sink, positiveSinkInput))) return null;
-  return {
-    ...base,
-    clipSourceNodeId: clipSource.id,
-    clipSourceOutput,
-  };
-}
-
-export function resolveUmbraUiInpaintRegionalConditioningContractForAdapter(
-  promptGraph: Record<string, unknown>,
-  adapter: UmbraUiInpaintAdapter,
-): UmbraUiInpaintRegionalConditioningContract | null {
-  const contract = resolveUmbraUiInpaintRegionalConditioningContract(promptGraph);
-  if (!contract) return null;
-  if (adapter === 'classic_conditioning') {
-    return contract.method === 'clip_masked_conditioning' ? contract : null;
-  }
-  if (adapter === 'flux_fill') {
-    return contract.method === 'flux_text_encode_masked_conditioning' ? contract : null;
-  }
-  if (adapter === 'qwen_image_controlnet') {
-    return contract.method === 'clip_masked_conditioning' ? contract : null;
-  }
-  return contract.method === 'clip_masked_conditioning'
-    || contract.method === 'flux_guidance_masked_conditioning'
-    || contract.method === 'qwen_image_edit_masked_conditioning'
-    ? contract
-    : null;
-}
-
 function connectedNodeExists(
   node: PipelineNode | undefined,
   inputName: string,
@@ -356,15 +202,6 @@ export function listUmbraUiInpaintPipelineGraphIssues(
   const nodeMap = new Map(nodes.map((node) => [node.id, node] as const));
   const nodeIds = new Set(nodeMap.keys());
   const issues: string[] = [];
-  const declaresRegionalConditioning = nodes.some((node) => (
-    String(node.meta.umbra_regional_method || '').trim().length > 0
-    || node.roles.some((role) => role.startsWith('inpaint_regional_'))
-  ));
-  if (declaresRegionalConditioning
-    && !resolveUmbraUiInpaintRegionalConditioningContractForAdapter(promptGraph, adapter)) {
-    issues.push('exact regional-conditioning contract');
-  }
-
   if (adapter !== 'native_edit') {
     const unified = nodes.find((node) => node.classType === 'UmbraPowerPrompter');
     if (!unified) {
@@ -1047,9 +884,6 @@ export function deriveUmbraUiInpaintCanvasCapabilities(
 ): UmbraUiInpaintCanvasCapabilities {
   const nodes = listPipelineNodes(promptGraph);
   const nodeClassTypes = uniqueNodeClassTypes(nodes);
-  const regionalContract = descriptor.inpaintAdapter
-    ? resolveUmbraUiInpaintRegionalConditioningContractForAdapter(promptGraph, descriptor.inpaintAdapter)
-    : null;
   if (descriptor.inpaintAdapter === 'classic_conditioning') {
     const isAnima = normalizeUmbraUiModelFamilyKey(
       descriptor.modelFamilyKey || descriptor.modelFamily,
@@ -1062,15 +896,6 @@ export function deriveUmbraUiInpaintCanvasCapabilities(
     ];
     return {
       version: 1,
-      regionalGuidance: {
-        support: 'adjustable',
-        reason: 'Umbra can compose regional positive and negative conditioning into this classic inpaint graph.',
-        nodeClassTypes,
-        maxLayers: 16,
-        positivePrompt: true,
-        negativePrompt: true,
-        autoNegative: true,
-      },
       controlLayers: {
         support: 'adjustable',
         reason: isAnima
@@ -1193,33 +1018,6 @@ export function deriveUmbraUiInpaintCanvasCapabilities(
     });
     return {
       version: 1,
-      regionalGuidance: regionalContract
-        ? {
-          support: 'adjustable',
-          reason: regionalContract.method === 'flux_guidance_masked_conditioning'
-            ? 'The locked native edit graph declares an exact FLUX guidance encoder and positive-conditioning sink. Negative regional conditioning is not part of this guider contract.'
-            : regionalContract.method === 'qwen_image_edit_masked_conditioning'
-              ? 'The locked native edit graph declares paired Qwen Image Edit Plus regional encoders and conditioning sinks.'
-              : 'The locked native edit graph declares an exact CLIP encoder and paired regional-conditioning sinks.',
-          nodeClassTypes: Array.from(new Set([
-            ...nodeClassTypes,
-            'LoadImageMask',
-            'ConditioningSetMask',
-            'ConditioningSetTimestepRange',
-            'ConditioningCombine',
-            ...(regionalContract.autoNegative ? ['InvertMask'] : []),
-          ])).sort(),
-          maxLayers: regionalContract.maxLayers,
-          positivePrompt: regionalContract.positivePrompt,
-          negativePrompt: regionalContract.negativePrompt,
-          autoNegative: regionalContract.autoNegative,
-        }
-        : {
-          ...unavailable('regional-guidance'),
-          positivePrompt: false,
-          negativePrompt: false,
-          autoNegative: false,
-        },
       controlLayers: zImageControlReady
         ? {
           support: 'adjustable',
@@ -1257,31 +1055,6 @@ export function deriveUmbraUiInpaintCanvasCapabilities(
   });
   return {
     version: 1,
-    regionalGuidance: regionalContract
-      ? {
-        support: 'adjustable',
-        reason: regionalContract.method === 'flux_text_encode_masked_conditioning'
-          ? 'The locked FLUX graph declares an exact CLIPTextEncodeFlux template and positive-conditioning sink.'
-          : 'The locked graph declares an exact CLIP source and paired regional-conditioning sinks.',
-        nodeClassTypes: Array.from(new Set([
-          ...nodeClassTypes,
-          'LoadImageMask',
-          'ConditioningSetMask',
-          'ConditioningSetTimestepRange',
-          'ConditioningCombine',
-          ...(regionalContract.autoNegative ? ['InvertMask'] : []),
-        ])).sort(),
-        maxLayers: regionalContract.maxLayers,
-        positivePrompt: regionalContract.positivePrompt,
-        negativePrompt: regionalContract.negativePrompt,
-        autoNegative: regionalContract.autoNegative,
-      }
-      : {
-        ...unavailable('regional-guidance'),
-        positivePrompt: false,
-        negativePrompt: false,
-        autoNegative: false,
-      },
     controlLayers: { ...unavailable('ControlNet'), adapterTypes: [], modes: [] },
     referenceLayers: fluxReduxReady
       ? {

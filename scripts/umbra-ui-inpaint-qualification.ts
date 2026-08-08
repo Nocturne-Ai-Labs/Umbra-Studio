@@ -42,10 +42,8 @@ export interface UmbraUiInpaintMetadataExpectation {
   outputOnlyMaskedRegions: boolean;
   colorMatch: number;
   differentialStrength: number;
-  regionalGuidanceIds: string[];
   controlLayerIds: string[];
   referenceLayerIds: string[];
-  regionalGuidance?: UmbraUiInpaintEntityMetadataExpectation[];
   controlLayers?: UmbraUiInpaintEntityMetadataExpectation[];
   referenceLayers?: UmbraUiInpaintEntityMetadataExpectation[];
   requiredPromptNodeClasses?: string[];
@@ -394,11 +392,6 @@ export function validateUmbraUiInpaintOutputMetadata(
     compareBoolean(inpaintIssues, 'Masked-only output', inpaint.outputOnlyMaskedRegions, expected.outputOnlyMaskedRegions);
     compareNumber(inpaintIssues, 'Color match', inpaint.colorMatch, expected.colorMatch);
     compareNumber(inpaintIssues, 'Differential strength', inpaint.differentialStrength, expected.differentialStrength);
-    if (expected.regionalGuidance) {
-      compareEntitySettings(inpaintIssues, 'Regional guidance', inpaint.regionalGuidance, expected.regionalGuidance);
-    } else {
-      compareEntityIds(inpaintIssues, 'Regional guidance ids', inpaint.regionalGuidance, expected.regionalGuidanceIds);
-    }
     if (expected.controlLayers) {
       compareEntitySettings(inpaintIssues, 'Control layer', inpaint.controlLayers, expected.controlLayers);
     } else {

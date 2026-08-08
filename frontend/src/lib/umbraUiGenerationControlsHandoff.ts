@@ -31,11 +31,17 @@ export function normalizeUmbraUiGenerationControlsHandoff(
   const source = normalizeRecord(value);
   const modelFamily = String(source.modelFamily || '').trim();
   if (!modelFamily) return null;
+  const generation = normalizePowerPrompterGenerationControls(source.generation);
   return {
     version: 1,
     modelFamily,
     pipelineName: String(source.pipelineName || '').trim(),
-    generation: normalizePowerPrompterGenerationControls(source.generation),
+    generation: {
+      ...generation,
+      outputOwner: 'power_prompter',
+      outputMode: 'txt2img',
+      outputFolder: '',
+    },
     createdAt: Number.isFinite(Number(source.createdAt)) ? Number(source.createdAt) : Date.now(),
   };
 }
@@ -48,11 +54,13 @@ export function applyUmbraUiGenerationControlsToPowerPrompterDocument(
   const handoff = normalizeUmbraUiGenerationControlsHandoff(value);
   if (!handoff) return null;
   const normalizedDocument = normalizePowerPrompterCardDocument(document, file ?? document.file);
+  const existingOutputFolder = normalizedDocument.generation.outputFolder || '';
   const generation = normalizePowerPrompterGenerationControls({
     ...handoff.generation,
     mediaType: 'image',
     outputOwner: 'power_prompter',
     outputMode: 'txt2img',
+    outputFolder: existingOutputFolder,
   });
   return {
     ...normalizedDocument,

@@ -22,19 +22,7 @@
       "samplerName": "euler",
       "scheduler": "normal",
       "denoise": 0.8,
-      "fillMode": "neutral",
-      "regionalGuidance": [
-        {
-          "id": "classic-region",
-          "name": "Classic regional prompt",
-          "positivePrompt": "warm window light, detailed stonework",
-          "negativePrompt": "flat lighting, melted architecture",
-          "autoNegative": true,
-          "weight": 0.8,
-          "beginStepPercent": 0.1,
-          "endStepPercent": 0.9
-        }
-      ]
+      "fillMode": "neutral"
     },
     {
       "id": "classic-illustrious-outpaint",
@@ -256,19 +244,7 @@
       "samplerName": "euler",
       "scheduler": "simple",
       "denoise": 0.8,
-      "fillMode": "neutral",
-      "regionalGuidance": [
-        {
-          "id": "flux-fill-region",
-          "name": "FLUX Fill positive region",
-          "positivePrompt": "snow-covered timber balcony, warm window light",
-          "negativePrompt": "",
-          "autoNegative": false,
-          "weight": 0.8,
-          "beginStepPercent": 0.1,
-          "endStepPercent": 0.9
-        }
-      ]
+      "fillMode": "neutral"
     },
     {
       "id": "flux-fill-outpaint",
@@ -394,19 +370,7 @@
       "samplerName": "euler",
       "scheduler": "simple",
       "denoise": 0.8,
-      "fillMode": "neutral",
-      "regionalGuidance": [
-        {
-          "id": "qwen-region",
-          "name": "Qwen paired region",
-          "positivePrompt": "coherent stone arch with warm reflected light",
-          "negativePrompt": "broken arch, duplicated stones",
-          "autoNegative": true,
-          "weight": 0.85,
-          "beginStepPercent": 0.1,
-          "endStepPercent": 0.9
-        }
-      ]
+      "fillMode": "neutral"
     },
     {
       "id": "qwen-controlnet-outpaint",
@@ -467,18 +431,6 @@
       "scheduler": "simple",
       "denoise": 0.8,
       "fillMode": "neutral",
-      "regionalGuidance": [
-        {
-          "id": "hidream-region",
-          "name": "HiDream paired region",
-          "positivePrompt": "natural timber doorway, coherent alpine lighting",
-          "negativePrompt": "warped doorway, inconsistent shadows",
-          "autoNegative": true,
-          "weight": 0.85,
-          "beginStepPercent": 0.1,
-          "endStepPercent": 0.9
-        }
-      ],
       "referenceLayers": [
         {
           "id": "hidream-reference",
@@ -531,6 +483,48 @@
       "denoise": 0.75,
       "fillMode": "lama",
       "inpaintModelName": "MAT_Places512_G_fp16.safetensors"
+    },
+    {
+      "id": "noobai-vpred-classic-inpaint",
+      "label": "NoobAI XL V-Pred classic inpaint",
+      "enabled": false,
+      "operationMode": "inpaint",
+      "fixtureMode": "inpaint-center",
+      "modelFamily": "NoobAI XL V-Pred",
+      "expectedAdapter": "classic_conditioning",
+      "modelSource": "checkpoint",
+      "checkpointName": "NoobAI-XL-Vpred-v1.0.safetensors",
+      "prompt": "repair the masked area with coherent anatomy and lighting",
+      "negativePrompt": "artifacts, seams, malformed anatomy",
+      "width": 832,
+      "height": 1216,
+      "steps": 28,
+      "cfg": 5,
+      "samplerName": "euler",
+      "scheduler": "normal",
+      "denoise": 0.8,
+      "fillMode": "neutral"
+    },
+    {
+      "id": "noobai-vpred-classic-outpaint",
+      "label": "NoobAI XL V-Pred classic outpaint",
+      "enabled": false,
+      "operationMode": "outpaint",
+      "fixtureMode": "outpaint-border",
+      "modelFamily": "NoobAI XL V-Pred",
+      "expectedAdapter": "classic_conditioning",
+      "modelSource": "checkpoint",
+      "checkpointName": "NoobAI-XL-Vpred-v1.0.safetensors",
+      "prompt": "extend the scene beyond the frame with coherent composition and lighting",
+      "negativePrompt": "border, seam, artifacts, malformed anatomy",
+      "width": 832,
+      "height": 1216,
+      "steps": 28,
+      "cfg": 5,
+      "samplerName": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "fillMode": "neutral"
     },
     {
       "id": "anima-classic-inpaint",
@@ -632,18 +626,6 @@
       "scheduler": "simple",
       "denoise": 0.8,
       "fillMode": "neutral",
-      "regionalGuidance": [
-        {
-          "id": "zimage-region",
-          "name": "Z-Image regional repair",
-          "positivePrompt": "matching timber roof detail and warm reflected light",
-          "negativePrompt": "melted beams, broken roof geometry",
-          "autoNegative": true,
-          "weight": 0.8,
-          "beginStepPercent": 0,
-          "endStepPercent": 1
-        }
-      ],
       "controlLayers": [
         {
           "id": "zimage-canny-control",
@@ -745,18 +727,6 @@
       "scheduler": "simple",
       "denoise": 0.8,
       "fillMode": "neutral",
-      "regionalGuidance": [
-        {
-          "id": "qwen-edit-region",
-          "name": "Qwen Edit paired region",
-          "positivePrompt": "matching timber roof detail and warm reflected light",
-          "negativePrompt": "melted beams, broken roof geometry",
-          "autoNegative": true,
-          "weight": 0.8,
-          "beginStepPercent": 0.1,
-          "endStepPercent": 0.9
-        }
-      ],
       "referenceLayers": [
         {
           "id": "qwen-edit-reference",
@@ -810,18 +780,6 @@
       "scheduler": "simple",
       "denoise": 0.8,
       "fillMode": "neutral",
-      "regionalGuidance": [
-        {
-          "id": "flux2-region",
-          "name": "FLUX.2 positive region",
-          "positivePrompt": "coherent timber roof detail, matching snow and light",
-          "negativePrompt": "",
-          "autoNegative": false,
-          "weight": 0.85,
-          "beginStepPercent": 0.1,
-          "endStepPercent": 0.9
-        }
-      ],
       "referenceLayers": [
         {
           "id": "flux2-reference",

@@ -81,6 +81,7 @@ const RUNTIME_SKELETON_LEAF_DIRECTORIES = [
   'User/PowerPrompter/CSV/tags',
   'User/PowerPrompter/Presets',
   'User/PowerPrompter/Prompts',
+  'User/PowerPrompter/Wildcards',
   'User/PowerPrompter/Queue/History',
   'User/Recovery/Replaced Sources',
   'User/Temp',

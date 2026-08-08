@@ -335,6 +335,7 @@ export interface PowerPrompterSettings {
   queueShuffleEnabled: boolean;
   queueShuffleSeed: number;
   agentEnhanceCompletePrompts: boolean;
+  agentInstructionId: string;
   generationCompleteSoundEnabled: boolean;
   generationCompleteSoundStyle: PowerPrompterCompletionSoundStyle;
   generationCompleteSoundVolume: number;

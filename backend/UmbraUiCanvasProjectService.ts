@@ -266,7 +266,15 @@ function migrateProjectDocument(rawProject: unknown): Record<string, any> {
   project.height = height;
   project.version = PROJECT_VERSION;
   project.generationRegionAspectRatio = Math.max(0, Math.min(32, Number(project.generationRegionAspectRatio) || 0));
-  project.layers = Array.isArray(project.layers) ? project.layers.map((rawLayer: unknown) => {
+  const sourceLayers = Array.isArray(project.layers) ? project.layers.map(asRecord) : [];
+  const obsoleteMaskIds = new Set(sourceLayers
+    .filter((layer) => layer.kind === 'regional_guidance')
+    .map((layer) => String(layer.maskLayerId || '').trim())
+    .filter(Boolean));
+  project.layers = sourceLayers
+    .filter((layer) => layer.kind !== 'regional_guidance')
+    .filter((layer) => !(layer.kind === 'mask' && obsoleteMaskIds.has(String(layer.id || '').trim())))
+    .map((rawLayer: unknown) => {
     const layer = asRecord(rawLayer);
     const hasPersistedOpacity = Object.prototype.hasOwnProperty.call(layer, 'opacity');
     layer.visible = layer.visible !== false;
@@ -303,9 +311,7 @@ function migrateProjectDocument(rawProject: unknown): Record<string, any> {
       };
     }
     if (layer.kind === 'mask') {
-      layer.purpose = layer.purpose === 'regional_guidance'
-        ? 'regional_guidance'
-        : layer.purpose === 'reference'
+      layer.purpose = layer.purpose === 'reference'
           ? 'reference'
         : layer.purpose === 'layer'
           ? 'layer'
@@ -332,19 +338,14 @@ function migrateProjectDocument(rawProject: unknown): Record<string, any> {
       layer.ipAdapterCombineEmbeds = combineModes.includes(String(layer.ipAdapterCombineEmbeds || '')) ? layer.ipAdapterCombineEmbeds : 'concat';
       layer.ipAdapterEmbedsScaling = scalingModes.includes(String(layer.ipAdapterEmbedsScaling || '')) ? layer.ipAdapterEmbedsScaling : 'V only';
       layer.maskLayerId = String(layer.maskLayerId || '').trim() || undefined;
-      layer.regionLayerId = String(layer.regionLayerId || '').trim() || undefined;
+      delete layer.regionLayerId;
     }
-    if (layer.kind === 'regional_guidance') layer.autoNegative = layer.autoNegative === true;
     return layer;
-  }) : [];
-  const regionalLayerIds = new Set(project.layers
-    .filter((layer: Record<string, any>) => layer.kind === 'regional_guidance')
-    .map((layer: Record<string, any>) => String(layer.id || '')));
+  });
   project.layers = project.layers.map((layer: Record<string, any>) => {
     if (layer.kind !== 'reference') return layer;
-    if (layer.method !== 'ip_adapter') return { ...layer, maskLayerId: undefined, regionLayerId: undefined };
-    if (layer.regionLayerId && regionalLayerIds.has(layer.regionLayerId)) return { ...layer, maskLayerId: undefined };
-    return { ...layer, regionLayerId: undefined };
+    if (layer.method !== 'ip_adapter') return { ...layer, maskLayerId: undefined };
+    return layer;
   });
   const referencedMaskIds = new Set(project.layers.flatMap((layer: Record<string, any>) => (
     typeof layer.maskLayerId === 'string' && layer.maskLayerId ? [layer.maskLayerId] : []

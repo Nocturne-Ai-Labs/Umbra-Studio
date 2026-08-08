@@ -1,5 +1,80 @@
 # Changelog
 
+## v0.30.6
+
+### TL;DR - Setup After Updating
+
+No additional Umbra support-model download is required. Update or extract the
+portable package normally. To use the new **NoobAI XL V-Pred** pipeline, place
+a compatible NoobAI/NubeAI XL V-Pred checkpoint in ComfyUI's checkpoint model
+folders, then select **NoobAI XL V-Pred** in Umbra UI or Power Prompter.
+
+Umbra seeds the new bundled wildcard libraries into
+`User/PowerPrompter/Wildcards` only when a same-named file does not already
+exist. Existing custom wildcard files and edits are preserved.
+
+### NoobAI XL V-Pred Pipeline
+
+- Added a dedicated NoobAI XL V-Pred model family instead of reusing the
+  Illustrious pipeline identity.
+- Added locked text-to-image and image-to-image workflows with native
+  `v_prediction` sampling and Zero Terminal SNR.
+- Added NoobAI XL V-Pred compatibility across Power Prompter, Umbra UI
+  text-to-image, image-to-image, inpainting, and Canvas generation paths.
+- Added visible **V-PRED + ZSNR** resource status so the active prediction
+  behavior is clear in generation controls.
+
+### Power Prompter Wildcards
+
+- Added seeded prompt wildcard expansion using `__wildcard-name__` tokens, with
+  a new wildcard library shared by Power Prompter and Umbra UI prompt fields.
+- Added bundled wildcard sources for poses, outfits, expressions, locations,
+  cameras, lighting, colors, and optional adult poses and outfits.
+- Added dedicated **Style Utility** and **Wildcard Utility** card creation flows.
+- Added a visual Wildcard Utility Builder for selecting one or more random
+  sources while preserving manually written fixed prompt text.
+- Added **Create From Cards**, allowing a named wildcard to be built from
+  selected Power Prompter cards or individual variants. Card groups expose
+  clear Expand/Collapse controls, partial selection, variant names, and prompt
+  previews.
+- Made every queued prompt resolve its wildcard choices independently and
+  deterministically from its queue seed and position.
+
+### Prompt Agent And Tag Tools
+
+- Added a persisted active-instruction selector to the Power Prompter Agent
+  panel and applied it consistently to per-variant and complete-prompt
+  enhancement.
+- Improved Danbooru CSV grounding with conservative close-tag matching while
+  preserving custom triggers, weights, embeddings, and LoRA syntax.
+- Added one-click prompt cleanup for underscores, whitespace, commas, and
+  duplicate tags in compact and expanded variant editors.
+
+### Workflow Interoperability
+
+- Kept Power Prompter's existing output destination when generation controls
+  are transferred from Umbra UI, preventing outputs from being redirected into
+  Umbra UI's folder layout.
+- Removed the unfinished regional-conditioning experiment and its dormant
+  backend, Canvas, inpainting, project, and pipeline capability code. Existing
+  Canvas inpaint, outpaint, control-layer, and reference-layer workflows remain
+  available.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Umbra UI generation-control transfers no longer overwrite Power
+  Prompter's save destination.
+- **Fixed:** Wildcards now resolve per queued generation instead of remaining
+  as literal prompt tokens.
+- **Fixed:** Danbooru agent enhancement now follows the instruction explicitly
+  selected in Power Prompter.
+- **Improved:** Users can create reusable wildcard libraries directly from
+  complete cards or carefully selected individual variants.
+- **Improved:** Wildcard selection now has visible group state, variant
+  previews, and clear Expand/Collapse badges.
+- **Improved:** Removed the incomplete regional-conditioning surface rather
+  than shipping a misleading or unreliable generation control.
+
 ## v0.30.5
 
 ### TL;DR - Setup After Updating

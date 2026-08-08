@@ -78,6 +78,7 @@ import {
   parsePowerPrompterCsv,
   type PowerPrompterCsvItem,
 } from './backend/powerPrompterCsv';
+import { expandUmbraPromptWildcards, normalizeUmbraPromptWildcards } from './shared/promptWildcards';
 import {
   buildHermesPromptCommand,
   isMissingHermesPromptSession,
@@ -132,6 +133,7 @@ import {
 } from './backend/UmbraUiPipelineCapabilities';
 import { buildQueuePromptsFromCards } from './shared/power-prompter/queuePromptBuilder';
 import {
+  UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
   createDefaultUmbraUiAgentInstructions,
   mergeRequiredUmbraUiAgentInstructions,
   type UmbraUiAgentContext,
@@ -6121,7 +6123,7 @@ function broadcastPrompterSyncToComfy() {
   }
 }
 
-function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: any) {
+async function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: any) {
   const prompts = sanitizePrompterPromptLines(data?.prompts, { dedupe: false });
   if (prompts.length === 0) {
     sendWs(ws, {
@@ -6134,6 +6136,30 @@ function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: any) {
   }
 
   const requestId = String(data?.requestId || crypto.randomUUID());
+  const wildcards = await listPowerPrompterWildcards();
+  const baseSeed = Math.max(0, Math.floor(Number(data?.state?.generation?.seed) || 0));
+  const resolvedPrompts = prompts.map((prompt, index) => (
+    expandUmbraPromptWildcards(prompt, wildcards, baseSeed + index).prompt
+  ));
+  data = {
+    ...data,
+    prompts: resolvedPrompts,
+    state: data?.state && typeof data.state === 'object'
+      ? {
+        ...data.state,
+        promptEntries: Array.isArray(data.state.promptEntries)
+          ? data.state.promptEntries.map((entry: any, index: number) => ({
+            ...entry,
+            prompt: expandUmbraPromptWildcards(
+              String(entry?.prompt || resolvedPrompts[index] || ''),
+              wildcards,
+              baseSeed + index,
+            ).prompt,
+          }))
+          : data.state.promptEntries,
+      }
+      : data?.state,
+  };
   const existingPending = prompterPendingQueueRequests.get(requestId);
   if (existingPending) {
     existingPending.sourceWs = ws;
@@ -6142,7 +6168,7 @@ function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: any) {
         ...data,
         type: 'queue_request',
         requestId,
-        prompts,
+        prompts: resolvedPrompts,
       }),
       targetBridgeId: existingPending.targetBridgeId || (existingPending.targetWs ? getPrompterMeta(existingPending.targetWs).bridgeId : '') || '',
       ageMs: Math.max(0, Date.now() - existingPending.createdAt),
@@ -6159,7 +6185,7 @@ function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: any) {
   }
 
   try {
-    void handlePrompterApiWorkflowQueueRequest(ws, data, requestId, prompts).catch((error: any) => {
+    void handlePrompterApiWorkflowQueueRequest(ws, data, requestId, resolvedPrompts).catch((error: any) => {
       prompterPendingQueueRequests.delete(requestId);
       sendWs(ws, {
         type: 'queue_result',
@@ -10747,7 +10773,14 @@ function handlePrompterMessage(ws: ServerWebSocket<unknown>, data: any) {
           : [],
       }
       : data;
-    handlePrompterQueueRequest(ws, payload);
+    void handlePrompterQueueRequest(ws, payload).catch((error: any) => {
+      sendWs(ws, {
+        type: 'queue_result',
+        requestId: String(payload?.requestId || ''),
+        success: false,
+        error: String(error?.message || 'Failed to prepare generation pipeline request.'),
+      });
+    });
     return;
   }
 
@@ -15895,6 +15928,8 @@ interface PowerPrompterSettings {
   queuePromptLimit: number | null;
   queueShuffleEnabled: boolean;
   queueShuffleSeed: number;
+  agentEnhanceCompletePrompts: boolean;
+  agentInstructionId: string;
   generationCompleteSoundEnabled: boolean;
   generationCompleteSoundStyle:
   | 'glass_tick'
@@ -15944,6 +15979,8 @@ const DEFAULT_PP_SETTINGS: PowerPrompterSettings = {
   queuePromptLimit: null,
   queueShuffleEnabled: false,
   queueShuffleSeed: 0,
+  agentEnhanceCompletePrompts: false,
+  agentInstructionId: UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
   generationCompleteSoundEnabled: true,
   generationCompleteSoundStyle: 'glass_tick',
   generationCompleteSoundVolume: 0.42,
@@ -15999,6 +16036,42 @@ const USER_CONFIG_FILES: Record<string, string> = {
 };
 const PP_CSV_TAGS_DIR = join(USER_DIR, 'PowerPrompter', 'CSV', 'tags');
 const PP_CSV_CHARS_DIR = join(USER_DIR, 'PowerPrompter', 'CSV', 'character tags');
+const PP_WILDCARDS_DIR = join(USER_DIR, 'PowerPrompter', 'Wildcards');
+const PP_DEFAULT_WILDCARDS_DIR = join(ROOT_DIR, 'defaults', 'PowerPrompter', 'Wildcards');
+
+function normalizePowerPrompterWildcardName(rawName: unknown): string {
+  return String(rawName || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\.txt$/i, '')
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 128);
+}
+
+async function listPowerPrompterWildcards() {
+  await fs.mkdir(PP_WILDCARDS_DIR, { recursive: true });
+  if (existsSync(PP_DEFAULT_WILDCARDS_DIR)) {
+    const bundledEntries = await fs.readdir(PP_DEFAULT_WILDCARDS_DIR, { withFileTypes: true });
+    await Promise.all(bundledEntries
+      .filter((entry) => entry.isFile() && extname(entry.name).toLowerCase() === '.txt')
+      .map(async (entry) => {
+        const destination = join(PP_WILDCARDS_DIR, entry.name);
+        if (!existsSync(destination)) {
+          await fs.copyFile(join(PP_DEFAULT_WILDCARDS_DIR, entry.name), destination);
+        }
+      }));
+  }
+  const entries = await fs.readdir(PP_WILDCARDS_DIR, { withFileTypes: true });
+  const wildcards = await Promise.all(entries
+    .filter((entry) => entry.isFile() && extname(entry.name).toLowerCase() === '.txt')
+    .map(async (entry) => {
+      const name = normalizePowerPrompterWildcardName(entry.name);
+      const content = await fs.readFile(join(PP_WILDCARDS_DIR, entry.name), 'utf8');
+      return { name, values: content.split(/\r?\n/).map((value) => value.trim()).filter(Boolean) };
+    }));
+  return normalizeUmbraPromptWildcards(wildcards).sort((left, right) => left.name.localeCompare(right.name));
+}
 const PP_QUEUE_DIR = join(USER_DIR, 'PowerPrompter', 'Queue');
 const PP_QUEUE_STATE_PATH = join(PP_QUEUE_DIR, 'queue-state.json');
 let lastPPQueueSnapshotClearedAt = 0;
@@ -16595,6 +16668,9 @@ function normalizePPSettingsPayload(rawSettings: unknown): PowerPrompterSettings
     queuePromptLimit: normalizePPQueuePromptLimit((settings as any).queuePromptLimit),
     queueShuffleEnabled: (settings as any).queueShuffleEnabled === true,
     queueShuffleSeed: Math.max(0, Math.floor(Number((settings as any).queueShuffleSeed) || 0)),
+    agentEnhanceCompletePrompts: settings.agentEnhanceCompletePrompts === true,
+    agentInstructionId: clampUmbraUiAgentText(settings.agentInstructionId, 120)
+      || UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
     generationCompleteSoundEnabled: settings.generationCompleteSoundEnabled !== false,
     generationCompleteSoundStyle: normalizePPCompletionSoundStyle(settings.generationCompleteSoundStyle),
     generationCompleteSoundVolume: normalizePPCompletionSoundVolume(settings.generationCompleteSoundVolume),
@@ -16995,6 +17071,7 @@ function buildUmbraUiAgentRequestPrompt(
   task: 'compose' | 'enhance-field' | 'enhance-complete-prompt' = 'compose',
   fieldLabel = '',
   csvGrounding = '',
+  danbooruTagEditing = false,
 ): string {
   if (task === 'enhance-complete-prompt') {
     return [
@@ -17011,6 +17088,26 @@ function buildUmbraUiAgentRequestPrompt(
       sourcePrompt,
       ...(csvGrounding ? ['', csvGrounding] : []),
       ...(context ? ['', 'UMBRA GENERATION CONTEXT:', context] : []),
+    ].join('\n');
+  }
+  if (task === 'enhance-field' && danbooruTagEditing) {
+    return [
+      'You are a conservative Danbooru tag editor for exactly one Power Prompter variant.',
+      `The variant role is "${fieldLabel || 'Prompt variant'}". Edit only the comma-separated tag text in this variant.`,
+      'Preserve the user\'s meaning and every already-valid exact tag.',
+      'Correct misspelled, partial, informal, or noncanonical ordinary terms only when the supplied CSV vocabulary contains a close relevant exact tag.',
+      'Add only closely related visible tags that make the stated variant role more precise. Do not introduce a different subject, identity, pose, outfit, location, style, camera treatment, or scene.',
+      'Preserve character triggers, custom identity tokens, prompt weights, embeddings, and LoRA syntax exactly, even when they are absent from the CSV vocabulary.',
+      'Remove duplicates and direct contradictions. Never invent a plausible-looking Danbooru tag; keep an explicit custom token or omit an uncertain ordinary concept when no trustworthy match exists.',
+      'Return only the complete replacement as concise comma-separated tag text. Do not return prose, labels, Markdown, reasoning, or commentary.',
+      '',
+      `PROMPTING GUIDANCE (${instructionName}):`,
+      inlineInstruction,
+      '',
+      'VARIANT TEXT:',
+      sourcePrompt,
+      ...(csvGrounding ? ['', csvGrounding] : []),
+      ...(context ? ['', 'POWER PROMPTER CONTEXT:', context] : []),
     ].join('\n');
   }
   if (task === 'enhance-field') {
@@ -17358,7 +17455,9 @@ async function generateUmbraUiPromptWithAgent(value: unknown): Promise<{
   const inlineInstruction = prepareUmbraUiInlineAgentInstruction(instruction.instruction)
     || 'Faithfully convert the request into a clear, production-ready generation prompt.';
   let csvGrounding = '';
-  if (mediaType === 'image' && instruction.id === 'image-anima-sdxl-csv-tags') {
+  const isDanbooruTagInstruction = mediaType === 'image'
+    && instruction.id === UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID;
+  if (isDanbooruTagInstruction) {
     if (ppIndex.length === 0) {
       await indexPowerPrompterCSVs();
     }
@@ -17373,6 +17472,7 @@ async function generateUmbraUiPromptWithAgent(value: unknown): Promise<{
     task,
     fieldLabel,
     csvGrounding,
+    isDanbooruTagInstruction,
   );
 
   const startedAt = Date.now();
@@ -18823,51 +18923,6 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
       if (limit <= 0) throw new Error(`The selected locked pipeline does not support ${kind}.`);
       throw new Error(`The selected locked pipeline supports at most ${limit} ${kind}.`);
     };
-    let regionalPayload: any[] = [];
-    try {
-      const parsed = JSON.parse(String(form.get('regionalGuidance') || '[]'));
-      regionalPayload = Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return json({ success: false, error: 'Regional guidance is not valid JSON.' }, 400);
-    }
-    assertLayerLimit('regional guidance layers', regionalPayload.length, declaredLayerLimit(canvasCapabilities?.regionalGuidance));
-    const regionalCapability = canvasCapabilities?.regionalGuidance;
-    const regionalGuidance = regionalPayload.map((rawRegion, index) => {
-      const id = String(rawRegion?.id || `region-${index + 1}`).trim().replace(/[^a-z0-9._-]+/gi, '-').slice(0, 120);
-      const maskFile = form.get(`regionalMask:${id}`) as any;
-      if (!id || !isUpload(maskFile)) throw new Error(`Regional guidance ${index + 1} is missing its mask.`);
-      if (!UMBRA_UI_INPAINT_IMAGE_EXTENSIONS.has(extname(maskFile.name).toLowerCase())) {
-        throw new Error(`Regional guidance ${index + 1} has an unsupported mask format.`);
-      }
-      const beginStepPercent = Math.max(0, Math.min(1, finiteNumberOrFallback(rawRegion?.beginStepPercent, 0)));
-      const endStepPercent = Math.max(beginStepPercent, Math.min(1, finiteNumberOrFallback(rawRegion?.endStepPercent, 1)));
-      const positivePrompt = String(rawRegion?.positivePrompt || '').trim().slice(0, 32000);
-      const negativePrompt = String(rawRegion?.negativePrompt || '').trim().slice(0, 32000);
-      const autoNegative = rawRegion?.autoNegative === true;
-      if (positivePrompt && regionalCapability?.positivePrompt !== true) {
-        throw new Error(`Regional guidance ${index + 1} uses a positive prompt that the selected locked pipeline does not support.`);
-      }
-      if (negativePrompt && regionalCapability?.negativePrompt !== true) {
-        throw new Error(`Regional guidance ${index + 1} uses a negative prompt that the selected locked pipeline does not support.`);
-      }
-      if (autoNegative && regionalCapability?.autoNegative !== true) {
-        throw new Error(`Regional guidance ${index + 1} uses automatic negative conditioning that the selected locked pipeline does not support.`);
-      }
-      return {
-        id,
-        name: String(rawRegion?.name || `Region ${index + 1}`).trim().slice(0, 160) || `Region ${index + 1}`,
-        mask: {
-          name: maskFile.name,
-          read: () => maskFile.arrayBuffer(),
-        },
-        positivePrompt,
-        negativePrompt,
-        autoNegative,
-        weight: Math.max(0, Math.min(10, finiteNumberOrFallback(rawRegion?.weight, 0))),
-        beginStepPercent,
-        endStepPercent,
-      };
-    });
     let controlPayload: any[] = [];
     try {
       const parsed = JSON.parse(String(form.get('controlLayers') || '[]'));
@@ -19164,7 +19219,6 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
       tiledVae,
       hiresFix,
       detailerPipeline: detailerPipeline.map((stage) => ({ ...stage }) as Record<string, unknown>),
-      regionalGuidance,
       controlLayers,
       referenceLayers,
     };
@@ -19680,7 +19734,6 @@ async function handleUmbraUiCanvasSave(req: Request): Promise<Response> {
       inpaintModelName: String(metadata.inpaintModelName || '').trim().replace(/\\/g, '/').slice(0, 500),
       colorMatch: Math.max(0, Math.min(1, finiteNumberOrFallback(metadata.colorMatch, 0))),
       differentialStrength: Math.max(0, Math.min(1, finiteNumberOrFallback(metadata.differentialStrength, 1))),
-      regionalGuidanceCount: Math.max(0, Math.min(10_000, Math.round(Number(metadata.regionalGuidanceCount) || 0))),
       controlLayerCount: Math.max(0, Math.min(10_000, Math.round(Number(metadata.controlLayerCount) || 0))),
       referenceLayerCount: Math.max(0, Math.min(10_000, Math.round(Number(metadata.referenceLayerCount) || 0))),
       generationRegion: { x: 0, y: 0, width, height },
@@ -33573,6 +33626,30 @@ const server = Bun.serve<any>({
         const tags = existsSync(PP_CSV_TAGS_DIR) ? readdirSync(PP_CSV_TAGS_DIR).filter(f => f.endsWith('.csv')) : [];
         const chars = existsSync(PP_CSV_CHARS_DIR) ? readdirSync(PP_CSV_CHARS_DIR).filter(f => f.endsWith('.csv')) : [];
         return json({ tags, characters: chars });
+      }
+
+      if (path === '/api/powerprompter/wildcards' && method === 'GET') {
+        return json({ wildcards: await listPowerPrompterWildcards() });
+      }
+
+      if (path === '/api/powerprompter/wildcards' && method === 'PUT') {
+        const body = await req.json().catch(() => ({})) as { name?: unknown; values?: unknown };
+        const name = normalizePowerPrompterWildcardName(body.name);
+        if (!name) return json({ success: false, error: 'Use letters, numbers, hyphens, or underscores for a wildcard name.' }, 400);
+        const values = Array.isArray(body.values)
+          ? body.values.map((value) => String(value || '').trim()).filter(Boolean)
+          : String(body.values || '').split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+        if (values.length === 0) return json({ success: false, error: 'Add at least one wildcard value.' }, 400);
+        await fs.mkdir(PP_WILDCARDS_DIR, { recursive: true });
+        await fs.writeFile(join(PP_WILDCARDS_DIR, `${name}.txt`), `${values.join('\n')}\n`, 'utf8');
+        return json({ success: true, wildcards: await listPowerPrompterWildcards() });
+      }
+
+      if (path.startsWith('/api/powerprompter/wildcards/') && method === 'DELETE') {
+        const name = normalizePowerPrompterWildcardName(decodeURIComponent(path.slice('/api/powerprompter/wildcards/'.length)));
+        if (!name) return json({ success: false, error: 'Wildcard name is required.' }, 400);
+        await fs.rm(join(PP_WILDCARDS_DIR, `${name}.txt`), { force: true });
+        return json({ success: true, wildcards: await listPowerPrompterWildcards() });
       }
 
       if (path === '/api/powerprompter/index' && method === 'POST') {

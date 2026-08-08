@@ -47,8 +47,15 @@ function stagedMaskAssetKey(jobId: string, itemId: string): string {
 
 async function appendBlobAsset(form: FormData, key: string, url: string, name: string): Promise<void> {
   if (!url || !/^(blob:|data:)/i.test(url)) return;
-  const blob = await readCanvasBlob(url, `asset ${name}`);
-  form.append(`asset:${encodeURIComponent(key)}`, blob, assetFilename(name, blob.type));
+  try {
+    const blob = await readCanvasBlob(url, `asset ${name}`);
+    form.append(`asset:${encodeURIComponent(key)}`, blob, assetFilename(name, blob.type));
+  } catch (error) {
+    // A revoked object URL can only belong to an old, unaccepted staging preview.
+    // Preserve the rest of the project instead of making its autosave impossible.
+    if (/^blob:/i.test(url)) return;
+    throw error;
+  }
 }
 
 async function readCanvasBlob(url: string, label: string): Promise<Blob> {

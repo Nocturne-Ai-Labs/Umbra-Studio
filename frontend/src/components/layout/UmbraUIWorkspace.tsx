@@ -2952,12 +2952,6 @@ export function UmbraUIWorkspace() {
             onModelSourceChange={handleModelTypeChange}
             modelLabel={primaryModelLabel}
             pipelineError={inpaintPipelineMatch.error}
-            regionalGuidanceAvailable={inpaintCanvasCapabilities.regionalGuidance.support !== 'unsupported'}
-            regionalGuidanceReason={inpaintCanvasCapabilities.regionalGuidance.reason}
-            regionalGuidanceMaxLayers={inpaintCanvasCapabilities.regionalGuidance.maxLayers}
-            regionalPositivePromptAvailable={inpaintCanvasCapabilities.regionalGuidance.positivePrompt}
-            regionalNegativePromptAvailable={inpaintCanvasCapabilities.regionalGuidance.negativePrompt}
-            regionalAutoNegativeAvailable={inpaintCanvasCapabilities.regionalGuidance.autoNegative}
             controlLayersAvailable={inpaintControlLayersAvailable}
             controlLayersReason={inpaintControlLayersReason}
             controlLayersMaxLayers={inpaintCanvasCapabilities.controlLayers.maxLayers}

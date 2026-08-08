@@ -109,9 +109,24 @@ function rasterSurfaceFor(image: HTMLImageElement, entity: UmbraCanvasRasterEnti
   return surface;
 }
 
-function maskSurfaceFor(image: HTMLImageElement, entity: UmbraCanvasMaskEntity, viewportScale: number): HTMLCanvasElement {
+function hexToRgb(hex: string): [number, number, number] {
+  const normalized = String(hex || '').replace('#', '');
+  if (!/^[0-9a-f]{6}$/i.test(normalized)) return [244, 63, 94];
+  return [
+    Number.parseInt(normalized.slice(0, 2), 16),
+    Number.parseInt(normalized.slice(2, 4), 16),
+    Number.parseInt(normalized.slice(4, 6), 16),
+  ];
+}
+
+function rgba(hex: string, alpha: number): string {
+  const [red, green, blue] = hexToRgb(hex);
+  return `rgba(${red},${green},${blue},${alpha})`;
+}
+
+function maskSurfaceFor(image: HTMLImageElement, entity: UmbraCanvasMaskEntity, viewportScale: number, color: string): HTMLCanvasElement {
   const previewScale = spatialPreviewScale(entity, viewportScale);
-  const key = [entity.id, entity.imageUrl, entity.width, entity.height, previewScale].join(':');
+  const key = [entity.id, entity.imageUrl, entity.width, entity.height, previewScale, color].join(':');
   const cached = MASK_SURFACE_CACHE.get(key);
   if (cached) {
     MASK_SURFACE_CACHE.delete(key);
@@ -135,12 +150,13 @@ function maskSurfaceFor(image: HTMLImageElement, entity: UmbraCanvasMaskEntity, 
       break;
     }
   }
+  const [red, green, blue] = hexToRgb(color);
   for (let offset = 0; offset < pixels.data.length; offset += 4) {
     const alpha = pixels.data[offset + 3];
     const luminance = Math.max(pixels.data[offset], pixels.data[offset + 1], pixels.data[offset + 2]);
-    pixels.data[offset] = 244;
-    pixels.data[offset + 1] = 63;
-    pixels.data[offset + 2] = 94;
+    pixels.data[offset] = red;
+    pixels.data[offset + 1] = green;
+    pixels.data[offset + 2] = blue;
     pixels.data[offset + 3] = Math.round((usesAlpha ? alpha : luminance * alpha / 255) * 0.72);
   }
   context.putImageData(pixels, 0, 0);
@@ -463,6 +479,23 @@ export class UmbraCanvasManager {
   setSelectedEntityIds(entityIds: string[]): void {
     this.selectedEntityIds = new Set(entityIds);
     this.refreshEntityTransformer();
+  }
+
+  private selectPointerEntity(entityId: string, event: PointerEvent): void {
+    const additive = event.shiftKey || event.ctrlKey || event.metaKey;
+    const next = new Set(this.selectedEntityIds);
+    if (!additive) {
+      next.clear();
+      next.add(entityId);
+    } else if (next.has(entityId)) {
+      next.delete(entityId);
+    } else {
+      next.add(entityId);
+    }
+    // Apply immediately so a pointer-down followed by a drag-start sees the
+    // same selection as React, rather than waiting for a render effect.
+    this.setSelectedEntityIds([...next]);
+    this.callbacks.onSelectEntity(entityId, additive);
   }
 
   render(project: UmbraCanvasProjectDocument): void {
@@ -1181,6 +1214,7 @@ export class UmbraCanvasManager {
 
     for (const mask of project.entities.filter((entity): entity is UmbraCanvasMaskEntity => entity.kind === 'mask')) {
       if (!mask.visible) continue;
+      const maskColor = '#f43f5e';
       const group = new Konva.Group({
         id: mask.id,
         name: 'mask-entity',
@@ -1198,13 +1232,25 @@ export class UmbraCanvasManager {
         draggable: !mask.locked,
         listening: this.tool === 'select',
       });
+      // Mask pixels and brush strokes are render-only, so give the group a transparent
+      // hit surface for drag and selection input.
+      if (this.tool === 'select') {
+        group.add(new Konva.Rect({
+          x: 0,
+          y: 0,
+          width: mask.width,
+          height: mask.height,
+          fill: 'rgba(0,0,0,0.001)',
+          listening: true,
+        }));
+      }
       if (mask.inverted) {
         group.add(new Konva.Rect({
           x: 0,
           y: 0,
           width: mask.width,
           height: mask.height,
-          fill: 'rgba(244,63,94,0.25)',
+          fill: rgba(maskColor, 0.25),
           listening: false,
         }));
       }
@@ -1212,7 +1258,7 @@ export class UmbraCanvasManager {
         const image = await loadImage(mask.imageUrl);
         if (token !== this.renderToken) return;
         group.add(new Konva.Image({
-          image: maskSurfaceFor(image, mask, this.viewport.scale),
+          image: maskSurfaceFor(image, mask, this.viewport.scale, maskColor),
           width: mask.width,
           height: mask.height,
           globalCompositeOperation: mask.inverted ? 'destination-out' : 'source-over',
@@ -1223,11 +1269,11 @@ export class UmbraCanvasManager {
         const erasesOverlay = mask.inverted ? stroke.mode === 'paint' : stroke.mode === 'erase';
         group.add(new Konva.Line({
           points: stroke.points,
-          stroke: 'rgba(244,63,94,0.72)',
+          stroke: rgba(maskColor, 0.72),
           strokeWidth: stroke.size,
           opacity: stroke.opacity,
           closed: stroke.closed,
-          fill: stroke.closed ? 'rgba(244,63,94,0.38)' : undefined,
+          fill: stroke.closed ? rgba(maskColor, 0.38) : undefined,
           lineCap: 'round',
           lineJoin: 'round',
           tension: 0.25,
@@ -1237,8 +1283,7 @@ export class UmbraCanvasManager {
       }
       group.on('pointerdown', (event) => {
         event.cancelBubble = true;
-        const pointerEvent = event.evt as PointerEvent;
-        this.callbacks.onSelectEntity(mask.id, pointerEvent.shiftKey || pointerEvent.ctrlKey || pointerEvent.metaKey);
+        this.selectPointerEntity(mask.id, event.evt as PointerEvent);
       });
       group.on('dragstart', () => this.beginSelectedDrag(group));
       group.on('dragmove', () => this.moveSelectedDrag(group, mask));
@@ -1344,8 +1389,7 @@ export class UmbraCanvasManager {
         });
         node.on('pointerdown', (event) => {
           event.cancelBubble = true;
-          const pointerEvent = event.evt as PointerEvent;
-          this.callbacks.onSelectEntity(entity.id, pointerEvent.shiftKey || pointerEvent.ctrlKey || pointerEvent.metaKey);
+          this.selectPointerEntity(entity.id, event.evt as PointerEvent);
         });
         node.on('dragstart', () => this.beginSelectedDrag(node));
         node.on('dragmove', () => this.moveSelectedDrag(node, entity));

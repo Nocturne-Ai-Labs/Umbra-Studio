@@ -120,18 +120,6 @@ export interface UmbraUiInpaintHandoff {
   createdAt: number;
 }
 
-export interface UmbraUiInpaintRegionalGuidanceInput {
-  id: string;
-  name: string;
-  mask: Blob;
-  positivePrompt: string;
-  negativePrompt: string;
-  autoNegative: boolean;
-  weight: number;
-  beginStepPercent: number;
-  endStepPercent: number;
-}
-
 export interface UmbraUiInpaintControlInput {
   id: string;
   name: string;
@@ -354,7 +342,6 @@ export interface UmbraUiInpaintSubmitOptions {
   };
   hiresFix?: PowerPrompterHiresFixControls;
   detailerPipeline: PowerPrompterDetailerStage[];
-  regionalGuidance: UmbraUiInpaintRegionalGuidanceInput[];
   controlLayers: UmbraUiInpaintControlInput[];
   referenceLayers: UmbraUiInpaintReferenceInput[];
 }
@@ -364,7 +351,7 @@ export async function submitUmbraUiInpaintJob(options: UmbraUiInpaintSubmitOptio
   form.append('source', options.source, options.sourceName || 'inpaint-source.png');
   form.append('mask', options.mask, 'inpaint-mask.png');
   for (const [key, value] of Object.entries(options)) {
-    if (key === 'source' || key === 'sourceName' || key === 'mask' || key === 'promptSegments' || key === 'loras' || key === 'workflowResources' || key === 'tiledVae' || key === 'hiresFix' || key === 'detailerPipeline' || key === 'regionalGuidance' || key === 'controlLayers' || key === 'referenceLayers') continue;
+    if (key === 'source' || key === 'sourceName' || key === 'mask' || key === 'promptSegments' || key === 'loras' || key === 'workflowResources' || key === 'tiledVae' || key === 'hiresFix' || key === 'detailerPipeline' || key === 'controlLayers' || key === 'referenceLayers') continue;
     form.append(key, String(value));
   }
   form.append('promptSegments', JSON.stringify(options.promptSegments));
@@ -373,19 +360,6 @@ export async function submitUmbraUiInpaintJob(options: UmbraUiInpaintSubmitOptio
   form.append('tiledVae', JSON.stringify(options.tiledVae));
   if (options.hiresFix) form.append('hiresFix', JSON.stringify(options.hiresFix));
   form.append('detailerPipeline', JSON.stringify(options.detailerPipeline));
-  form.append('regionalGuidance', JSON.stringify(options.regionalGuidance.map((region) => ({
-    id: region.id,
-    name: region.name,
-    positivePrompt: region.positivePrompt,
-    negativePrompt: region.negativePrompt,
-    autoNegative: region.autoNegative,
-    weight: region.weight,
-    beginStepPercent: region.beginStepPercent,
-    endStepPercent: region.endStepPercent,
-  }))));
-  for (const region of options.regionalGuidance) {
-    form.append(`regionalMask:${region.id}`, region.mask, `${region.id}.png`);
-  }
   form.append('controlLayers', JSON.stringify(options.controlLayers.map((control) => ({
     id: control.id,
     name: control.name,

@@ -18,12 +18,12 @@ export function inferUmbraUiClassicModelArchitecture(
 ): UmbraUiClassicModelArchitecture {
   const family = String(modelFamily || '').trim().toLowerCase();
   const familyKey = normalizeUmbraUiModelFamilyKey(modelFamily);
-  if (familyKey === 'anima' || familyKey === 'illustriousxl') return 'sdxl';
+  if (familyKey === 'anima' || familyKey === 'illustriousxl' || familyKey === 'noobaixlvpred') return 'sdxl';
   if (/\bsdxl\b|stable\s+diffusion\s+xl|\bpony\b/.test(family)) return 'sdxl';
   if (/\bsd\s*1[._-]?5\b|stable\s+diffusion\s+1[._-]?5/.test(family)) return 'sd15';
 
   const checkpoint = String(checkpointName || '').trim().toLowerCase();
-  if (/(?:^|[\s_./\\-])(?:sdxl|pony|illustrious)(?:[\s_./\\-]|$)|(?:^|[\s_./\\-])xl(?:[\s_./\\-]|$)/.test(checkpoint)) {
+  if (/(?:^|[\s_./\\-])(?:sdxl|pony|illustrious|noobai|nubeai)(?:[\s_./\\-]|$)|(?:^|[\s_./\\-])xl(?:[\s_./\\-]|$)/.test(checkpoint)) {
     return 'sdxl';
   }
   if (/(?:^|[\s_./\\-])(?:sd[_-]?1[._-]?5|sd15|v1[._-]?5)(?:[\s_./\\-]|$)/.test(checkpoint)) {

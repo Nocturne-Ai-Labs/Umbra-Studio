@@ -67,6 +67,11 @@ export function UmbraWorkflowResourceControls({
             {modelFamily}
           </span>
         ) : null}
+        {String(modelFamily || '').toLowerCase().includes('noobai') ? (
+          <span className="rounded-sm border border-cyan-300/25 bg-cyan-400/[0.08] px-1.5 py-0.5 font-mono text-[9px] text-cyan-100">
+            V-PRED + ZSNR
+          </span>
+        ) : null}
         <span className={`ml-auto font-mono text-[9px] ${requiredMissing > 0 ? 'text-amber-200' : 'text-zinc-500'}`}>
           {selectedCount}/{resources.length}{requiredMissing > 0 ? ` · ${requiredMissing} required` : ''}
         </span>
