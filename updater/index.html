@@ -205,6 +205,7 @@
     const stateMessage = document.querySelector('#state-message');
     let summary = null;
     let selected = null;
+    let latestState = null;
     let stateTimer = 0;
     const activePhases = new Set(['downloading', 'staged', 'stopping', 'extracting', 'applying', 'updating_nodes']);
     const phaseNames = {
@@ -233,6 +234,35 @@
       }
       return 0;
     };
+    const selectedIsNewer = () => Boolean(
+      selected
+      && summary
+      && compare(selected.version, summary.currentVersion) > 0
+    );
+    function updateReleaseLabels() {
+      if (!summary) return;
+      for (const button of list.querySelectorAll('.release')) {
+        const release = summary.releases.find((entry) => entry.tag === button.dataset.tag);
+        const title = button.querySelector('strong');
+        if (!release || !title) continue;
+        title.textContent = `v${release.version}${compare(release.version, summary.currentVersion) > 0 ? '  UPDATE' : release.version === summary.currentVersion ? '  INSTALLED' : ''}`;
+      }
+    }
+    function updateActions(state = latestState) {
+      const active = Boolean(state && activePhases.has(state.phase));
+      const canInstallSelected = !active && selectedIsNewer();
+      const completedCurrentSelection = Boolean(
+        state
+        && state.phase === 'complete'
+        && selected
+        && compare(selected.version, state.targetVersion || state.currentVersion) === 0
+      );
+      updateButton.disabled = !canInstallSelected;
+      updateButton.hidden = !canInstallSelected && completedCurrentSelection;
+      launchUmbraButton.hidden = !completedCurrentSelection;
+      launchUmbraButton.disabled = active;
+      closeUpdaterButton.disabled = active;
+    }
     function selectRelease(release) {
       selected = release;
       document.querySelector('#selected-version').textContent = `Umbra Studio v${release.version}`;
@@ -240,7 +270,7 @@
       document.querySelector('#selected-meta').textContent = `${release.packageName} | ${formatBytes(release.packageBytes)} | ${release.channel}`;
       document.querySelector('#notes').textContent = release.notes || 'No release notes were provided.';
       for (const button of list.querySelectorAll('.release')) button.classList.toggle('active', button.dataset.tag === release.tag);
-      updateButton.disabled = compare(release.version, summary.currentVersion) <= 0;
+      updateActions();
     }
     function renderReleases() {
       list.replaceChildren();
@@ -280,8 +310,12 @@
       try {
         const payload = await api('/api/state');
         const state = payload.state;
+        latestState = state;
         const active = activePhases.has(state.phase);
-        progressPanel.classList.toggle('visible', active || state.phase === 'complete' || state.phase === 'failed');
+        const completedCurrentSelection = state.phase === 'complete'
+          && selected
+          && compare(selected.version, state.targetVersion || state.currentVersion) === 0;
+        progressPanel.classList.toggle('visible', active || completedCurrentSelection || state.phase === 'failed');
         document.querySelector('#phase').textContent = phaseNames[state.phase] || 'Ready';
         document.querySelector('#current-item').textContent = state.currentItem || '';
         const ratio = state.totalBytes > 0 ? Math.min(100, state.processedBytes / state.totalBytes * 100) : 0;
@@ -292,17 +326,14 @@
         if (state.phase === 'complete' && summary && state.currentVersion) {
           summary.currentVersion = state.currentVersion;
           document.querySelector('#status-pill').textContent = `Installed v${state.currentVersion}`;
+          updateReleaseLabels();
         }
         stateMessage.className = `message${state.error ? ' error' : state.warning ? ' warning' : ''}`;
-        const completionMessage = state.phase === 'complete'
+        const completionMessage = completedCurrentSelection
           ? 'Update complete. Launch Umbra Studio when you are ready.'
           : '';
         stateMessage.textContent = state.error || [state.warning, completionMessage].filter(Boolean).join(' ');
-        updateButton.disabled = active || !selected || compare(selected.version, summary.currentVersion) <= 0;
-        closeUpdaterButton.disabled = active;
-        launchUmbraButton.hidden = state.phase !== 'complete';
-        launchUmbraButton.disabled = active;
-        updateButton.hidden = state.phase === 'complete';
+        updateActions(state);
         if (active) {
           updateButton.textContent = phaseNames[state.phase] || 'Updating';
           clearTimeout(stateTimer);

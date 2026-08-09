@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { AppUpdateService, compareUmbraVersions, readUmbraAppVersion } from '../backend/AppUpdateService';
 import {
+  createIdleUmbraUpdateState,
   isUmbraUpdateStateActive,
   normalizeUmbraUpdateState,
   recoverInterruptedUmbraUpdateState,
@@ -290,7 +291,18 @@ async function main() {
   heartbeat.unref();
   const currentVersion = readUmbraAppVersion(session.runtimeRoot, session.sourceRoot);
   const service = new AppUpdateService(session.runtimeRoot, currentVersion);
-  const persistedState = service.readState();
+  let persistedState = service.readState();
+  const sessionStartedAt = Date.parse(session.createdAt || '');
+  const updateCompletedAt = Date.parse(persistedState.completedAt || '');
+  if (
+    persistedState.phase === 'complete'
+    && Number.isFinite(sessionStartedAt)
+    && Number.isFinite(updateCompletedAt)
+    && updateCompletedAt <= sessionStartedAt
+  ) {
+    persistedState = writeState(service, session, createIdleUmbraUpdateState(currentVersion));
+    console.log('[UmbraUpdaterApp] Cleared the completed state from an earlier updater session.');
+  }
   if (
     isUmbraUpdateStateActive(persistedState)
     && !hasActiveUmbraUpdaterProcess(session.runtimeRoot, session.workspaceRoot)

@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.31.2
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, migrations, or manual configuration are
+required. This hotfix repairs the standalone updater so a completed record from
+an earlier release cannot hide the Install button for newer builds.
+
+### Updater State Recovery
+
+- Clear a completed update state when a new standalone updater session starts,
+  while preserving completion state during the session that actually performed
+  the update.
+- Keep **Install selected update** visible and enabled whenever the selected
+  release is newer than the installed version, even if an older completion
+  record is still present.
+- Hide stale completion progress when browsing a newer release and reserve the
+  **Launch Umbra Studio** action for the release that was actually installed.
+- Refresh release badges immediately after installation so the new version is
+  marked **Installed** without reopening the updater.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Reopening the updater after one successful update no longer leaves
+  every future release stuck behind the previous **Update complete** screen.
+- **Fixed:** A stale completed version can no longer suppress the Install button
+  for a newer selected Windows or Linux package.
+- **Fixed:** The release list no longer continues to label the previous version
+  as installed after a successful update.
+- **Improved:** Completed progress and launch controls now follow the release
+  that actually completed instead of whichever release is currently selected.
+
 ## v0.31.1
 
 ### TL;DR - Setup After Updating
