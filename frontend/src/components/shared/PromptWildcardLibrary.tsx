@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Check, ChevronDown, ChevronRight, Copy, Layers3, Trash2, WandSparkles, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Copy, Layers3, Pencil, Trash2, WandSparkles, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useStore } from '@/store/useStore';
 import {
@@ -11,6 +11,7 @@ import {
 } from '@/lib/powerPrompterWildcardBuilder';
 
 type PromptWildcard = { name: string; values: string[] };
+type PromptWildcardEditorState = { name: string; values: string };
 
 interface PromptWildcardLibraryProps {
   onInsert: (token: string) => void;
@@ -27,6 +28,7 @@ export function PromptWildcardLibrary({ onInsert, compact = false, cardSources =
   const [cardWildcardName, setCardWildcardName] = React.useState('');
   const [selectedVariantIds, setSelectedVariantIds] = React.useState<string[]>([]);
   const [expandedCardIds, setExpandedCardIds] = React.useState<string[]>([]);
+  const [editingWildcard, setEditingWildcard] = React.useState<PromptWildcardEditorState | null>(null);
   const [busy, setBusy] = React.useState(false);
   const allVariantIds = React.useMemo(
     () => cardSources.flatMap((card) => card.variants.map((variant) => variant.id)),
@@ -58,11 +60,15 @@ export function PromptWildcardLibrary({ onInsert, compact = false, cardSources =
     void load().catch((error) => showToast(error instanceof Error ? error.message : 'Could not load wildcards.', 'error'));
   }, [load, showToast]);
 
-  const saveValues = React.useCallback(async (rawName: string, rawValues: string[] | string) => {
+  const saveValues = React.useCallback(async (
+    rawName: string,
+    rawValues: string[] | string,
+    options: { confirmReplace?: boolean } = {},
+  ) => {
     const normalizedName = normalizePowerPrompterWildcardDraftName(rawName);
     if (!normalizedName) throw new Error('Enter a wildcard name.');
     const replacing = wildcards.some((entry) => entry.name === normalizedName);
-    if (replacing && !window.confirm(`Replace the existing __${normalizedName}__ wildcard?`)) return null;
+    if (replacing && options.confirmReplace !== false && !window.confirm(`Replace the existing __${normalizedName}__ wildcard?`)) return null;
     const response = await fetch('/api/powerprompter/wildcards', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -74,6 +80,25 @@ export function PromptWildcardLibrary({ onInsert, compact = false, cardSources =
     setWildcards(nextWildcards);
     return normalizedName;
   }, [wildcards]);
+
+  const saveEditedWildcard = React.useCallback(async () => {
+    if (!editingWildcard) return;
+    if (!editingWildcard.values.trim()) {
+      showToast('Add at least one wildcard value.', 'error');
+      return;
+    }
+    setBusy(true);
+    try {
+      const savedName = await saveValues(editingWildcard.name, editingWildcard.values, { confirmReplace: false });
+      if (!savedName) return;
+      setEditingWildcard(null);
+      showToast(`__${savedName}__ updated.`, 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not update wildcard.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }, [editingWildcard, saveValues, showToast]);
 
   const save = React.useCallback(async () => {
     if (!name.trim() || !values.trim()) {
@@ -188,6 +213,7 @@ export function PromptWildcardLibrary({ onInsert, compact = false, cardSources =
                     <div className="flex items-center gap-2">
                       <code className="min-w-0 flex-1 truncate text-xs font-bold text-fuchsia-100">{token}</code>
                       <button type="button" onClick={() => { onInsert(token); setOpen(false); showToast(`${token} inserted.`, 'success'); }} className="inline-flex h-7 items-center gap-1 rounded-sm border border-cyan-300/25 px-2 text-[9px] font-black uppercase text-cyan-100 hover:bg-cyan-500/[0.1]" title="Insert wildcard token"><Copy size={11} /> Insert</button>
+                      <button type="button" disabled={busy} onClick={() => setEditingWildcard({ name: wildcard.name, values: wildcard.values.join('\n') })} className="inline-flex h-7 items-center gap-1 rounded-sm border border-fuchsia-300/25 px-2 text-[9px] font-black uppercase text-fuchsia-100 hover:bg-fuchsia-500/[0.1] disabled:opacity-40" title="Edit wildcard values"><Pencil size={11} /> Edit</button>
                       <button type="button" disabled={busy} onClick={() => void remove(wildcard.name)} className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-red-300/20 text-red-200/70 hover:text-red-100 disabled:opacity-40" title="Delete wildcard"><Trash2 size={11} /></button>
                     </div>
                     <p className="mt-2 line-clamp-3 text-[11px] leading-5 text-zinc-400">{wildcard.values.join(' · ')}</p>
@@ -293,6 +319,43 @@ export function PromptWildcardLibrary({ onInsert, compact = false, cardSources =
                 </form>
               </div>
             </div>
+          </section>
+        </div>
+      ) : null}
+
+      {editingWildcard ? (
+        <div className="fixed inset-0 z-[510] flex items-center justify-center bg-black/80 p-4" onMouseDown={() => { if (!busy) setEditingWildcard(null); }}>
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Edit ${editingWildcard.name} wildcard`}
+            className="flex max-h-[min(42rem,calc(100dvh-2rem))] w-[min(36rem,100%)] flex-col overflow-hidden rounded-md border border-fuchsia-300/25 bg-[#090b10] shadow-2xl shadow-black/70"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="flex items-center gap-2 border-b border-white/10 px-4 py-3">
+              <Pencil size={14} className="text-fuchsia-200" />
+              <div className="min-w-0 flex-1">
+                <strong className="block text-xs font-black uppercase tracking-[0.12em] text-zinc-100">Edit Wildcard</strong>
+                <code className="mt-0.5 block truncate text-[10px] text-fuchsia-200">__{editingWildcard.name}__</code>
+              </div>
+              <button type="button" disabled={busy} onClick={() => setEditingWildcard(null)} className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 hover:text-white disabled:opacity-40" title="Close wildcard editor"><X size={14} /></button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar">
+              <label htmlFor="wildcard-editor-values" className="block text-[9px] font-black uppercase tracking-[0.12em] text-fuchsia-100">Values</label>
+              <p className="mt-1 text-[10px] leading-4 text-zinc-500">Each non-empty line is one possible value selected by this wildcard.</p>
+              <textarea
+                id="wildcard-editor-values"
+                autoFocus
+                value={editingWildcard.values}
+                onChange={(event) => setEditingWildcard((current) => current ? { ...current, values: event.target.value } : current)}
+                rows={14}
+                className="mt-3 min-h-64 w-full resize-y rounded-sm border border-white/12 bg-black/40 px-3 py-2 font-mono text-xs leading-5 text-zinc-100 outline-none focus:border-fuchsia-300/45"
+              />
+            </div>
+            <footer className="flex items-center justify-end gap-2 border-t border-white/10 px-4 py-3">
+              <button type="button" disabled={busy} onClick={() => setEditingWildcard(null)} className="h-9 rounded-sm border border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:text-white disabled:opacity-40">Cancel</button>
+              <button type="button" disabled={busy || !editingWildcard.values.trim()} onClick={() => void saveEditedWildcard()} className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-fuchsia-300/35 bg-fuchsia-500/[0.12] px-3 text-[10px] font-black uppercase tracking-[0.1em] text-fuchsia-100 hover:bg-fuchsia-500/[0.18] disabled:opacity-40"><Check size={12} /> Save Changes</button>
+            </footer>
           </section>
         </div>
       ) : null}

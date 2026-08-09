@@ -15,6 +15,7 @@ export const UMBRA_UPDATER_HEARTBEAT_MAX_AGE_MS = 15_000;
 type UpdaterSessionRecord = {
   updaterPid?: unknown;
   workerPid?: unknown;
+  relaunchPid?: unknown;
 };
 
 export function resolveUmbraUpdaterCacheRoot(runtimeRoot: string): string {
@@ -38,7 +39,7 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-type UmbraUpdaterProcessKind = 'updater' | 'worker';
+type UmbraUpdaterProcessKind = 'updater' | 'worker' | 'relaunch';
 
 function heartbeatPath(workspaceRoot: string, kind: UmbraUpdaterProcessKind): string {
   return join(workspaceRoot, `${kind}-heartbeat`);
@@ -75,8 +76,10 @@ function hasActiveWorkspaceProcess(workspaceRoot: string): boolean {
   }
   const updaterPid = Math.max(0, Math.floor(Number(session.updaterPid) || 0));
   const workerPid = Math.max(0, Math.floor(Number(session.workerPid) || 0));
+  const relaunchPid = Math.max(0, Math.floor(Number(session.relaunchPid) || 0));
   return isUmbraUpdaterProcessActive(workspaceRoot, 'updater', updaterPid)
-    || isUmbraUpdaterProcessActive(workspaceRoot, 'worker', workerPid);
+    || isUmbraUpdaterProcessActive(workspaceRoot, 'worker', workerPid)
+    || isUmbraUpdaterProcessActive(workspaceRoot, 'relaunch', relaunchPid);
 }
 
 export function hasActiveUmbraUpdaterProcess(

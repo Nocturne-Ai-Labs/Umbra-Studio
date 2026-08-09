@@ -211,6 +211,7 @@ export interface PowerPrompterCardNode {
   queueSetOrders?: Record<string, number>;
   queueTraversalRole?: PowerPrompterQueueTraversalRole;
   queueCycleWeights?: Record<string, number>;
+  wildcardRerolls?: number;
   chainLinks?: string[];
   blockLinks?: string[];
   order: number;

@@ -2,7 +2,7 @@ import type {
   PowerPrompterCardNode,
   PowerPrompterCardType,
 } from '@/types/powerPrompter';
-import { sortPowerPrompterCards } from '@/lib/powerPrompter';
+import { normalizeWildcardRerolls, sortPowerPrompterCards } from '@/lib/powerPrompter';
 import {
   normalizeQueueCycleWeights,
   normalizeQueueSetIds,
@@ -112,6 +112,7 @@ export function normalizeChainCards(cards: PowerPrompterCardNode[]): PowerPrompt
       queueSetIds,
       queueSetOrders: normalizeQueueSetOrders((card as any).queueSetOrders, queueSetIds, Number(card.order)),
       queueCycleWeights,
+      wildcardRerolls: normalizeWildcardRerolls((card as any).wildcardRerolls),
       chainLinks: normalizeChainLinks((card as any).chainLinks, id),
       blockLinks: normalizeBlockLinks((card as any).blockLinks, id),
       queueEnabled: queueSetIds.length > 0,
@@ -173,6 +174,7 @@ export function flattenChainSlots(slots: PrompterChainSlot[]): PowerPrompterCard
         queueSetIds,
         queueSetOrders: normalizeQueueSetOrders((variant as any).queueSetOrders, queueSetIds, Number(variant.order)),
         queueCycleWeights,
+        wildcardRerolls: normalizeWildcardRerolls((variant as any).wildcardRerolls),
         chainLinks: normalizeChainLinks((variant as any).chainLinks, id),
         blockLinks: normalizeBlockLinks((variant as any).blockLinks, id),
         queueEnabled: queueSetIds.length > 0,

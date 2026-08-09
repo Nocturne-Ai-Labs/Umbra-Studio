@@ -9751,7 +9751,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       if (!seedGroupIndexById.has(seedGroupId)) seedGroupIndexById.set(seedGroupId, seedGroupIndexById.size);
       return normalizePowerPrompterGenerationControls({
         ...normalizedGeneration,
-        seed: resolveSeedForQueuePromptGroup(normalizedGeneration, seedGroupIndexById.get(seedGroupId) ?? promptIndex, queueSeedSalt),
+        seed: resolveSeedForQueuePromptGroup(normalizedGeneration, seedGroupIndexById.get(seedGroupId) ?? promptIndex, queueSeedSalt, seedGroupId),
         controlAfterGenerate: 'fixed',
         loras: [],
       });
@@ -11518,7 +11518,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         const seedGroupIndex = seedGroupIndexById.get(seedGroupId) ?? promptIndex;
         return normalizePowerPrompterGenerationControls({
           ...normalizedGeneration,
-          seed: resolveSeedForQueuePromptGroup(normalizedGeneration, seedGroupIndex, queueSeedSalt),
+          seed: resolveSeedForQueuePromptGroup(normalizedGeneration, seedGroupIndex, queueSeedSalt, seedGroupId),
           controlAfterGenerate: 'fixed',
           // The active prompt text is the only LoRA source of truth for queued
           // style/variant runs. Explicit <lora:...> tags in that prompt are

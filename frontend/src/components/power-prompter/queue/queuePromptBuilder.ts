@@ -9,6 +9,7 @@ import {
   normalizePowerPrompterGenerationControls,
   normalizePowerPrompterPromptText,
   normalizeQueueTraversalRole,
+  normalizeWildcardRerolls,
   POWER_PROMPTER_MAX_QUEUE_SETS,
 } from '@/lib/powerPrompter';
 import {
@@ -44,7 +45,8 @@ const QUEUE_TRAVERSAL_ROLE_RANK = {
 export function resolveSeedForQueuePromptGroup(
   generation: ReturnType<typeof normalizePowerPrompterGenerationControls>,
   groupIndex: number,
-  shuffleSeed: unknown
+  shuffleSeed: unknown,
+  seedGroupId?: unknown,
 ): number {
   const baseSeed = Math.max(0, Math.floor(Number(generation.seed) || 0));
   const mode = String(generation.controlAfterGenerate || 'fixed').trim().toLowerCase();
@@ -53,6 +55,9 @@ export function resolveSeedForQueuePromptGroup(
   const increment = generation.seedIncrement === 100 || generation.seedIncrement === 1000
     ? generation.seedIncrement
     : 1;
+  if (mode === 'fixed' && String(seedGroupId || '').includes(':wildcard-reroll:')) {
+    return Math.max(0, Math.min(maxSeed, baseSeed + normalizedGroupIndex * increment));
+  }
   if (mode === 'increment') {
     return Math.max(0, Math.min(maxSeed, baseSeed + normalizedGroupIndex * increment));
   }
@@ -239,6 +244,10 @@ export function buildQueuePromptsFromCards(
     tokens: QueuePromptToken[];
   };
   const isStyleSlot = (slot: { type: PowerPrompterCardType; label: string }) => slot.type === 'style';
+  const isWildcardUtilitySlot = (slot: { type: PowerPrompterCardType; label: string }) => (
+    slot.type === 'custom'
+    && String(slot.label || '').trim().toLowerCase().startsWith('wildcard utility')
+  );
   const getSlotTraversalRole = (slotEntry: typeof slotVariants[number]) => (
     normalizeQueueTraversalRole(slotEntry.variants[0]?.queueTraversalRole)
   );
@@ -266,6 +275,11 @@ export function buildQueuePromptsFromCards(
     });
     return inSet;
   };
+  const getWildcardRerollsForSet = (setId: number): number => Math.max(1, ...slotVariants
+    .filter((slotEntry) => isWildcardUtilitySlot(slotEntry))
+    .flatMap((slotEntry) => getSelectedForSet(slotEntry.variants, setId))
+    .filter((card) => /__[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}__/.test(String(card.text || '')))
+    .map((card) => normalizeWildcardRerolls(card.wildcardRerolls)));
   let documentShuffleSalt = '';
   const getDocumentShuffleSalt = () => {
     if (documentShuffleSalt) return documentShuffleSalt;
@@ -481,6 +495,29 @@ export function buildQueuePromptsFromCards(
         truncated: true,
       };
     };
+    const wildcardRerolls = getWildcardRerollsForSet(setId);
+    const expandWildcardRerolls = (
+      entries: QueuePromptBuildEntry[],
+      prompts: string[],
+      styleMeta: QueuePromptStyleMeta[],
+      finalLimit: number,
+    ) => {
+      if (wildcardRerolls <= 1) return sampleBuiltQueue(entries, prompts, styleMeta, finalLimit);
+      const expandedEntries: QueuePromptBuildEntry[] = [];
+      const expandedPrompts: string[] = [];
+      const expandedStyleMeta: QueuePromptStyleMeta[] = [];
+      for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
+        for (let rerollIndex = 0; rerollIndex < wildcardRerolls; rerollIndex += 1) {
+          expandedEntries.push(entries[entryIndex]);
+          expandedPrompts.push(prompts[entryIndex]);
+          expandedStyleMeta.push({
+            ...styleMeta[entryIndex],
+            seedGroupId: `${styleMeta[entryIndex].seedGroupId}:wildcard-reroll:${rerollIndex}`,
+          });
+        }
+      }
+      return sampleBuiltQueue(expandedEntries, expandedPrompts, expandedStyleMeta, finalLimit);
+    };
     const slotTokenGroups = getSlotTokenGroupsForSet(setId);
     const baseTokenGroups = orderSlotTokenGroupsForTraversal(
       slotTokenGroups.filter((group) => !isStyleSlot(group.slotEntry))
@@ -489,8 +526,8 @@ export function buildQueuePromptsFromCards(
     const styleTokens = getStyleTokensForSet(setId);
     const hasFiniteLimit = Number.isFinite(limit);
     const finalLimit = hasFiniteLimit ? Math.max(0, Math.floor(Number(limit) || 0)) : limit;
-    const baseLimit = hasFiniteLimit && styleTokens.length > 0
-      ? Math.max(1, Math.ceil(finalLimit / Math.max(1, styleTokens.length)))
+    const baseLimit = hasFiniteLimit
+      ? Math.max(1, Math.ceil(finalLimit / (Math.max(1, styleTokens.length) * wildcardRerolls)))
       : finalLimit;
     const baseBuilt = buildExhaustiveFromTokens(baseSlotTokens, baseLimit);
     const baseEntries = baseBuilt.entries.length > 0
@@ -505,13 +542,13 @@ export function buildQueuePromptsFromCards(
         truncated: baseBuilt.truncated,
       };
       if (!hasFiniteLimit) {
-        const sampled = sampleBuiltQueue(built.entries, built.prompts, built.styleMeta, built.prompts.length);
+        const sampled = expandWildcardRerolls(built.entries, built.prompts, built.styleMeta, built.prompts.length * wildcardRerolls);
         return {
           ...sampled,
           truncated: built.truncated || sampled.truncated,
         };
       }
-      const sampled = sampleBuiltQueue(built.entries, built.prompts, built.styleMeta, finalLimit);
+      const sampled = expandWildcardRerolls(built.entries, built.prompts, built.styleMeta, finalLimit);
       return {
         ...sampled,
         truncated: built.truncated || sampled.truncated,
@@ -539,13 +576,13 @@ export function buildQueuePromptsFromCards(
       }
     }
     if (!hasFiniteLimit) {
-      const sampled = sampleBuiltQueue(entries, prompts, styleMeta, prompts.length);
+      const sampled = expandWildcardRerolls(entries, prompts, styleMeta, prompts.length * wildcardRerolls);
       return {
         ...sampled,
         truncated: truncated || sampled.truncated,
       };
     }
-    const sampled = sampleBuiltQueue(entries, prompts, styleMeta, finalLimit);
+    const sampled = expandWildcardRerolls(entries, prompts, styleMeta, finalLimit);
     return {
       ...sampled,
       truncated: truncated || sampled.truncated,
@@ -579,9 +616,10 @@ export function buildQueuePromptsFromCards(
     const baseEntryCount = baseBuilt.count > 0
       ? baseBuilt.count
       : (styleCount > 0 ? 1 : 0);
-    const totalBeforeModeLimit = styleCount > 0
+    const logicalPromptCount = styleCount > 0
       ? Math.min(Number.MAX_SAFE_INTEGER, baseEntryCount * styleCount)
       : baseEntryCount;
+    const totalBeforeModeLimit = Math.min(Number.MAX_SAFE_INTEGER, logicalPromptCount * getWildcardRerollsForSet(setId));
     const effectiveLimit = hasFiniteLimit ? Math.min(finalLimit, totalBeforeModeLimit) : totalBeforeModeLimit;
     return {
       count: Math.max(0, Math.min(totalBeforeModeLimit, effectiveLimit)),
@@ -622,19 +660,26 @@ export function buildQueuePromptsFromCards(
     });
     const promptEntry = buildEntryFromTokens(selectedTokens, selectedTokens);
     const normalizedPrompt = promptEntry?.prompt || '';
+    const wildcardRerolls = normalizedPrompt ? getWildcardRerollsForSet(activeSetId) : 0;
+    const promptCount = normalizedPrompt ? wildcardRerolls : 0;
     if (options?.countOnly === true) {
-      return returnCountOnly(normalizedPrompt ? 1 : 0, false);
+      return returnCountOnly(Math.min(promptCount, queuePromptCap), promptCount > queuePromptCap);
     }
+    const keptCount = Math.min(promptCount, queuePromptCap);
     return {
-      prompts: normalizedPrompt ? [normalizedPrompt] : [],
+      prompts: Array.from({ length: keptCount }, () => normalizedPrompt),
       promptEntries: promptEntry
-        ? [toPreviewEntry(promptEntry)]
+        ? Array.from({ length: keptCount }, () => toPreviewEntry(promptEntry))
         : [],
-      promptSetIds: normalizedPrompt ? [activeSetId] : [],
-      promptOutputSubfolders: normalizedPrompt ? [''] : [],
-      promptStyleNames: normalizedPrompt ? [''] : [],
-      promptSeedGroupIds: normalizedPrompt ? [`${activeSetId}:prompt:0`] : [],
-      truncated: false,
+      promptSetIds: Array.from({ length: keptCount }, () => activeSetId),
+      promptOutputSubfolders: Array.from({ length: keptCount }, () => ''),
+      promptStyleNames: Array.from({ length: keptCount }, () => ''),
+      promptSeedGroupIds: Array.from({ length: keptCount }, (_, index) => (
+        wildcardRerolls > 1
+          ? `${activeSetId}:prompt:0:wildcard-reroll:${index}`
+          : `${activeSetId}:prompt:0`
+      )),
+      truncated: promptCount > keptCount,
       warnings: [],
       randomApplied: false,
     };

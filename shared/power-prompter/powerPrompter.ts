@@ -39,6 +39,7 @@ const PP_BASE_CARD_CONFIG: PowerPrompterBaseCardConfig[] = [
 export const POWER_PROMPTER_CARD_DOC_VERSION = 1;
 export const POWER_PROMPTER_MAX_QUEUE_SETS = 10;
 export const POWER_PROMPTER_MAX_QUEUE_CYCLE_WEIGHT = 99;
+export const POWER_PROMPTER_MAX_WILDCARD_REROLLS = 1000;
 export const POWER_PROMPTER_MAX_RESOLUTION_SPLIT_TARGETS = 5;
 export const POWER_PROMPTER_ASPECT_RATIO_OPTIONS = [
   'custom',
@@ -587,6 +588,12 @@ export function getQueueCycleWeightForSet(rawWeights: unknown, setIdRaw: unknown
   return Math.max(1, Math.min(POWER_PROMPTER_MAX_QUEUE_CYCLE_WEIGHT, weight));
 }
 
+export function normalizeWildcardRerolls(rawValue: unknown): number {
+  const value = Math.floor(Number(rawValue));
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(1, Math.min(POWER_PROMPTER_MAX_WILDCARD_REROLLS, value));
+}
+
 function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
@@ -894,6 +901,7 @@ export function createPowerPrompterCardNode(
     queueSetOrders: { '1': Math.max(0, Math.floor(Number(order) || 0)) },
     queueTraversalRole: 'cycle',
     queueCycleWeights: {},
+    wildcardRerolls: 1,
     chainLinks: [],
     blockLinks: [],
     order,
@@ -969,6 +977,7 @@ export function importLegacyPromptToCardDocument(
       queueSetOrders: normalizeQueueSetOrders((card as any).queueSetOrders, queueSetIds, idx),
       queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
       queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
+      wildcardRerolls: normalizeWildcardRerolls((card as any).wildcardRerolls),
       chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
       blockLinks: normalizeBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
       variantName: normalizeVariantName(card.variantName),
@@ -1040,6 +1049,7 @@ function normalizeDeletedCardGroups(rawGroups: unknown, now: string): Record<str
         queueSetOrders: normalizeQueueSetOrders((card as any).queueSetOrders, queueSetIds, idx),
         queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
         queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
+        wildcardRerolls: normalizeWildcardRerolls((card as any).wildcardRerolls),
         chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
         blockLinks: normalizeBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
         order: Number.isFinite(Number(card.order)) ? Math.max(0, Math.floor(Number(card.order))) : idx,
@@ -1094,6 +1104,7 @@ export function normalizePowerPrompterCardDocument(
       queueSetOrders: normalizeQueueSetOrders((card as any).queueSetOrders, queueSetIds, idx),
       queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
       queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
+      wildcardRerolls: normalizeWildcardRerolls((card as any).wildcardRerolls),
       chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
       blockLinks: normalizeBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
       order: Number.isFinite(Number(card.order)) ? Math.max(0, Math.floor(Number(card.order))) : idx,

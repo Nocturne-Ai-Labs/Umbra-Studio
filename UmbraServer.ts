@@ -94,7 +94,6 @@ import {
   readPowerPrompterReceipt,
   writePowerPrompterReceipt,
 } from './backend/PowerPrompterReceiptService';
-import { runConfiguredStartupAutoLaunches } from './backend/startupAutoLaunch';
 import { extractUmbraUiTrainedTags } from './backend/UmbraUiLoraMetadata';
 import { resolveUmbraUiPinnedOutputFolder } from './backend/UmbraUiPinnedOutput';
 import {
@@ -14065,6 +14064,12 @@ function getCurrentAppVersion(): string {
 
 const appUpdateService = new AppUpdateService(ROOT_DIR, getCurrentAppVersion());
 const STANDALONE_UPDATER_PORT = clampPort(process.env.UMBRA_UPDATER_PORT || 8214, 8214);
+type StandaloneUpdaterLaunch = {
+  token: string;
+  origin: string;
+  updaterUrl: string;
+};
+let pendingStandaloneUpdaterLaunch: StandaloneUpdaterLaunch | null = null;
 
 function isPortableAppUpdateAvailable(): boolean {
   if (IS_UMBRA_DEV_MODE) return false;
@@ -14072,19 +14077,27 @@ function isPortableAppUpdateAvailable(): boolean {
     && existsSync(join(SOURCE_DIR, 'launcher', 'UmbraUpdateWorker.js'))
     && existsSync(join(SOURCE_DIR, 'launcher', 'UmbraUpdaterBootstrap.js'))
     && existsSync(join(SOURCE_DIR, 'updater', 'UmbraUpdaterApp.js'))
+    && existsSync(join(SOURCE_DIR, 'updater', 'UmbraRelaunchWorker.js'))
     && existsSync(join(SOURCE_DIR, 'updater', 'index.html'));
 }
 
-async function launchStandaloneUpdater(): Promise<string> {
+function prepareStandaloneUpdaterLaunch(): StandaloneUpdaterLaunch {
+  const token = randomBytes(24).toString('hex');
+  const origin = `http://127.0.0.1:${STANDALONE_UPDATER_PORT}`;
+  return {
+    token,
+    origin,
+    updaterUrl: `${origin}/?token=${encodeURIComponent(token)}`,
+  };
+}
+
+async function launchStandaloneUpdater(launch: StandaloneUpdaterLaunch): Promise<void> {
   if (!isPortableAppUpdateAvailable()) {
     throw new Error(IS_UMBRA_DEV_MODE
       ? 'The standalone updater is available only in a packaged portable build.'
       : 'This build does not include the standalone Umbra updater.');
   }
   const bootstrapPath = join(SOURCE_DIR, 'launcher', 'UmbraUpdaterBootstrap.js');
-  const token = randomBytes(24).toString('hex');
-  const origin = `http://127.0.0.1:${STANDALONE_UPDATER_PORT}`;
-  const updaterUrl = `${origin}/?token=${encodeURIComponent(token)}`;
   const updater = spawn(process.execPath, [
     bootstrapPath,
     '--root',
@@ -14094,7 +14107,7 @@ async function launchStandaloneUpdater(): Promise<string> {
     '--port',
     String(STANDALONE_UPDATER_PORT),
     '--token',
-    token,
+    launch.token,
     '--server-pid',
     String(process.pid),
     '--launcher-pid',
@@ -14120,10 +14133,10 @@ async function launchStandaloneUpdater(): Promise<string> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < 20_000) {
     try {
-      const response = await fetch(`${origin}/api/health?token=${encodeURIComponent(token)}`, {
+      const response = await fetch(`${launch.origin}/api/health?token=${encodeURIComponent(launch.token)}`, {
         cache: 'no-store',
       });
-      if (response.ok) return updaterUrl;
+      if (response.ok) return;
     } catch {
       // The standalone updater is still bootstrapping.
     }
@@ -17866,6 +17879,12 @@ function normalizePPQueueCycleWeights(rawWeights: unknown, allowedSetIds: number
   return normalized;
 }
 
+function normalizePPWildcardRerolls(rawValue: unknown): number {
+  const value = Math.floor(Number(rawValue));
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(1, Math.min(1000, value));
+}
+
 function normalizePPChainLinks(rawLinks: unknown, selfId: string): string[] {
   if (!Array.isArray(rawLinks)) return [];
   const self = String(selfId || '').trim();
@@ -20575,6 +20594,7 @@ function createPPCardNode(
     queueEnabled: true,
     queueSetIds: [1],
     queueCycleWeights: {},
+    wildcardRerolls: 1,
     chainLinks: [],
     blockLinks: [],
     order,
@@ -20655,6 +20675,7 @@ function normalizePPCardDocument(rawDoc: unknown, filePath: string | null): Powe
       queueEnabled: queueSetIds.length > 0,
       queueSetIds,
       queueCycleWeights: normalizePPQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
+      wildcardRerolls: normalizePPWildcardRerolls((card as any).wildcardRerolls),
       chainLinks: normalizePPChainLinks((card as any).chainLinks, id),
       blockLinks: normalizePPBlockLinks((card as any).blockLinks, id),
       order: Number.isFinite(Number(card.order)) ? Math.max(0, Math.floor(Number(card.order))) : idx,
@@ -20737,6 +20758,7 @@ function importLegacyPromptToPPCardDocument(
       queueSetIds,
       queueEnabled: queueSetIds.length > 0,
       queueCycleWeights: normalizePPQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
+      wildcardRerolls: normalizePPWildcardRerolls((card as any).wildcardRerolls),
       chainLinks: normalizePPChainLinks((card as any).chainLinks, String(card.id || '').trim()),
       blockLinks: normalizePPBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
       order: idx,
@@ -22373,6 +22395,7 @@ interface PowerPrompterCardNode {
   queueEnabled: boolean;
   queueSetIds: number[];
   queueCycleWeights?: Record<string, number>;
+  wildcardRerolls?: number;
   chainLinks?: string[];
   blockLinks?: string[];
   order: number;
@@ -33092,15 +33115,22 @@ const server = Bun.serve<any>({
           }, 400);
         }
         try {
-          const updaterUrl = await launchStandaloneUpdater();
+          if (pendingStandaloneUpdaterLaunch) {
+            return json({ success: false, error: 'The standalone updater is already starting.' }, 409);
+          }
+          const launch = prepareStandaloneUpdaterLaunch();
+          pendingStandaloneUpdaterLaunch = launch;
           setTimeout(() => {
             void gracefulShutdown('update');
-          }, 1_500);
+          }, 750);
           return json({
             success: true,
             accepted: true,
-            updaterUrl,
-          }, 202);
+            updaterUrl: launch.updaterUrl,
+          }, {
+            status: 202,
+            headers: { Connection: 'close' },
+          });
         } catch (error: any) {
           return json({ success: false, error: error?.message || 'Failed to launch the standalone Umbra updater.' }, 500);
         }
@@ -33113,7 +33143,10 @@ const server = Bun.serve<any>({
         setTimeout(() => {
           void gracefulShutdown('update');
         }, 250);
-        return json({ success: true, accepted: true }, 202);
+        return json({ success: true, accepted: true }, {
+          status: 202,
+          headers: { Connection: 'close' },
+        });
       }
 
       if (path === '/api/app/update/status' && method === 'GET') {
@@ -34848,27 +34881,6 @@ setTimeout(() => {
 // Backend status and system stats sampling are intentionally lazy; eager probes
 // can block the single Bun event loop when a child process or local service is wedged.
 
-async function autoLaunchConfiguredBackends() {
-  const appSettings = settingsManager.getAppSettings();
-  const launchQueue: Array<{ key: string; label: string; launch: () => Promise<any> }> = [
-    { key: 'comfyui.autoLaunch', label: 'ComfyUI', launch: startComfyUI },
-  ];
-
-  const results = await runConfiguredStartupAutoLaunches(appSettings, launchQueue);
-  for (const result of results) {
-    if (result.status === 'started') {
-      console.log(`[Startup] Auto-launch requested for ${result.label}: ${result.message}`);
-    } else {
-      console.warn(`[Startup] Failed to auto-launch ${result.label}: ${result.message}`);
-    }
-  }
-}
-
-const backendAutoLaunchTimer = setTimeout(() => {
-  void autoLaunchConfiguredBackends();
-}, 1_500);
-backendAutoLaunchTimer.unref?.();
-
 // ============================================
 // GRACEFUL SHUTDOWN
 // ============================================
@@ -34908,6 +34920,23 @@ async function gracefulShutdown(signal: string) {
   console.log('\x1b[33m[Shutdown]\x1b[0m Stopping file watchers...');
   stopSystemStatsSampler();
   stopBackendStatusSampler();
+
+  // Release the listener before managed tools are stopped. Keeping it open
+  // until immediately before process.exit can strand the port on Bun/Windows.
+  console.log('\x1b[33m[Shutdown]\x1b[0m Stopping server listener...');
+  await server.stop(true);
+
+  if (signal === 'update' && pendingStandaloneUpdaterLaunch) {
+    const launch = pendingStandaloneUpdaterLaunch;
+    pendingStandaloneUpdaterLaunch = null;
+    try {
+      console.log('\x1b[33m[Shutdown]\x1b[0m Starting standalone updater after listener release...');
+      await launchStandaloneUpdater(launch);
+      console.log('\x1b[32m[Shutdown]\x1b[0m Standalone updater is ready');
+    } catch (error) {
+      console.error('\x1b[31m[Shutdown]\x1b[0m Failed to start the standalone updater:', error);
+    }
+  }
 
   if (signal === 'migration' || signal === 'update') {
     // External maintenance only needs to stop children owned by this process.
@@ -34975,9 +35004,8 @@ async function gracefulShutdown(signal: string) {
   }
   console.log(`\x1b[32m[Shutdown]\x1b[0m Closed ${closedCount} WebSocket connections`);
 
-  // Stop the server
-  console.log('\x1b[33m[Shutdown]\x1b[0m Stopping server...');
-  server.stop(true);
+  // Give Bun's native listener a final drain window before process.exit.
+  await new Promise((resolveWait) => setTimeout(resolveWait, 2_000));
 
   console.log(`\n\x1b[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m`);
   console.log(`  \x1b[1m\x1b[32m✓ Umbra Server shut down cleanly\x1b[0m`);

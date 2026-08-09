@@ -1282,12 +1282,6 @@ const ComfyUISettings = ({ settings, updateSetting }: any) => {
             If set, Umbra save nodes and the Gallery can use this external output base path.
           </SettingHint>
         </SettingGroup>
-        <SettingCheckbox
-          checked={settings['comfyui.autoLaunch']}
-          onChange={(val: boolean) => updateSetting('comfyui.autoLaunch', val)}
-          label="Launch ComfyUI on startup"
-        />
-
         <ToolVersionManager tool="comfyui" dependency={settings['comfyui.path']} />
       </div>
 

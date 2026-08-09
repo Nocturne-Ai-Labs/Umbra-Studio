@@ -180,6 +180,7 @@
       <div id="hint" class="hint">This page is served by the external updater, not Umbra Studio.</div>
       <div class="actions">
         <button id="close-updater" class="button" type="button">Close updater</button>
+        <button id="launch-umbra" class="button primary" type="button" hidden>Launch Umbra Studio</button>
         <button id="update" class="button primary" type="button" disabled>Install selected update</button>
       </div>
     </footer>
@@ -197,6 +198,7 @@
     });
     const list = document.querySelector('#release-list');
     const updateButton = document.querySelector('#update');
+    const launchUmbraButton = document.querySelector('#launch-umbra');
     const closeUpdaterButton = document.querySelector('#close-updater');
     const refreshButton = document.querySelector('#refresh');
     const progressPanel = document.querySelector('#progress-panel');
@@ -293,11 +295,14 @@
         }
         stateMessage.className = `message${state.error ? ' error' : state.warning ? ' warning' : ''}`;
         const completionMessage = state.phase === 'complete'
-          ? 'Update complete. Close the updater, then start Umbra Studio manually.'
+          ? 'Update complete. Launch Umbra Studio when you are ready.'
           : '';
         stateMessage.textContent = state.error || [state.warning, completionMessage].filter(Boolean).join(' ');
         updateButton.disabled = active || !selected || compare(selected.version, summary.currentVersion) <= 0;
         closeUpdaterButton.disabled = active;
+        launchUmbraButton.hidden = state.phase !== 'complete';
+        launchUmbraButton.disabled = active;
+        updateButton.hidden = state.phase === 'complete';
         if (active) {
           updateButton.textContent = phaseNames[state.phase] || 'Updating';
           clearTimeout(stateTimer);
@@ -324,11 +329,50 @@
         updateButton.disabled = false;
       }
     });
+    async function pollRelaunch() {
+      try {
+        const status = await api('/api/relaunch-state');
+        if (status.phase === 'failed') {
+          stateMessage.className = 'message error';
+          stateMessage.textContent = status.error || 'Umbra Studio could not be started.';
+          document.querySelector('#phase').textContent = 'Launch failed';
+          document.querySelector('#hint').textContent = 'The updater remains open. Correct the problem or try again.';
+          launchUmbraButton.disabled = false;
+          closeUpdaterButton.disabled = false;
+          return;
+        }
+        setTimeout(pollRelaunch, 250);
+      } catch {
+        document.querySelector('#phase').textContent = 'Starting Umbra Studio';
+        document.querySelector('#hint').textContent = 'Updater closed. Umbra Studio is starting in a new launcher.';
+      }
+    }
+    launchUmbraButton.addEventListener('click', async () => {
+      clearTimeout(stateTimer);
+      launchUmbraButton.disabled = true;
+      closeUpdaterButton.disabled = true;
+      document.querySelector('#phase').textContent = 'Starting Umbra Studio';
+      document.querySelector('#hint').textContent = 'The updater will close before Umbra Studio starts.';
+      stateMessage.className = 'message';
+      stateMessage.textContent = 'A separate relaunch worker will start Umbra Studio after this updater has fully closed.';
+      progressPanel.classList.add('visible');
+      try {
+        await api('/api/relaunch', { method: 'POST', body: '{}' });
+        void pollRelaunch();
+      } catch (error) {
+        stateMessage.className = 'message error';
+        stateMessage.textContent = error.message;
+        document.querySelector('#phase').textContent = 'Launch failed';
+        document.querySelector('#hint').textContent = 'The updater remains open. Correct the problem or try again.';
+        launchUmbraButton.disabled = false;
+        closeUpdaterButton.disabled = false;
+      }
+    });
     closeUpdaterButton.addEventListener('click', async () => {
       closeUpdaterButton.disabled = true;
       try {
         await api('/api/close', { method: 'POST', body: '{}' });
-        document.querySelector('#hint').textContent = 'Updater closed. Start Umbra Studio when you are ready.';
+        document.querySelector('#hint').textContent = 'Updater closed.';
         document.querySelector('#phase').textContent = 'Updater closed';
       } catch (error) {
         stateMessage.className = 'message error';

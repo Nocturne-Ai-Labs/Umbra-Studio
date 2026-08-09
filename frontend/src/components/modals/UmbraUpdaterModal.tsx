@@ -56,6 +56,9 @@ export function UmbraUpdaterModal({
         throw new Error(payload?.error || 'The standalone updater could not be launched.');
       }
       if (launchAttemptRef.current !== attempt) return;
+      // The app releases its listener before spawning the updater so Windows
+      // cannot inherit the Umbra server socket into the updater process tree.
+      await new Promise((resolveDelay) => window.setTimeout(resolveDelay, 2_000));
       window.location.assign(String(payload.updaterUrl));
     } catch (launchError) {
       if (launchAttemptRef.current !== attempt) return;

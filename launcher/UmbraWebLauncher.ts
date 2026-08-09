@@ -1,6 +1,5 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { dirname, join, relative, resolve } from 'node:path';
 import { platform } from 'node:os';
 import { buildListenerOrigin } from '../backend/remoteNetworkAddress';
@@ -43,6 +42,7 @@ const DEFAULT_PORT = 8212;
 const ALREADY_RUNNING_TIMEOUT_MS = 5_000;
 const READY_TIMEOUT_MS = 120_000;
 const READY_POLL_MS = 350;
+const READY_REQUEST_TIMEOUT_MS = 1_500;
 const SHUTDOWN_MARKER_POLL_MS = 250;
 const SHUTDOWN_GRACE_TIMEOUT_MS = 12_000;
 const SHUTDOWN_FORCE_EXIT_TIMEOUT_MS = 6_000;
@@ -303,13 +303,32 @@ function normalizeRuntimeRootForCompare(value: string): string {
 }
 
 async function checkReady(localOrigin: string): Promise<ReadyCheckResult> {
-  const response = await fetch(`${localOrigin}/api/healthz/ready`, { cache: 'no-store' });
-  if (!response.ok) return { ready: false };
-  const body = await response.json().catch(() => ({})) as Record<string, unknown>;
-  return {
-    ready: true,
-    runtimeRoot: String(body.runtimeRoot || '').trim(),
-  };
+  const controller = new AbortController();
+  let requestTimer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race<ReadyCheckResult>([
+      fetch(`${localOrigin}/api/healthz/ready`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      }).then(async (response) => {
+        if (!response.ok) return { ready: false };
+        const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+        return {
+          ready: true,
+          runtimeRoot: String(body.runtimeRoot || '').trim(),
+        };
+      }).catch(() => ({ ready: false })),
+      new Promise<ReadyCheckResult>((resolveTimeout) => {
+        requestTimer = setTimeout(() => {
+          controller.abort();
+          resolveTimeout({ ready: false });
+        }, READY_REQUEST_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (requestTimer) clearTimeout(requestTimer);
+    controller.abort();
+  }
 }
 
 async function waitForReady(localOrigin: string, timeoutMs: number): Promise<ReadyCheckResult> {
@@ -324,25 +343,6 @@ async function waitForReady(localOrigin: string, timeoutMs: number): Promise<Rea
     await Bun.sleep(READY_POLL_MS);
   }
   return { ready: false };
-}
-
-async function canBindPort(portNumber: number, host: string): Promise<boolean> {
-  return await new Promise<boolean>((resolveProbe) => {
-    const probe = createServer();
-    let settled = false;
-
-    const settle = (available: boolean) => {
-      if (settled) return;
-      settled = true;
-      resolveProbe(available);
-    };
-
-    probe.unref();
-    probe.once('error', () => settle(false));
-    probe.listen({ port: portNumber, host, exclusive: true }, () => {
-      probe.close(() => settle(true));
-    });
-  });
 }
 
 function openBrowser(url: string) {
@@ -537,15 +537,6 @@ async function main() {
     writeLine(`[UmbraWebLauncher] Umbra is already running at ${appUrl} (checked in ${Date.now() - launchStartedAt}ms)`);
     if (!options.noOpen) openBrowser(appUrl);
     process.exit(configuredAlreadyRunningExitCode());
-  }
-
-  if (!(await canBindPort(effectivePort, bindHost))) {
-    writeBanner();
-    writeLine(`[UmbraWebLauncher] Configured port ${effectivePort} is occupied by another or unresponsive process.`);
-    writeLine('[UmbraWebLauncher] Umbra will not change ports automatically because Remote and proxy routes depend on this port.');
-    writeLine('[UmbraWebLauncher] Stop the process using the configured port, then launch Umbra again.');
-    await exitLauncher(1);
-    return;
   }
 
   const cacheRoot = join(runtimeRoot, 'Runtime', 'Cache');

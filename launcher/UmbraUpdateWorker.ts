@@ -32,6 +32,7 @@ const UPDATE_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 12_000;
 const UPDATE_FORCED_SHUTDOWN_TIMEOUT_MS = 30_000;
 const UMBRA_LISTENER_STOP_TIMEOUT_MS = 8_000;
 const UMBRA_SHUTDOWN_REQUEST_TIMEOUT_MS = 3_000;
+const UMBRA_SHUTDOWN_SETTLE_MS = 3_000;
 
 function log(request: UmbraUpdateWorkerRequest, message: string) {
   const line = `[${new Date().toISOString()}] ${message}`;
@@ -49,7 +50,16 @@ function writeJsonAtomic(filePath: string, value: unknown) {
   mkdirSync(dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  renameSync(temporaryPath, filePath);
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    try {
+      renameSync(temporaryPath, filePath);
+      return;
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+      if (!['EACCES', 'EBUSY', 'EPERM'].includes(code) || attempt === 39) throw error;
+      Bun.sleepSync(50);
+    }
+  }
 }
 
 function readState(request: UmbraUpdateWorkerRequest): UmbraUpdateState {
@@ -375,6 +385,7 @@ function verifyPayload(payloadRoot: string, request: UmbraUpdateWorkerRequest) {
     join(payloadRoot, 'resources', 'app', 'launcher', 'UmbraUpdateWorker.js'),
     join(payloadRoot, 'resources', 'app', 'launcher', 'UmbraUpdaterBootstrap.js'),
     join(payloadRoot, 'resources', 'app', 'updater', 'UmbraUpdaterApp.js'),
+    join(payloadRoot, 'resources', 'app', 'updater', 'UmbraRelaunchWorker.js'),
     join(payloadRoot, 'resources', 'app', 'updater', 'index.html'),
     process.platform === 'win32'
       ? join(payloadRoot, currentWindowsLauncher!.flavor === 'exe' ? 'UmbraStudio.exe' : 'UmbraStudio.bat')
@@ -523,6 +534,11 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
     }
     log(request, `Waiting for Umbra ${request.currentVersion} to close.`);
     await waitForProcesses(request);
+    writeState(request, {
+      phase: 'stopping',
+      currentItem: 'Allowing the previous Umbra server to finish releasing resources',
+    });
+    await Bun.sleep(UMBRA_SHUTDOWN_SETTLE_MS);
     writeState(request, { phase: 'extracting', currentItem: 'Opening release package' });
 
     const extractionRoot = join(request.workspaceRoot, 'payload');
@@ -552,7 +568,7 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
         }`);
       }
     }
-    log(request, `Umbra Studio ${request.targetVersion} was installed. Start Umbra Studio manually.`);
+    log(request, `Umbra Studio ${request.targetVersion} was installed and is ready to launch from the updater.`);
     if (!request.keepWorkspaceAlive) requestUmbraUpdaterWorkspaceCleanup(request.workspaceRoot);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

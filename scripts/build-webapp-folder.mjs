@@ -593,7 +593,7 @@ if not exist "%WEB_LAUNCHER%" (
 )
 "%BUN_BIN%" "%WEB_LAUNCHER%" --root "%CD%" %*
 set "EXIT_CODE=%ERRORLEVEL%"
-if not "%EXIT_CODE%"=="0" pause
+if not "%EXIT_CODE%"=="0" if not "%UMBRA_UPDATER_RELAUNCH%"=="1" pause
 exit /b %EXIT_CODE%
 `;
   fs.writeFileSync(launcherPath, script, 'utf-8');
@@ -686,6 +686,7 @@ function verifyPublish() {
     'resources/app/launcher/UmbraUpdateWorker.js',
     'resources/app/launcher/UmbraUpdaterBootstrap.js',
     'resources/app/updater/UmbraUpdaterApp.js',
+    'resources/app/updater/UmbraRelaunchWorker.js',
     'resources/app/updater/index.html',
     'resources/app/setup/UmbraSetupApp.js',
     'resources/app/setup/index.html',
@@ -738,11 +739,11 @@ function verifyPublish() {
     path.join(publishRoot, 'resources', 'app', 'updater', 'index.html'),
     'utf8',
   );
-  if (updaterWorker.includes('waitForHealthyRestart') || updaterApp.includes('/api/relaunch')) {
-    throw new Error('[webapp-publish] Updater must not restart Umbra Studio automatically.');
+  if (updaterWorker.includes('waitForHealthyRestart')) {
+    throw new Error('[webapp-publish] The update worker must not own application restart.');
   }
-  if (!updaterApp.includes('/api/close') || !updaterHtml.includes('start Umbra Studio manually')) {
-    throw new Error('[webapp-publish] Updater manual-restart completion flow is missing.');
+  if (!updaterApp.includes('/api/close') || !updaterApp.includes('/api/relaunch') || !updaterHtml.includes('Launch Umbra Studio')) {
+    throw new Error('[webapp-publish] Updater launch-and-close completion flow is missing.');
   }
   if (bundleDataForgeModels) verifyBundledDataForgeModels();
 }
@@ -835,6 +836,10 @@ function publish() {
   copyExplicitFile(
     path.join(root, 'dist-webapp', 'UmbraUpdaterApp.js'),
     path.join(packagedAppDir, 'updater', 'UmbraUpdaterApp.js'),
+  );
+  copyExplicitFile(
+    path.join(root, 'dist-webapp', 'UmbraRelaunchWorker.js'),
+    path.join(packagedAppDir, 'updater', 'UmbraRelaunchWorker.js'),
   );
   copyExplicitFile(
     path.join(root, 'dist-webapp', 'UmbraSetupApp.js'),

@@ -56,12 +56,9 @@ export const StudioShell = ({ children }: { children: React.ReactNode }) => {
 
   const autoLaunchTargets = useMemo(() => {
     const targets: Array<{ key: 'comfyui' | 'gallery' | 'comfyuiVersions'; label: string }> = [];
-    if (appSettings['comfyui.autoLaunch']) targets.push({ key: 'comfyui', label: 'ComfyUI' });
     targets.push({ key: 'comfyuiVersions', label: 'Workspace Config' });
     return targets;
-  }, [
-    appSettings['comfyui.autoLaunch'],
-  ]);
+  }, []);
 
   const splashMinDurationMs = useMemo(() => {
     const base = bootAnimation === 'fade'

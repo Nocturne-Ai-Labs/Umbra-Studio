@@ -235,20 +235,33 @@ function mergeLoras(...groups: UmbraUiMediaHandoffLora[][]): UmbraUiMediaHandoff
     for (const lora of group) {
       const key = normalizeModelKey(lora.name);
       if (!key) continue;
-      merged.set(key, { ...lora, id: `metadata-lora-${merged.size + 1}` });
+      merged.set(key, { ...lora });
     }
   }
-  return Array.from(merged.values());
+  return Array.from(merged.values(), (lora, index) => ({
+    ...lora,
+    id: `metadata-lora-${index + 1}`,
+  }));
 }
 
 function normalizeMetadataLoras(value: unknown, idPrefix: string): UmbraUiMediaHandoffLora[] {
   if (!Array.isArray(value)) return [];
+  const usedIds = new Set<string>();
   return value.map((candidate, index) => {
     const entry = isRecord(candidate) ? candidate : {};
     const name = normalizePath(entry.name);
     const strengthModel = boundedNumber(entry.strengthModel ?? entry.model_weight, -10, 10) ?? 1;
+    const fallbackId = `${idPrefix}-${index + 1}`;
+    const requestedId = String(entry.id || '').trim() || fallbackId;
+    let id = requestedId;
+    let suffix = index + 1;
+    while (usedIds.has(id)) {
+      id = `${requestedId}-${suffix}`;
+      suffix += 1;
+    }
+    usedIds.add(id);
     return {
-      id: String(entry.id || `${idPrefix}-${index + 1}`).trim() || `${idPrefix}-${index + 1}`,
+      id,
       name,
       enabled: entry.enabled !== false,
       strengthModel,

@@ -86,10 +86,12 @@ async function main() {
   const bunPath = join(workspaceRoot, bunName);
   const updaterPath = join(workspaceRoot, 'UmbraUpdaterApp.js');
   const workerPath = join(workspaceRoot, 'UmbraUpdateWorker.js');
+  const relaunchWorkerPath = join(workspaceRoot, 'UmbraRelaunchWorker.js');
   const htmlPath = join(workspaceRoot, 'index.html');
   copyRequired(process.execPath, bunPath);
   copyRequired(join(sourceRoot, 'updater', 'UmbraUpdaterApp.js'), updaterPath);
   copyRequired(join(sourceRoot, 'launcher', 'UmbraUpdateWorker.js'), workerPath);
+  copyRequired(join(sourceRoot, 'updater', 'UmbraRelaunchWorker.js'), relaunchWorkerPath);
   copyRequired(join(sourceRoot, 'updater', 'index.html'), htmlPath);
   if (process.platform !== 'win32') {
     chmodSync(bunPath, 0o755);
@@ -109,6 +111,7 @@ async function main() {
     createdAt: new Date().toISOString(),
     updaterPid: 0,
     workerPid: 0,
+    relaunchPid: 0,
   };
   writeFileSync(sessionPath, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
 

@@ -1,6 +1,6 @@
 {
   "name": "umbra-studio",
-  "version": "0.30.8",
+  "version": "0.30.9",
   "description": "Umbra Studio - AI image generation, prompt tooling, and media workflow suite",
   "author": "Nocturne AI Labs",
   "homepage": "https://github.com/Nocturne-Ai-Labs/Umbra-Studio",
@@ -50,7 +50,7 @@
     "webapp:prepare-dependencies": "node scripts/prepare-runtime-dependencies.mjs",
     "webapp:dev": "bun run build:frontend && bun launcher/UmbraWebLauncher.ts --root .",
     "webapp:build-update-worker": "bun build launcher/UmbraUpdateWorker.ts --target=bun --outfile dist-webapp/UmbraUpdateWorker.js",
-    "webapp:build-updater": "bun run webapp:build-update-worker && bun build launcher/UmbraUpdaterBootstrap.ts --target=bun --outfile dist-webapp/UmbraUpdaterBootstrap.js && bun build updater/UmbraUpdaterApp.ts --target=bun --outfile dist-webapp/UmbraUpdaterApp.js",
+    "webapp:build-updater": "bun run webapp:build-update-worker && bun build launcher/UmbraUpdaterBootstrap.ts --target=bun --outfile dist-webapp/UmbraUpdaterBootstrap.js && bun build updater/UmbraUpdaterApp.ts --target=bun --outfile dist-webapp/UmbraUpdaterApp.js && bun build updater/UmbraRelaunchWorker.ts --target=bun --outfile dist-webapp/UmbraRelaunchWorker.js",
     "webapp:build-setup": "bun build setup/UmbraSetupApp.ts --target=bun --outfile dist-webapp/UmbraSetupApp.js",
     "webapp:dist:no-bump": "bun run audit:umbra-ui-pipelines && bun run webapp:prepare-runtime && bun run models:waifu:download && bun run models:caption:download && bun run build:frontend",
     "webapp:update-folder:no-bump": "bun run audit:umbra-ui-pipelines && node scripts/build-webapp-folder.mjs",

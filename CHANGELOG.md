@@ -1,5 +1,68 @@
 # Changelog
 
+## v0.30.9
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, migrations, or manual configuration are
+required. Update normally. ComfyUI will no longer launch automatically with
+Umbra Studio; start it from Umbra's ComfyUI workspace when generation is
+needed.
+
+### Updater Launch And Shutdown Reliability
+
+- Added a dedicated **Launch Umbra Studio** action to the completed standalone
+  updater so users can start the newly installed build and close the updater in
+  one step.
+- Moved relaunch ownership into a separate external worker that waits for the
+  updater to exit, starts the updated installation, verifies the correct Umbra
+  runtime becomes healthy, and retries bounded startup failures.
+- Improved updater shutdown sequencing with listener release, process-settle
+  time, bounded readiness requests, and retry handling for transient Windows
+  file locks while writing updater state.
+- Included the relaunch worker in Windows and Linux packages and made updater
+  workspace cleanup account for its lifecycle.
+- Removed the launcher's intrusive bind probe. Umbra continues to use its
+  configured port without changing Remote or proxy routes, while readiness
+  checks now fail quickly instead of hanging indefinitely.
+
+### Power Prompter Wildcards
+
+- Added a persisted **Queue rerolls** control to Wildcard Utility cards. A
+  wildcard prompt can now generate multiple independently seeded choices
+  without increasing the generation batch size.
+- Updated queue totals, previews, limits, seed groups, card normalization, and
+  backend queue construction to represent wildcard rerolls accurately across
+  sets and other enabled card variants.
+- Added Standard Variant, Style Utility, and Wildcard Utility choices to the
+  add-card menu.
+- Added an **Edit** action beside every wildcard's Insert action. The shared
+  editor opens a focused modal for updating the wildcard's one-value-per-line
+  contents from either Power Prompter or Umbra UI.
+
+### Workflow And Settings Cleanup
+
+- Fixed Gallery parameter handoffs so every restored LoRA receives an
+  independent stable identity. Editing, enabling, or deleting one restored
+  LoRA no longer changes the entire imported stack.
+- Removed the **Launch ComfyUI on startup** setting and backend auto-launch
+  behavior from shipping builds. Existing saved values are ignored and removed
+  during settings normalization; manual ComfyUI controls remain available.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** The updater can now launch the updated Umbra Studio installation
+  after a successful update without keeping the updater process alive.
+- **Fixed:** Windows updater state writes tolerate short antivirus and file-lock
+  races instead of failing immediately.
+- **Fixed:** Restored LoRA rows no longer share IDs and mutate as one row.
+- **Fixed:** Wildcard reroll counts are reflected in the displayed image count,
+  queue cap, and generated seed groups.
+- **Improved:** Wildcard libraries can be edited directly instead of requiring
+  manual file changes or delete-and-recreate workarounds.
+- **Improved:** ComfyUI startup is explicit, reducing first-launch confusion and
+  unexpected GPU memory use.
+
 ## v0.30.8
 
 ### TL;DR - Setup After Updating

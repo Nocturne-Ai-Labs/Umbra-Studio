@@ -27,7 +27,6 @@ export interface AppSettings {
   'comfyui.securityLevel': ComfySecurityLevel;
   'comfyui.attentionBackend': ComfyAttentionBackend;
   'comfyui.vramMode': ComfyVramMode;
-  'comfyui.autoLaunch': boolean;
   'comfyui.showFilmstrip': boolean;
   'comfyui.showFilmstripLivePreviews': boolean;
   'library.metadataHoverTooltips': boolean;
@@ -77,7 +76,6 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   'comfyui.securityLevel': 'normal',
   'comfyui.attentionBackend': 'default',
   'comfyui.vramMode': 'auto',
-  'comfyui.autoLaunch': false,
   'comfyui.showFilmstrip': true,
   'comfyui.showFilmstripLivePreviews': true,
   'library.metadataHoverTooltips': false,
@@ -116,7 +114,6 @@ const BOOLEAN_KEYS: Array<keyof AppSettings> = [
   'enableToasts',
   'oledMode.enabled',
   'ui.idleFrameCapEnabled',
-  'comfyui.autoLaunch',
   'comfyui.showFilmstrip',
   'comfyui.showFilmstripLivePreviews',
   'library.metadataHoverTooltips',

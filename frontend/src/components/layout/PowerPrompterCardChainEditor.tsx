@@ -18,7 +18,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ArrowRight, Ban, Check, ChevronDown, ChevronRight, ChevronUp, Copy, EllipsisVertical, Eraser, Folder, FolderOpen, GripVertical, ImageIcon, Info, Link2, Loader2, Maximize2, Minimize2, Pencil, Plus, RefreshCw, RotateCw, Scissors, Shuffle, Sparkles, Trash2, WandSparkles, X, Zap } from 'lucide-react';
+import { ArrowRight, Ban, Check, ChevronDown, ChevronRight, ChevronUp, Copy, EllipsisVertical, Eraser, Folder, FolderOpen, GripVertical, ImageIcon, Info, Link2, Loader2, Maximize2, Minimize2, Minus, Pencil, Plus, RefreshCw, RotateCw, Scissors, Shuffle, Sparkles, Trash2, WandSparkles, X, Zap } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
 import { fetchAppSettingsFromBackend, loadAppSettings, pushAppSettingsToBackend } from '@/lib/appSettings';
@@ -34,6 +34,7 @@ import {
   normalizePowerPrompterGenerationControls,
   normalizePowerPrompterPromptText,
   normalizeQueueTraversalRole,
+  normalizeWildcardRerolls,
   POWER_PROMPTER_ASPECT_RATIO_OPTIONS,
   POWER_PROMPTER_MAX_QUEUE_CYCLE_WEIGHT,
   POWER_PROMPTER_MAX_QUEUE_SETS,
@@ -70,7 +71,9 @@ import type { PowerPrompterPipelineItem } from '@/components/power-prompter/pipe
 import { usePowerPrompterStageCatalog } from '@/components/power-prompter/pipelines/usePowerPrompterStageCatalog';
 import { UmbraHiresFixControls } from '@/components/umbra-ui/UmbraHiresFixControls';
 import { UmbraDetailerPipelineControls } from '@/components/umbra-ui/UmbraDetailerPipelineControls';
+import { ContextMenu } from '@/components/ui/ContextMenu';
 import { UmbraSelect } from '@/components/ui/UmbraSelect';
+import type { ContextMenuItem } from '@/hooks/useContextMenu';
 import { PromptWildcardLibrary } from '@/components/shared/PromptWildcardLibrary';
 import type { PowerPrompterWildcardCardSource } from '@/lib/powerPrompterWildcardBuilder';
 import {
@@ -430,6 +433,7 @@ interface WildcardUtilityEditorState {
   slotId: string;
   variantId: string;
   selectedNames: string[];
+  rerolls: number;
 }
 
 interface PowerPrompterWildcardLibraryEntry {
@@ -1805,6 +1809,7 @@ function createCard(
     queueSetOrders: { [String(setId)]: Math.max(0, Math.floor(Number(order) || 0)) },
     queueTraversalRole: 'cycle',
     queueCycleWeights: {},
+    wildcardRerolls: 1,
     chainLinks: [],
     blockLinks: [],
     order,
@@ -2770,6 +2775,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const [mobileGenerationControlsOpen, setMobileGenerationControlsOpen] = useState(false);
   const [umbraUiTargetMenuOpen, setUmbraUiTargetMenuOpen] = useState(false);
   const [mobileCardPickerOpen, setMobileCardPickerOpen] = useState(false);
+  const [cardAddMenuPosition, setCardAddMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [mobileVariantSetPicker, setMobileVariantSetPicker] = useState<{ slotId: string; variantId: string } | null>(null);
   const [chainLinkEditor, setChainLinkEditor] = useState<ChainLinkEditorState | null>(null);
   const [promptFieldsMinimized, setPromptFieldsMinimized] = useState(false);
@@ -4689,6 +4695,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
         slotId,
         variantId,
         selectedNames: selectedNames.length > 0 ? selectedNames : defaults,
+        rerolls: normalizeWildcardRerolls(variant.wildcardRerolls),
       });
       setActiveSlotId(slotId);
       setActiveVariantId(variantId);
@@ -4708,7 +4715,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       return;
     }
     const nextText = replacePromptWildcardTokens(targetVariant.text, wildcardUtilityEditor.selectedNames);
-    patchVariant(targetSlot.slotId, targetVariant.id, { text: nextText });
+    patchVariant(targetSlot.slotId, targetVariant.id, {
+      text: nextText,
+      wildcardRerolls: normalizeWildcardRerolls(wildcardUtilityEditor.rerolls),
+    });
     setWildcardUtilityEditor(null);
     showToast(
       wildcardUtilityEditor.selectedNames.length > 0
@@ -6837,6 +6847,24 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     emitSlots(next, activeQueueSet, nextDeletedGroups);
   }, [slots, activeQueueSet, deletedCardGroups, emitSlots]);
 
+  const cardAddMenuItems = useMemo<ContextMenuItem[]>(() => [
+    {
+      label: 'Standard Variant Card',
+      icon: <Plus size={14} />,
+      action: () => addSlot('prompt'),
+    },
+    {
+      label: 'Style Utility',
+      icon: <Sparkles size={14} />,
+      action: () => addSlot('style'),
+    },
+    {
+      label: 'Wildcard Utility',
+      icon: <WandSparkles size={14} />,
+      action: () => addSlot('wildcard'),
+    },
+  ], [addSlot]);
+
   const removeSlot = useCallback((slotId: string) => {
     if (slots.length <= 1) {
       showToast('Keep at least one card in the chain', 'error');
@@ -8721,10 +8749,16 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
             </div>
           </div>
           <button
-            onClick={addSlot}
+            type="button"
+            onClick={(event) => {
+              const bounds = event.currentTarget.getBoundingClientRect();
+              setCardAddMenuPosition({ x: bounds.left, y: bounds.bottom + 4 });
+            }}
             data-umbra-card-nav-add=""
+            aria-haspopup="menu"
+            aria-expanded={cardAddMenuPosition !== null}
             className="shrink-0 inline-flex min-h-10 items-center gap-1.5 rounded-md border border-emerald-400/45 bg-emerald-500/14 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-emerald-200 hover:text-emerald-100 hover:border-emerald-300/70"
-            title="Add card"
+            title="Choose a card type"
           >
             <Plus size={13} />
             Add
@@ -8735,6 +8769,14 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
           />
         </div>
       </div>
+
+      <ContextMenu
+        isOpen={cardAddMenuPosition !== null}
+        position={cardAddMenuPosition || { x: 0, y: 0 }}
+        items={cardAddMenuItems}
+        onClose={() => setCardAddMenuPosition(null)}
+        title="Add Card"
+      />
 
       <div
         ref={laneScrollRef}
@@ -11348,6 +11390,39 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 <span className="text-[10px] font-black uppercase tracking-[0.14em] text-fuchsia-100">This card will use</span>
                 <div className="mt-3 flex min-h-12 flex-wrap content-start gap-1.5">
                   {wildcardUtilityEditor.selectedNames.length > 0 ? wildcardUtilityEditor.selectedNames.map((name) => <span key={`wildcard-utility-token-${name}`} className="rounded-sm border border-fuchsia-300/30 bg-black/30 px-2 py-1 font-mono text-[10px] text-fuchsia-100">__{name}__</span>) : <span className="text-xs text-zinc-500">Select one or more sources.</span>}
+                </div>
+                <div className="mt-4 border-t border-fuchsia-300/15 pt-3">
+                  <label htmlFor="wildcard-utility-rerolls" className="text-[10px] font-black uppercase tracking-[0.12em] text-fuchsia-100">Queue rerolls</label>
+                  <div className="mt-2 grid grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] overflow-hidden rounded-md border border-fuchsia-300/25 bg-black/35">
+                    <button
+                      type="button"
+                      onClick={() => setWildcardUtilityEditor((current) => current ? { ...current, rerolls: normalizeWildcardRerolls(current.rerolls - 1) } : current)}
+                      className="inline-flex h-10 items-center justify-center border-r border-fuchsia-300/15 text-fuchsia-100 hover:bg-fuchsia-400/10"
+                      title="Remove one wildcard reroll"
+                      aria-label="Decrease wildcard rerolls"
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <input
+                      id="wildcard-utility-rerolls"
+                      type="number"
+                      min={1}
+                      max={1000}
+                      step={1}
+                      value={wildcardUtilityEditor.rerolls}
+                      onChange={(event) => setWildcardUtilityEditor((current) => current ? { ...current, rerolls: normalizeWildcardRerolls(event.target.value) } : current)}
+                      className="h-10 min-w-0 bg-transparent px-2 text-center font-mono text-sm font-bold text-fuchsia-50 outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setWildcardUtilityEditor((current) => current ? { ...current, rerolls: normalizeWildcardRerolls(current.rerolls + 1) } : current)}
+                      className="inline-flex h-10 items-center justify-center border-l border-fuchsia-300/15 text-fuchsia-100 hover:bg-fuchsia-400/10"
+                      title="Add one wildcard reroll"
+                      aria-label="Increase wildcard rerolls"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
                 </div>
                 <p className="mt-4 border-t border-fuchsia-300/15 pt-3 text-[11px] leading-5 text-zinc-400">A wildcard card can also include fixed tags. The builder updates only its wildcard tokens, so prompt text you add manually stays intact.</p>
               </aside>

@@ -123,7 +123,16 @@ function writeJsonAtomic(filePath: string, value: unknown) {
   mkdirSync(dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  renameSync(temporaryPath, filePath);
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    try {
+      renameSync(temporaryPath, filePath);
+      return;
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+      if (!['EACCES', 'EBUSY', 'EPERM'].includes(code) || attempt === 39) throw error;
+      Bun.sleepSync(50);
+    }
+  }
 }
 
 export class AppUpdateService {
