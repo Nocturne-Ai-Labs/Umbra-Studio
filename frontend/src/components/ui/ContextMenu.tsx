@@ -4,7 +4,6 @@ import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronRight } from 'lucide-react';
 import type { ContextMenuItem } from '@/hooks/useContextMenu';
-import { Portal } from './Portal';
 
 interface ContextMenuProps {
   isOpen: boolean;
@@ -388,18 +387,19 @@ export function ContextMenu({
 
   if (!isOpen) return null;
 
-  return (
-    <Portal>
-      <MenuPanel
-        items={normalizedItems}
-        boundarySelector={boundarySelector}
-        depth={0}
-        onCloseAll={onClose}
-        rootStyle={style}
-        rootRef={menuRef}
-        title={title}
-        subtitle={subtitle}
-      />
-    </Portal>
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <MenuPanel
+      items={normalizedItems}
+      boundarySelector={boundarySelector}
+      depth={0}
+      onCloseAll={onClose}
+      rootStyle={style}
+      rootRef={menuRef}
+      title={title}
+      subtitle={subtitle}
+    />,
+    document.body,
   );
 }

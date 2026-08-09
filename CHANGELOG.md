@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.31.1
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, migrations, or manual configuration are
+required. Update normally. Existing themes, Power Prompter cards, wildcard
+utilities, queue sets, and user settings are preserved.
+
+### Theme-Aware Selection Menus
+
+- Updated Umbra's universal selector trigger and dropdown menu to consume the
+  active theme engine's accent, panel, text, border, and glow variables.
+- Replaced the selector system's fixed cyan borders, highlights, chevrons,
+  icons, badges, separators, focus rings, and open-state colors with dynamic
+  theme colors across Umbra UI, Power Prompter, Gallery, Data Forge, Model
+  Manager, global settings, and remote interfaces.
+- Kept destructive context-menu actions red while allowing all ordinary menu
+  commands and shared context-menu surfaces to follow the selected theme.
+- Confirmed the frontend no longer contains native HTML select controls, so
+  app selectors consistently use Umbra's custom selection-menu system.
+
+### Add Card Menu Reliability
+
+- Fixed the Power Prompter card-row **Add** button opening an invisible menu.
+  The shared portal previously mounted one render after the positioning effect,
+  leaving the menu permanently hidden at its fallback coordinates.
+- Mounted the shared context-menu panel directly into the document portal so
+  positioning occurs only after the menu element exists.
+- Verified Standard Variant Card, Style Utility, and Wildcard Utility creation
+  from the repaired menu and restored the original card state after testing.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** The Power Prompter Add button no longer opens a hidden,
+  non-interactive card-type menu.
+- **Fixed:** Standard, Style Utility, and Wildcard Utility card choices now
+  create the requested card from the row-level Add menu.
+- **Improved:** Selectors and their menus now match the user's active Umbra
+  theme instead of remaining cyan or dark blue.
+- **Improved:** Shared context menus inherit theme-aware borders, highlights,
+  icons, badges, separators, and glow treatment.
+
 ## v0.31.0
 
 ### TL;DR - Setup After Updating

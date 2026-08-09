@@ -117,6 +117,7 @@ export function UmbraSelect({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-required={required || undefined}
+        data-open={open ? 'true' : 'false'}
         disabled={disabled}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
@@ -132,9 +133,7 @@ export function UmbraSelect({
           setOpen(true);
         }}
         className={cn(
-          'flex w-full touch-manipulation items-center gap-2 rounded-md border bg-black/35 text-left text-zinc-200 outline-none transition-colors',
-          'border-white/10 hover:border-cyan-300/25 focus-visible:border-cyan-300/45 focus-visible:ring-1 focus-visible:ring-cyan-300/20',
-          open && 'border-cyan-300/35 bg-cyan-500/[0.06]',
+          'umbra-select-trigger flex w-full touch-manipulation items-center gap-2 rounded-md border text-left outline-none transition-[border-color,background-color,box-shadow,color]',
           disabled && 'cursor-not-allowed opacity-40',
           sizeClasses[size],
           buttonClassName,
@@ -143,7 +142,7 @@ export function UmbraSelect({
         {leadingIcon ? <span className="umbra-context-menu-icon flex h-4 w-4 shrink-0 items-center justify-center">{leadingIcon}</span> : null}
         <span className="min-w-0 flex-1 truncate">{displayLabel}</span>
         {selectedOption?.badge !== undefined ? <span className="umbra-context-menu-badge shrink-0 px-1.5 py-0.5">{selectedOption.badge}</span> : null}
-        <ChevronDown size={13} className={cn('shrink-0 text-cyan-300/65 transition-transform', open && 'rotate-180')} />
+        <ChevronDown size={13} className={cn('umbra-select-chevron shrink-0 transition-transform', open && 'rotate-180')} />
       </button>
       <ContextMenu
         isOpen={open}
