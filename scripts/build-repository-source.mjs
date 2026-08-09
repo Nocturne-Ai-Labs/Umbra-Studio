@@ -122,6 +122,10 @@ function isTestSourceName(name) {
   return /\.test\./i.test(name) || /^test-.*\.(?:[cm]?[jt]sx?)$/i.test(name);
 }
 
+function isPrivateWildcardAuthoringScript(name) {
+  return /^generate-.*wildcard.*\.mjs$/i.test(name);
+}
+
 function copyTree(source, target, allowGeneratedPublic = false) {
   const stat = fs.lstatSync(source);
   if (stat.isSymbolicLink()) throw new Error(`Refusing to copy symlink into repository source: ${source}`);
@@ -134,7 +138,12 @@ function copyTree(source, target, allowGeneratedPublic = false) {
   fs.mkdirSync(target, { recursive: true });
   for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
     const environmentFile = /^\.env(?:\.|$)/i.test(entry.name);
-    if (environmentFile || isTestSourceName(entry.name) || (SKIP_NAMES.has(entry.name) && !(allowGeneratedPublic && entry.name === 'public'))) continue;
+    if (
+      environmentFile
+      || isTestSourceName(entry.name)
+      || isPrivateWildcardAuthoringScript(entry.name)
+      || (SKIP_NAMES.has(entry.name) && !(allowGeneratedPublic && entry.name === 'public'))
+    ) continue;
     copyTree(path.join(source, entry.name), path.join(target, entry.name), allowGeneratedPublic);
   }
 }
@@ -261,6 +270,17 @@ function verifyOutput() {
   findTestFiles(outputRoot);
   if (testFiles.length > 0) {
     throw new Error(`Clean repository source contains internal test files: ${testFiles.join(', ')}`);
+  }
+
+  const privateWildcardScripts = [];
+  const scriptsRoot = path.join(outputRoot, 'scripts');
+  for (const entry of fs.readdirSync(scriptsRoot, { withFileTypes: true })) {
+    if (entry.isFile() && isPrivateWildcardAuthoringScript(entry.name)) {
+      privateWildcardScripts.push(`scripts/${entry.name}`);
+    }
+  }
+  if (privateWildcardScripts.length > 0) {
+    throw new Error(`Clean repository source contains private wildcard authoring scripts: ${privateWildcardScripts.join(', ')}`);
   }
 }
 

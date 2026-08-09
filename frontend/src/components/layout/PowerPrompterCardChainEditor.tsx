@@ -321,6 +321,16 @@ function getQueueTraversalRoleTitle(role: PowerPrompterQueueTraversalRole): stri
   return 'Cycle: this card changes between Hold cards and Fast cards.';
 }
 
+function getWildcardUtilityModeLabel(role: PowerPrompterQueueTraversalRole): string {
+  return role === 'hold' ? 'Hold' : 'Reroll';
+}
+
+function getWildcardUtilityModeTitle(role: PowerPrompterQueueTraversalRole): string {
+  return role === 'hold'
+    ? 'Hold: resolve this wildcard once and keep that choice throughout the queued run.'
+    : 'Reroll: choose a new wildcard value for each configured queue reroll.';
+}
+
 interface QueueVariantState {
   status: 'Active' | 'Queue' | 'Disabled';
   position: { position: number; total: number; remaining: number } | null;
@@ -6561,7 +6571,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const cycleSlotQueueTraversalRole = useCallback((slotId: string) => {
     const next = cloneSlots(slots).map((slot) => {
       if (slot.slotId !== slotId) return slot;
-      const nextRole = getNextQueueTraversalRole(getSlotQueueTraversalRole(slot));
+      const currentRole = getSlotQueueTraversalRole(slot);
+      const nextRole = isWildcardUtilitySlot(slot)
+        ? (currentRole === 'hold' ? 'cycle' : 'hold')
+        : getNextQueueTraversalRole(currentRole);
       return {
         ...slot,
         variants: slot.variants.map((variant) => ({
@@ -9981,18 +9994,22 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-black uppercase tracking-[0.16em] transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
                         slotQueueTraversalRole === 'hold'
                           ? 'border-amber-300/45 bg-amber-500/12 text-amber-100 hover:border-amber-200/70'
-                          : slotQueueTraversalRole === 'fast'
+                          : !wildcardUtilitySlot && slotQueueTraversalRole === 'fast'
                             ? 'border-fuchsia-300/45 bg-fuchsia-500/12 text-fuchsia-100 hover:border-fuchsia-200/70'
                             : 'border-cyan-300/40 bg-cyan-500/10 text-cyan-100 hover:border-cyan-200/65'
                       }`}
-                      title={getQueueTraversalRoleTitle(slotQueueTraversalRole)}
+                      title={wildcardUtilitySlot
+                        ? getWildcardUtilityModeTitle(slotQueueTraversalRole)
+                        : getQueueTraversalRoleTitle(slotQueueTraversalRole)}
                     >
                       {slotQueueTraversalRole === 'hold'
                         ? <Info size={11} />
-                        : slotQueueTraversalRole === 'fast'
+                        : !wildcardUtilitySlot && slotQueueTraversalRole === 'fast'
                           ? <Zap size={11} />
                           : <RotateCw size={11} />}
-                      {getQueueTraversalRoleLabel(slotQueueTraversalRole)}
+                      {wildcardUtilitySlot
+                        ? getWildcardUtilityModeLabel(slotQueueTraversalRole)
+                        : getQueueTraversalRoleLabel(slotQueueTraversalRole)}
                     </button>
                     <div data-umbra-mobile-card-actions-row="" className="hidden shrink-0 items-center gap-1.5">
                       <button
@@ -10006,16 +10023,20 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                         className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
                           slotQueueTraversalRole === 'hold'
                             ? 'border-amber-300/45 bg-amber-500/12 text-amber-100'
-                            : slotQueueTraversalRole === 'fast'
+                            : !wildcardUtilitySlot && slotQueueTraversalRole === 'fast'
                               ? 'border-fuchsia-300/45 bg-fuchsia-500/12 text-fuchsia-100'
                               : 'border-cyan-300/40 bg-cyan-500/10 text-cyan-100'
                         }`}
-                        title={getQueueTraversalRoleTitle(slotQueueTraversalRole)}
-                        aria-label={`Change card cycle mode. ${getQueueTraversalRoleTitle(slotQueueTraversalRole)}`}
+                        title={wildcardUtilitySlot
+                          ? getWildcardUtilityModeTitle(slotQueueTraversalRole)
+                          : getQueueTraversalRoleTitle(slotQueueTraversalRole)}
+                        aria-label={wildcardUtilitySlot
+                          ? `Change wildcard mode. ${getWildcardUtilityModeTitle(slotQueueTraversalRole)}`
+                          : `Change card cycle mode. ${getQueueTraversalRoleTitle(slotQueueTraversalRole)}`}
                       >
                         {slotQueueTraversalRole === 'hold'
                           ? <Info size={16} />
-                          : slotQueueTraversalRole === 'fast'
+                          : !wildcardUtilitySlot && slotQueueTraversalRole === 'fast'
                             ? <Zap size={16} />
                             : <RotateCw size={16} />}
                       </button>
@@ -11347,7 +11368,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
               <WandSparkles size={16} className="text-fuchsia-200" />
               <div className="min-w-0">
                 <strong className="block text-xs font-black uppercase tracking-[0.14em] text-zinc-100">Wildcard Utility Builder</strong>
-                <span className="mt-0.5 block text-[11px] text-zinc-400">Choose the random sources for this card. Each selected source resolves once per generation.</span>
+                <span className="mt-0.5 block text-[11px] text-zinc-400">Choose random sources for this card, then use Reroll or Hold to control when they change.</span>
               </div>
               <button type="button" onClick={() => setWildcardUtilityEditor(null)} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-white" title="Close wildcard builder"><X size={14} /></button>
             </header>
@@ -11391,13 +11412,24 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 <div className="mt-3 flex min-h-12 flex-wrap content-start gap-1.5">
                   {wildcardUtilityEditor.selectedNames.length > 0 ? wildcardUtilityEditor.selectedNames.map((name) => <span key={`wildcard-utility-token-${name}`} className="rounded-sm border border-fuchsia-300/30 bg-black/30 px-2 py-1 font-mono text-[10px] text-fuchsia-100">__{name}__</span>) : <span className="text-xs text-zinc-500">Select one or more sources.</span>}
                 </div>
+                <div className="mt-4 flex items-center justify-between rounded-md border border-white/10 bg-black/25 px-3 py-2">
+                  <span className="text-[9px] font-black uppercase tracking-[0.12em] text-zinc-500">Wildcard mode</span>
+                  <span className={`text-[10px] font-black uppercase tracking-[0.12em] ${
+                    getSlotQueueTraversalRole(slots.find((slot) => slot.slotId === wildcardUtilityEditor.slotId)) === 'hold'
+                      ? 'text-amber-100'
+                      : 'text-cyan-100'
+                  }`}>
+                    {getWildcardUtilityModeLabel(getSlotQueueTraversalRole(slots.find((slot) => slot.slotId === wildcardUtilityEditor.slotId)))}
+                  </span>
+                </div>
                 <div className="mt-4 border-t border-fuchsia-300/15 pt-3">
                   <label htmlFor="wildcard-utility-rerolls" className="text-[10px] font-black uppercase tracking-[0.12em] text-fuchsia-100">Queue rerolls</label>
                   <div className="mt-2 grid grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] overflow-hidden rounded-md border border-fuchsia-300/25 bg-black/35">
                     <button
                       type="button"
                       onClick={() => setWildcardUtilityEditor((current) => current ? { ...current, rerolls: normalizeWildcardRerolls(current.rerolls - 1) } : current)}
-                      className="inline-flex h-10 items-center justify-center border-r border-fuchsia-300/15 text-fuchsia-100 hover:bg-fuchsia-400/10"
+                      disabled={getSlotQueueTraversalRole(slots.find((slot) => slot.slotId === wildcardUtilityEditor.slotId)) === 'hold'}
+                      className="inline-flex h-10 items-center justify-center border-r border-fuchsia-300/15 text-fuchsia-100 hover:bg-fuchsia-400/10 disabled:cursor-not-allowed disabled:opacity-30"
                       title="Remove one wildcard reroll"
                       aria-label="Decrease wildcard rerolls"
                     >
@@ -11411,24 +11443,31 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       step={1}
                       value={wildcardUtilityEditor.rerolls}
                       onChange={(event) => setWildcardUtilityEditor((current) => current ? { ...current, rerolls: normalizeWildcardRerolls(event.target.value) } : current)}
-                      className="h-10 min-w-0 bg-transparent px-2 text-center font-mono text-sm font-bold text-fuchsia-50 outline-none"
+                      disabled={getSlotQueueTraversalRole(slots.find((slot) => slot.slotId === wildcardUtilityEditor.slotId)) === 'hold'}
+                      className="h-10 min-w-0 bg-transparent px-2 text-center font-mono text-sm font-bold text-fuchsia-50 outline-none disabled:cursor-not-allowed disabled:opacity-35"
                     />
                     <button
                       type="button"
                       onClick={() => setWildcardUtilityEditor((current) => current ? { ...current, rerolls: normalizeWildcardRerolls(current.rerolls + 1) } : current)}
-                      className="inline-flex h-10 items-center justify-center border-l border-fuchsia-300/15 text-fuchsia-100 hover:bg-fuchsia-400/10"
+                      disabled={getSlotQueueTraversalRole(slots.find((slot) => slot.slotId === wildcardUtilityEditor.slotId)) === 'hold'}
+                      className="inline-flex h-10 items-center justify-center border-l border-fuchsia-300/15 text-fuchsia-100 hover:bg-fuchsia-400/10 disabled:cursor-not-allowed disabled:opacity-30"
                       title="Add one wildcard reroll"
                       aria-label="Increase wildcard rerolls"
                     >
                       <Plus size={14} />
                     </button>
                   </div>
+                  <p className="mt-2 text-[10px] leading-4 text-zinc-500">
+                    {getSlotQueueTraversalRole(slots.find((slot) => slot.slotId === wildcardUtilityEditor.slotId)) === 'hold'
+                      ? 'Hold resolves one choice for this card and keeps it throughout the queued run.'
+                      : 'Reroll creates the configured number of wildcard variations for each queue prompt.'}
+                  </p>
                 </div>
                 <p className="mt-4 border-t border-fuchsia-300/15 pt-3 text-[11px] leading-5 text-zinc-400">A wildcard card can also include fixed tags. The builder updates only its wildcard tokens, so prompt text you add manually stays intact.</p>
               </aside>
             </div>
             <footer className="flex items-center justify-between gap-3 border-t border-white/10 px-4 py-3">
-              <span className="text-[10px] text-zinc-500">The random choice is deterministic for a given generation seed.</span>
+              <span className="text-[10px] text-zinc-500">Use the card header control to switch between Reroll and Hold.</span>
               <div className="flex gap-2">
                 <button type="button" onClick={() => setWildcardUtilityEditor(null)} className="h-9 rounded-md border border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:text-white">Cancel</button>
                 <button type="button" onClick={applyWildcardUtilitySelection} className="inline-flex h-9 items-center gap-1.5 rounded-md border border-fuchsia-300/45 bg-fuchsia-500/[0.15] px-3 text-[10px] font-black uppercase tracking-[0.1em] text-fuchsia-100 hover:bg-fuchsia-500/[0.22]"><Check size={12} /> Apply sources</button>

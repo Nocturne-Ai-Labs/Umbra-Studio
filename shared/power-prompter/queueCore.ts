@@ -21,6 +21,7 @@ export type QueuePromptToken = {
   variantName: string;
   chainLinks: string[];
   blockLinks: string[];
+  wildcardMode?: 'reroll' | 'hold';
 };
 
 export type QueuePromptBuildEntry = {
@@ -35,6 +36,7 @@ export type QueuePromptPreviewToken = {
   variantId: string;
   variantName?: string;
   text?: string;
+  wildcardMode?: 'reroll' | 'hold';
 };
 
 export type QueuePromptPreviewEntry = {

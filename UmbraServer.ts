@@ -83,7 +83,11 @@ import {
   parsePowerPrompterCsv,
   type PowerPrompterCsvItem,
 } from './backend/powerPrompterCsv';
-import { expandUmbraPromptWildcards, normalizeUmbraPromptWildcards } from './shared/promptWildcards';
+import {
+  expandUmbraPromptWildcardSegments,
+  expandUmbraPromptWildcards,
+  normalizeUmbraPromptWildcards,
+} from './shared/promptWildcards';
 import {
   buildHermesPromptCommand,
   isMissingHermesPromptSession,
@@ -6132,6 +6136,27 @@ function broadcastPrompterSyncToComfy() {
   }
 }
 
+function resolvePrompterPromptWildcards(
+  rawPrompt: unknown,
+  rawEntry: unknown,
+  wildcards: unknown,
+  baseSeed: number,
+  promptIndex: number,
+): { prompt: string; entry: any } {
+  const entry = rawEntry && typeof rawEntry === 'object' ? rawEntry as any : null;
+  const expanded = expandUmbraPromptWildcardSegments(
+    rawPrompt,
+    entry?.tokens,
+    wildcards,
+    baseSeed,
+    promptIndex,
+  );
+  return {
+    prompt: expanded.prompt,
+    entry: entry ? { ...entry, prompt: expanded.prompt, tokens: expanded.tokens } : entry,
+  };
+}
+
 async function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: any) {
   const prompts = sanitizePrompterPromptLines(data?.prompts, { dedupe: false });
   if (prompts.length === 0) {
@@ -6147,9 +6172,15 @@ async function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: an
   const requestId = String(data?.requestId || crypto.randomUUID());
   const wildcards = await listPowerPrompterWildcards();
   const baseSeed = Math.max(0, Math.floor(Number(data?.state?.generation?.seed) || 0));
-  const resolvedPrompts = prompts.map((prompt, index) => (
-    expandUmbraPromptWildcards(prompt, wildcards, baseSeed + index).prompt
+  const rawPromptEntries = Array.isArray(data?.state?.promptEntries) ? data.state.promptEntries : [];
+  const resolved = prompts.map((prompt, index) => resolvePrompterPromptWildcards(
+    prompt,
+    rawPromptEntries[index],
+    wildcards,
+    baseSeed,
+    index,
   ));
+  const resolvedPrompts = resolved.map((entry) => entry.prompt);
   data = {
     ...data,
     prompts: resolvedPrompts,
@@ -6157,14 +6188,15 @@ async function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: an
       ? {
         ...data.state,
         promptEntries: Array.isArray(data.state.promptEntries)
-          ? data.state.promptEntries.map((entry: any, index: number) => ({
-            ...entry,
-            prompt: expandUmbraPromptWildcards(
-              String(entry?.prompt || resolvedPrompts[index] || ''),
+          ? data.state.promptEntries.map((entry: any, index: number) => (
+            resolvePrompterPromptWildcards(
+              String(entry?.prompt || prompts[index] || ''),
+              entry,
               wildcards,
-              baseSeed + index,
-            ).prompt,
-          }))
+              baseSeed,
+              index,
+            ).entry
+          ))
           : data.state.promptEntries,
       }
       : data?.state,
@@ -17879,6 +17911,12 @@ function normalizePPQueueCycleWeights(rawWeights: unknown, allowedSetIds: number
   return normalized;
 }
 
+function normalizePPQueueTraversalRole(rawRole: unknown): PowerPrompterQueueTraversalRole {
+  const role = String(rawRole || '').trim().toLowerCase();
+  if (role === 'hold' || role === 'fast') return role;
+  return 'cycle';
+}
+
 function normalizePPWildcardRerolls(rawValue: unknown): number {
   const value = Math.floor(Number(rawValue));
   if (!Number.isFinite(value)) return 1;
@@ -20593,6 +20631,7 @@ function createPPCardNode(
     randomSetIds: [],
     queueEnabled: true,
     queueSetIds: [1],
+    queueTraversalRole: 'cycle',
     queueCycleWeights: {},
     wildcardRerolls: 1,
     chainLinks: [],
@@ -20674,6 +20713,7 @@ function normalizePPCardDocument(rawDoc: unknown, filePath: string | null): Powe
       randomSetIds,
       queueEnabled: queueSetIds.length > 0,
       queueSetIds,
+      queueTraversalRole: normalizePPQueueTraversalRole((card as any).queueTraversalRole),
       queueCycleWeights: normalizePPQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
       wildcardRerolls: normalizePPWildcardRerolls((card as any).wildcardRerolls),
       chainLinks: normalizePPChainLinks((card as any).chainLinks, id),
@@ -20757,6 +20797,7 @@ function importLegacyPromptToPPCardDocument(
       randomSetIds: normalizePPRandomSetIds(card.randomSetIds),
       queueSetIds,
       queueEnabled: queueSetIds.length > 0,
+      queueTraversalRole: normalizePPQueueTraversalRole((card as any).queueTraversalRole),
       queueCycleWeights: normalizePPQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
       wildcardRerolls: normalizePPWildcardRerolls((card as any).wildcardRerolls),
       chainLinks: normalizePPChainLinks((card as any).chainLinks, String(card.id || '').trim()),
@@ -22379,6 +22420,7 @@ async function savePPSelections(selections: PPSelectionsMap) {
 type PPItem = PowerPrompterCsvItem;
 
 type PowerPrompterCardType = 'character' | 'location' | 'expression' | 'action' | 'style' | 'custom';
+type PowerPrompterQueueTraversalRole = 'hold' | 'cycle' | 'fast';
 type PowerPrompterSearchScope = 'scoped' | 'all';
 
 interface PowerPrompterCardNode {
@@ -22394,6 +22436,7 @@ interface PowerPrompterCardNode {
   randomSetIds: number[];
   queueEnabled: boolean;
   queueSetIds: number[];
+  queueTraversalRole?: PowerPrompterQueueTraversalRole;
   queueCycleWeights?: Record<string, number>;
   wildcardRerolls?: number;
   chainLinks?: string[];

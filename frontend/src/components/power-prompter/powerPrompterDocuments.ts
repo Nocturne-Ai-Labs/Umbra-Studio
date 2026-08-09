@@ -4,6 +4,7 @@ import {
   importLegacyPromptToCardDocument,
   normalizePowerPrompterCardDocument,
   normalizePowerPrompterGenerationControls,
+  normalizeQueueTraversalRole,
 } from '@/lib/powerPrompter';
 import {
   createSlotId,
@@ -12,7 +13,12 @@ import {
   normalizeChainLinks,
   normalizeVariantTags,
 } from '@/lib/powerPrompterChain';
-import { clampQueueSetId, normalizeQueueCycleWeights, normalizeQueueSetIds, normalizeRandomSetIds } from './queue/queueCore';
+import {
+  clampQueueSetId,
+  normalizeQueueCycleWeights,
+  normalizeQueueSetIds,
+  normalizeRandomSetIds,
+} from './queue/queueCore';
 import { composeActivePromptFromCards } from './queue/queuePromptBuilder';
 
 async function fetchTextWithTimeout(url: string, timeoutMs = 8000): Promise<Response> {
@@ -45,7 +51,9 @@ export function getCardDocSignature(document: PowerPrompterCardDocument | null):
       randomSetIds: normalizeRandomSetIds(card.randomSetIds),
       queueEnabled: card.queueEnabled !== false,
       queueSetIds: normalizeQueueSetIds(card.queueSetIds, false),
+      queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
       queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, normalizeQueueSetIds(card.queueSetIds, false)),
+      wildcardRerolls: Math.max(1, Math.min(1000, Math.floor(Number((card as any).wildcardRerolls) || 1))),
       chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
       blockLinks: normalizeBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
       order: card.order,
@@ -70,7 +78,9 @@ export function getCardDocSignature(document: PowerPrompterCardDocument | null):
             randomSetIds: normalizeRandomSetIds(card.randomSetIds),
             queueEnabled: card.queueEnabled !== false,
             queueSetIds: normalizeQueueSetIds(card.queueSetIds, false),
+            queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
             queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, normalizeQueueSetIds(card.queueSetIds, false)),
+            wildcardRerolls: Math.max(1, Math.min(1000, Math.floor(Number((card as any).wildcardRerolls) || 1))),
             chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
             blockLinks: normalizeBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
             order: Number.isFinite(Number(card.order)) ? Math.max(0, Math.floor(Number(card.order))) : 0,

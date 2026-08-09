@@ -20,8 +20,13 @@ ComfyUI-Nodes/
 ComfyUI-Output/
 .snapshots/
 docs/
+# Local agent skills, including the private Umbra wildcard authoring skill.
 .agents/
 agents.d/
+
+# Private Power Prompter wildcard libraries and their authoring generators.
+/defaults/PowerPrompter/Wildcards/
+/scripts/generate-*wildcard*.mjs
 
 # Separate repository
 Umbra-Nodes/

@@ -1,5 +1,69 @@
 # Changelog
 
+## v0.31.0
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, migrations, or manual configuration are
+required. Update normally. Existing wildcard files, Power Prompter cards,
+queue sets, and saved reroll counts are preserved.
+
+### Wildcard Utility Modes
+
+- Replaced the ordinary three-state card traversal control on Wildcard Utility
+  cards with two purpose-built modes: **Reroll** and **Hold**.
+- **Reroll** resolves a fresh wildcard choice for each configured queue reroll,
+  making it suitable for outfits, poses, actions, and other elements that
+  should vary throughout a run.
+- **Hold** resolves the wildcard once and keeps that choice stable throughout
+  the queued run, making it suitable for locations, environments, themes, and
+  other context that should remain consistent.
+- Kept the established Hold, Cycle, and Fast traversal controls unchanged on
+  standard variant and Style Utility cards.
+- Added the active wildcard mode to the Wildcard Utility builder and disabled
+  reroll-count editing while the card is held, so the relationship between the
+  two controls is visible and unambiguous.
+
+### Queue Composition And Resolution
+
+- Made held wildcard cards stop inflating the displayed or generated image
+  count, while rerolling wildcard cards continue to multiply the correct
+  combination count.
+- Added per-card wildcard mode metadata to queue previews and backend dispatch,
+  allowing held and rerolling wildcard cards to coexist in the same queue.
+- Preserved normal enabled variants while wildcard rerolls are applied. A held
+  location, rerolling outfit, and multiple ordinary pose variants now compose
+  predictably without changing one another's traversal behavior.
+- Added segmented wildcard expansion so the backend replaces only the wildcard
+  tokens owned by each utility card and preserves modular prompt segments and
+  agent-enhanced text around them.
+- Retained compatibility with older unsegmented wildcard prompts and cards that
+  predate the new mode metadata.
+
+### Persistence And Release Privacy
+
+- Added wildcard mode and reroll count to Power Prompter's document signature,
+  session updates, autosave detection, and server-side PPCard normalization.
+  Mode changes now survive app and browser refreshes.
+- Strengthened clean-source packaging so private wildcard libraries, authoring
+  generators, local agent skills, and internal test files remain outside the
+  public repository and release packages.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Wildcard Hold no longer reverts to Reroll after refreshing Power
+  Prompter or reopening a saved PPCard.
+- **Fixed:** Held wildcard cards no longer multiply queue totals using a reroll
+  count that is intentionally inactive.
+- **Fixed:** Mixed held and rerolling wildcard cards no longer share one global
+  wildcard-resolution cadence.
+- **Fixed:** Backend PPCard normalization no longer strips the card traversal
+  role during session updates and autosaves.
+- **Improved:** Wildcard Utility controls now use language that directly matches
+  their behavior instead of exposing ordinary card traversal terminology.
+- **Improved:** Public-source generation now explicitly rejects private wildcard
+  authoring scripts in addition to relying on Git ignore rules.
+
 ## v0.30.9
 
 ### TL;DR - Setup After Updating

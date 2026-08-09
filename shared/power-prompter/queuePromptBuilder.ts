@@ -287,6 +287,7 @@ export function buildQueuePromptsFromCards(
   const getWildcardRerollsForSet = (setId: number): number => Math.max(1, ...slotVariants
     .filter((slotEntry) => isWildcardUtilitySlot(slotEntry))
     .flatMap((slotEntry) => getSelectedForSet(slotEntry.variants, setId))
+    .filter((card) => normalizeQueueTraversalRole(card.queueTraversalRole) !== 'hold')
     .filter((card) => /__[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}__/.test(String(card.text || '')))
     .map((card) => normalizeWildcardRerolls(card.wildcardRerolls)));
   let documentShuffleSalt = '';
@@ -322,6 +323,9 @@ export function buildQueuePromptsFromCards(
           variantName: String((card as any).variantName || '').trim(),
           chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
           blockLinks: normalizeBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
+          ...(isWildcardUtilitySlot(slotEntry)
+            ? { wildcardMode: normalizeQueueTraversalRole(card.queueTraversalRole) === 'hold' ? 'hold' as const : 'reroll' as const }
+            : {}),
         };
         return Array.from({ length: repeatCount }, () => queueToken);
       });
@@ -417,6 +421,7 @@ export function buildQueuePromptsFromCards(
         variantId: String(token.variantId || '').trim(),
         variantName: String(token.variantName || '').trim(),
         text: String(token.text || '').trim(),
+        ...(token.wildcardMode ? { wildcardMode: token.wildcardMode } : {}),
       }))
       .filter((token) => token.slotId.length > 0 && token.variantId.length > 0),
   });
@@ -665,6 +670,9 @@ export function buildQueuePromptsFromCards(
         variantName: String((selected as any).variantName || '').trim(),
         chainLinks: normalizeChainLinks((selected as any).chainLinks, String(selected.id || '').trim()),
         blockLinks: normalizeBlockLinks((selected as any).blockLinks, String(selected.id || '').trim()),
+        ...(isWildcardUtilitySlot(slot)
+          ? { wildcardMode: normalizeQueueTraversalRole(selected.queueTraversalRole) === 'hold' ? 'hold' as const : 'reroll' as const }
+          : {}),
       } as QueuePromptToken];
     });
     const promptEntry = buildEntryFromTokens(selectedTokens, selectedTokens);

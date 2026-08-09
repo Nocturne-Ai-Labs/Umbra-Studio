@@ -9,6 +9,19 @@ export interface UmbraPromptWildcardExpansion {
   missing: string[];
 }
 
+export interface UmbraPromptWildcardSegment {
+  [key: string]: unknown;
+  text?: unknown;
+  slotId?: unknown;
+  variantId?: unknown;
+  wildcardMode?: unknown;
+}
+
+export interface UmbraPromptWildcardSegmentExpansion {
+  prompt: string;
+  tokens: UmbraPromptWildcardSegment[];
+}
+
 const TOKEN_PATTERN = /__([a-zA-Z0-9][a-zA-Z0-9_-]{0,127})__/g;
 const MAX_EXPANSION_DEPTH = 8;
 
@@ -79,4 +92,93 @@ export function expandUmbraPromptWildcards(
   }
   TOKEN_PATTERN.lastIndex = 0;
   return { prompt, resolved, missing: [...missing] };
+}
+
+interface UmbraPromptWildcardResolutionDescriptor {
+  name: string;
+  tokenIndex: number;
+  value: string;
+}
+
+function createWildcardTokenPattern(): RegExp {
+  return /__([a-zA-Z0-9][a-zA-Z0-9_-]{0,127})__/g;
+}
+
+export function expandUmbraPromptWildcardSegments(
+  rawPrompt: unknown,
+  rawTokens: unknown,
+  rawWildcards: unknown,
+  baseSeed: number,
+  promptIndex: number,
+): UmbraPromptWildcardSegmentExpansion {
+  const tokens = Array.isArray(rawTokens)
+    ? rawTokens.map((rawToken) => (
+      rawToken && typeof rawToken === 'object'
+        ? rawToken as UmbraPromptWildcardSegment
+        : {}
+    ))
+    : [];
+  if (tokens.length <= 0) {
+    return {
+      prompt: expandUmbraPromptWildcards(rawPrompt, rawWildcards, baseSeed + promptIndex).prompt,
+      tokens,
+    };
+  }
+
+  const descriptorsByName = new Map<string, UmbraPromptWildcardResolutionDescriptor[]>();
+  const descriptorsByToken = new Map<number, UmbraPromptWildcardResolutionDescriptor[]>();
+  for (const [tokenIndex, token] of tokens.entries()) {
+    const tokenText = String(token.text || '');
+    const hold = String(token.wildcardMode || '').trim().toLowerCase() === 'hold';
+    const slotIdentity = String(token.slotId || token.variantId || tokenIndex).trim() || String(tokenIndex);
+    let occurrenceIndex = 0;
+    for (const match of tokenText.matchAll(createWildcardTokenPattern())) {
+      const name = normalizeName(match[1]);
+      if (!name) continue;
+      const seed = hold
+        ? `${baseSeed}|wildcard-hold|${slotIdentity}|${occurrenceIndex}`
+        : `${baseSeed + promptIndex}|wildcard-reroll|${slotIdentity}|${occurrenceIndex}`;
+      const descriptor: UmbraPromptWildcardResolutionDescriptor = {
+        name,
+        tokenIndex,
+        value: expandUmbraPromptWildcards(`__${name}__`, rawWildcards, seed).prompt,
+      };
+      const namedDescriptors = descriptorsByName.get(name) || [];
+      namedDescriptors.push(descriptor);
+      descriptorsByName.set(name, namedDescriptors);
+      const tokenDescriptors = descriptorsByToken.get(tokenIndex) || [];
+      tokenDescriptors.push(descriptor);
+      descriptorsByToken.set(tokenIndex, tokenDescriptors);
+      occurrenceIndex += 1;
+    }
+  }
+
+  const descriptorOffsets = new Map<string, number>();
+  const prompt = String(rawPrompt || '').replace(
+    createWildcardTokenPattern(),
+    (wildcardToken, rawName: string) => {
+      const name = normalizeName(rawName);
+      const descriptors = descriptorsByName.get(name) || [];
+      const offset = descriptorOffsets.get(name) || 0;
+      descriptorOffsets.set(name, offset + 1);
+      const descriptor = descriptors[offset];
+      if (descriptor) return descriptor.value;
+      return expandUmbraPromptWildcards(
+        wildcardToken,
+        rawWildcards,
+        `${baseSeed + promptIndex}|wildcard-reroll|fallback|${name}|${offset}`,
+      ).prompt;
+    },
+  ).trim();
+
+  const resolvedTokens = tokens.map((token, tokenIndex) => {
+    const descriptorQueue = [...(descriptorsByToken.get(tokenIndex) || [])];
+    const text = String(token.text || '').replace(
+      createWildcardTokenPattern(),
+      (wildcardToken) => descriptorQueue.shift()?.value || wildcardToken,
+    );
+    return { ...token, text };
+  });
+
+  return { prompt, tokens: resolvedTokens };
 }
