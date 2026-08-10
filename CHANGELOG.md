@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.31.6
+
+### TL;DR - Wildcard Hold Queue Dispatch Hotfix
+
+No wildcard files or card edits are required. Start a fresh Power Prompter
+queue after updating. Wildcard Utility variants set to **Hold** now preserve
+their selected WCUID when a staged queue is dispatched to Umbra UI.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Restored segmented wildcard metadata during the normal staged
+  queue dispatch path. Previously, that handoff could omit the metadata that
+  identifies an Outfit or Location variant as **Hold**.
+- **Fixed:** Held wildcard choices now remain fixed across newly queued jobs,
+  while variants set to **Reroll** continue to vary by their requested count.
+
 ## v0.31.5
 
 ### TL;DR - Wildcard Hold Hotfix

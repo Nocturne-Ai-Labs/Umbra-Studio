@@ -5875,6 +5875,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         promptOutputSubfolders: meta.promptOutputSubfolders,
         promptStyleNames: meta.promptStyleNames,
         promptSeedGroupIds: meta.promptSeedGroupIds,
+        // Wildcard Hold is resolved by the backend from the segmented token
+        // metadata. Keep it attached for staged queue groups as well.
+        promptEntries: meta.promptEntries,
       }, requestId, meta.targetBridgeId, meta.queueTargetType);
       logPowerPrompterDebug('queue:dispatchGroup:accepted', {
         requestId,
