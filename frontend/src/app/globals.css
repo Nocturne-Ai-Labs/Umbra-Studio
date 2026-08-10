@@ -2416,11 +2416,15 @@ html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root] {
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-gallery-mobile-switcher] {
+  position: sticky;
+  top: 0;
+  z-index: 35;
   display: grid;
+  flex: 0 0 auto;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.325rem;
+  gap: 0.45rem;
   margin-top: var(--umbra-phone-shell-top);
-  padding: 0.55rem;
+  padding: 0.625rem;
   border-bottom: 1px solid color-mix(in srgb, var(--umbra-accent) 18%, rgba(255, 255, 255, 0.08));
   background: rgba(5, 5, 8, 0.96);
   backdrop-filter: blur(14px);
@@ -2428,7 +2432,8 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-mobile-switcher] {
 
 html[data-umbra-remote-mode="phone"] [data-umbra-gallery-mobile-switcher] button {
   display: inline-flex;
-  min-height: 2.4rem;
+  min-width: 0;
+  min-height: 3rem;
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
@@ -2440,6 +2445,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-mobile-switcher] button
   font-weight: 900;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  touch-action: manipulation;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-gallery-mobile-switcher] button[data-active="1"] {
@@ -2454,6 +2460,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator] {
   min-height: 0;
   max-height: none;
   flex: 1 1 auto;
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
   border-right: 0;
   border-bottom: 1px solid rgb(39 39 42 / 0.8);
 }
@@ -2509,38 +2516,41 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-navigator] > div:last-c
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-library-section-header] {
-  min-height: 1.95rem;
+  min-height: 2.75rem;
   margin-bottom: 0.25rem;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-library-section-toggle] {
-  min-height: 1.95rem !important;
+  min-height: 2.75rem !important;
   padding-block: 0.35rem !important;
+  touch-action: manipulation;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-library-section-collapse] {
-  width: 1.95rem !important;
-  height: 1.95rem !important;
+  width: 2.75rem !important;
+  height: 2.75rem !important;
+  touch-action: manipulation;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-library-folder-row] {
-  min-height: 2.3rem !important;
+  min-height: 3rem !important;
   height: auto !important;
   padding-block: 0.25rem;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-library-folder-row] > button,
 html[data-umbra-remote-mode="phone"] [data-umbra-library-root-row] {
-  min-height: 2.3rem !important;
+  min-height: 3rem !important;
+  touch-action: manipulation;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-library-root-row] {
-  height: 2.6rem !important;
+  height: 3rem !important;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-library-folder-row] > button:first-of-type {
-  min-width: 1.75rem;
-  min-height: 1.75rem !important;
+  min-width: 2.5rem;
+  min-height: 2.5rem !important;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-gallery-header] {
@@ -3196,7 +3206,18 @@ html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-root] {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   flex-direction: column;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-power-prompter] {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-sidebar] {
@@ -3805,7 +3826,9 @@ html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-m
   width: var(--umbra-phone-prompter-card-width) !important;
   min-width: var(--umbra-phone-prompter-card-width) !important;
   max-width: var(--umbra-phone-prompter-card-width) !important;
-  min-height: max(28rem, calc(100dvh - 22.75rem));
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
   border-radius: 1rem !important;
   scroll-snap-align: start;
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.36);

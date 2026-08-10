@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.31.8
+
+### TL;DR - Umbra Remote Mobile Hotfix
+
+No additional models, custom nodes, migrations, or manual configuration are
+required. Update normally. This hotfix restores the Power Prompter card
+workspace and repairs Gallery navigation for phone-sized Umbra Remote sessions.
+
+### Power Prompter Mobile Recovery
+
+- Restored the embedded Power Prompter to the full available Umbra UI height
+  instead of allowing its wrapper to collapse around the command bar.
+- Repaired the phone card lane so the selected card remains visible and usable
+  beneath the Cards, Presets, Queue, and wildcard controls.
+- Removed the fixed card minimum height that clipped card content on compact
+  phone screens and now lets each card fit its available scrollable stage.
+
+### Gallery Mobile Controls
+
+- Rebuilt the Library and Media switcher as a sticky 48-pixel touch bar that
+  remains fully clickable on narrow and short phone viewports.
+- Increased the touch area for library section toggles, collapse controls,
+  root rows, folder rows, and expand buttons.
+- Added phone-safe bottom spacing while preserving full vertical scrolling
+  through long folder trees above Umbra Remote's navigation bar.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Power Prompter no longer opens to a blank mobile workspace while
+  its cards render invisibly below a collapsed overflow boundary.
+- **Fixed:** Prompt cards no longer extend beyond the usable card stage on
+  compact phones.
+- **Fixed:** Gallery Library and Media controls no longer use undersized or
+  easily clipped mobile hit targets.
+- **Improved:** Folder navigation remains scrollable and comfortably tappable
+  down to a verified 360 by 640 phone viewport.
+
 ## v0.31.7
 
 ### TL;DR - Setup After Updating
