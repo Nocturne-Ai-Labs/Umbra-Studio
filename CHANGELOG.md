@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.31.5
+
+### TL;DR - Wildcard Hold Hotfix
+
+No wildcard files, cards, or settings need to be changed. Wildcard Utility
+variants set to **Hold** now keep one stable result throughout the queue, even
+when an earlier wildcard-file edit made the previously saved WCUID unavailable.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Prevented invalid or stale held wildcard selections from silently
+  falling back to per-job rerolls.
+- **Improved:** Kept exact WCUID holds unchanged while giving legacy or stale
+  held selections a deterministic stable fallback until the user chooses a new
+  active roll.
+
 ## v0.31.4
 
 ### TL;DR - Wildcard Performance Hotfix

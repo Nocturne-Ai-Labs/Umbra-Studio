@@ -145,6 +145,15 @@ function resolveWildcardChoice(
   return heldChoice || choices[randomState % choices.length];
 }
 
+function hasHeldWildcardChoice(wildcard: UmbraPromptWildcard | undefined, heldChoiceId = ''): boolean {
+  if (!wildcard || !heldChoiceId) return false;
+  const choices = wildcard.choices?.length
+    ? wildcard.choices
+    : createUmbraWildcardChoices(wildcard.name, wildcard.values);
+  const normalizedId = heldChoiceId.toUpperCase();
+  return choices.some((choice) => choice.id === normalizedId);
+}
+
 export function expandUmbraPromptWildcards(
   rawPrompt: unknown,
   rawWildcards: unknown,
@@ -428,6 +437,9 @@ export function expandUmbraPromptWildcardSegments(
   baseSeed: number,
   promptIndex: number,
 ): UmbraPromptWildcardSegmentExpansion {
+  const wildcardMap = new Map(
+    normalizeUmbraPromptWildcards(rawWildcards).map((wildcard) => [wildcard.name, wildcard]),
+  );
   const tokens = Array.isArray(rawTokens)
     ? rawTokens.map((rawToken) => (
       rawToken && typeof rawToken === 'object'
@@ -453,9 +465,15 @@ export function expandUmbraPromptWildcardSegments(
     for (const match of tokenText.matchAll(createWildcardTokenPattern())) {
       const name = normalizeName(match[1]);
       if (!name) continue;
-      const seed = hold
+      const heldChoiceId = heldChoiceIds[name];
+      const hasExactHeldChoice = hold && hasHeldWildcardChoice(wildcardMap.get(name), heldChoiceId);
+      // A library edit can invalidate a previously saved WCUID. Keep Hold stable in
+      // that case instead of silently falling through to a new choice for every job.
+      const seed = hasExactHeldChoice
         ? `${baseSeed}|wildcard-hold|${slotIdentity}|${occurrenceIndex}`
-        : `${baseSeed + promptIndex}|wildcard-reroll|${slotIdentity}|${occurrenceIndex}`;
+        : hold
+          ? `wildcard-hold-fallback|${slotIdentity}|${name}|${occurrenceIndex}`
+          : `${baseSeed + promptIndex}|wildcard-reroll|${slotIdentity}|${occurrenceIndex}`;
       const descriptor: UmbraPromptWildcardResolutionDescriptor = {
         name,
         tokenIndex,
