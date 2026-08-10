@@ -4,6 +4,7 @@ import React from 'react';
 import {
   CheckCircle2,
   Download,
+  EyeOff,
   Film,
   FolderOpen,
   Image as ImageIcon,
@@ -20,6 +21,7 @@ import {
   browseUmbraUiMediaToolsOutputFolder,
   browseUmbraUiMediaToolsSourceFiles,
   submitUmbraUiVideoToGif,
+  submitUmbraUiImageCensor,
   submitUmbraUiWatermark,
   uploadUmbraUiWatermarkAsset,
   type UmbraUiMediaToolResult,
@@ -42,7 +44,7 @@ import {
 } from '@/components/umbra-ui/UmbraImageExportControls';
 import { UmbraExtrasPresetControl } from '@/components/umbra-ui/UmbraExtrasPresetControl';
 
-export type UmbraExtrasMediaToolMode = 'watermark' | 'video-watermark' | 'gif';
+export type UmbraExtrasMediaToolMode = 'censor' | 'watermark' | 'video-watermark' | 'gif';
 
 type BatchItemStatus = 'staged' | 'running' | 'completed' | 'failed';
 
@@ -135,7 +137,7 @@ function useOutputFolder(scope: UmbraExtrasMediaToolMode) {
 }
 
 function useStagedMedia(mode: UmbraExtrasMediaToolMode) {
-  const targetKind: UmbraUiMediaBatchKind = mode === 'watermark' ? 'image' : 'video';
+  const targetKind: UmbraUiMediaBatchKind = mode === 'watermark' || mode === 'censor' ? 'image' : 'video';
   const [items, setItems] = React.useState<StagedMediaItem[]>([]);
   const addPaths = React.useCallback((paths: string[], previewUrls: Record<string, string> = {}) => {
     setItems((current) => {
@@ -229,7 +231,7 @@ function OutputDestination({
   onChange: (value: string) => void;
   browsing: boolean;
   onBrowse: () => void;
-  automaticSubfolder: 'Watermarked' | 'GIF';
+  automaticSubfolder: 'Censored' | 'Watermarked' | 'GIF';
 }) {
   return (
     <div>
@@ -530,6 +532,151 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
   );
 }
 
+function ImageCensorTool() {
+  const showToast = useStore((state) => state.showToast);
+  const { items, setItems, addFiles, addPaths } = useStagedMedia('censor');
+  const { outputFolder, setOutputFolder, browsing, browse } = useOutputFolder('censor');
+  const [selectedId, setSelectedId] = React.useState('');
+  const [censorMode, setCensorMode] = React.useState<'mosaic' | 'overlay'>('mosaic');
+  const [overlay, setOverlay] = React.useState<File | null>(null);
+  const [overlayAsset, setOverlayAsset] = React.useState<UmbraUiWatermarkAsset | null>(null);
+  const [overlayUploading, setOverlayUploading] = React.useState(false);
+  const [region, setRegion] = React.useState({ x: 0.325, y: 0.68, width: 0.35, height: 0.18 });
+  const [mosaicSize, setMosaicSize] = React.useState(24);
+  const [exportSettings, setExportSettings] = React.useState<UmbraImageExportSettings>({ resizeEnabled: false, longEdge: 1024, format: 'png', quality: 90 });
+  const [processing, setProcessing] = React.useState(false);
+  const [browsingSources, setBrowsingSources] = React.useState(false);
+  const [summary, setSummary] = React.useState({ completed: 0, failed: 0, total: 0 });
+  const [dimensions, setDimensions] = React.useState({ width: 4, height: 3 });
+  const [previewFailed, setPreviewFailed] = React.useState(false);
+  const sourceInputRef = React.useRef<HTMLInputElement | null>(null);
+  const overlayInputRef = React.useRef<HTMLInputElement | null>(null);
+  const previewRef = React.useRef<HTMLDivElement | null>(null);
+  const dragRef = React.useRef<{ kind: 'move' | 'resize'; x: number; y: number; region: typeof region } | null>(null);
+  const remoteClient = isUmbraRemoteClient();
+  const selected = items.find((item) => item.id === selectedId) || items[0];
+  const localSourceUrl = useFilePreview(selected?.file || null);
+  const sourceUrl = localSourceUrl || itemPreviewUrl(selected);
+  const localOverlayUrl = useFilePreview(overlay);
+  const overlayUrl = localOverlayUrl || overlayAsset?.previewUrl || '';
+
+  React.useEffect(() => {
+    if (!selectedId && items[0]) setSelectedId(items[0].id);
+    if (selectedId && !items.some((item) => item.id === selectedId)) setSelectedId(items[0]?.id || '');
+  }, [items, selectedId]);
+  React.useEffect(() => setPreviewFailed(false), [sourceUrl]);
+
+  const updateRegion = React.useCallback((next: Partial<typeof region>) => {
+    setRegion((current) => {
+      const width = Math.max(0.03, Math.min(1, Number(next.width ?? current.width) || current.width));
+      const height = Math.max(0.03, Math.min(1, Number(next.height ?? current.height) || current.height));
+      return {
+        x: Math.max(0, Math.min(1 - width, Number(next.x ?? current.x) || 0)),
+        y: Math.max(0, Math.min(1 - height, Number(next.y ?? current.y) || 0)),
+        width,
+        height,
+      };
+    });
+  }, []);
+  const chooseOverlay = React.useCallback(async (file: File | null) => {
+    if (!file) return;
+    setOverlay(file);
+    setOverlayAsset(null);
+    setOverlayUploading(true);
+    try {
+      setOverlayAsset(await uploadUmbraUiWatermarkAsset(file));
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to save the censor overlay for presets.', 'error');
+    } finally {
+      setOverlayUploading(false);
+    }
+  }, [showToast]);
+  const presetExtra = React.useMemo<Record<string, unknown>>(() => ({ censorMode, overlayAsset, region, mosaicSize, outputFolder }), [censorMode, mosaicSize, outputFolder, overlayAsset, region]);
+  const applyPreset = React.useCallback((value: Record<string, unknown>) => {
+    setCensorMode(value.censorMode === 'overlay' ? 'overlay' : 'mosaic');
+    const rawRegion = value.region && typeof value.region === 'object' ? value.region as Record<string, unknown> : {};
+    updateRegion({ x: Number(rawRegion.x), y: Number(rawRegion.y), width: Number(rawRegion.width), height: Number(rawRegion.height) });
+    setMosaicSize(Math.max(2, Math.min(160, Math.round(Number(value.mosaicSize) || 24))));
+    setOutputFolder(String(value.outputFolder || '').trim());
+    const rawAsset = value.overlayAsset && typeof value.overlayAsset === 'object' ? value.overlayAsset as Record<string, unknown> : null;
+    const path = String(rawAsset?.path || '').trim();
+    if (path) {
+      setOverlay(null);
+      setOverlayAsset({ path, filename: String(rawAsset?.filename || 'Censor overlay'), previewUrl: String(rawAsset?.previewUrl || `/api/fs/image?${new URLSearchParams({ path }).toString()}`) });
+    }
+  }, [setOutputFolder, updateRegion]);
+  const chooseSources = React.useCallback(async () => {
+    if (remoteClient) { sourceInputRef.current?.click(); return; }
+    if (browsingSources) return;
+    setBrowsingSources(true);
+    try {
+      addPaths(await browseUmbraUiMediaToolsSourceFiles('image', selected?.path || outputFolder));
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to select source images.', 'error');
+    } finally {
+      setBrowsingSources(false);
+    }
+  }, [addPaths, browsingSources, outputFolder, remoteClient, selected?.path, showToast]);
+  const run = React.useCallback(async () => {
+    if (processing || items.length === 0 || (censorMode === 'overlay' && !overlay && !overlayAsset)) return;
+    setProcessing(true);
+    setSummary({ completed: 0, failed: 0, total: items.length });
+    setItems((current) => current.map((item) => ({ ...item, status: 'staged', error: undefined, result: undefined })));
+    const result = await runUmbraUiMediaBatch({
+      items,
+      onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
+      runItem: async (item, sequenceNumber) => {
+        const next = await submitUmbraUiImageCensor({ source: item.file, sourcePath: item.path, mode: censorMode, overlay: overlayAsset ? undefined : overlay || undefined, overlayPath: overlayAsset?.path, outputFolder: outputFolder.trim(), sequenceNumber, ...region, mosaicSize, resizeEnabled: exportSettings.resizeEnabled, longEdge: exportSettings.longEdge, imageFormat: exportSettings.format, quality: exportSettings.quality });
+        setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, result: next } : entry));
+      },
+      onItemSettled: (item, error) => {
+        setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: error ? 'failed' : 'completed', error: error instanceof Error ? error.message : error ? String(error) : undefined } : entry));
+        setSummary((current) => ({ ...current, completed: current.completed + (error ? 0 : 1), failed: current.failed + (error ? 1 : 0) }));
+      },
+    });
+    setProcessing(false);
+    window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
+    showToast(result.failed ? `${result.completed} censored; ${result.failed} failed.` : `${result.completed} image${result.completed === 1 ? '' : 's'} censored.`, result.failed ? 'error' : 'success');
+  }, [censorMode, exportSettings, items, mosaicSize, outputFolder, overlay, overlayAsset, processing, region, setItems, showToast]);
+  const beginDrag = (event: React.PointerEvent<HTMLDivElement>, kind: 'move' | 'resize') => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = { kind, x: event.clientX, y: event.clientY, region };
+  };
+  const moveDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    const frame = previewRef.current;
+    if (!drag || !frame) return;
+    const bounds = frame.getBoundingClientRect();
+    const dx = (event.clientX - drag.x) / Math.max(1, bounds.width);
+    const dy = (event.clientY - drag.y) / Math.max(1, bounds.height);
+    if (drag.kind === 'move') updateRegion({ x: drag.region.x + dx, y: drag.region.y + dy });
+    else updateRegion({ width: drag.region.width + dx, height: drag.region.height + dy });
+  };
+  return (
+    <div data-umbra-ui-censor-tool="" className="grid min-h-0 flex-1 grid-cols-[minmax(300px,360px)_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:overflow-y-auto">
+      <section className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar max-[900px]:overflow-visible max-[900px]:border-b max-[900px]:border-r-0">
+        <div className="mb-3 flex items-center gap-2"><EyeOff size={13} className="text-fuchsia-300" /><h2 className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-300">Image Censor Batch</h2><span className="ml-auto font-mono text-[8px] uppercase text-zinc-600">25 images at a time</span></div>
+        <input ref={sourceInputRef} type="file" multiple accept="image/png,image/jpeg,image/webp,image/avif,image/bmp,image/tiff" className="hidden" onChange={(event) => { addFiles(Array.from(event.target.files || [])); setSummary({ completed: 0, failed: 0, total: 0 }); event.currentTarget.value = ''; }} />
+        <input ref={overlayInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/avif,image/bmp,image/tiff" className="hidden" onChange={(event) => { const file = event.target.files?.[0] || null; event.currentTarget.value = ''; void chooseOverlay(file); }} />
+        <div className="space-y-3">
+          <button type="button" disabled={processing || browsingSources} onClick={() => void chooseSources()} className="flex min-h-11 w-full items-center gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 text-left hover:border-fuchsia-300/30 disabled:opacity-40">{browsingSources ? <Loader2 size={14} className="animate-spin text-fuchsia-300" /> : <Upload size={14} className="text-fuchsia-300" />}<span className="flex-1 text-[9px] font-black uppercase tracking-[0.13em] text-zinc-300">Add Images</span></button>
+          <SourceBatchList items={items} disabled={processing} onSelect={setSelectedId} onRemove={(id) => setItems((current) => current.filter((item) => item.id !== id))} onClear={() => { setItems([]); setSummary({ completed: 0, failed: 0, total: 0 }); }} />
+          <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setCensorMode('mosaic')} className={cn('h-9 rounded-md border text-[9px] font-black uppercase tracking-[0.12em]', censorMode === 'mosaic' ? 'border-fuchsia-300/50 bg-fuchsia-500/[0.12] text-fuchsia-100' : 'border-white/10 text-zinc-500')}>Mosaic</button><button type="button" onClick={() => setCensorMode('overlay')} className={cn('h-9 rounded-md border text-[9px] font-black uppercase tracking-[0.12em]', censorMode === 'overlay' ? 'border-fuchsia-300/50 bg-fuchsia-500/[0.12] text-fuchsia-100' : 'border-white/10 text-zinc-500')}>Image Overlay</button></div>
+          {censorMode === 'mosaic' ? <label className="block space-y-1.5"><span className="flex justify-between"><span className={labelClass}>Mosaic block size</span><span className="font-mono text-[9px] text-fuchsia-200">{mosaicSize}px</span></span><input type="range" min={2} max={128} step={1} value={mosaicSize} onChange={(event) => setMosaicSize(Number(event.target.value))} className="w-full accent-fuchsia-300" /></label> : <button type="button" disabled={overlayUploading} onClick={() => overlayInputRef.current?.click()} className="flex min-h-11 w-full items-center gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 text-left hover:border-fuchsia-300/30 disabled:opacity-40">{overlayUploading ? <Loader2 size={14} className="animate-spin text-fuchsia-300" /> : <ImageIcon size={14} className="text-fuchsia-300" />}<span className="min-w-0 flex-1"><span className="block text-[9px] font-black uppercase tracking-[0.13em] text-zinc-300">Censor Overlay</span><span className="block truncate font-mono text-[8px] text-zinc-600">{overlayUploading ? 'Saving for presets...' : overlayAsset?.filename || overlay?.name || 'Choose image'}</span></span></button>}
+          <div className="grid grid-cols-2 gap-2">{(['x', 'y', 'width', 'height'] as const).map((key) => <label key={key} className="block space-y-1"><span className={labelClass}>{key === 'x' || key === 'y' ? `${key.toUpperCase()} position` : key}</span><input type="number" min={0} max={100} step={1} value={Math.round(region[key] * 100)} onChange={(event) => updateRegion({ [key]: Number(event.target.value) / 100 })} className={controlClass} /></label>)}</div>
+          <OutputDestination value={outputFolder} onChange={setOutputFolder} browsing={browsing} onBrowse={() => void browse()} automaticSubfolder="Censored" />
+          <UmbraImageExportControls value={exportSettings} onChange={setExportSettings} presetScope="image-censor" presetLabel="Image Censor Preset" presetExtra={presetExtra} onPresetExtraChange={applyPreset} presetSaveDisabled={censorMode === 'overlay' && !overlayAsset} />
+          <button type="button" onClick={() => void run()} disabled={items.length === 0 || processing || (censorMode === 'overlay' && !overlay && !overlayAsset)} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-fuchsia-300/30 bg-fuchsia-500/[0.1] text-[10px] font-black uppercase tracking-[0.16em] text-fuchsia-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600">{processing ? <Loader2 size={13} className="animate-spin" /> : <EyeOff size={13} />}{processing ? `Processing ${summary.completed + summary.failed}/${summary.total}` : 'Run Image Censor Batch'}</button>
+          <BatchSummary {...summary} />
+        </div>
+      </section>
+      <main className="flex min-h-0 min-w-0 flex-col bg-black/20"><div className="flex min-h-10 items-center gap-2 border-b border-white/10 px-3"><Move size={13} className="text-zinc-500" /><span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400">Censor Region Preview</span><span className="ml-auto max-w-[45%] truncate font-mono text-[8px] text-zinc-600">{selected?.name || 'No source selected'}</span></div><div className="flex min-h-[320px] flex-1 items-center justify-center overflow-auto p-4 max-[900px]:min-h-[280px]">{sourceUrl && !previewFailed ? <div ref={previewRef} className="relative max-h-full max-w-full touch-none overflow-hidden bg-black shadow-2xl" style={{ aspectRatio: `${dimensions.width}/${dimensions.height}`, width: 'min(100%, calc((100vh - 220px) * ' + (dimensions.width / Math.max(1, dimensions.height)) + '))' }} onPointerMove={moveDrag} onPointerUp={() => { dragRef.current = null; }} onPointerCancel={() => { dragRef.current = null; }}><img src={sourceUrl} alt="Censor source preview" className="pointer-events-none block h-full w-full object-contain" onError={() => setPreviewFailed(true)} onLoad={(event) => setDimensions({ width: event.currentTarget.naturalWidth || 4, height: event.currentTarget.naturalHeight || 3 })} /><div className="absolute border-2 border-fuchsia-300 bg-fuchsia-500/15 shadow-[0_0_0_1px_rgba(0,0,0,0.6)]" style={{ left: `${region.x * 100}%`, top: `${region.y * 100}%`, width: `${region.width * 100}%`, height: `${region.height * 100}%` }} onPointerDown={(event) => beginDrag(event, 'move')}><div className={cn('pointer-events-none absolute inset-0', censorMode === 'mosaic' ? 'bg-[repeating-linear-gradient(45deg,rgba(217,70,239,0.35)_0,rgba(217,70,239,0.35)_8px,rgba(0,0,0,0.35)_8px,rgba(0,0,0,0.35)_16px)]' : '')}>{censorMode === 'overlay' && overlayUrl ? <img src={overlayUrl} alt="Censor overlay preview" className="h-full w-full object-fill" /> : null}</div><button type="button" aria-label="Resize censor region" onPointerDown={(event) => beginDrag(event, 'resize')} className="absolute -bottom-2 -right-2 h-4 w-4 rounded-sm border border-fuchsia-100 bg-fuchsia-500 shadow-lg" /></div></div> : <div className="text-center text-zinc-700"><EyeOff size={34} className="mx-auto mb-3" /><div className="text-[10px] font-black uppercase tracking-[0.16em]">{previewFailed ? 'Source preview unavailable' : 'Stage images to preview'}</div></div>}</div></main>
+    </div>
+  );
+}
+
 function VideoToGifTool() {
   const showToast = useStore((state) => state.showToast);
   const { items, setItems, addFiles, addPaths } = useStagedMedia('gif');
@@ -620,6 +767,7 @@ function VideoToGifTool() {
 }
 
 export function UmbraExtrasMediaTools({ mode }: { mode: UmbraExtrasMediaToolMode }) {
+  if (mode === 'censor') return <ImageCensorTool />;
   if (mode === 'watermark') return <WatermarkTool targetKind="image" />;
   if (mode === 'video-watermark') return <WatermarkTool targetKind="video" />;
   return <VideoToGifTool />;

@@ -22,6 +22,15 @@ export interface UmbraUiImageExportSettings {
   quality: number;
 }
 
+export interface UmbraUiCensorRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export type UmbraUiImageCensorMode = 'mosaic' | 'overlay';
+
 function clamp(value: unknown, minimum: number, maximum: number, fallback: number): number {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
@@ -66,6 +75,17 @@ function normalizeImageExportSettings(value: UmbraUiImageExportSettings): UmbraU
     longEdge: Math.round(clamp(value.longEdge, 64, 16384, 1024)),
     format: value.format === 'jpeg' || value.format === 'webp' ? value.format : 'png',
     quality: Math.round(clamp(value.quality, 1, 100, 90)),
+  };
+}
+
+function normalizeCensorRegion(value: UmbraUiCensorRegion): UmbraUiCensorRegion {
+  const width = clamp(value.width, 0.01, 1, 0.35);
+  const height = clamp(value.height, 0.01, 1, 0.18);
+  return {
+    x: clamp(value.x, 0, 1 - width, 0.325),
+    y: clamp(value.y, 0, 1 - height, 0.68),
+    width,
+    height,
   };
 }
 
@@ -184,6 +204,71 @@ export async function applyUmbraUiWatermark(options: {
   }
   await applyImageWatermark(options);
   return 'image';
+}
+
+export async function applyUmbraUiImageCensor(options: {
+  sourcePath: string;
+  outputPath: string;
+  mode: UmbraUiImageCensorMode;
+  overlayPath?: string;
+  region: UmbraUiCensorRegion;
+  mosaicSize: number;
+  exportSettings: UmbraUiImageExportSettings;
+}): Promise<void> {
+  const exportSettings = normalizeImageExportSettings(options.exportSettings);
+  const region = normalizeCensorRegion(options.region);
+  const source = sharp(options.sourcePath).rotate();
+  const metadata = await source.metadata();
+  const originalWidth = Math.max(1, Number(metadata.width) || 1);
+  const originalHeight = Math.max(1, Number(metadata.height) || 1);
+  const resizeScale = exportSettings.resizeEnabled
+    ? exportSettings.longEdge / Math.max(originalWidth, originalHeight)
+    : 1;
+  const outputWidth = Math.max(1, Math.round(originalWidth * resizeScale));
+  const outputHeight = Math.max(1, Math.round(originalHeight * resizeScale));
+  const prepared = await source
+    .resize(exportSettings.resizeEnabled ? { width: outputWidth, height: outputHeight, fit: 'fill', kernel: sharp.kernel.lanczos3 } : undefined)
+    .ensureAlpha()
+    .png()
+    .toBuffer();
+  const left = Math.max(0, Math.min(outputWidth - 1, Math.round(outputWidth * region.x)));
+  const top = Math.max(0, Math.min(outputHeight - 1, Math.round(outputHeight * region.y)));
+  const width = Math.max(1, Math.min(outputWidth - left, Math.round(outputWidth * region.width)));
+  const height = Math.max(1, Math.min(outputHeight - top, Math.round(outputHeight * region.height)));
+
+  let censorLayer: Buffer;
+  if (options.mode === 'overlay') {
+    if (!options.overlayPath) throw new Error('Choose a censor overlay image.');
+    censorLayer = await sharp(options.overlayPath)
+      .rotate()
+      .resize({ width, height, fit: 'fill', kernel: sharp.kernel.nearest })
+      .ensureAlpha()
+      .png()
+      .toBuffer();
+  } else {
+    const blockSize = Math.round(clamp(options.mosaicSize, 2, 160, 24));
+    const mosaicWidth = Math.max(1, Math.round(width / blockSize));
+    const mosaicHeight = Math.max(1, Math.round(height / blockSize));
+    const reduced = await sharp(prepared)
+      .extract({ left, top, width, height })
+      .resize({ width: mosaicWidth, height: mosaicHeight, fit: 'fill', kernel: sharp.kernel.nearest })
+      .png()
+      .toBuffer();
+    censorLayer = await sharp(reduced)
+      .resize({ width, height, fit: 'fill', kernel: sharp.kernel.nearest })
+      .png()
+      .toBuffer();
+  }
+
+  await fs.mkdir(dirname(options.outputPath), { recursive: true });
+  const output = sharp(prepared).composite([{ input: censorLayer, left, top, blend: 'over' }]);
+  if (exportSettings.format === 'jpeg') {
+    await output.flatten({ background: '#ffffff' }).jpeg({ quality: exportSettings.quality, chromaSubsampling: '4:4:4' }).toFile(options.outputPath);
+  } else if (exportSettings.format === 'webp') {
+    await output.webp({ quality: exportSettings.quality, smartSubsample: true }).toFile(options.outputPath);
+  } else {
+    await output.png({ compressionLevel: 9 }).toFile(options.outputPath);
+  }
 }
 
 export async function convertUmbraUiVideoToGif(options: {

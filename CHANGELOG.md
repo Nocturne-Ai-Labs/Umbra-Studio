@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.31.7
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, migrations, or manual configuration are
+required. Update normally. Existing wildcard files, WCUID selections, Power
+Prompter cards, media presets, and user-owned files remain compatible.
+
+### Extras Image Censor Batch
+
+- Added a dedicated **Image Censor** workspace to Umbra UI Extras for preparing
+  image releases for platforms or audiences that require censorship.
+- Added mosaic censoring with an adjustable pixel-block strength and a movable,
+  resizable censor region.
+- Added image-overlay censoring so a saved logo, mark, or purpose-built censor
+  image can be placed over the selected region.
+- Added live placement previews, automatic `Censored` sibling output folders,
+  image resize and export-format controls, and reusable presets that retain the
+  censor mode, region, strength, overlay asset, destination, and export quality.
+- Added bounded batch processing at 25 images per chunk to avoid loading an
+  entire large image collection into memory at once.
+
+### Umbra Remote Wildcard Browser
+
+- Rebuilt the wildcard library for phone-sized Umbra Remote sessions with a
+  full-height dialog that fits the actual mobile workspace without hiding the
+  title, close control, or content behind the bottom navigation.
+- Added separate **Browse** and **Create** views on mobile, while preserving the
+  desktop two-column layout.
+- Added wildcard search by name or folder and horizontally scrollable folder
+  filters for large categorized libraries.
+- Limited the initial rendered list to 24 wildcard cards with an explicit
+  **Load More** control.
+- Replaced full wildcard-value DOM payloads with short previews and visible
+  value counts, substantially reducing the cost of opening libraries containing
+  hundreds or thousands of prompt choices.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Wildcard files and controls no longer appear clipped, missing, or
+  buried in an oversized desktop layout on Umbra Remote mobile.
+- **Fixed:** Large wildcard libraries no longer inject every hidden prompt value
+  into the browser DOM when the library opens.
+- **Fixed:** Mosaic censoring now performs a true two-stage nearest-neighbor
+  reduction and enlargement instead of allowing the image processor to collapse
+  both resize operations into an unchanged crop.
+- **Improved:** Wildcard folders, search results, insert/edit/delete actions, and
+  creation tools are easier to reach on phones.
+- **Improved:** Image censorship can be batch configured, previewed, saved as a
+  preset, and exported without leaving Umbra Studio.
+
 ## v0.31.6
 
 ### TL;DR - Wildcard Hold Queue Dispatch Hotfix

@@ -56,6 +56,7 @@ import {
   isUmbraExtendedVideoOutputPath,
 } from './backend/UmbraUiExtendedVideoService';
 import {
+  applyUmbraUiImageCensor,
   applyUmbraUiWatermark,
   convertUmbraUiVideoToGif,
   isUmbraUiWatermarkVideo,
@@ -20031,7 +20032,7 @@ function resolveUmbraUiMediaToolOutputFolder(
   value: unknown,
   allowExternal: boolean,
   sourcePath: string,
-  automaticSubfolder: 'Watermarked' | 'GIF',
+  automaticSubfolder: 'Censored' | 'Watermarked' | 'GIF',
 ): string {
   const rawPath = String(value || '').trim();
   if (!rawPath) {
@@ -20054,7 +20055,7 @@ function resolveUmbraUiMediaToolOutputFolder(
 async function reserveUmbraUiMediaToolSequencePath(
   outputFolder: string,
   prefix: 'image-sequence' | 'video-sequence' | 'gif-sequence',
-  extension: '.png' | '.mp4' | '.gif',
+  extension: '.gif' | '.jpg' | '.mp4' | '.png' | '.webp',
   requestedSequence: number,
 ): Promise<{ outputPath: string; filename: string }> {
   let sequence = Number.isInteger(requestedSequence) && requestedSequence > 0 ? requestedSequence : 1;
@@ -20176,6 +20177,91 @@ async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean
   } catch (error: any) {
     console.error('[UmbraUI Media Tools] Watermark failed:', error);
     return json({ success: false, error: String(error?.message || error || 'Failed to apply watermark.') }, 400);
+  } finally {
+    if (reservedOutputPath) await fs.rm(reservedOutputPath, { force: true }).catch(() => undefined);
+    await fs.rm(workDirectory, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boolean): Promise<Response> {
+  const jobId = `${Date.now()}-${randomBytes(5).toString('hex')}`;
+  const workDirectory = join(UMBRA_UI_MEDIA_TOOL_TEMP_ROOT, jobId);
+  let reservedOutputPath = '';
+  try {
+    const form = await req.formData();
+    const source = form.get('source') as any;
+    const overlay = form.get('overlay') as any;
+    const hasSourceUpload = source && typeof source.name === 'string' && typeof source.arrayBuffer === 'function' && Number(source.size) > 0;
+    const hasOverlayUpload = overlay && typeof overlay.name === 'string' && typeof overlay.arrayBuffer === 'function' && Number(overlay.size) > 0;
+    const gallerySourcePath = resolveUmbraUiMediaToolSourcePath(form.get('sourcePath'), UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS, allowExternalOutput);
+    const mode = String(form.get('mode') || '').trim().toLowerCase() === 'overlay' ? 'overlay' : 'mosaic';
+    const savedOverlayPath = mode === 'overlay' ? resolveUmbraUiWatermarkAssetPath(form.get('overlayPath')) : '';
+    if (!hasSourceUpload && !gallerySourcePath) {
+      return json({ success: false, error: 'Choose an image to censor.' }, 400);
+    }
+    if (mode === 'overlay' && !hasOverlayUpload && !savedOverlayPath) {
+      return json({ success: false, error: 'Choose a censor overlay image.' }, 400);
+    }
+    if (hasSourceUpload && Number(source.size) > UMBRA_UI_MEDIA_TOOL_MAX_SOURCE_BYTES) {
+      return json({ success: false, error: 'The source image exceeds the 4 GB processing limit.' }, 400);
+    }
+    if (hasOverlayUpload && Number(overlay.size) > UMBRA_UI_MEDIA_TOOL_MAX_WATERMARK_BYTES) {
+      return json({ success: false, error: 'The censor overlay exceeds the 64 MB limit.' }, 400);
+    }
+    const sourceName = hasSourceUpload ? source.name : basename(gallerySourcePath);
+    const sourceExtension = extname(sourceName).toLowerCase();
+    if (!UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS.has(sourceExtension)) {
+      return json({ success: false, error: `Unsupported censor source: ${sourceName}` }, 400);
+    }
+    const overlayExtension = hasOverlayUpload ? extname(overlay.name).toLowerCase() : extname(savedOverlayPath).toLowerCase();
+    if (mode === 'overlay' && (!overlayExtension || !UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS.has(overlayExtension))) {
+      return json({ success: false, error: 'The censor overlay must be a supported image.' }, 400);
+    }
+
+    await fs.mkdir(workDirectory, { recursive: true });
+    const sourcePath = hasSourceUpload ? join(workDirectory, `source${sourceExtension}`) : gallerySourcePath;
+    const overlayPath = hasOverlayUpload ? join(workDirectory, `overlay${overlayExtension}`) : savedOverlayPath;
+    await Promise.all([
+      ...(hasSourceUpload ? [fs.writeFile(sourcePath, Buffer.from(await source.arrayBuffer()))] : []),
+      ...(hasOverlayUpload ? [fs.writeFile(overlayPath, Buffer.from(await overlay.arrayBuffer()))] : []),
+    ]);
+    const outputFolder = resolveUmbraUiMediaToolOutputFolder(form.get('outputFolder'), allowExternalOutput, gallerySourcePath, 'Censored');
+    const imageFormatInput = String(form.get('imageFormat') || '').trim().toLowerCase();
+    const imageFormat = imageFormatInput === 'jpeg' || imageFormatInput === 'jpg'
+      ? 'jpeg'
+      : imageFormatInput === 'webp' ? 'webp' : 'png';
+    const outputExtension = imageFormat === 'jpeg' ? '.jpg' : `.${imageFormat}` as '.png' | '.webp';
+    const { outputPath, filename } = await reserveUmbraUiMediaToolSequencePath(
+      outputFolder,
+      'image-sequence',
+      outputExtension,
+      Number(form.get('sequenceNumber')),
+    );
+    reservedOutputPath = outputPath;
+    await applyUmbraUiImageCensor({
+      sourcePath,
+      outputPath,
+      mode,
+      overlayPath: mode === 'overlay' ? overlayPath : undefined,
+      region: {
+        x: Number(form.get('x')),
+        y: Number(form.get('y')),
+        width: Number(form.get('width')),
+        height: Number(form.get('height')),
+      },
+      mosaicSize: Number(form.get('mosaicSize')),
+      exportSettings: {
+        resizeEnabled: String(form.get('resizeEnabled') || '').trim().toLowerCase() === 'true',
+        longEdge: Number(form.get('longEdge')),
+        format: imageFormat,
+        quality: Number(form.get('quality')),
+      },
+    });
+    reservedOutputPath = '';
+    return json({ success: true, path: toClientPath(outputPath), filename, mediaType: 'image' });
+  } catch (error: any) {
+    console.error('[UmbraUI Media Tools] Censor failed:', error);
+    return json({ success: false, error: String(error?.message || error || 'Failed to censor image.') }, 400);
   } finally {
     if (reservedOutputPath) await fs.rm(reservedOutputPath, { force: true }).catch(() => undefined);
     await fs.rm(workDirectory, { recursive: true, force: true }).catch(() => undefined);
@@ -33516,6 +33602,10 @@ const server = Bun.serve<any>({
 
       if (path === '/api/umbra-ui/media-tools/watermark' && method === 'POST') {
         return handleUmbraUiWatermark(req, isHostRequest(req, url, server));
+      }
+
+      if (path === '/api/umbra-ui/media-tools/censor' && method === 'POST') {
+        return handleUmbraUiImageCensor(req, isHostRequest(req, url, server));
       }
 
       if (path === '/api/umbra-ui/media-tools/watermark-assets' && method === 'POST') {

@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Copy,
+  EyeOff,
   Film,
   FolderOpen,
   ImageUp,
@@ -92,6 +93,7 @@ function ExtrasToolNavigation({
 }) {
   const tools: Array<{ id: UmbraExtrasToolMode; label: string; icon: React.ReactNode }> = [
     { id: 'upscale', label: 'Upscale', icon: <ImageUp size={12} /> },
+    { id: 'censor', label: 'Image Censor', icon: <EyeOff size={12} /> },
     { id: 'watermark', label: 'Image Watermark', icon: <Stamp size={12} /> },
     { id: 'video-watermark', label: 'Video Watermark', icon: <Video size={12} /> },
     { id: 'gif', label: 'Video to GIF', icon: <Film size={12} /> },

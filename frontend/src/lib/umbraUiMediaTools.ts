@@ -74,6 +74,45 @@ export async function submitUmbraUiWatermark(options: {
   return readMediaToolResponse(response, 'Watermark processing failed');
 }
 
+export async function submitUmbraUiImageCensor(options: {
+  source?: File;
+  sourcePath?: string;
+  mode: 'mosaic' | 'overlay';
+  overlay?: File;
+  overlayPath?: string;
+  outputFolder: string;
+  sequenceNumber: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  mosaicSize: number;
+  resizeEnabled: boolean;
+  longEdge: number;
+  imageFormat: 'png' | 'jpeg' | 'webp';
+  quality: number;
+}): Promise<UmbraUiMediaToolResult> {
+  const form = new FormData();
+  if (options.source) form.set('source', options.source, options.source.name);
+  if (options.sourcePath) form.set('sourcePath', options.sourcePath);
+  if (options.overlay) form.set('overlay', options.overlay, options.overlay.name);
+  if (options.overlayPath) form.set('overlayPath', options.overlayPath);
+  form.set('mode', options.mode);
+  form.set('outputFolder', options.outputFolder);
+  form.set('sequenceNumber', String(options.sequenceNumber));
+  form.set('x', String(options.x));
+  form.set('y', String(options.y));
+  form.set('width', String(options.width));
+  form.set('height', String(options.height));
+  form.set('mosaicSize', String(options.mosaicSize));
+  form.set('resizeEnabled', String(options.resizeEnabled));
+  form.set('longEdge', String(options.longEdge));
+  form.set('imageFormat', options.imageFormat);
+  form.set('quality', String(options.quality));
+  const response = await fetch('/api/umbra-ui/media-tools/censor', { method: 'POST', body: form });
+  return readMediaToolResponse(response, 'Image censoring failed');
+}
+
 export async function submitUmbraUiVideoToGif(options: {
   source?: File;
   sourcePath?: string;

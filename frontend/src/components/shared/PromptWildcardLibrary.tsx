@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Check, ChevronDown, ChevronRight, Copy, Folder, FolderOpen, Layers3, Pencil, Trash2, WandSparkles, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Copy, Folder, FolderOpen, Layers3, Pencil, Search, Trash2, WandSparkles, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useStore } from '@/store/useStore';
 import {
@@ -24,6 +24,9 @@ export function PromptWildcardLibrary({ onInsert, compact = false, cardSources =
   const [open, setOpen] = React.useState(false);
   const [wildcards, setWildcards] = React.useState<PromptWildcard[]>([]);
   const [selectedFolder, setSelectedFolder] = React.useState('all');
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const [mobileView, setMobileView] = React.useState<'browse' | 'create'>('browse');
+  const [visibleLimit, setVisibleLimit] = React.useState(24);
   const [name, setName] = React.useState('');
   const [folder, setFolder] = React.useState('');
   const [values, setValues] = React.useState('');
@@ -51,12 +54,20 @@ export function PromptWildcardLibrary({ onInsert, compact = false, cardSources =
     () => Array.from(new Set(wildcards.map((entry) => entry.folder).filter(Boolean))).sort((left, right) => left.localeCompare(right)),
     [wildcards],
   );
-  const visibleWildcards = React.useMemo(
-    () => selectedFolder === 'all'
-      ? wildcards
-      : wildcards.filter((entry) => entry.folder === selectedFolder),
-    [selectedFolder, wildcards],
+  const visibleWildcards = React.useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return wildcards.filter((entry) => {
+      if (selectedFolder !== 'all' && entry.folder !== selectedFolder) return false;
+      if (!query) return true;
+      return entry.name.toLowerCase().includes(query) || entry.folder.toLowerCase().includes(query);
+    });
+  }, [searchQuery, selectedFolder, wildcards]);
+  const displayedWildcards = React.useMemo(
+    () => visibleWildcards.slice(0, visibleLimit),
+    [visibleLimit, visibleWildcards],
   );
+
+  React.useEffect(() => setVisibleLimit(24), [searchQuery, selectedFolder]);
 
   const load = React.useCallback(async () => {
     const response = await fetch('/api/powerprompter/wildcards');
@@ -73,6 +84,9 @@ export function PromptWildcardLibrary({ onInsert, compact = false, cardSources =
   const openLibrary = React.useCallback(() => {
     setOpen(true);
     setSelectedFolder('all');
+    setSearchQuery('');
+    setMobileView('browse');
+    setVisibleLimit(24);
     setCardWildcardName('');
     setCardWildcardFolder('');
     setSelectedVariantIds([]);
@@ -225,19 +239,28 @@ export function PromptWildcardLibrary({ onInsert, compact = false, cardSources =
       </button>
 
       {open ? (
-        <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/75 p-4">
-          <section role="dialog" aria-modal="true" aria-label="Prompt wildcards" className="flex max-h-[min(48rem,calc(100dvh-2rem))] w-[min(68rem,100%)] flex-col overflow-hidden rounded-md border border-white/15 bg-[#090b10] shadow-2xl shadow-black/70">
-            <header className="flex items-center gap-2 border-b border-white/10 px-4 py-3">
+        <div className="fixed inset-0 z-[1000] flex items-stretch justify-center bg-black/75 p-0 md:items-center md:p-4">
+          <section role="dialog" aria-modal="true" aria-label="Prompt wildcards" className="flex h-full w-full flex-col overflow-hidden border border-white/15 bg-[#090b10] pb-[env(safe-area-inset-bottom)] shadow-2xl shadow-black/70 md:h-auto md:max-h-[min(48rem,calc(100dvh-2rem))] md:w-[min(68rem,100%)] md:rounded-md">
+            <header className="flex shrink-0 items-center gap-2 border-b border-white/10 px-3 py-2.5 md:px-4 md:py-3">
               <WandSparkles size={15} className="text-fuchsia-200" />
               <div className="min-w-0">
                 <strong className="block text-xs font-black uppercase tracking-[0.12em] text-zinc-100">Prompt Wildcards</strong>
-                <span className="block text-[10px] text-zinc-400">Use tokens such as <code className="text-fuchsia-200">__weather__</code>. One line is one possible value.</span>
+                <span className="hidden text-[10px] text-zinc-400 sm:block">Use tokens such as <code className="text-fuchsia-200">__weather__</code>. One line is one possible value.</span>
               </div>
               <button type="button" onClick={() => setOpen(false)} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 hover:text-white" title="Close wildcards"><X size={14} /></button>
             </header>
-            <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto p-4 md:grid-cols-[minmax(0,1fr)_minmax(300px,0.95fr)] custom-scrollbar">
-              <div className="min-h-0 space-y-2">
-                <nav className="flex flex-wrap gap-1.5 rounded-sm border border-white/10 bg-black/25 p-2" aria-label="Wildcard folders">
+            <div className="grid shrink-0 grid-cols-2 gap-1.5 border-b border-white/10 bg-black/25 p-2 md:hidden">
+              <button type="button" onClick={() => setMobileView('browse')} className={cn('h-9 rounded-sm border text-[9px] font-black uppercase tracking-[0.12em]', mobileView === 'browse' ? 'border-fuchsia-300/40 bg-fuchsia-500/[0.12] text-fuchsia-100' : 'border-white/10 text-zinc-500')}>Browse {wildcards.length}</button>
+              <button type="button" onClick={() => setMobileView('create')} className={cn('h-9 rounded-sm border text-[9px] font-black uppercase tracking-[0.12em]', mobileView === 'create' ? 'border-cyan-300/40 bg-cyan-500/[0.12] text-cyan-100' : 'border-white/10 text-zinc-500')}>Create</button>
+            </div>
+            <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto overscroll-contain p-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:grid-cols-[minmax(0,1fr)_minmax(300px,0.95fr)] md:p-4 custom-scrollbar">
+              <div className={cn('min-h-0 space-y-2', mobileView === 'browse' ? 'block' : 'hidden', 'md:block')}>
+                <label className="relative block">
+                  <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
+                  <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search wildcard names or folders" className="h-10 w-full rounded-sm border border-white/12 bg-black/40 pl-9 pr-9 text-xs text-zinc-100 outline-none focus:border-fuchsia-300/45" />
+                  {searchQuery ? <button type="button" onClick={() => setSearchQuery('')} title="Clear wildcard search" className="absolute right-1.5 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-sm text-zinc-500 hover:bg-white/[0.06] hover:text-white"><X size={12} /></button> : null}
+                </label>
+                <nav className="flex flex-nowrap gap-1.5 overflow-x-auto rounded-sm border border-white/10 bg-black/25 p-2 md:flex-wrap md:overflow-visible custom-scrollbar" aria-label="Wildcard folders">
                   <button type="button" onClick={() => setSelectedFolder('all')} className={cn('inline-flex h-8 items-center gap-1.5 rounded-sm border px-2.5 text-[9px] font-black uppercase tracking-[0.08em]', selectedFolder === 'all' ? 'border-fuchsia-300/45 bg-fuchsia-500/12 text-fuchsia-100' : 'border-white/10 text-zinc-400 hover:text-zinc-100')}>
                     <FolderOpen size={11} /> All <span className="font-mono text-[8px] opacity-70">{wildcards.length}</span>
                   </button>
@@ -251,22 +274,24 @@ export function PromptWildcardLibrary({ onInsert, compact = false, cardSources =
                   ))}
                 </nav>
                 {wildcards.length === 0 ? <p className="rounded-sm border border-dashed border-white/10 p-4 text-center text-xs text-zinc-500">No wildcards yet.</p> : null}
-                {wildcards.length > 0 && visibleWildcards.length === 0 ? <p className="rounded-sm border border-dashed border-white/10 p-4 text-center text-xs text-zinc-500">This folder is empty.</p> : null}
-                {visibleWildcards.map((wildcard) => {
+                {wildcards.length > 0 && visibleWildcards.length === 0 ? <p className="rounded-sm border border-dashed border-white/10 p-4 text-center text-xs text-zinc-500">No wildcards match this folder and search.</p> : null}
+                {displayedWildcards.map((wildcard) => {
                   const token = `__${wildcard.name}__`;
                   return <article key={wildcard.path} className="rounded-sm border border-white/10 bg-white/[0.025] p-3">
-                    <div className="flex items-center gap-2">
-                      <code className="min-w-0 flex-1 truncate text-xs font-bold text-fuchsia-100">{token}</code>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <code className="min-w-0 basis-full truncate text-xs font-bold text-fuchsia-100 sm:basis-auto sm:flex-1">{token}</code>
                       <span className="hidden max-w-40 items-center gap-1 truncate rounded-sm border border-white/10 bg-black/25 px-1.5 py-1 text-[8px] font-bold uppercase text-zinc-500 sm:inline-flex" title={wildcard.folder || 'Root'}><Folder size={9} /> {wildcard.folder || 'Root'}</span>
                       <button type="button" onClick={() => { onInsert(token); setOpen(false); showToast(`${token} inserted.`, 'success'); }} className="inline-flex h-7 items-center gap-1 rounded-sm border border-cyan-300/25 px-2 text-[9px] font-black uppercase text-cyan-100 hover:bg-cyan-500/[0.1]" title="Insert wildcard token"><Copy size={11} /> Insert</button>
                       <button type="button" disabled={busy} onClick={() => setEditingWildcard({ name: wildcard.name, folder: wildcard.folder, path: wildcard.path, values: wildcard.values.join('\n') })} className="inline-flex h-7 items-center gap-1 rounded-sm border border-fuchsia-300/25 px-2 text-[9px] font-black uppercase text-fuchsia-100 hover:bg-fuchsia-500/[0.1] disabled:opacity-40" title="Edit wildcard values or folder"><Pencil size={11} /> Edit</button>
                       <button type="button" disabled={busy} onClick={() => void remove(wildcard)} className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-red-300/20 text-red-200/70 hover:text-red-100 disabled:opacity-40" title="Delete wildcard"><Trash2 size={11} /></button>
                     </div>
-                    <p className="mt-2 line-clamp-3 text-[11px] leading-5 text-zinc-400">{wildcard.values.join(' · ')}</p>
+                    <p className="mt-2 line-clamp-3 text-[11px] leading-5 text-zinc-400">{wildcard.values.slice(0, 3).join(' · ')}</p>
+                    <div className="mt-2 font-mono text-[8px] uppercase tracking-[0.08em] text-zinc-600">{wildcard.values.length} possible value{wildcard.values.length === 1 ? '' : 's'}</div>
                   </article>;
                 })}
+                {displayedWildcards.length < visibleWildcards.length ? <button type="button" onClick={() => setVisibleLimit((current) => current + 24)} className="inline-flex h-10 w-full items-center justify-center rounded-sm border border-fuchsia-300/25 bg-fuchsia-500/[0.06] text-[9px] font-black uppercase tracking-[0.12em] text-fuchsia-100 hover:bg-fuchsia-500/[0.12]">Load More ({visibleWildcards.length - displayedWildcards.length} remaining)</button> : null}
               </div>
-              <div className="space-y-3">
+              <div className={cn('space-y-3', mobileView === 'create' ? 'block' : 'hidden', 'md:block')}>
                 {cardSources.length > 0 ? (
                   <section className="rounded-sm border border-cyan-300/20 bg-cyan-500/[0.035] p-3">
                     <div className="flex items-start gap-2">
@@ -374,12 +399,12 @@ export function PromptWildcardLibrary({ onInsert, compact = false, cardSources =
       ) : null}
 
       {editingWildcard ? (
-        <div className="fixed inset-0 z-[510] flex items-center justify-center bg-black/80 p-4" onMouseDown={() => { if (!busy) setEditingWildcard(null); }}>
+        <div className="fixed inset-0 z-[1010] flex items-stretch justify-center bg-black/80 p-0 md:items-center md:p-4" onMouseDown={() => { if (!busy) setEditingWildcard(null); }}>
           <section
             role="dialog"
             aria-modal="true"
             aria-label={`Edit ${editingWildcard.name} wildcard`}
-            className="flex max-h-[min(42rem,calc(100dvh-2rem))] w-[min(36rem,100%)] flex-col overflow-hidden rounded-md border border-fuchsia-300/25 bg-[#090b10] shadow-2xl shadow-black/70"
+            className="flex h-full w-full flex-col overflow-hidden border border-fuchsia-300/25 bg-[#090b10] pb-[env(safe-area-inset-bottom)] shadow-2xl shadow-black/70 md:h-auto md:max-h-[min(42rem,calc(100dvh-2rem))] md:w-[min(36rem,100%)] md:rounded-md"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <header className="flex items-center gap-2 border-b border-white/10 px-4 py-3">
