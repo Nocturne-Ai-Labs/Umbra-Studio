@@ -2039,7 +2039,7 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
 
   if (!selectedApp) {
     return (
-      <div className="h-full overflow-y-auto bg-[var(--umbra-bg)] p-6">
+      <div data-umbra-local-servers-empty="" className="h-full overflow-y-auto bg-[var(--umbra-bg)] p-6">
         <div className="mx-auto flex min-h-full max-w-6xl flex-col justify-center gap-5">
           <div>
             <div className="flex items-center gap-3">
@@ -2430,10 +2430,6 @@ export const Workspace = () => {
   }, [activeWorkspace]);
 
   useEffect(() => {
-    if (remoteMode === 'phone' && (activeWorkspace === 'board' || activeWorkspace === 'localserver')) {
-      setActiveWorkspace('library');
-      return;
-    }
     if (isRemoteClient && activeWorkspace === 'remote') {
       setActiveWorkspace('comfyui');
       return;
@@ -2564,7 +2560,7 @@ export const Workspace = () => {
         className="absolute inset-0 workspace-board"
         style={getWorkspaceLayerStyle('board')}
       >
-        {remoteMode !== 'phone' && loadedWorkspaces.board ? (
+        {loadedWorkspaces.board ? (
           <Suspense fallback={null}>
             <BoardBrowser />
           </Suspense>
@@ -2588,7 +2584,7 @@ export const Workspace = () => {
         className="absolute inset-0 workspace-localserver"
         style={getWorkspaceLayerStyle('localserver')}
       >
-        {remoteMode !== 'phone' && loadedWorkspaces.localserver ? (
+        {loadedWorkspaces.localserver ? (
           <LocalServerWorkspace isActive={activeWorkspace === 'localserver'} />
         ) : null}
       </div>

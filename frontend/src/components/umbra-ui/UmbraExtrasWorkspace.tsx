@@ -524,7 +524,7 @@ export function UmbraExtrasWorkspace({
   return (
     <div data-umbra-ui-extras="" className="col-span-2 flex min-h-0 flex-col">
       <ExtrasToolNavigation value={activeTool} onChange={setActiveTool} />
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
+      <div data-umbra-ui-extras-workspace="" className="grid min-h-0 flex-1 grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
       <section data-umbra-ui-extras-controls="" className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar">
         <div className="mb-3 flex items-center gap-2">
           <ImageUp size={13} className="text-cyan-300" />

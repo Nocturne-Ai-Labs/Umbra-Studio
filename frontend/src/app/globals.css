@@ -687,7 +687,7 @@ code.custom-scrollbar::-webkit-scrollbar {
 }
 
 html[data-umbra-remote-mode="tablet"] {
-  --umbra-remote-sidebar-width: 14rem;
+  --umbra-remote-sidebar-width: 11.5rem;
   --umbra-remote-sidebar-collapsed-width: 3.25rem;
   --umbra-remote-touch-target: 2.625rem;
 }
@@ -790,11 +790,582 @@ html[data-umbra-remote-mode="tablet"] :where(input:focus, textarea:focus, [conte
   user-select: text !important;
 }
 
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-header] {
+  min-width: 0;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  padding-inline: 0.55rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-mode-nav] {
+  height: var(--umbra-remote-touch-target);
+  min-width: 0;
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-mode-nav]::-webkit-scrollbar {
+  display: none;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-mode-nav] button {
+  min-height: var(--umbra-remote-touch-target);
+  flex: 0 0 auto;
+  padding-inline: 0.65rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-header-actions] {
+  min-width: 0;
+  flex: 0 0 auto;
+  gap: 0.4rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-agent-label] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-power-prompter],
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-root],
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-main] {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-body]:not([data-umbra-ui-active-mode="prompter"]):not([data-umbra-ui-active-mode="canvas"]) {
+  display: flex !important;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-body]:not([data-umbra-ui-active-mode="prompter"]):not([data-umbra-ui-active-mode="canvas"]) > * {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-generation-panel],
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-prompt-panel],
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-video-controls],
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-extras-controls] {
+  width: 100%;
+  min-width: 0;
+  min-height: auto;
+  flex: 0 0 auto;
+  overflow: visible;
+  border-right: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-preview-panel] {
+  width: 100%;
+  min-width: 0;
+  min-height: 30rem;
+  flex: 0 0 30rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-video-review-drawer] > *,
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-extras-workspace] {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-inpaint-workspace] {
+  display: grid !important;
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: minmax(17rem, 20rem) minmax(0, 1fr) !important;
+  grid-template-rows: auto minmax(0, 1fr) !important;
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-inpaint-mobile-tabs] {
+  z-index: 70;
+  display: grid !important;
+  min-height: 3.4rem;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  padding: 0.4rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(5, 7, 8, 0.97);
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-inpaint-mobile-tabs] button {
+  display: inline-flex;
+  min-width: 0;
+  min-height: var(--umbra-remote-touch-target);
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #71717a;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-inpaint-mobile-tabs] button[data-active="1"] {
+  border-color: rgba(253, 164, 175, 0.36);
+  background: rgba(244, 63, 94, 0.1);
+  color: #ffe4e6;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-inpaint-generation-sidebar],
+html[data-umbra-remote-mode="tablet"] [data-umbra-inpaint-settings-sidebar] {
+  min-width: 0;
+  min-height: 0;
+  grid-column: 1;
+  grid-row: 2;
+  overflow-y: auto;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 0;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-inpaint-generation-sidebar][data-mobile-active="0"],
+html[data-umbra-remote-mode="tablet"] [data-umbra-inpaint-settings-sidebar][data-mobile-active="0"] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-inpaint-editor] {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  grid-column: 2;
+  grid-row: 2;
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-inpaint-editor] button {
+  min-width: 2.625rem;
+  min-height: 2.625rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-tablet-bar] {
+  width: 100%;
+  min-width: 0;
+  min-height: 7.55rem;
+  overflow-x: hidden;
+  overflow-y: visible;
+  flex-wrap: wrap;
+  border-bottom-color: color-mix(in srgb, var(--umbra-accent) 20%, rgba(255, 255, 255, 0.08));
+  background: rgba(5, 5, 8, 0.95);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-primary],
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-queue-row] {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-tablet-bar] button,
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-tablet-bar] select {
+  min-height: 3rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-mobile-generation-toggle] {
+  display: inline-flex !important;
+  min-width: 7.5rem;
+  min-height: 2.75rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-card-nav-preview],
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-card-nav-overflow] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor][data-umbra-mobile-generation-controls="0"] [data-umbra-generation-controls-card],
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-powerprompter-side-card],
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-recent-outputs-card] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor][data-umbra-mobile-generation-controls="1"] [data-umbra-generation-controls-card] {
+  position: relative;
+  inset: auto;
+  z-index: 110;
+  display: flex !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  transform: none !important;
+  border-radius: 0.9rem !important;
+  background: color-mix(in srgb, var(--umbra-panel) 97%, black) !important;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.72);
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor][data-umbra-mobile-generation-controls="1"] [data-umbra-card-lane-content],
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor][data-umbra-mobile-generation-controls="1"] [data-umbra-card-stage-viewport],
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor][data-umbra-mobile-generation-controls="1"] [data-umbra-card-stage] {
+  width: 100% !important;
+  min-width: 100% !important;
+  transform: none !important;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor][data-umbra-mobile-generation-controls="1"] [data-umbra-prompt-card],
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor][data-umbra-mobile-generation-controls="1"] [data-umbra-card-slot-rail],
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor][data-umbra-mobile-generation-controls="1"] [data-umbra-card-connector] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-mobile-generation-close] {
+  display: inline-flex !important;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-generation-controls-card] :where(input, button) {
+  min-height: 2.75rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-prompt-card-header] {
+  min-height: 3.25rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-prompt-card-header] > button,
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-prompt-card-header] [role="button"] {
+  min-height: 2.5rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-variant-card] > div:first-child {
+  flex-wrap: wrap;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-variant-card] > div:first-child > div:last-child {
+  width: 100%;
+  margin-left: 0;
+  justify-content: flex-end;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-variant-card] > div:first-child > div:last-child > button,
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-variant-card] button[title^="Move variant"],
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-variant-card] button[title="Remove variant"],
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-variant-card] button[title="Click to edit variant name"],
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-variant-card] button[title="Name this variant"] {
+  width: 2.25rem !important;
+  min-width: 2.25rem !important;
+  min-height: 2.25rem !important;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-card-chain-editor] [data-umbra-wildcard-active-roll] button {
+  min-height: 2.25rem;
+  padding-inline: 0.55rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-actions-backdrop] {
+  position: fixed;
+  inset: 0;
+  z-index: 225;
+  width: 100vw;
+  height: 100dvh;
+  border: 0;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(3px);
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-actions] {
+  position: fixed;
+  top: 4.5rem;
+  right: 1rem;
+  bottom: auto;
+  left: auto;
+  z-index: 230;
+  display: block;
+  width: min(31rem, calc(100vw - var(--umbra-remote-sidebar-width) - 2rem));
+  max-height: calc(100dvh - 5.5rem);
+  overflow-y: auto;
+  padding: 0.65rem 0.85rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--umbra-accent) 26%, rgba(255, 255, 255, 0.1));
+  border-radius: 0.9rem;
+  background: rgba(8, 9, 13, 0.985);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.62);
+  animation: umbra-phone-sheet-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-actions-handle] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-actions-header] {
+  display: flex;
+  min-width: 0;
+  min-height: 3.25rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-actions-header] > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-actions-header] span,
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-actions-header] strong {
+  display: block;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-actions-header] span {
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--umbra-accent) 65%, #a1a1aa);
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-actions-header] strong {
+  margin-top: 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.95rem;
+  color: #fafafa;
+  white-space: nowrap;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-actions-header] button {
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: #d4d4d8;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-actions-status] {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin: 0.45rem 0 0.7rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-actions-status] span {
+  min-width: 0;
+  padding: 0.5rem 0.35rem;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.03);
+  text-align: center;
+  text-overflow: ellipsis;
+  font-size: 0.63rem;
+  font-weight: 800;
+  color: #a1a1aa;
+  white-space: nowrap;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-actions] > button {
+  width: 100%;
+  min-height: 3rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-actions-grid] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin-top: 0.55rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-powerprompter-phone-actions-grid] button {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-style: solid;
+  border-width: 1px;
+  border-radius: 0.75rem;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@media (orientation: portrait) {
+  html[data-umbra-remote-mode="tablet"] [data-umbra-react-gallery-root] {
+    min-width: 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-mobile-switcher] {
+    z-index: 35;
+    display: grid;
+    flex: 0 0 auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+    padding: 0.55rem 0.7rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--umbra-accent) 20%, rgba(255, 255, 255, 0.08));
+    background: rgba(5, 5, 8, 0.97);
+  }
+
+  html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-mobile-switcher] button {
+    display: inline-flex;
+    min-width: 0;
+    min-height: var(--umbra-remote-touch-target);
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 0.65rem;
+    background: rgba(255, 255, 255, 0.035);
+    color: #a1a1aa;
+    font-size: 0.68rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    touch-action: manipulation;
+  }
+
+  html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-mobile-switcher] button[data-active="1"] {
+    border-color: color-mix(in srgb, var(--umbra-accent) 48%, rgba(255, 255, 255, 0.08));
+    background: color-mix(in srgb, var(--umbra-accent) 17%, rgba(255, 255, 255, 0.035));
+    color: #fff;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--umbra-accent) 20%, transparent);
+  }
+
+  html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-navigator],
+  html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-content] {
+    width: 100% !important;
+    min-width: 0;
+    min-height: 0;
+    flex: 1 1 auto;
+    border-right: 0;
+  }
+
+  html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-navigator][data-umbra-gallery-mobile-active="0"],
+  html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-content][data-umbra-gallery-mobile-active="0"] {
+    display: none !important;
+  }
+
+  html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-content] > header,
+  html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-action-bar] {
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.55rem 0.7rem;
+  }
+
+  html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-folder-summary] {
+    flex-basis: 12rem;
+  }
+
+  html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-sort-actions] {
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+
+  html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-content] button,
+  html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-content] [role="button"] {
+    min-height: var(--umbra-remote-touch-target);
+  }
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager] {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager-mobile-header] {
+  padding: 0.65rem 0.8rem 0.75rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager-local],
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager-list] {
+  width: 100%;
+  min-width: 0;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager-list] > div:last-child {
+  padding-bottom: 1rem;
+  overscroll-behavior-y: contain;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-entry] {
+  min-height: 4.5rem;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-entry] > div:first-child {
+  width: 4rem;
+  height: 4rem;
+  flex: 0 0 4rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager-details] {
+  max-height: none !important;
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager-detail-actions] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager-detail-actions] > button,
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager-detail-actions] > a {
+  min-height: var(--umbra-remote-touch-target);
+  justify-content: center;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager-civitai] {
+  min-width: 0;
+  padding: 0.85rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager-civitai] [class*="lg:grid-cols-"],
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager-browser] [class*="md:grid-cols-"] {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager-civitai] :where(button, input),
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager-browser] button {
+  min-height: var(--umbra-remote-touch-target);
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager-viewer] {
+  position: fixed;
+  inset: 0;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-model-manager-viewer-body] {
+  grid-template-columns: minmax(0, 1.35fr) minmax(17rem, 1fr);
+}
+
 html[data-umbra-remote-mode="phone"] {
   --umbra-remote-phone-touch-target: 3.25rem;
   --umbra-phone-shell-top: 0px;
   --umbra-phone-bottom-nav-height: calc(4.25rem + env(safe-area-inset-bottom));
-  --umbra-phone-pp-command-height: 7.55rem;
+  --umbra-phone-pp-command-height: 3.85rem;
   --umbra-phone-pp-panel-top: calc(var(--umbra-phone-shell-top) + var(--umbra-phone-pp-command-height));
 }
 
@@ -1242,33 +1813,41 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-header] > div:nth-child(3) {
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-mode-nav] {
-  display: grid;
+  display: flex;
   width: auto;
   height: 2.75rem;
   min-width: 0;
   flex: 1 1 auto;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  justify-content: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
   border-radius: 0.75rem;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-ui-mode-nav][data-umbra-ui-canvas-enabled="true"] {
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-mode-nav]::-webkit-scrollbar {
+  display: none;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-mode-nav] button {
   display: flex;
-  min-width: 0;
+  min-width: 4.65rem;
   min-height: 2.75rem;
+  flex: 0 0 4.65rem;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 0.18rem;
   overflow: hidden;
   padding: 0 0.2rem !important;
-  font-size: 0.52rem !important;
+  font-size: 0.58rem !important;
   line-height: 0.7rem;
   letter-spacing: 0 !important;
   white-space: nowrap;
+  scroll-snap-align: start;
   touch-action: manipulation;
 }
 
@@ -1323,6 +1902,12 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-body] {
   scroll-padding-bottom: 5.1rem;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-body][data-umbra-ui-active-mode="prompter"] {
+  overflow: hidden;
+  padding-bottom: 0;
+  scroll-padding-bottom: 0;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-ltx-storyboard] {
@@ -1733,6 +2318,24 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras] {
   flex-direction: column;
 }
 
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-workspace] {
+  display: flex !important;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-workspace] > [data-umbra-ui-extras-controls] {
+  width: 100%;
+  min-height: auto;
+  flex: 0 0 auto;
+  overflow: visible;
+  border-right: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-tool-nav] {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1813,6 +2416,21 @@ html[data-umbra-remote-mode="phone"] [data-umbra-canvas-staging-strip] article {
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-batch] {
   height: 100%;
   min-height: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-local-servers-empty] {
+  padding: 1rem;
+  padding-bottom: calc(5.25rem + env(safe-area-inset-bottom));
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-local-servers-empty] > div {
+  justify-content: flex-start;
+  gap: 1rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-local-servers-empty] button {
+  min-height: 2.75rem;
+  touch-action: manipulation;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-workspace] {
@@ -2487,6 +3105,16 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content] > div > div:fi
 html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content] select,
 html[data-umbra-remote-mode="phone"] [data-umbra-gallery-content] button {
   min-height: 2rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-sort-actions] button,
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-action-bar] button {
+  min-height: 2.5rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-gallery-sort-actions] > button:not(:first-child) {
+  min-width: 2.5rem;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-virtualized-gallery-grid] {
@@ -3212,12 +3840,28 @@ html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-root] {
   flex-direction: column;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-ui-power-prompter] {
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-power-prompter][aria-hidden="false"] {
   display: flex;
   width: 100%;
   height: 100%;
   min-height: 0;
   flex: 1 1 auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-power-prompter][aria-hidden="true"] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-img2img-source-layout] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-img2img-source-preview] {
+  height: 10rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-img2img-source-actions] button {
+  min-height: 2.75rem;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-sidebar] {
@@ -3273,6 +3917,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-main] > div:first
 
 html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-bar] {
   min-height: var(--umbra-phone-pp-command-height);
+  padding: 0.4rem 0.5rem;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
 }
 
@@ -3291,7 +3936,45 @@ html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-queue-row] 
 html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-primary] button,
 html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-queue-row] button,
 html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-queue-row] select {
-  min-height: 3rem;
+  min-height: 2.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-primary] button {
+  height: 2.75rem;
+}
+
+@media (max-width: 374px) {
+  html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-bar] {
+    padding-inline: 0.375rem;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-primary] {
+    gap: 0.25rem;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-primary] > div:first-child {
+    padding: 0.125rem;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-primary] > div:first-child > button {
+    padding-inline: 0.25rem;
+    font-size: 0.56rem;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-queue],
+  html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-queue-all] {
+    width: 3rem;
+  }
+
+  html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-more] {
+    width: 2.75rem;
+  }
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-file],
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-search],
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-queue-row] {
+  display: none !important;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-command-bar] {
@@ -3315,7 +3998,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions-bac
 
 html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-phone-actions] {
   position: fixed;
-  inset: auto 0 0 0;
+  inset: auto 0 var(--umbra-phone-bottom-nav-height) 0;
   z-index: 230;
   display: block;
   max-height: min(30rem, calc(100dvh - 2rem));
@@ -3923,24 +4606,32 @@ html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] {
   overscroll-behavior-y: contain;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] > button {
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] > button,
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] > div > button {
   display: flex;
   min-width: 0;
-  min-height: 4rem;
+  min-height: 4.6rem;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.65rem;
+  padding: 0.7rem;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 0.55rem;
+  border-radius: 0.7rem;
   background: rgba(255, 255, 255, 0.035);
   color: #d4d4d8;
   text-align: left;
+  touch-action: manipulation;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] > button[data-active="1"] {
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] > button[data-active="1"],
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] > div[data-active="1"] > button {
   border-color: color-mix(in srgb, var(--umbra-accent) 62%, rgba(255, 255, 255, 0.1));
   background: color-mix(in srgb, var(--umbra-accent) 13%, rgba(255, 255, 255, 0.03));
   color: #ffffff;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] > div[data-enabled="1"]:not([data-active="1"]) > button {
+  border-color: rgba(251, 191, 36, 0.3);
+  background: rgba(245, 158, 11, 0.07);
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] strong,
@@ -3961,7 +4652,8 @@ html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] small 
   color: #71717a;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] > button > span:last-child {
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] > button > span:last-child,
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] > div > button > span:last-child {
   display: inline-flex;
   min-width: 1.8rem;
   height: 1.8rem;
@@ -3977,27 +4669,40 @@ html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-grid] > butt
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-actions] {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
   padding: 0.65rem 0.1rem 0.05rem;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-add] {
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-actions] > button {
   display: inline-flex;
   width: 100%;
-  min-height: 3rem;
+  min-width: 0;
+  min-height: 4rem;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.55rem;
-  border: 1px solid rgba(52, 211, 153, 0.42);
+  gap: 0.35rem;
+  padding: 0.45rem 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 0.7rem;
-  background: rgba(16, 185, 129, 0.12);
-  color: #a7f3d0;
-  font-size: 0.72rem;
+  background: rgba(255, 255, 255, 0.035);
+  color: #d4d4d8;
+  font-size: 0.6rem;
   font-weight: 900;
-  letter-spacing: 0.1em;
+  line-height: 0.85rem;
+  letter-spacing: 0.06em;
+  text-align: center;
   text-transform: uppercase;
   touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-add] {
+  border-color: rgba(52, 211, 153, 0.42) !important;
+  background: rgba(16, 185, 129, 0.12) !important;
+  color: #a7f3d0 !important;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-mobile-card-picker-add]:active {
@@ -4098,6 +4803,235 @@ html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-m
 
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-variant-set-buttons] {
   display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-wildcard-utility-header] {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0.45rem 0.6rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-utility-header] > svg {
+  order: 1;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-utility-header] > span:not([data-umbra-wildcard-mode-summary]) {
+  order: 2;
+  font-size: 0.7rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-mode-summary] {
+  order: 3;
+  min-height: 1.75rem;
+  padding-inline: 0.45rem;
+  font-size: 0.6rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-utility-header] > button {
+  order: 4;
+  width: 2.5rem;
+  height: 2.5rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-card-actions-row] {
+  grid-column: 1;
+  grid-row: 2;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-card-actions-row] > button {
+  min-width: 0;
+  min-height: 2.75rem;
+  flex: 1 1 0;
+  justify-content: center;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-utility-header] ~ [data-umbra-mobile-card-actions-row] {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-variant-set-buttons]:has([data-umbra-wildcard-reroll-count]) {
+  display: flex !important;
+  width: 100%;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-variant-set-buttons] > button[title^="Toggle Set"] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-variant-set-buttons] > div:has([data-umbra-wildcard-reroll-count]) {
+  width: 100%;
+  padding-top: 0.35rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-reroll-count] {
+  width: 100%;
+  height: 2.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-reroll-count] > span {
+  flex: 1 1 auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-reroll-count] > button {
+  width: 2.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-reroll-count] > input {
+  width: 4rem;
+  min-width: 4rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor] button[title="Enhance this variant with the configured agent"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor] button[title="Clean variant tags"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor] button[title="Copy active wildcard roll"] {
+  min-width: 2.5rem !important;
+  min-height: 2.5rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder] {
+  max-height: calc(100dvh - 1rem);
+  width: calc(100vw - 1rem);
+  border-radius: 0.9rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-header] {
+  min-height: 4.5rem;
+  padding: 0.7rem 0.8rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-header] > button {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-body] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.65rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-controls] {
+  order: 1;
+  padding: 0.65rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-active-roll],
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-context] {
+  margin-top: 0.65rem;
+  padding: 0.65rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-active-list] {
+  max-height: 9.5rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-folders] {
+  order: 2;
+  display: flex;
+  min-height: 3.65rem;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.35rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 0.4rem;
+  scrollbar-width: thin;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-folders] > :not([hidden]) ~ :not([hidden]),
+html[data-umbra-remote-mode="tablet"] [data-umbra-wildcard-builder-folders] > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0 !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-folders] > button {
+  width: auto;
+  min-width: max-content;
+  min-height: 2.75rem;
+  flex: 0 0 auto;
+  padding-inline: 0.7rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-library] {
+  order: 3;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-library] > button {
+  min-height: 4.75rem;
+  padding: 0.7rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-footer] {
+  padding: 0.6rem 0.7rem calc(0.6rem + env(safe-area-inset-bottom));
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-footer] > span {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-footer] > div {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-builder-footer] button {
+  min-height: 2.75rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-wildcard-builder-body] {
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 22rem);
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-wildcard-builder-folders] {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding: 0.45rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-wildcard-builder-folders] > button {
+  width: auto;
+  min-width: max-content;
+  min-height: 2.75rem;
+  flex: 0 0 auto;
+  padding-inline: 0.75rem;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-wildcard-builder-library] {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-wildcard-builder-controls] {
+  grid-column: 2;
+  grid-row: 2;
+  position: sticky;
+  top: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-generation-controls-card] button[title="Close generation controls"],
+html[data-umbra-remote-mode="phone"] [data-umbra-generation-controls-card] button[title="Expand detailer settings"],
+html[data-umbra-remote-mode="phone"] [data-umbra-generation-controls-card] button[title="Collapse detailer settings"],
+html[data-umbra-remote-mode="phone"] [data-umbra-generation-controls-card] button[title^="Move detailer"],
+html[data-umbra-remote-mode="phone"] [data-umbra-generation-controls-card] button[title="Duplicate detailer"],
+html[data-umbra-remote-mode="phone"] [data-umbra-generation-controls-card] button[title="Remove detailer"] {
+  width: 2.5rem !important;
+  min-width: 2.5rem !important;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-card-actions-menu][data-mobile="1"] button,

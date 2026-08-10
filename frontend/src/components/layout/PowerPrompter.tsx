@@ -11904,6 +11904,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       <div data-umbra-powerprompter-main="" className="flex-1 min-w-0 h-full relative flex flex-col">
         <PowerPrompterCommandBar
           isPhoneRemote={isPhoneRemote}
+          isTabletRemote={isTabletRemote}
           prompterPanelMode={prompterPanelMode}
           setPrompterPanelMode={handlePrompterPanelModeChange}
           queueEditorEnabled={POWER_PROMPTER_QUEUE_EDITOR_ENABLED}

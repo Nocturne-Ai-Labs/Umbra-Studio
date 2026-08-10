@@ -2837,6 +2837,7 @@ export function UmbraUIWorkspace() {
 
       <div
         data-umbra-ui-body=""
+        data-umbra-ui-active-mode={activeMode}
         className={cn(
           'grid min-h-0 flex-1',
           activeMode === 'video' && videoStoryboardOpen

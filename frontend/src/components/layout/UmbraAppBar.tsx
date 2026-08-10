@@ -586,6 +586,7 @@ export const UmbraAppBar = () => {
     if (activeWorkspace === 'modelmanager') return t('nav.modelManager');
     if (activeWorkspace === 'imageinspector') return t('nav.imageInspector');
     if (activeWorkspace === 'board') return t('nav.dataForge');
+    if (activeWorkspace === 'localserver') return 'Local Servers';
     return 'Umbra';
   }, [activeWorkspace, t]);
   const phoneMoreWorkspaceActive = !['umbraui', 'powerprompter', 'library', 'comfyui'].includes(activeWorkspace);
@@ -1945,6 +1946,22 @@ export const UmbraAppBar = () => {
           >
             <ScanSearch size={20} />
             <span>{t('nav.imageInspector')}</span>
+          </button>
+          <button
+            type="button"
+            data-active={activeWorkspace === 'board' ? '1' : '0'}
+            onClick={() => handleWorkspaceSelect('board')}
+          >
+            <Anvil size={20} />
+            <span>{t('nav.dataForge')}</span>
+          </button>
+          <button
+            type="button"
+            data-active={activeWorkspace === 'localserver' ? '1' : '0'}
+            onClick={() => handleWorkspaceSelect('localserver')}
+          >
+            <Server size={20} />
+            <span>Local Servers</span>
           </button>
         </div>
         <NotificationBellButton

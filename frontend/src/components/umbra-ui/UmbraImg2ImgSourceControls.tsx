@@ -99,7 +99,7 @@ export function UmbraImg2ImgSourceControls({
   }, [onSourceChange, showToast, uploading]);
 
   return (
-    <section className="border border-cyan-300/20 bg-cyan-500/[0.035] p-3">
+    <section data-umbra-img2img-source className="border border-cyan-300/20 bg-cyan-500/[0.035] p-3">
       <div className="mb-2.5 flex items-center gap-2">
         <ImageIcon size={13} className="text-cyan-300" />
         <h3 className="text-[11px] font-black uppercase tracking-[0.13em] text-zinc-200">Source Image</h3>
@@ -108,8 +108,8 @@ export function UmbraImg2ImgSourceControls({
         ) : null}
       </div>
 
-      <div className="grid grid-cols-[112px_minmax(0,1fr)] gap-3">
-        <div className="flex h-28 items-center justify-center overflow-hidden border border-white/10 bg-black/45">
+      <div data-umbra-img2img-source-layout className="grid grid-cols-[112px_minmax(0,1fr)] gap-3">
+        <div data-umbra-img2img-source-preview className="flex h-28 items-center justify-center overflow-hidden border border-white/10 bg-black/45">
           {previewUrl ? (
             <img
               src={previewUrl}
@@ -125,7 +125,7 @@ export function UmbraImg2ImgSourceControls({
           ) : <ImageIcon size={22} className="text-zinc-700" />}
         </div>
 
-        <div className="min-w-0 space-y-2">
+        <div data-umbra-img2img-source-actions className="min-w-0 space-y-2">
           <input
             value={source.path}
             onChange={(event) => onSourceChange({

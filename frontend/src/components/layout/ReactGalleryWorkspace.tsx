@@ -4762,6 +4762,8 @@ export function ReactGalleryWorkspace() {
   const [galleryMobileView, setGalleryMobileView] = useState<'folders' | 'media'>(initialGalleryMobileView);
   const galleryMobileViewRef = useRef<'folders' | 'media'>(initialGalleryMobileView);
   const isPhoneRemote = remoteMode === 'phone';
+  const isTabletRemote = remoteMode === 'tablet';
+  const isCompactGalleryRemote = isPhoneRemote || isTabletRemote;
   const isRemoteClient = isRemoteGalleryClient();
   const [mobileGalleryChromeHidden, setMobileGalleryChromeHidden] = useState(false);
 
@@ -5949,9 +5951,9 @@ export function ReactGalleryWorkspace() {
       folderPath: normalized,
       durationMs: 0,
     });
-    if (isPhoneRemote && options.showMedia !== false) setGalleryMobileViewWithHistory('media');
+    if (isCompactGalleryRemote && options.showMedia !== false) setGalleryMobileViewWithHistory('media');
     void loadFolder({ folder: normalized, source: 'local' });
-  }, [isPhoneRemote, loadFolder, setGalleryMobileViewWithHistory]);
+  }, [isCompactGalleryRemote, loadFolder, setGalleryMobileViewWithHistory]);
 
   const confirmEmptyFolderCleanup = useCallback(async () => {
     const pending = emptyFolderCleanupModal;
@@ -9959,7 +9961,7 @@ export function ReactGalleryWorkspace() {
         treeChildrenByPath={treeChildrenByPath}
         loadingTreePaths={loadingTreePaths}
         onFocusFolder={focusFolder}
-        onOpenFolder={(folderPath) => openFolder(folderPath, { showMedia: !isPhoneRemote })}
+        onOpenFolder={(folderPath) => openFolder(folderPath)}
         onToggleExpand={toggleTreeExpand}
         onRefreshTree={refreshTreeChildren}
         onTogglePinnedFolder={togglePinnedFolder}

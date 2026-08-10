@@ -113,6 +113,8 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
   }, [handleQueuePromptLimitFocus]);
 
   const isPhoneRemote = props.isPhoneRemote === true;
+  const isTabletRemote = props.isTabletRemote === true;
+  const isCompactRemote = isPhoneRemote || isTabletRemote;
   const currentFileLabel = String(currentFile || '')
     .replace(/\\/g, '/')
     .split('/')
@@ -208,12 +210,13 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
     });
   }, [promptSearchMenuOpen]);
 
-  if (isPhoneRemote) {
+  if (isCompactRemote) {
     const phonePauseDisabled = !!queueControlBusy || queueStackItems.length <= 0 || hasStagedQueue;
     return (
       <div
         data-umbra-powerprompter-command-bar=""
-        data-umbra-powerprompter-phone-bar=""
+        data-umbra-powerprompter-phone-bar={isPhoneRemote ? '' : undefined}
+        data-umbra-powerprompter-tablet-bar={isTabletRemote ? '' : undefined}
         data-umbra-powerprompter-panel-mode={prompterPanelMode}
         className="border-b border-white/5 bg-black/45 px-2 pb-2 pt-2"
       >
@@ -262,7 +265,51 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               </button>
             ) : null}
           </div>
+          {isPhoneRemote ? (
+            <>
+              <button
+                type="button"
+                data-umbra-powerprompter-phone-queue=""
+                onClick={() => {
+                  void handleQueuePrompts('selected', {
+                    setId: queueSetTarget,
+                    traversalMode: queueTraversalMode,
+                    diversity: queueDiversity,
+                    shuffleEnabled: queueShuffleEnabled,
+                  });
+                }}
+                disabled={!currentFile || !!queueingMode}
+                className="inline-flex h-11 w-14 shrink-0 items-center justify-center gap-1 rounded-lg border border-amber-300/25 bg-amber-400/10 text-amber-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+                title={`Queue Set ${queueSetTarget} (${queueEstimate.setImageCount} images)`}
+                aria-label={`Queue Set ${queueSetTarget}: ${queueEstimate.setImageCount} images`}
+              >
+                {queueingMode === 'selected' ? <Loader2 size={14} className="animate-spin" /> : <ListChecks size={14} />}
+                <span className="text-[10px] font-black tabular-nums">{queueEstimate.setImageCount}</span>
+              </button>
+              <button
+                type="button"
+                data-umbra-powerprompter-phone-queue-all=""
+                onClick={() => {
+                  void handleQueuePrompts('variants', {
+                    includeAllSets: true,
+                    setId: queueSetTarget,
+                    traversalMode: queueTraversalMode,
+                    diversity: queueDiversity,
+                    shuffleEnabled: queueShuffleEnabled,
+                  });
+                }}
+                disabled={!currentFile || !!queueingMode}
+                className="inline-flex h-11 w-14 shrink-0 items-center justify-center gap-1 rounded-lg border border-cyan-300/25 bg-cyan-400/10 text-cyan-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+                title={`Queue all sets (${queueEstimate.allImageCount} images)`}
+                aria-label={`Queue all sets: ${queueEstimate.allImageCount} images`}
+              >
+                {queueingMode === 'variants' ? <Loader2 size={14} className="animate-spin" /> : <ListOrdered size={14} />}
+                <span className="text-[10px] font-black tabular-nums">{queueEstimate.allImageCount}</span>
+              </button>
+            </>
+          ) : null}
           <button
+            data-umbra-powerprompter-phone-file=""
             onClick={() => setLeftPanelCollapsed((prev) => !prev)}
             className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border transition-colors ${
               !leftPanelCollapsed
@@ -275,6 +322,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
             <FileText size={18} />
           </button>
           <button
+            data-umbra-powerprompter-phone-search=""
             onClick={() => setRightPanelCollapsed((prev) => !prev)}
             className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border transition-colors ${
               !rightPanelCollapsed
@@ -288,12 +336,20 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
           </button>
           <button
             type="button"
+            data-umbra-powerprompter-phone-more=""
             onClick={() => setPhoneActionsOpen(true)}
-            className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-zinc-300"
+            className={`inline-flex h-12 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-zinc-300 ${
+              isTabletRemote ? 'gap-2 px-3 text-[10px] font-black uppercase tracking-[0.08em]' : 'w-12'
+            }`}
             title="More Power Prompter controls"
             aria-label="More Power Prompter controls"
           >
-            <MoreHorizontal size={19} />
+            {isTabletRemote ? (
+              <>
+                <ListOrdered size={16} />
+                <span>Controls</span>
+              </>
+            ) : <MoreHorizontal size={19} />}
           </button>
         </div>
 
@@ -427,7 +483,33 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               <span>{queueSummaryCounts.pending || 0} pending</span>
               <span>{queueSummaryCounts.running || 0} running</span>
               <span>{queueSummaryCounts.queued || 0} done</span>
+              {isTabletRemote ? <span>{activePanelQueueEstimate.setAvailablePromptCount || 0} available</span> : null}
             </div>
+
+            {isPhoneRemote ? (
+              <div data-umbra-powerprompter-phone-actions-access="" className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPhoneActionsOpen(false);
+                    setLeftPanelCollapsed(false);
+                  }}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-500/[0.08] px-3 text-[10px] font-black uppercase tracking-[0.09em] text-cyan-100"
+                >
+                  <FolderOpen size={15} /> Files
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPhoneActionsOpen(false);
+                    setRightPanelCollapsed(false);
+                  }}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-500/[0.08] px-3 text-[10px] font-black uppercase tracking-[0.09em] text-cyan-100"
+                >
+                  <Search size={15} /> Tags
+                </button>
+              </div>
+            ) : null}
 
             <button
               type="button"
@@ -456,6 +538,168 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               <Bot size={15} />
               {completePromptAgentEnabled ? 'Complete Prompt Agent On' : 'Complete Prompt Agent Off'}
             </button>
+
+            {isTabletRemote ? (
+              <div data-umbra-powerprompter-tablet-controls="">
+                <div className="mt-2.5 rounded-lg border border-white/10 bg-white/[0.025] p-2.5">
+                  <div className="mb-2 text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">Alerts</div>
+                  <div className="grid grid-cols-[auto_minmax(0,1fr)_96px] gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { void handleToggleCompletionSound(); }}
+                      className={`inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold uppercase tracking-wider ${
+                        settings.generationCompleteSoundEnabled !== false
+                          ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-200'
+                          : 'border-white/10 bg-black/20 text-zinc-400'
+                      }`}
+                    >
+                      {settings.generationCompleteSoundEnabled !== false ? <Volume2 size={12} /> : <VolumeX size={12} />}
+                      Complete
+                    </button>
+                    <UmbraSelectControl
+                      value={settings.generationCompleteSoundStyle || POWER_PROMPTER_SOUND_STYLE_GLASS_TICK}
+                      onChange={(event) => { void handleSetCompletionSoundStyle(event.currentTarget.value); }}
+                      className="min-h-10 rounded-lg border border-white/10 bg-black/30 px-2.5 text-xs font-semibold text-zinc-200 outline-none umbra-themed-select"
+                      title="Image completion alert sound"
+                    >
+                      {POWER_PROMPTER_SOUND_STYLE_OPTIONS.map((option) => (
+                        <option key={`tablet-controls-completion-sound-${option.id}`} value={option.id}>{option.label}</option>
+                      ))}
+                    </UmbraSelectControl>
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.round(POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME * 100)}
+                      step={1}
+                      value={Math.round(clampCompletionSoundVolume(settings.generationCompleteSoundVolume) * 100)}
+                      onChange={(event) => {
+                        const next = Number(event.target.value);
+                        if (Number.isFinite(next)) void handleSetCompletionSoundVolume(next / 100);
+                      }}
+                      className="min-h-10 w-full accent-emerald-400"
+                      title="Image completion alert volume"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-2.5 grid grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhoneActionsOpen(false);
+                      openQueueHistoryPanel?.();
+                    }}
+                    className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-2 text-[10px] font-black uppercase tracking-wider text-cyan-100"
+                  >
+                    <ListOrdered size={13} /> History
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void queueCancelActionRef?.current?.(); }}
+                    disabled={queueDestructiveActionBusy || !hasCancelableQueueWork}
+                    className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-amber-400/30 bg-amber-500/10 px-2 text-[10px] font-black uppercase tracking-wider text-amber-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+                  >
+                    <XCircle size={13} /> Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void queueClearActionRef?.current?.(); }}
+                    disabled={queueDestructiveActionBusy || !hasClearableQueueWork}
+                    className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-red-400/30 bg-red-500/10 px-2 text-[10px] font-black uppercase tracking-wider text-red-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+                  >
+                    <Trash2 size={13} /> Clear
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void queueEmergencyActionRef?.current?.(); }}
+                    disabled={queueDestructiveActionBusy || !hasCancelableQueueWork}
+                    className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-rose-400/30 bg-rose-500/10 px-2 text-[10px] font-black uppercase tracking-wider text-rose-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+                  >
+                    <Power size={13} /> Emergency
+                  </button>
+                </div>
+
+                <div className="mt-2.5 grid grid-cols-[minmax(0,1fr)_132px] gap-3">
+                  <label className="block">
+                    <span className="mb-1 block text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">Queue Set</span>
+                    <UmbraSelectControl
+                      value={queueSetTarget}
+                      onChange={(event) => setQueueSetTarget(clampQueueSetId(event.target.value))}
+                      disabled={!currentFile || !!queueingMode}
+                      className="min-h-11 w-full rounded-lg border border-white/15 bg-black/30 px-3 text-xs font-bold text-zinc-200 outline-none disabled:text-zinc-600"
+                      title="Choose queue set target"
+                    >
+                      {Array.from({ length: POWER_PROMPTER_MAX_QUEUE_SETS }, (_, idx) => idx + 1).map((setId) => (
+                        <option key={`queue-set-tablet-option-${setId}`} value={setId}>Set {setId}</option>
+                      ))}
+                    </UmbraSelectControl>
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">Prompt Cap</span>
+                    <input
+                      type="text"
+                      value={queuePromptLimitDraft}
+                      disabled={!currentFile || !!queueingMode}
+                      onFocus={focusPromptLimitDraft}
+                      onChange={(event) => updatePromptLimitDraft(event.currentTarget.value)}
+                      onBlur={(event) => { void commitQueuePromptLimit(event.currentTarget.value); }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter') return;
+                        void commitQueuePromptLimit(event.currentTarget.value);
+                        event.currentTarget.blur();
+                      }}
+                      className="min-h-11 w-full rounded-lg border border-white/15 bg-black/30 px-3 text-right text-xs font-semibold text-zinc-200 outline-none disabled:text-zinc-600"
+                      placeholder="No cap"
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-2.5 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleClearSelectedQueueSetAssignments}
+                    disabled={!currentFile || !!queueingMode || activeQueueSetAssignmentCount <= 0}
+                    className="min-h-11 rounded-lg border border-red-400/30 bg-red-500/10 px-3 text-[10px] font-black uppercase tracking-wider text-red-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+                  >
+                    Clear Set {queueSetTarget}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClearAllQueueSetAssignments}
+                    disabled={!currentFile || !!queueingMode || totalQueueSetAssignmentCount <= 0}
+                    className="min-h-11 rounded-lg border border-orange-400/30 bg-orange-500/10 px-3 text-[10px] font-black uppercase tracking-wider text-orange-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+                  >
+                    Clear All Sets
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void handleToggleQueueShuffle(); }}
+                    disabled={!currentFile || !!queueingMode}
+                    className={`min-h-11 rounded-lg border px-3 text-[10px] font-black uppercase tracking-wider disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600 ${
+                      queueShuffleEnabled
+                        ? 'border-fuchsia-400/40 bg-fuchsia-500/12 text-fuchsia-100'
+                        : 'border-white/12 bg-white/[0.04] text-zinc-300'
+                    }`}
+                  >
+                    {queueShuffleEnabled ? 'Shuffle On' : 'Shuffle Off'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void handleExportSetAsTxt(); }}
+                    disabled={!currentFile || !!queueingMode}
+                    className="min-h-11 rounded-lg border border-emerald-400/35 bg-emerald-500/10 px-3 text-[10px] font-black uppercase tracking-wider text-emerald-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+                  >
+                    Export Set .txt
+                  </button>
+                </div>
+
+                <div className="mt-2.5 grid grid-cols-3 gap-2 text-center text-[10px] font-bold uppercase tracking-wider text-zinc-400 tabular-nums">
+                  <span className="rounded-lg border border-white/10 bg-white/[0.03] px-2 py-2">Batch {estimatedBatchSize}</span>
+                  <span className="rounded-lg border border-white/10 bg-white/[0.03] px-2 py-2">Set {queueEstimate.setImageCount} img</span>
+                  <span className="rounded-lg border border-white/10 bg-white/[0.03] px-2 py-2">All {queueEstimate.allImageCount} img</span>
+                </div>
+              </div>
+            ) : null}
 
             <div data-umbra-powerprompter-phone-actions-grid="">
               <button

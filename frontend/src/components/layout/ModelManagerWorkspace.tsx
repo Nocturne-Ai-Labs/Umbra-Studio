@@ -1081,7 +1081,8 @@ export function ModelManagerWorkspace() {
     if (typeof document === 'undefined') return undefined;
     const root = document.documentElement;
     const syncRemoteMode = () => {
-      setIsPhoneRemote(root.dataset.umbraRemoteMode === 'phone');
+      const mode = root.dataset.umbraRemoteMode;
+      setIsPhoneRemote(mode === 'phone' || mode === 'tablet');
     };
     syncRemoteMode();
     const observer = new MutationObserver(syncRemoteMode);

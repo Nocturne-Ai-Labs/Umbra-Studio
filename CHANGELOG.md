@@ -1,5 +1,80 @@
 # Changelog
 
+## v0.31.9
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, migrations, or manual configuration are
+required. Update normally. Existing Power Prompter cards, wildcard libraries,
+WCUID selections, queue sets, presets, and Umbra Remote settings remain
+compatible.
+
+### Power Prompter Mobile Workspace
+
+- Rebuilt the phone command bar around the actions used during active work:
+  Cards, Presets, Queue, the current-set queue count, the all-sets queue count,
+  and a compact More sheet for secondary controls.
+- Moved Files, tag search, agent access, and queue start/pause controls into the
+  mobile More sheet without removing their functionality.
+- Removed a duplicated mobile bottom-navigation reservation that left more than
+  80 pixels of empty space beneath the Power Prompter card workspace.
+- Added a narrow-phone layout for 360-pixel screens that preserves 44-pixel
+  touch heights while preventing Cards, Presets, Queue, and queue counts from
+  crowding one another.
+
+### Cards And Wildcards On Touch Devices
+
+- Rebuilt the All Cards switcher as a phone and tablet touch dialog with clear
+  enabled-variant counts and direct creation actions for Prompt, Style Utility,
+  and Wildcard Utility cards.
+- Restored reliable card selection on touch devices without exposing misleading
+  drag-only behavior.
+- Enabled Wildcard Utility rename and Add actions on mobile and reorganized each
+  wildcard card into a readable two-row control surface.
+- Reworked the wildcard builder so selected sources, the active WCUID roll,
+  smart-context controls, resolved preview, and reroll count appear before the
+  large wildcard library on phones.
+- Added a tablet wildcard layout with folder filters above a two-column library
+  and controls workspace, plus larger variant and inline wildcard actions.
+
+### Umbra Remote Mobile And Tablet Polish
+
+- Extended compact remote behavior to tablet Model Manager and Gallery flows.
+- Made Gallery folder selection transition into the media view consistently on
+  phone and tablet.
+- Added Data Forge and Local Servers to the mobile More workspace menu instead
+  of redirecting those destinations back to Gallery.
+- Added responsive stacking and touch sizing for image-to-image source controls,
+  Extras tools, Umbra UI generation panels, preview drawers, dialogs, and common
+  mobile actions.
+- Preserved scroll access above the fixed phone navigation and prevented modal,
+  drawer, and notification surfaces from being hidden beneath it.
+
+### Verification
+
+- Verified populated Power Prompter workflows at 360 by 740 and 390 by 844
+  phone viewports and an 834 by 1194 tablet viewport.
+- Verified the card switcher, card-type creation actions, Wildcard Utility card,
+  wildcard builder, More sheet, model controls, generation drawer, and advanced
+  generation settings on touch layouts.
+- Confirmed the production frontend build and frontend ESLint checks complete
+  successfully.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Power Prompter no longer wastes a large empty band above the mobile
+  bottom navigation.
+- **Fixed:** Mobile card selection, Wildcard Utility rename, and wildcard Add
+  actions no longer behave like disabled desktop drag controls.
+- **Fixed:** Wildcard configuration controls no longer sit several screens below
+  a large wildcard library on phones.
+- **Fixed:** Tablet variant actions and wildcard controls no longer use tiny,
+  inconsistent desktop hit targets.
+- **Improved:** Queue counts and primary Power Prompter navigation remain visible
+  in a compact phone command bar.
+- **Improved:** Umbra Remote exposes more of the application on phones and uses
+  tablet-aware layouts across Gallery, Model Manager, Extras, and Umbra UI.
+
 ## v0.31.8
 
 ### TL;DR - Umbra Remote Mobile Hotfix

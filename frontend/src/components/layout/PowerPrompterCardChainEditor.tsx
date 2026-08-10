@@ -285,9 +285,12 @@ function CardPickerSortableItem({
               ? 'border-amber-300/40 bg-amber-500/[0.07] text-zinc-100 hover:border-amber-200/70'
               : 'border-white/10 bg-white/[0.035] text-zinc-300 hover:border-white/25'
         } ${disabled ? '' : 'cursor-grab touch-none active:cursor-grabbing'}`}
-        title={`${label}: ${activePromptCount} enabled variant${activePromptCount === 1 ? '' : 's'} in Set ${activeQueueSet}. Drag this card to reorder.`}
+        title={disabled
+          ? `${label}: ${activePromptCount} enabled variant${activePromptCount === 1 ? '' : 's'} in Set ${activeQueueSet}. Select this card to edit it.`
+          : `${label}: ${activePromptCount} enabled variant${activePromptCount === 1 ? '' : 's'} in Set ${activeQueueSet}. Drag this card to reorder.`}
         {...attributes}
         {...listeners}
+        aria-disabled={undefined}
       >
         {!mobileSelectionMode ? <GripVertical size={14} className="pointer-events-none shrink-0 text-zinc-500" /> : null}
         <span className="min-w-0 flex-1">
@@ -10095,11 +10098,11 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            if (chainLinkModeActive || mobileSelectionMode) return;
+                            if (chainLinkModeActive) return;
                             openCardLabelModal(slot.slotId);
                           }}
                           onMouseDown={(event) => event.stopPropagation()}
-                          disabled={chainLinkModeActive || mobileSelectionMode}
+                          disabled={chainLinkModeActive}
                           className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-fuchsia-200/25 bg-black/20 text-fuchsia-100/75 hover:border-fuchsia-100/60 hover:text-fuchsia-50 disabled:cursor-not-allowed disabled:opacity-45"
                           title="Edit wildcard utility name"
                           aria-label={`Edit ${slot.label || 'Wildcard Utility'} card name`}
@@ -10266,11 +10269,11 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                           data-umbra-wildcard-add-variant=""
                           onClick={(event) => {
                             event.stopPropagation();
-                            if (chainLinkModeActive || mobileSelectionMode) return;
+                            if (chainLinkModeActive) return;
                             addVariant(slot.slotId);
                           }}
                           onMouseDown={(event) => event.stopPropagation()}
-                          disabled={chainLinkModeActive || mobileSelectionMode}
+                          disabled={chainLinkModeActive}
                           className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-300/40 bg-emerald-500/10 px-2.5 text-[9px] font-black uppercase tracking-[0.12em] text-emerald-100 hover:border-emerald-200/70 hover:bg-emerald-500/18 disabled:cursor-not-allowed disabled:opacity-45"
                           title="Add wildcard variant"
                           aria-label="Add wildcard variant"
@@ -11780,13 +11783,14 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       {wildcardUtilityEditor && typeof window !== 'undefined' && window.document?.body && createPortal(
         <div className="fixed inset-0 z-[12029] flex items-center justify-center bg-black/75 p-4" onMouseDown={() => setWildcardUtilityEditor(null)}>
           <section
+            data-umbra-wildcard-builder=""
             role="dialog"
             aria-modal="true"
             aria-label="Configure wildcard utility"
             onMouseDown={(event) => event.stopPropagation()}
             className="flex max-h-[calc(100dvh-2rem)] w-[min(82rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-fuchsia-300/25 bg-[#090a10] shadow-2xl shadow-black/70"
           >
-            <header className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
+            <header data-umbra-wildcard-builder-header="" className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
               <WandSparkles size={16} className="text-fuchsia-200" />
               <div className="min-w-0">
                 <strong className="block text-xs font-black uppercase tracking-[0.14em] text-zinc-100">Wildcard Utility Builder</strong>
@@ -11794,8 +11798,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
               </div>
               <button type="button" onClick={() => setWildcardUtilityEditor(null)} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-white" title="Close wildcard builder"><X size={14} /></button>
             </header>
-            <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 xl:grid-cols-[13rem_minmax(0,1fr)_27rem] custom-scrollbar">
-              <nav className="h-fit space-y-1 rounded-md border border-white/10 bg-black/25 p-2" aria-label="Wildcard utility folders">
+            <div data-umbra-wildcard-builder-body="" className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 xl:grid-cols-[13rem_minmax(0,1fr)_27rem] custom-scrollbar">
+              <nav data-umbra-wildcard-builder-folders="" className="h-fit space-y-1 rounded-md border border-white/10 bg-black/25 p-2" aria-label="Wildcard utility folders">
                 <button type="button" onClick={() => setWildcardUtilityFolder('all')} className={`flex h-9 w-full items-center gap-2 rounded-md border px-2 text-left text-[9px] font-black uppercase tracking-[0.08em] ${wildcardUtilityFolder === 'all' ? 'border-fuchsia-300/45 bg-fuchsia-500/12 text-fuchsia-100' : 'border-transparent text-zinc-400 hover:border-white/10 hover:text-zinc-100'}`}>
                   <FolderOpen size={12} /> <span className="min-w-0 flex-1 truncate">All Wildcards</span><span className="font-mono text-[8px] opacity-70">{wildcardLibrary.length}</span>
                 </button>
@@ -11808,7 +11812,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   </button>
                 ))}
               </nav>
-              <div className="grid h-fit grid-cols-1 gap-2 sm:grid-cols-2">
+              <div data-umbra-wildcard-builder-library="" className="grid h-fit grid-cols-1 gap-2 sm:grid-cols-2">
                 {visibleWildcardLibrary.map((wildcard) => {
                   const selected = wildcardUtilityEditor.selectedNames.includes(wildcard.name);
                   const adultOnly = wildcard.name.startsWith('adult-') || wildcard.folder.toLowerCase().startsWith('adult');
@@ -11851,7 +11855,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 {wildcardLibrary.length === 0 ? <div className="rounded-md border border-dashed border-white/15 p-6 text-center text-xs text-zinc-500">No wildcard source files are available yet.</div> : null}
                 {wildcardLibrary.length > 0 && visibleWildcardLibrary.length === 0 ? <div className="rounded-md border border-dashed border-white/15 p-6 text-center text-xs text-zinc-500">This folder is empty.</div> : null}
               </div>
-              <aside className="h-fit rounded-md border border-fuchsia-300/20 bg-fuchsia-500/[0.045] p-3">
+              <aside data-umbra-wildcard-builder-controls="" className="h-fit rounded-md border border-fuchsia-300/20 bg-fuchsia-500/[0.045] p-3">
                 <span className="text-[10px] font-black uppercase tracking-[0.14em] text-fuchsia-100">This card will use</span>
                 <div className="mt-3 flex min-h-12 flex-wrap content-start gap-1.5">
                   {wildcardUtilityEditor.selectedNames.length > 0 ? wildcardUtilityEditor.selectedNames.map((name) => <span key={`wildcard-utility-token-${name}`} className="rounded-sm border border-fuchsia-300/30 bg-black/30 px-2 py-1 font-mono text-[10px] text-fuchsia-100">__{name}__</span>) : <span className="text-xs text-zinc-500">Select one or more sources.</span>}
@@ -11866,7 +11870,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     {getWildcardUtilityModeLabel(wildcardUtilityTargetMode)}
                   </span>
                 </div>
-                <div className="mt-3 rounded-md border border-amber-300/20 bg-amber-500/[0.045] p-3">
+                <div data-umbra-wildcard-builder-active-roll="" className="mt-3 rounded-md border border-amber-300/20 bg-amber-500/[0.045] p-3">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[10px] font-black uppercase tracking-[0.12em] text-amber-100">Active roll</span>
                     <button
@@ -11879,7 +11883,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       <RefreshCw size={11} /> Roll candidate
                     </button>
                   </div>
-                  <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
+                  <div data-umbra-wildcard-builder-active-list="" className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
                     {wildcardUtilityEditor.selectedNames.map((name) => {
                       const wildcard = wildcardLibrary.find((entry) => entry.name === name);
                       const choice = wildcard?.choices.find((entry) => entry.id === wildcardUtilityEditor.heldSelections[name]);
@@ -11906,7 +11910,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   </div>
                   <p className="mt-2 text-[9px] leading-4 text-zinc-500">Rolling here previews a candidate. Use the inline Hold control on the variant to keep it for generation.</p>
                 </div>
-                <div className="mt-3 rounded-md border border-emerald-300/20 bg-emerald-500/[0.04] p-3">
+                <div data-umbra-wildcard-builder-context="" className="mt-3 rounded-md border border-emerald-300/20 bg-emerald-500/[0.04] p-3">
                   <button
                     type="button"
                     role="switch"
@@ -11976,7 +11980,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 <p className="mt-4 border-t border-fuchsia-300/15 pt-3 text-[11px] leading-5 text-zinc-400">A wildcard card can also include fixed tags. The builder updates only its wildcard tokens, so prompt text you add manually stays intact.</p>
               </aside>
             </div>
-            <footer className="flex items-center justify-between gap-3 border-t border-white/10 px-4 py-3">
+            <footer data-umbra-wildcard-builder-footer="" className="flex items-center justify-between gap-3 border-t border-white/10 px-4 py-3">
               <span className="text-[10px] text-zinc-500">Use each variant's inline controls to set its own Reroll or Hold behavior.</span>
               <div className="flex gap-2">
                 <button type="button" onClick={() => setWildcardUtilityEditor(null)} className="h-9 rounded-md border border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:text-white">Cancel</button>
