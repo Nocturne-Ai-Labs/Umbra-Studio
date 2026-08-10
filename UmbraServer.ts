@@ -16241,7 +16241,6 @@ async function listPowerPrompterWildcards() {
       folder: entry.folder,
       path: entry.path,
       values,
-      choices: createUmbraWildcardChoices(entry.name, values),
     };
   }));
   return wildcards.sort((left, right) => left.folder.localeCompare(right.folder) || left.name.localeCompare(right.name));

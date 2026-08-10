@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.31.4
+
+### TL;DR - Wildcard Performance Hotfix
+
+No wildcard files need to be changed. This update removes a Power Prompter
+rendering bottleneck that could make the editor sluggish or unresponsive after
+adding large wildcard libraries or several Wildcard Utility cards.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Stopped rebuilding WCUID choices for every wildcard row during
+  each Power Prompter render.
+- **Improved:** Cached normalized wildcard libraries and per-variant active-roll previews,
+  so ordinary editor updates no longer repeatedly expand the entire library.
+- **Improved:** Removed duplicated WCUID choice payload data from the wildcard API response;
+  wildcard values are still fully compatible with existing `.txt` libraries.
+
 ## v0.31.3
 
 ### TL;DR - Setup After Updating

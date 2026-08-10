@@ -39,6 +39,7 @@ export interface UmbraPromptWildcardSegmentExpansion {
 
 const TOKEN_PATTERN = /__([a-zA-Z0-9][a-zA-Z0-9_-]{0,127})__/g;
 const MAX_EXPANSION_DEPTH = 8;
+const normalizedWildcardLibraryCache = new WeakMap<object, UmbraPromptWildcard[]>();
 
 function normalizeName(value: unknown): string {
   return String(value || '').trim().toLowerCase();
@@ -83,19 +84,39 @@ export function createUmbraWildcardChoices(rawName: unknown, rawValues: unknown)
   });
 }
 
+function normalizeProvidedChoices(rawName: unknown, rawChoices: unknown): UmbraPromptWildcardChoice[] {
+  const name = normalizeName(rawName);
+  if (!name || !Array.isArray(rawChoices)) return [];
+  const seen = new Set<string>();
+  return rawChoices.flatMap((rawChoice) => {
+    const choice = rawChoice as Partial<UmbraPromptWildcardChoice> | null;
+    const value = String(choice?.value || '').trim();
+    if (!value) return [];
+    const id = String(choice?.id || createUmbraWildcardChoiceUid(name, value)).trim().toUpperCase();
+    if (!/^WCUID-[A-F0-9]{16}$/.test(id) || seen.has(id)) return [];
+    seen.add(id);
+    return [{ id, value }];
+  });
+}
+
 export function normalizeUmbraPromptWildcards(rawWildcards: unknown): UmbraPromptWildcard[] {
   if (!Array.isArray(rawWildcards)) return [];
+  const cached = normalizedWildcardLibraryCache.get(rawWildcards);
+  if (cached) return cached;
   const names = new Set<string>();
-  return rawWildcards.flatMap((entry) => {
+  const normalized = rawWildcards.flatMap((entry) => {
     const name = normalizeName((entry as UmbraPromptWildcard)?.name);
     if (!name || names.has(name)) return [];
     const values = Array.isArray((entry as UmbraPromptWildcard)?.values)
       ? (entry as UmbraPromptWildcard).values.map((value) => String(value || '').trim()).filter(Boolean)
       : [];
     if (values.length === 0) return [];
+    const choices = normalizeProvidedChoices(name, (entry as UmbraPromptWildcard)?.choices);
     names.add(name);
-    return [{ name, values, choices: createUmbraWildcardChoices(name, values) }];
+    return [{ name, values, choices: choices.length > 0 ? choices : createUmbraWildcardChoices(name, values) }];
   });
+  normalizedWildcardLibraryCache.set(rawWildcards, normalized);
+  return normalized;
 }
 
 export function normalizeUmbraWildcardHoldSelections(rawSelections: unknown): Record<string, string> {

@@ -2905,6 +2905,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const [wildcardLibraryLoading, setWildcardLibraryLoading] = useState(false);
   const wildcardLibraryRef = useRef<PowerPrompterWildcardLibraryEntry[]>([]);
   const wildcardLibraryRequestRef = useRef<Promise<PowerPrompterWildcardLibraryEntry[]> | null>(null);
+  const wildcardActiveRollCacheRef = useRef(new Map<string, ReturnType<typeof buildWildcardActiveRoll>>());
   const wildcardLibraryFolders = useMemo(
     () => Array.from(new Set(wildcardLibrary.map((entry) => entry.folder).filter(Boolean))).sort((left, right) => left.localeCompare(right)),
     [wildcardLibrary],
@@ -3064,6 +3065,26 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       // The Configure action reports the error if the library is still unavailable.
     });
   }, [loadWildcardLibrary, slots]);
+  useEffect(() => {
+    wildcardActiveRollCacheRef.current.clear();
+  }, [wildcardLibrary]);
+  const getCachedWildcardActiveRoll = useCallback((variant: PowerPrompterCardNode) => {
+    const cacheKey = [
+      variant.id,
+      variant.text,
+      variant.wildcardContextEnabled === false ? 'context-off' : 'context-on',
+      JSON.stringify(normalizeUmbraWildcardHoldSelections(variant.wildcardHoldSelections)),
+    ].join('\u0000');
+    const cached = wildcardActiveRollCacheRef.current.get(cacheKey);
+    if (cached !== undefined) return cached;
+    const next = buildWildcardActiveRoll(variant, wildcardLibrary);
+    if (wildcardActiveRollCacheRef.current.size >= 256) {
+      const oldestKey = wildcardActiveRollCacheRef.current.keys().next().value;
+      if (oldestKey) wildcardActiveRollCacheRef.current.delete(oldestKey);
+    }
+    wildcardActiveRollCacheRef.current.set(cacheKey, next);
+    return next;
+  }, [wildcardLibrary]);
   const wildcardCardSources = useMemo<PowerPrompterWildcardCardSource[]>(() => (
     slots
       .map((slot) => ({
@@ -10396,7 +10417,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                           : String(variant.text || '');
                         const isSkipVariant = (variant as any).skipVariant === true;
                         const wildcardActiveRoll = wildcardUtilitySlot
-                          ? buildWildcardActiveRoll(variant, wildcardLibrary)
+                          ? getCachedWildcardActiveRoll(variant)
                           : null;
                         const wildcardVariantMode = normalizeQueueTraversalRole(variant.queueTraversalRole) === 'hold' ? 'hold' : 'cycle';
                         const isGlobalSearchMatch = globalSearchMatchByVariantId.get(variant.id) === true;
