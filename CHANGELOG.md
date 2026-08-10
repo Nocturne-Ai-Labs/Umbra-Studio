@@ -1,5 +1,146 @@
 # Changelog
 
+## v0.31.3
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, migrations, or manual configuration are
+required. Update normally. Existing one-prompt-per-line wildcard text files,
+Power Prompter cards, queue sets, held choices, and user settings remain
+compatible. Legacy wildcard entries receive stable WCUID identities when they
+are loaded; users do not need to rewrite or convert their libraries.
+
+### Smart Wildcards And WCUID Identity
+
+- Added Umbra's WCUID system, which gives every wildcard choice a stable
+  identity independent of its display text or line position. A held choice can
+  now survive refreshes, file reordering, folder organization, and later
+  edits without relying on a fragile array index.
+- Kept ordinary wildcard `.txt` files fully supported. Umbra derives WCUIDs at
+  load time, so existing wildcard collections can be placed in the library and
+  used immediately without adopting a new file format.
+- Preserved wildcard tokens embedded inside longer authored prompts. Expansion
+  replaces only the wildcard-owned token and leaves surrounding fixed tags,
+  weights, LoRA syntax, and modular prompt text intact.
+- Added bounded nested-wildcard resolution and cycle protection. Wildcards can
+  reference another wildcard while malformed recursive loops stop safely
+  instead of hanging queue construction.
+- Unknown wildcard tokens remain visible in the composed prompt rather than
+  silently deleting user-authored text, making missing files and misspelled
+  names much easier to diagnose.
+
+### Per-Variant Hold, Reroll, And Active Choices
+
+- Made wildcard behavior unique to each variant inside a Wildcard Utility card.
+  One variant can hold an exact choice while another variant in the same card
+  continues rerolling independently.
+- Added an inline active-roll preview beneath wildcard variants so the exact
+  resolved prompt is visible without reopening the configuration modal.
+- Added inline **Reroll** and **Hold** controls. Reroll previews another choice
+  for that specific variant; Hold pins that exact WCUID for generation without
+  changing sibling variants or other Wildcard Utility cards.
+- Added a per-variant reroll counter beside the queue-set controls, supporting
+  1 through 1,000 requested wildcard outputs. The displayed queue and image
+  totals update immediately to match the selected value.
+- Kept held variants from inflating output counts. A held location can remain
+  stable while an outfit or pose wildcard produces many randomized outputs.
+- Made multiple active Wildcard Utility cards share the requested output span
+  instead of multiplying reroll counts into an accidental combinatorial queue.
+  Ordinary enabled card variants still compose with the wildcard output count
+  as expected.
+- Isolated reroll counts and held WCUIDs by queue set, allowing the same card to
+  behave differently across separate Power Prompter sets.
+
+### Optional Smart Context
+
+- Added an optional Smart Context pass for wildcard-composed prompts. It repairs
+  direct contradictions after wildcard expansion while leaving the source
+  wildcard files and card text unchanged.
+- Added contextual clothing and access-state handling so generated actions do
+  not retain incompatible garment states, while explicit through-clothing or
+  already-adjusted clothing instructions remain respected.
+- Added action compatibility checks for occupied hands, mouth availability,
+  mutually exclusive primary actions, solo versus multi-participant framing,
+  and participant-count requirements.
+- Added camera cleanup that keeps one structural viewing angle and one focus
+  target when several wildcard sources contribute competing composition tags.
+- Applied context repair only when enabled. Users can keep literal wildcard
+  output whenever strict source fidelity is preferred.
+
+### Wildcard Library And Authoring Experience
+
+- Added folder-aware wildcard browsing. The Wildcards modal now presents nested
+  categories for outfits, poses, expressions, locations, composition, adult
+  libraries, and user-created organizational structures instead of flattening
+  every file into one long list.
+- Expanded the Wildcard Utility configuration surface with clearer source
+  selection, active-choice previews, WCUID visibility, candidate rerolling,
+  reroll counts, and Smart Context controls.
+- Kept standard-card-to-wildcard authoring compatible with the WCUID system.
+  Users can select entire cards or individual variants, name the resulting
+  wildcard, and immediately use it as a stable Wildcard Utility source.
+- Preserved independently created wildcard, standard, and Style Utility cards
+  when they share the same visible name. Renaming a wildcard to `Character`,
+  `Style`, or another existing card name no longer merges, replaces, or removes
+  either card.
+- Kept wildcard identity intact when renaming a Wildcard Utility card, so the
+  purple utility card cannot silently turn into a standard variant card.
+
+### Power Prompter Interface And Ordering
+
+- Reworked the Wildcard Utility header so its name, utility identity, and
+  Hold/Reroll summary remain visible. **Configure** and **Add** now occupy a
+  separate action row instead of crowding the card name.
+- Returned the reroll counter to a compact right-aligned position beneath the
+  set controls after visual review on desktop and tablet layouts.
+- Improved variant move-up and move-down behavior so ordering follows the
+  enabled variant list directly and no longer depends on stale positions from
+  before a variant was enabled.
+- Kept variant ordering unique per queue set and ensured the resulting order is
+  the order used by Power Prompter queue composition.
+- Improved wildcard-card Add behavior and retained the row-level choices for a
+  Standard Variant card, Style Utility card, or Wildcard Utility card.
+
+### Compatibility, Testing, And Release Privacy
+
+- Added focused coverage for held and rerolled cards, repeated wildcard names,
+  nested expansion, unknown tokens, recursive cycles, contextual conflicts,
+  queue limits, queue-set isolation, ordinary variant composition, and card
+  identity collisions.
+- Validated wildcard queue construction with continuous prompt-only simulations
+  and real managed generation dispatch without requiring batch-size inflation.
+- Kept personal wildcard libraries, wildcard-authoring generators, internal
+  simulation files, local agent skills, and development tests out of the public
+  repository and portable packages.
+- Reorganized only the previously public starter wildcard files in the shipped
+  defaults. No private wildcard content has been added to this release.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Renaming a Wildcard Utility card no longer converts it into a
+  standard card or collides with an existing standard or Style Utility card.
+- **Fixed:** Per-variant Hold and Reroll controls no longer alter every variant
+  in the wildcard card.
+- **Fixed:** Held wildcard choices no longer depend on a mutable text-file line
+  number and remain addressable through their WCUID.
+- **Fixed:** Multiple wildcard reroll counts no longer multiply into an
+  unexpectedly huge queue.
+- **Fixed:** Blank wildcard variants no longer inflate another active wildcard
+  card's output count.
+- **Fixed:** Queue limits now cap wildcard rerolls consistently and report the
+  truncated total accurately.
+- **Fixed:** Wildcard Add controls no longer crowd or hide the utility-card name.
+- **Fixed:** Wildcard, standard, and Style Utility cards with matching names no
+  longer overwrite or remove one another.
+- **Improved:** Active wildcard results can be reviewed, rerolled, and held
+  directly on the variant that owns them.
+- **Improved:** Folder-aware browsing makes large third-party and user-authored
+  wildcard libraries practical to navigate.
+- **Improved:** Optional Smart Context produces more coherent combinations from
+  independent outfit, pose, action, expression, and camera wildcard sources.
+- **Improved:** Existing wildcard text files work immediately without a manual
+  conversion step or proprietary source format.
+
 ## v0.31.2
 
 ### TL;DR - Setup After Updating

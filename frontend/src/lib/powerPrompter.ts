@@ -23,6 +23,7 @@ import type {
   PowerPrompterVideoControls,
 } from '@/types/powerPrompter';
 import { UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID } from '../../../shared/umbra-ui/agentTypes';
+import { normalizeUmbraWildcardHoldSelections } from '../../../shared/promptWildcards';
 import {
   inferUmbraVideoResolutionPreset,
   normalizeUmbraVideoAspectPreset,
@@ -1309,6 +1310,17 @@ export function sortPowerPrompterCards(cards: PowerPrompterCardNode[]): PowerPro
   });
 }
 
+export function normalizePowerPrompterCardUtilityKind(
+  rawKind: unknown,
+  type: PowerPrompterCardType,
+  label: unknown,
+): 'wildcard' | undefined {
+  if (String(rawKind || '').trim().toLowerCase() === 'wildcard') return 'wildcard';
+  return type === 'custom' && String(label || '').trim().toLowerCase().startsWith('wildcard utility')
+    ? 'wildcard'
+    : undefined;
+}
+
 export function createPowerPrompterCardNode(
   type: PowerPrompterCardType,
   label?: string,
@@ -1335,6 +1347,8 @@ export function createPowerPrompterCardNode(
     queueTraversalRole: 'cycle',
     queueCycleWeights: {},
     wildcardRerolls: 1,
+    wildcardHoldSelections: {},
+    wildcardContextEnabled: false,
     chainLinks: [],
     blockLinks: [],
     order,
@@ -1410,6 +1424,8 @@ export function importLegacyPromptToCardDocument(
       queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
       queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
       wildcardRerolls: normalizeWildcardRerolls((card as any).wildcardRerolls),
+      wildcardHoldSelections: normalizeUmbraWildcardHoldSelections((card as any).wildcardHoldSelections),
+      wildcardContextEnabled: (card as any).wildcardContextEnabled === true,
       chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
       blockLinks: normalizeBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
       variantName: normalizeVariantName(card.variantName),
@@ -1469,6 +1485,7 @@ function normalizeDeletedCardGroups(rawGroups: unknown, now: string): Record<str
         id: String(card.id || createCardId()),
         slotId: String(card.slotId || '').trim(),
         type: cardType,
+        utilityKind: normalizePowerPrompterCardUtilityKind((card as any).utilityKind, cardType, card.label || label),
         label: String(card.label || '').trim() || label,
         variantName: normalizeVariantName(card.variantName),
         variantTags: normalizeVariantTags((card as any).variantTags),
@@ -1481,6 +1498,8 @@ function normalizeDeletedCardGroups(rawGroups: unknown, now: string): Record<str
         queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
         queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
         wildcardRerolls: normalizeWildcardRerolls((card as any).wildcardRerolls),
+        wildcardHoldSelections: normalizeUmbraWildcardHoldSelections((card as any).wildcardHoldSelections),
+        wildcardContextEnabled: (card as any).wildcardContextEnabled === true,
         chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
         blockLinks: normalizeBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
         order: Number.isFinite(Number(card.order)) ? Math.max(0, Math.floor(Number(card.order))) : idx,
@@ -1523,6 +1542,7 @@ export function normalizePowerPrompterCardDocument(
       id: String(card.id || createCardId()),
       slotId: String(card.slotId || '').trim() || createSlotId(type, card.label),
       type,
+      utilityKind: normalizePowerPrompterCardUtilityKind((card as any).utilityKind, type, card.label),
       label: String(card.label || '').trim() || (type === 'custom' ? 'Custom' : type[0].toUpperCase() + type.slice(1)),
       variantName: normalizeVariantName(card.variantName),
       variantTags: normalizeVariantTags((card as any).variantTags),
@@ -1535,6 +1555,8 @@ export function normalizePowerPrompterCardDocument(
       queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
       queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
       wildcardRerolls: normalizeWildcardRerolls((card as any).wildcardRerolls),
+      wildcardHoldSelections: normalizeUmbraWildcardHoldSelections((card as any).wildcardHoldSelections),
+      wildcardContextEnabled: (card as any).wildcardContextEnabled === true,
       chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
       blockLinks: normalizeBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
       order: Number.isFinite(Number(card.order)) ? Math.max(0, Math.floor(Number(card.order))) : idx,

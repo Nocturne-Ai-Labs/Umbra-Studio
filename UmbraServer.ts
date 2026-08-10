@@ -84,8 +84,10 @@ import {
   type PowerPrompterCsvItem,
 } from './backend/powerPrompterCsv';
 import {
+  createUmbraWildcardChoices,
   expandUmbraPromptWildcardSegments,
   expandUmbraPromptWildcards,
+  normalizeUmbraWildcardHoldSelections,
   normalizeUmbraPromptWildcards,
 } from './shared/promptWildcards';
 import {
@@ -6157,6 +6159,37 @@ function resolvePrompterPromptWildcards(
   };
 }
 
+function resolvePrompterQueuePayloadWildcards(
+  rawPrompts: unknown,
+  rawState: unknown,
+  wildcards: unknown,
+): { prompts: string[]; state: any } {
+  const prompts = sanitizePrompterPromptLines(rawPrompts, { dedupe: false });
+  const state = rawState && typeof rawState === 'object' ? rawState as any : {};
+  const baseSeed = Math.max(0, Math.floor(Number(state?.generation?.seed) || 0));
+  const rawPromptEntries = Array.isArray(state?.promptEntries) ? state.promptEntries : [];
+  const resolved = prompts.map((prompt, index) => resolvePrompterPromptWildcards(
+    prompt,
+    rawPromptEntries[index],
+    wildcards,
+    baseSeed,
+    index,
+  ));
+  const resolvedPrompts = resolved.map((entry) => entry.prompt);
+  return {
+    prompts: resolvedPrompts,
+    state: {
+      ...state,
+      activePrompt: resolvedPrompts[0] || '',
+      prompts: resolvedPrompts,
+      joinedPrompt: resolvedPrompts.join(', '),
+      promptEntries: Array.isArray(state?.promptEntries)
+        ? resolved.map((entry) => entry.entry)
+        : state?.promptEntries,
+    },
+  };
+}
+
 async function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: any) {
   const prompts = sanitizePrompterPromptLines(data?.prompts, { dedupe: false });
   if (prompts.length === 0) {
@@ -6171,35 +6204,12 @@ async function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: an
 
   const requestId = String(data?.requestId || crypto.randomUUID());
   const wildcards = await listPowerPrompterWildcards();
-  const baseSeed = Math.max(0, Math.floor(Number(data?.state?.generation?.seed) || 0));
-  const rawPromptEntries = Array.isArray(data?.state?.promptEntries) ? data.state.promptEntries : [];
-  const resolved = prompts.map((prompt, index) => resolvePrompterPromptWildcards(
-    prompt,
-    rawPromptEntries[index],
-    wildcards,
-    baseSeed,
-    index,
-  ));
-  const resolvedPrompts = resolved.map((entry) => entry.prompt);
+  const resolvedPayload = resolvePrompterQueuePayloadWildcards(prompts, data?.state, wildcards);
+  const resolvedPrompts = resolvedPayload.prompts;
   data = {
     ...data,
     prompts: resolvedPrompts,
-    state: data?.state && typeof data.state === 'object'
-      ? {
-        ...data.state,
-        promptEntries: Array.isArray(data.state.promptEntries)
-          ? data.state.promptEntries.map((entry: any, index: number) => (
-            resolvePrompterPromptWildcards(
-              String(entry?.prompt || prompts[index] || ''),
-              entry,
-              wildcards,
-              baseSeed,
-              index,
-            ).entry
-          ))
-          : data.state.promptEntries,
-      }
-      : data?.state,
+    state: resolvedPayload.state,
   };
   const existingPending = prompterPendingQueueRequests.get(requestId);
   if (existingPending) {
@@ -10158,6 +10168,7 @@ async function handlePrompterApiWorkflowQueueBatchRequest(
   batchRequestId: string,
 ) {
   const rawGroups = Array.isArray(data?.groups) ? data.groups : [];
+  const wildcards = await listPowerPrompterWildcards();
   const groups = rawGroups
     .map((group: any) => ({
       requestId: String(group?.requestId || '').trim(),
@@ -10165,7 +10176,15 @@ async function handlePrompterApiWorkflowQueueBatchRequest(
       prompts: sanitizePrompterPromptLines(group?.prompts, { dedupe: false }),
       state: group?.state && typeof group.state === 'object' ? group.state : {},
     }))
-    .filter((group) => group.requestId && group.prompts.length > 0);
+    .filter((group) => group.requestId && group.prompts.length > 0)
+    .map((group) => {
+      const resolvedPayload = resolvePrompterQueuePayloadWildcards(group.prompts, group.state, wildcards);
+      return {
+        ...group,
+        prompts: resolvedPayload.prompts,
+        state: resolvedPayload.state,
+      };
+    });
 
   if (groups.length <= 0) {
     sendWs(ws, {
@@ -16120,28 +16139,112 @@ function normalizePowerPrompterWildcardName(rawName: unknown): string {
     .slice(0, 128);
 }
 
+function normalizePowerPrompterWildcardFolder(rawFolder: unknown): string {
+  return String(rawFolder || '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((segment) => segment
+      .trim()
+      .replace(/[^a-zA-Z0-9 _-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 64))
+    .filter((segment) => segment.length > 0 && segment !== '.' && segment !== '..')
+    .slice(0, 8)
+    .join('/');
+}
+
+function normalizePowerPrompterWildcardPath(rawPath: unknown): string {
+  const source = String(rawPath || '').replace(/\\/g, '/').replace(/\.txt$/i, '').trim();
+  if (!source) return '';
+  const parts = source.split('/').map((part) => part.trim()).filter(Boolean);
+  const name = normalizePowerPrompterWildcardName(parts.pop());
+  if (!name) return '';
+  const folder = normalizePowerPrompterWildcardFolder(parts.join('/'));
+  return folder ? `${folder}/${name}` : name;
+}
+
+function resolvePowerPrompterWildcardFile(root: string, rawPath: unknown): string | null {
+  const wildcardPath = normalizePowerPrompterWildcardPath(rawPath);
+  if (!wildcardPath) return null;
+  const absoluteRoot = resolve(root);
+  const absolutePath = resolve(absoluteRoot, ...wildcardPath.split('/')) + '.txt';
+  if (absolutePath !== absoluteRoot && !absolutePath.startsWith(`${absoluteRoot}${sep}`)) return null;
+  return absolutePath;
+}
+
+interface PowerPrompterWildcardFileEntry {
+  name: string;
+  folder: string;
+  path: string;
+  absolutePath: string;
+}
+
+async function listPowerPrompterWildcardFiles(root: string, rawFolder = ''): Promise<PowerPrompterWildcardFileEntry[]> {
+  if (!existsSync(root)) return [];
+  const folder = normalizePowerPrompterWildcardFolder(rawFolder);
+  const directory = folder ? join(root, ...folder.split('/')) : root;
+  if (!existsSync(directory)) return [];
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  const files: PowerPrompterWildcardFileEntry[] = [];
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      const childFolder = folder ? `${folder}/${entry.name}` : entry.name;
+      files.push(...await listPowerPrompterWildcardFiles(root, childFolder));
+      continue;
+    }
+    if (!entry.isFile() || extname(entry.name).toLowerCase() !== '.txt') continue;
+    const name = normalizePowerPrompterWildcardName(entry.name);
+    if (!name) continue;
+    files.push({
+      name,
+      folder,
+      path: folder ? `${folder}/${name}` : name,
+      absolutePath: join(directory, entry.name),
+    });
+  }
+  return files;
+}
+
 async function listPowerPrompterWildcards() {
   await fs.mkdir(PP_WILDCARDS_DIR, { recursive: true });
   if (existsSync(PP_DEFAULT_WILDCARDS_DIR)) {
-    const bundledEntries = await fs.readdir(PP_DEFAULT_WILDCARDS_DIR, { withFileTypes: true });
-    await Promise.all(bundledEntries
-      .filter((entry) => entry.isFile() && extname(entry.name).toLowerCase() === '.txt')
-      .map(async (entry) => {
-        const destination = join(PP_WILDCARDS_DIR, entry.name);
-        if (!existsSync(destination)) {
-          await fs.copyFile(join(PP_DEFAULT_WILDCARDS_DIR, entry.name), destination);
+    const [bundledEntries, existingEntries] = await Promise.all([
+      listPowerPrompterWildcardFiles(PP_DEFAULT_WILDCARDS_DIR),
+      listPowerPrompterWildcardFiles(PP_WILDCARDS_DIR),
+    ]);
+    const existingByName = new Map(existingEntries.map((entry) => [entry.name, entry]));
+    await Promise.all(bundledEntries.map(async (entry) => {
+      const existing = existingByName.get(entry.name);
+      const destination = resolvePowerPrompterWildcardFile(PP_WILDCARDS_DIR, entry.path);
+      if (!destination) return;
+      if (existing) {
+        if (!existing.folder && entry.folder && existing.absolutePath !== destination && !existsSync(destination)) {
+          await fs.mkdir(dirname(destination), { recursive: true });
+          await fs.rename(existing.absolutePath, destination);
         }
-      }));
-  }
-  const entries = await fs.readdir(PP_WILDCARDS_DIR, { withFileTypes: true });
-  const wildcards = await Promise.all(entries
-    .filter((entry) => entry.isFile() && extname(entry.name).toLowerCase() === '.txt')
-    .map(async (entry) => {
-      const name = normalizePowerPrompterWildcardName(entry.name);
-      const content = await fs.readFile(join(PP_WILDCARDS_DIR, entry.name), 'utf8');
-      return { name, values: content.split(/\r?\n/).map((value) => value.trim()).filter(Boolean) };
+        return;
+      }
+      await fs.mkdir(dirname(destination), { recursive: true });
+      await fs.copyFile(entry.absolutePath, destination);
     }));
-  return normalizeUmbraPromptWildcards(wildcards).sort((left, right) => left.name.localeCompare(right.name));
+  }
+  const entries = await listPowerPrompterWildcardFiles(PP_WILDCARDS_DIR);
+  const uniqueEntries = new Map<string, PowerPrompterWildcardFileEntry>();
+  for (const entry of [...entries].sort((left, right) => left.path.localeCompare(right.path))) {
+    if (!uniqueEntries.has(entry.name)) uniqueEntries.set(entry.name, entry);
+  }
+  const wildcards = await Promise.all([...uniqueEntries.values()].map(async (entry) => {
+    const content = await fs.readFile(entry.absolutePath, 'utf8');
+    const values = content.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    return {
+      name: entry.name,
+      folder: entry.folder,
+      path: entry.path,
+      values,
+      choices: createUmbraWildcardChoices(entry.name, values),
+    };
+  }));
+  return wildcards.sort((left, right) => left.folder.localeCompare(right.folder) || left.name.localeCompare(right.name));
 }
 const PP_QUEUE_DIR = join(USER_DIR, 'PowerPrompter', 'Queue');
 const PP_QUEUE_STATE_PATH = join(PP_QUEUE_DIR, 'queue-state.json');
@@ -20557,6 +20660,18 @@ function normalizePPCardType(rawType: unknown): PowerPrompterCardType {
   return 'custom';
 }
 
+function normalizePPCardUtilityKind(
+  rawKind: unknown,
+  rawType: PowerPrompterCardType,
+  rawLabel: unknown,
+): 'wildcard' | undefined {
+  if (String(rawKind || '').trim().toLowerCase() === 'wildcard') return 'wildcard';
+  return normalizePPCardType(rawType) === 'custom'
+    && String(rawLabel || '').trim().toLowerCase().startsWith('wildcard utility')
+    ? 'wildcard'
+    : undefined;
+}
+
 function normalizePPVariantName(rawName: unknown): string {
   return String(rawName || '')
     .trim()
@@ -20634,6 +20749,8 @@ function createPPCardNode(
     queueTraversalRole: 'cycle',
     queueCycleWeights: {},
     wildcardRerolls: 1,
+    wildcardHoldSelections: {},
+    wildcardContextEnabled: false,
     chainLinks: [],
     blockLinks: [],
     order,
@@ -20704,6 +20821,7 @@ function normalizePPCardDocument(rawDoc: unknown, filePath: string | null): Powe
       id,
       slotId: String(card.slotId || '').trim() || createPPSlotId(type, resolvedLabel),
       type,
+      utilityKind: normalizePPCardUtilityKind((card as any).utilityKind, type, resolvedLabel),
       label: resolvedLabel,
       variantName: normalizePPVariantName((card as any).variantName),
       variantTags: normalizePPVariantTags((card as any).variantTags),
@@ -20716,6 +20834,8 @@ function normalizePPCardDocument(rawDoc: unknown, filePath: string | null): Powe
       queueTraversalRole: normalizePPQueueTraversalRole((card as any).queueTraversalRole),
       queueCycleWeights: normalizePPQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
       wildcardRerolls: normalizePPWildcardRerolls((card as any).wildcardRerolls),
+      wildcardHoldSelections: normalizeUmbraWildcardHoldSelections((card as any).wildcardHoldSelections),
+      wildcardContextEnabled: (card as any).wildcardContextEnabled === true,
       chainLinks: normalizePPChainLinks((card as any).chainLinks, id),
       blockLinks: normalizePPBlockLinks((card as any).blockLinks, id),
       order: Number.isFinite(Number(card.order)) ? Math.max(0, Math.floor(Number(card.order))) : idx,
@@ -20800,6 +20920,8 @@ function importLegacyPromptToPPCardDocument(
       queueTraversalRole: normalizePPQueueTraversalRole((card as any).queueTraversalRole),
       queueCycleWeights: normalizePPQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
       wildcardRerolls: normalizePPWildcardRerolls((card as any).wildcardRerolls),
+      wildcardHoldSelections: normalizeUmbraWildcardHoldSelections((card as any).wildcardHoldSelections),
+      wildcardContextEnabled: (card as any).wildcardContextEnabled === true,
       chainLinks: normalizePPChainLinks((card as any).chainLinks, String(card.id || '').trim()),
       blockLinks: normalizePPBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
       order: idx,
@@ -22427,6 +22549,7 @@ interface PowerPrompterCardNode {
   id: string;
   slotId: string;
   type: PowerPrompterCardType;
+  utilityKind?: 'wildcard';
   label: string;
   variantName: string;
   variantTags: string[];
@@ -22439,6 +22562,8 @@ interface PowerPrompterCardNode {
   queueTraversalRole?: PowerPrompterQueueTraversalRole;
   queueCycleWeights?: Record<string, number>;
   wildcardRerolls?: number;
+  wildcardHoldSelections?: Record<string, string>;
+  wildcardContextEnabled?: boolean;
   chainLinks?: string[];
   blockLinks?: string[];
   order: number;
@@ -34109,7 +34234,7 @@ const server = Bun.serve<any>({
       }
 
       if (path === '/api/powerprompter/wildcards' && method === 'PUT') {
-        const body = await req.json().catch(() => ({})) as { name?: unknown; values?: unknown };
+        const body = await req.json().catch(() => ({})) as { name?: unknown; folder?: unknown; path?: unknown; values?: unknown };
         const name = normalizePowerPrompterWildcardName(body.name);
         if (!name) return json({ success: false, error: 'Use letters, numbers, hyphens, or underscores for a wildcard name.' }, 400);
         const values = Array.isArray(body.values)
@@ -34117,14 +34242,43 @@ const server = Bun.serve<any>({
           : String(body.values || '').split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
         if (values.length === 0) return json({ success: false, error: 'Add at least one wildcard value.' }, 400);
         await fs.mkdir(PP_WILDCARDS_DIR, { recursive: true });
-        await fs.writeFile(join(PP_WILDCARDS_DIR, `${name}.txt`), `${values.join('\n')}\n`, 'utf8');
+        const existingEntries = await listPowerPrompterWildcardFiles(PP_WILDCARDS_DIR);
+        const requestedSourcePath = normalizePowerPrompterWildcardPath(body.path);
+        const existingByName = existingEntries.find((entry) => entry.name === name);
+        const sourcePath = requestedSourcePath || existingByName?.path || '';
+        const folder = body.folder === undefined
+          ? existingByName?.folder || ''
+          : normalizePowerPrompterWildcardFolder(body.folder);
+        const targetPath = folder ? `${folder}/${name}` : name;
+        const duplicate = existingEntries.find((entry) => entry.name === name && entry.path !== sourcePath);
+        if (duplicate) {
+          return json({ success: false, error: `A wildcard named __${name}__ already exists in ${duplicate.folder || 'the root folder'}. Wildcard names must stay unique across folders.` }, 409);
+        }
+        const destination = resolvePowerPrompterWildcardFile(PP_WILDCARDS_DIR, targetPath);
+        if (!destination) return json({ success: false, error: 'Wildcard folder or name is invalid.' }, 400);
+        await fs.mkdir(dirname(destination), { recursive: true });
+        await fs.writeFile(destination, `${values.join('\n')}\n`, 'utf8');
+        if (sourcePath && sourcePath !== targetPath) {
+          const source = resolvePowerPrompterWildcardFile(PP_WILDCARDS_DIR, sourcePath);
+          if (source && source !== destination) await fs.rm(source, { force: true });
+        }
+        return json({ success: true, wildcards: await listPowerPrompterWildcards() });
+      }
+
+      if (path === '/api/powerprompter/wildcards' && method === 'DELETE') {
+        const wildcardPath = normalizePowerPrompterWildcardPath(url.searchParams.get('path'));
+        if (!wildcardPath) return json({ success: false, error: 'Wildcard path is required.' }, 400);
+        const target = resolvePowerPrompterWildcardFile(PP_WILDCARDS_DIR, wildcardPath);
+        if (!target) return json({ success: false, error: 'Wildcard path is invalid.' }, 400);
+        await fs.rm(target, { force: true });
         return json({ success: true, wildcards: await listPowerPrompterWildcards() });
       }
 
       if (path.startsWith('/api/powerprompter/wildcards/') && method === 'DELETE') {
         const name = normalizePowerPrompterWildcardName(decodeURIComponent(path.slice('/api/powerprompter/wildcards/'.length)));
         if (!name) return json({ success: false, error: 'Wildcard name is required.' }, 400);
-        await fs.rm(join(PP_WILDCARDS_DIR, `${name}.txt`), { force: true });
+        const entry = (await listPowerPrompterWildcardFiles(PP_WILDCARDS_DIR)).find((candidate) => candidate.name === name);
+        if (entry) await fs.rm(entry.absolutePath, { force: true });
         return json({ success: true, wildcards: await listPowerPrompterWildcards() });
       }
 

@@ -34,6 +34,7 @@ import type {
   QueuePromptStyleMeta,
   QueuePromptToken,
 } from './queueCore';
+import { normalizeUmbraWildcardHoldSelections } from '../../../../../shared/promptWildcards';
 
 const QUEUE_TRAVERSAL_ROLE_RANK = {
   hold: 0,
@@ -235,6 +236,7 @@ export function buildQueuePromptsFromCards(
   const slotVariants = slots.map((slot) => ({
     slotId: slot.slotId,
     type: slot.type,
+    utilityKind: slot.utilityKind,
     label: slot.label,
     variants: slot.variants,
   }));
@@ -244,12 +246,14 @@ export function buildQueuePromptsFromCards(
     tokens: QueuePromptToken[];
   };
   const isStyleSlot = (slot: { type: PowerPrompterCardType; label: string }) => slot.type === 'style';
-  const isWildcardUtilitySlot = (slot: { type: PowerPrompterCardType; label: string }) => (
+  const isWildcardUtilitySlot = (slot: { type: PowerPrompterCardType; utilityKind?: 'wildcard'; label: string }) => (
     slot.type === 'custom'
-    && String(slot.label || '').trim().toLowerCase().startsWith('wildcard utility')
+    && (slot.utilityKind === 'wildcard' || String(slot.label || '').trim().toLowerCase().startsWith('wildcard utility'))
   );
   const getSlotTraversalRole = (slotEntry: typeof slotVariants[number]) => (
-    normalizeQueueTraversalRole(slotEntry.variants[0]?.queueTraversalRole)
+    isWildcardUtilitySlot(slotEntry)
+      ? 'cycle'
+      : normalizeQueueTraversalRole(slotEntry.variants[0]?.queueTraversalRole)
   );
   const orderSlotTokenGroupsForTraversal = (groups: QueuePromptSlotTokenGroup[]): QueuePromptSlotTokenGroup[] => (
     [...groups].sort((left, right) => {
@@ -275,12 +279,14 @@ export function buildQueuePromptsFromCards(
     });
     return inSet;
   };
-  const getWildcardRerollsForSet = (setId: number): number => Math.max(1, ...slotVariants
-    .filter((slotEntry) => isWildcardUtilitySlot(slotEntry))
-    .flatMap((slotEntry) => getSelectedForSet(slotEntry.variants, setId))
-    .filter((card) => normalizeQueueTraversalRole(card.queueTraversalRole) !== 'hold')
-    .filter((card) => /__[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}__/.test(String(card.text || '')))
-    .map((card) => normalizeWildcardRerolls(card.wildcardRerolls)));
+  const getTokenWildcardRerolls = (token: QueuePromptToken): number => (
+    token.wildcardMode === 'reroll'
+      ? normalizeWildcardRerolls(token.wildcardRerolls)
+      : 1
+  );
+  const getEntryWildcardRerolls = (entry: QueuePromptBuildEntry | null | undefined): number => (
+    entry ? Math.max(1, ...entry.tokens.map(getTokenWildcardRerolls)) : 1
+  );
   let documentShuffleSalt = '';
   const getDocumentShuffleSalt = () => {
     if (documentShuffleSalt) return documentShuffleSalt;
@@ -315,7 +321,12 @@ export function buildQueuePromptsFromCards(
           chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
           blockLinks: normalizeBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
           ...(isWildcardUtilitySlot(slotEntry)
-            ? { wildcardMode: normalizeQueueTraversalRole(card.queueTraversalRole) === 'hold' ? 'hold' as const : 'reroll' as const }
+            ? {
+              wildcardMode: normalizeQueueTraversalRole(card.queueTraversalRole) === 'hold' ? 'hold' as const : 'reroll' as const,
+              wildcardRerolls: normalizeWildcardRerolls(card.wildcardRerolls),
+              wildcardHoldSelections: normalizeUmbraWildcardHoldSelections(card.wildcardHoldSelections),
+              wildcardContextEnabled: card.wildcardContextEnabled === true,
+            }
             : {}),
         };
         return Array.from({ length: repeatCount }, () => queueToken);
@@ -381,21 +392,6 @@ export function buildQueuePromptsFromCards(
     ));
     return uniqueFolders.length <= 1 ? folders.map(() => '') : folders;
   };
-  const countExhaustivePromptLengths = (lengths: number[]): number => {
-    if (lengths.every((length) => Math.max(0, Math.floor(Number(length) || 0)) === 0)) return 0;
-    let total = 1;
-    for (const lengthRaw of lengths) {
-      const factor = Math.max(1, Math.max(0, Math.floor(Number(lengthRaw) || 0)));
-      if (!Number.isFinite(total * factor) || total > Number.MAX_SAFE_INTEGER / factor) {
-        return Number.MAX_SAFE_INTEGER;
-      }
-      total *= factor;
-    }
-    return total;
-  };
-  const countExhaustivePrompts = (slotTokens: QueuePromptToken[][]): number => {
-    return countExhaustivePromptLengths(slotTokens.map((tokens) => tokens.length));
-  };
   const buildPromptFromSegments = (segments: string[]): string => normalizePowerPrompterPromptText(
     segments
       .map((segment) => String(segment || '').trim())
@@ -413,6 +409,9 @@ export function buildQueuePromptsFromCards(
         variantName: String(token.variantName || '').trim(),
         text: String(token.text || '').trim(),
         ...(token.wildcardMode ? { wildcardMode: token.wildcardMode } : {}),
+        ...(token.wildcardRerolls ? { wildcardRerolls: token.wildcardRerolls } : {}),
+        ...(token.wildcardHoldSelections ? { wildcardHoldSelections: token.wildcardHoldSelections } : {}),
+        ...(token.wildcardContextEnabled === true ? { wildcardContextEnabled: true } : {}),
       }))
       .filter((token) => token.slotId.length > 0 && token.variantId.length > 0),
   });
@@ -500,18 +499,17 @@ export function buildQueuePromptsFromCards(
         truncated: true,
       };
     };
-    const wildcardRerolls = getWildcardRerollsForSet(setId);
     const expandWildcardRerolls = (
       entries: QueuePromptBuildEntry[],
       prompts: string[],
       styleMeta: QueuePromptStyleMeta[],
       finalLimit: number,
     ) => {
-      if (wildcardRerolls <= 1) return sampleBuiltQueue(entries, prompts, styleMeta, finalLimit);
       const expandedEntries: QueuePromptBuildEntry[] = [];
       const expandedPrompts: string[] = [];
       const expandedStyleMeta: QueuePromptStyleMeta[] = [];
       for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
+        const wildcardRerolls = getEntryWildcardRerolls(entries[entryIndex]);
         for (let rerollIndex = 0; rerollIndex < wildcardRerolls; rerollIndex += 1) {
           expandedEntries.push(entries[entryIndex]);
           expandedPrompts.push(prompts[entryIndex]);
@@ -532,7 +530,7 @@ export function buildQueuePromptsFromCards(
     const hasFiniteLimit = Number.isFinite(limit);
     const finalLimit = hasFiniteLimit ? Math.max(0, Math.floor(Number(limit) || 0)) : limit;
     const baseLimit = hasFiniteLimit
-      ? Math.max(1, Math.ceil(finalLimit / (Math.max(1, styleTokens.length) * wildcardRerolls)))
+      ? Math.max(1, Math.ceil(finalLimit / Math.max(1, styleTokens.length)))
       : finalLimit;
     const baseBuilt = buildExhaustiveFromTokens(baseSlotTokens, baseLimit);
     const baseEntries = baseBuilt.entries.length > 0
@@ -547,7 +545,7 @@ export function buildQueuePromptsFromCards(
         truncated: baseBuilt.truncated,
       };
       if (!hasFiniteLimit) {
-        const sampled = expandWildcardRerolls(built.entries, built.prompts, built.styleMeta, built.prompts.length * wildcardRerolls);
+        const sampled = expandWildcardRerolls(built.entries, built.prompts, built.styleMeta, Number.POSITIVE_INFINITY);
         return {
           ...sampled,
           truncated: built.truncated || sampled.truncated,
@@ -581,7 +579,7 @@ export function buildQueuePromptsFromCards(
       }
     }
     if (!hasFiniteLimit) {
-      const sampled = expandWildcardRerolls(entries, prompts, styleMeta, prompts.length * wildcardRerolls);
+      const sampled = expandWildcardRerolls(entries, prompts, styleMeta, Number.POSITIVE_INFINITY);
       return {
         ...sampled,
         truncated: truncated || sampled.truncated,
@@ -593,42 +591,52 @@ export function buildQueuePromptsFromCards(
       truncated: truncated || sampled.truncated,
     };
   };
-  const countBuiltEntriesFromLengths = (
-    slotTokenLengths: number[],
-    modeLimit: number
-  ): { count: number; truncated: boolean } => {
-    const safeLimit = Number.isFinite(modeLimit)
-      ? Math.max(0, Math.floor(Number(modeLimit) || 0))
-      : Number.MAX_SAFE_INTEGER;
-    if (safeLimit <= 0) return { count: 0, truncated: false };
-    const total = countExhaustivePromptLengths(slotTokenLengths);
-    return {
-      count: Math.min(total, safeLimit),
-      truncated: total > safeLimit,
-    };
+  const countWeightedWildcardEntries = (groups: QueuePromptSlotTokenGroup[]): { entries: number; weighted: number } => {
+    if (groups.every((group) => group.tokens.length === 0)) return { entries: 0, weighted: 0 };
+    let distribution = new Map<number, number>([[1, 1]]);
+    for (const group of groups) {
+      if (group.tokens.length === 0) continue;
+      const tokenCounts = new Map<number, number>();
+      for (const token of group.tokens) {
+        const rerolls = getTokenWildcardRerolls(token);
+        tokenCounts.set(rerolls, (tokenCounts.get(rerolls) || 0) + 1);
+      }
+      const next = new Map<number, number>();
+      for (const [currentMax, currentWays] of distribution) {
+        for (const [tokenRerolls, tokenWays] of tokenCounts) {
+          const nextMax = Math.max(currentMax, tokenRerolls);
+          const addedWays = Math.min(Number.MAX_SAFE_INTEGER, currentWays * tokenWays);
+          next.set(nextMax, Math.min(Number.MAX_SAFE_INTEGER, (next.get(nextMax) || 0) + addedWays));
+        }
+      }
+      distribution = next;
+    }
+    let entries = 0;
+    let weighted = 0;
+    for (const [rerolls, ways] of distribution) {
+      entries = Math.min(Number.MAX_SAFE_INTEGER, entries + ways);
+      weighted = Math.min(Number.MAX_SAFE_INTEGER, weighted + (rerolls * ways));
+    }
+    return { entries, weighted };
   };
   const countForSet = (setId: number, limit: number): { count: number; truncated: boolean } => {
     if (Number.isFinite(limit) && limit <= 0) {
       return { count: 0, truncated: true };
     }
-    const baseSlotLengths = orderSlotTokenGroupsForTraversal(
+    const baseSlotGroups = orderSlotTokenGroupsForTraversal(
       getSlotTokenGroupsForSet(setId).filter((group) => !isStyleSlot(group.slotEntry))
-    ).map((group) => group.tokens.length);
+    );
     const styleCount = getStyleTokensForSet(setId).length;
     const hasFiniteLimit = Number.isFinite(limit);
     const finalLimit = hasFiniteLimit ? Math.max(0, Math.floor(Number(limit) || 0)) : Number.MAX_SAFE_INTEGER;
-    const baseBuilt = countBuiltEntriesFromLengths(baseSlotLengths, Number.MAX_SAFE_INTEGER);
-    const baseEntryCount = baseBuilt.count > 0
-      ? baseBuilt.count
-      : (styleCount > 0 ? 1 : 0);
-    const logicalPromptCount = styleCount > 0
-      ? Math.min(Number.MAX_SAFE_INTEGER, baseEntryCount * styleCount)
-      : baseEntryCount;
-    const totalBeforeModeLimit = Math.min(Number.MAX_SAFE_INTEGER, logicalPromptCount * getWildcardRerollsForSet(setId));
+    const baseCount = countWeightedWildcardEntries(baseSlotGroups);
+    const totalBeforeModeLimit = baseCount.entries > 0
+      ? Math.min(Number.MAX_SAFE_INTEGER, baseCount.weighted * Math.max(1, styleCount))
+      : styleCount;
     const effectiveLimit = hasFiniteLimit ? Math.min(finalLimit, totalBeforeModeLimit) : totalBeforeModeLimit;
     return {
       count: Math.max(0, Math.min(totalBeforeModeLimit, effectiveLimit)),
-      truncated: baseBuilt.truncated || totalBeforeModeLimit > effectiveLimit,
+      truncated: totalBeforeModeLimit > effectiveLimit,
     };
   };
   const returnCountOnly = (count: number, truncated: boolean) => ({
@@ -662,13 +670,18 @@ export function buildQueuePromptsFromCards(
         chainLinks: normalizeChainLinks((selected as any).chainLinks, String(selected.id || '').trim()),
         blockLinks: normalizeBlockLinks((selected as any).blockLinks, String(selected.id || '').trim()),
         ...(isWildcardUtilitySlot(slot)
-          ? { wildcardMode: normalizeQueueTraversalRole(selected.queueTraversalRole) === 'hold' ? 'hold' as const : 'reroll' as const }
+          ? {
+            wildcardMode: normalizeQueueTraversalRole(selected.queueTraversalRole) === 'hold' ? 'hold' as const : 'reroll' as const,
+            wildcardRerolls: normalizeWildcardRerolls(selected.wildcardRerolls),
+            wildcardHoldSelections: normalizeUmbraWildcardHoldSelections(selected.wildcardHoldSelections),
+            wildcardContextEnabled: selected.wildcardContextEnabled === true,
+          }
           : {}),
       } as QueuePromptToken];
     });
     const promptEntry = buildEntryFromTokens(selectedTokens, selectedTokens);
     const normalizedPrompt = promptEntry?.prompt || '';
-    const wildcardRerolls = normalizedPrompt ? getWildcardRerollsForSet(activeSetId) : 0;
+    const wildcardRerolls = normalizedPrompt ? getEntryWildcardRerolls(promptEntry) : 0;
     const promptCount = normalizedPrompt ? wildcardRerolls : 0;
     if (options?.countOnly === true) {
       return returnCountOnly(Math.min(promptCount, queuePromptCap), promptCount > queuePromptCap);

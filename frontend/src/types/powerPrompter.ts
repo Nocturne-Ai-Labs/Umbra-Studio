@@ -349,6 +349,7 @@ export interface PowerPrompterCardNode {
   id: string;
   slotId: string;
   type: PowerPrompterCardType;
+  utilityKind?: 'wildcard';
   label: string;
   variantName?: string;
   variantTags: string[];
@@ -362,6 +363,8 @@ export interface PowerPrompterCardNode {
   queueTraversalRole?: PowerPrompterQueueTraversalRole;
   queueCycleWeights?: Record<string, number>;
   wildcardRerolls?: number;
+  wildcardHoldSelections?: Record<string, string>;
+  wildcardContextEnabled?: boolean;
   chainLinks?: string[];
   blockLinks?: string[];
   order: number;

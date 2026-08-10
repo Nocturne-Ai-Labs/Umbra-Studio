@@ -27,6 +27,7 @@ import {
   resolveQueueTraversalMode,
   stableShuffleQueueTokens,
 } from './queueCore';
+import { normalizeUmbraWildcardHoldSelections } from '../promptWildcards';
 import type {
   PowerPrompterQueueMode,
   QueuePromptBuildEntry,
@@ -235,6 +236,7 @@ export function buildQueuePromptsFromCards(
   const slotVariants = slots.map((slot) => ({
     slotId: slot.slotId,
     type: slot.type,
+    utilityKind: slot.utilityKind,
     label: slot.label,
     variants: slot.variants,
   }));
@@ -244,9 +246,9 @@ export function buildQueuePromptsFromCards(
     tokens: QueuePromptToken[];
   };
   const isStyleSlot = (slot: { type: PowerPrompterCardType; label: string }) => slot.type === 'style';
-  const isWildcardUtilitySlot = (slot: { type: PowerPrompterCardType; label: string }) => (
+  const isWildcardUtilitySlot = (slot: { type: PowerPrompterCardType; utilityKind?: 'wildcard'; label: string }) => (
     slot.type === 'custom'
-    && String(slot.label || '').trim().toLowerCase().startsWith('wildcard utility')
+    && (slot.utilityKind === 'wildcard' || String(slot.label || '').trim().toLowerCase().startsWith('wildcard utility'))
   );
   const getSlotTraversalRole = (slotEntry: typeof slotVariants[number]) => (
     normalizeQueueTraversalRole(slotEntry.variants[0]?.queueTraversalRole)
@@ -324,7 +326,11 @@ export function buildQueuePromptsFromCards(
           chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
           blockLinks: normalizeBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
           ...(isWildcardUtilitySlot(slotEntry)
-            ? { wildcardMode: normalizeQueueTraversalRole(card.queueTraversalRole) === 'hold' ? 'hold' as const : 'reroll' as const }
+            ? {
+              wildcardMode: normalizeQueueTraversalRole(card.queueTraversalRole) === 'hold' ? 'hold' as const : 'reroll' as const,
+              wildcardHoldSelections: normalizeUmbraWildcardHoldSelections(card.wildcardHoldSelections),
+              wildcardContextEnabled: card.wildcardContextEnabled === true,
+            }
             : {}),
         };
         return Array.from({ length: repeatCount }, () => queueToken);
@@ -422,6 +428,8 @@ export function buildQueuePromptsFromCards(
         variantName: String(token.variantName || '').trim(),
         text: String(token.text || '').trim(),
         ...(token.wildcardMode ? { wildcardMode: token.wildcardMode } : {}),
+        ...(token.wildcardHoldSelections ? { wildcardHoldSelections: token.wildcardHoldSelections } : {}),
+        ...(token.wildcardContextEnabled === true ? { wildcardContextEnabled: true } : {}),
       }))
       .filter((token) => token.slotId.length > 0 && token.variantId.length > 0),
   });
@@ -671,7 +679,11 @@ export function buildQueuePromptsFromCards(
         chainLinks: normalizeChainLinks((selected as any).chainLinks, String(selected.id || '').trim()),
         blockLinks: normalizeBlockLinks((selected as any).blockLinks, String(selected.id || '').trim()),
         ...(isWildcardUtilitySlot(slot)
-          ? { wildcardMode: normalizeQueueTraversalRole(selected.queueTraversalRole) === 'hold' ? 'hold' as const : 'reroll' as const }
+          ? {
+            wildcardMode: normalizeQueueTraversalRole(selected.queueTraversalRole) === 'hold' ? 'hold' as const : 'reroll' as const,
+            wildcardHoldSelections: normalizeUmbraWildcardHoldSelections(selected.wildcardHoldSelections),
+            wildcardContextEnabled: selected.wildcardContextEnabled === true,
+          }
           : {}),
       } as QueuePromptToken];
     });

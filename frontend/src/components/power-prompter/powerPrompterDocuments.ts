@@ -42,6 +42,7 @@ export function getCardDocSignature(document: PowerPrompterCardDocument | null):
       id: card.id,
       slotId: String(card.slotId || '').trim() || createSlotId(card.type, card.label),
       type: card.type,
+      utilityKind: (card as any).utilityKind === 'wildcard' ? 'wildcard' : undefined,
       label: card.label,
       variantName: String(card.variantName || '').trim(),
       variantTags: normalizeVariantTags((card as any).variantTags),
@@ -69,6 +70,7 @@ export function getCardDocSignature(document: PowerPrompterCardDocument | null):
           ? group.cards.map((card) => ({
             id: String(card.id || '').trim(),
             type: String(card.type || '').trim(),
+            utilityKind: (card as any).utilityKind === 'wildcard' ? 'wildcard' : undefined,
             label: String(card.label || '').trim(),
             variantName: String(card.variantName || '').trim(),
             variantTags: normalizeVariantTags((card as any).variantTags),

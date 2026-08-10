@@ -3,6 +3,7 @@ import type {
   PowerPrompterCardType,
 } from './types';
 import { normalizeWildcardRerolls, sortPowerPrompterCards } from './powerPrompter';
+import { normalizeUmbraWildcardHoldSelections } from '../promptWildcards';
 import {
   normalizeQueueCycleWeights,
   normalizeQueueSetIds,
@@ -12,8 +13,32 @@ import {
 export interface PrompterChainSlot {
   slotId: string;
   type: PowerPrompterCardType;
+  utilityKind?: 'wildcard';
   label: string;
   variants: PowerPrompterCardNode[];
+}
+
+function normalizeUtilityKind(card: Pick<PowerPrompterCardNode, 'type' | 'label' | 'utilityKind'>): 'wildcard' | undefined {
+  if (card.utilityKind === 'wildcard') return 'wildcard';
+  return card.type === 'custom' && String(card.label || '').trim().toLowerCase().startsWith('wildcard utility')
+    ? 'wildcard'
+    : undefined;
+}
+
+export function getPowerPrompterCardGroupingKey(
+  rawType: PowerPrompterCardType,
+  rawLabel: unknown,
+  rawUtilityKind?: unknown,
+): string {
+  const type = String(rawType || 'custom').trim().toLowerCase() as PowerPrompterCardType;
+  const label = String(rawLabel || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const utilityKind = normalizeUtilityKind({
+    type,
+    label,
+    utilityKind: String(rawUtilityKind || '').trim().toLowerCase() === 'wildcard' ? 'wildcard' : undefined,
+  });
+  const namespace = utilityKind === 'wildcard' ? 'utility:wildcard:' : '';
+  return label ? `${namespace}label:${label}` : `${namespace}type:${type}`;
 }
 
 export function createCardId(): string {
@@ -55,6 +80,50 @@ export function normalizeVariantTags(rawTags: unknown): string[] {
     if (normalized.length >= 16) break;
   }
   return normalized;
+}
+
+export function movePrompterVariantWithinSlot(
+  variants: PowerPrompterCardNode[],
+  variantId: string,
+  rawTargetIndex: number,
+  activeSetId: number,
+): PowerPrompterCardNode[] {
+  const ordered = sortPowerPrompterCards(variants);
+  const fromIndex = ordered.findIndex((variant) => variant.id === variantId);
+  if (fromIndex < 0 || ordered.length <= 1) return ordered;
+
+  const targetIndex = Math.max(0, Math.min(ordered.length - 1, Math.floor(rawTargetIndex)));
+  if (fromIndex === targetIndex) return ordered;
+
+  const [moving] = ordered.splice(fromIndex, 1);
+  ordered.splice(targetIndex, 0, moving);
+
+  const normalizedSetId = Math.max(1, Math.floor(Number(activeSetId) || 1));
+  const activeOrderById = new Map(
+    ordered
+      .filter((variant) => normalizeQueueSetIds(variant.queueSetIds, false).includes(normalizedSetId))
+      .map((variant, index) => [variant.id, index]),
+  );
+  const now = new Date().toISOString();
+
+  return ordered.map((variant, index) => {
+    const queueSetIds = normalizeCardQueueSetIds(variant);
+    const queueSetOrders = normalizeQueueSetOrders(
+      variant.queueSetOrders,
+      queueSetIds,
+      index,
+    );
+    const activeOrder = activeOrderById.get(variant.id);
+    if (activeOrder !== undefined) {
+      queueSetOrders[String(normalizedSetId)] = activeOrder;
+    }
+    return {
+      ...variant,
+      order: index,
+      queueSetOrders,
+      updatedAt: variant.id === variantId ? now : variant.updatedAt,
+    };
+  });
 }
 
 export function normalizeChainLinks(rawLinks: unknown, selfId = ''): string[] {
@@ -106,6 +175,7 @@ export function normalizeChainCards(cards: PowerPrompterCardNode[]): PowerPrompt
       ...card,
       id,
       slotId: String(card.slotId || '').trim() || createSlotId(card.type, label),
+      utilityKind: normalizeUtilityKind({ ...card, label }),
       label,
       variantName: String(card.variantName || '').trim().replace(/\s+/g, ' ').slice(0, 80),
       variantTags: normalizeVariantTags((card as any).variantTags),
@@ -117,6 +187,8 @@ export function normalizeChainCards(cards: PowerPrompterCardNode[]): PowerPrompt
       queueSetOrders: normalizeQueueSetOrders((card as any).queueSetOrders, queueSetIds, idx),
       queueCycleWeights,
       wildcardRerolls: normalizeWildcardRerolls((card as any).wildcardRerolls),
+      wildcardHoldSelections: normalizeUmbraWildcardHoldSelections((card as any).wildcardHoldSelections),
+      wildcardContextEnabled: (card as any).wildcardContextEnabled === true,
       chainLinks: normalizeChainLinks((card as any).chainLinks, id),
       blockLinks: normalizeBlockLinks((card as any).blockLinks, id),
       queueEnabled: queueSetIds.length > 0,
@@ -139,6 +211,7 @@ export function buildChainSlots(cards: PowerPrompterCardNode[]): PrompterChainSl
       slot = {
         slotId,
         type: card.type,
+        utilityKind: normalizeUtilityKind(card),
         label: card.label,
         variants: [],
       };
@@ -168,6 +241,7 @@ export function flattenChainSlots(slots: PrompterChainSlot[]): PowerPrompterCard
         id,
         slotId: String(slot.slotId || '').trim() || createSlotId(slot.type, slot.label),
         type: slot.type,
+        utilityKind: slot.utilityKind,
       label: String(slot.label || '').trim() || (slot.type === 'custom' ? 'Custom' : slot.type[0].toUpperCase() + slot.type.slice(1)),
       variantName: String(variant.variantName || '').trim().replace(/\s+/g, ' ').slice(0, 80),
       variantTags: normalizeVariantTags((variant as any).variantTags),
@@ -179,6 +253,8 @@ export function flattenChainSlots(slots: PrompterChainSlot[]): PowerPrompterCard
         queueSetOrders: normalizeQueueSetOrders((variant as any).queueSetOrders, queueSetIds, flattened.length),
         queueCycleWeights,
         wildcardRerolls: normalizeWildcardRerolls((variant as any).wildcardRerolls),
+        wildcardHoldSelections: normalizeUmbraWildcardHoldSelections((variant as any).wildcardHoldSelections),
+        wildcardContextEnabled: (variant as any).wildcardContextEnabled === true,
         chainLinks: normalizeChainLinks((variant as any).chainLinks, id),
         blockLinks: normalizeBlockLinks((variant as any).blockLinks, id),
         queueEnabled: queueSetIds.length > 0,

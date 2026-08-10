@@ -77,6 +77,9 @@ export type QueuePromptToken = {
   chainLinks: string[];
   blockLinks: string[];
   wildcardMode?: 'reroll' | 'hold';
+  wildcardRerolls?: number;
+  wildcardHoldSelections?: Record<string, string>;
+  wildcardContextEnabled?: boolean;
 };
 
 export type QueuePromptBuildEntry = {
@@ -92,6 +95,9 @@ export type QueuePromptPreviewToken = {
   variantName?: string;
   text?: string;
   wildcardMode?: 'reroll' | 'hold';
+  wildcardRerolls?: number;
+  wildcardHoldSelections?: Record<string, string>;
+  wildcardContextEnabled?: boolean;
 };
 
 export type QueuePromptPreviewEntry = {

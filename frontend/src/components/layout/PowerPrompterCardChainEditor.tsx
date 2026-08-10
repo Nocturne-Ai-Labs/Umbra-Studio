@@ -82,6 +82,14 @@ import {
   type UmbraUiPipelineModelSource,
 } from '../../../../shared/umbra-ui/pipelineTypes';
 import { UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID } from '../../../../shared/umbra-ui/agentTypes';
+import { getPowerPrompterCardGroupingKey, movePrompterVariantWithinSlot } from '../../../../shared/power-prompter/powerPrompterChain';
+import {
+  applyUmbraWildcardContextualModifiers,
+  createUmbraWildcardChoices,
+  expandUmbraPromptWildcards,
+  normalizeUmbraWildcardHoldSelections,
+  type UmbraPromptWildcardChoice,
+} from '../../../../shared/promptWildcards';
 
 export interface PowerPrompterCardChainEditorRef {
   insertAtCursor: (text: string) => void;
@@ -217,6 +225,7 @@ interface LoraBrowserFileEntry {
 interface ChainSlot {
   slotId: string;
   type: PowerPrompterCardType;
+  utilityKind?: 'wildcard';
   label: string;
   variants: PowerPrompterCardNode[];
 }
@@ -323,12 +332,6 @@ function getQueueTraversalRoleTitle(role: PowerPrompterQueueTraversalRole): stri
 
 function getWildcardUtilityModeLabel(role: PowerPrompterQueueTraversalRole): string {
   return role === 'hold' ? 'Hold' : 'Reroll';
-}
-
-function getWildcardUtilityModeTitle(role: PowerPrompterQueueTraversalRole): string {
-  return role === 'hold'
-    ? 'Hold: resolve this wildcard once and keep that choice throughout the queued run.'
-    : 'Reroll: choose a new wildcard value for each configured queue reroll.';
 }
 
 interface QueueVariantState {
@@ -444,11 +447,16 @@ interface WildcardUtilityEditorState {
   variantId: string;
   selectedNames: string[];
   rerolls: number;
+  heldSelections: Record<string, string>;
+  contextEnabled: boolean;
 }
 
 interface PowerPrompterWildcardLibraryEntry {
   name: string;
+  folder: string;
+  path: string;
   values: string[];
+  choices: UmbraPromptWildcardChoice[];
 }
 
 interface ExpandedVariantSuggestionEntry {
@@ -1002,25 +1010,13 @@ function normalizeBlockLinks(rawLinks: unknown, selfId = ''): string[] {
   return normalizeChainLinks(rawLinks, selfId);
 }
 
-function orderSlotVariantsByQueueSet(
+function orderSlotVariantsForDisplay(
   variants: PowerPrompterCardNode[],
-  activeSetId: number,
 ): PowerPrompterCardNode[] {
-  const enabled: PowerPrompterCardNode[] = [];
-  const disabled: PowerPrompterCardNode[] = [];
-  for (const variant of variants) {
-    if (normalizeQueueSetIds(variant.queueSetIds, false).includes(activeSetId)) {
-      enabled.push(variant);
-    } else {
-      disabled.push(variant);
-    }
-  }
-  enabled.sort((left, right) => (
-    getQueueSetOrder(left, activeSetId) - getQueueSetOrder(right, activeSetId)
-    || Number(left.order) - Number(right.order)
+  return [...variants].sort((left, right) => (
+    Number(left.order) - Number(right.order)
     || String(left.createdAt || '').localeCompare(String(right.createdAt || ''))
   ));
-  return [...enabled, ...disabled];
 }
 
 function shuffleItemsRandomly<T>(items: T[]): T[] {
@@ -1799,7 +1795,8 @@ function createCard(
   order = 0,
   setId = 1,
   randomEnabled = false,
-  randomSetIds: number[] = []
+  randomSetIds: number[] = [],
+  utilityKind?: 'wildcard',
 ): PowerPrompterCardNode {
   const now = getNowIso();
   const queueSetIds = normalizeQueueSetIds([setId], true);
@@ -1807,6 +1804,7 @@ function createCard(
     id: createId(type),
     slotId,
     type,
+    utilityKind,
     label,
     variantName: '',
     variantTags: [],
@@ -1820,6 +1818,8 @@ function createCard(
     queueTraversalRole: 'cycle',
     queueCycleWeights: {},
     wildcardRerolls: 1,
+    wildcardHoldSelections: {},
+    wildcardContextEnabled: utilityKind === 'wildcard',
     chainLinks: [],
     blockLinks: [],
     order,
@@ -1835,10 +1835,11 @@ function buildSlots(cards: PowerPrompterCardNode[]): ChainSlot[] {
   for (const card of sortCards(cards || [])) {
     const type = normalizeCardType(card.type);
     const label = String(card.label || '').trim() || cardTypeLabel(type);
+    const utilityKind = normalizeCardUtilityKind((card as any).utilityKind, type, label);
     const slotId = String(card.slotId || '').trim() || createSlotId(type, label);
     let slot = byId.get(slotId);
     if (!slot) {
-      slot = { slotId, type, label, variants: [] };
+      slot = { slotId, type, utilityKind, label, variants: [] };
       byId.set(slotId, slot);
       slots.push(slot);
     }
@@ -1848,6 +1849,7 @@ function buildSlots(cards: PowerPrompterCardNode[]): ChainSlot[] {
       id: String(card.id || '').trim() || createId(type),
       slotId,
       type,
+      utilityKind,
       label,
       variantName: normalizeVariantName(card.variantName),
       variantTags: normalizeVariantTags((card as any).variantTags),
@@ -1859,6 +1861,9 @@ function buildSlots(cards: PowerPrompterCardNode[]): ChainSlot[] {
       queueSetOrders: normalizeQueueSetOrders((card as any).queueSetOrders, queueSetIds, Number(card.order)),
       queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
       queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
+      wildcardRerolls: normalizeWildcardRerolls((card as any).wildcardRerolls),
+      wildcardHoldSelections: normalizeUmbraWildcardHoldSelections((card as any).wildcardHoldSelections),
+      wildcardContextEnabled: (card as any).wildcardContextEnabled === true,
       queueEnabled: queueSetIds.length > 0,
       chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
       blockLinks: normalizeBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
@@ -1877,7 +1882,9 @@ function buildSlots(cards: PowerPrompterCardNode[]): ChainSlot[] {
       ...variant,
       randomEnabled,
       randomSetIds,
-      queueTraversalRole,
+      queueTraversalRole: isWildcardUtilitySlot(slot)
+        ? normalizeQueueTraversalRole(variant.queueTraversalRole)
+        : queueTraversalRole,
       order: idx,
     }));
   }
@@ -1905,6 +1912,7 @@ function flattenSlots(slots: ChainSlot[]): PowerPrompterCardNode[] {
         id: String(variant.id || '').trim() || createId(type),
         slotId,
         type,
+        utilityKind: slot.utilityKind,
         label,
         variantName: normalizeVariantName(variant.variantName),
         variantTags: normalizeVariantTags((variant as any).variantTags),
@@ -1916,6 +1924,9 @@ function flattenSlots(slots: ChainSlot[]): PowerPrompterCardNode[] {
         queueSetOrders: normalizeQueueSetOrders((variant as any).queueSetOrders, queueSetIds, flattened.length),
         queueTraversalRole: normalizeQueueTraversalRole((variant as any).queueTraversalRole),
         queueCycleWeights: normalizeQueueCycleWeights((variant as any).queueCycleWeights, queueSetIds),
+        wildcardRerolls: normalizeWildcardRerolls((variant as any).wildcardRerolls),
+        wildcardHoldSelections: normalizeUmbraWildcardHoldSelections((variant as any).wildcardHoldSelections),
+        wildcardContextEnabled: (variant as any).wildcardContextEnabled === true,
         queueEnabled: queueSetIds.length > 0,
         chainLinks: normalizeChainLinks((variant as any).chainLinks, String(variant.id || '').trim()),
         blockLinks: normalizeBlockLinks((variant as any).blockLinks, String(variant.id || '').trim()),
@@ -1942,6 +1953,9 @@ function cloneSlots(slots: ChainSlot[]): ChainSlot[] {
         queueSetOrders: { ...normalizeQueueSetOrders((variant as any).queueSetOrders, queueSetIds, Number(variant.order)) },
         queueTraversalRole: normalizeQueueTraversalRole((variant as any).queueTraversalRole),
         queueCycleWeights: normalizeQueueCycleWeights((variant as any).queueCycleWeights, queueSetIds),
+        wildcardRerolls: normalizeWildcardRerolls((variant as any).wildcardRerolls),
+        wildcardHoldSelections: normalizeUmbraWildcardHoldSelections((variant as any).wildcardHoldSelections),
+        wildcardContextEnabled: (variant as any).wildcardContextEnabled === true,
         chainLinks: [...normalizeChainLinks((variant as any).chainLinks, String(variant.id || '').trim())],
         blockLinks: [...normalizeBlockLinks((variant as any).blockLinks, String(variant.id || '').trim())],
       };
@@ -2098,9 +2112,17 @@ function isStyleUtilitySlot(slot: Pick<ChainSlot, 'type'> | null | undefined) {
   return normalizeCardType(slot?.type) === 'style';
 }
 
-function isWildcardUtilitySlot(slot: Pick<ChainSlot, 'type' | 'label'> | null | undefined) {
+function normalizeCardUtilityKind(rawKind: unknown, type: PowerPrompterCardType, label: unknown): 'wildcard' | undefined {
+  if (String(rawKind || '').trim().toLowerCase() === 'wildcard') return 'wildcard';
+  return normalizeCardType(type) === 'custom'
+    && normalizeCustomGroupName(String(label || '')).startsWith(normalizeCustomGroupName('Wildcard Utility'))
+    ? 'wildcard'
+    : undefined;
+}
+
+function isWildcardUtilitySlot(slot: Pick<ChainSlot, 'type' | 'utilityKind' | 'label'> | null | undefined) {
   return normalizeCardType(slot?.type) === 'custom'
-    && normalizeCustomGroupName(String(slot?.label || '')).startsWith(normalizeCustomGroupName('Wildcard Utility'));
+    && normalizeCardUtilityKind(slot?.utilityKind, normalizeCardType(slot?.type), slot?.label) === 'wildcard';
 }
 
 function extractPromptWildcardNames(rawText: unknown): string[] {
@@ -2121,17 +2143,72 @@ function replacePromptWildcardTokens(rawText: unknown, names: string[]): string 
   return [fixedText, ...tokens].filter(Boolean).join(', ');
 }
 
-function getSlotGroupKeyForTypeLabel(rawType: PowerPrompterCardType, rawLabel: string) {
-  const type = normalizeCardType(rawType);
-  const normalizedName = normalizeCustomGroupName(rawLabel || '');
-  if (normalizedName) {
-    return `label:${normalizedName}`;
+function buildWildcardActiveRoll(
+  variant: Pick<PowerPrompterCardNode, 'id' | 'text' | 'wildcardHoldSelections' | 'wildcardContextEnabled'>,
+  wildcardLibrary: PowerPrompterWildcardLibraryEntry[],
+) {
+  const names = extractPromptWildcardNames(variant.text);
+  if (names.length === 0 || wildcardLibrary.length === 0) return null;
+  const expansion = expandUmbraPromptWildcards(variant.text, wildcardLibrary, `active-roll:${variant.id}`, {
+    heldChoiceIds: normalizeUmbraWildcardHoldSelections(variant.wildcardHoldSelections),
+  });
+  const context = variant.wildcardContextEnabled !== false
+    ? applyUmbraWildcardContextualModifiers(expansion.prompt)
+    : { prompt: expansion.prompt, added: [], removed: [], rules: [] };
+  return {
+    names,
+    prompt: context.prompt,
+    resolved: expansion.resolved,
+    added: context.added,
+    removed: context.removed,
+  };
+}
+
+function rollWildcardSelections(
+  names: string[],
+  currentSelections: unknown,
+  wildcardLibrary: PowerPrompterWildcardLibraryEntry[],
+): Record<string, string> {
+  const current = normalizeUmbraWildcardHoldSelections(currentSelections);
+  const next: Record<string, string> = {};
+  for (const name of names) {
+    const wildcard = wildcardLibrary.find((entry) => entry.name === name);
+    if (!wildcard?.choices.length) continue;
+    const currentIndex = wildcard.choices.findIndex((choice) => choice.id === current[name]);
+    const offset = wildcard.choices.length > 1
+      ? 1 + Math.floor(Math.random() * (wildcard.choices.length - 1))
+      : 0;
+    const nextIndex = currentIndex >= 0
+      ? (currentIndex + offset) % wildcard.choices.length
+      : Math.floor(Math.random() * wildcard.choices.length);
+    next[name] = wildcard.choices[nextIndex].id;
   }
-  return `type:${type}`;
+  return next;
+}
+
+function normalizeWildcardLibraryPayload(payload: any): PowerPrompterWildcardLibraryEntry[] {
+  return Array.isArray(payload?.wildcards) ? payload.wildcards.map((entry: any) => ({
+    name: String(entry?.name || ''),
+    folder: String(entry?.folder || ''),
+    path: String(entry?.path || entry?.name || ''),
+    values: Array.isArray(entry?.values) ? entry.values : [],
+    choices: Array.isArray(entry?.choices) && entry.choices.length > 0
+      ? entry.choices.map((choice: any) => ({
+        id: String(choice?.id || '').trim().toUpperCase(),
+        value: String(choice?.value || '').trim(),
+      })).filter((choice: UmbraPromptWildcardChoice) => choice.id && choice.value)
+      : createUmbraWildcardChoices(entry?.name, entry?.values),
+  })).filter((entry: PowerPrompterWildcardLibraryEntry) => entry.name && entry.choices.length > 0) : [];
+}
+
+function getSlotGroupKeyForTypeLabel(rawType: PowerPrompterCardType, rawLabel: string, rawUtilityKind?: unknown) {
+  const type = normalizeCardType(rawType);
+  const utilityKind = normalizeCardUtilityKind(rawUtilityKind, type, rawLabel);
+  return getPowerPrompterCardGroupingKey(type, rawLabel, utilityKind);
 }
 
 function getSlotGroupKey(slot: ChainSlot) {
-  return getSlotGroupKeyForTypeLabel(slot.type, slot.label);
+  return getSlotGroupKeyForTypeLabel(slot.type, slot.label, slot.utilityKind);
 }
 
 function normalizeDeletedCardGroups(rawGroups: unknown): Record<string, PowerPrompterDeletedCardGroup> {
@@ -2199,11 +2276,13 @@ function coalesceSlotsByGrouping(slots: ChainSlot[]): ChainSlot[] {
       const seeded: ChainSlot = {
         slotId: slot.slotId,
         type,
+        utilityKind: normalizeCardUtilityKind(slot.utilityKind, type, label),
         label,
         variants: slot.variants.map((variant) => ({
           ...variant,
           slotId: slot.slotId,
           type,
+          utilityKind: normalizeCardUtilityKind(slot.utilityKind, type, label),
           label,
         })),
       };
@@ -2221,6 +2300,7 @@ function coalesceSlotsByGrouping(slots: ChainSlot[]): ChainSlot[] {
         ...variant,
         slotId: existing.slotId,
         type: existing.type,
+        utilityKind: existing.utilityKind,
         label: existing.label,
       });
     }
@@ -2236,7 +2316,9 @@ function coalesceSlotsByGrouping(slots: ChainSlot[]): ChainSlot[] {
       ...variant,
       randomEnabled,
       randomSetIds,
-      queueTraversalRole,
+      queueTraversalRole: isWildcardUtilitySlot(slot)
+        ? normalizeQueueTraversalRole(variant.queueTraversalRole)
+        : queueTraversalRole,
       order: idx,
     }));
   }
@@ -2819,7 +2901,20 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const [expandedVariantCsvSourceIds, setExpandedVariantCsvSourceIds] = useState<string[]>([]);
   const [wildcardUtilityEditor, setWildcardUtilityEditor] = useState<WildcardUtilityEditorState | null>(null);
   const [wildcardLibrary, setWildcardLibrary] = useState<PowerPrompterWildcardLibraryEntry[]>([]);
+  const [wildcardUtilityFolder, setWildcardUtilityFolder] = useState('all');
   const [wildcardLibraryLoading, setWildcardLibraryLoading] = useState(false);
+  const wildcardLibraryRef = useRef<PowerPrompterWildcardLibraryEntry[]>([]);
+  const wildcardLibraryRequestRef = useRef<Promise<PowerPrompterWildcardLibraryEntry[]> | null>(null);
+  const wildcardLibraryFolders = useMemo(
+    () => Array.from(new Set(wildcardLibrary.map((entry) => entry.folder).filter(Boolean))).sort((left, right) => left.localeCompare(right)),
+    [wildcardLibrary],
+  );
+  const visibleWildcardLibrary = useMemo(
+    () => wildcardUtilityFolder === 'all'
+      ? wildcardLibrary
+      : wildcardLibrary.filter((entry) => entry.folder === wildcardUtilityFolder),
+    [wildcardLibrary, wildcardUtilityFolder],
+  );
   const [modelInfoModal, setModelInfoModal] = useState<PowerPrompterModelInfoPayload | null>(null);
   const [modelInfoError, setModelInfoError] = useState<string | null>(null);
   const [isLoadingModelInfo, setIsLoadingModelInfo] = useState(false);
@@ -2933,6 +3028,42 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const styleSeedMode = String((document as any).styleSeedMode || 'same') === 'different' ? 'different' : 'same';
   const estimatedBatchSize = Math.max(1, Math.floor(Number(generation.batchSize) || 1));
   const slots = useMemo(() => buildSlots(document.cards), [document.cards]);
+  const wildcardUtilityTargetVariant = useMemo(() => {
+    if (!wildcardUtilityEditor) return null;
+    return slots
+      .find((slot) => slot.slotId === wildcardUtilityEditor.slotId)
+      ?.variants.find((variant) => variant.id === wildcardUtilityEditor.variantId) || null;
+  }, [slots, wildcardUtilityEditor]);
+  const wildcardUtilityTargetMode = normalizeQueueTraversalRole(wildcardUtilityTargetVariant?.queueTraversalRole) === 'hold'
+    ? 'hold'
+    : 'cycle';
+  const loadWildcardLibrary = useCallback(async () => {
+    if (wildcardLibraryRef.current.length > 0) return wildcardLibraryRef.current;
+    if (wildcardLibraryRequestRef.current) return wildcardLibraryRequestRef.current;
+    setWildcardLibraryLoading(true);
+    const request = (async () => {
+      const response = await fetch('/api/powerprompter/wildcards');
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(String(payload?.error || 'Could not load wildcard library.'));
+      const library = normalizeWildcardLibraryPayload(payload);
+      wildcardLibraryRef.current = library;
+      setWildcardLibrary(library);
+      return library;
+    })();
+    wildcardLibraryRequestRef.current = request;
+    try {
+      return await request;
+    } finally {
+      wildcardLibraryRequestRef.current = null;
+      setWildcardLibraryLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (!slots.some((slot) => isWildcardUtilitySlot(slot)) || wildcardLibraryRef.current.length > 0) return;
+    void loadWildcardLibrary().catch(() => {
+      // The Configure action reports the error if the library is still unavailable.
+    });
+  }, [loadWildcardLibrary, slots]);
   const wildcardCardSources = useMemo<PowerPrompterWildcardCardSource[]>(() => (
     slots
       .map((slot) => ({
@@ -3021,8 +3152,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     return matches;
   }, [slots, deferredGlobalSearchTerms]);
   const getSlotDisplayVariants = useCallback((slot: ChainSlot) => (
-    orderSlotVariantsByQueueSet(slot.variants, activeQueueSet)
-  ), [activeQueueSet]);
+    orderSlotVariantsForDisplay(slot.variants)
+  ), []);
   const slotSurfaceStyle = useMemo<React.CSSProperties | undefined>(() => {
     const next: React.CSSProperties = {};
     if (shouldUseRenderContainment) {
@@ -3046,6 +3177,23 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     return Object.keys(next).length > 0 ? next : undefined;
   }, [shouldUseRenderContainment, shouldUseVariantContentVisibility]);
   const outputPrompt = useMemo(() => activePromptFromSlots(slots, activeQueueSet), [slots, activeQueueSet]);
+  const wildcardUtilityHeldPreview = useMemo(() => {
+    if (!wildcardUtilityEditor || !wildcardUtilityTargetVariant) return null;
+    const rawCardPrompt = replacePromptWildcardTokens(wildcardUtilityTargetVariant.text, wildcardUtilityEditor.selectedNames);
+    const expansion = expandUmbraPromptWildcards(rawCardPrompt, wildcardLibrary, 'hold-preview', {
+      heldChoiceIds: wildcardUtilityEditor.heldSelections,
+    });
+    const context = wildcardUtilityEditor.contextEnabled
+      ? applyUmbraWildcardContextualModifiers(expansion.prompt)
+      : { prompt: expansion.prompt, added: [], removed: [], rules: [] };
+    return {
+      prompt: context.prompt,
+      resolved: expansion.resolved,
+      added: context.added,
+      removed: context.removed,
+      rules: context.rules,
+    };
+  }, [wildcardLibrary, wildcardUtilityEditor, wildcardUtilityTargetVariant]);
   const setSlotSurfaceRef = useCallback((slotId: string, node: HTMLDivElement | null) => {
     if (node) {
       slotSurfaceRefMap.current.set(slotId, node);
@@ -4352,14 +4500,28 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
         }),
       };
     });
-    onChangeRef.current({
+    const nextDocument = {
       ...latestDocument,
       activeQueueSet: clampQueueSetId(latestDocument.activeQueueSet),
       updatedAt: getNowIso(),
       cards: flattenSlots(coalesceSlotsByGrouping(nextSlots)),
       deletedCardGroups: normalizeDeletedCardGroups((latestDocument as any).deletedCardGroups),
-    });
+    };
+    documentRef.current = nextDocument;
+    onChangeRef.current(nextDocument);
   }, []);
+
+  const setWildcardVariantRerolls = useCallback((slotId: string, variantId: string, value: unknown) => {
+    patchVariantFromLatestDocument(slotId, variantId, {
+      wildcardRerolls: normalizeWildcardRerolls(value),
+    });
+  }, [patchVariantFromLatestDocument]);
+
+  const adjustWildcardVariantRerolls = useCallback((slotId: string, variantId: string, delta: number) => {
+    const latestVariant = documentRef.current.cards.find((card) => card.slotId === slotId && card.id === variantId);
+    const current = normalizeWildcardRerolls(latestVariant?.wildcardRerolls);
+    setWildcardVariantRerolls(slotId, variantId, current + delta);
+  }, [setWildcardVariantRerolls]);
 
   const enhanceVariantWithAgent = useCallback(async (
     slotId: string,
@@ -4692,29 +4854,34 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const openWildcardUtilityEditor = useCallback(async (slotId: string, variant: PowerPrompterCardNode) => {
     const variantId = String(variant.id || '').trim();
     if (!variantId) return;
-    setWildcardLibraryLoading(true);
     try {
-      const response = await fetch('/api/powerprompter/wildcards');
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(String(payload?.error || 'Could not load wildcard library.'));
-      const library = Array.isArray(payload?.wildcards) ? payload.wildcards as PowerPrompterWildcardLibraryEntry[] : [];
-      setWildcardLibrary(library);
+      const library = await loadWildcardLibrary();
+      setWildcardUtilityFolder('all');
       const selectedNames = extractPromptWildcardNames(variant.text);
       const defaults = ['outfits', 'poses', 'expressions'].filter((name) => library.some((entry) => entry.name === name));
+      const resolvedNames = selectedNames.length > 0 ? selectedNames : defaults;
+      const savedSelections = normalizeUmbraWildcardHoldSelections(variant.wildcardHoldSelections);
+      const heldSelections = { ...savedSelections };
+      for (const name of resolvedNames) {
+        const wildcard = library.find((entry) => entry.name === name);
+        if (!wildcard?.choices.length) continue;
+        if (wildcard.choices.some((choice) => choice.id === heldSelections[name])) continue;
+        heldSelections[name] = wildcard.choices[Math.floor(Math.random() * wildcard.choices.length)].id;
+      }
       setWildcardUtilityEditor({
         slotId,
         variantId,
-        selectedNames: selectedNames.length > 0 ? selectedNames : defaults,
+        selectedNames: resolvedNames,
         rerolls: normalizeWildcardRerolls(variant.wildcardRerolls),
+        heldSelections,
+        contextEnabled: variant.wildcardContextEnabled !== false,
       });
       setActiveSlotId(slotId);
       setActiveVariantId(variantId);
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not load wildcard library.', 'error');
-    } finally {
-      setWildcardLibraryLoading(false);
     }
-  }, [showToast]);
+  }, [loadWildcardLibrary, showToast]);
 
   const applyWildcardUtilitySelection = useCallback(() => {
     if (!wildcardUtilityEditor) return;
@@ -4728,6 +4895,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     patchVariant(targetSlot.slotId, targetVariant.id, {
       text: nextText,
       wildcardRerolls: normalizeWildcardRerolls(wildcardUtilityEditor.rerolls),
+      wildcardHoldSelections: normalizeUmbraWildcardHoldSelections(wildcardUtilityEditor.heldSelections),
+      wildcardContextEnabled: wildcardUtilityEditor.contextEnabled,
     });
     setWildcardUtilityEditor(null);
     showToast(
@@ -4737,6 +4906,53 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       'success',
     );
   }, [patchVariant, showToast, slots, wildcardUtilityEditor]);
+
+  const rerollWildcardUtilityHeldPrompt = useCallback(() => {
+    setWildcardUtilityEditor((current) => {
+      if (!current) return current;
+      const heldSelections = rollWildcardSelections(current.selectedNames, current.heldSelections, wildcardLibrary);
+      return { ...current, heldSelections };
+    });
+  }, [wildcardLibrary]);
+
+  const rerollWildcardVariant = useCallback(async (slotId: string, variant: PowerPrompterCardNode) => {
+    const names = extractPromptWildcardNames(variant.text);
+    if (names.length === 0) {
+      showToast('Configure at least one wildcard source for this variant.', 'error');
+      return;
+    }
+    try {
+      const library = await loadWildcardLibrary();
+      const wildcardHoldSelections = rollWildcardSelections(names, variant.wildcardHoldSelections, library);
+      patchVariant(slotId, variant.id, { wildcardHoldSelections });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not roll this wildcard variant.', 'error');
+    }
+  }, [loadWildcardLibrary, patchVariant, showToast]);
+
+  const setWildcardVariantMode = useCallback(async (
+    slotId: string,
+    variant: PowerPrompterCardNode,
+    mode: 'cycle' | 'hold',
+  ) => {
+    let resolvedSelections = normalizeUmbraWildcardHoldSelections(variant.wildcardHoldSelections);
+    if (mode === 'hold') {
+      try {
+        const library = await loadWildcardLibrary();
+        const activeRoll = buildWildcardActiveRoll(variant, library);
+        if (activeRoll) {
+          resolvedSelections = Object.fromEntries(activeRoll.resolved.map((choice) => [choice.name, choice.id]));
+        }
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'Could not hold this wildcard result.', 'error');
+        return;
+      }
+    }
+    patchVariant(slotId, variant.id, {
+      queueTraversalRole: mode,
+      ...(mode === 'hold' ? { wildcardHoldSelections: resolvedSelections } : {}),
+    });
+  }, [loadWildcardLibrary, patchVariant, showToast]);
 
   const syncExpandedVariantEditorCaret = useCallback((target: HTMLTextAreaElement | null) => {
     if (!target) return;
@@ -6572,9 +6788,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     const next = cloneSlots(slots).map((slot) => {
       if (slot.slotId !== slotId) return slot;
       const currentRole = getSlotQueueTraversalRole(slot);
-      const nextRole = isWildcardUtilitySlot(slot)
-        ? (currentRole === 'hold' ? 'cycle' : 'hold')
-        : getNextQueueTraversalRole(currentRole);
+      const nextRole = getNextQueueTraversalRole(currentRole);
       return {
         ...slot,
         variants: slot.variants.map((variant) => ({
@@ -6808,6 +7022,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     const next = cloneSlots(slots);
     const used = new Set(next.map((slot) => slot.label.toLowerCase()));
     const type: PowerPrompterCardType = requestedType === 'style' ? 'style' : 'custom';
+    const utilityKind = requestedType === 'wildcard' ? 'wildcard' as const : undefined;
     const baseLabel = requestedType === 'style'
       ? 'Style'
       : requestedType === 'wildcard'
@@ -6817,7 +7032,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     let label = `${baseLabel} ${idx}`;
     while (used.has(label.toLowerCase())) { idx += 1; label = `${baseLabel} ${idx}`; }
     const slotId = createSlotId(type, label);
-    const groupKey = getSlotGroupKeyForTypeLabel(type, label);
+    const groupKey = getSlotGroupKeyForTypeLabel(type, label, utilityKind);
     const nextDeletedGroups = { ...deletedCardGroups };
     const backup = nextDeletedGroups[groupKey];
     const restoredVariants = backup && Array.isArray(backup.cards) && backup.cards.length > 0
@@ -6828,6 +7043,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
             id: String(card.id || createId(type)),
             slotId,
             type,
+            utilityKind,
             label,
             variantName: normalizeVariantName(card.variantName),
             variantTags: normalizeVariantTags((card as any).variantTags),
@@ -6848,10 +7064,11 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     if (backup) {
       delete nextDeletedGroups[groupKey];
     }
-    const created = createCard(type, label, slotId, 0, activeQueueSet, false);
+    const created = createCard(type, label, slotId, 0, activeQueueSet, false, [], utilityKind);
     next.push({
       slotId,
       type,
+      utilityKind,
       label,
       variants: restoredVariants.length > 0 ? restoredVariants : [created],
     });
@@ -6935,7 +7152,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
 
   const updateSlotLabel = useCallback((slotId: string, rawLabel: string) => {
     const targetSlot = slots.find((slot) => slot.slotId === slotId);
-    if (targetSlot && !isStyleUtilitySlot(targetSlot) && isReservedStyleLabel(rawLabel)) {
+    if (targetSlot && !isStyleUtilitySlot(targetSlot) && !isWildcardUtilitySlot(targetSlot) && isReservedStyleLabel(rawLabel)) {
       showToast('Style is reserved for the utility card', 'error');
       return;
     }
@@ -6943,7 +7160,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     const next = cloneSlots(slots).map((slot) => {
       if (slot.slotId !== slotId) return slot;
       const label = String(rawLabel || '').replace(/\s+/g, ' ').slice(0, 80);
-      const groupKey = getSlotGroupKeyForTypeLabel(slot.type, label);
+      const groupKey = getSlotGroupKeyForTypeLabel(slot.type, label, slot.utilityKind);
       const backup = nextDeletedGroups[groupKey];
       const isPlaceholder = slot.variants.length === 1
         && String(slot.variants[0]?.text || '').trim().length === 0
@@ -6954,6 +7171,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
           ...variant,
           slotId: slot.slotId,
           type: slot.type,
+          utilityKind: slot.utilityKind,
           label,
           variantName: normalizeVariantName(variant.variantName),
           variantTags: normalizeVariantTags((variant as any).variantTags),
@@ -6969,6 +7187,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
         label,
         variants: slot.variants.map((variant) => ({
           ...variant,
+          utilityKind: slot.utilityKind,
           label,
           variantName: normalizeVariantName(variant.variantName),
           variantTags: normalizeVariantTags((variant as any).variantTags),
@@ -7039,7 +7258,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       return;
     }
     const targetSlot = slots.find((slot) => slot.slotId === cardLabelModal.slotId);
-    if (targetSlot && !isStyleUtilitySlot(targetSlot) && isReservedStyleLabel(nextLabel)) {
+    if (targetSlot && !isStyleUtilitySlot(targetSlot) && !isWildcardUtilitySlot(targetSlot) && isReservedStyleLabel(nextLabel)) {
       showToast('Style is reserved for the utility card', 'error');
       return;
     }
@@ -7077,35 +7296,18 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     const next = cloneSlots(slots);
     const slot = next.find((entry) => entry.slotId === slotId);
     if (!slot || slot.variants.length <= 1) return;
-    const enabledVariants = orderSlotVariantsByQueueSet(slot.variants, activeQueueSet)
-      .filter((variant) => normalizeQueueSetIds(variant.queueSetIds, false).includes(activeQueueSet));
-    const fromIndex = enabledVariants.findIndex((variant) => variant.id === variantId);
+    const orderedVariants = orderSlotVariantsForDisplay(slot.variants);
+    const fromIndex = orderedVariants.findIndex((variant) => variant.id === variantId);
     if (fromIndex < 0) return;
-    const targetIndex = Math.max(0, Math.min(enabledVariants.length - 1, Math.floor(rawIndex)));
+    const targetIndex = Math.max(0, Math.min(orderedVariants.length - 1, Math.floor(rawIndex)));
     if (fromIndex === targetIndex) return;
-
-    const [moving] = enabledVariants.splice(fromIndex, 1);
-    enabledVariants.splice(targetIndex, 0, moving);
-    const orderByVariantId = new Map(enabledVariants.map((variant, index) => [variant.id, index]));
-    const updatedActiveVariants = enabledVariants.map((variant) => {
-      const queueSetIds = normalizeQueueSetIds(variant.queueSetIds, false);
-      return {
-        ...variant,
-        queueSetOrders: {
-          ...normalizeQueueSetOrders((variant as any).queueSetOrders, queueSetIds, Number(variant.order)),
-          [String(activeQueueSet)]: orderByVariantId.get(variant.id) ?? 0,
-        },
-        updatedAt: getNowIso(),
-      };
-    });
-    const updatedActiveById = new Map(updatedActiveVariants.map((variant) => [variant.id, variant]));
-    const inactiveVariants = slot.variants.filter((variant) => !orderByVariantId.has(variant.id));
-    slot.variants = [...updatedActiveVariants, ...inactiveVariants].map((variant, index) => {
-      const updatedActive = updatedActiveById.get(variant.id);
-      if (updatedActive) return { ...updatedActive, order: index };
-      const nextOrder = orderByVariantId.get(variant.id);
-      return nextOrder === undefined ? { ...variant, order: index } : variant;
-    });
+    const moving = orderedVariants[fromIndex];
+    slot.variants = movePrompterVariantWithinSlot(
+      orderedVariants,
+      variantId,
+      targetIndex,
+      activeQueueSet,
+    );
 
     setActiveSlotId(slot.slotId);
     setActiveVariantId(moving.id);
@@ -7178,7 +7380,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     };
     let targetVariants = [...targetSlot.variants, movedVariant];
     if (movedSetIds.includes(activeQueueSet)) {
-      const activeVariants = orderSlotVariantsByQueueSet(targetVariants, activeQueueSet)
+      const activeVariants = orderSlotVariantsForDisplay(targetVariants)
         .filter((variant) => normalizeQueueSetIds(variant.queueSetIds, false).includes(activeQueueSet))
         .filter((variant) => variant.id !== movedVariant.id);
       const targetIndex = Number.isFinite(rawTargetIndex)
@@ -9755,6 +9957,12 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   const chainLinkModeActive = Boolean(chainLinkEditor);
                   const styleUtilitySlot = isStyleUtilitySlot(slot);
                   const wildcardUtilitySlot = isWildcardUtilitySlot(slot);
+                  const wildcardHeldVariantCount = wildcardUtilitySlot
+                    ? slot.variants.filter((variant) => normalizeQueueTraversalRole(variant.queueTraversalRole) === 'hold').length
+                    : 0;
+                  const wildcardRerollVariantCount = wildcardUtilitySlot
+                    ? Math.max(0, slot.variants.length - wildcardHeldVariantCount)
+                    : 0;
                   const slotHasEditingVariant = slot.variants.some((variant) => variant.id === editingVariantId);
                   const slotQueueTraversalRole = getSlotQueueTraversalRole(slot);
                   return (
@@ -9862,22 +10070,30 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     ) : wildcardUtilitySlot ? (
                       <div data-umbra-wildcard-utility-header="" className="flex min-w-[190px] flex-1 items-center gap-2 rounded-md border border-fuchsia-300/35 bg-fuchsia-500/10 px-2.5 text-[11px] font-black uppercase tracking-[0.18em] text-fuchsia-100">
                         <WandSparkles size={13} className="shrink-0" />
-                        <span className="min-w-0 flex-1 truncate">Wildcard Utility</span>
                         <button
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            if (chainLinkModeActive || !topVariant) return;
-                            void openWildcardUtilityEditor(slot.slotId, topVariant);
+                            if (chainLinkModeActive || mobileSelectionMode) return;
+                            openCardLabelModal(slot.slotId);
                           }}
                           onMouseDown={(event) => event.stopPropagation()}
-                          disabled={chainLinkModeActive || !topVariant || wildcardLibraryLoading}
-                          className="inline-flex shrink-0 items-center gap-1 rounded border border-fuchsia-200/35 bg-fuchsia-500/12 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-fuchsia-100 hover:border-fuchsia-100/70 disabled:cursor-not-allowed disabled:opacity-45"
-                          title="Choose the wildcard sources used by this utility card"
+                          disabled={chainLinkModeActive || mobileSelectionMode}
+                          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-fuchsia-200/25 bg-black/20 text-fuchsia-100/75 hover:border-fuchsia-100/60 hover:text-fuchsia-50 disabled:cursor-not-allowed disabled:opacity-45"
+                          title="Edit wildcard utility name"
+                          aria-label={`Edit ${slot.label || 'Wildcard Utility'} card name`}
                         >
-                          {wildcardLibraryLoading ? <Loader2 size={10} className="animate-spin" /> : <WandSparkles size={10} />}
-                          Configure
+                          <Pencil size={10} />
                         </button>
+                        <span className="min-w-0 flex-1 truncate">{slot.label || 'Wildcard Utility'}</span>
+                        <span
+                          data-umbra-wildcard-mode-summary=""
+                          className="shrink-0 rounded border border-fuchsia-200/20 bg-black/20 px-1 py-0.5 text-[8px] tracking-[0] text-fuchsia-100/75"
+                          title={`${wildcardHeldVariantCount} held, ${wildcardRerollVariantCount} reroll. Modes are controlled independently on each variant.`}
+                          aria-label={`${wildcardHeldVariantCount} wildcard variants held, ${wildcardRerollVariantCount} wildcard variants rerolling`}
+                        >
+                          {wildcardHeldVariantCount}H · {wildcardRerollVariantCount}R
+                        </span>
                       </div>
                     ) : (
                       <>
@@ -9981,7 +10197,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                         </button>
                       </>
                     )}
-                    <button
+                    {!wildcardUtilitySlot ? <button
                       data-umbra-card-cycle=""
                       type="button"
                       onClick={(event) => {
@@ -9994,25 +10210,56 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-black uppercase tracking-[0.16em] transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
                         slotQueueTraversalRole === 'hold'
                           ? 'border-amber-300/45 bg-amber-500/12 text-amber-100 hover:border-amber-200/70'
-                          : !wildcardUtilitySlot && slotQueueTraversalRole === 'fast'
+                          : slotQueueTraversalRole === 'fast'
                             ? 'border-fuchsia-300/45 bg-fuchsia-500/12 text-fuchsia-100 hover:border-fuchsia-200/70'
                             : 'border-cyan-300/40 bg-cyan-500/10 text-cyan-100 hover:border-cyan-200/65'
                       }`}
-                      title={wildcardUtilitySlot
-                        ? getWildcardUtilityModeTitle(slotQueueTraversalRole)
-                        : getQueueTraversalRoleTitle(slotQueueTraversalRole)}
+                      title={getQueueTraversalRoleTitle(slotQueueTraversalRole)}
                     >
                       {slotQueueTraversalRole === 'hold'
                         ? <Info size={11} />
-                        : !wildcardUtilitySlot && slotQueueTraversalRole === 'fast'
+                        : slotQueueTraversalRole === 'fast'
                           ? <Zap size={11} />
                           : <RotateCw size={11} />}
-                      {wildcardUtilitySlot
-                        ? getWildcardUtilityModeLabel(slotQueueTraversalRole)
-                        : getQueueTraversalRoleLabel(slotQueueTraversalRole)}
-                    </button>
+                      {getQueueTraversalRoleLabel(slotQueueTraversalRole)}
+                    </button> : null}
+                    {wildcardUtilitySlot ? (
+                      <div data-umbra-wildcard-card-actions-row="" className="flex basis-full items-center justify-end gap-1.5 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (chainLinkModeActive || !topVariant) return;
+                            void openWildcardUtilityEditor(slot.slotId, topVariant);
+                          }}
+                          onMouseDown={(event) => event.stopPropagation()}
+                          disabled={chainLinkModeActive || !topVariant || wildcardLibraryLoading}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-fuchsia-200/35 bg-fuchsia-500/12 px-2.5 text-[9px] font-black uppercase tracking-[0.12em] text-fuchsia-100 hover:border-fuchsia-100/70 disabled:cursor-not-allowed disabled:opacity-45"
+                          title="Choose the wildcard sources used by this utility card"
+                        >
+                          {wildcardLibraryLoading ? <Loader2 size={11} className="animate-spin" /> : <WandSparkles size={11} />}
+                          Configure
+                        </button>
+                        <button
+                          type="button"
+                          data-umbra-wildcard-add-variant=""
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (chainLinkModeActive || mobileSelectionMode) return;
+                            addVariant(slot.slotId);
+                          }}
+                          onMouseDown={(event) => event.stopPropagation()}
+                          disabled={chainLinkModeActive || mobileSelectionMode}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-300/40 bg-emerald-500/10 px-2.5 text-[9px] font-black uppercase tracking-[0.12em] text-emerald-100 hover:border-emerald-200/70 hover:bg-emerald-500/18 disabled:cursor-not-allowed disabled:opacity-45"
+                          title="Add wildcard variant"
+                          aria-label="Add wildcard variant"
+                        >
+                          <Plus size={11} /> Add
+                        </button>
+                      </div>
+                    ) : null}
                     <div data-umbra-mobile-card-actions-row="" className="hidden shrink-0 items-center gap-1.5">
-                      <button
+                      {!wildcardUtilitySlot ? <button
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
@@ -10023,23 +10270,19 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                         className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
                           slotQueueTraversalRole === 'hold'
                             ? 'border-amber-300/45 bg-amber-500/12 text-amber-100'
-                            : !wildcardUtilitySlot && slotQueueTraversalRole === 'fast'
+                            : slotQueueTraversalRole === 'fast'
                               ? 'border-fuchsia-300/45 bg-fuchsia-500/12 text-fuchsia-100'
                               : 'border-cyan-300/40 bg-cyan-500/10 text-cyan-100'
                         }`}
-                        title={wildcardUtilitySlot
-                          ? getWildcardUtilityModeTitle(slotQueueTraversalRole)
-                          : getQueueTraversalRoleTitle(slotQueueTraversalRole)}
-                        aria-label={wildcardUtilitySlot
-                          ? `Change wildcard mode. ${getWildcardUtilityModeTitle(slotQueueTraversalRole)}`
-                          : `Change card cycle mode. ${getQueueTraversalRoleTitle(slotQueueTraversalRole)}`}
+                        title={getQueueTraversalRoleTitle(slotQueueTraversalRole)}
+                        aria-label={`Change card cycle mode. ${getQueueTraversalRoleTitle(slotQueueTraversalRole)}`}
                       >
                         {slotQueueTraversalRole === 'hold'
                           ? <Info size={16} />
-                          : !wildcardUtilitySlot && slotQueueTraversalRole === 'fast'
+                          : slotQueueTraversalRole === 'fast'
                             ? <Zap size={16} />
                             : <RotateCw size={16} />}
-                      </button>
+                      </button> : null}
                       <button
                         type="button"
                         data-umbra-mobile-card-actions=""
@@ -10062,7 +10305,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                         <EllipsisVertical size={17} />
                       </button>
                     </div>
-                    <button
+                    {!wildcardUtilitySlot ? <button
                       onClick={(event) => {
                         event.stopPropagation();
                         if (chainLinkModeActive || mobileSelectionMode) return;
@@ -10074,7 +10317,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     >
                       <Plus size={12} />
                       Add
-                    </button>
+                    </button> : null}
                     <div className="min-w-4 flex-1" />
                     <button
                       onClick={(event) => {
@@ -10098,11 +10341,9 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     >
                       {(() => {
                         const displayVariants = getSlotDisplayVariants(slot);
-                        const activeQueueVariantCount = displayVariants.filter((variant) => (
-                          normalizeQueueSetIds(variant.queueSetIds, false).includes(activeQueueSet)
-                        )).length;
                         const viewportMetrics = variantViewportMetricsBySlotId[slot.slotId];
-                        const shouldVirtualizeVariants = !chainLinkModeActive
+                        const shouldVirtualizeVariants = !wildcardUtilitySlot
+                          && !chainLinkModeActive
                           && !slotHasEditingVariant
                           && displayVariants.length > 6
                           && (viewportMetrics?.clientHeight || 0) > 0;
@@ -10143,9 +10384,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                               )}
                               {visibleDisplayVariants.map((variant, visibleVariantIndex) => {
                         const variantIdx = variantWindow.startIndex + visibleVariantIndex;
-                        const activeVariantIdx = displayVariants
-                          .filter((candidate) => normalizeQueueSetIds(candidate.queueSetIds, false).includes(activeQueueSet))
-                          .findIndex((candidate) => candidate.id === variant.id);
                         const isEditing = editingVariantId === variant.id;
                         const isRevealed = revealedVariantIds.includes(variant.id);
                         const variantTitle = normalizeVariantName(variant.variantName);
@@ -10157,6 +10395,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                           ? String(variantTextDrafts[variant.id] || '')
                           : String(variant.text || '');
                         const isSkipVariant = (variant as any).skipVariant === true;
+                        const wildcardActiveRoll = wildcardUtilitySlot
+                          ? buildWildcardActiveRoll(variant, wildcardLibrary)
+                          : null;
+                        const wildcardVariantMode = normalizeQueueTraversalRole(variant.queueTraversalRole) === 'hold' ? 'hold' : 'cycle';
                         const isGlobalSearchMatch = globalSearchMatchByVariantId.get(variant.id) === true;
                         const queueVariantState = getQueueVariantState(variant);
                         const status = queueVariantState.status;
@@ -10227,6 +10469,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                             ref={(node) => setVariantSurfaceRef(variant.id, node)}
                             style={{
                               ...(variantSurfaceStyle || {}),
+                              ...(wildcardUtilitySlot ? { containIntrinsicSize: '238px' } : {}),
                               ...(baseSetCardStyle || {}),
                               ...(activeCardStyle || {}),
                               ...(isEditing ? { contain: 'none' as const } : {}),
@@ -10267,7 +10510,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                               event.stopPropagation();
                               variantDragRef.current = null;
                               if (dragging.slotId === slot.slotId) {
-                                moveVariantWithinSlot(slot.slotId, dragging.variantId, activeVariantIdx);
+                                moveVariantWithinSlot(slot.slotId, dragging.variantId, variantIdx);
                               }
                             }}
                             onDragEnd={(event) => {
@@ -10293,7 +10536,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                             }}
                             data-umbra-variant-card=""
                             data-reorder-pulse={reorderPulseVariantId === variant.id ? 'true' : undefined}
-                            className={`h-[148px] min-h-[148px] overflow-visible rounded-md border px-2 py-1.5 text-[11px] ${isEditing ? 'cursor-text' : chainLinkEditor ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'} transition-colors ${
+                            className={`${wildcardUtilitySlot ? 'min-h-[238px]' : 'h-[148px] min-h-[148px]'} overflow-visible rounded-md border px-2 py-1.5 text-[11px] ${isEditing ? 'cursor-text' : chainLinkEditor ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'} transition-colors ${
                               isRelationshipAnchor
                                 ? isBlockLinkMode
                                   ? 'border-red-300/80 bg-red-500/14 text-zinc-100 shadow-[0_0_0_1px_rgba(248,113,113,0.24)]'
@@ -10456,10 +10699,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                     onClick={(event) => {
                                       event.stopPropagation();
                                       if (chainLinkModeActive || mobileSelectionMode) return;
-                                      moveVariantWithinSlot(slot.slotId, variant.id, activeVariantIdx - 1);
+                                      moveVariantWithinSlot(slot.slotId, variant.id, variantIdx - 1);
                                     }}
                                     onMouseDown={(event) => event.stopPropagation()}
-                                    disabled={chainLinkModeActive || mobileSelectionMode || !isInActiveQueueSet || activeVariantIdx <= 0}
+                                    disabled={chainLinkModeActive || mobileSelectionMode || variantIdx <= 0}
                                     className="p-0.5 rounded border border-white/10 text-zinc-500 hover:text-zinc-200 hover:border-white/25 disabled:opacity-40 disabled:cursor-not-allowed"
                                     title="Move variant up"
                                   >
@@ -10469,10 +10712,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                     onClick={(event) => {
                                       event.stopPropagation();
                                       if (chainLinkModeActive || mobileSelectionMode) return;
-                                      moveVariantWithinSlot(slot.slotId, variant.id, activeVariantIdx + 1);
+                                      moveVariantWithinSlot(slot.slotId, variant.id, variantIdx + 1);
                                     }}
                                     onMouseDown={(event) => event.stopPropagation()}
-                                    disabled={chainLinkModeActive || mobileSelectionMode || !isInActiveQueueSet || activeVariantIdx >= activeQueueVariantCount - 1}
+                                    disabled={chainLinkModeActive || mobileSelectionMode || variantIdx >= displayVariants.length - 1}
                                     className="p-0.5 rounded border border-white/10 text-zinc-500 hover:text-zinc-200 hover:border-white/25 disabled:opacity-40 disabled:cursor-not-allowed"
                                     title="Move variant down"
                                   >
@@ -10868,6 +11111,110 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                 placeholder={isSkipVariant ? 'Skip variant - no prompt text' : 'Variant text...'}
                               />
                             </div>
+                            {wildcardUtilitySlot ? (
+                              <div
+                                data-umbra-wildcard-active-roll=""
+                                data-wildcard-mode={wildcardVariantMode === 'hold' ? 'hold' : 'reroll'}
+                                data-no-variant-drag="true"
+                                className="mt-1.5 border-t border-fuchsia-300/20 pt-1.5"
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onPointerDown={(event) => event.stopPropagation()}
+                              >
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                  <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.13em] text-fuchsia-100">Active Roll</span>
+                                  <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.08em] ${
+                                    wildcardVariantMode === 'hold'
+                                      ? 'border-amber-300/35 bg-amber-500/10 text-amber-100'
+                                      : 'border-cyan-300/30 bg-cyan-500/10 text-cyan-100'
+                                  }`}>
+                                    {wildcardVariantMode === 'hold' ? 'Held' : `${normalizeWildcardRerolls(variant.wildcardRerolls)}x Queue`}
+                                  </span>
+                                  <div className="min-w-2 flex-1" />
+                                  <button
+                                    type="button"
+                                    data-wildcard-mode-reroll=""
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      if (chainLinkModeActive) return;
+                                      void setWildcardVariantMode(slot.slotId, variant, 'cycle');
+                                    }}
+                                    disabled={chainLinkModeActive || wildcardVariantMode === 'cycle'}
+                                    className="inline-flex h-6 items-center gap-1 rounded border border-cyan-300/25 bg-cyan-500/[0.07] px-1.5 text-[8px] font-black uppercase tracking-[0.08em] text-cyan-100 hover:border-cyan-200/60 disabled:cursor-default disabled:bg-cyan-500/15 disabled:opacity-100"
+                                    title="Reroll this wildcard during queue generation"
+                                  >
+                                    <RotateCw size={9} /> Reroll
+                                  </button>
+                                  <button
+                                    type="button"
+                                    data-wildcard-mode-hold=""
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      if (chainLinkModeActive) return;
+                                      void setWildcardVariantMode(slot.slotId, variant, 'hold');
+                                    }}
+                                    disabled={chainLinkModeActive || wildcardVariantMode === 'hold'}
+                                    className="inline-flex h-6 items-center gap-1 rounded border border-amber-300/25 bg-amber-500/[0.07] px-1.5 text-[8px] font-black uppercase tracking-[0.08em] text-amber-100 hover:border-amber-200/60 disabled:cursor-default disabled:bg-amber-500/15 disabled:opacity-100"
+                                    title="Keep the displayed wildcard result"
+                                  >
+                                    <Check size={9} /> Hold
+                                  </button>
+                                  <button
+                                    type="button"
+                                    data-wildcard-roll-button=""
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      if (chainLinkModeActive) return;
+                                      void rerollWildcardVariant(slot.slotId, variant);
+                                    }}
+                                    disabled={chainLinkModeActive || wildcardLibraryLoading || extractPromptWildcardNames(variant.text).length === 0}
+                                    className="inline-flex h-6 items-center gap-1 rounded border border-fuchsia-300/35 bg-fuchsia-500/10 px-1.5 text-[8px] font-black uppercase tracking-[0.08em] text-fuchsia-100 hover:border-fuchsia-200/70 hover:bg-fuchsia-500/16 disabled:cursor-not-allowed disabled:opacity-40"
+                                    title="Roll a new candidate for this variant"
+                                  >
+                                    {wildcardLibraryLoading ? <Loader2 size={9} className="animate-spin" /> : <RefreshCw size={9} />} Roll
+                                  </button>
+                                </div>
+                                <div className="mt-1 flex min-w-0 items-start gap-1.5">
+                                  <p
+                                    data-wildcard-active-prompt=""
+                                    className="max-h-10 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[9px] leading-4 text-zinc-300 custom-scrollbar"
+                                  >
+                                    {wildcardActiveRoll?.prompt
+                                      || (wildcardLibraryLoading ? 'Loading wildcard choices...' : 'Configure wildcard sources to create an active roll.')}
+                                  </p>
+                                  {wildcardActiveRoll?.prompt ? (
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        void navigator.clipboard?.writeText(wildcardActiveRoll.prompt);
+                                      }}
+                                      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-white/10 text-zinc-500 hover:border-fuchsia-300/40 hover:text-fuchsia-100"
+                                      title="Copy active roll"
+                                      aria-label="Copy active wildcard roll"
+                                    >
+                                      <Copy size={10} />
+                                    </button>
+                                  ) : null}
+                                </div>
+                                {wildcardActiveRoll?.resolved.length ? (
+                                  <div className="mt-1 flex max-h-6 flex-wrap gap-1 overflow-hidden">
+                                    {wildcardActiveRoll.resolved.map((choice, choiceIndex) => (
+                                      <span
+                                        key={`${variant.id}-active-roll-${choice.name}-${choice.id}-${choiceIndex}`}
+                                        className="max-w-[12rem] truncate rounded border border-fuchsia-300/20 bg-fuchsia-500/[0.06] px-1.5 py-0.5 text-[8px] text-fuchsia-100/80"
+                                        title={`${choice.name}: ${choice.value}`}
+                                      >
+                                        {choice.name.replace(/-/g, ' ')}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
                             <div data-umbra-variant-set-selector="" className="mt-1 space-y-1">
                               <button
                                 type="button"
@@ -10926,6 +11273,60 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                     </button>
                                   );
                                 })}
+                                {wildcardUtilitySlot ? (
+                                  <div className="flex basis-full justify-end pt-1">
+                                    <div
+                                      data-umbra-wildcard-reroll-count=""
+                                      data-no-variant-drag="true"
+                                      className="inline-flex h-8 shrink-0 items-center overflow-hidden rounded-md border border-fuchsia-300/30 bg-fuchsia-500/[0.08]"
+                                      title="Number of randomized outputs produced when this wildcard variant is selected"
+                                      onMouseDown={(event) => event.stopPropagation()}
+                                      onPointerDown={(event) => event.stopPropagation()}
+                                    >
+                                      <span className="border-r border-fuchsia-300/15 px-2 text-[9px] font-black uppercase tracking-[0.08em] text-fuchsia-100/80">Rerolls</span>
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          if (chainLinkModeActive) return;
+                                          adjustWildcardVariantRerolls(slot.slotId, variant.id, -1);
+                                        }}
+                                        disabled={chainLinkModeActive || normalizeWildcardRerolls(variant.wildcardRerolls) <= 1}
+                                        className="inline-flex h-full w-8 items-center justify-center text-fuchsia-100 hover:bg-fuchsia-400/12 disabled:cursor-not-allowed disabled:opacity-25"
+                                        title="Decrease wildcard rerolls"
+                                        aria-label="Decrease wildcard rerolls"
+                                      >
+                                        <Minus size={11} />
+                                      </button>
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        max={1000}
+                                        step={1}
+                                        value={normalizeWildcardRerolls(variant.wildcardRerolls)}
+                                        onClick={(event) => event.stopPropagation()}
+                                        onChange={(event) => setWildcardVariantRerolls(slot.slotId, variant.id, event.target.value)}
+                                        disabled={chainLinkModeActive}
+                                        className="h-full w-14 border-x border-fuchsia-300/15 bg-black/30 px-1.5 text-center font-mono text-[11px] font-bold text-fuchsia-50 outline-none [appearance:textfield] disabled:cursor-not-allowed disabled:opacity-40 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                                        aria-label="Wildcard reroll count"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          if (chainLinkModeActive) return;
+                                          adjustWildcardVariantRerolls(slot.slotId, variant.id, 1);
+                                        }}
+                                        disabled={chainLinkModeActive || normalizeWildcardRerolls(variant.wildcardRerolls) >= 1000}
+                                        className="inline-flex h-full w-8 items-center justify-center text-fuchsia-100 hover:bg-fuchsia-400/12 disabled:cursor-not-allowed disabled:opacity-25"
+                                        title="Increase wildcard rerolls"
+                                        aria-label="Increase wildcard rerolls"
+                                      >
+                                        <Plus size={11} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : null}
                               </div>
                             </div>
                           </div>
@@ -11362,7 +11763,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
             aria-modal="true"
             aria-label="Configure wildcard utility"
             onMouseDown={(event) => event.stopPropagation()}
-            className="flex max-h-[min(42rem,calc(100dvh-2rem))] w-[min(58rem,100%)] flex-col overflow-hidden rounded-xl border border-fuchsia-300/25 bg-[#090a10] shadow-2xl shadow-black/70"
+            className="flex max-h-[calc(100dvh-2rem)] w-[min(82rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-fuchsia-300/25 bg-[#090a10] shadow-2xl shadow-black/70"
           >
             <header className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
               <WandSparkles size={16} className="text-fuchsia-200" />
@@ -11372,21 +11773,41 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
               </div>
               <button type="button" onClick={() => setWildcardUtilityEditor(null)} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-white" title="Close wildcard builder"><X size={14} /></button>
             </header>
-            <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 lg:grid-cols-[minmax(0,1fr)_18rem] custom-scrollbar">
+            <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 xl:grid-cols-[13rem_minmax(0,1fr)_27rem] custom-scrollbar">
+              <nav className="h-fit space-y-1 rounded-md border border-white/10 bg-black/25 p-2" aria-label="Wildcard utility folders">
+                <button type="button" onClick={() => setWildcardUtilityFolder('all')} className={`flex h-9 w-full items-center gap-2 rounded-md border px-2 text-left text-[9px] font-black uppercase tracking-[0.08em] ${wildcardUtilityFolder === 'all' ? 'border-fuchsia-300/45 bg-fuchsia-500/12 text-fuchsia-100' : 'border-transparent text-zinc-400 hover:border-white/10 hover:text-zinc-100'}`}>
+                  <FolderOpen size={12} /> <span className="min-w-0 flex-1 truncate">All Wildcards</span><span className="font-mono text-[8px] opacity-70">{wildcardLibrary.length}</span>
+                </button>
+                <button type="button" onClick={() => setWildcardUtilityFolder('')} className={`flex h-9 w-full items-center gap-2 rounded-md border px-2 text-left text-[9px] font-black uppercase tracking-[0.08em] ${wildcardUtilityFolder === '' ? 'border-fuchsia-300/45 bg-fuchsia-500/12 text-fuchsia-100' : 'border-transparent text-zinc-400 hover:border-white/10 hover:text-zinc-100'}`}>
+                  <Folder size={12} /> <span className="min-w-0 flex-1 truncate">Root</span><span className="font-mono text-[8px] opacity-70">{wildcardLibrary.filter((entry) => !entry.folder).length}</span>
+                </button>
+                {wildcardLibraryFolders.map((folderName) => (
+                  <button key={`wildcard-utility-folder-${folderName}`} type="button" onClick={() => setWildcardUtilityFolder(folderName)} className={`flex min-h-9 w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-[9px] font-black uppercase tracking-[0.08em] ${wildcardUtilityFolder === folderName ? 'border-fuchsia-300/45 bg-fuchsia-500/12 text-fuchsia-100' : 'border-transparent text-zinc-400 hover:border-white/10 hover:text-zinc-100'}`}>
+                    <Folder size={12} className="shrink-0" /> <span className="min-w-0 flex-1 break-words">{folderName}</span><span className="font-mono text-[8px] opacity-70">{wildcardLibrary.filter((entry) => entry.folder === folderName).length}</span>
+                  </button>
+                ))}
+              </nav>
               <div className="grid h-fit grid-cols-1 gap-2 sm:grid-cols-2">
-                {wildcardLibrary.map((wildcard) => {
+                {visibleWildcardLibrary.map((wildcard) => {
                   const selected = wildcardUtilityEditor.selectedNames.includes(wildcard.name);
-                  const adultOnly = wildcard.name.startsWith('adult-');
+                  const adultOnly = wildcard.name.startsWith('adult-') || wildcard.folder.toLowerCase().startsWith('adult');
                   return (
                     <button
-                      key={`wildcard-utility-source-${wildcard.name}`}
+                      key={`wildcard-utility-source-${wildcard.path}`}
                       type="button"
                       onClick={() => setWildcardUtilityEditor((current) => {
                         if (!current) return current;
-                        const selectedNames = current.selectedNames.includes(wildcard.name)
+                        const alreadySelected = current.selectedNames.includes(wildcard.name);
+                        const selectedNames = alreadySelected
                           ? current.selectedNames.filter((name) => name !== wildcard.name)
                           : [...current.selectedNames, wildcard.name];
-                        return { ...current, selectedNames };
+                        const heldSelections = { ...current.heldSelections };
+                        if (alreadySelected) {
+                          delete heldSelections[wildcard.name];
+                        } else if (wildcard.choices.length > 0) {
+                          heldSelections[wildcard.name] = wildcard.choices[Math.floor(Math.random() * wildcard.choices.length)].id;
+                        }
+                        return { ...current, selectedNames, heldSelections };
                       })}
                       className={`min-h-20 rounded-md border p-3 text-left transition-colors ${
                         selected
@@ -11401,11 +11822,13 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                         <strong className="min-w-0 flex-1 truncate text-[11px] font-black uppercase tracking-[0.1em]">{wildcard.name.replace(/-/g, ' ')}</strong>
                         {adultOnly ? <span className="rounded border border-rose-300/30 bg-rose-500/10 px-1 py-0.5 text-[8px] font-black uppercase text-rose-100">Adult</span> : null}
                       </span>
-                      <span className="mt-2 block truncate text-[11px] text-zinc-400">{wildcard.values.length} choices · {wildcard.values.slice(0, 2).join(' · ')}</span>
+                      <span className="mt-2 flex items-center gap-1 truncate text-[9px] font-bold uppercase text-zinc-600"><Folder size={9} /> {wildcard.folder || 'Root'}</span>
+                      <span className="mt-1 block truncate text-[11px] text-zinc-400">{wildcard.values.length} choices · {wildcard.values.slice(0, 2).join(' · ')}</span>
                     </button>
                   );
                 })}
                 {wildcardLibrary.length === 0 ? <div className="rounded-md border border-dashed border-white/15 p-6 text-center text-xs text-zinc-500">No wildcard source files are available yet.</div> : null}
+                {wildcardLibrary.length > 0 && visibleWildcardLibrary.length === 0 ? <div className="rounded-md border border-dashed border-white/15 p-6 text-center text-xs text-zinc-500">This folder is empty.</div> : null}
               </div>
               <aside className="h-fit rounded-md border border-fuchsia-300/20 bg-fuchsia-500/[0.045] p-3">
                 <span className="text-[10px] font-black uppercase tracking-[0.14em] text-fuchsia-100">This card will use</span>
@@ -11415,20 +11838,88 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 <div className="mt-4 flex items-center justify-between rounded-md border border-white/10 bg-black/25 px-3 py-2">
                   <span className="text-[9px] font-black uppercase tracking-[0.12em] text-zinc-500">Wildcard mode</span>
                   <span className={`text-[10px] font-black uppercase tracking-[0.12em] ${
-                    getSlotQueueTraversalRole(slots.find((slot) => slot.slotId === wildcardUtilityEditor.slotId)) === 'hold'
+                    wildcardUtilityTargetMode === 'hold'
                       ? 'text-amber-100'
                       : 'text-cyan-100'
                   }`}>
-                    {getWildcardUtilityModeLabel(getSlotQueueTraversalRole(slots.find((slot) => slot.slotId === wildcardUtilityEditor.slotId)))}
+                    {getWildcardUtilityModeLabel(wildcardUtilityTargetMode)}
                   </span>
                 </div>
+                <div className="mt-3 rounded-md border border-amber-300/20 bg-amber-500/[0.045] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-[0.12em] text-amber-100">Active roll</span>
+                    <button
+                      type="button"
+                      onClick={rerollWildcardUtilityHeldPrompt}
+                      disabled={wildcardUtilityEditor.selectedNames.length === 0}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-amber-300/35 bg-amber-400/10 px-2.5 text-[9px] font-black uppercase tracking-[0.1em] text-amber-100 hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:opacity-35"
+                      title="Choose a different wildcard candidate"
+                    >
+                      <RefreshCw size={11} /> Roll candidate
+                    </button>
+                  </div>
+                  <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
+                    {wildcardUtilityEditor.selectedNames.map((name) => {
+                      const wildcard = wildcardLibrary.find((entry) => entry.name === name);
+                      const choice = wildcard?.choices.find((entry) => entry.id === wildcardUtilityEditor.heldSelections[name]);
+                      return (
+                        <div key={`wildcard-held-choice-${name}`} className="rounded border border-white/10 bg-black/30 p-2">
+                          <div className="flex items-center gap-2">
+                            <strong className="min-w-0 flex-1 truncate text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300">{name.replace(/-/g, ' ')}</strong>
+                            {choice?.id ? (
+                              <button
+                                type="button"
+                                onClick={() => void navigator.clipboard?.writeText(choice.id)}
+                                className="inline-flex h-6 items-center gap-1 rounded border border-white/10 px-1.5 font-mono text-[8px] text-zinc-500 hover:border-amber-300/30 hover:text-amber-100"
+                                title={`Copy ${choice.id}`}
+                              >
+                                <Copy size={9} /> {choice.id.slice(0, 13)}...
+                              </button>
+                            ) : null}
+                          </div>
+                          <p className="mt-1.5 whitespace-pre-wrap break-words text-[10px] leading-4 text-zinc-300">{choice?.value || 'No held choice is available.'}</p>
+                        </div>
+                      );
+                    })}
+                    {wildcardUtilityEditor.selectedNames.length === 0 ? <p className="text-[10px] text-zinc-500">Select a wildcard source to preview its active choice.</p> : null}
+                  </div>
+                  <p className="mt-2 text-[9px] leading-4 text-zinc-500">Rolling here previews a candidate. Use the inline Hold control on the variant to keep it for generation.</p>
+                </div>
+                <div className="mt-3 rounded-md border border-emerald-300/20 bg-emerald-500/[0.04] p-3">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={wildcardUtilityEditor.contextEnabled}
+                    onClick={() => setWildcardUtilityEditor((current) => current ? { ...current, contextEnabled: !current.contextEnabled } : current)}
+                    className="flex w-full items-center gap-2 text-left"
+                  >
+                    <span className={`inline-flex h-5 w-9 items-center rounded-full border p-0.5 transition-colors ${wildcardUtilityEditor.contextEnabled ? 'border-emerald-300/55 bg-emerald-400/20' : 'border-white/15 bg-black/30'}`}>
+                      <span className={`h-3.5 w-3.5 rounded-full transition-transform ${wildcardUtilityEditor.contextEnabled ? 'translate-x-3.5 bg-emerald-200' : 'translate-x-0 bg-zinc-600'}`} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <strong className="block text-[10px] font-black uppercase tracking-[0.12em] text-emerald-100">Smart context</strong>
+                      <span className="mt-0.5 block text-[9px] leading-4 text-zinc-500">Repairs explicit clothing and action conflicts during queue resolution.</span>
+                    </span>
+                  </button>
+                  {wildcardUtilityHeldPreview ? (
+                    <div className="mt-3 border-t border-emerald-300/15 pt-3">
+                      <span className="text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500">Resolved card preview</span>
+                      <p className="mt-1.5 max-h-28 overflow-y-auto whitespace-pre-wrap break-words rounded border border-white/10 bg-black/30 p-2 text-[10px] leading-4 text-zinc-300 custom-scrollbar">{wildcardUtilityHeldPreview.prompt || 'No prompt text yet.'}</p>
+                      {wildcardUtilityHeldPreview.added.length > 0 || wildcardUtilityHeldPreview.removed.length > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {wildcardUtilityHeldPreview.added.map((tag) => <span key={`wildcard-context-added-${tag}`} className="rounded border border-emerald-300/30 bg-emerald-400/10 px-1.5 py-0.5 font-mono text-[8px] text-emerald-100">+ {tag}</span>)}
+                          {wildcardUtilityHeldPreview.removed.map((tag) => <span key={`wildcard-context-removed-${tag}`} className="rounded border border-rose-300/30 bg-rose-400/10 px-1.5 py-0.5 font-mono text-[8px] text-rose-100">- {tag}</span>)}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
                 <div className="mt-4 border-t border-fuchsia-300/15 pt-3">
-                  <label htmlFor="wildcard-utility-rerolls" className="text-[10px] font-black uppercase tracking-[0.12em] text-fuchsia-100">Queue rerolls</label>
+                  <label htmlFor="wildcard-utility-rerolls" className="text-[10px] font-black uppercase tracking-[0.12em] text-fuchsia-100">Variant rerolls</label>
                   <div className="mt-2 grid grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] overflow-hidden rounded-md border border-fuchsia-300/25 bg-black/35">
                     <button
                       type="button"
                       onClick={() => setWildcardUtilityEditor((current) => current ? { ...current, rerolls: normalizeWildcardRerolls(current.rerolls - 1) } : current)}
-                      disabled={getSlotQueueTraversalRole(slots.find((slot) => slot.slotId === wildcardUtilityEditor.slotId)) === 'hold'}
                       className="inline-flex h-10 items-center justify-center border-r border-fuchsia-300/15 text-fuchsia-100 hover:bg-fuchsia-400/10 disabled:cursor-not-allowed disabled:opacity-30"
                       title="Remove one wildcard reroll"
                       aria-label="Decrease wildcard rerolls"
@@ -11443,13 +11934,11 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       step={1}
                       value={wildcardUtilityEditor.rerolls}
                       onChange={(event) => setWildcardUtilityEditor((current) => current ? { ...current, rerolls: normalizeWildcardRerolls(event.target.value) } : current)}
-                      disabled={getSlotQueueTraversalRole(slots.find((slot) => slot.slotId === wildcardUtilityEditor.slotId)) === 'hold'}
                       className="h-10 min-w-0 bg-transparent px-2 text-center font-mono text-sm font-bold text-fuchsia-50 outline-none disabled:cursor-not-allowed disabled:opacity-35"
                     />
                     <button
                       type="button"
                       onClick={() => setWildcardUtilityEditor((current) => current ? { ...current, rerolls: normalizeWildcardRerolls(current.rerolls + 1) } : current)}
-                      disabled={getSlotQueueTraversalRole(slots.find((slot) => slot.slotId === wildcardUtilityEditor.slotId)) === 'hold'}
                       className="inline-flex h-10 items-center justify-center border-l border-fuchsia-300/15 text-fuchsia-100 hover:bg-fuchsia-400/10 disabled:cursor-not-allowed disabled:opacity-30"
                       title="Add one wildcard reroll"
                       aria-label="Increase wildcard rerolls"
@@ -11458,16 +11947,16 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     </button>
                   </div>
                   <p className="mt-2 text-[10px] leading-4 text-zinc-500">
-                    {getSlotQueueTraversalRole(slots.find((slot) => slot.slotId === wildcardUtilityEditor.slotId)) === 'hold'
-                      ? 'Hold resolves one choice for this card and keeps it throughout the queued run.'
-                      : 'Reroll creates the configured number of wildcard variations for each queue prompt.'}
+                    {wildcardUtilityTargetMode === 'hold'
+                      ? 'This count is saved for the variant and takes effect when it is switched back to Reroll.'
+                      : 'Reroll creates the configured number of wildcard variations when this variant is selected.'}
                   </p>
                 </div>
                 <p className="mt-4 border-t border-fuchsia-300/15 pt-3 text-[11px] leading-5 text-zinc-400">A wildcard card can also include fixed tags. The builder updates only its wildcard tokens, so prompt text you add manually stays intact.</p>
               </aside>
             </div>
             <footer className="flex items-center justify-between gap-3 border-t border-white/10 px-4 py-3">
-              <span className="text-[10px] text-zinc-500">Use the card header control to switch between Reroll and Hold.</span>
+              <span className="text-[10px] text-zinc-500">Use each variant's inline controls to set its own Reroll or Hold behavior.</span>
               <div className="flex gap-2">
                 <button type="button" onClick={() => setWildcardUtilityEditor(null)} className="h-9 rounded-md border border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:text-white">Cancel</button>
                 <button type="button" onClick={applyWildcardUtilitySelection} className="inline-flex h-9 items-center gap-1.5 rounded-md border border-fuchsia-300/45 bg-fuchsia-500/[0.15] px-3 text-[10px] font-black uppercase tracking-[0.1em] text-fuchsia-100 hover:bg-fuchsia-500/[0.22]"><Check size={12} /> Apply sources</button>
