@@ -83,16 +83,23 @@ import {
 } from '../../../../shared/umbra-ui/pipelineTypes';
 import { UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID } from '../../../../shared/umbra-ui/agentTypes';
 import { getPowerPrompterCardGroupingKey, movePrompterVariantWithinSlot } from '../../../../shared/power-prompter/powerPrompterChain';
+import { replacePowerPrompterPromptTokenAtCursor } from '@/lib/powerPrompterPromptInsertion';
 import {
   applyUmbraWildcardContextualModifiers,
   createUmbraWildcardChoices,
   expandUmbraPromptWildcards,
   normalizeUmbraWildcardHoldSelections,
+  pickUmbraWildcardChoice,
   type UmbraPromptWildcardChoice,
 } from '../../../../shared/promptWildcards';
 
+export interface PowerPrompterPromptInsertOptions {
+  replaceCurrentToken?: boolean;
+  appendComma?: boolean;
+}
+
 export interface PowerPrompterCardChainEditorRef {
-  insertAtCursor: (text: string) => void;
+  insertAtCursor: (text: string, options?: PowerPrompterPromptInsertOptions) => void;
   refreshOutputPreview: () => void;
 }
 
@@ -2177,14 +2184,8 @@ function rollWildcardSelections(
   for (const name of names) {
     const wildcard = wildcardLibrary.find((entry) => entry.name === name);
     if (!wildcard?.choices.length) continue;
-    const currentIndex = wildcard.choices.findIndex((choice) => choice.id === current[name]);
-    const offset = wildcard.choices.length > 1
-      ? 1 + Math.floor(Math.random() * (wildcard.choices.length - 1))
-      : 0;
-    const nextIndex = currentIndex >= 0
-      ? (currentIndex + offset) % wildcard.choices.length
-      : Math.floor(Math.random() * wildcard.choices.length);
-    next[name] = wildcard.choices[nextIndex].id;
+    const choice = pickUmbraWildcardChoice(wildcard.choices, Math.random(), current[name]);
+    if (choice) next[name] = choice.id;
   }
   return next;
 }
@@ -2199,6 +2200,7 @@ function normalizeWildcardLibraryPayload(payload: any): PowerPrompterWildcardLib
       ? entry.choices.map((choice: any) => ({
         id: String(choice?.id || '').trim().toUpperCase(),
         value: String(choice?.value || '').trim(),
+        chance: Number.isFinite(Number(choice?.chance)) ? Math.max(0, Number(choice.chance)) : undefined,
       })).filter((choice: UmbraPromptWildcardChoice) => choice.id && choice.value)
       : createUmbraWildcardChoices(entry?.name, entry?.values),
   })).filter((entry: PowerPrompterWildcardLibraryEntry) => entry.name && entry.choices.length > 0) : [];
@@ -4890,7 +4892,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
         const wildcard = library.find((entry) => entry.name === name);
         if (!wildcard?.choices.length) continue;
         if (wildcard.choices.some((choice) => choice.id === heldSelections[name])) continue;
-        heldSelections[name] = wildcard.choices[Math.floor(Math.random() * wildcard.choices.length)].id;
+        const choice = pickUmbraWildcardChoice(wildcard.choices, Math.random());
+        if (choice) heldSelections[name] = choice.id;
       }
       setWildcardUtilityEditor({
         slotId,
@@ -5008,7 +5011,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     slotId: string,
     variant: PowerPrompterCardNode,
     rawToken: string,
-    options?: { appendComma?: boolean; preferExpanded?: boolean; }
+    options?: { appendComma?: boolean; preferExpanded?: boolean; replaceCurrentToken?: boolean; }
   ) => {
     const token = buildPromptInsertionToken(rawToken, false);
     if (!token) return;
@@ -5028,7 +5031,12 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
           : expandedTarget || inlineTarget;
     const start = target && typeof target.selectionStart === 'number' ? target.selectionStart : currentDraft.length;
     const end = target && typeof target.selectionEnd === 'number' ? target.selectionEnd : start;
-    const nextText = insertPromptTokenIntoDraftAtCursor(currentDraft, token, start, end, options?.appendComma === true);
+    const replacement = options?.replaceCurrentToken
+      ? replacePowerPrompterPromptTokenAtCursor(currentDraft, token, start, end, options?.appendComma === true)
+      : null;
+    const nextText = replacement?.nextValue
+      ?? insertPromptTokenIntoDraftAtCursor(currentDraft, token, start, end, options?.appendComma === true);
+    const nextCaret = replacement?.selectionStart ?? nextText.length;
     setActiveSlotId(slotId);
     setActiveVariantId(variantId);
     setEditingVariantId(variantId);
@@ -5041,7 +5049,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
           || null);
       if (!resolvedTarget) return;
       resolvedTarget.focus();
-      const nextCaret = nextText.length;
       try {
         resolvedTarget.setSelectionRange(nextCaret, nextCaret);
       } catch {
@@ -5055,7 +5062,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
 
   const applyDraftTokenToExpandedVariantEditor = useCallback((
     rawToken: string,
-    options?: { appendComma?: boolean; }
+    options?: { appendComma?: boolean; replaceCurrentToken?: boolean; }
   ) => {
     setExpandedVariantEditor((prev) => {
       if (!prev) return prev;
@@ -5064,8 +5071,12 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       const target = expandedVariantTextareaRef.current;
       const start = target && typeof target.selectionStart === 'number' ? target.selectionStart : prev.draft.length;
       const end = target && typeof target.selectionEnd === 'number' ? target.selectionEnd : start;
-      const nextDraft = insertPromptTokenIntoDraftAtCursor(prev.draft, token, start, end, options?.appendComma === true);
-      const nextCaret = nextDraft.length;
+      const replacement = options?.replaceCurrentToken
+        ? replacePowerPrompterPromptTokenAtCursor(prev.draft, token, start, end, options?.appendComma === true)
+        : null;
+      const nextDraft = replacement?.nextValue
+        ?? insertPromptTokenIntoDraftAtCursor(prev.draft, token, start, end, options?.appendComma === true);
+      const nextCaret = replacement?.selectionStart ?? nextDraft.length;
       window.requestAnimationFrame(() => {
         const textarea = expandedVariantTextareaRef.current;
         if (!textarea) return;
@@ -6945,21 +6956,20 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     const next = cloneSlots(slots);
     const slot = next.find((entry) => entry.slotId === slotId);
     if (!slot) return;
-    const slotSetIds = getSlotQueueSetIds(slot);
-    const slotRandomSetIds = getSlotRandomSetIds(slot);
-    const createdSetIds = slotSetIds.length > 0 ? slotSetIds : [activeQueueSet];
     const created = {
       ...createCard(
         slot.type,
         slot.label,
         slot.slotId,
         0,
-        createdSetIds[0],
-        isSlotRandomEnabled(slot),
-        slotRandomSetIds
+        activeQueueSet,
       ),
-      queueSetIds: createdSetIds,
-      queueEnabled: createdSetIds.length > 0,
+      randomEnabled: false,
+      randomSetIds: [],
+      queueSetIds: [],
+      queueSetOrders: {},
+      queueCycleWeights: {},
+      queueEnabled: false,
       queueTraversalRole: getSlotQueueTraversalRole(slot),
     };
     slot.variants = [created, ...slot.variants].map((variant, idx) => ({ ...variant, order: idx }));
@@ -7558,15 +7568,20 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   }, [emitGalleryRefreshPulse, outputPreviewActive, path, showToast]);
 
   useImperativeHandle(ref, () => ({
-    insertAtCursor: (text: string) => {
+    insertAtCursor: (text: string, options: PowerPrompterPromptInsertOptions = {}) => {
+      const appendComma = options.appendComma !== false;
       if (expandedVariantEditor) {
-        applyDraftTokenToExpandedVariantEditor(text, { appendComma: true });
+        applyDraftTokenToExpandedVariantEditor(text, {
+          appendComma,
+          replaceCurrentToken: options.replaceCurrentToken === true,
+        });
         return;
       }
       if (!activeSlot || !activeVariant) return;
       applyDraftTokenToVariant(activeSlot.slotId, activeVariant, text, {
-        appendComma: true,
+        appendComma,
         preferExpanded: false,
+        replaceCurrentToken: options.replaceCurrentToken === true,
       });
     },
     refreshOutputPreview: () => {
@@ -11830,7 +11845,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                         if (alreadySelected) {
                           delete heldSelections[wildcard.name];
                         } else if (wildcard.choices.length > 0) {
-                          heldSelections[wildcard.name] = wildcard.choices[Math.floor(Math.random() * wildcard.choices.length)].id;
+                          const choice = pickUmbraWildcardChoice(wildcard.choices, Math.random());
+                          if (choice) heldSelections[wildcard.name] = choice.id;
                         }
                         return { ...current, selectedNames, heldSelections };
                       })}

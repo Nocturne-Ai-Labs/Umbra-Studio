@@ -60,6 +60,7 @@ export function UmbraSelectControl({
   children,
   disabled = false,
   className,
+  style,
   title,
   id,
   name,
@@ -106,6 +107,7 @@ export function UmbraSelectControl({
         disabled={disabled}
         size={controlSize}
         buttonClassName={className}
+        buttonStyle={style}
         menuTitle={menuTitle || resolvedLabel}
         menuSubtitle={menuSubtitle}
         boundarySelector={boundarySelector}

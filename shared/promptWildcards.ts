@@ -7,6 +7,7 @@ export interface UmbraPromptWildcard {
 export interface UmbraPromptWildcardChoice {
   id: string;
   value: string;
+  chance?: number;
 }
 
 export interface UmbraPromptWildcardExpansion {
@@ -74,7 +75,7 @@ export function createUmbraWildcardChoices(rawName: unknown, rawValues: unknown)
   const name = normalizeName(rawName);
   if (!name || !Array.isArray(rawValues)) return [];
   const seen = new Set<string>();
-  return rawValues.flatMap((rawValue) => {
+  const output = rawValues.flatMap((rawValue) => {
     const value = String(rawValue || '').trim();
     if (!value) return [];
     const id = createUmbraWildcardChoiceUid(name, value);
@@ -82,21 +83,56 @@ export function createUmbraWildcardChoices(rawName: unknown, rawValues: unknown)
     seen.add(id);
     return [{ id, value }];
   });
+  const chance = output.length > 0 ? 100 / output.length : 0;
+  return output.map((choice) => ({ ...choice, chance }));
 }
 
 function normalizeProvidedChoices(rawName: unknown, rawChoices: unknown): UmbraPromptWildcardChoice[] {
   const name = normalizeName(rawName);
   if (!name || !Array.isArray(rawChoices)) return [];
   const seen = new Set<string>();
-  return rawChoices.flatMap((rawChoice) => {
+  const choices = rawChoices.flatMap((rawChoice) => {
     const choice = rawChoice as Partial<UmbraPromptWildcardChoice> | null;
     const value = String(choice?.value || '').trim();
     if (!value) return [];
     const id = String(choice?.id || createUmbraWildcardChoiceUid(name, value)).trim().toUpperCase();
     if (!/^WCUID-[A-F0-9]{16}$/.test(id) || seen.has(id)) return [];
     seen.add(id);
-    return [{ id, value }];
+    const rawChance = Number(choice?.chance);
+    return [{ id, value, chance: Number.isFinite(rawChance) ? Math.max(0, rawChance) : undefined }];
   });
+  const suppliedTotal = choices.reduce((sum, choice) => sum + Math.max(0, Number(choice.chance) || 0), 0);
+  const chance = choices.length > 0 ? 100 / choices.length : 0;
+  return choices.map((choice) => ({
+    ...choice,
+    chance: suppliedTotal > 0 ? (Math.max(0, Number(choice.chance) || 0) / suppliedTotal) * 100 : chance,
+  }));
+}
+
+export function pickUmbraWildcardChoice(
+  rawChoices: UmbraPromptWildcardChoice[],
+  randomUnit: number,
+  excludedChoiceId = '',
+): UmbraPromptWildcardChoice | undefined {
+  const choices = rawChoices.filter((choice) => choice?.id && choice?.value);
+  if (choices.length === 0) return undefined;
+  const excludedId = String(excludedChoiceId || '').trim().toUpperCase();
+  const eligible = excludedId && choices.length > 1
+    ? choices.filter((choice) => choice.id.toUpperCase() !== excludedId)
+    : choices;
+  const weights = eligible.map((choice) => Math.max(0, Number(choice.chance) || 0));
+  const suppliedTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  const effectiveWeights = suppliedTotal > 0 ? weights : weights.map(() => 1);
+  const total = effectiveWeights.reduce((sum, weight) => sum + weight, 0) || eligible.length;
+  const normalizedRandom = Number.isFinite(randomUnit)
+    ? ((randomUnit % 1) + 1) % 1
+    : 0;
+  let cursor = normalizedRandom * total;
+  for (let index = 0; index < eligible.length; index += 1) {
+    cursor -= effectiveWeights[index];
+    if (cursor < 0) return eligible[index];
+  }
+  return eligible[eligible.length - 1];
 }
 
 export function normalizeUmbraPromptWildcards(rawWildcards: unknown): UmbraPromptWildcard[] {
@@ -142,7 +178,7 @@ function resolveWildcardChoice(
   const heldChoice = heldChoiceId
     ? choices.find((choice) => choice.id === heldChoiceId.toUpperCase())
     : undefined;
-  return heldChoice || choices[randomState % choices.length];
+  return heldChoice || pickUmbraWildcardChoice(choices, randomState / 4294967296) || choices[0];
 }
 
 function hasHeldWildcardChoice(wildcard: UmbraPromptWildcard | undefined, heldChoiceId = ''): boolean {

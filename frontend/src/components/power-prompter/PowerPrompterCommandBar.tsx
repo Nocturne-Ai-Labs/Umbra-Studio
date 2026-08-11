@@ -267,6 +267,41 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
           </div>
           {isPhoneRemote ? (
             <>
+              <div
+                data-umbra-powerprompter-phone-active-set=""
+                className="relative w-[4.75rem] shrink-0"
+                title={`Active Set ${queueSetTarget}: card toggles and Queue use this set`}
+              >
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-2 top-1 z-[1] text-[7px] font-black uppercase tracking-[0.12em]"
+                  style={{ color: !currentFile || !!queueingMode ? '#71717a' : queueSetColor }}
+                >
+                  Active
+                </span>
+                <UmbraSelectControl
+                  value={queueSetTarget}
+                  onChange={(event) => setQueueSetTarget(clampQueueSetId(event.target.value))}
+                  disabled={!currentFile || !!queueingMode}
+                  className="h-11 w-full rounded-lg border bg-white/[0.04] pb-1 pl-2 pr-1 pt-3.5 text-[10px] font-black uppercase outline-none disabled:border-white/10 disabled:text-zinc-600"
+                  style={!currentFile || !!queueingMode
+                    ? undefined
+                    : {
+                        color: queueSetColor,
+                        borderColor: hexToRgba(queueSetColor, 0.58),
+                        backgroundColor: hexToRgba(queueSetColor, 0.17),
+                      }}
+                  aria-label={`Active Power Prompter set: Set ${queueSetTarget}`}
+                  menuTitle="Active Power Prompter Set"
+                  menuSubtitle="Card toggles and Queue use the selected set."
+                >
+                  {Array.from({ length: POWER_PROMPTER_MAX_QUEUE_SETS }, (_, idx) => idx + 1).map((setId) => (
+                    <option key={`active-set-phone-option-${setId}`} value={setId}>
+                      Set {setId}
+                    </option>
+                  ))}
+                </UmbraSelectControl>
+              </div>
               <button
                 type="button"
                 data-umbra-powerprompter-phone-queue=""
@@ -285,26 +320,6 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               >
                 {queueingMode === 'selected' ? <Loader2 size={14} className="animate-spin" /> : <ListChecks size={14} />}
                 <span className="text-[10px] font-black tabular-nums">{queueEstimate.setImageCount}</span>
-              </button>
-              <button
-                type="button"
-                data-umbra-powerprompter-phone-queue-all=""
-                onClick={() => {
-                  void handleQueuePrompts('variants', {
-                    includeAllSets: true,
-                    setId: queueSetTarget,
-                    traversalMode: queueTraversalMode,
-                    diversity: queueDiversity,
-                    shuffleEnabled: queueShuffleEnabled,
-                  });
-                }}
-                disabled={!currentFile || !!queueingMode}
-                className="inline-flex h-11 w-14 shrink-0 items-center justify-center gap-1 rounded-lg border border-cyan-300/25 bg-cyan-400/10 text-cyan-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
-                title={`Queue all sets (${queueEstimate.allImageCount} images)`}
-                aria-label={`Queue all sets: ${queueEstimate.allImageCount} images`}
-              >
-                {queueingMode === 'variants' ? <Loader2 size={14} className="animate-spin" /> : <ListOrdered size={14} />}
-                <span className="text-[10px] font-black tabular-nums">{queueEstimate.allImageCount}</span>
               </button>
             </>
           ) : null}
@@ -538,6 +553,48 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               <Bot size={15} />
               {completePromptAgentEnabled ? 'Complete Prompt Agent On' : 'Complete Prompt Agent Off'}
             </button>
+
+            {isPhoneRemote ? (
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPhoneActionsOpen(false);
+                    void handleQueuePrompts('selected', {
+                      setId: queueSetTarget,
+                      traversalMode: queueTraversalMode,
+                      diversity: queueDiversity,
+                      shuffleEnabled: queueShuffleEnabled,
+                    });
+                  }}
+                  disabled={!currentFile || !!queueingMode}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-amber-300/25 bg-amber-400/10 px-3 text-[10px] font-black uppercase tracking-[0.08em] text-amber-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+                >
+                  {queueingMode === 'selected' ? <Loader2 size={14} className="animate-spin" /> : <ListChecks size={14} />}
+                  Queue Set {queueSetTarget}
+                  <span className="rounded bg-black/25 px-1 tabular-nums">{queueEstimate.setImageCount}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPhoneActionsOpen(false);
+                    void handleQueuePrompts('variants', {
+                      includeAllSets: true,
+                      setId: queueSetTarget,
+                      traversalMode: queueTraversalMode,
+                      diversity: queueDiversity,
+                      shuffleEnabled: queueShuffleEnabled,
+                    });
+                  }}
+                  disabled={!currentFile || !!queueingMode}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 text-[10px] font-black uppercase tracking-[0.08em] text-cyan-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+                >
+                  {queueingMode === 'variants' ? <Loader2 size={14} className="animate-spin" /> : <ListOrdered size={14} />}
+                  Queue All
+                  <span className="rounded bg-black/25 px-1 tabular-nums">{queueEstimate.allImageCount}</span>
+                </button>
+              </div>
+            ) : null}
 
             {isTabletRemote ? (
               <div data-umbra-powerprompter-tablet-controls="">
@@ -968,7 +1025,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               </div>
             </div>
 
-            <div className="hidden shrink-0 items-center gap-1.5 md:flex">
+            <div className="hidden shrink-0 items-center gap-1.5 2xl:flex">
               <button
                 onClick={() => { void queueStartActionRef?.current?.(); }}
                 disabled={queueStartDisabled}
@@ -1000,7 +1057,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
             </div>
 
             {(prompterPanelMode === 'editor' || prompterPanelMode === 'preset-editor') && (
-              <div className="hidden min-w-0 items-center gap-1.5 lg:flex">
+              <div className="hidden min-w-0 items-center gap-1.5 2xl:flex">
                 <button
                   onClick={() => {
                     void handleQueuePrompts('selected', {

@@ -24,6 +24,7 @@ interface UmbraSelectProps {
   disabled?: boolean;
   className?: string;
   buttonClassName?: string;
+  buttonStyle?: React.CSSProperties;
   size?: 'xs' | 'sm' | 'md';
   menuTitle?: string;
   menuSubtitle?: string;
@@ -50,6 +51,7 @@ export function UmbraSelect({
   disabled = false,
   className,
   buttonClassName,
+  buttonStyle,
   size = 'md',
   menuTitle,
   menuSubtitle,
@@ -118,6 +120,7 @@ export function UmbraSelect({
         aria-expanded={open}
         aria-required={required || undefined}
         data-open={open ? 'true' : 'false'}
+        style={buttonStyle}
         disabled={disabled}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {

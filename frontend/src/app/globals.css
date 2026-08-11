@@ -1365,8 +1365,9 @@ html[data-umbra-remote-mode="phone"] {
   --umbra-remote-phone-touch-target: 3.25rem;
   --umbra-phone-shell-top: 0px;
   --umbra-phone-bottom-nav-height: calc(4.25rem + env(safe-area-inset-bottom));
-  --umbra-phone-pp-command-height: 3.85rem;
-  --umbra-phone-pp-panel-top: calc(var(--umbra-phone-shell-top) + var(--umbra-phone-pp-command-height));
+  --umbra-phone-umbra-ui-tabs-height: 3.5rem;
+  --umbra-phone-pp-command-height: 4.25rem;
+  --umbra-phone-pp-panel-top: calc(var(--umbra-phone-shell-top) + var(--umbra-phone-umbra-ui-tabs-height) + var(--umbra-phone-pp-command-height));
 }
 
 html[data-umbra-remote-mode="phone"],
@@ -2576,6 +2577,26 @@ html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-layers-panel]:has(butto
 html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-root] {
   min-width: 0;
   overflow: hidden;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-wildcard-generator] {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-generator-config] {
+  width: 100% !important;
+  height: auto;
+  max-height: none !important;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-generator-main] {
+  width: 100%;
+  min-height: auto;
+  flex: 0 0 auto;
+  overflow: visible;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-data-forge-tabs] {
@@ -3898,6 +3919,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-search] > * {
   position: fixed !important;
   inset: var(--umbra-phone-pp-panel-top) 0 0 0;
   z-index: 90;
+  height: auto !important;
   width: 100% !important;
   max-width: none !important;
   border-left: 0 !important;

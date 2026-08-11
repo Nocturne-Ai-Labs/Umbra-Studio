@@ -422,7 +422,7 @@ export function PromptWildcardLibrary({ onInsert, compact = false, cardSources =
                 id="wildcard-editor-folder"
                 value={editingWildcard.folder}
                 onChange={(event) => setEditingWildcard((current) => current ? { ...current, folder: event.target.value } : current)}
-                placeholder="Expressions/Adult"
+                placeholder="Expressions/Custom"
                 className="mt-2 h-9 w-full rounded-sm border border-white/12 bg-black/40 px-2 text-xs text-zinc-100 outline-none focus:border-fuchsia-300/45"
               />
               <label htmlFor="wildcard-editor-values" className="block text-[9px] font-black uppercase tracking-[0.12em] text-fuchsia-100">Values</label>

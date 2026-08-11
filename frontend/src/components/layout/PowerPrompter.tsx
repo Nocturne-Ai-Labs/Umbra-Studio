@@ -10,6 +10,7 @@ import {
   PowerPrompterCardChainEditorRef,
   PowerPrompterOutputPreviewItem,
   PowerPrompterOutputPreviewSnapshot,
+  type PowerPrompterPromptInsertOptions,
 } from './PowerPrompterCardChainEditor';
 import { PowerPrompterSearchPanel } from './PowerPrompterSearchPanel';
 import { PowerPrompterCommandBar } from '@/components/power-prompter/PowerPrompterCommandBar';
@@ -679,7 +680,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
   );
   const [enabledCSVs, setEnabledCSVs] = useState<string[]>([]);
   const editorRef = useRef<PrompterEditorRef>(null);
-  const pendingEditorInsertsRef = useRef<string[]>([]);
+  const pendingEditorInsertsRef = useRef<Array<{ text: string; options: PowerPrompterPromptInsertOptions }>>([]);
   const [pendingEditorInsertTick, setPendingEditorInsertTick] = useState(0);
   const currentFileRef = useRef<string | null>(null);
   const contentRef = useRef('');
@@ -8333,15 +8334,15 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     };
   }, []);
 
-  const handleInsert = (text: string) => {
+  const handleInsert = (text: string, options: PowerPrompterPromptInsertOptions = {}) => {
     const value = String(text || '');
     if (!value) return;
     if (editorRef.current) {
-      editorRef.current.insertAtCursor(value);
+      editorRef.current.insertAtCursor(value, options);
       return;
     }
     if (currentFileRef.current) {
-      pendingEditorInsertsRef.current.push(value);
+      pendingEditorInsertsRef.current.push({ text: value, options });
       setPrompterPanelMode('editor');
       setPendingEditorInsertTick((tick) => tick + 1);
       return;
@@ -8364,7 +8365,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       }
       const pending = pendingEditorInsertsRef.current.splice(0);
       for (const entry of pending) {
-        target.insertAtCursor(entry);
+        target.insertAtCursor(entry.text, entry.options);
       }
     };
     if (typeof window === 'undefined') {
@@ -12005,7 +12006,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         {floatingToolMenusEnabled && (!leftPanelCollapsed || !rightPanelCollapsed) && (
           <div
             data-umbra-powerprompter-menu-shelf=""
-            className="pointer-events-none absolute left-3 right-3 top-[7.25rem] z-[80] flex items-start gap-3"
+            className="pointer-events-none absolute left-3 right-3 top-[4rem] z-[80] flex items-start gap-3"
           >
             {!leftPanelCollapsed && (
               <div className="pointer-events-auto h-[min(52vh,620px)] min-h-[300px] w-[min(92vw,560px)] overflow-hidden rounded-xl border border-cyan-300/25 bg-[#050508]/98 shadow-[0_18px_46px_rgba(0,0,0,0.65)] backdrop-blur-md">
@@ -12028,8 +12029,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
             {!rightPanelCollapsed && (
               <div className="pointer-events-auto h-[min(52vh,620px)] min-h-[300px] w-[min(92vw,680px)] overflow-hidden rounded-xl border border-cyan-300/25 bg-[#050508]/98 shadow-[0_18px_46px_rgba(0,0,0,0.65)] backdrop-blur-md">
                 <PowerPrompterSearchPanel
-                  onInsert={(text) => {
-                    handleInsert(text);
+                  onInsert={(text, options) => {
+                    handleInsert(text, options);
                     setRightPanelCollapsed(true);
                   }}
                   enabledCSVs={enabledCSVs}
@@ -12159,8 +12160,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         ) : (
           <div data-umbra-powerprompter-search="" className="contents">
             <PowerPrompterSearchPanel
-              onInsert={(text) => {
-                handleInsert(text);
+              onInsert={(text, options) => {
+                handleInsert(text, options);
                 if (isPhoneRemote) setRightPanelCollapsed(true);
               }}
               enabledCSVs={enabledCSVs}

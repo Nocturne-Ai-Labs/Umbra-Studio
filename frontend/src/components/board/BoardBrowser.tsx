@@ -1,17 +1,18 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { useEffect, useState } from 'react';
-import { BarChart3, Database, Search, Download, FolderOpen, GraduationCap } from 'lucide-react';
+import { BarChart3, Database, Search, Download, FolderOpen, GraduationCap, WandSparkles } from 'lucide-react';
 import { SearchTab } from './SearchTab';
 import { DownloadsTab } from './DownloadsTab';
 import { DatasetsTab } from './DatasetsTab';
 import { DatasetResearchTab } from './DatasetResearchTab';
 import { DanbooruDatasetGeneratorTab } from './DanbooruDatasetGeneratorTab';
+import { WildcardGeneratorTab } from './WildcardGeneratorTab';
 import { AIToolkitTab } from './AIToolkitTab';
 import { useBoardStore } from './hooks/useBoardStore';
 import type { BooruPost } from './types';
 import { logDiagnostic } from '@/lib/diagnostics';
 
-type Tab = 'search' | 'research' | 'generator' | 'downloads' | 'datasets' | 'aitoolkit';
+type Tab = 'search' | 'research' | 'wildcards' | 'generator' | 'downloads' | 'datasets' | 'aitoolkit';
 
 export function BoardBrowser() {
   const [activeTab, setActiveTab] = useState<Tab>('search');
@@ -47,6 +48,7 @@ export function BoardBrowser() {
   const tabs: { id: Tab; label: string; icon: typeof Search; badge?: number }[] = [
     { id: 'search', label: 'Search', icon: Search },
     { id: 'research', label: 'Dataset Research', icon: BarChart3 },
+    { id: 'wildcards', label: 'Wildcard Generator', icon: WandSparkles },
     { id: 'generator', label: 'Danbooru Dataset Generator', icon: Database },
     { id: 'downloads', label: 'Downloads', icon: Download, badge: pendingDownloads },
     { id: 'datasets', label: 'Datasets', icon: FolderOpen },
@@ -112,6 +114,7 @@ export function BoardBrowser() {
       <div className="relative flex-1 min-h-0">
         {activeTab === 'search' && <SearchTab onDownload={handleDownload} />}
         {activeTab === 'research' && <DatasetResearchTab onOpenSearch={() => setActiveTab('search')} />}
+        {activeTab === 'wildcards' && <WildcardGeneratorTab />}
         {activeTab === 'generator' && <DanbooruDatasetGeneratorTab />}
         {activeTab === 'downloads' && <DownloadsTab />}
         {activeTab === 'datasets' && <DatasetsTab />}

@@ -1,11 +1,21 @@
+import {
+  classifyDanbooruTag,
+  hasExplicitDanbooruClassifier,
+  parseDanbooruTagClassifiers,
+  type DanbooruTagClassifierId,
+} from '../shared/danbooru/tagClassifiers';
+
 export type PowerPrompterCsvItemType = 'tag' | 'character';
 
 export interface PowerPrompterCsvItem {
   tag: string;
   category: number;
+  count?: number;
   extra?: string;
   displayTag?: string;
   searchAliases?: string;
+  classifiers: DanbooruTagClassifierId[];
+  explicit: boolean;
   source: string;
   sourceId: string;
   type: PowerPrompterCsvItemType;
@@ -88,9 +98,13 @@ export function parsePowerPrompterCsv(
       const tag = readCell(row, 0);
       if (!tag) return [];
       if (type === 'tag') {
+        const category = Number.parseInt(readCell(row, 1), 10) || 0;
+        const classifiers = classifyDanbooruTag(tag, category);
         return [{
           tag,
-          category: Number.parseInt(readCell(row, 1), 10) || 0,
+          category,
+          classifiers,
+          explicit: hasExplicitDanbooruClassifier(classifiers),
           source: fileName,
           sourceId,
           type,
@@ -99,6 +113,8 @@ export function parsePowerPrompterCsv(
       return [{
         tag,
         category: 4,
+        classifiers: [],
+        explicit: false,
         extra: row.slice(1).map((value) => value.trim()).filter(Boolean).join(', '),
         source: fileName,
         sourceId,
@@ -110,14 +126,27 @@ export function parsePowerPrompterCsv(
   const tagIndex = getHeaderIndex(headers, expectedHeader);
   const categoryIndex = getHeaderIndex(headers, 'category');
   const attributesIndex = getHeaderIndex(headers, 'attributes');
+  const postCountIndex = getHeaderIndex(headers, 'post_count', 'post count', 'postcount', 'count');
   const displayIndex = getHeaderIndex(headers, 'localized_name', 'localized_character');
   const aliasesIndex = getHeaderIndex(headers, 'localized_aliases', 'aliases', 'alias');
   const localizedAttributesIndex = getHeaderIndex(headers, 'localized_attributes');
+  const classifiersIndex = getHeaderIndex(headers, 'classifiers', 'classifier');
 
   return dataRows.flatMap((row) => {
     const tag = readCell(row, tagIndex);
     if (!tag) return [];
     const displayTag = readCell(row, displayIndex);
+    const rawPostCount = readCell(row, postCountIndex);
+    const parsedPostCount = rawPostCount === '' ? null : Number.parseInt(rawPostCount, 10);
+    const category = type === 'character'
+      ? 4
+      : Number.parseInt(readCell(row, categoryIndex), 10) || 0;
+    const storedClassifiers = type === 'tag'
+      ? parseDanbooruTagClassifiers(readCell(row, classifiersIndex))
+      : [];
+    const classifiers = type === 'tag' && storedClassifiers.length === 0
+      ? classifyDanbooruTag(tag, category)
+      : storedClassifiers;
     const searchAliases = [
       readCell(row, aliasesIndex),
       readCell(row, localizedAttributesIndex),
@@ -125,9 +154,12 @@ export function parsePowerPrompterCsv(
 
     return [{
       tag,
-      category: type === 'character'
-        ? 4
-        : Number.parseInt(readCell(row, categoryIndex), 10) || 0,
+      category,
+      classifiers,
+      explicit: hasExplicitDanbooruClassifier(classifiers),
+      ...(parsedPostCount !== null && Number.isFinite(parsedPostCount) && parsedPostCount >= 0
+        ? { count: parsedPostCount }
+        : {}),
       ...(type === 'character' && readCell(row, attributesIndex)
         ? { extra: readCell(row, attributesIndex) }
         : {}),

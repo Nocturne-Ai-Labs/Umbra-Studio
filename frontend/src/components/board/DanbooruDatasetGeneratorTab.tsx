@@ -228,6 +228,9 @@ export function DanbooruDatasetGeneratorTab() {
               </div>
               <TextInput label="Tags" value={limit} onChange={setLimit} placeholder="1000 or all" help="Use a number, or type all to fetch every matching tag Danbooru returns." />
               <NumberInput label="Min Tag Posts" value={minTagPosts} onChange={setMinTagPosts} min={0} max={10000000} />
+              <p className="rounded-md border border-emerald-400/15 bg-emerald-500/[0.06] px-3 py-2 text-[10px] leading-4 text-emerald-100/70">
+                Every tag row includes Danbooru&apos;s current post count for sorting, filtering, and wildcard scoring.
+              </p>
               {tagCategory === '1' ? <Checkbox label="Anima artist tokens: prepend @ and remove spaces/underscores" checked={animaArtistTokens} onChange={setAnimaArtistTokens} /> : null}
             </>
           )}

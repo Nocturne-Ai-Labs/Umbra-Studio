@@ -85,11 +85,17 @@ import {
   type PowerPrompterCsvItem,
 } from './backend/powerPrompterCsv';
 import {
+  DANBOORU_TAG_CLASSIFIERS,
+  getDanbooruTagClassifierDefinition,
+  type DanbooruTagClassifierId,
+} from './shared/danbooru/tagClassifiers';
+import {
   createUmbraWildcardChoices,
   expandUmbraPromptWildcardSegments,
   expandUmbraPromptWildcards,
   normalizeUmbraWildcardHoldSelections,
   normalizeUmbraPromptWildcards,
+  type UmbraPromptWildcardChoice,
 } from './shared/promptWildcards';
 import {
   buildHermesPromptCommand,
@@ -108,6 +114,14 @@ import {
   resolveUmbraUiPrompterOutputLayout,
 } from './backend/UmbraUiPrompterOutputLayout';
 import { getComfyVramLaunchArguments } from './backend/comfyLaunchArguments';
+import {
+  generateDataForgeWildcard,
+  inspectDataForgeWildcardTags,
+  listDataForgeWildcardClassifiers,
+  searchDataForgeWildcardTags,
+  type DataForgeWildcardGenerateRequest,
+} from './backend/DataForgeWildcardGenerator';
+import { ensureDefaultDanbooruTagCatalog } from './backend/DefaultDanbooruTagCatalog';
 
 // Route handlers we're keeping (will merge later)
 import * as trashRoutes from './backend/routes/trash';
@@ -211,6 +225,23 @@ const USER_DIR = join(ROOT_DIR, 'User');
 const POWER_PROMPTER_RECEIPT_DIR = join(USER_DIR, 'PowerPrompter', 'Receipts');
 const REMOTE_BOOTSTRAP_SETTINGS_PATH = join(USER_DIR, 'Config', 'UmbraRemote', 'settings.json');
 const IS_UMBRA_DEV_MODE = process.env.UMBRA_DEV_MODE === '1';
+const defaultDanbooruCatalogMigration = ensureDefaultDanbooruTagCatalog({
+  userDir: USER_DIR,
+  sourceDir: SOURCE_DIR,
+  runtimeRoot: ROOT_DIR,
+});
+if (defaultDanbooruCatalogMigration.action === 'replaced-stock') {
+  console.log('[PowerPrompter] Updated the stock Danbooru tag catalog.');
+} else if (defaultDanbooruCatalogMigration.action === 'installed') {
+  console.log('[PowerPrompter] Installed the default Danbooru tag catalog.');
+} else if (defaultDanbooruCatalogMigration.action === 'preserved-custom') {
+  console.log('[PowerPrompter] Preserved the customized Danbooru tag catalog.');
+} else if (defaultDanbooruCatalogMigration.action === 'missing-bundled') {
+  console.warn('[PowerPrompter] The bundled Danbooru tag catalog is missing.');
+}
+if (defaultDanbooruCatalogMigration.removedLegacyAlias) {
+  console.log('[PowerPrompter] Removed the obsolete stock Danbooru tag alias.');
+}
 const firstRunService = new FirstRunService(ROOT_DIR, SOURCE_DIR);
 const UMBRA_SERVER_LAUNCH_ID = randomBytes(16).toString('hex');
 
@@ -574,6 +605,24 @@ async function handleBooruImageProxy(req: Request, url: URL): Promise<Response> 
 
 type DatasetResearchMode = 'character' | 'artist' | 'concept';
 type DatasetResearchCategory = 'general' | 'character' | 'copyright' | 'artist' | 'meta' | 'unknown';
+
+function resolveDataForgeWildcardTagCsvPath(): string {
+  const candidates = [
+    join(USER_DIR, 'PowerPrompter', 'CSV', 'tags', 'UmbraDanbooruTagsv1.csv'),
+    join(SOURCE_DIR, 'defaults', 'PowerPrompter', 'CSV', 'tags', 'UmbraDanbooruTagsv1.csv'),
+    join(ROOT_DIR, 'resources', 'app', 'defaults', 'PowerPrompter', 'CSV', 'tags', 'UmbraDanbooruTagsv1.csv'),
+  ];
+  const csvPath = candidates.find((candidate) => existsSync(candidate));
+  if (!csvPath) throw new Error('Umbra Danbooru tag CSV is missing. Run the Data Forge tag generator or repair the app defaults.');
+  return csvPath;
+}
+
+async function getDataForgeDanbooruAuthorization(): Promise<string> {
+  const apiKeys = await loadStoredApiKeys();
+  const username = String(apiKeys.danbooru?.username || '').trim();
+  const apiKey = String(apiKeys.danbooru?.apiKey || '').trim();
+  return username && apiKey ? `Basic ${Buffer.from(`${username}:${apiKey}`).toString('base64')}` : '';
+}
 
 function normalizeDatasetResearchTag(value: unknown): string {
   return String(value || '')
@@ -16173,6 +16222,40 @@ function resolvePowerPrompterWildcardFile(root: string, rawPath: unknown): strin
   return absolutePath;
 }
 
+function resolvePowerPrompterWildcardMetadataFile(root: string, rawPath: unknown): string | null {
+  const wildcardFile = resolvePowerPrompterWildcardFile(root, rawPath);
+  return wildcardFile ? wildcardFile.replace(/\.txt$/i, '.umbra.json') : null;
+}
+
+function normalizePowerPrompterWildcardChoices(
+  name: string,
+  values: string[],
+  rawChoices: unknown,
+): UmbraPromptWildcardChoice[] | null {
+  if (!Array.isArray(rawChoices) || rawChoices.length === 0) return null;
+  const defaultChoices = createUmbraWildcardChoices(name, values);
+  const normalized = normalizeUmbraPromptWildcards([{ name, values, choices: rawChoices }])[0];
+  const providedByValue = new Map((normalized?.choices || []).map((choice) => [choice.value, choice]));
+  if (defaultChoices.length === 0 || !defaultChoices.every((choice) => providedByValue.has(choice.value))) return null;
+  return normalizeUmbraPromptWildcards([{
+    name,
+    values,
+    choices: defaultChoices.map((choice) => ({
+      ...choice,
+      chance: providedByValue.get(choice.value)?.chance,
+    })),
+  }])[0]?.choices || null;
+}
+
+async function removePowerPrompterWildcardFiles(root: string, rawPath: unknown): Promise<void> {
+  const wildcardFile = resolvePowerPrompterWildcardFile(root, rawPath);
+  const metadataFile = resolvePowerPrompterWildcardMetadataFile(root, rawPath);
+  await Promise.all([
+    wildcardFile ? fs.rm(wildcardFile, { force: true }) : Promise.resolve(),
+    metadataFile ? fs.rm(metadataFile, { force: true }) : Promise.resolve(),
+  ]);
+}
+
 interface PowerPrompterWildcardFileEntry {
   name: string;
   folder: string;
@@ -16222,11 +16305,21 @@ async function listPowerPrompterWildcards() {
         if (!existing.folder && entry.folder && existing.absolutePath !== destination && !existsSync(destination)) {
           await fs.mkdir(dirname(destination), { recursive: true });
           await fs.rename(existing.absolutePath, destination);
+          const sourceMetadata = resolvePowerPrompterWildcardMetadataFile(PP_WILDCARDS_DIR, existing.path);
+          const destinationMetadata = resolvePowerPrompterWildcardMetadataFile(PP_WILDCARDS_DIR, entry.path);
+          if (sourceMetadata && destinationMetadata && existsSync(sourceMetadata) && !existsSync(destinationMetadata)) {
+            await fs.rename(sourceMetadata, destinationMetadata);
+          }
         }
         return;
       }
       await fs.mkdir(dirname(destination), { recursive: true });
       await fs.copyFile(entry.absolutePath, destination);
+      const sourceMetadata = resolvePowerPrompterWildcardMetadataFile(PP_DEFAULT_WILDCARDS_DIR, entry.path);
+      const destinationMetadata = resolvePowerPrompterWildcardMetadataFile(PP_WILDCARDS_DIR, entry.path);
+      if (sourceMetadata && destinationMetadata && existsSync(sourceMetadata)) {
+        await fs.copyFile(sourceMetadata, destinationMetadata);
+      }
     }));
   }
   const entries = await listPowerPrompterWildcardFiles(PP_WILDCARDS_DIR);
@@ -16237,11 +16330,22 @@ async function listPowerPrompterWildcards() {
   const wildcards = await Promise.all([...uniqueEntries.values()].map(async (entry) => {
     const content = await fs.readFile(entry.absolutePath, 'utf8');
     const values = content.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    const metadataPath = resolvePowerPrompterWildcardMetadataFile(PP_WILDCARDS_DIR, entry.path);
+    let choices: UmbraPromptWildcardChoice[] | null = null;
+    if (metadataPath && existsSync(metadataPath)) {
+      try {
+        const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8')) as { choices?: unknown };
+        choices = normalizePowerPrompterWildcardChoices(entry.name, values, metadata?.choices);
+      } catch (error) {
+        console.warn(`[PowerPrompter] Ignoring invalid wildcard metadata for ${entry.path}:`, error);
+      }
+    }
     return {
       name: entry.name,
       folder: entry.folder,
       path: entry.path,
       values,
+      ...(choices ? { choices } : {}),
     };
   }));
   return wildcards.sort((left, right) => left.folder.localeCompare(right.folder) || left.name.localeCompare(right.name));
@@ -22755,6 +22859,7 @@ interface PowerPrompterQueueHistoryDocument {
 let ppIndex: PPItem[] = [];
 let ppTagIndex: PPItem[] = [];
 let ppCharacterIndex: PPItem[] = [];
+let ppBrowseIndex: PPItem[] = [];
 let ppIndexingPromise: Promise<void> | null = null;
 
 function normalizePPQueueMode(rawMode: unknown): PowerPrompterQueueMode {
@@ -23462,6 +23567,10 @@ async function indexPowerPrompterCSVs() {
     ppIndex = newIndex;
     ppCharacterIndex = newIndex.filter((entry) => entry.type === 'character' || entry.category === 4);
     ppTagIndex = newIndex.filter((entry) => !(entry.type === 'character' || entry.category === 4));
+    ppBrowseIndex = [...newIndex].sort((left, right) => (
+      Number(right.count ?? -1) - Number(left.count ?? -1)
+      || String(left.tag || '').localeCompare(String(right.tag || ''))
+    ));
     console.log(`[PowerPrompter] Indexed ${ppIndex.length} items`);
   })().finally(() => {
     ppIndexingPromise = null;
@@ -23542,12 +23651,68 @@ function matchesPPSearchCardScope(item: PPItem, cardType: PowerPrompterCardType 
   return item.type === 'tag' && item.category !== 4;
 }
 
+function normalizePPSearchCategory(rawCategory: unknown): number | null {
+  const value = String(rawCategory ?? '').trim().toLowerCase();
+  if (!value || value === 'all') return null;
+  const parsed = Number.parseInt(value, 10);
+  return parsed === 0 || parsed === 1 || parsed === 3 || parsed === 4 || parsed === 5 ? parsed : null;
+}
+
+function normalizePPSearchClassifier(rawClassifier: unknown): DanbooruTagClassifierId | null {
+  const value = String(rawClassifier ?? '').trim();
+  return getDanbooruTagClassifierDefinition(value)?.id || null;
+}
+
+function matchesPPCatalogFilters(
+  item: PPItem,
+  category: number | null,
+  classifier: DanbooruTagClassifierId | null,
+  includeExplicit: boolean,
+): boolean {
+  if (!includeExplicit && item.explicit) return false;
+  if (category !== null && item.category !== category) return false;
+  if (classifier && !item.classifiers.includes(classifier)) return false;
+  return true;
+}
+
+function listPowerPrompterClassifiers(enabledCSVs: string[], includeExplicit: boolean) {
+  const csvFilter = createPPCsvFilter(enabledCSVs);
+  if (csvFilter.size === 0) return [];
+  const tagsByClassifier = new Map<DanbooruTagClassifierId, Set<string>>();
+  for (const definition of DANBOORU_TAG_CLASSIFIERS) tagsByClassifier.set(definition.id, new Set());
+
+  for (const item of ppIndex) {
+    if (!matchesPPCsvFilter(item, csvFilter)) continue;
+    if (!includeExplicit && item.explicit) continue;
+    const key = `${item.type}:${String(item.tag || '').trim().toLowerCase()}`;
+    if (!key.endsWith(':')) {
+      for (const classifier of item.classifiers) tagsByClassifier.get(classifier)?.add(key);
+    }
+  }
+
+  return DANBOORU_TAG_CLASSIFIERS
+    .filter((definition) => includeExplicit || !definition.explicit)
+    .map((definition) => ({
+      ...definition,
+      count: tagsByClassifier.get(definition.id)?.size || 0,
+    }))
+    .filter((definition) => definition.count > 0);
+}
+
 function searchPP(
   query: string,
   page: number = 0,
   limit: number = 100,
   enabledCSVs: string[] = [],
-  options?: { scope?: unknown; cardType?: unknown; fast?: unknown; }
+  options?: {
+    scope?: unknown;
+    cardType?: unknown;
+    fast?: unknown;
+    browse?: unknown;
+    category?: unknown;
+    classifier?: unknown;
+    includeExplicit?: unknown;
+  }
 ) {
   const q = normalizePPSearchText(query);
   const safePage = Number.isFinite(page) ? Math.max(0, Math.floor(page)) : 0;
@@ -23555,21 +23720,26 @@ function searchPP(
   const scope = normalizePPSearchScope(options?.scope);
   const cardType = normalizePPCardSearchType(options?.cardType);
   const fast = String(options?.fast || '').trim().toLowerCase() === '1' || options?.fast === true;
+  const browse = String(options?.browse || '').trim().toLowerCase() === '1' || options?.browse === true;
+  const category = normalizePPSearchCategory(options?.category);
+  const classifier = normalizePPSearchClassifier(options?.classifier);
+  const includeExplicit = options?.includeExplicit !== false && String(options?.includeExplicit ?? '1').trim() !== '0';
   const start = safePage * safeLimit;
   const results: PPItem[] = [];
   let total = 0;
   const csvFilter = createPPCsvFilter(enabledCSVs);
 
-  if (q.length < 2 || csvFilter.size === 0) {
+  if ((q.length < 2 && !browse) || csvFilter.size === 0) {
     return { results: [], total: 0, hasMore: false };
   }
 
-  if (fast) {
+  if (fast && q.length >= 2) {
     const byKey = new Map<string, PPItem>();
     const seenOrder: string[] = [];
     const considerItem = (item: PPItem) => {
       if (!matchesPPCsvFilter(item, csvFilter)) return;
       if (!matchesPPSearchCardScope(item, cardType, scope)) return;
+      if (!matchesPPCatalogFilters(item, category, classifier, includeExplicit)) return;
       if (!matchesPPSearchQuery(item, q)) return;
       const key = normalizePPSearchText(item.tag) || `${item.type}:${String(item.tag || '')}`;
       const existing = byKey.get(key);
@@ -23606,10 +23776,12 @@ function searchPP(
     results.push(...ordered.slice(start, start + safeLimit));
   } else {
     // Avoid expensive array allocations on huge indexes by streaming matches.
-    for (const item of ppIndex) {
+    const sourceIndex = browse && !q ? ppBrowseIndex : ppIndex;
+    for (const item of sourceIndex) {
       if (!matchesPPCsvFilter(item, csvFilter)) continue;
       if (!matchesPPSearchCardScope(item, cardType, scope)) continue;
-      if (!matchesPPSearchQuery(item, q)) continue;
+      if (!matchesPPCatalogFilters(item, category, classifier, includeExplicit)) continue;
+      if (q && !matchesPPSearchQuery(item, q)) continue;
 
       if (total >= start && results.length < safeLimit) {
         results.push(item);
@@ -30976,6 +31148,62 @@ const server = Bun.serve<any>({
         return handleBooruDatasetResearch(url);
       }
 
+      if (path === '/api/data-forge/wildcard-generator/tags' && method === 'GET') {
+        try {
+          const values = await searchDataForgeWildcardTags({
+            csvPath: resolveDataForgeWildcardTagCsvPath(),
+            query: String(url.searchParams.get('query') || ''),
+            limit: Number(url.searchParams.get('limit') || 20),
+            category: url.searchParams.has('category') ? Number(url.searchParams.get('category')) : null,
+            classifier: url.searchParams.get('classifier'),
+            includeExplicit: url.searchParams.get('includeExplicit') !== '0',
+            authorization: await getDataForgeDanbooruAuthorization(),
+          });
+          return json({ ok: true, values });
+        } catch (error: any) {
+          return json({ ok: false, error: error?.message || 'Wildcard tag search failed.' }, 502);
+        }
+      }
+
+      if (path === '/api/data-forge/wildcard-generator/classifiers' && method === 'GET') {
+        try {
+          const values = await listDataForgeWildcardClassifiers({
+            csvPath: resolveDataForgeWildcardTagCsvPath(),
+            includeExplicit: url.searchParams.get('includeExplicit') !== '0',
+          });
+          return json({ ok: true, values });
+        } catch (error: any) {
+          return json({ ok: false, error: error?.message || 'Wildcard classifier catalog failed.' }, 502);
+        }
+      }
+
+      if (path === '/api/data-forge/wildcard-generator/inspect' && method === 'POST') {
+        try {
+          const body = await req.json().catch(() => ({})) as { tags?: unknown };
+          const values = await inspectDataForgeWildcardTags({
+            csvPath: resolveDataForgeWildcardTagCsvPath(),
+            tags: body.tags,
+            authorization: await getDataForgeDanbooruAuthorization(),
+          });
+          return json({ ok: true, values });
+        } catch (error: any) {
+          return json({ ok: false, error: error?.message || 'Wildcard tag inspection failed.' }, 400);
+        }
+      }
+
+      if (path === '/api/data-forge/wildcard-generator/generate' && method === 'POST') {
+        try {
+          const body = await req.json().catch(() => ({})) as DataForgeWildcardGenerateRequest;
+          const result = await generateDataForgeWildcard({
+            csvPath: resolveDataForgeWildcardTagCsvPath(),
+            request: body,
+          });
+          return json({ ok: true, ...result });
+        } catch (error: any) {
+          return json({ ok: false, error: error?.message || 'Wildcard generation failed.' }, 400);
+        }
+      }
+
       if (path === '/api/booru/dataset-generator/run' && method === 'POST') {
         return handleBooruDatasetGeneratorRun(req);
       }
@@ -33522,12 +33750,32 @@ const server = Bun.serve<any>({
         const scope = url.searchParams.get('scope') || 'scoped';
         const cardType = url.searchParams.get('cardType') || '';
         const fast = url.searchParams.get('fast') || '';
-        if (ppIndex.length === 0 && !ppIndexingPromise) {
-          void indexPowerPrompterCSVs().catch((error) => {
-            console.warn('[PowerPrompter] Lazy index warning:', error);
-          });
+        const browse = url.searchParams.get('browse') || '';
+        const category = url.searchParams.get('category') || '';
+        const classifier = url.searchParams.get('classifier') || '';
+        const includeExplicit = url.searchParams.get('includeExplicit') !== '0';
+        if (classifier && !getDanbooruTagClassifierDefinition(classifier)) {
+          return json({ error: `Unknown tag classifier: ${classifier}` }, 400);
         }
-        return json(searchPP(q, page, limit, csvs, { scope, cardType, fast }));
+        if (ppIndex.length === 0) await indexPowerPrompterCSVs();
+        return json(searchPP(q, page, limit, csvs, {
+          scope,
+          cardType,
+          fast,
+          browse,
+          category,
+          classifier,
+          includeExplicit,
+        }));
+      }
+
+      if (path === '/api/powerprompter/classifiers' && method === 'GET') {
+        const csvs = (url.searchParams.get('csvs')?.split(',') || [])
+          .map((entry) => String(entry || '').trim())
+          .filter((entry) => entry.length > 0);
+        const includeExplicit = url.searchParams.get('includeExplicit') !== '0';
+        if (ppIndex.length === 0) await indexPowerPrompterCSVs();
+        return json({ values: listPowerPrompterClassifiers(csvs, includeExplicit) });
       }
 
       if (path === '/api/powerprompter/api-workflows' && method === 'GET') {
@@ -34323,7 +34571,7 @@ const server = Bun.serve<any>({
       }
 
       if (path === '/api/powerprompter/wildcards' && method === 'PUT') {
-        const body = await req.json().catch(() => ({})) as { name?: unknown; folder?: unknown; path?: unknown; values?: unknown };
+        const body = await req.json().catch(() => ({})) as { name?: unknown; folder?: unknown; path?: unknown; values?: unknown; choices?: unknown };
         const name = normalizePowerPrompterWildcardName(body.name);
         if (!name) return json({ success: false, error: 'Use letters, numbers, hyphens, or underscores for a wildcard name.' }, 400);
         const values = Array.isArray(body.values)
@@ -34344,12 +34592,29 @@ const server = Bun.serve<any>({
           return json({ success: false, error: `A wildcard named __${name}__ already exists in ${duplicate.folder || 'the root folder'}. Wildcard names must stay unique across folders.` }, 409);
         }
         const destination = resolvePowerPrompterWildcardFile(PP_WILDCARDS_DIR, targetPath);
+        const destinationMetadata = resolvePowerPrompterWildcardMetadataFile(PP_WILDCARDS_DIR, targetPath);
         if (!destination) return json({ success: false, error: 'Wildcard folder or name is invalid.' }, 400);
+        const sourceMetadata = resolvePowerPrompterWildcardMetadataFile(PP_WILDCARDS_DIR, sourcePath || targetPath);
+        let metadataChoices = normalizePowerPrompterWildcardChoices(name, values, body.choices);
+        if (body.choices === undefined && sourceMetadata && existsSync(sourceMetadata)) {
+          try {
+            const metadata = JSON.parse(await fs.readFile(sourceMetadata, 'utf8')) as { choices?: unknown };
+            metadataChoices = normalizePowerPrompterWildcardChoices(name, values, metadata?.choices);
+          } catch {
+            metadataChoices = null;
+          }
+        }
         await fs.mkdir(dirname(destination), { recursive: true });
         await fs.writeFile(destination, `${values.join('\n')}\n`, 'utf8');
+        if (destinationMetadata) {
+          if (metadataChoices) {
+            await fs.writeFile(destinationMetadata, `${JSON.stringify({ version: 1, choices: metadataChoices }, null, 2)}\n`, 'utf8');
+          } else {
+            await fs.rm(destinationMetadata, { force: true });
+          }
+        }
         if (sourcePath && sourcePath !== targetPath) {
-          const source = resolvePowerPrompterWildcardFile(PP_WILDCARDS_DIR, sourcePath);
-          if (source && source !== destination) await fs.rm(source, { force: true });
+          await removePowerPrompterWildcardFiles(PP_WILDCARDS_DIR, sourcePath);
         }
         return json({ success: true, wildcards: await listPowerPrompterWildcards() });
       }
@@ -34359,7 +34624,7 @@ const server = Bun.serve<any>({
         if (!wildcardPath) return json({ success: false, error: 'Wildcard path is required.' }, 400);
         const target = resolvePowerPrompterWildcardFile(PP_WILDCARDS_DIR, wildcardPath);
         if (!target) return json({ success: false, error: 'Wildcard path is invalid.' }, 400);
-        await fs.rm(target, { force: true });
+        await removePowerPrompterWildcardFiles(PP_WILDCARDS_DIR, wildcardPath);
         return json({ success: true, wildcards: await listPowerPrompterWildcards() });
       }
 
@@ -34367,7 +34632,7 @@ const server = Bun.serve<any>({
         const name = normalizePowerPrompterWildcardName(decodeURIComponent(path.slice('/api/powerprompter/wildcards/'.length)));
         if (!name) return json({ success: false, error: 'Wildcard name is required.' }, 400);
         const entry = (await listPowerPrompterWildcardFiles(PP_WILDCARDS_DIR)).find((candidate) => candidate.name === name);
-        if (entry) await fs.rm(entry.absolutePath, { force: true });
+        if (entry) await removePowerPrompterWildcardFiles(PP_WILDCARDS_DIR, entry.path);
         return json({ success: true, wildcards: await listPowerPrompterWildcards() });
       }
 

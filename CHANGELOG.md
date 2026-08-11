@@ -1,5 +1,81 @@
 # Changelog
 
+## v0.31.10
+
+### TL;DR - Setup After Updating
+
+No manual tag generation is required. Umbra Studio now ships the expanded
+Danbooru catalog with post counts and smart classifiers as its default CSV.
+On startup, an unchanged stock catalog from an older release is upgraded
+automatically; customized user CSVs remain untouched. No additional models,
+custom nodes, or configuration changes are required.
+
+### Data Forge Wildcard Generator
+
+- Added a dedicated wildcard authoring workspace with configurable prompt
+  groups, per-group inclusion percentages, even-distribution defaults, and a
+  live output preview.
+- Added a searchable Tag Catalog drawer so users can inspect and select the
+  available Danbooru vocabulary without leaving the generator.
+- Added post-count-aware tag data and reusable smart classifier groups for
+  poses, facial expressions, clothing, accessories, and explicit content.
+- Kept the built-in examples suitable for general audiences while allowing
+  explicit classifiers to be selected deliberately when needed.
+
+### Default Danbooru Catalog Upgrade
+
+- Replaced the previous bundled CSV with the expanded 5.4 MB catalog containing
+  `tag`, `category`, `color`, `post_count`, and `classifiers` columns.
+- Added a safe startup migration that upgrades only exact, known stock CSV
+  files from earlier releases. User-edited catalogs are detected and preserved.
+- Removed the obsolete stock `danbooru-tags.csv` alias during migration so
+  upgraded installations do not index duplicate tag libraries.
+
+### Power Prompter Tag Catalog
+
+- Replaced the previous search surface with the shared Tag Catalog experience,
+  including CSV source selection, classifier filters, favorites, post counts,
+  and category-aware browsing.
+- Preserved smart prompt insertion: selecting a suggestion replaces the
+  incomplete tag being typed, then cleans spacing, commas, and duplicates.
+- Added the catalog to the expanded variant workflow so large tag libraries
+  remain searchable without crowding the card editor.
+
+### Mobile Set Selection And Variant Defaults
+
+- Added an always-visible active-set selector to Power Prompter on phones so
+  users can see which set they are editing and change it without opening the
+  desktop controls panel.
+- Changed newly created variants to begin with no queue sets enabled. Adding a
+  variant no longer silently assigns it to one or more sets; users opt into the
+  exact sets they want.
+- Preserved existing variants and their current set assignments.
+
+### Verification
+
+- Verified the catalog migration against missing, current, and customized user
+  CSV states.
+- Verified the Data Forge wildcard generator, Power Prompter Tag Catalog,
+  mobile active-set control, and new-variant set behavior in the development
+  app.
+- Confirmed focused tests, the production frontend build, pipeline audit, and
+  frontend ESLint checks complete successfully.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Existing users no longer need to regenerate the Danbooru CSV to
+  receive post counts and smart classifiers.
+- **Fixed:** The retired stock CSV alias no longer causes duplicate tag results
+  after an update.
+- **Fixed:** Adding a Power Prompter variant no longer enables queue sets
+  automatically.
+- **Improved:** Data Forge can build weighted wildcard libraries from a visible,
+  searchable, post-count-aware tag catalog.
+- **Improved:** Power Prompter uses the same richer catalog while retaining its
+  source selection and incomplete-tag replacement behavior.
+- **Improved:** Mobile users can always identify and switch the active Power
+  Prompter set.
+
 ## v0.31.9
 
 ### TL;DR - Setup After Updating

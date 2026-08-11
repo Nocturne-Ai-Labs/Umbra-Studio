@@ -10,6 +10,7 @@ import {
   loadDanbooruLocalizationMap,
   normalizeOutputLanguage,
 } from './lib/danbooru-localization.mjs';
+import { classifyDanbooruTag } from '../shared/danbooru/tagClassifiers.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -22,6 +23,7 @@ const DEFAULT_LOCALIZATION_CACHE_FILE = path.join(repoRoot, 'User', 'Cache', 'Da
 const DANBOORU_MAX_TAG_LIMIT = 1000;
 const DEFAULT_GENERAL_TAG_MIN_POSTS = 150;
 const DEFAULT_ARTIST_TAG_MIN_POSTS = 100;
+const DEFAULT_CONTEXT_TAG_MIN_POSTS = 10;
 const MAX_POST_LIMIT = 200;
 const MAX_FETCH_ATTEMPTS = 10;
 const GENERATOR_STOP_EXIT_CODE = 75;
@@ -53,7 +55,8 @@ const TAG_CATEGORY_COLORS = {
   meta: '#f2c94c',
   unknown: '#828282',
 };
-const TAG_LIST_ALLOWED_CATEGORY_IDS = new Set([0, 1, 5]);
+const TAG_LIST_CATEGORY_IDS = [0, 1, 3, 4, 5];
+const TAG_LIST_ALLOWED_CATEGORY_IDS = new Set(TAG_LIST_CATEGORY_IDS);
 const DEFAULT_IGNORE_TAGS = new Set([
   '',
   'absurdres',
@@ -397,6 +400,8 @@ function parseMode(value) {
 
 function parseTagCategory(value) {
   const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'all') return 'all';
+
   const categoryId = /^\d+$/.test(normalized)
     ? Number(normalized)
     : TAG_CATEGORIES[normalized];
@@ -405,7 +410,7 @@ function parseTagCategory(value) {
     throw new Error('--tag-category must be a Danbooru category number from 0-5.');
   }
   if (!TAG_LIST_ALLOWED_CATEGORY_IDS.has(categoryId)) {
-    throw new Error('--tag-category for plain tag CSVs must omit copyright and character tags. Use 0 general, 1 artist, or 5 meta.');
+    throw new Error('--tag-category must be all, 0 general, 1 artist, 3 copyright, 4 character, or 5 meta.');
   }
 
   return categoryId;
@@ -479,15 +484,15 @@ Options:
   -i, --interactive            Open a prompt menu
   --mode <value>               character-attributes or tags. Default: character-attributes
   --tags                       Shortcut for --mode tags
-  --tag-category <0|1|5>       Tag CSV Danbooru category. Use 0 general, 1 artist, or 5 meta
+  --tag-category <value>       Tag CSV category: all, 0 general, 1 artist, 3 copyright, 4 character, or 5 meta
   --remove-underscores         Output tags with spaces instead of underscores
   --output-language <value>    Optional search aliases: canonical (default), ja, or zh-CN
   --no-append-copyright        Do not append copyright to ambiguous character names
   --character-source <value>   Character list source: danbooru or csv. Default: danbooru
   --character-tags-csv <path>  Input character tag CSV when using --character-source csv
   --out-file <path>            Output CSV. Default: User/PowerPrompter/CSV/Characters/danbooru-character-attributes.csv
-  --limit <number>             Number of character tags to process. Default: 100
-  --all                        Process every character tag returned by Danbooru
+  --limit <number>             Rows to process, per category in all-category tag mode. Default: 100
+  --all                        Process every matching character or selected-category tag
   --tag <danbooru_tag>         Process a single character tag instead of the CSV list
   --series <danbooru_tag>      Find characters from recent posts for a series/copyright tag
   --copyright <danbooru_tag>   Alias for --series
@@ -495,7 +500,7 @@ Options:
   --post-sample <number>       Danbooru posts sampled per character, max 200. Default: 100
   --max-attributes <number>    Max attributes per character. Default: 12
   --min-character-posts <num>  Minimum Danbooru post count / series appearances. Default: 100
-  --min-tag-posts <num>        Minimum post count for tag CSV mode. General defaults to 150; artists default to 100
+  --min-tag-posts <num>        Minimum post count. Defaults: general 150, artist 100, other categories 10
   --min-frequency <0..1>       How common a tag must be to keep it. Default: 0.12
   --post-filter <tags>         Extra Danbooru filters, comma-separated. Use underscores inside tags. Default: "solo"
   --concurrency <number>       Parallel Danbooru post requests. Default: 4
@@ -505,11 +510,12 @@ Options:
 
 Output format:
   character mode: character,attributes
-  tags mode: tag,category,color
+  tags mode: tag,category,color,post_count,classifiers
   ja/zh-CN add localized_name and localized_aliases columns while preserving canonical prompt columns
 
 Examples:
   bun scripts/danbooru-character-attributes-csv.mjs --interactive
+  bun scripts/danbooru-character-attributes-csv.mjs --tags --tag-category all --all
   bun scripts/danbooru-character-attributes-csv.mjs --tags --tag-category 0 --limit 1000
   bun scripts/danbooru-character-attributes-csv.mjs --tag hatsune_miku
   bun scripts/danbooru-character-attributes-csv.mjs --series zenless_zone_zero --limit 50
@@ -530,24 +536,33 @@ async function promptForOptions(options) {
       options.mode = 'tags';
       options.outFile = DEFAULT_TAG_LIST_OUT_FILE;
       console.log('\nChoose tag category:');
+      console.log('  A. All supported categories');
       console.log('  0. General');
       console.log('  1. Artist');
+      console.log('  3. Copyright');
+      console.log('  4. Character');
       console.log('  5. Meta');
-      console.log('Character (4) and copyright/series (3) are omitted from this tag CSV mode.');
-      const categoryChoice = (await ask(rl, '\nChoice [1]: ', '1')).trim();
-      options.tagCategory = parseTagCategory(categoryChoice || '1');
-      if (options.minTagPosts === null) options.minTagPosts = getDefaultMinTagPosts(options.tagCategory);
+      const categoryChoice = (await ask(rl, '\nChoice [A]: ', 'all')).trim();
+      options.tagCategory = parseTagCategory(categoryChoice === 'a' ? 'all' : categoryChoice || 'all');
+      if (options.minTagPosts === null && options.tagCategory !== 'all') {
+        options.minTagPosts = getDefaultMinTagPosts(options.tagCategory);
+      }
       options.limit = parseLimit(await ask(rl, `How many tags? Type all for everything. [${formatLimit(options.limit)}]: `, formatLimit(options.limit)));
-      options.minTagPosts = parseNonNegativeInt(await ask(rl, `Minimum tag post count [${options.minTagPosts}]: `, String(options.minTagPosts)), 'min-tag-posts');
+      if (options.tagCategory === 'all') {
+        const minimum = await ask(rl, 'Minimum tag post count [category defaults]: ', '');
+        options.minTagPosts = minimum ? parseNonNegativeInt(minimum, 'min-tag-posts') : null;
+      } else {
+        options.minTagPosts = parseNonNegativeInt(await ask(rl, `Minimum tag post count [${options.minTagPosts}]: `, String(options.minTagPosts)), 'min-tag-posts');
+      }
       options.removeUnderscores = parseYesNo(await ask(rl, 'Output tags with spaces instead of underscores? [y/N]: ', 'n'));
       options.outputLanguage = await promptForOutputLanguage(rl);
       const outFile = await ask(rl, `Output CSV path [${path.relative(repoRoot, options.outFile)}]: `, options.outFile);
       options.outFile = path.resolve(outFile);
       console.log('\nReady to scan.');
       console.log(`Mode: tags`);
-      console.log(`Category: ${options.tagCategory} (${TAG_CATEGORY_NAMES[options.tagCategory] || 'unknown'})`);
+      console.log(`Category: ${options.tagCategory === 'all' ? 'all supported categories' : `${options.tagCategory} (${TAG_CATEGORY_NAMES[options.tagCategory] || 'unknown'})`}`);
       console.log(`Tags: ${formatLimit(options.limit)}`);
-      console.log(`Minimum tag post count: ${options.minTagPosts}`);
+      console.log(`Minimum tag post count: ${options.minTagPosts ?? 'category defaults'}`);
       console.log(`Remove underscores: ${options.removeUnderscores ? 'yes' : 'no'}`);
       console.log(`Localized aliases: ${options.outputLanguage}`);
       console.log(`Output: ${path.relative(repoRoot, options.outFile)}\n`);
@@ -726,12 +741,13 @@ async function fetchCharacterTagsFromDanbooru(limit, options) {
   return tags;
 }
 
-async function fetchTagRowsFromDanbooru(options) {
+async function fetchTagRowsForCategory(options, categoryId, onProgress) {
   const rows = [];
   let page = 1;
-  const categoryId = options.tagCategory;
+  let beforeId = '';
   const categoryName = TAG_CATEGORY_NAMES[categoryId] || 'unknown';
   const minPostCount = options.minTagPosts ?? getDefaultMinTagPosts(categoryId);
+  const useStableFullCatalogPagination = !Number.isFinite(options.limit);
 
   console.log(`Loading ${formatLimit(options.limit)} category ${categoryId} (${categoryName}) tags from Danbooru...`);
   if (minPostCount > 0) {
@@ -743,9 +759,14 @@ async function fetchTagRowsFromDanbooru(options) {
     const pageLimit = Math.min(DANBOORU_MAX_TAG_LIMIT, remaining);
     const url = new URL(DANBOORU_TAGS_URL);
     url.searchParams.set('limit', String(pageLimit));
-    url.searchParams.set('page', String(page));
     url.searchParams.set('search[category]', String(categoryId));
-    url.searchParams.set('search[order]', 'count');
+    if (useStableFullCatalogPagination) {
+      url.searchParams.set('search[order]', 'date');
+      if (beforeId) url.searchParams.set('page', `b${beforeId}`);
+    } else {
+      url.searchParams.set('page', String(page));
+      url.searchParams.set('search[order]', 'count');
+    }
     if (minPostCount > 0) {
       url.searchParams.set('search[post_count]', `>=${minPostCount}`);
     }
@@ -755,13 +776,16 @@ async function fetchTagRowsFromDanbooru(options) {
     if (!Array.isArray(tags) || tags.length === 0) break;
 
     for (const tag of tags) {
-      if (Number(tag?.post_count || 0) < minPostCount) continue;
+      const postCount = Math.max(0, Math.floor(Number(tag?.post_count) || 0));
+      if (postCount < minPostCount) continue;
       const name = normalizeTag(tag?.name);
       if (!name) continue;
       const category = Number(tag?.category);
       rows.push({
         category,
+        classifiers: classifyDanbooruTag(name, category),
         color: TAG_CATEGORY_COLORS[TAG_CATEGORY_LABELS.get(category) || 'unknown'] || TAG_CATEGORY_COLORS.unknown,
+        postCount,
         tag: name,
         options,
       });
@@ -769,8 +793,13 @@ async function fetchTagRowsFromDanbooru(options) {
     }
 
     console.log(`  tag page ${page}: ${rows.length.toLocaleString()} found`);
-    if (typeof options.writeRows === 'function') await options.writeRows(rows);
+    if (typeof onProgress === 'function') await onProgress(rows);
     if (tags.length < pageLimit) break;
+    if (useStableFullCatalogPagination) {
+      const nextBeforeId = String(tags.at(-1)?.id || '');
+      if (!nextBeforeId || nextBeforeId === beforeId) break;
+      beforeId = nextBeforeId;
+    }
     page += 1;
   }
 
@@ -778,10 +807,41 @@ async function fetchTagRowsFromDanbooru(options) {
   return rows;
 }
 
+async function fetchTagRowsFromDanbooru(options) {
+  const categoryIds = options.tagCategory === 'all'
+    ? TAG_LIST_CATEGORY_IDS
+    : [options.tagCategory];
+  const rows = [];
+  const seenTags = new Set();
+
+  for (const categoryId of categoryIds) {
+    const categoryRows = await fetchTagRowsForCategory(options, categoryId, async (partialRows) => {
+      if (typeof options.writeRows === 'function') {
+        await options.writeRows([...rows, ...partialRows]);
+      }
+    });
+    for (const row of categoryRows) {
+      if (seenTags.has(row.tag)) continue;
+      seenTags.add(row.tag);
+      rows.push(row);
+    }
+    if (typeof options.writeRows === 'function') await options.writeRows(rows);
+  }
+
+  rows.sort((left, right) => (
+    left.category - right.category
+    || right.postCount - left.postCount
+    || left.tag.localeCompare(right.tag)
+  ));
+
+  console.log(`Loaded ${rows.length.toLocaleString()} total tags across ${categoryIds.length} categor${categoryIds.length === 1 ? 'y' : 'ies'}.\n`);
+  return rows;
+}
+
 function getDefaultMinTagPosts(categoryId) {
   if (categoryId === 0) return DEFAULT_GENERAL_TAG_MIN_POSTS;
   if (categoryId === 1) return DEFAULT_ARTIST_TAG_MIN_POSTS;
-  return 0;
+  return DEFAULT_CONTEXT_TAG_MIN_POSTS;
 }
 
 async function loadCharacterTags(filePath, limit) {
@@ -1036,8 +1096,8 @@ function toCsv(rows, fallbackOptions = {}) {
 function tagRowsToCsv(rows, fallbackOptions = {}) {
   const localized = (rows[0]?.options || fallbackOptions).outputLanguage !== 'canonical';
   const headers = localized
-    ? ['tag', 'category', 'color', 'localized_name', 'localized_aliases']
-    : ['tag', 'category', 'color'];
+    ? ['tag', 'category', 'color', 'post_count', 'classifiers', 'localized_name', 'localized_aliases']
+    : ['tag', 'category', 'color', 'post_count', 'classifiers'];
   const lines = [
     headers.join(','),
     ...rows.map((row) => {
@@ -1045,6 +1105,8 @@ function tagRowsToCsv(rows, fallbackOptions = {}) {
         csvCell(displayTag(row.tag, row.options)),
         csvCell(row.category),
         csvCell(row.color),
+        csvCell(row.postCount),
+        csvCell((row.classifiers || classifyDanbooruTag(row.tag, row.category)).join('|')),
       ];
       if (!localized) return canonicalCells.join(',');
       const localization = getLocalizedTag(row.options.localizationMap, row.tag);
