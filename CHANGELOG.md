@@ -1,5 +1,69 @@
 # Changelog
 
+## v0.31.12
+
+### TL;DR - Setup After Updating
+
+Update normally. The Extras file picker and Gallery handoffs require no manual
+configuration. Automatic image censoring downloads one checksum-verified,
+MIT-licensed detector of approximately 12 MB the first time it is used, so an
+internet connection is required for that first run. Manual-region censoring,
+upscaling, watermarking, and video-to-GIF conversion do not require this model.
+
+### Extras File Selection And Gallery Handoffs
+
+- Repaired the desktop **Add Images** and **Add Videos** controls across Extras
+  so the Windows file picker opens visibly in front of Umbra Studio instead of
+  remaining hidden behind the application.
+- Restored the complete Gallery context-menu handoff under **Send to Umbra UI >
+  Extras** for Upscale, Image Censor, Image Watermark, Video Watermark, and
+  Video to GIF.
+- Preserved multi-selection counts and disabled actions that do not match the
+  selected media type, preventing images from being sent to video-only tools
+  and videos from being sent to image-only tools.
+
+### Automatic Batch Censoring
+
+- Added local automatic detection for female nipples, male genitals, and female
+  genitals, with each target independently selectable for a batch.
+- Added confidence and censor-padding controls so users can tune detection and
+  coverage without changing the source images.
+- Added multi-region mosaic and image-overlay compositing so every selected
+  target found in an image is censored in a single pass.
+- Kept Manual Region mode available for images that need deliberate placement
+  or correction beyond automatic detection.
+- Added detection-box previews with target labels and confidence after each
+  image is processed.
+- Included automatic-censor settings in Image Censor presets, alongside the
+  existing format, resize, overlay, output, and mosaic controls.
+- Downloads the pinned detector into Umbra's user-model storage, verifies its
+  SHA-256 checksum before activation, and keeps model binaries out of release
+  packages and repository source.
+
+### Verification
+
+- Verified the Windows Add button launches a foreground-owned native picker
+  from the packaged application path.
+- Verified the Gallery image context menu exposes every compatible Extras
+  action and stages Image Censor handoffs correctly.
+- Verified detector inference through Umbra's bundled Python helper runtime and
+  verified independent target filtering.
+- Verified multi-region censor compositing preserves source dimensions and the
+  server writes completed files to the automatic `Censored` destination.
+- Confirmed the production frontend build, frontend ESLint, and backend Bun
+  compilation pass.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Extras Add buttons no longer appear unresponsive because a native
+  picker opened behind the app.
+- **Fixed:** Gallery context menus once again expose the complete set of Extras
+  batch workflows.
+- **Improved:** Batch censoring can target female nipples, male genitals, and
+  female genitals independently instead of relying on one manual rectangle.
+- **Improved:** Automatic detection remains local, model integrity is verified,
+  and manual censor placement remains available as a fallback.
+
 ## v0.31.11
 
 ### TL;DR - Setup After Updating

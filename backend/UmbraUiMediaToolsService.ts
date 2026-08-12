@@ -211,12 +211,15 @@ export async function applyUmbraUiImageCensor(options: {
   outputPath: string;
   mode: UmbraUiImageCensorMode;
   overlayPath?: string;
-  region: UmbraUiCensorRegion;
+  region?: UmbraUiCensorRegion;
+  regions?: UmbraUiCensorRegion[];
   mosaicSize: number;
   exportSettings: UmbraUiImageExportSettings;
 }): Promise<void> {
   const exportSettings = normalizeImageExportSettings(options.exportSettings);
-  const region = normalizeCensorRegion(options.region);
+  const regions = (options.regions?.length ? options.regions : options.region ? [options.region] : [])
+    .map(normalizeCensorRegion);
+  if (regions.length === 0) throw new Error('No censor regions were found.');
   const source = sharp(options.sourcePath).rotate();
   const metadata = await source.metadata();
   const originalWidth = Math.max(1, Number(metadata.width) || 1);
@@ -231,37 +234,38 @@ export async function applyUmbraUiImageCensor(options: {
     .ensureAlpha()
     .png()
     .toBuffer();
-  const left = Math.max(0, Math.min(outputWidth - 1, Math.round(outputWidth * region.x)));
-  const top = Math.max(0, Math.min(outputHeight - 1, Math.round(outputHeight * region.y)));
-  const width = Math.max(1, Math.min(outputWidth - left, Math.round(outputWidth * region.width)));
-  const height = Math.max(1, Math.min(outputHeight - top, Math.round(outputHeight * region.height)));
-
-  let censorLayer: Buffer;
-  if (options.mode === 'overlay') {
-    if (!options.overlayPath) throw new Error('Choose a censor overlay image.');
-    censorLayer = await sharp(options.overlayPath)
-      .rotate()
-      .resize({ width, height, fit: 'fill', kernel: sharp.kernel.nearest })
-      .ensureAlpha()
-      .png()
-      .toBuffer();
-  } else {
-    const blockSize = Math.round(clamp(options.mosaicSize, 2, 160, 24));
-    const mosaicWidth = Math.max(1, Math.round(width / blockSize));
-    const mosaicHeight = Math.max(1, Math.round(height / blockSize));
-    const reduced = await sharp(prepared)
-      .extract({ left, top, width, height })
-      .resize({ width: mosaicWidth, height: mosaicHeight, fit: 'fill', kernel: sharp.kernel.nearest })
-      .png()
-      .toBuffer();
-    censorLayer = await sharp(reduced)
-      .resize({ width, height, fit: 'fill', kernel: sharp.kernel.nearest })
-      .png()
-      .toBuffer();
+  const compositeLayers: sharp.OverlayOptions[] = [];
+  for (const region of regions) {
+    const left = Math.max(0, Math.min(outputWidth - 1, Math.round(outputWidth * region.x)));
+    const top = Math.max(0, Math.min(outputHeight - 1, Math.round(outputHeight * region.y)));
+    const width = Math.max(1, Math.min(outputWidth - left, Math.round(outputWidth * region.width)));
+    const height = Math.max(1, Math.min(outputHeight - top, Math.round(outputHeight * region.height)));
+    let censorLayer: Buffer;
+    if (options.mode === 'overlay') {
+      if (!options.overlayPath) throw new Error('Choose a censor overlay image.');
+      censorLayer = await sharp(options.overlayPath)
+        .rotate()
+        .resize({ width, height, fit: 'fill', kernel: sharp.kernel.nearest })
+        .ensureAlpha()
+        .png()
+        .toBuffer();
+    } else {
+      const blockSize = Math.round(clamp(options.mosaicSize, 2, 160, 24));
+      const reduced = await sharp(prepared)
+        .extract({ left, top, width, height })
+        .resize({ width: Math.max(1, Math.round(width / blockSize)), height: Math.max(1, Math.round(height / blockSize)), fit: 'fill', kernel: sharp.kernel.nearest })
+        .png()
+        .toBuffer();
+      censorLayer = await sharp(reduced)
+        .resize({ width, height, fit: 'fill', kernel: sharp.kernel.nearest })
+        .png()
+        .toBuffer();
+    }
+    compositeLayers.push({ input: censorLayer, left, top, blend: 'over' });
   }
 
   await fs.mkdir(dirname(options.outputPath), { recursive: true });
-  const output = sharp(prepared).composite([{ input: censorLayer, left, top, blend: 'over' }]);
+  const output = sharp(prepared).composite(compositeLayers);
   if (exportSettings.format === 'jpeg') {
     await output.flatten({ background: '#ffffff' }).jpeg({ quality: exportSettings.quality, chromaSubsampling: '4:4:4' }).toFile(options.outputPath);
   } else if (exportSettings.format === 'webp') {

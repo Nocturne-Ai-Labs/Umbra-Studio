@@ -61,6 +61,10 @@ import {
   convertUmbraUiVideoToGif,
   isUmbraUiWatermarkVideo,
 } from './backend/UmbraUiMediaToolsService';
+import {
+  detectUmbraUiCensorRegions,
+  type UmbraUiCensorTarget,
+} from './backend/UmbraUiCensorDetectorService';
 import { applyUmbraUiClipSkipToGraph } from './backend/UmbraUiGraphControls';
 import { upsertPngTextMetadata } from './backend/PngTextMetadata';
 import {
@@ -20316,6 +20320,7 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
     const hasOverlayUpload = overlay && typeof overlay.name === 'string' && typeof overlay.arrayBuffer === 'function' && Number(overlay.size) > 0;
     const gallerySourcePath = resolveUmbraUiMediaToolSourcePath(form.get('sourcePath'), UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS, allowExternalOutput);
     const mode = String(form.get('mode') || '').trim().toLowerCase() === 'overlay' ? 'overlay' : 'mosaic';
+    const regionMode = String(form.get('regionMode') || '').trim().toLowerCase() === 'detect' ? 'detect' : 'manual';
     const savedOverlayPath = mode === 'overlay' ? resolveUmbraUiWatermarkAssetPath(form.get('overlayPath')) : '';
     if (!hasSourceUpload && !gallerySourcePath) {
       return json({ success: false, error: 'Choose an image to censor.' }, 400);
@@ -20347,6 +20352,20 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
       ...(hasOverlayUpload ? [fs.writeFile(overlayPath, Buffer.from(await overlay.arrayBuffer()))] : []),
     ]);
     const outputFolder = resolveUmbraUiMediaToolOutputFolder(form.get('outputFolder'), allowExternalOutput, gallerySourcePath, 'Censored');
+    const allowedTargets = new Set<UmbraUiCensorTarget>(['femaleNipples', 'maleGenitals', 'femaleGenitals']);
+    const requestedTargets = String(form.get('targets') || '')
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry): entry is UmbraUiCensorTarget => allowedTargets.has(entry as UmbraUiCensorTarget));
+    const detections = regionMode === 'detect'
+      ? await detectUmbraUiCensorRegions({
+        rootDir: ROOT_DIR,
+        sourcePath,
+        targets: requestedTargets,
+        threshold: Number(form.get('detectionThreshold')),
+        padding: Number(form.get('detectionPadding')),
+      })
+      : [];
     const imageFormatInput = String(form.get('imageFormat') || '').trim().toLowerCase();
     const imageFormat = imageFormatInput === 'jpeg' || imageFormatInput === 'jpg'
       ? 'jpeg'
@@ -20370,6 +20389,7 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
         width: Number(form.get('width')),
         height: Number(form.get('height')),
       },
+      regions: regionMode === 'detect' ? detections : undefined,
       mosaicSize: Number(form.get('mosaicSize')),
       exportSettings: {
         resizeEnabled: String(form.get('resizeEnabled') || '').trim().toLowerCase() === 'true',
@@ -20379,7 +20399,13 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
       },
     });
     reservedOutputPath = '';
-    return json({ success: true, path: toClientPath(outputPath), filename, mediaType: 'image' });
+    return json({
+      success: true,
+      path: toClientPath(outputPath),
+      filename,
+      mediaType: 'image',
+      detections,
+    });
   } catch (error: any) {
     console.error('[UmbraUI Media Tools] Censor failed:', error);
     return json({ success: false, error: String(error?.message || error || 'Failed to censor image.') }, 400);
@@ -20550,17 +20576,26 @@ async function runNativeFilePicker(
   if (process.platform === 'win32') {
     const script = [
       'Add-Type -AssemblyName System.Windows.Forms',
+      '$owner = New-Object System.Windows.Forms.Form',
+      '$owner.TopMost = $true',
+      '$owner.ShowInTaskbar = $false',
+      '$owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen',
+      '$owner.Size = New-Object System.Drawing.Size(1, 1)',
+      '$owner.Show()',
       '$dialog = New-Object System.Windows.Forms.OpenFileDialog',
       `$dialog.Title = ${quotePowerShellLiteral(title)}`,
       `$dialog.InitialDirectory = ${quotePowerShellLiteral(startDir)}`,
       `$dialog.Filter = ${quotePowerShellLiteral(windowsFilter)}`,
       '$dialog.Multiselect = $true',
       '$dialog.CheckFileExists = $true',
-      'if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {',
+      '$owner.Activate()',
+      'if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {',
       '  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
       '  $dialog.FileNames | ForEach-Object { Write-Output $_ }',
       '}',
       '$dialog.Dispose()',
+      '$owner.Close()',
+      '$owner.Dispose()',
     ].join('; ');
     proc = Bun.spawn(['powershell.exe', '-NoProfile', '-STA', '-WindowStyle', 'Hidden', '-Command', script]);
   } else if (process.platform === 'darwin') {

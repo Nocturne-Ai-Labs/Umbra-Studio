@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Copy,
   Download,
+  EyeOff,
   FileJson,
   Film,
   Folder,
@@ -9721,6 +9722,12 @@ export function ReactGalleryWorkspace() {
         icon: <ImageUp size={14} />,
         disabled: selectedImagePaths.length === 0,
         action: () => sendPathsToUmbraUiUpscale(selectedImagePaths),
+      },
+      {
+        label: selectedImagePaths.length > 1 ? `Image Censor (${selectedImagePaths.length})` : 'Image Censor',
+        icon: <EyeOff size={14} />,
+        disabled: selectedImagePaths.length === 0,
+        action: () => sendPathsToUmbraUiExtras(selectedImagePaths, 'censor'),
       },
       {
         label: selectedWatermarkImagePaths.length > 1 ? `Image Watermark (${selectedWatermarkImagePaths.length})` : 'Image Watermark',

@@ -2,6 +2,14 @@ export interface UmbraUiMediaToolResult {
   path: string;
   filename: string;
   mediaType: 'image' | 'video' | 'gif';
+  detections?: Array<{
+    target: 'femaleNipples' | 'maleGenitals' | 'femaleGenitals';
+    score: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }>;
 }
 
 export interface UmbraUiWatermarkAsset {
@@ -34,6 +42,7 @@ async function readMediaToolResponse(response: Response, fallback: string): Prom
     path: String(payload.path),
     filename: String(payload.filename || '').trim(),
     mediaType: payload.mediaType === 'video' || payload.mediaType === 'gif' ? payload.mediaType : 'image',
+    detections: Array.isArray(payload.detections) ? payload.detections : undefined,
   };
 }
 
@@ -78,6 +87,10 @@ export async function submitUmbraUiImageCensor(options: {
   source?: File;
   sourcePath?: string;
   mode: 'mosaic' | 'overlay';
+  regionMode: 'manual' | 'detect';
+  targets: Array<'femaleNipples' | 'maleGenitals' | 'femaleGenitals'>;
+  detectionThreshold: number;
+  detectionPadding: number;
   overlay?: File;
   overlayPath?: string;
   outputFolder: string;
@@ -98,6 +111,10 @@ export async function submitUmbraUiImageCensor(options: {
   if (options.overlay) form.set('overlay', options.overlay, options.overlay.name);
   if (options.overlayPath) form.set('overlayPath', options.overlayPath);
   form.set('mode', options.mode);
+  form.set('regionMode', options.regionMode);
+  form.set('targets', options.targets.join(','));
+  form.set('detectionThreshold', String(options.detectionThreshold));
+  form.set('detectionPadding', String(options.detectionPadding));
   form.set('outputFolder', options.outputFolder);
   form.set('sequenceNumber', String(options.sequenceNumber));
   form.set('x', String(options.x));

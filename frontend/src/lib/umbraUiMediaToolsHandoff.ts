@@ -1,4 +1,4 @@
-export type UmbraUiMediaToolsHandoffMode = 'watermark' | 'video-watermark' | 'gif';
+export type UmbraUiMediaToolsHandoffMode = 'censor' | 'watermark' | 'video-watermark' | 'gif';
 
 export interface UmbraUiMediaToolsHandoff {
   mode: UmbraUiMediaToolsHandoffMode;
@@ -24,7 +24,9 @@ export function normalizeUmbraUiMediaToolsHandoff(value: unknown): UmbraUiMediaT
     ? 'gif'
     : source.mode === 'video-watermark'
       ? 'video-watermark'
-      : source.mode === 'watermark' ? 'watermark' : null;
+      : source.mode === 'watermark'
+        ? 'watermark'
+        : source.mode === 'censor' ? 'censor' : null;
   if (!mode) return null;
   const acceptedPattern = mode === 'gif' || mode === 'video-watermark'
     ? VIDEO_EXTENSION_PATTERN

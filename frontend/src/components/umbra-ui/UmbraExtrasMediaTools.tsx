@@ -68,6 +68,14 @@ const OUTPUT_FOLDER_STORAGE_KEY = 'umbra-ui:extras-media-tools-output-folder-v2'
 const WATERMARK_EXPORT_SETTINGS_KEY = 'umbra-ui:watermark-export-settings';
 const VIDEO_WATERMARK_WIDTH_KEY = 'umbra-ui:video-watermark-output-width';
 
+type CensorTarget = 'femaleNipples' | 'maleGenitals' | 'femaleGenitals';
+
+const CENSOR_TARGETS: Array<{ id: CensorTarget; label: string }> = [
+  { id: 'femaleNipples', label: 'Female Nipples' },
+  { id: 'maleGenitals', label: 'Male Genitals' },
+  { id: 'femaleGenitals', label: 'Female Genitals' },
+];
+
 const ANCHORS = [
   { x: 0, y: 0, title: 'Top left' },
   { x: 0.5, y: 0, title: 'Top center' },
@@ -538,6 +546,14 @@ function ImageCensorTool() {
   const { outputFolder, setOutputFolder, browsing, browse } = useOutputFolder('censor');
   const [selectedId, setSelectedId] = React.useState('');
   const [censorMode, setCensorMode] = React.useState<'mosaic' | 'overlay'>('mosaic');
+  const [regionMode, setRegionMode] = React.useState<'manual' | 'detect'>('detect');
+  const [censorTargets, setCensorTargets] = React.useState<Record<CensorTarget, boolean>>({
+    femaleNipples: true,
+    maleGenitals: true,
+    femaleGenitals: true,
+  });
+  const [detectionThreshold, setDetectionThreshold] = React.useState(0.278);
+  const [detectionPadding, setDetectionPadding] = React.useState(0.12);
   const [overlay, setOverlay] = React.useState<File | null>(null);
   const [overlayAsset, setOverlayAsset] = React.useState<UmbraUiWatermarkAsset | null>(null);
   const [overlayUploading, setOverlayUploading] = React.useState(false);
@@ -591,9 +607,34 @@ function ImageCensorTool() {
       setOverlayUploading(false);
     }
   }, [showToast]);
-  const presetExtra = React.useMemo<Record<string, unknown>>(() => ({ censorMode, overlayAsset, region, mosaicSize, outputFolder }), [censorMode, mosaicSize, outputFolder, overlayAsset, region]);
+  const selectedTargets = React.useMemo(
+    () => CENSOR_TARGETS.filter((target) => censorTargets[target.id]).map((target) => target.id),
+    [censorTargets],
+  );
+  const presetExtra = React.useMemo<Record<string, unknown>>(() => ({
+    censorMode,
+    regionMode,
+    censorTargets,
+    detectionThreshold,
+    detectionPadding,
+    overlayAsset,
+    region,
+    mosaicSize,
+    outputFolder,
+  }), [censorMode, censorTargets, detectionPadding, detectionThreshold, mosaicSize, outputFolder, overlayAsset, region, regionMode]);
   const applyPreset = React.useCallback((value: Record<string, unknown>) => {
     setCensorMode(value.censorMode === 'overlay' ? 'overlay' : 'mosaic');
+    setRegionMode(value.regionMode === 'manual' ? 'manual' : 'detect');
+    const rawTargets = value.censorTargets && typeof value.censorTargets === 'object'
+      ? value.censorTargets as Record<string, unknown>
+      : {};
+    setCensorTargets({
+      femaleNipples: rawTargets.femaleNipples !== false,
+      maleGenitals: rawTargets.maleGenitals !== false,
+      femaleGenitals: rawTargets.femaleGenitals !== false,
+    });
+    setDetectionThreshold(Math.max(0.05, Math.min(0.95, Number(value.detectionThreshold) || 0.278)));
+    setDetectionPadding(Math.max(0, Math.min(0.5, Number(value.detectionPadding) || 0.12)));
     const rawRegion = value.region && typeof value.region === 'object' ? value.region as Record<string, unknown> : {};
     updateRegion({ x: Number(rawRegion.x), y: Number(rawRegion.y), width: Number(rawRegion.width), height: Number(rawRegion.height) });
     setMosaicSize(Math.max(2, Math.min(160, Math.round(Number(value.mosaicSize) || 24))));
@@ -618,7 +659,12 @@ function ImageCensorTool() {
     }
   }, [addPaths, browsingSources, outputFolder, remoteClient, selected?.path, showToast]);
   const run = React.useCallback(async () => {
-    if (processing || items.length === 0 || (censorMode === 'overlay' && !overlay && !overlayAsset)) return;
+    if (
+      processing
+      || items.length === 0
+      || (regionMode === 'detect' && selectedTargets.length === 0)
+      || (censorMode === 'overlay' && !overlay && !overlayAsset)
+    ) return;
     setProcessing(true);
     setSummary({ completed: 0, failed: 0, total: items.length });
     setItems((current) => current.map((item) => ({ ...item, status: 'staged', error: undefined, result: undefined })));
@@ -626,7 +672,7 @@ function ImageCensorTool() {
       items,
       onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
       runItem: async (item, sequenceNumber) => {
-        const next = await submitUmbraUiImageCensor({ source: item.file, sourcePath: item.path, mode: censorMode, overlay: overlayAsset ? undefined : overlay || undefined, overlayPath: overlayAsset?.path, outputFolder: outputFolder.trim(), sequenceNumber, ...region, mosaicSize, resizeEnabled: exportSettings.resizeEnabled, longEdge: exportSettings.longEdge, imageFormat: exportSettings.format, quality: exportSettings.quality });
+        const next = await submitUmbraUiImageCensor({ source: item.file, sourcePath: item.path, mode: censorMode, regionMode, targets: selectedTargets, detectionThreshold, detectionPadding, overlay: overlayAsset ? undefined : overlay || undefined, overlayPath: overlayAsset?.path, outputFolder: outputFolder.trim(), sequenceNumber, ...region, mosaicSize, resizeEnabled: exportSettings.resizeEnabled, longEdge: exportSettings.longEdge, imageFormat: exportSettings.format, quality: exportSettings.quality });
         setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, result: next } : entry));
       },
       onItemSettled: (item, error) => {
@@ -637,7 +683,7 @@ function ImageCensorTool() {
     setProcessing(false);
     window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
     showToast(result.failed ? `${result.completed} censored; ${result.failed} failed.` : `${result.completed} image${result.completed === 1 ? '' : 's'} censored.`, result.failed ? 'error' : 'success');
-  }, [censorMode, exportSettings, items, mosaicSize, outputFolder, overlay, overlayAsset, processing, region, setItems, showToast]);
+  }, [censorMode, detectionPadding, detectionThreshold, exportSettings, items, mosaicSize, outputFolder, overlay, overlayAsset, processing, region, regionMode, selectedTargets, setItems, showToast]);
   const beginDrag = (event: React.PointerEvent<HTMLDivElement>, kind: 'move' | 'resize') => {
     event.preventDefault();
     event.stopPropagation();
@@ -663,16 +709,70 @@ function ImageCensorTool() {
         <div className="space-y-3">
           <button type="button" disabled={processing || browsingSources} onClick={() => void chooseSources()} className="flex min-h-11 w-full items-center gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 text-left hover:border-fuchsia-300/30 disabled:opacity-40">{browsingSources ? <Loader2 size={14} className="animate-spin text-fuchsia-300" /> : <Upload size={14} className="text-fuchsia-300" />}<span className="flex-1 text-[9px] font-black uppercase tracking-[0.13em] text-zinc-300">Add Images</span></button>
           <SourceBatchList items={items} disabled={processing} onSelect={setSelectedId} onRemove={(id) => setItems((current) => current.filter((item) => item.id !== id))} onClear={() => { setItems([]); setSummary({ completed: 0, failed: 0, total: 0 }); }} />
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => setRegionMode('detect')} className={cn('h-9 rounded-md border text-[9px] font-black uppercase tracking-[0.12em]', regionMode === 'detect' ? 'border-fuchsia-300/50 bg-fuchsia-500/[0.12] text-fuchsia-100' : 'border-white/10 text-zinc-500')}>Auto Detect</button>
+            <button type="button" onClick={() => setRegionMode('manual')} className={cn('h-9 rounded-md border text-[9px] font-black uppercase tracking-[0.12em]', regionMode === 'manual' ? 'border-fuchsia-300/50 bg-fuchsia-500/[0.12] text-fuchsia-100' : 'border-white/10 text-zinc-500')}>Manual Region</button>
+          </div>
+          {regionMode === 'detect' ? (
+            <div className="space-y-3 rounded-md border border-fuchsia-300/15 bg-fuchsia-500/[0.04] p-2.5">
+              <div className="flex items-center justify-between"><span className={labelClass}>Body Parts</span><span className="font-mono text-[8px] text-zinc-600">On-device detection</span></div>
+              <div className="grid grid-cols-1 gap-1.5">
+                {CENSOR_TARGETS.map((target) => (
+                  <button
+                    key={target.id}
+                    type="button"
+                    aria-pressed={censorTargets[target.id]}
+                    onClick={() => setCensorTargets((current) => ({ ...current, [target.id]: !current[target.id] }))}
+                    className={cn('flex min-h-9 items-center gap-2 rounded-md border px-2.5 text-left text-[9px] font-black uppercase tracking-[0.1em]', censorTargets[target.id] ? 'border-fuchsia-300/35 bg-fuchsia-500/[0.1] text-fuchsia-100' : 'border-white/10 text-zinc-600')}
+                  >
+                    <span className={cn('h-3 w-3 rounded-sm border', censorTargets[target.id] ? 'border-fuchsia-200 bg-fuchsia-400' : 'border-white/20 bg-black/30')} />
+                    {target.label}
+                  </button>
+                ))}
+              </div>
+              <label className="block space-y-1.5"><span className="flex justify-between"><span className={labelClass}>Detection Confidence</span><span className="font-mono text-[9px] text-fuchsia-200">{Math.round(detectionThreshold * 100)}%</span></span><input type="range" min={10} max={90} step={1} value={Math.round(detectionThreshold * 100)} onChange={(event) => setDetectionThreshold(Number(event.target.value) / 100)} className="w-full accent-fuchsia-300" /></label>
+              <label className="block space-y-1.5"><span className="flex justify-between"><span className={labelClass}>Censor Padding</span><span className="font-mono text-[9px] text-fuchsia-200">{Math.round(detectionPadding * 100)}%</span></span><input type="range" min={0} max={50} step={1} value={Math.round(detectionPadding * 100)} onChange={(event) => setDetectionPadding(Number(event.target.value) / 100)} className="w-full accent-fuchsia-300" /></label>
+              <p className="font-mono text-[8px] leading-relaxed text-zinc-600">The MIT-licensed anime detector downloads once on first use. Each image is scanned independently.</p>
+            </div>
+          ) : null}
           <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setCensorMode('mosaic')} className={cn('h-9 rounded-md border text-[9px] font-black uppercase tracking-[0.12em]', censorMode === 'mosaic' ? 'border-fuchsia-300/50 bg-fuchsia-500/[0.12] text-fuchsia-100' : 'border-white/10 text-zinc-500')}>Mosaic</button><button type="button" onClick={() => setCensorMode('overlay')} className={cn('h-9 rounded-md border text-[9px] font-black uppercase tracking-[0.12em]', censorMode === 'overlay' ? 'border-fuchsia-300/50 bg-fuchsia-500/[0.12] text-fuchsia-100' : 'border-white/10 text-zinc-500')}>Image Overlay</button></div>
           {censorMode === 'mosaic' ? <label className="block space-y-1.5"><span className="flex justify-between"><span className={labelClass}>Mosaic block size</span><span className="font-mono text-[9px] text-fuchsia-200">{mosaicSize}px</span></span><input type="range" min={2} max={128} step={1} value={mosaicSize} onChange={(event) => setMosaicSize(Number(event.target.value))} className="w-full accent-fuchsia-300" /></label> : <button type="button" disabled={overlayUploading} onClick={() => overlayInputRef.current?.click()} className="flex min-h-11 w-full items-center gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 text-left hover:border-fuchsia-300/30 disabled:opacity-40">{overlayUploading ? <Loader2 size={14} className="animate-spin text-fuchsia-300" /> : <ImageIcon size={14} className="text-fuchsia-300" />}<span className="min-w-0 flex-1"><span className="block text-[9px] font-black uppercase tracking-[0.13em] text-zinc-300">Censor Overlay</span><span className="block truncate font-mono text-[8px] text-zinc-600">{overlayUploading ? 'Saving for presets...' : overlayAsset?.filename || overlay?.name || 'Choose image'}</span></span></button>}
-          <div className="grid grid-cols-2 gap-2">{(['x', 'y', 'width', 'height'] as const).map((key) => <label key={key} className="block space-y-1"><span className={labelClass}>{key === 'x' || key === 'y' ? `${key.toUpperCase()} position` : key}</span><input type="number" min={0} max={100} step={1} value={Math.round(region[key] * 100)} onChange={(event) => updateRegion({ [key]: Number(event.target.value) / 100 })} className={controlClass} /></label>)}</div>
+          {regionMode === 'manual' ? <div className="grid grid-cols-2 gap-2">{(['x', 'y', 'width', 'height'] as const).map((key) => <label key={key} className="block space-y-1"><span className={labelClass}>{key === 'x' || key === 'y' ? `${key.toUpperCase()} position` : key}</span><input type="number" min={0} max={100} step={1} value={Math.round(region[key] * 100)} onChange={(event) => updateRegion({ [key]: Number(event.target.value) / 100 })} className={controlClass} /></label>)}</div> : null}
           <OutputDestination value={outputFolder} onChange={setOutputFolder} browsing={browsing} onBrowse={() => void browse()} automaticSubfolder="Censored" />
           <UmbraImageExportControls value={exportSettings} onChange={setExportSettings} presetScope="image-censor" presetLabel="Image Censor Preset" presetExtra={presetExtra} onPresetExtraChange={applyPreset} presetSaveDisabled={censorMode === 'overlay' && !overlayAsset} />
-          <button type="button" onClick={() => void run()} disabled={items.length === 0 || processing || (censorMode === 'overlay' && !overlay && !overlayAsset)} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-fuchsia-300/30 bg-fuchsia-500/[0.1] text-[10px] font-black uppercase tracking-[0.16em] text-fuchsia-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600">{processing ? <Loader2 size={13} className="animate-spin" /> : <EyeOff size={13} />}{processing ? `Processing ${summary.completed + summary.failed}/${summary.total}` : 'Run Image Censor Batch'}</button>
+          <button type="button" onClick={() => void run()} disabled={items.length === 0 || processing || (regionMode === 'detect' && selectedTargets.length === 0) || (censorMode === 'overlay' && !overlay && !overlayAsset)} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-fuchsia-300/30 bg-fuchsia-500/[0.1] text-[10px] font-black uppercase tracking-[0.16em] text-fuchsia-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600">{processing ? <Loader2 size={13} className="animate-spin" /> : <EyeOff size={13} />}{processing ? `Processing ${summary.completed + summary.failed}/${summary.total}` : 'Run Image Censor Batch'}</button>
           <BatchSummary {...summary} />
         </div>
       </section>
-      <main className="flex min-h-0 min-w-0 flex-col bg-black/20"><div className="flex min-h-10 items-center gap-2 border-b border-white/10 px-3"><Move size={13} className="text-zinc-500" /><span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400">Censor Region Preview</span><span className="ml-auto max-w-[45%] truncate font-mono text-[8px] text-zinc-600">{selected?.name || 'No source selected'}</span></div><div className="flex min-h-[320px] flex-1 items-center justify-center overflow-auto p-4 max-[900px]:min-h-[280px]">{sourceUrl && !previewFailed ? <div ref={previewRef} className="relative max-h-full max-w-full touch-none overflow-hidden bg-black shadow-2xl" style={{ aspectRatio: `${dimensions.width}/${dimensions.height}`, width: 'min(100%, calc((100vh - 220px) * ' + (dimensions.width / Math.max(1, dimensions.height)) + '))' }} onPointerMove={moveDrag} onPointerUp={() => { dragRef.current = null; }} onPointerCancel={() => { dragRef.current = null; }}><img src={sourceUrl} alt="Censor source preview" className="pointer-events-none block h-full w-full object-contain" onError={() => setPreviewFailed(true)} onLoad={(event) => setDimensions({ width: event.currentTarget.naturalWidth || 4, height: event.currentTarget.naturalHeight || 3 })} /><div className="absolute border-2 border-fuchsia-300 bg-fuchsia-500/15 shadow-[0_0_0_1px_rgba(0,0,0,0.6)]" style={{ left: `${region.x * 100}%`, top: `${region.y * 100}%`, width: `${region.width * 100}%`, height: `${region.height * 100}%` }} onPointerDown={(event) => beginDrag(event, 'move')}><div className={cn('pointer-events-none absolute inset-0', censorMode === 'mosaic' ? 'bg-[repeating-linear-gradient(45deg,rgba(217,70,239,0.35)_0,rgba(217,70,239,0.35)_8px,rgba(0,0,0,0.35)_8px,rgba(0,0,0,0.35)_16px)]' : '')}>{censorMode === 'overlay' && overlayUrl ? <img src={overlayUrl} alt="Censor overlay preview" className="h-full w-full object-fill" /> : null}</div><button type="button" aria-label="Resize censor region" onPointerDown={(event) => beginDrag(event, 'resize')} className="absolute -bottom-2 -right-2 h-4 w-4 rounded-sm border border-fuchsia-100 bg-fuchsia-500 shadow-lg" /></div></div> : <div className="text-center text-zinc-700"><EyeOff size={34} className="mx-auto mb-3" /><div className="text-[10px] font-black uppercase tracking-[0.16em]">{previewFailed ? 'Source preview unavailable' : 'Stage images to preview'}</div></div>}</div></main>
+      <main className="flex min-h-0 min-w-0 flex-col bg-black/20">
+        <div className="flex min-h-10 items-center gap-2 border-b border-white/10 px-3">
+          <Move size={13} className="text-zinc-500" />
+          <span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400">{regionMode === 'detect' ? 'Detection Preview' : 'Censor Region Preview'}</span>
+          <span className="ml-auto max-w-[45%] truncate font-mono text-[8px] text-zinc-600">{selected?.name || 'No source selected'}</span>
+        </div>
+        <div className="flex min-h-[320px] flex-1 items-center justify-center overflow-auto p-4 max-[900px]:min-h-[280px]">
+          {sourceUrl && !previewFailed ? (
+            <div ref={previewRef} className="relative max-h-full max-w-full touch-none overflow-hidden bg-black shadow-2xl" style={{ aspectRatio: `${dimensions.width}/${dimensions.height}`, width: 'min(100%, calc((100vh - 220px) * ' + (dimensions.width / Math.max(1, dimensions.height)) + '))' }} onPointerMove={moveDrag} onPointerUp={() => { dragRef.current = null; }} onPointerCancel={() => { dragRef.current = null; }}>
+              <img src={sourceUrl} alt="Censor source preview" className="pointer-events-none block h-full w-full object-contain" onError={() => setPreviewFailed(true)} onLoad={(event) => setDimensions({ width: event.currentTarget.naturalWidth || 4, height: event.currentTarget.naturalHeight || 3 })} />
+              {regionMode === 'manual' ? (
+                <div className="absolute border-2 border-fuchsia-300 bg-fuchsia-500/15 shadow-[0_0_0_1px_rgba(0,0,0,0.6)]" style={{ left: `${region.x * 100}%`, top: `${region.y * 100}%`, width: `${region.width * 100}%`, height: `${region.height * 100}%` }} onPointerDown={(event) => beginDrag(event, 'move')}>
+                  <div className={cn('pointer-events-none absolute inset-0', censorMode === 'mosaic' ? 'bg-[repeating-linear-gradient(45deg,rgba(217,70,239,0.35)_0,rgba(217,70,239,0.35)_8px,rgba(0,0,0,0.35)_8px,rgba(0,0,0,0.35)_16px)]' : '')}>{censorMode === 'overlay' && overlayUrl ? <img src={overlayUrl} alt="Censor overlay preview" className="h-full w-full object-fill" /> : null}</div>
+                  <button type="button" aria-label="Resize censor region" onPointerDown={(event) => beginDrag(event, 'resize')} className="absolute -bottom-2 -right-2 h-4 w-4 rounded-sm border border-fuchsia-100 bg-fuchsia-500 shadow-lg" />
+                </div>
+              ) : (
+                <>
+                  {(selected?.result?.detections || []).map((detection, index) => (
+                    <div key={`${detection.target}-${index}`} className="pointer-events-none absolute border-2 border-fuchsia-300 bg-fuchsia-500/20 shadow-[0_0_0_1px_rgba(0,0,0,0.7)]" style={{ left: `${detection.x * 100}%`, top: `${detection.y * 100}%`, width: `${detection.width * 100}%`, height: `${detection.height * 100}%` }}>
+                      <span className="absolute -top-5 left-0 whitespace-nowrap rounded-sm bg-black/85 px-1.5 py-0.5 font-mono text-[7px] uppercase text-fuchsia-200">{CENSOR_TARGETS.find((target) => target.id === detection.target)?.label || detection.target} {Math.round(detection.score * 100)}%</span>
+                    </div>
+                  ))}
+                  {!selected?.result ? <div className="pointer-events-none absolute inset-x-3 bottom-3 rounded-md border border-white/10 bg-black/75 px-3 py-2 text-center font-mono text-[8px] uppercase text-zinc-400">Detections appear after this image is processed</div> : null}
+                </>
+              )}
+            </div>
+          ) : <div className="text-center text-zinc-700"><EyeOff size={34} className="mx-auto mb-3" /><div className="text-[10px] font-black uppercase tracking-[0.16em]">{previewFailed ? 'Source preview unavailable' : 'Stage images to preview'}</div></div>}
+        </div>
+      </main>
     </div>
   );
 }
