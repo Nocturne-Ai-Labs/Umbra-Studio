@@ -11004,6 +11004,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                             )}
                             <div
                               ref={(node) => setVariantPromptFieldRef(variant.id, node)}
+                              data-umbra-variant-prompt-field=""
                               data-no-variant-drag="true"
                               draggable={false}
                               className={`relative z-30 mt-1 flex h-[50px] max-h-[50px] w-full min-w-0 flex-wrap items-start gap-1 overflow-hidden rounded border border-white/10 bg-black px-2 py-1 transition-colors ${chainLinkModeActive ? 'cursor-pointer' : 'cursor-text'}`}
@@ -11159,7 +11160,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                 onMouseDown={(event) => event.stopPropagation()}
                                 onPointerDown={(event) => event.stopPropagation()}
                               >
-                                <div className="flex min-w-0 items-center gap-1.5">
+                                <div data-umbra-wildcard-active-roll-header="" className="flex min-w-0 items-center gap-1.5">
                                   <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.13em] text-fuchsia-100">Active Roll</span>
                                   <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.08em] ${
                                     wildcardVariantMode === 'hold'
@@ -11168,7 +11169,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                   }`}>
                                     {wildcardVariantMode === 'hold' ? 'Held' : `${normalizeWildcardRerolls(variant.wildcardRerolls)}x Queue`}
                                   </span>
-                                  <div className="min-w-2 flex-1" />
+                                  <div data-umbra-wildcard-active-roll-spacer="" className="min-w-2 flex-1" />
                                   <button
                                     type="button"
                                     data-wildcard-mode-reroll=""

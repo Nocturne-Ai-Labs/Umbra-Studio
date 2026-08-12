@@ -4809,7 +4809,63 @@ html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-m
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-variant-card] {
-  overflow: hidden;
+  height: auto !important;
+  min-height: 13.25rem;
+  overflow: visible;
+  padding: 0.7rem;
+  font-size: 0.78rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-variant-card] > div:first-child {
+  min-height: 2.6rem;
+  flex-wrap: wrap;
+  align-content: center;
+  gap: 0.45rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-variant-prompt-field] {
+  height: 6rem !important;
+  max-height: 6rem !important;
+  margin-top: 0.6rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-variant-prompt-field] textarea {
+  padding: 0.65rem 0.7rem;
+  font-size: 0.8rem !important;
+  line-height: 1.3rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-wildcard-active-roll] {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-active-roll-header] {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-active-roll-spacer] {
+  width: 100%;
+  height: 0;
+  min-width: 100%;
+  flex: 0 0 100%;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-active-roll-header] > button {
+  min-width: 0;
+  min-height: 2.75rem;
+  flex: 1 1 0;
+  justify-content: center;
+  padding-inline: 0.45rem;
+  font-size: 0.64rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-active-prompt] {
+  max-height: 5.5rem;
+  font-size: 0.72rem;
+  line-height: 1.15rem;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor][data-umbra-mobile-selection-mode="1"] [data-umbra-variant-set-selector] {
@@ -4912,7 +4968,26 @@ html[data-umbra-remote-mode="phone"] [data-umbra-wildcard-reroll-count] > input 
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor] button[title="Enhance this variant with the configured agent"],
-html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor] button[title="Clean variant tags"],
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor] button[title="Clean underscores, whitespace, duplicate tags, and commas"] {
+  display: inline-flex;
+  width: 2.75rem !important;
+  min-width: 2.75rem !important;
+  height: 2.75rem;
+  min-height: 2.75rem;
+  flex: 0 0 2.75rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 !important;
+  border-radius: 0.6rem;
+  touch-action: manipulation;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor] button[title="Enhance this variant with the configured agent"] > svg,
+html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor] button[title="Clean underscores, whitespace, duplicate tags, and commas"] > svg {
+  width: 1rem;
+  height: 1rem;
+}
+
 html[data-umbra-remote-mode="phone"] [data-umbra-card-chain-editor] button[title="Copy active wildcard roll"] {
   min-width: 2.5rem !important;
   min-height: 2.5rem;

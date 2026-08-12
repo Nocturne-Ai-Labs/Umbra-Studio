@@ -28,7 +28,10 @@ type DeviceShellResume = Pick<SharedUiSession, 'activeWorkspace' | 'selectedLoca
 
 function normalizeWorkspace(value: unknown): WorkspaceType {
   const workspace = String(value || '').trim() === 'browser' ? 'comfyui' : String(value || '').trim();
-  return (VALID_WORKSPACES as string[]).includes(workspace) ? workspace as WorkspaceType : 'umbraui';
+  const normalizedWorkspace = (VALID_WORKSPACES as string[]).includes(workspace)
+    ? workspace as WorkspaceType
+    : 'umbraui';
+  return isPhoneRemoteClient() && normalizedWorkspace === 'board' ? 'umbraui' : normalizedWorkspace;
 }
 
 function isPhoneRemoteClient(): boolean {

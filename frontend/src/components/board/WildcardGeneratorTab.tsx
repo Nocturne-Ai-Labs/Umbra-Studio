@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Check,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Copy,
   DatabaseZap,
@@ -23,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { WildcardLibraryManager, type WildcardLibraryEntry } from '@/components/shared/WildcardLibraryManager';
 
 type WildcardTag = {
   tag: string;
@@ -105,6 +107,67 @@ function createId(prefix: string): string {
 
 function createGroup(name: string): WildcardGroup {
   return { id: createId('group'), name, enabled: true, required: true, options: [] };
+}
+
+function normalizeStoredWildcardTag(rawTag: unknown): WildcardTag | null {
+  if (typeof rawTag === 'string') {
+    const tag = rawTag.trim();
+    return tag ? { tag, category: 0, postCount: null, classifiers: [], explicit: false, source: 'local' } : null;
+  }
+  if (!rawTag || typeof rawTag !== 'object' || Array.isArray(rawTag)) return null;
+  const record = rawTag as Record<string, unknown>;
+  const tag = String(record.tag || '').trim();
+  if (!tag) return null;
+  return {
+    tag,
+    category: Number.isFinite(Number(record.category)) ? Number(record.category) : 0,
+    postCount: record.postCount !== null && record.postCount !== undefined && Number.isFinite(Number(record.postCount)) ? Number(record.postCount) : null,
+    classifiers: Array.isArray(record.classifiers) ? record.classifiers.map((value) => String(value || '').trim()).filter(Boolean) : [],
+    explicit: record.explicit === true,
+    source: record.source === 'danbooru' ? 'danbooru' : 'local',
+  };
+}
+
+function normalizeStoredWildcardDefinition(rawDefinition: unknown): {
+  count: number;
+  seed: number;
+  maxTagsPerLine: number;
+  prioritizePostCounts: boolean;
+  baseTags: WildcardTag[];
+  forbiddenTags: WildcardTag[];
+  groups: WildcardGroup[];
+} | null {
+  if (!rawDefinition || typeof rawDefinition !== 'object' || Array.isArray(rawDefinition)) return null;
+  const record = rawDefinition as Record<string, unknown>;
+  const groups = (Array.isArray(record.groups) ? record.groups : []).map((rawGroup, groupIndex) => {
+    const group = rawGroup && typeof rawGroup === 'object' && !Array.isArray(rawGroup) ? rawGroup as Record<string, unknown> : {};
+    const options = (Array.isArray(group.options) ? group.options : []).map((rawOption, optionIndex) => {
+      const option = rawOption && typeof rawOption === 'object' && !Array.isArray(rawOption) ? rawOption as Record<string, unknown> : {};
+      const tags = (Array.isArray(option.tags) ? option.tags : []).map(normalizeStoredWildcardTag).filter((tag): tag is WildcardTag => Boolean(tag));
+      return {
+        id: String(option.id || createId(`option-${groupIndex}-${optionIndex}`)),
+        tags,
+        chance: Math.max(0, Math.min(100, Math.round(Number(option.chance) || 0))),
+      };
+    }).filter((option) => option.tags.length > 0);
+    return {
+      id: String(group.id || createId(`group-${groupIndex}`)),
+      name: String(group.name || `Group ${groupIndex + 1}`).trim() || `Group ${groupIndex + 1}`,
+      enabled: group.enabled !== false,
+      required: group.required !== false,
+      options,
+    };
+  }).filter((group) => group.options.length > 0);
+  if (groups.length === 0) return null;
+  return {
+    count: Math.max(1, Math.min(1000, Math.floor(Number(record.count) || 50))),
+    seed: Math.max(0, Math.min(0xffffffff, Math.floor(Number(record.seed) || 0))),
+    maxTagsPerLine: Math.max(2, Math.min(40, Math.floor(Number(record.maxTagsPerLine) || 12))),
+    prioritizePostCounts: record.prioritizePostCounts !== false,
+    baseTags: (Array.isArray(record.baseTags) ? record.baseTags : []).map(normalizeStoredWildcardTag).filter((tag): tag is WildcardTag => Boolean(tag)),
+    forbiddenTags: (Array.isArray(record.forbiddenTags) ? record.forbiddenTags : []).map(normalizeStoredWildcardTag).filter((tag): tag is WildcardTag => Boolean(tag)),
+    groups,
+  };
 }
 
 function allocateWholePercentages(weights: number[], total = 100): number[] {
@@ -717,6 +780,8 @@ export function WildcardGeneratorTab() {
   const [generating, setGenerating] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
+  const [libraryOpen, setLibraryOpen] = React.useState(false);
+  const [editingWildcardPath, setEditingWildcardPath] = React.useState<string | null>(null);
 
   const appendUniqueTags = (current: WildcardTag[], incoming: WildcardTag[]) => {
     const existing = new Set(current.map((tag) => tag.tag.toLowerCase()));
@@ -781,15 +846,27 @@ export function WildcardGeneratorTab() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          ...(editingWildcardPath ? { path: editingWildcardPath } : {}),
           name,
           folder,
           values: result.values,
           choices: result.rows.map((row) => ({ value: row.value, chance: row.chance })),
+          generatorDefinition: {
+            version: 1,
+            count,
+            seed,
+            maxTagsPerLine,
+            prioritizePostCounts,
+            baseTags,
+            forbiddenTags,
+            groups,
+          },
         }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(String(payload?.error || 'Could not save wildcard.'));
       const normalizedName = String(name).trim().toLowerCase().replace(/\.txt$/i, '').replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+      setEditingWildcardPath(folder ? `${folder}/${normalizedName}` : normalizedName);
       showToast(`__${normalizedName}__ saved to Power Prompter.`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not save wildcard.', 'error');
@@ -806,12 +883,52 @@ export function WildcardGeneratorTab() {
     window.setTimeout(() => setCopied(false), 1200);
   };
 
+  const editStructuredWildcard = (wildcard: WildcardLibraryEntry) => {
+    const definition = normalizeStoredWildcardDefinition(wildcard.generatorDefinition);
+    if (!definition) {
+      showToast('This wildcard does not contain a valid Umbra Combination Groups recipe.', 'error');
+      return;
+    }
+    setName(wildcard.name);
+    setFolder(wildcard.folder);
+    setCount(definition.count);
+    setSeed(definition.seed);
+    setMaxTagsPerLine(definition.maxTagsPerLine);
+    setPrioritizePostCounts(definition.prioritizePostCounts);
+    setBaseTags(definition.baseTags);
+    setForbiddenTags(definition.forbiddenTags);
+    setGroups(definition.groups);
+    setResult(null);
+    setEditingWildcardPath(wildcard.path);
+    setLibraryOpen(false);
+    showToast(`__${wildcard.name}__ loaded into Combination Groups.`, 'success');
+  };
+
+  if (libraryOpen) {
+    return (
+      <div data-umbra-data-forge-wildcard-library="" className="h-full min-h-0 bg-[var(--umbra-bg)] text-[var(--umbra-text)]" style={{ fontFamily: 'var(--font-family)' }}>
+        <WildcardLibraryManager
+          open
+          activeSaveFolder={folder}
+          onClose={() => setLibraryOpen(false)}
+          onChooseSaveFolder={(nextFolder) => {
+            setFolder(nextFolder);
+            setLibraryOpen(false);
+          }}
+          onEditStructured={editStructuredWildcard}
+        />
+      </div>
+    );
+  }
+
   return (
     <div data-umbra-data-forge-wildcard-generator className="relative flex h-full min-h-0 flex-col overflow-y-auto bg-[var(--umbra-bg)] text-[var(--umbra-text)] lg:flex-row lg:overflow-hidden" style={{ fontFamily: 'var(--font-family)' }}>
       <aside data-umbra-wildcard-generator-config className="glass-panel custom-scrollbar w-full shrink-0 overflow-visible rounded-none border-x-0 border-t-0 p-4 lg:w-[21rem] lg:overflow-y-auto lg:border-b-0 lg:border-r">
         <div className="flex items-center gap-2">
           <DatabaseZap className="h-4 w-4 text-cyan-200" />
-          <h2 className="text-xs font-black uppercase tracking-[0.18em] text-zinc-100">Wildcard Generator</h2>
+          <h2 className="min-w-0 flex-1 text-xs font-black uppercase tracking-[0.18em] text-zinc-100">Wildcard Generator</h2>
+          {editingWildcardPath ? <span className="max-w-32 truncate rounded-sm border border-emerald-300/20 bg-emerald-500/[0.08] px-1.5 py-1 text-[7px] font-black uppercase tracking-[0.08em] text-emerald-200" title={`Editing ${editingWildcardPath}`}>Editing Umbra</span> : null}
+          <button type="button" onClick={() => setLibraryOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-fuchsia-300/25 bg-fuchsia-500/[0.08] px-2 text-[8px] font-black uppercase tracking-[0.1em] text-fuchsia-100 hover:border-fuchsia-200/50" title="Browse and edit existing wildcards"><FolderTree className="h-3 w-3" /> Library</button>
         </div>
 
         <div className="mt-4 space-y-4">
@@ -822,10 +939,7 @@ export function WildcardGeneratorTab() {
             </label>
             <label>
               <span className="mb-1 block text-[9px] font-black uppercase tracking-[0.12em] text-zinc-500">Folder</span>
-              <div className="relative">
-                <FolderTree className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-600" />
-                <input value={folder} onChange={(event) => setFolder(event.target.value)} placeholder="Generated/Poses" className="settings-input h-9 !py-1.5 pl-8 text-xs" />
-              </div>
+              <button type="button" onClick={() => setLibraryOpen(true)} className="flex h-9 w-full min-w-0 items-center gap-2 rounded-sm border border-white/10 bg-black/35 px-2.5 text-left text-xs text-zinc-200 hover:border-cyan-300/35" title="Choose a wildcard save folder"><FolderTree className="h-3.5 w-3.5 shrink-0 text-cyan-200" /><span className="min-w-0 flex-1 truncate">{folder || 'Root'}</span><ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-600" /></button>
             </label>
           </div>
 

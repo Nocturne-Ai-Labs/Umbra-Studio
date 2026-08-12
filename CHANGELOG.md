@@ -1,5 +1,72 @@
 # Changelog
 
+## v0.31.11
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, migrations, or manual configuration are
+required. Update normally. Existing wildcard text files remain compatible and
+are identified clearly in the new library; wildcards created with this release
+begin storing an editable Umbra Combination Groups recipe automatically.
+
+### Structured Wildcard Authoring
+
+- Added versioned Umbra wildcard metadata that preserves the complete generator
+  recipe: fixed and excluded tags, Combination Groups, bundled options,
+  percentage weights, line count, seed, maximum tags, and post-count priority.
+- Added **Edit Groups** for structured wildcards. It restores the wildcard into
+  the normal generator workspace instead of reducing it to raw text lines.
+- Saving a loaded structured wildcard updates its existing path, including
+  rename or folder changes, without creating an accidental duplicate.
+- Kept generated `.txt` files interoperable with ordinary wildcard tools while
+  storing Umbra's editable recipe in the adjacent `.umbra.json` sidecar.
+
+### Wildcard Library Workspace
+
+- Replaced the temporary overlay with a full Data Forge workspace divided into
+  a nested folder tree, wildcard browser, and editor.
+- Added gallery-style folder selection for generator destinations and wildcard
+  moves, including nested folders and recursive item counts.
+- Added wildcard search across names, folders, and prompt values.
+- Added safe editing, rename, move, and two-step deletion for existing wildcard
+  files and their WCUID metadata.
+- Added visible source badges: **Umbra Structured**, **Umbra Legacy**, and
+  **Legacy Text**, so users know which files can return to Combination Groups.
+- Preserved raw-line editing for legacy files. Editing generated output lines
+  directly invalidates stale structured metadata instead of restoring an
+  inaccurate recipe later.
+
+### Umbra Remote And Power Prompter Polish
+
+- Removed Data Forge from phone Remote navigation because its desktop authoring
+  tools are not suitable for a narrow touch workspace.
+- Increased phone variant-card height, prompt readability, and wildcard active
+  roll spacing while keeping cleanup and agent actions at reliable touch sizes.
+- Reduced the desktop and tablet Power Prompter Tag Catalog drawer height so it
+  covers less of the active card workspace.
+
+### Verification
+
+- Verified a complete structured wildcard round trip: create, identify, load
+  into Combination Groups, regenerate, update the same path, and delete.
+- Verified nested-folder creation, selection, move, rename, and deletion against
+  an isolated QA wildcard with no residual test files.
+- Confirmed the production frontend build and frontend ESLint checks pass.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Wildcard editing no longer has to happen in a detached overlay.
+- **Fixed:** New Umbra wildcards no longer lose their Combination Groups recipe
+  after being saved as generated text.
+- **Fixed:** Renaming or moving a structured wildcard preserves its recipe when
+  the generated values are unchanged.
+- **Improved:** Existing wildcard libraries can be browsed through nested
+  folders and clearly distinguish structured, older Umbra, and plain-text files.
+- **Improved:** Structured wildcard files reopen with their original controls,
+  options, weights, and generation settings intact.
+- **Improved:** Phone Power Prompter cards and wildcard controls are easier to
+  read and operate, while unsupported Data Forge navigation stays hidden.
+
 ## v0.31.10
 
 ### TL;DR - Setup After Updating

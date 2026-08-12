@@ -16247,6 +16247,16 @@ function normalizePowerPrompterWildcardChoices(
   }])[0]?.choices || null;
 }
 
+function normalizePowerPrompterWildcardGeneratorDefinition(rawDefinition: unknown): Record<string, unknown> | null {
+  if (!rawDefinition || typeof rawDefinition !== 'object' || Array.isArray(rawDefinition)) return null;
+  try {
+    const normalized = JSON.parse(JSON.stringify(rawDefinition)) as Record<string, unknown>;
+    return JSON.stringify(normalized).length <= 1_000_000 ? normalized : null;
+  } catch {
+    return null;
+  }
+}
+
 async function removePowerPrompterWildcardFiles(root: string, rawPath: unknown): Promise<void> {
   const wildcardFile = resolvePowerPrompterWildcardFile(root, rawPath);
   const metadataFile = resolvePowerPrompterWildcardMetadataFile(root, rawPath);
@@ -16332,10 +16342,14 @@ async function listPowerPrompterWildcards() {
     const values = content.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
     const metadataPath = resolvePowerPrompterWildcardMetadataFile(PP_WILDCARDS_DIR, entry.path);
     let choices: UmbraPromptWildcardChoice[] | null = null;
+    let generatorDefinition: Record<string, unknown> | null = null;
+    let hasUmbraMetadata = false;
     if (metadataPath && existsSync(metadataPath)) {
       try {
-        const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8')) as { choices?: unknown };
+        const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8')) as { choices?: unknown; generatorDefinition?: unknown };
+        hasUmbraMetadata = true;
         choices = normalizePowerPrompterWildcardChoices(entry.name, values, metadata?.choices);
+        generatorDefinition = normalizePowerPrompterWildcardGeneratorDefinition(metadata?.generatorDefinition);
       } catch (error) {
         console.warn(`[PowerPrompter] Ignoring invalid wildcard metadata for ${entry.path}:`, error);
       }
@@ -16346,6 +16360,9 @@ async function listPowerPrompterWildcards() {
       path: entry.path,
       values,
       ...(choices ? { choices } : {}),
+      source: hasUmbraMetadata ? 'umbra' : 'legacy',
+      structured: Boolean(generatorDefinition),
+      ...(generatorDefinition ? { generatorDefinition } : {}),
     };
   }));
   return wildcards.sort((left, right) => left.folder.localeCompare(right.folder) || left.name.localeCompare(right.name));
@@ -34571,7 +34588,7 @@ const server = Bun.serve<any>({
       }
 
       if (path === '/api/powerprompter/wildcards' && method === 'PUT') {
-        const body = await req.json().catch(() => ({})) as { name?: unknown; folder?: unknown; path?: unknown; values?: unknown; choices?: unknown };
+        const body = await req.json().catch(() => ({})) as { name?: unknown; folder?: unknown; path?: unknown; values?: unknown; choices?: unknown; generatorDefinition?: unknown };
         const name = normalizePowerPrompterWildcardName(body.name);
         if (!name) return json({ success: false, error: 'Use letters, numbers, hyphens, or underscores for a wildcard name.' }, 400);
         const values = Array.isArray(body.values)
@@ -34595,20 +34612,29 @@ const server = Bun.serve<any>({
         const destinationMetadata = resolvePowerPrompterWildcardMetadataFile(PP_WILDCARDS_DIR, targetPath);
         if (!destination) return json({ success: false, error: 'Wildcard folder or name is invalid.' }, 400);
         const sourceMetadata = resolvePowerPrompterWildcardMetadataFile(PP_WILDCARDS_DIR, sourcePath || targetPath);
+        const sourceWildcard = resolvePowerPrompterWildcardFile(PP_WILDCARDS_DIR, sourcePath || targetPath);
         let metadataChoices = normalizePowerPrompterWildcardChoices(name, values, body.choices);
-        if (body.choices === undefined && sourceMetadata && existsSync(sourceMetadata)) {
+        let generatorDefinition = normalizePowerPrompterWildcardGeneratorDefinition(body.generatorDefinition);
+        if ((body.choices === undefined || body.generatorDefinition === undefined) && sourceMetadata && existsSync(sourceMetadata)) {
           try {
-            const metadata = JSON.parse(await fs.readFile(sourceMetadata, 'utf8')) as { choices?: unknown };
-            metadataChoices = normalizePowerPrompterWildcardChoices(name, values, metadata?.choices);
+            const metadata = JSON.parse(await fs.readFile(sourceMetadata, 'utf8')) as { choices?: unknown; generatorDefinition?: unknown };
+            if (body.choices === undefined) metadataChoices = normalizePowerPrompterWildcardChoices(name, values, metadata?.choices);
+            if (body.generatorDefinition === undefined && sourceWildcard && existsSync(sourceWildcard)) {
+              const sourceValues = (await fs.readFile(sourceWildcard, 'utf8')).split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+              if (sourceValues.length === values.length && sourceValues.every((value, index) => value === values[index])) {
+                generatorDefinition = normalizePowerPrompterWildcardGeneratorDefinition(metadata?.generatorDefinition);
+              }
+            }
           } catch {
             metadataChoices = null;
+            generatorDefinition = null;
           }
         }
         await fs.mkdir(dirname(destination), { recursive: true });
         await fs.writeFile(destination, `${values.join('\n')}\n`, 'utf8');
         if (destinationMetadata) {
-          if (metadataChoices) {
-            await fs.writeFile(destinationMetadata, `${JSON.stringify({ version: 1, choices: metadataChoices }, null, 2)}\n`, 'utf8');
+          if (metadataChoices || generatorDefinition) {
+            await fs.writeFile(destinationMetadata, `${JSON.stringify({ version: 2, choices: metadataChoices, generatorDefinition }, null, 2)}\n`, 'utf8');
           } else {
             await fs.rm(destinationMetadata, { force: true });
           }

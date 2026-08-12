@@ -155,7 +155,6 @@ const PHONE_REMOTE_WORKSPACES = new Set([
   'library',
   'modelmanager',
   'imageinspector',
-  'board',
   'localserver',
 ]);
 const PHONE_COMFY_MENU_LONG_PRESS_MS = 420;
@@ -1946,14 +1945,6 @@ export const UmbraAppBar = () => {
           >
             <ScanSearch size={20} />
             <span>{t('nav.imageInspector')}</span>
-          </button>
-          <button
-            type="button"
-            data-active={activeWorkspace === 'board' ? '1' : '0'}
-            onClick={() => handleWorkspaceSelect('board')}
-          >
-            <Anvil size={20} />
-            <span>{t('nav.dataForge')}</span>
           </button>
           <button
             type="button"

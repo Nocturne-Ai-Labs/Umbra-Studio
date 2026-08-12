@@ -12027,7 +12027,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
               </div>
             )}
             {!rightPanelCollapsed && (
-              <div className="pointer-events-auto h-[min(52vh,620px)] min-h-[300px] w-[min(92vw,680px)] overflow-hidden rounded-xl border border-cyan-300/25 bg-[#050508]/98 shadow-[0_18px_46px_rgba(0,0,0,0.65)] backdrop-blur-md">
+              <div className="pointer-events-auto h-[min(42vh,500px)] min-h-[240px] w-[min(92vw,680px)] overflow-hidden rounded-xl border border-cyan-300/25 bg-[#050508]/98 shadow-[0_18px_46px_rgba(0,0,0,0.65)] backdrop-blur-md">
                 <PowerPrompterSearchPanel
                   onInsert={(text, options) => {
                     handleInsert(text, options);
