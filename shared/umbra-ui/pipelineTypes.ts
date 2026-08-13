@@ -273,6 +273,9 @@ export function normalizeUmbraUiModelFamilyKey(value: unknown): string {
     .replace(/[^a-z0-9]+/g, '')
     .slice(0, 80);
   const aliases: Record<string, string> = {
+    anima29: 'anima29b',
+    anima29bpreview: 'anima29b',
+    anima29bpreviewv1: 'anima29b',
     chroma: 'chroma1',
     chroma1hd: 'chroma1',
     ernie: 'ernieimage',

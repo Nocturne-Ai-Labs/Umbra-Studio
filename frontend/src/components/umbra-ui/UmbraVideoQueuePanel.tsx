@@ -121,6 +121,10 @@ function cloneVideo(video: PowerPrompterVideoControls): PowerPrompterVideoContro
           : [],
       },
     },
+    ltx25: {
+      ...video.ltx25,
+      keyframes: video.ltx25.keyframes.map((keyframe) => ({ ...keyframe })),
+    },
   };
 }
 
@@ -245,7 +249,11 @@ function SettingsChips({ video, sequence, seed, seedMode, seedIncrement }: {
   seedIncrement: number;
 }) {
   const chips = [
-    video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : 'MiniMax H3',
+    video.family === 'wan22'
+      ? 'Wan 2.2'
+      : video.family === 'ltx23'
+        ? 'LTX-2.3'
+        : video.family === 'ltx25' ? 'LTX-2.5' : 'MiniMax H3',
     sequence ? 'LTX Extended' : '',
     sequence ? `Clip ${sequence.clipIndex + 1}/${sequence.clipCount}` : '',
     sequence ? `${sequence.totalDurationSeconds.toFixed(1)}s total` : '',
@@ -284,7 +292,7 @@ function resolveVideoFramesForDurationChange(
   currentFps: number,
   family: PowerPrompterVideoControls['family'],
 ): number {
-  const stride = family === 'minimax_h3' ? 17 : family === 'ltx23' ? 8 : 4;
+  const stride = family === 'minimax_h3' ? 17 : family === 'ltx23' || family === 'ltx25' ? 8 : 4;
   const minimumFrames = family === 'minimax_h3' ? 5 : stride + 1;
   const requestedFrames = family === 'minimax_h3'
     ? resolveMiniMaxH3FramesForDuration(durationSeconds)
@@ -525,7 +533,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
         : resolveUmbraVideoFramesForDuration(
           durationSeconds,
           fps,
-          current.family === 'ltx23' ? 8 : 4,
+          current.family === 'ltx23' || current.family === 'ltx25' ? 8 : 4,
         );
       return {
         ...current,
@@ -534,6 +542,18 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
         ltx: {
           ...current.ltx,
           keyframes: current.ltx.keyframes.map((keyframe) => ({
+            ...keyframe,
+            frameIndex: resolveUmbraVideoFrameIndexForSeconds(
+              keyframe.frameIndex / Math.max(1, current.fps),
+              fps,
+              8,
+              Math.max(0, frames - 1),
+            ),
+          })),
+        },
+        ltx25: {
+          ...current.ltx25,
+          keyframes: current.ltx25.keyframes.map((keyframe) => ({
             ...keyframe,
             frameIndex: resolveUmbraVideoFrameIndexForSeconds(
               keyframe.frameIndex / Math.max(1, current.fps),
@@ -780,6 +800,8 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
                       <NumberEditor label="Steps" value={draftVideo.wan.steps} min={2} onChange={(value) => setDraftVideo((current) => current ? { ...current, wan: { ...current.wan, steps: value } } : current)} />
                     ) : draftVideo.family === 'minimax_h3' ? (
                       <NumberEditor label="Steps" value={draftVideo.minimaxH3.steps} min={1} onChange={(value) => setDraftVideo((current) => current ? { ...current, minimaxH3: { ...current.minimaxH3, steps: value } } : current)} />
+                    ) : draftVideo.family === 'ltx25' ? (
+                      <NumberEditor label="Base CFG" value={draftVideo.ltx25.baseCfg} min={0} step={0.1} onChange={(value) => setDraftVideo((current) => current ? { ...current, ltx25: { ...current.ltx25, baseCfg: value } } : current)} />
                     ) : (
                       <NumberEditor label="Base CFG" value={draftVideo.ltx.baseCfg} min={0} step={0.1} onChange={(value) => setDraftVideo((current) => current ? { ...current, ltx: { ...current.ltx, baseCfg: value } } : current)} />
                     )}

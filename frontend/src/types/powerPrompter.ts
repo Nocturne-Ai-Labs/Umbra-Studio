@@ -17,7 +17,7 @@ export type PowerPrompterStyleSeedMode = 'same' | 'different';
 export type PowerPrompterModelType = 'checkpoint' | 'diffusers' | 'diffusion_model' | 'unet' | 'gguf';
 export type PowerPrompterMediaType = 'image' | 'video';
 export type PowerPrompterHiresResizeMode = 'scale' | 'dimensions';
-export type PowerPrompterVideoFamily = 'wan22' | 'ltx23' | 'minimax_h3';
+export type PowerPrompterVideoFamily = 'wan22' | 'ltx23' | 'ltx25' | 'minimax_h3';
 export type PowerPrompterVideoMode = 'text_to_video' | 'image_to_video' | 'reference_to_video' | 'video_to_video';
 export type PowerPrompterVideoFrameGuideMode = 'first' | 'first_last' | 'first_middle_last';
 export type PowerPrompterVideoDecodeMode = 'auto' | 'full' | 'tiled';
@@ -102,6 +102,36 @@ export interface PowerPrompterLtxVideoControls {
   extended: UmbraLtxExtendedControls;
 }
 
+export interface PowerPrompterLtx25VideoControls {
+  model: string;
+  textEncoder: string;
+  videoVae: string;
+  audioVae: string;
+  latentUpscaleModel: string;
+  promptEnhanceModel: string;
+  baseCfg: number;
+  refineCfg: number;
+  baseSamplerName: string;
+  refineSamplerName: string;
+  baseSigmas: string;
+  refineSigmas: string;
+  twoStage: boolean;
+  audioEnabled: boolean;
+  promptEnhance: boolean;
+  promptEnhanceSampling: boolean;
+  promptEnhanceMaxLength: number;
+  promptEnhanceTemperature: number;
+  promptEnhanceTopK: number;
+  promptEnhanceTopP: number;
+  promptEnhanceMinP: number;
+  promptEnhanceRepetitionPenalty: number;
+  promptEnhancePresencePenalty: number;
+  promptEnhanceThinking: boolean;
+  imageStrength: number;
+  imageCompression: number;
+  keyframes: PowerPrompterLtxVideoKeyframe[];
+}
+
 export interface PowerPrompterMiniMaxH3VideoControls {
   model: string;
   textEncoder: string;
@@ -180,6 +210,7 @@ export interface PowerPrompterVideoControls {
   postprocess: PowerPrompterVideoPostprocessControls;
   wan: PowerPrompterWanVideoControls;
   ltx: PowerPrompterLtxVideoControls;
+  ltx25: PowerPrompterLtx25VideoControls;
   minimaxH3: PowerPrompterMiniMaxH3VideoControls;
 }
 

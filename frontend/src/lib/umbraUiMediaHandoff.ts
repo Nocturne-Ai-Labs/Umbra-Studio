@@ -144,8 +144,9 @@ function normalizeModelKey(value: string): string {
   return normalizePath(value).toLowerCase().replace(/\.(safetensors|ckpt|pt|pth|bin)$/i, '');
 }
 
-function inferModelFamily(modelName: string): string {
+export function inferModelFamily(modelName: string): string {
   const value = normalizeModelKey(modelName);
+  if (value.includes('anima-2.9b') || value.includes('anima_2.9b') || value.includes('anima2.9b')) return 'Anima 2.9B';
   if (value.includes('anima')) return 'Anima';
   if (value.includes('sdxl') || value.includes('pony')) return 'SDXL';
   if (value.includes('flux')) return 'Flux';

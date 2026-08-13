@@ -491,6 +491,35 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
       },
       extended: createDefaultUmbraLtxExtendedControls(),
     },
+    ltx25: {
+      model: '',
+      textEncoder: '',
+      videoVae: '',
+      audioVae: '',
+      latentUpscaleModel: '',
+      promptEnhanceModel: '',
+      baseCfg: 1,
+      refineCfg: 1,
+      baseSamplerName: 'euler_ancestral',
+      refineSamplerName: 'euler_ancestral',
+      baseSigmas: '1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0',
+      refineSigmas: '0.85, 0.7250, 0.4219, 0.0',
+      twoStage: true,
+      audioEnabled: true,
+      promptEnhance: false,
+      promptEnhanceSampling: true,
+      promptEnhanceMaxLength: 600,
+      promptEnhanceTemperature: 0.7,
+      promptEnhanceTopK: 64,
+      promptEnhanceTopP: 0.95,
+      promptEnhanceMinP: 0.05,
+      promptEnhanceRepetitionPenalty: 1.15,
+      promptEnhancePresencePenalty: 0,
+      promptEnhanceThinking: false,
+      imageStrength: 0.7,
+      imageCompression: 18,
+      keyframes: [],
+    },
     minimaxH3: {
       model: '',
       textEncoder: '',
@@ -858,8 +887,8 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
   const defaults = DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS.video!;
   const video = rawVideo && typeof rawVideo === 'object' ? rawVideo as Record<string, any> : {};
   const familyRaw = String(video.family || '').trim().toLowerCase();
-  const family: PowerPrompterVideoControls['family'] = familyRaw === 'ltx23'
-    ? 'ltx23'
+  const family: PowerPrompterVideoControls['family'] = familyRaw === 'ltx23' || familyRaw === 'ltx25'
+    ? familyRaw
     : familyRaw === 'minimax_h3' ? 'minimax_h3' : 'wan22';
   const modeRaw = String(video.mode || '').trim().toLowerCase();
   const mode: PowerPrompterVideoControls['mode'] = modeRaw === 'video_to_video'
@@ -877,6 +906,7 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
     : parsedFrameGuideMode;
   const wan = video.wan && typeof video.wan === 'object' ? video.wan as Record<string, any> : {};
   const ltx = video.ltx && typeof video.ltx === 'object' ? video.ltx as Record<string, any> : {};
+  const ltx25 = video.ltx25 && typeof video.ltx25 === 'object' ? video.ltx25 as Record<string, any> : {};
   const minimaxH3 = video.minimaxH3 && typeof video.minimaxH3 === 'object' ? video.minimaxH3 as Record<string, any> : {};
   const postprocess = video.postprocess && typeof video.postprocess === 'object'
     ? video.postprocess as Record<string, any>
@@ -884,8 +914,8 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
   const steps = clampInteger(wan.steps, defaults.wan.steps, 1, 10000);
   const normalizedFrames = family === 'minimax_h3'
     ? normalizeMiniMaxH3VideoFrames(video.frames, 124)
-    : normalizeVideoFrames(video.frames, family === 'ltx23' ? 121 : defaults.frames, family === 'ltx23' ? 8 : 4);
-  const normalizedFps = family === 'minimax_h3' ? 24 : clampInteger(video.fps, family === 'ltx23' ? 25 : defaults.fps, 1, 120);
+    : normalizeVideoFrames(video.frames, family === 'ltx23' || family === 'ltx25' ? 121 : defaults.frames, family === 'ltx23' || family === 'ltx25' ? 8 : 4);
+  const normalizedFps = family === 'minimax_h3' || family === 'ltx25' ? 24 : clampInteger(video.fps, family === 'ltx23' ? 25 : defaults.fps, 1, 120);
   const normalizedStoryboard = normalizeUmbraLtxStoryboardControls(ltx.storyboard);
   const storyboard = {
     ...normalizedStoryboard,
@@ -1037,6 +1067,46 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
       keyframes,
       storyboard,
       extended,
+    },
+    ltx25: {
+      model: String(ltx25.model || '').trim().replace(/\\/g, '/'),
+      textEncoder: String(ltx25.textEncoder || '').trim().replace(/\\/g, '/'),
+      videoVae: String(ltx25.videoVae || '').trim().replace(/\\/g, '/'),
+      audioVae: String(ltx25.audioVae || '').trim().replace(/\\/g, '/'),
+      latentUpscaleModel: String(ltx25.latentUpscaleModel || '').trim().replace(/\\/g, '/'),
+      promptEnhanceModel: String(ltx25.promptEnhanceModel || '').trim().replace(/\\/g, '/'),
+      baseCfg: clampNumber(ltx25.baseCfg, defaults.ltx25.baseCfg, 0, 100),
+      refineCfg: clampNumber(ltx25.refineCfg, defaults.ltx25.refineCfg, 0, 100),
+      baseSamplerName: String(ltx25.baseSamplerName || defaults.ltx25.baseSamplerName).trim(),
+      refineSamplerName: String(ltx25.refineSamplerName || defaults.ltx25.refineSamplerName).trim(),
+      baseSigmas: String(ltx25.baseSigmas || defaults.ltx25.baseSigmas).trim(),
+      refineSigmas: String(ltx25.refineSigmas || defaults.ltx25.refineSigmas).trim(),
+      twoStage: ltx25.twoStage !== false,
+      audioEnabled: ltx25.audioEnabled !== false,
+      promptEnhance: ltx25.promptEnhance === true,
+      promptEnhanceSampling: ltx25.promptEnhanceSampling !== false,
+      promptEnhanceMaxLength: clampInteger(ltx25.promptEnhanceMaxLength, defaults.ltx25.promptEnhanceMaxLength, 1, 32768),
+      promptEnhanceTemperature: clampNumber(ltx25.promptEnhanceTemperature, defaults.ltx25.promptEnhanceTemperature, 0.01, 2),
+      promptEnhanceTopK: clampInteger(ltx25.promptEnhanceTopK, defaults.ltx25.promptEnhanceTopK, 0, 1000),
+      promptEnhanceTopP: clampNumber(ltx25.promptEnhanceTopP, defaults.ltx25.promptEnhanceTopP, 0, 1),
+      promptEnhanceMinP: clampNumber(ltx25.promptEnhanceMinP, defaults.ltx25.promptEnhanceMinP, 0, 1),
+      promptEnhanceRepetitionPenalty: clampNumber(ltx25.promptEnhanceRepetitionPenalty, defaults.ltx25.promptEnhanceRepetitionPenalty, 0, 5),
+      promptEnhancePresencePenalty: clampNumber(ltx25.promptEnhancePresencePenalty, defaults.ltx25.promptEnhancePresencePenalty, 0, 5),
+      promptEnhanceThinking: ltx25.promptEnhanceThinking === true,
+      imageStrength: clampNumber(ltx25.imageStrength, defaults.ltx25.imageStrength, 0, 1),
+      imageCompression: clampInteger(ltx25.imageCompression, defaults.ltx25.imageCompression, 0, 100),
+      keyframes: (Array.isArray(ltx25.keyframes) ? ltx25.keyframes : [])
+        .slice(0, 32)
+        .map((entry, index) => {
+          const keyframe = entry && typeof entry === 'object' ? entry as Record<string, any> : {};
+          return {
+            id: String(keyframe.id || `ltx25-keyframe-${index + 1}`),
+            sourceImagePath: String(keyframe.sourceImagePath || '').trim(),
+            sourceImageName: String(keyframe.sourceImageName || '').trim(),
+            frameIndex: clampInteger(keyframe.frameIndex, 0, 0, Math.max(0, resolvedFrames - 1)),
+            strength: clampNumber(keyframe.strength, 1, 0, 10),
+          };
+        }),
     },
     minimaxH3: {
       model: String(minimaxH3.model || '').trim().replace(/\\/g, '/'),

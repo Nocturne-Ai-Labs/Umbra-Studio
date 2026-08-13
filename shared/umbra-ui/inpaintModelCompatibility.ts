@@ -18,7 +18,7 @@ export function inferUmbraUiClassicModelArchitecture(
 ): UmbraUiClassicModelArchitecture {
   const family = String(modelFamily || '').trim().toLowerCase();
   const familyKey = normalizeUmbraUiModelFamilyKey(modelFamily);
-  if (familyKey === 'anima' || familyKey === 'illustriousxl' || familyKey === 'noobaixlvpred') return 'sdxl';
+  if (familyKey === 'anima' || familyKey === 'anima29b' || familyKey === 'illustriousxl' || familyKey === 'noobaixlvpred') return 'sdxl';
   if (/\bsdxl\b|stable\s+diffusion\s+xl|\bpony\b/.test(family)) return 'sdxl';
   if (/\bsd\s*1[._-]?5\b|stable\s+diffusion\s+1[._-]?5/.test(family)) return 'sd15';
 

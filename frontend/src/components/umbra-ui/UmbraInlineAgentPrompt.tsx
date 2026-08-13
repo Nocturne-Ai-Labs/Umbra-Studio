@@ -63,7 +63,7 @@ export function UmbraInlineAgentPrompt({
         setInstructions(compatible);
         const preferredId = mediaType === 'video' && context?.family === 'minimax_h3'
           ? 'video-minimax-h3-director'
-          : mediaType === 'video' && context?.family === 'ltx23'
+          : mediaType === 'video' && (context?.family === 'ltx23' || context?.family === 'ltx25')
             ? 'video-ltx-director'
             : '';
         setSelectedInstructionId((current) => compatible.some((entry) => entry.id === current)

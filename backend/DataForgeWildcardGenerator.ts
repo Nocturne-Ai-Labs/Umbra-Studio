@@ -29,6 +29,7 @@ export interface DataForgeWildcardTagRef {
   tag: string;
   postCount?: number | null;
   category?: number;
+  kind?: 'tag' | 'natural' | 'auto';
 }
 
 export interface DataForgeWildcardOption {
@@ -129,6 +130,14 @@ function normalizeTag(value: unknown): string {
     .replace(/\s+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, 180);
+}
+
+function normalizeNaturalLanguage(value: unknown): string {
+  return String(value || '')
+    .replace(/\r?\n+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 1000);
 }
 
 function normalizeTagList(value: unknown): string[] {
@@ -352,20 +361,45 @@ function normalizeTagRefs(value: unknown, catalog: CatalogCacheEntry): DataForge
   const source = Array.isArray(value) ? value : String(value || '').split(/[\n,]+/);
   const output: DataForgeWildcardTagRef[] = [];
   const seen = new Set<string>();
-  for (const raw of source) {
-    const rawObject = typeof raw === 'object' && raw !== null ? raw as DataForgeWildcardTagRef : null;
-    const requested = normalizeTag(rawObject?.tag ?? raw);
-    if (!requested) continue;
+  const appendNatural = (value: unknown) => {
+    const text = normalizeNaturalLanguage(value);
+    const key = `natural:${text.toLowerCase()}`;
+    if (!text || seen.has(key)) return;
+    seen.add(key);
+    output.push({ tag: text, postCount: null, kind: 'natural' });
+  };
+  const appendCatalogTag = (requested: string, rawObject?: DataForgeWildcardTagRef | null) => {
     const canonical = catalog.byTag.get(requested.toLowerCase());
-    if (!canonical) throw new Error(`Unknown Danbooru tag: ${requested || '(empty)'}`);
-    const key = canonical.tag.toLowerCase();
-    if (seen.has(key)) continue;
+    if (!canonical) return false;
+    const key = `tag:${canonical.tag.toLowerCase()}`;
+    if (seen.has(key)) return true;
     seen.add(key);
     output.push({
       tag: canonical.tag,
       category: canonical.category,
       postCount: normalizePostCount(rawObject?.postCount) ?? canonical.postCount,
+      kind: 'tag',
     });
+    return true;
+  };
+  for (const raw of source) {
+    const rawObject = typeof raw === 'object' && raw !== null ? raw as DataForgeWildcardTagRef : null;
+    const kind = rawObject?.kind === 'natural' || rawObject?.kind === 'auto' ? rawObject.kind : 'tag';
+    if (kind === 'natural') {
+      appendNatural(rawObject?.tag);
+      continue;
+    }
+    if (kind === 'auto') {
+      const text = normalizeNaturalLanguage(rawObject?.tag);
+      for (const part of text.split(',').map((entry) => entry.trim()).filter(Boolean)) {
+        const requested = normalizeTag(part);
+        if (!requested || !appendCatalogTag(requested, rawObject)) appendNatural(part);
+      }
+      continue;
+    }
+    const requested = normalizeTag(rawObject?.tag ?? raw);
+    if (!requested) continue;
+    if (!appendCatalogTag(requested, rawObject)) throw new Error(`Unknown Danbooru tag: ${requested || '(empty)'}`);
   }
   return output;
 }
@@ -396,6 +430,7 @@ function normalizeOptionChances<T extends { chance: number | null }>(options: T[
 
 function optionPostCount(option: { tags: DataForgeWildcardTagRef[] }): number | null {
   const known = option.tags
+    .filter((tag) => tag.postCount !== null && tag.postCount !== undefined)
     .map((tag) => Number(tag.postCount))
     .filter((count) => Number.isFinite(count) && count >= 0);
   return known.length > 0 ? Math.min(...known) : null;
@@ -404,6 +439,7 @@ function optionPostCount(option: { tags: DataForgeWildcardTagRef[] }): number | 
 function combinationScore(options: Array<{ tags: DataForgeWildcardTagRef[] }>): number {
   const counts = options
     .flatMap((option) => option.tags)
+    .filter((tag) => tag.postCount !== null && tag.postCount !== undefined)
     .map((tag) => Number(tag.postCount))
     .filter((count) => Number.isFinite(count) && count >= 0);
   if (counts.length === 0) return 0;
@@ -416,6 +452,7 @@ function combinationChanceWeight(options: Array<{ chance: number }>): number {
 
 interface InternalGeneratedRow extends Omit<DataForgeWildcardGeneratedRow, 'chance'> {
   chanceWeight: number;
+  entryCount: number;
 }
 
 function buildRow(
@@ -428,14 +465,15 @@ function buildRow(
   const tags: DataForgeWildcardTagRef[] = [];
   const seen = new Set<string>();
   for (const ref of refs) {
-    const key = ref.tag.toLowerCase();
-    if (forbidden.has(key)) return null;
+    const key = `${ref.kind === 'natural' ? 'natural' : 'tag'}:${ref.tag.toLowerCase()}`;
+    if (ref.kind !== 'natural' && forbidden.has(ref.tag.toLowerCase())) return null;
     if (seen.has(key)) continue;
     seen.add(key);
     tags.push(ref);
   }
   if (tags.length === 0 || tags.length > maxTagsPerLine) return null;
   const knownCounts = tags
+    .filter((tag) => tag.postCount !== null && tag.postCount !== undefined)
     .map((tag) => Number(tag.postCount))
     .filter((count) => Number.isFinite(count) && count >= 0);
   return {
@@ -444,6 +482,7 @@ function buildRow(
     chanceWeight: combinationChanceWeight(options),
     minimumPostCount: knownCounts.length > 0 ? Math.min(...knownCounts) : null,
     knownPostCountTags: knownCounts.length,
+    entryCount: tags.length,
   };
 }
 
@@ -576,7 +615,7 @@ export async function generateDataForgeWildcard(options: {
   const unknownPostCountTags = [...new Set([
     ...baseTags,
     ...groups.flatMap((group) => group.options.flatMap((option) => option.tags)),
-  ].filter((tag) => tag.postCount === null || tag.postCount === undefined).map((tag) => tag.tag))].sort();
+  ].filter((tag) => tag.kind !== 'natural' && (tag.postCount === null || tag.postCount === undefined)).map((tag) => tag.tag))].sort();
   const warnings: string[] = [];
   if (rows.length < count) warnings.push(`Generated ${rows.length} unique valid combinations from the requested ${count}.`);
   if (unknownPostCountTags.length > 0) warnings.push(`${unknownPostCountTags.length} tag${unknownPostCountTags.length === 1 ? '' : 's'} do not have stored or live post-count data.`);
@@ -591,7 +630,7 @@ export async function generateDataForgeWildcard(options: {
     warnings,
     audit: {
       unique: new Set(rows.map((row) => row.value)).size === rows.length,
-      maximumTagsPerLine: rows.reduce((maximum, row) => Math.max(maximum, row.value.split(', ').length), 0),
+      maximumTagsPerLine: weightedRows.reduce((maximum, row) => Math.max(maximum, row.entryCount), 0),
       unknownPostCountTags,
       groupsUsed: groups.length,
     },

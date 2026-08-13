@@ -20,6 +20,15 @@
         ],
         "priority": 100,
         "defaults": {
+          "modelName": "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors",
+          "modelNamesBySource": {
+            "unet": "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors"
+          },
+          "steps": 4,
+          "samplerName": "euler",
+          "scheduler": "simple",
+          "width": 832,
+          "height": 480,
           "denoise": 0.35
         }
       }

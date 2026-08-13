@@ -1,0 +1,719 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "LTX-2.5 Diffusion Model",
+      "umbra_role": "ltx25_model",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video",
+      "umbra_model_family": "LTX-2.5",
+      "umbra_ui_pipeline": {
+        "feature": "vid2vid",
+        "model_family": "LTX-2.5",
+        "model_sources": [
+          "unet"
+        ],
+        "priority": 110,
+        "defaults": {
+          "modelName": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+          "modelNamesBySource": {
+            "unet": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
+          },
+          "width": 640,
+          "height": 352,
+          "denoise": 0.35
+        }
+      }
+    }
+  },
+  "2": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ltx-2.5-video-vae-bf16.safetensors"
+    },
+    "_meta": {
+      "title": "LTX-2.5 Video VAE",
+      "umbra_role": "ltx25_video_vae",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ltx-2.5-audio-vae-bf16.safetensors"
+    },
+    "_meta": {
+      "title": "LTX-2.5 Audio VAE",
+      "umbra_role": "ltx_audio_vae",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "4": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "type": "ltxv",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "LTX-2.5 Text Encoder",
+      "umbra_role": "ltx25_text_encoder",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "5": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "gemma4_e2b_it_bf16.safetensors",
+      "type": "ltxv",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "LTX-2.5 Prompt Enhancer Model",
+      "umbra_role": "ltx_prompt_enhance_model",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "6": {
+    "class_type": "TextGenerateLTX2Prompt",
+    "inputs": {
+      "clip": [
+        "5",
+        0
+      ],
+      "prompt": "A cinematic subject moving naturally through the scene.",
+      "max_length": 600,
+      "sampling_mode": "on",
+      "sampling_mode.temperature": 0.7,
+      "sampling_mode.top_k": 64,
+      "sampling_mode.top_p": 0.95,
+      "sampling_mode.min_p": 0.05,
+      "sampling_mode.repetition_penalty": 1.15,
+      "sampling_mode.seed": 0,
+      "sampling_mode.presence_penalty": 0,
+      "thinking": false,
+      "use_default_template": true,
+      "video": [
+        "39",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX-2.5 Prompt Enhancer",
+      "umbra_role": "ltx_prompt_enhance",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "8": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "4",
+        0
+      ],
+      "text": "A cinematic subject moving naturally through the scene."
+    },
+    "_meta": {
+      "title": "Positive Prompt",
+      "umbra_role": "positive_prompt",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "9": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "4",
+        0
+      ],
+      "text": "pc game, console game, video game, cartoon, childish, ugly, blurry, low quality, still frame, watermark, subtitles"
+    },
+    "_meta": {
+      "title": "Negative Prompt",
+      "umbra_role": "negative_prompt",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "10": {
+    "class_type": "LTXVConditioning",
+    "inputs": {
+      "positive": [
+        "8",
+        0
+      ],
+      "negative": [
+        "9",
+        0
+      ],
+      "frame_rate": 24
+    },
+    "_meta": {
+      "title": "LTX-2.5 Conditioning",
+      "umbra_role": "ltx_conditioning",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "11": {
+    "class_type": "EmptyLTXVLatentVideo",
+    "inputs": {
+      "width": 640,
+      "height": 352,
+      "length": 121,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "LTX-2.5 Base Video Latent",
+      "umbra_role": "ltx_empty_video_latent",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "12": {
+    "class_type": "LTXVEmptyLatentAudio",
+    "inputs": {
+      "frames_number": 121,
+      "frame_rate": 24,
+      "batch_size": 1,
+      "audio_vae": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX-2.5 Empty Audio",
+      "umbra_role": "ltx_empty_audio",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "13": {
+    "class_type": "LTXVConcatAVLatent",
+    "inputs": {
+      "video_latent": [
+        "40",
+        0
+      ],
+      "audio_latent": [
+        "12",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX-2.5 Base AV Latent",
+      "umbra_role": "ltx_base_concat",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "14": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 0
+    },
+    "_meta": {
+      "title": "LTX-2.5 Base Noise",
+      "umbra_role": "ltx_base_noise",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "15": {
+    "class_type": "LTXVDualCFGGuider",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "10",
+        0
+      ],
+      "negative": [
+        "10",
+        1
+      ],
+      "video_cfg": 1,
+      "audio_cfg": 1
+    },
+    "_meta": {
+      "title": "LTX-2.5 Base Guidance",
+      "umbra_role": "ltx_base_cfg",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "16": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler_ancestral"
+    },
+    "_meta": {
+      "title": "LTX-2.5 Base Sampler",
+      "umbra_role": "ltx_base_sampler",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "17": {
+    "class_type": "ManualSigmas",
+    "inputs": {
+      "sigmas": "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
+    },
+    "_meta": {
+      "title": "LTX-2.5 Base Sigmas",
+      "umbra_role": "ltx_base_sigmas",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "18": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "14",
+        0
+      ],
+      "guider": [
+        "15",
+        0
+      ],
+      "sampler": [
+        "16",
+        0
+      ],
+      "sigmas": [
+        "17",
+        0
+      ],
+      "latent_image": [
+        "13",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX-2.5 Base Sample",
+      "umbra_role": "ltx_base_sample",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "19": {
+    "class_type": "LTXVSeparateAVLatent",
+    "inputs": {
+      "av_latent": [
+        "18",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Separate LTX-2.5 Base AV",
+      "umbra_role": "ltx_base_separate",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "20": {
+    "class_type": "LatentUpscaleModelLoader",
+    "inputs": {
+      "model_name": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
+    },
+    "_meta": {
+      "title": "LTX-2.5 Latent Upscaler",
+      "umbra_role": "ltx_upscale_model",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "21": {
+    "class_type": "LTXVLatentUpsampler",
+    "inputs": {
+      "samples": [
+        "19",
+        0
+      ],
+      "upscale_model": [
+        "20",
+        0
+      ],
+      "vae": [
+        "2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX-2.5 Spatial Upscale",
+      "umbra_role": "ltx_upscale",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "22": {
+    "class_type": "LTXVConcatAVLatent",
+    "inputs": {
+      "video_latent": [
+        "21",
+        0
+      ],
+      "audio_latent": [
+        "19",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "LTX-2.5 Refine AV Latent",
+      "umbra_role": "ltx_refine_concat",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "23": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 0
+    },
+    "_meta": {
+      "title": "LTX-2.5 Refine Noise",
+      "umbra_role": "ltx_refine_noise",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "24": {
+    "class_type": "LTXVDualCFGGuider",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "10",
+        0
+      ],
+      "negative": [
+        "10",
+        1
+      ],
+      "video_cfg": 1,
+      "audio_cfg": 1
+    },
+    "_meta": {
+      "title": "LTX-2.5 Refine Guidance",
+      "umbra_role": "ltx_refine_cfg",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "25": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler_ancestral"
+    },
+    "_meta": {
+      "title": "LTX-2.5 Refine Sampler",
+      "umbra_role": "ltx_refine_sampler",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "26": {
+    "class_type": "ManualSigmas",
+    "inputs": {
+      "sigmas": "0.85, 0.7250, 0.4219, 0.0"
+    },
+    "_meta": {
+      "title": "LTX-2.5 Refine Sigmas",
+      "umbra_role": "ltx_refine_sigmas",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "27": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "23",
+        0
+      ],
+      "guider": [
+        "24",
+        0
+      ],
+      "sampler": [
+        "25",
+        0
+      ],
+      "sigmas": [
+        "26",
+        0
+      ],
+      "latent_image": [
+        "22",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX-2.5 Refine Sample",
+      "umbra_role": "ltx_refine_sample",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "28": {
+    "class_type": "LTXVSeparateAVLatent",
+    "inputs": {
+      "av_latent": [
+        "27",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Separate LTX-2.5 Refined AV",
+      "umbra_role": "ltx_refine_separate",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "29": {
+    "class_type": "VAEDecodeTiled",
+    "inputs": {
+      "samples": [
+        "28",
+        0
+      ],
+      "vae": [
+        "2",
+        0
+      ],
+      "tile_size": 512,
+      "overlap": 64,
+      "temporal_size": 64,
+      "temporal_overlap": 16
+    },
+    "_meta": {
+      "title": "LTX-2.5 Pixel Diffusion Decode",
+      "umbra_role": "video_decode",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "30": {
+    "class_type": "LTXVAudioVAEDecode",
+    "inputs": {
+      "samples": [
+        "28",
+        1
+      ],
+      "audio_vae": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX-2.5 Audio Decode",
+      "umbra_role": "ltx_audio_decode",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "31": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "29",
+        0
+      ],
+      "audio": [
+        "35",
+        1
+      ],
+      "fps": 24
+    },
+    "_meta": {
+      "title": "Create LTX-2.5 Video",
+      "umbra_role": "video_create",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "32": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "31",
+        0
+      ],
+      "filename_prefix": "video/Umbra_LTX25_VID2VID",
+      "format": "auto",
+      "codec": "h264"
+    },
+    "_meta": {
+      "title": "Save LTX-2.5 Video",
+      "umbra_role": "video_output",
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx25",
+      "umbra_video_mode": "video_to_video"
+    }
+  },
+  "33": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "umbra-vid2vid-source.mp4"
+    },
+    "_meta": {
+      "title": "VID2VID Source Video",
+      "umbra_role": "source_video"
+    }
+  },
+  "34": {
+    "class_type": "Video Slice",
+    "inputs": {
+      "video": [
+        "33",
+        0
+      ],
+      "start_time": 0,
+      "duration": 5.041666666666667,
+      "strict_duration": false
+    },
+    "_meta": {
+      "title": "Trim LTX Source Duration",
+      "umbra_role": "source_video_slice"
+    }
+  },
+  "35": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "34",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Extract Trimmed Source Audio",
+      "umbra_role": "source_video_components"
+    }
+  },
+  "36": {
+    "class_type": "VideoFrameSample",
+    "inputs": {
+      "video": [
+        "34",
+        0
+      ],
+      "num_frames": 121,
+      "strategy": "uniform",
+      "seed": 0
+    },
+    "_meta": {
+      "title": "Normalize LTX Source Frames",
+      "umbra_role": "source_video_frame_sample"
+    }
+  },
+  "37": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "36",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Extract Normalized Source Frames",
+      "umbra_role": "source_video_frame_components"
+    }
+  },
+  "38": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "37",
+        0
+      ],
+      "batch_index": 0,
+      "length": 121
+    },
+    "_meta": {
+      "title": "Trim Source Frames",
+      "umbra_role": "source_video_frames"
+    }
+  },
+  "39": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "38",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": 640,
+      "height": 352,
+      "crop": "center"
+    },
+    "_meta": {
+      "title": "VID2VID Working Resolution",
+      "umbra_role": "source_video_scale"
+    }
+  },
+  "40": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "39",
+        0
+      ],
+      "vae": [
+        "2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Encode LTX Source Video",
+      "umbra_role": "ltx_base_video_latent",
+      "umbra_roles": [
+        "source_video_encode"
+      ]
+    }
+  }
+}

@@ -33,6 +33,14 @@ const sources = [
     height: 360,
     frames: 121,
   },
+  {
+    source: '[Umbra UI] LTX-2.5 Text to Video.json',
+    output: '[Umbra UI] LTX-2.5 Video to Video.json',
+    family: 'ltx25' as const,
+    width: 640,
+    height: 352,
+    frames: 121,
+  },
 ];
 
 function nextNodeIds(graph: PromptGraph, count: number): string[] {
@@ -65,22 +73,75 @@ function updateDescriptor(graph: PromptGraph) {
 
 function addSourceVideoChain(
   graph: PromptGraph,
-  options: { width: number; height: number; frames: number; vae: [string, number]; ltx: boolean },
+  options: {
+    width: number;
+    height: number;
+    frames: number;
+    fps?: number;
+    vae: [string, number];
+    ltx: boolean;
+    normalizeFrameRate?: boolean;
+  },
 ) {
-  const [sourceId, componentsId, framesId, scaleId, encodeId] = nextNodeIds(graph, 5);
+  const ids = nextNodeIds(graph, options.normalizeFrameRate ? 8 : 5);
+  const [sourceId] = ids;
   graph[sourceId] = {
     class_type: 'LoadVideo',
     inputs: { file: 'umbra-vid2vid-source.mp4' },
     _meta: { title: 'VID2VID Source Video', umbra_role: 'source_video' },
   };
-  graph[componentsId] = {
-    class_type: 'GetVideoComponents',
-    inputs: { video: [sourceId, 0] },
-    _meta: { title: 'Extract Source Video', umbra_role: 'source_video_components' },
-  };
+
+  let componentsId: string;
+  let framesSource: [string, number];
+  if (options.normalizeFrameRate) {
+    const [, sliceId, audioComponentsId, sampleId, frameComponentsId] = ids;
+    graph[sliceId] = {
+      class_type: 'Video Slice',
+      inputs: {
+        video: [sourceId, 0],
+        start_time: 0,
+        duration: options.frames / (options.fps || 24),
+        strict_duration: false,
+      },
+      _meta: { title: 'Trim LTX Source Duration', umbra_role: 'source_video_slice' },
+    };
+    graph[audioComponentsId] = {
+      class_type: 'GetVideoComponents',
+      inputs: { video: [sliceId, 0] },
+      _meta: { title: 'Extract Trimmed Source Audio', umbra_role: 'source_video_components' },
+    };
+    graph[sampleId] = {
+      class_type: 'VideoFrameSample',
+      inputs: {
+        video: [sliceId, 0],
+        num_frames: options.frames,
+        strategy: 'uniform',
+        seed: 0,
+      },
+      _meta: { title: 'Normalize LTX Source Frames', umbra_role: 'source_video_frame_sample' },
+    };
+    graph[frameComponentsId] = {
+      class_type: 'GetVideoComponents',
+      inputs: { video: [sampleId, 0] },
+      _meta: { title: 'Extract Normalized Source Frames', umbra_role: 'source_video_frame_components' },
+    };
+    componentsId = audioComponentsId;
+    framesSource = [frameComponentsId, 0];
+  } else {
+    const [, plainComponentsId] = ids;
+    graph[plainComponentsId] = {
+      class_type: 'GetVideoComponents',
+      inputs: { video: [sourceId, 0] },
+      _meta: { title: 'Extract Source Video', umbra_role: 'source_video_components' },
+    };
+    componentsId = plainComponentsId;
+    framesSource = [plainComponentsId, 0];
+  }
+
+  const [framesId, scaleId, encodeId] = ids.slice(-3);
   graph[framesId] = {
     class_type: 'ImageFromBatch',
-    inputs: { image: [componentsId, 0], batch_index: 0, length: options.frames },
+    inputs: { image: framesSource, batch_index: 0, length: options.frames },
     _meta: { title: 'Trim Source Frames', umbra_role: 'source_video_frames' },
   };
   graph[scaleId] = {
@@ -101,7 +162,7 @@ function addSourceVideoChain(
       ? { title: 'Encode LTX Source Video', umbra_role: 'ltx_base_video_latent', umbra_roles: ['source_video_encode'] }
       : { title: 'Encode Wan Source Video', umbra_role: 'source_video_encode' },
   };
-  return { sourceId, componentsId, encodeId };
+  return { sourceId, componentsId, framesId, scaleId, encodeId };
 }
 
 async function buildWorkflow(source: (typeof sources)[number]): Promise<PromptGraph> {
@@ -128,20 +189,30 @@ async function buildWorkflow(source: (typeof sources)[number]): Promise<PromptGr
     create.inputs.audio = [chain.componentsId, 1];
     output.inputs.filename_prefix = 'video/Umbra_Wan_VID2VID';
   } else {
-    const [checkpointId] = findRole(graph, 'ltx_checkpoint');
+    const [vaeId] = source.family === 'ltx25'
+      ? findRole(graph, 'ltx25_video_vae')
+      : findRole(graph, 'ltx_checkpoint');
     const [, originalLatent] = findRole(graph, 'ltx_base_video_latent');
     originalLatent._meta = { ...(originalLatent._meta || {}), umbra_role: 'ltx_empty_video_latent' };
     const chain = addSourceVideoChain(graph, {
       width: source.width,
       height: source.height,
       frames: source.frames,
-      vae: [checkpointId, 2],
+      fps: 24,
+      vae: [vaeId, source.family === 'ltx25' ? 0 : 2],
       ltx: true,
+      normalizeFrameRate: source.family === 'ltx25',
     });
     const [, baseConcat] = findRole(graph, 'ltx_base_concat');
     baseConcat.inputs.video_latent = [chain.encodeId, 0];
+    if (source.family === 'ltx25') {
+      const [, promptEnhancer] = findRole(graph, 'ltx_prompt_enhance');
+      promptEnhancer.inputs.video = [chain.scaleId, 0];
+    }
     create.inputs.audio = [chain.componentsId, 1];
-    output.inputs.filename_prefix = 'video/Umbra_LTX23_VID2VID';
+    output.inputs.filename_prefix = source.family === 'ltx25'
+      ? 'video/Umbra_LTX25_VID2VID'
+      : 'video/Umbra_LTX23_VID2VID';
   }
   return graph;
 }

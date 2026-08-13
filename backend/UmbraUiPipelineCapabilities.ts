@@ -332,7 +332,10 @@ export function listUmbraUiVid2VidPipelineGraphIssues(
   const nodeMap = new Map(nodes.map((node) => [node.id, node] as const));
   const issues: string[] = [];
   const sources = nodes.filter((node) => hasNodeRole(node, 'source_video'));
+  const slices = nodes.filter((node) => hasNodeRole(node, 'source_video_slice'));
   const components = nodes.filter((node) => hasNodeRole(node, 'source_video_components'));
+  const frameSamplers = nodes.filter((node) => hasNodeRole(node, 'source_video_frame_sample'));
+  const frameComponents = nodes.filter((node) => hasNodeRole(node, 'source_video_frame_components'));
   const frameSlices = nodes.filter((node) => hasNodeRole(node, 'source_video_frames'));
   const scales = nodes.filter((node) => hasNodeRole(node, 'source_video_scale'));
   const encodes = nodes.filter((node) => hasNodeRole(node, 'source_video_encode'));
@@ -344,7 +347,10 @@ export function listUmbraUiVid2VidPipelineGraphIssues(
   if (encodes.length !== 1) issues.push('exactly one source_video_encode role');
 
   const source = sources[0];
+  const slice = slices[0];
   const component = components[0];
+  const frameSampler = frameSamplers[0];
+  const frameComponent = frameComponents[0];
   const frameSlice = frameSlices[0];
   const scale = scales[0];
   const encode = encodes[0];
@@ -354,11 +360,25 @@ export function listUmbraUiVid2VidPipelineGraphIssues(
   }
   if (component) {
     if (component.classType !== 'GetVideoComponents') issues.push('VID2VID GetVideoComponents node');
-    if (source && connectedNodeId(component, 'video') !== source.id) issues.push('VID2VID source-to-components binding');
+    const expectedComponentSource = slice?.id || source?.id;
+    if (expectedComponentSource && connectedNodeId(component, 'video') !== expectedComponentSource) issues.push('VID2VID source-to-components binding');
+  }
+  if (slice) {
+    if (slices.length !== 1 || slice.classType !== 'Video Slice') issues.push('VID2VID source duration slice');
+    if (source && connectedNodeId(slice, 'video') !== source.id) issues.push('VID2VID source-to-slice binding');
+    if (!hasInput(slice, 'duration')) issues.push('VID2VID source duration limit');
+  }
+  if (frameSampler || frameComponent) {
+    if (frameSamplers.length !== 1 || frameSampler?.classType !== 'VideoFrameSample') issues.push('VID2VID frame sampler');
+    if (frameComponents.length !== 1 || frameComponent?.classType !== 'GetVideoComponents') issues.push('VID2VID sampled frame components');
+    if (slice && frameSampler && connectedNodeId(frameSampler, 'video') !== slice.id) issues.push('VID2VID slice-to-frame-sampler binding');
+    if (frameSampler && frameComponent && connectedNodeId(frameComponent, 'video') !== frameSampler.id) issues.push('VID2VID frame-sampler-to-components binding');
+    if (frameSampler && !hasInput(frameSampler, 'num_frames')) issues.push('VID2VID normalized frame count');
   }
   if (frameSlice) {
     if (frameSlice.classType !== 'ImageFromBatch') issues.push('VID2VID ImageFromBatch node');
-    if (component && connectedNodeId(frameSlice, 'image') !== component.id) issues.push('VID2VID components-to-frames binding');
+    const expectedFrameComponent = frameComponent?.id || component?.id;
+    if (expectedFrameComponent && connectedNodeId(frameSlice, 'image') !== expectedFrameComponent) issues.push('VID2VID components-to-frames binding');
     if (!hasInput(frameSlice, 'length')) issues.push('VID2VID frame limit');
   }
   if (scale) {

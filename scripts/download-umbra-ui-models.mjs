@@ -9,6 +9,35 @@ import { fileURLToPath } from 'node:url';
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HF_BASE = String(process.env.HF_BASE_URL || 'https://huggingface.co').replace(/\/$/, '');
 
+function readHuggingFaceToken() {
+  const environmentToken = String(process.env.HF_TOKEN || process.env.HUGGING_FACE_HUB_TOKEN || '').trim();
+  if (environmentToken) return environmentToken;
+  const home = String(process.env.USERPROFILE || process.env.HOME || '').trim();
+  const candidates = [
+    process.env.HF_HOME ? path.join(process.env.HF_HOME, 'token') : '',
+    home ? path.join(home, '.cache', 'huggingface', 'token') : '',
+    home ? path.join(home, '.huggingface', 'token') : '',
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      const token = fs.readFileSync(candidate, 'utf8').trim();
+      if (token) return token;
+    } catch {
+      // A public-model install does not require a local Hugging Face login.
+    }
+  }
+  return '';
+}
+
+const HF_TOKEN = readHuggingFaceToken();
+const HF_ORIGIN = new URL(HF_BASE).origin;
+
+function downloadHeaders(url, extra = {}) {
+  const headers = { 'User-Agent': 'UmbraStudio-ModelBundler/2.0', ...extra };
+  if (HF_TOKEN && new URL(url).origin === HF_ORIGIN) headers.Authorization = `Bearer ${HF_TOKEN}`;
+  return headers;
+}
+
 function readArg(name) {
   const index = process.argv.indexOf(name);
   return index >= 0 ? String(process.argv[index + 1] || '').trim() : '';
@@ -168,18 +197,33 @@ function downloadUrl(model, file) {
   return `${HF_BASE}/${model.repository}/resolve/${model.revision}/${sourcePath}`;
 }
 
+function downloadHttpError(response, url) {
+  const target = new URL(url);
+  if (target.origin === HF_ORIGIN && (response.status === 401 || response.status === 403)) {
+    const repository = target.pathname.split('/').filter(Boolean).slice(0, 2).join('/');
+    const tokenHint = HF_TOKEN
+      ? 'The configured Hugging Face token was sent, but it does not have access.'
+      : 'No Hugging Face token was found.';
+    return new Error(
+      `HTTP ${response.status} for ${url}\n`
+      + `      ${tokenHint} Accept the model terms at https://huggingface.co/${repository}, then use a Read token with gated-repository access.`,
+    );
+  }
+  return new Error(`HTTP ${response.status} for ${url}`);
+}
+
 async function downloadFile(url, outputPath, expected) {
   const partialPath = `${outputPath}.part`;
   fs.rmSync(partialPath, { force: true });
   if (cancellationRequested) throw new DownloadCancelledError();
 
-  const headers = { 'User-Agent': 'UmbraStudio-ModelBundler/2.0' };
+  const headers = downloadHeaders(url);
   const controller = new AbortController();
   activeDownloadController = controller;
 
   try {
     const response = await fetch(url, { headers, redirect: 'follow', signal: controller.signal });
-    if (!response.ok || !response.body) throw new Error(`HTTP ${response.status} for ${url}`);
+    if (!response.ok || !response.body) throw downloadHttpError(response, url);
     let downloaded = 0;
     let lastLogAt = 0;
     const source = Readable.fromWeb(response.body);
@@ -208,14 +252,11 @@ async function downloadFile(url, outputPath, expected) {
 
 async function testDownload(url, expected) {
   const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'UmbraStudio-ModelBundler/2.0',
-      Range: 'bytes=0-0',
-    },
+    headers: downloadHeaders(url, { Range: 'bytes=0-0' }),
     redirect: 'follow',
     signal: AbortSignal.timeout(30_000),
   });
-  if (!response.ok || !response.body) throw new Error(`HTTP ${response.status} for ${url}`);
+  if (!response.ok || !response.body) throw downloadHttpError(response, url);
 
   const reader = response.body.getReader();
   try {

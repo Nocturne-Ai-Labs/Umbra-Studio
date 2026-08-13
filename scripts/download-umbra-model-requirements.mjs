@@ -57,7 +57,7 @@ function loadManifest() {
 function printFamilies(manifest) {
   console.log('\nUmbra Studio model requirements');
   console.log('Choose model-family prerequisites and optional Canvas Control / Reference resources.');
-  console.log('Base generation checkpoints and diffusion models are never downloaded by this tool.\n');
+  console.log('Generation weights are downloaded only for profiles that explicitly include them.\n');
   Object.entries(manifest.profiles).forEach(([id, profile], index) => {
     const models = manifest.models.filter(model => model.profiles.includes(id));
     const bytes = models.flatMap(model => model.files).reduce((sum, file) => sum + Number(file.bytes || 0), 0);

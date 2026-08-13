@@ -1,5 +1,103 @@
 # Changelog
 
+## v0.31.13
+
+### TL;DR - Setup After Updating
+
+Update Umbra Studio normally. Existing image, video, and wildcard workflows do
+not require additional setup.
+
+- **Anima 2.9B:** In Umbra's ComfyUI tool controls, install or update the
+  managed custom nodes so `ComfyUI-Anima-2.9B` is present. Then run
+  `Install-Umbra-UI-Models.bat` on Windows or
+  `install-umbra-ui-models.sh` on Linux and select **Anima 2.9B Preview**.
+  The complete profile is approximately 7.29 GB and is distributed under a
+  non-commercial model license.
+- **LTX 2.5:** Update the managed ComfyUI installation before using the new
+  pipeline, then select **LTX-2.5 Video** in the Umbra UI model installer. The
+  core INT8 ConvRot profile is approximately 39.71 GB. Review and accept the
+  Lightricks LTX-2.5 model terms where required.
+- **Optional LTX 2.5 prompt enhancer:** Select **LTX-2.5 Prompt Enhancer** in
+  the model installer for the official Gemma 4 enhancer. This adds
+  approximately 10.28 GB and may require accepting the Gemma terms and using a
+  Hugging Face Read token with gated-model access.
+
+Linux users should keep `python3-dev`, `build-essential`, `libgl1`, and
+`libglib2.0-0` or their distribution equivalents installed for managed
+ComfyUI custom-node dependencies.
+
+### LTX 2.5 Video Pipeline
+
+- Added LTX 2.5 as a separate Umbra UI video family instead of replacing or
+  mutating the existing LTX 2.3 pipeline.
+- Added dedicated text-to-video, image-to-video, and experimental
+  video-to-video API workflows with native audio/video latent handling.
+- Added the official two-stage pixel-diffusion path, latent spatial upscaling,
+  refinement sampling, tiled VAE decoding, and independent video/audio CFG,
+  sampler, and sigma controls.
+- Added first-frame image conditioning, source-video duration slicing, frame
+  normalization, source-audio preservation, and queue-state persistence.
+- Added the official Gemma 4 prompt-enhancement path and preserved its native
+  LTX system template. Umbra Agent remains optional and runs before the native
+  model-specific enhancement pass rather than replacing it.
+- Added sampling, token limit, temperature, top-k, top-p, min-p, repetition,
+  presence, and thinking controls. Reasoning output is stripped before the
+  enhanced generation prompt is submitted.
+
+### Anima 2.9B Pipeline
+
+- Added Anima 2.9B Preview as its own model family with dedicated
+  text-to-image and image-to-image workflows.
+- Added the required 40-layer ComfyUI loader integration and immutable,
+  checksum-verified model manifest entry.
+- Reused the compatible Anima Qwen 3 text encoder and Qwen Image VAE while
+  preserving Anima 2.9B as a distinct selectable pipeline.
+- Added family detection and media-handoff compatibility for Power Prompter,
+  Umbra UI, inpainting, and Canvas workflows.
+
+### Smarter Wildcard Authoring
+
+- Every wildcard combination line can now be edited directly without deleting
+  and rebuilding its group option.
+- Removed the Danbooru-versus-natural-language mode switch. Users can type
+  Danbooru tags, ordinary prose, or a mixture of both in one free-form line.
+- Exact catalog tags still receive canonical spelling, classifier metadata,
+  post counts, and post-count weighting; unmatched prose is preserved instead
+  of being rejected as an unknown tag.
+- Corrected generated-line accounting so punctuation and commas inside prose
+  do not inflate the configured maximum-parts audit.
+- Added **Keep Selection** to the Danbooru Tag Catalog. After adding a bundle,
+  users can retain its selected tags, make a small change, and add the next
+  related wildcard line without starting over.
+- Existing structured wildcard recipes remain loadable while newly saved
+  recipes use the expanded free-form definition.
+
+### Verification
+
+- Verified LTX 2.5 text-to-video, image-to-video, and video-to-video workflow
+  graph generation and pipeline capability validation.
+- Verified the Anima 2.9B workflow generator and runtime qualification paths
+  for text-to-image and image-to-image.
+- Verified mixed catalog-tag and natural-language wildcard generation,
+  per-line editing, post-count scoring, default selection clearing, and the
+  Keep Selection workflow in the live Data Forge interface.
+- Confirmed the production frontend build and frontend ESLint pass.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Wildcard prose no longer fails because it is not an exact Danbooru
+  tag.
+- **Fixed:** Commas in natural-language wildcard lines no longer corrupt the
+  maximum-parts audit.
+- **Fixed:** Missing post counts are no longer coerced into zero when wildcard
+  combinations are scored.
+- **Improved:** Catalog bundles can retain their selected tags for quick,
+  incremental prompt variations.
+- **Improved:** LTX video-to-video normalizes source duration and frame count
+  before generation instead of relying on an incompatible source sequence.
+- **Improved:** Gated Hugging Face model downloads now detect local tokens and
+  provide actionable access and model-terms guidance for HTTP 401/403 errors.
+
 ## v0.31.12
 
 ### TL;DR - Setup After Updating

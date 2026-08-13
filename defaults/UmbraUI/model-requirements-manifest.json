@@ -5,6 +5,10 @@
       "label": "Anima",
       "description": "Qwen 3 text encoder and Qwen Image VAE used by Umbra's Anima pipelines."
     },
+    "anima-2.9b": {
+      "label": "Anima 2.9B Preview",
+      "description": "Anima 2.9B Preview v1 diffusion model plus the shared Anima Qwen 3 text encoder and Qwen Image VAE. Model weights are non-commercial."
+    },
     "flux-1": {
       "label": "FLUX.1",
       "description": "CLIP-L, T5-XXL FP8, and AE VAE for FLUX.1 pipelines."
@@ -79,6 +83,14 @@
       "label": "MiniMax H3 Reference Video",
       "description": "Adds the MiniMax H3 Ref2VA INT8 ConvRot model for Umbra UI reference-to-video. Requires the MiniMax H3 Video support files and adds a 20.96 GB model download."
     },
+    "ltx-2.5": {
+      "label": "LTX-2.5 Video",
+      "description": "LTX-2.5 INT8 ConvRot diffusion model, Gemma 4 text encoder, video/audio VAEs, and latent upscaler for Umbra UI text-to-video, image-to-video, and experimental video-to-video. Requires accepting the Lightricks LTX-2.5 model license on Hugging Face. Very large download."
+    },
+    "ltx-2.5-prompt-enhancer": {
+      "label": "LTX-2.5 Prompt Enhancer",
+      "description": "Optional Gemma 4 E2B instruction model for LTX-2.5 automatic prompt enhancement. Adds a 10.28 GB download."
+    },
     "video-postprocess": {
       "label": "Video Post-Processing",
       "description": "RIFE v4.26 frame interpolation for Umbra UI video post-processing. NVIDIA RTX Video Super Resolution is installed with ComfyUI custom nodes on NVIDIA systems and needs no separate model download."
@@ -88,7 +100,7 @@
     {
       "id": "anima-qwen-3-text-encoder",
       "installPolicy": "automatic",
-      "profiles": ["anima"],
+      "profiles": ["anima", "anima-2.9b"],
       "repository": "circlestone-labs/Anima",
       "revision": "f7382c4bf9d7ffe4ceea593a0adbb470c56dd79b",
       "files": [
@@ -103,7 +115,7 @@
     {
       "id": "qwen-image-vae",
       "installPolicy": "automatic",
-      "profiles": ["anima", "qwen-image", "krea-2"],
+      "profiles": ["anima", "anima-2.9b", "qwen-image", "krea-2"],
       "repository": "circlestone-labs/Anima",
       "revision": "f7382c4bf9d7ffe4ceea593a0adbb470c56dd79b",
       "files": [
@@ -112,6 +124,25 @@
           "sourcePath": "split_files/vae/qwen_image_vae.safetensors",
           "bytes": 253806246,
           "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+        }
+      ]
+    },
+    {
+      "id": "anima-2.9b-preview-v1",
+      "family": "Anima 2.9B",
+      "creator": "Gazingstars123",
+      "repository": "Gazingstars123/Anima-2.9B",
+      "revision": "ad22911d4a3ae419ffc169c41dd5254352e3ad22",
+      "license": "circlestone-labs-non-commercial-license",
+      "installPolicy": "automatic",
+      "profiles": ["anima-2.9b"],
+      "purpose": "Anima 2.9B Preview v1 text-to-image, image-to-image, inpainting, Canvas, and Power Prompter generation",
+      "files": [
+        {
+          "destination": "diffusion_models/Anima-2.9B-preview-v1.safetensors",
+          "sourcePath": "Anima-2.9B-preview-v1.safetensors",
+          "bytes": 5843204206,
+          "sha256": "0b3020d1b906155f7eb30667622723e87160632c8c7a5f1c93bdce685f2a346d"
         }
       ]
     },
@@ -388,6 +419,73 @@
           "destination": "clip_vision/sigclip_vision_patch14_384.safetensors",
           "bytes": 856505640,
           "sha256": "1fee501deabac72f0ed17610307d7131e3e9d1e838d0363aa3c2b97a6e03fb33"
+        }
+      ]
+    },
+    {
+      "id": "ltx-2.5-video-core",
+      "family": "Video",
+      "creator": "Lightricks",
+      "repository": "Lightricks/LTX-2.5",
+      "revision": "ce298b1259d61ce6c87e05154b9ad339b16f32a0",
+      "license": "ltx-2.5-community-license-agreement",
+      "installPolicy": "automatic",
+      "profiles": ["ltx-2.5"],
+      "purpose": "LTX-2.5 native audio-video generation for Umbra UI",
+      "files": [
+        {
+          "destination": "diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+          "sourcePath": "diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+          "url": "https://civitai.com/api/download/models/3220250?fileId=3102350",
+          "bytes": 21504034224,
+          "sha256": "c4279eeff115cbeaca494bd2183e7d768c38fe85a184dc6afbb7159157c44334"
+        },
+        {
+          "destination": "text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+          "sourcePath": "text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+          "url": "https://civitai.com/api/download/models/3220250?fileId=3102394",
+          "bytes": 15372971786,
+          "sha256": "09a89e084de1a149c3de60cfe9dfd3e5161967eb09eea39e806fcdeffdd568de"
+        },
+        {
+          "destination": "vae/ltx-2.5-video-vae-bf16.safetensors",
+          "sourcePath": "vae/ltx-2.5-video-vae-bf16.safetensors",
+          "url": "https://civitai.com/api/download/models/3219979?fileId=3102023",
+          "bytes": 1472223346,
+          "sha256": "847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3"
+        },
+        {
+          "destination": "vae/ltx-2.5-audio-vae-bf16.safetensors",
+          "sourcePath": "vae/ltx-2.5-audio-vae-bf16.safetensors",
+          "url": "https://civitai.com/api/download/models/3219979?fileId=3102020",
+          "bytes": 364866540,
+          "sha256": "c52733d37f6a7fb7949c3dc0fb468c6cb2169e4d836983a73babb9f0d54837a5"
+        },
+        {
+          "destination": "latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+          "sourcePath": "latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+          "url": "https://civitai.com/api/download/models/3220250?fileId=3102386",
+          "bytes": 995778752,
+          "sha256": "eb5a71fe4068ee87ccdb1c3aa635e547ca76bd2d30ae20ae889f2c325c0677e8"
+        }
+      ]
+    },
+    {
+      "id": "ltx-2.5-prompt-enhancer",
+      "family": "Video",
+      "creator": "Google / Comfy Org",
+      "repository": "Comfy-Org/gemma-4",
+      "revision": "fb53025d538a4d19de09e37d01ee49b41f18e486",
+      "license": "gemma-terms-of-use",
+      "installPolicy": "automatic",
+      "profiles": ["ltx-2.5-prompt-enhancer"],
+      "purpose": "Optional LTX-2.5 automatic prompt enhancement",
+      "files": [
+        {
+          "destination": "text_encoders/gemma4_e2b_it_bf16.safetensors",
+          "sourcePath": "text_encoders/gemma4_e2b_it_bf16.safetensors",
+          "bytes": 10278774160,
+          "sha256": "dcc3c8d27be2db2ef38b78d564ebfa1e92eb24665ed2751f2983275f03a067c8"
         }
       ]
     },

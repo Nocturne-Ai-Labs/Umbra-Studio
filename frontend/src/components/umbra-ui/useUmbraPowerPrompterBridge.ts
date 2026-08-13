@@ -95,7 +95,7 @@ export interface ApiWorkflowItem {
   modelFamily?: string;
   umbraUiPipelines?: UmbraUiPipelineDescriptor[];
   resources?: UmbraWorkflowResourceSelector[];
-  videoFamily?: 'wan22' | 'ltx23' | 'minimax_h3';
+  videoFamily?: 'wan22' | 'ltx23' | 'ltx25' | 'minimax_h3';
   videoMode?: 'text_to_video' | 'image_to_video' | 'reference_to_video' | 'video_to_video';
 }
 
@@ -1668,6 +1668,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       postprocess: { ...options.video.postprocess },
       wan: { ...options.video.wan },
       minimaxH3: { ...options.video.minimaxH3 },
+      ltx25: {
+        ...options.video.ltx25,
+        keyframes: options.video.ltx25.keyframes.map((keyframe) => ({ ...keyframe })),
+      },
       ltx: {
         ...options.video.ltx,
         keyframes: options.video.ltx.keyframes.map((keyframe) => ({ ...keyframe })),
@@ -1737,7 +1741,11 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       const timeline = resolveUmbraLtxStoryboardTimeline(video.ltx.storyboard, video.fps, video.frames);
       video.frames = timeline.frames;
     }
-    const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : 'MiniMax H3';
+    const modelFamily = video.family === 'wan22'
+      ? 'Wan 2.2'
+      : video.family === 'ltx23'
+        ? 'LTX-2.3'
+        : video.family === 'ltx25' ? 'LTX-2.5' : 'MiniMax H3';
     const feature: UmbraUiPipelineFeature = video.mode === 'video_to_video'
       ? 'vid2vid'
       : video.mode === 'reference_to_video' ? 'ref2vid'
@@ -1797,6 +1805,26 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           keyframe.sourceImageName = String(payload?.filename || '').trim();
         }
         if (!keyframe.sourceImageName) throw new Error(`ComfyUI did not stage the LTX guide at frame ${keyframe.frameIndex}.`);
+      }
+    }
+    if (video.family === 'ltx25' && video.ltx25.keyframes.length > 0) {
+      for (const keyframe of video.ltx25.keyframes) {
+        keyframe.sourceImagePath = String(keyframe.sourceImagePath || '').trim();
+        keyframe.sourceImageName = String(keyframe.sourceImageName || '').trim();
+        if (!keyframe.sourceImagePath && !keyframe.sourceImageName) continue;
+        if (!keyframe.sourceImageName) {
+          const response = await fetch('/api/comfy/copy-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sourcePath: keyframe.sourceImagePath }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || payload?.success === false) {
+            throw new Error(String(payload?.error || `Failed to stage LTX-2.5 guide at frame ${keyframe.frameIndex}.`));
+          }
+          keyframe.sourceImageName = String(payload?.filename || '').trim();
+        }
+        if (!keyframe.sourceImageName) throw new Error(`ComfyUI did not stage the LTX-2.5 guide at frame ${keyframe.frameIndex}.`);
       }
     }
 
@@ -1873,6 +1901,21 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       ];
       const missing = required.find(([, value]) => !String(value || '').trim());
       if (missing) throw new Error(`Select a MiniMax H3 ${missing[0]} before queueing.`);
+    } else if (video.family === 'ltx25') {
+      const required = [
+        ['diffusion model', video.ltx25.model],
+        ['Gemma 4 text encoder', video.ltx25.textEncoder],
+        ['video VAE', video.ltx25.videoVae],
+        ...(video.ltx25.twoStage ? [['latent upscaler', video.ltx25.latentUpscaleModel]] : []),
+        ...(video.ltx25.audioEnabled
+          && !video.sourceAudioName
+          && !(video.mode === 'video_to_video' && video.preserveSourceAudio)
+          ? [['audio VAE', video.ltx25.audioVae]]
+          : []),
+        ...(video.ltx25.promptEnhance ? [['prompt enhancer', video.ltx25.promptEnhanceModel]] : []),
+      ];
+      const missing = required.find(([, value]) => !String(value || '').trim());
+      if (missing) throw new Error(`Select an LTX-2.5 ${missing[0]} before queueing.`);
     } else {
       const required = [
         ['checkpoint', video.ltx.checkpoint],
@@ -1912,11 +1955,21 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       controlAfterGenerate: video.seedMode,
       seedIncrement: video.seedIncrement,
       steps: video.family === 'wan22' ? video.wan.steps : video.family === 'minimax_h3' ? video.minimaxH3.steps : 8,
-      cfg: video.family === 'wan22' ? video.wan.cfg : video.ltx.baseCfg,
-      samplerName: video.family === 'wan22' ? video.wan.highSamplerName : video.family === 'minimax_h3' ? video.minimaxH3.samplerName : video.ltx.baseSamplerName,
+      cfg: video.family === 'wan22'
+        ? video.wan.cfg
+        : video.family === 'ltx25' ? video.ltx25.baseCfg : video.ltx.baseCfg,
+      samplerName: video.family === 'wan22'
+        ? video.wan.highSamplerName
+        : video.family === 'minimax_h3'
+          ? video.minimaxH3.samplerName
+          : video.family === 'ltx25' ? video.ltx25.baseSamplerName : video.ltx.baseSamplerName,
       scheduler: video.family === 'wan22' ? video.wan.highScheduler : video.family === 'minimax_h3' ? video.minimaxH3.scheduler : 'normal',
       modelType: video.family === 'ltx23' ? 'checkpoint' : 'unet',
-      checkpointName: video.family === 'wan22' ? video.wan.highModel : video.family === 'minimax_h3' ? video.minimaxH3.model : video.ltx.checkpoint,
+      checkpointName: video.family === 'wan22'
+        ? video.wan.highModel
+        : video.family === 'minimax_h3'
+          ? video.minimaxH3.model
+          : video.family === 'ltx25' ? video.ltx25.model : video.ltx.checkpoint,
       aspectRatio: 'custom',
       swapDimensions: false,
       width: video.width,
@@ -1982,7 +2035,11 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       requestId = await submitQueueRequest(
         prompt,
         generation,
-        video.family === 'wan22' ? 'Umbra UI Wan 2.2 Video' : 'Umbra UI LTX-2.3 Video',
+        video.family === 'wan22'
+          ? 'Umbra UI Wan 2.2 Video'
+          : video.family === 'ltx23'
+            ? 'Umbra UI LTX-2.3 Video'
+            : video.family === 'ltx25' ? 'Umbra UI LTX-2.5 Video' : 'Umbra UI MiniMax H3 Video',
         { feature, modelFamily },
         options.queuePlacement,
       );

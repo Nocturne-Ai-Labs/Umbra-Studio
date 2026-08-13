@@ -11,8 +11,10 @@ import {
   DatabaseZap,
   Dices,
   FolderTree,
+  FileText,
   Layers3,
   Loader2,
+  Pencil,
   Plus,
   RefreshCw,
   Save,
@@ -32,7 +34,8 @@ type WildcardTag = {
   postCount: number | null;
   classifiers: string[];
   explicit: boolean;
-  source: 'danbooru' | 'local';
+  source: 'danbooru' | 'local' | 'natural' | 'freeform';
+  kind?: 'tag' | 'natural' | 'auto';
 };
 
 type WildcardClassifierSummary = {
@@ -118,14 +121,43 @@ function normalizeStoredWildcardTag(rawTag: unknown): WildcardTag | null {
   const record = rawTag as Record<string, unknown>;
   const tag = String(record.tag || '').trim();
   if (!tag) return null;
+  const freeform = record.kind === 'auto' || record.source === 'freeform';
+  const natural = record.kind === 'natural' || record.source === 'natural';
   return {
     tag,
     category: Number.isFinite(Number(record.category)) ? Number(record.category) : 0,
     postCount: record.postCount !== null && record.postCount !== undefined && Number.isFinite(Number(record.postCount)) ? Number(record.postCount) : null,
     classifiers: Array.isArray(record.classifiers) ? record.classifiers.map((value) => String(value || '').trim()).filter(Boolean) : [],
     explicit: record.explicit === true,
-    source: record.source === 'danbooru' ? 'danbooru' : 'local',
+    source: freeform ? 'freeform' : natural ? 'natural' : record.source === 'danbooru' ? 'danbooru' : 'local',
+    kind: freeform ? 'auto' : natural ? 'natural' : 'tag',
   };
+}
+
+function createFreeformEntry(value: string): WildcardTag | null {
+  const text = value.replace(/\r?\n+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1000);
+  if (!text) return null;
+  return {
+    tag: text,
+    category: 0,
+    postCount: null,
+    classifiers: [],
+    explicit: false,
+    source: 'freeform',
+    kind: 'auto',
+  };
+}
+
+function isNaturalLanguageEntry(tag: WildcardTag): boolean {
+  return tag.kind === 'natural' || tag.source === 'natural';
+}
+
+function isFreeformEntry(tag: WildcardTag): boolean {
+  return tag.kind === 'auto' || tag.source === 'freeform';
+}
+
+function optionText(option: WildcardOption): string {
+  return option.tags.map((tag) => tag.tag).join(', ');
 }
 
 function normalizeStoredWildcardDefinition(rawDefinition: unknown): {
@@ -231,7 +263,10 @@ function formatPostCount(value: number | null): string {
 }
 
 function minimumOptionPostCount(option: WildcardOption): number | null {
-  const counts = option.tags.map((tag) => tag.postCount).filter((count): count is number => count !== null);
+  const counts = option.tags
+    .filter((tag) => !isNaturalLanguageEntry(tag))
+    .map((tag) => tag.postCount)
+    .filter((count): count is number => count !== null);
   return counts.length > 0 ? Math.min(...counts) : null;
 }
 
@@ -362,10 +397,63 @@ function TagList({ tags, onRemove, emptyLabel }: { tags: WildcardTag[]; onRemove
       {tags.map((tag) => (
         <span key={tag.tag} className="inline-flex min-h-7 items-center gap-1 rounded-sm border border-white/10 bg-black/25 pl-2 text-[10px] text-zinc-300">
           <span className="font-mono">{tag.tag}</span>
-          <span className="text-[8px] text-cyan-200/70">{formatPostCount(tag.postCount)}</span>
+          <span className={`text-[8px] ${isNaturalLanguageEntry(tag) || isFreeformEntry(tag) ? 'text-fuchsia-200/70' : 'text-cyan-200/70'}`}>
+            {isFreeformEntry(tag) ? 'Freeform' : isNaturalLanguageEntry(tag) ? 'Natural' : formatPostCount(tag.postCount)}
+          </span>
           <button type="button" onClick={() => onRemove(tag.tag)} className="inline-flex h-6 w-6 items-center justify-center text-zinc-600 hover:text-red-200" title={`Remove ${tag.tag}`}><X className="h-3 w-3" /></button>
         </span>
       ))}
+    </div>
+  );
+}
+
+function FreeformComposer({
+  placeholder,
+  buttonLabel,
+  onAdd,
+  disabled = false,
+}: {
+  placeholder: string;
+  buttonLabel: string;
+  onAdd: (entry: WildcardTag) => void;
+  disabled?: boolean;
+}) {
+  const [draft, setDraft] = React.useState('');
+
+  const addDraft = () => {
+    const entry = createFreeformEntry(draft);
+    if (!entry || disabled) return;
+    onAdd(entry);
+    setDraft('');
+  };
+
+  return (
+    <div className="flex gap-1.5">
+      <div className="relative min-w-0 flex-1">
+        <FileText className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fuchsia-300/60" />
+        <input
+          value={draft}
+          disabled={disabled}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              addDraft();
+            }
+          }}
+          placeholder={placeholder}
+          aria-label={placeholder}
+          className="settings-input h-9 !py-1.5 pl-8 text-xs"
+        />
+      </div>
+      <button
+        type="button"
+        disabled={disabled || !draft.trim()}
+        onClick={addDraft}
+        className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-fuchsia-300/30 bg-fuchsia-500/10 px-2.5 text-[9px] font-black uppercase tracking-[0.1em] text-fuchsia-100 disabled:opacity-35"
+      >
+        <Plus className="h-3.5 w-3.5" /> {buttonLabel}
+      </button>
     </div>
   );
 }
@@ -395,6 +483,7 @@ function WildcardTagCatalogDrawer({
   ));
   const [items, setItems] = React.useState<WildcardTag[]>([]);
   const [selectedTags, setSelectedTags] = React.useState<WildcardTag[]>([]);
+  const [keepSelection, setKeepSelection] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
   const [refreshRevision, setRefreshRevision] = React.useState(0);
@@ -494,8 +583,11 @@ function WildcardTagCatalogDrawer({
       destinationLabel = group?.name || 'Group';
       onAddGroupBundle(groupId, selectedTags);
     }
-    showToast(`Added ${selectedTags.length} tag${selectedTags.length === 1 ? '' : 's'} to ${destinationLabel}.`, 'success');
-    setSelectedTags([]);
+    showToast(
+      `Added ${selectedTags.length} tag${selectedTags.length === 1 ? '' : 's'} to ${destinationLabel}${keepSelection ? '; selection kept' : ''}.`,
+      'success',
+    );
+    if (!keepSelection) setSelectedTags([]);
   };
 
   if (!open) {
@@ -554,7 +646,16 @@ function WildcardTagCatalogDrawer({
             <option value="excluded">Excluded Tags</option>
             {groups.map((group) => <option key={group.id} value={`group:${group.id}`}>{group.name || 'Untitled Group'} Bundle</option>)}
           </UmbraSelectControl>
-          <div className="flex gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              aria-pressed={keepSelection}
+              onClick={() => setKeepSelection((current) => !current)}
+              className={`inline-flex h-9 items-center gap-1.5 rounded-sm border px-2 text-[8px] font-black uppercase tracking-[0.08em] transition ${keepSelection ? 'border-fuchsia-300/35 bg-fuchsia-500/10 text-fuchsia-100' : 'border-white/10 text-zinc-500 hover:text-zinc-200'}`}
+              title="Keep selected tags after adding so you can make a similar line"
+            >
+              <Check className={`h-3 w-3 ${keepSelection ? 'opacity-100' : 'opacity-35'}`} /> Keep Selection
+            </button>
             <button type="button" disabled={selectedTags.length === 0} onClick={() => setSelectedTags([])} className="h-9 rounded-sm border border-white/10 px-2 text-[9px] font-black uppercase tracking-[0.08em] text-zinc-500 hover:text-zinc-200 disabled:opacity-30">Clear</button>
             <button type="button" disabled={selectedTags.length === 0} onClick={addSelected} className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-emerald-300/30 bg-emerald-500/10 px-3 text-[9px] font-black uppercase tracking-[0.08em] text-emerald-100 disabled:opacity-30"><Plus className="h-3.5 w-3.5" /> Add Selected</button>
           </div>
@@ -677,6 +778,104 @@ function WildcardTagCatalogDrawer({
   );
 }
 
+function EditableWildcardOption({
+  option,
+  optionIndex,
+  groupEnabled,
+  optionCount,
+  onUpdate,
+  onRemove,
+  onChanceChange,
+}: {
+  option: WildcardOption;
+  optionIndex: number;
+  groupEnabled: boolean;
+  optionCount: number;
+  onUpdate: (option: WildcardOption) => void;
+  onRemove: () => void;
+  onChanceChange: (chance: number) => void;
+}) {
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState(() => optionText(option));
+  const [error, setError] = React.useState('');
+
+  React.useEffect(() => {
+    if (editing) return;
+    setDraft(optionText(option));
+  }, [editing, option]);
+
+  const cancelEdit = () => {
+    setDraft(optionText(option));
+    setError('');
+    setEditing(false);
+  };
+
+  const saveEdit = () => {
+    if (!draft.trim()) return;
+    setError('');
+    const entry = createFreeformEntry(draft);
+    if (!entry) {
+      setError('Enter content for this wildcard line.');
+      return;
+    }
+    onUpdate({ ...option, tags: [entry] });
+    setEditing(false);
+  };
+
+  const freeform = option.tags.length === 1 && (isFreeformEntry(option.tags[0]) || isNaturalLanguageEntry(option.tags[0]));
+  const label = optionText(option);
+  return (
+    <div className="rounded-sm border border-white/[0.08] bg-black/25 px-2 py-2">
+      <div className="flex min-h-7 items-center gap-2">
+        <span className="w-6 shrink-0 font-mono text-[9px] text-zinc-700">{String(optionIndex + 1).padStart(2, '0')}</span>
+        <span className={`shrink-0 rounded-sm border px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.08em] ${freeform ? 'border-fuchsia-300/20 bg-fuchsia-500/[0.08] text-fuchsia-200' : 'border-cyan-300/20 bg-cyan-500/[0.08] text-cyan-200'}`}>
+          {freeform ? 'Freeform' : 'Catalog'}
+        </span>
+        <span className={`min-w-0 flex-1 truncate text-[11px] text-zinc-300 ${freeform ? 'font-sans' : 'font-mono'}`} title={label}>{label}</span>
+        {!freeform ? <span className="shrink-0 text-[9px] text-cyan-200/70">min {formatPostCount(minimumOptionPostCount(option))}</span> : null}
+        <button type="button" onClick={() => setEditing(true)} className="inline-flex h-7 w-7 shrink-0 items-center justify-center text-zinc-500 hover:text-cyan-100" title={`Edit line ${optionIndex + 1}`} aria-label={`Edit wildcard line ${optionIndex + 1}`}><Pencil className="h-3 w-3" /></button>
+        <button type="button" onClick={onRemove} className="inline-flex h-7 w-7 shrink-0 items-center justify-center text-zinc-600 hover:text-red-200" title="Remove option"><X className="h-3 w-3" /></button>
+      </div>
+
+      {editing ? (
+        <div className="mt-2 space-y-2 rounded-sm border border-white/[0.08] bg-black/35 p-2">
+          <textarea
+            value={draft}
+            onChange={(event) => { setDraft(event.target.value); setError(''); }}
+            rows={3}
+            aria-label={`Wildcard line ${optionIndex + 1} content`}
+            placeholder="Type tags, natural language, or mix both in the same line."
+            className="settings-input min-h-20 resize-y !py-2 text-xs leading-5"
+          />
+          <div className="text-[9px] leading-4 text-zinc-600">Type anything. Exact catalog tags receive post-count data automatically; all other text is preserved.</div>
+          {error ? <div className="text-[10px] text-red-300">{error}</div> : null}
+          <div className="flex justify-end gap-1.5">
+            <button type="button" onClick={cancelEdit} className="inline-flex h-8 items-center gap-1 rounded-sm border border-white/10 px-2 text-[8px] font-black uppercase tracking-[0.08em] text-zinc-400"><X className="h-3 w-3" /> Cancel</button>
+            <button type="button" disabled={!draft.trim()} onClick={saveEdit} className="inline-flex h-8 items-center gap-1 rounded-sm border border-emerald-300/25 bg-emerald-500/10 px-2 text-[8px] font-black uppercase tracking-[0.08em] text-emerald-100 disabled:opacity-35"><Check className="h-3 w-3" /> Save Line</button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mt-1.5 grid grid-cols-[3.6rem_minmax(5rem,1fr)_3rem] items-center gap-2 pl-8">
+        <span className="text-[8px] font-black uppercase tracking-[0.1em] text-zinc-600">Chance</span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={option.chance}
+          disabled={optionCount === 1 || !groupEnabled}
+          onChange={(event) => onChanceChange(Number(event.target.value))}
+          aria-label={`Chance for ${label}`}
+          className="h-1.5 w-full cursor-pointer disabled:cursor-default disabled:opacity-50"
+          style={{ accentColor: 'var(--umbra-accent)' }}
+        />
+        <span className="rounded-sm border border-cyan-300/15 bg-cyan-500/[0.07] px-1.5 py-1 text-center font-mono text-[10px] text-cyan-100">{option.chance}%</span>
+      </div>
+    </div>
+  );
+}
+
 function GroupPanel({
   group,
   index,
@@ -695,6 +894,13 @@ function GroupPanel({
     onChange({
       ...group,
       options: appendOptionWithBalancedChance(group.options, { id: createId('option'), tags }),
+    });
+  };
+
+  const updateOption = (nextOption: WildcardOption) => {
+    onChange({
+      ...group,
+      options: group.options.map((option) => option.id === nextOption.id ? nextOption : option),
     });
   };
 
@@ -725,39 +931,31 @@ function GroupPanel({
         <button type="button" onClick={onRemove} className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-red-300/15 text-red-200/60 hover:text-red-100" title={`Remove ${group.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
       </div>
 
-      <div className="mt-3">
-        <TagComposer placeholder="One option, or a bundle: sitting, outdoors" buttonLabel="Add option" onAdd={addOption} disabled={!group.enabled} />
+      <div className="mt-3 rounded-sm border border-white/[0.08] bg-black/20 p-2.5">
+        <FreeformComposer
+          placeholder="Type tags, natural language, or mix both"
+          buttonLabel="Add line"
+          onAdd={(entry) => addOption([entry])}
+          disabled={!group.enabled}
+        />
+        <div className="mt-1.5 text-[9px] leading-4 text-zinc-600">No content mode required. Recognized tags are enriched automatically; other wording remains untouched.</div>
       </div>
 
       <div className="mt-3 space-y-1.5">
         {group.options.map((option, optionIndex) => (
-          <div key={option.id} className="rounded-sm border border-white/[0.08] bg-black/25 px-2 py-2">
-            <div className="flex min-h-7 items-center gap-2">
-              <span className="w-6 shrink-0 font-mono text-[9px] text-zinc-700">{String(optionIndex + 1).padStart(2, '0')}</span>
-              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300" title={option.tags.map((tag) => tag.tag).join(', ')}>{option.tags.map((tag) => tag.tag).join(', ')}</span>
-              <span className="shrink-0 text-[9px] text-cyan-200/70">min {formatPostCount(minimumOptionPostCount(option))}</span>
-              <button type="button" onClick={() => onChange({ ...group, options: removeOptionAndRebalance(group.options, option.id) })} className="inline-flex h-7 w-7 shrink-0 items-center justify-center text-zinc-600 hover:text-red-200" title="Remove option"><X className="h-3 w-3" /></button>
-            </div>
-            <div className="mt-1.5 grid grid-cols-[3.6rem_minmax(5rem,1fr)_3rem] items-center gap-2 pl-8">
-              <span className="text-[8px] font-black uppercase tracking-[0.1em] text-zinc-600">Chance</span>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={1}
-                value={option.chance}
-                disabled={group.options.length === 1 || !group.enabled}
-                onChange={(event) => onChange({
-                  ...group,
-                  options: rebalanceOptionChance(group.options, option.id, Number(event.target.value)),
-                })}
-                aria-label={`Chance for ${option.tags.map((tag) => tag.tag).join(', ')}`}
-                className="h-1.5 w-full cursor-pointer disabled:cursor-default disabled:opacity-50"
-                style={{ accentColor: 'var(--umbra-accent)' }}
-              />
-              <span className="rounded-sm border border-cyan-300/15 bg-cyan-500/[0.07] px-1.5 py-1 text-center font-mono text-[10px] text-cyan-100">{option.chance}%</span>
-            </div>
-          </div>
+          <EditableWildcardOption
+            key={option.id}
+            option={option}
+            optionIndex={optionIndex}
+            groupEnabled={group.enabled}
+            optionCount={group.options.length}
+            onUpdate={updateOption}
+            onRemove={() => onChange({ ...group, options: removeOptionAndRebalance(group.options, option.id) })}
+            onChanceChange={(chance) => onChange({
+              ...group,
+              options: rebalanceOptionChance(group.options, option.id, chance),
+            })}
+          />
         ))}
         {group.options.length === 0 ? <div className="rounded-sm border border-dashed border-white/10 px-3 py-3 text-center text-[10px] text-zinc-600">No options in this group.</div> : null}
       </div>
@@ -852,7 +1050,7 @@ export function WildcardGeneratorTab() {
           values: result.values,
           choices: result.rows.map((row) => ({ value: row.value, chance: row.chance })),
           generatorDefinition: {
-            version: 1,
+            version: 3,
             count,
             seed,
             maxTagsPerLine,
@@ -949,7 +1147,7 @@ export function WildcardGeneratorTab() {
               <input type="number" min={1} max={1000} value={count} onChange={(event) => setCount(Math.max(1, Math.min(1000, Number(event.target.value) || 1)))} className="settings-input h-9 !py-1.5 text-xs" />
             </label>
             <label>
-              <span className="mb-1 block text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500">Max Tags</span>
+              <span className="mb-1 block text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500">Max Parts</span>
               <input type="number" min={2} max={40} value={maxTagsPerLine} onChange={(event) => setMaxTagsPerLine(Math.max(2, Math.min(40, Number(event.target.value) || 2)))} className="settings-input h-9 !py-1.5 text-xs" />
             </label>
             <label>
@@ -970,9 +1168,9 @@ export function WildcardGeneratorTab() {
           </label>
 
           <section>
-            <h3 className="mb-2 text-[9px] font-black uppercase tracking-[0.14em] text-emerald-200">Fixed Tags</h3>
-            <TagComposer placeholder="Applied to every line" buttonLabel="Add" onAdd={(tags) => setBaseTags((current) => appendUniqueTags(current, tags))} />
-            <div className="mt-2"><TagList tags={baseTags} emptyLabel="No fixed tags." onRemove={(tag) => setBaseTags((current) => current.filter((entry) => entry.tag !== tag))} /></div>
+            <h3 className="mb-2 text-[9px] font-black uppercase tracking-[0.14em] text-emerald-200">Fixed Content</h3>
+            <FreeformComposer placeholder="Tags or natural language applied to every line" buttonLabel="Add" onAdd={(entry) => setBaseTags((current) => appendUniqueTags(current, [entry]))} />
+            <div className="mt-2"><TagList tags={baseTags} emptyLabel="No fixed content." onRemove={(tag) => setBaseTags((current) => current.filter((entry) => entry.tag !== tag))} /></div>
           </section>
 
           <section>
@@ -1041,7 +1239,7 @@ export function WildcardGeneratorTab() {
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <div className="rounded-md border border-white/10 bg-white/[0.025] p-2.5"><span className="block text-[8px] font-black uppercase tracking-[0.12em] text-zinc-600">Generated</span><strong className="mt-1 block font-mono text-sm text-cyan-100">{result.generatedCount}/{result.requestedCount}</strong></div>
                   <div className="rounded-md border border-white/10 bg-white/[0.025] p-2.5"><span className="block text-[8px] font-black uppercase tracking-[0.12em] text-zinc-600">Possible</span><strong className="mt-1 block font-mono text-sm text-zinc-200">{new Intl.NumberFormat().format(result.possibleCombinations)}</strong></div>
-                  <div className="rounded-md border border-white/10 bg-white/[0.025] p-2.5"><span className="block text-[8px] font-black uppercase tracking-[0.12em] text-zinc-600">Max Tags</span><strong className="mt-1 block font-mono text-sm text-zinc-200">{result.audit.maximumTagsPerLine}</strong></div>
+                  <div className="rounded-md border border-white/10 bg-white/[0.025] p-2.5"><span className="block text-[8px] font-black uppercase tracking-[0.12em] text-zinc-600">Max Parts</span><strong className="mt-1 block font-mono text-sm text-zinc-200">{result.audit.maximumTagsPerLine}</strong></div>
                   <div className="rounded-md border border-white/10 bg-white/[0.025] p-2.5"><span className="block text-[8px] font-black uppercase tracking-[0.12em] text-zinc-600">Unique</span><strong className={`mt-1 block font-mono text-sm ${result.audit.unique ? 'text-emerald-200' : 'text-red-200'}`}>{result.audit.unique ? 'Yes' : 'No'}</strong></div>
                 </div>
 

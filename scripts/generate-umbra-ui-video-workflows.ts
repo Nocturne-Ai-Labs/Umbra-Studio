@@ -17,7 +17,7 @@ const TARGET_DIRS = [
 
 type VideoWorkflowMode = 'text_to_video' | 'image_to_video' | 'reference_to_video';
 
-function meta(title: string, role?: string, descriptor?: { family: 'wan22' | 'ltx23' | 'minimax_h3'; mode: VideoWorkflowMode }) {
+function meta(title: string, role?: string, descriptor?: { family: 'wan22' | 'ltx23' | 'ltx25' | 'minimax_h3'; mode: VideoWorkflowMode }) {
   return {
     title,
     ...(role ? { umbra_role: role } : {}),
@@ -29,7 +29,7 @@ function meta(title: string, role?: string, descriptor?: { family: 'wan22' | 'lt
   };
 }
 
-function node(classType: string, inputs: NodeInputs, title: string, role?: string, descriptor?: { family: 'wan22' | 'ltx23' | 'minimax_h3'; mode: VideoWorkflowMode }): PromptNode {
+function node(classType: string, inputs: NodeInputs, title: string, role?: string, descriptor?: { family: 'wan22' | 'ltx23' | 'ltx25' | 'minimax_h3'; mode: VideoWorkflowMode }): PromptNode {
   return { class_type: classType, inputs, _meta: meta(title, role, descriptor) };
 }
 
@@ -169,6 +169,90 @@ function buildLtxWorkflow(mode: 'text_to_video' | 'image_to_video'): PromptGraph
   return graph;
 }
 
+function buildLtx25Workflow(mode: 'text_to_video' | 'image_to_video'): PromptGraph {
+  const descriptor = { family: 'ltx25' as const, mode };
+  const i2v = mode === 'image_to_video';
+  const baseVideoRef: [string, number] = i2v ? ['44', 0] : ['11', 0];
+  const refineVideoRef: [string, number] = i2v ? ['45', 0] : ['21', 0];
+  const graph: PromptGraph = {
+    '1': node('UNETLoader', {
+      unet_name: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors', weight_dtype: 'default',
+    }, 'LTX-2.5 Diffusion Model', 'ltx25_model', descriptor),
+    '2': node('VAELoader', { vae_name: 'ltx-2.5-video-vae-bf16.safetensors' }, 'LTX-2.5 Video VAE', 'ltx25_video_vae', descriptor),
+    '3': node('VAELoader', { vae_name: 'ltx-2.5-audio-vae-bf16.safetensors' }, 'LTX-2.5 Audio VAE', 'ltx_audio_vae', descriptor),
+    '4': node('CLIPLoader', {
+      clip_name: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors', type: 'ltxv', device: 'default',
+    }, 'LTX-2.5 Text Encoder', 'ltx25_text_encoder', descriptor),
+    '5': node('CLIPLoader', {
+      clip_name: 'gemma4_e2b_it_bf16.safetensors', type: 'ltxv', device: 'default',
+    }, 'LTX-2.5 Prompt Enhancer Model', 'ltx_prompt_enhance_model', descriptor),
+    '6': node('TextGenerateLTX2Prompt', {
+      clip: ['5', 0], prompt: 'A cinematic subject moving naturally through the scene.', max_length: 600,
+      sampling_mode: 'on',
+      'sampling_mode.temperature': 0.7,
+      'sampling_mode.top_k': 64,
+      'sampling_mode.top_p': 0.95,
+      'sampling_mode.min_p': 0.05,
+      'sampling_mode.repetition_penalty': 1.15,
+      'sampling_mode.seed': 0,
+      'sampling_mode.presence_penalty': 0,
+      thinking: false, use_default_template: true,
+    }, 'LTX-2.5 Prompt Enhancer', 'ltx_prompt_enhance', descriptor),
+    '8': node('CLIPTextEncode', { clip: ['4', 0], text: 'A cinematic subject moving naturally through the scene.' }, 'Positive Prompt', 'positive_prompt', descriptor),
+    '9': node('CLIPTextEncode', {
+      clip: ['4', 0], text: 'pc game, console game, video game, cartoon, childish, ugly, blurry, low quality, still frame, watermark, subtitles',
+    }, 'Negative Prompt', 'negative_prompt', descriptor),
+    '10': node('LTXVConditioning', { positive: ['8', 0], negative: ['9', 0], frame_rate: 24 }, 'LTX-2.5 Conditioning', 'ltx_conditioning', descriptor),
+    '11': node('EmptyLTXVLatentVideo', { width: 640, height: 352, length: 121, batch_size: 1 }, 'LTX-2.5 Base Video Latent', i2v ? 'ltx_empty_video_latent' : 'ltx_base_video_latent', descriptor),
+    '12': node('LTXVEmptyLatentAudio', { frames_number: 121, frame_rate: 24, batch_size: 1, audio_vae: ['3', 0] }, 'LTX-2.5 Empty Audio', 'ltx_empty_audio', descriptor),
+    '13': node('LTXVConcatAVLatent', { video_latent: baseVideoRef, audio_latent: ['12', 0] }, 'LTX-2.5 Base AV Latent', 'ltx_base_concat', descriptor),
+    '14': node('RandomNoise', { noise_seed: 0 }, 'LTX-2.5 Base Noise', 'ltx_base_noise', descriptor),
+    '15': node('LTXVDualCFGGuider', { model: ['1', 0], positive: ['10', 0], negative: ['10', 1], video_cfg: 1, audio_cfg: 1 }, 'LTX-2.5 Base Guidance', 'ltx_base_cfg', descriptor),
+    '16': node('KSamplerSelect', { sampler_name: 'euler_ancestral' }, 'LTX-2.5 Base Sampler', 'ltx_base_sampler', descriptor),
+    '17': node('ManualSigmas', { sigmas: '1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0' }, 'LTX-2.5 Base Sigmas', 'ltx_base_sigmas', descriptor),
+    '18': node('SamplerCustomAdvanced', { noise: ['14', 0], guider: ['15', 0], sampler: ['16', 0], sigmas: ['17', 0], latent_image: ['13', 0] }, 'LTX-2.5 Base Sample', 'ltx_base_sample', descriptor),
+    '19': node('LTXVSeparateAVLatent', { av_latent: ['18', 0] }, 'Separate LTX-2.5 Base AV', 'ltx_base_separate', descriptor),
+    '20': node('LatentUpscaleModelLoader', { model_name: 'ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors' }, 'LTX-2.5 Latent Upscaler', 'ltx_upscale_model', descriptor),
+    '21': node('LTXVLatentUpsampler', { samples: ['19', 0], upscale_model: ['20', 0], vae: ['2', 0] }, 'LTX-2.5 Spatial Upscale', 'ltx_upscale', descriptor),
+    '22': node('LTXVConcatAVLatent', { video_latent: refineVideoRef, audio_latent: ['19', 1] }, 'LTX-2.5 Refine AV Latent', 'ltx_refine_concat', descriptor),
+    '23': node('RandomNoise', { noise_seed: 0 }, 'LTX-2.5 Refine Noise', 'ltx_refine_noise', descriptor),
+    '24': node('LTXVDualCFGGuider', { model: ['1', 0], positive: ['10', 0], negative: ['10', 1], video_cfg: 1, audio_cfg: 1 }, 'LTX-2.5 Refine Guidance', 'ltx_refine_cfg', descriptor),
+    '25': node('KSamplerSelect', { sampler_name: 'euler_ancestral' }, 'LTX-2.5 Refine Sampler', 'ltx_refine_sampler', descriptor),
+    '26': node('ManualSigmas', { sigmas: '0.85, 0.7250, 0.4219, 0.0' }, 'LTX-2.5 Refine Sigmas', 'ltx_refine_sigmas', descriptor),
+    '27': node('SamplerCustomAdvanced', { noise: ['23', 0], guider: ['24', 0], sampler: ['25', 0], sigmas: ['26', 0], latent_image: ['22', 0] }, 'LTX-2.5 Refine Sample', 'ltx_refine_sample', descriptor),
+    '28': node('LTXVSeparateAVLatent', { av_latent: ['27', 0] }, 'Separate LTX-2.5 Refined AV', 'ltx_refine_separate', descriptor),
+    '29': node('VAEDecodeTiled', { samples: ['28', 0], vae: ['2', 0], tile_size: 512, overlap: 64, temporal_size: 64, temporal_overlap: 16 }, 'LTX-2.5 Pixel Diffusion Decode', 'video_decode', descriptor),
+    '30': node('LTXVAudioVAEDecode', { samples: ['28', 1], audio_vae: ['3', 0] }, 'LTX-2.5 Audio Decode', 'ltx_audio_decode', descriptor),
+    '31': node('CreateVideo', { images: ['29', 0], audio: ['30', 0], fps: 24 }, 'Create LTX-2.5 Video', 'video_create', descriptor),
+    '32': node('SaveVideo', { video: ['31', 0], filename_prefix: 'video/Umbra_LTX25', format: 'auto', codec: 'h264' }, 'Save LTX-2.5 Video', 'video_output', descriptor),
+  };
+  if (i2v) {
+    graph['41'] = node('LoadImage', { image: 'example.png' }, 'Source Image', 'source_image', descriptor);
+    graph['42'] = node('ImageScale', { image: ['41', 0], upscale_method: 'lanczos', width: 640, height: 352, crop: 'center' }, 'Scale Source Image', 'source_image_scale', descriptor);
+    graph['43'] = node('LTXVPreprocess', { image: ['42', 0], img_compression: 18 }, 'LTX-2.5 Source Preprocess', 'ltx_preprocess', descriptor);
+    graph['6'].inputs.image = ['43', 0];
+    graph['44'] = node('LTXVImgToVideoInplace', { vae: ['2', 0], image: ['43', 0], latent: ['11', 0], strength: 0.7, bypass: false }, 'LTX-2.5 Base Image Conditioning', 'ltx_base_video_latent', descriptor);
+    graph['45'] = node('LTXVImgToVideoInplace', { vae: ['2', 0], image: ['43', 0], latent: ['21', 0], strength: 1, bypass: false }, 'LTX-2.5 Refine Image Conditioning', 'ltx_refine_video_latent', descriptor);
+  }
+  graph['1']._meta = {
+    ...graph['1']._meta,
+    umbra_model_family: 'LTX-2.5',
+    umbra_ui_pipeline: {
+      feature: i2v ? 'img2vid' : 'txt2vid',
+      model_family: 'LTX-2.5',
+      model_sources: ['unet'],
+      priority: 110,
+      defaults: {
+        modelName: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors',
+        modelNamesBySource: { unet: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors' },
+        width: 640,
+        height: 352,
+      },
+    },
+  };
+  return graph;
+}
+
 function buildMiniMaxH3Workflow(mode: 'text_to_video' | 'image_to_video'): PromptGraph {
   const descriptor = { family: 'minimax_h3' as const, mode };
   const graph: PromptGraph = {
@@ -293,6 +377,8 @@ const workflows: Array<[string, PromptGraph]> = [
   ['[Umbra UI] WAN 2.2 Image to Video.json', buildWanWorkflow('image_to_video')],
   ['[Umbra UI] LTX-2.3 Text to Video.json', buildLtxWorkflow('text_to_video')],
   ['[Umbra UI] LTX-2.3 Image to Video.json', buildLtxWorkflow('image_to_video')],
+  ['[Umbra UI] LTX-2.5 Text to Video.json', buildLtx25Workflow('text_to_video')],
+  ['[Umbra UI] LTX-2.5 Image to Video.json', buildLtx25Workflow('image_to_video')],
   ['[Umbra UI] MiniMax H3 Text to Video.json', buildMiniMaxH3Workflow('text_to_video')],
   ['[Umbra UI] MiniMax H3 Image to Video.json', buildMiniMaxH3Workflow('image_to_video')],
   ['[Umbra UI] MiniMax H3 Reference to Video.json', buildMiniMaxH3ReferenceWorkflow()],
