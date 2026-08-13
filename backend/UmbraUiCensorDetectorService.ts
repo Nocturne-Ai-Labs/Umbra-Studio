@@ -68,24 +68,33 @@ async function ensureDetectorModel(rootDir: string): Promise<string> {
 }
 
 function resolvePython(rootDir: string): string {
+  const managedComfyRoot = join(rootDir, 'Tools', 'ComfyUI');
   const candidates = process.platform === 'win32'
     ? [
       join(rootDir, 'Runtime', 'Python311', 'python.exe'),
       join(rootDir, 'Runtime', 'Python311', 'Scripts', 'python.exe'),
+      join(managedComfyRoot, 'venv', 'Scripts', 'python.exe'),
+      join(managedComfyRoot, '.venv', 'Scripts', 'python.exe'),
     ]
     : [
       join(rootDir, 'Runtime', 'Python311', 'bin', 'python3.11'),
       join(rootDir, 'Runtime', 'Python311', 'bin', 'python3'),
       join(rootDir, 'Runtime', 'Python311', 'bin', 'python'),
+      join(managedComfyRoot, 'venv', 'bin', 'python3'),
+      join(managedComfyRoot, 'venv', 'bin', 'python'),
+      join(managedComfyRoot, '.venv', 'bin', 'python3'),
+      join(managedComfyRoot, '.venv', 'bin', 'python'),
     ];
   const bundled = candidates.find(existsSync);
-  if (!bundled) throw new Error('Umbra\'s bundled Python runtime is unavailable.');
+  if (!bundled) {
+    throw new Error('Umbra could not find its Python helper runtime or the managed ComfyUI Python environment. Install ComfyUI from Umbra Studio, then retry image censoring.');
+  }
   return bundled;
 }
 
-async function runDetector(rootDir: string, modelPath: string, sourcePath: string, threshold: number): Promise<unknown> {
+async function runDetector(rootDir: string, sourceDir: string, modelPath: string, sourcePath: string, threshold: number): Promise<unknown> {
   const python = resolvePython(rootDir);
-  const script = join(rootDir, 'backend', 'python', 'anime_censor_detector.py');
+  const script = join(sourceDir, 'backend', 'python', 'anime_censor_detector.py');
   if (!existsSync(script)) throw new Error('Umbra\'s body-part detector script is missing.');
   return new Promise((resolve, reject) => {
     const child = spawn(python, [script, '--model', modelPath, '--image', sourcePath, '--threshold', String(threshold)], {
@@ -115,6 +124,7 @@ async function runDetector(rootDir: string, modelPath: string, sourcePath: strin
 
 export async function detectUmbraUiCensorRegions(options: {
   rootDir: string;
+  sourceDir?: string;
   sourcePath: string;
   targets: UmbraUiCensorTarget[];
   threshold?: number;
@@ -123,7 +133,13 @@ export async function detectUmbraUiCensorRegions(options: {
   const targetSet = new Set(options.targets);
   if (targetSet.size === 0) throw new Error('Select at least one body part to censor.');
   const modelPath = await ensureDetectorModel(options.rootDir);
-  const raw = await runDetector(options.rootDir, modelPath, options.sourcePath, clamp(options.threshold, 0.05, 0.95, 0.278));
+  const raw = await runDetector(
+    options.rootDir,
+    options.sourceDir || options.rootDir,
+    modelPath,
+    options.sourcePath,
+    clamp(options.threshold, 0.05, 0.95, 0.278),
+  );
   const rows = Array.isArray((raw as any)?.detections) ? (raw as any).detections : [];
   const padding = clamp(options.padding, 0, 0.5, 0.12);
   return rows.flatMap((row: any) => {

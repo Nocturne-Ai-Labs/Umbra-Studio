@@ -217,9 +217,15 @@ export async function applyUmbraUiImageCensor(options: {
   exportSettings: UmbraUiImageExportSettings;
 }): Promise<void> {
   const exportSettings = normalizeImageExportSettings(options.exportSettings);
-  const regions = (options.regions?.length ? options.regions : options.region ? [options.region] : [])
-    .map(normalizeCensorRegion);
-  if (regions.length === 0) throw new Error('No censor regions were found.');
+  const requestedRegions = options.regions !== undefined
+    ? options.regions
+    : options.region ? [options.region] : [];
+  const regions = requestedRegions.map(normalizeCensorRegion);
+  if (regions.length === 0) {
+    throw new Error(options.regions !== undefined
+      ? 'No selected body parts were detected in this image. Lower the detection confidence or use Manual Region.'
+      : 'No censor regions were found.');
+  }
   const source = sharp(options.sourcePath).rotate();
   const metadata = await source.metadata();
   const originalWidth = Math.max(1, Number(metadata.width) || 1);

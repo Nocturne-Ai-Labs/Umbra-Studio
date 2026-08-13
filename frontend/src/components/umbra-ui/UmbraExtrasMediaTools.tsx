@@ -668,6 +668,7 @@ function ImageCensorTool() {
     setProcessing(true);
     setSummary({ completed: 0, failed: 0, total: items.length });
     setItems((current) => current.map((item) => ({ ...item, status: 'staged', error: undefined, result: undefined })));
+    let firstFailureMessage = '';
     const result = await runUmbraUiMediaBatch({
       items,
       onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
@@ -676,13 +677,21 @@ function ImageCensorTool() {
         setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, result: next } : entry));
       },
       onItemSettled: (item, error) => {
+        if (error && !firstFailureMessage) {
+          firstFailureMessage = error instanceof Error ? error.message : String(error);
+        }
         setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: error ? 'failed' : 'completed', error: error instanceof Error ? error.message : error ? String(error) : undefined } : entry));
         setSummary((current) => ({ ...current, completed: current.completed + (error ? 0 : 1), failed: current.failed + (error ? 1 : 0) }));
       },
     });
     setProcessing(false);
     window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
-    showToast(result.failed ? `${result.completed} censored; ${result.failed} failed.` : `${result.completed} image${result.completed === 1 ? '' : 's'} censored.`, result.failed ? 'error' : 'success');
+    showToast(
+      result.failed
+        ? `${result.completed} censored; ${result.failed} failed.${firstFailureMessage ? ` ${firstFailureMessage}` : ''}`
+        : `${result.completed} image${result.completed === 1 ? '' : 's'} censored.`,
+      result.failed ? 'error' : 'success',
+    );
   }, [censorMode, detectionPadding, detectionThreshold, exportSettings, items, mosaicSize, outputFolder, overlay, overlayAsset, processing, region, regionMode, selectedTargets, setItems, showToast]);
   const beginDrag = (event: React.PointerEvent<HTMLDivElement>, kind: 'move' | 'resize') => {
     event.preventDefault();

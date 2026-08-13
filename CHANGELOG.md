@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.31.14
+
+### TL;DR - Setup After Updating
+
+Update Umbra Studio normally. No models need to be downloaded again.
+
+- **Automatic image censoring:** Install ComfyUI through Umbra Studio if it is
+  not already installed. The detector now uses Umbra's managed ComfyUI Python
+  environment when the optional helper runtime is absent.
+- **Manual image censoring:** Continues to work without ComfyUI or detector
+  dependencies.
+
+### Image Censor Hotfix
+
+- Fixed the packaged application looking for the detector script under the
+  install root instead of the packaged `resources/app` source directory.
+- Added Windows and Linux fallback discovery for the managed ComfyUI Python
+  environment when `Runtime/Python311` is not present.
+- Automatic detection now reports when none of the selected body parts were
+  found instead of silently applying the previous manual rectangle.
+- Batch failure notifications now include the first actionable processing
+  error instead of only reporting a failed-item count.
+
+### Verification
+
+- Verified the detector against an installed Windows package layout with no
+  `Runtime/Python311` directory and a managed ComfyUI virtual environment.
+- Verified automatic detection and mosaic output through the real media-tools
+  HTTP route with two detected regions.
+- Verified no-match detection returns an actionable HTTP 400 response without
+  leaving a partial output file.
+- Confirmed the production frontend build, frontend ESLint, and Bun backend
+  bundle pass.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Automatic image censoring works in portable package installs.
+- **Fixed:** Packaged detector scripts resolve from the correct source root.
+- **Improved:** Censor failures explain the missing dependency or no-match
+  condition directly in the notification.
+
 ## v0.31.13
 
 ### TL;DR - Setup After Updating

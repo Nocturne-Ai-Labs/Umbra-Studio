@@ -20535,6 +20535,7 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
     const detections = regionMode === 'detect'
       ? await detectUmbraUiCensorRegions({
         rootDir: ROOT_DIR,
+        sourceDir: SOURCE_DIR,
         sourcePath,
         targets: requestedTargets,
         threshold: Number(form.get('detectionThreshold')),
