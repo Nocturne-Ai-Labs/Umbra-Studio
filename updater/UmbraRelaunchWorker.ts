@@ -19,6 +19,11 @@ type UmbraRelaunchRequest = {
   createdAt: string;
 };
 
+type UmbraLaunchHandle = {
+  pid: number;
+  child?: ChildProcess;
+};
+
 const UPDATER_EXIT_TIMEOUT_MS = 30_000;
 const UPDATER_EXIT_SETTLE_MS = 5_000;
 const LAUNCH_READY_TIMEOUT_MS = 30_000;
@@ -70,25 +75,64 @@ async function waitForUpdaterExit(request: UmbraRelaunchRequest) {
   await Bun.sleep(UPDATER_EXIT_SETTLE_MS);
 }
 
-function launchUmbraStudio(request: UmbraRelaunchRequest): ChildProcess {
+function quotePowerShellLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function launchWindowsUmbraStudio(
+  request: UmbraRelaunchRequest,
+  command: string,
+  args: string[],
+): UmbraLaunchHandle {
+  const runtimeRoot = resolve(request.runtimeRoot);
+  const launchArgs = args.map(quotePowerShellLiteral).join(', ');
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$process = Start-Process -FilePath ${quotePowerShellLiteral(command)} `
+      + `-ArgumentList @(${launchArgs}) `
+      + `-WorkingDirectory ${quotePowerShellLiteral(runtimeRoot)} -PassThru`,
+    '[Console]::Out.Write($process.Id)',
+  ].join('; ');
+  const result = spawnSync('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    script,
+  ], {
+    cwd: runtimeRoot,
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 15_000,
+    env: {
+      ...process.env,
+      UMBRA_ROOT: runtimeRoot,
+      UMBRA_PORT: String(request.appPort),
+      UMBRA_HOST: request.appHost || '127.0.0.1',
+      UMBRA_UPDATER_RELAUNCH: '1',
+      UMBRA_TERMINAL_MODE: 'visible',
+      UMBRA_PAUSE_ON_EXIT: '0',
+    },
+  });
+  const pid = Number.parseInt(String(result.stdout || '').trim(), 10);
+  if (result.status !== 0 || !Number.isFinite(pid) || pid <= 0) {
+    const detail = String(result.stderr || result.stdout || result.error?.message || '').trim();
+    throw new Error(`Umbra Studio launcher did not start${detail ? `: ${detail}` : '.'}`);
+  }
+  return { pid };
+}
+
+function launchUmbraStudio(request: UmbraRelaunchRequest): UmbraLaunchHandle {
   const runtimeRoot = resolve(request.runtimeRoot);
   let command = '';
   let args: string[] = [];
   if (process.platform === 'win32') {
     const launcher = resolveUmbraWindowsLauncher(runtimeRoot);
     if (!launcher) throw new Error('Umbra Studio launcher is missing from the updated installation.');
-    if (launcher.flavor === 'bat') {
-      const bunPath = join(runtimeRoot, 'Runtime', 'Bun', 'win32', 'bun.exe');
-      const webLauncherPath = join(runtimeRoot, 'resources', 'app', 'launcher', 'UmbraWebLauncher.ts');
-      if (!existsSync(bunPath) || !existsSync(webLauncherPath)) {
-        throw new Error('The bundled Umbra Studio runtime or web launcher is missing.');
-      }
-      command = bunPath;
-      args = [webLauncherPath, '--root', runtimeRoot];
-    } else {
-      command = launcher.command;
-      args = launcher.args;
-    }
+    command = launcher.command;
+    args = launcher.args;
+    return launchWindowsUmbraStudio(request, command, args);
   } else {
     const launcherPath = join(runtimeRoot, 'start-umbra.sh');
     if (!existsSync(launcherPath)) throw new Error('Umbra Studio launcher is missing from the updated installation.');
@@ -107,16 +151,16 @@ function launchUmbraStudio(request: UmbraRelaunchRequest): ChildProcess {
       UMBRA_PORT: String(request.appPort),
       UMBRA_HOST: request.appHost || '127.0.0.1',
       UMBRA_UPDATER_RELAUNCH: '1',
-      UMBRA_TERMINAL_MODE: 'hidden',
+      UMBRA_TERMINAL_MODE: 'visible',
       UMBRA_PAUSE_ON_EXIT: '0',
     },
   });
   if (!child.pid) throw new Error('Umbra Studio launcher did not start.');
-  return child;
+  return { pid: child.pid, child };
 }
 
-function stopOwnedLauncher(child: ChildProcess) {
-  const pid = child.pid || 0;
+function stopOwnedLauncher(handle: UmbraLaunchHandle) {
+  const pid = handle.pid || 0;
   if (pid <= 0) return;
   try {
     if (process.platform === 'win32') {
@@ -126,7 +170,7 @@ function stopOwnedLauncher(child: ChildProcess) {
         timeout: 10_000,
       });
     } else {
-      child.kill('SIGTERM');
+      handle.child?.kill('SIGTERM');
     }
   } catch {
     // A launcher that exited between readiness checks needs no further cleanup.
@@ -155,29 +199,30 @@ async function fetchUmbraReady(request: UmbraRelaunchRequest): Promise<boolean> 
 
 async function waitForLaunchReady(
   request: UmbraRelaunchRequest,
-  child: ChildProcess,
+  handle: UmbraLaunchHandle,
 ): Promise<{ ready: boolean; detail: string }> {
   let exitDetail = '';
-  child.once('exit', (code) => { exitDetail = `launcher exited with code ${code ?? 1}`; });
-  child.once('error', (error) => { exitDetail = `launcher failed: ${error.message}`; });
+  handle.child?.once('exit', (code) => { exitDetail = `launcher exited with code ${code ?? 1}`; });
+  handle.child?.once('error', (error) => { exitDetail = `launcher failed: ${error.message}`; });
   const deadline = Date.now() + LAUNCH_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (exitDetail) return { ready: false, detail: exitDetail };
+    if (!isProcessAlive(handle.pid)) return { ready: false, detail: 'launcher exited before Umbra reported ready' };
     if (await fetchUmbraReady(request)) return { ready: true, detail: '' };
     await Bun.sleep(250);
   }
-  stopOwnedLauncher(child);
+  stopOwnedLauncher(handle);
   return { ready: false, detail: 'Umbra Studio did not report ready within 30 seconds' };
 }
 
 async function launchWithRetry(request: UmbraRelaunchRequest): Promise<number> {
   let lastFailure = '';
   for (let attempt = 1; attempt <= LAUNCH_ATTEMPTS; attempt += 1) {
-    const child = launchUmbraStudio(request);
-    const result = await waitForLaunchReady(request, child);
+    const handle = launchUmbraStudio(request);
+    const result = await waitForLaunchReady(request, handle);
     if (result.ready) {
-      child.unref();
-      return child.pid || 0;
+      handle.child?.unref();
+      return handle.pid;
     }
     lastFailure = result.detail;
     log(request, `Launch attempt ${attempt}/${LAUNCH_ATTEMPTS} failed: ${result.detail}.`);

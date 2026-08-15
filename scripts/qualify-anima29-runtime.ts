@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import sharp from 'sharp';
 
 type PromptNode = {
   class_type: string;
@@ -159,22 +160,54 @@ async function waitForPrompt(promptId: string, timeoutMs = 15 * 60_000) {
   throw new Error(`Prompt ${promptId} did not complete within ${timeoutMs}ms.`);
 }
 
+async function verifyRasterOutput(file: string) {
+  if (!existsSync(file)) throw new Error(`Generated image was not found: ${file}`);
+
+  const image = sharp(file, { failOn: 'error' });
+  const [metadata, stats] = await Promise.all([image.metadata(), image.stats()]);
+  const colorChannels = stats.channels.slice(0, 3);
+  const mean = colorChannels.reduce((sum, channel) => sum + channel.mean, 0) / Math.max(1, colorChannels.length);
+  const deviation = colorChannels.reduce((sum, channel) => sum + channel.stdev, 0) / Math.max(1, colorChannels.length);
+
+  if (!metadata.width || !metadata.height || metadata.width < 256 || metadata.height < 256) {
+    throw new Error(`Generated image has invalid dimensions: ${file} (${metadata.width || 0}x${metadata.height || 0})`);
+  }
+  if (mean < 2 && deviation < 2) {
+    throw new Error(`Generated image is effectively black: ${file} (mean=${mean.toFixed(3)}, deviation=${deviation.toFixed(3)})`);
+  }
+  if (stats.entropy < 0.05 || deviation < 0.5) {
+    throw new Error(`Generated image is effectively flat: ${file} (entropy=${stats.entropy.toFixed(4)}, deviation=${deviation.toFixed(3)})`);
+  }
+
+  return {
+    file,
+    width: metadata.width,
+    height: metadata.height,
+    format: metadata.format,
+    mean: Number(mean.toFixed(3)),
+    deviation: Number(deviation.toFixed(3)),
+    entropy: Number(stats.entropy.toFixed(4)),
+  };
+}
+
 await mkdir(dirname(inputFixture), { recursive: true });
 try {
   const txtGraph = await readWorkflow('[Umbra UI] Anima 2.9B Image Pipeline.json');
   prepareGraph(txtGraph, 'txt2img');
   const txtResult = await waitForPrompt(await queueGraph(txtGraph));
+  const txtVisual = await verifyRasterOutput(txtResult.files[0]);
 
   await copyFile(txtResult.files[0], inputFixture);
   const imgGraph = await readWorkflow('[Umbra UI] Anima 2.9B Image to Image Pipeline.json');
   prepareGraph(imgGraph, 'img2img');
   const imgResult = await waitForPrompt(await queueGraph(imgGraph));
+  const imgVisual = await verifyRasterOutput(imgResult.files[0]);
 
   console.log(JSON.stringify({
     success: true,
     baseUrl,
-    textToImage: txtResult,
-    imageToImage: imgResult,
+    textToImage: { ...txtResult, visual: txtVisual },
+    imageToImage: { ...imgResult, visual: imgVisual },
   }, null, 2));
 } finally {
   await rm(inputFixture, { force: true });

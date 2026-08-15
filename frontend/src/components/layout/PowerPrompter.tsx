@@ -12003,7 +12003,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           refreshSavedQueues={refreshSavedQueues}
         />
         {!isPhoneRemote && prompterPanelMode === 'preset-editor' ? powerPrompterPresetBar : null}
-        {floatingToolMenusEnabled && (!leftPanelCollapsed || !rightPanelCollapsed) && (
+        {floatingToolMenusEnabled && !leftPanelCollapsed && (
           <div
             data-umbra-powerprompter-menu-shelf=""
             className="pointer-events-none absolute left-3 right-3 top-[4rem] z-[80] flex items-start gap-3"
@@ -12021,21 +12021,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
                     setLeftPanelCollapsed(true);
                   }}
                   onDeleteFile={handleDeleteFile}
-                  overlayMode
-                  menuMode
-                />
-              </div>
-            )}
-            {!rightPanelCollapsed && (
-              <div className="pointer-events-auto h-[min(42vh,500px)] min-h-[240px] w-[min(92vw,680px)] overflow-hidden rounded-xl border border-cyan-300/25 bg-[#050508]/98 shadow-[0_18px_46px_rgba(0,0,0,0.65)] backdrop-blur-md">
-                <PowerPrompterSearchPanel
-                  onInsert={(text, options) => {
-                    handleInsert(text, options);
-                    setRightPanelCollapsed(true);
-                  }}
-                  enabledCSVs={enabledCSVs}
-                  onToggleCSV={handleToggleCSV}
-                  onOpenSettings={() => setSettingsOpen(true)}
                   overlayMode
                   menuMode
                 />
@@ -12142,36 +12127,16 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         {isPhoneRemote && prompterPanelMode === 'preset-editor' ? powerPrompterPresetBar : null}
       </div>
 
-      {!floatingToolMenusEnabled ? (
-        rightPanelCollapsed ? (
-          <div
-            data-umbra-powerprompter-right-rail=""
-            className="w-9 border-l border-white/5 flex-shrink-0 flex items-start justify-center pt-2"
-            style={overlayMode ? { backgroundColor: 'rgba(5,5,8,0.86)' } : undefined}
-          >
-            <button
-              onClick={() => setRightPanelCollapsed(false)}
-              className="p-1.5 rounded-md border border-white/15 bg-white/[0.04] text-zinc-300 hover:text-zinc-100 hover:border-white/30"
-              title="Open tag browser sidecar"
-            >
-              <ChevronLeft size={14} />
-            </button>
-          </div>
-        ) : (
-          <div data-umbra-powerprompter-search="" className="contents">
-            <PowerPrompterSearchPanel
-              onInsert={(text, options) => {
-                handleInsert(text, options);
-                if (isPhoneRemote) setRightPanelCollapsed(true);
-              }}
-              enabledCSVs={enabledCSVs}
-              onToggleCSV={handleToggleCSV}
-              onOpenSettings={() => setSettingsOpen(true)}
-              overlayMode={overlayMode}
-            />
-          </div>
-        )
-      ) : null}
+      <PowerPrompterSearchPanel
+        onInsert={handleInsert}
+        enabledCSVs={enabledCSVs}
+        onToggleCSV={handleToggleCSV}
+        onOpenSettings={() => setSettingsOpen(true)}
+        overlayMode={overlayMode}
+        drawerMode
+        drawerOpen={!rightPanelCollapsed}
+        onDrawerOpenChange={(open) => setTagMenuCollapsed(!open)}
+      />
 
       <PowerPrompterSettingsModal
         isOpen={settingsOpen}

@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Check,
+  ChevronDown,
+  ChevronUp,
   Copy,
   Database,
   ExternalLink,
@@ -47,9 +49,12 @@ interface PowerPrompterSearchPanelProps {
   onInsert: (text: string, options?: { replaceCurrentToken?: boolean; appendComma?: boolean }) => void;
   enabledCSVs: string[];
   onToggleCSV: (name: string) => void;
-  onOpenSettings: () => void;
+  onOpenSettings?: () => void;
   overlayMode?: boolean;
   menuMode?: boolean;
+  drawerMode?: boolean;
+  drawerOpen?: boolean;
+  onDrawerOpenChange?: (open: boolean) => void;
 }
 
 type CatalogView = 'catalog' | 'favorites' | 'sources';
@@ -110,7 +115,11 @@ export const PowerPrompterSearchPanel = React.memo(({
   onOpenSettings,
   overlayMode = false,
   menuMode = false,
+  drawerMode = false,
+  drawerOpen,
+  onDrawerOpenChange,
 }: PowerPrompterSearchPanelProps) => {
+  const [internalDrawerOpen, setInternalDrawerOpen] = useState(false);
   const [activeView, setActiveView] = useState<CatalogView>('catalog');
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
@@ -137,8 +146,13 @@ export const PowerPrompterSearchPanel = React.memo(({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: SearchResult } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const showToast = useStore((state) => state.showToast);
-  const nsfwMode = useStore((state) => state.appSettings['ui.nsfwThumbnailBlurEnabled'] === true);
+  const explicitCatalogEnabled = useStore((state) => state.appSettings['ui.tagCatalogExplicitEnabled'] === true);
   const setAppSetting = useStore((state) => state.setAppSetting);
+  const effectiveDrawerOpen = drawerOpen ?? internalDrawerOpen;
+  const setDrawerOpen = useCallback((open: boolean) => {
+    if (drawerOpen === undefined) setInternalDrawerOpen(open);
+    onDrawerOpenChange?.(open);
+  }, [drawerOpen, onDrawerOpenChange]);
 
   const loadSettings = useCallback(async () => {
     try {
@@ -197,9 +211,9 @@ export const PowerPrompterSearchPanel = React.memo(({
   }, []);
 
   useEffect(() => {
-    if (nsfwMode) return;
+    if (explicitCatalogEnabled) return;
     setSelectedItems((current) => current.filter((item) => item.explicit !== true));
-  }, [nsfwMode]);
+  }, [explicitCatalogEnabled]);
 
   useEffect(() => {
     if (activeView !== 'catalog' || enabledCSVs.length === 0) {
@@ -210,7 +224,7 @@ export const PowerPrompterSearchPanel = React.memo(({
     const controller = new AbortController();
     const params = new URLSearchParams({
       csvs: enabledCSVs.join(','),
-      includeExplicit: nsfwMode ? '1' : '0',
+      includeExplicit: explicitCatalogEnabled ? '1' : '0',
     });
     setClassifiersLoading(true);
     void fetch(`/api/powerprompter/classifiers?${params}`, { cache: 'no-store', signal: controller.signal })
@@ -230,7 +244,7 @@ export const PowerPrompterSearchPanel = React.memo(({
         if (!controller.signal.aborted) setClassifiersLoading(false);
       });
     return () => controller.abort();
-  }, [activeView, enabledCSVs, nsfwMode, refreshRevision, showToast]);
+  }, [activeView, enabledCSVs, explicitCatalogEnabled, refreshRevision, showToast]);
 
   const loadResults = useCallback(async (nextPage: number, append: boolean, signal?: AbortSignal) => {
     if (activeView !== 'catalog' || enabledCSVs.length === 0 || query.trim().length === 1) {
@@ -247,7 +261,7 @@ export const PowerPrompterSearchPanel = React.memo(({
         limit: '120',
         csvs: enabledCSVs.join(','),
         browse: '1',
-        includeExplicit: nsfwMode ? '1' : '0',
+        includeExplicit: explicitCatalogEnabled ? '1' : '0',
       });
       if (category !== 'all') params.set('category', category);
       if (classifier !== 'all') params.set('classifier', classifier);
@@ -265,7 +279,7 @@ export const PowerPrompterSearchPanel = React.memo(({
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [activeView, category, classifier, enabledCSVs, nsfwMode, query]);
+  }, [activeView, category, classifier, enabledCSVs, explicitCatalogEnabled, query]);
 
   useEffect(() => {
     if (activeView !== 'catalog') return undefined;
@@ -425,12 +439,38 @@ export const PowerPrompterSearchPanel = React.memo(({
     );
   };
 
+  if (drawerMode && !effectiveDrawerOpen) {
+    return (
+      <button
+        type="button"
+        data-umbra-tag-catalog-drawer-trigger=""
+        onClick={() => setDrawerOpen(true)}
+        className="absolute bottom-2 left-1/2 z-[90] inline-flex h-9 -translate-x-1/2 items-center gap-2 rounded-md border border-cyan-300/30 px-4 text-[9px] font-black uppercase tracking-[0.12em] text-cyan-100 shadow-[0_8px_30px_rgba(0,0,0,0.55)] hover:border-cyan-200/50"
+        style={{
+          backgroundColor: 'var(--umbra-bg, #09090b)',
+          backgroundImage: 'linear-gradient(var(--umbra-panel-bg, rgba(20, 20, 30, 0.96)), var(--umbra-panel-bg, rgba(20, 20, 30, 0.96)))',
+        }}
+      >
+        <Tags className="h-3.5 w-3.5" /> Tag Catalog <ChevronUp className="h-3.5 w-3.5" />
+      </button>
+    );
+  }
+
   return (
     <div
       data-umbra-powerprompter-search-panel=""
       data-umbra-powerprompter-tag-catalog=""
-      className={`${menuMode ? 'h-full min-h-0 w-full max-w-none' : 'h-full w-80 flex-shrink-0 border-l border-white/5'} flex min-h-0 flex-col glass-panel`}
-      style={{ backgroundColor: overlayMode ? 'rgba(5,5,8,0.98)' : '#050508' }}
+      data-umbra-tag-catalog-drawer={drawerMode ? '' : undefined}
+      className={`${drawerMode
+        ? 'absolute inset-x-0 bottom-0 z-[95] isolate flex max-h-[78dvh] min-h-0 flex-col border-t border-cyan-300/25 shadow-[0_-20px_60px_rgba(0,0,0,0.78)]'
+        : menuMode
+          ? 'h-full min-h-0 w-full max-w-none'
+          : 'h-full w-80 flex-shrink-0 border-l border-white/5'} flex min-h-0 flex-col glass-panel`}
+      style={drawerMode ? {
+        height: 'min(38rem, 78dvh)',
+        backgroundColor: 'var(--umbra-bg, #09090b)',
+        backgroundImage: 'linear-gradient(var(--umbra-panel-bg, rgba(20, 20, 30, 0.96)), var(--umbra-panel-bg, rgba(20, 20, 30, 0.96)))',
+      } : { backgroundColor: overlayMode ? 'rgba(5,5,8,0.98)' : '#050508' }}
     >
       <header className="flex min-h-12 items-center gap-2 border-b border-white/10 px-3 py-2">
         <Tags className="h-4 w-4 shrink-0 text-cyan-200" />
@@ -443,7 +483,12 @@ export const PowerPrompterSearchPanel = React.memo(({
         <button type="button" onClick={() => setRefreshRevision((value) => value + 1)} className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-cyan-100" title="Refresh catalog">
           <RefreshCw className={`h-3.5 w-3.5 ${loading || classifiersLoading ? 'animate-spin' : ''}`} />
         </button>
-        <button type="button" onClick={onOpenSettings} className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-cyan-100" title="Power Prompter settings"><Settings className="h-3.5 w-3.5" /></button>
+        {onOpenSettings ? <button type="button" onClick={onOpenSettings} className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-cyan-100" title="Power Prompter settings"><Settings className="h-3.5 w-3.5" /></button> : null}
+        {drawerMode ? (
+          <button type="button" onClick={() => setDrawerOpen(false)} className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-white/10 px-2 text-[9px] font-black uppercase tracking-[0.1em] text-zinc-400 hover:text-zinc-100">
+            <ChevronDown className="h-3.5 w-3.5" /> Close
+          </button>
+        ) : null}
       </header>
 
       <div className="grid grid-cols-3 gap-1 border-b border-white/[0.08] p-2">
@@ -526,9 +571,9 @@ export const PowerPrompterSearchPanel = React.memo(({
               {classifiersLoading ? <Loader2 className="ml-1 h-3.5 w-3.5 shrink-0 animate-spin text-zinc-600" /> : null}
             </div>
 
-            <div className={`mt-2 flex min-h-8 items-center justify-between gap-2 rounded-sm border px-2.5 ${nsfwMode ? 'border-red-300/20 bg-red-500/[0.05]' : 'border-white/[0.08] bg-black/20'}`}>
-              <span className={`inline-flex items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.09em] ${nsfwMode ? 'text-red-200/80' : 'text-zinc-600'}`}><ShieldCheck className="h-3 w-3" /> Explicit classifiers {nsfwMode ? 'visible' : 'hidden'}</span>
-              <button type="button" aria-pressed={nsfwMode} data-umbra-powerprompter-catalog-explicit-toggle onClick={() => setAppSetting('ui.nsfwThumbnailBlurEnabled', !nsfwMode)} className={`h-6 rounded-sm border px-2 text-[8px] font-black uppercase tracking-[0.08em] ${nsfwMode ? 'border-red-300/20 text-red-200/70 hover:text-red-100' : 'border-white/10 text-zinc-500 hover:text-zinc-200'}`}>NSFW {nsfwMode ? 'On' : 'Off'}</button>
+            <div className={`mt-2 flex min-h-8 items-center justify-between gap-2 rounded-sm border px-2.5 ${explicitCatalogEnabled ? 'border-red-300/20 bg-red-500/[0.05]' : 'border-white/[0.08] bg-black/20'}`}>
+              <span className={`inline-flex items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.09em] ${explicitCatalogEnabled ? 'text-red-200/80' : 'text-zinc-600'}`}><ShieldCheck className="h-3 w-3" /> Explicit classifiers {explicitCatalogEnabled ? 'visible' : 'hidden'}</span>
+              <button type="button" aria-pressed={explicitCatalogEnabled} data-umbra-powerprompter-catalog-explicit-toggle onClick={() => setAppSetting('ui.tagCatalogExplicitEnabled', !explicitCatalogEnabled)} className={`h-6 rounded-sm border px-2 text-[8px] font-black uppercase tracking-[0.08em] ${explicitCatalogEnabled ? 'border-red-300/20 text-red-200/70 hover:text-red-100' : 'border-white/10 text-zinc-500 hover:text-zinc-200'}`}>Explicit {explicitCatalogEnabled ? 'On' : 'Off'}</button>
             </div>
 
             {selectedItems.length > 0 ? (
@@ -550,7 +595,7 @@ export const PowerPrompterSearchPanel = React.memo(({
             ) : results.length === 0 ? (
               <div className="flex min-h-28 items-center justify-center rounded-md border border-dashed border-white/10 text-[10px] text-zinc-600">No matching catalog entries.</div>
             ) : (
-              <div className={`grid grid-cols-1 gap-1.5 ${menuMode ? 'sm:grid-cols-2' : ''}`}>{results.map(renderCatalogItem)}</div>
+              <div className={`grid grid-cols-1 gap-1.5 ${menuMode || drawerMode ? 'sm:grid-cols-2 lg:grid-cols-3' : ''}`}>{results.map(renderCatalogItem)}</div>
             )}
             {loading && results.length > 0 ? <div className="flex justify-center py-3"><Loader2 className="h-4 w-4 animate-spin text-zinc-600" /></div> : null}
           </div>
@@ -562,7 +607,7 @@ export const PowerPrompterSearchPanel = React.memo(({
             <button type="button" disabled={selectedItems.length === 0} onClick={() => insertItems(selectedItems)} className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-emerald-300/30 bg-emerald-500/10 px-3 text-[8px] font-black uppercase tracking-[0.08em] text-emerald-100 disabled:opacity-30"><Plus className="h-3 w-3" /> Insert Selected</button>
           </div>
           <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-2.5">
-            {favorites.length === 0 ? <div className="flex min-h-28 items-center justify-center rounded-md border border-dashed border-white/10 px-4 text-center text-[10px] text-zinc-600">No favorites yet. Use the star on any catalog entry.</div> : <div className={`grid grid-cols-1 gap-1.5 ${menuMode ? 'sm:grid-cols-2' : ''}`}>{favorites.map(renderCatalogItem)}</div>}
+            {favorites.length === 0 ? <div className="flex min-h-28 items-center justify-center rounded-md border border-dashed border-white/10 px-4 text-center text-[10px] text-zinc-600">No favorites yet. Use the star on any catalog entry.</div> : <div className={`grid grid-cols-1 gap-1.5 ${menuMode || drawerMode ? 'sm:grid-cols-2 lg:grid-cols-3' : ''}`}>{favorites.map(renderCatalogItem)}</div>}
           </div>
         </div>
       ) : (

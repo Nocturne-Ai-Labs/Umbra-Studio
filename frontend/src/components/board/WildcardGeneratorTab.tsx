@@ -36,6 +36,8 @@ type WildcardTag = {
   explicit: boolean;
   source: 'danbooru' | 'local' | 'natural' | 'freeform';
   kind?: 'tag' | 'natural' | 'auto';
+  catalogSource?: string;
+  catalogType?: 'tag' | 'character';
 };
 
 type WildcardClassifierSummary = {
@@ -61,6 +63,17 @@ type WildcardGroup = {
 };
 
 type TagCatalogDestination = 'fixed' | 'excluded' | `group:${string}`;
+type TagCatalogView = 'catalog' | 'sources';
+
+type PowerPrompterCatalogItem = {
+  tag?: unknown;
+  category?: unknown;
+  count?: unknown;
+  classifiers?: unknown;
+  explicit?: unknown;
+  source?: unknown;
+  type?: unknown;
+};
 
 type GeneratedRow = {
   value: string;
@@ -102,6 +115,30 @@ const TAG_CATALOG_CATEGORIES = [
   { value: '1', label: 'Artist' },
   { value: '5', label: 'Meta' },
 ] as const;
+
+const getCsvSourceId = (type: 'tag' | 'character', fileName: string) => `${type}:${fileName}`;
+
+const isCsvSourceEnabled = (enabledCSVs: string[], sourceId: string, fileName: string) => (
+  enabledCSVs.includes(sourceId) || enabledCSVs.includes(fileName)
+);
+
+function mapPowerPrompterCatalogItem(rawItem: PowerPrompterCatalogItem): WildcardTag | null {
+  const tag = String(rawItem.tag || '').trim();
+  if (!tag) return null;
+  const postCount = Number(rawItem.count);
+  return {
+    tag,
+    category: Number.isFinite(Number(rawItem.category)) ? Number(rawItem.category) : 0,
+    postCount: Number.isFinite(postCount) ? postCount : null,
+    classifiers: Array.isArray(rawItem.classifiers)
+      ? rawItem.classifiers.map((value) => String(value || '').trim()).filter(Boolean)
+      : [],
+    explicit: rawItem.explicit === true,
+    source: 'local',
+    catalogSource: String(rawItem.source || '').trim() || undefined,
+    catalogType: rawItem.type === 'character' ? 'character' : 'tag',
+  };
+}
 
 function createId(prefix: string): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return `${prefix}-${crypto.randomUUID()}`;
@@ -470,9 +507,10 @@ function WildcardTagCatalogDrawer({
   onAddGroupBundle: (groupId: string, tags: WildcardTag[]) => void;
 }) {
   const showToast = useStore((state) => state.showToast);
-  const nsfwMode = useStore((state) => state.appSettings['ui.nsfwThumbnailBlurEnabled'] === true);
+  const explicitCatalogEnabled = useStore((state) => state.appSettings['ui.tagCatalogExplicitEnabled'] === true);
   const setAppSetting = useStore((state) => state.setAppSetting);
   const [open, setOpen] = React.useState(false);
+  const [activeView, setActiveView] = React.useState<TagCatalogView>('catalog');
   const [query, setQuery] = React.useState('');
   const [category, setCategory] = React.useState('all');
   const [classifier, setClassifier] = React.useState('all');
@@ -485,8 +523,81 @@ function WildcardTagCatalogDrawer({
   const [selectedTags, setSelectedTags] = React.useState<WildcardTag[]>([]);
   const [keepSelection, setKeepSelection] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  const [csvLoading, setCsvLoading] = React.useState(false);
+  const [csvList, setCsvList] = React.useState<{ tags: string[]; characters: string[] }>({ tags: [], characters: [] });
+  const [enabledCSVs, setEnabledCSVs] = React.useState<string[]>([]);
   const [error, setError] = React.useState('');
   const [refreshRevision, setRefreshRevision] = React.useState(0);
+  const catalogSettingsRef = React.useRef<Record<string, unknown>>({});
+
+  const loadCsvSources = React.useCallback(async (showFeedback = false, rebuildIndex = false) => {
+    setCsvLoading(true);
+    try {
+      if (rebuildIndex) {
+        const indexResponse = await fetch('/api/powerprompter/index', { method: 'POST' });
+        if (!indexResponse.ok) throw new Error('Could not rebuild the CSV search index.');
+      }
+      const [listResponse, settingsResponse] = await Promise.all([
+        fetch('/api/powerprompter/csv/list', { cache: 'no-store' }),
+        fetch('/api/powerprompter/settings', { cache: 'no-store' }),
+      ]);
+      if (!listResponse.ok) throw new Error('Could not load the CSV library.');
+      if (!settingsResponse.ok) throw new Error('Could not load CSV source settings.');
+      const [listPayload, settingsPayload] = await Promise.all([listResponse.json(), settingsResponse.json()]);
+      setCsvList({
+        tags: Array.isArray(listPayload?.tags) ? listPayload.tags : [],
+        characters: Array.isArray(listPayload?.characters) ? listPayload.characters : [],
+      });
+      catalogSettingsRef.current = settingsPayload && typeof settingsPayload === 'object' ? settingsPayload : {};
+      setEnabledCSVs(Array.isArray(settingsPayload?.enabledCSVs)
+        ? settingsPayload.enabledCSVs.map((entry: unknown) => String(entry || '').trim()).filter(Boolean)
+        : []);
+      if (showFeedback) showToast('CSV sources and search index refreshed.', 'success');
+    } catch (nextError) {
+      if (showFeedback) showToast(nextError instanceof Error ? nextError.message : 'Could not refresh CSV sources.', 'error');
+    } finally {
+      setCsvLoading(false);
+    }
+  }, [showToast]);
+
+  const toggleCsvSource = React.useCallback(async (type: 'tag' | 'character', fileName: string) => {
+    const sourceId = getCsvSourceId(type, fileName);
+    const aliases = new Set([sourceId, fileName]);
+    const wasEnabled = enabledCSVs.some((entry) => aliases.has(entry));
+    const nextEnabled = wasEnabled
+      ? enabledCSVs.filter((entry) => !aliases.has(entry))
+      : [...enabledCSVs.filter((entry) => entry !== fileName), sourceId];
+    const previousSettings = catalogSettingsRef.current;
+    const nextSettings = { ...previousSettings, enabledCSVs: nextEnabled, editorMode: 'cards' };
+    setEnabledCSVs(nextEnabled);
+    catalogSettingsRef.current = nextSettings;
+    try {
+      const response = await fetch('/api/powerprompter/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(nextSettings),
+      });
+      if (!response.ok) throw new Error('Could not save the CSV source selection.');
+      try {
+        const channel = new BroadcastChannel('umbra-powerprompter-settings-sync');
+        channel.postMessage({ settings: nextSettings });
+        channel.close();
+      } catch {
+        // BroadcastChannel may be unavailable in an embedded browser.
+      }
+    } catch (nextError) {
+      catalogSettingsRef.current = previousSettings;
+      setEnabledCSVs(Array.isArray(previousSettings.enabledCSVs)
+        ? previousSettings.enabledCSVs.map((entry) => String(entry || '').trim()).filter(Boolean)
+        : []);
+      showToast(nextError instanceof Error ? nextError.message : 'Could not save the CSV source selection.', 'error');
+    }
+  }, [enabledCSVs, showToast]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    void loadCsvSources();
+  }, [loadCsvSources, open]);
 
   React.useEffect(() => {
     if (!destination.startsWith('group:')) return;
@@ -496,10 +607,17 @@ function WildcardTagCatalogDrawer({
   }, [destination, groups]);
 
   React.useEffect(() => {
-    if (!open) return undefined;
+    if (!open || activeView !== 'catalog' || enabledCSVs.length === 0) {
+      setClassifiers([]);
+      setClassifier('all');
+      return undefined;
+    }
     const controller = new AbortController();
     setClassifiersLoading(true);
-    void fetch(`/api/data-forge/wildcard-generator/classifiers?${new URLSearchParams({ includeExplicit: nsfwMode ? '1' : '0' })}`, {
+    void fetch(`/api/powerprompter/classifiers?${new URLSearchParams({
+      csvs: enabledCSVs.join(','),
+      includeExplicit: explicitCatalogEnabled ? '1' : '0',
+    })}`, {
       cache: 'no-store',
       signal: controller.signal,
     })
@@ -519,26 +637,39 @@ function WildcardTagCatalogDrawer({
         if (!controller.signal.aborted) setClassifiersLoading(false);
       });
     return () => controller.abort();
-  }, [nsfwMode, open, refreshRevision, showToast]);
+  }, [activeView, enabledCSVs, explicitCatalogEnabled, open, refreshRevision, showToast]);
 
   React.useEffect(() => {
-    if (!open) return undefined;
+    if (!open || activeView !== 'catalog' || enabledCSVs.length === 0) {
+      setItems([]);
+      setError('');
+      return undefined;
+    }
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setLoading(true);
       setError('');
       try {
-        const params = new URLSearchParams({ query: query.trim(), limit: '120' });
+        const params = new URLSearchParams({
+          q: query.trim(),
+          limit: '120',
+          page: '0',
+          browse: '1',
+          csvs: enabledCSVs.join(','),
+        });
         if (category !== 'all') params.set('category', category);
         if (classifier !== 'all') params.set('classifier', classifier);
-        params.set('includeExplicit', nsfwMode ? '1' : '0');
-        const response = await fetch(`/api/data-forge/wildcard-generator/tags?${params}`, {
+        params.set('includeExplicit', explicitCatalogEnabled ? '1' : '0');
+        const response = await fetch(`/api/powerprompter/search?${params}`, {
           cache: 'no-store',
           signal: controller.signal,
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(String(payload?.error || 'Could not load the tag catalog.'));
-        setItems(Array.isArray(payload?.values) ? payload.values : []);
+        const nextItems = (Array.isArray(payload?.results) ? payload.results : [])
+          .map((item: PowerPrompterCatalogItem) => mapPowerPrompterCatalogItem(item))
+          .filter((item: WildcardTag | null): item is WildcardTag => Boolean(item));
+        setItems(nextItems);
       } catch (nextError) {
         if (controller.signal.aborted) return;
         setItems([]);
@@ -551,7 +682,7 @@ function WildcardTagCatalogDrawer({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [category, classifier, nsfwMode, open, query, refreshRevision]);
+  }, [activeView, category, classifier, enabledCSVs, explicitCatalogEnabled, open, query, refreshRevision]);
 
   const classifierLabels = React.useMemo(
     () => new Map(classifiers.map((entry) => [entry.id, entry.label])),
@@ -622,13 +753,35 @@ function WildcardTagCatalogDrawer({
           <Tags className="h-4 w-4 shrink-0 text-cyan-200" />
           <div className="min-w-0">
             <h2 className="truncate text-[10px] font-black uppercase tracking-[0.15em] text-zinc-100">Danbooru Tag Catalog</h2>
-            <div className="font-mono text-[9px] text-zinc-600">{loading ? 'Loading...' : `${items.length} shown`} · {selectedTags.length} selected</div>
+            <div className="font-mono text-[9px] text-zinc-600">
+              {loading ? 'Loading...' : `${items.length} shown`} · {selectedTags.length} selected · {enabledCSVs.length} CSV
+            </div>
           </div>
         </div>
         <button type="button" onClick={() => setRefreshRevision((value) => value + 1)} className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-cyan-100" title="Refresh tag catalog"><RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /></button>
         <button type="button" onClick={() => setOpen(false)} className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-white/10 px-2 text-[9px] font-black uppercase tracking-[0.1em] text-zinc-400 hover:text-zinc-100"><ChevronDown className="h-3.5 w-3.5" /> Close</button>
       </header>
 
+      <div className="grid grid-cols-2 gap-1 border-b border-white/[0.08] p-2">
+        <button
+          type="button"
+          aria-pressed={activeView === 'catalog'}
+          onClick={() => setActiveView('catalog')}
+          className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-sm border px-2 text-[8px] font-black uppercase tracking-[0.08em] ${activeView === 'catalog' ? 'border-cyan-300/30 bg-cyan-500/10 text-cyan-100' : 'border-white/[0.08] text-zinc-600 hover:text-zinc-300'}`}
+        >
+          <Tags className="h-3 w-3" /> Catalog
+        </button>
+        <button
+          type="button"
+          aria-pressed={activeView === 'sources'}
+          onClick={() => setActiveView('sources')}
+          className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-sm border px-2 text-[8px] font-black uppercase tracking-[0.08em] ${activeView === 'sources' ? 'border-cyan-300/30 bg-cyan-500/10 text-cyan-100' : 'border-white/[0.08] text-zinc-600 hover:text-zinc-300'}`}
+        >
+          <DatabaseZap className="h-3 w-3" /> Sources <span className="font-mono opacity-60">{enabledCSVs.length}</span>
+        </button>
+      </div>
+
+      {activeView === 'catalog' ? <>
       <div className="border-b border-white/[0.08] px-3 py-2.5 sm:px-4">
         <div className="grid gap-2 lg:grid-cols-[minmax(14rem,1fr)_minmax(12rem,17rem)_auto]">
           <div className="relative">
@@ -710,18 +863,18 @@ function WildcardTagCatalogDrawer({
           {classifiersLoading ? <Loader2 className="ml-1 h-3.5 w-3.5 shrink-0 animate-spin text-zinc-600" /> : null}
         </div>
 
-        <div className={`mt-2 flex min-h-8 items-center justify-between gap-2 rounded-sm border px-2.5 ${nsfwMode ? 'border-red-300/20 bg-red-500/[0.05]' : 'border-white/[0.08] bg-black/20'}`}>
-          <span className={`inline-flex items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.09em] ${nsfwMode ? 'text-red-200/80' : 'text-zinc-600'}`}>
-            <ShieldCheck className="h-3 w-3" /> Explicit classifiers {nsfwMode ? 'visible' : 'hidden'}
+        <div className={`mt-2 flex min-h-8 items-center justify-between gap-2 rounded-sm border px-2.5 ${explicitCatalogEnabled ? 'border-red-300/20 bg-red-500/[0.05]' : 'border-white/[0.08] bg-black/20'}`}>
+          <span className={`inline-flex items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.09em] ${explicitCatalogEnabled ? 'text-red-200/80' : 'text-zinc-600'}`}>
+            <ShieldCheck className="h-3 w-3" /> Explicit classifiers {explicitCatalogEnabled ? 'visible' : 'hidden'}
           </span>
           <button
             type="button"
-            aria-pressed={nsfwMode}
+            aria-pressed={explicitCatalogEnabled}
             data-umbra-wildcard-explicit-toggle
-            onClick={() => setAppSetting('ui.nsfwThumbnailBlurEnabled', !nsfwMode)}
-            className={`h-6 rounded-sm border px-2 text-[8px] font-black uppercase tracking-[0.08em] ${nsfwMode ? 'border-red-300/20 text-red-200/70 hover:text-red-100' : 'border-white/10 text-zinc-500 hover:text-zinc-200'}`}
+            onClick={() => setAppSetting('ui.tagCatalogExplicitEnabled', !explicitCatalogEnabled)}
+            className={`h-6 rounded-sm border px-2 text-[8px] font-black uppercase tracking-[0.08em] ${explicitCatalogEnabled ? 'border-red-300/20 text-red-200/70 hover:text-red-100' : 'border-white/10 text-zinc-500 hover:text-zinc-200'}`}
           >
-            NSFW {nsfwMode ? 'On' : 'Off'}
+            Explicit {explicitCatalogEnabled ? 'On' : 'Off'}
           </button>
         </div>
 
@@ -741,8 +894,12 @@ function WildcardTagCatalogDrawer({
           <div className="flex min-h-28 items-center justify-center rounded-md border border-red-300/15 bg-red-500/[0.04] px-4 text-center text-[10px] text-red-200/80">{error}</div>
         ) : loading && items.length === 0 ? (
           <div className="flex min-h-28 items-center justify-center text-zinc-600"><Loader2 className="h-5 w-5 animate-spin" /></div>
+        ) : enabledCSVs.length === 0 ? (
+          <button type="button" onClick={() => setActiveView('sources')} className="flex min-h-28 w-full items-center justify-center rounded-md border border-dashed border-cyan-300/15 bg-cyan-500/[0.025] px-4 text-center text-[10px] text-cyan-100/65 hover:border-cyan-300/30 hover:text-cyan-100">
+            Select at least one CSV source to browse tags.
+          </button>
         ) : items.length === 0 ? (
-          <div className="flex min-h-28 items-center justify-center rounded-md border border-dashed border-white/10 text-[10px] text-zinc-600">No matching tags.</div>
+          <div className="flex min-h-28 items-center justify-center rounded-md border border-dashed border-white/10 text-[10px] text-zinc-600">No matching tags in the selected CSV sources.</div>
         ) : (
           <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 xl:grid-cols-3">
             {items.map((tag) => {
@@ -751,7 +908,7 @@ function WildcardTagCatalogDrawer({
                 .map((id) => classifierLabels.get(id) || id.replaceAll('_', ' '));
               return (
                 <button
-                  key={tag.tag}
+                  key={`${tag.catalogType || 'tag'}:${tag.catalogSource || 'catalog'}:${tag.tag}`}
                   type="button"
                   aria-pressed={selected}
                   onClick={() => toggleTag(tag)}
@@ -760,7 +917,9 @@ function WildcardTagCatalogDrawer({
                   <span className={`inline-flex h-4 w-4 items-center justify-center rounded-sm border ${selected ? 'border-cyan-200/50 bg-cyan-300/20 text-cyan-50' : 'border-white/15 text-transparent'}`}>{selected ? <Check className="h-2.5 w-2.5" /> : null}</span>
                   <span className="min-w-0">
                     <span className="block truncate font-mono text-[10px] text-zinc-200" title={tag.tag}>{tag.tag}</span>
-                    <span className="mt-0.5 block text-[8px] font-black uppercase tracking-[0.08em] text-zinc-600">{CATEGORY_LABELS[tag.category] || `Category ${tag.category}`} · {tag.source === 'danbooru' ? 'Live' : 'CSV'}</span>
+                    <span className="mt-0.5 block truncate text-[8px] font-black uppercase tracking-[0.08em] text-zinc-600" title={tag.catalogSource || 'CSV'}>
+                      {CATEGORY_LABELS[tag.category] || `Category ${tag.category}`} · {tag.catalogSource || (tag.source === 'danbooru' ? 'Live' : 'CSV')}
+                    </span>
                     {tagClassifierLabels.length > 0 ? (
                       <span className={`mt-0.5 block truncate text-[8px] font-bold uppercase tracking-[0.06em] ${tag.explicit ? 'text-red-300/55' : 'text-cyan-200/45'}`} title={tagClassifierLabels.join(', ')}>
                         {tagClassifierLabels.slice(0, 3).join(' / ')}{tagClassifierLabels.length > 3 ? ` +${tagClassifierLabels.length - 3}` : ''}
@@ -774,6 +933,66 @@ function WildcardTagCatalogDrawer({
           </div>
         )}
       </div>
+      </> : (
+        <div data-umbra-wildcard-tag-csv-sources className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-white/[0.08] bg-black/20 px-3 py-2.5">
+            <div>
+              <div className="text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300">CSV Sources</div>
+              <div className="mt-0.5 text-[9px] text-zinc-600">{enabledCSVs.length} enabled. This selection is shared with Power Prompter and Umbra UI.</div>
+            </div>
+            <button
+              type="button"
+              disabled={csvLoading}
+              onClick={() => { void loadCsvSources(true, true); }}
+              className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-cyan-300/20 px-2 text-[8px] font-black uppercase tracking-[0.08em] text-cyan-100 disabled:opacity-40"
+              title="Rescan CSV files and rebuild the shared tag index"
+            >
+              <RefreshCw className={`h-3 w-3 ${csvLoading ? 'animate-spin' : ''}`} /> Refresh Index
+            </button>
+          </div>
+
+          {csvLoading && csvList.tags.length === 0 && csvList.characters.length === 0 ? (
+            <div className="flex min-h-28 items-center justify-center text-zinc-600"><Loader2 className="h-5 w-5 animate-spin" /></div>
+          ) : csvList.tags.length === 0 && csvList.characters.length === 0 ? (
+            <div className="flex min-h-28 items-center justify-center rounded-md border border-dashed border-white/10 px-4 text-center text-[10px] text-zinc-600">No CSV files were found in the Power Prompter CSV library.</div>
+          ) : (
+            <div className="grid gap-4 xl:grid-cols-2">
+              {([
+                ['tag', 'Tag CSVs', csvList.tags],
+                ['character', 'Character CSVs', csvList.characters],
+              ] as const).map(([type, label, files]) => (
+                <section key={type} className="min-w-0 rounded-md border border-white/[0.08] bg-white/[0.018] p-2.5">
+                  <div className="mb-2 flex items-center gap-2 px-1">
+                    <FileText className="h-3.5 w-3.5 text-cyan-200" />
+                    <h3 className="text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300">{label}</h3>
+                    <span className="font-mono text-[8px] text-zinc-600">{files.length}</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {files.length === 0 ? <div className="rounded-sm border border-dashed border-white/[0.08] px-3 py-4 text-center text-[9px] text-zinc-700">No {label.toLowerCase()} found.</div> : files.map((fileName) => {
+                      const sourceId = getCsvSourceId(type, fileName);
+                      const enabled = isCsvSourceEnabled(enabledCSVs, sourceId, fileName);
+                      return (
+                        <button
+                          key={sourceId}
+                          type="button"
+                          aria-pressed={enabled}
+                          data-umbra-wildcard-csv-source={sourceId}
+                          onClick={() => { void toggleCsvSource(type, fileName); }}
+                          className={`grid min-h-10 w-full grid-cols-[1.2rem_minmax(0,1fr)_auto] items-center gap-2 rounded-sm border px-2.5 py-2 text-left transition ${enabled ? 'border-cyan-300/30 bg-cyan-500/[0.08] text-cyan-50' : 'border-white/[0.08] bg-black/20 text-zinc-500 hover:border-white/15 hover:text-zinc-200'}`}
+                        >
+                          <span className={`inline-flex h-4 w-4 items-center justify-center rounded-sm border ${enabled ? 'border-cyan-200/50 bg-cyan-300/20 text-cyan-50' : 'border-white/15 text-transparent'}`}>{enabled ? <Check className="h-2.5 w-2.5" /> : null}</span>
+                          <span className="min-w-0 truncate font-mono text-[10px]" title={fileName}>{fileName}</span>
+                          <span className="text-[8px] font-black uppercase tracking-[0.08em] opacity-55">{enabled ? 'Enabled' : 'Off'}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

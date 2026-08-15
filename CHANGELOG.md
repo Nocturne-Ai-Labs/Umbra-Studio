@@ -1,5 +1,87 @@
 # Changelog
 
+## v0.31.15
+
+### TL;DR - Setup After Updating
+
+Update Umbra Studio normally. No models need to be downloaded again.
+
+- **Required for Anima 2.9B:** Update ComfyUI from Umbra Studio's ComfyUI tool
+  controls before generating, then restart ComfyUI. ComfyUI 0.33.0 or newer
+  supports the model's 40-layer architecture natively and does not technically
+  require a custom node. Umbra also installs the official
+  `ComfyUI-Anima-2.9B` patch as a compatibility fallback for managed ComfyUI
+  installations that remain older. Skipping both paths can produce black or
+  corrupted images because older loaders detect only 28 of the model's 40
+  layers.
+
+### Anima 2.9B Compatibility Hotfix
+
+- Retained and verified the official Apache-2.0 `ComfyUI-Anima-2.9B` loader
+  patch in both managed custom-node installation paths as a required fallback.
+- Existing installations now retain the patch in their enabled-node config
+  when managed custom nodes are installed or updated.
+- Strengthened Anima 2.9B runtime qualification so text-to-image and
+  image-to-image outputs must decode successfully and pass dimensions,
+  brightness, variance, and entropy checks. A black output can no longer be
+  reported as a successful qualification merely because a file was created.
+
+### Shared Tag Catalog Drawers
+
+- Replaced Power Prompter's embedded tag-search surface with the same floating
+  catalog drawer used by Data Forge's Wildcard Generator.
+- Added the floating tag catalog to Umbra UI generation workspaces, excluding
+  Extras and the Prompter tab where it would duplicate existing controls.
+- Added **Sources** and **Catalog** views to the Wildcard Generator drawer so
+  users can choose and refresh tag or character CSV files without leaving the
+  workspace.
+- Shared enabled CSV sources between Power Prompter, Umbra UI, and the
+  Wildcard Generator, including classifiers, source labels, post-count
+  metadata, and incomplete-token replacement when inserting a selected tag.
+- Split explicit tag-catalog visibility from NSFW thumbnail blurring. Each now
+  has its own persisted setting, so browsing explicit tags cannot enable or
+  disable blur behavior in Gallery, datasets, or Model Manager.
+
+### Updater Relaunch Reliability
+
+- Updated the Windows relaunch worker to start Umbra through the resolved
+  primary launcher instead of bypassing the packaged launch flow.
+- The worker now tracks the real launched process, detects an early exit,
+  retries when needed, and opens Umbra's terminal normally after the updater
+  closes.
+
+### Verification
+
+- Confirmed both managed custom-node setup paths require the official Anima
+  2.9B 40-layer loader compatibility patch.
+- Verified the managed ComfyUI startup log reports the official patch loading
+  and dynamically expands Anima from 28 to 40 blocks, with no rejected
+  `blocks.28` through `blocks.39` weights.
+- Ran real Anima 2.9B text-to-image and image-to-image jobs at 832x1216. Both
+  outputs passed manual visual inspection plus automated decode, dimensions,
+  brightness, variance, and entropy validation.
+- Confirmed the production frontend build, frontend ESLint, and Bun backend
+  bundle pass.
+- Verified the shared catalog drawer appears in Power Prompter and supported
+  Umbra UI workspaces, with CSV source selection available in Data Forge.
+- Confirmed the relaunch worker bundles successfully with its packaged Windows
+  launcher and process-health handling.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Anima 2.9B no longer loses its final 12 transformer blocks on
+  older managed ComfyUI installations.
+- **Fixed:** Black or corrupted Anima 2.9B outputs can no longer pass runtime
+  qualification merely because an image file was created.
+- **Improved:** Anima 2.9B setup instructions now clearly require updating
+  ComfyUI and restarting it after managed custom nodes are updated.
+- **Improved:** Power Prompter, Umbra UI, and the Wildcard Generator now share
+  one floating tag-catalog experience and CSV source configuration.
+- **Fixed:** The tag catalog's explicit-content toggle no longer changes the
+  global NSFW thumbnail-blur setting.
+- **Fixed:** The updater relaunch worker now uses the packaged Umbra launcher,
+  tracks the resulting process, and retries premature exits.
+
 ## v0.31.14
 
 ### TL;DR - Setup After Updating

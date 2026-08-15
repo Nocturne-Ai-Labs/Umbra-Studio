@@ -62,6 +62,7 @@ import { UmbraExtrasWorkspace } from '@/components/umbra-ui/UmbraExtrasWorkspace
 import { UmbraInpaintWorkspace } from '@/components/umbra-ui/UmbraInpaintWorkspace';
 import { UmbraCanvasWorkspace } from '@/features/canvas/UmbraCanvasWorkspace';
 import { PowerPrompter } from '@/components/layout/PowerPrompter';
+import { PowerPrompterSearchPanel } from '@/components/layout/PowerPrompterSearchPanel';
 import { UmbraCheckpointControls } from '@/components/umbra-ui/UmbraCheckpointControls';
 import { UmbraWorkflowResourceControls } from '@/components/umbra-ui/UmbraWorkflowResourceControls';
 import { UmbraLoraStackControls } from '@/components/umbra-ui/UmbraLoraStackControls';
@@ -515,6 +516,9 @@ function PipelineControls({
 }
 
 export function UmbraUIWorkspace() {
+  const workspaceRootRef = React.useRef<HTMLDivElement>(null);
+  const lastCatalogTargetRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const catalogSettingsRef = React.useRef<Record<string, unknown>>({});
   const activeWorkspace = useStore((state) => state.activeWorkspace);
   const comfyConnected = useStore((state) => state.connections.comfyui === 'connected');
   const setActiveWorkspace = useStore((state) => state.setActiveWorkspace);
@@ -634,6 +638,126 @@ export function UmbraUIWorkspace() {
   const [imageAgentPrompt, setImageAgentPrompt] = React.useState(initialDeviceResume?.imageAgentPrompt || '');
   const workflowImagePrompt = imageAgentModeEnabled ? imageAgentPrompt.trim() : prompt;
   const [negativePrompt, setNegativePrompt] = React.useState(initialDeviceResume?.negativePrompt || '');
+  const [catalogEnabledCSVs, setCatalogEnabledCSVs] = React.useState<string[]>([]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/powerprompter/settings', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Could not load tag catalog settings.');
+        return response.json() as Promise<Record<string, unknown>>;
+      })
+      .then((settings) => {
+        if (cancelled) return;
+        catalogSettingsRef.current = settings;
+        setCatalogEnabledCSVs(Array.isArray(settings.enabledCSVs)
+          ? settings.enabledCSVs.map((entry) => String(entry || '').trim()).filter(Boolean)
+          : []);
+      })
+      .catch((error) => {
+        if (!cancelled) console.error('Failed to load Umbra tag catalog settings', error);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  React.useEffect(() => {
+    lastCatalogTargetRef.current = null;
+  }, [activeMode]);
+
+  const handleCatalogFocusCapture = React.useCallback((event: React.FocusEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (target instanceof HTMLTextAreaElement && !target.closest('[data-umbra-tag-catalog-drawer]')) {
+      lastCatalogTargetRef.current = target;
+    }
+  }, []);
+
+  const handleToggleCatalogCSV = React.useCallback(async (name: string) => {
+    const sourceName = String(name || '').trim();
+    if (!sourceName) return;
+    const legacyName = sourceName.includes(':') ? sourceName.slice(sourceName.indexOf(':') + 1).trim() : sourceName;
+    const aliases = new Set([sourceName, legacyName].filter(Boolean));
+    const nextEnabled = catalogEnabledCSVs.some((entry) => aliases.has(entry))
+      ? catalogEnabledCSVs.filter((entry) => !aliases.has(entry))
+      : [...catalogEnabledCSVs.filter((entry) => entry !== legacyName), sourceName];
+    const nextSettings = { ...catalogSettingsRef.current, enabledCSVs: nextEnabled, editorMode: 'cards' };
+    setCatalogEnabledCSVs(nextEnabled);
+    catalogSettingsRef.current = nextSettings;
+    try {
+      const response = await fetch('/api/powerprompter/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(nextSettings),
+      });
+      if (!response.ok) throw new Error('Could not save tag catalog sources.');
+      try {
+        const channel = new BroadcastChannel('umbra-powerprompter-settings-sync');
+        channel.postMessage({ settings: nextSettings });
+        channel.close();
+      } catch {
+        // BroadcastChannel may be unavailable in an embedded browser.
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not save tag catalog sources.', 'error');
+    }
+  }, [catalogEnabledCSVs, showToast]);
+
+  const handleCatalogInsert = React.useCallback((
+    text: string,
+    options: { replaceCurrentToken?: boolean; appendComma?: boolean } = {},
+  ) => {
+    const cleanText = String(text || '').trim();
+    if (!cleanText) return;
+    const root = workspaceRootRef.current;
+    let target = lastCatalogTargetRef.current;
+    if (!target?.isConnected || target.disabled || target.getClientRects().length === 0) {
+      target = root
+        ? Array.from(root.querySelectorAll<HTMLTextAreaElement>('textarea'))
+          .find((entry) => !entry.disabled && entry.getClientRects().length > 0 && !entry.closest('[data-umbra-tag-catalog-drawer]')) || null
+        : null;
+    }
+    if (target) {
+      const current = target.value;
+      const selectionStart = target.selectionStart ?? current.length;
+      const selectionEnd = target.selectionEnd ?? selectionStart;
+      let replaceStart = selectionStart;
+      let replaceEnd = selectionEnd;
+      if (options.replaceCurrentToken && selectionStart === selectionEnd) {
+        const previousComma = current.lastIndexOf(',', Math.max(0, selectionStart - 1));
+        const previousLine = current.lastIndexOf('\n', Math.max(0, selectionStart - 1));
+        replaceStart = Math.max(previousComma, previousLine) + 1;
+        while (replaceStart < selectionStart && /\s/.test(current[replaceStart] || '')) replaceStart += 1;
+        const nextComma = current.indexOf(',', selectionStart);
+        const nextLine = current.indexOf('\n', selectionStart);
+        const boundaries = [nextComma, nextLine].filter((value) => value >= 0);
+        replaceEnd = boundaries.length > 0 ? Math.min(...boundaries) : selectionEnd;
+      }
+      const suffix = options.appendComma ? ', ' : '';
+      const insertion = `${cleanText}${suffix}`;
+      const nextValue = `${current.slice(0, replaceStart)}${insertion}${current.slice(replaceEnd)}`;
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(target, nextValue);
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      const caret = replaceStart + insertion.length;
+      window.requestAnimationFrame(() => {
+        target?.focus({ preventScroll: true });
+        target?.setSelectionRange(caret, caret);
+      });
+      return;
+    }
+    if (activeMode === 'image' || activeMode === 'img2img' || activeMode === 'inpaint') {
+      setPromptSegments((current) => {
+        const targetId = current.some((segment) => segment.id === activePromptSegmentId)
+          ? activePromptSegmentId
+          : current[0]?.id;
+        return current.map((segment) => segment.id === targetId ? {
+          ...segment,
+          text: `${segment.text.trim().replace(/,\s*$/, '')}${segment.text.trim() ? ', ' : ''}${cleanText}`,
+        } : segment);
+      });
+      return;
+    }
+    showToast('Select a prompt field, then insert the catalog tags.', 'error');
+  }, [activeMode, activePromptSegmentId, showToast]);
   const [modelType, setModelType] = React.useState<PowerPrompterModelType>(initialDeviceResume?.modelType || 'checkpoint');
   const [modelFamily, setModelFamily] = React.useState(() => {
     if (initialDeviceResume?.modelFamily) return initialDeviceResume.modelFamily;
@@ -2722,7 +2846,12 @@ export function UmbraUIWorkspace() {
   ) || (queueSummary.running > 0 ? null : lastImageGenerationInfo);
 
   return (
-    <div data-umbra-ui-workspace="" className="flex h-full min-h-0 flex-col bg-[var(--umbra-bg)] text-zinc-100">
+    <div
+      ref={workspaceRootRef}
+      onFocusCapture={handleCatalogFocusCapture}
+      data-umbra-ui-workspace=""
+      className="relative flex h-full min-h-0 flex-col bg-[var(--umbra-bg)] text-zinc-100"
+    >
       <header data-umbra-ui-header="" className="flex min-h-14 flex-wrap items-center gap-3 border-b border-white/10 bg-black/30 px-4 py-1.5 max-[1140px]:gap-2 max-[1140px]:px-3">
         <PanelsTopLeft size={16} className="text-[var(--umbra-accent)] max-[1140px]:hidden" />
         <div className="text-xs font-black uppercase tracking-[0.18em] max-[1140px]:hidden">Umbra UI</div>
@@ -3541,6 +3670,15 @@ export function UmbraUIWorkspace() {
         ) : null}
 
       </div>
+
+      {activeMode !== 'extras' && activeMode !== 'prompter' ? (
+        <PowerPrompterSearchPanel
+          onInsert={handleCatalogInsert}
+          enabledCSVs={catalogEnabledCSVs}
+          onToggleCSV={handleToggleCatalogCSV}
+          drawerMode
+        />
+      ) : null}
 
       <UmbraModelPickerModal
         open={modelPickerOpen}

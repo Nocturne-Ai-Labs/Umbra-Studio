@@ -51,6 +51,7 @@ export interface AppSettings {
   'remote.syncUiAcrossDevices': boolean;
   'remote.galleryViewerOriginals': boolean;
   'remote.phoneComfyMenuPosition': string;
+  'ui.tagCatalogExplicitEnabled': boolean;
   'ui.nsfwThumbnailBlurEnabled': boolean;
   'ui.nsfwThumbnailBlurIntensity': number;
   'appUpdate.mode': 'source' | 'release';
@@ -100,6 +101,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   'remote.syncUiAcrossDevices': true,
   'remote.galleryViewerOriginals': false,
   'remote.phoneComfyMenuPosition': '',
+  'ui.tagCatalogExplicitEnabled': false,
   'ui.nsfwThumbnailBlurEnabled': false,
   'ui.nsfwThumbnailBlurIntensity': 85,
   'appUpdate.mode': 'source',
@@ -128,6 +130,7 @@ const BOOLEAN_KEYS: Array<keyof AppSettings> = [
   'scanner.showRawMetadata',
   'remote.syncUiAcrossDevices',
   'remote.galleryViewerOriginals',
+  'ui.tagCatalogExplicitEnabled',
   'ui.nsfwThumbnailBlurEnabled',
   'appUpdate.mode',
   'appUpdate.releaseChannel',
