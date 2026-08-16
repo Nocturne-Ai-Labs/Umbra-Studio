@@ -22,6 +22,10 @@ import { usePowerPrompterGlobalSearch } from '@/components/power-prompter/usePow
 import { usePowerPrompterPipelines } from '@/components/power-prompter/pipelines/usePowerPrompterPipelines';
 import { PowerPrompterQueueManagerSidePane } from '@/components/power-prompter/queue/PowerPrompterQueueManagerSidePane';
 import { PowerPrompterQueueManagerView } from '@/components/power-prompter/queue/PowerPrompterQueueManagerView';
+import {
+  claimQueuePromptCompletionNotification,
+  collectSuccessfulQueuePromptCompletions,
+} from '@/components/power-prompter/queue/queueNotificationModel';
 import { PowerPrompterQueueTrackerCard } from '@/components/power-prompter/queue/PowerPrompterQueueTrackerCard';
 import { PowerPrompterQueueHistoryModal } from '@/components/power-prompter/queue/PowerPrompterQueueHistoryModal';
 import { PowerPrompterQueueConfirmModal, PowerPrompterSaveQueueModal } from '@/components/power-prompter/queue/PowerPrompterQueueDialogs';
@@ -53,6 +57,13 @@ import { loadAppSettings, pushAppSettingsToBackend } from '@/lib/appSettings';
 import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
 import { subscribeUiSession } from '@/lib/uiSessionSocket';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
+import {
+  areUmbraQueueActivitiesEquivalent,
+  buildUmbraQueueActivitiesFromControllerSnapshot,
+  isUmbraQueueActivityTerminal,
+  useUmbraQueueActivities,
+  type UmbraQueueActivity,
+} from '@/lib/umbraQueueActivity';
 import { deletePathsWithSettings } from '@/utils/trashActions';
 import {
   decodePowerPrompterImageRestore,
@@ -409,12 +420,17 @@ function buildBackendQueueSnapshotSignature(snapshot: any): string {
     activePromptIndex: Math.max(0, Math.floor(Number(snapshot?.activePromptIndex) || 0)),
     requests: rawRequests.map((request: any) => ({
       requestId: normalizeRequestId(request?.requestId),
+      origin: String(request?.origin || '').trim().toLowerCase(),
+      queuePlacement: String(request?.queuePlacement || '').trim().toLowerCase(),
+      pipelineName: String(request?.pipelineName || '').trim(),
+      pipeline: request?.pipeline && typeof request.pipeline === 'object' ? request.pipeline : null,
       status: String(request?.status || '').trim().toLowerCase(),
       activeIndex: Math.max(0, Math.floor(Number(request?.activeIndex) || 0)),
       activeSetId: clampQueueSetId(request?.activeSetId ?? 1),
       createdAt: Math.max(0, Math.floor(Number(request?.createdAt) || 0)),
       prompts: (Array.isArray(request?.prompts) ? request.prompts : []).map((prompt: any) => ({
         promptIndex: Math.max(0, Math.floor(Number(prompt?.promptIndex) || 0)),
+        prompt: String(prompt?.prompt || ''),
         status: String(prompt?.status || 'pending').trim().toLowerCase(),
         promptId: String(prompt?.promptId || '').trim(),
         seed: Number.isFinite(Number(prompt?.seed)) ? Math.max(0, Math.floor(Number(prompt.seed))) : 0,
@@ -754,7 +770,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
   const powerPrompterUiFileRestoredRef = useRef(false);
   const powerPrompterUiSessionUpdatedAtRef = useRef(0);
   const powerPrompterUiSuppressPersistUntilRef = useRef(0);
-  const [, setPowerPrompterUiHydrationTick] = useState(0);
+  const [powerPrompterUiHydrationTick, setPowerPrompterUiHydrationTick] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [agentPromptPanelOpen, setAgentPromptPanelOpen] = useState(false);
   const [settings, setSettings] = useState<PowerPrompterSettings>(DEFAULT_POWER_PROMPTER_SETTINGS);
@@ -797,6 +813,21 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     ))
   ));
   const [queueVisualState, setQueueVisualStateState] = useState<QueueVisualState | null>(() => powerPrompterQueueSession.queueVisualState);
+  const [umbraUiControllerActivities, setUmbraUiControllerActivities] = useState<UmbraQueueActivity[]>([]);
+  const workspaceUmbraQueueActivities = useUmbraQueueActivities();
+  const umbraQueueActivities = useMemo(() => {
+    const byId = new Map<string, UmbraQueueActivity>();
+    for (const activity of [...umbraUiControllerActivities, ...workspaceUmbraQueueActivities]) {
+      byId.set(activity.id, activity);
+    }
+    const allActivities = Array.from(byId.values());
+    const activeActivities = allActivities.filter((activity) => !isUmbraQueueActivityTerminal(activity.status));
+    const recentTerminalActivities = allActivities
+      .filter((activity) => isUmbraQueueActivityTerminal(activity.status))
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .slice(0, 6);
+    return [...activeActivities, ...recentTerminalActivities];
+  }, [umbraUiControllerActivities, workspaceUmbraQueueActivities]);
   const [queueCompletionTick, setQueueCompletionTick] = useState(0);
   const [generationPreview, setGenerationPreviewState] = useState<GenerationPreviewState | null>(() => powerPrompterQueueSession.generationPreview);
   const generationPreviewRef = useRef<GenerationPreviewState | null>(powerPrompterQueueSession.generationPreview);
@@ -889,6 +920,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
   const soundMenuRef = useRef<HTMLDivElement | null>(null);
   const [queueTimingRevision, setQueueTimingRevision] = useState(0);
   const completedPromptIndicesRef = useRef(powerPrompterQueueSession.completedPromptIndices);
+  const notifiedCompletedPromptKeysRef = useRef(new Set<string>());
+  const completionSoundSnapshotReadyRef = useRef(false);
   const queuePromptStartedAtRef = useRef(powerPrompterQueueSession.queuePromptStartedAt);
   const queueRequestFirstPromptMsRef = useRef(powerPrompterQueueSession.queueRequestFirstPromptMs);
   const queuePromptLastActivityAtRef = useRef(powerPrompterQueueSession.queuePromptLastActivityAt);
@@ -1651,7 +1684,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     const liveExpandedKeys = new Set(
       queueStackItems
         .filter((item) => !item.exiting && (item.status === 'pending' || item.status === 'running'))
-        .map((item) => `${String(item.requestId || '').trim()}:${Math.max(0, Math.floor(Number(item.promptIndex) || 0))}`)
+        .map((item) => String(item.id || '').trim())
+        .filter(Boolean)
     );
     setSelectedQueuePromptKeys((prev) => {
       let changed = false;
@@ -1683,31 +1717,33 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     });
   }, [queueStackItems]);
   useEffect(() => {
+    if (!powerPrompterUiHydratedRef.current) return;
     setExpandedQueueSets((prev) => {
-      const next: Record<string, boolean> = {};
+      let next = prev;
       let changed = false;
-      const seen = new Set<string>();
       for (const setGroup of queueSetGroups) {
-        const key = String(setGroup.id || setGroup.setId);
-        seen.add(key);
-        if (Object.prototype.hasOwnProperty.call(prev, key)) {
-          next[key] = prev[key];
-        } else {
-          next[key] = false;
-          changed = true;
+        const stableKey = String(setGroup.setId);
+        if (Object.prototype.hasOwnProperty.call(prev, stableKey)) {
+          if (queuePromptExpandedMode && prev[stableKey] !== true) {
+            if (!changed) next = { ...prev };
+            next[stableKey] = true;
+            changed = true;
+          }
+          continue;
         }
+        const legacyKey = String(setGroup.id || '').trim();
+        const inheritedExpanded = legacyKey && Object.prototype.hasOwnProperty.call(prev, legacyKey)
+          ? prev[legacyKey] === true
+          : queuePromptExpandedMode;
+        if (!changed) next = { ...prev };
+        next[stableKey] = inheritedExpanded;
+        changed = true;
       }
-      for (const key of Object.keys(prev)) {
-        if (!seen.has(key)) {
-          changed = true;
-          break;
-        }
-      }
-      if (!changed) return prev;
-      return next;
+      return changed ? next : prev;
     });
-  }, [queueSetGroups]);
+  }, [powerPrompterUiHydrationTick, queuePromptExpandedMode, queueSetGroups]);
   useEffect(() => {
+    if (!powerPrompterUiHydratedRef.current) return;
     setExpandedQueueGroups((prev) => {
       const next: Record<string, boolean> = {};
       let changed = false;
@@ -1717,9 +1753,18 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         if (!key) continue;
         seen.add(key);
         if (Object.prototype.hasOwnProperty.call(prev, key)) {
-          next[key] = prev[key];
+          const nextExpanded = queuePromptExpandedMode ? true : prev[key];
+          next[key] = nextExpanded;
+          if (nextExpanded !== prev[key]) changed = true;
         } else {
-          next[key] = false;
+          const matchingSetGroup = queueSetGroups.find((setGroup) => (
+            setGroup.groups.some((candidate) => candidate.requestId === key)
+          ));
+          const stableSetKey = matchingSetGroup ? String(matchingSetGroup.setId) : String(group.setId);
+          const legacySetKey = matchingSetGroup ? String(matchingSetGroup.id || '').trim() : '';
+          next[key] = queuePromptExpandedMode
+            || expandedQueueSets[stableSetKey] === true
+            || (!!legacySetKey && expandedQueueSets[legacySetKey] === true);
           changed = true;
         }
       }
@@ -1732,7 +1777,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       if (!changed) return prev;
       return next;
       });
-  }, [queueRequestGroups]);
+  }, [expandedQueueSets, powerPrompterUiHydrationTick, queuePromptExpandedMode, queueRequestGroups, queueSetGroups]);
   const hasCancelableQueueWork = useMemo(() => {
     if (hasQueueStackCancelableWork) return true;
     if (queueRequestGroups.some((group) => group.pending > 0 || group.running > 0)) return true;
@@ -2976,6 +3021,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       queueRequestGroups={queueRequestGroups}
       queueSetGroups={queueSetGroups}
       queueTotalPromptCount={queueTotalPromptCount}
+      umbraQueueActivities={umbraQueueActivities}
       queueTrackerSummary={queueTrackerSummary}
       queueSummaryCounts={queueSummaryCounts}
       queueManagerStyleOptions={queueManagerStyleOptions}
@@ -3061,6 +3107,11 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       sendQueueManagerOutputToWorkspace={sendQueueManagerOutputToWorkspace}
       queueOutputMenu={queueOutputMenu}
       setQueueOutputMenu={setQueueOutputMenu}
+      completionSoundSettings={settings}
+      handleToggleCompletionSound={handleToggleCompletionSound}
+      handleSetCompletionSoundStyle={handleSetCompletionSoundStyle}
+      handleSetCompletionSoundVolume={handleSetCompletionSoundVolume}
+      playCompletionSound={playCompletionSound}
     />
   );
   const alertFeaturesEnabled = settings.generationCompleteSoundEnabled !== false;
@@ -3406,6 +3457,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
 
   const {
     playCompletionSound,
+    playSubmissionSound,
     handleActivePromptTypeProgress,
     handleChainLinkFeedback,
     handleToggleCompletionSound,
@@ -3417,6 +3469,18 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     persistSettings,
     showToast,
   });
+
+  const notifyPromptCompletion = useCallback((requestIdInput: unknown, promptIndexInput: unknown) => {
+    const notification = claimQueuePromptCompletionNotification(
+      notifiedCompletedPromptKeysRef.current,
+      requestIdInput,
+      promptIndexInput,
+    );
+    if (!notification) return false;
+    playCompletionSound();
+    setQueueCompletionTick((previous) => previous + 1);
+    return true;
+  }, [playCompletionSound]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -5179,9 +5243,29 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       ? (snapshotInput.snapshot && typeof snapshotInput.snapshot === 'object' ? snapshotInput.snapshot : snapshotInput)
       : null;
     const rawRequests = Array.isArray(snapshot?.requests) ? snapshot.requests : [];
+    const powerPrompterRequests = rawRequests.filter((request: any) => (
+      String(request?.origin || '').trim().toLowerCase() !== 'umbra_ui'
+    ));
+    const snapshotCompletedPromptKeys = collectSuccessfulQueuePromptCompletions(powerPrompterRequests);
+    if (!completionSoundSnapshotReadyRef.current) {
+      for (const entry of snapshotCompletedPromptKeys) {
+        notifiedCompletedPromptKeysRef.current.add(entry.key);
+      }
+      completionSoundSnapshotReadyRef.current = true;
+    } else {
+      for (const entry of snapshotCompletedPromptKeys) {
+        notifyPromptCompletion(entry.requestId, entry.promptIndex);
+      }
+    }
+    const nextUmbraUiControllerActivities = buildUmbraQueueActivitiesFromControllerSnapshot(snapshot);
+    setUmbraUiControllerActivities((current) => (
+      areUmbraQueueActivitiesEquivalent(current, nextUmbraUiControllerActivities)
+        ? current
+        : nextUmbraUiControllerActivities
+    ));
     const snapshotSignature = buildBackendQueueSnapshotSignature(snapshot);
     if (snapshotSignature && backendQueueSnapshotSignatureRef.current === snapshotSignature) {
-      const rawRequestIds = rawRequests
+      const rawRequestIds = powerPrompterRequests
           .map((request: any) => normalizeRequestId(request?.requestId))
           .filter(Boolean);
       const localSnapshotMismatch = hasBackendQueueSnapshotMismatch({
@@ -5192,7 +5276,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       logQueueDebug(localSnapshotMismatch ? 'ws:queue_snapshot:duplicate_reapply_mismatch' : 'ws:queue_snapshot:ignored_duplicate', {
         version: snapshot?.version,
         reason: snapshot?.reason,
-        requestCount: rawRequests.length,
+        requestCount: powerPrompterRequests.length,
+        umbraUiRequestCount: nextUmbraUiControllerActivities.length,
         localSnapshotMismatch,
       });
       // Even an identical backend snapshot is allowed to repair local UI state.
@@ -5208,7 +5293,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     const backendStackItems: QueueStackItem[] = [];
     let nextVisual: QueueVisualState | null = null;
 
-    for (const rawRequest of rawRequests) {
+    for (const rawRequest of powerPrompterRequests) {
       const requestId = normalizeRequestId(rawRequest?.requestId);
       if (!requestId) continue;
       const requestStatus = String(rawRequest?.status || '').trim().toLowerCase();
@@ -5364,12 +5449,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     backendQueueSnapshotActiveUntilRef.current = hasLiveBackendSnapshotWork
       ? Date.now() + 60000
       : 0;
-    const hasPendingBackendPrompt = rawRequests.some((request: any) =>
+    const hasPendingBackendPrompt = powerPrompterRequests.some((request: any) =>
       (Array.isArray(request?.prompts) ? request.prompts : []).some((entry: any) =>
         String(entry?.status || 'pending').trim().toLowerCase() === 'pending'
       )
     );
-    const hasRunningBackendPrompt = rawRequests.some((request: any) =>
+    const hasRunningBackendPrompt = powerPrompterRequests.some((request: any) =>
       (Array.isArray(request?.prompts) ? request.prompts : []).some((entry: any) => {
         const status = String(entry?.status || 'pending').trim().toLowerCase();
         return status === 'submitting' || status === 'running';
@@ -5381,7 +5466,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     if (!hasPendingBackendPrompt && activeBackendIds.size <= 0) {
       backendQueuePauseRequestedRef.current = false;
     }
-    const backendRequestOrder = rawRequests
+    const backendRequestOrder = powerPrompterRequests
       .map((request: any) => normalizeRequestId(request?.requestId))
       .filter(Boolean);
     const staleBackendDrivenRequestIds = getStaleBackendDrivenRequestIds({
@@ -5390,7 +5475,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       visualRequestId: queueVisualStateRef.current?.requestId || '',
       isStagedRequestId: isLocalStagedQueueRequestId,
     });
-    const staleInvisibleBackendRequestIds = !hasLiveBackendSnapshotWork && rawRequests.length <= 0
+    const staleInvisibleBackendRequestIds = !hasLiveBackendSnapshotWork && powerPrompterRequests.length <= 0
       ? Array.from(new Set([
         ...Array.from(queueRequestMetaRef.current.keys()),
         ...Array.from(completedPromptIndicesRef.current.keys()),
@@ -5403,7 +5488,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           && !pendingQueueRequestsRef.current.has(requestId)
         ))
       : [];
-    const staleLocalMetadataRequestIds = rawRequests.length > 0
+    const staleLocalMetadataRequestIds = powerPrompterRequests.length > 0
       ? Array.from(new Set([
         ...Array.from(queueRequestMetaRef.current.keys()),
         ...Array.from(completedPromptIndicesRef.current.keys()),
@@ -5444,6 +5529,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       activeRequestIds: Array.from(activeBackendIds),
       terminalRequestIds: Array.from(terminalBackendIds),
       stackItems: backendStackItems.length,
+      umbraUiActivities: nextUmbraUiControllerActivities.length,
       requestOrder: backendRequestOrder,
       staleRequestIdsPruned: prunedBackendRequestIds,
       version: snapshot?.version,
@@ -7126,7 +7212,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
             requestCompletions = new Set<number>();
             completedPromptIndicesRef.current.set(requestId, requestCompletions);
           }
-          const shouldPlayCompletionSound = !requestCompletions.has(promptIndex);
           requestCompletions.add(promptIndex);
           if (requestMeta) {
             updateQueueHistoryForRequest(requestId, {
@@ -7134,9 +7219,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
               status: requestCompletions.size >= requestMeta.prompts.length ? 'completed' : 'running',
             });
           }
-          if (shouldPlayCompletionSound) {
-            playCompletionSound();
-            setQueueCompletionTick((prev) => prev + 1);
+          if (payload.failed !== true && payload.canceled !== true && payload.interrupted !== true) {
+            notifyPromptCompletion(requestId, promptIndex);
           }
 
           const completedStackItems = applyQueueStackRunningState(
@@ -7497,6 +7581,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
             return { ...prev, promptIds: nextPromptIds, promptSeeds: nextPromptSeeds };
           });
         }
+        playSubmissionSound();
         scheduleRecoverableQueueSnapshotPersist({ clearWhenEmpty: true, delayMs: 100 });
         pending.resolve(payload);
       };

@@ -1,4 +1,4 @@
-import type { PowerPrompterCompletionSoundStyle } from '@/types/powerPrompter';
+import type { PowerPrompterCompletionSoundStyle, PowerPrompterSettings } from '@/types/powerPrompter';
 import { DEFAULT_POWER_PROMPTER_SETTINGS, POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME } from '@/lib/powerPrompter';
 
 export const POWER_PROMPTER_SOUND_STYLE_GLASS_TICK: PowerPrompterCompletionSoundStyle = 'glass_tick';
@@ -242,6 +242,17 @@ export const POWER_PROMPTER_SOUND_PROFILES: Record<PowerPrompterCompletionSoundS
   },
 };
 
+export type PowerPrompterNotificationSoundKind = 'submitted' | 'completed';
+export type PowerPrompterNotificationAudioSettings = Pick<
+  PowerPrompterSettings,
+  'generationCompleteSoundEnabled' | 'generationCompleteSoundStyle' | 'generationCompleteSoundVolume'
+>;
+
+let sharedNotificationAudioContext: AudioContext | null = null;
+let sharedNotificationAudioEnabled = DEFAULT_POWER_PROMPTER_SETTINGS.generationCompleteSoundEnabled;
+let sharedNotificationAudioStyle = DEFAULT_POWER_PROMPTER_SETTINGS.generationCompleteSoundStyle;
+let sharedNotificationAudioVolume = DEFAULT_POWER_PROMPTER_SETTINGS.generationCompleteSoundVolume;
+
 export function getCompletionAudioContext(existing: AudioContext | null): AudioContext | null {
   if (existing) return existing;
   if (typeof window === 'undefined') return null;
@@ -264,4 +275,87 @@ export function clampAlertLinearGain(rawGain: unknown): number {
   const numeric = Number(rawGain);
   if (!Number.isFinite(numeric)) return 0.0001;
   return Math.max(0.0001, Math.min(POWER_PROMPTER_ALERT_MAX_LINEAR_GAIN, numeric));
+}
+
+export function configurePowerPrompterNotificationAudio(
+  settings: Partial<PowerPrompterNotificationAudioSettings>,
+) {
+  sharedNotificationAudioEnabled = settings.generationCompleteSoundEnabled !== false;
+  sharedNotificationAudioStyle = POWER_PROMPTER_SOUND_STYLE_OPTIONS.some((entry) => (
+    entry.id === settings.generationCompleteSoundStyle
+  ))
+    ? settings.generationCompleteSoundStyle as PowerPrompterCompletionSoundStyle
+    : POWER_PROMPTER_SOUND_STYLE_GLASS_TICK;
+  sharedNotificationAudioVolume = clampCompletionSoundVolume(settings.generationCompleteSoundVolume);
+}
+
+export async function primePowerPrompterNotificationAudio(): Promise<boolean> {
+  const context = getCompletionAudioContext(sharedNotificationAudioContext);
+  if (!context) return false;
+  sharedNotificationAudioContext = context;
+  if (context.state === 'running') return true;
+  try {
+    await context.resume();
+    return String(context.state) === 'running';
+  } catch {
+    return false;
+  }
+}
+
+export function playPowerPrompterNotificationSound(
+  kind: PowerPrompterNotificationSoundKind = 'completed',
+) {
+  if (!sharedNotificationAudioEnabled) return;
+  const context = getCompletionAudioContext(sharedNotificationAudioContext);
+  if (!context) return;
+  sharedNotificationAudioContext = context;
+
+  const scheduleNotificationSound = () => {
+    const style = sharedNotificationAudioStyle || POWER_PROMPTER_SOUND_STYLE_GLASS_TICK;
+    const volume = clampCompletionSoundVolume(sharedNotificationAudioVolume);
+    if (volume <= 0.001) return;
+    const profile = POWER_PROMPTER_SOUND_PROFILES[style]
+      || POWER_PROMPTER_SOUND_PROFILES[POWER_PROMPTER_SOUND_STYLE_GLASS_TICK];
+    const now = context.currentTime;
+    const masterGain = context.createGain();
+    const pitchScale = kind === 'submitted' ? 0.82 : 1;
+    const durationScale = kind === 'submitted' ? 0.82 : 1;
+    const outputScale = kind === 'submitted' ? 0.82 : 1;
+    masterGain.gain.setValueAtTime(0.0001, now);
+    masterGain.connect(context.destination);
+
+    for (const tone of profile.tones) {
+      const start = now + tone.delay;
+      const duration = tone.duration * durationScale;
+      const oscillator = context.createOscillator();
+      const gainNode = context.createGain();
+      oscillator.type = profile.wave;
+      oscillator.frequency.setValueAtTime(tone.frequency * pitchScale, start);
+      gainNode.gain.setValueAtTime(0.0001, start);
+      gainNode.gain.exponentialRampToValueAtTime(
+        tone.gain,
+        start + Math.min(0.012, duration * 0.4),
+      );
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+      oscillator.connect(gainNode);
+      gainNode.connect(masterGain);
+      oscillator.start(start);
+      oscillator.stop(start + duration);
+    }
+
+    masterGain.gain.setValueAtTime(0.0001, now);
+    masterGain.gain.exponentialRampToValueAtTime(
+      clampAlertLinearGain(profile.peak * volume * outputScale),
+      now + profile.attack,
+    );
+    masterGain.gain.exponentialRampToValueAtTime(0.0001, now + profile.release);
+  };
+
+  if (context.state === 'running') {
+    scheduleNotificationSound();
+    return;
+  }
+  void context.resume().then(() => {
+    if (context.state === 'running') scheduleNotificationSound();
+  }).catch(() => undefined);
 }

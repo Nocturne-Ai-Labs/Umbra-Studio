@@ -13,6 +13,7 @@ interface ContextMenuProps {
   boundarySelector?: string;
   title?: string;
   subtitle?: string;
+  presentation?: 'anchored' | 'touch-sheet';
 }
 
 const MENU_MARGIN = 8;
@@ -109,6 +110,7 @@ function MenuPanel({
   rootRef,
   title,
   subtitle,
+  presentation = 'anchored',
 }: {
   items: ContextMenuItem[];
   boundarySelector?: string;
@@ -120,6 +122,7 @@ function MenuPanel({
   rootRef?: React.RefObject<HTMLDivElement>;
   title?: string;
   subtitle?: string;
+  presentation?: 'anchored' | 'touch-sheet';
 }) {
   const localRef = useRef<HTMLDivElement | null>(null);
   const panelRef = rootRef || localRef;
@@ -203,7 +206,11 @@ function MenuPanel({
     <div
       ref={panelRef}
       data-umbra-context-menu-layer="true"
-      className="umbra-context-menu-panel fixed min-w-[232px] max-w-[min(336px,calc(100vw-16px))] overflow-y-auto p-1"
+      data-umbra-context-menu-presentation={presentation}
+      className={`umbra-context-menu-panel fixed overflow-y-auto ${presentation === 'touch-sheet'
+        ? 'umbra-context-menu-touch-sheet min-w-0 max-w-none p-2'
+        : 'min-w-[232px] max-w-[min(336px,calc(100vw-16px))] p-1'
+      }`}
       style={{ ...style, zIndex: 10000 + depth * 2 }}
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
@@ -301,6 +308,7 @@ function MenuPanel({
                         setOpenIndex(-1);
                         itemRefs.current[index]?.focus();
                       }}
+                      presentation="anchored"
                     />,
                     document.body,
                   )
@@ -321,6 +329,7 @@ export function ContextMenu({
   boundarySelector,
   title,
   subtitle,
+  presentation = 'anchored',
 }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const normalizedItems = useMemo(() => normalizeMenuItems(items), [items]);
@@ -332,6 +341,17 @@ export function ContextMenu({
 
   useLayoutEffect(() => {
     if (!isOpen || !menuRef.current) return;
+    if (presentation === 'touch-sheet') {
+      setStyle({
+        left: 12,
+        right: 12,
+        bottom: 'max(12px, env(safe-area-inset-bottom))',
+        top: 'auto',
+        maxHeight: 'min(72dvh, 42rem)',
+        visibility: 'visible',
+      });
+      return;
+    }
     setStyle({
       left: position.x,
       top: position.y,
@@ -356,7 +376,7 @@ export function ContextMenu({
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
-  }, [boundarySelector, isOpen, normalizedItems.length, position]);
+  }, [boundarySelector, isOpen, normalizedItems.length, position, presentation]);
 
   React.useEffect(() => {
     if (!isOpen) return;
@@ -390,16 +410,22 @@ export function ContextMenu({
   if (typeof document === 'undefined') return null;
 
   return createPortal(
-    <MenuPanel
-      items={normalizedItems}
-      boundarySelector={boundarySelector}
-      depth={0}
-      onCloseAll={onClose}
-      rootStyle={style}
-      rootRef={menuRef}
-      title={title}
-      subtitle={subtitle}
-    />,
+    <>
+      {presentation === 'touch-sheet' ? (
+        <div className="umbra-context-menu-touch-scrim fixed inset-0" aria-hidden="true" />
+      ) : null}
+      <MenuPanel
+        items={normalizedItems}
+        boundarySelector={boundarySelector}
+        depth={0}
+        onCloseAll={onClose}
+        rootStyle={style}
+        rootRef={menuRef}
+        title={title}
+        subtitle={subtitle}
+        presentation={presentation}
+      />
+    </>,
     document.body,
   );
 }

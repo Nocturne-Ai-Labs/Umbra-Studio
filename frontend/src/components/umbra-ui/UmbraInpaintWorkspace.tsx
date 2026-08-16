@@ -236,6 +236,10 @@ import {
   type UmbraUiInpaintReferenceInput,
 } from '@/lib/umbraUiInpaint';
 import {
+  usePublishUmbraQueueActivity,
+  type UmbraQueueActivity,
+} from '@/lib/umbraQueueActivity';
+import {
   buildUmbraUiInpaintOutputStages,
   classifyUmbraUiInpaintRecoveryError,
   getUmbraUiInpaintTerminalMaterializationIssue,
@@ -2710,6 +2714,23 @@ export function UmbraInpaintWorkspace({
   const [softInpaintTransitionContrast, setSoftInpaintTransitionContrast] = React.useState(SIMPLE_INPAINT_DEFAULT_TRANSITION_CONTRAST);
   const [softInpaintMaskInfluence, setSoftInpaintMaskInfluence] = React.useState(SIMPLE_INPAINT_DEFAULT_MASK_INFLUENCE);
   const [job, setJob] = React.useState<UmbraUiInpaintJob | null>(null);
+  const queueActivity = React.useMemo<UmbraQueueActivity | null>(() => job ? ({
+    id: `umbra-inpaint:${job.id}`,
+    owner: 'umbra-ui-inpaint-workspace',
+    feature: 'inpaint',
+    label: job.sourceName ? `Inpaint - ${job.sourceName}` : 'Inpaint',
+    detail: job.prompt || `${job.width} x ${job.height}`,
+    status: job.status,
+    total: job.total,
+    completed: job.completed,
+    failed: job.failed,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    placement: 'next',
+    requestId: job.id,
+    readonly: true,
+  }) : null, [job]);
+  usePublishUmbraQueueActivity('umbra-ui-inpaint-workspace', queueActivity);
   const inpaintJobRunning = !!job && !isUmbraUiInpaintJobTerminal(job);
   const resizeTarget = React.useMemo(() => ({
     width: alignInpaintResizeDimension(Number(resizeWidth) || canvasDocument?.width || 1024, 'width', capabilities.resolution),

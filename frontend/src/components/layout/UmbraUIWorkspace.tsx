@@ -77,6 +77,7 @@ import {
 } from '@/components/umbra-ui/UmbraImageGenerationInfoDrawer';
 import { UmbraMobileWorkspaceSheet } from '@/components/umbra-ui/UmbraMobileWorkspaceSheet';
 import { UmbraQueueEmergencyControls } from '@/components/umbra-ui/UmbraQueueEmergencyControls';
+import { useUmbraQueueNotificationAudio } from '@/components/umbra-ui/useUmbraQueueNotificationAudio';
 import {
   UmbraQueuePlacementControls,
   useUmbraQueuePlacement,
@@ -540,6 +541,7 @@ export function UmbraUIWorkspace() {
     requestModelInfo,
     inheritedGeneration,
     queueSummary,
+    queueActivities,
     videoJobs,
     videoJobsLoading,
     videoJobsError,
@@ -552,6 +554,7 @@ export function UmbraUIWorkspace() {
     queueImage,
     queueVideo,
   } = useUmbraPowerPrompterBridge(comfyConnected);
+  useUmbraQueueNotificationAudio(queueActivities);
   const imageQueuePlacement = useUmbraQueuePlacement(queueSummary);
   const [queueControlBusy, setQueueControlBusy] = React.useState<'skip' | 'stop' | ''>('');
   const [initialDeviceResume] = React.useState(() => readDeviceUiResume<UmbraUiDeviceResume>('umbra-ui'));

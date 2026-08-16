@@ -60,6 +60,7 @@ import {
   applyUmbraUiWatermark,
   convertUmbraUiVideoToGif,
   isUmbraUiWatermarkVideo,
+  type UmbraUiCensorRegion,
 } from './backend/UmbraUiMediaToolsService';
 import {
   detectUmbraUiCensorRegions,
@@ -127,6 +128,7 @@ import {
   type DataForgeWildcardGenerateRequest,
 } from './backend/DataForgeWildcardGenerator';
 import { ensureDefaultDanbooruTagCatalog } from './backend/DefaultDanbooruTagCatalog';
+import { DanbooruTagCorpusService } from './backend/DanbooruTagCorpusService';
 
 // Route handlers we're keeping (will merge later)
 import * as trashRoutes from './backend/routes/trash';
@@ -351,6 +353,7 @@ const modelDownloadWorkerService = new ModelDownloadWorkerService({
   runtimeRoot: ROOT_DIR,
 });
 const modelManagerStateDb = new ModelManagerStateDb(ROOT_DIR);
+const danbooruTagCorpusService = new DanbooruTagCorpusService(USER_DIR);
 const umbraUiUpscaleService = new UmbraUiUpscaleService({
   getComfyBaseUrl: () => getComfyProxyBaseUrl(),
   getComfyInputRoot: () => join(getComfyToolRootFast() || join(ROOT_DIR, 'Tools', 'ComfyUI'), 'input'),
@@ -378,6 +381,7 @@ process.on('exit', () => {
   modelIndexWorkerService.dispose();
   modelDownloadWorkerService.dispose();
   modelManagerStateDb.close();
+  danbooruTagCorpusService.close();
   try {
     galleryDb.close();
   } catch {
@@ -608,9 +612,6 @@ async function handleBooruImageProxy(req: Request, url: URL): Promise<Response> 
   });
 }
 
-type DatasetResearchMode = 'character' | 'artist' | 'concept';
-type DatasetResearchCategory = 'general' | 'character' | 'copyright' | 'artist' | 'meta' | 'unknown';
-
 function resolveDataForgeWildcardTagCsvPath(): string {
   const candidates = [
     join(USER_DIR, 'PowerPrompter', 'CSV', 'tags', 'UmbraDanbooruTagsv1.csv'),
@@ -629,175 +630,12 @@ async function getDataForgeDanbooruAuthorization(): Promise<string> {
   return username && apiKey ? `Basic ${Buffer.from(`${username}:${apiKey}`).toString('base64')}` : '';
 }
 
-function normalizeDatasetResearchTag(value: unknown): string {
+function normalizeDanbooruTag(value: unknown): string {
   return String(value || '')
     .trim()
     .replace(/,/g, ' ')
     .replace(/\s+/g, '_')
     .replace(/^_+|_+$/g, '');
-}
-
-function addDatasetResearchTags(
-  counts: Map<string, { tag: string; count: number; category: DatasetResearchCategory }>,
-  raw: unknown,
-  category: DatasetResearchCategory,
-) {
-  const tags = String(raw || '').split(/\s+/).map((entry) => entry.trim()).filter(Boolean);
-  for (const tag of tags) {
-    const normalized = normalizeDatasetResearchTag(tag);
-    if (!normalized) continue;
-    const key = normalized.toLowerCase();
-    const existing = counts.get(key);
-    if (existing) existing.count += 1;
-    else counts.set(key, { tag: normalized, count: 1, category });
-  }
-}
-
-function datasetResearchTopTags(
-  counts: Map<string, { tag: string; count: number; category: DatasetResearchCategory }>,
-  postCount: number,
-  category?: DatasetResearchCategory,
-  limit = 40,
-) {
-  return Array.from(counts.values())
-    .filter((entry) => !category || entry.category === category)
-    .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag))
-    .slice(0, limit)
-    .map((entry) => ({
-      ...entry,
-      percent: postCount > 0 ? Math.round((entry.count / postCount) * 1000) / 10 : 0,
-    }));
-}
-
-function isDatasetResearchAdultTag(tag: string): boolean {
-  const normalized = String(tag || '').toLowerCase();
-  return [
-    'nude',
-    'naked',
-    'nipples',
-    'breasts',
-    'pussy',
-    'penis',
-    'sex',
-    'cum',
-    'masturbation',
-    'fellatio',
-    'paizuri',
-    'spread_legs',
-    'ass',
-    'anus',
-    'vaginal',
-    'anal',
-    'areola',
-    'erection',
-    'ejaculation',
-    'cum_in',
-  ].some((needle) => normalized === needle || normalized.includes(needle));
-}
-
-async function fetchDanbooruResearchPosts(tags: string, limit: number, apiConfig?: Awaited<ReturnType<typeof loadStoredApiKeys>>['danbooru']) {
-  const headers: Record<string, string> = { 'User-Agent': 'UmbraStudio/1.0 (dataset-research)' };
-  if (apiConfig?.username && apiConfig?.apiKey) {
-    headers.Authorization = `Basic ${Buffer.from(`${apiConfig.username}:${apiConfig.apiKey}`).toString('base64')}`;
-  }
-
-  const posts: any[] = [];
-  const safeLimit = Math.max(20, Math.min(500, Math.floor(limit || 200)));
-  const perPage = Math.min(100, safeLimit);
-  const pages = Math.ceil(safeLimit / perPage);
-  for (let page = 1; page <= pages; page += 1) {
-    const params = new URLSearchParams({
-      tags,
-      limit: String(Math.min(perPage, safeLimit - posts.length)),
-      page: String(page),
-    });
-    const res = await fetch(`https://danbooru.donmai.us/posts.json?${params}`, { headers });
-    if (!res.ok) {
-      const errorText = await res.text().catch(() => '');
-      throw new Error(`Danbooru research request failed: ${res.status}${errorText ? ` ${errorText.slice(0, 120)}` : ''}`);
-    }
-    const data = await res.json() as any[];
-    posts.push(...data);
-    if (data.length < perPage || posts.length >= safeLimit) break;
-  }
-  return posts.slice(0, safeLimit);
-}
-
-async function handleBooruDatasetResearch(url: URL): Promise<Response> {
-  const startedAt = Date.now();
-  try {
-    const source = String(url.searchParams.get('source') || 'danbooru').trim().toLowerCase();
-    if (source !== 'danbooru') {
-      return json({ error: 'Dataset research currently supports Danbooru metadata.' }, 400);
-    }
-    const mode = String(url.searchParams.get('mode') || 'character').trim().toLowerCase() as DatasetResearchMode;
-    const queryTag = normalizeDatasetResearchTag(url.searchParams.get('query'));
-    const extraTags = String(url.searchParams.get('extraTags') || '').trim().replace(/,/g, ' ').replace(/\s+/g, ' ');
-    const limit = Math.max(20, Math.min(500, Number(url.searchParams.get('limit') || 200)));
-    if (!queryTag) return json({ error: 'Missing research query' }, 400);
-
-    const apiKeys = await loadStoredApiKeys();
-    const searchTags = [queryTag, extraTags].filter(Boolean).join(' ').trim();
-    const posts = await fetchDanbooruResearchPosts(searchTags, limit, apiKeys.danbooru);
-    const counts = new Map<string, { tag: string; count: number; category: DatasetResearchCategory }>();
-    const ratings: Record<string, number> = {};
-
-    for (const post of posts) {
-      addDatasetResearchTags(counts, post.tag_string_general, 'general');
-      addDatasetResearchTags(counts, post.tag_string_character, 'character');
-      addDatasetResearchTags(counts, post.tag_string_copyright, 'copyright');
-      addDatasetResearchTags(counts, post.tag_string_artist, 'artist');
-      addDatasetResearchTags(counts, post.tag_string_meta, 'meta');
-      const rating = String(post.rating || '').trim() || 'unknown';
-      ratings[rating] = (ratings[rating] || 0) + 1;
-    }
-
-    const postCount = posts.length;
-    const allTop = datasetResearchTopTags(counts, postCount, undefined, 120);
-    const excludedCore = new Set([
-      queryTag.toLowerCase(),
-      ...extraTags.split(/\s+/).map((entry) => entry.toLowerCase()).filter(Boolean),
-    ]);
-    const identityCategory: DatasetResearchCategory = mode === 'artist' ? 'artist' : mode === 'character' ? 'character' : 'general';
-    const identityTags = datasetResearchTopTags(counts, postCount, identityCategory, 30).filter((entry) => !excludedCore.has(entry.tag.toLowerCase()));
-    const generalTags = datasetResearchTopTags(counts, postCount, 'general', 80).filter((entry) => !excludedCore.has(entry.tag.toLowerCase()));
-    const coreTags = generalTags.filter((entry) => entry.percent >= 55).slice(0, 24);
-    const variableTags = generalTags.filter((entry) => entry.percent >= 5 && entry.percent < 55).slice(0, 64);
-    const biasTags = allTop
-      .filter((entry) => entry.percent >= 35 && !excludedCore.has(entry.tag.toLowerCase()))
-      .slice(0, 36);
-    const adultTags = generalTags.filter((entry) => isDatasetResearchAdultTag(entry.tag)).slice(0, 64);
-
-    const response = json({
-      ok: true,
-      source,
-      mode,
-      query: queryTag,
-      searchTags,
-      postCount,
-      limit,
-      sourceUrl: `https://danbooru.donmai.us/posts?tags=${encodeURIComponent(searchTags)}`,
-      suggestedTrigger: queryTag,
-      buckets: {
-        identity: identityTags,
-        core: coreTags,
-        variable: variableTags,
-        bias: biasTags,
-        adult: adultTags,
-        general: datasetResearchTopTags(counts, postCount, 'general', 60),
-        character: datasetResearchTopTags(counts, postCount, 'character', 40),
-        artist: datasetResearchTopTags(counts, postCount, 'artist', 40),
-        copyright: datasetResearchTopTags(counts, postCount, 'copyright', 30),
-        meta: datasetResearchTopTags(counts, postCount, 'meta', 30),
-      },
-      ratings,
-    });
-    console.log(`[Booru] Research completed query="${searchTags}" posts=${postCount} ms=${Date.now() - startedAt}`);
-    return response;
-  } catch (error: any) {
-    console.error('[Booru] Dataset research error:', error);
-    return json({ error: error?.message || 'Dataset research failed' }, 500);
-  }
 }
 
 function sanitizeCsvFileName(value: unknown, fallback: string): string {
@@ -878,11 +716,11 @@ function buildDanbooruDatasetGeneratorCommand(body: Record<string, unknown>) {
   } else {
     const source = String(body.characterSource || 'danbooru');
     if (source === 'single') {
-      const tag = normalizeDatasetResearchTag(body.tag);
+      const tag = normalizeDanbooruTag(body.tag);
       if (!tag) throw new Error('Character tag is required.');
       args.push('--tag', tag);
     } else if (source === 'series') {
-      const series = normalizeDatasetResearchTag(body.seriesTag);
+      const series = normalizeDanbooruTag(body.seriesTag);
       if (!series) throw new Error('Series/copyright tag is required.');
       args.push('--series', series);
       pushNumber('--series-post-sample', body.seriesPostSample, 200, 1, 5000);
@@ -4653,6 +4491,7 @@ interface PowerPrompterQueueControllerPrompt {
 interface PowerPrompterQueueControllerRequest {
   requestId: string;
   origin: PowerPrompterQueueRequestOrigin;
+  queuePlacement: PowerPrompterQueuePlacement;
   mode: string;
   activeSetId: number;
   pipelineId: string;
@@ -5168,6 +5007,7 @@ function findPowerPrompterQueueControllerRequest(requestId: string): PowerPrompt
 function startPowerPrompterQueueControllerRequest(options: {
   requestId: string;
   origin?: unknown;
+  queuePlacement?: unknown;
   mode?: unknown;
   activeSetId?: unknown;
   pipeline: UmbraUiPipelineSelection;
@@ -5189,6 +5029,7 @@ function startPowerPrompterQueueControllerRequest(options: {
   const request: PowerPrompterQueueControllerRequest = {
     requestId,
     origin: normalizePowerPrompterQueueRequestOrigin(options.origin),
+    queuePlacement: normalizePowerPrompterQueuePlacement(options.queuePlacement),
     mode: String(options.mode || 'prompt').trim() || 'prompt',
     activeSetId,
     pipelineId: createUmbraUiPipelineTargetId(pipeline),
@@ -9688,6 +9529,7 @@ async function runBackendPowerPrompterPipelineQueue(
   startPowerPrompterQueueControllerRequest({
     requestId,
     origin: data?.queueOrigin ?? state.queueOrigin,
+    queuePlacement: data?.queuePlacement ?? state.queuePlacement,
     mode: data?.mode || state.mode || 'prompt',
     activeSetId: promptSetIds[0] ?? state.activeQueueSet ?? state.activeSetId ?? 1,
     pipeline: getPowerPrompterPipelineSelection(state, loaded),
@@ -10145,6 +9987,7 @@ function enqueueBackendPowerPrompterQueueWork(work: BackendPowerPrompterQueuedWo
   startPowerPrompterQueueControllerRequest({
     requestId,
     origin: work.data?.queueOrigin ?? state.queueOrigin,
+    queuePlacement,
     mode: work.data?.mode || state.mode || 'prompt',
     activeSetId: promptSetIds[0] ?? state.activeQueueSet ?? state.activeSetId ?? 1,
     pipeline: getPowerPrompterPipelineSelection(state, work.loaded),
@@ -20495,7 +20338,11 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
     const hasOverlayUpload = overlay && typeof overlay.name === 'string' && typeof overlay.arrayBuffer === 'function' && Number(overlay.size) > 0;
     const gallerySourcePath = resolveUmbraUiMediaToolSourcePath(form.get('sourcePath'), UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS, allowExternalOutput);
     const mode = String(form.get('mode') || '').trim().toLowerCase() === 'overlay' ? 'overlay' : 'mosaic';
-    const regionMode = String(form.get('regionMode') || '').trim().toLowerCase() === 'detect' ? 'detect' : 'manual';
+    const regionMode = String(form.get('regionMode') || '').trim().toLowerCase();
+    const autoDetectField = form.get('autoDetect');
+    const autoDetect = autoDetectField === null
+      ? regionMode === 'detect' || regionMode === 'combined'
+      : String(autoDetectField).trim().toLowerCase() === 'true';
     const savedOverlayPath = mode === 'overlay' ? resolveUmbraUiWatermarkAssetPath(form.get('overlayPath')) : '';
     if (!hasSourceUpload && !gallerySourcePath) {
       return json({ success: false, error: 'Choose an image to censor.' }, 400);
@@ -20532,7 +20379,41 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
       .split(',')
       .map((entry) => entry.trim())
       .filter((entry): entry is UmbraUiCensorTarget => allowedTargets.has(entry as UmbraUiCensorTarget));
-    const detections = regionMode === 'detect'
+    const rawManualRegions = String(form.get('manualRegions') || '').trim();
+    let manualRegions: UmbraUiCensorRegion[] = [];
+    if (rawManualRegions) {
+      let parsedManualRegions: unknown;
+      try {
+        parsedManualRegions = JSON.parse(rawManualRegions);
+      } catch {
+        return json({ success: false, error: 'Manual censor regions are invalid.' }, 400);
+      }
+      if (!Array.isArray(parsedManualRegions)) {
+        return json({ success: false, error: 'Manual censor regions must be a list.' }, 400);
+      }
+      manualRegions = parsedManualRegions.slice(0, 256).flatMap((entry: any) => {
+        const region = {
+          x: Number(entry?.x),
+          y: Number(entry?.y),
+          width: Number(entry?.width),
+          height: Number(entry?.height),
+        };
+        return Object.values(region).every(Number.isFinite) && region.width > 0 && region.height > 0
+          ? [region]
+          : [];
+      });
+    } else if (regionMode !== 'detect') {
+      const legacyRegion = {
+        x: Number(form.get('x')),
+        y: Number(form.get('y')),
+        width: Number(form.get('width')),
+        height: Number(form.get('height')),
+      };
+      if (Object.values(legacyRegion).every(Number.isFinite) && legacyRegion.width > 0 && legacyRegion.height > 0) {
+        manualRegions = [legacyRegion];
+      }
+    }
+    const detections = autoDetect
       ? await detectUmbraUiCensorRegions({
         rootDir: ROOT_DIR,
         sourceDir: SOURCE_DIR,
@@ -20559,13 +20440,7 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
       outputPath,
       mode,
       overlayPath: mode === 'overlay' ? overlayPath : undefined,
-      region: {
-        x: Number(form.get('x')),
-        y: Number(form.get('y')),
-        width: Number(form.get('width')),
-        height: Number(form.get('height')),
-      },
-      regions: regionMode === 'detect' ? detections : undefined,
+      regions: [...detections, ...manualRegions],
       mosaicSize: Number(form.get('mosaicSize')),
       exportSettings: {
         resizeEnabled: String(form.get('resizeEnabled') || '').trim().toLowerCase() === 'true',
@@ -31376,8 +31251,74 @@ const server = Bun.serve<any>({
         }
       }
 
-      if (path === '/api/booru/research' && method === 'GET') {
-        return handleBooruDatasetResearch(url);
+      if (path === '/api/booru/corpus/status' && method === 'GET') {
+        let status = danbooruTagCorpusService.getStatus();
+        try {
+          if (!danbooruTagCorpusService.shouldRefreshAvailablePostCount(status)) {
+            return json({ ok: true, status });
+          }
+          const apiKeys = await loadStoredApiKeys();
+          const username = String(apiKeys.danbooru?.username || '').trim();
+          status = await danbooruTagCorpusService.refreshAvailablePostCount({
+            minimumScore: status.minimumScore,
+            authorization: await getDataForgeDanbooruAuthorization(),
+            userAgent: username
+              ? `UmbraStudio/1.0 (Data Forge corpus count; Danbooru user ${username})`
+              : 'UmbraStudio/1.0 (Data Forge corpus count)',
+          });
+        } catch {
+          // Keep the cached/local status usable while Danbooru is unavailable.
+        }
+        return json({ ok: true, status });
+      }
+
+      if (path === '/api/booru/corpus/start' && method === 'POST') {
+        try {
+          const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+          const apiKeys = await loadStoredApiKeys();
+          const username = String(apiKeys.danbooru?.username || '').trim();
+          const status = await danbooruTagCorpusService.start({
+            targetPosts: Number(body.targetPosts || 2_000_000),
+            allPosts: body.allPosts === true,
+            minimumScore: Number(body.minimumScore || 0),
+            rebuild: body.rebuild === true,
+            authorization: await getDataForgeDanbooruAuthorization(),
+            userAgent: username
+              ? `UmbraStudio/1.0 (Data Forge corpus; Danbooru user ${username})`
+              : 'UmbraStudio/1.0 (Data Forge corpus)',
+          });
+          return json({ ok: true, status });
+        } catch (error: any) {
+          return json({ ok: false, error: error?.message || 'Could not start the Danbooru relation corpus.' }, 400);
+        }
+      }
+
+      if (path === '/api/booru/corpus/pause' && method === 'POST') {
+        return json({ ok: true, status: danbooruTagCorpusService.pause() });
+      }
+
+      if (path === '/api/booru/corpus/reset' && method === 'POST') {
+        return json({ ok: true, status: danbooruTagCorpusService.reset() });
+      }
+
+      if (path === '/api/booru/corpus/related' && method === 'GET') {
+        try {
+          const tags = String(url.searchParams.get('tags') || '')
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter(Boolean);
+          const result = danbooruTagCorpusService.getRelatedTags({
+            tags,
+            classifier: url.searchParams.get('classifier') || 'smart',
+            includeExplicit: url.searchParams.get('includeExplicit') === '1',
+            limit: Number(url.searchParams.get('limit') || 80),
+            minimumSupport: Number(url.searchParams.get('minimumSupport') || 20),
+            sampleLimit: Number(url.searchParams.get('sampleLimit') || 500_000),
+          });
+          return json({ ok: true, ...result });
+        } catch (error: any) {
+          return json({ ok: false, error: error?.message || 'Could not calculate related Danbooru tags.' }, 400);
+        }
       }
 
       if (path === '/api/data-forge/wildcard-generator/tags' && method === 'GET') {

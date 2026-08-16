@@ -1,8 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
-import { GERMAN_UI_TEXT } from '../frontend/src/i18n/germanUiCatalog';
-import { translateLegacyUiText } from '../frontend/src/i18n/legacyUiLocalization';
+import { hasLegacyUiTranslation, translateLegacyUiText } from '../frontend/src/i18n/legacyUiLocalization';
 
 const COMPONENT_ROOT = path.resolve('frontend/src/components');
 const MINIMUM_STATIC_COVERAGE = 95;
@@ -58,8 +57,7 @@ function walk(directory: string) {
 walk(COMPONENT_ROOT);
 
 function hasGermanTranslation(value: string): boolean {
-  const normalized = value.trim().toLocaleLowerCase('en-US');
-  return GERMAN_UI_TEXT.has(normalized) || translateLegacyUiText('de', value) !== value;
+  return hasLegacyUiTranslation('de', value) || translateLegacyUiText('de', value) !== value;
 }
 
 const untranslated = [...values]

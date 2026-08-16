@@ -42,6 +42,57 @@ const sizeClasses = {
   md: 'h-10 px-3 text-xs',
 } as const;
 
+export function shouldUseTouchSelectorPresentation({
+  remoteMode,
+  coarsePointer,
+  viewportWidth,
+}: {
+  remoteMode: string;
+  coarsePointer: boolean;
+  viewportWidth: number;
+}): boolean {
+  if (remoteMode === 'phone' || remoteMode === 'tablet') return true;
+  return coarsePointer && viewportWidth <= 1366;
+}
+
+function readTouchSelectorPresentation(): boolean {
+  if (typeof window === 'undefined') return false;
+  const remoteMode = document.documentElement.dataset.umbraRemoteMode
+    || new URLSearchParams(window.location.search).get('remoteMode')
+    || '';
+  return shouldUseTouchSelectorPresentation({
+    remoteMode,
+    coarsePointer: window.matchMedia('(pointer: coarse)').matches,
+    viewportWidth: window.innerWidth,
+  });
+}
+
+function useTouchSelectorPresentation(): boolean {
+  const [touchPresentation, setTouchPresentation] = React.useState(readTouchSelectorPresentation);
+
+  React.useEffect(() => {
+    const coarsePointerQuery = window.matchMedia('(pointer: coarse)');
+    const update = () => setTouchPresentation(readTouchSelectorPresentation());
+    const observer = new MutationObserver(update);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-umbra-remote-mode'],
+    });
+    coarsePointerQuery.addEventListener('change', update);
+    window.addEventListener('resize', update);
+    window.addEventListener('popstate', update);
+    update();
+    return () => {
+      observer.disconnect();
+      coarsePointerQuery.removeEventListener('change', update);
+      window.removeEventListener('resize', update);
+      window.removeEventListener('popstate', update);
+    };
+  }, []);
+
+  return touchPresentation;
+}
+
 export function UmbraSelect({
   value,
   options,
@@ -65,6 +116,7 @@ export function UmbraSelect({
   const triggerRef = React.useRef<HTMLButtonElement | null>(null);
   const [open, setOpen] = React.useState(false);
   const [position, setPosition] = React.useState({ x: 0, y: 0 });
+  const touchPresentation = useTouchSelectorPresentation();
   const selectedOption = React.useMemo(
     () => options.find((option) => option.value === value),
     [options, value],
@@ -108,7 +160,10 @@ export function UmbraSelect({
   const displayLabel = selectedOption?.label || (value ? value : placeholder);
 
   return (
-    <div className={cn('min-w-0', className)}>
+    <div
+      className={cn('min-w-0', className)}
+      data-umbra-select-presentation={touchPresentation ? 'touch-sheet' : 'anchored'}
+    >
       <button
         ref={triggerRef}
         id={triggerId}
@@ -155,6 +210,7 @@ export function UmbraSelect({
         boundarySelector={boundarySelector}
         title={menuTitle || ariaLabel}
         subtitle={menuSubtitle || (selectedOption ? `Current: ${selectedOption.label}` : 'Choose an option')}
+        presentation={touchPresentation ? 'touch-sheet' : 'anchored'}
       />
     </div>
   );

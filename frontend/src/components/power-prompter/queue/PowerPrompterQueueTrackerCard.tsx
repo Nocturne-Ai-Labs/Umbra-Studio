@@ -200,7 +200,8 @@ export const PowerPrompterQueueTrackerCard = React.memo(function PowerPrompterQu
         <div className="h-full overflow-y-auto pr-1 custom-scrollbar flex flex-col gap-1">
           {queueSetGroups.length > 0 ? queueSetGroups.map((setGroup) => {
             const setKey = String(setGroup.id || setGroup.setId);
-            const setExpanded = expandedQueueSets[setKey] ?? false;
+            const setExpansionKey = String(setGroup.setId);
+            const setExpanded = expandedQueueSets[setExpansionKey] ?? expandedQueueSets[setKey] ?? false;
               const setCanCancel = setGroup.pending > 0 || setGroup.running > 0 || (setGroup.completed + setGroup.failed < setGroup.total);
             const setProgressPercent = Math.max(0, Math.min(100, setGroup.progressRatio * 100));
             const setProgressWidth = `${setProgressPercent > 0 ? Math.max(4, setProgressPercent) : 0}%`;
@@ -217,7 +218,7 @@ export const PowerPrompterQueueTrackerCard = React.memo(function PowerPrompterQu
                 <div className="px-1.5 pt-1.5 pb-1">
                   <div className="flex items-center gap-1.5">
                     <button
-                      onClick={() => onToggleSetExpanded(setKey)}
+                      onClick={() => onToggleSetExpanded(setExpansionKey)}
                       className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/20 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-cyan-200 transition-colors hover:border-cyan-300/40 hover:text-cyan-100"
                       title={setExpanded ? 'Collapse set' : 'Expand set'}
                     >

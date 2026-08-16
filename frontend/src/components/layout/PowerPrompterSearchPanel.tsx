@@ -5,8 +5,10 @@ import {
   ChevronUp,
   Copy,
   Database,
+  DatabaseZap,
   ExternalLink,
   Loader2,
+  Network,
   Plus,
   RefreshCw,
   Search,
@@ -43,6 +45,32 @@ interface ClassifierSummary {
   description: string;
   explicit: boolean;
   count: number;
+}
+
+interface RelationCorpusStatus {
+  state: 'empty' | 'running' | 'paused' | 'completed' | 'failed';
+  mode: 'sample' | 'all';
+  targetPosts: number;
+  availablePosts: number;
+  indexedPosts: number;
+  scannedPosts: number;
+}
+
+interface RelatedSuggestion {
+  tag: string;
+  cooccurrenceCount: number;
+  conditionalPercent: number;
+  corpusPostCount: number;
+  lift: number;
+  classifiers: string[];
+  explicit: boolean;
+}
+
+interface RelatedResult {
+  tags: string[];
+  matchedPostCount: number;
+  sampledPostCount: number;
+  suggestions: RelatedSuggestion[];
 }
 
 interface PowerPrompterSearchPanelProps {
@@ -126,6 +154,11 @@ export const PowerPrompterSearchPanel = React.memo(({
   const [classifier, setClassifier] = useState('all');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [selectedItems, setSelectedItems] = useState<SearchResult[]>([]);
+  const [suggestionClassifier, setSuggestionClassifier] = useState('smart');
+  const [suggestionResult, setSuggestionResult] = useState<RelatedResult | null>(null);
+  const [suggestionLoading, setSuggestionLoading] = useState(false);
+  const [suggestionError, setSuggestionError] = useState('');
+  const [relationCorpusStatus, setRelationCorpusStatus] = useState<RelationCorpusStatus | null>(null);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [classifiers, setClassifiers] = useState<ClassifierSummary[]>([]);
   const [csvList, setCsvList] = useState<{ tags: string[]; characters: string[] }>({ tags: [], characters: [] });
@@ -146,6 +179,7 @@ export const PowerPrompterSearchPanel = React.memo(({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: SearchResult } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const showToast = useStore((state) => state.showToast);
+  const setActiveWorkspace = useStore((state) => state.setActiveWorkspace);
   const explicitCatalogEnabled = useStore((state) => state.appSettings['ui.tagCatalogExplicitEnabled'] === true);
   const setAppSetting = useStore((state) => state.setAppSetting);
   const effectiveDrawerOpen = drawerOpen ?? internalDrawerOpen;
@@ -153,6 +187,11 @@ export const PowerPrompterSearchPanel = React.memo(({
     if (drawerOpen === undefined) setInternalDrawerOpen(open);
     onDrawerOpenChange?.(open);
   }, [drawerOpen, onDrawerOpenChange]);
+  const suggestionSeeds = useMemo(
+    () => selectedItems.filter((item) => item.type === 'tag'),
+    [selectedItems],
+  );
+  const relationCorpusReady = (relationCorpusStatus?.indexedPosts || 0) > 0;
 
   const loadSettings = useCallback(async () => {
     try {
@@ -214,6 +253,65 @@ export const PowerPrompterSearchPanel = React.memo(({
     if (explicitCatalogEnabled) return;
     setSelectedItems((current) => current.filter((item) => item.explicit !== true));
   }, [explicitCatalogEnabled]);
+
+  useEffect(() => {
+    if (drawerMode && !effectiveDrawerOpen) return undefined;
+    let cancelled = false;
+    const loadStatus = async () => {
+      try {
+        const response = await fetch('/api/booru/corpus/status', { cache: 'no-store' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(String(payload?.error || 'Could not load relation corpus status.'));
+        if (!cancelled) setRelationCorpusStatus(payload.status || null);
+      } catch {
+        if (!cancelled) setRelationCorpusStatus(null);
+      }
+    };
+    void loadStatus();
+    const timer = window.setInterval(() => void loadStatus(), relationCorpusStatus?.state === 'running' ? 3_000 : 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [drawerMode, effectiveDrawerOpen, relationCorpusStatus?.state]);
+
+  useEffect(() => {
+    if (activeView !== 'catalog' || suggestionSeeds.length === 0 || !relationCorpusReady) {
+      setSuggestionResult(null);
+      setSuggestionError('');
+      return undefined;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setSuggestionLoading(true);
+      setSuggestionError('');
+      setSuggestionResult(null);
+      try {
+        const params = new URLSearchParams({
+          tags: suggestionSeeds.map((entry) => entry.tag).join(','),
+          classifier: suggestionClassifier,
+          includeExplicit: explicitCatalogEnabled ? '1' : '0',
+          limit: '60',
+          minimumSupport: '20',
+          sampleLimit: '50000',
+        });
+        const response = await fetch(`/api/booru/corpus/related?${params}`, { cache: 'no-store', signal: controller.signal });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(String(payload?.error || 'Could not calculate related tags.'));
+        setSuggestionResult(payload as RelatedResult);
+      } catch (nextError) {
+        if (controller.signal.aborted) return;
+        setSuggestionResult(null);
+        setSuggestionError(nextError instanceof Error ? nextError.message : 'Could not calculate related tags.');
+      } finally {
+        if (!controller.signal.aborted) setSuggestionLoading(false);
+      }
+    }, 180);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [activeView, explicitCatalogEnabled, relationCorpusReady, suggestionClassifier, suggestionSeeds]);
 
   useEffect(() => {
     if (activeView !== 'catalog' || enabledCSVs.length === 0) {
@@ -357,6 +455,17 @@ export const PowerPrompterSearchPanel = React.memo(({
     setSelectedItems([]);
     showToast(`Inserted ${values.length} catalog ${values.length === 1 ? 'entry' : 'entries'}`, 'success');
   }, [onInsert, showToast]);
+
+  const openCorpusBuilder = useCallback(() => {
+    try {
+      window.sessionStorage.setItem('umbra:data-forge-tab', 'corpus');
+      window.dispatchEvent(new CustomEvent('umbra:data-forge-open-tab', { detail: { tab: 'corpus' } }));
+    } catch {
+      // Data Forge still opens even if session storage is unavailable.
+    }
+    setActiveWorkspace('board');
+    if (drawerMode) setDrawerOpen(false);
+  }, [drawerMode, setActiveWorkspace, setDrawerOpen]);
 
   const handleScroll = () => {
     if (!scrollRef.current || loading || !hasMore) return;
@@ -577,9 +686,68 @@ export const PowerPrompterSearchPanel = React.memo(({
             </div>
 
             {selectedItems.length > 0 ? (
-              <div className="custom-scrollbar mt-2 flex max-h-16 flex-wrap gap-1 overflow-y-auto rounded-sm border border-white/[0.08] bg-black/20 p-1.5">
+              <div className="custom-scrollbar mt-2 flex max-h-20 flex-wrap items-center gap-1 overflow-y-auto rounded-sm border border-white/[0.08] bg-black/20 p-1.5">
                 {selectedItems.map((item) => <button key={getResultKey(item)} type="button" onClick={() => toggleItem(item)} className="inline-flex h-6 items-center gap-1 rounded-sm border border-cyan-300/20 bg-cyan-500/[0.08] px-1.5 font-mono text-[9px] text-cyan-100" title={`Remove ${item.tag} from selection`}>{cleanTag(item.tag)}<X className="h-2.5 w-2.5" /></button>)}
               </div>
+            ) : null}
+
+            {suggestionSeeds.length > 0 ? (
+              <section data-umbra-tag-suggestion-rail className="mt-2 overflow-hidden rounded-sm border border-fuchsia-300/15 bg-fuchsia-500/[0.025]">
+                <div className="flex min-h-8 flex-wrap items-center gap-2 border-b border-white/[0.06] px-2.5 py-1.5">
+                  <span className="inline-flex shrink-0 items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.1em] text-fuchsia-100">
+                    <Network className="h-3 w-3" /> Suggestions
+                  </span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-600" title={suggestionSeeds.map((item) => cleanTag(item.tag)).join(' + ')}>
+                    For {suggestionSeeds.map((item) => cleanTag(item.tag)).join(' + ')}
+                  </span>
+                  <div className="flex shrink-0 gap-1">
+                    {(['smart', 'all'] as const).map((value) => (
+                      <button key={value} type="button" aria-pressed={suggestionClassifier === value} onClick={() => setSuggestionClassifier(value)} className={`h-6 rounded-sm border px-2 text-[8px] font-black uppercase tracking-[0.08em] ${suggestionClassifier === value ? 'border-fuchsia-300/30 bg-fuchsia-500/10 text-fuchsia-100' : 'border-white/10 text-zinc-600 hover:text-zinc-300'}`}>
+                        {value === 'smart' ? 'Smart' : 'All'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="custom-scrollbar flex min-h-9 items-center gap-1.5 overflow-x-auto px-2 py-1.5">
+                  {!relationCorpusStatus ? (
+                    <span className="shrink-0 text-[9px] text-zinc-600">Checking corpus...</span>
+                  ) : relationCorpusStatus.indexedPosts === 0 ? (
+                    <button type="button" onClick={openCorpusBuilder} className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-sm border border-cyan-300/25 bg-cyan-500/10 px-2 text-[8px] font-black uppercase tracking-[0.08em] text-cyan-100"><DatabaseZap className="h-3 w-3" /> Build Corpus</button>
+                  ) : suggestionError ? (
+                    <span className="shrink-0 text-[9px] text-amber-200/75">{suggestionError}</span>
+                  ) : suggestionLoading ? (
+                    <span className="inline-flex shrink-0 items-center gap-1.5 text-[9px] text-zinc-500"><Loader2 className="h-3 w-3 animate-spin" /> Finding related tags...</span>
+                  ) : !suggestionResult || suggestionResult.suggestions.length === 0 ? (
+                    <span className="shrink-0 text-[9px] text-zinc-600">No supported relations found.</span>
+                  ) : suggestionResult.suggestions.map((suggestion) => {
+                    const item: SearchResult = {
+                      tag: suggestion.tag,
+                      category: 0,
+                      count: suggestion.corpusPostCount,
+                      classifiers: suggestion.classifiers,
+                      explicit: suggestion.explicit,
+                      source: 'Danbooru Relation Corpus',
+                      type: 'tag',
+                    };
+                    const selected = selectedKeys.has(getResultKey(item));
+                    return (
+                      <button
+                        key={suggestion.tag}
+                        type="button"
+                        aria-pressed={selected}
+                        data-umbra-tag-suggestion={suggestion.tag}
+                        onClick={() => toggleItem(item)}
+                        className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-sm border px-2 font-mono text-[9px] transition ${selected ? 'border-cyan-300/35 bg-cyan-500/12 text-cyan-100' : suggestion.explicit ? 'border-red-300/20 bg-red-500/[0.05] text-red-100/80 hover:border-red-300/35' : 'border-fuchsia-300/20 bg-fuchsia-500/[0.05] text-zinc-300 hover:border-fuchsia-300/40 hover:text-fuchsia-50'}`}
+                        title={`${suggestion.conditionalPercent.toFixed(1)}% together · ${suggestion.lift.toFixed(2)}x lift · ${new Intl.NumberFormat().format(suggestion.cooccurrenceCount)} matching posts`}
+                      >
+                        {selected ? <Check className="h-3 w-3" /> : <Plus className="h-3 w-3 opacity-60" />}
+                        {cleanTag(suggestion.tag)}
+                        <span className="text-[8px] opacity-55">{suggestion.conditionalPercent.toFixed(0)}%</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
             ) : null}
           </div>
 

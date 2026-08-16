@@ -14,6 +14,7 @@ import {
   FileText,
   Layers3,
   Loader2,
+  Network,
   Pencil,
   Plus,
   RefreshCw,
@@ -64,6 +65,37 @@ type WildcardGroup = {
 
 type TagCatalogDestination = 'fixed' | 'excluded' | `group:${string}`;
 type TagCatalogView = 'catalog' | 'sources';
+
+type RelatedCorpusSuggestion = {
+  tag: string;
+  cooccurrenceCount: number;
+  conditionalPercent: number;
+  corpusPostCount: number;
+  lift: number;
+  score: number;
+  classifiers: string[];
+  explicit: boolean;
+};
+
+type RelatedCorpusResult = {
+  tags: string[];
+  corpusPostCount: number;
+  matchedPostCount: number;
+  sampledPostCount: number;
+  truncated: boolean;
+  classifier: string;
+  suggestions: RelatedCorpusSuggestion[];
+};
+
+type RelationCorpusStatus = {
+  state: 'empty' | 'running' | 'paused' | 'completed' | 'failed';
+  mode: 'sample' | 'all';
+  targetPosts: number;
+  availablePosts: number;
+  indexedPosts: number;
+  scannedPosts: number;
+  progress: number;
+};
 
 type PowerPrompterCatalogItem = {
   tag?: unknown;
@@ -500,11 +532,13 @@ function WildcardTagCatalogDrawer({
   onAddFixed,
   onAddExcluded,
   onAddGroupBundle,
+  onOpenCorpus,
 }: {
   groups: WildcardGroup[];
   onAddFixed: (tags: WildcardTag[]) => void;
   onAddExcluded: (tags: WildcardTag[]) => void;
   onAddGroupBundle: (groupId: string, tags: WildcardTag[]) => void;
+  onOpenCorpus?: () => void;
 }) {
   const showToast = useStore((state) => state.showToast);
   const explicitCatalogEnabled = useStore((state) => state.appSettings['ui.tagCatalogExplicitEnabled'] === true);
@@ -521,6 +555,11 @@ function WildcardTagCatalogDrawer({
   ));
   const [items, setItems] = React.useState<WildcardTag[]>([]);
   const [selectedTags, setSelectedTags] = React.useState<WildcardTag[]>([]);
+  const [relatedClassifier, setRelatedClassifier] = React.useState('smart');
+  const [relatedResult, setRelatedResult] = React.useState<RelatedCorpusResult | null>(null);
+  const [relationCorpusStatus, setRelationCorpusStatus] = React.useState<RelationCorpusStatus | null>(null);
+  const [relatedLoading, setRelatedLoading] = React.useState(false);
+  const [relatedError, setRelatedError] = React.useState('');
   const [keepSelection, setKeepSelection] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [csvLoading, setCsvLoading] = React.useState(false);
@@ -529,6 +568,8 @@ function WildcardTagCatalogDrawer({
   const [error, setError] = React.useState('');
   const [refreshRevision, setRefreshRevision] = React.useState(0);
   const catalogSettingsRef = React.useRef<Record<string, unknown>>({});
+  const relatedSeeds = React.useMemo(() => selectedTags, [selectedTags]);
+  const relationCorpusReady = (relationCorpusStatus?.indexedPosts || 0) > 0;
 
   const loadCsvSources = React.useCallback(async (showFeedback = false, rebuildIndex = false) => {
     setCsvLoading(true);
@@ -600,6 +641,27 @@ function WildcardTagCatalogDrawer({
   }, [loadCsvSources, open]);
 
   React.useEffect(() => {
+    if (!open) return undefined;
+    let cancelled = false;
+    const loadStatus = async () => {
+      try {
+        const response = await fetch('/api/booru/corpus/status', { cache: 'no-store' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(String(payload?.error || 'Could not load relation corpus status.'));
+        if (!cancelled) setRelationCorpusStatus(payload.status || null);
+      } catch {
+        if (!cancelled) setRelationCorpusStatus(null);
+      }
+    };
+    void loadStatus();
+    const timer = window.setInterval(() => void loadStatus(), relationCorpusStatus?.state === 'running' ? 3_000 : 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [open, relationCorpusStatus?.state]);
+
+  React.useEffect(() => {
     if (!destination.startsWith('group:')) return;
     const groupId = destination.slice('group:'.length);
     if (groups.some((group) => group.id === groupId)) return;
@@ -607,7 +669,7 @@ function WildcardTagCatalogDrawer({
   }, [destination, groups]);
 
   React.useEffect(() => {
-    if (!open || activeView !== 'catalog' || enabledCSVs.length === 0) {
+    if (!open || activeView === 'sources' || enabledCSVs.length === 0) {
       setClassifiers([]);
       setClassifier('all');
       return undefined;
@@ -684,6 +746,47 @@ function WildcardTagCatalogDrawer({
     };
   }, [activeView, category, classifier, enabledCSVs, explicitCatalogEnabled, open, query, refreshRevision]);
 
+  React.useEffect(() => {
+    if (!open || activeView !== 'catalog' || relatedSeeds.length === 0 || !relationCorpusReady) {
+      setRelatedResult(null);
+      setRelatedError('');
+      return undefined;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setRelatedLoading(true);
+      setRelatedError('');
+      setRelatedResult(null);
+      try {
+        const params = new URLSearchParams({
+          tags: relatedSeeds.map((entry) => entry.tag).join(','),
+          classifier: relatedClassifier,
+          includeExplicit: explicitCatalogEnabled ? '1' : '0',
+          limit: '60',
+          minimumSupport: '20',
+          sampleLimit: '50000',
+        });
+        const response = await fetch(`/api/booru/corpus/related?${params}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(String(payload?.error || 'Could not calculate related tags.'));
+        setRelatedResult(payload as RelatedCorpusResult);
+      } catch (nextError) {
+        if (controller.signal.aborted) return;
+        setRelatedResult(null);
+        setRelatedError(nextError instanceof Error ? nextError.message : 'Could not calculate related tags.');
+      } finally {
+        if (!controller.signal.aborted) setRelatedLoading(false);
+      }
+    }, 180);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [activeView, explicitCatalogEnabled, open, relatedClassifier, relatedSeeds, relationCorpusReady]);
+
   const classifierLabels = React.useMemo(
     () => new Map(classifiers.map((entry) => [entry.id, entry.label])),
     [classifiers],
@@ -754,7 +857,7 @@ function WildcardTagCatalogDrawer({
           <div className="min-w-0">
             <h2 className="truncate text-[10px] font-black uppercase tracking-[0.15em] text-zinc-100">Danbooru Tag Catalog</h2>
             <div className="font-mono text-[9px] text-zinc-600">
-              {loading ? 'Loading...' : `${items.length} shown`} · {selectedTags.length} selected · {enabledCSVs.length} CSV
+              {loading ? 'Loading...' : `${items.length} shown`} / {selectedTags.length} selected / {enabledCSVs.length} CSV
             </div>
           </div>
         </div>
@@ -886,6 +989,70 @@ function WildcardTagCatalogDrawer({
               </button>
             ))}
           </div>
+        ) : null}
+
+        {relatedSeeds.length > 0 ? (
+          <section data-umbra-wildcard-suggestion-rail className="mt-2 overflow-hidden rounded-sm border border-fuchsia-300/15 bg-fuchsia-500/[0.025]">
+            <div className="flex min-h-8 flex-wrap items-center gap-2 border-b border-white/[0.06] px-2.5 py-1.5">
+              <span className="inline-flex shrink-0 items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.1em] text-fuchsia-100">
+                <Network className="h-3 w-3" /> Suggestions
+              </span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-600" title={relatedSeeds.map((tag) => tag.tag).join(' + ')}>
+                For {relatedSeeds.map((tag) => tag.tag).join(' + ')}
+              </span>
+              <UmbraSelectControl
+                value={relatedClassifier}
+                onChange={(event) => setRelatedClassifier(event.target.value)}
+                aria-label="Suggestion tag classifier"
+                menuTitle="Suggestion Type"
+                className="h-7 w-40 shrink-0 text-[9px]"
+              >
+                <option value="smart">Smart Match</option>
+                <option value="all">All Types</option>
+                {classifiers.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
+              </UmbraSelectControl>
+            </div>
+            <div className="custom-scrollbar flex min-h-9 items-center gap-1.5 overflow-x-auto px-2 py-1.5">
+              {!relationCorpusStatus ? (
+                <span className="shrink-0 text-[9px] text-zinc-600">Checking corpus...</span>
+              ) : relationCorpusStatus.indexedPosts === 0 ? (
+                <button type="button" onClick={() => { setOpen(false); onOpenCorpus?.(); }} className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-sm border border-cyan-300/25 bg-cyan-500/10 px-2 text-[8px] font-black uppercase tracking-[0.08em] text-cyan-100"><DatabaseZap className="h-3 w-3" /> Build Corpus</button>
+              ) : relatedError ? (
+                <span className="shrink-0 text-[9px] text-amber-200/75">{relatedError}</span>
+              ) : relatedLoading ? (
+                <span className="inline-flex shrink-0 items-center gap-1.5 text-[9px] text-zinc-500"><Loader2 className="h-3 w-3 animate-spin" /> Finding related tags...</span>
+              ) : !relatedResult || relatedResult.suggestions.length === 0 ? (
+                <span className="shrink-0 text-[9px] text-zinc-600">No supported relations found.</span>
+              ) : relatedResult.suggestions.map((suggestion) => {
+                const tag: WildcardTag = {
+                  tag: suggestion.tag,
+                  category: 0,
+                  postCount: suggestion.corpusPostCount,
+                  classifiers: suggestion.classifiers,
+                  explicit: suggestion.explicit,
+                  source: 'local',
+                  catalogSource: 'Danbooru Relation Corpus',
+                  catalogType: 'tag',
+                };
+                const selected = selectedKeys.has(tag.tag.toLowerCase());
+                return (
+                  <button
+                    key={tag.tag}
+                    type="button"
+                    aria-pressed={selected}
+                    data-umbra-wildcard-suggestion={tag.tag}
+                    onClick={() => toggleTag(tag)}
+                    className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-sm border px-2 font-mono text-[9px] transition ${selected ? 'border-cyan-300/35 bg-cyan-500/12 text-cyan-100' : suggestion.explicit ? 'border-red-300/20 bg-red-500/[0.05] text-red-100/80 hover:border-red-300/35' : 'border-fuchsia-300/20 bg-fuchsia-500/[0.05] text-zinc-300 hover:border-fuchsia-300/40 hover:text-fuchsia-50'}`}
+                    title={`${suggestion.conditionalPercent.toFixed(1)}% together · ${suggestion.lift.toFixed(2)}x lift · ${new Intl.NumberFormat().format(suggestion.cooccurrenceCount)} matching posts`}
+                  >
+                    {selected ? <Check className="h-3 w-3" /> : <Plus className="h-3 w-3 opacity-60" />}
+                    {tag.tag}
+                    <span className="text-[8px] opacity-55">{suggestion.conditionalPercent.toFixed(0)}%</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
         ) : null}
       </div>
 
@@ -1182,7 +1349,7 @@ function GroupPanel({
   );
 }
 
-export function WildcardGeneratorTab() {
+export function WildcardGeneratorTab({ onOpenCorpus }: { onOpenCorpus?: () => void }) {
   const showToast = useStore((state) => state.showToast);
   const [name, setName] = React.useState('');
   const [folder, setFolder] = React.useState('Generated');
@@ -1486,6 +1653,7 @@ export function WildcardGeneratorTab() {
 
       <WildcardTagCatalogDrawer
         groups={groups}
+        onOpenCorpus={onOpenCorpus}
         onAddFixed={(tags) => setBaseTags((current) => appendUniqueTags(current, tags))}
         onAddExcluded={(tags) => setForbiddenTags((current) => appendUniqueTags(current, tags))}
         onAddGroupBundle={addCatalogBundleToGroup}

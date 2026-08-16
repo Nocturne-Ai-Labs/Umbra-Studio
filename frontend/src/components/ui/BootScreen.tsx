@@ -64,8 +64,6 @@ const getMatrixRainTokens = (content: BootRainContent) => {
   return MATRIX_CHARS.split('');
 };
 
-const KANJI_RAIN_SIGNATURE = 'Umbra Studio';
-
 // ============================================
 // MATRIX RAIN ANIMATION
 // ============================================
@@ -106,9 +104,7 @@ const MatrixRain = ({ accent, depth, content }: { accent: string; depth: number;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       for (let i = 0; i < drops.length; i++) {
-        const token = content === 'kanji' && Math.random() < 0.008
-          ? KANJI_RAIN_SIGNATURE
-          : tokens[Math.floor(Math.random() * tokens.length)];
+        const token = tokens[Math.floor(Math.random() * tokens.length)];
         const x = i * columnWidth + columnOffsets[i] - (isTokenRain ? columnWidth : 0);
         const y = drops[i] * fontSize;
 

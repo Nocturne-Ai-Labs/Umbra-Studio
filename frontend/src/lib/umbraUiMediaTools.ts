@@ -87,7 +87,13 @@ export async function submitUmbraUiImageCensor(options: {
   source?: File;
   sourcePath?: string;
   mode: 'mosaic' | 'overlay';
-  regionMode: 'manual' | 'detect';
+  autoDetect: boolean;
+  manualRegions: Array<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }>;
   targets: Array<'femaleNipples' | 'maleGenitals' | 'femaleGenitals'>;
   detectionThreshold: number;
   detectionPadding: number;
@@ -95,10 +101,6 @@ export async function submitUmbraUiImageCensor(options: {
   overlayPath?: string;
   outputFolder: string;
   sequenceNumber: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
   mosaicSize: number;
   resizeEnabled: boolean;
   longEdge: number;
@@ -111,16 +113,21 @@ export async function submitUmbraUiImageCensor(options: {
   if (options.overlay) form.set('overlay', options.overlay, options.overlay.name);
   if (options.overlayPath) form.set('overlayPath', options.overlayPath);
   form.set('mode', options.mode);
-  form.set('regionMode', options.regionMode);
+  form.set('regionMode', options.autoDetect ? (options.manualRegions.length > 0 ? 'combined' : 'detect') : 'manual');
+  form.set('autoDetect', String(options.autoDetect));
+  form.set('manualRegions', JSON.stringify(options.manualRegions));
   form.set('targets', options.targets.join(','));
   form.set('detectionThreshold', String(options.detectionThreshold));
   form.set('detectionPadding', String(options.detectionPadding));
   form.set('outputFolder', options.outputFolder);
   form.set('sequenceNumber', String(options.sequenceNumber));
-  form.set('x', String(options.x));
-  form.set('y', String(options.y));
-  form.set('width', String(options.width));
-  form.set('height', String(options.height));
+  const firstManualRegion = options.manualRegions[0];
+  if (firstManualRegion) {
+    form.set('x', String(firstManualRegion.x));
+    form.set('y', String(firstManualRegion.y));
+    form.set('width', String(firstManualRegion.width));
+    form.set('height', String(firstManualRegion.height));
+  }
   form.set('mosaicSize', String(options.mosaicSize));
   form.set('resizeEnabled', String(options.resizeEnabled));
   form.set('longEdge', String(options.longEdge));

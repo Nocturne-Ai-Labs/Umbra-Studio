@@ -65,6 +65,10 @@ import { compileUmbraUiPromptSegments, type UmbraUiPromptSegment } from '@/lib/u
 import { composeUmbraUiPromptWithLoras, type UmbraUiLoraEntry } from '@/lib/umbraUiModels';
 import { stageUmbraUiMediaHandoff, type UmbraUiMediaHandoff, type UmbraUiMediaHandoffMode } from '@/lib/umbraUiMediaHandoff';
 import { stageUmbraUiUpscaleHandoff } from '@/lib/umbraUiUpscale';
+import {
+  usePublishUmbraQueueActivity,
+  type UmbraQueueActivity,
+} from '@/lib/umbraQueueActivity';
 import { advanceUmbraUiSeed, resolveUmbraUiQueueSeed } from '@/lib/umbraUiSeed';
 import {
   buildUmbraUiInpaintOutputPath,
@@ -451,6 +455,23 @@ export function UmbraCanvasWorkspace({
   const [softInpaintTransitionContrast, setSoftInpaintTransitionContrast] = React.useState(1.75);
   const [softInpaintMaskInfluence, setSoftInpaintMaskInfluence] = React.useState(0);
   const [job, setJob] = React.useState<UmbraUiInpaintJob | null>(null);
+  const queueActivity = React.useMemo<UmbraQueueActivity | null>(() => job ? ({
+    id: `umbra-canvas:${job.id}`,
+    owner: 'umbra-ui-canvas-workspace',
+    feature: 'canvas',
+    label: `Canvas - ${project.name || 'Generation Region'}`,
+    detail: job.prompt || `${job.width} x ${job.height}`,
+    status: job.status,
+    total: job.total,
+    completed: job.completed,
+    failed: job.failed,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    placement: 'next',
+    requestId: job.id,
+    readonly: true,
+  }) : null, [job, project.name]);
+  usePublishUmbraQueueActivity('umbra-ui-canvas-workspace', queueActivity);
   const [liveSamplingPreview, setLiveSamplingPreview] = React.useState<UmbraUiInpaintPreviewEvent | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
   const [canceling, setCanceling] = React.useState(false);

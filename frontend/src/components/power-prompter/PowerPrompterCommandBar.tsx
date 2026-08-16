@@ -859,18 +859,6 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
             {leftPanelCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
             Files
           </button>
-          <button
-            onClick={() => setRightPanelCollapsed((prev) => !prev)}
-            className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-colors ${
-              rightPanelCollapsed
-                ? 'border-white/20 bg-white/[0.06] text-zinc-200 hover:text-white hover:border-white/35'
-                : 'border-cyan-400/35 bg-cyan-500/10 text-cyan-200 hover:border-cyan-300/60 hover:text-cyan-100'
-            }`}
-            title={rightPanelCollapsed ? 'Open tag browser menu' : 'Close tag browser menu'}
-          >
-            Browser
-            {rightPanelCollapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
-          </button>
           <div
             className={prompterPanelMode === 'editor' ? 'relative shrink-0' : 'hidden'}
             ref={promptSearchMenuRef}

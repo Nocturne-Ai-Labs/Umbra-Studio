@@ -3,6 +3,7 @@ import { CHINESE_UI_TEXT } from './chineseUiCatalog';
 import { GERMAN_UI_TEXT } from './germanUiCatalog';
 import { JAPANESE_UI_TEXT } from './japaneseUiCatalog';
 import { KOREAN_UI_TEXT } from './koreanUiCatalog';
+import { RECENT_UI_TEXT } from './recentUiCatalog';
 
 const ORIGINAL_TEXT = new WeakMap<Text, string>();
 const LAST_RENDERED_TEXT = new WeakMap<Text, string>();
@@ -236,11 +237,15 @@ const GERMAN_NOUN_SUFFIXES = new Map<string, string>([
 
 function lookupLocalized(language: AppLanguage, value: string): string | null {
   const key = value.trim().toLocaleLowerCase('en-US');
-  if (language === 'ja') return JAPANESE_UI_TEXT.get(key) || null;
-  if (language === 'zh-CN') return CHINESE_UI_TEXT.get(key) || null;
-  if (language === 'ko') return KOREAN_UI_TEXT.get(key) || null;
-  if (language === 'de') return GERMAN_UI_TEXT.get(key) || null;
+  if (language === 'ja') return RECENT_UI_TEXT.ja.get(key) || JAPANESE_UI_TEXT.get(key) || null;
+  if (language === 'zh-CN') return RECENT_UI_TEXT['zh-CN'].get(key) || CHINESE_UI_TEXT.get(key) || null;
+  if (language === 'ko') return RECENT_UI_TEXT.ko.get(key) || KOREAN_UI_TEXT.get(key) || null;
+  if (language === 'de') return RECENT_UI_TEXT.de.get(key) || GERMAN_UI_TEXT.get(key) || null;
   return null;
+}
+
+export function hasLegacyUiTranslation(language: AppLanguage, value: string): boolean {
+  return lookupLocalized(language, value) !== null;
 }
 
 function translateNounPhrase(language: AppLanguage, value: string): string | null {
@@ -267,6 +272,28 @@ function translateNounPhrase(language: AppLanguage, value: string): string | nul
 }
 
 function translateDynamicUi(language: AppLanguage, value: string): string | null {
+  const currentValueMatch = value.match(/^Current:\s+(.+)$/i);
+  if (currentValueMatch) {
+    return language === 'zh-CN'
+      ? `当前：${currentValueMatch[1]}`
+      : language === 'ko'
+        ? `현재: ${currentValueMatch[1]}`
+        : language === 'de'
+          ? `Aktuell: ${currentValueMatch[1]}`
+          : `現在: ${currentValueMatch[1]}`;
+  }
+
+  const updaterLabelMatch = value.match(/^(Umbra Studio v[^.\s]+(?:\.[^.\s]+)*)\. Open updater\.$/i);
+  if (updaterLabelMatch) {
+    return language === 'zh-CN'
+      ? `${updaterLabelMatch[1]}。打开更新程序。`
+      : language === 'ko'
+        ? `${updaterLabelMatch[1]}. 업데이터 열기.`
+        : language === 'de'
+          ? `${updaterLabelMatch[1]}. Updater öffnen.`
+          : `${updaterLabelMatch[1]}。アップデーターを開く。`;
+  }
+
   const countMatch = value.match(/^(\d[\d,.]*)\s+(available|completed|done|failed|folders?|groups?|images?|img|items?|media|outputs?|pending|previews?|remaining|running|selected|selectors?|sets?|staged|total)$/i);
   if (countMatch) {
     const noun = /^img$/i.test(countMatch[2])

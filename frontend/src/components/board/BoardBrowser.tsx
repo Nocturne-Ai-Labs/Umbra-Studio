@@ -4,7 +4,7 @@ import { BarChart3, Database, Search, Download, FolderOpen, GraduationCap, WandS
 import { SearchTab } from './SearchTab';
 import { DownloadsTab } from './DownloadsTab';
 import { DatasetsTab } from './DatasetsTab';
-import { DatasetResearchTab } from './DatasetResearchTab';
+import { TagCorpusTab } from './TagCorpusTab';
 import { DanbooruDatasetGeneratorTab } from './DanbooruDatasetGeneratorTab';
 import { WildcardGeneratorTab } from './WildcardGeneratorTab';
 import { AIToolkitTab } from './AIToolkitTab';
@@ -12,10 +12,21 @@ import { useBoardStore } from './hooks/useBoardStore';
 import type { BooruPost } from './types';
 import { logDiagnostic } from '@/lib/diagnostics';
 
-type Tab = 'search' | 'research' | 'wildcards' | 'generator' | 'downloads' | 'datasets' | 'aitoolkit';
+type Tab = 'search' | 'corpus' | 'wildcards' | 'generator' | 'downloads' | 'datasets' | 'aitoolkit';
 
 export function BoardBrowser() {
-  const [activeTab, setActiveTab] = useState<Tab>('search');
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    try {
+      const requestedTab = window.sessionStorage.getItem('umbra:data-forge-tab');
+      if (requestedTab === 'corpus' || requestedTab === 'research') {
+        window.sessionStorage.removeItem('umbra:data-forge-tab');
+        return 'corpus';
+      }
+    } catch {
+      // Default to search when session storage is unavailable.
+    }
+    return 'search';
+  });
   const [aitoolkitVisited, setAIToolkitVisited] = useState(false);
   const { addToDownloadQueue, downloadQueue } = useBoardStore();
 
@@ -45,9 +56,18 @@ export function BoardBrowser() {
     if (activeTab === 'aitoolkit') setAIToolkitVisited(true);
   }, [activeTab]);
 
+  useEffect(() => {
+    const handleOpenTab = (event: Event) => {
+      const requestedTab = (event as CustomEvent<{ tab?: string }>).detail?.tab;
+      if (requestedTab === 'corpus' || requestedTab === 'research') setActiveTab('corpus');
+    };
+    window.addEventListener('umbra:data-forge-open-tab', handleOpenTab);
+    return () => window.removeEventListener('umbra:data-forge-open-tab', handleOpenTab);
+  }, []);
+
   const tabs: { id: Tab; label: string; icon: typeof Search; badge?: number }[] = [
     { id: 'search', label: 'Search', icon: Search },
-    { id: 'research', label: 'Dataset Research', icon: BarChart3 },
+    { id: 'corpus', label: 'Tag Corpus', icon: BarChart3 },
     { id: 'wildcards', label: 'Wildcard Generator', icon: WandSparkles },
     { id: 'generator', label: 'Danbooru Dataset Generator', icon: Database },
     { id: 'downloads', label: 'Downloads', icon: Download, badge: pendingDownloads },
@@ -113,8 +133,8 @@ export function BoardBrowser() {
       {/* Tab content */}
       <div className="relative flex-1 min-h-0">
         {activeTab === 'search' && <SearchTab onDownload={handleDownload} />}
-        {activeTab === 'research' && <DatasetResearchTab onOpenSearch={() => setActiveTab('search')} />}
-        {activeTab === 'wildcards' && <WildcardGeneratorTab />}
+        {activeTab === 'corpus' && <TagCorpusTab />}
+        {activeTab === 'wildcards' && <WildcardGeneratorTab onOpenCorpus={() => setActiveTab('corpus')} />}
         {activeTab === 'generator' && <DanbooruDatasetGeneratorTab />}
         {activeTab === 'downloads' && <DownloadsTab />}
         {activeTab === 'datasets' && <DatasetsTab />}

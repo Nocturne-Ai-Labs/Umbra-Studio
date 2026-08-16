@@ -10,6 +10,7 @@ import {
   Image as ImageIcon,
   Loader2,
   Move,
+  Plus,
   Stamp,
   Trash2,
   Upload,
@@ -43,6 +44,10 @@ import {
   type UmbraImageExportSettings,
 } from '@/components/umbra-ui/UmbraImageExportControls';
 import { UmbraExtrasPresetControl } from '@/components/umbra-ui/UmbraExtrasPresetControl';
+import {
+  usePublishUmbraQueueActivity,
+  type UmbraQueueActivity,
+} from '@/lib/umbraQueueActivity';
 
 export type UmbraExtrasMediaToolMode = 'censor' | 'watermark' | 'video-watermark' | 'gif';
 
@@ -70,6 +75,23 @@ const VIDEO_WATERMARK_WIDTH_KEY = 'umbra-ui:video-watermark-output-width';
 
 type CensorTarget = 'femaleNipples' | 'maleGenitals' | 'femaleGenitals';
 
+interface ManualCensorRegion {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+type ManualCensorRegionCoordinates = Omit<ManualCensorRegion, 'id'>;
+
+const DEFAULT_MANUAL_CENSOR_REGION: ManualCensorRegionCoordinates = {
+  x: 0.325,
+  y: 0.68,
+  width: 0.35,
+  height: 0.18,
+};
+
 const CENSOR_TARGETS: Array<{ id: CensorTarget; label: string }> = [
   { id: 'femaleNipples', label: 'Female Nipples' },
   { id: 'maleGenitals', label: 'Male Genitals' },
@@ -90,6 +112,32 @@ const ANCHORS = [
 
 function createId(): string {
   try { return crypto.randomUUID(); } catch { return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`; }
+}
+
+function normalizeManualCensorRegion(
+  value: Partial<ManualCensorRegionCoordinates>,
+  fallback: ManualCensorRegionCoordinates = DEFAULT_MANUAL_CENSOR_REGION,
+): ManualCensorRegionCoordinates {
+  const numeric = (candidate: unknown, defaultValue: number) => {
+    const parsed = Number(candidate);
+    return Number.isFinite(parsed) ? parsed : defaultValue;
+  };
+  const width = Math.max(0.03, Math.min(1, numeric(value.width, fallback.width)));
+  const height = Math.max(0.03, Math.min(1, numeric(value.height, fallback.height)));
+  return {
+    x: Math.max(0, Math.min(1 - width, numeric(value.x, fallback.x))),
+    y: Math.max(0, Math.min(1 - height, numeric(value.y, fallback.y))),
+    width,
+    height,
+  };
+}
+
+function createManualCensorRegion(value: Partial<ManualCensorRegionCoordinates> = {}): ManualCensorRegion {
+  return { id: createId(), ...normalizeManualCensorRegion(value) };
+}
+
+function manualCensorRegionCoordinates(region: ManualCensorRegion): ManualCensorRegionCoordinates {
+  return { x: region.x, y: region.y, width: region.width, height: region.height };
 }
 
 function mediaKind(name: string): UmbraUiMediaBatchKind | null {
@@ -269,6 +317,61 @@ function BatchSummary({ completed, failed, total }: { completed: number; failed:
   );
 }
 
+function useMediaBatchQueueActivity({
+  mode,
+  processing,
+  summary,
+  items,
+  startedAtRef,
+}: {
+  mode: UmbraExtrasMediaToolMode;
+  processing: boolean;
+  summary: { completed: number; failed: number; total: number };
+  items: StagedMediaItem[];
+  startedAtRef: React.MutableRefObject<number>;
+}) {
+  const updatedAt = React.useMemo(
+    () => Date.now(),
+    [processing, summary.completed, summary.failed, summary.total],
+  );
+  const activity = React.useMemo<UmbraQueueActivity | null>(() => {
+    if (summary.total <= 0 || startedAtRef.current <= 0) return null;
+    const label = mode === 'censor'
+      ? 'Image Censor Batch'
+      : mode === 'watermark'
+        ? 'Image Watermark Batch'
+        : mode === 'video-watermark'
+          ? 'Video Watermark Batch'
+          : 'Video to GIF Batch';
+    const status: UmbraQueueActivity['status'] = processing
+      ? 'running'
+      : summary.failed >= summary.total
+        ? 'failed'
+        : summary.failed > 0
+          ? 'partial'
+          : 'completed';
+    const firstName = String(items[0]?.name || '').trim();
+    return {
+      id: `umbra-extras:${mode}:${startedAtRef.current}`,
+      owner: `umbra-ui-extras-${mode}`,
+      feature: mode,
+      label,
+      detail: firstName
+        ? `${firstName}${summary.total > 1 ? ` +${summary.total - 1} more` : ''}`
+        : `${summary.total} item${summary.total === 1 ? '' : 's'}`,
+      status,
+      total: summary.total,
+      completed: summary.completed,
+      failed: summary.failed,
+      createdAt: startedAtRef.current,
+      updatedAt,
+      placement: 'parallel',
+      readonly: true,
+    };
+  }, [items, mode, processing, startedAtRef, summary.completed, summary.failed, summary.total, updatedAt]);
+  usePublishUmbraQueueActivity(`umbra-ui-extras-${mode}`, activity);
+}
+
 function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
   const showToast = useStore((state) => state.showToast);
   const mode: UmbraExtrasMediaToolMode = targetKind === 'video' ? 'video-watermark' : 'watermark';
@@ -295,6 +398,8 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
   const [processing, setProcessing] = React.useState(false);
   const [browsingSources, setBrowsingSources] = React.useState(false);
   const [summary, setSummary] = React.useState({ completed: 0, failed: 0, total: 0 });
+  const activityStartedAtRef = React.useRef(0);
+  useMediaBatchQueueActivity({ mode, processing, summary, items, startedAtRef: activityStartedAtRef });
   const [previewFailed, setPreviewFailed] = React.useState(false);
   const sourceInputRef = React.useRef<HTMLInputElement | null>(null);
   const watermarkInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -446,6 +551,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
 
   const run = React.useCallback(async () => {
     if (processing || items.length === 0 || (!watermark && !watermarkAsset)) return;
+    activityStartedAtRef.current = Date.now();
     setProcessing(true);
     setSummary({ completed: 0, failed: 0, total: items.length });
     setItems((current) => current.map((item) => ({ ...item, status: 'staged', error: undefined, result: undefined })));
@@ -546,7 +652,8 @@ function ImageCensorTool() {
   const { outputFolder, setOutputFolder, browsing, browse } = useOutputFolder('censor');
   const [selectedId, setSelectedId] = React.useState('');
   const [censorMode, setCensorMode] = React.useState<'mosaic' | 'overlay'>('mosaic');
-  const [regionMode, setRegionMode] = React.useState<'manual' | 'detect'>('detect');
+  const [autoDetectEnabled, setAutoDetectEnabled] = React.useState(true);
+  const [manualRegionsEnabled, setManualRegionsEnabled] = React.useState(false);
   const [censorTargets, setCensorTargets] = React.useState<Record<CensorTarget, boolean>>({
     femaleNipples: true,
     maleGenitals: true,
@@ -557,43 +664,106 @@ function ImageCensorTool() {
   const [overlay, setOverlay] = React.useState<File | null>(null);
   const [overlayAsset, setOverlayAsset] = React.useState<UmbraUiWatermarkAsset | null>(null);
   const [overlayUploading, setOverlayUploading] = React.useState(false);
-  const [region, setRegion] = React.useState({ x: 0.325, y: 0.68, width: 0.35, height: 0.18 });
+  const [manualRegionTemplate, setManualRegionTemplate] = React.useState<ManualCensorRegionCoordinates[]>([
+    DEFAULT_MANUAL_CENSOR_REGION,
+  ]);
+  const [manualRegionsByItem, setManualRegionsByItem] = React.useState<Record<string, ManualCensorRegion[]>>({});
+  const [activeManualRegionByItem, setActiveManualRegionByItem] = React.useState<Record<string, string>>({});
   const [mosaicSize, setMosaicSize] = React.useState(24);
   const [exportSettings, setExportSettings] = React.useState<UmbraImageExportSettings>({ resizeEnabled: false, longEdge: 1024, format: 'png', quality: 90 });
   const [processing, setProcessing] = React.useState(false);
   const [browsingSources, setBrowsingSources] = React.useState(false);
   const [summary, setSummary] = React.useState({ completed: 0, failed: 0, total: 0 });
+  const activityStartedAtRef = React.useRef(0);
+  useMediaBatchQueueActivity({ mode: 'censor', processing, summary, items, startedAtRef: activityStartedAtRef });
   const [dimensions, setDimensions] = React.useState({ width: 4, height: 3 });
   const [previewFailed, setPreviewFailed] = React.useState(false);
   const sourceInputRef = React.useRef<HTMLInputElement | null>(null);
   const overlayInputRef = React.useRef<HTMLInputElement | null>(null);
   const previewRef = React.useRef<HTMLDivElement | null>(null);
-  const dragRef = React.useRef<{ kind: 'move' | 'resize'; x: number; y: number; region: typeof region } | null>(null);
+  const dragRef = React.useRef<{
+    kind: 'move' | 'resize';
+    x: number;
+    y: number;
+    region: ManualCensorRegion;
+  } | null>(null);
   const remoteClient = isUmbraRemoteClient();
   const selected = items.find((item) => item.id === selectedId) || items[0];
   const localSourceUrl = useFilePreview(selected?.file || null);
   const sourceUrl = localSourceUrl || itemPreviewUrl(selected);
   const localOverlayUrl = useFilePreview(overlay);
   const overlayUrl = localOverlayUrl || overlayAsset?.previewUrl || '';
+  const selectedManualRegions = selected ? manualRegionsByItem[selected.id] || [] : [];
+  const activeManualRegionId = selected
+    ? activeManualRegionByItem[selected.id] || selectedManualRegions[0]?.id || ''
+    : '';
+  const activeManualRegion = selectedManualRegions.find((region) => region.id === activeManualRegionId)
+    || selectedManualRegions[0];
 
   React.useEffect(() => {
     if (!selectedId && items[0]) setSelectedId(items[0].id);
     if (selectedId && !items.some((item) => item.id === selectedId)) setSelectedId(items[0]?.id || '');
   }, [items, selectedId]);
+  React.useEffect(() => {
+    setManualRegionsByItem((current) => {
+      const validIds = new Set(items.map((item) => item.id));
+      let changed = Object.keys(current).some((id) => !validIds.has(id));
+      const next: Record<string, ManualCensorRegion[]> = {};
+      for (const item of items) {
+        if (current[item.id]) {
+          next[item.id] = current[item.id];
+        } else {
+          next[item.id] = manualRegionTemplate.map((region) => createManualCensorRegion(region));
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [items, manualRegionTemplate]);
+  React.useEffect(() => {
+    if (!selected) return;
+    const regions = manualRegionsByItem[selected.id] || [];
+    const activeId = activeManualRegionByItem[selected.id];
+    if (activeId && regions.some((region) => region.id === activeId)) return;
+    setActiveManualRegionByItem((current) => ({ ...current, [selected.id]: regions[0]?.id || '' }));
+  }, [activeManualRegionByItem, manualRegionsByItem, selected]);
   React.useEffect(() => setPreviewFailed(false), [sourceUrl]);
 
-  const updateRegion = React.useCallback((next: Partial<typeof region>) => {
-    setRegion((current) => {
-      const width = Math.max(0.03, Math.min(1, Number(next.width ?? current.width) || current.width));
-      const height = Math.max(0.03, Math.min(1, Number(next.height ?? current.height) || current.height));
-      return {
-        x: Math.max(0, Math.min(1 - width, Number(next.x ?? current.x) || 0)),
-        y: Math.max(0, Math.min(1 - height, Number(next.y ?? current.y) || 0)),
-        width,
-        height,
-      };
+  const updateManualRegion = React.useCallback((regionId: string, next: Partial<ManualCensorRegionCoordinates>) => {
+    if (!selected) return;
+    setManualRegionsByItem((current) => ({
+      ...current,
+      [selected.id]: (current[selected.id] || []).map((region) => (
+        region.id === regionId
+          ? { ...region, ...normalizeManualCensorRegion(next, region) }
+          : region
+      )),
+    }));
+  }, [selected]);
+  const addManualRegion = React.useCallback(() => {
+    if (!selected) return;
+    const existingCount = manualRegionsByItem[selected.id]?.length || 0;
+    const offset = (existingCount % 6) * 0.055;
+    const nextRegion = createManualCensorRegion({
+      x: Math.min(0.65, 0.08 + offset),
+      y: Math.min(0.72, 0.08 + offset),
+      width: 0.27,
+      height: 0.2,
     });
-  }, []);
+    setManualRegionsByItem((current) => ({
+      ...current,
+      [selected.id]: [...(current[selected.id] || []), nextRegion],
+    }));
+    setActiveManualRegionByItem((current) => ({ ...current, [selected.id]: nextRegion.id }));
+    setManualRegionsEnabled(true);
+  }, [manualRegionsByItem, selected]);
+  const removeManualRegion = React.useCallback((regionId: string) => {
+    if (!selected) return;
+    setManualRegionsByItem((current) => ({
+      ...current,
+      [selected.id]: (current[selected.id] || []).filter((region) => region.id !== regionId),
+    }));
+  }, [selected]);
   const chooseOverlay = React.useCallback(async (file: File | null) => {
     if (!file) return;
     setOverlay(file);
@@ -613,18 +783,29 @@ function ImageCensorTool() {
   );
   const presetExtra = React.useMemo<Record<string, unknown>>(() => ({
     censorMode,
-    regionMode,
+    regionMode: autoDetectEnabled ? (manualRegionsEnabled ? 'combined' : 'detect') : 'manual',
+    autoDetectEnabled,
+    manualRegionsEnabled,
     censorTargets,
     detectionThreshold,
     detectionPadding,
     overlayAsset,
-    region,
+    manualRegions: selectedManualRegions.map(manualCensorRegionCoordinates),
+    region: selectedManualRegions[0] ? manualCensorRegionCoordinates(selectedManualRegions[0]) : DEFAULT_MANUAL_CENSOR_REGION,
     mosaicSize,
     outputFolder,
-  }), [censorMode, censorTargets, detectionPadding, detectionThreshold, mosaicSize, outputFolder, overlayAsset, region, regionMode]);
+  }), [autoDetectEnabled, censorMode, censorTargets, detectionPadding, detectionThreshold, manualRegionsEnabled, mosaicSize, outputFolder, overlayAsset, selectedManualRegions]);
   const applyPreset = React.useCallback((value: Record<string, unknown>) => {
     setCensorMode(value.censorMode === 'overlay' ? 'overlay' : 'mosaic');
-    setRegionMode(value.regionMode === 'manual' ? 'manual' : 'detect');
+    const legacyRegionMode = String(value.regionMode || '').trim().toLowerCase();
+    const nextAutoDetectEnabled = typeof value.autoDetectEnabled === 'boolean'
+      ? value.autoDetectEnabled
+      : legacyRegionMode !== 'manual';
+    const nextManualRegionsEnabled = typeof value.manualRegionsEnabled === 'boolean'
+      ? value.manualRegionsEnabled
+      : legacyRegionMode === 'manual' || legacyRegionMode === 'combined';
+    setAutoDetectEnabled(nextAutoDetectEnabled || !nextManualRegionsEnabled);
+    setManualRegionsEnabled(nextManualRegionsEnabled);
     const rawTargets = value.censorTargets && typeof value.censorTargets === 'object'
       ? value.censorTargets as Record<string, unknown>
       : {};
@@ -635,8 +816,22 @@ function ImageCensorTool() {
     });
     setDetectionThreshold(Math.max(0.05, Math.min(0.95, Number(value.detectionThreshold) || 0.278)));
     setDetectionPadding(Math.max(0, Math.min(0.5, Number(value.detectionPadding) || 0.12)));
-    const rawRegion = value.region && typeof value.region === 'object' ? value.region as Record<string, unknown> : {};
-    updateRegion({ x: Number(rawRegion.x), y: Number(rawRegion.y), width: Number(rawRegion.width), height: Number(rawRegion.height) });
+    const rawRegions = Array.isArray(value.manualRegions)
+      ? value.manualRegions
+      : value.region && typeof value.region === 'object' ? [value.region] : [];
+    const nextRegionTemplate = rawRegions.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      return [normalizeManualCensorRegion(entry as Record<string, unknown>)];
+    });
+    const resolvedRegionTemplate = nextRegionTemplate.length > 0
+      ? nextRegionTemplate
+      : [DEFAULT_MANUAL_CENSOR_REGION];
+    setManualRegionTemplate(resolvedRegionTemplate);
+    if (selected) {
+      const nextRegions = resolvedRegionTemplate.map((region) => createManualCensorRegion(region));
+      setManualRegionsByItem((current) => ({ ...current, [selected.id]: nextRegions }));
+      setActiveManualRegionByItem((current) => ({ ...current, [selected.id]: nextRegions[0]?.id || '' }));
+    }
     setMosaicSize(Math.max(2, Math.min(160, Math.round(Number(value.mosaicSize) || 24))));
     setOutputFolder(String(value.outputFolder || '').trim());
     const rawAsset = value.overlayAsset && typeof value.overlayAsset === 'object' ? value.overlayAsset as Record<string, unknown> : null;
@@ -645,7 +840,7 @@ function ImageCensorTool() {
       setOverlay(null);
       setOverlayAsset({ path, filename: String(rawAsset?.filename || 'Censor overlay'), previewUrl: String(rawAsset?.previewUrl || `/api/fs/image?${new URLSearchParams({ path }).toString()}`) });
     }
-  }, [setOutputFolder, updateRegion]);
+  }, [selected, setOutputFolder]);
   const chooseSources = React.useCallback(async () => {
     if (remoteClient) { sourceInputRef.current?.click(); return; }
     if (browsingSources) return;
@@ -658,13 +853,22 @@ function ImageCensorTool() {
       setBrowsingSources(false);
     }
   }, [addPaths, browsingSources, outputFolder, remoteClient, selected?.path, showToast]);
+  const manualCoverageComplete = React.useMemo(() => (
+    items.every((item) => (manualRegionsByItem[item.id] || []).length > 0)
+  ), [items, manualRegionsByItem]);
+  const censorConfigurationValid = (
+    (autoDetectEnabled || manualRegionsEnabled)
+    && (!autoDetectEnabled || selectedTargets.length > 0)
+    && (autoDetectEnabled || !manualRegionsEnabled || manualCoverageComplete)
+  );
   const run = React.useCallback(async () => {
     if (
       processing
       || items.length === 0
-      || (regionMode === 'detect' && selectedTargets.length === 0)
+      || !censorConfigurationValid
       || (censorMode === 'overlay' && !overlay && !overlayAsset)
     ) return;
+    activityStartedAtRef.current = Date.now();
     setProcessing(true);
     setSummary({ completed: 0, failed: 0, total: items.length });
     setItems((current) => current.map((item) => ({ ...item, status: 'staged', error: undefined, result: undefined })));
@@ -673,7 +877,27 @@ function ImageCensorTool() {
       items,
       onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
       runItem: async (item, sequenceNumber) => {
-        const next = await submitUmbraUiImageCensor({ source: item.file, sourcePath: item.path, mode: censorMode, regionMode, targets: selectedTargets, detectionThreshold, detectionPadding, overlay: overlayAsset ? undefined : overlay || undefined, overlayPath: overlayAsset?.path, outputFolder: outputFolder.trim(), sequenceNumber, ...region, mosaicSize, resizeEnabled: exportSettings.resizeEnabled, longEdge: exportSettings.longEdge, imageFormat: exportSettings.format, quality: exportSettings.quality });
+        const next = await submitUmbraUiImageCensor({
+          source: item.file,
+          sourcePath: item.path,
+          mode: censorMode,
+          autoDetect: autoDetectEnabled,
+          manualRegions: manualRegionsEnabled
+            ? (manualRegionsByItem[item.id] || []).map(manualCensorRegionCoordinates)
+            : [],
+          targets: selectedTargets,
+          detectionThreshold,
+          detectionPadding,
+          overlay: overlayAsset ? undefined : overlay || undefined,
+          overlayPath: overlayAsset?.path,
+          outputFolder: outputFolder.trim(),
+          sequenceNumber,
+          mosaicSize,
+          resizeEnabled: exportSettings.resizeEnabled,
+          longEdge: exportSettings.longEdge,
+          imageFormat: exportSettings.format,
+          quality: exportSettings.quality,
+        });
         setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, result: next } : entry));
       },
       onItemSettled: (item, error) => {
@@ -692,12 +916,13 @@ function ImageCensorTool() {
         : `${result.completed} image${result.completed === 1 ? '' : 's'} censored.`,
       result.failed ? 'error' : 'success',
     );
-  }, [censorMode, detectionPadding, detectionThreshold, exportSettings, items, mosaicSize, outputFolder, overlay, overlayAsset, processing, region, regionMode, selectedTargets, setItems, showToast]);
-  const beginDrag = (event: React.PointerEvent<HTMLDivElement>, kind: 'move' | 'resize') => {
+  }, [autoDetectEnabled, censorConfigurationValid, censorMode, detectionPadding, detectionThreshold, exportSettings, items, manualRegionsByItem, manualRegionsEnabled, mosaicSize, outputFolder, overlay, overlayAsset, processing, selectedTargets, setItems, showToast]);
+  const beginDrag = (event: React.PointerEvent<HTMLElement>, region: ManualCensorRegion, kind: 'move' | 'resize') => {
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = { kind, x: event.clientX, y: event.clientY, region };
+    if (selected) setActiveManualRegionByItem((current) => ({ ...current, [selected.id]: region.id }));
   };
   const moveDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
@@ -706,8 +931,8 @@ function ImageCensorTool() {
     const bounds = frame.getBoundingClientRect();
     const dx = (event.clientX - drag.x) / Math.max(1, bounds.width);
     const dy = (event.clientY - drag.y) / Math.max(1, bounds.height);
-    if (drag.kind === 'move') updateRegion({ x: drag.region.x + dx, y: drag.region.y + dy });
-    else updateRegion({ width: drag.region.width + dx, height: drag.region.height + dy });
+    if (drag.kind === 'move') updateManualRegion(drag.region.id, { x: drag.region.x + dx, y: drag.region.y + dy });
+    else updateManualRegion(drag.region.id, { width: drag.region.width + dx, height: drag.region.height + dy });
   };
   return (
     <div data-umbra-ui-censor-tool="" className="grid min-h-0 flex-1 grid-cols-[minmax(300px,360px)_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:overflow-y-auto">
@@ -719,10 +944,10 @@ function ImageCensorTool() {
           <button type="button" disabled={processing || browsingSources} onClick={() => void chooseSources()} className="flex min-h-11 w-full items-center gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 text-left hover:border-fuchsia-300/30 disabled:opacity-40">{browsingSources ? <Loader2 size={14} className="animate-spin text-fuchsia-300" /> : <Upload size={14} className="text-fuchsia-300" />}<span className="flex-1 text-[9px] font-black uppercase tracking-[0.13em] text-zinc-300">Add Images</span></button>
           <SourceBatchList items={items} disabled={processing} onSelect={setSelectedId} onRemove={(id) => setItems((current) => current.filter((item) => item.id !== id))} onClear={() => { setItems([]); setSummary({ completed: 0, failed: 0, total: 0 }); }} />
           <div className="grid grid-cols-2 gap-2">
-            <button type="button" onClick={() => setRegionMode('detect')} className={cn('h-9 rounded-md border text-[9px] font-black uppercase tracking-[0.12em]', regionMode === 'detect' ? 'border-fuchsia-300/50 bg-fuchsia-500/[0.12] text-fuchsia-100' : 'border-white/10 text-zinc-500')}>Auto Detect</button>
-            <button type="button" onClick={() => setRegionMode('manual')} className={cn('h-9 rounded-md border text-[9px] font-black uppercase tracking-[0.12em]', regionMode === 'manual' ? 'border-fuchsia-300/50 bg-fuchsia-500/[0.12] text-fuchsia-100' : 'border-white/10 text-zinc-500')}>Manual Region</button>
+            <button type="button" aria-pressed={autoDetectEnabled} onClick={() => setAutoDetectEnabled((current) => !current)} className={cn('flex h-10 items-center justify-center gap-2 rounded-md border text-[9px] font-black uppercase tracking-[0.12em]', autoDetectEnabled ? 'border-fuchsia-300/50 bg-fuchsia-500/[0.12] text-fuchsia-100' : 'border-white/10 text-zinc-500')}><span className={cn('h-2.5 w-2.5 rounded-sm border', autoDetectEnabled ? 'border-fuchsia-100 bg-fuchsia-400' : 'border-white/20')} />Auto Detect</button>
+            <button type="button" aria-pressed={manualRegionsEnabled} onClick={() => setManualRegionsEnabled((current) => !current)} className={cn('flex h-10 items-center justify-center gap-2 rounded-md border text-[9px] font-black uppercase tracking-[0.12em]', manualRegionsEnabled ? 'border-cyan-300/50 bg-cyan-500/[0.12] text-cyan-100' : 'border-white/10 text-zinc-500')}><span className={cn('h-2.5 w-2.5 rounded-sm border', manualRegionsEnabled ? 'border-cyan-100 bg-cyan-400' : 'border-white/20')} />Manual Regions</button>
           </div>
-          {regionMode === 'detect' ? (
+          {autoDetectEnabled ? (
             <div className="space-y-3 rounded-md border border-fuchsia-300/15 bg-fuchsia-500/[0.04] p-2.5">
               <div className="flex items-center justify-between"><span className={labelClass}>Body Parts</span><span className="font-mono text-[8px] text-zinc-600">On-device detection</span></div>
               <div className="grid grid-cols-1 gap-1.5">
@@ -744,31 +969,64 @@ function ImageCensorTool() {
               <p className="font-mono text-[8px] leading-relaxed text-zinc-600">The MIT-licensed anime detector downloads once on first use. Each image is scanned independently.</p>
             </div>
           ) : null}
+          {manualRegionsEnabled ? (
+            <div className="space-y-2.5 rounded-md border border-cyan-300/15 bg-cyan-500/[0.04] p-2.5">
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className={labelClass}>Manual Regions</div>
+                  <div className="truncate font-mono text-[8px] text-zinc-600">Unique to {selected?.name || 'the selected image'}</div>
+                </div>
+                <span className="rounded-sm border border-cyan-300/20 bg-cyan-500/[0.08] px-1.5 py-1 font-mono text-[8px] text-cyan-200">{selectedManualRegions.length}</span>
+                <button type="button" disabled={!selected} onClick={addManualRegion} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-cyan-300/30 bg-cyan-500/[0.1] px-2 text-[8px] font-black uppercase tracking-[0.1em] text-cyan-100 disabled:opacity-40"><Plus size={11} />Add</button>
+              </div>
+              {selectedManualRegions.length > 0 ? (
+                <>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedManualRegions.map((region, index) => (
+                      <button key={region.id} type="button" onClick={() => selected && setActiveManualRegionByItem((current) => ({ ...current, [selected.id]: region.id }))} className={cn('h-7 rounded-md border px-2 font-mono text-[8px] uppercase', region.id === activeManualRegion?.id ? 'border-cyan-200/55 bg-cyan-500/[0.16] text-cyan-100' : 'border-white/10 text-zinc-500')}>Region {index + 1}</button>
+                    ))}
+                  </div>
+                  {activeManualRegion ? (
+                    <div className="space-y-2 border-t border-white/[0.07] pt-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-[8px] uppercase text-cyan-200">Editing Region {selectedManualRegions.findIndex((region) => region.id === activeManualRegion.id) + 1}</span>
+                        <button type="button" title="Delete selected manual region" aria-label="Delete selected manual region" onClick={() => removeManualRegion(activeManualRegion.id)} className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-red-400/20 text-red-300/70 hover:bg-red-500/10"><Trash2 size={11} /></button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(['x', 'y', 'width', 'height'] as const).map((key) => (
+                          <label key={key} className="block space-y-1">
+                            <span className={labelClass}>{key === 'x' || key === 'y' ? `${key.toUpperCase()} position` : key}</span>
+                            <input type="number" min={0} max={100} step={1} value={Math.round(activeManualRegion[key] * 100)} onChange={(event) => updateManualRegion(activeManualRegion.id, { [key]: Number(event.target.value) / 100 })} className={controlClass} />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              ) : <div className="rounded-md border border-dashed border-white/10 px-3 py-4 text-center font-mono text-[8px] uppercase text-zinc-600">Add a region for this image</div>}
+            </div>
+          ) : null}
           <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setCensorMode('mosaic')} className={cn('h-9 rounded-md border text-[9px] font-black uppercase tracking-[0.12em]', censorMode === 'mosaic' ? 'border-fuchsia-300/50 bg-fuchsia-500/[0.12] text-fuchsia-100' : 'border-white/10 text-zinc-500')}>Mosaic</button><button type="button" onClick={() => setCensorMode('overlay')} className={cn('h-9 rounded-md border text-[9px] font-black uppercase tracking-[0.12em]', censorMode === 'overlay' ? 'border-fuchsia-300/50 bg-fuchsia-500/[0.12] text-fuchsia-100' : 'border-white/10 text-zinc-500')}>Image Overlay</button></div>
           {censorMode === 'mosaic' ? <label className="block space-y-1.5"><span className="flex justify-between"><span className={labelClass}>Mosaic block size</span><span className="font-mono text-[9px] text-fuchsia-200">{mosaicSize}px</span></span><input type="range" min={2} max={128} step={1} value={mosaicSize} onChange={(event) => setMosaicSize(Number(event.target.value))} className="w-full accent-fuchsia-300" /></label> : <button type="button" disabled={overlayUploading} onClick={() => overlayInputRef.current?.click()} className="flex min-h-11 w-full items-center gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 text-left hover:border-fuchsia-300/30 disabled:opacity-40">{overlayUploading ? <Loader2 size={14} className="animate-spin text-fuchsia-300" /> : <ImageIcon size={14} className="text-fuchsia-300" />}<span className="min-w-0 flex-1"><span className="block text-[9px] font-black uppercase tracking-[0.13em] text-zinc-300">Censor Overlay</span><span className="block truncate font-mono text-[8px] text-zinc-600">{overlayUploading ? 'Saving for presets...' : overlayAsset?.filename || overlay?.name || 'Choose image'}</span></span></button>}
-          {regionMode === 'manual' ? <div className="grid grid-cols-2 gap-2">{(['x', 'y', 'width', 'height'] as const).map((key) => <label key={key} className="block space-y-1"><span className={labelClass}>{key === 'x' || key === 'y' ? `${key.toUpperCase()} position` : key}</span><input type="number" min={0} max={100} step={1} value={Math.round(region[key] * 100)} onChange={(event) => updateRegion({ [key]: Number(event.target.value) / 100 })} className={controlClass} /></label>)}</div> : null}
+          {!autoDetectEnabled && !manualRegionsEnabled ? <div className="rounded-md border border-amber-300/20 bg-amber-500/[0.06] px-2.5 py-2 font-mono text-[8px] uppercase leading-relaxed text-amber-200/80">Enable Auto Detect, Manual Regions, or both.</div> : null}
+          {!autoDetectEnabled && manualRegionsEnabled && !manualCoverageComplete ? <div className="rounded-md border border-amber-300/20 bg-amber-500/[0.06] px-2.5 py-2 font-mono text-[8px] uppercase leading-relaxed text-amber-200/80">Every staged image needs at least one manual region when Auto Detect is off.</div> : null}
           <OutputDestination value={outputFolder} onChange={setOutputFolder} browsing={browsing} onBrowse={() => void browse()} automaticSubfolder="Censored" />
           <UmbraImageExportControls value={exportSettings} onChange={setExportSettings} presetScope="image-censor" presetLabel="Image Censor Preset" presetExtra={presetExtra} onPresetExtraChange={applyPreset} presetSaveDisabled={censorMode === 'overlay' && !overlayAsset} />
-          <button type="button" onClick={() => void run()} disabled={items.length === 0 || processing || (regionMode === 'detect' && selectedTargets.length === 0) || (censorMode === 'overlay' && !overlay && !overlayAsset)} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-fuchsia-300/30 bg-fuchsia-500/[0.1] text-[10px] font-black uppercase tracking-[0.16em] text-fuchsia-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600">{processing ? <Loader2 size={13} className="animate-spin" /> : <EyeOff size={13} />}{processing ? `Processing ${summary.completed + summary.failed}/${summary.total}` : 'Run Image Censor Batch'}</button>
+          <button type="button" onClick={() => void run()} disabled={items.length === 0 || processing || !censorConfigurationValid || (censorMode === 'overlay' && !overlay && !overlayAsset)} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-fuchsia-300/30 bg-fuchsia-500/[0.1] text-[10px] font-black uppercase tracking-[0.16em] text-fuchsia-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600">{processing ? <Loader2 size={13} className="animate-spin" /> : <EyeOff size={13} />}{processing ? `Processing ${summary.completed + summary.failed}/${summary.total}` : 'Run Image Censor Batch'}</button>
           <BatchSummary {...summary} />
         </div>
       </section>
       <main className="flex min-h-0 min-w-0 flex-col bg-black/20">
         <div className="flex min-h-10 items-center gap-2 border-b border-white/10 px-3">
           <Move size={13} className="text-zinc-500" />
-          <span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400">{regionMode === 'detect' ? 'Detection Preview' : 'Censor Region Preview'}</span>
+          <span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400">{autoDetectEnabled && manualRegionsEnabled ? 'Auto + Manual Preview' : autoDetectEnabled ? 'Detection Preview' : 'Manual Region Preview'}</span>
           <span className="ml-auto max-w-[45%] truncate font-mono text-[8px] text-zinc-600">{selected?.name || 'No source selected'}</span>
         </div>
         <div className="flex min-h-[320px] flex-1 items-center justify-center overflow-auto p-4 max-[900px]:min-h-[280px]">
           {sourceUrl && !previewFailed ? (
             <div ref={previewRef} className="relative max-h-full max-w-full touch-none overflow-hidden bg-black shadow-2xl" style={{ aspectRatio: `${dimensions.width}/${dimensions.height}`, width: 'min(100%, calc((100vh - 220px) * ' + (dimensions.width / Math.max(1, dimensions.height)) + '))' }} onPointerMove={moveDrag} onPointerUp={() => { dragRef.current = null; }} onPointerCancel={() => { dragRef.current = null; }}>
               <img src={sourceUrl} alt="Censor source preview" className="pointer-events-none block h-full w-full object-contain" onError={() => setPreviewFailed(true)} onLoad={(event) => setDimensions({ width: event.currentTarget.naturalWidth || 4, height: event.currentTarget.naturalHeight || 3 })} />
-              {regionMode === 'manual' ? (
-                <div className="absolute border-2 border-fuchsia-300 bg-fuchsia-500/15 shadow-[0_0_0_1px_rgba(0,0,0,0.6)]" style={{ left: `${region.x * 100}%`, top: `${region.y * 100}%`, width: `${region.width * 100}%`, height: `${region.height * 100}%` }} onPointerDown={(event) => beginDrag(event, 'move')}>
-                  <div className={cn('pointer-events-none absolute inset-0', censorMode === 'mosaic' ? 'bg-[repeating-linear-gradient(45deg,rgba(217,70,239,0.35)_0,rgba(217,70,239,0.35)_8px,rgba(0,0,0,0.35)_8px,rgba(0,0,0,0.35)_16px)]' : '')}>{censorMode === 'overlay' && overlayUrl ? <img src={overlayUrl} alt="Censor overlay preview" className="h-full w-full object-fill" /> : null}</div>
-                  <button type="button" aria-label="Resize censor region" onPointerDown={(event) => beginDrag(event, 'resize')} className="absolute -bottom-2 -right-2 h-4 w-4 rounded-sm border border-fuchsia-100 bg-fuchsia-500 shadow-lg" />
-                </div>
-              ) : (
+              {autoDetectEnabled ? (
                 <>
                   {(selected?.result?.detections || []).map((detection, index) => (
                     <div key={`${detection.target}-${index}`} className="pointer-events-none absolute border-2 border-fuchsia-300 bg-fuchsia-500/20 shadow-[0_0_0_1px_rgba(0,0,0,0.7)]" style={{ left: `${detection.x * 100}%`, top: `${detection.y * 100}%`, width: `${detection.width * 100}%`, height: `${detection.height * 100}%` }}>
@@ -777,7 +1035,17 @@ function ImageCensorTool() {
                   ))}
                   {!selected?.result ? <div className="pointer-events-none absolute inset-x-3 bottom-3 rounded-md border border-white/10 bg-black/75 px-3 py-2 text-center font-mono text-[8px] uppercase text-zinc-400">Detections appear after this image is processed</div> : null}
                 </>
-              )}
+              ) : null}
+              {manualRegionsEnabled ? selectedManualRegions.map((region, index) => {
+                const active = region.id === activeManualRegion?.id;
+                return (
+                  <div key={region.id} className={cn('absolute z-10 cursor-move border-2 bg-cyan-500/15 shadow-[0_0_0_1px_rgba(0,0,0,0.65)]', active ? 'border-cyan-100' : 'border-cyan-400/65')} style={{ left: `${region.x * 100}%`, top: `${region.y * 100}%`, width: `${region.width * 100}%`, height: `${region.height * 100}%` }} onPointerDown={(event) => beginDrag(event, region, 'move')}>
+                    <span className={cn('pointer-events-none absolute -top-5 left-0 whitespace-nowrap rounded-sm px-1.5 py-0.5 font-mono text-[7px] uppercase', active ? 'bg-cyan-300 text-black' : 'bg-black/85 text-cyan-200')}>Manual {index + 1}</span>
+                    <div className={cn('pointer-events-none absolute inset-0', censorMode === 'mosaic' ? 'bg-[repeating-linear-gradient(45deg,rgba(34,211,238,0.3)_0,rgba(34,211,238,0.3)_8px,rgba(0,0,0,0.35)_8px,rgba(0,0,0,0.35)_16px)]' : '')}>{censorMode === 'overlay' && overlayUrl ? <img src={overlayUrl} alt="Censor overlay preview" className="h-full w-full object-fill" /> : null}</div>
+                    <button type="button" aria-label={`Resize manual censor region ${index + 1}`} onPointerDown={(event) => beginDrag(event, region, 'resize')} className={cn('absolute -bottom-2 -right-2 h-4 w-4 rounded-sm border shadow-lg', active ? 'border-cyan-50 bg-cyan-400' : 'border-cyan-200/70 bg-cyan-600')} />
+                  </div>
+                );
+              }) : null}
             </div>
           ) : <div className="text-center text-zinc-700"><EyeOff size={34} className="mx-auto mb-3" /><div className="text-[10px] font-black uppercase tracking-[0.16em]">{previewFailed ? 'Source preview unavailable' : 'Stage images to preview'}</div></div>}
         </div>
@@ -795,6 +1063,8 @@ function VideoToGifTool() {
   const [processing, setProcessing] = React.useState(false);
   const [browsingSources, setBrowsingSources] = React.useState(false);
   const [summary, setSummary] = React.useState({ completed: 0, failed: 0, total: 0 });
+  const activityStartedAtRef = React.useRef(0);
+  useMediaBatchQueueActivity({ mode: 'gif', processing, summary, items, startedAtRef: activityStartedAtRef });
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const remoteClient = isUmbraRemoteClient();
   const selected = items.find((item) => item.id === selectedId) || items[0];
@@ -828,6 +1098,7 @@ function VideoToGifTool() {
 
   const run = React.useCallback(async () => {
     if (processing || items.length === 0) return;
+    activityStartedAtRef.current = Date.now();
     setProcessing(true);
     setSummary({ completed: 0, failed: 0, total: items.length });
     setItems((current) => current.map((item) => ({ ...item, status: 'staged', error: undefined, result: undefined })));

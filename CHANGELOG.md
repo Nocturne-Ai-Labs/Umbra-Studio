@@ -1,5 +1,128 @@
 # Changelog
 
+## v0.31.16
+
+### TL;DR - Setup After Updating
+
+Update Umbra Studio normally. No models, ComfyUI update, or custom nodes are
+required for this release.
+
+- **Tag suggestions are optional:** Open **Data Forge > Tag Corpus** and select
+  **Build All** for the complete local relation index or **Build Sample** for a
+  smaller index. The ordinary tag catalog continues to work without a corpus.
+- The builder downloads and indexes Danbooru post metadata only; it does not
+  download images. A complete scan currently covers about 11.95 million posts
+  and used approximately 10.6 GiB in our verified build. Sample corpora use
+  less disk space.
+- Corpus progress is resumable. **Pause** stops cleanly, and **Resume**
+  continues from the saved cursor instead of rebuilding completed data.
+- The database is stored at
+  `User/Config/DataForge/DanbooruTagCorpus.db`. Umbra updates preserve it. Do
+  not manually copy the temporary `-wal` or `-shm` files while Umbra is
+  running.
+
+### Local Danbooru Relation Corpus
+
+- Replaced the one-tag-at-a-time Dataset Research workspace with **Tag
+  Corpus**, a local SQLite and FTS relation index designed for prompt-writing
+  suggestions.
+- Added complete and sampled corpus modes, minimum-score filtering,
+  start/pause/resume/reset controls, saved-cursor recovery, progress and ETA,
+  database-size reporting, throughput history, and recent-batch activity.
+- Added a live tag matrix that visualizes the most common tags and their
+  co-occurrence in each completed ingestion wave while the corpus is built.
+- Optimized corpus ingestion and relation queries for the multi-million-post
+  dataset while keeping the UI responsive during progress polling.
+- Kept explicit-content indexing configurable instead of silently limiting the
+  corpus to safe posts.
+
+### Inline Related-Tag Suggestions
+
+- Added a horizontally scrolling suggestion rail directly beneath the shared
+  tag catalog in Power Prompter, Umbra UI, and Data Forge's Wildcard Generator.
+- Suggestions are derived from tags already selected in the catalog and rank
+  real corpus co-occurrence using support, conditional percentage, and lift.
+- Clicking a suggestion adds it immediately to the current catalog selection;
+  selected suggestions remain visibly marked.
+- Added smart and category-focused filtering for expressions, poses, clothing,
+  accessories, and explicit tags.
+- Multi-tag context now uses every selected seed tag rather than stopping at
+  the first five. This lets increasingly specific selections refine the same
+  related-tag query.
+- Removed the old separate Suggestions view so related tags remain visible
+  beside the catalog workflow instead of interrupting it.
+
+### Unified Queue Visibility And Alerts
+
+- Added read-only Umbra UI activity lanes to Power Prompter's Queue Manager for
+  text-to-image, image-to-image, inpaint, Canvas, video, upscale, watermark,
+  censor, GIF, and other Extras jobs.
+- Umbra UI jobs now appear where they actually cut into ComfyUI dispatch order
+  without changing Power Prompter queue generation, editing, or cancellation
+  behavior.
+- Added distinct submitted and completed notification events for Umbra UI jobs
+  and Power Prompter queue submissions. Existing volume and sound controls now
+  apply consistently instead of only sounding when a job is skipped.
+- Preserved expanded queue prompts across ordinary queue updates and clear
+  actions, restored scrolling for long prompt blocks, and allowed expanded
+  rows to show their full modular prompt.
+
+### Media, Selectors, And Interface Polish
+
+- Image Censor now supports multiple independently movable and resizable manual
+  regions per image.
+- Automatic detection and manual regions can run together, making it possible
+  to add coverage for anatomy or objects the detector does not recognize.
+- Updated Chromium range controls with a filled track and correctly centered
+  thumb so sliders match their polished Firefox presentation.
+- Kept Umbra's custom themed selectors on desktop while phone and tablet
+  layouts use native operating-system selectors for reliable touch input.
+- Removed the redundant Power Prompter **Browser** button now that the shared
+  floating Tag Catalog provides the same discovery workflow.
+- Removed the startup animation's oversized **Umbra Studio** wordmark while
+  retaining the matrix startup treatment.
+
+### Localization
+
+- Added the latest corpus, catalog, queue, alert, censor, selector, and media
+  interface language strings across German, Japanese, Simplified Chinese, and
+  Korean catalogs.
+- Added a repeatable localization-catalog generation command and updated all
+  four localization audits for the new shared UI vocabulary.
+
+### Verification
+
+- Completed and checkpointed a full corpus with **11,949,552 indexed posts**;
+  canonical and FTS tables both contain 11,949,552 rows.
+- Passed full `PRAGMA integrity_check` with `ok`, then copied the closed database
+  and confirmed an identical SHA-256 digest on the portable copy.
+- Verified live suggestions for `lying` include `on_back`, `on_side`,
+  `on_stomach`, `spread_legs`, and other statistically related tags.
+- Verified a six-tag AND query retains all six selected seeds and returns only
+  posts matching the complete context.
+- Passed full frontend ESLint, the production frontend build, all four
+  localization audits, the 50-workflow Umbra UI pipeline audit, media-tools
+  image/video/GIF qualification, and a production Bun backend bundle.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Related-tag suggestions no longer stop considering context after
+  five selected tags.
+- **Fixed:** Suggestion results no longer reset whenever corpus progress polling
+  updates the indexed-post count.
+- **Fixed:** Long expanded Queue Manager prompts can be scrolled and viewed in
+  full, and clear actions no longer collapse unrelated queue rows.
+- **Fixed:** Queue alert sounds now fire for normal submissions and successful
+  completions, not only skip actions.
+- **Improved:** The old Dataset Research surface is replaced by one resumable,
+  observable corpus workflow built for millions of posts.
+- **Improved:** Related tags are clickable inline badges instead of a separate
+  catalog tab.
+- **Improved:** Image censor batches can combine automatic detection with any
+  number of manual regions per source image.
+- **Improved:** Desktop sliders and selectors are polished consistently while
+  touch devices retain native selector ergonomics.
+
 ## v0.31.15
 
 ### TL;DR - Setup After Updating

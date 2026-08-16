@@ -54,6 +54,10 @@ import {
   type UmbraImageExportSettings,
 } from '@/components/umbra-ui/UmbraImageExportControls';
 import { browseUmbraUiMediaToolsSourceFiles } from '@/lib/umbraUiMediaTools';
+import {
+  usePublishUmbraQueueActivity,
+  type UmbraQueueActivity,
+} from '@/lib/umbraQueueActivity';
 
 const IMAGE_EXTENSION_PATTERN = /\.(?:avif|bmp|gif|jpe?g|png|tiff?|webp)$/i;
 const MAX_UPSCALE_BATCH_ITEMS = 512;
@@ -169,6 +173,23 @@ export function UmbraExtrasWorkspace({
   const [sources, setSources] = React.useState<StagedUpscaleSource[]>([]);
   const [activeTool, setActiveTool] = React.useState<UmbraExtrasToolMode>('upscale');
   const [job, setJob] = React.useState<UmbraUiUpscaleJob | null>(null);
+  const queueActivity = React.useMemo<UmbraQueueActivity | null>(() => job ? ({
+    id: `umbra-upscale:${job.id}`,
+    owner: 'umbra-ui-extras-upscale',
+    feature: 'upscale',
+    label: job.modelName ? `Upscale - ${job.modelName}` : 'Upscale',
+    detail: `${job.maxDimension}px long edge - ${job.outputFormat.toUpperCase()}`,
+    status: job.status,
+    total: job.total,
+    completed: job.completed,
+    failed: job.failed,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    placement: job.queuePlacement,
+    requestId: job.id,
+    readonly: true,
+  }) : null, [job]);
+  usePublishUmbraQueueActivity('umbra-ui-extras-upscale', queueActivity);
   const [submitting, setSubmitting] = React.useState(false);
   const [exportSettings, setExportSettings] = React.useState<UmbraImageExportSettings>(() => {
     const fallback: UmbraImageExportSettings = { resizeEnabled: true, longEdge: maxDimension, format: 'png', quality: 90 };

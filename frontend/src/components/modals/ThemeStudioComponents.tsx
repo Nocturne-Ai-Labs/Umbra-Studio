@@ -197,9 +197,9 @@ export const ThemeStudioSettings = () => {
                 onChange={(e) => theme.setAccentBlendRatio(parseInt(e.target.value))}
                 style={{
                   ...sliderStyle(theme.accentBlendRatio, 0, 100),
-                  background: `linear-gradient(120deg, ${theme.colors.accent} 0%, ${theme.colors.accent} ${theme.accentBlendRatio}%, ${theme.colors.accentSecondary} 100%)`,
+                  backgroundImage: `linear-gradient(120deg, ${theme.colors.accent} 0%, ${theme.colors.accent} ${theme.accentBlendRatio}%, ${theme.colors.accentSecondary} 100%)`,
                 }}
-                className="w-full h-2 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-black/40 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:hover:scale-125"
+                className="umbra-accent-mix-slider"
               />
             </div>
 

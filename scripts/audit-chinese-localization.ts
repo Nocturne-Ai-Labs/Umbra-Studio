@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
-import { translateLegacyUiText } from '../frontend/src/i18n/legacyUiLocalization';
+import { hasLegacyUiTranslation, translateLegacyUiText } from '../frontend/src/i18n/legacyUiLocalization';
 
 const COMPONENT_ROOT = path.resolve('frontend/src/components');
 const MINIMUM_STATIC_COVERAGE = 75;
@@ -56,7 +56,7 @@ function walk(directory: string) {
 walk(COMPONENT_ROOT);
 
 const untranslated = [...values]
-  .filter((value) => translateLegacyUiText('zh-CN', value) === value)
+  .filter((value) => !hasLegacyUiTranslation('zh-CN', value) && translateLegacyUiText('zh-CN', value) === value)
   .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }));
 const translatedCount = values.size - untranslated.length;
 const coverage = values.size > 0 ? Math.round((translatedCount / values.size) * 100) : 100;

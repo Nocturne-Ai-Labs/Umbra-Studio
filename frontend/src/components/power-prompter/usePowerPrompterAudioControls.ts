@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect } from 'react';
 import type {
   PowerPrompterCompletionSoundStyle,
   PowerPrompterSettings,
 } from '@/types/powerPrompter';
-import { DEFAULT_POWER_PROMPTER_SETTINGS } from '@/lib/powerPrompter';
 import {
-  POWER_PROMPTER_SOUND_PROFILES,
   POWER_PROMPTER_SOUND_STYLE_GLASS_TICK,
   POWER_PROMPTER_SOUND_STYLE_OPTIONS,
-  clampAlertLinearGain,
   clampCompletionSoundVolume,
-  getCompletionAudioContext,
+  configurePowerPrompterNotificationAudio,
+  playPowerPrompterNotificationSound,
+  primePowerPrompterNotificationAudio,
 } from '@/components/power-prompter/powerPrompterAudio';
 
 type PersistPowerPrompterSettings = (
@@ -31,84 +30,23 @@ export function usePowerPrompterAudioControls({
   persistSettings,
   showToast,
 }: UsePowerPrompterAudioControlsOptions) {
-  const completionAudioContextRef = useRef<AudioContext | null>(null);
-  const completionSoundEnabledRef = useRef<boolean>(DEFAULT_POWER_PROMPTER_SETTINGS.generationCompleteSoundEnabled);
-  const completionSoundStyleRef = useRef<PowerPrompterCompletionSoundStyle>(DEFAULT_POWER_PROMPTER_SETTINGS.generationCompleteSoundStyle);
-  const completionSoundVolumeRef = useRef<number>(DEFAULT_POWER_PROMPTER_SETTINGS.generationCompleteSoundVolume);
-
   const primeCompletionSound = useCallback(async (): Promise<boolean> => {
-    const context = getCompletionAudioContext(completionAudioContextRef.current);
-    if (!context) return false;
-    completionAudioContextRef.current = context;
-    if (context.state === 'running') return true;
-    try {
-      await context.resume();
-      return String(context.state) === 'running';
-    } catch {
-      return false;
-    }
+    return primePowerPrompterNotificationAudio();
   }, []);
 
   const playCompletionSound = useCallback(() => {
-    if (!completionSoundEnabledRef.current) return;
-    const context = getCompletionAudioContext(completionAudioContextRef.current);
-    if (!context) return;
-    completionAudioContextRef.current = context;
+    playPowerPrompterNotificationSound('completed');
+  }, []);
 
-    const scheduleCompletionSound = () => {
-      const style = completionSoundStyleRef.current || POWER_PROMPTER_SOUND_STYLE_GLASS_TICK;
-      const volume = clampCompletionSoundVolume(completionSoundVolumeRef.current);
-      if (volume <= 0.001) return;
-      const now = context.currentTime;
-      const masterGain = context.createGain();
-      masterGain.gain.setValueAtTime(0.0001, now);
-      masterGain.connect(context.destination);
-
-      const scheduleTone = (
-        frequency: number,
-        start: number,
-        duration: number,
-        gainPeak: number,
-        wave: OscillatorType
-      ) => {
-        const oscillator = context.createOscillator();
-        const gainNode = context.createGain();
-        oscillator.type = wave;
-        oscillator.frequency.setValueAtTime(frequency, start);
-        gainNode.gain.setValueAtTime(0.0001, start);
-        gainNode.gain.exponentialRampToValueAtTime(gainPeak, start + Math.min(0.012, duration * 0.4));
-        gainNode.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-        oscillator.connect(gainNode);
-        gainNode.connect(masterGain);
-        oscillator.start(start);
-        oscillator.stop(start + duration);
-      };
-
-      const profile = POWER_PROMPTER_SOUND_PROFILES[style] || POWER_PROMPTER_SOUND_PROFILES[POWER_PROMPTER_SOUND_STYLE_GLASS_TICK];
-      for (const tone of profile.tones) {
-        scheduleTone(tone.frequency, now + tone.delay, tone.duration, tone.gain, profile.wave);
-      }
-      masterGain.gain.setValueAtTime(0.0001, now);
-      masterGain.gain.exponentialRampToValueAtTime(clampAlertLinearGain(profile.peak * volume), now + profile.attack);
-      masterGain.gain.exponentialRampToValueAtTime(0.0001, now + profile.release);
-    };
-
-    if (context.state !== 'running') {
-      void context.resume().then(() => {
-        if (context.state === 'running') scheduleCompletionSound();
-      }).catch(() => undefined);
-      return;
-    }
-    scheduleCompletionSound();
+  const playSubmissionSound = useCallback(() => {
+    playPowerPrompterNotificationSound('submitted');
   }, []);
 
   const handleActivePromptTypeProgress = useCallback((_charsAdded: number) => undefined, []);
   const handleChainLinkFeedback = useCallback((_event: 'anchor' | 'toggle' | 'save' | 'clear' | 'done') => undefined, []);
 
   useEffect(() => {
-    completionSoundEnabledRef.current = settings.generationCompleteSoundEnabled !== false;
-    completionSoundStyleRef.current = (settings.generationCompleteSoundStyle || POWER_PROMPTER_SOUND_STYLE_GLASS_TICK) as PowerPrompterCompletionSoundStyle;
-    completionSoundVolumeRef.current = clampCompletionSoundVolume(settings.generationCompleteSoundVolume);
+    configurePowerPrompterNotificationAudio(settings);
   }, [
     settings.generationCompleteSoundEnabled,
     settings.generationCompleteSoundStyle,
@@ -130,15 +68,6 @@ export function usePowerPrompterAudioControls({
     };
   }, [primeCompletionSound]);
 
-  useEffect(() => {
-    return () => {
-      const context = completionAudioContextRef.current;
-      completionAudioContextRef.current = null;
-      if (!context) return;
-      void context.close().catch(() => undefined);
-    };
-  }, []);
-
   const handleToggleCompletionSound = useCallback(async () => {
     const enabledNext = settings.generationCompleteSoundEnabled === false;
     const nextSettings: PowerPrompterSettings = {
@@ -149,9 +78,7 @@ export function usePowerPrompterAudioControls({
       editorMode: 'cards',
     };
     setSettings(nextSettings);
-    completionSoundEnabledRef.current = enabledNext;
-    completionSoundStyleRef.current = nextSettings.generationCompleteSoundStyle;
-    completionSoundVolumeRef.current = nextSettings.generationCompleteSoundVolume;
+    configurePowerPrompterNotificationAudio(nextSettings);
     if (enabledNext) {
       void primeCompletionSound();
     }
@@ -172,8 +99,7 @@ export function usePowerPrompterAudioControls({
       editorMode: 'cards',
     };
     setSettings(nextSettings);
-    completionSoundStyleRef.current = nextStyle;
-    completionSoundVolumeRef.current = nextSettings.generationCompleteSoundVolume;
+    configurePowerPrompterNotificationAudio(nextSettings);
     if (nextSettings.generationCompleteSoundEnabled !== false) {
       void primeCompletionSound().then((ready) => {
         if (ready) playCompletionSound();
@@ -194,7 +120,7 @@ export function usePowerPrompterAudioControls({
       editorMode: 'cards',
     };
     setSettings(nextSettings);
-    completionSoundVolumeRef.current = nextVolume;
+    configurePowerPrompterNotificationAudio(nextSettings);
     const persisted = await persistSettings(nextSettings, { silent: true });
     if (!persisted) {
       showToast('Failed to update generation sound volume', 'error');
@@ -203,6 +129,7 @@ export function usePowerPrompterAudioControls({
 
   return {
     playCompletionSound,
+    playSubmissionSound,
     handleActivePromptTypeProgress,
     handleChainLinkFeedback,
     handleToggleCompletionSound,

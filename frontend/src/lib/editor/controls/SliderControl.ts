@@ -87,7 +87,7 @@ export class SliderControl {
       style.id = styleId;
       style.textContent = `
         .umbra-slider::-webkit-slider-runnable-track {
-          height: 5px; border-radius: 999px; background: #2a2d35;
+          height: 5px; border-radius: 999px; background: transparent;
         }
         .umbra-slider::-webkit-slider-thumb {
           -webkit-appearance: none; width: 13px; height: 13px;

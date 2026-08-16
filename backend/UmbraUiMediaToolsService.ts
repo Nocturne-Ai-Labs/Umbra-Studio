@@ -222,9 +222,7 @@ export async function applyUmbraUiImageCensor(options: {
     : options.region ? [options.region] : [];
   const regions = requestedRegions.map(normalizeCensorRegion);
   if (regions.length === 0) {
-    throw new Error(options.regions !== undefined
-      ? 'No selected body parts were detected in this image. Lower the detection confidence or use Manual Region.'
-      : 'No censor regions were found.');
+    throw new Error('No censor regions were found. Add a manual region, enable automatic detection, or lower the detection confidence.');
   }
   const source = sharp(options.sourcePath).rotate();
   const metadata = await source.metadata();

@@ -49,6 +49,7 @@ import {
 } from '../../../../shared/umbra-ui/videoExtension';
 import { resolveUmbraUiQueueControlTargets } from '@/lib/umbraUiQueueControls';
 import type { UmbraUiPromptSegment } from '@/lib/umbraUiPromptSegments';
+import { buildUmbraQueueActivitiesFromControllerSnapshot } from '@/lib/umbraQueueActivity';
 
 const RECONNECT_DELAY_MS = 1500;
 const QUEUE_ACK_TIMEOUT_MS = 15000;
@@ -634,6 +635,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   const ownedRequestIdsRef = React.useRef(new Set<string>());
   const [connected, setConnected] = React.useState(false);
   const [queueSnapshot, setQueueSnapshot] = React.useState<QueueSnapshot | null>(null);
+  const queueActivities = React.useMemo(
+    () => buildUmbraQueueActivitiesFromControllerSnapshot(queueSnapshot),
+    [queueSnapshot],
+  );
   const [generationPreview, setGenerationPreview] = React.useState<UmbraGenerationPreview | null>(null);
   const [latestSavedImage, setLatestSavedImage] = React.useState<UmbraSavedImage | null>(null);
   const [videoJobs, setVideoJobs] = React.useState<UmbraVideoReviewJob[]>([]);
@@ -2071,6 +2076,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     requestModelInfo,
     inheritedGeneration,
     queueSummary,
+    queueActivities,
     videoJobs,
     videoJobsLoading,
     videoJobsError,
