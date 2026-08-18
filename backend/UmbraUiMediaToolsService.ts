@@ -215,15 +215,12 @@ export async function applyUmbraUiImageCensor(options: {
   regions?: UmbraUiCensorRegion[];
   mosaicSize: number;
   exportSettings: UmbraUiImageExportSettings;
-}): Promise<void> {
+}): Promise<boolean> {
   const exportSettings = normalizeImageExportSettings(options.exportSettings);
   const requestedRegions = options.regions !== undefined
     ? options.regions
     : options.region ? [options.region] : [];
   const regions = requestedRegions.map(normalizeCensorRegion);
-  if (regions.length === 0) {
-    throw new Error('No censor regions were found. Add a manual region, enable automatic detection, or lower the detection confidence.');
-  }
   const source = sharp(options.sourcePath).rotate();
   const metadata = await source.metadata();
   const originalWidth = Math.max(1, Number(metadata.width) || 1);
@@ -238,6 +235,20 @@ export async function applyUmbraUiImageCensor(options: {
     .ensureAlpha()
     .png()
     .toBuffer();
+  const writeOutput = async (image: any) => {
+    await fs.mkdir(dirname(options.outputPath), { recursive: true });
+    if (exportSettings.format === 'jpeg') {
+      await image.flatten({ background: '#ffffff' }).jpeg({ quality: exportSettings.quality, chromaSubsampling: '4:4:4' }).toFile(options.outputPath);
+    } else if (exportSettings.format === 'webp') {
+      await image.webp({ quality: exportSettings.quality, smartSubsample: true }).toFile(options.outputPath);
+    } else {
+      await image.png({ compressionLevel: 9 }).toFile(options.outputPath);
+    }
+  };
+  if (regions.length === 0) {
+    await writeOutput(sharp(prepared));
+    return false;
+  }
   const compositeLayers: sharp.OverlayOptions[] = [];
   for (const region of regions) {
     const left = Math.max(0, Math.min(outputWidth - 1, Math.round(outputWidth * region.x)));
@@ -268,15 +279,9 @@ export async function applyUmbraUiImageCensor(options: {
     compositeLayers.push({ input: censorLayer, left, top, blend: 'over' });
   }
 
-  await fs.mkdir(dirname(options.outputPath), { recursive: true });
   const output = sharp(prepared).composite(compositeLayers);
-  if (exportSettings.format === 'jpeg') {
-    await output.flatten({ background: '#ffffff' }).jpeg({ quality: exportSettings.quality, chromaSubsampling: '4:4:4' }).toFile(options.outputPath);
-  } else if (exportSettings.format === 'webp') {
-    await output.webp({ quality: exportSettings.quality, smartSubsample: true }).toFile(options.outputPath);
-  } else {
-    await output.png({ compressionLevel: 9 }).toFile(options.outputPath);
-  }
+  await writeOutput(output);
+  return true;
 }
 
 export async function convertUmbraUiVideoToGif(options: {

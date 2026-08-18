@@ -20435,7 +20435,7 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
       Number(form.get('sequenceNumber')),
     );
     reservedOutputPath = outputPath;
-    await applyUmbraUiImageCensor({
+    const censored = await applyUmbraUiImageCensor({
       sourcePath,
       outputPath,
       mode,
@@ -20449,12 +20449,27 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
         quality: Number(form.get('quality')),
       },
     });
+    const outputStat = await fs.stat(outputPath);
+    galleryDb.upsertFolderFiles(dirname(outputPath), [{
+      path: outputPath,
+      folderPath: dirname(outputPath),
+      name: basename(outputPath),
+      type: 'image',
+      size: outputStat.size,
+      createdMs: outputStat.birthtimeMs || outputStat.mtimeMs,
+      modifiedMs: outputStat.mtimeMs,
+    }]);
+    const outputUids = galleryDb.resolveUidsForPaths([outputPath]);
+    const galleryTag = censored ? 'censored' : 'uncensored';
+    if (outputUids.length > 0) galleryDb.addTagsToFiles(outputUids, [galleryTag]);
     reservedOutputPath = '';
     return json({
       success: true,
       path: toClientPath(outputPath),
       filename,
       mediaType: 'image',
+      censored,
+      galleryTags: [galleryTag],
       detections,
     });
   } catch (error: any) {

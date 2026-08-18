@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.31.20
+
+### TL;DR - Image Censor Pass-Through
+
+No additional setup is required. Update Umbra Studio normally.
+
+- Images with no detected or manually selected censor region now pass through unchanged instead of failing.
+- Passed-through outputs are tagged `uncensored` in the Gallery.
+- Images with at least one applied censor region are tagged `censored` in the Gallery.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Image Censor Batch no longer reports a false failure when there is nothing to censor.
+- **Improved:** Censor results now register their Gallery tags immediately and the batch summary reports pass-through images.
+
 ## v0.31.19
 
 ### TL;DR - Wildcard Save Fix

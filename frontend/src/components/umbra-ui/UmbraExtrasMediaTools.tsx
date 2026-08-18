@@ -873,6 +873,7 @@ function ImageCensorTool() {
     setSummary({ completed: 0, failed: 0, total: items.length });
     setItems((current) => current.map((item) => ({ ...item, status: 'staged', error: undefined, result: undefined })));
     let firstFailureMessage = '';
+    let passedThroughCount = 0;
     const result = await runUmbraUiMediaBatch({
       items,
       onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
@@ -898,6 +899,7 @@ function ImageCensorTool() {
           imageFormat: exportSettings.format,
           quality: exportSettings.quality,
         });
+        if (next.censored === false) passedThroughCount += 1;
         setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, result: next } : entry));
       },
       onItemSettled: (item, error) => {
@@ -913,7 +915,7 @@ function ImageCensorTool() {
     showToast(
       result.failed
         ? `${result.completed} censored; ${result.failed} failed.${firstFailureMessage ? ` ${firstFailureMessage}` : ''}`
-        : `${result.completed} image${result.completed === 1 ? '' : 's'} censored.`,
+        : `${result.completed} image${result.completed === 1 ? '' : 's'} processed${passedThroughCount > 0 ? `; ${passedThroughCount} passed through uncensored.` : '.'}`,
       result.failed ? 'error' : 'success',
     );
   }, [autoDetectEnabled, censorConfigurationValid, censorMode, detectionPadding, detectionThreshold, exportSettings, items, manualRegionsByItem, manualRegionsEnabled, mosaicSize, outputFolder, overlay, overlayAsset, processing, selectedTargets, setItems, showToast]);

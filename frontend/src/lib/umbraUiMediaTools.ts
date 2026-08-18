@@ -2,6 +2,8 @@ export interface UmbraUiMediaToolResult {
   path: string;
   filename: string;
   mediaType: 'image' | 'video' | 'gif';
+  censored?: boolean;
+  galleryTags?: string[];
   detections?: Array<{
     target: 'femaleNipples' | 'maleGenitals' | 'femaleGenitals';
     score: number;
@@ -42,6 +44,8 @@ async function readMediaToolResponse(response: Response, fallback: string): Prom
     path: String(payload.path),
     filename: String(payload.filename || '').trim(),
     mediaType: payload.mediaType === 'video' || payload.mediaType === 'gif' ? payload.mediaType : 'image',
+    censored: typeof payload.censored === 'boolean' ? payload.censored : undefined,
+    galleryTags: Array.isArray(payload.galleryTags) ? payload.galleryTags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean) : undefined,
     detections: Array.isArray(payload.detections) ? payload.detections : undefined,
   };
 }
