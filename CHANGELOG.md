@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.31.18
+
+### TL;DR - Setup After Updating
+
+Update Umbra Studio normally. No models, ComfyUI update, or custom nodes are
+required for this release.
+
+- Wildcard Generator now supports progressive groups, random percentage splits,
+  and per-line enable/disable controls.
+- Existing wildcard files remain compatible. Empty placeholder groups are
+  ignored during preview generation instead of blocking the preview.
+- **Output Lines** is the number of wildcard entries to request. The old
+  1,000-line cap has been removed, so large requests may use substantially more
+  time and memory.
+
+### Wildcard Generator Controls
+
+- Added a **Progressive** group mode that advances through enabled options in
+  output order. This is useful for staged prompt content where later lines
+  should introduce later-stage options.
+- Added **Random Split** beside **Even Split** for quickly assigning varied
+  percentages to enabled options.
+- Added an enable checkbox to every wildcard line. Disabled lines remain in the
+  definition and retain their saved percentage, but are excluded from preview
+  generation until enabled again.
+- Renamed **Lines** to **Output Lines** and **Max Parts** to **Tags Per Line**
+  so the controls describe their actual behavior.
+
+### Compatibility
+
+- Legacy wildcard definitions continue to load. Existing optional-group
+  behavior remains supported in saved definitions, while new generator groups
+  no longer expose the confusing required toggle.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Empty generator groups no longer produce a misleading preview
+  failure when other groups contain options.
+- **Improved:** Wildcard previews can request more than 1,000 output lines
+  without the UI silently reducing the requested count.
+- **Improved:** Progressive generation remains isolated to the group where it
+  is enabled; other groups keep their existing selection behavior.
+
 ## v0.31.16
 
 ### TL;DR - Setup After Updating
@@ -2706,33 +2749,3 @@ copying their virtual environments.
 - Expanded Umbra UI image, video, inpainting, and media handoff workflows.
 - Expanded Data Forge dataset, captioning, search, and AI Toolkit integration.
 - Added Windows and Linux x64 portable ZIP packages.
-## v0.31.17
-
-### TL;DR - Setup After Updating
-
-No additional models, custom nodes, or manual migration are required for this
-mobile UI polish release. Update Umbra Studio normally and restart it after the
-update. Existing settings, cards, presets, and outputs are preserved.
-
-### Mobile UI Polish
-
-- Reworked Umbra UI and Extras navigation on phone layouts into full-width,
-  touch-friendly selectors so active workspaces and tools remain readable.
-- Simplified empty Metadata Scanner and Visual Analysis states to one focused
-  Add Media action instead of showing blank history and disabled controls.
-- Added mobile file-picker import controls for Metadata Scanner and Visual
-  Analysis while preserving existing Gallery handoffs, drag-and-drop, and
-  duplicate handling.
-- Kept tablet and desktop navigation, history rails, and populated inspector
-  controls intact.
-
-### Fixes And Quality-of-Life Recap
-
-- **Fixed:** Mobile Umbra UI and Extras tabs no longer clip or overflow on narrow
-  screens.
-- **Fixed:** Empty inspector workspaces no longer present misleading zero-item
-  toolbars.
-- **Improved:** Metadata Scanner and Visual Analysis can now be started directly
-  from a phone-sized layout.
-- **Improved:** Localized the new mobile navigation and empty-state controls for
-  English, German, Japanese, Simplified Chinese, and Korean.

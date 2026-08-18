@@ -76,3 +76,6 @@ NUL
 Thumbs.db
 .vscode/
 .idea/
+# Local package-build output is validated separately and is never committed.
+/artifacts/
+/release/

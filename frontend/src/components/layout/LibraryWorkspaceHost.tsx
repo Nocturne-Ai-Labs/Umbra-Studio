@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef } from 'react';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
+import { openUmbraUiExtrasTool } from '@/lib/umbraUiExtrasNavigation';
 
 const GALLERY_THEME_VARS = [
   '--umbra-accent',
@@ -1190,12 +1191,9 @@ export const LibraryWorkspaceHost = () => {
         const workspace = String(payload.workspace || '').trim();
         if (workspace !== 'scanner' && workspace !== 'waifudiffusion') return;
         const appStore = useStore.getState();
-        if (workspace === 'scanner' || workspace === 'waifudiffusion') {
-          appStore.setUI('imageInspectorTab', workspace === 'scanner' ? 'scanner' : 'waifu');
-          appStore.setActiveWorkspace('imageinspector');
-        } else {
-          appStore.setActiveWorkspace(workspace);
-        }
+        appStore.setUI('imageInspectorTab', workspace === 'scanner' ? 'scanner' : 'waifu');
+        appStore.setActiveWorkspace('umbraui');
+        openUmbraUiExtrasTool(workspace === 'scanner' ? 'metadata-scanner' : 'visual-analysis');
         return;
       }
       if (payload.type === 'gallery:pinned-folders-changed') {
@@ -1220,12 +1218,9 @@ export const LibraryWorkspaceHost = () => {
         const appStore = useStore.getState();
         appStore.addScannedImport(unique);
         
-        if (workspace === 'scanner' || workspace === 'waifudiffusion') {
-          appStore.setUI('imageInspectorTab', workspace === 'scanner' ? 'scanner' : 'waifu');
-          appStore.setActiveWorkspace('imageinspector');
-        } else {
-          appStore.setActiveWorkspace(workspace);
-        }
+        appStore.setUI('imageInspectorTab', workspace === 'scanner' ? 'scanner' : 'waifu');
+        appStore.setActiveWorkspace('umbraui');
+        openUmbraUiExtrasTool(workspace === 'scanner' ? 'metadata-scanner' : 'visual-analysis');
         
         appStore.showToast(
           workspace === 'scanner'

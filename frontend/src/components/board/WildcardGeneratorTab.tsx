@@ -53,6 +53,7 @@ type WildcardOption = {
   id: string;
   tags: WildcardTag[];
   chance: number;
+  enabled: boolean;
 };
 
 type WildcardGroup = {
@@ -60,6 +61,7 @@ type WildcardGroup = {
   name: string;
   enabled: boolean;
   required: boolean;
+  progressive: boolean;
   options: WildcardOption[];
 };
 
@@ -178,7 +180,7 @@ function createId(prefix: string): string {
 }
 
 function createGroup(name: string): WildcardGroup {
-  return { id: createId('group'), name, enabled: true, required: true, options: [] };
+  return { id: createId('group'), name, enabled: true, required: true, progressive: false, options: [] };
 }
 
 function normalizeStoredWildcardTag(rawTag: unknown): WildcardTag | null {
@@ -249,6 +251,7 @@ function normalizeStoredWildcardDefinition(rawDefinition: unknown): {
         id: String(option.id || createId(`option-${groupIndex}-${optionIndex}`)),
         tags,
         chance: Math.max(0, Math.min(100, Math.round(Number(option.chance) || 0))),
+        enabled: option.enabled !== false,
       };
     }).filter((option) => option.tags.length > 0);
     return {
@@ -256,12 +259,13 @@ function normalizeStoredWildcardDefinition(rawDefinition: unknown): {
       name: String(group.name || `Group ${groupIndex + 1}`).trim() || `Group ${groupIndex + 1}`,
       enabled: group.enabled !== false,
       required: group.required !== false,
+      progressive: group.progressive === true,
       options,
     };
   }).filter((group) => group.options.length > 0);
   if (groups.length === 0) return null;
   return {
-    count: Math.max(1, Math.min(1000, Math.floor(Number(record.count) || 50))),
+    count: Math.max(1, Math.floor(Number(record.count) || 50)),
     seed: Math.max(0, Math.min(0xffffffff, Math.floor(Number(record.seed) || 0))),
     maxTagsPerLine: Math.max(2, Math.min(40, Math.floor(Number(record.maxTagsPerLine) || 12))),
     prioritizePostCounts: record.prioritizePostCounts !== false,
@@ -291,17 +295,28 @@ function allocateWholePercentages(weights: number[], total = 100): number[] {
 }
 
 function evenlyDistributeOptions(options: WildcardOption[]): WildcardOption[] {
-  const chances = allocateWholePercentages(options.map(() => 1));
-  return options.map((option, index) => ({ ...option, chance: chances[index] || 0 }));
+  const active = options.filter((option) => option.enabled);
+  const chances = allocateWholePercentages(active.map(() => 1));
+  let activeIndex = 0;
+  return options.map((option) => option.enabled ? { ...option, chance: chances[activeIndex++] || 0 } : option);
 }
 
-function appendOptionWithBalancedChance(options: WildcardOption[], option: Omit<WildcardOption, 'chance'>): WildcardOption[] {
-  if (options.length === 0) return [{ ...option, chance: 100 }];
-  const newChance = Math.max(1, Math.round(100 / (options.length + 1)));
-  const existingChances = allocateWholePercentages(options.map((entry) => entry.chance), 100 - newChance);
+function randomlyDistributeOptions(options: WildcardOption[]): WildcardOption[] {
+  const active = options.filter((option) => option.enabled);
+  const chances = allocateWholePercentages(active.map(() => Math.random() + 0.01));
+  let activeIndex = 0;
+  return options.map((option) => option.enabled ? { ...option, chance: chances[activeIndex++] || 0 } : option);
+}
+
+function appendOptionWithBalancedChance(options: WildcardOption[], option: Omit<WildcardOption, 'chance' | 'enabled'>): WildcardOption[] {
+  const active = options.filter((entry) => entry.enabled);
+  if (active.length === 0) return [...options, { ...option, enabled: true, chance: 100 }];
+  const newChance = Math.max(1, Math.round(100 / (active.length + 1)));
+  const existingChances = allocateWholePercentages(active.map((entry) => entry.chance), 100 - newChance);
+  let activeIndex = 0;
   return [
-    ...options.map((entry, index) => ({ ...entry, chance: existingChances[index] || 0 })),
-    { ...option, chance: newChance },
+    ...options.map((entry) => entry.enabled ? { ...entry, chance: existingChances[activeIndex++] || 0 } : entry),
+    { ...option, enabled: true, chance: newChance },
   ];
 }
 
@@ -313,13 +328,15 @@ function removeOptionAndRebalance(options: WildcardOption[], optionId: string): 
 }
 
 function rebalanceOptionChance(options: WildcardOption[], optionId: string, rawChance: number): WildcardOption[] {
-  if (options.length <= 1) return options.map((option) => ({ ...option, chance: 100 }));
+  const active = options.filter((option) => option.enabled);
+  if (active.length <= 1) return options.map((option) => option.enabled ? { ...option, chance: 100 } : option);
   const targetChance = Math.max(0, Math.min(100, Math.round(rawChance)));
-  const others = options.filter((option) => option.id !== optionId);
+  const others = active.filter((option) => option.id !== optionId);
   const otherChances = allocateWholePercentages(others.map((option) => option.chance), 100 - targetChance);
   let otherIndex = 0;
   return options.map((option) => {
     if (option.id === optionId) return { ...option, chance: targetChance };
+    if (!option.enabled) return option;
     const chance = otherChances[otherIndex] || 0;
     otherIndex += 1;
     return { ...option, chance };
@@ -1211,8 +1228,16 @@ function EditableWildcardOption({
   const freeform = option.tags.length === 1 && (isFreeformEntry(option.tags[0]) || isNaturalLanguageEntry(option.tags[0]));
   const label = optionText(option);
   return (
-    <div className="rounded-sm border border-white/[0.08] bg-black/25 px-2 py-2">
+    <div className={`rounded-sm border border-white/[0.08] bg-black/25 px-2 py-2 ${option.enabled ? '' : 'opacity-55'}`}>
       <div className="flex min-h-7 items-center gap-2">
+        <input
+          type="checkbox"
+          checked={option.enabled}
+          onChange={() => onUpdate({ ...option, enabled: !option.enabled })}
+          aria-label={`Enable wildcard line ${optionIndex + 1}`}
+          title={option.enabled ? 'Disable wildcard line' : 'Enable wildcard line'}
+          className="shrink-0"
+        />
         <span className="w-6 shrink-0 font-mono text-[9px] text-zinc-700">{String(optionIndex + 1).padStart(2, '0')}</span>
         <span className={`shrink-0 rounded-sm border px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.08em] ${freeform ? 'border-fuchsia-300/20 bg-fuchsia-500/[0.08] text-fuchsia-200' : 'border-cyan-300/20 bg-cyan-500/[0.08] text-cyan-200'}`}>
           {freeform ? 'Freeform' : 'Catalog'}
@@ -1250,7 +1275,7 @@ function EditableWildcardOption({
           max={100}
           step={1}
           value={option.chance}
-          disabled={optionCount === 1 || !groupEnabled}
+          disabled={optionCount <= 1 || !groupEnabled || !option.enabled}
           onChange={(event) => onChanceChange(Number(event.target.value))}
           aria-label={`Chance for ${label}`}
           className="h-1.5 w-full cursor-pointer disabled:cursor-default disabled:opacity-50"
@@ -1300,10 +1325,6 @@ function GroupPanel({
           aria-label={`Group ${index + 1} name`}
           className="settings-input h-8 min-w-36 flex-1 !py-1 text-xs font-bold"
         />
-        <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-sm border border-white/10 px-2 text-[9px] font-black uppercase tracking-[0.08em] text-zinc-400">
-          <input type="checkbox" checked={group.required} onChange={(event) => onChange({ ...group, required: event.target.checked })} />
-          Required
-        </label>
         {group.options.length > 1 ? (
           <button
             type="button"
@@ -1313,6 +1334,16 @@ function GroupPanel({
             <RefreshCw className="h-3 w-3" /> Even Split
           </button>
         ) : null}
+        {group.options.length > 1 ? (
+          <button
+            type="button"
+            onClick={() => onChange({ ...group, options: randomlyDistributeOptions(group.options) })}
+            className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-fuchsia-300/20 px-2 text-[9px] font-black uppercase tracking-[0.08em] text-fuchsia-100/80 hover:border-fuchsia-300/40 hover:text-fuchsia-50"
+          >
+            <Dices className="h-3 w-3" /> Random Split
+          </button>
+        ) : null}
+        <button type="button" onClick={() => onChange({ ...group, progressive: !group.progressive })} className={`h-8 rounded-sm border px-2 text-[9px] font-black uppercase tracking-[0.08em] ${group.progressive ? 'border-amber-300/30 text-amber-100' : 'border-white/10 text-zinc-500'}`} title="Advance through this group's enabled lines in order as output lines progress">{group.progressive ? 'Progressive' : 'Random Order'}</button>
         <button type="button" onClick={() => onChange({ ...group, enabled: !group.enabled })} className={`h-8 rounded-sm border px-2 text-[9px] font-black uppercase tracking-[0.08em] ${group.enabled ? 'border-emerald-300/25 text-emerald-200' : 'border-white/10 text-zinc-600'}`}>{group.enabled ? 'Enabled' : 'Disabled'}</button>
         <button type="button" onClick={onRemove} className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-red-300/15 text-red-200/60 hover:text-red-100" title={`Remove ${group.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
       </div>
@@ -1334,7 +1365,7 @@ function GroupPanel({
             option={option}
             optionIndex={optionIndex}
             groupEnabled={group.enabled}
-            optionCount={group.options.length}
+            optionCount={group.options.filter((entry) => entry.enabled).length}
             onUpdate={updateOption}
             onRemove={() => onChange({ ...group, options: removeOptionAndRebalance(group.options, option.id) })}
             onChanceChange={(chance) => onChange({
@@ -1529,11 +1560,11 @@ export function WildcardGeneratorTab({ onOpenCorpus }: { onOpenCorpus?: () => vo
 
           <div className="grid grid-cols-3 gap-2">
             <label>
-              <span className="mb-1 block text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500">Lines</span>
-              <input type="number" min={1} max={1000} value={count} onChange={(event) => setCount(Math.max(1, Math.min(1000, Number(event.target.value) || 1)))} className="settings-input h-9 !py-1.5 text-xs" />
+              <span className="mb-1 block text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500">Output Lines</span>
+              <input type="number" min={1} value={count} onChange={(event) => setCount(Math.max(1, Math.floor(Number(event.target.value) || 1)))} className="settings-input h-9 !py-1.5 text-xs" />
             </label>
             <label>
-              <span className="mb-1 block text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500">Max Parts</span>
+              <span className="mb-1 block text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500">Tags Per Line</span>
               <input type="number" min={2} max={40} value={maxTagsPerLine} onChange={(event) => setMaxTagsPerLine(Math.max(2, Math.min(40, Number(event.target.value) || 2)))} className="settings-input h-9 !py-1.5 text-xs" />
             </label>
             <label>
@@ -1583,7 +1614,7 @@ export function WildcardGeneratorTab({ onOpenCorpus }: { onOpenCorpus?: () => vo
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-zinc-100"><Layers3 className="h-4 w-4 text-cyan-200" /> Combination Groups</h2>
-                <p className="mt-1 text-[10px] text-zinc-600">Each generated line selects one bundled option from every required group.</p>
+                <p className="mt-1 text-[10px] text-zinc-600">Each non-empty group contributes one bundled option to a generated line.</p>
               </div>
               <button type="button" onClick={() => setGroups((current) => [...current, createGroup(`Group ${current.length + 1}`)])} className="inline-flex h-9 items-center gap-1.5 rounded-md border border-emerald-300/25 bg-emerald-500/10 px-3 text-[9px] font-black uppercase tracking-[0.1em] text-emerald-100"><Plus className="h-3.5 w-3.5" /> Add Group</button>
             </div>
@@ -1617,7 +1648,7 @@ export function WildcardGeneratorTab({ onOpenCorpus }: { onOpenCorpus?: () => vo
                 <div>
                   <DatabaseZap className="mx-auto h-9 w-9 text-zinc-700" />
                   <div className="mt-3 text-sm font-bold text-zinc-400">No wildcard preview yet</div>
-                  <div className="mt-1 text-[10px] text-zinc-600">Add options to each group, then generate.</div>
+                  <div className="mt-1 text-[10px] text-zinc-600">Add options to at least one group, then generate.</div>
                 </div>
               </div>
             ) : (

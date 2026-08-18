@@ -36,6 +36,7 @@ export interface DataForgeWildcardOption {
   id?: string;
   tags?: DataForgeWildcardTagRef[] | string[] | string;
   chance?: number;
+  enabled?: boolean;
 }
 
 export interface DataForgeWildcardGroup {
@@ -43,6 +44,7 @@ export interface DataForgeWildcardGroup {
   name?: string;
   enabled?: boolean;
   required?: boolean;
+  progressive?: boolean;
   options?: DataForgeWildcardOption[];
 }
 
@@ -412,6 +414,7 @@ function normalizeOption(option: DataForgeWildcardOption, catalog: CatalogCacheE
     id: String(option?.id || ''),
     tags,
     chance: Number.isFinite(rawChance) ? Math.max(0, Math.min(100, rawChance)) : null,
+    enabled: option?.enabled !== false,
   };
 }
 
@@ -525,13 +528,19 @@ function weightedPick<T extends { tags: DataForgeWildcardTagRef[]; chance: numbe
   return options[options.length - 1];
 }
 
+function progressivePick<T extends { tags: DataForgeWildcardTagRef[]; chance: number }>(options: T[], lineIndex: number, lineCount: number): T {
+  const index = lineCount <= 1 ? 0 : Math.min(options.length - 1, Math.floor((lineIndex * options.length) / lineCount));
+  return options[index];
+}
+
 export async function generateDataForgeWildcard(options: {
   csvPath: string;
   request: DataForgeWildcardGenerateRequest;
 }): Promise<DataForgeWildcardGenerateResult> {
   const catalog = await loadCatalog(options.csvPath);
   const request = options.request || {};
-  const count = Math.max(1, Math.min(1000, Math.floor(Number(request.count) || 50)));
+  const requestedCount = Number(request.count);
+  const count = Math.max(1, Number.isFinite(requestedCount) ? Math.floor(requestedCount) : 50);
   const seed = Math.max(0, Math.min(0xffffffff, Math.floor(Number(request.seed) || 1)));
   const maxTagsPerLine = Math.max(2, Math.min(40, Math.floor(Number(request.maxTagsPerLine) || 12)));
   const prioritizePostCounts = request.prioritizePostCounts !== false;
@@ -544,30 +553,32 @@ export async function generateDataForgeWildcard(options: {
       const options = (Array.isArray(group.options) ? group.options : [])
         .slice(0, 250)
         .map((option) => normalizeOption(option, catalog));
-      if (options.length === 0) throw new Error(`${String(group.name || `Group ${groupIndex + 1}`)} has no options.`);
       return {
         id: String(group.id || `group-${groupIndex + 1}`),
         name: String(group.name || `Group ${groupIndex + 1}`).trim(),
         required: group.required !== false,
+        progressive: group.progressive === true,
         options: normalizeOptionChances(options),
       };
-    });
+    })
+    .filter((group) => group.options.length > 0);
   if (groups.length === 0) throw new Error('Add at least one enabled wildcard group.');
 
   const normalizedGroups = groups.map((group) => {
-    const eligibleOptions = group.options.filter((option) => option.chance > 0);
+    const eligibleOptions = group.options.filter((option) => option.enabled !== false && option.chance > 0);
     if (eligibleOptions.length === 0) throw new Error(`${group.name} needs at least one option above 0%.`);
-    if (group.required) return eligibleOptions;
+    if (group.required) return { ...group, options: eligibleOptions };
     const averageChance = 100 / eligibleOptions.length;
-    return [{ id: `${group.id}-empty`, tags: [] as DataForgeWildcardTagRef[], chance: averageChance }, ...eligibleOptions];
+    return { ...group, options: [{ id: `${group.id}-empty`, tags: [] as DataForgeWildcardTagRef[], chance: averageChance }, ...eligibleOptions] };
   });
-  const possibleCombinations = normalizedGroups.reduce((total, group) => Math.min(Number.MAX_SAFE_INTEGER, total * group.length), 1);
+  const possibleCombinations = normalizedGroups.reduce((total, group) => Math.min(Number.MAX_SAFE_INTEGER, total * group.options.length), 1);
   const rowsByValue = new Map<string, InternalGeneratedRow>();
   const enumerationLimit = 100_000;
   const random = createSeededRandom(seed);
+  const hasProgressiveGroup = normalizedGroups.some((group) => group.progressive);
 
-  if (possibleCombinations <= enumerationLimit) {
-    const combinations = enumerateCombinations(normalizedGroups, enumerationLimit);
+  if (possibleCombinations <= enumerationLimit && !hasProgressiveGroup) {
+    const combinations = enumerateCombinations(normalizedGroups.map((group) => group.options), enumerationLimit);
     const ranked = combinations
       .map((combination) => {
         const row = buildRow(baseTags, combination, forbidden, maxTagsPerLine);
@@ -587,7 +598,9 @@ export async function generateDataForgeWildcard(options: {
   } else {
     const maximumAttempts = Math.min(500_000, Math.max(count * 200, 20_000));
     for (let attempt = 0; attempt < maximumAttempts && rowsByValue.size < count; attempt += 1) {
-      const combination = normalizedGroups.map((group) => weightedPick(group, random, prioritizePostCounts));
+      const combination = normalizedGroups.map((group) => group.progressive
+        ? progressivePick(group.options, attempt, count)
+        : weightedPick(group.options, random, prioritizePostCounts));
       const row = buildRow(baseTags, combination, forbidden, maxTagsPerLine);
       if (row && !rowsByValue.has(row.value)) rowsByValue.set(row.value, row);
     }
