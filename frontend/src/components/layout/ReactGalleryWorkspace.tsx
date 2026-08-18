@@ -46,6 +46,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
+import { openUmbraUiExtrasTool } from '@/lib/umbraUiExtrasNavigation';
 import { cn } from '@/lib/utils';
 import {
   GALLERY_DIRECT_BASE_URLS,
@@ -6355,7 +6356,8 @@ export function ReactGalleryWorkspace() {
     }
     addScannedImport(normalizedPaths);
     useStore.getState().setUI('imageInspectorTab', workspace === 'scanner' ? 'scanner' : 'waifu');
-    setActiveWorkspace('imageinspector');
+    setActiveWorkspace('umbraui');
+    openUmbraUiExtrasTool(workspace === 'scanner' ? 'metadata-scanner' : 'visual-analysis');
     addToast({
       type: 'success',
       message: workspace === 'scanner'

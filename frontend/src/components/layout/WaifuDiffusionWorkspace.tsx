@@ -28,6 +28,7 @@ import {
   setWaifuPrependPresets,
   subscribeWaifuPrependPresets,
 } from '@/lib/waifuPrependPresets';
+import { useI18n } from '@/i18n';
 
 interface WaifuTagScore {
   tag: string;
@@ -141,13 +142,22 @@ const NATURAL_MODEL_OPTIONS = [
 
 type VisualAnalysisMode = 'tags' | 'caption';
 
-export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: boolean }) {
+export function WaifuDiffusionWorkspace({
+  hideHeader = false,
+  active: activeOverride,
+  remoteMode = 'desktop',
+}: {
+  hideHeader?: boolean;
+  active?: boolean;
+  remoteMode?: string;
+}) {
   const [items, setItems] = useState<WaifuItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [batchTagging, setBatchTagging] = useState(false);
   const [analysisMode, setAnalysisMode] = useState<VisualAnalysisMode>('tags');
   const itemsRef = useRef<WaifuItem[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [waifuOptions, setWaifuOptions] = useState(() => ({
     modelRepo: WAIFU_MODEL_OPTIONS[0].id,
     generalThreshold: 0.35,
@@ -171,13 +181,15 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
     maxNewTokens: 192,
   });
   const { activeWorkspace, setActiveWorkspace, showToast, ui, clearScannedImport } = useStore();
+  const { t } = useI18n();
   const prependPresets = useSyncExternalStore(
     subscribeWaifuPrependPresets,
     getWaifuPrependPresetsSnapshot,
     () => []
   );
 
-  const isActive = activeWorkspace === 'imageinspector' && ui.imageInspectorTab === 'waifu';
+  const isActive = activeOverride
+    ?? (activeWorkspace === 'imageinspector' && ui.imageInspectorTab === 'waifu');
 
   useEffect(() => {
     itemsRef.current = items;
@@ -259,6 +271,25 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
     }
   }, [showToast]);
 
+  const importFiles = useCallback(async (fileList: FileList | File[]) => {
+    const files = Array.from(fileList);
+    for (const file of files) {
+      const osPath = String((file as File & { path?: string })?.path || '').trim();
+      if (osPath) {
+        await loadFromPath(osPath);
+      } else {
+        await loadFile(file, file.name);
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
+  }, [loadFile, loadFromPath]);
+
+  const handleFileSelection = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.currentTarget.files;
+    if (files?.length) await importFiles(files);
+    event.currentTarget.value = '';
+  }, [importFiles]);
+
   useEffect(() => {
     if (!isActive) return;
     const queuedPaths = Array.isArray(ui.scannedImportQueue) ? ui.scannedImportQueue : [];
@@ -321,16 +352,7 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
     }
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const files = Array.from(e.dataTransfer.files);
-      for (const file of files) {
-        const osPath = String((file as any)?.path || '').trim();
-        if (osPath) {
-          await loadFromPath(osPath);
-        } else {
-          await loadFile(file, file.name);
-        }
-        await new Promise((resolve) => window.setTimeout(resolve, 0));
-      }
+      await importFiles(e.dataTransfer.files);
       return;
     }
 
@@ -355,7 +377,7 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
     } catch (error) {
       console.error('[WaifuDiffusionWorkspace] Failed to parse drop data:', error);
     }
-  }, [isActive, loadFile, loadFromPath]);
+  }, [importFiles, isActive, loadFromPath]);
 
   const selectedItem = items.find((item) => item.id === selectedId);
 
@@ -691,11 +713,21 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
 
   return (
     <div
+      data-umbra-image-inspector="visual"
+      data-umbra-image-inspector-remote-mode={remoteMode}
       className="relative h-full flex bg-[var(--umbra-bg)] text-[var(--umbra-text)]"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,video/*"
+        multiple
+        className="hidden"
+        onChange={(event) => void handleFileSelection(event)}
+      />
       {isDragging && (
         <div className="absolute inset-0 z-50 bg-[var(--umbra-accent)]/15 border-4 border-dashed border-[var(--umbra-accent)] backdrop-blur-sm flex items-center justify-center pointer-events-none">
           <div className="text-center">
@@ -706,41 +738,39 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
         </div>
       )}
 
-      <div className="custom-scrollbar w-24 space-y-2 overflow-y-auto border-r border-white/10 p-2 umbra-surface-deep">
-        <div className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] umbra-text-faint">
-          {items.length} Media
+      {items.length > 0 ? (
+        <div data-umbra-image-inspector-history="" className="custom-scrollbar w-24 space-y-2 overflow-y-auto border-r border-white/10 p-2 umbra-surface-deep">
+          <div data-umbra-image-inspector-history-count="" className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] umbra-text-faint">
+            {items.length} Media
+          </div>
+          {items.map((item) => (
+            <div
+              key={item.id}
+              data-umbra-image-inspector-thumbnail=""
+              onClick={() => setSelectedId(item.id)}
+              className={`relative h-20 w-20 cursor-pointer overflow-hidden rounded-md border transition ${selectedId === item.id
+                ? 'border-[var(--umbra-accent)] shadow-[0_0_16px_var(--umbra-accent-glow)]'
+                : 'border-white/10 opacity-60 hover:border-white/25 hover:opacity-100'
+                }`}
+            >
+              {item.isVideo ? (
+                <video src={item.blobUrl} className="h-full w-full object-cover" muted preload="metadata" />
+              ) : (
+                <img src={item.previewUrl || item.blobUrl} alt={item.name} className="h-full w-full object-cover" loading="lazy" decoding="async" />
+              )}
+              {(analysisMode === 'caption' ? item.naturalCaption.status : item.waifuTagger.status) !== 'idle' ? (
+                <div className="absolute bottom-1 right-1 rounded border border-black/40 bg-black/70 px-1 text-[9px] font-semibold uppercase tracking-wide text-zinc-200">
+                  {analysisMode === 'caption' ? item.naturalCaption.status : item.waifuTagger.status}
+                </div>
+              ) : null}
+            </div>
+          ))}
         </div>
-        {items.map((item) => (
-          <div
-            key={item.id}
-            onClick={() => setSelectedId(item.id)}
-            className={`relative h-20 w-20 cursor-pointer overflow-hidden rounded-md border transition ${selectedId === item.id
-              ? 'border-[var(--umbra-accent)] shadow-[0_0_16px_var(--umbra-accent-glow)]'
-              : 'border-white/10 opacity-60 hover:border-white/25 hover:opacity-100'
-              }`}
-          >
-            {item.isVideo ? (
-              <video src={item.blobUrl} className="h-full w-full object-cover" muted preload="metadata" />
-            ) : (
-              <img src={item.previewUrl || item.blobUrl} alt={item.name} className="h-full w-full object-cover" loading="lazy" decoding="async" />
-            )}
-            {(analysisMode === 'caption' ? item.naturalCaption.status : item.waifuTagger.status) !== 'idle' ? (
-              <div className="absolute bottom-1 right-1 rounded border border-black/40 bg-black/70 px-1 text-[9px] font-semibold uppercase tracking-wide text-zinc-200">
-                {analysisMode === 'caption' ? item.naturalCaption.status : item.waifuTagger.status}
-              </div>
-            ) : null}
-          </div>
-        ))}
-        {items.length === 0 ? (
-          <div className="rounded-md border border-white/10 bg-black/25 p-2 text-center text-[10px] umbra-text-faint">
-            Drop media
-          </div>
-        ) : null}
-      </div>
+      ) : null}
 
-        <div className="flex-1 flex flex-col min-w-0">
+        <div data-umbra-image-inspector-main="" className="flex-1 flex flex-col min-w-0">
           {!hideHeader && (
-            <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-black/20 px-4 py-3 backdrop-blur-xl">
+            <div data-umbra-image-inspector-toolbar="" className="flex items-center justify-between gap-3 border-b border-white/10 bg-black/20 px-4 py-3 backdrop-blur-xl">
               <div>
                 <h2 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.18em] text-[var(--umbra-text)]">
                   <Sparkles size={16} className="text-[var(--umbra-accent)]" />
@@ -749,6 +779,15 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
                 <p className="mt-0.5 text-xs umbra-text-muted">Booru tagging and natural-language captions for generation</p>
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 rounded border border-white/15 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition umbra-surface-soft hover:bg-white/10"
+                  title={t('common.addMedia')}
+                >
+                  <Upload size={14} />
+                  {t('common.addMedia')}
+                </button>
                 <button
                   onClick={() => void runSelectedAnalysis()}
                   disabled={batchTagging || !selectedItem || selectedItem.isVideo || (
@@ -798,8 +837,17 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
               </div>
             </div>
           )}
-          {hideHeader && (
-            <div className="flex items-center justify-end gap-2 border-b border-white/10 bg-black/20 px-3 py-1.5 backdrop-blur-xl z-10">
+          {hideHeader && items.length > 0 && (
+            <div data-umbra-image-inspector-toolbar="" className="flex items-center justify-end gap-2 border-b border-white/10 bg-black/20 px-3 py-1.5 backdrop-blur-xl z-10">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 rounded border border-white/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide transition umbra-surface-soft hover:bg-white/10"
+                title={t('common.addMedia')}
+              >
+                <Upload size={12} />
+                {t('common.addMedia')}
+              </button>
               <button
                 onClick={() => void runSelectedAnalysis()}
                 disabled={batchTagging || !selectedItem || selectedItem.isVideo || (
@@ -828,7 +876,7 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
                 {batchTagging ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
                 {batchTagging ? 'Batch' : analysisMode === 'caption' ? 'Caption All' : 'Tag All'}
               </button>
-              {!isUmbraRemoteClient() ? (
+              {remoteMode !== 'phone' && !isUmbraRemoteClient() ? (
                 <button
                   onClick={() => void revealInExplorer(selectedItem?.path)}
                   disabled={!selectedItem}
@@ -849,13 +897,25 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
             </div>
           )}
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(320px,1.15fr)_minmax(360px,1fr)]">
+        <div
+          data-umbra-visual-analysis-grid=""
+          data-umbra-visual-analysis-empty={selectedItem ? 'false' : 'true'}
+          className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(320px,1.15fr)_minmax(360px,1fr)]"
+        >
           <div className="flex min-h-0 items-center justify-center overflow-hidden border-r border-white/10 p-4 umbra-surface-deep">
             {!selectedItem ? (
               <div className="text-center umbra-text-faint">
                 <Upload size={56} className="mx-auto mb-3 opacity-30" />
-                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Drag Images Into Visual Analysis</p>
-                <p className="mt-1 text-xs umbra-text-muted">Then choose tags or a natural caption</p>
+                <p className="text-sm font-semibold uppercase tracking-[0.12em] text-zinc-400">{t('extras.addImagesVisual')}</p>
+                <p className="mt-1 text-xs umbra-text-muted">{t('extras.visualAnalysisHint')}</p>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-4 inline-flex items-center gap-1.5 rounded border border-white/15 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition umbra-surface-soft hover:bg-white/10"
+                >
+                  <Upload size={14} />
+                  {t('common.addMedia')}
+                </button>
               </div>
             ) : selectedItem.isVideo ? (
               <video src={selectedItem.blobUrl} controls className="h-full max-h-full w-full max-w-full rounded-md border border-white/10 object-contain shadow-2xl shadow-black/50 umbra-surface-soft" preload="metadata" />
@@ -864,7 +924,7 @@ export function WaifuDiffusionWorkspace({ hideHeader = false }: { hideHeader?: b
             )}
           </div>
 
-          <div className="custom-scrollbar space-y-3 overflow-y-auto bg-[var(--umbra-bg)]/60 p-4">
+          <div data-umbra-visual-analysis-controls="" className="custom-scrollbar space-y-3 overflow-y-auto bg-[var(--umbra-bg)]/60 p-4">
             {!selectedItem ? null : (
               <div className="flex items-center justify-between">
                 <div className="min-w-0">

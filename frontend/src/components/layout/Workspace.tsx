@@ -73,7 +73,6 @@ async function importWithChunkRecovery<T>(key: string, importer: () => Promise<T
 const SUCCESS_TOAST_THRESHOLD = 3;
 const COMFY_BRIDGE_MESSAGE_TIMEOUT_MS = 4500;
 
-const loadImageInspectorWorkspaceModule = () => importWithChunkRecovery('image-inspector-workspace', () => import('./ImageInspectorWorkspace'));
 const loadModelManagerWorkspaceModule = () => importWithChunkRecovery('model-manager-workspace', () => import('./ModelManagerWorkspace'));
 const loadBoardBrowserModule = () => importWithChunkRecovery('board-browser', () => import('@/components/board/BoardBrowser'));
 const loadReactGalleryWorkspaceModule = () => importWithChunkRecovery('react-gallery-workspace', () => import('./ReactGalleryWorkspace'));
@@ -86,7 +85,6 @@ const WORKSPACE_NAV_ORDER: WorkspaceType[] = [
   'comfyui',
   'library',
   'modelmanager',
-  'imageinspector',
   'board',
   'localserver',
   'remote',
@@ -97,11 +95,6 @@ function getWorkspaceNavRank(workspace: WorkspaceType): number {
   const index = WORKSPACE_NAV_ORDER.indexOf(workspace);
   return index >= 0 ? index : WORKSPACE_NAV_ORDER.length;
 }
-
-const ImageInspectorWorkspace = lazy(async () => {
-  const module = await loadImageInspectorWorkspaceModule();
-  return { default: module.ImageInspectorWorkspace };
-});
 
 const ModelManagerWorkspace = lazy(async () => {
   const module = await loadModelManagerWorkspaceModule();
@@ -2444,7 +2437,6 @@ export const Workspace = () => {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const warmLazyWorkspaces = () => {
-      void loadImageInspectorWorkspaceModule().catch(() => {});
       void loadModelManagerWorkspaceModule().catch(() => {});
       if (remoteMode !== 'phone') {
         void loadBoardBrowserModule().catch(() => {});
@@ -2515,18 +2507,6 @@ export const Workspace = () => {
         {loadedWorkspaces.umbraui ? (
           <Suspense fallback={null}>
             <UmbraUIWorkspace />
-          </Suspense>
-        ) : null}
-      </div>
-
-      {/* Image Inspector Layer (Metadata Scanner + Visual Analysis) */}
-      <div
-        className="absolute inset-0"
-        style={getWorkspaceLayerStyle('imageinspector')}
-      >
-        {loadedWorkspaces.imageinspector ? (
-          <Suspense fallback={null}>
-            <ImageInspectorWorkspace />
           </Suspense>
         ) : null}
       </div>

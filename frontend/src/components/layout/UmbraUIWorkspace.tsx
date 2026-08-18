@@ -25,6 +25,7 @@ import {
 import { useStore } from '@/store/useStore';
 import { cn } from '@/lib/utils';
 import { UmbraSelect } from '@/components/ui/UmbraSelect';
+import { useI18n } from '@/i18n';
 import {
   DEFAULT_POWER_PROMPTER_DETAILER_PIPELINE,
   normalizePowerPrompterGenerationControls,
@@ -171,6 +172,7 @@ import {
   normalizeUmbraUiPipelineReadiness,
   resolveUmbraUiHiresResizeMode,
 } from '../../../../shared/umbra-ui/pipelineTypes';
+import { UMBRA_UI_EXTRAS_TOOL_EVENT } from '@/lib/umbraUiExtrasNavigation';
 
 type UmbraGenerationMode = 'prompter' | 'image' | 'img2img' | 'inpaint' | 'canvas' | 'video' | 'extras';
 
@@ -517,6 +519,7 @@ function PipelineControls({
 }
 
 export function UmbraUIWorkspace() {
+  const { t } = useI18n();
   const workspaceRootRef = React.useRef<HTMLDivElement>(null);
   const lastCatalogTargetRef = React.useRef<HTMLTextAreaElement | null>(null);
   const catalogSettingsRef = React.useRef<Record<string, unknown>>({});
@@ -582,6 +585,7 @@ export function UmbraUIWorkspace() {
       ? normalizeUmbraGenerationMode(initialDeviceResume.activeMode)
       : readPersistedUmbraGenerationMode()
   ));
+  const modeNavigationRef = React.useRef<HTMLDivElement>(null);
   const [mountedModes, setMountedModes] = React.useState<Set<UmbraGenerationMode>>(
     () => new Set([activeMode]),
   );
@@ -625,6 +629,22 @@ export function UmbraUIWorkspace() {
   React.useEffect(() => {
     if (!canvasEnabled && activeMode === 'canvas') setActiveMode('image');
   }, [activeMode, canvasEnabled]);
+
+  React.useLayoutEffect(() => {
+    const navigation = modeNavigationRef.current;
+    const activeButton = navigation?.querySelector<HTMLElement>(`[data-umbra-ui-mode="${activeMode}"]`);
+    if (!navigation || !activeButton) return;
+    const frame = window.requestAnimationFrame(() => {
+      const navigationRect = navigation.getBoundingClientRect();
+      const buttonRect = activeButton.getBoundingClientRect();
+      if (buttonRect.left < navigationRect.left) {
+        navigation.scrollLeft -= navigationRect.left - buttonRect.left;
+      } else if (buttonRect.right > navigationRect.right) {
+        navigation.scrollLeft += buttonRect.right - navigationRect.right;
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeMode, canvasEnabled, remoteMode]);
   const [promptSegments, setPromptSegments] = React.useState<UmbraUiPromptSegment[]>(() => (
     Array.isArray(initialDeviceResume?.promptSegments) && initialDeviceResume.promptSegments.length > 0
       ? initialDeviceResume.promptSegments
@@ -2615,6 +2635,7 @@ export function UmbraUIWorkspace() {
     };
     const onUpscaleHandoff = () => setActiveMode('extras');
     const onMediaToolsHandoff = () => setActiveMode('extras');
+    const onExtrasToolRequest = () => setActiveMode('extras');
     const target = window as typeof window & { __umbraPendingUmbraUiMediaHandoff?: unknown };
     let storedHandoff: UmbraUiMediaHandoff | null = null;
     try {
@@ -2624,10 +2645,12 @@ export function UmbraUIWorkspace() {
     window.addEventListener(UMBRA_UI_MEDIA_HANDOFF_EVENT, onHandoff);
     window.addEventListener('umbra:umbra-ui-upscale-handoff', onUpscaleHandoff);
     window.addEventListener('umbra:umbra-ui-media-tools-handoff', onMediaToolsHandoff);
+    window.addEventListener(UMBRA_UI_EXTRAS_TOOL_EVENT, onExtrasToolRequest);
     return () => {
       window.removeEventListener(UMBRA_UI_MEDIA_HANDOFF_EVENT, onHandoff);
       window.removeEventListener('umbra:umbra-ui-upscale-handoff', onUpscaleHandoff);
       window.removeEventListener('umbra:umbra-ui-media-tools-handoff', onMediaToolsHandoff);
+      window.removeEventListener(UMBRA_UI_EXTRAS_TOOL_EVENT, onExtrasToolRequest);
     };
   }, [applyPowerPrompterGenerationControls, clearStoredMediaHandoff, loraCatalog, modelCatalog, selectedWorkflowResources]);
 
@@ -2859,13 +2882,36 @@ export function UmbraUIWorkspace() {
         <PanelsTopLeft size={16} className="text-[var(--umbra-accent)] max-[1140px]:hidden" />
         <div className="text-xs font-black uppercase tracking-[0.18em] max-[1140px]:hidden">Umbra UI</div>
         <div className="h-4 w-px bg-white/10 max-[1140px]:hidden" />
-        <div
-          data-umbra-ui-mode-nav=""
-          data-umbra-ui-canvas-enabled={canvasEnabled ? 'true' : 'false'}
-          className="inline-flex h-9 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/25"
-        >
+        {remoteMode === 'phone' ? (
+          <div data-umbra-ui-mobile-mode-picker="" className="min-w-0 flex-1">
+            <UmbraSelect
+              value={activeMode}
+              options={[
+                { value: 'image', label: 'TXT2IMG', icon: <ImageIcon size={14} /> },
+                { value: 'prompter', label: 'Prompter', icon: <Notebook size={14} /> },
+                { value: 'img2img', label: 'IMG2IMG', icon: <Images size={14} /> },
+                { value: 'inpaint', label: 'Inpaint', icon: <Paintbrush size={14} /> },
+                { value: 'video', label: 'Video', icon: <Clapperboard size={14} />, badge: 'BETA' },
+                { value: 'extras', label: 'Extras', icon: <ImageUp size={14} /> },
+              ]}
+              onValueChange={(nextValue) => setActiveMode(nextValue as UmbraGenerationMode)}
+              ariaLabel={t('nav.umbraUiWorkspace')}
+              menuTitle="Umbra UI"
+              menuSubtitle={t('nav.chooseWorkspace')}
+              leadingIcon={<PanelsTopLeft size={15} />}
+              buttonClassName="h-11 border-white/10 bg-black/30 px-3 font-black uppercase tracking-[0.08em] text-[var(--umbra-text)]"
+            />
+          </div>
+        ) : (
+          <div
+            ref={modeNavigationRef}
+            data-umbra-ui-mode-nav=""
+            data-umbra-ui-canvas-enabled={canvasEnabled ? 'true' : 'false'}
+            className="inline-flex h-9 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/25"
+          >
           <button
             type="button"
+            data-umbra-ui-mode="image"
             onClick={() => setActiveMode('image')}
             className={cn(
               'inline-flex items-center gap-2 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
@@ -2876,6 +2922,7 @@ export function UmbraUIWorkspace() {
           </button>
           <button
             type="button"
+            data-umbra-ui-mode="prompter"
             onClick={() => setActiveMode('prompter')}
             className={cn(
               'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
@@ -2886,6 +2933,7 @@ export function UmbraUIWorkspace() {
           </button>
           <button
             type="button"
+            data-umbra-ui-mode="img2img"
             onClick={() => setActiveMode('img2img')}
             className={cn(
               'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
@@ -2896,6 +2944,7 @@ export function UmbraUIWorkspace() {
           </button>
           <button
             type="button"
+            data-umbra-ui-mode="inpaint"
             onClick={() => setActiveMode('inpaint')}
             className={cn(
               'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
@@ -2907,6 +2956,7 @@ export function UmbraUIWorkspace() {
           {canvasEnabled ? (
             <button
               type="button"
+              data-umbra-ui-mode="canvas"
               onClick={() => setActiveMode('canvas')}
               className={cn(
                 'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
@@ -2918,6 +2968,7 @@ export function UmbraUIWorkspace() {
           ) : null}
           <button
             type="button"
+            data-umbra-ui-mode="video"
             onClick={() => setActiveMode('video')}
             className={cn(
               'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
@@ -2929,6 +2980,7 @@ export function UmbraUIWorkspace() {
           </button>
           <button
             type="button"
+            data-umbra-ui-mode="extras"
             onClick={() => setActiveMode('extras')}
             className={cn(
               'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
@@ -2937,7 +2989,8 @@ export function UmbraUIWorkspace() {
           >
             <ImageUp size={13} /> Extras
           </button>
-        </div>
+          </div>
+        )}
         <div data-umbra-ui-header-actions="" className="ml-auto flex shrink-0 items-center gap-2">
           <UmbraQueueEmergencyControls
             queueSummary={queueSummary}
@@ -3112,6 +3165,7 @@ export function UmbraUIWorkspace() {
           <div className={activeMode === 'extras' ? 'contents' : 'hidden'} aria-hidden={activeMode !== 'extras'}>
             <UmbraExtrasWorkspace
               active={activeMode === 'extras'}
+              remoteMode={remoteMode}
               upscaleModels={modelCatalog.upscaleModels}
               modelName={outputUpscale.modelName}
               maxDimension={outputUpscale.maxDimension}

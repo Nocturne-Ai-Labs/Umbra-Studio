@@ -20,7 +20,6 @@ import {
   Sliders,
   RefreshCw,
   Heart,
-  ScanSearch,
   Anvil,
   Boxes,
   AlertCircle,
@@ -154,7 +153,6 @@ const PHONE_REMOTE_WORKSPACES = new Set([
   'comfyui',
   'library',
   'modelmanager',
-  'imageinspector',
   'localserver',
 ]);
 const PHONE_COMFY_MENU_LONG_PRESS_MS = 420;
@@ -583,7 +581,6 @@ export const UmbraAppBar = () => {
     if (activeWorkspace === 'library') return t('nav.gallery');
     if (activeWorkspace === 'umbraui') return t('nav.umbraUi');
     if (activeWorkspace === 'modelmanager') return t('nav.modelManager');
-    if (activeWorkspace === 'imageinspector') return t('nav.imageInspector');
     if (activeWorkspace === 'board') return t('nav.dataForge');
     if (activeWorkspace === 'localserver') return 'Local Servers';
     return 'Umbra';
@@ -1940,14 +1937,6 @@ export const UmbraAppBar = () => {
           </button>
           <button
             type="button"
-            data-active={activeWorkspace === 'imageinspector' ? '1' : '0'}
-            onClick={() => handleWorkspaceSelect('imageinspector')}
-          >
-            <ScanSearch size={20} />
-            <span>{t('nav.imageInspector')}</span>
-          </button>
-          <button
-            type="button"
             data-active={activeWorkspace === 'localserver' ? '1' : '0'}
             onClick={() => handleWorkspaceSelect('localserver')}
           >
@@ -2558,15 +2547,6 @@ export const UmbraAppBar = () => {
                 </button>
               </DroppableNavItem>
 
-              <DroppableNavItem id="nav-imageinspector">
-                <button
-                  onClick={() => handleWorkspaceSelect('imageinspector')}
-                  className={sidebarNavItemClass(activeWorkspace === 'imageinspector', 'w-full')}
-                >
-                  <ScanSearch size={14} />
-                  <span>{t('nav.imageInspector')}</span>
-                </button>
-              </DroppableNavItem>
             </>
           ) : null}
         {!isPhoneRemote ? (

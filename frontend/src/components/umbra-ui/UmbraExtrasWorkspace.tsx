@@ -14,6 +14,8 @@ import {
   Layers3,
   Loader2,
   Plus,
+  ScanSearch,
+  Sparkles,
   Stamp,
   Trash2,
   Upload,
@@ -21,7 +23,9 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/i18n';
 import { useStore } from '@/store/useStore';
+import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import {
   fetchUmbraUiUpscaleJob,
@@ -58,6 +62,15 @@ import {
   usePublishUmbraQueueActivity,
   type UmbraQueueActivity,
 } from '@/lib/umbraQueueActivity';
+import { ScannerWorkspace } from '@/components/layout/ScannerWorkspace';
+import { WaifuDiffusionWorkspace } from '@/components/layout/WaifuDiffusionWorkspace';
+import {
+  normalizeUmbraUiExtrasTool,
+  persistUmbraUiExtrasTool,
+  readPersistedUmbraUiExtrasTool,
+  UMBRA_UI_EXTRAS_TOOL_EVENT,
+  type UmbraUiExtrasToolId,
+} from '@/lib/umbraUiExtrasNavigation';
 
 const IMAGE_EXTENSION_PATTERN = /\.(?:avif|bmp|gif|jpe?g|png|tiff?|webp)$/i;
 const MAX_UPSCALE_BATCH_ITEMS = 512;
@@ -77,6 +90,7 @@ interface StagedUpscaleSource {
 
 interface UmbraExtrasWorkspaceProps {
   active?: boolean;
+  remoteMode?: string;
   upscaleModels: string[];
   modelName: string;
   maxDimension: number;
@@ -86,31 +100,104 @@ interface UmbraExtrasWorkspaceProps {
   queueSummary: UmbraQueueSummary;
 }
 
-type UmbraExtrasToolMode = 'upscale' | UmbraExtrasMediaToolMode;
+type UmbraExtrasToolMode = UmbraUiExtrasToolId;
+
+function isMediaToolMode(value: UmbraExtrasToolMode): value is UmbraExtrasMediaToolMode {
+  return value === 'censor'
+    || value === 'watermark'
+    || value === 'video-watermark'
+    || value === 'gif';
+}
 
 function ExtrasToolNavigation({
   value,
   onChange,
+  remoteMode,
 }: {
   value: UmbraExtrasToolMode;
   onChange: (value: UmbraExtrasToolMode) => void;
+  remoteMode: string;
 }) {
+  const { language, t } = useI18n();
+  const navigationRef = React.useRef<HTMLDivElement>(null);
   const tools: Array<{ id: UmbraExtrasToolMode; label: string; icon: React.ReactNode }> = [
-    { id: 'upscale', label: 'Upscale', icon: <ImageUp size={12} /> },
-    { id: 'censor', label: 'Image Censor', icon: <EyeOff size={12} /> },
-    { id: 'watermark', label: 'Image Watermark', icon: <Stamp size={12} /> },
-    { id: 'video-watermark', label: 'Video Watermark', icon: <Video size={12} /> },
-    { id: 'gif', label: 'Video to GIF', icon: <Film size={12} /> },
+    { id: 'upscale', label: t('extras.upscale'), icon: <ImageUp size={12} /> },
+    { id: 'censor', label: t('extras.imageCensor'), icon: <EyeOff size={12} /> },
+    { id: 'watermark', label: t('extras.imageWatermark'), icon: <Stamp size={12} /> },
+    { id: 'video-watermark', label: t('extras.videoWatermark'), icon: <Video size={12} /> },
+    { id: 'gif', label: t('extras.videoToGif'), icon: <Film size={12} /> },
+    { id: 'metadata-scanner', label: t('extras.metadataScanner'), icon: <ScanSearch size={12} /> },
+    { id: 'visual-analysis', label: t('extras.visualAnalysis'), icon: <Sparkles size={12} /> },
   ];
+
+  React.useLayoutEffect(() => {
+    const navigation = navigationRef.current;
+    const activeButton = navigation?.querySelector<HTMLElement>(`[data-umbra-ui-extras-tool="${value}"]`);
+    if (!navigation || !activeButton) return;
+    let frame = 0;
+    const revealActiveButton = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const navigationRect = navigation.getBoundingClientRect();
+        const buttonRect = activeButton.getBoundingClientRect();
+        if (buttonRect.left < navigationRect.left || buttonRect.right > navigationRect.right) {
+          navigation.scrollLeft += buttonRect.left - navigationRect.left - 6;
+        }
+      });
+    };
+    revealActiveButton();
+    const resizeObserver = new ResizeObserver(revealActiveButton);
+    resizeObserver.observe(navigation);
+    navigation.querySelectorAll('button').forEach((button) => resizeObserver.observe(button));
+    const modeObserver = new MutationObserver(revealActiveButton);
+    modeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-umbra-remote-mode'],
+    });
+    const settleInterval = window.setInterval(revealActiveButton, 120);
+    const settleTimeout = window.setTimeout(() => window.clearInterval(settleInterval), 2_000);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearInterval(settleInterval);
+      window.clearTimeout(settleTimeout);
+      resizeObserver.disconnect();
+      modeObserver.disconnect();
+    };
+  }, [language, remoteMode, value]);
+
+  if (remoteMode === 'phone') {
+    const selectedTool = tools.find((tool) => tool.id === value) || tools[0];
+    return (
+      <div data-umbra-ui-extras-tool-picker="" className="shrink-0 border-b border-white/10 bg-black/30 p-2">
+        <UmbraSelect
+          value={value}
+          options={tools.map((tool) => ({
+            value: tool.id,
+            label: tool.label,
+            icon: tool.icon,
+          }))}
+          onValueChange={(nextValue) => onChange(nextValue as UmbraExtrasToolMode)}
+          ariaLabel={t('extras.toolPicker')}
+          menuTitle={t('extras.toolPicker')}
+          menuSubtitle={t('extras.chooseTool')}
+          leadingIcon={selectedTool.icon}
+          buttonClassName="h-11 border-white/10 bg-black/30 px-3 font-black uppercase tracking-[0.08em] text-[var(--umbra-text)]"
+        />
+      </div>
+    );
+  }
+
   return (
-    <div data-umbra-ui-extras-tool-nav="" className="flex min-h-11 shrink-0 items-center gap-1 border-b border-white/10 bg-black/30 px-3">
+    <div ref={navigationRef} data-umbra-ui-extras-tool-nav="" className="flex min-h-11 shrink-0 items-center gap-1 overflow-x-auto border-b border-white/10 bg-black/30 px-3 custom-scrollbar">
       {tools.map((tool) => (
         <button
           key={tool.id}
           type="button"
+          data-umbra-ui-extras-tool={tool.id}
+          aria-pressed={value === tool.id}
           onClick={() => onChange(tool.id)}
           className={cn(
-            'inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[9px] font-black uppercase tracking-[0.12em] transition-colors',
+            'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-3 text-[9px] font-black uppercase tracking-[0.12em] transition-colors',
             value === tool.id
               ? 'border-cyan-300/30 bg-cyan-500/[0.1] text-cyan-100'
               : 'border-transparent text-zinc-600 hover:border-white/10 hover:text-zinc-300',
@@ -161,6 +248,7 @@ function JobStatusIcon({ status }: { status: string }) {
 
 export function UmbraExtrasWorkspace({
   active = true,
+  remoteMode = 'desktop',
   upscaleModels,
   modelName,
   maxDimension,
@@ -171,7 +259,7 @@ export function UmbraExtrasWorkspace({
 }: UmbraExtrasWorkspaceProps) {
   const showToast = useStore((state) => state.showToast);
   const [sources, setSources] = React.useState<StagedUpscaleSource[]>([]);
-  const [activeTool, setActiveTool] = React.useState<UmbraExtrasToolMode>('upscale');
+  const [activeTool, setActiveTool] = React.useState<UmbraExtrasToolMode>(readPersistedUmbraUiExtrasTool);
   const [job, setJob] = React.useState<UmbraUiUpscaleJob | null>(null);
   const queueActivity = React.useMemo<UmbraQueueActivity | null>(() => job ? ({
     id: `umbra-upscale:${job.id}`,
@@ -228,6 +316,20 @@ export function UmbraExtrasWorkspace({
       setPlacement(nextPlacement as UmbraQueuePlacement);
     }
   }, [modelChoices, onModelNameChange, remoteClient, setPlacement, showToast]);
+
+  React.useEffect(() => {
+    persistUmbraUiExtrasTool(activeTool);
+  }, [activeTool]);
+
+  React.useEffect(() => {
+    const onToolRequest = (event: Event) => {
+      const detail = (event as CustomEvent<{ tool?: unknown }>).detail;
+      const tool = normalizeUmbraUiExtrasTool(detail?.tool);
+      if (tool) setActiveTool(tool);
+    };
+    window.addEventListener(UMBRA_UI_EXTRAS_TOOL_EVENT, onToolRequest);
+    return () => window.removeEventListener(UMBRA_UI_EXTRAS_TOOL_EVENT, onToolRequest);
+  }, []);
 
   React.useEffect(() => {
     setExportSettings((current) => current.longEdge === maxDimension ? current : { ...current, longEdge: maxDimension });
@@ -533,10 +635,25 @@ export function UmbraExtrasWorkspace({
     }
   }, [failureMessages, showToast]);
 
-  if (activeTool !== 'upscale') {
+  if (activeTool === 'metadata-scanner' || activeTool === 'visual-analysis') {
     return (
       <div data-umbra-ui-extras="" className="col-span-2 flex min-h-0 flex-col">
-        <ExtrasToolNavigation value={activeTool} onChange={setActiveTool} />
+        <ExtrasToolNavigation value={activeTool} onChange={setActiveTool} remoteMode={remoteMode} />
+        <div data-umbra-ui-extras-inspector="" className="min-h-0 flex-1 overflow-hidden">
+          {activeTool === 'metadata-scanner' ? (
+            <ScannerWorkspace hideHeader active={active} remoteMode={remoteMode} />
+          ) : (
+            <WaifuDiffusionWorkspace hideHeader active={active} remoteMode={remoteMode} />
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (isMediaToolMode(activeTool)) {
+    return (
+      <div data-umbra-ui-extras="" className="col-span-2 flex min-h-0 flex-col">
+        <ExtrasToolNavigation value={activeTool} onChange={setActiveTool} remoteMode={remoteMode} />
         <UmbraExtrasMediaTools mode={activeTool} />
       </div>
     );
@@ -544,7 +661,7 @@ export function UmbraExtrasWorkspace({
 
   return (
     <div data-umbra-ui-extras="" className="col-span-2 flex min-h-0 flex-col">
-      <ExtrasToolNavigation value={activeTool} onChange={setActiveTool} />
+      <ExtrasToolNavigation value={activeTool} onChange={setActiveTool} remoteMode={remoteMode} />
       <div data-umbra-ui-extras-workspace="" className="grid min-h-0 flex-1 grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
       <section data-umbra-ui-extras-controls="" className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar">
         <div className="mb-3 flex items-center gap-2">

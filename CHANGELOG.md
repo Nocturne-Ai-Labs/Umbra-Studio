@@ -2706,3 +2706,33 @@ copying their virtual environments.
 - Expanded Umbra UI image, video, inpainting, and media handoff workflows.
 - Expanded Data Forge dataset, captioning, search, and AI Toolkit integration.
 - Added Windows and Linux x64 portable ZIP packages.
+## v0.31.17
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, or manual migration are required for this
+mobile UI polish release. Update Umbra Studio normally and restart it after the
+update. Existing settings, cards, presets, and outputs are preserved.
+
+### Mobile UI Polish
+
+- Reworked Umbra UI and Extras navigation on phone layouts into full-width,
+  touch-friendly selectors so active workspaces and tools remain readable.
+- Simplified empty Metadata Scanner and Visual Analysis states to one focused
+  Add Media action instead of showing blank history and disabled controls.
+- Added mobile file-picker import controls for Metadata Scanner and Visual
+  Analysis while preserving existing Gallery handoffs, drag-and-drop, and
+  duplicate handling.
+- Kept tablet and desktop navigation, history rails, and populated inspector
+  controls intact.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Mobile Umbra UI and Extras tabs no longer clip or overflow on narrow
+  screens.
+- **Fixed:** Empty inspector workspaces no longer present misleading zero-item
+  toolbars.
+- **Improved:** Metadata Scanner and Visual Analysis can now be started directly
+  from a phone-sized layout.
+- **Improved:** Localized the new mobile navigation and empty-state controls for
+  English, German, Japanese, Simplified Chinese, and Korean.

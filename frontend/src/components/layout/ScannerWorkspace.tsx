@@ -3,6 +3,7 @@ import { FileJson, Upload, Trash2, X, Copy, Download } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { loadAppSettings, subscribeToAppSettings } from '@/lib/appSettings';
 import { extractMetadataFromPath, getComfyUiJsonText, getLegacyGenerationParametersText, getWorkflowJsonExport } from '@/utils/metadata';
+import { useI18n } from '@/i18n';
 
 interface ScanItem {
   id: string;
@@ -50,11 +51,20 @@ const readGalleryDragPaths = (dataTransfer: DataTransfer): string[] => {
   }
 };
 
-export function ScannerWorkspace({ hideHeader = false }: { hideHeader?: boolean }) {
+export function ScannerWorkspace({
+  hideHeader = false,
+  active: activeOverride,
+  remoteMode = 'desktop',
+}: {
+  hideHeader?: boolean;
+  active?: boolean;
+  remoteMode?: string;
+}) {
   const [items, setItems] = useState<ScanItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const itemsRef = useRef<ScanItem[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [scannerPrefs, setScannerPrefs] = useState(() => {
     const settings = loadAppSettings();
     return {
@@ -63,6 +73,7 @@ export function ScannerWorkspace({ hideHeader = false }: { hideHeader?: boolean 
     };
   });
   const { activeWorkspace, ui, clearScannedImport } = useStore();
+  const { t } = useI18n();
 
   const copyExportText = useCallback(async (text: string | null) => {
     if (!text || !navigator?.clipboard?.writeText) return;
@@ -82,7 +93,8 @@ export function ScannerWorkspace({ hideHeader = false }: { hideHeader?: boolean 
     URL.revokeObjectURL(url);
   }, []);
 
-  const isActive = activeWorkspace === 'scanner' || (activeWorkspace === 'imageinspector' && ui.imageInspectorTab === 'scanner');
+  const isActive = activeOverride
+    ?? (activeWorkspace === 'scanner' || (activeWorkspace === 'imageinspector' && ui.imageInspectorTab === 'scanner'));
   const scannerCardClass = 'glass-panel umbra-surface-soft rounded-lg border-white/10 p-3';
   const scannerLabelClass = 'text-[10px] font-semibold uppercase tracking-[0.16em] umbra-text-faint';
   const scannerToolButtonClass = 'inline-flex items-center gap-2 rounded-md border border-white/10 bg-black/25 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-300 transition hover:border-[var(--umbra-accent)]/45 hover:text-white';
@@ -229,6 +241,25 @@ export function ScannerWorkspace({ hideHeader = false }: { hideHeader?: boolean 
     }
   }, []);
 
+  const importFiles = useCallback(async (fileList: FileList | File[]) => {
+    const files = Array.from(fileList);
+    for (const file of files) {
+      const osPath = String((file as File & { path?: string })?.path || '').trim();
+      if (osPath) {
+        await loadFromPath(osPath);
+      } else {
+        await loadFile(file, file.name);
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
+  }, [loadFile, loadFromPath]);
+
+  const handleFileSelection = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.currentTarget.files;
+    if (files?.length) await importFiles(files);
+    event.currentTarget.value = '';
+  }, [importFiles]);
+
   useEffect(() => {
     if (!isActive) return;
     const queuedPaths = Array.isArray(ui.scannedImportQueue) ? ui.scannedImportQueue : [];
@@ -280,16 +311,7 @@ export function ScannerWorkspace({ hideHeader = false }: { hideHeader?: boolean 
 
     // Check for native OS file drops
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const files = Array.from(e.dataTransfer.files);
-      for (const file of files) {
-        const osPath = String((file as any)?.path || '').trim();
-        if (osPath) {
-          await loadFromPath(osPath);
-        } else {
-          await loadFile(file, file.name);
-        }
-        await new Promise((resolve) => window.setTimeout(resolve, 0));
-      }
+      await importFiles(e.dataTransfer.files);
       return;
     }
 
@@ -322,7 +344,7 @@ export function ScannerWorkspace({ hideHeader = false }: { hideHeader?: boolean 
     } catch (error) {
       console.error('[ScannerWorkspace] Failed to parse drop data:', error);
     }
-  }, [isActive, loadFile, loadFromPath]);
+  }, [importFiles, isActive, loadFromPath]);
 
   const selectedItem = items.find(i => i.id === selectedId);
 
@@ -577,11 +599,21 @@ export function ScannerWorkspace({ hideHeader = false }: { hideHeader?: boolean 
 
   return (
     <div
+      data-umbra-image-inspector="metadata"
+      data-umbra-image-inspector-remote-mode={remoteMode}
       className="relative flex h-full bg-[var(--umbra-bg)] text-[var(--umbra-text)]"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,video/*"
+        multiple
+        className="hidden"
+        onChange={(event) => void handleFileSelection(event)}
+      />
       {/* Drop Overlay */}
       {isDragging && (
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center border-4 border-dashed border-[var(--umbra-accent)] bg-[var(--umbra-accent)]/15 backdrop-blur-sm">
@@ -594,65 +626,83 @@ export function ScannerWorkspace({ hideHeader = false }: { hideHeader?: boolean 
       )}
 
       {/* Sidebar - History */}
-      <div className="custom-scrollbar w-24 space-y-2 overflow-y-auto border-r border-white/10 p-2 umbra-surface-deep">
-        <div className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] umbra-text-faint">
-          {items.length} Scans
+      {items.length > 0 ? (
+        <div data-umbra-image-inspector-history="" className="custom-scrollbar w-24 space-y-2 overflow-y-auto border-r border-white/10 p-2 umbra-surface-deep">
+          <div data-umbra-image-inspector-history-count="" className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] umbra-text-faint">
+            {items.length} Scans
+          </div>
+          {items.map(item => (
+            <div
+              key={item.id}
+              data-umbra-image-inspector-thumbnail=""
+              onClick={() => setSelectedId(item.id)}
+              className={`h-20 w-20 cursor-pointer overflow-hidden rounded-md border transition ${selectedId === item.id
+                  ? 'border-[var(--umbra-accent)] opacity-100 shadow-[0_0_16px_var(--umbra-accent-glow)]'
+                  : 'border-white/10 opacity-60 hover:border-white/25 hover:opacity-100'
+                }`}
+            >
+              {item.isVideo ? (
+                <video
+                  src={item.blobUrl}
+                  className="h-full w-full object-cover"
+                  muted
+                />
+              ) : (
+                <img
+                  src={item.previewUrl || item.blobUrl}
+                  alt={item.name}
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                  decoding="async"
+                />
+              )}
+            </div>
+          ))}
         </div>
-        {items.map(item => (
-          <div
-            key={item.id}
-            onClick={() => setSelectedId(item.id)}
-            className={`h-20 w-20 cursor-pointer overflow-hidden rounded-md border transition ${selectedId === item.id
-                ? 'border-[var(--umbra-accent)] opacity-100 shadow-[0_0_16px_var(--umbra-accent-glow)]'
-                : 'border-white/10 opacity-60 hover:border-white/25 hover:opacity-100'
-              }`}
-          >
-            {item.isVideo ? (
-              <video
-                src={item.blobUrl}
-                className="h-full w-full object-cover"
-                muted
-              />
-            ) : (
-              <img
-                src={item.previewUrl || item.blobUrl}
-                alt={item.name}
-                className="h-full w-full object-cover"
-                loading="lazy"
-                decoding="async"
-              />
-            )}
-          </div>
-        ))}
-        {items.length === 0 ? (
-          <div className="rounded-md border border-white/10 bg-black/25 p-2 text-center text-[10px] umbra-text-faint">
-            Drop media
-          </div>
-        ) : null}
-      </div>
+      ) : null}
 
       {/* Main Content */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div data-umbra-image-inspector-main="" className="flex min-w-0 flex-1 flex-col">
         {/* Header */}
         {!hideHeader && (
-          <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-black/20 px-4 py-3 backdrop-blur-xl">
+          <div data-umbra-image-inspector-toolbar="" className="flex items-center justify-between gap-3 border-b border-white/10 bg-black/20 px-4 py-3 backdrop-blur-xl">
             <div>
               <h2 className="text-sm font-black uppercase tracking-[0.18em] text-white">Metadata Scanner</h2>
               <p className="mt-0.5 text-xs umbra-text-muted">Extract image generation metadata</p>
             </div>
-            <button
-              onClick={clearAll}
-              className="rounded-md border border-white/10 bg-black/25 p-2 text-zinc-400 transition hover:border-red-500/35 hover:bg-red-500/10 hover:text-red-300"
-              title="Clear All"
-            >
-              <Trash2 size={18} />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className={scannerToolButtonClass}
+                title={t('common.addMedia')}
+              >
+                <Upload size={14} />
+                {t('common.addMedia')}
+              </button>
+              <button
+                onClick={clearAll}
+                className="rounded-md border border-white/10 bg-black/25 p-2 text-zinc-400 transition hover:border-red-500/35 hover:bg-red-500/10 hover:text-red-300"
+                title="Clear All"
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
           </div>
         )}
 
         {/* Content Area */}
-        {hideHeader && (
-          <div className="flex items-center justify-end gap-2 border-b border-white/10 bg-black/20 px-3 py-1.5 backdrop-blur-xl z-10">
+        {hideHeader && items.length > 0 && (
+          <div data-umbra-image-inspector-toolbar="" className="flex items-center justify-end gap-2 border-b border-white/10 bg-black/20 px-3 py-1.5 backdrop-blur-xl z-10">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className={scannerToolButtonClass}
+              title={t('common.addMedia')}
+            >
+              <Upload size={13} />
+              {t('common.addMedia')}
+            </button>
             <button
               onClick={clearAll}
               className="rounded-md border border-white/10 bg-black/25 p-1.5 text-zinc-400 transition hover:border-red-500/35 hover:bg-red-500/10 hover:text-red-300"
@@ -667,8 +717,16 @@ export function ScannerWorkspace({ hideHeader = false }: { hideHeader?: boolean 
             <div className="flex h-full items-center justify-center text-zinc-600">
               <div className="text-center">
                 <Upload size={64} className="mx-auto mb-4 opacity-20" />
-                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Drag images from filmstrip to scan</p>
-                <p className="mt-2 text-xs text-zinc-700">Or drag files from your computer</p>
+                <p className="text-sm font-semibold uppercase tracking-[0.12em] text-zinc-400">{t('extras.addImagesMetadata')}</p>
+                <p className="mt-2 text-xs text-zinc-600">{t('extras.metadataHint')}</p>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`${scannerToolButtonClass} mt-4`}
+                >
+                  <Upload size={14} />
+                  {t('common.addMedia')}
+                </button>
               </div>
             </div>
           ) : (

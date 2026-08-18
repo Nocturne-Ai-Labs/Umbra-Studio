@@ -10,6 +10,7 @@ import { isDiagnosticLoggingEnabled, logDiagnostic } from '@/lib/diagnostics';
 import { getWorkflowJsonExport, type ImageMetadata } from '@/utils/metadata';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import { galleryMediaRevision } from '@/lib/galleryMediaIdentity';
+import { openUmbraUiExtrasTool } from '@/lib/umbraUiExtrasNavigation';
 
 interface UmbraFilmstripProps {
   initialHeight?: number;
@@ -588,12 +589,9 @@ export function UmbraFilmstrip({
       return;
     }
     addScannedImport(paths);
-    if (workspace === 'scanner' || workspace === 'waifudiffusion') {
-      useStore.getState().setUI('imageInspectorTab', workspace === 'scanner' ? 'scanner' : 'waifu');
-      setActiveWorkspace('imageinspector');
-    } else {
-      setActiveWorkspace(workspace);
-    }
+    useStore.getState().setUI('imageInspectorTab', workspace === 'scanner' ? 'scanner' : 'waifu');
+    setActiveWorkspace('umbraui');
+    openUmbraUiExtrasTool(workspace === 'scanner' ? 'metadata-scanner' : 'visual-analysis');
     addToast({
       type: 'success',
       message: workspace === 'scanner'
@@ -1697,7 +1695,8 @@ export function UmbraFilmstrip({
 
   const onOpenWaifuTab = useCallback(() => {
     useStore.getState().setUI('imageInspectorTab', 'waifu');
-    setActiveWorkspace('imageinspector');
+    setActiveWorkspace('umbraui');
+    openUmbraUiExtrasTool('visual-analysis');
   }, [setActiveWorkspace]);
 
   const onSendToWaifu = useCallback((ids: string[]) => {

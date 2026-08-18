@@ -33,6 +33,7 @@ import { PowerPrompterSettingsModal } from '@/components/modals/PowerPrompterSet
 import { UmbraAgentPromptPanel } from '@/components/umbra-ui/UmbraAgentPromptPanel';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
+import { openUmbraUiExtrasTool } from '@/lib/umbraUiExtrasNavigation';
 import type {
   PowerPrompterCardDocument,
   PowerPrompterQueueTraversalMode,
@@ -2788,12 +2789,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       return;
     }
     addScannedImport([normalizedPath]);
-    if (workspace === 'scanner' || workspace === 'waifudiffusion') {
-      useStore.getState().setUI('imageInspectorTab', workspace === 'scanner' ? 'scanner' : 'waifu');
-      setActiveWorkspace('imageinspector');
-    } else {
-      setActiveWorkspace(workspace);
-    }
+    useStore.getState().setUI('imageInspectorTab', workspace === 'scanner' ? 'scanner' : 'waifu');
+    setActiveWorkspace('umbraui');
+    openUmbraUiExtrasTool(workspace === 'scanner' ? 'metadata-scanner' : 'visual-analysis');
     showToast(
       workspace === 'waifudiffusion'
         ? `Sent to Visual Analysis: ${item.name}`

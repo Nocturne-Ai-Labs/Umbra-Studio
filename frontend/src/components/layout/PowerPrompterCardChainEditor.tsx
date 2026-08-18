@@ -21,6 +21,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { ArrowRight, Ban, Check, ChevronDown, ChevronRight, ChevronUp, Copy, EllipsisVertical, Eraser, Folder, FolderOpen, GripVertical, ImageIcon, Info, Link2, Loader2, Maximize2, Minimize2, Minus, Pencil, Plus, RefreshCw, RotateCw, Scissors, Shuffle, Sparkles, Trash2, WandSparkles, X, Zap } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
+import { openUmbraUiExtrasTool } from '@/lib/umbraUiExtrasNavigation';
 import { fetchAppSettingsFromBackend, loadAppSettings, pushAppSettingsToBackend } from '@/lib/appSettings';
 import { deleteUserConfig, readUserConfig, writeUserConfig } from '@/lib/userConfig';
 import { deletePathsWithSettings } from '@/utils/trashActions';
@@ -3760,12 +3761,9 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       return;
     }
     addScannedImport([normalizedPath]);
-    if (workspace === 'scanner' || workspace === 'waifudiffusion') {
-      useStore.getState().setUI('imageInspectorTab', workspace === 'scanner' ? 'scanner' : 'waifu');
-      setActiveWorkspace('imageinspector');
-    } else {
-      setActiveWorkspace(workspace);
-    }
+    useStore.getState().setUI('imageInspectorTab', workspace === 'scanner' ? 'scanner' : 'waifu');
+    setActiveWorkspace('umbraui');
+    openUmbraUiExtrasTool(workspace === 'scanner' ? 'metadata-scanner' : 'visual-analysis');
     showToast(
       workspace === 'waifudiffusion'
         ? `Sent to Visual Analysis: ${item.name}`

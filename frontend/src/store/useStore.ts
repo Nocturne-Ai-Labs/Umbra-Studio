@@ -15,7 +15,7 @@ export type WorkspaceType = 'comfyui' | 'library' | 'modelmanager' | 'powerpromp
 
 const SHARED_UI_SESSION_CONFIG_KEY = 'remote-ui-session';
 const SHARED_UI_SESSION_POLL_MS = 15000;
-const VALID_WORKSPACES: WorkspaceType[] = ['comfyui', 'library', 'modelmanager', 'powerprompter', 'umbraui', 'imageinspector', 'board', 'remote', 'localserver'];
+const VALID_WORKSPACES: WorkspaceType[] = ['comfyui', 'library', 'modelmanager', 'powerprompter', 'umbraui', 'board', 'remote', 'localserver'];
 
 interface SharedUiSession {
   activeWorkspace?: WorkspaceType;
@@ -27,7 +27,12 @@ interface SharedUiSession {
 type DeviceShellResume = Pick<SharedUiSession, 'activeWorkspace' | 'selectedLocalServerAppId'>;
 
 function normalizeWorkspace(value: unknown): WorkspaceType {
-  const workspace = String(value || '').trim() === 'browser' ? 'comfyui' : String(value || '').trim();
+  const requestedWorkspace = String(value || '').trim();
+  const workspace = requestedWorkspace === 'browser'
+    ? 'comfyui'
+    : requestedWorkspace === 'imageinspector'
+      ? 'umbraui'
+      : requestedWorkspace;
   const normalizedWorkspace = (VALID_WORKSPACES as string[]).includes(workspace)
     ? workspace as WorkspaceType
     : 'umbraui';
@@ -492,7 +497,7 @@ export const useStore = create<AppState>()(
           const now = Date.now();
           const state = get();
           const inGalleryWorkspace = state.activeWorkspace === 'library' || state.activeWorkspace === 'modelmanager';
-          const inBackgroundWorkspace = state.activeWorkspace === 'board' || state.activeWorkspace === 'imageinspector';
+          const inBackgroundWorkspace = state.activeWorkspace === 'board';
           const hasActiveBoot = Object.values(state.booting || {}).some(Boolean);
           const tabHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
           const hasFailureBackoff = consecutiveSystemStatusFailures >= 3 && !hasActiveBoot;

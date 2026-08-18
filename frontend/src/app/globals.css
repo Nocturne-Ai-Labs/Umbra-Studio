@@ -1881,6 +1881,17 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-header-actions] > [data-umbr
   display: none !important;
 }
 
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-mobile-mode-picker] {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-mobile-mode-picker] .umbra-select-trigger {
+  height: 2.75rem;
+  border-radius: 0.75rem;
+}
+
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-agent-button] > span:not([data-umbra-ui-agent-label]) {
   position: absolute;
   top: -0.2rem;
@@ -2338,18 +2349,137 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-workspace] > [data-um
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-tool-nav] {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  min-height: 3.15rem;
+  display: flex;
+  min-height: 3.25rem;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 0.35rem;
+  overflow-x: auto;
+  overflow-y: hidden;
   padding: 0.35rem;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-tool-nav]::-webkit-scrollbar {
+  display: none;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-tool-nav] button {
-  min-width: 0;
-  min-height: 2.45rem;
+  min-width: 8.6rem;
+  min-height: 2.55rem;
+  flex: 0 0 8.6rem;
   justify-content: center;
-  padding-inline: 0.35rem;
-  font-size: 0.52rem;
+  padding-inline: 0.55rem;
+  font-size: 0.56rem;
+  line-height: 0.75rem;
+  letter-spacing: 0.03em;
+  scroll-snap-align: start;
+  white-space: normal;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-tool-picker] {
+  padding: 0.45rem 0.5rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-tool-picker] .umbra-select-trigger {
+  border-radius: 0.7rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-inspector] {
+  min-height: 0;
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector] {
+  min-width: 0;
+  flex-direction: column;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-history] {
+  display: flex;
+  width: 100%;
+  height: 5rem;
+  min-height: 5rem;
+  flex: 0 0 5rem;
+  align-items: center;
+  gap: 0.45rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-right: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.45rem;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-history]::-webkit-scrollbar {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-history] > * {
+  margin-top: 0 !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-history-count] {
+  display: flex;
+  min-width: 3.75rem;
+  height: 4rem;
+  flex: 0 0 3.75rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem;
+  text-align: center;
+  white-space: normal;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-thumbnail] {
+  width: 4rem !important;
+  height: 4rem !important;
+  flex: 0 0 4rem;
+  scroll-snap-align: start;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-main] {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-visual-analysis-empty="true"] {
+  min-height: calc(100dvh - 11rem);
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-visual-analysis-empty="true"] > div:first-child {
+  min-height: 18rem;
+  border-right: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-visual-analysis-empty="true"] [data-umbra-visual-analysis-controls] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-toolbar] {
+  min-height: 3.25rem;
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector-toolbar]::-webkit-scrollbar {
+  display: none;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-watermark-tool],
