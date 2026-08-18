@@ -1482,7 +1482,9 @@ export function WildcardGeneratorTab({ onOpenCorpus }: { onOpenCorpus?: () => vo
       if (!response.ok) throw new Error(String(payload?.error || 'Could not save wildcard.'));
       const normalizedName = String(name).trim().toLowerCase().replace(/\.txt$/i, '').replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
       setEditingWildcardPath(folder ? `${folder}/${normalizedName}` : normalizedName);
-      showToast(`__${normalizedName}__ saved to Power Prompter.`, 'success');
+      showToast(payload?.savedAsNewWildcard
+        ? `__${normalizedName}__ saved as a new wildcard. The original was kept.`
+        : `__${normalizedName}__ saved to Power Prompter.`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not save wildcard.', 'error');
     } finally {

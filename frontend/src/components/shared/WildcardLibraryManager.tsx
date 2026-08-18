@@ -251,7 +251,9 @@ export function WildcardLibraryManager({
       setWildcards(nextWildcards);
       const saved = nextWildcards.find((entry) => entry.path === nextPath);
       if (saved) openEditor(saved);
-      showToast(`__${normalizedName}__ updated.`, 'success');
+      showToast(payload?.savedAsNewWildcard
+        ? `__${normalizedName}__ saved as a new wildcard. The original was kept.`
+        : `__${normalizedName}__ updated.`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not update wildcard.', 'error');
     } finally {

@@ -34795,10 +34795,13 @@ const server = Bun.serve<any>({
             await fs.rm(destinationMetadata, { force: true });
           }
         }
-        if (sourcePath && sourcePath !== targetPath) {
-          await removePowerPrompterWildcardFiles(PP_WILDCARDS_DIR, sourcePath);
-        }
-        return json({ success: true, wildcards: await listPowerPrompterWildcards() });
+        const savedAsNewWildcard = Boolean(sourcePath && sourcePath !== targetPath);
+        return json({
+          success: true,
+          path: targetPath,
+          savedAsNewWildcard,
+          wildcards: await listPowerPrompterWildcards(),
+        });
       }
 
       if (path === '/api/powerprompter/wildcards' && method === 'DELETE') {
