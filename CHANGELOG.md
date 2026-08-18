@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.31.19
+
+### TL;DR - Wildcard Save Fix
+
+No additional setup is required. Update Umbra Studio normally.
+
+- Saving an edited wildcard with its existing name now updates the original file.
+- Renaming an edited wildcard now creates a new file and preserves the original.
+- The editor clearly reports whether it updated an existing wildcard or created a new one.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Wildcard edits no longer delete the original file when the wildcard is renamed.
+- **Improved:** Wildcard library and generator save feedback now reflects the actual result.
+
 ## v0.31.18
 
 ### TL;DR - Setup After Updating
