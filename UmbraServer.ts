@@ -20850,7 +20850,9 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
       seenPaths.add(key);
       sources.push({
         name: displayName || basename(fullPath),
-        sourcePath: temporary ? '' : toClientPath(fullPath),
+        // Preserve the absolute source for automatic output placement. A client-relative
+        // path would resolve from resources/app in packaged builds.
+        sourcePath: temporary ? '' : fullPath,
         read: () => fs.readFile(fullPath),
         ...(temporary ? {
           cleanup: async () => {

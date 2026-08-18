@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.31.21
+
+### TL;DR - Upscale Output Placement Fix
+
+No additional setup is required. Update Umbra Studio normally.
+
+- Upscaled images now use the source image's folder when creating the automatic `Upscaled` subfolder.
+- Packaged builds no longer resolve gallery-relative source paths inside `resources\\app`.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Extras upscale output no longer falls back to the packaged ComfyUI output directory.
+- **Improved:** Automatic upscale destinations now match the existing Watermark and Censor folder behavior.
+
 ## v0.31.20
 
 ### TL;DR - Image Censor Pass-Through
