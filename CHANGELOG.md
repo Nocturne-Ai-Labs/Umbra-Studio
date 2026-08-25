@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.31.22
+
+### Tag Catalog And Umbra UI Prompt Workflow
+
+- Moved the Umbra UI tag catalog into the prompt area so it expands over the prompt region instead of blocking the workspace.
+- Stabilized catalog selection by removing the expanding selected-tag strip.
+- Added a fixed header insert action so double-click tag insertion remains easy and predictable.
+
+### Fixes And Quality-of-Life Recap
+
+- **Improved:** Umbra UI tag catalog placement and prompt-area focus.
+- **Improved:** Catalog selection no longer shifts the result list when tags are selected.
+- **Improved:** Double-click insertion remains direct without spawning a moving action bar.
+
+
 ## v0.31.21
 
 ### TL;DR - Upscale Output Placement Fix

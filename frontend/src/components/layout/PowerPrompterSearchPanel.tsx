@@ -17,7 +17,6 @@ import {
   Star,
   Tags,
   Trash2,
-  X,
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 
@@ -598,6 +597,15 @@ export const PowerPrompterSearchPanel = React.memo(({
             <ChevronDown className="h-3.5 w-3.5" /> Close
           </button>
         ) : null}
+        <button
+          type="button"
+          disabled={selectedItems.length === 0}
+          onClick={() => insertItems(selectedItems)}
+          className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-emerald-300/30 bg-emerald-500/10 px-2.5 text-[8px] font-black uppercase tracking-[0.08em] text-emerald-100 disabled:cursor-not-allowed disabled:opacity-30"
+          title="Insert selected catalog entries"
+        >
+          <Plus className="h-3 w-3" /> Insert{selectedItems.length > 0 ? ` ${selectedItems.length}` : ''}
+        </button>
       </header>
 
       <div className="grid grid-cols-3 gap-1 border-b border-white/[0.08] p-2">
@@ -684,12 +692,6 @@ export const PowerPrompterSearchPanel = React.memo(({
               <span className={`inline-flex items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.09em] ${explicitCatalogEnabled ? 'text-red-200/80' : 'text-zinc-600'}`}><ShieldCheck className="h-3 w-3" /> Explicit classifiers {explicitCatalogEnabled ? 'visible' : 'hidden'}</span>
               <button type="button" aria-pressed={explicitCatalogEnabled} data-umbra-powerprompter-catalog-explicit-toggle onClick={() => setAppSetting('ui.tagCatalogExplicitEnabled', !explicitCatalogEnabled)} className={`h-6 rounded-sm border px-2 text-[8px] font-black uppercase tracking-[0.08em] ${explicitCatalogEnabled ? 'border-red-300/20 text-red-200/70 hover:text-red-100' : 'border-white/10 text-zinc-500 hover:text-zinc-200'}`}>Explicit {explicitCatalogEnabled ? 'On' : 'Off'}</button>
             </div>
-
-            {selectedItems.length > 0 ? (
-              <div className="custom-scrollbar mt-2 flex max-h-20 flex-wrap items-center gap-1 overflow-y-auto rounded-sm border border-white/[0.08] bg-black/20 p-1.5">
-                {selectedItems.map((item) => <button key={getResultKey(item)} type="button" onClick={() => toggleItem(item)} className="inline-flex h-6 items-center gap-1 rounded-sm border border-cyan-300/20 bg-cyan-500/[0.08] px-1.5 font-mono text-[9px] text-cyan-100" title={`Remove ${item.tag} from selection`}>{cleanTag(item.tag)}<X className="h-2.5 w-2.5" /></button>)}
-              </div>
-            ) : null}
 
             {suggestionSeeds.length > 0 ? (
               <section data-umbra-tag-suggestion-rail className="mt-2 overflow-hidden rounded-sm border border-fuchsia-300/15 bg-fuchsia-500/[0.025]">

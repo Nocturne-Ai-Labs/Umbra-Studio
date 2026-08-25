@@ -2777,8 +2777,9 @@ export function UmbraUIWorkspace() {
               ? 'Queue this source through the locked Umbra UI IMG2IMG pipeline'
               : 'Queue this image through the locked Umbra UI pipeline');
   const imagePromptControls = (
-    <>
-      <UmbraPositivePromptEditor
+    <div className="relative">
+      <>
+        <UmbraPositivePromptEditor
         segments={promptSegments}
         activeSegmentId={activePromptSegmentId}
         onChange={setPromptSegments}
@@ -2837,7 +2838,15 @@ export function UmbraUIWorkspace() {
           />
         </label>
       ) : null}
-    </>
+
+      <PowerPrompterSearchPanel
+        onInsert={handleCatalogInsert}
+        enabledCSVs={catalogEnabledCSVs}
+        onToggleCSV={handleToggleCatalogCSV}
+        drawerMode
+      />
+      </>
+    </div>
   );
 
   const imageQueueControls = (
@@ -3728,7 +3737,7 @@ export function UmbraUIWorkspace() {
 
       </div>
 
-      {activeMode !== 'extras' && activeMode !== 'prompter' ? (
+      {activeMode !== 'extras' && activeMode !== 'prompter' && activeMode !== 'image' && activeMode !== 'img2img' && activeMode !== 'inpaint' ? (
         <PowerPrompterSearchPanel
           onInsert={handleCatalogInsert}
           enabledCSVs={catalogEnabledCSVs}
