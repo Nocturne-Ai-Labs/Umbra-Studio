@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.31.24
+
+### NSFW Privacy Sidebar Controls
+
+- Added Off, Blur, and Lock modes to the NSFW sidebar control.
+- Added four-digit PIN setup and salted PIN verifier storage.
+- Added privacy-lock state and minimum-duration settings for personal-build testing.
+
+### Fixes And Quality-of-Life Recap
+
+- **Improved:** NSFW protection settings now expose separate display modes.
+- **Improved:** Privacy-lock configuration is available directly from the sidebar.
+
+
 ## v0.31.23
 
 ### Tag Catalog Interaction And Motion

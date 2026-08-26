@@ -34,6 +34,7 @@ export interface AppSettings {
   'library.enableExternalRoots': boolean;
   'library.externalRoots': string[];
   'library.pinnedFolders': string[];
+  'library.protectedFolders': string[];
   'library.recentFolders': string[];
   'library.cloudRoots': string[];
   'library.trashStoragePath': string;
@@ -54,6 +55,11 @@ export interface AppSettings {
   'ui.tagCatalogExplicitEnabled': boolean;
   'ui.nsfwThumbnailBlurEnabled': boolean;
   'ui.nsfwThumbnailBlurIntensity': number;
+  'ui.nsfwPrivacyMode': 'off' | 'blur' | 'lock';
+  'ui.nsfwPrivacyLockEngaged': boolean;
+  'ui.nsfwPrivacyLockEngagedAt': number;
+  'ui.nsfwPrivacyPinHash': string;
+  'ui.nsfwPrivacyPinSalt': string;
   'appUpdate.mode': 'source' | 'release';
   'appUpdate.releaseChannel': 'stable' | 'beta';
   'appUpdate.feedUrl': string;
@@ -84,6 +90,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   'library.enableExternalRoots': true,
   'library.externalRoots': [],
   'library.pinnedFolders': [],
+  'library.protectedFolders': [],
   'library.recentFolders': [],
   'library.cloudRoots': [],
   'library.trashStoragePath': '',
@@ -104,6 +111,11 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   'ui.tagCatalogExplicitEnabled': false,
   'ui.nsfwThumbnailBlurEnabled': false,
   'ui.nsfwThumbnailBlurIntensity': 85,
+  'ui.nsfwPrivacyMode': 'off',
+  'ui.nsfwPrivacyLockEngaged': false,
+  'ui.nsfwPrivacyLockEngagedAt': 0,
+  'ui.nsfwPrivacyPinHash': '',
+  'ui.nsfwPrivacyPinSalt': '',
   'appUpdate.mode': 'source',
   'appUpdate.releaseChannel': 'stable',
   'appUpdate.feedUrl': '',
@@ -132,6 +144,10 @@ const BOOLEAN_KEYS: Array<keyof AppSettings> = [
   'remote.galleryViewerOriginals',
   'ui.tagCatalogExplicitEnabled',
   'ui.nsfwThumbnailBlurEnabled',
+  'ui.nsfwPrivacyLockEngaged',
+  'ui.nsfwPrivacyMode',
+  'ui.nsfwPrivacyPinHash',
+  'ui.nsfwPrivacyPinSalt',
   'appUpdate.mode',
   'appUpdate.releaseChannel',
   'appUpdate.feedUrl',
@@ -145,6 +161,7 @@ const NUMBER_KEYS: Array<keyof AppSettings> = [
   'ui.idleFrameCapFps',
   'library.trashAutoDeleteDays',
   'ui.nsfwThumbnailBlurIntensity',
+  'ui.nsfwPrivacyLockEngagedAt',
   'advanced.consoleMaxLogs',
 ];
 
@@ -152,6 +169,7 @@ const STRING_ARRAY_KEYS: Array<keyof AppSettings> = [
   'system.visibleDrives',
   'library.externalRoots',
   'library.pinnedFolders',
+  'library.protectedFolders',
   'library.recentFolders',
   'library.cloudRoots',
 ];
