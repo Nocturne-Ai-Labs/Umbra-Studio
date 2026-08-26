@@ -522,6 +522,7 @@ export function UmbraUIWorkspace() {
   const { t } = useI18n();
   const workspaceRootRef = React.useRef<HTMLDivElement>(null);
   const lastCatalogTargetRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const lastCatalogSelectionRef = React.useRef<{ target: HTMLTextAreaElement; start: number; end: number } | null>(null);
   const catalogSettingsRef = React.useRef<Record<string, unknown>>({});
   const activeWorkspace = useStore((state) => state.activeWorkspace);
   const comfyConnected = useStore((state) => state.connections.comfyui === 'connected');
@@ -691,6 +692,11 @@ export function UmbraUIWorkspace() {
     const target = event.target;
     if (target instanceof HTMLTextAreaElement && !target.closest('[data-umbra-tag-catalog-drawer]')) {
       lastCatalogTargetRef.current = target;
+      lastCatalogSelectionRef.current = {
+        target,
+        start: target.selectionStart ?? target.value.length,
+        end: target.selectionEnd ?? target.selectionStart ?? target.value.length,
+      };
     }
   }, []);
 
@@ -740,8 +746,9 @@ export function UmbraUIWorkspace() {
     }
     if (target) {
       const current = target.value;
-      const selectionStart = target.selectionStart ?? current.length;
-      const selectionEnd = target.selectionEnd ?? selectionStart;
+      const savedSelection = lastCatalogSelectionRef.current?.target === target ? lastCatalogSelectionRef.current : null;
+      const selectionStart = savedSelection?.start ?? target.selectionStart ?? current.length;
+      const selectionEnd = savedSelection?.end ?? target.selectionEnd ?? selectionStart;
       let replaceStart = selectionStart;
       let replaceEnd = selectionEnd;
       if (options.replaceCurrentToken && selectionStart === selectionEnd) {
@@ -761,6 +768,7 @@ export function UmbraUIWorkspace() {
       setter?.call(target, nextValue);
       target.dispatchEvent(new Event('input', { bubbles: true }));
       const caret = replaceStart + insertion.length;
+      lastCatalogSelectionRef.current = { target, start: caret, end: caret };
       window.requestAnimationFrame(() => {
         target?.focus({ preventScroll: true });
         target?.setSelectionRange(caret, caret);
@@ -2839,12 +2847,6 @@ export function UmbraUIWorkspace() {
         </label>
       ) : null}
 
-      <PowerPrompterSearchPanel
-        onInsert={handleCatalogInsert}
-        enabledCSVs={catalogEnabledCSVs}
-        onToggleCSV={handleToggleCatalogCSV}
-        drawerMode
-      />
       </>
     </div>
   );
@@ -2884,6 +2886,7 @@ export function UmbraUIWorkspace() {
     <div
       ref={workspaceRootRef}
       onFocusCapture={handleCatalogFocusCapture}
+      onSelectCapture={handleCatalogFocusCapture}
       data-umbra-ui-workspace=""
       className="relative flex h-full min-h-0 flex-col bg-[var(--umbra-bg)] text-zinc-100"
     >
@@ -3540,6 +3543,12 @@ export function UmbraUIWorkspace() {
             </span>
             <span className="ml-auto font-mono text-[10px] text-zinc-500">{queueSummary.completed} outputs</span>
           </div>
+          <PowerPrompterSearchPanel
+            onInsert={handleCatalogInsert}
+            enabledCSVs={catalogEnabledCSVs}
+            onToggleCSV={handleToggleCatalogCSV}
+            drawerMode
+          />
           <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black/35 p-4">
             <div className="relative flex h-full min-h-0 w-full items-center justify-center border border-white/10 bg-black/25">
               {imagePreviewUrl ? (

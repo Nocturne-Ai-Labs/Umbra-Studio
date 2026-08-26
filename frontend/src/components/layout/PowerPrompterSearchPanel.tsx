@@ -512,8 +512,13 @@ export const PowerPrompterSearchPanel = React.memo(({
         <button
           type="button"
           aria-pressed={selected}
+          onMouseDown={(event) => event.preventDefault()}
           onClick={() => toggleItem(item)}
-          onDoubleClick={() => insertItems([item])}
+          onDoubleClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            insertItems([item]);
+          }}
           className="grid min-w-0 grid-cols-[1.2rem_minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5 text-left"
           title="Select this entry. Double-click to insert it immediately."
         >
@@ -547,35 +552,37 @@ export const PowerPrompterSearchPanel = React.memo(({
     );
   };
 
-  if (drawerMode && !effectiveDrawerOpen) {
-    return (
-      <button
-        type="button"
-        data-umbra-tag-catalog-drawer-trigger=""
-        onClick={() => setDrawerOpen(true)}
-        className="absolute bottom-2 left-1/2 z-[90] inline-flex h-9 -translate-x-1/2 items-center gap-2 rounded-md border border-cyan-300/30 px-4 text-[9px] font-black uppercase tracking-[0.12em] text-cyan-100 shadow-[0_8px_30px_rgba(0,0,0,0.55)] hover:border-cyan-200/50"
-        style={{
-          backgroundColor: 'var(--umbra-bg, #09090b)',
-          backgroundImage: 'linear-gradient(var(--umbra-panel-bg, rgba(20, 20, 30, 0.96)), var(--umbra-panel-bg, rgba(20, 20, 30, 0.96)))',
-        }}
-      >
-        <Tags className="h-3.5 w-3.5" /> Tag Catalog <ChevronUp className="h-3.5 w-3.5" />
-      </button>
-    );
-  }
-
   return (
-    <div
+    <>
+      {drawerMode && !effectiveDrawerOpen ? (
+        <button
+          type="button"
+          data-umbra-tag-catalog-drawer-trigger=""
+          onClick={() => setDrawerOpen(true)}
+          className="absolute left-0 top-1/2 z-[90] inline-flex min-h-32 -translate-y-1/2 items-center gap-2 rounded-r-md border border-cyan-300/30 px-2 py-4 text-[9px] font-black uppercase tracking-[0.12em] text-cyan-100 shadow-[8px_0_30px_rgba(0,0,0,0.55)] transition-[transform,opacity] duration-300 ease-out hover:border-cyan-200/50 [writing-mode:vertical-rl]"
+          style={{
+            backgroundColor: 'var(--umbra-bg, #09090b)',
+            backgroundImage: 'linear-gradient(var(--umbra-panel-bg, rgba(20, 20, 30, 0.96)), var(--umbra-panel-bg, rgba(20, 20, 30, 0.96)))',
+          }}
+        >
+          <Tags className="h-3.5 w-3.5" /> Tag Catalog <ChevronUp className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
+      <div
       data-umbra-powerprompter-search-panel=""
       data-umbra-powerprompter-tag-catalog=""
       data-umbra-tag-catalog-drawer={drawerMode ? '' : undefined}
       className={`${drawerMode
-        ? 'absolute inset-x-0 bottom-0 z-[95] isolate flex max-h-[78dvh] min-h-0 flex-col border-t border-cyan-300/25 shadow-[0_-20px_60px_rgba(0,0,0,0.78)]'
+        ? 'absolute inset-0 z-[95] isolate flex min-h-0 flex-col border-r border-cyan-300/25 shadow-[20px_0_60px_rgba(0,0,0,0.78)] transition-[transform,opacity] duration-300 ease-out'
         : menuMode
           ? 'h-full min-h-0 w-full max-w-none'
-          : 'h-full w-80 flex-shrink-0 border-l border-white/5'} flex min-h-0 flex-col glass-panel`}
+          : 'h-full w-80 flex-shrink-0 border-l border-white/5'} ${drawerMode
+            ? effectiveDrawerOpen
+              ? 'translate-x-0 opacity-100 pointer-events-auto'
+              : 'translate-x-full opacity-0 pointer-events-none'
+            : ''} flex min-h-0 flex-col glass-panel`}
       style={drawerMode ? {
-        height: 'min(38rem, 78dvh)',
+        height: '100%',
         backgroundColor: 'var(--umbra-bg, #09090b)',
         backgroundImage: 'linear-gradient(var(--umbra-panel-bg, rgba(20, 20, 30, 0.96)), var(--umbra-panel-bg, rgba(20, 20, 30, 0.96)))',
       } : { backgroundColor: overlayMode ? 'rgba(5,5,8,0.98)' : '#050508' }}
@@ -693,9 +700,9 @@ export const PowerPrompterSearchPanel = React.memo(({
               <button type="button" aria-pressed={explicitCatalogEnabled} data-umbra-powerprompter-catalog-explicit-toggle onClick={() => setAppSetting('ui.tagCatalogExplicitEnabled', !explicitCatalogEnabled)} className={`h-6 rounded-sm border px-2 text-[8px] font-black uppercase tracking-[0.08em] ${explicitCatalogEnabled ? 'border-red-300/20 text-red-200/70 hover:text-red-100' : 'border-white/10 text-zinc-500 hover:text-zinc-200'}`}>Explicit {explicitCatalogEnabled ? 'On' : 'Off'}</button>
             </div>
 
-            {suggestionSeeds.length > 0 ? (
-              <section data-umbra-tag-suggestion-rail className="mt-2 overflow-hidden rounded-sm border border-fuchsia-300/15 bg-fuchsia-500/[0.025]">
-                <div className="flex min-h-8 flex-wrap items-center gap-2 border-b border-white/[0.06] px-2.5 py-1.5">
+            {drawerMode || menuMode || activeView === 'catalog' ? (
+              <section data-umbra-tag-suggestion-rail className="mt-2 h-[5.25rem] flex-none overflow-hidden rounded-sm border border-fuchsia-300/15 bg-fuchsia-500/[0.025]">
+                <div className="flex h-8 shrink-0 flex-wrap items-center gap-2 border-b border-white/[0.06] px-2.5 py-1.5">
                   <span className="inline-flex shrink-0 items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.1em] text-fuchsia-100">
                     <Network className="h-3 w-3" /> Suggestions
                   </span>
@@ -710,7 +717,7 @@ export const PowerPrompterSearchPanel = React.memo(({
                     ))}
                   </div>
                 </div>
-                <div className="custom-scrollbar flex min-h-9 items-center gap-1.5 overflow-x-auto px-2 py-1.5">
+                <div className="custom-scrollbar h-9 shrink-0 flex items-center gap-1.5 overflow-x-auto px-2 py-1.5">
                   {!relationCorpusStatus ? (
                     <span className="shrink-0 text-[9px] text-zinc-600">Checking corpus...</span>
                   ) : relationCorpusStatus.indexedPosts === 0 ? (
@@ -824,6 +831,7 @@ export const PowerPrompterSearchPanel = React.memo(({
         </div>
       ) : null}
     </div>
+    </>
   );
 });
 

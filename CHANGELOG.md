@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.31.23
+
+### Tag Catalog Interaction And Motion
+
+- Added smooth slide-in and slide-out animation to the Umbra UI tag catalog.
+- Preserved the prompt caret and selection range when inserting a tag by double-click.
+- Prevented catalog result buttons from stealing focus from the active prompt field.
+- Kept the fixed suggestion rail and preview-side catalog placement stable during interaction.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Double-click tag insertion replacing text before the first comma instead of the active prompt token.
+- **Improved:** Tag catalog opening and closing motion.
+- **Improved:** Prompt focus and caret preservation during catalog use.
+
+
 ## v0.31.22
 
 ### Tag Catalog And Umbra UI Prompt Workflow
