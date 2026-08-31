@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.31.25
+
+### TL;DR - Setup After Updating
+
+**Krea 2 inpainting requires ComfyUI 0.34.0 or newer.** Update ComfyUI from
+Umbra Studio's managed ComfyUI controls, then restart ComfyUI before using the
+new Krea 2 inpaint pipeline. No custom node is required.
+
+- Install the Krea 2 diffusion model, Qwen3-VL 4B text encoder, and Qwen Image
+  VAE through Umbra's model requirements installer if they are not already
+  installed.
+- The model files are not bundled into the portable packages. Existing Krea 2
+  model installations remain in place during a normal update.
+- On Windows, launch the updated portable build with `UmbraStudio.bat`. On
+  Linux, use `start-umbra.sh`; managed Python tooling may require the documented
+  system build and graphics libraries before ComfyUI can install its venv.
+
+### Krea 2 Masked Inpainting
+
+- Added a dedicated locked **Krea 2 Inpaint** workflow alongside Krea 2
+  text-to-image and image-to-image.
+- The workflow uses ComfyUI's mask-aware VAE encoding and sampling path, then
+  composites the result back over the original image so unmasked pixels are
+  preserved.
+- Krea 2 inpaint exposes its verified controls: model source, LoRA stack,
+  seed, steps, CFG, sampler, scheduler, resolution, inpaint denoise, detailer
+  stages, and final output upscale.
+- Canvas control layers, reference layers, and seamless tiling remain disabled
+  for Krea 2 because no compatible Krea-specific binding is declared by the
+  workflow.
+
+### ComfyUI Development Baseline
+
+- Updated the managed development ComfyUI source baseline to **v0.34.0** and
+  refreshed its required Python packages.
+- Verified the Krea workflow's required ComfyUI nodes and registered pipeline
+  contract against that baseline.
+
+### Verification
+
+- Passed the Umbra UI pipeline audit with the Krea 2 inpaint provider present.
+- Passed focused Krea masked-workflow and pipeline-capability tests, frontend
+  lint, production frontend build, and live Umbra pipeline resolution.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Krea 2 no longer lacks an Umbra UI inpaint pipeline.
+- **Improved:** Native masked-edit workflows now correctly advertise their
+  adjustable denoise control when the graph wires it to the inpaint sampler.
+
 ## v0.31.24
 
 ### NSFW Privacy Sidebar Controls

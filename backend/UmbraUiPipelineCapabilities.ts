@@ -735,20 +735,26 @@ export function deriveUmbraUiTxt2ImgCapabilities(
       ? control('fixed', `Scheduler behavior is fixed by ${fixedSchedulerNodes[0].classType}.`, fixedSchedulerNodes, defaults.scheduler || fixedSchedulerNodes[0].classType)
       : unsupported('No supported scheduler selector is present in this graph.');
 
-  const img2imgDenoiseNodes = descriptor.feature === 'img2img'
+  const denoiseNodes = descriptor.feature === 'img2img'
     ? nodes.filter((node) => (
       (hasNodeRole(node, 'img2img_sampler') || hasNodeRole(node, 'img2img_scheduler'))
       && hasInput(node, 'denoise')
     ))
-    : [];
-  const denoise = img2imgDenoiseNodes.length > 0
+    : descriptor.feature === 'inpainting' && descriptor.inpaintAdapter === 'native_edit'
+      ? nodes.filter((node) => hasNodeRole(node, 'inpaint_sampler') && hasInput(node, 'denoise'))
+      : [];
+  const denoise = denoiseNodes.length > 0
     ? control(
       'adjustable',
-      'IMG2IMG denoise is wired to the base sampling path.',
-      img2imgDenoiseNodes,
-      literalInput(img2imgDenoiseNodes, ['denoise']) ?? defaults.denoise,
+      descriptor.feature === 'inpainting'
+        ? 'Masked inpaint denoise is wired to the native sampling path.'
+        : 'IMG2IMG denoise is wired to the base sampling path.',
+      denoiseNodes,
+      literalInput(denoiseNodes, ['denoise']) ?? defaults.denoise,
     )
-    : unsupported('This pipeline does not expose a base IMG2IMG denoise control.');
+    : unsupported(descriptor.feature === 'inpainting'
+      ? 'This inpaint pipeline does not expose a native denoise control.'
+      : 'This pipeline does not expose a base IMG2IMG denoise control.');
 
   const resolutionNodes = nodes.filter((node) => (
     ['UmbraPowerPrompter', 'UmbraPowerPrompterReader', 'Ideogram4Scheduler', 'Flux2Scheduler'].includes(node.classType)

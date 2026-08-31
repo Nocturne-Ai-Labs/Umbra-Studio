@@ -598,8 +598,116 @@ async function buildQwenImageEditInpaint() {
   await writeGraph('[Umbra UI] Qwen Image Edit Inpaint Pipeline.json', graph);
 }
 
+async function buildKrea2Inpaint() {
+  const base = await readGraph('[Umbra UI] Krea 2 Image to Image Pipeline.json');
+  const graph: PromptGraph = {
+    '1': cloneNode(base, '1', {
+      _meta: {
+        title: 'Umbra UI Krea 2 Masked Inpaint',
+        umbra_model_family: 'Krea 2',
+        umbra_ui_pipelines: [inpaintDescriptor('Krea 2', ['diffusion_model', 'unet', 'gguf'], {
+          modelName: 'krea2_turbo_fp8_scaled.safetensors',
+          modelNamesBySource: {
+            diffusion_model: 'krea2_turbo_fp8_scaled.safetensors',
+            unet: 'krea2_turbo_fp8_scaled.safetensors',
+          },
+          steps: 8,
+          cfg: 1,
+          samplerName: 'euler',
+          scheduler: 'simple',
+          width: 1024,
+          height: 1024,
+          clipSkip: 1,
+          denoise: 0.8,
+        })],
+      },
+    }),
+    '2': cloneNode(base, '2'),
+    '3': cloneNode(base, '3'),
+    '4': cloneNode(base, '4'),
+    '5': cloneNode(base, '5'),
+    '6': cloneNode(base, '6'),
+    '7': node('LoadImage', { image: 'umbra-krea2-source.png' }, {
+      title: 'Editable Source Image',
+      umbra_role: 'inpaint_source',
+      umbra_output_index: 0,
+    }),
+    '8': node('LoadImageMask', { image: 'umbra-krea2-mask.png', channel: 'red' }, {
+      title: 'Editable Source Mask',
+      umbra_role: 'inpaint_mask',
+      umbra_output_index: 0,
+    }),
+    '9': node('INPAINT_ExpandMask', { mask: ['8', 0], grow: 0, blur: 0, blur_type: 'gaussian' }, {
+      title: 'Grow + Feather Krea 2 Mask',
+      umbra_role: 'inpaint_mask_processor',
+    }),
+    '10': node('VAEEncodeForInpaint', {
+      pixels: ['7', 0],
+      vae: ['4', 0],
+      mask: ['9', 0],
+      grow_mask_by: 0,
+    }, {
+      title: 'Encode Krea 2 Masked Source',
+    }),
+    '11': cloneNode(base, '8', {
+      inputs: {
+        ...structuredClone(base['8'].inputs),
+        latent_image: ['10', 0],
+        denoise: 0.8,
+      },
+      _meta: {
+        title: 'Sample Krea 2 Masked Edit',
+        umbra_role: 'inpaint_sampler',
+      },
+    }),
+    '12': cloneNode(base, '9', {
+      inputs: { samples: ['11', 0], vae: ['4', 0] },
+      _meta: { title: 'Decode Krea 2 Edit' },
+    }),
+    '13': node('ImageCompositeMasked', {
+      destination: ['7', 0],
+      source: ['12', 0],
+      x: 0,
+      y: 0,
+      resize_source: false,
+      mask: ['9', 0],
+    }, { title: 'Non-Destructive Krea 2 Composite' }),
+    '14': cloneNode(base, '10', {
+      inputs: {
+        ...structuredClone(base['10'].inputs),
+        image: ['13', 0],
+      },
+      _meta: { title: 'Umbra Detail Pipeline' },
+    }),
+    '15': cloneNode(base, '11', {
+      inputs: {
+        ...structuredClone(base['11'].inputs),
+        image: ['14', 0],
+      },
+      _meta: { title: 'Optional Output Upscale' },
+    }),
+    '16': cloneNode(base, '12', {
+      inputs: {
+        ...structuredClone(base['12'].inputs),
+        images: ['15', 0],
+        filename_prefix: 'UmbraUI_Inpaint_Krea2_%date%',
+        output_folder: 'Umbra UI/inpainting',
+        model_name: ['1', 3],
+        seed: ['2', 3],
+        steps: 8,
+        cfg: 1,
+        sampler_name: 'euler',
+        scheduler: 'simple',
+      },
+      _meta: { title: 'Save Krea 2 Inpaint', umbra_role: 'inpaint_output' },
+    }),
+  };
+  await writeGraph('[Umbra UI] Krea 2 Inpaint Pipeline.json', graph);
+}
+
 await buildHiDreamO1Inpaint();
 await buildFlux2EditInpaint();
 await buildQwenImageEditInpaint();
 await buildZImageTurboInpaint();
-console.log(`Generated native HiDream-O1, FLUX.2 Edit, Qwen Image Edit, and Z-Image Turbo inpaint workflows in ${workflowDirectories.length} locations.`);
+await buildKrea2Inpaint();
+console.log(`Generated native HiDream-O1, FLUX.2 Edit, Qwen Image Edit, Z-Image Turbo, and Krea 2 inpaint workflows in ${workflowDirectories.length} locations.`);
