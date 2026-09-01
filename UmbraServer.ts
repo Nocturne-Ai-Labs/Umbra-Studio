@@ -24671,6 +24671,7 @@ async function handleFsListProgressive(url: URL): Promise<Response> {
           metadataReady: indexed.metadataReady,
           metadataFormat: indexed.metadataFormat,
           tags: Array.isArray(indexed.tags) ? indexed.tags : [],
+          privacyClass: indexed.privacyClass === 'nsfw' ? 'nsfw' : 'normal',
           width: Number.isFinite(indexed.width) ? Math.max(0, Math.trunc(indexed.width)) : 0,
           height: Number.isFinite(indexed.height) ? Math.max(0, Math.trunc(indexed.height)) : 0,
         };
@@ -24691,6 +24692,7 @@ async function handleFsListProgressive(url: URL): Promise<Response> {
         customOrder: cursor + index,
         type: inferGalleryMediaType(normalizedPath, file?.type),
         tags: [],
+        privacyClass: 'normal',
         width: 0,
         height: 0,
       };
@@ -24753,7 +24755,10 @@ async function handleFsListProgressive(url: URL): Promise<Response> {
     return json({
       ...publicResult,
       path: normalizedFolderPath,
-      files: augmentedFiles,
+      files: augmentedFiles.map((file: any) => ({
+        ...file,
+        privacyClass: file?.privacyClass === 'nsfw' ? 'nsfw' : 'normal',
+      })),
     });
   } catch (error: any) {
     const code = String(error?.code || '').trim().toUpperCase();
@@ -24912,20 +24917,30 @@ async function handleFsTagsAdd(req: Request): Promise<Response> {
   try {
     const payload = await req.json().catch(() => ({} as Record<string, unknown>));
     const rawUids = Array.isArray((payload as any).uids) ? (payload as any).uids : [];
+    const rawPaths = Array.isArray((payload as any).paths) ? (payload as any).paths : [];
     const rawTags = Array.isArray((payload as any).tags) ? (payload as any).tags : [];
 
-    const uids = Array.from(new Set(
+    const directUids = Array.from(new Set(
       rawUids
         .map((entry: unknown) => String(entry || '').trim())
         .filter(Boolean),
     ));
+    const paths = Array.from(new Set(
+      rawPaths
+        .map((entry: unknown) => normalizeOutputPathInput(String(entry || '').trim()))
+        .filter(Boolean),
+    ));
+    const uids = Array.from(new Set([
+      ...directUids,
+      ...(paths.length > 0 ? galleryDb.resolveUidsForPaths(paths) : []),
+    ]));
     const tags = Array.from(new Set(
       rawTags
         .map((entry: unknown) => normalizeFsTag(entry))
         .filter(Boolean),
     ));
 
-    if (uids.length === 0) return json({ error: 'Missing uids' }, 400);
+    if (uids.length === 0) return json({ error: 'Missing uids or paths' }, 400);
     if (tags.length === 0) return json({ error: 'Missing tags' }, 400);
 
     const tagsByUidMap = galleryDb.addTagsToFiles(uids, tags);
@@ -24948,6 +24963,59 @@ async function handleFsTagsAdd(req: Request): Promise<Response> {
   } catch (error: any) {
     console.error('[FS Tags Add] Error:', error);
     return json({ error: error?.message || 'Failed to add tags' }, 500);
+  }
+}
+
+async function handleFsTagsRemove(req: Request): Promise<Response> {
+  try {
+    const payload = await req.json().catch(() => ({} as Record<string, unknown>));
+    const rawUids = Array.isArray((payload as any).uids) ? (payload as any).uids : [];
+    const rawPaths = Array.isArray((payload as any).paths) ? (payload as any).paths : [];
+    const rawTags = Array.isArray((payload as any).tags) ? (payload as any).tags : [];
+
+    const directUids = Array.from(new Set(
+      rawUids
+        .map((entry: unknown) => String(entry || '').trim())
+        .filter(Boolean),
+    ));
+    const paths = Array.from(new Set(
+      rawPaths
+        .map((entry: unknown) => normalizeOutputPathInput(String(entry || '').trim()))
+        .filter(Boolean),
+    ));
+    const uids = Array.from(new Set([
+      ...directUids,
+      ...(paths.length > 0 ? galleryDb.resolveUidsForPaths(paths) : []),
+    ]));
+    const tags = Array.from(new Set(
+      rawTags
+        .map((entry: unknown) => normalizeFsTag(entry))
+        .filter(Boolean),
+    ));
+
+    if (uids.length === 0) return json({ error: 'Missing uids or paths' }, 400);
+    if (tags.length === 0) return json({ error: 'Missing tags' }, 400);
+
+    const tagsByUidMap = galleryDb.removeTagsFromFiles(uids, tags);
+    const tagsByUid: Record<string, string[]> = {};
+    for (const [uid, uidTags] of tagsByUidMap.entries()) {
+      const normalizedUid = String(uid || '').trim();
+      if (!normalizedUid) continue;
+      tagsByUid[normalizedUid] = Array.from(new Set(
+        (Array.isArray(uidTags) ? uidTags : [])
+          .map((entry) => normalizeFsTag(entry))
+          .filter(Boolean),
+      ));
+    }
+
+    return json({
+      success: true,
+      updated: Object.keys(tagsByUid).length,
+      tagsByUid,
+    });
+  } catch (error: any) {
+    console.error('[FS Tags Remove] Error:', error);
+    return json({ error: error?.message || 'Failed to remove tags' }, 500);
   }
 }
 
@@ -30116,6 +30184,7 @@ const server = Bun.serve<any>({
       if (path === '/api/fs/write' && method === 'POST') return handleFsWrite(req);
       if (path === '/api/fs/reorder' && method === 'POST') return handleFsReorder(req);
       if (path === '/api/fs/tags/add' && method === 'POST') return handleFsTagsAdd(req);
+      if (path === '/api/fs/tags/remove' && method === 'POST') return handleFsTagsRemove(req);
       if (path === '/api/fs/tags/set' && method === 'POST') return handleFsTagsSet(req);
       if (path === '/api/fs/tags/summary' && method === 'GET') return handleFsTagsSummary(url);
 

@@ -82,6 +82,9 @@ import { buildGalleryGenerationPromptDetails } from '@/lib/galleryGenerationProm
 import { PowerPrompterActivePromptInline } from './PowerPrompterActivePromptInline';
 import type { Dataset } from '@/components/board/types';
 import { resolveGalleryContextSelectionPaths } from './galleryContextSelection';
+import { NsfwPrivacyShield } from '@/components/privacy/NsfwPrivacyProvider';
+import { classifyUmbraPrompt, type UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
+import { UMBRA_MANUAL_NSFW_TAG } from '../../../../shared/nsfwPrivacyClassifier';
 
 type GallerySortBy = 'created' | 'modified' | 'name' | 'custom';
 type GallerySortOrder = 'asc' | 'desc';
@@ -93,6 +96,7 @@ type GallerySetSortRule = {
 type GalleryUiSession = {
   currentFolder?: string;
   focusedFolder?: string;
+  expandedFolders?: string[];
   sortBy?: GallerySortBy;
   sortOrder?: GallerySortOrder;
   groupBySet?: boolean;
@@ -171,6 +175,7 @@ type GallerySavedOutputFile = {
   modifiedMs?: number;
   size?: number;
   tags?: string[];
+  privacyClass?: UmbraPrivacyClass;
   metadata?: GalleryViewerMetadata;
 };
 
@@ -1048,6 +1053,7 @@ function normalizeGalleryFile(file: GalleryFile, index = 0): GalleryFile {
     originalPath: normalizePath(file.originalPath || file.trashOriginalPath),
     trashOriginalPath: normalizePath(file.trashOriginalPath || file.originalPath),
     tags: normalizeTags(file.tags),
+    privacyClass: file.privacyClass === 'nsfw' ? 'nsfw' : 'normal',
   };
 }
 
@@ -1099,6 +1105,10 @@ function collectSavedOutputFiles(detail: unknown): GallerySavedOutputFile[] {
       ...(Array.isArray(item.tags) ? item.tags : []),
       item.promptSetLabel,
     ]);
+    const privacyClass = classifyUmbraPrompt(
+      item.positivePrompt ?? item.positive_prompt ?? payload.positivePrompt ?? payload.positive_prompt,
+      tags,
+    );
     files.push({
       path,
       ...(name ? { name } : {}),
@@ -1106,6 +1116,7 @@ function collectSavedOutputFiles(detail: unknown): GallerySavedOutputFile[] {
       ...(Number.isFinite(modified) ? { modifiedMs: modified } : {}),
       ...(Number.isFinite(size) && size > 0 ? { size } : {}),
       ...(tags.length > 0 ? { tags } : {}),
+      privacyClass,
       ...(metadata ? { metadata } : {}),
     });
   }
@@ -2714,6 +2725,7 @@ function GalleryImageTile({
   const isTrashItem = isTrashPath(path);
   const trashCountdown = isTrashItem ? formatTimeRemaining(getTrashExpiresMs(file) - Date.now()) : '';
   const tags = useMemo(() => normalizeTags(file.tags), [file.tags]);
+  const isNsfw = file.privacyClass === 'nsfw';
   const tagLine = tags.length > 0 ? tags.slice(0, 5).join(', ') : 'No tags';
   const typeLabel = isFolder ? 'FOLDER' : file.type === 'video' ? 'VIDEO' : file.type === 'gif' ? 'GIF' : 'IMAGE';
   const effectiveSetColor = !isFolder && !contextTargeted && !restoredHighlighted && setColor ? setColor : '';
@@ -3035,6 +3047,7 @@ function GalleryImageTile({
           </div>
         ) : (
           <img
+            data-umbra-nsfw-media={isNsfw ? '' : undefined}
             key={`${fileId(file)}:${src}`}
             src={loadGranted ? src : undefined}
             alt={file.name}
@@ -3056,6 +3069,7 @@ function GalleryImageTile({
         {isLivePreview ? (
           <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-emerald-300/18 to-transparent" />
         ) : null}
+        {!isFolder ? <NsfwPrivacyShield compact protectedMedia={isNsfw} /> : null}
       </div>
       <div data-umbra-gallery-tile-footer className="shrink-0 px-0.5 pb-0.5 pt-1.5">
         <div className="truncate text-xs font-medium leading-4 text-zinc-100" title={file.name}>{file.name}</div>
@@ -3139,6 +3153,7 @@ function GalleryMediaViewer({
   const imageSrc = useMemo(() => (file ? imageUrl(file, { lane: 'gallery', remoteOriginals: remoteViewerOriginals }) : ''), [file, remoteViewerOriginals]);
   const stillSrc = useMemo(() => (file ? thumbnailUrl(file, { lane: 'gallery' }) : ''), [file]);
   const isVideo = file?.type === 'video';
+  const isNsfw = file?.privacyClass === 'nsfw';
   const isGif = file?.type === 'gif';
   const canSendWaifu = Boolean(file && !isLivePreview && (file.type === 'image' || file.type === 'gif'));
   const sizeLabel = formatBytes(file?.size);
@@ -3764,13 +3779,14 @@ function GalleryMediaViewer({
             } : undefined}
           >
             {isVideo ? (
-              <video key={imageSrc} src={imageSrc} controls autoPlay playsInline preload="metadata" className="h-full max-h-full w-full max-w-full object-contain" />
+              <video data-umbra-nsfw-media={isNsfw ? '' : undefined} key={imageSrc} src={imageSrc} controls autoPlay playsInline preload="metadata" className="h-full max-h-full w-full max-w-full object-contain" />
             ) : (
               <div
                 className="flex flex-none items-center justify-center"
                 style={zoom > 1 ? { width: `${zoom * 100}%`, height: `${zoom * 100}%` } : { width: '100%', height: '100%' }}
               >
                 <img
+                  data-umbra-nsfw-media={isNsfw ? '' : undefined}
                   key={imageSrc || stillSrc}
                   src={isGif ? imageSrc : imageSrc || stillSrc}
                   alt={file.name}
@@ -3780,6 +3796,7 @@ function GalleryMediaViewer({
               </div>
             )}
           </div>
+          <NsfwPrivacyShield protectedMedia={isNsfw} />
         </main>
 
         {showInfo ? (
@@ -5317,6 +5334,7 @@ export function ReactGalleryWorkspace() {
   const toggleTreeExpand = useCallback((folderPath: string) => {
     const normalized = normalizePath(folderPath);
     if (!normalized) return;
+    markGalleryUiSessionDirty();
     setExpandedFolders((current) => {
       const next = new Set(current);
       if (next.has(normalized)) {
@@ -5329,7 +5347,7 @@ export function ReactGalleryWorkspace() {
     if (!Object.prototype.hasOwnProperty.call(treeChildrenRef.current, normalized)) {
       void loadTreeChildren(normalized);
     }
-  }, [loadTreeChildren]);
+  }, [loadTreeChildren, markGalleryUiSessionDirty]);
 
   const refreshTreeChildren = useCallback((folderPath: string) => {
     const normalized = normalizePath(folderPath);
@@ -5343,6 +5361,41 @@ export function ReactGalleryWorkspace() {
     });
     void loadTreeChildren(normalized, true);
   }, [invalidateTreeChildrenCache, loadTreeChildren]);
+
+  const pruneDeletedFolderTreeState = useCallback((deletedPaths: string[]) => {
+    const deleted = uniqueNormalizedPaths(deletedPaths);
+    if (deleted.length === 0) return;
+    const isDeletedBranch = (candidate: string) => deleted.some((path) => (
+      pathsEqual(candidate, path) || pathIsInsideRoot(candidate, path)
+    ));
+
+    markGalleryUiSessionDirty();
+    setExpandedFolders((current) => {
+      const next = new Set(Array.from(current).filter((path) => !isDeletedBranch(path)));
+      return next.size === current.size ? current : next;
+    });
+    for (const path of Array.from(treeCacheRef.current.keys())) {
+      if (isDeletedBranch(path)) treeCacheRef.current.delete(path);
+    }
+    for (const path of Array.from(treeRequestByPathRef.current.keys())) {
+      if (isDeletedBranch(path)) treeRequestByPathRef.current.delete(path);
+    }
+    setTreeChildrenByPath((current) => {
+      let changed = false;
+      const next: Record<string, GalleryFolderTreeNode[]> = {};
+      for (const [parentPath, children] of Object.entries(current)) {
+        if (isDeletedBranch(parentPath)) {
+          changed = true;
+          continue;
+        }
+        const filteredChildren = children.filter((child) => !isDeletedBranch(child.path));
+        if (filteredChildren.length !== children.length) changed = true;
+        next[parentPath] = filteredChildren;
+      }
+      if (changed) treeChildrenRef.current = next;
+      return changed ? next : current;
+    });
+  }, [markGalleryUiSessionDirty]);
 
   const previewEmptyFolderCleanup = useCallback(async (folderPath: string) => {
     const normalized = normalizePath(folderPath);
@@ -5977,6 +6030,7 @@ export function ReactGalleryWorkspace() {
         ? payload.deleted.map(normalizePath).filter(Boolean)
         : [];
       const failed = Array.isArray(payload.failed) ? payload.failed : [];
+      pruneDeletedFolderTreeState(deleted);
       const touchedParents = uniqueNormalizedPaths([
         pending.rootPath,
         ...deleted.map(pathParent),
@@ -6010,6 +6064,7 @@ export function ReactGalleryWorkspace() {
     loadFolder,
     loadTreeChildren,
     openFolder,
+    pruneDeletedFolderTreeState,
   ]);
 
   const applyGalleryUiSession = useCallback((session: GalleryUiSession | null | undefined, options: { localRestore?: boolean } = {}) => {
@@ -6041,6 +6096,9 @@ export function ReactGalleryWorkspace() {
     const nextSortBy = session.sortBy;
     const nextSortOrder = session.sortOrder;
     const nextMobileView = session.mobileView;
+    const nextExpandedFolders = Array.isArray(session.expandedFolders)
+      ? session.expandedFolders.map(normalizePath).filter(Boolean)
+      : [];
     if (nextSortBy === 'created' || nextSortBy === 'modified' || nextSortBy === 'name' || nextSortBy === 'custom') {
       setSortBy(nextSortBy);
     }
@@ -6053,6 +6111,13 @@ export function ReactGalleryWorkspace() {
     if (nextMobileView === 'folders' || nextMobileView === 'media') {
       setGalleryMobileView(nextMobileView);
       galleryMobileViewRef.current = nextMobileView;
+    }
+    if (nextExpandedFolders.length > 0) {
+      setExpandedFolders((current) => {
+        const next = new Set(current);
+        for (const folderPath of nextExpandedFolders) next.add(folderPath);
+        return next.size === current.size ? current : next;
+      });
     }
     if (nextFocusedFolder) {
       setFocusedFolder(nextFocusedFolder);
@@ -6110,6 +6175,7 @@ export function ReactGalleryWorkspace() {
     const session = {
       currentFolder: pendingFolder || currentFolder,
       focusedFolder,
+      expandedFolders: Array.from(expandedFolders),
       sortBy,
       sortOrder,
       groupBySet,
@@ -6140,7 +6206,7 @@ export function ReactGalleryWorkspace() {
         galleryUiSessionSaveTimerRef.current = null;
       }
     };
-  }, [currentFolder, focusedFolder, galleryMobileView, groupBySet, sortBy, sortOrder, syncUiAcrossDevices]);
+  }, [currentFolder, expandedFolders, focusedFolder, galleryMobileView, groupBySet, sortBy, sortOrder, syncUiAcrossDevices]);
 
   const selectFile = useCallback((file: GalleryFile, event: React.MouseEvent) => {
     const path = normalizePath(file.path);
@@ -6872,6 +6938,7 @@ export function ReactGalleryWorkspace() {
         rollbackOptimisticPathRemoval(optimisticSnapshot);
         return;
       }
+      pruneDeletedFolderTreeState(dedupedRemovedPaths);
       for (const removedPath of dedupedRemovedPaths) clearCachedViewerMetadata(removedPath);
 
       if (failedDeletePaths.length > 0 && optimisticSnapshot) {
@@ -6925,7 +6992,7 @@ export function ReactGalleryWorkspace() {
       }
       addToast({ type: 'error', message: deleteError instanceof Error ? deleteError.message : 'Failed to delete selection' });
     }
-  }, [addToast, appSettings, applyOptimisticPathRemoval, clearPageCacheForFolder, clearTrashCache, currentFolder, loadFolder, queueTrashUndoToast, rollbackOptimisticPathRemoval, trashMode]);
+  }, [addToast, appSettings, applyOptimisticPathRemoval, clearPageCacheForFolder, clearTrashCache, currentFolder, loadFolder, pruneDeletedFolderTreeState, queueTrashUndoToast, rollbackOptimisticPathRemoval, trashMode]);
 
   const deleteViewerSelection = useCallback(() => {
     const currentViewerPath = normalizePath(viewerPath || lastSelectedPath);
@@ -7656,7 +7723,13 @@ export function ReactGalleryWorkspace() {
     const nextTags = normalizeTags(tags);
     const updateFile = (file: GalleryFile): GalleryFile => (
       pathSet.has(normalizePath(file.path).toLowerCase())
-        ? { ...file, tags: nextTags }
+        ? {
+            ...file,
+            tags: nextTags,
+            // Never reveal an item locally until the next indexed refresh can
+            // also account for metadata-derived NSFW classification.
+            privacyClass: classifyUmbraPrompt('', nextTags) === 'nsfw' ? 'nsfw' : file.privacyClass,
+          }
         : file
     );
 
@@ -9281,6 +9354,69 @@ export function ReactGalleryWorkspace() {
     }));
   }, [sortBy, sortOrder]);
 
+  const applyManualNsfwToLoadedFiles = useCallback((paths: string[], marked: boolean) => {
+    const pathSet = new Set(uniqueNormalizedPaths(paths).map((path) => path.toLowerCase()));
+    const updateFile = (file: GalleryFile): GalleryFile => {
+      if (!pathSet.has(normalizePath(file.path).toLowerCase())) return file;
+      const currentTags = normalizeTags(file.tags);
+      const nextTags = marked
+        ? normalizeTags([...currentTags, UMBRA_MANUAL_NSFW_TAG])
+        : currentTags.filter((tag) => tag.toLowerCase() !== UMBRA_MANUAL_NSFW_TAG);
+      return {
+        ...file,
+        tags: nextTags,
+        // An explicit mark takes effect immediately. Clearing it waits for the
+        // server refresh so metadata-derived protection cannot briefly leak.
+        privacyClass: marked ? 'nsfw' : file.privacyClass,
+      };
+    };
+
+    setFiles((current) => {
+      const nextFiles = current.map(updateFile);
+      filesRef.current = nextFiles;
+      return nextFiles;
+    });
+    setSearchResults((current) => current ? {
+      ...current,
+      files: Array.isArray(current.files) ? current.files.map(updateFile) : current.files,
+    } : current);
+    setFolderPreviewGroups((current) => current.map((group) => {
+      const nextGroup = { ...group, files: group.files.map(updateFile) };
+      folderPreviewCacheRef.current.set(galleryFolderPreviewCacheKey(group.folder.path, sortBy, sortOrder), nextGroup);
+      return nextGroup;
+    }));
+    updateViewerSessionFiles(viewerSessionFilesRef.current.map(updateFile));
+    setViewerFileFallback((current) => current ? updateFile(current) : current);
+  }, [sortBy, sortOrder, updateViewerSessionFiles]);
+
+  const setManualNsfwForPaths = useCallback(async (paths: string[], marked: boolean) => {
+    const normalized = stripLiveGenerationPreviewPaths(paths);
+    if (normalized.length === 0) return;
+    try {
+      const response = await fetchGalleryFs(marked ? '/tags/add' : '/tags/remove', new URLSearchParams(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: normalized, tags: [UMBRA_MANUAL_NSFW_TAG] }),
+      });
+      const payload = await response.json().catch(() => ({} as Record<string, unknown>));
+      if (!response.ok) throw new Error(String(payload?.error || 'Failed to update NSFW protection'));
+      applyManualNsfwToLoadedFiles(normalized, marked);
+      clearPageCacheForFolder(currentFolder);
+      window.dispatchEvent(new CustomEvent('umbra:gallery-content-changed', {
+        detail: { path: currentFolder, folderPath: currentFolder, source: 'react-gallery', reason: 'privacy' },
+      }));
+      void loadFolder({ folder: currentFolder, keepSelection: true, forceRefresh: true, preserveScroll: true });
+      addToast({
+        type: 'success',
+        message: marked
+          ? `Marked ${normalized.length} item${normalized.length === 1 ? '' : 's'} as NSFW`
+          : `Removed the NSFW mark from ${normalized.length} item${normalized.length === 1 ? '' : 's'}`,
+      });
+    } catch (error) {
+      addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to update NSFW protection' });
+    }
+  }, [addToast, applyManualNsfwToLoadedFiles, clearPageCacheForFolder, currentFolder, loadFolder]);
+
   const collapseFolderPreview = useCallback((folderPath: string) => {
     const normalized = normalizePath(folderPath);
     if (!normalized) return;
@@ -9673,6 +9809,11 @@ export function ReactGalleryWorkspace() {
       const file = knownFiles.find((entry) => pathsEqual(entry.path, path));
       return !!file && file.type === 'video';
     });
+    const manuallyMarkedPaths = paths.filter((path) => {
+      const file = knownFiles.find((entry) => pathsEqual(entry.path, path));
+      return normalizeTags(file?.tags).some((tag) => tag.toLowerCase() === UMBRA_MANUAL_NSFW_TAG);
+    });
+    const hasUnmarkedPaths = manuallyMarkedPaths.length < paths.length;
     const targetImagePath = targetFile && (targetFile.type === 'image' || targetFile.type === 'gif')
       ? normalizePath(targetFile.path)
       : '';
@@ -9801,6 +9942,13 @@ export function ReactGalleryWorkspace() {
         ],
       },
       ...datasetImportItems,
+      {
+        label: hasUnmarkedPaths
+          ? (paths.length > 1 ? `Mark NSFW (${paths.length})` : 'Mark as NSFW')
+          : (paths.length > 1 ? `Remove NSFW Mark (${paths.length})` : 'Remove NSFW Mark'),
+        icon: <EyeOff size={14} />,
+        action: () => void setManualNsfwForPaths(paths, hasUnmarkedPaths),
+      },
       { label: paths.length > 1 ? `Edit Tags (${paths.length})...` : 'Edit Tags...', icon: <Tags size={14} />, action: () => openTagEditor(paths) },
       { separator: true },
       ...(!isPhoneRemote ? [
@@ -9843,6 +9991,7 @@ export function ReactGalleryWorkspace() {
     restoreTrashPaths,
     revealPaths,
     refreshDatasetTargets,
+    setManualNsfwForPaths,
     selectedPathsForContext,
     selectedPaths,
     sendPathToUmbraUi,

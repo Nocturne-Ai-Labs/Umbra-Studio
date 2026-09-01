@@ -11,6 +11,7 @@ import { getWorkflowJsonExport, type ImageMetadata } from '@/utils/metadata';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import { galleryMediaRevision } from '@/lib/galleryMediaIdentity';
 import { openUmbraUiExtrasTool } from '@/lib/umbraUiExtrasNavigation';
+import { classifyUmbraPrompt, type UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
 
 interface UmbraFilmstripProps {
   initialHeight?: number;
@@ -36,6 +37,7 @@ type FsListMediaFile = {
   modifiedMs?: number;
   customOrder?: number;
   tags?: string[];
+  privacyClass?: UmbraPrivacyClass;
 };
 
 type GallerySortBy = 'created' | 'modified' | 'name' | 'custom';
@@ -113,6 +115,7 @@ function filmstripImageFromGenerationPreview(detail: unknown): FilmstripImage | 
     size: 0,
     dateCreated: String(updatedAt),
     dateModified: String(updatedAt),
+    privacyClass: classifyUmbraPrompt(payload.prompt),
   };
 }
 
@@ -199,6 +202,7 @@ function toFilmstripImage(item: FsListMediaFile): FilmstripImage {
     size,
     dateCreated: String(safeNumber(item.createdMs ?? item.created)),
     dateModified: String(modifiedMs),
+    privacyClass: item.privacyClass === 'nsfw' ? 'nsfw' : 'normal',
   };
 }
 
@@ -213,6 +217,7 @@ function filmstripImagesFromSavedOutputs(detail: unknown): FilmstripImage[] {
     const key = path.toLowerCase();
     if (!path || seen.has(key)) continue;
     seen.add(key);
+    const tags = Array.isArray(item.tags) ? item.tags.map((tag) => String(tag || '')).filter(Boolean) : undefined;
     images.push(toFilmstripImage({
       path,
       name: String(item.filename || item.name || pathLeaf(path) || 'generation'),
@@ -220,7 +225,8 @@ function filmstripImagesFromSavedOutputs(detail: unknown): FilmstripImage[] {
       modifiedMs: safeNumber(item.modifiedMs ?? item.modified ?? Date.now()) || Date.now(),
       createdMs: safeNumber(item.createdMs ?? item.created ?? item.modifiedMs ?? item.modified ?? Date.now()) || Date.now(),
       size: safeNumber(item.size),
-      tags: Array.isArray(item.tags) ? item.tags.map((tag) => String(tag || '')).filter(Boolean) : undefined,
+      tags,
+      privacyClass: classifyUmbraPrompt(item.positivePrompt ?? item.positive_prompt ?? payload.positivePrompt ?? payload.positive_prompt, tags),
     }));
   }
   return images;

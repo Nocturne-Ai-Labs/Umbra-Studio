@@ -30,6 +30,8 @@ import type {
 import type { UmbraVideoEditorDraft } from '@/components/umbra-ui/UmbraVideoGenerationControls';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
 import { normalizeUmbraUiSeed } from '@/lib/umbraUiSeed';
+import { NsfwPrivacyShield } from '@/components/privacy/NsfwPrivacyProvider';
+import { classifyUmbraPrompt } from '@/lib/nsfwPrivacy';
 import {
   resolveUmbraLtxStoryboardTimeline,
   resolveUmbraVideoDurationSeconds,
@@ -58,11 +60,12 @@ function mediaUrl(path: string): string {
   return path ? `/api/fs/image?path=${encodeURIComponent(path)}` : '';
 }
 
-function LazyVideo({ src, controls = false, muted = false, className = '' }: {
+function LazyVideo({ src, controls = false, muted = false, className = '', protectedMedia = false }: {
   src: string;
   controls?: boolean;
   muted?: boolean;
   className?: string;
+  protectedMedia?: boolean;
 }) {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const [visible, setVisible] = React.useState(false);
@@ -84,9 +87,10 @@ function LazyVideo({ src, controls = false, muted = false, className = '' }: {
   }, []);
 
   return (
-    <div ref={hostRef} className="h-full w-full bg-black/45">
+    <div ref={hostRef} data-umbra-queue-preview="" className="relative h-full w-full bg-black/45">
       {visible ? (
         <video
+          data-umbra-nsfw-media={protectedMedia ? '' : undefined}
           src={src}
           controls={controls}
           muted={muted}
@@ -95,6 +99,7 @@ function LazyVideo({ src, controls = false, muted = false, className = '' }: {
           className={className}
         />
       ) : <div className="h-full w-full animate-pulse bg-white/[0.025]" />}
+      {visible ? <NsfwPrivacyShield compact protectedMedia={protectedMedia} /> : null}
     </div>
   );
 }
@@ -162,12 +167,12 @@ function getPrimaryOutput(outputs: UmbraVideoReviewOutput[]): UmbraVideoReviewOu
     || null;
 }
 
-function CardOutputPreview({ output }: { output: UmbraVideoReviewOutput }) {
+function CardOutputPreview({ output, protectedMedia }: { output: UmbraVideoReviewOutput; protectedMedia: boolean }) {
   if (output.type === 'video') {
-    return <LazyVideo src={mediaUrl(output.path)} controls className="h-full w-full object-contain" />;
+    return <LazyVideo src={mediaUrl(output.path)} controls className="h-full w-full object-contain" protectedMedia={protectedMedia} />;
   }
   if (output.type === 'image') {
-    return <img src={mediaUrl(output.path)} alt={output.name} loading="lazy" className="h-full w-full object-contain" />;
+    return <img data-umbra-nsfw-media={protectedMedia ? '' : undefined} src={mediaUrl(output.path)} alt={output.name} loading="lazy" className="h-full w-full object-contain" />;
   }
   if (output.type === 'audio') {
     return <div className="flex h-full items-center justify-center"><Music2 size={18} className="text-cyan-300/65" /></div>;
@@ -175,27 +180,31 @@ function CardOutputPreview({ output }: { output: UmbraVideoReviewOutput }) {
   return <div className="flex h-full items-center justify-center font-mono text-[9px] text-zinc-600">FILE</div>;
 }
 
-function ReviewOutputPreview({ output }: { output: UmbraVideoReviewOutput }) {
+function ReviewOutputPreview({ output, protectedMedia }: { output: UmbraVideoReviewOutput; protectedMedia: boolean }) {
   if (output.type === 'video') {
     return (
-      <div className="flex min-h-64 w-full items-center justify-center overflow-hidden bg-black p-2">
+      <div data-umbra-queue-preview="" className="relative flex min-h-64 w-full items-center justify-center overflow-hidden bg-black p-2">
         <video
+          data-umbra-nsfw-media={protectedMedia ? '' : undefined}
           src={mediaUrl(output.path)}
           controls
           preload="metadata"
           className="block h-auto max-h-[min(68dvh,760px)] w-auto max-w-full object-contain"
         />
+        <NsfwPrivacyShield protectedMedia={protectedMedia} />
       </div>
     );
   }
   if (output.type === 'image') {
     return (
-      <div className="flex min-h-64 w-full items-center justify-center overflow-hidden bg-black p-2">
+      <div data-umbra-queue-preview="" className="relative flex min-h-64 w-full items-center justify-center overflow-hidden bg-black p-2">
         <img
+          data-umbra-nsfw-media={protectedMedia ? '' : undefined}
           src={mediaUrl(output.path)}
           alt={output.name}
           className="block h-auto max-h-[min(68dvh,760px)] w-auto max-w-full object-contain"
         />
+        <NsfwPrivacyShield protectedMedia={protectedMedia} />
       </div>
     );
   }
@@ -226,7 +235,7 @@ function ReferenceStrip({ video, large = false }: { video: PowerPrompterVideoCon
   return (
     <div className={cn('flex gap-1.5 overflow-x-auto border-b border-white/10 bg-black/30 p-1.5 custom-scrollbar', large ? 'min-h-24' : 'min-h-16')}>
       {references.map((reference) => (
-        <div key={reference.id} className={cn('relative shrink-0 overflow-hidden border border-white/10 bg-black/50', large ? 'h-20 w-28' : 'h-12 w-16')}>
+        <div key={reference.id} data-umbra-queue-preview="" className={cn('relative shrink-0 overflow-hidden border border-white/10 bg-black/50', large ? 'h-20 w-28' : 'h-12 w-16')}>
           {reference.type === 'image' ? (
             <img src={mediaUrl(reference.path)} alt={reference.label} loading="lazy" className="h-full w-full object-cover" />
           ) : reference.type === 'video' ? (
@@ -311,6 +320,7 @@ function VideoJobCard({ job, onOpen }: { job: UmbraVideoReviewJob; onOpen: () =>
   const video = job.generation.video!;
   const primary = getPrimaryOutput(job.outputs);
   const visibleOutputs = job.outputs.slice(0, 4);
+  const protectedMedia = classifyUmbraPrompt(job.prompt) === 'nsfw';
   return (
     <article
       role="button"
@@ -332,12 +342,13 @@ function VideoJobCard({ job, onOpen }: { job: UmbraVideoReviewJob; onOpen: () =>
       <ReferenceStrip video={video} />
       <div className={cn('relative bg-black/45', visibleOutputs.length > 1 ? 'grid grid-cols-2 gap-px bg-white/10' : 'h-56')}>
         {visibleOutputs.length > 0 ? visibleOutputs.map((output) => (
-          <div key={output.id} className={cn('relative overflow-hidden bg-black/70', visibleOutputs.length > 1 ? 'h-40' : 'h-full')}>
-            <CardOutputPreview output={output} />
+          <div key={output.id} data-umbra-queue-preview="" className={cn('relative overflow-hidden bg-black/70', visibleOutputs.length > 1 ? 'h-40' : 'h-full')}>
+            <CardOutputPreview output={output} protectedMedia={protectedMedia} />
+            {output.type === 'image' || output.type === 'video' ? <NsfwPrivacyShield compact={visibleOutputs.length > 1} protectedMedia={protectedMedia} /> : null}
             <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/65 px-1.5 py-1 font-mono text-[8px] text-zinc-400">{output.name}</span>
           </div>
         )) : primary?.type === 'image' ? (
-          <img src={mediaUrl(primary.path)} alt={primary.name} loading="lazy" className="h-full w-full object-contain" />
+          <img data-umbra-nsfw-media={protectedMedia ? '' : undefined} src={mediaUrl(primary.path)} alt={primary.name} loading="lazy" className="h-full w-full object-contain" />
         ) : (
           <div className="flex h-full flex-col items-center justify-center text-zinc-700">
             {job.status === 'running' || job.status === 'submitting'
@@ -662,7 +673,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
               <div className="grid gap-3 border-b border-white/10 bg-black/25 p-3">
                 {selected.outputs.length > 0 ? selected.outputs.map((output) => (
                   <div key={output.id} className="overflow-hidden rounded-md border border-white/10 bg-black/45">
-                    <ReviewOutputPreview output={output} />
+                    <ReviewOutputPreview output={output} protectedMedia={classifyUmbraPrompt(selected.prompt) === 'nsfw'} />
                     <div className="truncate border-t border-white/10 px-2 py-1.5 font-mono text-[9px] text-zinc-500">{output.name}</div>
                   </div>
                 )) : (

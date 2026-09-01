@@ -77,6 +77,8 @@ import {
   type UmbraImageGenerationInfo,
 } from '@/components/umbra-ui/UmbraImageGenerationInfoDrawer';
 import { UmbraMobileWorkspaceSheet } from '@/components/umbra-ui/UmbraMobileWorkspaceSheet';
+import { NsfwPrivacyShield } from '@/components/privacy/NsfwPrivacyProvider';
+import { classifyUmbraPrompt } from '@/lib/nsfwPrivacy';
 import { UmbraQueueEmergencyControls } from '@/components/umbra-ui/UmbraQueueEmergencyControls';
 import { useUmbraQueueNotificationAudio } from '@/components/umbra-ui/useUmbraQueueNotificationAudio';
 import {
@@ -2426,6 +2428,7 @@ export function UmbraUIWorkspace() {
   const imagePreviewUrl = showingLivePreview
     ? generationPreview?.imageDataUrl || ''
     : latestSavedImage?.imageUrl || generationPreview?.imageDataUrl || '';
+  const imagePreviewIsNsfw = classifyUmbraPrompt(workflowImagePrompt) === 'nsfw';
   const samplerOptions = modelCatalog.samplers.length > 0
     ? modelCatalog.samplers
     : ['er_sde', 'euler', 'dpmpp_2m_sde'];
@@ -3532,6 +3535,7 @@ export function UmbraUIWorkspace() {
           badge={queueSummary.completed > 0 ? `${queueSummary.completed}` : undefined}
           icon={<ImageIcon size={14} />}
           thumbnailUrl={imagePreviewUrl}
+          thumbnailProtected={imagePreviewIsNsfw}
         >
           <main data-umbra-ui-preview-panel="" className="relative flex min-h-0 min-w-0 flex-col">
           <div className="flex min-h-11 items-center gap-2 border-b border-white/10 px-3">
@@ -3553,6 +3557,7 @@ export function UmbraUIWorkspace() {
             <div className="relative flex h-full min-h-0 w-full items-center justify-center border border-white/10 bg-black/25">
               {imagePreviewUrl ? (
                 <img
+                  data-umbra-nsfw-media={imagePreviewIsNsfw ? '' : undefined}
                   src={imagePreviewUrl}
                   alt={showingLivePreview ? 'Current generation preview' : 'Latest Umbra UI output'}
                   className="h-full w-full object-contain"
@@ -3563,6 +3568,7 @@ export function UmbraUIWorkspace() {
                   <div className="text-[10px] font-black uppercase tracking-[0.16em]">Waiting for output</div>
                 </div>
               )}
+              {imagePreviewUrl ? <NsfwPrivacyShield protectedMedia={imagePreviewIsNsfw} /> : null}
             </div>
           </div>
           <div className="flex min-h-11 flex-wrap items-center gap-2 border-t border-white/10 bg-black/20 px-3 py-2">

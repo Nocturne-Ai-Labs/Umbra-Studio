@@ -145,12 +145,6 @@ const BOOLEAN_KEYS: Array<keyof AppSettings> = [
   'ui.tagCatalogExplicitEnabled',
   'ui.nsfwThumbnailBlurEnabled',
   'ui.nsfwPrivacyLockEngaged',
-  'ui.nsfwPrivacyMode',
-  'ui.nsfwPrivacyPinHash',
-  'ui.nsfwPrivacyPinSalt',
-  'appUpdate.mode',
-  'appUpdate.releaseChannel',
-  'appUpdate.feedUrl',
   'advanced.diagnosticLogging',
   'advanced.enableWebSocket',
 ];
@@ -187,6 +181,9 @@ const STRING_KEYS: Array<keyof AppSettings> = [
   'library.deleteMode',
   'remote.phoneComfyMenuPosition',
   'ui.language',
+  'ui.nsfwPrivacyMode',
+  'ui.nsfwPrivacyPinHash',
+  'ui.nsfwPrivacyPinSalt',
   'appUpdate.mode',
   'appUpdate.releaseChannel',
   'appUpdate.feedUrl',
@@ -301,6 +298,18 @@ export function normalizeAppSettings(input: unknown): AppSettings {
     100,
     Math.max(0, Math.round(Number(normalized['ui.nsfwThumbnailBlurIntensity'] ?? DEFAULT_APP_SETTINGS['ui.nsfwThumbnailBlurIntensity']))),
   );
+
+  if (
+    normalized['ui.nsfwPrivacyMode'] !== 'off'
+    && normalized['ui.nsfwPrivacyMode'] !== 'blur'
+    && normalized['ui.nsfwPrivacyMode'] !== 'lock'
+  ) {
+    normalized['ui.nsfwPrivacyMode'] = DEFAULT_APP_SETTINGS['ui.nsfwPrivacyMode'];
+  }
+  if (typeof candidate['ui.nsfwPrivacyMode'] !== 'string') {
+    if (normalized['ui.nsfwPrivacyLockEngaged']) normalized['ui.nsfwPrivacyMode'] = 'lock';
+    else if (normalized['ui.nsfwThumbnailBlurEnabled']) normalized['ui.nsfwPrivacyMode'] = 'blur';
+  }
 
   if (!COMFY_SECURITY_LEVELS.includes(normalized['comfyui.securityLevel'])) {
     normalized['comfyui.securityLevel'] = DEFAULT_APP_SETTINGS['comfyui.securityLevel'];

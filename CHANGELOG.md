@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.31.26
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, migrations, or manual configuration are
+required. Update normally; existing media folders, tags, gallery layout, and
+privacy settings are preserved.
+
+### Protected Media And Gallery Navigation
+
+- Replaced the browser-native four-digit privacy PIN prompts with Umbra's
+  in-app modal, including keyboard-safe cancellation and validation.
+- Protected Media mode now classifies prompt metadata and explicit gallery
+  NSFW marks consistently across gallery, filmstrip, viewer, queue, and mobile
+  surfaces.
+- Added gallery context-menu actions to mark media as NSFW or remove a manual
+  NSFW mark when metadata is absent.
+- Protected Media only shields media identified as NSFW; ordinary SFW media
+  remains visible.
+- Preserved expanded gallery-folder branches after deleting a folder and across
+  gallery remounts, while pruning only the deleted branch from saved state.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** deleting a gallery folder no longer collapses the entire folder
+  tree.
+- **Improved:** privacy controls now use a cohesive Umbra modal instead of a
+  browser prompt.
+- **Improved:** manual NSFW marking works for images and videos that lack
+  generation metadata.
+
 ## v0.31.25
 
 ### TL;DR - Setup After Updating

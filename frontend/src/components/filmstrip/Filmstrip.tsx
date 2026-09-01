@@ -26,6 +26,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getSelectedIdsForTarget, normalizeFilmstripSelectionId } from './filmstripSelection';
+import { NsfwPrivacyShield } from '@/components/privacy/NsfwPrivacyProvider';
+import type { UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
 
 export interface FilmstripImage {
   id: string;
@@ -40,6 +42,7 @@ export interface FilmstripImage {
   size?: number;
   dateCreated?: string;
   dateModified?: string;
+  privacyClass?: UmbraPrivacyClass;
 }
 
 export type SortField = 'date' | 'created' | 'name' | 'size' | 'custom';
@@ -671,6 +674,7 @@ function FilmstripTile({
   const size = formatBytes(image.size);
   const tooltip = [image.name, normalizePath(image.path), dimensions, size].filter(Boolean).join('\n');
   const isMedia = image.type === 'video' || image.type === 'gif';
+  const isNsfw = image.privacyClass === 'nsfw';
   const isLivePreview = normalizePath(image.path).startsWith('umbra-live-generation://');
   const accentStyle: React.CSSProperties = !selected && !isLivePreview && imageAccentColor ? {
     borderColor: `rgba(${imageAccentColor}, 0.34)`,
@@ -730,6 +734,7 @@ function FilmstripTile({
     >
       {src ? (
         <img
+          data-umbra-nsfw-media={isNsfw ? '' : undefined}
           src={src}
           alt={image.name}
           loading="lazy"
@@ -766,6 +771,8 @@ function FilmstripTile({
           <ImageIcon size={22} />
         </div>
       )}
+
+      <NsfwPrivacyShield compact protectedMedia={isNsfw} />
 
       {isLivePreview ? (
         <span className="absolute left-1.5 top-1.5 z-20 rounded border border-emerald-300/35 bg-emerald-300/20 px-1.5 py-0.5 text-[10px] font-bold text-emerald-50 shadow-[0_0_12px_rgba(16,185,129,0.35)]">

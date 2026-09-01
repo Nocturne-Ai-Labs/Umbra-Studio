@@ -4,6 +4,8 @@ import type { PowerPrompterOutputPreviewItem } from '@/components/layout/PowerPr
 import { Portal } from '@/components/ui/Portal';
 import { buildFsImageUrl } from '@/lib/utils';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
+import { NsfwPrivacyShield } from '@/components/privacy/NsfwPrivacyProvider';
+import { classifyUmbraPrompt } from '@/lib/nsfwPrivacy';
 import type {
   GenerationPreviewState,
   QueueManagerOutputBucket,
@@ -97,6 +99,7 @@ export function PowerPrompterQueueManagerSidePane({
   queueOutputMenu,
   setQueueOutputMenu,
 }: PowerPrompterQueueManagerSidePaneProps) {
+  const generationPreviewIsNsfw = classifyUmbraPrompt(generationPreview?.prompt) === 'nsfw';
   const outputMenuRef = React.useRef<HTMLDivElement | null>(null);
   const [outputMenuStyle, setOutputMenuStyle] = React.useState<React.CSSProperties>({
     left: 0,
@@ -165,9 +168,10 @@ export function PowerPrompterQueueManagerSidePane({
               )}
             </div>
             <div className="flex-1 min-h-0 p-3">
-              <div className="h-full rounded-lg border border-white/10 bg-black/35 overflow-hidden flex items-center justify-center">
+              <div data-umbra-queue-preview="" className="relative h-full rounded-lg border border-white/10 bg-black/35 overflow-hidden flex items-center justify-center">
                 {hasActiveGenerationPreview && String(generationPreview?.imageDataUrl || '').trim() ? (
                   <img
+                    data-umbra-nsfw-media={generationPreviewIsNsfw ? '' : undefined}
                     src={String(generationPreview?.imageDataUrl || '')}
                     alt="Queue manager generation preview"
                     className="umbra-power-prompter-generation-preview w-full h-full object-contain"
@@ -186,6 +190,7 @@ export function PowerPrompterQueueManagerSidePane({
                     </div>
                   </div>
                 )}
+                {hasActiveGenerationPreview && String(generationPreview?.imageDataUrl || '').trim() ? <NsfwPrivacyShield protectedMedia={generationPreviewIsNsfw} /> : null}
               </div>
             </div>
           </div>

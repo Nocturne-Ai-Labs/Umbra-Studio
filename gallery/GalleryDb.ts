@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { existsSync, mkdirSync } from 'fs';
 import { basename, dirname, extname, join, resolve } from 'path';
 import { MetadataParser, type ImageMetadata } from '../backend/MetadataParser';
+import { classifyUmbraMediaMetadata, type UmbraPrivacyClass } from '../shared/nsfwPrivacyClassifier';
 
 export type GalleryMediaType = 'image' | 'gif' | 'video';
 export type GallerySortBy = 'created' | 'modified' | 'name' | 'custom';
@@ -32,6 +33,7 @@ export type GalleryIndexedFile = {
   metadataReady: boolean;
   metadataFormat: string | null;
   tags: string[];
+  privacyClass: UmbraPrivacyClass;
 };
 
 export type GallerySearchSuggestion = {
@@ -436,22 +438,26 @@ export class GalleryDb {
     const tagsByUid = this.getTagsForUids(rows.map((row) => row.uid));
 
     return rows
-      .map((row) => ({
-        uid: row.uid,
-        path: row.path,
-        folderPath: row.folderPath,
-        name: row.name,
-        type: row.type,
-        size: row.size,
-        createdMs: row.createdMs,
-        modifiedMs: row.modifiedMs,
-        customOrder: row.customOrder,
-        width: row.width,
-        height: row.height,
-        metadataReady: row.metadataUpdatedMs === row.modifiedMs,
-        metadataFormat: row.metadataFormat,
-        tags: tagsByUid.get(row.uid) || [],
-      }));
+      .map((row) => {
+        const tags = tagsByUid.get(row.uid) || [];
+        return {
+          uid: row.uid,
+          path: row.path,
+          folderPath: row.folderPath,
+          name: row.name,
+          type: row.type,
+          size: row.size,
+          createdMs: row.createdMs,
+          modifiedMs: row.modifiedMs,
+          customOrder: row.customOrder,
+          width: row.width,
+          height: row.height,
+          metadataReady: row.metadataUpdatedMs === row.modifiedMs,
+          metadataFormat: row.metadataFormat,
+          tags,
+          privacyClass: classifyUmbraMediaMetadata(row.metadataJson, tags),
+        };
+      });
   }
 
   getFolderFilesByPaths(folderPathInput: string, pathInputs: string[]): GalleryIndexedFile[] {
@@ -512,22 +518,26 @@ export class GalleryDb {
       .filter((row): row is FileRow => Boolean(row));
     const tagsByUid = this.getTagsForUids(rows.map((row) => row.uid));
 
-    return rows.map((row) => ({
-      uid: row.uid,
-      path: row.path,
-      folderPath: row.folderPath,
-      name: row.name,
-      type: row.type,
-      size: Number(row.size || 0),
-      createdMs: normalizeTimestamp(row.createdMs),
-      modifiedMs: normalizeTimestamp(row.modifiedMs),
-      customOrder: Number.isFinite(row.customOrder) ? Math.trunc(Number(row.customOrder)) : 0,
-      width: row.width,
-      height: row.height,
-      metadataReady: normalizeTimestamp(row.metadataUpdatedMs || 0) === normalizeTimestamp(row.modifiedMs),
-      metadataFormat: row.metadataFormat,
-      tags: tagsByUid.get(row.uid) || [],
-    }));
+    return rows.map((row) => {
+      const tags = tagsByUid.get(row.uid) || [];
+      return {
+        uid: row.uid,
+        path: row.path,
+        folderPath: row.folderPath,
+        name: row.name,
+        type: row.type,
+        size: Number(row.size || 0),
+        createdMs: normalizeTimestamp(row.createdMs),
+        modifiedMs: normalizeTimestamp(row.modifiedMs),
+        customOrder: Number.isFinite(row.customOrder) ? Math.trunc(Number(row.customOrder)) : 0,
+        width: row.width,
+        height: row.height,
+        metadataReady: normalizeTimestamp(row.metadataUpdatedMs || 0) === normalizeTimestamp(row.modifiedMs),
+        metadataFormat: row.metadataFormat,
+        tags,
+        privacyClass: classifyUmbraMediaMetadata(row.metadataJson, tags),
+      };
+    });
   }
 
   getTagsForUids(uidInputs: string[]): Map<string, string[]> {
@@ -864,6 +874,26 @@ export class GalleryDb {
         for (const tag of txTags) {
           upsertFileTag.run(uid, tag, now);
         }
+      }
+    });
+    transaction(validUids, tags);
+
+    return this.getTagsForUids(validUids);
+  }
+
+  removeTagsFromFiles(uidInputs: string[], tagInputs: string[]): Map<string, string[]> {
+    const uids = Array.from(new Set((uidInputs || []).map((entry) => String(entry || '').trim()).filter(Boolean)));
+    const tags = normalizeTagList(tagInputs || []);
+    if (uids.length === 0 || tags.length === 0) return new Map<string, string[]>();
+
+    const selectExistingUid = this.db.prepare('SELECT uid FROM files WHERE uid = ? LIMIT 1');
+    const validUids = uids.filter((uid) => Boolean(selectExistingUid.get(uid)));
+    if (validUids.length === 0) return new Map<string, string[]>();
+
+    const deleteFileTag = this.db.prepare('DELETE FROM file_tags WHERE uid = ? AND tag = ?');
+    const transaction = this.db.transaction((txUids: string[], txTags: string[]) => {
+      for (const uid of txUids) {
+        for (const tag of txTags) deleteFileTag.run(uid, tag);
       }
     });
     transaction(validUids, tags);

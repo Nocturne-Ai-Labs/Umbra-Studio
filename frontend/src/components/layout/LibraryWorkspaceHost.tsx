@@ -290,6 +290,7 @@ export const LibraryWorkspaceHost = () => {
   const galleryActiveInteractionUntilRef = useRef(0);
   const activeWorkspace = useStore((state) => state.activeWorkspace);
   const pinnedFoldersSetting = useStore((state) => state.appSettings['library.pinnedFolders']);
+  const protectedFoldersSetting = useStore((state) => state.appSettings['library.protectedFolders']);
   const showFilmstrip = useStore((state) => state.ui.showFilmstrip);
   const nsfwThumbnailBlurEnabled = useStore((state) => state.appSettings['ui.nsfwThumbnailBlurEnabled'] === true);
   const nsfwThumbnailBlurIntensity = useStore((state) => {
@@ -505,6 +506,11 @@ export const LibraryWorkspaceHost = () => {
       pinnedFolders,
     });
   }, [normalizePinnedFolders, pinnedFoldersSetting, postToGallery]);
+
+  const postProtectedFolders = useCallback((raw?: unknown) => {
+    const protectedFolders = normalizePinnedFolders(raw ?? protectedFoldersSetting);
+    postToGallery({ type: 'gallery:protected-folders-sync', protectedFolders });
+  }, [normalizePinnedFolders, postToGallery, protectedFoldersSetting]);
 
   const postFilmstripState = useCallback((visible?: boolean) => {
     const nextVisible = typeof visible === 'boolean' ? visible : Boolean(showFilmstrip);
@@ -1202,6 +1208,11 @@ export const LibraryWorkspaceHost = () => {
         appStore.setAppSetting('library.pinnedFolders', next);
         return;
       }
+      if (payload.type === 'gallery:protected-folders-changed') {
+        const next = normalizePinnedFolders(payload.protectedFolders);
+        useStore.getState().setAppSetting('library.protectedFolders', next);
+        return;
+      }
       if (payload.type === 'gallery:send-to-workspace') {
         const workspace = String(payload.workspace || '').trim();
         if (workspace !== 'scanner' && workspace !== 'waifudiffusion') return;
@@ -1307,6 +1318,10 @@ export const LibraryWorkspaceHost = () => {
   useEffect(() => {
     postPinnedFolders();
   }, [postPinnedFolders, pinnedFoldersSetting]);
+
+  useEffect(() => {
+    postProtectedFolders();
+  }, [postProtectedFolders, protectedFoldersSetting]);
 
   useEffect(() => {
     postFilmstripState();

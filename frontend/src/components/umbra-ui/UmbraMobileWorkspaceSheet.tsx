@@ -3,6 +3,7 @@
 import React from 'react';
 import { ChevronUp, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { NsfwPrivacyShield } from '@/components/privacy/NsfwPrivacyProvider';
 
 export type UmbraMobileWorkspaceSheetTone = 'cyan' | 'rose' | 'fuchsia' | 'amber';
 
@@ -13,6 +14,7 @@ interface UmbraMobileWorkspaceSheetProps {
   badge?: string;
   icon: React.ReactNode;
   thumbnailUrl?: string;
+  thumbnailProtected?: boolean;
   tone?: UmbraMobileWorkspaceSheetTone;
   children: React.ReactNode;
   className?: string;
@@ -25,6 +27,7 @@ export function UmbraMobileWorkspaceSheet({
   badge,
   icon,
   thumbnailUrl,
+  thumbnailProtected = false,
   tone = 'cyan',
   children,
   className,
@@ -59,8 +62,9 @@ export function UmbraMobileWorkspaceSheet({
         className="hidden"
       >
         {thumbnailUrl ? (
-          <span data-umbra-mobile-workspace-sheet-thumbnail="">
-            <img src={thumbnailUrl} alt="" />
+          <span data-umbra-mobile-workspace-sheet-thumbnail="" className="relative overflow-hidden">
+            <img data-umbra-nsfw-media={thumbnailProtected ? '' : undefined} src={thumbnailUrl} alt="" />
+            <NsfwPrivacyShield compact protectedMedia={thumbnailProtected} />
           </span>
         ) : (
           <span data-umbra-mobile-workspace-sheet-icon="">{icon}</span>

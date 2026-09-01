@@ -1,46 +1,20 @@
 'use client';
 
-export type UmbraPrivacyClass = 'normal' | 'nsfw';
+export {
+  classifyUmbraMediaMetadata,
+  classifyUmbraPrompt,
+  type UmbraPrivacyClass,
+} from '../../../shared/nsfwPrivacyClassifier';
 
 export interface UmbraPrivacyLockState {
-  engaged: boolean;
-  engagedAt: number;
-  minimumDurationMs: number;
+  mode: 'off' | 'blur' | 'lock';
   unlockedUntil: number;
 }
 
-export const NSFW_PRIVACY_MINIMUM_DURATION_MS = 10 * 60 * 1000;
-
-const EXPLICIT_TOKEN_PATTERNS = [
-  /\bnsfw\b/i,
-  /\bexplicit(?:[_ -](?:action|content|rating|genital|nudity))?\b/i,
-  /\bnude\b/i,
-  /\bnudity\b/i,
-  /\bnaked\b/i,
-  /\btopless\b/i,
-  /\bsex\b/i,
-  /\berotic\b/i,
-  /\bporn(?:ographic)?\b/i,
-  /\bxxx\b/i,
-];
-
-export function classifyUmbraPrompt(prompt: unknown, tags: unknown[] = []): UmbraPrivacyClass {
-  const haystack = [
-    typeof prompt === 'string' ? prompt : '',
-    ...tags.filter((tag): tag is string => typeof tag === 'string'),
-  ].join(' ');
-  return EXPLICIT_TOKEN_PATTERNS.some((pattern) => pattern.test(haystack)) ? 'nsfw' : 'normal';
-}
+export const NSFW_PRIVACY_UNLOCK_DURATION_MS = 15 * 60 * 1000;
 
 export function isUmbraPrivacyLocked(state: UmbraPrivacyLockState, now = Date.now()): boolean {
-  if (!state.engaged) return false;
-  if (state.unlockedUntil > now) return false;
-  return true;
-}
-
-export function canUnlockUmbraPrivacyLock(state: UmbraPrivacyLockState, now = Date.now()): boolean {
-  if (!state.engaged) return true;
-  return now - state.engagedAt >= state.minimumDurationMs;
+  return state.mode === 'lock' && state.unlockedUntil <= now;
 }
 
 export function normalizeFourDigitPin(value: unknown): string | null {

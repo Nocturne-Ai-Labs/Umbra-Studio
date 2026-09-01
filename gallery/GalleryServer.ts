@@ -761,6 +761,7 @@ function serializeGalleryFile(file: MediaFileRecord) {
     metadataReady: file.metadataReady,
     metadataFormat: file.metadataFormat,
     tags: Array.isArray(file.tags) ? file.tags : [],
+    privacyClass: file.privacyClass,
   };
 }
 

@@ -16,6 +16,7 @@ import {
   isUmbraQueueActivityTerminal,
   type UmbraQueueActivity,
 } from '@/lib/umbraQueueActivity';
+import { classifyUmbraPrompt } from '@/lib/nsfwPrivacy';
 
 type PowerPrompterQueueManagerViewProps = Record<string, any>;
 type QueueManagerPromptRowsProps = {
@@ -1285,6 +1286,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                                               </span>
                                               {itemPreviewUrl ? (
                                                 <img
+                                                  data-umbra-nsfw-media={classifyUmbraPrompt(item.prompt) === 'nsfw' ? '' : undefined}
                                                   src={itemPreviewUrl}
                                                   alt="Live queue item preview"
                                                   className="umbra-power-prompter-generation-preview h-12 w-12 shrink-0 rounded-lg border border-white/10 object-cover"

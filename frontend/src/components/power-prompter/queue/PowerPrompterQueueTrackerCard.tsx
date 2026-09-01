@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { CheckCircle2, ChevronDown, ChevronRight, ListChecks, ListOrdered, Loader2, Pause, Play, Power, Trash2, XCircle } from 'lucide-react';
 import { QUEUE_MANAGER_PROMPT_ROW_VISIBILITY_STYLE } from './queueCore';
 import type { GenerationPreviewState, QueueRequestGroup, QueueSetGroup, QueueStackItem, QueueVisualState } from './queueCore';
+import { classifyUmbraPrompt } from '@/lib/nsfwPrivacy';
 
 type QueueControlBusy = 'start' | 'cancel' | 'clear' | 'emergency' | null;
 type ActiveQueuePosition = { position: number; total: number; remaining: number } | null;
@@ -79,6 +80,7 @@ export const PowerPrompterQueueTrackerCard = React.memo(function PowerPrompterQu
           <div className="flex items-center gap-2">
             {queueTrackerPreviewUrl ? (
               <img
+                data-umbra-nsfw-media={classifyUmbraPrompt(generationPreview?.prompt) === 'nsfw' ? '' : undefined}
                 src={queueTrackerPreviewUrl}
                 alt="Active queue preview"
                 className="umbra-power-prompter-generation-preview h-8 w-8 shrink-0 rounded-md border border-white/10 object-cover"
@@ -402,6 +404,7 @@ function QueueTrackerPromptRows({
         <div className="flex items-start gap-2">
           {itemPreviewUrl ? (
             <img
+              data-umbra-nsfw-media={classifyUmbraPrompt(item.prompt) === 'nsfw' ? '' : undefined}
               src={itemPreviewUrl}
               alt="Live queue item preview"
               className="umbra-power-prompter-generation-preview mt-0.5 h-8 w-8 shrink-0 rounded-md border border-white/10 object-cover"

@@ -103,6 +103,14 @@ body.umbra-nsfw-thumbnail-blur-enabled [data-umbra-nsfw-exempt] {
   filter: none !important;
 }
 
+/*
+ * Locked mode is intentionally opaque. Media remains laid out so cards and
+ * viewers do not jump, but no source pixels are visible before PIN unlock.
+ */
+body.umbra-nsfw-media-locked [data-umbra-nsfw-media]:not([data-umbra-nsfw-exempt]) {
+  opacity: 0 !important;
+}
+
 body {
   background: var(--umbra-bg);
   color: var(--umbra-text);

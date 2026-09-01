@@ -20,6 +20,7 @@ import { useStore } from '@/store/useStore';
 import { useComponentDebug } from '@/hooks/useComponentDebug';
 import { governorShouldRun, governorTryAcquire } from '@/lib/loadGovernor';
 import { PerfTraceProbe } from '@/components/perf/PerfTraceProbe';
+import { NsfwPrivacyProvider } from '@/components/privacy/NsfwPrivacyProvider';
 import {
   DEFAULT_APP_SETTINGS,
   fetchAppSettingsFromBackend,
@@ -159,23 +160,10 @@ export const StudioShell = ({ children }: { children: React.ReactNode }) => {
     return () => unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const className = 'umbra-nsfw-thumbnail-blur-enabled';
-    const enabled = appSettings['ui.nsfwThumbnailBlurEnabled'] === true;
-    const intensity = Math.max(0, Math.min(100, Math.round(Number(appSettings['ui.nsfwThumbnailBlurIntensity'] ?? 85))));
-    const blurPx = (intensity / 100) * 20;
-    document.body.classList.toggle(className, enabled);
-    document.documentElement.style.setProperty('--umbra-nsfw-thumbnail-blur', `${blurPx.toFixed(2)}px`);
-    return () => {
-      document.body.classList.remove(className);
-      document.documentElement.style.removeProperty('--umbra-nsfw-thumbnail-blur');
-    };
-  }, [appSettings['ui.nsfwThumbnailBlurEnabled'], appSettings['ui.nsfwThumbnailBlurIntensity']]);
-
   return (
     <ThemeProvider>
       <ModalProvider>
+        <NsfwPrivacyProvider>
         {cursorEffects && <CursorEffects />}
         <OLEDMode />
         <PerfTraceProbe />
@@ -239,6 +227,7 @@ export const StudioShell = ({ children }: { children: React.ReactNode }) => {
             </div>
           )}
         </DragDropProvider>
+        </NsfwPrivacyProvider>
       </ModalProvider>
     </ThemeProvider>
   );
