@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.31.27
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, migrations, or manual configuration are
+required. Update normally.
+
+### Protected Media Coverage
+
+- Expanded locked-media detection for explicit prompt metadata, including
+  `tentacles`, `cum`, `nipples`, `nsfw`, and related explicit anatomy, action,
+  toy, and adult-content terms.
+- Added support for nested generation metadata and modular prompt segments so
+  imported and Power Prompter-derived media receive the same privacy result.
+- Kept SFW media visible unless its prompt metadata or a manual gallery mark
+  identifies it as protected.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** protected media no longer slips through the lock merely because
+  its explicit prompt is stored below a nested metadata field.
+
 ## v0.31.26
 
 ### TL;DR - Setup After Updating
