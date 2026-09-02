@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.31.28
+
+### TL;DR - Setup After Updating
+
+No additional models, custom nodes, migrations, or manual configuration are
+required. Update normally.
+
+### Strict Inpaint Mask Preservation
+
+- Added a final source-and-mask composite immediately before every ordinary
+  inpaint output is saved.
+- Pixels outside the effective mask now come directly from the original source
+  image, even when a native-edit model internally regenerates the whole frame.
+- Applied the same protection after detailers, hires fix, upscaling, soft
+  inpaint, and other post-processing stages.
+- Covered classic conditioning plus the shipped FLUX.2 Edit, HiDream O1,
+  Krea 2, Qwen Image Edit, and Z-Image Turbo inpaint pipelines.
+- Transparent masked-region-only exports retain their existing behavior.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** inpainting no longer behaves like IMG2IMG by replacing pixels
+  outside the selected mask.
+
 ## v0.31.27
 
 ### TL;DR - Setup After Updating

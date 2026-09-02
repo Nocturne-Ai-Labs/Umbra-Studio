@@ -2768,6 +2768,21 @@ export class UmbraUiInpaintService {
       });
       outputRef = ref(detailerId);
     }
+    if (!settings.outputOnlyMaskedRegions) {
+      const finalCompositeId = addNode({
+        class_type: 'ImageCompositeMasked',
+        inputs: {
+          destination: ref(sourceId),
+          source: outputRef,
+          x: 0,
+          y: 0,
+          resize_source: true,
+          mask: maskRef,
+        },
+        _meta: { title: 'Final Inpaint Mask Preservation' },
+      });
+      outputRef = ref(finalCompositeId);
+    }
     const sourceStem = sanitizeFilename(sourceName, 'image.png').replace(/\.[^.]+$/, '');
     const outputModeLabel = settings.operationMode === 'outpaint' ? 'Outpaint' : 'Inpaint';
     addNode({
@@ -3134,6 +3149,41 @@ export class UmbraUiInpaintService {
       if (Object.prototype.hasOwnProperty.call(inputs, 'denoise')) inputs.denoise = Math.max(0.01, Math.min(1, finiteNumberOrFallback(settings.denoise, 0.8)));
       if (Object.prototype.hasOwnProperty.call(inputs, 'denoise_strength')) inputs.denoise_strength = Math.max(0.01, Math.min(1, finiteNumberOrFallback(settings.denoise, 0.8)));
       samplerEntry[1].inputs = inputs;
+    }
+
+    if (!settings.outputOnlyMaskedRegions) {
+      const sourceMeta = sourceEntry[1]?._meta && typeof sourceEntry[1]._meta === 'object' ? sourceEntry[1]._meta : {};
+      const maskProcessorEntry = findRole('inpaint_mask_processor');
+      const maskSourceEntry = maskProcessorEntry || maskEntry;
+      const maskMeta = maskSourceEntry[1]?._meta && typeof maskSourceEntry[1]._meta === 'object' ? maskSourceEntry[1]._meta : {};
+      const sourceRef: UmbraUiGraphRef = [sourceEntry[0], Math.max(0, Math.floor(Number(sourceMeta.umbra_output_index) || 0))];
+      const maskRef: UmbraUiGraphRef = [maskSourceEntry[0], Math.max(0, Math.floor(Number(maskMeta.umbra_output_index) || 0))];
+      const declaredOutputs = Object.entries(graph).filter(([, node]) => roleOf(node) === 'inpaint_output');
+      const outputEntries = declaredOutputs.length > 0
+        ? declaredOutputs
+        : Object.entries(graph).filter(([, node]) => ['UmbraLabSaveImage', 'SaveImage', 'PreviewImage'].includes(String(node?.class_type || '')));
+      for (const [, outputNode] of outputEntries) {
+        const inputs = outputNode?.inputs && typeof outputNode.inputs === 'object' ? outputNode.inputs : {};
+        const imageField = Object.prototype.hasOwnProperty.call(inputs, 'images')
+          ? 'images'
+          : Object.prototype.hasOwnProperty.call(inputs, 'image') ? 'image' : '';
+        const generatedRef = normalizeGraphReference(imageField ? inputs[imageField] : null, graph);
+        if (!imageField || !generatedRef) continue;
+        const finalCompositeId = addNode({
+          class_type: 'ImageCompositeMasked',
+          inputs: {
+            destination: sourceRef,
+            source: generatedRef,
+            x: 0,
+            y: 0,
+            resize_source: true,
+            mask: maskRef,
+          },
+          _meta: { title: 'Final Native Inpaint Mask Preservation' },
+        });
+        inputs[imageField] = [finalCompositeId, 0];
+        outputNode.inputs = inputs;
+      }
     }
 
     const hasOutput = Object.values(graph).some((node: any) => (
