@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.32.3
+
+### TL;DR - Setup After Updating
+
+Update Umbra Studio normally on Windows or Linux. Open **Data Forge > Model
+Merge > Bake LoRAs**, select one base model, add compatible local LoRAs, and
+save with a new filename. No additional model download is required if your
+base model and LoRAs are already installed. Baking uses the managed ComfyUI
+Python environment; Anima-to-Anima-2.9B compatibility still requires the
+existing compatible Umbra Nodes installation. No new custom node is required.
+
+Refresh the model list after saving. When generating with the baked model,
+disable the LoRAs already baked into it to avoid applying their effect twice.
+Keep any required trigger words: baking weights does not remove learned trigger
+dependencies or embed prompts, samplers, seeds, or detailer settings.
+Original models are never overwritten. Back up the private merge blueprint
+separately from the model to preserve the editable recipe.
+
+### Single-Model LoRA Baking
+
+- Added a dedicated Bake LoRAs operation alongside normal two-model merging.
+  It applies the enabled, nonzero LoRA stack directly to one base model without
+  requiring a duplicate checkpoint or an artificial blend.
+- Bake mode hides Model B and block-blend controls, excludes their retained
+  values from submitted jobs, and rejects ambiguous bake requests on the backend.
+- Recipes and private blueprints retain the operation, ordered LoRAs, and
+  strengths. Existing merge recipes remain compatible.
+- Preserved clean metadata, source fingerprinting, finite-weight validation,
+  cancellation, output collision protection, and atomic output publication.
+- Baking runs on the CPU with a single-source memory estimate. Compatible
+  full-precision Safetensors inputs and supported LoRA formats remain required;
+  this is weight baking, not dataset-based fine-tuning.
+
+### Platform Notes
+
+Windows uses UmbraStudio.bat; Linux uses ./start-umbra.sh. Linux managed Python
+tools require python3-dev, build-essential, libgl1, and libglib2.0-0 or their
+distribution equivalents. Private datasets, model weights, and merge blueprints
+are not included in either package.
+
+### Fixes And Quality-of-Life Recap
+
+- **Improved:** Bake a compatible LoRA stack into one model without a second source.
+- **Improved:** Hidden blend settings cannot affect a bake operation.
+- **Improved:** Saved recipes restore the correct merge or bake controls.
+
 ## v0.32.2
 
 ### TL;DR - Setup After Updating

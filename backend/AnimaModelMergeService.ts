@@ -7,9 +7,16 @@ import { extractUmbraUiTriggerWords } from './UmbraUiLoraMetadata';
 
 type MergeConfig = { modelsRoot: string; python: string; comfyRoot?: string };
 type LoraEntry = { id: string; model: string; strength: number; enabled: boolean };
-type MergeInput = { a?: unknown; b?: unknown; ratio?: unknown; name?: unknown; blocks?: unknown; lorasA?: unknown; lorasB?: unknown; cleanMetadata?: unknown };
+type MergeInput = { mode?: unknown; a?: unknown; b?: unknown; ratio?: unknown; name?: unknown; blocks?: unknown; lorasA?: unknown; lorasB?: unknown; cleanMetadata?: unknown };
+
+export function mergeMode(value: unknown): 'merge' | 'lora_bake' {
+  if (value === undefined || value === 'merge') return 'merge';
+  if (value === 'lora_bake') return value;
+  throw new Error('Invalid model merge mode.');
+}
 
 export function normalizeMergeOptions(input: MergeInput) {
+  const mode = mergeMode(input.mode);
   if (input.cleanMetadata !== undefined && typeof input.cleanMetadata !== 'boolean') throw new Error('Invalid metadata setting.');
   const blocks = input.blocks ?? {};
   if (!blocks || typeof blocks !== 'object' || Array.isArray(blocks)) throw new Error('Invalid block weights.');
@@ -26,9 +33,12 @@ export function normalizeMergeOptions(input: MergeInput) {
       return { id: entry.id, model: entry.model, strength: entry.strength, enabled: entry.enabled };
     });
   };
-  return { blocks: blocks as Record<string, number>, lorasA: stack(input.lorasA), lorasB: stack(input.lorasB), cleanMetadata: input.cleanMetadata !== false };
+  const lorasA = stack(input.lorasA), lorasB = stack(input.lorasB);
+  if (mode === 'lora_bake' && (input.b || input.ratio !== 0 || Object.keys(blocks).length || lorasB.length)) throw new Error('LoRA baking uses only Model A and its LoRA stack, with no blend weights.');
+  return { mode, blocks: blocks as Record<string, number>, lorasA, lorasB, cleanMetadata: input.cleanMetadata !== false };
 }
 export type AnimaMergeJob = {
+  mode?: 'merge' | 'lora_bake';
   id: string; phase: string; progress: number; a: string; b: string; ratio: number;
   output: string; outputModelId?: string; family?: string; blueprintId?: string; error?: string; processed?: number; total?: number;
 };
@@ -225,10 +235,11 @@ export class AnimaModelMergeService {
     return { child, done };
   }
 
-  async inspect(a: unknown, b: unknown) {
+  async inspect(a: unknown, b: unknown, modeInput?: unknown) {
+    const mode = mergeMode(modeInput);
     const config = this.config();
-    const paths = { a: await this.source(a, config.modelsRoot), b: await this.source(b, config.modelsRoot) };
-    const { child, done } = this.run(config.python, { action: 'inspect', ...paths });
+    const paths = { a: await this.source(a, config.modelsRoot), b: mode === 'lora_bake' ? '' : await this.source(b, config.modelsRoot) };
+    const { child, done } = this.run(config.python, { action: 'inspect', mode, ...paths });
     const timeout = setTimeout(() => child.kill(), 30000);
     try { return await done; } finally { clearTimeout(timeout); }
   }
@@ -240,16 +251,17 @@ export class AnimaModelMergeService {
     this.busy = true;
     try {
       const config = this.config();
-      const a = await this.source(input.a, config.modelsRoot), b = await this.source(input.b, config.modelsRoot);
+      const options = normalizeMergeOptions(input);
+      const a = await this.source(input.a, config.modelsRoot), b = options.mode === 'lora_bake' ? '' : await this.source(input.b, config.modelsRoot);
       if (a === b) throw new Error('Choose two different source models.');
       if (typeof input.ratio !== 'number' || !Number.isFinite(input.ratio) || input.ratio < 0 || input.ratio > 1) throw new Error('Mix must be between 0 and 100 percent.');
-      const options = normalizeMergeOptions(input);
       const resolveStack = async (stack: LoraEntry[]) => {
         const result = [];
         for (const entry of stack.filter(item => item.enabled && item.strength !== 0)) result.push({ path: await this.source(entry.model, config.modelsRoot, true), strength: entry.strength });
         return result;
       };
       const lorasA = await resolveStack(options.lorasA), lorasB = await resolveStack(options.lorasB);
+      if (options.mode === 'lora_bake' && !lorasA.length) throw new Error('Enable at least one LoRA with a non-zero strength.');
       const name = typeof input.name === 'string' ? input.name.trim().replace(/\.safetensors$/i, '') : '';
       if (!/^[a-zA-Z0-9][a-zA-Z0-9 _.-]{0,99}$/.test(name) || /[. ]$/.test(name) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) throw new Error('Use a filename of 1-100 letters, numbers, spaces, dots, underscores, or hyphens.');
       const outputCategory = String(input.a).split('/')[0];
@@ -265,9 +277,9 @@ export class AnimaModelMergeService {
       const partial = join(destination, `.${id}.partial`);
       this.cancelPath = join(this.workRoot, `${id}.cancel`);
       await mkdir(this.blueprintRoot(), { recursive: true });
-      const blueprint = { id, title: name, createdAt: new Date().toISOString(), setup: { a: input.a, b: input.b, ratio: input.ratio, name, ...options } };
-      this.job = { id, phase: 'checking', progress: 0, a: String(input.a), b: String(input.b), ratio: input.ratio, output, outputModelId: `${outputCategory}/Merges/${name}.safetensors`, blueprintId: id };
-      const { child, done } = this.run(config.python, { action: 'merge', a, b, ratio: input.ratio, blocks: options.blocks, lorasA, lorasB, cleanMetadata: options.cleanMetadata, blueprint, blueprintPath: join(this.blueprintRoot(), `${id}.json`), comfyRoot: config.comfyRoot, output, partial, cancel: this.cancelPath }, event => {
+      const blueprint = { id, title: name, createdAt: new Date().toISOString(), setup: { a: input.a, b: options.mode === 'lora_bake' ? '' : input.b, ratio: input.ratio, name, ...options } };
+      this.job = { id, mode: options.mode, phase: 'checking', progress: 0, a: String(input.a), b: options.mode === 'lora_bake' ? '' : String(input.b), ratio: input.ratio, output, outputModelId: `${outputCategory}/Merges/${name}.safetensors`, blueprintId: id };
+      const { child, done } = this.run(config.python, { action: 'merge', mode: options.mode, a, b, ratio: input.ratio, blocks: options.blocks, lorasA, lorasB, cleanMetadata: options.cleanMetadata, blueprint, blueprintPath: join(this.blueprintRoot(), `${id}.json`), comfyRoot: config.comfyRoot, output, partial, cancel: this.cancelPath }, event => {
         if (!this.job || this.job.id !== id) return;
         if (typeof event.phase === 'string') this.job.phase = event.phase;
         if (typeof event.family === 'string') this.job.family = event.family;

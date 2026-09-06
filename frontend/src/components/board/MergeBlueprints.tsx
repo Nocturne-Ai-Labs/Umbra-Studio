@@ -4,6 +4,7 @@ import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import { mergeButtonClass as buttonClass } from './ModelMergeControls';
 
 export type MergeBlueprintSetup = {
+  mode?: 'merge' | 'lora_bake';
   a: string; b: string; ratio: number; name: string; cleanMetadata?: boolean;
   blocks: Record<string, number>;
   lorasA: { id: string; model: string; strength: number; enabled: boolean }[];

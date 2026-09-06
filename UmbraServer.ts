@@ -31495,8 +31495,8 @@ const server = Bun.serve<any>({
           if (path.endsWith('/recipes/delete') && method === 'POST') { await animaModelMergeService.deleteRecipe((await req.json() as { id?: unknown }).id); return json({ success: true }); }
           if (path.endsWith('/status') && method === 'GET') return json({ job: animaModelMergeService.status() });
           if (path.endsWith('/inspect') && method === 'POST') {
-            const body = await req.json() as { a?: unknown; b?: unknown };
-            return json(await animaModelMergeService.inspect(body.a, body.b));
+            const body = await req.json() as { a?: unknown; b?: unknown; mode?: unknown };
+            return json(await animaModelMergeService.inspect(body.a, body.b, body.mode));
           }
           if (path.endsWith('/start') && method === 'POST') return json({ job: await animaModelMergeService.start(await req.json()) });
           if (path.endsWith('/cancel') && method === 'POST') {

@@ -10,7 +10,7 @@ import sys
 import hashlib
 import importlib.util
 import logging
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from model_merge_layout import describe, block_for_key
@@ -177,6 +177,19 @@ def inspect_pair(a, b):
     return left, right
 
 
+def operation_mode(request):
+    mode = request.get('mode', 'merge')
+    if mode not in ('merge', 'lora_bake'):
+        raise ValueError('Invalid model merge mode.')
+    return mode
+
+
+def inspect_sources(request):
+    if operation_mode(request) == 'lora_bake':
+        return inspect(request['a']), None
+    return inspect_pair(request['a'], request['b'])
+
+
 def merge(request):
     os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
     os.environ['PYTORCH_NVML_BASED_CUDA_CHECK'] = '0'
@@ -186,11 +199,18 @@ def merge(request):
     import psutil
 
     torch.set_num_threads(2)
-    a, b = request['a'], request['b']
+    mode = operation_mode(request)
+    baking = mode == 'lora_bake'
+    a, b = request['a'], request.get('b', '')
     ratio = request['ratio']
     if isinstance(ratio, bool) or not isinstance(ratio, (int, float)) or not math.isfinite(ratio) or not 0 <= ratio <= 1:
         raise ValueError('Mix must be between 0 and 100 percent.')
-    left, right = inspect_pair(a, b)
+    if baking:
+        if b or ratio != 0 or request.get('blocks') or request.get('lorasB'):
+            raise ValueError('LoRA baking uses only Model A and its LoRA stack, with no blend weights.')
+        if not any(entry.get('strength', 0) != 0 for entry in request.get('lorasA', [])):
+            raise ValueError('Enable at least one LoRA with a non-zero strength.')
+    left, right = inspect_sources(request)
     overrides = block_ratios(request.get('blocks', {}), left['blocks'])
     output = Path(request['output'])
     partial = Path(request['partial'])
@@ -210,7 +230,7 @@ def merge(request):
     if output.exists():
         raise ValueError('Output already exists. Choose a new name.')
     lora_bytes = sum(Path(item['path']).stat().st_size for side in ('lorasA', 'lorasB') for item in request.get(side, []))
-    required = left['bytes'] * 3 + lora_bytes * 2 + 1024 ** 3
+    required = left['bytes'] * (2 if baking else 3) + lora_bytes * 2 + 1024 ** 3
     if psutil.virtual_memory().available < required:
         raise ValueError(f'Not enough free RAM. Free approximately {required / 1024 ** 3:.1f} GB first.')
     if shutil.disk_usage(output.parent).free < left['bytes'] + 512 * 1024 ** 2:
@@ -226,29 +246,30 @@ def merge(request):
         patches_a, snapshots_a = prepare_stack(request.get('lorasA', []), left, request, check_cancel)
         patches_b, snapshots_b = prepare_stack(request.get('lorasB', []), right, request, check_cancel)
         merged = {}
-        with safe_open(a, framework='pt', device='cpu') as source_a, safe_open(b, framework='pt', device='cpu') as source_b:
+        with safe_open(a, framework='pt', device='cpu') as source_a, (nullcontext() if baking else safe_open(b, framework='pt', device='cpu')) as source_b:
             keys = sorted(left['tensors'])
             for index, key in enumerate(keys):
                 check_cancel()
-                x, y = source_a.get_tensor(left['sourceKeys'][key]), source_b.get_tensor(right['sourceKeys'][key])
+                x = source_a.get_tensor(left['sourceKeys'][key])
+                y = None if baking else source_b.get_tensor(right['sourceKeys'][key])
                 output_key = left['sourceKeys'][key]
                 if x.is_floating_point():
-                    if not torch.isfinite(x).all() or not torch.isfinite(y).all():
+                    if not torch.isfinite(x).all() or (y is not None and not torch.isfinite(y).all()):
                         raise ValueError(f'Non-finite source weights: {key}')
                     weight = overrides.get(block_for_key(key, left['blockLabels']), ratio)
-                    value = torch.lerp(apply_stack(x, key, patches_a), apply_stack(y, key, patches_b), weight).to(x.dtype)
+                    value = (apply_stack(x, key, patches_a) if baking else torch.lerp(apply_stack(x, key, patches_a), apply_stack(y, key, patches_b), weight)).to(x.dtype)
                     if not torch.isfinite(value).all():
                         raise ValueError(f'Non-finite merged weights: {key}')
                     merged[output_key] = value.contiguous()
                 else:
-                    if not torch.equal(x, y):
+                    if y is not None and not torch.equal(x, y):
                         raise ValueError(f'Non-floating model buffers differ: {key}')
                     merged[output_key] = x.clone()
                 if index % 20 == 0 or index == len(keys) - 1:
                     emit(phase='blending', progress=round((index + 1) / len(keys) * 90), processed=index + 1, total=len(keys))
         emit(phase='fingerprinting', progress=90)
         fingerprints = []
-        for path, before in [(a, left), (b, right), *snapshots_a, *snapshots_b]:
+        for path, before in [(a, left), *([] if baking else [(b, right)]), *snapshots_a, *snapshots_b]:
             check_cancel()
             digest = hashlib.sha256()
             with open(path, 'rb') as source:
@@ -261,7 +282,7 @@ def merge(request):
             fingerprints.append({'name': Path(path).name, 'bytes': after.st_size, 'sha256': digest.hexdigest()})
         check_cancel()
         emit(phase='saving', progress=92)
-        provenance = {'version': 1, 'method': 'weighted_sum', 'a': Path(a).name, 'b': Path(b).name, 'bWeight': ratio, 'family': left['family'], 'blocks': request.get('blocks', {}), 'lorasA': [{'name': Path(e['path']).name, 'strength': e['strength']} for e in request.get('lorasA', [])], 'lorasB': [{'name': Path(e['path']).name, 'strength': e['strength']} for e in request.get('lorasB', [])], 'sources': fingerprints}
+        provenance = {'version': 1, 'method': 'lora_bake' if baking else 'weighted_sum', 'a': Path(a).name, 'b': None if baking else Path(b).name, 'bWeight': ratio, 'family': left['family'], 'blocks': request.get('blocks', {}), 'lorasA': [{'name': Path(e['path']).name, 'strength': e['strength']} for e in request.get('lorasA', [])], 'lorasB': [{'name': Path(e['path']).name, 'strength': e['strength']} for e in request.get('lorasB', [])], 'sources': fingerprints}
         metadata = {} if clean_metadata else {k: v for k, v in left['metadata'].items() if isinstance(v, str) and k not in ('modelspec.hash_sha256', 'sshs_model_hash', 'sshs_legacy_hash') and not k.startswith('umbra.')}
         if not clean_metadata:
             metadata['modelspec.title'] = output.stem
@@ -305,8 +326,8 @@ if __name__ == '__main__':
     try:
         request = json.loads(sys.stdin.read())
         if request['action'] == 'inspect':
-            a, b = inspect_pair(request['a'], request['b'])
-            emit(compatible=True, blocks=a['blocks'], blockLabels=a['blockLabels'], combined=a['combined'], family=a['family'], tensorCount=len(a['tensors']), bytes=a['bytes'], precision=sorted({v['dtype'] for v in a['tensors'].values()}), estimatedRamBytes=a['bytes'] * 3 + 1024 ** 3)
+            a, b = inspect_sources(request)
+            emit(compatible=True, blocks=a['blocks'], blockLabels=a['blockLabels'], combined=a['combined'], family=a['family'], tensorCount=len(a['tensors']), bytes=a['bytes'], precision=sorted({v['dtype'] for v in a['tensors'].values()}), estimatedRamBytes=a['bytes'] * (2 if b is None else 3) + 1024 ** 3)
         else:
             merge(request)
     except Exception as error:

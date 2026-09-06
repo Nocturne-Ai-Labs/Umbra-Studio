@@ -9,9 +9,9 @@ import { MergeBlockEditor, MergeLoraStack, mergeButtonClass as buttonClass, merg
 
 type Model = { id: string; name: string; bytes: number; family: string; umbra?: boolean; blueprintId?: string };
 type Inspection = { compatible: boolean; blocks: number; blockLabels: string[]; combined: boolean; family: string; tensorCount: number; bytes: number; precision: string[]; estimatedRamBytes: number };
-type Setup = { a: string; b: string; ratio: number; name: string; blocks: Record<string, number>; lorasA: MergeLora[]; lorasB: MergeLora[]; cleanMetadata?: boolean };
+type Setup = MergeBlueprintSetup;
 type Recipe = { id: string; title: string; setup: Setup };
-type Job = { id: string; phase: string; progress: number; a: string; b: string; ratio: number; output: string; outputModelId?: string; family?: string; error?: string; processed?: number; total?: number };
+type Job = { mode?: 'merge' | 'lora_bake'; id: string; phase: string; progress: number; a: string; b: string; ratio: number; output: string; outputModelId?: string; family?: string; error?: string; processed?: number; total?: number };
 const terminal = new Set(['completed', 'cancelled', 'failed']);
 const size = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 const draftKey = 'umbra:data-forge-merge-draft';
@@ -33,6 +33,8 @@ async function api<T>(path: string, body?: object, signal?: AbortSignal): Promis
 export function ModelMergeTab() {
   const [models, setModels] = useState<Model[]>([]);
   const [draft] = useState(readDraft);
+  const [mode, setMode] = useState(draft.mode || 'merge');
+  const baking = mode === 'lora_bake';
   const [a, setA] = useState(draft.a);
   const [b, setB] = useState(draft.b);
   const [ratio, setRatio] = useState(draft.ratio);
@@ -60,10 +62,11 @@ export function ModelMergeTab() {
   const [checkError, setCheckError] = useState('');
   const running = !!job && !terminal.has(job.phase);
   const locked = running || submitting || testBusy;
+  const setup: Setup = { mode, a, b: baking ? '' : b, ratio: baking ? 0 : ratio / 100, name, blocks: baking ? {} : blocks, lorasA, lorasB: baking ? [] : lorasB, cleanMetadata };
 
   useEffect(() => {
-    try { sessionStorage.setItem(draftKey, JSON.stringify({ a, b, ratio, name, blocks, lorasA, lorasB, cleanMetadata })); } catch { /* Storage may be unavailable. */ }
-  }, [a, b, ratio, name, blocks, lorasA, lorasB, cleanMetadata]);
+    try { sessionStorage.setItem(draftKey, JSON.stringify({ mode, a, b, ratio, name, blocks, lorasA, lorasB, cleanMetadata })); } catch { /* Storage may be unavailable. */ }
+  }, [mode, a, b, ratio, name, blocks, lorasA, lorasB, cleanMetadata]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -98,19 +101,19 @@ export function ModelMergeTab() {
   useEffect(() => {
     setInspection(null);
     setCheckError('');
-    if (!a || !b) { setChecking(false); return; }
+    if (!a || (!baking && !b)) { setChecking(false); return; }
     const controller = new AbortController();
     setChecking(true);
-    void api<Inspection>('inspect', { a, b }, controller.signal)
+    void api<Inspection>('inspect', { a, b: baking ? '' : b, mode }, controller.signal)
       .then(result => { if (!controller.signal.aborted) setInspection(result); })
       .catch(reason => { if (!controller.signal.aborted) setCheckError(reason.message); })
       .finally(() => { if (!controller.signal.aborted) setChecking(false); });
     return () => controller.abort();
-  }, [a, b]);
+  }, [a, b, baking, mode]);
 
   const start = async () => {
     setSubmitting(true); setError('');
-    try { setJob((await api<{ job: Job }>('start', { a, b, ratio: ratio / 100, name, blocks, lorasA, lorasB, cleanMetadata })).job); }
+    try { setJob((await api<{ job: Job }>('start', setup)).job); }
     catch (reason) { setError((reason as Error).message); }
     finally { setSubmitting(false); }
   };
@@ -120,9 +123,10 @@ export function ModelMergeTab() {
   };
   const options = models.filter(model => model.id === a || model.id === b || model.id.toLowerCase().includes(filter.toLowerCase())).map(model => ({ value: model.id, label: model.name, description: `${model.family} · ${model.id}`, badge: model.umbra ? 'Made with Umbra' : size(model.bytes) }));
   const loadSetup = (setup: MergeBlueprintSetup) => {
+    setMode(setup.mode || 'merge');
     setA(setup.a); setB(setup.b); setRatio(setup.ratio * 100); setName(setup.name); setBlocks(setup.blocks); setLorasA(setup.lorasA); setLorasB(setup.lorasB); setCleanMetadata(setup.cleanMetadata !== false); setAdvanced(Object.keys(setup.blocks).length > 0);
     setError('');
-    const missing = [setup.a, setup.b].filter(id => !models.some(model => model.id === id));
+    const missing = (setup.mode === 'lora_bake' ? [setup.a] : [setup.a, setup.b]).filter(id => !models.some(model => model.id === id));
     const missingLoras = [...setup.lorasA, ...setup.lorasB].filter(entry => entry.enabled && entry.strength !== 0 && !loras.some(model => model.id === entry.model));
     if (missing.length || missingLoras.length) setError(`Restore or reselect missing models: ${[...missing, ...missingLoras.map(entry => entry.model)].join(', ')}`);
   };
@@ -147,7 +151,7 @@ export function ModelMergeTab() {
     setRecipeBusy(true); setError('');
     try {
       const existing = recipes.find(item => item.id === recipeId && item.title === recipeTitle.trim());
-      const result = await api<{ recipe: Recipe }>('recipes/save', { id: existing?.id, title: recipeTitle, setup: { a, b, ratio: ratio / 100, name, blocks, lorasA, lorasB, cleanMetadata } });
+      const result = await api<{ recipe: Recipe }>('recipes/save', { id: existing?.id, title: recipeTitle, setup });
       setRecipeId(result.recipe.id); setRecipes(current => [...current.filter(item => item.id !== result.recipe.id), result.recipe]);
     } catch (reason) { setError((reason as Error).message); }
     finally { setRecipeBusy(false); }
@@ -159,7 +163,7 @@ export function ModelMergeTab() {
     catch (reason) { setError((reason as Error).message); }
     finally { setRecipeBusy(false); }
   };
-  const loraBytes = [...lorasA, ...lorasB].filter(entry => entry.enabled && entry.strength !== 0).reduce((sum, entry) => sum + (loras.find(item => item.id === entry.model)?.bytes || 0), 0);
+  const loraBytes = [...lorasA, ...(baking ? [] : lorasB)].filter(entry => entry.enabled && entry.strength !== 0).reduce((sum, entry) => sum + (loras.find(item => item.id === entry.model)?.bytes || 0), 0);
 
   return (
     <div className="h-full overflow-y-auto" data-model-merge data-test-view={testView ? 'test' : 'merge'} style={{ containerType: 'inline-size', containerName: 'umbra-model-merge', '--umbra-border': 'color-mix(in srgb, var(--umbra-accent) 12%, rgba(255,255,255,0.1))', '--umbra-text-muted': 'color-mix(in srgb, var(--umbra-text) 60%, transparent)' } as CSSProperties}>
@@ -184,24 +188,28 @@ export function ModelMergeTab() {
         </section>
 
         <MergeBlueprints refreshKey={`${job?.id}:${job?.phase === 'completed'}`} locked={locked || recipeBusy} onLoad={continueBlueprint} />
+        <div role="group" aria-label="Model operation" className="flex flex-wrap gap-2">
+          <button className={buttonClass} style={!baking ? { borderColor: 'var(--umbra-accent)', color: 'var(--umbra-accent)' } : undefined} aria-pressed={!baking} disabled={locked} onClick={() => setMode('merge')}><Combine size={16} />Merge models</button>
+          <button className={buttonClass} style={baking ? { borderColor: 'var(--umbra-accent)', color: 'var(--umbra-accent)' } : undefined} aria-pressed={baking} disabled={locked} onClick={() => setMode('lora_bake')}><Save size={16} />Bake LoRAs</button>
+        </div>
         <input type="search" aria-label="Filter models" placeholder="Filter local models..." title="Full-precision Safetensors models; quantized and pickle checkpoints are excluded" value={filter} onChange={event => setFilter(event.target.value)} className={`${inputClass} max-w-md`} />
-        <section data-model-merge-sources className="grid min-w-0 grid-cols-1 items-start gap-4 md:grid-cols-[minmax(0,1fr)_44px_minmax(0,1fr)]" aria-label="Source models">
-          <div className="min-w-0 space-y-2"><label className="block text-sm font-semibold" htmlFor="merge-model-a">Model A <span className="float-right text-[var(--umbra-accent)]">{100 - ratio}%</span></label>
+        <section data-model-merge-sources className={`grid min-w-0 grid-cols-1 items-start gap-4 ${baking ? '' : 'md:grid-cols-[minmax(0,1fr)_44px_minmax(0,1fr)]'}`} aria-label="Source models">
+          <div className="min-w-0 space-y-2"><label className="block text-sm font-semibold" htmlFor="merge-model-a">{baking ? 'Base model' : 'Model A'} <span className="float-right text-[var(--umbra-accent)]">{baking ? 100 : 100 - ratio}%</span></label>
             <UmbraSelect triggerId="merge-model-a" triggerTitle={a} value={a} options={options} onValueChange={value => { setA(value); setBlocks({}); }} ariaLabel="Model A" placeholder="Choose base model" disabled={locked || loading} buttonClassName="!min-h-11 !h-auto !text-sm" />
             {a && <p className="break-all text-xs text-[var(--umbra-text-muted)]">{a}</p>}
             {models.find(model => model.id === a)?.umbra && <div className="flex flex-wrap items-center gap-2 text-xs"><span>Made with Umbra</span>{models.find(model => model.id === a)?.blueprintId && <button className={buttonClass} disabled={locked || recipeBusy} onClick={() => void loadModelBlueprint(models.find(model => model.id === a)!.blueprintId!)}><FolderOpen size={16} />Load A blueprint</button>}</div>}
             <MergeLoraStack side="A" entries={lorasA} models={loras} locked={locked} onChange={setLorasA} />
           </div>
-          <button className={`${buttonClass} w-11 self-start mt-7 justify-self-center !px-0`} title="Swap models and LoRA stacks" aria-label="Swap models" disabled={locked || !a || !b} onClick={() => { setA(b); setB(a); setRatio(100 - ratio); setLorasA(lorasB); setLorasB(lorasA); setBlocks(Object.fromEntries(Object.entries(blocks).map(([key, value]) => [key, 1 - value]))); }}><ArrowRightLeft size={18} /></button>
+          {!baking && <><button className={`${buttonClass} w-11 self-start mt-7 justify-self-center !px-0`} title="Swap models and LoRA stacks" aria-label="Swap models" disabled={locked || !a || !b} onClick={() => { setA(b); setB(a); setRatio(100 - ratio); setLorasA(lorasB); setLorasB(lorasA); setBlocks(Object.fromEntries(Object.entries(blocks).map(([key, value]) => [key, 1 - value]))); }}><ArrowRightLeft size={18} /></button>
           <div className="min-w-0 space-y-2"><label className="block text-sm font-semibold" htmlFor="merge-model-b">Model B <span className="float-right text-emerald-400">{ratio}%</span></label>
             <UmbraSelect triggerId="merge-model-b" triggerTitle={b} value={b} options={options} onValueChange={value => { setB(value); setBlocks({}); }} ariaLabel="Model B" placeholder="Choose blend model" disabled={locked || loading} buttonClassName="!min-h-11 !h-auto !text-sm" />
             {b && <p className="break-all text-xs text-[var(--umbra-text-muted)]">{b}</p>}
             {models.find(model => model.id === b)?.umbra && <div className="flex flex-wrap items-center gap-2 text-xs"><span>Made with Umbra</span>{models.find(model => model.id === b)?.blueprintId && <button className={buttonClass} disabled={locked || recipeBusy} onClick={() => void loadModelBlueprint(models.find(model => model.id === b)!.blueprintId!)}><FolderOpen size={16} />Load B blueprint</button>}</div>}
             <MergeLoraStack side="B" entries={lorasB} models={loras} locked={locked} onChange={setLorasB} />
-          </div>
+          </div></>}
         </section>
 
-        <section className="space-y-4 border-y border-[var(--umbra-border)] py-5" aria-label="Blend ratio">
+        {!baking && <><section className="space-y-4 border-y border-[var(--umbra-border)] py-5" aria-label="Blend ratio">
           <div className="flex items-center justify-between gap-4"><label htmlFor="merge-ratio" className="text-sm font-semibold">Model B contribution</label><div className="flex items-center gap-2"><input aria-label="Model B percentage" type="number" min={0} max={100} step={1} value={ratio} disabled={locked} onChange={event => setRatio(Math.max(0, Math.min(100, Number(event.target.value) || 0)))} className={`${inputClass} !w-20 text-center`} /><span>%</span></div></div>
           <input id="merge-ratio" type="range" min={0} max={100} step={1} value={ratio} disabled={locked} onChange={event => setRatio(Number(event.target.value))} className="min-h-11 w-full" />
           <div className="flex items-center justify-between gap-3 text-xs text-[var(--umbra-text-muted)]"><span>100% Model A</span><button className="min-h-9 px-3 hover:text-[var(--umbra-text)] disabled:opacity-40" disabled={locked} onClick={() => setRatio(50)}>50 / 50</button><span>100% Model B</span></div>
@@ -213,8 +221,9 @@ export function ModelMergeTab() {
           {advanced && (inspection ? inspection.blocks > 0 ? <><div className="text-xs text-[var(--umbra-text-muted)]">Non-block weights: global mix{inspection.combined ? ' · Includes VAE / text encoder weights' : ''}</div><MergeBlockEditor key={inspection.blockLabels?.join('|') || inspection.blocks} count={inspection.blocks} labels={inspection.blockLabels} ratio={ratio} values={blocks} locked={locked} onChange={setBlocks} /></> : <p className="text-sm text-[var(--umbra-text-muted)]">No indexed blocks · Global mix only</p> : <p className="text-sm text-[var(--umbra-text-muted)]">Select compatible source models</p>)}
         </section>
 
+        </>}
         <div className="flex min-h-12 items-start gap-2 text-sm" role="status">
-          {checking ? <><Loader2 size={18} className="shrink-0 animate-spin" />Checking tensor compatibility...</> : checkError ? <><CircleAlert size={18} className="shrink-0 text-amber-400" /><span>{checkError}</span></> : inspection ? <><CheckCircle2 size={18} className="shrink-0 text-emerald-400" /><span>{inspection.family} · {inspection.tensorCount.toLocaleString()} matching tensors · {inspection.precision.join(', ')}</span></> : <><Workflow size={18} className="shrink-0" /><span>{models.length ? 'Select two compatible models' : loading ? 'Loading local models...' : 'No local full-precision Safetensors models found'}</span></>}
+          {checking ? <><Loader2 size={18} className="shrink-0 animate-spin" />Checking tensor compatibility...</> : checkError ? <><CircleAlert size={18} className="shrink-0 text-amber-400" /><span>{checkError}</span></> : inspection ? <><CheckCircle2 size={18} className="shrink-0 text-emerald-400" /><span>{inspection.family} · {inspection.tensorCount.toLocaleString()} tensors · {inspection.precision.join(', ')}</span></> : <><Workflow size={18} className="shrink-0" /><span>{models.length ? baking ? 'Select a base model' : 'Select two compatible models' : loading ? 'Loading local models...' : 'No local full-precision Safetensors models found'}</span></>}
         </div>
 
         <section data-model-merge-output className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(200px,0.6fr)]" aria-label="Merge output">
@@ -227,19 +236,19 @@ export function ModelMergeTab() {
           <p className="text-xs text-[var(--umbra-text-muted)]">A private blueprint is saved automatically in User / Config / DataForge / MergeJobs / Blueprints. Back it up separately; the model ID alone cannot restore it.</p>
         </section>
         {error && <div role="alert" className="break-words text-sm text-red-400">{error}</div>}
-        <div className="flex flex-wrap justify-end gap-3"><button className={`${buttonClass} border-[var(--umbra-accent)] text-[var(--umbra-accent)]`} disabled={locked || checking || !inspection || !name.trim()} onClick={() => void start()}>{submitting ? <Loader2 size={17} className="animate-spin" /> : <Save size={17} />}Save merged model</button></div>
+        <div className="flex flex-wrap justify-end gap-3"><button className={`${buttonClass} border-[var(--umbra-accent)] text-[var(--umbra-accent)]`} disabled={locked || checking || !inspection || !name.trim() || (baking && !lorasA.some(entry => entry.enabled && entry.strength !== 0))} onClick={() => void start()}>{submitting ? <Loader2 size={17} className="animate-spin" /> : <Save size={17} />}{baking ? 'Save baked model' : 'Save merged model'}</button></div>
 
         {job && <section className="space-y-3 border-t border-[var(--umbra-border)] pt-5" aria-label="Merge job">
           <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold capitalize">{job.phase}</h3><span className="text-sm tabular-nums">{job.progress}%</span></div>
           <progress className="h-2 w-full accent-[var(--umbra-accent)]" aria-label="Merge progress" max={100} value={job.progress} />
           {job.total && <p className="text-xs tabular-nums">{job.processed?.toLocaleString() || 0} / {job.total.toLocaleString()} tensors</p>}
-          <p className="break-all text-xs">{job.a} ({Math.round((1 - job.ratio) * 100)}%) + {job.b} ({Math.round(job.ratio * 100)}%)</p>
+          <p className="break-all text-xs">{job.mode === 'lora_bake' ? `${job.a} + LoRAs` : `${job.a} (${Math.round((1 - job.ratio) * 100)}%) + ${job.b} (${Math.round(job.ratio * 100)}%)`}</p>
           <p className="break-all text-xs text-[var(--umbra-text-muted)]">{job.output}</p>
           {job.error && <p role="alert" className="break-words text-sm text-red-400">{job.error}</p>}
           {running && <button className={buttonClass} onClick={() => void cancel()}><Square size={15} />Cancel merge</button>}
         </section>}
       </div>
-      <ModelMergePreview a={a ? { id: a, family: inspection?.family || models.find(model => model.id === a)?.family || 'Safetensors' } : undefined} b={b ? { id: b, family: inspection?.family || models.find(model => model.id === b)?.family || 'Safetensors' } : undefined} merged={job?.phase === 'completed' ? { id: job.outputModelId || `${job.a.split('/')[0]}/Merges/${job.output.replace(/\\/g, '/').split('/').pop()}`, family: job.family || models.find(model => model.id === job.a)?.family || 'Safetensors' } : undefined} mergeBusy={running || submitting} onBusyChange={setTestBusy} />
+      <ModelMergePreview a={a ? { id: a, family: inspection?.family || models.find(model => model.id === a)?.family || 'Safetensors' } : undefined} b={!baking && b ? { id: b, family: inspection?.family || models.find(model => model.id === b)?.family || 'Safetensors' } : undefined} merged={job?.phase === 'completed' ? { id: job.outputModelId || `${job.a.split('/')[0]}/Merges/${job.output.replace(/\\/g, '/').split('/').pop()}`, family: job.family || models.find(model => model.id === job.a)?.family || 'Safetensors' } : undefined} mergeBusy={running || submitting} onBusyChange={setTestBusy} />
       </div>
     </div>
   );

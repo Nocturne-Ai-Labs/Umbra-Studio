@@ -16,7 +16,8 @@ export function normalizeMergeDraft(raw: unknown) {
     }).slice(0, 32);
   };
   const blocks = Object.fromEntries(Object.entries(object(value.blocks)).filter(([key, weight]) => /^(?:0|[1-9][0-9]{0,3})$/.test(key) && Number(key) < 4096 && typeof weight === 'number' && Number.isFinite(weight) && weight >= 0 && weight <= 1)) as Record<string, number>;
-  return { a: text(value.a), b: text(value.b), name: text(value.name), ratio: number(value.ratio, 50, 0, 100), blocks, lorasA: stack(value.lorasA), lorasB: stack(value.lorasB), cleanMetadata: value.cleanMetadata !== false };
+  const mode: 'merge' | 'lora_bake' = value.mode === 'lora_bake' ? 'lora_bake' : 'merge';
+  return { mode, a: text(value.a), b: text(value.b), name: text(value.name), ratio: number(value.ratio, 50, 0, 100), blocks, lorasA: stack(value.lorasA), lorasB: stack(value.lorasB), cleanMetadata: value.cleanMetadata !== false };
 }
 
 export type MergePreviewDraft = { family: string; source: UmbraUiPipelineModelSource; model: string; prompt: string; negative: string; seed: number; steps: number; cfg: number; width: number; height: number; sampler: string; scheduler: string; resources: Record<string, string> };
