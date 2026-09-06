@@ -31,6 +31,7 @@ def validate(archive, version, platform):
             'resources/app/package.json', 'resources/app/UmbraServer.js',
             'resources/app/setup/UmbraSetupApp.js',
             'resources/app/backend/python/anima_model_merge.py',
+            'resources/app/backend/python/model_merge_layout.py',
             'resources/app/node_modules/yazl/package.json',
             'resources/app/node_modules/sharp/package.json',
             'resources/app/defaults/UmbraUI/model-manifest.json',

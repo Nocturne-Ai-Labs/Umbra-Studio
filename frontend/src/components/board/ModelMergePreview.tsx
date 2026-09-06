@@ -55,7 +55,9 @@ export function ModelMergePreview({ a, b, merged, mergeBusy, onBusyChange }: { a
   const chooseTestModel = (model: TestModel) => {
     const [folder, ...parts] = model.id.replace(/\\/g, '/').split('/');
     const source: UmbraUiPipelineModelSource = folder === 'checkpoints' ? 'checkpoint' : folder === 'unet' ? 'unet' : 'diffusion_model';
-    patch({ family: model.family, source, model: parts.join('/'), resources: model.family === draft.family ? draft.resources : {} });
+    const family = families.find(value => value.toLowerCase() === model.family.toLowerCase());
+    patch({ family: family || '', source, model: parts.join('/'), resources: family === draft.family ? draft.resources : {} });
+    setError(family ? '' : 'Select the matching test pipeline for this model before generating.');
     bridge.refreshModelCatalog();
   };
   const generate = async () => {

@@ -73,7 +73,7 @@ function BlockMixSlider({ label, percentage, locked, onChange }: { label: string
   </div>;
 }
 
-export function MergeBlockEditor({ count, ratio, values, locked, onChange }: { count: number; ratio: number; values: Record<string, number>; locked: boolean; onChange: (value: Record<string, number>) => void }) {
+export function MergeBlockEditor({ count, labels, ratio, values, locked, onChange }: { count: number; labels?: string[]; ratio: number; values: Record<string, number>; locked: boolean; onChange: (value: Record<string, number>) => void }) {
   const [selected, setSelected] = useState<number[]>([]);
   const [bulkRatio, setBulkRatio] = useState(50);
   const [helpBlock, setHelpBlock] = useState<number | null>(null);
@@ -96,11 +96,11 @@ export function MergeBlockEditor({ count, ratio, values, locked, onChange }: { c
     }
     onChange(next);
   };
-  return <section aria-label="Transformer blocks" className="space-y-4">
+  return <section aria-label="Model blocks" className="space-y-4">
     <details className="border-b border-[var(--umbra-border)] pb-3 text-sm">
       <summary className="min-h-11 cursor-pointer py-3 font-semibold">What do these blocks affect?</summary>
       <dl className="grid gap-4 pb-2 text-xs leading-relaxed sm:grid-cols-2">
-        <div><dt className="font-semibold">Image and prompt relationships</dt><dd className="mt-1 text-[var(--umbra-text-muted)]">Each block connects image features through self-attention, relates them to the prompt through cross-attention, and transforms those features. Blocks work together; none is a dedicated face, style, or background control.</dd></div>
+        <div><dt className="font-semibold">Model structure</dt><dd className="mt-1 text-[var(--umbra-text-muted)]">Groups follow the selected model's tensor layout. Depending on the architecture they contain convolution, attention, or feature transformations. No block is a dedicated face, style, or background control.</dd></div>
         <div><dt className="font-semibold">Why blend individual blocks?</dt><dd className="mt-1 text-[var(--umbra-text-muted)]">A block blend combines that stage's learned weights from the two models. It can change the result differently from a whole-model blend, but the effect depends on the checkpoints and prompt. A-only and B-only are complete weight swaps for that block.</dd></div>
         <div><dt className="font-semibold">Depth, not denoising steps</dt><dd className="mt-1 text-[var(--umbra-text-muted)]">Block numbers describe order inside the network. All these stages run during each model evaluation, not at separate points on the sampler timeline. Earlier does not reliably mean composition, and later does not reliably mean detail.</dd></div>
         <div><dt className="font-semibold">Hardware and quality</dt><dd className="mt-1 text-[var(--umbra-text-muted)]">Blending keeps the same architecture and block count; it does not shrink the model or save inference VRAM. Quality is best compared using the same seed, prompt, and generation settings, changing a small number of blocks at a time.</dd></div>
@@ -127,13 +127,13 @@ export function MergeBlockEditor({ count, ratio, values, locked, onChange }: { c
         return <div className="min-w-0 space-y-1 border-b border-[var(--umbra-border)] py-2" key={index}>
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex min-h-11 items-center gap-2 text-sm font-semibold"><input className="h-5 w-5 accent-[var(--umbra-accent)]" type="checkbox" aria-label={`Select block ${index}`} checked={selected.includes(index)} disabled={locked} onChange={event => setSelected(current => event.target.checked ? [...current, index] : current.filter(i => i !== index))} />Block {index}</label>
-            <span className="text-xs text-[var(--umbra-text-muted)]">{value === undefined ? 'Global' : 'Override'}</span>
+            <span className="min-w-0 break-all text-xs text-[var(--umbra-text-muted)]">{labels?.[index] || `Block ${index}`} · {value === undefined ? 'Global' : 'Override'}</span>
             <div className="ml-auto flex gap-1">
               <button className={mergeButtonClass} title={`About block ${index}`} aria-label={`About block ${index}`} aria-expanded={helpBlock === index} onClick={() => setHelpBlock(helpBlock === index ? null : index)}><CircleHelp size={16} /></button>
               <button className={mergeButtonClass} title="Return to global mix" aria-label={`Reset block ${index} to global`} disabled={locked || value === undefined} onClick={() => change([index])}><RotateCcw size={16} /></button>
             </div>
           </div>
-          {helpBlock === index && <p className="pb-2 text-xs leading-relaxed text-[var(--umbra-text-muted)]">Stage {index + 1} of {count}, {index < count / 3 ? 'in the earlier part' : index < 2 * count / 3 ? 'in the middle' : 'in the later part'} of the network. It refines the features passed from {index === 0 ? 'the image input projection' : `block ${index - 1}`} through image attention, prompt attention, and feature transformations. Its visual effect is not isolated to one subject or image region.</p>}
+          {helpBlock === index && <p className="pb-2 text-xs leading-relaxed text-[var(--umbra-text-muted)]">Tensor group {labels?.[index] || index}, {index + 1} of {count}. This control blends the matching weights in that group. Group numbering is a stable catalog order, not a guarantee of execution order or a specific visual effect.</p>}
           <BlockMixSlider label={`Block ${index}`} percentage={value === undefined ? ratio : value * 100} locked={locked} onChange={percentage => change([index], percentage)} />
         </div>;
       })}

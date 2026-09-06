@@ -14,7 +14,7 @@ export function blockMixRandomRange(ratio: number, mode: BlockMixRandomMode) {
 }
 
 export function randomizeBlockMix(values: Record<string, number>, count: number, ratio: number, mode: BlockMixRandomMode, selected: number[] = [], random: () => number = Math.random): Record<string, number> {
-  if (count !== 28 && count !== 40) throw new Error('Unsupported Anima block count.');
+  if (!Number.isInteger(count) || count < 1 || count > 4096) throw new Error('Unsupported block count.');
   const { min, max } = blockMixRandomRange(ratio, mode);
   const targets = selected.length ? [...new Set(selected)].filter(index => Number.isInteger(index) && index >= 0 && index < count) : Array.from({ length: count }, (_, index) => index);
   const next = { ...values };

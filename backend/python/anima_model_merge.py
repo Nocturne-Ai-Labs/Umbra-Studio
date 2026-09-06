@@ -1,4 +1,4 @@
-"""CPU-only, same-architecture Anima weight blending for Data Forge."""
+"""CPU-only, matching-layout Safetensors weight blending for Data Forge."""
 import json
 import math
 import os
@@ -12,6 +12,8 @@ import importlib.util
 import logging
 from contextlib import contextmanager
 from types import SimpleNamespace
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from model_merge_layout import describe, block_for_key
 
 
 def block_ratios(values, count):
@@ -56,14 +58,35 @@ def prepare_stack(entries, info, request, check_cancel):
     from comfy.weight_adapter.lora import LoRAAdapter
 
     # Only tensor names are needed to ask ComfyUI for its standard key mapping.
-    model = SimpleNamespace(model_config=SimpleNamespace(unet_config={}), state_dict=lambda: {'diffusion_model.' + key: None for key in info['tensors']})
-    key_map = comfy.lora.model_lora_keys_unet(model, {})
-    compat_path = comfy_root / 'custom_nodes/Umbra-Nodes/anima_lora_compat.py'
-    spec = importlib.util.spec_from_file_location('umbra_merge_lora_compat', compat_path)
-    compat = importlib.util.module_from_spec(spec)
-    if not compat_path.is_file():
-        raise ValueError('Update Umbra Nodes in ComfyUI before baking Anima LoRAs.')
-    spec.loader.exec_module(compat)
+    from model_merge_layout import AUXILIARY
+    diffusion_keys = [key for key in info['tensors'] if not key.startswith(AUXILIARY[:-1])]
+    unet_config = {}
+    if info['family'] not in ('Anima', 'Anima 2.9B'):
+        import comfy.model_detection
+        shape_state = {key: torch.empty(info['tensors'][key]['shape'], device='meta') for key in diffusion_keys}
+        try:
+            unet_config = comfy.model_detection.detect_unet_config(shape_state, '') or {}
+        except (KeyError, IndexError, TypeError, RuntimeError):
+            # Unknown layouts still support direct, exact tensor-name LoRAs.
+            unet_config = {}
+    model = SimpleNamespace(model_config=SimpleNamespace(unet_config=unet_config), state_dict=lambda: {'diffusion_model.' + key: None for key in diffusion_keys})
+    try:
+        key_map = comfy.lora.model_lora_keys_unet(model, {})
+    except (KeyError, IndexError, TypeError, ValueError):
+        model.model_config.unet_config = {}
+        key_map = comfy.lora.model_lora_keys_unet(model, {})
+    for key in diffusion_keys:
+        if key.endswith('.weight'):
+            key_map[key[:-7]] = 'diffusion_model.' + key
+            key_map['transformer.' + key[:-7]] = 'diffusion_model.' + key
+    compat = None
+    if info['family'] == 'Anima 2.9B':
+        compat_path = comfy_root / 'custom_nodes/Umbra-Nodes/anima_lora_compat.py'
+        if not compat_path.is_file():
+            raise ValueError('Update Umbra Nodes in ComfyUI before baking Anima 2.9B LoRAs.')
+        spec = importlib.util.spec_from_file_location('umbra_merge_lora_compat', compat_path)
+        compat = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(compat)
     target = SimpleNamespace(get_model_object=lambda _: SimpleNamespace(blocks=[None] * info['blocks'], llm_adapter=True))
     stacks, snapshots = {}, []
     for entry in entries:
@@ -76,7 +99,8 @@ def prepare_stack(entries, info, request, check_cancel):
         state = load_file(str(path), device='cpu')
         if not state or any(not torch.isfinite(t).all() for t in state.values()):
             raise ValueError(f'Empty or non-finite LoRA weights: {path.name}')
-        state = compat.prepare_anima_lora(target, state)
+        if compat:
+            state = compat.prepare_anima_lora(target, state)
         state = comfy.lora_convert.convert_lora(state)
         with strict_lora_warnings():
             patches = comfy.lora.load_lora(state, key_map)
@@ -88,7 +112,8 @@ def prepare_stack(entries, info, request, check_cancel):
             key = raw_key.removeprefix('diffusion_model.')
             up, down, _, mid, _, reshape = adapter.weights
             shape = info['tensors'][key]['shape']
-            if mid is not None or reshape is not None or up.ndim != 2 or down.ndim != 2 or list(shape) != [up.shape[0], down.shape[1]] or up.shape[1] != down.shape[0]:
+            expected = [up.shape[0], *down.shape[1:]] if up.ndim >= 2 and down.ndim >= 2 else []
+            if mid is not None or reshape is not None or not expected or up.shape[1] != down.shape[0] or math.prod(up.shape[2:]) != 1 or list(shape) != expected:
                 raise ValueError(f'Unsupported LoRA tensor shape: {raw_key}')
             stacks.setdefault(key, []).append((strength, adapter, 1.0, None, None))
         after = path.stat()
@@ -121,22 +146,7 @@ def inspect(path):
             raise ValueError('Invalid safetensors header size.')
         header = json.loads(stream.read(length))
     raw_tensors = {k: v for k, v in header.items() if k != '__metadata__'}
-    source_keys = {re.sub(r'^(?:model\.diffusion_model\.|diffusion_model\.|net\.)', '', k): k for k in raw_tensors}
-    if len(source_keys) != len(raw_tensors):
-        raise ValueError('Duplicate model tensors after prefix normalization.')
-    tensors = {k: raw_tensors[original] for k, original in source_keys.items()}
-    if any(k.startswith(('first_stage_model.', 'cond_stage_model.', 'text_encoders.', 'vae.', 'clip.')) for k in tensors):
-        raise ValueError('Select a diffusion-only Anima model; combined VAE/text encoder checkpoints cannot be merged.')
-    blocks = {int(m.group(1)) for k in tensors if (m := re.match(r'blocks\.(\d+)\.', k))}
-    if blocks not in (set(range(28)), set(range(40))) or not any('llm_adapter.blocks.' in k for k in tensors):
-        raise ValueError('Select a full Anima diffusion model, not a LoRA or another model family.')
-    if not any(k.endswith('final_layer.linear.weight') for k in tensors):
-        raise ValueError('The Anima model is missing its final layer.')
-    for key, tensor in tensors.items():
-        if tensor.get('dtype') not in ('F16', 'BF16', 'F32', 'I64', 'I32', 'BOOL'):
-            raise ValueError('Quantized/FP8 models are not supported. Use FP16, BF16, or FP32 weights.')
-        if not isinstance(tensor.get('shape'), list):
-            raise ValueError(f'Invalid tensor: {key}')
+    layout = describe(raw_tensors, header.get('__metadata__', {}))
     # Let safetensors validate offsets, sizes, and the complete file without loading weights.
     from safetensors import safe_open
     with safe_open(str(path), framework='pt', device='cpu') as model:
@@ -144,9 +154,8 @@ def inspect(path):
             raise ValueError('Invalid model tensor index.')
     info = path.stat()
     return {
-        'family': 'Anima 2.9B' if len(blocks) == 40 else 'Anima',
-        'blocks': len(blocks), 'bytes': info.st_size, 'mtimeNs': info.st_mtime_ns,
-        'tensors': tensors, 'sourceKeys': source_keys, 'metadata': header.get('__metadata__', {}),
+        **layout, 'bytes': info.st_size, 'mtimeNs': info.st_mtime_ns,
+        'metadata': header.get('__metadata__', {}),
     }
 
 
@@ -154,8 +163,11 @@ def inspect_pair(a, b):
     if Path(a).resolve() == Path(b).resolve():
         raise ValueError('Choose two different source models.')
     left, right = inspect(a), inspect(b)
-    if left['blocks'] != right['blocks']:
-        raise ValueError('Original Anima and Anima 2.9B cannot be merged together.')
+    if left['family'] != right['family'] or left['blockLabels'] != right['blockLabels']:
+        raise ValueError('Different model architectures or block layouts cannot be merged together.')
+    for key in set(left['runtimeMetadata']) & set(right['runtimeMetadata']):
+        if left['runtimeMetadata'][key] != right['runtimeMetadata'][key]:
+            raise ValueError(f'Model runtime metadata differs: {key}. Use compatible training/prediction layouts.')
     if left['tensors'].keys() != right['tensors'].keys():
         raise ValueError('These models have different tensor keys. Use models with matching weight layouts.')
     for key, tensor in left['tensors'].items():
@@ -210,7 +222,7 @@ def merge(request):
 
     try:
         check_cancel()
-        emit(phase='loading_loras', progress=0)
+        emit(phase='loading_loras', progress=0, family=left['family'])
         patches_a, snapshots_a = prepare_stack(request.get('lorasA', []), left, request, check_cancel)
         patches_b, snapshots_b = prepare_stack(request.get('lorasB', []), right, request, check_cancel)
         merged = {}
@@ -219,12 +231,11 @@ def merge(request):
             for index, key in enumerate(keys):
                 check_cancel()
                 x, y = source_a.get_tensor(left['sourceKeys'][key]), source_b.get_tensor(right['sourceKeys'][key])
-                output_key = 'net.' + key
+                output_key = left['sourceKeys'][key]
                 if x.is_floating_point():
                     if not torch.isfinite(x).all() or not torch.isfinite(y).all():
                         raise ValueError(f'Non-finite source weights: {key}')
-                    match = re.match(r'blocks\.(\d+)\.', key)
-                    weight = overrides.get(int(match.group(1)), ratio) if match else ratio
+                    weight = overrides.get(block_for_key(key, left['blockLabels']), ratio)
                     value = torch.lerp(apply_stack(x, key, patches_a), apply_stack(y, key, patches_b), weight).to(x.dtype)
                     if not torch.isfinite(value).all():
                         raise ValueError(f'Non-finite merged weights: {key}')
@@ -256,6 +267,7 @@ def merge(request):
             metadata['modelspec.title'] = output.stem
             metadata['umbra.merge'] = json.dumps(provenance)
         metadata.update({'format': 'pt', 'umbra.creator': 'Umbra Studio', 'umbra.blueprint_id': blueprint['id']})
+        metadata.update(left['runtimeMetadata'])
         save_file(merged, str(partial), metadata=metadata)
         del merged
         emit(phase='verifying', progress=98)
@@ -267,7 +279,7 @@ def merge(request):
             while chunk := source.read(8 * 1024 * 1024):
                 check_cancel()
                 digest.update(chunk)
-        record = {**blueprint, 'version': 1, 'kind': 'umbra-model-merge', 'family': left['family'], 'blockCount': left['blocks'], 'effectiveBlockWeights': {str(i): overrides.get(i, ratio) for i in range(left['blocks'])}, 'torchVersion': torch.__version__, 'provenance': provenance, 'output': {'name': output.name, 'bytes': partial.stat().st_size, 'sha256': digest.hexdigest()}, 'cleanMetadata': clean_metadata}
+        record = {**blueprint, 'version': 1, 'kind': 'umbra-model-merge', 'family': left['family'], 'blockCount': left['blocks'], 'blockLabels': left['blockLabels'], 'effectiveBlockWeights': {str(i): overrides.get(i, ratio) for i in range(left['blocks'])}, 'torchVersion': torch.__version__, 'provenance': provenance, 'output': {'name': output.name, 'bytes': partial.stat().st_size, 'sha256': digest.hexdigest()}, 'cleanMetadata': clean_metadata}
         blueprint_path.parent.mkdir(parents=True, exist_ok=True)
         with blueprint_partial.open('x', encoding='utf-8') as target:
             blueprint_staged = True
@@ -294,7 +306,7 @@ if __name__ == '__main__':
         request = json.loads(sys.stdin.read())
         if request['action'] == 'inspect':
             a, b = inspect_pair(request['a'], request['b'])
-            emit(compatible=True, blocks=a['blocks'], family=a['family'], tensorCount=len(a['tensors']), bytes=a['bytes'], precision=sorted({v['dtype'] for v in a['tensors'].values()}), estimatedRamBytes=a['bytes'] * 3 + 1024 ** 3)
+            emit(compatible=True, blocks=a['blocks'], blockLabels=a['blockLabels'], combined=a['combined'], family=a['family'], tensorCount=len(a['tensors']), bytes=a['bytes'], precision=sorted({v['dtype'] for v in a['tensors'].values()}), estimatedRamBytes=a['bytes'] * 3 + 1024 ** 3)
         else:
             merge(request)
     except Exception as error:

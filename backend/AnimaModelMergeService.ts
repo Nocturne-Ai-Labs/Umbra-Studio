@@ -14,7 +14,7 @@ export function normalizeMergeOptions(input: MergeInput) {
   const blocks = input.blocks ?? {};
   if (!blocks || typeof blocks !== 'object' || Array.isArray(blocks)) throw new Error('Invalid block weights.');
   for (const [index, value] of Object.entries(blocks)) {
-    if (!/^(?:[0-9]|[1-3][0-9])$/.test(index) || typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) throw new Error('Invalid block weights.');
+    if (!/^(?:0|[1-9][0-9]{0,3})$/.test(index) || Number(index) >= 4096 || typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) throw new Error('Invalid block weights.');
   }
   const stack = (raw: unknown): LoraEntry[] => {
     if (raw === undefined) return [];
@@ -30,7 +30,7 @@ export function normalizeMergeOptions(input: MergeInput) {
 }
 export type AnimaMergeJob = {
   id: string; phase: string; progress: number; a: string; b: string; ratio: number;
-  output: string; blueprintId?: string; error?: string; processed?: number; total?: number;
+  output: string; outputModelId?: string; family?: string; blueprintId?: string; error?: string; processed?: number; total?: number;
 };
 
 export class AnimaModelMergeService {
@@ -71,8 +71,11 @@ export class AnimaModelMergeService {
                     umbra = metadata['umbra.creator'] === 'Umbra Studio' || typeof metadata['umbra.merge'] === 'string';
                     if (typeof metadata['umbra.blueprint_id'] === 'string' && /^[a-f0-9-]{36}$/.test(metadata['umbra.blueprint_id'])) blueprintId = metadata['umbra.blueprint_id'];
                     const keys = Object.keys(header);
+                    const tensors = Object.entries(header).filter(([key]) => key !== '__metadata__') as [string, { dtype?: string; shape?: unknown[] }][];
+                    const isLora = keys.some(key => /(?:^|\.)(?:lora_up|lora_down|lora_A|lora_B)(?:\.|$)|^lora_/.test(key));
+                    if (!isLora && tensors.length && tensors.every(([, tensor]) => tensor && ['F16', 'BF16', 'F32', 'I64', 'I32', 'BOOL'].includes(tensor.dtype || '') && Array.isArray(tensor.shape)) && tensors.some(([key, tensor]) => key.endsWith('.weight') && (tensor.shape?.length || 0) >= 2)) family = 'Safetensors';
                     const blocks = new Set(keys.flatMap(key => { const match = key.match(/^(?:model\.diffusion_model\.|diffusion_model\.|net\.)?blocks\.(\d+)\./); return match ? [Number(match[1])] : []; }));
-                    if ([28, 40].includes(blocks.size) && keys.some(key => key.includes('llm_adapter.blocks.')) && [...blocks].every(block => block < blocks.size)) family = blocks.size === 40 ? 'Anima 2.9B' : 'Anima';
+                    if (family && [28, 40].includes(blocks.size) && keys.some(key => key.includes('llm_adapter.blocks.')) && [...blocks].every(block => block < blocks.size)) family = blocks.size === 40 ? 'Anima 2.9B' : 'Anima';
                   }
                 } catch { /* Unsupported or incomplete files stay out of the merge catalog. */ }
                 finally { await handle.close(); }
@@ -249,7 +252,8 @@ export class AnimaModelMergeService {
       const lorasA = await resolveStack(options.lorasA), lorasB = await resolveStack(options.lorasB);
       const name = typeof input.name === 'string' ? input.name.trim().replace(/\.safetensors$/i, '') : '';
       if (!/^[a-zA-Z0-9][a-zA-Z0-9 _.-]{0,99}$/.test(name) || /[. ]$/.test(name) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) throw new Error('Use a filename of 1-100 letters, numbers, spaces, dots, underscores, or hyphens.');
-      const destination = join(config.modelsRoot, 'diffusion_models', 'Merges');
+      const outputCategory = String(input.a).split('/')[0];
+      const destination = join(config.modelsRoot, outputCategory, 'Merges');
       await mkdir(destination, { recursive: true });
       const base = await realpath(config.modelsRoot);
       const rel = relative(base, await realpath(destination));
@@ -262,10 +266,11 @@ export class AnimaModelMergeService {
       this.cancelPath = join(this.workRoot, `${id}.cancel`);
       await mkdir(this.blueprintRoot(), { recursive: true });
       const blueprint = { id, title: name, createdAt: new Date().toISOString(), setup: { a: input.a, b: input.b, ratio: input.ratio, name, ...options } };
-      this.job = { id, phase: 'checking', progress: 0, a: String(input.a), b: String(input.b), ratio: input.ratio, output, blueprintId: id };
+      this.job = { id, phase: 'checking', progress: 0, a: String(input.a), b: String(input.b), ratio: input.ratio, output, outputModelId: `${outputCategory}/Merges/${name}.safetensors`, blueprintId: id };
       const { child, done } = this.run(config.python, { action: 'merge', a, b, ratio: input.ratio, blocks: options.blocks, lorasA, lorasB, cleanMetadata: options.cleanMetadata, blueprint, blueprintPath: join(this.blueprintRoot(), `${id}.json`), comfyRoot: config.comfyRoot, output, partial, cancel: this.cancelPath }, event => {
         if (!this.job || this.job.id !== id) return;
         if (typeof event.phase === 'string') this.job.phase = event.phase;
+        if (typeof event.family === 'string') this.job.family = event.family;
         if (typeof event.progress === 'number') this.job.progress = event.progress;
         if (typeof event.processed === 'number') this.job.processed = event.processed;
         if (typeof event.total === 'number') this.job.total = event.total;

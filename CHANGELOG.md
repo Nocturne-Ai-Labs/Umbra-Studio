@@ -1,5 +1,67 @@
 # Changelog
 
+## v0.32.0
+
+### TL;DR - Setup After Updating
+
+Update Umbra Studio normally and restart the app. Model Merge uses the managed
+ComfyUI Python environment with PyTorch and safetensors. For LoRA baking, keep
+managed ComfyUI updated; legacy Anima LoRAs on Anima 2.9B also require the
+Umbra-Nodes compatibility helper introduced in v0.31.29. No new checkpoint
+downloads are required. Existing models and merge blueprints are preserved.
+
+### Model Merge Beyond Anima
+
+- Removed the Anima-only model restriction. Data Forge can now inspect and merge
+  compatible FP16, BF16, and FP32 Safetensors model layouts, including matching
+  UNet, transformer, and combined-checkpoint layouts.
+- Compatibility is checked before writing: source tensor names, shapes, dtypes,
+  block layouts, and shared declared runtime metadata must agree. This does not
+  enable cross-architecture merging, such as Anima with SDXL or FLUX.
+- Advanced block controls now follow the inspected model's actual tensor groups,
+  including layouts beyond Anima's 28/40 blocks. Light, medium, and heavy
+  randomization and saved blueprints retain those expanded block selections.
+  Models without indexed blocks use the global blend control.
+- Added generic diffusion-model LoRA baking through ComfyUI's supported mappings,
+  including validated linear and convolutional adapters. Unsupported adapters
+  and unmapped targets fail explicitly instead of silently dropping weights.
+  This is not a promise of support for every LoRA format.
+- Preserve the source checkpoint's tensor naming and output category. Combined
+  checkpoint VAE/text-encoder weights follow the global mix, while diffusion
+  blocks can use individual overrides.
+- Clean metadata removes private descriptive metadata while retaining essential
+  declared runtime identifiers. Blueprints remain separate and reloadable;
+  review them before sharing because they describe the merge's sources.
+- Preview selection recognizes known matching image pipelines. Unknown families
+  require an explicit pipeline choice instead of silently defaulting to Anima.
+  Video-model merging does not add a video-generation preview.
+
+### Compatibility And Validation
+
+GGUF, quantized/FP8 weights, pickle-based checkpoints, incompatible tensor
+layouts, and differing source tensor precisions remain unsupported. Matching
+layout is a structural safety check, not a guarantee of artistic quality.
+Respect every source model and LoRA license when distributing merged weights.
+
+Validated with numerical Safetensors fixtures for combined UNet checkpoints,
+transformer/video layouts, block overrides, LoRA baking, metadata, and blueprint
+round trips, plus Anima regressions and desktop/tablet UI checks. Full-size
+non-Anima image-generation quality comparisons were not performed.
+
+Windows and Linux portable packages include the new layout inspector and exclude
+private models, wildcards, runtime data, and internal tests. Optional AI Toolkit
+still requires Git and Node.js 20 or newer. Linux managed tools may require
+python3-dev, build-essential, libgl1, and libglib2.0-0 or distribution equivalents.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Compatible non-Anima models no longer disappear from Model Merge.
+- **Fixed:** Saved merges preserve the correct model category and tensor layout.
+- **Improved:** Block controls and blueprints adapt to the inspected architecture.
+- **Improved:** Unsupported LoRA targets and incompatible sources report errors
+  before a misleading merged output is saved.
+- **Improved:** Clean metadata retains runtime identifiers needed by model loaders.
+
 ## v0.31.29
 
 ### TL;DR - Setup After Updating

@@ -8,10 +8,10 @@ import { normalizeMergeDraft } from '@/lib/modelMergeDraft';
 import { MergeBlockEditor, MergeLoraStack, mergeButtonClass as buttonClass, mergeInputClass as inputClass, type MergeLora, type MergeLoraModel } from './ModelMergeControls';
 
 type Model = { id: string; name: string; bytes: number; family: string; umbra?: boolean; blueprintId?: string };
-type Inspection = { compatible: boolean; blocks: number; family: string; tensorCount: number; bytes: number; precision: string[]; estimatedRamBytes: number };
+type Inspection = { compatible: boolean; blocks: number; blockLabels: string[]; combined: boolean; family: string; tensorCount: number; bytes: number; precision: string[]; estimatedRamBytes: number };
 type Setup = { a: string; b: string; ratio: number; name: string; blocks: Record<string, number>; lorasA: MergeLora[]; lorasB: MergeLora[]; cleanMetadata?: boolean };
 type Recipe = { id: string; title: string; setup: Setup };
-type Job = { id: string; phase: string; progress: number; a: string; b: string; ratio: number; output: string; error?: string; processed?: number; total?: number };
+type Job = { id: string; phase: string; progress: number; a: string; b: string; ratio: number; output: string; outputModelId?: string; family?: string; error?: string; processed?: number; total?: number };
 const terminal = new Set(['completed', 'cancelled', 'failed']);
 const size = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 const draftKey = 'umbra:data-forge-merge-draft';
@@ -170,7 +170,7 @@ export function ModelMergeTab() {
       <div data-model-merge-layout className="grid w-full min-w-0">
       <div data-model-merge-editor className="min-w-0 space-y-7 p-4 md:p-6" style={{ containerType: 'inline-size', containerName: 'umbra-model-merge-editor' }}>
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--umbra-border)] pb-4">
-          <div className="flex items-center gap-3"><Combine size={22} className="text-[var(--umbra-accent)]" /><h2 className="text-lg font-semibold">Model Merge</h2><span className="rounded border border-[var(--umbra-border)] px-2 py-1 text-xs">Anima</span></div>
+          <div className="flex flex-wrap items-center gap-3"><Combine size={22} className="text-[var(--umbra-accent)]" /><h2 className="text-lg font-semibold">Model Merge</h2><span className="rounded border border-[var(--umbra-border)] px-2 py-1 text-xs">{inspection?.family || 'Safetensors'}</span></div>
           <div className="flex gap-2"><button className={buttonClass} title="Clear merge setup" aria-label="Clear merge setup" disabled={locked} onClick={() => { setA(''); setB(''); setName(''); setRatio(50); setFilter(''); setError(''); setLorasA([]); setLorasB([]); setBlocks({}); setCleanMetadata(true); setRecipeId(''); setRecipeTitle(''); setConfirmDelete(false); }}><RotateCcw size={16} /></button><button className={buttonClass} title="Refresh local models" aria-label="Refresh local models" disabled={loading || locked} onClick={() => void refresh()}><RefreshCw size={16} className={loading ? 'animate-spin' : ''} /></button></div>
         </header>
 
@@ -184,7 +184,7 @@ export function ModelMergeTab() {
         </section>
 
         <MergeBlueprints refreshKey={`${job?.id}:${job?.phase === 'completed'}`} locked={locked || recipeBusy} onLoad={continueBlueprint} />
-        <input type="search" aria-label="Filter models" placeholder="Filter local Anima models..." value={filter} onChange={event => setFilter(event.target.value)} className={`${inputClass} max-w-md`} />
+        <input type="search" aria-label="Filter models" placeholder="Filter local models..." title="Full-precision Safetensors models; quantized and pickle checkpoints are excluded" value={filter} onChange={event => setFilter(event.target.value)} className={`${inputClass} max-w-md`} />
         <section data-model-merge-sources className="grid min-w-0 grid-cols-1 items-start gap-4 md:grid-cols-[minmax(0,1fr)_44px_minmax(0,1fr)]" aria-label="Source models">
           <div className="min-w-0 space-y-2"><label className="block text-sm font-semibold" htmlFor="merge-model-a">Model A <span className="float-right text-[var(--umbra-accent)]">{100 - ratio}%</span></label>
             <UmbraSelect triggerId="merge-model-a" triggerTitle={a} value={a} options={options} onValueChange={value => { setA(value); setBlocks({}); }} ariaLabel="Model A" placeholder="Choose base model" disabled={locked || loading} buttonClassName="!min-h-11 !h-auto !text-sm" />
@@ -210,20 +210,20 @@ export function ModelMergeTab() {
 
         <section className="space-y-4 border-b border-[var(--umbra-border)] pb-5">
           <button className={`${buttonClass} w-full justify-between`} aria-expanded={advanced} onClick={() => setAdvanced(value => !value)}>Advanced block mix <span className="ml-auto text-xs text-[var(--umbra-text-muted)]">{Object.keys(blocks).length} overrides</span>{advanced ? <ChevronUp size={17} /> : <ChevronDown size={17} />}</button>
-          {advanced && (inspection ? <><div className="text-xs text-[var(--umbra-text-muted)]">Non-block weights: global mix</div><MergeBlockEditor key={inspection.blocks} count={inspection.blocks} ratio={ratio} values={blocks} locked={locked} onChange={setBlocks} /></> : <p className="text-sm text-[var(--umbra-text-muted)]">Select compatible source models</p>)}
+          {advanced && (inspection ? inspection.blocks > 0 ? <><div className="text-xs text-[var(--umbra-text-muted)]">Non-block weights: global mix{inspection.combined ? ' · Includes VAE / text encoder weights' : ''}</div><MergeBlockEditor key={inspection.blockLabels?.join('|') || inspection.blocks} count={inspection.blocks} labels={inspection.blockLabels} ratio={ratio} values={blocks} locked={locked} onChange={setBlocks} /></> : <p className="text-sm text-[var(--umbra-text-muted)]">No indexed blocks · Global mix only</p> : <p className="text-sm text-[var(--umbra-text-muted)]">Select compatible source models</p>)}
         </section>
 
         <div className="flex min-h-12 items-start gap-2 text-sm" role="status">
-          {checking ? <><Loader2 size={18} className="shrink-0 animate-spin" />Checking tensor compatibility...</> : checkError ? <><CircleAlert size={18} className="shrink-0 text-amber-400" /><span>{checkError}</span></> : inspection ? <><CheckCircle2 size={18} className="shrink-0 text-emerald-400" /><span>{inspection.family} · {inspection.tensorCount.toLocaleString()} matching tensors · {inspection.precision.join(', ')}</span></> : <><Workflow size={18} className="shrink-0" /><span>{models.length ? 'Select two Anima models' : loading ? 'Loading local models...' : 'No local models found'}</span></>}
+          {checking ? <><Loader2 size={18} className="shrink-0 animate-spin" />Checking tensor compatibility...</> : checkError ? <><CircleAlert size={18} className="shrink-0 text-amber-400" /><span>{checkError}</span></> : inspection ? <><CheckCircle2 size={18} className="shrink-0 text-emerald-400" /><span>{inspection.family} · {inspection.tensorCount.toLocaleString()} matching tensors · {inspection.precision.join(', ')}</span></> : <><Workflow size={18} className="shrink-0" /><span>{models.length ? 'Select two compatible models' : loading ? 'Loading local models...' : 'No local full-precision Safetensors models found'}</span></>}
         </div>
 
         <section data-model-merge-output className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(200px,0.6fr)]" aria-label="Merge output">
-          <div className="min-w-0 space-y-2"><label htmlFor="merge-name" className="block text-sm font-semibold">Output filename</label><div className="flex items-center gap-2"><input id="merge-name" placeholder="My Anima Merge" value={name} maxLength={100} onChange={event => setName(event.target.value)} disabled={locked} className={`${inputClass} min-w-0`} /><span className="text-xs">.safetensors</span></div><div className="break-all text-xs text-[var(--umbra-text-muted)]">models / diffusion_models / Merges</div></div>
+          <div className="min-w-0 space-y-2"><label htmlFor="merge-name" className="block text-sm font-semibold">Output filename</label><div className="flex items-center gap-2"><input id="merge-name" placeholder="My Model Merge" value={name} maxLength={100} onChange={event => setName(event.target.value)} disabled={locked} className={`${inputClass} min-w-0`} /><span className="text-xs">.safetensors</span></div><div className="break-all text-xs text-[var(--umbra-text-muted)]">models / {a.split('/')[0] || 'diffusion_models'} / Merges</div></div>
           <dl className="space-y-2 text-sm"><div className="flex justify-between gap-3"><dt className="flex items-center gap-2"><Cpu size={15} />Processing</dt><dd>CPU</dd></div><div className="flex justify-between gap-3"><dt>Estimated output</dt><dd>{inspection ? size(inspection.bytes) : '--'}</dd></div><div className="flex justify-between gap-3"><dt>Free RAM required</dt><dd>{inspection ? size(inspection.estimatedRamBytes + loraBytes * 2) : '--'}</dd></div></dl>
         </section>
         <section className="space-y-2 border-b border-[var(--umbra-border)] pb-4" aria-label="Model metadata">
           <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={cleanMetadata} disabled={locked} onChange={event => setCleanMetadata(event.target.checked)} className="h-5 w-5 accent-[var(--umbra-accent)]" />Clean model metadata</label>
-          <p className="text-xs text-[var(--umbra-text-muted)]">{cleanMetadata ? 'Only format, Umbra creator marker, and blueprint ID are embedded. Source metadata and the recipe stay out of the model.' : 'Source metadata and the full merge recipe will be embedded in the model.'}</p>
+          <p className="text-xs text-[var(--umbra-text-muted)]">{cleanMetadata ? 'Format, runtime architecture metadata, Umbra creator marker, and blueprint ID are retained. Personal source metadata and the recipe stay out of the model.' : 'Source metadata and the full merge recipe will be embedded in the model.'}</p>
           <p className="text-xs text-[var(--umbra-text-muted)]">A private blueprint is saved automatically in User / Config / DataForge / MergeJobs / Blueprints. Back it up separately; the model ID alone cannot restore it.</p>
         </section>
         {error && <div role="alert" className="break-words text-sm text-red-400">{error}</div>}
@@ -239,7 +239,7 @@ export function ModelMergeTab() {
           {running && <button className={buttonClass} onClick={() => void cancel()}><Square size={15} />Cancel merge</button>}
         </section>}
       </div>
-      <ModelMergePreview a={models.find(model => model.id === a)} b={models.find(model => model.id === b)} merged={job?.phase === 'completed' ? { id: `diffusion_models/Merges/${job.output.replace(/\\/g, '/').split('/').pop()}`, family: models.find(model => model.id === job.a)?.family || inspection?.family || 'Anima' } : undefined} mergeBusy={running || submitting} onBusyChange={setTestBusy} />
+      <ModelMergePreview a={a ? { id: a, family: inspection?.family || models.find(model => model.id === a)?.family || 'Safetensors' } : undefined} b={b ? { id: b, family: inspection?.family || models.find(model => model.id === b)?.family || 'Safetensors' } : undefined} merged={job?.phase === 'completed' ? { id: job.outputModelId || `${job.a.split('/')[0]}/Merges/${job.output.replace(/\\/g, '/').split('/').pop()}`, family: job.family || models.find(model => model.id === job.a)?.family || 'Safetensors' } : undefined} mergeBusy={running || submitting} onBusyChange={setTestBusy} />
       </div>
     </div>
   );
