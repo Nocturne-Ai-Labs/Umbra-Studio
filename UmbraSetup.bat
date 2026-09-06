@@ -13,5 +13,5 @@ if not exist "%SETUP_APP%" (
   pause
   exit /b 1
 )
-"%BUN_BIN%" "%SETUP_APP%" --root "%CD%"
+"%BUN_BIN%" "%SETUP_APP%" --root "%CD%" %*
 if errorlevel 1 pause

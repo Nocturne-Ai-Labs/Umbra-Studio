@@ -65,6 +65,10 @@ const testDownloads = process.argv.includes('--test-downloads');
 const verifyTarget = process.argv.includes('--verify-target');
 const manifestOnly = process.argv.includes('--manifest-only');
 const listOnly = process.argv.includes('--list');
+const jsonProgress = process.argv.includes('--json-progress');
+function reportProgress(event) {
+  if (jsonProgress) console.log(`UMBRA_MODEL_PROGRESS|${JSON.stringify(event)}`);
+}
 const comfyRoot = path.resolve(
   readArg('--comfy-root')
   || process.env.UMBRA_COMFYUI_ROOT
@@ -93,7 +97,7 @@ process.once('SIGINT', requestCancellation);
 process.once('SIGTERM', requestCancellation);
 
 function beginCancellationInput() {
-  if (!process.stdin.isTTY && process.env.UMBRA_TEST_CANCEL_INPUT !== '1') return;
+  if (!process.stdin.isTTY && !process.argv.includes('--cancel-stdin') && process.env.UMBRA_TEST_CANCEL_INPUT !== '1') return;
   cancelInputWasRaw = Boolean(process.stdin.isRaw);
   process.stdin.setRawMode?.(true);
   process.stdin.resume();
@@ -232,11 +236,13 @@ async function downloadFile(url, outputPath, expected) {
       const now = Date.now();
       if (now - lastLogAt < 2000) return;
       lastLogAt = now;
-      process.stdout.write(`\r      ${formatBytes(downloaded)} ${((downloaded / expected.bytes) * 100).toFixed(1)}%`);
+      reportProgress({ stage: 'downloading', file: expected.destination, bytes: downloaded, totalBytes: expected.bytes });
+      if (!jsonProgress) process.stdout.write(`\r      ${formatBytes(downloaded)} ${((downloaded / expected.bytes) * 100).toFixed(1)}%`);
     });
     await pipeline(source, fs.createWriteStream(partialPath, { flags: 'w' }));
     process.stdout.write('\n');
     if (cancellationRequested) throw new DownloadCancelledError();
+    reportProgress({ stage: 'verifying', file: expected.destination, bytes: expected.bytes, totalBytes: expected.bytes });
     const verified = await verifyFile(partialPath, expected);
     if (cancellationRequested) throw new DownloadCancelledError();
     if (!verified) throw new Error(`Integrity check failed for ${expected.destination}`);
@@ -328,16 +334,19 @@ async function main() {
 
   const missing = [];
   const installed = [];
+  const totalFiles = models.reduce((count, model) => count + model.files.length, 0);
   for (const model of models) {
     console.log(`\n[umbra-ui-models] ${model.id}`);
     for (const expected of model.files) {
       const destination = normalizedRelative(expected.destination, `${model.id} destination`);
       const outputPath = path.join(modelsRoot, ...destination.split('/'));
+      reportProgress({ stage: 'checking', file: destination, completedFiles: installed.length, totalFiles, bytes: 0, totalBytes: expected.bytes });
       const existingIsValid = await verifyFile(outputPath, expected);
       if (cancellationRequested) throw new DownloadCancelledError();
       if (existingIsValid) {
         console.log(`  verified ${destination} (${formatBytes(expected.bytes)})`);
         installed.push({ modelId: model.id, destination, sha256: expected.sha256 });
+        reportProgress({ stage: 'verified', file: destination, completedFiles: installed.length, totalFiles, bytes: expected.bytes, totalBytes: expected.bytes });
         continue;
       }
       if (checkOnly) {
@@ -351,6 +360,7 @@ async function main() {
       await downloadFile(downloadUrl(model, expected), outputPath, expected);
       console.log(`  verified ${destination} (${formatBytes(expected.bytes)})`);
       installed.push({ modelId: model.id, destination, sha256: expected.sha256 });
+      reportProgress({ stage: 'verified', file: destination, completedFiles: installed.length, totalFiles, bytes: expected.bytes, totalBytes: expected.bytes });
     }
   }
 

@@ -83,6 +83,10 @@
       "label": "MiniMax H3 Reference Video",
       "description": "Adds the MiniMax H3 Ref2VA INT8 ConvRot model for Umbra UI reference-to-video. Requires the MiniMax H3 Video support files and adds a 20.96 GB model download."
     },
+    "ltx-2.3": {
+      "label": "LTX-2.3 Video",
+      "description": "Gemma 3 FP8 text encoder and spatial upscaler for LTX-2.3. Download a compatible LTX-2.3 checkpoint and any selected optional LoRAs separately in Model Manager. Large download."
+    },
     "ltx-2.5": {
       "label": "LTX-2.5 Video",
       "description": "LTX-2.5 INT8 ConvRot diffusion model, Gemma 4 text encoder, video/audio VAEs, and latent upscaler for Umbra UI text-to-video, image-to-video, and experimental video-to-video. Requires accepting the Lightricks LTX-2.5 model license on Hugging Face. Very large download."
@@ -97,6 +101,34 @@
     }
   },
   "models": [
+    {
+      "id": "ltx-2.3-gemma-text-encoder",
+      "installPolicy": "automatic",
+      "profiles": ["ltx-2.3"],
+      "repository": "Comfy-Org/ltx-2",
+      "revision": "101c239b4b64dd1b45d645365339c56e0e7df4c3",
+      "license": "Gemma terms; see source repository",
+      "files": [{
+        "destination": "text_encoders/gemma_3_12B_it_fp8_scaled.safetensors",
+        "sourcePath": "split_files/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors",
+        "bytes": 13205434827,
+        "sha256": "60216ce97c01c3a8753c2dfd0a89fc76e16fbe446d1a32ef8f1b528ac8bae466"
+      }]
+    },
+    {
+      "id": "ltx-2.3-spatial-upscaler",
+      "installPolicy": "automatic",
+      "profiles": ["ltx-2.3"],
+      "repository": "Lightricks/LTX-2.3",
+      "revision": "5948be4ced3a4493d1f836df64378ff136ddb770",
+      "license": "ltx-2-community-license-agreement",
+      "files": [{
+        "destination": "latent_upscale_models/ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+        "sourcePath": "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+        "bytes": 995743560,
+        "sha256": "5f416311fa8172b65af67530758964708d29a317b830d689a51143b7f91913ed"
+      }]
+    },
     {
       "id": "anima-qwen-3-text-encoder",
       "installPolicy": "automatic",

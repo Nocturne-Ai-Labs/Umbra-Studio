@@ -46,7 +46,7 @@
       font-weight: 900;
       text-transform: uppercase;
     }
-    h1 { margin: 4px 0 0; font-size: clamp(18px, 3vw, 26px); }
+    h1 { margin: 4px 0 0; font-size: 24px; }
     main {
       width: min(1080px, 100%);
       margin: 0 auto;
@@ -73,7 +73,7 @@
     .packs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
     .pack { border: 1px solid var(--line); background: #080c0f; padding: 16px; }
     .pack h3 { margin: 0 0 8px; font-size: 14px; }
-    .pack p { min-height: 66px; }
+    .pack p { min-height: 0; }
     .pack .button { width: 100%; margin-top: 14px; }
     .progress { display: none; border: 1px solid var(--line); background: var(--panel-2); padding: 14px; }
     .progress.visible { display: block; }
@@ -98,6 +98,43 @@
     .status { color: var(--muted); font-size: 11px; text-transform: uppercase; }
     .status.error { color: var(--danger); }
     .actions { display: flex; gap: 8px; }
+    [hidden] { display: none !important; }
+    .setup-tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+    .setup-tabs [aria-selected="true"] { color: var(--accent); border-color: var(--accent); }
+    .model-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+    .model-toolbar input { min-width: 160px; flex: 1; }
+    input { font: inherit; background: var(--panel-2); border: 1px solid var(--line); color: var(--text); padding: 10px; min-height: 42px; }
+    input[type="checkbox"] { min-width: 20px; min-height: 20px; width: 20px; height: 20px; flex: none; accent-color: var(--accent); }
+    .model-layout { display: grid; grid-template-columns: minmax(230px, .8fr) minmax(0, 1.2fr); gap: 20px; }
+    .model-families { max-height: 570px; overflow-y: auto; }
+    .model-recommended { padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+    .model-recommended h3 { margin: 0 0 10px; font-size: 13px; color: #eab86b; }
+    .recommended-options { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+    .recommended-option { display: flex; align-items: flex-start; gap: 8px; padding: 12px 10px; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+    .recommended-option:has(:checked) { border-color: var(--accent); background: #0c201a; }
+    .recommended-option strong { display: block; font-size: 12px; overflow-wrap: anywhere; }
+    .recommended-option small { display: block; font-size: 11px; color: var(--muted); margin-top: 6px; }
+    @media (max-width: 900px) { .recommended-options { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (max-width: 540px) { .recommended-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .model-family { display: flex; gap: 10px; padding: 12px 6px; border-bottom: 1px solid var(--line); align-items: flex-start; cursor: pointer; }
+    .model-family:has(:checked) { background: #0c201a; }
+    .model-family strong { font-size: 13px; }
+    .model-family p { font-size: 12px; margin-top: 5px; }
+    .model-review { min-width: 0; }
+    .model-files { max-height: 370px; overflow: auto; margin: 12px 0; }
+    .model-file { border-bottom: 1px solid var(--line); padding: 9px 0; overflow-wrap: anywhere; font-size: 12px; }
+    .model-file small { display: block; color: var(--muted); margin-top: 5px; }
+    #model-root { overflow-wrap: anywhere; font-size: 12px; margin: 10px 0; }
+    #model-summary { color: var(--text); }
+    #model-token { width: 100%; margin: 8px 0; }
+    #model-meter { width: 100%; height: 14px; accent-color: var(--accent); }
+    #model-transfer { overflow-wrap: anywhere; margin-top: 8px; }
+    .model-help { margin-top: 12px; }
+    #data-forge-pack { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+    #data-forge-pack .packs { display: block; margin: 0; }
+    #data-forge-pack .pack { border: 0; background: none; padding: 0; }
+    #data-forge-pack .pack .button { width: auto; }
+    @media (max-width: 720px) { .model-layout { grid-template-columns: 1fr; } .model-families { max-height: 290px; } h1 { font-size: 20px; } }
     @media (max-width: 720px) {
       .packs { grid-template-columns: 1fr; }
       .language-row { grid-template-columns: 1fr; }
@@ -117,7 +154,11 @@
       <div id="status" class="status" data-i18n="standaloneService">Standalone service</div>
     </header>
     <main>
-      <section class="panel">
+      <nav class="setup-tabs" role="tablist" aria-label="Setup">
+        <button id="tab-general" class="button" role="tab" aria-selected="true" aria-controls="general-panel" data-i18n="languageLabel">Language</button>
+        <button id="tab-models" class="button" role="tab" aria-selected="false" aria-controls="models-panel" data-i18n="modelsTab">Models</button>
+      </nav>
+      <section id="general-panel" class="panel" role="tabpanel" aria-labelledby="tab-general">
         <div class="section-label" data-i18n="languageLabel">Language</div>
         <h2 data-i18n="languageTitle">Choose your preferred language</h2>
         <p data-i18n="languageDescription">This preference is stored in your portable User folder and can be changed later in Umbra Studio settings.</p>
@@ -132,34 +173,57 @@
           <button id="save-language" class="button primary" type="button" data-i18n="saveLanguage">Save Language</button>
         </div>
       </section>
-      <section class="panel">
-        <div class="panel-head">
-          <div>
-            <div class="section-label" data-i18n="optionalModelPacks">Optional Model Packs</div>
-            <h2 data-i18n="installFeatureSupport">Install feature support</h2>
-            <p data-i18n="installFeatureDescription">Install only what you plan to use. Existing valid files are verified and kept.</p>
+      <section id="models-panel" class="panel" role="tabpanel" aria-labelledby="tab-models" hidden>
+        <h2 data-i18n="modelsTitle">Model setup</h2>
+        <section class="model-recommended" aria-labelledby="recommended-title">
+          <h3 id="recommended-title" data-i18n="recommendedModels">Recommended</h3>
+          <div id="model-recommended" class="recommended-options"></div>
+        </section>
+        <div class="model-toolbar">
+          <button id="pack-requirements" class="button primary" type="button" aria-pressed="true" data-i18n="familyModels">Model families</button>
+          <button id="pack-support" class="button" type="button" aria-pressed="false" data-i18n="supportModels">Pipeline support</button>
+          <input id="model-search" type="search" aria-label="Search model families" placeholder="Search model families">
+        </div>
+        <div class="model-layout">
+          <div id="model-families" class="model-families" aria-label="Model families"></div>
+          <div class="model-review">
+            <h3 data-i18n="selectedFiles">Selected files</h3>
+            <p id="model-summary" aria-live="polite"></p>
+            <p id="model-root"></p>
+            <div id="model-files" class="model-files"></div>
+            <details>
+              <summary data-i18n="hfAccess">Hugging Face access (optional)</summary>
+              <input id="model-token" type="password" autocomplete="off" spellcheck="false" aria-label="Hugging Face read token" placeholder="hf_...">
+              <p data-i18n="hfHint">Session only. Accept any gated model licenses on Hugging Face before downloading.</p>
+            </details>
+            <div class="model-toolbar">
+              <button id="model-install" class="button primary" type="button" disabled data-i18n="installSelected">Install selected</button>
+              <button id="model-check" class="button" type="button" disabled data-i18n="verifySelected">Verify selected</button>
+              <button id="model-clear" class="button" type="button" data-i18n="clearSelection">Clear selection</button>
+            </div>
+            <p class="model-help" data-i18n="modelHint">Most families need a separate checkpoint from Model Manager. Some packs include generation weights; review the file list and licenses.</p>
           </div>
         </div>
+        <div id="data-forge-pack">
         <div class="packs">
           <article class="pack">
             <h3 data-i18n="dataForgeModels">Data Forge Models</h3>
             <p data-i18n="dataForgeModelsDescription">WD taggers and the natural-language caption model used by datasets and Image Inspector.</p>
             <button class="button" data-install="data-forge" type="button" data-i18n="installDataForgeModels">Install Data Forge Models</button>
           </article>
-          <article class="pack">
-            <h3 data-i18n="umbraUiSupportModels">Umbra UI Support Models</h3>
-            <p data-i18n="umbraUiSupportDescription">Default person, face, and hand detailers, SAM refinement, and upscale resources used by Umbra UI pipelines. Install ComfyUI first.</p>
-            <button class="button" data-install="umbra-ui" type="button" data-i18n="installUmbraUiModels">Install Umbra UI Models</button>
-          </article>
+        </div>
         </div>
       </section>
       <section id="progress" class="progress">
         <div class="progress-head">
-          <span id="job-step" data-i18n="preparingInstaller">Preparing installer</span>
-          <span id="job-phase" data-i18n="running">Running</span>
+          <span id="job-step">Preparing installer</span>
+          <span id="job-phase">Running</span>
         </div>
         <div class="track"><div class="fill"></div></div>
-        <pre id="job-log" data-i18n="waitingForInstallerOutput">Waiting for installer output...</pre>
+        <progress id="model-meter" max="100" hidden></progress>
+        <p id="model-transfer" aria-live="polite"></p>
+        <button id="model-cancel" class="button" type="button" hidden data-i18n="cancelDownload">Cancel download</button>
+        <details><summary data-i18n="installerLog">Installer log</summary><pre id="job-log">Waiting for installer output...</pre></details>
       </section>
     </main>
     <footer>
@@ -260,8 +324,10 @@
     const jobLog = document.getElementById('job-log');
     const installButtons = Array.from(document.querySelectorAll('[data-install]'));
     let polling = false;
+    let pollTimer;
     let currentLanguage = 'en';
     let languageDirty = false;
+    let setupClosed = false;
 
     function tr(key) {
       return SETUP_TRANSLATIONS[currentLanguage]?.[key] || SETUP_TRANSLATIONS.en[key] || key;
@@ -294,6 +360,7 @@
       installButtons.forEach((button) => { button.disabled = busy; });
       document.getElementById('launch').disabled = busy;
       document.getElementById('close').disabled = busy;
+      setModelBusy(busy);
     }
 
     function renderJob(job) {
@@ -306,23 +373,25 @@
       jobLog.textContent = (job.lines || []).join('\n') || tr('waitingForInstallerOutput');
       jobLog.scrollTop = jobLog.scrollHeight;
       setBusy(job.phase === 'running');
+      renderModelProgress(job);
       status.textContent = job.phase === 'running' ? tr('installingModels') : localizeJobStep(job.step);
       status.classList.toggle('error', job.phase === 'failed');
     }
 
     async function poll() {
-      if (polling) return;
+      if (polling || setupClosed) return;
+      clearTimeout(pollTimer);
       polling = true;
       try {
         const result = await api('/api/status');
         if (!languageDirty) setSetupLanguage(result.language || language.value);
         renderJob(result.job);
-        if (result.job?.phase === 'running') setTimeout(() => { polling = false; poll(); }, 600);
-        else polling = false;
       } catch (error) {
-        polling = false;
         status.textContent = error.message;
         status.classList.add('error');
+      } finally {
+        polling = false;
+        if (!setupClosed) pollTimer = setTimeout(poll, 1000);
       }
     }
 
@@ -346,7 +415,6 @@
           body: JSON.stringify({ kind: button.dataset.install }),
         });
         renderJob(result.job);
-        polling = false;
         poll();
       } catch (error) {
         status.textContent = error.message;
@@ -360,6 +428,7 @@
         setSetupLanguage(language.value);
         languageDirty = false;
         await api('/api/launch', { method: 'POST', body: '{}' });
+        setupClosed = true;
         status.textContent = tr('launchingUmbra');
       } catch (error) {
         status.textContent = error.message;
@@ -370,6 +439,7 @@
     document.getElementById('close').addEventListener('click', async () => {
       try {
         await api('/api/close', { method: 'POST', body: '{}' });
+        setupClosed = true;
         status.textContent = tr('setupClosed');
         window.close();
       } catch (error) {
@@ -378,6 +448,7 @@
       }
     });
 
+    /* MODEL_SETUP_SCRIPT */
     language.addEventListener('change', () => setSetupLanguage(language.value, true));
     setSetupLanguage(language.value);
     poll();

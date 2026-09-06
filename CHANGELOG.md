@@ -1,5 +1,67 @@
 # Changelog
 
+## v0.32.1
+
+### TL;DR - Setup After Updating
+
+Update Umbra Studio normally. Open **UmbraSetup.bat** on Windows or
+**./umbra-setup.sh** on Linux and select **Models**. The model installer
+shortcuts also open this tab when launched without command-line arguments.
+No model downloads are required just to apply this update. Install managed
+ComfyUI before installing its model resources, and restart ComfyUI after adding
+models if its catalog needs refreshing. Existing valid files are verified and
+retained; no migration or replacement of personal settings is performed.
+
+The new optional LTX-2.3 support selection downloads about 14.2 GB of text-encoder
+and spatial-upscaler resources. Its checkpoint and any optional workflow LoRAs
+remain separate Model Manager downloads. Review file lists, sizes, and model
+licenses before installing any pack; some video packs include generation weights
+and are much larger. Gated Hugging Face downloads require accepting the provider's
+terms and supplying an authorized read token or an existing supported login.
+
+### Graphical Model Setup
+
+- Added a dedicated Models tab to the standalone Umbra Setup utility, replacing
+  numbered CLI menus as the default experience for model installer shortcuts.
+- Search model families, select multiple compatible resource packs, and review
+  exact files, destinations, sizes, and available license notices before starting.
+  Shared files within the selection are counted once.
+- Added a Recommended area for Anima, Krea 2, FLUX.2, LTX-2.3, and MiniMax H3 Video.
+  Its checkboxes stay synchronized with the full model-family list; selecting
+  recommendations does not automatically start downloads.
+- Added checksum verification, current-file transfer progress, installer logs,
+  and cancellation for family and pipeline-support downloads. Completed files
+  are retained; cancellation discards the active incomplete download.
+- Added an optional session-only Hugging Face read-token field. Tokens are not
+  stored in settings or returned in job status.
+- Kept the Data Forge model pack in the same tab. Its existing installer verifies
+  files during installation; separate verification and cancellation controls
+  apply to family and pipeline-support downloads.
+- Preserved explicit CLI arguments for unattended install/check workflows and
+  package validation. Windows and Linux shortcuts retain their existing names.
+
+### LTX-2.3 And Packaging
+
+- Added a separate checksum-pinned LTX-2.3 manifest profile for the Gemma 3 FP8
+  text encoder and LTX-2.3 spatial upscaler. It does not select LTX-2.5 resources
+  or alter existing generation workflows.
+- Validated model selection, shared-file counting, destination isolation,
+  verification, cancellation, and installer shortcut generation with local
+  fixtures; checked the interface at desktop, tablet, and phone sizes.
+- Windows and Linux archive checks require the new setup UI asset. Private
+  models, wildcards, runtime data, and internal test fixtures remain excluded.
+- Optional AI Toolkit still requires Git and Node.js 20 or newer. Linux managed
+  tools may require python3-dev, build-essential, libgl1, and libglib2.0-0 or
+  distribution equivalents.
+
+### Fixes And Quality-of-Life Recap
+
+- **Improved:** Model setup no longer requires navigating numbered terminal menus.
+- **Improved:** Recommended selections and a file review make download choices clearer.
+- **Improved:** Visible transfer progress and cancellation keep long downloads manageable.
+- **Fixed:** LTX-2.3 support resources are now available separately from LTX-2.5.
+- **Improved:** Existing CLI automation and portable-root download destinations are preserved.
+
 ## v0.32.0
 
 ### TL;DR - Setup After Updating

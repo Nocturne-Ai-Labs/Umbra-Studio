@@ -85,6 +85,22 @@ mixed up.
 
 ## Windows Portable Builds
 
+### Graphical Model Setup
+
+Open `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, then select
+the **Models** tab. It lists the existing model-family and pipeline-support
+manifests, including file sizes, destinations, license notices, and shared-file
+deduplication. Install or verify a selection without entering CLI menu numbers.
+The optional Hugging Face read token is session-only and is not saved to settings.
+Cancellation retains completed models and discards the active partial download.
+The Data Forge pack remains available on the same tab.
+
+Opening the generated model installer shortcuts without arguments now opens this
+tab. Explicit commands such as `--family anima --check`, `--verify-target`, and
+`--profile core --check` retain the noninteractive downloader paths for automation.
+Use `--tab models` with the setup launcher to open directly to model setup.
+Setup writes only to its portable root; it does not start ComfyUI or migrate data.
+
 No-bump update of the current portable root:
 
 ```powershell

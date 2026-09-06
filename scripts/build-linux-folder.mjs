@@ -287,6 +287,7 @@ if [ ! -x "$BUN_BIN" ]; then
   echo "[ERROR] Bundled Bun runtime is missing: $BUN_BIN"
   exit 1
 fi
+if [ "$#" -eq 0 ]; then exec "$PWD/umbra-setup.sh" --tab models --pack data-forge; fi
 "$BUN_BIN" "$PWD/resources/app/scripts/download-waifu-models.mjs"
 "$BUN_BIN" "$PWD/resources/app/scripts/download-caption-models.mjs"
 echo "Data Forge models are ready."
@@ -305,6 +306,7 @@ if [ ! -x "$BUN_BIN" ]; then
   echo "[ERROR] Bundled Bun runtime is missing: $BUN_BIN"
   exit 1
 fi
+if [ "$#" -eq 0 ]; then exec "$PWD/umbra-setup.sh" --tab models --pack requirements; fi
 "$BUN_BIN" "$PWD/resources/app/scripts/download-umbra-model-requirements.mjs" "$@"
 echo "Umbra UI model requirements are ready."
 `;
@@ -322,6 +324,7 @@ if [ ! -x "$BUN_BIN" ]; then
   echo "[ERROR] Bundled Bun runtime is missing: $BUN_BIN"
   exit 1
 fi
+if [ "$#" -eq 0 ]; then exec "$PWD/umbra-setup.sh" --tab models --pack support; fi
 "$BUN_BIN" "$PWD/resources/app/scripts/download-umbra-ui-models.mjs" --profile core "$@"
 echo "Umbra UI support models are ready."
 `;
@@ -339,6 +342,7 @@ if [ ! -x "$BUN_BIN" ]; then
   echo "[ERROR] Bundled Bun runtime is missing: $BUN_BIN"
   exit 1
 fi
+if [ "$#" -eq 0 ]; then exec "$PWD/umbra-setup.sh" --tab models --pack requirements; fi
 "$BUN_BIN" "$PWD/resources/app/scripts/download-umbra-model-requirements.mjs" "$@"
 echo "Model requirements are ready."
 `;
@@ -464,6 +468,7 @@ function verifyPublish() {
     'resources/app/updater/index.html',
     'resources/app/setup/UmbraSetupApp.js',
     'resources/app/setup/index.html',
+    'resources/app/setup/models.js',
     'resources/app/backend/FirstRunService.ts',
     'resources/app/shared/onboarding/firstRun.ts',
     'resources/app/node_modules',

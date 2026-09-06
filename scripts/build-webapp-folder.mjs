@@ -350,7 +350,7 @@ function ensureBundledPowerPrompterStarterCards() {
   }
 }
 
-function windowsInstallerScript({ title, commands, successMessage }) {
+function windowsInstallerScript({ title, commands, successMessage, setupPack = 'requirements' }) {
   return `@echo off
 setlocal EnableExtensions
 title ${title}
@@ -358,6 +358,12 @@ set "APP_ROOT=%~dp0"
 cd /d "%APP_ROOT%"
 set "EXIT_CODE=0"
 set "BUN_BIN=%APP_ROOT%Runtime\\Bun\\win32\\bun.exe"
+if "%~1"=="" goto :setup
+goto :cli
+:setup
+call "%APP_ROOT%UmbraSetup.bat" --tab models --pack ${setupPack}
+exit /b %ERRORLEVEL%
+:cli
 
 echo ============================================================
 echo ${title}
@@ -411,6 +417,7 @@ function writeDataForgeModelInstaller() {
   const installerPath = path.join(publishRoot, 'Install-Data-Forge-Models.bat');
   const script = windowsInstallerScript({
     title: 'Umbra Studio - Data Forge Model Installer',
+    setupPack: 'data-forge',
     commands: `set "INSTALLER=%APP_ROOT%resources\\app\\scripts\\download-waifu-models.mjs"
 if not exist "%INSTALLER%" (
   echo [ERROR] The Data Forge installer is missing:
@@ -458,6 +465,7 @@ function writeUmbraUiSupportModelInstaller() {
   const installerPath = path.join(publishRoot, 'Install-Umbra-UI-Support-Models.bat');
   const script = windowsInstallerScript({
     title: 'Umbra Studio - Support Model Installer',
+    setupPack: 'support',
     commands: `set "INSTALLER=%APP_ROOT%resources\\app\\scripts\\download-umbra-ui-models.mjs"
 if not exist "%INSTALLER%" (
   echo [ERROR] The support-model installer is missing:
@@ -638,7 +646,7 @@ if not exist "%SETUP_APP%" (
   pause
   exit /b 1
 )
-"%BUN_BIN%" "%SETUP_APP%" --root "%CD%"
+"%BUN_BIN%" "%SETUP_APP%" --root "%CD%" %*
 if errorlevel 1 pause
 `;
   fs.writeFileSync(launcherPath, script, 'utf-8');
@@ -689,6 +697,7 @@ function verifyPublish() {
     'resources/app/updater/index.html',
     'resources/app/setup/UmbraSetupApp.js',
     'resources/app/setup/index.html',
+    'resources/app/setup/models.js',
     'resources/app/backend/FirstRunService.ts',
     'resources/app/shared/onboarding/firstRun.ts',
     'resources/app/node_modules',
