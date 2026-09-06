@@ -18,7 +18,14 @@ import {
 } from '@/lib/umbraQueueActivity';
 import { classifyUmbraPrompt } from '@/lib/nsfwPrivacy';
 
-type PowerPrompterQueueManagerViewProps = Record<string, any>;
+type PowerPrompterQueueManagerViewProps = Record<string, any> & {
+  queueSetGroups: import('./queueCore').QueueSetGroup[];
+  queueRequestGroups: import('./queueCore').QueueRequestGroup[];
+  queueManagerStyleOptions: Array<{ name: string; count: number }>;
+  savedQueues: import('./queueCore').SavedPowerPrompterQueueSummary[];
+  setQueuePromptExpandedMode: React.Dispatch<React.SetStateAction<boolean>>;
+  setExpandedQueuePromptRows: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+};
 type QueueManagerPromptRowsProps = {
   items: any[];
   emptyContent?: React.ReactNode;

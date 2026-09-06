@@ -25,6 +25,7 @@ import {
 import { useStore } from '@/store/useStore';
 import { cn } from '@/lib/utils';
 import { UmbraSelect } from '@/components/ui/UmbraSelect';
+import { INITIAL_TABLET_PANELS, reduceTabletPanels, UmbraTabletPanelNavigation } from '@/components/umbra-ui/UmbraTabletPanelNavigation';
 import { useI18n } from '@/i18n';
 import {
   DEFAULT_POWER_PROMPTER_DETAILER_PIPELINE,
@@ -111,6 +112,7 @@ import {
 } from '@/lib/umbraUiMediaHandoff';
 import {
   createUmbraUiLoraEntry,
+  extractUmbraUiLoraTriggerWords,
   getUmbraUiLorasForFamily,
   replaceUmbraUiLorasForFamily,
   type UmbraUiLoraEntry,
@@ -195,7 +197,11 @@ function snapshotUmbraImageGenerationInfo(
       detailerPipeline: options.detailerPipeline.map((stage) => ({ ...stage })),
       outputUpscale: { ...options.outputUpscale },
       tiledVae: { ...options.tiledVae },
-      loras: options.loras.map((lora) => ({ ...lora, trainedTags: [...lora.trainedTags] })),
+      loras: options.loras.map((lora) => ({
+        ...lora,
+        trainedTags: [...lora.trainedTags],
+        triggerWords: [...(lora.triggerWords || [])],
+      })),
     },
   };
 }
@@ -523,6 +529,7 @@ function PipelineControls({
 export function UmbraUIWorkspace() {
   const { t } = useI18n();
   const workspaceRootRef = React.useRef<HTMLDivElement>(null);
+  const [tabletPanels, toggleTabletPanel] = React.useReducer(reduceTabletPanels, INITIAL_TABLET_PANELS);
   const lastCatalogTargetRef = React.useRef<HTMLTextAreaElement | null>(null);
   const lastCatalogSelectionRef = React.useRef<{ target: HTMLTextAreaElement; start: number; end: number } | null>(null);
   const catalogSettingsRef = React.useRef<Record<string, unknown>>({});
@@ -944,6 +951,7 @@ export function UmbraUIWorkspace() {
     setLoras(snapshot.loras.map((lora) => ({
       ...lora,
       trainedTags: [...lora.trainedTags],
+      triggerWords: [...(lora.triggerWords || [])],
     })));
     setNegativePrompt(generation.negativePrompt);
     setSeed(String(generation.seed));
@@ -1952,6 +1960,10 @@ export function UmbraUIWorkspace() {
         ? info
         : await requestLoraInfo(normalizedName);
       const visualMeta = getUmbraUiLoraVisualMeta(loraInfo);
+      const triggerWords = extractUmbraUiLoraTriggerWords(loraInfo);
+      const trainingTags = Array.isArray(loraInfo.trainingTags) && loraInfo.trainingTags.length > 0
+        ? loraInfo.trainingTags
+        : loraInfo.trainedTags;
       setLoras((current) => {
         const existing = current.find((entry) => (
           String(entry.modelFamilyKey || '').toLowerCase() === activeLoraFamilyKey
@@ -1959,14 +1971,15 @@ export function UmbraUIWorkspace() {
         ));
         if (existing) {
           return current.map((entry) => entry.id === existing.id
-            ? { ...entry, enabled: true, trainedTags: loraInfo.trainedTags, ...visualMeta }
+            ? { ...entry, enabled: true, trainedTags: trainingTags, triggerWords, ...visualMeta }
             : entry);
         }
         return [...current, createUmbraUiLoraEntry(
           normalizedName,
-          loraInfo.trainedTags,
+          trainingTags,
           activeLoraFamilyKey,
           visualMeta,
+          triggerWords,
         )];
       });
       closeModelPicker();
@@ -1983,7 +1996,8 @@ export function UmbraUIWorkspace() {
   React.useEffect(() => {
     const unresolved = loras.filter((lora) => {
       const key = lora.name.toLowerCase();
-      return (lora.trainedTags.length <= 0 || !lora.thumbnailUrl) && !attemptedLoraInfoRef.current.has(key);
+      return (lora.trainedTags.length <= 0 || (lora.triggerWords || []).length <= 0 || !lora.thumbnailUrl)
+        && !attemptedLoraInfoRef.current.has(key);
     });
     if (unresolved.length <= 0) return;
     for (const lora of unresolved) {
@@ -1992,9 +2006,13 @@ export function UmbraUIWorkspace() {
       void requestLoraInfo(lora.name)
         .then((info) => {
           const visualMeta = getUmbraUiLoraVisualMeta(info);
-          if (info.trainedTags.length <= 0 && !visualMeta.thumbnailUrl) return;
+          const triggerWords = extractUmbraUiLoraTriggerWords(info);
+          const trainingTags = Array.isArray(info.trainingTags) && info.trainingTags.length > 0
+            ? info.trainingTags
+            : info.trainedTags;
+          if (trainingTags.length <= 0 && triggerWords.length <= 0 && !visualMeta.thumbnailUrl) return;
           setLoras((current) => current.map((entry) => entry.name.toLowerCase() === key
-            ? { ...entry, trainedTags: info.trainedTags, ...visualMeta }
+            ? { ...entry, trainedTags: trainingTags, triggerWords, ...visualMeta }
             : entry));
         })
         .catch(() => {
@@ -2439,7 +2457,7 @@ export function UmbraUIWorkspace() {
     const publishContext = () => {
       void publishUmbraUiAgentContext({
         updatedAt: Date.now(),
-        activeMode,
+        activeMode: activeMode === 'prompter' ? 'image' : activeMode,
         image: {
           prompt: workflowImagePrompt,
           promptSegments,
@@ -3035,9 +3053,14 @@ export function UmbraUIWorkspace() {
         </div>
       </header>
 
+      {remoteMode === 'tablet' && activeMode === 'image' ? (
+        <UmbraTabletPanelNavigation panels={tabletPanels} onToggle={toggleTabletPanel} />
+      ) : null}
       <div
         data-umbra-ui-body=""
         data-umbra-ui-active-mode={activeMode}
+        data-tablet-generation={tabletPanels.generation ? 'shown' : 'hidden'}
+        data-tablet-prompt={tabletPanels.prompt ? 'shown' : 'hidden'}
         className={cn(
           'grid min-h-0 flex-1',
           activeMode === 'video' && videoStoryboardOpen

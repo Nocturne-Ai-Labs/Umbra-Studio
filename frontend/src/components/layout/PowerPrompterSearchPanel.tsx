@@ -572,6 +572,7 @@ export const PowerPrompterSearchPanel = React.memo(({
       data-umbra-powerprompter-search-panel=""
       data-umbra-powerprompter-tag-catalog=""
       data-umbra-tag-catalog-drawer={drawerMode ? '' : undefined}
+      data-umbra-tag-catalog-open={drawerMode ? String(effectiveDrawerOpen) : undefined}
       className={`${drawerMode
         ? 'absolute inset-0 z-[95] isolate flex min-h-0 flex-col border-r border-cyan-300/25 shadow-[20px_0_60px_rgba(0,0,0,0.78)] transition-[transform,opacity] duration-300 ease-out'
         : menuMode

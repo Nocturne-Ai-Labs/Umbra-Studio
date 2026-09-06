@@ -181,7 +181,7 @@ const REMOTE_TABS: Array<{
   id: RemoteTab;
   label: string;
   description: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
+  icon: import('lucide-react').LucideIcon;
 }> = [
   { id: 'connection', label: 'Connection', description: 'URLs, bind, ports, HTTPS, and connection mode.', icon: Network },
   { id: 'security', label: 'Security', description: 'Remote account, trusted devices, and sessions.', icon: LockKeyhole },
@@ -413,7 +413,7 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
     setDevicesLoading(true);
     try {
       const response = await fetch('/api/remote/devices', { cache: 'no-store' });
-      const payload = await response.json().catch(() => ({} as { devices?: RemoteDevice[]; error?: string }));
+      const payload: { devices?: RemoteDevice[]; error?: string } = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(String(payload?.error || 'Trusted devices failed to load'));
       const nextDevices = payload.devices || [];
       setDevices(nextDevices);

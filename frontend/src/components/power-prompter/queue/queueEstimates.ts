@@ -1,4 +1,4 @@
-import type { PowerPrompterCardDocument } from '@/types/powerPrompter';
+import type { PowerPrompterCardDocument, PowerPrompterQueueTraversalMode } from '@/types/powerPrompter';
 import {
   QUEUE_DIVERSITY_MIN,
   clampQueueSetId,
@@ -20,17 +20,17 @@ export interface PowerPrompterQueueEstimate {
   allPromptCount: number;
   allImageCount: number;
   allTruncated: boolean;
-  appliedPromptLimit: number;
+  appliedPromptLimit: number | null;
 }
 
 export interface BuildPowerPrompterQueueEstimateOptions {
   cardDocument: PowerPrompterCardDocument;
   queueSetTarget: number;
-  queueTraversalMode: string;
+  queueTraversalMode: PowerPrompterQueueTraversalMode;
   queueDiversity: number;
-  queuePromptLimit: number;
+  queuePromptLimit: number | null;
   queueShuffleEnabled: boolean;
-  queueShuffleSeed?: string;
+  queueShuffleSeed?: number;
   estimatedBatchSize: number;
 }
 
@@ -42,7 +42,7 @@ export interface BuildPowerPrompterQueueEditorEstimateOptions {
 }
 
 export function createEmptyPowerPrompterQueueEstimate(
-  appliedPromptLimit = 0,
+  appliedPromptLimit: number | null = 0,
   estimatedBatchSize = 1
 ): PowerPrompterQueueEstimate {
   return {
@@ -74,7 +74,7 @@ export function buildPowerPrompterQueueEstimate({
 }: BuildPowerPrompterQueueEstimateOptions): PowerPrompterQueueEstimate {
   const setModeAvailableCounted = buildQueuePromptsFromCards(cardDocument, 'selected', {
     setIdOverride: queueSetTarget,
-    traversalMode: queueTraversalMode as any,
+    traversalMode: queueTraversalMode,
     diversity: queueDiversity,
     promptLimit: Number.MAX_SAFE_INTEGER,
     shuffleEnabled: queueShuffleEnabled,
@@ -83,7 +83,7 @@ export function buildPowerPrompterQueueEstimate({
   });
   const setCounted = buildQueuePromptsFromCards(cardDocument, 'selected', {
     setIdOverride: queueSetTarget,
-    traversalMode: queueTraversalMode as any,
+    traversalMode: queueTraversalMode,
     diversity: queueDiversity,
     promptLimit: queuePromptLimit,
     shuffleEnabled: queueShuffleEnabled,
@@ -102,7 +102,7 @@ export function buildPowerPrompterQueueEstimate({
   const allCounted = buildQueuePromptsFromCards(cardDocument, 'variants', {
     setIdOverride: queueSetTarget,
     includeAllSets: true,
-    traversalMode: queueTraversalMode as any,
+    traversalMode: queueTraversalMode,
     diversity: queueDiversity,
     promptLimit: queuePromptLimit,
     shuffleEnabled: queueShuffleEnabled,

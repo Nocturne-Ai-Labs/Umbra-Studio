@@ -136,11 +136,22 @@ function normalizeLoras(value: unknown): UmbraUiLoraEntry[] {
     const name = String(rawEntry.name || '').trim().replace(/\\/g, '/').slice(0, MAX_LORA_NAME_LENGTH);
     if (!name) continue;
     const fallbackId = `umbra-ui-lora-${index + 1}-${name.toLowerCase()}`.slice(0, 512);
-    let id = String(rawEntry.id || '').trim().slice(0, 512) || fallbackId;
-    if (ids.has(id)) id = `${id}-${index + 1}`.slice(0, 512);
+    const baseId = String(rawEntry.id || '').trim().slice(0, 512) || fallbackId;
+    let id = baseId;
+    let suffixIndex = 2;
+    while (ids.has(id)) {
+      const suffix = `-${suffixIndex++}`;
+      id = `${baseId.slice(0, 512 - suffix.length)}${suffix}`;
+    }
     ids.add(id);
     const trainedTags = Array.isArray(rawEntry.trainedTags)
       ? Array.from(new Set(rawEntry.trainedTags
+        .map((tag) => String(tag || '').trim().slice(0, MAX_LORA_TAG_LENGTH))
+        .filter(Boolean)))
+        .slice(0, MAX_LORA_TAGS)
+      : [];
+    const triggerWords = Array.isArray(rawEntry.triggerWords)
+      ? Array.from(new Set(rawEntry.triggerWords
         .map((tag) => String(tag || '').trim().slice(0, MAX_LORA_TAG_LENGTH))
         .filter(Boolean)))
         .slice(0, MAX_LORA_TAGS)
@@ -156,6 +167,7 @@ function normalizeLoras(value: unknown): UmbraUiLoraEntry[] {
       strengthModel,
       strengthClip: clampNumber(rawEntry.strengthClip, strengthModel, -10, 10),
       trainedTags,
+      triggerWords,
     });
   }
   return normalized;

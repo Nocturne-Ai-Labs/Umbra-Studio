@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowDownAZ,
+  Archive,
   ArrowUpAZ,
   AlertTriangle,
   CheckSquare,
@@ -46,6 +47,10 @@ import {
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
+import { useGalleryTransfer, startGalleryTransfer } from '@/lib/galleryTransfers';
+import { GalleryTransferStrip } from './GalleryTransferStrip';
+import { archiveIsActive, startGalleryArchive, useGalleryArchive } from '@/lib/galleryArchives';
+import { GalleryArchiveList, GalleryArchiveStatus } from './GalleryArchives';
 import { openUmbraUiExtrasTool } from '@/lib/umbraUiExtrasNavigation';
 import { cn } from '@/lib/utils';
 import {
@@ -117,6 +122,7 @@ type GalleryFolderTreeNode = GalleryFolder & {
 };
 
 type GalleryFile = {
+  privacyClass?: 'normal' | 'nsfw';
   uid?: string;
   id?: string;
   name: string;
@@ -310,6 +316,7 @@ function dispatchGalleryWorkflowOpen(payload: GalleryApiWorkflowOpenPayload) {
 }
 
 type GalleryListPayload = {
+  missing?: boolean;
   folders?: GalleryFolder[];
   files?: GalleryFile[];
   done?: boolean;
@@ -411,19 +418,6 @@ type GalleryOptimisticRemovalSnapshot = {
   lastSelectedPath: string;
   viewerPath: string;
   viewerFileFallback: GalleryFile | null;
-};
-
-type GalleryTransferProgressState = {
-  active: boolean;
-  mode: 'move' | 'copy';
-  destination: string;
-  totalPaths: number;
-  completedPaths: number;
-  totalUnits: number;
-  completedUnits: number;
-  percent: number;
-  currentPath: string;
-  error?: string;
 };
 
 type GalleryPageCacheEntry = {
@@ -1922,13 +1916,11 @@ type LibraryNavigatorProps = {
   onSearchSuggestionSelect: (index: number) => void;
   draggingCount: number;
   dropTargetFolder: string;
-  transferProgress: GalleryTransferProgressState | null;
   onFolderDragStart: (event: React.DragEvent, folderPath: string) => void;
   onFolderDragEnd: () => void;
   onFolderDragOver: (event: React.DragEvent, folderPath: string) => void;
   onFolderDragLeave: (folderPath: string) => void;
   onFolderDrop: (event: React.DragEvent, folderPath: string) => void;
-  mobileExpandOnTap?: boolean;
   showContextButtons?: boolean;
 };
 
@@ -2025,7 +2017,6 @@ function LibraryFolderRow({
   onFolderDragOver,
   onFolderDragLeave,
   onFolderDrop,
-  mobileExpandOnTap = false,
   showContextButtons = false,
 }: {
   node: GalleryFolderTreeNode;
@@ -2050,7 +2041,6 @@ function LibraryFolderRow({
   onFolderDragOver: (event: React.DragEvent, folderPath: string) => void;
   onFolderDragLeave: (folderPath: string) => void;
   onFolderDrop: (event: React.DragEvent, folderPath: string) => void;
-  mobileExpandOnTap?: boolean;
   showContextButtons?: boolean;
 }) {
   const folderPath = normalizePath(node.path);
@@ -2058,7 +2048,7 @@ function LibraryFolderRow({
   const treeLoaded = Object.prototype.hasOwnProperty.call(treeChildrenByPath, folderPath);
   const expanded = expandedFolders.has(folderPath);
   const loading = loadingTreePaths.has(folderPath);
-  const canExpand = node.hasChildren !== false && (!treeLoaded || children.length > 0);
+  const canExpand = expanded || (treeLoaded ? children.length > 0 : node.hasChildren !== false);
   const isOpen = pathsEqual(currentFolder, folderPath);
   const isFocused = pathsEqual(focusedFolder, folderPath);
   const dropActive = pathsEqual(dropTargetFolder, folderPath);
@@ -2164,7 +2154,7 @@ function LibraryFolderRow({
               return;
             }
             onFocusFolder(folderPath);
-            if (canExpand && (mobileExpandOnTap || !expanded)) onToggleExpand(folderPath);
+            if (canExpand && !expanded) onToggleExpand(folderPath);
             onOpenFolder(folderPath);
           }}
           onContextMenu={(event) => onFolderContextMenu(event, folderPath)}
@@ -2222,7 +2212,6 @@ function LibraryFolderRow({
           onFolderDragOver={onFolderDragOver}
           onFolderDragLeave={onFolderDragLeave}
           onFolderDrop={onFolderDrop}
-          mobileExpandOnTap={mobileExpandOnTap}
           showContextButtons={showContextButtons}
         />
       )) : null}
@@ -2259,13 +2248,11 @@ function LibraryNavigator({
   onSearchSuggestionSelect,
   draggingCount,
   dropTargetFolder,
-  transferProgress,
   onFolderDragStart,
   onFolderDragEnd,
   onFolderDragOver,
   onFolderDragLeave,
   onFolderDrop,
-  mobileExpandOnTap = false,
   showContextButtons = false,
 }: LibraryNavigatorProps) {
   const [collapsedSections, setCollapsedSections] = useState<Record<'pinned' | 'roots', boolean>>({
@@ -2278,15 +2265,6 @@ function LibraryNavigator({
     const normalized = normalizePath(folderPath);
     return Boolean(normalized) && !isTrashPath(normalized) && !rootPathSet.has(normalized.toLowerCase());
   }, [rootPathSet]);
-  const progressPercent = transferProgress ? Math.max(0, Math.min(100, Math.round(transferProgress.percent || 0))) : 0;
-  const progressVerb = transferProgress?.mode === 'copy' ? 'Copying' : 'Moving';
-  const progressPastVerb = transferProgress?.mode === 'copy' ? 'Copied' : 'Moved';
-  const progressTotal = transferProgress
-    ? Math.max(transferProgress.totalUnits || 0, transferProgress.totalPaths || 0)
-    : 0;
-  const progressDone = transferProgress
-    ? Math.max(transferProgress.completedUnits || 0, transferProgress.completedPaths || 0)
-    : 0;
   const toggleSection = useCallback((section: 'pinned' | 'roots') => {
     setCollapsedSections((current) => ({
       ...current,
@@ -2505,26 +2483,6 @@ function LibraryNavigator({
       </div>
 
       <div data-umbra-library-body="" className="min-h-0 flex-1 overflow-y-auto p-2">
-        {transferProgress ? (
-          <div data-umbra-library-transfer="" className="mb-3 rounded border border-[var(--umbra-accent)]/35 bg-zinc-900/70 p-2 shadow-[0_0_18px_color-mix(in_srgb,var(--umbra-accent)_18%,transparent)]">
-            <div className="flex items-center justify-between gap-2 text-[11px] font-medium uppercase tracking-[0.12em] text-zinc-300">
-              <span>{transferProgress.active ? progressVerb : progressPastVerb}</span>
-              <span>{progressDone}/{progressTotal} media</span>
-            </div>
-            <div className="mt-2 h-1.5 overflow-hidden rounded bg-zinc-950">
-              <div
-                className="h-full rounded bg-[var(--umbra-accent)] transition-[width]"
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
-            <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-zinc-500">
-              <span className="min-w-0 truncate" title={transferProgress.currentPath || transferProgress.destination}>
-                {transferProgress.error || pathLeaf(transferProgress.currentPath) || pathLeaf(transferProgress.destination) || transferProgress.destination}
-              </span>
-              <span className="shrink-0">{progressPercent}%</span>
-            </div>
-          </div>
-        ) : null}
         <div data-umbra-library-pinned="" className="mb-3 border-t border-zinc-900 pt-2">
           {renderSectionHeader('pinned', 'Pinned')}
           {!collapsedSections.pinned ? (
@@ -2635,7 +2593,6 @@ function LibraryNavigator({
                           onFolderDragOver={onFolderDragOver}
                           onFolderDragLeave={onFolderDragLeave}
                           onFolderDrop={onFolderDrop}
-                          mobileExpandOnTap={mobileExpandOnTap}
                           showContextButtons={showContextButtons}
                         />
                         {rootExpanded && !rootLoaded && loadingTreePaths.has(rootFolderPath) ? (
@@ -4825,7 +4782,14 @@ export function ReactGalleryWorkspace() {
     () => normalizePath(initialGalleryDeviceResume?.focusedFolder) || normalizePath(initialGalleryDeviceResume?.currentFolder) || rootPath,
   );
   const [, setOpenedFolders] = useState<string[]>([rootPath]);
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set([rootPath]));
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set([
+    rootPath,
+    ...(Array.isArray(initialGalleryDeviceResume?.expandedFolders)
+      ? initialGalleryDeviceResume.expandedFolders.map(normalizePath).filter(Boolean)
+      : []),
+  ]));
+  const archiveJob = useGalleryArchive();
+  const [archiveCount, setArchiveCount] = useState(0);
   const [treeChildrenByPath, setTreeChildrenByPath] = useState<Record<string, GalleryFolderTreeNode[]>>({});
   const [loadingTreePaths, setLoadingTreePaths] = useState<Set<string>>(() => new Set());
   const [files, setFiles] = useState<GalleryFile[]>([]);
@@ -4877,8 +4841,9 @@ export function ReactGalleryWorkspace() {
   const [folderPreviewRefreshVersion, setFolderPreviewRefreshVersion] = useState(0);
   const [draggingPaths, setDraggingPaths] = useState<string[]>([]);
   const [dropTargetFolder, setDropTargetFolder] = useState('');
-  const [transferInProgress, setTransferInProgress] = useState(false);
-  const [transferProgress, setTransferProgress] = useState<GalleryTransferProgressState | null>(null);
+  const transferProgress = useGalleryTransfer();
+  const transferInProgress = Boolean(transferProgress?.active);
+  const lastRefreshedTransfer = useRef<object | null>(null);
   const [trashRetentionDays, setTrashRetentionDays] = useState(() => clampTrashRetentionDays(trashAutoDeleteSetting));
   const [savingTrashSettings, setSavingTrashSettings] = useState(false);
   const [emptyingTrash, setEmptyingTrash] = useState(false);
@@ -4909,7 +4874,6 @@ export function ReactGalleryWorkspace() {
   } | null>(null);
   const skipNextSortReloadRef = useRef(false);
   const contentRefreshKeyRef = useRef('');
-  const transferProgressHideTimerRef = useRef<number | null>(null);
   const pendingTrashUndoToastRef = useRef<{ timer: number | null; items: GalleryTrashUndoItem[] }>({
     timer: null,
     items: [],
@@ -4949,7 +4913,7 @@ export function ReactGalleryWorkspace() {
   const currentFolderLastReconcileAtRef = useRef(0);
   const treeChildrenRef = useRef<Record<string, GalleryFolderTreeNode[]>>({});
   const treeCacheRef = useRef<Map<string, GalleryFolderTreeNode[]>>(new Map());
-  const treeRequestByPathRef = useRef<Map<string, Promise<GalleryFolderTreeNode[]>>>(new Map());
+  const treeRequestByPathRef = useRef<Map<string, { token: symbol; promise: Promise<GalleryFolderTreeNode[]> }>>(new Map());
   const pageCacheRef = useRef<Map<string, GalleryPageCacheEntry>>(new Map());
   const folderLoadAbortRef = useRef<AbortController | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
@@ -5241,13 +5205,7 @@ export function ReactGalleryWorkspace() {
     const normalized = normalizePath(folderPath);
     if (!normalized) return;
     treeCacheRef.current.delete(normalized);
-    delete treeChildrenRef.current[normalized];
-    setTreeChildrenByPath((current) => {
-      if (!Object.prototype.hasOwnProperty.call(current, normalized)) return current;
-      const next = { ...current };
-      delete next[normalized];
-      return next;
-    });
+    // Keep the rendered branch while its replacement is loading or unavailable.
   }, []);
 
   const loadTreeChildren = useCallback((folderPath: string, force = false): Promise<GalleryFolderTreeNode[]> => {
@@ -5257,7 +5215,7 @@ export function ReactGalleryWorkspace() {
       return Promise.resolve([]);
     }
     if (!force) {
-      const cached = treeCacheRef.current.get(normalized) || treeChildrenRef.current[normalized];
+      const cached = treeCacheRef.current.get(normalized);
       if (cached) {
         treeCacheRef.current.delete(normalized);
         treeCacheRef.current.set(normalized, cached);
@@ -5267,7 +5225,7 @@ export function ReactGalleryWorkspace() {
     }
 
     const existingRequest = force ? null : treeRequestByPathRef.current.get(normalized);
-    if (existingRequest) return existingRequest;
+    if (existingRequest) return existingRequest.promise;
 
     setLoadingTreePaths((current) => {
       if (current.has(normalized)) return current;
@@ -5277,6 +5235,7 @@ export function ReactGalleryWorkspace() {
     });
 
     const treeStartedAt = nowMs();
+    const token = Symbol(normalized);
     const request = (async () => {
       const params = new URLSearchParams({ path: normalized, maxDepth: '0' });
       if (force) params.set('force', '1');
@@ -5285,9 +5244,11 @@ export function ReactGalleryWorkspace() {
         signal: AbortSignal.timeout(TREE_FETCH_TIMEOUT_MS),
       });
       const jsonStartedAt = nowMs();
-      const payload = await response.json().catch(() => ({} as { folders?: GalleryFolderTreeNode[]; error?: string }));
+      const payload: { folders?: GalleryFolderTreeNode[]; error?: string; missing?: boolean } = await response.json();
       const jsonMs = nowMs() - jsonStartedAt;
       if (!response.ok) throw new Error(String(payload?.error || 'Failed to load folders'));
+      if (payload.missing) throw new Error('Folder is currently unavailable');
+      if (!Array.isArray(payload.folders)) throw new Error('Invalid folder listing');
       const nextFolders = Array.isArray(payload.folders)
         ? payload.folders.map((folder) => ({
           ...folder,
@@ -5297,7 +5258,9 @@ export function ReactGalleryWorkspace() {
           hasChildren: folder.hasChildren !== false,
         }))
         : [];
-      writeTreeChildrenCache(normalized, nextFolders);
+      if (treeRequestByPathRef.current.get(normalized)?.token === token) {
+        writeTreeChildrenCache(normalized, nextFolders);
+      }
       traceGalleryLoad({
         event: 'tree_complete',
         folderPath: normalized,
@@ -5316,9 +5279,9 @@ export function ReactGalleryWorkspace() {
         error: treeError instanceof Error ? treeError.message : 'Failed to load folders',
         durationMs: nowMs() - treeStartedAt,
       });
-      writeTreeChildrenCache(normalized, []);
-      return [];
+      return treeChildrenRef.current[normalized] || [];
     }).finally(() => {
+      if (treeRequestByPathRef.current.get(normalized)?.token !== token) return;
       treeRequestByPathRef.current.delete(normalized);
       setLoadingTreePaths((current) => {
         const next = new Set(current);
@@ -5327,7 +5290,7 @@ export function ReactGalleryWorkspace() {
       });
     });
 
-    treeRequestByPathRef.current.set(normalized, request);
+    treeRequestByPathRef.current.set(normalized, { token, promise: request });
     return request;
   }, [writeTreeChildrenCache]);
 
@@ -5406,7 +5369,7 @@ export function ReactGalleryWorkspace() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: normalized }),
       });
-      const payload = await response.json().catch(() => ({} as { rootPath?: string; folders?: string[]; error?: string }));
+      const payload: { rootPath?: string; folders?: string[]; error?: string } = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(String(payload?.error || 'Failed to scan empty folders'));
       const folders = Array.isArray(payload.folders)
         ? payload.folders.map(normalizePath).filter(Boolean)
@@ -5484,7 +5447,7 @@ export function ReactGalleryWorkspace() {
     if (isTrashRootPath(normalizedFolder)) {
       if (!trashAllFilesRef.current) {
         const response = await fetch('/api/trash/list', { cache: 'no-store', signal });
-        const payload = await response.json().catch(() => ({} as { items?: TrashMetadataItem[]; error?: string }));
+        const payload: { items?: TrashMetadataItem[]; error?: string } = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(String(payload?.error || 'Failed to load Trash'));
         trashAllFilesRef.current = (Array.isArray(payload.items) ? payload.items : [])
           .map((entry, index) => toTrashGalleryFile(entry, index))
@@ -5512,7 +5475,7 @@ export function ReactGalleryWorkspace() {
       recursive: 'false',
     });
     const response = await fetch(`/api/fs/list?${params.toString()}`, { cache: 'no-store', signal });
-    const payload = await response.json().catch(() => ({} as GalleryListPayload & { error?: string; hasMore?: boolean }));
+    const payload: GalleryListPayload & { error?: string; hasMore?: boolean } = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(String(payload?.error || 'Failed to load Trash folder'));
     const files = Array.isArray(payload.files)
       ? payload.files.map((file, index) => normalizeGalleryFile(file, index))
@@ -5553,7 +5516,7 @@ export function ReactGalleryWorkspace() {
       cache: 'no-store',
       signal,
     });
-    const payload = await response.json().catch(() => ({} as GalleryFolderSummary & { error?: string }));
+    const payload: GalleryFolderSummary & { error?: string } = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(String((payload as GalleryFolderSummary & { error?: string })?.error || 'Failed to summarize folder'));
     return payload;
   }, []);
@@ -5586,7 +5549,6 @@ export function ReactGalleryWorkspace() {
 
     const applyPayload = (payload: GalleryListPayload) => {
       const incomingFiles = Array.isArray(payload.files) ? payload.files : [];
-      const incomingFolders = Array.isArray(payload.folders) ? payload.folders : [];
       const nextFiles = incomingFiles;
       const appendedFiles = incomingFiles.length;
 
@@ -5605,14 +5567,9 @@ export function ReactGalleryWorkspace() {
       if (pendingNavigation && pathsEqual(pendingNavigation.folder, folderPath)) {
         pendingLocalFolderNavigationRef.current = null;
       }
-      const incomingTreeNodes = galleryFoldersToTreeNodes(incomingFolders);
-      writeTreeChildrenCache(folderPath, incomingTreeNodes);
-      setTreeChildrenByPath((current) => {
-        return {
-          ...current,
-          [folderPath]: incomingTreeNodes,
-        };
-      });
+      if (Array.isArray(payload.folders)) {
+        writeTreeChildrenCache(folderPath, galleryFoldersToTreeNodes(payload.folders));
+      }
       filesRef.current = nextFiles;
       setFiles(nextFiles);
       setTotal(Math.max(0, Math.trunc(Number(payload.total || nextFiles.length))));
@@ -5689,9 +5646,10 @@ export function ReactGalleryWorkspace() {
         }
         const response = await fetchGalleryFs('/list-progressive', params, { signal: abortController.signal });
         const responseStartedAt = nowMs();
-        payload = await response.json().catch(() => ({} as GalleryListPayload & { error?: string }));
+        payload = await response.json();
         jsonMs = nowMs() - responseStartedAt;
         if (!response.ok) throw new Error(String((payload as GalleryListPayload & { error?: string })?.error || 'Failed to load gallery folder'));
+        if (payload.missing) throw new Error('Folder is currently unavailable');
         status = response.status;
         core = response.headers.get('x-gallery-core') || response.headers.get('X-Gallery-Core') || '';
         bridgeMs = response.headers.get('x-gallery-bridge-ms') || response.headers.get('X-Gallery-Bridge-Ms') || '';
@@ -5725,6 +5683,7 @@ export function ReactGalleryWorkspace() {
         total: payload.total ?? applied.nextFiles.length,
       });
     } catch (loadError) {
+      if (seq !== loadSeqRef.current) return;
       if (isAbortError(loadError)) return;
       const message = loadError instanceof Error ? loadError.message : 'Failed to load gallery folder';
       if (!isTrashFolder && isMissingGalleryFolderMessage(message)) {
@@ -5735,27 +5694,6 @@ export function ReactGalleryWorkspace() {
           invalidateTreeChildrenCache(parentFolder);
           void loadTreeChildren(parentFolder, true);
         }
-        const missingPayload: GalleryListPayload = {
-          folders: [],
-          files: [],
-          done: true,
-          nextCursor: null,
-          total: 0,
-          sortBy,
-          sortOrder,
-        };
-        const applied = applyPayload(missingPayload);
-        if (!applied.stale) {
-          traceGalleryLoad({
-            event: 'missing_folder_cleared',
-            folderPath,
-            cursor,
-            limit: 0,
-            durationMs: nowMs() - loadStartedAt,
-            error: message,
-          });
-        }
-        return;
       }
       if (options?.forceRefresh && !isTrashFolder) {
         const parentFolder = pathParent(folderPath);
@@ -5786,6 +5724,7 @@ export function ReactGalleryWorkspace() {
   }, [addOpenedFolder, addToast, currentFolder, emitFilmstripFeed, emitFolderChanged, emitSelectionChanged, fetchTrashListPayload, invalidateTreeChildrenCache, loadTreeChildren, markGalleryUiSessionDirty, readCachedPage, rootPath, sortBy, sortOrder, writeCachedPage, writeTreeChildrenCache]);
 
   const refreshCurrentFolderFromDisk = useCallback(() => {
+    window.dispatchEvent(new Event('umbra:gallery-archives-refresh'));
     const folderPath = normalizePath(currentFolder || rootPath);
     if (!folderPath) return;
     clearPageCacheForFolder(folderPath);
@@ -5860,9 +5799,10 @@ export function ReactGalleryWorkspace() {
       });
       const response = await fetchGalleryFs('/list-progressive', params, { cache: 'no-store' });
       if (!isStillCurrentFolder()) return false;
-      const payload = await response.json().catch(() => ({} as GalleryListPayload & { error?: string }));
+      const payload: GalleryListPayload & { error?: string } = await response.json();
       if (!isStillCurrentFolder()) return false;
       if (!response.ok) throw new Error(String((payload as GalleryListPayload & { error?: string })?.error || 'Failed to reconcile gallery folder'));
+      if (payload.missing) throw new Error('Folder is currently unavailable');
 
       const incomingFiles = Array.isArray(payload.files)
         ? payload.files.map((file, index) => normalizeGalleryFile(file, index))
@@ -6020,11 +5960,11 @@ export function ReactGalleryWorkspace() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: pending.rootPath }),
       });
-      const payload = await response.json().catch(() => ({} as {
+      const payload: {
         deleted?: string[];
         failed?: Array<{ path?: string; error?: string }>;
         error?: string;
-      }));
+      } = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(String(payload?.error || 'Failed to clear empty folders'));
       const deleted = Array.isArray(payload.deleted)
         ? payload.deleted.map(normalizePath).filter(Boolean)
@@ -7158,16 +7098,6 @@ export function ReactGalleryWorkspace() {
     return stripLiveGenerationPreviewPaths(resolveGalleryContextSelectionPaths(state, selectedPaths));
   }, [contextMenu, selectedPaths]);
 
-  const scheduleTransferProgressClear = useCallback((delayMs = 2600) => {
-    if (transferProgressHideTimerRef.current !== null) {
-      window.clearTimeout(transferProgressHideTimerRef.current);
-    }
-    transferProgressHideTimerRef.current = window.setTimeout(() => {
-      transferProgressHideTimerRef.current = null;
-      setTransferProgress(null);
-    }, delayMs);
-  }, []);
-
   const refreshAfterTransfer = useCallback((sourcePaths: string[], destination: string, mode: 'move' | 'copy') => {
     const affectedFolders = uniqueNormalizedPaths([
       currentFolder,
@@ -7198,40 +7128,17 @@ export function ReactGalleryWorkspace() {
     void loadTreeChildren(destination, true);
   }, [clearPageCacheForFolder, currentFolder, emitSelectionChanged, invalidateTreeChildrenCache, lastSelectedPath, loadFolder, loadTreeChildren]);
 
-  const pollTransferJob = useCallback(async (mode: 'move' | 'copy', jobId: string) => {
-    const endpoint = mode === 'copy' ? '/api/fs/copy/status' : '/api/fs/move/status';
-    for (let attempt = 0; attempt < 360; attempt += 1) {
-      const response = await fetch(`${endpoint}?jobId=${encodeURIComponent(jobId)}`, { cache: 'no-store' });
-      const payload = await response.json().catch(() => ({} as Record<string, unknown>));
-      if (!response.ok) throw new Error(String(payload?.error || `Failed to read ${mode} status`));
-      const job = (payload as { job?: Record<string, unknown> }).job || {};
-      const status = String(job.status || '');
-      const results = Array.isArray(job.results) ? job.results as Array<Record<string, unknown>> : [];
-      const completedPaths = Number(job[mode === 'copy' ? 'copied' : 'moved'] || 0)
-        || results.filter((entry) => entry.success === true).length;
-      const totalPaths = Number(job.totalPaths || 0);
-      const totalUnits = Number(job.totalUnits || 0);
-      const completedUnits = Number(job.completedUnits || 0);
-      const percent = Number(job.percent || (totalUnits > 0 ? Math.round((completedUnits / totalUnits) * 100) : 0));
-      setTransferProgress((current) => current ? {
-        ...current,
-        active: status !== 'completed' && status !== 'failed',
-        totalPaths: totalPaths || current.totalPaths,
-        completedPaths: Math.max(current.completedPaths, completedPaths),
-        totalUnits: totalUnits || current.totalUnits,
-        completedUnits: Math.max(current.completedUnits, completedUnits),
-        percent: Math.max(current.percent, Math.min(100, percent)),
-        currentPath: String(job.currentPath || current.currentPath || ''),
-        error: status === 'failed' ? String(job.error || '') : undefined,
-      } : current);
-      if (status === 'completed') {
-        return results.filter((entry) => entry.success === true).length;
-      }
-      if (status === 'failed') throw new Error(String(job.error || `${mode === 'copy' ? 'Copy' : 'Move'} failed`));
-      await sleep(450);
-    }
-    throw new Error(`${mode === 'copy' ? 'Copy' : 'Move'} is still running`);
-  }, []);
+  useEffect(() => {
+    if (!transferProgress || transferProgress.active || lastRefreshedTransfer.current === transferProgress) return;
+    lastRefreshedTransfer.current = transferProgress;
+    const successes = transferProgress.results.filter(result => result.success).map(result => result.path);
+    if (successes.length) refreshAfterTransfer(successes, transferProgress.destination, transferProgress.mode);
+    const failures = transferProgress.results.filter(result => !result.success).length;
+    addToast({
+      type: failures || transferProgress.error ? 'error' : 'success',
+      message: `${transferProgress.completedPaths} transferred${failures ? `; ${failures} failed` : ''}${transferProgress.error ? `: ${transferProgress.error}` : ''}`,
+    });
+  }, [addToast, refreshAfterTransfer, transferProgress]);
 
   const transferPathsToFolder = useCallback(async (paths: string[], destinationPath: string, mode: 'move' | 'copy') => {
     if (transferInProgress) {
@@ -7245,71 +7152,15 @@ export function ReactGalleryWorkspace() {
       return;
     }
 
-    setTransferInProgress(true);
-    if (transferProgressHideTimerRef.current !== null) {
-      window.clearTimeout(transferProgressHideTimerRef.current);
-      transferProgressHideTimerRef.current = null;
-    }
-    setTransferProgress({
-      active: true,
-      mode,
-      destination,
-      totalPaths: validPaths.length,
-      completedPaths: 0,
-      totalUnits: validPaths.length,
-      completedUnits: 0,
-      percent: 0,
-      currentPath: validPaths[0] || destination,
-    });
     try {
-      const endpoint = mode === 'copy' ? '/api/fs/copy' : '/api/fs/move';
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          paths: validPaths,
-          destination,
-          trackProgress: true,
-        }),
-      });
-      const payload = await response.json().catch(() => ({} as Record<string, unknown>));
-      if (!response.ok) throw new Error(String(payload?.error || `Failed to ${mode} media`));
-      let completed = 0;
-      const jobId = String(payload.jobId || '').trim();
-      if (jobId) {
-        completed = await pollTransferJob(mode, jobId);
-      } else {
-        const results = Array.isArray(payload.results) ? payload.results as Array<Record<string, unknown>> : [];
-        completed = results.filter((entry) => entry.success === true).length || Number(payload[mode === 'copy' ? 'copied' : 'moved'] || 0);
-      }
-      refreshAfterTransfer(validPaths, destination, mode);
-      setTransferProgress((current) => current ? {
-        ...current,
-        active: false,
-        completedPaths: completed || validPaths.length,
-        completedUnits: current.totalUnits || completed || validPaths.length,
-        percent: 100,
-        currentPath: destination,
-      } : current);
-      scheduleTransferProgressClear();
-      addToast({
-        type: completed > 0 ? 'success' : 'info',
-        message: `${mode === 'copy' ? 'Copied' : 'Moved'} ${completed || validPaths.length} item${(completed || validPaths.length) === 1 ? '' : 's'} to ${pathLeaf(destination) || destination}`,
-      });
+      await startGalleryTransfer(validPaths, destination, mode);
     } catch (error) {
-      setTransferProgress((current) => current ? {
-        ...current,
-        active: false,
-        error: error instanceof Error ? error.message : `Failed to ${mode} media`,
-      } : current);
-      scheduleTransferProgressClear(5000);
       addToast({ type: 'error', message: error instanceof Error ? error.message : `Failed to ${mode} media` });
     } finally {
-      setTransferInProgress(false);
       setDropTargetFolder('');
       setDraggingPaths([]);
     }
-  }, [addToast, pollTransferJob, refreshAfterTransfer, scheduleTransferProgressClear, transferInProgress]);
+  }, [addToast, transferInProgress]);
 
   const openTransferChoiceMenu = useCallback((event: React.MouseEvent | React.DragEvent, paths: string[], destinationPath: string) => {
     const destination = normalizePath(destinationPath);
@@ -7380,13 +7231,6 @@ export function ReactGalleryWorkspace() {
 
   const handleFolderDropTargetDragLeave = useCallback((folderPath: string) => {
     setDropTargetFolder((current) => pathsEqual(current, folderPath) ? '' : current);
-  }, []);
-
-  useEffect(() => () => {
-    if (transferProgressHideTimerRef.current !== null) {
-      window.clearTimeout(transferProgressHideTimerRef.current);
-      transferProgressHideTimerRef.current = null;
-    }
   }, []);
 
   useEffect(() => {
@@ -8077,7 +7921,7 @@ export function ReactGalleryWorkspace() {
     try {
       if (isTrashRootPath(folderPath)) {
         const response = await fetch('/api/trash/list', { cache: 'no-store' });
-        const payload = await response.json().catch(() => ({} as { items?: TrashMetadataItem[]; error?: string }));
+        const payload: { items?: TrashMetadataItem[]; error?: string } = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(String(payload?.error || 'Failed to select Trash items'));
         const paths = (Array.isArray(payload.items) ? payload.items : [])
           .map((item) => normalizePath(item.trashPath))
@@ -8102,7 +7946,7 @@ export function ReactGalleryWorkspace() {
         recursive: 'false',
       });
       const response = await fetchGalleryFs('/list-progressive', params);
-      const payload = await response.json().catch(() => ({} as GalleryListPayload & { error?: string }));
+      const payload: GalleryListPayload & { error?: string } = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(String(payload?.error || 'Failed to select folder media'));
       const selected = new Set<string>();
       for (const file of Array.isArray(payload.files) ? payload.files : []) {
@@ -8330,7 +8174,7 @@ export function ReactGalleryWorkspace() {
     const onSetSelection = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
       if (detail.source === 'react-gallery') return;
-      const paths = Array.isArray(detail.paths) ? detail.paths.map(normalizePath).filter(Boolean) : [];
+      const paths: string[] = Array.isArray(detail.paths) ? detail.paths.map(normalizePath).filter(Boolean) : [];
       const nextSelection = new Set(paths);
       setSelectedPaths(nextSelection);
       selectedPathsRef.current = nextSelection;
@@ -8546,7 +8390,6 @@ export function ReactGalleryWorkspace() {
   useEffect(() => {
     const activeRoot = findActiveRoot(currentFolder || rootPath, rootChoices);
     if (!activeRoot) return;
-    let cancelled = false;
     const nextFocusedFolder = currentFolder || activeRoot.path;
     setFocusedFolder((current) => (pathsEqual(current, nextFocusedFolder) ? current : nextFocusedFolder));
     const chain = folderPathChain(currentFolder || activeRoot.path, activeRoot.path);
@@ -8561,19 +8404,30 @@ export function ReactGalleryWorkspace() {
         }
         return changed ? next : current;
       });
-      void (async () => {
-        for (const folderPath of chain) {
-          if (cancelled) return;
-          if (!treeCacheRef.current.has(folderPath) && !Object.prototype.hasOwnProperty.call(treeChildrenRef.current, folderPath)) {
-            await loadTreeChildren(folderPath);
-          }
-        }
-      })();
     }
+  }, [currentFolder, rootPath, rootChoices]);
+
+  useEffect(() => {
+    let cancelled = false;
+    // Restore all expanded branches, not only ancestors of the selected folder.
+    const pending = Array.from(expandedFolders).filter((path) => (
+      !Object.prototype.hasOwnProperty.call(treeChildrenRef.current, path)
+    ));
+    let nextIndex = 0;
+    const restoreBranch = async () => {
+      while (nextIndex < pending.length) {
+        if (cancelled) return;
+        const folderPath = pending[nextIndex++];
+        if (!Object.prototype.hasOwnProperty.call(treeChildrenRef.current, folderPath)) {
+          await loadTreeChildren(folderPath);
+        }
+      }
+    };
+    void Promise.all(Array.from({ length: Math.min(3, pending.length) }, restoreBranch));
     return () => {
       cancelled = true;
     };
-  }, [currentFolder, loadTreeChildren, rootPath, rootChoices]);
+  }, [expandedFolders, loadTreeChildren]);
 
   const searchNeedle = useMemo(() => normalizeSearchQuery(query), [query]);
   const globalSearchActive = !isTrashPath(currentFolder) && searchNeedle.length >= GLOBAL_SEARCH_MIN_QUERY_LENGTH;
@@ -8625,7 +8479,7 @@ export function ReactGalleryWorkspace() {
         cache: 'no-store',
         signal: controller.signal,
       }).then(async (response) => {
-        const payload = await response.json().catch(() => ({} as GalleryMetadataSearchPayload));
+      const payload: GalleryMetadataSearchPayload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(String(payload?.error || 'Failed to search metadata'));
         if (controller.signal.aborted) return;
         setMetadataMatches(Array.isArray(payload.matches) ? payload.matches : []);
@@ -8816,7 +8670,7 @@ export function ReactGalleryWorkspace() {
             cache: 'no-store',
             signal: controller.signal,
           });
-          const payload = await response.json().catch(() => ({} as GalleryListPayload & { error?: string }));
+          const payload: GalleryListPayload & { error?: string } = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(String(payload?.error || 'Gallery search failed'));
           const folderFiles = Array.isArray(payload.files)
             ? payload.files
@@ -8923,7 +8777,7 @@ export function ReactGalleryWorkspace() {
         signal: controller.signal,
       })
         .then(async (response) => {
-          const payload = await response.json().catch(() => ({} as { suggestions?: GallerySearchSuggestion[] }));
+        const payload: { suggestions?: GallerySearchSuggestion[] } = await response.json().catch(() => ({}));
           if (!response.ok) return [];
           return Array.isArray(payload.suggestions) ? payload.suggestions : [];
         })
@@ -9132,7 +8986,7 @@ export function ReactGalleryWorkspace() {
       signal: controller.signal,
     })
       .then(async (response) => {
-        const payload = await response.json().catch(() => ({} as { tags?: GalleryTagSummaryItem[]; error?: string }));
+      const payload: { tags?: GalleryTagSummaryItem[]; error?: string } = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(String(payload?.error || 'Failed to load gallery tags'));
         return Array.isArray(payload.tags) ? payload.tags : [];
       })
@@ -9273,7 +9127,7 @@ export function ReactGalleryWorkspace() {
           cache: 'no-store',
           signal: controller.signal,
         });
-        const payload = await response.json().catch(() => ({} as GalleryListPayload & { error?: string }));
+        const payload: GalleryListPayload & { error?: string } = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(String(payload?.error || 'Failed to load folder preview'));
         addNestedTargets(target, Array.isArray(payload.folders) ? payload.folders : []);
         const nextGroup: GalleryFolderPreviewGroup = {
@@ -9623,7 +9477,7 @@ export function ReactGalleryWorkspace() {
   useEffect(() => {
     const onFilmstripContextMenu = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
-      const paths = Array.isArray(detail.paths)
+      const paths: string[] = Array.isArray(detail.paths)
         ? detail.paths.map(normalizePath).filter(Boolean)
         : [];
       const reorderPaths = Array.isArray(detail.reorderPaths)
@@ -9728,6 +9582,12 @@ export function ReactGalleryWorkspace() {
           label: 'New Subfolder...',
           icon: <Folder size={14} />,
           action: () => void createSubfolder(targetPath),
+        },
+        {
+          label: 'Create ZIP',
+          icon: <Archive size={14} />,
+          disabled: archiveIsActive(archiveJob),
+          action: () => void startGalleryArchive(targetPath),
         },
         { separator: true },
         {
@@ -9966,6 +9826,7 @@ export function ReactGalleryWorkspace() {
     ];
   }, [
     contextMenu,
+    archiveJob,
     openOrCopyComfyWorkflow,
     copyPaths,
     createSubfolder,
@@ -10085,8 +9946,12 @@ export function ReactGalleryWorkspace() {
     : '';
 
   return (
+    <div className="flex h-full min-h-0 w-full flex-col">
+      <GalleryTransferStrip transfer={transferProgress} />
+      <GalleryArchiveStatus job={archiveJob} />
     <section
-      className="flex h-full min-h-0 w-full bg-zinc-950 text-zinc-100"
+      className="flex min-h-0 w-full flex-1 bg-zinc-950 text-zinc-100"
+      style={{ minHeight: 0 }}
       data-umbra-react-gallery-root
       data-umbra-gallery-mobile-media-view={isPhoneRemote ? 'grid' : undefined}
       data-umbra-gallery-mobile-chrome-hidden={isPhoneRemote && galleryMobileView === 'media' && mobileGalleryChromeHidden ? '1' : '0'}
@@ -10141,13 +10006,11 @@ export function ReactGalleryWorkspace() {
         onSearchSuggestionSelect={applySearchSuggestion}
         draggingCount={draggingPaths.length}
         dropTargetFolder={dropTargetFolder}
-        transferProgress={transferProgress}
         onFolderDragStart={startFolderDrag}
         onFolderDragEnd={clearMediaDrag}
         onFolderDragOver={handleFolderDropTargetDragOver}
         onFolderDragLeave={handleFolderDropTargetDragLeave}
         onFolderDrop={handleFolderDropTargetDrop}
-        mobileExpandOnTap={isPhoneRemote}
         showContextButtons={isTouchRemote}
       />
 
@@ -10530,6 +10393,7 @@ export function ReactGalleryWorkspace() {
             onScroll={handleGalleryMediaScroll}
             className="min-h-0 flex-1 overflow-y-auto p-3"
           >
+            {!trashMode && <GalleryArchiveList folder={currentFolder} job={archiveJob} query={searchNeedle} onCount={setArchiveCount} />}
             {openingDifferentFolder ? (
               <div className="flex h-full flex-col items-center justify-center gap-2 text-zinc-500">
                 <div className="flex items-center text-sm">
@@ -10549,7 +10413,7 @@ export function ReactGalleryWorkspace() {
                 Searching gallery
               </div>
             ) : displayFiles.length === 0 && !folderPreviewMode && (!globalSearchActive || searchFolders.length === 0) ? (
-              <div className="flex h-full items-center justify-center text-sm text-zinc-500">
+              <div className={archiveCount > 0 && !trashMode ? 'hidden' : 'flex h-full items-center justify-center text-sm text-zinc-500'}>
                 {searchNeedle ? 'No matches found' : trashMode ? 'No items in Trash' : 'No media in this folder'}
               </div>
             ) : groupBySet && !trashMode ? (
@@ -11292,6 +11156,7 @@ export function ReactGalleryWorkspace() {
         }}
       />
     </section>
+    </div>
   );
 }
 

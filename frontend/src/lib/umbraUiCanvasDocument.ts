@@ -323,6 +323,7 @@ export interface UmbraCanvasGenerationSettings {
     strengthModel: number;
     strengthClip: number;
     trainedTags: string[];
+    triggerWords?: string[];
   }>;
   promptSegments: Array<{ id: string; text: string }>;
   activePromptSegmentId: string;
@@ -531,7 +532,7 @@ function isVisualCanvasLayer(
   return layer.kind === 'raster' || layer.kind === 'text' || layer.kind === 'gradient';
 }
 
-function isImmutableSourceLayer(layer: UmbraCanvasLayer | null | undefined): layer is UmbraCanvasRasterLayer {
+function isImmutableSourceLayer(layer: UmbraCanvasLayer | null | undefined): layer is UmbraCanvasRasterLayer & { role: 'source' } {
   return layer?.kind === 'raster' && layer.role === 'source';
 }
 
@@ -762,6 +763,7 @@ function normalizeGenerationSettings(value: unknown): UmbraCanvasGenerationSetti
     strengthModel: clamp(lora?.strengthModel ?? 1, -10, 10),
     strengthClip: clamp(lora?.strengthClip ?? lora?.strengthModel ?? 1, -10, 10),
     trainedTags: Array.isArray(lora?.trainedTags) ? lora.trainedTags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean) : [],
+    triggerWords: Array.isArray(lora?.triggerWords) ? lora.triggerWords.map((tag: unknown) => String(tag || '').trim()).filter(Boolean) : [],
   })).filter((lora: { name: string }) => !!lora.name) : [];
   const fillMode = source.fillMode === 'telea' || source.fillMode === 'neutral' || source.fillMode === 'color' || source.fillMode === 'tile' || source.fillMode === 'lama'
     ? source.fillMode
@@ -964,6 +966,7 @@ export function migrateUmbraCanvasDocument(input: unknown): UmbraCanvasDocument 
   const stagingIds = new Set<string>();
   source.staging = source.staging.map((stage: Record<string, any>) => ({
     ...stage,
+    asset: stage.asset,
     id: String(stage.id || '').trim(),
     jobId: String(stage.jobId || '').trim(),
     itemId: String(stage.itemId || '').trim(),
@@ -1326,6 +1329,8 @@ function acceptStage(
   });
 }
 
+export function umbraCanvasDocumentReducer(state: UmbraCanvasDocument, action: UmbraCanvasDocumentAction): UmbraCanvasDocument;
+export function umbraCanvasDocumentReducer(state: UmbraCanvasDocumentState, action: UmbraCanvasDocumentAction): UmbraCanvasDocumentState;
 export function umbraCanvasDocumentReducer(
   state: UmbraCanvasDocumentState,
   action: UmbraCanvasDocumentAction,

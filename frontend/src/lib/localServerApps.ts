@@ -79,7 +79,7 @@ export function normalizeLocalServerFolderPath(rawPath: unknown): string {
 }
 
 export function normalizeLocalServerApps(rawValue: unknown): LocalServerApp[] {
-  const rawList = Array.isArray(rawValue)
+  const rawList: unknown[] = Array.isArray(rawValue)
     ? rawValue
     : Array.isArray((rawValue as any)?.apps)
       ? (rawValue as any).apps
@@ -185,7 +185,7 @@ export async function probeLocalServerUrl(url: string, timeoutMs = 3500, useHost
       return 'offline';
     }
   }
-  const attempt = async (method: 'HEAD' | 'GET') => {
+  const attempt = async (method: 'HEAD' | 'GET'): Promise<LocalServerHealth> => {
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), timeoutMs);
     try {

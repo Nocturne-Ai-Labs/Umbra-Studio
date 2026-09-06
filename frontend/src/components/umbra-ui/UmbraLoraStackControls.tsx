@@ -94,8 +94,8 @@ export function UmbraLoraStackControls({
   }, [loras, updateLora]);
 
   return (
-    <section className="rounded-md border border-white/10 bg-white/[0.02]">
-      <div className="flex min-h-10 items-center gap-2 px-2.5">
+    <section data-umbra-lora-stack="" className="rounded-md border border-white/10 bg-white/[0.02]">
+      <div data-umbra-lora-stack-header="" className="flex min-h-10 items-center gap-2 px-2.5">
         <button
           type="button"
           onClick={() => setExpanded((current) => !current)}
@@ -142,6 +142,11 @@ export function UmbraLoraStackControls({
           ) : loras.map((lora) => {
             const syntax = buildUmbraUiLoraSyntax(lora);
             const thumbnail = String(lora.thumbnailUrls?.[0] || lora.thumbnailUrl || '').trim();
+            const triggerWords = Array.from(new Set(
+              (lora.triggerWords || []).map((word) => String(word || '').trim()).filter(Boolean),
+            ));
+            const triggerWordKeys = new Set(triggerWords.map((word) => word.toLowerCase()));
+            const trainingTags = lora.trainedTags.filter((tag) => !triggerWordKeys.has(tag.toLowerCase()));
             return (
               <div key={lora.id} className={cn('rounded-md border border-white/10 bg-black/25 p-2', !lora.enabled && 'opacity-55')}>
                 <div className="flex min-w-0 items-center gap-2">
@@ -231,13 +236,13 @@ export function UmbraLoraStackControls({
                   </div>
                 </div>
 
-                {lora.trainedTags.length > 0 ? (
+                {triggerWords.length > 0 ? (
                   <div className="mt-2">
                     <div className="mb-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500">
-                      <Tags size={10} /> Trigger Tags
+                      <Tags size={10} /> Trigger Words
                     </div>
                     <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto custom-scrollbar">
-                      {lora.trainedTags.map((tag) => (
+                      {triggerWords.map((tag) => (
                         <button
                           type="button"
                           key={tag}
@@ -251,6 +256,28 @@ export function UmbraLoraStackControls({
                       ))}
                     </div>
                   </div>
+                ) : null}
+
+                {trainingTags.length > 0 ? (
+                  <details className="mt-2 border-t border-white/[0.06] pt-2">
+                    <summary className="cursor-pointer select-none text-[9px] font-black uppercase tracking-[0.1em] text-zinc-600 hover:text-zinc-400">
+                      Trained Tokens ({trainingTags.length})
+                    </summary>
+                    <div className="mt-1 flex max-h-24 flex-wrap gap-1 overflow-y-auto custom-scrollbar">
+                      {trainingTags.map((tag) => (
+                        <button
+                          type="button"
+                          key={tag}
+                          onClick={() => { void copyToken(tag); }}
+                          className="inline-flex max-w-full items-center gap-1.5 truncate rounded-sm border border-white/10 bg-white/[0.025] px-2 py-1.5 font-mono text-[9px] text-zinc-400 hover:border-white/20 hover:text-zinc-200"
+                          title={`Copy "${tag}"`}
+                        >
+                          {copiedToken === tag ? <Check size={9} className="shrink-0" /> : <Copy size={9} className="shrink-0" />}
+                          <span className="truncate">{tag}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </details>
                 ) : null}
               </div>
             );

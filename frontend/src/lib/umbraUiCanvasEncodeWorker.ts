@@ -37,7 +37,13 @@ export async function encodeUmbraCanvasInWorker(options: {
     throw new DOMException('Canvas encoding was canceled.', 'AbortError');
   }
 
-  const worker = new Worker('/assets/UmbraCanvasEncodeWorker.js', { type: 'module' });
+  let worker: Worker;
+  try {
+    worker = new Worker('/assets/UmbraCanvasEncodeWorker.js', { type: 'module' });
+  } catch (error) {
+    bitmap.close();
+    throw error;
+  }
   const requestId = nextRequestId++;
 
   return new Promise((resolve, reject) => {
@@ -66,6 +72,7 @@ export async function encodeUmbraCanvasInWorker(options: {
       }));
     };
     worker.onerror = (event) => finish(() => reject(new Error(event.message || 'The background canvas encoder crashed.')));
+    worker.onmessageerror = () => finish(() => reject(new Error('The background canvas encoder returned an unreadable result.')));
 
     if (options.signal?.aborted) {
       bitmap.close();

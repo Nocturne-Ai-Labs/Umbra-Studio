@@ -1,6 +1,6 @@
 {
   "name": "umbra-studio",
-  "version": "0.31.28",
+  "version": "0.31.29",
   "description": "Umbra Studio - AI image generation, prompt tooling, and media workflow suite",
   "author": "Nocturne AI Labs",
   "homepage": "https://github.com/Nocturne-Ai-Labs/Umbra-Studio",
@@ -9,7 +9,8 @@
     "url": "https://github.com/Nocturne-Ai-Labs/Umbra-Studio.git"
   },
   "umbraRuntimeDependencies": [
-    "sharp"
+    "sharp",
+    "yazl"
   ],
   "license": "MIT",
   "main": "UmbraServer.ts",
@@ -84,10 +85,12 @@
     "qrcode": "^1.5.4",
     "react-router-dom": "^7.12.0",
     "sharp": "^0.34.5",
-    "yauzl": "^3.4.0"
+    "yauzl": "^3.4.0",
+    "yazl": "^3.3.1"
   },
   "devDependencies": {
     "@types/bun": "^1.3.6",
+    "@types/yazl": "^3.3.1",
     "esbuild": "^0.27.2"
   },
   "trustedDependencies": [

@@ -2,6 +2,7 @@ import { join } from 'path';
 import { spawn, type ChildProcess } from 'child_process';
 
 type FsWorkerRequest =
+  | { id: string; type: 'gallery-transfer'; payload: { mode: 'move' | 'copy'; pairs: Array<{ sourcePath: string; targetPath: string }> } }
   | {
       id: string;
       type: 'warmup';
@@ -154,7 +155,7 @@ type FsWorkerResponse =
 type PendingRequest = {
   resolve: (value: any) => void;
   reject: (reason?: unknown) => void;
-  timeout: ReturnType<typeof setTimeout>;
+  timeout?: ReturnType<typeof setTimeout>;
   onProgress?: (progress: any) => void;
   startedAt: number;
   ensureMs: number;
@@ -164,6 +165,8 @@ type PendingRequest = {
 };
 
 const WORKER_REQUEST_TIMEOUT_MS = 60_000;
+const MUTATING_REQUESTS = new Set(['move', 'copy', 'delete', 'system-trash', 'mkdir', 'rename', 'write', 'gallery-transfer']);
+type RequestWithoutId = FsWorkerRequest extends infer R ? R extends { id: string } ? Omit<R, 'id'> : never : never;
 
 export class FsWorkerService {
   private child: ChildProcess | null = null;
@@ -233,6 +236,10 @@ export class FsWorkerService {
     options?: { onProgress?: (progress: any) => void },
   ) {
     return this.sendRequest({ type: 'copy', payload }, options);
+  }
+
+  async reconcileGallery(payload: Extract<FsWorkerRequest, { type: 'gallery-transfer' }>['payload']) {
+    return this.sendRequest({ type: 'gallery-transfer', payload });
   }
 
   async mkdir(payload: Extract<FsWorkerRequest, { type: 'mkdir' }>['payload']) {
@@ -322,7 +329,7 @@ export class FsWorkerService {
           }
           this.pending.delete(response.id);
           clearTimeout(pending.timeout);
-          if (response.ok) {
+          if (response.ok === true) {
             const result = response.result;
             if (result && typeof result === 'object' && !Array.isArray(result)) {
               (result as Record<string, unknown>).__serviceDebug = {
@@ -378,8 +385,8 @@ export class FsWorkerService {
     return child;
   }
 
-  private sendRequest<T extends FsWorkerRequest['type']>(
-    request: Omit<Extract<FsWorkerRequest, { type: T }>, 'id'>,
+  private sendRequest(
+    request: RequestWithoutId,
     options?: { onProgress?: (progress: any) => void },
   ): Promise<any> {
     const ensureStartedAt = Date.now();
@@ -391,7 +398,8 @@ export class FsWorkerService {
 
     return new Promise((resolve, reject) => {
       const writeStartedAt = Date.now();
-      const timeout = setTimeout(() => {
+      // Mutations must remain tracked until their actual result or worker exit.
+      const timeout = MUTATING_REQUESTS.has(request.type) ? undefined : setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Filesystem worker request timed out (${request.type})`));
       }, WORKER_REQUEST_TIMEOUT_MS);

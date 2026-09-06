@@ -90,10 +90,12 @@ function hasExternalImageDrop(dataTransfer: DataTransfer): boolean {
   return false;
 }
 
-function extractExternalImagesFromDrop(dataTransfer: DataTransfer): any[] {
-  const fileItems = Array.from(dataTransfer.files || [])
+export type DroppedImage = { kind: 'file'; file: File; name: string; type: string } | { kind: 'url'; url: string };
+
+function extractExternalImagesFromDrop(dataTransfer: DataTransfer): DroppedImage[] {
+  const fileItems: DroppedImage[] = Array.from(dataTransfer.files || [])
     .filter(isImageFile)
-    .map((file) => ({ kind: 'file', file, name: file.name, type: file.type }));
+    .map((file): DroppedImage => ({ kind: 'file', file, name: file.name, type: file.type }));
 
   const url = getDroppedImageUrl(dataTransfer);
   if (url) {

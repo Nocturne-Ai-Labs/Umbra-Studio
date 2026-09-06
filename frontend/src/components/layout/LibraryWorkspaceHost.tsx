@@ -1090,6 +1090,7 @@ export const LibraryWorkspaceHost = () => {
         workspace?: string;
         paths?: string[];
         pinnedFolders?: unknown[];
+        protectedFolders?: unknown[];
         items?: Array<{ trashPath?: string; originalPath?: string; name?: string }>;
         failed?: Array<{ path?: string; error?: string }>;
         restored?: Array<{

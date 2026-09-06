@@ -120,18 +120,8 @@ export function buildUmbraAssistedSelectionLayerSourceKey(
   if (layer.kind === 'mask') {
     return JSON.stringify({ canvas, layer: maskSourceKey(layer) });
   }
-  const mask = documentState.layers.find((candidate): candidate is UmbraCanvasMaskLayer => (
-    candidate.kind === 'mask' && candidate.id === layer.maskLayerId
-  ));
-  return JSON.stringify({
-    canvas,
-    layer: {
-      id: layer.id,
-      kind: layer.kind,
-      mask: maskSourceKey(mask),
-      updatedAt: layer.updatedAt,
-    },
-  });
+  const unhandledLayer: never = layer;
+  throw new Error(`Unsupported assisted-selection layer: ${String(unhandledLayer)}`);
 }
 
 export function buildUmbraAssistedSelectionSignature(input: UmbraAssistedSelectionSignatureInput): string {

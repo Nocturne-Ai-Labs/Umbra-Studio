@@ -1,6 +1,6 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { useEffect, useState } from 'react';
-import { BarChart3, Database, Search, Download, FolderOpen, GraduationCap, WandSparkles } from 'lucide-react';
+import { BarChart3, Combine, Database, Search, Download, FolderOpen, GraduationCap, WandSparkles } from 'lucide-react';
 import { SearchTab } from './SearchTab';
 import { DownloadsTab } from './DownloadsTab';
 import { DatasetsTab } from './DatasetsTab';
@@ -8,11 +8,12 @@ import { TagCorpusTab } from './TagCorpusTab';
 import { DanbooruDatasetGeneratorTab } from './DanbooruDatasetGeneratorTab';
 import { WildcardGeneratorTab } from './WildcardGeneratorTab';
 import { AIToolkitTab } from './AIToolkitTab';
+import { ModelMergeTab } from './ModelMergeTab';
 import { useBoardStore } from './hooks/useBoardStore';
 import type { BooruPost } from './types';
 import { logDiagnostic } from '@/lib/diagnostics';
 
-type Tab = 'search' | 'corpus' | 'wildcards' | 'generator' | 'downloads' | 'datasets' | 'aitoolkit';
+type Tab = 'search' | 'corpus' | 'wildcards' | 'generator' | 'downloads' | 'datasets' | 'aitoolkit' | 'merge';
 
 export function BoardBrowser() {
   const [activeTab, setActiveTab] = useState<Tab>(() => {
@@ -69,6 +70,7 @@ export function BoardBrowser() {
     { id: 'search', label: 'Search', icon: Search },
     { id: 'corpus', label: 'Tag Corpus', icon: BarChart3 },
     { id: 'wildcards', label: 'Wildcard Generator', icon: WandSparkles },
+    { id: 'merge', label: 'Model Merge', icon: Combine },
     { id: 'generator', label: 'Danbooru Dataset Generator', icon: Database },
     { id: 'downloads', label: 'Downloads', icon: Download, badge: pendingDownloads },
     { id: 'datasets', label: 'Datasets', icon: FolderOpen },
@@ -135,6 +137,7 @@ export function BoardBrowser() {
         {activeTab === 'search' && <SearchTab onDownload={handleDownload} />}
         {activeTab === 'corpus' && <TagCorpusTab />}
         {activeTab === 'wildcards' && <WildcardGeneratorTab onOpenCorpus={() => setActiveTab('corpus')} />}
+        {activeTab === 'merge' && <ModelMergeTab />}
         {activeTab === 'generator' && <DanbooruDatasetGeneratorTab />}
         {activeTab === 'downloads' && <DownloadsTab />}
         {activeTab === 'datasets' && <DatasetsTab />}

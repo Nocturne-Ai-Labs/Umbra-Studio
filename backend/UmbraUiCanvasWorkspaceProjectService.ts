@@ -98,6 +98,7 @@ function normalizeGenerationSettings(rawSettings: unknown): Record<string, any> 
       strengthModel: finiteNumber(lora.strengthModel, 1, -10, 10),
       strengthClip: finiteNumber(lora.strengthClip, 1, -10, 10),
       trainedTags: (Array.isArray(lora.trainedTags) ? lora.trainedTags : []).slice(0, 512).map((tag: unknown) => String(tag || '').trim().slice(0, 512)).filter(Boolean),
+      triggerWords: (Array.isArray(lora.triggerWords) ? lora.triggerWords : []).slice(0, 512).map((tag: unknown) => String(tag || '').trim().slice(0, 512)).filter(Boolean),
       thumbnailUrl: String(lora.thumbnailUrl || '').trim().slice(0, 4096),
       thumbnailUrls: (Array.isArray(lora.thumbnailUrls) ? lora.thumbnailUrls : []).slice(0, 32).map((url: unknown) => String(url || '').trim().slice(0, 4096)).filter(Boolean),
       civitaiUrl: String(lora.civitaiUrl || '').trim().slice(0, 4096),

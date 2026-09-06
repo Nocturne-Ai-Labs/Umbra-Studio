@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { createHash } from 'crypto';
+import { isPrivateDevelopmentSource } from './release-source-policy.mjs';
 
 const root = process.cwd();
 const pkgPath = path.join(root, 'package.json');
@@ -147,6 +148,7 @@ function shouldSkipSourcePath(sourcePath) {
 }
 
 function copyTree(source, target, options = {}) {
+  if (isPrivateDevelopmentSource(path.relative(root, source))) return;
   if (!fs.existsSync(source)) return;
   if (!options.allowSkippedSource && shouldSkipSourcePath(source)) return;
 
@@ -302,10 +304,7 @@ function prepareCleanPublishedUser() {
     path.join(root, 'defaults', 'PowerPrompter', 'Prompts'),
     path.join(userPath, 'PowerPrompter', 'Prompts'),
   );
-  copyTree(
-    path.join(root, 'defaults', 'PowerPrompter', 'Wildcards'),
-    path.join(userPath, 'PowerPrompter', 'Wildcards'),
-  );
+  ensureDir(path.join(userPath, 'PowerPrompter', 'Wildcards'));
 }
 
 function seedBundledDataForgeModels() {

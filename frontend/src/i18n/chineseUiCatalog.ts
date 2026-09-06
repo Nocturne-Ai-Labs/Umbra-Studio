@@ -314,6 +314,7 @@ const CHINESE_EXACT_ENTRIES: Array<readonly [string, string]> = [
   ["test url", "测试网址"],
   ["thumbnails", "缩略图"],
   ["trained tokens", "训练过的令牌"],
+  ["trigger words", "触发词"],
   ["txt2img", "txt2img"],
   ["update", "更新"],
   ["upload", "上传"],

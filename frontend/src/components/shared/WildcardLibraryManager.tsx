@@ -65,7 +65,7 @@ function normalizeFolderPath(value: unknown): string {
 
 function mapWildcardEntries(payload: unknown): WildcardLibraryEntry[] {
   if (!Array.isArray(payload)) return [];
-  return payload.map((entry) => {
+  return payload.map<WildcardLibraryEntry>((entry) => {
     const record = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {};
     const name = String(record.name || '').trim();
     const folder = normalizeFolderPath(record.folder);
@@ -91,7 +91,7 @@ function buildFolderTree(wildcards: WildcardLibraryEntry[], virtualFolders: stri
     let currentMap = root;
     let currentPath = '';
     let node: MutableNode | null = null;
-    parts.forEach((part) => {
+    for (const part of parts) {
       currentPath = currentPath ? `${currentPath}/${part}` : part;
       node = currentMap.get(part) || {
         name: part,
@@ -103,7 +103,7 @@ function buildFolderTree(wildcards: WildcardLibraryEntry[], virtualFolders: stri
       };
       currentMap.set(part, node);
       currentMap = node.childMap;
-    });
+    }
     return node;
   };
 

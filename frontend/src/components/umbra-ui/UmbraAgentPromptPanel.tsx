@@ -854,7 +854,7 @@ export function UmbraAgentPromptPanel({
                       </div>
                     )}
 
-                    <div data-umbra-agent-tuning className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    <div data-umbra-agent-tuning className={cn('grid grid-cols-2 gap-3', generationSettings.provider !== 'hermes' && 'md:grid-cols-4')}>
                       <div className="space-y-1.5">
                         <span className={labelClass}>Thinking Level</span>
                         <UmbraSelect
@@ -867,30 +867,34 @@ export function UmbraAgentPromptPanel({
                           buttonClassName="w-full font-mono"
                         />
                       </div>
-                      <label className="block space-y-1.5">
-                        <span className={labelClass}>Temperature</span>
-                        <input
-                          type="number"
-                          min={0}
-                          max={2}
-                          step={0.05}
-                          value={generationSettings.temperature}
-                          onChange={(event) => updateGenerationSettings({ temperature: Number(event.target.value) })}
-                          className={inputClass}
-                        />
-                      </label>
-                      <label className="block space-y-1.5">
-                        <span className={labelClass}>Max Tokens</span>
-                        <input
-                          type="number"
-                          min={64}
-                          max={8192}
-                          step={64}
-                          value={generationSettings.maxTokens}
-                          onChange={(event) => updateGenerationSettings({ maxTokens: Number(event.target.value) })}
-                          className={inputClass}
-                        />
-                      </label>
+                      {generationSettings.provider !== 'hermes' && (
+                        <>
+                          <label className="block space-y-1.5">
+                            <span className={labelClass}>Temperature</span>
+                            <input
+                              type="number"
+                              min={0}
+                              max={2}
+                              step={0.05}
+                              value={generationSettings.temperature}
+                              onChange={(event) => updateGenerationSettings({ temperature: Number(event.target.value) })}
+                              className={inputClass}
+                            />
+                          </label>
+                          <label className="block space-y-1.5">
+                            <span className={labelClass}>Max Tokens</span>
+                            <input
+                              type="number"
+                              min={64}
+                              max={8192}
+                              step={64}
+                              value={generationSettings.maxTokens}
+                              onChange={(event) => updateGenerationSettings({ maxTokens: Number(event.target.value) })}
+                              className={inputClass}
+                            />
+                          </label>
+                        </>
+                      )}
                       <label className="block space-y-1.5">
                         <span className={labelClass}>Timeout Seconds</span>
                         <input

@@ -351,7 +351,7 @@ export function UmbraPositivePromptEditor({
         <span className="rounded-sm border border-white/10 bg-black/25 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400">
           {segments.length} field{segments.length === 1 ? '' : 's'}
         </span>
-        <div className="ml-auto flex items-center gap-1">
+        <div data-umbra-prompt-toolbar="" className="ml-auto flex items-center gap-1">
           <PromptWildcardLibrary onInsert={insertWildcard} compact />
           <button
             type="button"
@@ -467,7 +467,7 @@ export function UmbraPositivePromptEditor({
           const fieldHistory = fieldHistoriesRef.current.get(segment.id);
           return (
             <article key={segment.id} className={cn('rounded-md border border-white/10 bg-black/25 p-2 transition-colors', active && activeClasses)}>
-              <div className="mb-1.5 flex items-center gap-1.5">
+              <div data-umbra-prompt-field-header="" className="mb-1.5 flex items-center gap-1.5">
                 <span className="font-mono text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-400">
                   {segment.label || (index === 0 ? 'Base' : `Segment ${index + 1}`)}
                 </span>
@@ -476,7 +476,7 @@ export function UmbraPositivePromptEditor({
                     {segment.variantName}
                   </span>
                 ) : null}
-                <div className="ml-auto flex items-center gap-1">
+                <div data-umbra-prompt-field-actions="" className="ml-auto flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() => undoField(segment.id)}

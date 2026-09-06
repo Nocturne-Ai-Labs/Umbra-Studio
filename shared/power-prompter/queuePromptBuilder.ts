@@ -106,12 +106,16 @@ export function areChainLinkedTokensAllowed(tokens: Array<{ variantId: string; c
 
 function applyChainLinkedTokens<T extends { slotId: string; variantId: string; chainLinks?: string[] }>(
   tokens: T[],
-  candidateTokens: T[]
+  candidateTokens: T[],
+  candidateIndex?: Map<string, T>
 ): T[] | null {
-  const candidatesById = new Map<string, T>();
-  for (const candidate of candidateTokens) {
-    const variantId = String(candidate.variantId || '').trim();
-    if (variantId && !candidatesById.has(variantId)) candidatesById.set(variantId, candidate);
+  if (tokens.every((token) => normalizeChainLinks(token.chainLinks, token.variantId).length === 0)) return tokens;
+  const candidatesById = candidateIndex || new Map<string, T>();
+  if (!candidateIndex) {
+    for (const candidate of candidateTokens) {
+      const variantId = String(candidate.variantId || '').trim();
+      if (variantId && !candidatesById.has(variantId)) candidatesById.set(variantId, candidate);
+    }
   }
   if (candidatesById.size <= 0) return tokens;
 
@@ -251,7 +255,9 @@ export function buildQueuePromptsFromCards(
     && (slot.utilityKind === 'wildcard' || String(slot.label || '').trim().toLowerCase().startsWith('wildcard utility'))
   );
   const getSlotTraversalRole = (slotEntry: typeof slotVariants[number]) => (
-    normalizeQueueTraversalRole(slotEntry.variants[0]?.queueTraversalRole)
+    isWildcardUtilitySlot(slotEntry)
+      ? 'cycle'
+      : normalizeQueueTraversalRole(slotEntry.variants[0]?.queueTraversalRole)
   );
   const orderSlotTokenGroupsForTraversal = (groups: QueuePromptSlotTokenGroup[]): QueuePromptSlotTokenGroup[] => (
     [...groups].sort((left, right) => {
@@ -286,12 +292,14 @@ export function buildQueuePromptsFromCards(
       return String(left.createdAt || '').localeCompare(String(right.createdAt || ''));
     });
   };
-  const getWildcardRerollsForSet = (setId: number): number => Math.max(1, ...slotVariants
-    .filter((slotEntry) => isWildcardUtilitySlot(slotEntry))
-    .flatMap((slotEntry) => getSelectedForSet(slotEntry.variants, setId))
-    .filter((card) => normalizeQueueTraversalRole(card.queueTraversalRole) !== 'hold')
-    .filter((card) => /__[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}__/.test(String(card.text || '')))
-    .map((card) => normalizeWildcardRerolls(card.wildcardRerolls)));
+  const getTokenWildcardRerolls = (token: QueuePromptToken): number => (
+    token.wildcardMode === 'reroll'
+      ? normalizeWildcardRerolls(token.wildcardRerolls)
+      : 1
+  );
+  const getEntryWildcardRerolls = (entry: QueuePromptBuildEntry | null | undefined): number => (
+    entry ? Math.max(1, ...entry.tokens.map(getTokenWildcardRerolls)) : 1
+  );
   let documentShuffleSalt = '';
   const getDocumentShuffleSalt = () => {
     if (documentShuffleSalt) return documentShuffleSalt;
@@ -328,6 +336,7 @@ export function buildQueuePromptsFromCards(
           ...(isWildcardUtilitySlot(slotEntry)
             ? {
               wildcardMode: normalizeQueueTraversalRole(card.queueTraversalRole) === 'hold' ? 'hold' as const : 'reroll' as const,
+              wildcardRerolls: normalizeWildcardRerolls(card.wildcardRerolls),
               wildcardHoldSelections: normalizeUmbraWildcardHoldSelections(card.wildcardHoldSelections),
               wildcardContextEnabled: card.wildcardContextEnabled === true,
             }
@@ -340,7 +349,6 @@ export function buildQueuePromptsFromCards(
       : tokens;
     return { slotEntry, slotIndex, tokens: orderedTokens };
   });
-  const getSlotTokensForSet = (setId: number) => getSlotTokenGroupsForSet(setId).map((group) => group.tokens);
   const sanitizeOutputSubfolderSegment = (value: string): string => {
     const normalized = String(value || '')
       .trim()
@@ -396,21 +404,6 @@ export function buildQueuePromptsFromCards(
     ));
     return uniqueFolders.length <= 1 ? folders.map(() => '') : folders;
   };
-  const countExhaustivePromptLengths = (lengths: number[]): number => {
-    if (lengths.every((length) => Math.max(0, Math.floor(Number(length) || 0)) === 0)) return 0;
-    let total = 1;
-    for (const lengthRaw of lengths) {
-      const factor = Math.max(1, Math.max(0, Math.floor(Number(lengthRaw) || 0)));
-      if (!Number.isFinite(total * factor) || total > Number.MAX_SAFE_INTEGER / factor) {
-        return Number.MAX_SAFE_INTEGER;
-      }
-      total *= factor;
-    }
-    return total;
-  };
-  const countExhaustivePrompts = (slotTokens: QueuePromptToken[][]): number => {
-    return countExhaustivePromptLengths(slotTokens.map((tokens) => tokens.length));
-  };
   const buildPromptFromSegments = (segments: string[]): string => normalizePowerPrompterPromptText(
     segments
       .map((segment) => String(segment || '').trim())
@@ -428,6 +421,7 @@ export function buildQueuePromptsFromCards(
         variantName: String(token.variantName || '').trim(),
         text: String(token.text || '').trim(),
         ...(token.wildcardMode ? { wildcardMode: token.wildcardMode } : {}),
+        ...(token.wildcardRerolls ? { wildcardRerolls: token.wildcardRerolls } : {}),
         ...(token.wildcardHoldSelections ? { wildcardHoldSelections: token.wildcardHoldSelections } : {}),
         ...(token.wildcardContextEnabled === true ? { wildcardContextEnabled: true } : {}),
       }))
@@ -441,8 +435,19 @@ export function buildQueuePromptsFromCards(
       return leftOrder - rightOrder;
     })
   );
+  // Candidate arrays are immutable for this build; reuse their lookup across combinations.
+  const candidateIndexes = new WeakMap<QueuePromptToken[], Map<string, QueuePromptToken>>();
   const buildEntryFromTokens = (tokens: QueuePromptToken[], candidateTokens: QueuePromptToken[] = tokens): QueuePromptBuildEntry | null => {
-    const linkedTokens = applyChainLinkedTokens(tokens, candidateTokens) || null;
+    let candidateIndex = candidateIndexes.get(candidateTokens);
+    if (!candidateIndex && tokens.some((token) => token.chainLinks.length > 0)) {
+      candidateIndex = new Map<string, QueuePromptToken>();
+      for (const candidate of candidateTokens) {
+        const id = String(candidate.variantId || '').trim();
+        if (id && !candidateIndex.has(id)) candidateIndex.set(id, candidate);
+      }
+      candidateIndexes.set(candidateTokens, candidateIndex);
+    }
+    const linkedTokens = applyChainLinkedTokens(tokens, candidateTokens, candidateIndex) || null;
     if (!linkedTokens) return null;
     const filteredTokens = orderTokensForPrompt(filterBlockedTokens(linkedTokens));
     const prompt = buildPromptFromSegments(filteredTokens.map((token) => token.text));
@@ -469,13 +474,14 @@ export function buildQueuePromptsFromCards(
     const indices = new Array(tokenGrid.length).fill(0);
     const entries: QueuePromptBuildEntry[] = [];
     const promptSet = new Set<string>();
+    const candidateTokens = slotTokens.flat();
     let truncated = false;
     while (true) {
       const selectedTokens = tokenGrid.flatMap((tokens, slotIndex) => {
         const selected = tokens[indices[slotIndex]];
         return selected ? [selected] : [];
       });
-      const entry = buildEntryFromTokens(selectedTokens, slotTokens.flat());
+      const entry = buildEntryFromTokens(selectedTokens, candidateTokens);
       if (entry && !promptSet.has(entry.prompt)) {
         promptSet.add(entry.prompt);
         entries.push(entry);
@@ -500,45 +506,38 @@ export function buildQueuePromptsFromCards(
     if (Number.isFinite(limit) && limit <= 0) {
       return { entries: [], prompts: [], styleMeta: [], truncated: true };
     }
-    const sampleBuiltQueue = (
-      entries: QueuePromptBuildEntry[],
-      prompts: string[],
-      styleMeta: QueuePromptStyleMeta[],
-      finalLimit: number
-    ): { entries: QueuePromptBuildEntry[]; prompts: string[]; styleMeta: QueuePromptStyleMeta[]; truncated: boolean } => {
-      const safeLimit = Math.max(0, Math.floor(Number(finalLimit) || 0));
-      if (!Number.isFinite(finalLimit) || safeLimit <= 0 || prompts.length <= safeLimit) {
-        return { entries, prompts, styleMeta, truncated: false };
-      }
-      return {
-        entries: entries.slice(0, safeLimit),
-        prompts: prompts.slice(0, safeLimit),
-        styleMeta: styleMeta.slice(0, safeLimit),
-        truncated: true,
-      };
-    };
-    const wildcardRerolls = getWildcardRerollsForSet(setId);
     const expandWildcardRerolls = (
       entries: QueuePromptBuildEntry[],
       prompts: string[],
       styleMeta: QueuePromptStyleMeta[],
       finalLimit: number,
     ) => {
-      if (wildcardRerolls <= 1) return sampleBuiltQueue(entries, prompts, styleMeta, finalLimit);
       const expandedEntries: QueuePromptBuildEntry[] = [];
       const expandedPrompts: string[] = [];
       const expandedStyleMeta: QueuePromptStyleMeta[] = [];
+      const safeLimit = Math.max(0, Math.floor(Number(finalLimit) || 0));
+      const expansionLimit = Number.isFinite(finalLimit) && safeLimit > 0 ? safeLimit : Number.POSITIVE_INFINITY;
+      let totalExpanded = 0;
       for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
-        for (let rerollIndex = 0; rerollIndex < wildcardRerolls; rerollIndex += 1) {
+        const wildcardRerolls = getEntryWildcardRerolls(entries[entryIndex]);
+        totalExpanded += wildcardRerolls;
+        for (let rerollIndex = 0; rerollIndex < wildcardRerolls && expandedEntries.length < expansionLimit; rerollIndex += 1) {
           expandedEntries.push(entries[entryIndex]);
           expandedPrompts.push(prompts[entryIndex]);
           expandedStyleMeta.push({
             ...styleMeta[entryIndex],
-            seedGroupId: `${styleMeta[entryIndex].seedGroupId}:wildcard-reroll:${rerollIndex}`,
+            seedGroupId: wildcardRerolls > 1
+              ? `${styleMeta[entryIndex].seedGroupId}:wildcard-reroll:${rerollIndex}`
+              : styleMeta[entryIndex].seedGroupId,
           });
         }
       }
-      return sampleBuiltQueue(expandedEntries, expandedPrompts, expandedStyleMeta, finalLimit);
+      return {
+        entries: expandedEntries,
+        prompts: expandedPrompts,
+        styleMeta: expandedStyleMeta,
+        truncated: totalExpanded > expansionLimit,
+      };
     };
     const slotTokenGroups = getSlotTokenGroupsForSet(setId);
     const baseTokenGroups = orderSlotTokenGroupsForTraversal(
@@ -549,7 +548,7 @@ export function buildQueuePromptsFromCards(
     const hasFiniteLimit = Number.isFinite(limit);
     const finalLimit = hasFiniteLimit ? Math.max(0, Math.floor(Number(limit) || 0)) : limit;
     const baseLimit = hasFiniteLimit
-      ? Math.max(1, Math.ceil(finalLimit / (Math.max(1, styleTokens.length) * wildcardRerolls)))
+      ? Math.max(1, Math.ceil(finalLimit / Math.max(1, styleTokens.length)))
       : finalLimit;
     const baseBuilt = buildExhaustiveFromTokens(baseSlotTokens, baseLimit);
     const baseEntries = baseBuilt.entries.length > 0
@@ -564,7 +563,7 @@ export function buildQueuePromptsFromCards(
         truncated: baseBuilt.truncated,
       };
       if (!hasFiniteLimit) {
-        const sampled = expandWildcardRerolls(built.entries, built.prompts, built.styleMeta, built.prompts.length * wildcardRerolls);
+        const sampled = expandWildcardRerolls(built.entries, built.prompts, built.styleMeta, Number.POSITIVE_INFINITY);
         return {
           ...sampled,
           truncated: built.truncated || sampled.truncated,
@@ -580,11 +579,12 @@ export function buildQueuePromptsFromCards(
     const prompts: string[] = [];
     const styleMeta: QueuePromptStyleMeta[] = [];
     let truncated = baseBuilt.truncated;
+    const styledCandidates = [...baseSlotTokens.flat(), ...styleTokens];
     for (let baseIndex = 0; baseIndex < baseEntries.length; baseIndex += 1) {
       const baseEntry = baseEntries[baseIndex];
       for (let styleIndex = 0; styleIndex < styleTokens.length; styleIndex += 1) {
         const styleToken = styleTokens[styleIndex];
-        const entry = buildStyledEntryFromTokens(baseEntry.tokens, styleToken, [...baseSlotTokens.flat(), ...styleTokens]);
+        const entry = buildStyledEntryFromTokens(baseEntry.tokens, styleToken, styledCandidates);
         if (!entry) continue;
         entries.push(entry);
         prompts.push(entry.prompt);
@@ -598,7 +598,7 @@ export function buildQueuePromptsFromCards(
       }
     }
     if (!hasFiniteLimit) {
-      const sampled = expandWildcardRerolls(entries, prompts, styleMeta, prompts.length * wildcardRerolls);
+      const sampled = expandWildcardRerolls(entries, prompts, styleMeta, Number.POSITIVE_INFINITY);
       return {
         ...sampled,
         truncated: truncated || sampled.truncated,
@@ -610,42 +610,52 @@ export function buildQueuePromptsFromCards(
       truncated: truncated || sampled.truncated,
     };
   };
-  const countBuiltEntriesFromLengths = (
-    slotTokenLengths: number[],
-    modeLimit: number
-  ): { count: number; truncated: boolean } => {
-    const safeLimit = Number.isFinite(modeLimit)
-      ? Math.max(0, Math.floor(Number(modeLimit) || 0))
-      : Number.MAX_SAFE_INTEGER;
-    if (safeLimit <= 0) return { count: 0, truncated: false };
-    const total = countExhaustivePromptLengths(slotTokenLengths);
-    return {
-      count: Math.min(total, safeLimit),
-      truncated: total > safeLimit,
-    };
+  const countWeightedWildcardEntries = (groups: QueuePromptSlotTokenGroup[]): { entries: number; weighted: number } => {
+    if (groups.every((group) => group.tokens.length === 0)) return { entries: 0, weighted: 0 };
+    let distribution = new Map<number, number>([[1, 1]]);
+    for (const group of groups) {
+      if (group.tokens.length === 0) continue;
+      const tokenCounts = new Map<number, number>();
+      for (const token of group.tokens) {
+        const rerolls = getTokenWildcardRerolls(token);
+        tokenCounts.set(rerolls, (tokenCounts.get(rerolls) || 0) + 1);
+      }
+      const next = new Map<number, number>();
+      for (const [currentMax, currentWays] of distribution) {
+        for (const [tokenRerolls, tokenWays] of tokenCounts) {
+          const nextMax = Math.max(currentMax, tokenRerolls);
+          const addedWays = Math.min(Number.MAX_SAFE_INTEGER, currentWays * tokenWays);
+          next.set(nextMax, Math.min(Number.MAX_SAFE_INTEGER, (next.get(nextMax) || 0) + addedWays));
+        }
+      }
+      distribution = next;
+    }
+    let entries = 0;
+    let weighted = 0;
+    for (const [rerolls, ways] of distribution) {
+      entries = Math.min(Number.MAX_SAFE_INTEGER, entries + ways);
+      weighted = Math.min(Number.MAX_SAFE_INTEGER, weighted + (rerolls * ways));
+    }
+    return { entries, weighted };
   };
   const countForSet = (setId: number, limit: number): { count: number; truncated: boolean } => {
     if (Number.isFinite(limit) && limit <= 0) {
       return { count: 0, truncated: true };
     }
-    const baseSlotLengths = orderSlotTokenGroupsForTraversal(
+    const baseSlotGroups = orderSlotTokenGroupsForTraversal(
       getSlotTokenGroupsForSet(setId).filter((group) => !isStyleSlot(group.slotEntry))
-    ).map((group) => group.tokens.length);
+    );
     const styleCount = getStyleTokensForSet(setId).length;
     const hasFiniteLimit = Number.isFinite(limit);
     const finalLimit = hasFiniteLimit ? Math.max(0, Math.floor(Number(limit) || 0)) : Number.MAX_SAFE_INTEGER;
-    const baseBuilt = countBuiltEntriesFromLengths(baseSlotLengths, Number.MAX_SAFE_INTEGER);
-    const baseEntryCount = baseBuilt.count > 0
-      ? baseBuilt.count
-      : (styleCount > 0 ? 1 : 0);
-    const logicalPromptCount = styleCount > 0
-      ? Math.min(Number.MAX_SAFE_INTEGER, baseEntryCount * styleCount)
-      : baseEntryCount;
-    const totalBeforeModeLimit = Math.min(Number.MAX_SAFE_INTEGER, logicalPromptCount * getWildcardRerollsForSet(setId));
+    const baseCount = countWeightedWildcardEntries(baseSlotGroups);
+    const totalBeforeModeLimit = baseCount.entries > 0
+      ? Math.min(Number.MAX_SAFE_INTEGER, baseCount.weighted * Math.max(1, styleCount))
+      : styleCount;
     const effectiveLimit = hasFiniteLimit ? Math.min(finalLimit, totalBeforeModeLimit) : totalBeforeModeLimit;
     return {
       count: Math.max(0, Math.min(totalBeforeModeLimit, effectiveLimit)),
-      truncated: baseBuilt.truncated || totalBeforeModeLimit > effectiveLimit,
+      truncated: totalBeforeModeLimit > effectiveLimit,
     };
   };
   const returnCountOnly = (count: number, truncated: boolean) => ({
@@ -681,6 +691,7 @@ export function buildQueuePromptsFromCards(
         ...(isWildcardUtilitySlot(slot)
           ? {
             wildcardMode: normalizeQueueTraversalRole(selected.queueTraversalRole) === 'hold' ? 'hold' as const : 'reroll' as const,
+            wildcardRerolls: normalizeWildcardRerolls(selected.wildcardRerolls),
             wildcardHoldSelections: normalizeUmbraWildcardHoldSelections(selected.wildcardHoldSelections),
             wildcardContextEnabled: selected.wildcardContextEnabled === true,
           }
@@ -689,7 +700,7 @@ export function buildQueuePromptsFromCards(
     });
     const promptEntry = buildEntryFromTokens(selectedTokens, selectedTokens);
     const normalizedPrompt = promptEntry?.prompt || '';
-    const wildcardRerolls = normalizedPrompt ? getWildcardRerollsForSet(activeSetId) : 0;
+    const wildcardRerolls = normalizedPrompt ? getEntryWildcardRerolls(promptEntry) : 0;
     const promptCount = normalizedPrompt ? wildcardRerolls : 0;
     if (options?.countOnly === true) {
       return returnCountOnly(Math.min(promptCount, queuePromptCap), promptCount > queuePromptCap);

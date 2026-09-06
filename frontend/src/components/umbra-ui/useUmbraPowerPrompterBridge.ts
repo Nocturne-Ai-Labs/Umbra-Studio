@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { ModelInfoRequestCache } from '@/lib/modelInfoRequestCache';
 import {
   createPrompterWsUrl,
   type PowerPrompterInfoRequestOptions,
@@ -9,6 +10,7 @@ import {
 } from '@/components/power-prompter/powerPrompterSupport';
 import {
   composeUmbraUiPromptWithLoras,
+  extractUmbraUiLoraTriggerWords,
   type UmbraUiLoraEntry,
 } from '@/lib/umbraUiModels';
 import { readUmbraObjectInfoRequiredInputs } from '@/lib/umbraUiObjectInfo';
@@ -64,6 +66,7 @@ interface QueuePrompt {
   prompt: string;
   status: QueuePromptStatus;
   updatedAt: number;
+  error: string;
 }
 
 interface QueueRequest {
@@ -228,6 +231,7 @@ export interface UmbraSavedImage {
   name: string;
   path: string;
   imageUrl: string;
+  comfyViewUrl?: string;
   updatedAt: number;
 }
 
@@ -430,7 +434,7 @@ async function fetchUmbraUiCatalogInfo(
   kind: 'checkpoint' | 'lora',
   name: string,
 ): Promise<PowerPrompterLoraInfoPayload | PowerPrompterModelInfoPayload> {
-  const response = await fetch(`/api/umbra-ui/catalog/info?${new URLSearchParams({ kind, name }).toString()}`, { cache: 'no-store' });
+  const response = await fetch(`/api/umbra-ui/catalog/info?${new URLSearchParams({ kind, name }).toString()}`, { cache: 'no-store', signal: AbortSignal.timeout(30000) });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.success === false || !payload?.info) {
     throw new Error(String(payload?.error || `${kind} metadata returned ${response.status}.`));
@@ -543,6 +547,7 @@ function normalizeQueueSnapshot(value: unknown): QueueSnapshot | null {
               promptIndex: toFiniteInteger(prompt.promptIndex, 0, 0, Number.MAX_SAFE_INTEGER),
               prompt: String(prompt.prompt || '').trim(),
               status: String(prompt.status || 'pending').trim() as QueuePromptStatus,
+              error: String(prompt.error || '').trim(),
               updatedAt: toFiniteInteger(prompt.updatedAt, 0, 0, Number.MAX_SAFE_INTEGER),
             }))
           : [],
@@ -653,8 +658,8 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   const [pipelineCatalogRevision, setPipelineCatalogRevision] = React.useState(0);
   const [loraCatalog, setLoraCatalog] = React.useState<string[]>([]);
   const [loraCatalogLoading, setLoraCatalogLoading] = React.useState(false);
-  const loraInfoCacheRef = React.useRef(new Map<string, PowerPrompterLoraInfoPayload>());
-  const modelInfoCacheRef = React.useRef(new Map<string, PowerPrompterModelInfoPayload>());
+  const loraInfoCacheRef = React.useRef(new ModelInfoRequestCache<PowerPrompterLoraInfoPayload>((info) => info.civitai ? 300_000 : 30_000));
+  const modelInfoCacheRef = React.useRef(new ModelInfoRequestCache<PowerPrompterModelInfoPayload>((info) => info.civitai ? 300_000 : 30_000));
 
   const refreshVideoJobs = React.useCallback(async () => {
     const mutationRevision = videoJobsMutationRevisionRef.current;
@@ -1045,10 +1050,13 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
             trainedTags: Array.isArray(payload?.trainedTags)
               ? Array.from(new Set(payload.trainedTags.map((entry) => String(entry || '').trim()).filter(Boolean)))
               : [],
+            triggerWords: extractUmbraUiLoraTriggerWords(payload),
+            trainingTags: Array.isArray(payload?.trainingTags)
+              ? Array.from(new Set(payload.trainingTags.map((entry) => String(entry || '').trim()).filter(Boolean)))
+              : [],
             descriptionHtml: String(payload?.descriptionHtml || '').trim(),
             descriptionText: String(payload?.descriptionText || '').trim(),
           };
-          if (info.loraName) loraInfoCacheRef.current.set(info.loraName.toLowerCase(), info);
           pending.resolve(info);
           return;
         }
@@ -1076,7 +1084,6 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
             descriptionHtml: String(payload?.descriptionHtml || '').trim(),
             descriptionText: String(payload?.descriptionText || '').trim(),
           };
-          if (info.modelName) modelInfoCacheRef.current.set(info.modelName.toLowerCase(), info);
           pending.resolve(info);
           return;
         }
@@ -1136,6 +1143,9 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
             name,
             path,
             imageUrl: `/api/fs/image?${new URLSearchParams({ path }).toString()}`,
+            ...(typeof image.filename === 'string' && ['output', 'temp', 'input'].includes(String(image.type)) ? {
+              comfyViewUrl: `/comfy/view?${new URLSearchParams({ filename: image.filename, subfolder: String(image.subfolder || ''), type: String(image.type) }).toString()}`,
+            } : {}),
             updatedAt: Date.now(),
           });
           window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
@@ -1213,37 +1223,35 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   ): Promise<PowerPrompterLoraInfoPayload> => {
     const normalizedName = String(loraName || '').trim().replace(/\\/g, '/');
     if (!normalizedName) return Promise.reject(new Error('Choose a LoRA first.'));
-    const cached = loraInfoCacheRef.current.get(normalizedName.toLowerCase());
-    if (cached && options?.previewOnly !== true) return Promise.resolve(cached);
-    const requestThroughHttp = () => (fetchUmbraUiCatalogInfo('lora', normalizedName) as Promise<PowerPrompterLoraInfoPayload>)
-      .then((info) => {
-        loraInfoCacheRef.current.set(normalizedName.toLowerCase(), info);
-        return info;
-      });
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || !connected) {
-      return requestThroughHttp();
-    }
-    const requestId = createRequestId();
-    return new Promise<PowerPrompterLoraInfoPayload>((resolve, reject) => {
-      const timer = window.setTimeout(() => {
-        pendingLoraInfoRef.current.delete(requestId);
-        reject(new Error('LoRA metadata request timed out.'));
-      }, CATALOG_REQUEST_TIMEOUT_MS);
-      pendingLoraInfoRef.current.set(requestId, { resolve, reject, timer });
-      try {
-        ws.send(JSON.stringify({
-          type: 'lora_info_request',
-          requestId,
-          loraName: normalizedName,
-          previewOnly: options?.previewOnly === true,
-        }));
-      } catch (error) {
-        window.clearTimeout(timer);
-        pendingLoraInfoRef.current.delete(requestId);
-        reject(error instanceof Error ? error : new Error('Failed to request LoRA metadata.'));
+    return loraInfoCacheRef.current.get(`${options?.previewOnly ? 'preview' : 'full'}:${normalizedName.toLowerCase()}`, () => {
+      const requestThroughHttp = () => fetchUmbraUiCatalogInfo('lora', normalizedName) as Promise<PowerPrompterLoraInfoPayload>;
+      // Previews do not require an open ComfyUI browser bridge or its 30s timeout.
+      if (options?.previewOnly) return requestThroughHttp();
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN || !connected) {
+        return requestThroughHttp();
       }
-    }).catch(requestThroughHttp);
+      const requestId = createRequestId();
+      return new Promise<PowerPrompterLoraInfoPayload>((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+          pendingLoraInfoRef.current.delete(requestId);
+          reject(new Error('LoRA metadata request timed out.'));
+        }, CATALOG_REQUEST_TIMEOUT_MS);
+        pendingLoraInfoRef.current.set(requestId, { resolve, reject, timer });
+        try {
+          ws.send(JSON.stringify({
+            type: 'lora_info_request',
+            requestId,
+            loraName: normalizedName,
+            previewOnly: options?.previewOnly === true,
+          }));
+        } catch (error) {
+          window.clearTimeout(timer);
+          pendingLoraInfoRef.current.delete(requestId);
+          reject(error instanceof Error ? error : new Error('Failed to request LoRA metadata.'));
+        }
+      }).catch(requestThroughHttp);
+    });
   }, [connected]);
 
   const requestModelInfo = React.useCallback((
@@ -1252,40 +1260,38 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   ): Promise<PowerPrompterModelInfoPayload> => {
     const normalizedName = String(modelName || '').trim().replace(/\\/g, '/');
     if (!normalizedName) return Promise.reject(new Error('Choose a checkpoint first.'));
-    const cached = modelInfoCacheRef.current.get(normalizedName.toLowerCase());
-    if (cached && options?.previewOnly !== true) return Promise.resolve(cached);
-    const requestThroughHttp = () => (fetchUmbraUiCatalogInfo('checkpoint', normalizedName) as Promise<PowerPrompterModelInfoPayload>)
-      .then((info) => {
-        modelInfoCacheRef.current.set(normalizedName.toLowerCase(), info);
-        return info;
-      });
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || !connected) {
-      return requestThroughHttp();
-    }
-    const requestId = createRequestId();
-    return new Promise<PowerPrompterModelInfoPayload>((resolve, reject) => {
-      const timer = window.setTimeout(() => {
-        pendingModelInfoRef.current.delete(requestId);
-        reject(new Error('Checkpoint metadata request timed out.'));
-      }, CATALOG_REQUEST_TIMEOUT_MS);
-      pendingModelInfoRef.current.set(requestId, { resolve, reject, timer });
-      try {
-        ws.send(JSON.stringify({
-          type: 'model_info_request',
-          requestId,
-          modelName: normalizedName,
-          previewOnly: options?.previewOnly === true,
-        }));
-      } catch (error) {
-        window.clearTimeout(timer);
-        pendingModelInfoRef.current.delete(requestId);
-        reject(error instanceof Error ? error : new Error('Failed to request checkpoint metadata.'));
+    return modelInfoCacheRef.current.get(`${options?.previewOnly ? 'preview' : 'full'}:${normalizedName.toLowerCase()}`, () => {
+      const requestThroughHttp = () => fetchUmbraUiCatalogInfo('checkpoint', normalizedName) as Promise<PowerPrompterModelInfoPayload>;
+      if (options?.previewOnly) return requestThroughHttp();
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN || !connected) {
+        return requestThroughHttp();
       }
-    }).catch(requestThroughHttp);
+      const requestId = createRequestId();
+      return new Promise<PowerPrompterModelInfoPayload>((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+          pendingModelInfoRef.current.delete(requestId);
+          reject(new Error('Checkpoint metadata request timed out.'));
+        }, CATALOG_REQUEST_TIMEOUT_MS);
+        pendingModelInfoRef.current.set(requestId, { resolve, reject, timer });
+        try {
+          ws.send(JSON.stringify({
+            type: 'model_info_request',
+            requestId,
+            modelName: normalizedName,
+            previewOnly: options?.previewOnly === true,
+          }));
+        } catch (error) {
+          window.clearTimeout(timer);
+          pendingModelInfoRef.current.delete(requestId);
+          reject(error instanceof Error ? error : new Error('Failed to request checkpoint metadata.'));
+        }
+      }).catch(requestThroughHttp);
+    });
   }, [connected]);
 
   const refreshLoraCatalog = React.useCallback(async () => {
+    loraInfoCacheRef.current.clear();
     setLoraCatalogLoading(true);
     try {
       const items = await requestLoraCatalog();
@@ -1360,6 +1366,14 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       await sendQueueControl('queue_interrupt_active', [activeRequestId], activeRequestId);
     }
   }, [queueSummary.umbraUiActiveRequestId, queueSummary.umbraUiRequestIds, sendQueueControl]);
+
+  const cancelOwnedImage = React.useCallback(async (requestId: string) => {
+    if (!ownedRequestIdsRef.current.has(requestId)) throw new Error('This generation belongs to another workspace.');
+    await sendQueueControl('queue_cancel', [requestId]);
+    if (queueSummary.umbraUiActiveRequestId === requestId) {
+      await sendQueueControl('queue_interrupt_active', [requestId], requestId);
+    }
+  }, [queueSummary.umbraUiActiveRequestId, sendQueueControl]);
 
   const submitQueueBatchRequest = React.useCallback((
     prompts: string[],
@@ -2066,6 +2080,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     modelCatalog,
     videoModelCatalog,
     refreshModelCatalog: () => {
+      modelInfoCacheRef.current.clear();
       setModelCatalogRevision((revision) => revision + 1);
       setPipelineCatalogRevision((revision) => revision + 1);
     },
@@ -2077,6 +2092,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     inheritedGeneration,
     queueSummary,
     queueActivities,
+    queueErrors: Object.fromEntries((queueSnapshot?.requests || []).map(request => [request.requestId, request.prompts.map(prompt => prompt.error).filter(Boolean).join('\n')])),
     videoJobs,
     videoJobsLoading,
     videoJobsError,
@@ -2086,6 +2102,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     latestSavedImage,
     skipActiveUmbraJob,
     stopAllUmbraJobs,
+    cancelOwnedImage,
     queueImage,
     queueVideo,
   };

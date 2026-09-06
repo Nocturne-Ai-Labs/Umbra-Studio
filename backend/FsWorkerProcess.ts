@@ -2,6 +2,8 @@ import { join, basename, extname, dirname, resolve } from 'path';
 import { existsSync, type Dirent } from 'fs';
 import * as fs from 'fs/promises';
 import { spawn } from 'node:child_process';
+import { GalleryDb } from '../gallery/GalleryDb';
+import { copyTreeExclusive, type CopyProgress } from './FsTransferCopy';
 
 type FsFilter = string | null;
 
@@ -172,6 +174,7 @@ type FsSystemTrashRequest = {
 };
 
 type FsWorkerRequest =
+  | { id: string; type: 'gallery-transfer'; payload: { mode: 'move' | 'copy'; pairs: Array<{ sourcePath: string; targetPath: string }> } }
   | FsWarmupRequest
   | FsInvalidateRequest
   | FsListRequest
@@ -877,7 +880,7 @@ async function runFolderSummary(payload: FsFolderSummaryRequest['payload']) {
       videoCount += 1;
       continue;
     }
-    if (entry.mediaType === 'gif') {
+    if (extname(entry.name).toLowerCase() === '.gif') {
       gifCount += 1;
       continue;
     }
@@ -1012,30 +1015,8 @@ async function removePathRecursiveSafe(targetPath: string, force = false): Promi
   throw new Error(stderrText || `Failed to remove path: ${targetPath}`);
 }
 
-async function copyPathRecursive(sourcePath: string, targetPath: string): Promise<void> {
-  const sourceStat = await fs.lstat(sourcePath);
-
-  if (sourceStat.isSymbolicLink()) {
-    const linkTarget = await fs.readlink(sourcePath);
-    await withMoveRetry('symlink', () => fs.symlink(linkTarget, targetPath));
-    return;
-  }
-
-  if (sourceStat.isDirectory()) {
-    await withMoveRetry('mkdir', () => fs.mkdir(targetPath, { recursive: true }));
-    const entries = await fs.readdir(sourcePath, { withFileTypes: true });
-    for (const entry of entries) {
-      const childSource = join(sourcePath, entry.name);
-      const childTarget = join(targetPath, entry.name);
-      await copyPathRecursive(childSource, childTarget);
-    }
-    return;
-  }
-
-  await withMoveRetry('copy-file', () => fs.copyFile(sourcePath, targetPath));
-}
-
-async function movePathWithFallback(sourcePath: string, targetPath: string): Promise<void> {
+async function movePathWithFallback(sourcePath: string, targetPath: string, onProgress?: CopyProgress): Promise<void> {
+  if (existsSync(targetPath)) throw new Error('Destination already exists; original retained');
   try {
     await withMoveRetry('rename', () => fs.rename(sourcePath, targetPath));
     return;
@@ -1043,7 +1024,7 @@ async function movePathWithFallback(sourcePath: string, targetPath: string): Pro
     if (err?.code !== 'EXDEV') throw err;
   }
 
-  await copyPathRecursive(sourcePath, targetPath);
+  await copyTreeExclusive(sourcePath, targetPath, onProgress);
   await removePathRecursiveSafe(sourcePath, false);
 }
 
@@ -1072,34 +1053,15 @@ async function movePathCloudSafe(
   sourcePath: string,
   targetPath: string,
   onUnitDone?: (movedPath: string) => Promise<void> | void,
+  onProgress?: CopyProgress,
 ): Promise<void> {
-  const stats = await fs.lstat(sourcePath);
-
-  if (stats.isSymbolicLink()) {
-    const linkTarget = await fs.readlink(sourcePath);
-    await withMoveRetry('cloud-symlink', () => fs.symlink(linkTarget, targetPath));
-    await removePathRecursiveSafe(sourcePath, false);
-    await onUnitDone?.(targetPath);
-    return;
-  }
-
-  if (stats.isDirectory()) {
-    await withMoveRetry('cloud-mkdir', () => fs.mkdir(targetPath, { recursive: true }));
-    const entries = await fs.readdir(sourcePath, { withFileTypes: true });
-    for (const entry of entries) {
-      const childSource = join(sourcePath, entry.name);
-      const childTarget = join(targetPath, entry.name);
-      await movePathCloudSafe(childSource, childTarget, onUnitDone);
-    }
-    await removePathRecursiveSafe(sourcePath, false);
-    return;
-  }
-
-  await withMoveRetry('cloud-copy-file', () => fs.copyFile(sourcePath, targetPath));
-  await waitForFileStable(targetPath);
+  // Do not delete any source children until the complete tree has copied.
+  await copyTreeExclusive(sourcePath, targetPath, onProgress, async (file) => {
+    await waitForFileStable(file);
+    await onUnitDone?.(file);
+    await sleep(180);
+  });
   await removePathRecursiveSafe(sourcePath, false);
-  await onUnitDone?.(targetPath);
-  await sleep(180);
 }
 
 async function countTransferUnits(sourcePath: string): Promise<number> {
@@ -1115,24 +1077,6 @@ async function countTransferUnits(sourcePath: string): Promise<number> {
   return total || 1;
 }
 
-function resolveUniqueMoveTargetPath(baseTargetPath: string, sourceIsDirectory: boolean): string {
-  if (!existsSync(baseTargetPath)) return baseTargetPath;
-
-  const targetDir = dirname(baseTargetPath);
-  const baseName = basename(baseTargetPath);
-  const ext = sourceIsDirectory ? '' : extname(baseName);
-  const nameWithoutExt = sourceIsDirectory ? baseName : baseName.slice(0, -(ext.length || 0));
-
-  let counter = 1;
-  let candidate = baseTargetPath;
-  while (existsSync(candidate)) {
-    const nextName = ext ? `${nameWithoutExt} (${counter})${ext}` : `${nameWithoutExt} (${counter})`;
-    candidate = join(targetDir, nextName);
-    counter += 1;
-  }
-  return candidate;
-}
-
 function resolveReservedMoveTargetPath(
   baseTargetPath: string,
   sourceIsDirectory: boolean,
@@ -1141,7 +1085,7 @@ function resolveReservedMoveTargetPath(
   const targetDir = dirname(baseTargetPath);
   const baseName = basename(baseTargetPath);
   const ext = sourceIsDirectory ? '' : extname(baseName);
-  const nameWithoutExt = sourceIsDirectory ? baseName : baseName.slice(0, -(ext.length || 0));
+  const nameWithoutExt = ext ? baseName.slice(0, -ext.length) : baseName;
 
   let counter = 1;
   let candidate = baseTargetPath;
@@ -1160,6 +1104,7 @@ function emitProgress(id: string, progress: unknown) {
 
 async function runMove(id: string, payload: FsMoveRequest['payload']) {
   const { items, destinationFullPath, transferMode } = payload;
+  emitProgress(id, { phase: 'preparing' });
   await fs.mkdir(destinationFullPath, { recursive: true });
 
   const pathUnits = new Map<string, number>();
@@ -1178,6 +1123,10 @@ async function runMove(id: string, payload: FsMoveRequest['payload']) {
   const totalUnits = Array.from(pathUnits.values()).reduce((sum, units) => sum + Math.max(units, 1), 0) || Math.max(items.length, 1);
   let completedUnits = 0;
   const reservedMoveTargets = new Set<string>();
+  const copyProgress: CopyProgress = (fileBytes, fileTotalBytes, currentPath) => emitProgress(id, {
+    phase: 'transferring', completedUnits, totalUnits, currentPath, fileBytes, fileTotalBytes,
+  });
+  emitProgress(id, { phase: 'transferring', completedUnits, totalUnits });
 
   const results = await mapWithConcurrency(items, transferMode === 'cloud' ? 1 : 4, async (item) => {
     const sourceUnits = Math.max(pathUnits.get(item.sourcePath) || 1, 1);
@@ -1209,9 +1158,9 @@ async function runMove(id: string, payload: FsMoveRequest['payload']) {
         await movePathCloudSafe(item.sourceFullPath, targetPath, async () => {
           completedUnits = Math.min(totalUnits, completedUnits + 1);
           emitProgress(id, { deltaUnits: 1, completedUnits, totalUnits, currentPath: item.sourcePath });
-        });
+        }, copyProgress);
       } else {
-        await movePathWithFallback(item.sourceFullPath, targetPath);
+        await movePathWithFallback(item.sourceFullPath, targetPath, copyProgress);
         completedUnits = Math.min(totalUnits, completedUnits + sourceUnits);
         emitProgress(id, { deltaUnits: sourceUnits, completedUnits, totalUnits, currentPath: item.sourcePath });
       }
@@ -1245,9 +1194,14 @@ async function runMove(id: string, payload: FsMoveRequest['payload']) {
 
 async function runCopy(id: string, payload: FsCopyRequest['payload']) {
   const { items, destinationFullPath } = payload;
+  emitProgress(id, { phase: 'preparing' });
   await fs.mkdir(destinationFullPath, { recursive: true });
   const totalUnits = Math.max(items.length, 1);
   let completedUnits = 0;
+  const reservedTargets = new Set<string>();
+  const copyProgress: CopyProgress = (fileBytes, fileTotalBytes, currentPath) => emitProgress(id, {
+    phase: 'transferring', completedUnits, totalUnits, currentPath, fileBytes, fileTotalBytes,
+  });
 
   const results = await mapWithConcurrency(items, 4, async (item) => {
     try {
@@ -1256,9 +1210,14 @@ async function runCopy(id: string, payload: FsCopyRequest['payload']) {
       const rawTargetPath = item.targetFullPath || join(destinationFullPath, filename);
       const targetPath = item.targetFullPath
         ? rawTargetPath
-        : resolveUniqueMoveTargetPath(rawTargetPath, sourceStat.isDirectory() && !sourceStat.isSymbolicLink());
+        : resolveReservedMoveTargetPath(rawTargetPath, sourceStat.isDirectory() && !sourceStat.isSymbolicLink(), reservedTargets);
+      const sourceNormalized = normalizePathForCompare(item.sourceFullPath);
+      const targetNormalized = normalizePathForCompare(targetPath);
+      if (targetNormalized === sourceNormalized || targetNormalized.startsWith(`${sourceNormalized}/`)) {
+        throw new Error('Cannot copy a folder into itself');
+      }
       await fs.mkdir(dirname(targetPath), { recursive: true });
-      await copyPathRecursive(item.sourceFullPath, targetPath);
+      await copyTreeExclusive(item.sourceFullPath, targetPath, copyProgress);
       completedUnits = Math.min(totalUnits, completedUnits + 1);
       emitProgress(id, {
         deltaUnits: 1,
@@ -1447,8 +1406,38 @@ async function runSystemTrash(payload: FsSystemTrashRequest['payload']) {
   return { success: true };
 }
 
+let transferDb: GalleryDb | undefined;
+
+async function reconcileGalleryTransfer(payload: Extract<FsWorkerRequest, { type: 'gallery-transfer' }>['payload']) {
+  let changed = 0;
+  for (const pair of payload.pairs) {
+    let offset = 0;
+    while (true) {
+      let count = 0;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          transferDb ??= new GalleryDb(process.env.UMBRA_ROOT || process.cwd(), undefined, { busyTimeoutMs: 50, quiet: true });
+          const batch = transferDb.getTransferRecordPairs(pair, offset);
+          count = batch.length;
+          changed += payload.mode === 'move' ? transferDb.moveRecordsForPaths(batch) : transferDb.copyRecordsForPaths(batch);
+          break;
+        } catch (error) {
+          if (attempt >= 30 || !/database is (locked|busy)|SQLITE_BUSY|SQLITE_LOCKED/i.test(String(error))) throw error;
+          await sleep(Math.min(1000, 100 + attempt * 50));
+        }
+      }
+      if (count < 100) break;
+      if (payload.mode === 'copy') offset += count;
+      await sleep(0);
+    }
+  }
+  return { changed };
+}
+
 async function handleRequest(request: FsWorkerRequest) {
   switch (request.type) {
+    case 'gallery-transfer':
+      return reconcileGalleryTransfer(request.payload);
     case 'warmup':
       return { ready: true };
     case 'invalidate':
@@ -1489,6 +1478,18 @@ async function handleRequest(request: FsWorkerRequest) {
 async function main() {
   const decoder = new TextDecoder();
   let buffer = '';
+  let mutations = Promise.resolve();
+  const readers = Array.from({ length: 4 }, () => Promise.resolve());
+  let nextReader = 0;
+  const mutating = new Set(['move', 'copy', 'delete', 'system-trash', 'mkdir', 'rename', 'write', 'gallery-transfer']);
+  const execute = async (request: FsWorkerRequest) => {
+    try {
+      const result = await handleRequest(request);
+      writeResponse({ id: request.id, ok: true, result });
+    } catch (error: any) {
+      writeResponse({ id: request.id, ok: false, error: String(error?.message || error), stack: error?.stack });
+    }
+  };
 
   for await (const chunk of Bun.stdin.stream()) {
     buffer += decoder.decode(chunk, { stream: true });
@@ -1501,8 +1502,13 @@ async function main() {
 
       try {
         const request = JSON.parse(line) as FsWorkerRequest;
-        const result = await handleRequest(request);
-        writeResponse({ id: request.id, ok: true, result });
+        if (mutating.has(request.type)) {
+          if (request.type === 'move' || request.type === 'copy') emitProgress(request.id, { phase: 'queued' });
+          mutations = mutations.then(() => execute(request));
+        } else {
+          const lane = nextReader++ % readers.length;
+          readers[lane] = readers[lane].then(() => execute(request));
+        }
       } catch (error: any) {
         writeResponse({
           id: (() => {
@@ -1519,6 +1525,7 @@ async function main() {
       }
     }
   }
+  await Promise.all([mutations, ...readers]);
 }
 
 main().catch((error) => {

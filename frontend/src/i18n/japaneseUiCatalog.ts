@@ -315,6 +315,7 @@ const JAPANESE_EXACT_ENTRIES: Array<readonly [string, string]> = [
   ['Test URL', 'URLをテスト'],
   ['Thumbnails', 'サムネイル'],
   ['Trained Tokens', '学習済みトークン'],
+  ['Trigger Words', 'トリガーワード'],
   ['TXT2IMG', 'TXT2IMG'],
   ['Update', '更新'],
   ['Upload', 'アップロード'],

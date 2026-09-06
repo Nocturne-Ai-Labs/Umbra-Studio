@@ -171,6 +171,9 @@ function infoName(info: UmbraModelPickerInfo | null): string {
 
 function infoMatchesPath(info: UmbraModelPickerInfo | null, path: string): boolean {
   if (!info || !path) return false;
+  const candidate = infoName(info).toLowerCase().replace(/^(?:checkpoints|loras)\//, '');
+  const requested = normalizeCatalogPath(path).toLowerCase().replace(/^(?:checkpoints|loras)\//, '');
+  if (candidate.includes('/') && requested.includes('/') && candidate !== requested) return false;
   const pathAliases = new Set(getCatalogAliasKeys(path));
   return getCatalogAliasKeys(infoName(info)).some((alias) => pathAliases.has(alias));
 }
@@ -184,11 +187,7 @@ function findCachedInfo(
   kind: UmbraModelPickerKind,
   path: string,
 ): UmbraModelPickerInfo | null {
-  for (const alias of getCatalogAliasKeys(path)) {
-    const cached = cache[getInfoCacheKey(kind, alias)];
-    if (cached) return cached;
-  }
-  return null;
+  return cache[getInfoCacheKey(kind, normalizeCatalogPath(path).toLowerCase())] || null;
 }
 
 function normalizeThumbnailOverrides(value: unknown): Record<string, string[]> {
@@ -216,7 +215,12 @@ function findThumbnailOverrides(overrides: Record<string, string[]>, path: strin
   return [];
 }
 
-function renderPreviewMedia(url: string, alt: string, className: string): React.ReactNode {
+function PreviewMedia({ urls, index, alt, className }: { urls: string[]; index: number; alt: string; className: string }) {
+  const [failed, setFailed] = React.useState<string[]>([]);
+  const available = urls.filter((url) => !failed.includes(url));
+  const url = available[index % available.length];
+  const onError = () => setFailed((current) => current.includes(url) ? current : [...current, url]);
+  if (!url) return <ImageIcon size={18} className="text-zinc-600" aria-label="Preview unavailable" />;
   if (isVideoPreviewUrl(url)) {
     return (
       <video
@@ -227,6 +231,7 @@ function renderPreviewMedia(url: string, alt: string, className: string): React.
         autoPlay
         playsInline
         preload="metadata"
+        onError={onError}
       />
     );
   }
@@ -237,6 +242,8 @@ function renderPreviewMedia(url: string, alt: string, className: string): React.
       className={className}
       loading="lazy"
       referrerPolicy="no-referrer"
+      decoding="async"
+      onError={onError}
     />
   );
 }
@@ -267,20 +274,19 @@ export function UmbraModelPickerModal({
   const [infoCache, setInfoCache] = React.useState<Record<string, UmbraModelPickerInfo>>({});
   const [previewTick, setPreviewTick] = React.useState(0);
   const [thumbnailOverrides, setThumbnailOverrides] = React.useState<Record<string, string[]>>({});
+  const resultsRef = React.useRef<HTMLElement>(null);
+  const [nearbyKeys, setNearbyKeys] = React.useState<Set<string>>(new Set());
+  const [refreshEpoch, setRefreshEpoch] = React.useState(0);
+  const [previewPending, setPreviewPending] = React.useState<Set<string>>(new Set());
   const pendingPreviewInfoRef = React.useRef(new Set<string>());
   const infoCacheRef = React.useRef(infoCache);
   infoCacheRef.current = infoCache;
 
   const cacheInfo = React.useCallback((requestedPath: string, nextInfo: UmbraModelPickerInfo) => {
-    const aliases = Array.from(new Set([
-      ...getCatalogAliasKeys(requestedPath),
-      ...getCatalogAliasKeys(infoName(nextInfo)),
-    ]));
-    if (aliases.length <= 0) return;
+    const path = normalizeCatalogPath(requestedPath).toLowerCase();
+    if (!path) return;
     setInfoCache((current) => {
-      const patch = Object.fromEntries(
-        aliases.map((alias) => [getInfoCacheKey(kind, alias), nextInfo]),
-      );
+      const patch = { [getInfoCacheKey(kind, path)]: nextInfo };
       const merged = { ...current, ...patch };
       infoCacheRef.current = merged;
       return merged;
@@ -354,8 +360,32 @@ export function UmbraModelPickerModal({
   }, [folder, search, sourceFiles]);
 
   React.useEffect(() => {
+    const root = resultsRef.current;
+    if (!open || !root) return;
+    setNearbyKeys(new Set());
+    const observer = new IntersectionObserver((entries) => {
+      setNearbyKeys((current) => {
+        const next = new Set(current);
+        for (const entry of entries) {
+          const key = (entry.target as HTMLElement).dataset.catalogKey!;
+          if (entry.isIntersecting) next.add(key);
+          else next.delete(key);
+        }
+        return next;
+      });
+    }, { root, rootMargin: '200px 0px' });
+    root.querySelectorAll('[data-catalog-key]').forEach((card) => observer.observe(card));
+    return () => observer.disconnect();
+  }, [open, visibleFiles]);
+
+  React.useEffect(() => {
     if (!open) return;
     let disposed = false;
+    setInfoCache((current) => {
+      const next = Object.fromEntries(Object.entries(current).filter(([, value]) => extractPreviewUrls(value).length > 0));
+      infoCacheRef.current = next;
+      return next;
+    });
     void readUserConfig<Record<string, unknown>>('powerprompter-thumbnail-overrides', {})
       .then((value) => {
         if (!disposed) setThumbnailOverrides(normalizeThumbnailOverrides(value));
@@ -420,22 +450,22 @@ export function UmbraModelPickerModal({
     return () => {
       canceled = true;
     };
-  }, [cacheInfo, kind, onRequestInfo, open, selectedFile, selectedPath]);
+  }, [cacheInfo, kind, onRequestInfo, open, selectedFile, selectedPath, refreshEpoch]);
 
   React.useEffect(() => {
-    if (!open) return;
+    if (!open || !selectedPath) return;
     const timer = window.setInterval(() => {
       setPreviewTick((current) => current + 1);
     }, 2400);
     return () => window.clearInterval(timer);
-  }, [open]);
+  }, [open, selectedPath]);
 
   React.useEffect(() => {
     if (!open || !onRequestInfo) return;
     const targets = Array.from(new Set([
       ...visibleFiles
         .filter((file) => kind !== 'checkpoint' || !file.source || file.source === 'checkpoint')
-        .slice(0, 24)
+        .filter((file) => nearbyKeys.has(file.key))
         .map((file) => file.path),
       ...(selectedFile && (kind !== 'checkpoint' || !selectedFile.source || selectedFile.source === 'checkpoint')
         ? [selectedFile.path]
@@ -444,28 +474,33 @@ export function UmbraModelPickerModal({
     if (targets.length <= 0) return;
 
     let canceled = false;
+    let nextIndex = 0;
     const hydrate = async () => {
-      for (const path of targets) {
+      while (nextIndex < targets.length) {
         if (canceled) return;
+        const path = targets[nextIndex++];
+        if (findThumbnailOverrides(thumbnailOverrides, path).length > 0) continue;
         const pendingKey = getInfoCacheKey(kind, path.toLowerCase());
         if (findCachedInfo(infoCacheRef.current, kind, path)) continue;
         if (pendingPreviewInfoRef.current.has(pendingKey)) continue;
         pendingPreviewInfoRef.current.add(pendingKey);
+        setPreviewPending(new Set(pendingPreviewInfoRef.current));
         try {
           const nextInfo = await onRequestInfo(path, { previewOnly: true });
-          if (!canceled) cacheInfo(path, nextInfo);
+          cacheInfo(path, nextInfo);
         } catch {
           // Preview metadata is optional; selection still works without it.
         } finally {
           pendingPreviewInfoRef.current.delete(pendingKey);
+          setPreviewPending(new Set(pendingPreviewInfoRef.current));
         }
       }
     };
-    void hydrate();
+    for (let worker = 0; worker < 4; worker += 1) void hydrate();
     return () => {
       canceled = true;
     };
-  }, [cacheInfo, kind, onRequestInfo, open, selectedFile, visibleFiles]);
+  }, [cacheInfo, kind, onRequestInfo, open, selectedFile, visibleFiles, nearbyKeys, refreshEpoch, thumbnailOverrides]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -514,7 +549,13 @@ export function UmbraModelPickerModal({
           </div>
           <button
             type="button"
-            onClick={() => void onRefresh?.()}
+            onClick={async () => {
+              await onRefresh?.();
+              infoCacheRef.current = {};
+              setInfoCache({});
+              setInfo(null);
+              setRefreshEpoch((current) => current + 1);
+            }}
             disabled={!onRefresh || catalogLoading}
             className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.03] px-3 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:border-cyan-300/30 hover:text-cyan-100 disabled:text-zinc-700"
           >
@@ -598,7 +639,7 @@ export function UmbraModelPickerModal({
             </div>
           </aside>
 
-          <main data-umbra-model-picker-results className="min-h-0 overflow-y-auto p-3 custom-scrollbar">
+          <main ref={resultsRef} data-umbra-model-picker-results className="min-h-0 overflow-y-auto p-3 custom-scrollbar">
             {visibleFiles.length <= 0 ? (
               <div className="flex h-full items-center justify-center text-[10px] uppercase tracking-[0.14em] text-zinc-700">No matching files</div>
             ) : (
@@ -612,15 +653,13 @@ export function UmbraModelPickerModal({
                     ...findThumbnailOverrides(thumbnailOverrides, file.path),
                     ...extractPreviewUrls(cardInfo),
                   ]));
-                  const activePreview = cardPreviews.length > 0
-                    ? cardPreviews[previewTick % cardPreviews.length]
-                    : '';
-                  const cardInfoPending = pendingPreviewInfoRef.current.has(
+                  const cardInfoPending = previewPending.has(
                     getInfoCacheKey(kind, file.path.toLowerCase()),
                   );
                   return (
                     <button
                       data-umbra-model-picker-card
+                      data-catalog-key={file.key}
                       data-selected={active ? '1' : '0'}
                       type="button"
                       key={file.key}
@@ -633,8 +672,8 @@ export function UmbraModelPickerModal({
                       title={file.path}
                     >
                       <div data-umbra-model-picker-preview className="relative flex h-36 items-center justify-center overflow-hidden border-b border-white/10 bg-black/45">
-                        {activePreview ? (
-                          renderPreviewMedia(activePreview, `${file.name} preview`, 'h-full w-full object-contain')
+                        {cardPreviews.length > 0 && nearbyKeys.has(file.key) ? (
+                          <PreviewMedia urls={cardPreviews} index={active ? previewTick : 0} alt={`${file.name} preview`} className="h-full w-full object-contain" />
                         ) : (active && infoLoading) || cardInfoPending ? (
                           <Loader2 size={17} className="animate-spin text-cyan-300" />
                         ) : (

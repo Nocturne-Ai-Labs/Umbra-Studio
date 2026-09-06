@@ -1152,7 +1152,7 @@ export class UmbraCanvasManager {
   }
 
   private refreshEntityTransformer(): void {
-    const nodes = this.stage.find((node) => (
+    const nodes = this.stage.find((node: Konva.Node) => (
       this.selectedEntityIds.has(node.id())
       && (node.hasName('drawable-entity') || node.hasName('mask-entity'))
       && node.isVisible()

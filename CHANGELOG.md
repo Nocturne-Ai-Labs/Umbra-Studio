@@ -1,5 +1,89 @@
 # Changelog
 
+## v0.31.29
+
+### TL;DR - Setup After Updating
+
+Update Umbra Studio normally. For Anima 2.9B legacy LoRA compatibility and
+LoRA baking in Model Merge, update your managed ComfyUI and Umbra-Nodes, then
+restart ComfyUI. Existing checkpoints and LoRAs are reused; this update does
+not download replacement checkpoints or include personal models or wildcards.
+Model Merge requires the managed ComfyUI Python environment with PyTorch and
+safetensors installed. Back up important merge blueprints alongside your models.
+
+### Data Forge Model Merge
+
+- Added an Anima model-merging workspace with normal and advanced controls,
+  separate source LoRA stacks, and generation previews using supported Umbra UI
+  pipelines. Model blending is restricted to compatible architectures; original
+  Anima and Anima 2.9B checkpoints cannot be blended directly with each other.
+- Added per-block A/B sliders and light, medium, and heavy randomization for
+  exploring block mixtures. LoRAs can be baked into either source before blending.
+- Added clean model metadata output and reusable merge blueprints. Load a saved
+  blueprint to restore the merge configuration and continue experimenting.
+  Clean metadata is not a license waiver; respect source-model usage terms.
+- Added scoped legacy Anima LoRA layer remapping for Anima 2.9B through Umbra's
+  loaders. Ambiguous partial-layer LoRAs are rejected instead of silently applied
+  to the wrong layers. Trained trigger words may still be necessary.
+
+### Gallery Reliability And Archives
+
+- Added persistent transfer progress with file/byte counts, errors, and indexing
+  status. Long transfers no longer fail solely because of a short request timeout.
+- Serialized filesystem mutations while keeping read operations responsive;
+  shortened database reconciliation work and added retry handling for busy writes.
+- Added exclusive streaming copies for cross-drive moves, progress reporting,
+  and interrupted-operation records without automatically replaying file moves.
+- Kept expanded folder branches stable during navigation, cloud-folder refreshes,
+  and transient directory-read failures.
+- Added ZIP files to the gallery with download actions, plus Create ZIP on folder
+  context menus. Archives are saved inside the selected folder with collision-safe
+  names and progress reporting. Original files remain untouched. Archive creation
+  needs temporary disk space and may require cloud files to download locally.
+
+### Power Prompter And Agent Reliability
+
+- Unified queue construction between the frontend and backend. Mixed wildcard
+  reroll counts now use each variant's count instead of the largest count in a set;
+  held prompts and ordinary seed identifiers retain their established behavior.
+- Reduced repeated queue traversal and capped unnecessary allocation. Debounced
+  count updates, cancelled superseded requests, and stopped hidden queue-editor
+  estimation work to improve editing responsiveness.
+- Hardened agent output parsing against reasoning blocks, reasoning-only API
+  fields, terminal formatting, and incomplete responses. Rejected responses no
+  longer replace the original prompt with an empty or truncated answer.
+- Kept LoRA syntax, wildcard markers, and prompt weights intact during cleanup.
+- Removed Temperature and Max Tokens controls for Hermes because that provider
+  does not consume them. Other providers retain their controls; Hermes keeps
+  its applicable thinking and timeout settings.
+
+### Interface And Model Loading
+
+- Improved model/LoRA thumbnail loading with lazy media and shared request caching.
+- Made Civitai model-page loading less dependent on media preloading, with bounded
+  request handling for slow responses.
+- Refined phone spacing and protected-thumbnail controls. Tablets use a more
+  desktop-like workspace with collapsible controls and preview panels.
+- Cleaned up frontend TypeScript errors and obsolete code paths while preserving
+  the existing protected-media and strict inpaint-mask fixes.
+
+### Packaging
+
+- Windows BAT and Linux portable ZIP packages include required runtime dependencies
+  for gallery archives. Optional large model packs remain separate downloads.
+- Private wildcard libraries, authoring scripts, qualification fixtures, credentials,
+  databases, and personal runtime folders are excluded from published source.
+- Linux users may need `python3-dev`, `build-essential`, `libgl1`, and
+  `libglib2.0-0` for optional tools. AI Toolkit additionally needs host Git and Node 20.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** inconsistent mixed-reroll queue counts and unnecessary background estimates.
+- **Fixed:** agent reasoning and response wrappers leaking into generated prompts.
+- **Fixed:** disappearing folder expansions and misleading timeouts during large moves.
+- **Improved:** model merging, resumable blueprints, gallery ZIP tools, and transfer visibility.
+- **Improved:** model loading responsiveness and phone/tablet workspace usability.
+
 ## v0.31.28
 
 ### TL;DR - Setup After Updating

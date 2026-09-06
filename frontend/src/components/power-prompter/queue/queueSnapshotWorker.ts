@@ -118,25 +118,40 @@ function requestQueueWorkerValue<T>(input: {
   requestSeqRef: MutableRefObject<number>;
   pendingSignatureRef: MutableRefObject<Map<number, QueueSnapshotWorkerPending>>;
   timeoutMs?: number;
+  signal?: AbortSignal;
   message: (requestId: number) => Record<string, any>;
   fallback: () => T;
 }): Promise<T> {
+  if (input.signal?.aborted) return Promise.reject(new DOMException('Queue estimate superseded.', 'AbortError'));
   const worker = getQueueSnapshotWorker(input.workerRef, input.pendingSignatureRef);
-  if (!worker) return Promise.resolve(input.fallback());
+  if (!worker) return Promise.resolve().then(() => {
+    if (input.signal?.aborted) throw new DOMException('Queue estimate superseded.', 'AbortError');
+    return input.fallback();
+  });
   const requestId = input.requestSeqRef.current + 1;
   input.requestSeqRef.current = requestId;
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
+    const cleanup = () => {
+      clearTimeout(timer);
       input.pendingSignatureRef.current.delete(requestId);
-      resolve(input.fallback());
+      input.signal?.removeEventListener('abort', abort);
+    };
+    const succeed = (value: T) => { cleanup(); resolve(value); };
+    const fail = (error: unknown) => { cleanup(); reject(error); };
+    const abort = () => fail(new DOMException('Queue estimate superseded.', 'AbortError'));
+    const timer = setTimeout(() => {
+      try {
+        succeed(input.fallback());
+      } catch (error) {
+        fail(error);
+      }
     }, Math.max(1000, Math.floor(Number(input.timeoutMs) || 10000)));
-    input.pendingSignatureRef.current.set(requestId, { resolve, reject, fallback: input.fallback, timer });
+    input.pendingSignatureRef.current.set(requestId, { resolve: succeed, reject: fail, fallback: input.fallback, timer });
+    input.signal?.addEventListener('abort', abort, { once: true });
     try {
       worker.postMessage(input.message(requestId));
     } catch (error: any) {
-      clearTimeout(timer);
-      input.pendingSignatureRef.current.delete(requestId);
-      reject(new Error(String(error?.message || error || 'Queue worker failed.')));
+      fail(new Error(String(error?.message || error || 'Queue worker failed.')));
     }
   });
 }
@@ -185,12 +200,14 @@ export function buildQueuePromptsOnWorker(input: {
 }
 
 export function buildPowerPrompterQueueEstimateOnWorker(input: BuildPowerPrompterQueueEstimateOptions & {
+  signal?: AbortSignal;
   workerRef: MutableRefObject<Worker | null>;
   requestSeqRef: MutableRefObject<number>;
   pendingSignatureRef: MutableRefObject<Map<number, QueueSnapshotWorkerPending>>;
 }): Promise<PowerPrompterQueueEstimate> {
   const fallback = () => buildPowerPrompterQueueEstimate(input);
   return requestQueueWorkerValue<PowerPrompterQueueEstimate>({
+    signal: input.signal,
     workerRef: input.workerRef,
     requestSeqRef: input.requestSeqRef,
     pendingSignatureRef: input.pendingSignatureRef,
@@ -214,12 +231,14 @@ export function buildPowerPrompterQueueEstimateOnWorker(input: BuildPowerPrompte
 }
 
 export function buildPowerPrompterQueueEditorEstimateOnWorker(input: BuildPowerPrompterQueueEditorEstimateOptions & {
+  signal?: AbortSignal;
   workerRef: MutableRefObject<Worker | null>;
   requestSeqRef: MutableRefObject<number>;
   pendingSignatureRef: MutableRefObject<Map<number, QueueSnapshotWorkerPending>>;
 }): Promise<PowerPrompterQueueEstimate> {
   const fallback = () => buildPowerPrompterQueueEditorEstimate(input);
   return requestQueueWorkerValue<PowerPrompterQueueEstimate>({
+    signal: input.signal,
     workerRef: input.workerRef,
     requestSeqRef: input.requestSeqRef,
     pendingSignatureRef: input.pendingSignatureRef,

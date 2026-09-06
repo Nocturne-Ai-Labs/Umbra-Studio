@@ -1,5 +1,33 @@
 const MEMORY_HISTORY_LIMIT = 180;
 
+export interface UmbraRendererMemorySample {
+  timestamp: string;
+  url: string;
+  activeWorkspace: string;
+  visibilityState: DocumentVisibilityState;
+  heap?: { usedMb: number; totalMb: number; limitMb: number; usedPercent: number };
+  dom: { nodes: number; elements: number; images: number; loadedImages: number; videos: number; canvases: number; iframes: number };
+}
+
+export interface UmbraMemoryTelemetry {
+  timestamp: string;
+  renderer: UmbraRendererMemorySample;
+  logPath: string | null;
+}
+
+declare global {
+  interface Window {
+    __UMBRA_MEMORY_TELEMETRY__?: {
+      latest: UmbraMemoryTelemetry | null;
+      history: UmbraMemoryTelemetry[];
+      logPath: string | null;
+    };
+    umbraDesktop?: {
+      collectMemoryTelemetry?: (sample: UmbraRendererMemorySample) => Promise<UmbraMemoryTelemetry | null>;
+    };
+  }
+}
+
 type ChromiumPerformanceMemory = {
   usedJSHeapSize?: number;
   totalJSHeapSize?: number;

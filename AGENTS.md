@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+In the private development source, also read `skills.md` when available for the
+extended handoff. That internal guide is not shipped in public source. Use this
+repository guide and `PUBLISHING.md` for public development and packaging.
+
 ## Project Structure & Module Organization
 - `UmbraServer.ts` is the Bun backend entrypoint; backend services live in `backend/` (`routes/`, `settings/`, `python/`).
 - Frontend app code is in `frontend/src/` (React + TypeScript), with shared UI in `frontend/src/components/` and state in `frontend/src/store/`.

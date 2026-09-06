@@ -1431,6 +1431,19 @@ export class UmbraUiInpaintService {
         if (!nodeTypes.has(required)) throw new Error(`ComfyUI is missing the required background-removal node: ${required}.`);
       }
       const imageInputName = await this.uploadInput(requestId, 'cutout', image.name, bytes);
+      const rembgRequiredInputs = this.nodeTypesCache?.objectInfo?.['Image Rembg (Remove Background)']?.input?.required || {};
+      const rembgInputs: Record<string, any> = {
+        images: ['1', 0],
+        transparency: true,
+        model,
+        post_processing: true,
+        only_mask: false,
+      };
+      if ('alpha_matting' in rembgRequiredInputs) rembgInputs.alpha_matting = false;
+      if ('alpha_matting_foreground_threshold' in rembgRequiredInputs) rembgInputs.alpha_matting_foreground_threshold = 240;
+      if ('alpha_matting_background_threshold' in rembgRequiredInputs) rembgInputs.alpha_matting_background_threshold = 10;
+      if ('alpha_matting_erode_size' in rembgRequiredInputs) rembgInputs.alpha_matting_erode_size = 10;
+      if ('background_color' in rembgRequiredInputs) rembgInputs.background_color = 'none';
       const graph: Record<string, any> = {
         '1': {
           class_type: 'LoadImage',
@@ -1439,13 +1452,7 @@ export class UmbraUiInpaintService {
         },
         '2': {
           class_type: 'Image Rembg (Remove Background)',
-          inputs: {
-            images: ['1', 0],
-            transparency: true,
-            model,
-            post_processing: true,
-            only_mask: false,
-          },
+          inputs: rembgInputs,
           _meta: { title: 'Umbra Character Cutout' },
         },
         '3': {

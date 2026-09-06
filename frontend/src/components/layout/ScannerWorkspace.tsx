@@ -94,7 +94,7 @@ export function ScannerWorkspace({
   }, []);
 
   const isActive = activeOverride
-    ?? (activeWorkspace === 'scanner' || (activeWorkspace === 'imageinspector' && ui.imageInspectorTab === 'scanner'));
+    ?? (activeWorkspace === 'imageinspector' && ui.imageInspectorTab === 'scanner');
   const scannerCardClass = 'glass-panel umbra-surface-soft rounded-lg border-white/10 p-3';
   const scannerLabelClass = 'text-[10px] font-semibold uppercase tracking-[0.16em] umbra-text-faint';
   const scannerToolButtonClass = 'inline-flex items-center gap-2 rounded-md border border-white/10 bg-black/25 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-300 transition hover:border-[var(--umbra-accent)]/45 hover:text-white';
@@ -219,7 +219,6 @@ export function ScannerWorkspace({
         previewUrl: buildFsThumbnailUrl(normalizedPath),
         ownsBlobUrl: false,
         metadata: {
-          type: isVideo ? 'video' : 'image',
           name: filename,
           size: Number((metadata as any)?.size || 0),
           ...metadata,

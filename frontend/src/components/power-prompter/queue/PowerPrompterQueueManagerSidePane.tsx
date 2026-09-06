@@ -13,7 +13,7 @@ import type {
 } from './queueCore';
 
 type PowerPrompterQueueManagerSidePaneProps = {
-  queueManagerRightPaneRef: React.RefObject<HTMLDivElement | null>;
+  queueManagerRightPaneRef: React.RefObject<HTMLDivElement>;
   queueManagerPreviewSplit: number;
   beginQueueManagerPaneResize: (event: React.PointerEvent<HTMLButtonElement>) => void;
   hasActiveGenerationPreview: boolean;

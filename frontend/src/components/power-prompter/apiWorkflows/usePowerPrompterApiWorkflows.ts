@@ -95,7 +95,7 @@ export function usePowerPrompterApiWorkflows({
         throw new Error(`Failed to load API workflows (${response.status})`);
       }
       const payload = await response.json().catch(() => ({}));
-      const items = Array.isArray(payload?.items)
+      const items: PowerPrompterApiWorkflowItem[] = Array.isArray(payload?.items)
         ? payload.items
           .map(normalizeApiWorkflowItem)
           .filter((entry: PowerPrompterApiWorkflowItem | null): entry is PowerPrompterApiWorkflowItem => !!entry)

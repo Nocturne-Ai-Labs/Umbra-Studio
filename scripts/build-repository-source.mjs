@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { isPrivateDevelopmentSource } from './release-source-policy.mjs';
 
 const root = process.cwd();
 const outputArgIndex = process.argv.indexOf('--output');
@@ -127,6 +128,7 @@ function isPrivateWildcardAuthoringScript(name) {
 }
 
 function copyTree(source, target, allowGeneratedPublic = false) {
+  if (isPrivateDevelopmentSource(path.relative(root, source))) return;
   const stat = fs.lstatSync(source);
   if (stat.isSymbolicLink()) throw new Error(`Refusing to copy symlink into repository source: ${source}`);
   if (stat.isFile()) {
@@ -195,7 +197,7 @@ function verifyOutput() {
     }
   }
 
-  for (const forbidden of ['Models', 'Runtime', 'Umbra-Nodes', 'node_modules', 'public', 'dist-webapp', '.snapshots']) {
+  for (const forbidden of ['Models', 'Runtime', 'Umbra-Nodes', 'node_modules', 'public', 'dist-webapp', '.snapshots', 'defaults/PowerPrompter/Wildcards']) {
     if (fs.existsSync(path.join(outputRoot, forbidden))) {
       throw new Error(`Clean repository source contains forbidden runtime path: ${forbidden}`);
     }

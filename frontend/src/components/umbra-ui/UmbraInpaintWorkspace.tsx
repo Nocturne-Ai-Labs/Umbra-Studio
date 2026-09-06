@@ -922,7 +922,7 @@ function createRandomGenerationSeed(): number {
   try {
     const values = new Uint32Array(2);
     crypto.getRandomValues(values);
-    return Number((((BigInt(values[0]) << 21n) ^ BigInt(values[1])) % BigInt(Number.MAX_SAFE_INTEGER - 1)) + 1n);
+    return Number((((BigInt(values[0]) << BigInt(21)) ^ BigInt(values[1])) % BigInt(Number.MAX_SAFE_INTEGER - 1)) + BigInt(1));
   } catch {
     return Math.max(1, Math.floor(Math.random() * (Number.MAX_SAFE_INTEGER - 1)));
   }
@@ -1538,7 +1538,7 @@ function buildGuidanceOverlayKey(
   visibility: GuidanceOverlayVisibility,
 ): string {
   if (!documentState || !visibility.showGuidanceOverlays) return 'hidden';
-  const layers = documentState.layers.flatMap((layer) => {
+  const layers = documentState.layers.flatMap<Record<string, unknown>>((layer) => {
     if ((layer.kind === 'control' && visibility.showControlLayerOverlays)
       || (layer.kind === 'reference' && visibility.showReferenceLayerOverlays)) return [{
       id: layer.id,
@@ -2971,7 +2971,11 @@ export function UmbraInpaintWorkspace({
       modelFamily,
       modelSource,
       checkpointName,
-      loras: loras.map((lora) => ({ ...lora, trainedTags: [...lora.trainedTags] })),
+      loras: loras.map((lora) => ({
+        ...lora,
+        trainedTags: [...lora.trainedTags],
+        triggerWords: [...(lora.triggerWords || [])],
+      })),
       promptSegments: promptSegments.map((segment) => ({ ...segment })),
       activePromptSegmentId,
       negativePrompt,
@@ -3438,7 +3442,7 @@ export function UmbraInpaintWorkspace({
       && (!layer.groupId || !collapsedGroups.has(layer.groupId))
     ));
   }, [canvasDocument, groupLayers]);
-  const simpleInpaintLayerRows = React.useMemo(() => (canvasDocument?.layers || []).filter((layer) => (
+  const simpleInpaintLayerRows = React.useMemo(() => (canvasDocument?.layers || []).filter((layer): layer is UmbraCanvasRasterLayer | UmbraCanvasMaskLayer => (
     layer.kind === 'raster'
     || layer.kind === 'mask' && layer.purpose === 'inpaint' && !layer.frozen
   )), [canvasDocument]);
@@ -3886,6 +3890,7 @@ export function UmbraInpaintWorkspace({
         const summary: UmbraCanvasProjectSummary = {
           id: saved.id,
           name: saved.name,
+          thumbnailUrl: current.find((entry) => entry.id === saved.id)?.thumbnailUrl || '',
           width: saved.width,
           height: saved.height,
           layerCount: saved.layers.length,
@@ -8083,7 +8088,7 @@ export function UmbraInpaintWorkspace({
   }, [activeTransformLayer, canvasDocument, showToast]);
 
   const resetActiveLayerTransform = React.useCallback(() => {
-    if (!canResetUmbraCanvasLayerTransform(activeTransformLayer)) return;
+    if (!activeTransformLayer || !canResetUmbraCanvasLayerTransform(activeTransformLayer)) return;
     dispatchCanvasDocument({ type: 'reset_layer_transform', layerId: activeTransformLayer.id });
     showToast(`${activeTransformLayer.name} transform reset.`, 'success');
   }, [activeTransformLayer, dispatchCanvasDocument, showToast]);
@@ -9522,7 +9527,7 @@ export function UmbraInpaintWorkspace({
       return;
     }
     const target = window as typeof window & { __umbraPendingUmbraUiMediaHandoff?: UmbraUiInpaintHandoff | null };
-    target.__umbraPendingUmbraUiMediaHandoff = handoff;
+    target.__umbraPendingUmbraUiMediaHandoff = { ...handoff, mode: 'inpaint' };
     window.dispatchEvent(new CustomEvent(UMBRA_UI_MEDIA_HANDOFF_EVENT, { detail: handoff }));
   }, [showToast]);
 
@@ -10163,175 +10168,9 @@ export function UmbraInpaintWorkspace({
             </label>
           </div>
 
-          {false ? <details open className="border-t border-white/10 pt-2">
-            <summary className="flex cursor-pointer list-none items-center gap-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-zinc-400">
-              <Focus size={11} className="text-rose-300" /> Mask Processing <ChevronDown size={10} className="ml-auto" />
-            </summary>
-            <div className="mt-2 space-y-2.5">
-              <div className="grid grid-cols-3 gap-2">
-                <label className="space-y-1.5">
-                  <span className={labelClass}>Grow</span>
-                  <input type="number" min={0} max={2048} value={maskGrow} onChange={(event) => setMaskGrow(Math.max(0, Math.min(2048, Number(event.target.value) || 0)))} disabled={!maskExpansionAvailable} title={maskExpansionAvailable ? 'Grow the submitted mask' : 'INPAINT_ExpandMask is not installed'} className={inputClass} />
-                </label>
-                <label className="space-y-1.5">
-                  <span className={labelClass}>Feather</span>
-                  <input type="number" min={0} max={2048} value={maskFeather} onChange={(event) => setMaskFeather(Math.max(0, Math.min(2048, Number(event.target.value) || 0)))} disabled={!maskExpansionAvailable} title={maskExpansionAvailable ? 'Feather the submitted mask' : 'INPAINT_ExpandMask is not installed'} className={inputClass} />
-                </label>
-                <label className="space-y-1.5">
-                  <span className={labelClass}>Context</span>
-                  <input type="number" min={0} max={2048} step={8} value={contextPadding} onChange={(event) => setContextPadding(Math.max(0, Math.min(2048, Number(event.target.value) || 0)))} className={inputClass} />
-                </label>
-              </div>
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <span className={labelClass}>Scale Before Processing</span>
-                  <span className="ml-auto font-mono text-[8px] text-zinc-600">
-                    {(visibleContextRegion || visibleGenerationRegion)?.width || 0}x{(visibleContextRegion || visibleGenerationRegion)?.height || 0}
-                    {processingSize.resized ? ` -> ${processingSize.width}x${processingSize.height}` : ''}
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 border border-white/10 p-0.5">
-                  {(['none', 'auto', 'manual'] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => setProcessingScaleMode(mode)}
-                      className={cn(
-                        'h-7 font-mono text-[8px] font-black uppercase',
-                        processingScaleMode === mode ? 'bg-rose-500/15 text-rose-100' : 'text-zinc-600 hover:text-zinc-300',
-                      )}
-                    >
-                      {mode}
-                    </button>
-                  ))}
-                </div>
-                {processingScaleMode === 'manual' ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="space-y-1.5">
-                      <span className={labelClass}>Processing Width</span>
-                      <input type="number" min={64} max={16384} step={capabilities.resolution.step || 8} value={processingWidth} onChange={(event) => setProcessingWidth(Math.max(64, Math.min(16384, Number(event.target.value) || 64)))} className={inputClass} />
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className={labelClass}>Processing Height</span>
-                      <input type="number" min={64} max={16384} step={capabilities.resolution.step || 8} value={processingHeight} onChange={(event) => setProcessingHeight(Math.max(64, Math.min(16384, Number(event.target.value) || 64)))} className={inputClass} />
-                    </label>
-                  </div>
-                ) : null}
-                {processingSize.limitedByMemory ? <div className="font-mono text-[8px] text-amber-300/80">Limited to 64 MP</div> : null}
-              </div>
-              <div className="space-y-1.5 border-t border-white/[0.06] pt-2">
-                <span className={labelClass}>Coherence Pass</span>
-                <UmbraSelectControl value={coherenceMode} onChange={(event) => setCoherenceMode(event.target.value as UmbraCanvasCoherenceMode)} className={inputClass}>
-                  <option value="none">Off</option>
-                  <option value="gaussian">Gaussian Falloff</option>
-                  <option value="box">Box Falloff</option>
-                  <option value="staged">Staged Edge</option>
-                </UmbraSelectControl>
-                {coherenceMode !== 'none' ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="space-y-1.5">
-                      <span className={labelClass}>Edge Size</span>
-                      <input type="number" min={0} max={256} step={1} value={coherenceEdgeSize} onChange={(event) => setCoherenceEdgeSize(Math.max(0, Math.min(256, Number(event.target.value) || 0)))} className={inputClass} />
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className={labelClass}>Minimum Denoise {coherenceMinimumDenoise.toFixed(2)}</span>
-                      <input type="range" min={0} max={1} step={0.01} value={coherenceMinimumDenoise} onChange={(event) => setCoherenceMinimumDenoise(Number(event.target.value))} className="w-full accent-cyan-400" />
-                    </label>
-                  </div>
-                ) : null}
-              </div>
-              <div className={cn('space-y-1.5 border-t border-white/[0.06] pt-2', !effectiveSeamlessAvailable && 'opacity-45')} title={effectiveSeamlessAvailable ? 'Use circular model and VAE padding on the selected axes' : seamlessReason || 'UmbraSeamlessTiling is not installed'}>
-                <span className={labelClass}>Seamless Tiling</span>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <label className="flex h-8 items-center gap-2 border border-white/10 px-2.5 font-mono text-[8px] uppercase">
-                    <input type="checkbox" checked={seamlessX} onChange={(event) => setSeamlessX(event.target.checked)} disabled={!effectiveSeamlessAvailable || !seamlessAxes.includes('x')} className="accent-cyan-400" />
-                    <span>Horizontal X</span>
-                  </label>
-                  <label className="flex h-8 items-center gap-2 border border-white/10 px-2.5 font-mono text-[8px] uppercase">
-                    <input type="checkbox" checked={seamlessY} onChange={(event) => setSeamlessY(event.target.checked)} disabled={!effectiveSeamlessAvailable || !seamlessAxes.includes('y')} className="accent-cyan-400" />
-                    <span>Vertical Y</span>
-                  </label>
-                </div>
-                {!effectiveSeamlessAvailable ? <div className="font-mono text-[8px] text-zinc-700">{seamlessReason || 'UmbraSeamlessTiling is not installed.'}</div> : null}
-              </div>
-              <label className={cn('flex h-9 items-center gap-2 border border-white/10 px-2.5 font-mono text-[8px] uppercase', !maskedOutputAvailable && 'text-zinc-700')} title={maskedOutputAvailable ? 'Save generated pixels with transparency outside the active mask' : 'The selected native edit provider does not declare RGBA masked output.'}>
-                <input type="checkbox" checked={outputOnlyMaskedRegions} onChange={(event) => setOutputOnlyMaskedRegions(event.target.checked)} disabled={!maskedOutputAvailable} className="accent-cyan-400" />
-                <span>Output Only Masked Regions</span>
-              </label>
-              <label className="block space-y-1.5">
-                <span className={labelClass}>Masked Fill</span>
-                <UmbraSelectControl value={fillMode} onChange={(event) => setFillMode(event.target.value as UmbraUiInpaintFillMode)} className={inputClass}>
-                  <option value="navier-stokes" disabled={!maskedFillAvailable}>Navier-Stokes{maskedFillAvailable ? '' : ' (Unavailable)'}</option>
-                  <option value="telea" disabled={!maskedFillAvailable}>Telea{maskedFillAvailable ? '' : ' (Unavailable)'}</option>
-                  <option value="neutral">Neutral</option>
-                  <option value="color" disabled={!colorPrefillAvailable}>Solid Color{colorPrefillAvailable ? '' : ' (Unavailable)'}</option>
-                  <option value="tile" disabled={!tilePrefillAvailable}>Source Tiles{tilePrefillAvailable ? '' : ' (Unavailable)'}</option>
-                  <option value="lama" disabled={!modelInfillAvailable}>LaMa / MAT Model{modelInfillAvailable ? '' : ' (Unavailable)'}</option>
-                </UmbraSelectControl>
-              </label>
-              {fillMode === 'color' ? (
-                <label className="flex items-center gap-2 border border-white/10 px-2.5 py-2">
-                  <span className={labelClass}>Infill Color</span>
-                  <input type="color" value={infillColor} onChange={(event) => setInfillColor(event.target.value)} className="ml-auto h-7 w-10 cursor-pointer border-0 bg-transparent p-0" />
-                  <span className="w-16 font-mono text-[8px] text-zinc-500">{infillColor}</span>
-                </label>
-              ) : null}
-              {fillMode === 'tile' ? (
-                <label className="block space-y-1.5">
-                  <span className={labelClass}>Tile Size</span>
-                  <input type="number" min={8} max={512} step={8} value={infillTileSize} onChange={(event) => setInfillTileSize(Math.max(8, Math.min(512, Number(event.target.value) || 8)))} className={inputClass} />
-                </label>
-              ) : null}
-              {fillMode === 'lama' ? (
-                <label className="block space-y-1.5">
-                  <span className={labelClass}>Infill Model</span>
-                  <UmbraSelectControl value={inpaintModelName} onChange={(event) => setInpaintModelName(event.target.value)} disabled={!modelInfillAvailable} className={inputClass}>
-                    {inpaintModels.length <= 0 ? <option value="">No LaMa / MAT models installed</option> : null}
-                    {inpaintModels.map((model) => <option key={model} value={model}>{model}</option>)}
-                  </UmbraSelectControl>
-                </label>
-              ) : null}
-              <label className="block space-y-1.5">
-                <span className={labelClass}>Denoise {denoise.toFixed(2)}</span>
-                <input type="range" min={0.05} max={1} step={0.01} value={denoise} onChange={(event) => setDenoise(Number(event.target.value))} className="w-full accent-rose-400" />
-              </label>
-              <label className={cn('block space-y-1.5', !colorMatchAvailable && 'opacity-45')} title={colorMatchAvailable ? 'Match generated colors to the source context' : 'Color matching is unavailable for this provider or installation'}>
-                <span className={labelClass}>Color Match {Math.round(colorMatch * 100)}%</span>
-                <input type="range" min={0} max={1} step={0.05} value={colorMatch} onChange={(event) => setColorMatch(Number(event.target.value))} disabled={!colorMatchAvailable} className="w-full accent-cyan-400" />
-              </label>
-              <label className={cn('block space-y-1.5', !differentialDiffusionAvailable && 'opacity-45')} title={differentialDiffusionAvailable ? 'Blend feathered denoise strength through Differential Diffusion' : 'Differential Diffusion is unavailable for this provider or installation'}>
-                <span className={labelClass}>Differential Blend {Math.round(differentialStrength * 100)}%</span>
-                <input type="range" min={0} max={1} step={0.05} value={differentialStrength} onChange={(event) => setDifferentialStrength(Number(event.target.value))} disabled={!differentialDiffusionAvailable} className="w-full accent-emerald-400" />
-              </label>
-            </div>
-          </details> : null}
 
-          {false ? <details open className="border-t border-white/10 pt-2">
-            <summary className="flex cursor-pointer list-none items-center gap-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-zinc-400">
-              <Maximize2 size={11} className="text-cyan-300" /> Outpaint Frame <ChevronDown size={10} className="ml-auto" />
-            </summary>
-            <div className="mt-2 space-y-2">
-              <div className="grid grid-cols-4 gap-1.5">
-                {(['left', 'right', 'top', 'bottom'] as const).map((side) => (
-                  <label key={side} className="space-y-1.5">
-                    <span className="block truncate text-center text-[8px] font-black uppercase text-zinc-600">{side}</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={UMBRA_CANVAS_INTERACTIVE_MAX_SIDE - 1}
-                      step={8}
-                      value={draftMargins[side]}
-                      onChange={(event) => setDraftMargins((current) => ({ ...current, [side]: Number(event.target.value) }))}
-                      className={`${inputClass} px-1 text-center`}
-                    />
-                  </label>
-                ))}
-              </div>
-              <button type="button" onClick={applyOutpaintFrame} disabled={!source} className="inline-flex h-8 w-full items-center justify-center gap-2 rounded-md border border-cyan-300/25 bg-cyan-500/[0.06] text-[9px] font-black uppercase tracking-[0.12em] text-cyan-100 disabled:text-zinc-700">
-                <Maximize2 size={11} /> Apply Frame
-              </button>
-            </div>
-          </details> : null}
+
+
 
           {source ? (
             <button
@@ -10376,243 +10215,7 @@ export function UmbraInpaintWorkspace({
         </div>
         <div data-umbra-inpaint-toolbar="" className="relative z-30 shrink-0 border-b border-white/10 bg-[#050708]/95 shadow-md shadow-black/35 backdrop-blur-sm">
           <div className="flex min-h-10 min-w-0 flex-wrap items-center gap-1.5 px-2.5 py-1.5 [&>*]:shrink-0">
-          {false ? (
-            <>
-          <div className="flex items-center gap-1 border border-white/[0.08] bg-black/30 p-0.5" aria-label="Canvas tools">
-            {toolButtons.map((button) => (
-              <button
-                key={`${button.id}-${button.target || 'canvas'}`}
-                type="button"
-                onClick={() => selectCanvasTool(button.id, button.target)}
-                disabled={button.disabled}
-                title={button.label}
-                className={cn(
-                  'inline-flex h-7 w-7 items-center justify-center rounded-sm border transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-300/60 disabled:cursor-not-allowed disabled:border-transparent disabled:text-zinc-800',
-                  tool === button.id && (!button.target || editTarget === button.target)
-                    ? 'border-rose-300/50 bg-rose-500/[0.16] text-rose-50 shadow-sm shadow-rose-950/50'
-                    : 'border-transparent text-zinc-600 hover:border-white/10 hover:bg-white/[0.035] hover:text-zinc-300',
-                )}
-              >
-                {button.icon}
-              </button>
-            ))}
-          </div>
-          <div className="ml-1 h-5 w-px bg-white/10" />
-          {tool === 'transform' ? (
-            <>
-              <UmbraSelectControl value={transformFitMode} onChange={(event) => setTransformFitMode(event.target.value as UmbraCanvasFitMode)} title="Fit mode" className="h-7 border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none">
-                <option value="contain">Contain</option>
-                <option value="cover">Cover</option>
-                <option value="fill">Fill</option>
-              </UmbraSelectControl>
-              <button type="button" onClick={() => void fitActiveLayerToGenerationRegion(transformFitMode)} disabled={!activeTransformLayer || activeTransformLayer.locked || (activeTransformLayer.kind === 'raster' && activeTransformLayer.role === 'source')} title="Fit active layer to the generation region, or the whole canvas when no region is set" className="inline-flex h-7 items-center gap-1.5 border border-cyan-300/20 px-2 font-mono text-[7px] font-black uppercase text-cyan-200 disabled:border-white/5 disabled:text-zinc-800"><Maximize2 size={9} /> Fit</button>
-              <button type="button" onClick={resetActiveLayerTransform} disabled={!canResetUmbraCanvasLayerTransform(activeTransformLayer)} title="Restore the active layer's original size, orientation, and mirroring while preserving its center" className="inline-flex h-7 items-center gap-1.5 border border-white/10 px-2 font-mono text-[7px] font-black uppercase text-zinc-400 disabled:border-white/5 disabled:text-zinc-800"><RotateCcw size={9} /> Reset</button>
-              <div className="h-5 w-px bg-white/10" />
-            </>
-          ) : null}
-          {tool === 'brush' || tool === 'erase' ? (
-            <>
-              <span className="inline-flex h-7 items-center border border-rose-300/20 bg-rose-500/[0.06] px-2 font-mono text-[7px] font-black uppercase text-rose-100">Inpaint Mask</span>
-              <div className="h-5 w-px bg-white/10" />
-            </>
-          ) : null}
-          {tool === 'eyedropper' ? <><CanvasColorPair primary={paintColor} secondary={secondaryPaintColor} onPrimaryChange={setPaintColor} onSecondaryChange={setSecondaryPaintColor} onSwap={() => { setPaintColor(secondaryPaintColor); setSecondaryPaintColor(paintColor); }} /><span className="font-mono text-[7px] uppercase text-zinc-600">Alt-click samples secondary</span></> : null}
-          {tool === 'gradient' ? (
-            <>
-              <CanvasColorPair primary={paintColor} secondary={secondaryPaintColor} onPrimaryChange={setPaintColor} onSecondaryChange={setSecondaryPaintColor} onSwap={() => { setPaintColor(secondaryPaintColor); setSecondaryPaintColor(paintColor); }} />
-              <UmbraSelectControl
-                value={activeGradientLayer?.gradientType || 'linear'}
-                onChange={(event) => activeGradientLayer && dispatchCanvasDocument({ type: 'update_gradient_layer', layerId: activeGradientLayer.id, changes: { gradientType: event.target.value as 'linear' | 'radial' } })}
-                disabled={!activeGradientLayer}
-                title="Gradient type"
-                className="h-7 border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none disabled:text-zinc-700"
-              >
-                <option value="linear">Linear</option>
-                <option value="radial">Radial</option>
-              </UmbraSelectControl>
-              <button
-                type="button"
-                aria-pressed={canvasPreferences.gradientClip}
-                onClick={() => setCanvasPreferences((current) => ({ ...current, gradientClip: !current.gradientClip }))}
-                title="Clip the gradient to the dragged transition range"
-                className={cn('inline-flex h-7 items-center gap-1.5 border px-2 font-mono text-[7px] font-black uppercase', canvasPreferences.gradientClip ? 'border-cyan-300/35 bg-cyan-500/10 text-cyan-100' : 'border-white/10 text-zinc-600')}
-              >
-                <Crop size={9} /> Clip
-              </button>
-              <div className="h-5 w-px bg-white/10" />
-            </>
-          ) : null}
-          {tool === 'shape' ? (
-            <>
-              <UmbraSelectControl value={shapeType} onChange={(event) => { setShapePoints([]); setBoxPreview(null); setShapeType(event.target.value as RasterShapeType); }} title="Raster shape type" className="h-7 border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none"><option value="rectangle">Rectangle</option><option value="ellipse">Ellipse</option><option value="line">Line</option><option value="polygon">Polygon</option><option value="freehand">Freehand</option></UmbraSelectControl>
-              <CanvasColorPair primary={paintColor} secondary={secondaryPaintColor} onPrimaryChange={setPaintColor} onSecondaryChange={setSecondaryPaintColor} onSwap={() => { setPaintColor(secondaryPaintColor); setSecondaryPaintColor(paintColor); }} />
-              {shapeType !== 'line' ? <label className="flex h-7 items-center gap-1.5 border border-white/10 px-2 font-mono text-[7px] uppercase text-zinc-400"><input type="checkbox" checked={shapeFilled} onChange={(event) => setShapeFilled(event.target.checked)} className="accent-cyan-300" /> Fill</label> : null}
-              {!shapeFilled || shapeType === 'line' ? <label className="flex items-center gap-1.5"><span className="font-mono text-[7px] uppercase text-zinc-600">Stroke</span><input type="number" min={1} max={256} value={shapeStrokeWidth} onChange={(event) => setShapeStrokeWidth(Math.max(1, Math.min(256, Number(event.target.value) || 1)))} className="h-7 w-12 border border-white/10 bg-black/35 px-1 text-center font-mono text-[8px] text-zinc-400 outline-none" /></label> : null}
-              <label className="flex items-center gap-1.5"><span className="font-mono text-[7px] uppercase text-zinc-600">Opacity</span><input type="range" min={0.05} max={1} step={0.05} value={brushOpacity} onChange={(event) => setBrushOpacity(Number(event.target.value))} className="w-16 accent-rose-400" /><span className="w-7 text-right font-mono text-[8px] text-zinc-500">{Math.round(brushOpacity * 100)}%</span></label>
-              {shapeType === 'polygon' ? <>
-                <span className="font-mono text-[7px] uppercase text-zinc-600">{shapePoints.length} vertices</span>
-                <button type="button" onClick={() => finishShapePolygon()} disabled={shapePoints.length < 3} title="Commit polygon shape (Enter)" className="inline-flex h-7 w-7 items-center justify-center border border-cyan-300/25 text-cyan-200 disabled:text-zinc-800"><Check size={10} /></button>
-                <button type="button" onClick={() => setShapePoints([])} disabled={shapePoints.length <= 0} title="Cancel polygon shape (Escape)" className="inline-flex h-7 w-7 items-center justify-center border border-white/10 text-zinc-500 disabled:text-zinc-800"><X size={10} /></button>
-              </> : null}
-              <div className="h-5 w-px bg-white/10" />
-            </>
-          ) : null}
-          {tool === 'brush' || tool === 'erase' ? (
-            <>
-              <label className="flex items-center gap-2 px-1">
-                <span className="text-[8px] font-black uppercase text-zinc-600">{tool === 'erase' ? editTarget === 'raster' ? 'Layer Erase' : 'Mask Erase' : 'Brush'}</span>
-                <input
-                  type="range"
-                  min={4}
-                  max={512}
-                  step={4}
-                  value={tool === 'erase' ? eraserSize : brushSize}
-                  onChange={(event) => (tool === 'erase' ? setEraserSize : setBrushSize)(Number(event.target.value))}
-                  className="w-24 accent-rose-400"
-                />
-                <span className="w-8 text-right font-mono text-[8px] text-zinc-500">{tool === 'erase' ? eraserSize : brushSize}</span>
-              </label>
-              <label className="flex items-center gap-1.5 px-1" title="Brush opacity">
-                <span className="text-[8px] font-black uppercase text-zinc-600">Opacity</span>
-                <input type="range" min={0.05} max={1} step={0.05} value={brushOpacity} onChange={(event) => setBrushOpacity(Number(event.target.value))} className="w-16 accent-rose-400" />
-                <span className="w-7 text-right font-mono text-[8px] text-zinc-500">{Math.round(brushOpacity * 100)}%</span>
-              </label>
-              <label className="flex items-center gap-1.5 px-1" title="Brush edge hardness">
-                <span className="text-[8px] font-black uppercase text-zinc-600">Hard</span>
-                <input type="range" min={0} max={1} step={0.05} value={brushHardness} onChange={(event) => setBrushHardness(Number(event.target.value))} className="w-16 accent-rose-400" />
-                <span className="w-7 text-right font-mono text-[8px] text-zinc-500">{Math.round(brushHardness * 100)}%</span>
-              </label>
-              <div className="h-5 w-px bg-white/10" />
-            </>
-          ) : null}
-          <div className="h-5 w-px bg-white/10" />
-          <button type="button" aria-pressed={snapEnabled} onClick={() => setCanvasPreferences((current) => ({ ...current, snapEnabled: !current.snapEnabled }))} title="Toggle transform and region snapping" className={cn('inline-flex h-7 w-7 items-center justify-center rounded-sm border', snapEnabled ? 'border-cyan-300/35 bg-cyan-500/10 text-cyan-100' : 'border-white/10 text-zinc-600')}><Magnet size={11} /></button>
-          {snapEnabled ? <input type="number" min={1} max={256} step={1} value={snapSize} onChange={(event) => setCanvasPreferences((current) => ({ ...current, snapSize: Math.max(1, Math.min(256, Number(event.target.value) || 8)) }))} title="Snap grid size" className="h-7 w-12 border border-white/10 bg-black/35 px-1 text-center font-mono text-[8px] text-zinc-500 outline-none" /> : null}
-          <button type="button" aria-pressed={rulersEnabled} onClick={() => setCanvasPreferences((current) => ({ ...current, rulersEnabled: !current.rulersEnabled }))} title="Toggle canvas rulers" className={cn('inline-flex h-7 w-7 items-center justify-center rounded-sm border', rulersEnabled ? 'border-cyan-300/35 bg-cyan-500/10 text-cyan-100' : 'border-white/10 text-zinc-600')}><Ruler size={11} /></button>
-          <details className="group relative">
-            <summary title="Canvas editing preferences" className="inline-flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-sm border border-white/10 text-zinc-600 hover:text-zinc-300"><Settings2 size={11} /></summary>
-            <div className="absolute right-0 top-8 z-50 w-52 border border-white/15 bg-[#090a0c] p-2 shadow-xl shadow-black/70">
-              {([ 
-                ['autoSaveStagesToGallery', 'Auto-save staged results'],
-                ['clipToGenerationRegion', 'Clip tools to region'],
-                ['dynamicGrid', 'Dynamic grid'],
-                ['isolatedLayerPreview', 'Isolate active layer'],
-                ['isolatedStagingPreview', 'Isolate staged result'],
-                ['invertToolWheel', 'Invert Shift-wheel size'],
-                ['ruleOfThirds', 'Rule of thirds'],
-                ['showInpaintMaskOverlays', 'Show secondary masks'],
-                ['showGenerationRegionOverlay', 'Show generation region'],
-                ['showProgressOnCanvas', 'Show generation progress'],
-                ['pressureSensitivity', 'Pen pressure'],
-                ['preserveMask', 'Preserve mask on accept'],
-                ['stagingThumbnailsVisible', 'Show staging thumbnails'],
-              ] as Array<[keyof CanvasPreferences, string]>).map(([key, label]) => (
-                <label key={key} className="flex h-7 items-center gap-2 border-b border-white/[0.05] px-1 font-mono text-[8px] text-zinc-400 last:border-b-0">
-                  <input type="checkbox" checked={canvasPreferences[key]} onChange={(event) => setCanvasPreferences((current) => ({ ...current, [key]: event.target.checked }))} className="accent-cyan-400" />
-                  <span>{label}</span>
-                </label>
-              ))}
-              <label className="mt-1 flex flex-col gap-1 border-t border-white/[0.06] px-1 pt-2 font-mono text-[7px] font-black uppercase text-zinc-500">
-                Staging auto-switch
-                <UmbraSelectControl
-                  value={canvasPreferences.stagingAutoSwitch}
-                  onChange={(event) => setCanvasPreferences((current) => ({ ...current, stagingAutoSwitch: event.target.value as UmbraCanvasStagingAutoSwitch }))}
-                  className="h-8 border border-white/10 bg-black/35 px-2 font-mono text-[8px] text-zinc-300 outline-none focus:border-cyan-300/30"
-                >
-                  <option value="off">Off</option>
-                  <option value="start">On first result</option>
-                  <option value="finish">When batch finishes</option>
-                </UmbraSelectControl>
-              </label>
-              <button type="button" onClick={() => setHotkeyEditorOpen(true)} className="mt-1 flex h-8 w-full items-center justify-center border border-cyan-300/20 font-mono text-[7px] font-black uppercase text-cyan-200">Keyboard Shortcuts</button>
-              <div className="mt-1 grid grid-cols-2 gap-1">
-                <button type="button" onClick={clearDocumentHistory} disabled={!canvasDocument || (documentHistory.past.length <= 0 && documentHistory.future.length <= 0)} className="flex h-8 items-center justify-center border border-white/10 font-mono text-[7px] font-black uppercase text-zinc-500 hover:text-cyan-200 disabled:text-zinc-800">Clear History</button>
-                <button type="button" onClick={clearCanvasImageCache} className="flex h-8 items-center justify-center border border-white/10 font-mono text-[7px] font-black uppercase text-zinc-500 hover:text-cyan-200">Clear Cache</button>
-              </div>
-            </div>
-          </details>
-          <div className="h-5 w-px bg-white/10" />
-          <button type="button" onClick={undoDocument} disabled={documentHistory.past.length <= 0} title="Undo canvas edit" className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 disabled:text-zinc-800"><Undo2 size={12} /></button>
-          <button type="button" onClick={redoDocument} disabled={documentHistory.future.length <= 0} title="Redo canvas edit" className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 disabled:text-zinc-800"><Redo2 size={12} /></button>
-          <button type="button" onClick={invertMask} disabled={!source || maskEditingLocked || maskProcessing} title={maskEditingLocked ? 'Unlock the active mask before editing it' : 'Invert the active mask'} aria-label="Invert active mask" className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-rose-200 disabled:text-zinc-800"><ArrowRightLeft size={12} /></button>
-          <button type="button" onClick={() => void adjustActiveMask(-8)} disabled={!source || maskEditingLocked || maskProcessing} title={maskEditingLocked ? 'Unlock the active mask before editing it' : 'Shrink mask by 8 pixels'} className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-cyan-200 disabled:text-zinc-800"><Minimize2 size={12} /></button>
-          <button type="button" onClick={() => void adjustActiveMask(8)} disabled={!source || maskEditingLocked || maskProcessing} title={maskEditingLocked ? 'Unlock the active mask before editing it' : 'Grow mask by 8 pixels'} className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-cyan-200 disabled:text-zinc-800"><Maximize2 size={12} /></button>
-          <button type="button" onClick={() => void featherActiveMask(8)} disabled={!source || maskEditingLocked || maskProcessing} title={maskEditingLocked ? 'Unlock the active mask before editing it' : 'Feather mask by 8 pixels'} className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-cyan-200 disabled:text-zinc-800">{maskProcessing ? <Loader2 size={12} className="animate-spin" /> : <Focus size={12} />}</button>
-          <button type="button" onClick={clearMask} disabled={!source || maskEditingLocked || maskProcessing} title={maskEditingLocked ? 'Unlock the active mask before editing it' : 'Clear mask'} className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-red-200 disabled:text-zinc-800"><Trash2 size={12} /></button>
-          <div className="h-5 w-px bg-white/10" />
-          <button type="button" onClick={() => void createCompositeLayer(true)} disabled={!source || !canvasReady} title="Extract masked pixels to a raster layer" className="inline-flex h-7 w-7 items-center justify-center border border-white/10 text-zinc-500 hover:text-cyan-200 disabled:text-zinc-800"><Scissors size={11} /></button>
-          <button type="button" onClick={() => void copyMaskedSelection()} disabled={!source || !canvasReady} title="Copy masked pixels" className="inline-flex h-7 w-7 items-center justify-center border border-white/10 text-zinc-500 hover:text-cyan-200 disabled:text-zinc-800"><Copy size={11} /></button>
-          <button type="button" onClick={pasteCanvasSelection} disabled={!canvasClipboard} title="Paste copied pixels as a raster layer" className="inline-flex h-7 w-7 items-center justify-center border border-white/10 text-zinc-500 hover:text-cyan-200 disabled:text-zinc-800"><ClipboardPaste size={11} /></button>
-          <button type="button" onClick={() => void createCompositeLayer(false)} disabled={!source || !canvasReady} title="Composite visible pixels to a new raster layer" className="inline-flex h-7 w-7 items-center justify-center border border-white/10 text-zinc-500 hover:text-cyan-200 disabled:text-zinc-800"><Combine size={11} /></button>
-          <button type="button" onClick={() => void flattenVisibleCanvas()} disabled={!source || !canvasReady || flattenVisibleMutationLocked || !!fullResolutionOperation || isExportingPsd} title={flattenVisibleMutationLocked ? 'Unlock visible layers and groups before flattening' : 'Flatten visible canvas content'} className="inline-flex h-7 w-7 items-center justify-center border border-white/10 text-zinc-500 hover:text-amber-200 disabled:text-zinc-800"><FileImage size={11} /></button>
-          <button type="button" onClick={() => void mergeActiveLayerDown()} disabled={!mergeDownTarget || visualMergeDownMutationLocked || !canvasReady} title={visualMergeDownMutationLocked ? 'Unlock the participating layer before merging' : 'Merge active visual layer down'} className="inline-flex h-7 w-7 items-center justify-center border border-white/10 text-zinc-500 hover:text-amber-200 disabled:text-zinc-800"><Layers3 size={11} /></button>
-          <button type="button" onClick={() => void copyActiveVisualToMask()} disabled={!activeVisualLayer || !canvasReady} title="Copy active visual layer to an editable mask" className="inline-flex h-7 w-7 items-center justify-center border border-white/10 text-zinc-500 hover:text-rose-200 disabled:text-zinc-800"><SquareDashed size={11} /></button>
-          <button type="button" onClick={() => void cropToGenerationRegion()} disabled={!canvasDocument?.generationRegion || maskProcessing} title="Crop canvas to generation region" className="inline-flex h-7 w-7 items-center justify-center border border-white/10 text-zinc-500 hover:text-cyan-200 disabled:text-zinc-800"><Crop size={11} /></button>
-          <details className="group relative">
-            <summary title="Canvas export, clipboard, and region fitting" className="inline-flex h-7 w-7 cursor-pointer list-none items-center justify-center border border-white/10 text-zinc-500 hover:text-cyan-200"><Download size={11} /></summary>
-            <div className="absolute left-0 top-8 z-50 w-52 border border-white/15 bg-[#090a0c] p-1.5 shadow-xl shadow-black/70">
-              <CanvasMenuButton icon={<Copy size={9} />} label="Copy Active Layer" disabled={!activeVisualLayer || !!fullResolutionOperation || isExportingPsd} onClick={() => void copyActiveLayerToSystemClipboard()} />
-              <CanvasMenuButton icon={<Copy size={9} />} label="Copy Canvas" disabled={!!fullResolutionOperation || isExportingPsd} onClick={() => void copyCanvasToSystemClipboard(false)} />
-              <CanvasMenuButton icon={<BoxSelect size={9} />} label="Copy Generation Region" disabled={!canvasDocument?.generationRegion || !!fullResolutionOperation || isExportingPsd} onClick={() => void copyCanvasToSystemClipboard(true)} />
-              <div className="my-1 h-px bg-white/[0.06]" />
-              <CanvasMenuButton icon={<ClipboardPaste size={9} />} label="Paste to Canvas" onClick={() => void pasteSystemClipboardImage(false)} />
-              <CanvasMenuButton icon={<ClipboardPaste size={9} />} label="Paste to Region" disabled={!canvasDocument?.generationRegion} onClick={() => void pasteSystemClipboardImage(true)} />
-              <div className="my-1 h-px bg-white/[0.06]" />
-              <CanvasMenuButton icon={isSavingCanvas ? <Loader2 size={9} className="animate-spin" /> : <Save size={9} />} label={isSavingCanvas ? 'Saving Canvas...' : 'Save Canvas to Gallery'} disabled={isSavingCanvas || !!fullResolutionOperation || isExportingPsd} onClick={() => void saveCanvasToGallery(false)} />
-              <CanvasMenuButton icon={isSavingCanvas ? <Loader2 size={9} className="animate-spin" /> : <Save size={9} />} label="Save Region to Gallery" disabled={isSavingCanvas || !canvasDocument?.generationRegion || !!fullResolutionOperation || isExportingPsd} onClick={() => void saveCanvasToGallery(true)} />
-              <CanvasMenuButton icon={isSavingCanvas ? <Loader2 size={9} className="animate-spin" /> : <Layers3 size={9} />} label="Save Active Layer to Gallery" disabled={isSavingCanvas || !activeVisualLayer || !!fullResolutionOperation || isExportingPsd} onClick={() => void saveActiveLayerToGallery()} />
-              <CanvasMenuButton icon={<ImagePlus size={9} />} label="Continue in IMG2IMG" disabled={isSavingCanvas || !!fullResolutionOperation || isExportingPsd} onClick={() => void sendCanvasToImg2Img()} />
-              <div className="my-1 h-px bg-white/[0.06]" />
-              <CanvasMenuButton icon={<Download size={9} />} label="Download Canvas PNG" disabled={!!fullResolutionOperation || isExportingPsd} onClick={() => void downloadCanvasImage(false)} />
-              <CanvasMenuButton icon={<Download size={9} />} label="Download Region PNG" disabled={!canvasDocument?.generationRegion || !!fullResolutionOperation || isExportingPsd} onClick={() => void downloadCanvasImage(true)} />
-              <CanvasMenuButton icon={isExportingPsd ? <X size={9} /> : <Layers3 size={9} />} label={isExportingPsd ? `Cancel PSD Export ${psdExportProgress.completed}/${psdExportProgress.total}` : 'Download Layered PSD'} disabled={!!fullResolutionOperation} onClick={() => {
-                if (isExportingPsd) cancelPsdExport();
-                else void exportCanvasToPsd();
-              }} />
-              <div className="my-1 h-px bg-white/[0.06]" />
-              <CanvasMenuButton icon={<SquareDashed size={9} />} label="Fit Region to Masks" onClick={() => void fitGenerationRegionToMasks()} />
-              <CanvasMenuButton icon={<BoxSelect size={9} />} label="Fit Region to Selection" disabled={selectedVisualLayers.length <= 0} onClick={fitGenerationRegionToSelectedLayers} />
-              <CanvasMenuButton icon={<Layers3 size={9} />} label="Fit Region to Layers" onClick={fitGenerationRegionToVisibleLayers} />
-              <CanvasMenuButton icon={<Crop size={9} />} label="Crop Active Image Layer to Region" disabled={!activeImageLayer || !canvasDocument?.generationRegion || !canvasReady} onClick={() => void cropActiveImageLayerToGenerationRegion()} />
-              <CanvasMenuButton icon={<SquareDashed size={9} />} label="Crop Active Mask to Region" disabled={!activeInpaintMaskLayer || activeInpaintMaskLayer.locked || !canvasDocument?.generationRegion || !canvasReady} onClick={() => void cropActiveMaskToGenerationRegion()} />
-            </div>
-          </details>
-          <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1 border border-white/[0.06] bg-black/25 p-0.5">
-            {canvasDocument?.generationRegion ? (
-              <details className="group relative">
-                <summary title="Edit exact generation-region geometry" className="inline-flex h-7 w-7 cursor-pointer list-none items-center justify-center border border-cyan-300/20 text-cyan-200 hover:bg-cyan-500/[0.06]"><Scan size={10} /></summary>
-                <div className="absolute right-0 top-8 z-50 w-56 border border-white/15 bg-[#090a0c] p-2 shadow-xl shadow-black/70">
-                  <CanvasRegionGeometryControls
-                    region={canvasDocument.generationRegion}
-                    onChange={updateGenerationRegionGeometry}
-                    onAlign={() => updateGenerationRegionGeometry({})}
-                    onSwap={() => dispatchCanvasDocument({ type: 'swap_generation_region_dimensions' })}
-                  />
-                </div>
-              </details>
-            ) : null}
-            {canvasDocument?.generationRegion ? (
-              <button
-                type="button"
-                onClick={() => dispatchCanvasDocument({ type: 'set_generation_region', region: null })}
-                title="Clear generation region"
-                className="mr-1 inline-flex h-7 items-center gap-1.5 border border-cyan-300/20 px-2 font-mono text-[8px] text-cyan-200"
-              >
-                <Scan size={10} /> {canvasDocument.generationRegion.width}x{canvasDocument.generationRegion.height} <X size={9} />
-              </button>
-            ) : null}
-            {lastBox ? <span className="mr-2 font-mono text-[8px] text-zinc-600">{Math.round(lastBox.width)}x{Math.round(lastBox.height)} @ {Math.round(lastBox.x)},{Math.round(lastBox.y)}</span> : null}
-            <button type="button" onClick={() => activeTransformLayer && zoomToRect(activeTransformLayer.transform)} disabled={!activeTransformLayer} title="Zoom to active layer" className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 disabled:text-zinc-800"><Focus size={12} /></button>
-            <button type="button" onClick={zoomToMaskSelection} disabled={!canvasDocument} title="Zoom to active mask selection" className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 disabled:text-zinc-800"><LassoSelect size={12} /></button>
-            <button type="button" onClick={zoomToSelectedLayers} disabled={selectedVisualLayers.length <= 0} title="Zoom to selected layers" className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 disabled:text-zinc-800"><SquareDashed size={12} /></button>
-            <button type="button" onClick={() => canvasDocument?.generationRegion && zoomToRect(canvasDocument.generationRegion)} disabled={!canvasDocument?.generationRegion} title="Zoom to generation region" className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500 disabled:text-zinc-800"><BoxSelect size={12} /></button>
-            <button type="button" onClick={() => studioMode ? zoomStudioView(1 / 1.2) : setZoom((value) => Math.max(0.25, value - 0.25))} title="Zoom out" className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500"><ZoomOut size={12} /></button>
-            <button type="button" onClick={() => studioMode ? fitStudioView() : setZoom(1)} title={studioMode ? 'Fit all artboards' : 'Fit canvas'} className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500"><Maximize2 size={12} /></button>
-            <button type="button" onClick={() => studioMode ? zoomStudioView(1.2) : setZoom((value) => Math.min(6, value + 0.25))} title="Zoom in" className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-500"><ZoomIn size={12} /></button>
-            <span className="w-10 text-right font-mono text-[8px] text-zinc-600">{Math.round((studioMode ? studioViewport.zoom : zoom) * 100)}%</span>
-          </div>
-            </>
-          ) : (
+          {(
             <>
               <div className="flex items-center gap-1 border border-white/[0.08] bg-black/30 p-0.5" aria-label="Inpaint tools">
                 {toolButtons.map((button) => (
@@ -10674,120 +10277,11 @@ export function UmbraInpaintWorkspace({
             </>
           )}
           </div>
-          {false && tool === 'region' ? (
-            <div data-umbra-generation-region-presets="" className="flex min-h-10 min-w-0 flex-wrap items-center gap-1.5 border-t border-cyan-300/[0.12] bg-cyan-500/[0.025] px-2.5 py-1.5">
-              <BoxSelect size={11} className="text-cyan-200" />
-              <span className="mr-1 font-mono text-[8px] font-black uppercase text-zinc-500">Region Aspect</span>
-              <div role="group" aria-label="Generation region preset shape" className="flex min-w-0 flex-wrap items-center border border-white/[0.08] bg-black/30 p-0.5">
-                {REGION_ASPECT_RATIO_OPTIONS.map((option) => {
-                  const selected = Math.abs((canvasDocument?.generationRegionAspectRatio || 0) - option.ratio) < 0.0001;
-                  return (
-                    <button
-                      key={option.label}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => applyGenerationRegionAspectPreset(option.ratio)}
-                      disabled={!canvasDocument}
-                      title={option.ratio > 0
-                        ? studioMode
-                          ? `Create an independent ${option.label} generation canvas`
-                          : `Create a ${option.label} generation region`
-                        : 'Unlock the generation region aspect ratio'}
-                      className={cn(
-                        'inline-flex h-7 min-w-11 items-center justify-center border px-2 font-mono text-[8px] font-black uppercase transition-colors disabled:text-zinc-800',
-                        selected
-                          ? 'border-cyan-300/40 bg-cyan-500/[0.12] text-cyan-100'
-                          : 'border-transparent text-zinc-500 hover:border-white/10 hover:text-zinc-200',
-                      )}
-                    >
-                      {option.label}
-                    </button>
-                  );
-                })}
-              </div>
-              <div role="group" aria-label="Manual generation region resolution" className="flex min-w-0 items-center gap-1 border border-white/[0.08] bg-black/30 p-0.5">
-                <span className="px-1 font-mono text-[7px] font-black uppercase text-zinc-600">Manual</span>
-                <label className="flex h-7 items-center border border-white/[0.08] bg-black/35 pl-1.5 focus-within:border-cyan-300/35">
-                  <span className="font-mono text-[7px] font-black text-zinc-600">W</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    aria-label="Generation region width"
-                    value={manualRegionResolution.width}
-                    onChange={(event) => setManualRegionResolution((current) => ({ ...current, width: event.target.value }))}
-                    onFocus={(event) => event.currentTarget.select()}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault();
-                        applyManualGenerationRegionResolution();
-                      }
-                      if (event.key === 'Escape') {
-                        event.preventDefault();
-                        resetManualGenerationRegionResolution();
-                        event.currentTarget.blur();
-                      }
-                    }}
-                    disabled={!canvasDocument}
-                    className="h-full w-16 bg-transparent px-1.5 font-mono text-[8px] text-zinc-200 outline-none disabled:text-zinc-800"
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setManualRegionResolution((current) => ({ width: current.height, height: current.width }))}
-                  disabled={!canvasDocument}
-                  title="Swap manual width and height"
-                  className="inline-flex h-7 w-7 items-center justify-center border border-white/[0.08] text-zinc-500 hover:text-cyan-200 disabled:text-zinc-800"
-                >
-                  <ArrowRightLeft size={10} />
-                </button>
-                <label className="flex h-7 items-center border border-white/[0.08] bg-black/35 pl-1.5 focus-within:border-cyan-300/35">
-                  <span className="font-mono text-[7px] font-black text-zinc-600">H</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    aria-label="Generation region height"
-                    value={manualRegionResolution.height}
-                    onChange={(event) => setManualRegionResolution((current) => ({ ...current, height: event.target.value }))}
-                    onFocus={(event) => event.currentTarget.select()}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault();
-                        applyManualGenerationRegionResolution();
-                      }
-                      if (event.key === 'Escape') {
-                        event.preventDefault();
-                        resetManualGenerationRegionResolution();
-                        event.currentTarget.blur();
-                      }
-                    }}
-                    disabled={!canvasDocument}
-                    className="h-full w-16 bg-transparent px-1.5 font-mono text-[8px] text-zinc-200 outline-none disabled:text-zinc-800"
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={applyManualGenerationRegionResolution}
-                  disabled={!canvasDocument}
-                  title={studioMode ? 'Create an independent generation canvas at this resolution' : 'Apply this manual generation-region resolution'}
-                  className="inline-flex h-7 items-center gap-1.5 border border-cyan-300/30 bg-cyan-500/[0.08] px-2 font-mono text-[7px] font-black uppercase text-cyan-100 hover:bg-cyan-500/[0.14] disabled:border-white/[0.08] disabled:bg-transparent disabled:text-zinc-800"
-                >
-                  <Check size={9} /> {studioMode ? 'Create' : 'Apply'}
-                </button>
-              </div>
-              <span className="ml-auto inline-flex h-7 items-center gap-1.5 border border-white/[0.08] bg-black/25 px-2 font-mono text-[8px] uppercase text-zinc-600">
-                <Grid3X3 size={10} /> {UMBRA_CANVAS_STUDIO_SNAP_SIZE}px grid
-              </span>
-              {canvasDocument?.generationRegion ? (
-                <span className="font-mono text-[8px] text-cyan-200/65">
-                  {canvasDocument.generationRegion.width}x{canvasDocument.generationRegion.height}
-                </span>
-              ) : null}
-            </div>
-          ) : tool === 'polygon' ? (
+          {tool === 'polygon' ? (
             <div className="flex min-h-9 min-w-0 flex-wrap items-center gap-1.5 border-t border-white/[0.06] bg-black/20 px-2.5 py-1">
               <LassoSelect size={11} className="text-cyan-200" />
               <span className="font-mono text-[8px] uppercase text-zinc-500">{polygonPoints.length} vertices</span>
-              <button type="button" onClick={finishPolygonSelection} disabled={polygonPoints.length < 3} title="Apply polygon (Enter)" className="ml-auto inline-flex h-6 w-6 items-center justify-center border border-cyan-300/25 text-cyan-200 disabled:text-zinc-800"><Check size={10} /></button>
+              <button type="button" onClick={() => finishPolygonSelection()} disabled={polygonPoints.length < 3} title="Apply polygon (Enter)" className="ml-auto inline-flex h-6 w-6 items-center justify-center border border-cyan-300/25 text-cyan-200 disabled:text-zinc-800"><Check size={10} /></button>
               <button type="button" onClick={() => setPolygonPoints([])} disabled={polygonPoints.length <= 0} title="Cancel polygon (Escape)" className="inline-flex h-6 w-6 items-center justify-center border border-white/10 text-zinc-500 disabled:text-zinc-800"><X size={10} /></button>
             </div>
           ) : tool === 'wand' ? (
@@ -11339,50 +10833,8 @@ export function UmbraInpaintWorkspace({
                     ))}
                   </svg>
                 ) : null}
-                {false && (canvasPreferences.showGenerationRegionOverlay || tool === 'region') && visibleContextRegion && contextPadding > 0 ? (
-                  <div
-                    className="pointer-events-none absolute border border-dashed border-violet-300/55 bg-violet-300/[0.025]"
-                    style={{
-                      left: `${(visibleContextRegion.x / canvasSize.width) * 100}%`,
-                      top: `${(visibleContextRegion.y / canvasSize.height) * 100}%`,
-                      width: `${(visibleContextRegion.width / canvasSize.width) * 100}%`,
-                      height: `${(visibleContextRegion.height / canvasSize.height) * 100}%`,
-                    }}
-                  />
-                ) : null}
-                {false && !studioMode && (canvasPreferences.showGenerationRegionOverlay || tool === 'region') && canvasDocument?.generationRegion ? (
-                  <div
-                    className={cn(
-                      'absolute border border-cyan-200 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.75),0_0_18px_rgba(103,232,249,0.18)]',
-                      tool === 'region' ? 'cursor-move touch-none' : 'pointer-events-none',
-                    )}
-                    style={{
-                      left: `${(canvasDocument.generationRegion.x / canvasSize.width) * 100}%`,
-                      top: `${(canvasDocument.generationRegion.y / canvasSize.height) * 100}%`,
-                      width: `${(canvasDocument.generationRegion.width / canvasSize.width) * 100}%`,
-                      height: `${(canvasDocument.generationRegion.height / canvasSize.height) * 100}%`,
-                    }}
-                    onPointerDown={(event) => beginRegionTransform(event, 'move')}
-                    onPointerMove={moveRegionTransform}
-                    onPointerUp={finishRegionTransform}
-                    onPointerCancel={finishRegionTransform}
-                  >
-                    <span className="absolute left-0 top-0 bg-cyan-950/90 px-1.5 py-0.5 font-mono text-[7px] text-cyan-100">GENERATION REGION</span>
-                    {tool === 'region' ? (['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
-                      <button
-                        key={corner}
-                        type="button"
-                        aria-label={`Resize generation region ${corner}`}
-                        onPointerDown={(event) => beginRegionTransform(event, `resize-${corner}`)}
-                        className={cn(
-                          'absolute h-2.5 w-2.5 border border-cyan-100 bg-cyan-950 shadow-[0_0_6px_rgba(103,232,249,0.5)]',
-                          corner[0] === 'n' ? '-top-1.5' : '-bottom-1.5',
-                          corner[1] === 'w' ? '-left-1.5' : '-right-1.5',
-                        )}
-                      />
-                    )) : null}
-                  </div>
-                ) : null}
+
+
                 {tool === 'transform' && activeTransformLayer && activeTransformLayer.visible ? (
                   <div
                     className={cn(
@@ -11596,318 +11048,7 @@ export function UmbraInpaintWorkspace({
                   ) : null}
                 </div>
               </div>
-              {false ? <div className="min-w-0 bg-[#07090a] px-3 pb-3 pt-2">
-                <div className="mb-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="border-l-2 border-rose-300/60 pl-2 text-[8px] font-black uppercase tracking-[0.14em] text-rose-100/80">Layers</span>
-                  <span className="font-mono text-[8px] text-zinc-700">bottom to top</span>
-                  {selectedLayerIds.length > 1 ? <span className="font-mono text-[7px] uppercase text-cyan-300">{selectedLayerIds.length} selected</span> : null}
-                  <div data-umbra-layer-actions="" className="flex w-full max-w-full min-w-0 flex-wrap items-center gap-1 [&>*]:shrink-0">
-                    <button
-                      type="button"
-                      onClick={groupSelectedLayers}
-                      disabled={groupableSelectedLayers.length < 2 || selectedVisualMutationLocked}
-                      title="Group selected visual layers (Shift-click layer rows to select several)"
-                      className="inline-flex h-6 items-center gap-1.5 border border-cyan-300/20 px-2 text-[7px] font-black uppercase text-cyan-200 disabled:border-white/5 disabled:text-zinc-800"
-                    >
-                      <FolderPlus size={9} /> Group
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void mergeSelectedLayers()}
-                      disabled={selectedVisualLayers.length < 2 || selectedVisualMutationLocked || !canvasReady}
-                      title="Merge selected visual layers into one raster layer"
-                      className="inline-flex h-6 items-center gap-1.5 border border-amber-300/20 px-2 text-[7px] font-black uppercase text-amber-200 disabled:border-white/5 disabled:text-zinc-800"
-                    >
-                      <Combine size={9} /> Merge
-                    </button>
-                    {activeControlLayer || activeInpaintMaskLayer ? (
-                      <button
-                        type="button"
-                        onClick={() => void mergeVisibleGuidanceLayers()}
-                        disabled={visibleGuidanceMergeLayers.length < 2 || visibleGuidanceMergeMutationLocked || !canvasReady}
-                        title={`Merge all visible ${activeControlLayer ? 'controls' : 'inpaint masks'} into one layer`}
-                        className="inline-flex h-6 w-6 items-center justify-center border border-emerald-300/20 text-emerald-200 disabled:border-white/5 disabled:text-zinc-800"
-                      >
-                        <Layers3 size={9} />
-                      </button>
-                    ) : null}
-                    {false ? <div ref={booleanMenuRef} className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setBooleanMenuOpen((value) => !value)}
-                        disabled={booleanRasterLayers.length !== 2 || !canvasReady}
-                        aria-haspopup="menu"
-                        aria-expanded={booleanMenuOpen}
-                        title="Combine exactly two visible raster layers while preserving the originals"
-                        className="inline-flex h-6 items-center gap-1.5 border border-violet-300/20 px-2 text-[7px] font-black uppercase text-violet-200 disabled:border-white/5 disabled:text-zinc-800"
-                      >
-                        <SquaresIntersect size={9} /> Boolean <ChevronDown size={8} />
-                      </button>
-                      {booleanMenuOpen ? (
-                        <div role="menu" className="absolute right-0 top-[calc(100%+4px)] z-50 w-36 border border-violet-300/25 bg-[#08090d] p-1 shadow-xl shadow-black/70">
-                          <button type="button" role="menuitem" onClick={() => void applyRasterBoolean('intersect')} className="flex h-7 w-full items-center gap-2 px-2 text-left text-[8px] font-black uppercase text-zinc-300 hover:bg-violet-500/10 hover:text-violet-100"><SquaresIntersect size={10} /> Intersect</button>
-                          <button type="button" role="menuitem" onClick={() => void applyRasterBoolean('cut_out')} className="flex h-7 w-full items-center gap-2 px-2 text-left text-[8px] font-black uppercase text-zinc-300 hover:bg-violet-500/10 hover:text-violet-100"><Scissors size={10} /> Cut Out</button>
-                          <button type="button" role="menuitem" onClick={() => void applyRasterBoolean('cut_away')} className="flex h-7 w-full items-center gap-2 px-2 text-left text-[8px] font-black uppercase text-zinc-300 hover:bg-violet-500/10 hover:text-violet-100"><SquaresSubtract size={10} /> Cut Away</button>
-                          <button type="button" role="menuitem" onClick={() => void applyRasterBoolean('exclude')} className="flex h-7 w-full items-center gap-2 px-2 text-left text-[8px] font-black uppercase text-zinc-300 hover:bg-violet-500/10 hover:text-violet-100"><SquaresUnite size={10} /> Exclude</button>
-                        </div>
-                      ) : null}
-                    </div> : null}
-                    <button type="button" onClick={() => dispatchCanvasDocument({ type: 'add_inpaint_mask' })} disabled={!canvasDocument} title="Add another editable inpaint mask" className="inline-flex h-6 items-center justify-center gap-1.5 border border-rose-300/20 px-2 text-[7px] font-black uppercase text-rose-200 disabled:text-zinc-800"><Plus size={9} /> New Mask</button>
-                    <button
-                      type="button"
-                      onClick={() => activeInpaintMaskLayer && deleteInpaintMask(activeInpaintMaskLayer.id)}
-                      disabled={!activeInpaintMaskLayer || activeInpaintMaskLayer.locked}
-                      title={!activeInpaintMaskLayer ? 'Select an inpaint mask to delete it' : activeInpaintMaskLayer.locked ? 'Unlock the active mask before deleting it' : 'Delete the selected inpaint mask; Undo restores it'}
-                      className="inline-flex h-6 items-center justify-center gap-1.5 border border-red-300/20 px-2 text-[7px] font-black uppercase text-red-200 disabled:border-white/[0.06] disabled:text-zinc-800"
-                    >
-                      <Trash2 size={9} /> Delete Mask
-                    </button>
-                    <button type="button" onClick={() => dispatchCanvasDocument({ type: 'add_group_layer' })} disabled={!canvasDocument} title="Add layer group" className="inline-flex h-6 w-6 items-center justify-center border border-white/10 text-zinc-400 disabled:text-zinc-800"><FolderPlus size={9} /></button>
-                  </div>
-                </div>
-                <div className="flex min-h-[110px] gap-2 overflow-x-auto custom-scrollbar">
-                  {canvasDocument ? [...visibleLayerRows].reverse().map((layer) => {
-                    const active = canvasDocument.activeLayerId === layer.id;
-                    const selected = selectedLayerIds.includes(layer.id);
-                    const isSource = layer.kind === 'raster' && layer.role === 'source';
-                    const isActiveMask = layer.id === canvasDocument.activeMaskLayerId;
-                    const isEditingLayerMask = layer.id === editingLayerMaskId;
-                    const canToggleGeneration = layer.kind === 'mask' && layer.purpose === 'inpaint'
-                      || layer.kind === 'control'
-                      || layer.kind === 'reference';
-                    const thumbnail = layer.kind === 'raster'
-                      ? layer.asset.imageUrl
-                      : layer.kind === 'control'
-                        ? layer.asset.imageUrl
-                      : layer.kind === 'reference'
-                        ? layer.asset.imageUrl
-                      : layer.kind === 'mask'
-                        ? layer.dataUrl
-                        : '';
-                    return (
-                      <div
-                        key={layer.id}
-                        onDragOver={(event) => previewLayerDrop(event, layer.id)}
-                        onDrop={(event) => dropLayer(event, layer.id)}
-                        className={cn(
-                          'relative w-[194px] shrink-0 border bg-black/40 p-1.5',
-                          active
-                            ? 'border-rose-300/55 shadow-[0_0_14px_rgba(251,113,133,0.12)]'
-                            : selected
-                              ? 'border-cyan-300/50 bg-cyan-500/[0.045] shadow-[0_0_12px_rgba(103,232,249,0.1)]'
-                              : 'border-white/10',
-                          layerDropTarget?.layerId === layer.id && layerDropTarget.side === 'left' ? 'after:absolute after:bottom-0 after:left-[-5px] after:top-0 after:w-0.5 after:bg-cyan-200' : '',
-                          layerDropTarget?.layerId === layer.id && layerDropTarget.side === 'right' ? 'after:absolute after:bottom-0 after:right-[-5px] after:top-0 after:w-0.5 after:bg-cyan-200' : '',
-                        )}
-                      >
-                        {canToggleGeneration ? (
-                          <button
-                            type="button"
-                            onClick={() => dispatchCanvasDocument({ type: 'toggle_layer_enabled', layerId: layer.id })}
-                            disabled={layer.locked}
-                            title={layer.enabled ? 'Disable this layer for generation' : 'Enable this layer for generation'}
-                            className={cn('absolute left-[42px] top-2 z-10 inline-flex h-4 w-4 items-center justify-center border bg-black/80 disabled:text-zinc-800', layer.enabled ? 'border-emerald-300/40 text-emerald-200' : 'border-white/15 text-zinc-700')}
-                          >
-                            <Power size={8} />
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          aria-pressed={selected}
-                          title="Select layer; Shift-click to add or remove it from the selection"
-                          onClick={(event) => selectLayerRow(layer, event.shiftKey)}
-                          className="flex w-full items-center gap-2 text-left"
-                        >
-                          <span className="relative h-10 w-12 shrink-0 overflow-hidden border border-white/10 bg-[linear-gradient(45deg,#171717_25%,transparent_25%),linear-gradient(-45deg,#171717_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#171717_75%),linear-gradient(-45deg,transparent_75%,#171717_75%)] bg-[length:10px_10px]">
-                            {thumbnail ? <img src={thumbnail} alt="" className="h-full w-full object-cover" /> : layer.kind === 'gradient' ? <span className="absolute inset-0" style={{ background: `linear-gradient(${layer.angle}deg, ${layer.stops.map((stop) => `${stop.color} ${Math.round(stop.offset * 100)}%`).join(', ')})` }} /> : layer.kind === 'text' ? <Type size={15} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-zinc-500" /> : layer.kind === 'group' ? <FolderPlus size={15} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-zinc-500" /> : <Layers3 size={13} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-zinc-700" />}
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[8px] font-black uppercase text-zinc-300" title={layer.name}>{layer.name}</span>
-                            <span className="block font-mono text-[7px] uppercase text-zinc-600">{layer.kind}{isActiveMask ? ' / active' : ''}{isEditingLayerMask ? ' / layer mask' : ''}{selected && !active ? ' / selected' : ''}</span>
-                            {layer.groupId ? <span className="block truncate font-mono text-[6px] uppercase text-cyan-300/50">{groupLayers.find((group) => group.id === layer.groupId)?.name || 'Missing group'}</span> : null}
-                          </span>
-                        </button>
-                        <div className="mt-1.5 flex items-center gap-1">
-                          <button
-                            type="button"
-                            draggable={!isSource && !layer.locked}
-                            onDragStart={(event) => beginLayerDrag(event, layer.id)}
-                            onDragEnd={finishLayerDrag}
-                            disabled={isSource || layer.locked}
-                            title={isSource ? 'The immutable source stays at the bottom of the stack' : layer.locked ? 'Unlock the layer before reordering it' : 'Drag to reorder layer'}
-                            className="inline-flex h-5 w-5 cursor-grab items-center justify-center border border-white/10 text-zinc-500 active:cursor-grabbing disabled:cursor-default disabled:text-zinc-800"
-                          >
-                            <GripVertical size={9} />
-                          </button>
-                          <button type="button" onClick={() => dispatchCanvasDocument({ type: 'toggle_layer', layerId: layer.id })} title={layer.visible ? 'Hide layer' : 'Show layer'} className="inline-flex h-5 w-5 items-center justify-center border border-white/10 text-zinc-500">{layer.visible ? <Eye size={9} /> : <EyeOff size={9} />}</button>
-                          <button type="button" onClick={() => dispatchCanvasDocument({ type: 'toggle_layer_lock', layerId: layer.id })} disabled={isSource} title={isSource ? 'The source layer is immutable' : layer.locked ? 'Unlock layer' : 'Lock layer'} className="inline-flex h-5 w-5 items-center justify-center border border-white/10 text-zinc-500 disabled:text-zinc-800">{layer.locked ? <Lock size={9} /> : <Unlock size={9} />}</button>
-                          {layer.kind === 'group' ? <button type="button" onClick={() => dispatchCanvasDocument({ type: 'toggle_group_collapsed', layerId: layer.id })} title={layer.collapsed ? 'Expand group' : 'Collapse group'} className="inline-flex h-5 w-5 items-center justify-center border border-white/10 text-zinc-500">{layer.collapsed ? <ChevronRight size={9} /> : <ChevronDown size={9} />}</button> : null}
-                          <button type="button" onClick={() => dispatchCanvasDocument({ type: 'move_layer', layerId: layer.id, direction: 'up' })} disabled={isSource || layer.locked} title="Move up" className="inline-flex h-5 w-5 items-center justify-center border border-white/10 text-zinc-500 disabled:text-zinc-800"><ArrowUp size={9} /></button>
-                          <button type="button" onClick={() => dispatchCanvasDocument({ type: 'move_layer', layerId: layer.id, direction: 'down' })} disabled={isSource || layer.locked} title="Move down" className="inline-flex h-5 w-5 items-center justify-center border border-white/10 text-zinc-500 disabled:text-zinc-800"><ArrowDown size={9} /></button>
-                          <button type="button" onClick={() => dispatchCanvasDocument({ type: 'duplicate_layer', layerId: layer.id })} disabled={isSource || layer.locked || layer.kind === 'group' || layer.kind === 'mask' && (layer.frozen || layer.purpose !== 'inpaint')} title="Duplicate layer" className="inline-flex h-5 w-5 items-center justify-center border border-white/10 text-zinc-500 disabled:text-zinc-800"><Copy size={9} /></button>
-                          <button type="button" aria-pressed={canvasDocument.bookmarkedLayerId === layer.id} onClick={() => dispatchCanvasDocument({ type: 'set_bookmarked_layer', layerId: canvasDocument.bookmarkedLayerId === layer.id ? '' : layer.id })} title={canvasDocument.bookmarkedLayerId === layer.id ? 'Remove quick-switch bookmark' : 'Bookmark layer for quick switch'} className={cn('inline-flex h-5 w-5 items-center justify-center border', canvasDocument.bookmarkedLayerId === layer.id ? 'border-cyan-300/40 bg-cyan-500/10 text-cyan-100' : 'border-white/10 text-zinc-600')}><Bookmark size={9} className={canvasDocument.bookmarkedLayerId === layer.id ? 'fill-current' : ''} /></button>
-                          <button type="button" onClick={() => layer.kind === 'mask' && layer.purpose === 'inpaint' ? deleteInpaintMask(layer.id) : dispatchCanvasDocument({ type: 'remove_layer', layerId: layer.id })} disabled={isSource || layer.locked || (layer.kind === 'mask' && layer.purpose === 'layer')} title={layer.kind === 'mask' && layer.purpose === 'layer' ? 'Remove this mask from its raster layer controls' : layer.kind === 'mask' && layer.purpose === 'inpaint' ? 'Delete inpaint mask; Undo restores it' : 'Delete layer'} className="ml-auto inline-flex h-5 w-5 items-center justify-center border border-red-300/15 text-red-300/60 disabled:text-zinc-800"><Trash2 size={9} /></button>
-                        </div>
-                        {layer.kind !== 'mask' || !layer.frozen ? (
-                          <label className="mt-1.5 flex items-center gap-1.5">
-                            <span className="w-7 text-[7px] font-black uppercase text-zinc-700">Opacity</span>
-                            <input type="range" min={0} max={1} step={0.01} value={layer.opacity} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_opacity', layerId: layer.id, opacity: Number(event.target.value) })} disabled={layer.locked} className="min-w-0 flex-1 accent-rose-400 disabled:opacity-30" />
-                            <span className="w-7 text-right font-mono text-[7px] text-zinc-600">{Math.round(layer.opacity * 100)}%</span>
-                          </label>
-                        ) : null}
-                      </div>
-                    );
-                  }) : (
-                    <div className="flex min-w-44 items-center justify-center border border-dashed border-white/10 text-[8px] font-black uppercase tracking-[0.12em] text-zinc-700">Open an image</div>
-                  )}
-                </div>
-                {activeRasterLayer ? (
-                  <fieldset
-                    disabled={activeRasterLayer.locked || activeRasterLayer.role === 'source'}
-                    className="mt-2 grid w-full min-w-0 items-end gap-1.5 border-0 border-t border-white/[0.06] p-0 pt-2 disabled:opacity-55"
-                    style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 88px), 1fr))' }}
-                  >
-                    <label className="col-span-2 min-w-0 space-y-1">
-                      <span className="block text-[7px] font-black uppercase text-zinc-700">Layer Name</span>
-                      <input value={activeRasterLayer.name} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_name', layerId: activeRasterLayer.id, name: event.target.value })} className="h-7 w-full min-w-0 border border-white/10 bg-black/35 px-2 font-mono text-[8px] text-zinc-200 outline-none focus:border-cyan-300/35" />
-                    </label>
-                    <label className="min-w-0 space-y-1">
-                      <span className="block text-[7px] font-black uppercase text-zinc-700">Blend</span>
-                      <UmbraSelectControl value={activeRasterLayer.blendMode} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_blend_mode', layerId: activeRasterLayer.id, blendMode: event.target.value as UmbraCanvasBlendMode })} className="h-7 w-full border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none">
-                        {UMBRA_CANVAS_BLEND_MODES.map((mode) => <option key={mode} value={mode}>{mode === 'source-over' ? 'Normal' : mode}</option>)}
-                      </UmbraSelectControl>
-                    </label>
-                    <label className="min-w-0 space-y-1">
-                      <span className="block text-[7px] font-black uppercase text-zinc-700">Group</span>
-                      <UmbraSelectControl value={activeRasterLayer.groupId || ''} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_group', layerId: activeRasterLayer.id, groupId: event.target.value })} disabled={activeRasterLayer.role === 'source'} className="h-7 w-full border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none disabled:text-zinc-700">
-                        <option value="">Ungrouped</option>
-                        {groupLayers.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-                      </UmbraSelectControl>
-                    </label>
-                    <label className="min-w-0 space-y-1">
-                      <span className="block text-[7px] font-black uppercase text-zinc-700">Smoothing</span>
-                      <UmbraSelectControl value={activeRasterLayer.smoothing} onChange={(event) => dispatchCanvasDocument({ type: 'set_raster_smoothing', layerId: activeRasterLayer.id, smoothing: event.target.value as UmbraCanvasRasterLayer['smoothing'] })} className="h-7 w-full border border-white/10 bg-black/35 px-1 font-mono text-[8px] text-zinc-300 outline-none">
-                        <option value="none">None</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
-                      </UmbraSelectControl>
-                    </label>
-                    {([
-                      ['X', 'x'],
-                      ['Y', 'y'],
-                      ['W', 'width'],
-                      ['H', 'height'],
-                      ['ROT', 'rotation'],
-                    ] as const).map(([label, key]) => (
-                      <label key={key} className="min-w-0 space-y-1">
-                        <span className="block text-[7px] font-black uppercase text-zinc-700">{label}</span>
-                        <input
-                          type="number"
-                          value={Math.round(activeRasterLayer.transform[key] * 100) / 100}
-                          onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_transform', layerId: activeRasterLayer.id, transform: { [key]: Number(event.target.value) } })}
-                          disabled={activeRasterLayer.locked}
-                          className="h-7 w-full border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none disabled:text-zinc-700"
-                        />
-                      </label>
-                    ))}
-                    <div className="space-y-1">
-                      <span className="block text-[7px] font-black uppercase text-zinc-700">Flip</span>
-                      <div className="grid grid-cols-2 gap-1">
-                        <button type="button" onClick={() => dispatchCanvasDocument({ type: 'set_layer_transform', layerId: activeRasterLayer.id, transform: { scaleX: activeRasterLayer.transform.scaleX * -1 } })} disabled={activeRasterLayer.locked} title="Flip horizontally" className="inline-flex h-7 items-center justify-center border border-white/10 text-zinc-500 disabled:text-zinc-800"><FlipHorizontal2 size={10} /></button>
-                        <button type="button" onClick={() => dispatchCanvasDocument({ type: 'set_layer_transform', layerId: activeRasterLayer.id, transform: { scaleY: activeRasterLayer.transform.scaleY * -1 } })} disabled={activeRasterLayer.locked} title="Flip vertically" className="inline-flex h-7 items-center justify-center border border-white/10 text-zinc-500 disabled:text-zinc-800"><FlipVertical2 size={10} /></button>
-                      </div>
-                    </div>
-                    <div className="col-span-full flex min-w-0 flex-wrap items-end gap-2 border-t border-white/[0.05] pt-2">
-                      <label className="flex h-8 shrink-0 items-center gap-1.5 border border-white/10 px-2 font-mono text-[7px] uppercase text-zinc-400"><input type="checkbox" checked={activeRasterLayer.adjustments.enabled} onChange={(event) => dispatchCanvasDocument({ type: 'update_raster_adjustments', layerId: activeRasterLayer.id, changes: { enabled: event.target.checked } })} className="accent-cyan-300" /> Adjustments</label>
-                      <label className="flex h-8 shrink-0 items-center gap-1.5 border border-white/10 px-2 font-mono text-[7px] uppercase text-zinc-400"><input type="checkbox" checked={activeRasterLayer.transparencyLocked} onChange={(event) => dispatchCanvasDocument({ type: 'set_raster_transparency_lock', layerId: activeRasterLayer.id, locked: event.target.checked })} className="accent-rose-300" /> Lock Alpha</label>
-                      <button type="button" onClick={() => setRasterFilterLayerId(activeRasterLayer.id)} className="inline-flex h-8 shrink-0 items-center gap-1.5 border border-rose-300/20 px-2 text-[7px] font-black uppercase text-rose-200"><WandSparkles size={9} /> Filter</button>
-                      <button type="button" onClick={() => setLayerUpscaleLayerId(activeRasterLayer.id)} disabled={!comfyConnected || upscaleModels.length <= 0} title={upscaleModels.length > 0 ? 'Upscale this layer with an installed model' : 'Install an upscale model to use this action'} className="inline-flex h-8 shrink-0 items-center gap-1.5 border border-cyan-300/20 px-2 text-[7px] font-black uppercase text-cyan-200 disabled:border-white/5 disabled:text-zinc-800"><Maximize2 size={9} /> Upscale</button>
-                      <button type="button" onClick={() => void editOrAddActiveRasterMask()} disabled={activeRasterLayer.role === 'source'} className="inline-flex h-8 shrink-0 items-center gap-1.5 border border-cyan-300/20 px-2 text-[7px] font-black uppercase text-cyan-200 disabled:border-white/5 disabled:text-zinc-800"><SquareDashed size={9} /> {activeRasterLayer.maskLayerId ? 'Edit Mask' : 'Add Mask'}</button>
-                      {!activeRasterLayer.maskLayerId ? <button type="button" onClick={() => void editOrAddActiveRasterMask(true)} disabled={activeRasterLayer.role === 'source'} className="inline-flex h-8 shrink-0 items-center gap-1.5 border border-cyan-300/20 px-2 text-[7px] font-black uppercase text-cyan-200 disabled:border-white/5 disabled:text-zinc-800"><Scissors size={9} /> From Selection</button> : null}
-                      {activeRasterLayer.maskLayerId ? <button type="button" onClick={() => detachRasterMask(activeRasterLayer)} disabled={activeRasterLayer.role === 'source'} className="inline-flex h-8 shrink-0 items-center gap-1.5 border border-red-300/20 px-2 text-[7px] font-black uppercase text-red-200 disabled:border-white/5 disabled:text-zinc-800"><X size={9} /> Remove Mask</button> : null}
-                      <div className="flex h-8 shrink-0 items-stretch">
-                        {(['simple', 'curves'] as const).map((mode) => <button key={mode} type="button" onClick={() => dispatchCanvasDocument({ type: 'update_raster_adjustments', layerId: activeRasterLayer.id, changes: { mode } })} className={cn('border px-2 font-mono text-[7px] font-black uppercase', activeRasterLayer.adjustments.mode === mode ? 'border-cyan-300/30 bg-cyan-500/[0.08] text-cyan-200' : 'border-white/10 text-zinc-600')}>{mode}</button>)}
-                      </div>
-                      {activeRasterLayer.adjustments.mode === 'simple' ? ([
-                          ['Brightness', 'brightness', -1, 1],
-                          ['Contrast', 'contrast', -1, 1],
-                          ['Saturation', 'saturation', -1, 1],
-                          ['Temperature', 'temperature', -1, 1],
-                          ['Tint', 'tint', -1, 1],
-                          ['Sharpness', 'sharpness', 0, 1],
-                        ] as const).map(([label, key, minimum, maximum]) => (
-                          <label key={key} className="w-28 shrink-0 space-y-1">
-                            <span className="flex text-[7px] font-black uppercase text-zinc-700"><span>{label}</span><span className="ml-auto font-mono text-zinc-500">{activeRasterLayer.adjustments[key].toFixed(2)}</span></span>
-                            <input type="range" min={minimum} max={maximum} step={0.01} value={activeRasterLayer.adjustments[key]} disabled={!activeRasterLayer.adjustments.enabled} onChange={(event) => dispatchCanvasDocument({ type: 'update_raster_adjustments', layerId: activeRasterLayer.id, changes: { [key]: Number(event.target.value) } })} className="w-full accent-cyan-300 disabled:opacity-30" />
-                          </label>
-                        )) : (
-                          <UmbraRasterCurvesEditor
-                            curves={activeRasterLayer.adjustments.curves}
-                            imageUrl={activeRasterLayer.asset.imageUrl}
-                            disabled={!activeRasterLayer.adjustments.enabled}
-                            onChange={(curves) => dispatchCanvasDocument({ type: 'update_raster_adjustments', layerId: activeRasterLayer.id, changes: { curves } })}
-                          />
-                        )}
-                    </div>
-                  </fieldset>
-                ) : activeGroupLayer ? (
-                  <div
-                    data-umbra-layer-settings="group"
-                    className="mt-2 grid w-full min-w-0 items-end gap-1.5 border-t border-white/[0.06] pt-2"
-                    style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 120px), 1fr))' }}
-                  >
-                    <label className="space-y-1"><span className="block text-[7px] font-black uppercase text-zinc-700">Group Name</span><input value={activeGroupLayer.name} disabled={activeGroupLayer.locked} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_name', layerId: activeGroupLayer.id, name: event.target.value })} className="h-8 w-full border border-white/10 bg-black/35 px-2 font-mono text-[8px] text-zinc-200 outline-none disabled:opacity-35" /></label>
-                    <label className="space-y-1"><span className="block text-[7px] font-black uppercase text-zinc-700">Opacity</span><input type="range" min={0} max={1} step={0.01} value={activeGroupLayer.opacity} disabled={activeGroupLayer.locked} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_opacity', layerId: activeGroupLayer.id, opacity: Number(event.target.value) })} className="h-8 w-full accent-rose-300 disabled:opacity-35" /></label>
-                    <label className="space-y-1"><span className="block text-[7px] font-black uppercase text-zinc-700">Blend</span><UmbraSelectControl value={activeGroupLayer.blendMode} disabled={activeGroupLayer.locked} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_blend_mode', layerId: activeGroupLayer.id, blendMode: event.target.value as UmbraCanvasBlendMode })} className="h-8 w-full border border-white/10 bg-black/35 px-1 font-mono text-[8px] text-zinc-300 outline-none disabled:opacity-35">{UMBRA_CANVAS_BLEND_MODES.map((mode) => <option key={mode} value={mode}>{mode === 'source-over' ? 'Normal' : mode}</option>)}</UmbraSelectControl></label>
-                    <button type="button" onClick={() => dispatchCanvasDocument({ type: 'toggle_group_collapsed', layerId: activeGroupLayer.id })} className="inline-flex h-8 items-center justify-center gap-1 border border-white/10 text-[7px] font-black uppercase text-zinc-400">{activeGroupLayer.collapsed ? <ChevronRight size={9} /> : <ChevronDown size={9} />}{activeGroupLayer.collapsed ? 'Expand' : 'Collapse'}</button>
-                    <button type="button" onClick={() => void mergeActiveGroup()} disabled={!canvasReady || activeGroupMergeMutationLocked} title={activeGroupMergeMutationLocked ? 'Unlock the group and its children before merging' : 'Merge the group into one raster layer'} className="inline-flex h-8 items-center justify-center gap-1 border border-cyan-300/20 text-[7px] font-black uppercase text-cyan-200 disabled:text-zinc-800"><Combine size={9} /> Merge</button>
-                  </div>
-                ) : activeLayerMaskLayer ? (
-                  <div
-                    data-umbra-layer-settings="layer-mask"
-                    className="mt-2 grid w-full min-w-0 items-end gap-2 border-t border-white/[0.06] pt-2"
-                    style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 130px), 1fr))' }}
-                  >
-                    <label className="min-w-0 space-y-1">
-                      <span className="block text-[7px] font-black uppercase text-zinc-700">Layer Mask Name</span>
-                      <input value={activeLayerMaskLayer.name} onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_name', layerId: activeLayerMaskLayer.id, name: event.target.value })} className="h-8 w-full min-w-0 border border-white/10 bg-black/35 px-2 font-mono text-[8px] text-zinc-200 outline-none focus:border-cyan-300/35" />
-                    </label>
-                    <div className="space-y-1">
-                      <span className="block text-[7px] font-black uppercase text-zinc-700">Masks Raster Layer</span>
-                      <div className="flex h-8 items-center border border-white/10 bg-black/35 px-2 font-mono text-[8px] text-zinc-400">{rasterForActiveLayerMask?.name || 'Missing raster layer'}</div>
-                    </div>
-                    <button type="button" onClick={() => detachRasterMask(rasterForActiveLayerMask)} disabled={!rasterForActiveLayerMask} className="inline-flex h-8 items-center justify-center gap-1.5 border border-red-300/20 text-[7px] font-black uppercase text-red-200 disabled:text-zinc-800"><Trash2 size={9} /> Remove Mask</button>
-                  </div>
-                ) : activeInpaintMaskLayer ? (
-                  <div
-                    data-umbra-layer-settings="inpaint-mask"
-                    className="mt-2 grid w-full min-w-0 items-end gap-2 border-t border-white/[0.06] pt-2"
-                    style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 120px), 1fr))' }}
-                  >
-                    <label className="min-w-0 space-y-1">
-                      <span className="block text-[7px] font-black uppercase text-zinc-700">Mask Name</span>
-                      <input
-                        value={activeInpaintMaskLayer.name}
-                        onChange={(event) => dispatchCanvasDocument({ type: 'set_layer_name', layerId: activeInpaintMaskLayer.id, name: event.target.value })}
-                        disabled={activeInpaintMaskLayer.locked}
-                        className="h-8 w-full min-w-0 border border-white/10 bg-black/35 px-2 font-mono text-[8px] text-zinc-200 outline-none focus:border-rose-300/35 disabled:text-zinc-700"
-                      />
-                    </label>
-                    <CanvasMaskOverlayControls
-                      layer={activeInpaintMaskLayer}
-                      disabled={activeInpaintMaskLayer.locked}
-                      onChange={(changes) => dispatchCanvasDocument({ type: 'update_mask_overlay', layerId: activeInpaintMaskLayer.id, changes })}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => deleteInpaintMask(activeInpaintMaskLayer.id)}
-                      disabled={activeInpaintMaskLayer.locked}
-                      title={activeInpaintMaskLayer.locked ? 'Unlock this mask before deleting it' : 'Delete this inpaint mask; Undo restores it'}
-                      className="inline-flex h-8 items-center justify-center gap-1.5 border border-red-300/20 text-[7px] font-black uppercase text-red-200 hover:bg-red-500/10 disabled:border-white/[0.06] disabled:text-zinc-800"
-                    >
-                      <Trash2 size={9} /> Delete Mask
-                    </button>
-                  </div>
-                ) : null}
-              </div> : null}
+
               <div className="min-w-0 bg-[#060a0b] px-3 pb-3 pt-2">
                 <div className="mb-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="border-l-2 border-cyan-300/60 pl-2 text-[8px] font-black uppercase tracking-[0.14em] text-cyan-100/80">Generation Staging</span>
@@ -12003,68 +11144,7 @@ export function UmbraInpaintWorkspace({
           }}
           onContextMenu={(event) => event.preventDefault()}
         >
-          {false ? <>
-          <div className="px-2 py-1 font-mono text-[7px] font-black uppercase tracking-[0.14em] text-zinc-700">Canvas</div>
-          {studioMode ? <CanvasMenuButton icon={<Combine size={9} />} label={`Stitch ${studioOverlapArtboards.length > 1 ? `${studioOverlapArtboards.length} Overlapping Canvases` : 'Overlaps'}`} disabled={studioOverlapArtboards.length < 2 || !!fullResolutionOperation || studioOverlapArtboards.some((artboard) => artboard.locked)} onClick={() => { setCanvasContextMenu(null); void stitchOverlappingArtboards(); }} /> : null}
-          <CanvasMenuButton icon={<Copy size={9} />} label="Copy Canvas" onClick={() => { setCanvasContextMenu(null); void copyCanvasToSystemClipboard(false); }} />
-          <CanvasMenuButton icon={<BoxSelect size={9} />} label="Copy Generation Region" disabled={!canvasDocument?.generationRegion} onClick={() => { setCanvasContextMenu(null); void copyCanvasToSystemClipboard(true); }} />
-          <CanvasMenuButton icon={<FlipHorizontal2 size={9} />} label="Flip Artboard Horizontally" disabled={!canvasDocument || canvasDocument.staging.length > 0 || canvasDocument.pendingJobs.length > 0 || !!fullResolutionOperation || canvasStudio.activeArtboard?.locked} onClick={() => { setCanvasContextMenu(null); void transformCanvasArtboard('flip_horizontal'); }} />
-          <CanvasMenuButton icon={<FlipVertical2 size={9} />} label="Flip Artboard Vertically" disabled={!canvasDocument || canvasDocument.staging.length > 0 || canvasDocument.pendingJobs.length > 0 || !!fullResolutionOperation || canvasStudio.activeArtboard?.locked} onClick={() => { setCanvasContextMenu(null); void transformCanvasArtboard('flip_vertical'); }} />
-          <CanvasMenuButton icon={<RotateCcw size={9} />} label="Rotate Artboard Left" disabled={!canvasDocument || canvasDocument.staging.length > 0 || canvasDocument.pendingJobs.length > 0 || !!fullResolutionOperation || canvasStudio.activeArtboard?.locked} onClick={() => { setCanvasContextMenu(null); void transformCanvasArtboard('rotate_left'); }} />
-          <CanvasMenuButton icon={<RotateCw size={9} />} label="Rotate Artboard Right" disabled={!canvasDocument || canvasDocument.staging.length > 0 || canvasDocument.pendingJobs.length > 0 || !!fullResolutionOperation || canvasStudio.activeArtboard?.locked} onClick={() => { setCanvasContextMenu(null); void transformCanvasArtboard('rotate_right'); }} />
-          <CanvasMenuButton icon={<Scissors size={9} />} label="Create Transparent Character Cutout" disabled={!backgroundRemovalAvailable || !canvasDocument || canvasDocument.staging.length > 0 || canvasDocument.pendingJobs.length > 0 || !!fullResolutionOperation || canvasStudio.activeArtboard?.locked} onClick={() => { setCanvasContextMenu(null); void removeCanvasBackground(); }} />
-          <CanvasMenuButton icon={<ClipboardPaste size={9} />} label="Paste to Canvas" onClick={() => { setCanvasContextMenu(null); void pasteSystemClipboardImage(false); }} />
-          <CanvasMenuButton icon={<ClipboardPaste size={9} />} label="Paste to Region" disabled={!canvasDocument?.generationRegion} onClick={() => { setCanvasContextMenu(null); void pasteSystemClipboardImage(true); }} />
-          <CanvasMenuButton icon={<SquareDashed size={9} />} label="Paste as Inpaint Mask" onClick={() => { setCanvasContextMenu(null); void pasteClipboardAsGuidance('mask'); }} />
-          <CanvasMenuButton icon={<SquareDashed size={9} />} label="Fit Region to Masks" onClick={() => { setCanvasContextMenu(null); void fitGenerationRegionToMasks(); }} />
-          <CanvasMenuButton icon={<Layers3 size={9} />} label="Fit Region to Visible Layers" onClick={() => { setCanvasContextMenu(null); fitGenerationRegionToVisibleLayers(); }} />
-          <CanvasMenuButton icon={<Crop size={9} />} label="Crop Canvas to Region" disabled={!canvasDocument?.generationRegion} onClick={() => { setCanvasContextMenu(null); void cropToGenerationRegion(); }} />
-          <CanvasMenuButton icon={<Crop size={9} />} label="Crop Canvas to Visible Content" disabled={!canvasReady || maskProcessing} onClick={() => { setCanvasContextMenu(null); void cropCanvasToVisibleContent(); }} />
-          <CanvasMenuButton icon={<Save size={9} />} label="Save Canvas to Gallery" disabled={isSavingCanvas} onClick={() => { setCanvasContextMenu(null); void saveCanvasToGallery(false); }} />
-          <CanvasMenuButton icon={<ImagePlus size={9} />} label="Continue in IMG2IMG" disabled={isSavingCanvas || !!fullResolutionOperation || isExportingPsd} onClick={() => { setCanvasContextMenu(null); void sendCanvasToImg2Img(); }} />
-          <div className="my-1 h-px bg-white/[0.06]" />
-          <div className="px-2 py-1 font-mono text-[7px] font-black uppercase tracking-[0.14em] text-zinc-700">New Layer</div>
-          <CanvasMenuButton icon={<SquareDashed size={9} />} label="Inpaint Mask" onClick={() => { setCanvasContextMenu(null); dispatchCanvasDocument({ type: 'add_inpaint_mask' }); }} />
-          <CanvasMenuButton icon={<FolderPlus size={9} />} label="Layer Group" onClick={() => { setCanvasContextMenu(null); dispatchCanvasDocument({ type: 'add_group_layer' }); }} />
-          <CanvasMenuButton icon={<Layers3 size={9} />} label="Raster from Region" disabled={!canvasDocument?.generationRegion || !canvasReady} onClick={() => { setCanvasContextMenu(null); void captureGenerationRegionAsRaster(); }} />
-          {activeCanvasLayer ? (
-            <>
-              <div className="my-1 h-px bg-white/[0.06]" />
-              <div className="truncate px-2 py-1 font-mono text-[7px] font-black uppercase tracking-[0.14em] text-zinc-700">{activeCanvasLayer.name}</div>
-              <CanvasMenuButton icon={activeCanvasLayer.visible ? <EyeOff size={9} /> : <Eye size={9} />} label={activeCanvasLayer.visible ? 'Hide Layer' : 'Show Layer'} onClick={() => { setCanvasContextMenu(null); dispatchCanvasDocument({ type: 'toggle_layer', layerId: activeCanvasLayer.id }); }} />
-              {'enabled' in activeCanvasLayer ? <CanvasMenuButton icon={<Power size={9} />} label={activeCanvasLayer.enabled ? 'Disable for Generation' : 'Enable for Generation'} disabled={activeCanvasLayerMutationLocked} onClick={() => { setCanvasContextMenu(null); dispatchCanvasDocument({ type: 'toggle_layer_enabled', layerId: activeCanvasLayer.id }); }} /> : null}
-              <CanvasMenuButton icon={activeCanvasLayer.locked ? <Unlock size={9} /> : <Lock size={9} />} label={activeCanvasLayerIsSource ? 'Source Is Immutable' : activeCanvasLayer.locked ? 'Unlock Layer' : 'Lock Layer'} disabled={activeCanvasLayerIsSource} onClick={() => { setCanvasContextMenu(null); dispatchCanvasDocument({ type: 'toggle_layer_lock', layerId: activeCanvasLayer.id }); }} />
-              <CanvasMenuButton icon={<Copy size={9} />} label="Duplicate Layer" disabled={activeCanvasLayerMutationLocked || activeCanvasLayer.kind === 'group' || activeCanvasLayerIsProtectedMask} onClick={() => { setCanvasContextMenu(null); dispatchCanvasDocument({ type: 'duplicate_layer', layerId: activeCanvasLayer.id }); }} />
-              <CanvasMenuButton icon={<Maximize2 size={9} />} label={`Fit Layer (${transformFitMode})`} disabled={!activeTransformLayer || activeTransformLayer.locked || activeTransformLayer.kind === 'raster' && activeTransformLayer.role === 'source'} onClick={() => { setCanvasContextMenu(null); void fitActiveLayerToGenerationRegion(transformFitMode); }} />
-              <CanvasMenuButton icon={<RotateCcw size={9} />} label="Reset Layer Transform" disabled={!canResetUmbraCanvasLayerTransform(activeTransformLayer)} onClick={() => { setCanvasContextMenu(null); resetActiveLayerTransform(); }} />
-              <CanvasMenuButton icon={<Copy size={9} />} label="Copy Layer to Clipboard" onClick={() => { setCanvasContextMenu(null); void copyActiveLayerToSystemClipboard(); }} />
-              <CanvasMenuButton icon={<Save size={9} />} label="Save Layer to Gallery" disabled={isSavingCanvas} onClick={() => { setCanvasContextMenu(null); void saveActiveLayerToGallery(); }} />
-              {activeRasterLayer ? <CanvasMenuButton icon={<WandSparkles size={9} />} label="Filter Layer" disabled={activeCanvasLayerMutationLocked} onClick={() => { setCanvasContextMenu(null); setRasterFilterLayerId(activeRasterLayer.id); }} /> : null}
-              {activeRasterLayer ? <CanvasMenuButton icon={<Maximize2 size={9} />} label="Upscale Layer" disabled={activeCanvasLayerMutationLocked || !comfyConnected || upscaleModels.length <= 0} onClick={() => { setCanvasContextMenu(null); setLayerUpscaleLayerId(activeRasterLayer.id); }} /> : null}
-              {activeRasterLayer ? <CanvasMenuButton icon={<Crop size={9} />} label="Crop Layer to Region" disabled={activeCanvasLayerMutationLocked || !canvasDocument?.generationRegion || !canvasReady} onClick={() => { setCanvasContextMenu(null); void cropActiveImageLayerToGenerationRegion(); }} /> : null}
-              {activeInpaintMaskLayer ? <CanvasMenuButton icon={<SquareDashed size={9} />} label="Crop Mask to Region" disabled={Boolean(activeInpaintMaskLayer.locked) || !canvasDocument?.generationRegion || !canvasReady} onClick={() => { setCanvasContextMenu(null); void cropActiveMaskToGenerationRegion(); }} /> : null}
-              {activeRasterLayer ? <CanvasMenuButton icon={<Crop size={9} />} label="Trim Layer to Content" disabled={activeCanvasLayerMutationLocked || !canvasReady} onClick={() => { setCanvasContextMenu(null); void trimActiveImageLayerToContent(); }} /> : null}
-              {activeVisualLayer ? <CanvasMenuButton icon={<Combine size={9} />} label="Merge Layer Down" disabled={activeCanvasLayerMutationLocked || !mergeDownTarget || visualMergeDownMutationLocked || !canvasReady} onClick={() => { setCanvasContextMenu(null); void mergeActiveLayerDown(); }} /> : null}
-              {activeInpaintMaskLayer ? <CanvasMenuButton icon={<Combine size={9} />} label="Merge Layer Down" disabled={activeCanvasLayerMutationLocked || !guidanceMergeDownTarget || guidanceMergeDownMutationLocked || !canvasReady} onClick={() => { setCanvasContextMenu(null); void mergeActiveGuidanceDown(); }} /> : null}
-              {activeInpaintMaskLayer ? <CanvasMenuButton icon={<Layers3 size={9} />} label="Merge Visible Masks" disabled={visibleGuidanceMergeLayers.length < 2 || visibleGuidanceMergeMutationLocked || !canvasReady} onClick={() => { setCanvasContextMenu(null); void mergeVisibleGuidanceLayers(); }} /> : null}
-              {activeVisualLayer ? <CanvasMenuButton icon={<SquareDashed size={9} />} label="Copy to Inpaint Mask" onClick={() => { setCanvasContextMenu(null); void copyActiveVisualToMask(); }} /> : null}
-              <CanvasMenuButton icon={<BringToFront size={9} />} label="Move Layer to Front" disabled={activeCanvasLayerMutationLocked} onClick={() => { setCanvasContextMenu(null); dispatchCanvasDocument({ type: 'move_layer', layerId: activeCanvasLayer.id, direction: 'front' }); }} />
-              <CanvasMenuButton icon={<ArrowUp size={9} />} label="Move Layer Up" disabled={activeCanvasLayerMutationLocked} onClick={() => { setCanvasContextMenu(null); dispatchCanvasDocument({ type: 'move_layer', layerId: activeCanvasLayer.id, direction: 'up' }); }} />
-              <CanvasMenuButton icon={<ArrowDown size={9} />} label="Move Layer Down" disabled={activeCanvasLayerMutationLocked} onClick={() => { setCanvasContextMenu(null); dispatchCanvasDocument({ type: 'move_layer', layerId: activeCanvasLayer.id, direction: 'down' }); }} />
-              <CanvasMenuButton icon={<SendToBack size={9} />} label="Move Layer to Back" disabled={activeCanvasLayerMutationLocked} onClick={() => { setCanvasContextMenu(null); dispatchCanvasDocument({ type: 'move_layer', layerId: activeCanvasLayer.id, direction: 'back' }); }} />
-              <CanvasMenuButton
-                icon={<Trash2 size={9} />}
-                label={activeInpaintMaskLayer ? 'Delete Mask' : 'Delete Layer'}
-                disabled={activeCanvasLayerMutationLocked || activeCanvasLayerIsProtectedMask}
-                onClick={() => {
-                  setCanvasContextMenu(null);
-                  if (activeInpaintMaskLayer) deleteInpaintMask(activeInpaintMaskLayer.id);
-                  else dispatchCanvasDocument({ type: 'remove_layer', layerId: activeCanvasLayer.id });
-                }}
-              />
-            </>
-          ) : null}
-          </> : <>
+          {<>
             <div className="px-2 py-1 font-mono text-[7px] font-black uppercase tracking-[0.14em] text-zinc-700">Inpaint Image</div>
             <CanvasMenuButton icon={<Copy size={9} />} label="Copy Image" onClick={() => { setCanvasContextMenu(null); void copyCanvasToSystemClipboard(false); }} />
             <CanvasMenuButton icon={<Save size={9} />} label="Save to Gallery" disabled={!source || isSavingCanvas} onClick={() => { setCanvasContextMenu(null); void saveCanvasToGallery(false); }} />

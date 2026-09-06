@@ -1863,7 +1863,7 @@ export function UmbraCanvasWorkspace({
     const raster = useUmbraCanvasStore.getState().present.entities.find((entity) => (
       entity.kind === 'raster' && entity.id === rasterEntityId
     ));
-    if (!raster?.imageUrl) {
+    if (!raster || raster.kind !== 'raster' || !raster.imageUrl) {
       showToast('Select an imported image before creating a surrounding mask.', 'error');
       return;
     }

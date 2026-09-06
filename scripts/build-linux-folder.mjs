@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { isPrivateDevelopmentSource } from './release-source-policy.mjs';
 
 if (process.platform !== 'linux') {
   throw new Error('[linux-publish] Linux portable folder builds must be run on Linux.');
@@ -98,6 +99,7 @@ function shouldSkipSourcePath(sourcePath) {
 }
 
 function copyTree(source, target, options = {}) {
+  if (isPrivateDevelopmentSource(path.relative(root, source))) return;
   if (!fs.existsSync(source)) return;
   if (!options.allowSkippedSource && shouldSkipSourcePath(source)) return;
 
@@ -192,10 +194,7 @@ function prepareCleanUser() {
     path.join(root, 'defaults', 'PowerPrompter', 'Prompts'),
     path.join(userPath, 'PowerPrompter', 'Prompts'),
   );
-  copyTree(
-    path.join(root, 'defaults', 'PowerPrompter', 'Wildcards'),
-    path.join(userPath, 'PowerPrompter', 'Wildcards'),
-  );
+  ensureDir(path.join(userPath, 'PowerPrompter', 'Wildcards'));
 }
 
 function verifyCleanPublishedUser() {

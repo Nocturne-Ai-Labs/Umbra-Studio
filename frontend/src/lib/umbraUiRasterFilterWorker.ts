@@ -22,7 +22,7 @@ export function canUseUmbraRasterFilterWorker(): boolean {
     && typeof createImageBitmap !== 'undefined';
 }
 
-export function renderUmbraRasterFilterInWorker(options: {
+export async function renderUmbraRasterFilterInWorker(options: {
   blob: Blob;
   width: number;
   height: number;
@@ -32,6 +32,7 @@ export function renderUmbraRasterFilterInWorker(options: {
   if (!canUseUmbraRasterFilterWorker()) {
     return Promise.reject(new Error('Background raster filtering is unavailable in this browser.'));
   }
+  if (options.signal?.aborted) throw new DOMException('Raster filtering was canceled.', 'AbortError');
 
   const worker = new Worker('/assets/UmbraRasterFilterWorker.js', { type: 'module' });
   const requestId = nextRequestId++;
@@ -48,20 +49,22 @@ export function renderUmbraRasterFilterInWorker(options: {
     const handleAbort = () => finish(() => reject(new DOMException('Raster filtering was canceled.', 'AbortError')));
 
     worker.onmessage = (event: MessageEvent<UmbraRasterFilterWorkerResponse>) => {
-      if (event.data.requestId !== requestId) return;
-      if (!event.data.success) {
-        finish(() => reject(new Error(event.data.error)));
+      const response = event.data;
+      if (response.requestId !== requestId) return;
+      if (!response.success) {
+        finish(() => reject(new Error(response.error)));
         return;
       }
       finish(() => resolve({
-        blob: event.data.blob,
-        width: event.data.width,
-        height: event.data.height,
-        padding: event.data.padding,
-        elapsedMs: event.data.elapsedMs,
+        blob: response.blob,
+        width: response.width,
+        height: response.height,
+        padding: response.padding,
+        elapsedMs: response.elapsedMs,
       }));
     };
     worker.onerror = (event) => finish(() => reject(new Error(event.message || 'The background raster filter crashed.')));
+    worker.onmessageerror = () => finish(() => reject(new Error('The background raster filter returned an unreadable result.')));
 
     if (options.signal?.aborted) {
       handleAbort();
@@ -75,6 +78,10 @@ export function renderUmbraRasterFilterInWorker(options: {
       height: options.height,
       config: options.config,
     };
-    worker.postMessage(request);
+    try {
+      worker.postMessage(request);
+    } catch (error) {
+      finish(() => reject(error));
+    }
   });
 }

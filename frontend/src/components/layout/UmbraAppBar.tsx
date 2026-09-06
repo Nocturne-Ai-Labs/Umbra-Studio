@@ -1749,6 +1749,53 @@ export const UmbraAppBar = () => {
     );
   };
 
+  const renderThumbnailPrivacyControls = () => (
+    <div data-umbra-thumbnail-privacy-controls="" className="space-y-2">
+              <div className="text-[10px] uppercase tracking-[0.2em] font-black text-zinc-400">
+                NSFW Thumbnails
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                {(['off', 'blur', 'lock'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setNsfwPrivacyMode(mode)}
+                    aria-pressed={nsfwPrivacyMode === mode}
+                    className={cn(
+                      'rounded-md border px-2 py-2 text-[10px] font-semibold transition-colors',
+                      nsfwPrivacyMode === mode
+                        ? 'border-red-400/40 bg-red-500/15 text-red-100'
+                        : 'border-white/10 bg-white/[0.04] text-zinc-400 hover:text-zinc-100',
+                    )}
+                  >
+                    {mode === 'off' ? 'Off' : mode === 'blur' ? 'Blur' : 'Lock'}
+                  </button>
+                ))}
+              </div>
+              {nsfwPrivacyMode === 'blur' ? (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[10px] uppercase tracking-widest text-zinc-500">
+                    <span>Blur Intensity</span>
+                    <span className="text-zinc-300 tabular-nums">{nsfwThumbnailBlurIntensity}%</span>
+                  </div>
+                  <input type="range" min={0} max={100} step={1} value={nsfwThumbnailBlurIntensity} onChange={(event) => setAppSetting('ui.nsfwThumbnailBlurIntensity', Math.max(0, Math.min(100, Math.round(Number(event.target.value) || 0))))} className="w-full accent-red-400" aria-label="NSFW blur intensity" />
+                </div>
+              ) : null}
+              {nsfwPrivacyMode === 'lock' && hasNsfwPrivacyPin ? (
+                <button
+                  type="button"
+                  onClick={nsfwPrivacyLocked ? requestNsfwPrivacyUnlock : lockNsfwPrivacyNow}
+                  className="w-full rounded-md border border-red-300/25 bg-red-500/10 px-2.5 py-2 text-[10px] font-semibold text-red-100 hover:bg-red-500/20"
+                >
+                  {nsfwPrivacyLocked ? 'Unlock Protected Media' : 'Lock Media Now'}
+                </button>
+              ) : null}
+              <button type="button" onClick={configureNsfwPrivacyPin} className="w-full rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-2 text-[10px] font-semibold text-zinc-300 hover:border-red-300/30 hover:text-red-100">
+                {hasNsfwPrivacyPin ? 'Change 4-Digit PIN' : 'Set 4-Digit PIN'}
+              </button>
+    </div>
+  );
+
   const phoneTopbarStyle = React.useMemo(() => {
     if (!isPhoneComfyImmersive || !phoneComfyMenuPosition) return undefined;
     return {
@@ -1954,6 +2001,9 @@ export const UmbraAppBar = () => {
           description={unreadIssueCount > 0 ? `${unreadIssueCount} unread issue${unreadIssueCount === 1 ? '' : 's'}` : 'Review action errors and retries'}
           className="mb-3 w-full justify-start border-white/10 bg-white/[0.035] px-3 py-2.5"
         />
+        <div className="my-3 border-y border-white/10 py-3">
+          {renderThumbnailPrivacyControls()}
+        </div>
         {isRemoteClient ? renderRemoteSessionControls('phone') : null}
         <button
           type="button"
@@ -2332,47 +2382,7 @@ export const UmbraAppBar = () => {
                 NSFW
               </PopoverButton>
               <PopoverPanel anchor="bottom start" className="z-[110] mt-2 w-[240px] rounded-xl border border-white/15 bg-[#090b10]/95 p-3 shadow-2xl backdrop-blur-xl space-y-2">
-              <div className="text-[10px] uppercase tracking-[0.2em] font-black text-zinc-400">
-                NSFW Mode
-              </div>
-              <div className="grid grid-cols-3 gap-1">
-                {(['off', 'blur', 'lock'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setNsfwPrivacyMode(mode)}
-                    className={cn(
-                      'rounded-md border px-2 py-2 text-[10px] font-semibold transition-colors',
-                      nsfwPrivacyMode === mode
-                        ? 'border-red-400/40 bg-red-500/15 text-red-100'
-                        : 'border-white/10 bg-white/[0.04] text-zinc-400 hover:text-zinc-100',
-                    )}
-                  >
-                    {mode === 'off' ? 'Off' : mode === 'blur' ? 'Blur' : 'Lock'}
-                  </button>
-                ))}
-              </div>
-              {nsfwPrivacyMode === 'blur' ? (
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between text-[10px] uppercase tracking-widest text-zinc-500">
-                    <span>Blur Intensity</span>
-                    <span className="text-zinc-300 tabular-nums">{nsfwThumbnailBlurIntensity}%</span>
-                  </div>
-                  <input type="range" min={0} max={100} step={1} value={nsfwThumbnailBlurIntensity} onChange={(event) => setAppSetting('ui.nsfwThumbnailBlurIntensity', Math.max(0, Math.min(100, Math.round(Number(event.target.value) || 0))))} className="w-full accent-red-400" aria-label="NSFW blur intensity" />
-                </div>
-              ) : null}
-              {nsfwPrivacyMode === 'lock' && hasNsfwPrivacyPin ? (
-                <button
-                  type="button"
-                  onClick={nsfwPrivacyLocked ? requestNsfwPrivacyUnlock : lockNsfwPrivacyNow}
-                  className="w-full rounded-md border border-red-300/25 bg-red-500/10 px-2.5 py-2 text-[10px] font-semibold text-red-100 hover:bg-red-500/20"
-                >
-                  {nsfwPrivacyLocked ? 'Unlock Protected Media' : 'Lock Media Now'}
-                </button>
-              ) : null}
-              <button type="button" onClick={configureNsfwPrivacyPin} className="w-full rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-2 text-[10px] font-semibold text-zinc-300 hover:border-red-300/30 hover:text-red-100">
-                {hasNsfwPrivacyPin ? 'Change 4-Digit PIN' : 'Set 4-Digit PIN'}
-              </button>
+              {renderThumbnailPrivacyControls()}
             </PopoverPanel>
           </Popover>
 

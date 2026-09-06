@@ -19,9 +19,13 @@ import { pathToFileURL } from 'url';
 import { createConnection } from 'net';
 import { ServerWebSocket } from 'bun';
 import { ThumbnailService } from './backend/ThumbnailService';
+import { CIVITAI_PAGE_TIMEOUT_MS, CIVITAI_METADATA_TIMEOUT_MS, requestCivitaiPage, civitaiPageError } from './backend/CivitaiPageRequest';
 import { seedBundledWorkflowDirectory } from './backend/BundledWorkflowService';
 import { settingsManager } from './backend/settings/SettingsManager';
 import { FsWorkerService } from './backend/FsWorkerService';
+import { GalleryTransferJournal } from './backend/GalleryTransferJournal';
+import { copyFileExclusive } from './backend/FsTransferCopy';
+import { AnimaModelMergeService } from './backend/AnimaModelMergeService';
 import {
   buildBooruMediaRequestHeaders,
   loadApiKeys,
@@ -108,12 +112,17 @@ import {
   isMissingHermesPromptSession,
   parseHermesPromptSessionId,
 } from './backend/hermesPromptCommand';
+import { AGENT_PROMPT_RESPONSE_FORMAT, cleanUmbraUiAgentPromptOutput, extractAgentResponseText } from './backend/umbraUiAgentOutput';
 import {
   normalizePowerPrompterReceiptUid,
   readPowerPrompterReceipt,
   writePowerPrompterReceipt,
 } from './backend/PowerPrompterReceiptService';
-import { extractUmbraUiTrainedTags } from './backend/UmbraUiLoraMetadata';
+import {
+  extractUmbraUiTrainedTags,
+  extractUmbraUiTrainingTags,
+  extractUmbraUiTriggerWords,
+} from './backend/UmbraUiLoraMetadata';
 import { resolveUmbraUiPinnedOutputFolder } from './backend/UmbraUiPinnedOutput';
 import {
   applyUmbraUiPrompterOutputLayout,
@@ -140,6 +149,7 @@ import { ModelIndexWorkerService, type ModelRootDescriptor } from './backend/Mod
 import { ModelDownloadWorkerService } from './backend/ModelDownloadWorkerService';
 import { ModelManagerStateDb } from './backend/ModelManagerStateDb';
 import { createDatasetArchive } from './backend/DatasetArchiveService';
+import { getGalleryArchiveJob, listGalleryArchives, queueGalleryArchive } from './backend/GalleryArchiveService';
 import { FirstRunService } from './backend/FirstRunService';
 import { UMBRA_MIGRATION_EXIT_CODE } from './shared/onboarding/firstRun';
 import {
@@ -354,6 +364,11 @@ const modelDownloadWorkerService = new ModelDownloadWorkerService({
 });
 const modelManagerStateDb = new ModelManagerStateDb(ROOT_DIR);
 const danbooruTagCorpusService = new DanbooruTagCorpusService(USER_DIR);
+const animaModelMergeService = new AnimaModelMergeService(() => {
+  const tool = detectComfyUI();
+  if (!tool.detected || !tool.pythonPath) throw new Error('Configure a ComfyUI installation with its Python environment first.');
+  return { modelsRoot: join(tool.path, 'models'), python: tool.pythonPath, comfyRoot: tool.path };
+}, join(SOURCE_DIR, 'backend', 'python', 'anima_model_merge.py'), join(USER_DIR, 'Config', 'DataForge', 'MergeJobs'));
 const umbraUiUpscaleService = new UmbraUiUpscaleService({
   getComfyBaseUrl: () => getComfyProxyBaseUrl(),
   getComfyInputRoot: () => join(getComfyToolRootFast() || join(ROOT_DIR, 'Tools', 'ComfyUI'), 'input'),
@@ -17234,63 +17249,6 @@ function serializeUmbraUiAgentGenerationContext(value: unknown): string {
   }
 }
 
-function cleanUmbraUiAgentPromptOutput(value: string): string {
-  let output = String(value || '')
-    .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
-    .replace(/\r\n/g, '\n')
-    .trim();
-  // Local agents may return hidden reasoning, terminal chrome, or status text
-  // alongside the answer. Strip those transport artifacts before generation.
-  const hasAgentReasoning = /\b(?:the user wants|i need to|let me|i should|context:|return only|that's good|let's refine)\b/i.test(output);
-  if (hasAgentReasoning) {
-    const paragraphs = output
-      .split(/\n\s*\n+/)
-      .map((paragraph) => paragraph.trim())
-      .filter(Boolean);
-    const finalParagraph = [...paragraphs]
-      .reverse()
-      .find((paragraph) => !/^(?:the user wants|context:|i need to|let me|i should|return only|prompt(?:ing)? guidance|complete prompt|umbra generation context|that's good|the subject:)/i.test(paragraph));
-    if (finalParagraph) output = finalParagraph;
-    if (/\b(?:the user wants|i need to|let me|return only|just the prompt text)\b/i.test(output)) {
-      const finalLine = [...output.split('\n')]
-        .map((line) => line.trim())
-        .reverse()
-        .find((line) => line.length >= 40 && !/^(?:the user wants|context:|i need to|let me|i should|return only|prompt(?:ing)? guidance|complete prompt|umbra generation context|that's good|the subject:)/i.test(line));
-      if (finalLine) output = finalLine;
-    }
-  }
-  output = output
-    .replace(/┌─\s*Reasoning[\s\S]*?┐/i, '')
-    .replace(/[┌└]─[^\n]*(?:┐|┘)/g, '')
-    .replace(/(^|\n)\s*[│|]\s*/g, '$1')
-    .replace(/\*{1,3}\s*(?:composing|drafting|writing)\s+(?:a\s+)?(?:concise\s+)?(?:image-to-video|video)\s+prompt\s*\*{1,3}/gi, '')
-    .replace(/\b(?:composing|drafting|writing)\s+(?:a\s+)?(?:concise\s+)?(?:image-to-video|video)\s+prompt\b/gi, '')
-    .replace(/(^|\n)\s*(?:reasoning|thinking|composing\s+prompt)\s*:?\s*$/gim, '$1')
-    .replace(/(^|\n)\s*[┌└│─|_]+\s*(?=\n|$)/g, '$1')
-    .replace(/<\/?(?:think|thinking|reasoning)>[\s\S]*?<\/(?:think|thinking|reasoning)>/gi, '')
-    .replace(/<think(?:ing)?\b[^>]*>[\s\S]*?(?:<\/think(?:ing)?>|$)/gi, '')
-    .replace(/(?:^|\n)\s*[\u250c\u256d]\u2500+\s*(?:reasoning|thinking|analysis)\b[\s\S]*?(?=\n\s*[\u2514\u256f]\u2500+|\n\s*(?:final(?:\s+answer)?|answer)\s*[:\uFF1A])/gi, '\n')
-    .replace(/(^|\n)\s*[\u2502|]\s*/g, '$1')
-    .replace(/(^|\n)\s*(?:[*#_`-]*\s*)?(?:reasoning|thinking|analysis|chain\s+of\s+thought|composing\s+prompt)\s*:?\s*(?:[*#_`-]*\s*)?$/gim, '$1')
-    .replace(/(^|\n)\s*(?:final(?:\s+answer)?|answer|response)\s*[:\uFF1A]\s*/i, '$1')
-    .replace(/[\u2500-\u257f]/g, '')
-    .replace(/(^|\n)\s*[*#_`-]{2,}\s*(?=\n|$)/g, '$1')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  output = output.replace(/^```(?:text|markdown|md)?\s*/i, '').replace(/\s*```$/i, '').trim();
-  output = output.replace(/^(?:final\s+)?(?:positive\s+)?prompt\s*:\s*/i, '').trim();
-  if (/^umbra_ui_stage_prompt\b/i.test(output)) {
-    const stagedSegments = output.match(/\bsegments\s*=\s*\[([\s\S]*?)\](?:\s+\w+\s*=|$)/i)?.[1]?.trim();
-    if (stagedSegments) {
-      output = stagedSegments
-        .replace(/(^|;\s*)(?:subject|identity|pose|action|composition|camera|setting|environment|lighting(?:\s+and\s+style)?|style|quality(?:\s+details)?)\s*:\s*/gi, '$1')
-        .replace(/;\s*/g, ', ')
-        .trim();
-    }
-  }
-  output = output.replace(/(?:,\s*)?(?:restrained\s+)?negative\s+prompt\s*:[\s\S]*$/i, '').trim();
-  return output.slice(0, UMBRA_UI_AGENT_TEXT_LIMIT);
-}
 
 function prepareUmbraUiInlineAgentInstruction(value: string): string {
   return String(value || '')
@@ -17421,18 +17379,17 @@ async function readAgentResponseText(response: Response, providerLabel: string):
   try {
     payload = text ? JSON.parse(text) : null;
   } catch {
+    if (response.ok && /\bjson\b/i.test(response.headers.get('content-type') || '')) {
+      throw new Error(`${providerLabel} returned an invalid JSON response. Retry the agent request; the original prompt has not been replaced.`);
+    }
     // Some local servers return plain text on errors.
   }
   if (!response.ok) {
     const reason = payload?.error?.message || payload?.error || payload?.message || text;
     throw new Error(`${providerLabel} request failed (${response.status}): ${clampUmbraUiAgentText(reason, 600) || 'Unknown error'}`);
   }
-  if (payload?.choices?.[0]?.message?.content) return String(payload.choices[0].message.content);
-  if (payload?.choices?.[0]?.text) return String(payload.choices[0].text);
-  if (payload?.message?.content) return String(payload.message.content);
-  if (payload?.response) return String(payload.response);
-  if (typeof payload === 'string') return payload;
-  return text;
+  // Do not stringify a provider envelope when its final content is empty.
+  return payload === null && text.trim() !== 'null' ? text : extractAgentResponseText(payload);
 }
 
 async function generateUmbraUiPromptWithOpenAiCompatible(
@@ -17557,6 +17514,7 @@ async function generateUmbraUiPromptWithConfiguredAgent(
   settings: UmbraUiAgentGenerationSettings,
   agentRequest: string,
 ): Promise<string> {
+  agentRequest = `${agentRequest}\n\nRESPONSE FORMAT:\n${AGENT_PROMPT_RESPONSE_FORMAT}`;
   if (settings.provider === 'ollama') return generateUmbraUiPromptWithOllama(settings, agentRequest);
   if (settings.provider === 'lmstudio' || settings.provider === 'openai-compatible') {
     return generateUmbraUiPromptWithOpenAiCompatible(settings, agentRequest);
@@ -17752,7 +17710,7 @@ async function generateUmbraUiPromptWithAgent(value: unknown): Promise<{
     const settings = await loadUmbraUiAgentSettings();
     const rawPrompt = await generateUmbraUiPromptWithConfiguredAgent(settings.generation, agentRequest);
     const prompt = cleanUmbraUiAgentPromptOutput(rawPrompt);
-    if (!prompt) throw new Error('The configured agent returned an empty prompt.');
+    if (!prompt) throw new Error('The agent returned reasoning or an empty response without a usable final prompt. Retry or increase the agent output-token limit. Your original prompt has not been replaced.');
     return {
       prompt,
       instructionId: instruction.id,
@@ -18881,7 +18839,8 @@ const UMBRA_UI_INPAINT_IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.jpeg', '.j
 type UmbraUiCatalogKind = 'checkpoint' | 'lora';
 
 const UMBRA_UI_METADATA_ENDPOINTS = ['/easyuse/metadata/', '/pysssss/metadata/', '/umbra/metadata/'];
-const umbraUiCatalogInfoCache = new Map<string, Record<string, unknown>>();
+const umbraUiCatalogInfoCache = new Map<string, { info: Record<string, unknown>; expires: number }>();
+const umbraUiCatalogInfoPending = new Map<string, Promise<Record<string, unknown>>>();
 
 function normalizeUmbraUiCatalogName(value: unknown): string {
   return String(value || '').trim().replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/{2,}/g, '/');
@@ -19073,19 +19032,32 @@ async function handleUmbraUiCatalogInfo(url: URL): Promise<Response> {
   }
   const cacheKey = `${kind}:${name.toLowerCase()}`;
   const cached = umbraUiCatalogInfoCache.get(cacheKey);
-  if (cached) return Response.json({ success: true, info: cached });
+  if (cached && cached.expires > Date.now()) return Response.json({ success: true, info: cached.info });
+  umbraUiCatalogInfoCache.delete(cacheKey);
   try {
-    const metadata = await fetchUmbraUiLocalModelMetadata(kind, name);
-    const civitai = await fetchUmbraUiCivitaiInfo(kind, name, metadata);
-    const info = {
-      ...(kind === 'lora' ? { loraName: name } : { modelName: name }),
-      metadata,
-      civitai,
-      trainedTags: extractUmbraUiTrainedTags(civitai, metadata),
-      descriptionHtml: '',
-      descriptionText: '',
-    };
-    umbraUiCatalogInfoCache.set(cacheKey, info);
+    let pending = umbraUiCatalogInfoPending.get(cacheKey);
+    if (!pending) {
+      pending = (async () => {
+        const metadata = await fetchUmbraUiLocalModelMetadata(kind, name);
+        const civitai = await fetchUmbraUiCivitaiInfo(kind, name, metadata);
+        const info = {
+          ...(kind === 'lora' ? { loraName: name } : { modelName: name }),
+          metadata,
+          civitai,
+          trainedTags: extractUmbraUiTrainedTags(civitai, metadata),
+          triggerWords: extractUmbraUiTriggerWords(civitai, metadata),
+          trainingTags: extractUmbraUiTrainingTags(metadata),
+          descriptionHtml: '',
+          descriptionText: '',
+        };
+        // A temporary provider failure must not hide a model's previews for the whole session.
+        umbraUiCatalogInfoCache.set(cacheKey, { info, expires: Date.now() + (civitai ? 300_000 : 30_000) });
+        while (umbraUiCatalogInfoCache.size > 1024) umbraUiCatalogInfoCache.delete(umbraUiCatalogInfoCache.keys().next().value!);
+        return info;
+      })().finally(() => umbraUiCatalogInfoPending.delete(cacheKey));
+      umbraUiCatalogInfoPending.set(cacheKey, pending);
+    }
+    const info = await pending;
     return Response.json({ success: true, info });
   } catch (error) {
     return Response.json({ success: false, error: String((error as Error)?.message || error) }, { status: 500 });
@@ -25958,6 +25930,35 @@ async function buildBufferZip(
   }
 }
 
+async function handleGalleryArchives(req: Request, url: URL): Promise<Response> {
+  try {
+    if (url.pathname.endsWith('/status')) {
+      const job = getGalleryArchiveJob(url.searchParams.get('id') || '');
+      return job ? json(job) : json({ error: 'Archive job is no longer available. Check the folder before trying again.' }, 404);
+    }
+    const body = req.method === 'POST' ? await req.json() : null;
+    const requestedPath = String(body?.path || url.searchParams.get('path') || '').trim();
+    if (!requestedPath) return json({ error: 'Select a Gallery folder' }, 400);
+    const path = normalizeOutputPathInput(requestedPath);
+    if (!path || path === TRASH_ROOT || path.startsWith(`${TRASH_ROOT}/`)) return json({ error: 'Select a normal Gallery folder' }, 400);
+    const resolved = resolvePath(path);
+    if (!resolved) return json({ error: 'Invalid archive path' }, 403);
+    if (url.pathname.endsWith('/download')) {
+      if (extname(resolved.fullPath).toLowerCase() !== '.zip' || !(await fs.stat(resolved.fullPath)).isFile()) return json({ error: 'Select a ZIP file' }, 400);
+      return new Response(Bun.file(resolved.fullPath), { headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(basename(resolved.fullPath))}`,
+        'Cache-Control': 'no-store',
+      } });
+    }
+    if (!(await fs.stat(resolved.fullPath)).isDirectory()) return json({ error: 'Select a folder' }, 400);
+    if (req.method === 'POST') return json(queueGalleryArchive(resolved.fullPath, path), 202);
+    return json({ archives: await listGalleryArchives(resolved.fullPath, path) });
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : 'Archive operation failed' }, 400);
+  }
+}
+
 async function handleFsDownloadZip(req: Request): Promise<Response> {
   try {
     const contentType = String(req.headers.get('content-type') || '').toLowerCase();
@@ -27172,6 +27173,7 @@ async function handleModelManagerCivitaiSearch(url: URL): Promise<Response> {
     headers.set('Content-Type', 'application/json');
 
     const attemptedUrls = new Set<string>();
+    const pageSignal = AbortSignal.timeout(CIVITAI_PAGE_TIMEOUT_MS);
     let lastStatus = 500;
     let lastErrorText = '';
     for (const attempt of attempts) {
@@ -27180,20 +27182,15 @@ async function handleModelManagerCivitaiSearch(url: URL): Promise<Response> {
       if (attemptedUrls.has(key)) continue;
       attemptedUrls.add(key);
 
-      const response = await fetch(requestUrl, {
-        headers,
-        signal: AbortSignal.timeout(MODEL_MANAGER_CIVITAI_TIMEOUT_MS),
-      });
+      const response = await requestCivitaiPage<Record<string, unknown>>(requestUrl, headers, { signal: pageSignal });
       if (response.ok) {
-        const payload = await response.json();
-        return json(payload);
+        return json(response.data);
       }
 
       lastStatus = response.status;
-      lastErrorText = await response.text().catch(() => '');
+      lastErrorText = response.details;
 
       if (response.status === 400) continue;
-      if (response.status === 429 || response.status >= 500) continue;
       break;
     }
 
@@ -27208,7 +27205,7 @@ async function handleModelManagerCivitaiSearch(url: URL): Promise<Response> {
     return json({
       items: [],
       metadata: { nextPage: null },
-      warning: error?.message || 'CivitAI search failed',
+      warning: civitaiPageError(error),
     });
   }
 }
@@ -27223,15 +27220,11 @@ async function handleModelManagerCivitaiModel(url: URL): Promise<Response> {
     const headers = await buildModelManagerCivitaiHeaders('application/json');
     headers.set('Content-Type', 'application/json');
 
-    const response = await fetch(targetBase, {
-      headers,
-      signal: AbortSignal.timeout(MODEL_MANAGER_CIVITAI_TIMEOUT_MS),
-    });
+    const response = await requestCivitaiPage<Record<string, unknown>>(targetBase, headers);
     if (!response.ok) {
-      const detail = await response.text().catch(() => '');
-      return json({ error: `CivitAI model request failed (${response.status})`, details: detail.slice(0, 240) }, response.status || 500);
+      return json({ error: `CivitAI model request failed (${response.status})`, details: response.details.slice(0, 240) }, response.status || 500);
     }
-    const payload = await response.json() as Record<string, unknown>;
+    const payload = response.data;
     if (slim) {
       payload.communityMedia = [];
       return json(payload);
@@ -27248,16 +27241,20 @@ async function handleModelManagerCivitaiModel(url: URL): Promise<Response> {
       ? payload.modelVersions as Array<Record<string, unknown>>
       : [];
     const enrichedVersions: Array<Record<string, unknown>> = [];
+    const metadataSignal = AbortSignal.timeout(CIVITAI_METADATA_TIMEOUT_MS);
+    let previewBudget = MODEL_MANAGER_CLIPBOARD_IMAGE_LIMIT;
 
     for (const version of modelVersions) {
       const versionId = Number(version?.id || 0);
-      const existingImages = Array.isArray(version?.images) ? version.images as Array<Record<string, unknown>> : [];
+      // Only enrich images that will actually be returned to the page.
+      const existingImages = (Array.isArray(version?.images) ? version.images as Array<Record<string, unknown>> : []).slice(0, previewBudget);
+      previewBudget -= existingImages.length;
       const needsMetaEnrichment = existingImages.length > 0 && existingImages.some((image) => {
         const imageRecord = (image && typeof image === 'object') ? image as Record<string, unknown> : {};
         return !(Object.prototype.hasOwnProperty.call(imageRecord, 'meta')) || imageRecord.meta == null;
       });
-      if (!needsMetaEnrichment || !Number.isFinite(versionId) || versionId <= 0) {
-        enrichedVersions.push(version);
+      if (!needsMetaEnrichment || !Number.isFinite(versionId) || versionId <= 0 || metadataSignal.aborted) {
+        enrichedVersions.push({ ...version, images: existingImages });
         continue;
       }
 
@@ -27268,7 +27265,7 @@ async function handleModelManagerCivitaiModel(url: URL): Promise<Response> {
         imagesTarget.searchParams.set('limit', '200');
         const imagesResponse = await fetch(imagesTarget, {
           headers,
-          signal: AbortSignal.timeout(MODEL_MANAGER_CIVITAI_TIMEOUT_MS),
+          signal: metadataSignal,
         });
         if (imagesResponse.ok) {
           const imagesPayload = await imagesResponse.json().catch(() => ({})) as { items?: Array<Record<string, unknown>> };
@@ -27279,7 +27276,7 @@ async function handleModelManagerCivitaiModel(url: URL): Promise<Response> {
       }
 
       if (apiItems.length <= 0) {
-        enrichedVersions.push(version);
+        enrichedVersions.push({ ...version, images: existingImages });
         continue;
       }
 
@@ -27314,23 +27311,32 @@ async function handleModelManagerCivitaiModel(url: URL): Promise<Response> {
       });
     }
 
-    let remainingImages = MODEL_MANAGER_CLIPBOARD_IMAGE_LIMIT;
-    const cappedVersions = enrichedVersions.map((version) => {
-      const versionRecord = { ...version };
-      const versionImages = Array.isArray(versionRecord.images) ? versionRecord.images as Array<Record<string, unknown>> : [];
-      const keep = Math.max(0, remainingImages);
-      const trimmedImages = versionImages.slice(0, keep);
-      remainingImages -= trimmedImages.length;
-      versionRecord.images = trimmedImages;
-      return versionRecord;
-    });
-
-    payload.modelVersions = cappedVersions;
+    payload.modelVersions = enrichedVersions;
     payload.communityMedia = [];
     return json(payload);
   } catch (error: any) {
     console.error('[ModelManager] CivitAI model error:', error);
-    return json({ error: error?.message || 'CivitAI model request failed' }, 500);
+    return json({ error: civitaiPageError(error) }, 502);
+  }
+}
+
+async function handleModelManagerCivitaiPreviewMetadata(url: URL): Promise<Response> {
+  const versionId = Number(url.searchParams.get('versionId'));
+  if (!Number.isSafeInteger(versionId) || versionId <= 0) return json({ error: 'Invalid version id' }, 400);
+  try {
+    const headers = await buildModelManagerCivitaiHeaders('application/json');
+    const target = new URL('https://civitai.com/api/v1/images');
+    target.searchParams.set('modelVersionId', String(versionId));
+    target.searchParams.set('limit', '200');
+    const result = await requestCivitaiPage<{ items?: Array<Record<string, unknown>> }>(target, headers, {
+      timeoutMs: CIVITAI_METADATA_TIMEOUT_MS,
+    });
+    if (!result.ok) return json({ error: 'Preview metadata unavailable' }, result.status);
+    return json({ items: (Array.isArray(result.data.items) ? result.data.items : []).map(item => ({
+      id: item.id, url: item.url, meta: item.meta,
+    })) });
+  } catch {
+    return json({ error: 'Preview metadata unavailable' }, 502);
   }
 }
 
@@ -27346,15 +27352,11 @@ async function handleModelManagerCivitaiVersion(url: URL): Promise<Response> {
     const headers = await buildModelManagerCivitaiHeaders('application/json');
     headers.set('Content-Type', 'application/json');
     const targetBase = new URL(`https://civitai.com/api/v1/model-versions/${encodeURIComponent(String(versionId))}`);
-    const response = await fetch(targetBase, {
-      headers,
-      signal: AbortSignal.timeout(MODEL_MANAGER_CIVITAI_TIMEOUT_MS),
-    });
+    const response = await requestCivitaiPage<Record<string, unknown>>(targetBase, headers);
     if (!response.ok) {
-      const detail = await response.text().catch(() => '');
-      return json({ error: `CivitAI model version request failed (${response.status})`, details: detail.slice(0, 240) }, response.status || 500);
+      return json({ error: `CivitAI model version request failed (${response.status})`, details: response.details.slice(0, 240) }, response.status || 500);
     }
-    const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+    const payload = response.data;
     const modelId = Number(payload?.modelId || 0);
     if (!Number.isFinite(modelId) || modelId <= 0) {
       return json({ error: 'Model id not found for version' }, 404);
@@ -27366,7 +27368,7 @@ async function handleModelManagerCivitaiVersion(url: URL): Promise<Response> {
     });
   } catch (error: any) {
     console.error('[ModelManager] CivitAI version error:', error);
-    return json({ error: error?.message || 'CivitAI model version request failed' }, 500);
+    return json({ error: civitaiPageError(error) }, 502);
   }
 }
 
@@ -27725,7 +27727,7 @@ async function handleFsTree(url: URL): Promise<Response> {
     if (!resolved) return json({ error: 'Invalid path' }, 400);
 
     const { fullPath } = resolved;
-    if (!existsSync(fullPath)) return json({ folders: [] });
+    if (!existsSync(fullPath)) return json({ folders: [], missing: true, path: normalizedPath });
 
     const result = await fsWorkerService.tree({
       fullPath,
@@ -28213,7 +28215,14 @@ type FsMoveJobStatus = 'running' | 'completed' | 'failed';
 type FsCopyResult = { path: string; success: boolean; error?: string; newPath?: string };
 type FsCopyJobStatus = 'running' | 'completed' | 'failed';
 
-interface FsMoveJob {
+interface FsTransferDetails {
+  phase?: string;
+  fileBytes?: number;
+  fileTotalBytes?: number;
+  lastProgressAt?: number;
+}
+
+interface FsMoveJob extends FsTransferDetails {
   id: string;
   status: FsMoveJobStatus;
   transferMode: MoveTransferMode;
@@ -28228,7 +28237,7 @@ interface FsMoveJob {
   results: FsMoveResult[];
 }
 
-interface FsCopyJob {
+interface FsCopyJob extends FsTransferDetails {
   id: string;
   status: FsCopyJobStatus;
   destination: string;
@@ -28265,6 +28274,7 @@ interface ModelManagerFsTransferJob {
 
 const fsMoveJobs = new Map<string, FsMoveJob>();
 const fsCopyJobs = new Map<string, FsCopyJob>();
+const galleryTransferJournal = new GalleryTransferJournal(join(ROOT_DIR, 'User', 'Config', 'GalleryTransfers'));
 const modelManagerFsTransferJobs = new Map<string, ModelManagerFsTransferJob>();
 const FS_MOVE_JOB_TTL_MS = 10 * 60 * 1000;
 const CLOUD_TRANSFER_DELAY_MS = 180;
@@ -28699,7 +28709,7 @@ function normalizeFsTransferResultPath(value: unknown): string {
   }
 }
 
-function syncGalleryDbAfterTransfer(results: Array<Record<string, unknown>>, mode: 'move' | 'copy') {
+async function syncGalleryDbAfterTransfer(results: Array<Record<string, unknown>>, mode: 'move' | 'copy') {
   const pairs = (results || [])
     .filter((entry) => entry?.success === true)
     .map((entry) => ({
@@ -28708,21 +28718,13 @@ function syncGalleryDbAfterTransfer(results: Array<Record<string, unknown>>, mod
     }))
     .filter((pair) => pair.sourcePath && pair.targetPath && pair.sourcePath !== pair.targetPath);
   if (pairs.length === 0) return;
-  try {
-    const changed = mode === 'move'
-      ? galleryDb.moveRecordsForPaths(pairs)
-      : galleryDb.copyRecordsForPaths(pairs);
-    if (changed > 0 && FS_LIST_DEBUG) {
-      console.debug(`[GalleryDb] Synced ${changed} ${mode} record${changed === 1 ? '' : 's'}`);
-    }
-  } catch (error) {
-    console.warn(`[GalleryDb] Failed to sync ${mode} metadata:`, error);
-  }
+  await fsWorkerService.reconcileGallery({ mode, pairs });
 }
 
 const GALLERY_MEDIA_SIDECAR_EXTENSIONS = ['.txt', '.json', '.caption', '.yaml', '.yml'];
 
 async function syncGallerySidecarsAfterTransfer(results: Array<Record<string, unknown>>, mode: 'move' | 'copy') {
+  const warnings: string[] = [];
   const pairs = (results || [])
     .filter((entry) => entry?.success === true)
     .map((entry) => ({
@@ -28754,24 +28756,47 @@ async function syncGallerySidecarsAfterTransfer(results: Array<Record<string, un
           const sidecarStat = await fs.stat(variant.source).catch(() => null);
           if (!sidecarStat || !sidecarStat.isFile()) continue;
           await fs.mkdir(dirname(variant.target), { recursive: true });
-          if (mode === 'move') {
-            await fs.rename(variant.source, variant.target).catch(async () => {
-              await fs.copyFile(variant.source, variant.target);
-              await fs.rm(variant.source, { force: true });
-            });
-          } else {
-            await fs.copyFile(variant.source, variant.target);
-          }
+          await copyFileExclusive(variant.source, variant.target);
+          if (mode === 'move') await fs.unlink(variant.source);
         }
       }
     } catch (error) {
       console.warn(`[Gallery] Failed to ${mode} sidecar for ${pair.sourcePath}:`, error);
+      warnings.push(`Sidecar for ${pair.sourcePath}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+  return warnings;
+}
+
+function updateGalleryTransferProgress(job: FsMoveJob | FsCopyJob, progress: Record<string, unknown>) {
+  if (progress.phase) job.phase = String(progress.phase);
+  if (typeof progress.totalUnits === 'number') job.totalUnits = progress.totalUnits;
+  if (typeof progress.completedUnits === 'number') job.completedUnits = Math.min(job.totalUnits || progress.completedUnits, progress.completedUnits);
+  if (progress.currentPath) job.currentPath = String(progress.currentPath);
+  if (typeof progress.fileBytes === 'number') job.fileBytes = progress.fileBytes;
+  if (typeof progress.fileTotalBytes === 'number') job.fileTotalBytes = progress.fileTotalBytes;
+  job.lastProgressAt = Date.now();
+}
+
+async function finishGalleryTransfer(job: FsMoveJob | FsCopyJob, mode: 'move' | 'copy') {
+  job.phase = 'sidecars';
+  await galleryTransferJournal.save(job);
+  const warnings = await syncGallerySidecarsAfterTransfer(job.results, mode);
+  job.phase = 'indexing';
+  await galleryTransferJournal.save(job);
+  try {
+    await syncGalleryDbAfterTransfer(job.results, mode);
+  } catch (error) {
+    throw new Error(`Files transferred, but Gallery indexing failed. Do not repeat the file transfer. ${String(error)}`);
+  }
+  if (warnings.length) job.error = warnings.join('\n');
+  job.phase = 'completed';
 }
 
 async function runFsMoveJob(job: FsMoveJob) {
   try {
+    job.phase = 'queued';
+    await galleryTransferJournal.save(job);
     const destinationResolved = resolvePath(job.destination);
     if (!destinationResolved) throw new Error('Invalid destination path');
     const items = job.paths.map((sourcePath) => {
@@ -28785,7 +28810,7 @@ async function runFsMoveJob(job: FsMoveJob) {
       };
     });
 
-    const invalidPaths = items.filter((item) => !item).map((_, index) => job.paths[index]);
+    const invalidPaths = items.flatMap((item, index) => item ? [] : [job.paths[index]]);
     for (const invalidPath of invalidPaths) {
       job.results.push({ path: invalidPath, success: false, error: 'Invalid source path' });
     }
@@ -28807,11 +28832,7 @@ async function runFsMoveJob(job: FsMoveJob) {
       },
       {
         onProgress: (progress) => {
-          const totalUnits = Number(progress?.totalUnits || 0);
-          const completedUnits = Number(progress?.completedUnits || 0);
-          if (totalUnits > 0) job.totalUnits = totalUnits;
-          job.completedUnits = Math.min(job.totalUnits || completedUnits, completedUnits);
-          job.currentPath = String(progress?.currentPath || '');
+          updateGalleryTransferProgress(job, progress);
         },
       },
     );
@@ -28819,8 +28840,7 @@ async function runFsMoveJob(job: FsMoveJob) {
     if (job.totalUnits <= 0) job.totalUnits = Number((execution as any).totalUnits || 0);
     job.completedUnits = Math.min(job.totalUnits, Math.max(job.completedUnits, job.totalUnits));
     job.results = [...job.results, ...((execution as any).results || [])];
-    await syncGallerySidecarsAfterTransfer(job.results as Array<Record<string, unknown>>, 'move');
-    syncGalleryDbAfterTransfer(job.results as Array<Record<string, unknown>>, 'move');
+    await finishGalleryTransfer(job, 'move');
     job.status = 'completed';
     job.finishedAt = Date.now();
     const movedTargets = ((execution as any).results || [])
@@ -28837,12 +28857,16 @@ async function runFsMoveJob(job: FsMoveJob) {
     job.error = error?.message || 'Move job failed';
     job.finishedAt = Date.now();
   } finally {
+    invalidateFsListCacheForPaths([job.destination, ...job.paths, ...job.results.flatMap(result => result.newPath ? [result.newPath] : [])], 'move');
+    await galleryTransferJournal.save(job).catch((error) => { job.error = `Transfer history could not be saved: ${String(error)}`; });
     scheduleFsMoveJobCleanup(job.id);
   }
 }
 
 async function runFsCopyJob(job: FsCopyJob) {
   try {
+    job.phase = 'queued';
+    await galleryTransferJournal.save(job);
     const destinationResolved = resolvePath(job.destination);
     if (!destinationResolved) throw new Error('Invalid destination path');
     const items = job.paths.map((sourcePath) => {
@@ -28856,7 +28880,7 @@ async function runFsCopyJob(job: FsCopyJob) {
       };
     });
 
-    const invalidPaths = items.filter((item) => !item).map((_, index) => job.paths[index]);
+    const invalidPaths = items.flatMap((item, index) => item ? [] : [job.paths[index]]);
     for (const invalidPath of invalidPaths) {
       job.results.push({ path: invalidPath, success: false, error: 'Invalid source path' });
     }
@@ -28877,11 +28901,7 @@ async function runFsCopyJob(job: FsCopyJob) {
       },
       {
         onProgress: (progress) => {
-          const totalUnits = Number(progress?.totalUnits || 0);
-          const completedUnits = Number(progress?.completedUnits || 0);
-          if (totalUnits > 0) job.totalUnits = totalUnits;
-          job.completedUnits = Math.min(job.totalUnits || completedUnits, completedUnits);
-          job.currentPath = String(progress?.currentPath || '');
+          updateGalleryTransferProgress(job, progress);
         },
       },
     );
@@ -28889,8 +28909,7 @@ async function runFsCopyJob(job: FsCopyJob) {
     if (job.totalUnits <= 0) job.totalUnits = Number((execution as any).totalUnits || 0);
     job.completedUnits = Math.min(job.totalUnits, Math.max(job.completedUnits, job.totalUnits));
     job.results = [...job.results, ...((execution as any).results || [])];
-    await syncGallerySidecarsAfterTransfer(job.results as Array<Record<string, unknown>>, 'copy');
-    syncGalleryDbAfterTransfer(job.results as Array<Record<string, unknown>>, 'copy');
+    await finishGalleryTransfer(job, 'copy');
     job.status = 'completed';
     job.finishedAt = Date.now();
     const copiedTargets = ((execution as any).results || [])
@@ -28907,16 +28926,60 @@ async function runFsCopyJob(job: FsCopyJob) {
     job.error = error?.message || 'Copy job failed';
     job.finishedAt = Date.now();
   } finally {
+    invalidateFsListCacheForPaths([job.destination, ...job.paths, ...job.results.flatMap(result => result.newPath ? [result.newPath] : [])], 'copy');
+    await galleryTransferJournal.save(job).catch((error) => { job.error = `Transfer history could not be saved: ${String(error)}`; });
     scheduleFsCopyJobCleanup(job.id);
   }
 }
 
-function handleFsMoveStatus(url: URL): Response {
+async function readArchivedGalleryTransfer(id: string) {
+  if (!/^fs(move|copy)-[\w-]+$/.test(id)) return null;
+  const job = await galleryTransferJournal.read(id);
+  if (job && (!Array.isArray(job.paths) || typeof job.destination !== 'string')) return null;
+  if (job?.status === 'running') {
+    job.status = 'failed';
+    job.error = 'Transfer tracking was interrupted by a server restart. Check source and destination before retrying; files may already have transferred.';
+    job.finishedAt = Date.now();
+    await galleryTransferJournal.save(job as { id: string });
+  }
+  return job;
+}
+
+async function handleGalleryTransferReconcile(req: Request): Promise<Response> {
+  const { jobId } = await req.json() as { jobId?: string };
+  const id = String(jobId || '');
+  const job = fsMoveJobs.get(id) || fsCopyJobs.get(id) || await readArchivedGalleryTransfer(id) as FsMoveJob | FsCopyJob | null;
+  if (!job) return json({ error: 'Transfer not found' }, 404);
+  if (job.status === 'running' || job.phase !== 'indexing') return json({ error: 'This transfer does not have pending indexing' }, 409);
+  const mode = id.startsWith('fscopy-') ? 'copy' : 'move';
+  job.status = 'running';
+  job.error = undefined;
+  if (mode === 'copy') fsCopyJobs.set(id, job);
+  else fsMoveJobs.set(id, job as FsMoveJob);
+  void (async () => {
+    try {
+      await galleryTransferJournal.save(job);
+      await syncGalleryDbAfterTransfer(job.results, mode);
+      job.status = 'completed';
+      job.phase = 'completed';
+      invalidateFsListCacheForPaths([job.destination, ...job.paths], mode);
+    } catch (error) {
+      job.status = 'failed';
+      job.error = `Gallery indexing still needs attention: ${String(error)}`;
+    } finally {
+      job.finishedAt = Date.now();
+      await galleryTransferJournal.save(job).catch(error => console.warn('[Gallery] Transfer journal:', error));
+    }
+  })();
+  return json({ success: true, jobId: id });
+}
+
+async function handleFsMoveStatus(url: URL): Promise<Response> {
   pruneFsMoveJobs();
   const jobId = String(url.searchParams.get('jobId') || '').trim();
   if (!jobId) return json({ error: 'jobId required' }, 400);
 
-  const job = fsMoveJobs.get(jobId);
+  const job = fsMoveJobs.get(jobId) || await readArchivedGalleryTransfer(jobId) as FsMoveJob | null;
   if (!job) return json({ error: 'Move job not found' }, 404);
 
   const moved = job.results.filter((entry) => entry.success).length;
@@ -28929,6 +28992,10 @@ function handleFsMoveStatus(url: URL): Response {
     job: {
       id: job.id,
       status: job.status,
+      phase: job.phase,
+      fileBytes: job.fileBytes,
+      fileTotalBytes: job.fileTotalBytes,
+      lastProgressAt: job.lastProgressAt,
       transferMode: job.transferMode,
       destination: job.destination,
       totalPaths: job.paths.length,
@@ -28945,12 +29012,12 @@ function handleFsMoveStatus(url: URL): Response {
   });
 }
 
-function handleFsCopyStatus(url: URL): Response {
+async function handleFsCopyStatus(url: URL): Promise<Response> {
   pruneFsCopyJobs();
   const jobId = String(url.searchParams.get('jobId') || '').trim();
   if (!jobId) return json({ error: 'jobId required' }, 400);
 
-  const job = fsCopyJobs.get(jobId);
+  const job = fsCopyJobs.get(jobId) || await readArchivedGalleryTransfer(jobId) as FsCopyJob | null;
   if (!job) return json({ error: 'Copy job not found' }, 404);
 
   const copied = job.results.filter((entry) => entry.success).length;
@@ -28963,6 +29030,10 @@ function handleFsCopyStatus(url: URL): Response {
     job: {
       id: job.id,
       status: job.status,
+      phase: job.phase,
+      fileBytes: job.fileBytes,
+      fileTotalBytes: job.fileTotalBytes,
+      lastProgressAt: job.lastProgressAt,
       destination: job.destination,
       totalPaths: job.paths.length,
       totalUnits: job.totalUnits,
@@ -29033,7 +29104,7 @@ async function handleFsMove(req: Request): Promise<Response> {
       .map((entry) => String(entry.newPath || '').trim())
       .filter((entry) => entry.length > 0);
     await syncGallerySidecarsAfterTransfer(results as Array<Record<string, unknown>>, 'move');
-    syncGalleryDbAfterTransfer(results as Array<Record<string, unknown>>, 'move');
+    await syncGalleryDbAfterTransfer(results as Array<Record<string, unknown>>, 'move');
     invalidateFsListCacheForPaths([destination, ...paths, ...movedTargets], 'move');
     return json({
       success: true,
@@ -29092,7 +29163,7 @@ async function handleFsCopy(req: Request): Promise<Response> {
       .filter((entry) => entry.length > 0)
       .map((entry) => toClientPath(entry));
     await syncGallerySidecarsAfterTransfer(results as Array<Record<string, unknown>>, 'copy');
-    syncGalleryDbAfterTransfer(results as Array<Record<string, unknown>>, 'copy');
+    await syncGalleryDbAfterTransfer(results as Array<Record<string, unknown>>, 'copy');
     invalidateFsListCacheForPaths([destination, ...paths, ...copiedTargets], 'copy');
     return json({ success: true, results, copied: results.filter(r => r.success).length, total: paths.length });
   } catch (error: any) {
@@ -30164,6 +30235,8 @@ const server = Bun.serve<any>({
       if (path === '/api/fs/preview' && method === 'GET') return handleFsPreview(url);
       if (path === '/api/fs/image' && method === 'GET') return handleFsImage(req, url, server);
       if (path === '/api/fs/download-zip' && method === 'POST') return handleFsDownloadZip(req);
+      if (path === '/api/fs/archives' && (method === 'GET' || method === 'POST')) return handleGalleryArchives(req, url);
+      if ((path === '/api/fs/archives/status' || path === '/api/fs/archives/download') && method === 'GET') return handleGalleryArchives(req, url);
       if (path === '/api/fs/download-jpeg-zip' && method === 'POST') return handleFsDownloadJpegZip(req);
       if (path === '/api/fs/metadata' && method === 'GET') return handleFsMetadata(url);
       if (path === '/api/powerprompter/receipt' && method === 'GET') return handlePowerPrompterReceiptLookup(url);
@@ -30180,6 +30253,7 @@ const server = Bun.serve<any>({
       if (path === '/api/fs/move/status' && method === 'GET') return handleFsMoveStatus(url);
       if (path === '/api/fs/copy' && method === 'POST') return handleFsCopy(req);
       if (path === '/api/fs/copy/status' && method === 'GET') return handleFsCopyStatus(url);
+      if (path === '/api/fs/transfer/reconcile' && method === 'POST') return handleGalleryTransferReconcile(req);
       if (path === '/api/fs/upload' && method === 'POST') return handleFsUpload(req);
       if (path === '/api/fs/write' && method === 'POST') return handleFsWrite(req);
       if (path === '/api/fs/reorder' && method === 'POST') return handleFsReorder(req);
@@ -30209,6 +30283,7 @@ const server = Bun.serve<any>({
       if (path === '/api/model-manager/civitai/auth' && method === 'DELETE') return handleModelManagerCivitaiAuthDelete();
       if (path === '/api/model-manager/civitai/search' && method === 'GET') return handleModelManagerCivitaiSearch(url);
       if (path === '/api/model-manager/civitai/model' && method === 'GET') return handleModelManagerCivitaiModel(url);
+      if (path === '/api/model-manager/civitai/preview-metadata' && method === 'GET') return handleModelManagerCivitaiPreviewMetadata(url);
       if (path === '/api/model-manager/civitai/version' && method === 'GET') return handleModelManagerCivitaiVersion(url);
       if (path === '/api/model-manager/civitai/download' && method === 'POST') return handleModelManagerCivitaiDownload(req);
       if (path === '/api/model-manager/media' && method === 'GET') return handleModelManagerMedia(url);
@@ -31405,6 +31480,31 @@ const server = Bun.serve<any>({
         } catch (error: any) {
           return json({ ok: false, error: error?.message || 'Could not calculate related Danbooru tags.' }, 400);
         }
+      }
+
+      if (path.startsWith('/api/data-forge/model-merge/')) {
+        try {
+          if (path.endsWith('/models') && method === 'GET') return json({ models: await animaModelMergeService.catalog() });
+          if (path.endsWith('/loras') && method === 'GET') return json({ loras: await animaModelMergeService.loras() });
+          if (path.endsWith('/lora-info') && method === 'POST') return json(await animaModelMergeService.loraInfo((await req.json() as { id?: unknown }).id));
+          if (path.endsWith('/recipes') && method === 'GET') return json({ recipes: await animaModelMergeService.recipes() });
+          if (path.endsWith('/blueprints') && method === 'GET') return json({ blueprints: await animaModelMergeService.blueprints() });
+          if (path.endsWith('/blueprints/import') && method === 'POST') return json({ blueprint: await animaModelMergeService.importBlueprint(await req.json()) });
+          if (path.endsWith('/blueprint') && method === 'POST') return json({ blueprint: await animaModelMergeService.blueprint((await req.json() as { id?: unknown }).id) });
+          if (path.endsWith('/recipes/save') && method === 'POST') return json({ recipe: await animaModelMergeService.saveRecipe(await req.json()) });
+          if (path.endsWith('/recipes/delete') && method === 'POST') { await animaModelMergeService.deleteRecipe((await req.json() as { id?: unknown }).id); return json({ success: true }); }
+          if (path.endsWith('/status') && method === 'GET') return json({ job: animaModelMergeService.status() });
+          if (path.endsWith('/inspect') && method === 'POST') {
+            const body = await req.json() as { a?: unknown; b?: unknown };
+            return json(await animaModelMergeService.inspect(body.a, body.b));
+          }
+          if (path.endsWith('/start') && method === 'POST') return json({ job: await animaModelMergeService.start(await req.json()) });
+          if (path.endsWith('/cancel') && method === 'POST') {
+            await animaModelMergeService.cancel();
+            return json({ success: true });
+          }
+          return json({ error: 'Unknown model merge operation.' }, 404);
+        } catch (error: any) { return json({ error: error?.message || 'Model merge failed.' }, 400); }
       }
 
       if (path === '/api/data-forge/wildcard-generator/tags' && method === 'GET') {
@@ -33469,7 +33569,7 @@ const server = Bun.serve<any>({
             'a polished nocturne-themed creative studio dashboard icon, clean lighting, crisp details',
           ].join('\n'));
           const prompt = cleanUmbraUiAgentPromptOutput(rawPrompt);
-          if (!prompt) throw new Error('The configured agent returned an empty test prompt.');
+          if (!prompt) throw new Error('The agent returned reasoning or an empty response without a usable final prompt. Retry or increase the agent output-token limit.');
           return json({
             success: true,
             provider: settings.provider,
@@ -35713,6 +35813,7 @@ async function gracefulShutdown(signal: string) {
     return;
   }
   isShuttingDown = true;
+  await animaModelMergeService.shutdown().catch(error => console.warn('[Shutdown] Merge cancellation failed:', error));
 
   try {
     writeUmbraShutdownMarker(ROOT_DIR, {

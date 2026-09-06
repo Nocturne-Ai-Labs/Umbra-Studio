@@ -170,7 +170,7 @@ interface AppState {
 
   // Toast Notifications
   toast: ToastNotification | null;
-  showToast: (message: string, type: 'success' | 'error') => void;
+  showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   clearToast: () => void;
 
   // API Bridge Actions
@@ -479,7 +479,7 @@ export const useStore = create<AppState>()(
         })),
 
         toast: null,
-        showToast: (message, type) => {
+        showToast: (message, type = 'info') => {
           if (get().appSettings.enableToasts === false && type !== 'error') return;
           useToastStore.getState().addToast({ message, type });
         },
@@ -619,6 +619,7 @@ export const useStore = create<AppState>()(
                     comfyui: false,
                   },
                   booting: {
+                    ...get().booting,
                     comfyui: false,
                   },
                 });

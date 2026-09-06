@@ -1,12 +1,19 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { Bell, BellOff, Bot, ChevronDown, ChevronLeft, ChevronRight, FileText, FolderOpen, ListChecks, ListOrdered, Loader2, MoreHorizontal, Pause, Play, Power, RefreshCw, Save, Search, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
 import { POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME, POWER_PROMPTER_MAX_QUEUE_SETS } from '@/lib/powerPrompter';
 import { PowerPrompterGlobalSearchBox } from './PowerPrompterGlobalSearchBox';
 import { POWER_PROMPTER_SOUND_STYLE_GLASS_TICK, POWER_PROMPTER_SOUND_STYLE_OPTIONS, clampCompletionSoundVolume } from './powerPrompterAudio';
 import { QUEUE_MANAGER_DISPATCH_DELAY_OPTIONS, clampQueueSetId, getSetColor, hexToRgba } from './queue/queueCore';
 
-type PowerPrompterCommandBarProps = Record<string, any>;
+type PowerPrompterCommandBarProps = Record<string, any> & {
+  setLeftPanelCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
+  setRightPanelCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
+  setSoundMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setQueuePromptExpandedMode: React.Dispatch<React.SetStateAction<boolean>>;
+  savedQueues?: import('./queue/queueCore').SavedPowerPrompterQueueSummary[];
+};
 
 export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
   const {
@@ -473,15 +480,14 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
           </div>
         ) : null}
 
-        {phoneActionsOpen ? (
+        {phoneActionsOpen && typeof document !== 'undefined' ? createPortal(
+          <>
           <button
             type="button"
             data-umbra-powerprompter-phone-actions-backdrop=""
             onClick={() => setPhoneActionsOpen(false)}
             aria-label="Close Power Prompter controls"
           />
-        ) : null}
-        {phoneActionsOpen ? (
           <section data-umbra-powerprompter-phone-actions="" role="dialog" aria-modal="true" aria-label="Power Prompter controls">
             <div data-umbra-powerprompter-phone-actions-handle="" />
             <div data-umbra-powerprompter-phone-actions-header="">
@@ -785,6 +791,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               </button>
             </div>
           </section>
+          </>, document.body
         ) : null}
       </div>
     );

@@ -119,12 +119,11 @@ export function UmbraInlineAgentPrompt({
       event.preventDefault();
       const textarea = event.currentTarget;
       const weighted = applyUmbraPromptWeightToTextarea(
-        textarea.value,
-        textarea.selectionStart,
-        textarea.selectionEnd,
+        textarea,
         event.key === 'ArrowUp' ? 0.1 : -0.1,
       );
-      onAgentPromptChange(weighted.value);
+      if (!weighted) return;
+      onAgentPromptChange(weighted.nextValue);
       requestAnimationFrame(() => {
         textarea.focus({ preventScroll: true });
         textarea.setSelectionRange(weighted.selectionStart, weighted.selectionEnd);

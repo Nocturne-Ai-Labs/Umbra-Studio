@@ -1,6 +1,7 @@
 'use client';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { LazyModelMedia } from '@/components/ui/LazyModelMedia';
 import React from 'react';
 import {
   ArrowLeft,
@@ -155,6 +156,7 @@ type CivitAIFile = {
 };
 
 type CivitAIImage = {
+  id?: number | string;
   url: string;
   nsfw?: boolean;
   nsfwLevel?: number;
@@ -316,7 +318,8 @@ const ROOT_ORDER: LocalRootKey[] = ['user', 'comfyui', 'aitoolkit'];
 const MODEL_TREE_REQUEST_TIMEOUT_MS = 15000;
 const MODEL_MANAGER_UPDATE_TIMEOUT_MS = 30000;
 const MODEL_MANAGER_RECURSIVE_UPDATE_TIMEOUT_MS = 120000;
-const MODEL_MANAGER_DETAIL_TIMEOUT_MS = 20000;
+// Backend page requests have a 45s budget plus at most 5s of optional preview metadata.
+const MODEL_MANAGER_DETAIL_TIMEOUT_MS = 60000;
 const MODEL_MANAGER_LIST_TIMEOUT_MS = 10000;
 const MODEL_MANAGER_RECURSIVE_LIST_TIMEOUT_MS = 60000;
 const CIVITAI_BROWSER_SITES = {
@@ -980,10 +983,13 @@ function getMediaWorkflowPayload(meta: Record<string, unknown>): unknown | null 
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
-  const data = await response.json().catch(() => ({}));
+  const data = await response.json().catch((error: unknown) => {
+    if (init?.signal?.aborted || response.ok) throw error;
+    return {};
+  });
   if (!response.ok) {
     const message = typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`;
-    throw new Error(message);
+    throw Object.assign(new Error(message), { status: response.status });
   }
   return data as T;
 }
@@ -999,7 +1005,7 @@ async function fetchJsonWithTimeout<T>(
   try {
     return await fetchJson<T>(url, {
       ...(init || {}),
-      signal: controller.signal,
+      signal: init?.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal,
     });
   } catch (error: any) {
     if (controller.signal.aborted || error?.name === 'AbortError') {
@@ -1025,8 +1031,8 @@ export function ModelManagerWorkspace() {
   const [mobileFolderSheetOpen, setMobileFolderSheetOpen] = React.useState(false);
   const [mobileActionsSheetOpen, setMobileActionsSheetOpen] = React.useState(false);
   const [browserSite, setBrowserSite] = React.useState<CivitaiBrowserSite>('pg');
-  const [browserUrl, setBrowserUrl] = React.useState(CIVITAI_BROWSER_SITES.pg);
-  const [browserAddressInput, setBrowserAddressInput] = React.useState(CIVITAI_BROWSER_SITES.pg);
+  const [browserUrl, setBrowserUrl] = React.useState<string>(CIVITAI_BROWSER_SITES.pg);
+  const [browserAddressInput, setBrowserAddressInput] = React.useState<string>(CIVITAI_BROWSER_SITES.pg);
   const [browserLoading, setBrowserLoading] = React.useState(false);
   const [browserWebviewKey, setBrowserWebviewKey] = React.useState(0);
   const [browserBookmarks, setBrowserBookmarks] = React.useState<BrowserBookmarkItem[]>(loadModelManagerBrowserBookmarks);
@@ -1532,6 +1538,48 @@ export function ModelManagerWorkspace() {
   const activePreviewMeta = React.useMemo<Record<string, unknown>>(() => {
     return extractMediaMeta(activePreviewMedia);
   }, [activePreviewMedia]);
+
+  const previewMetadataAttempts = React.useRef(new WeakMap<CivitAIModel, Set<number>>());
+  React.useEffect(() => {
+    if (!activeModel || !activePreviewMedia || activePreviewMedia.meta != null || activeModel.__placeholder) return;
+    const model = activeModel;
+    const version = model.modelVersions?.find(item => item.images?.some(image => image.url === activePreviewMedia.url));
+    if (!version?.id) return;
+    const attempted = previewMetadataAttempts.current.get(model) || new Set<number>();
+    if (attempted.has(version.id)) return;
+    const controller = new AbortController();
+    void fetchJsonWithTimeout<{ items?: CivitAIImage[] }>(
+      `/api/model-manager/civitai/preview-metadata?versionId=${encodeURIComponent(String(version.id))}`,
+      { signal: controller.signal }, 10_000,
+    ).then(payload => {
+      if (controller.signal.aborted) return;
+      attempted.add(version.id);
+      previewMetadataAttempts.current.set(model, attempted);
+      const items = payload.items || [];
+      setCivitaiDetails(previous => {
+        // A refresh or another request must not be overwritten by an older preview response.
+        if (previous[model.id] && previous[model.id] !== model) return previous;
+        const next = {
+          ...model,
+          modelVersions: model.modelVersions?.map(entry => entry.id !== version.id ? entry : {
+            ...entry,
+            images: entry.images?.map(image => {
+              const match = items.find(item => (image.id != null && item.id === image.id)
+                || item.url?.split('?')[0] === image.url?.split('?')[0]);
+              return match && image.meta == null ? { ...image, meta: match.meta } : image;
+            }),
+          }),
+        };
+        previewMetadataAttempts.current.set(next, attempted);
+        return { ...previous, [model.id]: next };
+      });
+    }).catch(() => {
+      if (controller.signal.aborted) return;
+      attempted.add(version.id);
+      previewMetadataAttempts.current.set(model, attempted);
+    });
+    return () => controller.abort();
+  }, [activeModel, activePreviewMedia]);
 
   const activePreviewWorkflow = React.useMemo(() => getMediaWorkflowPayload(activePreviewMeta), [activePreviewMeta]);
 
@@ -2401,7 +2449,7 @@ export function ModelManagerWorkspace() {
     if (preview?.url) setActiveModelImageUrl(preview.url);
   }, [activeModelId, activeModelImageUrl, mergedCivitaiModels]);
 
-  const loadModelDetail = React.useCallback(async (modelId: number, options?: { force?: boolean; slim?: boolean; quiet?: boolean }) => {
+  const loadModelDetail = React.useCallback(async (modelId: number, options?: { force?: boolean; slim?: boolean; quiet?: boolean; onNotFound?: () => void }) => {
     const force = options?.force === true;
     const slim = options?.slim === true;
     const quiet = options?.quiet === true;
@@ -2411,17 +2459,19 @@ export function ModelManagerWorkspace() {
     if (!force && !slim && inFlight) return inFlight;
     const request = (async () => {
       try {
-        const data = await fetchJsonWithTimeout<CivitAIModel>(
-          `/api/model-manager/civitai/model?id=${encodeURIComponent(String(modelId))}${slim ? '&slim=1' : ''}`,
+        const response = await fetchJsonWithTimeout<CivitAIModel>(
+          `/api/model-manager/civitai/model?id=${encodeURIComponent(String(modelId))}&slim=1`,
           { cache: 'no-store' },
           MODEL_MANAGER_DETAIL_TIMEOUT_MS,
           'CivitAI model detail request timed out',
         );
+        const data = capModelUploadMedia(response);
         if (!slim) {
           setCivitaiDetails((prev) => ({ ...prev, [modelId]: data }));
         }
         return data;
       } catch (error: any) {
+        if (error?.status === 404) options?.onNotFound?.();
         if (!slim) {
           setCivitaiDetails((prev) => {
             const existing = prev[modelId];
@@ -2515,6 +2565,10 @@ export function ModelManagerWorkspace() {
         'CivitAI search timed out',
       );
       const items = Array.isArray(payload.items) ? payload.items : [];
+      if (payload.warning) {
+        setCivitaiDiscoveryWarning(payload.warning);
+        return;
+      }
       setCivitaiModels((current) => {
         if (!append) return items;
         const byId = new Map<number, CivitAIModel>();
@@ -3118,8 +3172,9 @@ export function ModelManagerWorkspace() {
     }
     setActiveModelId(modelId);
     setActiveModelImageUrl(String(cachedPreview?.url || ''));
-    let detail = await loadModelDetail(modelId, { force: true });
-    if (!detail) {
+    let modelNotFound = false;
+    let detail = await loadModelDetail(modelId, { force: true, onNotFound: () => { modelNotFound = true; } });
+    if (!detail && modelNotFound) {
       try {
         const resolved = await fetchJsonWithTimeout<{ modelId?: number }>(
           `/api/model-manager/civitai/version?id=${encodeURIComponent(String(modelId))}`,
@@ -4820,24 +4875,12 @@ export function ModelManagerWorkspace() {
                               >
                                 <div className="aspect-[4/3] overflow-hidden border-b border-white/10 bg-black/40">
                                   {preview?.url ? (
-                                    isVideoMedia(preview) ? (
-                                      <video
-                                        src={getModelMediaSrc(preview.url)}
-                                        className="h-full w-full object-cover"
-                                        muted
-                                        playsInline
-                                        preload="metadata"
-                                        style={blurred ? { filter: `blur(${nsfwBlurPx.toFixed(2)}px)` } : undefined}
-                                      />
-                                    ) : (
-                                      <img
-                                        src={getModelMediaSrc(preview.url)}
-                                        alt={`${model.name || `Model ${model.id}`} preview`}
-                                        className="h-full w-full object-cover"
-                                        loading="lazy"
-                                        style={blurred ? { filter: `blur(${nsfwBlurPx.toFixed(2)}px)` } : undefined}
-                                      />
-                                    )
+                                    <LazyModelMedia
+                                      src={getModelMediaSrc(preview.url)}
+                                      video={isVideoMedia(preview)}
+                                      alt={`${model.name || `Model ${model.id}`} preview`}
+                                      style={blurred ? { filter: `blur(${nsfwBlurPx.toFixed(2)}px)` } : undefined}
+                                    />
                                   ) : (
                                     <div className="flex h-full w-full items-center justify-center text-zinc-600">
                                       <ImageIcon size={28} />
@@ -5138,25 +5181,12 @@ export function ModelManagerWorkspace() {
                               >
                                 <div className="h-12 w-16 shrink-0 overflow-hidden rounded border border-white/10 bg-black/40">
                                   {preview?.url ? (
-                                    isVideoMedia(preview) ? (
-                                      <video
-                                        src={getModelMediaSrc(preview.url)}
-                                        className="h-full w-full object-cover"
-                                        muted
-                                        loop
-                                        playsInline
-                                        preload="metadata"
-                                        style={blurred ? { filter: `blur(${nsfwBlurPx.toFixed(2)}px)` } : undefined}
-                                      />
-                                    ) : (
-                                      <img
-                                        src={getModelMediaSrc(preview.url)}
-                                        alt={`${model.name || `Model ${model.id}`} thumbnail`}
-                                        className="h-full w-full object-cover"
-                                        loading="lazy"
-                                        style={blurred ? { filter: `blur(${nsfwBlurPx.toFixed(2)}px)` } : undefined}
-                                      />
-                                    )
+                                    <LazyModelMedia
+                                      src={getModelMediaSrc(preview.url)}
+                                      video={isVideoMedia(preview)}
+                                      alt={`${model.name || `Model ${model.id}`} thumbnail`}
+                                      style={blurred ? { filter: `blur(${nsfwBlurPx.toFixed(2)}px)` } : undefined}
+                                    />
                                   ) : (
                                     <div className="flex h-full w-full items-center justify-center text-zinc-600">
                                       <ImageIcon size={14} />
@@ -5562,25 +5592,12 @@ export function ModelManagerWorkspace() {
                                     : 'border-white/10 hover:border-white/30',
                                 )}
                               >
-                                {isVideoMedia(image) ? (
-                                  <video
-                                    src={getModelMediaSrc(image.url)}
-                                    className="h-full w-full object-cover"
-                                    muted
-                                    loop
-                                    playsInline
-                                    preload="metadata"
-                                    style={blurred ? { filter: `blur(${nsfwBlurPx.toFixed(2)}px)` } : undefined}
-                                  />
-                                ) : (
-                                  <img
-                                    src={getModelMediaSrc(image.url)}
-                                    alt={`${activeModel.name} preview ${index + 1}`}
-                                    className="h-full w-full object-cover"
-                                    loading="lazy"
-                                    style={blurred ? { filter: `blur(${nsfwBlurPx.toFixed(2)}px)` } : undefined}
-                                  />
-                                )}
+                                <LazyModelMedia
+                                  src={getModelMediaSrc(image.url)}
+                                  video={isVideoMedia(image)}
+                                  alt={`${activeModel.name} preview ${index + 1}`}
+                                  style={blurred ? { filter: `blur(${nsfwBlurPx.toFixed(2)}px)` } : undefined}
+                                />
                                 {isVideoMedia(image) ? (
                                   <span className="absolute left-1 top-1 rounded bg-black/70 px-1 py-0.5 text-[9px] font-semibold text-zinc-100">
                                     VID

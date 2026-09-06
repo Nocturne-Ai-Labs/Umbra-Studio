@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, statSync } from 'fs';
 import { basename, dirname, extname, join, resolve } from 'path';
 import { MetadataParser, type ImageMetadata } from '../backend/MetadataParser';
 import { classifyUmbraMediaMetadata, type UmbraPrivacyClass } from '../shared/nsfwPrivacyClassifier';
@@ -239,6 +239,7 @@ async function readImageDimensions(filePath: string): Promise<{ width: number; h
 
 export class GalleryDb {
   private readonly db: Database;
+  private readonly rootDir: string;
 
   private readonly metadataQueue: string[] = [];
 
@@ -248,7 +249,8 @@ export class GalleryDb {
 
   private readonly metadataConcurrency = 2;
 
-  constructor(rootDir: string, relativeDbPath = DEFAULT_DB_RELATIVE_PATH) {
+  constructor(rootDir: string, relativeDbPath = DEFAULT_DB_RELATIVE_PATH, options: { busyTimeoutMs?: number; quiet?: boolean } = {}) {
+    this.rootDir = rootDir;
     const dbPath = resolve(rootDir, relativeDbPath);
     const dbDir = resolve(dbPath, '..');
     if (!existsSync(dbDir)) {
@@ -256,11 +258,21 @@ export class GalleryDb {
     }
     this.db = new Database(dbPath);
     this.db.run('PRAGMA journal_mode = WAL');
-    this.db.run('PRAGMA busy_timeout = 5000');
+    this.db.run(`PRAGMA busy_timeout = ${Math.max(0, Math.trunc(options.busyTimeoutMs ?? 5000))}`);
     this.db.run('PRAGMA synchronous = NORMAL');
     this.db.run('PRAGMA temp_store = MEMORY');
     this.ensureSchema();
-    console.log('[GalleryDb] Initialized:', dbPath);
+    if (!options.quiet) console.log('[GalleryDb] Initialized:', dbPath);
+  }
+
+  private transferredFile(row: FileRow, path: string): GalleryFileInput {
+    const file = { ...row, path, folderPath: normalizePath(dirname(path)), name: basename(path) };
+    try {
+      const stats = statSync(resolve(this.rootDir, path));
+      return { ...file, size: stats.size, createdMs: stats.birthtimeMs, modifiedMs: stats.mtimeMs };
+    } catch {
+      return file;
+    }
   }
 
   close(): void {
@@ -648,6 +660,7 @@ export class GalleryDb {
       metadataReady: normalizeTimestamp(row.metadataUpdatedMs || 0) === normalizeTimestamp(row.modifiedMs),
       metadataFormat: row.metadataFormat,
       tags: tagsByUid.get(row.uid) || [],
+      privacyClass: classifyUmbraMediaMetadata(row.metadataJson, tagsByUid.get(row.uid) || []),
     }));
   }
 
@@ -940,6 +953,14 @@ export class GalleryDb {
     return this.getTagsForUids(validUids);
   }
 
+  getTransferRecordPairs(pair: { sourcePath: string; targetPath: string }, offset = 0, limit = 100) {
+    const source = normalizePath(pair.sourcePath);
+    const target = normalizePath(pair.targetPath);
+    const rows = this.db.query('SELECT path FROM files WHERE path = ? OR (path >= ? AND path < ?) ORDER BY path LIMIT ? OFFSET ?')
+      .all(source, `${source}/`, `${source}0`, limit, offset) as Array<{ path: string }>;
+    return rows.map(row => ({ sourcePath: row.path, targetPath: `${target}${row.path.slice(source.length)}` }));
+  }
+
   moveRecordsForPaths(pairs: Array<{ sourcePath: string; targetPath: string }>): number {
     const normalizedPairs = (pairs || [])
       .map((pair) => ({
@@ -957,7 +978,7 @@ export class GalleryDb {
         file_sig AS fileSig, metadata_json AS metadataJson,
         metadata_updated_ms AS metadataUpdatedMs, metadata_format AS metadataFormat
       FROM files
-      WHERE path = ? OR path LIKE ?
+      WHERE path = ? OR (path >= ? AND path < ?)
       ORDER BY length(path) ASC
     `);
     const selectTargetUid = this.db.prepare('SELECT uid FROM files WHERE path = ? LIMIT 1');
@@ -966,7 +987,7 @@ export class GalleryDb {
     const deleteFile = this.db.prepare('DELETE FROM files WHERE uid = ?');
     const updateFile = this.db.prepare(`
       UPDATE files
-      SET path = ?, folder_path = ?, file_name = ?, last_seen_ms = ?
+      SET path = ?, folder_path = ?, file_name = ?, file_size = ?, created_ms = ?, modified_ms = ?, file_sig = ?, last_seen_ms = ?
       WHERE uid = ?
     `);
     const selectNextIndex = this.db.prepare('SELECT COALESCE(MAX(order_index), -1) + 1 AS nextIndex FROM folder_order WHERE folder_path = ?');
@@ -982,7 +1003,7 @@ export class GalleryDb {
     let changed = 0;
     const transaction = this.db.transaction((txPairs: typeof normalizedPairs) => {
       for (const pair of txPairs) {
-        const rows = selectRows.all(pair.sourcePath, `${pair.sourcePath}/%`) as FileRow[];
+        const rows = selectRows.all(pair.sourcePath, `${pair.sourcePath}/`, `${pair.sourcePath}0`) as FileRow[];
         for (const row of rows) {
           const suffix = row.path === pair.sourcePath ? '' : row.path.slice(pair.sourcePath.length);
           const nextPath = normalizePath(`${pair.targetPath}${suffix}`);
@@ -995,7 +1016,8 @@ export class GalleryDb {
             deleteFile.run(existingTargetUid);
           }
           const nextFolder = normalizePath(dirname(nextPath));
-          updateFile.run(nextPath, nextFolder, basename(nextPath), now, row.uid);
+          const file = this.transferredFile(row, nextPath);
+          updateFile.run(nextPath, nextFolder, file.name, file.size, normalizeTimestamp(file.createdMs), normalizeTimestamp(file.modifiedMs), buildFileSignature(file), now, row.uid);
           deleteOrderForUid.run(row.uid);
           const nextIndexRow = selectNextIndex.get(nextFolder) as { nextIndex?: number } | null;
           const nextIndex = Math.max(0, Math.trunc(Number(nextIndexRow?.nextIndex || 0)));
@@ -1004,7 +1026,7 @@ export class GalleryDb {
         }
       }
     });
-    transaction(normalizedPairs);
+    transaction.immediate(normalizedPairs);
     return changed;
   }
 
@@ -1025,7 +1047,7 @@ export class GalleryDb {
         file_sig AS fileSig, metadata_json AS metadataJson,
         metadata_updated_ms AS metadataUpdatedMs, metadata_format AS metadataFormat
       FROM files
-      WHERE path = ? OR path LIKE ?
+      WHERE path = ? OR (path >= ? AND path < ?)
       ORDER BY length(path) ASC
     `);
     const selectTargetUid = this.db.prepare('SELECT uid FROM files WHERE path = ? LIMIT 1');
@@ -1068,19 +1090,15 @@ export class GalleryDb {
     let changed = 0;
     const transaction = this.db.transaction((txPairs: typeof normalizedPairs) => {
       for (const pair of txPairs) {
-        const rows = selectRows.all(pair.sourcePath, `${pair.sourcePath}/%`) as FileRow[];
+        const rows = selectRows.all(pair.sourcePath, `${pair.sourcePath}/`, `${pair.sourcePath}0`) as FileRow[];
         for (const row of rows) {
           const suffix = row.path === pair.sourcePath ? '' : row.path.slice(pair.sourcePath.length);
           const nextPath = normalizePath(`${pair.targetPath}${suffix}`);
           if (!nextPath) continue;
           const nextFolder = normalizePath(dirname(nextPath));
           const nextName = basename(nextPath);
-          const nextFileSig = [
-            nextName.toLowerCase(),
-            Math.trunc(row.size),
-            normalizeTimestamp(row.createdMs),
-            normalizeTimestamp(row.modifiedMs),
-          ].join('|');
+          const file = this.transferredFile(row, nextPath);
+          const nextFileSig = buildFileSignature(file);
           const existingTarget = selectTargetUid.get(nextPath) as { uid?: string } | null;
           const targetUid = String(existingTarget?.uid || '').trim() || crypto.randomUUID();
           if (!existingTarget?.uid) {
@@ -1090,9 +1108,9 @@ export class GalleryDb {
               nextFolder,
               nextName,
               row.type,
-              row.size,
-              row.createdMs,
-              row.modifiedMs,
+              file.size,
+              normalizeTimestamp(file.createdMs),
+              normalizeTimestamp(file.modifiedMs),
               nextFileSig,
               row.metadataJson,
               row.metadataFormat,
@@ -1105,9 +1123,9 @@ export class GalleryDb {
               nextFolder,
               nextName,
               row.type,
-              row.size,
-              row.createdMs,
-              row.modifiedMs,
+              file.size,
+              normalizeTimestamp(file.createdMs),
+              normalizeTimestamp(file.modifiedMs),
               nextFileSig,
               row.metadataJson,
               row.metadataFormat,
@@ -1128,7 +1146,7 @@ export class GalleryDb {
         }
       }
     });
-    transaction(normalizedPairs);
+    transaction.immediate(normalizedPairs);
     return changed;
   }
 
@@ -1136,16 +1154,16 @@ export class GalleryDb {
     const paths = Array.from(new Set((pathInputs || []).map((entry) => normalizePath(entry)).filter(Boolean)));
     if (paths.length === 0) return 0;
 
-    const selectRows = this.db.prepare('SELECT uid, path FROM files WHERE path = ? OR path LIKE ?');
+    const selectRows = this.db.prepare('SELECT uid, path FROM files WHERE path = ? OR (path >= ? AND path < ?)');
     const deleteFileTags = this.db.prepare('DELETE FROM file_tags WHERE uid = ?');
     const deleteFolderOrderByUid = this.db.prepare('DELETE FROM folder_order WHERE uid = ?');
     const deleteFile = this.db.prepare('DELETE FROM files WHERE uid = ?');
-    const deleteFolderOrders = this.db.prepare('DELETE FROM folder_order WHERE folder_path = ? OR folder_path LIKE ?');
+    const deleteFolderOrders = this.db.prepare('DELETE FROM folder_order WHERE folder_path = ? OR (folder_path >= ? AND folder_path < ?)');
 
     let removed = 0;
     const transaction = this.db.transaction((txPaths: string[]) => {
       for (const path of txPaths) {
-        const rows = selectRows.all(path, `${path}/%`) as Array<{ uid: string; path: string }>;
+        const rows = selectRows.all(path, `${path}/`, `${path}0`) as Array<{ uid: string; path: string }>;
         for (const row of rows) {
           const uid = String(row.uid || '').trim();
           if (!uid) continue;
@@ -1154,10 +1172,10 @@ export class GalleryDb {
           deleteFile.run(uid);
           removed += 1;
         }
-        deleteFolderOrders.run(path, `${path}/%`);
+        deleteFolderOrders.run(path, `${path}/`, `${path}0`);
       }
     });
-    transaction(paths);
+    transaction.immediate(paths);
     return removed;
   }
 

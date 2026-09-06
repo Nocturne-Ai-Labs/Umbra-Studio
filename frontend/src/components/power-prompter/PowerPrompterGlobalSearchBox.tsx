@@ -4,7 +4,7 @@ import type { GlobalSearchSuggestionEntry } from './powerPrompterSupport';
 import { normalizeSearchChip } from './powerPrompterPromptChips';
 
 type PowerPrompterGlobalSearchBoxProps = {
-  searchBoxRef: React.RefObject<HTMLDivElement | null>;
+  searchBoxRef: React.RefObject<HTMLDivElement>;
   query: string;
   suggestionsOpen: boolean;
   suggestionIndex: number;

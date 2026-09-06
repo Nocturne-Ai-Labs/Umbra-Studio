@@ -6,6 +6,7 @@ export interface UmbraUiLoraEntry {
   strengthModel: number;
   strengthClip: number;
   trainedTags: string[];
+  triggerWords?: string[];
   thumbnailUrl?: string;
   thumbnailUrls?: string[];
   civitaiUrl?: string;
@@ -15,6 +16,58 @@ export interface UmbraUiLoraVisualMeta {
   thumbnailUrl?: string;
   thumbnailUrls?: string[];
   civitaiUrl?: string;
+}
+
+type UmbraUiMetadataRecord = Record<string, unknown>;
+
+function collectUmbraUiLoraWords(value: unknown, add: (word: string) => void): void {
+  let parsed = value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        parsed = value;
+      }
+    }
+  }
+  if (Array.isArray(parsed)) {
+    parsed.forEach((entry) => collectUmbraUiLoraWords(entry, add));
+    return;
+  }
+  if (parsed && typeof parsed === 'object') {
+    Object.keys(parsed as UmbraUiMetadataRecord).forEach(add);
+    return;
+  }
+  if (typeof parsed === 'string') parsed.split(/[,;\n]/).forEach(add);
+}
+
+export function extractUmbraUiLoraTriggerWords(info: unknown): string[] {
+  if (!info || typeof info !== 'object') return [];
+  const record = info as UmbraUiMetadataRecord;
+  const metadata = record.metadata && typeof record.metadata === 'object'
+    ? record.metadata as UmbraUiMetadataRecord
+    : {};
+  const civitai = record.civitai && typeof record.civitai === 'object'
+    ? record.civitai as UmbraUiMetadataRecord
+    : {};
+  const words: string[] = [];
+  const seen = new Set<string>();
+  const add = (rawWord: string) => {
+    const word = String(rawWord || '').trim();
+    const key = word.toLowerCase();
+    if (!word || seen.has(key)) return;
+    seen.add(key);
+    words.push(word);
+  };
+  collectUmbraUiLoraWords(record.triggerWords, add);
+  collectUmbraUiLoraWords(civitai.trainedWords, add);
+  for (const key of [
+    'trainedWords', 'trained_words', 'activation text', 'activation_text',
+    'trigger_words', 'triggerWords', 'modelspec.trigger_phrase',
+  ]) collectUmbraUiLoraWords(metadata[key], add);
+  return words.slice(0, 120);
 }
 
 function clampStrength(value: unknown, fallback = 1): number {
@@ -49,6 +102,7 @@ export function createUmbraUiLoraEntry(
   trainedTags: string[] = [],
   modelFamilyKey = '',
   visualMeta: UmbraUiLoraVisualMeta = {},
+  triggerWords: string[] = [],
 ): UmbraUiLoraEntry {
   const normalizedName = String(name || '').trim().replace(/\\/g, '/');
   const normalizedModelFamilyKey = String(modelFamilyKey || '').trim().toLowerCase();
@@ -75,6 +129,9 @@ export function createUmbraUiLoraEntry(
     strengthClip: 1,
     trainedTags: Array.from(new Set(
       trainedTags.map((tag) => String(tag || '').trim()).filter(Boolean),
+    )),
+    triggerWords: Array.from(new Set(
+      triggerWords.map((tag) => String(tag || '').trim()).filter(Boolean),
     )),
     ...(thumbnailUrl ? { thumbnailUrl } : {}),
     ...(thumbnailUrls.length > 0 ? { thumbnailUrls } : {}),

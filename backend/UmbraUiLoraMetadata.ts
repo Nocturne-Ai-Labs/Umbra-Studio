@@ -57,6 +57,15 @@ export function extractUmbraUiTrainedTags(
   civitai: MetadataRecord | null,
   metadata: MetadataRecord,
 ): string[] {
+  const triggerWords = extractUmbraUiTriggerWords(civitai, metadata);
+  const trainingTags = extractUmbraUiTrainingTags(metadata);
+  return Array.from(new Set([...triggerWords, ...trainingTags])).slice(0, 120);
+}
+
+export function extractUmbraUiTriggerWords(
+  civitai: MetadataRecord | null,
+  metadata: MetadataRecord,
+): string[] {
   const tags: string[] = [];
   const seen = new Set<string>();
   const add = (rawTag: unknown) => {
@@ -76,11 +85,23 @@ export function extractUmbraUiTrainedTags(
     'trigger_words',
     'triggerWords',
     'modelspec.trigger_phrase',
-    'modelspec.tags',
   ]) {
     collectDirectTags(metadata[key], add);
   }
-  collectFrequencyTags(metadata.ss_tag_frequency).forEach(add);
+  return tags.slice(0, 120);
+}
 
+export function extractUmbraUiTrainingTags(metadata: MetadataRecord): string[] {
+  const tags: string[] = [];
+  const seen = new Set<string>();
+  const add = (rawTag: unknown) => {
+    const tag = String(rawTag || '').trim();
+    const key = tag.toLowerCase();
+    if (!tag || seen.has(key)) return;
+    seen.add(key);
+    tags.push(tag);
+  };
+  collectDirectTags(metadata['modelspec.tags'], add);
+  collectFrequencyTags(metadata.ss_tag_frequency).forEach(add);
   return tags.slice(0, 120);
 }

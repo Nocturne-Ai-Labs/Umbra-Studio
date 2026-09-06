@@ -1202,7 +1202,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       cardCount: cards.length,
       byType,
       variantsBySet,
-      disabledCount: cards.filter((card) => card.disabled === true).length,
+      disabledCount: cards.filter((card) => card.skipVariant === true).length,
       randomEnabledCount,
       cycleWeightedCount,
       activePromptLength,
@@ -1216,8 +1216,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         dispatchDelayMs: queueDispatchDelayMsRef.current,
       },
       generation: {
-        model: document.generation?.model || '',
-        sampler: document.generation?.sampler || '',
+        model: document.generation?.checkpointName || '',
+        sampler: document.generation?.samplerName || '',
         scheduler: document.generation?.scheduler || '',
         steps: document.generation?.steps,
         cfg: document.generation?.cfg,
@@ -2933,8 +2933,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
   }, [refreshQueueManagerOutputPreview]);
   useEffect(() => {
     if (!queueOutputMenu) return;
-    const dismiss = (event: MouseEvent) => {
-      if (event.button !== 0) return;
+    const dismiss = (event: Event) => {
+      if (event instanceof MouseEvent && event.button !== 0) return;
       setQueueOutputMenu(null);
     };
     const onKey = (event: KeyboardEvent) => {
@@ -3122,82 +3122,93 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
   useEffect(() => {
     const requestSeq = queueEstimateSeqRef.current + 1;
     queueEstimateSeqRef.current = requestSeq;
-    const startedAt = performance.now();
-    void buildPowerPrompterQueueEstimateOnWorker({
-      cardDocument,
-      queueSetTarget,
-      queueTraversalMode,
-      queueDiversity,
-      queuePromptLimit,
-      queueShuffleEnabled,
-      queueShuffleSeed: settings.queueShuffleSeed,
-      estimatedBatchSize,
-      workerRef: queueWorkerRef,
-      requestSeqRef: queueWorkerRequestSeqRef,
-      pendingSignatureRef: queueWorkerPendingSignatureRef,
-    })
-      .then((nextEstimate) => {
-        if (queueEstimateSeqRef.current !== requestSeq) return;
-        const elapsedMs = Math.round(performance.now() - startedAt);
-        setQueueEstimate(nextEstimate);
-        logPowerPrompterDebug('promptBuild:estimate:worker:end', {
-          setPromptCount: nextEstimate.setPromptCount,
-          allPromptCount: nextEstimate.allPromptCount,
-          elapsedMs,
-        });
-        if (elapsedMs >= 500) {
-          logPowerPrompterDebug('promptBuild:estimate:slow', {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      const startedAt = performance.now();
+      void buildPowerPrompterQueueEstimateOnWorker({
+        signal: controller.signal,
+        cardDocument,
+        queueSetTarget,
+        queueTraversalMode,
+        queueDiversity,
+        queuePromptLimit,
+        queueShuffleEnabled,
+        queueShuffleSeed: settings.queueShuffleSeed,
+        estimatedBatchSize,
+        workerRef: queueWorkerRef,
+        requestSeqRef: queueWorkerRequestSeqRef,
+        pendingSignatureRef: queueWorkerPendingSignatureRef,
+      })
+        .then((nextEstimate) => {
+          if (controller.signal.aborted || queueEstimateSeqRef.current !== requestSeq) return;
+          const elapsedMs = Math.round(performance.now() - startedAt);
+          setQueueEstimate(nextEstimate);
+          logPowerPrompterDebug('promptBuild:estimate:worker:end', {
             setPromptCount: nextEstimate.setPromptCount,
             allPromptCount: nextEstimate.allPromptCount,
             elapsedMs,
           });
-        }
-      })
-      .catch((error: any) => {
-        if (queueEstimateSeqRef.current !== requestSeq) return;
-        logPowerPrompterDebug('promptBuild:estimate:worker:error', {
-          message: String(error?.message || error || 'Unknown error'),
+          if (elapsedMs >= 500) {
+            logPowerPrompterDebug('promptBuild:estimate:slow', {
+              setPromptCount: nextEstimate.setPromptCount,
+              allPromptCount: nextEstimate.allPromptCount,
+              elapsedMs,
+            });
+          }
+        })
+        .catch((error: any) => {
+          if (controller.signal.aborted || queueEstimateSeqRef.current !== requestSeq) return;
+          logPowerPrompterDebug('promptBuild:estimate:worker:error', {
+            message: String(error?.message || error || 'Unknown error'),
+          });
         });
-      });
+    }, 100);
+    return () => { clearTimeout(timer); controller.abort(); };
   }, [cardDocument, queueSetTarget, queueTraversalMode, queueDiversity, queuePromptLimit, queueShuffleEnabled, settings.queueShuffleSeed, estimatedBatchSize]);
 
   useEffect(() => {
     const requestSeq = queueEditorEstimateSeqRef.current + 1;
     queueEditorEstimateSeqRef.current = requestSeq;
-    const startedAt = performance.now();
-    void buildPowerPrompterQueueEditorEstimateOnWorker({
-      queueEditorDocument,
-      queueEditorDraft,
-      queueSetTarget,
-      estimatedBatchSize,
-      workerRef: queueWorkerRef,
-      requestSeqRef: queueWorkerRequestSeqRef,
-      pendingSignatureRef: queueWorkerPendingSignatureRef,
-    })
-      .then((nextEstimate) => {
-        if (queueEditorEstimateSeqRef.current !== requestSeq) return;
-        const elapsedMs = Math.round(performance.now() - startedAt);
-        setQueueEditorEstimate(nextEstimate);
-        logPowerPrompterDebug('promptBuild:editorEstimate:worker:end', {
-          setPromptCount: nextEstimate.setPromptCount,
-          allPromptCount: nextEstimate.allPromptCount,
-          elapsedMs,
-        });
-        if (elapsedMs >= 500) {
-          logPowerPrompterDebug('promptBuild:editorEstimate:slow', {
+    if (!POWER_PROMPTER_QUEUE_EDITOR_ENABLED || prompterPanelMode !== 'queue-editor' || !queueEditorDraft) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      const startedAt = performance.now();
+      void buildPowerPrompterQueueEditorEstimateOnWorker({
+        signal: controller.signal,
+        queueEditorDocument,
+        queueEditorDraft,
+        queueSetTarget,
+        estimatedBatchSize,
+        workerRef: queueWorkerRef,
+        requestSeqRef: queueWorkerRequestSeqRef,
+        pendingSignatureRef: queueWorkerPendingSignatureRef,
+      })
+        .then((nextEstimate) => {
+          if (controller.signal.aborted || queueEditorEstimateSeqRef.current !== requestSeq) return;
+          const elapsedMs = Math.round(performance.now() - startedAt);
+          setQueueEditorEstimate(nextEstimate);
+          logPowerPrompterDebug('promptBuild:editorEstimate:worker:end', {
             setPromptCount: nextEstimate.setPromptCount,
             allPromptCount: nextEstimate.allPromptCount,
             elapsedMs,
           });
-        }
-      })
-      .catch((error: any) => {
-        if (queueEditorEstimateSeqRef.current !== requestSeq) return;
-        logPowerPrompterDebug('promptBuild:editorEstimate:worker:error', {
-          message: String(error?.message || error || 'Unknown error'),
+          if (elapsedMs >= 500) {
+            logPowerPrompterDebug('promptBuild:editorEstimate:slow', {
+              setPromptCount: nextEstimate.setPromptCount,
+              allPromptCount: nextEstimate.allPromptCount,
+              elapsedMs,
+            });
+          }
+        })
+        .catch((error: any) => {
+          if (controller.signal.aborted || queueEditorEstimateSeqRef.current !== requestSeq) return;
+          logPowerPrompterDebug('promptBuild:editorEstimate:worker:error', {
+            message: String(error?.message || error || 'Unknown error'),
+          });
         });
-      });
-  }, [estimatedBatchSize, queueEditorDocument, queueEditorDraft, queueSetTarget]);
+    }, 100);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [estimatedBatchSize, queueEditorDocument, queueEditorDraft, queueSetTarget, prompterPanelMode]);
   const activePanelQueueEstimate = POWER_PROMPTER_QUEUE_EDITOR_ENABLED && prompterPanelMode === 'queue-editor' && queueEditorDraft
     ? queueEditorEstimate
     : queueEstimate;
@@ -3711,7 +3722,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           existingGroupSnapshot.promptIndices.push(nextPromptIndex);
         } else {
           groupSnapshotIndex.set(normalizedRequestId, {
-            meta: requestMeta,
+            meta: requestMeta ?? null,
             promptIndices: [nextPromptIndex],
           });
         }
@@ -3785,7 +3796,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       powerPrompterQueueSession.restoredPausedQueue = null;
       logPowerPrompterDebug('recovery:snapshot:persistCleared', {
         paused: options?.paused === true || queuePausedRef.current,
-        clearWhenEmpty: options?.clearWhenEmpty !== false,
+        clearWhenEmpty: true,
       }, { includeQueue: true });
       void writePersistedPausedQueueSnapshot(null);
       return;
@@ -5319,7 +5330,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         activeBackendIds.add(requestId);
       }
 
-      const prompts = rawPrompts.map((entry: any) => String(entry?.prompt || '').trim());
+      const prompts: string[] = rawPrompts.map((entry: any) => String(entry?.prompt || '').trim());
       const promptSetIds = rawPrompts.map((entry: any) => clampQueueSetId(entry?.setId ?? rawRequest?.activeSetId ?? 1));
       const promptOutputSubfolders = rawPrompts.map((entry: any) => String(entry?.outputSubfolder || '').trim());
       const promptStyleNames = rawPrompts.map((entry: any) => String(entry?.styleName || '').trim());
@@ -5372,7 +5383,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         };
         queueRequestMetaRef.current.set(requestId, meta);
         updateQueueHistoryForRequest(requestId, {
-          total: prompts.length,
+          promptCount: prompts.length,
           completed: rawPrompts.filter((entry: any) => String(entry?.status || '').trim().toLowerCase() === 'completed').length,
           status: hasLiveWork
             ? 'running'
@@ -7883,8 +7894,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       nextCardCount: nextCards.length,
       previousActiveSet: previousDocument.activeQueueSet,
       nextActiveSet: normalized.activeQueueSet,
-      previousDisabledCount: previousCards.filter((card) => card.disabled === true).length,
-      nextDisabledCount: nextCards.filter((card) => card.disabled === true).length,
+      previousDisabledCount: previousCards.filter((card) => card.skipVariant === true).length,
+      nextDisabledCount: nextCards.filter((card) => card.skipVariant === true).length,
       previousRandomEnabledCount: previousCards.filter((card) => card.randomEnabled === true).length,
       nextRandomEnabledCount: nextCards.filter((card) => card.randomEnabled === true).length,
       previousQueueAssignedCount: previousCards.filter((card) => normalizeQueueSetIds(card.queueSetIds, false).length > 0).length,
@@ -11260,7 +11271,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
   const handleSetAgentInstruction = async (instructionId: string) => {
     const nextSettings = normalizePowerPrompterSettings({
       ...settings,
-      agentInstructionId,
+      agentInstructionId: instructionId,
     });
     setSettings(nextSettings);
     const persisted = await persistSettings(nextSettings, { silent: true });

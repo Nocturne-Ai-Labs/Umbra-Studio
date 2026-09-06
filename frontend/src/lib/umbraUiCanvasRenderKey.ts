@@ -14,7 +14,7 @@ export function buildUmbraCanvasVisualRenderKey(documentState: UmbraCanvasDocume
   const rasterMaskLayerIds = new Set(documentState.layers.flatMap((layer) => (
     layer.kind === 'raster' && layer.maskLayerId ? [layer.maskLayerId] : []
   )));
-  const layers = documentState.layers.flatMap((layer) => {
+  const layers = documentState.layers.flatMap<Record<string, unknown>>((layer) => {
     if (layer.kind === 'raster') return [{
       id: layer.id,
       kind: layer.kind,

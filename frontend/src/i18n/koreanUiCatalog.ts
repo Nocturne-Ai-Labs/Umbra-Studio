@@ -314,6 +314,7 @@ const KOREAN_EXACT_ENTRIES: Array<readonly [string, string]> = [
   ["test url", "테스트 URL"],
   ["thumbnails", "미리보기 이미지"],
   ["trained tokens", "훈련된 토큰"],
+  ["trigger words", "트리거 단어"],
   ["txt2img", "txt2img"],
   ["update", "업데이트"],
   ["upload", "업로드"],

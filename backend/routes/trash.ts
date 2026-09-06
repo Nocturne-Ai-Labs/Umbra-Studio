@@ -1,7 +1,8 @@
 import { rename, rm, mkdir, stat, writeFile, readFile, readdir, cp } from 'fs/promises';
 import { join, basename, dirname, resolve, relative, sep } from 'path';
-import { existsSync, readdirSync } from 'fs';
+import { existsSync } from 'fs';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import type { FsWorkerService } from '../FsWorkerService';
 // import { db } from '../db';
 
@@ -130,32 +131,67 @@ function sanitizeMetadata(data: any): TrashMetadata {
 
 async function loadMetadata(context: RouteContext): Promise<TrashMetadata> {
   const metadataFile = getMetadataPath(context);
+  if (!existsSync(metadataFile)) return { items: [] };
   try {
     let data: string;
     if (context.fsWorkerService) {
       const result = await context.fsWorkerService.read({ fullPath: metadataFile });
       data = Buffer.from(String((result as any).contentBase64 || ''), 'base64').toString('utf-8');
     } else {
-      if (!existsSync(metadataFile)) return { items: [] };
       data = await readFile(metadataFile, 'utf-8');
     }
-    return sanitizeMetadata(JSON.parse(data));
-  } catch { return { items: [] }; }
+    const parsed = JSON.parse(data);
+    if (!parsed || !Array.isArray(parsed.items)) throw new Error('Trash metadata has an invalid items list.');
+    return sanitizeMetadata(parsed);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return { items: [] };
+    throw error;
+  }
 }
 
 async function saveMetadata(context: RouteContext, metadata: TrashMetadata) {
   await ensureConfigDir(context);
   const content = JSON.stringify(sanitizeMetadata(metadata), null, 2);
-  if (context.fsWorkerService) {
-    await context.fsWorkerService.write({
-      fullPath: getMetadataPath(context),
-      content,
-      encoding: 'utf8',
-    });
-    return;
+  const metadataPath = getMetadataPath(context);
+  const temporaryPath = `${metadataPath}.${randomUUID()}.tmp`;
+  try {
+    if (context.fsWorkerService) {
+      await context.fsWorkerService.write({ fullPath: temporaryPath, content, encoding: 'utf8' });
+    } else {
+      await writeFile(temporaryPath, content, { flag: 'wx' });
+    }
+    await rename(temporaryPath, metadataPath);
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
   }
-  await writeFile(getMetadataPath(context), content);
 }
+
+// File moves and metadata commits must share the same lock, including cleanup.
+const trashTransactions = new Map<string, Promise<void>>();
+
+function withTrashTransaction<T>(context: RouteContext, operation: () => Promise<T>): Promise<T> {
+  const key = normalizeFsPathForLock(getMetadataPath(context));
+  const previous = trashTransactions.get(key) || Promise.resolve();
+  const result = previous.then(operation);
+  const settled = result.then(() => undefined, () => undefined);
+  trashTransactions.set(key, settled);
+  void settled.then(() => {
+    if (trashTransactions.get(key) === settled) trashTransactions.delete(key);
+  });
+  return result;
+}
+
+type TrashRoute = (req: Request, url: URL, context: RouteContext) => Promise<Response>;
+function serializedTrashRoute(route: TrashRoute): TrashRoute {
+  return (req, url, context) => withTrashTransaction(context, () => route(req, url, context));
+}
+
+export const listTrash = serializedTrashRoute(listTrashUnlocked);
+export const updateTrashRetention = serializedTrashRoute(updateTrashRetentionUnlocked);
+export const deleteToTrash = serializedTrashRoute(deleteToTrashUnlocked);
+export const restoreFromTrash = serializedTrashRoute(restoreFromTrashUnlocked);
+export const emptyTrash = serializedTrashRoute(emptyTrashUnlocked);
+export const permanentlyDelete = serializedTrashRoute(permanentlyDeleteUnlocked);
 
 async function mergeMetadataItems(
   context: RouteContext,
@@ -251,15 +287,6 @@ function resolveWorkspacePath(input: string, context: RouteContext): { relativeP
 function isTrashPath(path: string): boolean {
   const normalized = normalizeRelPath(path);
   return normalized === TRASH_ROOT || normalized.startsWith(`${TRASH_ROOT}/`);
-}
-
-function getTopLevelTrashEntry(path: string): string {
-  const normalized = normalizeRelPath(path);
-  const prefix = `${TRASH_ROOT}/`;
-  if (!normalized.startsWith(prefix)) return '';
-  const relativePart = normalized.slice(prefix.length);
-  if (!relativePart) return '';
-  return relativePart.split('/').filter(Boolean)[0] || '';
 }
 
 function inferOriginalPath(
@@ -361,36 +388,33 @@ async function ensureDailyTrashFolder(trashDir: string, dateStamp: string, conte
   return fallbackName;
 }
 
-async function movePathSafely(sourcePath: string, targetPath: string, isDirectory: boolean): Promise<void> {
+export async function movePathSafely(
+  sourcePath: string,
+  targetPath: string,
+  isDirectory: boolean,
+  operations = { rename, cp, rm },
+): Promise<void> {
   try {
-    await rename(sourcePath, targetPath);
+    await operations.rename(sourcePath, targetPath);
     return;
   } catch (err: any) {
     const code = String(err?.code || '');
     if (code !== 'EXDEV') throw err;
   }
 
-  try {
-    await cp(sourcePath, targetPath, {
-      recursive: isDirectory,
-      force: false,
-      errorOnExist: true,
-    });
-    await rm(sourcePath, { recursive: true, force: true });
-  } catch (err) {
-    try {
-      await rm(targetPath, { recursive: true, force: true });
-    } catch {
-      // ignore cleanup failure for partial copies
-    }
-    throw err;
-  }
+  // Preserve the destination on failure: it may predate this copy, or contain
+  // the only complete copy if removing the source failed partway through.
+  await operations.cp(sourcePath, targetPath, {
+    recursive: isDirectory,
+    force: false,
+    errorOnExist: true,
+  });
+  await operations.rm(sourcePath, { recursive: true, force: true });
 }
 
-// Cleanup expired items and orphaned files
+// Only expire tracked items. Unindexed files may belong to an interrupted move.
 async function cleanupTrash(context: RouteContext) {
   try {
-    const trashDir = getTrashDir(context);
     const metadata = await loadMetadata(context);
     const now = new Date();
     let changed = false;
@@ -408,53 +432,26 @@ async function cleanupTrash(context: RouteContext) {
             } catch (trashErr) {
               console.warn('[Trash] OS trash failed during expiry cleanup, falling back to direct delete:', trashErr);
               if (context.fsWorkerService) {
-                await context.fsWorkerService.delete({
+                const deletion = await context.fsWorkerService.delete({
                   items: [{ path: normalizeRelPath(item.trashPath), fullPath }],
                   force: true,
                 });
+                const result = (deletion as { results?: Array<{ success?: boolean; error?: string }> }).results?.[0];
+                if (!result?.success) throw new Error(result?.error || 'Expired trash item could not be deleted.');
               } else {
                 await rm(fullPath, { recursive: true, force: true });
               }
               console.log(`[Trash] Auto-expired via fallback delete: ${item.name}`);
             }
           }
-        } catch {
-          // Invalid metadata path: treat as stale and remove metadata entry.
+        } catch (error) {
+          console.warn('[Trash] Retaining expired item after cleanup failed:', error);
+          activeItems.push(item);
+          continue;
         }
         changed = true;
       } else {
         activeItems.push(item);
-      }
-    }
-
-    // Step 2: Clean up orphaned files (in directory but not in metadata)
-    if (existsSync(trashDir)) {
-      const trackedPaths = new Set(
-        activeItems
-          .map((item) => getTopLevelTrashEntry(item.trashPath))
-          .filter(Boolean)
-      );
-      const entries = readdirSync(trashDir);
-
-      for (const entry of entries) {
-        // If this file/folder isn't tracked in metadata, it's orphaned
-        if (!trackedPaths.has(entry)) {
-          const fullPath = join(trashDir, entry);
-          try {
-            if (context.fsWorkerService) {
-              await context.fsWorkerService.delete({
-                items: [{ path: normalizeRelPath(join(TRASH_ROOT, entry)), fullPath }],
-                force: true,
-              });
-            } else {
-              await rm(fullPath, { recursive: true, force: true });
-            }
-            console.log(`[Trash] Cleaned up orphaned: ${entry}`);
-            changed = true;
-          } catch (err) {
-            console.error(`[Trash] Failed to clean up orphaned ${entry}:`, err);
-          }
-        }
       }
     }
 
@@ -470,7 +467,7 @@ async function cleanupTrash(context: RouteContext) {
 }
 
 export async function runTrashCleanup(context: RouteContext) {
-  return cleanupTrash(context);
+  return withTrashTransaction(context, () => cleanupTrash(context));
 }
 
 export async function enrichTrashListItem(
@@ -501,7 +498,7 @@ export async function enrichTrashListItem(
   }
 }
 
-export async function listTrash(_req: Request, _url: URL, context: RouteContext) {
+async function listTrashUnlocked(_req: Request, _url: URL, context: RouteContext) {
   try {
     // Auto-cleanup before listing
     await cleanupTrash(context);
@@ -519,7 +516,7 @@ export async function listTrash(_req: Request, _url: URL, context: RouteContext)
   }
 }
 
-export async function updateTrashRetention(req: Request, _url: URL, context: RouteContext) {
+async function updateTrashRetentionUnlocked(req: Request, _url: URL, context: RouteContext) {
   let body: any;
   try {
     body = await req.json();
@@ -564,7 +561,7 @@ export async function updateTrashRetention(req: Request, _url: URL, context: Rou
   }
 }
 
-export async function deleteToTrash(req: Request, _url: URL, context: RouteContext) {
+async function deleteToTrashUnlocked(req: Request, _url: URL, context: RouteContext) {
   let body: any;
   try {
     body = await req.json();
@@ -793,7 +790,7 @@ export async function deleteToTrash(req: Request, _url: URL, context: RouteConte
   }
 }
 
-export async function restoreFromTrash(req: Request, _url: URL, context: RouteContext) {
+async function restoreFromTrashUnlocked(req: Request, _url: URL, context: RouteContext) {
   let body: any;
   try {
     body = await req.json();
@@ -995,9 +992,11 @@ export async function restoreFromTrash(req: Request, _url: URL, context: RouteCo
   }
 }
 
-export async function emptyTrash(_req: Request, _url: URL, context: RouteContext) {
+async function emptyTrashUnlocked(_req: Request, _url: URL, context: RouteContext) {
   try {
     const trashDir = getTrashDir(context);
+    const removedTrashPaths = new Set<string>();
+    const failed: Array<{ path: string; error: string }> = [];
 
     // Delete ALL files and folders in the Trash directory (not just tracked items)
     // This handles orphaned files that may not be in metadata
@@ -1010,10 +1009,16 @@ export async function emptyTrash(_req: Request, _url: URL, context: RouteContext
 
       if (context.fsWorkerService) {
         const execution = await context.fsWorkerService.delete({ items: fullEntries, force: true });
-        for (const entry of (((execution as any).results || []) as any[])) {
+        const results = new Map<string, { success?: boolean; error?: string }>(
+          (((execution as any).results || []) as any[]).map((entry) => [String(entry.path), entry]),
+        );
+        for (const item of fullEntries) {
+          const entry = results.get(item.path);
           if (entry?.success) {
-            const matched = fullEntries.find((item) => item.path === entry.path);
-            if (matched && context.thumbnailService) await context.thumbnailService.clearCache(matched.fullPath);
+            removedTrashPaths.add(item.path);
+            if (context.thumbnailService) await context.thumbnailService.clearCache(item.fullPath);
+          } else {
+            failed.push({ path: item.path, error: entry?.error || 'Trash item could not be deleted.' });
           }
         }
       } else {
@@ -1021,16 +1026,21 @@ export async function emptyTrash(_req: Request, _url: URL, context: RouteContext
             const fullPath = join(trashDir, entry.name);
             try {
               await rm(fullPath, { recursive: true, force: true });
+              removedTrashPaths.add(normalizeRelPath(join(TRASH_ROOT, entry.name)));
               if (context.thumbnailService) await context.thumbnailService.clearCache(fullPath);
               console.log(`[Trash] Deleted: ${fullPath}`);
             } catch (err) {
+              failed.push({ path: normalizeRelPath(join(TRASH_ROOT, entry.name)), error: err instanceof Error ? err.message : 'Trash item could not be deleted.' });
               console.error(`[Trash] Failed to delete ${fullPath}:`, err);
             }
           });
       }
     }
 
-    // Clear the metadata
+    if (failed.length > 0) {
+      await mergeMetadataItems(context, { removeTrashPaths: removedTrashPaths });
+      return json({ success: false, error: 'Some trash items could not be deleted.', failed }, 200, context.corsHeaders);
+    }
     await saveMetadata(context, { items: [] });
     return json({ success: true }, 200, context.corsHeaders);
   } catch (error: any) {
@@ -1039,7 +1049,7 @@ export async function emptyTrash(_req: Request, _url: URL, context: RouteContext
   }
 }
 
-export async function permanentlyDelete(req: Request, _url: URL, context: RouteContext) {
+async function permanentlyDeleteUnlocked(req: Request, _url: URL, context: RouteContext) {
   let body: any;
   try {
     body = await req.json();

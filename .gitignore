@@ -34,6 +34,8 @@ Umbra-Nodes/
 /UmbraPowerPrompterReader.py
 
 # Generated builds
+/artifacts/
+/release/
 /public/
 dist*/
 dist-webapp/
@@ -44,6 +46,11 @@ dist-webapp/
 # Internal test sources stay in the development tree only. Repository-ready
 # source and public releases intentionally omit them.
 *.test.*
+/scripts/gallery-operation-audit.ts
+/scripts/gallery-copy-collision-audit.ts
+/scripts/test_anima_model_merge.py
+/scripts/qualify-anima-*.py
+/scripts/qualify-anima-*.ts
 /test-*.ts
 /test-*.js
 
@@ -76,6 +83,3 @@ NUL
 Thumbs.db
 .vscode/
 .idea/
-# Local package-build output is validated separately and is never committed.
-/artifacts/
-/release/

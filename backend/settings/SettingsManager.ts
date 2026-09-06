@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, renameSync, rmSync } from 'fs';
+import { randomUUID } from 'crypto';
 import { join, resolve } from 'path';
 
 export interface UmbraSettings {
@@ -148,15 +149,23 @@ class SettingsManager {
 
             const raw = readFileSync(this.settingsPath, 'utf-8');
             const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                throw new Error('Settings must contain a JSON object.');
+            }
             const resolved = this.resolveVariables(parsed);
             const merged = this.mergeWithDefaults(resolved);
 
             // Self-heal sparse/missing config to keep schema consistent.
-            this.saveSettings(merged);
+            try {
+                this.saveSettings(merged);
+            } catch {
+                // A failed schema rewrite must not discard successfully loaded settings.
+            }
             return merged;
         } catch (err) {
             console.error('[SettingsManager] Failed to load settings:', err);
-            return this.createDefaultSettings();
+            // Preserve unreadable settings for recovery instead of overwriting them.
+            return this.buildDefaultSettings();
         }
     }
 
@@ -167,6 +176,7 @@ class SettingsManager {
     }
 
     private saveSettings(settings: UmbraSettings) {
+        const temporaryPath = `${this.settingsPath}.${randomUUID()}.tmp`;
         try {
             const configDir = join(this.projectRoot, 'User', 'Config');
             if (!existsSync(configDir)) {
@@ -175,9 +185,13 @@ class SettingsManager {
 
             const portable = this.toPortableVariables(settings);
             const raw = JSON.stringify(portable, null, 2);
-            writeFileSync(this.settingsPath, raw, 'utf-8');
+            writeFileSync(temporaryPath, raw, { encoding: 'utf-8', flag: 'wx' });
+            renameSync(temporaryPath, this.settingsPath);
         } catch (err) {
             console.error('[SettingsManager] Failed to save settings:', err);
+            throw err;
+        } finally {
+            rmSync(temporaryPath, { force: true });
         }
     }
 
@@ -193,11 +207,15 @@ class SettingsManager {
         const safe = (patch && typeof patch === 'object' && !Array.isArray(patch))
             ? patch
             : {};
-        this.settings.app = {
-            ...(this.settings.app || {}),
-            ...safe
+        const nextSettings = {
+            ...this.settings,
+            app: {
+                ...(this.settings.app || {}),
+                ...safe
+            }
         };
-        this.saveSettings(this.settings);
+        this.saveSettings(nextSettings);
+        this.settings = nextSettings;
     }
 }
 

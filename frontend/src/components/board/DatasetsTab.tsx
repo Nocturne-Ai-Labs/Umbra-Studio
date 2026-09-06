@@ -3,6 +3,7 @@ import { useState, useEffect, type DragEvent } from 'react';
 import { Archive, Trash2, Move, Tag, Check, CheckSquare, Square, Loader2, Upload, X, Flag, Sparkles, Copy, FolderOpen } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { useDropZone } from '@/lib/dnd';
+import type { DroppedImage } from '@/lib/dnd/SimpleDragDrop';
 import { showInFileExplorer } from '@/utils/fileExplorer';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import { DatasetTree } from './components/DatasetTree';
@@ -88,10 +89,10 @@ function hasNativeImageDrop(dataTransfer: DataTransfer): boolean {
   return types.some((type) => ['Files', 'text/uri-list', 'text/plain', 'text/html', 'text/x-moz-url'].includes(type));
 }
 
-function extractNativeDroppedImages(dataTransfer: DataTransfer): any[] {
-  const images = Array.from(dataTransfer.files || [])
+function extractNativeDroppedImages(dataTransfer: DataTransfer): DroppedImage[] {
+  const images: DroppedImage[] = Array.from(dataTransfer.files || [])
     .filter(isNativeImageFile)
-    .map((file) => ({ kind: 'file', file, name: file.name, type: file.type }));
+    .map((file): DroppedImage => ({ kind: 'file', file, name: file.name, type: file.type }));
 
   const url = getDroppedImageUrl(dataTransfer);
   if (url) {

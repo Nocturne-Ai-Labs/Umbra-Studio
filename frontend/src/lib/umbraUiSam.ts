@@ -28,6 +28,11 @@ export interface UmbraClipSegCapabilities {
   supportsPrompt: boolean;
 }
 
+export interface UmbraSamCapabilities {
+  available: boolean;
+  models: string[];
+}
+
 export interface DetectUmbraClipSegMaskRequest {
   image: Blob;
   prompt: string;
@@ -44,6 +49,16 @@ async function readAssistedSelectionError(response: Response): Promise<string> {
   }
   const text = (await response.text().catch(() => '')).trim();
   return text || `Assisted selection failed (${response.status}).`;
+}
+
+export async function fetchUmbraSamCapabilities(signal?: AbortSignal): Promise<UmbraSamCapabilities> {
+  const response = await fetch('/comfy/umbra/sam/capabilities', { cache: 'no-store', signal });
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok || payload.ok !== true) throw new Error(String(payload.error || 'SAM capabilities are unavailable.'));
+  return {
+    available: payload.available === true,
+    models: Array.isArray(payload.models) ? payload.models.map((model) => String(model || '').trim()).filter(Boolean) : [],
+  };
 }
 
 export async function detectUmbraSamMask(request: DetectUmbraSamMaskRequest): Promise<Blob> {

@@ -187,6 +187,8 @@ export interface PowerPrompterLoraInfoPayload {
   metadata: Record<string, unknown>;
   civitai: Record<string, unknown> | null;
   trainedTags: string[];
+  triggerWords?: string[];
+  trainingTags?: string[];
   descriptionHtml?: string;
   descriptionText?: string;
 }

@@ -953,7 +953,7 @@ function normalizeQueueSetIds(rawSets: unknown, fallbackEnabled = true): number[
   return normalized;
 }
 
-function normalizeCardQueueSetIds(card: Pick<PowerPrompterCardNode, 'queueSetIds' | 'queueEnabled'>, fallbackSetId = 1): number[] {
+function normalizeCardQueueSetIds(card: Partial<Pick<PowerPrompterCardNode, 'queueSetIds' | 'queueEnabled'>>, fallbackSetId = 1): number[] {
   const queueSetIds = normalizeQueueSetIds(card.queueSetIds, false);
   if (Array.isArray(card.queueSetIds) || queueSetIds.length > 0 || card.queueEnabled === false) return queueSetIds;
   return [clampQueueSetId(fallbackSetId)];
@@ -7733,7 +7733,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
         const directItems = outputs
           .map((entry: unknown) => normalizeDirectOutputPreviewItem(entry as DirectOutputPreviewDescriptor, outputRoots))
           .filter((entry: OutputPreviewItem | null): entry is OutputPreviewItem =>
-            Boolean(entry) && isOutputPreviewPathWithinRoots(entry.path, outputRoots)
+            entry !== null && isOutputPreviewPathWithinRoots(entry.path, outputRoots)
           );
         if (directItems.length <= 0) return;
         outputPreviewLoadSeqRef.current += 1;
@@ -8249,7 +8249,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       if (absX < 8 || absX < absY * 1.2) return;
       pan.dragging = true;
       suppressTouchPanClickUntilRef.current = Date.now() + 450;
-      const active = document.activeElement;
+      const active = pan.node.ownerDocument.activeElement;
       if (active instanceof HTMLElement && pan.node.contains(active) && active.matches('textarea, input')) {
         active.blur();
       }

@@ -1990,6 +1990,7 @@ const GENERATED_GERMAN_UI_TEXT: Array<readonly [string, string]> = [
   ["Trained tag", "Trainierter Tag"],
   ["Trained Tags", "Trainierte Tags"],
   ["Trained Tokens", "Ausgebildete Token"],
+  ["Trigger Words", "Auslösewörter"],
   ["Trained Words", "Geschulte Wörter"],
   ["Transfer the active set prompt and generation controls to Umbra UI without queueing or starting", "Übertragen Sie die Active-Set-Eingabeaufforderung und die Generierungssteuerelemente ohne Warteschlangen oder Start auf die Umbra-Benutzeroberfläche"],
   ["Transfers", "Überweisungen"],
