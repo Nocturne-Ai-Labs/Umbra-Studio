@@ -28,6 +28,10 @@ def validate(archive, version, platform):
             if '/node_modules/' not in relative and ('.test.' in leaf or leaf.startswith('qualify-anima-') or leaf == 'test_anima_model_merge.py'):
                 raise ValueError(f'{archive.name}: internal test source: {relative}')
         required = [
+            'resources/app/scripts/download-waifu-models.mjs',
+            'resources/app/scripts/download-caption-models.mjs',
+            'resources/app/scripts/download-umbra-ui-models.mjs',
+            'resources/app/scripts/download-umbra-model-requirements.mjs',
             'resources/app/package.json', 'resources/app/UmbraServer.js',
             'resources/app/setup/UmbraSetupApp.js',
             'resources/app/backend/python/anima_model_merge.py',
@@ -46,6 +50,12 @@ def validate(archive, version, platform):
                 raise ValueError(f'{archive.name}: missing {name}')
         if 'Umbra Studio/UmbraStudio.exe' in names:
             raise ValueError('Unexpected EXE launcher in portable package')
+        for retired in ['Install-Data-Forge-Models.bat', 'Install-Umbra-UI-Models.bat',
+                        'Install-Umbra-UI-Support-Models.bat', 'Install-Model-Requirements.bat',
+                        'install-data-forge-models.sh', 'install-umbra-ui-models.sh',
+                        'install-umbra-ui-support-models.sh', 'install-model-requirements.sh']:
+            if f'Umbra Studio/{retired}' in names:
+                raise ValueError(f'Retired model shortcut is still packaged: {retired}')
         manifest = json.loads(package.read('Umbra Studio/resources/app/package.json'))
         if manifest['version'] != version:
             raise ValueError(f'{archive.name}: version mismatch')

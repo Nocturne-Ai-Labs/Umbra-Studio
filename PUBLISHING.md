@@ -95,9 +95,10 @@ The optional Hugging Face read token is session-only and is not saved to setting
 Cancellation retains completed models and discards the active partial download.
 The Data Forge pack remains available on the same tab.
 
-Opening the generated model installer shortcuts without arguments now opens this
-tab. Explicit commands such as `--family anima --check`, `--verify-target`, and
-`--profile core --check` retain the noninteractive downloader paths for automation.
+Windows packages use `UmbraSetup.bat` and Linux packages use `umbra-setup.sh`
+as the model-setup shortcuts. Legacy model-download BAT and shell files are no
+longer shipped. Internal downloader scripts accept explicit
+arguments such as `--family anima --check` and `--verify-target` for automation.
 Use `--tab models` with the setup launcher to open directly to model setup.
 Setup writes only to its portable root; it does not start ComfyUI or migrate data.
 
@@ -132,21 +133,16 @@ skeleton by supplying an explicit temporary package root and
 `UMBRA_WEBAPP_CLEAN_RELEASE=1`.
 
 Local portable builds bundle the pinned Data Forge models by default. Set
-`UMBRA_BUNDLE_DATA_FORGE_MODELS=0` only for a package that will ship with the
-generated `Install-Data-Forge-Models.bat` downloader instead. The build verifies
+`UMBRA_BUNDLE_DATA_FORGE_MODELS=0` for a package whose models will be installed
+through `UmbraSetup.bat` > **Models** instead. The build verifies
 every bundled model file against the expected size in
 `defaults/DataForge/model-manifest.json`.
 
-Every Windows package also includes `Install-Umbra-UI-Support-Models.bat` and the
-Umbra UI support-model manifest. Managed ComfyUI setup installs the automatic
-`core` profile; the helper remains available for repair and for explicitly
-installing optional profiles.
-
-Every Windows package also includes `Install-Model-Requirements.bat`. It opens
-the same complete family selector as `Install-Umbra-UI-Models.bat` for optional
-image-model VAEs and text encoders, installs each selected file directly below
-`Tools/ComfyUI/models/`, and never downloads base checkpoints or diffusion
-models.
+Every Windows package includes the support-model and model-requirements manifests
+and their internal downloaders. Umbra Setup exposes both catalogs in its Models
+tab. Managed ComfyUI setup installs the automatic `core` profile; optional family
+resources install under `Tools/ComfyUI/models/`. Some profiles also include
+generation weights, so review their file lists and licenses before installing.
 
 Every Windows package must include exactly one primary launcher:
 `UmbraStudio.bat`. It also includes `UmbraSetup.bat` and
@@ -210,14 +206,14 @@ Python isolation expectations:
   plus `bun setup-tools.ts python-helpers` when preparing a Linux runtime.
 
 Linux packages built with `UMBRA_BUNDLE_DATA_FORGE_MODELS=0` include
-`install-data-forge-models.sh`. Local Linux builds bundle the same pinned model
+the **Umbra Setup > Models** downloader. Local Linux builds bundle the same pinned model
 pack by default and verify it before the publish is accepted.
 
-Every Linux package also includes `install-umbra-ui-support-models.sh` and the same
+Every Linux package includes Umbra Setup and the same
 cross-platform support-model manifest used by Windows.
 
-Every Linux package also includes `install-model-requirements.sh`, the
-cross-platform interactive selector for optional image-model prerequisites.
+Every Linux package includes the internal model-requirements downloader,
+used by Setup for optional model-family prerequisites.
 
 Every Linux package must also include `umbra-setup.sh` and
 `resources/app/setup/UmbraSetupApp.js`.
@@ -315,8 +311,8 @@ After publishing:
   removes the completed transaction.
 - Confirm Gallery starts.
 - Confirm Umbra UI lists its image/video pipelines and can validate a generation.
-- Run `Install-Umbra-UI-Support-Models.bat --check` or
-  `./install-umbra-ui-support-models.sh --check` and confirm the core support pack verifies.
+- Use **Umbra Setup > Models > Pipeline support > Verify selected** and confirm
+  the core support pack verifies on either platform.
 - Confirm Power Prompter loads presets/cards.
 - Confirm Power Prompter and Umbra UI share the packaged pipeline definitions.
 - Confirm Data Forge opens and both model installer scripts resolve their pinned models.

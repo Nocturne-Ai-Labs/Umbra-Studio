@@ -40,22 +40,24 @@ jobs:
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $batPackageRoot = "release/windows-bat/Umbra Studio"
           function Assert-CommonPackage([string] $packageRoot) {
-            if (!(Test-Path "$packageRoot/Install-Data-Forge-Models.bat")) { throw 'Data Forge model installer is missing' }
             if (!(Test-Path "$packageRoot/resources/app/defaults/DataForge/model-manifest.json")) { throw 'Data Forge model manifest is missing' }
-            if (!(Test-Path "$packageRoot/Install-Umbra-UI-Models.bat")) { throw 'Umbra UI model installer is missing' }
-            if (!(Test-Path "$packageRoot/Install-Umbra-UI-Support-Models.bat")) { throw 'Umbra UI support-model installer is missing' }
             if (!(Test-Path "$packageRoot/resources/app/defaults/UmbraUI/model-manifest.json")) { throw 'Umbra UI model manifest is missing' }
-            if (!(Test-Path "$packageRoot/Install-Model-Requirements.bat")) { throw 'Model requirements installer is missing' }
             if (!(Test-Path "$packageRoot/resources/app/defaults/UmbraUI/model-requirements-manifest.json")) { throw 'Model requirements manifest is missing' }
             if (!(Test-Path "$packageRoot/UmbraSetup.bat")) { throw 'Standalone Umbra setup launcher is missing' }
             if (!(Test-Path "$packageRoot/resources/app/setup/UmbraSetupApp.js")) { throw 'Standalone Umbra setup service is missing' }
+            if (!(Test-Path "$packageRoot/resources/app/setup/models.js")) { throw 'Model setup interface is missing' }
+            foreach ($name in @('Install-Data-Forge-Models.bat', 'Install-Umbra-UI-Models.bat', 'Install-Umbra-UI-Support-Models.bat', 'Install-Model-Requirements.bat')) {
+              if (Test-Path "$packageRoot/$name") { throw "Retired model shortcut is still packaged: $name" }
+            }
           }
           Assert-CommonPackage $batPackageRoot
           if (!(Test-Path "$batPackageRoot/UmbraStudio.bat")) { throw 'Umbra Studio BAT launcher is missing' }
           if (Test-Path "$batPackageRoot/UmbraStudio.exe") { throw 'BAT package must not include the EXE launcher' }
           $comfyRoot = [System.IO.Path]::GetFullPath("$batPackageRoot/Tools/ComfyUI")
           [System.IO.Directory]::CreateDirectory($comfyRoot) | Out-Null
-          $installerOutput = (& cmd.exe /d /c "`"$batPackageRoot/Install-Umbra-UI-Models.bat`" --verify-target --family anima" 2>&1 | Out-String)
+          $bunBinary = Join-Path $batPackageRoot 'Runtime/Bun/win32/bun.exe'
+          $installerScript = Join-Path $batPackageRoot 'resources/app/scripts/download-umbra-model-requirements.mjs'
+          $installerOutput = (& $bunBinary $installerScript --verify-target --family anima --comfy-root $comfyRoot 2>&1 | Out-String)
           if ($LASTEXITCODE -ne 0) { throw "Packaged model installer returned unexpected status $LASTEXITCODE`n$installerOutput" }
           $expectedModelsRoot = [System.IO.Path]::Combine($comfyRoot, 'models')
           if ($installerOutput -notlike "*$expectedModelsRoot*") {
@@ -95,15 +97,15 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           package_root="release/linux/Umbra Studio"
-          test -f "${package_root}/install-data-forge-models.sh"
           test -f "${package_root}/resources/app/defaults/DataForge/model-manifest.json"
-          test -f "${package_root}/install-umbra-ui-models.sh"
-          test -f "${package_root}/install-umbra-ui-support-models.sh"
           test -f "${package_root}/resources/app/defaults/UmbraUI/model-manifest.json"
-          test -f "${package_root}/install-model-requirements.sh"
           test -f "${package_root}/resources/app/defaults/UmbraUI/model-requirements-manifest.json"
           test -f "${package_root}/umbra-setup.sh"
           test -f "${package_root}/resources/app/setup/UmbraSetupApp.js"
+          test -f "${package_root}/resources/app/setup/models.js"
+          for retired in install-data-forge-models.sh install-umbra-ui-models.sh install-umbra-ui-support-models.sh install-model-requirements.sh; do
+            test ! -e "${package_root}/${retired}"
+          done
           bundled_bun_version="$("${package_root}/Runtime/Bun/linux/bun" --version)"
           case "${bundled_bun_version}" in
             1.4.*) ;;

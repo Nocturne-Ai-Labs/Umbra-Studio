@@ -277,79 +277,6 @@ function ensureBundledPowerPrompterStarterCards() {
   }
 }
 
-function writeDataForgeModelInstaller() {
-  const installerPath = path.join(publishRoot, 'install-data-forge-models.sh');
-  const script = `#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")"
-BUN_BIN="$PWD/Runtime/Bun/linux/bun"
-if [ ! -x "$BUN_BIN" ]; then
-  echo "[ERROR] Bundled Bun runtime is missing: $BUN_BIN"
-  exit 1
-fi
-if [ "$#" -eq 0 ]; then exec "$PWD/umbra-setup.sh" --tab models --pack data-forge; fi
-"$BUN_BIN" "$PWD/resources/app/scripts/download-waifu-models.mjs"
-"$BUN_BIN" "$PWD/resources/app/scripts/download-caption-models.mjs"
-echo "Data Forge models are ready."
-`;
-  fs.writeFileSync(installerPath, script, 'utf-8');
-  fs.chmodSync(installerPath, 0o755);
-}
-
-function writeUmbraUiModelInstaller() {
-  const installerPath = path.join(publishRoot, 'install-umbra-ui-models.sh');
-  const script = `#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")"
-BUN_BIN="$PWD/Runtime/Bun/linux/bun"
-if [ ! -x "$BUN_BIN" ]; then
-  echo "[ERROR] Bundled Bun runtime is missing: $BUN_BIN"
-  exit 1
-fi
-if [ "$#" -eq 0 ]; then exec "$PWD/umbra-setup.sh" --tab models --pack requirements; fi
-"$BUN_BIN" "$PWD/resources/app/scripts/download-umbra-model-requirements.mjs" "$@"
-echo "Umbra UI model requirements are ready."
-`;
-  fs.writeFileSync(installerPath, script, 'utf-8');
-  fs.chmodSync(installerPath, 0o755);
-}
-
-function writeUmbraUiSupportModelInstaller() {
-  const installerPath = path.join(publishRoot, 'install-umbra-ui-support-models.sh');
-  const script = `#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")"
-BUN_BIN="$PWD/Runtime/Bun/linux/bun"
-if [ ! -x "$BUN_BIN" ]; then
-  echo "[ERROR] Bundled Bun runtime is missing: $BUN_BIN"
-  exit 1
-fi
-if [ "$#" -eq 0 ]; then exec "$PWD/umbra-setup.sh" --tab models --pack support; fi
-"$BUN_BIN" "$PWD/resources/app/scripts/download-umbra-ui-models.mjs" --profile core "$@"
-echo "Umbra UI support models are ready."
-`;
-  fs.writeFileSync(installerPath, script, 'utf-8');
-  fs.chmodSync(installerPath, 0o755);
-}
-
-function writeModelRequirementsInstaller() {
-  const installerPath = path.join(publishRoot, 'install-model-requirements.sh');
-  const script = `#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")"
-BUN_BIN="$PWD/Runtime/Bun/linux/bun"
-if [ ! -x "$BUN_BIN" ]; then
-  echo "[ERROR] Bundled Bun runtime is missing: $BUN_BIN"
-  exit 1
-fi
-if [ "$#" -eq 0 ]; then exec "$PWD/umbra-setup.sh" --tab models --pack requirements; fi
-"$BUN_BIN" "$PWD/resources/app/scripts/download-umbra-model-requirements.mjs" "$@"
-echo "Model requirements are ready."
-`;
-  fs.writeFileSync(installerPath, script, 'utf-8');
-  fs.chmodSync(installerPath, 0o755);
-}
-
 function writeLinuxLauncher() {
   const launcherPath = path.join(publishRoot, 'start-umbra.sh');
   const script = `#!/usr/bin/env bash
@@ -417,6 +344,13 @@ function removeWindowsLaunchers() {
   }
 }
 
+function removeRetiredModelInstallers() {
+  for (const name of ['install-data-forge-models.sh', 'install-umbra-ui-models.sh', 'install-umbra-ui-support-models.sh', 'install-model-requirements.sh']) {
+    const target = path.join(publishRoot, name);
+    if (fs.existsSync(target)) safeRemoveInside(publishRoot, target);
+  }
+}
+
 function writeDesktopFile() {
   const desktopPath = path.join(publishRoot, 'UmbraStudio.desktop');
   const scriptPath = path.join(publishRoot, 'start-umbra.sh');
@@ -477,10 +411,10 @@ function verifyPublish() {
     'User/PowerPrompter/Prompts/Anime Girls Starter.ppcards.json',
     'User/PowerPrompter/Prompts/Intro to Powerprompter.ppcards.json',
     'User/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
-    'install-data-forge-models.sh',
-    'install-umbra-ui-models.sh',
-    'install-umbra-ui-support-models.sh',
-    'install-model-requirements.sh',
+    'resources/app/scripts/download-waifu-models.mjs',
+    'resources/app/scripts/download-caption-models.mjs',
+    'resources/app/scripts/download-umbra-ui-models.mjs',
+    'resources/app/scripts/download-umbra-model-requirements.mjs',
     'umbra-setup.sh',
     'umbra-updater.sh',
     'start-umbra.sh',
@@ -524,12 +458,13 @@ function publish() {
     run('node', ['scripts/download-waifu-models.mjs'], 'Data Forge WD model preparation');
     run('node', ['scripts/download-caption-models.mjs'], 'Data Forge natural caption model preparation');
   } else {
-    console.log('[linux-publish] GitHub-sized package mode: Data Forge model weights will be installed with install-data-forge-models.sh.');
+    console.log('[linux-publish] GitHub-sized package mode: install Data Forge models through umbra-setup.sh > Models.');
   }
 
   if (isCleanRelease) safeWipePublishRoot();
   ensureDir(publishRoot);
   removeWindowsLaunchers();
+  removeRetiredModelInstallers();
 
   run('bun', ['install'], 'dependency install');
   run('bun', ['run', 'webapp:prepare-runtime'], 'runtime preparation');
@@ -634,10 +569,6 @@ function publish() {
   writeLinuxLauncher();
   writeLinuxSetupLauncher();
   writeLinuxUpdaterLauncher();
-  writeDataForgeModelInstaller();
-  writeUmbraUiModelInstaller();
-  writeUmbraUiSupportModelInstaller();
-  writeModelRequirementsInstaller();
   writeDesktopFile();
   fs.writeFileSync(path.join(publishRoot, 'portable-mode'), 'portable linux webapp runtime enabled\n', 'utf-8');
   verifyPublish();

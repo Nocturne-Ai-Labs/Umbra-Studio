@@ -22,6 +22,12 @@ const isCleanRelease = process.argv.includes('--clean-release')
 const bundleDataForgeModels = process.env.UMBRA_BUNDLE_DATA_FORGE_MODELS !== '0';
 
 const primaryWindowsLauncher = 'UmbraStudio.bat';
+const RETIRED_MODEL_INSTALLERS = [
+  'Install-Data-Forge-Models.bat',
+  'Install-Umbra-UI-Models.bat',
+  'Install-Umbra-UI-Support-Models.bat',
+  'Install-Model-Requirements.bat',
+];
 
 const PRESERVED_TOP_LEVEL = new Set(['User', 'Tools']);
 const LEGACY_DESKTOP_NAME = ['elec', 'tron'].join('');
@@ -350,152 +356,6 @@ function ensureBundledPowerPrompterStarterCards() {
   }
 }
 
-function windowsInstallerScript({ title, commands, successMessage, setupPack = 'requirements' }) {
-  return `@echo off
-setlocal EnableExtensions
-title ${title}
-set "APP_ROOT=%~dp0"
-cd /d "%APP_ROOT%"
-set "EXIT_CODE=0"
-set "BUN_BIN=%APP_ROOT%Runtime\\Bun\\win32\\bun.exe"
-if "%~1"=="" goto :setup
-goto :cli
-:setup
-call "%APP_ROOT%UmbraSetup.bat" --tab models --pack ${setupPack}
-exit /b %ERRORLEVEL%
-:cli
-
-echo ============================================================
-echo ${title}
-echo ============================================================
-echo App root: %APP_ROOT%
-echo.
-
-if not exist "%BUN_BIN%" (
-  echo [ERROR] The bundled Bun runtime is missing:
-  echo         %BUN_BIN%
-  echo.
-  echo Your antivirus may have quarantined bun.exe. Repair or extract
-  echo Umbra Studio again, then add the Umbra Studio folder as an exception.
-  set "EXIT_CODE=2"
-  goto :finish
-)
-
-"%BUN_BIN%" --version >nul 2>&1
-if errorlevel 1 (
-  echo [ERROR] The bundled Bun runtime exists but Windows could not start it:
-  echo         %BUN_BIN%
-  echo.
-  echo Check Windows Security or third-party antivirus quarantine history.
-  set "EXIT_CODE=3"
-  goto :finish
-)
-
-${commands}
-if errorlevel 1 (
-  set "EXIT_CODE=%ERRORLEVEL%"
-  echo.
-  echo [ERROR] The installer stopped with exit code %ERRORLEVEL%.
-  goto :finish
-)
-
-echo.
-echo ${successMessage}
-
-:finish
-if not "%EXIT_CODE%"=="0" echo Installer exit code: %EXIT_CODE%
-if "%~1"=="" (
-  echo.
-  echo Press any key to close this window.
-  pause >nul
-)
-exit /b %EXIT_CODE%
-`;
-}
-
-function writeDataForgeModelInstaller() {
-  const installerPath = path.join(publishRoot, 'Install-Data-Forge-Models.bat');
-  const script = windowsInstallerScript({
-    title: 'Umbra Studio - Data Forge Model Installer',
-    setupPack: 'data-forge',
-    commands: `set "INSTALLER=%APP_ROOT%resources\\app\\scripts\\download-waifu-models.mjs"
-if not exist "%INSTALLER%" (
-  echo [ERROR] The Data Forge installer is missing:
-  echo         %INSTALLER%
-  set "EXIT_CODE=4"
-  goto :finish
-)
-"%BUN_BIN%" "%INSTALLER%"
-if errorlevel 1 (
-  set "EXIT_CODE=%ERRORLEVEL%"
-  goto :finish
-)
-set "INSTALLER=%APP_ROOT%resources\\app\\scripts\\download-caption-models.mjs"
-if not exist "%INSTALLER%" (
-  echo [ERROR] The Data Forge caption installer is missing:
-  echo         %INSTALLER%
-  set "EXIT_CODE=4"
-  goto :finish
-)
-"%BUN_BIN%" "%INSTALLER%"
-`,
-    successMessage: 'Data Forge models are ready.',
-  });
-  fs.writeFileSync(installerPath, script, 'utf-8');
-}
-
-function writeUmbraUiModelInstaller() {
-  const installerPath = path.join(publishRoot, 'Install-Umbra-UI-Models.bat');
-  const script = windowsInstallerScript({
-    title: 'Umbra Studio - Model Requirements Installer',
-    commands: `set "INSTALLER=%APP_ROOT%resources\\app\\scripts\\download-umbra-model-requirements.mjs"
-if not exist "%INSTALLER%" (
-  echo [ERROR] The model requirements installer is missing:
-  echo         %INSTALLER%
-  set "EXIT_CODE=4"
-  goto :finish
-)
-"%BUN_BIN%" "%INSTALLER%" %*`,
-    successMessage: 'Umbra UI model requirements are ready.',
-  });
-  fs.writeFileSync(installerPath, script, 'utf-8');
-}
-
-function writeUmbraUiSupportModelInstaller() {
-  const installerPath = path.join(publishRoot, 'Install-Umbra-UI-Support-Models.bat');
-  const script = windowsInstallerScript({
-    title: 'Umbra Studio - Support Model Installer',
-    setupPack: 'support',
-    commands: `set "INSTALLER=%APP_ROOT%resources\\app\\scripts\\download-umbra-ui-models.mjs"
-if not exist "%INSTALLER%" (
-  echo [ERROR] The support-model installer is missing:
-  echo         %INSTALLER%
-  set "EXIT_CODE=4"
-  goto :finish
-)
-"%BUN_BIN%" "%INSTALLER%" --profile core %*`,
-    successMessage: 'Umbra UI support models are ready.',
-  });
-  fs.writeFileSync(installerPath, script, 'utf-8');
-}
-
-function writeModelRequirementsInstaller() {
-  const installerPath = path.join(publishRoot, 'Install-Model-Requirements.bat');
-  const script = windowsInstallerScript({
-    title: 'Umbra Studio - Model Requirements Installer',
-    commands: `set "INSTALLER=%APP_ROOT%resources\\app\\scripts\\download-umbra-model-requirements.mjs"
-if not exist "%INSTALLER%" (
-  echo [ERROR] The model requirements installer is missing:
-  echo         %INSTALLER%
-  set "EXIT_CODE=4"
-  goto :finish
-)
-"%BUN_BIN%" "%INSTALLER%" %*`,
-    successMessage: 'Model requirements are ready.',
-  });
-  fs.writeFileSync(installerPath, script, 'utf-8');
-}
-
 function verifyCleanPublishedUser() {
   const userPath = path.join(publishRoot, 'User');
   const dirtyPaths = [
@@ -653,7 +513,7 @@ if errorlevel 1 pause
 }
 
 function removeLegacyDesktopArtifacts() {
-  for (const relativePath of LEGACY_DESKTOP_ROOT_ARTIFACTS) {
+  for (const relativePath of [...LEGACY_DESKTOP_ROOT_ARTIFACTS, ...RETIRED_MODEL_INSTALLERS]) {
     const target = path.join(publishRoot, relativePath);
     if (!fs.existsSync(target)) continue;
     safeRemoveInside(publishRoot, target);
@@ -706,10 +566,10 @@ function verifyPublish() {
     'User/PowerPrompter/Prompts/Anime Girls Starter.ppcards.json',
     'User/PowerPrompter/Prompts/Intro to Powerprompter.ppcards.json',
     'User/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
-    'Install-Data-Forge-Models.bat',
-    'Install-Umbra-UI-Models.bat',
-    'Install-Umbra-UI-Support-Models.bat',
-    'Install-Model-Requirements.bat',
+    'resources/app/scripts/download-waifu-models.mjs',
+    'resources/app/scripts/download-caption-models.mjs',
+    'resources/app/scripts/download-umbra-ui-models.mjs',
+    'resources/app/scripts/download-umbra-model-requirements.mjs',
     primaryWindowsLauncher,
     'UmbraSetup.bat',
     'UmbraUpdater.bat',
@@ -770,7 +630,7 @@ function publish() {
     run('node', ['scripts/download-waifu-models.mjs'], 'Data Forge WD model preparation');
     run('node', ['scripts/download-caption-models.mjs'], 'Data Forge natural caption model preparation');
   } else {
-    console.log('[webapp-publish] GitHub-sized package mode: Data Forge model weights will be installed with Install-Data-Forge-Models.bat.');
+    console.log('[webapp-publish] GitHub-sized package mode: install Data Forge models through UmbraSetup.bat > Models.');
   }
   removeEmptyTopLevelModelsFolder();
   removeLegacyDesktopArtifacts();
@@ -875,10 +735,6 @@ function publish() {
     removeLegacyRootShortcut(path.join(publishRoot, name));
   }
 
-  writeDataForgeModelInstaller();
-  writeUmbraUiModelInstaller();
-  writeUmbraUiSupportModelInstaller();
-  writeModelRequirementsInstaller();
   writeUmbraStudioBatchLauncher();
   writeUmbraSetupLauncher();
   writeUmbraUpdaterLauncher();

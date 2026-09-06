@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.32.2
+
+### TL;DR - Setup After Updating
+
+Update Umbra Studio normally. Use **UmbraSetup.bat > Models** on Windows or
+**./umbra-setup.sh > Models** on Linux for model downloads and verification.
+The old model-download BAT and shell shortcuts
+are retired and removed from the application root by the normal updater.
+No model downloads, ComfyUI updates, or settings migration are required for this
+hotfix. Existing models and personal data in User and Tools are preserved.
+
+### Model Installer Cleanup
+
+- Removed Install-Data-Forge-Models.bat, Install-Umbra-UI-Models.bat,
+  Install-Umbra-UI-Support-Models.bat, and Install-Model-Requirements.bat from
+  Windows package generation, plus install-data-forge-models.sh,
+  install-umbra-ui-models.sh, install-umbra-ui-support-models.sh, and
+  install-model-requirements.sh from Linux packages. Removed their obsolete
+  generation code on both platforms.
+- Retained UmbraSetup.bat / umbra-setup.sh and their Models tab as the model-setup entry
+  point. Internal download scripts remain available to Setup and CLI automation.
+  No separate model-download shortcuts are needed on either platform.
+- Updated packaging checks to reject retired BAT/shell shortcuts and require the
+  internal downloaders. Windows installer-target validation now invokes the
+  packaged downloader directly through the bundled Bun runtime.
+- Verified that the updater removes obsolete root shortcuts, preserves User and
+  Tools, and restores the previous application files during rollback.
+- Updated setup and publishing documentation to point to Umbra Setup.
+
+### Fixes And Quality-of-Life Recap
+
+- **Improved:** Windows and Linux packages no longer contain redundant model-download shortcuts.
+- **Improved:** Normal updates clean up the old shortcuts without touching user models.
+- **Improved:** Model setup instructions and release validation match the new layout.
+
 ## v0.32.1
 
 ### TL;DR - Setup After Updating

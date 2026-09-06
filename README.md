@@ -191,18 +191,17 @@ folder with the helper for your platform:
 Windows:
 
 ```bat
-Install-Data-Forge-Models.bat
+UmbraSetup.bat --tab models --pack data-forge
 ```
 
 Linux:
 
 ```bash
-chmod +x install-data-forge-models.sh
-./install-data-forge-models.sh
+./umbra-setup.sh --tab models --pack data-forge
 ```
 
-Keep the terminal open until it reports `Data Forge models are ready.` The
-installer resumes partial downloads, verifies every pinned file, and places the
+Keep Setup open until installation completes. The
+installer verifies every pinned file and places the
 models under:
 
 ```text
@@ -237,14 +236,13 @@ The same installer can be run or repaired manually from a portable package:
 Windows:
 
 ```bat
-Install-Umbra-UI-Support-Models.bat
+UmbraSetup.bat --tab models --pack support
 ```
 
 Linux:
 
 ```bash
-chmod +x install-umbra-ui-support-models.sh
-./install-umbra-ui-support-models.sh
+./umbra-setup.sh --tab models --pack support
 ```
 
 Source checkouts can use:
@@ -258,14 +256,14 @@ use model-specific non-commercial licenses. Run the main Umbra UI model
 installer and choose only the Canvas resources for the pipelines you use:
 
 ```bat
-Install-Umbra-UI-Models.bat
+UmbraSetup.bat --tab models
 ```
 
 ```bash
-./install-umbra-ui-models.sh
+./umbra-setup.sh --tab models
 ```
 
-The interactive menu includes Anima, Qwen Image, and Z-Image Canvas controls,
+The model-family list includes Anima, Qwen Image, and Z-Image Canvas controls,
 plus SDXL IP-Adapter and FLUX.1 Redux reference conditioning. The menu shows
 the exact download size and identifies non-commercial model terms before a
 user confirms the selection.
@@ -280,26 +278,24 @@ user-installed.
 ### Optional: Image Model Prerequisites
 
 Umbra does not bundle large VAEs and text encoders in the release archives.
-Use the interactive requirements helper to install only the shared resources
-for the image-model families you actually use. It never downloads a base
-checkpoint or diffusion model, and each verified file goes straight into its
+Use Umbra Setup to install only the resources
+for the model families you actually use. Some profiles include generation
+weights; review the selected files. Each verified file goes straight into its
 correct `Tools/ComfyUI/models/` subfolder.
 
 Windows:
 
 ```bat
-Install-Model-Requirements.bat
+UmbraSetup.bat --tab models
 ```
 
-`Install-Umbra-UI-Models.bat` opens this same complete selector under the
-more obvious Umbra UI name. `Install-Model-Requirements.bat` remains as a
-compatibility alias.
+Windows and Linux packages no longer include separate model-download shortcuts.
+Use **Umbra Setup > Models** for recommendations, family resources, and verification.
 
 Linux:
 
 ```bash
-chmod +x install-model-requirements.sh
-./install-model-requirements.sh
+./umbra-setup.sh --tab models
 ```
 
 The menu covers Anima, FLUX.1, FLUX.2, Qwen Image, Krea 2, ERNIE Image,
@@ -413,8 +409,8 @@ Single-tool examples:
 AI Toolkit and ComfyUI are managed installations stored under `Tools/`; their
 large upstream checkouts and virtual environments are not committed to this
 repository. Data Forge model weights are pinned by the included downloader
-scripts. GitHub portable packages include `Install-Data-Forge-Models.bat` or
-`install-data-forge-models.sh` so users can install those weights after
+scripts. GitHub portable packages include **Umbra Setup > Models** so users
+can install those weights after
 extracting the core package. Downloads are checked against the byte sizes and
 SHA-256 values in the bundled manifest before installation completes.
 
