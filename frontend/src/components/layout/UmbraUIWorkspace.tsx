@@ -662,6 +662,7 @@ export function UmbraUIWorkspace() {
   const workflowImagePrompt = imageAgentModeEnabled ? imageAgentPrompt.trim() : prompt;
   const [negativePrompt, setNegativePrompt] = React.useState(initialDeviceResume?.negativePrompt || '');
   const [catalogEnabledCSVs, setCatalogEnabledCSVs] = React.useState<string[]>([]);
+  const [canvasCatalogTriggerContainer, setCanvasCatalogTriggerContainer] = React.useState<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -3062,6 +3063,7 @@ export function UmbraUIWorkspace() {
         {canvasEnabled && modeIsMounted('canvas') ? (
           <div className={activeMode === 'canvas' ? 'contents' : 'hidden'} aria-hidden={activeMode !== 'canvas'}>
             <UmbraCanvasWorkspace
+              onCatalogTriggerContainerChange={setCanvasCatalogTriggerContainer}
               active={activeMode === 'canvas'}
               capabilities={inpaintCapabilities}
               canvasCapabilities={inpaintCanvasCapabilities}
@@ -3764,6 +3766,7 @@ export function UmbraUIWorkspace() {
 
       {activeMode !== 'extras' && !prompterSurfaceActive && activeMode !== 'image' && activeMode !== 'img2img' && activeMode !== 'inpaint' ? (
         <PowerPrompterSearchPanel
+          drawerTriggerContainer={activeMode === 'canvas' ? canvasCatalogTriggerContainer : undefined}
           onInsert={handleCatalogInsert}
           enabledCSVs={catalogEnabledCSVs}
           onToggleCSV={handleToggleCatalogCSV}

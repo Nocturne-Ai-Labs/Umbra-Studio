@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Check,
   ChevronDown,
@@ -80,6 +81,7 @@ interface PowerPrompterSearchPanelProps {
   overlayMode?: boolean;
   menuMode?: boolean;
   drawerMode?: boolean;
+  drawerTriggerContainer?: HTMLElement | null;
   drawerOpen?: boolean;
   onDrawerOpenChange?: (open: boolean) => void;
 }
@@ -143,6 +145,7 @@ export const PowerPrompterSearchPanel = React.memo(({
   overlayMode = false,
   menuMode = false,
   drawerMode = false,
+  drawerTriggerContainer,
   drawerOpen,
   onDrawerOpenChange,
 }: PowerPrompterSearchPanelProps) => {
@@ -552,14 +555,12 @@ export const PowerPrompterSearchPanel = React.memo(({
     );
   };
 
-  return (
-    <>
-      {drawerMode && !effectiveDrawerOpen ? (
+  const drawerTrigger = drawerMode && !effectiveDrawerOpen ? (
         <button
           type="button"
           data-umbra-tag-catalog-drawer-trigger=""
           onClick={() => setDrawerOpen(true)}
-          className="absolute left-0 top-1/2 z-[90] inline-flex min-h-32 -translate-y-1/2 items-center gap-2 rounded-r-md border border-cyan-300/30 px-2 py-4 text-[9px] font-black uppercase tracking-[0.12em] text-cyan-100 shadow-[8px_0_30px_rgba(0,0,0,0.55)] transition-[transform,opacity] duration-300 ease-out hover:border-cyan-200/50 [writing-mode:vertical-rl]"
+          className={`${drawerTriggerContainer === undefined ? 'absolute left-0 top-1/2 z-[90] min-h-32 -translate-y-1/2 rounded-r-md px-2 py-4 shadow-[8px_0_30px_rgba(0,0,0,0.55)] [writing-mode:vertical-rl]' : 'relative min-h-10 w-full justify-center rounded-md px-3 py-2'} inline-flex items-center gap-2 border border-cyan-300/30 text-[9px] font-black uppercase tracking-[0.12em] text-cyan-100 transition-[transform,opacity] duration-300 ease-out hover:border-cyan-200/50`}
           style={{
             backgroundColor: 'var(--umbra-bg, #09090b)',
             backgroundImage: 'linear-gradient(var(--umbra-panel-bg, rgba(20, 20, 30, 0.96)), var(--umbra-panel-bg, rgba(20, 20, 30, 0.96)))',
@@ -567,7 +568,11 @@ export const PowerPrompterSearchPanel = React.memo(({
         >
           <Tags className="h-3.5 w-3.5" /> Tag Catalog <ChevronUp className="h-3.5 w-3.5" />
         </button>
-      ) : null}
+      ) : null;
+
+  return (
+    <>
+      {drawerTriggerContainer === undefined ? drawerTrigger : drawerTriggerContainer ? createPortal(drawerTrigger, drawerTriggerContainer) : null}
       <div
       data-umbra-powerprompter-search-panel=""
       data-umbra-powerprompter-tag-catalog=""

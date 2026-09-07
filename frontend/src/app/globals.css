@@ -695,7 +695,7 @@ code.custom-scrollbar::-webkit-scrollbar {
 }
 @media (min-width: 1536px) {
   html:not([data-umbra-remote-mode="phone"]):not([data-umbra-remote-mode="tablet"]) [data-appbar-collapsed="1"] [data-umbra-canvas-workspace] {
-    grid-template-columns: 52px clamp(300px, 21.6vw, 360px) clamp(288px, 20.4vw, 336px) minmax(0, 1fr) 336px;
+    grid-template-columns: clamp(300px, 21.6vw, 360px) clamp(288px, 20.4vw, 336px) minmax(0, 1fr) 336px;
   }
 }
 
@@ -2819,10 +2819,6 @@ html[data-umbra-remote-mode="phone"] [data-umbra-canvas-workspace] {
   grid-template-columns: minmax(0, 1fr) !important;
   width: 100%;
   min-width: 0;
-}
-
-html[data-umbra-remote-mode="phone"] [data-umbra-canvas-tool-rail] {
-  display: none !important;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-canvas-center] {

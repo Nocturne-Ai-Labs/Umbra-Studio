@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.32.9
+
+### TL;DR - Setup After Updating
+
+Update and restart Umbra Studio, then refresh open browser and remote tabs.
+Windows uses `UmbraStudio.bat`; Linux uses `./start-umbra.sh`. This Canvas UI
+hotfix requires no new models, ComfyUI update, or Umbra Nodes update.
+
+### Canvas Toolbar And Tag Catalog Hotfix
+
+- Move Canvas editing tools from the left rail into a wrapping toolbar above
+  the canvas, matching Inpaint's tool placement. Preserve tool actions,
+  shortcuts, enabled states, and the bottom generation action bar.
+- Place Canvas's Tag Catalog entry at the bottom of Prompt & Inpaint as a
+  compact, full-width horizontal button. Remove the separate catalog gutter
+  and prevent the floating tab from covering editing tools. Catalog placement
+  in other workspaces remains unchanged.
+- Adjust normal and collapsed-sidebar grids for the removed tool rail, and
+  keep the catalog reachable inside the tablet Prompt & Inpaint panel.
+
+### Compatibility And Packaging
+
+Windows BAT and Linux portable ZIPs use the same patch version. Personal
+models, presets, media, and settings are not included or migrated by this
+hotfix. Existing Linux managed-tool prerequisites remain `python3-dev`,
+`build-essential`, `libgl1`, and `libglib2.0-0` (or distribution equivalents).
+Optional AI Toolkit still requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Canvas's Tag Catalog tab could cover controls in the old tool rail.
+- Improved: Canvas and Inpaint place editing tools above the image area.
+- Improved: Canvas's catalog button is horizontal and integrated into Prompt
+  & Inpaint, without a dedicated empty strip.
+- Improved: Desktop and tablet layouts retain accessible generation controls.
+
 ## v0.32.8
 
 ### TL;DR - Setup After Updating

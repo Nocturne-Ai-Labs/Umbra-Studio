@@ -188,6 +188,7 @@ interface UmbraCanvasWorkspaceProps {
   activePromptSegmentId: string;
   onPromptSegmentsChange: (segments: UmbraUiPromptSegment[]) => void;
   onActivePromptSegmentChange: (segmentId: string) => void;
+  onCatalogTriggerContainerChange?: (element: HTMLDivElement | null) => void;
   negativePrompt: string;
   onNegativePromptChange: (value: string) => void;
   seed: string;
@@ -338,6 +339,7 @@ export function UmbraCanvasWorkspace({
   activePromptSegmentId,
   onPromptSegmentsChange,
   onActivePromptSegmentChange,
+  onCatalogTriggerContainerChange,
   negativePrompt,
   onNegativePromptChange,
   seed,
@@ -2031,43 +2033,12 @@ export function UmbraCanvasWorkspace({
       data-canvas-bbox-y={project.generationBbox.y}
       data-canvas-bbox-width={project.generationBbox.width}
       data-canvas-bbox-height={project.generationBbox.height}
-      className="relative col-span-full grid min-h-0 grid-cols-[52px_minmax(0,1fr)] bg-[#07090a] 2xl:grid-cols-[52px_clamp(250px,18vw,300px)_clamp(240px,17vw,280px)_minmax(0,1fr)_280px]"
+      className="relative col-span-full grid min-h-0 grid-cols-[minmax(0,1fr)] bg-[#07090a] 2xl:grid-cols-[clamp(250px,18vw,300px)_clamp(240px,17vw,280px)_minmax(0,1fr)_280px]"
     >
       {compactPanel ? <button type="button" aria-label="Close Canvas side panel" onClick={() => setCompactPanel('')} className="absolute inset-0 z-10 bg-black/65 2xl:hidden" /> : null}
-      <aside data-umbra-canvas-tool-rail="" className="relative z-20 flex min-h-0 flex-col items-center gap-2 overflow-y-auto border-r border-white/10 bg-black/35 px-1.5 py-2 custom-scrollbar 2xl:z-auto">
-        <ToolButton active={tool === 'select'} title="Select and transform" shortcut="V" icon={<MousePointer2 size={15} />} onClick={() => setTool('select')} />
-        <ToolButton active={tool === 'bbox'} title="Generation bounding box" shortcut="G" icon={<BoxSelect size={15} />} onClick={() => setTool('bbox')} />
-        <ToolButton active={tool === 'pan'} title="Pan Canvas" shortcut="H" icon={<Hand size={15} />} onClick={() => setTool('pan')} />
-        {UMBRA_CANVAS_RASTER_PAINT_ENABLED ? <ToolButton active={tool === 'raster-brush'} title="Paint active image layer" icon={<Brush size={15} />} onClick={() => activateRasterTool('raster-brush')} /> : null}
-        <ToolButton active={tool === 'raster-eraser'} title="Erase active image layer" icon={<Eraser size={15} />} onClick={() => activateRasterTool('raster-eraser')} />
-        {UMBRA_CANVAS_COLOR_PICKER_ENABLED ? <ToolButton active={tool === 'eyedropper'} title="Pick color from Canvas" icon={<Pipette size={15} />} onClick={() => setTool('eyedropper')} /> : null}
-        <div className="h-px w-7 bg-white/10" />
-        <ToolButton active={tool === 'mask-brush'} title="Paint inpaint mask" icon={<Brush size={15} />} onClick={() => activateMaskTool('mask-brush')} />
-        <ToolButton active={tool === 'mask-eraser'} title="Erase inpaint mask" icon={<Eraser size={15} />} onClick={() => activateMaskTool('mask-eraser')} />
-        <ToolButton active={tool === 'mask-lasso'} title="Lasso mask selection" icon={<LassoSelect size={15} />} onClick={() => activateMaskTool('mask-lasso')} />
-        {UMBRA_CANVAS_VECTOR_TOOLS_ENABLED ? (
-          <>
-            <div className="h-px w-7 bg-white/10" />
-            <button type="button" title="Add rectangle layer" aria-label="Add rectangle layer" onClick={() => addVectorLayer('rectangle')} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-500 hover:border-cyan-300/30 hover:text-cyan-100"><Square size={15} /></button>
-            <button type="button" title="Add ellipse layer" aria-label="Add ellipse layer" onClick={() => addVectorLayer('ellipse')} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-500 hover:border-cyan-300/30 hover:text-cyan-100"><Circle size={15} /></button>
-            <button type="button" title="Add text layer" aria-label="Add text layer" onClick={() => addVectorLayer('text')} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-500 hover:border-cyan-300/30 hover:text-cyan-100"><Type size={15} /></button>
-            <button type="button" title="Add gradient layer" aria-label="Add gradient layer" onClick={() => addVectorLayer('gradient')} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-500 hover:border-cyan-300/30 hover:text-cyan-100"><Blend size={15} /></button>
-            <ToolButton active={tool === 'freehand-shape'} title="Draw freehand vector path" icon={<Spline size={15} />} onClick={() => setTool('freehand-shape')} />
-            <ToolButton active={tool === 'polygon-shape'} title="Draw polygon (double-click or Enter to finish)" icon={<PenTool size={15} />} onClick={() => setTool('polygon-shape')} />
-          </>
-        ) : null}
-        <button type="button" title="Import image" aria-label="Import image" onClick={() => fileInputRef.current?.click()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-500 hover:border-cyan-300/30 hover:text-cyan-100"><ImagePlus size={15} /></button>
-        <button type="button" title="Import mask image" aria-label="Import mask image" onClick={() => maskInputRef.current?.click()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-rose-300/15 bg-black/35 text-rose-300/55 hover:border-rose-300/35 hover:text-rose-100"><LassoSelect size={15} /></button>
-        <button type="button" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo (Ctrl/Cmd+Z)" onClick={undo} disabled={!canUndo} className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 disabled:text-zinc-800"><Undo2 size={15} /><kbd aria-hidden="true" className="absolute bottom-0.5 right-0.5 min-w-3 rounded-sm bg-black/80 px-0.5 text-center font-mono text-[6px] font-black leading-3 tracking-normal text-zinc-400">Z</kbd></button>
-        <button type="button" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo (Ctrl/Cmd+Shift+Z)" onClick={redo} disabled={!canRedo} className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 disabled:text-zinc-800"><Redo2 size={15} /><kbd aria-hidden="true" className="absolute bottom-0.5 right-0.5 min-w-3 rounded-sm bg-black/80 px-0.5 text-center font-mono text-[6px] font-black leading-3 tracking-normal text-zinc-400">⇧Z</kbd></button>
-        <div className="mt-auto flex flex-col gap-2">
-          <button type="button" title="Fit visible content" aria-label="Fit visible content" onClick={() => managerRef.current?.fitToContent()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100"><Focus size={15} /></button>
-          <button type="button" title="Reset view" aria-label="Reset view" onClick={() => managerRef.current?.resetView()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100"><RotateCcw size={15} /></button>
-        </div>
-      </aside>
 
       <aside data-umbra-canvas-generation-panel="" className={cn(
-        'absolute bottom-0 left-[52px] top-0 z-20 w-[min(340px,calc(100%-52px))] min-h-0 overflow-y-auto border-r border-white/10 bg-[#090c0e] p-3 shadow-2xl custom-scrollbar 2xl:static 2xl:z-auto 2xl:block 2xl:w-auto 2xl:bg-black/20 2xl:shadow-none',
+        'absolute bottom-0 left-0 top-0 z-20 w-[min(340px,100%)] min-h-0 overflow-y-auto border-r border-white/10 bg-[#090c0e] p-3 shadow-2xl custom-scrollbar 2xl:static 2xl:z-auto 2xl:block 2xl:w-auto 2xl:bg-black/20 2xl:shadow-none',
         compactPanel === 'generation' ? 'block' : 'hidden',
       )}>
         <div className="mb-3 flex items-center gap-2">
@@ -2190,7 +2161,7 @@ export function UmbraCanvasWorkspace({
       </aside>
 
       <aside data-umbra-canvas-inpaint-panel="" className={cn(
-        'absolute bottom-0 left-[52px] top-0 z-20 w-[min(340px,calc(100%-52px))] min-h-0 overflow-y-auto border-r border-white/10 bg-[#090c0e] p-3 shadow-2xl custom-scrollbar 2xl:static 2xl:z-auto 2xl:block 2xl:w-auto 2xl:bg-black/15 2xl:shadow-none',
+        'absolute bottom-0 left-0 top-0 z-20 w-[min(340px,100%)] min-h-0 overflow-y-auto border-r border-white/10 bg-[#090c0e] p-3 shadow-2xl custom-scrollbar 2xl:static 2xl:z-auto 2xl:block 2xl:w-auto 2xl:bg-black/15 2xl:shadow-none',
         compactPanel === 'inpaint' ? 'block' : 'hidden',
       )}>
         <div className="mb-3 flex items-center gap-2">
@@ -2251,9 +2222,10 @@ export function UmbraCanvasWorkspace({
           </section>
           {job ? <div className="rounded-md border border-white/10 bg-black/30 p-2.5 font-mono text-[9px] text-zinc-500"><div className="flex items-center gap-2"><span className="font-black uppercase text-zinc-300">{job.status}</span><span>{job.completed}/{job.total}</span>{!isUmbraUiInpaintJobTerminal(job) ? <button type="button" onClick={() => void cancelGeneration()} disabled={canceling} className="ml-auto text-rose-300 hover:text-rose-100">{canceling ? 'Canceling' : 'Cancel'}</button> : null}</div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-rose-400 transition-[width]" style={{ width: `${Math.round(job.completed / Math.max(1, job.total) * 100)}%` }} /></div></div> : null}
         </div>
+        <div ref={onCatalogTriggerContainerChange} data-umbra-canvas-catalog-trigger-container="" className="mt-3 flex justify-end" />
       </aside>
 
-      <div data-umbra-canvas-center="" className={cn('col-start-2 grid min-h-0 min-w-0 2xl:col-start-auto', stages.length ? 'grid-rows-[42px_minmax(0,1fr)_auto_auto_38px]' : 'grid-rows-[42px_minmax(0,1fr)_auto_38px]')}>
+      <div data-umbra-canvas-center="" className={cn('grid min-h-0 min-w-0', stages.length ? 'grid-rows-[42px_auto_minmax(0,1fr)_auto_auto_38px]' : 'grid-rows-[42px_auto_minmax(0,1fr)_auto_38px]')}>
         <div className="flex min-w-0 items-center gap-2 overflow-x-auto border-b border-white/10 bg-black/25 px-3 custom-scrollbar">
           <button type="button" title="Generation controls" aria-label="Open generation controls" onClick={() => setCompactPanel((current) => current === 'generation' ? '' : 'generation')} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-rose-300/20 text-rose-200 2xl:hidden"><PanelLeftOpen size={13} /></button>
           <button type="button" title="Prompt and inpaint controls" aria-label="Open prompt and inpaint controls" onClick={() => setCompactPanel((current) => current === 'inpaint' ? '' : 'inpaint')} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cyan-300/20 text-cyan-200 2xl:hidden"><Focus size={13} /></button>
@@ -2303,6 +2275,37 @@ export function UmbraCanvasWorkspace({
             <span>{project.generationBbox.width} x {project.generationBbox.height}</span>
             <span>{project.generationAlignment}px</span>
             <button type="button" title="Canvas layers" aria-label="Open Canvas layers" onClick={() => setCompactPanel((current) => current === 'layers' ? '' : 'layers')} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cyan-300/20 text-cyan-200 2xl:hidden"><PanelRightOpen size={13} /></button>
+          </div>
+        </div>
+        <div data-umbra-canvas-tool-toolbar="" role="toolbar" aria-label="Canvas editing tools" className="flex min-w-0 flex-wrap items-center gap-2 border-b border-white/10 bg-black/35 p-2 [&_button]:shrink-0">
+          <ToolButton active={tool === 'select'} title="Select and transform" shortcut="V" icon={<MousePointer2 size={15} />} onClick={() => setTool('select')} />
+          <ToolButton active={tool === 'bbox'} title="Generation bounding box" shortcut="G" icon={<BoxSelect size={15} />} onClick={() => setTool('bbox')} />
+          <ToolButton active={tool === 'pan'} title="Pan Canvas" shortcut="H" icon={<Hand size={15} />} onClick={() => setTool('pan')} />
+          {UMBRA_CANVAS_RASTER_PAINT_ENABLED ? <ToolButton active={tool === 'raster-brush'} title="Paint active image layer" icon={<Brush size={15} />} onClick={() => activateRasterTool('raster-brush')} /> : null}
+          <ToolButton active={tool === 'raster-eraser'} title="Erase active image layer" icon={<Eraser size={15} />} onClick={() => activateRasterTool('raster-eraser')} />
+          {UMBRA_CANVAS_COLOR_PICKER_ENABLED ? <ToolButton active={tool === 'eyedropper'} title="Pick color from Canvas" icon={<Pipette size={15} />} onClick={() => setTool('eyedropper')} /> : null}
+          <div className="h-6 w-px bg-white/10" />
+          <ToolButton active={tool === 'mask-brush'} title="Paint inpaint mask" icon={<Brush size={15} />} onClick={() => activateMaskTool('mask-brush')} />
+          <ToolButton active={tool === 'mask-eraser'} title="Erase inpaint mask" icon={<Eraser size={15} />} onClick={() => activateMaskTool('mask-eraser')} />
+          <ToolButton active={tool === 'mask-lasso'} title="Lasso mask selection" icon={<LassoSelect size={15} />} onClick={() => activateMaskTool('mask-lasso')} />
+          {UMBRA_CANVAS_VECTOR_TOOLS_ENABLED ? (
+            <>
+              <div className="h-6 w-px bg-white/10" />
+              <button type="button" title="Add rectangle layer" aria-label="Add rectangle layer" onClick={() => addVectorLayer('rectangle')} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-500 hover:border-cyan-300/30 hover:text-cyan-100"><Square size={15} /></button>
+              <button type="button" title="Add ellipse layer" aria-label="Add ellipse layer" onClick={() => addVectorLayer('ellipse')} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-500 hover:border-cyan-300/30 hover:text-cyan-100"><Circle size={15} /></button>
+              <button type="button" title="Add text layer" aria-label="Add text layer" onClick={() => addVectorLayer('text')} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-500 hover:border-cyan-300/30 hover:text-cyan-100"><Type size={15} /></button>
+              <button type="button" title="Add gradient layer" aria-label="Add gradient layer" onClick={() => addVectorLayer('gradient')} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-500 hover:border-cyan-300/30 hover:text-cyan-100"><Blend size={15} /></button>
+              <ToolButton active={tool === 'freehand-shape'} title="Draw freehand vector path" icon={<Spline size={15} />} onClick={() => setTool('freehand-shape')} />
+              <ToolButton active={tool === 'polygon-shape'} title="Draw polygon (double-click or Enter to finish)" icon={<PenTool size={15} />} onClick={() => setTool('polygon-shape')} />
+            </>
+          ) : null}
+          <button type="button" title="Import image" aria-label="Import image" onClick={() => fileInputRef.current?.click()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-500 hover:border-cyan-300/30 hover:text-cyan-100"><ImagePlus size={15} /></button>
+          <button type="button" title="Import mask image" aria-label="Import mask image" onClick={() => maskInputRef.current?.click()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-rose-300/15 bg-black/35 text-rose-300/55 hover:border-rose-300/35 hover:text-rose-100"><LassoSelect size={15} /></button>
+          <button type="button" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo (Ctrl/Cmd+Z)" onClick={undo} disabled={!canUndo} className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 disabled:text-zinc-800"><Undo2 size={15} /><kbd aria-hidden="true" className="absolute bottom-0.5 right-0.5 min-w-3 rounded-sm bg-black/80 px-0.5 text-center font-mono text-[6px] font-black leading-3 tracking-normal text-zinc-400">Z</kbd></button>
+          <button type="button" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo (Ctrl/Cmd+Shift+Z)" onClick={redo} disabled={!canRedo} className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 disabled:text-zinc-800"><Redo2 size={15} /><kbd aria-hidden="true" className="absolute bottom-0.5 right-0.5 min-w-3 rounded-sm bg-black/80 px-0.5 text-center font-mono text-[6px] font-black leading-3 tracking-normal text-zinc-400">⇧Z</kbd></button>
+          <div className="ml-auto flex items-center gap-2">
+            <button type="button" title="Fit visible content" aria-label="Fit visible content" onClick={() => managerRef.current?.fitToContent()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100"><Focus size={15} /></button>
+            <button type="button" title="Reset view" aria-label="Reset view" onClick={() => managerRef.current?.resetView()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100"><RotateCcw size={15} /></button>
           </div>
         </div>
         <div className="relative min-h-0 min-w-0">
@@ -2410,7 +2413,7 @@ export function UmbraCanvasWorkspace({
       </div>
 
       <aside data-umbra-canvas-layers-panel="" className={cn(
-        'absolute bottom-0 right-0 top-0 z-20 w-[min(340px,calc(100%-52px))] min-h-0 flex-col border-l border-white/10 bg-[#090c0e] shadow-2xl 2xl:static 2xl:z-auto 2xl:flex 2xl:w-auto 2xl:bg-black/30 2xl:shadow-none',
+        'absolute bottom-0 right-0 top-0 z-20 w-[min(340px,100%)] min-h-0 flex-col border-l border-white/10 bg-[#090c0e] shadow-2xl 2xl:static 2xl:z-auto 2xl:flex 2xl:w-auto 2xl:bg-black/30 2xl:shadow-none',
         compactPanel === 'layers' ? 'flex' : 'hidden',
       )}>
         <div className="flex h-11 items-center gap-2 border-b border-white/10 px-3">
