@@ -27,6 +27,7 @@ export function resolveUmbraUiPrompterOutputLayout(options: {
   promptSetId: unknown;
   outputSubfolder: unknown;
   dateFolder: string;
+  pinnedOutputFolder?: string;
 }): UmbraUiPrompterOutputLayout | null {
   if (String(options.queueOrigin || '').trim() !== 'power_prompter') return null;
   if (String(options.outputMode || '').trim().toLowerCase() !== 'txt2img') return null;
@@ -35,10 +36,12 @@ export function resolveUmbraUiPrompterOutputLayout(options: {
   const setSubfolder = `Set ${promptSetId}`;
   const styleSubfolder = sanitizeOutputSegment(options.outputSubfolder);
   const dateFolder = sanitizeOutputSegment(options.dateFolder);
-  const relativeParts = [UMBRA_UI_TXT2IMG_OUTPUT_FOLDER, dateFolder, setSubfolder, styleSubfolder].filter(Boolean);
+  // The caller validates pinned roots against Gallery settings before compiling.
+  const outputFolder = options.pinnedOutputFolder || UMBRA_UI_TXT2IMG_OUTPUT_FOLDER;
+  const relativeParts = [outputFolder.replace(/\\/g, '/').replace(/\/$/, ''), dateFolder, setSubfolder, styleSubfolder].filter(Boolean);
 
   return {
-    outputFolder: UMBRA_UI_TXT2IMG_OUTPUT_FOLDER,
+    outputFolder,
     saveToDateFolder: true,
     saveToSetSubfolder: true,
     setSubfolder,

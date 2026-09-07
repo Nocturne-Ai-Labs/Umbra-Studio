@@ -10,7 +10,6 @@ import {
 import type {
   PersistedPausedQueueSnapshot,
   PersistedQueueGroupSnapshot,
-  PowerPrompterQueueHistoryDocument,
   PowerPrompterQueueHistorySummary,
   QueueEditorBuildSettings,
   QueueRequestMeta,
@@ -186,13 +185,13 @@ export function applyQueueHistorySummaryPatch<T extends PowerPrompterQueueHistor
 }
 
 export function findStaleQueueHistoryEntries(
-  document: PowerPrompterQueueHistoryDocument,
+  document: PowerPrompterQueueHistorySummary,
   items: PowerPrompterQueueHistorySummary[],
   activeHistoryIds: Set<string>
 ): PowerPrompterQueueHistorySummary[] {
   const fileKey = String(document.file || '').trim();
   return (Array.isArray(items) ? items : []).filter((entry) => {
-    if (!entry?.id || entry.id === document.id || activeHistoryIds.has(entry.id)) return false;
+    if (!entry?.id || entry.backendOwned || entry.id === document.id || activeHistoryIds.has(entry.id)) return false;
     if (entry.status !== 'running' && entry.status !== 'queued') return false;
     if (String(entry.file || '').trim() !== fileKey) return false;
     if (clampQueueSetId(entry.activeSetId) !== clampQueueSetId(document.activeSetId)) return false;

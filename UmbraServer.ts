@@ -20,6 +20,9 @@ import { createConnection } from 'net';
 import { ServerWebSocket } from 'bun';
 import { QueueUploadReceiver } from './shared/power-prompter/queueTransport';
 import { compactQueueSnapshot } from './shared/power-prompter/queueSnapshotTransport';
+import { PowerPrompterHistoryStore } from './backend/PowerPrompterHistoryStore';
+import { buildRemainingPowerPrompterQueueSnapshot, splitSavedPowerPrompterQueue } from './backend/PowerPrompterSavedQueue';
+import { getSavedQueueAvailability } from './shared/power-prompter/savedQueue';
 import { ThumbnailService } from './backend/ThumbnailService';
 import { CIVITAI_PAGE_TIMEOUT_MS, CIVITAI_METADATA_TIMEOUT_MS, requestCivitaiPage, civitaiPageError } from './backend/CivitaiPageRequest';
 import { seedBundledWorkflowDirectory } from './backend/BundledWorkflowService';
@@ -4777,6 +4780,7 @@ interface BackendPowerPrompterQueuedWork {
   loaded: LoadedPPApiWorkflow;
   data: any;
   queuePlacement?: PowerPrompterQueuePlacement;
+  preservePaused?: boolean;
 }
 
 const backendPowerPrompterQueuedWork: BackendPowerPrompterQueuedWork[] = [];
@@ -4903,6 +4907,11 @@ function clonePowerPrompterQueueControllerSnapshot(reason?: string) {
   return {
     type: 'queue_snapshot',
     backendAutoDispatch: true,
+    backendOwnedHistory: true,
+    savedQueues: {
+      ...getSavedQueueAvailability(powerPrompterQueueControllerState),
+      canLoad: !powerPrompterQueueControllerState.requests.some((request) => request.prompts.some((prompt) => ['pending', 'submitting', 'running'].includes(prompt.status))),
+    },
     version: powerPrompterQueueControllerState.version,
     paused: powerPrompterQueueControllerState.paused,
     activeRequestId: powerPrompterQueueControllerState.activeRequestId,
@@ -4913,6 +4922,7 @@ function clonePowerPrompterQueueControllerSnapshot(reason?: string) {
       delete publicRequest.workflowImplementationName;
       return {
         ...publicRequest,
+        history: ppBackendHistory.get(request.requestId)?.summary || null,
         prompts: request.prompts.map((prompt) => ({ ...prompt })),
       };
     }),
@@ -4926,6 +4936,93 @@ function isPowerPrompterQueueControllerTerminalStatus(status: unknown) {
   return normalized === 'completed' || normalized === 'canceled' || normalized === 'interrupted' || normalized === 'failed';
 }
 
+type BackendPPHistory = {
+  ready: Promise<unknown>;
+  summary: PPQueueHistorySummary | null;
+  progressSignature: string;
+  deleted?: boolean;
+};
+const ppBackendHistory = new Map<string, BackendPPHistory>();
+
+function publishBackendPPHistory(history: BackendPPHistory, summary: PPQueueHistorySummary | null) {
+  if (!summary || history.deleted) return;
+  const changed = history.summary?.updatedAt !== summary.updatedAt;
+  history.summary = summary;
+  if (changed) sendPrompterEventToTargets({ type: 'queue_history_updated', item: summary });
+}
+
+function reportBackendPPHistoryError(requestId: string, error: unknown) {
+  console.warn('[PowerPrompter] Queue history persistence failed:', requestId, error);
+  sendPrompterEventToTargets({ type: 'queue_history_error', requestId, error: 'Queue history could not be saved. Check disk space and permissions.' });
+}
+
+function buildBackendPPHistorySnapshot(request: PowerPrompterQueueControllerRequest, state: Record<string, any>): PowerPrompterQueueSnapshot | null {
+  return normalizePPQueueSnapshot({
+    ...state,
+    version: 1,
+    file: state.sourceFile || state.file || null,
+    mode: request.mode,
+    activeSetId: request.activeSetId,
+    targetBridgeId: request.pipelineId,
+    requestIds: request.prompts.map(() => request.requestId),
+    prompts: request.prompts.map((prompt) => prompt.prompt),
+    promptSetIds: request.prompts.map((prompt) => prompt.setId),
+    promptOutputSubfolders: request.prompts.map((prompt) => prompt.outputSubfolder),
+    promptStyleNames: request.prompts.map((prompt) => prompt.styleName),
+    generation: request.prompts[0]?.generation,
+    generationByPrompt: request.prompts.map((prompt) => prompt.generation),
+    paused: true,
+    groupSnapshots: [{
+      id: request.requestId, requestId: request.requestId, mode: request.mode,
+      activeSetId: request.activeSetId, promptStartIndex: 0, promptCount: request.prompts.length,
+      editorSnapshot: state.editorSnapshot,
+    }],
+  });
+}
+
+function initializeBackendPPQueueHistory(request: PowerPrompterQueueControllerRequest, state: Record<string, any>) {
+  if (request.origin !== 'power_prompter' || ppBackendHistory.has(request.requestId)) return;
+  const history: BackendPPHistory = { ready: Promise.resolve(), summary: null, progressSignature: '' };
+  ppBackendHistory.set(request.requestId, history);
+  const snapshot = buildBackendPPHistorySnapshot(request, state);
+  const name = basename(String(state.sourceFile || state.file || 'Power Prompter')).replace(/\.ppcards\.json$/i, '');
+  history.ready = savePPQueueHistory(`${name} - Set ${request.activeSetId}`, snapshot, 'queued', [], request.requestId, true)
+    .then((summary) => publishBackendPPHistory(history, summary))
+    .catch((error) => { reportBackendPPHistoryError(request.requestId, error); });
+}
+
+function persistBackendPPQueueHistoryProgress(request: PowerPrompterQueueControllerRequest, previews?: unknown[]) {
+  const history = ppBackendHistory.get(request.requestId);
+  if (!history || history.deleted) return;
+  const patch = {
+    status: request.status === 'pending' ? 'queued' : request.status,
+    completed: request.completed, failed: request.failed, canceled: request.canceled,
+    ...(previews ? { previewImages: normalizePPQueueHistoryPreviewImages(previews) } : {}),
+  };
+  const signature = JSON.stringify(patch);
+  if (!previews && history.progressSignature === signature) return;
+  if (!previews) history.progressSignature = signature;
+  history.ready = history.ready.then(async () => {
+    const summary = await updatePPQueueHistory(getPPQueueRequestHistoryId(request.requestId), patch, true);
+    publishBackendPPHistory(history, summary);
+  }).catch((error) => {
+    history.progressSignature = '';
+    reportBackendPPHistoryError(request.requestId, error);
+  });
+}
+
+// Edits are the only time a running queue replaces its immutable snapshot.
+function reviseBackendPPQueueHistory(request: PowerPrompterQueueControllerRequest, transform: (snapshot: PowerPrompterQueueSnapshot) => PowerPrompterQueueSnapshot) {
+  const history = ppBackendHistory.get(request.requestId);
+  if (!history) return;
+  history.ready = history.ready.then(async () => {
+    const id = getPPQueueRequestHistoryId(request.requestId);
+    const existing = await loadPPQueueHistory(id);
+    if (!existing) return;
+    publishBackendPPHistory(history, await updatePPQueueHistory(id, { snapshot: transform(existing.snapshot) }, true));
+  }).catch((error) => reportBackendPPHistoryError(request.requestId, error));
+}
+
 function retainVisiblePowerPrompterQueueControllerRequests(requests: PowerPrompterQueueControllerRequest[]) {
   const terminalRequests = requests.filter((request) => isPowerPrompterQueueControllerTerminalStatus(request.status));
   const keepTerminalIds = new Set(terminalRequests.slice(-20).map((request) => request.requestId));
@@ -4936,8 +5033,14 @@ function recomputePowerPrompterQueueControllerState(reason?: string) {
   const now = Date.now();
   powerPrompterQueueControllerState.requests = powerPrompterQueueControllerState.requests.filter((request) => {
     if (!isPowerPrompterQueueControllerTerminalStatus(request.status)) return true;
-    return now - Math.max(0, Number(request.updatedAt) || 0) < 30000;
+    const keep = now - Math.max(0, Number(request.updatedAt) || 0) < 30000;
+    if (!keep) ppBackendHistory.delete(request.requestId);
+    return keep;
   });
+  const visibleRequestIds = new Set(powerPrompterQueueControllerState.requests.map((request) => request.requestId));
+  for (const requestId of ppBackendHistory.keys()) {
+    if (!visibleRequestIds.has(requestId)) ppBackendHistory.delete(requestId);
+  }
   for (const request of powerPrompterQueueControllerState.requests) {
     request.total = request.prompts.length;
     request.completed = request.prompts.filter((prompt) => prompt.status === 'completed').length;
@@ -4968,6 +5071,7 @@ function recomputePowerPrompterQueueControllerState(reason?: string) {
       request.status = 'pending';
     }
     request.updatedAt = Math.max(request.updatedAt || 0, activePrompt?.updatedAt || 0, now);
+    persistBackendPPQueueHistoryProgress(request);
   }
 
   const activeRequest = powerPrompterQueueControllerState.requests.find((request) =>
@@ -5046,6 +5150,7 @@ function startPowerPrompterQueueControllerRequest(options: {
   promptOutputSubfolders: string[];
   promptStyleNames: string[];
   generationByPrompt: PowerPrompterGenerationControls[];
+  historyState?: Record<string, any>;
   preservePaused?: boolean;
 }, preferredSourceWs?: ServerWebSocket<unknown> | null, reason = 'request_started') {
   const requestId = String(options.requestId || '').trim();
@@ -5104,6 +5209,7 @@ function startPowerPrompterQueueControllerRequest(options: {
   for (const prompt of request.prompts) {
     void upsertUmbraUiVideoReviewPrompt(request, prompt);
   }
+  initializeBackendPPQueueHistory(request, options.historyState || {});
   broadcastPowerPrompterQueueControllerSnapshot(reason, preferredSourceWs);
 }
 
@@ -5296,6 +5402,18 @@ function applyPowerPrompterQueueControllerReorder(data: any, preferredSourceWs?:
       task.activePromptIndex = oldIndexToNewIndex.get(task.activePromptIndex) ?? task.activePromptIndex;
     }
     refreshBackendPowerPrompterQueuedWorkFromController(entry.requestId);
+    const historyOrder = nextPrompts.map((prompt) => prompt.promptIndex);
+    reviseBackendPPQueueHistory(request, (snapshot) => {
+      const reorder = <T,>(values: T[]) => historyOrder.map((index) => values[index]);
+      return {
+        ...snapshot,
+        prompts: reorder(snapshot.prompts), requestIds: reorder(snapshot.requestIds),
+        promptSetIds: reorder(snapshot.promptSetIds), promptStyleNames: reorder(snapshot.promptStyleNames),
+        promptOutputSubfolders: reorder(snapshot.promptOutputSubfolders), promptSeedGroupIds: reorder(snapshot.promptSeedGroupIds),
+        generationByPrompt: reorder(snapshot.generationByPrompt),
+        ...(snapshot.promptEntries ? { promptEntries: reorder(snapshot.promptEntries) } : {}),
+      };
+    });
     changed = true;
   }
 
@@ -5512,6 +5630,14 @@ function replacePowerPrompterQueueControllerGroup(
     };
   }
 
+  const historyPrompts = request.prompts.slice();
+  const historyRequest = { ...request, prompts: historyPrompts };
+  reviseBackendPPQueueHistory(request, (snapshot) => buildBackendPPHistorySnapshot(historyRequest, {
+    ...snapshot,
+    sourceFile: snapshot.file,
+    promptEntries: [...lockedPrompts.map((prompt) => snapshot.promptEntries?.[prompt.promptIndex] ?? null), ...replacementPromptEntries],
+    editorSnapshot: replacement.editorSnapshot ?? replacementGroup.editorSnapshot ?? snapshot.groupSnapshots?.[0]?.editorSnapshot,
+  }) || snapshot);
   broadcastPowerPrompterQueueControllerSnapshot('group_replaced', preferredSourceWs);
   appendPowerPrompterQueueLog('backend_queue_group_replaced', {
     requestId: normalizedRequestId,
@@ -5640,6 +5766,7 @@ async function addPowerPrompterQueueControllerGroup(
     promptStyleNames,
     generationByPrompt,
     preservePaused: true,
+    historyState: state,
   }, preferredSourceWs, 'group_added');
 
   const request = findPowerPrompterQueueControllerRequest(requestId);
@@ -7411,14 +7538,9 @@ function compileUmbraUiPipelineWorkflow(
   const setLabel = `Set ${promptSetId}`;
   const isUmbraUiOutput = generation.outputOwner === 'umbra_ui';
   const umbraUiOutputMode = getUmbraUiOutputMode(generation);
-  const prompterOutputLayout = resolveUmbraUiPrompterOutputLayout({
-    queueOrigin: options.queueOrigin,
-    outputMode: activeImagePipeline?.feature || umbraUiOutputMode,
-    promptSetId,
-    outputSubfolder,
-    dateFolder: formatUmbraUiLocalDate(),
-  });
-  const requestedPinnedOutputFolder = !prompterOutputLayout && isUmbraUiOutput && umbraUiOutputMode === 'txt2img'
+  const prompterOutputMode = activeImagePipeline?.feature || umbraUiOutputMode;
+  const isPrompterOutput = options.queueOrigin === 'power_prompter' && prompterOutputMode === 'txt2img';
+  const requestedPinnedOutputFolder = isPrompterOutput || (isUmbraUiOutput && umbraUiOutputMode === 'txt2img')
     ? generation.outputFolder
     : '';
   const pinnedOutputFolder = resolveUmbraUiPinnedOutputFolder(
@@ -7426,6 +7548,14 @@ function compileUmbraUiPipelineWorkflow(
     settingsManager.getAppSettings()['library.pinnedFolders'],
     resolvePathCandidate,
   );
+  const prompterOutputLayout = resolveUmbraUiPrompterOutputLayout({
+    queueOrigin: options.queueOrigin,
+    outputMode: prompterOutputMode,
+    promptSetId,
+    outputSubfolder,
+    dateFolder: formatUmbraUiLocalDate(),
+    pinnedOutputFolder,
+  });
   let pinnedOutputFolderApplied = false;
   const isImg2Img = isUmbraUiOutput && umbraUiOutputMode === 'img2img';
   const isVid2Vid = isUmbraUiOutput && umbraUiOutputMode === 'vid2vid';
@@ -7769,6 +7899,7 @@ function compileUmbraUiPipelineWorkflow(
       setPPApiNodeInput(node, 'scheduler', generation.scheduler);
       if (prompterOutputLayout) {
         applyUmbraUiPrompterOutputLayout(classType, node, prompterOutputLayout);
+        if (pinnedOutputFolder) pinnedOutputFolderApplied = true;
       } else if (isUmbraUiOutput) {
         setPPApiNodeInput(node, 'output_folder', pinnedOutputFolder || `Umbra UI/${umbraUiOutputMode}`);
         setPPApiNodeInput(node, 'save_to_yyyy_mm_dd_folder', !pinnedOutputFolder);
@@ -7787,6 +7918,9 @@ function compileUmbraUiPipelineWorkflow(
     }
 
     if (prompterOutputLayout && classType === 'SaveImage') {
+      if (pinnedOutputFolder) {
+        throw new Error('Pinned output folders require an Umbra save-image node. This pipeline uses ComfyUI SaveImage, which is limited to its output directory.');
+      }
       applyUmbraUiPrompterOutputLayout(classType, node, prompterOutputLayout);
     } else if (isUmbraUiOutput && classType === 'SaveImage') {
       setPPApiNodeInput(
@@ -8571,6 +8705,9 @@ async function emitBackendPowerPrompterSavedOutputs(
   const reviewPrompt = reviewRequest?.prompts[promptIndex];
   if (reviewRequest && reviewPrompt) {
     void upsertUmbraUiVideoReviewPrompt(reviewRequest, reviewPrompt, stampedOutputs);
+    persistBackendPPQueueHistoryProgress(reviewRequest, stampedOutputs.map((output) => ({
+      path: output.fullpath, name: basename(output.fullpath), promptIndex, promptId, setId: promptSetId,
+    })));
   }
   emitPowerPrompterRuntimeTerminalLog('queue_saved_outputs', payload);
   void tagPowerPrompterSavedOutputs(payload, null);
@@ -9508,7 +9645,7 @@ async function runBackendPowerPrompterPipelineQueue(
   const promptSetIds = prompts.map((_, index) => clampPPQueueSetId(Array.isArray(state.promptSetIds) ? state.promptSetIds[index] : state.activeQueueSet ?? state.activeSetId ?? 1));
   let promptOutputSubfolders = prompts.map((_, index) => String(Array.isArray(state.promptOutputSubfolders) ? state.promptOutputSubfolders[index] : '').trim());
   const uniqueOutputSubfolders = Array.from(new Set(promptOutputSubfolders.filter(Boolean)));
-  if (uniqueOutputSubfolders.length <= 1) {
+  if (uniqueOutputSubfolders.length <= 1 && state.restoredSavedQueue !== true) {
     promptOutputSubfolders = promptOutputSubfolders.map(() => '');
   }
   const promptStyleNames = prompts.map((_, index) => String(Array.isArray(state.promptStyleNames) ? state.promptStyleNames[index] : '').trim());
@@ -9566,6 +9703,8 @@ async function runBackendPowerPrompterPipelineQueue(
     promptOutputSubfolders,
     promptStyleNames,
     generationByPrompt,
+    historyState: state,
+    preservePaused: true,
   }, sourceWs);
   let queueAcceptedSent = false;
   let failedPromptCount = 0;
@@ -9593,6 +9732,7 @@ async function runBackendPowerPrompterPipelineQueue(
       throwIfBackendPowerPrompterQueueCanceled(task);
       if (index > 0) {
         await drainBackendPowerPrompterPriorityWork();
+        await waitForBackendPowerPrompterQueueResume(task, requestId, sourceWs);
         throwIfBackendPowerPrompterQueueCanceled(task);
       }
       task.activePromptIndex = index;
@@ -10024,6 +10164,8 @@ function enqueueBackendPowerPrompterQueueWork(work: BackendPowerPrompterQueuedWo
     promptOutputSubfolders,
     promptStyleNames,
     generationByPrompt,
+    historyState: state,
+    preservePaused: work.preservePaused,
   }, work.sourceWs, 'request_enqueued');
   if (queuePlacement === 'interrupt') {
     for (const [activeRequestId, activeTask] of backendPowerPrompterQueueTasks.entries()) {
@@ -22948,6 +23090,9 @@ interface PowerPrompterQueueGroupSnapshot {
   promptCount: number;
   promptIndices?: number[];
   editorSnapshot?: unknown;
+  targetBridgeId?: string;
+  file?: string | null;
+  dispatchDelayMs?: number;
 }
 
 interface PowerPrompterSavedQueueDocument {
@@ -22975,6 +23120,8 @@ interface PowerPrompterQueueHistoryPreviewImage {
 interface PowerPrompterQueueHistoryDocument {
   version: 1;
   id: string;
+  requestId?: string;
+  backendOwned?: boolean;
   name: string;
   createdAt: number;
   updatedAt: number;
@@ -23120,7 +23267,7 @@ function normalizePPQueueSnapshot(rawSnapshot: unknown): PowerPrompterQueueSnaps
         if (!entry || typeof entry !== 'object') return null;
         const requestId = String(entry.requestId || '').trim();
         if (!requestId) return null;
-        const rawPromptIndices = Array.isArray(entry.promptIndices)
+        const rawPromptIndices: number[] = Array.isArray(entry.promptIndices)
           ? entry.promptIndices
             .map((value: unknown) => Math.floor(Number(value)))
             .filter((value: number) => Number.isFinite(value) && value >= 0 && value < prompts.length)
@@ -23146,6 +23293,9 @@ function normalizePPQueueSnapshot(rawSnapshot: unknown): PowerPrompterQueueSnaps
           ...(String(entry.label || '').trim() ? { label: String(entry.label || '').trim() } : {}),
           ...(entry.mode ? { mode: normalizePPQueueMode(entry.mode) } : {}),
           ...(entry.activeSetId !== undefined ? { activeSetId: clampPPQueueSetId(entry.activeSetId) } : {}),
+          ...(typeof entry.targetBridgeId === 'string' ? { targetBridgeId: entry.targetBridgeId } : {}),
+          ...(entry.file !== undefined ? { file: typeof entry.file === 'string' ? entry.file : null } : {}),
+          ...(entry.dispatchDelayMs !== undefined ? { dispatchDelayMs: Math.max(0, Number(entry.dispatchDelayMs) || 0) } : {}),
           promptStartIndex,
           promptCount,
           ...(promptIndices.length > 0 ? { promptIndices } : {}),
@@ -23156,7 +23306,7 @@ function normalizePPQueueSnapshot(rawSnapshot: unknown): PowerPrompterQueueSnaps
     : [];
   return {
     version: 1,
-    ...(groupSnapshots.length > 0 ? { snapshotSchemaVersion: 2 } : {}),
+    ...(groupSnapshots.length > 0 ? { snapshotSchemaVersion: Math.max(2, Number(snapshot.snapshotSchemaVersion) || 2) } : {}),
     savedAt: Number(snapshot.savedAt) || Date.now(),
     file: typeof snapshot.file === 'string' ? String(snapshot.file).trim() || null : null,
     mode: normalizePPQueueMode(snapshot.mode),
@@ -23393,7 +23543,7 @@ async function savePPSavedQueue(name: unknown, snapshot: unknown): Promise<Power
   const normalizedSnapshot = normalizePPQueueSnapshot(snapshot);
   if (!normalizedSnapshot) return null;
   const safeName = sanitizePPSavedQueueName(name);
-  const id = createPPSavedQueueId(safeName);
+  const id = `${createPPSavedQueueId(safeName)}-${crypto.randomUUID().slice(0, 8)}`;
   const filePath = getPPSavedQueuePath(id);
   if (!filePath) return null;
   const document: PowerPrompterSavedQueueDocument = {
@@ -23408,8 +23558,51 @@ async function savePPSavedQueue(name: unknown, snapshot: unknown): Promise<Power
     },
   };
   await fs.mkdir(PP_QUEUE_SNAPSHOTS_DIR, { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(document, null, 2), 'utf-8');
+  await writeTextFileAtomic(filePath, JSON.stringify(document));
   return document;
+}
+
+async function capturePausedPowerPrompterQueue() {
+  const availability = getSavedQueueAvailability(powerPrompterQueueControllerState);
+  if (!availability.canSave) throw new Error(availability.reason);
+  const version = powerPrompterQueueControllerState.version;
+  const snapshots = new Map<string, Record<string, any>>();
+  for (const request of powerPrompterQueueControllerState.requests) {
+    if (request.origin !== 'power_prompter' || !request.prompts.some((prompt) => prompt.status === 'pending')) continue;
+    await ppBackendHistory.get(request.requestId)?.ready;
+    const history = await loadPPQueueHistory(getPPQueueRequestHistoryId(request.requestId));
+    if (history) snapshots.set(request.requestId, history.snapshot);
+  }
+  if (version !== powerPrompterQueueControllerState.version) throw new Error('The queue changed while preparing the save. Please try again.');
+  return buildRemainingPowerPrompterQueueSnapshot(powerPrompterQueueControllerState, snapshots);
+}
+
+function assertSavedQueueCanLoad() {
+  if (powerPrompterQueueControllerState.requests.some((request) => request.prompts.some((prompt) => ['pending', 'submitting', 'running'].includes(prompt.status)))) {
+    throw new Error('Finish or clear the current queue before loading a saved Power Prompter queue.');
+  }
+}
+
+async function restoreSavedPowerPrompterQueue(id: unknown) {
+  assertSavedQueueCanLoad();
+  const document = await loadPPSavedQueue(id);
+  if (!document) throw new Error('Saved queue not found.');
+  const groups = splitSavedPowerPrompterQueue(document.snapshot);
+  const prepared: BackendPowerPrompterQueuedWork[] = [];
+  for (const group of groups) {
+    const loaded = await loadRequestedPowerPrompterPipeline(group.state);
+    if (!loaded.item.compatible) throw new Error(`Saved queue pipeline is unavailable: ${loaded.item.name}`);
+    prepared.push({
+      sourceWs: null, requestId: crypto.randomUUID(), loaded, prompts: group.prompts, preservePaused: true,
+      data: { mode: group.mode, queueOrigin: 'power_prompter', queuePlacement: 'end', state: group.state },
+    });
+  }
+  // Validate every group before committing any work; a failed load leaves the live queue alone.
+  assertSavedQueueCanLoad();
+  powerPrompterQueueControllerState.paused = true;
+  for (const work of prepared) enqueueBackendPowerPrompterQueueWork(work);
+  broadcastPowerPrompterQueueControllerSnapshot('saved_queue_loaded');
+  return { id: document.id, name: document.name, promptCount: document.snapshot.prompts.length, requestIds: prepared.map((work) => work.requestId) };
 }
 
 async function deletePPSavedQueue(id: unknown): Promise<boolean> {
@@ -23463,15 +23656,11 @@ function createPPQueueHistoryId(rawName: unknown): string {
   return normalizePPQueueHistoryId(`${stamp}-${base}-${suffix}`);
 }
 
-function getPPQueueHistoryPath(id: unknown): string | null {
-  const normalizedId = normalizePPQueueHistoryId(id);
-  if (!normalizedId) return null;
-  return join(PP_QUEUE_HISTORY_DIR, `${normalizedId}.pphistory.json`);
-}
-
-function summarizePPQueueHistoryDocument(document: PowerPrompterQueueHistoryDocument) {
+function summarizePPQueueHistoryDocument(document: Omit<PowerPrompterQueueHistoryDocument, 'version'>): PPQueueHistorySummary {
   return {
     id: document.id,
+    requestId: document.requestId,
+    backendOwned: document.backendOwned,
     name: document.name,
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
@@ -23507,6 +23696,8 @@ function normalizePPQueueHistoryDocument(rawDocument: unknown, fallbackId?: stri
     id,
     name,
     createdAt: Number(document.createdAt) || snapshot.savedAt || Date.now(),
+    requestId: String(document.requestId || '').trim() || undefined,
+    backendOwned: document.backendOwned === true,
     updatedAt: Number(document.updatedAt) || Number(document.createdAt) || snapshot.savedAt || Date.now(),
     file: typeof document.file === 'string' ? String(document.file).trim() || null : snapshot.file,
     mode: normalizePPQueueMode(document.mode || snapshot.mode),
@@ -23526,103 +23717,104 @@ function normalizePPQueueHistoryDocument(rawDocument: unknown, fallbackId?: stri
   };
 }
 
+type PPQueueHistorySummary = Omit<PowerPrompterQueueHistoryDocument, 'version' | 'snapshot'>;
+const ppHistoryStore = new PowerPrompterHistoryStore<PPQueueHistorySummary, PowerPrompterQueueSnapshot>({
+  directory: PP_QUEUE_HISTORY_DIR,
+  writeAtomic: writeTextFileAtomic,
+  normalizeLegacy: normalizePPQueueHistoryDocument,
+  summarize: summarizePPQueueHistoryDocument,
+});
+const ppHistoryBootStartedAt = Date.now();
+
+function getPPQueueRequestHistoryId(requestId: string): string {
+  return `request-${createHash('sha256').update(requestId).digest('hex')}`;
+}
+
 async function listPPQueueHistory() {
-  if (!existsSync(PP_QUEUE_HISTORY_DIR)) return [];
-  const entries = await fs.readdir(PP_QUEUE_HISTORY_DIR, { withFileTypes: true });
-  const items = [];
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.pphistory.json')) continue;
-    try {
-      const parsed = JSON.parse(await fs.readFile(join(PP_QUEUE_HISTORY_DIR, entry.name), 'utf-8'));
-      const document = normalizePPQueueHistoryDocument(parsed, entry.name.replace(/\.pphistory\.json$/i, ''));
-      if (document) items.push(summarizePPQueueHistoryDocument(document));
-    } catch {
-      // Keep malformed history files user-recoverable by leaving them in place.
+  const items = await ppHistoryStore.list();
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
+    if (item.backendOwned && item.updatedAt < ppHistoryBootStartedAt
+      && (item.status === 'queued' || item.status === 'running')
+      && !ppBackendHistory.has(item.requestId || '')) {
+      // A stopped backend cannot finish its old queue. Keep unfinished prompts
+      // available for resume instead of counting them as canceled.
+      items[index] = await updatePPQueueHistory(item.id, { status: 'interrupted' }, true) || item;
     }
   }
   return items.sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt);
 }
 
 async function loadPPQueueHistory(id: unknown): Promise<PowerPrompterQueueHistoryDocument | null> {
-  const filePath = getPPQueueHistoryPath(id);
-  if (!filePath || !existsSync(filePath)) return null;
-  try {
-    const parsed = JSON.parse(await fs.readFile(filePath, 'utf-8'));
-    return normalizePPQueueHistoryDocument(parsed, normalizePPQueueHistoryId(id));
-  } catch {
-    return null;
+  const key = normalizePPQueueHistoryId(id);
+  if (!key) return null;
+  const document = await ppHistoryStore.load(key);
+  return document ? { ...document, version: 1 } : null;
+}
+
+async function savePPQueueHistory(name: unknown, snapshot: unknown, status?: unknown, previewImages?: unknown, requestIdRaw?: unknown, backendOwned = false): Promise<PPQueueHistorySummary | null> {
+  const raw = snapshot && typeof snapshot === 'object' ? snapshot as Partial<PowerPrompterQueueSnapshot> : {};
+  const requestId = String(requestIdRaw || raw.requestIds?.[0] || '').trim();
+  const id = requestId ? getPPQueueRequestHistoryId(requestId) : createPPQueueHistoryId(name);
+  const summary = await ppHistoryStore.create(id, () => normalizePPQueueHistoryDocument({
+    id, name, snapshot, status, previewImages, requestId, backendOwned,
+  }, id));
+  if (summary && backendOwned && !summary.backendOwned) {
+    const canonical = normalizePPQueueHistoryDocument({ ...summary, name, snapshot, requestId, backendOwned: true }, id);
+    if (canonical) return ppHistoryStore.update(id, () => summarizePPQueueHistoryDocument(canonical), canonical.snapshot);
   }
+  return summary;
 }
 
-async function savePPQueueHistory(name: unknown, snapshot: unknown, status?: unknown, previewImages?: unknown): Promise<PowerPrompterQueueHistoryDocument | null> {
-  const normalizedSnapshot = normalizePPQueueSnapshot(snapshot);
-  if (!normalizedSnapshot) return null;
-  const now = Date.now();
-  const safeName = sanitizePPSavedQueueName(name || normalizedSnapshot.file || 'Queue History');
-  const id = createPPQueueHistoryId(safeName);
-  const document = normalizePPQueueHistoryDocument({
-    version: 1,
-    id,
-    name: safeName,
-    createdAt: now,
-    updatedAt: now,
-    status: normalizePPQueueHistoryStatus(status),
-    previewImages,
-    snapshot: {
-      ...normalizedSnapshot,
-      savedAt: now,
-      paused: true,
-    },
-  }, id);
-  if (!document) return null;
-  const filePath = getPPQueueHistoryPath(document.id);
-  if (!filePath) return null;
-  await fs.mkdir(PP_QUEUE_HISTORY_DIR, { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(document, null, 2), 'utf-8');
-  return document;
-}
-
-async function updatePPQueueHistory(id: unknown, patch: unknown): Promise<PowerPrompterQueueHistoryDocument | null> {
-  const existing = await loadPPQueueHistory(id);
-  if (!existing || !patch || typeof patch !== 'object') return existing;
-  const payload = patch as Partial<PowerPrompterQueueHistoryDocument> & { snapshot?: unknown };
-  const nextSnapshot = payload.snapshot ? normalizePPQueueSnapshot(payload.snapshot) : existing.snapshot;
-  if (!nextSnapshot) return existing;
-  const nextPromptCount = nextSnapshot.prompts.length;
-  const nextPreviewImages = payload.previewImages !== undefined
-    ? normalizePPQueueHistoryPreviewImages(payload.previewImages)
-    : existing.previewImages;
-  const next = normalizePPQueueHistoryDocument({
-    ...existing,
-    ...payload,
-    id: existing.id,
-    name: payload.name !== undefined ? sanitizePPSavedQueueName(payload.name) : existing.name,
-    updatedAt: Date.now(),
-    file: typeof payload.file === 'string' ? payload.file : existing.file,
-    completed: payload.completed !== undefined ? Math.max(0, Math.min(nextPromptCount, Math.floor(Number(payload.completed) || 0))) : existing.completed,
-    failed: payload.failed !== undefined ? Math.max(0, Math.min(nextPromptCount, Math.floor(Number(payload.failed) || 0))) : existing.failed,
-    canceled: payload.canceled !== undefined ? Math.max(0, Math.min(nextPromptCount, Math.floor(Number(payload.canceled) || 0))) : existing.canceled,
-    status: payload.status !== undefined ? normalizePPQueueHistoryStatus(payload.status) : existing.status,
-    outputFolders: Array.isArray(payload.outputFolders) ? payload.outputFolders : existing.outputFolders,
-    previewImages: nextPreviewImages,
-    snapshot: {
-      ...nextSnapshot,
-      paused: true,
-    },
-  }, existing.id);
-  if (!next) return existing;
-  const filePath = getPPQueueHistoryPath(next.id);
-  if (!filePath) return next;
-  await fs.mkdir(PP_QUEUE_HISTORY_DIR, { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(next, null, 2), 'utf-8');
-  return next;
+async function updatePPQueueHistory(id: unknown, patch: unknown, backendOwned = false): Promise<PPQueueHistorySummary | null> {
+  const key = normalizePPQueueHistoryId(id);
+  if (!key) return null;
+  const payload = patch && typeof patch === 'object' ? patch as Partial<PowerPrompterQueueHistoryDocument> : {};
+  // Browser clients cannot overwrite a live backend queue with their local copy.
+  const current = await ppHistoryStore.summary(key);
+  if (!current || (current.backendOwned && !backendOwned)) return current;
+  const snapshot = payload.snapshot ? normalizePPQueueSnapshot(payload.snapshot) || undefined : undefined;
+  return ppHistoryStore.update(key, (existing) => {
+    if (existing.backendOwned && !backendOwned) return null;
+    const promptCount = snapshot?.prompts.length ?? existing.promptCount;
+    const count = (value: unknown, fallback: number) => value === undefined ? fallback : Math.max(0, Math.min(promptCount, Math.floor(Number(value) || 0)));
+    return {
+      ...existing,
+      name: payload.name !== undefined ? sanitizePPSavedQueueName(payload.name) : existing.name,
+      updatedAt: Math.max(Date.now(), existing.updatedAt + 1),
+      promptCount,
+      file: snapshot ? snapshot.file : existing.file,
+      mode: snapshot ? snapshot.mode : existing.mode,
+      activeSetId: snapshot ? snapshot.activeSetId : existing.activeSetId,
+      completed: count(payload.completed, existing.completed),
+      failed: count(payload.failed, existing.failed),
+      canceled: count(payload.canceled, existing.canceled),
+      status: payload.status === undefined ? existing.status : normalizePPQueueHistoryStatus(payload.status),
+      outputFolders: Array.isArray(payload.outputFolders)
+        ? Array.from(new Set(payload.outputFolders.map(String))).slice(0, 200)
+        : (snapshot ? Array.from(new Set(snapshot.promptOutputSubfolders.filter(Boolean))).slice(0, 200) : existing.outputFolders),
+      previewImages: payload.previewImages === undefined ? existing.previewImages : normalizePPQueueHistoryPreviewImages([
+        ...existing.previewImages, ...(Array.isArray(payload.previewImages) ? payload.previewImages : []),
+      ]),
+      hasEditorSnapshot: snapshot ? hasPPQueueEditorSnapshot(snapshot) : existing.hasEditorSnapshot,
+    };
+  }, snapshot);
 }
 
 async function deletePPQueueHistory(id: unknown): Promise<boolean> {
-  const filePath = getPPQueueHistoryPath(id);
-  if (!filePath || !existsSync(filePath)) return false;
-  await fs.rm(filePath, { force: true });
-  return true;
+  const key = normalizePPQueueHistoryId(id);
+  if (!key) return false;
+  const history = Array.from(ppBackendHistory.entries()).find(([requestId]) => getPPQueueRequestHistoryId(requestId) === key)?.[1];
+  if (history) history.deleted = true;
+  try {
+    const deleted = await ppHistoryStore.delete(key);
+    if (history) history.summary = null;
+    sendPrompterEventToTargets({ type: 'queue_history_deleted', id: key });
+    return deleted;
+  } catch (error) {
+    if (history) history.deleted = false;
+    throw error;
+  }
 }
 
 async function loadPPSettings(): Promise<PowerPrompterSettings> {
@@ -34765,12 +34957,25 @@ const server = Bun.serve<any>({
       }
 
       if (path === '/api/powerprompter/queues' && method === 'POST') {
-        const body = await req.json() as { name?: unknown; snapshot?: unknown };
-        const document = await savePPSavedQueue(body?.name, body?.snapshot);
-        if (!document) {
-          return json({ success: false, error: 'Queue snapshot did not contain any prompts.' }, 400);
+        try {
+          const body = await req.json() as { name?: unknown };
+          if (!String(body.name || '').trim()) return json({ success: false, error: 'Queue name is required.' }, 400);
+          const document = await savePPSavedQueue(body.name, await capturePausedPowerPrompterQueue());
+          if (!document) return json({ success: false, error: 'No remaining Power Prompter prompts to save.' }, 409);
+          const { snapshot, ...summary } = document;
+          return json({ success: true, item: { ...summary, promptCount: snapshot.prompts.length, file: snapshot.file, mode: snapshot.mode, activeSetId: snapshot.activeSetId } });
+        } catch (error: any) {
+          return json({ success: false, error: error?.message || 'Failed to save the paused queue.' }, 409);
         }
-        return json({ success: true, item: document });
+      }
+
+      if (path === '/api/powerprompter/queues/restore' && method === 'POST') {
+        try {
+          const body = await req.json() as { id?: unknown };
+          return json({ success: true, item: await restoreSavedPowerPrompterQueue(body.id) });
+        } catch (error: any) {
+          return json({ success: false, error: error?.message || 'Failed to load saved queue.' }, 409);
+        }
       }
 
       if (path === '/api/powerprompter/queues' && method === 'DELETE') {
@@ -34796,7 +35001,7 @@ const server = Bun.serve<any>({
         if (!document) {
           return json({ success: false, error: 'Queue history snapshot did not contain any prompts.' }, 400);
         }
-        return json({ success: true, item: document });
+        return json({ success: true, item: url.searchParams.get('summary') === '1' ? document : await loadPPQueueHistory(document.id) });
       }
 
       if (path === '/api/powerprompter/queue-history' && method === 'PATCH') {
@@ -34805,7 +35010,7 @@ const server = Bun.serve<any>({
         const body = await req.json().catch(() => ({}));
         const document = await updatePPQueueHistory(id, body);
         if (!document) return json({ success: false, error: 'Queue history item not found.' }, 404);
-        return json({ success: true, item: document });
+        return json({ success: true, item: url.searchParams.get('summary') === '1' ? document : await loadPPQueueHistory(document.id) });
       }
 
       if (path === '/api/powerprompter/queue-history' && method === 'DELETE') {

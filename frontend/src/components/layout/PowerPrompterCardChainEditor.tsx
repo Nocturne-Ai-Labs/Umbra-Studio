@@ -70,6 +70,7 @@ import type {
 } from '@/types/powerPrompter';
 import type { PowerPrompterPipelineItem } from '@/components/power-prompter/pipelines/usePowerPrompterPipelines';
 import { usePowerPrompterStageCatalog } from '@/components/power-prompter/pipelines/usePowerPrompterStageCatalog';
+import { PowerPrompterOutputFolder } from '@/components/power-prompter/PowerPrompterOutputFolder';
 import { UmbraHiresFixControls } from '@/components/umbra-ui/UmbraHiresFixControls';
 import { UmbraDetailerPipelineControls } from '@/components/umbra-ui/UmbraDetailerPipelineControls';
 import { ContextMenu } from '@/components/ui/ContextMenu';
@@ -9735,6 +9736,11 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     Reset Controls
                   </button>
               </>
+
+              <PowerPrompterOutputFolder
+                value={generation.outputFolder || ''}
+                onChange={(outputFolder) => updateGeneration({ outputFolder })}
+              />
 
               <div className="pt-2 border-t border-white/10">
                 <div className="flex items-center justify-between gap-2">

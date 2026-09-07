@@ -315,6 +315,8 @@ export type PowerPrompterQueueHistoryPreviewImage = {
 
 export type PowerPrompterQueueHistorySummary = {
   id: string;
+  requestId?: string;
+  backendOwned?: boolean;
   name: string;
   createdAt: number;
   updatedAt: number;

@@ -16,6 +16,7 @@ import {
 } from './PowerPrompterCardChainEditor';
 import { PowerPrompterSearchPanel } from './PowerPrompterSearchPanel';
 import { PowerPrompterCommandBar } from '@/components/power-prompter/PowerPrompterCommandBar';
+import { QueueManagerToolbar } from '@/components/power-prompter/queue/QueueManagerToolbar';
 import { PowerPrompterLoadingOverlays } from '@/components/power-prompter/PowerPrompterLoadingOverlays';
 import { PowerPrompterPresetBar } from '@/components/power-prompter/PowerPrompterPresetBar';
 import { PowerPrompterWorkspacePanels } from '@/components/power-prompter/PowerPrompterWorkspacePanels';
@@ -149,7 +150,6 @@ import type {
   QueueRequestMeta,
   QueueStackItem,
   QueueVisualState,
-  SavedPowerPrompterQueueDocument,
   SavedPowerPrompterQueueSummary,
 } from '@/components/power-prompter/queue/queueCore';
 import {
@@ -169,6 +169,7 @@ import {
   createQueueEditorSnapshot,
   normalizePersistedPausedQueueSnapshot,
   normalizePowerPrompterQueueHistoryPreviewImages,
+  normalizePowerPrompterQueueHistorySummary,
   normalizeQueueEditorBuildSettings,
   normalizeQueueEditorSnapshot,
   readPersistedPausedQueueSnapshot,
@@ -188,7 +189,7 @@ import {
   listPowerPrompterQueueHistory,
   listSavedPowerPrompterQueues,
   loadPowerPrompterQueueHistory,
-  loadSavedPowerPrompterQueue,
+  restoreSavedPowerPrompterQueue,
   patchPowerPrompterQueueHistory,
   savePowerPrompterQueueSnapshot,
 } from '@/components/power-prompter/queue/queueStorageApi';
@@ -452,7 +453,6 @@ function buildBackendQueueSnapshotSignature(snapshot: any): string {
 const POWER_PROMPTER_QUEUE_SNAPSHOT_RECOVERY_ENABLED = false;
 const POWER_PROMPTER_QUEUE_MANAGER_REORDER_ENABLED = false;
 const POWER_PROMPTER_QUEUE_EDITOR_ENABLED = true;
-const POWER_PROMPTER_SAVED_QUEUE_SNAPSHOTS_ENABLED = false;
 
 function normalizeQueueSavedOutputPreviewImages(payload: any): PowerPrompterQueueHistoryPreviewImage[] {
   const outputs = Array.isArray(payload?.outputs) ? payload.outputs : [];
@@ -486,6 +486,9 @@ type PrompterEditorRef = PowerPrompterCardChainEditorRef;
 interface PowerPrompterProps {
   overlayMode?: boolean;
   isActive?: boolean;
+  queueManagerActive?: boolean;
+  onOpenQueueManager?: () => void;
+  onOpenPrompter?: () => void;
 }
 
 type PowerPrompterUiPreferences = {
@@ -679,7 +682,7 @@ function normalizePowerPrompterPresetStore(
   };
 }
 
-export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPrompterProps) => {
+export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManagerActive, onOpenQueueManager, onOpenPrompter }: PowerPrompterProps) => {
   const normalizePrompterSourceFilePath = (value: unknown): string | null => {
     const normalized = String(value || '').trim()
       .replace(/\\/g, '/')
@@ -837,7 +840,20 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
   const [queueCompletionTick, setQueueCompletionTick] = useState(0);
   const [generationPreview, setGenerationPreviewState] = useState<GenerationPreviewState | null>(() => powerPrompterQueueSession.generationPreview);
   const generationPreviewRef = useRef<GenerationPreviewState | null>(powerPrompterQueueSession.generationPreview);
-  const [prompterPanelMode, setPrompterPanelMode] = useState<PowerPrompterPanelMode>('editor');
+  const [editorPanelMode, setEditorPanelMode] = useState<PowerPrompterPanelMode>('editor');
+  const workspaceNavigationRef = useRef({ queueManagerActive, onOpenQueueManager, onOpenPrompter });
+  workspaceNavigationRef.current = { queueManagerActive, onOpenQueueManager, onOpenPrompter };
+  const prompterPanelMode = queueManagerActive ? 'queue-manager' : editorPanelMode;
+  // Keep the controller alive; the workspace owns queue navigation, not editor preferences.
+  const setPrompterPanelMode = useCallback((mode: PowerPrompterPanelMode) => {
+    const navigation = workspaceNavigationRef.current;
+    if (mode === 'queue-manager' && navigation.onOpenQueueManager) {
+      navigation.onOpenQueueManager();
+      return;
+    }
+    setEditorPanelMode(mode);
+    if (navigation.queueManagerActive) navigation.onOpenPrompter?.();
+  }, []);
   const powerPrompterUiClientIdRef = useRef(`powerprompter-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
   const localPanelModeChangeRef = useRef<{ mode: PowerPrompterPanelMode; at: number } | null>(null);
   const handlePrompterPanelModeChange = useCallback((mode: PowerPrompterPanelMode) => {
@@ -875,9 +891,10 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
   const [savedQueueBusy, setSavedQueueBusy] = useState<'list' | 'save' | 'load' | 'delete' | null>(null);
   const [saveQueueNameDraft, setSaveQueueNameDraft] = useState('');
   const [saveQueueModalOpen, setSaveQueueModalOpen] = useState(false);
-  const savedQueuesRef = useRef<SavedPowerPrompterQueueSummary[]>([]);
   const selectedSavedQueueIdRef = useRef('');
-  const pendingSavedQueueSnapshotRef = useRef<PersistedPausedQueueSnapshot | null>(null);
+  const [savedQueueAvailability, setSavedQueueAvailability] = useState({
+    canSave: false, canLoad: false, remaining: 0, reason: 'Queue state unavailable.',
+  });
   const [queueHistoryOpen, setQueueHistoryOpen] = useState(false);
   const [queueHistoryItems, setQueueHistoryItems] = useState<PowerPrompterQueueHistorySummary[]>([]);
   const [selectedQueueHistoryId, setSelectedQueueHistoryId] = useState('');
@@ -885,6 +902,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
   const queueHistoryItemsRef = useRef<PowerPrompterQueueHistorySummary[]>([]);
   const selectedQueueHistoryIdRef = useRef('');
   const queueHistoryByRequestIdRef = useRef(new Map<string, string>());
+  const backendOwnedHistoryRef = useRef(false);
   const queueHistoryPendingPatchByRequestIdRef = useRef(new Map<string, Partial<PowerPrompterQueueHistorySummary>>());
   const queueDiversityPickerRef = useRef<HTMLDivElement | null>(null);
   const queueDiversityPickerPopoverRef = useRef<HTMLDivElement | null>(null);
@@ -1800,7 +1818,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
   const hasStagedQueue = useMemo(() => {
     const visualRequestId = String(queueVisualState?.requestId || '').trim();
     if (queuePaused && !!restoredPausedQueueRef.current) return true;
-    if (queuePaused && queueRequestGroups.some((group) => group.pending > 0 || group.running > 0)) return true;
     return isLocalStagedQueueRequestId(visualRequestId) || queueRequestGroups.some((group) =>
       isLocalStagedQueueRequestId(group.requestId)
     );
@@ -1836,10 +1853,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     }
     return buildActiveQueuePosition(queueVisualState);
   }, [activeQueueItem, queueRequestGroups, queueVisualState]);
-  const selectedSavedQueue = useMemo(
-    () => savedQueues.find((entry) => entry.id === selectedSavedQueueId) || null,
-    [savedQueues, selectedSavedQueueId]
-  );
   // The editor only needs identity, active prompt, and seed changes. Excluding
   // progress timestamps keeps a 1,000-prompt queue from re-rendering the whole
   // card workspace for every WebSocket progress event.
@@ -1980,6 +1993,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       nextPrompt,
       statusLabel,
       previewImageDataUrl: queueTrackerPreviewUrl,
+      previewPrompt: generationPreview?.prompt || undefined,
+      previewPromptId: generationPreview?.promptId,
       previewStepLabel: generationPreviewStepLabel,
       estimatedMsRemaining,
     };
@@ -1987,6 +2002,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     activeQueueItem,
     activeQueuePosition,
     generationPreviewStepLabel,
+    generationPreview?.prompt,
+    generationPreview?.promptId,
     queueStackItems,
     queueRequestGroups,
     queueSummaryCounts,
@@ -2601,6 +2618,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         blocks={blocks}
         fallbackText={fallbackText}
         chipConfig={queueManagerPromptChipConfig}
+        wrapTokens
       />
     );
   }, [queueManagerPromptChipConfig]);
@@ -3056,16 +3074,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       queuePromptExpandedMode={queuePromptExpandedMode}
       queueManagerSearchQuery={queueManagerSearchQuery}
       setQueueManagerSearchQuery={setQueueManagerSearchQuery}
-      savedQueueSnapshotsEnabled={POWER_PROMPTER_SAVED_QUEUE_SNAPSHOTS_ENABLED}
-      savedQueues={savedQueues}
-      selectedSavedQueueId={selectedSavedQueueId}
-      setSelectedSavedQueueId={setSelectedSavedQueueId}
-      savedQueueBusy={savedQueueBusy}
-      selectedSavedQueue={selectedSavedQueue}
-      handleSaveCurrentQueueSnapshot={handleSaveCurrentQueueSnapshot}
-      handleLoadSavedQueueSnapshot={handleLoadSavedQueueSnapshot}
-      handleDeleteSavedQueueSnapshot={handleDeleteSavedQueueSnapshot}
-      refreshSavedQueues={refreshSavedQueues}
       queueManagerDragState={queueManagerDragState}
       setQueueManagerDragState={setQueueManagerDragState}
       clearQueueManagerDragState={clearQueueManagerDragState}
@@ -3549,10 +3557,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     queuePausedRef.current = queuePaused;
     powerPrompterQueueSession.queuePaused = queuePaused;
   }, [queuePaused]);
-
-  useEffect(() => {
-    savedQueuesRef.current = savedQueues;
-  }, [savedQueues]);
 
   useEffect(() => {
     selectedSavedQueueIdRef.current = selectedSavedQueueId;
@@ -4168,137 +4172,74 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
   }, [bridgeTargets, queuePaused, queueStackItems, queueVisualState]);
 
   const refreshSavedQueues = useCallback(async (): Promise<SavedPowerPrompterQueueSummary[]> => {
-    if (!POWER_PROMPTER_SAVED_QUEUE_SNAPSHOTS_ENABLED) {
-      setSavedQueues([]);
-      setSelectedSavedQueueId('');
-      return [];
-    }
     setSavedQueueBusy((prev) => prev || 'list');
     try {
       const items = await listSavedPowerPrompterQueues();
       setSavedQueues(items);
-      setSelectedSavedQueueId((prev) => {
-        if (prev && items.some((entry) => entry.id === prev)) return prev;
-        return items[0]?.id || '';
-      });
+      setSelectedSavedQueueId((prev) => items.some((entry) => entry.id === prev) ? prev : items[0]?.id || '');
       return items;
     } catch (error: any) {
       showToast(String(error?.message || 'Failed to load saved queues'), 'error');
       return [];
     } finally {
-      setSavedQueueBusy((prev) => (prev === 'list' ? null : prev));
+      setSavedQueueBusy((prev) => prev === 'list' ? null : prev);
     }
   }, [showToast]);
 
-  useEffect(() => {
-    if (!POWER_PROMPTER_SAVED_QUEUE_SNAPSHOTS_ENABLED) return;
-    if (prompterPanelMode !== 'queue-manager') return;
-    void refreshSavedQueues();
-  }, [prompterPanelMode, refreshSavedQueues]);
-
-  const handleSaveCurrentQueueSnapshot = useCallback(async () => {
-    if (!POWER_PROMPTER_SAVED_QUEUE_SNAPSHOTS_ENABLED) {
-      showToast('Saved queue snapshots are parked while Queue Manager follows the live queue only.', 'error');
-      return;
-    }
+  const handleOpenSavedQueues = useCallback(() => {
     if (savedQueueBusy) return;
-    const snapshot = buildRecoverablePausedQueueSnapshotFromCurrentState({ paused: true })
-      || normalizePersistedPausedQueueSnapshot(restoredPausedQueueRef.current);
-    if (!snapshot) {
-      showToast('No active or pending queue prompts to save', 'error');
-      return;
-    }
-    const defaultName = currentFileRef.current
-      ? `${String(currentFileRef.current).split(/[\\/]/).pop()?.replace(/\.ppcards\.json$/i, '') || 'Power Prompter'} Queue`
-      : 'Power Prompter Queue';
-    pendingSavedQueueSnapshotRef.current = snapshot;
-    setSaveQueueNameDraft(defaultName);
+    const fileName = String(currentFileRef.current || '').split(/[\\/]/).pop()?.replace(/\.ppcards\.json$/i, '');
+    setSaveQueueNameDraft(fileName ? `${fileName} Queue` : 'Power Prompter Queue');
     setSaveQueueModalOpen(true);
-  }, [buildRecoverablePausedQueueSnapshotFromCurrentState, savedQueueBusy, showToast]);
+    void refreshSavedQueues();
+  }, [refreshSavedQueues, savedQueueBusy]);
 
   const handleConfirmSaveCurrentQueueSnapshot = useCallback(async () => {
-    if (!POWER_PROMPTER_SAVED_QUEUE_SNAPSHOTS_ENABLED) {
-      pendingSavedQueueSnapshotRef.current = null;
-      setSaveQueueModalOpen(false);
-      showToast('Saved queue snapshots are parked while Queue Manager follows the live queue only.', 'error');
-      return;
-    }
     if (savedQueueBusy) return;
-    const snapshot = normalizePersistedPausedQueueSnapshot(pendingSavedQueueSnapshotRef.current);
-    if (!snapshot) {
-      setSaveQueueModalOpen(false);
-      showToast('No active or pending queue prompts to save', 'error');
+    if (!savedQueueAvailability.canSave) {
+      showToast(savedQueueAvailability.reason, 'error');
       return;
     }
-    const trimmedName = String(saveQueueNameDraft || '').trim();
-    if (!trimmedName) {
-      showToast('Saved queue needs a name', 'error');
-      return;
-    }
+    const name = saveQueueNameDraft.trim();
+    if (!name) return;
     setSavedQueueBusy('save');
     try {
-      const document = await savePowerPrompterQueueSnapshot(trimmedName, snapshot);
+      const document = await savePowerPrompterQueueSnapshot(name);
       await refreshSavedQueues();
       if (document?.id) setSelectedSavedQueueId(document.id);
-      showToast(`Saved queue: ${document?.name || trimmedName}`, 'success');
+      showToast(`Saved queue: ${document?.name || name}`, 'success');
     } catch (error: any) {
       showToast(String(error?.message || 'Failed to save queue'), 'error');
     } finally {
       setSavedQueueBusy(null);
-      pendingSavedQueueSnapshotRef.current = null;
-      setSaveQueueModalOpen(false);
     }
-  }, [refreshSavedQueues, saveQueueNameDraft, savedQueueBusy, showToast]);
+  }, [refreshSavedQueues, saveQueueNameDraft, savedQueueAvailability, savedQueueBusy, showToast]);
 
   const handleLoadSavedQueueSnapshot = useCallback(async () => {
-    if (!POWER_PROMPTER_SAVED_QUEUE_SNAPSHOTS_ENABLED) {
-      showToast('Saved queue snapshots are parked while Queue Manager follows the live queue only.', 'error');
-      return;
-    }
-    let id = String(selectedSavedQueueIdRef.current || savedQueuesRef.current[0]?.id || '').trim();
-    if (!id && !savedQueueBusy) {
-      const items = await refreshSavedQueues();
-      id = String(selectedSavedQueueIdRef.current || items[0]?.id || '').trim();
-    }
-    if (!id || savedQueueBusy) return;
+    const id = selectedSavedQueueIdRef.current;
+    if (!id || savedQueueBusy || !savedQueueAvailability.canLoad || hasCancelableQueueWork) return;
     setSavedQueueBusy('load');
     try {
-      const document = await loadSavedPowerPrompterQueue(id);
-      if (!document) throw new Error('Saved queue could not be read.');
-      restoreRecoverableQueueAsPausedSnapshot(document.snapshot, 'saved queue load');
-      setSelectedSavedQueueId(document.id);
-      showToast(`Loaded saved queue: ${document.name}`, 'success');
+      const document = await restoreSavedPowerPrompterQueue(id);
+      setSaveQueueModalOpen(false);
+      if (onOpenQueueManager) onOpenQueueManager();
+      else setPrompterPanelMode('queue-manager');
+      showToast(`Loaded paused queue: ${document.name}`, 'success');
     } catch (error: any) {
       showToast(String(error?.message || 'Failed to load saved queue'), 'error');
     } finally {
       setSavedQueueBusy(null);
     }
-  }, [refreshSavedQueues, restoreRecoverableQueueAsPausedSnapshot, savedQueueBusy, showToast]);
+  }, [savedQueueAvailability.canLoad, hasCancelableQueueWork, onOpenQueueManager, savedQueueBusy, showToast]);
 
   const handleDeleteSavedQueueSnapshot = useCallback(async () => {
-    if (!POWER_PROMPTER_SAVED_QUEUE_SNAPSHOTS_ENABLED) {
-      showToast('Saved queue snapshots are parked while Queue Manager follows the live queue only.', 'error');
-      return;
-    }
-    let id = String(selectedSavedQueueIdRef.current || savedQueuesRef.current[0]?.id || '').trim();
-    if (!id && !savedQueueBusy) {
-      const items = await refreshSavedQueues();
-      id = String(selectedSavedQueueIdRef.current || items[0]?.id || '').trim();
-    }
+    const id = selectedSavedQueueIdRef.current;
     if (!id || savedQueueBusy) return;
-    const selected = savedQueuesRef.current.find((entry) => entry.id === id) || null;
-    const confirmed = typeof window === 'undefined'
-      ? true
-      : window.confirm(`Delete saved queue "${selected?.name || id}"?`);
-    if (!confirmed) return;
     setSavedQueueBusy('delete');
     try {
-      const deleted = await deleteSavedPowerPrompterQueue(id);
-      if (!deleted) {
-        throw new Error('Saved queue file was not found on disk.');
-      }
+      if (!await deleteSavedPowerPrompterQueue(id)) throw new Error('Saved queue file was not found on disk.');
       await refreshSavedQueues();
-      showToast(`Deleted saved queue: ${selected?.name || id}`, 'success');
+      showToast('Saved queue deleted', 'success');
     } catch (error: any) {
       showToast(String(error?.message || 'Failed to delete saved queue'), 'error');
     } finally {
@@ -4358,7 +4299,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     }
   }, [showToast]);
 
-  const interruptStaleQueueHistoryForDocument = useCallback(async (document: PowerPrompterQueueHistoryDocument) => {
+  const interruptStaleQueueHistoryForDocument = useCallback(async (document: PowerPrompterQueueHistorySummary) => {
     if (!document?.id) return;
     let items = queueHistoryItemsRef.current;
     if (items.length <= 0) {
@@ -4405,20 +4346,15 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
   }, []);
 
   const createQueueHistoryEntryForRequest = useCallback(async (requestId: string) => {
+    // Compatibility fallback for backends predating backend-owned history.
+    if (backendOwnedHistoryRef.current) return null;
     const normalizedRequestId = String(requestId || '').trim();
+    if (queueHistoryByRequestIdRef.current.has(normalizedRequestId)) return null;
     const snapshot = buildQueueHistorySnapshotForRequest(normalizedRequestId);
     if (!normalizedRequestId || !snapshot) {
       logPowerPrompterDebug('history:create:skipped', {
         requestId: normalizedRequestId,
         hasSnapshot: Boolean(snapshot),
-      }, { includeQueue: true });
-      return null;
-    }
-    const existingHistoryId = queueHistoryByRequestIdRef.current.get(normalizedRequestId);
-    if (existingHistoryId) {
-      logPowerPrompterDebug('history:create:deduped', {
-        requestId: normalizedRequestId,
-        existingHistoryId,
       }, { includeQueue: true });
       return null;
     }
@@ -4459,7 +4395,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           }, { includeQueue: true });
           void patchPowerPrompterQueueHistory(document.id, {
             ...pendingPatch,
-            snapshot: buildQueueHistorySnapshotForRequest(normalizedRequestId) || snapshot,
           }).catch(() => undefined);
         }
       }
@@ -4492,6 +4427,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
   }, [buildQueueHistorySnapshotForRequest, interruptStaleQueueHistoryForDocument]);
 
   const updateQueueHistoryForRequest = useCallback((requestId: string, patch: Partial<PowerPrompterQueueHistorySummary>) => {
+    if (backendOwnedHistoryRef.current) return;
     const normalizedRequestId = String(requestId || '').trim();
     const historyId = normalizedRequestId ? queueHistoryByRequestIdRef.current.get(normalizedRequestId) : '';
     if (!historyId) {
@@ -4521,16 +4457,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       }));
       return;
     }
-    const snapshot = buildQueueHistorySnapshotForRequest(normalizedRequestId);
     logPowerPrompterDebug('history:update:patchStart', {
       requestId: normalizedRequestId,
       historyId,
       patchKeys: Object.keys(patch),
-      hasSnapshot: Boolean(snapshot),
     }, { includeQueue: true });
     void patchPowerPrompterQueueHistory(historyId, {
       ...patch,
-      ...(snapshot ? { snapshot } : {}),
     })
       .then((document) => {
         if (!document) return;
@@ -4551,7 +4484,19 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           message: String(error?.message || error || 'Unknown error'),
         }, { includeQueue: true });
       });
-  }, [buildQueueHistorySnapshotForRequest]);
+  }, [createQueueHistoryEntryForRequest]);
+
+  const receiveBackendQueueHistory = (raw: unknown) => {
+    const summary = normalizePowerPrompterQueueHistorySummary(raw);
+    if (!summary) return;
+    if (summary.requestId) queueHistoryByRequestIdRef.current.set(summary.requestId, summary.id);
+    setQueueHistoryItems((previous) => {
+      const existing = previous.find((entry) => entry.id === summary.id);
+      if (existing && existing.updatedAt >= summary.updatedAt) return previous;
+      return [summary, ...previous.filter((entry) => entry.id !== summary.id)];
+    });
+    setSelectedQueueHistoryId((previous) => previous || summary.id);
+  };
 
   const mergeQueueHistoryPreviewImagesForRequest = useCallback((
     requestId: string,
@@ -5256,7 +5201,23 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     const snapshot = snapshotInput && typeof snapshotInput === 'object'
       ? (snapshotInput.snapshot && typeof snapshotInput.snapshot === 'object' ? snapshotInput.snapshot : snapshotInput)
       : null;
+    backendOwnedHistoryRef.current = snapshot?.backendOwnedHistory === true;
+    const availability = snapshot?.savedQueues;
+    const nextAvailability = {
+      canSave: availability?.canSave === true,
+      canLoad: availability?.canLoad === true,
+      remaining: Number(availability?.remaining) || 0,
+      reason: String(availability?.reason || ''),
+    };
+    setSavedQueueAvailability((current) => (
+      current.canSave === nextAvailability.canSave && current.canLoad === nextAvailability.canLoad
+        && current.remaining === nextAvailability.remaining && current.reason === nextAvailability.reason
+        ? current : nextAvailability
+    ));
     const rawRequests = Array.isArray(snapshot?.requests) ? snapshot.requests : [];
+    for (const request of rawRequests) {
+      if (request.history) receiveBackendQueueHistory(request.history);
+    }
     const powerPrompterRequests = rawRequests.filter((request: any) => (
       String(request?.origin || '').trim().toLowerCase() !== 'umbra_ui'
     ));
@@ -5725,7 +5686,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       promptEntries: Array.isArray(stateOverride?.promptEntries)
         ? stateOverride.promptEntries.slice(0, cleanedPrompts.length)
         : undefined,
-      editorSnapshot: normalizeQueueEditorSnapshot(stateOverride?.editorSnapshot) || undefined,
+      editorSnapshot: normalizeQueueEditorSnapshot(stateOverride?.editorSnapshot)
+        || queueRequestMetaRef.current.get(requestId)?.editorSnapshot
+        || createQueueEditorSnapshot(cardDocumentRef.current, currentFileRef.current, {
+          traversalMode: queueTraversalMode, diversity: queueDiversity, promptLimit: queuePromptLimit,
+          shuffleEnabled: queueShuffleEnabled, shuffleSeed: settings.queueShuffleSeed,
+        }),
       styleSeedMode: normalizedStyleSeedMode,
     };
     logPowerPrompterDebug('queue:websocket:requestPrepared', {
@@ -6632,7 +6598,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           (nextPanelMode === 'editor' || nextPanelMode === 'preset-editor' || nextPanelMode === 'queue-manager' || nextPanelMode === 'queue-editor')
           && !shouldIgnoreIncomingPanelMode(nextPanelMode, preferences)
         ) {
-          setPrompterPanelMode(nextPanelMode);
+          setEditorPanelMode(workspaceNavigationRef.current.onOpenQueueManager && nextPanelMode === 'queue-manager' ? 'editor' : nextPanelMode);
         }
         powerPrompterUiPendingFileRef.current = String(preferences?.currentFile || '').trim().replace(/\\/g, '/') || null;
         powerPrompterUiHydratedRef.current = true;
@@ -6667,7 +6633,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       leftPanelCollapsed,
       rightPanelCollapsed,
       currentFile,
-      panelMode: prompterPanelMode,
+      panelMode: editorPanelMode,
       uiClientId: powerPrompterUiClientIdRef.current,
       updatedAt,
     } satisfies PowerPrompterUiPreferences;
@@ -6681,7 +6647,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     generationPreviewHoldMs,
     globalSearchQuery,
     leftPanelCollapsed,
-    prompterPanelMode,
+    editorPanelMode,
     queueManagerPreviewSplit,
     queueManagerSearchQuery,
     queueManagerSequenceMode,
@@ -6987,6 +6953,23 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           if (Number.isFinite(Number(payload.dispatchDelayMs))) {
             setQueueDispatchDelayMs(Math.max(0, Math.floor(Number(payload.dispatchDelayMs) || 0)));
           }
+          return;
+        }
+
+        if (messageType === 'queue_history_updated') {
+          receiveBackendQueueHistory(payload.item);
+          return;
+        }
+
+        if (messageType === 'queue_history_deleted') {
+          const id = String(payload.id || '');
+          setQueueHistoryItems((previous) => previous.filter((entry) => entry.id !== id));
+          setSelectedQueueHistoryId((previous) => previous === id ? '' : previous);
+          return;
+        }
+
+        if (messageType === 'queue_history_error') {
+          showToast(String(payload.error || 'Queue history could not be saved.'), 'error');
           return;
         }
 
@@ -7851,7 +7834,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       (nextPanelMode === 'editor' || nextPanelMode === 'preset-editor' || nextPanelMode === 'queue-manager' || nextPanelMode === 'queue-editor')
       && !shouldIgnoreIncomingPanelMode(nextPanelMode, preferences)
     ) {
-      setPrompterPanelMode(nextPanelMode);
+      setEditorPanelMode(workspaceNavigationRef.current.onOpenQueueManager && nextPanelMode === 'queue-manager' ? 'editor' : nextPanelMode);
     }
     const nextFile = String(preferences.currentFile || '').trim().replace(/\\/g, '/');
     if (nextFile && nextFile !== currentFileRef.current) {
@@ -10433,6 +10416,22 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           && String(item.requestId || '').trim() === activeVisualRequestId
         )
       );
+    // Backend-owned paused queues already contain their resolved prompts and seeds.
+    // Resume them in place; remapping IDs and batching here would submit duplicates.
+    if (effectiveQueuePaused && backendQueueSnapshotRequestIdsRef.current.size > 0) {
+      const sent = requestQueuePauseToggleThroughWebSocket(
+        false,
+        activeMeta?.targetBridgeId || effectiveQueueTargetBridgeId,
+        'pipeline',
+      );
+      if (!sent) {
+        showToast('Power Prompter is disconnected. Unable to resume the queue.', 'error');
+        return;
+      }
+      backendQueuePauseRequestedRef.current = false;
+      setQueuePaused(false);
+      return;
+    }
     if (activeMeta && !effectiveQueuePaused && activeVisualHasLiveDispatch) {
       logPowerPrompterDebug('queue:start:alreadyDispatchingActiveMeta', {
         activeVisualRequestId,
@@ -11977,7 +11976,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       ? 'relative flex h-full w-full overflow-hidden bg-[rgba(5,5,8,0.76)]'
       : 'relative flex h-full w-full overflow-hidden bg-[#050508]'
     }>
-      {!floatingToolMenusEnabled ? (
+      {!isQueueManagerPanel && !floatingToolMenusEnabled ? (
         leftPanelCollapsed ? (
           <div
             data-umbra-powerprompter-left-rail=""
@@ -12015,10 +12014,31 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         )
       ) : null}
 
-      <div data-umbra-powerprompter-main="" className="flex-1 min-w-0 h-full relative flex flex-col">
-        <PowerPrompterCommandBar
+      <div data-umbra-powerprompter-main="" data-umbra-queue-workspace={isQueueManagerPanel ? '' : undefined} className="flex-1 min-w-0 h-full relative flex flex-col">
+        {isQueueManagerPanel ? (
+          <QueueManagerToolbar
+            searchQuery={queueManagerSearchQuery}
+            onSearchChange={setQueueManagerSearchQuery}
+            startDisabled={queueStartDisabled}
+            pauseDisabled={!!queueControlBusy || queueStackItems.length <= 0 || hasStagedQueue}
+            paused={queuePaused}
+            staged={hasStagedQueue}
+            destructiveDisabled={queueDestructiveActionBusy || !hasCancelableQueueWork}
+            clearDisabled={queueDestructiveActionBusy || !hasClearableQueueWork}
+            onStart={() => { void queueStartActionRef.current?.(); }}
+            onPause={() => { void queuePauseActionRef.current?.(); }}
+            onCancel={() => { void queueCancelActionRef.current?.(); }}
+            onClear={() => { void queueClearActionRef.current?.(); }}
+            onEmergency={() => { void queueEmergencyActionRef.current?.(); }}
+            onHistory={openQueueHistoryPanel}
+            onSavedQueues={handleOpenSavedQueues}
+            onBack={onOpenPrompter ? undefined : () => setPrompterPanelMode('editor')}
+          />
+        ) : <PowerPrompterCommandBar
+          onOpenSavedQueues={handleOpenSavedQueues}
           isPhoneRemote={isPhoneRemote}
           isTabletRemote={isTabletRemote}
+          queueManagerInWorkspace={!!onOpenQueueManager}
           prompterPanelMode={prompterPanelMode}
           setPrompterPanelMode={handlePrompterPanelModeChange}
           queueEditorEnabled={POWER_PROMPTER_QUEUE_EDITOR_ENABLED}
@@ -12095,7 +12115,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           queuePromptExpandedMode={queuePromptExpandedMode}
           queueManagerSearchQuery={queueManagerSearchQuery}
           setQueueManagerSearchQuery={setQueueManagerSearchQuery}
-          savedQueueSnapshotsEnabled={POWER_PROMPTER_SAVED_QUEUE_SNAPSHOTS_ENABLED}
           globalSearchBoxRef={globalSearchBoxRef}
           globalSearchQuery={globalSearchQuery}
           setGlobalSearchQuery={setGlobalSearchQuery}
@@ -12105,18 +12124,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           setGlobalSearchSuggestionIndex={setGlobalSearchSuggestionIndex}
           filteredGlobalSearchSuggestions={filteredGlobalSearchSuggestions}
           applyGlobalSearchSelection={applyGlobalSearchSelection}
-          savedQueues={savedQueues}
-          selectedSavedQueueId={selectedSavedQueueId}
-          setSelectedSavedQueueId={setSelectedSavedQueueId}
-          savedQueueBusy={savedQueueBusy}
-          selectedSavedQueue={selectedSavedQueue}
-          handleSaveCurrentQueueSnapshot={handleSaveCurrentQueueSnapshot}
-          handleLoadSavedQueueSnapshot={handleLoadSavedQueueSnapshot}
-          handleDeleteSavedQueueSnapshot={handleDeleteSavedQueueSnapshot}
-          refreshSavedQueues={refreshSavedQueues}
-        />
+        />}
         {!isPhoneRemote && prompterPanelMode === 'preset-editor' ? powerPrompterPresetBar : null}
-        {floatingToolMenusEnabled && !leftPanelCollapsed && (
+        {!isQueueManagerPanel && floatingToolMenusEnabled && !leftPanelCollapsed && (
           <div
             data-umbra-powerprompter-menu-shelf=""
             className="pointer-events-none absolute left-3 right-3 top-[4rem] z-[80] flex items-start gap-3"
@@ -12163,11 +12173,17 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           open={saveQueueModalOpen}
           nameDraft={saveQueueNameDraft}
           busy={savedQueueBusy}
+          availability={{ ...savedQueueAvailability, canLoad: savedQueueAvailability.canLoad && !hasCancelableQueueWork }}
+          queues={savedQueues}
+          selectedId={selectedSavedQueueId}
+          onSelect={setSelectedSavedQueueId}
+          onLoad={handleLoadSavedQueueSnapshot}
+          onDelete={handleDeleteSavedQueueSnapshot}
+          onRefresh={refreshSavedQueues}
           onNameChange={setSaveQueueNameDraft}
           onSubmit={handleConfirmSaveCurrentQueueSnapshot}
           onCancel={() => {
             if (savedQueueBusy) return;
-            pendingSavedQueueSnapshotRef.current = null;
             setSaveQueueModalOpen(false);
           }}
         />
@@ -12240,7 +12256,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         {isPhoneRemote && prompterPanelMode === 'preset-editor' ? powerPrompterPresetBar : null}
       </div>
 
-      <PowerPrompterSearchPanel
+      {!isQueueManagerPanel && <PowerPrompterSearchPanel
         onInsert={handleInsert}
         enabledCSVs={enabledCSVs}
         onToggleCSV={handleToggleCSV}
@@ -12249,7 +12265,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         drawerMode
         drawerOpen={!rightPanelCollapsed}
         onDrawerOpenChange={(open) => setTagMenuCollapsed(!open)}
-      />
+      />}
 
       <PowerPrompterSettingsModal
         isOpen={settingsOpen}

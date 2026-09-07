@@ -34,15 +34,22 @@ export async function listSavedPowerPrompterQueues(): Promise<SavedPowerPrompter
 
 export async function savePowerPrompterQueueSnapshot(
   name: string,
-  snapshot: PersistedPausedQueueSnapshot
-): Promise<SavedPowerPrompterQueueDocument | null> {
+): Promise<SavedPowerPrompterQueueSummary | null> {
   const response = await fetch('/api/powerprompter/queues', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, snapshot }),
+    body: JSON.stringify({ name }),
   });
   const payload = await readJsonPayload(response, 'Failed to save queue');
-  return normalizeSavedPowerPrompterQueueDocument(payload?.item);
+  return normalizeSavedPowerPrompterQueueSummary(payload?.item);
+}
+
+export async function restoreSavedPowerPrompterQueue(id: string): Promise<{ id: string; name: string; promptCount: number }> {
+  const response = await fetch('/api/powerprompter/queues/restore', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+  });
+  const payload = await readJsonPayload(response, 'Failed to restore saved queue');
+  return payload.item as { id: string; name: string; promptCount: number };
 }
 
 export async function loadSavedPowerPrompterQueue(id: string): Promise<SavedPowerPrompterQueueDocument | null> {
@@ -78,27 +85,27 @@ export async function createPowerPrompterQueueHistory(input: {
   status: PowerPrompterQueueHistorySummary['status'];
   snapshot: PersistedPausedQueueSnapshot;
   previewImages?: PowerPrompterQueueHistorySummary['previewImages'];
-}): Promise<PowerPrompterQueueHistoryDocument | null> {
-  const response = await fetch('/api/powerprompter/queue-history', {
+}): Promise<PowerPrompterQueueHistorySummary | null> {
+  const response = await fetch('/api/powerprompter/queue-history?summary=1', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
   const payload = await readJsonPayload(response, 'Failed to create queue history');
-  return normalizePowerPrompterQueueHistoryDocument(payload?.item);
+  return normalizePowerPrompterQueueHistorySummary(payload?.item);
 }
 
 export async function patchPowerPrompterQueueHistory(
   id: string,
   patch: Record<string, unknown>
-): Promise<PowerPrompterQueueHistoryDocument | null> {
-  const response = await fetch(`/api/powerprompter/queue-history?id=${encodeURIComponent(id)}`, {
+): Promise<PowerPrompterQueueHistorySummary | null> {
+  const response = await fetch(`/api/powerprompter/queue-history?summary=1&id=${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
   });
   const payload = await readJsonPayload(response, 'Failed to update queue history');
-  return normalizePowerPrompterQueueHistoryDocument(payload?.item);
+  return normalizePowerPrompterQueueHistorySummary(payload?.item);
 }
 
 export async function deletePowerPrompterQueueHistory(id: string): Promise<void> {

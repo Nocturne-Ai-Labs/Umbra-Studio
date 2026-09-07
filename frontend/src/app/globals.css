@@ -976,6 +976,7 @@ html[data-umbra-remote-mode="tablet"] [data-umbra-tablet-panel-navigation] butto
 }
 
 html[data-umbra-remote-mode="tablet"] [data-umbra-ui-body][data-umbra-ui-active-mode="prompter"],
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-body][data-umbra-ui-active-mode="queue"],
 html[data-umbra-remote-mode="tablet"] [data-umbra-ui-body][data-umbra-ui-active-mode="canvas"] {
   overflow: hidden;
 }
@@ -2063,10 +2064,105 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-body] {
   -webkit-overflow-scrolling: touch;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-ui-body][data-umbra-ui-active-mode="prompter"] {
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-body][data-umbra-ui-active-mode="prompter"],
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-body][data-umbra-ui-active-mode="queue"] {
   overflow: hidden;
   padding-bottom: 0;
   scroll-padding-bottom: 0;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-ui-queue-manager-button],
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-queue-manager-button] {
+  min-height: 2.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-queue-manager-button] {
+  width: 2.75rem;
+  padding: 0;
+  margin-right: 0.35rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-queue-manager-label] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-workspace-toolbar] {
+  padding-inline: 0.5rem;
+  gap: 0.5rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-workspace-search] {
+  flex-basis: 100%;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-workspace-actions] {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.25rem;
+  width: 100%;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-workspace-actions] > button {
+  grid-column: span 2;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-workspace-actions] > button:nth-last-child(2),
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-workspace-actions] > div:last-child {
+  grid-column: span 3;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-workspace-actions] > button,
+html[data-umbra-remote-mode="phone"] [data-umbra-queue-workspace-actions] > div > button {
+  min-width: 0;
+  min-height: 2.75rem;
+  width: 100%;
+  padding-inline: 0.25rem;
+  font-size: 0.6875rem;
+  gap: 0.25rem;
+}
+
+[data-umbra-queue-workspace] {
+  container: umbra-queue-workspace / inline-size;
+}
+
+@container umbra-queue-workspace (max-width: 1150px) {
+  [data-umbra-queue-manager-header] {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  [data-umbra-queue-manager-controls] {
+    align-items: flex-start;
+    min-width: 0;
+  }
+
+  [data-umbra-queue-manager-control-row] {
+    justify-content: flex-start;
+  }
+}
+
+@container umbra-queue-workspace (max-width: 900px) {
+  [data-umbra-queue-manager-layout] {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+  }
+
+  [data-umbra-queue-manager-list] {
+    flex: 0 0 auto;
+    height: max(360px, 60vh);
+  }
+
+  [data-umbra-queue-manager-side-pane] {
+    flex: 0 0 auto;
+    height: max(500px, 65vh);
+  }
+
+  [data-umbra-queue-workspace-search] {
+    order: 2;
+    flex-basis: 100%;
+  }
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-ltx-storyboard] {
@@ -4229,7 +4325,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-search] > * {
   box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.08), 0 -28px 70px rgba(0, 0, 0, 0.42);
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-main] > div:first-child {
+html[data-umbra-remote-mode="phone"] [data-umbra-powerprompter-main] > [data-umbra-powerprompter-command-bar] {
   position: sticky;
   top: 0;
   z-index: 95;

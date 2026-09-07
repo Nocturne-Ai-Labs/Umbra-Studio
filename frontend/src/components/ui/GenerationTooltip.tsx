@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2, AlertCircle, Clock, ListChecks } from 'lucide-react';
+import { LiveGenerationPreview } from '@/components/privacy/LiveGenerationPreview';
 
 interface GenerationTooltipProps {
   backend: 'comfyui';
@@ -23,6 +24,8 @@ export interface PowerPrompterQueueTooltipStatus {
   nextPrompt: string;
   statusLabel: string;
   previewImageDataUrl: string;
+  previewPrompt?: string;
+  previewPromptId?: string;
   previewStepLabel: string;
   estimatedMsRemaining?: number | null;
   updatedAt: number;
@@ -44,6 +47,8 @@ function normalizePowerPrompterQueueStatus(detail: Partial<PowerPrompterQueueToo
     nextPrompt: String(detail?.nextPrompt || '').trim(),
     statusLabel: String(detail?.statusLabel || '').trim(),
     previewImageDataUrl,
+    previewPrompt: typeof detail?.previewPrompt === 'string' ? detail.previewPrompt : undefined,
+    previewPromptId: String(detail?.previewPromptId || '').trim(),
     previewStepLabel: String(detail?.previewStepLabel || '').trim(),
     estimatedMsRemaining: Number.isFinite(Number(detail?.estimatedMsRemaining))
       ? Math.max(0, Math.floor(Number(detail?.estimatedMsRemaining)))
@@ -271,14 +276,12 @@ export function GenerationTooltip({ backend, children, delay = 500, powerPrompte
               <span className="text-[9px] font-black uppercase tracking-wider text-cyan-200">Generation Preview</span>
               {previewStepLabel && <span className="text-[9px] text-zinc-500">{previewStepLabel}</span>}
             </div>
-            <div className="flex h-[180px] items-center justify-center overflow-hidden bg-black/60">
-              <img
-                src={previewImageDataUrl}
-                alt="ComfyUI generation preview"
-                className="block h-full w-full object-contain object-center"
-                loading="eager"
-              />
-            </div>
+            <LiveGenerationPreview
+              src={previewImageDataUrl}
+              prompt={effectivePowerPrompterQueue?.previewPrompt}
+              alt="ComfyUI generation preview"
+              className="h-[180px]"
+            />
           </div>
         )}
 

@@ -1,7 +1,7 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Bell, CheckCircle2, ChevronDown, ChevronRight, Film, FolderOpen, GripVertical, Image as ImageIcon, ListChecks, ListOrdered, Loader2, LockKeyhole, Paintbrush, Pause, Pencil, Play, Power, RefreshCw, Save, Search, Sparkles, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
+import { Bell, CheckCircle2, ChevronDown, ChevronRight, Film, GripVertical, Image as ImageIcon, ListChecks, ListOrdered, Loader2, LockKeyhole, Paintbrush, Pause, Pencil, Play, Power, Search, Sparkles, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
 import { PowerPrompterActivePromptInline } from '@/components/layout/PowerPrompterActivePromptInline';
 import { PowerPrompterQueueManagerSidePane } from './PowerPrompterQueueManagerSidePane';
 import { QUEUE_MANAGER_DISPATCH_DELAY_OPTIONS, formatQueueEtaDuration, getSetColor, hexToRgba } from './queueCore';
@@ -22,7 +22,6 @@ type PowerPrompterQueueManagerViewProps = Record<string, any> & {
   queueSetGroups: import('./queueCore').QueueSetGroup[];
   queueRequestGroups: import('./queueCore').QueueRequestGroup[];
   queueManagerStyleOptions: Array<{ name: string; count: number }>;
-  savedQueues: import('./queueCore').SavedPowerPrompterQueueSummary[];
   setQueuePromptExpandedMode: React.Dispatch<React.SetStateAction<boolean>>;
   setExpandedQueuePromptRows: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
 };
@@ -99,7 +98,13 @@ function UmbraQueueActivityCard({ activity }: { activity: UmbraQueueActivity }) 
             </span>
           </div>
           {activity.detail ? (
-            <div className="mt-1 line-clamp-2 break-words font-mono text-[10px] leading-relaxed text-current/65" title={activity.detail}>
+            <div
+              data-umbra-queue-prompt-text="job"
+              role="region"
+              aria-label={`${activity.label || getUmbraQueueActivityFeatureLabel(activity.feature)} job details`}
+              tabIndex={0}
+              className="mt-1 max-h-20 overflow-y-auto overscroll-contain custom-scrollbar whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[10px] leading-relaxed text-current/65 focus-visible:outline focus-visible:outline-1 focus-visible:outline-current"
+            >
               {activity.detail}
             </div>
           ) : null}
@@ -265,16 +270,6 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
     queuePromptExpandedMode,
     queueManagerSearchQuery,
     setQueueManagerSearchQuery,
-    savedQueueSnapshotsEnabled = false,
-    savedQueues,
-    selectedSavedQueueId,
-    setSelectedSavedQueueId,
-    savedQueueBusy,
-    selectedSavedQueue,
-    handleSaveCurrentQueueSnapshot,
-    handleLoadSavedQueueSnapshot,
-    handleDeleteSavedQueueSnapshot,
-    refreshSavedQueues,
     queueManagerDragState,
     setQueueManagerDragState,
     clearQueueManagerDragState,
@@ -368,10 +363,6 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
       window.removeEventListener('keydown', closeOnEscape);
     };
   }, [soundControlsOpen]);
-  const savedQueueSnapshotsParked = savedQueueSnapshotsEnabled !== true;
-  const savedQueueSnapshotsTitle = savedQueueSnapshotsParked
-    ? 'Saved queue snapshots are parked while Queue Manager follows the live queue only'
-    : '';
   return (
     <div data-umbra-queue-manager="" className="h-full min-h-0 px-3 pb-3">
       <div
@@ -471,7 +462,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                       ? 'border-cyan-400/40 bg-cyan-500/12 text-cyan-100'
                       : 'border-white/10 bg-black/25 text-zinc-300 hover:border-white/25 hover:text-zinc-100'
                   }`}
-                  title={queuePromptExpandedMode ? 'Use compact single-line prompt rows' : 'Expand queued prompts into card/variant segments'}
+                  title={queuePromptExpandedMode ? 'Use compact scrollable prompt rows' : 'Expand queued prompts into card/variant segments'}
                 >
                   <ListChecks size={12} />
                   {queuePromptExpandedMode ? 'Expanded' : 'Compact'}
@@ -692,7 +683,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                     ? 'border-cyan-400/35 bg-cyan-500/10 text-cyan-100'
                     : 'border-white/10 bg-black/20 text-zinc-400 hover:border-white/25 hover:text-zinc-200'
                 }`}
-                title={queuePromptExpandedMode ? 'Use compact single-line prompt rows' : 'Expand queued prompts into card/variant segments'}
+                title={queuePromptExpandedMode ? 'Use compact scrollable prompt rows' : 'Expand queued prompts into card/variant segments'}
               >
                 <ListChecks size={11} />
                 {queuePromptExpandedMode ? 'Expanded Prompts' : 'Compact Prompts'}
@@ -717,102 +708,6 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                   </button>
                 )}
               </label>
-            </div>
-          </div>
-          <div className="hidden">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="shrink-0 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">Saved Queues</span>
-              <div className="relative min-w-[260px] flex-1">
-                <UmbraSelectControl
-                  value={selectedSavedQueueId}
-                  onChange={(event) => setSelectedSavedQueueId(String(event.currentTarget.value || '').trim())}
-                  disabled={savedQueueSnapshotsParked || savedQueueBusy === 'list' || savedQueues.length <= 0}
-                  className={`h-8 w-full appearance-none rounded-md border bg-black/35 px-2.5 pr-7 text-[11px] font-semibold outline-none transition-colors umbra-themed-select ${
-                    savedQueueSnapshotsParked || savedQueueBusy === 'list' || savedQueues.length <= 0
-                      ? 'border-white/10 text-zinc-600 cursor-not-allowed'
-                      : 'border-white/15 text-zinc-200 hover:border-white/30 focus:border-emerald-400/55'
-                  }`}
-                  title={savedQueueSnapshotsParked ? savedQueueSnapshotsTitle : 'Choose a saved queue to load into Queue Manager'}
-                >
-                  {savedQueues.length <= 0 ? (
-                    <option value="" style={{ color: '#71717a', backgroundColor: '#0a0a0e' }}>
-                      No saved queues
-                    </option>
-                  ) : savedQueues.map((queue) => (
-                    <option
-                      key={`saved-queue-${queue.id}`}
-                      value={queue.id}
-                      style={{ color: '#d4d4d8', backgroundColor: '#0a0a0e' }}
-                    >
-                      {`${queue.name} · ${queue.promptCount} prompts · Set ${queue.activeSetId}`}
-                    </option>
-                  ))}
-                </UmbraSelectControl>
-                <ChevronDown
-                  size={12}
-                  className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400"
-                />
-              </div>
-              {selectedSavedQueue && (
-                <span className="max-w-[220px] truncate rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[10px] font-semibold text-zinc-400">
-                  {new Date(selectedSavedQueue.savedAt || 0).toLocaleString()}
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => { void handleSaveCurrentQueueSnapshot(); }}
-                disabled={savedQueueSnapshotsParked || !!savedQueueBusy || !hasCancelableQueueWork}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-                  savedQueueSnapshotsParked || !!savedQueueBusy || !hasCancelableQueueWork
-                    ? 'border-white/10 bg-white/[0.03] text-zinc-600 cursor-not-allowed'
-                    : 'border-emerald-400/35 bg-emerald-500/10 text-emerald-200 hover:border-emerald-300/55'
-                }`}
-                title={savedQueueSnapshotsParked ? savedQueueSnapshotsTitle : 'Save the active and pending queue prompts as a named queue file'}
-              >
-                {savedQueueBusy === 'save' ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
-                Save
-              </button>
-              <button
-                type="button"
-                onClick={() => { void handleLoadSavedQueueSnapshot(); }}
-                disabled={savedQueueSnapshotsParked || !!savedQueueBusy || (!selectedSavedQueueId && savedQueues.length <= 0)}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-                  savedQueueSnapshotsParked || !!savedQueueBusy || (!selectedSavedQueueId && savedQueues.length <= 0)
-                    ? 'border-white/10 bg-white/[0.03] text-zinc-600 cursor-not-allowed'
-                    : 'border-cyan-400/35 bg-cyan-500/10 text-cyan-200 hover:border-cyan-300/55'
-                }`}
-                title={savedQueueSnapshotsParked ? savedQueueSnapshotsTitle : 'Load the selected saved queue as a paused queue'}
-              >
-                {savedQueueBusy === 'load' ? <Loader2 size={11} className="animate-spin" /> : <FolderOpen size={11} />}
-                Load
-              </button>
-              <button
-                type="button"
-                onClick={() => { void handleDeleteSavedQueueSnapshot(); }}
-                disabled={savedQueueSnapshotsParked || !!savedQueueBusy || (!selectedSavedQueueId && savedQueues.length <= 0)}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-                  savedQueueSnapshotsParked || !!savedQueueBusy || (!selectedSavedQueueId && savedQueues.length <= 0)
-                    ? 'border-white/10 bg-white/[0.03] text-zinc-600 cursor-not-allowed'
-                    : 'border-red-400/30 bg-red-500/8 text-red-200 hover:border-red-300/50'
-                }`}
-                title={savedQueueSnapshotsParked ? savedQueueSnapshotsTitle : 'Delete the selected saved queue file'}
-              >
-                {savedQueueBusy === 'delete' ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
-                Delete
-              </button>
-              <button
-                type="button"
-                onClick={() => { void refreshSavedQueues(); }}
-                disabled={savedQueueSnapshotsParked || !!savedQueueBusy}
-                className={`inline-flex h-8 items-center justify-center rounded-md border px-2 transition-colors ${
-                  savedQueueSnapshotsParked || !!savedQueueBusy
-                    ? 'border-white/10 bg-white/[0.03] text-zinc-600 cursor-not-allowed'
-                    : 'border-white/12 bg-white/[0.04] text-zinc-400 hover:border-white/25 hover:text-zinc-100'
-                }`}
-                title={savedQueueSnapshotsParked ? savedQueueSnapshotsTitle : 'Refresh saved queue files'}
-              >
-                <RefreshCw size={11} className={savedQueueBusy === 'list' ? 'animate-spin' : ''} />
-              </button>
             </div>
           </div>
           {activeQueuePosition && (
@@ -1255,7 +1150,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                                               itemSearchMatches ? 'ring-1 ring-cyan-300/45 shadow-[0_0_20px_rgba(34,211,238,0.10)]' : ''
                                             } ${
                                               itemLocked ? 'cursor-not-allowed' : 'cursor-default'
-                                            } ${item.exiting ? 'opacity-0 max-h-0 overflow-hidden py-0' : `opacity-100 ${itemExpanded ? 'max-h-none overflow-visible' : 'max-h-[220px]'}`}`}
+                                            } ${item.exiting ? 'opacity-0 max-h-0 overflow-hidden py-0' : 'opacity-100'}`}
                                           >
                                             <div className="flex items-start gap-3">
                                               <button
@@ -1379,14 +1274,21 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                                                 {itemExpanded ? (
                                                   <div
                                                     data-umbra-queue-expanded-prompt=""
-                                                    className="mt-2 min-w-0 max-w-full overflow-visible rounded-md border border-cyan-400/10 bg-black/25 px-2.5 py-2 break-words"
+                                                    data-umbra-queue-prompt-text="expanded"
+                                                    role="region"
+                                                    aria-label={`Expanded prompt ${itemQueuePosition}`}
+                                                    tabIndex={0}
+                                                    className="mt-2 min-w-0 max-w-full max-h-[min(45dvh,320px)] overflow-y-auto overscroll-contain custom-scrollbar rounded-md border border-cyan-400/10 bg-black/25 px-2.5 py-2 [overflow-wrap:anywhere] focus-visible:outline focus-visible:outline-1 focus-visible:outline-current"
                                                   >
                                                     {renderPromptBlockList(itemPromptBlocks, item.prompt)}
                                                   </div>
                                                 ) : (
                                                   <div
-                                                    className="mt-1 min-w-0 max-w-full truncate rounded-md border border-white/5 bg-black/25 px-2 py-1 font-mono text-[11px] leading-relaxed text-current/90"
-                                                    title={String(item.prompt || '')}
+                                                    data-umbra-queue-prompt-text="compact"
+                                                    role="region"
+                                                    aria-label={`Prompt ${itemQueuePosition}`}
+                                                    tabIndex={0}
+                                                    className="mt-1 min-w-0 max-w-full max-h-20 overflow-y-auto overscroll-contain custom-scrollbar whitespace-pre-wrap [overflow-wrap:anywhere] rounded-md border border-white/5 bg-black/25 px-2 py-1 font-mono text-[11px] leading-relaxed text-current/90 focus-visible:outline focus-visible:outline-1 focus-visible:outline-current"
                                                   >
                                                       {renderHighlightedQueuePromptText(item.prompt, queueManagerSearchQuery)}
                                                   </div>

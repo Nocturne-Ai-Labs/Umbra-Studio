@@ -18,6 +18,7 @@ type Props = {
   fallbackText: string;
   className?: string;
   chipConfig?: PowerPrompterPromptChipConfig;
+  wrapTokens?: boolean;
 };
 
 export const PowerPrompterActivePromptInline = React.memo(function PowerPrompterActivePromptInline({
@@ -25,11 +26,12 @@ export const PowerPrompterActivePromptInline = React.memo(function PowerPrompter
   fallbackText,
   className = '',
   chipConfig,
+  wrapTokens = false,
 }: Props) {
   if (blocks.length <= 0) {
     return (
       <div className={`text-zinc-500 ${className}`.trim()}>
-        <PowerPrompterPromptChips text={fallbackText} config={chipConfig} emptyText={fallbackText} />
+        <PowerPrompterPromptChips text={fallbackText} config={chipConfig} emptyText={fallbackText} wrapTokens={wrapTokens} />
       </div>
     );
   }
@@ -56,8 +58,8 @@ export const PowerPrompterActivePromptInline = React.memo(function PowerPrompter
                   {block.variantLabel}
                 </span>
               ) : null}
-              <span className="min-w-0 leading-relaxed text-zinc-200">
-                <PowerPrompterPromptChips text={text} config={chipConfig} />
+              <span className={`min-w-0 leading-relaxed text-zinc-200 ${wrapTokens ? 'max-w-full [overflow-wrap:anywhere]' : ''}`}>
+                <PowerPrompterPromptChips text={text} config={chipConfig} wrapTokens={wrapTokens} />
               </span>
             </div>
           </div>

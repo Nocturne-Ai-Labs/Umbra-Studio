@@ -105,6 +105,7 @@ type Props = {
   emptyText?: string;
   compact?: boolean;
   specialOnly?: boolean;
+  wrapTokens?: boolean;
 };
 
 export const PowerPrompterPromptChips = React.memo(function PowerPrompterPromptChips({
@@ -114,6 +115,7 @@ export const PowerPrompterPromptChips = React.memo(function PowerPrompterPromptC
   emptyText = '',
   compact = false,
   specialOnly = false,
+  wrapTokens = false,
 }: Props) {
   const tokens = React.useMemo(() => {
     const allTokens = buildPowerPrompterPromptChipTokens(text, config);
@@ -143,7 +145,7 @@ export const PowerPrompterPromptChips = React.memo(function PowerPrompterPromptC
                 }}
                 title="LoRA token"
               >
-                <span className="min-w-0 truncate">{token.text}</span>
+                <span className={wrapTokens ? 'min-w-0 whitespace-normal [overflow-wrap:anywhere]' : 'min-w-0 truncate'}>{token.text}</span>
               </span>
               {trailingSeparator ? <span className="text-zinc-400">{trailingSeparator}</span> : null}
             </span>
@@ -157,7 +159,7 @@ export const PowerPrompterPromptChips = React.memo(function PowerPrompterPromptC
                 className="inline-flex min-w-0 max-w-full items-center overflow-hidden rounded-md border border-cyan-400/35 bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-cyan-200 shadow-[0_0_0_1px_rgba(34,211,238,0.08)_inset]"
                 title="Trained tag"
               >
-                <span className="min-w-0 truncate">{token.text}</span>
+                <span className={wrapTokens ? 'min-w-0 whitespace-normal [overflow-wrap:anywhere]' : 'min-w-0 truncate'}>{token.text}</span>
               </span>
               {trailingSeparator ? <span className="text-zinc-400">{trailingSeparator}</span> : null}
             </span>
@@ -167,7 +169,7 @@ export const PowerPrompterPromptChips = React.memo(function PowerPrompterPromptC
         return (
           <span
             key={token.key}
-            className={`min-w-0 leading-relaxed text-zinc-300 ${compact ? 'text-[10px]' : 'text-[11px]'}`}
+            className={`min-w-0 leading-relaxed text-zinc-300 ${compact ? 'text-[10px]' : 'text-[11px]'} ${wrapTokens ? 'max-w-full [overflow-wrap:anywhere]' : ''}`}
           >
             {token.text}{trailingSeparator}
           </span>

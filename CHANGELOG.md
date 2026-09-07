@@ -1,5 +1,92 @@
 # Changelog
 
+## v0.32.6
+
+### TL;DR - Setup After Updating
+
+Update and restart Umbra Studio, then refresh open browser and remote tabs.
+Windows uses UmbraStudio.bat; Linux uses ./start-umbra.sh. No new models,
+ComfyUI update, or Umbra Nodes update is required for this release.
+
+Queue Manager now opens from the top bar beside Skip. To keep a Power Prompter
+queue for later, pause it, wait for the current image to finish, and use Saved
+Queues. Loading saved work requires an idle queue and leaves the restored work
+paused until you choose Resume. Save unfinished work before shutting down;
+this is an explicit save/load feature, not automatic crash recovery.
+
+### Readable Queue Prompts
+
+- Compact prompt previews wrap and scroll instead of cutting off the text.
+  Expanded card/variant previews have a larger scroll area, and long LoRA and
+  trained-token badges wrap without hiding the end of the token.
+- Prompt fields support mouse-wheel, touch, and keyboard scrolling. Normal
+  queue status updates preserve the current inner scroll position.
+- Read-only Umbra UI job details also scroll. Reading or expanding a prompt
+  does not alter its generation settings, queue order, or execution.
+
+### Standalone Queue Manager And Saved Queues
+
+- Open Queue Manager directly from the Umbra UI top bar, without navigating
+  through Power Prompter's editor tabs. Existing queue controls and read-only
+  Umbra UI job visibility remain available.
+- Save only the remaining pending Power Prompter work after pausing and
+  allowing its active generation to finish. TXT2IMG, IMG2IMG, Inpaint, Canvas,
+  Video, and Extras jobs are not included in these saved queues.
+- Preserve resolved prompts, seeds, LoRA strengths, pipeline selections, sets,
+  styles, output destinations, and editor metadata when restoring work.
+  Restoring does not reroll wildcards or repeat already completed images.
+- Validate saved pipelines before restoring, reject restore attempts while
+  other work is active, and leave loaded work paused for deliberate resumption.
+
+### Queue History Performance And Reliability
+
+- Keep large immutable prompt/settings snapshots separate from small progress
+  summaries. Normal completions no longer rewrite the full queue history.
+- Backend-owned history continues updating without a connected editor and
+  prevents reconnecting clients from overwriting newer progress.
+- Serialize history changes and use atomic replacement so concurrent updates,
+  deletion, and failed writes cannot leave partially written history files.
+  Older history files remain readable and migrate when used.
+
+### Pinned Power Prompter Outputs And Preview Privacy
+
+- Choose a Gallery pinned folder in Power Prompter's generation controls,
+  above the LoRA section. Outputs retain Power Prompter's date, set, and style
+  subfolder structure beneath that destination.
+- The default output location remains unchanged when no pinned folder is
+  selected. Missing pins and unsupported output nodes report an error rather
+  than silently redirecting files to another directory.
+- Locked thumbnail mode now covers protected live previews in the sidebar
+  and generation tooltips. Identified safe previews remain visible; unknown
+  live frames stay protected until their prompt context can be established.
+
+### Validation And Packaging
+
+- Regression checks cover atomic history updates, legacy history, concurrent
+  writes, failed replacement, 3,500- and 10,000-prompt fixtures, paused restore,
+  pipeline validation, pinned output layouts, and live-preview privacy.
+- Long-prompt scrolling was verified in compact and expanded views, in small
+  and virtualized queues, at desktop, tablet, and phone sizes. Tests include
+  wheel, keyboard, touch, long-token wrapping, and queue-refresh stability.
+- A prior isolated development generation run exercised a large queued workload;
+  it did not render every image in the queue. Synthetic fixture counts are not
+  claims of thousands of completed image generations or guaranteed throughput.
+- Windows and Linux packages exclude private datasets, prompt libraries,
+  wildcards, model weights, runtime state, and internal test fixtures.
+- Linux managed tools still require python3-dev, build-essential, libgl1, and
+  libglib2.0-0, or distribution equivalents. Optional AI Toolkit setup still
+  requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Compact and expanded queue previews hiding the rest of long prompts.
+- Fixed: Long LoRA and trained-token badges clipping their contents.
+- Fixed: Protected live previews appearing in the sidebar while Locked mode is on.
+- Improved: Atomic, backend-owned history avoids repeated large snapshot writes.
+- Improved: Queue Manager is directly accessible from the Umbra UI top bar.
+- Improved: Paused Power Prompter queues can be saved and deliberately resumed later.
+- Improved: Pinned output destinations preserve Power Prompter's set/style folders.
+
 ## v0.32.5
 
 ### TL;DR - Setup After Updating

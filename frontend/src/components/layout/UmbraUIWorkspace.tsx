@@ -1,6 +1,7 @@
 'use client';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { getUmbraUiPinnedFolderLabel, normalizeUmbraUiPinnedFolder } from '@/lib/pinnedOutputFolders';
 import React from 'react';
 import {
   Activity,
@@ -13,6 +14,7 @@ import {
   ImageUp,
   Layers3,
   ListPlus,
+  ListOrdered,
   Loader2,
   Notebook,
   Paintbrush,
@@ -178,10 +180,10 @@ import {
 } from '../../../../shared/umbra-ui/pipelineTypes';
 import { UMBRA_UI_EXTRAS_TOOL_EVENT } from '@/lib/umbraUiExtrasNavigation';
 
-type UmbraGenerationMode = 'prompter' | 'image' | 'img2img' | 'inpaint' | 'canvas' | 'video' | 'extras';
+type UmbraGenerationMode = 'prompter' | 'queue' | 'image' | 'img2img' | 'inpaint' | 'canvas' | 'video' | 'extras';
 
 const UMBRA_UI_ACTIVE_MODE_STORAGE_KEY = 'umbra-ui:active-mode';
-const UMBRA_UI_GENERATION_MODES: UmbraGenerationMode[] = ['prompter', 'image', 'img2img', 'inpaint', 'canvas', 'video', 'extras'];
+const UMBRA_UI_GENERATION_MODES: UmbraGenerationMode[] = ['prompter', 'queue', 'image', 'img2img', 'inpaint', 'canvas', 'video', 'extras'];
 
 function snapshotUmbraImageGenerationInfo(
   workflowName: string,
@@ -266,16 +268,6 @@ function readPersistedUmbraGenerationMode(): UmbraGenerationMode {
   } catch {
     return 'image';
   }
-}
-
-function normalizeUmbraUiPinnedFolder(value: unknown): string {
-  return String(value || '').trim().replace(/\\/g, '/').replace(/\/+$/, '');
-}
-
-function getUmbraUiPinnedFolderLabel(value: string): string {
-  const parts = normalizeUmbraUiPinnedFolder(value).split('/').filter(Boolean);
-  if (parts.length <= 1) return parts[0] || value;
-  return `${parts.at(-1)} - ${parts.at(-2)}`;
 }
 
 function getUmbraUiPipelineModelSelectionKey(
@@ -603,6 +595,9 @@ export function UmbraUIWorkspace() {
   const shellPrompterSyncPendingRef = React.useRef(false);
   const activeModeRef = React.useRef(activeMode);
   activeModeRef.current = activeMode;
+  const openQueueManager = React.useCallback(() => setActiveMode('queue'), []);
+  const openPrompter = React.useCallback(() => setActiveMode('prompter'), []);
+  const prompterSurfaceActive = activeMode === 'prompter' || activeMode === 'queue';
 
   React.useEffect(() => {
     const previousWorkspace = previousShellWorkspaceRef.current;
@@ -2457,7 +2452,7 @@ export function UmbraUIWorkspace() {
     const publishContext = () => {
       void publishUmbraUiAgentContext({
         updatedAt: Date.now(),
-        activeMode: activeMode === 'prompter' ? 'image' : activeMode,
+        activeMode: activeMode === 'prompter' || activeMode === 'queue' ? 'image' : activeMode,
         image: {
           prompt: workflowImagePrompt,
           promptSegments,
@@ -2926,6 +2921,7 @@ export function UmbraUIWorkspace() {
                 { value: 'inpaint', label: 'Inpaint', icon: <Paintbrush size={14} /> },
                 { value: 'video', label: 'Video', icon: <Clapperboard size={14} />, badge: 'BETA' },
                 { value: 'extras', label: 'Extras', icon: <ImageUp size={14} /> },
+                { value: 'queue', label: 'Queue Manager', icon: <ListOrdered size={14} /> },
               ]}
               onValueChange={(nextValue) => setActiveMode(nextValue as UmbraGenerationMode)}
               ariaLabel={t('nav.umbraUiWorkspace')}
@@ -3025,6 +3021,23 @@ export function UmbraUIWorkspace() {
           </div>
         )}
         <div data-umbra-ui-header-actions="" className="ml-auto flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            data-umbra-ui-queue-manager-button=""
+            onClick={openQueueManager}
+            aria-label="Queue Manager"
+            aria-pressed={activeMode === 'queue'}
+            title="Queue Manager"
+            className={cn(
+              'inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-[10px] font-black uppercase transition-colors',
+              activeMode === 'queue'
+                ? 'border-[var(--umbra-accent)] bg-[var(--umbra-panel-bg)] text-[var(--umbra-accent)]'
+                : 'border-white/15 bg-black/20 text-[var(--umbra-text)] hover:border-[var(--umbra-accent)]',
+            )}
+          >
+            <ListOrdered size={15} />
+            <span data-umbra-ui-queue-manager-label="">Queue Manager</span>
+          </button>
           <UmbraQueueEmergencyControls
             queueSummary={queueSummary}
             busyAction={queueControlBusy}
@@ -3065,20 +3078,26 @@ export function UmbraUIWorkspace() {
           'grid min-h-0 flex-1',
           activeMode === 'video' && videoStoryboardOpen
             ? 'grid-cols-[minmax(340px,400px)_minmax(320px,380px)_minmax(320px,1fr)]'
-            : activeMode === 'canvas' || activeMode === 'prompter'
+            : activeMode === 'canvas' || prompterSurfaceActive
               ? 'grid-cols-[minmax(0,1fr)]'
             : activeMode === 'image'
               ? 'grid-cols-[clamp(300px,24vw,380px)_clamp(280px,22vw,360px)_minmax(300px,1fr)]'
               : 'grid-cols-[minmax(360px,400px)_minmax(320px,1fr)]',
         )}
       >
-        {modeIsMounted('prompter') ? (
+        {modeIsMounted('prompter') || modeIsMounted('queue') ? (
           <div
             data-umbra-ui-power-prompter=""
-            className={activeMode === 'prompter' ? 'h-full min-h-0 min-w-0 flex-1 overflow-hidden' : 'hidden'}
-            aria-hidden={activeMode !== 'prompter'}
+            className={prompterSurfaceActive ? 'h-full min-h-0 min-w-0 flex-1 overflow-hidden' : 'hidden'}
+            aria-hidden={!prompterSurfaceActive}
           >
-            <PowerPrompter overlayMode={false} isActive={activeMode === 'prompter'} />
+            <PowerPrompter
+              overlayMode={false}
+              isActive={prompterSurfaceActive}
+              queueManagerActive={activeMode === 'queue'}
+              onOpenQueueManager={openQueueManager}
+              onOpenPrompter={openPrompter}
+            />
           </div>
         ) : null}
         {canvasEnabled && modeIsMounted('canvas') ? (
@@ -3775,7 +3794,7 @@ export function UmbraUIWorkspace() {
 
       </div>
 
-      {activeMode !== 'extras' && activeMode !== 'prompter' && activeMode !== 'image' && activeMode !== 'img2img' && activeMode !== 'inpaint' ? (
+      {activeMode !== 'extras' && !prompterSurfaceActive && activeMode !== 'image' && activeMode !== 'img2img' && activeMode !== 'inpaint' ? (
         <PowerPrompterSearchPanel
           onInsert={handleCatalogInsert}
           enabledCSVs={catalogEnabledCSVs}

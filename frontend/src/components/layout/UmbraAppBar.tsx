@@ -51,6 +51,8 @@ import { GlobalSettings } from '@/components/modals/GlobalSettings';
 import { UmbraUpdaterModal } from '@/components/modals/UmbraUpdaterModal';
 import { NotificationBellButton } from '@/components/ui/NotificationCenter';
 import { useNsfwPrivacy } from '@/components/privacy/NsfwPrivacyProvider';
+import { LiveGenerationPreview } from '@/components/privacy/LiveGenerationPreview';
+import { isProtectedLivePreview, readComfyPreviewPrompt } from '@/lib/livePreviewPrivacy';
 
 import { SystemMonitor } from '@/components/SystemMonitor';
 import { useComponentDebug } from '@/hooks/useComponentDebug';
@@ -143,6 +145,7 @@ type ComfyAppPreviewEvent = {
   active?: boolean;
   nodeId?: string;
   promptId?: string;
+  imagePromptId?: string;
   source?: string;
   updatedAt?: number;
 };
@@ -222,7 +225,7 @@ function sniffComfyPreviewMime(bytes: Uint8Array): string {
   return '';
 }
 
-function readComfyImagePreviewBlob(buffer: ArrayBuffer): { blob: Blob; mimeType: string } | null {
+function readComfyImagePreviewBlob(buffer: ArrayBuffer): { blob: Blob; mimeType: string; promptId?: string } | null {
   if (buffer.byteLength < 8) return null;
   const view = new DataView(buffer);
   const eventType = view.getUint32(0, false);
@@ -244,15 +247,17 @@ function readComfyImagePreviewBlob(buffer: ArrayBuffer): { blob: Blob; mimeType:
     const sniffedMime = sniffComfyPreviewMime(bytes);
     if (!sniffedMime) return null;
     let mimeType = sniffedMime;
+    let promptId: string | undefined;
     try {
       const metadataText = new TextDecoder().decode(new Uint8Array(buffer, 8, metadataLength));
       const metadata = JSON.parse(metadataText);
+      promptId = String(metadata?.prompt_id || '').trim() || undefined;
       const metadataMime = String(metadata?.image_type || metadata?.mimeType || '').trim();
       if (metadataMime.startsWith('image/')) mimeType = metadataMime;
     } catch {
       // Metadata is optional; magic-byte detection keeps image previews usable.
     }
-    return { blob: new Blob([bytes], { type: mimeType }), mimeType };
+    return { blob: new Blob([bytes], { type: mimeType }), mimeType, promptId };
   }
 
   return null;
@@ -343,6 +348,7 @@ export const UmbraAppBar = () => {
   });
   const [powerPrompterQueueStatus, setPowerPrompterQueueStatus] = React.useState<PowerPrompterQueueStatusEvent | null>(null);
   const [comfyAppPreview, setComfyAppPreview] = React.useState<ComfyAppPreviewEvent | null>(null);
+  const [comfyPreviewPrompts, setComfyPreviewPrompts] = React.useState<Map<string, string>>(() => new Map());
   const [sidebarSkipBusy, setSidebarSkipBusy] = React.useState(false);
   const comfyQueueWasBusyRef = React.useRef(false);
   const comfyRunningIdsRef = React.useRef<string[]>([]);
@@ -900,6 +906,8 @@ export const UmbraAppBar = () => {
       const nextPrompt = String(detail.nextPrompt || '').trim();
       const statusLabel = String(detail.statusLabel || '').trim();
       const previewImageDataUrl = String(detail.previewImageDataUrl || '').trim();
+      const previewPrompt = typeof detail.previewPrompt === 'string' ? detail.previewPrompt : undefined;
+      const previewPromptId = String(detail.previewPromptId || '').trim();
       const previewStepLabel = String(detail.previewStepLabel || '').trim();
       const estimatedMsRemaining = Number.isFinite(Number(detail.estimatedMsRemaining))
         ? Math.max(0, Math.floor(Number(detail.estimatedMsRemaining)))
@@ -926,6 +934,8 @@ export const UmbraAppBar = () => {
         nextPrompt,
         previewStepLabel,
         previewSignature,
+        JSON.stringify(previewPrompt) ?? 'unknown',
+        previewPromptId,
       ].join('|');
       if (signature === powerPrompterQueueBadgeSignatureRef.current) return;
       powerPrompterQueueBadgeSignatureRef.current = signature;
@@ -942,6 +952,8 @@ export const UmbraAppBar = () => {
         nextPrompt,
         statusLabel,
         previewImageDataUrl,
+        previewPrompt,
+        previewPromptId,
         previewStepLabel,
         estimatedMsRemaining,
         updatedAt: Math.max(0, Math.floor(Number(detail.updatedAt) || Date.now())),
@@ -963,6 +975,7 @@ export const UmbraAppBar = () => {
     let reconnectTimer: number | null = null;
     let staleTimer: number | null = null;
     let currentObjectUrl = '';
+    let executingPromptId = '';
     const wsUrl = normalizeComfyWebSocketUrl(urls.comfyui || comfySettingsUrl);
     if (!wsUrl) return;
 
@@ -1018,6 +1031,10 @@ export const UmbraAppBar = () => {
             const message = JSON.parse(String(event.data || '{}'));
             const messageType = String(message?.type || '').trim();
             const data = message?.data || {};
+            if (['execution_start', 'executing', 'progress'].includes(messageType)) {
+              const promptId = String(data?.prompt_id || data?.promptId || '').trim();
+              if (promptId) executingPromptId = promptId;
+            }
             if (messageType === 'progress') {
               setProgress(data);
               return;
@@ -1058,6 +1075,7 @@ export const UmbraAppBar = () => {
           currentObjectUrl = imageDataUrl;
           setComfyAppPreview({
             imageDataUrl,
+            imagePromptId: frame.promptId || executingPromptId,
             mimeType: frame.mimeType,
             active: true,
             source: 'comfy_direct_image_ws',
@@ -1069,6 +1087,7 @@ export const UmbraAppBar = () => {
         }
       };
       socket.onclose = () => {
+        executingPromptId = '';
         socket = null;
         if (!closed) reconnectTimer = window.setTimeout(connect, 2500);
       };
@@ -1170,6 +1189,21 @@ export const UmbraAppBar = () => {
 
         const runningRows = Array.isArray(payload?.queue_running) ? payload.queue_running : [];
         const pendingRows = Array.isArray(payload?.queue_pending) ? payload.queue_pending : [];
+        setComfyPreviewPrompts((current) => {
+          const next = new Map(current);
+          for (const row of runningRows) {
+            if (!Array.isArray(row)) continue;
+            const promptId = String(row[1] || '').trim();
+            if (!promptId || next.has(promptId)) continue;
+            const prompt = readComfyPreviewPrompt(row);
+            if (promptId && prompt !== undefined) next.set(promptId, prompt);
+          }
+          // Keep recent completed-frame metadata without retaining whole workflow graphs.
+          while (next.size > 64) next.delete(next.keys().next().value!);
+          return next.size === current.size && [...next].every(([id, prompt]) => current.get(id) === prompt)
+            ? current
+            : next;
+        });
         const running = runningRows.length;
         const pending = pendingRows.length;
         const total = running + pending;
@@ -1825,7 +1859,14 @@ export const UmbraAppBar = () => {
   const comfySidebarActivePrompt = String(powerPrompterQueueStatus?.activePrompt || '').trim();
   const comfySidebarNextPrompt = String(powerPrompterQueueStatus?.nextPrompt || '').trim();
   const comfySidebarPreviewImage = comfyAppPreviewImage || String(powerPrompterQueueStatus?.previewImageDataUrl || '').trim();
-  const comfySidebarPreviewIsVideo = /^data:video\//i.test(comfySidebarPreviewImage);
+  const comfySidebarPreviewPrompt = comfyAppPreviewImage
+    ? (comfyPreviewPrompts.get(comfyAppPreview?.imagePromptId || '')
+      ?? (comfyAppPreview?.imagePromptId && comfyAppPreview.imagePromptId === powerPrompterQueueStatus?.previewPromptId
+        ? powerPrompterQueueStatus.previewPrompt
+        : undefined))
+    : powerPrompterQueueStatus?.previewPrompt;
+  const comfySidebarPreviewIsVideo = /^data:video\//i.test(comfySidebarPreviewImage)
+    || (Boolean(comfyAppPreviewImage) && /^video\//i.test(comfyAppPreview?.mimeType || ''));
   const comfySidebarPreviewStep = comfyAppPreviewStep || String(powerPrompterQueueStatus?.previewStepLabel || '').trim();
   const canSkipSidebarJob = effectiveComfyQueueBadge.running > 0 || normalizeQueueCount(powerPrompterQueueStatus?.running) > 0;
 
@@ -1851,19 +1892,24 @@ export const UmbraAppBar = () => {
 
   const handleOpenSidebarGenerationPreview = React.useCallback(() => {
     if (!comfySidebarPreviewImage || comfySidebarPreviewIsVideo) return;
+    if (nsfwPrivacyLocked && isProtectedLivePreview(comfySidebarPreviewPrompt)) {
+      requestNsfwPrivacyUnlock();
+      return;
+    }
     window.dispatchEvent(new CustomEvent('umbra:gallery-open-path', {
       detail: {
         imagePath: LIVE_GENERATION_PREVIEW_PATH,
         source: 'appbar-generation-preview',
         imageDataUrl: comfySidebarPreviewImage,
-        prompt: comfySidebarActivePrompt || comfySidebarNextPrompt,
+        prompt: comfySidebarPreviewPrompt || '',
         status: effectiveComfyQueueBadge.status === 'complete' ? 'idle' : 'running',
         updatedAt: Date.now(),
       },
     }));
   }, [
-    comfySidebarActivePrompt,
-    comfySidebarNextPrompt,
+    comfySidebarPreviewPrompt,
+    nsfwPrivacyLocked,
+    requestNsfwPrivacyUnlock,
     comfySidebarPreviewImage,
     comfySidebarPreviewIsVideo,
     effectiveComfyQueueBadge.status,
@@ -2490,31 +2536,13 @@ export const UmbraAppBar = () => {
                     </div>
                   </div>
                   {comfySidebarPreviewImage ? (
-                    <button
-                      type="button"
-                      onClick={handleOpenSidebarGenerationPreview}
-                      disabled={comfySidebarPreviewIsVideo}
-                      className="mt-2 block w-full overflow-hidden rounded-md border border-white/10 bg-black/35 text-left transition hover:border-cyan-300/45 hover:shadow-[0_0_18px_rgba(34,211,238,0.16)] disabled:cursor-default disabled:hover:border-white/10 disabled:hover:shadow-none"
-                      title={comfySidebarPreviewIsVideo ? 'Video previews do not open in the media viewer yet' : 'Open live generation preview'}
-                    >
-                      {comfySidebarPreviewIsVideo ? (
-                        <video
-                          src={comfySidebarPreviewImage}
-                          className="h-56 w-full bg-black object-contain"
-                          autoPlay
-                          muted
-                          loop
-                          playsInline
-                        />
-                      ) : (
-                        <img
-                          src={comfySidebarPreviewImage}
-                          alt="Live generation preview"
-                          className="h-56 w-full bg-black object-contain"
-                          loading="eager"
-                        />
-                      )}
-                    </button>
+                    <LiveGenerationPreview
+                      src={comfySidebarPreviewImage}
+                      prompt={comfySidebarPreviewPrompt}
+                      mimeType={comfyAppPreviewImage ? comfyAppPreview?.mimeType : undefined}
+                      onOpen={handleOpenSidebarGenerationPreview}
+                      className="mt-2 h-56 rounded-md border border-white/10"
+                    />
                   ) : null}
                   <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-black/35">
                     <div

@@ -58,7 +58,7 @@ export function PowerPrompterWorkspacePanels(props: PowerPrompterWorkspacePanels
     handleQueueEditorDocumentChange,
     mobileSelectionMode = false,
   } = props;
-  const canShowWorkspace = currentFile || (queueEditorEnabled && prompterPanelMode === 'queue-editor' && queueEditorDraft);
+  const canShowWorkspace = prompterPanelMode === 'queue-manager' || currentFile || (queueEditorEnabled && prompterPanelMode === 'queue-editor' && queueEditorDraft);
   const isHistoryQueueEditorDraft = queueEditorDraft?.sourceKind === 'history';
 
   return (

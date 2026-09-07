@@ -361,6 +361,8 @@ export function normalizePowerPrompterQueueHistorySummary(rawValue: unknown): Po
     id,
     name: String(entry.name || id).trim() || id,
     createdAt: Number(entry.createdAt) || 0,
+    requestId: String(entry.requestId || '').trim() || undefined,
+    backendOwned: entry.backendOwned === true,
     updatedAt: Number(entry.updatedAt) || Number(entry.createdAt) || 0,
     file: typeof entry.file === 'string' ? entry.file : null,
     promptCount,

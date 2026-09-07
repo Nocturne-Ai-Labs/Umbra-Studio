@@ -1,7 +1,7 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { Bell, BellOff, Bot, ChevronDown, ChevronLeft, ChevronRight, FileText, FolderOpen, ListChecks, ListOrdered, Loader2, MoreHorizontal, Pause, Play, Power, RefreshCw, Save, Search, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
+import { Bell, BellOff, Bot, ChevronDown, ChevronLeft, ChevronRight, FileText, FolderOpen, ListChecks, ListOrdered, Loader2, MoreHorizontal, Pause, Play, Power, Search, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
 import { POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME, POWER_PROMPTER_MAX_QUEUE_SETS } from '@/lib/powerPrompter';
 import { PowerPrompterGlobalSearchBox } from './PowerPrompterGlobalSearchBox';
 import { POWER_PROMPTER_SOUND_STYLE_GLASS_TICK, POWER_PROMPTER_SOUND_STYLE_OPTIONS, clampCompletionSoundVolume } from './powerPrompterAudio';
@@ -12,7 +12,6 @@ type PowerPrompterCommandBarProps = Record<string, any> & {
   setRightPanelCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
   setSoundMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setQueuePromptExpandedMode: React.Dispatch<React.SetStateAction<boolean>>;
-  savedQueues?: import('./queue/queueCore').SavedPowerPrompterQueueSummary[];
 };
 
 export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
@@ -97,16 +96,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
     setGlobalSearchSuggestionIndex,
     filteredGlobalSearchSuggestions,
     applyGlobalSearchSelection,
-    savedQueueSnapshotsEnabled = false,
-    savedQueues = [],
-    selectedSavedQueueId,
-    setSelectedSavedQueueId,
-    savedQueueBusy,
-    selectedSavedQueue,
-    handleSaveCurrentQueueSnapshot,
-    handleLoadSavedQueueSnapshot,
-    handleDeleteSavedQueueSnapshot,
-    refreshSavedQueues
+    onOpenSavedQueues,
   } = props;
   const updatePromptLimitDraft = React.useCallback((rawValue: unknown) => {
     if (typeof handleQueuePromptLimitDraftChange === 'function') {
@@ -132,10 +122,6 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
   const queueSettingsMenuRef = React.useRef<HTMLDivElement | null>(null);
   const [queueManagerMenuOpen, setQueueManagerMenuOpen] = React.useState(false);
   const queueManagerMenuRef = React.useRef<HTMLDivElement | null>(null);
-  const savedQueueSnapshotsParked = savedQueueSnapshotsEnabled !== true;
-  const savedQueueSnapshotsTitle = savedQueueSnapshotsParked
-    ? 'Saved queue snapshots are parked while Queue Manager follows the live queue only'
-    : '';
   const [promptSearchMenuOpen, setPromptSearchMenuOpen] = React.useState(false);
   const promptSearchMenuRef = React.useRef<HTMLDivElement | null>(null);
   const [phoneActionsOpen, setPhoneActionsOpen] = React.useState(false);
@@ -249,7 +235,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
             >
               Presets
             </button>
-            <button
+            {!props.queueManagerInWorkspace && <button
               onClick={() => setPrompterPanelMode('queue-manager')}
               className={`h-12 min-w-0 flex-1 rounded-md px-2 text-[10px] font-black uppercase tracking-[0.08em] transition-colors ${
                 prompterPanelMode === 'queue-manager'
@@ -258,7 +244,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               }`}
             >
               Queue
-            </button>
+            </button>}
             {queueEditorEnabled && queueEditorDraft ? (
               <button
                 onClick={() => setPrompterPanelMode('queue-editor')}
@@ -506,6 +492,14 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               <span>{queueSummaryCounts.queued || 0} done</span>
               {isTabletRemote ? <span>{activePanelQueueEstimate.setAvailablePromptCount || 0} available</span> : null}
             </div>
+
+            <button
+              type="button"
+              onClick={() => { setPhoneActionsOpen(false); onOpenSavedQueues?.(); }}
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-white/15 px-3 text-xs text-[var(--umbra-text)] hover:border-[var(--umbra-accent)]"
+            >
+              <FolderOpen size={15} /> Saved Queues
+            </button>
 
             {isPhoneRemote ? (
               <div data-umbra-powerprompter-phone-actions-access="" className="grid grid-cols-2 gap-2">
@@ -829,7 +823,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
             >
               Preset Editor
             </button>
-            <button
+            {!props.queueManagerInWorkspace && <button
               onClick={() => setPrompterPanelMode('queue-manager')}
               className={`inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-colors ${
                 prompterPanelMode === 'queue-manager'
@@ -839,7 +833,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               title="Open Queue Manager panel"
             >
               Queue Manager
-            </button>
+            </button>}
             {queueEditorEnabled && queueEditorDraft && (
               <button
                 onClick={() => setPrompterPanelMode('queue-editor')}
@@ -1179,6 +1173,9 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                       <ListOrdered size={14} />
                       History
                     </button>
+                  <button type="button" onClick={() => { setPhoneActionsOpen(false); setQueueSettingsMenuOpen(false); setQueueManagerMenuOpen(false); onOpenSavedQueues?.(); }} className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-md border border-white/15 px-2 text-xs text-[var(--umbra-text)] hover:border-[var(--umbra-accent)]">
+                    <FolderOpen size={13} /> Saved Queues
+                  </button>
                     <button
                       onClick={() => { void queueCancelActionRef?.current?.(); }}
                       disabled={queueDestructiveActionBusy || !hasCancelableQueueWork}
@@ -1269,104 +1266,6 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                       )}
                     </label>
 
-                    <div className="rounded-lg border border-white/10 bg-white/[0.025] p-2.5">
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">Saved Queues</div>
-                        {selectedSavedQueue && (
-                          <span className="truncate text-[10px] font-semibold text-zinc-500">
-                            {new Date(selectedSavedQueue.savedAt || 0).toLocaleString()}
-                          </span>
-                        )}
-                      </div>
-                      <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto]">
-                        <div className="relative min-w-0">
-                          <UmbraSelectControl
-                            value={selectedSavedQueueId}
-                            onChange={(event) => setSelectedSavedQueueId?.(String(event.currentTarget.value || '').trim())}
-                            disabled={savedQueueSnapshotsParked || savedQueueBusy === 'list' || savedQueues.length <= 0}
-                            className={`h-10 w-full appearance-none rounded-lg border bg-black/35 px-2.5 pr-7 text-xs font-semibold outline-none transition-colors umbra-themed-select ${
-                              savedQueueSnapshotsParked || savedQueueBusy === 'list' || savedQueues.length <= 0
-                                ? 'border-white/10 text-zinc-600 cursor-not-allowed'
-                                : 'border-white/15 text-zinc-200 hover:border-white/30 focus:border-emerald-400/55'
-                            }`}
-                            title={savedQueueSnapshotsParked ? savedQueueSnapshotsTitle : 'Choose a saved queue to load into Queue Manager'}
-                          >
-                            {savedQueues.length <= 0 ? (
-                              <option value="" style={{ color: '#71717a', backgroundColor: '#0a0a0e' }}>
-                                No saved queues
-                              </option>
-                            ) : savedQueues.map((queue) => (
-                              <option
-                                key={`saved-queue-menu-${queue.id}`}
-                                value={queue.id}
-                                style={{ color: '#d4d4d8', backgroundColor: '#0a0a0e' }}
-                              >
-                                {`${queue.name} - ${queue.promptCount} prompts - Set ${queue.activeSetId}`}
-                              </option>
-                            ))}
-                          </UmbraSelectControl>
-                          <ChevronDown
-                            size={12}
-                            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400"
-                          />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => { void handleSaveCurrentQueueSnapshot?.(); }}
-                          disabled={savedQueueSnapshotsParked || !!savedQueueBusy || !hasCancelableQueueWork}
-                          className={`inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-                            savedQueueSnapshotsParked || !!savedQueueBusy || !hasCancelableQueueWork
-                              ? 'border-white/10 bg-white/[0.03] text-zinc-600 cursor-not-allowed'
-                              : 'border-emerald-400/35 bg-emerald-500/10 text-emerald-200 hover:border-emerald-300/55'
-                          }`}
-                          title={savedQueueSnapshotsParked ? savedQueueSnapshotsTitle : 'Save the active and pending queue prompts as a named queue file'}
-                        >
-                          {savedQueueBusy === 'save' ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { void handleLoadSavedQueueSnapshot?.(); }}
-                          disabled={savedQueueSnapshotsParked || !!savedQueueBusy || (!selectedSavedQueueId && savedQueues.length <= 0)}
-                          className={`inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-                            savedQueueSnapshotsParked || !!savedQueueBusy || (!selectedSavedQueueId && savedQueues.length <= 0)
-                              ? 'border-white/10 bg-white/[0.03] text-zinc-600 cursor-not-allowed'
-                              : 'border-cyan-400/35 bg-cyan-500/10 text-cyan-200 hover:border-cyan-300/55'
-                          }`}
-                          title={savedQueueSnapshotsParked ? savedQueueSnapshotsTitle : 'Load the selected saved queue as a paused queue'}
-                        >
-                          {savedQueueBusy === 'load' ? <Loader2 size={12} className="animate-spin" /> : <FolderOpen size={12} />}
-                          Load
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { void handleDeleteSavedQueueSnapshot?.(); }}
-                          disabled={savedQueueSnapshotsParked || !!savedQueueBusy || (!selectedSavedQueueId && savedQueues.length <= 0)}
-                          className={`inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-                            savedQueueSnapshotsParked || !!savedQueueBusy || (!selectedSavedQueueId && savedQueues.length <= 0)
-                              ? 'border-white/10 bg-white/[0.03] text-zinc-600 cursor-not-allowed'
-                              : 'border-red-400/30 bg-red-500/8 text-red-200 hover:border-red-300/50'
-                          }`}
-                          title={savedQueueSnapshotsParked ? savedQueueSnapshotsTitle : 'Delete the selected saved queue file'}
-                        >
-                          {savedQueueBusy === 'delete' ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                          Delete
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { void refreshSavedQueues?.(); }}
-                          disabled={savedQueueSnapshotsParked || !!savedQueueBusy}
-                          className={`inline-flex min-h-10 items-center justify-center rounded-lg border px-3 transition-colors ${
-                            savedQueueSnapshotsParked || !!savedQueueBusy
-                              ? 'border-white/10 bg-white/[0.03] text-zinc-600 cursor-not-allowed'
-                              : 'border-white/12 bg-white/[0.04] text-zinc-400 hover:border-white/25 hover:text-zinc-100'
-                          }`}
-                          title={savedQueueSnapshotsParked ? savedQueueSnapshotsTitle : 'Refresh saved queue files'}
-                        >
-                          <RefreshCw size={12} className={savedQueueBusy === 'list' ? 'animate-spin' : ''} />
-                        </button>
-                      </div>
-                    </div>
                   </div>
 
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.025] px-2.5 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500 tabular-nums">
@@ -1474,6 +1373,9 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                       <ListOrdered size={13} />
                       History
                     </button>
+                  <button type="button" onClick={() => { setPhoneActionsOpen(false); setQueueSettingsMenuOpen(false); setQueueManagerMenuOpen(false); onOpenSavedQueues?.(); }} className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-md border border-white/15 px-2 text-xs text-[var(--umbra-text)] hover:border-[var(--umbra-accent)]">
+                    <FolderOpen size={13} /> Saved Queues
+                  </button>
                     <button
                       onClick={() => { void queueCancelActionRef?.current?.(); }}
                       disabled={queueDestructiveActionBusy || !hasCancelableQueueWork}
