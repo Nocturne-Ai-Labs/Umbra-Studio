@@ -1,5 +1,50 @@
 # Changelog
 
+## v0.32.5
+
+### TL;DR - Setup After Updating
+
+Update and restart Umbra Studio, then refresh open browser and remote tabs to
+enable compact queue updates. Windows uses UmbraStudio.bat; Linux uses
+./start-umbra.sh. No ComfyUI or Umbra Nodes update, model download, or migration
+is required. Check Queue Manager before retrying a previous submission to avoid
+duplicates. This patch follows the large-upload transport fix in v0.32.4.
+
+### Large Queue Start Performance
+
+- Reuse the ComfyUI resource catalog and workflow graph validation within each
+  queue submission instead of rebuilding them for every image. Every prompt's
+  resource selections are still validated, including different models and
+  optional upscale resources.
+- Yield between validation batches so large submissions allow other backend
+  work to run during preflight.
+- Send repeated generation settings once per queue status snapshot, with
+  separate per-prompt seeds and setting references. Updated clients normalize
+  shared settings once instead of repeating that work for every prompt.
+- Negotiate compact snapshots with updated clients; older clients retain the
+  original snapshot format. Queue ordering, prompts, seeds, LoRA strengths,
+  wildcard Hold behavior, and generation execution are unchanged.
+
+### Validation And Packaging
+
+- Synthetic 3,500- and 10,000-prompt snapshot tests preserved settings, seeds,
+  edits, and progress. The 3,500-prompt fixture fell from about 25 MB to 437 KB
+  per snapshot, a 98.3% reduction for that repeated-settings fixture.
+- Production preflight tests confirmed one catalog build and one graph check
+  for 3,500 inputs while checking all 3,500 resource selections and rejecting
+  a missing model in the final prompt. Socket tests cover legacy compatibility.
+- Upload regression tests, frontend TypeScript, lint, and builds passed. These
+  are isolated tests, not a live 3,500-image generation run or verification of
+  every user's Start latency.
+- Windows and Linux packages exclude private datasets, wildcard libraries,
+  runtime data, and internal test fixtures.
+
+### Fixes And Quality-of-Life Recap
+
+- Improved: Large-queue Start preflight avoids redundant catalog and graph work.
+- Improved: Compact queue updates reduce transfer size and repeated processing.
+- Improved: Updated and older clients negotiate compatible status formats.
+
 ## v0.32.4
 
 ### TL;DR - Setup After Updating

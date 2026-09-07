@@ -976,6 +976,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         if (disposed || wsRef.current !== ws) return;
         ws.send(JSON.stringify({
           type: 'register',
+          compactQueueSnapshots: true,
           role: 'powerprompter',
           source: 'umbra-ui-workspace',
         }));

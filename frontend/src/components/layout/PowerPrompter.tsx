@@ -1,5 +1,6 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sendQueueUpload } from '../../../../shared/power-prompter/queueTransport';
+import { normalizeSnapshotGenerations } from '../../../../shared/power-prompter/queueSnapshotTransport';
 import { Bell, BellOff, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, FolderOpen, GripVertical, ImageIcon, ListChecks, ListOrdered, Loader2, Pause, Pencil, Play, Plus, Power, RefreshCw, Save, Search, Shuffle, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { PowerPrompterSidebar } from './PowerPrompterSidebar';
@@ -418,6 +419,7 @@ function buildBackendQueueSnapshotSignature(snapshot: any): string {
   const rawRequests = Array.isArray(snapshot?.requests) ? snapshot.requests : [];
   return JSON.stringify({
     paused: snapshot?.paused === true,
+    generations: snapshot?.generations,
     activeRequestId: String(snapshot?.activeRequestId || ''),
     activePromptIndex: Math.max(0, Math.floor(Number(snapshot?.activePromptIndex) || 0)),
     requests: rawRequests.map((request: any) => ({
@@ -437,6 +439,8 @@ function buildBackendQueueSnapshotSignature(snapshot: any): string {
         promptId: String(prompt?.promptId || '').trim(),
         seed: Number.isFinite(Number(prompt?.seed)) ? Math.max(0, Math.floor(Number(prompt.seed))) : 0,
         generation: prompt?.generation && typeof prompt.generation === 'object' ? prompt.generation : null,
+        generationIndex: prompt?.generationIndex,
+        generationSeed: prompt?.generationSeed,
         setId: clampQueueSetId(prompt?.setId ?? request?.activeSetId ?? 1),
         styleName: String(prompt?.styleName || '').trim(),
         outputSubfolder: String(prompt?.outputSubfolder || '').trim(),
@@ -5299,6 +5303,10 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
     backendQueueSnapshotSignatureRef.current = snapshotSignature;
     const now = Date.now();
     const activeBackendIds = new Set<string>();
+    const generationBase = normalizePowerPrompterGenerationControls(cardDocumentRef.current.generation);
+    const sharedGenerations = normalizeSnapshotGenerations(snapshot, (settings) =>
+      normalizePowerPrompterGenerationControls({ ...generationBase, ...settings })
+    );
     const terminalBackendIds = new Set<string>();
     const backendStackItems: QueueStackItem[] = [];
     let nextVisual: QueueVisualState | null = null;
@@ -5342,8 +5350,17 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         markQueuePromptStarted(requestId, promptIndex);
         markQueuePromptActivity(requestId, promptIndex);
       }
-      const generationBase = normalizePowerPrompterGenerationControls(cardDocumentRef.current.generation);
       const generationByPrompt = rawPrompts.map((entry: any) => {
+        const shared = Number.isInteger(entry?.generationIndex)
+          ? sharedGenerations[entry.generationIndex] : undefined;
+        if (shared) {
+          return {
+            ...shared,
+            seed: Number.isFinite(Number(entry?.seed))
+              ? Math.max(0, Math.floor(Number(entry.seed)))
+              : Math.max(0, Math.floor(Number(entry?.generationSeed) || 0)),
+          };
+        }
         const snapshotGeneration = entry?.generation && typeof entry.generation === 'object'
           ? entry.generation
           : null;
@@ -6697,6 +6714,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
           type: 'register',
           role: 'powerprompter',
           source: 'umbra-ui',
+          compactQueueSnapshots: true,
         });
         const restoredSnapshot = POWER_PROMPTER_QUEUE_SNAPSHOT_RECOVERY_ENABLED
           ? restoredPausedQueueRef.current

@@ -19,6 +19,7 @@ import { pathToFileURL } from 'url';
 import { createConnection } from 'net';
 import { ServerWebSocket } from 'bun';
 import { QueueUploadReceiver } from './shared/power-prompter/queueTransport';
+import { compactQueueSnapshot } from './shared/power-prompter/queueSnapshotTransport';
 import { ThumbnailService } from './backend/ThumbnailService';
 import { CIVITAI_PAGE_TIMEOUT_MS, CIVITAI_METADATA_TIMEOUT_MS, requestCivitaiPage, civitaiPageError } from './backend/CivitaiPageRequest';
 import { seedBundledWorkflowDirectory } from './backend/BundledWorkflowService';
@@ -4383,6 +4384,7 @@ function broadcastUmbraUiInpaintPreview(preview: unknown): void {
   }
 }
 interface PrompterClientMeta {
+  compactQueueSnapshots?: boolean;
   role: 'unknown' | 'powerprompter' | 'comfy_bridge';
   source: string;
   remote: boolean;
@@ -4806,9 +4808,18 @@ let prompterSyncState: PrompterSyncState = {
   },
   updatedAt: 0,
 };
+const compactQueueMessages = new WeakMap<object, object>();
 function sendWs(ws: ServerWebSocket<unknown>, data: any): boolean {
   try {
     if (ws.readyState !== 1) return false;
+    if (data?.type === 'queue_snapshot' && prompterClientMeta.get(ws)?.compactQueueSnapshots) {
+      let compact = compactQueueMessages.get(data);
+      if (!compact) {
+        compact = { ...data, snapshot: compactQueueSnapshot(data.snapshot) };
+        compactQueueMessages.set(data, compact);
+      }
+      data = compact;
+    }
     const serialized = JSON.stringify(data);
     const eventType = String(data?.type || '').trim();
     const shouldCompress = (ws.data as any)?.remoteClient === true
@@ -5331,9 +5342,7 @@ async function resolvePowerPrompterQueueReplacementPipeline(
     generationByPrompt: replacement.generationByPrompt,
   };
   const loaded = await loadRequestedPowerPrompterPipeline(pipelineState);
-  for (const generation of listPPQueueGenerationInputs(pipelineState)) {
-    await assertPPApiWorkflowExecutionReady(loaded, generation);
-  }
+  await assertPPQueueExecutionReady(loaded, pipelineState);
   return { pipeline, loaded };
 }
 
@@ -10200,10 +10209,9 @@ async function handlePrompterApiWorkflowQueueBatchRequest(
       group,
       loaded: await loadRequestedPowerPrompterPipeline(group.state),
     })));
+    const validationContext = await createPPQueueValidationContext();
     for (const { group, loaded } of resolvedGroups) {
-      for (const generation of listPPQueueGenerationInputs(group.state)) {
-        await assertPPApiWorkflowExecutionReady(loaded, generation);
-      }
+      await assertPPQueueExecutionReady(loaded, group.state, validationContext);
     }
   } catch (error: any) {
     sendWs(ws, {
@@ -10266,9 +10274,7 @@ async function handlePrompterApiWorkflowQueueRequest(
   let loaded: LoadedPPApiWorkflow;
   try {
     loaded = await loadRequestedPowerPrompterPipeline(data?.state);
-    for (const generation of listPPQueueGenerationInputs(data?.state)) {
-      await assertPPApiWorkflowExecutionReady(loaded, generation);
-    }
+    await assertPPQueueExecutionReady(loaded, data?.state);
   } catch (error: any) {
     prompterPendingQueueRequests.delete(requestId);
     sendWs(ws, {
@@ -10691,6 +10697,7 @@ function handlePrompterMessage(ws: ServerWebSocket<unknown>, data: any) {
     const meta = getPrompterMeta(ws);
     meta.role = normalizePrompterRole(data?.role);
     meta.source = String(data?.source || 'unknown');
+    meta.compactQueueSnapshots = data?.compactQueueSnapshots === true;
     if (meta.role === 'comfy_bridge') {
       const bridge = normalizePrompterBridgeCatalogEntry(data, {
         bridgeId: meta.bridgeId,
@@ -22335,20 +22342,44 @@ function formatUmbraUiQueueResourceIssue(issue: UmbraUiQueueResourceIssue): stri
   return `${issue.label} "${issue.value}" could not be verified against the live ComfyUI resource catalog.`;
 }
 
+async function createPPQueueValidationContext() {
+  const objectInfo = await getPPComfyObjectInfoForValidation();
+  return {
+    availableClassTypes: objectInfo ? new Set(Object.keys(objectInfo)) : null,
+    catalog: buildPPComfyResourceCatalog(objectInfo),
+    validatedWorkflows: new Set<LoadedPPApiWorkflow>(),
+  };
+}
+
+async function assertPPQueueExecutionReady(
+  loaded: LoadedPPApiWorkflow,
+  state: unknown,
+  context?: Awaited<ReturnType<typeof createPPQueueValidationContext>>,
+) {
+  const validationContext = context || await createPPQueueValidationContext();
+  const generations = listPPQueueGenerationInputs(state);
+  for (let index = 0; index < generations.length; index += 1) {
+    if (index % 32 === 0) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await assertPPApiWorkflowExecutionReady(loaded, generations[index], validationContext);
+  }
+}
+
 async function assertPPApiWorkflowExecutionReady(
   loaded: LoadedPPApiWorkflow,
   generationInput: unknown,
+  context?: Awaited<ReturnType<typeof createPPQueueValidationContext>>,
 ): Promise<void> {
-  const objectInfo = await getPPComfyObjectInfoForValidation();
-  const availableClassTypes = objectInfo ? new Set(Object.keys(objectInfo)) : null;
-  const validation = validatePPApiWorkflowDocument(loaded.document, availableClassTypes);
-  if (!validation.ok) {
-    throw new Error(`Selected generation pipeline has an invalid graph: ${validation.graph.issues.join(', ') || 'unknown graph issue'}.`);
+  const validationContext = context || await createPPQueueValidationContext();
+  if (!validationContext.validatedWorkflows.has(loaded)) {
+    const validation = validatePPApiWorkflowDocument(loaded.document, validationContext.availableClassTypes);
+    if (!validation.ok) {
+      throw new Error(`Selected generation pipeline has an invalid graph: ${validation.graph.issues.join(', ') || 'unknown graph issue'}.`);
+    }
+    const nodeError = getUmbraUiRuntimeNodeExecutionError(validation.runtimeNodes);
+    if (nodeError) throw new Error(nodeError);
+    validationContext.validatedWorkflows.add(loaded);
   }
-  const nodeError = getUmbraUiRuntimeNodeExecutionError(validation.runtimeNodes);
-  if (nodeError) throw new Error(nodeError);
-
-  const catalog = buildPPComfyResourceCatalog(objectInfo);
+  const catalog = validationContext.catalog;
   const generation = normalizePPGenerationControls(generationInput);
   const workflowResourceValues = resolvePPWorkflowResourceValues(
     loaded.item.resources,
