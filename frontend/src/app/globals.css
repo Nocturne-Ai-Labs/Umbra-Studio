@@ -389,7 +389,7 @@ body[data-dna="retro"] {
 }
 body[data-dna="retro"] img,
 body[data-dna="retro"] video,
-body[data-dna="retro"] canvas,
+body[data-dna="retro"] canvas:not([data-umbra-live-preview-frame]),
 body[data-dna="retro"] iframe,
 body[data-dna="retro"] [data-umbra-gallery-viewer-media],
 body[data-dna="retro"] .umbra-power-prompter-generation-preview {

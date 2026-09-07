@@ -5,6 +5,7 @@ import { Portal } from '@/components/ui/Portal';
 import { buildFsImageUrl } from '@/lib/utils';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import { NsfwPrivacyShield } from '@/components/privacy/NsfwPrivacyProvider';
+import { LiveGenerationPreview } from '@/components/privacy/LiveGenerationPreview';
 import { classifyUmbraPrompt } from '@/lib/nsfwPrivacy';
 import type {
   GenerationPreviewState,
@@ -99,7 +100,6 @@ export function PowerPrompterQueueManagerSidePane({
   queueOutputMenu,
   setQueueOutputMenu,
 }: PowerPrompterQueueManagerSidePaneProps) {
-  const generationPreviewIsNsfw = classifyUmbraPrompt(generationPreview?.prompt) === 'nsfw';
   const outputMenuRef = React.useRef<HTMLDivElement | null>(null);
   const [outputMenuStyle, setOutputMenuStyle] = React.useState<React.CSSProperties>({
     left: 0,
@@ -170,12 +170,13 @@ export function PowerPrompterQueueManagerSidePane({
             <div className="flex-1 min-h-0 p-3">
               <div data-umbra-queue-preview="" className="relative h-full rounded-lg border border-white/10 bg-black/35 overflow-hidden flex items-center justify-center">
                 {hasActiveGenerationPreview && String(generationPreview?.imageDataUrl || '').trim() ? (
-                  <img
-                    data-umbra-nsfw-media={generationPreviewIsNsfw ? '' : undefined}
+                  <LiveGenerationPreview
                     src={String(generationPreview?.imageDataUrl || '')}
+                    prompt={generationPreview?.prompt}
+                    streamKey={`${generationPreview?.requestId}:${generationPreview?.promptIndex}:${generationPreview?.promptId}`}
                     alt="Queue manager generation preview"
-                    className="umbra-power-prompter-generation-preview w-full h-full object-contain"
-                    loading="eager"
+                    className="h-full"
+                    showRenderingControl
                   />
                 ) : (
                   <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-center">
@@ -190,7 +191,6 @@ export function PowerPrompterQueueManagerSidePane({
                     </div>
                   </div>
                 )}
-                {hasActiveGenerationPreview && String(generationPreview?.imageDataUrl || '').trim() ? <NsfwPrivacyShield protectedMedia={generationPreviewIsNsfw} /> : null}
               </div>
             </div>
           </div>

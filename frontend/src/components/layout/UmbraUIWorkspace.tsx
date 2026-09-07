@@ -3308,6 +3308,34 @@ export function UmbraUIWorkspace() {
             img2imgDetailerActiveCount={detailerPipeline.filter((stage) => stage.enabled).length}
             img2imgDetailerStageCount={detailerPipeline.length}
             detailerPipeline={detailerPipeline}
+            onDetailerPipelineChange={handleDetailerPipelineChange}
+            detectorModels={modelCatalog.detectorModels}
+            hiresFix={{
+              enabled: hiresEnabled,
+              upscaler: hiresUpscaler,
+              resizeMode: hiresResizeMode,
+              scaleBy: hiresScaleBy,
+              targetWidth: Number(hiresTargetWidth) || 0,
+              targetHeight: Number(hiresTargetHeight) || 0,
+              steps: Number(hiresSteps) || 0,
+              denoise: hiresDenoise,
+              cfg: Number(hiresCfg) || 0,
+              samplerName: hiresSamplerName,
+              scheduler: hiresScheduler,
+            }}
+            onHiresFixChange={(next) => {
+              setHiresEnabled(next.enabled);
+              setHiresUpscaler(next.upscaler);
+              setHiresResizeMode(next.resizeMode);
+              setHiresScaleBy(next.scaleBy);
+              setHiresTargetWidth(String(next.targetWidth));
+              setHiresTargetHeight(String(next.targetHeight));
+              setHiresSteps(String(next.steps));
+              setHiresDenoise(next.denoise);
+              setHiresCfg(String(next.cfg));
+              setHiresSamplerName(next.samplerName);
+              setHiresScheduler(next.scheduler);
+            }}
             tiledVae={tiledVae}
             onTiledVaeChange={setTiledVae}
             onImg2imgDetailersEnabledChange={(enabled) => {

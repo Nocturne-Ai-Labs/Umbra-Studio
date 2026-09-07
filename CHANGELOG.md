@@ -1,5 +1,74 @@
 # Changelog
 
+## v0.32.7
+
+### TL;DR - Setup After Updating
+
+Update and restart Umbra Studio, then refresh open browser and remote tabs.
+Windows uses UmbraStudio.bat; Linux uses ./start-umbra.sh. This patch requires
+no new models, ComfyUI update, or Umbra Nodes update. Existing hires-fix and
+detailer model/node requirements still apply when those stages are enabled.
+
+Inpaint now exposes Hires Fix and Detailer Pipeline controls for supported
+pipelines. Review these controls after importing an image, and disable any
+extra passes you do not want before choosing Generate Inpaint.
+
+### Editable Inpaint Post-Processing
+
+- Show imported hires-fix settings in Inpaint, including the on/off switch,
+  upscaler, resize mode, scale or dimensions, steps, denoise, CFG, sampler,
+  and scheduler where supported by the selected pipeline.
+- Expose the existing ordered Detailer Pipeline controls so imported stages
+  can be enabled, disabled, adjusted, added, reordered, or removed. Detector
+  and SAM model choices use the shared model catalog.
+- Use current detailer and hires-fix values when submitting an inpaint job.
+  Detailer changes no longer depend on another generation setting changing
+  before the submission callback sees the updated stage list.
+- Filter unsupported optional stages from frontend submissions and enforce
+  the selected pipeline's optional-stage policy again at the backend boundary.
+- Retain the final masked composite after optional hires-fix and detailer
+  passes. The existing inpaint mask-preservation behavior is unchanged.
+
+### Steadier Live Previews
+
+- Decode incoming image previews into a reusable canvas while keeping the
+  last successfully rendered frame visible until the next frame is ready.
+- Keep at most one image decode in flight and retain only the latest pending
+  frame, avoiding a growing backlog when preview updates arrive quickly.
+- Add a pixel/smooth rendering toggle to Queue Manager's main live preview.
+  Pixel rendering is the default; video previews retain their existing path.
+- Reset previews when the generation changes and release canvas resources
+  when the preview unmounts or becomes protected. Locked and blurred media
+  continue to follow Umbra's existing privacy controls.
+- This changes how Umbra displays received previews, not ComfyUI's preview
+  decoder, source resolution, sampling, or final image quality.
+
+### Validation And Packaging
+
+- Inpaint regression checks cover imported settings, edited values, disabled
+  stages, stage removal, supported capabilities, and final mask preservation.
+  Browser checks inspect actual multipart submissions without generating images.
+- Verified control reachability on desktop, tablet, and phone layouts, along
+  with frontend TypeScript, lint, and production-build checks.
+- Preview checks cover delayed and invalid frames, burst coalescing, job
+  changes, privacy transitions, resource cleanup, and responsive layouts.
+  One isolated development generation also verified live preview progression;
+  this is not a claim of faster model inference or a full pipeline benchmark.
+- Windows and Linux packages exclude private prompts, wildcards, datasets,
+  model weights, runtime state, and internal test fixtures.
+- Linux managed tools still require python3-dev, build-essential, libgl1,
+  and libglib2.0-0, or distribution equivalents. Optional AI Toolkit setup
+  still requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Imported detailers running in Inpaint without visible editing controls.
+- Fixed: Stale detailer settings reaching subsequent inpaint submissions.
+- Fixed: Unsupported optional stages leaking into inpaint requests.
+- Improved: Hires Fix and Detailer Pipeline settings are directly accessible in Inpaint.
+- Improved: Live image previews retain the last good frame while decoding updates.
+- Improved: Queue Manager offers pixel and smooth live-preview rendering.
+
 ## v0.32.6
 
 ### TL;DR - Setup After Updating

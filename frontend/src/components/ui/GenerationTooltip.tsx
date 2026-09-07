@@ -279,6 +279,7 @@ export function GenerationTooltip({ backend, children, delay = 500, powerPrompte
             <LiveGenerationPreview
               src={previewImageDataUrl}
               prompt={effectivePowerPrompterQueue?.previewPrompt}
+              streamKey={effectivePowerPrompterQueue?.previewPromptId}
               alt="ComfyUI generation preview"
               className="h-[180px]"
             />

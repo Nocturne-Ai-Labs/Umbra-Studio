@@ -19587,6 +19587,12 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
       parseInpaintJsonField('detailerPipeline', []),
       undefined,
     );
+    const optionalStagePolicy = resolveUmbraUiOptionalStagePolicy(
+      resolvedPipeline.pipeline.capabilities,
+      hiresFix,
+      detailerPipeline,
+      { enabled: false },
+    );
     const requestedWidth = Math.max(64, Math.min(16384, Math.round(finiteNumberOrFallback(form.get('width'), 1024))));
     const requestedHeight = Math.max(64, Math.min(16384, Math.round(finiteNumberOrFallback(form.get('height'), 1024))));
     const resolutionCapability = resolvedPipeline.pipeline.capabilities?.resolution;
@@ -19676,8 +19682,12 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
       softInpaintTransitionContrast: Math.max(0.25, Math.min(8, finiteNumberOrFallback(form.get('softInpaintTransitionContrast'), 2))),
       softInpaintMaskInfluence: Math.max(0, Math.min(1, finiteNumberOrFallback(form.get('softInpaintMaskInfluence'), 0))),
       tiledVae,
-      hiresFix,
-      detailerPipeline: detailerPipeline.map((stage) => ({ ...stage }) as Record<string, unknown>),
+      hiresFix: {
+        ...hiresFix,
+        enabled: optionalStagePolicy.hiresFix.enabled,
+        resizeMode: optionalStagePolicy.hiresFix.resizeMode || 'scale',
+      },
+      detailerPipeline: optionalStagePolicy.detailerPipeline.map((stage) => ({ ...stage }) as Record<string, unknown>),
       controlLayers,
       referenceLayers,
     };

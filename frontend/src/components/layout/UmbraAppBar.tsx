@@ -2539,6 +2539,7 @@ export const UmbraAppBar = () => {
                     <LiveGenerationPreview
                       src={comfySidebarPreviewImage}
                       prompt={comfySidebarPreviewPrompt}
+                      streamKey={comfyAppPreviewImage ? comfyAppPreview?.imagePromptId : powerPrompterQueueStatus?.previewPromptId}
                       mimeType={comfyAppPreviewImage ? comfyAppPreview?.mimeType : undefined}
                       onOpen={handleOpenSidebarGenerationPreview}
                       className="mt-2 h-56 rounded-md border border-white/10"

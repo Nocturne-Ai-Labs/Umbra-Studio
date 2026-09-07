@@ -86,6 +86,8 @@ import { UmbraInpaintProjectBrowserModal } from '@/components/umbra-ui/UmbraInpa
 import { UmbraMobileWorkspaceSheet } from '@/components/umbra-ui/UmbraMobileWorkspaceSheet';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
 import { UmbraTiledVaeControls } from '@/components/umbra-ui/UmbraTiledVaeControls';
+import { UmbraHiresFixControls } from '@/components/umbra-ui/UmbraHiresFixControls';
+import { UmbraDetailerPipelineControls } from '@/components/umbra-ui/UmbraDetailerPipelineControls';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import {
   composeUmbraUiPromptWithLoras,
@@ -99,6 +101,7 @@ import {
 } from '@/lib/umbraUiPromptShortcuts';
 import type {
   PowerPrompterDetailerStage,
+  PowerPrompterHiresFixControls,
   PowerPrompterModelType,
   PowerPrompterSeedControlMode,
   PowerPrompterSeedIncrement,
@@ -269,6 +272,10 @@ import type {
   UmbraUiPipelineCapabilities,
   UmbraUiPipelineControlCapability,
   UmbraUiPipelineResolutionCapability,
+} from '../../../../shared/umbra-ui/pipelineTypes';
+import {
+  filterUmbraUiDetailerStages,
+  resolveUmbraUiHiresResizeMode,
 } from '../../../../shared/umbra-ui/pipelineTypes';
 
 type CanvasTool = UmbraCanvasPointerTool;
@@ -651,6 +658,10 @@ export interface UmbraInpaintWorkspaceProps {
   img2imgDetailerActiveCount: number;
   img2imgDetailerStageCount: number;
   detailerPipeline: PowerPrompterDetailerStage[];
+  onDetailerPipelineChange: (stages: PowerPrompterDetailerStage[]) => void;
+  detectorModels: string[];
+  hiresFix: PowerPrompterHiresFixControls;
+  onHiresFixChange: (settings: PowerPrompterHiresFixControls) => void;
   tiledVae: PowerPrompterTiledVaeControls;
   onTiledVaeChange: (value: PowerPrompterTiledVaeControls) => void;
   onImg2imgDetailersEnabledChange: (enabled: boolean) => void;
@@ -2458,6 +2469,10 @@ export function UmbraInpaintWorkspace({
   img2imgDetailerActiveCount,
   img2imgDetailerStageCount,
   detailerPipeline,
+  onDetailerPipelineChange,
+  detectorModels,
+  hiresFix,
+  onHiresFixChange,
   tiledVae,
   onTiledVaeChange,
   onImg2imgDetailersEnabledChange,
@@ -9363,7 +9378,21 @@ export function UmbraInpaintWorkspace({
         softInpaintTransitionContrast,
         softInpaintMaskInfluence,
         tiledVae,
-        detailerPipeline: detailerPipeline.map((stage) => ({ ...stage })),
+        hiresFix: {
+          ...hiresFix,
+          enabled: capabilities.hiresFix.support === 'adjustable'
+            && !!resolveUmbraUiHiresResizeMode(capabilities.hiresFix, hiresFix.resizeMode)
+            && hiresFix.enabled,
+          resizeMode: resolveUmbraUiHiresResizeMode(capabilities.hiresFix, hiresFix.resizeMode) || 'scale',
+          upscaler: capabilities.hiresFix.controls.upscaler ? hiresFix.upscaler : 'Latent',
+          steps: capabilities.hiresFix.controls.steps ? hiresFix.steps : 0,
+          denoise: capabilities.hiresFix.controls.denoise ? hiresFix.denoise : 0.35,
+          cfg: capabilities.hiresFix.controls.cfg ? hiresFix.cfg : 0,
+          samplerName: capabilities.hiresFix.controls.sampler ? hiresFix.samplerName : 'use_same',
+          scheduler: capabilities.hiresFix.controls.scheduler ? hiresFix.scheduler : 'use_same',
+        },
+        detailerPipeline: filterUmbraUiDetailerStages(capabilities.detailerStages, detailerPipeline)
+          .map((stage) => ({ ...stage })),
         controlLayers: [],
         referenceLayers: [],
       });
@@ -9413,6 +9442,8 @@ export function UmbraInpaintWorkspace({
     denoise,
     differentialDiffusionAvailable,
     differentialStrength,
+    detailerPipeline,
+    hiresFix,
     softInpaintCompositeAvailable,
     softInpaintEnabled,
     softInpaintMaskInfluence,
@@ -9798,6 +9829,58 @@ export function UmbraInpaintWorkspace({
               {capabilities.scheduler.support === 'adjustable' ? <label className="space-y-1.5"><span className={labelClass}>Scheduler</span><UmbraSelect value={scheduler} onValueChange={onSchedulerChange} ariaLabel="Scheduler" menuTitle="Scheduler" options={schedulerOptions.map((option) => ({ value: option, label: option }))} /></label> : null}
             </div>
           ) : null}
+
+          {capabilities.hiresFix.support === 'adjustable' ? (
+            <UmbraHiresFixControls
+              enabled={hiresFix.enabled}
+              onEnabledChange={(enabled) => onHiresFixChange({ ...hiresFix, enabled })}
+              upscaler={hiresFix.upscaler}
+              onUpscalerChange={(upscaler) => onHiresFixChange({ ...hiresFix, upscaler })}
+              upscaleModels={upscaleModels}
+              resizeMode={hiresFix.resizeMode}
+              onResizeModeChange={(resizeMode) => onHiresFixChange({ ...hiresFix, resizeMode })}
+              scaleBy={hiresFix.scaleBy}
+              onScaleByChange={(scaleBy) => onHiresFixChange({ ...hiresFix, scaleBy })}
+              targetWidth={String(hiresFix.targetWidth)}
+              onTargetWidthChange={(value) => onHiresFixChange({ ...hiresFix, targetWidth: Number(value) || 0 })}
+              targetHeight={String(hiresFix.targetHeight)}
+              onTargetHeightChange={(value) => onHiresFixChange({ ...hiresFix, targetHeight: Number(value) || 0 })}
+              baseWidth={processingSize.width}
+              baseHeight={processingSize.height}
+              steps={String(hiresFix.steps)}
+              onStepsChange={(value) => onHiresFixChange({ ...hiresFix, steps: Number(value) || 0 })}
+              denoise={hiresFix.denoise}
+              onDenoiseChange={(denoise) => onHiresFixChange({ ...hiresFix, denoise })}
+              cfg={String(hiresFix.cfg)}
+              onCfgChange={(value) => onHiresFixChange({ ...hiresFix, cfg: Number(value) || 0 })}
+              samplerName={hiresFix.samplerName}
+              onSamplerNameChange={(samplerName) => onHiresFixChange({ ...hiresFix, samplerName })}
+              scheduler={hiresFix.scheduler}
+              onSchedulerChange={(scheduler) => onHiresFixChange({ ...hiresFix, scheduler })}
+              samplerOptions={samplerOptions}
+              schedulerOptions={schedulerOptions}
+              resizeModes={capabilities.hiresFix.resizeModes}
+              showUpscaler={capabilities.hiresFix.controls.upscaler}
+              showSteps={capabilities.hiresFix.controls.steps}
+              showDenoise={capabilities.hiresFix.controls.denoise}
+              showCfg={capabilities.hiresFix.controls.cfg}
+              showSampler={capabilities.hiresFix.controls.sampler}
+              showScheduler={capabilities.hiresFix.controls.scheduler}
+            />
+          ) : null}
+          <UmbraDetailerPipelineControls
+            stages={detailerPipeline}
+            onStagesChange={onDetailerPipelineChange}
+            detectorModels={detectorModels}
+            samModels={samModels}
+            samplerOptions={samplerOptions}
+            schedulerOptions={schedulerOptions}
+            upscaleModels={upscaleModels}
+            showDetailer={capabilities.detailerStages.support === 'adjustable'}
+            showOutputUpscale={false}
+            allowCustomStages={capabilities.detailerStages.customStages}
+            showStageControls={capabilities.detailerStages.customStages}
+          />
 
           <div className="grid grid-cols-[80px_minmax(0,1fr)] gap-2 border-t border-white/10 pt-3">
             <label className="space-y-1.5">

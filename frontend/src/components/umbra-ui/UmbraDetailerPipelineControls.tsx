@@ -97,8 +97,8 @@ interface UmbraDetailerPipelineControlsProps {
   samplerOptions: string[];
   schedulerOptions: string[];
   upscaleModels: string[];
-  outputUpscale: PowerPrompterOutputUpscaleControls;
-  onOutputUpscaleChange: (settings: PowerPrompterOutputUpscaleControls) => void;
+  outputUpscale?: PowerPrompterOutputUpscaleControls;
+  onOutputUpscaleChange?: (settings: PowerPrompterOutputUpscaleControls) => void;
   showDetailer?: boolean;
   showOutputUpscale?: boolean;
   allowCustomStages?: boolean;
@@ -115,8 +115,8 @@ export function UmbraDetailerPipelineControls({
   samplerOptions,
   schedulerOptions,
   upscaleModels,
-  outputUpscale,
-  onOutputUpscaleChange,
+  outputUpscale = { enabled: false, modelName: '', maxDimension: 0 },
+  onOutputUpscaleChange = () => {},
   showDetailer = true,
   showOutputUpscale = true,
   allowCustomStages = true,
