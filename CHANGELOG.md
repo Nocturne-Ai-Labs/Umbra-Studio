@@ -1,5 +1,102 @@
 # Changelog
 
+## v0.32.8
+
+### TL;DR - Setup After Updating
+
+Update and restart Umbra Studio, then refresh open browser and remote tabs.
+Windows uses `UmbraStudio.bat`; Linux uses `./start-umbra.sh`. This patch
+requires no new models, ComfyUI update, or Umbra Nodes update. Existing
+pipeline, upscaler, and automatic-censor dependencies still apply.
+
+Pin a destination in Gallery, then choose it from the task's **Pinned folder**
+selector. Selected pins now receive task-specific subfolders. In particular,
+TXT2IMG pinned output uses `txt2img/<date>` instead of placing images directly
+in the pin. Existing files are not moved. Default output and replace-source
+options retain their existing behavior; Power Prompter retains its date,
+set, and style layout. Unavailable pins report an error instead of silently
+sending new output elsewhere.
+
+### Consistent Output Destinations And Action Bars
+
+- Share Gallery-pinned output selection across TXT2IMG, IMG2IMG, Inpaint,
+  Canvas, Video, Upscale, Image Censor, Image Watermark, Video Watermark,
+  and Video to GIF. Remote clients can select approved Gallery pins without
+  needing a host operating-system folder dialog.
+- Keep outputs separated under the chosen pin by task: `txt2img`, `img2img`,
+  `inpainting`, `canvas`, `Video`, `Upscaled`, `Censored`, `Watermarked`, or
+  `GIF`. Image-generation and video destinations include their date folders.
+- Remember task-specific selections between sessions. Choosing a destination
+  for one task does not replace another task's choice.
+- Put Generate beside the pinned-folder selector in the IMG2IMG bottom bar.
+  Add persistent bottom action bars to Inpaint and Canvas rather than hiding
+  generation controls at the bottom of scrolling settings panels.
+- Keep relevant result actions alongside generation controls and remove the
+  redundant Open Power Prompter shortcut from image generation controls.
+- Keep the phone Inpaint Layers control above the footer, including when
+  footer controls wrap onto multiple rows.
+- Publish completed video copies into the selected pin while preserving
+  ComfyUI's original files for history and continuation. This intentionally
+  uses additional disk space for the published copy.
+
+### Reusable LoRA Stack Presets
+
+- Save and reload named LoRA stacks from a dedicated preset modal, with an
+  optional uploaded thumbnail, rename, and delete controls.
+- Retain individual enabled states and model/CLIP strengths. Presets are
+  available across pipelines; model compatibility requirements still apply.
+- Use revision-checked, atomic preset writes to prevent concurrent edits
+  from silently overwriting each other.
+- Give desktop generation sidebars more room when the application sidebar
+  is collapsed, and improve LoRA syntax and prompt-toolbar layout.
+
+### Queue Controls And Live Inpaint Previews
+
+- Allow supported Umbra UI jobs to be skipped or removed from Queue Manager,
+  using their owning generation service rather than editing Power Prompter
+  queues as a substitute. Controls reflect job state and cancellation support.
+- Show the unfinished queue count on the Queue Manager button.
+- Display live sampling previews in both Inpaint and Canvas while retaining
+  their editing workspace. Preview visibility follows media privacy settings.
+
+### Unified Alerts And Safer Tag Insertion
+
+- Replace scattered sound controls with shared alert settings: a master
+  switch, volume, tone style, sound preview, and separate submission,
+  completion, and failure events.
+- Coalesce repeated events and coordinate sound playback between tabs.
+  Previously loaded queue history does not replay as fresh notifications.
+- Remove routine generation-submission toasts and keep errors visible even
+  when routine notifications are muted. Notification history remains available.
+- Catalog insertion preserves existing prompt text. Insert at the remembered
+  cursor, after a selected range without deleting it, or append when no valid
+  cursor is available. Add comma separation without consuming existing text.
+
+### Validation And Packaging
+
+- Checked frontend TypeScript, lint, production builds, output-routing and
+  request contracts, preset persistence, queue actions, alert behavior,
+  non-destructive insertion, and responsive control layouts.
+- Output-routing checks include approved remote pins, unavailable pins,
+  per-task folders, video-copy retries, and unchanged Power Prompter layouts.
+  These checks do not claim a new full-model generation benchmark.
+- Windows and Linux releases exclude private prompts, wildcards, datasets,
+  model weights, runtime state, and internal test fixtures.
+- Linux managed tools still require `python3-dev`, `build-essential`, `libgl1`,
+  and `libglib2.0-0`, or distribution equivalents. Optional AI Toolkit setup
+  still requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Missing Generate in the IMG2IMG bottom action bar.
+- Fixed: Inpaint and Canvas generation controls hidden in scrolling panels.
+- Fixed: Inconsistent pinned output destinations across generation and Extras.
+- Fixed: Tag Catalog insertion replacing text that users already entered.
+- Fixed: Duplicate or stale alert playback and inconsistent notification controls.
+- Improved: Reusable LoRA stacks with thumbnails and safe preset persistence.
+- Improved: Queue Manager job actions, queue counts, and inpaint live previews.
+- Improved: Desktop spacing and unobstructed phone/tablet generation controls.
+
 ## v0.32.7
 
 ### TL;DR - Setup After Updating

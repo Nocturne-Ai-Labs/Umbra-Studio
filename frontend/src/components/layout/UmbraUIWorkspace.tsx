@@ -1,8 +1,10 @@
 'use client';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
-import { getUmbraUiPinnedFolderLabel, normalizeUmbraUiPinnedFolder } from '@/lib/pinnedOutputFolders';
+import { insertCatalogTagsAtCursor } from '@/lib/powerPrompterPromptInsertion';
+import { normalizeUmbraUiPinnedFolder } from '@/lib/pinnedOutputFolders';
 import React from 'react';
+import { UmbraPinnedOutputControl, usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
 import {
   Activity,
   Bot,
@@ -70,6 +72,7 @@ import { PowerPrompterSearchPanel } from '@/components/layout/PowerPrompterSearc
 import { UmbraCheckpointControls } from '@/components/umbra-ui/UmbraCheckpointControls';
 import { UmbraWorkflowResourceControls } from '@/components/umbra-ui/UmbraWorkflowResourceControls';
 import { UmbraLoraStackControls } from '@/components/umbra-ui/UmbraLoraStackControls';
+import { UmbraQueueManagerButton } from '@/components/umbra-ui/UmbraQueueManagerButton';
 import { UmbraPositivePromptEditor } from '@/components/umbra-ui/UmbraPositivePromptEditor';
 import { UmbraAgentPromptPanel } from '@/components/umbra-ui/UmbraAgentPromptPanel';
 import { UmbraInlineAgentPrompt } from '@/components/umbra-ui/UmbraInlineAgentPrompt';
@@ -413,7 +416,6 @@ interface PipelineControlsProps {
   placement: UmbraQueuePlacement;
   onPlacementChange: (placement: UmbraQueuePlacement) => void;
   effectivePlacement: UmbraQueuePlacement;
-  onOpenPowerPrompter: () => void;
   onSendControlsToPowerPrompter?: () => void;
   sendControlsDisabled?: boolean;
   sendControlsTitle?: string;
@@ -431,7 +433,6 @@ function PipelineControls({
   placement,
   onPlacementChange,
   effectivePlacement,
-  onOpenPowerPrompter,
   onSendControlsToPowerPrompter,
   sendControlsDisabled = false,
   sendControlsTitle = 'Apply these TXT2IMG generation controls to the active PPCard file',
@@ -505,14 +506,6 @@ function PipelineControls({
             Send Controls to Power Prompter
           </button>
         ) : null}
-        <button
-          type="button"
-          onClick={onOpenPowerPrompter}
-          className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-white/10 bg-white/[0.025] text-[9px] font-black uppercase tracking-[0.12em] text-zinc-400 transition-colors hover:border-cyan-300/30 hover:text-cyan-100"
-        >
-          <ListPlus size={12} />
-          Open Power Prompter
-        </button>
       </div>
     </div>
   );
@@ -526,9 +519,11 @@ export function UmbraUIWorkspace() {
   const lastCatalogSelectionRef = React.useRef<{ target: HTMLTextAreaElement; start: number; end: number } | null>(null);
   const catalogSettingsRef = React.useRef<Record<string, unknown>>({});
   const activeWorkspace = useStore((state) => state.activeWorkspace);
+  const appSidebarCollapsed = useStore((state) => state.ui.isAppBarCollapsed);
   const comfyConnected = useStore((state) => state.connections.comfyui === 'connected');
   const setActiveWorkspace = useStore((state) => state.setActiveWorkspace);
   const showToast = useStore((state) => state.showToast);
+  const [img2imgOutputFolder, setImg2imgOutputFolder] = usePinnedOutputFolder('img2img');
   const pinnedFolderSetting = useStore((state) => state.appSettings['library.pinnedFolders']);
   const [remoteMode, setRemoteMode] = React.useState(() => (
     typeof document === 'undefined' ? 'desktop' : document.documentElement.dataset.umbraRemoteMode || 'desktop'
@@ -579,7 +574,7 @@ export function UmbraUIWorkspace() {
   );
   const activeTxt2imgOutputFolder = React.useMemo(() => {
     const selectedKey = txt2imgOutputFolder.toLowerCase();
-    return pinnedOutputFolders.find((folder) => folder.toLowerCase() === selectedKey) || '';
+    return pinnedOutputFolders.find((folder) => folder.toLowerCase() === selectedKey) || txt2imgOutputFolder;
   }, [pinnedOutputFolders, txt2imgOutputFolder]);
   const canvasEnabled = remoteMode !== 'phone';
   const [activeMode, setActiveMode] = React.useState<UmbraGenerationMode>(() => (
@@ -736,7 +731,7 @@ export function UmbraUIWorkspace() {
 
   const handleCatalogInsert = React.useCallback((
     text: string,
-    options: { replaceCurrentToken?: boolean; appendComma?: boolean } = {},
+    options: { preserveExistingText?: boolean; appendComma?: boolean } = {},
   ) => {
     const cleanText = String(text || '').trim();
     if (!cleanText) return;
@@ -751,27 +746,15 @@ export function UmbraUIWorkspace() {
     if (target) {
       const current = target.value;
       const savedSelection = lastCatalogSelectionRef.current?.target === target ? lastCatalogSelectionRef.current : null;
-      const selectionStart = savedSelection?.start ?? target.selectionStart ?? current.length;
-      const selectionEnd = savedSelection?.end ?? target.selectionEnd ?? selectionStart;
-      let replaceStart = selectionStart;
-      let replaceEnd = selectionEnd;
-      if (options.replaceCurrentToken && selectionStart === selectionEnd) {
-        const previousComma = current.lastIndexOf(',', Math.max(0, selectionStart - 1));
-        const previousLine = current.lastIndexOf('\n', Math.max(0, selectionStart - 1));
-        replaceStart = Math.max(previousComma, previousLine) + 1;
-        while (replaceStart < selectionStart && /\s/.test(current[replaceStart] || '')) replaceStart += 1;
-        const nextComma = current.indexOf(',', selectionStart);
-        const nextLine = current.indexOf('\n', selectionStart);
-        const boundaries = [nextComma, nextLine].filter((value) => value >= 0);
-        replaceEnd = boundaries.length > 0 ? Math.min(...boundaries) : selectionEnd;
-      }
-      const suffix = options.appendComma ? ', ' : '';
-      const insertion = `${cleanText}${suffix}`;
-      const nextValue = `${current.slice(0, replaceStart)}${insertion}${current.slice(replaceEnd)}`;
+      const selectionStart = savedSelection?.start ?? current.length;
+      const selectionEnd = savedSelection?.end ?? selectionStart;
+      const insertion = insertCatalogTagsAtCursor(current, cleanText, selectionStart, selectionEnd, options.appendComma !== false);
+      if (!insertion) return;
+      const nextValue = insertion.nextValue;
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
       setter?.call(target, nextValue);
       target.dispatchEvent(new Event('input', { bubbles: true }));
-      const caret = replaceStart + insertion.length;
+      const caret = insertion.selectionStart;
       lastCatalogSelectionRef.current = { target, start: caret, end: caret };
       window.requestAnimationFrame(() => {
         target?.focus({ preventScroll: true });
@@ -786,7 +769,7 @@ export function UmbraUIWorkspace() {
           : current[0]?.id;
         return current.map((segment) => segment.id === targetId ? {
           ...segment,
-          text: `${segment.text.trim().replace(/,\s*$/, '')}${segment.text.trim() ? ', ' : ''}${cleanText}`,
+          text: insertCatalogTagsAtCursor(segment.text, cleanText, segment.text.length, segment.text.length, options.appendComma !== false)?.nextValue ?? segment.text,
         } : segment);
       });
       return;
@@ -2227,7 +2210,7 @@ export function UmbraUIWorkspace() {
           : imageCapabilities.resolution.defaultHeight || Number(height),
         batchSize,
         outputMode: activeImageFeature,
-        outputFolder: activeImageFeature === 'txt2img' ? activeTxt2imgOutputFolder : '',
+        outputFolder: activeImageFeature === 'txt2img' ? activeTxt2imgOutputFolder : img2imgOutputFolder,
         sourceImagePath: img2imgSource.path,
         sourceImageName: img2imgSource.name,
         denoise: img2imgDenoise,
@@ -2288,15 +2271,6 @@ export function UmbraUIWorkspace() {
       if (seedIsAdjustable) {
         setSeed(String(advanceUmbraUiSeed(queuedSeed, seedMode, seedIncrement, batchSize)));
       }
-      const jobLabel = activeImageFeature === 'img2img' ? 'IMG2IMG job' : 'Image';
-      const placementMessage = effectivePlacement === 'next'
-        ? 'will run after the current Power Prompter image.'
-        : effectivePlacement === 'interrupt'
-          ? 'will run as soon as the current Power Prompter image stops.'
-          : queueSummary.powerPrompterActive
-            ? 'was added to the end of the Power Prompter queue.'
-            : 'was submitted for generation.';
-      showToast(`${jobLabel} ${placementMessage}`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to queue image.', 'error');
     } finally {
@@ -2327,6 +2301,7 @@ export function UmbraUIWorkspace() {
     isQueueing,
     activeLoras,
     activeTxt2imgOutputFolder,
+    img2imgOutputFolder,
     modelFamily,
     modelType,
     negativePrompt,
@@ -2690,7 +2665,6 @@ export function UmbraUIWorkspace() {
       autoStart,
     });
     setActiveMode('extras');
-    showToast(autoStart ? 'Image sent to Extras for immediate upscaling.' : 'Image added to the upscale batch.', 'success');
   }, [latestSavedImage, showToast]);
 
   const sendLatestToImg2Img = React.useCallback(() => {
@@ -2874,7 +2848,6 @@ export function UmbraUIWorkspace() {
       placement={imageQueuePlacement.placement}
       onPlacementChange={imageQueuePlacement.setPlacement}
       effectivePlacement={imageQueuePlacement.effectivePlacement}
-      onOpenPowerPrompter={() => setActiveWorkspace('powerprompter')}
       onSendControlsToPowerPrompter={activeMode === 'image'
         ? handleSendGenerationControlsToPowerPrompter
         : undefined}
@@ -2888,7 +2861,7 @@ export function UmbraUIWorkspace() {
       queueLabel={activeMode === 'img2img' ? 'Generate IMG2IMG' : 'Generate Image'}
       queueDisabled={imageQueueDisabled}
       queueTitle={imageQueueTitle}
-      showGenerateButton={activeMode === 'img2img'}
+      showGenerateButton={false}
       flushTop={activeMode === 'image'}
     />
   );
@@ -2904,6 +2877,7 @@ export function UmbraUIWorkspace() {
       onFocusCapture={handleCatalogFocusCapture}
       onSelectCapture={handleCatalogFocusCapture}
       data-umbra-ui-workspace=""
+      data-appbar-collapsed={appSidebarCollapsed ? '1' : '0'}
       className="relative flex h-full min-h-0 flex-col bg-[var(--umbra-bg)] text-zinc-100"
     >
       <header data-umbra-ui-header="" className="flex min-h-14 flex-wrap items-center gap-3 border-b border-white/10 bg-black/30 px-4 py-1.5 max-[1140px]:gap-2 max-[1140px]:px-3">
@@ -3021,23 +2995,7 @@ export function UmbraUIWorkspace() {
           </div>
         )}
         <div data-umbra-ui-header-actions="" className="ml-auto flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            data-umbra-ui-queue-manager-button=""
-            onClick={openQueueManager}
-            aria-label="Queue Manager"
-            aria-pressed={activeMode === 'queue'}
-            title="Queue Manager"
-            className={cn(
-              'inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-[10px] font-black uppercase transition-colors',
-              activeMode === 'queue'
-                ? 'border-[var(--umbra-accent)] bg-[var(--umbra-panel-bg)] text-[var(--umbra-accent)]'
-                : 'border-white/15 bg-black/20 text-[var(--umbra-text)] hover:border-[var(--umbra-accent)]',
-            )}
-          >
-            <ListOrdered size={15} />
-            <span data-umbra-ui-queue-manager-label="">Queue Manager</span>
-          </button>
+          <UmbraQueueManagerButton remaining={queueSummary.remaining} active={activeMode === 'queue'} onClick={openQueueManager} />
           <UmbraQueueEmergencyControls
             queueSummary={queueSummary}
             busyAction={queueControlBusy}
@@ -3072,6 +3030,7 @@ export function UmbraUIWorkspace() {
       <div
         data-umbra-ui-body=""
         data-umbra-ui-active-mode={activeMode}
+        data-video-storyboard={videoStoryboardOpen ? 'open' : 'closed'}
         data-tablet-generation={tabletPanels.generation ? 'shown' : 'hidden'}
         data-tablet-prompt={tabletPanels.prompt ? 'shown' : 'hidden'}
         className={cn(
@@ -3684,7 +3643,7 @@ export function UmbraUIWorkspace() {
             </div>
             {activeMode === 'image' || activeMode === 'img2img' ? (
               <div data-umbra-ui-preview-actions="" className="flex w-full min-w-0 flex-wrap items-center justify-end gap-1.5">
-                {activeMode === 'image' ? (
+                {activeMode === 'image' || activeMode === 'img2img' ? (
                   <div data-umbra-ui-preview-generate="" className="mr-0.5 border-r border-white/10 pr-2">
                     <button
                       type="button"
@@ -3698,32 +3657,13 @@ export function UmbraUIWorkspace() {
                     </button>
                   </div>
                 ) : null}
-                {activeMode === 'image' ? (
-                  <label
-                    data-umbra-ui-preview-output=""
-                    className="mr-0.5 flex min-w-0 items-center gap-2 border-r border-white/10 pr-2"
-                    title={activeTxt2imgOutputFolder
-                      ? `Save directly to pinned Gallery folder: ${activeTxt2imgOutputFolder}`
-                      : pinnedOutputFolders.length > 0
-                        ? 'Choose one of your Gallery pinned folders, or keep the default dated Umbra UI output.'
-                        : 'Pin a folder in Gallery to make it available here.'}
-                  >
-                    <span className="flex shrink-0 items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.1em] text-cyan-200">
-                      <FolderOutput size={12} /> Pinned Folder
-                    </span>
-                    <UmbraSelectControl
-                      value={activeTxt2imgOutputFolder}
-                      onChange={(event) => setTxt2imgOutputFolder(event.target.value)}
-                      className="h-8 min-w-0 w-44 rounded-sm border border-cyan-300/20 bg-black/35 px-2 font-mono text-[9px] text-zinc-300 outline-none focus:border-cyan-300/45"
-                      aria-label="Pinned folder output"
-                    >
-                      <option value="">Default dated output</option>
-                      {pinnedOutputFolders.map((folder) => (
-                        <option key={folder} value={folder}>{getUmbraUiPinnedFolderLabel(folder)}</option>
-                      ))}
-                    </UmbraSelectControl>
-                  </label>
-                ) : null}
+                {(activeMode === 'image' || activeMode === 'img2img') && (
+                  <div data-umbra-ui-preview-output="" className="min-w-0 max-w-full">
+                    <UmbraPinnedOutputControl task={activeMode === 'image' ? 'TXT2IMG' : 'IMG2IMG'}
+                      value={activeMode === 'image' ? activeTxt2imgOutputFolder : img2imgOutputFolder}
+                      onChange={activeMode === 'image' ? setTxt2imgOutputFolder : setImg2imgOutputFolder} />
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={sendLatestToImg2Img}

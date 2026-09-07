@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   Copy,
+  FolderOpen,
   Image as ImageIcon,
   Library,
   Minus,
@@ -18,6 +19,7 @@ import {
   type UmbraUiLoraEntry,
 } from '@/lib/umbraUiModels';
 import { useStore } from '@/store/useStore';
+import { UmbraLoraPresetModal } from './UmbraLoraPresetModal';
 
 interface UmbraLoraStackControlsProps {
   loras: UmbraUiLoraEntry[];
@@ -39,7 +41,7 @@ function roundStrengthToStep(value: number): number {
 }
 
 function formatStrength(value: number): string {
-  return Number(roundStrengthToStep(value).toFixed(2)).toString();
+  return String(value);
 }
 
 export function UmbraLoraStackControls({
@@ -50,6 +52,7 @@ export function UmbraLoraStackControls({
 }: UmbraLoraStackControlsProps) {
   const showToast = useStore((state) => state.showToast);
   const [expanded, setExpanded] = React.useState(false);
+  const [presetsOpen, setPresetsOpen] = React.useState(false);
   const [copiedToken, setCopiedToken] = React.useState('');
   const copiedTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const enabledLoras = loras.filter((lora) => lora.enabled);
@@ -94,7 +97,7 @@ export function UmbraLoraStackControls({
   }, [loras, updateLora]);
 
   return (
-    <section data-umbra-lora-stack="" className="rounded-md border border-white/10 bg-white/[0.02]">
+    <section data-umbra-lora-stack="" className="min-w-0 rounded-md border border-white/10 bg-white/[0.02]">
       <div data-umbra-lora-stack-header="" className="flex min-h-10 items-center gap-2 px-2.5">
         <button
           type="button"
@@ -103,29 +106,21 @@ export function UmbraLoraStackControls({
           aria-expanded={expanded}
         >
           <Library size={13} className="shrink-0 text-emerald-300" />
-          <span className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">LoRA Stack</span>
-          <span className="rounded-sm border border-emerald-300/20 bg-emerald-500/[0.06] px-1.5 py-0.5 font-mono text-[9px] text-emerald-100">
-            {enabledLoras.length} enabled
+          <span className="min-w-0 text-[11px] font-black uppercase text-zinc-200">LoRA Stack</span>
+          <span title={`${enabledLoras.length} enabled LoRAs`} className="shrink-0 rounded-sm border border-emerald-300/20 bg-emerald-500/[0.06] px-1.5 py-0.5 font-mono text-[9px] text-emerald-100">
+            {enabledLoras.length}
           </span>
-          {!expanded && enabledLoras.length > 0 ? (
-            <div className="ml-1 flex min-w-0 flex-1 gap-1 overflow-hidden">
-              {enabledLoras.slice(0, 2).map((lora) => (
-                <span key={lora.id} className="max-w-36 truncate rounded-sm border border-cyan-300/15 bg-cyan-500/[0.045] px-1.5 py-0.5 font-mono text-[9px] text-cyan-100/80">
-                  {buildUmbraUiLoraSyntax(lora)}
-                </span>
-              ))}
-              {enabledLoras.length > 2 ? <span className="font-mono text-[9px] text-zinc-500">+{enabledLoras.length - 2}</span> : null}
-            </div>
-          ) : null}
           <ChevronDown size={11} className={cn('ml-auto shrink-0 text-zinc-600 transition-transform', expanded && 'rotate-180')} />
         </button>
+        <button type="button" onClick={() => setPresetsOpen(true)} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-white/15 text-zinc-300 hover:bg-white/10" title="LoRA stack presets" aria-label="LoRA stack presets"><FolderOpen size={14} /></button>
         <button
           type="button"
           onClick={onOpenPicker}
-          className="inline-flex h-7 items-center gap-1.5 rounded-sm border border-emerald-300/20 bg-emerald-500/[0.06] px-2.5 text-[9px] font-black uppercase tracking-[0.1em] text-emerald-100 hover:bg-emerald-500/[0.11]"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-emerald-300/20 bg-emerald-500/[0.06] text-emerald-100 hover:bg-emerald-500/[0.11]"
           title={`Browse ${availableCount} available LoRAs`}
+          aria-label="Add LoRA"
         >
-          <Plus size={11} /> Add
+          <Plus size={14} />
         </button>
       </div>
 
@@ -187,18 +182,19 @@ export function UmbraLoraStackControls({
                   <button
                     type="button"
                     onClick={() => { void copyToken(syntax); }}
-                    className="flex min-w-0 items-center gap-1.5 rounded-sm border border-cyan-300/18 bg-cyan-500/[0.05] px-2 text-left font-mono text-[9px] text-cyan-100/90 hover:border-cyan-300/35"
-                    title="Copy LoRA syntax"
+                    className="flex w-full min-w-0 max-w-full items-start gap-1.5 rounded-sm border border-cyan-300/18 bg-cyan-500/[0.05] px-2 py-1.5 text-left font-mono text-[10px] leading-relaxed text-cyan-100/90 hover:border-cyan-300/35"
+                    title={`Copy LoRA syntax: ${syntax}`}
+                    aria-label="Copy LoRA syntax"
                   >
                     {copiedToken === syntax ? <Check size={10} className="shrink-0 text-emerald-300" /> : <Copy size={10} className="shrink-0" />}
-                    <span className="truncate">{syntax}</span>
+                    <span className="min-w-0 break-all">{syntax}</span>
                   </button>
                   <div className="grid grid-cols-2 gap-1.5">
                     {([
                       ['strengthModel', 'Model'],
                       ['strengthClip', 'CLIP'],
                     ] as const).map(([key, label]) => (
-                      <label key={key} className="space-y-1">
+                      <div key={key} className="min-w-0 space-y-1">
                         <span className={labelClass}>{label}</span>
                         <div className="flex h-8 overflow-hidden rounded-sm border border-white/10 bg-black/35 focus-within:border-emerald-300/35">
                           <button
@@ -217,9 +213,10 @@ export function UmbraLoraStackControls({
                             step={0.05}
                             value={formatStrength(lora[key])}
                             onChange={(event) => updateLora(lora.id, { [key]: clampStrength(event.target.value, lora[key]) })}
-                            onBlur={(event) => updateLora(lora.id, { [key]: roundStrengthToStep(clampStrength(event.target.value, lora[key])) })}
+                            onBlur={(event) => updateLora(lora.id, { [key]: clampStrength(event.target.value, lora[key]) })}
                             inputMode="decimal"
-                            className="min-w-0 flex-1 bg-transparent px-1 text-center font-mono text-[10px] text-zinc-100 outline-none"
+                            aria-label={`${label} strength for ${lora.name}`}
+                            className="umbra-lora-strength min-w-0 flex-1 bg-transparent px-1 text-center font-mono text-xs text-zinc-100 outline-none"
                           />
                           <button
                             type="button"
@@ -231,7 +228,7 @@ export function UmbraLoraStackControls({
                             <Plus size={11} />
                           </button>
                         </div>
-                      </label>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -284,6 +281,7 @@ export function UmbraLoraStackControls({
           })}
         </div>
       ) : null}
+      {presetsOpen && <UmbraLoraPresetModal loras={loras} onLoad={(next) => { onChange(next); setExpanded(true); }} onClose={() => setPresetsOpen(false)} />}
     </section>
   );
 }

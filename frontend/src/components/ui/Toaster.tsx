@@ -20,11 +20,8 @@ export function Toaster() {
     return () => window.removeEventListener('umbra:remote-mode-change', updateMode);
   }, []);
 
-  const visibleToasts = !enableToasts
-    ? []
-    : isPhoneRemote
-      ? toasts.filter((toast) => toast.type !== 'error').slice(-1)
-      : toasts.slice(-3);
+  const eligibleToasts = toasts.filter((toast) => enableToasts || toast.type === 'error');
+  const visibleToasts = [...eligibleToasts.filter((toast) => toast.type !== 'error'), ...eligibleToasts.filter((toast) => toast.type === 'error')].slice(isPhoneRemote ? -1 : -3);
 
   return (
     <div
@@ -42,6 +39,7 @@ export function Toaster() {
         {visibleToasts.map((toast) => (
           <motion.div
             key={toast.id}
+            role={toast.type === 'error' ? 'alert' : 'status'}
             initial={{ opacity: 0, y: 20, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, x: 20, scale: 0.9 }}
@@ -58,7 +56,7 @@ export function Toaster() {
             
             <div className="min-w-0 flex-1">
               {toast.type === 'error' ? <div className="mb-0.5 text-[10px] font-black uppercase tracking-[0.1em] text-red-200/75">Issue saved</div> : null}
-              <div className="line-clamp-2 break-words text-sm font-medium">{toast.message}</div>
+              <div className="max-h-28 overflow-y-auto break-words text-sm font-medium">{toast.message}</div>
             </div>
 
             {toast.action && (
@@ -89,6 +87,8 @@ export function Toaster() {
 
             <button
               onClick={() => dismissToast(toast.id)}
+              aria-label="Dismiss notification"
+              title="Dismiss notification"
               className="rounded-md p-1 text-zinc-500 transition-colors hover:bg-white/10 hover:text-white"
             >
               <X size={14} />

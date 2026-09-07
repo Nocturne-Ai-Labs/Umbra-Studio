@@ -1,6 +1,7 @@
 'use client';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { UmbraPinnedOutputControl, usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
 import React from 'react';
 import {
   ChevronDown,
@@ -705,6 +706,7 @@ export function UmbraVideoGenerationControls({
   const [sourcePreviewUrl, setSourcePreviewUrl] = React.useState('');
   const [isQueueing, setIsQueueing] = React.useState(false);
   const [resourcePicker, setResourcePicker] = React.useState<VideoResourcePicker | null>(null);
+  const [pinnedOutputFolder, setPinnedOutputFolder] = usePinnedOutputFolder('video');
   const { placement, setPlacement, effectivePlacement } = useUmbraQueuePlacement(queueSummary);
   const [settingsLoaded, setSettingsLoaded] = React.useState(false);
   const handoffAppliedRef = React.useRef(false);
@@ -1495,6 +1497,7 @@ export function UmbraVideoGenerationControls({
     try {
       const queuedSeed = resolveUmbraUiQueueSeed(video.seed, video.seedMode);
       await queueVideo({
+        outputFolder: pinnedOutputFolder,
         prompt: queuePrompt,
         negativePrompt,
         video: {
@@ -1511,14 +1514,6 @@ export function UmbraVideoGenerationControls({
         && current.seedIncrement === video.seedIncrement
         ? { ...current, seed: nextSeed }
         : current);
-      const placementMessage = queuePlacement === 'next'
-        ? 'will run after the current Power Prompter image.'
-        : queuePlacement === 'interrupt'
-          ? 'will run as soon as the current Power Prompter image stops.'
-          : queueSummary.powerPrompterActive
-            ? 'was added to the end of the Power Prompter queue.'
-            : 'was submitted for generation.';
-      showToast(`${video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : video.family === 'ltx25' ? 'LTX-2.5' : 'MiniMax H3'} video ${placementMessage}`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to queue video.', 'error');
     } finally {
@@ -2443,6 +2438,7 @@ export function UmbraVideoGenerationControls({
             <span className="text-[9px] font-black uppercase tracking-[0.12em] text-zinc-400">{queueSummary.remaining} queue remaining</span>
           </div>
           <div className="space-y-2">
+            <UmbraPinnedOutputControl value={pinnedOutputFolder} onChange={setPinnedOutputFolder} task="Video" />
             <UmbraQueuePlacementControls
               queueSummary={queueSummary}
               value={placement}

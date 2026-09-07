@@ -9,7 +9,9 @@
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { createReadStream, createWriteStream, existsSync, statSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, type Dirent } from 'fs';
 import * as fs from 'fs/promises';
+import { LoraPresetWriteError, writeLoraPresetLibrary } from './backend/UmbraLoraPresetStore';
 import * as os from 'os';
+import { cancelComfyJobById, controlUmbraControllerJob } from './backend/UmbraQueueJobControl';
 import { exec, spawn } from 'child_process';
 import { createHash, randomBytes, pbkdf2Sync, timingSafeEqual } from 'crypto';
 import { gzip } from 'zlib';
@@ -128,7 +130,8 @@ import {
   extractUmbraUiTrainingTags,
   extractUmbraUiTriggerWords,
 } from './backend/UmbraUiLoraMetadata';
-import { resolveUmbraUiPinnedOutputFolder } from './backend/UmbraUiPinnedOutput';
+import { resolveUmbraUiPinnedOutputFolder, resolveUmbraPinnedTaskFolder } from './backend/UmbraUiPinnedOutput';
+import { publishPinnedVideoOutput } from './backend/UmbraUiPinnedVideoOutput';
 import {
   applyUmbraUiPrompterOutputLayout,
   resolveUmbraUiPrompterOutputLayout,
@@ -6432,6 +6435,9 @@ function applyPPVideoRoleToApiNode(
       return true;
     }
     case 'video_output':
+      if (generation.outputOwner === 'umbra_ui' && generation.outputFolder) {
+        resolveUmbraPinnedTaskFolder(generation.outputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, 'Video');
+      }
       setPPApiNodeInput(
         node,
         'filename_prefix',
@@ -7540,7 +7546,7 @@ function compileUmbraUiPipelineWorkflow(
   const umbraUiOutputMode = getUmbraUiOutputMode(generation);
   const prompterOutputMode = activeImagePipeline?.feature || umbraUiOutputMode;
   const isPrompterOutput = options.queueOrigin === 'power_prompter' && prompterOutputMode === 'txt2img';
-  const requestedPinnedOutputFolder = isPrompterOutput || (isUmbraUiOutput && umbraUiOutputMode === 'txt2img')
+  const requestedPinnedOutputFolder = isPrompterOutput || (isUmbraUiOutput && (umbraUiOutputMode === 'txt2img' || umbraUiOutputMode === 'img2img'))
     ? generation.outputFolder
     : '';
   const pinnedOutputFolder = resolveUmbraUiPinnedOutputFolder(
@@ -7901,8 +7907,8 @@ function compileUmbraUiPipelineWorkflow(
         applyUmbraUiPrompterOutputLayout(classType, node, prompterOutputLayout);
         if (pinnedOutputFolder) pinnedOutputFolderApplied = true;
       } else if (isUmbraUiOutput) {
-        setPPApiNodeInput(node, 'output_folder', pinnedOutputFolder || `Umbra UI/${umbraUiOutputMode}`);
-        setPPApiNodeInput(node, 'save_to_yyyy_mm_dd_folder', !pinnedOutputFolder);
+        setPPApiNodeInput(node, 'output_folder', pinnedOutputFolder ? resolveUmbraPinnedTaskFolder(requestedPinnedOutputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, umbraUiOutputMode === 'img2img' ? 'img2img' : 'txt2img') : `Umbra UI/${umbraUiOutputMode}`);
+        setPPApiNodeInput(node, 'save_to_yyyy_mm_dd_folder', true);
         setPPApiNodeInput(node, 'save_to_set_subfolder', false);
         setPPApiNodeInput(node, 'set_subfolder', '');
         setPPApiNodeInput(node, 'save_set_to_style_subfolder', '');
@@ -8602,6 +8608,7 @@ async function emitBackendPowerPrompterSavedOutputs(
   sourceFile: string,
   metadata?: Record<string, unknown> | null,
   sourceWs?: ServerWebSocket<unknown> | null,
+  generation?: PowerPrompterGenerationControls,
 ): Promise<Array<Record<string, unknown>>> {
   const outputs = await fetchBackendPowerPrompterSavedOutputs(promptId);
   if (outputs.length === 0) return [];
@@ -8609,6 +8616,13 @@ async function emitBackendPowerPrompterSavedOutputs(
     ...output,
     fullpath: resolveComfySavedOutputPath(output),
   }));
+  if (generation?.outputOwner === 'umbra_ui' && generation.mediaType === 'video' && generation.outputFolder) {
+    const destination = resolveUmbraPinnedTaskFolder(generation.outputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, 'Video');
+    for (const output of resolvedOutputs) {
+      const fullpath = await publishPinnedVideoOutput(output.fullpath, join(destination, formatUmbraUiLocalDate()), promptId);
+      if (fullpath !== output.fullpath) Object.assign(output, { fullpath, filename: basename(fullpath), subfolder: '' });
+    }
+  }
   const basePowerPrompterMetadata = metadata?.umbra_power_prompter && typeof metadata.umbra_power_prompter === 'object'
     ? metadata.umbra_power_prompter as Record<string, unknown>
     : {};
@@ -8878,6 +8892,38 @@ function applyBackendPowerPrompterQueueControl(data: any, type: 'queue_cancel' |
     });
   }
   return affected;
+}
+
+async function handleUmbraQueueJobControl(req: Request): Promise<Response> {
+  const data = await req.json().catch(() => null) as any;
+  const requestId = String(data?.requestId || '').trim();
+  const action = data?.action;
+  if (!requestId || (action !== 'skip' && action !== 'remove')) return json({ error: 'A job ID and valid action are required.' }, 400);
+  try {
+    await controlUmbraControllerJob({
+      request: findPowerPrompterQueueControllerRequest(requestId),
+      action,
+      remove: () => applyBackendPowerPrompterQueueControl({ requestIds: [requestId] }, 'queue_cancel').length > 0,
+      skip: async () => {
+        const task = backendPowerPrompterQueueTasks.get(requestId);
+        if (!task || task.canceled) return false;
+        const index = task.activePromptIndex;
+        const promptId = task.promptIds[index];
+        if (!promptId || promptId !== String(data?.promptId || '') || task.interruptedPromptIndices.has(index)) return false;
+        const canceled = await cancelComfyJobById(getComfyProxyBaseUrl(), promptId);
+        if (!canceled) return false;
+        // The worker may have advanced while the cancel request was in flight.
+        if (task.activePromptIndex === index && task.promptIds[index] === promptId) {
+          interruptBackendPowerPrompterActivePrompt(requestId, 'interrupt');
+        }
+        return true;
+      },
+    });
+    broadcastPowerPrompterQueueControllerSnapshot('umbra_ui_job_control');
+    return json({ success: true });
+  } catch (error: any) {
+    return json({ error: String(error?.message || error) }, 409);
+  }
 }
 
 function throwIfBackendPowerPrompterQueueCanceled(task: BackendPowerPrompterQueueTask) {
@@ -9591,7 +9637,7 @@ async function finalizeUmbraExtendedVideo(options: {
       workDirectory,
     });
   }
-  const portablePath = relative(ROOT_DIR, outputPath).replace(/\\/g, '/');
+  const portablePath = toClientPath(outputPath);
   const reviewRequest = findPowerPrompterQueueControllerRequest(options.requestId);
   const finalPrompt = reviewRequest?.prompts[options.session.clipCount - 1];
   if (reviewRequest && finalPrompt) {
@@ -9988,6 +10034,7 @@ async function runBackendPowerPrompterPipelineQueue(
         state.sourceFile ? String(state.sourceFile) : '',
         extraPngInfo,
         sourceWs,
+        generation,
       );
       if (extendedSession) {
         const videoOutput = savedOutputs.find((output) => (
@@ -10244,13 +10291,16 @@ async function interruptRunningBackendPowerPrompterForUmbraUi(reason: string): P
 async function prepareUmbraUiUpscaleExecution(context: {
   jobId: string;
   queuePlacement: 'next' | 'end' | 'interrupt';
+  isCanceled: () => boolean;
 }): Promise<() => void> {
   const placement = normalizePowerPrompterQueuePlacement(context.queuePlacement);
   const blockId = `umbra-ui-upscale:${context.jobId}`;
 
   if (placement === 'end') {
-    while (hasRemainingBackendPowerPrompterWork()) await Bun.sleep(250);
+    while (hasRemainingBackendPowerPrompterWork() && !context.isCanceled()) await Bun.sleep(250);
   }
+
+  if (context.isCanceled()) return () => {};
 
   backendPowerPrompterExecutionBlocks.add(blockId);
   broadcastPowerPrompterQueueControllerSnapshot('umbra_ui_upscale_hold');
@@ -10258,7 +10308,7 @@ async function prepareUmbraUiUpscaleExecution(context: {
     if (placement === 'interrupt') {
       await interruptRunningBackendPowerPrompterForUmbraUi('umbra_ui_upscale_interrupt');
     }
-    while (hasRunningBackendPowerPrompterWork()) await Bun.sleep(100);
+    while (hasRunningBackendPowerPrompterWork() && !context.isCanceled()) await Bun.sleep(100);
   } catch (error) {
     backendPowerPrompterExecutionBlocks.delete(blockId);
     broadcastPowerPrompterQueueControllerSnapshot('umbra_ui_upscale_hold_failed');
@@ -16254,6 +16304,7 @@ const USER_CONFIG_FILES: Record<string, string> = {
   'umbra-ui-agent-instructions': join('..', 'UmbraUI', 'Agent', 'prompt-instructions.json'),
   'umbra-ui-image-controls': join('..', 'UmbraUI', 'image-controls.json'),
   'umbra-ui-prompt-history': join('..', 'UmbraUI', 'prompt-history.json'),
+  'umbra-ui-lora-presets': join('..', 'UmbraUI', 'lora-presets.json'),
   'umbra-ui-video-prompt-history': join('..', 'UmbraUI', 'video-prompt-history.json'),
   'model-manager-browser': 'model-manager-browser.json',
   'board-preferences': 'board-preferences.json',
@@ -19609,6 +19660,7 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
       throw new Error(`The selected pipeline requires width and height aligned to ${resolutionStep} pixels.`);
     }
     const settings: UmbraUiInpaintSettings = {
+      outputFolder: resolveUmbraPinnedTaskFolder(form.get('pinnedOutputFolder'), settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, form.get('outputTask') === 'canvas' ? 'canvas' : 'inpainting'),
       workflowId: resolvedPipeline.loaded.item.id,
       canvasProjectId: String(form.get('canvasProjectId') || '').trim().slice(0, 160),
       sourceFreeGeneration: String(form.get('sourceFreeGeneration') || '').trim().toLowerCase() === 'true',
@@ -20219,7 +20271,8 @@ async function handleUmbraUiCanvasSave(req: Request): Promise<Response> {
     const configuredOutput = resolveConfiguredPath(String(settingsManager.getAppSettings()['comfyui.externalOutputPath'] || '').trim());
     const outputRoot = configuredOutput || resolvePathCandidate(getDefaultOutputRootPath());
     const dateFolder = new Date().toISOString().slice(0, 10);
-    const outputFolder = join(outputRoot, 'Umbra UI', 'canvas', dateFolder);
+    const pinnedFolder = resolveUmbraPinnedTaskFolder(form.get('pinnedOutputFolder'), settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, form.get('outputTask') === 'inpainting' ? 'inpainting' : 'canvas');
+    const outputFolder = pinnedFolder ? join(pinnedFolder, dateFolder) : join(outputRoot, 'Umbra UI', 'canvas', dateFolder);
     await fs.mkdir(outputFolder, { recursive: true });
     const requestedName = String(form.get('name') || inpaintMetadata.documentName || 'Umbra Canvas')
       .replace(/\.png$/i, '')
@@ -20316,7 +20369,10 @@ function resolveUmbraUiMediaToolOutputFolder(
   allowExternal: boolean,
   sourcePath: string,
   automaticSubfolder: 'Censored' | 'Watermarked' | 'GIF',
+  pinnedOutputFolder?: unknown,
 ): string {
+  const pinned = resolveUmbraPinnedTaskFolder(pinnedOutputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, automaticSubfolder);
+  if (pinned) return pinned;
   const rawPath = String(value || '').trim();
   if (!rawPath) {
     const sourceFolder = sourcePath && existsSync(sourcePath) ? dirname(sourcePath) : '';
@@ -20419,6 +20475,7 @@ async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean
       allowExternalOutput,
       gallerySourcePath,
       'Watermarked',
+      form.get('pinnedOutputFolder'),
     );
     const imageFormatInput = String(form.get('imageFormat') || '').trim().toLowerCase();
     const imageFormat = imageFormatInput === 'jpeg' || imageFormatInput === 'jpg'
@@ -20513,7 +20570,7 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
       ...(hasSourceUpload ? [fs.writeFile(sourcePath, Buffer.from(await source.arrayBuffer()))] : []),
       ...(hasOverlayUpload ? [fs.writeFile(overlayPath, Buffer.from(await overlay.arrayBuffer()))] : []),
     ]);
-    const outputFolder = resolveUmbraUiMediaToolOutputFolder(form.get('outputFolder'), allowExternalOutput, gallerySourcePath, 'Censored');
+    const outputFolder = resolveUmbraUiMediaToolOutputFolder(form.get('outputFolder'), allowExternalOutput, gallerySourcePath, 'Censored', form.get('pinnedOutputFolder'));
     const allowedTargets = new Set<UmbraUiCensorTarget>(['femaleNipples', 'maleGenitals', 'femaleGenitals']);
     const requestedTargets = String(form.get('targets') || '')
       .split(',')
@@ -20650,6 +20707,7 @@ async function handleUmbraUiVideoToGif(req: Request, allowExternalOutput: boolea
       allowExternalOutput,
       gallerySourcePath,
       'GIF',
+      form.get('pinnedOutputFolder'),
     );
     const reserved = await reserveUmbraUiMediaToolSequencePath(outputFolder, 'gif-sequence', '.gif', Number(form.get('sequenceNumber')));
     const { outputPath, filename } = reserved;
@@ -20920,8 +20978,8 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
     const quality = Math.max(1, Math.min(100, Math.round(Number(form.get('quality')) || 90)));
     const queuePlacement = normalizePowerPrompterQueuePlacement(form.get('queuePlacement'));
     const requestedOutputFolder = String(form.get('outputFolder') || '').trim();
-    let outputFolder = '';
-    if (requestedOutputFolder) {
+    let outputFolder = resolveUmbraPinnedTaskFolder(form.get('pinnedOutputFolder'), settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, 'Upscaled');
+    if (requestedOutputFolder && !outputFolder) {
       if (!allowCustomOutputFolder) {
         return json({ success: false, error: 'Custom upscale output folders can only be selected from the host PC.' }, 403);
       }
@@ -33926,6 +33984,15 @@ const server = Bun.serve<any>({
             return json({ success: false, error: 'Unknown user config key' }, 400);
           }
           let value = body.value ?? null;
+          if (normalizedKey === 'umbra-ui-lora-presets') {
+            try {
+              await writeLoraPresetLibrary(resolveUserConfigPath(normalizedKey)!, value);
+              return json({ success: true, key: normalizedKey, value });
+            } catch (error) {
+              if (error instanceof LoraPresetWriteError) return json({ success: false, error: error.message }, error.status);
+              throw error;
+            }
+          }
           if (
             (normalizedKey === 'gallery-ui-session' || normalizedKey === 'remote-ui-session' || normalizedKey === 'powerprompter-ui')
             && value
@@ -34616,6 +34683,16 @@ const server = Bun.serve<any>({
         if (method === 'DELETE') return handleUmbraUiInpaintProjectDelete(projectId);
       }
 
+      if (path === '/api/umbra-ui/queue/control' && method === 'POST') {
+        return handleUmbraQueueJobControl(req);
+      }
+
+      if (path.startsWith('/api/umbra-ui/upscale/jobs/') && path.endsWith('/cancel') && method === 'POST') {
+        const jobId = decodeURIComponent(path.slice('/api/umbra-ui/upscale/jobs/'.length, -'/cancel'.length));
+        const job = umbraUiUpscaleService.cancel(jobId);
+        return job ? json({ success: true, job }) : json({ error: 'Upscale job not found.' }, 404);
+      }
+
       if (path === '/api/umbra-ui/inpaint/jobs' && method === 'GET') {
         return json({ success: true, jobs: umbraUiInpaintService.listJobs() });
       }
@@ -34626,6 +34703,15 @@ const server = Bun.serve<any>({
 
       if (path.startsWith('/api/umbra-ui/inpaint/jobs/') && path.endsWith('/cancel') && method === 'POST') {
         return handleUmbraUiInpaintJobCancel(path);
+      }
+
+      if (path.startsWith('/api/umbra-ui/inpaint/jobs/') && path.endsWith('/skip') && method === 'POST') {
+        const jobId = decodeURIComponent(path.slice('/api/umbra-ui/inpaint/jobs/'.length, -'/skip'.length));
+        const data = await req.json().catch(() => ({})) as any;
+        try {
+          const job = await umbraUiInpaintService.skip(jobId, String(data?.promptId || ''));
+          return job ? json({ success: true, job }) : json({ error: 'Inpaint job not found.' }, 404);
+        } catch (error: any) { return json({ error: String(error?.message || error) }, 409); }
       }
 
       if (path === '/api/umbra-ui/upscale/jobs' && method === 'GET') {

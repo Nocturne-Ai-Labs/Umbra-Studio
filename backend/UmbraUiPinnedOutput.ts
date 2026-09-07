@@ -1,4 +1,16 @@
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
+import { existsSync, statSync, mkdirSync } from 'node:fs';
+
+export type UmbraPinnedOutputTask = 'txt2img' | 'img2img' | 'inpainting' | 'canvas' | 'Video' | 'Upscaled' | 'Censored' | 'Watermarked' | 'GIF';
+
+export function resolveUmbraPinnedTaskFolder(requested: unknown, pins: unknown, resolveCandidate: (value: string) => string, task: UmbraPinnedOutputTask): string {
+  const root = resolveUmbraUiPinnedOutputFolder(requested, pins, resolveCandidate);
+  if (!root) return '';
+  if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error('The pinned output folder is unavailable.');
+  const folder = join(root, task);
+  mkdirSync(folder, { recursive: true });
+  return folder;
+}
 
 function normalizePinnedPathValue(value: unknown): string {
   const normalized = String(value || '').trim().replace(/\\/g, '/');

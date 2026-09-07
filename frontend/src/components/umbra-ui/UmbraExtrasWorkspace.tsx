@@ -1,6 +1,7 @@
 'use client';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { UmbraPinnedOutputControl, usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
@@ -74,7 +75,7 @@ import {
 
 const IMAGE_EXTENSION_PATTERN = /\.(?:avif|bmp|gif|jpe?g|png|tiff?|webp)$/i;
 const MAX_UPSCALE_BATCH_ITEMS = 512;
-const TERMINAL_JOB_STATUSES = new Set(['completed', 'partial', 'failed']);
+const TERMINAL_JOB_STATUSES = new Set(['completed', 'partial', 'failed', 'canceled']);
 const OUTPUT_FOLDER_STORAGE_KEY = 'umbra-ui:extras-output-folder-v2';
 const UPSCALE_EXPORT_SETTINGS_KEY = 'umbra-ui:upscale-export-settings';
 const inputClass = 'w-full rounded-md border border-white/10 bg-black/35 px-2.5 py-2 text-xs text-zinc-100 outline-none transition-colors focus:border-cyan-300/45';
@@ -270,11 +271,12 @@ export function UmbraExtrasWorkspace({
     status: job.status,
     total: job.total,
     completed: job.completed,
-    failed: job.failed,
+    failed: job.failed + job.items.filter((item) => item.status === 'canceled').length,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     placement: job.queuePlacement,
     requestId: job.id,
+    cancelRequested: job.cancelRequested,
     readonly: true,
   }) : null, [job]);
   usePublishUmbraQueueActivity('umbra-ui-extras-upscale', queueActivity);
@@ -286,6 +288,7 @@ export function UmbraExtrasWorkspace({
   const { placement, setPlacement, effectivePlacement } = useUmbraQueuePlacement(queueSummary);
   const [stageProgress, setStageProgress] = React.useState({ completed: 0, total: 0 });
   const [pendingAutoStartPath, setPendingAutoStartPath] = React.useState('');
+  const [pinnedOutputFolder, setPinnedOutputFolder] = usePinnedOutputFolder('upscale');
   const [outputFolder, setOutputFolder] = React.useState(() => {
     if (typeof window === 'undefined') return '';
     try { return window.localStorage.getItem(OUTPUT_FOLDER_STORAGE_KEY) || ''; } catch { return ''; }
@@ -460,10 +463,10 @@ export function UmbraExtrasWorkspace({
           window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
           const firstFailure = nextJob.items.find((item) => item.error)?.error || '';
           showToast(
-            nextJob.status === 'completed'
+            nextJob.status === 'canceled' ? 'Upscale batch canceled. Completed files were kept.' : nextJob.status === 'completed'
               ? `${nextJob.completed} image${nextJob.completed === 1 ? '' : 's'} upscaled.`
               : `Upscale failed: ${firstFailure || `${nextJob.failed} item${nextJob.failed === 1 ? '' : 's'} failed.`}`,
-            nextJob.status === 'completed' ? 'success' : 'error',
+            nextJob.status === 'completed' || nextJob.status === 'canceled' ? 'success' : 'error',
           );
           return;
         }
@@ -570,20 +573,13 @@ export function UmbraExtrasWorkspace({
         outputFormat: exportSettings.format,
         quality: exportSettings.quality,
         outputFolder: remoteClient ? '' : outputFolder,
+        pinnedOutputFolder,
         queuePlacement,
         onStageProgress: (completed, total) => setStageProgress({ completed, total }),
       });
       setJob(nextJob);
       try { window.sessionStorage.setItem(UMBRA_UI_UPSCALE_ACTIVE_JOB_KEY, nextJob.id); } catch { /* best effort */ }
       removeSubmittedSources(selectedSources);
-      const placementMessage = queuePlacement === 'next'
-        ? 'will run after the current Power Prompter image.'
-        : queuePlacement === 'interrupt'
-          ? 'will run as soon as the current Power Prompter image stops.'
-          : queueSummary.powerPrompterActive
-            ? 'was added after the Power Prompter queue.'
-            : 'was submitted.';
-      showToast(`${nextJob.total} upscale${nextJob.total === 1 ? '' : 's'} ${placementMessage}`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to queue upscale batch.', 'error');
     } finally {
@@ -599,6 +595,7 @@ export function UmbraExtrasWorkspace({
     modelName,
     outputFolder,
     queueSummary.powerPrompterActive,
+    pinnedOutputFolder,
     remoteClient,
     removeSubmittedSources,
     showToast,
@@ -690,7 +687,8 @@ export function UmbraExtrasWorkspace({
             Long Edge is the final output size. A source already larger than this value will be reduced after upscaling.
           </div>
 
-          <div className={cn('space-y-1.5', remoteClient && 'opacity-45')}>
+          <UmbraPinnedOutputControl value={pinnedOutputFolder} onChange={setPinnedOutputFolder} task="Upscaled" />
+          <div hidden={!!pinnedOutputFolder} className={cn('space-y-1.5', remoteClient && 'opacity-45')}>
             <div className="flex items-center gap-2">
               <span className={labelClass}>Output Folder</span>
               {!outputFolder ? <span className="ml-auto font-mono text-[8px] uppercase text-emerald-300/70">Automatic by source</span> : null}

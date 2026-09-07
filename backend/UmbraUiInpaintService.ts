@@ -1,6 +1,7 @@
 import { closeSync, fsyncSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'fs';
 import { mkdir, open, rename, rm } from 'fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'path';
+import { cancelComfyJobById } from './UmbraQueueJobControl';
 import {
   normalizeUmbraUiModelFamilyKey,
   type UmbraUiInpaintAdapter,
@@ -295,6 +296,7 @@ export interface UmbraUiInpaintReferenceLayer {
 }
 
 export interface UmbraUiInpaintSettings {
+  outputFolder?: string;
   workflowId: string;
   canvasProjectId: string;
   sourceFreeGeneration?: boolean;
@@ -1508,11 +1510,28 @@ export class UmbraUiInpaintService {
     }
   }
 
+  async skip(jobId: string, promptId: string): Promise<UmbraUiInpaintJob | null> {
+    const job = this.jobs.get(jobId);
+    if (!job) return null;
+    const item = job.items.find((candidate) => candidate.promptId === promptId && ['queued', 'running'].includes(candidate.status));
+    if (!item) throw new Error('The sample changed or finished. Refresh the queue and try again.');
+    if (!await cancelComfyJobById(this.getComfyBaseUrl(), promptId)) throw new Error('The sample has already finished.');
+    if (item.status !== 'completed') {
+      item.status = 'canceled';
+      item.error = 'Skipped by user.';
+      job.updatedAt = Date.now();
+      this.persistJobs();
+    }
+    return cloneJob(job);
+  }
+
   async cancel(jobIdInput: string): Promise<UmbraUiInpaintJob | null> {
     const job = this.jobs.get(String(jobIdInput || '').trim());
     if (!job) return null;
     if (['completed', 'partial', 'failed', 'canceled'].includes(job.status)) return cloneJob(job);
-    const promptIds = job.items.map((item) => item.promptId).filter(Boolean);
+    const promptIds = job.items.filter((item) => !['completed', 'failed', 'canceled'].includes(item.status)).map((item) => item.promptId).filter(Boolean);
+    for (const promptId of promptIds) await cancelComfyJobById(this.getComfyBaseUrl(), promptId);
+    if (job.items.every((item) => ['completed', 'failed', 'canceled'].includes(item.status))) return cloneJob(job);
     job.status = 'canceled';
     for (const item of job.items) {
       if (item.status === 'staging' || item.status === 'queued' || item.status === 'running') {
@@ -1523,27 +1542,7 @@ export class UmbraUiInpaintService {
     job.updatedAt = Date.now();
     this.stopPreviewMonitor(job.id);
     this.persistJobs();
-    try {
-      let runningOwnPrompt = false;
-      const queueResponse = await fetch(`${this.getComfyBaseUrl()}/queue`, { cache: 'no-store' });
-      if (queueResponse.ok) {
-        const queuePayload: any = await queueResponse.json().catch(() => ({}));
-        const runningIds = collectQueuePromptIds({ queue_running: queuePayload?.queue_running });
-        runningOwnPrompt = promptIds.some((promptId) => runningIds.has(promptId));
-      }
-      if (promptIds.length > 0) {
-        await fetch(`${this.getComfyBaseUrl()}/queue`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ delete: promptIds }),
-        }).catch(() => undefined);
-      }
-      if (runningOwnPrompt) {
-        await fetch(`${this.getComfyBaseUrl()}/interrupt`, { method: 'POST' }).catch(() => undefined);
-      }
-    } finally {
-      await this.cleanupStagedInputs(job.id);
-    }
+    await this.cleanupStagedInputs(job.id);
     return cloneJob(job);
   }
 
@@ -2004,6 +2003,13 @@ export class UmbraUiInpaintService {
           const powerPrompterMetadata = buildUmbraUiInpaintPowerPrompterMetadata(settings, item, job.total);
           const base = await this.buildBaseWorkflow(settings, item.seed);
           const graph = this.buildWorkflow(base.promptGraph, sourceInputName, maskInputName, uploadedControlLayers, uploadedReferenceLayers, source.name, settings, item.seed, nodeTypes);
+          if (settings.outputFolder) {
+            for (const node of Object.values(graph)) {
+              if (!['UmbraLabSaveImage', 'UmbraLabSaveImageSimple'].includes(node.class_type)) continue;
+              node.inputs.output_folder = settings.outputFolder;
+              node.inputs.save_to_yyyy_mm_dd_folder = true;
+            }
+          }
           const previewClientId = `umbra-ui-inpaint-${job.id}-${item.id}`;
           await this.startPreviewMonitor(job, item, previewClientId);
           const response = await fetch(`${this.getComfyBaseUrl()}/prompt`, {
@@ -2224,7 +2230,7 @@ export class UmbraUiInpaintService {
         (node as any).inputs = {
           ...inputs,
           filename_prefix: `UmbraUI_Canvas_${sourceStem}_%date%`,
-          output_folder: 'Umbra UI/canvas',
+          output_folder: settings.outputFolder || 'Umbra UI/canvas',
         };
         (node as any)._meta = { ...((node as any)._meta || {}), title: 'Umbra UI Canvas Output' };
       }
@@ -2801,7 +2807,7 @@ export class UmbraUiInpaintService {
         negative_prompt: settings.negativePrompt,
         positive: samplerPositiveRef,
         negative: samplerNegativeRef,
-        output_folder: `Umbra UI/${settings.operationMode === 'outpaint' ? 'outpainting' : 'inpainting'}`,
+        output_folder: settings.outputFolder || `Umbra UI/${settings.operationMode === 'outpaint' ? 'outpainting' : 'inpainting'}`,
         save_to_yyyy_mm_dd_folder: true,
         save_to_set_subfolder: false,
         set_subfolder: '',
@@ -3237,6 +3243,7 @@ export class UmbraUiInpaintService {
       this.persistJobs();
       try {
         const record = await this.waitForHistory(job, item);
+        if (job.status === 'canceled' || item.status === 'canceled') return;
         const executionError = readExecutionError(record);
         const status = String(record?.status?.status_str || '').trim().toLowerCase();
         if (executionError || status === 'error') throw new Error(executionError || 'ComfyUI inpaint execution failed.');
@@ -3257,7 +3264,7 @@ export class UmbraUiInpaintService {
       if (item.ppuid) this.outputMetadataByPpuid.delete(item.ppuid);
     }));
     if (job.status === 'canceled') return;
-    job.status = job.completed === job.total
+    job.status = job.items.every((item) => item.status === 'canceled') ? 'canceled' : job.completed === job.total
       ? 'completed'
       : job.completed > 0 ? 'partial' : 'failed';
     job.updatedAt = Date.now();

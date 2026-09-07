@@ -85,7 +85,7 @@ import {
 } from '../../../../shared/umbra-ui/pipelineTypes';
 import { UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID } from '../../../../shared/umbra-ui/agentTypes';
 import { getPowerPrompterCardGroupingKey, movePrompterVariantWithinSlot } from '../../../../shared/power-prompter/powerPrompterChain';
-import { replacePowerPrompterPromptTokenAtCursor } from '@/lib/powerPrompterPromptInsertion';
+import { insertCatalogTagsAtCursor } from '@/lib/powerPrompterPromptInsertion';
 import {
   applyUmbraWildcardContextualModifiers,
   createUmbraWildcardChoices,
@@ -96,7 +96,7 @@ import {
 } from '../../../../shared/promptWildcards';
 
 export interface PowerPrompterPromptInsertOptions {
-  replaceCurrentToken?: boolean;
+  preserveExistingText?: boolean;
   appendComma?: boolean;
 }
 
@@ -5010,7 +5010,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     slotId: string,
     variant: PowerPrompterCardNode,
     rawToken: string,
-    options?: { appendComma?: boolean; preferExpanded?: boolean; replaceCurrentToken?: boolean; }
+    options?: { appendComma?: boolean; preferExpanded?: boolean; preserveExistingText?: boolean; }
   ) => {
     const token = buildPromptInsertionToken(rawToken, false);
     if (!token) return;
@@ -5030,8 +5030,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
           : expandedTarget || inlineTarget;
     const start = target && typeof target.selectionStart === 'number' ? target.selectionStart : currentDraft.length;
     const end = target && typeof target.selectionEnd === 'number' ? target.selectionEnd : start;
-    const replacement = options?.replaceCurrentToken
-      ? replacePowerPrompterPromptTokenAtCursor(currentDraft, token, start, end, options?.appendComma === true)
+    const replacement = options?.preserveExistingText
+      ? insertCatalogTagsAtCursor(currentDraft, token, start, end, options?.appendComma === true)
       : null;
     const nextText = replacement?.nextValue
       ?? insertPromptTokenIntoDraftAtCursor(currentDraft, token, start, end, options?.appendComma === true);
@@ -5061,7 +5061,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
 
   const applyDraftTokenToExpandedVariantEditor = useCallback((
     rawToken: string,
-    options?: { appendComma?: boolean; replaceCurrentToken?: boolean; }
+    options?: { appendComma?: boolean; preserveExistingText?: boolean; }
   ) => {
     setExpandedVariantEditor((prev) => {
       if (!prev) return prev;
@@ -5070,8 +5070,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       const target = expandedVariantTextareaRef.current;
       const start = target && typeof target.selectionStart === 'number' ? target.selectionStart : prev.draft.length;
       const end = target && typeof target.selectionEnd === 'number' ? target.selectionEnd : start;
-      const replacement = options?.replaceCurrentToken
-        ? replacePowerPrompterPromptTokenAtCursor(prev.draft, token, start, end, options?.appendComma === true)
+      const replacement = options?.preserveExistingText
+        ? insertCatalogTagsAtCursor(prev.draft, token, start, end, options?.appendComma === true)
         : null;
       const nextDraft = replacement?.nextValue
         ?? insertPromptTokenIntoDraftAtCursor(prev.draft, token, start, end, options?.appendComma === true);
@@ -7572,7 +7572,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       if (expandedVariantEditor) {
         applyDraftTokenToExpandedVariantEditor(text, {
           appendComma,
-          replaceCurrentToken: options.replaceCurrentToken === true,
+          preserveExistingText: options.preserveExistingText === true,
         });
         return;
       }
@@ -7580,7 +7580,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       applyDraftTokenToVariant(activeSlot.slotId, activeVariant, text, {
         appendComma,
         preferExpanded: false,
-        replaceCurrentToken: options.replaceCurrentToken === true,
+        preserveExistingText: options.preserveExistingText === true,
       });
     },
     refreshOutputPreview: () => {

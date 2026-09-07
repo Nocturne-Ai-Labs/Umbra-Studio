@@ -6,8 +6,8 @@ const JOB_RETENTION_MS = 6 * 60 * 60 * 1000;
 const HISTORY_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const MAX_SOURCE_BYTES = 512 * 1024 * 1024;
 
-export type UmbraUiUpscaleItemStatus = 'staging' | 'queued' | 'running' | 'completed' | 'failed';
-export type UmbraUiUpscaleJobStatus = 'staging' | 'queued' | 'running' | 'completed' | 'partial' | 'failed';
+export type UmbraUiUpscaleItemStatus = 'staging' | 'queued' | 'running' | 'completed' | 'failed' | 'canceled';
+export type UmbraUiUpscaleJobStatus = 'staging' | 'queued' | 'running' | 'completed' | 'partial' | 'failed' | 'canceled';
 export type UmbraUiUpscaleQueuePlacement = 'next' | 'end' | 'interrupt';
 export type UmbraUiUpscaleOutputFormat = 'png' | 'jpeg' | 'webp';
 
@@ -49,6 +49,7 @@ export interface UmbraUiUpscaleJob {
   failed: number;
   createdAt: number;
   updatedAt: number;
+  cancelRequested?: boolean;
   items: UmbraUiUpscaleJobItem[];
 }
 
@@ -59,6 +60,7 @@ interface UmbraUiUpscaleServiceOptions {
   prepareExecution?: (context: {
     jobId: string;
     queuePlacement: UmbraUiUpscaleQueuePlacement;
+    isCanceled: () => boolean;
   }) => Promise<void | (() => void | Promise<void>)>;
 }
 
@@ -205,6 +207,16 @@ export class UmbraUiUpscaleService {
       .map(cloneJob);
   }
 
+  cancel(jobId: string): UmbraUiUpscaleJob | null {
+    const job = this.jobs.get(jobId);
+    if (!job) return null;
+    if (!['completed', 'partial', 'failed', 'canceled'].includes(job.status)) {
+      job.cancelRequested = true;
+      job.updatedAt = Date.now();
+    }
+    return cloneJob(job);
+  }
+
   async submit(
     sources: UmbraUiUpscaleSource[],
     settings: {
@@ -256,7 +268,7 @@ export class UmbraUiUpscaleService {
     const run = async () => {
       let releaseExecution: (() => void | Promise<void>) | undefined;
       try {
-        const preparedRelease = await this.prepareExecution?.({ jobId: job.id, queuePlacement });
+        const preparedRelease = job.cancelRequested ? undefined : await this.prepareExecution?.({ jobId: job.id, queuePlacement, isCanceled: () => job.cancelRequested === true });
         if (typeof preparedRelease === 'function') releaseExecution = preparedRelease;
         await this.processSerialJob(job, sources, modelName, maxDimension, outputFormat, quality, outputFolder, queuePlacement);
       } catch (error: any) {
@@ -359,6 +371,12 @@ export class UmbraUiUpscaleService {
     for (let index = 0; index < sources.length; index += 1) {
       const source = sources[index];
       const item = job.items[index];
+      if (job.cancelRequested) {
+        item.status = 'canceled';
+        if (source.cleanup) await source.cleanup().catch(() => undefined);
+        sources[index] = null as unknown as UmbraUiUpscaleSource;
+        continue;
+      }
       item.status = 'staging';
       job.updatedAt = Date.now();
       try {
@@ -430,7 +448,7 @@ export class UmbraUiUpscaleService {
       job.failed = job.items.filter((candidate) => candidate.status === 'failed').length;
       job.updatedAt = Date.now();
     }
-    job.status = job.completed === job.total
+    job.status = job.cancelRequested && job.completed + job.failed < job.total ? 'canceled' : job.completed === job.total
       ? 'completed'
       : job.completed > 0 ? 'partial' : 'failed';
     job.updatedAt = Date.now();

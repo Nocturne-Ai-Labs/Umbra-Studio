@@ -1,6 +1,9 @@
 'use client';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { UmbraInpaintLivePreviewStream } from './UmbraInpaintLivePreview';
+import { usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
+import { UmbraGenerationActionBar } from '@/components/umbra-ui/UmbraGenerationActionBar';
 import React from 'react';
 import type { BlendMode as PsdBlendMode, Layer as PsdLayer, Psd } from 'ag-psd';
 import {
@@ -2479,6 +2482,7 @@ export function UmbraInpaintWorkspace({
   comfyConnected,
   showToast,
 }: UmbraInpaintWorkspaceProps) {
+  const [pinnedOutputFolder, setPinnedOutputFolder] = usePinnedOutputFolder('inpaint');
   const studioMode = false;
   const [mobileControlsTab, setMobileControlsTab] = React.useState<'generation' | 'inpaint'>(() => {
     const saved = readDeviceUiResume<{ controlsTab?: 'generation' | 'inpaint' }>('umbra-ui-inpaint');
@@ -2738,11 +2742,12 @@ export function UmbraInpaintWorkspace({
     status: job.status,
     total: job.total,
     completed: job.completed,
-    failed: job.failed,
+    failed: job.failed + job.items.filter((item) => item.status === 'canceled').length,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     placement: 'next',
     requestId: job.id,
+    promptId: job.items.find((item) => item.status === 'running' || item.status === 'queued')?.promptId,
     readonly: true,
   }) : null, [job]);
   usePublishUmbraQueueActivity('umbra-ui-inpaint-workspace', queueActivity);
@@ -7373,6 +7378,8 @@ export function UmbraInpaintWorkspace({
     return {
       canvasProjectId: canvasDocument.id,
       originalSourcePath: source?.originalPath || source?.path || '',
+      pinnedOutputFolder,
+      outputTask: 'inpainting' as const,
       documentName: canvasDocument.name,
       operationMode: canvasDocument.operationMode,
       regionOnly: true,
@@ -7426,6 +7433,7 @@ export function UmbraInpaintWorkspace({
       height,
     };
   }, [
+    pinnedOutputFolder,
     canvasDocument,
     cfg,
     checkpointName,
@@ -9314,6 +9322,8 @@ export function UmbraInpaintWorkspace({
       ]);
       const processingScale = Math.sqrt(submissionProcessingSize.scaleX * submissionProcessingSize.scaleY);
       const nextJob = await submitUmbraUiInpaintJob({
+        pinnedOutputFolder,
+        outputTask: 'inpainting',
         source: sourceBlob,
         sourceName: source.name.replace(/\.[^.]+$/, '') + '.png',
         canvasProjectId: canvasDocument.id,
@@ -9421,7 +9431,6 @@ export function UmbraInpaintWorkspace({
           samples,
         )));
       }
-      showToast(`${nextJob.total} inpaint sample${nextJob.total === 1 ? '' : 's'} queued.`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to queue inpaint samples.', 'error');
     } finally {
@@ -9485,6 +9494,7 @@ export function UmbraInpaintWorkspace({
     processingHeight,
     processingScaleMode,
     processingWidth,
+    pinnedOutputFolder,
     rememberCurrentPrompt,
     renderStudioCompositeRegion,
     showToast,
@@ -9882,21 +9892,11 @@ export function UmbraInpaintWorkspace({
             showStageControls={capabilities.detailerStages.customStages}
           />
 
-          <div className="grid grid-cols-[80px_minmax(0,1fr)] gap-2 border-t border-white/10 pt-3">
+          <div className="max-w-24 border-t border-white/10 pt-3">
             <label className="space-y-1.5">
               <span className={labelClass}>Samples</span>
               <input type="number" min={1} max={8} value={samples} onChange={(event) => setSamples(Math.max(1, Math.min(8, Number(event.target.value) || 1)))} className={inputClass} />
             </label>
-            <button
-              type="button"
-              onClick={() => void generateSamples()}
-              disabled={!generationReady || isSubmitting || running}
-              title={generationBlockedReason || (running ? 'Generation is already running.' : 'Queue generation through the selected locked inpaint pipeline')}
-              className="mt-[18px] inline-flex h-9 items-center justify-center gap-2 rounded-md border border-rose-300/35 bg-rose-500/[0.12] text-[9px] font-black uppercase tracking-[0.14em] text-rose-100 transition-colors hover:bg-rose-500/[0.18] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-700"
-            >
-              {isSubmitting || running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
-              {running ? `${job?.completed || 0}/${job?.total || samples}` : 'Generate Inpaint'}
-            </button>
           </div>
           {running ? (
             <button type="button" onClick={() => void cancelActiveJob()} className="inline-flex h-8 w-full items-center justify-center gap-2 border border-red-300/25 bg-red-500/[0.06] text-[8px] font-black uppercase tracking-[0.12em] text-red-200">
@@ -10295,6 +10295,9 @@ export function UmbraInpaintWorkspace({
           >
             <X size={12} /> Stop All Samples
           </button>
+        </div>
+        <div className="pointer-events-auto absolute bottom-12 left-2 z-40 max-w-[calc(100%-16px)]">
+          <UmbraInpaintLivePreviewStream job={job} />
         </div>
         <div data-umbra-inpaint-toolbar="" className="relative z-30 shrink-0 border-b border-white/10 bg-[#050708]/95 shadow-md shadow-black/35 backdrop-blur-sm">
           <div className="flex min-h-10 min-w-0 flex-wrap items-center gap-1.5 px-2.5 py-1.5 [&>*]:shrink-0">
@@ -11185,6 +11188,17 @@ export function UmbraInpaintWorkspace({
             </div>
           ) : null}
         </div>
+        <UmbraGenerationActionBar task="Inpaint" onGenerate={() => void generateSamples()}
+          disabled={!generationReady || isSubmitting || running} busy={isSubmitting || running}
+          title={generationBlockedReason || (running ? 'Generation is already running.' : 'Generate with the current inpaint settings')}
+          label={running ? `Generating ${job?.completed || 0}/${job?.total || samples}` : 'Generate'}
+          folder={pinnedOutputFolder} onFolderChange={setPinnedOutputFolder}>
+          <button type="button" onClick={() => void saveCanvasToGallery(false)} disabled={!source || isSavingCanvas || !!fullResolutionOperation}
+            title="Save accepted image to the selected output destination" aria-label="Save accepted image"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-sm border border-white/10 text-zinc-300 disabled:text-zinc-600"><Save size={13} /></button>
+          <button type="button" onClick={() => void sendCanvasToImg2Img()} disabled={!source || isSavingCanvas || !!fullResolutionOperation}
+            title="Continue accepted image in IMG2IMG" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-cyan-300/20 px-2.5 text-[10px] font-bold text-cyan-100 disabled:text-zinc-600"><ImagePlus size={12} /> IMG2IMG</button>
+        </UmbraGenerationActionBar>
         </main>
       </UmbraMobileWorkspaceSheet>
       {studioMode ? (

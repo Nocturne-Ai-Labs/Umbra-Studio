@@ -73,7 +73,7 @@ interface RelatedResult {
 }
 
 interface PowerPrompterSearchPanelProps {
-  onInsert: (text: string, options?: { replaceCurrentToken?: boolean; appendComma?: boolean }) => void;
+  onInsert: (text: string, options?: { preserveExistingText?: boolean; appendComma?: boolean }) => void;
   enabledCSVs: string[];
   onToggleCSV: (name: string) => void;
   onOpenSettings?: () => void;
@@ -450,7 +450,7 @@ export const PowerPrompterSearchPanel = React.memo(({
         return true;
       });
     if (values.length === 0) return;
-    onInsert(values.join(', '), { replaceCurrentToken: true, appendComma: true });
+    onInsert(values.join(', '), { preserveExistingText: true, appendComma: true });
     setSelectedItems([]);
     showToast(`Inserted ${values.length} catalog ${values.length === 1 ? 'entry' : 'entries'}`, 'success');
   }, [onInsert, showToast]);

@@ -66,6 +66,7 @@ import {
   buildUmbraQueueActivitiesFromControllerSnapshot,
   isUmbraQueueActivityTerminal,
   useUmbraQueueActivities,
+  setPowerPrompterStagedCount,
   type UmbraQueueActivity,
 } from '@/lib/umbraQueueActivity';
 import { deletePathsWithSettings } from '@/utils/trashActions';
@@ -916,7 +917,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const [loraInfoCache, setLoraInfoCache] = useState<Record<string, PowerPrompterLoraInfoPayload>>({});
   const [modelCatalog, setModelCatalog] = useState<string[]>([]);
   const [modelInfoCache, setModelInfoCache] = useState<Record<string, PowerPrompterModelInfoPayload>>({});
-  const [soundMenuOpen, setSoundMenuOpen] = useState(false);
   const [expandedQueueSets, setExpandedQueueSets] = useState<Record<string, boolean>>({});
   const [expandedQueueGroups, setExpandedQueueGroups] = useState<Record<string, boolean>>({});
   const [expandedQueuePromptRows, setExpandedQueuePromptRows] = useState<Record<string, boolean>>({});
@@ -941,7 +941,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const generationPreviewHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queueManagerRightPaneRef = useRef<HTMLDivElement | null>(null);
   const queueManagerResizeCleanupRef = useRef<(() => void) | null>(null);
-  const soundMenuRef = useRef<HTMLDivElement | null>(null);
   const [queueTimingRevision, setQueueTimingRevision] = useState(0);
   const completedPromptIndicesRef = useRef(powerPrompterQueueSession.completedPromptIndices);
   const notifiedCompletedPromptKeysRef = useRef(new Set<string>());
@@ -1948,6 +1947,11 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     () => buildQueueSummaryCounts(queueStackItems),
     [queueStackItems]
   );
+  const stagedPromptCount = useMemo(() => queueStackItems.reduce((count, item) => (
+    !item.exiting && isLocalStagedQueueRequestId(item.requestId)
+      && (item.status === 'pending' || item.status === 'running') ? count + 1 : count
+  ), 0), [queueStackItems]);
+  useEffect(() => { setPowerPrompterStagedCount(stagedPromptCount); }, [stagedPromptCount]);
   useEffect(() => {
     try {
       window.localStorage.removeItem(POWER_PROMPTER_QUEUE_MANAGER_SPLIT_STORAGE_KEY);
@@ -3118,14 +3122,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       sendQueueManagerOutputToWorkspace={sendQueueManagerOutputToWorkspace}
       queueOutputMenu={queueOutputMenu}
       setQueueOutputMenu={setQueueOutputMenu}
-      completionSoundSettings={settings}
-      handleToggleCompletionSound={handleToggleCompletionSound}
-      handleSetCompletionSoundStyle={handleSetCompletionSoundStyle}
-      handleSetCompletionSoundVolume={handleSetCompletionSoundVolume}
-      playCompletionSound={playCompletionSound}
     />
   );
-  const alertFeaturesEnabled = settings.generationCompleteSoundEnabled !== false;
   const [queueEstimate, setQueueEstimate] = useState<PowerPrompterQueueEstimate>(() =>
     createEmptyPowerPrompterQueueEstimate(queuePromptLimit, estimatedBatchSize)
   );
@@ -3482,15 +3480,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     playSubmissionSound,
     handleActivePromptTypeProgress,
     handleChainLinkFeedback,
-    handleToggleCompletionSound,
-    handleSetCompletionSoundStyle,
-    handleSetCompletionSoundVolume,
-  } = usePowerPrompterAudioControls({
-    settings,
-    setSettings,
-    persistSettings,
-    showToast,
-  });
+  } = usePowerPrompterAudioControls();
 
   const notifyPromptCompletion = useCallback((requestIdInput: unknown, promptIndexInput: unknown) => {
     const notification = claimQueuePromptCompletionNotification(
@@ -3499,7 +3489,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       promptIndexInput,
     );
     if (!notification) return false;
-    playCompletionSound();
+    playCompletionSound(notification.key);
     setQueueCompletionTick((previous) => previous + 1);
     return true;
   }, [playCompletionSound]);
@@ -4629,17 +4619,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     return () => channel?.close();
   }, []);
 
-  useEffect(() => {
-    if (!soundMenuOpen || typeof window === 'undefined') return;
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (!target) return;
-      if (soundMenuRef.current?.contains(target)) return;
-      setSoundMenuOpen(false);
-    };
-    window.addEventListener('mousedown', handlePointerDown);
-    return () => window.removeEventListener('mousedown', handlePointerDown);
-  }, [soundMenuOpen]);
 
   useEffect(() => {
     try {
@@ -7592,7 +7571,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
             return { ...prev, promptIds: nextPromptIds, promptSeeds: nextPromptSeeds };
           });
         }
-        playSubmissionSound();
+        playSubmissionSound(requestId);
         scheduleRecoverableQueueSnapshotPersist({ clearWhenEmpty: true, delayMs: 100 });
         pending.resolve(payload);
       };
@@ -11822,10 +11801,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           );
           throw dispatchError;
         }
-        showToast(
-          `Staged ${prompts.length} prompt${prompts.length === 1 ? '' : 's'} behind the active queue`,
-          'success'
-        );
         return;
       }
 
@@ -11874,10 +11849,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         groupCount: stagedGroups.length,
         appendedToExistingStage: hasExistingLocalStage,
       }, { includeQueue: true });
-      showToast(
-        `Added ${prompts.length} prompt${prompts.length === 1 ? '' : 's'} to staged queue. Press Start Queue to send.`,
-        'success'
-      );
     } catch (error: any) {
       logPowerPrompterDebug('queue:stage:error', {
         mode,
@@ -12047,14 +12018,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           setLeftPanelCollapsed={setFileMenuCollapsed}
           rightPanelCollapsed={rightPanelCollapsed}
           setRightPanelCollapsed={setTagMenuCollapsed}
-          soundMenuRef={soundMenuRef}
-          soundMenuOpen={soundMenuOpen}
-          setSoundMenuOpen={setSoundMenuOpen}
-          alertFeaturesEnabled={alertFeaturesEnabled}
           settings={settings}
-          handleToggleCompletionSound={handleToggleCompletionSound}
-          handleSetCompletionSoundStyle={handleSetCompletionSoundStyle}
-          handleSetCompletionSoundVolume={handleSetCompletionSoundVolume}
           handleSendActivePromptToUmbraUi={handleSendActivePromptToUmbraUi}
           umbraUiHandoffBusy={umbraUiHandoffBusy}
           queueSetTarget={queueSetTarget}

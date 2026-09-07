@@ -298,6 +298,7 @@ export interface UmbraImageQueueOptions {
 }
 
 export interface UmbraVideoQueueOptions {
+  outputFolder?: string;
   prompt: string;
   negativePrompt: string;
   video: PowerPrompterVideoControls;
@@ -1546,9 +1547,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       mediaType: 'image',
       outputOwner: 'umbra_ui',
       outputMode: feature,
-      outputFolder: feature === 'txt2img'
-        ? String(options.outputFolder || '').trim().replace(/\\/g, '/')
-        : '',
+      outputFolder: String(options.outputFolder || '').trim().replace(/\\/g, '/'),
       img2img: {
         sourceImagePath: String(options.sourceImagePath || '').trim().replace(/\\/g, '/'),
         sourceImageName: String(options.sourceImageName || '').trim().replace(/\\/g, '/'),
@@ -1966,6 +1965,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     const generation = {
       mediaType: 'video',
       outputOwner: 'umbra_ui',
+      outputFolder: String(options.outputFolder || '').trim().replace(/\\/g, '/'),
       outputMode: video.mode === 'video_to_video'
         ? 'vid2vid'
         : video.mode === 'reference_to_video' ? 'ref2vid'

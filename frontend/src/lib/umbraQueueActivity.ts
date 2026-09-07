@@ -42,12 +42,42 @@ export interface UmbraQueueActivity {
   placement: UmbraQueueActivityPlacement;
   queueIndex?: number;
   requestId?: string;
+  promptId?: string;
+  cancelRequested?: boolean;
   readonly: true;
 }
 
 const activitiesByOwner = new Map<string, UmbraQueueActivity[]>();
 const activityListeners = new Set<() => void>();
 let activitySnapshot: UmbraQueueActivity[] = [];
+let powerPrompterStagedCount = 0;
+const stagedCountListeners = new Set<() => void>();
+
+export function setPowerPrompterStagedCount(count: number) {
+  const next = clampCount(count);
+  if (next === powerPrompterStagedCount) return;
+  powerPrompterStagedCount = next;
+  stagedCountListeners.forEach((listener) => listener());
+}
+
+export function usePowerPrompterStagedCount(): number {
+  return useSyncExternalStore(
+    (listener) => { stagedCountListeners.add(listener); return () => { stagedCountListeners.delete(listener); }; },
+    () => powerPrompterStagedCount,
+    () => 0,
+  );
+}
+
+export function countUnfinishedQueueItems(controllerRemaining: number, staged: number, activities: UmbraQueueActivity[]): number {
+  const unique = new Map(activities.map((activity) => [activity.id, activity]));
+  let count = clampCount(controllerRemaining) + clampCount(staged);
+  for (const activity of unique.values()) {
+    // Controller jobs are already represented in the bridge's remaining count.
+    if (activity.owner === 'umbra-ui-controller' || isUmbraQueueActivityTerminal(activity.status)) continue;
+    count += Math.max(0, clampCount(activity.total) - clampCount(activity.completed) - clampCount(activity.failed));
+  }
+  return count;
+}
 
 function clampCount(value: unknown): number {
   return Math.max(0, Math.floor(Number(value) || 0));
@@ -119,6 +149,8 @@ function activitySignature(activities: UmbraQueueActivity[]): string {
     placement: activity.placement,
     queueIndex: activity.queueIndex ?? -1,
     requestId: activity.requestId || '',
+    promptId: activity.promptId || '',
+    cancelRequested: activity.cancelRequested === true,
   })));
 }
 
@@ -276,7 +308,77 @@ export function buildUmbraQueueActivitiesFromControllerSnapshot(snapshot: any): 
       placement: normalizePlacement(request?.queuePlacement),
       queueIndex,
       requestId,
+      promptId: String(firstLivePrompt?.promptId || '').trim() || undefined,
       readonly: true as const,
     }];
   });
+}
+
+type QueueActivityActions = { skip?: () => Promise<void>; remove: () => Promise<void> };
+const localActivityActions = new Map<string, QueueActivityActions>();
+const DISMISSED_ACTIVITY_KEY = 'umbra-ui:queue-dismissed-activities';
+
+export function isUmbraQueueActivityDismissed(id: string): boolean {
+  try {
+    const ids = JSON.parse(localStorage.getItem(DISMISSED_ACTIVITY_KEY) || '[]');
+    return Array.isArray(ids) && ids.includes(id);
+  } catch { return false; }
+}
+
+export function dismissUmbraQueueActivity(id: string): void {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DISMISSED_ACTIVITY_KEY) || '[]');
+    const ids = Array.isArray(saved) ? saved.filter((entry) => typeof entry === 'string' && entry !== id) : [];
+    localStorage.setItem(DISMISSED_ACTIVITY_KEY, JSON.stringify([...ids.slice(-199), id]));
+  } catch { /* The entry can still be dismissed for this view when storage is unavailable. */ }
+}
+
+export function useUmbraQueueActivityActions(id: string | undefined, actions: QueueActivityActions) {
+  const ref = useRef(actions);
+  ref.current = actions;
+  useEffect(() => {
+    if (!id) return;
+    const entry: QueueActivityActions = { remove: () => ref.current.remove() };
+    localActivityActions.set(id, entry);
+    return () => { if (localActivityActions.get(id) === entry) localActivityActions.delete(id); };
+  }, [id]);
+}
+
+export function getUmbraQueueActivityControls(activity: UmbraQueueActivity) {
+  const terminal = isUmbraQueueActivityTerminal(activity.status);
+  const controller = activity.owner === 'umbra-ui-controller';
+  const inpaint = activity.owner === 'umbra-ui-inpaint-workspace' || activity.owner === 'umbra-ui-canvas-workspace';
+  const upscale = activity.owner === 'umbra-ui-extras-upscale';
+  return {
+    skip: !terminal && (controller || inpaint) && !!activity.promptId && (activity.status === 'running' || activity.status === 'queued'),
+    remove: terminal || (!!activity.requestId && (controller || inpaint || upscale)) || localActivityActions.has(activity.id),
+    removeTitle: terminal ? 'Remove from queue view (keep output files)'
+      : inpaint ? 'Cancel this job and its remaining samples'
+        : 'Remove job; finish in-flight items and stop remaining work',
+  };
+}
+
+export async function controlUmbraQueueActivity(activity: UmbraQueueActivity, action: 'skip' | 'remove'): Promise<void> {
+  if (isUmbraQueueActivityTerminal(activity.status)) return;
+  const local = localActivityActions.get(activity.id);
+  if (local) {
+    const handler = local[action];
+    if (!handler) throw new Error('This job does not support that action.');
+    return handler();
+  }
+  if (!activity.requestId) throw new Error('The job is no longer available.');
+  let url: string;
+  let body: string | undefined;
+  if (activity.owner === 'umbra-ui-controller') {
+    url = '/api/umbra-ui/queue/control';
+    body = JSON.stringify({ requestId: activity.requestId, promptId: activity.promptId, action });
+  } else if (['umbra-ui-inpaint-workspace', 'umbra-ui-canvas-workspace', 'umbra-ui-extras-upscale'].includes(activity.owner)) {
+    const service = activity.owner === 'umbra-ui-extras-upscale' ? 'upscale' : 'inpaint';
+    if (action === 'skip' && service === 'upscale') throw new Error('This job does not support skipping.');
+    url = `/api/umbra-ui/${service}/jobs/${encodeURIComponent(activity.requestId)}/${action === 'skip' ? 'skip' : 'cancel'}`;
+    if (action === 'skip') body = JSON.stringify({ promptId: activity.promptId });
+  } else throw new Error('This job does not support that action.');
+  const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.success === false) throw new Error(String(payload.error || `Job control failed (${response.status}).`));
 }

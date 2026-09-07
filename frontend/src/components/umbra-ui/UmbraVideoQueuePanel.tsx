@@ -590,7 +590,6 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
       }
       await queueVideo({ prompt: draftPrompt, negativePrompt: draftNegative, video: videoForQueue });
       await onRefresh();
-      showToast('Edited video added to the shared queue.', 'success');
     } catch (queueError) {
       showToast(queueError instanceof Error ? queueError.message : 'Failed to requeue video.', 'error');
     } finally {

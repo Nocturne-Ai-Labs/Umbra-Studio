@@ -1,5 +1,6 @@
 'use client';
 
+import { UmbraPinnedOutputControl, usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
 import React from 'react';
 import {
   CheckCircle2,
@@ -46,6 +47,7 @@ import {
 import { UmbraExtrasPresetControl } from '@/components/umbra-ui/UmbraExtrasPresetControl';
 import {
   usePublishUmbraQueueActivity,
+  useUmbraQueueActivityActions,
   type UmbraQueueActivity,
 } from '@/lib/umbraQueueActivity';
 
@@ -168,6 +170,7 @@ function itemPreviewUrl(item: StagedMediaItem | undefined): string {
 
 function useOutputFolder(scope: UmbraExtrasMediaToolMode) {
   const showToast = useStore((state) => state.showToast);
+  const [pinnedOutputFolder, setPinnedOutputFolder] = usePinnedOutputFolder(scope);
   const storageKey = `${OUTPUT_FOLDER_STORAGE_KEY}:${scope}`;
   const [outputFolder, setOutputFolder] = React.useState(() => {
     if (typeof window === 'undefined') return '';
@@ -176,7 +179,7 @@ function useOutputFolder(scope: UmbraExtrasMediaToolMode) {
   const [browsing, setBrowsing] = React.useState(false);
   React.useEffect(() => {
     try { window.localStorage.setItem(storageKey, outputFolder); } catch { /* best effort */ }
-  }, [outputFolder, storageKey]);
+  }, [pinnedOutputFolder, outputFolder, storageKey]);
   const browse = React.useCallback(async () => {
     if (browsing) return;
     setBrowsing(true);
@@ -188,8 +191,8 @@ function useOutputFolder(scope: UmbraExtrasMediaToolMode) {
     } finally {
       setBrowsing(false);
     }
-  }, [browsing, outputFolder, showToast]);
-  return { outputFolder, setOutputFolder, browsing, browse };
+  }, [browsing, pinnedOutputFolder, outputFolder, showToast]);
+  return { outputFolder, setOutputFolder, browsing, browse, pinnedOutputFolder, setPinnedOutputFolder };
 }
 
 function useStagedMedia(mode: UmbraExtrasMediaToolMode) {
@@ -330,6 +333,13 @@ function useMediaBatchQueueActivity({
   items: StagedMediaItem[];
   startedAtRef: React.MutableRefObject<number>;
 }) {
+  const stopRef = React.useRef(false);
+  const [cancelRequested, setCancelRequested] = React.useState(false);
+  const activityId = startedAtRef.current > 0 ? `umbra-extras:${mode}:${startedAtRef.current}` : undefined;
+  useUmbraQueueActivityActions(activityId, { remove: async () => {
+    stopRef.current = true;
+    setCancelRequested(true);
+  } });
   const updatedAt = React.useMemo(
     () => Date.now(),
     [processing, summary.completed, summary.failed, summary.total],
@@ -345,7 +355,7 @@ function useMediaBatchQueueActivity({
           : 'Video to GIF Batch';
     const status: UmbraQueueActivity['status'] = processing
       ? 'running'
-      : summary.failed >= summary.total
+      : cancelRequested && summary.completed + summary.failed < summary.total ? 'canceled' : summary.failed >= summary.total
         ? 'failed'
         : summary.failed > 0
           ? 'partial'
@@ -360,6 +370,7 @@ function useMediaBatchQueueActivity({
         ? `${firstName}${summary.total > 1 ? ` +${summary.total - 1} more` : ''}`
         : `${summary.total} item${summary.total === 1 ? '' : 's'}`,
       status,
+      cancelRequested: processing && cancelRequested,
       total: summary.total,
       completed: summary.completed,
       failed: summary.failed,
@@ -368,8 +379,12 @@ function useMediaBatchQueueActivity({
       placement: 'parallel',
       readonly: true,
     };
-  }, [items, mode, processing, startedAtRef, summary.completed, summary.failed, summary.total, updatedAt]);
+  }, [cancelRequested, items, mode, processing, startedAtRef, summary.completed, summary.failed, summary.total, updatedAt]);
   usePublishUmbraQueueActivity(`umbra-ui-extras-${mode}`, activity);
+  return React.useMemo(() => ({
+    reset: () => { stopRef.current = false; setCancelRequested(false); },
+    shouldStop: () => stopRef.current,
+  }), []);
 }
 
 function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
@@ -377,7 +392,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
   const mode: UmbraExtrasMediaToolMode = targetKind === 'video' ? 'video-watermark' : 'watermark';
   const videoMode = targetKind === 'video';
   const { items, setItems, addFiles, addPaths } = useStagedMedia(mode);
-  const { outputFolder, setOutputFolder, browsing, browse } = useOutputFolder(mode);
+  const { outputFolder, setOutputFolder, browsing, browse, pinnedOutputFolder, setPinnedOutputFolder } = useOutputFolder(mode);
   const [selectedId, setSelectedId] = React.useState('');
   const [watermark, setWatermark] = React.useState<File | null>(null);
   const [watermarkAsset, setWatermarkAsset] = React.useState<UmbraUiWatermarkAsset | null>(null);
@@ -399,7 +414,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
   const [browsingSources, setBrowsingSources] = React.useState(false);
   const [summary, setSummary] = React.useState({ completed: 0, failed: 0, total: 0 });
   const activityStartedAtRef = React.useRef(0);
-  useMediaBatchQueueActivity({ mode, processing, summary, items, startedAtRef: activityStartedAtRef });
+  const batchControl = useMediaBatchQueueActivity({ mode, processing, summary, items, startedAtRef: activityStartedAtRef });
   const [previewFailed, setPreviewFailed] = React.useState(false);
   const sourceInputRef = React.useRef<HTMLInputElement | null>(null);
   const watermarkInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -530,7 +545,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
     } finally {
       setBrowsingSources(false);
     }
-  }, [addPaths, browsingSources, outputFolder, remoteClient, selected?.path, showToast, targetKind]);
+  }, [addPaths, browsingSources, pinnedOutputFolder, outputFolder, remoteClient, selected?.path, showToast, targetKind]);
 
   React.useEffect(() => {
     if (!selectedId && items[0]) setSelectedId(items[0].id);
@@ -551,6 +566,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
 
   const run = React.useCallback(async () => {
     if (processing || items.length === 0 || (!watermark && !watermarkAsset)) return;
+    batchControl.reset();
     activityStartedAtRef.current = Date.now();
     setProcessing(true);
     setSummary({ completed: 0, failed: 0, total: items.length });
@@ -558,6 +574,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
     const imageSequence = new Map(items.filter((item) => item.kind === 'image').map((item, index) => [item.id, index + 1]));
     const videoSequence = new Map(items.filter((item) => item.kind === 'video').map((item, index) => [item.id, index + 1]));
     const result = await runUmbraUiMediaBatch({
+      shouldStop: batchControl.shouldStop,
       items,
       onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
       runItem: async (item) => {
@@ -566,7 +583,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
           sourcePath: item.path,
           watermark: watermarkAsset ? undefined : watermark || undefined,
           watermarkPath: watermarkAsset?.path,
-          outputFolder: outputFolder.trim(),
+          outputFolder: outputFolder.trim(), pinnedOutputFolder,
           sequenceNumber: item.kind === 'video' ? videoSequence.get(item.id) || 1 : imageSequence.get(item.id) || 1,
           x: position.x,
           y: position.y,
@@ -588,7 +605,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
     setProcessing(false);
     window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
     showToast(result.failed ? `${result.completed} watermark${result.completed === 1 ? '' : 's'} completed; ${result.failed} failed.` : `${result.completed} watermark${result.completed === 1 ? '' : 's'} completed.`, result.failed ? 'error' : 'success');
-  }, [exportSettings, items, opacity, outputFolder, position.x, position.y, processing, scale, setItems, showToast, videoMode, videoOutputWidth, watermark, watermarkAsset]);
+  }, [batchControl, exportSettings, items, opacity, pinnedOutputFolder, outputFolder, position.x, position.y, processing, scale, setItems, showToast, videoMode, videoOutputWidth, watermark, watermarkAsset]);
 
   return (
     <div data-umbra-ui-watermark-tool="" className="grid min-h-0 flex-1 grid-cols-[minmax(300px,360px)_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:overflow-y-auto">
@@ -600,7 +617,8 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
           <button type="button" disabled={processing || browsingSources} onClick={() => void chooseSources()} className="flex min-h-11 w-full items-center gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 text-left hover:border-cyan-300/30 disabled:opacity-40">{browsingSources ? <Loader2 size={14} className="animate-spin text-cyan-300" /> : <Upload size={14} className="text-cyan-300" />}<span className="flex-1 text-[9px] font-black uppercase tracking-[0.13em] text-zinc-300">{videoMode ? 'Add Videos' : 'Add Images'}</span></button>
           <SourceBatchList items={items} disabled={processing} onSelect={setSelectedId} onRemove={(id) => setItems((current) => current.filter((item) => item.id !== id))} onClear={() => { setItems([]); setSummary({ completed: 0, failed: 0, total: 0 }); }} />
           <button type="button" disabled={processing || watermarkUploading} onClick={() => watermarkInputRef.current?.click()} className="flex min-h-11 w-full items-center gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 text-left hover:border-emerald-300/30 disabled:opacity-40">{watermarkUploading ? <Loader2 size={14} className="animate-spin text-emerald-300" /> : <Stamp size={14} className="text-emerald-300" />}<span className="min-w-0 flex-1"><span className="block text-[9px] font-black uppercase tracking-[0.13em] text-zinc-300">Watermark</span><span className="block truncate font-mono text-[8px] text-zinc-600">{watermarkUploading ? 'Saving to watermark library...' : watermarkAsset?.filename || watermark?.name || 'Choose a logo or mark'}</span></span></button>
-          <OutputDestination value={outputFolder} onChange={setOutputFolder} browsing={browsing} onBrowse={() => void browse()} automaticSubfolder="Watermarked" />
+          <UmbraPinnedOutputControl value={pinnedOutputFolder} onChange={setPinnedOutputFolder} task="Watermarked" />
+          {!pinnedOutputFolder && <OutputDestination value={outputFolder} onChange={setOutputFolder} browsing={browsing} onBrowse={() => void browse()} automaticSubfolder="Watermarked" />}
           {videoMode ? <>
             <UmbraExtrasPresetControl
               scope="video-watermark"
@@ -649,7 +667,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
 function ImageCensorTool() {
   const showToast = useStore((state) => state.showToast);
   const { items, setItems, addFiles, addPaths } = useStagedMedia('censor');
-  const { outputFolder, setOutputFolder, browsing, browse } = useOutputFolder('censor');
+  const { outputFolder, setOutputFolder, browsing, browse, pinnedOutputFolder, setPinnedOutputFolder } = useOutputFolder('censor');
   const [selectedId, setSelectedId] = React.useState('');
   const [censorMode, setCensorMode] = React.useState<'mosaic' | 'overlay'>('mosaic');
   const [autoDetectEnabled, setAutoDetectEnabled] = React.useState(true);
@@ -675,7 +693,7 @@ function ImageCensorTool() {
   const [browsingSources, setBrowsingSources] = React.useState(false);
   const [summary, setSummary] = React.useState({ completed: 0, failed: 0, total: 0 });
   const activityStartedAtRef = React.useRef(0);
-  useMediaBatchQueueActivity({ mode: 'censor', processing, summary, items, startedAtRef: activityStartedAtRef });
+  const batchControl = useMediaBatchQueueActivity({ mode: 'censor', processing, summary, items, startedAtRef: activityStartedAtRef });
   const [dimensions, setDimensions] = React.useState({ width: 4, height: 3 });
   const [previewFailed, setPreviewFailed] = React.useState(false);
   const sourceInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -852,7 +870,7 @@ function ImageCensorTool() {
     } finally {
       setBrowsingSources(false);
     }
-  }, [addPaths, browsingSources, outputFolder, remoteClient, selected?.path, showToast]);
+  }, [addPaths, browsingSources, pinnedOutputFolder, outputFolder, remoteClient, selected?.path, showToast]);
   const manualCoverageComplete = React.useMemo(() => (
     items.every((item) => (manualRegionsByItem[item.id] || []).length > 0)
   ), [items, manualRegionsByItem]);
@@ -868,6 +886,7 @@ function ImageCensorTool() {
       || !censorConfigurationValid
       || (censorMode === 'overlay' && !overlay && !overlayAsset)
     ) return;
+    batchControl.reset();
     activityStartedAtRef.current = Date.now();
     setProcessing(true);
     setSummary({ completed: 0, failed: 0, total: items.length });
@@ -875,6 +894,7 @@ function ImageCensorTool() {
     let firstFailureMessage = '';
     let passedThroughCount = 0;
     const result = await runUmbraUiMediaBatch({
+      shouldStop: batchControl.shouldStop,
       items,
       onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
       runItem: async (item, sequenceNumber) => {
@@ -891,7 +911,7 @@ function ImageCensorTool() {
           detectionPadding,
           overlay: overlayAsset ? undefined : overlay || undefined,
           overlayPath: overlayAsset?.path,
-          outputFolder: outputFolder.trim(),
+          outputFolder: outputFolder.trim(), pinnedOutputFolder,
           sequenceNumber,
           mosaicSize,
           resizeEnabled: exportSettings.resizeEnabled,
@@ -918,7 +938,7 @@ function ImageCensorTool() {
         : `${result.completed} image${result.completed === 1 ? '' : 's'} processed${passedThroughCount > 0 ? `; ${passedThroughCount} passed through uncensored.` : '.'}`,
       result.failed ? 'error' : 'success',
     );
-  }, [autoDetectEnabled, censorConfigurationValid, censorMode, detectionPadding, detectionThreshold, exportSettings, items, manualRegionsByItem, manualRegionsEnabled, mosaicSize, outputFolder, overlay, overlayAsset, processing, selectedTargets, setItems, showToast]);
+  }, [batchControl, autoDetectEnabled, censorConfigurationValid, censorMode, detectionPadding, detectionThreshold, exportSettings, items, manualRegionsByItem, manualRegionsEnabled, mosaicSize, pinnedOutputFolder, outputFolder, overlay, overlayAsset, processing, selectedTargets, setItems, showToast]);
   const beginDrag = (event: React.PointerEvent<HTMLElement>, region: ManualCensorRegion, kind: 'move' | 'resize') => {
     event.preventDefault();
     event.stopPropagation();
@@ -1012,7 +1032,8 @@ function ImageCensorTool() {
           {censorMode === 'mosaic' ? <label className="block space-y-1.5"><span className="flex justify-between"><span className={labelClass}>Mosaic block size</span><span className="font-mono text-[9px] text-fuchsia-200">{mosaicSize}px</span></span><input type="range" min={2} max={128} step={1} value={mosaicSize} onChange={(event) => setMosaicSize(Number(event.target.value))} className="w-full accent-fuchsia-300" /></label> : <button type="button" disabled={overlayUploading} onClick={() => overlayInputRef.current?.click()} className="flex min-h-11 w-full items-center gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 text-left hover:border-fuchsia-300/30 disabled:opacity-40">{overlayUploading ? <Loader2 size={14} className="animate-spin text-fuchsia-300" /> : <ImageIcon size={14} className="text-fuchsia-300" />}<span className="min-w-0 flex-1"><span className="block text-[9px] font-black uppercase tracking-[0.13em] text-zinc-300">Censor Overlay</span><span className="block truncate font-mono text-[8px] text-zinc-600">{overlayUploading ? 'Saving for presets...' : overlayAsset?.filename || overlay?.name || 'Choose image'}</span></span></button>}
           {!autoDetectEnabled && !manualRegionsEnabled ? <div className="rounded-md border border-amber-300/20 bg-amber-500/[0.06] px-2.5 py-2 font-mono text-[8px] uppercase leading-relaxed text-amber-200/80">Enable Auto Detect, Manual Regions, or both.</div> : null}
           {!autoDetectEnabled && manualRegionsEnabled && !manualCoverageComplete ? <div className="rounded-md border border-amber-300/20 bg-amber-500/[0.06] px-2.5 py-2 font-mono text-[8px] uppercase leading-relaxed text-amber-200/80">Every staged image needs at least one manual region when Auto Detect is off.</div> : null}
-          <OutputDestination value={outputFolder} onChange={setOutputFolder} browsing={browsing} onBrowse={() => void browse()} automaticSubfolder="Censored" />
+          <UmbraPinnedOutputControl value={pinnedOutputFolder} onChange={setPinnedOutputFolder} task="Censored" />
+          {!pinnedOutputFolder && <OutputDestination value={outputFolder} onChange={setOutputFolder} browsing={browsing} onBrowse={() => void browse()} automaticSubfolder="Censored" />}
           <UmbraImageExportControls value={exportSettings} onChange={setExportSettings} presetScope="image-censor" presetLabel="Image Censor Preset" presetExtra={presetExtra} onPresetExtraChange={applyPreset} presetSaveDisabled={censorMode === 'overlay' && !overlayAsset} />
           <button type="button" onClick={() => void run()} disabled={items.length === 0 || processing || !censorConfigurationValid || (censorMode === 'overlay' && !overlay && !overlayAsset)} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-fuchsia-300/30 bg-fuchsia-500/[0.1] text-[10px] font-black uppercase tracking-[0.16em] text-fuchsia-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600">{processing ? <Loader2 size={13} className="animate-spin" /> : <EyeOff size={13} />}{processing ? `Processing ${summary.completed + summary.failed}/${summary.total}` : 'Run Image Censor Batch'}</button>
           <BatchSummary {...summary} />
@@ -1059,14 +1080,14 @@ function ImageCensorTool() {
 function VideoToGifTool() {
   const showToast = useStore((state) => state.showToast);
   const { items, setItems, addFiles, addPaths } = useStagedMedia('gif');
-  const { outputFolder, setOutputFolder, browsing, browse } = useOutputFolder('gif');
+  const { outputFolder, setOutputFolder, browsing, browse, pinnedOutputFolder, setPinnedOutputFolder } = useOutputFolder('gif');
   const [selectedId, setSelectedId] = React.useState('');
   const [width, setWidth] = React.useState(720);
   const [processing, setProcessing] = React.useState(false);
   const [browsingSources, setBrowsingSources] = React.useState(false);
   const [summary, setSummary] = React.useState({ completed: 0, failed: 0, total: 0 });
   const activityStartedAtRef = React.useRef(0);
-  useMediaBatchQueueActivity({ mode: 'gif', processing, summary, items, startedAtRef: activityStartedAtRef });
+  const batchControl = useMediaBatchQueueActivity({ mode: 'gif', processing, summary, items, startedAtRef: activityStartedAtRef });
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const remoteClient = isUmbraRemoteClient();
   const selected = items.find((item) => item.id === selectedId) || items[0];
@@ -1096,19 +1117,21 @@ function VideoToGifTool() {
     } finally {
       setBrowsingSources(false);
     }
-  }, [addPaths, browsingSources, outputFolder, remoteClient, selected?.path, showToast]);
+  }, [addPaths, browsingSources, pinnedOutputFolder, outputFolder, remoteClient, selected?.path, showToast]);
 
   const run = React.useCallback(async () => {
     if (processing || items.length === 0) return;
+    batchControl.reset();
     activityStartedAtRef.current = Date.now();
     setProcessing(true);
     setSummary({ completed: 0, failed: 0, total: items.length });
     setItems((current) => current.map((item) => ({ ...item, status: 'staged', error: undefined, result: undefined })));
     const result = await runUmbraUiMediaBatch({
       items,
+      shouldStop: batchControl.shouldStop,
       onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
       runItem: async (item, sequenceNumber) => {
-        const next = await submitUmbraUiVideoToGif({ source: item.file, sourcePath: item.path, outputFolder: outputFolder.trim(), sequenceNumber, width });
+        const next = await submitUmbraUiVideoToGif({ source: item.file, sourcePath: item.path, outputFolder: outputFolder.trim(), pinnedOutputFolder, sequenceNumber, width });
         setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, result: next } : entry));
       },
       onItemSettled: (item, error) => {
@@ -1119,7 +1142,7 @@ function VideoToGifTool() {
     setProcessing(false);
     window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
     showToast(result.failed ? `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed; ${result.failed} failed.` : `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed.`, result.failed ? 'error' : 'success');
-  }, [items, outputFolder, processing, setItems, showToast, width]);
+  }, [batchControl, items, pinnedOutputFolder, outputFolder, processing, setItems, showToast, width]);
 
   return (
     <div data-umbra-ui-gif-tool="" className="grid min-h-0 flex-1 grid-cols-[minmax(300px,360px)_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:overflow-y-auto">
@@ -1130,7 +1153,8 @@ function VideoToGifTool() {
           <button type="button" disabled={processing || browsingSources} onClick={() => void chooseSources()} className="flex min-h-11 w-full items-center gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 text-left hover:border-amber-300/30 disabled:opacity-40">{browsingSources ? <Loader2 size={14} className="animate-spin text-amber-300" /> : <Upload size={14} className="text-amber-300" />}<span className="flex-1 text-[9px] font-black uppercase tracking-[0.13em] text-zinc-300">Add Videos</span></button>
           <SourceBatchList items={items} disabled={processing} onSelect={setSelectedId} onRemove={(id) => setItems((current) => current.filter((item) => item.id !== id))} onClear={() => { setItems([]); setSummary({ completed: 0, failed: 0, total: 0 }); }} />
           <UmbraExtrasPresetControl scope="video-to-gif" label="GIF Preset" value={gifPresetValue} onApply={applyGifPreset} />
-          <OutputDestination value={outputFolder} onChange={setOutputFolder} browsing={browsing} onBrowse={() => void browse()} automaticSubfolder="GIF" />
+          <UmbraPinnedOutputControl value={pinnedOutputFolder} onChange={setPinnedOutputFolder} task="GIF" />
+          {!pinnedOutputFolder && <OutputDestination value={outputFolder} onChange={setOutputFolder} browsing={browsing} onBrowse={() => void browse()} automaticSubfolder="GIF" />}
           <div className="border-t border-white/10 pt-3">
             <label className="block space-y-1.5"><span className={labelClass}>Output Width</span><input type="number" min={64} max={3840} step={2} value={width} onChange={(event) => setWidth(Math.max(64, Math.min(3840, Number(event.target.value) || 720)))} className={controlClass} /></label>
           </div>

@@ -12,6 +12,7 @@ export type UserConfigKey =
   | 'umbra-ui-agent-instructions'
   | 'umbra-ui-image-controls'
   | 'umbra-ui-prompt-history'
+  | 'umbra-ui-lora-presets'
   | 'umbra-ui-video-prompt-history'
   | 'model-manager-browser'
   | 'board-preferences'

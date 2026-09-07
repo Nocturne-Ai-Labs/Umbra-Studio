@@ -1,4 +1,6 @@
 export interface UmbraUiCanvasSaveMetadata {
+  pinnedOutputFolder?: string;
+  outputTask?: 'canvas' | 'inpainting';
   canvasProjectId: string;
   documentName: string;
   operationMode: 'inpaint' | 'outpaint';
@@ -63,6 +65,8 @@ export async function saveUmbraUiCanvasToGallery(
   form.append('image', image, `${String(name || 'umbra-canvas').replace(/\.png$/i, '')}.png`);
   form.append('name', name);
   form.append('metadata', JSON.stringify(metadata));
+  form.append('pinnedOutputFolder', metadata.pinnedOutputFolder || '');
+  form.append('outputTask', metadata.outputTask || 'canvas');
   const response = await fetch('/api/umbra-ui/canvas/save', { method: 'POST', body: form, signal });
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok || payload.success !== true) {

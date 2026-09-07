@@ -351,14 +351,14 @@ export function UmbraPositivePromptEditor({
         <span className="rounded-sm border border-white/10 bg-black/25 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400">
           {segments.length} field{segments.length === 1 ? '' : 's'}
         </span>
-        <div data-umbra-prompt-toolbar="" className="ml-auto flex items-center gap-1">
+        <div data-umbra-prompt-toolbar="" className="flex w-full min-w-0 flex-wrap items-center gap-1">
           <PromptWildcardLibrary onInsert={insertWildcard} compact />
           <button
             type="button"
             onClick={() => void enhanceSelectedSegments()}
             disabled={enhancingFields || selectedAgentSegments.length <= 0}
             className={cn(
-              'inline-flex h-7 items-center gap-1.5 rounded-sm border px-2 font-mono text-[9px] font-black uppercase transition-colors',
+              'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border transition-colors',
               selectedAgentSegments.length > 0
                 ? accent === 'rose'
                   ? 'border-rose-300/30 bg-rose-500/[0.08] text-rose-100'
@@ -368,16 +368,17 @@ export function UmbraPositivePromptEditor({
                 : 'border-white/10 text-zinc-700',
             )}
             title="Enhance only the prompt fields with an enabled agent icon"
+            aria-label={enhancingFields ? 'Enhancing prompt fields' : `Enhance ${selectedAgentSegments.length} prompt fields`}
           >
             {enhancingFields ? <Loader2 size={11} className="animate-spin" /> : <WandSparkles size={11} />}
-            {enhancingFields ? 'Enhancing' : `Enhance ${selectedAgentSegments.length}`}
           </button>
           <button
             type="button"
             onClick={onRememberCurrent}
             disabled={!compiledPrompt || !onRememberCurrent}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-white/10 text-zinc-400 hover:border-cyan-300/25 hover:text-cyan-100 disabled:text-zinc-800"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-white/10 text-zinc-400 hover:border-cyan-300/25 hover:text-cyan-100 disabled:text-zinc-800"
             title="Save the current prompt to history"
+            aria-label="Save the current prompt to history"
           >
             <BookmarkPlus size={12} />
           </button>
@@ -385,21 +386,23 @@ export function UmbraPositivePromptEditor({
             type="button"
             onClick={() => setHistoryOpen((open) => !open)}
             className={cn(
-              'inline-flex h-7 items-center gap-1.5 rounded-sm border px-2 font-mono text-[9px] font-black uppercase',
+              'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border',
               historyOpen ? 'border-cyan-300/30 bg-cyan-500/[0.08] text-cyan-100' : 'border-white/10 text-zinc-500 hover:text-zinc-200',
             )}
-            title="Show prompt history"
+            title={`Show prompt history (${history.length})`}
+            aria-label="Show prompt history"
           >
-            <History size={11} /> {history.length}
+            <History size={13} />
           </button>
           <button
             type="button"
             onClick={addSegment}
             disabled={segments.length >= MAX_PROMPT_SEGMENTS}
-            className="inline-flex h-7 items-center gap-1.5 rounded-sm border border-white/10 bg-white/[0.025] px-2.5 text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:border-cyan-300/25 hover:text-cyan-100 disabled:text-zinc-700"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-white/10 bg-white/[0.025] text-zinc-300 hover:border-cyan-300/25 hover:text-cyan-100 disabled:text-zinc-700"
             title="Add positive prompt field"
+            aria-label="Add positive prompt field"
           >
-            <ListPlus size={11} /> Add Field
+            <ListPlus size={14} />
           </button>
         </div>
       </header>

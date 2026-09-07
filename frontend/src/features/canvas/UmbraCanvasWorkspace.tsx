@@ -1,7 +1,13 @@
 'use client';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
+import { UmbraGenerationActionBar } from '@/components/umbra-ui/UmbraGenerationActionBar';
 import React from 'react';
+import { useInpaintSamplingPreview } from '@/hooks/useInpaintSamplingPreview';
+import { UmbraInpaintLivePreview } from '@/components/umbra-ui/UmbraInpaintLivePreview';
+import { useNsfwPrivacy } from '@/components/privacy/NsfwPrivacyProvider';
+import { isProtectedLivePreview } from '@/lib/livePreviewPrivacy';
 import {
   ArrowDown,
   ArrowUp,
@@ -78,7 +84,6 @@ import {
   isUmbraUiInpaintJobTerminal,
   submitUmbraUiInpaintJob,
   type UmbraUiInpaintJob,
-  type UmbraUiInpaintPreviewEvent,
 } from '@/lib/umbraUiInpaint';
 import type {
   PowerPrompterDetailerStage,
@@ -368,6 +373,7 @@ export function UmbraCanvasWorkspace({
   onMediaHandoffConsumed,
   onRestoreGenerationSettings,
 }: UmbraCanvasWorkspaceProps) {
+  const [pinnedOutputFolder, setPinnedOutputFolder] = usePinnedOutputFolder('canvas');
   const showToast = useStore((state) => state.showToast);
   const project = useUmbraCanvasStore((state) => state.present);
   const canUndo = useUmbraCanvasStore((state) => state.past.length > 0);
@@ -464,15 +470,18 @@ export function UmbraCanvasWorkspace({
     status: job.status,
     total: job.total,
     completed: job.completed,
-    failed: job.failed,
+    failed: job.failed + job.items.filter((item) => item.status === 'canceled').length,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     placement: 'next',
     requestId: job.id,
+    promptId: job.items.find((item) => item.status === 'running' || item.status === 'queued')?.promptId,
     readonly: true,
   }) : null, [job, project.name]);
   usePublishUmbraQueueActivity('umbra-ui-canvas-workspace', queueActivity);
-  const [liveSamplingPreview, setLiveSamplingPreview] = React.useState<UmbraUiInpaintPreviewEvent | null>(null);
+  const liveSamplingPreview = useInpaintSamplingPreview(job);
+  const previewPrivacy = useNsfwPrivacy();
+  const hideInlineSamplingPreview = isProtectedLivePreview(job?.prompt) && (previewPrivacy.locked || previewPrivacy.mode === 'blur');
   const [submitting, setSubmitting] = React.useState(false);
   const [canceling, setCanceling] = React.useState(false);
   const [previewStageId, setPreviewStageId] = React.useState('');
@@ -496,58 +505,12 @@ export function UmbraCanvasWorkspace({
     acceptanceMaskUrl: string;
   }>());
   const jobRef = React.useRef(job);
-  const liveSamplingPreviewsRef = React.useRef(new Map<string, UmbraUiInpaintPreviewEvent>());
   const seenStageIdsRef = React.useRef(new Set<string>());
   const consumedHandoffAtRef = React.useRef(0);
   const recoveredProjectRef = React.useRef(false);
   const projectRef = React.useRef(project);
   projectRef.current = project;
   jobRef.current = job;
-
-  React.useEffect(() => {
-    let socket: WebSocket | null = null;
-    let reconnectTimer = 0;
-    let disposed = false;
-    const connect = () => {
-      if (disposed) return;
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      socket = new WebSocket(`${protocol}//${window.location.host}/ws/inpaint-preview`);
-      socket.onmessage = (event) => {
-        let message: { type?: string; data?: UmbraUiInpaintPreviewEvent } | null = null;
-        try { message = JSON.parse(String(event.data)); } catch { return; }
-        if (message?.type !== 'umbra_ui_inpaint_preview' || !message.data?.jobId) return;
-        const preview = message.data;
-        if (preview.active) liveSamplingPreviewsRef.current.set(preview.jobId, preview);
-        else liveSamplingPreviewsRef.current.delete(preview.jobId);
-        while (liveSamplingPreviewsRef.current.size > 8) {
-          const oldest = liveSamplingPreviewsRef.current.keys().next().value;
-          if (!oldest) break;
-          liveSamplingPreviewsRef.current.delete(oldest);
-        }
-        if (jobRef.current?.id === preview.jobId) {
-          setLiveSamplingPreview(preview.active ? preview : null);
-        }
-      };
-      socket.onclose = () => {
-        socket = null;
-        if (!disposed) reconnectTimer = window.setTimeout(connect, 1_500);
-      };
-    };
-    connect();
-    return () => {
-      disposed = true;
-      window.clearTimeout(reconnectTimer);
-      socket?.close();
-    };
-  }, []);
-
-  React.useEffect(() => {
-    if (!job || isUmbraUiInpaintJobTerminal(job)) {
-      setLiveSamplingPreview(null);
-      return;
-    }
-    setLiveSamplingPreview(liveSamplingPreviewsRef.current.get(job.id) || null);
-  }, [job?.id, job?.status]);
 
   const persistedGenerationSettingsPayload = React.useMemo(
     () => JSON.stringify(project.generation.settings || null),
@@ -747,8 +710,8 @@ export function UmbraCanvasWorkspace({
   }, [previewStageKey, stagingReveal]);
 
   const samplingPreview = React.useMemo(() => {
-    if (!job || isUmbraUiInpaintJobTerminal(job)) return null;
-    const preview = liveSamplingPreview?.jobId === job.id ? liveSamplingPreview : job.preview;
+    if (!job || isUmbraUiInpaintJobTerminal(job) || hideInlineSamplingPreview) return null;
+    const preview = liveSamplingPreview;
     if (!preview?.imageDataUrl) return null;
     const frozen = jobBboxesRef.current.get(job.id);
     if (!frozen) return null;
@@ -763,7 +726,7 @@ export function UmbraCanvasWorkspace({
       step: preview.step,
       maxStep: preview.maxStep,
     };
-  }, [job, liveSamplingPreview]);
+  }, [hideInlineSamplingPreview, job, liveSamplingPreview]);
   const samplingPreviewKey = samplingPreview
     ? [samplingPreview.imageDataUrl.length, samplingPreview.imageDataUrl.slice(-48), samplingPreview.step, samplingPreview.maxStep, samplingPreview.bbox.x, samplingPreview.bbox.y, samplingPreview.bbox.width, samplingPreview.bbox.height].join(':')
     : '';
@@ -1522,6 +1485,8 @@ export function UmbraCanvasWorkspace({
         && submittedControlLayers.length === 0
         && submittedReferenceLayers.length === 0;
       const nextJob = await submitUmbraUiInpaintJob({
+        pinnedOutputFolder,
+        outputTask: 'canvas',
         source: preparedRegion.sourceBlob,
         sourceName: `${submissionProject.name || 'umbra-canvas'}.png`,
         canvasProjectId: submissionProject.id,
@@ -1609,7 +1574,6 @@ export function UmbraCanvasWorkspace({
       setJob(nextJob);
       await saveProject(false);
       onSeedChange(String(advanceUmbraUiSeed(queuedSeed, seedMode, seedIncrement, samples)));
-      showToast(`${nextJob.total} Canvas sample${nextJob.total === 1 ? '' : 's'} queued.`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Canvas generation could not be queued.', 'error');
     } finally {
@@ -1644,6 +1608,7 @@ export function UmbraCanvasWorkspace({
     onSeedChange,
     pipelineError,
     preparedRegion,
+    pinnedOutputFolder,
     referenceLayersAvailable,
     referenceLayersReason,
     promptSegments,
@@ -2284,12 +2249,11 @@ export function UmbraCanvasWorkspace({
             <label className="block"><span className="flex justify-between text-[8px] font-black uppercase text-zinc-500">Color Match <span className="font-mono text-rose-200">{Math.round(colorMatch * 100)}%</span></span><input type="range" min="0" max="1" step="0.05" value={colorMatch} onChange={(event) => setColorMatch(Number(event.target.value))} className="mt-1 w-full accent-rose-300" /></label>
             <label className="block"><span className="flex justify-between text-[8px] font-black uppercase text-zinc-500">Mask Bias <span className="font-mono text-rose-200">{Math.round(softInpaintMaskInfluence * 100)}%</span></span><input type="range" min="0" max="1" step="0.05" value={softInpaintMaskInfluence} onChange={(event) => setSoftInpaintMaskInfluence(Number(event.target.value))} className="mt-1 w-full accent-rose-300" /></label>
           </section>
-          <button type="button" onClick={() => void prepareGenerationRegion()} disabled={preparingRegion || submitting} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-rose-300/30 bg-rose-500/10 text-[10px] font-black uppercase tracking-[0.1em] text-rose-100 disabled:border-white/10 disabled:bg-transparent disabled:text-zinc-700">{preparingRegion || submitting ? <LoaderCircle size={14} className="animate-spin" /> : <ScanLine size={14} />} {preparingRegion ? 'Preparing' : submitting ? 'Submitting' : 'Generate'}</button>
           {job ? <div className="rounded-md border border-white/10 bg-black/30 p-2.5 font-mono text-[9px] text-zinc-500"><div className="flex items-center gap-2"><span className="font-black uppercase text-zinc-300">{job.status}</span><span>{job.completed}/{job.total}</span>{!isUmbraUiInpaintJobTerminal(job) ? <button type="button" onClick={() => void cancelGeneration()} disabled={canceling} className="ml-auto text-rose-300 hover:text-rose-100">{canceling ? 'Canceling' : 'Cancel'}</button> : null}</div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-rose-400 transition-[width]" style={{ width: `${Math.round(job.completed / Math.max(1, job.total) * 100)}%` }} /></div></div> : null}
         </div>
       </aside>
 
-      <div data-umbra-canvas-center="" className="col-start-2 grid min-h-0 min-w-0 grid-rows-[42px_minmax(0,1fr)_auto_38px] 2xl:col-start-auto">
+      <div data-umbra-canvas-center="" className={cn('col-start-2 grid min-h-0 min-w-0 2xl:col-start-auto', stages.length ? 'grid-rows-[42px_minmax(0,1fr)_auto_auto_38px]' : 'grid-rows-[42px_minmax(0,1fr)_auto_38px]')}>
         <div className="flex min-w-0 items-center gap-2 overflow-x-auto border-b border-white/10 bg-black/25 px-3 custom-scrollbar">
           <button type="button" title="Generation controls" aria-label="Open generation controls" onClick={() => setCompactPanel((current) => current === 'generation' ? '' : 'generation')} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-rose-300/20 text-rose-200 2xl:hidden"><PanelLeftOpen size={13} /></button>
           <button type="button" title="Prompt and inpaint controls" aria-label="Open prompt and inpaint controls" onClick={() => setCompactPanel((current) => current === 'inpaint' ? '' : 'inpaint')} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cyan-300/20 text-cyan-200 2xl:hidden"><Focus size={13} /></button>
@@ -2305,7 +2269,6 @@ export function UmbraCanvasWorkspace({
           <button type="button" title="Save project as a new copy" aria-label="Save project as a new copy" onClick={() => void forkProject()} disabled={forkingProject || saving || project.entities.length === 0} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100 disabled:text-zinc-800">{forkingProject ? <LoaderCircle size={12} className="animate-spin" /> : <Copy size={12} />}</button>
           <button type="button" title="Export portable Canvas project" aria-label="Export portable Canvas project" onClick={() => void exportProject()} disabled={archiving || project.entities.length === 0} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100 disabled:text-zinc-800"><Download size={12} /></button>
           <button type="button" title="Import portable Canvas project" aria-label="Import portable Canvas project" onClick={() => archiveInputRef.current?.click()} disabled={archiving} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100 disabled:text-zinc-800"><Upload size={12} /></button>
-          <button type="button" onClick={() => void prepareGenerationRegion()} disabled={preparingRegion || submitting} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-rose-300/25 bg-rose-500/[0.08] px-2.5 text-[9px] font-black uppercase text-rose-100 disabled:text-zinc-700">{preparingRegion || submitting ? <LoaderCircle size={12} className="animate-spin" /> : <ScanLine size={12} />} {preparingRegion ? 'Preparing' : submitting ? 'Submitting' : 'Generate'}</button>
           {tool === 'bbox' ? (
             <div className="flex shrink-0 items-center gap-1 border-l border-white/10 pl-2">
               {(['x', 'y', 'width', 'height'] as const).map((field) => (
@@ -2342,8 +2305,10 @@ export function UmbraCanvasWorkspace({
             <button type="button" title="Canvas layers" aria-label="Open Canvas layers" onClick={() => setCompactPanel((current) => current === 'layers' ? '' : 'layers')} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cyan-300/20 text-cyan-200 2xl:hidden"><PanelRightOpen size={13} /></button>
           </div>
         </div>
+        <div className="relative min-h-0 min-w-0">
         <div
           ref={containerRef}
+          style={{ height: '100%' }}
           data-umbra-canvas-viewport=""
           onDragOver={(event) => {
             if (event.dataTransfer.types.includes('Files') || event.dataTransfer.types.includes(UMBRA_GALLERY_DRAG_PATHS_MIME)) {
@@ -2369,6 +2334,10 @@ export function UmbraCanvasWorkspace({
           }}
           className="relative min-h-0 overflow-hidden bg-[#090b0c] [background-image:linear-gradient(45deg,rgba(255,255,255,0.018)_25%,transparent_25%),linear-gradient(-45deg,rgba(255,255,255,0.018)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,rgba(255,255,255,0.018)_75%),linear-gradient(-45deg,transparent_75%,rgba(255,255,255,0.018)_75%)] [background-position:0_0,0_8px,8px_-8px,-8px_0px] [background-size:16px_16px]"
         />
+        <div className="absolute bottom-2 right-2 z-20 max-w-[calc(100%-16px)]">
+          <UmbraInpaintLivePreview job={job} preview={liveSamplingPreview} />
+        </div>
+        </div>
         {stages.length > 0 ? (
           <section data-umbra-canvas-staging-strip="" aria-label="Canvas staging strip" className="flex min-h-28 items-stretch gap-2 overflow-x-auto border-t border-white/10 bg-black/40 p-2 custom-scrollbar">
             <div className="flex w-36 shrink-0 flex-col justify-center">
@@ -2421,6 +2390,17 @@ export function UmbraCanvasWorkspace({
             );})}
           </section>
         ) : null}
+        <UmbraGenerationActionBar task="Canvas" onGenerate={() => void prepareGenerationRegion()}
+          disabled={preparingRegion || submitting} busy={preparingRegion || submitting}
+          title="Generate the selected Canvas region" label={preparingRegion ? 'Preparing' : submitting ? 'Submitting' : 'Generate'}
+          folder={pinnedOutputFolder} onFolderChange={setPinnedOutputFolder}>
+          <button type="button" disabled={!previewStage?.sourcePath} onClick={() => { if (previewStage) void sendStagedResult(previewStage, 'img2img'); }}
+            title="Continue the previewed result in IMG2IMG" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-cyan-300/20 px-2.5 text-[10px] font-bold text-cyan-100 disabled:text-zinc-600"><ImagePlus size={12} /> IMG2IMG</button>
+          <button type="button" disabled={!previewStage?.sourcePath} onClick={() => { if (previewStage) void sendStagedResult(previewStage, 'inpaint'); }}
+            title="Continue the previewed result in Inpaint" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-rose-300/20 px-2.5 text-[10px] font-bold text-rose-100 disabled:text-zinc-600"><Brush size={12} /> Inpaint</button>
+          <button type="button" disabled={!previewStage?.sourcePath} onClick={() => { if (previewStage) void sendStagedResult(previewStage, 'extras'); }}
+            title="Add the previewed result to the Extras upscale batch" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-white/10 px-2.5 text-[10px] font-bold text-zinc-300 disabled:text-zinc-600"><Layers3 size={12} /> Add to Batch</button>
+        </UmbraGenerationActionBar>
         <div className="flex items-center gap-3 border-t border-white/10 bg-black/30 px-3 font-mono text-[9px] text-zinc-600">
           <span className="text-cyan-300">WORLD</span>
           <span>X {Math.round(project.viewport.x)}</span>

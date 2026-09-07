@@ -1,16 +1,15 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { UmbraAlertSettingsButton } from '@/components/ui/UmbraAlertSettings';
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { Bell, BellOff, Bot, ChevronDown, ChevronLeft, ChevronRight, FileText, FolderOpen, ListChecks, ListOrdered, Loader2, MoreHorizontal, Pause, Play, Power, Search, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
-import { POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME, POWER_PROMPTER_MAX_QUEUE_SETS } from '@/lib/powerPrompter';
+import { Bot, ChevronDown, ChevronLeft, ChevronRight, FileText, FolderOpen, ListChecks, ListOrdered, Loader2, MoreHorizontal, Pause, Play, Power, Search, Trash2, XCircle } from 'lucide-react';
+import { POWER_PROMPTER_MAX_QUEUE_SETS } from '@/lib/powerPrompter';
 import { PowerPrompterGlobalSearchBox } from './PowerPrompterGlobalSearchBox';
-import { POWER_PROMPTER_SOUND_STYLE_GLASS_TICK, POWER_PROMPTER_SOUND_STYLE_OPTIONS, clampCompletionSoundVolume } from './powerPrompterAudio';
 import { QUEUE_MANAGER_DISPATCH_DELAY_OPTIONS, clampQueueSetId, getSetColor, hexToRgba } from './queue/queueCore';
 
 type PowerPrompterCommandBarProps = Record<string, any> & {
   setLeftPanelCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
   setRightPanelCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
-  setSoundMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setQueuePromptExpandedMode: React.Dispatch<React.SetStateAction<boolean>>;
 };
 
@@ -24,14 +23,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
     setLeftPanelCollapsed,
     rightPanelCollapsed,
     setRightPanelCollapsed,
-    soundMenuRef,
-    soundMenuOpen,
-    setSoundMenuOpen,
-    alertFeaturesEnabled,
     settings,
-    handleToggleCompletionSound,
-    handleSetCompletionSoundStyle,
-    handleSetCompletionSoundVolume,
     queueSetTarget,
     setQueueSetTarget,
     currentFile,
@@ -598,46 +590,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
 
             {isTabletRemote ? (
               <div data-umbra-powerprompter-tablet-controls="">
-                <div className="mt-2.5 rounded-lg border border-white/10 bg-white/[0.025] p-2.5">
-                  <div className="mb-2 text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">Alerts</div>
-                  <div className="grid grid-cols-[auto_minmax(0,1fr)_96px] gap-2">
-                    <button
-                      type="button"
-                      onClick={() => { void handleToggleCompletionSound(); }}
-                      className={`inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold uppercase tracking-wider ${
-                        settings.generationCompleteSoundEnabled !== false
-                          ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-200'
-                          : 'border-white/10 bg-black/20 text-zinc-400'
-                      }`}
-                    >
-                      {settings.generationCompleteSoundEnabled !== false ? <Volume2 size={12} /> : <VolumeX size={12} />}
-                      Complete
-                    </button>
-                    <UmbraSelectControl
-                      value={settings.generationCompleteSoundStyle || POWER_PROMPTER_SOUND_STYLE_GLASS_TICK}
-                      onChange={(event) => { void handleSetCompletionSoundStyle(event.currentTarget.value); }}
-                      className="min-h-10 rounded-lg border border-white/10 bg-black/30 px-2.5 text-xs font-semibold text-zinc-200 outline-none umbra-themed-select"
-                      title="Image completion alert sound"
-                    >
-                      {POWER_PROMPTER_SOUND_STYLE_OPTIONS.map((option) => (
-                        <option key={`tablet-controls-completion-sound-${option.id}`} value={option.id}>{option.label}</option>
-                      ))}
-                    </UmbraSelectControl>
-                    <input
-                      type="range"
-                      min={0}
-                      max={Math.round(POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME * 100)}
-                      step={1}
-                      value={Math.round(clampCompletionSoundVolume(settings.generationCompleteSoundVolume) * 100)}
-                      onChange={(event) => {
-                        const next = Number(event.target.value);
-                        if (Number.isFinite(next)) void handleSetCompletionSoundVolume(next / 100);
-                      }}
-                      className="min-h-10 w-full accent-emerald-400"
-                      title="Image completion alert volume"
-                    />
-                  </div>
-                </div>
+                <UmbraAlertSettingsButton />
 
                 <div className="mt-2.5 grid grid-cols-4 gap-2">
                   <button
@@ -926,84 +879,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
               </div>
             )}
           </div>
-          <div className="hidden" ref={soundMenuRef}>
-            <button
-              onClick={() => setSoundMenuOpen((prev) => !prev)}
-              className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-colors ${
-                alertFeaturesEnabled
-                  ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-200 hover:border-emerald-300/60 hover:text-emerald-100'
-                  : 'border-white/20 bg-white/[0.06] text-zinc-300 hover:text-zinc-100 hover:border-white/35'
-              }`}
-              title={alertFeaturesEnabled ? 'Alert effects enabled' : 'Alert effects disabled'}
-            >
-              {alertFeaturesEnabled ? <Bell size={14} /> : <BellOff size={14} />}
-              Alert
-              <ChevronDown size={13} />
-            </button>
-            {soundMenuOpen && (
-              <div className="absolute left-0 top-[calc(100%+6px)] z-40 w-[300px] rounded-lg border border-white/15 bg-[#090b11]/95 backdrop-blur-md p-2 shadow-[0_10px_24px_rgba(0,0,0,0.35)]">
-                <div className="rounded-md border border-white/10 bg-white/[0.02] p-2">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Completion Alert</div>
-                      <div className="text-[10px] text-zinc-600">Plays when each queued prompt finishes</div>
-                    </div>
-                    <button
-                      onClick={() => { void handleToggleCompletionSound(); }}
-                      className={`rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
-                        settings.generationCompleteSoundEnabled !== false
-                          ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-200 hover:border-emerald-300/55'
-                          : 'border-white/15 bg-white/[0.03] text-zinc-300 hover:border-white/30'
-                      }`}
-                    >
-                      <span className="inline-flex items-center gap-1.5">
-                        {settings.generationCompleteSoundEnabled !== false ? <Volume2 size={12} /> : <VolumeX size={12} />}
-                        {settings.generationCompleteSoundEnabled !== false ? 'On' : 'Off'}
-                      </span>
-                    </button>
-                  </div>
-                  <div className="grid max-h-[132px] grid-cols-1 gap-1 overflow-y-auto pr-1 custom-scrollbar">
-                    {POWER_PROMPTER_SOUND_STYLE_OPTIONS.map((option) => {
-                      const selected = (settings.generationCompleteSoundStyle || POWER_PROMPTER_SOUND_STYLE_GLASS_TICK) === option.id;
-                      return (
-                        <button
-                          key={`pp-sound-style-${option.id}`}
-                          onClick={() => { void handleSetCompletionSoundStyle(option.id); }}
-                          className={`rounded-md border px-2 py-1.5 text-left text-[11px] transition-colors ${
-                            selected
-                              ? 'border-cyan-400/45 bg-cyan-500/12 text-cyan-100'
-                              : 'border-white/10 bg-white/[0.03] text-zinc-300 hover:border-white/25'
-                          }`}
-                        >
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-2">
-                    <div className="mb-1 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-                      <span>Volume</span>
-                      <span>{Math.round(clampCompletionSoundVolume(settings.generationCompleteSoundVolume) * 100)}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={Math.round(POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME * 100)}
-                      step={1}
-                      value={Math.round(clampCompletionSoundVolume(settings.generationCompleteSoundVolume) * 100)}
-                      onChange={(event) => {
-                        const next = Number(event.target.value);
-                        if (Number.isFinite(next)) {
-                          void handleSetCompletionSoundVolume(next / 100);
-                        }
-                      }}
-                      className="w-full accent-cyan-400"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+
           <div className="ml-auto flex min-w-0 shrink items-center justify-end gap-1.5">
             <div className="hidden min-w-0 items-center gap-1.5 self-center xl:flex">
               <div className="hidden rounded-md border border-white/10 bg-white/[0.035] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-zinc-500 tabular-nums 2xl:block">
@@ -1319,50 +1195,7 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                     </div>
                   </div>
 
-                  <div className="mb-3 rounded-lg border border-white/10 bg-white/[0.025] p-2.5">
-                    <div className="mb-2 text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">Alerts</div>
-                    <div className="grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)_96px]">
-                      <button
-                        onClick={() => { void handleToggleCompletionSound(); }}
-                        className={`inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-                          settings.generationCompleteSoundEnabled !== false
-                            ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-200 hover:border-emerald-300/55'
-                            : 'border-white/10 bg-black/20 text-zinc-400 hover:border-white/25 hover:text-zinc-200'
-                        }`}
-                        title="Toggle image completion alert"
-                      >
-                        {settings.generationCompleteSoundEnabled !== false ? <Volume2 size={12} /> : <VolumeX size={12} />}
-                        Complete
-                      </button>
-                      <UmbraSelectControl
-                        value={settings.generationCompleteSoundStyle || POWER_PROMPTER_SOUND_STYLE_GLASS_TICK}
-                        onChange={(event) => { void handleSetCompletionSoundStyle(event.currentTarget.value); }}
-                        className="min-h-9 rounded-lg border border-white/10 bg-black/30 px-2.5 text-xs font-semibold text-zinc-200 outline-none transition-colors hover:border-white/25 focus:border-emerald-400/45 umbra-themed-select"
-                        title="Image completion alert sound"
-                      >
-                        {POWER_PROMPTER_SOUND_STYLE_OPTIONS.map((option) => (
-                          <option key={`controls-completion-sound-${option.id}`} value={option.id}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </UmbraSelectControl>
-                      <input
-                        type="range"
-                        min={0}
-                        max={Math.round(POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME * 100)}
-                        step={1}
-                        value={Math.round(clampCompletionSoundVolume(settings.generationCompleteSoundVolume) * 100)}
-                        onChange={(event) => {
-                          const next = Number(event.target.value);
-                          if (Number.isFinite(next)) {
-                            void handleSetCompletionSoundVolume(next / 100);
-                          }
-                        }}
-                        className="min-h-9 w-full accent-emerald-400"
-                        title="Image completion alert volume"
-                      />
-                    </div>
-                  </div>
+                  <UmbraAlertSettingsButton />
 
                   <div className="mb-3 grid gap-2 sm:grid-cols-2">
                     <button

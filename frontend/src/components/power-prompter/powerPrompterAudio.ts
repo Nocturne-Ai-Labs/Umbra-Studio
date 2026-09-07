@@ -1,5 +1,6 @@
 import type { PowerPrompterCompletionSoundStyle, PowerPrompterSettings } from '@/types/powerPrompter';
 import { DEFAULT_POWER_PROMPTER_SETTINGS, POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME } from '@/lib/powerPrompter';
+import { loadAppSettings } from '@/lib/appSettings';
 
 export const POWER_PROMPTER_SOUND_STYLE_GLASS_TICK: PowerPrompterCompletionSoundStyle = 'glass_tick';
 export const POWER_PROMPTER_ALERT_MAX_LINEAR_GAIN = 10 ** (-1 / 20);
@@ -242,7 +243,7 @@ export const POWER_PROMPTER_SOUND_PROFILES: Record<PowerPrompterCompletionSoundS
   },
 };
 
-export type PowerPrompterNotificationSoundKind = 'submitted' | 'completed';
+export type PowerPrompterNotificationSoundKind = 'submitted' | 'completed' | 'failed';
 export type PowerPrompterNotificationAudioSettings = Pick<
   PowerPrompterSettings,
   'generationCompleteSoundEnabled' | 'generationCompleteSoundStyle' | 'generationCompleteSoundVolume'
@@ -252,9 +253,24 @@ let sharedNotificationAudioContext: AudioContext | null = null;
 let sharedNotificationAudioEnabled = DEFAULT_POWER_PROMPTER_SETTINGS.generationCompleteSoundEnabled;
 let sharedNotificationAudioStyle = DEFAULT_POWER_PROMPTER_SETTINGS.generationCompleteSoundStyle;
 let sharedNotificationAudioVolume = DEFAULT_POWER_PROMPTER_SETTINGS.generationCompleteSoundVolume;
+const lastPlayedByKind = new Map<string, number>();
+const heardEventIds = new Set<string>();
+let lastAnyPlayedAt = 0;
+
+export function getUmbraAlertPreferences() {
+  const settings = loadAppSettings();
+  const migrated = settings['alerts.configured'];
+  const requestedStyle = migrated ? settings['alerts.style'] : sharedNotificationAudioStyle;
+  return {
+    enabled: migrated ? settings['alerts.soundEnabled'] : sharedNotificationAudioEnabled,
+    style: POWER_PROMPTER_SOUND_STYLE_OPTIONS.find((option) => option.id === requestedStyle)?.id || POWER_PROMPTER_SOUND_STYLE_GLASS_TICK,
+    volume: clampCompletionSoundVolume(migrated ? settings['alerts.volume'] : sharedNotificationAudioVolume),
+    submitted: settings['alerts.submitted'], completed: settings['alerts.completed'], failed: settings['alerts.failed'],
+  };
+}
 
 export function getCompletionAudioContext(existing: AudioContext | null): AudioContext | null {
-  if (existing) return existing;
+  if (existing && existing.state !== 'closed') return existing;
   if (typeof window === 'undefined') return null;
   const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AudioContextCtor) return null;
@@ -304,21 +320,36 @@ export async function primePowerPrompterNotificationAudio(): Promise<boolean> {
 
 export function playPowerPrompterNotificationSound(
   kind: PowerPrompterNotificationSoundKind = 'completed',
+  options: { eventId?: string; preview?: ReturnType<typeof getUmbraAlertPreferences> } = {},
 ) {
-  if (!sharedNotificationAudioEnabled) return;
-  const context = getCompletionAudioContext(sharedNotificationAudioContext);
-  if (!context) return;
-  sharedNotificationAudioContext = context;
+  const preferences = options.preview || getUmbraAlertPreferences();
+  if (!preferences.enabled || (!options.preview && !preferences[kind]) || preferences.volume <= 0.001) return;
+  const eventKey = options.eventId ? `${kind}:${options.eventId}` : '';
+  if (!options.preview && eventKey && heardEventIds.has(eventKey)) return;
+  if (eventKey) {
+    heardEventIds.add(eventKey);
+    if (heardEventIds.size > 10000) heardEventIds.delete(heardEventIds.values().next().value!);
+  }
+  const timestamp = Date.now();
+  if (timestamp - lastAnyPlayedAt < 300) return;
+  if (!options.preview && timestamp - (lastPlayedByKind.get(kind) || 0) < 800) return;
+  // Do not enqueue audio behind the browser's autoplay gate; that replays old alerts on the next click.
+  const context = sharedNotificationAudioContext;
+  if (!context || context.state !== 'running') return;
+  lastPlayedByKind.set(kind, timestamp);
+  lastAnyPlayedAt = timestamp;
 
   const scheduleNotificationSound = () => {
-    const style = sharedNotificationAudioStyle || POWER_PROMPTER_SOUND_STYLE_GLASS_TICK;
-    const volume = clampCompletionSoundVolume(sharedNotificationAudioVolume);
+    const current = options.preview || getUmbraAlertPreferences();
+    if (!current.enabled || (!options.preview && !current[kind])) return;
+    const style = current.style || POWER_PROMPTER_SOUND_STYLE_GLASS_TICK;
+    const volume = current.volume;
     if (volume <= 0.001) return;
     const profile = POWER_PROMPTER_SOUND_PROFILES[style]
       || POWER_PROMPTER_SOUND_PROFILES[POWER_PROMPTER_SOUND_STYLE_GLASS_TICK];
     const now = context.currentTime;
     const masterGain = context.createGain();
-    const pitchScale = kind === 'submitted' ? 0.82 : 1;
+    const pitchScale = kind === 'failed' ? 0.58 : kind === 'submitted' ? 0.82 : 1;
     const durationScale = kind === 'submitted' ? 0.82 : 1;
     const outputScale = kind === 'submitted' ? 0.82 : 1;
     masterGain.gain.setValueAtTime(0.0001, now);
@@ -341,6 +372,7 @@ export function playPowerPrompterNotificationSound(
       gainNode.connect(masterGain);
       oscillator.start(start);
       oscillator.stop(start + duration);
+      oscillator.onended = () => { oscillator.disconnect(); gainNode.disconnect(); };
     }
 
     masterGain.gain.setValueAtTime(0.0001, now);
@@ -349,13 +381,25 @@ export function playPowerPrompterNotificationSound(
       now + profile.attack,
     );
     masterGain.gain.exponentialRampToValueAtTime(0.0001, now + profile.release);
+    const end = Math.max(profile.release, ...profile.tones.map((tone) => tone.delay + tone.duration * durationScale));
+    setTimeout(() => masterGain.disconnect(), (end + 0.1) * 1000);
   };
 
-  if (context.state === 'running') {
+  const playOnceAcrossTabs = () => {
+    if (!options.preview) {
+      try {
+        const key = 'umbra-alert-audio-recent';
+        const raw = JSON.parse(localStorage.getItem(key) || '[]');
+        const recent = (Array.isArray(raw) ? raw : []).filter((item: { at?: number }) => timestamp - Number(item?.at) < 60000);
+        if (recent.some((item: { id?: string; at?: number }) => (eventKey && item.id === eventKey) || timestamp - Number(item.at) < 300)) return;
+        localStorage.setItem(key, JSON.stringify([...recent.slice(-63), { id: eventKey, at: timestamp }]));
+      } catch { /* Audio remains available when browser storage is disabled. */ }
+    }
     scheduleNotificationSound();
-    return;
-  }
-  void context.resume().then(() => {
-    if (context.state === 'running') scheduleNotificationSound();
-  }).catch(() => undefined);
+  };
+  if (!options.preview && typeof navigator !== 'undefined' && navigator.locks?.request) {
+    void navigator.locks.request('umbra-alert-audio', { ifAvailable: true }, (lock) => {
+      if (lock) playOnceAcrossTabs();
+    }).catch(() => undefined);
+  } else playOnceAcrossTabs();
 }

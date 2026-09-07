@@ -13,7 +13,7 @@ function cleanInsertionText(value: string): string {
   return String(value || '').trim().replace(/(?:\s*,\s*)+$/g, '');
 }
 
-export function replacePowerPrompterPromptTokenAtCursor(
+export function insertCatalogTagsAtCursor(
   rawText: string,
   rawInsertion: string,
   selectionStart: number,
@@ -24,32 +24,17 @@ export function replacePowerPrompterPromptTokenAtCursor(
   if (!insertion) return null;
 
   const source = String(rawText || '');
-  const start = clampSelection(selectionStart, source.length);
-  const end = Math.max(start, clampSelection(selectionEnd, source.length));
-  let insertionStart = start;
-  let insertionEnd = end;
-
-  if (start === end) {
-    const leftComma = source.lastIndexOf(',', Math.max(0, start - 1));
-    const leftNewline = source.lastIndexOf('\n', Math.max(0, start - 1));
-    const tokenStart = Math.max(leftComma, leftNewline) + 1;
-    const rightComma = source.indexOf(',', start);
-    const rightNewline = source.indexOf('\n', start);
-    const rightBoundaries = [rightComma, rightNewline].filter((index) => index >= 0);
-    const tokenEnd = rightBoundaries.length > 0 ? Math.min(...rightBoundaries) : source.length;
-    const tokenText = source.slice(tokenStart, tokenEnd);
-    const leadingWhitespace = tokenText.match(/^\s*/)?.[0].length || 0;
-    const trailingWhitespace = tokenText.match(/\s*$/)?.[0].length || 0;
-    insertionStart = tokenStart + leadingWhitespace;
-    insertionEnd = Math.max(insertionStart, tokenEnd - trailingWhitespace);
-  }
-
-  const before = source.slice(0, insertionStart);
-  const after = source.slice(insertionEnd);
+  // Catalog clicks are additive, including when the field has selected text.
+  const caret = Math.max(clampSelection(selectionStart, source.length), clampSelection(selectionEnd, source.length));
+  const before = source.slice(0, caret);
+  const after = source.slice(caret);
+  const prefix = !before || /(?:,|\r?\n)[\t ]*$/.test(before)
+    ? (/,$/.test(before) ? ' ' : '')
+    : ', ';
   const alreadyDelimited = /^\s*,/.test(after) || /^\s*\n/.test(after);
   const suffix = appendTrailingComma && !alreadyDelimited ? ', ' : '';
-  const nextValue = `${before}${insertion}${suffix}${after}`;
-  const nextCaret = before.length + insertion.length + suffix.length;
+  const nextValue = `${before}${prefix}${insertion}${suffix}${after}`;
+  const nextCaret = before.length + prefix.length + insertion.length + suffix.length;
 
   return {
     nextValue,

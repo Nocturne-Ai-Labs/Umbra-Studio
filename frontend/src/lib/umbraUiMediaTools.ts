@@ -56,6 +56,7 @@ export async function submitUmbraUiWatermark(options: {
   watermark?: File;
   watermarkPath?: string;
   outputFolder: string;
+  pinnedOutputFolder?: string;
   sequenceNumber: number;
   x: number;
   y: number;
@@ -73,6 +74,7 @@ export async function submitUmbraUiWatermark(options: {
   if (options.watermark) form.set('watermark', options.watermark, options.watermark.name);
   if (options.watermarkPath) form.set('watermarkPath', options.watermarkPath);
   form.set('outputFolder', options.outputFolder);
+  form.set('pinnedOutputFolder', options.pinnedOutputFolder || '');
   form.set('sequenceNumber', String(options.sequenceNumber));
   form.set('x', String(options.x));
   form.set('y', String(options.y));
@@ -104,6 +106,7 @@ export async function submitUmbraUiImageCensor(options: {
   overlay?: File;
   overlayPath?: string;
   outputFolder: string;
+  pinnedOutputFolder?: string;
   sequenceNumber: number;
   mosaicSize: number;
   resizeEnabled: boolean;
@@ -124,6 +127,7 @@ export async function submitUmbraUiImageCensor(options: {
   form.set('detectionThreshold', String(options.detectionThreshold));
   form.set('detectionPadding', String(options.detectionPadding));
   form.set('outputFolder', options.outputFolder);
+  form.set('pinnedOutputFolder', options.pinnedOutputFolder || '');
   form.set('sequenceNumber', String(options.sequenceNumber));
   const firstManualRegion = options.manualRegions[0];
   if (firstManualRegion) {
@@ -145,6 +149,7 @@ export async function submitUmbraUiVideoToGif(options: {
   source?: File;
   sourcePath?: string;
   outputFolder: string;
+  pinnedOutputFolder?: string;
   sequenceNumber: number;
   width: number;
 }): Promise<UmbraUiMediaToolResult> {
@@ -152,6 +157,7 @@ export async function submitUmbraUiVideoToGif(options: {
   if (options.source) form.set('source', options.source, options.source.name);
   if (options.sourcePath) form.set('sourcePath', options.sourcePath);
   form.set('outputFolder', options.outputFolder);
+  form.set('pinnedOutputFolder', options.pinnedOutputFolder || '');
   form.set('sequenceNumber', String(options.sequenceNumber));
   form.set('width', String(options.width));
   const response = await fetch('/api/umbra-ui/media-tools/video-to-gif', { method: 'POST', body: form });

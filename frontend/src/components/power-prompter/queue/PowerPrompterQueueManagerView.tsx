@@ -1,18 +1,19 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { UmbraAlertSettingsButton } from '@/components/ui/UmbraAlertSettings';
 import React from 'react';
+import { SkipForward } from 'lucide-react';
+import { useStore } from '@/store/useStore';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Bell, CheckCircle2, ChevronDown, ChevronRight, Film, GripVertical, Image as ImageIcon, ListChecks, ListOrdered, Loader2, LockKeyhole, Paintbrush, Pause, Pencil, Play, Power, Search, Sparkles, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronRight, Film, GripVertical, Image as ImageIcon, ListChecks, ListOrdered, Loader2, Paintbrush, Pause, Pencil, Play, Power, Search, Sparkles, Trash2, XCircle } from 'lucide-react';
 import { PowerPrompterActivePromptInline } from '@/components/layout/PowerPrompterActivePromptInline';
 import { PowerPrompterQueueManagerSidePane } from './PowerPrompterQueueManagerSidePane';
 import { QUEUE_MANAGER_DISPATCH_DELAY_OPTIONS, formatQueueEtaDuration, getSetColor, hexToRgba } from './queueCore';
-import { POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME } from '@/lib/powerPrompter';
-import {
-  POWER_PROMPTER_SOUND_STYLE_GLASS_TICK,
-  POWER_PROMPTER_SOUND_STYLE_OPTIONS,
-  clampCompletionSoundVolume,
-} from '@/components/power-prompter/powerPrompterAudio';
 import {
   getUmbraQueueActivityFeatureLabel,
+  getUmbraQueueActivityControls,
+  controlUmbraQueueActivity,
+  dismissUmbraQueueActivity,
+  isUmbraQueueActivityDismissed,
   isUmbraQueueActivityTerminal,
   type UmbraQueueActivity,
 } from '@/lib/umbraQueueActivity';
@@ -67,7 +68,30 @@ function getUmbraQueuePlacementLabel(placement: UmbraQueueActivity['placement'])
   return 'After Queue';
 }
 
-function UmbraQueueActivityCard({ activity }: { activity: UmbraQueueActivity }) {
+export function UmbraQueueActivityCard({ activity }: { activity: UmbraQueueActivity }) {
+  const showToast = useStore((state) => state.showToast);
+  const [busy, setBusy] = React.useState<'skip' | 'remove' | null>(null);
+  const [stopRequested, setStopRequested] = React.useState(false);
+  const [dismissed, setDismissed] = React.useState(() => isUmbraQueueActivityDismissed(activity.id));
+  const busyRef = React.useRef(false);
+  const terminal = isUmbraQueueActivityTerminal(activity.status);
+  const controls = getUmbraQueueActivityControls(activity);
+  const act = async (action: 'skip' | 'remove') => {
+    if (busyRef.current) return;
+    if (terminal) { dismissUmbraQueueActivity(activity.id); setDismissed(true); return; }
+    busyRef.current = true;
+    setBusy(action);
+    try {
+      await controlUmbraQueueActivity(activity, action);
+      if (action === 'remove') setStopRequested(true);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not control this job.', 'error');
+    } finally {
+      busyRef.current = false;
+      setBusy(null);
+    }
+  };
+  if (dismissed && terminal) return null;
   const resolved = Math.min(activity.total, activity.completed + activity.failed);
   const progress = activity.total > 0 ? Math.max(0, Math.min(100, (resolved / activity.total) * 100)) : 0;
   const tone = UMBRA_QUEUE_ACTIVITY_TONES[activity.feature] || UMBRA_QUEUE_ACTIVITY_TONES.extras;
@@ -93,9 +117,15 @@ function UmbraQueueActivityCard({ activity }: { activity: UmbraQueueActivity }) 
             <span className="rounded-full border border-white/10 bg-black/20 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.1em] text-zinc-400">
               {getUmbraQueuePlacementLabel(activity.placement)}
             </span>
-            <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/20 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.1em] text-zinc-500">
-              <LockKeyhole size={8} /> Read Only
-            </span>
+            {!terminal && (stopRequested || activity.cancelRequested) ? <span role="status" className="text-[10px] text-amber-200">Stopping</span> : null}
+            <div className="ml-auto flex shrink-0 items-center gap-1">
+              {controls.skip ? <button type="button" aria-label="Skip current generation" title="Skip current generation; continue the remaining job" disabled={!!busy || stopRequested || activity.cancelRequested} onClick={() => void act('skip')} className="inline-flex h-8 w-8 items-center justify-center rounded border border-current/20 hover:bg-white/10 disabled:opacity-40">
+                {busy === 'skip' ? <Loader2 size={14} className="animate-spin" /> : <SkipForward size={14} />}
+              </button> : null}
+              {controls.remove ? <button type="button" aria-label={terminal ? 'Remove from queue history' : 'Remove job'} title={controls.removeTitle} disabled={!!busy || (!terminal && (stopRequested || activity.cancelRequested))} onClick={() => void act('remove')} className="inline-flex h-8 w-8 items-center justify-center rounded border border-current/20 hover:bg-red-500/15 disabled:opacity-40">
+                {busy === 'remove' ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+              </button> : null}
+            </div>
           </div>
           {activity.detail ? (
             <div
@@ -315,17 +345,8 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
     queueOutputMenu,
     setQueueOutputMenu,
     umbraQueueActivities = [],
-    completionSoundSettings,
-    handleToggleCompletionSound,
-    handleSetCompletionSoundStyle,
-    handleSetCompletionSoundVolume,
-    playCompletionSound,
   } = props;
-  const [soundControlsOpen, setSoundControlsOpen] = React.useState(false);
-  const soundControlsRef = React.useRef<HTMLDivElement | null>(null);
-  const completionSoundEnabled = completionSoundSettings?.generationCompleteSoundEnabled !== false;
-  const completionSoundStyle = completionSoundSettings?.generationCompleteSoundStyle || POWER_PROMPTER_SOUND_STYLE_GLASS_TICK;
-  const completionSoundVolume = clampCompletionSoundVolume(completionSoundSettings?.generationCompleteSoundVolume);
+
   const activeUmbraActivities = React.useMemo(
     () => (umbraQueueActivities as UmbraQueueActivity[]).filter((activity) => !isUmbraQueueActivityTerminal(activity.status)),
     [umbraQueueActivities],
@@ -348,21 +369,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
   );
   const hasQueueTimelineItems = queueSetGroups.length > 0 || umbraQueueActivities.length > 0;
 
-  React.useEffect(() => {
-    if (!soundControlsOpen) return;
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!soundControlsRef.current?.contains(event.target as Node)) setSoundControlsOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSoundControlsOpen(false);
-    };
-    window.addEventListener('pointerdown', closeOnOutsidePointer);
-    window.addEventListener('keydown', closeOnEscape);
-    return () => {
-      window.removeEventListener('pointerdown', closeOnOutsidePointer);
-      window.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [soundControlsOpen]);
+
   return (
     <div data-umbra-queue-manager="" className="h-full min-h-0 px-3 pb-3">
       <div
@@ -467,88 +474,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                   <ListChecks size={12} />
                   {queuePromptExpandedMode ? 'Expanded' : 'Compact'}
                 </button>
-                <div ref={soundControlsRef} className="relative">
-                  <button
-                    type="button"
-                    data-umbra-queue-alert-controls=""
-                    onClick={() => setSoundControlsOpen((current) => !current)}
-                    className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-                      completionSoundEnabled
-                        ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-100'
-                        : 'border-white/10 bg-black/25 text-zinc-500 hover:border-white/25 hover:text-zinc-200'
-                    }`}
-                    title="Configure submitted and completed job alerts"
-                    aria-expanded={soundControlsOpen}
-                  >
-                    {completionSoundEnabled ? <Volume2 size={12} /> : <VolumeX size={12} />}
-                    Alerts
-                  </button>
-                  {soundControlsOpen ? (
-                    <div
-                      data-umbra-queue-alert-popover=""
-                      className="absolute right-0 top-9 z-40 w-[270px] rounded-lg border border-white/15 bg-[#090a0d]/98 p-3 text-left shadow-2xl shadow-black/70 backdrop-blur-xl"
-                    >
-                      <div className="mb-2 flex items-center gap-2">
-                        <Bell size={12} className="text-emerald-300" />
-                        <span className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-300">Queue Alerts</span>
-                        <button
-                          type="button"
-                          onClick={() => { void handleToggleCompletionSound?.(); }}
-                          className={`ml-auto inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[8px] font-black uppercase tracking-[0.1em] ${
-                            completionSoundEnabled
-                              ? 'border-emerald-300/35 bg-emerald-500/10 text-emerald-100'
-                              : 'border-white/10 bg-black/20 text-zinc-500'
-                          }`}
-                        >
-                          {completionSoundEnabled ? <Volume2 size={10} /> : <VolumeX size={10} />}
-                          {completionSoundEnabled ? 'On' : 'Off'}
-                        </button>
-                      </div>
-                      <div className="mb-2 text-[8px] font-bold uppercase tracking-[0.1em] text-zinc-600">
-                        Job submitted and prompt completed
-                      </div>
-                      <label className="block space-y-1.5">
-                        <span className="text-[8px] font-black uppercase tracking-[0.14em] text-zinc-500">Sound</span>
-                        <UmbraSelectControl
-                          value={completionSoundStyle}
-                          onChange={(event) => { void handleSetCompletionSoundStyle?.(event.currentTarget.value); }}
-                          className="h-8 w-full rounded-md border border-white/10 bg-black/40 px-2 text-[10px] font-bold text-zinc-100 outline-none focus:border-emerald-300/45 umbra-themed-select"
-                          title="Choose the queue alert sound"
-                        >
-                          {POWER_PROMPTER_SOUND_STYLE_OPTIONS.map((option) => (
-                            <option key={`queue-alert-style-${option.id}`} value={option.id}>{option.label}</option>
-                          ))}
-                        </UmbraSelectControl>
-                      </label>
-                      <label className="mt-3 block space-y-1.5">
-                        <span className="flex items-center justify-between text-[8px] font-black uppercase tracking-[0.14em] text-zinc-500">
-                          <span>Volume</span>
-                          <span className="font-mono text-emerald-200">
-                            {Math.round((completionSoundVolume / Math.max(0.001, POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME)) * 100)}%
-                          </span>
-                        </span>
-                        <input
-                          type="range"
-                          min={0}
-                          max={POWER_PROMPTER_MAX_COMPLETION_SOUND_VOLUME}
-                          step={0.01}
-                          value={completionSoundVolume}
-                          onChange={(event) => { void handleSetCompletionSoundVolume?.(Number(event.currentTarget.value)); }}
-                          className="w-full accent-emerald-300"
-                          aria-label="Queue alert volume"
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => playCompletionSound?.()}
-                        disabled={!completionSoundEnabled || completionSoundVolume <= 0}
-                        className="mt-3 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-white/10 bg-white/[0.035] text-[8px] font-black uppercase tracking-[0.14em] text-zinc-300 hover:border-emerald-300/30 hover:text-emerald-100 disabled:cursor-not-allowed disabled:opacity-35"
-                      >
-                        <Volume2 size={10} /> Test Alert
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
+                <UmbraAlertSettingsButton />
                 <label className="flex h-7 items-center gap-1.5 rounded-md border border-white/10 bg-black/25 px-2 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
                   <span className="whitespace-nowrap">Delay</span>
                   <UmbraSelectControl
@@ -739,8 +665,8 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                 <UmbraQueueActivityLane
                   title={queueSetGroups.length > 0 ? 'Umbra UI Cut-In' : 'Umbra UI Jobs'}
                   note={queueSetGroups.length > 0
-                    ? 'Runs ahead of the remaining Power Prompter work. Display only; queue editing stays isolated.'
-                    : 'Live Umbra UI work. Display only; its original controls remain authoritative.'}
+                    ? 'Runs ahead of the remaining Power Prompter work.'
+                    : 'Live Umbra UI work.'}
                   activities={priorityUmbraActivities}
                 />
                 <UmbraQueueActivityLane
@@ -1316,7 +1242,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                 />
                 <UmbraQueueActivityLane
                   title="Recent Umbra UI"
-                  note="Latest completed or failed jobs, kept read-only for quick confirmation."
+                  note="Recent jobs"
                   activities={recentUmbraActivities}
                 />
               </div>

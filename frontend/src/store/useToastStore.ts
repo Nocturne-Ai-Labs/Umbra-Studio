@@ -1,11 +1,19 @@
 
 import { create } from 'zustand';
+import { playPowerPrompterNotificationSound } from '@/components/power-prompter/powerPrompterAudio';
 
-const DEFAULT_TOAST_DURATION_MS = 6500;
+const DEFAULT_TOAST_DURATION_MS = 3500;
 const DEFAULT_ERROR_TOAST_DURATION_MS = 10000;
 const DEFAULT_ACTION_TOAST_DURATION_MS = 12000;
 const ERROR_NOTIFICATION_DEDUP_MS = 5 * 60_000;
 const MAX_ERROR_NOTIFICATIONS = 50;
+const toastTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearToastTimer(id: string) {
+  const timer = toastTimers.get(id);
+  if (timer) clearTimeout(timer);
+  toastTimers.delete(id);
+}
 
 export interface Toast {
   id: string;
@@ -44,10 +52,11 @@ export const useToastStore = create<ToastState>((set) => ({
     const id = Math.random().toString(36).substring(2, 9);
     const newToast = { ...toast, id };
     const now = Date.now();
+    let shown = false;
 
     set((state) => {
       let notifications = state.notifications;
-      let shouldShowToast = true;
+      let shouldShowToast = !!toast.action || !state.toasts.some((entry) => entry.message === toast.message && entry.type === toast.type);
 
       if (toast.type === 'error') {
         const duplicate = state.notifications.find((notification) => (
@@ -61,11 +70,11 @@ export const useToastStore = create<ToastState>((set) => ({
                 ...notification,
                 count: notification.count + 1,
                 updatedAt: now,
-                read: notification.read,
+                read: false,
               }
               : notification
           ));
-          shouldShowToast = false;
+          shouldShowToast = !!toast.action;
         } else {
           notifications = [{
             id,
@@ -78,13 +87,17 @@ export const useToastStore = create<ToastState>((set) => ({
         }
       }
 
+      shown = shouldShowToast;
+      const toasts = shouldShowToast ? [...state.toasts, newToast].slice(-6) : state.toasts;
+      for (const entry of state.toasts) if (!toasts.includes(entry)) clearToastTimer(entry.id);
       return {
         notifications,
-        toasts: shouldShowToast ? [...state.toasts, newToast].slice(-6) : state.toasts,
+        toasts,
       };
     });
 
-    if (toast.duration !== Infinity) {
+    if (shown && toast.type === 'error') playPowerPrompterNotificationSound('failed');
+    if (shown && toast.duration !== Infinity) {
       const hasCustomDuration = typeof toast.duration === 'number' && Number.isFinite(toast.duration);
       const timeoutMs = hasCustomDuration
         ? toast.duration!
@@ -93,17 +106,20 @@ export const useToastStore = create<ToastState>((set) => ({
           : toast.type === 'error'
             ? DEFAULT_ERROR_TOAST_DURATION_MS
             : DEFAULT_TOAST_DURATION_MS;
-      setTimeout(() => {
+      toastTimers.set(id, setTimeout(() => {
+        toastTimers.delete(id);
         set((state) => ({
           toasts: state.toasts.filter((t) => t.id !== id),
         }));
-      }, timeoutMs);
+      }, Math.max(0, timeoutMs)));
     }
   },
-  dismissToast: (id) =>
+  dismissToast: (id) => {
+    clearToastTimer(id);
     set((state) => ({
       toasts: state.toasts.filter((t) => t.id !== id),
-    })),
+    }));
+  },
   markNotificationsRead: () => set((state) => ({
     notifications: state.notifications.map((notification) => ({ ...notification, read: true })),
   })),

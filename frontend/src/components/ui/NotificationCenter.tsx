@@ -4,6 +4,7 @@ import { AlertCircle, Bell, BellRing, CheckCheck, Trash2, X } from 'lucide-react
 import { getUmbraRemoteMode } from '@/utils/hostOnly';
 import { useToastStore } from '@/store/useToastStore';
 import { cn } from '@/lib/utils';
+import { UmbraAlertSettingsButton, useUmbraAlertRuntime } from './UmbraAlertSettings';
 
 const OPEN_NOTIFICATION_CENTER_EVENT = 'umbra:open-notification-center';
 
@@ -72,12 +73,16 @@ export function NotificationBellButton({
 }
 
 export function NotificationCenter() {
+  useUmbraAlertRuntime();
   const notifications = useToastStore((state) => state.notifications);
   const markNotificationsRead = useToastStore((state) => state.markNotificationsRead);
   const dismissNotification = useToastStore((state) => state.dismissNotification);
   const clearNotifications = useToastStore((state) => state.clearNotifications);
   const [open, setOpen] = React.useState(false);
   const [isPhoneRemote, setIsPhoneRemote] = React.useState(() => getUmbraRemoteMode() === 'phone');
+  React.useEffect(() => {
+    if (open && notifications.some((notification) => !notification.read)) markNotificationsRead();
+  }, [open, notifications, markNotificationsRead]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -133,6 +138,7 @@ export function NotificationCenter() {
             )}
           >
             <header className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
+              <UmbraAlertSettingsButton />
               <AlertCircle size={18} className="text-amber-300" />
               <div className="min-w-0 flex-1">
                 <h2 className="text-sm font-black tracking-[0.06em]">Issues</h2>

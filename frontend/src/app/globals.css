@@ -675,6 +675,43 @@ code.custom-scrollbar::-webkit-scrollbar {
   }
 }
 
+/* Reclaim collapsed navigation space without changing phone/tablet drawers. */
+@media (min-width: 1200px) {
+  html:not([data-umbra-remote-mode="phone"]):not([data-umbra-remote-mode="tablet"]) [data-appbar-collapsed="1"] [data-umbra-ui-body][data-umbra-ui-active-mode="image"] {
+    grid-template-columns: clamp(360px, 28.8vw, 456px) clamp(336px, 26.4vw, 432px) minmax(0, 1fr);
+  }
+  html:not([data-umbra-remote-mode="phone"]):not([data-umbra-remote-mode="tablet"]) [data-appbar-collapsed="1"] [data-umbra-ui-body]:is([data-umbra-ui-active-mode="img2img"], [data-umbra-ui-active-mode="extras"], [data-umbra-ui-active-mode="video"]) {
+    grid-template-columns: minmax(432px, 480px) minmax(0, 1fr);
+  }
+  html:not([data-umbra-remote-mode="phone"]):not([data-umbra-remote-mode="tablet"]) [data-appbar-collapsed="1"] [data-umbra-ui-body][data-umbra-ui-active-mode="video"][data-video-storyboard="open"] {
+    grid-template-columns: minmax(408px, 480px) minmax(384px, 456px) minmax(0, 1fr);
+  }
+  html:not([data-umbra-remote-mode="phone"]):not([data-umbra-remote-mode="tablet"]) [data-appbar-collapsed="1"] [data-umbra-inpaint-workspace] {
+    grid-template-columns: clamp(278.4px, 21.6vw, 336px) clamp(264px, 20.4vw, 312px) minmax(0, 1fr);
+  }
+  html:not([data-umbra-remote-mode="phone"]):not([data-umbra-remote-mode="tablet"]) [data-appbar-collapsed="1"] [data-umbra-inpaint-workspace][data-umbra-canvas-studio] {
+    grid-template-columns: clamp(264px, 20.4vw, 312px) clamp(252px, 19.2vw, 292.8px) minmax(0, 1fr) clamp(285.6px, 21.6vw, 343.2px);
+  }
+}
+@media (min-width: 1536px) {
+  html:not([data-umbra-remote-mode="phone"]):not([data-umbra-remote-mode="tablet"]) [data-appbar-collapsed="1"] [data-umbra-canvas-workspace] {
+    grid-template-columns: 52px clamp(300px, 21.6vw, 360px) clamp(288px, 20.4vw, 336px) minmax(0, 1fr) 336px;
+  }
+}
+
+[data-umbra-lora-stack] .umbra-lora-strength {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+[data-umbra-lora-stack] .umbra-lora-strength::-webkit-inner-spin-button,
+[data-umbra-lora-stack] .umbra-lora-strength::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]) [data-umbra-lora-stack] input.umbra-lora-strength {
+  min-height: 0;
+}
+
 .umbra-sidebar-shell {
   border-right: 1px solid color-mix(in srgb, var(--umbra-accent) 42%, rgba(255, 255, 255, 0.08));
   animation: sidebar-glow-pulse 7s ease-in-out infinite;
@@ -2077,8 +2114,9 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-queue-manager-button] {
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-queue-manager-button] {
-  width: 2.75rem;
-  padding: 0;
+  width: auto;
+  min-width: 4.5rem;
+  padding: 0 0.5rem;
   margin-right: 0.35rem;
 }
 
@@ -2908,7 +2946,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] button {
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-layers-panel] {
-  inset: auto 0.55rem 0.55rem auto !important;
+  inset: auto 0.55rem calc(var(--umbra-generation-actions-height, 0px) + 0.55rem) auto !important;
   width: 3rem !important;
   height: 3rem;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -2936,10 +2974,10 @@ html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-layers-panel] > div:fir
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-layers-panel]:has(button[aria-expanded="true"]) {
-  inset: auto 0 0 0 !important;
+  inset: auto 0 var(--umbra-generation-actions-height, 0px) 0 !important;
   width: 100% !important;
   height: min(58dvh, 34rem);
-  max-height: calc(100% - 1rem);
+  max-height: calc(100% - var(--umbra-generation-actions-height, 0px) - 1rem);
   border: 0;
   border-top: 1px solid color-mix(in srgb, var(--umbra-accent) 22%, rgba(255, 255, 255, 0.1));
   border-radius: 1rem 1rem 0 0;

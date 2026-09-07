@@ -14,6 +14,13 @@ export type AppLanguage = (typeof APP_LANGUAGES)[number];
 
 export interface AppSettings {
   enableToasts: boolean;
+  'alerts.configured': boolean;
+  'alerts.soundEnabled': boolean;
+  'alerts.submitted': boolean;
+  'alerts.completed': boolean;
+  'alerts.failed': boolean;
+  'alerts.volume': number;
+  'alerts.style': string;
   'oledMode.enabled': boolean;
   'oledMode.idleTime': number;
   'ui.idleFrameCapEnabled': boolean;
@@ -70,6 +77,13 @@ export interface AppSettings {
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   enableToasts: true,
+  'alerts.configured': false,
+  'alerts.soundEnabled': true,
+  'alerts.submitted': true,
+  'alerts.completed': true,
+  'alerts.failed': true,
+  'alerts.volume': 0.42,
+  'alerts.style': 'glass_tick',
   'oledMode.enabled': false,
   'oledMode.idleTime': 120,
   'ui.idleFrameCapEnabled': false,
@@ -126,6 +140,11 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 
 const BOOLEAN_KEYS: Array<keyof AppSettings> = [
   'enableToasts',
+  'alerts.configured',
+  'alerts.soundEnabled',
+  'alerts.submitted',
+  'alerts.completed',
+  'alerts.failed',
   'oledMode.enabled',
   'ui.idleFrameCapEnabled',
   'comfyui.showFilmstrip',
@@ -150,6 +169,7 @@ const BOOLEAN_KEYS: Array<keyof AppSettings> = [
 ];
 
 const NUMBER_KEYS: Array<keyof AppSettings> = [
+  'alerts.volume',
   'oledMode.idleTime',
   'ui.idleFrameCapIdleTime',
   'ui.idleFrameCapFps',
@@ -169,6 +189,7 @@ const STRING_ARRAY_KEYS: Array<keyof AppSettings> = [
 ];
 
 const STRING_KEYS: Array<keyof AppSettings> = [
+  'alerts.style',
   'comfyui.path',
   'comfyui.url',
   'aitoolkit.path',
@@ -408,7 +429,7 @@ export async function fetchAppSettingsFromBackend(): Promise<AppSettings | null>
   }
 }
 
-export async function pushAppSettingsToBackend(settings: AppSettings): Promise<void> {
+export async function pushAppSettingsToBackend(settings: Partial<AppSettings>): Promise<void> {
   const response = await fetch('/api/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

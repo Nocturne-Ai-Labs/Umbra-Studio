@@ -276,6 +276,8 @@ export async function removeUmbraUiImageBackground(
 }
 
 export interface UmbraUiInpaintSubmitOptions {
+  pinnedOutputFolder?: string;
+  outputTask?: 'canvas' | 'inpainting';
   source: Blob;
   sourceName: string;
   canvasProjectId: string;

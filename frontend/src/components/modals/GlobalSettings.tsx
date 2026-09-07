@@ -1,6 +1,7 @@
 'use client';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { UmbraAlertSettingsButton } from '@/components/ui/UmbraAlertSettings';
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -636,11 +637,7 @@ const GeneralSettings = ({ settings, updateSetting }: any) => {
 
       <SettingGroup label={t('settings.preferences')}>
         <div className="space-y-2">
-          <SettingCheckbox
-            checked={settings.enableToasts}
-            onChange={(val: boolean) => updateSetting('enableToasts', val)}
-            label={t('settings.showToasts')}
-          />
+          <UmbraAlertSettingsButton />
         </div>
       </SettingGroup>
 

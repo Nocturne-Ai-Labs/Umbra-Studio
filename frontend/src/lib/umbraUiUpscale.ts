@@ -1,5 +1,5 @@
-export type UmbraUiUpscaleItemStatus = 'staging' | 'queued' | 'running' | 'completed' | 'failed';
-export type UmbraUiUpscaleJobStatus = 'staging' | 'queued' | 'running' | 'completed' | 'partial' | 'failed';
+export type UmbraUiUpscaleItemStatus = 'staging' | 'queued' | 'running' | 'completed' | 'failed' | 'canceled';
+export type UmbraUiUpscaleJobStatus = 'staging' | 'queued' | 'running' | 'completed' | 'partial' | 'failed' | 'canceled';
 export type UmbraUiUpscaleQueuePlacement = 'next' | 'end' | 'interrupt';
 
 export interface UmbraUiUpscaleOutput {
@@ -33,6 +33,7 @@ export interface UmbraUiUpscaleJob {
   failed: number;
   createdAt: number;
   updatedAt: number;
+  cancelRequested?: boolean;
   items: UmbraUiUpscaleJobItem[];
 }
 
@@ -95,6 +96,7 @@ export async function submitUmbraUiUpscaleJob(options: {
   outputFormat: 'png' | 'jpeg' | 'webp';
   quality: number;
   outputFolder?: string;
+  pinnedOutputFolder?: string;
   queuePlacement?: UmbraUiUpscaleQueuePlacement;
   onStageProgress?: (completed: number, total: number) => void;
 }): Promise<UmbraUiUpscaleJob> {
@@ -118,6 +120,7 @@ export async function submitUmbraUiUpscaleJob(options: {
   form.set('maxDimension', String(options.maxDimension));
   form.set('outputFormat', options.outputFormat);
   form.set('quality', String(options.quality));
+  form.set('pinnedOutputFolder', options.pinnedOutputFolder || '');
   form.set('outputFolder', String(options.outputFolder || '').trim());
   form.set('queuePlacement', String(options.queuePlacement || 'end'));
   const response = await fetch('/api/umbra-ui/upscale', { method: 'POST', body: form });
