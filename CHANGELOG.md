@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.32.4
+
+### TL;DR - Setup After Updating
+
+Update Umbra Studio normally, restart the app, and refresh any open browser or
+remote tabs so the frontend and backend both use the new queue transport.
+Windows uses UmbraStudio.bat; Linux uses ./start-umbra.sh. No ComfyUI update,
+Umbra Nodes update, model download, or dataset migration is required.
+
+If a previous large submission disconnected, check Queue Manager before retrying
+to avoid submitting work that was already accepted. Existing cards, wildcard
+Hold selections, LoRA strengths, and generation settings are preserved.
+
+### Large Power Prompter Queue Hotfix
+
+- Fixed large queue submissions exceeding the runtime's default 16 MiB
+  WebSocket message limit. The threshold depended on prompt and settings size,
+  not a fixed number of images.
+- Individual and Queue All submissions now upload bounded chunks with
+  backpressure handling and event-loop yields. Concurrent uploads on one socket
+  are serialized while ordinary control messages remain independent.
+- The backend validates and reassembles a complete request before passing it to
+  the existing queue handler. No partial upload starts generation; prompt order,
+  per-image settings, seeds, and queue behavior remain unchanged.
+- Added interrupted-upload cleanup, ordered-chunk validation, a 60-second upload
+  timeout, and an explicit 128 MiB request-size guard. Oversized requests report
+  an error instead of silently disconnecting; submit fewer sets at a time if
+  that guard is reached.
+- WebSocket diagnostic logs now include the close code, reason, and clean-close
+  status to make remaining connection problems easier to investigate.
+
+### Validation
+
+- Reproduced the previous disconnect with an 18 MiB single message.
+- Passed real local WebSocket transport tests at 1,000, 1,100, 3,500, and 10,000
+  synthetic prompts, including a roughly 73 MB request, with exact payload
+  preservation and responsive ping traffic.
+- Passed Unicode-boundary, concurrent-upload, malformed/incomplete-upload,
+  cancellation, timeout, and disconnect-cleanup checks.
+- Frontend TypeScript, ESLint, frontend build, and backend bundle checks passed.
+  These checks validate transport, not 10,000 live image generations.
+- Private prompt libraries, datasets, tests, and personal runtime files are not
+  included in the release.
+
+### Fixes And Quality-of-Life Recap
+
+- **Fixed:** Large Power Prompter queue submissions disconnecting the WebSocket.
+- **Improved:** Bounded uploads keep control traffic responsive while submitting.
+- **Improved:** Interrupted or oversized uploads produce actionable errors.
+
 ## v0.32.3
 
 ### TL;DR - Setup After Updating

@@ -18,6 +18,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { pathToFileURL } from 'url';
 import { createConnection } from 'net';
 import { ServerWebSocket } from 'bun';
+import { QueueUploadReceiver } from './shared/power-prompter/queueTransport';
 import { ThumbnailService } from './backend/ThumbnailService';
 import { CIVITAI_PAGE_TIMEOUT_MS, CIVITAI_METADATA_TIMEOUT_MS, requestCivitaiPage, civitaiPageError } from './backend/CivitaiPageRequest';
 import { seedBundledWorkflowDirectory } from './backend/BundledWorkflowService';
@@ -10669,9 +10670,17 @@ function handlePrompterModelRequest(
   }
 }
 
+const prompterQueueUploads = new QueueUploadReceiver<ServerWebSocket<unknown>>((ws, error) => { sendWs(ws, error); });
+
 function handlePrompterMessage(ws: ServerWebSocket<unknown>, data: any) {
   const type = String(data?.type || '').trim();
   if (!type) return;
+  if (type.startsWith('queue_upload_')) {
+    if (getPrompterMeta(ws).role !== 'powerprompter') return;
+    const payload = prompterQueueUploads.receive(ws, data);
+    if (payload) handlePrompterMessage(ws, payload);
+    return;
+  }
 
   if (type === 'ping') {
     sendWs(ws, { type: 'pong' });
@@ -35703,6 +35712,7 @@ const server = Bun.serve<any>({
       handleWsConnection(ws, endpoint);
     },
     close(ws) {
+      prompterQueueUploads.discard(ws);
       const endpoint = (ws.data as any)?.endpoint || '/ws/unknown';
       if (endpoint === '/comfy/ws') {
         try { (ws.data as any)?.upstream?.close?.(); } catch {}

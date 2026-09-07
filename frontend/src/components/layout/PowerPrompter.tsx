@@ -1,4 +1,5 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { sendQueueUpload } from '../../../../shared/power-prompter/queueTransport';
 import { Bell, BellOff, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, FolderOpen, GripVertical, ImageIcon, ListChecks, ListOrdered, Loader2, Pause, Pencil, Play, Plus, Power, RefreshCw, Save, Search, Shuffle, Trash2, Volume2, VolumeX, XCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { PowerPrompterSidebar } from './PowerPrompterSidebar';
@@ -5745,7 +5746,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       }, PROMPTER_QUEUE_TIMEOUT_MS);
 
       pendingQueueRequestsRef.current.set(requestId, { resolve, reject, timer });
-      const sent = sendPrompterWsMessage({
+      void sendQueueUpload(prompterWsRef.current!, {
         type: 'queue_request',
         requestId,
         targetBridgeId,
@@ -5753,20 +5754,20 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         mode,
         prompts: cleanedPrompts,
         state,
-      });
-      logPowerPrompterDebug(sent ? 'queue:websocket:sent' : 'queue:websocket:sendFailed', {
-        requestId,
-        mode,
-        promptCount: cleanedPrompts.length,
-        targetBridgeId,
-        queueTargetType,
-        pipeline,
-      }, { includeQueue: true });
-      if (!sent) {
+      }, () => pendingQueueRequestsRef.current.has(requestId)).then(() => {
+        logPowerPrompterDebug('queue:websocket:sent', {
+          requestId,
+          mode,
+          promptCount: cleanedPrompts.length,
+          targetBridgeId,
+          queueTargetType,
+          pipeline,
+        }, { includeQueue: true });
+      }).catch((error) => {
         clearTimeout(timer);
         pendingQueueRequestsRef.current.delete(requestId);
-        reject(new Error('Failed to submit queue request.'));
-      }
+        reject(error instanceof Error ? error : new Error('Failed to submit queue request.'));
+      });
     });
   };
 
@@ -5868,25 +5869,25 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
       }, PROMPTER_QUEUE_TIMEOUT_MS);
 
       pendingQueueRequestsRef.current.set(batchRequestId, { resolve, reject, timer });
-      const sent = sendPrompterWsMessage({
+      void sendQueueUpload(prompterWsRef.current!, {
         type: 'queue_batch_request',
         requestId: batchRequestId,
         targetBridgeId,
         queueTargetType,
         groups,
-      });
-      logPowerPrompterDebug(sent ? 'queue:websocket:batchSent' : 'queue:websocket:batchSendFailed', {
-        requestId: batchRequestId,
-        groupCount: groups.length,
-        targetBridgeId,
-        queueTargetType,
-        pipeline: firstState.pipeline,
-      }, { includeQueue: true });
-      if (!sent) {
+      }, () => pendingQueueRequestsRef.current.has(batchRequestId)).then(() => {
+        logPowerPrompterDebug('queue:websocket:batchSent', {
+          requestId: batchRequestId,
+          groupCount: groups.length,
+          targetBridgeId,
+          queueTargetType,
+          pipeline: firstState.pipeline,
+        }, { includeQueue: true });
+      }).catch((error) => {
         clearTimeout(timer);
         pendingQueueRequestsRef.current.delete(batchRequestId);
-        reject(new Error('Failed to submit queue batch request.'));
-      }
+        reject(error instanceof Error ? error : new Error('Failed to submit queue batch request.'));
+      });
     });
   };
 
@@ -7595,8 +7596,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true }: PowerPro
         pending.resolve(payload);
       };
 
-      ws.onclose = () => {
-        logQueueDebug('ws:closed', { closedByEffectCleanup });
+      ws.onclose = (event) => {
+        logQueueDebug('ws:closed', { closedByEffectCleanup, code: event.code, reason: event.reason, wasClean: event.wasClean });
         if (prompterWsRef.current === ws) {
           prompterWsRef.current = null;
         }
