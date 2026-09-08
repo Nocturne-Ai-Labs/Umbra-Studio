@@ -22,6 +22,7 @@ import { cn, buildFsImageUrl } from '@/lib/utils';
 import {
   browseUmbraUiMediaToolsOutputFolder,
   browseUmbraUiMediaToolsSourceFiles,
+  normalizeUmbraUiCensorDetectionSettings,
   submitUmbraUiVideoToGif,
   submitUmbraUiImageCensor,
   submitUmbraUiWatermark,
@@ -75,7 +76,7 @@ const OUTPUT_FOLDER_STORAGE_KEY = 'umbra-ui:extras-media-tools-output-folder-v2'
 const WATERMARK_EXPORT_SETTINGS_KEY = 'umbra-ui:watermark-export-settings';
 const VIDEO_WATERMARK_WIDTH_KEY = 'umbra-ui:video-watermark-output-width';
 
-type CensorTarget = 'femaleNipples' | 'maleGenitals' | 'femaleGenitals';
+type CensorTarget = 'maleGenitals' | 'femaleGenitals';
 
 interface ManualCensorRegion {
   id: string;
@@ -95,7 +96,6 @@ const DEFAULT_MANUAL_CENSOR_REGION: ManualCensorRegionCoordinates = {
 };
 
 const CENSOR_TARGETS: Array<{ id: CensorTarget; label: string }> = [
-  { id: 'femaleNipples', label: 'Female Nipples' },
   { id: 'maleGenitals', label: 'Male Genitals' },
   { id: 'femaleGenitals', label: 'Female Genitals' },
 ];
@@ -673,12 +673,11 @@ function ImageCensorTool() {
   const [autoDetectEnabled, setAutoDetectEnabled] = React.useState(true);
   const [manualRegionsEnabled, setManualRegionsEnabled] = React.useState(false);
   const [censorTargets, setCensorTargets] = React.useState<Record<CensorTarget, boolean>>({
-    femaleNipples: true,
     maleGenitals: true,
     femaleGenitals: true,
   });
-  const [detectionThreshold, setDetectionThreshold] = React.useState(0.278);
-  const [detectionPadding, setDetectionPadding] = React.useState(0.12);
+  const [detectionThreshold, setDetectionThreshold] = React.useState(0.5);
+  const [detectionPadding, setDetectionPadding] = React.useState(0);
   const [overlay, setOverlay] = React.useState<File | null>(null);
   const [overlayAsset, setOverlayAsset] = React.useState<UmbraUiWatermarkAsset | null>(null);
   const [overlayUploading, setOverlayUploading] = React.useState(false);
@@ -828,12 +827,12 @@ function ImageCensorTool() {
       ? value.censorTargets as Record<string, unknown>
       : {};
     setCensorTargets({
-      femaleNipples: rawTargets.femaleNipples !== false,
       maleGenitals: rawTargets.maleGenitals !== false,
       femaleGenitals: rawTargets.femaleGenitals !== false,
     });
-    setDetectionThreshold(Math.max(0.05, Math.min(0.95, Number(value.detectionThreshold) || 0.278)));
-    setDetectionPadding(Math.max(0, Math.min(0.5, Number(value.detectionPadding) || 0.12)));
+    const detectionSettings = normalizeUmbraUiCensorDetectionSettings(value);
+    setDetectionThreshold(detectionSettings.detectionThreshold);
+    setDetectionPadding(detectionSettings.detectionPadding);
     const rawRegions = Array.isArray(value.manualRegions)
       ? value.manualRegions
       : value.region && typeof value.region === 'object' ? [value.region] : [];
@@ -988,7 +987,7 @@ function ImageCensorTool() {
               </div>
               <label className="block space-y-1.5"><span className="flex justify-between"><span className={labelClass}>Detection Confidence</span><span className="font-mono text-[9px] text-fuchsia-200">{Math.round(detectionThreshold * 100)}%</span></span><input type="range" min={10} max={90} step={1} value={Math.round(detectionThreshold * 100)} onChange={(event) => setDetectionThreshold(Number(event.target.value) / 100)} className="w-full accent-fuchsia-300" /></label>
               <label className="block space-y-1.5"><span className="flex justify-between"><span className={labelClass}>Censor Padding</span><span className="font-mono text-[9px] text-fuchsia-200">{Math.round(detectionPadding * 100)}%</span></span><input type="range" min={0} max={50} step={1} value={Math.round(detectionPadding * 100)} onChange={(event) => setDetectionPadding(Number(event.target.value) / 100)} className="w-full accent-fuchsia-300" /></label>
-              <p className="font-mono text-[8px] leading-relaxed text-zinc-600">The MIT-licensed anime detector downloads once on first use. Each image is scanned independently.</p>
+              <p className="font-mono text-[8px] leading-relaxed text-zinc-500">Paired contours + 3px edge. Male anatomy requires the separate v2 specialist model and its license terms. Images stay on-device. <a href="https://github.com/Nocturne-Ai-Labs/Umbra-Studio/blob/main/CENSORING.md" target="_blank" rel="noopener noreferrer" className="underline text-fuchsia-200">Model setup</a></p>
             </div>
           ) : null}
           {manualRegionsEnabled ? (
@@ -1045,6 +1044,10 @@ function ImageCensorTool() {
           <span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400">{autoDetectEnabled && manualRegionsEnabled ? 'Auto + Manual Preview' : autoDetectEnabled ? 'Detection Preview' : 'Manual Region Preview'}</span>
           <span className="ml-auto max-w-[45%] truncate font-mono text-[8px] text-zinc-600">{selected?.name || 'No source selected'}</span>
         </div>
+        {selected?.result?.warnings?.map((warning) => <div key={warning} role="status" className="border-b border-amber-300/20 px-3 py-2 text-xs text-amber-200">{warning}</div>)}
+        {selected?.result?.detections?.some((detection) => detection.maskKind === 'box-fallback') ? (
+          <div role="status" className="border-b border-amber-300/20 px-3 py-2 text-xs text-amber-200">Rectangular fallback used for uncertain outlines. Review this image before publishing.</div>
+        ) : null}
         <div className="flex min-h-[320px] flex-1 items-center justify-center overflow-auto p-4 max-[900px]:min-h-[280px]">
           {sourceUrl && !previewFailed ? (
             <div ref={previewRef} className="relative max-h-full max-w-full touch-none overflow-hidden bg-black shadow-2xl" style={{ aspectRatio: `${dimensions.width}/${dimensions.height}`, width: 'min(100%, calc((100vh - 220px) * ' + (dimensions.width / Math.max(1, dimensions.height)) + '))' }} onPointerMove={moveDrag} onPointerUp={() => { dragRef.current = null; }} onPointerCancel={() => { dragRef.current = null; }}>
@@ -1052,7 +1055,8 @@ function ImageCensorTool() {
               {autoDetectEnabled ? (
                 <>
                   {(selected?.result?.detections || []).map((detection, index) => (
-                    <div key={`${detection.target}-${index}`} className="pointer-events-none absolute border-2 border-fuchsia-300 bg-fuchsia-500/20 shadow-[0_0_0_1px_rgba(0,0,0,0.7)]" style={{ left: `${detection.x * 100}%`, top: `${detection.y * 100}%`, width: `${detection.width * 100}%`, height: `${detection.height * 100}%` }}>
+                    <div key={`${detection.target}-${index}`} className="pointer-events-none absolute" style={{ left: `${detection.x * 100}%`, top: `${detection.y * 100}%`, width: `${detection.width * 100}%`, height: `${detection.height * 100}%` }}>
+                      <div className={cn('absolute inset-0', detection.maskPngBase64 ? 'bg-fuchsia-400/60' : 'border-2 border-amber-300 bg-amber-500/20')} style={detection.maskPngBase64 ? { maskImage: `url(data:image/png;base64,${detection.maskPngBase64})`, maskMode: 'luminance', maskSize: '100% 100%', maskRepeat: 'no-repeat' } : undefined} />
                       <span className="absolute -top-5 left-0 whitespace-nowrap rounded-sm bg-black/85 px-1.5 py-0.5 font-mono text-[7px] uppercase text-fuchsia-200">{CENSOR_TARGETS.find((target) => target.id === detection.target)?.label || detection.target} {Math.round(detection.score * 100)}%</span>
                     </div>
                   ))}

@@ -20571,7 +20571,7 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
       ...(hasOverlayUpload ? [fs.writeFile(overlayPath, Buffer.from(await overlay.arrayBuffer()))] : []),
     ]);
     const outputFolder = resolveUmbraUiMediaToolOutputFolder(form.get('outputFolder'), allowExternalOutput, gallerySourcePath, 'Censored', form.get('pinnedOutputFolder'));
-    const allowedTargets = new Set<UmbraUiCensorTarget>(['femaleNipples', 'maleGenitals', 'femaleGenitals']);
+    const allowedTargets = new Set<UmbraUiCensorTarget>(['maleGenitals', 'femaleGenitals']);
     const requestedTargets = String(form.get('targets') || '')
       .split(',')
       .map((entry) => entry.trim())
@@ -20610,14 +20610,16 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
         manualRegions = [legacyRegion];
       }
     }
+    let censorWarnings: string[] = [];
     const detections = autoDetect
       ? await detectUmbraUiCensorRegions({
         rootDir: ROOT_DIR,
         sourceDir: SOURCE_DIR,
         sourcePath,
         targets: requestedTargets,
-        threshold: Number(form.get('detectionThreshold')),
-        padding: Number(form.get('detectionPadding')),
+        threshold: form.has('detectionThreshold') ? Number(form.get('detectionThreshold')) : undefined,
+        padding: form.has('detectionPadding') ? Number(form.get('detectionPadding')) : undefined,
+        onWarnings: (warnings) => { censorWarnings = warnings; },
       })
       : [];
     const imageFormatInput = String(form.get('imageFormat') || '').trim().toLowerCase();
@@ -20637,7 +20639,8 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
       outputPath,
       mode,
       overlayPath: mode === 'overlay' ? overlayPath : undefined,
-      regions: [...detections, ...manualRegions],
+      regions: manualRegions,
+      autoRegions: detections,
       mosaicSize: Number(form.get('mosaicSize')),
       exportSettings: {
         resizeEnabled: String(form.get('resizeEnabled') || '').trim().toLowerCase() === 'true',
@@ -20667,6 +20670,7 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
       mediaType: 'image',
       censored,
       galleryTags: [galleryTag],
+      warnings: censorWarnings,
       detections,
     });
   } catch (error: any) {

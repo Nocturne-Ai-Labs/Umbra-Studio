@@ -36,6 +36,7 @@ const SOURCE_FILES = [
   'AGENTS.md',
   'bun.lock',
   'CHANGELOG.md',
+  'CENSORING.md',
   'Credits.md',
   'install-tools.bat',
   'install-tools.sh',

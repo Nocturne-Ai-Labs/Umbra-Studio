@@ -12,7 +12,9 @@ import onnxruntime as ort
 from PIL import Image, ImageOps
 
 
+# Preserve the trained output indices, even for classes Umbra no longer exposes.
 LABELS = ("nipple_f", "penis", "pussy")
+SUPPORTED_TARGETS = ("penis", "pussy")
 INPUT_SIZE = 640
 
 
@@ -105,10 +107,28 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
     parser.add_argument("--image", required=True)
-    parser.add_argument("--threshold", type=float, default=0.278)
+    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--specialist-model")
+    parser.add_argument("--segment-encoder")
+    parser.add_argument("--segment-decoder")
+    parser.add_argument("--targets", default=",".join(SUPPORTED_TARGETS))
+    parser.add_argument("--padding", type=float, default=0)
     args = parser.parse_args()
     try:
-        print(json.dumps(detect(args.model, args.image, max(0.05, min(0.95, args.threshold)))))
+        result = detect(args.model, args.image, max(0.05, min(0.95, args.threshold)))
+        targets = set(args.targets.split(",")).intersection(SUPPORTED_TARGETS)
+        result["detections"] = [row for row in result["detections"] if row["label"] in targets]
+        if args.segment_encoder and args.segment_decoder:
+            from anime_censor_segmentation import refine_detections
+            result["detections"] = refine_detections(args.image, result["detections"], args.segment_encoder, args.segment_decoder, max(0, min(0.5, args.padding)))
+        if args.specialist_model and 'penis' in targets:
+            from anime_censor_specialist import detect_specialist
+            supplements = result['detections']
+            excluded = sum(row['label'] == 'penis' and row.get('maskKind') != 'contour' for row in supplements)
+            result['detections'] = [row for row in supplements if row['label'] != 'penis' or row.get('maskKind') == 'contour']
+            result['detections'].extend(detect_specialist(args.specialist_model, args.image, max(0.05, min(0.95, args.threshold)), max(0, min(0.5, args.padding))))
+            result['warnings'] = [f'{excluded} uncertain supplemental outline(s) were excluded. Review this image and add manual regions where needed.'] if excluded else []
+        print(json.dumps(result))
         return 0
     except Exception as error:  # pragma: no cover - surfaced to the Bun service
         print(str(error), file=sys.stderr)

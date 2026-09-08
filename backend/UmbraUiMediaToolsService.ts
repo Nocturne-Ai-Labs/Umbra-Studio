@@ -27,6 +27,7 @@ export interface UmbraUiCensorRegion {
   y: number;
   width: number;
   height: number;
+  maskPngBase64?: string;
 }
 
 export type UmbraUiImageCensorMode = 'mosaic' | 'overlay';
@@ -79,13 +80,15 @@ function normalizeImageExportSettings(value: UmbraUiImageExportSettings): UmbraU
 }
 
 function normalizeCensorRegion(value: UmbraUiCensorRegion): UmbraUiCensorRegion {
-  const width = clamp(value.width, 0.01, 1, 0.35);
-  const height = clamp(value.height, 0.01, 1, 0.18);
+  const minimum = value.maskPngBase64 ? Number.EPSILON : 0.01;
+  const width = clamp(value.width, minimum, 1, 0.35);
+  const height = clamp(value.height, minimum, 1, 0.18);
   return {
     x: clamp(value.x, 0, 1 - width, 0.325),
     y: clamp(value.y, 0, 1 - height, 0.68),
     width,
     height,
+    maskPngBase64: value.maskPngBase64,
   };
 }
 
@@ -206,6 +209,43 @@ export async function applyUmbraUiWatermark(options: {
   return 'image';
 }
 
+function averageMosaicBlocks(pixels: Buffer, width: number, height: number, blockSize: number, mask?: Buffer): Buffer {
+  const output = Buffer.from(pixels);
+  for (let top = 0; top < height; top += blockSize) {
+    for (let left = 0; left < width; left += blockSize) {
+      const right = Math.min(width, left + blockSize);
+      const bottom = Math.min(height, top + blockSize);
+      let red = 0;
+      let green = 0;
+      let blue = 0;
+      let total = 0;
+      for (let y = top; y < bottom; y++) {
+        for (let x = left; x < right; x++) {
+          const pixel = y * width + x;
+          const offset = pixel * 4;
+          // Do not let pixels outside a contour or transparent source pixels tint it.
+          const weight = (mask ? mask[pixel] / 255 : 1) * pixels[offset + 3] / 255;
+          red += pixels[offset] * weight;
+          green += pixels[offset + 1] * weight;
+          blue += pixels[offset + 2] * weight;
+          total += weight;
+        }
+      }
+      if (total === 0) continue;
+      const color = [Math.round(red / total), Math.round(green / total), Math.round(blue / total)];
+      for (let y = top; y < bottom; y++) {
+        for (let x = left; x < right; x++) {
+          const offset = (y * width + x) * 4;
+          output[offset] = color[0];
+          output[offset + 1] = color[1];
+          output[offset + 2] = color[2];
+        }
+      }
+    }
+  }
+  return output;
+}
+
 export async function applyUmbraUiImageCensor(options: {
   sourcePath: string;
   outputPath: string;
@@ -213,6 +253,7 @@ export async function applyUmbraUiImageCensor(options: {
   overlayPath?: string;
   region?: UmbraUiCensorRegion;
   regions?: UmbraUiCensorRegion[];
+  autoRegions?: UmbraUiCensorRegion[];
   mosaicSize: number;
   exportSettings: UmbraUiImageExportSettings;
 }): Promise<boolean> {
@@ -220,11 +261,21 @@ export async function applyUmbraUiImageCensor(options: {
   const requestedRegions = options.regions !== undefined
     ? options.regions
     : options.region ? [options.region] : [];
-  const regions = requestedRegions.map(normalizeCensorRegion);
+  let regions = requestedRegions.map(normalizeCensorRegion);
   const source = sharp(options.sourcePath).rotate();
   const metadata = await source.metadata();
-  const originalWidth = Math.max(1, Number(metadata.width) || 1);
-  const originalHeight = Math.max(1, Number(metadata.height) || 1);
+  const swapAxes = [5, 6, 7, 8].includes(Number(metadata.orientation));
+  const originalWidth = Math.max(1, Number(swapAxes ? metadata.height : metadata.width) || 1);
+  const originalHeight = Math.max(1, Number(swapAxes ? metadata.width : metadata.height) || 1);
+  if (options.autoRegions !== undefined) {
+    const { unionCensorRegions } = await import('./UmbraUiCensorMaskService');
+    const autoMask = await unionCensorRegions(originalWidth, originalHeight, options.autoRegions.map(normalizeCensorRegion), 3);
+    if (autoMask) regions.unshift(autoMask);
+    if (options.mode === 'mosaic') {
+      const combined = await unionCensorRegions(originalWidth, originalHeight, regions);
+      regions = combined ? [combined] : [];
+    }
+  }
   const resizeScale = exportSettings.resizeEnabled
     ? exportSettings.longEdge / Math.max(originalWidth, originalHeight)
     : 1;
@@ -255,6 +306,10 @@ export async function applyUmbraUiImageCensor(options: {
     const top = Math.max(0, Math.min(outputHeight - 1, Math.round(outputHeight * region.y)));
     const width = Math.max(1, Math.min(outputWidth - left, Math.round(outputWidth * region.width)));
     const height = Math.max(1, Math.min(outputHeight - top, Math.round(outputHeight * region.height)));
+    const mask = region.maskPngBase64 ? await sharp(Buffer.from(region.maskPngBase64, 'base64'))
+      .resize({ width, height, fit: 'fill', kernel: sharp.kernel.nearest })
+      .removeAlpha().greyscale().raw().toBuffer() : undefined;
+    if (mask && !mask.some((value) => value > 0)) throw new Error('Censor segmentation returned an empty mask.');
     let censorLayer: Buffer;
     if (options.mode === 'overlay') {
       if (!options.overlayPath) throw new Error('Choose a censor overlay image.');
@@ -266,15 +321,20 @@ export async function applyUmbraUiImageCensor(options: {
         .toBuffer();
     } else {
       const blockSize = Math.round(clamp(options.mosaicSize, 2, 160, 24));
-      const reduced = await sharp(prepared)
+      const pixels = await sharp(prepared)
         .extract({ left, top, width, height })
-        .resize({ width: Math.max(1, Math.round(width / blockSize)), height: Math.max(1, Math.round(height / blockSize)), fit: 'fill', kernel: sharp.kernel.nearest })
+        .ensureAlpha().raw().toBuffer();
+      const averaged = averageMosaicBlocks(pixels, width, height, blockSize, mask);
+      censorLayer = await sharp(averaged, { raw: { width, height, channels: 4 } })
         .png()
         .toBuffer();
-      censorLayer = await sharp(reduced)
-        .resize({ width, height, fit: 'fill', kernel: sharp.kernel.nearest })
-        .png()
-        .toBuffer();
+    }
+    if (mask) {
+      const layer = await sharp(censorLayer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      for (let pixel = 0; pixel < width * height; pixel++) {
+        layer.data[pixel * 4 + 3] = Math.round(layer.data[pixel * 4 + 3] * mask[pixel] / 255);
+      }
+      censorLayer = await sharp(layer.data, { raw: { width, height, channels: 4 } }).png().toBuffer();
     }
     compositeLayers.push({ input: censorLayer, left, top, blend: 'over' });
   }

@@ -537,7 +537,7 @@ function publish() {
     path.join(packagedAppDir, 'setup', 'UmbraSetupApp.js'),
   );
 
-  for (const file of ['Credits.md', 'LICENSE', 'NOTICE']) {
+  for (const file of ['Credits.md', 'LICENSE', 'NOTICE', 'CENSORING.md']) {
     copyTree(path.join(root, file), path.join(publishRoot, file));
   }
 

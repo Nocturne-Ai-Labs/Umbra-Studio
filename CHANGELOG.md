@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.32.11
+
+### TL;DR - Setup After Updating
+
+Update and restart Umbra Studio, then refresh browser and remote tabs. Launch
+with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux.
+**Automatic male-anatomy censoring now requires a separate specialist model**:
+obtain the author's unmodified v2.0 file (about 125 MB) and place it in
+`User/Models/Detectors/anatomy-v2/`. See the included `CENSORING.md` for the
+official model link, exact filename/hash, Windows/Linux helper setup and
+third-party license notices. These weights and Ultralytics are not bundled or
+relicensed by this package. Review their terms before installation or use.
+The existing outline models download on first use (about 41 MB); processing
+stays local. ComfyUI need not be running, but male detection uses its managed
+Python environment. No Umbra Nodes update is required.
+
+### Paired Contour Censoring
+
+- Make the reviewed `paired-contour-supplement-edge-3px` method the automatic
+  censor path: specialist male masks, existing female detection with outline
+  refinement, and usable supplemental male contours from the existing detector.
+- Union automatic masks before rendering and expand their edges by three
+  source-image pixels. Use one averaged mosaic grid to avoid inconsistent
+  overlapping patches and preserve unmasked clothing/background pixels.
+- Default to 50% detection confidence and 0% additional percentage padding.
+  The confidence control applies to both detectors. Keep saved preset values,
+  adjustable mosaic strength, overlay censorship, and auto plus manual regions.
+- Retain female rectangular fallback when its outline is uncertain; exclude
+  uncertain male supplemental boxes and show a review warning. Missing or
+  mismatched specialist models produce a setup error, never an unannounced
+  downgrade to the old male detector.
+- Remove nipple targeting. Keep independent male/female selections. No-region
+  outputs pass through and are tagged `uncensored`; applied masks are tagged
+  `censored`. Neither tag certifies complete coverage or publication compliance.
+- Verify production outputs against all seven approved review samples: exact
+  decoded-pixel matches, unchanged originals, and unchanged clothed controls.
+  This is a focused regression set, not a guarantee for every image.
+
+### Compatibility And Packaging
+
+Both portable ZIPs use the same patch version and include censor setup guidance.
+Private review images, model weights, test artifacts, presets and runtime data
+are excluded. Existing Linux system prerequisites remain unchanged.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Missed anatomy outlines and clipped mask edges in the reviewed samples.
+- Fixed: Overlapping mosaic regions and unrelated colors causing uneven patches.
+- Improved: Consistent confidence settings, independent targets and review warnings.
+- Improved: Clear separate-model setup instead of silently using weaker detection.
+
 ## v0.32.10
 
 ### TL;DR - Setup After Updating

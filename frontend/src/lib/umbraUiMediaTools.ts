@@ -4,13 +4,17 @@ export interface UmbraUiMediaToolResult {
   mediaType: 'image' | 'video' | 'gif';
   censored?: boolean;
   galleryTags?: string[];
+  warnings?: string[];
   detections?: Array<{
-    target: 'femaleNipples' | 'maleGenitals' | 'femaleGenitals';
+    target: 'maleGenitals' | 'femaleGenitals';
     score: number;
     x: number;
     y: number;
     width: number;
     height: number;
+    maskPngBase64?: string;
+    maskKind?: 'contour' | 'box-fallback';
+    maskScore?: number;
   }>;
 }
 
@@ -18,6 +22,17 @@ export interface UmbraUiWatermarkAsset {
   path: string;
   filename: string;
   previewUrl: string;
+}
+
+export function normalizeUmbraUiCensorDetectionSettings(value: Record<string, unknown>) {
+  const threshold = value.detectionThreshold == null || value.detectionThreshold === ''
+    ? NaN : Number(value.detectionThreshold);
+  const padding = value.detectionPadding == null || value.detectionPadding === ''
+    ? NaN : Number(value.detectionPadding);
+  return {
+    detectionThreshold: Number.isFinite(threshold) ? Math.max(0.05, Math.min(0.95, threshold)) : 0.5,
+    detectionPadding: Number.isFinite(padding) ? Math.max(0, Math.min(0.5, padding)) : 0,
+  };
 }
 
 export async function uploadUmbraUiWatermarkAsset(file: File): Promise<UmbraUiWatermarkAsset> {
@@ -47,6 +62,7 @@ async function readMediaToolResponse(response: Response, fallback: string): Prom
     censored: typeof payload.censored === 'boolean' ? payload.censored : undefined,
     galleryTags: Array.isArray(payload.galleryTags) ? payload.galleryTags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean) : undefined,
     detections: Array.isArray(payload.detections) ? payload.detections : undefined,
+    warnings: Array.isArray(payload.warnings) ? payload.warnings.filter((value: unknown): value is string => typeof value === 'string') : undefined,
   };
 }
 
@@ -100,7 +116,7 @@ export async function submitUmbraUiImageCensor(options: {
     width: number;
     height: number;
   }>;
-  targets: Array<'femaleNipples' | 'maleGenitals' | 'femaleGenitals'>;
+  targets: Array<'maleGenitals' | 'femaleGenitals'>;
   detectionThreshold: number;
   detectionPadding: number;
   overlay?: File;
