@@ -42,7 +42,7 @@ function isAbortLike(error: unknown, signal?: AbortSignal | null): boolean {
   return record.name === 'AbortError' || String(record.message || '').toLowerCase().includes('abort');
 }
 
-export async function fetchGalleryFs(pathname: string, params: URLSearchParams, init?: RequestInit): Promise<Response> {
+async function fetchGalleryFsPage(pathname: string, params: URLSearchParams, init?: RequestInit): Promise<Response> {
   const directBaseUrl = galleryFsBaseUrl();
   const method = String(init?.method || 'GET').toUpperCase();
   const signal = init?.signal ?? null;
@@ -72,6 +72,70 @@ export async function fetchGalleryFs(pathname: string, params: URLSearchParams, 
     throw new DOMException('The operation was aborted.', 'AbortError');
   }
   return fetch(`${GALLERY_BRIDGE_FS_PREFIX}${pathname}${params ? `?${params.toString()}` : ''}`, init);
+}
+
+type GalleryListing = Record<string, unknown> & {
+  files?: Record<string, unknown>[];
+  folders?: Record<string, unknown>[];
+  nextCursor?: number | null;
+  done?: boolean;
+  total?: number;
+};
+
+export async function fetchGalleryFs(pathname: string, params: URLSearchParams, init?: RequestInit): Promise<Response> {
+  const response = await fetchGalleryFsPage(pathname, params, init);
+  if (!response.ok || pathname !== '/list-progressive'
+    || String(init?.method || 'GET').toUpperCase() !== 'GET'
+    || Number(params.get('limit')) > 0 || Number(params.get('cursor')) > 0) return response;
+
+  // The main backend returns a full listing, but the standalone Gallery service
+  // pages it. Unbounded callers must receive the same complete result from both.
+  let page: GalleryListing = await response.clone().json();
+  if (page.nextCursor == null && page.done !== false) return response;
+  const files = new Map<string | symbol, Record<string, unknown>>();
+  const folders = new Map<string | symbol, Record<string, unknown>>();
+  const append = (target: typeof files, entries: Record<string, unknown>[] | undefined) => {
+    for (const entry of entries || []) {
+      const key = String(entry.path ?? entry.relativePath ?? entry.uid ?? entry.id ?? '');
+      target.set(key || Symbol(), entry);
+    }
+  };
+  const firstPage = page;
+  let total = 0;
+  let cursor = 0;
+  while (true) {
+    init?.signal?.throwIfAborted();
+    if (page.missing === true) throw new Error('Folder is currently unavailable');
+    append(files, page.files);
+    append(folders, page.folders);
+    total = Math.max(total, Number(page.total) || 0);
+    if (page.nextCursor == null && page.done !== false) break;
+    const nextCursor = page.nextCursor;
+    if (typeof nextCursor !== 'number' || !Number.isSafeInteger(nextCursor) || nextCursor <= cursor) {
+      throw new Error('Gallery returned an invalid continuation cursor. Refresh the folder to retry.');
+    }
+    cursor = nextCursor;
+    const nextParams = new URLSearchParams(params);
+    nextParams.set('cursor', String(cursor));
+    nextParams.set('limit', '256');
+    nextParams.delete('force');
+    nextParams.delete('refresh');
+    const nextResponse = await fetchGalleryFsPage(pathname, nextParams, init);
+    if (!nextResponse.ok) return nextResponse;
+    page = await nextResponse.json();
+  }
+  const headers = new Headers(response.headers);
+  headers.delete('content-length');
+  headers.delete('content-encoding');
+  headers.delete('transfer-encoding');
+  return Response.json({
+    ...firstPage,
+    files: [...files.values()],
+    folders: [...folders.values()],
+    total: Math.max(total, files.size),
+    done: true,
+    nextCursor: null,
+  }, { status: response.status, headers });
 }
 
 export function normalizeGalleryFsUrl(rawUrl: string): string {

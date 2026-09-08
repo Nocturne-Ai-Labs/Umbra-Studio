@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.32.10
+
+### TL;DR - Setup After Updating
+
+Update and restart Umbra Studio, then refresh open browser and remote tabs.
+Windows uses `UmbraStudio.bat`; Linux uses `./start-umbra.sh`. Reopen the affected
+Gallery folder after updating. No new models, ComfyUI update, Umbra Nodes
+update, or gallery database rebuild is required.
+
+### Gallery Pagination Hotfix
+
+- Fix the Gallery stopping at 72 images when the standalone Gallery service
+  returns a paginated listing. The shared client now follows continuation
+  cursors until the complete folder listing is available.
+- Apply the same handling to folder previews so expansion includes files
+  beyond the first page. Preserve explicit page requests and the main
+  backend's existing complete-list responses.
+- Preserve listing parameters and deduplicate overlapping pages. Stop
+  cancelled requests, reject invalid or repeated cursors, and surface later
+  page errors instead of caching an incomplete listing as complete.
+- Verify the real Gallery service and browser with a 600-image fixture,
+  including scrolling to later images and expanding folder previews.
+
+### Compatibility And Packaging
+
+Windows BAT and Linux portable ZIPs use the same patch version. Personal
+media, models, presets, and settings are not included in either package.
+Existing Linux managed-tool prerequisites remain `python3-dev`,
+`build-essential`, `libgl1`, and `libglib2.0-0` (or distribution equivalents).
+Optional AI Toolkit still requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Gallery could stop loading after its first 72 images.
+- Fixed: Folder-preview expansion could only reveal the first loaded page.
+- Improved: Failed or cancelled pagination cannot silently become a cached
+  complete folder listing.
+
 ## v0.32.9
 
 ### TL;DR - Setup After Updating
