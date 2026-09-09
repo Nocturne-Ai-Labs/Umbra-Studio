@@ -985,7 +985,26 @@ function ImageCensorTool() {
                   </button>
                 ))}
               </div>
-              <label className="block space-y-1.5"><span className="flex justify-between"><span className={labelClass}>Detection Confidence</span><span className="font-mono text-[9px] text-fuchsia-200">{Math.round(detectionThreshold * 100)}%</span></span><input type="range" min={10} max={90} step={1} value={Math.round(detectionThreshold * 100)} onChange={(event) => setDetectionThreshold(Number(event.target.value) / 100)} className="w-full accent-fuchsia-300" /></label>
+              <label
+                className="block space-y-1.5"
+                title="Only automatically detected regions at or above this confidence are censored. Lower scores are skipped. Higher cutoffs can miss real anatomy. Manual regions are unaffected."
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <span className={labelClass}>Censor Cutoff</span>
+                  <span className="shrink-0 font-mono text-[9px] tabular-nums text-fuchsia-200">{Math.round(detectionThreshold * 100)}%</span>
+                </span>
+                <input
+                  type="range"
+                  aria-label="Censor cutoff"
+                  aria-valuetext={`${Math.round(detectionThreshold * 100)}% minimum detection confidence`}
+                  min={5}
+                  max={95}
+                  step={1}
+                  value={Math.round(detectionThreshold * 100)}
+                  onChange={(event) => setDetectionThreshold(Number(event.target.value) / 100)}
+                  className="w-full accent-fuchsia-300"
+                />
+              </label>
               <label className="block space-y-1.5"><span className="flex justify-between"><span className={labelClass}>Censor Padding</span><span className="font-mono text-[9px] text-fuchsia-200">{Math.round(detectionPadding * 100)}%</span></span><input type="range" min={0} max={50} step={1} value={Math.round(detectionPadding * 100)} onChange={(event) => setDetectionPadding(Number(event.target.value) / 100)} className="w-full accent-fuchsia-300" /></label>
               <p className="font-mono text-[8px] leading-relaxed text-zinc-500">Paired contours + 3px edge. Male anatomy requires the separate v2 specialist model and its license terms. Images stay on-device. <a href="https://github.com/Nocturne-Ai-Labs/Umbra-Studio/blob/main/CENSORING.md" target="_blank" rel="noopener noreferrer" className="underline text-fuchsia-200">Model setup</a></p>
             </div>

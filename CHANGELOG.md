@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.32.12
+
+### TL;DR - Setup After Updating
+
+Update and restart Umbra Studio, then refresh browser and remote tabs.
+Windows uses `UmbraStudio.bat`; Linux uses `./start-umbra.sh`.
+In Extras > Image Censor, use **Censor Cutoff** to choose the minimum
+confidence for automatic censorship. For example, 65% excludes detections
+below 65%; higher values can also miss real anatomy. Manual regions are
+unaffected. The existing 50% default and saved preset values are unchanged.
+No additional models, ComfyUI update or Umbra Nodes update are needed when
+upgrading from a configured v0.32.11 installation. New users should follow
+`CENSORING.md` for the existing paired-detector setup and model license terms.
+
+### Censor Cutoff Control
+
+- Rename Detection Confidence to Censor Cutoff, keeping the selected percentage
+  visible and explaining the threshold through its tooltip.
+- Expose the backend's full supported 5-95% range in 1% increments, so valid
+  saved settings outside the former 10-90% slider range remain adjustable.
+- Add an explicit accessible slider name and minimum-confidence value text.
+- Preserve the paired-contour algorithm, manual regions, output tagging,
+  percentage padding and three-pixel automatic mask edge.
+- Verify the 65% sample excludes the lower-confidence false-positive region
+  while preserving the upper censor mask and leaving the source unchanged.
+  This sample result is not a universal accuracy guarantee.
+
+### Fixes And Quality-of-Life Recap
+
+- Improved: Clearer cutoff naming, visible percentage and accessible value text.
+- Fixed: The slider range no longer excludes supported 5-9% and 91-95% presets.
+- Improved: Windows and Linux packages include the same control polish without
+  private sample images, model weights or test artifacts.
+
 ## v0.32.11
 
 ### TL;DR - Setup After Updating
