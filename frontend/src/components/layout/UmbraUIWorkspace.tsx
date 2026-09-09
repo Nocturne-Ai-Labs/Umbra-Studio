@@ -3042,6 +3042,8 @@ export function UmbraUIWorkspace() {
               ? 'grid-cols-[minmax(0,1fr)]'
             : activeMode === 'image'
               ? 'grid-cols-[clamp(300px,24vw,380px)_clamp(280px,22vw,360px)_minmax(300px,1fr)]'
+            : activeMode === 'extras'
+              ? 'grid-cols-2'
               : 'grid-cols-[minmax(360px,400px)_minmax(320px,1fr)]',
         )}
       >

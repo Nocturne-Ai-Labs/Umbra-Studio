@@ -14,6 +14,7 @@ export async function runUmbraUiMediaBatch<T extends UmbraUiMediaBatchItem>(opti
   onItemStart?: (item: T) => void;
   onItemSettled?: (item: T, error?: unknown) => void;
   shouldStop?: () => boolean;
+  imageConcurrency?: number;
 }): Promise<{ completed: number; failed: number }> {
   const images = options.items.filter((item) => item.kind === 'image');
   const videos = options.items.filter((item) => item.kind === 'video');
@@ -32,9 +33,10 @@ export async function runUmbraUiMediaBatch<T extends UmbraUiMediaBatchItem>(opti
     }
   };
 
-  for (let offset = 0; offset < images.length; offset += UMBRA_UI_MEDIA_BATCH_IMAGE_CONCURRENCY) {
+  const imageConcurrency = Math.max(1, Math.min(UMBRA_UI_MEDIA_BATCH_IMAGE_CONCURRENCY, Math.floor(options.imageConcurrency || UMBRA_UI_MEDIA_BATCH_IMAGE_CONCURRENCY)));
+  for (let offset = 0; offset < images.length; offset += imageConcurrency) {
     if (options.shouldStop?.()) break;
-    const chunk = images.slice(offset, offset + UMBRA_UI_MEDIA_BATCH_IMAGE_CONCURRENCY);
+    const chunk = images.slice(offset, offset + imageConcurrency);
     await Promise.all(chunk.map((item, index) => runOne(item, offset + index + 1)));
   }
   for (let index = 0; index < videos.length; index += UMBRA_UI_MEDIA_BATCH_VIDEO_CONCURRENCY) {

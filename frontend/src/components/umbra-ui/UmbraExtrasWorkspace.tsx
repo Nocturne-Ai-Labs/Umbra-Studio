@@ -649,7 +649,7 @@ export function UmbraExtrasWorkspace({
 
   if (isMediaToolMode(activeTool)) {
     return (
-      <div data-umbra-ui-extras="" className="col-span-2 flex min-h-0 flex-col">
+      <div data-umbra-ui-extras="" className={`col-span-2 flex min-h-0 flex-col ${activeTool === 'censor' ? 'flex-1 overflow-hidden' : ''}`}>
         <ExtrasToolNavigation value={activeTool} onChange={setActiveTool} remoteMode={remoteMode} />
         <UmbraExtrasMediaTools mode={activeTool} />
       </div>

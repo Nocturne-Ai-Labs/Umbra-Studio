@@ -60,6 +60,8 @@ import {
   type UmbraUiLayerUpscaleSettings,
 } from './backend/UmbraUiInpaintService';
 import { UmbraUiCanvasProjectService } from './backend/UmbraUiCanvasProjectService';
+import { UmbraUiCensorReviewService } from './backend/UmbraUiCensorReviewService';
+import { handleCensorReviewRoute } from './backend/routes/censorReviewRoutes';
 import { UmbraUiCanvasWorkspaceProjectService } from './backend/UmbraUiCanvasWorkspaceProjectService';
 import { replaceUmbraUiImageSource } from './backend/UmbraUiSourceReplacementService';
 import {
@@ -243,6 +245,7 @@ const gzipAsync = promisify(gzip);
 
 const SOURCE_DIR = import.meta.dir;
 const ROOT_DIR = process.env.UMBRA_ROOT || import.meta.dir;
+const censorReviewService = new UmbraUiCensorReviewService(ROOT_DIR, SOURCE_DIR);
 const ROOT_PUBLIC_DIR = join(ROOT_DIR, 'public');
 const SOURCE_PUBLIC_DIR = join(SOURCE_DIR, 'public');
 const PUBLIC_DIR = existsSync(ROOT_PUBLIC_DIR) ? ROOT_PUBLIC_DIR : SOURCE_PUBLIC_DIR;
@@ -34526,6 +34529,27 @@ const server = Bun.serve<any>({
 
       if (path === '/api/umbra-ui/media-tools/censor' && method === 'POST') {
         return handleUmbraUiImageCensor(req, isHostRequest(req, url, server));
+      }
+
+      if (path === '/api/umbra-ui/censor-review/projects' || path.startsWith('/api/umbra-ui/censor-review/projects/')) {
+        // CPU detection may legitimately exceed the normal HTTP idle timeout.
+        if (method === 'POST' && /\/(detect|render)$/.test(path)) server.timeout(req, 0);
+        const host = isHostRequest(req, url, server);
+        return handleCensorReviewRoute(req, {
+          service: censorReviewService,
+          source: value => resolveUmbraUiMediaToolSourcePath(value, UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS, host),
+          overlay: resolveUmbraUiWatermarkAssetPath,
+          tags: source => Array.from(galleryDb.getTagsForUids(galleryDb.resolveUidsForPaths([source])).values()).flat(),
+          output: (source, folder, pinned) => resolveUmbraUiMediaToolOutputFolder(folder, host,
+            host || isPathInsideAllowedRoots(source) ? source : '', 'Censored', pinned),
+          register: async (outputPath, censored, protectedMedia) => {
+            const stat = await fs.stat(outputPath);
+            galleryDb.upsertFolderFiles(dirname(outputPath), [{ path: outputPath, folderPath: dirname(outputPath),
+              name: basename(outputPath), type: 'image', size: stat.size, createdMs: stat.birthtimeMs, modifiedMs: stat.mtimeMs }]);
+            const uids = galleryDb.resolveUidsForPaths([outputPath]);
+            galleryDb.addTagsToFiles(uids, [censored ? 'censored' : 'uncensored', ...(protectedMedia ? ['umbra:manual-nsfw'] : [])]);
+          },
+        });
       }
 
       if (path === '/api/umbra-ui/media-tools/watermark-assets' && method === 'POST') {

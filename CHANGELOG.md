@@ -1,5 +1,85 @@
 # Changelog
 
+## v0.32.13
+
+### TL;DR - Setup After Updating
+
+Update and restart Umbra Studio, then refresh browser and remote tabs.
+Launch with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux.
+Open **Umbra UI > Extras > Image Censor** to create or reopen a review project.
+Build previews, review each image, then export only the images you approve.
+Nothing is automatically approved or exported. Existing images and exports
+are not modified or automatically converted into projects.
+
+No additional models, ComfyUI update or Umbra Nodes update is required for
+an already configured v0.32.11/12 censor installation. Fully manual masking
+does not require detector models. New automatic-censor users should follow
+`CENSORING.md`: the separately obtained male specialist is about 125 MB, and
+the existing outline models download about 41 MB on first use. Existing
+third-party model and helper license requirements remain unchanged.
+
+Review projects store private source copies, edit state and previews under
+`User/UmbraUI/CensorReviews/`. Allow disk space for the originals plus working
+previews and masks; include this folder when backing up your projects.
+Save edits successfully before closing the app.
+
+### Image Censor Review Workspace
+
+- Replace the immediate-output batch screen with a resumable review workflow:
+  Pending, Needs review and Approved states, filters and a thumbnail filmstrip.
+- Compare original and censored previews with a before/after slider and shared
+  pan/zoom. Moving the slider toward After reveals more of the censored result.
+- Adjust the current image's cutoff, selected anatomy targets, padding, mosaic
+  strength, overlay image and export settings. Rerun just that image when needed.
+- Inspect detected-region confidence scores, locate regions and independently
+  enable or disable them. Keep the existing paired-contour censor algorithm.
+- Draw, move, resize, disable and delete manual rectangles. Paint or erase the
+  censor mask, undo/redo edits, combine manual corrections with detection, or
+  disable detection for entirely manual processing.
+- Remove unwanted censorship from the editable mask without altering the source.
+  Render changes before approval; later edits invalidate previous approval.
+- Export approved images to the existing source-derived Censored folder, a
+  selected output folder or a pinned Gallery destination. Preserve censored
+  and uncensored Gallery tags and the source's protected-media classification.
+- Retain completed work when stopping a batch after its current image. Reopen
+  projects after restarting and continue processing unfinished previews.
+
+### Reliability And Scale
+
+- Preserve immutable source snapshots and use atomic state writes, revision
+  checks and per-image operation locks. Detection and rendering are bounded
+  rather than running every image concurrently.
+- Retry interrupted Gallery registration against the existing export receipt
+  instead of creating duplicate output files. Never overwrite originals.
+- Virtualize thumbnail lists and avoid repeatedly checking every earlier item
+  during import. A 500-image synthetic import benchmark improved from about
+  67 seconds to 10 seconds on the same development machine; real workloads vary.
+- Keep settings accessible in a narrow-screen drawer, remove tablet clipping
+  caused by the old Extras width constraint, and use compact phone controls.
+- Keep locked originals and previews out of rendered image elements while
+  permitting safe media to remain visible.
+
+### Compatibility And Packaging
+
+- The 50% default cutoff, zero additional padding and 24-pixel mosaic remain
+  unchanged. Detection confidence is not an accuracy guarantee. No detections
+  means uncensored output, not proof that an image is safe to publish.
+- Still-image imports support up to 64 megapixels and 16,384 pixels per side;
+  local imports allow 256 MB and browser uploads allow 120 MB.
+- Windows and Linux packages exclude private review projects, test images,
+  detector weights, development tests and personal runtime data.
+- Linux managed-tool prerequisites remain `python3-dev`, `build-essential`,
+  `libgl1` and `libglib2.0-0`, or distribution equivalents. Optional AI Toolkit
+  still requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Before/after slider direction now agrees with its labels.
+- Fixed: Tablet review controls no longer extend past the workspace edge.
+- Improved: Review and correct individual detections or paint masks manually.
+- Improved: Explicit approval gates, resumable projects and duplicate-safe exports.
+- Improved: Faster large-batch imports, virtual thumbnails and clearer progress.
+
 ## v0.32.12
 
 ### TL;DR - Setup After Updating

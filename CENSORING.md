@@ -4,6 +4,30 @@ Extras > Image Censor uses paired contours with a 3-source-pixel edge expansion.
 The defaults are 50% confidence, 0% additional padding and a 24-pixel mosaic.
 Saved presets retain their explicit confidence and padding values.
 
+## Review And Export
+
+Open **Umbra UI > Extras > Image Censor**, create a review project and add images.
+Use **Preview batch** to prepare unfinished images, or **Render preview** for the
+current image. Compare the source and preview, adjust individual regions, or use
+rectangle, brush and eraser tools. Automatic detection can be disabled for fully
+manual masking. Moving the comparison slider toward After reveals the preview.
+
+Each image must be rendered with its current edits and explicitly approved before
+**Export approved** includes it. Editing an approved image returns it to review.
+Images with no mask coverage are marked uncensored and still require approval.
+Source-derived, custom and pinned output folders use the existing Censored output
+conventions. Originals and earlier exports are never overwritten.
+
+Projects save under `User/UmbraUI/CensorReviews/`, including immutable source
+copies, current previews, masks and edit state. Allow space for the original files
+plus these working assets, and include this directory in your backups. Save
+successfully before closing Umbra. Reopen a project to resume; stopping a batch
+finishes its current image without discarding previously completed previews.
+
+Inputs must be still images up to 64 megapixels and 16,384 pixels per side.
+Browser uploads allow 120 MB; local file imports allow 256 MB. Manual masks permit
+256 rectangles, 4,000 brush strokes and 200,000 stroke points per image.
+
 ## Separate Male Anatomy Model
 
 The specialist weights are **not bundled or mirrored by Umbra**. Obtain v2.0 of
