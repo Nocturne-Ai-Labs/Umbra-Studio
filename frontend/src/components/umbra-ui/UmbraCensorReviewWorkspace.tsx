@@ -8,6 +8,7 @@ import {
   Download,
   FolderOpen,
   ImagePlus,
+  ImageOff,
   Loader2,
   Plus,
   Redo2,
@@ -520,13 +521,13 @@ export function UmbraCensorReviewWorkspace() {
       : void perform('Choosing images', async () => {
           await importSources(await browseUmbraUiMediaToolsSourceFiles('image'));
         });
-  const approve = () =>
+  const approve = (uncensored = false) =>
     perform('Approving image', async () => {
       const current = await flush();
       if (!current || !project) return;
-      receive(await api.action(project.id, current, 'review', { approve: true }));
+      receive(await api.action(project.id, current, uncensored ? 'approve-uncensored' : 'review', { approve: true }));
       const index = filtered.findIndex((i) => i.id === current.id);
-      const next = filtered.slice(index + 1).find((i) => i.status !== 'approved');
+      const next = [...filtered.slice(index + 1), ...filtered.slice(0, index)].find((i) => i.status !== 'approved');
       if (next) await select(next.id);
     });
   const canApprove = item && !dirty && censorReviewCanApprove(item);
@@ -759,6 +760,15 @@ export function UmbraCensorReviewWorkspace() {
               >
                 <RefreshCw size={14} />
                 <span className="max-sm:sr-only">Render preview</span>
+              </button>
+              <button
+                className={`${censorButton} border-emerald-400/40 text-emerald-200`}
+                title="Approve original without censorship and go to next image (clears masks; preserves original format and size)"
+                disabled={!!busy}
+                onClick={() => void approve(true)}
+              >
+                <ImageOff size={16} />
+                <span>Approve uncensored</span>
               </button>
               <button
                 className={`${censorButton} border-emerald-400/40 text-emerald-200`}

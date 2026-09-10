@@ -107,6 +107,8 @@ export async function handleCensorReviewRoute(req: Request, context: Context): P
         const data = await body(req);
         if (action === 'detect') return json(await service.detect(projectId, itemId, data.revision));
         if (action === 'render') return json(await service.render(projectId, itemId, data.revision));
+        if (action === 'approve-uncensored')
+          return json(await service.approveUncensored(projectId, itemId, data.revision));
         if (action === 'review')
           return json(await service.review(projectId, itemId, data.revision, data.approve === true));
         if (action === 'export')

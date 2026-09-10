@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.32.14
+
+### TL;DR - Setup After Updating
+
+Update and restart Umbra Studio, then refresh browser and remote tabs.
+Launch with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux.
+In **Umbra UI > Extras > Image Censor**, click **Approve uncensored** to
+approve the untouched original and advance to the next unapproved image.
+Use **Export approved** to export it alongside your approved censored images.
+No additional models, ComfyUI update, Umbra Nodes update or migration is required.
+
+### Uncensored Approval
+
+- Approve images that need no censorship without running detection or rendering
+  a preview first, including when automatic detection is unavailable or failed.
+- Explicit uncensored approval clears manual masks and disables detected regions
+  for that image. The original import is preserved byte-for-byte, including its
+  format and dimensions; resize and conversion settings are bypassed for this action.
+- Keep uncensored exports tagged as uncensored in Gallery and preserve the
+  source's protected-media classification. Approval does not mark media as SFW.
+- Name exports with `-uncensored` or `-censored` according to their actual result.
+  Existing exports and original files are not renamed or overwritten.
+- Later edits still invalidate approval and require a fresh preview before
+  ordinary approval. Revision checks and duplicate-safe export handling remain.
+- Windows and Linux packages exclude private review data, images and prototypes.
+  Linux managed-tool prerequisites remain `python3-dev`, `build-essential`,
+  `libgl1` and `libglib2.0-0`, or distribution equivalents. Optional AI Toolkit
+  still requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Uncensored exports no longer receive misleading censored filenames.
+- Improved: One-click approval of untouched originals, without detector setup.
+- Improved: Approval advances to the next unapproved image, wrapping when needed.
+
 ## v0.32.13
 
 ### TL;DR - Setup After Updating

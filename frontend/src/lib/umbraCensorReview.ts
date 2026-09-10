@@ -54,7 +54,7 @@ export const censorReviewApi = {
   action: (
     project: string,
     item: CensorReviewItem,
-    action: 'detect' | 'render' | 'review',
+    action: 'detect' | 'render' | 'review' | 'approve-uncensored',
     extra: Record<string, unknown> = {},
   ) =>
     request<CensorReviewItem>(`${itemPath(project, item.id)}/${action}`, 'POST', {

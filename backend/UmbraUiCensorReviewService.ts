@@ -547,6 +547,29 @@ export class UmbraUiCensorReviewService {
       }),
     );
   }
+  async approveUncensored(projectId: string, itemId: string, revision: number): Promise<CensorReviewItem> {
+    return this.locked(`${projectId}/${itemId}`, async () => {
+      const item = await this.getItem(projectId, itemId);
+      this.checkRevision(item, revision);
+      // Use the immutable import directly, without detection, resizing, or re-encoding.
+      await this.owned(join(this.itemDir(projectId, itemId), item.sourceFile));
+      item.settings = { ...item.settings, autoDetect: false };
+      item.regions = item.regions.map((region) => ({ ...region, enabled: false }));
+      item.rectangles = [];
+      item.strokes = [];
+      item.editRevision++;
+      item.previewFile = item.sourceFile;
+      item.maskFile = '';
+      item.censored = false;
+      item.error = '';
+      item.warnings = [];
+      item.renderedEditRevision = item.editRevision;
+      item.status = 'approved';
+      const saved = await this.persist(projectId, item);
+      await this.discardObsoleteAssets(projectId, saved).catch(() => undefined);
+      return saved;
+    });
+  }
   async review(
     projectId: string,
     itemId: string,
@@ -617,7 +640,7 @@ export class UmbraUiCensorReviewService {
       await fs.mkdir(directory, { recursive: true });
       let path = '';
       for (let sequence = 0; sequence < 1_000_000; sequence++) {
-        const candidate = join(directory, `${stem}-censored${sequence ? `-${sequence}` : ''}${extension}`);
+        const candidate = join(directory, `${stem}-${item.censored ? 'censored' : 'uncensored'}${sequence ? `-${sequence}` : ''}${extension}`);
         try {
           const handle = await fs.open(candidate, 'wx');
           await handle.close();
