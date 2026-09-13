@@ -32,6 +32,7 @@ type ModelIndexWorkerRequest =
       payload: {
         path: string;
         fullPath: string;
+        includeMetadata?: boolean;
       };
     }
   | {
@@ -178,14 +179,16 @@ function readSnapshotValue(source: Record<string, unknown>, keys: string[]): str
   return '';
 }
 
-async function readModelSnapshotSummary(fullPath: string, clientPath: string) {
+async function readModelSnapshotSummary(fullPath: string, clientPath: string, directory: {
+  artifacts: Set<string>; files: Set<string>; thumbnails: Map<string, string>;
+}) {
   const artifactDir = join(dirname(fullPath), MODEL_ARTIFACT_DIR);
-  const artifactClientDir = normalizeClientPath(join(dirname(clientPath), MODEL_ARTIFACT_DIR));
   const baseName = basename(fullPath);
   const preferredSnapshotPath = join(artifactDir, `${baseName}${MODEL_SNAPSHOT_SUFFIX}`);
   const legacySnapshotPath = `${fullPath}${MODEL_SNAPSHOT_SUFFIX}`;
-  const snapshotPath = existsSync(preferredSnapshotPath) ? preferredSnapshotPath : legacySnapshotPath;
-  if (!existsSync(snapshotPath)) return null;
+  const snapshotName = `${baseName}${MODEL_SNAPSHOT_SUFFIX}`;
+  const snapshotPath = directory.artifacts.has(snapshotName) ? preferredSnapshotPath : legacySnapshotPath;
+  if (!directory.artifacts.has(snapshotName) && !directory.files.has(snapshotName)) return null;
   try {
     const raw = await fs.readFile(snapshotPath, 'utf8');
     const parsed = toRecord(JSON.parse(String(raw || '{}')));
@@ -193,28 +196,7 @@ async function readModelSnapshotSummary(fullPath: string, clientPath: string) {
     const version = toRecord(parsed.version);
     const file = toRecord(parsed.file);
 
-    let thumbnailPath = '';
-    const thumbPrefix = `${baseName}${MODEL_THUMB_PREFIX}.`;
-    try {
-      const entries = existsSync(artifactDir) ? await fs.readdir(artifactDir) : [];
-      const thumbName = entries.find((entry) => entry.startsWith(thumbPrefix));
-      if (thumbName) {
-        thumbnailPath = normalizeClientPath(join(artifactClientDir, thumbName));
-      }
-    } catch {
-      thumbnailPath = '';
-    }
-    if (!thumbnailPath) {
-      try {
-        const entries = await fs.readdir(dirname(fullPath));
-        const thumbName = entries.find((entry) => entry.startsWith(thumbPrefix));
-        if (thumbName) {
-          thumbnailPath = normalizeClientPath(join(dirname(clientPath), thumbName));
-        }
-      } catch {
-        thumbnailPath = '';
-      }
-    }
+    const thumbnailPath = directory.thumbnails.get(baseName) || '';
 
     const summary = {
       source: readSnapshotValue(parsed, ['source']) || 'civitai',
@@ -314,6 +296,18 @@ async function buildList(path: string, fullPath: string, options: { includeMetad
   if (cached) return cached;
 
   const entries = await listDirectoryEntries(fullPath);
+  const artifactNames: string[] = includeMetadata ? await fs.readdir(join(fullPath, MODEL_ARTIFACT_DIR)).catch(() => []) : [];
+  const directory = { artifacts: new Set(artifactNames), files: new Set(entries.map(entry => entry.name)), thumbnails: new Map<string, string>() };
+  if (includeMetadata) {
+    for (const [names, parent] of [[artifactNames, join(path, MODEL_ARTIFACT_DIR)], [entries.map(entry => entry.name), path]] as const) {
+      for (const name of names) {
+        const marker = name.lastIndexOf(`${MODEL_THUMB_PREFIX}.`);
+        if (marker < 0) continue;
+        const modelName = name.slice(0, marker);
+        if (!directory.thumbnails.has(modelName)) directory.thumbnails.set(modelName, normalizeClientPath(join(parent, name)));
+      }
+    }
+  }
 
   const folders = entries
     .filter((entry) => entry.isDirectory())
@@ -328,14 +322,13 @@ async function buildList(path: string, fullPath: string, options: { includeMetad
       };
     });
 
-  const files = await Promise.all(
-    entries
+  const modelEntries = entries
       .filter((entry) => entry.isFile())
       .filter((entry) => {
         const ext = `.${String(entry.name || '').split('.').pop() || ''}`.toLowerCase();
         return modelFileExtensions.has(ext);
-      })
-      .map(async (entry) => {
+      });
+  const loadEntry = async (entry: Dirent) => {
         const fullFilePath = join(fullPath, entry.name);
         const stat = await fs.stat(fullFilePath).catch(() => null);
         const ext = String(entry.name).includes('.')
@@ -344,7 +337,7 @@ async function buildList(path: string, fullPath: string, options: { includeMetad
         const modelType = normalizeModelTypeByExt(entry.name);
         const clientFilePath = normalizeClientPath(join(path, entry.name));
         const snapshot = includeMetadata && (modelType === 'model' || modelType === 'runtime')
-          ? await readModelSnapshotSummary(fullFilePath, clientFilePath).catch(() => null)
+          ? await readModelSnapshotSummary(fullFilePath, clientFilePath, directory).catch(() => null)
           : null;
         return {
           name: entry.name,
@@ -355,8 +348,15 @@ async function buildList(path: string, fullPath: string, options: { includeMetad
           modelType,
           snapshot: snapshot || undefined,
         };
-      }),
-  );
+      };
+  const files: Awaited<ReturnType<typeof loadEntry>>[] = new Array(modelEntries.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(8, modelEntries.length) }, async () => {
+    while (next < modelEntries.length) {
+      const index = next++;
+      files[index] = await loadEntry(modelEntries[index]);
+    }
+  }));
 
   folders.sort(compareNames);
   files.sort(compareNames);

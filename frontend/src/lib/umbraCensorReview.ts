@@ -37,6 +37,8 @@ export const censorReviewApi = {
   project: (id: string) => request<CensorReviewProject>(`/${id}`),
   rename: (id: string, name: string) => request<CensorReviewProject>(`/${id}`, 'PATCH', { name }),
   item: (project: string, item: string) => request<CensorReviewItem>(itemPath(project, item)),
+  remove: (project: string, item: CensorReviewItem) =>
+    request<CensorReviewProject>(itemPath(project, item.id), 'DELETE', { revision: item.revision }),
   import: (project: string, source: File | string, settings: CensorReviewSettings) => {
     const data = new FormData();
     data.set(typeof source === 'string' ? 'path' : 'file', source);

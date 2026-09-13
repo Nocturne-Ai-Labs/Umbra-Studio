@@ -1,20 +1,21 @@
 import { useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Loader2, RefreshCw, X } from 'lucide-react';
-import { dismissGalleryTransfer, retryGalleryTransferIndex, type GalleryTransferState } from '@/lib/galleryTransfers';
+import { AlertTriangle, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Loader2, RefreshCw, Undo2, X, Square } from 'lucide-react';
+import { cancelGalleryTransfer, dismissGalleryTransfer, retryGalleryTransferIndex, undoGalleryMove, useGalleryUndoMove, type GalleryTransferState } from '@/lib/galleryTransfers';
 
 const phaseLabels: Record<string, string> = {
   queued: 'Queued', preparing: 'Preparing', transferring: 'Transferring', sidecars: 'Updating sidecars',
-  indexing: 'Updating Gallery', completed: 'Completed', failed: 'Needs attention',
+  indexing: 'Updating Gallery', completed: 'Completed', failed: 'Needs attention', cancelled: 'Cancelled',
 };
 const bytes = (value: number) => value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(1)} GB` : `${(value / 1024 ** 2).toFixed(1)} MB`;
 
 export function GalleryTransferStrip({ transfer }: { transfer: GalleryTransferState | null }) {
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(0);
+  const undoMove = useGalleryUndoMove();
   if (!transfer) return null;
   const failed = transfer.results.filter(result => !result.success);
   const needsAttention = Boolean(transfer.error || failed.length);
-  const label = transfer.reconnecting ? 'Reconnecting to transfer' : phaseLabels[transfer.phase] || transfer.phase;
+  const label = transfer.reconnecting ? 'Reconnecting to transfer' : transfer.active && transfer.cancelRequested ? 'Cancelling safely' : phaseLabels[transfer.phase] || transfer.phase;
   const isCounting = transfer.phase === 'queued' || transfer.phase === 'preparing' || transfer.reconnecting;
   const currentName = (transfer.currentPath || transfer.destination).replaceAll('\\', '/').split('/').pop();
   const error = transfer.error || failed[0]?.error || 'Some items could not be transferred.';
@@ -30,13 +31,15 @@ export function GalleryTransferStrip({ transfer }: { transfer: GalleryTransferSt
         {transfer.active ? <Loader2 size={16} className="shrink-0 animate-spin text-[var(--umbra-accent)]" /> : needsAttention ? <AlertTriangle size={16} className="shrink-0 text-amber-400" /> : <Check size={16} className="shrink-0 text-[var(--umbra-accent)]" />}
         <div className="min-w-0 flex-1">
           <div role="status" className="flex flex-wrap gap-x-2 gap-y-0.5">
-            <strong>{transfer.mode === 'copy' ? 'Copy' : 'Move'}: {label}</strong>
+            <strong>{transfer.undoOf ? 'Undo Move' : transfer.mode === 'copy' ? 'Copy' : 'Move'}: {label}</strong>
             <span>{transfer.active ? `${transfer.completedUnits}/${transfer.totalUnits || transfer.totalPaths} processed` : `${transfer.completedPaths}/${transfer.totalPaths} successful`}</span>
             {failed.length > 0 && <span className="text-amber-400">{failed.length} failed</span>}
           </div>
           <div className="truncate text-zinc-400" title={transfer.currentPath || transfer.destination}>{currentName}</div>
         </div>
         <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded hover:bg-white/10" aria-label="Transfer details" title="Transfer details" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</button>
+        {transfer.active && <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded hover:bg-white/10 disabled:opacity-40" aria-label="Cancel transfer" title="Cancel unfinished transfers; completed files stay in place" disabled={!transfer.jobId || transfer.cancelRequested || ['sidecars', 'indexing'].includes(transfer.phase)} onClick={() => void cancelGalleryTransfer()}><Square size={16} /></button>}
+        {undoMove && !transfer.active && <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded hover:bg-white/10" aria-label="Undo last move" title={`Undo last move (${undoMove.count} items)`} onClick={() => void undoGalleryMove()}><Undo2 size={18} /></button>}
         {transfer.indexPending && !transfer.active && <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded hover:bg-white/10" aria-label="Retry Gallery indexing" title="Retry Gallery indexing without transferring files again" onClick={() => void retryGalleryTransferIndex()}><RefreshCw size={18} /></button>}
         {!transfer.active && <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded hover:bg-white/10" aria-label="Dismiss transfer" title="Dismiss transfer" onClick={dismissGalleryTransfer}><X size={18} /></button>}
       </div>

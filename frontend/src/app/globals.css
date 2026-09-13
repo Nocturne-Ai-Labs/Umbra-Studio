@@ -2102,6 +2102,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-body] {
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-body][data-umbra-ui-active-mode="prompter"],
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-body]:has([data-censor-review="workspace"]),
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-body][data-umbra-ui-active-mode="queue"] {
   overflow: hidden;
   padding-bottom: 0;

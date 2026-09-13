@@ -95,6 +95,8 @@ export async function handleCensorReviewRoute(req: Request, context: Context): P
       }
       if (itemId && !action) {
         if (req.method === 'GET') return json(await service.getItem(projectId, itemId));
+        if (req.method === 'DELETE')
+          return json(await service.removeItem(projectId, itemId, (await body(req)).revision));
         if (req.method === 'PUT')
           return json(await service.saveEdits(projectId, itemId, await body(req), context.overlay));
       }

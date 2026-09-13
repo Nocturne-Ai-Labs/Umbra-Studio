@@ -68,6 +68,8 @@ export function UmbraImageExportControls({
   presetExtra,
   onPresetExtraChange,
   presetSaveDisabled = false,
+  selectedPresetId: controlledPresetId,
+  onPresetSelection,
 }: {
   value: UmbraImageExportSettings;
   onChange: (value: UmbraImageExportSettings) => void;
@@ -77,11 +79,14 @@ export function UmbraImageExportControls({
   presetExtra?: Record<string, unknown>;
   onPresetExtraChange?: (value: Record<string, unknown>) => void;
   presetSaveDisabled?: boolean;
+  selectedPresetId?: string;
+  onPresetSelection?: (preset: { id: string; value: UmbraImageExportSettings } | null) => void;
 }) {
   const storageKey = presetScope === 'image-export' ? PRESET_STORAGE_KEY : `${PRESET_STORAGE_KEY}:${presetScope}`;
   const [customPresets, setCustomPresets] = React.useState<UmbraImageExportPreset[]>(() => readCustomPresets(storageKey));
   const [selectedPresetId, setSelectedPresetId] = React.useState('custom');
   const [presetName, setPresetName] = React.useState('');
+  const activeId = controlledPresetId ?? selectedPresetId;
   const presets = React.useMemo(
     () => [
       ...BUILT_IN_PRESETS.filter((preset) => !resizeLocked || preset.resizeEnabled),
@@ -108,10 +113,11 @@ export function UmbraImageExportControls({
   const choosePreset = React.useCallback((id: string) => {
     setSelectedPresetId(id);
     const preset = presets.find((candidate) => candidate.id === id);
-    if (!preset) return;
+    if (!preset) { onPresetSelection?.(null); return; }
     onChange(normalizeSettings({ ...preset, resizeEnabled: resizeLocked ? true : preset.resizeEnabled }));
     if (preset.extra && onPresetExtraChange) onPresetExtraChange(preset.extra);
-  }, [onChange, onPresetExtraChange, presets, resizeLocked]);
+    onPresetSelection?.({ id, value: normalizeSettings({ ...preset, resizeEnabled: resizeLocked ? true : preset.resizeEnabled }) });
+  }, [onChange, onPresetExtraChange, onPresetSelection, presets, resizeLocked]);
 
   const savePreset = React.useCallback(() => {
     const name = presetName.trim().slice(0, 48);
@@ -128,25 +134,27 @@ export function UmbraImageExportControls({
     persistCustomPresets(next);
     setSelectedPresetId(id);
     setPresetName('');
-  }, [customPresets, persistCustomPresets, presetExtra, presetName, value]);
+    onPresetSelection?.({ id, value: normalizeSettings(value) });
+  }, [customPresets, persistCustomPresets, presetExtra, presetName, value, onPresetSelection]);
 
   const deleteSelectedPreset = React.useCallback(() => {
-    if (!selectedPresetId.startsWith('custom-')) return;
-    persistCustomPresets(customPresets.filter((preset) => preset.id !== selectedPresetId));
+    if (!activeId.startsWith('custom-')) return;
+    persistCustomPresets(customPresets.filter((preset) => preset.id !== activeId));
     setSelectedPresetId('custom');
-  }, [customPresets, persistCustomPresets, selectedPresetId]);
+    onPresetSelection?.(null);
+  }, [customPresets, persistCustomPresets, activeId, onPresetSelection]);
 
   return (
     <div data-umbra-image-export-controls="" className="space-y-3 border-t border-white/10 pt-3">
       <div className="grid grid-cols-[minmax(0,1fr)_34px] gap-1.5">
         <label className="block min-w-0 space-y-1.5">
           <span className={labelClass}>{presetLabel}</span>
-          <UmbraSelectControl value={selectedPresetId} onChange={(event) => choosePreset(event.target.value)} className={controlClass}>
+          <UmbraSelectControl value={activeId} onChange={(event) => choosePreset(event.target.value)} className={controlClass}>
             <option value="custom">Custom Settings</option>
             {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
           </UmbraSelectControl>
         </label>
-        <button type="button" onClick={deleteSelectedPreset} disabled={!selectedPresetId.startsWith('custom-')} title="Delete selected preset" className="mt-[19px] inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-zinc-500 hover:border-red-300/25 hover:text-red-200 disabled:opacity-25"><Trash2 size={12} /></button>
+        <button type="button" onClick={deleteSelectedPreset} disabled={!activeId.startsWith('custom-')} title="Delete selected preset" className="mt-[19px] inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-zinc-500 hover:border-red-300/25 hover:text-red-200 disabled:opacity-25"><Trash2 size={12} /></button>
       </div>
 
       <div className="grid grid-cols-[minmax(0,1fr)_34px] gap-1.5">

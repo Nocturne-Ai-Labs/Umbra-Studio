@@ -46,6 +46,7 @@ type FsWorkerRequest =
         fullPath: string;
         targetPath: string;
         maxDepth: number;
+        force?: boolean;
       };
     }
   | {
@@ -82,6 +83,7 @@ type FsWorkerRequest =
         destination: string;
         destinationFullPath: string;
         transferMode: 'default' | 'cloud';
+        restoreExact?: boolean;
       };
     }
   | {
@@ -157,6 +159,7 @@ type PendingRequest = {
   reject: (reason?: unknown) => void;
   timeout?: ReturnType<typeof setTimeout>;
   onProgress?: (progress: any) => void;
+  disposeAbort?: () => void;
   startedAt: number;
   ensureMs: number;
   spawned: boolean;
@@ -226,14 +229,14 @@ export class FsWorkerService {
 
   async move(
     payload: Extract<FsWorkerRequest, { type: 'move' }>['payload'],
-    options?: { onProgress?: (progress: any) => void },
+    options?: { onProgress?: (progress: any) => void; signal?: AbortSignal },
   ) {
     return this.sendRequest({ type: 'move', payload }, options);
   }
 
   async copy(
     payload: Extract<FsWorkerRequest, { type: 'copy' }>['payload'],
-    options?: { onProgress?: (progress: any) => void },
+    options?: { onProgress?: (progress: any) => void; signal?: AbortSignal },
   ) {
     return this.sendRequest({ type: 'copy', payload }, options);
   }
@@ -286,6 +289,7 @@ export class FsWorkerService {
   private failPending(error: Error) {
     for (const [, pending] of this.pending) {
       clearTimeout(pending.timeout);
+      pending.disposeAbort?.();
       pending.reject(error);
     }
     this.pending.clear();
@@ -329,6 +333,7 @@ export class FsWorkerService {
           }
           this.pending.delete(response.id);
           clearTimeout(pending.timeout);
+          pending.disposeAbort?.();
           if (response.ok === true) {
             const result = response.result;
             if (result && typeof result === 'object' && !Array.isArray(result)) {
@@ -387,7 +392,7 @@ export class FsWorkerService {
 
   private sendRequest(
     request: RequestWithoutId,
-    options?: { onProgress?: (progress: any) => void },
+    options?: { onProgress?: (progress: any) => void; signal?: AbortSignal },
   ): Promise<any> {
     const ensureStartedAt = Date.now();
     const child = this.ensureWorker();
@@ -423,8 +428,17 @@ export class FsWorkerService {
         if (!error) return;
         this.pending.delete(id);
         clearTimeout(pending.timeout);
+        pending.disposeAbort?.();
         pending.reject(error);
       });
+      if (options?.signal) {
+        const signal = options.signal;
+        const cancel = () => child.stdin?.write(JSON.stringify({ type: 'cancel-transfer', requestId: id }) + '\n');
+        signal.addEventListener('abort', cancel, { once: true });
+        const pending = this.pending.get(id);
+        if (pending) pending.disposeAbort = () => signal.removeEventListener('abort', cancel);
+        if (signal.aborted) cancel();
+      }
     });
   }
 }

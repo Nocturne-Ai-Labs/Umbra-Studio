@@ -285,9 +285,10 @@ export function WaifuDiffusionWorkspace({
   }, [loadFile, loadFromPath]);
 
   const handleFileSelection = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.currentTarget.files;
+    const input = event.currentTarget;
+    const files = Array.from(input.files || []);
+    input.value = '';
     if (files?.length) await importFiles(files);
-    event.currentTarget.value = '';
   }, [importFiles]);
 
   useEffect(() => {
@@ -483,10 +484,12 @@ export function WaifuDiffusionWorkspace({
       }
 
       setItemTaggerState(item.id, { status: 'done', result: payload });
+      return true;
     } catch (error: any) {
       const errorMessage = error?.message || 'Tagging failed';
       setItemTaggerState(item.id, { status: 'error', error: errorMessage });
       showToast(errorMessage, 'error');
+      return false;
     }
   }, [setItemTaggerState, showToast, waifuOptions]);
 
@@ -532,10 +535,12 @@ export function WaifuDiffusionWorkspace({
         throw new Error(payload?.error || `Captioning failed (${response.status})`);
       }
       setItemCaptionState(item.id, { status: 'done', result: payload });
+      return true;
     } catch (error: any) {
       const errorMessage = error?.message || 'Captioning failed';
       setItemCaptionState(item.id, { status: 'error', error: errorMessage });
       showToast(errorMessage, 'error');
+      return false;
     }
   }, [captionOptions, setItemCaptionState, showToast]);
 
@@ -562,16 +567,17 @@ export function WaifuDiffusionWorkspace({
     }
     setBatchTagging(true);
     try {
+      let completed = 0;
       for (const item of analyzableItems) {
-        if (analysisMode === 'caption') {
-          await runNaturalCaptionForItem(item);
-        } else {
-          await runWaifuTaggerForItem(item);
-        }
+        const success = analysisMode === 'caption'
+          ? await runNaturalCaptionForItem(item)
+          : await runWaifuTaggerForItem(item);
+        if (success) completed += 1;
       }
+      const failed = analyzableItems.length - completed;
       showToast(
-        `${analysisMode === 'caption' ? 'Captioned' : 'Tagged'} ${analyzableItems.length} image${analyzableItems.length === 1 ? '' : 's'}`,
-        'success',
+        `${analysisMode === 'caption' ? 'Captioned' : 'Tagged'} ${completed} image${completed === 1 ? '' : 's'}${failed ? `. ${failed} failed; retained for retry.` : ''}`,
+        failed ? 'error' : 'success',
       );
     } finally {
       setBatchTagging(false);

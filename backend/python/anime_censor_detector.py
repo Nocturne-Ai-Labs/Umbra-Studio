@@ -108,6 +108,7 @@ def main() -> int:
     parser.add_argument("--model", required=True)
     parser.add_argument("--image", required=True)
     parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--review-threshold", type=float)
     parser.add_argument("--specialist-model")
     parser.add_argument("--segment-encoder")
     parser.add_argument("--segment-decoder")
@@ -115,9 +116,15 @@ def main() -> int:
     parser.add_argument("--padding", type=float, default=0)
     args = parser.parse_args()
     try:
-        result = detect(args.model, args.image, max(0.05, min(0.95, args.threshold)))
+        censor_threshold = max(0.05, min(0.95, args.threshold))
+        review_threshold = censor_threshold if args.review_threshold is None else max(0.05, min(censor_threshold, args.review_threshold))
+        result = detect(args.model, args.image, review_threshold)
         targets = set(args.targets.split(",")).intersection(SUPPORTED_TARGETS)
         result["detections"] = [row for row in result["detections"] if row["label"] in targets]
+        # Review-only boxes never enter outline refinement or the censor mask.
+        candidates = [{**row, 'reviewOnly': True, 'maskKind': 'box-fallback'}
+                      for row in result['detections'] if row['score'] < censor_threshold]
+        result['detections'] = [row for row in result['detections'] if row['score'] >= censor_threshold]
         if args.segment_encoder and args.segment_decoder:
             from anime_censor_segmentation import refine_detections
             result["detections"] = refine_detections(args.image, result["detections"], args.segment_encoder, args.segment_decoder, max(0, min(0.5, args.padding)))
@@ -125,9 +132,13 @@ def main() -> int:
             from anime_censor_specialist import detect_specialist
             supplements = result['detections']
             excluded = sum(row['label'] == 'penis' and row.get('maskKind') != 'contour' for row in supplements)
+            if args.review_threshold is not None:
+                candidates.extend({**row, 'reviewOnly': True} for row in supplements
+                                  if row['label'] == 'penis' and row.get('maskKind') != 'contour')
             result['detections'] = [row for row in supplements if row['label'] != 'penis' or row.get('maskKind') == 'contour']
-            result['detections'].extend(detect_specialist(args.specialist_model, args.image, max(0.05, min(0.95, args.threshold)), max(0, min(0.5, args.padding))))
+            result['detections'].extend(detect_specialist(args.specialist_model, args.image, review_threshold, max(0, min(0.5, args.padding)), censor_threshold if args.review_threshold is not None else None))
             result['warnings'] = [f'{excluded} uncertain supplemental outline(s) were excluded. Review this image and add manual regions where needed.'] if excluded else []
+        result['detections'].extend(candidates)
         print(json.dumps(result))
         return 0
     except Exception as error:  # pragma: no cover - surfaced to the Bun service

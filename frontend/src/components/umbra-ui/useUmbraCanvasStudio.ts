@@ -306,7 +306,7 @@ export function useUmbraCanvasStudio({
   const persist = React.useCallback(async (snapshot?: UmbraCanvasStudioProject | null) => {
     clearScheduledAutoSave();
     const candidate = snapshot || latestProjectRef.current;
-    if (!candidate) return;
+    if (!candidate) return true;
     const version = dirtyVersionRef.current;
     setSaveState('saving');
     try {
@@ -329,9 +329,11 @@ export function useUmbraCanvasStudio({
       }, ...current.filter((entry) => entry.id !== saved.id)]
         .sort((left, right) => right.updatedAt - left.updatedAt || left.name.localeCompare(right.name)));
       try { window.localStorage.setItem(ACTIVE_STUDIO_PROJECT_KEY, saved.id); } catch { /* best effort */ }
+      return dirtyVersionRef.current === 0;
     } catch (error) {
       if (dirtyVersionRef.current === version) setSaveState('error');
       showToast(error instanceof Error ? error.message : 'Failed to save the Canvas Studio project.', 'error');
+      return false;
     }
   }, [clearScheduledAutoSave, queueProjectSave, showToast]);
 
@@ -359,12 +361,14 @@ export function useUmbraCanvasStudio({
     if (!projectId) return;
     setLoading(true);
     try {
-      if (latestProjectRef.current && dirtyVersionRef.current > 0) await persist(latestProjectRef.current);
+      if (latestProjectRef.current && dirtyVersionRef.current > 0 && !await persist(latestProjectRef.current)) return;
       const loaded = await loadUmbraStudioProject(projectId);
+      if (dirtyVersionRef.current > 0) return;
       const active = loaded.artboards.find((artboard) => artboard.id === loaded.activeArtboardId) || loaded.artboards[0];
       if (active && active.documentId !== document?.id && !await openCanvasDocument(active.documentId, true)) {
         throw new Error(`The artboard document for ${active.name} is unavailable.`);
       }
+      if (dirtyVersionRef.current > 0) return;
       setProject(loaded);
       setSaveState('saved');
       dirtyVersionRef.current = 0;
@@ -380,7 +384,7 @@ export function useUmbraCanvasStudio({
   const createProject = React.useCallback(async (name = '') => {
     setLoading(true);
     try {
-      if (latestProjectRef.current && dirtyVersionRef.current > 0) await persist(latestProjectRef.current);
+      if (latestProjectRef.current && dirtyVersionRef.current > 0 && !await persist(latestProjectRef.current)) return;
       const persistedDocument = document ? await saveUmbraCanvasProject(document) : null;
       const next = persistedDocument
         ? createUmbraStudioProjectFromCanvas(persistedDocument, { name: name.trim() || `${persistedDocument.name} Studio` })
@@ -938,7 +942,7 @@ export function useUmbraCanvasStudio({
     createProject,
     openProject,
     deleteProject,
-    saveNow: () => persist(project),
+    saveNow: async () => { await persist(project); },
     addCurrentArtboard,
     attachDocumentToProject,
     replaceArtboardsWithDocument,

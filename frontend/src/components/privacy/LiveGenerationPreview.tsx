@@ -26,7 +26,7 @@ export function LiveGenerationPreview({
   showRenderingControl?: boolean;
 }) {
   const { locked } = useNsfwPrivacy();
-  const [pixelated, setPixelated] = useState(true);
+  const [pixelated, setPixelated] = useState(false);
   const protectedMedia = isProtectedLivePreview(prompt);
   const blocked = locked && protectedMedia;
   const video = /^video\//i.test(mimeType || '') || /^data:video\//i.test(src);

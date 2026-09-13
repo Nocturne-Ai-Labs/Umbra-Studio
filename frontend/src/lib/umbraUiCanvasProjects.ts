@@ -209,7 +209,7 @@ function projectAssetPrefix(projectId: string): string {
 
 async function readApi<T>(response: Response, fallback: string): Promise<T> {
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload?.success) throw new Error(String(payload?.error || fallback));
+  if (!response.ok || !payload?.success) throw Object.assign(new Error(String(payload?.error || fallback)), { status: response.status });
   return payload as T;
 }
 

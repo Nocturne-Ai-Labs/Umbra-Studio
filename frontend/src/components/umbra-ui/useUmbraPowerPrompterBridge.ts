@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { classifyUmbraMediaMetadata, classifyUmbraPrompt, type UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
 import { ModelInfoRequestCache } from '@/lib/modelInfoRequestCache';
 import {
   createPrompterWsUrl,
@@ -215,6 +216,7 @@ export interface UmbraQueueSummary {
 }
 
 export interface UmbraGenerationPreview {
+  privacyClass: UmbraPrivacyClass;
   requestId: string;
   promptIndex: number;
   promptId: string;
@@ -225,6 +227,7 @@ export interface UmbraGenerationPreview {
 }
 
 export interface UmbraSavedImage {
+  privacyClass: UmbraPrivacyClass;
   requestId: string;
   promptIndex: number;
   promptId: string;
@@ -639,6 +642,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   const pendingLoraInfoRef = React.useRef(new Map<string, PendingCatalogRequest<PowerPrompterLoraInfoPayload>>());
   const pendingModelInfoRef = React.useRef(new Map<string, PendingCatalogRequest<PowerPrompterModelInfoPayload>>());
   const ownedRequestIdsRef = React.useRef(new Set<string>());
+  const ownedRequestPromptsRef = React.useRef(new Map<string, string[]>());
   const [connected, setConnected] = React.useState(false);
   const [queueSnapshot, setQueueSnapshot] = React.useState<QueueSnapshot | null>(null);
   const queueActivities = React.useMemo(
@@ -1093,6 +1097,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           const imageDataUrl = String(payload?.imageDataUrl || '').trim();
           if (!imageDataUrl.startsWith('data:image/')) return;
           setGenerationPreview({
+            privacyClass: payload?.privacyClass === 'nsfw'
+              || classifyUmbraMediaMetadata(payload) === 'nsfw'
+              || classifyUmbraPrompt(ownedRequestPromptsRef.current.get(String(payload?.requestId || ''))?.[Number(payload?.promptIndex) || 0]) === 'nsfw'
+              ? 'nsfw' : 'normal',
             requestId: String(payload?.requestId || '').trim(),
             promptIndex: toFiniteInteger(payload?.promptIndex, 0, 0, Number.MAX_SAFE_INTEGER),
             promptId: String(payload?.promptId || '').trim(),
@@ -1139,6 +1147,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           if (!path) return;
           const name = String(image.filename || image.name || path.replace(/\\/g, '/').split('/').pop() || 'Umbra UI output').trim();
           setLatestSavedImage({
+            privacyClass: classifyUmbraMediaMetadata(image) === 'nsfw'
+              || classifyUmbraMediaMetadata(payload) === 'nsfw'
+              || classifyUmbraPrompt(ownedRequestPromptsRef.current.get(requestId)?.[Number(payload?.promptIndex) || 0]) === 'nsfw'
+              ? 'nsfw' : 'normal',
             requestId,
             promptIndex: toFiniteInteger(payload?.promptIndex, 0, 0, Number.MAX_SAFE_INTEGER),
             promptId: String(payload?.promptId || '').trim(),
@@ -1397,9 +1409,13 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     }
     const requestId = createRequestId();
     ownedRequestIdsRef.current.add(requestId);
+    ownedRequestPromptsRef.current.set(requestId, [...prompts]);
     if (ownedRequestIdsRef.current.size > 100) {
       const oldest = ownedRequestIdsRef.current.values().next().value;
-      if (oldest) ownedRequestIdsRef.current.delete(oldest);
+      if (oldest) {
+        ownedRequestIdsRef.current.delete(oldest);
+        ownedRequestPromptsRef.current.delete(oldest);
+      }
     }
     const normalizedStyleNames = prompts.map((_, index) => String(styleNames[index] || `Umbra UI ${index + 1}`).trim());
     const state = {
@@ -1651,10 +1667,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       let sourceImageName = String(options.sourceImageName || '').trim();
       if (!sourceImagePath && !sourceImageName) throw new Error('Choose a source image for IMG2IMG.');
       if (!sourceImageName) {
-        const response = await fetch('/api/comfy/copy-image', {
+        const response = await fetch('/api/comfy/copy-media', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sourcePath: sourceImagePath }),
+          body: JSON.stringify({ sourcePath: sourceImagePath, kind: 'image' }),
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || payload?.success === false || !payload?.filename) {
@@ -1778,10 +1794,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       const stageFrame = async (label: string, path: string, name: string): Promise<string> => {
         if (name) return name;
         if (!path) throw new Error(`Choose a ${label.toLowerCase()} image.`);
-        const response = await fetch('/api/comfy/copy-image', {
+        const response = await fetch('/api/comfy/copy-media', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sourcePath: path }),
+          body: JSON.stringify({ sourcePath: path, kind: 'image' }),
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || payload?.success === false) {
@@ -1812,10 +1828,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         keyframe.sourceImageName = String(keyframe.sourceImageName || '').trim();
         if (!keyframe.sourceImagePath && !keyframe.sourceImageName) continue;
         if (!keyframe.sourceImageName) {
-          const response = await fetch('/api/comfy/copy-image', {
+          const response = await fetch('/api/comfy/copy-media', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sourcePath: keyframe.sourceImagePath }),
+            body: JSON.stringify({ sourcePath: keyframe.sourceImagePath, kind: 'image' }),
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok || payload?.success === false) {
@@ -1832,10 +1848,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         keyframe.sourceImageName = String(keyframe.sourceImageName || '').trim();
         if (!keyframe.sourceImagePath && !keyframe.sourceImageName) continue;
         if (!keyframe.sourceImageName) {
-          const response = await fetch('/api/comfy/copy-image', {
+          const response = await fetch('/api/comfy/copy-media', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sourcePath: keyframe.sourceImagePath }),
+            body: JSON.stringify({ sourcePath: keyframe.sourceImagePath, kind: 'image' }),
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok || payload?.success === false) {
@@ -1861,10 +1877,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         if (!shot.prompt) throw new Error(`Enter a prompt for storyboard shot ${index + 1}.`);
         if (!shot.sourceImagePath && !shot.sourceImageName) continue;
         if (!shot.sourceImageName) {
-          const response = await fetch('/api/comfy/copy-image', {
+          const response = await fetch('/api/comfy/copy-media', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sourcePath: shot.sourceImagePath }),
+            body: JSON.stringify({ sourcePath: shot.sourceImagePath, kind: 'image' }),
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok || payload?.success === false) {

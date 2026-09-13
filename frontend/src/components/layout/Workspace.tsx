@@ -2518,7 +2518,7 @@ export const Workspace = () => {
       >
         {loadedWorkspaces.library ? (
           <Suspense fallback={null}>
-            <ReactGalleryWorkspace />
+            <ReactGalleryWorkspace active={activeWorkspace === 'library'} />
           </Suspense>
         ) : null}
       </div>

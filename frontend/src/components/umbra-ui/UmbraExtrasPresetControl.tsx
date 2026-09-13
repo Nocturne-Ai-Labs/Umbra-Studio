@@ -40,6 +40,8 @@ export function UmbraExtrasPresetControl({
   onApply,
   saveDisabled = false,
   saveDisabledTitle = 'Complete the required settings before saving this preset',
+  selectedPresetId,
+  onPresetSelection,
 }: {
   scope: string;
   label: string;
@@ -47,11 +49,14 @@ export function UmbraExtrasPresetControl({
   onApply: (value: Record<string, unknown>) => void;
   saveDisabled?: boolean;
   saveDisabledTitle?: string;
+  selectedPresetId?: string;
+  onPresetSelection?: (preset: { id: string; value: Record<string, unknown> } | null) => void;
 }) {
   const storageKey = `umbra-ui:extras-operation-presets:${scope}`;
   const [presets, setPresets] = React.useState<UmbraExtrasPreset[]>(() => readPresets(storageKey));
   const [selectedId, setSelectedId] = React.useState('custom');
   const [name, setName] = React.useState('');
+  const activeId = selectedPresetId ?? selectedId;
 
   React.useEffect(() => {
     setPresets(readPresets(storageKey));
@@ -67,7 +72,8 @@ export function UmbraExtrasPresetControl({
     setSelectedId(id);
     const preset = presets.find((candidate) => candidate.id === id);
     if (preset) onApply(preset.value);
-  }, [onApply, presets]);
+    onPresetSelection?.(preset || null);
+  }, [onApply, onPresetSelection, presets]);
 
   const save = React.useCallback(() => {
     const presetName = name.trim().slice(0, 48);
@@ -79,25 +85,27 @@ export function UmbraExtrasPresetControl({
     persist(next);
     setSelectedId(id);
     setName('');
-  }, [name, persist, presets, saveDisabled, value]);
+    onPresetSelection?.(nextPreset);
+  }, [name, persist, presets, saveDisabled, value, onPresetSelection]);
 
   const remove = React.useCallback(() => {
-    if (!selectedId.startsWith('custom-')) return;
-    persist(presets.filter((preset) => preset.id !== selectedId));
+    if (!activeId.startsWith('custom-')) return;
+    persist(presets.filter((preset) => preset.id !== activeId));
     setSelectedId('custom');
-  }, [persist, presets, selectedId]);
+    onPresetSelection?.(null);
+  }, [persist, presets, activeId, onPresetSelection]);
 
   return (
     <div data-umbra-extras-operation-presets={scope} className="space-y-2 border-t border-white/10 pt-3">
       <div className="grid grid-cols-[minmax(0,1fr)_34px] gap-1.5">
         <label className="block min-w-0 space-y-1.5">
           <span className={labelClass}>{label}</span>
-          <UmbraSelectControl value={selectedId} onChange={(event) => choose(event.target.value)} className={controlClass}>
+          <UmbraSelectControl value={activeId} onChange={(event) => choose(event.target.value)} className={controlClass}>
             <option value="custom">Custom Settings</option>
             {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
           </UmbraSelectControl>
         </label>
-        <button type="button" onClick={remove} disabled={!selectedId.startsWith('custom-')} title="Delete selected preset" className="mt-[19px] inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-zinc-500 hover:border-red-300/25 hover:text-red-200 disabled:opacity-25"><Trash2 size={12} /></button>
+        <button type="button" onClick={remove} disabled={!activeId.startsWith('custom-')} title="Delete selected preset" className="mt-[19px] inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-zinc-500 hover:border-red-300/25 hover:text-red-200 disabled:opacity-25"><Trash2 size={12} /></button>
       </div>
       <div className="grid grid-cols-[minmax(0,1fr)_34px] gap-1.5">
         <input value={name} maxLength={48} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); save(); } }} placeholder="Preset name" className={cn(controlClass, 'h-9')} />

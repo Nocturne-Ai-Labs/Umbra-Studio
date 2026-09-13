@@ -31,6 +31,7 @@ import {
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import {
   runUmbraUiMediaBatch,
+  clearCompletedUmbraUiMediaBatch,
   type UmbraUiMediaBatchKind,
 } from '@/lib/umbraUiMediaBatch';
 import {
@@ -552,6 +553,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
         setSummary((current) => ({ ...current, completed: current.completed + (error ? 0 : 1), failed: current.failed + (error ? 1 : 0) }));
       },
     });
+    setItems((current) => clearCompletedUmbraUiMediaBatch(current, items));
     setProcessing(false);
     window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
     showToast(result.failed ? `${result.completed} watermark${result.completed === 1 ? '' : 's'} completed; ${result.failed} failed.` : `${result.completed} watermark${result.completed === 1 ? '' : 's'} completed.`, result.failed ? 'error' : 'success');
@@ -631,7 +633,9 @@ function VideoToGifTool() {
   const selected = items.find((item) => item.id === selectedId) || items[0];
   const localSourceUrl = useFilePreview(selected?.file || null);
   const sourceUrl = localSourceUrl || itemPreviewUrl(selected);
-  React.useEffect(() => { if (!selectedId && items[0]) setSelectedId(items[0].id); }, [items, selectedId]);
+  React.useEffect(() => {
+    if (!items.some((item) => item.id === selectedId)) setSelectedId(items[0]?.id || '');
+  }, [items, selectedId]);
   const gifPresetValue = React.useMemo<Record<string, unknown>>(() => ({
     outputFolder,
     width,
@@ -677,6 +681,7 @@ function VideoToGifTool() {
         setSummary((current) => ({ ...current, completed: current.completed + (error ? 0 : 1), failed: current.failed + (error ? 1 : 0) }));
       },
     });
+    setItems((current) => clearCompletedUmbraUiMediaBatch(current, items));
     setProcessing(false);
     window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
     showToast(result.failed ? `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed; ${result.failed} failed.` : `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed.`, result.failed ? 'error' : 'success');

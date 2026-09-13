@@ -254,9 +254,10 @@ export function ScannerWorkspace({
   }, [loadFile, loadFromPath]);
 
   const handleFileSelection = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.currentTarget.files;
+    const input = event.currentTarget;
+    const files = Array.from(input.files || []);
+    input.value = '';
     if (files?.length) await importFiles(files);
-    event.currentTarget.value = '';
   }, [importFiles]);
 
   useEffect(() => {

@@ -12,6 +12,7 @@ import {
   normalizeCensorReviewSettings as settings,
   censorReviewCanApprove,
   censorReviewNeedsDetection,
+  censorReviewDetectionFloor,
   summarizeCensorReviewItem,
   type CensorReviewItem,
   type CensorReviewProject,
@@ -260,9 +261,23 @@ export class UmbraUiCensorReviewService {
   async getItem(projectId: string, itemId: string): Promise<CensorReviewItem> {
     if (!(await this.index(projectId)).itemIds.includes(id(itemId)))
       throw new CensorReviewError('Review image not found.', 404);
-    return JSON.parse(
+    const item: CensorReviewItem = JSON.parse(
       await fs.readFile(await this.owned(join(this.itemDir(projectId, itemId), 'state.json')), 'utf8'),
     );
+    item.settings = settings(item.settings);
+    return item;
+  }
+  async removeItem(projectId: string, itemId: string, revision: unknown): Promise<CensorReviewProject> {
+    return this.locked(projectId, () => this.locked(`${projectId}/${itemId}`, async () => {
+      const item = await this.getItem(projectId, itemId);
+      this.checkRevision(item, revision);
+      const project = await this.index(projectId);
+      project.itemIds = project.itemIds.filter((value) => value !== itemId);
+      // Detach from the batch only. Never delete originals, exports, or saved review assets.
+      await atomicJson(join(this.projectDir(projectId), 'project.json'), project);
+      this.summaries.delete(join(this.itemDir(projectId, itemId), 'state.json'));
+      return this.readProject(projectId, true);
+    }));
   }
   async importImage(
     projectId: string,
@@ -426,6 +441,7 @@ export class UmbraUiCensorReviewService {
             sourcePath: join(directory, item.sourceFile),
             targets: item.settings.targets,
             threshold: item.settings.cutoff,
+            reviewThreshold: censorReviewDetectionFloor(item.settings),
             padding: item.settings.padding,
             onWarnings: (value) => {
               warnings = value;
@@ -448,6 +464,7 @@ export class UmbraUiCensorReviewService {
               maskKind: region.maskKind || ('box-fallback' as const),
               maskFile,
               enabled: true,
+              reviewOnly: region.reviewOnly === true,
             });
           }
           item.regions = regions;
@@ -455,7 +472,8 @@ export class UmbraUiCensorReviewService {
           item.error = '';
           item.status = 'needs-review';
           item.editRevision++;
-          item.detectedCutoff = item.settings.cutoff;
+          item.detectedCutoff = censorReviewDetectionFloor(item.settings);
+          item.detectedCensorCutoff = item.settings.cutoff;
           item.detectedPadding = item.settings.padding;
           item.detectedTargets = [...item.settings.targets];
           const saved = await this.persist(projectId, item);
@@ -486,6 +504,7 @@ export class UmbraUiCensorReviewService {
             for (const region of item.regions) {
               if (
                 !region.enabled ||
+                region.reviewOnly ||
                 region.score < item.settings.cutoff ||
                 !item.settings.targets.includes(region.target)
               )

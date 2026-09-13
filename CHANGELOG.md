@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.32.16 - Gallery, Extras, And Generation Reliability
+
+### TL;DR - Setup After Updating
+
+- Update Umbra Studio, restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux, and refresh any open remote browser sessions.
+- No new model downloads, custom nodes, or ComfyUI updates are required for these fixes. Existing optional censor-detector requirements remain unchanged; see `CENSORING.md`.
+- Extras now removes successfully processed inputs from staged batches while retaining failures for retry. Successful Image Censor exports are also removed from the review project; keep original sources and exported files as your archive.
+
+### Gallery And Model Manager
+
+- Added folder Copy, Cut, Paste, Open in File Explorer, and Undo Last Move actions, with cancellation support for gallery transfers.
+- Refresh visible expanded folder branches without repeatedly collapsing the tree or requiring a root-folder visit. Improved progressive loading, selection preservation, transfer reporting, and recovery from gallery-service errors.
+- Hardened model downloads against destination collisions, incomplete writes, cancellation races, and credentials being forwarded to unrelated download hosts. Thumbnail retrieval is bounded and does not prevent saving model metadata.
+- Reduced repeated directory scans and bounded model-index I/O. Improved stale-response handling and reporting of partial model transfers.
+
+### Censor Review And Extras
+
+- Added independent low-confidence review flags and a Needs attention filter. Weak candidates can be flagged without being censored; detector scores are not calibrated accuracy, and missed regions still require human review.
+- Added side-by-side Before/After review, configurable mask color, uncensored approval, batch removal, and persistent review preset selection.
+- Stabilized preview rendering layout and kept visited Extras tools mounted so tab changes preserve active jobs and controls. Image and video watermark state remains independent.
+- Retain failed upscale inputs for retry, correlate completed items to their original batch entries, and recover polling after temporary errors. Missing ComfyUI jobs no longer hold the upscale queue indefinitely.
+
+### Generation Workflow Reliability
+
+- Fixed image handoffs between generation, editing, and Extras tools, including source identity and output settings. Video requeue preserves its pinned destination.
+- Protect Canvas and Inpaint work from failed saves, overlapping source changes, and late responses. Existing-project fallback is limited to a confirmed missing project.
+- Prevent a late generation acknowledgement from advancing a newly edited seed or generation context. Corrected recovered Inpaint settings synchronization and preservation of zero-valued Canvas settings.
+- Tie live-preview privacy to the submitted job rather than later prompt edits. Smooth live preview is now the default.
+- Corrected file-import handling and success/failure counts in image analysis tools.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: source handoff races, unsaved editor transitions, stale seed updates, and missing-job polling stalls.
+- Fixed: partial-transfer reporting, download collisions, and inconsistent Extras batch cleanup.
+- Improved: gallery folder navigation, transfer controls, model indexing, and censor review at scale.
+- Improved: preview stability, privacy handling, and continuity when switching between tools.
+
 ## v0.32.15
 
 ### TL;DR - Setup After Updating

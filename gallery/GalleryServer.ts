@@ -970,15 +970,16 @@ async function handleTree(reqUrl: URL): Promise<Response> {
   const startedAt = nowMs();
   const pathValue = reqUrl.searchParams.get('path') || '';
   const force = String(reqUrl.searchParams.get('force') || '').trim() === '1';
+  const shallow = reqUrl.searchParams.get('shallow') === '1';
   try {
     const ensureStartedAt = nowMs();
     const dirPath = await ensureDirectory(pathValue);
     const ensureMs = nowMs() - ensureStartedAt;
     const toClientPath = createClientPathMapper(pathValue, dirPath);
-    registerPrewarmRoot(dirPath);
+    if (!shallow) registerPrewarmRoot(dirPath);
     if (force) {
       invalidateFolderTree(dirPath);
-      invalidateFolderSummary(dirPath);
+      if (!shallow) invalidateFolderSummary(dirPath);
     }
 
     const cachedFolders = force ? null : getCachedFolderTree(dirPath);
@@ -1010,7 +1011,7 @@ async function handleTree(reqUrl: URL): Promise<Response> {
     });
     const workerMs = nowMs() - workerStartedAt;
 
-    setTimeout(() => {
+    if (!shallow) setTimeout(() => {
       scheduleFolderSummaryPrewarm(dirPath);
       for (const folder of folders) {
         scheduleFolderSummaryPrewarm(folder.path);

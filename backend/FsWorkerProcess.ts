@@ -3,7 +3,7 @@ import { existsSync, type Dirent } from 'fs';
 import * as fs from 'fs/promises';
 import { spawn } from 'node:child_process';
 import { GalleryDb } from '../gallery/GalleryDb';
-import { copyTreeExclusive, type CopyProgress } from './FsTransferCopy';
+import { copyTreeExclusive, moveTreeExclusive, type CopyProgress } from './FsTransferCopy';
 
 type FsFilter = string | null;
 
@@ -62,6 +62,7 @@ type FsTreeRequest = {
     fullPath: string;
     targetPath: string;
     maxDepth: number;
+    force?: boolean;
   };
 };
 
@@ -101,6 +102,7 @@ type FsMoveRequest = {
     destination: string;
     destinationFullPath: string;
     transferMode: 'default' | 'cloud';
+    restoreExact?: boolean;
   };
 };
 
@@ -407,11 +409,11 @@ async function buildDirectoryTreeSeed(fullPath: string) {
   return entries;
 }
 
-async function getDirectoryTreeSeed(fullPath: string) {
+async function getDirectoryTreeSeed(fullPath: string, force = false) {
   const cacheKey = resolve(fullPath);
   pruneDirectoryTreeSeedCache();
   const cached = directoryTreeSeedCache.get(cacheKey);
-  if (cached && (Date.now() - cached.createdAt) <= DIRECTORY_TREE_SEED_TTL_MS) {
+  if (!force && cached && (Date.now() - cached.createdAt) <= DIRECTORY_TREE_SEED_TTL_MS) {
     return cached.entries;
   }
 
@@ -770,7 +772,11 @@ async function runListProgressive(payload: FsListProgressiveRequest['payload']) 
   const snapshot = await getProgressiveSeedSnapshot(fullPath, force === true);
   const seedMs = Date.now() - seedStartedAt;
   const entries = snapshot.entries;
-  const chunk = entries;
+  const cursor = Math.max(0, Math.trunc(payload.cursor || 0));
+  const limit = Math.max(0, Math.trunc(payload.limit || 0));
+  const chunk = limit > 0 ? entries.slice(cursor, cursor + limit) : entries.slice(cursor);
+  const nextCursor = cursor + chunk.length;
+  const done = nextCursor >= entries.length;
 
   for (const entry of chunk) {
     const itemPath = normalizeRelPath(join(targetPath, entry.name));
@@ -808,11 +814,11 @@ async function runListProgressive(payload: FsListProgressiveRequest['payload']) 
     folders,
     files,
     total: snapshot.totalMedia,
-    done: true,
-    nextCursor: null,
+    done,
+    nextCursor: done ? null : nextCursor,
     debug: {
-      cursor: 0,
-      limit: 0,
+      cursor,
+      limit,
       seedSource: snapshot.seedSource,
       seedMs,
       seedWaitMs: snapshot.seedWaitMs,
@@ -827,8 +833,8 @@ async function runListProgressive(payload: FsListProgressiveRequest['payload']) 
   };
 }
 
-async function buildFolderTree(fullPath: string, targetPath: string, depth: number, maxDepth: number): Promise<any[]> {
-  const entries = await getDirectoryTreeSeed(fullPath);
+async function buildFolderTree(fullPath: string, targetPath: string, depth: number, maxDepth: number, force = false): Promise<any[]> {
+  const entries = await getDirectoryTreeSeed(fullPath, force);
   const folders = await mapWithConcurrency(
     entries,
     12,
@@ -836,7 +842,7 @@ async function buildFolderTree(fullPath: string, targetPath: string, depth: numb
       const itemPath = normalizeRelPath(join(targetPath, entry.name));
       const childFullPath = join(fullPath, entry.name);
       const children = depth < maxDepth
-        ? await buildFolderTree(childFullPath, itemPath, depth + 1, maxDepth)
+        ? await buildFolderTree(childFullPath, itemPath, depth + 1, maxDepth, force)
         : [];
       const folder: Record<string, unknown> = {
         name: entry.name,
@@ -858,7 +864,7 @@ async function runTree(payload: FsTreeRequest['payload']) {
   const { fullPath, targetPath } = payload;
   const requestedMaxDepth = Number.isFinite(payload.maxDepth) ? Math.floor(payload.maxDepth) : 0;
   const maxDepth = Math.max(0, Math.min(8, requestedMaxDepth));
-  const folders = await buildFolderTree(fullPath, targetPath, 0, maxDepth);
+  const folders = await buildFolderTree(fullPath, targetPath, 0, maxDepth, payload.force);
 
   return { folders };
 }
@@ -1024,8 +1030,7 @@ async function movePathWithFallback(sourcePath: string, targetPath: string, onPr
     if (err?.code !== 'EXDEV') throw err;
   }
 
-  await copyTreeExclusive(sourcePath, targetPath, onProgress);
-  await removePathRecursiveSafe(sourcePath, false);
+  await moveTreeExclusive(sourcePath, targetPath, onProgress);
 }
 
 async function waitForFileStable(filePath: string): Promise<void> {
@@ -1056,12 +1061,11 @@ async function movePathCloudSafe(
   onProgress?: CopyProgress,
 ): Promise<void> {
   // Do not delete any source children until the complete tree has copied.
-  await copyTreeExclusive(sourcePath, targetPath, onProgress, async (file) => {
+  await moveTreeExclusive(sourcePath, targetPath, onProgress, async (file) => {
     await waitForFileStable(file);
     await onUnitDone?.(file);
     await sleep(180);
   });
-  await removePathRecursiveSafe(sourcePath, false);
 }
 
 async function countTransferUnits(sourcePath: string): Promise<number> {
@@ -1102,6 +1106,12 @@ function emitProgress(id: string, progress: unknown) {
   writeResponse({ id, event: 'progress', progress });
 }
 
+const cancelledTransfers = new Set<string>();
+const activeTransfers = new Set<string>();
+function checkTransferCancellation(id: string) {
+  if (cancelledTransfers.has(id)) throw new Error('Transfer cancelled; unfinished source retained');
+}
+
 async function runMove(id: string, payload: FsMoveRequest['payload']) {
   const { items, destinationFullPath, transferMode } = payload;
   emitProgress(id, { phase: 'preparing' });
@@ -1123,19 +1133,23 @@ async function runMove(id: string, payload: FsMoveRequest['payload']) {
   const totalUnits = Array.from(pathUnits.values()).reduce((sum, units) => sum + Math.max(units, 1), 0) || Math.max(items.length, 1);
   let completedUnits = 0;
   const reservedMoveTargets = new Set<string>();
-  const copyProgress: CopyProgress = (fileBytes, fileTotalBytes, currentPath) => emitProgress(id, {
+  const copyProgress: CopyProgress = (fileBytes, fileTotalBytes, currentPath) => {
+    checkTransferCancellation(id);
+    emitProgress(id, {
     phase: 'transferring', completedUnits, totalUnits, currentPath, fileBytes, fileTotalBytes,
-  });
+    });
+  };
   emitProgress(id, { phase: 'transferring', completedUnits, totalUnits });
 
   const results = await mapWithConcurrency(items, transferMode === 'cloud' ? 1 : 4, async (item) => {
     const sourceUnits = Math.max(pathUnits.get(item.sourcePath) || 1, 1);
     try {
+      checkTransferCancellation(id);
       const sourceStat = await fs.lstat(item.sourceFullPath);
       const filename = basename(item.sourceFullPath);
       const sourceParentNormalized = normalizePathForCompare(dirname(item.sourceFullPath));
       const destinationNormalized = normalizePathForCompare(destinationFullPath);
-      if (destinationNormalized === sourceParentNormalized) {
+      if (!item.targetFullPath && destinationNormalized === sourceParentNormalized) {
         completedUnits += sourceUnits;
         emitProgress(id, { deltaUnits: sourceUnits, completedUnits, totalUnits, currentPath: item.sourcePath });
         return { path: item.sourcePath, success: false, error: 'Source and destination are the same folder' };
@@ -1154,7 +1168,12 @@ async function runMove(id: string, payload: FsMoveRequest['payload']) {
         return { path: item.sourcePath, success: false, error: 'Cannot move a folder into itself' };
       }
 
-      if (transferMode === 'cloud') {
+      if (payload.restoreExact) {
+        // Reserve the original name exclusively, including on POSIX where rename can overwrite.
+        await moveTreeExclusive(item.sourceFullPath, targetPath, copyProgress);
+        completedUnits = Math.min(totalUnits, completedUnits + sourceUnits);
+        emitProgress(id, { deltaUnits: sourceUnits, completedUnits, totalUnits, currentPath: item.sourcePath });
+      } else if (transferMode === 'cloud') {
         await movePathCloudSafe(item.sourceFullPath, targetPath, async () => {
           completedUnits = Math.min(totalUnits, completedUnits + 1);
           emitProgress(id, { deltaUnits: 1, completedUnits, totalUnits, currentPath: item.sourcePath });
@@ -1199,12 +1218,16 @@ async function runCopy(id: string, payload: FsCopyRequest['payload']) {
   const totalUnits = Math.max(items.length, 1);
   let completedUnits = 0;
   const reservedTargets = new Set<string>();
-  const copyProgress: CopyProgress = (fileBytes, fileTotalBytes, currentPath) => emitProgress(id, {
+  const copyProgress: CopyProgress = (fileBytes, fileTotalBytes, currentPath) => {
+    checkTransferCancellation(id);
+    emitProgress(id, {
     phase: 'transferring', completedUnits, totalUnits, currentPath, fileBytes, fileTotalBytes,
-  });
+    });
+  };
 
   const results = await mapWithConcurrency(items, 4, async (item) => {
     try {
+      checkTransferCancellation(id);
       const sourceStat = await fs.lstat(item.sourceFullPath);
       const filename = basename(item.sourceFullPath);
       const rawTargetPath = item.targetFullPath || join(destinationFullPath, filename);
@@ -1488,6 +1511,9 @@ async function main() {
       writeResponse({ id: request.id, ok: true, result });
     } catch (error: any) {
       writeResponse({ id: request.id, ok: false, error: String(error?.message || error), stack: error?.stack });
+    } finally {
+      cancelledTransfers.delete(request.id);
+      activeTransfers.delete(request.id);
     }
   };
 
@@ -1501,9 +1527,17 @@ async function main() {
       if (!line) continue;
 
       try {
-        const request = JSON.parse(line) as FsWorkerRequest;
+        const message = JSON.parse(line);
+        if (message.type === 'cancel-transfer' && typeof message.requestId === 'string') {
+          if (activeTransfers.has(message.requestId)) cancelledTransfers.add(message.requestId);
+          continue;
+        }
+        const request = message as FsWorkerRequest;
         if (mutating.has(request.type)) {
-          if (request.type === 'move' || request.type === 'copy') emitProgress(request.id, { phase: 'queued' });
+          if (request.type === 'move' || request.type === 'copy') {
+            activeTransfers.add(request.id);
+            emitProgress(request.id, { phase: 'queued' });
+          }
           mutations = mutations.then(() => execute(request));
         } else {
           const lane = nextReader++ % readers.length;

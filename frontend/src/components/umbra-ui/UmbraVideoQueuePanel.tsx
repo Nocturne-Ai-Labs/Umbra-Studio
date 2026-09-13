@@ -588,14 +588,14 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
           clip.id === selected.sequence?.clipId ? { ...clip, prompt: draftPrompt.trim() } : clip
         ));
       }
-      await queueVideo({ prompt: draftPrompt, negativePrompt: draftNegative, video: videoForQueue });
+      await queueVideo({ prompt: draftPrompt, negativePrompt: draftNegative, video: videoForQueue, outputFolder: selected?.generation.outputFolder });
       await onRefresh();
     } catch (queueError) {
       showToast(queueError instanceof Error ? queueError.message : 'Failed to requeue video.', 'error');
     } finally {
       setRequeueing(false);
     }
-  }, [draftNegative, draftPrompt, draftVideo, onRefresh, queueVideo, requeueing, selected?.sequence, showToast]);
+  }, [draftNegative, draftPrompt, draftVideo, onRefresh, queueVideo, requeueing, selected?.sequence, selected?.generation.outputFolder, showToast]);
 
   return (
     <main data-umbra-ui-video-queue="" className="relative flex min-h-0 min-w-0 flex-col bg-black/15">

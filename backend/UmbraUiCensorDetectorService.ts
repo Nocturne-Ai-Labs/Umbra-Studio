@@ -7,6 +7,7 @@ import { join } from 'path';
 export type UmbraUiCensorTarget = 'maleGenitals' | 'femaleGenitals';
 
 export interface UmbraUiCensorDetection {
+  reviewOnly?: boolean;
   target: UmbraUiCensorTarget;
   score: number;
   x: number;
@@ -140,7 +141,7 @@ function resolvePython(rootDir: string, specialist: boolean): string {
   return bundled;
 }
 
-async function runDetector(rootDir: string, sourceDir: string, modelPath: string, sourcePath: string, threshold: number, padding: number, targets: Set<UmbraUiCensorTarget>): Promise<unknown> {
+async function runDetector(rootDir: string, sourceDir: string, modelPath: string, sourcePath: string, threshold: number, padding: number, targets: Set<UmbraUiCensorTarget>, reviewThreshold?: number): Promise<unknown> {
   const specialist = targets.has('maleGenitals');
   const python = resolvePython(rootDir, specialist);
   const specialistPath = join(rootDir, 'User', 'Models', 'Detectors', 'anatomy-v2', 'cockAndBallDetection2D_v20.pt');
@@ -154,6 +155,7 @@ async function runDetector(rootDir: string, sourceDir: string, modelPath: string
   return new Promise((resolve, reject) => {
     const child = spawn(python, [script, '--model', modelPath, '--image', sourcePath, '--threshold', String(threshold),
       '--segment-encoder', encoder, '--segment-decoder', decoder, '--padding', String(padding), '--targets', labels.join(','),
+      ...(reviewThreshold === undefined ? [] : ['--review-threshold', String(reviewThreshold)]),
       ...(specialist ? ['--specialist-model', specialistPath] : [])], {
       cwd: rootDir,
       windowsHide: true,
@@ -192,6 +194,7 @@ export async function detectUmbraUiCensorRegions(options: {
   sourcePath: string;
   targets: UmbraUiCensorTarget[];
   threshold?: number;
+  reviewThreshold?: number;
   padding?: number;
   onWarnings?: (warnings: string[]) => void;
 }): Promise<UmbraUiCensorDetection[]> {
@@ -199,6 +202,7 @@ export async function detectUmbraUiCensorRegions(options: {
   if (targetSet.size === 0) throw new Error('Select at least one body part to censor.');
   const modelPath = await ensureDetectorModel(options.rootDir);
   const threshold = clamp(options.threshold, 0.05, 0.95, 0.5);
+  const reviewThreshold = options.reviewThreshold === undefined ? undefined : clamp(options.reviewThreshold, 0.05, threshold, Math.min(0.15, threshold));
   const raw = await runDetector(
     options.rootDir,
     options.sourceDir || options.rootDir,
@@ -207,13 +211,15 @@ export async function detectUmbraUiCensorRegions(options: {
     threshold,
     clamp(options.padding, 0, 0.5, 0),
     targetSet,
+    reviewThreshold,
   );
   const warnings = (raw as any)?.warnings;
   options.onWarnings?.(Array.isArray(warnings) ? warnings.filter((value: unknown): value is string => typeof value === 'string') : []);
   const rows = Array.isArray((raw as any)?.detections) ? (raw as any).detections : [];
   return rows.flatMap((row: any) => {
     const target = LABEL_TARGETS[String(row?.label || '')];
-    if (!target || !targetSet.has(target) || !Number.isFinite(row.score) || row.score < threshold) return [];
+    const reviewOnly = reviewThreshold !== undefined && row.reviewOnly === true;
+    if (!target || !targetSet.has(target) || !Number.isFinite(row.score) || row.score < (reviewOnly ? reviewThreshold! : threshold)) return [];
     const x = clamp(row.x, 0, 1, 0);
     const y = clamp(row.y, 0, 1, 0);
     const width = clamp(row.width, 0.001, 1, 0.01);
@@ -222,6 +228,7 @@ export async function detectUmbraUiCensorRegions(options: {
     if (row.maskKind === 'contour' && (typeof row.maskPngBase64 !== 'string' || !row.maskPngBase64)) throw new Error('Censor segmentation returned an empty mask.');
     return [{
       target,
+      ...(reviewOnly ? { reviewOnly: true } : {}),
       score: clamp(row.score, 0, 1, 0),
       x,
       y,

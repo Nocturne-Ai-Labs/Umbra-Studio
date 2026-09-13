@@ -84,7 +84,6 @@ import {
 } from '@/components/umbra-ui/UmbraImageGenerationInfoDrawer';
 import { UmbraMobileWorkspaceSheet } from '@/components/umbra-ui/UmbraMobileWorkspaceSheet';
 import { NsfwPrivacyShield } from '@/components/privacy/NsfwPrivacyProvider';
-import { classifyUmbraPrompt } from '@/lib/nsfwPrivacy';
 import { UmbraQueueEmergencyControls } from '@/components/umbra-ui/UmbraQueueEmergencyControls';
 import { useUmbraQueueNotificationAudio } from '@/components/umbra-ui/useUmbraQueueNotificationAudio';
 import {
@@ -98,7 +97,6 @@ import {
   type UmbraModelPickerKind,
 } from '@/components/umbra-ui/UmbraModelPickerModal';
 import { stageUmbraUiUpscaleHandoff } from '@/lib/umbraUiUpscale';
-import { stageUmbraUiInpaintHandoff } from '@/lib/umbraUiInpaint';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
 import {
@@ -111,6 +109,8 @@ import {
 } from '../../../../shared/umbra-ui/inpaintModelCompatibility';
 import {
   normalizeUmbraUiMediaHandoff,
+  clearPendingUmbraUiMediaHandoff,
+  stageUmbraUiMediaHandoff,
   UMBRA_UI_MEDIA_HANDOFF_EVENT,
   UMBRA_UI_MEDIA_HANDOFF_KEY,
   type UmbraUiMediaHandoff,
@@ -987,16 +987,6 @@ export function UmbraUIWorkspace() {
     };
   }, [applyPersistedImageControls]);
 
-  const clearStoredMediaHandoff = React.useCallback((handoff: UmbraUiMediaHandoff) => {
-    const target = window as typeof window & { __umbraPendingUmbraUiMediaHandoff?: unknown };
-    const pending = normalizeUmbraUiMediaHandoff(target.__umbraPendingUmbraUiMediaHandoff);
-    if (pending?.createdAt === handoff.createdAt) target.__umbraPendingUmbraUiMediaHandoff = null;
-    try {
-      const stored = normalizeUmbraUiMediaHandoff(JSON.parse(window.sessionStorage.getItem(UMBRA_UI_MEDIA_HANDOFF_KEY) || 'null'));
-      if (stored?.createdAt === handoff.createdAt) window.sessionStorage.removeItem(UMBRA_UI_MEDIA_HANDOFF_KEY);
-    } catch { /* best effort */ }
-  }, []);
-
   React.useEffect(() => {
     setMountedModes((current) => {
       if (current.has(activeMode)) return current;
@@ -1659,6 +1649,9 @@ export function UmbraUIWorkspace() {
     const inheritedScheduler = readString('scheduler');
     if (inheritedScheduler) setScheduler(inheritedScheduler);
     const inheritedHiresFix = generation.hiresFix;
+    if (generation.tiledVae && typeof generation.tiledVae === 'object') {
+      setTiledVae(normalizePowerPrompterGenerationControls({ tiledVae: generation.tiledVae }).tiledVae!);
+    }
     if (inheritedHiresFix && typeof inheritedHiresFix === 'object') {
       const hiresFix = inheritedHiresFix as Record<string, unknown>;
       setHiresEnabled(hiresFix.enabled === true);
@@ -1775,24 +1768,29 @@ export function UmbraUIWorkspace() {
     const controller = new AbortController();
     const sourcePath = img2imgSource.path;
     const timer = window.setTimeout(() => {
-      void fetch('/api/comfy/copy-image', {
+      void fetch('/api/comfy/copy-media', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourcePath }),
+        body: JSON.stringify({ sourcePath, kind: 'image' }),
         signal: controller.signal,
       }).then(async (response) => {
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload?.filename) return;
+        if (!response.ok || payload?.success === false || !payload?.filename) {
+          throw new Error(String(payload?.error || 'Failed to stage the IMG2IMG source in ComfyUI.'));
+        }
+        if (controller.signal.aborted) return;
         setImg2imgSource((current) => current.path === sourcePath
           ? { ...current, name: String(payload.filename) }
           : current);
-      }).catch(() => undefined);
+      }).catch((error) => {
+        if (!controller.signal.aborted) showToast(error instanceof Error ? error.message : 'Failed to stage the IMG2IMG source.', 'error');
+      });
     }, 300);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [activeMode, img2imgSource.name, img2imgSource.path]);
+  }, [activeMode, img2imgSource.name, img2imgSource.path, showToast]);
 
   React.useEffect(() => {
     if (promptSegments.some((segment) => segment.id === activePromptSegmentId)) return;
@@ -2154,6 +2152,11 @@ export function UmbraUIWorkspace() {
     showToast,
   ]);
 
+  const imageSeedContext = JSON.stringify([seed, seedMode, seedIncrement, batchSize, activeImageFeature, modelFamily, modelType, checkpointName, workflowResourceValues, img2imgSource.path]);
+  const imageSeedContextRef = React.useRef({ key: imageSeedContext, revision: 0 });
+  if (imageSeedContextRef.current.key !== imageSeedContext) {
+    imageSeedContextRef.current = { key: imageSeedContext, revision: imageSeedContextRef.current.revision + 1 };
+  }
   const handleQueueImage = React.useCallback(async (placement: UmbraQueuePlacement = 'end') => {
     if (isQueueing) return;
     const effectivePlacement = queueSummary.powerPrompterActive ? placement : 'end';
@@ -2161,6 +2164,7 @@ export function UmbraUIWorkspace() {
       'Stop the current Power Prompter image and run this Umbra UI image next?',
     )) return;
     setIsQueueing(true);
+    const submittedSeedRevision = imageSeedContextRef.current.revision;
     try {
       const controlNumber = (value: string, capabilityValue: string | number | boolean | undefined) => (
         typeof capabilityValue === 'number' && Number.isFinite(capabilityValue)
@@ -2269,8 +2273,10 @@ export function UmbraUIWorkspace() {
         if (!originalPath) throw new Error('Umbra could not identify the original Gallery image to replace.');
         img2imgSourceReplacementRequestsRef.current.set(requestId, originalPath);
       }
-      if (seedIsAdjustable) {
-        setSeed(String(advanceUmbraUiSeed(queuedSeed, seedMode, seedIncrement, batchSize)));
+      if (seedIsAdjustable && imageSeedContextRef.current.revision === submittedSeedRevision) {
+        setSeed((current) => current === seed
+          ? String(advanceUmbraUiSeed(queuedSeed, seedMode, seedIncrement, batchSize))
+          : current);
       }
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to queue image.', 'error');
@@ -2375,13 +2381,17 @@ export function UmbraUIWorkspace() {
         const replacedPath = String(payload?.path || originalPath).trim() || originalPath;
         const revision = String(payload?.revision || Date.now()).trim();
         const replacedFolderPath = replacedPath.replace(/[\\/][^\\/]+$/, '');
-        setImg2imgSource({
-          path: replacedPath,
-          originalPath: replacedPath,
-          name: '',
-          imageUrl: `/api/fs/image?${new URLSearchParams({ path: replacedPath, rev: revision }).toString()}`,
-          width: 0,
-          height: 0,
+        setImg2imgSource((current) => {
+          const currentPath = String(current.originalPath || current.path || '').replace(/\\/g, '/');
+          if (currentPath !== originalPath.replace(/\\/g, '/')) return current;
+          return {
+            path: replacedPath,
+            originalPath: replacedPath,
+            name: '',
+            imageUrl: `/api/fs/image?${new URLSearchParams({ path: replacedPath, rev: revision }).toString()}`,
+            width: 0,
+            height: 0,
+          };
         });
         window.dispatchEvent(new CustomEvent('umbra:gallery-content-changed', {
           detail: {
@@ -2417,7 +2427,7 @@ export function UmbraUIWorkspace() {
   const imagePreviewUrl = showingLivePreview
     ? generationPreview?.imageDataUrl || ''
     : latestSavedImage?.imageUrl || generationPreview?.imageDataUrl || '';
-  const imagePreviewIsNsfw = classifyUmbraPrompt(workflowImagePrompt) === 'nsfw';
+  const imagePreviewIsNsfw = (showingLivePreview ? generationPreview : latestSavedImage || generationPreview)?.privacyClass === 'nsfw';
   const samplerOptions = modelCatalog.samplers.length > 0
     ? modelCatalog.samplers
     : ['er_sde', 'euler', 'dpmpp_2m_sde'];
@@ -2536,9 +2546,11 @@ export function UmbraUIWorkspace() {
       if (!handoff) return;
       if (handoff.createdAt <= mediaHandoffAppliedAtRef.current) return;
       mediaHandoffAppliedAtRef.current = handoff.createdAt;
-      window.setTimeout(() => {
-        clearStoredMediaHandoff(handoff);
-      }, 250);
+      // Inpaint acknowledges after mounting; a timer can discard its source
+      // before a busy editor has installed the handoff listener.
+      if (handoff.mode !== 'inpaint') {
+        window.setTimeout(() => clearPendingUmbraUiMediaHandoff(handoff), 250);
+      }
       if (handoff.mode === 'video') setActiveMode('video');
       if (handoff.mode === 'txt2img') {
         setActiveMode('image');
@@ -2619,6 +2631,7 @@ export function UmbraUIWorkspace() {
         hiresFix: snapshot.hiresFix,
         detailerPipeline: snapshot.detailerPipeline,
         outputUpscale: snapshot.outputUpscale,
+        tiledVae: snapshot.tiledVae,
       }, { replace: true, modelFamily: snapshot.modelFamily });
 
       if (snapshot.vaeName) {
@@ -2652,7 +2665,10 @@ export function UmbraUIWorkspace() {
       window.removeEventListener('umbra:umbra-ui-media-tools-handoff', onMediaToolsHandoff);
       window.removeEventListener(UMBRA_UI_EXTRAS_TOOL_EVENT, onExtrasToolRequest);
     };
-  }, [applyPowerPrompterGenerationControls, clearStoredMediaHandoff, loraCatalog, modelCatalog, selectedWorkflowResources]);
+  }, [applyPowerPrompterGenerationControls, loraCatalog, modelCatalog, selectedWorkflowResources]);
+
+  const [outputHandoffPending, setOutputHandoffPending] = React.useState(false);
+  const outputHandoffBusyRef = React.useRef(false);
 
   const sendLatestToUpscale = React.useCallback((autoStart: boolean) => {
     if (!latestSavedImage?.path) {
@@ -2668,36 +2684,31 @@ export function UmbraUIWorkspace() {
     setActiveMode('extras');
   }, [latestSavedImage, showToast]);
 
-  const sendLatestToImg2Img = React.useCallback(() => {
+  const sendLatestToEditor = React.useCallback(async (mode: 'img2img' | 'inpaint') => {
+    if (outputHandoffBusyRef.current) return;
     if (!latestSavedImage?.path) {
-      showToast('Finish an Umbra UI image before sending it to IMG2IMG.', 'error');
+      showToast('Finish an Umbra UI image before opening an editor.', 'error');
       return;
     }
-    setImg2imgSource({
-      path: latestSavedImage.path,
-      originalPath: latestSavedImage.path,
-      name: '',
-      imageUrl: latestSavedImage.imageUrl,
-      width: 0,
-      height: 0,
-    });
-    setActiveMode('img2img');
-    showToast('Image opened in IMG2IMG.', 'success');
-  }, [latestSavedImage, showToast]);
-
-  const sendLatestToInpaint = React.useCallback(() => {
-    if (!latestSavedImage?.path) {
-      showToast('Finish an Umbra UI image before sending it to inpaint.', 'error');
-      return;
+    outputHandoffBusyRef.current = true;
+    setOutputHandoffPending(true);
+    try {
+      // Publish the complete handoff before opening the destination. Inpaint
+      // must not start restoring an old project while metadata is loading.
+      await stageUmbraUiMediaHandoff({
+        mode,
+        path: latestSavedImage.path,
+        originalSourcePath: latestSavedImage.path,
+        name: latestSavedImage.name,
+        imageUrl: latestSavedImage.imageUrl,
+        source: 'umbra-ui-latest-output',
+      });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to open the image.', 'error');
+    } finally {
+      outputHandoffBusyRef.current = false;
+      setOutputHandoffPending(false);
     }
-    stageUmbraUiInpaintHandoff({
-      path: latestSavedImage.path,
-      name: latestSavedImage.name,
-      imageUrl: latestSavedImage.imageUrl,
-      source: 'umbra-ui-latest-output',
-    });
-    setActiveMode('inpaint');
-    showToast('Image opened in Inpaint.', 'success');
   }, [latestSavedImage, showToast]);
 
   const modelPickerOpen = modelPickerKind !== null || activeResourcePicker !== null;
@@ -3670,17 +3681,17 @@ export function UmbraUIWorkspace() {
                 )}
                 <button
                   type="button"
-                  onClick={sendLatestToImg2Img}
-                  disabled={!latestSavedImage?.path}
+                  onClick={() => void sendLatestToEditor('img2img')}
+                  disabled={!latestSavedImage?.path || outputHandoffPending}
                   className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-cyan-300/20 bg-cyan-500/[0.055] px-2.5 text-[10px] font-black uppercase tracking-[0.1em] text-cyan-100 transition-colors hover:bg-cyan-500/[0.1] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.025] disabled:text-zinc-600"
                   title="Use the latest completed image as an IMG2IMG source"
                 >
-                  <Images size={12} /> IMG2IMG
+                  {outputHandoffPending ? <Loader2 size={12} className="animate-spin" /> : <Images size={12} />} IMG2IMG
                 </button>
                 <button
                   type="button"
-                  onClick={sendLatestToInpaint}
-                  disabled={!latestSavedImage?.path}
+                  onClick={() => void sendLatestToEditor('inpaint')}
+                  disabled={!latestSavedImage?.path || outputHandoffPending}
                   className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-rose-300/20 bg-rose-500/[0.055] px-2.5 text-[10px] font-black uppercase tracking-[0.1em] text-rose-100 transition-colors hover:bg-rose-500/[0.1] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.025] disabled:text-zinc-600"
                   title="Open the latest completed image in the non-destructive inpaint editor"
                 >
@@ -3689,7 +3700,7 @@ export function UmbraUIWorkspace() {
                 <button
                   type="button"
                   onClick={() => sendLatestToUpscale(false)}
-                  disabled={!latestSavedImage?.path}
+                  disabled={!latestSavedImage?.path || outputHandoffPending}
                   className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-white/10 bg-white/[0.025] px-2.5 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-300 transition-colors hover:border-amber-300/25 hover:text-amber-100 disabled:cursor-not-allowed disabled:opacity-30"
                   title="Add the latest completed image to the Extras upscale batch"
                 >
@@ -3698,7 +3709,7 @@ export function UmbraUIWorkspace() {
                 <button
                   type="button"
                   onClick={() => sendLatestToUpscale(true)}
-                  disabled={!latestSavedImage?.path || !comfyConnected}
+                  disabled={!latestSavedImage?.path || !comfyConnected || outputHandoffPending}
                   className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-amber-300/25 bg-amber-500/[0.08] px-2.5 text-[10px] font-black uppercase tracking-[0.1em] text-amber-100 transition-colors hover:bg-amber-500/[0.14] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.025] disabled:text-zinc-600"
                   title="Upscale the latest completed image now"
                 >

@@ -8,7 +8,9 @@ import {
   Download,
   FolderOpen,
   ImagePlus,
+  ImageMinus,
   ImageOff,
+  TriangleAlert,
   Loader2,
   Plus,
   Redo2,
@@ -27,6 +29,8 @@ import {
   censorReviewId,
   censorReviewCanApprove,
   censorReviewNeedsDetection,
+  censorReviewAttention,
+  censorReviewDetectionFloor,
   censorReviewSnapshot,
   normalizeCensorReviewSettings,
   summarizeCensorReviewItem,
@@ -40,6 +44,7 @@ import { UmbraCensorReviewViewer, CensorIconButton, censorButton } from './Umbra
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { UmbraPinnedOutputControl, usePinnedOutputFolder } from './UmbraPinnedOutputControl';
 import { UmbraImageExportControls } from './UmbraImageExportControls';
+import { censorReviewPresetSession } from '@/lib/censorReviewPresetSession';
 import { UmbraExtrasPresetControl } from './UmbraExtrasPresetControl';
 import {
   browseUmbraUiMediaToolsSourceFiles,
@@ -118,6 +123,7 @@ export function UmbraCensorReviewWorkspace() {
   const itemRef = React.useRef(item);
   itemRef.current = item;
   const [dirty, setDirty] = React.useState(false);
+  const [, refreshPresetSelection] = React.useReducer((value: number) => value + 1, 0);
   const dirtyRef = React.useRef(false);
   const [busy, setBusy] = React.useState('');
   const [drawing, setDrawing] = React.useState(false);
@@ -183,7 +189,7 @@ export function UmbraCensorReviewWorkspace() {
   const filtered = React.useMemo(
     () =>
       (project?.items || []).filter(
-        (i) => filter === 'all' || i.status === filter || (filter === 'failed' && i.error),
+        (i) => filter === 'all' || i.status === filter || (filter === 'failed' && i.error) || (filter === 'attention' && !!i.attention?.length),
       ),
     [project, filter],
   );
@@ -251,10 +257,14 @@ export function UmbraCensorReviewWorkspace() {
     const draft = pendingEdits.get(draftKey(currentProject.id, id));
     const alreadySaved = draft && JSON.stringify(censorReviewSnapshot(draft)) === JSON.stringify(censorReviewSnapshot(saved));
     if (alreadySaved) pendingEdits.delete(draftKey(currentProject.id, id));
-    const next = draft && !alreadySaved ? draft : saved;
+    const hasDraft = !!draft && !alreadySaved;
+    const base = hasDraft ? draft : saved;
+    const next = censorReviewPresetSession(currentProject.id).apply(base, hasDraft);
+    const carried = next !== base;
+    if (carried) pendingEdits.set(draftKey(currentProject.id, id), next);
     itemRef.current = next;
     setItem(next);
-    markDirty(!!draft && !alreadySaved, false);
+    markDirty(hasDraft || carried, false);
     if (draft && !alreadySaved && draft.revision !== saved.revision)
       setError('Unsaved edits were recovered, but this image changed in another session. Reload the saved image to discard this draft.');
     setSelectedRect('');
@@ -302,8 +312,16 @@ export function UmbraCensorReviewWorkspace() {
     markDirty(true);
   };
   const settings = item?.settings || defaults;
+  const presetSession = censorReviewPresetSession(project?.id || 'imports');
+  const chooseSessionPreset = (scope: 'censor' | 'export', preset: { id: string; value: Record<string, unknown> | Partial<CensorReviewSettings> } | null) => {
+    presetSession.choose(scope, preset ? {
+      id: preset.id,
+      value: scope === 'censor' ? normalizeCensorReviewSettings({ ...settings, ...preset.value }) : preset.value as Partial<CensorReviewSettings>,
+    } : null, item?.id);
+    refreshPresetSelection();
+  };
   const changeSettings = (changes: Partial<CensorReviewSettings>) =>
-    item ? edit({ settings: { ...settings, ...changes } }) : setDefaults({ ...settings, ...changes });
+    item ? edit({ settings: normalizeCensorReviewSettings({ ...settings, ...changes }) }) : setDefaults(normalizeCensorReviewSettings({ ...settings, ...changes }));
   const saveAndRender = async (forceDetection = false) => {
     let current = await flush();
     if (!current || !project) return;
@@ -324,7 +342,7 @@ export function UmbraCensorReviewWorkspace() {
     const rows = refreshed.items.filter((i) =>
       kind === 'export'
         ? i.status === 'approved'
-        : i.status !== 'approved' && (!!i.error || i.renderedEditRevision !== i.editRevision),
+        : i.status !== 'approved' && (!!i.error || i.needsDetection || i.renderedEditRevision !== i.editRevision),
     );
     setProgress({ total: rows.length, completed: 0, failed: 0, startedAt: Date.now(), running: true });
     try {
@@ -338,8 +356,23 @@ export function UmbraCensorReviewWorkspace() {
             if (censorReviewNeedsDetection(current))
               current = await api.action(project.id, current, 'detect');
             current = await api.action(project.id, current, 'render');
-          } else current = (await api.export(project.id, current, outputFolder, pinned)).item;
-          receive(current, false);
+            receive(current, false);
+          } else {
+            current = (await api.export(project.id, current, outputFolder, pinned)).item;
+            const remaining = await api.remove(project.id, current);
+            pendingEdits.delete(draftKey(project.id, current.id));
+            if (mounted.current) {
+              projectRef.current = remaining;
+              setProject(remaining);
+              if (itemRef.current?.id === current.id) {
+                itemRef.current = null;
+                setItem(null);
+                markDirty(false);
+                setSelectedRect('');
+                setHistory({ undo: [], redo: [] });
+              }
+            }
+          }
         },
         onItemSettled: (row, failure) => {
           if (!mounted.current) return;
@@ -356,7 +389,8 @@ export function UmbraCensorReviewWorkspace() {
       if (mounted.current) {
         const next = await api.project(project.id);
         setProject(next);
-        if (itemRef.current) await select(itemRef.current.id, next);
+        const nextId = next.items.find((row) => row.id === itemRef.current?.id)?.id || next.items[0]?.id;
+        if (nextId) await select(nextId, next);
       }
     } finally {
       if (mounted.current) setProgress((p) => ({ ...p, running: false }));
@@ -531,12 +565,29 @@ export function UmbraCensorReviewWorkspace() {
       if (next) await select(next.id);
     });
   const canApprove = item && !dirty && censorReviewCanApprove(item);
+  const removeCurrent = () => perform('Removing image from batch', async () => {
+    const current = itemRef.current;
+    if (!project || !current) return;
+    const index = filtered.findIndex((image) => image.id === current.id);
+    const remaining = await api.remove(project.id, current);
+    pendingEdits.delete(draftKey(project.id, current.id));
+    markDirty(false);
+    itemRef.current = null;
+    setItem(null);
+    setSelectedRect('');
+    setHistory({ undo: [], redo: [] });
+    projectRef.current = remaining;
+    setProject(remaining);
+    const next = [...filtered.slice(index + 1), ...filtered.slice(0, Math.max(0, index)).reverse()]
+      .find((image) => remaining.items.some((value) => value.id === image.id));
+    if (next) await select(next.id, remaining);
+  });
   return (
     <div
-      className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--umbra-bg)] text-zinc-200"
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--umbra-bg)] text-zinc-200"
       data-censor-review="workspace"
     >
-      <header className="flex flex-wrap items-center gap-2 border-b border-white/10 p-3">
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/10 p-3">
         <h2 className="mr-auto min-w-0 truncate text-sm font-bold max-sm:w-full" title={project?.name}>
           {project?.name || 'Censor review'}
         </h2>
@@ -554,6 +605,13 @@ export function UmbraCensorReviewWorkspace() {
           <FolderOpen size={16} />
         </CensorIconButton>
         <CensorIconButton
+          title="Remove image from batch"
+          disabled={!item || !!busy || drawing}
+          onClick={() => void removeCurrent()}
+        >
+          <ImageMinus size={16} />
+        </CensorIconButton>
+        <CensorIconButton
           title="Save review edits"
           disabled={!dirty || !!busy}
           onClick={() =>
@@ -564,7 +622,7 @@ export function UmbraCensorReviewWorkspace() {
         >
           <Save size={16} />
         </CensorIconButton>
-        <span className={`text-xs max-sm:hidden ${dirty ? 'text-amber-300' : 'text-zinc-500'}`}>
+        <span className={`w-20 shrink-0 text-xs max-sm:hidden ${dirty ? 'text-amber-300' : 'text-zinc-500'}`}>
           {dirty ? 'Unsaved edits' : project ? 'Saved' : ''}
         </span>
         <button className={censorButton} title="Add images" disabled={!!busy} onClick={chooseImage}>
@@ -637,22 +695,24 @@ export function UmbraCensorReviewWorkspace() {
             });
         }}
       />
-      {(busy || progress.total > 0) && (
         <div
-          className="flex flex-wrap items-center gap-3 border-b border-white/10 px-3 py-2 text-xs"
+          className="flex h-11 shrink-0 items-center gap-2 overflow-hidden border-b border-white/10 px-3 text-xs"
           role="status"
+          data-censor-review="activity"
         >
-          {busy && <Loader2 size={14} className="animate-spin" />}
-          <span>{busy || 'Batch finished'}</span>
+          <Loader2 size={14} className={`shrink-0 ${busy ? 'animate-spin' : 'invisible'}`} aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate" title={busy || (progress.total > 0 ? 'Batch finished' : 'Ready')}>
+            {busy || (progress.total > 0 ? 'Batch finished' : 'Ready')}
+          </span>
           {progress.total > 0 && (
             <>
               <progress
                 aria-label="Review batch progress"
-                className="h-2 min-w-20 flex-1 accent-emerald-400"
+                className="h-2 w-20 shrink-0 accent-emerald-400 sm:w-32"
                 max={progress.total}
                 value={progress.completed + progress.failed}
               />
-              <span>
+              <span className="shrink-0 tabular-nums">
                 {progress.completed + progress.failed}/{progress.total}{' '}
                 {progress.failed ? `(${progress.failed} failed)` : ''}
               </span>
@@ -661,15 +721,16 @@ export function UmbraCensorReviewWorkspace() {
           {progress.running && (
             <button
               className={censorButton}
+              title="Stop after current image"
               onClick={() => {
                 stop.current = true;
               }}
             >
-              Stop after image
+              <Square size={14} />
+              <span className="sr-only">Stop after image</span>
             </button>
           )}
         </div>
-      )}
       {error && (
         <div
           role="alert"
@@ -695,7 +756,7 @@ export function UmbraCensorReviewWorkspace() {
           </CensorIconButton>
         </div>
       )}
-      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+      <div className="relative flex min-h-[480px] min-w-0 flex-1 shrink-0 overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {item ? (
             <UmbraCensorReviewViewer
@@ -717,7 +778,7 @@ export function UmbraCensorReviewWorkspace() {
             </div>
           )}
           {item && (
-            <div className="flex flex-wrap items-center gap-2 border-t border-white/10 p-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-white/10 p-2">
               <CensorIconButton
                 title="Previous image"
                 disabled={!!busy || filtered.findIndex((i) => i.id === item.id) <= 0}
@@ -734,7 +795,7 @@ export function UmbraCensorReviewWorkspace() {
                 {item.name}
               </span>
               <span
-                className={`text-xs ${item.status === 'approved' ? 'text-emerald-300' : 'text-amber-200'}`}
+                className={`w-24 shrink-0 text-right text-xs ${item.status === 'approved' ? 'text-emerald-300' : 'text-amber-200'}`}
               >
                 {statusLabel(item.status)}
               </span>
@@ -793,17 +854,24 @@ export function UmbraCensorReviewWorkspace() {
               </CensorIconButton>
             </div>
           )}
-          {item && (dirty || item.renderedEditRevision !== item.editRevision) && (
-            <div className="border-t border-amber-400/15 px-3 py-1 text-xs text-amber-200" role="status">
-              Preview needs rendering
-            </div>
-          )}
-          {item?.previewFile &&
-            !item.censored &&
-            !dirty &&
-            item.renderedEditRevision === item.editRevision && (
-              <div className="px-3 py-1 text-xs text-amber-200">Uncensored output - no mask coverage</div>
+          <div
+            className="flex h-10 shrink-0 items-center gap-4 overflow-x-auto whitespace-nowrap border-t border-white/10 px-3 text-xs text-amber-200"
+            role="status"
+            data-censor-review="image-status"
+          >
+            {item && (dirty || item.renderedEditRevision !== item.editRevision) && (
+              <span>Preview needs rendering</span>
             )}
+            {item && censorReviewAttention(item).length > 0 && (
+              <span className="inline-flex shrink-0 items-center gap-2" title={censorReviewAttention(item).join('; ')}>
+                <TriangleAlert size={14} className="shrink-0" />
+                Needs attention: {censorReviewAttention(item).join('; ')}
+              </span>
+            )}
+            {item?.previewFile && !item.censored && !dirty && item.renderedEditRevision === item.editRevision && (
+              <span>Uncensored output - no mask coverage</span>
+            )}
+          </div>
         </div>
         {showSettings && (
           <aside
@@ -831,10 +899,12 @@ export function UmbraCensorReviewWorkspace() {
               <UmbraExtrasPresetControl
                 scope="censor-review"
                 label="Censor"
+                selectedPresetId={presetSession.selectedId('censor', settings)}
+                onPresetSelection={(preset) => chooseSessionPreset('censor', preset)}
                 value={{ ...settings }}
                 onApply={(v) => {
                   const next = { ...settings };
-                  for (const key of ['cutoff', 'padding', 'mosaicSize', 'longEdge', 'quality'] as const)
+                  for (const key of ['cutoff', 'reviewThreshold', 'padding', 'mosaicSize', 'longEdge', 'quality'] as const)
                     if (typeof v[key] === 'number' && Number.isFinite(v[key])) next[key] = v[key];
                   for (const key of ['autoDetect', 'resizeEnabled'] as const)
                     if (typeof v[key] === 'boolean') next[key] = v[key];
@@ -892,6 +962,14 @@ export function UmbraCensorReviewWorkspace() {
                     onChange={(v) => changeSettings({ cutoff: v / 100 })}
                   />
                   <Range
+                    label="Review flag floor"
+                    value={censorReviewDetectionFloor(settings) * 100}
+                    min={5}
+                    max={settings.cutoff * 100}
+                    suffix="%"
+                    onChange={(v) => changeSettings({ reviewThreshold: v / 100 })}
+                  />
+                  <Range
                     label="Detection padding"
                     value={settings.padding * 100}
                     min={0}
@@ -946,6 +1024,7 @@ export function UmbraCensorReviewWorkspace() {
                       <input
                         aria-label={`Enable detected region ${index + 1}`}
                         type="checkbox"
+                        title={region.reviewOnly ? 'Include this candidate in review flags only; it will not be censored' : 'Enable detected region'}
                         checked={region.enabled}
                         onChange={(e) =>
                           edit({
@@ -962,12 +1041,13 @@ export function UmbraCensorReviewWorkspace() {
                       >
                         {index + 1}. {region.target === 'maleGenitals' ? 'Male' : 'Female'}
                         {region.maskKind === 'box-fallback' ? ' (box)' : ''}
+                        {region.reviewOnly || region.score < settings.cutoff ? ' - Review only' : ''}
                       </button>
                       <span
-                        className={region.score < settings.cutoff ? 'text-zinc-500' : 'text-emerald-200'}
+                        className={region.reviewOnly || region.score < settings.cutoff ? 'text-amber-200' : 'text-emerald-200'}
                         title={
-                          region.score < settings.cutoff
-                            ? 'Below cutoff; not rendered'
+                          region.reviewOnly || region.score < settings.cutoff
+                            ? 'Review only; never included in the censor mask'
                             : 'Detector confidence'
                         }
                       >
@@ -1078,7 +1158,12 @@ export function UmbraCensorReviewWorkspace() {
                 </div>
               )}
               <div className="border-t border-white/10 pt-3">
-                <UmbraImageExportControls value={settings} onChange={(v) => changeSettings(v)} />
+                <UmbraImageExportControls
+                  value={settings}
+                  onChange={(v) => changeSettings(v)}
+                  selectedPresetId={presetSession.selectedId('export', settings)}
+                  onPresetSelection={(preset) => chooseSessionPreset('export', preset)}
+                />
               </div>
             </fieldset>
             <div className="space-y-3 border-t border-white/10 pt-3">
@@ -1118,11 +1203,19 @@ export function UmbraCensorReviewWorkspace() {
         )}
       </div>
       <footer className="shrink-0 border-t border-white/10">
-        <div className="flex flex-wrap items-center gap-3 px-3 py-2 text-xs">
+        <div className="flex h-11 items-center gap-3 overflow-x-auto whitespace-nowrap px-3 text-xs [&>*]:shrink-0">
           <span>{project?.items.length || 0} images</span>
           <span className="text-emerald-200">
             {project?.items.filter((i) => i.status === 'approved').length || 0} approved
           </span>
+          <button
+            className="inline-flex min-h-8 items-center gap-1 text-amber-200"
+            onClick={() => setFilter('attention')}
+            title="Show images needing attention"
+          >
+            <TriangleAlert size={14} />
+            {project?.items.filter((i) => i.attention?.length).length || 0} need attention
+          </button>
           <UmbraSelectControl
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -1130,6 +1223,7 @@ export function UmbraCensorReviewWorkspace() {
             className="h-8 w-36 rounded border border-white/15 bg-black/30 text-xs"
           >
             <option value="all">All images</option>
+            <option value="attention">Needs attention</option>
             <option value="pending">Pending</option>
             <option value="needs-review">Needs review</option>
             <option value="approved">Approved</option>
@@ -1152,9 +1246,14 @@ export function UmbraCensorReviewWorkspace() {
                       })
                     }
                     className={`w-full overflow-hidden rounded border ${item?.id === image.id ? 'border-emerald-300' : 'border-white/15'}`}
-                    title={`${image.name} - ${statusLabel(image.status)}`}
+                    title={`${image.name} - ${statusLabel(image.status)}${image.attention?.length ? ` - ${image.attention.join('; ')}` : ''}`}
                   >
                     <div className="relative h-12 bg-black sm:h-16">
+                      {!!image.attention?.length && (
+                        <span className="absolute right-0 top-0 z-10 rounded-sm bg-black/90 p-1 text-amber-200" aria-label="Needs attention">
+                          <TriangleAlert size={14} />
+                        </span>
+                      )}
                       {!hidden && (
                         <img
                           loading="lazy"

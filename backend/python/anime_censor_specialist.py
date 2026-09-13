@@ -30,7 +30,7 @@ CLASSES = {
 }
 
 
-def detect_specialist(model_path, image_path, threshold, padding=0):
+def detect_specialist(model_path, image_path, threshold, padding=0, censor_threshold=None):
     import numpy as np
     try:
         import torch
@@ -54,15 +54,31 @@ def detect_specialist(model_path, image_path, threshold, padding=0):
         image = ImageOps.exif_transpose(source).convert('RGB')
     width, height = image.size
     with contextlib.redirect_stdout(sys.stderr):
-        result = model.predict(image, device='cpu', conf=threshold, classes=[0],
+        result = model.predict(image, device='cpu', conf=censor_threshold or threshold, classes=[0],
                                imgsz=1024, retina_masks=True, verbose=False)[0]
+    rows = []
+    if censor_threshold is not None and threshold < censor_threshold:
+        # Keep the original full-resolution censor pass unchanged. Weak candidates
+        # use bounded inference-size masks, never hundreds of source-sized masks.
+        with contextlib.redirect_stdout(sys.stderr):
+            candidates = model.predict(image, device='cpu', conf=threshold, classes=[0],
+                                       imgsz=1024, retina_masks=False, verbose=False)[0]
+        for box in candidates.boxes:
+            score = float(box.conf.item())
+            if score >= censor_threshold:
+                continue
+            left, top, right, bottom = box.xyxy[0].cpu().tolist()
+            rows.append({'label': 'penis', 'score': score, 'reviewOnly': True,
+                         'x': left / width, 'y': top / height,
+                         'width': (right-left) / width, 'height': (bottom-top) / height,
+                         'maskKind': 'box-fallback'})
+        del candidates
     if result.masks is None:
         if len(result.boxes):
             raise ValueError('Anatomy detection returned boxes without outline masks.')
-        return []
+        return rows
     if len(result.boxes) != len(result.masks.data):
         raise ValueError('Anatomy detection returned mismatched masks.')
-    rows = []
     for box, raw_mask in zip(result.boxes, result.masks.data):
         mask = Image.fromarray((raw_mask.cpu().numpy() > 0.5).astype(np.uint8) * 255)
         if mask.size != image.size:

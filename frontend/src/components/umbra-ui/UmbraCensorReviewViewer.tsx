@@ -1,5 +1,5 @@
 import React from 'react';
-import { Brush, Eraser, Hand, Scan, Square, ZoomIn, ZoomOut, Eye, Columns2 } from 'lucide-react';
+import { Brush, Eraser, Hand, Scan, Square, ZoomIn, ZoomOut, Eye } from 'lucide-react';
 import {
   censorReviewApi,
   censorReviewId,
@@ -22,6 +22,7 @@ interface MaskGesture {
   nextRect?: CensorReviewRect;
   resize?: boolean;
   stroke?: CensorReviewStroke;
+  panOnly?: boolean;
 }
 const clamp = (n: number, min = 0, max = 1) => Math.max(min, Math.min(max, n));
 const uuid = censorReviewId;
@@ -73,8 +74,13 @@ export function UmbraCensorReviewViewer({
   const hidden = item.protectedMedia && privacy.locked;
   const blurred = item.protectedMedia && privacy.mode === 'blur';
   const [tool, setTool] = React.useState<Tool>('pan');
-  const [compare, setCompare] = React.useState(true);
-  const [split, setSplit] = React.useState(50);
+  const [maskColor, setMaskColor] = React.useState(() => {
+    try {
+      const saved = localStorage.getItem('umbra.censor.maskColor');
+      if (saved && /^#[0-9a-f]{6}$/i.test(saved)) return saved;
+    } catch { /* Storage may be unavailable in private browsing. */ }
+    return '#ff4466';
+  });
   const [zoom, setZoom] = React.useState(1);
   const [pan, setPan] = React.useState({ x: 0, y: 0 });
   const [radius, setRadius] = React.useState(0.025);
@@ -105,15 +111,11 @@ export function UmbraCensorReviewViewer({
     imageCache.current.clear();
   }, [item.id]);
   React.useEffect(() => {
-    if (item.previewFile) {
-      setTool('pan');
-      setCompare(true);
-    }
-  }, [item.previewFile]);
+    try { localStorage.setItem('umbra.censor.maskColor', maskColor); } catch { /* Keep the session preference. */ }
+  }, [maskColor]);
   React.useEffect(() => {
     if (!selectedRect) return;
     setShowMask(true);
-    setCompare(false);
     if (item.rectangles.some((r) => r.id === selectedRect)) setTool('rectangle');
   }, [selectedRect]);
   const scale = Math.min(
@@ -128,7 +130,7 @@ export function UmbraCensorReviewViewer({
     let cancelled = false;
     const draw = async () => {
       const target = canvas.current;
-      if (!target || hidden || blurred || !showMask || (!editing && compare)) return;
+      if (!target || hidden || blurred || !showMask) return;
       const ratio = Math.min(1, 1024 / Math.max(item.width, item.height));
       const w = Math.max(1, Math.round(item.width * ratio)),
         h = Math.max(1, Math.round(item.height * ratio));
@@ -144,6 +146,7 @@ export function UmbraCensorReviewViewer({
         for (const region of item.regions) {
           if (
             !region.enabled ||
+            region.reviewOnly ||
             region.score < item.settings.cutoff ||
             !item.settings.targets.includes(region.target)
           )
@@ -185,11 +188,12 @@ export function UmbraCensorReviewViewer({
       }
       if (cancelled) return;
       const pixels = context.getImageData(0, 0, w, h);
+      const rgb = [1, 3, 5].map(offset => Number.parseInt(maskColor.slice(offset, offset + 2), 16));
       for (let i = 0; i < pixels.data.length; i += 4) {
         const a = pixels.data[i];
-        pixels.data[i] = 255;
-        pixels.data[i + 1] = 68;
-        pixels.data[i + 2] = 102;
+        pixels.data[i] = rgb[0];
+        pixels.data[i + 1] = rgb[1];
+        pixels.data[i + 2] = rgb[2];
         pixels.data[i + 3] = Math.round(a * 0.5);
       }
       target.width = w;
@@ -217,8 +221,7 @@ export function UmbraCensorReviewViewer({
     hidden,
     blurred,
     showMask,
-    editing,
-    compare,
+    maskColor,
   ]);
   const point = (event: React.PointerEvent): Point => {
     const bounds = stage.current!.getBoundingClientRect();
@@ -227,14 +230,14 @@ export function UmbraCensorReviewViewer({
       clamp((event.clientY - bounds.top) / bounds.height),
     ];
   };
-  const start = (event: React.PointerEvent) => {
+  const start = (event: React.PointerEvent, panOnly = false) => {
     if (disabled || hidden || blurred || event.button !== 0 || drag.current) return;
     onDrawing(true);
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     const p = point(event);
-    const current: MaskGesture = { pointerId: event.pointerId, start: p, client: [event.clientX, event.clientY], pan };
-    if (tool === 'rectangle') {
+    const current: MaskGesture = { pointerId: event.pointerId, start: p, client: [event.clientX, event.clientY], pan, panOnly };
+    if (!panOnly && tool === 'rectangle') {
       const rect = [...item.rectangles]
         .reverse()
         .find(
@@ -253,7 +256,7 @@ export function UmbraCensorReviewViewer({
       setDraftRect(current.rect);
       current.nextRect = current.rect;
     }
-    if (tool === 'brush' || tool === 'eraser') {
+    if (!panOnly && (tool === 'brush' || tool === 'eraser')) {
       current.stroke = { id: uuid(), erase: tool === 'eraser', radius, points: [p] };
       setDraftStroke(current.stroke);
     }
@@ -262,7 +265,7 @@ export function UmbraCensorReviewViewer({
   const move = (event: React.PointerEvent) => {
     const d = drag.current;
     if (!d || d.pointerId !== event.pointerId) return;
-    if (tool === 'pan') {
+    if (d.panOnly || tool === 'pan') {
       setPan({ x: d.pan.x + event.clientX - d.client[0], y: d.pan.y + event.clientY - d.client[1] });
       return;
     }
@@ -312,7 +315,7 @@ export function UmbraCensorReviewViewer({
   };
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label="Censor comparison and mask editor">
-      <div className="flex flex-wrap items-center gap-1 border-b border-white/10 p-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-white/10 p-2">
         {(
           [
             ['pan', Hand, 'Pan image'],
@@ -333,25 +336,22 @@ export function UmbraCensorReviewViewer({
         ))}
         <span className="mx-1 h-5 border-l border-white/15" />
         <CensorIconButton
-          title="Before and after comparison"
-          active={compare}
-          onClick={() => {
-            setCompare(!compare);
-            setTool('pan');
-          }}
-        >
-          <Columns2 size={16} />
-        </CensorIconButton>
-        <CensorIconButton
           title="Show editable mask"
           active={showMask}
           onClick={() => {
             setShowMask(!showMask);
-            setCompare(false);
           }}
         >
           <Eye size={16} />
         </CensorIconButton>
+        <input
+          type="color"
+          aria-label="Mask color"
+          title="Mask color"
+          value={maskColor}
+          onChange={(event) => setMaskColor(event.target.value)}
+          className="h-9 w-9 shrink-0 cursor-pointer rounded border border-white/15 bg-transparent p-1"
+        />
         <CensorIconButton title="Zoom out" onClick={() => setZoom((v) => clamp(v / 1.25, 1, 12))}>
           <ZoomOut size={16} />
         </CensorIconButton>
@@ -384,6 +384,9 @@ export function UmbraCensorReviewViewer({
           </label>
         )}
       </div>
+      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-2 divide-x divide-white/15">
+      <div className="flex min-h-0 min-w-0 flex-col" aria-label="Before mask editor">
+      <div className="shrink-0 border-b border-white/10 px-3 py-2 text-xs">Before</div>
       <div
         ref={viewport}
         className="relative min-h-0 flex-1 overflow-hidden bg-black/50"
@@ -401,7 +404,7 @@ export function UmbraCensorReviewViewer({
               transform: `scale(${zoom})`,
               filter: blurred ? 'blur(24px)' : undefined,
             }}
-            onPointerDown={start}
+            onPointerDown={(event) => start(event)}
             onPointerMove={move}
             onPointerUp={finish}
             onPointerCancel={(event) => {
@@ -418,27 +421,17 @@ export function UmbraCensorReviewViewer({
               draggable={false}
               className="pointer-events-none absolute inset-0 h-full w-full"
             />
-            {compare && !editing && item.previewFile && (
-              <img
-                src={asset(item.previewFile)}
-                alt="Censored preview"
-                draggable={false}
-                className="pointer-events-none absolute inset-0 h-full w-full"
-                style={{ clipPath: `inset(0 0 0 ${split}%)` }}
-              />
-            )}
-            {(!compare || editing) && showMask && (
+            {showMask && (
               <canvas ref={canvas} className="pointer-events-none absolute inset-0 h-full w-full" />
             )}
-            {(!compare || editing) &&
-              showMask &&
+            {showMask &&
               item.settings.autoDetect &&
               item.regions
                 .filter((r) => r.id === selectedRect)
                 .map((region) => (
                   <div
                     key={region.id}
-                    className="pointer-events-none absolute border-2 border-yellow-300"
+                    className={`pointer-events-none absolute border-2 border-yellow-300 ${region.reviewOnly || region.score < item.settings.cutoff ? 'border-dashed' : ''}`}
                     style={{
                       left: `${region.x * 100}%`,
                       top: `${region.y * 100}%`,
@@ -469,43 +462,40 @@ export function UmbraCensorReviewViewer({
                     <span className="absolute -bottom-1 -right-1 h-2 w-2 bg-yellow-300" />
                   </div>
                 ))}
-            {compare && !editing && item.previewFile && (
-              <div
-                className="pointer-events-none absolute bottom-0 top-0 border-l border-white"
-                style={{ left: `${split}%` }}
-              />
-            )}
           </div>
         )}
         <NsfwPrivacyShield protectedMedia={item.protectedMedia} />
-        {!editing && compare && (
-          <div className="pointer-events-none absolute inset-x-3 top-3 flex justify-between text-xs">
-            <span className="bg-black/75 px-2 py-1">Original</span>
-            <span className="bg-black/75 px-2 py-1">{item.previewFile ? 'Preview' : 'Not rendered'}</span>
-          </div>
-        )}
         {maskError && (
           <div role="alert" className="absolute bottom-2 left-2 bg-black p-2 text-xs text-red-300">
             {maskError}
           </div>
         )}
       </div>
-      {compare && !editing && (
-        <label className="flex items-center gap-3 border-t border-white/10 px-3 py-2 text-xs">
-          <span>Before</span>
-          <input
-            aria-label="Before and after split"
-            type="range"
-            min={0}
-            max={100}
-            value={100 - split}
-            onChange={(e) => setSplit(100 - Number(e.target.value))}
-            aria-valuetext={`${100 - split}% after`}
-            className="min-w-0 flex-1"
-          />
-          <span>After</span>
-        </label>
-      )}
+      </div>
+      <div className="flex min-h-0 min-w-0 flex-col" aria-label="After preview">
+        <div className="shrink-0 border-b border-white/10 px-3 py-2 text-xs">After</div>
+        <div className="relative min-h-0 flex-1 overflow-hidden bg-black/50" style={{ touchAction: 'none' }}>
+          {!hidden && item.previewFile && (
+            <div
+              className="absolute cursor-grab"
+              style={{ width, height, left: (size.width - width) / 2 + pan.x, top: (size.height - height) / 2 + pan.y, transform: `scale(${zoom})`, filter: blurred ? 'blur(24px)' : undefined }}
+              onPointerDown={(event) => start(event, true)}
+              onPointerMove={move}
+              onPointerUp={finish}
+              onPointerCancel={(event) => {
+                if (drag.current?.pointerId !== event.pointerId) return;
+                drag.current = null;
+                onDrawing(false);
+              }}
+            >
+              <img src={asset(item.previewFile)} alt="Censored preview" draggable={false} className="pointer-events-none h-full w-full" />
+            </div>
+          )}
+          {!hidden && !item.previewFile && <div className="absolute inset-0 flex items-center justify-center p-3 text-center text-xs text-zinc-500">Not rendered</div>}
+          <NsfwPrivacyShield protectedMedia={item.protectedMedia} />
+        </div>
+      </div>
+      </div>
     </section>
   );
 }

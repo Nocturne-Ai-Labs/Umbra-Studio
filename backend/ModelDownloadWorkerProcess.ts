@@ -1,6 +1,9 @@
 import { basename, dirname, extname, join } from 'path';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
+import { randomUUID } from 'node:crypto';
+import { copyFileExclusive } from './FsTransferCopy';
+import { fetchModelDownload } from './ModelDownloadHttp';
 
 type ModelDownloadJobStatus = 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled';
 
@@ -60,6 +63,7 @@ type ModelDownloadWorkerResponse =
 
 const jobs = new Map<string, ModelDownloadJob>();
 const jobControllers = new Map<string, AbortController>();
+const reservedDestinations = new Set<string>();
 const MAX_JOBS = 512;
 const MODEL_SNAPSHOT_SUFFIX = '.umbra-model.json';
 const MODEL_THUMB_SUFFIX = '.umbra-model-thumb';
@@ -151,20 +155,30 @@ async function saveSnapshotThumbnail(
   imageUrl: string,
   destinationPath: string,
   civitaiToken?: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   const normalizedUrl = pickString(imageUrl);
   if (!normalizedUrl) return '';
 
   try {
-    const headers = new Headers();
-    headers.set('User-Agent', 'UmbraStudio/0.8');
-    const token = pickString(civitaiToken);
-    if (token) headers.set('Authorization', `Bearer ${token}`);
-
-    const response = await fetch(normalizedUrl, { method: 'GET', headers });
-    if (!response.ok) return '';
-    const bytes = await response.arrayBuffer();
-    if (!bytes || bytes.byteLength <= 0) return '';
+    const timeout = AbortSignal.timeout(5000);
+    const response = await fetchModelDownload(normalizedUrl, civitaiToken, signal ? AbortSignal.any([signal, timeout]) : timeout);
+    const reader = response.body?.getReader();
+    if (!reader) return '';
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      if (!response.ok || !String(response.headers.get('content-type')).startsWith('image/')) return '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > 8 * 1024 * 1024) return '';
+        chunks.push(value);
+      }
+    } finally { await reader.cancel().catch(() => undefined); }
+    if (!size) return '';
+    const bytes = Buffer.concat(chunks);
 
     const extension = inferThumbExtension(normalizedUrl, String(response.headers.get('content-type') || ''));
     const artifactDir = await ensureModelArtifactDir(destinationPath);
@@ -180,15 +194,12 @@ async function persistModelSnapshot(
   job: ModelDownloadJob,
   snapshotRaw: unknown,
   civitaiToken?: string,
+  signal?: AbortSignal,
 ) {
   const snapshot = toRecord(snapshotRaw);
   if (Object.keys(snapshot).length <= 0) return;
 
   const imageUrl = extractSnapshotImageUrl(snapshot);
-  const thumbnailPath = imageUrl
-    ? await saveSnapshotThumbnail(imageUrl, job.destinationPath, civitaiToken)
-    : '';
-
   const payload: Record<string, unknown> = {
     ...snapshot,
     snapshotVersion: 1,
@@ -207,13 +218,16 @@ async function persistModelSnapshot(
     },
   };
 
-  if (thumbnailPath) {
-    payload.localThumbnailPath = thumbnailPath;
-  }
-
   const artifactDir = await ensureModelArtifactDir(job.destinationPath);
   const snapshotPath = join(artifactDir, `${getModelArtifactBaseName(job.destinationPath)}${MODEL_SNAPSHOT_SUFFIX}`);
   await fs.writeFile(snapshotPath, JSON.stringify(payload, null, 2), 'utf8');
+  const thumbnailPath = imageUrl
+    ? await saveSnapshotThumbnail(imageUrl, job.destinationPath, civitaiToken, signal)
+    : '';
+  if (thumbnailPath) {
+    payload.localThumbnailPath = thumbnailPath;
+    await fs.writeFile(snapshotPath, JSON.stringify(payload, null, 2), 'utf8');
+  }
 }
 
 function sanitizeFileName(input: string): string {
@@ -236,16 +250,16 @@ function normalizeCivitaiType(input: string): string {
 }
 
 function resolveUniqueDestinationPath(targetPath: string): string {
-  if (!existsSync(targetPath)) return targetPath;
   const parent = dirname(targetPath);
   const ext = extname(targetPath);
   const stem = basename(targetPath, ext);
   let index = 1;
   let candidate = targetPath;
-  while (existsSync(candidate)) {
+  while (existsSync(candidate) || existsSync(`${candidate}.part`) || reservedDestinations.has(candidate.toLowerCase())) {
     candidate = join(parent, `${stem} (${index})${ext}`);
     index += 1;
   }
+  reservedDestinations.add(candidate.toLowerCase());
   return candidate;
 }
 
@@ -278,41 +292,26 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
   job.startedAt = Date.now();
   job.error = '';
 
-  const destinationFolderName = normalizeCivitaiType(job.modelType);
-  const destinationDir = job.useExactDestination
-    ? job.destinationRoot
-    : join(job.destinationRoot, destinationFolderName);
-  await fs.mkdir(destinationDir, { recursive: true });
-  job.destinationFolder = destinationDir;
-
-  const safeFileName = sanitizeFileName(job.fileName || 'model.safetensors');
-  const targetPath = resolveUniqueDestinationPath(join(destinationDir, safeFileName));
-  const tempPath = `${targetPath}.part`;
-  job.destinationPath = targetPath;
-  job.bytesDownloaded = 0;
-  job.bytesTotal = 0;
-  job.progress = 0;
-
+  let targetPath = '';
+  let tempPath = '';
+  let committed = false;
   try {
-    const headers = new Headers();
-    headers.set('User-Agent', 'UmbraStudio/0.8');
-    const normalizedToken = String(civitaiToken || '').trim();
-    if (normalizedToken) {
-      headers.set('Authorization', `Bearer ${normalizedToken}`);
-    }
-
-    const response = await fetch(job.downloadUrl, {
-      method: 'GET',
-      headers,
-      signal: controller.signal,
-    });
+    const destinationDir = job.useExactDestination ? job.destinationRoot : join(job.destinationRoot, normalizeCivitaiType(job.modelType));
+    await fs.mkdir(destinationDir, { recursive: true });
+    controller.signal.throwIfAborted();
+    job.destinationFolder = destinationDir;
+    targetPath = resolveUniqueDestinationPath(join(destinationDir, sanitizeFileName(job.fileName || 'model.safetensors')));
+    tempPath = `${targetPath}.${randomUUID()}.part`;
+    job.destinationPath = targetPath;
+    const response = await fetchModelDownload(job.downloadUrl, civitaiToken, controller.signal);
     if (!response.ok) {
       const fallbackText = await response.text().catch(() => '');
       throw new Error(`CivitAI download failed (${response.status})${fallbackText ? `: ${fallbackText.slice(0, 160)}` : ''}`);
     }
 
     const totalHeader = Number(response.headers.get('content-length') || '0');
-    if (Number.isFinite(totalHeader) && totalHeader > 0) {
+    const contentEncoding = response.headers.get('content-encoding')?.trim().toLowerCase();
+    if ((!contentEncoding || contentEncoding === 'identity') && Number.isFinite(totalHeader) && totalHeader > 0) {
       job.bytesTotal = Math.floor(totalHeader);
     }
 
@@ -321,31 +320,64 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
       throw new Error('Download stream unavailable');
     }
 
-    const fileHandle = await fs.open(tempPath, 'w');
+    const fileHandle = await fs.open(tempPath, 'wx');
     try {
       while (true) {
+        controller.signal.throwIfAborted();
         const chunk = await reader.read();
         if (chunk.done) break;
         const value = chunk.value;
         if (!value || value.byteLength <= 0) continue;
-        await fileHandle.write(value);
+        let offset = 0;
+        while (offset < value.byteLength) {
+          const { bytesWritten } = await fileHandle.write(value, offset, value.byteLength - offset);
+          if (!bytesWritten) throw new Error('Download destination stopped accepting data');
+          offset += bytesWritten;
+        }
         job.bytesDownloaded += value.byteLength;
         if (job.bytesTotal > 0) {
           job.progress = Math.max(0, Math.min(100, (job.bytesDownloaded / job.bytesTotal) * 100));
         }
       }
+      if (job.bytesTotal > 0 && job.bytesDownloaded !== job.bytesTotal) throw new Error('Incomplete model download');
+      if (!job.bytesDownloaded) throw new Error('Empty model download');
+      await fileHandle.sync();
     } finally {
       await fileHandle.close();
+      await reader.cancel().catch(() => undefined);
     }
 
-    await fs.rename(tempPath, targetPath);
-    await persistModelSnapshot(job, snapshotRaw, civitaiToken).catch(() => undefined);
+    controller.signal.throwIfAborted();
+    // A hard link publishes the finished file without replacing a late arrival.
+    // Filesystems without link support use an exclusive copy instead.
+    while (true) {
+      try {
+        try { await fs.link(tempPath, targetPath); }
+        catch (error: any) {
+          if (!['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS'].includes(error?.code)) throw error;
+          await copyFileExclusive(tempPath, targetPath, () => controller.signal.throwIfAborted());
+        }
+        break;
+      } catch (error: any) {
+        if (error?.code !== 'EEXIST') throw error;
+        reservedDestinations.delete(targetPath.toLowerCase());
+        targetPath = resolveUniqueDestinationPath(targetPath);
+        job.destinationPath = targetPath;
+        controller.signal.throwIfAborted();
+      }
+    }
+    committed = true;
+    await persistModelSnapshot(job, snapshotRaw, civitaiToken, controller.signal).catch(() => undefined);
     job.status = 'completed';
     job.progress = 100;
     job.finishedAt = Date.now();
   } catch (error: any) {
     const isAbort = controller.signal.aborted || String(error?.name || '').toLowerCase() === 'aborterror';
-    if (isAbort) {
+    if (committed) {
+      job.status = 'completed';
+      job.progress = 100;
+      job.finishedAt = Date.now();
+    } else if (isAbort) {
       job.status = 'cancelled';
       job.cancelledAt = Date.now();
       job.error = 'Cancelled';
@@ -354,8 +386,10 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
       job.error = String(error?.message || 'Download failed');
       job.finishedAt = Date.now();
     }
-    await fs.unlink(tempPath).catch(() => undefined);
   } finally {
+    controller.abort();
+    if (tempPath) await fs.unlink(tempPath).catch(() => undefined);
+    if (targetPath) reservedDestinations.delete(targetPath.toLowerCase());
     jobControllers.delete(jobId);
   }
 }

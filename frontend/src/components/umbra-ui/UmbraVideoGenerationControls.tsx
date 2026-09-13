@@ -992,24 +992,29 @@ export function UmbraVideoGenerationControls({
     const controller = new AbortController();
     const sourcePath = video.sourceImagePath;
     const timer = window.setTimeout(() => {
-      void fetch('/api/comfy/copy-image', {
+      void fetch('/api/comfy/copy-media', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourcePath }),
+        body: JSON.stringify({ sourcePath, kind: 'image' }),
         signal: controller.signal,
       }).then(async (response) => {
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload?.filename) return;
+        if (!response.ok || payload?.success === false || !payload?.filename) {
+          throw new Error(String(payload?.error || 'Failed to stage the video source image.'));
+        }
+        if (controller.signal.aborted) return;
         setVideo((current) => current.sourceImagePath === sourcePath
           ? { ...current, sourceImageName: String(payload.filename) }
           : current);
-      }).catch(() => undefined);
+      }).catch((error) => {
+        if (!controller.signal.aborted) showToast(error instanceof Error ? error.message : 'Failed to stage the video source image.', 'error');
+      });
     }, 300);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [video.mode, video.sourceImageName, video.sourceImagePath]);
+  }, [showToast, video.mode, video.sourceImageName, video.sourceImagePath]);
 
   React.useEffect(() => {
     const sourcePath = video.mode === 'image_to_video' || video.mode === 'reference_to_video'

@@ -15,6 +15,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  ClipboardPaste,
+  Scissors,
+  Undo2,
   Download,
   EyeOff,
   FileJson,
@@ -47,18 +50,17 @@ import {
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
-import { useGalleryTransfer, startGalleryTransfer } from '@/lib/galleryTransfers';
+import { useGalleryTransfer, startGalleryTransfer, useGalleryUndoMove, undoGalleryMove } from '@/lib/galleryTransfers';
+import { useGalleryTreeRefresh } from '@/lib/galleryTreeRefresh';
 import { GalleryTransferStrip } from './GalleryTransferStrip';
 import { archiveIsActive, startGalleryArchive, useGalleryArchive } from '@/lib/galleryArchives';
 import { GalleryArchiveList, GalleryArchiveStatus } from './GalleryArchives';
 import { openUmbraUiExtrasTool } from '@/lib/umbraUiExtrasNavigation';
 import { cn } from '@/lib/utils';
 import {
-  GALLERY_DIRECT_BASE_URLS,
   fetchGalleryFs,
   galleryBridgeFsUrl,
   normalizeGalleryFsUrl,
-  setGalleryDirectBaseUrl,
 } from '@/lib/galleryBridgeFs';
 import { galleryMediaCacheKey, galleryMediaRevision } from '@/lib/galleryMediaIdentity';
 import { buildTrashThumbnailUrl } from '@/lib/galleryTrashMedia';
@@ -4543,6 +4545,7 @@ function getDatasetConceptFolder(concept: Dataset['concepts'][number]): string {
   return `${concept.repeats}_${concept.isReg ? 'reg_' : ''}${concept.name}`;
 }
 
+
 function GalleryDatasetTargetPicker({
   state,
   datasets,
@@ -4716,7 +4719,7 @@ function GalleryDatasetTargetPicker({
   );
 }
 
-export function ReactGalleryWorkspace() {
+export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const appSettings = useStore((state) => state.appSettings);
   const externalOutputPath = useStore((state) => state.appSettings['comfyui.externalOutputPath']);
   const externalRootsSetting = useStore((state) => state.appSettings['library.externalRoots']);
@@ -4803,6 +4806,8 @@ export function ReactGalleryWorkspace() {
   const [restoredHighlightPaths, setRestoredHighlightPaths] = useState<Set<string>>(() => new Set());
   const [contextMenu, setContextMenu] = useState<GalleryContextMenuState | null>(null);
   const [datasetPicker, setDatasetPicker] = useState<GalleryDatasetPickerState | null>(null);
+  const [folderClipboard, setFolderClipboard] = useState<{ source: string; mode: 'copy' | 'move' } | null>(null);
+  const undoMove = useGalleryUndoMove();
   const [renameModal, setRenameModal] = useState<GalleryRenameModalState | null>(null);
   const [tagModal, setTagModal] = useState<GalleryTagModalState | null>(null);
   const [folderNameModal, setFolderNameModal] = useState<GalleryFolderNameModalState | null>(null);
@@ -4853,7 +4858,6 @@ export function ReactGalleryWorkspace() {
   const [openingFolder, setOpeningFolder] = useState('');
   const [error, setError] = useState('');
   const [total, setTotal] = useState(0);
-  const [, setGalleryDirectBaseVersion] = useState(0);
   const loadSeqRef = useRef(0);
   const scrollParentRef = useRef<HTMLDivElement | null>(null);
   const mobileGalleryChromeScrollTopRef = useRef(0);
@@ -4994,76 +4998,6 @@ export function ReactGalleryWorkspace() {
   }, [trashAutoDeleteSetting]);
 
   useEffect(() => {
-    let disposed = false;
-
-    const probeDirectGalleryService = async () => {
-      const applyBaseUrl = (value: unknown) => {
-        const rawUrl = String(value || '').trim();
-        if (!rawUrl) return false;
-        try {
-          const parsed = new URL(rawUrl, window.location.origin);
-          const baseUrl = `${parsed.protocol}//${parsed.host}`;
-          if (!GALLERY_DIRECT_BASE_URLS.some((candidate) => candidate === baseUrl)) return false;
-          const changed = setGalleryDirectBaseUrl(baseUrl);
-          if (changed) setGalleryDirectBaseVersion((current) => current + 1);
-          return true;
-        } catch {
-          return false;
-        }
-      };
-
-      try {
-        const statusResponse = await fetch('/api/gallery-bridge/status', { cache: 'no-store' });
-        if (statusResponse.ok) {
-          const status = await statusResponse.json().catch(() => null) as { running?: boolean; healthy?: boolean; url?: string } | null;
-          if (!disposed && status?.running && status?.healthy !== false && applyBaseUrl(status.url)) return;
-        }
-      } catch {
-        // Startup and direct probes below cover source/dev cases where status is stale.
-      }
-
-      try {
-        await fetch('/api/umbrabridge/backend/start', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ backend: 'gallery' }),
-        });
-        await fetch('/api/umbrabridge/backend/wait-ready', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ backend: 'gallery', timeout: 30000 }),
-        });
-        const statusResponse = await fetch('/api/gallery-bridge/status', { cache: 'no-store' });
-        if (statusResponse.ok) {
-          const status = await statusResponse.json().catch(() => null) as { running?: boolean; healthy?: boolean; url?: string } | null;
-          if (!disposed && status?.running && status?.healthy !== false && applyBaseUrl(status.url)) return;
-        }
-      } catch {
-        // Fall through to direct loopback probes.
-      }
-
-      for (const baseUrl of GALLERY_DIRECT_BASE_URLS) {
-        if (disposed) return;
-        try {
-          const response = await fetch(`${baseUrl}/health`, { cache: 'no-store', signal: AbortSignal.timeout(1200) });
-          const payload = await response.json().catch(() => null) as { ok?: boolean } | null;
-          if (response.ok && payload?.ok === true) {
-            applyBaseUrl(baseUrl);
-            return;
-          }
-        } catch {
-          // Try the next loopback host.
-        }
-      }
-    };
-
-    void probeDirectGalleryService();
-    return () => {
-      disposed = true;
-    };
-  }, []);
-
-  useEffect(() => {
     filesRef.current = files;
   }, [files]);
 
@@ -5190,7 +5124,9 @@ export function ReactGalleryWorkspace() {
       if (
         existing
         && existing.length === nextChildren.length
-        && existing.every((child, index) => pathsEqual(child.path, nextChildren[index]?.path))
+        && existing.every((child, index) => child.path === nextChildren[index]?.path
+          && child.name === nextChildren[index]?.name
+          && child.hasChildren === nextChildren[index]?.hasChildren)
       ) {
         return current;
       }
@@ -5208,7 +5144,7 @@ export function ReactGalleryWorkspace() {
     // Keep the rendered branch while its replacement is loading or unavailable.
   }, []);
 
-  const loadTreeChildren = useCallback((folderPath: string, force = false): Promise<GalleryFolderTreeNode[]> => {
+  const loadTreeChildren = useCallback((folderPath: string, force = false, background = false): Promise<GalleryFolderTreeNode[]> => {
     const normalized = normalizePath(folderPath);
     if (!normalized || normalized === TRASH_ROOT || normalized.startsWith(`${TRASH_ROOT}/`)) {
       writeTreeChildrenCache(normalized, []);
@@ -5224,10 +5160,10 @@ export function ReactGalleryWorkspace() {
       }
     }
 
-    const existingRequest = force ? null : treeRequestByPathRef.current.get(normalized);
+    const existingRequest = force && !background ? null : treeRequestByPathRef.current.get(normalized);
     if (existingRequest) return existingRequest.promise;
 
-    setLoadingTreePaths((current) => {
+    if (!background) setLoadingTreePaths((current) => {
       if (current.has(normalized)) return current;
       const next = new Set(current);
       next.add(normalized);
@@ -5239,6 +5175,7 @@ export function ReactGalleryWorkspace() {
     const request = (async () => {
       const params = new URLSearchParams({ path: normalized, maxDepth: '0' });
       if (force) params.set('force', '1');
+      if (background) params.set('shallow', '1');
       const response = await fetchGalleryFs('/tree', params, {
         cache: 'no-store',
         signal: AbortSignal.timeout(TREE_FETCH_TIMEOUT_MS),
@@ -5279,11 +5216,13 @@ export function ReactGalleryWorkspace() {
         error: treeError instanceof Error ? treeError.message : 'Failed to load folders',
         durationMs: nowMs() - treeStartedAt,
       });
+      if (background) throw treeError;
       return treeChildrenRef.current[normalized] || [];
     }).finally(() => {
       if (treeRequestByPathRef.current.get(normalized)?.token !== token) return;
       treeRequestByPathRef.current.delete(normalized);
       setLoadingTreePaths((current) => {
+        if (!current.has(normalized)) return current;
         const next = new Set(current);
         next.delete(normalized);
         return next;
@@ -5293,6 +5232,23 @@ export function ReactGalleryWorkspace() {
     treeRequestByPathRef.current.set(normalized, { token, promise: request });
     return request;
   }, [writeTreeChildrenCache]);
+
+  const visibleTreeBranches = useMemo(() => {
+    const pending = rootChoices.filter(root => root.kind !== 'trash').map(root => normalizePath(root.path));
+    const visible = new Set<string>();
+    for (let index = 0; index < pending.length; index++) {
+      const path = pending[index];
+      if (visible.has(path) || !expandedFolders.has(path)) continue;
+      visible.add(path);
+      for (const child of treeChildrenByPath[path] || []) pending.push(child.path);
+    }
+    return Array.from(visible);
+  }, [expandedFolders, rootChoices, treeChildrenByPath]);
+  const invalidateChangedTreeBranches = useGalleryTreeRefresh({
+    paths: visibleTreeBranches,
+    paused: !active || transferInProgress || (isPhoneRemote && galleryMobileView !== 'folders'),
+    refresh: (path) => loadTreeChildren(path, true, true),
+  });
 
   const toggleTreeExpand = useCallback((folderPath: string) => {
     const normalized = normalizePath(folderPath);
@@ -5547,6 +5503,7 @@ export function ReactGalleryWorkspace() {
     const cachedPayload = !isTrashFolder && !options?.forceRefresh ? readCachedPage(cacheKey) : null;
     let abortController: AbortController | null = null;
 
+    let appliedPage = false;
     const applyPayload = (payload: GalleryListPayload) => {
       const incomingFiles = Array.isArray(payload.files) ? payload.files : [];
       const nextFiles = incomingFiles;
@@ -5567,13 +5524,13 @@ export function ReactGalleryWorkspace() {
       if (pendingNavigation && pathsEqual(pendingNavigation.folder, folderPath)) {
         pendingLocalFolderNavigationRef.current = null;
       }
-      if (Array.isArray(payload.folders)) {
+      if (Array.isArray(payload.folders) && payload.done !== false && payload.nextCursor == null) {
         writeTreeChildrenCache(folderPath, galleryFoldersToTreeNodes(payload.folders));
       }
       filesRef.current = nextFiles;
       setFiles(nextFiles);
       setTotal(Math.max(0, Math.trunc(Number(payload.total || nextFiles.length))));
-      if (options?.keepSelection !== true) {
+      if (!appliedPage && options?.keepSelection !== true) {
         setSelectedPaths(new Set());
         setLastSelectedPath('');
         emitSelectionChanged([]);
@@ -5581,17 +5538,16 @@ export function ReactGalleryWorkspace() {
       emitFolderChanged(folderPath);
       emitFilmstripFeed(folderPath, incomingFiles, {
         ...payload,
-        done: true,
-        nextCursor: null,
         mode: 'replace',
       });
-      if (preserveScroll) {
+      if (!appliedPage && preserveScroll) {
         window.requestAnimationFrame(() => {
           const node = scrollParentRef.current;
           if (!node) return;
           node.scrollTop = Math.min(preservedScrollTop, Math.max(0, node.scrollHeight - node.clientHeight));
         });
       }
+      appliedPage = true;
       return { incomingFiles, appendedFiles, nextFiles, stale: false };
     };
 
@@ -5639,12 +5595,17 @@ export function ReactGalleryWorkspace() {
           sortBy,
           sortOrder,
           fast: '1',
+          limit: '72',
           recursive: 'false',
         });
         if (options?.forceRefresh) {
           params.set('force', '1');
         }
-        const response = await fetchGalleryFs('/list-progressive', params, { signal: abortController.signal });
+        const response = await fetchGalleryFs('/list-progressive', params, { signal: abortController.signal }, (page) => {
+          if (seq !== loadSeqRef.current) return;
+          applyPayload(page as GalleryListPayload);
+          setLoading(false);
+        });
         const responseStartedAt = nowMs();
         payload = await response.json();
         jsonMs = nowMs() - responseStartedAt;
@@ -7098,11 +7059,12 @@ export function ReactGalleryWorkspace() {
     return stripLiveGenerationPreviewPaths(resolveGalleryContextSelectionPaths(state, selectedPaths));
   }, [contextMenu, selectedPaths]);
 
-  const refreshAfterTransfer = useCallback((sourcePaths: string[], destination: string, mode: 'move' | 'copy') => {
+  const refreshAfterTransfer = useCallback((sourcePaths: string[], destination: string, mode: 'move' | 'copy', targetPaths: string[] = []) => {
     const affectedFolders = uniqueNormalizedPaths([
       currentFolder,
       destination,
       ...sourcePaths.map(pathParent),
+      ...targetPaths.map(pathParent),
     ]);
     for (const folder of affectedFolders) {
       clearPageCacheForFolder(folder);
@@ -7124,7 +7086,9 @@ export function ReactGalleryWorkspace() {
         detail: { paths: sourcePaths, source: 'react-gallery-transfer' },
       }));
     }
-    void loadFolder({ folder: currentFolder, keepSelection: mode !== 'move', forceRefresh: true, preserveScroll: true });
+    const nextFolder = mode === 'move' && sourcePaths.some((path) => pathIsInsideRoot(currentFolder, path))
+      ? destination : currentFolder;
+    void loadFolder({ folder: nextFolder, keepSelection: mode !== 'move', forceRefresh: true, preserveScroll: true });
     void loadTreeChildren(destination, true);
   }, [clearPageCacheForFolder, currentFolder, emitSelectionChanged, invalidateTreeChildrenCache, lastSelectedPath, loadFolder, loadTreeChildren]);
 
@@ -7132,7 +7096,11 @@ export function ReactGalleryWorkspace() {
     if (!transferProgress || transferProgress.active || lastRefreshedTransfer.current === transferProgress) return;
     lastRefreshedTransfer.current = transferProgress;
     const successes = transferProgress.results.filter(result => result.success).map(result => result.path);
-    if (successes.length) refreshAfterTransfer(successes, transferProgress.destination, transferProgress.mode);
+    if (successes.length) refreshAfterTransfer(successes, transferProgress.destination, transferProgress.mode,
+      transferProgress.results.flatMap(result => result.success && result.newPath ? [result.newPath] : []));
+    if (transferProgress.mode === 'move') {
+      setFolderClipboard(current => current?.mode === 'move' && successes.some(path => pathsEqual(path, current.source)) ? null : current);
+    }
     const failures = transferProgress.results.filter(result => !result.success).length;
     addToast({
       type: failures || transferProgress.error ? 'error' : 'success',
@@ -8314,6 +8282,8 @@ export function ReactGalleryWorkspace() {
       if (changedMediaPath) clearCachedViewerMetadata(changedMediaPath);
       const changedPath = detailFolderPath || (changedMediaPath ? pathParent(changedMediaPath) : detailPath);
       if (!changedPath) return;
+      // Refresh visible ancestors even when the changed folder is not the open grid.
+      invalidateChangedTreeBranches(changedPath);
       if (
         !pathsEqual(changedPath, currentFolder)
         && !pathIsInsideRoot(currentFolder, changedPath)
@@ -8379,7 +8349,7 @@ export function ReactGalleryWorkspace() {
       window.removeEventListener('umbra:gallery-trash-updated', onTrashUpdated as EventListener);
       window.removeEventListener('umbra:gallery-content-changed', onContentChanged as EventListener);
     };
-  }, [addOpenedFolder, clearPageCacheForFolder, clearTrashCache, currentFolder, emitFilmstripFeed, emitSelectionChanged, files, getSelectionOrderedFiles, invalidateTreeChildrenCache, liveGenerationPreviewFile, loadFolder, loadTreeChildren, rememberRestoredHighlights, trashMode, updateViewerSessionFiles, upsertDirectSavedOutputs, viewerFileFallback]);
+  }, [addOpenedFolder, clearPageCacheForFolder, clearTrashCache, currentFolder, emitFilmstripFeed, emitSelectionChanged, files, getSelectionOrderedFiles, invalidateChangedTreeBranches, invalidateTreeChildrenCache, liveGenerationPreviewFile, loadFolder, loadTreeChildren, rememberRestoredHighlights, trashMode, updateViewerSessionFiles, upsertDirectSavedOutputs, viewerFileFallback]);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('umbra:gallery-sort-changed', {
@@ -8511,7 +8481,7 @@ export function ReactGalleryWorkspace() {
     const poll = async () => {
       if (disposed) return;
       if (folderSummaryPollInFlightRef.current) return;
-      if (loading || transferInProgress || selectAllLoading) return;
+      if (!active || loading || folderLoadAbortRef.current || transferInProgress || selectAllLoading) return;
       if (typeof document !== 'undefined' && document.visibilityState && document.visibilityState !== 'visible') return;
 
       folderSummaryPollInFlightRef.current = true;
@@ -8608,6 +8578,7 @@ export function ReactGalleryWorkspace() {
     currentFolder,
     fetchFolderSummary,
     globalSearchActive,
+    active,
     invalidateTreeChildrenCache,
     loadTreeChildren,
     loading,
@@ -9565,14 +9536,14 @@ export function ReactGalleryWorkspace() {
         },
       ];
       const folderFileItems: ContextMenuItem[] = [
-        ...(!isRemoteClient ? [
-          { label: 'Show in File Explorer', icon: <FolderOpen size={14} />, action: () => void revealPaths([targetPath]) },
-        ] satisfies ContextMenuItem[] : []),
         { label: 'Copy Path', icon: <Copy size={14} />, action: () => void copyPaths([targetPath]) },
         { label: 'Rename Folder...', icon: <MoreHorizontal size={14} />, action: () => void renameFolder(targetPath) },
       ];
       return [
         { label: 'Open Folder', icon: <FolderOpen size={14} />, action: () => openFolder(targetPath) },
+        ...(!isRemoteClient ? [
+          { label: 'Open in File Explorer', icon: <FolderOpen size={14} />, action: () => void revealPaths([targetPath]) },
+        ] satisfies ContextMenuItem[] : []),
         {
           label: pinned ? 'Unpin Folder' : 'Pin Folder',
           icon: <Pin size={14} />,
@@ -9590,6 +9561,27 @@ export function ReactGalleryWorkspace() {
           action: () => void startGalleryArchive(targetPath),
         },
         { separator: true },
+        {
+          label: 'Copy Folder',
+          icon: <Copy size={14} />,
+          disabled: transferInProgress || !pathParent(targetPath),
+          action: () => setFolderClipboard({ source: targetPath, mode: 'copy' }),
+        },
+        {
+          label: 'Cut Folder',
+          icon: <Scissors size={14} />,
+          disabled: transferInProgress || !pathParent(targetPath),
+          action: () => setFolderClipboard({ source: targetPath, mode: 'move' }),
+        },
+        {
+          label: 'Paste Folder',
+          icon: <ClipboardPaste size={14} />,
+          badge: folderClipboard?.mode === 'move' ? 'Move' : folderClipboard ? 'Copy' : undefined,
+          disabled: transferInProgress || !folderClipboard || getValidTransferPathsForDestination([folderClipboard.source], targetPath).length === 0,
+          action: () => {
+            if (folderClipboard) void transferPathsToFolder([folderClipboard.source], targetPath, folderClipboard.mode);
+          },
+        },
         {
           label: 'Transfer Selected',
           icon: <Images size={14} />,
@@ -9826,6 +9818,7 @@ export function ReactGalleryWorkspace() {
     ];
   }, [
     contextMenu,
+    folderClipboard,
     archiveJob,
     openOrCopyComfyWorkflow,
     copyPaths,
@@ -11137,7 +11130,13 @@ export function ReactGalleryWorkspace() {
       <ContextMenu
         isOpen={Boolean(contextMenu)}
         position={{ x: contextMenu?.x || 0, y: contextMenu?.y || 0 }}
-        items={contextMenuItems}
+        items={[
+          ...contextMenuItems,
+          ...(undoMove ? [
+            { separator: true },
+            { label: 'Undo Last Move', icon: <Undo2 size={14} />, badge: undoMove.count, disabled: transferInProgress, action: () => void undoGalleryMove() },
+          ] satisfies ContextMenuItem[] : []),
+        ]}
         onClose={() => setContextMenu(null)}
         boundarySelector="[data-umbra-react-gallery-root]"
         title={contextMenuHeader.title}

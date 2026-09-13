@@ -21,6 +21,7 @@ import { pathToFileURL } from 'url';
 import { createConnection } from 'net';
 import { ServerWebSocket } from 'bun';
 import { QueueUploadReceiver } from './shared/power-prompter/queueTransport';
+import { classifyUmbraPrompt } from './shared/nsfwPrivacyClassifier';
 import { compactQueueSnapshot } from './shared/power-prompter/queueSnapshotTransport';
 import { PowerPrompterHistoryStore } from './backend/PowerPrompterHistoryStore';
 import { buildRemainingPowerPrompterQueueSnapshot, splitSavedPowerPrompterQueue } from './backend/PowerPrompterSavedQueue';
@@ -8372,6 +8373,7 @@ function startBackendPowerPrompterPreviewMonitor(
             promptIndex,
             promptId,
             imageDataUrl: dataUrl,
+            privacyClass: classifyUmbraPrompt(task.prompts[promptIndex]),
             step: Number.isFinite(stepRaw) ? Math.max(0, Math.floor(stepRaw)) : 0,
             maxStep: Number.isFinite(maxStepRaw) ? Math.max(0, Math.floor(maxStepRaw)) : 0,
             updatedAt: Date.now(),
@@ -11266,18 +11268,23 @@ function handlePrompterMessage(ws: ServerWebSocket<unknown>, data: any) {
     const meta = getPrompterMeta(ws);
     if (meta.role !== 'comfy_bridge') return;
     const requestId = String(data?.requestId || '');
+    const promptIndex = Math.max(0, Math.floor(Number(data?.promptIndex) || 0));
+    const previewPrompt = backendPowerPrompterQueueTasks.get(requestId)?.prompts[promptIndex]
+      ?? findPowerPrompterQueueControllerRequest(requestId)?.prompts[promptIndex]?.prompt
+      ?? data?.prompt;
+    const payload = { ...data, privacyClass: data?.privacyClass === 'nsfw' ? 'nsfw' : classifyUmbraPrompt(previewPrompt) };
     let requestSourceClient: ServerWebSocket<unknown> | null = null;
     if (requestId) {
       requestSourceClient = prompterPendingQueueRequests.get(requestId)?.sourceWs || null;
     }
 
     if (requestSourceClient && requestSourceClient.readyState === 1) {
-      sendWs(requestSourceClient, data);
+      sendWs(requestSourceClient, payload);
     }
 
     for (const target of getPowerPrompterTargets()) {
       if (target === requestSourceClient) continue;
-      sendWs(target, data);
+      sendWs(target, payload);
     }
     return;
   }
@@ -15949,6 +15956,10 @@ async function proxyGalleryBridgeFsGet(
       headers,
       signal: AbortSignal.timeout(proxyTimeoutMs),
     });
+    if (upstream.status >= 500) {
+      await upstream.body?.cancel();
+      throw new Error(`Gallery service returned ${upstream.status}`);
+    }
     galleryBridgeProxyBackoffUntil = 0;
     galleryBridgeProxyFailures = 0;
     const responseHeaders = new Headers(upstream.headers);
@@ -21013,13 +21024,16 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
       folders = parsed.map((entry) => String(entry || '').trim()).filter(Boolean);
     }
     const rawStaged = String(form.get('staged') || '').trim();
-    let staged: Array<{ path: string; name: string }> = [];
+    const sourceIds = JSON.parse(String(form.get('sourceIds') || '{}'));
+    if (!sourceIds || typeof sourceIds !== 'object' || Array.isArray(sourceIds)) throw new Error('Upscale source IDs must be an object.');
+    let staged: Array<{ path: string; name: string; clientSourceId: string }> = [];
     if (rawStaged) {
       const parsed = JSON.parse(rawStaged);
       if (!Array.isArray(parsed)) throw new Error('Staged upscale files must be a JSON array.');
       staged = parsed.map((entry) => ({
         path: String(entry?.path || '').trim(),
         name: String(entry?.name || '').trim(),
+        clientSourceId: String(entry?.clientSourceId || '').slice(0, 200),
       })).filter((entry) => entry.path);
     }
     const files = form.getAll('files').filter((entry) => {
@@ -21037,7 +21051,7 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
     const sources: UmbraUiUpscaleSource[] = [];
     const seenPaths = new Set<string>();
     const uploadRoot = resolve(UMBRA_UI_UPSCALE_UPLOAD_ROOT);
-    const addPathSource = (fullPathInput: string, displayName = '', temporary = false) => {
+    const addPathSource = (fullPathInput: string, displayName = '', temporary = false, clientSourceId = '') => {
       const fullPath = resolve(fullPathInput);
       const uploadRelative = relative(uploadRoot, fullPath);
       const isStagedUpload = !!uploadRelative && !uploadRelative.startsWith('..') && !isAbsolute(uploadRelative);
@@ -21055,6 +21069,7 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
       seenPaths.add(key);
       sources.push({
         name: displayName || basename(fullPath),
+        clientSourceId,
         // Preserve the absolute source for automatic output placement. A client-relative
         // path would resolve from resources/app in packaged builds.
         sourcePath: temporary ? '' : fullPath,
@@ -21075,7 +21090,7 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
       if (!resolved) {
         throw new Error(`Upscale source is outside Umbra's allowed folders: ${rawPath}`);
       }
-      addPathSource(resolved.fullPath);
+      addPathSource(resolved.fullPath, '', false, String(sourceIds[rawPath] || '').slice(0, 200));
     }
     for (const rawFolder of folders) {
       const resolved = resolvePath(rawFolder, { allowOutsideRoot: true });
@@ -21096,7 +21111,7 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
         ? entry.path
         : resolvePath(entry.path, { allowOutsideRoot: true })?.fullPath || '';
       if (!stagedPath) throw new Error(`Staged upscale source was not found: ${entry.path}`);
-      addPathSource(stagedPath, entry.name, true);
+      addPathSource(stagedPath, entry.name, true, entry.clientSourceId);
     }
     for (const file of files) {
       if (!UMBRA_UI_UPSCALE_IMAGE_EXTENSIONS.has(extname(file.name).toLowerCase())) {
@@ -24842,8 +24857,8 @@ async function handleFsList(url: URL): Promise<Response> {
 async function handleFsListProgressive(url: URL): Promise<Response> {
   const requestStartedAt = Date.now();
   const path = url.searchParams.get('path');
-  const limit = 0;
-  const cursor = 0;
+  const limit = Math.max(0, Math.min(1024, Math.trunc(Number(url.searchParams.get('limit')) || 0)));
+  const cursor = Math.max(0, Math.trunc(Number(url.searchParams.get('cursor')) || 0));
   const filter = url.searchParams.get('filter');
   const sortBy = String(url.searchParams.get('sortBy') || '').trim();
   const sortOrder = String(url.searchParams.get('sortOrder') || '').trim();
@@ -26800,10 +26815,12 @@ async function runModelManagerFsTransferJob(job: ModelManagerFsTransferJob) {
     if (job.totalUnits <= 0) job.totalUnits = Number((execution as any)?.totalUnits || validItems.length || 1);
     job.completedUnits = Math.min(job.totalUnits, Math.max(job.completedUnits, job.totalUnits));
     job.results = ((execution as any)?.results || []) as Array<FsMoveResult | FsCopyResult>;
-    job.status = 'completed';
-    job.finishedAt = Date.now();
+    const failures = job.results.filter(entry => !entry.success);
+    const transferredSources = new Set(job.results.filter(entry => entry.success).map(entry => normalizePathForCompare(resolveModelManagerPath(entry.path)?.fullPath || entry.path)));
+    const missingRequested = job.paths.filter(path => !transferredSources.has(normalizePathForCompare(resolveModelManagerPath(path)?.fullPath || path))).length;
+    if (failures.length) job.error = `${failures.length} transfer item(s) failed: ${failures[0].error || 'Unknown error'}`;
+    else if (missingRequested) job.error = `${missingRequested} requested item(s) could not be transferred`;
     const successCount = job.results.filter((entry) => entry.success).length;
-    console.log(`[ModelManager] ${job.mode === 'copy' ? 'Copy' : 'Move'} completed paths=${validItems.length} success=${successCount} destination="${job.destination}" ms=${job.finishedAt - job.startedAt} job=${job.id}`);
 
     await modelIndexWorkerService.invalidatePaths([
       job.destinationFullPath,
@@ -26812,6 +26829,9 @@ async function runModelManagerFsTransferJob(job: ModelManagerFsTransferJob) {
         .map((entry: any) => String(entry?.newPath || '').trim())
         .filter((entry: string) => entry.length > 0),
     ]);
+    job.status = failures.length || missingRequested ? 'failed' : 'completed';
+    job.finishedAt = Date.now();
+    console.log(`[ModelManager] ${job.mode === 'copy' ? 'Copy' : 'Move'} ${job.status} paths=${validItems.length} success=${successCount} ms=${job.finishedAt - job.startedAt} job=${job.id}`);
   } catch (error: any) {
     job.status = 'failed';
     job.error = error?.message || `${job.mode === 'copy' ? 'Copy' : 'Move'} failed`;
@@ -26834,6 +26854,8 @@ function handleModelManagerFsTransferStatus(url: URL): Response {
     ? Math.min(100, Math.round((job.completedUnits / job.totalUnits) * 100))
     : 0;
   const successCount = job.results.filter((entry) => entry.success).length;
+  const successfulSources = new Set(job.results.filter(entry => entry.success).map(entry => normalizePathForCompare(resolveModelManagerPath(entry.path)?.fullPath || entry.path)));
+  const successfulPaths = job.paths.filter(path => successfulSources.has(normalizePathForCompare(resolveModelManagerPath(path)?.fullPath || path))).length;
 
   return json({
     success: true,
@@ -26852,6 +26874,8 @@ function handleModelManagerFsTransferStatus(url: URL): Response {
       moved: job.mode === 'move' ? successCount : undefined,
       copied: job.mode === 'copy' ? successCount : undefined,
       results: job.results,
+      successfulPaths,
+      failedPaths: job.status === 'running' ? 0 : job.paths.length - successfulPaths,
       startedAt: job.startedAt,
       finishedAt: job.finishedAt,
     },
@@ -28042,6 +28066,7 @@ async function handleFsTree(url: URL): Promise<Response> {
       // Sidebar tree is lazy by default, while specific browsers can opt into
       // bounded nested traversal with maxDepth.
       maxDepth,
+      force: url.searchParams.get('force') === '1',
     });
     return json(result);
   } catch (error: any) {
@@ -28523,6 +28548,7 @@ type FsCopyResult = { path: string; success: boolean; error?: string; newPath?: 
 type FsCopyJobStatus = 'running' | 'completed' | 'failed';
 
 interface FsTransferDetails {
+  cancelRequested?: boolean;
   phase?: string;
   fileBytes?: number;
   fileTotalBytes?: number;
@@ -28542,6 +28568,10 @@ interface FsMoveJob extends FsTransferDetails {
   finishedAt?: number;
   error?: string;
   results: FsMoveResult[];
+  undoOf?: string;
+  undoJobId?: string;
+  undonePaths?: string[];
+  restoreTargets?: Record<string, string>;
 }
 
 interface FsCopyJob extends FsTransferDetails {
@@ -28581,6 +28611,7 @@ interface ModelManagerFsTransferJob {
 
 const fsMoveJobs = new Map<string, FsMoveJob>();
 const fsCopyJobs = new Map<string, FsCopyJob>();
+const galleryTransferControllers = new Map<string, AbortController>();
 const galleryTransferJournal = new GalleryTransferJournal(join(ROOT_DIR, 'User', 'Config', 'GalleryTransfers'));
 const modelManagerFsTransferJobs = new Map<string, ModelManagerFsTransferJob>();
 const FS_MOVE_JOB_TTL_MS = 10 * 60 * 1000;
@@ -29101,6 +29132,8 @@ async function finishGalleryTransfer(job: FsMoveJob | FsCopyJob, mode: 'move' | 
 }
 
 async function runFsMoveJob(job: FsMoveJob) {
+  const controller = new AbortController();
+  galleryTransferControllers.set(job.id, controller);
   try {
     job.phase = 'queued';
     await galleryTransferJournal.save(job);
@@ -29114,6 +29147,7 @@ async function runFsMoveJob(job: FsMoveJob) {
       return {
         sourcePath,
         sourceFullPath: sourceResolved.fullPath,
+        ...(job.restoreTargets?.[sourcePath] ? { targetFullPath: job.restoreTargets[sourcePath] } : {}),
       };
     });
 
@@ -29136,8 +29170,10 @@ async function runFsMoveJob(job: FsMoveJob) {
         destination: job.destination,
         destinationFullPath: destinationResolved.fullPath,
         transferMode: job.transferMode,
+        restoreExact: Boolean(job.undoOf),
       },
       {
+        signal: controller.signal,
         onProgress: (progress) => {
           updateGalleryTransferProgress(job, progress);
         },
@@ -29148,6 +29184,7 @@ async function runFsMoveJob(job: FsMoveJob) {
     job.completedUnits = Math.min(job.totalUnits, Math.max(job.completedUnits, job.totalUnits));
     job.results = [...job.results, ...((execution as any).results || [])];
     await finishGalleryTransfer(job, 'move');
+    if (job.cancelRequested) job.phase = 'cancelled';
     job.status = 'completed';
     job.finishedAt = Date.now();
     const movedTargets = ((execution as any).results || [])
@@ -29164,6 +29201,7 @@ async function runFsMoveJob(job: FsMoveJob) {
     job.error = error?.message || 'Move job failed';
     job.finishedAt = Date.now();
   } finally {
+    galleryTransferControllers.delete(job.id);
     invalidateFsListCacheForPaths([job.destination, ...job.paths, ...job.results.flatMap(result => result.newPath ? [result.newPath] : [])], 'move');
     await galleryTransferJournal.save(job).catch((error) => { job.error = `Transfer history could not be saved: ${String(error)}`; });
     scheduleFsMoveJobCleanup(job.id);
@@ -29171,6 +29209,8 @@ async function runFsMoveJob(job: FsMoveJob) {
 }
 
 async function runFsCopyJob(job: FsCopyJob) {
+  const controller = new AbortController();
+  galleryTransferControllers.set(job.id, controller);
   try {
     job.phase = 'queued';
     await galleryTransferJournal.save(job);
@@ -29207,6 +29247,7 @@ async function runFsCopyJob(job: FsCopyJob) {
         destinationFullPath: destinationResolved.fullPath,
       },
       {
+        signal: controller.signal,
         onProgress: (progress) => {
           updateGalleryTransferProgress(job, progress);
         },
@@ -29217,6 +29258,7 @@ async function runFsCopyJob(job: FsCopyJob) {
     job.completedUnits = Math.min(job.totalUnits, Math.max(job.completedUnits, job.totalUnits));
     job.results = [...job.results, ...((execution as any).results || [])];
     await finishGalleryTransfer(job, 'copy');
+    if (job.cancelRequested) job.phase = 'cancelled';
     job.status = 'completed';
     job.finishedAt = Date.now();
     const copiedTargets = ((execution as any).results || [])
@@ -29233,6 +29275,7 @@ async function runFsCopyJob(job: FsCopyJob) {
     job.error = error?.message || 'Copy job failed';
     job.finishedAt = Date.now();
   } finally {
+    galleryTransferControllers.delete(job.id);
     invalidateFsListCacheForPaths([job.destination, ...job.paths, ...job.results.flatMap(result => result.newPath ? [result.newPath] : [])], 'copy');
     await galleryTransferJournal.save(job).catch((error) => { job.error = `Transfer history could not be saved: ${String(error)}`; });
     scheduleFsCopyJobCleanup(job.id);
@@ -29279,6 +29322,22 @@ async function handleGalleryTransferReconcile(req: Request): Promise<Response> {
     }
   })();
   return json({ success: true, jobId: id });
+}
+
+async function handleGalleryTransferCancel(req: Request): Promise<Response> {
+  const { jobId } = await req.json() as { jobId?: string };
+  const id = String(jobId || '');
+  const job = fsMoveJobs.get(id) || fsCopyJobs.get(id);
+  if (!job) return json({ error: 'Active transfer not found' }, 404);
+  if (job.status !== 'running') return json({ success: true });
+  const controller = galleryTransferControllers.get(id);
+  if (!controller || job.phase === 'indexing' || job.phase === 'sidecars') {
+    return json({ error: 'Files have transferred; Gallery is finishing updates' }, 409);
+  }
+  job.cancelRequested = true;
+  controller.abort();
+  await galleryTransferJournal.save(job);
+  return json({ success: true });
 }
 
 async function handleFsMoveStatus(url: URL): Promise<Response> {
@@ -29354,6 +29413,63 @@ async function handleFsCopyStatus(url: URL): Promise<Response> {
       finishedAt: job.finishedAt,
     },
   });
+}
+
+const fsUndoMoveRequests = new Set<string>();
+async function handleFsUndoMove(req: Request): Promise<Response> {
+  let lockedId = '';
+  let prepared: FsMoveJob | null = null;
+  try {
+    const { jobId } = await req.json() as { jobId?: string };
+    if (typeof jobId !== 'string' || !/^fsmove-[\w-]+$/.test(jobId)) return json({ error: 'Valid move jobId required' }, 400);
+    if (fsUndoMoveRequests.has(jobId)) return json({ error: 'Undo is already being prepared' }, 409);
+    lockedId = jobId;
+    fsUndoMoveRequests.add(jobId);
+    const original = fsMoveJobs.get(jobId) || await readArchivedGalleryTransfer(jobId) as FsMoveJob | null;
+    if (!original || original.undoOf) return json({ error: 'Move history is unavailable' }, 404);
+    if (original.status === 'running') return json({ error: 'Wait for the move to finish' }, 409);
+    const undonePaths = new Set(original.undonePaths || []);
+    if (original.undoJobId) {
+      const previous = fsMoveJobs.get(original.undoJobId) || await readArchivedGalleryTransfer(original.undoJobId) as FsMoveJob | null;
+      if (!previous) return json({ error: 'Previous undo history is unavailable; check restored files before retrying' }, 409);
+      if (previous.status === 'running' || previous.phase === 'indexing') return json({ success: true, jobId: previous.id });
+      for (const result of previous.results) if (result.success) undonePaths.add(result.path);
+      original.undonePaths = [...undonePaths];
+      await galleryTransferJournal.save(original);
+    }
+    const successes = original.results.filter(result => result.success && result.newPath && !undonePaths.has(result.newPath));
+    if (!successes.length && original.undoJobId) return json({ success: true, jobId: original.undoJobId });
+    if (!successes.length) return json({ error: 'No successfully moved items to undo' }, 400);
+    const targets: Record<string, string> = {};
+    for (const result of successes) {
+      const source = resolvePath(result.newPath!);
+      const target = resolvePath(result.path);
+      if (!source || !target || !isPathInsideAllowedRoots(source.fullPath) || !isPathInsideAllowedRoots(target.fullPath)) {
+        return json({ error: 'A recorded move path is no longer accessible' }, 403);
+      }
+      targets[result.newPath!] = target.fullPath;
+    }
+    const undo = createFsMoveJob(Object.keys(targets), dirname(Object.values(targets)[0]), 'default');
+    prepared = undo;
+    undo.undoOf = original.id;
+    undo.restoreTargets = targets;
+    await galleryTransferJournal.save(undo);
+    original.undoJobId = undo.id;
+    await galleryTransferJournal.save(original);
+    fsMoveJobs.set(original.id, original);
+    void runFsMoveJob(undo);
+    return json({ success: true, jobId: undo.id });
+  } catch (error) {
+    if (prepared) {
+      prepared.status = 'failed';
+      prepared.error = 'Undo could not start because its transfer history could not be saved. No files were restored.';
+      prepared.finishedAt = Date.now();
+      await galleryTransferJournal.save(prepared).catch(() => undefined);
+    }
+    return json({ error: error instanceof Error ? error.message : 'Unable to undo move' }, 500);
+  } finally {
+    if (lockedId) fsUndoMoveRequests.delete(lockedId);
+  }
 }
 
 async function handleFsMove(req: Request): Promise<Response> {
@@ -30557,10 +30673,12 @@ const server = Bun.serve<any>({
       if (path === '/api/fs/rename' && method === 'POST') return handleFsRename(req);
       if (path === '/api/fs/rename/batch' && method === 'POST') return handleFsRenameBatch(req);
       if (path === '/api/fs/move' && method === 'POST') return handleFsMove(req);
+      if (path === '/api/fs/move/undo' && method === 'POST') return handleFsUndoMove(req);
       if (path === '/api/fs/move/status' && method === 'GET') return handleFsMoveStatus(url);
       if (path === '/api/fs/copy' && method === 'POST') return handleFsCopy(req);
       if (path === '/api/fs/copy/status' && method === 'GET') return handleFsCopyStatus(url);
       if (path === '/api/fs/transfer/reconcile' && method === 'POST') return handleGalleryTransferReconcile(req);
+      if (path === '/api/fs/transfer/cancel' && method === 'POST') return handleGalleryTransferCancel(req);
       if (path === '/api/fs/upload' && method === 'POST') return handleFsUpload(req);
       if (path === '/api/fs/write' && method === 'POST') return handleFsWrite(req);
       if (path === '/api/fs/reorder' && method === 'POST') return handleFsReorder(req);

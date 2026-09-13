@@ -31,6 +31,7 @@ type ModelIndexWorkerRequest =
       payload: {
         path: string;
         fullPath: string;
+        includeMetadata?: boolean;
       };
     }
   | {

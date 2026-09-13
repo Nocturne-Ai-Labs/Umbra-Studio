@@ -184,6 +184,7 @@ import {
 import { buildUmbraCanvasVisualRenderKey } from '@/lib/umbraUiCanvasRenderKey';
 import {
   normalizeUmbraUiMediaHandoff,
+  clearPendingUmbraUiMediaHandoff,
   stageUmbraUiMediaHandoff,
   UMBRA_UI_MEDIA_HANDOFF_EVENT,
   type UmbraUiMediaGenerationSnapshot,
@@ -2518,7 +2519,7 @@ export function UmbraInpaintWorkspace({
     originalPath: string;
     stageIds: string[];
   } | null>(null);
-  const generationRestoreProjectIdRef = React.useRef('');
+  const [generationRestoreProjectId, setGenerationRestoreProjectId] = React.useState('');
   const maskSnapshotUrlsRef = React.useRef(new Set<string>());
   const maskSnapshotLeaseRef = React.useRef(new Map<string, number>());
   const maskSnapshotCleanupTimerRef = React.useRef<number | null>(null);
@@ -3084,8 +3085,8 @@ export function UmbraInpaintWorkspace({
 
   React.useEffect(() => {
     if (!canvasDocument) return;
-    if (generationRestoreProjectIdRef.current === canvasDocument.id) {
-      generationRestoreProjectIdRef.current = '';
+    if (generationRestoreProjectId === canvasDocument.id) {
+      setGenerationRestoreProjectId('');
       return;
     }
     if (JSON.stringify(canvasDocument.generation) !== JSON.stringify(currentGenerationSettings)) {
@@ -3096,6 +3097,7 @@ export function UmbraInpaintWorkspace({
     canvasDocument?.generation,
     currentGenerationSettings,
     dispatchCanvasDocument,
+    generationRestoreProjectId,
   ]);
 
   const rememberCurrentPrompt = React.useCallback((notify = true) => {
@@ -3818,6 +3820,18 @@ export function UmbraInpaintWorkspace({
     context.restore();
   }, [canvasSize.height, canvasSize.width, source]);
 
+  const sourceTransitionRef = React.useRef(0);
+  const flushSourceSaveRef = React.useRef<() => Promise<boolean>>(async () => false);
+  const beginSourceTransition = React.useCallback(async () => {
+    const token = ++sourceTransitionRef.current;
+    const before = latestDocumentRef.current;
+    const isCurrent = () => token === sourceTransitionRef.current
+      && latestDocumentRef.current?.id === before?.id
+      && latestDocumentRef.current?.revision === before?.revision;
+    if (!await flushSourceSaveRef.current() || !isCurrent()) return null;
+    return isCurrent;
+  }, []);
+
   const loadSource = React.useCallback(async (
     imageUrl: string,
     name: string,
@@ -3827,7 +3841,16 @@ export function UmbraInpaintWorkspace({
   ) => {
     const normalizedUrl = String(imageUrl || '').trim();
     if (!normalizedUrl) throw new Error('No source image was provided.');
+    const canReplace = await beginSourceTransition();
+    if (!canReplace) {
+      if (objectUrl) URL.revokeObjectURL(normalizedUrl);
+      return null;
+    }
     const image = await loadHtmlImage(normalizedUrl);
+    if (!canReplace()) {
+      if (objectUrl) URL.revokeObjectURL(normalizedUrl);
+      return null;
+    }
     assertUmbraCanvasInteractiveAllocation(image.naturalWidth, image.naturalHeight);
     releaseMaskSnapshotUrls();
     for (const assetUrl of layerAssetObjectUrlsRef.current) URL.revokeObjectURL(assetUrl);
@@ -3870,7 +3893,7 @@ export function UmbraInpaintWorkspace({
     setZoom(1);
     setMaskResetRevision((value) => value + 1);
     return nextDocument;
-  }, [releaseMaskSnapshotUrls]);
+  }, [beginSourceTransition, releaseMaskSnapshotUrls]);
 
   const refreshProjects = React.useCallback(async (signal?: AbortSignal) => {
     try {
@@ -3894,15 +3917,15 @@ export function UmbraInpaintWorkspace({
 
   const persistProject = React.useCallback(async (documentSnapshot: UmbraCanvasDocument, notify = false) => {
     clearScheduledProjectAutoSave();
-    const pendingSnapshot = projectAutoSaveSnapshotRef.current;
-    if (pendingSnapshot?.id === documentSnapshot.id && pendingSnapshot.revision <= documentSnapshot.revision) {
-      projectAutoSaveSnapshotRef.current = null;
-    }
     const requestId = ++projectSaveRequestRef.current;
     setProjectSaveState('saving');
     try {
       const saved = await saveUmbraCanvasProject(documentSnapshot);
       if (requestId !== projectSaveRequestRef.current) return;
+      const pendingSnapshot = projectAutoSaveSnapshotRef.current;
+      if (pendingSnapshot?.id === documentSnapshot.id && pendingSnapshot.revision <= documentSnapshot.revision) {
+        projectAutoSaveSnapshotRef.current = null;
+      }
       if (latestDocumentRef.current?.id === saved.id && latestDocumentRef.current.revision === documentSnapshot.revision) {
         dispatchCanvasHistory({ type: 'history_hydrate', document: saved });
       }
@@ -3930,6 +3953,12 @@ export function UmbraInpaintWorkspace({
       return null;
     }
   }, [clearScheduledProjectAutoSave, showToast]);
+
+  flushSourceSaveRef.current = async () => {
+    const snapshot = projectAutoSaveSnapshotRef.current;
+    if (snapshot && !await persistProject(snapshot, true)) return false;
+    return !projectAutoSaveSnapshotRef.current;
+  };
 
   React.useEffect(() => {
     if (!canvasDocument || !source) {
@@ -4058,12 +4087,13 @@ export function UmbraInpaintWorkspace({
     if (!seamlessAvailable || !seamlessAxes.includes('y')) setSeamlessY(false);
   }, [seamlessAvailable, seamlessAxes]);
 
-  const openProject = React.useCallback(async (projectId: string, quiet = false): Promise<boolean> => {
+  const openProject = React.useCallback(async (projectId: string, quiet = false, onMissing?: () => void): Promise<boolean> => {
     if (!projectId) return false;
+    const canReplace = await beginSourceTransition();
+    if (!canReplace) return false;
     try {
-      const pendingSnapshot = projectAutoSaveSnapshotRef.current;
-      if (pendingSnapshot) await persistProject(pendingSnapshot);
       const project = await loadUmbraCanvasProject(projectId);
+      if (!canReplace()) return false;
       assertUmbraCanvasInteractiveAllocation(project.width, project.height);
       const sourceLayer = project.layers.find((layer) => layer.kind === 'raster' && layer.role === 'source');
       if (!sourceLayer || sourceLayer.kind !== 'raster') throw new Error('The project source layer is missing.');
@@ -4105,17 +4135,19 @@ export function UmbraInpaintWorkspace({
       setSamBox(null);
       setJob(null);
       setZoom(1);
-      generationRestoreProjectIdRef.current = project.id;
+      setGenerationRestoreProjectId(project.id);
       applyProjectGenerationSettings(project.generation);
       dispatchCanvasDocument({ type: 'replace_document', document: project });
       setMaskResetRevision((value) => value + 1);
       if (!quiet) showToast(`Opened ${project.name}.`, 'success');
       return true;
     } catch (error) {
+      if (!canReplace()) return false;
+      if (error instanceof Error && 'status' in error && error.status === 404) onMissing?.();
       if (!quiet) showToast(error instanceof Error ? error.message : 'Failed to open the inpaint project.', 'error');
       return false;
     }
-  }, [applyProjectGenerationSettings, persistProject, releaseMaskSnapshotUrls, showToast]);
+  }, [applyProjectGenerationSettings, beginSourceTransition, releaseMaskSnapshotUrls, showToast]);
 
   const showProjectBrowser = React.useCallback(() => {
     setProjectBrowserOpen(true);
@@ -4331,7 +4363,6 @@ export function UmbraInpaintWorkspace({
       return;
     }
     const fork = forkUmbraCanvasDocument(canvasDocument, name);
-    dispatchCanvasHistory({ type: 'history_reset', document: fork });
     setProjectSaveState('saving');
     const saved = await persistProject(fork, true);
     if (saved) dispatchCanvasHistory({ type: 'history_reset', document: saved });
@@ -4500,17 +4531,30 @@ export function UmbraInpaintWorkspace({
       if (oldest) consumedMediaHandoffKeysRef.current.delete(oldest);
     }
     void (async () => {
-      if (handoff.canvasProjectId && await openProject(handoff.canvasProjectId, true)) {
-        showToast(`Editable ${handoff.canvasOperationMode || 'inpaint'} project restored.`, 'success');
-        return;
+      if (handoff.canvasProjectId) {
+        let missing = false;
+        if (await openProject(handoff.canvasProjectId, true, () => { missing = true; })) {
+          clearPendingUmbraUiMediaHandoff(handoff);
+          showToast(`Editable ${handoff.canvasOperationMode || 'inpaint'} project restored.`, 'success');
+          return;
+        }
+        if (!missing) {
+          consumedMediaHandoffKeysRef.current.delete(handoffKey);
+          return;
+        }
       }
-      await loadSource(
+      const loaded = await loadSource(
         handoff.imageUrl,
         handoff.name || handoff.path?.replace(/\\/g, '/').split('/').pop() || 'generated-image.png',
         handoff.source === 'local-file' ? '' : handoff.path || '',
         handoff.imageUrl.startsWith('blob:'),
         handoff.source === 'local-file' ? '' : handoff.originalSourcePath || handoff.path || '',
       );
+      if (!loaded) {
+        consumedMediaHandoffKeysRef.current.delete(handoffKey);
+        return;
+      }
+      clearPendingUmbraUiMediaHandoff(handoff);
       dispatchCanvasDocument({ type: 'set_operation_mode', mode: 'inpaint' });
       applyRecoveredInpaintSettings(handoff.generation);
       const omittedLayerCount = handoff.generation?.inpaint
@@ -4525,7 +4569,10 @@ export function UmbraInpaintWorkspace({
           : 'Image opened in Inpaint.',
         'success',
       );
-    })().catch((error) => showToast(error instanceof Error ? error.message : 'Failed to open the image.', 'error'));
+    })().catch((error) => {
+      consumedMediaHandoffKeysRef.current.delete(handoffKey);
+      showToast(error instanceof Error ? error.message : 'Failed to open the image.', 'error');
+    });
   }, [applyRecoveredInpaintSettings, dispatchCanvasDocument, loadSource, openProject, showToast]);
 
   React.useEffect(() => {

@@ -81,6 +81,7 @@ import {
   buildUmbraUiInpaintOutputUrl,
   cancelUmbraUiInpaintJob,
   fetchUmbraUiInpaintJob,
+  failLostUmbraUiInpaintJob,
   isUmbraUiInpaintJobTerminal,
   submitUmbraUiInpaintJob,
   type UmbraUiInpaintJob,
@@ -139,6 +140,7 @@ import {
   UMBRA_CANVAS_BLEND_MODES,
   UMBRA_CANVAS_DEFAULT_RASTER_ADJUSTMENTS,
   type UmbraCanvasGenerationSettingsSnapshot,
+  type UmbraCanvasProjectDocument,
   type UmbraCanvasStagedGeneration,
 } from './canvasModel';
 import { composeUmbraCanvasAcceptedReplacementBlob, composeUmbraCanvasDrawableRegionBlob, composeUmbraCanvasGenerationRegion, composeUmbraCanvasMaskBlob, composeUmbraCanvasProjectThumbnail, composeUmbraCanvasRasterBlob, composeUmbraCanvasRasterCropBlob, type UmbraCanvasCompositeResult } from './canvasCompositor';
@@ -863,30 +865,52 @@ export function UmbraCanvasWorkspace({
     }
   }, [showToast]);
 
-  const saveProject = React.useCallback(async (notify = true) => {
-    if (saving) return null;
+  const projectSavePromiseRef = React.useRef<Promise<UmbraCanvasProjectDocument | null> | null>(null);
+  const projectTransitionRef = React.useRef(0);
+  const saveProject = React.useCallback((notify = true): Promise<UmbraCanvasProjectDocument | null> => {
+    if (projectSavePromiseRef.current) return projectSavePromiseRef.current;
     setSaving(true);
-    try {
-      const current = useUmbraCanvasStore.getState().present;
-      const thumbnail = await composeUmbraCanvasProjectThumbnail(current).catch(() => null);
-      const saved = await saveUmbraCanvasWorkspaceProject(current, thumbnail);
-      syncPersistedProject(saved);
-      window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, saved.id);
-      setLastSavedRevision(saved.revision);
-      setSaveError('');
-      if (projectBrowserOpen) void refreshProjects();
-      if (notify) showToast('Canvas project saved.', 'success');
-      return saved;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to save the Canvas project.';
-      setSaveError(message);
-      if (notify) showToast(`Canvas save failed: ${message}`, 'error');
-      else console.warn(`[Canvas] Autosave failed: ${message}`);
-      return null;
-    } finally {
-      setSaving(false);
+    const request = (async () => {
+      try {
+        const current = useUmbraCanvasStore.getState().present;
+        const thumbnail = await composeUmbraCanvasProjectThumbnail(current).catch(() => null);
+        const saved = await saveUmbraCanvasWorkspaceProject(current, thumbnail);
+        syncPersistedProject(saved);
+        window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, saved.id);
+        setLastSavedRevision(saved.revision);
+        setSaveError('');
+        if (projectBrowserOpen) void refreshProjects();
+        if (notify) showToast('Canvas project saved.', 'success');
+        return saved;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to save the Canvas project.';
+        setSaveError(message);
+        if (notify) showToast(`Canvas save failed: ${message}`, 'error');
+        else console.warn(`[Canvas] Autosave failed: ${message}`);
+        return null;
+      } finally {
+        setSaving(false);
+      }
+    })();
+    projectSavePromiseRef.current = request;
+    void request.finally(() => { if (projectSavePromiseRef.current === request) projectSavePromiseRef.current = null; });
+    return request;
+  }, [projectBrowserOpen, refreshProjects, showToast, syncPersistedProject]);
+
+  const prepareProjectTransition = React.useCallback(async () => {
+    const token = ++projectTransitionRef.current;
+    const current = useUmbraCanvasStore.getState().present;
+    const isCurrent = () => {
+      const latest = useUmbraCanvasStore.getState().present;
+      return token === projectTransitionRef.current && latest.id === current.id && latest.revision === current.revision;
+    };
+    if (current.entities.length || current.revision > 0) {
+      const saved = await saveProject();
+      if (!saved || saved.id !== current.id || saved.revision !== current.revision) return null;
     }
-  }, [projectBrowserOpen, refreshProjects, saving, showToast, syncPersistedProject]);
+    if (!isCurrent()) return null;
+    return isCurrent;
+  }, [saveProject]);
 
   const exportProject = React.useCallback(async () => {
     if (archiving || project.entities.length === 0) return;
@@ -906,10 +930,13 @@ export function UmbraCanvasWorkspace({
     setArchiving(true);
     let objectUrls: string[] = [];
     try {
+      const canReplace = await prepareProjectTransition();
+      if (!canReplace) return;
       const imported = await importUmbraCanvasWorkspaceArchive(file);
       objectUrls = imported.objectUrls;
       const thumbnail = await composeUmbraCanvasProjectThumbnail(imported.project).catch(() => null);
       const saved = await saveUmbraCanvasWorkspaceProject(imported.project, thumbnail);
+      if (!canReplace()) return;
       replaceProject(saved);
       window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, saved.id);
       setLastSavedRevision(saved.revision);
@@ -922,7 +949,7 @@ export function UmbraCanvasWorkspace({
       objectUrls.forEach((url) => URL.revokeObjectURL(url));
       setArchiving(false);
     }
-  }, [archiving, onRestoreGenerationSettings, replaceProject, showToast]);
+  }, [archiving, onRestoreGenerationSettings, prepareProjectTransition, replaceProject, showToast]);
 
   React.useEffect(() => {
     if (project.entities.length === 0 || project.revision === lastSavedRevision || saving) return;
@@ -938,7 +965,10 @@ export function UmbraCanvasWorkspace({
 
   const loadProject = React.useCallback(async (projectId: string) => {
     try {
+      const canReplace = await prepareProjectTransition();
+      if (!canReplace) return;
       const loaded = await loadUmbraCanvasWorkspaceProject(projectId);
+      if (!canReplace()) return;
       replaceProject(loaded);
       window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, loaded.id);
       setLastSavedRevision(loaded.revision);
@@ -960,7 +990,8 @@ export function UmbraCanvasWorkspace({
           acceptanceMaskUrl: pending.acceptanceMaskUrl || '',
         });
         try {
-          setJob(await fetchUmbraUiInpaintJob(pending.jobId));
+          const recovered = await fetchUmbraUiInpaintJob(pending.jobId);
+          if (useUmbraCanvasStore.getState().present.id === loaded.id) setJob(recovered);
         } catch (error) {
           showToast(error instanceof Error ? error.message : 'The pending Canvas job could not be recovered.', 'error');
         }
@@ -971,7 +1002,7 @@ export function UmbraCanvasWorkspace({
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to open the Canvas project.', 'error');
     }
-  }, [onRestoreGenerationSettings, replaceProject, showToast]);
+  }, [onRestoreGenerationSettings, prepareProjectTransition, replaceProject, showToast]);
 
   React.useEffect(() => {
     if (!active || !mediaHandoff || mediaHandoff.mode !== 'canvas') return;
@@ -988,15 +1019,19 @@ export function UmbraCanvasWorkspace({
     let bitmap: ImageBitmap | null = null;
     let destinationSettings: UmbraCanvasGenerationSettingsSnapshot | null = null;
     try {
+      const canReplace = await prepareProjectTransition();
+      if (!canReplace) return;
       const response = await fetch(handoff.imageUrl, { cache: 'no-store' });
       if (!response.ok) throw new Error(`The Canvas source returned ${response.status}.`);
       const blob = await response.blob();
       bitmap = await createImageBitmap(blob);
       const name = String(handoff.name || handoff.path.split(/[\\/]/).pop() || 'Canvas Source').trim();
+      if (!canReplace()) return;
 
       if (destinationProjectId) {
         if (destinationProjectId !== useUmbraCanvasStore.getState().present.id) {
           const loaded = await loadUmbraCanvasWorkspaceProject(destinationProjectId);
+          if (!canReplace()) return;
           replaceProject(loaded);
           window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, loaded.id);
           setLastSavedRevision(loaded.revision);
@@ -1048,7 +1083,7 @@ export function UmbraCanvasWorkspace({
           scheduler: inherited.scheduler || 'normal',
           denoise: inherited.denoise ?? 0.65,
           samples: 1,
-          tiledVae: {},
+          tiledVae: { ...(inherited.tiledVae || tiledVae) },
           hiresFix: inherited.hiresFix ? { ...inherited.hiresFix } : {},
           detailerPipeline: (inherited.detailerPipeline || []).map((stage) => ({ ...stage })) as unknown as Array<Record<string, unknown>>,
           maskGrow: 8,
@@ -1082,7 +1117,7 @@ export function UmbraCanvasWorkspace({
       bitmap?.close();
       setMediaImportBusy(false);
     }
-  }, [addRaster, mediaImportBusy, newProject, onMediaHandoffConsumed, onRestoreGenerationSettings, pendingMediaImport, renameProject, replaceProject, saveProject, setGenerationBbox, setGenerationSettings, showToast]);
+  }, [addRaster, mediaImportBusy, newProject, onMediaHandoffConsumed, onRestoreGenerationSettings, pendingMediaImport, prepareProjectTransition, renameProject, replaceProject, saveProject, setGenerationBbox, setGenerationSettings, showToast, tiledVae]);
 
   const cancelMediaHandoff = React.useCallback(() => {
     if (mediaImportBusy) return;
@@ -1686,14 +1721,24 @@ export function UmbraCanvasWorkspace({
   React.useEffect(() => {
     if (!job || isUmbraUiInpaintJobTerminal(job)) return;
     const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      void fetchUmbraUiInpaintJob(job.id, controller.signal)
-        .then(setJob)
-        .catch((error) => {
-          if (controller.signal.aborted) return;
-          showToast(error instanceof Error ? error.message : 'Canvas job status could not be refreshed.', 'error');
-        });
-    }, 850);
+    let timer = 0;
+    let failures = 0;
+    const poll = async () => {
+      try {
+        const next = await fetchUmbraUiInpaintJob(job.id, controller.signal);
+        if (!controller.signal.aborted) setJob(next);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        failures++;
+        if (failures === 1) showToast(error instanceof Error ? error.message : 'Canvas job status could not be refreshed.', 'error');
+        if (error instanceof Error && 'status' in error && error.status === 404) {
+          setJob(failLostUmbraUiInpaintJob(job, 'The Canvas job is no longer available. Retry the generation.'));
+          return;
+        }
+        timer = window.setTimeout(() => void poll(), Math.min(10000, 1000 * 2 ** Math.min(failures, 4)));
+      }
+    };
+    timer = window.setTimeout(() => void poll(), 850);
     return () => {
       controller.abort();
       window.clearTimeout(timer);
@@ -1919,7 +1964,9 @@ export function UmbraCanvasWorkspace({
     }
     setTool(nextTool);
   };
-  const startBlankProject = () => {
+  const startBlankProject = async () => {
+    const canReplace = await prepareProjectTransition();
+    if (!canReplace?.()) return;
     window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, UMBRA_CANVAS_BLANK_PROJECT);
     setPreviewStageId('');
     setJob(null);

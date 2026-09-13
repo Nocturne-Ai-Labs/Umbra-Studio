@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
 
 export type CopyProgress = (bytes: number, total: number, path: string) => void;
+type TransferSnapshot = { path: string; stat: Awaited<ReturnType<typeof fs.lstat>>; children?: string[] };
 
 // Own the destination exclusively; never replace a file created by another job.
 export async function copyFileExclusive(source: string, target: string, onProgress?: CopyProgress) {
@@ -47,8 +48,11 @@ export async function copyFileExclusive(source: string, target: string, onProgre
   }
 }
 
-export async function copyTreeExclusive(source: string, target: string, onProgress?: CopyProgress, onFileDone?: (path: string) => Promise<void> | void): Promise<void> {
+export async function copyTreeExclusive(source: string, target: string, onProgress?: CopyProgress, onFileDone?: (path: string) => Promise<void> | void, snapshot?: TransferSnapshot[]): Promise<void> {
   const stats = await fs.lstat(source);
+  onProgress?.(0, stats.isFile() ? stats.size : 0, source);
+  const entrySnapshot: TransferSnapshot = { path: source, stat: stats };
+  snapshot?.push(entrySnapshot);
   if (stats.isSymbolicLink()) {
     await fs.symlink(await fs.readlink(source), target);
     await onFileDone?.(target);
@@ -61,12 +65,45 @@ export async function copyTreeExclusive(source: string, target: string, onProgre
   }
   await fs.mkdir(target);
   try {
-    for (const entry of await fs.readdir(source)) {
-      await copyTreeExclusive(join(source, entry), join(target, entry), onProgress, onFileDone);
+    const entries = await fs.readdir(source);
+    entrySnapshot.children = entries;
+    for (const entry of entries) {
+      await copyTreeExclusive(join(source, entry), join(target, entry), onProgress, onFileDone, snapshot);
     }
   } catch (error) {
     // This directory was created exclusively by this copy; sources are untouched.
     await fs.rm(target, { recursive: true, force: true, maxRetries: 3 });
     throw error;
+  }
+}
+
+export async function moveTreeExclusive(source: string, target: string, onProgress?: CopyProgress, onFileDone?: (path: string) => Promise<void> | void): Promise<void> {
+  const snapshot: TransferSnapshot[] = [];
+  await copyTreeExclusive(source, target, onProgress, onFileDone, snapshot);
+  // Verify the whole source before removing anything. Never recursively delete a
+  // live source tree: rmdir must reject files arriving after this snapshot.
+  for (const entry of snapshot) {
+    const current = await fs.lstat(entry.path);
+    if (entry.children) {
+      const names = new Set(await fs.readdir(entry.path));
+      if (names.size !== entry.children.length || entry.children.some(name => !names.has(name))) {
+        throw new Error('Source changed during transfer; source and copied destination retained');
+      }
+    }
+    if (current.ino !== entry.stat.ino || current.dev !== entry.stat.dev
+      || current.size !== entry.stat.size || current.mtimeMs !== entry.stat.mtimeMs) {
+      throw new Error('Source changed during transfer; source and copied destination retained');
+    }
+  }
+  for (const entry of [...snapshot].reverse()) {
+    if (entry.stat.isDirectory() && !entry.stat.isSymbolicLink()) {
+      await fs.rmdir(entry.path);
+    } else {
+      const current = await fs.lstat(entry.path);
+      if (current.ino !== entry.stat.ino || current.size !== entry.stat.size || current.mtimeMs !== entry.stat.mtimeMs) {
+        throw new Error('Source changed during transfer; remaining source and copied destination retained');
+      }
+      await fs.unlink(entry.path);
+    }
   }
 }

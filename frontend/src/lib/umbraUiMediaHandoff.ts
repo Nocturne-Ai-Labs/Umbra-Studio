@@ -10,6 +10,7 @@ import type {
   PowerPrompterOutputUpscaleControls,
   PowerPrompterSeedControlMode,
   PowerPrompterSeedIncrement,
+  PowerPrompterTiledVaeControls,
 } from '@/types/powerPrompter';
 
 export const UMBRA_UI_MEDIA_HANDOFF_KEY = 'umbra-ui:pending-media-handoff';
@@ -92,6 +93,7 @@ export interface UmbraUiMediaGenerationSnapshot {
   hiresFix?: PowerPrompterHiresFixControls;
   detailerPipeline?: PowerPrompterDetailerStage[];
   outputUpscale?: PowerPrompterOutputUpscaleControls;
+  tiledVae?: PowerPrompterTiledVaeControls;
   workflowResources?: Record<string, string>;
   loras: UmbraUiMediaHandoffLora[];
   inpaint?: UmbraUiMediaInpaintSnapshot;
@@ -348,6 +350,7 @@ export function normalizeUmbraUiMediaGenerationSnapshot(value: unknown): UmbraUi
     hiresFix: value.hiresFix,
     detailerPipeline: value.detailerPipeline,
     outputUpscale: value.outputUpscale,
+    tiledVae: value.tiledVae,
   });
   const resources = isRecord(value.workflowResources)
     ? Object.fromEntries(Object.entries(value.workflowResources)
@@ -393,6 +396,7 @@ export function normalizeUmbraUiMediaGenerationSnapshot(value: unknown): UmbraUi
     ...(isRecord(value.hiresFix) ? { hiresFix: normalizedPipelineControls.hiresFix } : {}),
     ...(Array.isArray(value.detailerPipeline) ? { detailerPipeline: normalizedPipelineControls.detailerPipeline } : {}),
     ...(isRecord(value.outputUpscale) ? { outputUpscale: normalizedPipelineControls.outputUpscale } : {}),
+    ...(isRecord(value.tiledVae) ? { tiledVae: normalizedPipelineControls.tiledVae } : {}),
     workflowResources: resources && Object.keys(resources).length > 0 ? resources : undefined,
     loras: normalizeMetadataLoras(value.loras, 'metadata-handoff-lora'),
     inpaint: normalizeUmbraUiMediaInpaintSnapshot(value.inpaint),
@@ -407,11 +411,14 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
   const generation = isRecord(powerPrompter.generation) ? powerPrompter.generation : {};
   const pipeline = isRecord(powerPrompter.pipeline) ? powerPrompter.pipeline : {};
   const inpaint = isRecord(metadata.umbra_inpaint) ? metadata.umbra_inpaint : {};
+  const img2img = isRecord(generation.img2img) && generation.outputMode !== 'txt2img' ? generation.img2img : {};
+  const tiledVae = isRecord(generation.tiledVae) ? generation.tiledVae : inpaint.tiledVae;
   const metadataDetailerPipeline = Array.isArray(generation.detailerPipeline)
     ? generation.detailerPipeline
     : Array.isArray(powerPrompter.detailerPipeline) ? powerPrompter.detailerPipeline : undefined;
   const normalizedPowerPrompterGeneration = normalizePowerPrompterGenerationControls({
     ...generation,
+    tiledVae,
     ...(metadataDetailerPipeline ? { detailerPipeline: metadataDetailerPipeline } : {}),
     controlAfterGenerate: generation.controlAfterGenerate ?? generation.seedMode ?? inpaint.seedMode,
     seedIncrement: generation.seedIncrement ?? inpaint.seedIncrement,
@@ -479,6 +486,16 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
     : undefined;
   const negativePrompt = String(prompts.negative || powerPrompter.negativePrompt || generation.negativePrompt || '').trim();
 
+  // File dimensions, EXIF, and filenames do not constitute generation settings.
+  // A plain image must not clear the receiving editor's model, LoRAs or prompts.
+  const hasGenerationControls = ['seed', 'steps', 'cfg', 'samplerName', 'modelFamily', 'hiresFix', 'detailerPipeline', 'tiledVae']
+    .some((key) => generation[key] !== undefined || inpaint[key] !== undefined);
+  if (!positivePrompt && !negativePrompt && !checkpointName && !positivePromptSegments.length
+    && !hasGenerationControls && !directLoras.length && !generationLoras.length && !inpaintLoras.length
+    && params.seed === undefined && params.steps === undefined && params.cfg === undefined && !params.sampler) {
+    return undefined;
+  }
+
   return normalizeUmbraUiMediaGenerationSnapshot({
     positivePrompt,
     positivePromptSegments,
@@ -495,7 +512,7 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
     scheduler: String(generation.scheduler || inpaint.scheduler || params.scheduler || '').trim(),
     width: finiteNumber(generation.width ?? params.width),
     height: finiteNumber(generation.height ?? params.height),
-    denoise: finiteNumber(generation.denoise ?? inpaint.denoise ?? params.denoise),
+    denoise: finiteNumber(img2img.denoise ?? generation.denoise ?? inpaint.denoise ?? params.denoise),
     ...(generation.controlAfterGenerate !== undefined
       || generation.seedMode !== undefined
       || inpaint.seedMode !== undefined
@@ -512,8 +529,9 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
       ? { outputUpscale: normalizedPowerPrompterGeneration.outputUpscale }
       : {}),
     workflowResources,
+    ...(isRecord(tiledVae) ? { tiledVae: normalizedPowerPrompterGeneration.tiledVae } : {}),
     loras: mergeLoras(directLoras, extractGraphLoras(metadata), generationLoras, inpaintLoras, syntaxLoras),
-    inpaint: normalizeUmbraUiMediaInpaintSnapshot(inpaint),
+    inpaint: isRecord(metadata.umbra_inpaint) ? normalizeUmbraUiMediaInpaintSnapshot(inpaint) : undefined,
   });
 }
 
@@ -585,6 +603,20 @@ export async function fetchUmbraUiMediaMetadata(path: string): Promise<ImageMeta
   } catch {
     return null;
   }
+}
+
+export function clearPendingUmbraUiMediaHandoff(handoff: Pick<UmbraUiMediaHandoff, 'mode' | 'createdAt'> & { path?: string }): void {
+  const target = window as typeof window & { __umbraPendingUmbraUiMediaHandoff?: unknown };
+  const matches = (value: unknown) => {
+    const pending = normalizeUmbraUiMediaHandoff(value);
+    return pending?.createdAt === handoff.createdAt && pending.mode === handoff.mode && pending.path === normalizePath(handoff.path);
+  };
+  if (matches(target.__umbraPendingUmbraUiMediaHandoff)) target.__umbraPendingUmbraUiMediaHandoff = null;
+  try {
+    if (matches(JSON.parse(window.sessionStorage.getItem(UMBRA_UI_MEDIA_HANDOFF_KEY) || 'null'))) {
+      window.sessionStorage.removeItem(UMBRA_UI_MEDIA_HANDOFF_KEY);
+    }
+  } catch { /* best effort */ }
 }
 
 export async function stageUmbraUiMediaHandoff(options: {

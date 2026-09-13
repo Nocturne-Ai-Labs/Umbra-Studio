@@ -15,6 +15,7 @@ export interface CensorReviewStroke {
   points: Array<[number, number]>;
 }
 export interface CensorReviewRegion extends CensorReviewRect {
+  reviewOnly?: boolean;
   target: CensorReviewTarget;
   score: number;
   maskKind: 'contour' | 'box-fallback';
@@ -24,6 +25,7 @@ export interface CensorReviewSettings {
   autoDetect: boolean;
   targets: CensorReviewTarget[];
   cutoff: number;
+  reviewThreshold: number;
   padding: number;
   mosaicSize: number;
   mode: 'mosaic' | 'overlay';
@@ -37,6 +39,7 @@ export const DEFAULT_CENSOR_REVIEW_SETTINGS: CensorReviewSettings = {
   autoDetect: true,
   targets: ['maleGenitals', 'femaleGenitals'],
   cutoff: 0.5,
+  reviewThreshold: 0.15,
   padding: 0,
   mosaicSize: 24,
   mode: 'mosaic',
@@ -65,6 +68,7 @@ export interface CensorReviewItem {
   rectangles: CensorReviewRect[];
   strokes: CensorReviewStroke[];
   detectedCutoff: number | null;
+  detectedCensorCutoff?: number;
   detectedPadding: number | null;
   detectedTargets: CensorReviewTarget[];
   warnings: string[];
@@ -90,7 +94,7 @@ export type CensorReviewItemSummary = Pick<
   | 'lastExport'
   | 'sourceBytes'
   | 'protectedMedia'
->;
+> & { attention: string[]; needsDetection: boolean };
 export interface CensorReviewProject {
   id: string;
   name: string;
@@ -117,10 +121,28 @@ export function censorReviewNeedsDetection(item: CensorReviewItem): boolean {
   return (
     item.settings.autoDetect &&
     (item.detectedCutoff === null ||
-      item.settings.cutoff < item.detectedCutoff ||
+      (item.status === 'approved' && item.detectedCensorCutoff === undefined
+        ? item.settings.cutoff : censorReviewDetectionFloor(item.settings)) < item.detectedCutoff ||
+      item.settings.cutoff < (item.detectedCensorCutoff ?? item.detectedCutoff) ||
       item.detectedPadding !== item.settings.padding ||
       item.settings.targets.some((target) => !item.detectedTargets.includes(target)))
   );
+}
+export function censorReviewDetectionFloor(settings: CensorReviewSettings): number {
+  return Math.min(settings.cutoff, settings.reviewThreshold ?? 0.15);
+}
+export function censorReviewAttention(item: CensorReviewItem): string[] {
+  if (item.status === 'approved') return [];
+  if (item.error) return ['Detection or preview failed'];
+  if (!item.settings.autoDetect) return [];
+  if (censorReviewNeedsDetection(item)) return ['Review scan needed'];
+  const active = item.regions.filter((r) => r.enabled && item.settings.targets.includes(r.target));
+  const weak = active.filter((r) => r.score >= censorReviewDetectionFloor(item.settings) && (r.reviewOnly || r.score < item.settings.cutoff));
+  return [
+    ...(weak.length ? [`${weak.length} uncertain region${weak.length === 1 ? '' : 's'}`] : []),
+    ...(!active.length ? ['No regions detected'] : []),
+    ...(item.warnings.length ? ['Detector warning'] : []),
+  ];
 }
 export function censorReviewCanApprove(item: CensorReviewItem): boolean {
   return (
@@ -148,6 +170,7 @@ export function normalizeCensorReviewSettings(value: unknown): CensorReviewSetti
       ),
     ],
     cutoff: number(v.cutoff, 0.05, 0.95, 0.5),
+    reviewThreshold: Math.min(number(v.reviewThreshold, 0.05, 0.95, 0.15), number(v.cutoff, 0.05, 0.95, 0.5)),
     padding: number(v.padding, 0, 0.5, 0),
     mosaicSize: Math.round(number(v.mosaicSize, 2, 160, 24)),
     mode: v.mode === 'overlay' ? 'overlay' : 'mosaic',
@@ -188,5 +211,7 @@ export function summarizeCensorReviewItem(item: CensorReviewItem): CensorReviewI
     lastExport,
     sourceBytes,
     protectedMedia,
+    attention: censorReviewAttention(item),
+    needsDetection: censorReviewNeedsDetection(item),
   };
 }

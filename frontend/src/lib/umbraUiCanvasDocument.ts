@@ -810,7 +810,7 @@ function normalizeGenerationSettings(value: unknown): UmbraCanvasGenerationSetti
     processingWidth: clamp(Math.round(Number(source.processingWidth) || 1024), 64, 16384),
     processingHeight: clamp(Math.round(Number(source.processingHeight) || 1024), 64, 16384),
     coherenceMode,
-    coherenceEdgeSize: clamp(Math.round(Number(source.coherenceEdgeSize) || 16), 0, 2048),
+    coherenceEdgeSize: clamp(Math.round(Number(source.coherenceEdgeSize ?? 16) || 0), 0, 2048),
     coherenceMinimumDenoise: clamp(source.coherenceMinimumDenoise ?? 0, 0, 1),
     seamlessX: source.seamlessX === true,
     seamlessY: source.seamlessY === true,
@@ -1345,8 +1345,11 @@ export function umbraCanvasDocumentReducer(
       return commit(state, { name: String(action.name || '').slice(0, 240) });
     case 'set_operation_mode':
       return commit(state, { operationMode: action.mode });
-    case 'set_generation_settings':
-      return commit(state, { generation: normalizeGenerationSettings(action.generation) });
+    case 'set_generation_settings': {
+      const generation = normalizeGenerationSettings(action.generation);
+      if (JSON.stringify(state.generation) === JSON.stringify(generation)) return state;
+      return commit(state, { generation });
+    }
     case 'set_generation_region':
       return commit(state, {
         generationRegion: action.region

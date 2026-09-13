@@ -262,6 +262,7 @@ type DownloadJob = {
   bytesDownloaded: number;
   progress: number;
   error?: string;
+  cancelRequested?: boolean;
 };
 
 type LocalTransferMode = 'copy' | 'move';
@@ -281,6 +282,8 @@ type LocalTransferJob = {
   error?: string;
   startedAt?: number;
   finishedAt?: number;
+  successfulPaths?: number;
+  failedPaths?: number;
 };
 
 type ContextMenuState = {
@@ -3279,40 +3282,52 @@ export function ModelManagerWorkspace() {
     });
   }, []);
 
+  const downloadJobsRef = React.useRef(downloadJobs);
+  downloadJobsRef.current = downloadJobs;
+  const activeDownloadIds = JSON.stringify(Object.values(downloadJobs).filter(job => job.status === 'queued' || job.status === 'downloading').map(job => job.jobId).sort());
+  const localTransferJobsRef = React.useRef(localTransferJobs);
+  localTransferJobsRef.current = localTransferJobs;
+  const activeTransferIds = JSON.stringify(Object.values(localTransferJobs).filter(job => job.status === 'running').map(job => job.jobId).sort());
+
   React.useEffect(() => {
-    const activeJobs = Object.values(downloadJobs).filter((job) => job.status === 'queued' || job.status === 'downloading');
+    const activeJobs = Object.values(downloadJobsRef.current).filter((job) => job.status === 'queued' || job.status === 'downloading');
     if (activeJobs.length <= 0) return;
 
     let cancelled = false;
+    let inFlight = false;
+    const controller = new AbortController();
     const pollOnce = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
       const updates: Array<{ jobId: string; job: DownloadJob | null }> = [];
       for (const job of activeJobs) {
         try {
-          const data = await fetchJson<{ job?: DownloadJob | null }>(`/api/model-manager/downloads/${encodeURIComponent(job.jobId)}`);
+          const data = await fetchJson<{ job?: DownloadJob | null }>(`/api/model-manager/downloads/${encodeURIComponent(job.jobId)}`, {
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
+          });
           updates.push({ jobId: job.jobId, job: data.job || null });
-        } catch {
+        } catch (error: any) {
+          if (error?.status === 404) updates.push({ jobId: job.jobId, job: { ...job, status: 'failed', error: 'Download tracking was lost. Check the destination before retrying.' } });
           // ignore transient status errors
         }
       }
+      inFlight = false;
       if (cancelled || updates.length <= 0) return;
 
       let hasTerminalUpdate = false;
+      for (const { jobId, job } of updates) {
+        if (job && ['completed', 'failed', 'cancelled'].includes(job.status) && !announcedTerminalJobsRef.current.has(jobId)) {
+          announcedTerminalJobsRef.current.add(jobId);
+          hasTerminalUpdate = true;
+          addToast({ type: job.status === 'completed' ? 'success' : job.status === 'cancelled' ? 'info' : 'error',
+            message: job.status === 'completed' ? `Downloaded ${job.fileName}` : `${job.fileName}: ${job.error || job.status}` });
+        }
+      }
       setDownloadJobs((prev) => {
         const next = { ...prev };
         for (const update of updates) {
           if (update.job) {
-            next[update.jobId] = update.job;
-            const done = update.job.status === 'completed' || update.job.status === 'failed' || update.job.status === 'cancelled';
-            if (done && !announcedTerminalJobsRef.current.has(update.jobId)) {
-              announcedTerminalJobsRef.current.add(update.jobId);
-              hasTerminalUpdate = true;
-              addToast({
-                type: update.job.status === 'completed' ? 'success' : 'error',
-                message: update.job.status === 'completed'
-                  ? `Downloaded ${update.job.fileName}`
-                  : `${update.job.fileName}: ${update.job.error || update.job.status}`,
-              });
-            }
+            next[update.jobId] = { ...update.job, cancelRequested: prev[update.jobId]?.cancelRequested };
           } else {
             delete next[update.jobId];
           }
@@ -3321,8 +3336,7 @@ export function ModelManagerWorkspace() {
       });
 
       if (hasTerminalUpdate) {
-        const userRoot = roots.find((root) => root.key === 'user');
-        if (userRoot && isPathInside(userRoot.path, currentFolderPath)) {
+        if (currentFolderPath) {
           void loadFolder(currentFolderPath, { preserveSelection: true });
           void loadRoots();
         }
@@ -3336,16 +3350,21 @@ export function ModelManagerWorkspace() {
 
     return () => {
       cancelled = true;
+      controller.abort();
       window.clearInterval(timer);
     };
-  }, [addToast, currentFolderPath, downloadJobs, loadFolder, loadRoots, roots]);
+  }, [addToast, currentFolderPath, activeDownloadIds, loadFolder, loadRoots]);
 
   React.useEffect(() => {
-    const activeJobs = Object.values(localTransferJobs).filter((job) => job.status === 'running');
+    const activeJobs = Object.values(localTransferJobsRef.current).filter((job) => job.status === 'running');
     if (activeJobs.length <= 0) return;
 
     let cancelled = false;
+    let inFlight = false;
+    const controller = new AbortController();
     const pollOnce = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
       const updates: Array<{ jobId: string; job: LocalTransferJob | null }> = [];
       for (const job of activeJobs) {
         const endpoint = job.mode === 'copy'
@@ -3354,7 +3373,7 @@ export function ModelManagerWorkspace() {
         try {
           const data = await fetchJson<{ job?: Partial<LocalTransferJob> | null }>(
             `${endpoint}?jobId=${encodeURIComponent(job.jobId)}`,
-            { cache: 'no-store' },
+            { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) },
           );
           const nextJob = data.job ? {
             ...job,
@@ -3371,13 +3390,25 @@ export function ModelManagerWorkspace() {
             error: typeof data.job.error === 'string' ? data.job.error : job.error,
           } : null;
           updates.push({ jobId: job.jobId, job: nextJob });
-        } catch {
+        } catch (error: any) {
+          if (error?.status === 404) updates.push({ jobId: job.jobId, job: { ...job, status: 'failed', error: 'Transfer tracking was lost. Check source and destination before retrying.' } });
           // ignore transient status errors
         }
       }
+      inFlight = false;
       if (cancelled || updates.length <= 0) return;
 
       let hasTerminalUpdate = false;
+      for (const { jobId, job } of updates) {
+        if (job && ['completed', 'failed'].includes(job.status) && !announcedTerminalTransferJobsRef.current.has(jobId)) {
+          announcedTerminalTransferJobsRef.current.add(jobId);
+          hasTerminalUpdate = true;
+          const verb = job.mode === 'copy' ? 'Copied' : 'Moved';
+          const count = job.successfulPaths ?? (job.status === 'completed' ? job.totalPaths : 0);
+          addToast({ type: job.status === 'completed' ? 'success' : 'error',
+            message: `${verb} ${count}/${job.totalPaths} item(s)${job.error ? `: ${job.error}` : ''}` });
+        }
+      }
       setLocalTransferJobs((prev) => {
         const next = { ...prev };
         for (const update of updates) {
@@ -3386,18 +3417,6 @@ export function ModelManagerWorkspace() {
             continue;
           }
           next[update.jobId] = update.job;
-          const done = update.job.status === 'completed' || update.job.status === 'failed';
-          if (done && !announcedTerminalTransferJobsRef.current.has(update.jobId)) {
-            announcedTerminalTransferJobsRef.current.add(update.jobId);
-            hasTerminalUpdate = true;
-            const verb = update.job.mode === 'copy' ? 'Copied' : 'Moved';
-            addToast({
-              type: update.job.status === 'completed' ? 'success' : 'error',
-              message: update.job.status === 'completed'
-                ? `${verb} ${update.job.totalPaths || 1} item(s)`
-                : `${verb} failed: ${update.job.error || 'transfer failed'}`,
-            });
-          }
         }
         return next;
       });
@@ -3414,15 +3433,17 @@ export function ModelManagerWorkspace() {
 
     return () => {
       cancelled = true;
+      controller.abort();
       window.clearInterval(timer);
     };
-  }, [addToast, localTransferJobs, refreshLocalView]);
+  }, [addToast, activeTransferIds, refreshLocalView]);
 
   const cancelDownload = React.useCallback(async (jobId: string) => {
     try {
-      await fetchJson(`/api/model-manager/downloads/${encodeURIComponent(jobId)}/cancel`, {
+      const response = await fetchJson<{ success?: boolean; error?: string }>(`/api/model-manager/downloads/${encodeURIComponent(jobId)}/cancel`, {
         method: 'POST',
       });
+      if (response.success === false) throw new Error(response.error || 'Unable to cancel download');
     } catch (error: any) {
       addToast({ type: 'error', message: error?.message || 'Failed to cancel download' });
       return;
@@ -3434,11 +3455,10 @@ export function ModelManagerWorkspace() {
         ...prev,
         [jobId]: {
           ...current,
-          status: 'cancelled',
+          cancelRequested: true,
         },
       };
     });
-    addToast({ type: 'info', message: 'Download cancelled' });
   }, [addToast]);
 
   const revealSpecificPath = React.useCallback(async (pathValue: string) => {
@@ -5738,17 +5758,16 @@ export function ModelManagerWorkspace() {
                   const percent = Math.max(0, Math.min(100, Math.round(job.percent || 0)));
                   const verb = job.mode === 'copy' ? 'Copying' : 'Moving';
                   const finishedVerb = job.mode === 'copy' ? 'Copied' : 'Moved';
-                  const label = job.status === 'completed'
-                    ? finishedVerb
-                    : job.status === 'failed'
-                      ? `${finishedVerb} failed`
-                      : verb;
+                  const successfulPaths = job.successfulPaths ?? (job.status === 'completed' ? job.totalPaths : 0);
+                  const label = job.status === 'running'
+                    ? `${verb} ${job.totalPaths} item(s)`
+                    : `${finishedVerb} ${successfulPaths}/${job.totalPaths} item(s)${job.status === 'failed' ? (successfulPaths > 0 ? ' (partial failure)' : ' (failed)') : ''}`;
                   return (
                     <div key={job.jobId} className="rounded-md border border-white/10 bg-black/20 px-2 py-1.5">
                       <div className="flex items-center gap-2">
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-xs text-zinc-200">
-                            {label} {job.totalPaths || 1} item(s)
+                            {label}
                           </div>
                           <div className="truncate text-[10px] text-zinc-500" title={job.currentPath || job.destination || '-'}>
                             {job.currentPath || job.destination || '-'}
@@ -5795,7 +5814,7 @@ export function ModelManagerWorkspace() {
                     <div className="flex items-center gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-xs text-zinc-200">{job.fileName}</div>
-                        <div className="text-[10px] text-zinc-500">{job.status}</div>
+                        <div className="text-[10px] text-zinc-500">{job.cancelRequested && ['queued', 'downloading'].includes(job.status) ? 'Cancelling' : job.status}</div>
                       </div>
                       <div className="text-[11px] text-zinc-400">{Math.max(0, Math.min(100, Math.round(job.progress || 0)))}%</div>
                       {(job.status === 'queued' || job.status === 'downloading') ? (
@@ -5804,6 +5823,7 @@ export function ModelManagerWorkspace() {
                           onClick={() => void cancelDownload(job.jobId)}
                           className="rounded border border-white/10 p-1 text-zinc-400 hover:text-white"
                           title="Cancel download"
+                          disabled={job.cancelRequested}
                         >
                           <X size={12} />
                         </button>

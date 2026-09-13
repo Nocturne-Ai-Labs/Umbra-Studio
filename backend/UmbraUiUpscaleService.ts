@@ -4,6 +4,10 @@ import { dirname, extname, join, resolve, sep } from 'path';
 const IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);
 const JOB_RETENTION_MS = 6 * 60 * 60 * 1000;
 const HISTORY_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+const COMFY_REQUEST_TIMEOUT_MS = 15_000;
+const QUEUE_CHECK_INTERVAL_MS = 5_000;
+const MISSING_PROMPT_GRACE_MS = 30_000;
+const COMFY_OUTAGE_TIMEOUT_MS = 120_000;
 const MAX_SOURCE_BYTES = 512 * 1024 * 1024;
 
 export type UmbraUiUpscaleItemStatus = 'staging' | 'queued' | 'running' | 'completed' | 'failed' | 'canceled';
@@ -13,6 +17,7 @@ export type UmbraUiUpscaleOutputFormat = 'png' | 'jpeg' | 'webp';
 
 export interface UmbraUiUpscaleSource {
   name: string;
+  clientSourceId?: string;
   sourcePath?: string;
   read: () => Promise<ArrayBuffer | Uint8Array>;
   cleanup?: () => Promise<void>;
@@ -27,6 +32,7 @@ export interface UmbraUiUpscaleOutput {
 
 export interface UmbraUiUpscaleJobItem {
   id: string;
+  clientSourceId?: string;
   name: string;
   sourcePath: string;
   status: UmbraUiUpscaleItemStatus;
@@ -254,6 +260,7 @@ export class UmbraUiUpscaleService {
       updatedAt: now,
       items: sources.map((source, index) => ({
         id: `${index + 1}`,
+        clientSourceId: source.clientSourceId || '',
         name: sanitizeFilename(source.name, `image-${index + 1}`),
         sourcePath: String(source.sourcePath || '').trim(),
         status: 'staging',
@@ -429,7 +436,7 @@ export class UmbraUiUpscaleService {
         item.promptId = promptId;
         item.status = 'running';
         job.updatedAt = Date.now();
-        const record = await this.waitForHistory(item.promptId);
+        const record = await this.waitForHistory(item.promptId, job);
         const executionError = readExecutionError(record);
         const status = String(record?.status?.status_str || '').trim().toLowerCase();
         if (executionError || status === 'error') throw new Error(executionError || 'ComfyUI upscale execution failed.');
@@ -437,7 +444,7 @@ export class UmbraUiUpscaleService {
         if (item.outputs.length <= 0) throw new Error('ComfyUI finished the upscale without reporting a saved output.');
         item.status = 'completed';
       } catch (error: any) {
-        item.status = 'failed';
+        item.status = job.cancelRequested && error?.code === 'UPSCALE_PROMPT_MISSING' ? 'canceled' : 'failed';
         item.error = String(error?.message || error || 'Upscale failed.');
       } finally {
         await this.cleanupStagedInputs(job.id);
@@ -454,15 +461,27 @@ export class UmbraUiUpscaleService {
     job.updatedAt = Date.now();
   }
 
-  private async waitForHistory(promptId: string): Promise<any> {
+  private async waitForHistory(promptId: string, job: UmbraUiUpscaleJob): Promise<any> {
     const startedAt = Date.now();
     let lastError = '';
+    let lastQueueCheckAt = -Infinity;
+    let missingSince: number | null = null;
+    let lastHealthyAt = startedAt;
     while (Date.now() - startedAt < HISTORY_TIMEOUT_MS) {
+      job.updatedAt = Date.now();
+      let historyAvailable = false;
       try {
-        const response = await fetch(`${this.getComfyBaseUrl()}/history/${encodeURIComponent(promptId)}`, { cache: 'no-store' });
+        const response = await fetch(`${this.getComfyBaseUrl()}/history/${encodeURIComponent(promptId)}`, {
+          cache: 'no-store', signal: AbortSignal.timeout(COMFY_REQUEST_TIMEOUT_MS),
+        });
         if (response.ok) {
-          const record = readHistoryRecord(await response.json().catch(() => ({})), promptId);
+          const payload = await response.json();
+          if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Invalid ComfyUI history response.');
+          historyAvailable = true;
+          const record = readHistoryRecord(payload, promptId);
           if (record) {
+            lastHealthyAt = Date.now();
+            missingSince = null;
             const status = String(record?.status?.status_str || '').trim().toLowerCase();
             if (readExecutionError(record) || status === 'error' || status === 'success' || status === 'completed' || record?.status?.completed === true) {
               return record;
@@ -474,6 +493,53 @@ export class UmbraUiUpscaleService {
       } catch (error: any) {
         lastError = String(error?.message || error || 'history request failed');
       }
+      if (!historyAvailable) missingSince = null;
+      if (historyAvailable && Date.now() - lastQueueCheckAt >= QUEUE_CHECK_INTERVAL_MS) {
+        lastQueueCheckAt = Date.now();
+        let absent = false;
+        try {
+          const response = await fetch(`${this.getComfyBaseUrl()}/queue`, {
+            cache: 'no-store', signal: AbortSignal.timeout(COMFY_REQUEST_TIMEOUT_MS),
+          });
+          if (!response.ok) throw new Error(`ComfyUI queue returned ${response.status}.`);
+          const queue = await response.json() as any;
+          if (!Array.isArray(queue?.queue_running) || !Array.isArray(queue?.queue_pending)) throw new Error('Invalid ComfyUI queue response.');
+          lastHealthyAt = Date.now();
+          const present = [...queue.queue_running, ...queue.queue_pending].some((entry) => (
+            String(Array.isArray(entry) ? entry[1] : entry?.prompt_id || entry?.promptId || '') === promptId
+          ));
+          if (present) missingSince = null;
+          else {
+            missingSince ??= Date.now();
+            absent = Date.now() - missingSince >= MISSING_PROMPT_GRACE_MS;
+          }
+        } catch (error: any) {
+          missingSince = null;
+          lastError = String(error?.message || 'queue request failed');
+        }
+        if (absent) {
+          // Completion can race the history -> queue reads. Recheck before declaring an orphan.
+          let confirmedMissing = false;
+          try {
+            const response = await fetch(`${this.getComfyBaseUrl()}/history/${encodeURIComponent(promptId)}`, {
+              cache: 'no-store', signal: AbortSignal.timeout(COMFY_REQUEST_TIMEOUT_MS),
+            });
+            if (!response.ok) throw new Error(`ComfyUI history returned ${response.status}.`);
+            const payload = await response.json();
+            if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Invalid ComfyUI history response.');
+            confirmedMissing = !readHistoryRecord(payload, promptId);
+          } catch (error: any) {
+            lastError = String(error?.message || 'history recheck failed');
+          }
+          missingSince = null;
+          if (confirmedMissing) throw Object.assign(new Error(job.cancelRequested
+              ? 'Upscale canceled; ComfyUI no longer has the active prompt.'
+              : 'ComfyUI no longer reports this upscale in its queue or history. Retry the image.'), { code: 'UPSCALE_PROMPT_MISSING' });
+        }
+      }
+      if (Date.now() - lastHealthyAt >= COMFY_OUTAGE_TIMEOUT_MS) {
+        throw new Error(`ComfyUI remained unavailable while waiting for the upscale. Retry when it is connected. ${lastError}`);
+      }
       await Bun.sleep(1000);
     }
     throw new Error(`Timed out waiting for ComfyUI upscale ${promptId}.${lastError ? ` ${lastError}` : ''}`);
@@ -482,7 +548,7 @@ export class UmbraUiUpscaleService {
   private prune() {
     const cutoff = Date.now() - JOB_RETENTION_MS;
     for (const [jobId, job] of this.jobs) {
-      if (job.updatedAt < cutoff) this.jobs.delete(jobId);
+      if (job.updatedAt < cutoff && ['completed', 'partial', 'failed', 'canceled'].includes(job.status)) this.jobs.delete(jobId);
     }
   }
 

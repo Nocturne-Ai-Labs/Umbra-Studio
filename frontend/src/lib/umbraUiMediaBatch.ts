@@ -8,6 +8,14 @@ export interface UmbraUiMediaBatchItem {
 export const UMBRA_UI_MEDIA_BATCH_IMAGE_CONCURRENCY = 25;
 export const UMBRA_UI_MEDIA_BATCH_VIDEO_CONCURRENCY = 1;
 
+export function clearCompletedUmbraUiMediaBatch<T extends { id: string; status: string }>(
+  current: T[],
+  submitted: ReadonlyArray<{ id: string }>,
+): T[] {
+  const submittedIds = new Set(submitted.map((item) => item.id));
+  return current.filter((item) => item.status !== 'completed' || !submittedIds.has(item.id));
+}
+
 export async function runUmbraUiMediaBatch<T extends UmbraUiMediaBatchItem>(options: {
   items: T[];
   runItem: (item: T, sequenceNumber: number) => Promise<void>;

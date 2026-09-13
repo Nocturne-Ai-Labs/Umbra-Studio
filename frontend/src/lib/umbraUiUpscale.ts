@@ -11,6 +11,7 @@ export interface UmbraUiUpscaleOutput {
 
 export interface UmbraUiUpscaleJobItem {
   id: string;
+  clientSourceId?: string;
   name: string;
   sourcePath: string;
   status: UmbraUiUpscaleItemStatus;
@@ -89,8 +90,10 @@ async function stageUmbraUiUpscaleFile(
 
 export async function submitUmbraUiUpscaleJob(options: {
   paths?: string[];
+  sourceIds?: Record<string, string>;
   folders?: string[];
   files?: File[];
+  fileSourceIds?: string[];
   modelName: string;
   maxDimension: number;
   outputFormat: 'png' | 'jpeg' | 'webp';
@@ -102,10 +105,11 @@ export async function submitUmbraUiUpscaleJob(options: {
 }): Promise<UmbraUiUpscaleJob> {
   const files = options.files || [];
   const batchId = files.length > 0 ? createUpscaleStageBatchId() : '';
-  const staged: Array<{ path: string; name: string }> = [];
+  const staged: Array<{ path: string; name: string; clientSourceId: string }> = [];
   try {
     for (let index = 0; index < files.length; index += 1) {
-      staged.push(await stageUmbraUiUpscaleFile(files[index], batchId, index));
+      const source = await stageUmbraUiUpscaleFile(files[index], batchId, index);
+      staged.push({ ...source, clientSourceId: options.fileSourceIds?.[index] || '' });
       options.onStageProgress?.(index + 1, files.length);
     }
   } catch (error) {
@@ -114,6 +118,7 @@ export async function submitUmbraUiUpscaleJob(options: {
   }
   const form = new FormData();
   form.set('paths', JSON.stringify((options.paths || []).filter(Boolean)));
+  form.set('sourceIds', JSON.stringify(options.sourceIds || {}));
   form.set('folders', JSON.stringify((options.folders || []).filter(Boolean)));
   form.set('staged', JSON.stringify(staged));
   form.set('modelName', options.modelName);
@@ -132,6 +137,10 @@ export async function submitUmbraUiUpscaleJob(options: {
   return payload.job as UmbraUiUpscaleJob;
 }
 
+export class UmbraUiUpscaleStatusError extends Error {
+  constructor(message: string, public readonly status: number) { super(message); }
+}
+
 export async function fetchUmbraUiUpscaleJob(jobId: string, signal?: AbortSignal): Promise<UmbraUiUpscaleJob> {
   const response = await fetch(`/api/umbra-ui/upscale/jobs/${encodeURIComponent(jobId)}`, {
     cache: 'no-store',
@@ -139,7 +148,7 @@ export async function fetchUmbraUiUpscaleJob(jobId: string, signal?: AbortSignal
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.success === false || !payload?.job) {
-    throw new Error(String(payload?.error || `Upscale status failed (${response.status}).`));
+    throw new UmbraUiUpscaleStatusError(String(payload?.error || `Upscale status failed (${response.status}).`), response.status);
   }
   return payload.job as UmbraUiUpscaleJob;
 }

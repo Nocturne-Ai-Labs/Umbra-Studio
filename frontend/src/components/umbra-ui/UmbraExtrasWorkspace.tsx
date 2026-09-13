@@ -30,6 +30,7 @@ import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import {
   fetchUmbraUiUpscaleJob,
+  UmbraUiUpscaleStatusError,
   submitUmbraUiUpscaleJob,
   UMBRA_UI_UPSCALE_ACTIVE_JOB_KEY,
   UMBRA_UI_UPSCALE_HANDOFF_KEY,
@@ -261,7 +262,15 @@ export function UmbraExtrasWorkspace({
   const showToast = useStore((state) => state.showToast);
   const [sources, setSources] = React.useState<StagedUpscaleSource[]>([]);
   const [activeTool, setActiveTool] = React.useState<UmbraExtrasToolMode>(readPersistedUmbraUiExtrasTool);
+  const [visitedTools, setVisitedTools] = React.useState<UmbraExtrasToolMode[]>(() => [activeTool]);
+  React.useEffect(() => {
+    setVisitedTools((current) => current.includes(activeTool) ? current : [...current, activeTool]);
+  }, [activeTool]);
   const [job, setJob] = React.useState<UmbraUiUpscaleJob | null>(null);
+  const [activeJobId, setActiveJobId] = React.useState(() => {
+    try { return window.sessionStorage.getItem(UMBRA_UI_UPSCALE_ACTIVE_JOB_KEY) || ''; } catch { return ''; }
+  });
+  const submittedSourceIdsRef = React.useRef(new Set<string>());
   const queueActivity = React.useMemo<UmbraQueueActivity | null>(() => job ? ({
     id: `umbra-upscale:${job.id}`,
     owner: 'umbra-ui-extras-upscale',
@@ -439,27 +448,19 @@ export function UmbraExtrasWorkspace({
   }, [addHandoff]);
 
   React.useEffect(() => {
-    let canceled = false;
-    let storedJobId = '';
-    try { storedJobId = window.sessionStorage.getItem(UMBRA_UI_UPSCALE_ACTIVE_JOB_KEY) || ''; } catch { /* best effort */ }
-    if (!storedJobId) return;
-    void fetchUmbraUiUpscaleJob(storedJobId)
-      .then((savedJob) => { if (!canceled) setJob(savedJob); })
-      .catch(() => {
-        try { window.sessionStorage.removeItem(UMBRA_UI_UPSCALE_ACTIVE_JOB_KEY); } catch { /* best effort */ }
-      });
-    return () => { canceled = true; };
-  }, []);
-
-  React.useEffect(() => {
-    if (!job || isTerminalJob(job)) return;
+    if (!activeJobId) return;
     const controller = new AbortController();
     let timer = 0;
+    let failures = 0;
     const poll = async () => {
       try {
-        const nextJob = await fetchUmbraUiUpscaleJob(job.id, controller.signal);
+        const nextJob = await fetchUmbraUiUpscaleJob(activeJobId, controller.signal);
+        if (controller.signal.aborted) return;
+        failures = 0;
         setJob(nextJob);
         if (isTerminalJob(nextJob)) {
+          setActiveJobId('');
+          try { window.sessionStorage.removeItem(UMBRA_UI_UPSCALE_ACTIVE_JOB_KEY); } catch { /* best effort */ }
           window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
           const firstFailure = nextJob.items.find((item) => item.error)?.error || '';
           showToast(
@@ -473,7 +474,24 @@ export function UmbraExtrasWorkspace({
         timer = window.setTimeout(poll, 1000);
       } catch (error) {
         if (controller.signal.aborted) return;
-        showToast(error instanceof Error ? error.message : 'Failed to read upscale progress.', 'error');
+        if (error instanceof UmbraUiUpscaleStatusError && error.status === 404) {
+          setActiveJobId('');
+          setJob((current) => current?.id === activeJobId ? {
+            ...current,
+            status: 'failed',
+            failed: current.total - current.completed,
+            updatedAt: Date.now(),
+            items: current.items.map((item) => item.status === 'completed' ? item : {
+              ...item, status: 'failed', error: item.error || 'The upscale job is no longer available.',
+            }),
+          } : current);
+          try { window.sessionStorage.removeItem(UMBRA_UI_UPSCALE_ACTIVE_JOB_KEY); } catch { /* best effort */ }
+          showToast('The upscale job is no longer available. Staged inputs were kept.', 'error');
+          return;
+        }
+        failures += 1;
+        if (failures === 1) showToast('Upscale progress unavailable. Reconnecting; staged inputs were kept.', 'error');
+        timer = window.setTimeout(poll, Math.min(10000, 1000 * 2 ** Math.min(failures, 3)));
       }
     };
     timer = window.setTimeout(poll, 500);
@@ -481,7 +499,7 @@ export function UmbraExtrasWorkspace({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [job?.id, job?.status, showToast]);
+  }, [activeJobId, showToast]);
 
   React.useEffect(() => () => {
     for (const url of objectUrlsRef.current) URL.revokeObjectURL(url);
@@ -549,11 +567,21 @@ export function UmbraExtrasWorkspace({
     });
   }, []);
 
+  React.useEffect(() => {
+    if (!job) return;
+    const completedIds = new Set(job.items.filter((item) => item.status === 'completed').map((item) => item.clientSourceId));
+    const completedSources = sources.filter((source) => submittedSourceIdsRef.current.has(source.id) && completedIds.has(source.id));
+    if (completedSources.length) {
+      removeSubmittedSources(completedSources);
+      for (const source of completedSources) submittedSourceIdsRef.current.delete(source.id);
+    }
+  }, [job, removeSubmittedSources, sources]);
+
   const runSources = React.useCallback(async (
     selectedSources: StagedUpscaleSource[],
     requestedPlacement: UmbraQueuePlacement = effectivePlacement,
   ) => {
-    if (submitting || selectedSources.length <= 0) return;
+    if (submitting || activeJobId || selectedSources.length <= 0) return;
     if (!comfyConnected) {
       showToast('Start ComfyUI before queueing an upscale.', 'error');
       return;
@@ -565,9 +593,12 @@ export function UmbraExtrasWorkspace({
     setSubmitting(true);
     setStageProgress({ completed: 0, total: selectedSources.filter((source) => !!source.file).length });
     try {
+      submittedSourceIdsRef.current = new Set(selectedSources.map((source) => source.id));
       const nextJob = await submitUmbraUiUpscaleJob({
         paths: selectedSources.map((source) => source.path).filter(Boolean),
+        sourceIds: Object.fromEntries(selectedSources.filter((source) => source.path).map((source) => [source.path, source.id])),
         files: selectedSources.map((source) => source.file).filter((file): file is File => !!file),
+        fileSourceIds: selectedSources.filter((source) => !!source.file).map((source) => source.id),
         modelName,
         maxDimension,
         outputFormat: exportSettings.format,
@@ -578,8 +609,8 @@ export function UmbraExtrasWorkspace({
         onStageProgress: (completed, total) => setStageProgress({ completed, total }),
       });
       setJob(nextJob);
+      setActiveJobId(nextJob.id);
       try { window.sessionStorage.setItem(UMBRA_UI_UPSCALE_ACTIVE_JOB_KEY, nextJob.id); } catch { /* best effort */ }
-      removeSubmittedSources(selectedSources);
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to queue upscale batch.', 'error');
     } finally {
@@ -587,6 +618,7 @@ export function UmbraExtrasWorkspace({
       setStageProgress({ completed: 0, total: 0 });
     }
   }, [
+    activeJobId,
     comfyConnected,
     effectivePlacement,
     exportSettings.format,
@@ -597,18 +629,17 @@ export function UmbraExtrasWorkspace({
     queueSummary.powerPrompterActive,
     pinnedOutputFolder,
     remoteClient,
-    removeSubmittedSources,
     showToast,
     submitting,
   ]);
 
   React.useEffect(() => {
-    if (!pendingAutoStartPath || submitting) return;
+    if (!pendingAutoStartPath || submitting || activeJobId) return;
     const source = sources.find((candidate) => candidate.path.toLowerCase() === pendingAutoStartPath.toLowerCase());
     if (!source) return;
     setPendingAutoStartPath('');
     void runSources([source]);
-  }, [pendingAutoStartPath, runSources, sources, submitting]);
+  }, [activeJobId, pendingAutoStartPath, runSources, sources, submitting]);
 
   const rowVirtualizer = useVirtualizer({
     count: sources.length,
@@ -632,33 +663,17 @@ export function UmbraExtrasWorkspace({
     }
   }, [failureMessages, showToast]);
 
-  if (activeTool === 'metadata-scanner' || activeTool === 'visual-analysis') {
-    return (
-      <div data-umbra-ui-extras="" className="col-span-2 flex min-h-0 flex-col">
-        <ExtrasToolNavigation value={activeTool} onChange={setActiveTool} remoteMode={remoteMode} />
-        <div data-umbra-ui-extras-inspector="" className="min-h-0 flex-1 overflow-hidden">
-          {activeTool === 'metadata-scanner' ? (
-            <ScannerWorkspace hideHeader active={active} remoteMode={remoteMode} />
-          ) : (
-            <WaifuDiffusionWorkspace hideHeader active={active} remoteMode={remoteMode} />
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (isMediaToolMode(activeTool)) {
-    return (
-      <div data-umbra-ui-extras="" className={`col-span-2 flex min-h-0 flex-col ${activeTool === 'censor' ? 'flex-1 overflow-hidden' : ''}`}>
-        <ExtrasToolNavigation value={activeTool} onChange={setActiveTool} remoteMode={remoteMode} />
-        <UmbraExtrasMediaTools mode={activeTool} />
-      </div>
-    );
-  }
-
   return (
     <div data-umbra-ui-extras="" className="col-span-2 flex min-h-0 flex-col">
       <ExtrasToolNavigation value={activeTool} onChange={setActiveTool} remoteMode={remoteMode} />
+      {visitedTools.filter((tool) => tool !== 'upscale').map((tool) => (
+        <div key={tool} data-extras-tool={tool} data-umbra-ui-extras-inspector={tool === 'metadata-scanner' || tool === 'visual-analysis' ? '' : undefined} className={tool === activeTool ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'hidden'}>
+          {tool === 'metadata-scanner' ? <ScannerWorkspace hideHeader active={active && tool === activeTool} remoteMode={remoteMode} />
+            : tool === 'visual-analysis' ? <WaifuDiffusionWorkspace hideHeader active={active && tool === activeTool} remoteMode={remoteMode} />
+              : isMediaToolMode(tool) ? <UmbraExtrasMediaTools mode={tool} /> : null}
+        </div>
+      ))}
+      <div data-extras-tool="upscale" className={activeTool === 'upscale' ? 'contents' : 'hidden'}>
       <div data-umbra-ui-extras-workspace="" className="grid min-h-0 flex-1 grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
       <section data-umbra-ui-extras-controls="" className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar">
         <div className="mb-3 flex items-center gap-2">
@@ -779,7 +794,7 @@ export function UmbraExtrasWorkspace({
             <button
               type="button"
               onClick={() => void runSources(sources, effectivePlacement)}
-              disabled={sources.length <= 0 || submitting || !comfyConnected}
+              disabled={sources.length <= 0 || submitting || !!activeJobId || !comfyConnected}
               className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-cyan-300/30 bg-cyan-500/[0.1] text-[10px] font-black uppercase tracking-[0.16em] text-cyan-100 transition-colors hover:bg-cyan-500/[0.16] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
             >
               {submitting ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
@@ -909,6 +924,7 @@ export function UmbraExtrasWorkspace({
         )}
         </main>
       </UmbraMobileWorkspaceSheet>
+      </div>
       </div>
     </div>
   );

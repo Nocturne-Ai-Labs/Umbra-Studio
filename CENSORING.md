@@ -10,13 +10,45 @@ Open **Umbra UI > Extras > Image Censor**, create a review project and add image
 Use **Preview batch** to prepare unfinished images, or **Render preview** for the
 current image. Compare the source and preview, adjust individual regions, or use
 rectangle, brush and eraser tools. Automatic detection can be disabled for fully
-manual masking. Moving the comparison slider toward After reveals the preview.
+manual masking. Before and After are shown side by side; the editable mask view
+supports panning and a configurable overlay color.
 
 Each image must be rendered with its current edits and explicitly approved before
-**Export approved** includes it. Editing an approved image returns it to review.
+**Export approved** includes it. Alternatively, **Approve uncensored** approves
+the untouched original without detection or rendering, clears manual masks and
+disables detected regions. This action preserves the original format and size.
+Editing an approved image returns it to review.
 Images with no mask coverage are marked uncensored and still require approval.
 Source-derived, custom and pinned output folders use the existing Censored output
 conventions. Originals and earlier exports are never overwritten.
+Successful exports are removed from the active batch and review project; failed
+exports remain for retry. Keep the exported files and original sources as your
+archive. Removing an image from the batch does not delete its original source.
+
+### Review Flags
+
+**Censor cutoff** controls which detections are eligible for censorship.
+**Review flag floor** independently retains weaker candidates for inspection:
+15% by default, adjustable down to 5% and no higher than the censor cutoff.
+For example, a 65% censor cutoff and 15% review floor flags a 20% candidate
+without censoring it. These scores are detector scores, not calibrated accuracy.
+
+**Needs attention** filters for uncertain regions, empty detection results,
+detector warnings/errors and images needing a fresh review scan. Click a region
+to locate its box; review-only boxes never enter the automatic mask. Add a manual
+rectangle or paint a mask when needed, or approve the original uncensored.
+Explicit approval resolves the flag until further edits or a new detection pass.
+
+Use **Preview batch** to scan existing unapproved projects for low-confidence
+candidates. Previously approved images are left alone. Lowering the review floor
+below the last scan or lowering the censor cutoff requires new detection.
+The optional weak-candidate specialist pass adds some CPU processing time but
+does not generate full-resolution masks for weak candidates.
+
+No detections does not prove an image is safe. A missed region with no surviving
+candidate cannot be reliably flagged when other regions were detected. Flags
+prioritize manual review; they do not guarantee complete coverage or auto-approve
+unflagged images.
 
 Projects save under `User/UmbraUI/CensorReviews/`, including immutable source
 copies, current previews, masks and edit state. Allow space for the original files
