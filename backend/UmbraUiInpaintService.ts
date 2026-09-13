@@ -2220,7 +2220,10 @@ export class UmbraUiInpaintService {
     nodeTypes: Set<string>,
   ): Record<string, any> {
     if (settings.sourceFreeGeneration) {
-      const graph = structuredClone(sourceGraph);
+      // Native edit graphs still require the uploaded blank source and full mask.
+      const graph = settings.inpaintAdapter === 'native_edit'
+        ? this.buildNativeEditWorkflow(sourceGraph, sourceInputName, maskInputName, controlLayers, referenceLayers, settings, seed)
+        : structuredClone(sourceGraph);
       const sourceStem = sanitizeFilename(sourceName, 'canvas.png').replace(/\.[^.]+$/, '');
       for (const node of Object.values(graph)) {
         if (!node || typeof node !== 'object' || String((node as any).class_type || '') !== 'UmbraLabSaveImage') continue;

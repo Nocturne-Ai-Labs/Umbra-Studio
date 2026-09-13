@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.32.15
+
+### TL;DR - Setup After Updating
+
+Update and restart Umbra Studio, then refresh browser and remote tabs.
+Launch with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux.
+No additional models, ComfyUI update, Umbra Nodes update or migration is required
+for this hotfix. Existing model and pipeline requirements still apply.
+
+### Canvas Native Pipeline Hotfix
+
+- Blank Canvas generation now binds the uploaded source image and mask when
+  using a native edit workflow, instead of submitting template filenames.
+  This fixes Krea 2 validation failures and the same path in other native edit
+  pipelines, while retaining Canvas output routing and mask preservation.
+- Canvas disables color matching for native edit pipelines and submits it as
+  zero, preventing inherited settings from blocking generation. Switching back
+  to a supported pipeline restores the user's saved color-match value.
+- This scoped hotfix does not change model weights, sampling defaults or
+  existing image-backed inpaint behavior. Windows and Linux packages exclude
+  private images, runtime data and internal tests.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Krea 2 blank Canvas jobs no longer submit placeholder source/mask files.
+- Fixed: Unsupported inherited color matching no longer blocks native Canvas jobs.
+- Improved: Color-match controls reflect native pipeline support without losing preferences.
+
 ## v0.32.14
 
 ### TL;DR - Setup After Updating
