@@ -5,12 +5,16 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmdirSync,
   renameSync,
   rmSync,
   writeFileSync,
+  type WriteStream,
 } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import type { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import yauzl from 'yauzl';
 import {
   normalizeUmbraUpdateState,
@@ -296,10 +300,18 @@ async function extractZip(
         return;
       }
       let settled = false;
+      let activeInput: Readable | undefined;
+      let activeOutput: WriteStream | undefined;
       const fail = (error: unknown) => {
         if (settled) return;
         settled = true;
-        archive.close();
+        activeInput?.destroy();
+        activeOutput?.destroy();
+        try {
+          archive.close();
+        } catch {
+          // Preserve the original extraction failure.
+        }
         rejectExtract(error instanceof Error ? error : new Error(String(error)));
       };
       archive.on('error', fail);
@@ -308,14 +320,9 @@ async function extractZip(
         settled = true;
         resolveExtract();
       });
-      archive.on('entry', (entry) => {
-        let relativePath = '';
-        try {
-          relativePath = safeArchiveEntryName(entry.fileName);
-        } catch (error) {
-          fail(error);
-          return;
-        }
+      const extractEntry = async (entry: yauzl.Entry) => {
+        if (settled) return;
+        const relativePath = safeArchiveEntryName(entry.fileName);
         const destinationPath = resolve(destinationRoot, ...relativePath.split('/'));
         const rel = relative(resolve(destinationRoot), destinationPath);
         if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
@@ -333,31 +340,46 @@ async function extractZip(
           return;
         }
         mkdirSync(dirname(destinationPath), { recursive: true });
-        archive.openReadStream(entry, (streamError, input) => {
-          if (streamError || !input) {
-            fail(streamError || new Error(`Could not extract ${relativePath}.`));
-            return;
-          }
-          const output = createWriteStream(destinationPath, { flags: 'wx' });
-          input.on('error', fail);
-          output.on('error', fail);
-          output.on('close', () => {
-            if (process.platform !== 'win32') {
-              const unixMode = (entry.externalFileAttributes >>> 16) & 0xffff;
-              if (unixMode) {
-                try {
-                  chmodSync(destinationPath, unixMode & 0o777);
-                } catch {
-                  // Known launchers are repaired after extraction.
-                }
-              }
+        const input = await new Promise<Readable | undefined>((resolveInput, rejectInput) => {
+          archive.openReadStream(entry, (streamError, stream) => {
+            if (settled) {
+              stream?.destroy();
+              resolveInput(undefined);
+            } else if (streamError || !stream) {
+              rejectInput(streamError || new Error(`Could not extract ${relativePath}.`));
+            } else {
+              activeInput = stream;
+              resolveInput(stream);
             }
-            archive.readEntry();
           });
-          input.pipe(output);
         });
+        if (settled || !input) return;
+        activeOutput = createWriteStream(destinationPath, { flags: 'wx' });
+        await pipeline(input, activeOutput);
+        activeInput = undefined;
+        activeOutput = undefined;
+        if (settled) return;
+        if (process.platform !== 'win32') {
+          const unixMode = (entry.externalFileAttributes >>> 16) & 0xffff;
+          if (unixMode) {
+            try {
+              chmodSync(destinationPath, unixMode & 0o777);
+            } catch {
+              // Known launchers are repaired after extraction.
+            }
+          }
+        }
+        archive.readEntry();
+      };
+      archive.on('entry', (entry) => {
+        // Archive callbacks must reject extraction, including synchronous filesystem failures.
+        void extractEntry(entry).catch(fail);
       });
-      archive.readEntry();
+      try {
+        archive.readEntry();
+      } catch (error) {
+        fail(error);
+      }
     });
   });
 }
@@ -472,14 +494,29 @@ export function applyPayload(
 
   mkdirSync(request.runtimeRoot, { recursive: true });
   mkdirSync(backupRoot, { recursive: false });
+  let backupComplete = false;
   try {
     moveApplicationEntries(request.runtimeRoot, backupRoot);
+    backupComplete = true;
     moveApplicationEntries(payloadRoot, request.runtimeRoot);
     mkdirSync(join(request.runtimeRoot, 'User'), { recursive: true });
     mkdirSync(join(request.runtimeRoot, 'Tools'), { recursive: true });
     return { backupRoot, preservedRoot };
   } catch (error) {
-    rollbackSwap(request, backupRoot, preservedRoot);
+    try {
+      if (backupComplete) rollbackSwap(request, backupRoot, preservedRoot);
+      else {
+        // Replacement has not begun: untouched entries are still the old app.
+        for (const entry of readdirSync(backupRoot, { withFileTypes: true })) {
+          const target = join(request.runtimeRoot, entry.name);
+          if (existsSync(target)) throw new Error(`Refusing to overwrite ${target} while restoring the incomplete backup.`);
+          renameSync(join(backupRoot, entry.name), target);
+        }
+        rmdirSync(backupRoot);
+      }
+    } catch (recoveryError) {
+      throw new Error(`Update failed: ${error instanceof Error ? error.message : String(error)}. Recovery incomplete; retain ${backupRoot}. ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`);
+    }
     throw error;
   }
 }

@@ -107,8 +107,9 @@ async function applyImageWatermark(options: {
   const exportSettings = normalizeImageExportSettings(options.exportSettings);
   const source = sharp(options.sourcePath).rotate();
   const metadata = await source.metadata();
-  const originalWidth = Math.max(1, Number(metadata.width) || 1);
-  const originalHeight = Math.max(1, Number(metadata.height) || 1);
+  const swapAxes = [5, 6, 7, 8].includes(Number(metadata.orientation));
+  const originalWidth = Math.max(1, Number(swapAxes ? metadata.height : metadata.width) || 1);
+  const originalHeight = Math.max(1, Number(swapAxes ? metadata.width : metadata.height) || 1);
   const resizeScale = exportSettings.resizeEnabled
     ? exportSettings.longEdge / Math.max(originalWidth, originalHeight)
     : 1;

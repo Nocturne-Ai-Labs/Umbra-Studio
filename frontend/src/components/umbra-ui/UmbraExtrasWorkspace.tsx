@@ -819,6 +819,12 @@ export function UmbraExtrasWorkspace({
               <span>{job.status}</span>
               <span>{job.failed > 0 ? `${job.failed} failed` : job.modelName}</span>
             </div>
+            {job.warning ? (
+              <div role="status" data-umbra-ui-upscale-warning="" className="mt-3 flex items-start gap-2 rounded-md border border-amber-300/25 bg-amber-500/[0.07] p-2.5 text-amber-100/80">
+                <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                <p className="min-w-0 break-words font-mono text-[9px] leading-relaxed">{job.warning}</p>
+              </div>
+            ) : null}
             {failureMessages.length > 0 ? (
               <div data-umbra-ui-upscale-errors="" className="mt-3 rounded-md border border-red-300/25 bg-red-500/[0.07] p-2.5">
                 <div className="flex items-center gap-2">

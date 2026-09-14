@@ -213,25 +213,60 @@ export class AnimaModelMergeService {
   }
   async deleteRecipe(id: unknown) { await rm(join(this.recipeRoot(), `${this.recipeId(id)}.json`), { force: true }); }
 
-  private run(python: string, request: object, onEvent?: (event: Record<string, unknown>) => void) {
+  private run(python: string, request: Record<string, unknown>, onEvent?: (event: Record<string, unknown>) => void) {
     const child = spawn(python, ['-u', this.script], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, CUDA_VISIBLE_DEVICES: '-1', PYTORCH_NVML_BASED_CUDA_CHECK: '0', OMP_NUM_THREADS: '2' } });
-    child.stdin.on('error', () => undefined);
-    child.stdin.end(JSON.stringify(request));
     let buffer = '', errors = '';
-    let last: Record<string, unknown> = {};
+    let result: Record<string, unknown> | undefined;
+    let failure: Error | undefined;
+    const fail = (error: Error) => {
+      if (failure) return;
+      failure = error;
+      buffer = '';
+      child.kill('SIGKILL');
+    };
+    const consume = (line: string) => {
+      if (failure || !line.trim()) return;
+      let event: Record<string, unknown>;
+      try { event = JSON.parse(line); } catch { return; }
+      if (!event || typeof event !== 'object' || Array.isArray(event)) return;
+      if (typeof event.error === 'string' && event.error) { failure = new Error(event.error); return; }
+      if (event.phase === 'completed' && (request.action !== 'merge' || event.output !== request.output)) return;
+      if (request.action === 'inspect' ? event.compatible === true : event.phase === 'completed' && event.output === request.output) result = event;
+      // Publication is provisional until the worker finishes its cleanup and exits.
+      if (event.phase === 'completed') return;
+      try { onEvent?.(event); } catch (error) { fail(error instanceof Error ? error : new Error(String(error))); }
+    };
+    child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
+      if (failure) return;
+      if (buffer.length + chunk.length > 4 * 1024 * 1024) { fail(new Error('Merge worker output exceeded the response limit.')); return; }
       buffer += String(chunk);
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
-      for (const line of lines) {
-        try { last = JSON.parse(line); onEvent?.(last); } catch { /* Ignore non-protocol library output. */ }
-      }
+      for (const line of lines) consume(line);
     });
     child.stderr.on('data', (chunk) => { errors = (errors + String(chunk)).slice(-2000); });
+    child.stdin.on('error', fail);
+    child.stdout.on('error', fail);
+    child.stderr.on('error', fail);
     const done = new Promise<Record<string, unknown>>((accept, reject) => {
-      child.on('error', reject);
-      child.on('close', (code) => code === 0 ? accept(last) : reject(new Error(String(last.error || errors || 'Merge worker stopped.'))));
+      child.on('error', fail);
+      // Keep ownership until close: cleanup must not race a still-writing worker.
+      child.on('close', (code) => {
+        consume(buffer);
+        buffer = '';
+        if (failure) reject(failure);
+        else if (code !== 0) reject(new Error(errors || 'Merge worker stopped.'));
+        else if (!result) reject(new Error('Merge worker exited without a completed response.'));
+        else {
+          try {
+            if (request.action === 'merge') onEvent?.(result);
+            accept(result);
+          } catch (error) { reject(error); }
+        }
+      });
     });
+    try { child.stdin.end(JSON.stringify(request)); } catch (error) { fail(error instanceof Error ? error : new Error(String(error))); }
     return { child, done };
   }
 

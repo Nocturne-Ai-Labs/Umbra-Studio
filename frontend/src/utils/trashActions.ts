@@ -35,6 +35,80 @@ async function parseJsonSafe(response: Response): Promise<any> {
   }
 }
 
+function collectDeleteResults(requested: string[], entries: unknown[]) {
+  const key = (value: string) => value.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  const reported = new Map<string, Record<string, unknown> | null>();
+  for (const value of entries) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const entry = value as Record<string, unknown>;
+    const path = entry.requestedPath === undefined ? entry.path : entry.requestedPath;
+    if (typeof path !== 'string' || !path.trim()) continue;
+    const pathKey = key(path);
+    reported.set(pathKey, reported.has(pathKey) ? null : entry);
+  }
+  const deletedPaths: string[] = [];
+  const failed: Array<{ path: string; error: string }> = [];
+  const confirmed: Record<string, unknown>[] = [];
+  for (const path of requested) {
+    const entry = reported.get(key(path));
+    if (entry?.success === true) { deletedPaths.push(path); confirmed.push(entry); }
+    else failed.push({ path, error: typeof entry?.error === 'string' && entry.error ? entry.error : 'Deletion was not confirmed. Refresh Gallery before retrying.' });
+  }
+  return { deletedPaths, failed, confirmed };
+}
+
+export function validateTrashRestoreResult(payload: unknown, requestedPaths: string[]) {
+  const key = (value: string) => value.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  const body = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  const reported = new Map<string, Record<string, unknown> | null>();
+  for (const [values, success] of [[body.restored, true], [body.failed, false]] as const) {
+    if (!Array.isArray(values)) continue;
+    for (const entry of values) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry) || typeof entry.trashPath !== 'string') continue;
+      const pathKey = key(entry.trashPath);
+      reported.set(pathKey, reported.has(pathKey) ? null : { ...entry, success });
+    }
+  }
+  const restored: Array<{ trashPath: string; restoredPath: string; type?: 'file' | 'folder' }> = [];
+  const failed: Array<{ trashPath: string; error: string }> = [];
+  for (const trashPath of [...new Set(requestedPaths.map(key).filter(Boolean))]) {
+    const entry = reported.get(trashPath);
+    if (entry?.success === true && typeof entry.restoredPath === 'string' && entry.restoredPath.trim()) {
+      restored.push({ trashPath, restoredPath: entry.restoredPath, type: entry.type === 'file' || entry.type === 'folder' ? entry.type : undefined });
+    } else {
+      failed.push({ trashPath, error: typeof entry?.error === 'string' && entry.error ? entry.error : 'Restore was not confirmed. Refresh Trash before retrying.' });
+    }
+  }
+  if (!restored.length) throw new Error(failed[0]?.error || 'Restore was not confirmed.');
+  return { restored, failed, warning: typeof body.warning === 'string' ? body.warning : undefined };
+}
+
+export async function permanentlyDeleteTrashPaths(paths: string[]): Promise<Pick<DeleteExecutionResult, 'deletedPaths' | 'failed' | 'warning'>> {
+  const requested = normalizeDeletePaths(paths);
+  if (!requested.length) return { deletedPaths: [], failed: [] };
+  const response = await fetch('/api/trash/permanent-delete', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths: requested }),
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) throw new Error(String(payload?.error || 'Failed to permanently delete from trash'));
+  const key = (value: string) => value.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  const results = new Map<string, { success?: boolean; error?: unknown }>();
+  if (Array.isArray(payload?.results)) {
+    for (const item of payload.results) {
+      if (item && typeof item.path === 'string') results.set(key(item.path), item);
+    }
+  }
+  const deletedPaths: string[] = [];
+  const failed: Array<{ path: string; error: string }> = [];
+  for (const path of requested) {
+    const result = results.get(key(path));
+    if (result?.success === true) deletedPaths.push(path);
+    else failed.push({ path, error: String(result?.error || 'Deletion was not confirmed.') });
+  }
+  return { deletedPaths, failed, warning: typeof payload?.warning === 'string' ? payload.warning : undefined };
+}
+
 export async function deletePathsWithSettings(
   paths: string[],
   settings: Partial<AppSettings> | Record<string, unknown>,
@@ -64,27 +138,18 @@ export async function deletePathsWithSettings(
       throw new Error(result?.error || 'Trash delete failed');
     }
 
-    const trashItems = Array.isArray(result?.items)
-      ? result.items
-          .map((item: any) => ({
-            trashPath: String(item?.trashPath || ''),
-            originalPath: String(item?.originalPath || ''),
-          }))
-          .filter((item: TrashItemRef) => item.trashPath && item.originalPath)
-      : [];
-    const failed = Array.isArray(result?.failed)
-      ? result.failed
-          .map((item: any) => ({
-            path: String(item?.path || ''),
-            error: String(item?.error || 'Trash delete failed'),
-          }))
-          .filter((item: { path: string; error: string }) => !!item.path)
-      : [];
-    const deletedPaths = trashItems.map((item: TrashItemRef) => item.originalPath);
-
-    if (deletedPaths.length === 0 && failed.length > 0) {
-      throw new Error(failed[0].error || 'Trash delete failed');
-    }
+    const entries = Array.isArray(result?.items) ? result.items.map((item: any) => ({
+      path: item?.originalPath,
+      requestedPath: item?.requestedPath,
+      originalPath: item?.originalPath,
+      trashPath: item?.trashPath,
+      success: typeof item?.originalPath === 'string' && !!item.originalPath.trim()
+        && typeof item?.trashPath === 'string' && !!item.trashPath.trim(),
+    })) : [];
+    if (Array.isArray(result?.failed)) entries.push(...result.failed.map((item: any) => ({ path: item?.path, error: item?.error, success: false })));
+    const { deletedPaths, failed, confirmed } = collectDeleteResults(normalizedPaths, entries);
+    const trashItems = confirmed.map((item) => ({ originalPath: item.originalPath as string, trashPath: item.trashPath as string }));
+    if (deletedPaths.length === 0) throw new Error(failed[0]?.error || 'Trash delete failed');
 
     return {
       mode,
@@ -106,18 +171,7 @@ export async function deletePathsWithSettings(
       throw new Error(result?.error || 'System trash failed');
     }
 
-    const rawResults = Array.isArray(result?.results) ? result.results : [];
-    const deletedPaths = rawResults
-      .filter((item: any) => item?.success)
-      .map((item: any) => String(item?.path || ''))
-      .filter(Boolean);
-    const failed = rawResults
-      .filter((item: any) => !item?.success)
-      .map((item: any) => ({
-        path: String(item?.path || ''),
-        error: String(item?.error || 'System trash failed'),
-      }))
-      .filter((item: { path: string; error: string }) => !!item.path);
+    const { deletedPaths, failed } = collectDeleteResults(normalizedPaths, Array.isArray(result?.results) ? result.results : []);
 
     if (deletedPaths.length === 0) {
       throw new Error(failed[0]?.error || 'System trash failed');
@@ -142,18 +196,7 @@ export async function deletePathsWithSettings(
     throw new Error(result?.error || 'Permanent delete failed');
   }
 
-  const rawResults = Array.isArray(result?.results) ? result.results : [];
-  const deletedPaths = rawResults
-    .filter((item: any) => item?.success)
-    .map((item: any) => String(item?.path || ''))
-    .filter(Boolean);
-  const failed = rawResults
-    .filter((item: any) => !item?.success)
-    .map((item: any) => ({
-      path: String(item?.path || ''),
-      error: String(item?.error || 'Permanent delete failed'),
-    }))
-    .filter((item: { path: string; error: string }) => !!item.path);
+  const { deletedPaths, failed } = collectDeleteResults(normalizedPaths, Array.isArray(result?.results) ? result.results : []);
 
   if (deletedPaths.length === 0) {
     throw new Error(failed[0]?.error || 'Permanent delete failed');

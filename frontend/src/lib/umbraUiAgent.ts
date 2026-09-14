@@ -1,4 +1,4 @@
-import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
+import { readUserConfigStrict, writeUserConfig } from '@/lib/userConfig';
 import {
   createDefaultUmbraUiAgentInstructions,
   mergeRequiredUmbraUiAgentInstructions,
@@ -116,17 +116,10 @@ function normalizeInstructions(value: unknown): UmbraUiAgentInstruction[] {
 
 export async function loadUmbraUiAgentInstructions(): Promise<UmbraUiAgentInstruction[]> {
   const defaults = createDefaultUmbraUiAgentInstructions();
-  const stored = await readUserConfig<unknown>('umbra-ui-agent-instructions', defaults);
+  const stored = await readUserConfigStrict<unknown>('umbra-ui-agent-instructions', defaults);
+  if (!Array.isArray(stored)) throw new Error('Invalid saved agent instructions');
   const normalized = normalizeInstructions(stored);
-  if (normalized.length > 0) {
-    const merged = mergeRequiredUmbraUiAgentInstructions(normalized);
-    if (merged.length !== normalized.length) {
-      await writeUserConfig('umbra-ui-agent-instructions', merged);
-    }
-    return merged;
-  }
-  await writeUserConfig('umbra-ui-agent-instructions', defaults);
-  return defaults;
+  return normalized.length > 0 ? mergeRequiredUmbraUiAgentInstructions(normalized) : defaults;
 }
 
 export async function saveUmbraUiAgentInstructions(instructions: UmbraUiAgentInstruction[]): Promise<UmbraUiAgentInstruction[]> {

@@ -5,7 +5,7 @@ import { Filmstrip, type FilmstripImage, type SortDirection, type SortField } fr
 import { resolveFilmstripSelectedImages } from '@/components/filmstrip/filmstripSelection';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
-import { deletePathsWithSettings } from '@/utils/trashActions';
+import { deletePathsWithSettings, permanentlyDeleteTrashPaths, validateTrashRestoreResult } from '@/utils/trashActions';
 import { isDiagnosticLoggingEnabled, logDiagnostic } from '@/lib/diagnostics';
 import { getWorkflowJsonExport, type ImageMetadata } from '@/utils/metadata';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
@@ -341,24 +341,6 @@ function isLikelyFilePath(value: string): boolean {
   return Boolean(leaf) && leaf.includes('.');
 }
 
-function resolveRestoredPath(
-  entry: unknown,
-  fallbackPath?: string,
-): string {
-  const payload = (entry && typeof entry === 'object'
-    ? entry as Record<string, unknown>
-    : null);
-  return normalizePath(
-    String(
-      payload?.restoredPath
-      || payload?.originalPath
-      || payload?.path
-      || fallbackPath
-      || '',
-    ),
-  );
-}
-
 function normalizeGallerySortBy(input: unknown): GallerySortBy {
   const value = String(input || '').trim().toLowerCase();
   if (value === 'modified' || value === 'name' || value === 'custom') return value;
@@ -653,7 +635,7 @@ export function UmbraFilmstrip({
   }, [addToast, currentFolder, images, rootPath]);
 
   const refreshImages = useCallback((options?: { force?: boolean }) => {
-    const folder = normalizePath(currentFolder || rootPath);
+    const folder = normalizePath(currentFolderRef.current || rootPath);
     if (!folder) return;
     const now = Date.now();
     if (!options?.force && now - lastFeedRequestAtRef.current < 850) return;
@@ -665,7 +647,7 @@ export function UmbraFilmstrip({
         source: options?.force ? 'gallery-content-changed' : 'filmstrip-refresh',
       },
     }));
-  }, [currentFolder, rootPath]);
+  }, [rootPath]);
 
   useEffect(() => {
     if (!rootPath) return;
@@ -1208,6 +1190,19 @@ export function UmbraFilmstrip({
     }));
   }, []);
 
+  const removeCompletedImages = useCallback((entries: FilmstripImage[], paths: string[]) => {
+    const removedPaths = Array.from(new Set(paths.map(normalizePath).filter(Boolean)));
+    if (removedPaths.length === 0) return;
+    const isRemoved = (path: string) => removedPaths.some((removed) => pathsLikelySame(path, removed));
+    const removedIds = new Set(entries.filter((entry) => isRemoved(entry.path)).map((entry) => normalizeId(entry.id)));
+    setFeedMode('remove');
+    setImages((current) => current.filter((item) => !isRemoved(item.path)));
+    setCustomOrder((current) => current.filter((id) => !removedIds.has(normalizeId(id))));
+    setSelectedIds((current) => new Set(Array.from(current).filter((id) => !removedIds.has(normalizeId(id)))));
+    setLastSelectedId((current) => removedIds.has(normalizeId(current)) ? '' : current);
+    notifyGalleryRemovePaths(removedPaths);
+  }, [notifyGalleryRemovePaths]);
+
   const notifyGalleryRestorePaths = useCallback((paths: string[]) => {
     const normalized = Array.from(new Set(paths.map((entry) => normalizePath(entry)).filter(Boolean)));
     if (normalized.length === 0) return;
@@ -1317,23 +1312,15 @@ export function UmbraFilmstrip({
     const deletePaths = selectedPaths.filter((pathValue) => !isTrashPath(pathValue));
     if (trashPaths.length === selectedPaths.length) {
       try {
-        const response = await fetch('/api/trash/permanent-delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            paths: trashPaths,
-          }),
-        });
-        const payload = await response.json().catch(() => ({} as Record<string, unknown>));
-        if (!response.ok) {
-          throw new Error(String(payload?.error || 'Failed to permanently delete from trash'));
-        }
-        addToast({
+        const result = await permanentlyDeleteTrashPaths(trashPaths);
+        const count = result.deletedPaths.length;
+        if (result.failed.length) addToast({ type: 'error', message: result.failed[0].error });
+        if (result.warning) addToast({ type: 'info', message: result.warning });
+        if (count) addToast({
           type: 'success',
-          message: `Deleted ${trashPaths.length} item${trashPaths.length === 1 ? '' : 's'} permanently`,
+          message: `Deleted ${count} item${count === 1 ? '' : 's'} permanently`,
         });
-        setSelectedIds(new Set());
-        setLastSelectedId('');
+        removeCompletedImages(selectedEntries, result.deletedPaths);
         notifyGalleryTrashUpdated();
         void refreshImages({ force: true });
       } catch (error) {
@@ -1358,18 +1345,20 @@ export function UmbraFilmstrip({
       let permanentlyDeleted = 0;
 
       if (deletePaths.length > 0) {
-        const deleteResult = await deletePathsWithSettings(deletePaths, appSettings);
+        const deleteResult = await deletePathsWithSettings(deletePaths, appSettings).catch((error: unknown) => ({
+          mode: undefined,
+          deletedPaths: [] as string[],
+          trashItems: [],
+          failed: deletePaths.map((path) => ({ path, error: error instanceof Error ? error.message : 'Failed to delete selection' })),
+          warning: undefined,
+        }));
         failedItems.push(...deleteResult.failed);
         const successfulPaths = Array.from(new Set(
-          (deleteResult.deletedPaths.length > 0
-            ? deleteResult.deletedPaths
-            : deletePaths.filter((entry) => !deleteResult.failed.some((failed) => pathsLikelySame(failed.path, entry))))
+          deleteResult.deletedPaths
             .map((entry) => normalizePath(entry))
             .filter(Boolean),
         ));
-        if (successfulPaths.length === 0 && failedItems.length > 0) {
-          throw new Error(String(failedItems[0]?.error || 'Failed to delete selection'));
-        }
+        if (deleteResult.warning) addToast({ type: 'info', message: deleteResult.warning });
         removeSignalPaths.push(...successfulPaths);
         if (deleteResult.mode === 'umbra-trash') {
           movedToUmbraTrash += successfulPaths.length;
@@ -1398,17 +1387,15 @@ export function UmbraFilmstrip({
       }
 
       if (trashPaths.length > 0) {
-        const response = await fetch('/api/trash/permanent-delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ paths: trashPaths }),
-        });
-        const payload = await response.json().catch(() => ({} as Record<string, unknown>));
-        if (!response.ok) {
-          throw new Error(String(payload?.error || 'Failed to permanently delete from trash'));
-        }
-        removeSignalPaths.push(...trashPaths);
-        permanentlyDeleted += trashPaths.length;
+        const result = await permanentlyDeleteTrashPaths(trashPaths).catch((error: unknown) => ({
+          deletedPaths: [] as string[],
+          failed: trashPaths.map((path) => ({ path, error: error instanceof Error ? error.message : 'Failed to permanently delete from trash' })),
+          warning: undefined,
+        }));
+        removeSignalPaths.push(...result.deletedPaths);
+        permanentlyDeleted += result.deletedPaths.length;
+        failedItems.push(...result.failed);
+        if (result.warning) addToast({ type: 'info', message: result.warning });
       }
 
       const dedupedRemoveSignalPaths = Array.from(new Set(
@@ -1440,15 +1427,13 @@ export function UmbraFilmstrip({
                 if (!restoreResponse.ok) {
                   throw new Error(String(restorePayload?.error || 'Failed to restore from trash'));
                 }
-                const restoredItems = Array.isArray((restorePayload as { restored?: unknown[] }).restored)
-                  ? (restorePayload as {
-                    restored?: Array<{ restoredPath?: string; originalPath?: string; type?: 'file' | 'folder' }>;
-                  }).restored || []
-                  : [];
+                const { restored: restoredItems, failed, warning } = validateTrashRestoreResult(restorePayload, undoItems.map((item) => item.trashPath));
+                if (failed.length) addToast({ type: 'error', message: failed[0].error });
+                if (warning) addToast({ type: 'info', message: warning });
                 const restoredPaths = restoredItems
-                  .map((entry, index) => resolveRestoredPath(entry, undoItems[index]?.originalPath))
+                  .map((entry) => entry.restoredPath)
                   .filter(Boolean);
-                addRestoredBatchToast(restoredPaths, undoItems.length, restoredItems[0]?.type);
+                addRestoredBatchToast(restoredPaths, restoredPaths.length, restoredItems[0]?.type);
                 if (restoredPaths.length > 0) notifyGalleryRestorePaths(restoredPaths);
                 notifyGalleryTrashUpdated();
                 void refreshImages({ force: true });
@@ -1480,12 +1465,14 @@ export function UmbraFilmstrip({
       }
 
       if (dedupedRemoveSignalPaths.length > 0) {
-        if (!didOptimisticRemove) {
-          applyOptimisticRemoval(dedupedRemoveSignalPaths);
-        } else if (failedItems.length > 0) {
+        removeCompletedImages(selectedEntries, dedupedRemoveSignalPaths);
+        notifyGalleryTrashUpdated();
+        if (failedItems.length > 0) {
           void refreshImages({ force: true });
         }
-      } else if (!didOptimisticRemove) {
+      } else if (didOptimisticRemove) {
+        void refreshImages({ force: true });
+      } else {
         setSelectedIds(new Set());
         setLastSelectedId('');
       }
@@ -1507,10 +1494,12 @@ export function UmbraFilmstrip({
     notifyGalleryRestorePaths,
     notifyGalleryTrashUpdated,
     refreshImages,
+    removeCompletedImages,
     resolveSelectedImages,
   ]);
 
   const onRestoreFromTrash = useCallback(async (ids: string[]) => {
+    const selectedEntries = resolveSelectedImages(ids);
     const selectedPaths = resolveSelectionPaths(ids).filter((pathValue) => isTrashPath(pathValue));
     if (selectedPaths.length === 0) return;
 
@@ -1526,15 +1515,13 @@ export function UmbraFilmstrip({
       if (!response.ok) {
         throw new Error(String(payload?.error || 'Failed to restore from trash'));
       }
-      const restoredItems = Array.isArray((payload as { restored?: unknown[] }).restored)
-        ? (payload as {
-          restored?: Array<{ restoredPath?: string; originalPath?: string; type?: 'file' | 'folder' }>;
-        }).restored || []
-        : [];
-      const count = restoredItems.length || selectedPaths.length;
+      const { restored: restoredItems, failed, warning } = validateTrashRestoreResult(payload, selectedPaths);
+      if (failed.length) addToast({ type: 'error', message: failed[0].error });
+      if (warning) addToast({ type: 'info', message: warning });
+      const count = restoredItems.length;
 
       if (restoredItems.length === 1) {
-        const restoredPath = resolveRestoredPath(restoredItems[0]);
+        const restoredPath = restoredItems[0].restoredPath;
         if (restoredPath) {
           addRestoredToast(restoredPath, undefined, restoredItems[0]?.type);
         } else {
@@ -1544,7 +1531,7 @@ export function UmbraFilmstrip({
           });
         }
       } else {
-        const firstPath = resolveRestoredPath(restoredItems[0]);
+        const firstPath = restoredItems[0].restoredPath;
         addToast({
           type: 'success',
           message: `Restored ${count} item${count === 1 ? '' : 's'}`,
@@ -1561,13 +1548,12 @@ export function UmbraFilmstrip({
         });
       }
       const restoredPaths = restoredItems
-        .map((entry) => resolveRestoredPath(entry))
+        .map((entry) => entry.restoredPath)
         .filter(Boolean);
       if (restoredPaths.length > 0) {
         notifyGalleryRestorePaths(restoredPaths);
       }
-      setSelectedIds(new Set());
-      setLastSelectedId('');
+      removeCompletedImages(selectedEntries, restoredItems.map((entry) => entry.trashPath));
       notifyGalleryTrashUpdated();
       void refreshImages({ force: true });
     } catch (error) {
@@ -1576,30 +1562,23 @@ export function UmbraFilmstrip({
         message: error instanceof Error ? error.message : 'Failed to restore from trash',
       });
     }
-  }, [addRestoredToast, addToast, notifyGalleryRestorePaths, notifyGalleryTrashUpdated, openPathInGallery, refreshImages, resolveSelectionPaths]);
+  }, [addRestoredToast, addToast, notifyGalleryRestorePaths, notifyGalleryTrashUpdated, openPathInGallery, refreshImages, removeCompletedImages, resolveSelectedImages, resolveSelectionPaths]);
 
   const onDeleteForeverFromTrash = useCallback(async (ids: string[]) => {
+    const selectedEntries = resolveSelectedImages(ids);
     const selectedPaths = resolveSelectionPaths(ids).filter((pathValue) => isTrashPath(pathValue));
     if (selectedPaths.length === 0) return;
 
     try {
-      const response = await fetch('/api/trash/permanent-delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          paths: selectedPaths,
-        }),
-      });
-      const payload = await response.json().catch(() => ({} as Record<string, unknown>));
-      if (!response.ok) {
-        throw new Error(String(payload?.error || 'Failed to permanently delete from trash'));
-      }
-      addToast({
+      const result = await permanentlyDeleteTrashPaths(selectedPaths);
+      const count = result.deletedPaths.length;
+      if (result.failed.length) addToast({ type: 'error', message: result.failed[0].error });
+      if (result.warning) addToast({ type: 'info', message: result.warning });
+      if (count) addToast({
         type: 'success',
-        message: `Deleted ${selectedPaths.length} item${selectedPaths.length === 1 ? '' : 's'} permanently`,
+        message: `Deleted ${count} item${count === 1 ? '' : 's'} permanently`,
       });
-      setSelectedIds(new Set());
-      setLastSelectedId('');
+      removeCompletedImages(selectedEntries, result.deletedPaths);
       notifyGalleryTrashUpdated();
       void refreshImages({ force: true });
     } catch (error) {
@@ -1608,7 +1587,7 @@ export function UmbraFilmstrip({
         message: error instanceof Error ? error.message : 'Failed to permanently delete from trash',
       });
     }
-  }, [addToast, notifyGalleryTrashUpdated, refreshImages, resolveSelectionPaths]);
+  }, [addToast, notifyGalleryTrashUpdated, refreshImages, removeCompletedImages, resolveSelectedImages, resolveSelectionPaths]);
 
   const onShowInExplorer = useCallback(async (ids: string[]) => {
     const targetPath = resolveSelectionPaths(ids).at(0) || '';
@@ -1716,6 +1695,7 @@ export function UmbraFilmstrip({
     try {
       let renamed = 0;
       let failed = 0;
+      const warnings: string[] = [];
       const touchedFolderPaths = new Set<string>();
 
       if (selection.length === 1) {
@@ -1738,6 +1718,7 @@ export function UmbraFilmstrip({
           throw new Error(String(payload?.error || 'Failed to rename item'));
         }
         renamed = 1;
+        if (Array.isArray(payload?.warnings)) warnings.push(...payload.warnings.filter((value: unknown): value is string => typeof value === 'string'));
         const nextPath = normalizePath(String((payload as { newPath?: unknown }).newPath || ''));
         const oldFolder = normalizePath(pathParent(single.path));
         const newFolder = normalizePath(pathParent(nextPath));
@@ -1787,6 +1768,7 @@ export function UmbraFilmstrip({
           if (!response.ok) {
             throw new Error(String(payload?.error || 'Failed to rename items'));
           }
+          if (Array.isArray(payload?.warnings)) warnings.push(...payload.warnings.filter((value: unknown): value is string => typeof value === 'string'));
           const reportedRenamed = Number((payload as { renamed?: unknown }).renamed);
           if (Number.isFinite(reportedRenamed) && reportedRenamed >= 0) {
             renamed += Math.trunc(reportedRenamed);
@@ -1829,10 +1811,10 @@ export function UmbraFilmstrip({
           }));
         }
         addToast({
-          type: 'success',
-          message: failed > 0
+          type: warnings.length || failed > 0 ? 'info' : 'success',
+          message: [failed > 0
             ? `Renamed ${renamed} item${renamed === 1 ? '' : 's'} (${failed} failed)`
-            : `Renamed ${renamed} item${renamed === 1 ? '' : 's'}`,
+            : `Renamed ${renamed} item${renamed === 1 ? '' : 's'}`, ...warnings].join('\n'),
         });
         void refreshImages({ force: true });
       } else if (failed > 0) {

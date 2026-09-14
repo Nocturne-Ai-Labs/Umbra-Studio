@@ -58,7 +58,7 @@ import {
 import { buildPowerPrompterActivePromptBlocks } from '@/lib/powerPrompterActivePrompt';
 import { governorShouldRun, governorTryAcquire } from '@/lib/loadGovernor';
 import { loadAppSettings, pushAppSettingsToBackend } from '@/lib/appSettings';
-import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
+import { readUserConfig, readUserConfigStrict, writeUserConfig } from '@/lib/userConfig';
 import { subscribeUiSession } from '@/lib/uiSessionSocket';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import {
@@ -6449,7 +6449,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     try {
       const activeFilePath = normalizePowerPrompterPresetSourceFilePath(currentFileRef.current || '');
       const activeFileKey = normalizePowerPrompterPresetSourceFileKey(activeFilePath);
-      const rawStore = await readUserConfig<PowerPrompterPresetStore>('powerprompter-presets', {
+      const rawStore = await readUserConfigStrict<PowerPrompterPresetStore>('powerprompter-presets', {
         version: 1,
         selectedPresetId: '',
         selectedPresetIdByFile: {},
@@ -6499,7 +6499,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     if (!activeFileKey) {
       throw new Error('Open or create a card file before saving presets');
     }
-    const existingRawStore = await readUserConfig<PowerPrompterPresetStore>('powerprompter-presets', {
+    const existingRawStore = await readUserConfigStrict<PowerPrompterPresetStore>('powerprompter-presets', {
       version: 1,
       selectedPresetId: '',
       selectedPresetIdByFile: {},
@@ -6530,9 +6530,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     const selectedId = normalizedScopedPresets.some((preset) => preset.id === normalizedStore.selectedPresetId)
       ? normalizedStore.selectedPresetId || ''
       : (normalizedScopedPresets[0]?.id || '');
+    await writeUserConfig('powerprompter-presets', normalizedStore);
     setPowerPrompterPresets(normalizedScopedPresets);
     setSelectedPowerPrompterPresetId(selectedId);
-    await writeUserConfig('powerprompter-presets', normalizedStore);
   }, []);
 
   useEffect(() => {
@@ -7421,9 +7421,14 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
             && item.status !== 'failed'
           );
           const backendOwnsNextDispatch = String(payload.source || '').trim() === 'backend_pipeline';
+          const reportedSettled = payload.settled;
+          const payloadSettled = backendOwnsNextDispatch && Number.isSafeInteger(reportedSettled)
+            && reportedSettled >= payloadCompleted && reportedSettled <= payloadTotal
+            ? reportedSettled
+            : payloadCompleted;
           const completedCount = completedIndices?.size ?? 0;
           if (hasRemainingTrackedPrompts || (expectedTotal > 0 && completedCount < expectedTotal)) {
-            if (payload.success === true && payloadTotal > 0 && payloadCompleted >= payloadTotal) {
+            if (payload.success === true && payloadTotal > 0 && payloadSettled >= payloadTotal) {
               completedPromptIndicesRef.current.set(requestId, new Set(Array.from({ length: payloadTotal }, (_, index) => index)));
               updateQueueStackItemsSynced((prev) =>
                 prev.map((item) => {
@@ -9230,9 +9235,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     if (!normalizedRequestId) return false;
     const normalizedPromptOrder = Array.from(new Set(
       promptOrder
-        .map((entry) => Number(entry))
-        .filter((entry) => Number.isFinite(entry))
-        .map((entry) => Math.max(0, Math.floor(entry)))
+        .filter((entry) => typeof entry === 'number' && Number.isSafeInteger(entry) && entry >= 0)
     ));
     if (normalizedPromptOrder.length <= 0) return false;
 
@@ -9253,7 +9256,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     const sourceLength = Math.max(
       Number(requestMeta?.prompts?.length || 0),
       Number(visualState?.prompts?.length || 0),
-      normalizedPromptOrder.length,
     );
     if (sourceLength <= 0) return false;
 
@@ -9261,12 +9263,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     const immutablePrefix = lockedIndex >= 0 ? allIndices.filter((index) => index < lockedIndex) : [];
     const lockedSegment = lockedIndex >= 0 ? [lockedIndex] : [];
     const movableIndices = allIndices.filter((index) => index > lockedIndex);
-    const desiredMovable = normalizedPromptOrder.filter((index) => movableIndices.includes(index));
+    const desiredMovable = normalizedPromptOrder.filter((index) => index > lockedIndex && index < sourceLength);
+    const desiredIndices = new Set(desiredMovable);
     const finalOrder = [
       ...immutablePrefix,
       ...lockedSegment,
       ...desiredMovable,
-      ...movableIndices.filter((index) => !desiredMovable.includes(index)),
+      ...movableIndices.filter((index) => !desiredIndices.has(index)),
     ];
     if (finalOrder.length !== sourceLength) return false;
     if (finalOrder.every((index, position) => index === position)) return false;

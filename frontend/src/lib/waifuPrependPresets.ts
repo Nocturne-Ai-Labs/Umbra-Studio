@@ -1,4 +1,4 @@
-import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
+import { readUserConfigStrict, writeUserConfig } from '@/lib/userConfig';
 
 const WAIFU_PREPEND_PRESETS_STORAGE_KEY = 'umbra.waifu.prependPresets';
 const WAIFU_PREPEND_PRESETS_CONFIG_KEY = 'waifu-prepend-presets';
@@ -8,6 +8,13 @@ type PresetListener = () => void;
 const listeners = new Set<PresetListener>();
 let presetCache: string[] | null = null;
 let loadPromise: Promise<void> | null = null;
+let operationQueue: Promise<void> = Promise.resolve();
+
+function serializePresets(operation: () => Promise<void>): Promise<void> {
+  const pending = operationQueue.then(operation);
+  operationQueue = pending.catch(() => undefined);
+  return pending;
+}
 
 function arraysEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
@@ -25,7 +32,9 @@ export function normalizeWaifuPreset(raw: string): string {
 }
 
 function sanitizePresetList(input: unknown): string[] {
-  if (!Array.isArray(input)) return [];
+  if (!Array.isArray(input) || input.some((entry) => typeof entry !== 'string')) {
+    throw new Error('Invalid saved prepend preset list. Existing presets have not been changed.');
+  }
   const cleaned: string[] = [];
   const seen = new Set<string>();
   for (const entry of input) {
@@ -50,15 +59,15 @@ function clearLegacyStorage(): void {
 
 function loadFromConfig(): Promise<void> {
   if (loadPromise) return loadPromise;
-  loadPromise = readUserConfig<unknown[]>(WAIFU_PREPEND_PRESETS_CONFIG_KEY, [])
-    .then((value) => {
-      const next = sanitizePresetList(value);
-      const current = presetCache || [];
-      clearLegacyStorage();
-      if (arraysEqual(current, next)) return;
-      presetCache = next;
-      notifyListeners();
-    })
+  loadPromise = serializePresets(async () => {
+    const value = await readUserConfigStrict(WAIFU_PREPEND_PRESETS_CONFIG_KEY, [], AbortSignal.timeout(15_000));
+    const next = sanitizePresetList(value);
+    const current = presetCache || [];
+    clearLegacyStorage();
+    if (arraysEqual(current, next)) return;
+    presetCache = next;
+    notifyListeners();
+  })
     .finally(() => {
       loadPromise = null;
     });
@@ -74,7 +83,7 @@ function notifyListeners(): void {
 function getOrInitCache(): string[] {
   if (presetCache) return presetCache;
   presetCache = [];
-  void loadFromConfig();
+  void loadFromConfig().catch((error) => console.warn('[WaifuPrependPresets] Failed to load presets:', error));
   return presetCache;
 }
 
@@ -82,21 +91,21 @@ export function getWaifuPrependPresetsSnapshot(): string[] {
   return getOrInitCache();
 }
 
-export function setWaifuPrependPresets(nextPresets: string[]): void {
-  const sanitizedNext = sanitizePresetList(nextPresets);
-  const current = getOrInitCache();
-  if (arraysEqual(current, sanitizedNext)) return;
-  presetCache = sanitizedNext;
-  clearLegacyStorage();
-  void writeUserConfig(WAIFU_PREPEND_PRESETS_CONFIG_KEY, sanitizedNext).catch((error) => {
-    console.warn('[WaifuPrependPresets] Failed to persist presets:', error);
+export function setWaifuPrependPresets(update: (current: string[]) => string[]): Promise<void> {
+  return serializePresets(async () => {
+    const current = sanitizePresetList(await readUserConfigStrict(WAIFU_PREPEND_PRESETS_CONFIG_KEY, [], AbortSignal.timeout(15_000)));
+    const next = sanitizePresetList(update([...current]));
+    if (!arraysEqual(current, next)) await writeUserConfig(WAIFU_PREPEND_PRESETS_CONFIG_KEY, next);
+    const changed = !presetCache || !arraysEqual(presetCache, next);
+    if (changed) presetCache = next;
+    clearLegacyStorage();
+    if (changed) notifyListeners();
   });
-  notifyListeners();
 }
 
 export function subscribeWaifuPrependPresets(listener: PresetListener): () => void {
   listeners.add(listener);
-  void loadFromConfig();
+  void loadFromConfig().catch((error) => console.warn('[WaifuPrependPresets] Failed to load presets:', error));
 
   return () => {
     listeners.delete(listener);

@@ -58,7 +58,7 @@ import {
 } from '@/components/umbra-ui/UmbraQueuePlacementControls';
 import { resolveUmbraUiPipeline } from '@/lib/umbraUiPipelines';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
-import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
+import { readUserConfigWithRetry, writeUserConfig } from '@/lib/userConfig';
 import { advanceUmbraUiSeed, normalizeUmbraUiSeed, resolveUmbraUiQueueSeed } from '@/lib/umbraUiSeed';
 import {
   mergeUmbraUiPromptHistories,
@@ -691,6 +691,7 @@ export function UmbraVideoGenerationControls({
   );
   const [promptHistory, setPromptHistory] = React.useState<UmbraUiPromptHistoryEntry[]>([]);
   const promptHistoryLoadedRef = React.useRef(false);
+  const promptHistoryPendingEditsRef = React.useRef({ cleared: false, removed: new Set<string>() });
   const promptHistoryDirtyRef = React.useRef(false);
   const promptHistoryRevisionRef = React.useRef(0);
   const promptHistoryWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
@@ -709,6 +710,7 @@ export function UmbraVideoGenerationControls({
   const [pinnedOutputFolder, setPinnedOutputFolder] = usePinnedOutputFolder('video');
   const { placement, setPlacement, effectivePlacement } = useUmbraQueuePlacement(queueSummary);
   const [settingsLoaded, setSettingsLoaded] = React.useState(false);
+  const videoControlsWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const handoffAppliedRef = React.useRef(false);
   const handoffAppliedAtRef = React.useRef(0);
   const targetDimensions = React.useMemo(() => resolveUmbraVideoTargetDimensions({
@@ -780,11 +782,15 @@ export function UmbraVideoGenerationControls({
 
   React.useEffect(() => {
     let canceled = false;
+    setSettingsLoaded(false);
     void fetch('/api/umbra-ui/video-controls', { cache: 'no-store' })
       .then(async (response) => {
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || payload?.success === false) throw new Error(payload?.error || 'Failed to load video controls.');
-        return payload?.video as PowerPrompterVideoControls | undefined;
+        if (!response.ok) throw new Error(`Failed to load video controls (${response.status}).`);
+        const payload = await response.json();
+        if (payload?.success !== true || !payload.video || typeof payload.video !== 'object' || Array.isArray(payload.video)) {
+          throw new Error('Invalid saved video controls response.');
+        }
+        return payload.video as PowerPrompterVideoControls;
       })
       .then((savedVideo) => {
         if (canceled) return;
@@ -836,39 +842,59 @@ export function UmbraVideoGenerationControls({
         }
         setSettingsLoaded(true);
       })
-      .catch(() => {
-        if (!canceled) setSettingsLoaded(true);
+      .catch((error) => {
+        if (!canceled) {
+          console.warn('[Umbra UI] Failed to restore video controls:', error);
+          showToast('Saved video controls could not be loaded. Changes will not be saved; reload Umbra to retry.', 'error');
+        }
       });
     return () => {
       canceled = true;
     };
-  }, []);
+  }, [showToast]);
 
   React.useEffect(() => {
     if (!settingsLoaded) return;
     const timer = window.setTimeout(() => {
-      void fetch('/api/umbra-ui/video-controls', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video }),
-      }).catch(() => undefined);
+      videoControlsWriteQueueRef.current = videoControlsWriteQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          const response = await fetch('/api/umbra-ui/video-controls', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ video }),
+          });
+          if (!response.ok || (await response.json()).success !== true) throw new Error('Failed to save video controls.');
+        })
+        .catch((error) => {
+          console.warn('[Umbra UI] Failed to save video controls:', error);
+          showToast('Video control changes could not be saved.', 'error');
+        });
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [settingsLoaded, video]);
+  }, [settingsLoaded, showToast, video]);
 
   React.useEffect(() => {
-    let canceled = false;
-    void readUserConfig<unknown>('umbra-ui-video-prompt-history', [])
+    const controller = new AbortController();
+    void readUserConfigWithRetry<unknown>('umbra-ui-video-prompt-history', [], controller.signal,
+      (error) => console.warn('[Umbra UI] Retrying video prompt history load:', error))
       .then((storedHistory) => {
-        if (canceled) return;
+        if (controller.signal.aborted) return;
+        if (!Array.isArray(storedHistory)) throw new Error('Invalid saved video prompt history');
+        const pending = promptHistoryPendingEditsRef.current;
+        const restored = pending.cleared ? [] : normalizeUmbraUiPromptHistory(storedHistory)
+          .filter((entry) => !pending.removed.has(entry.id));
+        promptHistoryLoadedRef.current = true;
         setPromptHistory((current) => mergeUmbraUiPromptHistories(
-          normalizeUmbraUiPromptHistory(storedHistory),
+          restored,
           current,
         ));
-        promptHistoryLoadedRef.current = true;
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) console.warn('[Umbra UI] Failed to restore video prompt history:', error);
       });
     return () => {
-      canceled = true;
+      controller.abort();
     };
   }, []);
 
@@ -1084,12 +1110,14 @@ export function UmbraVideoGenerationControls({
   }, [showToast]);
 
   const removePromptHistoryEntry = React.useCallback((entryId: string) => {
+    if (!promptHistoryLoadedRef.current) promptHistoryPendingEditsRef.current.removed.add(entryId);
     promptHistoryDirtyRef.current = true;
     promptHistoryRevisionRef.current += 1;
     setPromptHistory((current) => current.filter((entry) => entry.id !== entryId));
   }, []);
 
   const clearPromptHistory = React.useCallback(() => {
+    if (!promptHistoryLoadedRef.current) promptHistoryPendingEditsRef.current.cleared = true;
     promptHistoryDirtyRef.current = true;
     promptHistoryRevisionRef.current += 1;
     setPromptHistory([]);

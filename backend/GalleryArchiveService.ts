@@ -119,7 +119,10 @@ export async function createGalleryArchive(fullPath: string, job: GalleryArchive
           });
           inputs.add(counter);
           const source = inputHandle.createReadStream();
-          void pipeline(source, counter).catch(error => counter.destroy(error));
+          void pipeline(source, counter).catch(error => {
+            counter.destroy(error);
+            zipOutput.destroy(error);
+          });
           counter.once('close', () => inputs.delete(counter));
           callback(null, counter);
         })().catch(error => callback(error, null!));

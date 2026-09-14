@@ -5,6 +5,8 @@ const IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.gif', '.jpeg', '.jpg', '.pn
 const JOB_RETENTION_MS = 6 * 60 * 60 * 1000;
 const HISTORY_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const COMFY_REQUEST_TIMEOUT_MS = 15_000;
+const COMFY_UPLOAD_TIMEOUT_MS = 120_000;
+const COMFY_SUBMISSION_TIMEOUT_MS = 30_000;
 const QUEUE_CHECK_INTERVAL_MS = 5_000;
 const MISSING_PROMPT_GRACE_MS = 30_000;
 const COMFY_OUTAGE_TIMEOUT_MS = 120_000;
@@ -55,6 +57,7 @@ export interface UmbraUiUpscaleJob {
   failed: number;
   createdAt: number;
   updatedAt: number;
+  warning?: string;
   cancelRequested?: boolean;
   items: UmbraUiUpscaleJobItem[];
 }
@@ -293,7 +296,19 @@ export class UmbraUiUpscaleService {
         job.status = job.completed > 0 ? 'partial' : 'failed';
         job.updatedAt = Date.now();
       } finally {
-        if (releaseExecution) await releaseExecution();
+        if (releaseExecution) {
+          const finalStatus = job.status;
+          job.status = 'running';
+          try {
+            await releaseExecution();
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            job.warning = `Could not release the generation queue after this job: ${detail}`;
+          } finally {
+            job.status = finalStatus;
+            job.updatedAt = Date.now();
+          }
+        }
       }
     };
     this.executionTail = this.executionTail.catch(() => undefined).then(run);
@@ -308,7 +323,9 @@ export class UmbraUiUpscaleService {
     form.append('type', 'input');
     form.append('subfolder', subfolder);
     form.append('overwrite', 'true');
-    const response = await fetch(`${this.getComfyBaseUrl()}/upload/image`, { method: 'POST', body: form });
+    const response = await fetch(`${this.getComfyBaseUrl()}/upload/image`, {
+      method: 'POST', body: form, signal: AbortSignal.timeout(COMFY_UPLOAD_TIMEOUT_MS),
+    });
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
       throw new Error(detail || `ComfyUI rejected the upscale input (${response.status}).`);
@@ -375,9 +392,21 @@ export class UmbraUiUpscaleService {
   ) {
     job.status = 'running';
     job.updatedAt = Date.now();
+    let uncertainSubmission = false;
+    const checkCanceled = () => {
+      if (job.cancelRequested)
+        throw Object.assign(new Error('Upscale canceled before submission.'), { code: 'UPSCALE_CANCELED' });
+    };
     for (let index = 0; index < sources.length; index += 1) {
       const source = sources[index];
       const item = job.items[index];
+      if (uncertainSubmission) {
+        item.status = 'failed';
+        item.error = 'Not submitted because the previous upscale could not be confirmed. Check the ComfyUI queue before retrying.';
+        if (source.cleanup) await source.cleanup().catch(() => undefined);
+        sources[index] = null as unknown as UmbraUiUpscaleSource;
+        continue;
+      }
       if (job.cancelRequested) {
         item.status = 'canceled';
         if (source.cleanup) await source.cleanup().catch(() => undefined);
@@ -386,12 +415,15 @@ export class UmbraUiUpscaleService {
       }
       item.status = 'staging';
       job.updatedAt = Date.now();
+      let promptOutstanding = false;
       try {
         const rawBytes = await source.read();
+        checkCanceled();
         const bytes = rawBytes instanceof Uint8Array ? rawBytes : new Uint8Array(rawBytes);
         if (bytes.byteLength <= 0) throw new Error('The source image is empty.');
         if (bytes.byteLength > MAX_SOURCE_BYTES) throw new Error('The source image exceeds the 512 MB upscale limit.');
         const inputName = await this.uploadInput(job.id, index, item.name, bytes);
+        checkCanceled();
         const sourcePath = String(item.sourcePath || '').trim();
         const automaticRoot = sourcePath
           ? dirname(resolve(sourcePath))
@@ -399,10 +431,14 @@ export class UmbraUiUpscaleService {
         const resolvedOutputFolder = outputFolder || join(automaticRoot, 'Upscaled');
         await mkdir(resolvedOutputFolder, { recursive: true });
         const graph = this.buildWorkflow(inputName, item.name, modelName, maxDimension, outputFormat, quality, resolvedOutputFolder);
+        checkCanceled();
         item.status = 'queued';
         job.updatedAt = Date.now();
+        // A lost response does not prove ComfyUI rejected this mutation.
+        promptOutstanding = true;
         const response = await fetch(`${this.getComfyBaseUrl()}/prompt`, {
           method: 'POST',
+          signal: AbortSignal.timeout(COMFY_SUBMISSION_TIMEOUT_MS),
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             client_id: `umbra-ui-upscale-${job.id}`,
@@ -428,6 +464,7 @@ export class UmbraUiUpscaleService {
           }),
         });
         if (!response.ok) {
+          if (response.status >= 400 && response.status < 500) promptOutstanding = false;
           const detail = await response.text().catch(() => '');
           throw new Error(readPromptRejection(detail, response.status));
         }
@@ -437,6 +474,7 @@ export class UmbraUiUpscaleService {
         item.status = 'running';
         job.updatedAt = Date.now();
         const record = await this.waitForHistory(item.promptId, job);
+        promptOutstanding = false;
         const executionError = readExecutionError(record);
         const status = String(record?.status?.status_str || '').trim().toLowerCase();
         if (executionError || status === 'error') throw new Error(executionError || 'ComfyUI upscale execution failed.');
@@ -444,10 +482,15 @@ export class UmbraUiUpscaleService {
         if (item.outputs.length <= 0) throw new Error('ComfyUI finished the upscale without reporting a saved output.');
         item.status = 'completed';
       } catch (error: any) {
-        item.status = job.cancelRequested && error?.code === 'UPSCALE_PROMPT_MISSING' ? 'canceled' : 'failed';
+        if (error?.code === 'UPSCALE_PROMPT_MISSING') promptOutstanding = false;
+        item.status = job.cancelRequested && ['UPSCALE_PROMPT_MISSING', 'UPSCALE_CANCELED'].includes(error?.code) ? 'canceled' : 'failed';
         item.error = String(error?.message || error || 'Upscale failed.');
+        if (promptOutstanding) {
+          uncertainSubmission = true;
+          item.error += ' Submission or completion could not be confirmed. Uploaded inputs were retained; check the ComfyUI queue before retrying.';
+        }
       } finally {
-        await this.cleanupStagedInputs(job.id);
+        if (!promptOutstanding) await this.cleanupStagedInputs(job.id);
         if (source.cleanup) await source.cleanup().catch(() => undefined);
       }
       sources[index] = null as unknown as UmbraUiUpscaleSource;
@@ -455,6 +498,8 @@ export class UmbraUiUpscaleService {
       job.failed = job.items.filter((candidate) => candidate.status === 'failed').length;
       job.updatedAt = Date.now();
     }
+    job.completed = job.items.filter((candidate) => candidate.status === 'completed').length;
+    job.failed = job.items.filter((candidate) => candidate.status === 'failed').length;
     job.status = job.cancelRequested && job.completed + job.failed < job.total ? 'canceled' : job.completed === job.total
       ? 'completed'
       : job.completed > 0 ? 'partial' : 'failed';

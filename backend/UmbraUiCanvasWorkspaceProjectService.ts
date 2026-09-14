@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { copyFile, mkdir, open, readFile, readdir, rename, rm, stat } from 'fs/promises';
+import { copyFile, lstat, mkdir, open, readFile, readdir, rename, rm, stat } from 'fs/promises';
 import { extname, join, resolve, sep } from 'path';
 
 const PROJECT_VERSION = 8;
@@ -450,26 +450,86 @@ async function replaceFileAtomically(temporaryPath: string, finalPath: string): 
     await rename(temporaryPath, finalPath);
     return;
   } catch {
-    // Windows cannot replace an existing file with rename(). Keep a short-lived
-    // backup so an interrupted save never destroys the last usable document.
+    // Some Windows file-sharing states need a backup fallback. Startup recovery
+    // restores a committed backup if interruption leaves the final path absent.
   }
   const backupPath = `${finalPath}.umbra-canvas-backup-${Date.now()}`;
   const hadExisting = await stat(finalPath).then((entry) => entry.isFile()).catch(() => false);
   if (hadExisting) await rename(finalPath, backupPath);
   try {
     await rename(temporaryPath, finalPath);
-    if (hadExisting) await rm(backupPath, { force: true });
   } catch (error) {
     if (hadExisting) await rename(backupPath, finalPath).catch(() => undefined);
     throw error;
+  }
+  if (hadExisting) await rm(backupPath, { force: true }).catch(() => undefined);
+}
+
+async function recoverCanvasBackups(directory: string, allowName: (name: string) => boolean): Promise<void> {
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+  const candidates = entries.filter(entry => entry.isFile()).map(entry => ({
+    name: entry.name, match: /^(.*)\.umbra-canvas-backup-(\d+)$/.exec(entry.name),
+  })).filter(entry => entry.match && allowName(entry.match[1]));
+  candidates.sort((left, right) => Number(right.match![2]) - Number(left.match![2]));
+  for (const candidate of candidates) {
+    const finalName = candidate.match![1];
+    const finalPath = join(directory, finalName);
+    const exists = await lstat(finalPath).then(() => true).catch(error => {
+      if (error.code !== 'ENOENT') throw error;
+      return false;
+    });
+    if (exists) continue;
+    const backupPath = join(directory, candidate.name);
+    if (finalName.endsWith('.json')) {
+      try {
+        const info = await stat(backupPath);
+        if (info.size > MAX_PROJECT_JSON_BYTES) continue;
+        const parsed = JSON.parse(await readFile(backupPath, 'utf8'));
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+      } catch { continue; }
+    }
+    await rename(backupPath, finalPath);
   }
 }
 
 export class UmbraUiCanvasWorkspaceProjectService {
   private readonly root: string;
+  private readonly operations = new Map<string, Promise<unknown>>();
+  private readonly recoveryPromise: Promise<void>;
 
   constructor(userRoot: string) {
     this.root = resolve(userRoot, 'UmbraUI', 'CanvasProjects');
+    this.recoveryPromise = this.recoverInterruptedSaves();
+    void this.recoveryPromise.catch(() => undefined);
+  }
+
+  private async recoverInterruptedSaves(): Promise<void> {
+    const projects = await readdir(this.root, { withFileTypes: true }).catch(() => []);
+    for (const entry of projects) {
+      if (!entry.isDirectory() || safeId(entry.name) !== entry.name) continue;
+      const directory = this.projectRoot(entry.name);
+      await recoverCanvasBackups(directory, name => name === 'project.json' || name === 'thumbnail.png');
+      for (const child of ['assets', 'restore-points']) {
+        const path = join(directory, child);
+        const info = await lstat(path).catch(() => null);
+        if (!info?.isDirectory() || info.isSymbolicLink()) continue;
+        await recoverCanvasBackups(path, name => child === 'assets'
+          ? safeStoredFilename(name) === name
+          : /^[a-z0-9._-]+\.json$/i.test(name));
+      }
+    }
+  }
+
+  private async locked<T>(projectId: string, action: () => Promise<T>): Promise<T> {
+    const path = this.projectRoot(projectId);
+    const key = process.platform === 'win32' ? path.toLowerCase() : path;
+    const operation = (this.operations.get(key) || Promise.resolve()).catch(() => undefined).then(async () => {
+      await this.recoveryPromise;
+      return action();
+    });
+    this.operations.set(key, operation);
+    try { return await operation; }
+    finally { if (this.operations.get(key) === operation) this.operations.delete(key); }
   }
 
   private projectRoot(projectIdInput: string): string {
@@ -581,6 +641,15 @@ export class UmbraUiCanvasWorkspaceProjectService {
     assetInputs: UmbraUiCanvasWorkspaceAssetInput[],
     thumbnailInput?: Uint8Array,
   ): Promise<Record<string, any>> {
+    return this.locked(projectIdInput, () => this.saveProject(projectIdInput, rawProject, assetInputs, thumbnailInput));
+  }
+
+  private async saveProject(
+    projectIdInput: string,
+    rawProject: unknown,
+    assetInputs: UmbraUiCanvasWorkspaceAssetInput[],
+    thumbnailInput?: Uint8Array,
+  ): Promise<Record<string, any>> {
     await mkdir(this.root, { recursive: true });
     const project = normalizeProject(rawProject);
     const projectId = safeId(projectIdInput);
@@ -648,6 +717,20 @@ export class UmbraUiCanvasWorkspaceProjectService {
       if (/^(blob:|data:)/i.test(currentUrl)) throw new Error(`Canvas staging mask ${entry.id} was not uploaded with the project.`);
       return { ...entry, acceptanceMaskUrl: '' };
     });
+    const referenced = new Set<string>();
+    const assetUrls = [
+      ...project.entities.map((entity: Record<string, any>) => entity.imageUrl),
+      ...[...project.generation.pending, ...project.generation.staging].map((entry: Record<string, any>) => entry.acceptanceMaskUrl),
+    ];
+    for (const url of assetUrls) {
+      if (!String(url || '').startsWith(PROJECT_ASSET_PREFIX)) continue;
+      const filename = safeStoredFilename(String(url).slice(PROJECT_ASSET_PREFIX.length));
+      if (!filename) throw new Error('Canvas project references an invalid image asset.');
+      referenced.add(filename);
+    }
+    for (const filename of referenced) {
+      if (!await this.resolveAsset(projectId, filename)) throw new Error('A Canvas image asset is missing. Reload the saved project before saving again.');
+    }
     project.updatedAt = Date.now();
     const serialized = JSON.stringify(project, null, 2);
     const temporaryProjectPath = join(projectRoot, `project.${Date.now()}.tmp`);
@@ -664,17 +747,6 @@ export class UmbraUiCanvasWorkspaceProjectService {
         throw error;
       });
     }
-    const referenced = new Set(project.entities.map((entity: Record<string, any>) => (
-      (entity.kind === 'raster' || entity.kind === 'mask') && String(entity.imageUrl || '').startsWith(PROJECT_ASSET_PREFIX)
-        ? safeStoredFilename(String(entity.imageUrl).slice(PROJECT_ASSET_PREFIX.length))
-        : ''
-    )).filter(Boolean));
-    for (const entry of [...project.generation.pending, ...project.generation.staging]) {
-      const acceptanceMaskUrl = String(entry.acceptanceMaskUrl || '');
-      if (!acceptanceMaskUrl.startsWith(PROJECT_ASSET_PREFIX)) continue;
-      const filename = safeStoredFilename(acceptanceMaskUrl.slice(PROJECT_ASSET_PREFIX.length));
-      if (filename) referenced.add(filename);
-    }
     await this.collectRestorePointAssetNames(projectId, referenced);
     const assetEntries = await readdir(assetsRoot, { withFileTypes: true }).catch(() => []);
     await Promise.all(assetEntries.map((entry) => (
@@ -688,11 +760,17 @@ export class UmbraUiCanvasWorkspaceProjectService {
   async get(projectIdInput: string): Promise<Record<string, any> | null> {
     const projectId = safeId(projectIdInput);
     if (!projectId) return null;
-    const stored = await this.readStored(projectId);
-    return stored ? this.hydrate(projectId, normalizeProject(stored)) : null;
+    return this.locked(projectId, async () => {
+      const stored = await this.readStored(projectId);
+      return stored ? this.hydrate(projectId, normalizeProject(stored)) : null;
+    });
   }
 
   async fork(projectIdInput: string, nameInput: unknown): Promise<Record<string, any>> {
+    return this.locked(projectIdInput, () => this.forkProject(projectIdInput, nameInput));
+  }
+
+  private async forkProject(projectIdInput: string, nameInput: unknown): Promise<Record<string, any>> {
     const sourceId = safeId(projectIdInput);
     if (!sourceId) throw new Error('A valid Canvas project id is required.');
     const stored = await this.readStored(sourceId);
@@ -728,14 +806,18 @@ export class UmbraUiCanvasWorkspaceProjectService {
   }
 
   async list(): Promise<UmbraUiCanvasWorkspaceProjectSummary[]> {
+    await this.recoveryPromise;
     await mkdir(this.root, { recursive: true });
     const entries = await readdir(this.root, { withFileTypes: true }).catch(() => []);
     const summaries: UmbraUiCanvasWorkspaceProjectSummary[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const stored = await this.readStored(entry.name);
+      const stored = await this.locked(entry.name, () => this.readStored(entry.name));
       if (!stored) continue;
-      const project = normalizeProject(stored);
+      let project: Record<string, any>;
+      try { project = normalizeProject(stored); }
+      catch { continue; } // Keep incompatible projects on disk without hiding healthy projects.
+      if (project.id !== entry.name) continue;
       const topVisible = [...project.entities].reverse().find((entity: Record<string, any>) => entity.visible !== false && String(entity.imageUrl || '').startsWith(PROJECT_ASSET_PREFIX));
       const filename = topVisible ? safeStoredFilename(String(topVisible.imageUrl).slice(PROJECT_ASSET_PREFIX.length)) : '';
       const hasThumbnail = await stat(join(this.projectRoot(project.id), 'thumbnail.png')).then((item) => item.isFile()).catch(() => false);
@@ -755,6 +837,7 @@ export class UmbraUiCanvasWorkspaceProjectService {
   }
 
   async listRestorePoints(projectIdInput: string): Promise<UmbraUiCanvasWorkspaceRestorePointSummary[]> {
+    await this.recoveryPromise;
     const projectId = safeId(projectIdInput);
     if (!projectId) return [];
     const entries = await readdir(this.restorePointRoot(projectId), { withFileTypes: true }).catch(() => []);
@@ -782,6 +865,10 @@ export class UmbraUiCanvasWorkspaceProjectService {
   }
 
   async createRestorePoint(projectIdInput: string, nameInput: unknown): Promise<UmbraUiCanvasWorkspaceRestorePointSummary> {
+    return this.locked(projectIdInput, () => this.createProjectRestorePoint(projectIdInput, nameInput));
+  }
+
+  private async createProjectRestorePoint(projectIdInput: string, nameInput: unknown): Promise<UmbraUiCanvasWorkspaceRestorePointSummary> {
     const projectId = safeId(projectIdInput);
     if (!projectId) throw new Error('A valid Canvas project id is required.');
     const stored = await this.readStored(projectId);
@@ -812,6 +899,10 @@ export class UmbraUiCanvasWorkspaceProjectService {
   }
 
   async restoreRestorePoint(projectIdInput: string, restorePointIdInput: string): Promise<Record<string, any>> {
+    return this.locked(projectIdInput, () => this.restoreProjectRestorePoint(projectIdInput, restorePointIdInput));
+  }
+
+  private async restoreProjectRestorePoint(projectIdInput: string, restorePointIdInput: string): Promise<Record<string, any>> {
     const projectId = safeId(projectIdInput);
     if (!projectId) throw new Error('A valid Canvas project id is required.');
     const restorePoint = await this.readRestorePoint(projectId, restorePointIdInput);
@@ -834,14 +925,15 @@ export class UmbraUiCanvasWorkspaceProjectService {
   async deleteRestorePoint(projectIdInput: string, restorePointIdInput: string): Promise<void> {
     const projectId = safeId(projectIdInput);
     if (!projectId) throw new Error('A valid Canvas project id is required.');
-    await rm(this.restorePointPath(projectId, restorePointIdInput), { force: true });
+    await this.locked(projectId, () => rm(this.restorePointPath(projectId, restorePointIdInput), { force: true }));
   }
 
   async delete(projectIdInput: string): Promise<void> {
-    await rm(this.projectRoot(projectIdInput), { recursive: true, force: true });
+    await this.locked(projectIdInput, () => rm(this.projectRoot(projectIdInput), { recursive: true, force: true }));
   }
 
   async resolveAsset(projectIdInput: string, filenameInput: string): Promise<{ path: string; size: number } | null> {
+    await this.recoveryPromise;
     const assetsRoot = resolve(this.projectRoot(projectIdInput), 'assets');
     const filename = safeStoredFilename(filenameInput);
     if (!filename) return null;
@@ -852,6 +944,7 @@ export class UmbraUiCanvasWorkspaceProjectService {
   }
 
   async resolveThumbnail(projectIdInput: string): Promise<{ path: string; size: number } | null> {
+    await this.recoveryPromise;
     const target = join(this.projectRoot(projectIdInput), 'thumbnail.png');
     const entry = await stat(target).catch(() => null);
     return entry?.isFile() ? { path: target, size: entry.size } : null;

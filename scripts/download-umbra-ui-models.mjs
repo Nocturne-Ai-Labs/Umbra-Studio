@@ -2,12 +2,11 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HF_BASE = String(process.env.HF_BASE_URL || 'https://huggingface.co').replace(/\/$/, '');
+const DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
 
 function readHuggingFaceToken() {
   const environmentToken = String(process.env.HF_TOKEN || process.env.HUGGING_FACE_HUB_TOKEN || '').trim();
@@ -217,29 +216,61 @@ function downloadHttpError(response, url) {
 }
 
 async function downloadFile(url, outputPath, expected) {
-  const partialPath = `${outputPath}.part`;
-  fs.rmSync(partialPath, { force: true });
   if (cancellationRequested) throw new DownloadCancelledError();
+  const partialPath = `${outputPath}.${crypto.randomUUID()}.part`;
 
   const headers = downloadHeaders(url);
   const controller = new AbortController();
   activeDownloadController = controller;
+  let reader;
+  let output;
+  let ownedPartial = false;
+  const network = async (operation) => {
+    let timer;
+    const deadline = new Promise((_resolve, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error('Model download stalled for two minutes. Retry when the connection is available.');
+        controller.abort(error);
+        reject(error);
+      }, DOWNLOAD_IDLE_TIMEOUT_MS);
+    });
+    try { return await Promise.race([operation(), deadline]); }
+    finally { clearTimeout(timer); }
+  };
 
   try {
-    const response = await fetch(url, { headers, redirect: 'follow', signal: controller.signal });
-    if (!response.ok || !response.body) throw downloadHttpError(response, url);
+    const response = await network(() => fetch(url, { headers, redirect: 'follow', signal: controller.signal }));
+    if (!response.ok || !response.body) {
+      await response.body?.cancel().catch(() => {});
+      throw downloadHttpError(response, url);
+    }
+    reader = response.body.getReader();
+    output = await fs.promises.open(partialPath, 'wx');
+    ownedPartial = true;
     let downloaded = 0;
     let lastLogAt = 0;
-    const source = Readable.fromWeb(response.body);
-    source.on('data', chunk => {
-      downloaded += chunk.length;
+    while (true) {
+      if (cancellationRequested) throw new DownloadCancelledError();
+      const chunk = await network(() => reader.read());
+      if (chunk.done) break;
+      downloaded += chunk.value.length;
+      if (downloaded > expected.bytes) throw new Error(`Download exceeds the expected size for ${expected.destination}`);
+      // Network deadlines do not include slow disk writes or checksum verification.
+      let offset = 0;
+      while (offset < chunk.value.length) {
+        const { bytesWritten } = await output.write(chunk.value, offset, chunk.value.length - offset);
+        if (!bytesWritten) throw new Error(`Could not write ${expected.destination}`);
+        offset += bytesWritten;
+      }
       const now = Date.now();
-      if (now - lastLogAt < 2000) return;
+      if (now - lastLogAt < 2000) continue;
       lastLogAt = now;
       reportProgress({ stage: 'downloading', file: expected.destination, bytes: downloaded, totalBytes: expected.bytes });
       if (!jsonProgress) process.stdout.write(`\r      ${formatBytes(downloaded)} ${((downloaded / expected.bytes) * 100).toFixed(1)}%`);
-    });
-    await pipeline(source, fs.createWriteStream(partialPath, { flags: 'w' }));
+    }
+    await output.sync();
+    await output.close();
+    output = undefined;
     process.stdout.write('\n');
     if (cancellationRequested) throw new DownloadCancelledError();
     reportProgress({ stage: 'verifying', file: expected.destination, bytes: expected.bytes, totalBytes: expected.bytes });
@@ -247,12 +278,22 @@ async function downloadFile(url, outputPath, expected) {
     if (cancellationRequested) throw new DownloadCancelledError();
     if (!verified) throw new Error(`Integrity check failed for ${expected.destination}`);
     fs.renameSync(partialPath, outputPath);
+    ownedPartial = false;
   } catch (error) {
-    fs.rmSync(partialPath, { force: true });
-    if (cancellationRequested || controller.signal.aborted) throw new DownloadCancelledError();
+    controller.abort(error);
+    if (cancellationRequested) throw new DownloadCancelledError();
     throw error;
   } finally {
-    if (activeDownloadController === controller) activeDownloadController = null;
+    try {
+      try { await output?.close(); }
+      finally {
+        await reader?.cancel().catch(() => {});
+        reader?.releaseLock();
+        if (ownedPartial) fs.rmSync(partialPath, { force: true });
+      }
+    } finally {
+      if (activeDownloadController === controller) activeDownloadController = null;
+    }
   }
 }
 
@@ -355,7 +396,6 @@ async function main() {
         continue;
       }
       fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-      fs.rmSync(outputPath, { force: true });
       console.log(`  download ${destination}`);
       await downloadFile(downloadUrl(model, expected), outputPath, expected);
       console.log(`  verified ${destination} (${formatBytes(expected.bytes)})`);

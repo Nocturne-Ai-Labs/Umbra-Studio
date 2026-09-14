@@ -151,16 +151,17 @@ function buildMatchExpression(tags: string[]): string {
 function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, milliseconds);
-    signal.addEventListener('abort', () => {
+    const onAbort = () => {
       clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
       reject(new DOMException('Aborted', 'AbortError'));
-    }, { once: true });
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener('abort', onAbort, { once: true });
   });
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
 }
 
 function emptyTagMatrix(): DanbooruCorpusTagMatrix {
@@ -210,7 +211,10 @@ export class DanbooruTagCorpusService {
   private indexedPosts = 0;
   private abortController: AbortController | null = null;
   private runner: Promise<void> | null = null;
+  private starting = false;
+  private closed = false;
   private runToken = 0;
+  private runFailure: { error: string; updatedAt: number } | null = null;
   private latestTagMatrix = emptyTagMatrix();
 
   constructor(userDir: string, databasePath = join(userDir, 'Config', 'DataForge', 'DanbooruTagCorpus.db')) {
@@ -222,7 +226,7 @@ export class DanbooruTagCorpusService {
     this.db.run('PRAGMA temp_store = MEMORY');
     this.db.run('PRAGMA cache_size = -65536');
     this.ensureSchema();
-    this.indexedPosts = Number((this.db.prepare(
+    this.indexedPosts = Number((this.db.query(
       'SELECT COUNT(*) AS count FROM danbooru_corpus_posts',
     ).get() as { count?: number } | null)?.count || 0);
     this.setMetaValues({ indexed_posts: this.indexedPosts });
@@ -234,8 +238,12 @@ export class DanbooruTagCorpusService {
   }
 
   close(): void {
-    this.pause();
-    this.db.close();
+    if (this.closed) return;
+    try { this.pause(); }
+    finally {
+      this.closed = true;
+      this.db.close();
+    }
   }
 
   getStatus(): DanbooruCorpusStatus {
@@ -247,9 +255,10 @@ export class DanbooruTagCorpusService {
     const availablePostsCheckedAt = this.metaNumber('available_posts_checked_at');
     const rawState = String(this.getMeta('state') || (indexedPosts > 0 ? 'paused' : 'empty')) as CorpusRunState;
     const progressPosts = mode === 'all' ? scannedPosts : indexedPosts;
-    const state: CorpusRunState = progressPosts >= targetPosts && rawState !== 'running' ? 'completed' : rawState;
+    const state: CorpusRunState = this.runFailure ? 'failed'
+      : progressPosts >= targetPosts && rawState !== 'running' && rawState !== 'failed' ? 'completed' : rawState;
     const startedAt = this.metaNumber('started_at');
-    const updatedAt = this.metaNumber('updated_at');
+    const updatedAt = this.runFailure?.updatedAt ?? this.metaNumber('updated_at');
     const completedAt = this.metaNumber('completed_at');
     const elapsedMs = startedAt ? Math.max(0, (completedAt || Date.now()) - startedAt) : 0;
     const runStartedPosts = clampInteger(this.getMeta('run_started_posts'), 0, 0, Number.MAX_SAFE_INTEGER);
@@ -289,7 +298,7 @@ export class DanbooruTagCorpusService {
         : [this.databasePath, `${this.databasePath}-wal`, `${this.databasePath}-shm`]
           .reduce((total, path) => total + (existsSync(path) ? statSync(path).size : 0), 0),
       tagMatrix: this.latestTagMatrix,
-      error: String(this.getMeta('error') || ''),
+      error: this.runFailure?.error ?? String(this.getMeta('error') || ''),
     };
   }
 
@@ -298,7 +307,10 @@ export class DanbooruTagCorpusService {
     authorization?: string;
     userAgent?: string;
     force?: boolean;
+    signal?: AbortSignal;
   } = {}): Promise<DanbooruCorpusStatus> {
+    if (this.closed) throw new Error('The corpus database is closed.');
+    const token = this.runToken;
     const current = this.getStatus();
     const minimumScore = clampInteger(options.minimumScore, current.minimumScore, 0, 1_000_000);
     const cachedScore = clampInteger(this.getMeta('available_posts_minimum_score'), 0, 0, 1_000_000);
@@ -320,7 +332,10 @@ export class DanbooruTagCorpusService {
     const availablePosts = await this.fetchPostCount(
       `https://danbooru.donmai.us/counts/posts.json${params.size > 0 ? `?${params}` : ''}`,
       headers,
+      options.signal,
     );
+    if (this.closed) throw new Error('The corpus database is closed.');
+    if (token !== this.runToken || options.signal?.aborted) return this.getStatus();
     const now = Date.now();
     const values: Record<string, string | number | null> = {
       available_posts: availablePosts,
@@ -341,9 +356,28 @@ export class DanbooruTagCorpusService {
   }
 
   async start(options: DanbooruCorpusStartOptions = {}): Promise<DanbooruCorpusStatus> {
-    if (this.runner) return this.getStatus();
+    if (this.closed) throw new Error('The corpus database is closed.');
+    if (this.runner || this.starting) return this.getStatus();
     if (options.rebuild) this.reset();
+    const token = ++this.runToken;
+    const controller = new AbortController();
+    this.starting = true;
+    this.abortController = controller;
+    try {
+      return await this.startBuild(options, token, controller);
+    } catch (error) {
+      if (this.closed) throw new Error('The corpus database is closed.');
+      if (this.runToken !== token || controller.signal.aborted) return this.getStatus();
+      throw error;
+    } finally {
+      if (this.runToken === token) {
+        this.starting = false;
+        if (!this.runner) this.abortController = null;
+      }
+    }
+  }
 
+  private async startBuild(options: DanbooruCorpusStartOptions, token: number, controller: AbortController): Promise<DanbooruCorpusStatus> {
     let current = this.getStatus();
     const mode: CorpusMode = options.allPosts === true ? 'all' : options.allPosts === false ? 'sample' : current.mode;
     const minimumScore = clampInteger(options.minimumScore, current.minimumScore, 0, 1_000_000);
@@ -356,7 +390,10 @@ export class DanbooruTagCorpusService {
         authorization: options.authorization,
         userAgent: options.userAgent,
         force: current.scannedPosts === 0,
+        signal: controller.signal,
       });
+      if (this.closed) throw new Error('The corpus database is closed.');
+      if (this.runToken !== token || controller.signal.aborted) return this.getStatus();
     }
     const targetPosts = mode === 'all'
       ? current.availablePosts || current.targetPosts
@@ -364,6 +401,7 @@ export class DanbooruTagCorpusService {
     const progressPosts = mode === 'all' ? current.scannedPosts : current.indexedPosts;
     if (progressPosts >= targetPosts) {
       this.setMetaValues({ corpus_mode: mode, target_posts: targetPosts, state: 'completed', completed_at: Date.now(), updated_at: Date.now(), error: '' });
+      this.runFailure = null;
       return this.getStatus();
     }
 
@@ -381,9 +419,7 @@ export class DanbooruTagCorpusService {
       error: '',
     });
 
-    const token = ++this.runToken;
-    const controller = new AbortController();
-    this.abortController = controller;
+    this.runFailure = null;
     this.runner = this.runCorpusBuild({
       targetPosts,
       allPosts: mode === 'all',
@@ -402,6 +438,7 @@ export class DanbooruTagCorpusService {
       signal: controller.signal,
       token,
     }).finally(() => {
+      controller.abort();
       if (this.runToken === token) {
         this.runner = null;
         this.abortController = null;
@@ -416,9 +453,15 @@ export class DanbooruTagCorpusService {
     this.abortController?.abort();
     this.abortController = null;
     this.runner = null;
+    this.starting = false;
     const current = this.getStatus();
     if (current.state === 'running') {
-      this.setMetaValues({ state: current.indexedPosts > 0 ? 'paused' : 'empty', updated_at: Date.now() });
+      try {
+        this.setMetaValues({ state: current.indexedPosts > 0 ? 'paused' : 'empty', updated_at: Date.now() });
+      } catch (error) {
+        this.recordRunFailure(error);
+        throw error;
+      }
     }
     return this.getStatus();
   }
@@ -433,6 +476,7 @@ export class DanbooruTagCorpusService {
     });
     tx();
     this.seedMeta();
+    this.runFailure = null;
     this.indexedPosts = 0;
     this.latestTagMatrix = emptyTagMatrix();
     this.db.run("INSERT INTO danbooru_corpus_fts(danbooru_corpus_fts) VALUES('optimize')");
@@ -440,11 +484,18 @@ export class DanbooruTagCorpusService {
   }
 
   ingestPosts(posts: DanbooruCorpusPost[]): { inserted: number; lastPostId: number | null } {
-    const insertPost = this.db.prepare(`
+    return this.ingestBatch(posts);
+  }
+
+  private ingestBatch(
+    posts: DanbooruCorpusPost[],
+    progress?: (lastPostId: number | null) => Record<string, string | number | null>,
+  ): { inserted: number; lastPostId: number | null } {
+    const insertPost = this.db.query(`
       INSERT OR IGNORE INTO danbooru_corpus_posts (id, score, rating, created_at, tag_count)
       VALUES (?, ?, ?, ?, ?)
     `);
-    const insertTags = this.db.prepare('INSERT INTO danbooru_corpus_fts(rowid, tags) VALUES (?, ?)');
+    const insertTags = this.db.query('INSERT INTO danbooru_corpus_fts(rowid, tags) VALUES (?, ?)');
     let inserted = 0;
     let lastPostId: number | null = null;
     const normalizedPosts = posts.map((post) => {
@@ -458,9 +509,15 @@ export class DanbooruTagCorpusService {
       } : null;
     }).filter((post): post is NonNullable<typeof post> => Boolean(post));
 
+    for (const post of normalizedPosts) lastPostId = lastPostId === null ? post.id : Math.min(lastPostId, post.id);
+    const progressValues = progress?.(lastPostId) || {};
+    const tagMatrix = this.buildTagMatrix(
+      normalizedPosts.filter((post) => post.tags.length > 0).map((post) => post.tags),
+      lastPostId,
+    );
+
     const tx = this.db.transaction(() => {
       for (const post of normalizedPosts) {
-        lastPostId = lastPostId === null ? post.id : Math.min(lastPostId, post.id);
         if (post.tags.length === 0) continue;
         const result = insertPost.run(
           post.id,
@@ -474,17 +531,16 @@ export class DanbooruTagCorpusService {
           inserted += 1;
         }
       }
+      this.setMetaValues({
+        ...progressValues,
+        indexed_posts: this.indexedPosts + inserted,
+        tag_matrix_json: JSON.stringify(tagMatrix),
+      });
     });
     tx();
+    // Publish cached status only after rows, search data and the cursor commit together.
     this.indexedPosts += inserted;
-    this.latestTagMatrix = this.buildTagMatrix(
-      normalizedPosts.filter((post) => post.tags.length > 0).map((post) => post.tags),
-      lastPostId,
-    );
-    this.setMetaValues({
-      indexed_posts: this.indexedPosts,
-      tag_matrix_json: JSON.stringify(this.latestTagMatrix),
-    });
+    this.latestTagMatrix = tagMatrix;
     return { inserted, lastPostId };
   }
 
@@ -546,7 +602,7 @@ export class DanbooruTagCorpusService {
     const minimumSupport = clampInteger(options.minimumSupport, 20, 1, 100_000);
     const sampleLimit = clampInteger(options.sampleLimit, MAX_RELATED_SAMPLE_POSTS, 100, MAX_RELATED_SAMPLE_POSTS);
     const matchExpression = buildMatchExpression(tags);
-    const matchedPostCount = Number((this.db.prepare(
+    const matchedPostCount = Number((this.db.query(
       'SELECT COUNT(*) AS count FROM danbooru_corpus_fts WHERE danbooru_corpus_fts MATCH ?',
     ).get(matchExpression) as { count?: number } | null)?.count || 0);
     // Keep broad-corpus noise out without making uncommon intersections blank.
@@ -568,7 +624,7 @@ export class DanbooruTagCorpusService {
       indexedPosts: status.indexedPosts,
     });
     if (status.state !== 'running') {
-      const cached = this.db.prepare('SELECT payload FROM danbooru_corpus_related_cache WHERE cache_key = ?').get(cacheKey) as { payload?: string } | null;
+      const cached = this.db.query('SELECT payload FROM danbooru_corpus_related_cache WHERE cache_key = ?').get(cacheKey) as { payload?: string } | null;
       if (cached?.payload) {
         try {
           return JSON.parse(cached.payload) as DanbooruRelatedResult;
@@ -587,7 +643,7 @@ export class DanbooruTagCorpusService {
     const selected = new Set(tags);
     const counts = new Map<string, number>();
     let sampledPostCount = 0;
-    const rows = this.db.prepare(`
+    const rows = this.db.query(`
       SELECT tags
       FROM danbooru_corpus_fts
       WHERE danbooru_corpus_fts MATCH ?
@@ -618,7 +674,7 @@ export class DanbooruTagCorpusService {
       .sort((a, b) => b.cooccurrenceCount - a.cooccurrenceCount || a.tag.localeCompare(b.tag))
       .slice(0, Math.max(limit * 4, 160));
 
-    const countTagPosts = this.db.prepare(
+    const countTagPosts = this.db.query(
       'SELECT COUNT(*) AS count FROM danbooru_corpus_fts WHERE danbooru_corpus_fts MATCH ?',
     );
     const suggestions = preliminary.map((entry) => {
@@ -646,7 +702,7 @@ export class DanbooruTagCorpusService {
       suggestions,
     };
     if (status.state !== 'running') {
-      this.db.prepare(`
+      this.db.query(`
         INSERT INTO danbooru_corpus_related_cache (cache_key, payload, updated_at)
         VALUES (?, ?, ?)
         ON CONFLICT(cache_key) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at
@@ -702,7 +758,7 @@ export class DanbooruTagCorpusService {
       tag_matrix_json: '',
       error: '',
     };
-    const insert = this.db.prepare('INSERT OR IGNORE INTO danbooru_corpus_meta (key, value) VALUES (?, ?)');
+    const insert = this.db.query('INSERT OR IGNORE INTO danbooru_corpus_meta (key, value) VALUES (?, ?)');
     const tx = this.db.transaction(() => {
       for (const [key, value] of Object.entries(defaults)) insert.run(key, String(value));
     });
@@ -710,7 +766,7 @@ export class DanbooruTagCorpusService {
   }
 
   private getMeta(key: string): string {
-    return String((this.db.prepare('SELECT value FROM danbooru_corpus_meta WHERE key = ?').get(key) as { value?: string } | null)?.value || '');
+    return String((this.db.query('SELECT value FROM danbooru_corpus_meta WHERE key = ?').get(key) as { value?: string } | null)?.value || '');
   }
 
   private metaNumber(key: string): number | null {
@@ -719,7 +775,7 @@ export class DanbooruTagCorpusService {
   }
 
   private setMetaValues(values: Record<string, string | number | null>): void {
-    const upsert = this.db.prepare(`
+    const upsert = this.db.query(`
       INSERT INTO danbooru_corpus_meta (key, value)
       VALUES (?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
@@ -728,6 +784,19 @@ export class DanbooruTagCorpusService {
       for (const [key, value] of Object.entries(values)) upsert.run(key, value === null ? '' : String(value));
     });
     tx();
+  }
+
+  private recordRunFailure(error: unknown): void {
+    this.runFailure = {
+      error: error instanceof Error ? error.message : 'Danbooru corpus build failed.',
+      updatedAt: Date.now(),
+    };
+    try {
+      this.setMetaValues({ state: 'failed', error: this.runFailure.error, updated_at: this.runFailure.updatedAt });
+    } catch (persistError) {
+      // A storage failure must not hide the stopped runner behind stale database status.
+      this.runFailure.error += ` Could not save the failure status: ${persistError instanceof Error ? persistError.message : String(persistError)}`;
+    }
   }
 
   private async runCorpusBuild(options: {
@@ -784,16 +853,15 @@ export class DanbooruTagCorpusService {
           if (options.signal.aborted || this.runToken !== options.token) return;
 
           const ingestedBatch = batches.flat();
-          this.ingestPosts(ingestedBatch);
           const nextCursor = ranges[ranges.length - 1].low;
-          this.setMetaValues({
+          this.ingestBatch(ingestedBatch, () => ({
             last_post_id: nextCursor,
             request_count: status.requestCount + ranges.length,
             last_batch_size: ingestedBatch.length,
             scanned_posts: status.scannedPosts + ingestedBatch.length,
             updated_at: Date.now(),
             error: '',
-          });
+          }));
 
           const nextStatus = this.getStatus();
           if (nextStatus.scannedPosts >= options.targetPosts) continue;
@@ -816,18 +884,18 @@ export class DanbooruTagCorpusService {
 
         const remainingPosts = Math.max(0, options.targetPosts - progressPosts);
         const ingestedBatch = data.slice(0, remainingPosts);
-        const ingested = this.ingestPosts(ingestedBatch);
-        const nextCursor = ingested.lastPostId;
-        if (!nextCursor || (status.lastPostId && nextCursor >= status.lastPostId)) {
-          throw new Error('Danbooru corpus pagination stopped advancing. The partial corpus was preserved.');
-        }
-        this.setMetaValues({
-          last_post_id: nextCursor,
-          request_count: status.requestCount + 1,
-          last_batch_size: ingestedBatch.length,
-          scanned_posts: status.scannedPosts + ingestedBatch.length,
-          updated_at: Date.now(),
-          error: '',
+        this.ingestBatch(ingestedBatch, (nextCursor) => {
+          if (!nextCursor || (status.lastPostId && nextCursor >= status.lastPostId)) {
+            throw new Error('Danbooru corpus pagination stopped advancing. The partial corpus was preserved.');
+          }
+          return {
+            last_post_id: nextCursor,
+            request_count: status.requestCount + 1,
+            last_batch_size: ingestedBatch.length,
+            scanned_posts: status.scannedPosts + ingestedBatch.length,
+            updated_at: Date.now(),
+            error: '',
+          };
         });
 
         const nextStatus = this.getStatus();
@@ -835,19 +903,15 @@ export class DanbooruTagCorpusService {
         await abortableDelay(options.requestDelayMs, options.signal);
       }
     } catch (error) {
-      if (isAbortError(error) || options.signal.aborted || this.runToken !== options.token) return;
-      this.setMetaValues({
-        state: 'failed',
-        error: error instanceof Error ? error.message : 'Danbooru corpus build failed.',
-        updated_at: Date.now(),
-      });
+      if (options.signal.aborted || this.runToken !== options.token) return;
+      this.recordRunFailure(error);
     }
   }
 
   private async fetchPostBatch(url: string, headers: Record<string, string>, signal: AbortSignal): Promise<DanbooruCorpusPost[]> {
     let lastError = '';
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const response = await fetch(url, { headers, signal });
+      const response = await fetch(url, { headers, signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) });
       if (response.ok) {
         const payload = await response.json();
         if (!Array.isArray(payload)) throw new Error('Danbooru returned an invalid corpus response.');
@@ -863,10 +927,11 @@ export class DanbooruTagCorpusService {
     throw new Error(lastError || 'Danbooru corpus request failed.');
   }
 
-  private async fetchPostCount(url: string, headers: Record<string, string>): Promise<number> {
+  private async fetchPostCount(url: string, headers: Record<string, string>, signal?: AbortSignal): Promise<number> {
     let lastError = '';
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const response = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
+      const timeout = AbortSignal.timeout(30_000);
+      const response = await fetch(url, { headers, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
       if (response.ok) {
         const payload = await response.json() as { counts?: { posts?: unknown } };
         const count = clampInteger(payload?.counts?.posts, 0, 1, MAX_TARGET_POSTS);
@@ -878,7 +943,7 @@ export class DanbooruTagCorpusService {
       if (![429, 500, 502, 503, 504].includes(response.status) || attempt === 4) break;
       const retryAfterSeconds = Number(response.headers.get('retry-after') || 0);
       const waitMs = retryAfterSeconds > 0 ? retryAfterSeconds * 1_000 : Math.min(60_000, 5_000 * (2 ** attempt));
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      await abortableDelay(waitMs, signal || new AbortController().signal);
     }
     throw new Error(lastError || 'Danbooru post-count request failed.');
   }

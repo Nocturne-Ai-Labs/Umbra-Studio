@@ -16,10 +16,6 @@ let minor = Number(match[2]);
 let patch = Number(match[3]);
 
 patch += 1;
-if (patch > 9) {
-  patch = 0;
-  minor += 1;
-}
 
 const nextVersion = `${major}.${minor}.${patch}`;
 const prevVersion = pkg.version;

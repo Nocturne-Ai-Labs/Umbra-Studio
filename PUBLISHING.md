@@ -273,6 +273,17 @@ The release workflow must publish only the Windows and Linux portable ZIPs.
 Do not add standalone JSON manifests to the release asset list; the manifests
 are implementation resources included inside both archives.
 
+Run `python3 scripts/validate-release-archives.py artifacts` before publishing
+clean GitHub archives. The gate rejects unsafe or colliding archive paths,
+symlinks, private runtime files, and missing launchers or required manifests.
+Files under `User/` must be empty placeholders or byte-identical copies of the
+packaged Power Prompter workflow, CSV, and starter-prompt defaults. Installed
+`Tools/` content and nested `resources/app/User` or `resources/app/Tools` data
+are not allowed. Review the curated defaults themselves; matching the copies
+inside an archive does not establish that their content is suitable for release.
+Clean portable builds reject application-source symlinks; explicit runtime
+dependency and optional bundled-model copying retain their separate handling.
+
 Portable packages must use the curated `umbraRuntimeDependencies` list from
 `package.json`. `scripts/prepare-runtime-dependencies.mjs` installs those
 dependencies for the current target platform and verifies the native Sharp

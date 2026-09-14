@@ -48,7 +48,7 @@ function sniffComfyPreviewMime(bytes: Uint8Array): string {
   if (bytes.byteLength >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
   if (bytes.byteLength >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'image/png';
   if (bytes.byteLength >= 12) {
-    const header = new TextDecoder('ascii').decode(bytes.subarray(0, 12));
+    const header = new TextDecoder('utf-8').decode(bytes.subarray(0, 12));
     if (header.startsWith('RIFF') && header.slice(8, 12) === 'WEBP') return 'image/webp';
   }
   return '';
@@ -3235,38 +3235,45 @@ export class UmbraUiInpaintService {
   }
 
   private async monitor(job: UmbraUiInpaintJob, items: UmbraUiInpaintJobItem[]) {
-    if (job.status === 'canceled') return;
+    const jobCanceled = () => job.status === 'canceled';
+    if (jobCanceled()) {
+      for (const item of items) if (item.ppuid) this.outputMetadataByPpuid.delete(item.ppuid);
+      return;
+    }
     job.status = 'running';
     job.updatedAt = Date.now();
     this.persistJobs();
     await Promise.all(items.map(async (item) => {
-      if (job.status === 'canceled' || item.status === 'canceled') return;
-      item.status = 'running';
-      job.updatedAt = Date.now();
-      this.persistJobs();
+      const canceled = () => jobCanceled() || item.status === 'canceled';
       try {
+        if (canceled()) return;
+        item.status = 'running';
+        job.updatedAt = Date.now();
+        this.persistJobs();
         const record = await this.waitForHistory(job, item);
-        if (job.status === 'canceled' || item.status === 'canceled') return;
+        if (canceled()) return;
         const executionError = readExecutionError(record);
         const status = String(record?.status?.status_str || '').trim().toLowerCase();
         if (executionError || status === 'error') throw new Error(executionError || 'ComfyUI inpaint execution failed.');
         item.outputs = collectOutputs(record);
         if (item.outputs.length <= 0) throw new Error('ComfyUI finished the inpaint sample without reporting a saved output.');
         await this.stampPowerPrompterMetadata(item);
+        if (canceled()) return;
         item.status = 'completed';
       } catch (error: any) {
-        if (job.status !== 'canceled' && item.status !== 'canceled') {
+        if (!canceled()) {
           item.status = 'failed';
           item.error = String(error?.message || error || 'Inpaint sample failed.');
         }
+      } finally {
+        job.completed = job.items.filter((candidate) => candidate.status === 'completed').length;
+        job.failed = job.items.filter((candidate) => candidate.status === 'failed').length;
+        job.updatedAt = Date.now();
+        if (item.ppuid) this.outputMetadataByPpuid.delete(item.ppuid);
+        this.persistJobs();
       }
-      job.completed = job.items.filter((candidate) => candidate.status === 'completed').length;
-      job.failed = job.items.filter((candidate) => candidate.status === 'failed').length;
-      job.updatedAt = Date.now();
-      this.persistJobs();
-      if (item.ppuid) this.outputMetadataByPpuid.delete(item.ppuid);
     }));
-    if (job.status === 'canceled') return;
+    if (jobCanceled()) return;
     job.status = job.items.every((item) => item.status === 'canceled') ? 'canceled' : job.completed === job.total
       ? 'completed'
       : job.completed > 0 ? 'partial' : 'failed';
@@ -3288,22 +3295,24 @@ export class UmbraUiInpaintService {
     let lastError = '';
     let lastQueueCheckAt = 0;
     let missingFromQueueSince = 0;
+    let lastHealthyAt = startedAt;
+    const readFinishedHistory = async () => {
+      const response = await fetch(`${this.getComfyBaseUrl()}/history/${encodeURIComponent(promptId)}`, {
+        cache: 'no-store', signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
+      const record = readHistoryRecord(await response.json(), promptId);
+      if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
+      lastHealthyAt = Date.now();
+      missingFromQueueSince = 0;
+      const status = String(record?.status?.status_str || '').trim().toLowerCase();
+      return readExecutionError(record) || status === 'error' || status === 'success' || status === 'completed' || record?.status?.completed === true ? record : null;
+    };
     while (Date.now() - startedAt < HISTORY_TIMEOUT_MS) {
       if (isCanceled()) throw new Error(`${label} canceled.`);
       try {
-        const response = await fetch(`${this.getComfyBaseUrl()}/history/${encodeURIComponent(promptId)}`, { cache: 'no-store' });
-        if (response.ok) {
-          const record = readHistoryRecord(await response.json().catch(() => ({})), promptId);
-          if (record) {
-            missingFromQueueSince = 0;
-            const status = String(record?.status?.status_str || '').trim().toLowerCase();
-            if (readExecutionError(record) || status === 'error' || status === 'success' || status === 'completed' || record?.status?.completed === true) {
-              return record;
-            }
-          }
-        } else {
-          lastError = `${response.status} ${response.statusText}`.trim();
-        }
+        const record = await readFinishedHistory();
+        if (record) return record;
       } catch (error: any) {
         lastError = String(error?.message || error || 'history request failed');
       }
@@ -3311,12 +3320,19 @@ export class UmbraUiInpaintService {
       if (now - lastQueueCheckAt >= this.queueCheckIntervalMs) {
         lastQueueCheckAt = now;
         try {
-          const queueResponse = await fetch(`${this.getComfyBaseUrl()}/queue`, { cache: 'no-store' });
+          const queueResponse = await fetch(`${this.getComfyBaseUrl()}/queue`, { cache: 'no-store', signal: AbortSignal.timeout(15_000) });
           if (queueResponse.ok) {
-            const queuePromptIds = collectQueuePromptIds(await queueResponse.json().catch(() => ({})));
+            const payload = await queueResponse.json();
+            if (!payload || typeof payload !== 'object'
+              || !('queue_running' in payload) || !Array.isArray(payload.queue_running)
+              || !('queue_pending' in payload) || !Array.isArray(payload.queue_pending)) throw new Error('Invalid ComfyUI queue response.');
+            lastHealthyAt = Date.now();
+            const queuePromptIds = collectQueuePromptIds(payload);
             if (queuePromptIds.has(promptId)) missingFromQueueSince = 0;
             else if (!missingFromQueueSince) missingFromQueueSince = now;
             else if (now - missingFromQueueSince >= this.orphanedPromptGraceMs) {
+              const completed = await readFinishedHistory();
+              if (completed) return completed;
               throw new Error(`ComfyUI no longer reports ${label} prompt ${promptId} in history or its active queue.`);
             }
           }
@@ -3326,6 +3342,7 @@ export class UmbraUiInpaintService {
           lastError = message;
         }
       }
+      if (Date.now() - lastHealthyAt >= 120_000) throw new Error(`ComfyUI remained unavailable for two minutes while waiting for ${label}.${lastError ? ` ${lastError}` : ''}`);
       await Bun.sleep(this.historyPollIntervalMs);
     }
     throw new Error(`Timed out waiting for ComfyUI ${label} ${promptId}.${lastError ? ` ${lastError}` : ''}`);
@@ -3355,7 +3372,7 @@ export class UmbraUiInpaintService {
     const cutoff = Date.now() - JOB_RETENTION_MS;
     let changed = false;
     for (const [jobId, job] of this.jobs) {
-      if (job.updatedAt < cutoff) {
+      if (job.updatedAt < cutoff && ['completed', 'partial', 'failed', 'canceled'].includes(job.status)) {
         this.jobs.delete(jobId);
         changed = true;
       }

@@ -1,13 +1,13 @@
 import {
   createReadStream,
-  createWriteStream,
   existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
   writeFileSync,
 } from 'node:fs';
-import { once } from 'node:events';
+import type { BigIntStats } from 'node:fs';
+import * as fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
@@ -27,6 +27,8 @@ import {
 
 const RELEASES_API_URL = 'https://api.github.com/repos/Nocturne-Ai-Labs/Umbra-Studio/releases?per_page=30';
 const RELEASE_CACHE_TTL_MS = 5 * 60 * 1000;
+const DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
+const MAX_PACKAGE_BYTES = 8 * 1024 * 1024 * 1024;
 
 type GithubAsset = {
   name?: unknown;
@@ -94,13 +96,18 @@ export function normalizeGithubRelease(
   arch: string,
   windowsLauncherFlavor: UmbraWindowsLauncherFlavor = 'bat',
 ): UmbraReleaseBuild | null {
-  if (!value || value.draft === true) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.draft === true) return null;
   const tag = String(value.tag_name || '').trim();
   const version = normalizeUmbraVersion(tag);
   if (!tag || !/^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i.test(version)) return null;
   const assets = Array.isArray(value.assets) ? value.assets as GithubAsset[] : [];
   const packagePattern = releaseAssetPattern(platform, arch, windowsLauncherFlavor);
-  const asset = assets.find((entry) => packagePattern.test(String(entry.name || '').trim()));
+  const asset = assets.find((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const name = String(entry.name || '').trim();
+    const assetVersion = /^Umbra-Studio-v(.+)-(?:Windows-x64(?:-BAT)?|Linux-x64)\.zip$/i.exec(name)?.[1];
+    return packagePattern.test(name) && assetVersion?.toLowerCase() === version.toLowerCase();
+  });
   if (!asset) return null;
   const packageUrl = String(asset.browser_download_url || '').trim();
   if (!packageUrl.startsWith('https://github.com/')) return null;
@@ -171,6 +178,7 @@ export class AppUpdateService {
       return this.summarizeReleases(this.releaseCache.releases, options.includePrerelease === true);
     }
     const response = await fetch(RELEASES_API_URL, {
+      signal: AbortSignal.timeout(20_000),
       headers: {
         Accept: 'application/vnd.github+json',
         'User-Agent': `Umbra-Studio/${this.currentVersion || 'unknown'}`,
@@ -185,7 +193,8 @@ export class AppUpdateService {
         : `GitHub release check failed (${response.status}).`);
     }
     const payload = await response.json();
-    const releases = (Array.isArray(payload) ? payload : [])
+    if (!Array.isArray(payload)) throw new Error('Invalid GitHub release list. Please try checking for updates again.');
+    const releases = payload
       .map((entry) => normalizeGithubRelease(
         entry as GithubRelease,
         process.platform,
@@ -228,48 +237,90 @@ export class AppUpdateService {
     workspaceRoot: string,
     onProgress: (processedBytes: number, totalBytes: number) => void,
   ): Promise<{ archivePath: string; sha256: string; totalBytes: number }> {
+    if (!release.packageName || /[<>:"/\\|?*\x00-\x1f]/.test(release.packageName) || !/\.zip$/i.test(release.packageName))
+      throw new Error('Invalid release package filename.');
     const archivePath = join(workspaceRoot, release.packageName);
-    const response = await fetch(release.packageUrl, {
+    const expectedBytes = release.packageBytes;
+    if (!Number.isSafeInteger(expectedBytes) || expectedBytes < 0 || expectedBytes > MAX_PACKAGE_BYTES)
+      throw new Error('Invalid release package size.');
+    const controller = new AbortController();
+    const network = async <T>(operation: () => Promise<T>): Promise<T> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error('Release download stalled for two minutes. Retry when the connection is available.');
+          controller.abort(error);
+          reject(error);
+        }, DOWNLOAD_IDLE_TIMEOUT_MS);
+      });
+      try { return await Promise.race([operation(), deadline]); }
+      finally { clearTimeout(timer); }
+    };
+    const response = await network(() => fetch(release.packageUrl, {
       headers: {
         Accept: 'application/octet-stream',
         'User-Agent': `Umbra-Studio/${this.currentVersion || 'unknown'}`,
         'Cache-Control': 'no-cache',
+        'Accept-Encoding': 'identity',
       },
       redirect: 'follow',
-    });
+      signal: controller.signal,
+    }));
     if (!response.ok || !response.body) {
+      await response.body?.cancel().catch(() => undefined);
       throw new Error(`Release package download failed (${response.status}).`);
     }
-    const contentLength = Math.max(
-      0,
-      Number(response.headers.get('content-length')) || release.packageBytes || 0,
-    );
-    const output = createWriteStream(archivePath, { flags: 'wx' });
-    const hash = createHash('sha256');
+    const reader = response.body.getReader();
+    let output: Awaited<ReturnType<typeof fs.open>> | undefined;
+    let owned: BigIntStats | undefined;
+    let complete = false;
+    const digest = createHash('sha256');
     let processedBytes = 0;
     try {
-      for await (const chunk of response.body as any) {
-        const buffer = Buffer.from(chunk);
-        hash.update(buffer);
+      const declaredBytes = Number(response.headers.get('content-length') || 0);
+      if (!Number.isSafeInteger(declaredBytes) || declaredBytes < 0 || declaredBytes > MAX_PACKAGE_BYTES
+        || (expectedBytes && declaredBytes && expectedBytes !== declaredBytes))
+        throw new Error('Release package size does not match the published asset.');
+      const contentLength = expectedBytes || declaredBytes;
+      output = await fs.open(archivePath, 'wx');
+      owned = await output.stat({ bigint: true });
+      while (true) {
+        const chunk = await network(() => reader.read());
+        if (chunk.done) break;
+        const buffer = chunk.value;
         processedBytes += buffer.length;
-        if (!output.write(buffer)) await once(output, 'drain');
+        if (processedBytes > (contentLength || MAX_PACKAGE_BYTES)) throw new Error('Release package exceeds its expected size.');
+        digest.update(buffer);
+        let offset = 0;
+        while (offset < buffer.length) {
+          const { bytesWritten } = await output.write(buffer, offset, buffer.length - offset);
+          if (!bytesWritten) throw new Error('Release package could not be written.');
+          offset += bytesWritten;
+        }
         onProgress(processedBytes, contentLength);
       }
-      output.end();
-      await once(output, 'close');
-    } catch (error) {
-      output.destroy();
-      throw error;
+      if (!processedBytes || (contentLength && processedBytes !== contentLength))
+        throw new Error('Downloaded release package is empty or incomplete.');
+      const sha256 = digest.digest('hex');
+      if (release.sha256 && sha256.toLowerCase() !== release.sha256.toLowerCase())
+        throw new Error('Downloaded release package failed SHA-256 verification.');
+      await output.sync();
+      await output.close();
+      output = undefined;
+      complete = true;
+      return { archivePath, sha256, totalBytes: processedBytes };
+    } finally {
+      try { await output?.close(); }
+      finally {
+        await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
+        if (!complete && owned) {
+          const current = await fs.lstat(archivePath, { bigint: true }).catch(() => null);
+          if (current?.dev === owned.dev && current?.ino === owned.ino)
+            await fs.unlink(archivePath).catch(() => undefined);
+        }
+      }
     }
-    const sha256 = hash.digest('hex');
-    if (release.sha256 && sha256.toLowerCase() !== release.sha256.toLowerCase()) {
-      throw new Error('Downloaded release package failed SHA-256 verification.');
-    }
-    return {
-      archivePath,
-      sha256,
-      totalBytes: processedBytes,
-    };
   }
 
   async hashFile(filePath: string): Promise<string> {

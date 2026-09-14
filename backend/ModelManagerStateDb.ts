@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { existsSync, mkdirSync } from 'fs';
 import { join, resolve } from 'path';
+import { createSqliteWriteQueue } from './SqliteWriteQueue';
 
 export type ModelManagerClipboardRow = {
   id: number;
@@ -35,6 +36,7 @@ function parseJsonObject(value: string): Record<string, unknown> | null {
 
 export class ModelManagerStateDb {
   private readonly db: Database;
+  private readonly enqueueWrite = createSqliteWriteQueue();
 
   constructor(rootDir: string, relativeDbPath = DEFAULT_DB_RELATIVE_PATH) {
     const dbPath = resolve(rootDir, relativeDbPath);
@@ -50,6 +52,18 @@ export class ModelManagerStateDb {
 
   close(): void {
     this.db.close();
+  }
+
+  hasState(): boolean {
+    return Boolean(this.db.query("SELECT 1 FROM model_manager_state WHERE key = 'opened_model_ids'").get());
+  }
+
+  updateState(update: (current: ModelManagerStateRecord) => ModelManagerStateRecord): Promise<ModelManagerStateRecord> {
+    return this.enqueueWrite(() => this.db.transaction(() => {
+      const next = update(this.getState());
+      this.replaceState(next);
+      return this.getState();
+    }).immediate());
   }
 
   getState(): ModelManagerStateRecord {
@@ -167,7 +181,11 @@ export class ModelManagerStateDb {
     return row || null;
   }
 
-  upsertMediaCache(entry: ModelManagerMediaCacheEntry): void {
+  upsertMediaCache(entry: ModelManagerMediaCacheEntry): Promise<void> {
+    return this.enqueueWrite(() => this.writeMediaCache(entry));
+  }
+
+  private writeMediaCache(entry: ModelManagerMediaCacheEntry): void {
     const mediaUrl = String(entry.mediaUrl || '').trim();
     const localPath = String(entry.localPath || '').trim();
     if (!mediaUrl || !localPath) return;
@@ -188,7 +206,11 @@ export class ModelManagerStateDb {
     );
   }
 
-  deleteMediaCache(mediaUrlInput: string): ModelManagerMediaCacheEntry | null {
+  deleteMediaCache(mediaUrlInput: string): Promise<ModelManagerMediaCacheEntry | null> {
+    return this.enqueueWrite(() => this.db.transaction(() => this.removeMediaCache(mediaUrlInput)).immediate());
+  }
+
+  private removeMediaCache(mediaUrlInput: string): ModelManagerMediaCacheEntry | null {
     const mediaUrl = String(mediaUrlInput || '').trim();
     if (!mediaUrl) return null;
     const existing = this.getMediaCache(mediaUrl);

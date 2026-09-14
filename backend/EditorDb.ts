@@ -7,6 +7,7 @@ import { Database } from 'bun:sqlite';
 import { join, resolve } from 'path';
 import { existsSync } from 'fs';
 import * as fs from 'fs/promises';
+import { createSqliteWriteQueue } from './SqliteWriteQueue';
 
 const ROOT_DIR = process.env.UMBRA_ROOT
   ? resolve(process.env.UMBRA_ROOT)
@@ -16,17 +17,13 @@ const DB_PATH = join(USER_DIR, 'Config', 'GalleryDb.db');
 const LEGACY_DB_PATH = join(USER_DIR, 'Config', 'EditorDb.db');
 
 let db: Database | null = null;
+const enqueueWrite = createSqliteWriteQueue();
 
-async function cleanupLegacyEditorDbArtifacts(): Promise<void> {
-  const legacyPaths = [
-    LEGACY_DB_PATH,
-    `${LEGACY_DB_PATH}-wal`,
-    `${LEGACY_DB_PATH}-shm`,
-  ];
-  for (const artifactPath of legacyPaths) {
-    if (!existsSync(artifactPath)) continue;
-    await fs.unlink(artifactPath).catch(() => {});
-  }
+export function write<T>(operation: () => T): Promise<T> {
+  return enqueueWrite(() => {
+    if (!db) throw new Error('Database not initialized');
+    return db.transaction(operation).immediate();
+  });
 }
 
 /**
@@ -131,61 +128,66 @@ export async function initDatabase(): Promise<void> {
   const migrationKey = 'legacy-editor-db-migrated-to-gallerydb';
   const migrationRow = db.prepare('SELECT value FROM editor_db_meta WHERE key = ?').get(migrationKey) as { value?: string } | null;
   const migrationDone = String(migrationRow?.value || '').trim() === '1';
-  let migrationCompleted = migrationDone;
   if (!migrationDone && resolve(LEGACY_DB_PATH) !== resolve(DB_PATH) && existsSync(LEGACY_DB_PATH)) {
     try {
       db.run(`ATTACH DATABASE '${LEGACY_DB_PATH.replace(/'/g, "''")}' AS legacy_editor_db`);
-
+      db.run('BEGIN IMMEDIATE');
+      const tolerateMissingLegacyTable = (error: unknown) => {
+        if (!String((error as Error)?.message || error).includes('no such table: legacy_editor_db.')) throw error;
+      };
       try {
         db.run(`
           INSERT OR IGNORE INTO custom_order (folder_path, image_id, position, updated_at)
           SELECT folder_path, image_id, position, updated_at FROM legacy_editor_db.custom_order
         `);
-      } catch {}
+      } catch (error) { tolerateMissingLegacyTable(error); }
 
       try {
         db.run(`
-          INSERT OR IGNORE INTO presets (id, name, category, adjustments, created_at, updated_at)
-          SELECT id, name, category, adjustments, created_at, updated_at FROM legacy_editor_db.presets
+          INSERT OR IGNORE INTO presets (name, category, adjustments, created_at, updated_at)
+          SELECT name, category, adjustments, created_at, updated_at FROM legacy_editor_db.presets
         `);
-      } catch {}
+      } catch (error) { tolerateMissingLegacyTable(error); }
 
       try {
         db.run(`
-          INSERT OR IGNORE INTO editor_tags (id, name, color)
-          SELECT id, name, color FROM legacy_editor_db.tags
+          INSERT OR IGNORE INTO editor_tags (name, color)
+          SELECT name, color FROM legacy_editor_db.tags
         `);
-      } catch {}
+      } catch (error) { tolerateMissingLegacyTable(error); }
 
       try {
         db.run(`
           INSERT OR IGNORE INTO editor_image_tags (image_path, tag_id)
-          SELECT image_path, tag_id FROM legacy_editor_db.image_tags
+          SELECT legacy_image.image_path, current_tag.id
+          FROM legacy_editor_db.image_tags AS legacy_image
+          JOIN legacy_editor_db.tags AS legacy_tag ON legacy_tag.id = legacy_image.tag_id
+          JOIN editor_tags AS current_tag ON current_tag.name = legacy_tag.name
         `);
-      } catch {}
+      } catch (error) { tolerateMissingLegacyTable(error); }
 
       try {
         db.run(`
           INSERT OR IGNORE INTO editor_config (key, value, updated_at)
           SELECT key, value, updated_at FROM legacy_editor_db.editor_config
         `);
-      } catch {}
+      } catch (error) { tolerateMissingLegacyTable(error); }
 
       try {
         db.run(`
           INSERT OR IGNORE INTO editor_adjustments (path, sidecar_json, created_at, updated_at)
           SELECT path, sidecar_json, created_at, updated_at FROM legacy_editor_db.editor_adjustments
         `);
-      } catch {}
-
-      db.run('DETACH DATABASE legacy_editor_db');
+      } catch (error) { tolerateMissingLegacyTable(error); }
       db.prepare(`
         INSERT INTO editor_db_meta (key, value)
         VALUES (?, ?)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
       `).run(migrationKey, '1');
-      migrationCompleted = true;
+      db.run('COMMIT');
+      db.run('DETACH DATABASE legacy_editor_db');
     } catch (migrationError) {
+      try { db.run('ROLLBACK'); } catch { /* A transaction may not have started. */ }
       console.warn('[EditorDb] Legacy migration skipped:', migrationError);
       try {
         db.run('DETACH DATABASE legacy_editor_db');
@@ -193,9 +195,8 @@ export async function initDatabase(): Promise<void> {
     }
   }
 
-  if (migrationCompleted) {
-    await cleanupLegacyEditorDbArtifacts();
-  }
+  // Retain the legacy database as a recovery source, including name conflicts
+  // skipped by INSERT OR IGNORE. Never delete its active SQLite sidecars.
 
   console.log('[EditorDb] Database initialized at:', DB_PATH);
 }
@@ -351,7 +352,7 @@ export function listTags(): TagRow[] {
 export function createTag(name: string, color = ''): number {
   if (!db) throw new Error('Database not initialized');
   const result = db.prepare('INSERT OR IGNORE INTO editor_tags (name, color) VALUES (?, ?)').run(name, color);
-  if (Number(result.lastInsertRowid) > 0) return Number(result.lastInsertRowid);
+  if (result.changes > 0) return Number(result.lastInsertRowid);
   // Already exists, return existing id
   const existing = db.prepare('SELECT id FROM editor_tags WHERE name = ?').get(name) as { id: number } | undefined;
   return existing?.id ?? 0;

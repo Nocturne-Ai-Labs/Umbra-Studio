@@ -1890,10 +1890,15 @@ function emptyLocalServerEditor(): LocalServerEditorState {
 }
 
 const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
+  const editorId = React.useId();
   const selectedLocalServerAppId = useStore((state) => state.selectedLocalServerAppId);
   const setSelectedLocalServerAppId = useStore((state) => state.setSelectedLocalServerAppId);
   const showToast = useStore((state) => state.showToast);
   const [apps, setApps] = useState<LocalServerApp[]>([]);
+  const [appsLoaded, setAppsLoaded] = useState(false);
+  const [appsLoadError, setAppsLoadError] = useState('');
+  const appsReadyRef = useRef(false);
+  const appsLoadControllerRef = useRef<AbortController | null>(null);
   const [editor, setEditor] = useState<LocalServerEditorState>(() => emptyLocalServerEditor());
   const [saving, setSaving] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -1903,10 +1908,28 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
   const isRemoteClient = useMemo(() => isUmbraRemoteClient(), [remoteClientRevision]);
 
   const reloadApps = useCallback(async () => {
-    const loaded = await loadLocalServerApps().catch(() => []);
-    setApps(loaded);
-    if (selectedLocalServerAppId && loaded.length > 0 && !loaded.some((app) => app.id === selectedLocalServerAppId)) {
-      setSelectedLocalServerAppId(loaded[0].id);
+    appsLoadControllerRef.current?.abort();
+    const controller = new AbortController();
+    appsLoadControllerRef.current = controller;
+    appsReadyRef.current = false;
+    setAppsLoaded(false);
+    setAppsLoadError('');
+    const timeout = window.setTimeout(() => controller.abort(new Error('Local server list load timed out.')), 15000);
+    try {
+      const loaded = await loadLocalServerApps(controller.signal);
+      controller.signal.throwIfAborted();
+      if (appsLoadControllerRef.current !== controller) return;
+      setApps(loaded);
+      appsReadyRef.current = true;
+      setAppsLoaded(true);
+      if (selectedLocalServerAppId && loaded.length > 0 && !loaded.some((app) => app.id === selectedLocalServerAppId)) {
+        setSelectedLocalServerAppId(loaded[0].id);
+      }
+    } catch (error) {
+      if (appsLoadControllerRef.current !== controller) return;
+      setAppsLoadError(error instanceof Error ? error.message : 'Failed to load local servers.');
+    } finally {
+      window.clearTimeout(timeout);
     }
   }, [selectedLocalServerAppId, setSelectedLocalServerAppId]);
 
@@ -1914,7 +1937,11 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
     void reloadApps();
     const onChanged = () => void reloadApps();
     window.addEventListener('umbra:local-server-apps-changed', onChanged);
-    return () => window.removeEventListener('umbra:local-server-apps-changed', onChanged);
+    return () => {
+      appsLoadControllerRef.current?.abort();
+      appsLoadControllerRef.current = null;
+      window.removeEventListener('umbra:local-server-apps-changed', onChanged);
+    };
   }, [reloadApps]);
 
   useEffect(() => {
@@ -1935,6 +1962,7 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
   const sortedApps = useMemo(() => [...apps].sort((left, right) => left.order - right.order || left.name.localeCompare(right.name)), [apps]);
 
   const persistApps = useCallback(async (nextApps: LocalServerApp[]) => {
+    if (!appsReadyRef.current) throw new Error('Reload the local server list before saving changes.');
     const normalized = await saveLocalServerApps(nextApps.map((app, index) => ({ ...app, order: index })));
     setApps(normalized);
     return normalized;
@@ -1977,10 +2005,14 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
 
   const handleDelete = useCallback(async (app: LocalServerApp) => {
     if (!window.confirm(`Delete local server "${app.name}"?`)) return;
-    const saved = await persistApps(apps.filter((entry) => entry.id !== app.id));
-    if (selectedLocalServerAppId === app.id) setSelectedLocalServerAppId(saved[0]?.id || null);
-    if (editor.id === app.id) setEditor(emptyLocalServerEditor());
-    showToast('Local server deleted', 'success');
+    try {
+      const saved = await persistApps(apps.filter((entry) => entry.id !== app.id));
+      if (selectedLocalServerAppId === app.id) setSelectedLocalServerAppId(saved[0]?.id || null);
+      if (editor.id === app.id) setEditor(emptyLocalServerEditor());
+      showToast('Local server deleted', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to delete local server', 'error');
+    }
   }, [apps, editor.id, persistApps, selectedLocalServerAppId, setSelectedLocalServerAppId, showToast]);
 
   const moveApp = useCallback(async (app: LocalServerApp, direction: -1 | 1) => {
@@ -1990,8 +2022,12 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
     const next = [...sortedApps];
     const [removed] = next.splice(index, 1);
     next.splice(targetIndex, 0, removed);
-    await persistApps(next);
-  }, [persistApps, sortedApps]);
+    try {
+      await persistApps(next);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to reorder local servers', 'error');
+    }
+  }, [persistApps, showToast, sortedApps]);
 
   useEffect(() => {
     setFrameLoaded(false);
@@ -2029,6 +2065,22 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
     if (selectedApp) startEdit(selectedApp);
     else startAdd();
   }, [selectedApp, startAdd, startEdit]);
+
+  if (!appsLoaded) {
+    return (
+      <div className="flex h-full items-start gap-3 p-6" role={appsLoadError ? 'alert' : 'status'}>
+        {appsLoadError ? (
+          <>
+            <p className="min-w-0 break-words text-sm text-red-200">{appsLoadError}</p>
+            <button type="button" onClick={() => void reloadApps()} title="Retry loading local servers" aria-label="Retry loading local servers"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-white/20 hover:bg-white/10">
+              <RefreshCw size={16} />
+            </button>
+          </>
+        ) : <><Loader2 size={16} className="shrink-0 animate-spin" /><span className="text-sm">Loading local servers...</span></>}
+      </div>
+    );
+  }
 
   if (!selectedApp) {
     return (
@@ -2154,8 +2206,9 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
               </div>
               <div className="space-y-3">
                 <div>
-                  <label className="mb-1 block text-[10px] font-black uppercase tracking-wider text-zinc-500">Name</label>
+                  <label htmlFor={`${editorId}-name`} className="mb-1 block text-[10px] font-black uppercase tracking-wider text-zinc-500">Name</label>
                   <input
+                    id={`${editorId}-name`}
                     value={editor.name}
                     onChange={(event) => setEditor((current) => ({ ...current, name: event.target.value }))}
                     placeholder="ComfyUI"
@@ -2163,8 +2216,9 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[10px] font-black uppercase tracking-wider text-zinc-500">URL</label>
+                  <label htmlFor={`${editorId}-url`} className="mb-1 block text-[10px] font-black uppercase tracking-wider text-zinc-500">URL</label>
                   <input
+                    id={`${editorId}-url`}
                     value={editor.url}
                     onChange={(event) => setEditor((current) => ({ ...current, url: event.target.value }))}
                     placeholder="http://127.0.0.1:8188"
@@ -2172,8 +2226,9 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[10px] font-black uppercase tracking-wider text-zinc-500">App Folder</label>
+                  <label htmlFor={`${editorId}-folder`} className="mb-1 block text-[10px] font-black uppercase tracking-wider text-zinc-500">App Folder</label>
                   <input
+                    id={`${editorId}-folder`}
                     value={editor.folderPath}
                     onChange={(event) => setEditor((current) => ({ ...current, folderPath: event.target.value }))}
                     placeholder="D:\\Tools\\ComfyUI"

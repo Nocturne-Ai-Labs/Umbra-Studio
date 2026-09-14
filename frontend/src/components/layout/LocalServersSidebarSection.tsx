@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ExternalLink, FolderOpen, Globe2, Plus } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -41,20 +41,36 @@ export const LocalServersSidebarSection = React.memo(({
   const selectedLocalServerAppId = useStore((state) => state.selectedLocalServerAppId);
   const setSelectedLocalServerAppId = useStore((state) => state.setSelectedLocalServerAppId);
   const [apps, setApps] = useState<LocalServerApp[]>([]);
+  const appsLoadControllerRef = useRef<AbortController | null>(null);
   const [health, setHealth] = useState<Record<string, LocalServerHealth>>({});
 
   const selectedId = selectedLocalServerAppId || null;
 
   const reloadApps = useCallback(async () => {
-    const loaded = await loadLocalServerApps().catch(() => []);
-    setApps(loaded);
+    appsLoadControllerRef.current?.abort();
+    const controller = new AbortController();
+    appsLoadControllerRef.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), 15000);
+    try {
+      const loaded = await loadLocalServerApps(controller.signal);
+      if (controller.signal.aborted || appsLoadControllerRef.current !== controller) return;
+      setApps(loaded);
+    } catch (error) {
+      if (appsLoadControllerRef.current === controller) console.warn('[Local Servers] Failed to refresh sidebar:', error);
+    } finally {
+      window.clearTimeout(timeout);
+    }
   }, []);
 
   useEffect(() => {
     void reloadApps();
     const onChanged = () => void reloadApps();
     window.addEventListener('umbra:local-server-apps-changed', onChanged);
-    return () => window.removeEventListener('umbra:local-server-apps-changed', onChanged);
+    return () => {
+      appsLoadControllerRef.current?.abort();
+      appsLoadControllerRef.current = null;
+      window.removeEventListener('umbra:local-server-apps-changed', onChanged);
+    };
   }, [reloadApps]);
 
   useEffect(() => {

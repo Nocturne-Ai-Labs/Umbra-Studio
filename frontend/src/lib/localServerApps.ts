@@ -1,4 +1,4 @@
-import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
+import { readUserConfigStrict, writeUserConfig } from '@/lib/userConfig';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 
 export interface LocalServerApp {
@@ -118,8 +118,9 @@ export function normalizeLocalServerApps(rawValue: unknown): LocalServerApp[] {
     .map((entry, index) => ({ ...entry, order: index }));
 }
 
-export async function loadLocalServerApps(): Promise<LocalServerApp[]> {
-  const value = await readUserConfig<unknown>(LOCAL_SERVER_APPS_CONFIG_KEY, []);
+export async function loadLocalServerApps(signal?: AbortSignal): Promise<LocalServerApp[]> {
+  const value = await readUserConfigStrict<unknown>(LOCAL_SERVER_APPS_CONFIG_KEY, [], signal);
+  if (!Array.isArray(value)) throw new Error('Invalid saved local server list.');
   return normalizeLocalServerApps(value);
 }
 

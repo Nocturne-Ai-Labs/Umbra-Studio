@@ -34,6 +34,7 @@ export interface UmbraUiUpscaleJob {
   failed: number;
   createdAt: number;
   updatedAt: number;
+  warning?: string;
   cancelRequested?: boolean;
   items: UmbraUiUpscaleJobItem[];
 }
@@ -128,11 +129,22 @@ export async function submitUmbraUiUpscaleJob(options: {
   form.set('pinnedOutputFolder', options.pinnedOutputFolder || '');
   form.set('outputFolder', String(options.outputFolder || '').trim());
   form.set('queuePlacement', String(options.queuePlacement || 'end'));
-  const response = await fetch('/api/umbra-ui/upscale', { method: 'POST', body: form });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload?.success === false || !payload?.job) {
+  const uncertainMessage = 'Upscale submission could not be confirmed. Staged files were retained; check the upscale queue before retrying.';
+  let response: Response;
+  let payload: any;
+  try {
+    response = await fetch('/api/umbra-ui/upscale', { method: 'POST', body: form });
+    payload = await response.json();
+  } catch {
+    throw new Error(uncertainMessage);
+  }
+  if (response.status === 400 && payload?.success === false && typeof payload.error === 'string' && !payload.job) {
     await cleanupUmbraUiUpscaleStage(batchId);
-    throw new Error(String(payload?.error || `Upscale request failed (${response.status}).`));
+    throw new Error(payload.error || 'Upscale request was rejected.');
+  }
+  if (!response.ok || payload?.success !== true || !payload.job || typeof payload.job !== 'object'
+    || Array.isArray(payload.job) || typeof payload.job.id !== 'string' || !payload.job.id.trim()) {
+    throw new Error(uncertainMessage);
   }
   return payload.job as UmbraUiUpscaleJob;
 }

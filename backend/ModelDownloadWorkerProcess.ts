@@ -65,6 +65,7 @@ const jobs = new Map<string, ModelDownloadJob>();
 const jobControllers = new Map<string, AbortController>();
 const reservedDestinations = new Set<string>();
 const MAX_JOBS = 512;
+const DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
 const MODEL_SNAPSHOT_SUFFIX = '.umbra-model.json';
 const MODEL_THUMB_SUFFIX = '.umbra-model-thumb';
 const MODEL_ARTIFACT_DIR = '.umbra';
@@ -295,6 +296,16 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
   let targetPath = '';
   let tempPath = '';
   let committed = false;
+  let downloadTimedOut = false;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const stopIdleTimer = () => { if (idleTimer) clearTimeout(idleTimer); idleTimer = undefined; };
+  const waitForNetwork = () => {
+    stopIdleTimer();
+    idleTimer = setTimeout(() => {
+      downloadTimedOut = true;
+      controller.abort(new Error('Model download stalled: no network data for two minutes.'));
+    }, DOWNLOAD_IDLE_TIMEOUT_MS);
+  };
   try {
     const destinationDir = job.useExactDestination ? job.destinationRoot : join(job.destinationRoot, normalizeCivitaiType(job.modelType));
     await fs.mkdir(destinationDir, { recursive: true });
@@ -303,10 +314,12 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
     targetPath = resolveUniqueDestinationPath(join(destinationDir, sanitizeFileName(job.fileName || 'model.safetensors')));
     tempPath = `${targetPath}.${randomUUID()}.part`;
     job.destinationPath = targetPath;
+    waitForNetwork();
     const response = await fetchModelDownload(job.downloadUrl, civitaiToken, controller.signal);
+    stopIdleTimer();
     if (!response.ok) {
-      const fallbackText = await response.text().catch(() => '');
-      throw new Error(`CivitAI download failed (${response.status})${fallbackText ? `: ${fallbackText.slice(0, 160)}` : ''}`);
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error(`CivitAI download failed (${response.status})`);
     }
 
     const totalHeader = Number(response.headers.get('content-length') || '0');
@@ -324,7 +337,9 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
     try {
       while (true) {
         controller.signal.throwIfAborted();
+        waitForNetwork();
         const chunk = await reader.read();
+        stopIdleTimer();
         if (chunk.done) break;
         const value = chunk.value;
         if (!value || value.byteLength <= 0) continue;
@@ -372,7 +387,7 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
     job.progress = 100;
     job.finishedAt = Date.now();
   } catch (error: any) {
-    const isAbort = controller.signal.aborted || String(error?.name || '').toLowerCase() === 'aborterror';
+    const isAbort = !downloadTimedOut && (controller.signal.aborted || String(error?.name || '').toLowerCase() === 'aborterror');
     if (committed) {
       job.status = 'completed';
       job.progress = 100;
@@ -383,10 +398,11 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
       job.error = 'Cancelled';
     } else {
       job.status = 'failed';
-      job.error = String(error?.message || 'Download failed');
+      job.error = downloadTimedOut ? 'Model download stalled: no network data for two minutes.' : String(error?.message || 'Download failed');
       job.finishedAt = Date.now();
     }
   } finally {
+    stopIdleTimer();
     controller.abort();
     if (tempPath) await fs.unlink(tempPath).catch(() => undefined);
     if (targetPath) reservedDestinations.delete(targetPath.toLowerCase());

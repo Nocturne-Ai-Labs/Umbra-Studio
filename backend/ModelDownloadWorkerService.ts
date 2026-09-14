@@ -131,11 +131,17 @@ export class ModelDownloadWorkerService {
     if (this.disposed) {
       throw new Error('Model download worker service has been disposed');
     }
-    if (this.child && this.child.exitCode === null && this.child.stdin && !this.child.stdin.destroyed) {
+    if (this.child && !this.child.killed && this.child.exitCode === null && this.child.signalCode === null && this.child.stdin && !this.child.stdin.destroyed) {
       return this.child;
     }
 
     const bunExecutable = process.execPath;
+    const previousChild = this.child;
+    if (previousChild) {
+      this.child = null;
+      this.failPending(new Error('Model download worker connection was lost'));
+      if (previousChild.exitCode === null && !previousChild.killed) previousChild.kill('SIGTERM');
+    }
     const child = spawn(bunExecutable, [this.workerScriptPath], {
       cwd: this.cwd,
       env: this.env,
@@ -145,6 +151,7 @@ export class ModelDownloadWorkerService {
     this.buffer = '';
 
     child.stdout?.on('data', (chunk: Buffer | string) => {
+      if (this.child !== child) return;
       this.buffer += String(chunk);
       while (true) {
         const newlineIndex = this.buffer.indexOf('\n');
@@ -160,7 +167,7 @@ export class ModelDownloadWorkerService {
 
           this.pending.delete(response.id);
           clearTimeout(pending.timeout);
-          if (response.ok) {
+          if (response.ok === true) {
             pending.resolve(response.result);
           } else {
             const error = new Error(response.error || 'Model download worker error');
@@ -181,7 +188,19 @@ export class ModelDownloadWorkerService {
       console.error(`[ModelDownloadWorker] ${text}`);
     });
 
+    const onWorkerError = (error: Error) => {
+      if (this.child !== child) return;
+      this.child = null;
+      this.failPending(error);
+      if (child.exitCode === null && !child.killed) {
+        try { child.kill('SIGTERM'); } catch { /* The process may already be gone. */ }
+      }
+    };
+    child.on('error', onWorkerError);
+    child.stdin?.on('error', onWorkerError);
+
     child.on('exit', (code, signal) => {
+      if (this.child !== child) return;
       const exitMessage = `Model download worker exited (code=${code}, signal=${signal})`;
       if (this.disposed) {
         this.failPending(new Error(exitMessage));

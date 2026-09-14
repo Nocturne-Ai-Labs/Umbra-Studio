@@ -3,6 +3,7 @@ import * as fs from 'fs/promises';
 import { basename, dirname, extname, join } from 'path';
 import { randomBytes } from 'crypto';
 import { constants as zlibConstants, createDeflateRaw } from 'zlib';
+import { finished } from 'node:stream/promises';
 
 type DatasetArchiveEntry = {
   fullPath: string;
@@ -103,13 +104,6 @@ function writeChunk(stream: ReturnType<typeof createWriteStream>, chunk: Uint8Ar
   });
 }
 
-function finishStream(stream: ReturnType<typeof createWriteStream>): Promise<void> {
-  return new Promise((resolve, reject) => {
-    stream.once('error', reject);
-    stream.end(resolve);
-  });
-}
-
 async function collectDatasetEntries(datasetPath: string, datasetName: string): Promise<DatasetArchiveEntry[]> {
   const datasetStat = await fs.stat(datasetPath);
   const entries: DatasetArchiveEntry[] = [{
@@ -163,6 +157,9 @@ async function collectDatasetEntries(datasetPath: string, datasetName: string): 
 
 async function writeDatasetZip(entries: DatasetArchiveEntry[], zipPath: string): Promise<{ size: number; sourceBytes: number }> {
   const stream = createWriteStream(zipPath);
+  // Observe errors from open through close, including before the first write.
+  const completion = finished(stream, { cleanup: true });
+  void completion.catch(() => undefined);
   const centralDirectory: Buffer[] = [];
   let offset = 0;
   let sourceBytes = 0;
@@ -224,12 +221,17 @@ async function writeDatasetZip(entries: DatasetArchiveEntry[], zipPath: string):
           });
           input.on('error', (error) => deflater.destroy(error));
           input.pipe(deflater);
-          for await (const chunk of deflater) {
-            const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-            compressedSize += buffer.length;
-            await writeChunk(stream, buffer);
-            offset += buffer.length;
-            ensureZip32Offset();
+          try {
+            for await (const chunk of deflater) {
+              const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+              compressedSize += buffer.length;
+              await writeChunk(stream, buffer);
+              offset += buffer.length;
+              ensureZip32Offset();
+            }
+          } finally {
+            input.destroy();
+            deflater.destroy();
           }
         }
         crc = (crc ^ 0xffffffff) >>> 0;
@@ -291,10 +293,12 @@ async function writeDatasetZip(entries: DatasetArchiveEntry[], zipPath: string):
     await writeChunk(stream, endRecord);
     offset += endRecord.length;
     ensureZip32Offset();
-    await finishStream(stream);
+    stream.end();
+    await completion;
     return { size: offset, sourceBytes };
   } catch (error) {
     stream.destroy();
+    await completion.catch(() => undefined);
     await fs.rm(zipPath, { force: true }).catch(() => undefined);
     throw error;
   }
@@ -313,7 +317,6 @@ export async function createDatasetArchive(options: {
 
   try {
     const result = await writeDatasetZip(entries, temporaryPath);
-    await fs.rm(options.archivePath, { force: true });
     await fs.rename(temporaryPath, options.archivePath);
     return {
       archivePath: options.archivePath,

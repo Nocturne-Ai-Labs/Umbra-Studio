@@ -35,7 +35,7 @@ export async function handleConsoleLogs(req: Request, _url: URL, ctx: any) {
   }
 }
 
-async function persistConsoleLogs(req: Request, logsDir: string, logFile: string) {
+async function persistConsoleLogs(req: { json(): Promise<unknown> }, logsDir: string, logFile: string) {
   try {
       const body: any = await req.json();
       const logs = body.logs;

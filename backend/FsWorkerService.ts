@@ -112,6 +112,7 @@ type FsWorkerRequest =
       payload: {
         oldFullPath: string;
         newFullPath: string;
+        replaceExisting?: boolean;
       };
     }
   | {
@@ -299,12 +300,20 @@ export class FsWorkerService {
     if (this.disposed) {
       throw new Error('Filesystem worker service has been disposed');
     }
-    if (this.child && this.child.exitCode === null && this.child.stdin && !this.child.stdin.destroyed) {
+    if (this.child && !this.child.killed && this.child.exitCode === null && this.child.signalCode === null && this.child.stdin && !this.child.stdin.destroyed) {
       this.lastEnsureSpawned = false;
       return this.child;
     }
 
     const bunExecutable = process.execPath;
+    const previousChild = this.child;
+    if (previousChild) {
+      this.child = null;
+      this.failPending(new Error('Filesystem worker connection was lost; check transfer destinations before retrying'));
+      if (previousChild.exitCode === null && !previousChild.killed) {
+        try { previousChild.kill('SIGTERM'); } catch { /* The process may already be gone. */ }
+      }
+    }
     const child = spawn(bunExecutable, [this.workerScriptPath], {
       cwd: this.cwd,
       env: this.env,
@@ -315,6 +324,7 @@ export class FsWorkerService {
     this.buffer = '';
 
     child.stdout?.on('data', (chunk: Buffer | string) => {
+      if (this.child !== child) return;
       this.buffer += String(chunk);
       while (true) {
         const newlineIndex = this.buffer.indexOf('\n');
@@ -367,6 +377,7 @@ export class FsWorkerService {
     });
 
     child.on('exit', (code, signal) => {
+      if (this.child !== child) return;
       const workerExitedError = new Error(`Filesystem worker exited (code=${String(code)} signal=${String(signal)})`);
       this.failPending(workerExitedError);
       this.child = null;
@@ -383,9 +394,16 @@ export class FsWorkerService {
       }
     });
 
-    child.on('error', (error) => {
-      console.error('[FsWorkerService] Worker process error:', error);
-    });
+    const onWorkerError = (error: Error) => {
+      if (this.child !== child) return;
+      this.child = null;
+      this.failPending(error);
+      if (child.exitCode === null && !child.killed) {
+        try { child.kill('SIGTERM'); } catch { /* The process may already be gone. */ }
+      }
+    };
+    child.on('error', onWorkerError);
+    child.stdin?.on('error', onWorkerError);
 
     return child;
   }

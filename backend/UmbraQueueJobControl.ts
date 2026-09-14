@@ -3,8 +3,11 @@ export type UmbraQueueJobAction = 'skip' | 'remove';
 export async function cancelComfyJobById(baseUrl: string, promptId: string): Promise<boolean> {
   if (!promptId.trim()) throw new Error('The generation is still submitting. Try again once it is queued.');
   // Never fall back to /interrupt: it can hit another owner's generation.
-  const response = await fetch(`${baseUrl}/api/jobs/${encodeURIComponent(promptId)}/cancel`, { method: 'POST' });
-  const payload = await response.json().catch(() => ({}));
+  const response = await fetch(`${baseUrl}/api/jobs/${encodeURIComponent(promptId)}/cancel`, {
+    method: 'POST', signal: AbortSignal.timeout(15_000),
+  });
+  const raw: unknown = await response.json().catch(() => ({}));
+  const payload = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   if (!response.ok) {
     throw new Error(response.status === 404
       ? 'Update ComfyUI to use targeted generation cancellation.'

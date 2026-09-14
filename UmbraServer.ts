@@ -7,7 +7,7 @@
  */
 
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
-import { createReadStream, createWriteStream, existsSync, statSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, type Dirent } from 'fs';
+import { createReadStream, createWriteStream, existsSync, statSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, openSync, closeSync, renameSync, rmSync, type Dirent, type Stats, type BigIntStats } from 'fs';
 import * as fs from 'fs/promises';
 import { LoraPresetWriteError, writeLoraPresetLibrary } from './backend/UmbraLoraPresetStore';
 import * as os from 'os';
@@ -22,6 +22,8 @@ import { createConnection } from 'net';
 import { ServerWebSocket } from 'bun';
 import { QueueUploadReceiver } from './shared/power-prompter/queueTransport';
 import { classifyUmbraPrompt } from './shared/nsfwPrivacyClassifier';
+import { resolveSingleByteRange } from './shared/httpByteRange';
+import { createVariantEtag, matchesIfNoneMatch, permitsConditionalRange } from './shared/httpCache';
 import { compactQueueSnapshot } from './shared/power-prompter/queueSnapshotTransport';
 import { PowerPrompterHistoryStore } from './backend/PowerPrompterHistoryStore';
 import { buildRemainingPowerPrompterQueueSnapshot, splitSavedPowerPrompterQueue } from './backend/PowerPrompterSavedQueue';
@@ -32,24 +34,26 @@ import { seedBundledWorkflowDirectory } from './backend/BundledWorkflowService';
 import { settingsManager } from './backend/settings/SettingsManager';
 import { FsWorkerService } from './backend/FsWorkerService';
 import { GalleryTransferJournal } from './backend/GalleryTransferJournal';
-import { copyFileExclusive } from './backend/FsTransferCopy';
+import { buildGalleryDownloadArchive, type GalleryDownloadEntry } from './backend/GalleryDownloadArchiveService';
+import { copyFileExclusive, moveTreeExclusive } from './backend/FsTransferCopy';
 import { AnimaModelMergeService } from './backend/AnimaModelMergeService';
 import {
   buildBooruMediaRequestHeaders,
-  loadApiKeys,
+  readApiKeys,
   saveApiKeys,
   fetchDanbooruPosts,
   fetchE621Posts,
   fetchGelbooruPosts,
   fetchRule34Posts,
 } from './backend/booruApi';
-import type { BooruApiConfig } from './backend/booruApi';
+import type { BooruApiConfig, BooruImageResult } from './backend/booruApi';
 import { createRuntimePathHelpers } from './backend/runtimePaths';
 import { createSystemStatsService } from './backend/systemStats';
 import {
   UmbraUiUpscaleService,
   type UmbraUiUpscaleSource,
 } from './backend/UmbraUiUpscaleService';
+import { UmbraUiUpscaleStagingStore, type UmbraUiUpscaleStagingLease } from './backend/UmbraUiUpscaleStagingStore';
 import {
   UmbraUiInpaintService,
   type UmbraUiBackgroundRemovalSettings,
@@ -155,6 +159,7 @@ import * as trashRoutes from './backend/routes/trash';
 import * as logRoutes from './backend/routes/logs';
 import { MetadataParser } from './backend/MetadataParser';
 import * as EditorDb from './backend/EditorDb';
+import { fetchModelMedia, isSafeModelMediaType, validateModelMediaUrl } from './backend/ModelManagerMediaHttp';
 import { GalleryDb, type GalleryFileInput, type GalleryMediaType } from './gallery/GalleryDb';
 import { ModelIndexWorkerService, type ModelRootDescriptor } from './backend/ModelIndexWorkerService';
 import { ModelDownloadWorkerService } from './backend/ModelDownloadWorkerService';
@@ -344,8 +349,6 @@ const COMFY_PROXY_TIMEOUT_MS = 4000;
 const COMFY_PROXY_WEBSOCKET_ENABLED = process.env.UMBRA_ENABLE_COMFY_WS_PROXY !== '0';
 const BACKEND_READY_PROBE_TIMEOUT_MS = 2000;
 const BACKEND_PP_PREVIEW_FRAME_THROTTLE_MS = 0;
-const APPBAR_COMFY_PREVIEW_FRAME_THROTTLE_MS = 0;
-const APPBAR_COMFY_PREVIEW_ENABLED = false;
 const BACKEND_PP_PREVIEW_MAX_DATA_URL_LENGTH = 8_000_000;
 const fsWorkerService = new FsWorkerService({
   sourceRoot: SOURCE_DIR,
@@ -416,28 +419,22 @@ process.on('exit', () => {
   }
 });
 
+let storedApiKeysWriteQueue: Promise<void> = Promise.resolve();
+
 async function loadStoredApiKeys() {
-  const canonical = await loadApiKeys(CONFIG_PATH);
-  if (LEGACY_CONFIG_PATH === CONFIG_PATH || !existsSync(LEGACY_CONFIG_PATH)) {
-    return canonical;
-  }
-  const legacy = await loadApiKeys(LEGACY_CONFIG_PATH);
-  const merged = { ...legacy, ...canonical };
-  const canonicalToken = String(canonical.civitai?.apiToken || canonical.civitai?.apiKey || '').trim();
-  const legacyToken = String(legacy.civitai?.apiToken || legacy.civitai?.apiKey || '').trim();
-  if (!canonicalToken && legacyToken) {
-    merged.civitai = { apiToken: legacyToken };
-  }
-  if (Object.keys(legacy).length > 0) {
-    await saveApiKeys(CONFIG_PATH, merged).catch((error) => {
-      console.warn('[API Keys] Failed to migrate legacy api-keys.json:', error);
-    });
-  }
-  return merged;
+  const canonical = await readApiKeys(CONFIG_PATH);
+  // An existing (even empty) canonical file is authoritative after key removal.
+  if (canonical !== null) return canonical;
+  return LEGACY_CONFIG_PATH === CONFIG_PATH ? {} : (await readApiKeys(LEGACY_CONFIG_PATH)) ?? {};
 }
 
-async function saveStoredApiKeys(config: Awaited<ReturnType<typeof loadApiKeys>>) {
-  await saveApiKeys(CONFIG_PATH, config);
+async function updateStoredApiKeys(mutate: (current: BooruApiConfig) => BooruApiConfig): Promise<void> {
+  const write = storedApiKeysWriteQueue.then(async () => {
+    const current = await loadStoredApiKeys();
+    await saveApiKeys(CONFIG_PATH, mutate(current));
+  });
+  storedApiKeysWriteQueue = write.catch(() => undefined);
+  await write;
 }
 
 type DatasetConceptCaptionSettings = {
@@ -1930,29 +1927,19 @@ async function saveModelManagerSnapshotThumbnailForFile(
   if (!imageUrl) return '';
 
   try {
-    const mediaUrl = validateModelManagerMediaUrl(imageUrl);
-    const headers = await buildModelManagerCivitaiHeaders('image/*,*/*;q=0.5');
-    const response = await fetch(mediaUrl, {
-      headers,
-      signal: AbortSignal.timeout(MODEL_MANAGER_CIVITAI_TIMEOUT_MS),
+    return await withModelManagerMediaSlot(async () => {
+      const { bytes: buffer, mimeType } = await fetchModelMedia(imageUrl, await getModelManagerCivitaiToken(), {
+        timeoutMs: MODEL_MANAGER_CIVITAI_TIMEOUT_MS,
+      });
+      if (!mimeType.startsWith('image/')) return '';
+
+      const artifactDir = join(dirname(modelFullPath), MODEL_ARTIFACT_DIR);
+      await fs.mkdir(artifactDir, { recursive: true });
+      const extension = getModelManagerMediaExtension(imageUrl, mimeType);
+      const thumbnailPath = join(artifactDir, `${basename(modelFullPath)}${MODEL_THUMB_PREFIX}.${extension}`);
+      await fs.writeFile(thumbnailPath, buffer);
+      return thumbnailPath;
     });
-    if (!response.ok) return '';
-
-    const mimeType = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-    if (!mimeType.startsWith('image/')) return '';
-
-    const contentLength = Number(response.headers.get('content-length') || 0);
-    if (Number.isFinite(contentLength) && contentLength > MODEL_MANAGER_MEDIA_MAX_BYTES) return '';
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length <= 0 || buffer.length > MODEL_MANAGER_MEDIA_MAX_BYTES) return '';
-
-    const artifactDir = join(dirname(modelFullPath), MODEL_ARTIFACT_DIR);
-    await fs.mkdir(artifactDir, { recursive: true });
-    const extension = getModelManagerMediaExtension(imageUrl, mimeType);
-    const thumbnailPath = join(artifactDir, `${basename(modelFullPath)}${MODEL_THUMB_PREFIX}.${extension}`);
-    await fs.writeFile(thumbnailPath, buffer);
-    return thumbnailPath;
   } catch {
     return '';
   }
@@ -2305,42 +2292,28 @@ function normalizeModelManagerState(rawValue: unknown): ModelManagerState {
 }
 
 async function loadModelManagerState(): Promise<ModelManagerState> {
-  try {
-    const fromDb = modelManagerStateDb.getState();
-    const normalizedFromDb: ModelManagerState = {
-      openedModelIds: normalizeModelManagerOpenedIds(fromDb.openedModelIds),
-      civitaiClipboard: normalizeModelManagerClipboard(fromDb.civitaiClipboard),
-    };
-    if (normalizedFromDb.openedModelIds.length > 0 || normalizedFromDb.civitaiClipboard.length > 0) {
-      return normalizedFromDb;
-    }
-
-    if (existsSync(LEGACY_MODEL_MANAGER_STATE_PATH)) {
-      const content = await fs.readFile(LEGACY_MODEL_MANAGER_STATE_PATH, 'utf-8');
-      const legacyState = normalizeModelManagerState(JSON.parse(content));
-      modelManagerStateDb.replaceState(legacyState);
-      await fs.unlink(LEGACY_MODEL_MANAGER_STATE_PATH).catch(() => {});
-      return legacyState;
-    }
-
+  const fromDb = modelManagerStateDb.getState();
+  const normalizedFromDb: ModelManagerState = {
+    openedModelIds: normalizeModelManagerOpenedIds(fromDb.openedModelIds),
+    civitaiClipboard: normalizeModelManagerClipboard(fromDb.civitaiClipboard),
+  };
+  if (modelManagerStateDb.hasState() || normalizedFromDb.openedModelIds.length > 0 || normalizedFromDb.civitaiClipboard.length > 0) {
     return normalizedFromDb;
-  } catch {
-    return { openedModelIds: [], civitaiClipboard: [] };
   }
+
+  if (existsSync(LEGACY_MODEL_MANAGER_STATE_PATH)) {
+    const content = await fs.readFile(LEGACY_MODEL_MANAGER_STATE_PATH, 'utf-8');
+    const legacyState = normalizeModelManagerState(JSON.parse(content));
+    // Recheck inside the write transaction so a concurrent edit wins over migration.
+    return modelManagerStateDb.updateState(current => modelManagerStateDb.hasState() ? current : legacyState);
+  }
+
+  return normalizedFromDb;
 }
 
-async function saveModelManagerState(nextValue: Partial<ModelManagerState>): Promise<ModelManagerState> {
-  const current = await loadModelManagerState();
-  const next: ModelManagerState = {
-    openedModelIds: Object.prototype.hasOwnProperty.call(nextValue, 'openedModelIds')
-      ? normalizeModelManagerOpenedIds(nextValue.openedModelIds)
-      : current.openedModelIds,
-    civitaiClipboard: Object.prototype.hasOwnProperty.call(nextValue, 'civitaiClipboard')
-      ? normalizeModelManagerClipboard(nextValue.civitaiClipboard)
-      : current.civitaiClipboard,
-  };
-  modelManagerStateDb.replaceState(next);
-  return next;
+async function saveModelManagerState(update: (current: ModelManagerState) => ModelManagerState): Promise<ModelManagerState> {
+  await loadModelManagerState();
+  return modelManagerStateDb.updateState(current => normalizeModelManagerState(update(current)));
 }
 
 function normalizeGalleryPortablePath(value: unknown): string {
@@ -2494,19 +2467,31 @@ function getCorsHeaders(): Record<string, string> {
   return createCorsHeadersForOrigin(corsOriginContext.getStore() || DEFAULT_CORS_ORIGIN);
 }
 
-function json(data: any, statusOrInit: number | ResponseInit = 200): Response {
-  const init: ResponseInit = typeof statusOrInit === 'number'
+type JsonResponseInit = Omit<ResponseInit, 'headers'> & { headers?: ResponseInit['headers'] | Record<string, string | string[]> };
+
+async function readJsonObject(req: Request, allowEmpty = false): Promise<Record<string, unknown> | null> {
+  try {
+    const text = await req.text();
+    if (allowEmpty && !text.trim()) return {};
+    const value: unknown = JSON.parse(text);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  } catch { return null; }
+}
+
+function json(data: unknown, statusOrInit: number | JsonResponseInit = 200): Response {
+  const init: JsonResponseInit = typeof statusOrInit === 'number'
     ? { status: statusOrInit }
     : { ...statusOrInit };
 
   const headers = new Headers(getCorsHeaders());
   if (init.headers) {
-    const incoming = init.headers as any;
+    const incoming = init.headers;
     if (incoming instanceof Headers) {
-      incoming.forEach((value: string, key: string) => headers.set(key, value));
+      incoming.forEach((value, key) => key.toLowerCase() === 'set-cookie' ? headers.append(key, value) : headers.set(key, value));
     } else if (Array.isArray(incoming)) {
       for (const [key, value] of incoming) {
-        headers.set(String(key), String(value));
+        if (String(key).toLowerCase() === 'set-cookie') headers.append(String(key), String(value));
+        else headers.set(String(key), String(value));
       }
     } else if (incoming && typeof incoming === 'object') {
       for (const [key, value] of Object.entries(incoming)) {
@@ -2822,8 +2807,12 @@ function getRequestVisibleOrigin(req: Request, url: URL): string {
 }
 
 function isTailscaleRequest(req: Request, url: URL, server?: RequestIpServer): boolean {
+  const socketAddress = getRequestSocketAddress(req, server);
+  if (isTailscaleIpAddress(socketAddress)) return true;
+  // Host/forwarded headers are only evidence behind a proxy on this machine.
+  if (!socketAddress || (!isLoopbackIpAddress(socketAddress) && !getLocalNetworkAddressSet().has(socketAddress))) return false;
   return getRequestHostCandidates(req, url).some(isTailscaleHostname)
-    || getRequestAddressCandidates(req, server).some(isTailscaleIpAddress);
+    || (loadRemoteConnectionSettings().trustProxyHeaders && getRequestAddressCandidates(req, server).some(isTailscaleIpAddress));
 }
 
 function isPublishedRemoteRequestAllowed(req: Request, url: URL, server?: RequestIpServer): boolean {
@@ -2834,13 +2823,10 @@ function isPublishedRemoteRequestAllowed(req: Request, url: URL, server?: Reques
 
 function isHostRequest(req: Request, url: URL, server?: RequestIpServer): boolean {
   const localAddresses = getLocalNetworkAddressSet();
-  const requestHostname = normalizeRequestHostname(url.hostname || req.headers.get('host'));
   const socketAddress = getRequestSocketAddress(req, server);
+  // A remote peer can choose Host: localhost. Never grant host privileges from it.
+  if (!socketAddress || (!isLoopbackIpAddress(socketAddress) && !localAddresses.has(socketAddress))) return false;
   if (getRequestHostCandidates(req, url).some(isTailscaleHostname)) return false;
-  if (isLoopbackHostname(requestHostname)) return true;
-  if (localAddresses.has(requestHostname)) {
-    return isLoopbackIpAddress(socketAddress) || localAddresses.has(socketAddress);
-  }
   const settings = loadRemoteConnectionSettings();
   if (settings.trustProxyHeaders) {
     const forwardedFor = normalizeIpAddress(
@@ -2859,9 +2845,7 @@ function isHostRequest(req: Request, url: URL, server?: RequestIpServer): boolea
     );
     if (forwardedHost && !isLoopbackHostname(forwardedHost) && !localAddresses.has(forwardedHost)) return false;
   }
-  if (!socketAddress) return false;
-  if (isLoopbackIpAddress(socketAddress)) return true;
-  return localAddresses.has(socketAddress);
+  return true;
 }
 
 function isRemoteRequest(req: Request, url: URL, server?: RequestIpServer): boolean {
@@ -2963,8 +2947,21 @@ function loadRemoteAuthConfig(): RemoteAuthConfig | null {
 }
 
 function saveRemoteAuthConfig(config: RemoteAuthConfig): void {
+  const content = `${JSON.stringify(config, null, 2)}\n`;
   mkdirSync(REMOTE_AUTH_DIR, { recursive: true });
-  writeFileSync(REMOTE_AUTH_PATH, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
+  const temporary = `${REMOTE_AUTH_PATH}.${randomBytes(12).toString('hex')}.tmp`;
+  const descriptor = openSync(temporary, 'wx', 0o600);
+  let closed = false;
+  try {
+    writeFileSync(descriptor, content, 'utf-8');
+    closeSync(descriptor);
+    closed = true;
+    // Keep read-modify-publish synchronous so device revocations cannot interleave.
+    renameSync(temporary, REMOTE_AUTH_PATH);
+  } finally {
+    if (!closed) { try { closeSync(descriptor); } catch { /* Preserve the original error. */ } }
+    try { rmSync(temporary, { force: true }); } catch { /* Only the owned temporary file may remain. */ }
+  }
 }
 
 function hashRemotePassword(password: string, salt: string, iterations: number): string {
@@ -3034,9 +3031,10 @@ function isRemoteRequestAuthenticated(req: Request, config: RemoteAuthConfig | n
   });
 }
 
-function getRemoteRequestAddress(req: Request): string {
+function getRemoteRequestAddress(req: Request, server?: RequestIpServer): string {
+  const socketAddress = getRequestSocketAddress(req, server);
   const settings = loadRemoteConnectionSettings();
-  if (settings.trustProxyHeaders) {
+  if (settings.trustProxyHeaders && socketAddress && (isLoopbackIpAddress(socketAddress) || getLocalNetworkAddressSet().has(socketAddress))) {
     const forwardedFor = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
     if (forwardedFor) return forwardedFor;
     const realIp = req.headers.get('x-real-ip')?.trim();
@@ -3044,7 +3042,7 @@ function getRemoteRequestAddress(req: Request): string {
     const cfIp = req.headers.get('cf-connecting-ip')?.trim();
     if (cfIp) return cfIp;
   }
-  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'direct';
+  return socketAddress || 'direct';
 }
 
 function isSecureRemoteRequest(req: Request): boolean {
@@ -3066,12 +3064,12 @@ function getRemoteCookieSecuritySuffix(req: Request): string {
   return isSecureRemoteRequest(req) ? '; Secure' : '';
 }
 
-function getRemoteLoginRateKey(req: Request, username: string): string {
-  return `${getRemoteRequestAddress(req)}:${username.toLowerCase()}`;
+function getRemoteLoginRateKey(req: Request, server?: RequestIpServer): string {
+  return getRemoteRequestAddress(req, server);
 }
 
-function getRemoteLoginRateLimit(req: Request, username: string): { limited: boolean; retryAfterSeconds: number } {
-  const key = getRemoteLoginRateKey(req, username);
+function getRemoteLoginRateLimit(req: Request, server?: RequestIpServer): { limited: boolean; retryAfterSeconds: number } {
+  const key = getRemoteLoginRateKey(req, server);
   const now = Date.now();
   const entry = remoteLoginFailures.get(key);
   if (!entry || entry.resetAt <= now) {
@@ -3082,8 +3080,8 @@ function getRemoteLoginRateLimit(req: Request, username: string): { limited: boo
   return { limited, retryAfterSeconds: limited ? Math.max(1, Math.ceil((entry.resetAt - now) / 1000)) : 0 };
 }
 
-function recordRemoteLoginFailure(req: Request, username: string): void {
-  const key = getRemoteLoginRateKey(req, username);
+function recordRemoteLoginFailure(req: Request, server?: RequestIpServer): void {
+  const key = getRemoteLoginRateKey(req, server);
   const now = Date.now();
   const existing = remoteLoginFailures.get(key);
   if (!existing || existing.resetAt <= now) {
@@ -3093,8 +3091,8 @@ function recordRemoteLoginFailure(req: Request, username: string): void {
   remoteLoginFailures.set(key, { count: existing.count + 1, resetAt: existing.resetAt });
 }
 
-function clearRemoteLoginFailures(req: Request, username: string): void {
-  remoteLoginFailures.delete(getRemoteLoginRateKey(req, username));
+function clearRemoteLoginFailures(req: Request, server?: RequestIpServer): void {
+  remoteLoginFailures.delete(getRemoteLoginRateKey(req, server));
 }
 
 function sanitizeRemoteDevice(device: RemoteAuthDeviceRecord) {
@@ -3128,13 +3126,13 @@ function createRemoteDeviceCookie(token: string, req: Request): string {
   return `${REMOTE_DEVICE_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${getRemoteCookieSecuritySuffix(req)}`;
 }
 
-function createRemoteHandshake(config: RemoteAuthConfig, req: Request, requestedLabel?: unknown): { deviceToken: string; deviceId: string; config: RemoteAuthConfig } {
+function createRemoteHandshake(config: RemoteAuthConfig, req: Request, requestedLabel?: unknown, server?: RequestIpServer): { deviceToken: string; deviceId: string; config: RemoteAuthConfig } {
   const now = Date.now();
   const existingToken = getRemoteDeviceToken(req);
   const deviceToken = existingToken || randomBytes(32).toString('base64url');
   const deviceId = hashRemoteSessionToken(deviceToken);
   const userAgent = String(req.headers.get('user-agent') || '').slice(0, 300);
-  const remoteAddress = getRemoteRequestAddress(req).slice(0, 120);
+  const remoteAddress = getRemoteRequestAddress(req, server).slice(0, 120);
   const label = getRemoteDeviceLabel(req, requestedLabel);
   const devices = [...(config.devices || [])];
   const existingIndex = devices.findIndex((device) => safeEqualHex(device.id, deviceId));
@@ -3399,14 +3397,14 @@ function summarizeRemoteTelemetryEvents(events: Array<Record<string, unknown>>) 
   };
 }
 
-function createRemoteTelemetryClient(req: Request, payload: any): RemoteTelemetryClientStats {
+function createRemoteTelemetryClient(req: Request, payload: any, server?: RequestIpServer): RemoteTelemetryClientStats {
   const now = Date.now();
   return {
     clientId: String(payload?.clientId || randomBytes(16).toString('hex')).slice(0, 120),
     clientLabel: String(payload?.clientLabel || getRemoteDeviceLabel(req)).slice(0, 80),
     mode: String(payload?.mode || 'desktop').slice(0, 40),
     url: sanitizeTelemetryPath(payload?.url),
-    remoteAddress: getRemoteRequestAddress(req).slice(0, 120),
+    remoteAddress: getRemoteRequestAddress(req, server).slice(0, 120),
     userAgent: String(req.headers.get('user-agent') || '').slice(0, 240),
     viewport: payload?.viewport,
     createdAt: now,
@@ -3427,14 +3425,14 @@ function createRemoteTelemetryClient(req: Request, payload: any): RemoteTelemetr
   };
 }
 
-function recordRemoteTelemetryBatch(req: Request, payload: any): RemoteTelemetryClientStats {
+function recordRemoteTelemetryBatch(req: Request, payload: any, server?: RequestIpServer): RemoteTelemetryClientStats {
   const clientId = String(payload?.clientId || '').trim().slice(0, 120) || randomBytes(16).toString('hex');
   const now = Date.now();
-  const stats = remoteTelemetryClients.get(clientId) || createRemoteTelemetryClient(req, { ...payload, clientId });
+  const stats = remoteTelemetryClients.get(clientId) || createRemoteTelemetryClient(req, { ...payload, clientId }, server);
   stats.clientLabel = String(payload?.clientLabel || stats.clientLabel || getRemoteDeviceLabel(req)).slice(0, 80);
   stats.mode = String(payload?.mode || stats.mode || 'desktop').slice(0, 40);
   stats.url = sanitizeTelemetryPath(payload?.url || stats.url);
-  stats.remoteAddress = getRemoteRequestAddress(req).slice(0, 120);
+  stats.remoteAddress = getRemoteRequestAddress(req, server).slice(0, 120);
   stats.viewport = payload?.viewport || stats.viewport;
   stats.lastSeenAt = now;
 
@@ -4373,7 +4371,6 @@ const wsClients = {
   generation: new Set<ServerWebSocket<unknown>>(),
   output: new Set<ServerWebSocket<unknown>>(),
   prompter: new Set<ServerWebSocket<unknown>>(),
-  comfyPreview: new Set<ServerWebSocket<unknown>>(),
   inpaintPreview: new Set<ServerWebSocket<unknown>>(),
   uiSession: new Set<ServerWebSocket<unknown>>()
 };
@@ -4788,6 +4785,7 @@ interface BackendPowerPrompterQueuedWork {
   data: any;
   queuePlacement?: PowerPrompterQueuePlacement;
   preservePaused?: boolean;
+  removedPromptIndices?: Set<number>;
 }
 
 const backendPowerPrompterQueuedWork: BackendPowerPrompterQueuedWork[] = [];
@@ -5062,10 +5060,14 @@ function recomputePowerPrompterQueueControllerState(reason?: string) {
     const hasPendingPrompt = request.prompts.some((prompt) => prompt.status === 'pending');
     const hasInterruptedPrompt = request.prompts.some((prompt) => prompt.status === 'interrupted');
     const hasCanceledPrompt = request.prompts.some((prompt) => prompt.status === 'canceled');
+    const terminalStatus = isPowerPrompterQueueControllerTerminalStatus(request.status) ? request.status : null;
     if (hasRunningPrompt) {
       request.status = 'running';
     } else if (hasPendingPrompt) {
       request.status = 'pending';
+    } else if (terminalStatus) {
+      // Counts describe individual prompts; polling must not replace the final job outcome.
+      request.status = terminalStatus;
     } else if (request.failed > 0) {
       request.status = 'failed';
     } else if (hasInterruptedPrompt) {
@@ -5077,7 +5079,10 @@ function recomputePowerPrompterQueueControllerState(reason?: string) {
     } else {
       request.status = 'pending';
     }
-    request.updatedAt = Math.max(request.updatedAt || 0, activePrompt?.updatedAt || 0, now);
+    request.updatedAt = request.prompts.reduce(
+      (latest, prompt) => Math.max(latest, prompt.updatedAt || 0),
+      request.updatedAt || request.createdAt || 0,
+    );
     persistBackendPPQueueHistoryProgress(request);
   }
 
@@ -5159,6 +5164,7 @@ function startPowerPrompterQueueControllerRequest(options: {
   generationByPrompt: PowerPrompterGenerationControls[];
   historyState?: Record<string, any>;
   preservePaused?: boolean;
+  removedPromptIndices?: ReadonlySet<number>;
 }, preferredSourceWs?: ServerWebSocket<unknown> | null, reason = 'request_started') {
   const requestId = String(options.requestId || '').trim();
   if (!requestId) return;
@@ -5194,7 +5200,7 @@ function startPowerPrompterQueueControllerRequest(options: {
         setId: clampPPQueueSetId(options.promptSetIds[index] ?? activeSetId),
         outputSubfolder: String(options.promptOutputSubfolders[index] || '').trim(),
         styleName: String(options.promptStyleNames[index] || '').trim(),
-        status: 'pending',
+        status: options.removedPromptIndices?.has(index) ? 'canceled' : 'pending',
         updatedAt: now,
       };
     }),
@@ -5243,6 +5249,11 @@ function updatePowerPrompterQueueControllerPrompt(
   broadcastPowerPrompterQueueControllerSnapshot(reason, preferredSourceWs);
 }
 
+function normalizePowerPrompterPromptIndices(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.filter((index): index is number => typeof index === 'number' && Number.isSafeInteger(index) && index >= 0)));
+}
+
 function applyPowerPrompterQueueControllerPromptRemovals(data: any, preferredSourceWs?: ServerWebSocket<unknown> | null) {
   const rawRemovals = Array.isArray(data?.promptRemovals) ? data.promptRemovals : [];
   const affectedRequestIds = new Set<string>();
@@ -5256,19 +5267,13 @@ function applyPowerPrompterQueueControllerPromptRemovals(data: any, preferredSou
     const request = findPowerPrompterQueueControllerRequest(requestId);
     const task = backendPowerPrompterQueueTasks.get(requestId);
     if (!request && !task) continue;
-    const requestedIndices = Array.isArray(rawRemoval?.promptIndices)
-      ? Array.from(new Set(
-        rawRemoval.promptIndices
-          .map((entry: unknown) => Number(entry))
-          .filter((entry: number) => Number.isFinite(entry))
-          .map((entry: number) => Math.max(0, Math.floor(entry)))
-      )).sort((a, b) => a - b)
-      : [];
+    const requestedIndices = normalizePowerPrompterPromptIndices(rawRemoval?.promptIndices).sort((a, b) => a - b);
     if (requestedIndices.length <= 0) continue;
 
     const appliedIndices: number[] = [];
     for (const promptIndex of requestedIndices) {
       const prompt = request?.prompts[promptIndex] || null;
+      if (!prompt && (!task || promptIndex >= task.prompts.length)) continue;
       if (prompt && prompt.status !== 'pending') continue;
       if (task) task.removedPromptIndices.add(promptIndex);
       if (prompt) {
@@ -5320,12 +5325,7 @@ function applyPowerPrompterQueueControllerReorder(data: any, preferredSourceWs?:
     ? data.promptOrders
       .map((entry: any) => ({
         requestId: String(entry?.requestId || '').trim(),
-        promptOrder: Array.isArray(entry?.promptOrder)
-          ? entry.promptOrder
-            .map((index: unknown) => Number(index))
-            .filter((index: number) => Number.isFinite(index))
-            .map((index: number) => Math.max(0, Math.floor(index)))
-          : [],
+        promptOrder: normalizePowerPrompterPromptIndices(entry?.promptOrder),
       }))
       .filter((entry) => entry.requestId && entry.promptOrder.length > 0)
     : [];
@@ -5367,20 +5367,30 @@ function applyPowerPrompterQueueControllerReorder(data: any, preferredSourceWs?:
     const request = findPowerPrompterQueueControllerRequest(entry.requestId);
     if (!request) continue;
     const oldPrompts = [...request.prompts].sort((a, b) => a.promptIndex - b.promptIndex);
-    const pendingPrompts = oldPrompts.filter((prompt) => prompt.status === 'pending');
+    const lockedThrough = oldPrompts.reduce((boundary, prompt) => (
+      prompt.status === 'running' || prompt.status === 'submitting'
+      || (prompt.promptIndex === request.activeIndex && prompt.status !== 'pending')
+        ? Math.max(boundary, prompt.promptIndex)
+        : boundary
+    ), -1);
+    const pendingPrompts = oldPrompts.filter((prompt) => prompt.status === 'pending' && prompt.promptIndex > lockedThrough);
     if (pendingPrompts.length <= 1) continue;
     const pendingByOldIndex = new Map(pendingPrompts.map((prompt) => [prompt.promptIndex, prompt] as const));
     const orderedPending = entry.promptOrder
       .map((promptIndex) => pendingByOldIndex.get(promptIndex) || null)
       .filter((prompt): prompt is PowerPrompterQueueControllerPrompt => !!prompt);
+    const orderedIndices = new Set(orderedPending.map((prompt) => prompt.promptIndex));
     const nextPending = [
       ...orderedPending,
-      ...pendingPrompts.filter((prompt) => !orderedPending.some((entry) => entry.promptIndex === prompt.promptIndex)),
+      ...pendingPrompts.filter((prompt) => !orderedIndices.has(prompt.promptIndex)),
     ];
     if (nextPending.every((prompt, index) => prompt.promptIndex === pendingPrompts[index]?.promptIndex)) continue;
 
-    const nonPendingPrompts = oldPrompts.filter((prompt) => prompt.status !== 'pending');
-    const nextPrompts = [...nonPendingPrompts, ...nextPending];
+    // Preserve executor/callback indices; only fill the existing movable slots.
+    let pendingIndex = 0;
+    const nextPrompts = oldPrompts.map((prompt) => pendingByOldIndex.has(prompt.promptIndex)
+      ? nextPending[pendingIndex++]
+      : prompt);
     const oldIndexToNewIndex = new Map<number, number>();
     const now = Date.now();
     request.prompts = nextPrompts.map((prompt, index) => {
@@ -5407,6 +5417,16 @@ function applyPowerPrompterQueueControllerReorder(data: any, preferredSourceWs?:
       task.removedPromptIndices = new Set(Array.from(task.removedPromptIndices).map((index) => oldIndexToNewIndex.get(index)).filter((index): index is number => index !== undefined));
       task.interruptedPromptIndices = new Set(Array.from(task.interruptedPromptIndices).map((index) => oldIndexToNewIndex.get(index)).filter((index): index is number => index !== undefined));
       task.activePromptIndex = oldIndexToNewIndex.get(task.activePromptIndex) ?? task.activePromptIndex;
+    }
+    const queuedWork = backendPowerPrompterQueuedWork.find(work => work.requestId === entry.requestId);
+    if (queuedWork) {
+      const previousEntries = queuedWork.data?.state?.promptEntries;
+      if (Array.isArray(previousEntries)) {
+        queuedWork.data = {
+          ...queuedWork.data,
+          state: { ...queuedWork.data.state, promptEntries: nextPrompts.map(prompt => previousEntries[prompt.promptIndex] ?? null) },
+        };
+      }
     }
     refreshBackendPowerPrompterQueuedWorkFromController(entry.requestId);
     const historyOrder = nextPrompts.map((prompt) => prompt.promptIndex);
@@ -5480,6 +5500,13 @@ function replacePowerPrompterQueueControllerGroup(
   const normalizedRequestId = String(requestId || '').trim();
   const request = findPowerPrompterQueueControllerRequest(normalizedRequestId);
   if (!request || !rawReplacement || typeof rawReplacement !== 'object') return { updated: false, lockedPromptCount: 0, request: null };
+  const task = backendPowerPrompterQueueTasks.get(normalizedRequestId);
+  const queuedWork = backendPowerPrompterQueuedWork.find((entry) => entry.requestId === normalizedRequestId);
+  // Pipeline resolution can outlive this group; visible history is not a worker.
+  if ((!task && !queuedWork) || isPowerPrompterQueueControllerTerminalStatus(request.status)
+    || task?.canceled || task?.abortController.signal.aborted || task?.stopAfterCurrent) {
+    return { updated: false, lockedPromptCount: 0, request: null };
+  }
 
   const replacement = rawReplacement as Record<string, any>;
   const replacementGroup = replacement.groupSnapshot && typeof replacement.groupSnapshot === 'object'
@@ -5516,10 +5543,15 @@ function replacePowerPrompterQueueControllerGroup(
     return entry && typeof entry === 'object' ? entry : null;
   });
 
-  const lockedPrompts = request.prompts
-    .filter((prompt) => prompt.status !== 'pending')
-    .sort((a, b) => a.promptIndex - b.promptIndex);
   const now = Date.now();
+  const previousPrompts = [...request.prompts].sort((a, b) => a.promptIndex - b.promptIndex);
+  const lastLockedPosition = previousPrompts.reduce((last, prompt, index) => (
+    prompt.status !== 'pending' ? index : last
+  ), -1);
+  // Keep callback indices stable. Replaced gaps become tombstones, not live work.
+  const lockedPrompts = previousPrompts.slice(0, lastLockedPosition + 1).map((prompt) => (
+    prompt.status === 'pending' ? { ...prompt, status: 'canceled' as const, updatedAt: now } : prompt
+  ));
   const nextControllerPrompts: PowerPrompterQueueControllerPrompt[] = [
     ...lockedPrompts.map((prompt, index) => ({
       ...prompt,
@@ -5558,7 +5590,6 @@ function replacePowerPrompterQueueControllerGroup(
   }
   request.updatedAt = now;
 
-  const task = backendPowerPrompterQueueTasks.get(normalizedRequestId);
   if (task) {
     if (pipelineBinding) task.loaded = pipelineBinding.loaded;
     const nextPrompts = nextControllerPrompts.map((prompt) => prompt.prompt);
@@ -5585,6 +5616,9 @@ function replacePowerPrompterQueueControllerGroup(
     task.generationByPrompt.splice(0, task.generationByPrompt.length, ...nextGenerationByPrompt);
     task.promptIds.splice(0, task.promptIds.length, ...nextControllerPrompts.map((prompt) => prompt.promptId || ''));
     task.removedPromptIndices = new Set(Array.from(task.removedPromptIndices).filter((index) => index < lockedPrompts.length));
+    for (const prompt of lockedPrompts) {
+      if (prompt.status === 'canceled') task.removedPromptIndices.add(prompt.promptIndex);
+    }
     task.interruptedPromptIndices = new Set(Array.from(task.interruptedPromptIndices).filter((index) => index < lockedPrompts.length));
     const replacementEditorSnapshot = replacement.editorSnapshot ?? replacementGroup.editorSnapshot;
     if (replacementEditorSnapshot && typeof replacementEditorSnapshot === 'object') {
@@ -5593,7 +5627,6 @@ function replacePowerPrompterQueueControllerGroup(
     }
   }
 
-  const queuedWork = backendPowerPrompterQueuedWork.find((entry) => entry.requestId === normalizedRequestId);
   if (queuedWork) {
     if (pipelineBinding) queuedWork.loaded = pipelineBinding.loaded;
     const previousState = queuedWork.data?.state && typeof queuedWork.data.state === 'object'
@@ -5610,6 +5643,7 @@ function replacePowerPrompterQueueControllerGroup(
     const nextPromptOutputSubfolders = nextControllerPrompts.map((prompt) => String(prompt.outputSubfolder || '').trim());
     const nextPromptStyleNames = nextControllerPrompts.map((prompt) => String(prompt.styleName || '').trim());
     const nextGenerationByPrompt = nextControllerPrompts.map((prompt) => normalizePPGenerationControls(prompt.generation));
+    queuedWork.removedPromptIndices = new Set(nextControllerPrompts.filter(prompt => prompt.status === 'canceled').map(prompt => prompt.promptIndex));
     queuedWork.prompts = nextPrompts;
     queuedWork.data = {
       ...queuedWork.data,
@@ -5662,10 +5696,10 @@ function refreshBackendPowerPrompterQueuedWorkFromController(requestId: string):
   const request = findPowerPrompterQueueControllerRequest(normalizedRequestId);
   if (!work || !request) return false;
   const task = backendPowerPrompterQueueTasks.get(normalizedRequestId);
-  const livePrompts = request.prompts
-    .filter((prompt) => prompt.status === 'pending')
-    .sort((a, b) => a.promptIndex - b.promptIndex);
-  if (livePrompts.length <= 0) {
+  // Keep metadata indexed exactly like the controller until the worker starts.
+  const orderedPrompts = [...request.prompts].sort((a, b) => a.promptIndex - b.promptIndex);
+  const firstPendingPrompt = orderedPrompts.find(prompt => prompt.status === 'pending');
+  if (!firstPendingPrompt) {
     cancelBackendPowerPrompterQueuedWork(normalizedRequestId, 'empty');
     return true;
   }
@@ -5673,13 +5707,14 @@ function refreshBackendPowerPrompterQueuedWorkFromController(requestId: string):
   const previousGenerationByPrompt = Array.isArray(previousState.generationByPrompt) ? previousState.generationByPrompt : [];
   const previousPromptEntries = Array.isArray(previousState.promptEntries) ? previousState.promptEntries : [];
   const livePromptEntries = task?.promptEntries || previousPromptEntries;
-  const generationByPrompt = livePrompts.map((prompt) => normalizePPGenerationControls(
+  const generationByPrompt = orderedPrompts.map((prompt) => normalizePPGenerationControls(
     prompt.generation ?? task?.generationByPrompt[prompt.promptIndex] ?? previousGenerationByPrompt[prompt.promptIndex] ?? {
       ...(previousState.generation && typeof previousState.generation === 'object' ? previousState.generation : {}),
       seed: prompt.seed,
     }
   ));
-  work.prompts = livePrompts.map((prompt) => prompt.prompt);
+  work.removedPromptIndices = new Set(orderedPrompts.filter(prompt => prompt.status === 'canceled').map(prompt => prompt.promptIndex));
+  work.prompts = orderedPrompts.map((prompt) => prompt.prompt);
   work.data = {
     ...work.data,
     mode: request.mode,
@@ -5692,14 +5727,14 @@ function refreshBackendPowerPrompterQueuedWorkFromController(requestId: string):
       umbraUiFeature: request.pipeline.feature,
       activeSetId: request.activeSetId,
       activeQueueSet: request.activeSetId,
-      activePrompt: work.prompts[0] || '',
+      activePrompt: firstPendingPrompt.prompt,
       prompts: work.prompts,
       joinedPrompt: work.prompts.join(', '),
-      promptSetIds: livePrompts.map((prompt) => prompt.setId),
-      promptOutputSubfolders: livePrompts.map((prompt) => prompt.outputSubfolder),
-      promptStyleNames: livePrompts.map((prompt) => prompt.styleName),
-      promptEntries: livePrompts.map((prompt) => livePromptEntries[prompt.promptIndex] ?? null),
-      generation: generationByPrompt[0] ?? normalizePPGenerationControls(previousState.generation),
+      promptSetIds: orderedPrompts.map((prompt) => prompt.setId),
+      promptOutputSubfolders: orderedPrompts.map((prompt) => prompt.outputSubfolder),
+      promptStyleNames: orderedPrompts.map((prompt) => prompt.styleName),
+      promptEntries: orderedPrompts.map((prompt) => livePromptEntries[prompt.promptIndex] ?? null),
+      generation: generationByPrompt[firstPendingPrompt.promptIndex] ?? normalizePPGenerationControls(previousState.generation),
       generationByPrompt,
     },
   };
@@ -7978,9 +8013,13 @@ function readComfyQueuePromptId(entry: any): string {
 async function getComfyQueuePromptIdSet(): Promise<Set<string>> {
   const response = await fetch(`${getComfyProxyBaseUrl()}/queue`, {
     cache: 'no-store',
+    signal: AbortSignal.timeout(15_000),
   });
-  if (!response.ok) return new Set();
-  const payload = await response.json().catch(() => ({} as any));
+  if (!response.ok) throw new Error(`Unable to read ComfyUI queue (${response.status}).`);
+  const payload = await response.json();
+  if (!payload || typeof payload !== 'object'
+    || !('queue_running' in payload) || !Array.isArray(payload.queue_running)
+    || !('queue_pending' in payload) || !Array.isArray(payload.queue_pending)) throw new Error('ComfyUI returned an invalid queue response.');
   const rows = [
     ...(Array.isArray(payload?.queue_running) ? payload.queue_running : []),
     ...(Array.isArray(payload?.queue_pending) ? payload.queue_pending : []),
@@ -8129,139 +8168,11 @@ function extractComfyProgressFromMessage(data: any): { hasProgress: boolean; ste
   };
 }
 
-let appbarComfyPreviewLastFrameAt = 0;
-let appbarComfyPreviewLastSignature = '';
-let appbarComfyPreviewLastPayload: Record<string, unknown> | null = null;
 
-function broadcastAppbarComfyPreview(data: Record<string, unknown>) {
-  if (!APPBAR_COMFY_PREVIEW_ENABLED) return;
-  const payload = {
-    type: 'comfy_generation_preview',
-    data: {
-      ...data,
-      updatedAt: Date.now(),
-    },
-  };
-  appbarComfyPreviewLastPayload = payload.data;
-  for (const client of wsClients.comfyPreview) {
-    sendWs(client, payload);
-  }
-}
 
-function emitAppbarComfyPreviewProgress(progress: { step: number; maxStep: number }, extra: Record<string, unknown> = {}) {
-  const step = Math.max(0, Math.floor(Number(progress.step) || 0));
-  const maxStep = Math.max(0, Math.floor(Number(progress.maxStep) || 0));
-  if (step <= 0 && maxStep <= 0) return;
-  broadcastAppbarComfyPreview({
-    ...extra,
-    step,
-    maxStep,
-    stepLabel: maxStep > 0 ? `Step ${step}/${maxStep}` : `Step ${step}`,
-    source: String(extra.source || 'comfy_proxy_ws'),
-  });
-}
 
-function emitAppbarComfyPreviewFrame(frame: ComfyPreviewFrame | null, extra: Record<string, unknown> = {}) {
-  const dataUrl = dataUrlFromPreviewFrame(frame);
-  if (!dataUrl) return;
-  const now = Date.now();
-  if (now - appbarComfyPreviewLastFrameAt < APPBAR_COMFY_PREVIEW_FRAME_THROTTLE_MS) return;
-  appbarComfyPreviewLastFrameAt = now;
-  const signature = [
-    dataUrl.length,
-    dataUrl.slice(-48),
-    frame?.frameIndex ?? '',
-    frame?.nodeId ?? '',
-    extra.step ?? '',
-    extra.maxStep ?? '',
-  ].join('|');
-  if (signature === appbarComfyPreviewLastSignature) return;
-  appbarComfyPreviewLastSignature = signature;
-  broadcastAppbarComfyPreview({
-    ...extra,
-    imageDataUrl: dataUrl,
-    mimeType: frame?.mimeType || '',
-    frameIndex: frame?.frameIndex ?? null,
-    nodeId: String(frame?.nodeId || extra.nodeId || '').trim(),
-    source: String(extra.source || 'comfy_proxy_ws'),
-  });
-}
 
-function handleAppbarComfyPreviewTextMessage(text: string) {
-  let message: { type: string; data: any } | null = null;
-  try {
-    message = normalizeComfyWsMessage(JSON.parse(text));
-  } catch {
-    return;
-  }
-  if (!message) return;
 
-  if (message.type === 'progress') {
-    const progress = extractComfyProgressFromMessage(message.data);
-    if (progress.hasProgress) emitAppbarComfyPreviewProgress(progress);
-    return;
-  }
-
-  if (message.type === 'executing') {
-    const nodeId = String(message.data?.node || message.data?.node_id || '').trim();
-    const promptId = extractComfyPromptIdFromMessage(message.data);
-    if (!nodeId && !promptId) {
-      broadcastAppbarComfyPreview({ active: false, source: 'comfy_proxy_ws' });
-      return;
-    }
-    broadcastAppbarComfyPreview({
-      active: true,
-      nodeId,
-      promptId,
-      source: 'comfy_proxy_ws',
-    });
-    return;
-  }
-
-  if (message.type === 'VHS_latentpreview') {
-    broadcastAppbarComfyPreview({
-      active: true,
-      length: Math.max(0, Math.floor(Number(message.data?.length) || 0)),
-      rate: Math.max(0, Number(message.data?.rate) || 0),
-      nodeId: String(message.data?.id || message.data?.node || '').trim(),
-      source: 'vhs_latentpreview',
-    });
-    return;
-  }
-
-  if (message.type === 'kj_preview_override') {
-    const base64 = String(message.data?.image || '').trim();
-    if (!base64) return;
-    const mimeType = String(message.data?.mime || 'image/jpeg').trim() || 'image/jpeg';
-    const step = Math.max(0, Math.floor(Number(message.data?.step) || 0));
-    const maxStep = Math.max(0, Math.floor(Number(message.data?.total) || 0));
-    const imageDataUrl = base64.startsWith('data:') ? base64 : `data:${mimeType};base64,${base64}`;
-    if (imageDataUrl.length > BACKEND_PP_PREVIEW_MAX_DATA_URL_LENGTH) return;
-    broadcastAppbarComfyPreview({
-      active: true,
-      imageDataUrl,
-      mimeType,
-      step,
-      maxStep,
-      stepLabel: maxStep > 0 ? `Step ${step}/${maxStep}` : step > 0 ? `Step ${step}` : '',
-      nodeId: String(message.data?.node_id || message.data?.node || '').trim(),
-      fps: Number.isFinite(Number(message.data?.fps)) ? Number(message.data.fps) : null,
-      source: 'kj_preview_override',
-    });
-  }
-}
-
-async function handleAppbarComfyPreviewProxyMessage(data: unknown) {
-  if (!APPBAR_COMFY_PREVIEW_ENABLED) return;
-  if (wsClients.comfyPreview.size <= 0) return;
-  if (typeof data === 'string') {
-    handleAppbarComfyPreviewTextMessage(data);
-    return;
-  }
-  const buffer = await bufferFromComfyWsData(data);
-  if (!buffer) return;
-  emitAppbarComfyPreviewFrame(readComfyPreviewBuffer(buffer));
-}
 
 function getBackendPreviewPromptIndex(task: BackendPowerPrompterQueueTask, promptId?: string): number {
   const normalizedPromptId = String(promptId || '').trim();
@@ -8321,15 +8232,18 @@ function startBackendPowerPrompterPreviewMonitor(
     try {
       const ws = new WebSocket(wsUrl);
       task.previewWs = ws;
+      const ownsMonitor = () => task.previewWs === ws && !task.previewMonitorClosed
+        && !task.canceled && !task.abortController.signal.aborted;
       ws.binaryType = 'arraybuffer';
       ws.onopen = () => {
+        if (!ownsMonitor()) { finish(); return; }
         task.previewReconnectAttempts = 0;
         appendPowerPrompterQueueLog('backend_preview_ws_open', { requestId });
         finish();
       };
       ws.onmessage = (event) => {
         void (async () => {
-          if (task.canceled || task.abortController.signal.aborted) return;
+          if (!ownsMonitor()) return;
           if (typeof event.data === 'string') {
             const message = normalizeComfyWsMessage(JSON.parse(event.data));
             if (!message) return;
@@ -8357,14 +8271,19 @@ function startBackendPowerPrompterPreviewMonitor(
             return;
           }
 
+          const promptIndex = getBackendPreviewPromptIndex(task);
+          const promptId = String(task.promptIds[promptIndex] || '').trim();
+          const prompt = task.prompts[promptIndex];
           const buffer = await bufferFromComfyWsData(event.data);
+          // A delayed decode must not inherit another prompt's privacy metadata.
+          if (!ownsMonitor() || getBackendPreviewPromptIndex(task) !== promptIndex
+            || String(task.promptIds[promptIndex] || '').trim() !== promptId
+            || task.prompts[promptIndex] !== prompt) return;
           const dataUrl = dataUrlFromPreviewFrame(buffer ? readComfyPreviewBuffer(buffer) : null);
           if (!dataUrl) return;
           const now = Date.now();
           if (BACKEND_PP_PREVIEW_FRAME_THROTTLE_MS > 0 && now - task.lastPreviewFrameAt < BACKEND_PP_PREVIEW_FRAME_THROTTLE_MS) return;
           task.lastPreviewFrameAt = now;
-          const promptIndex = getBackendPreviewPromptIndex(task);
-          const promptId = String(task.promptIds[promptIndex] || '').trim();
           const progressSignature = task.previewProgressSignatures.get(`${requestId}:${promptIndex}`) || '';
           const [stepRaw, maxStepRaw] = progressSignature.split(':').map((entry) => Number(entry));
           sendPrompterEventToTargets({
@@ -8373,7 +8292,7 @@ function startBackendPowerPrompterPreviewMonitor(
             promptIndex,
             promptId,
             imageDataUrl: dataUrl,
-            privacyClass: classifyUmbraPrompt(task.prompts[promptIndex]),
+            privacyClass: classifyUmbraPrompt(prompt),
             step: Number.isFinite(stepRaw) ? Math.max(0, Math.floor(stepRaw)) : 0,
             maxStep: Number.isFinite(maxStepRaw) ? Math.max(0, Math.floor(maxStepRaw)) : 0,
             updatedAt: Date.now(),
@@ -8387,13 +8306,15 @@ function startBackendPowerPrompterPreviewMonitor(
         });
       };
       ws.onerror = () => {
+        if (!ownsMonitor()) { finish(); return; }
         appendPowerPrompterQueueLog('backend_preview_ws_error', { requestId });
         finish();
       };
       ws.onclose = () => {
-        if (task.previewWs === ws) task.previewWs = null;
+        const wasCurrentSocket = task.previewWs === ws;
+        if (wasCurrentSocket) task.previewWs = null;
         finish();
-        if (task.previewMonitorClosed || task.canceled || task.abortController.signal.aborted || task.previewReconnectTimer) return;
+        if (!wasCurrentSocket || task.previewMonitorClosed || task.canceled || task.abortController.signal.aborted || task.previewReconnectTimer) return;
         task.previewReconnectAttempts += 1;
         const delayMs = Math.min(8000, 1000 * task.previewReconnectAttempts);
         appendPowerPrompterQueueLog('backend_preview_ws_reconnect_scheduled', {
@@ -8442,11 +8363,18 @@ async function waitForComfyPromptDrain(
   if (!normalizedPromptId) return;
   const startedAt = Date.now();
   let nextHeartbeatAt = 0;
+  let lastHealthyAt = startedAt;
   while (Date.now() - startedAt < timeoutMs) {
     shouldStop?.();
-    const ids = await getComfyQueuePromptIdSet().catch(() => new Set<string>());
+    let ids: Set<string> | null = null;
+    try {
+      ids = await getComfyQueuePromptIdSet();
+      lastHealthyAt = Date.now();
+    } catch (error) {
+      if (Date.now() - lastHealthyAt >= 120_000) throw new Error(`ComfyUI queue remained unavailable for two minutes: ${String(error)}`);
+    }
     shouldStop?.();
-    if (!ids.has(normalizedPromptId)) return;
+    if (ids && !ids.has(normalizedPromptId)) return;
     const now = Date.now();
     if (onActiveHeartbeat && now >= nextHeartbeatAt) {
       nextHeartbeatAt = now + BACKEND_PP_QUEUE_HEARTBEAT_MS;
@@ -8944,6 +8872,7 @@ async function waitForBackendPowerPrompterQueueResume(
   let announced = false;
   while (powerPrompterQueueControllerState.paused || backendPowerPrompterExecutionBlocks.size > 0) {
     throwIfBackendPowerPrompterQueueCanceled(task);
+    if (task.stopAfterCurrent) return;
     if (!announced) {
       announced = true;
       appendPowerPrompterQueueLog('backend_queue_waiting_for_resume', { requestId });
@@ -9450,7 +9379,7 @@ function buildPowerPrompterMetadataSegments(
       variantName: String(token.variantName || card?.variantName || '').trim(),
       text,
     };
-  }).filter((segment): segment is Record<string, unknown> => !!segment);
+  }).filter((segment): segment is NonNullable<typeof segment> => segment !== null);
 
   if (segments.length > 0) return segments;
   const prompt = String(fallbackPrompt || entry.prompt || '').trim();
@@ -9691,6 +9620,7 @@ async function runBackendPowerPrompterPipelineQueue(
   prompts: string[],
   loaded: LoadedPPApiWorkflow,
   data: any,
+  removedPromptIndices: ReadonlySet<number> = new Set(),
 ) {
   const state = data?.state && typeof data.state === 'object' ? data.state : {};
   const promptSetIds = prompts.map((_, index) => clampPPQueueSetId(Array.isArray(state.promptSetIds) ? state.promptSetIds[index] : state.activeQueueSet ?? state.activeSetId ?? 1));
@@ -9719,7 +9649,7 @@ async function runBackendPowerPrompterPipelineQueue(
     editorSnapshot: state.editorSnapshot && typeof state.editorSnapshot === 'object' ? state.editorSnapshot : null,
     restoreMetadataCache: null,
     loaded,
-    removedPromptIndices: new Set<number>(),
+    removedPromptIndices: new Set(removedPromptIndices),
     interruptedPromptIndices: new Set<number>(),
     promptIds: prompts.map(() => ''),
     activePromptIndex: 0,
@@ -9756,12 +9686,40 @@ async function runBackendPowerPrompterPipelineQueue(
     generationByPrompt,
     historyState: state,
     preservePaused: true,
+    removedPromptIndices: task.removedPromptIndices,
   }, sourceWs);
   let queueAcceptedSent = false;
   let failedPromptCount = 0;
+  let completedPromptCount = 0;
+  let interruptedPromptCount = 0;
   let extendedImg2VideoPipeline: LoadedPPApiWorkflow | null = null;
   let extendedContinuationImageName = '';
   const extendedClipPaths: string[] = [];
+  const finishBeforeNextPromptIfStopped = (): boolean => {
+    if (!task.stopAfterCurrent) return false;
+    sendPrompterEventToTargets({
+      type: 'job_idle',
+      requestId,
+      success: false,
+      canceled: true,
+      completed: completedPromptCount,
+      failed: failedPromptCount,
+      interruptedCount: interruptedPromptCount,
+      canceledCount: Math.max(0, prompts.length - completedPromptCount - failedPromptCount - interruptedPromptCount),
+      settled: prompts.length,
+      total: prompts.length,
+      reason: task.cancelReason || 'backend_queue_stopped_after_current',
+      source: 'backend_pipeline',
+    }, sourceWs);
+    appendPowerPrompterQueueLog('backend_queue_stopped_after_current', {
+      requestId,
+      completed: completedPromptCount,
+      total: prompts.length,
+      reason: task.cancelReason || 'cancel',
+    });
+    finishPowerPrompterQueueControllerRequest(requestId, 'canceled', 'stopped_after_current', task.cancelReason || 'cancel', sourceWs);
+    return true;
+  };
   try {
     extendedSession = readBackendUmbraLtxExtendedSession(generationByPrompt);
     if (extendedSession) {
@@ -9779,12 +9737,15 @@ async function runBackendPowerPrompterPipelineQueue(
     }
     for (let index = 0; index < prompts.length; index += 1) {
       throwIfBackendPowerPrompterQueueCanceled(task);
+      if (finishBeforeNextPromptIfStopped()) return;
       await waitForBackendPowerPrompterQueueResume(task, requestId, sourceWs);
       throwIfBackendPowerPrompterQueueCanceled(task);
+      if (finishBeforeNextPromptIfStopped()) return;
       if (index > 0) {
         await drainBackendPowerPrompterPriorityWork();
         await waitForBackendPowerPrompterQueueResume(task, requestId, sourceWs);
         throwIfBackendPowerPrompterQueueCanceled(task);
+        if (finishBeforeNextPromptIfStopped()) return;
       }
       task.activePromptIndex = index;
       if (task.removedPromptIndices.has(index)) {
@@ -9973,6 +9934,7 @@ async function runBackendPowerPrompterPipelineQueue(
           error: 'interrupt',
           completedAt: Date.now(),
         }, 'prompt_interrupted', sourceWs);
+        interruptedPromptCount += 1;
         sendPrompterEventToTargets({
           type: 'queue_progress',
           requestId,
@@ -10065,6 +10027,7 @@ async function runBackendPowerPrompterPipelineQueue(
         promptId,
         completedAt: Date.now(),
       }, 'prompt_completed', sourceWs);
+      completedPromptCount += 1;
       sendPrompterEventToTargets({
         type: 'queue_progress',
         requestId,
@@ -10076,27 +10039,6 @@ async function runBackendPowerPrompterPipelineQueue(
         total: prompts.length,
         source: 'backend_pipeline',
       }, sourceWs);
-      if (task.stopAfterCurrent && index < prompts.length - 1) {
-        const completed = index + 1;
-        sendPrompterEventToTargets({
-          type: 'job_idle',
-          requestId,
-          success: false,
-          canceled: true,
-          completed,
-          total: prompts.length,
-          reason: task.cancelReason || 'backend_queue_stopped_after_current',
-          source: 'backend_pipeline',
-        }, sourceWs);
-        appendPowerPrompterQueueLog('backend_queue_stopped_after_current', {
-          requestId,
-          completed,
-          total: prompts.length,
-          reason: task.cancelReason || 'cancel',
-        });
-        finishPowerPrompterQueueControllerRequest(requestId, 'canceled', 'stopped_after_current', task.cancelReason || 'cancel', sourceWs);
-        return;
-      }
     }
 
     if (extendedSession && failedPromptCount <= 0) {
@@ -10112,8 +10054,12 @@ async function runBackendPowerPrompterPipelineQueue(
       type: 'job_idle',
       requestId,
       success: failedPromptCount <= 0,
-      completed: Math.max(0, prompts.length - failedPromptCount),
+      completed: completedPromptCount,
       failed: failedPromptCount,
+      canceledCount: task.removedPromptIndices.size,
+      interruptedCount: interruptedPromptCount,
+      settled: completedPromptCount + failedPromptCount + interruptedPromptCount + task.removedPromptIndices.size,
+      ...(failedPromptCount > 0 ? { error: `${failedPromptCount} prompt(s) failed in ComfyUI.` } : {}),
       total: prompts.length,
       reason: failedPromptCount > 0 ? 'backend_queue_finished_with_failures' : 'backend_queue_finished',
       source: 'backend_pipeline',
@@ -10252,7 +10198,7 @@ async function runBackendPowerPrompterQueuedWork(next: BackendPowerPrompterQueue
     emitPowerPrompterTerminalLine(`Backend skipped terminal group req=${formatPowerPrompterRequestId(next.requestId)} status=${request.status}`);
     return;
   }
-  await runBackendPowerPrompterPipelineQueue(next.sourceWs, next.requestId, next.prompts, next.loaded, next.data);
+  await runBackendPowerPrompterPipelineQueue(next.sourceWs, next.requestId, next.prompts, next.loaded, next.data, next.removedPromptIndices);
 }
 
 async function drainBackendPowerPrompterPriorityWork(): Promise<void> {
@@ -10381,10 +10327,19 @@ async function handlePrompterApiWorkflowQueueBatchRequest(
     return;
   }
 
-  const duplicateRequestIds = groups
-    .map((group) => group.requestId)
-    .filter((requestId) => backendPowerPrompterQueueTasks.has(requestId) || backendPowerPrompterQueuedWork.some((entry) => entry.requestId === requestId));
-  if (duplicateRequestIds.length > 0) {
+  const rejectDuplicateRequests = (): boolean => {
+    const seen = new Set<string>();
+    const duplicates = new Set<string>();
+    const queuedIds = new Set(backendPowerPrompterQueuedWork.map(entry => entry.requestId));
+    for (const { requestId } of groups) {
+      if (seen.has(requestId) || backendPowerPrompterQueueTasks.has(requestId)
+        || queuedIds.has(requestId)) {
+        duplicates.add(requestId);
+      }
+      seen.add(requestId);
+    }
+    if (duplicates.size === 0) return false;
+    const duplicateRequestIds = Array.from(duplicates);
     sendWs(ws, {
       type: 'queue_batch_forwarded',
       requestId: batchRequestId,
@@ -10394,8 +10349,9 @@ async function handlePrompterApiWorkflowQueueBatchRequest(
       acceptedRequestIds: [],
       duplicateRequestIds,
     });
-    return;
-  }
+    return true;
+  };
+  if (rejectDuplicateRequests()) return;
 
   let resolvedGroups: Array<{
     group: typeof groups[number];
@@ -10432,6 +10388,9 @@ async function handlePrompterApiWorkflowQueueBatchRequest(
     return;
   }
 
+  // Validation awaits permit another batch to acquire these IDs. Recheck at
+  // the admission boundary; the enqueue loop below must remain synchronous.
+  if (rejectDuplicateRequests()) return;
   const acceptedRequestIds: string[] = [];
   for (const { group, loaded } of resolvedGroups) {
     enqueueBackendPowerPrompterQueueWork({
@@ -11547,18 +11506,9 @@ function handleWsConnection(ws: ServerWebSocket<unknown>, endpoint: string) {
     });
     logWsLifecycle(`[WS] Prompter client connected (${wsClients.prompter.size} total)`);
   } else if (endpoint === '/ws/comfy-preview') {
-    if (!APPBAR_COMFY_PREVIEW_ENABLED) {
-      try { ws.close(); } catch {}
-      return;
-    }
-    wsClients.comfyPreview.add(ws);
-    logWsLifecycle(`[WS] Comfy preview client connected (${wsClients.comfyPreview.size} total)`);
-    if (appbarComfyPreviewLastPayload) {
-      sendWs(ws, {
-        type: 'comfy_generation_preview',
-        data: appbarComfyPreviewLastPayload,
-      });
-    }
+    // Retired endpoint: preserve the existing immediate-close behavior.
+    try { ws.close(); } catch {}
+    return;
   } else if (endpoint === '/ws/inpaint-preview') {
     wsClients.inpaintPreview.add(ws);
     logWsLifecycle(`[WS] Inpaint preview client connected (${wsClients.inpaintPreview.size} total)`);
@@ -11596,9 +11546,6 @@ function handleWsDisconnection(ws: ServerWebSocket<unknown>, endpoint: string) {
     if (shouldBroadcastBridgeCatalog) {
       broadcastBridgeCatalogToPowerPrompterClients();
     }
-  } else if (endpoint === '/ws/comfy-preview') {
-    wsClients.comfyPreview.delete(ws);
-    logWsLifecycle(`[WS] Comfy preview client disconnected (${wsClients.comfyPreview.size} remaining)`);
   } else if (endpoint === '/ws/inpaint-preview') {
     wsClients.inpaintPreview.delete(ws);
     logWsLifecycle(`[WS] Inpaint preview client disconnected (${wsClients.inpaintPreview.size} remaining)`);
@@ -11611,7 +11558,7 @@ function handleWsDisconnection(ws: ServerWebSocket<unknown>, endpoint: string) {
 // ============================================
 // BACKEND LAUNCHER - SIMPLIFIED (was 328 lines in separate file)
 // ============================================
-import { spawn, spawnSync, type ChildProcess } from 'child_process';
+import { spawnSync, type ChildProcess } from 'child_process';
 
 let comfyProcess: ChildProcess | null = null;
 let galleryBridgeProcess: ChildProcess | null = null;
@@ -17265,6 +17212,7 @@ async function saveUserSettingsBundleSnapshot(bundleOverride?: Partial<UmbraUser
 
 function resolveUserConfigPath(key: unknown): string | null {
   const normalizedKey = String(key || '').trim().toLowerCase();
+  if (!Object.hasOwn(USER_CONFIG_FILES, normalizedKey)) return null;
   const fileName = USER_CONFIG_FILES[normalizedKey];
   if (!fileName) return null;
   return join(USER_DIR, 'Config', fileName);
@@ -17272,23 +17220,65 @@ function resolveUserConfigPath(key: unknown): string | null {
 
 async function readUserConfigValue(key: unknown): Promise<unknown | null> {
   const configPath = resolveUserConfigPath(key);
-  if (!configPath || !existsSync(configPath)) return null;
-  const raw = await fs.readFile(configPath, 'utf-8');
-  return JSON.parse(raw);
+  if (!configPath) return null;
+  try {
+    return JSON.parse(await fs.readFile(configPath, 'utf-8'));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+const userConfigMutations = new Map<string, Promise<unknown>>();
+
+async function withUserConfigMutation<T>(key: unknown, action: (configPath: string) => Promise<T>): Promise<T> {
+  const configPath = resolveUserConfigPath(key);
+  if (!configPath) throw new Error('Unknown user config key');
+  const previous = userConfigMutations.get(configPath) ?? Promise.resolve();
+  const operation = previous.catch(() => {}).then(() => action(configPath));
+  userConfigMutations.set(configPath, operation);
+  try {
+    return await operation;
+  } finally {
+    if (userConfigMutations.get(configPath) === operation) userConfigMutations.delete(configPath);
+  }
+}
+
+// Called only inside the owning config's mutation queue, including revision checks.
+async function writeUserConfigFile(configPath: string, value: unknown): Promise<void> {
+  const content = JSON.stringify(value ?? null, null, 2);
+  await fs.mkdir(dirname(configPath), { recursive: true });
+  const temporary = `${configPath}.${randomBytes(12).toString('hex')}.tmp`;
+  const handle = await fs.open(temporary, 'wx');
+  try {
+    await handle.writeFile(content, 'utf-8');
+    await handle.close();
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await fs.rename(temporary, configPath);
+        break;
+      } catch (error) {
+        // Windows readers and indexers may briefly hold a non-delete-sharing handle.
+        if (process.platform !== 'win32' || attempt >= 7 || !['EPERM', 'EACCES', 'EBUSY'].includes((error as NodeJS.ErrnoException).code || '')) throw error;
+        await new Promise(resolve => setTimeout(resolve, 25 * (attempt + 1)));
+      }
+    }
+  } finally {
+    await handle.close().catch(() => {});
+    await fs.rm(temporary, { force: true }).catch(() => {});
+  }
 }
 
 async function writeUserConfigValue(key: unknown, value: unknown): Promise<void> {
-  const configPath = resolveUserConfigPath(key);
-  if (!configPath) throw new Error('Unknown user config key');
-  const configDir = dirname(configPath);
-  if (!existsSync(configDir)) await fs.mkdir(configDir, { recursive: true });
-  await fs.writeFile(configPath, JSON.stringify(value ?? null, null, 2), 'utf-8');
+  await withUserConfigMutation(key, path => writeUserConfigFile(path, value));
 }
 
 async function deleteUserConfigValue(key: unknown): Promise<void> {
-  const configPath = resolveUserConfigPath(key);
-  if (!configPath || !existsSync(configPath)) return;
-  await fs.unlink(configPath);
+  if (!resolveUserConfigPath(key)) return;
+  await withUserConfigMutation(key, async path => {
+    try { await fs.unlink(path); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  });
 }
 
 const UMBRA_UI_AGENT_SETTINGS_PATH = join(USER_DIR, 'Config', 'UmbraUI', 'agent-mcp.json');
@@ -17427,22 +17417,12 @@ function normalizeUmbraUiAgentInstructions(value: unknown): UmbraUiAgentInstruct
 }
 
 async function loadUmbraUiAgentInstructions(): Promise<UmbraUiAgentInstruction[]> {
-  try {
-    const stored = await readUserConfigValue('umbra-ui-agent-instructions');
-    const normalized = normalizeUmbraUiAgentInstructions(stored);
-    if (normalized.length > 0) {
-      const merged = mergeRequiredUmbraUiAgentInstructions(normalized);
-      if (merged.length !== normalized.length) {
-        await writeUserConfigValue('umbra-ui-agent-instructions', merged);
-      }
-      return merged;
-    }
-  } catch (error) {
-    console.warn('[Umbra UI Agent] Failed to load prompt instructions; restoring defaults.', error);
-  }
-  const defaults = createDefaultUmbraUiAgentInstructions();
-  await writeUserConfigValue('umbra-ui-agent-instructions', defaults);
-  return defaults;
+  const stored = await readUserConfigValue('umbra-ui-agent-instructions');
+  if (stored !== null && !Array.isArray(stored)) throw new Error('Invalid saved agent instructions');
+  const normalized = normalizeUmbraUiAgentInstructions(stored);
+  return normalized.length > 0
+    ? mergeRequiredUmbraUiAgentInstructions(normalized)
+    : createDefaultUmbraUiAgentInstructions();
 }
 
 function resolveHermesExecutable(): string {
@@ -17844,21 +17824,23 @@ async function listUmbraUiAgentModels(
     try {
       const response = await fetch(`${baseUrl}/api/tags`, { signal: controller.signal, cache: 'no-store' });
       if (!response.ok) throw new Error(`Ollama model list failed (${response.status}).`);
-      const payload = await response.json().catch(() => ({}));
-      const models = Array.isArray(payload?.models)
-        ? payload.models
-          .map((entry: any) => {
+      const payload: unknown = await response.json();
+      if (!payload || typeof payload !== 'object' || !('models' in payload) || !Array.isArray(payload.models)) {
+        throw new Error('Ollama returned an invalid model list.');
+      }
+      const models = payload.models
+          .map((entry: unknown) => {
+            if (!entry || typeof entry !== 'object' || !('name' in entry)) return null;
             const id = clampUmbraUiAgentText(entry?.name, 240);
             if (!id) return null;
-            const size = Number(entry?.size);
+            const size = Number('size' in entry ? entry.size : undefined);
             return {
               id,
               label: id,
               detail: Number.isFinite(size) && size > 0 ? `${(size / 1_000_000_000).toFixed(1)} GB` : undefined,
             } satisfies UmbraUiAgentModelOption;
           })
-          .filter((entry: UmbraUiAgentModelOption | null): entry is UmbraUiAgentModelOption => !!entry)
-        : [];
+          .filter((entry: UmbraUiAgentModelOption | null): entry is UmbraUiAgentModelOption => !!entry);
       return { provider, models, source: 'ollama /api/tags' };
     } finally {
       clearTimeout(timer);
@@ -18946,26 +18928,32 @@ function normalizePPGenerationControls(rawControls: unknown): PowerPrompterGener
 
 const UMBRA_UI_VIDEO_CONTROLS_PATH = join(USER_DIR, 'Config', 'umbra-ui-video-controls.json');
 let umbraUiVideoControlsSession: PowerPrompterVideoControls | null = null;
+let umbraUiVideoControlsWriteQueue: Promise<unknown> = Promise.resolve();
 
 function getUmbraUiVideoControlsSession(): PowerPrompterVideoControls {
   if (umbraUiVideoControlsSession) return normalizePPVideoControls(umbraUiVideoControlsSession);
   try {
-    if (existsSync(UMBRA_UI_VIDEO_CONTROLS_PATH)) {
-      umbraUiVideoControlsSession = normalizePPVideoControls(JSON.parse(readFileSync(UMBRA_UI_VIDEO_CONTROLS_PATH, 'utf8')));
-      return normalizePPVideoControls(umbraUiVideoControlsSession);
-    }
+    const stored: unknown = JSON.parse(readFileSync(UMBRA_UI_VIDEO_CONTROLS_PATH, 'utf8'));
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) throw new Error('Invalid saved video controls');
+    umbraUiVideoControlsSession = normalizePPVideoControls(stored);
+    return normalizePPVideoControls(umbraUiVideoControlsSession);
   } catch (error) {
-    console.warn('[Umbra UI] Failed to load saved video controls:', error);
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   umbraUiVideoControlsSession = normalizePPVideoControls(null);
   return normalizePPVideoControls(umbraUiVideoControlsSession);
 }
 
-function saveUmbraUiVideoControlsSession(rawVideo: unknown): PowerPrompterVideoControls {
-  umbraUiVideoControlsSession = normalizePPVideoControls(rawVideo);
-  mkdirSync(dirname(UMBRA_UI_VIDEO_CONTROLS_PATH), { recursive: true });
-  writeFileSync(UMBRA_UI_VIDEO_CONTROLS_PATH, `${JSON.stringify(umbraUiVideoControlsSession, null, 2)}\n`, 'utf8');
-  return normalizePPVideoControls(umbraUiVideoControlsSession);
+async function saveUmbraUiVideoControlsSession(rawVideo: unknown): Promise<PowerPrompterVideoControls> {
+  if (!rawVideo || typeof rawVideo !== 'object' || Array.isArray(rawVideo)) throw new Error('Expected video controls');
+  const normalized = normalizePPVideoControls(rawVideo);
+  const operation = umbraUiVideoControlsWriteQueue.catch(() => {}).then(async () => {
+    await writeUserConfigFile(UMBRA_UI_VIDEO_CONTROLS_PATH, normalized);
+    umbraUiVideoControlsSession = normalized;
+    return normalizePPVideoControls(normalized);
+  });
+  umbraUiVideoControlsWriteQueue = operation;
+  return operation;
 }
 
 async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings, seed: number) {
@@ -20306,6 +20294,7 @@ async function handleUmbraUiCanvasSave(req: Request): Promise<Response> {
 
 const UMBRA_UI_UPSCALE_IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);
 const UMBRA_UI_UPSCALE_UPLOAD_ROOT = join(USER_DIR, 'Temp', 'UmbraUiUpscale');
+const umbraUiUpscaleStagingStore = new UmbraUiUpscaleStagingStore(UMBRA_UI_UPSCALE_UPLOAD_ROOT);
 const UMBRA_UI_UPSCALE_MAX_ITEMS = 512;
 const UMBRA_UI_UPSCALE_MAX_SOURCE_BYTES = 512 * 1024 * 1024;
 const UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);
@@ -20405,26 +20394,36 @@ function resolveUmbraUiMediaToolOutputFolder(
   return resolved.fullPath;
 }
 
-async function reserveUmbraUiMediaToolSequencePath(
+async function publishUmbraUiMediaToolSequencePath(
   outputFolder: string,
   prefix: 'image-sequence' | 'video-sequence' | 'gif-sequence',
   extension: '.gif' | '.jpg' | '.mp4' | '.png' | '.webp',
   requestedSequence: number,
-): Promise<{ outputPath: string; filename: string }> {
+  renderedPath: string,
+): Promise<{ outputPath: string; filename: string; stat: BigIntStats }> {
+  const rendered = await fs.stat(renderedPath);
+  if (!rendered.isFile() || rendered.size <= 0) throw new Error('The media tool did not produce a complete output file.');
   let sequence = Number.isInteger(requestedSequence) && requestedSequence > 0 ? requestedSequence : 1;
   while (sequence < 1_000_000) {
     const filename = `${prefix}-${String(sequence).padStart(4, '0')}${extension}`;
     const outputPath = join(outputFolder, filename);
     try {
-      const reservation = await fs.open(outputPath, 'wx');
-      await reservation.close();
-      return { outputPath, filename };
+      const stat = await copyFileExclusive(renderedPath, outputPath);
+      return { outputPath, filename, stat };
     } catch (error: any) {
       if (error?.code !== 'EEXIST') throw error;
       sequence += 1;
     }
   }
   throw new Error('Could not reserve a sequence filename in the selected destination.');
+}
+
+async function removeUmbraUiMediaToolOutputIfUnchanged(output: { outputPath: string; stat: BigIntStats }): Promise<void> {
+  const current = await fs.lstat(output.outputPath, { bigint: true }).catch(() => null);
+  if (current?.dev === output.stat.dev && current?.ino === output.stat.ino
+    && current?.size === output.stat.size && current?.mtimeNs === output.stat.mtimeNs) {
+    await fs.unlink(output.outputPath).catch(() => undefined);
+  }
 }
 
 function resolveUmbraUiMediaToolSourcePath(value: unknown, supportedExtensions: Set<string>, allowExternal = false): string {
@@ -20446,7 +20445,6 @@ function resolveUmbraUiMediaToolSourcePath(value: unknown, supportedExtensions: 
 async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean): Promise<Response> {
   const jobId = `${Date.now()}-${randomBytes(5).toString('hex')}`;
   const workDirectory = join(UMBRA_UI_MEDIA_TOOL_TEMP_ROOT, jobId);
-  let reservedOutputPath = '';
   try {
     const form = await req.formData();
     const source = form.get('source') as any;
@@ -20497,20 +20495,13 @@ async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean
       : imageFormatInput === 'webp' ? 'webp' : 'png';
     const outputExtension = isUmbraUiWatermarkVideo(sourcePath)
       ? '.mp4'
-      : imageFormat === 'jpeg' ? '.jpg' : `.${imageFormat}`;
-    const reserved = await reserveUmbraUiMediaToolSequencePath(
-      outputFolder,
-      outputExtension === '.mp4' ? 'video-sequence' : 'image-sequence',
-      outputExtension,
-      Number(form.get('sequenceNumber')),
-    );
-    const { outputPath, filename } = reserved;
-    reservedOutputPath = outputPath;
+      : imageFormat === 'jpeg' ? '.jpg' : imageFormat === 'webp' ? '.webp' : '.png';
+    const renderedPath = join(workDirectory, `rendered${outputExtension}`);
     const mediaType = await applyUmbraUiWatermark({
       comfyRoot: join(ROOT_DIR, 'Tools', 'ComfyUI'),
       sourcePath,
       watermarkPath,
-      outputPath,
+      outputPath: renderedPath,
       workDirectory,
       placement: {
         x: Number(form.get('x')),
@@ -20526,13 +20517,18 @@ async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean
       },
       outputWidth: Number(form.get('outputWidth')),
     });
-    reservedOutputPath = '';
+    const { outputPath, filename } = await publishUmbraUiMediaToolSequencePath(
+      outputFolder,
+      outputExtension === '.mp4' ? 'video-sequence' : 'image-sequence',
+      outputExtension,
+      Number(form.get('sequenceNumber')),
+      renderedPath,
+    );
     return json({ success: true, path: toClientPath(outputPath), filename, mediaType });
   } catch (error: any) {
     console.error('[UmbraUI Media Tools] Watermark failed:', error);
     return json({ success: false, error: String(error?.message || error || 'Failed to apply watermark.') }, 400);
   } finally {
-    if (reservedOutputPath) await fs.rm(reservedOutputPath, { force: true }).catch(() => undefined);
     await fs.rm(workDirectory, { recursive: true, force: true }).catch(() => undefined);
   }
 }
@@ -20540,7 +20536,7 @@ async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean
 async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boolean): Promise<Response> {
   const jobId = `${Date.now()}-${randomBytes(5).toString('hex')}`;
   const workDirectory = join(UMBRA_UI_MEDIA_TOOL_TEMP_ROOT, jobId);
-  let reservedOutputPath = '';
+  let reservedOutput: { outputPath: string; stat: BigIntStats } | null = null;
   try {
     const form = await req.formData();
     const source = form.get('source') as any;
@@ -20641,16 +20637,10 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
       ? 'jpeg'
       : imageFormatInput === 'webp' ? 'webp' : 'png';
     const outputExtension = imageFormat === 'jpeg' ? '.jpg' : `.${imageFormat}` as '.png' | '.webp';
-    const { outputPath, filename } = await reserveUmbraUiMediaToolSequencePath(
-      outputFolder,
-      'image-sequence',
-      outputExtension,
-      Number(form.get('sequenceNumber')),
-    );
-    reservedOutputPath = outputPath;
+    const renderedPath = join(workDirectory, `rendered${outputExtension}`);
     const censored = await applyUmbraUiImageCensor({
       sourcePath,
-      outputPath,
+      outputPath: renderedPath,
       mode,
       overlayPath: mode === 'overlay' ? overlayPath : undefined,
       regions: manualRegions,
@@ -20663,6 +20653,11 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
         quality: Number(form.get('quality')),
       },
     });
+    const published = await publishUmbraUiMediaToolSequencePath(
+      outputFolder, 'image-sequence', outputExtension, Number(form.get('sequenceNumber')), renderedPath,
+    );
+    const { outputPath, filename } = published;
+    reservedOutput = published;
     const outputStat = await fs.stat(outputPath);
     galleryDb.upsertFolderFiles(dirname(outputPath), [{
       path: outputPath,
@@ -20676,7 +20671,7 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
     const outputUids = galleryDb.resolveUidsForPaths([outputPath]);
     const galleryTag = censored ? 'censored' : 'uncensored';
     if (outputUids.length > 0) galleryDb.addTagsToFiles(outputUids, [galleryTag]);
-    reservedOutputPath = '';
+    reservedOutput = null;
     return json({
       success: true,
       path: toClientPath(outputPath),
@@ -20691,7 +20686,7 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
     console.error('[UmbraUI Media Tools] Censor failed:', error);
     return json({ success: false, error: String(error?.message || error || 'Failed to censor image.') }, 400);
   } finally {
-    if (reservedOutputPath) await fs.rm(reservedOutputPath, { force: true }).catch(() => undefined);
+    if (reservedOutput) await removeUmbraUiMediaToolOutputIfUnchanged(reservedOutput);
     await fs.rm(workDirectory, { recursive: true, force: true }).catch(() => undefined);
   }
 }
@@ -20699,7 +20694,6 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
 async function handleUmbraUiVideoToGif(req: Request, allowExternalOutput: boolean): Promise<Response> {
   const jobId = `${Date.now()}-${randomBytes(5).toString('hex')}`;
   const workDirectory = join(UMBRA_UI_MEDIA_TOOL_TEMP_ROOT, jobId);
-  let reservedOutputPath = '';
   try {
     const form = await req.formData();
     const source = form.get('source') as any;
@@ -20727,23 +20721,22 @@ async function handleUmbraUiVideoToGif(req: Request, allowExternalOutput: boolea
       'GIF',
       form.get('pinnedOutputFolder'),
     );
-    const reserved = await reserveUmbraUiMediaToolSequencePath(outputFolder, 'gif-sequence', '.gif', Number(form.get('sequenceNumber')));
-    const { outputPath, filename } = reserved;
-    reservedOutputPath = outputPath;
+    const renderedPath = join(workDirectory, 'rendered.gif');
     await convertUmbraUiVideoToGif({
       comfyRoot: join(ROOT_DIR, 'Tools', 'ComfyUI'),
       sourcePath,
-      outputPath,
+      outputPath: renderedPath,
       workDirectory,
       width: Number(form.get('width')),
     });
-    reservedOutputPath = '';
+    const { outputPath, filename } = await publishUmbraUiMediaToolSequencePath(
+      outputFolder, 'gif-sequence', '.gif', Number(form.get('sequenceNumber')), renderedPath,
+    );
     return json({ success: true, path: toClientPath(outputPath), filename, mediaType: 'gif' });
   } catch (error: any) {
     console.error('[UmbraUI Media Tools] GIF conversion failed:', error);
     return json({ success: false, error: String(error?.message || error || 'Failed to convert video to GIF.') }, 400);
   } finally {
-    if (reservedOutputPath) await fs.rm(reservedOutputPath, { force: true }).catch(() => undefined);
     await fs.rm(workDirectory, { recursive: true, force: true }).catch(() => undefined);
   }
 }
@@ -20803,8 +20796,21 @@ function quotePowerShellLiteral(value: string): string {
   return `'${String(value || '').replace(/'/g, "''")}'`;
 }
 
+async function readNativePickerOutput(proc: Bun.Subprocess<'ignore', 'pipe', 'pipe'>): Promise<string | null> {
+  const [exitCode, output, diagnostic] = await Promise.all([
+    proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text(),
+  ]);
+  if (exitCode === 0) return output;
+  const canceled = process.platform === 'darwin'
+    ? exitCode === 1 && /\(-128\)/.test(diagnostic)
+    : process.platform !== 'win32' && exitCode === 1;
+  if (canceled) return null;
+  throw new Error(`System picker failed (${exitCode}): ${diagnostic.trim().slice(0, 2000) || 'No diagnostic output.'}`);
+}
+
 async function runNativeFolderPicker(startDir: string, title: string): Promise<string | null> {
-  let proc: ReturnType<typeof Bun.spawn> | null = null;
+  const stdio = { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' } as const;
+  let proc: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | null = null;
   if (process.platform === 'win32') {
     const script = [
       'Add-Type -AssemblyName System.Windows.Forms',
@@ -20818,24 +20824,23 @@ async function runNativeFolderPicker(startDir: string, title: string): Promise<s
       '}',
       '$dialog.Dispose()',
     ].join('; ');
-    proc = Bun.spawn(['powershell.exe', '-NoProfile', '-STA', '-WindowStyle', 'Hidden', '-Command', script]);
+    proc = Bun.spawn(['powershell.exe', '-NoProfile', '-STA', '-WindowStyle', 'Hidden', '-Command', script], stdio);
   } else if (process.platform === 'darwin') {
     const prompt = title.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const location = startDir.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    proc = Bun.spawn(['osascript', '-e', `POSIX path of (choose folder with prompt "${prompt}" default location POSIX file "${location}")`]);
+    proc = Bun.spawn(['osascript', '-e', `POSIX path of (choose folder with prompt "${prompt}" default location POSIX file "${location}")`], stdio);
   } else {
     try {
-      proc = Bun.spawn(['kdialog', '--getexistingdirectory', startDir, '--title', title]);
-      await proc.exited;
+      proc = Bun.spawn(['kdialog', '--getexistingdirectory', startDir, '--title', title], stdio);
     } catch {
-      proc = Bun.spawn(['zenity', '--file-selection', '--directory', `--title=${title}`, `--filename=${startDir}/`]);
+      proc = Bun.spawn(['zenity', '--file-selection', '--directory', `--title=${title}`, `--filename=${startDir}/`], stdio);
     }
   }
 
   if (!proc) return null;
-  if (proc.exitCode === null) await proc.exited;
-  if (proc.exitCode !== 0) return null;
-  const selectedPath = (await new Response(proc.stdout).text()).trim();
+  const output = await readNativePickerOutput(proc);
+  if (output === null) return null;
+  const selectedPath = output.trim();
   if (!selectedPath) return null;
   const fullPath = resolve(selectedPath);
   if (!existsSync(fullPath) || !statSync(fullPath).isDirectory()) {
@@ -20854,7 +20859,8 @@ async function runNativeFilePicker(
     : kind === 'video'
       ? 'Videos|*.avi;*.m4v;*.mkv;*.mov;*.mp4;*.webm;*.wmv|All files|*.*'
       : 'Images and videos|*.avif;*.avi;*.bmp;*.gif;*.jpeg;*.jpg;*.m4v;*.mkv;*.mov;*.mp4;*.png;*.tif;*.tiff;*.webm;*.webp;*.wmv|All files|*.*';
-  let proc: ReturnType<typeof Bun.spawn> | null = null;
+  const stdio = { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' } as const;
+  let proc: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | null = null;
   if (process.platform === 'win32') {
     const script = [
       'Add-Type -AssemblyName System.Windows.Forms',
@@ -20879,23 +20885,30 @@ async function runNativeFilePicker(
       '$owner.Close()',
       '$owner.Dispose()',
     ].join('; ');
-    proc = Bun.spawn(['powershell.exe', '-NoProfile', '-STA', '-WindowStyle', 'Hidden', '-Command', script]);
+    proc = Bun.spawn(['powershell.exe', '-NoProfile', '-STA', '-WindowStyle', 'Hidden', '-Command', script], stdio);
   } else if (process.platform === 'darwin') {
     const prompt = title.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    proc = Bun.spawn(['osascript', '-e', `set chosenFiles to choose file with prompt "${prompt}" with multiple selections allowed`, '-e', 'repeat with chosenFile in chosenFiles', '-e', 'log POSIX path of chosenFile', '-e', 'end repeat']);
+    const location = startDir.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const script = [
+      `set chosenFiles to choose file with prompt "${prompt}" default location POSIX file "${location}" with multiple selections allowed`,
+      'set selectedPaths to ""',
+      'repeat with chosenFile in chosenFiles',
+      'set selectedPaths to selectedPaths & (POSIX path of chosenFile) & linefeed',
+      'end repeat',
+      'return selectedPaths',
+    ].join('\n');
+    proc = Bun.spawn(['osascript', '-e', script], stdio);
   } else {
     try {
-      proc = Bun.spawn(['kdialog', '--getopenfilename', startDir, '*', '--multiple', '--separate-output', '--title', title]);
-      await proc.exited;
+      proc = Bun.spawn(['kdialog', '--getopenfilename', startDir, '*', '--multiple', '--separate-output', '--title', title], stdio);
     } catch {
-      proc = Bun.spawn(['zenity', '--file-selection', '--multiple', '--separator=\n', `--title=${title}`, `--filename=${startDir}/`]);
+      proc = Bun.spawn(['zenity', '--file-selection', '--multiple', '--separator=\n', `--title=${title}`, `--filename=${startDir}/`], stdio);
     }
   }
 
   if (!proc) return [];
-  if (proc.exitCode === null) await proc.exited;
-  if (proc.exitCode !== 0) return [];
-  const output = await new Response(proc.stdout).text();
+  const output = await readNativePickerOutput(proc);
+  if (output === null) return [];
   const supported = kind === 'image'
     ? UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS
     : kind === 'video' ? UMBRA_UI_MEDIA_TOOL_VIDEO_EXTENSIONS : UMBRA_UI_MEDIA_TOOL_SOURCE_EXTENSIONS;
@@ -20963,11 +20976,10 @@ async function handleUmbraUiUpscaleStage(req: Request): Promise<Response> {
     }
     const displayName = String(form.get('displayName') || file.name).trim().slice(0, 500) || file.name;
     const safeName = `${String(index + 1).padStart(4, '0')}_${sanitizeUmbraUiUpscaleUploadName(file.name, `image-${index + 1}`)}`;
-    await fs.mkdir(batchFolder, { recursive: true });
     const targetPath = resolve(join(batchFolder, safeName));
     const rel = relative(batchFolder, targetPath);
     if (!rel || rel.startsWith('..') || isAbsolute(rel)) throw new Error('Invalid upscale staging path.');
-    await fs.writeFile(targetPath, Buffer.from(await file.arrayBuffer()));
+    await umbraUiUpscaleStagingStore.write(targetPath, Buffer.from(await file.arrayBuffer()));
     return json({ success: true, batchId, staged: { path: toClientPath(targetPath), name: displayName } });
   } catch (error: any) {
     return json({ success: false, error: String(error?.message || error || 'Failed to stage upscale image.') }, 400);
@@ -20979,7 +20991,7 @@ async function handleUmbraUiUpscaleStageCleanup(req: Request): Promise<Response>
     const body = await req.json().catch(() => ({})) as Record<string, unknown>;
     const batchFolder = resolveUmbraUiUpscaleBatchFolder(body.batchId);
     if (!batchFolder) return json({ success: false, error: 'Invalid upscale staging batch.' }, 400);
-    await fs.rm(batchFolder, { recursive: true, force: true });
+    await umbraUiUpscaleStagingStore.cleanupBatch(batchFolder);
     return json({ success: true });
   } catch (error: any) {
     return json({ success: false, error: String(error?.message || error || 'Failed to clean upscale staging files.') }, 400);
@@ -20987,6 +20999,8 @@ async function handleUmbraUiUpscaleStageCleanup(req: Request): Promise<Response>
 }
 
 async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder: boolean): Promise<Response> {
+  let stagingLeases = new Map<string, UmbraUiUpscaleStagingLease>();
+  let accepted = false;
   try {
     const form = await req.formData();
     const modelName = String(form.get('modelName') || '').trim().replace(/\\/g, '/');
@@ -21050,6 +21064,7 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
 
     const sources: UmbraUiUpscaleSource[] = [];
     const seenPaths = new Set<string>();
+    const stagedPaths: string[] = [];
     const uploadRoot = resolve(UMBRA_UI_UPSCALE_UPLOAD_ROOT);
     const addPathSource = (fullPathInput: string, displayName = '', temporary = false, clientSourceId = '') => {
       const fullPath = resolve(fullPathInput);
@@ -21064,21 +21079,19 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
       if (!UMBRA_UI_UPSCALE_IMAGE_EXTENSIONS.has(extname(fullPath).toLowerCase())) {
         throw new Error(`Upscale source is not a supported image: ${fullPathInput}`);
       }
-      const key = fullPath.toLowerCase();
+      const key = process.platform === 'win32' ? fullPath.toLowerCase() : fullPath;
       if (seenPaths.has(key)) return;
       seenPaths.add(key);
+      if (isStagedUpload) stagedPaths.push(fullPath);
       sources.push({
         name: displayName || basename(fullPath),
         clientSourceId,
         // Preserve the absolute source for automatic output placement. A client-relative
         // path would resolve from resources/app in packaged builds.
-        sourcePath: temporary ? '' : fullPath,
+        sourcePath: isStagedUpload ? '' : fullPath,
         read: () => fs.readFile(fullPath),
-        ...(temporary ? {
-          cleanup: async () => {
-            await fs.rm(fullPath, { force: true });
-            await fs.rmdir(dirname(fullPath)).catch(() => undefined);
-          },
+        ...(isStagedUpload ? {
+          cleanup: () => stagingLeases.get(fullPath)!.cleanup(),
         } : {}),
       });
       if (sources.length > UMBRA_UI_UPSCALE_MAX_ITEMS) {
@@ -21128,6 +21141,7 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
 
     if (sources.length <= 0) return json({ success: false, error: 'No supported images were found.' }, 400);
 
+    stagingLeases = await umbraUiUpscaleStagingStore.claim(stagedPaths);
     const job = await umbraUiUpscaleService.submit(sources, {
       modelName,
       maxDimension,
@@ -21136,8 +21150,12 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
       outputFolder,
       queuePlacement,
     });
+    accepted = true;
     return json({ success: true, job });
   } catch (error: any) {
+    if (!accepted) {
+      for (const lease of stagingLeases.values()) await lease.release();
+    }
     return json({ success: false, error: String(error?.message || error || 'Failed to queue upscale job.') }, 400);
   }
 }
@@ -21436,7 +21454,7 @@ function importLegacyPromptToPPCardDocument(
   const segments = splitLegacyPromptSegments(text);
   const nowIso = new Date().toISOString();
   const fallbackSetId = clampPPQueueSetId(baseDoc.activeQueueSet);
-  const cards = sortPPCards(baseDoc.cards).map((card, idx) => {
+  const cards: PowerPrompterCardNode[] = sortPPCards(baseDoc.cards).map((card, idx) => {
     const queueSetIds = normalizePPCardQueueSetIds(card.queueSetIds, card.queueEnabled, fallbackSetId);
     return {
       ...card,
@@ -21459,8 +21477,9 @@ function importLegacyPromptToPPCardDocument(
   });
 
   if (segments.length > cards.length) {
-    for (let idx = cards.length; idx < segments.length; idx += 1) {
-      cards.push(createPPCardNode('custom', `Custom ${idx - cards.length + 1}`, segments[idx], idx, nowIso));
+    const firstNewCard = cards.length;
+    for (let idx = firstNewCard; idx < segments.length; idx += 1) {
+      cards.push(createPPCardNode('custom', `Custom ${idx - firstNewCard + 1}`, segments[idx], idx, nowIso));
     }
   }
 
@@ -25162,8 +25181,9 @@ function inferGalleryMediaType(pathLike: string, fallbackType: unknown): Gallery
 
 async function handleFsReorder(req: Request): Promise<Response> {
   try {
-    const payload = await req.json().catch(() => ({} as Record<string, unknown>));
-    const folderPathRaw = String((payload as any).path || '').trim();
+    const payload = await readJsonObject(req);
+    if (!payload) return json({ error: 'Expected a JSON object.' }, 400);
+    const folderPathRaw = String(payload.path || '').trim();
     if (!folderPathRaw) return json({ error: 'Missing folder path' }, 400);
 
     const normalizedFolderPath = normalizeOutputPathInput(folderPathRaw);
@@ -25176,13 +25196,13 @@ async function handleFsReorder(req: Request): Promise<Response> {
       return json({ error: 'Path is not a directory' }, 400);
     }
 
-    const rawOrderedPaths = Array.isArray((payload as any).orderedPaths) ? (payload as any).orderedPaths : [];
+    const rawOrderedPaths: unknown[] = Array.isArray(payload.orderedPaths) ? payload.orderedPaths : [];
     const orderedPaths = Array.from(new Set(
       rawOrderedPaths
         .map((entry: unknown) => normalizeOutputPathInput(String(entry || '').trim()))
         .filter(Boolean),
     ));
-    const rawOrdered = Array.isArray((payload as any).orderedUids) ? (payload as any).orderedUids : [];
+    const rawOrdered: unknown[] = Array.isArray(payload.orderedUids) ? payload.orderedUids : [];
     const fallbackOrderedUids = Array.from(new Set(
       rawOrdered
         .map((entry: unknown) => String(entry || '').trim())
@@ -25209,10 +25229,11 @@ async function handleFsReorder(req: Request): Promise<Response> {
 
 async function handleFsTagsAdd(req: Request): Promise<Response> {
   try {
-    const payload = await req.json().catch(() => ({} as Record<string, unknown>));
-    const rawUids = Array.isArray((payload as any).uids) ? (payload as any).uids : [];
-    const rawPaths = Array.isArray((payload as any).paths) ? (payload as any).paths : [];
-    const rawTags = Array.isArray((payload as any).tags) ? (payload as any).tags : [];
+    const payload = await readJsonObject(req);
+    if (!payload || !Array.isArray(payload.tags) || !payload.tags.every(tag => typeof tag === 'string')) return json({ error: 'Expected a tags array of strings.' }, 400);
+    const rawUids: unknown[] = Array.isArray(payload.uids) ? payload.uids : [];
+    const rawPaths: unknown[] = Array.isArray(payload.paths) ? payload.paths : [];
+    const rawTags = payload.tags;
 
     const directUids = Array.from(new Set(
       rawUids
@@ -25262,10 +25283,11 @@ async function handleFsTagsAdd(req: Request): Promise<Response> {
 
 async function handleFsTagsRemove(req: Request): Promise<Response> {
   try {
-    const payload = await req.json().catch(() => ({} as Record<string, unknown>));
-    const rawUids = Array.isArray((payload as any).uids) ? (payload as any).uids : [];
-    const rawPaths = Array.isArray((payload as any).paths) ? (payload as any).paths : [];
-    const rawTags = Array.isArray((payload as any).tags) ? (payload as any).tags : [];
+    const payload = await readJsonObject(req);
+    if (!payload || !Array.isArray(payload.tags) || !payload.tags.every(tag => typeof tag === 'string')) return json({ error: 'Expected a tags array of strings.' }, 400);
+    const rawUids: unknown[] = Array.isArray(payload.uids) ? payload.uids : [];
+    const rawPaths: unknown[] = Array.isArray(payload.paths) ? payload.paths : [];
+    const rawTags = payload.tags;
 
     const directUids = Array.from(new Set(
       rawUids
@@ -25315,10 +25337,11 @@ async function handleFsTagsRemove(req: Request): Promise<Response> {
 
 async function handleFsTagsSet(req: Request): Promise<Response> {
   try {
-    const payload = await req.json().catch(() => ({} as Record<string, unknown>));
-    const rawUids = Array.isArray((payload as any).uids) ? (payload as any).uids : [];
-    const rawPaths = Array.isArray((payload as any).paths) ? (payload as any).paths : [];
-    const rawTags = Array.isArray((payload as any).tags) ? (payload as any).tags : [];
+    const payload = await readJsonObject(req);
+    if (!payload || !Array.isArray(payload.tags) || !payload.tags.every(tag => typeof tag === 'string')) return json({ error: 'Expected a tags array of strings.' }, 400);
+    const rawUids: unknown[] = Array.isArray(payload.uids) ? payload.uids : [];
+    const rawPaths: unknown[] = Array.isArray(payload.paths) ? payload.paths : [];
+    const rawTags = payload.tags;
 
     const directUids = Array.from(new Set(
       rawUids
@@ -25342,6 +25365,7 @@ async function handleFsTagsSet(req: Request): Promise<Response> {
 
     if (uids.length === 0) return json({ error: 'Missing uids or paths' }, 400);
 
+    if (rawTags.length > 0 && tags.length === 0) return json({ error: 'Tags cannot contain only blank values. Use an empty array to clear tags.' }, 400);
     const tagsByUidMap = galleryDb.setTagsForFiles(uids, tags);
     const tagsByUid: Record<string, string[]> = {};
     for (const [uid, uidTags] of tagsByUidMap.entries()) {
@@ -25747,7 +25771,7 @@ async function handleFsThumbnail(req: Request, url: URL, server?: RequestIpServe
 }
 
 
-async function handleFsPreview(url: URL): Promise<Response> {
+async function handleFsPreview(req: Request, url: URL): Promise<Response> {
   const path = url.searchParams.get('path');
   const sizeParam = url.searchParams.get('size') as 'small' | 'medium' | 'large' || 'medium';
   if (!path) return new Response('Path parameter required', { status: 400 });
@@ -25774,7 +25798,7 @@ async function handleFsPreview(url: URL): Promise<Response> {
     const fallbackRevision = `m${Math.max(0, Math.floor(fileStat.mtimeMs))}-s${Math.max(0, Math.floor(fileStat.size))}`;
     const effectiveRevision = requestedRevision || `${fallbackRevision}-preview`;
     const etag = `W/"preview-${createHash('md5').update(`${path}|${size}|${effectiveRevision}`).digest('hex').slice(0, 16)}"`;
-    const ifNoneMatch = String(url.headers?.get?.('if-none-match') || '').trim();
+    const ifNoneMatch = String(req.headers.get('if-none-match') || '').trim();
     if (ifNoneMatch && ifNoneMatch === etag) {
       return new Response(null, {
         status: 304,
@@ -25839,10 +25863,10 @@ async function handleFsImage(req: Request, url: URL, server?: RequestIpServer): 
     const range = String(req.headers.get('range') || '').trim();
     let previewMode = String(url.searchParams.get('preview') || '').trim().toLowerCase();
     let resizeEnabled = String(url.searchParams.get('gpr') || '1').trim() !== '0';
-    let maxLongSide = Number.isFinite(Number(url.searchParams.get('gpm')))
+    let maxLongSide = url.searchParams.has('gpm') && Number.isFinite(Number(url.searchParams.get('gpm')))
       ? Math.max(128, Math.min(2048, Math.round(Number(url.searchParams.get('gpm')))))
       : 512;
-    let quality = Number.isFinite(Number(url.searchParams.get('gpq')))
+    let quality = url.searchParams.has('gpq') && Number.isFinite(Number(url.searchParams.get('gpq')))
       ? Math.max(40, Math.min(100, Math.round(Number(url.searchParams.get('gpq')))))
       : 90;
     const remoteOptimized = isRemoteGalleryImageOptimizationEnabled(req, url, server)
@@ -25861,6 +25885,20 @@ async function handleFsImage(req: Request, url: URL, server?: RequestIpServer): 
     }
 
     if (!downloadMode && previewMode === 'grid' && resizeEnabled) {
+      const previewHeaders: Record<string, string> = {
+        'Content-Type': 'image/webp',
+        'Cache-Control': hasRevision
+          ? 'public, max-age=31536000, immutable'
+          : 'public, max-age=120, stale-while-revalidate=600',
+        'ETag': createVariantEtag(etag, `grid-${maxLongSide}-${quality}`),
+        'X-Grid-Preview': '1',
+        'X-Grid-Preview-Max': String(maxLongSide),
+        'X-Grid-Preview-Quality': String(quality),
+        ...(remoteOptimized ? { 'X-Umbra-Remote-Optimized': '1' } : {}),
+      };
+      if (matchesIfNoneMatch(req.headers.get('if-none-match'), previewHeaders.ETag)) {
+        return new Response(null, { status: 304, headers: previewHeaders });
+      }
       const preview = await thumbnailService.generateGridPreview(fullPath, {
         maxLongSide,
         quality,
@@ -25869,37 +25907,35 @@ async function handleFsImage(req: Request, url: URL, server?: RequestIpServer): 
       if (preview) {
         return new Response(new Uint8Array(preview), {
           headers: {
-            'Content-Type': 'image/webp',
+            ...previewHeaders,
             'Content-Length': String(preview.length),
-            'Cache-Control': hasRevision
-              ? 'public, max-age=31536000, immutable'
-              : 'public, max-age=120, stale-while-revalidate=600',
-            'ETag': `${etag}-grid-${maxLongSide}-${quality}`,
-            'X-Grid-Preview': '1',
-            'X-Grid-Preview-Max': String(maxLongSide),
-            'X-Grid-Preview-Quality': String(quality),
-            ...(remoteOptimized ? { 'X-Umbra-Remote-Optimized': '1' } : {}),
           }
         });
       }
     }
 
     if (!downloadMode && (previewMode === 'viewer-webp' || previewMode === 'original-webp')) {
+      const previewHeaders: Record<string, string> = {
+        'Content-Type': 'image/webp',
+        'Cache-Control': hasRevision
+          ? 'public, max-age=31536000, immutable'
+          : 'public, max-age=120, stale-while-revalidate=600',
+        'ETag': createVariantEtag(etag, `viewer-webp-${quality}`),
+        'X-Viewer-Preview': 'original-webp',
+        'X-Viewer-Preview-Quality': String(quality),
+        ...(remoteOptimized ? { 'X-Umbra-Remote-Optimized': '1' } : {}),
+      };
+      if (matchesIfNoneMatch(req.headers.get('if-none-match'), previewHeaders.ETag)) {
+        return new Response(null, { status: 304, headers: previewHeaders });
+      }
       const preview = await thumbnailService.generateOriginalWebpPreview(fullPath, {
         quality,
       });
       if (preview) {
         return new Response(new Uint8Array(preview), {
           headers: {
-            'Content-Type': 'image/webp',
+            ...previewHeaders,
             'Content-Length': String(preview.length),
-            'Cache-Control': hasRevision
-              ? 'public, max-age=31536000, immutable'
-              : 'public, max-age=120, stale-while-revalidate=600',
-            'ETag': `${etag}-viewer-webp-${quality}`,
-            'X-Viewer-Preview': 'original-webp',
-            'X-Viewer-Preview-Quality': String(quality),
-            ...(remoteOptimized ? { 'X-Umbra-Remote-Optimized': '1' } : {}),
           }
         });
       }
@@ -25923,39 +25959,34 @@ async function handleFsImage(req: Request, url: URL, server?: RequestIpServer): 
       baseHeaders['Content-Disposition'] = `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(rawName)}`;
     }
 
-    if (range) {
-      const match = /^bytes=(\d*)-(\d*)$/i.exec(range);
-      if (match) {
-        const size = fileStat.size;
-        let start = match[1] ? Number.parseInt(match[1], 10) : Number.NaN;
-        let end = match[2] ? Number.parseInt(match[2], 10) : Number.NaN;
-        if (!Number.isFinite(start) && Number.isFinite(end)) {
-          start = Math.max(0, size - end);
-          end = size - 1;
-        } else {
-          if (!Number.isFinite(start)) start = 0;
-          if (!Number.isFinite(end)) end = size - 1;
-        }
-        start = Math.max(0, Math.min(size - 1, Math.floor(start)));
-        end = Math.max(start, Math.min(size - 1, Math.floor(end)));
-        if (size > 0 && start <= end) {
-          return new Response(file.slice(start, end + 1), {
-            status: 206,
-            headers: {
-              ...baseHeaders,
-              'Content-Length': String(end - start + 1),
-              'Content-Range': `bytes ${start}-${end}/${size}`,
-            },
-          });
-        }
+    if (matchesIfNoneMatch(req.headers.get('if-none-match'), etag)) {
+      return new Response(null, { status: 304, headers: baseHeaders });
+    }
+
+    if (range && permitsConditionalRange(req.headers.get('if-range'), etag)) {
+      const size = fileStat.size;
+      const bounds = resolveSingleByteRange(range, size);
+      if (bounds) {
+        const { start, end } = bounds;
+        return new Response(file.slice(start, end + 1), {
+          status: 206,
+          headers: {
+            ...baseHeaders,
+            'Content-Length': String(end - start + 1),
+            'Content-Range': `bytes ${start}-${end}/${size}`,
+          },
+        });
       }
-      return new Response(null, {
-        status: 416,
-        headers: {
-          ...baseHeaders,
-          'Content-Range': `bytes */${fileStat.size}`,
-        },
-      });
+      // Ignore Range for empty representations; there is no byte interval to send.
+      if (size > 0) {
+        return new Response(null, {
+          status: 416,
+          headers: {
+            ...baseHeaders,
+            'Content-Range': `bytes */${size}`,
+          },
+        });
+      }
     }
 
     return new Response(file, {
@@ -25970,287 +26001,6 @@ async function handleFsImage(req: Request, url: URL, server?: RequestIpServer): 
   }
 }
 
-const ZIP_CRC32_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let index = 0; index < 256; index++) {
-    let value = index;
-    for (let bit = 0; bit < 8; bit++) {
-      value = (value & 1) ? (0xedb88320 ^ (value >>> 1)) : (value >>> 1);
-    }
-    table[index] = value >>> 0;
-  }
-  return table;
-})();
-
-function updateZipCrc32(crc: number, chunk: Uint8Array): number {
-  let next = crc >>> 0;
-  for (const byte of chunk) {
-    next = ZIP_CRC32_TABLE[(next ^ byte) & 0xff] ^ (next >>> 8);
-  }
-  return next >>> 0;
-}
-
-function zipDosDateTime(dateValue: Date): { date: number; time: number } {
-  const year = Math.max(1980, Math.min(2107, dateValue.getFullYear()));
-  const month = Math.max(1, Math.min(12, dateValue.getMonth() + 1));
-  const day = Math.max(1, Math.min(31, dateValue.getDate()));
-  const hours = Math.max(0, Math.min(23, dateValue.getHours()));
-  const minutes = Math.max(0, Math.min(59, dateValue.getMinutes()));
-  const seconds = Math.max(0, Math.min(59, Math.floor(dateValue.getSeconds() / 2)));
-  return {
-    date: ((year - 1980) << 9) | (month << 5) | day,
-    time: (hours << 11) | (minutes << 5) | seconds,
-  };
-}
-
-function zipU16(value: number): Buffer {
-  const buffer = Buffer.allocUnsafe(2);
-  buffer.writeUInt16LE(value & 0xffff, 0);
-  return buffer;
-}
-
-function zipU32(value: number): Buffer {
-  const buffer = Buffer.allocUnsafe(4);
-  buffer.writeUInt32LE(value >>> 0, 0);
-  return buffer;
-}
-
-function zipSafeEntryName(name: string): string {
-  const leaf = basename(String(name || '').replace(/\\/g, '/')).replace(/[\u0000-\u001f<>:"\\|?*]+/g, '_').trim();
-  return leaf || 'umbra-media';
-}
-
-function uniqueZipEntryName(name: string, usedNames: Set<string>): string {
-  const safe = zipSafeEntryName(name);
-  let candidate = safe;
-  let index = 2;
-  const parsed = { ext: extname(safe), base: safe.slice(0, safe.length - extname(safe).length) };
-  while (usedNames.has(candidate.toLowerCase())) {
-    candidate = `${parsed.base || 'umbra-media'} (${index})${parsed.ext}`;
-    index += 1;
-  }
-  usedNames.add(candidate.toLowerCase());
-  return candidate;
-}
-
-function writeZipChunk(stream: ReturnType<typeof createWriteStream>, chunk: Uint8Array | Buffer): Promise<void> {
-  return new Promise((resolve, reject) => {
-    stream.write(chunk, (error) => {
-      if (error) reject(error);
-      else resolve();
-    });
-  });
-}
-
-async function finishZipStream(stream: ReturnType<typeof createWriteStream>): Promise<void> {
-  return new Promise((resolve, reject) => {
-    stream.once('error', reject);
-    stream.end(() => resolve());
-  });
-}
-
-async function buildOriginalsZip(items: Array<{ fullPath: string; name: string; mtime: Date; size: number }>): Promise<{ zipPath: string; size: number }> {
-  const tempRoot = join(USER_DIR, 'Temp', 'Downloads');
-  await fs.mkdir(tempRoot, { recursive: true });
-  const zipPath = join(tempRoot, `umbra-originals-${Date.now()}-${randomBytes(4).toString('hex')}.zip`);
-  const stream = createWriteStream(zipPath);
-  const centralDirectory: Buffer[] = [];
-  const usedNames = new Set<string>();
-  let offset = 0;
-
-  try {
-    for (const item of items) {
-      if (item.size > 0xffffffff) {
-        throw new Error(`File is too large for portable zip download: ${item.name}`);
-      }
-      const entryName = uniqueZipEntryName(item.name, usedNames);
-      const nameBuffer = Buffer.from(entryName, 'utf8');
-      const { date, time } = zipDosDateTime(item.mtime);
-      const entryOffset = offset;
-      const flags = 0x0808; // UTF-8 names + trailing data descriptor.
-      const localHeader = Buffer.concat([
-        zipU32(0x04034b50),
-        zipU16(20),
-        zipU16(flags),
-        zipU16(0),
-        zipU16(time),
-        zipU16(date),
-        zipU32(0),
-        zipU32(0),
-        zipU32(0),
-        zipU16(nameBuffer.length),
-        zipU16(0),
-        nameBuffer,
-      ]);
-      await writeZipChunk(stream, localHeader);
-      offset += localHeader.length;
-
-      let crc = 0xffffffff;
-      let size = 0;
-      for await (const chunk of createReadStream(item.fullPath)) {
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        crc = updateZipCrc32(crc, buffer);
-        size += buffer.length;
-        if (size > 0xffffffff) {
-          throw new Error(`File is too large for portable zip download: ${item.name}`);
-        }
-        await writeZipChunk(stream, buffer);
-        offset += buffer.length;
-      }
-      crc = (crc ^ 0xffffffff) >>> 0;
-
-      const descriptor = Buffer.concat([
-        zipU32(0x08074b50),
-        zipU32(crc),
-        zipU32(size),
-        zipU32(size),
-      ]);
-      await writeZipChunk(stream, descriptor);
-      offset += descriptor.length;
-
-      centralDirectory.push(Buffer.concat([
-        zipU32(0x02014b50),
-        zipU16(20),
-        zipU16(20),
-        zipU16(flags),
-        zipU16(0),
-        zipU16(time),
-        zipU16(date),
-        zipU32(crc),
-        zipU32(size),
-        zipU32(size),
-        zipU16(nameBuffer.length),
-        zipU16(0),
-        zipU16(0),
-        zipU16(0),
-        zipU16(0),
-        zipU32(0),
-        zipU32(entryOffset),
-        nameBuffer,
-      ]));
-    }
-
-    const centralOffset = offset;
-    for (const entry of centralDirectory) {
-      await writeZipChunk(stream, entry);
-      offset += entry.length;
-    }
-    const centralSize = offset - centralOffset;
-    const endRecord = Buffer.concat([
-      zipU32(0x06054b50),
-      zipU16(0),
-      zipU16(0),
-      zipU16(centralDirectory.length),
-      zipU16(centralDirectory.length),
-      zipU32(centralSize),
-      zipU32(centralOffset),
-      zipU16(0),
-    ]);
-    await writeZipChunk(stream, endRecord);
-    offset += endRecord.length;
-    await finishZipStream(stream);
-    return { zipPath, size: offset };
-  } catch (error) {
-    stream.destroy();
-    await fs.rm(zipPath, { force: true }).catch(() => {});
-    throw error;
-  }
-}
-
-async function buildBufferZip(
-  label: string,
-  items: Array<{ name: string; mtime: Date; data: Buffer }>,
-): Promise<{ zipPath: string; size: number }> {
-  const tempRoot = join(USER_DIR, 'Temp', 'Downloads');
-  await fs.mkdir(tempRoot, { recursive: true });
-  const zipPath = join(tempRoot, `umbra-${label}-${Date.now()}-${randomBytes(4).toString('hex')}.zip`);
-  const stream = createWriteStream(zipPath);
-  const centralDirectory: Buffer[] = [];
-  const usedNames = new Set<string>();
-  let offset = 0;
-
-  try {
-    for (const item of items) {
-      const data = Buffer.isBuffer(item.data) ? item.data : Buffer.from(item.data);
-      if (data.length > 0xffffffff) {
-        throw new Error(`File is too large for portable zip download: ${item.name}`);
-      }
-      const entryName = uniqueZipEntryName(item.name, usedNames);
-      const nameBuffer = Buffer.from(entryName, 'utf8');
-      const { date, time } = zipDosDateTime(item.mtime);
-      const entryOffset = offset;
-      const flags = 0x0800;
-      let crc = 0xffffffff;
-      crc = updateZipCrc32(crc, data);
-      crc = (crc ^ 0xffffffff) >>> 0;
-      const size = data.length;
-
-      const localHeader = Buffer.concat([
-        zipU32(0x04034b50),
-        zipU16(20),
-        zipU16(flags),
-        zipU16(0),
-        zipU16(time),
-        zipU16(date),
-        zipU32(crc),
-        zipU32(size),
-        zipU32(size),
-        zipU16(nameBuffer.length),
-        zipU16(0),
-        nameBuffer,
-      ]);
-      await writeZipChunk(stream, localHeader);
-      await writeZipChunk(stream, data);
-      offset += localHeader.length + data.length;
-
-      centralDirectory.push(Buffer.concat([
-        zipU32(0x02014b50),
-        zipU16(20),
-        zipU16(20),
-        zipU16(flags),
-        zipU16(0),
-        zipU16(time),
-        zipU16(date),
-        zipU32(crc),
-        zipU32(size),
-        zipU32(size),
-        zipU16(nameBuffer.length),
-        zipU16(0),
-        zipU16(0),
-        zipU16(0),
-        zipU16(0),
-        zipU32(0),
-        zipU32(entryOffset),
-        nameBuffer,
-      ]));
-    }
-
-    const centralOffset = offset;
-    for (const entry of centralDirectory) {
-      await writeZipChunk(stream, entry);
-      offset += entry.length;
-    }
-    const centralSize = offset - centralOffset;
-    const endRecord = Buffer.concat([
-      zipU32(0x06054b50),
-      zipU16(0),
-      zipU16(0),
-      zipU16(centralDirectory.length),
-      zipU16(centralDirectory.length),
-      zipU32(centralSize),
-      zipU32(centralOffset),
-      zipU16(0),
-    ]);
-    await writeZipChunk(stream, endRecord);
-    offset += endRecord.length;
-    await finishZipStream(stream);
-    return { zipPath, size: offset };
-  } catch (error) {
-    stream.destroy();
-    await fs.rm(zipPath, { force: true }).catch(() => {});
-    throw error;
-  }
-}
 
 async function handleGalleryArchives(req: Request, url: URL): Promise<Response> {
   try {
@@ -26258,8 +26008,10 @@ async function handleGalleryArchives(req: Request, url: URL): Promise<Response> 
       const job = getGalleryArchiveJob(url.searchParams.get('id') || '');
       return job ? json(job) : json({ error: 'Archive job is no longer available. Check the folder before trying again.' }, 404);
     }
-    const body = req.method === 'POST' ? await req.json() : null;
-    const requestedPath = String(body?.path || url.searchParams.get('path') || '').trim();
+    const body = req.method === 'POST' ? await readJsonObject(req) : null;
+    if (req.method === 'POST' && !body) return json({ error: 'Expected a JSON object.' }, 400);
+    if (body?.path !== undefined && typeof body.path !== 'string') return json({ error: 'Archive path must be a string.' }, 400);
+    const requestedPath = (typeof body?.path === 'string' ? body.path : url.searchParams.get('path') || '').trim();
     if (!requestedPath) return json({ error: 'Select a Gallery folder' }, 400);
     const path = normalizeOutputPathInput(requestedPath);
     if (!path || path === TRASH_ROOT || path.startsWith(`${TRASH_ROOT}/`)) return json({ error: 'Select a normal Gallery folder' }, 400);
@@ -26281,39 +26033,56 @@ async function handleGalleryArchives(req: Request, url: URL): Promise<Response> 
   }
 }
 
-async function handleFsDownloadZip(req: Request): Promise<Response> {
+async function readArchiveDownloadOptions(req: Request): Promise<{ paths: string[]; keepMetadata: boolean } | null> {
   try {
-    const contentType = String(req.headers.get('content-type') || '').toLowerCase();
-    let paths: unknown[] = [];
+    const contentType = (req.headers.get('content-type') || '').toLowerCase();
+    let paths: unknown;
+    let metadata: unknown;
     if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
       const formData = await req.formData();
       const rawPaths = formData.get('paths');
-      paths = typeof rawPaths === 'string' ? JSON.parse(rawPaths) : [];
+      if (typeof rawPaths !== 'string') return null;
+      paths = JSON.parse(rawPaths);
+      metadata = formData.get('metadata') ?? undefined;
     } else {
-      const body = await req.json().catch(() => ({}));
-      paths = Array.isArray(body?.paths) ? body.paths : [];
+      const body = await readJsonObject(req);
+      if (!body) return null;
+      paths = body.paths;
+      metadata = body.metadata;
     }
+    if (!Array.isArray(paths) || !paths.every((path): path is string => typeof path === 'string')) return null;
+    if (metadata !== undefined && typeof metadata !== 'string') return null;
+    return { paths, keepMetadata: typeof metadata !== 'string' || metadata.toLowerCase() !== 'strip' };
+  } catch {
+    return null;
+  }
+}
 
-    const normalizedPaths = Array.from(new Set(paths.map((entry) => String(entry || '').trim()).filter(Boolean)));
+async function handleFsDownloadZip(req: Request): Promise<Response> {
+  try {
+    const options = await readArchiveDownloadOptions(req);
+    if (!options) return json({ error: 'Expected an array of file paths.' }, 400);
+    const normalizedPaths = Array.from(new Set(options.paths.map((entry) => entry.trim()).filter(Boolean)));
     if (normalizedPaths.length < 2) return json({ error: 'At least two files are required for a zip download' }, 400);
     if (normalizedPaths.length > 1000) return json({ error: 'Too many files selected for one zip download' }, 400);
 
-    const items: Array<{ fullPath: string; name: string; mtime: Date; size: number }> = [];
+    const items: GalleryDownloadEntry[] = [];
     for (const path of normalizedPaths) {
+      req.signal.throwIfAborted();
       const resolved = resolvePath(path);
       if (!resolved) return json({ error: `Invalid path: ${path}` }, 403);
-      const stats = statSync(resolved.fullPath);
+      const stats = await fs.stat(resolved.fullPath);
       if (!stats.isFile()) continue;
       items.push({
-        fullPath: resolved.fullPath,
         name: basename(resolved.fullPath),
         mtime: stats.mtime,
         size: stats.size,
+        open: () => createReadStream(resolved.fullPath),
       });
     }
     if (items.length < 2) return json({ error: 'Select at least two files to download a zip' }, 400);
 
-    const { zipPath, size } = await buildOriginalsZip(items);
+    const { zipPath, size } = await buildGalleryDownloadArchive(join(USER_DIR, 'Temp', 'Downloads'), 'originals', items, req.signal);
     const cleanupTimer = setTimeout(() => {
       fs.rm(zipPath, { force: true }).catch(() => {});
     }, 15 * 60 * 1000);
@@ -26335,56 +26104,41 @@ async function handleFsDownloadZip(req: Request): Promise<Response> {
 
 async function handleFsDownloadJpegZip(req: Request): Promise<Response> {
   try {
-    const contentType = String(req.headers.get('content-type') || '').toLowerCase();
-    let paths: unknown[] = [];
-    let keepMetadata = true;
-    if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
-      const formData = await req.formData();
-      const rawPaths = formData.get('paths');
-      paths = typeof rawPaths === 'string' ? JSON.parse(rawPaths) : [];
-      keepMetadata = String(formData.get('metadata') || 'keep').toLowerCase() !== 'strip';
-    } else {
-      const body = await req.json().catch(() => ({}));
-      paths = Array.isArray(body?.paths) ? body.paths : [];
-      keepMetadata = String(body?.metadata || 'keep').toLowerCase() !== 'strip';
-    }
-
-    const normalizedPaths = Array.from(new Set(paths.map((entry) => String(entry || '').trim()).filter(Boolean)));
+    const options = await readArchiveDownloadOptions(req);
+    if (!options) return json({ error: 'Expected an array of file paths.' }, 400);
+    const { keepMetadata } = options;
+    const normalizedPaths = Array.from(new Set(options.paths.map((entry) => entry.trim()).filter(Boolean)));
     if (normalizedPaths.length === 0) return json({ error: 'Select at least one image to download' }, 400);
     if (normalizedPaths.length > 1000) return json({ error: 'Too many images selected for one zip download' }, 400);
 
     const sharp = (await import('sharp')).default;
     const imageExts = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.avif', '.tif', '.tiff']);
-    const items: Array<{ name: string; mtime: Date; data: Buffer }> = [];
+    const items: GalleryDownloadEntry[] = [];
 
     for (const path of normalizedPaths) {
+      req.signal.throwIfAborted();
       const resolved = resolvePath(path);
       if (!resolved) return json({ error: `Invalid path: ${path}` }, 403);
-      const stats = statSync(resolved.fullPath);
+      const stats = await fs.stat(resolved.fullPath);
       if (!stats.isFile()) continue;
       if (!imageExts.has(extname(resolved.fullPath).toLowerCase())) continue;
 
-      let pipeline = sharp(resolved.fullPath, { animated: false }).rotate();
-      pipeline = keepMetadata ? pipeline.withMetadata() : pipeline;
-      const data = await pipeline
-        .jpeg({
-          quality: 94,
-          mozjpeg: true,
-          chromaSubsampling: '4:4:4',
-        })
-        .toBuffer();
       const sourceName = basename(resolved.fullPath).replace(/\.[^.]+$/, '');
       items.push({
         name: `${sourceName || 'umbra-media'}.jpg`,
         mtime: stats.mtime,
-        data,
+        open: () => {
+          let image = sharp(resolved.fullPath, { animated: false }).rotate();
+          image = keepMetadata ? image.withMetadata() : image;
+          return image.jpeg({ quality: 94, mozjpeg: true, chromaSubsampling: '4:4:4' });
+        },
       });
     }
 
     if (items.length === 0) return json({ error: 'No supported images were selected' }, 400);
 
     const label = keepMetadata ? 'jpeg-metadata' : 'jpeg-clean';
-    const { zipPath, size } = await buildBufferZip(label, items);
+    const { zipPath, size } = await buildGalleryDownloadArchive(join(USER_DIR, 'Temp', 'Downloads'), label, items, req.signal);
     const cleanupTimer = setTimeout(() => {
       fs.rm(zipPath, { force: true }).catch(() => {});
     }, 15 * 60 * 1000);
@@ -27071,6 +26825,7 @@ async function handleModelManagerFsRename(req: Request): Promise<Response> {
       await fsWorkerService.rename({
         oldFullPath: snapshotRename.oldPath,
         newFullPath: snapshotRename.nextPath,
+        replaceExisting: true,
       }).catch(() => undefined);
     }
 
@@ -27083,6 +26838,7 @@ async function handleModelManagerFsRename(req: Request): Promise<Response> {
       await fsWorkerService.rename({
         oldFullPath: oldThumbPath,
         newFullPath: nextThumbPath,
+        replaceExisting: true,
       }).catch(() => undefined);
     }
 
@@ -27176,7 +26932,23 @@ async function handleModelManagerFsReveal(req: Request, server?: RequestIpServer
 }
 
 const MODEL_MANAGER_MEDIA_MAX_BYTES = 80 * 1024 * 1024;
-const MODEL_MANAGER_MEDIA_ALLOWED_HOST = /(^|\.)civitai\.com$/i;
+const MODEL_MANAGER_MEDIA_CONCURRENCY = 4;
+let modelManagerMediaActive = 0;
+const modelManagerMediaQueue: Array<() => void> = [];
+const modelManagerMediaRequests = new Map<string, Promise<{ localPath: string; mimeType: string }>>();
+
+async function withModelManagerMediaSlot<T>(task: () => Promise<T>): Promise<T> {
+  await new Promise<void>(resolve => {
+    const acquire = () => { modelManagerMediaActive++; resolve(); };
+    if (modelManagerMediaActive < MODEL_MANAGER_MEDIA_CONCURRENCY) acquire();
+    else modelManagerMediaQueue.push(acquire);
+  });
+  try { return await task(); }
+  finally {
+    modelManagerMediaActive--;
+    modelManagerMediaQueue.shift()?.();
+  }
+}
 
 function getModelManagerMediaExtension(rawUrl: string, mimeTypeInput: string): string {
   const mimeType = String(mimeTypeInput || '').toLowerCase();
@@ -27200,15 +26972,7 @@ function getModelManagerMediaExtension(rawUrl: string, mimeTypeInput: string): s
 }
 
 function validateModelManagerMediaUrl(rawUrl: string): URL {
-  const parsed = new URL(String(rawUrl || '').trim());
-  const protocol = String(parsed.protocol || '').toLowerCase();
-  if (protocol !== 'http:' && protocol !== 'https:') {
-    throw new Error('Unsupported media URL protocol');
-  }
-  if (!MODEL_MANAGER_MEDIA_ALLOWED_HOST.test(parsed.hostname)) {
-    throw new Error('Unsupported media host');
-  }
-  return parsed;
+  return validateModelMediaUrl(String(rawUrl || '').trim());
 }
 
 function maskCivitaiToken(token: string): string {
@@ -27250,9 +27014,7 @@ async function handleModelManagerCivitaiAuthPost(req: Request): Promise<Response
     const body = await req.json().catch(() => ({})) as { apiToken?: unknown; token?: unknown; apiKey?: unknown };
     const token = String(body.apiToken || body.token || body.apiKey || '').trim();
     if (!token) return json({ error: 'Missing CivitAI API token' }, 400);
-    const config = await loadStoredApiKeys();
-    config.civitai = { apiToken: token };
-    await saveStoredApiKeys(config);
+    await updateStoredApiKeys(config => ({ ...config, civitai: { apiToken: token } }));
     return json({
       success: true,
       hasToken: true,
@@ -27265,9 +27027,10 @@ async function handleModelManagerCivitaiAuthPost(req: Request): Promise<Response
 
 async function handleModelManagerCivitaiAuthDelete(): Promise<Response> {
   try {
-    const config = await loadStoredApiKeys();
-    delete config.civitai;
-    await saveStoredApiKeys(config);
+    await updateStoredApiKeys(config => {
+      delete config.civitai;
+      return config;
+    });
     return json({ success: true, hasToken: false, maskedToken: '' });
   } catch (error: any) {
     return json({ error: error?.message || 'Failed to remove CivitAI account token' }, 500);
@@ -27275,49 +27038,80 @@ async function handleModelManagerCivitaiAuthDelete(): Promise<Response> {
 }
 
 async function resolveModelManagerMediaCache(rawUrl: string): Promise<{ localPath: string; mimeType: string }> {
-  const normalizedUrl = String(rawUrl || '').trim();
+  const validatedUrl = validateModelManagerMediaUrl(String(rawUrl || '').trim());
+  validatedUrl.hash = '';
+  const normalizedUrl = validatedUrl.href;
+  const existing = modelManagerMediaRequests.get(normalizedUrl);
+  if (existing) return existing;
+  const request = loadModelManagerMediaCache(normalizedUrl);
+  modelManagerMediaRequests.set(normalizedUrl, request);
+  try { return await request; }
+  finally { if (modelManagerMediaRequests.get(normalizedUrl) === request) modelManagerMediaRequests.delete(normalizedUrl); }
+}
+
+async function removeModelManagerMediaFileIfUnchanged(localPath: string, owned: BigIntStats): Promise<void> {
+  const current = await fs.lstat(localPath, { bigint: true }).catch(() => null);
+  if (current?.dev === owned.dev && current?.ino === owned.ino
+    && current?.size === owned.size && current?.mtimeNs === owned.mtimeNs) {
+    await fs.unlink(localPath).catch(() => undefined);
+  }
+}
+
+async function loadModelManagerMediaCache(normalizedUrl: string): Promise<{ localPath: string; mimeType: string }> {
   const cached = modelManagerStateDb.getMediaCache(normalizedUrl);
-  if (cached && cached.localPath && existsSync(cached.localPath)) {
+  const cacheStat = cached?.localPath && isPathInsideDirectory(MODEL_MANAGER_MEDIA_CACHE_DIR, cached.localPath)
+    ? await fs.lstat(cached.localPath, { bigint: true }).catch(() => null) : null;
+  if (cached && cacheStat?.isFile() && cacheStat.size > 0n
+    && Number.isSafeInteger(cached.sizeBytes) && cacheStat.size === BigInt(cached.sizeBytes)
+    && cacheStat.size <= BigInt(MODEL_MANAGER_MEDIA_MAX_BYTES) && isSafeModelMediaType(cached.mimeType || '')) {
     return {
       localPath: cached.localPath,
       mimeType: String(cached.mimeType || '').trim() || 'application/octet-stream',
     };
   }
 
-  const mediaUrl = validateModelManagerMediaUrl(normalizedUrl);
-  const headers = await buildModelManagerCivitaiHeaders('image/*,video/*;q=0.9,*/*;q=0.5');
-  const response = await fetch(mediaUrl, { headers });
-  if (!response.ok) {
-    throw new Error(`Media fetch failed (${response.status})`);
-  }
-
-  const contentLength = Number(response.headers.get('content-length') || 0);
-  if (Number.isFinite(contentLength) && contentLength > MODEL_MANAGER_MEDIA_MAX_BYTES) {
-    throw new Error('Media exceeds cache size limit');
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-  if (buffer.length > MODEL_MANAGER_MEDIA_MAX_BYTES) {
-    throw new Error('Media exceeds cache size limit');
-  }
-
-  const mimeType = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase() || 'application/octet-stream';
-  const ext = getModelManagerMediaExtension(normalizedUrl, mimeType);
-  const fileName = `${createHash('sha1').update(normalizedUrl).digest('hex')}.${ext}`;
-  if (!existsSync(MODEL_MANAGER_MEDIA_CACHE_DIR)) {
-    await fs.mkdir(MODEL_MANAGER_MEDIA_CACHE_DIR, { recursive: true });
-  }
-  const localPath = join(MODEL_MANAGER_MEDIA_CACHE_DIR, fileName);
-  await fs.writeFile(localPath, buffer);
-  modelManagerStateDb.upsertMediaCache({
-    mediaUrl: normalizedUrl,
-    localPath,
-    mimeType,
-    sizeBytes: buffer.length,
-    fetchedAt: Date.now(),
+  return withModelManagerMediaSlot(async () => {
+    const { bytes: buffer, mimeType } = await fetchModelMedia(normalizedUrl, await getModelManagerCivitaiToken());
+    const ext = getModelManagerMediaExtension(normalizedUrl, mimeType);
+    // Retired cache entries may still be awaiting cleanup while this generation publishes.
+    const fileName = `${createHash('sha1').update(normalizedUrl).digest('hex')}.${crypto.randomUUID()}.${ext}`;
+    if (!existsSync(MODEL_MANAGER_MEDIA_CACHE_DIR)) {
+      await fs.mkdir(MODEL_MANAGER_MEDIA_CACHE_DIR, { recursive: true });
+    }
+    const localPath = join(MODEL_MANAGER_MEDIA_CACHE_DIR, fileName);
+    let output: Awaited<ReturnType<typeof fs.open>> | undefined;
+    let owned: BigIntStats | undefined;
+    let published = false;
+    try {
+      output = await fs.open(localPath, 'wx');
+      owned = await output.stat({ bigint: true });
+      await output.writeFile(buffer);
+      owned = await output.stat({ bigint: true });
+      await output.close();
+      output = undefined;
+      // The database publishes this unique generation only after its bytes are closed.
+      await modelManagerStateDb.upsertMediaCache({
+        mediaUrl: normalizedUrl,
+        localPath,
+        mimeType,
+        sizeBytes: buffer.length,
+        fetchedAt: Date.now(),
+      });
+      published = true;
+      if (cached && cacheStat?.isFile() && cached.localPath !== localPath) {
+        await removeModelManagerMediaFileIfUnchanged(cached.localPath, cacheStat);
+      }
+      return { localPath, mimeType };
+    } finally {
+      if (output) {
+        owned = await output.stat({ bigint: true }).catch(() => owned);
+        await output.close().catch(() => undefined);
+      }
+      if (!published && owned) {
+        await removeModelManagerMediaFileIfUnchanged(localPath, owned);
+      }
+    }
   });
-
-  return { localPath, mimeType };
 }
 
 function extractModelManagerSnapshotMediaUrls(modelRaw: Record<string, unknown>): string[] {
@@ -27383,6 +27177,7 @@ async function handleModelManagerMedia(url: URL): Promise<Response> {
         return new Response(new Uint8Array(thumbnail), {
           headers: {
             'Content-Type': 'image/webp',
+            'X-Content-Type-Options': 'nosniff',
             'Cache-Control': 'public, max-age=31536000, immutable',
           },
         });
@@ -27391,6 +27186,7 @@ async function handleModelManagerMedia(url: URL): Promise<Response> {
     return new Response(Bun.file(resolved.localPath), {
       headers: {
         'Content-Type': resolved.mimeType || 'application/octet-stream',
+        'X-Content-Type-Options': 'nosniff',
         'Cache-Control': 'public, max-age=31536000, immutable',
       },
     });
@@ -27805,12 +27601,16 @@ async function handleModelManagerDownloadCancel(jobId: string): Promise<Response
 }
 
 async function handleModelManagerOpenedModelsGet(): Promise<Response> {
-  const state = await loadModelManagerState();
-  return json({
-    success: true,
-    openedModelIds: state.openedModelIds,
-    civitaiClipboard: state.civitaiClipboard.map((entry) => entry.model),
-  });
+  try {
+    const state = await loadModelManagerState();
+    return json({
+      success: true,
+      openedModelIds: state.openedModelIds,
+      civitaiClipboard: state.civitaiClipboard.map((entry) => entry.model),
+    });
+  } catch (error: any) {
+    return json({ error: error?.message || 'Failed to read saved models' }, 500);
+  }
 }
 
 async function handleModelManagerOpenedModelsPost(req: Request): Promise<Response> {
@@ -27819,29 +27619,19 @@ async function handleModelManagerOpenedModelsPost(req: Request): Promise<Respons
       openedModelIds?: unknown;
       modelSnapshot?: unknown;
     };
-    const currentState = await loadModelManagerState();
-    let nextClipboard = currentState.civitaiClipboard;
-    let snapshotToPrewarm: Record<string, unknown> | null = null;
-    if (Object.prototype.hasOwnProperty.call(body, 'modelSnapshot')) {
-      const entry = normalizeModelManagerClipboardEntry({
-        model: body.modelSnapshot,
-      });
-      if (entry) {
-        snapshotToPrewarm = entry.model;
-        nextClipboard = [
-          entry,
-          ...currentState.civitaiClipboard.filter((item) => item.id !== entry.id),
-        ];
-      }
-    }
-    const nextState = await saveModelManagerState({
+    const entry = Object.prototype.hasOwnProperty.call(body, 'modelSnapshot')
+      ? normalizeModelManagerClipboardEntry({ model: body.modelSnapshot })
+      : null;
+    const nextState = await saveModelManagerState(currentState => ({
       openedModelIds: Object.prototype.hasOwnProperty.call(body, 'openedModelIds')
-        ? body.openedModelIds
+        ? normalizeModelManagerOpenedIds(body.openedModelIds)
         : currentState.openedModelIds,
-      civitaiClipboard: nextClipboard,
-    });
-    if (snapshotToPrewarm) {
-      void prewarmModelManagerSnapshotMedia(snapshotToPrewarm);
+      civitaiClipboard: entry
+        ? [entry, ...currentState.civitaiClipboard.filter(item => item.id !== entry.id)]
+        : currentState.civitaiClipboard,
+    }));
+    if (entry) {
+      void prewarmModelManagerSnapshotMedia(entry.model);
     }
     return json({
       success: true,
@@ -27855,10 +27645,19 @@ async function handleModelManagerOpenedModelsPost(req: Request): Promise<Respons
 }
 
 async function deleteModelManagerCachedMediaForModel(modelRaw: Record<string, unknown>): Promise<void> {
-  const mediaUrls = extractModelManagerSnapshotMediaUrls(modelRaw);
-  if (mediaUrls.length <= 0) return;
+  const mediaUrls = new Set<string>();
+  for (const rawUrl of extractModelManagerSnapshotMediaUrls(modelRaw)) {
+    mediaUrls.add(rawUrl);
+    try {
+      const canonicalUrl = validateModelManagerMediaUrl(rawUrl);
+      canonicalUrl.hash = '';
+      mediaUrls.add(canonicalUrl.href);
+    } catch {
+      // Keep legacy-key cleanup available even when a saved URL is no longer valid.
+    }
+  }
   for (const mediaUrl of mediaUrls) {
-    const removed = modelManagerStateDb.deleteMediaCache(mediaUrl);
+    const removed = await modelManagerStateDb.deleteMediaCache(mediaUrl);
     if (!removed?.localPath) continue;
     if (!isPathInsideDirectory(MODEL_MANAGER_MEDIA_CACHE_DIR, removed.localPath)) continue;
     await fs.unlink(removed.localPath).catch(() => {});
@@ -27892,14 +27691,13 @@ async function handleModelManagerOpenedModelsRefresh(req: Request): Promise<Resp
       return json({ error: 'Invalid model response from CivitAI' }, 502);
     }
 
-    const currentState = await loadModelManagerState();
-    const nextState = await saveModelManagerState({
+    const nextState = await saveModelManagerState(currentState => ({
       openedModelIds: [entry.id, ...currentState.openedModelIds.filter((value) => value !== entry.id)],
       civitaiClipboard: [
         entry,
         ...currentState.civitaiClipboard.filter((item) => item.id !== entry.id),
       ],
-    });
+    }));
     void prewarmModelManagerSnapshotMedia(entry.model);
     return json({
       success: true,
@@ -27921,16 +27719,15 @@ async function handleModelManagerOpenedModelsDelete(req: Request): Promise<Respo
       return json({ error: 'Missing modelId' }, 400);
     }
 
-    const currentState = await loadModelManagerState();
-    const removedEntry = currentState.civitaiClipboard.find((item) => item.id === modelId) || null;
-    const nextState = await saveModelManagerState({
-      openedModelIds: currentState.openedModelIds.filter((value) => value !== modelId),
-      civitaiClipboard: currentState.civitaiClipboard.filter((item) => item.id !== modelId),
+    let removedEntry: ModelManagerClipboardEntry | null = null;
+    const nextState = await saveModelManagerState(currentState => {
+      removedEntry = currentState.civitaiClipboard.find(item => item.id === modelId) || null;
+      return {
+        openedModelIds: currentState.openedModelIds.filter(value => value !== modelId),
+        civitaiClipboard: currentState.civitaiClipboard.filter(item => item.id !== modelId),
+      };
     });
-
-    if (removedEntry?.model) {
-      await deleteModelManagerCachedMediaForModel(removedEntry.model);
-    }
+    if (removedEntry) await deleteModelManagerCachedMediaForModel(removedEntry.model);
 
     return json({
       success: true,
@@ -28211,8 +28008,13 @@ async function handleFsRename(req: Request): Promise<Response> {
 
     if (resolve(resolved.fullPath) !== resolve(newPath)) {
       try {
-        await fs.lstat(newPath);
-        return json({ error: 'A file or folder with that name already exists' }, 409);
+        const targetStat = await fs.lstat(newPath);
+        const caseChange = process.platform === 'win32'
+          && resolve(resolved.fullPath).toLowerCase() === newPath.toLowerCase();
+        const sourceStat = caseChange ? await fs.lstat(resolved.fullPath) : null;
+        if (!sourceStat || sourceStat.ino === 0 || sourceStat.ino !== targetStat.ino || sourceStat.dev !== targetStat.dev) {
+          return json({ error: 'A file or folder with that name already exists' }, 409);
+        }
       } catch (error: any) {
         if (error?.code !== 'ENOENT') throw error;
       }
@@ -28222,13 +28024,14 @@ async function handleFsRename(req: Request): Promise<Response> {
       oldFullPath: resolved.fullPath,
       newFullPath: newPath,
     });
+    const warnings = await syncGalleryDbAfterRename([{ path: oldPath, newPath: toClientPath(newPath), success: true }]);
     invalidateFsListCacheForPaths([
       oldPath,
       toClientPath(newPath),
       dirname(oldPath),
       toClientPath(dirname(newPath)),
     ], 'rename');
-    return json({ success: true, path: oldPath, newPath: toClientPath(newPath) });
+    return json({ success: true, path: oldPath, newPath: toClientPath(newPath), ...(warnings.length ? { warnings } : {}) });
   } catch (error: any) {
     console.error('[Rename] Error:', error);
     return json({ error: error.message }, 500);
@@ -28435,6 +28238,7 @@ async function handleFsRenameBatch(req: Request): Promise<Response> {
       }
     }
 
+    const warnings = await syncGalleryDbAfterRename(results);
     if (invalidatePaths.size > 0) {
       invalidateFsListCacheForPaths(Array.from(invalidatePaths), 'rename-batch');
     }
@@ -28446,6 +28250,7 @@ async function handleFsRenameBatch(req: Request): Promise<Response> {
       failed: results.length - renamed,
       total: results.length,
       results,
+      ...(warnings.length ? { warnings } : {}),
     });
   } catch (error: any) {
     console.error('[Rename Batch] Error:', error);
@@ -28824,7 +28629,7 @@ async function waitForStableFile(
   sourcePath: string,
   attempts = CLOUD_FILE_STABLE_MAX_ATTEMPTS,
   intervalMs = CLOUD_FILE_STABLE_CHECK_INTERVAL_MS,
-): Promise<fs.Stats> {
+): Promise<Stats> {
   let lastSize = -1;
   let lastMtime = -1;
 
@@ -29059,6 +28864,16 @@ async function syncGalleryDbAfterTransfer(results: Array<Record<string, unknown>
   await fsWorkerService.reconcileGallery({ mode, pairs });
 }
 
+async function syncGalleryDbAfterRename(results: Array<Record<string, unknown>>): Promise<string[]> {
+  try {
+    await syncGalleryDbAfterTransfer(results, 'move');
+    return [];
+  } catch (error) {
+    console.warn('[Gallery] Rename completed but metadata reconciliation failed:', error);
+    return ['Renamed, but Gallery metadata could not be updated. Manual tags may not appear at the new path. Do not repeat the rename.'];
+  }
+}
+
 const GALLERY_MEDIA_SIDECAR_EXTENSIONS = ['.txt', '.json', '.caption', '.yaml', '.yml'];
 
 async function syncGallerySidecarsAfterTransfer(results: Array<Record<string, unknown>>, mode: 'move' | 'copy') {
@@ -29094,8 +28909,8 @@ async function syncGallerySidecarsAfterTransfer(results: Array<Record<string, un
           const sidecarStat = await fs.stat(variant.source).catch(() => null);
           if (!sidecarStat || !sidecarStat.isFile()) continue;
           await fs.mkdir(dirname(variant.target), { recursive: true });
-          await copyFileExclusive(variant.source, variant.target);
-          if (mode === 'move') await fs.unlink(variant.source);
+          if (mode === 'move') await moveTreeExclusive(variant.source, variant.target);
+          else await copyFileExclusive(variant.source, variant.target);
         }
       }
     } catch (error) {
@@ -29104,6 +28919,30 @@ async function syncGallerySidecarsAfterTransfer(results: Array<Record<string, un
     }
   }
   return warnings;
+}
+
+function normalizeGalleryTransferResults(paths: string[], value: unknown): FsMoveResult[] {
+  const requested = new Set(paths);
+  const entries = new Map<string, Record<string, unknown> | null>();
+  for (const entry of Array.isArray(value) ? value : []) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || typeof entry.path !== 'string' || !requested.has(entry.path)) continue;
+    entries.set(entry.path, entries.has(entry.path) ? null : entry);
+  }
+  return paths.map(path => {
+    const entry = entries.get(path);
+    if (entry?.success === false) {
+      return { path, success: false, error: typeof entry.error === 'string' && entry.error.trim() ? entry.error : 'File transfer failed' };
+    }
+    if (entry?.success === true && typeof entry.newPath === 'string' && entry.newPath.trim() && !entry.newPath.includes('\0')) {
+      return {
+        path, success: true, newPath: entry.newPath,
+        ...(typeof entry.isDirectory === 'boolean' ? { isDirectory: entry.isDirectory } : {}),
+        ...(typeof entry.size === 'number' && Number.isFinite(entry.size) && entry.size >= 0 ? { size: entry.size } : {}),
+      };
+    }
+    return { path, success: false, error: 'Transfer result was not confirmed. Check source and destination before retrying; files may already have transferred.' };
+  });
 }
 
 function updateGalleryTransferProgress(job: FsMoveJob | FsCopyJob, progress: Record<string, unknown>) {
@@ -29182,13 +29021,13 @@ async function runFsMoveJob(job: FsMoveJob) {
 
     if (job.totalUnits <= 0) job.totalUnits = Number((execution as any).totalUnits || 0);
     job.completedUnits = Math.min(job.totalUnits, Math.max(job.completedUnits, job.totalUnits));
-    job.results = [...job.results, ...((execution as any).results || [])];
+    job.results = [...job.results, ...normalizeGalleryTransferResults(validItems.map(item => item.sourcePath), execution?.results)];
     await finishGalleryTransfer(job, 'move');
     if (job.cancelRequested) job.phase = 'cancelled';
     job.status = 'completed';
     job.finishedAt = Date.now();
-    const movedTargets = ((execution as any).results || [])
-      .filter((entry) => entry.success)
+    const movedTargets = job.results
+      .filter((entry) => entry.success === true)
       .map((entry) => String(entry.newPath || '').trim())
       .filter((entry) => entry.length > 0);
     invalidateFsListCacheForPaths([
@@ -29256,13 +29095,13 @@ async function runFsCopyJob(job: FsCopyJob) {
 
     if (job.totalUnits <= 0) job.totalUnits = Number((execution as any).totalUnits || 0);
     job.completedUnits = Math.min(job.totalUnits, Math.max(job.completedUnits, job.totalUnits));
-    job.results = [...job.results, ...((execution as any).results || [])];
+    job.results = [...job.results, ...normalizeGalleryTransferResults(validItems.map(item => item.sourcePath), execution?.results)];
     await finishGalleryTransfer(job, 'copy');
     if (job.cancelRequested) job.phase = 'cancelled';
     job.status = 'completed';
     job.finishedAt = Date.now();
-    const copiedTargets = ((execution as any).results || [])
-      .filter((entry) => entry.success)
+    const copiedTargets = job.results
+      .filter((entry) => entry.success === true)
       .map((entry) => String(entry.newPath || '').trim())
       .filter((entry) => entry.length > 0);
     invalidateFsListCacheForPaths([
@@ -29282,15 +29121,47 @@ async function runFsCopyJob(job: FsCopyJob) {
   }
 }
 
-async function readArchivedGalleryTransfer(id: string) {
+function isArchivedGalleryTransfer(value: Record<string, unknown>, id: string): value is Record<string, unknown> & (FsMoveJob | FsCopyJob) {
+  const strings = (items: unknown): items is string[] => Array.isArray(items) && items.every(item => typeof item === 'string');
+  const count = (item: unknown) => typeof item === 'number' && Number.isFinite(item) && item >= 0;
+  if (value.id !== id || typeof value.status !== 'string' || !['running', 'completed', 'failed'].includes(value.status)) return false;
+  if (typeof value.destination !== 'string' || typeof value.currentPath !== 'string' || !strings(value.paths)) return false;
+  if (!count(value.totalUnits) || !count(value.completedUnits) || !count(value.startedAt)) return false;
+  if (id.startsWith('fsmove-') && value.transferMode !== 'default' && value.transferMode !== 'cloud') return false;
+  for (const key of ['finishedAt', 'fileBytes', 'fileTotalBytes', 'lastProgressAt']) {
+    if (value[key] !== undefined && !count(value[key])) return false;
+  }
+  for (const key of ['error', 'phase']) {
+    if (value[key] !== undefined && typeof value[key] !== 'string') return false;
+  }
+  if (value.cancelRequested !== undefined && typeof value.cancelRequested !== 'boolean') return false;
+  for (const key of ['undoOf', 'undoJobId']) {
+    if (value[key] !== undefined && (typeof value[key] !== 'string' || !/^fsmove-[\w-]+$/.test(value[key]))) return false;
+  }
+  if (value.undonePaths !== undefined && !strings(value.undonePaths)) return false;
+  if (value.restoreTargets !== undefined && (!value.restoreTargets || typeof value.restoreTargets !== 'object' || Array.isArray(value.restoreTargets) || !Object.values(value.restoreTargets).every(target => typeof target === 'string'))) return false;
+  return Array.isArray(value.results) && value.results.every(result => (
+    result && typeof result === 'object' && !Array.isArray(result)
+    && typeof result.path === 'string' && typeof result.success === 'boolean'
+    && (result.newPath === undefined || typeof result.newPath === 'string')
+    && (result.error === undefined || typeof result.error === 'string')
+  ));
+}
+
+async function readArchivedGalleryTransfer(id: string, kind: 'move'): Promise<FsMoveJob | null>;
+async function readArchivedGalleryTransfer(id: string, kind: 'copy'): Promise<FsCopyJob | null>;
+async function readArchivedGalleryTransfer(id: string): Promise<FsMoveJob | FsCopyJob | null>;
+async function readArchivedGalleryTransfer(id: string, kind?: 'move' | 'copy'): Promise<FsMoveJob | FsCopyJob | null> {
   if (!/^fs(move|copy)-[\w-]+$/.test(id)) return null;
+  if (kind && !id.startsWith(`fs${kind}-`)) return null;
   const job = await galleryTransferJournal.read(id);
-  if (job && (!Array.isArray(job.paths) || typeof job.destination !== 'string')) return null;
+  if (!job) return null;
+  if (!isArchivedGalleryTransfer(job, id)) throw new Error('Saved transfer record is invalid. Transfer history and files have not been changed.');
   if (job?.status === 'running') {
     job.status = 'failed';
     job.error = 'Transfer tracking was interrupted by a server restart. Check source and destination before retrying; files may already have transferred.';
     job.finishedAt = Date.now();
-    await galleryTransferJournal.save(job as { id: string });
+    await galleryTransferJournal.save(job);
   }
   return job;
 }
@@ -29298,7 +29169,7 @@ async function readArchivedGalleryTransfer(id: string) {
 async function handleGalleryTransferReconcile(req: Request): Promise<Response> {
   const { jobId } = await req.json() as { jobId?: string };
   const id = String(jobId || '');
-  const job = fsMoveJobs.get(id) || fsCopyJobs.get(id) || await readArchivedGalleryTransfer(id) as FsMoveJob | FsCopyJob | null;
+  const job = fsMoveJobs.get(id) || fsCopyJobs.get(id) || await readArchivedGalleryTransfer(id);
   if (!job) return json({ error: 'Transfer not found' }, 404);
   if (job.status === 'running' || job.phase !== 'indexing') return json({ error: 'This transfer does not have pending indexing' }, 409);
   const mode = id.startsWith('fscopy-') ? 'copy' : 'move';
@@ -29345,7 +29216,7 @@ async function handleFsMoveStatus(url: URL): Promise<Response> {
   const jobId = String(url.searchParams.get('jobId') || '').trim();
   if (!jobId) return json({ error: 'jobId required' }, 400);
 
-  const job = fsMoveJobs.get(jobId) || await readArchivedGalleryTransfer(jobId) as FsMoveJob | null;
+  const job = fsMoveJobs.get(jobId) || await readArchivedGalleryTransfer(jobId, 'move');
   if (!job) return json({ error: 'Move job not found' }, 404);
 
   const moved = job.results.filter((entry) => entry.success).length;
@@ -29383,7 +29254,7 @@ async function handleFsCopyStatus(url: URL): Promise<Response> {
   const jobId = String(url.searchParams.get('jobId') || '').trim();
   if (!jobId) return json({ error: 'jobId required' }, 400);
 
-  const job = fsCopyJobs.get(jobId) || await readArchivedGalleryTransfer(jobId) as FsCopyJob | null;
+  const job = fsCopyJobs.get(jobId) || await readArchivedGalleryTransfer(jobId, 'copy');
   if (!job) return json({ error: 'Copy job not found' }, 404);
 
   const copied = job.results.filter((entry) => entry.success).length;
@@ -29425,12 +29296,12 @@ async function handleFsUndoMove(req: Request): Promise<Response> {
     if (fsUndoMoveRequests.has(jobId)) return json({ error: 'Undo is already being prepared' }, 409);
     lockedId = jobId;
     fsUndoMoveRequests.add(jobId);
-    const original = fsMoveJobs.get(jobId) || await readArchivedGalleryTransfer(jobId) as FsMoveJob | null;
+    const original = fsMoveJobs.get(jobId) || await readArchivedGalleryTransfer(jobId, 'move');
     if (!original || original.undoOf) return json({ error: 'Move history is unavailable' }, 404);
     if (original.status === 'running') return json({ error: 'Wait for the move to finish' }, 409);
     const undonePaths = new Set(original.undonePaths || []);
     if (original.undoJobId) {
-      const previous = fsMoveJobs.get(original.undoJobId) || await readArchivedGalleryTransfer(original.undoJobId) as FsMoveJob | null;
+      const previous = fsMoveJobs.get(original.undoJobId) || await readArchivedGalleryTransfer(original.undoJobId, 'move');
       if (!previous) return json({ error: 'Previous undo history is unavailable; check restored files before retrying' }, 409);
       if (previous.status === 'running' || previous.phase === 'indexing') return json({ success: true, jobId: previous.id });
       for (const result of previous.results) if (result.success) undonePaths.add(result.path);
@@ -29867,12 +29738,20 @@ function crc32(buf: Buffer): number {
   return (crc ^ 0xFFFFFFFF) >>> 0;
 }
 
-const server = Bun.serve<any>({
+type UmbraSocketData = {
+  endpoint: string;
+  targetUrl?: string;
+  remoteClient?: boolean;
+  queuedMessages?: Array<string | Buffer>;
+  upstream?: WebSocket;
+};
+
+const server = Bun.serve<UmbraSocketData>({
   port: PORT,
   hostname: HOST,
   idleTimeout: 120,
 
-  async fetch(req, server) {
+  async fetch(req: Request, server: Bun.Server<UmbraSocketData>) {
     const requestStartedAt = Date.now();
     let responseStatus = 0;
     const url = new URL(req.url);
@@ -29945,7 +29824,8 @@ const server = Bun.serve<any>({
           if (isRemoteRequest(req, url, server)) {
             return json({ error: 'Remote auth setup is only available from the host browser.' }, 403);
           }
-          const body = await req.json().catch(() => ({} as any));
+          const body = await readJsonObject(req);
+          if (!body) return json({ error: 'Expected a JSON object.' }, 400);
           const username = String(body?.username || '').trim();
           const password = String(body?.password || '');
           if (username.length < 3) return json({ error: 'Username must be at least 3 characters.' }, 400);
@@ -29958,13 +29838,13 @@ const server = Bun.serve<any>({
             salt,
             passwordHash: hashRemotePassword(password, salt, REMOTE_AUTH_PBKDF2_ITERATIONS),
             iterations: REMOTE_AUTH_PBKDF2_ITERATIONS,
-            createdAt: effectiveRemoteAuthConfig?.createdAt || now,
+            createdAt: loadRemoteAuthConfig()?.createdAt || now,
             updatedAt: now,
             sessions: [],
             devices: [],
             pairTokens: [],
           };
-          const handshake = createRemoteHandshake(nextConfig, req, body?.deviceLabel);
+          const handshake = createRemoteHandshake(nextConfig, req, body?.deviceLabel, server);
           const session = createRemoteSession(handshake.config, { deviceId: handshake.deviceId });
           saveRemoteAuthConfig(session.config);
           console.log(`[UmbraRemote] Remote login configured for user "${username}"`);
@@ -29987,9 +29867,10 @@ const server = Bun.serve<any>({
         if (method === 'POST' && path === '/api/remote/auth/pair-token') {
           const guard = withRemoteAdminGuard(req, url, server);
           if (guard) return guard;
-          const config = effectiveRemoteAuthConfig;
+          const body = await readJsonObject(req, true);
+          if (!body) return json({ error: 'Expected a JSON object.' }, 400);
+          const config = loadRemoteAuthConfig();
           if (!config) return json({ error: 'Remote auth is not configured on the host yet.' }, 409);
-          const body = await req.json().catch(() => ({} as any));
           const pair = createRemotePairToken(config, body?.deviceLabel || 'Remote device');
           saveRemoteAuthConfig(pair.config);
           console.log(`[UmbraRemote] Pair link created for ${String(body?.deviceLabel || 'Remote device').slice(0, 80)}`);
@@ -30009,10 +29890,10 @@ const server = Bun.serve<any>({
           const consumed = consumeRemotePairToken(config, token);
           if (!consumed.ok) {
             saveRemoteAuthConfig(consumed.config);
-            console.warn(`[UmbraRemote] Pair link rejected secure=${isSecureRemoteRequest(req)} host="${req.headers.get('host') || ''}" from=${getRemoteRequestAddress(req)}`);
+            console.warn(`[UmbraRemote] Pair link rejected secure=${isSecureRemoteRequest(req)} host="${req.headers.get('host') || ''}" from=${getRemoteRequestAddress(req, server)}`);
             return json({ error: 'Pair link expired or already used.' }, 401);
           }
-          const handshake = createRemoteHandshake(consumed.config, req, consumed.label || 'Paired remote device');
+          const handshake = createRemoteHandshake(consumed.config, req, consumed.label || 'Paired remote device', server);
           const session = createRemoteSession(handshake.config, { deviceId: handshake.deviceId });
           saveRemoteAuthConfig(session.config);
           console.log(`[UmbraRemote] Pair link accepted for "${config.username}" (${getRemoteDeviceLabel(req, consumed.label)})`);
@@ -30023,14 +29904,16 @@ const server = Bun.serve<any>({
         }
 
         if (method === 'POST' && path === '/api/remote/auth/login') {
-          const config = effectiveRemoteAuthConfig;
+          const body = await readJsonObject(req);
+          if (!body) return json({ error: 'Expected a JSON object.' }, 400);
+          // No async work may separate this fresh auth snapshot from its save.
+          const config = loadRemoteAuthConfig();
           if (!config) return json({ error: 'Remote auth is not configured on the host yet.' }, 409);
-          const body = await req.json().catch(() => ({} as any));
           const username = String(body?.username || '').trim();
           const password = String(body?.password || '');
-          const rateLimit = getRemoteLoginRateLimit(req, username);
+          const rateLimit = getRemoteLoginRateLimit(req, server);
           if (rateLimit.limited) {
-            console.warn(`[UmbraRemote] Login rate limited for ${getRemoteRequestAddress(req)}`);
+            console.warn(`[UmbraRemote] Login rate limited for ${getRemoteRequestAddress(req, server)}`);
             return json({ error: `Too many failed login attempts. Try again in ${rateLimit.retryAfterSeconds}s.`, retryAfterSeconds: rateLimit.retryAfterSeconds }, {
               status: 429,
               headers: { 'Retry-After': String(rateLimit.retryAfterSeconds) },
@@ -30040,11 +29923,11 @@ const server = Bun.serve<any>({
           const usernameMatches = username === config.username;
           const passwordMatches = safeEqualHex(candidateHash, config.passwordHash);
           if (!usernameMatches || !passwordMatches) {
-            recordRemoteLoginFailure(req, username);
+            recordRemoteLoginFailure(req, server);
             const reason = !usernameMatches ? 'username_mismatch' : 'password_mismatch';
             console.warn(
               `[UmbraRemote] Failed login reason=${reason} typedUser="${username || 'empty'}" configuredUser="${config.username}" ` +
-              `passwordLength=${password.length} secure=${isSecureRemoteRequest(req)} host="${req.headers.get('host') || ''}" from=${getRemoteRequestAddress(req)}`
+              `passwordLength=${password.length} secure=${isSecureRemoteRequest(req)} host="${req.headers.get('host') || ''}" from=${getRemoteRequestAddress(req, server)}`
             );
             return json({
               error: reason === 'username_mismatch'
@@ -30055,8 +29938,8 @@ const server = Bun.serve<any>({
               passwordLength: password.length,
             }, 401);
           }
-          clearRemoteLoginFailures(req, username);
-          const handshake = createRemoteHandshake(config, req, body?.deviceLabel);
+          clearRemoteLoginFailures(req, server);
+          const handshake = createRemoteHandshake(config, req, body?.deviceLabel, server);
           const session = createRemoteSession(handshake.config, { deviceId: handshake.deviceId });
           saveRemoteAuthConfig(session.config);
           console.log(`[UmbraRemote] Trusted device handshake for "${username}" (${getRemoteDeviceLabel(req, body?.deviceLabel)})`);
@@ -30076,8 +29959,9 @@ const server = Bun.serve<any>({
         }
 
         if (method === 'POST' && path === '/api/remote/auth/logout') {
-          const config = effectiveRemoteAuthConfig;
-          const body = await req.json().catch(() => ({} as any));
+          const body = await readJsonObject(req, true);
+          if (!body) return json({ error: 'Expected a JSON object.' }, 400);
+          const config = loadRemoteAuthConfig();
           const forgetDevice = body?.forgetDevice !== false;
           const sessionToken = getRemoteSessionToken(req);
           const sessionHash = sessionToken ? hashRemoteSessionToken(sessionToken) : '';
@@ -30116,7 +30000,8 @@ const server = Bun.serve<any>({
           if (isRemoteRequest(req, url, server)) {
             return json({ error: 'Remote connection settings are only editable from the host browser.' }, 403);
           }
-          const body = await req.json().catch(() => ({} as any));
+          const body = await readJsonObject(req);
+          if (!body) return json({ error: 'Expected a JSON object.' }, 400);
           const now = Date.now();
           const publishedTailscaleOnly = !IS_UMBRA_DEV_MODE;
           const settings: RemoteConnectionSettings = {
@@ -30161,9 +30046,10 @@ const server = Bun.serve<any>({
         if (method === 'POST' && path === '/api/remote/devices/rename') {
           const guard = withRemoteAdminGuard(req, url, server);
           if (guard) return guard;
-          const config = effectiveRemoteAuthConfig;
+          const body = await readJsonObject(req);
+          if (!body) return json({ error: 'Expected a JSON object.' }, 400);
+          const config = loadRemoteAuthConfig();
           if (!config) return json({ error: 'Remote auth is not configured.' }, 409);
-          const body = await req.json().catch(() => ({} as any));
           const id = String(body?.id || '').trim();
           const label = String(body?.label || '').trim().slice(0, 80);
           if (!id || !label) return json({ error: 'Device id and label are required.' }, 400);
@@ -30176,9 +30062,10 @@ const server = Bun.serve<any>({
         if (method === 'POST' && path === '/api/remote/devices/revoke') {
           const guard = withRemoteAdminGuard(req, url, server);
           if (guard) return guard;
-          const config = effectiveRemoteAuthConfig;
+          const body = await readJsonObject(req);
+          if (!body) return json({ error: 'Expected a JSON object.' }, 400);
+          const config = loadRemoteAuthConfig();
           if (!config) return json({ error: 'Remote auth is not configured.' }, 409);
-          const body = await req.json().catch(() => ({} as any));
           const id = String(body?.id || '').trim();
           if (!id) return json({ error: 'Device id is required.' }, 400);
           const devices = (config.devices || []).filter((device) => !safeEqualHex(device.id, id));
@@ -30191,7 +30078,8 @@ const server = Bun.serve<any>({
         if (method === 'POST' && path === '/api/remote/test-url') {
           const guard = withRemoteAdminGuard(req, url, server);
           if (guard) return guard;
-          const body = await req.json().catch(() => ({} as any));
+          const body = await readJsonObject(req);
+          if (!body) return json({ error: 'Expected a JSON object.' }, 400);
           return json(await testRemoteUrl(body?.url));
         }
 
@@ -30265,8 +30153,9 @@ const server = Bun.serve<any>({
         }
 
         if (method === 'POST' && path === '/api/remote/metrics') {
-          const payload: any = await req.json().catch(() => ({} as any));
-          const stats = recordRemoteTelemetryBatch(req, payload);
+          const payload = await readJsonObject(req);
+          if (!payload) return json({ error: 'Expected a JSON object.' }, 400);
+          const stats = recordRemoteTelemetryBatch(req, payload, server);
           return json({ ok: true, clientId: stats.clientId, accepted: Array.isArray(payload?.events) ? payload.events.length : 0 });
         }
 
@@ -30655,7 +30544,7 @@ const server = Bun.serve<any>({
       if (path === '/api/fs/list' && method === 'GET') return handleFsList(url);
       if (path === '/api/fs/list-progressive' && method === 'GET') return handleFsListProgressive(url);
       if (path === '/api/fs/thumbnail' && method === 'GET') return handleFsThumbnail(req, url, server);
-      if (path === '/api/fs/preview' && method === 'GET') return handleFsPreview(url);
+      if (path === '/api/fs/preview' && method === 'GET') return handleFsPreview(req, url);
       if (path === '/api/fs/image' && method === 'GET') return handleFsImage(req, url, server);
       if (path === '/api/fs/download-zip' && method === 'POST') return handleFsDownloadZip(req);
       if (path === '/api/fs/archives' && (method === 'GET' || method === 'POST')) return handleGalleryArchives(req, url);
@@ -30880,10 +30769,11 @@ const server = Bun.serve<any>({
       // POST /api/editor/config — upsert { key, value }
       if (path === '/api/editor/config' && method === 'POST') {
         try {
-          const body = await req.json();
+          const body = await readJsonObject(req);
+          if (!body) return json({ error: 'Expected a JSON object.' }, 400);
           const { key, value } = body;
-          if (!key) return json({ error: 'Missing key' }, 400);
-          EditorDb.setEditorConfig(key, JSON.stringify(value));
+          if (typeof key !== 'string' || !key.trim() || value === undefined) return json({ error: 'A string key and value are required.' }, 400);
+          await EditorDb.write(() => EditorDb.setEditorConfig(key, JSON.stringify(value)));
           return json({ success: true });
         } catch (err: any) {
           return json({ error: err.message }, 500);
@@ -30912,7 +30802,7 @@ const server = Bun.serve<any>({
           if (!body.folder || !Array.isArray(body.order)) {
             return json({ error: 'Invalid request body' }, { status: 400 });
           }
-          EditorDb.setCustomOrder(body.folder, body.order);
+          await EditorDb.write(() => EditorDb.setCustomOrder(body.folder, body.order));
           return json({ success: true });
         } catch (err: any) {
           return json({ error: err.message }, { status: 500 });
@@ -30925,7 +30815,7 @@ const server = Bun.serve<any>({
           if (!body.folder) {
             return json({ error: 'Missing folder parameter' }, { status: 400 });
           }
-          EditorDb.clearCustomOrder(body.folder);
+          await EditorDb.write(() => EditorDb.clearCustomOrder(body.folder));
           return json({ success: true });
         } catch (err: any) {
           return json({ error: err.message }, { status: 500 });
@@ -30962,7 +30852,7 @@ const server = Bun.serve<any>({
           if (existsSync(legacySidecarPath)) {
             const legacyContent = await Bun.file(legacySidecarPath).text();
             const parsed = JSON.parse(legacyContent);
-            EditorDb.setEditorAdjustment(body.path, JSON.stringify(parsed));
+            await EditorDb.write(() => EditorDb.setEditorAdjustment(body.path, JSON.stringify(parsed)));
             await fs.unlink(legacySidecarPath).catch(() => { });
             return json({ sidecar: parsed });
           }
@@ -30977,7 +30867,7 @@ const server = Bun.serve<any>({
         try {
           const body = await req.json() as { path: string; sidecar: any };
           if (!body.path || body.sidecar == null) return json({ error: 'Missing path or sidecar' }, { status: 400 });
-          EditorDb.setEditorAdjustment(body.path, JSON.stringify(body.sidecar));
+          await EditorDb.write(() => EditorDb.setEditorAdjustment(body.path, JSON.stringify(body.sidecar)));
 
           // Cleanup legacy file if it still exists.
           const legacySidecarPath = join(ROOT_DIR, body.path + '.umbra');
@@ -30996,7 +30886,7 @@ const server = Bun.serve<any>({
           const body = await req.json() as { path: string };
           if (!body.path) return json({ error: 'Missing path' }, { status: 400 });
 
-          EditorDb.deleteEditorAdjustment(body.path);
+          await EditorDb.write(() => EditorDb.deleteEditorAdjustment(body.path));
 
           // Cleanup legacy file if present.
           const legacySidecarPath = join(ROOT_DIR, body.path + '.umbra');
@@ -31024,7 +30914,7 @@ const server = Bun.serve<any>({
         try {
           const body = await req.json() as { name: string; adjustments: any; category?: string };
           if (!body.name || !body.adjustments) return json({ error: 'Missing name or adjustments' }, { status: 400 });
-          const result = EditorDb.upsertPreset(body.name, JSON.stringify(body.adjustments), body.category);
+          const result = await EditorDb.write(() => EditorDb.upsertPreset(body.name, JSON.stringify(body.adjustments), body.category));
           return json({ id: result.id, created: result.created, success: true });
         } catch (err: any) {
           return json({ error: err.message }, { status: 500 });
@@ -31036,7 +30926,7 @@ const server = Bun.serve<any>({
           const id = parseInt(path.split('/').pop() || '0');
           if (!id) return json({ error: 'Invalid preset ID' }, { status: 400 });
           const body = await req.json() as { name: string; adjustments: any; category?: string };
-          EditorDb.updatePreset(id, body.name, JSON.stringify(body.adjustments), body.category);
+          await EditorDb.write(() => EditorDb.updatePreset(id, body.name, JSON.stringify(body.adjustments), body.category));
           return json({ success: true });
         } catch (err: any) {
           return json({ error: err.message }, { status: 500 });
@@ -31047,7 +30937,7 @@ const server = Bun.serve<any>({
         try {
           const id = parseInt(path.split('/').pop() || '0');
           if (!id) return json({ error: 'Invalid preset ID' }, { status: 400 });
-          EditorDb.deletePreset(id);
+          await EditorDb.write(() => EditorDb.deletePreset(id));
           return json({ success: true });
         } catch (err: any) {
           return json({ error: err.message }, { status: 500 });
@@ -31073,9 +30963,10 @@ const server = Bun.serve<any>({
       // POST /api/editor/meta — deprecated compatibility no-op
       if (path === '/api/editor/meta' && method === 'POST') {
         try {
-          const body = await req.json();
+          const body = await readJsonObject(req);
+          if (!body) return json({ error: 'Expected a JSON object.' }, 400);
           const { path: imagePath } = body;
-          if (!imagePath) return json({ error: 'Missing path' }, { status: 400 });
+          if (typeof imagePath !== 'string' || !imagePath.trim()) return json({ error: 'Missing path' }, { status: 400 });
           return json({ success: true, deprecated: true, ignored: ['rating', 'colorLabel', 'hasEdits'] });
         } catch (err: any) {
           return json({ error: err.message }, { status: 500 });
@@ -31085,11 +30976,13 @@ const server = Bun.serve<any>({
       // POST /api/editor/meta/batch — deprecated compatibility handler
       if (path === '/api/editor/meta/batch' && method === 'POST') {
         try {
-          const body = await req.json();
+          const body = await readJsonObject(req);
+          if (!body) return json({ error: 'Expected a JSON object.' }, 400);
           const { paths, updates } = body;
 
           // Batch read: return compatibility metas plus tags for requested paths
           if (paths && Array.isArray(paths)) {
+            if (!paths.every(imagePath => typeof imagePath === 'string')) return json({ error: 'Paths must be strings.' }, 400);
             const normalizedPaths = paths
               .map((imagePath: string) => String(imagePath || '').trim())
               .filter(Boolean);
@@ -31130,10 +31023,13 @@ const server = Bun.serve<any>({
       // POST /api/editor/tags — create a tag
       if (path === '/api/editor/tags' && method === 'POST') {
         try {
-          const body = await req.json();
+          const body = await readJsonObject(req);
+          if (!body) return json({ error: 'Expected a JSON object.' }, 400);
           const { name, color } = body;
-          if (!name) return json({ error: 'Missing tag name' }, { status: 400 });
-          const id = EditorDb.createTag(name, color || '');
+          if (typeof name !== 'string' || !name.trim()) return json({ error: 'Missing tag name' }, { status: 400 });
+          if (color !== undefined && typeof color !== 'string') return json({ error: 'Tag color must be a string.' }, 400);
+          const tagColor = typeof color === 'string' ? color : '';
+          const id = await EditorDb.write(() => EditorDb.createTag(name, tagColor));
           return json({ id });
         } catch (err: any) {
           return json({ error: err.message }, { status: 500 });
@@ -31143,9 +31039,10 @@ const server = Bun.serve<any>({
       // DELETE /api/editor/tags/:id — delete a tag
       if (path.startsWith('/api/editor/tags/') && method === 'DELETE') {
         try {
-          const id = parseInt(path.split('/').pop() || '0');
-          if (!id) return json({ error: 'Invalid tag ID' }, { status: 400 });
-          EditorDb.deleteTag(id);
+          const rawId = path.split('/').pop() || '';
+          const id = Number(rawId);
+          if (!/^[1-9]\d*$/.test(rawId) || !Number.isSafeInteger(id)) return json({ error: 'Invalid tag ID' }, { status: 400 });
+          await EditorDb.write(() => EditorDb.deleteTag(id));
           return json({ success: true });
         } catch (err: any) {
           return json({ error: err.message }, { status: 500 });
@@ -31155,16 +31052,22 @@ const server = Bun.serve<any>({
       // POST /api/editor/image-tags — set tags for an image
       if (path === '/api/editor/image-tags' && method === 'POST') {
         try {
-          const body = await req.json();
+          const body = await readJsonObject(req);
+          if (!body) return json({ error: 'Expected a JSON object.' }, 400);
           const { imagePath, tagIds, addTagId, removeTagId } = body;
-          if (!imagePath) return json({ error: 'Missing imagePath' }, { status: 400 });
+          if (typeof imagePath !== 'string' || !imagePath.trim()) return json({ error: 'Missing imagePath' }, { status: 400 });
+          if ([tagIds, addTagId, removeTagId].filter(value => value !== undefined).length !== 1) return json({ error: 'Provide exactly one tag operation.' }, 400);
+          const validTagId = (id: unknown): id is number => typeof id === 'number' && Number.isSafeInteger(id) && id > 0;
 
           if (tagIds !== undefined) {
-            EditorDb.setImageTags(imagePath, tagIds);
+            if (!Array.isArray(tagIds) || !tagIds.every(validTagId)) return json({ error: 'tagIds must be an array of positive integer IDs.' }, 400);
+            await EditorDb.write(() => EditorDb.setImageTags(imagePath, tagIds));
           } else if (addTagId !== undefined) {
-            EditorDb.addImageTag(imagePath, addTagId);
+            if (!validTagId(addTagId)) return json({ error: 'Invalid tag ID' }, 400);
+            await EditorDb.write(() => EditorDb.addImageTag(imagePath, addTagId));
           } else if (removeTagId !== undefined) {
-            EditorDb.removeImageTag(imagePath, removeTagId);
+            if (!validTagId(removeTagId)) return json({ error: 'Invalid tag ID' }, 400);
+            await EditorDb.write(() => EditorDb.removeImageTag(imagePath, removeTagId));
           } else {
             return json({ error: 'Provide tagIds, addTagId, or removeTagId' }, { status: 400 });
           }
@@ -33530,7 +33433,7 @@ const server = Bun.serve<any>({
 
           // Detect site from URL and use direct API
           const url = body.url || '';
-          let images: Array<{ url: string; fullUrl?: string; id: string; tags?: string[]; rating?: string }> = [];
+          let images: BooruImageResult[] = [];
 
           try {
             if (url.includes('danbooru.donmai.us') || url.includes('danbooru:')) {
@@ -33604,41 +33507,39 @@ const server = Bun.serve<any>({
       if (path === '/api/dataset/api-keys' && method === 'POST') {
         try {
           const body = await req.json() as BooruApiConfig;
-          const existing = await loadStoredApiKeys();
-
-          // Merge with existing, only update what's provided
-          const merged: BooruApiConfig = { ...existing };
-
-          if (body.danbooru) {
-            merged.danbooru = {
-              username: body.danbooru.username || existing.danbooru?.username || '',
-              apiKey: body.danbooru.apiKey || existing.danbooru?.apiKey || ''
-            };
-          }
-          if (body.gelbooru) {
-            merged.gelbooru = {
-              userId: body.gelbooru.userId || existing.gelbooru?.userId || '',
-              apiKey: body.gelbooru.apiKey || existing.gelbooru?.apiKey || ''
-            };
-          }
-          if (body.rule34) {
-            merged.rule34 = {
-              userId: body.rule34.userId || existing.rule34?.userId || '',
-              apiKey: body.rule34.apiKey || existing.rule34?.apiKey || ''
-            };
-          }
-          if (body.e621) {
-            merged.e621 = {
-              username: body.e621.username || existing.e621?.username || '',
-              apiKey: body.e621.apiKey || existing.e621?.apiKey || ''
-            };
-          }
-          if (body.civitai) {
-            const apiToken = String(body.civitai.apiToken || body.civitai.apiKey || existing.civitai?.apiToken || existing.civitai?.apiKey || '').trim();
-            if (apiToken) merged.civitai = { apiToken };
-          }
-
-          await saveStoredApiKeys(merged);
+          await updateStoredApiKeys(existing => {
+            // Merge with existing, only update what's provided.
+            const merged: BooruApiConfig = { ...existing };
+            if (body.danbooru) {
+              merged.danbooru = {
+                username: body.danbooru.username || existing.danbooru?.username || '',
+                apiKey: body.danbooru.apiKey || existing.danbooru?.apiKey || ''
+              };
+            }
+            if (body.gelbooru) {
+              merged.gelbooru = {
+                userId: body.gelbooru.userId || existing.gelbooru?.userId || '',
+                apiKey: body.gelbooru.apiKey || existing.gelbooru?.apiKey || ''
+              };
+            }
+            if (body.rule34) {
+              merged.rule34 = {
+                userId: body.rule34.userId || existing.rule34?.userId || '',
+                apiKey: body.rule34.apiKey || existing.rule34?.apiKey || ''
+              };
+            }
+            if (body.e621) {
+              merged.e621 = {
+                username: body.e621.username || existing.e621?.username || '',
+                apiKey: body.e621.apiKey || existing.e621?.apiKey || ''
+              };
+            }
+            if (body.civitai) {
+              const apiToken = String(body.civitai.apiToken || body.civitai.apiKey || existing.civitai?.apiToken || existing.civitai?.apiKey || '').trim();
+              if (apiToken) merged.civitai = { apiToken };
+            }
+            return merged;
+          });
           console.log('[API Keys] Configuration saved');
           return json({ success: true });
         } catch (error: any) {
@@ -33650,15 +33551,14 @@ const server = Bun.serve<any>({
       if (path === '/api/dataset/api-keys' && method === 'DELETE') {
         try {
           const body = await req.json() as { site: string };
-          const config = await loadStoredApiKeys();
-
-          if (body.site === 'danbooru') delete config.danbooru;
-          if (body.site === 'gelbooru') delete config.gelbooru;
-          if (body.site === 'rule34') delete config.rule34;
-          if (body.site === 'e621') delete config.e621;
-          if (body.site === 'civitai') delete config.civitai;
-
-          await saveStoredApiKeys(config);
+          await updateStoredApiKeys(config => {
+            if (body.site === 'danbooru') delete config.danbooru;
+            if (body.site === 'gelbooru') delete config.gelbooru;
+            if (body.site === 'rule34') delete config.rule34;
+            if (body.site === 'e621') delete config.e621;
+            if (body.site === 'civitai') delete config.civitai;
+            return config;
+          });
           return json({ success: true });
         } catch (error: any) {
           return json({ error: error.message }, 500);
@@ -34103,58 +34003,63 @@ const server = Bun.serve<any>({
 
       if (path === '/api/user-config' && method === 'POST') {
         try {
-          const body = await req.json() as { key?: string; value?: unknown };
-          const normalizedKey = String(body?.key || '').trim().toLowerCase();
+          const body = await readJsonObject(req);
+          if (!body || typeof body.key !== 'string' || !Object.hasOwn(body, 'value')) {
+            return json({ success: false, error: 'Expected a config key and an explicit value.' }, 400);
+          }
+          const normalizedKey = body.key.trim().toLowerCase();
           if (!resolveUserConfigPath(normalizedKey)) {
             return json({ success: false, error: 'Unknown user config key' }, 400);
           }
-          let value = body.value ?? null;
-          if (normalizedKey === 'umbra-ui-lora-presets') {
-            try {
-              await writeLoraPresetLibrary(resolveUserConfigPath(normalizedKey)!, value);
-              return json({ success: true, key: normalizedKey, value });
-            } catch (error) {
-              if (error instanceof LoraPresetWriteError) return json({ success: false, error: error.message }, error.status);
-              throw error;
-            }
-          }
-          if (
-            (normalizedKey === 'gallery-ui-session' || normalizedKey === 'remote-ui-session' || normalizedKey === 'powerprompter-ui')
-            && value
-            && typeof value === 'object'
-          ) {
-            const incomingUpdatedAt = Math.max(0, Math.floor(Number((value as Record<string, unknown>).updatedAt) || 0));
-            const existing = await readUserConfigValue(normalizedKey) as Record<string, unknown> | null;
-            const existingUpdatedAt = existing && typeof existing === 'object'
-              ? Math.max(0, Math.floor(Number(existing.updatedAt) || 0))
-              : 0;
-            if (incomingUpdatedAt > 0 && existingUpdatedAt > incomingUpdatedAt) {
-              return json({ success: true, key: normalizedKey, value: existing, stale: true });
-            }
-            if (normalizedKey === 'gallery-ui-session') {
-              const incoming = value as Record<string, unknown>;
-              const currentFolder = String(incoming.currentFolder || '').replace(/\\/g, '/').replace(/\/+$/, '').trim();
-              const focusedFolder = String(incoming.focusedFolder || '').replace(/\\/g, '/').replace(/\/+$/, '').trim();
-              const existingCurrentFolder = existing && typeof existing === 'object'
-                ? String(existing.currentFolder || '').replace(/\\/g, '/').replace(/\/+$/, '').trim()
-                : '';
-              if (
-                focusedFolder
-                && currentFolder
-                && focusedFolder !== currentFolder
-                && existingCurrentFolder
-                && currentFolder === existingCurrentFolder
-              ) {
-                value = {
-                  ...incoming,
-                  currentFolder: focusedFolder,
-                };
+          return await withUserConfigMutation(normalizedKey, async (configPath) => {
+            let value = body.value ?? null;
+            if (normalizedKey === 'umbra-ui-lora-presets') {
+              try {
+                await writeLoraPresetLibrary(configPath, value);
+                return json({ success: true, key: normalizedKey, value });
+              } catch (error) {
+                if (error instanceof LoraPresetWriteError) return json({ success: false, error: error.message }, error.status);
+                throw error;
               }
             }
-          }
-          await writeUserConfigValue(normalizedKey, value);
-          broadcastUiSessionUpdate(normalizedKey, value);
-          return json({ success: true, key: normalizedKey, value });
+            if (
+              (normalizedKey === 'gallery-ui-session' || normalizedKey === 'remote-ui-session' || normalizedKey === 'powerprompter-ui')
+              && value
+              && typeof value === 'object'
+            ) {
+              const incomingUpdatedAt = Math.max(0, Math.floor(Number((value as Record<string, unknown>).updatedAt) || 0));
+              const existing = await readUserConfigValue(normalizedKey) as Record<string, unknown> | null;
+              const existingUpdatedAt = existing && typeof existing === 'object'
+                ? Math.max(0, Math.floor(Number(existing.updatedAt) || 0))
+                : 0;
+              if (incomingUpdatedAt > 0 && existingUpdatedAt > incomingUpdatedAt) {
+                return json({ success: true, key: normalizedKey, value: existing, stale: true });
+              }
+              if (normalizedKey === 'gallery-ui-session') {
+                const incoming = value as Record<string, unknown>;
+                const currentFolder = String(incoming.currentFolder || '').replace(/\\/g, '/').replace(/\/+$/, '').trim();
+                const focusedFolder = String(incoming.focusedFolder || '').replace(/\\/g, '/').replace(/\/+$/, '').trim();
+                const existingCurrentFolder = existing && typeof existing === 'object'
+                  ? String(existing.currentFolder || '').replace(/\\/g, '/').replace(/\/+$/, '').trim()
+                  : '';
+                if (
+                  focusedFolder
+                  && currentFolder
+                  && focusedFolder !== currentFolder
+                  && existingCurrentFolder
+                  && currentFolder === existingCurrentFolder
+                ) {
+                  value = {
+                    ...incoming,
+                    currentFolder: focusedFolder,
+                  };
+                }
+              }
+            }
+            await writeUserConfigFile(configPath, value);
+            broadcastUiSessionUpdate(normalizedKey, value);
+            return json({ success: true, key: normalizedKey, value });
+          });
         } catch (error: any) {
           return json({ success: false, error: error?.message || 'Failed to save user config' }, 500);
         }
@@ -34599,16 +34504,23 @@ const server = Bun.serve<any>({
       }
 
       if (path === '/api/umbra-ui/video-controls' && method === 'GET') {
-        return json({ success: true, video: getUmbraUiVideoControlsSession() });
+        try {
+          return json({ success: true, video: getUmbraUiVideoControlsSession() });
+        } catch (error: any) {
+          return json({ success: false, error: error?.message || 'Failed to load Umbra UI video controls.' }, 500);
+        }
       }
 
       if (path === '/api/umbra-ui/video-controls' && (method === 'PUT' || method === 'POST')) {
         try {
-          const body = await req.json() as { video?: unknown };
-          const video = saveUmbraUiVideoControlsSession(body?.video);
+          const body = await readJsonObject(req);
+          if (!body?.video || typeof body.video !== 'object' || Array.isArray(body.video)) {
+            return json({ success: false, error: 'Expected a video controls object.' }, 400);
+          }
+          const video = await saveUmbraUiVideoControlsSession(body.video);
           return json({ success: true, video });
         } catch (error: any) {
-          return json({ success: false, error: error?.message || 'Failed to save Umbra UI video controls.' }, 400);
+          return json({ success: false, error: error?.message || 'Failed to save Umbra UI video controls.' }, 500);
         }
       }
 
@@ -35151,14 +35063,7 @@ const server = Bun.serve<any>({
             ? body.promptRemovals
               .map((entry) => ({
                 requestId: String(entry?.requestId || '').trim(),
-                promptIndices: Array.isArray(entry?.promptIndices)
-                  ? Array.from(new Set(
-                    entry.promptIndices
-                      .map((value: unknown) => Number(value))
-                      .filter((value: number) => Number.isFinite(value))
-                      .map((value: number) => Math.max(0, Math.floor(value)))
-                  )).sort((a, b) => a - b)
-                  : [],
+                promptIndices: normalizePowerPrompterPromptIndices(entry?.promptIndices).sort((a, b) => a - b),
               }))
               .filter((entry) => entry.requestId && entry.promptIndices.length > 0)
             : [];

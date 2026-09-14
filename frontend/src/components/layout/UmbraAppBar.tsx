@@ -989,6 +989,7 @@ export const UmbraAppBar = () => {
     const scheduleStaleClear = () => {
       clearStaleTimer();
       staleTimer = window.setTimeout(() => {
+        if (closed) return;
         comfyAppPreviewSignatureRef.current = '';
         if (currentObjectUrl) {
           URL.revokeObjectURL(currentObjectUrl);
@@ -1023,9 +1024,12 @@ export const UmbraAppBar = () => {
 
     const connect = () => {
       if (closed) return;
-      socket = new WebSocket(wsUrl);
-      socket.binaryType = 'arraybuffer';
-      socket.onmessage = (event) => {
+      reconnectTimer = null;
+      const currentSocket = new WebSocket(wsUrl);
+      socket = currentSocket;
+      currentSocket.binaryType = 'arraybuffer';
+      currentSocket.onmessage = (event) => {
+        if (closed || socket !== currentSocket) return;
         try {
           if (typeof event.data === 'string') {
             const message = JSON.parse(String(event.data || '{}'));
@@ -1064,13 +1068,7 @@ export const UmbraAppBar = () => {
           const frame = readComfyImagePreviewBlob(event.data);
           if (!frame) return;
           const imageDataUrl = URL.createObjectURL(frame.blob);
-          const signature = [
-            frame.blob.size,
-            frame.mimeType,
-            Date.now(),
-          ].join('|');
-          if (signature === comfyAppPreviewSignatureRef.current) return;
-          comfyAppPreviewSignatureRef.current = signature;
+          comfyAppPreviewSignatureRef.current = '';
           if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
           currentObjectUrl = imageDataUrl;
           setComfyAppPreview({
@@ -1086,7 +1084,8 @@ export const UmbraAppBar = () => {
           // Preview messages are best-effort; malformed packets should not disturb the app bar.
         }
       };
-      socket.onclose = () => {
+      currentSocket.onclose = () => {
+        if (closed || socket !== currentSocket) return;
         executingPromptId = '';
         socket = null;
         if (!closed) reconnectTimer = window.setTimeout(connect, 2500);
@@ -1100,6 +1099,8 @@ export const UmbraAppBar = () => {
       if (reconnectTimer != null) window.clearTimeout(reconnectTimer);
       try { socket?.close(); } catch {}
       if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+      comfyAppPreviewSignatureRef.current = '';
+      setComfyAppPreview(null);
     };
   }, [backendHealth.comfyui, comfySettingsUrl, connections.comfyui, isRemoteClient, urls.comfyui]);
 

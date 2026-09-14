@@ -94,7 +94,7 @@ export function parsePowerPrompterCsv(
   const sourceId = getSourceId(type, fileName);
 
   if (!hasHeader) {
-    return dataRows.flatMap((row) => {
+    return dataRows.flatMap<PowerPrompterCsvItem>((row) => {
       const tag = readCell(row, 0);
       if (!tag) return [];
       if (type === 'tag') {

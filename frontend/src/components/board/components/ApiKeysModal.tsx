@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ExternalLink, KeyRound, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Check, ExternalLink, KeyRound, RefreshCw, ShieldCheck, Trash2, X } from 'lucide-react';
 import { useApiKeys, type ApiKeyUpdate, type ApiSiteId } from '../hooks/useApiKeys';
 
 interface ApiKeysModalProps {
@@ -72,8 +72,9 @@ const EMPTY_DRAFTS: CredentialDrafts = {
 };
 
 export function ApiKeysModal({ isOpen, onClose }: ApiKeysModalProps) {
-  const { config, saveApiKeys, deleteApiKeys, isLoading } = useApiKeys();
+  const { config, saveApiKeys, deleteApiKeys, isLoading, error, refetch } = useApiKeys();
   const [drafts, setDrafts] = useState<CredentialDrafts>(EMPTY_DRAFTS);
+  const dirtyIdentities = useRef(new Set<ApiSiteId>());
   const [savingSite, setSavingSite] = useState<ApiSiteId | null>(null);
   const [savedSite, setSavedSite] = useState<ApiSiteId | null>(null);
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
@@ -83,17 +84,21 @@ export function ApiKeysModal({ isOpen, onClose }: ApiKeysModalProps) {
   }, []);
 
   useEffect(() => {
-    setDrafts(current => ({
-      danbooru: { identity: config.danbooru?.username || '', apiKey: current.danbooru.apiKey },
-      gelbooru: { identity: config.gelbooru?.userId || '', apiKey: current.gelbooru.apiKey },
-      rule34: { identity: config.rule34?.userId || '', apiKey: current.rule34.apiKey },
-      e621: { identity: config.e621?.username || '', apiKey: current.e621.apiKey },
-    }));
+    setDrafts(current => {
+      const next = { ...current };
+      for (const site of SITES) {
+        if (!dirtyIdentities.current.has(site.id)) {
+          next[site.id] = { ...current[site.id], identity: config[site.id]?.[site.identityKey] || '' };
+        }
+      }
+      return next;
+    });
   }, [config]);
 
   if (!isOpen || !portalTarget) return null;
 
   const updateDraft = (site: ApiSiteId, field: 'identity' | 'apiKey', value: string) => {
+    if (field === 'identity') dirtyIdentities.current.add(site);
     setDrafts(current => ({
       ...current,
       [site]: { ...current[site], [field]: value },
@@ -114,16 +119,38 @@ export function ApiKeysModal({ isOpen, onClose }: ApiKeysModalProps) {
     const success = await saveApiKeys(update);
     setSavingSite(null);
     if (!success) return;
-    updateDraft(site.id, 'apiKey', '');
+    setDrafts(current => {
+      const unchangedIdentity = current[site.id].identity === draft.identity;
+      if (unchangedIdentity) dirtyIdentities.current.delete(site.id);
+      return {
+        ...current,
+        [site.id]: {
+          identity: unchangedIdentity ? draft.identity.trim() : current[site.id].identity,
+          apiKey: current[site.id].apiKey === draft.apiKey ? '' : current[site.id].apiKey,
+        },
+      };
+    });
     setSavedSite(site.id);
     window.setTimeout(() => setSavedSite(current => current === site.id ? null : current), 2000);
   };
 
   const handleDelete = async (site: ApiSiteId) => {
+    const draft = drafts[site];
     setSavingSite(site);
-    await deleteApiKeys(site);
+    const success = await deleteApiKeys(site);
     setSavingSite(null);
-    setDrafts(current => ({ ...current, [site]: { identity: '', apiKey: '' } }));
+    if (!success) return;
+    setDrafts(current => {
+      const unchangedIdentity = current[site].identity === draft.identity;
+      if (unchangedIdentity) dirtyIdentities.current.delete(site);
+      return {
+        ...current,
+        [site]: {
+          identity: unchangedIdentity ? '' : current[site].identity,
+          apiKey: current[site].apiKey === draft.apiKey ? '' : current[site].apiKey,
+        },
+      };
+    });
   };
 
   return createPortal(
@@ -143,6 +170,15 @@ export function ApiKeysModal({ isOpen, onClose }: ApiKeysModalProps) {
             <X className="h-4 w-4" />
           </button>
         </div>
+
+        {error && (
+          <div role="alert" className="flex items-start gap-2 border-b border-red-500/20 px-4 py-2 text-xs text-red-300">
+            <span className="min-w-0 flex-1 break-words">{error}</span>
+            <button type="button" onClick={() => void refetch()} disabled={isLoading} className="umbra-icon-button shrink-0 rounded p-1 disabled:opacity-40" title="Retry loading credentials" aria-label="Retry loading credentials">
+              <RefreshCw className="h-4 w-4" />
+            </button>
+          </div>
+        )}
 
         <div className="custom-scrollbar grid min-h-0 gap-2 overflow-y-auto p-4 sm:grid-cols-2">
           {SITES.map(site => {
@@ -188,7 +224,7 @@ export function ApiKeysModal({ isOpen, onClose }: ApiKeysModalProps) {
                       {isSaving ? 'Saving...' : savedSite === site.id ? <span className="inline-flex items-center gap-1"><Check className="h-3 w-3" /> Saved</span> : 'Save'}
                     </button>
                     {hasApiKey && (
-                      <button type="button" onClick={() => void handleDelete(site.id)} disabled={isSaving} className="rounded border border-red-500/30 bg-red-500/10 p-1.5 text-red-300" title={`Delete ${site.name} credentials`}>
+                      <button type="button" onClick={() => void handleDelete(site.id)} disabled={isSaving || isLoading} className="rounded border border-red-500/30 bg-red-500/10 p-1.5 text-red-300" title={`Delete ${site.name} credentials`}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     )}

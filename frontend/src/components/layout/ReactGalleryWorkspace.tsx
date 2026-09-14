@@ -70,7 +70,7 @@ import { extractGenerationParams, extractPrompts, getWorkflowJsonExport, type Im
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import type { ContextMenuItem } from '@/hooks/useContextMenu';
 import { BaseModal } from '@/components/modals/BaseModal';
-import { deletePathsWithSettings } from '@/utils/trashActions';
+import { deletePathsWithSettings, permanentlyDeleteTrashPaths, validateTrashRestoreResult } from '@/utils/trashActions';
 import { POWER_PROMPTER_MAX_QUEUE_SETS } from '@/lib/powerPrompter';
 import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
 import { subscribeUiSession } from '@/lib/uiSessionSocket';
@@ -408,8 +408,7 @@ type GalleryFolderSummary = {
   firstMediaType?: 'image' | 'gif' | 'video' | null;
 };
 
-type GalleryOptimisticRemovalSnapshot = {
-  folder: string;
+type GalleryOptimisticRemovalState = {
   files: GalleryFile[];
   knownFiles: GalleryFile[];
   activeViewerFiles: GalleryFile[];
@@ -420,6 +419,12 @@ type GalleryOptimisticRemovalSnapshot = {
   lastSelectedPath: string;
   viewerPath: string;
   viewerFileFallback: GalleryFile | null;
+};
+
+type GalleryOptimisticRemovalSnapshot = GalleryOptimisticRemovalState & {
+  folder: string;
+  loadSequence: number;
+  applied: GalleryOptimisticRemovalState;
 };
 
 type GalleryPageCacheEntry = {
@@ -672,6 +677,11 @@ function pathIsInsideRoot(pathValue: unknown, rootValue: unknown): boolean {
   return Boolean(path && root) && (path === root || path.startsWith(`${root}/`));
 }
 
+function remapGalleryFolderPath(value: unknown, source: string, target: string): string {
+  const path = normalizePath(value);
+  return pathIsInsideRoot(path, source) ? `${target}${path.slice(source.length)}` : path;
+}
+
 function getValidTransferPathsForDestination(paths: string[], destinationPath: string): string[] {
   const destination = normalizePath(destinationPath);
   if (!destination || isTrashPath(destination)) return [];
@@ -723,17 +733,6 @@ function isTrashPath(pathValue: unknown): boolean {
 
 function isTrashRootPath(pathValue: unknown): boolean {
   return normalizePath(pathValue) === TRASH_ROOT;
-}
-
-function resolveRestoredPath(entry: unknown, fallbackPath?: string): string {
-  const payload = entry && typeof entry === 'object' ? entry as Record<string, unknown> : null;
-  return normalizePath(String(
-    payload?.restoredPath
-    || payload?.originalPath
-    || payload?.path
-    || fallbackPath
-    || '',
-  ));
 }
 
 function isEditableKeyboardTarget(target: EventTarget | null): boolean {
@@ -4844,6 +4843,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const [datasetTargetsLoading, setDatasetTargetsLoading] = useState(false);
   const [folderPreviewGroups, setFolderPreviewGroups] = useState<GalleryFolderPreviewGroup[]>([]);
   const [folderPreviewRefreshVersion, setFolderPreviewRefreshVersion] = useState(0);
+  const [galleryPathRevision, setGalleryPathRevision] = useState(0);
   const [draggingPaths, setDraggingPaths] = useState<string[]>([]);
   const [dropTargetFolder, setDropTargetFolder] = useState('');
   const transferProgress = useGalleryTransfer();
@@ -5161,7 +5161,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     }
 
     const existingRequest = force && !background ? null : treeRequestByPathRef.current.get(normalized);
-    if (existingRequest) return existingRequest.promise;
+    if (existingRequest) return background ? existingRequest.promise : existingRequest.promise.catch(() => treeChildrenRef.current[normalized] || []);
 
     if (!background) setLoadingTreePaths((current) => {
       if (current.has(normalized)) return current;
@@ -5216,8 +5216,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         error: treeError instanceof Error ? treeError.message : 'Failed to load folders',
         durationMs: nowMs() - treeStartedAt,
       });
-      if (background) throw treeError;
-      return treeChildrenRef.current[normalized] || [];
+      throw treeError;
     }).finally(() => {
       if (treeRequestByPathRef.current.get(normalized)?.token !== token) return;
       treeRequestByPathRef.current.delete(normalized);
@@ -5230,7 +5229,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     });
 
     treeRequestByPathRef.current.set(normalized, { token, promise: request });
-    return request;
+    return background ? request : request.catch(() => treeChildrenRef.current[normalized] || []);
   }, [writeTreeChildrenCache]);
 
   const visibleTreeBranches = useMemo(() => {
@@ -5377,11 +5376,11 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         paths,
         selectedPaths: paths,
         primaryPath: primaryPath || paths.at(-1) || '',
-        folderPath: currentFolder,
+        folderPath: currentFolderRef.current,
         source: 'react-gallery',
       },
     }));
-  }, [currentFolder]);
+  }, []);
 
   const applyGallerySelection = useCallback((nextSelection: Set<string>, primaryPath: string) => {
     setSelectedPaths(nextSelection);
@@ -6513,18 +6512,11 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       const payload = await response.json().catch(() => ({} as Record<string, unknown>));
       if (!response.ok) throw new Error(String(payload?.error || 'Failed to restore from trash'));
 
-      const restoredItems = Array.isArray((payload as { restored?: unknown[] }).restored)
-        ? (payload as { restored?: Array<Record<string, unknown>> }).restored || []
-        : [];
-      const failedItems = Array.isArray((payload as { failed?: unknown[] }).failed)
-        ? (payload as { failed?: Array<{ error?: string }> }).failed || []
-        : [];
-      if (failedItems.length > 0 && restoredItems.length === 0) {
-        throw new Error(String(failedItems[0]?.error || 'Failed to restore from trash'));
-      }
+      const { restored: restoredItems, failed: failedItems, warning } = validateTrashRestoreResult(payload, items.map((item) => item.trashPath));
+      if (warning) addToast({ type: 'info', message: warning });
       const restoredPaths = uniqueNormalizedPaths(
         restoredItems
-          .map((entry, index) => resolveRestoredPath(entry, items[index]?.originalPath))
+          .map((entry) => entry.restoredPath)
           .filter(Boolean),
       );
 
@@ -6541,7 +6533,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       }));
       clearTrashCache();
 
-      const restoredCount = restoredPaths.length || items.length;
+      const restoredCount = restoredPaths.length;
       addToast({
         type: 'success',
         message: restoredCount === 1
@@ -6644,13 +6636,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
 
   const applyOptimisticPathRemoval = useCallback((
     paths: string[],
-    options: { clearViewer?: boolean; keepSelection?: boolean; nextViewerPath?: string; reason?: string } = {},
+    options: { clearViewer?: boolean; clearRemovedViewer?: boolean; keepSelection?: boolean; nextViewerPath?: string; reason?: string } = {},
   ): GalleryOptimisticRemovalSnapshot | null => {
     const normalized = uniqueNormalizedPaths(paths);
     if (normalized.length === 0) return null;
     const removedSet = new Set(normalized.map((path) => normalizePath(path).toLowerCase()));
-    const snapshot: GalleryOptimisticRemovalSnapshot = {
-      folder: currentFolderRef.current,
+    const previousState: GalleryOptimisticRemovalState = {
       files: filesRef.current,
       knownFiles: knownFilesRef.current,
       activeViewerFiles: activeViewerFilesRef.current,
@@ -6662,6 +6653,13 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       viewerPath,
       viewerFileFallback,
     };
+    const snapshot: GalleryOptimisticRemovalSnapshot = {
+      ...previousState,
+      folder: currentFolderRef.current,
+      loadSequence: loadSeqRef.current,
+      applied: { ...previousState },
+    };
+    const applied = snapshot.applied;
     const removeFromList = (source: GalleryFile[]) => source.filter((file) => (
       !removedSet.has(normalizePath(file.path).toLowerCase())
     ));
@@ -6679,36 +6677,61 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     filesRef.current = nextFiles;
     knownFilesRef.current = nextKnownFiles;
     activeViewerFilesRef.current = nextActiveViewerFiles;
+    applied.files = nextFiles;
+    applied.knownFiles = nextKnownFiles;
+    applied.activeViewerFiles = nextActiveViewerFiles;
     setFiles(nextFiles);
-    setSearchResults((current) => current ? {
-      ...current,
-      files: removeFromList(Array.isArray(current.files) ? current.files : []),
-    } : current);
+    setSearchResults((current) => {
+      const next = current ? {
+        ...current,
+        files: removeFromList(Array.isArray(current.files) ? current.files : []),
+      } : current;
+      applied.searchResults = next;
+      return next;
+    });
     const nextFolderPreviewGroups = folderPreviewGroupsRef.current.map((group) => ({
       ...group,
       files: removeFromList(Array.isArray(group.files) ? group.files : []),
     }));
     folderPreviewGroupsRef.current = nextFolderPreviewGroups;
+    applied.folderPreviewGroups = nextFolderPreviewGroups;
     setFolderPreviewGroups(nextFolderPreviewGroups);
     updateViewerSessionFiles(nextViewerSessionFiles);
 
     if (options.clearViewer) {
-      setViewerPath(shouldUseNextViewer ? nextViewerPath : '');
+      applied.viewerPath = shouldUseNextViewer ? nextViewerPath : '';
+      setViewerPath(applied.viewerPath);
       if (!shouldUseNextViewer) {
+        applied.viewerFileFallback = null;
         setViewerFileFallback(null);
         updateViewerSessionFiles([]);
       }
+    } else if (options.clearRemovedViewer) {
+      setViewerPath((current) => {
+        const next = removedSet.has(normalizePath(current).toLowerCase()) ? '' : current;
+        applied.viewerPath = next;
+        return next;
+      });
+      setViewerFileFallback((current) => {
+        const next = current && removedSet.has(normalizePath(current.path).toLowerCase()) ? null : current;
+        applied.viewerFileFallback = next;
+        return next;
+      });
     }
+    applied.viewerSessionFiles = viewerSessionFilesRef.current;
     const nextSelection = options.keepSelection
       ? new Set(Array.from(selectedPathsRef.current).filter((path) => !removedSet.has(normalizePath(path).toLowerCase())))
       : shouldUseNextViewer
         ? new Set([nextViewerPath])
         : new Set<string>();
     selectedPathsRef.current = nextSelection;
+    applied.selectedPaths = nextSelection;
     setSelectedPaths(nextSelection);
     setLastSelectedPath((current) => {
-      if (shouldUseNextViewer) return nextViewerPath;
-      return removedSet.has(normalizePath(current).toLowerCase()) ? '' : current;
+      const next = shouldUseNextViewer ? nextViewerPath
+        : removedSet.has(normalizePath(current).toLowerCase()) ? '' : current;
+      applied.lastSelectedPath = next;
+      return next;
     });
     if (shouldUseNextViewer) emitSelectionChanged([nextViewerPath], nextViewerPath);
 
@@ -6732,23 +6755,33 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
 
   const rollbackOptimisticPathRemoval = useCallback((snapshot: GalleryOptimisticRemovalSnapshot | null) => {
     if (!snapshot) return;
-    if (!pathsEqual(currentFolderRef.current, snapshot.folder)) return;
+    if (loadSeqRef.current !== snapshot.loadSequence || !pathsEqual(currentFolderRef.current, snapshot.folder)) return;
+    const applied = snapshot.applied;
+    // Fresh pages or another mutation invalidate a full-list rollback.
+    if (filesRef.current !== applied.files || knownFilesRef.current !== applied.knownFiles) {
+      void loadFolder({ folder: snapshot.folder, keepSelection: true, forceRefresh: true, preserveScroll: true });
+      return;
+    }
     filesRef.current = snapshot.files;
     knownFilesRef.current = snapshot.knownFiles;
-    activeViewerFilesRef.current = snapshot.activeViewerFiles;
-    folderPreviewGroupsRef.current = snapshot.folderPreviewGroups;
+    if (activeViewerFilesRef.current === applied.activeViewerFiles) activeViewerFilesRef.current = snapshot.activeViewerFiles;
     setFiles(snapshot.files);
-    setSearchResults(snapshot.searchResults);
-    setFolderPreviewGroups(snapshot.folderPreviewGroups);
-    updateViewerSessionFiles(snapshot.viewerSessionFiles);
-    const restoredSelection = new Set(snapshot.selectedPaths);
-    selectedPathsRef.current = restoredSelection;
-    setSelectedPaths(restoredSelection);
-    setLastSelectedPath(snapshot.lastSelectedPath);
-    setViewerPath(snapshot.viewerPath);
-    setViewerFileFallback(snapshot.viewerFileFallback);
-    emitSelectionChanged(Array.from(snapshot.selectedPaths), snapshot.lastSelectedPath);
-  }, [emitSelectionChanged, updateViewerSessionFiles]);
+    setSearchResults((current) => current === applied.searchResults ? snapshot.searchResults : current);
+    if (folderPreviewGroupsRef.current === applied.folderPreviewGroups) {
+      folderPreviewGroupsRef.current = snapshot.folderPreviewGroups;
+      setFolderPreviewGroups(snapshot.folderPreviewGroups);
+    }
+    if (viewerSessionFilesRef.current === applied.viewerSessionFiles) updateViewerSessionFiles(snapshot.viewerSessionFiles);
+    if (selectedPathsRef.current === applied.selectedPaths) {
+      const restoredSelection = new Set(snapshot.selectedPaths);
+      selectedPathsRef.current = restoredSelection;
+      setSelectedPaths(restoredSelection);
+      setLastSelectedPath((current) => current === applied.lastSelectedPath ? snapshot.lastSelectedPath : current);
+      emitSelectionChanged(Array.from(snapshot.selectedPaths), snapshot.lastSelectedPath);
+    }
+    setViewerPath((current) => current === applied.viewerPath ? snapshot.viewerPath : current);
+    setViewerFileFallback((current) => current === applied.viewerFileFallback ? snapshot.viewerFileFallback : current);
+  }, [emitSelectionChanged, loadFolder, updateViewerSessionFiles]);
 
   const deleteGalleryPaths = useCallback(async (
     paths: string[],
@@ -6756,6 +6789,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   ) => {
     const normalized = stripLiveGenerationPreviewPaths(paths);
     if (normalized.length === 0) return;
+    const refreshSequence = loadSeqRef.current;
     const nameByPath = new Map<string, string>();
     for (const file of [...knownFilesRef.current, ...filesRef.current]) {
       const filePath = normalizePath(file.path);
@@ -6777,15 +6811,15 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
 
     try {
       if (deletePaths.length > 0) {
-        const result = await deletePathsWithSettings(deletePaths, appSettings);
-        const successfulPaths = uniqueNormalizedPaths(
-          result.deletedPaths.length > 0
-            ? result.deletedPaths
-            : deletePaths.filter((path) => !result.failed.some((failed) => pathsEqual(failed.path, path))),
-        );
-        if (successfulPaths.length === 0) {
-          throw new Error(result.failed[0]?.error || 'Delete failed');
-        }
+        const result = await deletePathsWithSettings(deletePaths, appSettings).catch((error: unknown) => ({
+          mode: undefined,
+          deletedPaths: [] as string[],
+          trashItems: [],
+          failed: deletePaths.map((path) => ({ path, error: error instanceof Error ? error.message : 'Delete failed' })),
+          warning: undefined,
+        }));
+        const successfulPaths = uniqueNormalizedPaths(result.deletedPaths);
+        if (result.warning) addToast({ type: 'info', message: result.warning });
         removedPaths.push(...successfulPaths);
         if (result.mode === 'umbra-trash') {
           movedToUmbraTrash += successfulPaths.length;
@@ -6823,15 +6857,16 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       }
 
       if (trashPaths.length > 0) {
-        const response = await fetch('/api/trash/permanent-delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ paths: trashPaths }),
-        });
-        const payload = await response.json().catch(() => ({} as { error?: string }));
-        if (!response.ok) throw new Error(String(payload?.error || 'Failed to permanently delete from trash'));
-        removedPaths.push(...trashPaths);
-        permanentlyDeleted += trashPaths.length;
+        const result = await permanentlyDeleteTrashPaths(trashPaths).catch((error: unknown) => ({
+          deletedPaths: [] as string[],
+          failed: trashPaths.map((path) => ({ path, error: error instanceof Error ? error.message : 'Failed to permanently delete from trash' })),
+          warning: undefined,
+        }));
+        removedPaths.push(...result.deletedPaths);
+        permanentlyDeleted += result.deletedPaths.length;
+        failedDeletePaths.push(...result.failed.map((entry) => entry.path));
+        if (result.failed.length) addToast({ type: 'error', message: result.failed[0].error });
+        if (result.warning) addToast({ type: 'info', message: result.warning });
       }
 
       const dedupedRemovedPaths = uniqueNormalizedPaths(removedPaths);
@@ -6846,6 +6881,10 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         rollbackOptimisticPathRemoval(optimisticSnapshot);
         optimisticSnapshot = applyOptimisticPathRemoval(dedupedRemovedPaths, {
           ...options,
+          keepSelection: true,
+          clearViewer: false,
+          clearRemovedViewer: true,
+          nextViewerPath: undefined,
           reason: trashPaths.length > 0 && deletePaths.length === 0 ? 'permanent-delete' : 'delete',
         });
       }
@@ -6873,17 +6912,14 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           addToast({ type: 'success', message: messages.join(', ') || `Deleted ${dedupedRemovedPaths.length} item${dedupedRemovedPaths.length === 1 ? '' : 's'}` });
         }
       }
+      const refreshIfCurrent = () => {
+        if (loadSeqRef.current !== refreshSequence || !pathsEqual(currentFolderRef.current, currentFolder)) return;
+        void loadFolder({ folder: currentFolder, keepSelection: true, forceRefresh: true, preserveScroll: true });
+      };
       if (trashMode) {
-        void loadFolder({ folder: currentFolder, keepSelection: !!options.keepSelection, forceRefresh: true, preserveScroll: true });
+        refreshIfCurrent();
       } else if (touchedFolders.some((folder) => pathsEqual(folder, currentFolder))) {
-        window.setTimeout(() => {
-          void loadFolder({
-            folder: currentFolder,
-            keepSelection: !!options.keepSelection,
-            forceRefresh: true,
-            preserveScroll: true,
-          });
-        }, 120);
+        window.setTimeout(refreshIfCurrent, 120);
       }
     } catch (deleteError) {
       if (options.rollbackOnFailure === false) {
@@ -6975,6 +7011,96 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       : [...pinnedFolders, normalized]);
   }, [pinnedFolders, setPinnedFolders]);
 
+  const applyRenamedFolder = useCallback((sourceInput: string, targetInput: string) => {
+    const source = normalizePath(sourceInput);
+    const target = normalizePath(targetInput);
+    if (!source || !target || source === target) return;
+    searchAbortRef.current?.abort();
+    metadataSearchAbortRef.current?.abort();
+    searchSuggestAbortRef.current?.abort();
+    folderPreviewAbortRef.current?.abort();
+    setGalleryPathRevision((revision) => revision + 1);
+    const remap = (path: unknown) => remapGalleryFolderPath(path, source, target);
+    const remapFile = (file: GalleryFile): GalleryFile => {
+      const path = remap(file.path);
+      return path === file.path ? file : { ...file, path, name: pathLeaf(path), url: undefined, thumbnailUrl: undefined };
+    };
+    const remapNode = (node: GalleryFolderTreeNode): GalleryFolderTreeNode => ({
+      ...node,
+      path: remap(node.path),
+      name: remap(node.path) === node.path ? node.name : pathLeaf(remap(node.path)),
+      ...(node.relativePath ? { relativePath: remap(node.relativePath) } : {}),
+      ...(node.children ? { children: node.children.map(remapNode) } : {}),
+    });
+    markGalleryUiSessionDirty();
+    setExpandedFolders((current) => new Set(Array.from(current, remap)));
+    setFocusedFolder(remap);
+    setOpenedFolders((current) => uniqueNormalizedPaths(current.map(remap)));
+    setOpeningFolder(remap);
+    setFolderClipboard((current) => current ? { ...current, source: remap(current.source) } : current);
+
+    const currentPins = useStore.getState().appSettings['library.pinnedFolders'];
+    if (Array.isArray(currentPins)) {
+      const nextPins = currentPins.map(remap);
+      if (nextPins.some((path, index) => path !== normalizePath(currentPins[index]))) setPinnedFolders(nextPins);
+    }
+
+    // Drop request ownership before remapping caches so old replies cannot restore the old branch.
+    const invalidatedTreePaths = new Set<string>();
+    for (const path of treeRequestByPathRef.current.keys()) {
+      if (pathIsInsideRoot(path, source) || pathsEqual(path, pathParent(source))) {
+        invalidatedTreePaths.add(path);
+        treeRequestByPathRef.current.delete(path);
+      }
+    }
+    setLoadingTreePaths((current) => new Set(Array.from(current).filter((path) => !invalidatedTreePaths.has(path))));
+    treeCacheRef.current = new Map(Array.from(treeCacheRef.current, ([path, children]) => [remap(path), children.map(remapNode)]));
+    const nextTree = Object.fromEntries(Object.entries(treeChildrenRef.current).map(([path, children]) => [remap(path), children.map(remapNode)]));
+    treeChildrenRef.current = nextTree;
+    setTreeChildrenByPath(nextTree);
+    for (const cache of [pageCacheRef.current, folderPreviewCacheRef.current]) {
+      for (const key of cache.keys()) {
+        const path = key.split(PAGE_CACHE_KEY_SEPARATOR)[0];
+        if (pathIsInsideRoot(path, source) || pathsEqual(path, pathParent(source))) cache.delete(key);
+      }
+    }
+
+    const nextSelection = new Set(Array.from(selectedPathsRef.current, remap));
+    selectedPathsRef.current = nextSelection;
+    setSelectedPaths(nextSelection);
+    setLastSelectedPath(remap);
+    setViewerPath(remap);
+    setViewerFileFallback((current) => current ? remapFile(current) : current);
+    updateViewerSessionFiles(viewerSessionFilesRef.current.map(remapFile));
+    filesRef.current = filesRef.current.map(remapFile);
+    knownFilesRef.current = knownFilesRef.current.map(remapFile);
+    activeViewerFilesRef.current = activeViewerFilesRef.current.map(remapFile);
+    setFiles(filesRef.current);
+    setRestoredHighlightPaths((current) => new Set(Array.from(current, remap)));
+    pendingRevealPathRef.current = remap(pendingRevealPathRef.current);
+    const nextGroups = folderPreviewGroupsRef.current.map((group) => ({
+      ...group, folder: remapNode(group.folder), files: group.files.map(remapFile),
+      ...(group.parentPath ? { parentPath: remap(group.parentPath) } : {}),
+      ...(group.rootPath ? { rootPath: remap(group.rootPath) } : {}),
+    }));
+    folderPreviewGroupsRef.current = nextGroups;
+    setFolderPreviewGroups(nextGroups);
+    setFolderPreviewRefreshVersion((current) => current + 1);
+    setSearchResults((current) => current ? { ...current, files: current.files?.map(remapFile), folders: current.folders?.map(remapNode) } : current);
+    setMetadataMatches((current) => current.map((match) => ({ ...match, path: remap(match.path), ...(match.folderPath ? { folderPath: remap(match.folderPath) } : {}) })));
+
+    const pendingNavigation = pendingLocalFolderNavigationRef.current;
+    const navigatingElsewhere = pendingNavigation && !pathIsInsideRoot(pendingNavigation.folder, source);
+    if (pendingNavigation) pendingLocalFolderNavigationRef.current = { ...pendingNavigation, folder: remap(pendingNavigation.folder) };
+    const nextFolder = remap(currentFolderRef.current);
+    if (nextFolder !== currentFolderRef.current) {
+      currentFolderRef.current = nextFolder;
+      setCurrentFolder(nextFolder);
+      if (!navigatingElsewhere) void loadFolder({ folder: nextFolder, keepSelection: true, forceRefresh: true });
+    }
+    emitSelectionChanged(Array.from(nextSelection));
+  }, [emitSelectionChanged, loadFolder, markGalleryUiSessionDirty, setPinnedFolders, updateViewerSessionFiles]);
+
   const createSubfolder = useCallback((parentPath: string) => {
     const parent = normalizePath(parentPath);
     if (!parent) return;
@@ -7037,19 +7163,23 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         });
         const payload = await response.json().catch(() => ({} as Record<string, unknown>));
         if (!response.ok) throw new Error(String(payload?.error || 'Failed to rename folder'));
+        const newPath = typeof payload?.newPath === 'string' ? normalizePath(payload.newPath) : '';
+        if (payload?.success !== true || !newPath) throw new Error('Rename was not confirmed. Refresh the folder before retrying.');
+        applyRenamedFolder(normalized, newPath);
         const parent = pathParent(normalized);
         if (parent) {
           invalidateTreeChildrenCache(parent);
           await loadTreeChildren(parent, true);
         }
-        addToast({ type: 'success', message: 'Renamed folder' });
+        const warnings = Array.isArray(payload?.warnings) ? payload.warnings.filter((value: unknown): value is string => typeof value === 'string') : [];
+        addToast({ type: warnings.length ? 'info' : 'success', message: warnings.length ? warnings.join('\n') : 'Renamed folder' });
       }
       setFolderNameModal(null);
     } catch (error) {
       addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to save folder' });
       setFolderNameModal((current) => current ? { ...current, submitting: false } : current);
     }
-  }, [addToast, folderNameModal, invalidateTreeChildrenCache, loadTreeChildren]);
+  }, [addToast, applyRenamedFolder, folderNameModal, invalidateTreeChildrenCache, loadTreeChildren]);
 
   const deleteSelection = useCallback(() => {
     void deleteGalleryPaths(Array.from(selectedPaths), { rollbackOnFailure: false });
@@ -7466,6 +7596,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         const firstFailure = results.find((entry) => entry?.success !== true);
         throw new Error(String(firstFailure?.error || 'Failed to rename items'));
       }
+      const warnings = Array.isArray(payload?.warnings) ? payload.warnings.filter((value: unknown): value is string => typeof value === 'string') : [];
       const newPathByOldPath = new Map<string, string>();
       for (const result of results) {
         if (result?.success !== true) continue;
@@ -7485,8 +7616,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       }
       setRenameModal(null);
       addToast({
-        type: failedCount > 0 ? 'info' : 'success',
-        message: failedCount > 0 ? `Renamed ${renamedCount} item${renamedCount === 1 ? '' : 's'} (${failedCount} failed)` : `Renamed ${renamedCount} item${renamedCount === 1 ? '' : 's'}`,
+        type: failedCount > 0 || warnings.length ? 'info' : 'success',
+        message: [failedCount > 0 ? `Renamed ${renamedCount} item${renamedCount === 1 ? '' : 's'} (${failedCount} failed)` : `Renamed ${renamedCount} item${renamedCount === 1 ? '' : 's'}`, ...warnings].join('\n'),
       });
       const folders = uniqueNormalizedPaths(normalized.map(pathParent));
       for (const folder of folders) {
@@ -7679,6 +7810,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const restoreTrashPaths = useCallback(async (paths: string[]) => {
     const normalized = stripLiveGenerationPreviewPaths(paths);
     if (normalized.length === 0) return;
+    const refreshSequence = loadSeqRef.current;
     let optimisticSnapshot = applyOptimisticPathRemoval(normalized, {
       keepSelection: false,
       reason: 'restore',
@@ -7700,17 +7832,10 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       });
       const payload = await response.json().catch(() => ({} as Record<string, unknown>));
       if (!response.ok) throw new Error(String(payload?.error || 'Failed to restore from trash'));
-      const restored = Array.isArray((payload as { restored?: unknown[] }).restored)
-        ? (payload as { restored?: Array<Record<string, unknown>> }).restored || []
-        : [];
-      const failed = Array.isArray((payload as { failed?: unknown[] }).failed)
-        ? (payload as { failed?: Array<{ trashPath?: string; error?: string }> }).failed || []
-        : [];
-      if (failed.length > 0 && restored.length === 0) {
-        throw new Error(String(failed[0]?.error || 'Failed to restore from trash'));
-      }
+      const { restored, failed, warning } = validateTrashRestoreResult(payload, normalized);
+      if (warning) addToast({ type: 'info', message: warning });
       const restoredPaths = restored
-        .map((entry) => normalizePath(String(entry?.restoredPath || entry?.originalPath || entry?.path || '')))
+        .map((entry) => normalizePath(entry.restoredPath))
         .filter(Boolean);
       if (failed.length > 0 && optimisticSnapshot) {
         const restoredTrashPaths = uniqueNormalizedPaths(
@@ -7718,7 +7843,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         );
         rollbackOptimisticPathRemoval(optimisticSnapshot);
         optimisticSnapshot = applyOptimisticPathRemoval(restoredTrashPaths, {
-          keepSelection: false,
+          keepSelection: true,
+          clearRemovedViewer: true,
           reason: 'restore',
         });
       }
@@ -7729,7 +7855,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         }));
       }
       window.dispatchEvent(new CustomEvent('umbra:gallery-trash-updated', { detail: { source: 'react-gallery' } }));
-      addToast({ type: 'success', message: `Restored ${restoredPaths.length || normalized.length} item${(restoredPaths.length || normalized.length) === 1 ? '' : 's'}` });
+      addToast({ type: 'success', message: `Restored ${restoredPaths.length} item${restoredPaths.length === 1 ? '' : 's'}` });
       if (failed.length > 0) {
         addToast({
           type: 'error',
@@ -7739,7 +7865,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         });
       }
       clearTrashCache();
-      void loadFolder({ folder: currentFolder, keepSelection: false, forceRefresh: true, preserveScroll: true });
+      if (loadSeqRef.current === refreshSequence && pathsEqual(currentFolderRef.current, currentFolder)) {
+        void loadFolder({ folder: currentFolder, keepSelection: true, forceRefresh: true, preserveScroll: true });
+      }
     } catch (error) {
       rollbackOptimisticPathRemoval(optimisticSnapshot);
       addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to restore from trash' });
@@ -7749,18 +7877,18 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const deleteTrashPathsForever = useCallback(async (paths: string[]) => {
     const normalized = uniqueNormalizedPaths(paths);
     if (normalized.length === 0) return;
+    const refreshSequence = loadSeqRef.current;
     try {
-      const response = await fetch('/api/trash/permanent-delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths: normalized }),
-      });
-      const payload = await response.json().catch(() => ({} as Record<string, unknown>));
-      if (!response.ok) throw new Error(String(payload?.error || 'Failed to permanently delete from trash'));
+      const result = await permanentlyDeleteTrashPaths(normalized);
+      const count = result.deletedPaths.length;
+      if (result.failed.length) addToast({ type: 'error', message: result.failed[0].error });
+      if (result.warning) addToast({ type: 'info', message: result.warning });
       window.dispatchEvent(new CustomEvent('umbra:gallery-trash-updated', { detail: { source: 'react-gallery' } }));
-      addToast({ type: 'success', message: `Deleted ${normalized.length} item${normalized.length === 1 ? '' : 's'} permanently` });
+      if (count) addToast({ type: 'success', message: `Deleted ${count} item${count === 1 ? '' : 's'} permanently` });
       clearTrashCache();
-      void loadFolder({ folder: currentFolder, keepSelection: false, forceRefresh: true, preserveScroll: true });
+      if (loadSeqRef.current === refreshSequence && pathsEqual(currentFolderRef.current, currentFolder)) {
+        void loadFolder({ folder: currentFolder, keepSelection: false, forceRefresh: true, preserveScroll: true });
+      }
     } catch (error) {
       addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to permanently delete from trash' });
     }
@@ -7768,6 +7896,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
 
   const applyTrashRetention = useCallback(async () => {
     const days = clampTrashRetentionDays(trashRetentionDays);
+    const refreshSequence = loadSeqRef.current;
     setSavingTrashSettings(true);
     try {
       setAppSetting('library.trashAutoDeleteDays', days as any);
@@ -7780,7 +7909,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       if (!response.ok) throw new Error(String(payload?.error || 'Failed to update trash retention'));
       clearTrashCache();
       addToast({ type: 'success', message: `Trash retention set to ${days} day${days === 1 ? '' : 's'}` });
-      if (isTrashPath(currentFolder)) {
+      if (loadSeqRef.current === refreshSequence && pathsEqual(currentFolderRef.current, currentFolder) && isTrashPath(currentFolder)) {
         void loadFolder({ folder: currentFolder, keepSelection: true, forceRefresh: true, preserveScroll: true });
       }
     } catch (error) {
@@ -7792,17 +7921,18 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
 
   const emptyTrash = useCallback(async () => {
     if (emptyingTrash) return;
+    const refreshSequence = loadSeqRef.current;
     setEmptyingTrash(true);
     try {
       const response = await fetch('/api/trash/empty', { method: 'POST' });
       const payload = await response.json().catch(() => ({} as { error?: string }));
       if (!response.ok) throw new Error(String(payload?.error || 'Failed to empty Trash'));
       clearTrashCache();
-      setSelectedPaths(new Set());
-      setLastSelectedPath('');
       window.dispatchEvent(new CustomEvent('umbra:gallery-trash-updated', { detail: { source: 'react-gallery' } }));
       addToast({ type: 'success', message: 'Emptied Trash' });
-      if (isTrashPath(currentFolder)) {
+      if (loadSeqRef.current === refreshSequence && pathsEqual(currentFolderRef.current, currentFolder) && isTrashPath(currentFolder)) {
+        setSelectedPaths(new Set());
+        setLastSelectedPath('');
         void loadFolder({ folder: TRASH_ROOT, keepSelection: false, forceRefresh: true, preserveScroll: true });
       }
     } catch (error) {
@@ -8449,12 +8579,15 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         cache: 'no-store',
         signal: controller.signal,
       }).then(async (response) => {
-      const payload: GalleryMetadataSearchPayload = await response.json().catch(() => ({}));
+        const payload: GalleryMetadataSearchPayload = await response.json();
         if (!response.ok) throw new Error(String(payload?.error || 'Failed to search metadata'));
         if (controller.signal.aborted) return;
-        setMetadataMatches(Array.isArray(payload.matches) ? payload.matches : []);
+        if (!payload || !Array.isArray(payload.matches) || payload.matches.some((match) => (
+          !match || typeof match !== 'object' || Array.isArray(match) || typeof match.path !== 'string' || !match.path.trim()
+        ))) throw new Error('Invalid metadata search response');
+        setMetadataMatches(payload.matches);
       }).catch((metadataError) => {
-        if (isAbortError(metadataError) || controller.signal.aborted) return;
+        if (controller.signal.aborted) return;
         setMetadataMatches([]);
         setMetadataSearchError(metadataError instanceof Error ? metadataError.message : 'Failed to search metadata');
       }).finally(() => {
@@ -8466,7 +8599,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [currentFolder, metadataSearchActive, metadataSearchNeedle]);
+  }, [currentFolder, galleryPathRevision, metadataSearchActive, metadataSearchNeedle]);
 
   useEffect(() => {
     const folderPath = normalizePath(currentFolder);
@@ -8615,6 +8748,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         const queue = [...searchableRoots];
         const visited = new Set<string>();
         let scannedFolders = 0;
+        let failedFolders = 0;
 
         while (queue.length > 0 && scannedFolders < GLOBAL_SEARCH_MAX_FOLDERS) {
           if (controller.signal.aborted) return;
@@ -8629,62 +8763,72 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
             matchedFolders.push({ name: pathLeaf(folderPath) || folderPath, path: folderPath });
           }
 
-          if (controller.signal.aborted) return;
-          const params = new URLSearchParams({
-            path: folderPath,
-            sortBy,
-            sortOrder,
-            fast: '1',
-            recursive: 'false',
-          });
-          const response = await fetchGalleryFs('/list-progressive', params, {
-            cache: 'no-store',
-            signal: controller.signal,
-          });
-          const payload: GalleryListPayload & { error?: string } = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(String(payload?.error || 'Gallery search failed'));
-          const folderFiles = Array.isArray(payload.files)
-            ? payload.files
+          try {
+            if (controller.signal.aborted) return;
+            const params = new URLSearchParams({
+              path: folderPath,
+              sortBy,
+              sortOrder,
+              fast: '1',
+              recursive: 'false',
+            });
+            const response = await fetchGalleryFs('/list-progressive', params, {
+              cache: 'no-store',
+              signal: controller.signal,
+            });
+            const payload: GalleryListPayload & { error?: string } = await response.json();
+            if (!response.ok) throw new Error(String(payload?.error || 'Gallery search failed'));
+            if (payload?.missing) throw new Error('Folder is currently unavailable');
+            if (controller.signal.aborted) return;
+            if (!payload || !Array.isArray(payload.files)) throw new Error('Invalid folder listing');
+            const folderFiles = payload.files
               .map((file, index) => normalizeGalleryFile(file, index))
-              .filter((file) => fileMatchesSearch(file, searchNeedle))
-            : [];
-          if (folderFiles.length > 0 || matchedFolders.length > 0) {
+              .filter((file) => fileMatchesSearch(file, searchNeedle));
             appendResults({
               files: folderFiles,
               folders: matchedFolders,
               scannedFolders,
               done: false,
             });
-          } else {
+
+            const children = await loadTreeChildren(folderPath, true, true);
+            if (controller.signal.aborted) return;
+            const childMatches: GalleryFolder[] = [];
+            for (const child of children) {
+              const childPath = normalizePath(child.path);
+              const childKey = childPath.toLowerCase();
+              if (!childPath || visited.has(childKey)) continue;
+              queue.push(childPath);
+              if (textMatchesSearch(child.name || pathLeaf(childPath), searchNeedle) || textMatchesSearch(childPath, searchNeedle)) {
+                childMatches.push({ name: child.name || pathLeaf(childPath) || childPath, path: childPath });
+              }
+            }
+            if (childMatches.length > 0) appendResults({ folders: childMatches, scannedFolders, done: false });
+          } catch (folderError) {
+            if (controller.signal.aborted) return;
+            failedFolders += 1;
+            const message = folderError instanceof Error ? folderError.message : 'Folder unavailable';
+            setSearchError(`Search incomplete: ${failedFolders} folder${failedFolders === 1 ? '' : 's'} could not be fully scanned. ${message}`);
             appendResults({ scannedFolders, done: false });
           }
-
-          const children = await loadTreeChildren(folderPath);
-          const childMatches: GalleryFolder[] = [];
-          for (const child of children) {
-            const childPath = normalizePath(child.path);
-            const childKey = childPath.toLowerCase();
-            if (!childPath || visited.has(childKey)) continue;
-            queue.push(childPath);
-            if (textMatchesSearch(child.name || pathLeaf(childPath), searchNeedle) || textMatchesSearch(childPath, searchNeedle)) {
-              childMatches.push({ name: child.name || pathLeaf(childPath) || childPath, path: childPath });
-            }
-          }
-          if (childMatches.length > 0) appendResults({ folders: childMatches, scannedFolders, done: false });
         }
 
         if (controller.signal.aborted) return;
-        appendResults({ scannedFolders, done: true });
+        const limitReached = queue.some((path) => normalizePath(path) && !isTrashPath(path) && !visited.has(normalizePath(path).toLowerCase()));
+        if (limitReached) setSearchError(`Search incomplete: the ${GLOBAL_SEARCH_MAX_FOLDERS.toLocaleString()} folder scan limit was reached.${failedFolders ? ` ${failedFolders} folders could not be fully scanned.` : ''}`);
+        const done = failedFolders === 0 && !limitReached;
+        appendResults({ scannedFolders, done });
         traceGalleryLoad({
-          event: 'search_complete',
+          event: done ? 'search_complete' : 'search_partial',
           query: searchNeedle,
           scannedFolders,
-          done: true,
+          failedFolders,
+          done,
           durationMs: nowMs() - startedAt,
         });
       })()
         .catch((searchFailure) => {
-          if (controller.signal.aborted || isAbortError(searchFailure)) return;
+          if (controller.signal.aborted) return;
           const message = searchFailure instanceof Error ? searchFailure.message : 'Gallery search failed';
           setSearchError(message);
           traceGalleryLoad({
@@ -8703,7 +8847,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [globalSearchActive, loadTreeChildren, searchableRoots, searchNeedle, sortBy, sortOrder]);
+  }, [galleryPathRevision, globalSearchActive, loadTreeChildren, searchableRoots, searchNeedle, sortBy, sortOrder]);
 
   const searchFiles = globalSearchActive && Array.isArray(searchResults?.files) ? searchResults.files : [];
   const searchFolders = globalSearchActive && Array.isArray(searchResults?.folders) ? searchResults.folders : [];
@@ -8768,8 +8912,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           setSearchSuggestions(next);
           setSearchSuggestionIndex((current) => next.length === 0 ? -1 : Math.max(0, Math.min(current < 0 ? 0 : current, next.length - 1)));
         })
-        .catch((error) => {
-          if (controller.signal.aborted || isAbortError(error)) return;
+        .catch(() => {
+          if (controller.signal.aborted) return;
           setSearchSuggestions(localSearchSuggestions);
           setSearchSuggestionIndex(localSearchSuggestions.length > 0 ? 0 : -1);
         });
@@ -8779,7 +8923,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [localSearchSuggestions, searchableRoots, searchNeedle]);
+  }, [galleryPathRevision, localSearchSuggestions, searchableRoots, searchNeedle]);
 
   const applySearchSuggestion = useCallback((index: number) => {
     const suggestion = searchSuggestions[index];

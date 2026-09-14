@@ -8,6 +8,7 @@ import { classifyUmbraMediaMetadata } from '../shared/nsfwPrivacyClassifier';
 import { detectUmbraUiCensorRegions, type UmbraUiCensorDetection } from './UmbraUiCensorDetectorService';
 import { applyUmbraUiImageCensor } from './UmbraUiMediaToolsService';
 import { renderCensorReviewMask, censorReviewOverlayRegions } from './UmbraUiCensorReviewMask';
+import { copyFileExclusive } from './FsTransferCopy';
 import {
   normalizeCensorReviewSettings as settings,
   censorReviewCanApprove,
@@ -635,12 +636,19 @@ export class UmbraUiCensorReviewService {
       if (item.status !== 'approved' || !censorReviewCanApprove(item))
         throw new CensorReviewError('Only approved, up-to-date images can be exported.');
       const directory = resolveOutput(item.originalPath);
+      const previewPath = await this.asset(projectId, itemId, item.previewFile);
+      const previewStat = await fs.stat(previewPath);
+      if (!previewStat.isFile() || !previewStat.size || previewStat.size > MAX_BYTES)
+        throw new CensorReviewError('The approved preview is missing, empty, or exceeds the export size limit. Render it again before exporting.');
+      const previewHash = await hash(previewPath);
+      if (item.previewFile === item.sourceFile && previewHash !== item.sourceHash)
+        throw new CensorReviewError('The imported source has changed. Import and review the image again before exporting.');
       if (
         item.lastExport?.editRevision === item.editRevision &&
         item.lastExport.directory === directory &&
         (await fs
-          .stat(item.lastExport.path)
-          .then((s) => s.isFile())
+          .lstat(item.lastExport.path)
+          .then(async (s) => s.isFile() && s.size === previewStat.size && await hash(item.lastExport!.path) === previewHash)
           .catch(() => false))
       ) {
         if (!item.lastExport.registered) {
@@ -658,11 +666,11 @@ export class UmbraUiCensorReviewService {
           .slice(0, 140) || 'image';
       await fs.mkdir(directory, { recursive: true });
       let path = '';
+      let copiedStat: Awaited<ReturnType<typeof copyFileExclusive>> | undefined;
       for (let sequence = 0; sequence < 1_000_000; sequence++) {
         const candidate = join(directory, `${stem}-${item.censored ? 'censored' : 'uncensored'}${sequence ? `-${sequence}` : ''}${extension}`);
         try {
-          const handle = await fs.open(candidate, 'wx');
-          await handle.close();
+          copiedStat = await copyFileExclusive(previewPath, candidate);
           path = candidate;
           break;
         } catch (error: any) {
@@ -671,11 +679,16 @@ export class UmbraUiCensorReviewService {
       }
       if (!path) throw new CensorReviewError('Could not reserve an export filename.');
       try {
-        await fs.copyFile(join(this.itemDir(projectId, itemId), item.previewFile), path);
+        if (await hash(path) !== previewHash)
+          throw new CensorReviewError('The approved preview changed during export. Review it again before exporting.');
         item.lastExport = { path, directory, editRevision: item.editRevision, exportedAt: Date.now(), registered: false };
         await this.persist(projectId, item);
       } catch (error) {
-        await fs.rm(path, { force: true }).catch(() => undefined);
+        // Roll back only our unchanged output, not a replacement or external edit.
+        const current = await fs.lstat(path, { bigint: true }).catch(() => null);
+        if (current && copiedStat && current.dev === copiedStat.dev && current.ino === copiedStat.ino
+          && current.size === copiedStat.size && current.mtimeNs === copiedStat.mtimeNs)
+          await fs.unlink(path).catch(() => undefined);
         throw error;
       }
       // A saved receipt makes Gallery registration retryable without duplicating or deleting the export.

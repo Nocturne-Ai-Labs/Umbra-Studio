@@ -1,5 +1,6 @@
-import { dirname } from 'path';
-import { existsSync } from 'fs';
+import { dirname, basename, join } from 'path';
+import { type BigIntStats } from 'fs';
+import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
 
 export interface BooruApiConfig {
@@ -150,24 +151,51 @@ export function parseRule34Posts(data: unknown): BooruImageResult[] {
   }).filter((post) => post.url);
 }
 
-export async function loadApiKeys(configPath: string): Promise<BooruApiConfig> {
+export async function readApiKeys(configPath: string): Promise<BooruApiConfig | null> {
+  let content: string;
   try {
-    if (existsSync(configPath)) {
-      const content = await fs.readFile(configPath, 'utf-8');
-      return JSON.parse(content);
-    }
+    content = await fs.readFile(configPath, 'utf-8');
   } catch (error) {
-    console.warn(`[API Keys] Failed to read ${configPath}:`, error);
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
+    throw error;
   }
-  return {};
+  let config: unknown;
+  try { config = JSON.parse(content); }
+  catch { throw new Error('Invalid API-key configuration JSON'); }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error('Invalid API-key configuration object');
+  }
+  return config as BooruApiConfig;
+}
+
+export async function loadApiKeys(configPath: string): Promise<BooruApiConfig> {
+  return (await readApiKeys(configPath)) ?? {};
 }
 
 export async function saveApiKeys(configPath: string, config: BooruApiConfig): Promise<void> {
   const configDir = dirname(configPath);
-  if (!existsSync(configDir)) {
-    await fs.mkdir(configDir, { recursive: true });
+  const content = JSON.stringify(config, null, 2);
+  await fs.mkdir(configDir, { recursive: true });
+  const temporaryPath = join(configDir, `.${basename(configPath)}.${randomUUID()}.tmp`);
+  let output: Awaited<ReturnType<typeof fs.open>> | undefined;
+  let owned: BigIntStats | undefined;
+  try {
+    output = await fs.open(temporaryPath, 'wx', 0o600);
+    owned = await output.stat({ bigint: true });
+    await output.writeFile(content, 'utf-8');
+    await output.sync();
+    await output.close();
+    output = undefined;
+    await fs.rename(temporaryPath, configPath);
+  } finally {
+    await output?.close().catch(() => undefined);
+    if (owned) {
+      const current = await fs.lstat(temporaryPath, { bigint: true }).catch(() => null);
+      if (current?.dev === owned.dev && current?.ino === owned.ino) {
+        await fs.unlink(temporaryPath).catch(() => undefined);
+      }
+    }
   }
-  await fs.writeFile(configPath, JSON.stringify(config, null, 2));
 }
 
 export async function fetchDanbooruPosts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['danbooru']): Promise<BooruImageResult[]> {

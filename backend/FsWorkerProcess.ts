@@ -3,7 +3,7 @@ import { existsSync, type Dirent } from 'fs';
 import * as fs from 'fs/promises';
 import { spawn } from 'node:child_process';
 import { GalleryDb } from '../gallery/GalleryDb';
-import { copyTreeExclusive, moveTreeExclusive, type CopyProgress } from './FsTransferCopy';
+import { copyTreeExclusive, moveTreeExclusive, moveFileExclusive, type CopyProgress } from './FsTransferCopy';
 
 type FsFilter = string | null;
 
@@ -134,6 +134,7 @@ type FsRenameRequest = {
   payload: {
     oldFullPath: string;
     newFullPath: string;
+    replaceExisting?: boolean;
   };
 };
 
@@ -1023,6 +1024,10 @@ async function removePathRecursiveSafe(targetPath: string, force = false): Promi
 
 async function movePathWithFallback(sourcePath: string, targetPath: string, onProgress?: CopyProgress): Promise<void> {
   if (existsSync(targetPath)) throw new Error('Destination already exists; original retained');
+  if ((await fs.lstat(sourcePath)).isFile()) {
+    await moveFileExclusive(sourcePath, targetPath, onProgress, withMoveRetry);
+    return;
+  }
   try {
     await withMoveRetry('rename', () => fs.rename(sourcePath, targetPath));
     return;
@@ -1281,7 +1286,22 @@ async function runMkdir(payload: FsMkdirRequest['payload']) {
 }
 
 async function runRename(payload: FsRenameRequest['payload']) {
-  await fs.rename(payload.oldFullPath, payload.newFullPath);
+  const source = resolve(payload.oldFullPath);
+  const target = resolve(payload.newFullPath);
+  let sameEntryCaseChange = false;
+  if (process.platform === 'win32' && source !== target && source.toLowerCase() === target.toLowerCase()) {
+    const before = await fs.lstat(source, { bigint: true });
+    const existing = await fs.lstat(target, { bigint: true }).catch((error) => {
+      if (error?.code === 'ENOENT') return null;
+      throw error;
+    });
+    sameEntryCaseChange = Boolean(existing && before.ino !== 0n && before.ino === existing.ino && before.dev === existing.dev);
+  }
+  if (payload.replaceExisting === true || source === target || sameEntryCaseChange) {
+    await withMoveRetry('rename', () => fs.rename(source, target));
+  } else {
+    await movePathWithFallback(source, target);
+  }
   invalidateProgressiveSeedCachePath(payload.oldFullPath);
   invalidateProgressiveSeedCachePath(payload.newFullPath);
   return { success: true };

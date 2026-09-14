@@ -6,7 +6,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, join, relative, resolve, sep } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export const UMBRA_UPDATER_CACHE_RELATIVE_PATH = join('User', 'Cache', 'UmbraUpdater');
 export const UMBRA_UPDATER_CLEANUP_MARKER = 'cleanup-requested';
@@ -26,7 +26,7 @@ export function isUmbraUpdaterWorkspace(runtimeRoot: string, workspaceRoot: stri
   const cacheRoot = resolveUmbraUpdaterCacheRoot(runtimeRoot);
   const workspace = resolve(workspaceRoot);
   const rel = relative(cacheRoot, workspace);
-  return Boolean(rel) && !rel.startsWith('..') && !rel.includes(`..${sep}`);
+  return Boolean(rel) && !isAbsolute(rel) && !rel.startsWith('..') && !rel.includes(`..${sep}`);
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -91,7 +91,7 @@ export function hasActiveUmbraUpdaterProcess(
   const excluded = excludedWorkspaceRoot ? resolve(excludedWorkspaceRoot) : '';
 
   for (const entry of readdirSync(cacheRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !/^session-[a-z0-9-]+$/i.test(entry.name)) continue;
+    if (!entry.isDirectory() || !/^session-[a-z0-9._-]+$/i.test(entry.name)) continue;
     const workspaceRoot = resolve(cacheRoot, entry.name);
     if (workspaceRoot === excluded || !isUmbraUpdaterWorkspace(runtimeRoot, workspaceRoot)) continue;
     if (hasActiveWorkspaceProcess(workspaceRoot)) return true;
@@ -113,10 +113,16 @@ export function cleanupInactiveUmbraUpdaterWorkspaces(
   const removed: string[] = [];
 
   for (const entry of readdirSync(cacheRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !/^session-[a-z0-9-]+$/i.test(entry.name)) continue;
+    if (!entry.isDirectory() || !/^session-[a-z0-9._-]+$/i.test(entry.name)) continue;
     const workspaceRoot = resolve(cacheRoot, entry.name);
     if (!isUmbraUpdaterWorkspace(runtimeRoot, workspaceRoot)) continue;
     if (hasActiveWorkspaceProcess(workspaceRoot)) continue;
+    // Recovery copies may be the only remaining original app or user directories.
+    try {
+      if (readdirSync(workspaceRoot).some((name) => /^(?:backup-|failed-app-|preserved$)/i.test(name))) continue;
+    } catch {
+      continue;
+    }
     const cleanupRequested = existsSync(join(workspaceRoot, UMBRA_UPDATER_CLEANUP_MARKER));
     let stale = false;
     try {

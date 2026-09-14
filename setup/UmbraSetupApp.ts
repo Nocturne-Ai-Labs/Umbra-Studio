@@ -138,12 +138,16 @@ async function runScript(runtimeRoot: string, scriptPath: string, args: string[]
     windowsHide: true,
   });
   jobChildren.set(job.id, child);
+  const redact = (value: string) => hfToken ? value.split(hfToken).join('[redacted]') : value;
+  child.stdin?.on('error', (error) => {
+    appendOutput(job, redact(`Installer input pipe failed: ${error.message}`));
+  });
   const attachOutput = (stream: typeof child.stdout) => {
     let pending = '';
     const line = (value: string) => {
       if (value.startsWith('UMBRA_MODEL_PROGRESS|')) {
         try { job.progress = { ...job.progress, ...JSON.parse(value.slice('UMBRA_MODEL_PROGRESS|'.length)) }; } catch { /* Ignore incomplete worker messages. */ }
-      } else appendOutput(job, hfToken ? value.split(hfToken).join('[redacted]') : value);
+      } else appendOutput(job, redact(value));
     };
     stream?.setEncoding('utf8');
     stream?.on('data', (chunk) => {
@@ -224,6 +228,7 @@ async function main() {
   if (!existsSync(htmlPath)) throw new Error(`Setup page is missing: ${htmlPath}`);
   const html = readFileSync(htmlPath, 'utf8').replace('/* MODEL_SETUP_SCRIPT */', () => readFileSync(join(sourceRoot, 'setup', 'models.js'), 'utf8'));
   let activeJob: SetupJobState | null = null;
+  const hasRunningInstaller = () => activeJob?.phase === 'running';
 
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -244,10 +249,18 @@ async function main() {
       }
       if (url.pathname === '/api/cancel' && request.method === 'POST') {
         if (!activeJob || activeJob.phase !== 'running' || !activeJob.cancellable) return json({ success: false, error: 'No cancellable download is running.' }, 409);
-        const child = jobChildren.get(activeJob.id);
+        const job = activeJob;
+        const child = jobChildren.get(job.id);
         if (!child?.stdin?.writable) return json({ success: false, error: 'Installer is finishing. Try again shortly.' }, 409);
-        activeJob.cancelRequested = true;
-        child.stdin.write('q');
+        try {
+          await new Promise<void>((resolveWrite, rejectWrite) => {
+            child.stdin!.write('q', (error) => error ? rejectWrite(error) : resolveWrite());
+          });
+        } catch {
+          return json({ success: false, error: 'The installer could not receive the cancellation request. Check its status and try again.' }, 409);
+        }
+        if (job.phase !== 'running') return json({ success: false, error: 'The installer has already finished.' }, 409);
+        job.cancelRequested = true;
         return json({ success: true });
       }
       if (url.pathname === '/api/status' && request.method === 'GET') {
@@ -272,10 +285,13 @@ async function main() {
         }
       }
       if (url.pathname === '/api/install' && request.method === 'POST') {
-        if (activeJob?.phase === 'running') {
+        if (hasRunningInstaller()) {
           return json({ success: false, error: 'A model installation is already running.' }, 409);
         }
         const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+          return json({ success: false, error: 'Model installation requires a settings object.' }, 400);
+        }
         const kind = String(body.kind || '') as SetupJobKind;
         if (!['data-forge', 'umbra-ui', 'requirements', 'support'].includes(kind)) {
           return json({ success: false, error: 'Choose a supported model pack.' }, 400);
@@ -286,6 +302,10 @@ async function main() {
           if (body.hfToken !== undefined && (typeof body.hfToken !== 'string' || body.hfToken.length > 512 || /[\r\n]/.test(body.hfToken))) throw new Error('Invalid Hugging Face token.');
           if (kind === 'data-forge' && body.check) throw new Error('Data Forge verification runs during installation.');
         } catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 400); }
+        // Reading the request body yields; another installer may now own the slot.
+        if (hasRunningInstaller()) {
+          return json({ success: false, error: 'A model installation is already running.' }, 409);
+        }
         const job: SetupJobState = {
           id: randomUUID(),
           kind,

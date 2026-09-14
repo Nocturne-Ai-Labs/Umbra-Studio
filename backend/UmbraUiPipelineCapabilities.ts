@@ -585,7 +585,7 @@ export function getUmbraUiRuntimeNodeExecutionError(
 
 export function deriveUmbraUiTxt2ImgCapabilities(
   promptGraph: Record<string, unknown>,
-  descriptor: UmbraUiCapabilityDescriptorInput,
+  descriptor: UmbraUiInpaintCapabilityDescriptorInput,
 ): UmbraUiPipelineCapabilities {
   const nodes = listPipelineNodes(promptGraph);
   const defaults = descriptor.defaults || {};

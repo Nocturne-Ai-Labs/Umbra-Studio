@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.32.17 - Studio Reliability And Data Protection
+
+### TL;DR - Setup After Updating
+
+- Update through Umbra's updater, then restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux. Refresh open browser and Remote sessions after updating.
+- No additional models, custom nodes, or ComfyUI update are required by this release. Existing pipeline and optional censor-detector requirements are unchanged.
+- Back up important projects and configuration before updating. Legacy editor databases are retained when migration cannot complete; do not delete them to work around an error.
+- Remote reverse proxies must use explicitly trusted forwarding configuration. Untrusted forwarded identity and localhost headers no longer grant host access.
+
+### Storage, Gallery, And Transfers
+
+- Protect configuration, Canvas projects, credentials, and generated outputs from interrupted writes, overlapping saves, and failed publication. Preserve newer files when cleanup encounters an external replacement.
+- Serialize contended SQLite writes and related metadata updates. Correct legacy tag/preset migration collisions and retain recoverable source data after migration errors.
+- Make Gallery copy, move, Trash, restore, and Undo reporting reflect confirmed per-file outcomes. Preserve partial successes, report unresolved items, and retain useful cleanup warnings.
+- Improve transfer reconnection and cancellation ownership. Reject malformed acknowledgments instead of treating incomplete operations as successful.
+- Stream archive inputs rather than retaining all converted images in memory. Handle archive input/output failures without crashing the application or deleting the previous archive.
+- Correct media byte-range, cache validation, and conditional preview responses.
+
+### Generation, Extras, And Data Forge
+
+- Validate ComfyUI queue/history responses, bound polling failures, and protect active Inpaint jobs from age-based pruning.
+- Correct queue reorder/removal validation and avoid quadratic membership scans in large Power Prompter reorder operations.
+- Preserve uncertain upscale submissions and staged inputs for recovery; protect accepted inputs from competing cleanup. Improve terminal-state reporting and queue-release warnings.
+- Render watermark, GIF, and direct censor outputs privately before exclusively publishing sequence filenames. Failed renders no longer remove an unrelated destination file.
+- Improve Censor Review export ownership, orientation handling, and failure cleanup without changing detector models or confidence defaults.
+- Make corpus ingest and cursor updates transactional, improve failed pause/error reporting, and close database statements reliably. Do not reset an existing corpus to install this update.
+- Correct model-merge startup/cancellation and completion-state races.
+
+### Model Manager, Setup, And Remote
+
+- Bound model-media downloads, validate redirects and content types, restrict credential forwarding, share duplicate requests, and limit concurrent cache operations.
+- Harden model and filesystem worker lifecycle handling against spawn errors, broken pipes, and late events from retired workers.
+- Add stalled-download handling and protect completed files from failed download cleanup or destination collisions.
+- Preserve credential edits during loading/saving, reject malformed save acknowledgments, synchronize credential status between consumers, and allow failed credential loading to be retried.
+- Strengthen Remote peer/identity checks, cookie handling, rate-limit attribution, and settings validation.
+- Harden setup admission/cancellation, updater file ownership, and release archive validation. Packages continue to exclude private development files, user data, and installed tools.
+
+### Validation And Compatibility
+
+- Development validation: 1,166 passing regression tests across 106 files, frontend/backend TypeScript checks, frontend lint/build, and the 51-workflow pipeline audit.
+- Tests include synthetic filesystem/SQLite failures, request races, and owned test media. This is not a claim of exhaustive GPU, cloud-storage, power-loss, or every-device validation; backups and manual censor review remain important.
+- Linux managed-tool prerequisites remain `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit UI setup still requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: stale saves, incomplete acknowledgments, migration collisions, and cleanup that could remove newer files.
+- Fixed: queue polling/reorder failures, archive stream errors, credential edit loss, and premature job completion reporting.
+- Improved: Gallery transfer/restore feedback, Model Manager media retrieval, and Extras output publication.
+- Improved: Remote access boundaries, resumable corpus persistence, setup/updater reliability, and package privacy checks.
+
 ## v0.32.16 - Gallery, Extras, And Generation Reliability
 
 ### TL;DR - Setup After Updating

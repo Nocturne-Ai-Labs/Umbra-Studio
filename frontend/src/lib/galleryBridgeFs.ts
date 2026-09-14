@@ -17,6 +17,19 @@ type GalleryListing = Record<string, unknown> & {
   total?: number;
 };
 
+function requireGalleryListing(value: unknown): GalleryListing {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid Gallery listing');
+  const page = value as GalleryListing;
+  if (!Array.isArray(page.files) || (page.folders !== undefined && !Array.isArray(page.folders))) {
+    throw new Error('Invalid Gallery listing');
+  }
+  const isEntry = (entry: unknown) => entry !== null && typeof entry === 'object' && !Array.isArray(entry);
+  if (!page.files.every(isEntry) || (page.folders && !page.folders.every(isEntry))) {
+    throw new Error('Invalid Gallery listing entry');
+  }
+  return page;
+}
+
 export async function fetchGalleryFs(pathname: string, params: URLSearchParams, init?: RequestInit, onPage?: (page: GalleryListing) => void): Promise<Response> {
   const response = await fetchGalleryFsPage(pathname, params, init);
   if (!response.ok || pathname !== '/list-progressive'
@@ -25,7 +38,7 @@ export async function fetchGalleryFs(pathname: string, params: URLSearchParams, 
 
   // Keep full-list callers compatible while allowing the Gallery to display
   // each accumulated page before the complete listing is ready.
-  let page: GalleryListing = await response.clone().json();
+  let page = requireGalleryListing(await response.clone().json());
   if (page.nextCursor == null && page.done !== false) return response;
   const files = new Map<string | symbol, Record<string, unknown>>();
   const folders = new Map<string | symbol, Record<string, unknown>>();
@@ -59,7 +72,7 @@ export async function fetchGalleryFs(pathname: string, params: URLSearchParams, 
     nextParams.delete('refresh');
     const nextResponse = await fetchGalleryFsPage(pathname, nextParams, init);
     if (!nextResponse.ok) return nextResponse;
-    page = await nextResponse.json();
+    page = requireGalleryListing(await nextResponse.json());
   }
   const headers = new Headers(response.headers);
   headers.delete('content-length');

@@ -211,6 +211,17 @@ type CivitAIAuthStatus = {
   maskedToken?: string;
 };
 
+function parseCivitaiAuthStatus(data: unknown, expectedToken?: boolean): CivitAIAuthStatus {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid CivitAI account status');
+  const value = data as Record<string, unknown>;
+  if (typeof value.hasToken !== 'boolean'
+    || (value.maskedToken !== undefined && typeof value.maskedToken !== 'string')
+    || (expectedToken !== undefined && (value.success !== true || value.hasToken !== expectedToken))) {
+    throw new Error('Invalid CivitAI account status');
+  }
+  return { hasToken: value.hasToken, maskedToken: typeof value.maskedToken === 'string' ? value.maskedToken : '' };
+}
+
 type BrowserBookmarkItem = {
   id: string;
   type: 'link' | 'folder';
@@ -1154,6 +1165,9 @@ export function ModelManagerWorkspace() {
   const hydratedOpenedIdsRef = React.useRef<Set<number>>(new Set());
   const civitaiLinkInputRef = React.useRef<HTMLInputElement | null>(null);
   const civitaiTokenInputRef = React.useRef<HTMLInputElement | null>(null);
+  const civitaiAuthPendingRef = React.useRef(false);
+  const civitaiAuthVersionRef = React.useRef(0);
+  const civitaiAuthMountedRef = React.useRef(true);
   const browserConfigHydratedRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -1821,66 +1835,83 @@ export function ModelManagerWorkspace() {
   }, [addToast, refreshLocalView]);
 
   const loadCivitaiAuthStatus = React.useCallback(async () => {
+    if (civitaiAuthPendingRef.current || !civitaiAuthMountedRef.current) return;
+    const version = ++civitaiAuthVersionRef.current;
     try {
-      const data = await fetchJson<CivitAIAuthStatus>('/api/model-manager/civitai/auth', { cache: 'no-store' });
-      setCivitaiAuthStatus({
-        hasToken: data.hasToken === true,
-        maskedToken: String(data.maskedToken || ''),
-      });
+      const data = await fetchJson<unknown>('/api/model-manager/civitai/auth', { cache: 'no-store' });
+      if (version !== civitaiAuthVersionRef.current || !civitaiAuthMountedRef.current) return;
+      setCivitaiAuthStatus(parseCivitaiAuthStatus(data));
     } catch (error: any) {
-      addToast({ type: 'error', message: error?.message || 'Failed to read CivitAI account token' });
+      if (version === civitaiAuthVersionRef.current && civitaiAuthMountedRef.current) {
+        addToast({ type: 'error', message: error?.message || 'Failed to read CivitAI account token' });
+      }
     }
   }, [addToast]);
 
   const saveCivitaiAuthToken = React.useCallback(async () => {
-    if (civitaiAuthSaving) return;
-    const liveToken = String(civitaiTokenInputRef.current?.value || '').trim();
-    const apiToken = liveToken || String(civitaiTokenInput || '').trim();
+    if (civitaiAuthPendingRef.current || !civitaiAuthMountedRef.current) return;
+    const submittedDraft = civitaiTokenInputRef.current?.value ?? civitaiTokenInput;
+    const apiToken = String(submittedDraft || '').trim();
     if (!apiToken) {
       addToast({ type: 'error', message: 'Paste a CivitAI API token first' });
       return;
     }
+    civitaiAuthPendingRef.current = true;
+    const version = ++civitaiAuthVersionRef.current;
     setCivitaiAuthSaving(true);
     try {
-      const data = await fetchJson<CivitAIAuthStatus>('/api/model-manager/civitai/auth', {
+      const data = await fetchJson<unknown>('/api/model-manager/civitai/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiToken }),
       });
-      setCivitaiAuthStatus({
-        hasToken: data.hasToken === true,
-        maskedToken: String(data.maskedToken || ''),
-      });
-      setCivitaiTokenInput('');
+      if (version !== civitaiAuthVersionRef.current || !civitaiAuthMountedRef.current) return;
+      setCivitaiAuthStatus(parseCivitaiAuthStatus(data, true));
+      setCivitaiTokenInput(current => current === submittedDraft ? '' : current);
       setCivitaiAuthRevision((current) => current + 1);
       addToast({ type: 'success', message: 'CivitAI account token saved' });
     } catch (error: any) {
-      addToast({ type: 'error', message: error?.message || 'Failed to save CivitAI account token' });
+      if (version === civitaiAuthVersionRef.current && civitaiAuthMountedRef.current) {
+        addToast({ type: 'error', message: error?.message || 'Failed to save CivitAI account token' });
+      }
     } finally {
-      setCivitaiAuthSaving(false);
+      civitaiAuthPendingRef.current = false;
+      if (civitaiAuthMountedRef.current) setCivitaiAuthSaving(false);
     }
-  }, [addToast, civitaiAuthSaving, civitaiTokenInput]);
+  }, [addToast, civitaiTokenInput]);
 
   const removeCivitaiAuthToken = React.useCallback(async () => {
-    if (civitaiAuthSaving) return;
+    if (civitaiAuthPendingRef.current || !civitaiAuthMountedRef.current) return;
+    const submittedDraft = civitaiTokenInputRef.current?.value ?? civitaiTokenInput;
+    civitaiAuthPendingRef.current = true;
+    const version = ++civitaiAuthVersionRef.current;
     setCivitaiAuthSaving(true);
     try {
-      const data = await fetchJson<CivitAIAuthStatus>('/api/model-manager/civitai/auth', {
+      const data = await fetchJson<unknown>('/api/model-manager/civitai/auth', {
         method: 'DELETE',
       });
-      setCivitaiAuthStatus({
-        hasToken: data.hasToken === true,
-        maskedToken: String(data.maskedToken || ''),
-      });
-      setCivitaiTokenInput('');
+      if (version !== civitaiAuthVersionRef.current || !civitaiAuthMountedRef.current) return;
+      setCivitaiAuthStatus(parseCivitaiAuthStatus(data, false));
+      setCivitaiTokenInput(current => current === submittedDraft ? '' : current);
       setCivitaiAuthRevision((current) => current + 1);
       addToast({ type: 'success', message: 'CivitAI account token removed' });
     } catch (error: any) {
-      addToast({ type: 'error', message: error?.message || 'Failed to remove CivitAI account token' });
+      if (version === civitaiAuthVersionRef.current && civitaiAuthMountedRef.current) {
+        addToast({ type: 'error', message: error?.message || 'Failed to remove CivitAI account token' });
+      }
     } finally {
-      setCivitaiAuthSaving(false);
+      civitaiAuthPendingRef.current = false;
+      if (civitaiAuthMountedRef.current) setCivitaiAuthSaving(false);
     }
-  }, [addToast, civitaiAuthSaving]);
+  }, [addToast, civitaiTokenInput]);
+
+  React.useEffect(() => {
+    civitaiAuthMountedRef.current = true;
+    return () => {
+      civitaiAuthMountedRef.current = false;
+      ++civitaiAuthVersionRef.current;
+    };
+  }, []);
 
   React.useEffect(() => {
     void loadRoots();
@@ -1899,16 +1930,16 @@ export function ModelManagerWorkspace() {
         const data = await fetchJson<OpenedModelsPayload>('/api/model-manager/opened-models');
         if (cancelled) return;
         applyOpenedModelsPayload(data);
-      } catch {
+      } catch (error: any) {
         if (cancelled) return;
-        setSavedOpenedModelIds([]);
+        addToast({ type: 'error', message: error?.message || 'Failed to load model details' });
       }
     };
     void run();
     return () => {
       cancelled = true;
     };
-  }, [applyOpenedModelsPayload, sourceTab]);
+  }, [addToast, applyOpenedModelsPayload, sourceTab]);
 
   React.useEffect(() => {
     if (sortedRoots.length <= 0) return;
@@ -2510,10 +2541,9 @@ export function ModelManagerWorkspace() {
         const opened = await fetchJson<OpenedModelsPayload>('/api/model-manager/opened-models', { cache: 'no-store' });
         if (cancelled) return;
         applyOpenedModelsPayload(opened);
-      } catch {
+      } catch (error: any) {
         if (!cancelled) {
-          setSavedOpenedModelIds([]);
-          setCivitaiModels([]);
+          addToast({ type: 'error', message: error?.message || 'Failed to load model details' });
         }
       }
 
@@ -2534,6 +2564,7 @@ export function ModelManagerWorkspace() {
     };
   }, [
     activeModelId,
+    addToast,
     applyOpenedModelsPayload,
     civitaiAuthRevision,
     loadCivitaiAuthStatus,
@@ -2627,10 +2658,10 @@ export function ModelManagerWorkspace() {
           ...(modelSnapshot ? { modelSnapshot } : {}),
         }),
       });
-    } catch {
-      // best effort persistence; keep local state even if save fails.
+    } catch (error: any) {
+      addToast({ type: 'error', message: error?.message || 'Failed to save model collection' });
     }
-  }, []);
+  }, [addToast]);
 
   React.useEffect(() => {
     if (sourceTab !== 'civitai') return;

@@ -98,7 +98,7 @@ import {
 } from '@/components/umbra-ui/UmbraModelPickerModal';
 import { stageUmbraUiUpscaleHandoff } from '@/lib/umbraUiUpscale';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
-import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
+import { readUserConfigStrict, readUserConfigWithRetry, writeUserConfig } from '@/lib/userConfig';
 import {
   resolveUmbraUiInpaintControlAvailability,
   resolveUmbraUiInpaintReferenceAvailability,
@@ -653,6 +653,7 @@ export function UmbraUIWorkspace() {
   const [activePromptSegmentId, setActivePromptSegmentId] = React.useState(initialDeviceResume?.activePromptSegmentId || '');
   const [promptHistory, setPromptHistory] = React.useState<UmbraUiPromptHistoryEntry[]>([]);
   const promptHistoryLoadedRef = React.useRef(false);
+  const promptHistoryPendingEditsRef = React.useRef({ cleared: false, removed: new Set<string>() });
   const promptHistoryDirtyRef = React.useRef(false);
   const promptHistoryRevisionRef = React.useRef(0);
   const promptHistoryWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
@@ -898,6 +899,7 @@ export function UmbraUIWorkspace() {
     hasUmbraUiImageControls(initialDeviceResume),
   );
   const [imageControlsHydrated, setImageControlsHydrated] = React.useState(false);
+  const imageControlsSaveEnabledRef = React.useRef(false);
   const imageControlsPreserveHydratedBaselineRef = React.useRef(
     hasUmbraUiImageControls(initialDeviceResume),
   );
@@ -968,24 +970,30 @@ export function UmbraUIWorkspace() {
 
   React.useEffect(() => {
     let canceled = false;
-    void readUserConfig<unknown>('umbra-ui-image-controls', null)
+    imageControlsSaveEnabledRef.current = false;
+    void readUserConfigStrict<unknown>('umbra-ui-image-controls', null)
       .then((storedValue) => {
         if (canceled) return;
         const snapshot = normalizeUmbraUiImageControlsSnapshot(storedValue);
+        if (storedValue !== null && !snapshot) throw new Error('Invalid saved image controls');
         if (snapshot) {
           imageControlsPersistedFingerprintRef.current = getUmbraUiImageControlsFingerprint(snapshot);
           applyPersistedImageControls(snapshot);
         }
+        imageControlsSaveEnabledRef.current = true;
         setImageControlsHydrated(true);
       })
       .catch((error) => {
         console.warn('[Umbra UI] Failed to restore saved image controls:', error);
-        if (!canceled) setImageControlsHydrated(true);
+        if (!canceled) {
+          setImageControlsHydrated(true);
+          showToast('Saved image controls could not be loaded. Changes will not be saved; reload Umbra to retry.', 'error');
+        }
       });
     return () => {
       canceled = true;
     };
-  }, [applyPersistedImageControls]);
+  }, [applyPersistedImageControls, showToast]);
 
   React.useEffect(() => {
     setMountedModes((current) => {
@@ -998,18 +1006,26 @@ export function UmbraUIWorkspace() {
   }, [activeMode]);
 
   React.useEffect(() => {
-    let canceled = false;
-    void readUserConfig<unknown>('umbra-ui-prompt-history', [])
+    const controller = new AbortController();
+    void readUserConfigWithRetry<unknown>('umbra-ui-prompt-history', [], controller.signal,
+      (error) => console.warn('[Umbra UI] Retrying prompt history load:', error))
       .then((storedHistory) => {
-        if (canceled) return;
+        if (controller.signal.aborted) return;
+        if (!Array.isArray(storedHistory)) throw new Error('Invalid saved prompt history');
+        const pending = promptHistoryPendingEditsRef.current;
+        const restored = pending.cleared ? [] : normalizeUmbraUiPromptHistory(storedHistory)
+          .filter((entry) => !pending.removed.has(entry.id));
+        promptHistoryLoadedRef.current = true;
         setPromptHistory((current) => mergeUmbraUiPromptHistories(
-          normalizeUmbraUiPromptHistory(storedHistory),
+          restored,
           current,
         ));
-        promptHistoryLoadedRef.current = true;
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) console.warn('[Umbra UI] Failed to restore prompt history:', error);
       });
     return () => {
-      canceled = true;
+      controller.abort();
     };
   }, []);
 
@@ -1208,7 +1224,7 @@ export function UmbraUIWorkspace() {
   ]);
 
   React.useEffect(() => {
-    if (!imageControlsHydrated || !imageControlsSnapshot) return;
+    if (!imageControlsHydrated || !imageControlsSaveEnabledRef.current || !imageControlsSnapshot) return;
     const fingerprint = getUmbraUiImageControlsFingerprint(imageControlsSnapshot);
     if (fingerprint === imageControlsPersistedFingerprintRef.current) return;
     const timer = window.setTimeout(() => {
@@ -1822,12 +1838,14 @@ export function UmbraUIWorkspace() {
   }, [showToast]);
 
   const removePromptHistoryEntry = React.useCallback((entryId: string) => {
+    if (!promptHistoryLoadedRef.current) promptHistoryPendingEditsRef.current.removed.add(entryId);
     promptHistoryDirtyRef.current = true;
     promptHistoryRevisionRef.current += 1;
     setPromptHistory((current) => current.filter((entry) => entry.id !== entryId));
   }, []);
 
   const clearPromptHistory = React.useCallback(() => {
+    if (!promptHistoryLoadedRef.current) promptHistoryPendingEditsRef.current.cleared = true;
     promptHistoryDirtyRef.current = true;
     promptHistoryRevisionRef.current += 1;
     setPromptHistory([]);

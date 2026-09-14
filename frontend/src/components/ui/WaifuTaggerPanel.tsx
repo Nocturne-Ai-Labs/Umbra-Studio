@@ -277,21 +277,24 @@ export function WaifuTaggerPanel({ imagePath, imageName, onSendToWaifuDiffusion 
     return unique.join(separator).trim();
   }, [waifuOptions.exportUseCommas, waifuOptions.exportUseUnderscores, waifuOptions.prependTags]);
 
-  const addPrependPreset = useCallback((rawPreset: string) => {
+  const addPrependPreset = useCallback(async (rawPreset: string) => {
     const preset = normalizeWaifuPreset(rawPreset);
     if (!preset) {
       showToast('Enter tags to save as a preset', 'error');
       return;
     }
-    const currentPresets = getWaifuPrependPresetsSnapshot();
-    const exists = currentPresets.some((entry) => entry.toLowerCase() === preset.toLowerCase());
-    if (exists) {
-      showToast('Preset already exists', 'error');
-      return;
+    try {
+      await setWaifuPrependPresets((currentPresets) => {
+        if (currentPresets.some((entry) => entry.toLowerCase() === preset.toLowerCase())) {
+          throw new Error('Preset already exists');
+        }
+        return [preset, ...currentPresets];
+      });
+      setPrependPresetDraft((current) => normalizeWaifuPreset(current) === preset ? '' : current);
+      showToast('Saved prepend preset', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to save prepend preset', 'error');
     }
-    setWaifuPrependPresets([preset, ...currentPresets]);
-    setPrependPresetDraft('');
-    showToast('Saved prepend preset', 'success');
   }, [showToast]);
 
   const applyPrependPreset = useCallback((preset: string) => {
@@ -306,10 +309,13 @@ export function WaifuTaggerPanel({ imagePath, imageName, onSendToWaifuDiffusion 
     showToast('Preset prepended', 'success');
   }, [showToast]);
 
-  const removePrependPreset = useCallback((preset: string) => {
-    const currentPresets = getWaifuPrependPresetsSnapshot();
-    setWaifuPrependPresets(currentPresets.filter((entry) => entry !== preset));
-  }, []);
+  const removePrependPreset = useCallback(async (preset: string) => {
+    try {
+      await setWaifuPrependPresets((currentPresets) => currentPresets.filter((entry) => entry !== preset));
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to remove prepend preset', 'error');
+    }
+  }, [showToast]);
 
   const booruExportString = useMemo(() => {
     if (!item?.waifuTagger.result) return '';

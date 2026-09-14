@@ -1018,10 +1018,12 @@ export class GalleryDb {
           const nextFolder = normalizePath(dirname(nextPath));
           const file = this.transferredFile(row, nextPath);
           updateFile.run(nextPath, nextFolder, file.name, file.size, normalizeTimestamp(file.createdMs), normalizeTimestamp(file.modifiedMs), buildFileSignature(file), now, row.uid);
-          deleteOrderForUid.run(row.uid);
-          const nextIndexRow = selectNextIndex.get(nextFolder) as { nextIndex?: number } | null;
-          const nextIndex = Math.max(0, Math.trunc(Number(nextIndexRow?.nextIndex || 0)));
-          upsertOrder.run(nextFolder, row.uid, nextIndex, now);
+          if (nextFolder !== row.folderPath) {
+            deleteOrderForUid.run(row.uid);
+            const nextIndexRow = selectNextIndex.get(nextFolder) as { nextIndex?: number } | null;
+            const nextIndex = Math.max(0, Math.trunc(Number(nextIndexRow?.nextIndex || 0)));
+            upsertOrder.run(nextFolder, row.uid, nextIndex, now);
+          }
           changed += 1;
         }
       }

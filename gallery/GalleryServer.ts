@@ -1,4 +1,4 @@
-import { existsSync } from 'fs';
+import { existsSync, type Dirent } from 'fs';
 import * as fs from 'fs/promises';
 import { spawn } from 'child_process';
 import { basename, extname, join, relative, resolve, isAbsolute } from 'path';
@@ -13,6 +13,8 @@ import {
 } from './GalleryDb';
 import { MetadataParser, type ImageMetadata } from '../backend/MetadataParser';
 import { galleryMediaCacheControl } from './GalleryMediaCache';
+import { resolveSingleByteRange } from '../shared/httpByteRange';
+import { createVariantEtag, matchesIfNoneMatch, permitsConditionalRange } from '../shared/httpCache';
 
 const ROOT_DIR = process.env.UMBRA_ROOT || process.cwd();
 const HOST = String(process.env.UMBRA_GALLERY_HOST || '127.0.0.1').trim();
@@ -573,7 +575,7 @@ function registerPrewarmRoot(pathValue: string) {
 async function prewarmChildFolderSummaries(rootPath: string) {
   const normalizedRoot = normalizePath(rootPath);
   if (!normalizedRoot) return;
-  let entries: Awaited<ReturnType<typeof fs.readdir>> = [];
+  let entries: Dirent<string>[] = [];
   try {
     entries = await fs.readdir(normalizedRoot, { withFileTypes: true });
   } catch {
@@ -1359,7 +1361,7 @@ async function handleSearch(reqUrl: URL): Promise<Response> {
       const current = queue.shift();
       if (!current) continue;
       scannedFolders += 1;
-      let entries: Awaited<ReturnType<typeof fs.readdir>>;
+      let entries: Dirent<string>[];
       try {
         entries = await fs.readdir(current.absolutePath, { withFileTypes: true });
       } catch {
@@ -1629,13 +1631,13 @@ async function handleReorder(req: Request): Promise<Response> {
     }
 
     const folderPath = await ensureDirectory(folderPathRaw);
-    const orderedPathsRaw = Array.isArray((payload as any).orderedPaths) ? (payload as any).orderedPaths : [];
+    const orderedPathsRaw: unknown[] = Array.isArray((payload as any).orderedPaths) ? (payload as any).orderedPaths : [];
     const orderedPaths = Array.from(new Set(
       orderedPathsRaw
         .map((value: unknown) => normalizePath(String(value || '')))
         .filter(Boolean),
     ));
-    const orderedRaw = Array.isArray((payload as any).orderedUids) ? (payload as any).orderedUids : [];
+    const orderedRaw: unknown[] = Array.isArray((payload as any).orderedUids) ? (payload as any).orderedUids : [];
     const fallbackOrderedUids = Array.from(new Set(
       orderedRaw
         .map((value: unknown) => String(value || '').trim())
@@ -1694,9 +1696,9 @@ async function handleAddTags(req: Request): Promise<Response> {
 async function handleSetTags(req: Request): Promise<Response> {
   try {
     const payload = await req.json().catch(() => ({} as Record<string, unknown>));
-    const rawUids = Array.isArray((payload as any).uids) ? (payload as any).uids : [];
-    const rawPaths = Array.isArray((payload as any).paths) ? (payload as any).paths : [];
-    const rawTags = Array.isArray((payload as any).tags) ? (payload as any).tags : [];
+    const rawUids: unknown[] = Array.isArray((payload as any).uids) ? (payload as any).uids : [];
+    const rawPaths: unknown[] = Array.isArray((payload as any).paths) ? (payload as any).paths : [];
+    const rawTags: unknown[] = Array.isArray((payload as any).tags) ? (payload as any).tags : [];
 
     const directUids = Array.from(new Set(
       rawUids
@@ -1938,17 +1940,6 @@ async function handleImage(req: Request, reqUrl: URL): Promise<Response> {
     const etag = getMediaEtag(stat);
     const cacheControl = galleryMediaCacheControl(reqUrl.searchParams.get('rev'));
     const ifNoneMatch = req.headers.get('if-none-match') || '';
-    if (ifNoneMatch && ifNoneMatch === etag) {
-      return new Response(null, {
-        status: 304,
-        headers: {
-          'Cache-Control': cacheControl,
-          ETag: etag,
-          'X-Image-Lane': lane,
-          'X-Image-Source': 'gallery-bridge-local',
-        },
-      });
-    }
     const ext = extname(filePath).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
     const previewMode = String(reqUrl.searchParams.get('preview') || '').trim().toLowerCase();
@@ -1957,20 +1948,22 @@ async function handleImage(req: Request, reqUrl: URL): Promise<Response> {
     const quality = clamp(Number(reqUrl.searchParams.get('gpq') || 90) || 90, 40, 95);
 
     if (previewMode === 'grid' && resizeEnabled && BUN_IMAGE_STILL_EXTENSIONS.has(ext)) {
+      const previewHeaders = {
+        'Content-Type': 'image/webp',
+        'Cache-Control': cacheControl,
+        ETag: createVariantEtag(etag, `grid-${maxLongSide}-${quality}`),
+        'X-Grid-Preview': '1',
+        'X-Grid-Preview-Max': String(maxLongSide),
+        'X-Grid-Preview-Quality': String(quality),
+        'X-Image-Lane': lane,
+        'X-Image-Source': 'gallery-bridge-local',
+      };
+      if (matchesIfNoneMatch(ifNoneMatch, previewHeaders.ETag)) {
+        return new Response(null, { status: 304, headers: previewHeaders });
+      }
       const preview = await getOrBuildThumbnailBuffer(filePath, maxLongSide, quality, 'contain', lane);
-      const previewEtag = `${etag}-grid-${maxLongSide}-${quality}`;
       return new Response(preview.buffer, {
-        headers: {
-          'Content-Type': 'image/webp',
-          'Content-Length': String(preview.buffer.byteLength),
-          'Cache-Control': cacheControl,
-          ETag: previewEtag,
-          'X-Grid-Preview': '1',
-          'X-Grid-Preview-Max': String(maxLongSide),
-          'X-Grid-Preview-Quality': String(quality),
-          'X-Image-Lane': lane,
-          'X-Image-Source': 'gallery-bridge-local',
-        },
+        headers: { ...previewHeaders, 'Content-Length': String(preview.buffer.byteLength) },
       });
     }
 
@@ -1986,39 +1979,33 @@ async function handleImage(req: Request, reqUrl: URL): Promise<Response> {
       'X-Image-Source': 'gallery-bridge-local',
     };
     const range = String(req.headers.get('range') || '').trim();
-    if (range) {
-      const match = /^bytes=(\d*)-(\d*)$/i.exec(range);
-      if (match) {
-        const size = stat.size;
-        let start = match[1] ? Number.parseInt(match[1], 10) : Number.NaN;
-        let end = match[2] ? Number.parseInt(match[2], 10) : Number.NaN;
-        if (!Number.isFinite(start) && Number.isFinite(end)) {
-          start = Math.max(0, size - end);
-          end = size - 1;
-        } else {
-          if (!Number.isFinite(start)) start = 0;
-          if (!Number.isFinite(end)) end = size - 1;
-        }
-        start = Math.max(0, Math.min(size - 1, Math.floor(start)));
-        end = Math.max(start, Math.min(size - 1, Math.floor(end)));
-        if (size > 0 && start <= end) {
-          return new Response(file.slice(start, end + 1), {
-            status: 206,
-            headers: {
-              ...baseHeaders,
-              'Content-Length': String(end - start + 1),
-              'Content-Range': `bytes ${start}-${end}/${size}`,
-            },
-          });
-        }
+    if (matchesIfNoneMatch(ifNoneMatch, etag)) {
+      return new Response(null, { status: 304, headers: baseHeaders });
+    }
+    if (range && permitsConditionalRange(req.headers.get('if-range'), etag)) {
+      const size = stat.size;
+      const bounds = resolveSingleByteRange(range, size);
+      if (bounds) {
+        const { start, end } = bounds;
+        return new Response(file.slice(start, end + 1), {
+          status: 206,
+          headers: {
+            ...baseHeaders,
+            'Content-Length': String(end - start + 1),
+            'Content-Range': `bytes ${start}-${end}/${size}`,
+          },
+        });
       }
-      return new Response(null, {
-        status: 416,
-        headers: {
-          ...baseHeaders,
-          'Content-Range': `bytes */${stat.size}`,
-        },
-      });
+      // Ignore Range for empty representations; there is no byte interval to send.
+      if (size > 0) {
+        return new Response(null, {
+          status: 416,
+          headers: {
+            ...baseHeaders,
+            'Content-Range': `bytes */${size}`,
+          },
+        });
+      }
     }
 
     return new Response(Bun.file(filePath), {

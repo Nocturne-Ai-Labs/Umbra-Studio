@@ -192,6 +192,8 @@ export const deleteToTrash = serializedTrashRoute(deleteToTrashUnlocked);
 export const restoreFromTrash = serializedTrashRoute(restoreFromTrashUnlocked);
 export const emptyTrash = serializedTrashRoute(emptyTrashUnlocked);
 export const permanentlyDelete = serializedTrashRoute(permanentlyDeleteUnlocked);
+export const permanentlyDeleteDirect = serializedTrashRoute(permanentlyDeleteDirectUnlocked);
+export const deleteToSystemTrash = serializedTrashRoute(deleteToSystemTrashUnlocked);
 
 async function mergeMetadataItems(
   context: RouteContext,
@@ -569,7 +571,7 @@ async function deleteToTrashUnlocked(req: Request, _url: URL, context: RouteCont
     return json({ error: 'Invalid JSON body' }, 400, context.corsHeaders);
   }
 
-  const rawInputPaths = Array.isArray(body?.paths) ? body.paths.filter((p: unknown): p is string => typeof p === 'string') : [];
+  const rawInputPaths: string[] = Array.isArray(body?.paths) ? body.paths.filter((p: unknown): p is string => typeof p === 'string') : [];
   const inputPaths = Array.from(new Set(rawInputPaths.map((path) => String(path || '').trim()).filter(Boolean)));
   const rawAutoDeleteDays = Number(body?.autoDeleteDays);
   const autoDeleteDays = Number.isFinite(rawAutoDeleteDays) && rawAutoDeleteDays > 0
@@ -675,6 +677,7 @@ async function deleteToTrashUnlocked(req: Request, _url: URL, context: RouteCont
           validItems.push({
             id: `trash-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             originalPath: candidate.relativePath,
+            requestedPath: candidate.inputPath,
             trashPath: normalizeRelPath(join(dateFolderRelativePath, trashFilename)),
             name: candidate.filename,
             type: itemType,
@@ -718,6 +721,7 @@ async function deleteToTrashUnlocked(req: Request, _url: URL, context: RouteCont
             validItems.push({
               id: `trash-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
               originalPath: candidate.relativePath,
+              requestedPath: candidate.inputPath,
               trashPath: normalizeRelPath(join(dateFolderRelativePath, trashFilename)),
               name: candidate.filename,
               type: itemType,
@@ -776,6 +780,7 @@ async function deleteToTrashUnlocked(req: Request, _url: URL, context: RouteCont
         items: validItems.map((item) => ({
           trashPath: item.trashPath,
           originalPath: item.originalPath,
+          requestedPath: item.requestedPath,
           name: item.name,
         })),
         failed: failedItems,
@@ -838,6 +843,7 @@ async function restoreFromTrashUnlocked(req: Request, _url: URL, context: RouteC
       resolvedTrashPath: { relativePath: string; fullPath: string };
       resolvedOriginal: { relativePath: string; fullPath: string };
       fullRestorePath: string;
+      restoredPath: string;
       restoredIsDirectory: boolean;
       usedFallbackPath: boolean;
     }> = [];
@@ -888,12 +894,17 @@ async function restoreFromTrashUnlocked(req: Request, _url: URL, context: RouteC
         const restoredStats = await stat(resolvedTrashPath.fullPath);
         const restoredIsDirectory = restoredStats.isDirectory();
         const fullRestorePath = await findAvailableRestorePath(resolvedOriginal.fullPath, reservedRestorePaths);
+        const restoredPath = normalizeRelPath(resolveWorkspacePath(
+          context.resolvePath ? fullRestorePath : relative(context.ROOT_DIR, fullRestorePath),
+          context,
+        ).relativePath);
         restoreCandidates.push({
           trashPath,
           originalPath: originalPath || '',
           resolvedTrashPath,
           resolvedOriginal,
           fullRestorePath,
+          restoredPath,
           restoredIsDirectory,
           usedFallbackPath,
         });
@@ -918,23 +929,27 @@ async function restoreFromTrashUnlocked(req: Request, _url: URL, context: RouteC
         destinationFullPath: context.ROOT_DIR,
         transferMode: 'default',
       });
-      const resultByPath = new Map<string, any>(
-        (((execution as any).results || []) as any[]).map((entry) => [normalizeRelPath(String(entry.path || '')), entry]),
-      );
+      const resultByPath = new Map<string, { success?: unknown; error?: unknown } | null>();
+      if (Array.isArray(execution.results)) {
+        for (const entry of execution.results) {
+          if (!entry || typeof entry.path !== 'string') continue;
+          const path = normalizeRelPath(entry.path);
+          resultByPath.set(path, resultByPath.has(path) ? null : entry);
+        }
+      }
       for (const candidate of restoreCandidates) {
         const trashRelativePath = normalizeRelPath(candidate.resolvedTrashPath.relativePath);
         const result = resultByPath.get(trashRelativePath);
-        if (!result?.success) {
-          failed.push({ trashPath: candidate.trashPath, error: result?.error || 'Restore failed' });
+        if (result?.success !== true) {
+          failed.push({ trashPath: candidate.trashPath, error: String(result?.error || 'Restore was not confirmed. Refresh Trash before retrying.') });
           continue;
         }
         cacheClearPaths.push(candidate.resolvedTrashPath.fullPath);
         removedTrashPaths.add(trashRelativePath);
-        const restoredPath = normalizeRelPath(resolveWorkspacePath(candidate.fullRestorePath, context).relativePath);
         restored.push({
           trashPath: trashRelativePath,
           originalPath: normalizeRelPath(candidate.resolvedOriginal.relativePath),
-          restoredPath,
+          restoredPath: candidate.restoredPath,
           type: candidate.restoredIsDirectory ? 'folder' : 'file',
           fallback: candidate.usedFallbackPath,
         });
@@ -947,11 +962,10 @@ async function restoreFromTrashUnlocked(req: Request, _url: URL, context: RouteC
           cacheClearPaths.push(candidate.resolvedTrashPath.fullPath);
           const trashRelativePath = normalizeRelPath(candidate.resolvedTrashPath.relativePath);
           removedTrashPaths.add(trashRelativePath);
-          const restoredPath = normalizeRelPath(resolveWorkspacePath(candidate.fullRestorePath, context).relativePath);
           restored.push({
             trashPath: trashRelativePath,
             originalPath: normalizeRelPath(candidate.resolvedOriginal.relativePath),
-            restoredPath,
+            restoredPath: candidate.restoredPath,
             type: candidate.restoredIsDirectory ? 'folder' : 'file',
             fallback: candidate.usedFallbackPath,
           });
@@ -1056,38 +1070,52 @@ async function permanentlyDeleteUnlocked(req: Request, _url: URL, context: Route
   } catch {
     return json({ error: 'Invalid JSON body' }, 400, context.corsHeaders);
   }
-  const paths = Array.isArray(body?.paths) ? body.paths.filter((p: unknown): p is string => typeof p === 'string') : [];
+  const paths: string[] = Array.isArray(body?.paths) ? body.paths.filter((p: unknown): p is string => typeof p === 'string') : [];
 
   try {
     if (paths.length === 0) {
       return json({ error: 'Paths array required' }, 400, context.corsHeaders);
     }
 
-    const resolvedPaths = paths.map((trashPath) => resolveWorkspacePath(trashPath, context));
+    const resolvedPaths = Array.from(new Set(paths)).map((trashPath) => resolveWorkspacePath(trashPath, context));
     if (resolvedPaths.some((p) => !isTrashPath(p.relativePath))) {
       return json({ error: 'Only User/Trash paths are allowed' }, 400, context.corsHeaders);
     }
 
-    const pathSet = new Set(resolvedPaths.map((p) => normalizeRelPath(p.relativePath)));
+    let results: Array<{ path: string; success: boolean; error?: string }>;
 
     if (context.fsWorkerService) {
       const execution = await context.fsWorkerService.delete({
         items: resolvedPaths.map(({ relativePath, fullPath }) => ({ path: normalizeRelPath(relativePath), fullPath })),
         force: true,
       });
-      for (const entry of (((execution as any).results || []) as any[])) {
-        if (entry?.success) {
-          const matched = resolvedPaths.find((item) => normalizeRelPath(item.relativePath) === entry.path);
-          if (matched && context.thumbnailService) await context.thumbnailService.clearCache(matched.fullPath);
+      const reported = new Map<string, { success?: unknown; error?: unknown }>();
+      if (Array.isArray(execution.results)) {
+        for (const entry of execution.results) {
+          if (entry && typeof entry.path === 'string') reported.set(entry.path, entry);
         }
       }
+      results = resolvedPaths.map(({ relativePath }) => {
+        const path = normalizeRelPath(relativePath);
+        const entry = reported.get(path);
+        return { path, success: entry?.success === true, error: entry?.success === true ? undefined : String(entry?.error || 'Deletion was not confirmed.') };
+      });
     } else {
-      await mapWithConcurrency(resolvedPaths, 8, async ({ fullPath }) => {
-          if (existsSync(fullPath)) {
-            await rm(fullPath, { recursive: true, force: true });
-            if (context.thumbnailService) await context.thumbnailService.clearCache(fullPath);
-          }
-        });
+      results = await mapWithConcurrency(resolvedPaths, 8, async ({ relativePath, fullPath }) => {
+        const path = normalizeRelPath(relativePath);
+        try {
+          await rm(fullPath, { recursive: true, force: true });
+          return { path, success: true };
+        } catch (error) {
+          return { path, success: false, error: error instanceof Error ? error.message : 'Permanent delete failed' };
+        }
+      });
+    }
+    const pathSet = new Set(results.filter((entry) => entry.success).map((entry) => entry.path));
+    for (const item of resolvedPaths) {
+      if (pathSet.has(normalizeRelPath(item.relativePath)) && context.thumbnailService) {
+        await context.thumbnailService.clearCache(item.fullPath).catch((error: unknown) => console.warn('[Trash] Thumbnail cleanup failed:', error));
+      }
     }
 
     let metadataWarning: string | null = null;
@@ -1099,8 +1127,9 @@ async function permanentlyDeleteUnlocked(req: Request, _url: URL, context: Route
     }
     return json(
       {
-        success: true,
-        deleted: resolvedPaths.length,
+        success: results.every((entry) => entry.success),
+        deleted: pathSet.size,
+        results,
         warning: metadataWarning || undefined,
       },
       200,
@@ -1207,14 +1236,23 @@ async function sendPathToSystemTrash(fullPath: string, context: RouteContext): P
   throw new Error('No supported Linux trash command found (gio/trash-put/gvfs-trash/kioclient)');
 }
 
-export async function permanentlyDeleteDirect(req: Request, _url: URL, context: RouteContext) {
+async function clearDeletedThumbnailCache(fullPath: string, context: RouteContext, warnings: Set<string>): Promise<void> {
+  try {
+    await context.thumbnailService?.clearCache(fullPath);
+  } catch (error) {
+    warnings.add('Deletion completed, but thumbnail cache cleanup failed. Refresh Gallery; do not repeat the deletion.');
+    console.warn('[Trash] Thumbnail cleanup warning after deletion:', error);
+  }
+}
+
+async function permanentlyDeleteDirectUnlocked(req: Request, _url: URL, context: RouteContext) {
   let body: any;
   try {
     body = await req.json();
   } catch {
     return json({ error: 'Invalid JSON body' }, 400, context.corsHeaders);
   }
-  const paths = Array.isArray(body?.paths) ? body.paths.filter((p: unknown): p is string => typeof p === 'string') : [];
+  const paths: string[] = Array.isArray(body?.paths) ? body.paths.filter((p: unknown): p is string => typeof p === 'string') : [];
 
   if (paths.length === 0) {
     return json({ error: 'Paths array required' }, 400, context.corsHeaders);
@@ -1222,6 +1260,7 @@ export async function permanentlyDeleteDirect(req: Request, _url: URL, context: 
 
   try {
     const removedTrashBases: string[] = [];
+    const cleanupWarnings = new Set<string>();
     const resolvedItems = paths.map((inputPath) => {
       let resolved: { relativePath: string; fullPath: string };
       try {
@@ -1234,38 +1273,45 @@ export async function permanentlyDeleteDirect(req: Request, _url: URL, context: 
     const invalidResults = resolvedItems
       .filter((item: any) => item.error)
       .map((item: any) => ({ path: item.inputPath, success: false, error: item.error }));
-    const validResolved = resolvedItems.filter((item: any) => item.resolved).map((item: any) => item.resolved as { relativePath: string; fullPath: string });
+    const validResolved = resolvedItems.filter((item: any) => item.resolved).map((item: any) => ({
+      ...item.resolved as { relativePath: string; fullPath: string },
+      requestedPath: item.inputPath as string,
+    }));
     let results: any[] = invalidResults;
     if (context.fsWorkerService && validResolved.length > 0) {
       const execution = await context.fsWorkerService.delete({
         items: validResolved.map(({ relativePath, fullPath }) => ({ path: normalizeRelPath(relativePath), fullPath })),
         force: true,
       });
-      results = results.concat((((execution as any).results || []) as any[]));
-      for (const entry of (((execution as any).results || []) as any[])) {
-        if (entry?.success) {
-          const matched = validResolved.find((item) => normalizeRelPath(item.relativePath) === entry.path);
-          if (matched) {
-            if (context.thumbnailService) await context.thumbnailService.clearCache(matched.fullPath);
-            if (isTrashPath(normalizeRelPath(matched.relativePath))) {
-              removedTrashBases.push(normalizeRelPath(matched.relativePath));
-            }
-          }
+      const reported = new Map<string, { success?: unknown; error?: unknown }>();
+      if (Array.isArray(execution.results)) {
+        for (const entry of execution.results) {
+          if (entry && typeof entry.path === 'string') reported.set(entry.path, entry);
+        }
+      }
+      for (const item of validResolved) {
+        const path = normalizeRelPath(item.relativePath);
+        const entry = reported.get(path);
+        const success = entry?.success === true;
+        results.push({ path, requestedPath: item.requestedPath, success, error: success ? undefined : String(entry?.error || 'Deletion was not confirmed.') });
+        if (success) {
+          if (isTrashPath(path)) removedTrashBases.push(path);
+          await clearDeletedThumbnailCache(item.fullPath, context, cleanupWarnings);
         }
       }
     } else if (validResolved.length > 0) {
       const fallbackResults = await mapWithConcurrency(validResolved, 8, async (resolved) => {
         const normalizedPath = normalizeRelPath(resolved.relativePath);
         if (!existsSync(resolved.fullPath)) {
-          return { path: normalizedPath, success: false, error: 'Path does not exist' };
+          return { path: normalizedPath, requestedPath: resolved.requestedPath, success: false, error: 'Path does not exist' };
         }
         try {
           await rm(resolved.fullPath, { recursive: true, force: true });
-          if (context.thumbnailService) await context.thumbnailService.clearCache(resolved.fullPath);
           if (isTrashPath(normalizedPath)) removedTrashBases.push(normalizedPath);
-          return { path: normalizedPath, success: true };
+          await clearDeletedThumbnailCache(resolved.fullPath, context, cleanupWarnings);
+          return { path: normalizedPath, requestedPath: resolved.requestedPath, success: true };
         } catch (err: any) {
-          return { path: normalizedPath, success: false, error: err?.message || 'Permanent delete failed' };
+          return { path: normalizedPath, requestedPath: resolved.requestedPath, success: false, error: err?.message || 'Permanent delete failed' };
         }
       });
       results = results.concat(fallbackResults);
@@ -1283,10 +1329,10 @@ export async function permanentlyDeleteDirect(req: Request, _url: URL, context: 
 
     return json(
       {
-        success: results.some((entry) => entry.success),
-        deleted: results.filter((entry) => entry.success).length,
+        success: results.length > 0 && results.every((entry) => entry.success === true),
+        deleted: results.filter((entry) => entry.success === true).length,
         results,
-        warning: metadataWarning || undefined,
+        warning: [metadataWarning, ...cleanupWarnings].filter(Boolean).join(' ') || undefined,
       },
       200,
       context.corsHeaders,
@@ -1297,20 +1343,22 @@ export async function permanentlyDeleteDirect(req: Request, _url: URL, context: 
   }
 }
 
-export async function deleteToSystemTrash(req: Request, _url: URL, context: RouteContext) {
+async function deleteToSystemTrashUnlocked(req: Request, _url: URL, context: RouteContext) {
   let body: any;
   try {
     body = await req.json();
   } catch {
     return json({ error: 'Invalid JSON body' }, 400, context.corsHeaders);
   }
-  const paths = Array.isArray(body?.paths) ? body.paths.filter((p: unknown) => typeof p === 'string') : [];
+  const paths: string[] = Array.isArray(body?.paths) ? body.paths.filter((p: unknown): p is string => typeof p === 'string') : [];
 
   if (paths.length === 0) {
     return json({ error: 'Paths array required' }, 400, context.corsHeaders);
   }
 
   try {
+    const cleanupWarnings = new Set<string>();
+    const removedTrashPaths = new Set<string>();
     const results = await mapWithConcurrency(paths, 3, async (p) => {
       let resolved: { relativePath: string; fullPath: string };
       try {
@@ -1325,9 +1373,9 @@ export async function deleteToSystemTrash(req: Request, _url: URL, context: Rout
 
       try {
         await sendPathToSystemTrash(fullPath, context);
+        if (isTrashPath(resolved.relativePath)) removedTrashPaths.add(resolved.relativePath);
 
-        if (context.thumbnailService) await context.thumbnailService.clearCache(fullPath);
-        // try { db.exec(`DELETE FROM images WHERE path = '${fullPath.replace(/'/g, "''")}'`); } catch { }
+        await clearDeletedThumbnailCache(fullPath, context, cleanupWarnings);
 
         return { path: p, success: true };
       } catch (err: any) {
@@ -1336,7 +1384,15 @@ export async function deleteToSystemTrash(req: Request, _url: URL, context: Rout
       }
     });
 
-    return json({ success: true, results }, 200, context.corsHeaders);
+    if (removedTrashPaths.size > 0) {
+      try {
+        await mergeMetadataItems(context, { removeTrashPaths: removedTrashPaths });
+      } catch (error) {
+        cleanupWarnings.add(error instanceof Error ? error.message : 'Trash metadata could not be saved');
+        console.warn('[Trash] Metadata save warning after system trash:', error);
+      }
+    }
+    return json({ success: results.every((entry) => entry.success === true), results, warning: [...cleanupWarnings].join(' ') || undefined }, 200, context.corsHeaders);
   } catch (err: any) {
     console.error('[Trash] System trash error:', err);
     return json({ error: err.message }, 500, context.corsHeaders);

@@ -160,6 +160,7 @@ function copyTree(source, target, options = {}) {
 
   const stats = fs.lstatSync(source);
   if (stats.isSymbolicLink()) {
+    if (isCleanRelease && !options.allowSkippedSource) throw new Error(`Refusing source symlink in clean release: ${source}`);
     const realSource = fs.realpathSync(source);
     const realStats = fs.statSync(realSource);
     if (realStats.isDirectory()) {
@@ -198,6 +199,7 @@ function copyTree(source, target, options = {}) {
 
 function copyExplicitFile(source, target) {
   if (!fs.existsSync(source)) return;
+  if (isCleanRelease && fs.lstatSync(source).isSymbolicLink()) throw new Error(`Refusing source symlink in clean release: ${source}`);
   const sourceStats = fs.statSync(source);
   if (fs.existsSync(target)) {
     const targetStats = fs.statSync(target);
