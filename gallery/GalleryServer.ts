@@ -437,7 +437,7 @@ async function computeFolderSummary(dirPath: string): Promise<FolderSummary> {
   let firstMediaType: 'image' | 'gif' | 'video' | null = null;
 
   const sortedEntries = [...entries].sort((a, b) => (
-    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    galleryNameCollator.compare(a.name, b.name)
   ));
 
   for (const entry of sortedEntries) {
@@ -709,8 +709,10 @@ type MetadataSearchPayload = {
   total: number;
 };
 
+const galleryNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
 function compareMediaByName(a: MediaFileRecord, b: MediaFileRecord): number {
-  return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+  return galleryNameCollator.compare(a.name, b.name);
 }
 
 function compareMedia(
@@ -740,7 +742,7 @@ function compareMedia(
 }
 
 function compareMediaCandidatesByName(a: MediaCandidate, b: MediaCandidate): number {
-  const byName = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+  const byName = galleryNameCollator.compare(a.name, b.name);
   if (byName !== 0) return byName;
   return a.clientPath.localeCompare(b.clientPath);
 }
@@ -862,7 +864,13 @@ function resolveGalleryPath(input: string): string {
   const raw = String(input || '').trim();
   if (!raw) return '';
   if (isAbsolute(raw)) return resolve(raw);
-  return resolve(ROOT_DIR, raw);
+  // Match the main API's legacy output alias so thumbnails, metadata and editor
+  // handoffs all resolve the same file. Absolute paths remain literal.
+  const normalized = raw.replace(/\\/g, '/');
+  const mapped = normalized === 'User/Outputs' || normalized.startsWith('User/Outputs/')
+    ? `Tools/ComfyUI/output${normalized.slice('User/Outputs'.length)}`
+    : normalized;
+  return resolve(ROOT_DIR, mapped);
 }
 
 function createClientPathMapper(inputRoot: string, resolvedRoot: string) {
@@ -1007,7 +1015,7 @@ async function handleTree(reqUrl: URL): Promise<Response> {
           name: entry.name,
           path: toClientPath(join(dirPath, entry.name)),
         }))
-        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+        .sort((a, b) => galleryNameCollator.compare(a.name, b.name));
       setCachedFolderTree(dirPath, nextFolders);
       return nextFolders;
     });
@@ -1063,6 +1071,34 @@ function createMissingListProgressivePayload(pathValue: string, sortBy: GalleryS
   };
 }
 
+type GalleryDirectorySnapshot = {
+  dirPath: string;
+  clientFolderPath: string;
+  folders: Array<{ name: string; path: string }>;
+  candidates: MediaCandidate[];
+  expiresAt: number;
+};
+const directorySnapshots = new Map<string, GalleryDirectorySnapshot>();
+const DIRECTORY_SNAPSHOT_TTL_MS = 120_000;
+
+function rememberDirectorySnapshot(snapshot: GalleryDirectorySnapshot): string | undefined {
+  for (const [id, entry] of directorySnapshots) {
+    if (entry.expiresAt <= Date.now()) directorySnapshots.delete(id);
+  }
+  if (snapshot.candidates.length > 100_000) return undefined;
+  let total = snapshot.candidates.length;
+  for (const entry of directorySnapshots.values()) total += entry.candidates.length;
+  while (directorySnapshots.size >= 8 || total > 100_000) {
+    const oldest = directorySnapshots.entries().next().value;
+    if (!oldest) break;
+    total -= oldest[1].candidates.length;
+    directorySnapshots.delete(oldest[0]);
+  }
+  const id = crypto.randomUUID();
+  directorySnapshots.set(id, snapshot);
+  return id;
+}
+
 async function buildListProgressivePayload(
   dirPath: string,
   clientFolderPath: string,
@@ -1071,6 +1107,7 @@ async function buildListProgressivePayload(
   sortBy: GallerySortBy,
   sortOrder: GallerySortOrder,
   fastPage: boolean,
+  requestedSnapshot?: string,
 ) {
   const traceStartedAt = nowMs();
   let readdirMs = 0;
@@ -1079,24 +1116,38 @@ async function buildListProgressivePayload(
   const normalizedClientFolderPath = normalizePath(clientFolderPath) || normalizePath(dirPath);
   const toClientPath = createClientPathMapper(normalizedClientFolderPath, dirPath);
   const readdirStartedAt = nowMs();
-  const entries = await fs.readdir(dirPath, { withFileTypes: true });
-  readdirMs = nowMs() - readdirStartedAt;
-  const folders = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => ({
-      name: entry.name,
-      path: toClientPath(join(dirPath, entry.name)),
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+  let snapshot = requestedSnapshot ? directorySnapshots.get(requestedSnapshot) : undefined;
+  if (requestedSnapshot && (!snapshot || snapshot.expiresAt <= Date.now()
+    || snapshot.dirPath !== dirPath || snapshot.clientFolderPath !== normalizedClientFolderPath)) {
+    throw new Error('Gallery listing expired. Refresh the folder to retry.');
+  }
+  let snapshotId = requestedSnapshot;
+  if (!snapshot) {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+    readdirMs = nowMs() - readdirStartedAt;
+    const folders = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => ({
+        name: entry.name,
+        path: toClientPath(join(dirPath, entry.name)),
+      }))
+      .sort((a, b) => galleryNameCollator.compare(a.name, b.name));
 
-  const mediaCandidates = entries
-    .filter((entry) => entry.isFile() && isSupportedMediaPath(entry.name))
-    .map((entry) => ({
-      name: entry.name,
-      absolutePath: join(dirPath, entry.name),
-      clientPath: toClientPath(join(dirPath, entry.name)),
-      folderPath: normalizedClientFolderPath,
-    }));
+    const mediaCandidates = entries
+      .filter((entry) => entry.isFile() && isSupportedMediaPath(entry.name))
+      .map((entry) => ({
+        name: entry.name,
+        absolutePath: join(dirPath, entry.name),
+        clientPath: toClientPath(join(dirPath, entry.name)),
+        folderPath: normalizedClientFolderPath,
+      }));
+    mediaCandidates.sort(compareMediaCandidatesByName);
+    snapshot = { dirPath, clientFolderPath: normalizedClientFolderPath, folders, candidates: mediaCandidates, expiresAt: Date.now() + DIRECTORY_SNAPSHOT_TTL_MS };
+    if (fastPage) snapshotId = rememberDirectorySnapshot(snapshot);
+  }
+  snapshot.expiresAt = Date.now() + DIRECTORY_SNAPSHOT_TTL_MS;
+  const folders = snapshot.folders;
+  const mediaCandidates = snapshot.candidates;
 
   let page: MediaFileRecord[] = [];
   let total = mediaCandidates.length;
@@ -1104,9 +1155,9 @@ async function buildListProgressivePayload(
 
   const pageStartedAt = nowMs();
   if (fastPage) {
-    const orderedCandidates = [...mediaCandidates].sort(compareMediaCandidatesByName);
-    if (sortOrder === 'desc') orderedCandidates.reverse();
-    const pageCandidates = orderedCandidates.slice(cursor, cursor + limit);
+    const pageCandidates = sortOrder === 'desc'
+      ? mediaCandidates.slice(Math.max(0, total - cursor - limit), Math.max(0, total - cursor)).reverse()
+      : mediaCandidates.slice(cursor, cursor + limit);
     const statStartedAt = nowMs();
     const validInputs = await statMediaCandidates(pageCandidates, normalizedClientFolderPath);
     const inputsByFolder = new Map<string, typeof validInputs>();
@@ -1146,9 +1197,11 @@ async function buildListProgressivePayload(
   }
   pageMs = nowMs() - pageStartedAt;
 
-  scheduleFolderSummaryPrewarm(dirPath);
-  for (const folder of folders.slice(0, FOLDER_SUMMARY_PREWARM_CHILD_LIMIT)) {
-    scheduleFolderSummaryPrewarm(folder.path);
+  if (cursor === 0) {
+    scheduleFolderSummaryPrewarm(dirPath);
+    for (const folder of folders.slice(0, FOLDER_SUMMARY_PREWARM_CHILD_LIMIT)) {
+      scheduleFolderSummaryPrewarm(folder.path);
+    }
   }
   if (!fastPage) schedulePageThumbnailPrewarm(page);
   traceGalleryService('list_build', {
@@ -1177,6 +1230,7 @@ async function buildListProgressivePayload(
     total,
     sortBy,
     sortOrder,
+    ...(snapshotId ? { snapshot: snapshotId } : {}),
   };
 }
 
@@ -1198,10 +1252,11 @@ async function handleListProgressive(reqUrl: URL): Promise<Response> {
       invalidateFolderTree(dirPath);
       invalidateFolderSummary(dirPath, true);
     }
-    const requestKey = `list:${dirPath}:${sortBy}:${sortOrder}:${cursor}:${limit}:fast:${fastPage ? 1 : 0}:force:${force ? startedAt : 0}`;
+    const snapshot = cursor > 0 ? reqUrl.searchParams.get('snapshot') || undefined : undefined;
+    const requestKey = `list:${dirPath}:${normalizePath(pathValue)}:${sortBy}:${sortOrder}:${cursor}:${limit}:fast:${fastPage ? 1 : 0}:snapshot:${snapshot || ''}:force:${force ? startedAt : 0}`;
     const workerStartedAt = nowMs();
     const payload = await galleryWorker.run(requestKey, async () => (
-      buildListProgressivePayload(dirPath, normalizePath(pathValue) || dirPath, cursor, limit, sortBy, sortOrder, fastPage)
+      buildListProgressivePayload(dirPath, normalizePath(pathValue) || dirPath, cursor, limit, sortBy, sortOrder, fastPage, snapshot)
     ));
     const workerMs = nowMs() - workerStartedAt;
     traceGalleryService('list_progressive', {
@@ -1370,7 +1425,7 @@ async function handleSearch(reqUrl: URL): Promise<Response> {
 
       const directories = entries
         .filter((entry) => entry.isDirectory())
-        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+        .sort((a, b) => galleryNameCollator.compare(a.name, b.name));
       for (const entry of directories) {
         const absolutePath = join(current.absolutePath, entry.name);
         const absoluteKey = normalizePath(absolutePath).toLowerCase();
@@ -1425,7 +1480,7 @@ async function handleSearch(reqUrl: URL): Promise<Response> {
       .sort((a, b) => compareSearchFiles(a, b, query, sortBy, sortOrder))
       .slice(0, fileLimit);
     const folders = Array.from(foldersByPath.values())
-      .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: 'base' }))
+      .sort((a, b) => galleryNameCollator.compare(a.path, b.path))
       .slice(0, folderLimit);
 
     traceGalleryService('search', {
@@ -1942,7 +1997,7 @@ async function handleImage(req: Request, reqUrl: URL): Promise<Response> {
     const ifNoneMatch = req.headers.get('if-none-match') || '';
     const ext = extname(filePath).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-    const previewMode = String(reqUrl.searchParams.get('preview') || '').trim().toLowerCase();
+    const previewMode = reqUrl.searchParams.get('original') === '1' ? '' : String(reqUrl.searchParams.get('preview') || '').trim().toLowerCase();
     const resizeEnabled = String(reqUrl.searchParams.get('gpr') || '1').trim() !== '0';
     const maxLongSide = clamp(Number(reqUrl.searchParams.get('gpm') || 512) || 512, 128, 2048);
     const quality = clamp(Number(reqUrl.searchParams.get('gpq') || 90) || 90, 40, 95);

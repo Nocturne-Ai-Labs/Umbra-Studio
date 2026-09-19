@@ -593,11 +593,30 @@ export function normalizeUmbraUiMediaHandoff(value: unknown): UmbraUiMediaHandof
   };
 }
 
-export async function fetchUmbraUiMediaMetadata(path: string): Promise<ImageMetadata | null> {
+export function originalUmbraUiMediaUrl(path: string, suppliedUrl = ''): string {
+  // Preview URLs are for display, never the pixels imported into an editor.
+  if (suppliedUrl) {
+    const base = typeof window !== 'undefined' && window.location ? window.location.origin : 'http://localhost';
+    try {
+      const url = new URL(suppliedUrl, base);
+      if (url.origin !== base || !/^\/api\/(?:gallery-bridge\/)?fs\/(?:image|thumbnail|preview)$/.test(url.pathname)) return suppliedUrl;
+      const params = new URLSearchParams({ path, original: '1' });
+      for (const key of ['v', 'rev']) if (url.searchParams.has(key)) params.set(key, url.searchParams.get(key)!);
+      return `/api/fs/image?${params}`;
+    } catch { return suppliedUrl; }
+  }
+  return `/api/fs/image?${new URLSearchParams({ path, original: '1' })}`;
+}
+
+let latestHandoffId = 0;
+
+export async function fetchUmbraUiMediaMetadata(path: string, signal?: AbortSignal): Promise<ImageMetadata | null> {
   const normalizedPath = normalizePath(path);
   if (!normalizedPath) return null;
   try {
-    const response = await fetch(`/api/fs/metadata?${new URLSearchParams({ path: normalizedPath }).toString()}`, { cache: 'no-store' });
+    const response = await fetch(`/api/fs/metadata?${new URLSearchParams({ path: normalizedPath }).toString()}`, {
+      cache: 'no-store', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000),
+    });
     if (!response.ok) return null;
     return await response.json() as ImageMetadata;
   } catch {
@@ -638,7 +657,10 @@ export async function stageUmbraUiMediaHandoff(options: {
 }): Promise<UmbraUiMediaHandoff> {
   const path = normalizePath(options.path);
   if (!path) throw new Error('Choose media before sending it to Umbra UI.');
+  // Stamp the intent before I/O so an older, slower click cannot replace a newer image.
+  const handoffId = latestHandoffId = Math.max(Date.now(), latestHandoffId + 1);
   const metadata = options.metadata === undefined ? await fetchUmbraUiMediaMetadata(path) : options.metadata;
+  if (handoffId !== latestHandoffId) throw new DOMException('A newer image transfer replaced this request.', 'AbortError');
   const inpaint = isRecord(metadata?.umbra_inpaint) ? metadata.umbra_inpaint : {};
   const originalSourcePath = normalizePath(options.originalSourcePath)
     || normalizePath(inpaint.originalSourcePath)
@@ -659,7 +681,7 @@ export async function stageUmbraUiMediaHandoff(options: {
     path,
     originalSourcePath,
     name: String(options.name || path.split('/').pop() || 'image').trim(),
-    imageUrl: options.imageUrl || `/api/fs/image?${new URLSearchParams({ path }).toString()}`,
+    imageUrl: originalUmbraUiMediaUrl(path, options.imageUrl),
     source: String(options.source || 'umbra-ui').trim() || 'umbra-ui',
     ...(canvasProjectId ? { canvasProjectId } : {}),
     ...(canvasOperationMode ? { canvasOperationMode } : {}),
@@ -668,7 +690,7 @@ export async function stageUmbraUiMediaHandoff(options: {
     ...(options.studioDestination ? { studioDestination: options.studioDestination } : {}),
     ...(options.mode === 'video' ? { videoFrameRole: options.videoFrameRole || 'first' } : {}),
     generation,
-    createdAt: Date.now(),
+    createdAt: handoffId,
   };
   const target = window as typeof window & { __umbraPendingUmbraUiMediaHandoff?: UmbraUiMediaHandoff | null };
   target.__umbraPendingUmbraUiMediaHandoff = payload;

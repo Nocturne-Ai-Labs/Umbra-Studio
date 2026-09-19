@@ -66,6 +66,8 @@ export interface DatasetImage {
   width?: number;
   height?: number;
   tags?: string[]; // Original booru tags if available
+  canRedownload?: boolean;
+  revision?: number;
 }
 
 // Booru source configuration

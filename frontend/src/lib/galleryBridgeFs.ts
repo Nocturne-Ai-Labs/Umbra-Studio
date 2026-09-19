@@ -68,6 +68,7 @@ export async function fetchGalleryFs(pathname: string, params: URLSearchParams, 
     const nextParams = new URLSearchParams(params);
     nextParams.set('cursor', String(cursor));
     nextParams.set('limit', '256');
+    if (typeof page.snapshot === 'string') nextParams.set('snapshot', page.snapshot);
     nextParams.delete('force');
     nextParams.delete('refresh');
     const nextResponse = await fetchGalleryFsPage(pathname, nextParams, init);

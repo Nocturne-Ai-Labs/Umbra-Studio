@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.32.18 - Regression Recovery And Dataset Download Repair
+
+### TL;DR - Setup After Updating
+
+- Update through Umbra's updater, then restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux. Refresh open browser sessions after the restart.
+- No new models, custom nodes, or ComfyUI update are required. Back up important projects before updating; existing images, captions, models, and settings are retained.
+- In Data Forge > Datasets, open a concept folder and use **Re-download original** on an image, in its sidebar, or in the full-size viewer. Original files must still be available from the source site. Some sources require credentials under Data Forge > Search > Auth.
+- Older booru downloads can be recovered through their original hash filenames. Imported or renamed images without saved source information cannot be recovered automatically.
+
+### Gallery And Media Transfer Regressions
+
+- Correct JPEG archive completion for Sharp image streams, including large images. Reject interrupted or invalid image data instead of reporting an empty or incomplete archive as successful.
+- Prepare Gallery downloads without navigating away from Umbra. Export errors remain inside the app, with cancellation available while an archive is prepared. Editor ZIP exports use the bundled archive implementation.
+- Reuse bounded directory snapshots across listing pages and cancel obsolete folder requests. A synthetic 10,000-file listing improved from approximately 8.5 seconds to 1.5 seconds in the isolated Windows test; actual storage performance varies.
+- Transfer original-resolution source pixels instead of optimized thumbnails. Bound metadata retrieval and prevent an older request from replacing the newest transfer.
+- Retain Inpaint and Video transfers until the receiving workspace consumes them. Prevent incoming Inpaint controls from changing the previous document and cancelling the source-image replacement.
+- Honor the server's host classification for local controls and retain socket identity in file-reveal actions. Remote clients remain subject to the existing access restrictions.
+
+### Data Forge Download Recovery
+
+- Add per-image re-download controls, including for images that cannot be displayed.
+- Check source checksums, response completeness, and full image decoding before atomically publishing downloaded images. Existing corrupt files are no longer silently treated as successful downloads.
+- Preserve saved and unsaved captions during image recovery. Failed downloads leave the existing image untouched; concurrent downloads cannot race for the same destination.
+- Save recovery source information alongside new downloads, retain it when moving between concepts, and refresh unavailable source URLs when the original can be found again.
+- Refresh repaired thumbnails and keep concept tiles large enough for their controls.
+
+### Packaging And Compatibility
+
+- Stop seeding the optional censoring reference document into portable installations. Clean-package validation rejects accidental copies in the application root or packaged application directory. Existing user files are not deleted by this change.
+- This patch supersedes the withdrawn v0.32.16 and v0.32.17 packages. Those releases remain unpublished.
+- Linux managed-tool prerequisites remain `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit UI setup still requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Gallery JPEG exports failing with a premature-close error or replacing the application with an error page.
+- Fixed: slow repeated folder scans, stale image transfers, and Inpaint keeping the previous source image.
+- Fixed: host-only controls being unavailable on the host and incomplete booru downloads being accepted as successful.
+- Improved: per-image dataset recovery, caption preservation, export failure feedback, and portable-package content checks.
+
 ## v0.32.17 - Studio Reliability And Data Protection
 
 ### TL;DR - Setup After Updating

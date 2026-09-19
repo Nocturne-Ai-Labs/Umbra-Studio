@@ -30,6 +30,8 @@ export function DownloadsTab() {
           md5: item.post.md5,
           ext: item.post.fileExt,
           tags: item.post.tags,
+          source: item.post.source,
+          postId: item.post.id,
           dataset: item.dataset,
           concept: item.concept,
         }),

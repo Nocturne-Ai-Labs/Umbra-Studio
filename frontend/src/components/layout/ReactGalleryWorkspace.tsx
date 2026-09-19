@@ -52,6 +52,7 @@ import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
 import { useGalleryTransfer, startGalleryTransfer, useGalleryUndoMove, undoGalleryMove } from '@/lib/galleryTransfers';
 import { useGalleryTreeRefresh } from '@/lib/galleryTreeRefresh';
+import { prepareGalleryDownload, startGalleryDownload } from '@/lib/galleryDownloads';
 import { GalleryTransferStrip } from './GalleryTransferStrip';
 import { archiveIsActive, startGalleryArchive, useGalleryArchive } from '@/lib/galleryArchives';
 import { GalleryArchiveList, GalleryArchiveStatus } from './GalleryArchives';
@@ -1393,6 +1394,8 @@ function buildRenamePreview(paths: string[], templateValue: string): GalleryRena
   });
 }
 
+const galleryNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
 function compareGalleryFiles(
   left: GalleryFile,
   right: GalleryFile,
@@ -1403,10 +1406,7 @@ function compareGalleryFiles(
   if (sortBy === 'modified') {
     value = Number(left.modifiedMs || 0) - Number(right.modifiedMs || 0);
   } else if (sortBy === 'name') {
-    value = String(left.name || pathLeaf(left.path)).localeCompare(String(right.name || pathLeaf(right.path)), undefined, {
-      numeric: true,
-      sensitivity: 'base',
-    });
+    value = galleryNameCollator.compare(String(left.name || pathLeaf(left.path)), String(right.name || pathLeaf(right.path)));
   } else if (sortBy === 'custom') {
     value = Number(left.customOrder || 0) - Number(right.customOrder || 0);
   } else {
@@ -1414,10 +1414,7 @@ function compareGalleryFiles(
   }
 
   if (value === 0) {
-    value = String(left.name || pathLeaf(left.path)).localeCompare(String(right.name || pathLeaf(right.path)), undefined, {
-      numeric: true,
-      sensitivity: 'base',
-    });
+    value = galleryNameCollator.compare(String(left.name || pathLeaf(left.path)), String(right.name || pathLeaf(right.path)));
   }
   if (value === 0) value = normalizePath(left.path).localeCompare(normalizePath(right.path));
   return sortOrder === 'desc' ? -value : value;
@@ -5489,6 +5486,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     const preserveScroll = options?.preserveScroll === true && pathsEqual(folderPath, currentFolder);
     const preservedScrollTop = preserveScroll ? (scrollParentRef.current?.scrollTop ?? 0) : 0;
     const seq = ++loadSeqRef.current;
+    folderLoadAbortRef.current?.abort();
+    folderLoadAbortRef.current = null;
+    setError('');
     const loadSource = options?.source || 'system';
     if (loadSource === 'local') {
       const navigationAt = Date.now();
@@ -5555,6 +5555,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     if (!preserveScroll) scrollParentRef.current?.scrollTo({ top: 0 });
     setOpeningFolder((current) => (pathsEqual(current, folderPath) ? current : folderPath));
     if (cachedPayload) {
+      setLoading(false);
       const cachedResult = applyPayload(cachedPayload);
       if (cachedResult.stale) return;
       traceGalleryLoad({
@@ -5572,7 +5573,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       }
     }
     abortController = new AbortController();
-    folderLoadAbortRef.current?.abort();
     folderLoadAbortRef.current = abortController;
     if (!cachedPayload) setLoading(true);
     setError('');
@@ -7375,23 +7375,34 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     }
   }, [addToast, isRemoteClient]);
 
+  const exportAbortRef = useRef<AbortController | null>(null);
+  const [exportStatus, setExportStatus] = useState('');
+  useEffect(() => () => exportAbortRef.current?.abort(), []);
+
+  const downloadArchive = useCallback(async (paths: string[], metadata: 'keep' | 'strip' | null) => {
+    if (exportAbortRef.current) return;
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
+    setExportStatus(`Preparing ${paths.length} file${paths.length === 1 ? '' : 's'} for download...`);
+    try {
+      const ready = await prepareGalleryDownload(paths, metadata, controller.signal);
+      startGalleryDownload(ready.url, ready.filename);
+      addToast({ type: 'success', message: 'Export ready. Download started.' });
+    } catch (error) {
+      if (!controller.signal.aborted) addToast({ type: 'error', message: error instanceof Error ? error.message : 'Gallery export failed.' });
+    } finally {
+      if (exportAbortRef.current === controller) {
+        exportAbortRef.current = null;
+        setExportStatus('');
+      }
+    }
+  }, [addToast]);
+
   const downloadOriginalPaths = useCallback((paths: string[]) => {
     const normalized = stripLiveGenerationPreviewPaths(paths);
     if (normalized.length === 0 || typeof document === 'undefined') return;
     if (normalized.length > 1) {
-      const form = document.createElement('form');
-      const input = document.createElement('input');
-      form.method = 'POST';
-      form.action = '/api/fs/download-zip';
-      form.style.display = 'none';
-      input.type = 'hidden';
-      input.name = 'paths';
-      input.value = JSON.stringify(normalized);
-      form.appendChild(input);
-      document.body.appendChild(form);
-      form.submit();
-      window.setTimeout(() => form.remove(), 1000);
-      addToast({ type: 'success', message: `Packing ${normalized.length} originals into a zip` });
+      void downloadArchive(normalized, null);
       return;
     }
     normalized.forEach((path, index) => {
@@ -7410,35 +7421,13 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       type: 'success',
       message: normalized.length === 1 ? 'Downloading original' : `Downloading ${normalized.length} originals`,
     });
-  }, [addToast]);
+  }, [addToast, downloadArchive]);
 
   const downloadJpegZip = useCallback((paths: string[], metadata: 'keep' | 'strip') => {
     const normalized = stripLiveGenerationPreviewPaths(paths);
     if (normalized.length === 0 || typeof document === 'undefined') return;
-    const form = document.createElement('form');
-    const pathsInput = document.createElement('input');
-    const metadataInput = document.createElement('input');
-    form.method = 'POST';
-    form.action = '/api/fs/download-jpeg-zip';
-    form.style.display = 'none';
-    pathsInput.type = 'hidden';
-    pathsInput.name = 'paths';
-    pathsInput.value = JSON.stringify(normalized);
-    metadataInput.type = 'hidden';
-    metadataInput.name = 'metadata';
-    metadataInput.value = metadata;
-    form.appendChild(pathsInput);
-    form.appendChild(metadataInput);
-    document.body.appendChild(form);
-    form.submit();
-    window.setTimeout(() => form.remove(), 1000);
-    addToast({
-      type: 'success',
-      message: metadata === 'keep'
-        ? `Packing ${normalized.length} JPEG${normalized.length === 1 ? '' : 's'} with metadata`
-        : `Packing ${normalized.length} clean JPEG${normalized.length === 1 ? '' : 's'}`,
-    });
-  }, [addToast]);
+    void downloadArchive(normalized, metadata);
+  }, [downloadArchive]);
 
   const refreshDatasetTargets = useCallback(async (options: { quiet?: boolean } = {}) => {
     setDatasetTargetsLoading(true);
@@ -10085,6 +10074,11 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
       <GalleryTransferStrip transfer={transferProgress} />
+      {exportStatus && <div role="status" className="flex shrink-0 items-center gap-2 border-b border-white/10 px-3 py-2 text-xs">
+        <Loader2 size={14} className="animate-spin" />
+        <span>{exportStatus}</span>
+        <button type="button" className="ml-auto p-1" title="Cancel export" aria-label="Cancel export" onClick={() => exportAbortRef.current?.abort()}><X size={14} /></button>
+      </div>}
       <GalleryArchiveStatus job={archiveJob} />
     <section
       className="flex min-h-0 w-full flex-1 bg-zinc-950 text-zinc-100"

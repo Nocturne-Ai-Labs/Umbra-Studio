@@ -2401,6 +2401,15 @@ function parsePendingHandoff(value: unknown): UmbraUiInpaintHandoff | null {
   };
 }
 
+function readPendingInpaintHandoff(): UmbraUiInpaintHandoff | null {
+  const target = window as typeof window & { __umbraPendingUmbraUiMediaHandoff?: unknown };
+  const direct = parsePendingHandoff(target.__umbraPendingUmbraUiMediaHandoff);
+  if (direct) return direct;
+  try {
+    return parsePendingHandoff(JSON.parse(window.sessionStorage.getItem('umbra-ui:pending-media-handoff') || 'null'));
+  } catch { return null; }
+}
+
 export function UmbraInpaintWorkspace({
   active = true,
   capabilities,
@@ -3085,6 +3094,9 @@ export function UmbraInpaintWorkspace({
 
   React.useEffect(() => {
     if (!canvasDocument) return;
+    // Incoming controls belong to the new image. Mirroring them into the old
+    // document would change its revision and cancel the guarded source load.
+    if (readPendingInpaintHandoff()) return;
     if (generationRestoreProjectId === canvasDocument.id) {
       setGenerationRestoreProjectId('');
       return;
@@ -4576,11 +4588,8 @@ export function UmbraInpaintWorkspace({
   }, [applyRecoveredInpaintSettings, dispatchCanvasDocument, loadSource, openProject, showToast]);
 
   React.useEffect(() => {
-    const target = window as typeof window & { __umbraPendingUmbraUiMediaHandoff?: unknown };
-    const direct = parsePendingHandoff(target.__umbraPendingUmbraUiMediaHandoff);
-    let stored: UmbraUiInpaintHandoff | null = null;
-    try { stored = parsePendingHandoff(JSON.parse(window.sessionStorage.getItem('umbra-ui:pending-media-handoff') || 'null')); } catch { /* ignore */ }
-    const pending = direct || stored;
+    if (!active) return;
+    const pending = readPendingInpaintHandoff();
     if (pending) {
       consumeHandoff(pending);
     }
@@ -4590,7 +4599,7 @@ export function UmbraInpaintWorkspace({
     };
     window.addEventListener('umbra:umbra-ui-media-handoff', onHandoff);
     return () => window.removeEventListener('umbra:umbra-ui-media-handoff', onHandoff);
-  }, [consumeHandoff]);
+  }, [active, consumeHandoff]);
 
   React.useEffect(() => {
     const pending = selectUmbraUiInpaintRecoveryTarget(canvasDocument?.pendingJobs || [], job);

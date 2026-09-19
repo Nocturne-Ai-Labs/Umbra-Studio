@@ -1,5 +1,5 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
-import { useState, useEffect, type DragEvent } from 'react';
+import { useState, useEffect, useRef, type DragEvent } from 'react';
 import { Archive, Trash2, Move, Tag, Check, CheckSquare, Square, Loader2, Upload, X, Flag, Sparkles, Copy, FolderOpen } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { useDropZone } from '@/lib/dnd';
@@ -13,6 +13,8 @@ import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { useDatasets } from './hooks/useDatasets';
 import type { DatasetConceptSettings } from './hooks/useDatasets';
 import type { DatasetImage } from './types';
+import { datasetImageUrl, redownloadDatasetImage } from './datasetMedia';
+import { DatasetRedownloadButton } from './components/DatasetRedownloadButton';
 
 const IMAGE_FILE_PATTERN = /\.(avif|bmp|gif|jpe?g|png|webp)$/i;
 const WAIFU_MODEL_OPTIONS = [
@@ -127,6 +129,32 @@ export function DatasetsTab() {
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [focusedImage, setFocusedImage] = useState<DatasetImage | null>(null);
   const [isLoadingImages, setIsLoadingImages] = useState(false);
+  const [repairingImages, setRepairingImages] = useState<Set<string>>(new Set());
+  const repairLocks = useRef(new Set<string>());
+  const conceptKey = JSON.stringify([selectedDataset, selectedConcept]);
+  const activeConcept = useRef(conceptKey);
+  activeConcept.current = conceptKey;
+  const repairKey = (filename: string) => JSON.stringify([selectedDataset, selectedConcept, filename]);
+  const handleRedownload = async (image: DatasetImage) => {
+    if (!selectedDataset || !selectedConcept) return;
+    const key = repairKey(image.filename);
+    if (repairLocks.current.has(key)) return;
+    repairLocks.current.add(key);
+    setRepairingImages(previous => new Set(previous).add(key));
+    try {
+      const revision = await redownloadDatasetImage(selectedDataset, selectedConcept, image.filename);
+      if (activeConcept.current === conceptKey) {
+        setImages(previous => previous.map(item => item.filename === image.filename ? { ...item, revision } : item));
+        setFocusedImage(previous => previous?.filename === image.filename ? { ...previous, revision } : previous);
+      }
+      showToast('Original image restored. Captions kept.', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Image re-download failed.', 'error');
+    } finally {
+      repairLocks.current.delete(key);
+      setRepairingImages(previous => { const next = new Set(previous); next.delete(key); return next; });
+    }
+  };
 
   // Modal states
   const [showNewDataset, setShowNewDataset] = useState(false);
@@ -1205,9 +1233,9 @@ export function DatasetsTab() {
               <p>No images - drag from filmstrip or download from Search</p>
             </div>
           ) : (
-            <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2">
               {images.map((img, index) => {
-                const imageUrl = `/api/files/datasets/${selectedDataset}/${selectedConcept}/${img.filename}`;
+                const imageUrl = datasetImageUrl(selectedDataset || '', selectedConcept || '', img);
                 const isSelected = selectedImages.has(img.filename);
                 const isFocused = focusedImage?.filename === img.filename;
                 const isFlagged = flaggedForDeletion.has(img.filename);
@@ -1255,6 +1283,9 @@ export function DatasetsTab() {
                         <Tag className="w-3 h-3 text-green-400" />
                       </div>
                     )}
+                    <div className="absolute bottom-1 right-1 z-10">
+                      <DatasetRedownloadButton image={img} busy={repairingImages.has(repairKey(img.filename))} onRedownload={handleRedownload} compact />
+                    </div>
                   </div>
                 );
               })}
@@ -1270,6 +1301,8 @@ export function DatasetsTab() {
           datasetName={selectedDataset || ''}
           conceptFolder={selectedConcept || ''}
           onSave={handleSaveCaption}
+          onRedownload={handleRedownload}
+          isRedownloading={!!focusedImage && repairingImages.has(repairKey(focusedImage.filename))}
         />
       </div>
 
@@ -1468,6 +1501,8 @@ export function DatasetsTab() {
           onToggleFlag={toggleFlag}
           onClose={() => setLightboxOpen(false)}
           onSaveCaption={handleSaveCaption}
+          onRedownload={handleRedownload}
+          isRedownloading={filename => repairingImages.has(repairKey(filename))}
         />
       )}
 

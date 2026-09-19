@@ -1,4 +1,4 @@
-import { basename, relative, resolve } from 'path';
+import { basename, isAbsolute, relative, resolve } from 'path';
 import { settingsManager } from './settings/SettingsManager';
 
 export interface ResolvedPath {
@@ -23,7 +23,7 @@ export function createRuntimePathHelpers(options: RuntimePathOptions) {
   const DATASETS_ROOT = resolve(ROOT_DIR_RESOLVED, options.datasetsRelativeRoot || 'User/Datasets');
 
   function isAbsolutePathInput(input: string): boolean {
-    return input.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(input);
+    return isAbsolute(input) || /^[a-zA-Z]:[\\/]/.test(input);
   }
 
   function normalizePathForCompare(input: string): string {

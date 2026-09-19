@@ -536,6 +536,13 @@ function verifyBundledDataForgeModels() {
 }
 
 function verifyPublish() {
+  if (isCleanRelease) {
+    for (const relativePath of ['CENSORING.md', 'resources/app/CENSORING.md']) {
+      if (fs.existsSync(path.join(publishRoot, relativePath))) {
+        throw new Error(`[webapp-publish] Clean releases must not seed ${relativePath}.`);
+      }
+    }
+  }
   const required = [
     'public/index.html',
     'resources/app/public/index.html',
@@ -716,7 +723,7 @@ function publish() {
     path.join(packagedAppDir, 'setup', 'UmbraSetupApp.js'),
   );
 
-  for (const file of ['Credits.md', 'LICENSE', 'NOTICE', 'CENSORING.md']) {
+  for (const file of ['Credits.md', 'LICENSE', 'NOTICE']) {
     copyTree(path.join(root, file), path.join(publishRoot, file));
   }
 

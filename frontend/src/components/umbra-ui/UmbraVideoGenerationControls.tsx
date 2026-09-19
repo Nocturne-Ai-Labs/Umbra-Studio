@@ -75,6 +75,7 @@ import {
   normalizeUmbraUiMediaHandoff,
   UMBRA_UI_MEDIA_HANDOFF_EVENT,
   UMBRA_UI_MEDIA_HANDOFF_KEY,
+  clearPendingUmbraUiMediaHandoff,
   type UmbraUiMediaHandoff,
   type UmbraUiVideoFrameRole,
 } from '@/lib/umbraUiMediaHandoff';
@@ -1183,6 +1184,7 @@ export function UmbraVideoGenerationControls({
       replacePromptSegments(detail.generation.positivePrompt, handoffSegments);
     }
     if (detail.generation?.negativePrompt) setNegativePrompt(detail.generation.negativePrompt);
+    clearPendingUmbraUiMediaHandoff(detail);
   }, [replacePromptSegments]);
 
   React.useEffect(() => {

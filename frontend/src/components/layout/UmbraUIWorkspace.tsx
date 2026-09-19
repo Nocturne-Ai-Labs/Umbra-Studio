@@ -2564,11 +2564,8 @@ export function UmbraUIWorkspace() {
       if (!handoff) return;
       if (handoff.createdAt <= mediaHandoffAppliedAtRef.current) return;
       mediaHandoffAppliedAtRef.current = handoff.createdAt;
-      // Inpaint acknowledges after mounting; a timer can discard its source
-      // before a busy editor has installed the handoff listener.
-      if (handoff.mode !== 'inpaint') {
-        window.setTimeout(() => clearPendingUmbraUiMediaHandoff(handoff), 250);
-      }
+      // Child consumers acknowledge after mounting, not after an arbitrary timeout.
+      if (handoff.mode !== 'inpaint' && handoff.mode !== 'video') clearPendingUmbraUiMediaHandoff(handoff);
       if (handoff.mode === 'video') setActiveMode('video');
       if (handoff.mode === 'txt2img') {
         setActiveMode('image');

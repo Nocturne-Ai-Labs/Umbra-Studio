@@ -68,7 +68,8 @@ export function isUmbraRemoteClient(): boolean {
   if (typeof document !== 'undefined') {
     const flag = document.documentElement.dataset.umbraRemoteClient;
     if (flag === '1') return true;
-    if (flag === '0') return !isHostBrowser;
+    // The server checks the socket peer, including host access via its LAN IP.
+    if (flag === '0') return false;
   }
   return !isHostBrowser;
 }

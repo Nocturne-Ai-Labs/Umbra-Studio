@@ -27,7 +27,7 @@ function uniqueEntryName(name: string, usedNames: Set<string>): string {
 
 export async function buildGalleryDownloadArchive(
   tempRoot: string,
-  label: 'originals' | 'jpeg-metadata' | 'jpeg-clean',
+  label: 'originals' | 'jpeg-metadata' | 'jpeg-clean' | 'export',
   entries: GalleryDownloadEntry[],
   signal?: AbortSignal,
 ): Promise<{ zipPath: string; size: number }> {
@@ -40,6 +40,7 @@ export async function buildGalleryDownloadArchive(
   const zipOutput = zip.outputStream as Readable;
   const output = handle.createWriteStream();
   const inputs = new Map<Readable, Promise<void>>();
+  let inputError: unknown;
   const usedNames = new Set<string>();
   zip.on('error', error => zipOutput.destroy(error));
   const writing = pipeline(zipOutput, output, { signal });
@@ -58,7 +59,12 @@ export async function buildGalleryDownloadArchive(
           signal?.throwIfAborted();
           if (zipOutput.destroyed) throw new Error('Archive writing stopped');
           const source = entry.open();
-          const closing = finished(source, { cleanup: true }).catch(error => { zipOutput.destroy(error); });
+          // File-backed Sharp transforms expose an unused writable side that
+          // never finishes; the archive consumes only their readable side.
+          const closing = finished(source, { cleanup: true, writable: false }).catch(error => {
+            inputError ??= error;
+            zipOutput.destroy(error);
+          });
           inputs.set(source, closing);
           void closing.then(() => inputs.delete(source));
           callback(null, source);
@@ -69,6 +75,8 @@ export async function buildGalleryDownloadArchive(
     }
     zip.end();
     await writing;
+    await Promise.all(inputs.values());
+    if (inputError) throw inputError;
     signal?.throwIfAborted();
     const size = (await fs.stat(zipPath)).size;
     complete = true;
@@ -81,4 +89,37 @@ export async function buildGalleryDownloadArchive(
     await handle.close().catch(() => {});
     if (!complete) await fs.rm(zipPath, { force: true }).catch(() => {});
   }
+}
+
+const preparedDownloads = new Map<string, { zipPath: string; size: number; filename: string }>();
+
+function archiveResponse(archive: { zipPath: string; size: number; filename: string }): Response {
+  return new Response(Bun.file(archive.zipPath), { headers: {
+    'Content-Type': 'application/zip',
+    'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(archive.filename)}`,
+    'Content-Length': String(archive.size),
+    'Cache-Control': 'no-store',
+  } });
+}
+
+export function prepareGalleryDownloadResponse(req: Request, archive: { zipPath: string; size: number }, label: string): Response {
+  const id = randomUUID();
+  const ready = { ...archive, filename: `umbra-${label}-${new Date().toISOString().slice(0, 10)}.zip` };
+  const wantsReceipt = req.headers.get('accept')?.includes('application/json');
+  if (wantsReceipt) preparedDownloads.set(id, ready);
+  const cleanup = setTimeout(() => {
+    preparedDownloads.delete(id);
+    void fs.rm(archive.zipPath, { force: true }).catch(() => {});
+  }, 30 * 60 * 1000);
+  cleanup.unref?.();
+  // Preparing via fetch surfaces errors; a separate GET lets the browser stream
+  // a multi-gigabyte archive to disk without buffering it in frontend memory.
+  return wantsReceipt
+    ? Response.json({ url: `/api/fs/download-archive?id=${id}`, filename: ready.filename, size: archive.size })
+    : archiveResponse(ready);
+}
+
+export function getPreparedGalleryDownload(id: string): Response {
+  const archive = preparedDownloads.get(id);
+  return archive ? archiveResponse(archive) : Response.json({ error: 'This download expired. Export the selection again.' }, { status: 404 });
 }

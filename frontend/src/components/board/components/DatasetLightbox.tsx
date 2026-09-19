@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Trash2, Flag, Save, Loader2 } from 'lucide-react';
 import type { DatasetImage } from '../types';
+import { datasetImageUrl } from '../datasetMedia';
+import { DatasetRedownloadButton } from './DatasetRedownloadButton';
 
 interface DatasetLightboxProps {
   images: DatasetImage[];
@@ -12,6 +14,8 @@ interface DatasetLightboxProps {
   onToggleFlag: (filename: string) => void;
   onClose: () => void;
   onSaveCaption?: (filename: string, caption: string) => Promise<boolean>;
+  onRedownload: (image: DatasetImage) => void;
+  isRedownloading: (filename: string) => boolean;
 }
 
 export function DatasetLightbox({
@@ -23,6 +27,8 @@ export function DatasetLightbox({
   onToggleFlag,
   onClose,
   onSaveCaption,
+  onRedownload,
+  isRedownloading,
 }: DatasetLightboxProps) {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [zoom, setZoom] = useState(1);
@@ -35,9 +41,8 @@ export function DatasetLightbox({
   const currentImage = images[currentIndex];
   const isFlagged = currentImage ? flaggedForDeletion.has(currentImage.filename) : false;
 
-  // Build URL - match the grid format exactly (no encoding needed for local API)
   const imageUrl = currentImage
-    ? `/api/files/datasets/${datasetName}/${conceptFolder}/${currentImage.filename}`
+    ? datasetImageUrl(datasetName, conceptFolder, currentImage)
     : '';
 
   // Determine if current file is a video
@@ -49,12 +54,12 @@ export function DatasetLightbox({
     setZoom(1);
     setIsLoading(true);
     setHasError(false);
-    const image = images[currentIndex];
-    if (image) {
-      setCaption(image.caption || '');
-      setHasChanges(false);
-    }
-  }, [currentIndex, images]);
+  }, [imageUrl]);
+
+  useEffect(() => {
+    setCaption(currentImage?.caption || '');
+    setHasChanges(false);
+  }, [currentImage?.filename, currentImage?.caption, datasetName, conceptFolder]);
 
   const handleNext = useCallback(() => {
     if (images.length <= 1) return;
@@ -146,6 +151,7 @@ export function DatasetLightbox({
           </div>
 
           <div className="flex items-center gap-1">
+            <DatasetRedownloadButton image={currentImage} busy={isRedownloading(currentImage.filename)} onRedownload={onRedownload} />
             <button
               onClick={() => setZoom(z => Math.max(0.5, z - 0.25))}
               className="umbra-icon-button rounded p-2 transition-colors"

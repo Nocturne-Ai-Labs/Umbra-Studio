@@ -9,6 +9,7 @@
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { createReadStream, createWriteStream, existsSync, statSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, openSync, closeSync, renameSync, rmSync, type Dirent, type Stats, type BigIntStats } from 'fs';
 import * as fs from 'fs/promises';
+import { Readable } from 'node:stream';
 import { LoraPresetWriteError, writeLoraPresetLibrary } from './backend/UmbraLoraPresetStore';
 import * as os from 'os';
 import { cancelComfyJobById, controlUmbraControllerJob } from './backend/UmbraQueueJobControl';
@@ -34,7 +35,7 @@ import { seedBundledWorkflowDirectory } from './backend/BundledWorkflowService';
 import { settingsManager } from './backend/settings/SettingsManager';
 import { FsWorkerService } from './backend/FsWorkerService';
 import { GalleryTransferJournal } from './backend/GalleryTransferJournal';
-import { buildGalleryDownloadArchive, type GalleryDownloadEntry } from './backend/GalleryDownloadArchiveService';
+import { buildGalleryDownloadArchive, prepareGalleryDownloadResponse, getPreparedGalleryDownload, type GalleryDownloadEntry } from './backend/GalleryDownloadArchiveService';
 import { copyFileExclusive, moveTreeExclusive } from './backend/FsTransferCopy';
 import { AnimaModelMergeService } from './backend/AnimaModelMergeService';
 import {
@@ -47,6 +48,7 @@ import {
   fetchRule34Posts,
 } from './backend/booruApi';
 import type { BooruApiConfig, BooruImageResult } from './backend/booruApi';
+import { BooruSourceUnavailableError, booruSourceSidecar, downloadBooruOriginal, normalizeBooruMediaUrl, resolveBooruRepairSource } from './backend/BooruDownloadService';
 import { createRuntimePathHelpers } from './backend/runtimePaths';
 import { createSystemStatsService } from './backend/systemStats';
 import {
@@ -568,26 +570,6 @@ async function writeDatasetConceptSettings(
   const saved = { ...normalized, updatedAt: Date.now() };
   await fs.writeFile(join(conceptPath, DATASET_CONCEPT_SETTINGS_FILE), `${JSON.stringify(saved, null, 2)}\n`, 'utf8');
   return saved;
-}
-
-function normalizeBooruMediaUrl(value: unknown): URL | null {
-  const raw = String(value || '').trim();
-  if (!raw) return null;
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
-    const hostname = parsed.hostname.toLowerCase();
-    const allowedHostSuffixes = [
-      'donmai.us',
-      'gelbooru.com',
-      'rule34.xxx',
-      'e621.net',
-    ];
-    if (!allowedHostSuffixes.some((suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`))) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
 }
 
 async function handleBooruImageProxy(req: Request, url: URL): Promise<Response> {
@@ -6280,6 +6262,13 @@ function resolvePrompterQueuePayloadWildcards(
   };
 }
 
+function hasPrompterQueueWildcardReferences(prompts: unknown, state: any): boolean {
+  if (Array.isArray(prompts) && prompts.some((prompt) => String(prompt || '').includes('__'))) return true;
+  return Array.isArray(state?.promptEntries) && state.promptEntries.some((entry: any) => (
+    Array.isArray(entry?.tokens) && entry.tokens.some((token: any) => String(token?.text || '').includes('__'))
+  ));
+}
+
 async function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: any) {
   const prompts = sanitizePrompterPromptLines(data?.prompts, { dedupe: false });
   if (prompts.length === 0) {
@@ -6293,7 +6282,9 @@ async function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: an
   }
 
   const requestId = String(data?.requestId || crypto.randomUUID());
-  const wildcards = await listPowerPrompterWildcards();
+  const wildcards = hasPrompterQueueWildcardReferences(prompts, data?.state)
+    ? await listPowerPrompterWildcards()
+    : [];
   const resolvedPayload = resolvePrompterQueuePayloadWildcards(prompts, data?.state, wildcards);
   const resolvedPrompts = resolvedPayload.prompts;
   data = {
@@ -10298,7 +10289,9 @@ async function handlePrompterApiWorkflowQueueBatchRequest(
   batchRequestId: string,
 ) {
   const rawGroups = Array.isArray(data?.groups) ? data.groups : [];
-  const wildcards = await listPowerPrompterWildcards();
+  const wildcards = rawGroups.some((group: any) => hasPrompterQueueWildcardReferences(group?.prompts, group?.state))
+    ? await listPowerPrompterWildcards()
+    : [];
   const groups = rawGroups
     .map((group: any) => ({
       requestId: String(group?.requestId || '').trim(),
@@ -15901,7 +15894,7 @@ async function proxyGalleryBridgeFsGet(
     const upstream = await fetch(targetUrl.toString(), {
       method: 'GET',
       headers,
-      signal: AbortSignal.timeout(proxyTimeoutMs),
+      signal: AbortSignal.any([req.signal, AbortSignal.timeout(proxyTimeoutMs)]),
     });
     if (upstream.status >= 500) {
       await upstream.body?.cancel();
@@ -15924,6 +15917,7 @@ async function proxyGalleryBridgeFsGet(
       headers: responseHeaders,
     });
   } catch (error: any) {
+    if (req.signal.aborted) return new Response(null, { status: 499 });
     galleryBridgeProxyFailures += 1;
     galleryBridgeProxyBackoffUntil = Date.now() + 2000;
     if (galleryBridgeProxyFailures >= 3 && !isChildProcessAlive(galleryBridgeProcess) && !(await isGalleryBridgeHealthy())) {
@@ -22553,9 +22547,15 @@ function getPPComfyResourceKinds(nodeType: string, inputName: string): PPApiWork
   return [];
 }
 
+// A fetched object-info snapshot is immutable for its lifetime. Reuse its index
+// across pipeline descriptors and queue validation; refreshed snapshots rebuild it.
+const ppComfyResourceCatalogCache = new WeakMap<Record<string, unknown>, Map<PPApiWorkflowResourceKind, Set<string>>>();
+
 function buildPPComfyResourceCatalog(
   objectInfo: Record<string, unknown> | null,
 ): Map<PPApiWorkflowResourceKind, Set<string>> {
+  const cached = objectInfo ? ppComfyResourceCatalogCache.get(objectInfo) : undefined;
+  if (cached) return cached;
   const catalog = new Map<PPApiWorkflowResourceKind, Set<string>>();
   if (!objectInfo) return catalog;
   for (const [nodeType, rawNode] of Object.entries(objectInfo)) {
@@ -22577,6 +22577,7 @@ function buildPPComfyResourceCatalog(
       }
     }
   }
+  ppComfyResourceCatalogCache.set(objectInfo, catalog);
   return catalog;
 }
 
@@ -25617,6 +25618,7 @@ function hasRemoteGalleryImageOptimizationHint(url: URL): boolean {
 }
 
 function isRemoteGalleryImageOptimizationEnabled(req: Request, url: URL, server?: RequestIpServer): boolean {
+  if (url.searchParams.get('original') === '1') return false;
   return (isRemoteRequest(req, url, server) || hasRemoteGalleryImageOptimizationHint(url))
     && getAppSettings()['remote.galleryViewerOriginals'] !== true;
 }
@@ -25861,7 +25863,7 @@ async function handleFsImage(req: Request, url: URL, server?: RequestIpServer): 
     const hasRevision = String(url.searchParams.get('rev') || '').trim().length > 0;
     const downloadMode = String(url.searchParams.get('download') || '').trim() === '1';
     const range = String(req.headers.get('range') || '').trim();
-    let previewMode = String(url.searchParams.get('preview') || '').trim().toLowerCase();
+    let previewMode = url.searchParams.get('original') === '1' ? '' : String(url.searchParams.get('preview') || '').trim().toLowerCase();
     let resizeEnabled = String(url.searchParams.get('gpr') || '1').trim() !== '0';
     let maxLongSide = url.searchParams.has('gpm') && Number.isFinite(Number(url.searchParams.get('gpm')))
       ? Math.max(128, Math.min(2048, Math.round(Number(url.searchParams.get('gpm')))))
@@ -26082,20 +26084,8 @@ async function handleFsDownloadZip(req: Request): Promise<Response> {
     }
     if (items.length < 2) return json({ error: 'Select at least two files to download a zip' }, 400);
 
-    const { zipPath, size } = await buildGalleryDownloadArchive(join(USER_DIR, 'Temp', 'Downloads'), 'originals', items, req.signal);
-    const cleanupTimer = setTimeout(() => {
-      fs.rm(zipPath, { force: true }).catch(() => {});
-    }, 15 * 60 * 1000);
-    (cleanupTimer as any).unref?.();
-
-    return new Response(Bun.file(zipPath), {
-      headers: {
-        'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="umbra-originals-${new Date().toISOString().slice(0, 10)}.zip"`,
-        'Content-Length': String(size),
-        'Cache-Control': 'no-store',
-      },
-    });
+    const archive = await buildGalleryDownloadArchive(join(USER_DIR, 'Temp', 'Downloads'), 'originals', items, req.signal);
+    return prepareGalleryDownloadResponse(req, archive, 'originals');
   } catch (error: any) {
     console.error('[ImageZip] Error:', error);
     return json({ error: error?.message || 'Failed to create zip download' }, 500);
@@ -26138,20 +26128,8 @@ async function handleFsDownloadJpegZip(req: Request): Promise<Response> {
     if (items.length === 0) return json({ error: 'No supported images were selected' }, 400);
 
     const label = keepMetadata ? 'jpeg-metadata' : 'jpeg-clean';
-    const { zipPath, size } = await buildGalleryDownloadArchive(join(USER_DIR, 'Temp', 'Downloads'), label, items, req.signal);
-    const cleanupTimer = setTimeout(() => {
-      fs.rm(zipPath, { force: true }).catch(() => {});
-    }, 15 * 60 * 1000);
-    (cleanupTimer as any).unref?.();
-
-    return new Response(Bun.file(zipPath), {
-      headers: {
-        'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="umbra-${label}-${new Date().toISOString().slice(0, 10)}.zip"`,
-        'Content-Length': String(size),
-        'Cache-Control': 'no-store',
-      },
-    });
+    const archive = await buildGalleryDownloadArchive(join(USER_DIR, 'Temp', 'Downloads'), label, items, req.signal);
+    return prepareGalleryDownloadResponse(req, archive, label);
   } catch (error: any) {
     console.error('[ImageJpegZip] Error:', error);
     return json({ error: error?.message || 'Failed to create JPEG zip download' }, 500);
@@ -26306,18 +26284,21 @@ async function handleFsReveal(req: Request, server?: RequestIpServer): Promise<R
     const resolved = resolvePath(targetPath);
     if (!resolved) return json({ error: 'Invalid path' }, 400);
 
-    const { fullPath } = resolved;
-    if (!isPathInsideAllowedRoots(fullPath)) return json({ error: 'Access denied' }, 403);
-    if (!existsSync(fullPath)) return json({ error: 'File not found' }, 404);
-
-    const targetStat = statSync(fullPath);
-    const opened = await openPathInHostFileExplorer(fullPath, targetStat);
-    if (!opened.opened) return json({ error: 'Failed to open file explorer' }, 500);
-    return json({ success: true, highlighted: opened.highlighted, fullPath });
+    return await revealValidatedHostPath(resolved.fullPath);
   } catch (error: any) {
     console.error('[FS Reveal] Error:', error);
     return json({ error: error.message || 'Failed to reveal path' }, 500);
   }
+}
+
+// Call only after checking the original HTTP request's host identity.
+async function revealValidatedHostPath(fullPath: string): Promise<Response> {
+  if (!isPathInsideAllowedRoots(fullPath)) return json({ error: 'Access denied' }, 403);
+  const targetStat = await fs.stat(fullPath).catch(() => null);
+  if (!targetStat) return json({ error: 'File not found' }, 404);
+  const opened = await openPathInHostFileExplorer(fullPath, targetStat);
+  if (!opened.opened) return json({ error: 'Failed to open file explorer' }, 500);
+  return json({ success: true, highlighted: opened.highlighted, fullPath });
 }
 
 async function openPathInHostFileExplorer(
@@ -26919,12 +26900,7 @@ async function handleModelManagerFsReveal(req: Request, server?: RequestIpServer
     if (!pathRaw) return json({ error: 'Missing path' }, 400);
     const resolved = resolveModelManagerPath(pathRaw);
     if (!resolved) return json({ error: 'Invalid path' }, 400);
-    const proxyReq = new Request('http://127.0.0.1/api/fs/reveal', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: resolved.clientPath }),
-    });
-    return await handleFsReveal(proxyReq, server);
+    return await revealValidatedHostPath(resolved.fullPath);
   } catch (error: any) {
     console.error('[ModelManager] reveal error:', error);
     return json({ error: error?.message || 'Reveal failed' }, 500);
@@ -30546,10 +30522,17 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/fs/thumbnail' && method === 'GET') return handleFsThumbnail(req, url, server);
       if (path === '/api/fs/preview' && method === 'GET') return handleFsPreview(req, url);
       if (path === '/api/fs/image' && method === 'GET') return handleFsImage(req, url, server);
-      if (path === '/api/fs/download-zip' && method === 'POST') return handleFsDownloadZip(req);
+      if (path === '/api/fs/download-zip' && method === 'POST') {
+        server.timeout(req, 0);
+        return handleFsDownloadZip(req);
+      }
+      if (path === '/api/fs/download-archive' && method === 'GET') return getPreparedGalleryDownload(url.searchParams.get('id') || '');
       if (path === '/api/fs/archives' && (method === 'GET' || method === 'POST')) return handleGalleryArchives(req, url);
       if ((path === '/api/fs/archives/status' || path === '/api/fs/archives/download') && method === 'GET') return handleGalleryArchives(req, url);
-      if (path === '/api/fs/download-jpeg-zip' && method === 'POST') return handleFsDownloadJpegZip(req);
+      if (path === '/api/fs/download-jpeg-zip' && method === 'POST') {
+        server.timeout(req, 0);
+        return handleFsDownloadJpegZip(req);
+      }
       if (path === '/api/fs/metadata' && method === 'GET') return handleFsMetadata(url);
       if (path === '/api/powerprompter/receipt' && method === 'GET') return handlePowerPrompterReceiptLookup(url);
       if (path === '/api/fs/read' && method === 'GET') return handleFsRead(url);
@@ -30703,46 +30686,22 @@ const server = Bun.serve<UmbraSocketData>({
 
       // POST /api/export/batch-zip — Create a ZIP from multiple exported blobs
       if (path === '/api/export/batch-zip' && method === 'POST') {
+        server.timeout(req, 0);
         try {
           const formData = await req.formData();
-          const files = formData.getAll('files') as File[];
+          const files = formData.getAll('files');
 
           if (!files || files.length === 0) {
             return json({ error: 'No files provided' }, 400);
           }
-
-          // Use a temporary directory approach
-          const tmpDir = join(ROOT_DIR, 'User', '.tmp_export_' + Date.now());
-          await fs.mkdir(tmpDir, { recursive: true });
-
-          // Write all files to temp dir
-          for (const file of files) {
-            const buffer = Buffer.from(await file.arrayBuffer());
-            await Bun.write(join(tmpDir, file.name), buffer);
+          if (files.length > 1000 || !files.every((file): file is Exclude<typeof file, string> => typeof file !== 'string')) {
+            return json({ error: 'Select between 1 and 1000 files.' }, 400);
           }
-
-          // Use tar/zip command available on system
-          const zipPath = tmpDir + '.zip';
-          const proc = Bun.spawn(['zip', '-j', zipPath, ...files.map(f => join(tmpDir, f.name))], {
-            cwd: tmpDir,
-          });
-          await proc.exited;
-
-          // Read the zip file
-          const zipFile = Bun.file(zipPath);
-          const zipBuffer = await zipFile.arrayBuffer();
-
-          // Cleanup
-          await fs.rm(tmpDir, { recursive: true, force: true });
-          await fs.rm(zipPath, { force: true });
-
-          return new Response(zipBuffer, {
-            headers: {
-              'Content-Type': 'application/zip',
-              'Content-Disposition': 'attachment; filename="export.zip"',
-              'Content-Length': String(zipBuffer.byteLength),
-            },
-          });
+          const archive = await buildGalleryDownloadArchive(join(USER_DIR, 'Temp', 'Downloads'), 'export', files.map(file => ({
+            name: file.name, mtime: new Date(), size: file.size,
+            open: () => Readable.fromWeb(file.stream() as any),
+          })), req.signal);
+          return prepareGalleryDownloadResponse(req, archive, 'export');
         } catch (err: any) {
           console.error('[Export] Batch ZIP failed:', err);
           return json({ error: err.message }, 500);
@@ -31948,6 +31907,7 @@ const server = Bun.serve<UmbraSocketData>({
 
       // Booru download to dataset
       if (path === '/api/booru/download' && method === 'POST') {
+        server.timeout(req, 0);
         try {
           const body = await req.json() as {
             url: string;
@@ -31956,6 +31916,8 @@ const server = Bun.serve<UmbraSocketData>({
             tags?: string[];
             dataset: string;
             concept: string;
+            source?: string;
+            postId?: string;
           };
 
           if (!body.url || !body.md5 || !body.dataset || !body.concept) {
@@ -31980,42 +31942,20 @@ const server = Bun.serve<UmbraSocketData>({
           }
 
           // Download image
-          const md5 = String(body.md5 || '').trim().replace(/[^a-fA-F0-9]/g, '');
-          if (!md5) {
+          const md5 = String(body.md5 || '').trim().toLowerCase();
+          if (!/^[a-f0-9]{32}$/.test(md5)) {
             return json({ error: 'Invalid md5 value' }, 400);
           }
           const extSafe = String(body.ext || 'jpg').trim().toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
           const filename = `${md5}.${extSafe}`;
           const imagePath = join(conceptPath, filename);
 
-          // Skip if already exists
-          if (existsSync(imagePath)) {
-            return json({ success: true, message: 'Already exists', path: imagePath });
-          }
-
-          const sourceUrl = normalizeBooruMediaUrl(body.url);
-          if (!sourceUrl) {
-            return json({ error: 'The image URL is not from a configured Data Forge source.' }, 400);
-          }
-          const imgRes = await fetch(sourceUrl, {
-            headers: { 'User-Agent': 'UmbraStudio (Data Forge; local application)' },
-            signal: AbortSignal.timeout(30000),
+          const result = await downloadBooruOriginal({
+            conceptPath, filename,
+            source: { url: body.url, md5, source: body.source, postId: body.postId },
+            tags: body.tags, signal: req.signal,
           });
-
-          if (!imgRes.ok) {
-            throw new Error(`Failed to download: ${imgRes.status}`);
-          }
-
-          const buffer = await imgRes.arrayBuffer();
-          await fs.writeFile(imagePath, Buffer.from(buffer));
-
-          // Save tags as caption if provided
-          if (body.tags && body.tags.length > 0) {
-            const captionPath = join(conceptPath, `${md5}.txt`);
-            await fs.writeFile(captionPath, body.tags.join(', '));
-          }
-
-          return json({ success: true, path: imagePath });
+          return json({ success: true, path: imagePath, ...result });
         } catch (error: any) {
           console.error('[Booru] Download error:', error.message);
           return json({ error: error.message }, 500);
@@ -32025,6 +31965,32 @@ const server = Bun.serve<UmbraSocketData>({
       // ============================================
       // DATASET ENDPOINTS
       // ============================================
+
+      if (path === '/api/datasets/redownload-image' && method === 'POST') {
+        server.timeout(req, 0);
+        try {
+          const body = await req.json() as { dataset?: string; concept?: string; filename?: string };
+          const dataset = sanitizeDatasetSegment(body.dataset);
+          const concept = sanitizeDatasetSegment(body.concept);
+          const filename = sanitizeDatasetSegment(body.filename);
+          if (!dataset || !concept || !filename || filename !== body.filename) return json({ error: 'Invalid dataset image path' }, 400);
+          const conceptPath = resolveDatasetPathSafe(dataset, concept);
+          if (!conceptPath || !existsSync(conceptPath)) return json({ error: 'Concept not found' }, 404);
+          const config = await readApiKeys(CONFIG_PATH) || await readApiKeys(LEGACY_CONFIG_PATH) || {};
+          const source = await resolveBooruRepairSource(conceptPath, filename, config, req.signal);
+          let result;
+          try {
+            result = await downloadBooruOriginal({ conceptPath, filename, source, replace: true, signal: req.signal });
+          } catch (error) {
+            if (!(error instanceof BooruSourceUnavailableError) || req.signal.aborted) throw error;
+            const refreshed = await resolveBooruRepairSource(conceptPath, filename, config, req.signal, undefined, true);
+            result = await downloadBooruOriginal({ conceptPath, filename, source: refreshed, replace: true, signal: req.signal });
+          }
+          return json({ success: true, ...result });
+        } catch (error: any) {
+          return json({ error: error?.message || 'Could not re-download the image. The existing file was kept.' }, 400);
+        }
+      }
 
       // List datasets with concepts.
       if (path === '/api/datasets' && method === 'GET') {
@@ -32300,6 +32266,8 @@ const server = Bun.serve<UmbraSocketData>({
                 return {
                   filename: f,
                   path: `/User/Datasets/${datasetName}/${conceptFolder}/${f}`,
+                  canRedownload: /^[a-f0-9]{32}\.[a-z0-9]+$/i.test(f) || existsSync(join(conceptPath, booruSourceSidecar(f))),
+                  revision: (await fs.stat(join(conceptPath, f))).mtimeMs,
                   caption,
                   tags,
                 };
@@ -32383,6 +32351,10 @@ const server = Bun.serve<UmbraSocketData>({
               if (existsSync(srcCaption)) {
                 await fs.rename(srcCaption, destCaption);
               }
+              const sourceRecord = booruSourceSidecar(safeImgName);
+              if (existsSync(join(fromPath, sourceRecord))) {
+                await fs.rename(join(fromPath, sourceRecord), join(toPath, sourceRecord));
+              }
             }
           }
 
@@ -32432,6 +32404,9 @@ const server = Bun.serve<UmbraSocketData>({
               if (existsSync(captionPath)) {
                 await fs.unlink(captionPath);
               }
+              await fs.unlink(join(conceptPath, booruSourceSidecar(safeImgName))).catch(error => {
+                if (error.code !== 'ENOENT') throw error;
+              });
             }
           }
 

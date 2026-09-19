@@ -1,12 +1,16 @@
 import { useState, useEffect } from 'react';
 import { Save, Copy, Loader2 } from 'lucide-react';
 import type { DatasetImage } from '../types';
+import { datasetImageUrl } from '../datasetMedia';
+import { DatasetRedownloadButton } from './DatasetRedownloadButton';
 
 interface CaptionEditorProps {
   image: DatasetImage | null;
   datasetName: string;
   conceptFolder: string;
   onSave: (imageName: string, caption: string) => Promise<boolean>;
+  onRedownload: (image: DatasetImage) => void;
+  isRedownloading: boolean;
 }
 
 export function CaptionEditor({
@@ -14,6 +18,8 @@ export function CaptionEditor({
   datasetName,
   conceptFolder,
   onSave,
+  onRedownload,
+  isRedownloading,
 }: CaptionEditorProps) {
   const [caption, setCaption] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -25,7 +31,7 @@ export function CaptionEditor({
       setCaption(image.caption || '');
       setIsDirty(false);
     }
-  }, [image]);
+  }, [image?.filename, image?.caption, datasetName, conceptFolder]);
 
   const handleSave = async () => {
     if (!image || !isDirty) return;
@@ -55,7 +61,7 @@ export function CaptionEditor({
   }
 
   // Build image URL
-  const imageUrl = `/api/files/datasets/${encodeURIComponent(datasetName)}/${encodeURIComponent(conceptFolder)}/${encodeURIComponent(image.filename)}`;
+  const imageUrl = datasetImageUrl(datasetName, conceptFolder, image);
 
   return (
     <div className="h-full flex flex-col">
@@ -80,6 +86,7 @@ export function CaptionEditor({
             {image.width} x {image.height}
           </p>
         )}
+        <DatasetRedownloadButton image={image} busy={isRedownloading} onRedownload={onRedownload} />
       </div>
 
       {/* Caption editor */}

@@ -142,6 +142,8 @@ export function useBooru() {
           md5: post.md5,
           ext: post.fileExt,
           tags: post.tags,
+          source: post.source,
+          postId: post.id,
           dataset,
           concept,
         }),
