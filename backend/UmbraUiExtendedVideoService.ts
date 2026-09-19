@@ -38,20 +38,37 @@ export function resolveUmbraExtendedVideoFfmpeg(comfyRoot: string): string {
   return findImageIoFfmpeg(comfyRoot) || 'ffmpeg';
 }
 
-function runProcess(command: string, args: string[], cwd: string): Promise<void> {
+function runProcess(command: string, args: string[], cwd: string, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
+    signal?.throwIfAborted();
     const child = spawn(command, args, {
       cwd,
       windowsHide: true,
       stdio: ['ignore', 'ignore', 'pipe'],
     });
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const abort = () => {
+      child.kill();
+      killTimer = setTimeout(() => child.kill('SIGKILL'), 2000);
+    };
+    const cleanup = () => {
+      signal?.removeEventListener('abort', abort);
+      if (killTimer) clearTimeout(killTimer);
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
     let stderr = '';
     child.stderr?.on('data', (chunk) => {
       stderr += String(chunk || '');
       if (stderr.length > 24000) stderr = stderr.slice(-24000);
     });
-    child.once('error', reject);
+    child.once('error', error => { cleanup(); reject(error); });
     child.once('close', (code) => {
+      cleanup();
+      if (signal?.aborted) {
+        reject(signal.reason || new Error('Video finalization cancelled.'));
+        return;
+      }
       if (code === 0) {
         resolve();
         return;
@@ -74,7 +91,9 @@ export async function concatenateUmbraExtendedVideoClips(options: {
   clipPaths: string[];
   outputPath: string;
   workDirectory: string;
+  signal?: AbortSignal;
 }): Promise<void> {
+  options.signal?.throwIfAborted();
   if (options.clipPaths.length < 2) {
     throw new Error('An extended video needs at least two completed clips to merge.');
   }
@@ -99,8 +118,9 @@ export async function concatenateUmbraExtendedVideoClips(options: {
       '-c', 'copy',
       '-movflags', '+faststart',
       options.outputPath,
-    ], options.workDirectory);
+    ], options.workDirectory, options.signal);
   } catch {
+    options.signal?.throwIfAborted();
     await runProcess(ffmpeg, [
       '-hide_banner',
       '-loglevel', 'error',
@@ -118,7 +138,7 @@ export async function concatenateUmbraExtendedVideoClips(options: {
       '-b:a', '192k',
       '-movflags', '+faststart',
       options.outputPath,
-    ], options.workDirectory);
+    ], options.workDirectory, options.signal);
   } finally {
     await fs.rm(concatListPath, { force: true }).catch(() => undefined);
   }

@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { copyFile, lstat, mkdir, open, readFile, readdir, rename, rm, stat } from 'fs/promises';
 import { extname, join, resolve, sep } from 'path';
 
@@ -465,30 +465,55 @@ async function replaceFileAtomically(temporaryPath: string, finalPath: string): 
   if (hadExisting) await rm(backupPath, { force: true }).catch(() => undefined);
 }
 
-async function recoverCanvasBackups(directory: string, allowName: (name: string) => boolean): Promise<void> {
+async function inspectCanvasRecoveryFile(path: string, finalName: string, projectId: string): Promise<'usable' | 'missing' | 'invalid' | 'unavailable' | 'unsupported'> {
+  let info;
+  try { info = await lstat(path); }
+  catch (error: any) { return error?.code === 'ENOENT' ? 'missing' : 'unavailable'; }
+  if (!info.isFile() || info.isSymbolicLink()) return 'unavailable';
+  if (info.size === 0) return 'invalid';
+  if (!finalName.endsWith('.json')) return 'usable';
+  if (info.size > MAX_PROJECT_JSON_BYTES) return 'invalid';
+  let raw: string;
+  try { raw = await readFile(path, 'utf8'); }
+  catch { return 'unavailable'; }
+  try {
+    const parsed = JSON.parse(raw);
+    const project = finalName === 'project.json' ? parsed : parsed?.project;
+    if (!project || typeof project !== 'object' || Array.isArray(project)) return 'invalid';
+    if (Number(project.version) > PROJECT_VERSION) return 'unsupported';
+    if (project.id !== projectId || !Array.isArray(project.entities)) return 'invalid';
+    normalizeProject(project);
+    return 'usable';
+  } catch { return 'invalid'; }
+}
+
+async function recoverCanvasBackups(directory: string, allowName: (name: string) => boolean, projectId: string): Promise<void> {
   const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
   const candidates = entries.filter(entry => entry.isFile()).map(entry => ({
     name: entry.name, match: /^(.*)\.umbra-canvas-backup-(\d+)$/.exec(entry.name),
   })).filter(entry => entry.match && allowName(entry.match[1]));
   candidates.sort((left, right) => Number(right.match![2]) - Number(left.match![2]));
-  for (const candidate of candidates) {
-    const finalName = candidate.match![1];
+  for (const finalName of new Set(candidates.map(candidate => candidate.match![1]))) {
     const finalPath = join(directory, finalName);
-    const exists = await lstat(finalPath).then(() => true).catch(error => {
-      if (error.code !== 'ENOENT') throw error;
-      return false;
-    });
-    if (exists) continue;
-    const backupPath = join(directory, candidate.name);
-    if (finalName.endsWith('.json')) {
-      try {
-        const info = await stat(backupPath);
-        if (info.size > MAX_PROJECT_JSON_BYTES) continue;
-        const parsed = JSON.parse(await readFile(backupPath, 'utf8'));
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
-      } catch { continue; }
+    const current = await inspectCanvasRecoveryFile(finalPath, finalName, projectId);
+    if (current !== 'missing' && current !== 'invalid') continue;
+    const inspected = await Promise.all(candidates.filter(candidate => candidate.match![1] === finalName).map(async candidate => ({
+      path: join(directory, candidate.name),
+      state: await inspectCanvasRecoveryFile(join(directory, candidate.name), finalName, projectId),
+    })));
+    if (inspected.some(candidate => candidate.state === 'unsupported' || candidate.state === 'unavailable')) continue;
+    const backup = inspected.find(candidate => candidate.state === 'usable');
+    if (!backup) continue;
+    const quarantine = current === 'invalid' ? `${finalPath}.umbra-unusable-${randomUUID()}` : '';
+    if (quarantine) await rename(finalPath, quarantine);
+    try {
+      await rename(backup.path, finalPath);
+    } catch (error) {
+      if (quarantine && await inspectCanvasRecoveryFile(finalPath, finalName, projectId) === 'missing') {
+        await rename(quarantine, finalPath).catch(() => undefined);
+      }
+      throw error;
     }
-    await rename(backupPath, finalPath);
   }
 }
 
@@ -508,14 +533,14 @@ export class UmbraUiCanvasWorkspaceProjectService {
     for (const entry of projects) {
       if (!entry.isDirectory() || safeId(entry.name) !== entry.name) continue;
       const directory = this.projectRoot(entry.name);
-      await recoverCanvasBackups(directory, name => name === 'project.json' || name === 'thumbnail.png');
+      await recoverCanvasBackups(directory, name => name === 'project.json' || name === 'thumbnail.png', entry.name);
       for (const child of ['assets', 'restore-points']) {
         const path = join(directory, child);
         const info = await lstat(path).catch(() => null);
         if (!info?.isDirectory() || info.isSymbolicLink()) continue;
         await recoverCanvasBackups(path, name => child === 'assets'
           ? safeStoredFilename(name) === name
-          : /^[a-z0-9._-]+\.json$/i.test(name));
+          : /^[a-z0-9._-]+\.json$/i.test(name), entry.name);
       }
     }
   }
@@ -741,19 +766,27 @@ export class UmbraUiCanvasWorkspaceProjectService {
     });
     if (thumbnailInput && thumbnailInput.byteLength > 0) {
       const temporaryThumbnailPath = join(projectRoot, `.thumbnail.${Date.now()}.tmp`);
-      await writeFileDurably(temporaryThumbnailPath, thumbnailInput);
-      await replaceFileAtomically(temporaryThumbnailPath, join(projectRoot, 'thumbnail.png')).catch(async (error) => {
+      try {
+        await writeFileDurably(temporaryThumbnailPath, thumbnailInput);
+        await replaceFileAtomically(temporaryThumbnailPath, join(projectRoot, 'thumbnail.png'));
+      } catch (error) {
+        console.warn('[CanvasProjects] Project saved, but its thumbnail could not be updated:', error);
+      } finally {
         await rm(temporaryThumbnailPath, { force: true }).catch(() => undefined);
-        throw error;
-      });
+      }
     }
-    await this.collectRestorePointAssetNames(projectId, referenced);
-    const assetEntries = await readdir(assetsRoot, { withFileTypes: true }).catch(() => []);
-    await Promise.all(assetEntries.map((entry) => (
-      entry.isFile() && !referenced.has(entry.name)
-        ? rm(join(assetsRoot, entry.name), { force: true })
-        : Promise.resolve()
-    )));
+    try {
+      await this.collectRestorePointAssetNames(projectId, referenced);
+      const assetEntries = await readdir(assetsRoot, { withFileTypes: true });
+      await Promise.all(assetEntries.map((entry) => (
+        entry.isFile() && !referenced.has(entry.name)
+          ? rm(join(assetsRoot, entry.name), { force: true })
+          : Promise.resolve()
+      )));
+    } catch (error) {
+      // The document is durable already; optional housekeeping cannot make it unsaved.
+      console.warn('[CanvasProjects] Project saved, but unused assets could not be cleaned:', error);
+    }
     return this.hydrate(projectId, project);
   }
 

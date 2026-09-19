@@ -17,9 +17,12 @@ const DB_PATH = join(USER_DIR, 'Config', 'GalleryDb.db');
 const LEGACY_DB_PATH = join(USER_DIR, 'Config', 'EditorDb.db');
 
 let db: Database | null = null;
+let initialization: Promise<void> | null = null;
+let initializationGeneration = 0;
 const enqueueWrite = createSqliteWriteQueue();
 
-export function write<T>(operation: () => T): Promise<T> {
+export async function write<T>(operation: () => T): Promise<T> {
+  await initDatabase();
   return enqueueWrite(() => {
     if (!db) throw new Error('Database not initialized');
     return db.transaction(operation).immediate();
@@ -29,15 +32,28 @@ export function write<T>(operation: () => T): Promise<T> {
 /**
  * Initialize the database and create tables if needed
  */
-export async function initDatabase(): Promise<void> {
-  // Ensure User/Config directory exists
-  const dbDir = join(USER_DIR, 'Config');
-  if (!existsSync(dbDir)) {
-    await fs.mkdir(dbDir, { recursive: true });
-  }
+export function initDatabase(): Promise<void> {
+  if (db) return Promise.resolve();
+  if (initialization) return initialization;
+  const generation = initializationGeneration;
+  initialization = (async () => {
+    await fs.mkdir(join(USER_DIR, 'Config'), { recursive: true });
+    await enqueueWrite(() => {
+      if (generation !== initializationGeneration) throw new Error('Database initialization was closed');
+      const candidate = new Database(DB_PATH);
+      try {
+        initializeSchema(candidate);
+        db = candidate;
+      } catch (error) {
+        candidate.close();
+        throw error;
+      }
+    });
+  })().finally(() => { initialization = null; });
+  return initialization;
+}
 
-  // Open database (creates file if doesn't exist)
-  db = new Database(DB_PATH);
+function initializeSchema(db: Database): void {
 
   // Enable WAL mode for better concurrent performance
   db.run('PRAGMA journal_mode = WAL');
@@ -489,6 +505,7 @@ export function deleteEditorAdjustment(path: string): void {
  * Close the database connection
  */
 export function closeDatabase(): void {
+  initializationGeneration++;
   if (db) {
     db.close();
     db = null;

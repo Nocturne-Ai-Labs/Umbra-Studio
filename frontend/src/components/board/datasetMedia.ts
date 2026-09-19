@@ -1,4 +1,9 @@
 import type { DatasetImage } from './types';
+import { classifyUmbraPrompt } from '@/lib/nsfwPrivacy';
+
+export function isProtectedDatasetImage(image: DatasetImage | null | undefined): boolean {
+  return !!image && classifyUmbraPrompt([image.caption || '', ...(image.tags || [])].join(', ')) === 'nsfw';
+}
 
 export function datasetImageUrl(dataset: string, concept: string, image: DatasetImage): string {
   return `/api/files/datasets/${[dataset, concept, image.filename].map(encodeURIComponent).join('/')}?v=${image.revision || 0}`;

@@ -11,7 +11,8 @@ import { HSLMixer } from './controls/HSLMixer';
 import { TagInput, TagItem } from './controls/TagInput';
 import { CropTool } from './CropTool';
 import { WatermarkPanel } from './WatermarkPanel';
-import { WatermarkConfig } from './WatermarkEngine';
+import { WatermarkConfig, WatermarkEngine } from './WatermarkEngine';
+import { SettingsSaveNotice } from './SettingsSaveNotice';
 import { EventBus } from '../EventBus';
 import {
   EditAdjustments,
@@ -25,7 +26,7 @@ import {
 import { isModalOpen } from './ModalGuard';
 import { PresetManager, Preset } from './PresetManager';
 import {
-  ExportSettings, loadExportSettings, saveExportSettings,
+  ExportSettings, getDefaultExportSettings, loadExportSettings, saveExportSettings,
   FORMAT_LABELS, exportImage, downloadBlob,
 } from './ExportEngine';
 import { previewTemplate } from './FilenameTemplate';
@@ -95,6 +96,8 @@ export class EditorPanel {
 
   // Export
   private exportSettings: ExportSettings;
+  private settingsSaveNotice: SettingsSaveNotice | null = null;
+  private settingsController = new AbortController();
   private exportStatusEl: HTMLDivElement | null = null;
   private exportBtn: HTMLButtonElement | null = null;
   private exportWatermarkCheckEl: HTMLInputElement | null = null;
@@ -105,7 +108,7 @@ export class EditorPanel {
 
   constructor(container: HTMLElement, eventBus: EventBus) {
     this.eventBus = eventBus;
-    this.exportSettings = loadExportSettings();
+    this.exportSettings = getDefaultExportSettings();
 
     this.root = document.createElement('div');
     this.root.style.cssText = `
@@ -205,11 +208,7 @@ export class EditorPanel {
     this.buildCropSection();
     this.refreshEffectsUI();
 
-    // Build watermark tab
-    this.buildWatermarkTab();
-
-    // Build export tab
-    this.buildExportTab();
+    void this.loadOutputSettings();
 
     // Build split tab
     this.buildSplitTab();
@@ -1431,7 +1430,40 @@ export class EditorPanel {
     this.watermarkPreviewHintEl.style.color = active ? '#a5b4fc' : '#71717a';
   }
 
-  private buildWatermarkTab(): void {
+  private persistExportSettings(): void {
+    this.settingsSaveNotice?.save(() => saveExportSettings(this.exportSettings));
+  }
+
+  private async loadOutputSettings(): Promise<void> {
+    this.watermarkContainer.textContent = 'Loading settings...';
+    this.exportContainer.textContent = 'Loading settings...';
+    const signal = this.settingsController.signal;
+    try {
+      const [settings, watermark] = await Promise.all([
+        loadExportSettings(signal), WatermarkEngine.loadConfig(signal),
+      ]);
+      if (signal.aborted) return;
+      this.exportSettings = settings;
+      this.watermarkContainer.replaceChildren();
+      this.exportContainer.replaceChildren();
+      this.buildWatermarkTab(watermark);
+      this.buildExportTab();
+      this.settingsSaveNotice = new SettingsSaveNotice(this.exportContainer);
+    } catch (error) {
+      if (signal.aborted) return;
+      console.warn('[EditorPanel] Could not load output settings:', error);
+      for (const container of [this.watermarkContainer, this.exportContainer]) {
+        container.textContent = 'Could not load saved settings. ';
+        const retry = document.createElement('button');
+        retry.textContent = 'Retry';
+        this.styleControlButton(retry, 'neutral');
+        retry.addEventListener('click', () => { void this.loadOutputSettings(); });
+        container.appendChild(retry);
+      }
+    }
+  }
+
+  private buildWatermarkTab(initialConfig: WatermarkConfig): void {
     this.watermarkPanel = new WatermarkPanel(this.watermarkContainer, (config) => {
       this.watermarkConfig = config;
       // Emit for live preview in viewer (honors preview toggle override)
@@ -1441,8 +1473,8 @@ export class EditorPanel {
       if (this.exportWatermarkCheckEl) {
         this.exportWatermarkCheckEl.checked = !!config.enabled;
       }
-      saveExportSettings(this.exportSettings);
-    });
+      this.persistExportSettings();
+    }, initialConfig);
 
     this.watermarkConfig = this.watermarkPanel.getConfig();
 
@@ -1498,7 +1530,7 @@ export class EditorPanel {
       `;
       btn.addEventListener('click', () => {
         this.exportSettings.format = fmt;
-        saveExportSettings(this.exportSettings);
+        this.persistExportSettings();
         this.updateExportFormatButtons(formatRow);
         this.updateExportQualityVisibility();
       });
@@ -1534,7 +1566,7 @@ export class EditorPanel {
       const val = parseInt(qualitySlider.value);
       this.exportSettings.quality = val / 100;
       qualityLabel.textContent = `${val}%`;
-      saveExportSettings(this.exportSettings);
+      this.persistExportSettings();
     });
     qualityContainer.appendChild(qualitySlider);
     el.appendChild(qualityContainer);
@@ -1554,7 +1586,7 @@ export class EditorPanel {
     `;
     maxSideInput.addEventListener('input', () => {
       this.exportSettings.maxLongestSide = parseInt(maxSideInput.value) || 0;
-      saveExportSettings(this.exportSettings);
+      this.persistExportSettings();
     });
     el.appendChild(maxSideInput);
 
@@ -1582,7 +1614,7 @@ export class EditorPanel {
 
     templateInput.addEventListener('input', () => {
       this.exportSettings.filenameTemplate = templateInput.value;
-      saveExportSettings(this.exportSettings);
+      this.persistExportSettings();
       updatePreview();
     });
     el.appendChild(templateInput);
@@ -1597,7 +1629,7 @@ export class EditorPanel {
     metaCheck.style.cssText = 'accent-color: var(--umbra-accent, #6366f1);';
     metaCheck.addEventListener('change', () => {
       this.exportSettings.embedMetadata = metaCheck.checked;
-      saveExportSettings(this.exportSettings);
+      this.persistExportSettings();
     });
     metaRow.appendChild(metaCheck);
     metaRow.appendChild(document.createTextNode('Embed generation metadata'));
@@ -1622,7 +1654,7 @@ export class EditorPanel {
         };
       }
       this.emitWatermarkPreviewConfig();
-      saveExportSettings(this.exportSettings);
+      this.persistExportSettings();
     });
     this.exportWatermarkCheckEl = watermarkCheck;
     watermarkRow.appendChild(watermarkCheck);
@@ -1894,6 +1926,7 @@ export class EditorPanel {
   }
 
   destroy(): void {
+    this.settingsController.abort();
     window.removeEventListener('keydown', this._onKeyDown);
     if (this._onOpenSplit) this.eventBus.off('editor:open-split', this._onOpenSplit);
     this.sliders.forEach(s => s.destroy());

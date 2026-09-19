@@ -6,7 +6,8 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
+import { resolveMigrationPath, isSameMigrationPath, isMigrationPathInside } from '../shared/migrationPaths';
 import {
   createPendingFirstRunState,
   normalizeFirstRunState,
@@ -16,11 +17,6 @@ import {
   type UmbraMigrationRequest,
   type UmbraMigrationSummary,
 } from '../shared/onboarding/firstRun';
-
-function isPathInside(parentPath: string, childPath: string): boolean {
-  const rel = relative(resolve(parentPath), resolve(childPath));
-  return Boolean(rel) && !rel.startsWith('..') && !isAbsolute(rel);
-}
 
 function readPackageVersion(rootPath: string): string {
   const candidates = [
@@ -128,14 +124,16 @@ export class FirstRunService {
     if (!String(sourceValue || '').trim() || !existsSync(sourceRoot) || !statSync(sourceRoot).isDirectory()) {
       throw new Error('Choose an existing Umbra Studio folder.');
     }
-    if (sourceRoot === this.runtimeRoot) {
+    const physicalSource = resolveMigrationPath(sourceRoot);
+    const physicalRuntime = resolveMigrationPath(this.runtimeRoot);
+    if (isSameMigrationPath(physicalSource, physicalRuntime)) {
       throw new Error('Choose a previous Umbra Studio build, not the build currently running.');
     }
-    if (isPathInside(sourceRoot, this.runtimeRoot)) {
+    if (isMigrationPathInside(physicalSource, physicalRuntime)) {
       throw new Error('The current Umbra Studio folder cannot be inside the previous build.');
     }
-    if (isPathInside(this.runtimeRoot, sourceRoot)) {
-      const [topLevelName = ''] = relative(this.runtimeRoot, sourceRoot).split(/[\\/]/).filter(Boolean);
+    if (isMigrationPathInside(physicalRuntime, physicalSource)) {
+      const [topLevelName = ''] = relative(physicalRuntime, physicalSource).split(/[\\/]/).filter(Boolean);
       if (!/^v\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/i.test(topLevelName)) {
         throw new Error('Only a previous version folder may be migrated from inside the current Umbra Studio root.');
       }

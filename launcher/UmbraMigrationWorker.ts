@@ -1,8 +1,14 @@
 import {
   copyFileSync,
+  constants,
+  closeSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
+  openSync,
+  readSync,
+  fsyncSync,
   readFileSync,
   readlinkSync,
   readdirSync,
@@ -13,6 +19,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { FirstRunService } from '../backend/FirstRunService';
@@ -21,6 +28,7 @@ import {
   type UmbraMigrationRequest,
 } from '../shared/onboarding/firstRun';
 import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
+import { assertSeparateMigrationPaths } from '../shared/migrationPaths';
 
 const UMBRA_NODES_DIRECTORY_NAME = 'umbra-nodes';
 const MIGRATION_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
@@ -126,33 +134,77 @@ export function measureMigrationTrees(sourceRoot: string): UmbraMigrationProgres
   return progress;
 }
 
-function moveFileOrLink(sourcePath: string, destinationPath: string, stats: ReturnType<typeof lstatSync>) {
-  mkdirSync(dirname(destinationPath), { recursive: true });
-  if (existsSync(destinationPath)) {
-    rmSync(destinationPath, { recursive: true, force: true });
+function verifyMigrationCopy(sourcePath: string, stagedPath: string, original: ReturnType<typeof lstatSync>) {
+  const hash = (path: string) => {
+    const descriptor = openSync(path, 'r');
+    try {
+      const digest = createHash('sha256');
+      const buffer = Buffer.allocUnsafe(1024 * 1024);
+      for (;;) {
+        const count = readSync(descriptor, buffer, 0, buffer.length, null);
+        if (!count) break;
+        digest.update(buffer.subarray(0, count));
+      }
+      return digest.digest('hex');
+    } finally {
+      closeSync(descriptor);
+    }
+  };
+  if (lstatSync(stagedPath).size !== original.size || hash(sourcePath) !== hash(stagedPath)) {
+    throw new Error('Migration copy verification failed; the original files were preserved.');
   }
+  const current = lstatSync(sourcePath);
+  if (current.dev !== original.dev || current.ino !== original.ino
+    || current.size !== original.size || current.mtimeMs !== original.mtimeMs) {
+    throw new Error('Migration source changed while copying; the original files were preserved.');
+  }
+  const descriptor = openSync(stagedPath, 'r+');
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function moveFileOrLink(sourcePath: string, destinationPath: string, stats: ReturnType<typeof lstatSync>) {
+  assertSeparateMigrationPaths(sourcePath, destinationPath);
+  mkdirSync(dirname(destinationPath), { recursive: true });
   try {
     renameSync(sourcePath, destinationPath);
     return;
   } catch (error: any) {
     if (error?.code !== 'EXDEV') throw error;
   }
-  if (stats.isSymbolicLink()) {
-    const target = readlinkSync(sourcePath);
-    let linkType: 'junction' | 'file' | undefined;
-    if (process.platform === 'win32') {
-      try {
-        linkType = statSync(sourcePath).isDirectory() ? 'junction' : 'file';
-      } catch {
-        linkType = 'file';
+  // Stage cross-volume copies beside the destination; never truncate its last-good file.
+  const stagingDirectory = mkdtempSync(join(dirname(destinationPath), '.umbra-migration-'));
+  const stagedPath = join(stagingDirectory, 'replacement');
+  try {
+    if (stats.isSymbolicLink()) {
+      const target = readlinkSync(sourcePath);
+      let linkType: 'junction' | 'file' | undefined;
+      if (process.platform === 'win32') {
+        try {
+          linkType = statSync(sourcePath).isDirectory() ? 'junction' : 'file';
+        } catch {
+          linkType = 'file';
+        }
       }
+      symlinkSync(target, stagedPath, linkType);
+      if (readlinkSync(sourcePath) !== target) throw new Error('Migration link changed while copying.');
+    } else {
+      copyFileSync(sourcePath, stagedPath, constants.COPYFILE_EXCL);
+      verifyMigrationCopy(sourcePath, stagedPath, stats);
     }
-    symlinkSync(target, destinationPath, linkType);
+    assertSeparateMigrationPaths(sourcePath, destinationPath);
+    renameSync(stagedPath, destinationPath);
     rmSync(sourcePath, { force: true });
-    return;
+  } finally {
+    try {
+      rmSync(stagingDirectory, { recursive: true, force: true });
+    } catch (error) {
+      console.warn('[UmbraMigration] Could not clean staging directory:', error);
+    }
   }
-  copyFileSync(sourcePath, destinationPath);
-  rmSync(sourcePath, { force: true });
 }
 
 function moveMigrationEntry(
@@ -164,6 +216,7 @@ function moveMigrationEntry(
   onProgress?: (progress: UmbraMigrationProgress) => void,
 ) {
   if (!existsSync(sourcePath) || isExcludedMigrationPath(sourceRoot, sourcePath)) return;
+  assertSeparateMigrationPaths(sourcePath, destinationPath);
   const stats = lstatSync(sourcePath);
   if (stats.isDirectory() && !stats.isSymbolicLink()) {
     mkdirSync(destinationPath, { recursive: true });
@@ -200,6 +253,7 @@ export function moveMigrationTree(
   onProgress?: (progress: UmbraMigrationProgress) => void,
 ): boolean {
   if (!existsSync(sourcePath)) return false;
+  assertSeparateMigrationPaths(sourcePath, destinationPath);
   mkdirSync(destinationPath, { recursive: true });
   for (const entry of readdirSync(sourcePath)) {
     moveMigrationEntry(
@@ -427,6 +481,11 @@ export async function runMigrationRequest(
   options: { waitForServer?: boolean; relaunch?: boolean } = {},
 ) {
   const service = new FirstRunService(request.destinationRoot, request.destinationSourceRoot);
+  // Validate again in the worker before writing state or waiting on another process.
+  service.inspectMigrationSource(request.sourceRoot);
+  for (const treeName of ['User', 'Tools']) {
+    assertSeparateMigrationPaths(join(request.sourceRoot, treeName), join(request.destinationRoot, treeName));
+  }
   const shouldWaitForServer = options.waitForServer !== false;
   const shouldRelaunch = options.relaunch !== false;
   try {
@@ -434,6 +493,7 @@ export async function runMigrationRequest(
       appendMigrationLog(request, `Waiting for Umbra server process ${request.serverPid} to exit.`);
       await waitForServerExit(request.serverPid);
     }
+    service.inspectMigrationSource(request.sourceRoot);
     appendMigrationLog(request, `Migrating from ${request.sourceRoot}.`);
     writeMigrationConsole(`Moving data from ${request.sourceRoot}`);
     const progress = measureMigrationTrees(request.sourceRoot);

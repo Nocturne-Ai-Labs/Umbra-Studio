@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
 import { Save, Copy, Loader2 } from 'lucide-react';
 import type { DatasetImage } from '../types';
-import { datasetImageUrl } from '../datasetMedia';
+import { DatasetThumbnail } from './DatasetThumbnail';
 import { DatasetRedownloadButton } from './DatasetRedownloadButton';
+import { useCaptionDraft } from '../hooks/useCaptionDraft';
 
 interface CaptionEditorProps {
   image: DatasetImage | null;
@@ -21,34 +21,14 @@ export function CaptionEditor({
   onRedownload,
   isRedownloading,
 }: CaptionEditorProps) {
-  const [caption, setCaption] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
-
-  // Load caption when image changes
-  useEffect(() => {
-    if (image) {
-      setCaption(image.caption || '');
-      setIsDirty(false);
-    }
-  }, [image?.filename, image?.caption, datasetName, conceptFolder]);
-
-  const handleSave = async () => {
-    if (!image || !isDirty) return;
-
-    setIsSaving(true);
-    const success = await onSave(image.filename, caption);
-    setIsSaving(false);
-
-    if (success) {
-      setIsDirty(false);
-    }
-  };
+  const { caption, setCaption, isSaving, isDirty, error, save: handleSave } = useCaptionDraft(
+    JSON.stringify([datasetName, conceptFolder, image?.filename]), image?.caption || '',
+    image ? value => onSave(image.filename, value) : undefined,
+  );
 
   const handleCopyTags = () => {
     if (image?.tags) {
       setCaption(image.tags.join(', '));
-      setIsDirty(true);
     }
   };
 
@@ -60,19 +40,12 @@ export function CaptionEditor({
     );
   }
 
-  // Build image URL
-  const imageUrl = datasetImageUrl(datasetName, conceptFolder, image);
-
   return (
     <div className="h-full flex flex-col">
       {/* Preview */}
       <div className="flex-shrink-0 border-b border-white/10 p-3">
-        <div className="umbra-surface-deep mx-auto aspect-square max-h-48 overflow-hidden rounded-lg border border-white/10">
-          <img
-            src={imageUrl}
-            alt={image.filename}
-            className="w-full h-full object-contain"
-          />
+        <div className="umbra-surface-deep relative mx-auto aspect-square max-h-48 overflow-hidden rounded-lg border border-white/10">
+          <DatasetThumbnail image={image} datasetName={datasetName} conceptFolder={conceptFolder} contain />
         </div>
       </div>
 
@@ -104,13 +77,13 @@ export function CaptionEditor({
           value={caption}
           onChange={(e) => {
             setCaption(e.target.value);
-            setIsDirty(true);
           }}
           placeholder="Enter caption tags..."
           className="umbra-input custom-scrollbar w-full flex-1 resize-none rounded-lg p-2 text-sm placeholder:text-zinc-500 focus:border-cyan-400/60 focus:outline-none"
         />
 
         {/* Actions */}
+        {error && <p role="alert" className="text-xs text-red-300">{error}</p>}
         <div className="flex gap-2">
           <button
             onClick={handleSave}

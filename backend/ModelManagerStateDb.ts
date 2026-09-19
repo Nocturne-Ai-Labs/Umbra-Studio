@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { existsSync, mkdirSync } from 'fs';
+import { mkdir } from 'fs/promises';
 import { join, resolve } from 'path';
 import { createSqliteWriteQueue } from './SqliteWriteQueue';
 
@@ -35,30 +35,56 @@ function parseJsonObject(value: string): Record<string, unknown> | null {
 }
 
 export class ModelManagerStateDb {
-  private readonly db: Database;
+  private connection: Database | null = null;
+  private initialization: Promise<void> | null = null;
+  private closed = false;
+  private readonly dbPath: string;
   private readonly enqueueWrite = createSqliteWriteQueue();
 
   constructor(rootDir: string, relativeDbPath = DEFAULT_DB_RELATIVE_PATH) {
-    const dbPath = resolve(rootDir, relativeDbPath);
-    const dbDir = resolve(dbPath, '..');
-    if (!existsSync(dbDir)) {
-      mkdirSync(dbDir, { recursive: true });
-    }
-    this.db = new Database(dbPath);
-    this.db.run('PRAGMA journal_mode = WAL');
-    this.db.run('PRAGMA synchronous = NORMAL');
-    this.ensureSchema();
+    this.dbPath = resolve(rootDir, relativeDbPath);
+  }
+
+  private get db(): Database {
+    if (!this.connection) throw new Error('Model manager database not initialized');
+    return this.connection;
+  }
+
+  ready(): Promise<void> {
+    if (this.closed) return Promise.reject(new Error('Model manager database is closed'));
+    if (this.connection) return Promise.resolve();
+    if (this.initialization) return this.initialization;
+    this.initialization = (async () => {
+      await mkdir(resolve(this.dbPath, '..'), { recursive: true });
+      await this.enqueueWrite(() => {
+        if (this.closed) throw new Error('Model manager database is closed');
+        const candidate = new Database(this.dbPath);
+        try {
+          candidate.run('PRAGMA journal_mode = WAL');
+          candidate.run('PRAGMA synchronous = NORMAL');
+          this.ensureSchema(candidate);
+          this.connection = candidate;
+        } catch (error) {
+          candidate.close();
+          throw error;
+        }
+      });
+    })().finally(() => { this.initialization = null; });
+    return this.initialization;
   }
 
   close(): void {
-    this.db.close();
+    this.closed = true;
+    this.connection?.close();
+    this.connection = null;
   }
 
   hasState(): boolean {
     return Boolean(this.db.query("SELECT 1 FROM model_manager_state WHERE key = 'opened_model_ids'").get());
   }
 
-  updateState(update: (current: ModelManagerStateRecord) => ModelManagerStateRecord): Promise<ModelManagerStateRecord> {
+  async updateState(update: (current: ModelManagerStateRecord) => ModelManagerStateRecord): Promise<ModelManagerStateRecord> {
+    await this.ready();
     return this.enqueueWrite(() => this.db.transaction(() => {
       const next = update(this.getState());
       this.replaceState(next);
@@ -181,7 +207,8 @@ export class ModelManagerStateDb {
     return row || null;
   }
 
-  upsertMediaCache(entry: ModelManagerMediaCacheEntry): Promise<void> {
+  async upsertMediaCache(entry: ModelManagerMediaCacheEntry): Promise<void> {
+    await this.ready();
     return this.enqueueWrite(() => this.writeMediaCache(entry));
   }
 
@@ -206,7 +233,8 @@ export class ModelManagerStateDb {
     );
   }
 
-  deleteMediaCache(mediaUrlInput: string): Promise<ModelManagerMediaCacheEntry | null> {
+  async deleteMediaCache(mediaUrlInput: string): Promise<ModelManagerMediaCacheEntry | null> {
+    await this.ready();
     return this.enqueueWrite(() => this.db.transaction(() => this.removeMediaCache(mediaUrlInput)).immediate());
   }
 
@@ -219,8 +247,8 @@ export class ModelManagerStateDb {
     return existing;
   }
 
-  private ensureSchema(): void {
-    this.db.run(`
+  private ensureSchema(db: Database): void {
+    db.run(`
       CREATE TABLE IF NOT EXISTS model_manager_state (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
@@ -228,7 +256,7 @@ export class ModelManagerStateDb {
       )
     `);
 
-    this.db.run(`
+    db.run(`
       CREATE TABLE IF NOT EXISTS model_manager_clipboard (
         model_id INTEGER PRIMARY KEY,
         captured_at INTEGER NOT NULL,
@@ -236,7 +264,7 @@ export class ModelManagerStateDb {
       )
     `);
 
-    this.db.run(`
+    db.run(`
       CREATE TABLE IF NOT EXISTS model_manager_media_cache (
         media_url TEXT PRIMARY KEY,
         local_path TEXT NOT NULL,
@@ -246,7 +274,7 @@ export class ModelManagerStateDb {
       )
     `);
 
-    this.db.run(`
+    db.run(`
       CREATE INDEX IF NOT EXISTS idx_model_manager_clipboard_captured
       ON model_manager_clipboard(captured_at DESC)
     `);

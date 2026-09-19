@@ -188,7 +188,7 @@ export function useDatasets() {
   const getConceptImages = useCallback(async (
     datasetName: string,
     conceptFolder: string
-  ): Promise<DatasetImage[]> => {
+  ): Promise<DatasetImage[] | null> => {
     try {
       const response = await fetch(
         `/api/datasets/${encodeURIComponent(datasetName)}/concept/${encodeURIComponent(conceptFolder)}/images`
@@ -197,10 +197,11 @@ export function useDatasets() {
       if (!response.ok) throw new Error(await getResponseError(response, 'Failed to fetch images'));
 
       const data = await response.json();
-      return data.images || [];
+      if (!Array.isArray(data?.images)) throw new Error('Invalid concept image response');
+      return data.images;
     } catch (err: any) {
       setError(err.message);
-      return [];
+      return null;
     }
   }, []);
 
@@ -211,11 +212,12 @@ export function useDatasets() {
     try {
       const response = await fetch(
         `/api/datasets/${encodeURIComponent(datasetName)}/concept/${encodeURIComponent(conceptFolder)}/settings`,
-        { cache: 'no-store' }
+        { cache: 'no-store', signal: AbortSignal.timeout(15_000) }
       );
       if (!response.ok) throw new Error(await getResponseError(response, 'Failed to fetch concept settings'));
       const data = await response.json();
-      return data.settings || null;
+      if (!data?.settings || typeof data.settings !== 'object' || Array.isArray(data.settings)) throw new Error('Invalid concept settings response');
+      return data.settings;
     } catch (err: any) {
       setError(err.message);
       return null;
@@ -226,7 +228,7 @@ export function useDatasets() {
     datasetName: string,
     conceptFolder: string,
     settings: Partial<DatasetConceptSettings>
-  ): Promise<DatasetConceptSettings | null> => {
+  ): Promise<DatasetConceptSettings> => {
     try {
       const response = await fetch(
         `/api/datasets/${encodeURIComponent(datasetName)}/concept/${encodeURIComponent(conceptFolder)}/settings`,
@@ -234,14 +236,16 @@ export function useDatasets() {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(settings),
+          signal: AbortSignal.timeout(15_000),
         }
       );
       if (!response.ok) throw new Error(await getResponseError(response, 'Failed to save concept settings'));
       const data = await response.json();
-      return data.settings || null;
+      if (!data?.success || !data.settings || !Number.isFinite(data.settings.updatedAt)) throw new Error('Invalid concept settings save response');
+      return data.settings;
     } catch (err: any) {
       setError(err.message);
-      return null;
+      throw err;
     }
   }, []);
 

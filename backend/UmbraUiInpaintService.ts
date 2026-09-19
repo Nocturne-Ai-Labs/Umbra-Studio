@@ -2,6 +2,7 @@ import { closeSync, fsyncSync, openSync, readFileSync, readdirSync, renameSync, 
 import { mkdir, open, rename, rm } from 'fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'path';
 import { cancelComfyJobById } from './UmbraQueueJobControl';
+import { fetchComfyOutput } from './ComfyOutputTransfer';
 import {
   normalizeUmbraUiModelFamilyKey,
   type UmbraUiInpaintAdapter,
@@ -1309,15 +1310,9 @@ export class UmbraUiInpaintService {
         subfolder: output.subfolder,
         type: output.type || 'temp',
       });
-      const outputResponse = await fetch(`${this.getComfyBaseUrl()}/view?${params.toString()}`, { cache: 'no-store' });
-      if (!outputResponse.ok) throw new Error(`Unable to load the processed control image (${outputResponse.status}).`);
-      const outputBytes = new Uint8Array(await outputResponse.arrayBuffer());
-      if (outputBytes.byteLength <= 0 || outputBytes.byteLength > MAX_SOURCE_BYTES) {
-        throw new Error('The processed control image is empty or exceeds the 256 MB limit.');
-      }
+      const transferred = await fetchComfyOutput(`${this.getComfyBaseUrl()}/view?${params.toString()}`, { maxBytes: MAX_SOURCE_BYTES });
       return {
-        bytes: outputBytes,
-        contentType: String(outputResponse.headers.get('content-type') || 'image/png').split(';')[0] || 'image/png',
+        ...transferred,
         output,
       };
     } finally {
@@ -1402,15 +1397,9 @@ export class UmbraUiInpaintService {
         subfolder: output.subfolder,
         type: output.type || 'temp',
       });
-      const outputResponse = await fetch(`${this.getComfyBaseUrl()}/view?${params.toString()}`, { cache: 'no-store' });
-      if (!outputResponse.ok) throw new Error(`Unable to load the upscaled layer (${outputResponse.status}).`);
-      const outputBytes = new Uint8Array(await outputResponse.arrayBuffer());
-      if (outputBytes.byteLength <= 0 || outputBytes.byteLength > MAX_SOURCE_BYTES) {
-        throw new Error('The upscaled layer is empty or exceeds the 256 MB limit.');
-      }
+      const transferred = await fetchComfyOutput(`${this.getComfyBaseUrl()}/view?${params.toString()}`, { maxBytes: MAX_SOURCE_BYTES });
       return {
-        bytes: outputBytes,
-        contentType: String(outputResponse.headers.get('content-type') || 'image/png').split(';')[0] || 'image/png',
+        ...transferred,
         output,
       };
     } finally {
@@ -1494,15 +1483,9 @@ export class UmbraUiInpaintService {
         subfolder: output.subfolder,
         type: output.type || 'temp',
       });
-      const outputResponse = await fetch(`${this.getComfyBaseUrl()}/view?${params.toString()}`, { cache: 'no-store' });
-      if (!outputResponse.ok) throw new Error(`Unable to load the transparent cutout (${outputResponse.status}).`);
-      const outputBytes = new Uint8Array(await outputResponse.arrayBuffer());
-      if (outputBytes.byteLength <= 0 || outputBytes.byteLength > MAX_SOURCE_BYTES) {
-        throw new Error('The transparent cutout is empty or exceeds the 256 MB limit.');
-      }
+      const transferred = await fetchComfyOutput(`${this.getComfyBaseUrl()}/view?${params.toString()}`, { maxBytes: MAX_SOURCE_BYTES });
       return {
-        bytes: outputBytes,
-        contentType: String(outputResponse.headers.get('content-type') || 'image/png').split(';')[0] || 'image/png',
+        ...transferred,
         output,
       };
     } finally {

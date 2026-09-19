@@ -1,5 +1,6 @@
 """CPU-only, matching-layout Safetensors weight blending for Data Forge."""
 import json
+import errno
 import math
 import os
 from pathlib import Path
@@ -14,6 +15,48 @@ from contextlib import contextmanager, nullcontext
 from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from model_merge_layout import describe, block_for_key
+
+
+def publish_new_file(source, destination, check_cancel):
+    """Publish without replacing collisions, including on drives without hard links."""
+    check_cancel()
+    try:
+        os.link(source, destination)
+        return
+    except OSError as error:
+        if error.errno not in (errno.EXDEV, errno.EPERM, errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENOSYS, errno.EINVAL) and getattr(error, 'winerror', None) not in (1, 50):
+            raise
+
+    check_cancel()
+    owned = None
+    complete = False
+    try:
+        with source.open('rb') as reader:
+            before = os.fstat(reader.fileno())
+            if shutil.disk_usage(destination.parent).free < before.st_size:
+                raise OSError(errno.ENOSPC, 'Not enough disk space to publish on a drive without hard-link support.')
+            with destination.open('xb') as writer:
+                owned = os.fstat(writer.fileno())
+                copied = 0
+                while chunk := reader.read(8 * 1024 * 1024):
+                    check_cancel()
+                    writer.write(chunk)
+                    copied += len(chunk)
+                check_cancel()
+                after = os.fstat(reader.fileno())
+                if copied != before.st_size or after.st_size != before.st_size or after.st_mtime_ns != before.st_mtime_ns:
+                    raise ValueError('Staged model changed during publication.')
+                writer.flush()
+                os.fsync(writer.fileno())
+        complete = True
+    finally:
+        if owned is not None and not complete:
+            try:
+                current = destination.stat()
+                if current.st_dev == owned.st_dev and current.st_ino == owned.st_ino:
+                    destination.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def block_ratios(values, count):
@@ -309,9 +352,9 @@ def merge(request):
             os.fsync(target.fileno())
         check_cancel()
         # Keep the private blueprint durable before making its model visible.
-        os.link(blueprint_partial, blueprint_path)
+        publish_new_file(blueprint_partial, blueprint_path, check_cancel)
         blueprint_published = True
-        os.link(partial, output)
+        publish_new_file(partial, output, check_cancel)
         model_published = True
         emit(phase='completed', progress=100, output=str(output))
     finally:

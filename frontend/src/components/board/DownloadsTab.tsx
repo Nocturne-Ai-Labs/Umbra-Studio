@@ -1,4 +1,3 @@
-import { useState, useEffect, useRef } from 'react';
 import { Pause, Play, Trash2, CheckCircle } from 'lucide-react';
 import { DownloadQueue } from './components/DownloadQueue';
 import { useBoardStore } from './hooks/useBoardStore';
@@ -6,85 +5,11 @@ import { useBoardStore } from './hooks/useBoardStore';
 export function DownloadsTab() {
   const {
     downloadQueue,
-    setIsDownloading,
-    updateDownloadItem,
+    downloadPaused: isPaused,
+    setDownloadPaused: setIsPaused,
     removeFromDownloadQueue,
     clearDownloadQueue,
   } = useBoardStore();
-
-  const [isPaused, setIsPaused] = useState(false);
-  const activeDownloadsRef = useRef<Set<string>>(new Set());
-  const MAX_CONCURRENT = 5;
-
-  // Download a single item
-  const downloadItem = async (item: typeof downloadQueue[0]) => {
-    activeDownloadsRef.current.add(item.id);
-    updateDownloadItem(item.id, { status: 'downloading', progress: 0 });
-
-    try {
-      const response = await fetch('/api/booru/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: item.post.fullUrl,
-          md5: item.post.md5,
-          ext: item.post.fileExt,
-          tags: item.post.tags,
-          source: item.post.source,
-          postId: item.post.id,
-          dataset: item.dataset,
-          concept: item.concept,
-        }),
-      });
-
-      if (response.ok) {
-        updateDownloadItem(item.id, { status: 'done', progress: 100 });
-      } else {
-        const err = await response.json();
-        updateDownloadItem(item.id, { status: 'error', error: err.error || 'Download failed' });
-      }
-    } catch (err: any) {
-      updateDownloadItem(item.id, { status: 'error', error: err.message });
-    }
-
-    activeDownloadsRef.current.delete(item.id);
-  };
-
-  // Process download queue - runs continuously with parallel downloads
-  useEffect(() => {
-    const processQueue = () => {
-      if (isPaused) return;
-
-      const queue = useBoardStore.getState().downloadQueue;
-      const activeCount = activeDownloadsRef.current.size;
-      const slotsAvailable = MAX_CONCURRENT - activeCount;
-
-      if (slotsAvailable <= 0) return;
-
-      // Get queued items that aren't already being processed
-      const queuedItems = queue.filter(
-        i => i.status === 'queued' && !activeDownloadsRef.current.has(i.id)
-      );
-
-      // Start downloads for available slots
-      const itemsToStart = queuedItems.slice(0, slotsAvailable);
-      if (itemsToStart.length > 0) {
-        setIsDownloading(true);
-        itemsToStart.forEach(item => downloadItem(item));
-      }
-
-      // Check if we're done
-      const hasActive = activeDownloadsRef.current.size > 0;
-      const hasQueued = queue.some(i => i.status === 'queued');
-      if (!hasActive && !hasQueued) {
-        setIsDownloading(false);
-      }
-    };
-
-    // Poll frequently for new items
-    const interval = setInterval(processQueue, 200);
-    return () => clearInterval(interval);
-  }, [isPaused, setIsDownloading, updateDownloadItem]);
 
   // Stats
   const completed = downloadQueue.filter(i => i.status === 'done').length;
@@ -150,13 +75,14 @@ export function DownloadsTab() {
 
           <button
             onClick={clearDownloadQueue}
+            title="Clear queued and finished items. Active downloads will finish."
             className="flex items-center gap-1.5 px-2 py-1 text-[11px] rounded transition-colors"
             style={{ color: '#ef4444' }}
             onMouseEnter={e => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
           >
             <Trash2 className="w-3.5 h-3.5" />
-            Clear All
+            Clear Inactive
           </button>
         </div>
       </div>

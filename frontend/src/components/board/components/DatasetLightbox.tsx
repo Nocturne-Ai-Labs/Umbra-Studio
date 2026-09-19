@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Trash2, Flag, Save, Loader2 } from 'lucide-react';
 import type { DatasetImage } from '../types';
-import { datasetImageUrl } from '../datasetMedia';
+import { datasetImageUrl, isProtectedDatasetImage } from '../datasetMedia';
 import { DatasetRedownloadButton } from './DatasetRedownloadButton';
+import { NsfwPrivacyShield, useNsfwPrivacy } from '@/components/privacy/NsfwPrivacyProvider';
+import { useCaptionDraft } from '../hooks/useCaptionDraft';
 
 interface DatasetLightboxProps {
   images: DatasetImage[];
@@ -34,11 +36,14 @@ export function DatasetLightbox({
   const [zoom, setZoom] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
-  const [caption, setCaption] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [hasChanges, setHasChanges] = useState(false);
 
   const currentImage = images[currentIndex];
+  const { caption, setCaption, isSaving, isDirty: hasChanges, error: captionError, save: handleSaveCaption } = useCaptionDraft(
+    JSON.stringify([datasetName, conceptFolder, currentImage?.filename]), currentImage?.caption || '',
+    currentImage && onSaveCaption ? value => onSaveCaption(currentImage.filename, value) : undefined,
+  );
+  const { locked } = useNsfwPrivacy();
+  const protectedMedia = isProtectedDatasetImage(currentImage);
   const isFlagged = currentImage ? flaggedForDeletion.has(currentImage.filename) : false;
 
   const imageUrl = currentImage
@@ -56,10 +61,6 @@ export function DatasetLightbox({
     setHasError(false);
   }, [imageUrl]);
 
-  useEffect(() => {
-    setCaption(currentImage?.caption || '');
-    setHasChanges(false);
-  }, [currentImage?.filename, currentImage?.caption, datasetName, conceptFolder]);
 
   const handleNext = useCallback(() => {
     if (images.length <= 1) return;
@@ -77,15 +78,6 @@ export function DatasetLightbox({
     }
   }, [currentImage, onToggleFlag]);
 
-  const handleSaveCaption = async () => {
-    if (!currentImage || !onSaveCaption) return;
-    setIsSaving(true);
-    const success = await onSaveCaption(currentImage.filename, caption);
-    setIsSaving(false);
-    if (success) {
-      setHasChanges(false);
-    }
-  };
 
   // Keyboard navigation
   useEffect(() => {
@@ -189,14 +181,16 @@ export function DatasetLightbox({
               <>
                 <button
                   onClick={handlePrev}
-                  className="glass-panel absolute left-4 z-10 rounded-full p-3 text-white/55 transition-all hover:text-white"
+                  aria-label="Previous image"
+                  className="glass-panel absolute left-4 z-50 rounded-full p-3 text-white/55 transition-all hover:text-white"
                 >
                   <ChevronLeft size={28} />
                 </button>
 
                 <button
                   onClick={handleNext}
-                  className="glass-panel absolute right-4 z-10 rounded-full p-3 text-white/55 transition-all hover:text-white"
+                  aria-label="Next image"
+                  className="glass-panel absolute right-4 z-50 rounded-full p-3 text-white/55 transition-all hover:text-white"
                 >
                   <ChevronRight size={28} />
                 </button>
@@ -217,12 +211,12 @@ export function DatasetLightbox({
                 }
               }}
             >
-              {isLoading && (
+              {isLoading && !(locked && protectedMedia) && (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="w-8 h-8 border-2 border-zinc-500 border-t-white rounded-full animate-spin" />
                 </div>
               )}
-              {hasError ? (
+              {locked && protectedMedia ? null : hasError ? (
                 <div className="flex flex-col items-center justify-center text-zinc-500 gap-2">
                   <span className="text-lg">Failed to load media</span>
                   <span className="text-xs opacity-50 max-w-md text-center break-all">{imageUrl}</span>
@@ -231,6 +225,7 @@ export function DatasetLightbox({
                 <video
                   key={imageUrl}
                   src={imageUrl}
+                  data-umbra-nsfw-media={protectedMedia ? '' : undefined}
                   className="max-h-full max-w-full object-contain"
                   style={{ transform: `scale(${zoom})` }}
                   controls
@@ -247,6 +242,7 @@ export function DatasetLightbox({
                 <img
                   key={imageUrl}
                   src={imageUrl}
+                  data-umbra-nsfw-media={protectedMedia ? '' : undefined}
                   alt={currentImage.filename}
                   className="max-h-full max-w-full object-contain"
                   style={{ transform: `scale(${zoom})` }}
@@ -258,6 +254,7 @@ export function DatasetLightbox({
                   }}
                 />
               )}
+              <NsfwPrivacyShield protectedMedia={protectedMedia} />
             </motion.div>
           </div>
 
@@ -287,14 +284,14 @@ export function DatasetLightbox({
                 value={caption}
                 onChange={(e) => {
                   setCaption(e.target.value);
-                  setHasChanges(true);
                 }}
                 placeholder="Enter caption..."
                 className="umbra-input custom-scrollbar w-full flex-1 resize-none rounded px-3 py-2 text-sm placeholder:text-zinc-500 focus:border-cyan-400/60 focus:outline-none"
               />
+              {captionError && <p role="alert" className="text-xs text-red-300">{captionError}</p>}
               <button
                 onClick={handleSaveCaption}
-                disabled={!hasChanges || isSaving}
+                disabled={!hasChanges || isSaving || !onSaveCaption}
                 className="mt-2 flex items-center justify-center gap-2 rounded border border-cyan-400/35 bg-cyan-500/15 px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] text-cyan-100 transition-colors hover:bg-cyan-500/22 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSaving ? (

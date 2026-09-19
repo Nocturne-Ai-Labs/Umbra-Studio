@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Star, ExternalLink, Download, Plus, Tag, Check } from 'lucide-react';
 import { BOORU_SOURCES } from '../sources';
 import type { BooruPost } from '../types';
+import { NsfwPrivacyShield, useNsfwPrivacy } from '@/components/privacy/NsfwPrivacyProvider';
+import { isProtectedBooruPost } from '../booruPrivacy';
 
 interface BoardLightboxProps {
   posts: BooruPost[];
@@ -32,6 +34,7 @@ function uniqueMediaUrls(values: Array<string | null | undefined>): string[] {
 }
 
 export function BoardLightbox({ posts, initialIndex, onClose, onDownload, onAddTag }: BoardLightboxProps) {
+  const { locked } = useNsfwPrivacy();
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [zoom, setZoom] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
@@ -41,6 +44,8 @@ export function BoardLightbox({ posts, initialIndex, onClose, onDownload, onAddT
   const [hasError, setHasError] = useState(false);
 
   const currentPost = posts[currentIndex];
+  const protectedMedia = isProtectedBooruPost(currentPost);
+  const blocked = locked && protectedMedia;
   const source = currentPost ? BOORU_SOURCES[currentPost.source] : null;
 
   const mediaUrls = currentPost
@@ -59,10 +64,10 @@ export function BoardLightbox({ posts, initialIndex, onClose, onDownload, onAddT
     setIsLoading(true);
     setMediaAttempt(0);
     setHasError(false);
-  }, [currentIndex]);
+  }, [currentIndex, blocked]);
 
   useEffect(() => {
-    if (!isLoading || hasError || !imageUrl) return;
+    if (blocked || !isLoading || hasError || !imageUrl) return;
     const timeoutId = window.setTimeout(() => {
       setMediaAttempt((attempt) => {
         if (attempt < mediaUrls.length - 1) {
@@ -74,7 +79,7 @@ export function BoardLightbox({ posts, initialIndex, onClose, onDownload, onAddT
       });
     }, FULLSCREEN_MEDIA_LOAD_TIMEOUT_MS);
     return () => window.clearTimeout(timeoutId);
-  }, [hasError, imageUrl, isLoading, mediaUrls.length]);
+  }, [blocked, hasError, imageUrl, isLoading, mediaUrls.length]);
 
   const handleMediaLoaded = useCallback(() => {
     setIsLoading(false);
@@ -266,14 +271,18 @@ export function BoardLightbox({ posts, initialIndex, onClose, onDownload, onAddT
               <>
                 <button
                   onClick={handlePrev}
-                  className="glass-panel absolute left-4 z-10 rounded-full p-3 text-white/55 transition-all hover:text-white"
+                  aria-label="Previous image"
+                  title="Previous image"
+                  className="glass-panel absolute left-4 z-50 rounded-full p-3 text-white/55 transition-all hover:text-white"
                 >
                   <ChevronLeft size={28} />
                 </button>
 
                 <button
                   onClick={handleNext}
-                  className="glass-panel absolute right-4 z-10 rounded-full p-3 text-white/55 transition-all hover:text-white"
+                  aria-label="Next image"
+                  title="Next image"
+                  className="glass-panel absolute right-4 z-50 rounded-full p-3 text-white/55 transition-all hover:text-white"
                 >
                   <ChevronRight size={28} />
                 </button>
@@ -294,18 +303,19 @@ export function BoardLightbox({ posts, initialIndex, onClose, onDownload, onAddT
                 }
               }}
             >
-              {isLoading && (
+              {!blocked && isLoading && (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="w-8 h-8 border-2 border-zinc-500 border-t-white rounded-full animate-spin" />
                 </div>
               )}
-              {hasError ? (
+              {blocked ? null : hasError ? (
                 <div className="flex flex-col items-center justify-center text-zinc-500 gap-2">
                   <span className="text-lg">Failed to load media</span>
                   <span className="max-w-[70vw] truncate text-xs opacity-50">{currentPost.fullUrl || currentPost.previewUrl}</span>
                 </div>
               ) : ['mp4', 'webm', 'mov'].includes(currentPost.fileExt?.toLowerCase() || '') ? (
                 <video
+                  data-umbra-nsfw-media={protectedMedia ? '' : undefined}
                   key={imageUrl}
                   src={imageUrl}
                   className="max-h-full max-w-full object-contain"
@@ -322,6 +332,7 @@ export function BoardLightbox({ posts, initialIndex, onClose, onDownload, onAddT
                 />
               ) : (
                 <img
+                  data-umbra-nsfw-media={protectedMedia ? '' : undefined}
                   key={imageUrl}
                   src={imageUrl}
                   alt=""
@@ -335,6 +346,7 @@ export function BoardLightbox({ posts, initialIndex, onClose, onDownload, onAddT
                   onError={handleMediaError}
                 />
               )}
+              <NsfwPrivacyShield protectedMedia={protectedMedia} />
             </motion.div>
           </div>
 

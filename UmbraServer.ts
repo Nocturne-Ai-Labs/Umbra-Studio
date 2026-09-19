@@ -35,7 +35,9 @@ import { seedBundledWorkflowDirectory } from './backend/BundledWorkflowService';
 import { settingsManager } from './backend/settings/SettingsManager';
 import { FsWorkerService } from './backend/FsWorkerService';
 import { GalleryTransferJournal } from './backend/GalleryTransferJournal';
+import { isGalleryUploadFilename, isGalleryUploadStrategy, prepareGalleryUploadDirectory } from './backend/GalleryUploadService';
 import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
+import { fetchLocalServerProxy, readLocalServerProxyText } from './backend/LocalServerProxyTransfer';
 import { buildGalleryDownloadArchive, prepareGalleryDownloadResponse, getPreparedGalleryDownload, type GalleryDownloadEntry } from './backend/GalleryDownloadArchiveService';
 import { copyFileExclusive, moveTreeExclusive } from './backend/FsTransferCopy';
 import { AnimaModelMergeService } from './backend/AnimaModelMergeService';
@@ -161,6 +163,7 @@ import { DanbooruTagCorpusService } from './backend/DanbooruTagCorpusService';
 import * as trashRoutes from './backend/routes/trash';
 import * as logRoutes from './backend/routes/logs';
 import { MetadataParser } from './backend/MetadataParser';
+import { isAllowedLocalServerHostname } from './shared/localServerHost';
 import * as EditorDb from './backend/EditorDb';
 import { fetchModelMedia, isSafeModelMediaType, validateModelMediaUrl } from './backend/ModelManagerMediaHttp';
 import { GalleryDb, type GalleryFileInput, type GalleryMediaType } from './gallery/GalleryDb';
@@ -515,11 +518,13 @@ function normalizeDatasetConceptSettings(
     return fallback;
   };
   const parseNumber = (value: unknown, fallback: number, min: number, max: number): number => {
+    if (value == null || String(value).trim() === '') return fallback;
     const parsed = typeof value === 'number' ? value : Number(String(value ?? '').trim());
     if (!Number.isFinite(parsed)) return fallback;
     return Math.max(min, Math.min(max, parsed));
   };
   const parseInteger = (value: unknown, fallback: number, min: number, max: number): number => {
+    if (value == null || String(value).trim() === '') return fallback;
     const parsed = Number(String(value ?? '').trim());
     if (!Number.isFinite(parsed)) return fallback;
     return Math.max(min, Math.min(max, Math.floor(parsed)));
@@ -553,13 +558,16 @@ function normalizeDatasetConceptSettings(
 async function readDatasetConceptSettings(datasetName: string, conceptFolder: string, conceptPath: string): Promise<DatasetConceptCaptionSettings> {
   const settingsPath = join(conceptPath, DATASET_CONCEPT_SETTINGS_FILE);
   try {
-    if (!existsSync(settingsPath)) return createDefaultDatasetConceptSettings(datasetName, conceptFolder);
     const parsed = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid concept settings. Restore or repair the settings file before saving.');
     return normalizeDatasetConceptSettings(parsed, datasetName, conceptFolder);
-  } catch {
-    return createDefaultDatasetConceptSettings(datasetName, conceptFolder);
+  } catch (error: any) {
+    if (error?.code === 'ENOENT') return createDefaultDatasetConceptSettings(datasetName, conceptFolder);
+    throw error;
   }
 }
+
+const datasetConceptSettingsWrites = new Map<string, Promise<unknown>>();
 
 async function writeDatasetConceptSettings(
   datasetName: string,
@@ -567,10 +575,22 @@ async function writeDatasetConceptSettings(
   conceptPath: string,
   settings: Record<string, unknown>,
 ): Promise<DatasetConceptCaptionSettings> {
-  const normalized = normalizeDatasetConceptSettings(settings, datasetName, conceptFolder);
-  const saved = { ...normalized, updatedAt: Date.now() };
-  await fs.writeFile(join(conceptPath, DATASET_CONCEPT_SETTINGS_FILE), `${JSON.stringify(saved, null, 2)}\n`, 'utf8');
-  return saved;
+  const canonicalPath = await fs.realpath(conceptPath);
+  const key = process.platform === 'win32' ? canonicalPath.toLowerCase() : canonicalPath;
+  const previous = datasetConceptSettingsWrites.get(key);
+  const write = Promise.resolve(previous).catch(() => {}).then(async () => {
+    const current = await readDatasetConceptSettings(datasetName, conceptFolder, canonicalPath);
+    if (settings.updatedAt !== undefined && settings.updatedAt !== (current.updatedAt ?? 0)) {
+      throw Object.assign(new Error('Concept settings changed elsewhere. Reload before saving.'), { status: 409 });
+    }
+    const normalized = normalizeDatasetConceptSettings(settings, datasetName, conceptFolder);
+    const saved = { ...normalized, updatedAt: Math.max(Date.now(), (current.updatedAt ?? 0) + 1) };
+    await writeTextFileAtomic(join(canonicalPath, DATASET_CONCEPT_SETTINGS_FILE), `${JSON.stringify(saved, null, 2)}\n`);
+    return saved;
+  });
+  datasetConceptSettingsWrites.set(key, write);
+  try { return await write; }
+  finally { if (datasetConceptSettingsWrites.get(key) === write) datasetConceptSettingsWrites.delete(key); }
 }
 
 async function handleBooruImageProxy(req: Request, url: URL): Promise<Response> {
@@ -2275,6 +2295,7 @@ function normalizeModelManagerState(rawValue: unknown): ModelManagerState {
 }
 
 async function loadModelManagerState(): Promise<ModelManagerState> {
+  await modelManagerStateDb.ready();
   const fromDb = modelManagerStateDb.getState();
   const normalizedFromDb: ModelManagerState = {
     openedModelIds: normalizeModelManagerOpenedIds(fromDb.openedModelIds),
@@ -4013,29 +4034,6 @@ async function proxyComfyHttp(req: Request, sourceUrl: URL, targetPath: string):
 
 const LOCAL_SERVER_PROXY_PREFIX = '/api/local-server-proxy/';
 
-function isLocalServerPrivateIpv4(hostname: string): boolean {
-  const parts = hostname.split('.').map((part) => Number.parseInt(part, 10));
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
-  const [a, b] = parts;
-  return a === 10
-    || (a === 172 && b >= 16 && b <= 31)
-    || (a === 192 && b === 168)
-    || (a === 169 && b === 254)
-    || (a === 100 && b >= 64 && b <= 127)
-    || a === 127;
-}
-
-function isAllowedLocalServerHostname(hostname: string): boolean {
-  const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
-  if (!host) return false;
-  if (host === 'localhost' || host === '::1' || host === '0.0.0.0') return true;
-  if (host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80:')) return true;
-  if (host.endsWith('.local')) return true;
-  if (isLocalServerPrivateIpv4(host)) return true;
-  if (/^[a-z0-9-]+$/i.test(host) && !host.includes('.')) return true;
-  return false;
-}
-
 function parseLocalServerTargetUrl(rawUrl: unknown): URL | null {
   const value = String(rawUrl || '').trim();
   if (!value || value.length > 2048) return null;
@@ -4238,20 +4236,30 @@ function rewriteLocalServerAssetText(body: string, token: string, contentType: s
   return nextBody;
 }
 
-async function localServerHealth(rawUrl: string | null): Promise<Response> {
+async function localServerHealth(rawUrl: string | null, requestSignal?: AbortSignal): Promise<Response> {
   const targetUrl = parseLocalServerTargetUrl(rawUrl);
   if (!targetUrl) return json({ ok: false, online: false, error: 'Only local/LAN http(s) URLs are allowed.' }, 400);
   const fetchUrl = normalizeLocalServerFetchUrl(targetUrl);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error('Local server health check timed out.')), 3000);
+  const signal = requestSignal ? AbortSignal.any([requestSignal, controller.signal]) : controller.signal;
   const attempt = async (method: 'HEAD' | 'GET') => fetch(fetchUrl.toString(), {
     method,
     redirect: 'manual',
+    signal,
   });
   try {
     let upstream = await attempt('HEAD');
-    if (upstream.status === 405 || upstream.status === 501) upstream = await attempt('GET');
+    if (upstream.status === 405 || upstream.status === 501) {
+      void upstream.body?.cancel().catch(() => undefined);
+      upstream = await attempt('GET');
+    }
+    void upstream.body?.cancel().catch(() => undefined);
     return json({ ok: true, online: true, status: upstream.status, url: targetUrl.toString() });
   } catch (error: any) {
     return json({ ok: true, online: false, error: error?.message || String(error), url: targetUrl.toString() });
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -4269,11 +4277,12 @@ async function proxyLocalServerHttp(req: Request, sourceUrl: URL): Promise<Respo
 
   let upstream: Response;
   try {
-    upstream = await fetch(fetchUrl.toString(), {
+    upstream = await fetchLocalServerProxy(fetchUrl.toString(), {
       method: req.method,
       headers,
       body: req.method === 'GET' || req.method === 'HEAD' ? undefined : req.body,
       redirect: 'manual',
+      signal: req.signal,
     });
   } catch (error: any) {
     return json({
@@ -4313,7 +4322,9 @@ async function proxyLocalServerHttp(req: Request, sourceUrl: URL): Promise<Respo
 
   const contentType = responseHeaders.get('content-type') || '';
   if (contentType.includes('text/html') && req.method !== 'HEAD') {
-    const html = await upstream.text();
+    let html: string;
+    try { html = await readLocalServerProxyText(upstream); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : 'Local server response failed' }, 502); }
     responseHeaders.set('content-type', 'text/html; charset=utf-8');
     return createProxyTextResponse(
       req,
@@ -4329,7 +4340,9 @@ async function proxyLocalServerHttp(req: Request, sourceUrl: URL): Promise<Respo
     || contentType.includes('application/json')
     || contentType.includes('text/x-component');
   if (isRewritableAsset && req.method !== 'HEAD') {
-    const body = await upstream.text();
+    let body: string;
+    try { body = await readLocalServerProxyText(upstream); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : 'Local server response failed' }, 502); }
     return createProxyTextResponse(
       req,
       sourceUrl,
@@ -9544,7 +9557,9 @@ async function finalizeUmbraExtendedVideo(options: {
   requestId: string;
   clipPaths: string[];
   sourceWs: ServerWebSocket<unknown> | null;
+  signal?: AbortSignal;
 }): Promise<string> {
+  options.signal?.throwIfAborted();
   if (options.clipPaths.length !== options.session.clipCount) {
     throw new Error(`Umbra Extended completed ${options.clipPaths.length} of ${options.session.clipCount} clips.`);
   }
@@ -9553,16 +9568,25 @@ async function finalizeUmbraExtendedVideo(options: {
   const sessionName = sanitizeUmbraExtendedSessionName(options.session.sessionId);
   const outputPath = join(outputDirectory, `Umbra_Extended_${sessionName}.mp4`);
   const workDirectory = join(USER_DIR, 'UmbraUI', 'Queue', 'Extended', sessionName);
-  if (options.clipPaths.length === 1) {
-    await fs.copyFile(options.clipPaths[0], outputPath);
-  } else {
-    await concatenateUmbraExtendedVideoClips({
-      comfyRoot: getComfyToolRootFast() || join(ROOT_DIR, 'Tools', 'ComfyUI'),
-      clipPaths: options.clipPaths,
-      outputPath,
-      workDirectory,
-    });
+  const temporaryOutput = join(outputDirectory, `.Umbra_Extended_${sessionName}_${crypto.randomUUID()}.mp4`);
+  try {
+    if (options.clipPaths.length === 1) {
+      await fs.copyFile(options.clipPaths[0], temporaryOutput);
+    } else {
+      await concatenateUmbraExtendedVideoClips({
+        comfyRoot: getComfyToolRootFast() || join(ROOT_DIR, 'Tools', 'ComfyUI'),
+        clipPaths: options.clipPaths,
+        outputPath: temporaryOutput,
+        workDirectory,
+        signal: options.signal,
+      });
+    }
+    options.signal?.throwIfAborted();
+    await fs.rename(temporaryOutput, outputPath);
+  } finally {
+    await fs.rm(temporaryOutput, { force: true }).catch(() => undefined);
   }
+  options.signal?.throwIfAborted();
   const portablePath = toClientPath(outputPath);
   const reviewRequest = findPowerPrompterQueueControllerRequest(options.requestId);
   const finalPrompt = reviewRequest?.prompts[options.session.clipCount - 1];
@@ -9579,6 +9603,7 @@ async function finalizeUmbraExtendedVideo(options: {
       },
     ]);
   }
+  options.signal?.throwIfAborted();
   sendPrompterEventToTargets({
     type: 'queue_saved_outputs',
     requestId: options.requestId,
@@ -10034,14 +10059,17 @@ async function runBackendPowerPrompterPipelineQueue(
     }
 
     if (extendedSession && failedPromptCount <= 0) {
+      throwIfBackendPowerPrompterQueueCanceled(task);
       await finalizeUmbraExtendedVideo({
         session: extendedSession,
         requestId,
         clipPaths: extendedClipPaths,
         sourceWs,
+        signal: task.abortController.signal,
       });
     }
 
+    throwIfBackendPowerPrompterQueueCanceled(task);
     sendPrompterEventToTargets({
       type: 'job_idle',
       requestId,
@@ -27018,6 +27046,7 @@ async function removeModelManagerMediaFileIfUnchanged(localPath: string, owned: 
 }
 
 async function loadModelManagerMediaCache(normalizedUrl: string): Promise<{ localPath: string; mimeType: string }> {
+  await modelManagerStateDb.ready();
   const cached = modelManagerStateDb.getMediaCache(normalizedUrl);
   const cacheStat = cached?.localPath && isPathInsideDirectory(MODEL_MANAGER_MEDIA_CACHE_DIR, cached.localPath)
     ? await fs.lstat(cached.localPath, { bigint: true }).catch(() => null) : null;
@@ -27750,6 +27779,7 @@ async function handleEditorSearch(url: URL): Promise<Response> {
   }
 
   // Search images by tags
+  await EditorDb.initDatabase();
   const taggedImagePaths = EditorDb.searchImagePathsByTag(query, limit * 4);
   const images: Array<{
     path: string;
@@ -29429,14 +29459,24 @@ async function handleFsCopy(req: Request): Promise<Response> {
 async function handleFsUpload(req: Request): Promise<Response> {
   try {
     const formData = await req.formData();
-    const files = formData.getAll('files') as File[];
-    const rawDestination = (formData.get('destination') as string || '').trim();
+    const files = formData.getAll('files');
+    const destinationPart = formData.get('destination');
+    if (destinationPart !== null && typeof destinationPart !== 'string') return json({ error: 'Invalid upload destination' }, 400);
+    const rawDestination = typeof destinationPart === 'string' ? destinationPart.trim() : '';
     let destination = (!rawDestination || rawDestination === 'Library')
       ? getDefaultOutputRootPath()
       : normalizeOutputPathInput(rawDestination);
     const checkDuplicates = formData.get('checkDuplicates') === 'true';
 
     if (!files || files.length === 0) return json({ error: 'No files provided' }, 400);
+    if (!files.every((file): file is Exclude<typeof file, string> => typeof file !== 'string' && isGalleryUploadFilename(file.name))) {
+      return json({ error: 'Upload requires files with valid filenames, without paths or reserved characters' }, 400);
+    }
+    for (const file of files) {
+      if (!isGalleryUploadStrategy(formData.get(`strategy_${file.name}`) || 'keepBoth')) {
+        return json({ error: 'Invalid duplicate handling strategy' }, 400);
+      }
+    }
 
     const resolved = resolvePath(destination);
     if (!resolved) return json({ error: 'Invalid target path' }, 400);
@@ -29444,15 +29484,24 @@ async function handleFsUpload(req: Request): Promise<Response> {
       return json({ error: 'Upload destination is outside allowed roots' }, 403);
     }
 
-    await fs.mkdir(resolved.fullPath, { recursive: true });
+    let uploadDirectory: string;
+    try {
+      uploadDirectory = await prepareGalleryUploadDirectory(resolved.fullPath, [
+        ROOT_DIR, getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate),
+      ]);
+    } catch (error: any) {
+      return json({ error: error?.message || 'Upload destination is unavailable' }, 400);
+    }
 
     // Check for duplicates if requested
     if (checkDuplicates) {
       const duplicates = [];
       for (const file of files) {
-        const filePath = join(resolved.fullPath, file.name);
+        const filePath = join(uploadDirectory, file.name);
         try {
-          await fs.access(filePath);
+          const info = await fs.lstat(filePath);
+          if (info.isSymbolicLink()) return json({ error: 'Cannot compare an upload with a linked file' }, 400);
+          if (!info.isFile()) continue;
           // File exists - check if it's actually the same file using hash
           const existingBuffer = await Bun.file(filePath).arrayBuffer();
           const newBuffer = await file.arrayBuffer();
@@ -29484,31 +29533,22 @@ async function handleFsUpload(req: Request): Promise<Response> {
     // Process uploads
     const results = await Promise.all(files.map(async (file) => {
       try {
-        let filePath = join(resolved.fullPath, file.name);
         const strategy = formData.get(`strategy_${file.name}`) as string || 'keepBoth';
 
         // Handle duplicate strategy
         if (strategy === 'skip') {
           return { name: file.name, success: true, skipped: true };
-        } else if (strategy === 'keepBoth') {
-          // Auto-rename if file exists
-          let counter = 1;
-          const ext = file.name.substring(file.name.lastIndexOf('.'));
-          const baseName = file.name.substring(0, file.name.lastIndexOf('.'));
-
-          while (await fs.access(filePath).then(() => true).catch(() => false)) {
-            filePath = join(resolved.fullPath, `${baseName} (${counter})${ext}`);
-            counter++;
-          }
         }
-        // strategy === 'replace' will just overwrite
-
+        if (!isGalleryUploadStrategy(strategy)) throw new Error('Invalid duplicate handling strategy');
         const buffer = await file.arrayBuffer();
-        await fsWorkerService.write({
-          fullPath: filePath,
-          content: Buffer.from(buffer).toString('base64'),
-          encoding: 'base64',
+        const published = await fsWorkerService.upload({
+          directory: uploadDirectory,
+          name: file.name,
+          strategy,
+          contentBase64: Buffer.from(buffer).toString('base64'),
         });
+        if (!published.path) throw new Error('Upload did not publish a file');
+        const filePath = join(resolved.fullPath, basename(published.path));
         return { name: file.name, success: true, path: filePath };
       } catch (error: any) {
         return { name: file.name, success: false, error: error.message };
@@ -29575,27 +29615,33 @@ async function handleEditorSave(req: Request): Promise<Response> {
 /** Embed AI generation metadata from source image into exported buffer */
 async function embedMetadataIntoBuffer(buffer: Buffer, sourcePath: string, filename: string): Promise<Buffer> {
   try {
-    // Resolve source path to read metadata
-    let fullSourcePath = sourcePath;
-    if (!sourcePath.startsWith('/')) {
-      fullSourcePath = join(USER_DIR, sourcePath);
-      if (!existsSync(fullSourcePath)) fullSourcePath = join(ROOT_DIR, sourcePath);
+    const resolved = resolvePath(sourcePath, { allowOutsideRoot: true });
+    let fullSourcePath = resolved?.fullPath || '';
+    if ((!fullSourcePath || !existsSync(fullSourcePath)) && !isAbsolutePathInput(sourcePath)) {
+      // Older editor clients supplied paths relative to User rather than the runtime root.
+      fullSourcePath = resolvePath(join(USER_DIR, sourcePath), { allowOutsideRoot: true })?.fullPath || '';
     }
-    if (!existsSync(fullSourcePath)) return buffer;
+    if (!fullSourcePath || !existsSync(fullSourcePath)) {
+      throw new Error('The source image for metadata was not found. Restore the source or turn off Embed Metadata.');
+    }
 
     const metadata = await MetadataParser.parse(fullSourcePath);
-    if (!metadata.positive_prompt && !metadata.model && !metadata.seed) return buffer;
+    if (!metadata.positive_prompt && !metadata.negative_prompt && !metadata.model && metadata.seed == null) return buffer;
 
-    // Build metadata text
-    const metaText = [
-      metadata.positive_prompt ? `Prompt: ${metadata.positive_prompt}` : '',
-      metadata.negative_prompt ? `Negative: ${metadata.negative_prompt}` : '',
-      metadata.model ? `Model: ${metadata.model}` : '',
-      metadata.seed != null ? `Seed: ${metadata.seed}` : '',
-      metadata.steps ? `Steps: ${metadata.steps}` : '',
+    // Match the parameters format read by Umbra and other image-generation tools.
+    const controls = [
+      `Steps: ${metadata.steps ?? ''}`,
       metadata.sampler ? `Sampler: ${metadata.sampler}` : '',
-      metadata.cfg != null ? `CFG: ${metadata.cfg}` : '',
+      metadata.scheduler ? `Schedule type: ${metadata.scheduler}` : '',
+      metadata.cfg != null ? `CFG scale: ${metadata.cfg}` : '',
+      metadata.seed != null ? `Seed: ${metadata.seed}` : '',
+      metadata.model ? `Model: ${metadata.model}` : '',
     ].filter(Boolean).join(', ');
+    const metaText = [
+      metadata.positive_prompt || '',
+      metadata.negative_prompt ? `Negative prompt: ${metadata.negative_prompt}` : '',
+      controls,
+    ].filter(Boolean).join('\n');
 
     if (!metaText) return buffer;
 
@@ -29603,14 +29649,13 @@ async function embedMetadataIntoBuffer(buffer: Buffer, sourcePath: string, filen
     const ext = filename.split('.').pop()?.toLowerCase();
 
     if (ext === 'png') {
-      // For PNG: embed as tEXt chunks
+      // iTXt preserves non-Latin prompts; tEXt is limited to Latin-1.
       return await sharp(buffer)
         .withMetadata({})
         .png()
         .toBuffer()
         .then(async (buf: Buffer) => {
-          // Sharp doesn't directly support PNG tEXt chunks, so we manually inject them
-          return injectPngTextChunk(buf, 'parameters', metaText);
+          return injectPngInternationalTextChunk(buf, 'parameters', metaText);
         });
     } else {
       // For JPEG/WebP: embed in EXIF UserComment via sharp
@@ -29624,40 +29669,8 @@ async function embedMetadataIntoBuffer(buffer: Buffer, sourcePath: string, filen
     }
   } catch (err) {
     console.error('[Export] Metadata embedding failed:', err);
-    return buffer;
+    throw err;
   }
-}
-
-/** Inject a tEXt chunk into a PNG buffer */
-function injectPngTextChunk(pngBuffer: Buffer, keyword: string, text: string): Buffer {
-  // PNG structure: 8-byte signature, then chunks
-  // We insert the tEXt chunk right after the IHDR chunk (first chunk after signature)
-  // Read IHDR chunk (starts at offset 8)
-  const ihdrLen = pngBuffer.readUInt32BE(8);
-  const ihdrEnd = 8 + 4 + 4 + ihdrLen + 4; // length(4) + type(4) + data + crc(4)
-
-  // Build tEXt chunk: keyword + null byte + text
-  const keyBuf = Buffer.from(keyword, 'latin1');
-  const textBuf = Buffer.from(text, 'latin1');
-  const chunkData = Buffer.concat([keyBuf, Buffer.from([0]), textBuf]);
-
-  const chunkLen = Buffer.alloc(4);
-  chunkLen.writeUInt32BE(chunkData.length, 0);
-  const chunkType = Buffer.from('tEXt', 'ascii');
-
-  // CRC covers type + data
-  const crcInput = Buffer.concat([chunkType, chunkData]);
-  const crc = crc32(crcInput);
-  const crcBuf = Buffer.alloc(4);
-  crcBuf.writeUInt32BE(crc >>> 0, 0);
-
-  const textChunk = Buffer.concat([chunkLen, chunkType, chunkData, crcBuf]);
-
-  // Insert after IHDR
-  const before = pngBuffer.subarray(0, ihdrEnd);
-  const after = pngBuffer.subarray(ihdrEnd);
-
-  return Buffer.concat([before, textChunk, after]);
 }
 
 /** Inject an uncompressed UTF-8 iTXt chunk into a PNG buffer. */
@@ -30172,7 +30185,7 @@ const server = Bun.serve<UmbraSocketData>({
         }
 
       if (path === '/api/local-server-proxy/health' && method === 'GET') {
-          return await localServerHealth(url.searchParams.get('url'));
+          return await localServerHealth(url.searchParams.get('url'), req.signal);
       }
       if (path === '/api/local-server-apps/open-folder' && method === 'POST') {
           return await handleLocalServerOpenFolder(req, server);
@@ -30695,6 +30708,14 @@ const server = Bun.serve<UmbraSocketData>({
       // ============================================
       // EDITOR CONFIG API
       // ============================================
+
+      // GET /api/editor/config/:key
+      if (path.startsWith('/api/editor/')) {
+        try { await EditorDb.initDatabase(); }
+        catch (error: any) {
+          return json({ error: `Editor database is temporarily unavailable. Please retry. ${error?.message || error}` }, 503);
+        }
+      }
 
       // GET /api/editor/config/:key
       if (path.startsWith('/api/editor/config/') && method === 'GET') {
@@ -32280,11 +32301,12 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ settings });
           }
 
-          const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+          const body = await req.json() as Record<string, unknown>;
+          if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'Invalid concept settings' }, 400);
           const settings = await writeDatasetConceptSettings(datasetName, conceptFolder, conceptPath, body);
           return json({ success: true, settings });
         } catch (error: any) {
-          return json({ error: error.message }, 500);
+          return json({ error: error.message }, error?.status === 409 ? 409 : 500);
         }
       }
 
@@ -32554,7 +32576,7 @@ const server = Bun.serve<UmbraSocketData>({
           const triggerTags = parseTagList(body.triggerTags, replaceUnderscoresWithSpaces);
           const prependTags = parseTagList(body.prependTags, replaceUnderscoresWithSpaces);
           const prefixTags = mergeTags(triggerTags, prependTags);
-          await writeDatasetConceptSettings(datasetName, conceptName, conceptPath, {
+          if (body.persistSettings !== false) await writeDatasetConceptSettings(datasetName, conceptName, conceptPath, {
             triggerTags: String(body.triggerTags ?? ''),
             prependTags: String(body.prependTags ?? ''),
             captionMode,

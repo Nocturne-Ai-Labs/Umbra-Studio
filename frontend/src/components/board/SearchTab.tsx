@@ -61,6 +61,9 @@ export function SearchTab({ onDownload }: SearchTabProps) {
   // Refs for scroll container and loading state
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isLoadingRef = useRef(false);
+  const searchControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => { searchControllerRef.current?.abort(); }, []);
 
   // Set initial active tab
   useEffect(() => {
@@ -81,50 +84,72 @@ export function SearchTab({ onDownload }: SearchTabProps) {
   // Perform search
   const doSearch = useCallback(async (append = false, tagsOverride?: string) => {
     if (!activeTab || isLoadingRef.current) return;
-
+    const tab = useBoardStore.getState().searchTabs.find(item => item.id === activeTab.id);
+    if (!tab) return;
+    const searchTags = String(tagsOverride ?? tab.tags).trim();
+    const sources = [...tab.sources];
+    const queryKey = JSON.stringify([searchTags, [...sources].sort()]);
+    const appendPage = append && tab.resultQuery === queryKey;
+    const controller = new AbortController();
+    searchControllerRef.current = controller;
     isLoadingRef.current = true;
-    updateSearchTab(activeTab.id, { isLoading: true });
-    const searchTags = String(tagsOverride ?? activeTab.tags).trim();
-    if (!append) addSearchHistory(searchTags);
+    updateSearchTab(tab.id, { isLoading: true, tags: searchTags });
+    if (!appendPage) addSearchHistory(searchTags);
 
-    const page = append ? activeTab.page + 1 : 1;
-    const results = await search({
-      sources: activeTab.sources,
-      tags: searchTags,
-      page,
-      limit: 40,
-    });
+    const page = appendPage ? tab.page + 1 : 1;
+    const exhaustedSources = new Set(appendPage ? tab.exhaustedSources || [] : []);
+    let pageInfo: Record<string, boolean> | null = null;
+    try {
+      const results = await search({
+        sources: sources.filter(source => !exhaustedSources.has(source)),
+        tags: searchTags,
+        page,
+        limit: 40,
+        signal: controller.signal,
+        onPageInfo: (info) => { pageInfo = info; },
+      });
+      if (results === null || controller.signal.aborted) return;
+      const currentTab = useBoardStore.getState().searchTabs.find(item => item.id === tab.id);
+      if (!currentTab || JSON.stringify([currentTab.tags.trim(), [...currentTab.sources].sort()]) !== queryKey) return;
+      if (pageInfo) for (const [source, hasMore] of Object.entries(pageInfo)) {
+        if (!hasMore) exhaustedSources.add(source);
+      }
 
-    // Deduplicate when appending paginated results
-    let finalResults = results;
-    if (append) {
-      const existingIds = new Set(activeTab.results.map(p => p.id));
-      const newResults = results.filter(p => !existingIds.has(p.id));
-      finalResults = [...activeTab.results, ...newResults];
+      // Deduplicate when appending paginated results.
+      let finalResults = results;
+      if (appendPage) {
+        const existingIds = new Set(currentTab.results.map(p => p.id));
+        finalResults = [...currentTab.results, ...results.filter(p => !existingIds.has(p.id))];
+      }
+
+      updateSearchTab(tab.id, {
+        results: finalResults,
+        resultQuery: queryKey,
+        selected: appendPage ? currentTab.selected : new Set(),
+        page,
+        hasMore: sources.some(source => !exhaustedSources.has(source)) && (pageInfo !== null || results.length >= 40),
+        exhaustedSources: [...exhaustedSources],
+        tags: searchTags,
+        name: searchTags.split(' ')[0] || 'Search',
+      });
+    } finally {
+      updateSearchTab(tab.id, { isLoading: false });
+      isLoadingRef.current = false;
+      if (searchControllerRef.current === controller) searchControllerRef.current = null;
     }
-
-    updateSearchTab(activeTab.id, {
-      results: finalResults,
-      page,
-      hasMore: results.length >= 40,
-      isLoading: false,
-      tags: searchTags,
-      name: searchTags.split(' ')[0] || 'Search',
-    });
-    isLoadingRef.current = false;
   }, [activeTab, addSearchHistory, search, updateSearchTab]);
 
   // Auto-load more when scrolled to bottom
   const handleScroll = useCallback(() => {
     const container = scrollContainerRef.current;
-    if (!container || !activeTab?.hasMore || isLoadingRef.current) return;
+    if (!container || !activeTab?.hasMore || isLoadingRef.current || searchError) return;
 
     const { scrollTop, scrollHeight, clientHeight } = container;
     // Trigger when within 100px of bottom
     if (scrollHeight - scrollTop - clientHeight < 100) {
       doSearch(true);
     }
-  }, [activeTab?.hasMore, doSearch]);
+  }, [activeTab?.hasMore, doSearch, searchError]);
 
   // Toggle selection
   const toggleSelect = (postId: string, selected: boolean) => {

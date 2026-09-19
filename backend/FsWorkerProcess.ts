@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import { spawn } from 'node:child_process';
 import { GalleryDb } from '../gallery/GalleryDb';
 import { copyTreeExclusive, moveTreeExclusive, moveFileExclusive, type CopyProgress } from './FsTransferCopy';
+import { publishGalleryUpload, type GalleryUploadRequest } from './GalleryUploadService';
 
 type FsFilter = string | null;
 
@@ -177,6 +178,7 @@ type FsSystemTrashRequest = {
 };
 
 type FsWorkerRequest =
+  | { id: string; type: 'upload'; payload: GalleryUploadRequest }
   | { id: string; type: 'gallery-transfer'; payload: { mode: 'move' | 'copy'; pairs: Array<{ sourcePath: string; targetPath: string }> } }
   | FsWarmupRequest
   | FsInvalidateRequest
@@ -1505,6 +1507,11 @@ async function handleRequest(request: FsWorkerRequest) {
       return runRename(request.payload);
     case 'write':
       return runWrite(request.payload);
+    case 'upload': {
+      const result = await publishGalleryUpload(request.payload);
+      if (result.path) invalidateProgressiveSeedCachePath(result.path);
+      return result;
+    }
     case 'read':
       return runRead(request.payload);
     case 'delete':
@@ -1524,7 +1531,7 @@ async function main() {
   let mutations = Promise.resolve();
   const readers = Array.from({ length: 4 }, () => Promise.resolve());
   let nextReader = 0;
-  const mutating = new Set(['move', 'copy', 'delete', 'system-trash', 'mkdir', 'rename', 'write', 'gallery-transfer']);
+  const mutating = new Set(['move', 'copy', 'delete', 'system-trash', 'mkdir', 'rename', 'write', 'upload', 'gallery-transfer']);
   const execute = async (request: FsWorkerRequest) => {
     try {
       const result = await handleRequest(request);

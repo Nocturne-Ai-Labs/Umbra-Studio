@@ -7,6 +7,8 @@ interface SearchOptions {
   tags: string;
   page?: number;
   limit?: number;
+  signal?: AbortSignal;
+  onPageInfo?: (hasMoreBySource: Record<string, boolean>) => void;
 }
 
 export function useBooru() {
@@ -21,7 +23,7 @@ export function useBooru() {
   };
 
   // Search multiple sources
-  const search = useCallback(async (options: SearchOptions): Promise<BooruPost[]> => {
+  const search = useCallback(async (options: SearchOptions): Promise<BooruPost[] | null> => {
     const { sources, tags, page = 1, limit = 40 } = options;
 
     if (!tags.trim()) {
@@ -30,6 +32,8 @@ export function useBooru() {
 
     setIsLoading(true);
     setError(null);
+    const deadline = AbortSignal.timeout(30_000);
+    const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
 
     try {
       // Search all enabled sources in parallel
@@ -40,7 +44,7 @@ export function useBooru() {
             tags,
             page: String(page),
             limit: String(limit),
-          })}`);
+          })}`, { signal });
 
           if (!response.ok) {
             const payload = await response.json().catch(() => ({}));
@@ -50,8 +54,9 @@ export function useBooru() {
           const data = await response.json();
 
           // Server returns pre-parsed format, map to BooruPost
-          const posts = Array.isArray(data) ? data : [];
-          return posts.filter((p: any) => p.url || p.fullUrl).map((p: any): BooruPost => ({
+          if (!Array.isArray(data)) throw new Error(`${BOORU_SOURCES[sourceId]?.name || sourceId}: Invalid search response`);
+          const posts = data;
+          const mapped = posts.filter((p: any) => p.url || p.fullUrl).map((p: any): BooruPost => ({
             id: `${sourceId}_${p.id}`,
             source: sourceId,
             previewUrl: p.url || p.fullUrl,
@@ -64,20 +69,27 @@ export function useBooru() {
             tags: p.tags || [],
             fileExt: p.fileExt || (p.fullUrl || p.url || '').split('.').pop() || 'jpg',
           }));
+          return { posts: mapped, sourceId, hasMore: posts.length >= limit };
         })
       );
+      if (options.signal?.aborted) return null;
 
       // Combine results from all sources
       let allPosts: BooruPost[] = [];
       const sourceErrors: string[] = [];
+      const hasMoreBySource: Record<string, boolean> = {};
       for (const result of results) {
         if (result.status === 'fulfilled') {
-          allPosts = allPosts.concat(result.value);
+          allPosts = allPosts.concat(result.value.posts);
+          hasMoreBySource[result.value.sourceId] = result.value.hasMore;
         } else {
           sourceErrors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
         }
       }
       setError(sourceErrors.length > 0 ? sourceErrors.join(' | ') : null);
+      // A shared page cursor cannot advance until every selected source succeeds.
+      if (sourceErrors.length > 0) return null;
+      options.onPageInfo?.(hasMoreBySource);
 
       // Remove duplicates by ID (unique per source+id combo)
       const seen = new Set<string>();
@@ -94,7 +106,7 @@ export function useBooru() {
       return allPosts;
     } catch (err: any) {
       setError(err.message);
-      return [];
+      return null;
     } finally {
       setIsLoading(false);
     }

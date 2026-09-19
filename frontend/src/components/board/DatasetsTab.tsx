@@ -13,8 +13,10 @@ import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { useDatasets } from './hooks/useDatasets';
 import type { DatasetConceptSettings } from './hooks/useDatasets';
 import type { DatasetImage } from './types';
-import { datasetImageUrl, redownloadDatasetImage } from './datasetMedia';
+import { redownloadDatasetImage } from './datasetMedia';
 import { DatasetRedownloadButton } from './components/DatasetRedownloadButton';
+import { DatasetThumbnail } from './components/DatasetThumbnail';
+import { createConceptSettingsSession, type ConceptSaveStatus } from './conceptSettingsSession';
 
 const IMAGE_FILE_PATTERN = /\.(avif|bmp|gif|jpe?g|png|webp)$/i;
 const WAIFU_MODEL_OPTIONS = [
@@ -133,6 +135,7 @@ export function DatasetsTab() {
   const repairLocks = useRef(new Set<string>());
   const conceptKey = JSON.stringify([selectedDataset, selectedConcept]);
   const activeConcept = useRef(conceptKey);
+  const imageLoadSequence = useRef(0);
   activeConcept.current = conceptKey;
   const repairKey = (filename: string) => JSON.stringify([selectedDataset, selectedConcept, filename]);
   const handleRedownload = async (image: DatasetImage) => {
@@ -190,6 +193,10 @@ export function DatasetsTab() {
   const [includeMetaTags, setIncludeMetaTags] = useState(DEFAULT_CONCEPT_SETTINGS.includeMetaTags);
   const [includeRatingTags, setIncludeRatingTags] = useState(DEFAULT_CONCEPT_SETTINGS.includeRatingTags);
   const [conceptSettingsReadyKey, setConceptSettingsReadyKey] = useState('');
+  const [conceptSettingsFailed, setConceptSettingsFailed] = useState(false);
+  const [conceptSettingsRetry, setConceptSettingsRetry] = useState(0);
+  const conceptSessions = useRef(new Map<string, ReturnType<typeof createConceptSettingsSession>>());
+  const [conceptSaveStatus, setConceptSaveStatus] = useState<ConceptSaveStatus>({ state: 'saved' });
   const [autoTagging, setAutoTagging] = useState(false);
   const [preserveExistingCaptions, setPreserveExistingCaptions] = useState(true);
   const [replaceUnderscoresWithSpaces, setReplaceUnderscoresWithSpaces] = useState(false);
@@ -345,18 +352,26 @@ export function DatasetsTab() {
 
   // Load images when concept is selected
   useEffect(() => {
+    setImages([]);
+    setSelectedImages(new Set());
+    setFlaggedForDeletion(new Set());
+    setFocusedImage(null);
+    setLightboxOpen(false);
+    setShowDeleteConfirm(false);
+    setShowMoveModal(false);
+    setMoveToConcept('');
     if (selectedDataset && selectedConcept) {
-      loadImages();
+      void loadImages();
     } else {
-      setImages([]);
-      setSelectedImages(new Set());
-      setFocusedImage(null);
+      setIsLoadingImages(false);
     }
+    return () => { imageLoadSequence.current++; };
   }, [selectedDataset, selectedConcept]);
 
   useEffect(() => {
     let cancelled = false;
     setConceptSettingsReadyKey('');
+    setConceptSettingsFailed(false);
 
     if (!selectedDataset || !selectedConcept) {
       applyConceptSettings(DEFAULT_CONCEPT_SETTINGS);
@@ -366,22 +381,43 @@ export function DatasetsTab() {
     }
 
     const key = `${selectedDataset}/${selectedConcept}`;
+    const existing = conceptSessions.current.get(key);
+    if (existing) {
+      applyConceptSettings(existing.draft);
+      setConceptSaveStatus(existing.status);
+      setConceptSettingsReadyKey(key);
+      return;
+    }
     void getConceptSettings(selectedDataset, selectedConcept).then((settings) => {
       if (cancelled) return;
-      applyConceptSettings(settings || DEFAULT_CONCEPT_SETTINGS);
+      if (!settings) {
+        setConceptSettingsFailed(true);
+        return;
+      }
+      applyConceptSettings(settings);
+      const session = createConceptSettingsSession(
+        { ...DEFAULT_CONCEPT_SETTINGS, ...settings },
+        value => saveConceptSettings(selectedDataset, selectedConcept, value),
+        status => { if (activeConcept.current === conceptKey) setConceptSaveStatus(status); },
+      );
+      conceptSessions.current.set(key, session);
+      setConceptSaveStatus(session.status);
       setConceptSettingsReadyKey(key);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [getConceptSettings, selectedDataset, selectedConcept]);
+  }, [getConceptSettings, saveConceptSettings, selectedDataset, selectedConcept, conceptSettingsRetry]);
+
+  useEffect(() => () => {
+    for (const session of conceptSessions.current.values()) void session.flush();
+  }, []);
 
   useEffect(() => {
     if (!selectedDataset || !selectedConcept || conceptSettingsReadyKey !== selectedConceptSettingsKey) return;
 
-    const timeoutId = window.setTimeout(() => {
-      void saveConceptSettings(selectedDataset, selectedConcept, {
+    conceptSessions.current.get(selectedConceptSettingsKey)?.update({
         triggerTags,
         prependTags,
         captionMode,
@@ -403,10 +439,7 @@ export function DatasetsTab() {
         maxTags,
         preserveExisting: preserveExistingCaptions,
         replaceUnderscoresWithSpaces,
-      });
-    }, 500);
-
-    return () => window.clearTimeout(timeoutId);
+    });
   }, [
     characterMcutEnabled,
     characterThreshold,
@@ -437,12 +470,17 @@ export function DatasetsTab() {
   ]);
 
   const loadImages = async () => {
-    if (!selectedDataset || !selectedConcept) return;
-
+    if (!selectedDataset || !selectedConcept || activeConcept.current !== conceptKey) return;
+    const sequence = ++imageLoadSequence.current;
     setIsLoadingImages(true);
-    const imgs = await getConceptImages(selectedDataset, selectedConcept);
-    setImages(imgs);
-    setIsLoadingImages(false);
+    try {
+      const imgs = await getConceptImages(selectedDataset, selectedConcept);
+      if (activeConcept.current === conceptKey && sequence === imageLoadSequence.current && imgs !== null) {
+        setImages(imgs);
+      }
+    } finally {
+      if (activeConcept.current === conceptKey && sequence === imageLoadSequence.current) setIsLoadingImages(false);
+    }
   };
 
   // Handlers
@@ -510,8 +548,10 @@ export function DatasetsTab() {
 
     if (!confirm(`Delete ${selectedImages.size} images?`)) return;
 
-    await deleteImages(selectedDataset, selectedConcept, Array.from(selectedImages));
+    const success = await deleteImages(selectedDataset, selectedConcept, Array.from(selectedImages));
+    if (!success || activeConcept.current !== conceptKey) return;
     await loadImages();
+    if (activeConcept.current !== conceptKey) return;
     setSelectedImages(new Set());
     setFocusedImage(null);
   };
@@ -519,8 +559,10 @@ export function DatasetsTab() {
   const handleMoveSelected = async () => {
     if (!selectedDataset || !selectedConcept || !moveToConcept || selectedImages.size === 0) return;
 
-    await moveImages(selectedDataset, Array.from(selectedImages), selectedConcept, moveToConcept);
+    const success = await moveImages(selectedDataset, Array.from(selectedImages), selectedConcept, moveToConcept);
+    if (!success || activeConcept.current !== conceptKey) return;
     await loadImages();
+    if (activeConcept.current !== conceptKey) return;
     setSelectedImages(new Set());
     setShowMoveModal(false);
     setMoveToConcept('');
@@ -529,20 +571,18 @@ export function DatasetsTab() {
   const handleSaveCaption = async (imageName: string, caption: string): Promise<boolean> => {
     if (!selectedDataset || !selectedConcept) return false;
     const success = await saveCaption(selectedDataset, selectedConcept, imageName, caption);
-    if (success) {
+    if (success && activeConcept.current === conceptKey) {
       // Update local state
       setImages(prev => prev.map(img =>
         img.filename === imageName ? { ...img, caption } : img
       ));
-      if (focusedImage?.filename === imageName) {
-        setFocusedImage({ ...focusedImage, caption });
-      }
+      setFocusedImage(previous => previous?.filename === imageName ? { ...previous, caption } : previous);
     }
     return success;
   };
 
   const handleBatchCaption = async (autoTag: boolean) => {
-    if (!selectedDataset || !selectedConcept || images.length === 0 || autoTagging) return;
+    if (!selectedDataset || !selectedConcept || images.length === 0 || autoTagging || conceptSettingsReadyKey !== selectedConceptSettingsKey) return;
 
     const targetImages = selectedImages.size > 0 ? Array.from(selectedImages) : [];
     if (!autoTag && !triggerTags.trim() && !prependTags.trim()) {
@@ -552,6 +592,9 @@ export function DatasetsTab() {
 
     setAutoTagging(true);
     try {
+      const session = conceptSessions.current.get(selectedConceptSettingsKey);
+      if (!session || !await session.flush()) throw new Error('Save concept settings before captioning.');
+      if (activeConcept.current !== conceptKey) return;
       const response = await fetch('/api/datasets/auto-tag-captions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -562,6 +605,7 @@ export function DatasetsTab() {
           triggerTags,
           prependTags,
           autoTag,
+          persistSettings: false,
           captionMode,
           modelRepo: taggerModel,
           naturalModelRepo: naturalModel,
@@ -592,6 +636,7 @@ export function DatasetsTab() {
       if (!response.ok || payload?.error) {
         throw new Error(payload?.error || `Caption update failed (${response.status})`);
       }
+      if (activeConcept.current !== conceptKey) return;
 
       const captionByName = new Map(
         (payload?.results || [])
@@ -669,8 +714,10 @@ export function DatasetsTab() {
 
   const handleConfirmDelete = async () => {
     if (!selectedDataset || !selectedConcept) return;
-    await deleteImages(selectedDataset, selectedConcept, Array.from(flaggedForDeletion));
+    const success = await deleteImages(selectedDataset, selectedConcept, Array.from(flaggedForDeletion));
+    if (!success || activeConcept.current !== conceptKey) return;
     await loadImages();
+    if (activeConcept.current !== conceptKey) return;
     setFlaggedForDeletion(new Set());
     setShowDeleteConfirm(false);
     setFocusedImage(null);
@@ -923,6 +970,22 @@ export function DatasetsTab() {
 
         {selectedConcept && (
           <div className="glass-panel flex-shrink-0 rounded-none border-x-0 border-t-0 px-3 py-2">
+            {conceptSettingsReadyKey !== selectedConceptSettingsKey && <div role="status" className="mb-2 flex items-center gap-2 text-xs text-zinc-400">
+              <span>{conceptSettingsFailed ? 'Could not load concept settings.' : 'Loading concept settings...'}</span>
+              {conceptSettingsFailed && <button type="button" className="umbra-icon-button rounded px-2 py-1" onClick={() => setConceptSettingsRetry(value => value + 1)}>Retry</button>}
+            </div>}
+            <fieldset disabled={conceptSettingsReadyKey !== selectedConceptSettingsKey} className="min-w-0 disabled:opacity-50">
+              <div role="status" className="mb-2 min-h-6 text-xs text-zinc-400">
+                {conceptSettingsReadyKey !== selectedConceptSettingsKey ? null : conceptSaveStatus.state === 'error' ? <>
+                  <span className="text-red-400">{conceptSaveStatus.error}</span>
+                  <button type="button" className="ml-2 rounded px-2 py-1" onClick={() => void conceptSessions.current.get(selectedConceptSettingsKey)?.retry()}>Retry save</button>
+                  <button type="button" className="ml-2 rounded px-2 py-1" onClick={() => {
+                    if (!window.confirm('Discard unsaved concept settings and reload?')) return;
+                    conceptSessions.current.delete(selectedConceptSettingsKey);
+                    setConceptSettingsRetry(value => value + 1);
+                  }}>Reload</button>
+                </> : conceptSaveStatus.state === 'saved' ? 'Settings saved' : conceptSaveStatus.state === 'saving' ? 'Saving settings...' : 'Unsaved settings'}
+              </div>
             <div className="grid grid-cols-1 items-end gap-2 xl:grid-cols-2 2xl:grid-cols-[minmax(210px,1fr)_minmax(260px,1.25fr)_220px]">
               <label className="min-w-0">
                 <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
@@ -1167,10 +1230,11 @@ export function DatasetsTab() {
                 </p>
                 <div className="h-8 min-w-[120px] rounded border border-white/10 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-zinc-500">
                   <span className="block text-[9px] text-zinc-600">Saved</span>
-                  <span className="block font-bold text-zinc-300">Concept local</span>
+                  <span className="block font-bold text-zinc-300">{conceptSettingsReadyKey === selectedConceptSettingsKey ? 'Concept local' : 'Unavailable'}</span>
                 </div>
               </div>
             )}
+            </fieldset>
           </div>
         )}
 
@@ -1235,7 +1299,6 @@ export function DatasetsTab() {
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2">
               {images.map((img, index) => {
-                const imageUrl = datasetImageUrl(selectedDataset || '', selectedConcept || '', img);
                 const isSelected = selectedImages.has(img.filename);
                 const isFocused = focusedImage?.filename === img.filename;
                 const isFlagged = flaggedForDeletion.has(img.filename);
@@ -1257,7 +1320,7 @@ export function DatasetsTab() {
                         e.stopPropagation();
                         toggleImageSelect(img.filename);
                       }}
-                      className={`absolute top-2 left-2 z-10 w-5 h-5 rounded border-2 flex items-center justify-center
+                      className={`absolute top-2 left-2 z-50 w-5 h-5 rounded border-2 flex items-center justify-center
                                  ${isSelected ? 'border-cyan-300/70 bg-cyan-500/30' : 'border-white/20 bg-black/65'}`}
                     >
                       {isSelected && <Check className="h-3 w-3 text-cyan-50" />}
@@ -1270,12 +1333,7 @@ export function DatasetsTab() {
                       </div>
                     )}
 
-                    <img
-                      src={imageUrl}
-                      alt={img.filename}
-                      loading="lazy"
-                      className="w-full h-full object-cover"
-                    />
+                    <DatasetThumbnail image={img} datasetName={selectedDataset || ''} conceptFolder={selectedConcept || ''} />
 
                     {/* Caption indicator */}
                     {img.caption && (
@@ -1283,7 +1341,7 @@ export function DatasetsTab() {
                         <Tag className="w-3 h-3 text-green-400" />
                       </div>
                     )}
-                    <div className="absolute bottom-1 right-1 z-10">
+                    <div className="absolute bottom-1 right-1 z-50">
                       <DatasetRedownloadButton image={img} busy={repairingImages.has(repairKey(img.filename))} onRedownload={handleRedownload} compact />
                     </div>
                   </div>

@@ -1,8 +1,11 @@
 import { create } from 'zustand';
 import type { BoardState, SearchTab, DownloadItem } from '../types';
-import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
+import { createUserPreferenceSession } from '@/lib/userPreferenceSession';
+import { startBoardDownloadRunner } from '../boardDownloadRunner';
 
 const SUPPORTED_SOURCES = new Set(['danbooru', 'gelbooru', 'rule34', 'e621']);
+let nextBoardId = 0;
+const createBoardId = (prefix: string) => `${prefix}_${Date.now()}_${++nextBoardId}`;
 
 function normalizeSources(value: unknown): string[] {
   const sources = Array.isArray(value) ? value.map(source => String(source || '').trim()) : [];
@@ -11,7 +14,7 @@ function normalizeSources(value: unknown): string[] {
 }
 
 const createSearchTab = (): SearchTab => ({
-  id: `tab_${Date.now()}`,
+  id: createBoardId('tab'),
   name: 'New Search',
   tags: '',
   sources: ['danbooru'],
@@ -23,7 +26,7 @@ const createSearchTab = (): SearchTab => ({
 });
 
 export const useBoardStore = create<BoardState>()(
-    (set) => ({
+    (set, get) => ({
       // Initial state
       searchTabs: [createSearchTab()],
       activeSearchTabId: null,
@@ -31,6 +34,7 @@ export const useBoardStore = create<BoardState>()(
       searchHistory: [],
       downloadQueue: [],
       isDownloading: false,
+      downloadPaused: false,
       enabledSources: ['danbooru'],
       defaultRepeats: 10,
 
@@ -76,7 +80,8 @@ export const useBoardStore = create<BoardState>()(
 
       // Favorites actions
       addFavorite: (query) => {
-        set(state => ({
+        boardPreferences.update(state => ({
+          ...state,
           favorites: state.favorites.includes(query)
             ? state.favorites
             : [...state.favorites, query],
@@ -84,7 +89,8 @@ export const useBoardStore = create<BoardState>()(
       },
 
       removeFavorite: (query) => {
-        set(state => ({
+        boardPreferences.update(state => ({
+          ...state,
           favorites: state.favorites.filter(f => f !== query),
         }));
       },
@@ -92,16 +98,17 @@ export const useBoardStore = create<BoardState>()(
       addSearchHistory: (query) => {
         const normalized = query.trim().replace(/\s+/g, ' ');
         if (!normalized) return;
-        set(state => ({
+        boardPreferences.update(state => ({
+          ...state,
           searchHistory: [normalized, ...state.searchHistory.filter(item => item !== normalized)].slice(0, 5),
         }));
       },
 
       // Download queue actions
       addToDownloadQueue: (items) => {
-        const newItems: DownloadItem[] = items.map((item, i) => ({
+        const newItems: DownloadItem[] = items.map((item) => ({
           ...item,
-          id: `dl_${Date.now()}_${i}`,
+          id: createBoardId('dl'),
           status: 'queued',
           progress: 0,
         }));
@@ -120,57 +127,56 @@ export const useBoardStore = create<BoardState>()(
 
       removeFromDownloadQueue: (id) => {
         set(state => ({
-          downloadQueue: state.downloadQueue.filter(item => item.id !== id),
+          downloadQueue: state.downloadQueue.filter(item => item.id !== id || item.status === 'downloading'),
         }));
       },
 
       clearDownloadQueue: () => {
-        set({ downloadQueue: [] });
+        set(state => ({ downloadQueue: state.downloadQueue.filter(item => item.status === 'downloading') }));
       },
 
       // Settings actions
       setIsDownloading: (value) => {
         set({ isDownloading: value });
       },
+      setDownloadPaused: (value) => set({ downloadPaused: value }),
 
       toggleSource: (sourceId) => {
-        set(state => ({
-          enabledSources: state.enabledSources.includes(sourceId)
+        const remove = get().enabledSources.includes(sourceId);
+        boardPreferences.update(state => ({
+          ...state,
+          enabledSources: remove
             ? state.enabledSources.filter(s => s !== sourceId)
-            : [...state.enabledSources, sourceId],
+            : [...new Set([...state.enabledSources, sourceId])],
         }));
       },
 
       setDefaultRepeats: (value) => {
-        set({ defaultRepeats: value });
+        boardPreferences.update(state => ({ ...state, defaultRepeats: value }));
       },
     })
 );
 
-let boardPreferencesHydrated = false;
+type BoardPreferences = Pick<BoardState, 'favorites' | 'searchHistory' | 'enabledSources' | 'defaultRepeats'>;
+const boardPreferences = createUserPreferenceSession<BoardPreferences>({
+  key: 'board-preferences',
+  initial: { favorites: [], searchHistory: [], enabledSources: ['danbooru'], defaultRepeats: 10 },
+  normalize: (raw) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid board preferences');
+    const preferences = raw as Partial<BoardPreferences>;
+    return {
+      favorites: Array.isArray(preferences.favorites) ? preferences.favorites.filter(item => typeof item === 'string') : [],
+      searchHistory: Array.isArray(preferences.searchHistory) ? preferences.searchHistory.filter(item => typeof item === 'string').slice(0, 5) : [],
+      enabledSources: normalizeSources(preferences.enabledSources),
+      defaultRepeats: Number.isFinite(Number(preferences.defaultRepeats)) ? Number(preferences.defaultRepeats) : 10,
+    };
+  },
+  apply: preferences => useBoardStore.setState(preferences),
+  onError: error => console.warn('[BoardStore] Failed to synchronize board preferences:', error),
+});
 
 if (typeof window !== 'undefined') {
+  startBoardDownloadRunner(useBoardStore);
   try { window.localStorage.removeItem('board-storage'); } catch {}
-  void readUserConfig<Partial<BoardState>>('board-preferences', {})
-    .then((preferences) => {
-      useBoardStore.setState({
-        favorites: Array.isArray(preferences.favorites) ? preferences.favorites : [],
-        searchHistory: Array.isArray(preferences.searchHistory) ? preferences.searchHistory.slice(0, 5) : [],
-        enabledSources: normalizeSources(preferences.enabledSources),
-        defaultRepeats: Number.isFinite(Number(preferences.defaultRepeats)) ? Number(preferences.defaultRepeats) : 10,
-      });
-    })
-    .finally(() => {
-      boardPreferencesHydrated = true;
-    });
-
-  useBoardStore.subscribe((state) => {
-    if (!boardPreferencesHydrated) return;
-    void writeUserConfig('board-preferences', {
-      favorites: state.favorites,
-      searchHistory: state.searchHistory,
-      enabledSources: normalizeSources(state.enabledSources),
-      defaultRepeats: state.defaultRepeats,
-    }).catch((error) => console.warn('[BoardStore] Failed to persist board preferences:', error));
-  });
+  void boardPreferences.hydrate();
 }

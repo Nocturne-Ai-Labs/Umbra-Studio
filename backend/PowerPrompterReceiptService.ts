@@ -37,9 +37,9 @@ export function normalizePowerPrompterReceiptUid(value: unknown): string {
 
 async function atomicWriteJson(path: string, value: unknown): Promise<void> {
   const temporaryPath = `${path}.${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(value), 'utf8');
   try {
-    await rm(path, { force: true });
+    await writeFile(temporaryPath, JSON.stringify(value), 'utf8');
+    // Rename replaces atomically; keep the previous receipt if publication fails.
     await rename(temporaryPath, path);
   } catch (error) {
     await rm(temporaryPath, { force: true }).catch(() => undefined);

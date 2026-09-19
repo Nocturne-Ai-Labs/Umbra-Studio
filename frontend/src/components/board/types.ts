@@ -21,6 +21,8 @@ export interface SearchTab {
   tags: string;
   sources: string[];
   results: BooruPost[];
+  resultQuery?: string;
+  exhaustedSources?: string[];
   selected: Set<string>;
   page: number;
   hasMore: boolean;
@@ -95,6 +97,7 @@ export interface BoardState {
   // Downloads
   downloadQueue: DownloadItem[];
   isDownloading: boolean;
+  downloadPaused: boolean;
 
   // Settings
   enabledSources: string[];
@@ -116,6 +119,7 @@ export interface BoardState {
   clearDownloadQueue: () => void;
 
   setIsDownloading: (value: boolean) => void;
+  setDownloadPaused: (value: boolean) => void;
   toggleSource: (sourceId: string) => void;
   setDefaultRepeats: (value: number) => void;
 }

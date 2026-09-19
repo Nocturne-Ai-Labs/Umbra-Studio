@@ -23,6 +23,7 @@ import { useStore } from '@/store/useStore';
 
 type NsfwPrivacyMode = AppSettings['ui.nsfwPrivacyMode'];
 type PrivacyDialogMode = 'setup' | 'unlock';
+type PrivacyUnlockAction = 'off' | 'blur' | 'configure-pin' | null;
 
 interface NsfwPrivacyContextValue {
   mode: NsfwPrivacyMode;
@@ -45,12 +46,14 @@ function NsfwPinDialog({
   error,
   onClose,
   onSubmit,
+  unlockAction = null,
 }: {
   mode: PrivacyDialogMode;
   busy: boolean;
   error: string;
   onClose: () => void;
   onSubmit: (pin: string, confirmation: string) => void;
+  unlockAction?: PrivacyUnlockAction;
 }) {
   const [pin, setPin] = useState('');
   const [confirmation, setConfirmation] = useState('');
@@ -94,12 +97,16 @@ function NsfwPinDialog({
             </span>
             <div className="min-w-0">
               <h2 id="umbra-nsfw-pin-title" className="text-sm font-bold text-zinc-100">
-                {mode === 'setup' ? 'Set privacy PIN' : 'Unlock protected media'}
+                {mode === 'setup' ? 'Set privacy PIN' : unlockAction ? 'Verify privacy PIN' : 'Unlock protected media'}
               </h2>
               <p className="mt-1 text-[11px] leading-4 text-zinc-500">
                 {mode === 'setup'
                   ? 'Use four digits. Media relocks when Umbra Studio restarts.'
-                  : 'Enter your four-digit PIN to reveal protected images and videos for 15 minutes.'}
+                  : unlockAction === 'configure-pin'
+                    ? 'Enter the current PIN before setting a new one.'
+                    : unlockAction
+                      ? 'Enter your current PIN to change the privacy mode.'
+                      : 'Enter your four-digit PIN to reveal protected images and videos for 15 minutes.'}
               </p>
             </div>
           </div>
@@ -144,7 +151,7 @@ function NsfwPinDialog({
           className="mt-2 flex h-10 w-full items-center justify-center gap-2 rounded-md border border-red-300/35 bg-red-500/15 text-[11px] font-bold text-red-100 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <LockKeyhole size={14} />
-          {busy ? 'Checking...' : mode === 'setup' ? 'Set PIN and lock' : 'Unlock media'}
+          {busy ? 'Checking...' : mode === 'setup' ? 'Set PIN and lock' : unlockAction ? 'Continue' : 'Unlock media'}
         </button>
       </form>
     </div>
@@ -165,6 +172,7 @@ export function NsfwPrivacyProvider({ children }: { children: React.ReactNode })
   const [dialogError, setDialogError] = useState('');
   const [dialogBusy, setDialogBusy] = useState(false);
   const [pendingLockEnable, setPendingLockEnable] = useState(false);
+  const [pendingUnlockAction, setPendingUnlockAction] = useState<PrivacyUnlockAction>(null);
 
   const locked = isUmbraPrivacyLocked({ mode, unlockedUntil });
 
@@ -182,16 +190,24 @@ export function NsfwPrivacyProvider({ children }: { children: React.ReactNode })
     setDialogMode(null);
     setDialogError('');
     setPendingLockEnable(false);
+    setPendingUnlockAction(null);
   }, [dialogBusy]);
 
   const configurePin = useCallback(() => {
     setDialogError('');
+    if (locked && hasPin) {
+      setPendingUnlockAction('configure-pin');
+      setDialogMode('unlock');
+      return;
+    }
+    setPendingUnlockAction(null);
     setPendingLockEnable(mode !== 'lock');
     setDialogMode('setup');
-  }, [mode]);
+  }, [hasPin, locked, mode]);
 
   const requestUnlock = useCallback(() => {
     setDialogError('');
+    setPendingUnlockAction(null);
     if (!hasPin) {
       setPendingLockEnable(true);
       setDialogMode('setup');
@@ -202,6 +218,7 @@ export function NsfwPrivacyProvider({ children }: { children: React.ReactNode })
 
   const lockNow = useCallback(() => {
     setUnlockedUntil(0);
+    setPendingUnlockAction(null);
     commitSettings({
       'ui.nsfwPrivacyMode': 'lock',
       'ui.nsfwPrivacyLockEngaged': true,
@@ -221,13 +238,19 @@ export function NsfwPrivacyProvider({ children }: { children: React.ReactNode })
       lockNow();
       return;
     }
+    if (locked && hasPin) {
+      setDialogError('');
+      setPendingUnlockAction(nextMode);
+      setDialogMode('unlock');
+      return;
+    }
     setUnlockedUntil(0);
     commitSettings({
       'ui.nsfwPrivacyMode': nextMode,
       'ui.nsfwPrivacyLockEngaged': false,
       'ui.nsfwThumbnailBlurEnabled': nextMode === 'blur',
     });
-  }, [commitSettings, hasPin, lockNow]);
+  }, [commitSettings, hasPin, locked, lockNow]);
 
   const submitPin = useCallback(async (rawPin: string, rawConfirmation: string) => {
     const pin = normalizeFourDigitPin(rawPin);
@@ -266,13 +289,31 @@ export function NsfwPrivacyProvider({ children }: { children: React.ReactNode })
         setDialogError('Incorrect PIN.');
         return;
       }
+      const action = pendingUnlockAction;
+      setPendingUnlockAction(null);
+      setDialogError('');
+      if (action === 'configure-pin') {
+        setPendingLockEnable(false);
+        setDialogMode('setup');
+        return;
+      }
+      if (action === 'off' || action === 'blur') {
+        setUnlockedUntil(0);
+        commitSettings({
+          'ui.nsfwPrivacyMode': action,
+          'ui.nsfwPrivacyLockEngaged': false,
+          'ui.nsfwThumbnailBlurEnabled': action === 'blur',
+        });
+        setDialogMode(null);
+        return;
+      }
       setUnlockedUntil(Date.now() + NSFW_PRIVACY_UNLOCK_DURATION_MS);
       setDialogMode(null);
       useStore.getState().showToast('Protected media unlocked for 15 minutes', 'success');
     } finally {
       setDialogBusy(false);
     }
-  }, [commitSettings, dialogMode, mode, pendingLockEnable, pinHash, pinSalt]);
+  }, [commitSettings, dialogMode, mode, pendingLockEnable, pendingUnlockAction, pinHash, pinSalt]);
 
   useEffect(() => {
     if (mode !== 'lock' || unlockedUntil <= Date.now()) return;
@@ -341,6 +382,7 @@ export function NsfwPrivacyProvider({ children }: { children: React.ReactNode })
         <NsfwPinDialog
           key={dialogMode}
           mode={dialogMode}
+          unlockAction={pendingUnlockAction}
           busy={dialogBusy}
           error={dialogError}
           onClose={closeDialog}

@@ -4,6 +4,7 @@
  */
 
 import { WatermarkEngine, WatermarkConfig, WatermarkPosition, WatermarkType } from './WatermarkEngine';
+import { SettingsSaveNotice } from './SettingsSaveNotice';
 
 const FONTS = ['Arial', 'Georgia', 'Times New Roman', 'Courier New', 'Verdana', 'Impact'];
 const WATERMARK_FONT_FOLDER = 'User/FontforWatermark';
@@ -33,16 +34,18 @@ export class WatermarkPanel {
   private contentEl: HTMLDivElement;
   private userFonts: UserWatermarkFont[] = [];
   private isLoadingFonts = false;
+  private saveNotice: SettingsSaveNotice;
 
-  constructor(container: HTMLElement, onChange: (config: WatermarkConfig) => void) {
+  constructor(container: HTMLElement, onChange: (config: WatermarkConfig) => void, initialConfig: WatermarkConfig) {
     this.container = container;
     this.onChange = onChange;
-    this.config = WatermarkEngine.loadConfig();
+    this.config = structuredClone(initialConfig);
 
     // Main wrapper
     this.contentEl = document.createElement('div');
     this.contentEl.style.cssText = 'font-size: 12px; color: #a1a1aa; min-width: 0;';
     this.container.appendChild(this.contentEl);
+    this.saveNotice = new SettingsSaveNotice(this.container);
 
     this.build();
     void this.refreshUserFonts();
@@ -53,7 +56,7 @@ export class WatermarkPanel {
   }
 
   private emit(): void {
-    WatermarkEngine.saveConfig(this.config);
+    this.saveNotice.save(() => WatermarkEngine.saveConfig(this.config));
     this.onChange(this.config);
   }
 

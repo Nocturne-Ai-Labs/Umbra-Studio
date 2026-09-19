@@ -27,6 +27,7 @@ class SettingsManager {
     private projectRoot: string;
     private bundledProjectRoot: string;
     private bundledSettingsPath: string;
+    private settingsLoaded = false;
 
     constructor() {
         this.bundledProjectRoot = resolve(__dirname, '../../');
@@ -144,7 +145,9 @@ class SettingsManager {
     private loadSettings(): UmbraSettings {
         try {
             if (!existsSync(this.settingsPath)) {
-                return this.createDefaultSettings();
+                const defaults = this.createDefaultSettings();
+                this.settingsLoaded = true;
+                return defaults;
             }
 
             const raw = readFileSync(this.settingsPath, 'utf-8');
@@ -154,6 +157,7 @@ class SettingsManager {
             }
             const resolved = this.resolveVariables(parsed);
             const merged = this.mergeWithDefaults(resolved);
+            this.settingsLoaded = true;
 
             // Self-heal sparse/missing config to keep schema consistent.
             try {
@@ -163,6 +167,7 @@ class SettingsManager {
             }
             return merged;
         } catch (err) {
+            this.settingsLoaded = false;
             console.error('[SettingsManager] Failed to load settings:', err);
             // Preserve unreadable settings for recovery instead of overwriting them.
             return this.buildDefaultSettings();
@@ -191,7 +196,11 @@ class SettingsManager {
             console.error('[SettingsManager] Failed to save settings:', err);
             throw err;
         } finally {
-            rmSync(temporaryPath, { force: true });
+            try {
+                rmSync(temporaryPath, { force: true });
+            } catch (err) {
+                console.warn('[SettingsManager] Failed to remove temporary settings file:', err);
+            }
         }
     }
 
@@ -204,6 +213,13 @@ class SettingsManager {
     }
 
     updateAppSettings(patch: Record<string, unknown>) {
+        if (!this.settingsLoaded) {
+            const recovered = this.loadSettings();
+            if (!this.settingsLoaded) {
+                throw new Error('Settings could not be loaded. Repair settings.json before saving preferences; the original file has been preserved.');
+            }
+            this.settings = recovered;
+        }
         const safe = (patch && typeof patch === 'object' && !Array.isArray(patch))
             ? patch
             : {};

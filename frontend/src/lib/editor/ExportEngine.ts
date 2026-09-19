@@ -7,7 +7,7 @@
 import { WebGLPipeline, EditAdjustments } from '../webgl/WebGLPipeline';
 import { WatermarkEngine, WatermarkConfig } from './WatermarkEngine';
 import { resolveTemplate, buildContext, DEFAULT_TEMPLATE } from './FilenameTemplate';
-import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
+import { readUserConfigStrict, writeUserConfig } from '@/lib/userConfig';
 
 export interface ExportSettings {
   format: 'image/png' | 'image/jpeg' | 'image/webp';
@@ -43,8 +43,8 @@ export function getDefaultExportSettings(): ExportSettings {
 
 const EXPORT_SETTINGS_LEGACY_STORAGE_KEY = 'umbra_export_settings';
 const EXPORT_SETTINGS_CONFIG_KEY = 'editor-export-settings';
-let exportSettingsCache: ExportSettings | null = null;
-let exportSettingsLoadPromise: Promise<void> | null = null;
+let exportSettingsWrite: Promise<void> | null = null;
+let pendingExportSettings: ExportSettings | null = null;
 
 function clearLegacyExportSettingsStorage() {
   try {
@@ -55,34 +55,37 @@ function clearLegacyExportSettingsStorage() {
   }
 }
 
-function loadExportSettingsFromConfig() {
-  if (exportSettingsLoadPromise) return exportSettingsLoadPromise;
-  exportSettingsLoadPromise = readUserConfig<Partial<ExportSettings>>(EXPORT_SETTINGS_CONFIG_KEY, {})
-    .then((settings) => {
-      exportSettingsCache = { ...getDefaultExportSettings(), ...settings };
-      clearLegacyExportSettingsStorage();
-    })
-    .finally(() => {
-      exportSettingsLoadPromise = null;
-    });
-  return exportSettingsLoadPromise;
-}
-
-export function loadExportSettings(): ExportSettings {
+export async function loadExportSettings(signal?: AbortSignal): Promise<ExportSettings> {
+  if (pendingExportSettings) await saveExportSettings(pendingExportSettings);
+  else await exportSettingsWrite;
+  const timeout = AbortSignal.timeout(15_000);
+  const settings = await readUserConfigStrict<Partial<ExportSettings>>(EXPORT_SETTINGS_CONFIG_KEY, {}, signal ? AbortSignal.any([signal, timeout]) : timeout);
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('Invalid export settings');
   clearLegacyExportSettingsStorage();
-  if (!exportSettingsCache) {
-    exportSettingsCache = getDefaultExportSettings();
-    void loadExportSettingsFromConfig();
-  }
-  return exportSettingsCache;
-}
-
-export function saveExportSettings(settings: ExportSettings): void {
-  exportSettingsCache = { ...getDefaultExportSettings(), ...settings };
-  clearLegacyExportSettingsStorage();
-  void writeUserConfig(EXPORT_SETTINGS_CONFIG_KEY, exportSettingsCache).catch((error) => {
-    console.warn('[ExportEngine] Failed to persist export settings:', error);
+  return structuredClone({ ...getDefaultExportSettings(), ...settings,
+    watermarkConfig: { ...WatermarkEngine.getDefault(), ...settings.watermarkConfig },
   });
+}
+
+export function saveExportSettings(settings: ExportSettings): Promise<void> {
+  pendingExportSettings = structuredClone({ ...getDefaultExportSettings(), ...settings });
+  clearLegacyExportSettingsStorage();
+  if (exportSettingsWrite) return exportSettingsWrite;
+  exportSettingsWrite = Promise.resolve().then(async () => {
+    while (pendingExportSettings) {
+      const snapshot = pendingExportSettings;
+      pendingExportSettings = null;
+      try {
+        await writeUserConfig(EXPORT_SETTINGS_CONFIG_KEY, snapshot, AbortSignal.timeout(15_000));
+      } catch (error) {
+        pendingExportSettings ??= snapshot;
+        throw error;
+      }
+    }
+  }).finally(() => {
+    exportSettingsWrite = null;
+  });
+  return exportSettingsWrite;
 }
 
 /**
@@ -113,59 +116,63 @@ export async function exportImage(
   // Create offscreen pipeline
   const offscreenCanvas = document.createElement('canvas');
   const pipeline = new WebGLPipeline(offscreenCanvas);
-  await pipeline.loadImage(img);
-
-  if (adjustments) {
-    pipeline.setAdjustments(adjustments);
-  }
-  pipeline.render();
-
-  onProgress?.('Encoding...');
-
-  let targetWidth = img.naturalWidth;
-  let targetHeight = img.naturalHeight;
-  const needsResize = settings.maxLongestSide > 0;
-  const needsWatermark = settings.watermarkConfig.enabled;
-
   let blob: Blob;
+  try {
+    await pipeline.loadImage(img);
 
-  if (needsResize || needsWatermark) {
-    if (needsResize) {
-      const longest = Math.max(targetWidth, targetHeight);
-      const scale = Math.min(settings.maxLongestSide / longest, 1);
-      targetWidth = Math.round(targetWidth * scale);
-      targetHeight = Math.round(targetHeight * scale);
+    if (adjustments) {
+      pipeline.setAdjustments(adjustments);
     }
+    pipeline.render();
 
-    const fullBlob = await pipeline.toBlob('image/png', 1);
-    const fullBitmap = await createImageBitmap(fullBlob);
+    onProgress?.('Encoding...');
 
-    const canvas2d = document.createElement('canvas');
-    canvas2d.width = targetWidth;
-    canvas2d.height = targetHeight;
-    const ctx = canvas2d.getContext('2d')!;
-    ctx.drawImage(fullBitmap, 0, 0, targetWidth, targetHeight);
-    fullBitmap.close();
+    let targetWidth = img.naturalWidth;
+    let targetHeight = img.naturalHeight;
+    const needsResize = settings.maxLongestSide > 0;
+    const needsWatermark = settings.watermarkConfig.enabled;
 
-    if (needsWatermark) {
-      await WatermarkEngine.apply(ctx, targetWidth, targetHeight, settings.watermarkConfig, {
-        index: counter,
-        total,
+    if (needsResize || needsWatermark) {
+      if (needsResize) {
+        const longest = Math.max(targetWidth, targetHeight);
+        const scale = Math.min(settings.maxLongestSide / longest, 1);
+        targetWidth = Math.max(1, Math.round(targetWidth * scale));
+        targetHeight = Math.max(1, Math.round(targetHeight * scale));
+      }
+
+      const fullBlob = await pipeline.toBlob('image/png', 1);
+      const canvas2d = document.createElement('canvas');
+      canvas2d.width = targetWidth;
+      canvas2d.height = targetHeight;
+      const ctx = canvas2d.getContext('2d');
+      if (!ctx) throw new Error('The export canvas could not be initialized.');
+      const fullBitmap = await createImageBitmap(fullBlob);
+      try {
+        ctx.drawImage(fullBitmap, 0, 0, targetWidth, targetHeight);
+      } finally {
+        fullBitmap.close();
+      }
+
+      if (needsWatermark) {
+        await WatermarkEngine.apply(ctx, targetWidth, targetHeight, settings.watermarkConfig, {
+          index: counter,
+          total,
+        });
+      }
+
+      blob = await new Promise<Blob>((resolve, reject) => {
+        canvas2d.toBlob(
+          (b) => b ? resolve(b) : reject(new Error('toBlob failed')),
+          settings.format,
+          settings.quality,
+        );
       });
+    } else {
+      blob = await pipeline.toBlob(settings.format, settings.quality);
     }
-
-    blob = await new Promise<Blob>((resolve, reject) => {
-      canvas2d.toBlob(
-        (b) => b ? resolve(b) : reject(new Error('toBlob failed')),
-        settings.format,
-        settings.quality,
-      );
-    });
-  } else {
-    blob = await pipeline.toBlob(settings.format, settings.quality);
+  } finally {
+    pipeline.destroy();
   }
-
-  pipeline.destroy();
 
   // Build filename
   const ext = FORMAT_EXTS[settings.format] || '.png';
@@ -182,10 +189,14 @@ export async function exportImage(
       formData.append('file', blob, filename);
       formData.append('sourcePath', imagePath);
       const metaRes = await fetch('/api/export/embed-metadata', { method: 'POST', body: formData });
-      if (metaRes.ok) {
-        downloadBlob = await metaRes.blob();
+      if (!metaRes.ok) {
+        const body = await metaRes.json().catch(() => null);
+        throw new Error(body?.error || `Metadata export failed (HTTP ${metaRes.status}).`);
       }
-    } catch { /* fallback to original blob */ }
+      downloadBlob = await metaRes.blob();
+    } catch (error) {
+      throw new Error(`Could not embed metadata: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   return { blob: downloadBlob, filename };

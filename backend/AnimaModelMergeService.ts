@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { join, relative, resolve, isAbsolute } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { extractUmbraUiTriggerWords } from './UmbraUiLoraMetadata';
+import { copyFileExclusive } from './FsTransferCopy';
 
 type MergeConfig = { modelsRoot: string; python: string; comfyRoot?: string };
 type LoraEntry = { id: string; model: string; strength: number; enabled: boolean };
@@ -165,7 +166,11 @@ export class AnimaModelMergeService {
     const temporary = join(this.blueprintRoot(), `${id}.${randomUUID()}.tmp`);
     try {
       await Bun.write(temporary, JSON.stringify(value, null, 2));
-      await link(temporary, destination);
+      try { await link(temporary, destination); }
+      catch (error: any) {
+        if (!['EXDEV', 'EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EINVAL'].includes(error?.code)) throw error;
+        await copyFileExclusive(temporary, destination);
+      }
     } finally { await rm(temporary, { force: true }); }
     return value;
   }

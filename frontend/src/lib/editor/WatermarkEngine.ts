@@ -5,7 +5,7 @@
  */
 
 import { buildFsImageUrl } from '@/lib/utils';
-import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
+import { readUserConfigStrict, writeUserConfig } from '@/lib/userConfig';
 
 export type WatermarkPosition =
   | 'top-left' | 'top-center' | 'top-right'
@@ -62,8 +62,8 @@ const FALLBACK_FONT = 'Arial, sans-serif';
 export class WatermarkEngine {
   private static loadedCustomFonts = new Map<string, string>();
   private static loadingCustomFonts = new Map<string, Promise<string>>();
-  private static configCache: WatermarkConfig | null = null;
-  private static configLoadPromise: Promise<void> | null = null;
+  private static configWrite: Promise<void> | null = null;
+  private static pendingConfig: WatermarkConfig | null = null;
 
   /**
    * Apply watermark to a 2D canvas context.
@@ -351,21 +351,35 @@ export class WatermarkEngine {
     };
   }
 
-  static loadConfig(): WatermarkConfig {
+  static async loadConfig(signal?: AbortSignal): Promise<WatermarkConfig> {
+    if (WatermarkEngine.pendingConfig) await WatermarkEngine.saveConfig(WatermarkEngine.pendingConfig);
+    else await WatermarkEngine.configWrite;
+    const timeout = AbortSignal.timeout(15_000);
+    const config = await readUserConfigStrict<Partial<WatermarkConfig>>(WATERMARK_CONFIG_KEY, {}, signal ? AbortSignal.any([signal, timeout]) : timeout);
+    if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('Invalid watermark settings');
     WatermarkEngine.clearLegacyStorage();
-    if (!WatermarkEngine.configCache) {
-      WatermarkEngine.configCache = WatermarkEngine.getDefault();
-      void WatermarkEngine.loadConfigFromFile();
-    }
-    return WatermarkEngine.configCache;
+    return structuredClone({ ...WatermarkEngine.getDefault(), ...config });
   }
 
-  static saveConfig(config: WatermarkConfig): void {
-    WatermarkEngine.configCache = { ...WatermarkEngine.getDefault(), ...config };
+  static saveConfig(config: WatermarkConfig): Promise<void> {
+    WatermarkEngine.pendingConfig = structuredClone({ ...WatermarkEngine.getDefault(), ...config });
     WatermarkEngine.clearLegacyStorage();
-    void writeUserConfig(WATERMARK_CONFIG_KEY, WatermarkEngine.configCache).catch((error) => {
-      console.warn('[WatermarkEngine] Failed to persist watermark config:', error);
+    if (WatermarkEngine.configWrite) return WatermarkEngine.configWrite;
+    WatermarkEngine.configWrite = Promise.resolve().then(async () => {
+      while (WatermarkEngine.pendingConfig) {
+        const snapshot = WatermarkEngine.pendingConfig;
+        WatermarkEngine.pendingConfig = null;
+        try {
+          await writeUserConfig(WATERMARK_CONFIG_KEY, snapshot, AbortSignal.timeout(15_000));
+        } catch (error) {
+          WatermarkEngine.pendingConfig ??= snapshot;
+          throw error;
+        }
+      }
+    }).finally(() => {
+      WatermarkEngine.configWrite = null;
     });
+    return WatermarkEngine.configWrite;
   }
 
   private static clearLegacyStorage(): void {
@@ -377,16 +391,4 @@ export class WatermarkEngine {
     }
   }
 
-  private static loadConfigFromFile(): Promise<void> {
-    if (WatermarkEngine.configLoadPromise) return WatermarkEngine.configLoadPromise;
-    WatermarkEngine.configLoadPromise = readUserConfig<Partial<WatermarkConfig>>(WATERMARK_CONFIG_KEY, {})
-      .then((config) => {
-        WatermarkEngine.configCache = { ...WatermarkEngine.getDefault(), ...config };
-        WatermarkEngine.clearLegacyStorage();
-      })
-      .finally(() => {
-        WatermarkEngine.configLoadPromise = null;
-      });
-    return WatermarkEngine.configLoadPromise;
-  }
 }

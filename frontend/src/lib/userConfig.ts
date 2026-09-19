@@ -94,9 +94,10 @@ async function requireUserConfigAcknowledgment(response: Response, key: UserConf
   }
 }
 
-export async function writeUserConfig(key: UserConfigKey, value: unknown): Promise<void> {
+export async function writeUserConfig(key: UserConfigKey, value: unknown, signal?: AbortSignal): Promise<void> {
   const response = await fetch('/api/user-config', {
     method: 'POST',
+    signal,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ key, value }),
   });

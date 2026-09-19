@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { debugMiddleware } from './debugMiddleware';
 import { AppSettings, loadAppSettings, pushAppSettingsToBackend, saveAppSettings } from '@/lib/appSettings';
 import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
+import { createUserPreferenceSession } from '@/lib/userPreferenceSession';
 import { subscribeUiSession } from '@/lib/uiSessionSocket';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import {
@@ -408,15 +409,14 @@ export const useStore = create<AppState>()(
         })),
 
         customOrders: initialCustomOrders,
-        setCustomOrder: (albumPath, order) => set((state) => {
-          const updated = { ...state.customOrders, [albumPath]: order };
-          void writeUserConfig('library-preferences', {
-            customOrders: updated,
-            favorites: state.favorites,
-          }).catch((error) => console.warn('[useStore] Failed to persist custom orders:', error));
-          return { customOrders: updated };
-        }),
-        reorderImage: (albumPath, activeId, overId, currentImages) => set((state) => {
+        setCustomOrder: (albumPath, order) => {
+          const snapshot = [...order];
+          libraryPreferences.update(state => ({
+            ...state, customOrders: { ...state.customOrders, [albumPath]: snapshot },
+          }));
+        },
+        reorderImage: (albumPath, activeId, overId, currentImages) => {
+          const state = get();
           const order = state.customOrders[albumPath] || currentImages;
           const oldIndex = order.indexOf(activeId);
           const newIndex = order.indexOf(overId);
@@ -426,29 +426,20 @@ export const useStore = create<AppState>()(
             const [removed] = newOrder.splice(oldIndex, 1);
             newOrder.splice(newIndex, 0, removed);
 
-            const updatedOrders = { ...state.customOrders, [albumPath]: newOrder };
-            void writeUserConfig('library-preferences', {
-              customOrders: updatedOrders,
-              favorites: state.favorites,
-            }).catch((error) => console.warn('[useStore] Failed to persist reordered images:', error));
-            return { customOrders: updatedOrders };
+            libraryPreferences.update(preferences => ({
+              ...preferences, customOrders: { ...preferences.customOrders, [albumPath]: newOrder },
+            }));
           }
-          return state;
-        }),
+        },
 
         favorites: initialFavorites,
-        toggleFavorite: (path) => set((state) => {
-          const isFav = state.favorites.includes(path);
-          const newFavorites = isFav
-            ? state.favorites.filter(p => p !== path)
-            : [...state.favorites, path];
-
-          void writeUserConfig('library-preferences', {
-            customOrders: state.customOrders,
-            favorites: newFavorites,
-          }).catch((error) => console.warn('[useStore] Failed to persist favorites:', error));
-          return { favorites: newFavorites };
-        }),
+        toggleFavorite: (path) => {
+          const remove = get().favorites.includes(path);
+          libraryPreferences.update(state => ({
+            ...state,
+            favorites: remove ? state.favorites.filter(p => p !== path) : [...new Set([...state.favorites, path])],
+          }));
+        },
 
         logs: [],
         addLog: (entry) =>
@@ -639,15 +630,23 @@ export const useStore = create<AppState>()(
   )
 );
 
-if (typeof window !== 'undefined') {
-  void readUserConfig<{ customOrders?: Record<string, string[]>; favorites?: string[] }>('library-preferences', {})
-    .then((preferences) => {
-      useStore.setState({
-        customOrders: preferences?.customOrders && typeof preferences.customOrders === 'object'
-          ? preferences.customOrders
-          : {},
-        favorites: Array.isArray(preferences?.favorites) ? preferences.favorites : [],
-      });
-    })
-    .catch(() => undefined);
-}
+type LibraryPreferences = Pick<AppState, 'customOrders' | 'favorites'>;
+const libraryPreferences = createUserPreferenceSession<LibraryPreferences>({
+  key: 'library-preferences',
+  initial: { customOrders: {}, favorites: [] },
+  normalize: raw => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid library preferences');
+    const preferences = raw as Partial<LibraryPreferences>;
+    const orders = preferences.customOrders;
+    return {
+      customOrders: orders && typeof orders === 'object' && !Array.isArray(orders)
+        ? Object.fromEntries(Object.entries(orders).filter(([, order]) => Array.isArray(order) && order.every(item => typeof item === 'string')))
+        : {},
+      favorites: Array.isArray(preferences.favorites) ? preferences.favorites.filter(item => typeof item === 'string') : [],
+    };
+  },
+  apply: preferences => useStore.setState(preferences),
+  onError: error => console.warn('[useStore] Failed to synchronize library preferences:', error),
+});
+
+if (typeof window !== 'undefined') void libraryPreferences.hydrate();

@@ -1,7 +1,9 @@
 import { join } from 'path';
 import { spawn, type ChildProcess } from 'child_process';
+import type { GalleryUploadRequest } from './GalleryUploadService';
 
 type FsWorkerRequest =
+  | { id: string; type: 'upload'; payload: GalleryUploadRequest }
   | { id: string; type: 'gallery-transfer'; payload: { mode: 'move' | 'copy'; pairs: Array<{ sourcePath: string; targetPath: string }> } }
   | {
       id: string;
@@ -256,6 +258,10 @@ export class FsWorkerService {
 
   async write(payload: Extract<FsWorkerRequest, { type: 'write' }>['payload']) {
     return this.sendRequest({ type: 'write', payload });
+  }
+
+  async upload(payload: GalleryUploadRequest): Promise<{ path?: string; skipped?: boolean }> {
+    return this.sendRequest({ type: 'upload', payload });
   }
 
   async read(payload: Extract<FsWorkerRequest, { type: 'read' }>['payload']) {

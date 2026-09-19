@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.32.20 - Verified Reliability And Save Recovery
+
+### TL;DR - Setup After Updating
+
+- Update through Umbra's updater, then restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux. Refresh open browser and Remote sessions after restarting.
+- No new models, custom nodes, or ComfyUI update are required. Back up important projects and settings before updating. Existing media and models are retained.
+- Data Forge concept settings and editor export/watermark settings now display save failures with Retry controls. If another client changed concept settings, reload them before retrying; reloading discards the local unsaved settings only after confirmation.
+
+### Data Forge And Settings
+
+- Preserve caption edits made while an earlier save is outstanding. Late saves and folder loads cannot overwrite another concept's visible state; failed saves keep the local draft available.
+- Serialize and coalesce concept-settings saves, reject stale versioned writes, and keep unreadable settings files intact. Captioning waits for settings to save instead of racing a second settings write.
+- Keep failed search pages retryable and discard responses for obsolete queries or closed tabs. Track exhausted sources separately so other selected sources can continue loading.
+- Keep the download scheduler running across Data Forge tab navigation, with bounded concurrency and stable pause state. Active downloads remain visible when clearing inactive entries.
+- Honor protected-media locking in search, download previews, dataset thumbnails, caption editors, and lightboxes. Changing an existing Locked mode or PIN requires the current PIN.
+- Hydrate Gallery/Data Forge preferences before merging early edits, and serialize preference writes. Export and watermark settings load before their controls become editable; failed writes retain the latest snapshot and expose Retry.
+
+### Gallery, Projects, And File Reliability
+
+- Preserve the last good Power Prompter receipt when staging or replacement fails.
+- Validate Gallery upload paths and duplicate strategies; keep-both uploads use exclusive publication to avoid concurrent overwrite collisions.
+- Preserve multilingual PNG export metadata and resolve supported source-path aliases. Requested metadata failures are reported, and export rendering resources are released on failure.
+- Wait asynchronously for short shared-database locks and expose database services only after successful initialization.
+- Reject invalid Inpaint project identifiers and missing saved assets. Serialize project mutations, validate recovery candidates, retain damaged alternatives, and avoid replacing unsupported newer documents.
+- Report a committed Canvas save as successful even when optional thumbnail or unused-asset cleanup fails.
+- Reject migrations between overlapping or physically aliased installations. Stage and verify cross-volume copies before replacing destination files.
+- Support exclusive-copy publication when model/blueprint destinations do not support hard links. Full interrupted-copy recovery is not included in this release.
+
+### Request And Output Handling
+
+- Bound Canvas auxiliary output downloads while streaming, including incomplete and oversized responses.
+- Bound local-server health probes, proxy header waits, idle streams, and buffered text rewrites. Active binary downloads and event streams retain streaming behavior without a short total-duration limit.
+- Classify local IPv4/IPv6 literals accurately instead of treating similarly prefixed public hostnames as local addresses.
+- Improve pinned video publication collision handling and verification. Extended-video cancellation terminates its owned processing child and avoids starting a fallback after cancellation.
+
+### Validation And Scope
+
+- The development regression run passed 264 focused tests, frontend/backend TypeScript checks, frontend lint, the production frontend build, isolated browser save/retry checks, and a packaged-layout Gallery/backend smoke test.
+- This is a bounded reliability pass, not a claim that every audit finding is resolved. Cross-client Canvas save conflicts, complete auxiliary-job cancellation/reconciliation, and durable migration/interrupted-publication recovery remain follow-up work.
+- Windows BAT and Linux portable packages remain the only release assets. Private audit reports, test fixtures, personal media, installed tools, and model weights are excluded.
+- Linux managed-tool prerequisites remain `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit UI setup still requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: lost caption edits, stale concept/search responses, and overlapping concept-settings saves.
+- Fixed: protected previews leaking through Data Forge views and Locked-mode changes bypassing the existing PIN.
+- Fixed: settings failures being silently treated as defaults or successful saves, and downloads stopping when leaving their tab.
+- Fixed: several receipt, project-recovery, upload-collision, metadata-export, and short database-lock failure paths.
+- Improved: explicit save retries, bounded stalled requests, verified output publication, and safer migration transfers.
+
 ## v0.32.19 - Gallery Health Check Hotfix
 
 ### TL;DR - Setup After Updating

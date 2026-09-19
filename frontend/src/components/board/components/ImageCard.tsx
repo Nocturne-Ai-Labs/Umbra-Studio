@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Check, Star } from 'lucide-react';
 import { BOORU_SOURCES } from '../sources';
 import type { BooruPost } from '../types';
+import { NsfwPrivacyShield, useNsfwPrivacy } from '@/components/privacy/NsfwPrivacyProvider';
+import { isProtectedBooruPost } from '../booruPrivacy';
 
 interface ImageCardProps {
   post: BooruPost;
@@ -12,6 +14,9 @@ interface ImageCardProps {
 }
 
 export function ImageCard({ post, isSelected, onSelect, onClick, onDoubleClick }: ImageCardProps) {
+  const { locked } = useNsfwPrivacy();
+  const protectedMedia = isProtectedBooruPost(post);
+  const blocked = locked && protectedMedia;
   const [isLoaded, setIsLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [mediaAttempt, setMediaAttempt] = useState(0);
@@ -33,7 +38,7 @@ export function ImageCard({ post, isSelected, onSelect, onClick, onDoubleClick }
           e.stopPropagation();
           onSelect(!isSelected);
         }}
-        className={`absolute left-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-md border
+        className={`absolute left-2 top-2 z-50 flex h-6 w-6 items-center justify-center rounded-md border
                     transition-all ${isSelected
                       ? 'border-cyan-300/70 bg-cyan-500/30 text-cyan-50'
                       : 'border-white/20 bg-black/65 text-zinc-500 hover:border-cyan-400/55 hover:text-cyan-200'}`}
@@ -52,8 +57,9 @@ export function ImageCard({ post, isSelected, onSelect, onClick, onDoubleClick }
       </div>
 
       {/* Image */}
-      {!hasError ? (
+      {blocked ? null : !hasError ? (
         <img
+          data-umbra-nsfw-media={protectedMedia ? '' : undefined}
           src={mediaUrls[Math.min(mediaAttempt, mediaUrls.length - 1)]}
           alt=""
           loading="lazy"
@@ -77,9 +83,11 @@ export function ImageCard({ post, isSelected, onSelect, onClick, onDoubleClick }
       )}
 
       {/* Loading skeleton */}
-      {!isLoaded && !hasError && (
+      {!blocked && !isLoaded && !hasError && (
         <div className="absolute inset-0 animate-pulse bg-white/10" />
       )}
+
+      <NsfwPrivacyShield protectedMedia={protectedMedia} compact />
 
       {/* Score & dimensions overlay */}
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2

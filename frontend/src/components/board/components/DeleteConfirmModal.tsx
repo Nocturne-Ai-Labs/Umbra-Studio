@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { AlertTriangle, Trash2, X } from 'lucide-react';
 import type { DatasetImage } from '../types';
+import { DatasetThumbnail } from './DatasetThumbnail';
 
 interface DeleteConfirmModalProps {
   images: DatasetImage[];
@@ -53,18 +54,12 @@ export function DeleteConfirmModal({
         <div className="custom-scrollbar flex-1 overflow-y-auto p-4">
           <div className="grid grid-cols-4 gap-2">
             {images.map(img => {
-              const imageUrl = `/api/files/datasets/${datasetName}/${conceptFolder}/${img.filename}`;
               return (
                 <div
                   key={img.filename}
-                  className="umbra-surface-deep aspect-square overflow-hidden rounded border border-red-500/30"
+                  className="umbra-surface-deep relative aspect-square overflow-hidden rounded border border-red-500/30"
                 >
-                  <img
-                    src={imageUrl}
-                    alt={img.filename}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
+                  <DatasetThumbnail image={img} datasetName={datasetName} conceptFolder={conceptFolder} />
                 </div>
               );
             })}

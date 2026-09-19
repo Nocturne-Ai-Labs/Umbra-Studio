@@ -1,6 +1,8 @@
 import { Check, AlertCircle, Loader2, Clock } from 'lucide-react';
 import { BOORU_SOURCES } from '../sources';
 import type { DownloadItem } from '../types';
+import { NsfwPrivacyShield, useNsfwPrivacy } from '@/components/privacy/NsfwPrivacyProvider';
+import { isProtectedBooruPost } from '../booruPrivacy';
 
 interface DownloadQueueProps {
   items: DownloadItem[];
@@ -8,6 +10,7 @@ interface DownloadQueueProps {
 }
 
 export function DownloadQueue({ items, onRemove: _onRemove }: DownloadQueueProps) {
+  const { locked } = useNsfwPrivacy();
   const getStatusIcon = (item: DownloadItem) => {
     switch (item.status) {
       case 'done':
@@ -82,6 +85,7 @@ export function DownloadQueue({ items, onRemove: _onRemove }: DownloadQueueProps
           <tbody>
             {items.map(item => {
               const source = BOORU_SOURCES[item.post.source];
+              const protectedMedia = isProtectedBooruPost(item.post);
 
               return (
                 <tr
@@ -89,12 +93,14 @@ export function DownloadQueue({ items, onRemove: _onRemove }: DownloadQueueProps
                   className="border-b border-white/5 hover:bg-white/5"
                 >
                   <td className="p-2">
-                    <div className="umbra-surface-deep h-10 w-10 overflow-hidden rounded border border-white/10">
-                      <img
+                    <div className="umbra-surface-deep relative h-10 w-10 overflow-hidden rounded border border-white/10">
+                      {!(locked && protectedMedia) && <img
+                        data-umbra-nsfw-media={protectedMedia ? '' : undefined}
                         src={item.post.previewUrl}
                         alt=""
                         className="w-full h-full object-cover"
-                      />
+                      />}
+                      <NsfwPrivacyShield protectedMedia={protectedMedia} compact />
                     </div>
                   </td>
                   <td className="p-2">

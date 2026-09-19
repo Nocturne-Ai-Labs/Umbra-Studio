@@ -1,5 +1,6 @@
 import { readUserConfigStrict, writeUserConfig } from '@/lib/userConfig';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
+import { isAllowedLocalServerHostname } from '../../../shared/localServerHost';
 
 export interface LocalServerApp {
   id: string;
@@ -27,29 +28,6 @@ function createLocalServerId(): string {
   }
 }
 
-function isPrivateIpv4(hostname: string): boolean {
-  const parts = hostname.split('.').map((part) => Number.parseInt(part, 10));
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
-  const [a, b] = parts;
-  return a === 10
-    || (a === 172 && b >= 16 && b <= 31)
-    || (a === 192 && b === 168)
-    || (a === 169 && b === 254)
-    || (a === 100 && b >= 64 && b <= 127)
-    || a === 127;
-}
-
-function isLocalHostname(hostname: string): boolean {
-  const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
-  if (!host) return false;
-  if (host === 'localhost' || host === '::1' || host === '0.0.0.0') return true;
-  if (host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80:')) return true;
-  if (host.endsWith('.local')) return true;
-  if (isPrivateIpv4(host)) return true;
-  if (/^[a-z0-9-]+$/i.test(host) && !host.includes('.')) return true;
-  return false;
-}
-
 export function validateLocalServerUrl(rawUrl: string): { ok: true; url: string } | { ok: false; error: string } {
   const value = String(rawUrl || '').trim();
   if (!value) return { ok: false, error: 'Enter a local server URL.' };
@@ -65,7 +43,7 @@ export function validateLocalServerUrl(rawUrl: string): { ok: true; url: string 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return { ok: false, error: 'Local server apps require http:// or https:// URLs.' };
   }
-  if (!isLocalHostname(parsed.hostname)) {
+  if (!isAllowedLocalServerHostname(parsed.hostname)) {
     return { ok: false, error: 'Only localhost, private LAN, and .local URLs are allowed.' };
   }
   parsed.hash = '';

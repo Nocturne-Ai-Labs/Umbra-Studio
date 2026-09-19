@@ -1,5 +1,5 @@
-import { mkdir, open, readFile, readdir, rename, rm, stat } from 'fs/promises';
-import { createHash } from 'crypto';
+import { mkdir, open, readFile, readdir, rename, rm, stat, lstat } from 'fs/promises';
+import { createHash, randomUUID } from 'crypto';
 import { dirname, extname, join, resolve, sep } from 'path';
 
 const PROJECT_VERSION = 19;
@@ -52,6 +52,13 @@ export interface UmbraUiCanvasProjectServiceOptions {
 function safeId(value: unknown, fallback = ''): string {
   const normalized = String(value || '').trim().replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 120);
   return normalized || fallback;
+}
+
+function storedId(value: unknown): string {
+  if (typeof value !== 'string' || !/^[a-z0-9._-]{1,120}$/i.test(value)
+    || value === '.' || value === '..' || value.endsWith('.')
+    || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(value)) return '';
+  return value;
 }
 
 function safeAssetName(key: string, originalName: string, bytes: Uint8Array): string {
@@ -112,16 +119,30 @@ function parseAtomicBackupFinalName(filename: string): string {
     || parse(LEGACY_ATOMIC_BACKUP_MARKER, /^(?:\d+-[a-z0-9]{4,12}|interrupted)$/i);
 }
 
-async function isUsableAtomicFile(path: string): Promise<boolean> {
-  const entry = await stat(path).catch(() => null);
-  if (!entry?.isFile() || entry.size <= 0) return false;
-  if (extname(path).toLowerCase() !== '.json') return true;
+type AtomicFileState = 'usable' | 'missing' | 'invalid' | 'unavailable' | 'unsupported';
+
+async function inspectAtomicFile(path: string, finalName: string): Promise<AtomicFileState> {
+  let entry: Awaited<ReturnType<typeof lstat>>;
   try {
-    const payload = JSON.parse(await readFile(path, 'utf8'));
-    return Boolean(payload && typeof payload === 'object' && !Array.isArray(payload));
-  } catch {
-    return false;
+    entry = await lstat(path);
+  } catch (error: any) {
+    return error?.code === 'ENOENT' ? 'missing' : 'unavailable';
   }
+  if (!entry.isFile()) return 'unavailable';
+  if (entry.size <= 0) return 'invalid';
+  if (extname(finalName).toLowerCase() !== '.json') return 'usable';
+  if (entry.size > MAX_PROJECT_JSON_BYTES) return 'unavailable';
+  let contents: string;
+  try { contents = await readFile(path, 'utf8'); }
+  catch { return 'unavailable'; }
+  try {
+    const payload = JSON.parse(contents);
+    const document = finalName === 'project.json' ? payload : payload?.project;
+    if (!document || typeof document !== 'object' || Array.isArray(document)) return 'invalid';
+    if (Number(document.version) > PROJECT_VERSION) return 'unsupported';
+    migrateProjectDocument(document);
+    return 'usable';
+  } catch { return 'invalid'; }
 }
 
 async function replaceFileAtomically(
@@ -179,27 +200,34 @@ async function recoverInterruptedAtomicReplacements(directory: string): Promise<
 
   for (const [finalName, backupNames] of backupsByFinalName) {
     const finalPath = join(directory, finalName);
-    const finalUsable = await isUsableAtomicFile(finalPath);
-    if (finalUsable) {
-      await Promise.all(backupNames.map((name) => rm(join(directory, name), { force: true }).catch(() => undefined)));
-      continue;
-    }
-
+    const finalState = await inspectAtomicFile(finalPath, finalName);
+    if (finalState === 'unavailable' || finalState === 'unsupported') continue;
     const candidates = await Promise.all(backupNames.map(async (name) => ({
       name,
       mtimeMs: await stat(join(directory, name)).then((entry) => entry.mtimeMs).catch(() => 0),
-      usable: await isUsableAtomicFile(join(directory, name)),
+      state: await inspectAtomicFile(join(directory, name), finalName),
     })));
+    // Do not downgrade or discard recovery data that this build cannot inspect.
+    if (candidates.some(candidate => candidate.state === 'unsupported' || candidate.state === 'unavailable')) continue;
+    if (finalState === 'usable') {
+      await Promise.all(candidates.filter(candidate => candidate.state === 'usable')
+        .map(candidate => rm(join(directory, candidate.name), { force: true }).catch(() => undefined)));
+      continue;
+    }
     candidates.sort((left, right) => right.mtimeMs - left.mtimeMs || right.name.localeCompare(left.name));
-    const selected = candidates.find((candidate) => candidate.usable);
+    const selected = candidates.find((candidate) => candidate.state === 'usable');
     if (!selected) continue;
-    await rm(finalPath, { force: true }).catch(() => undefined);
+    if (finalState === 'invalid') {
+      const retainedPath = `${finalPath}.umbra-unusable-${randomUUID()}`;
+      const retained = await rename(finalPath, retainedPath).then(() => true).catch(() => false);
+      if (!retained) continue;
+    }
     const restored = await rename(join(directory, selected.name), finalPath).then(() => true).catch(() => false);
-    if (!restored) continue;
+    if (!restored || await inspectAtomicFile(finalPath, finalName) !== 'usable') continue;
     await syncFileBestEffort(finalPath);
     await syncContainingDirectoryBestEffort(finalPath);
     await Promise.all(candidates
-      .filter((candidate) => candidate.name !== selected.name)
+      .filter((candidate) => candidate.name !== selected.name && candidate.state === 'usable')
       .map((candidate) => rm(join(directory, candidate.name), { force: true }).catch(() => undefined)));
   }
 
@@ -214,20 +242,21 @@ function asRecord(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 }
 
-function collectStoredAssetNames(value: unknown, names: Set<string>): void {
+function collectStoredAssetNames(value: unknown, names: Set<string>, strict = false): void {
   if (typeof value === 'string') {
     if (value.startsWith(PROJECT_ASSET_PREFIX)) {
       const filename = safeStoredFilename(value.slice(PROJECT_ASSET_PREFIX.length));
+      if (strict && (!filename || filename !== value.slice(PROJECT_ASSET_PREFIX.length))) throw new Error('Invalid stored Inpaint asset reference.');
       if (filename) names.add(filename);
     }
     return;
   }
   if (Array.isArray(value)) {
-    for (const child of value) collectStoredAssetNames(child, names);
+    for (const child of value) collectStoredAssetNames(child, names, strict);
     return;
   }
   if (!value || typeof value !== 'object') return;
-  for (const child of Object.values(value as Record<string, unknown>)) collectStoredAssetNames(child, names);
+  for (const child of Object.values(value as Record<string, unknown>)) collectStoredAssetNames(child, names, strict);
 }
 
 function normalizeCurvePoints(value: unknown): Array<[number, number]> {
@@ -359,6 +388,7 @@ function migrateProjectDocument(rawProject: unknown): Record<string, any> {
 }
 
 export class UmbraUiCanvasProjectService {
+  private readonly operations = new Map<string, Promise<unknown>>();
   private readonly root: string;
   private readonly recoveryPromise: Promise<void>;
   private readonly atomicReplacementHooks?: UmbraUiCanvasProjectServiceOptions['atomicReplacementHooks'];
@@ -382,11 +412,34 @@ export class UmbraUiCanvasProjectService {
   }
 
   private projectRoot(projectId: string): string {
-    const id = safeId(projectId);
+    const id = storedId(projectId);
     if (!id) throw new Error('A valid inpaint project id is required.');
     const target = resolve(this.root, id);
-    if (target !== this.root && !target.startsWith(`${this.root}${sep}`)) throw new Error('Invalid inpaint project path.');
+    if (target === this.root || !target.startsWith(`${this.root}${sep}`)) throw new Error('Invalid inpaint project path.');
     return target;
+  }
+
+  private async locked<T>(projectId: string, action: () => Promise<T>): Promise<T> {
+    const path = this.projectRoot(projectId);
+    const key = process.platform === 'win32' ? path.toLowerCase() : path;
+    const operation = (this.operations.get(key) || Promise.resolve()).catch(() => undefined).then(async () => {
+      await this.recoveryPromise;
+      return action();
+    });
+    this.operations.set(key, operation);
+    try { return await operation; }
+    finally { if (this.operations.get(key) === operation) this.operations.delete(key); }
+  }
+
+  private async assertProjectAssets(projectId: string, project: unknown, pending = new Set<string>()): Promise<Set<string>> {
+    const referenced = new Set<string>();
+    collectStoredAssetNames(project, referenced, true);
+    for (const filename of referenced) {
+      if (!pending.has(filename) && !((await this.resolveAsset(projectId, filename))?.size > 0)) {
+        throw new Error('An Inpaint image asset is missing. Reload the saved project before saving again.');
+      }
+    }
+    return referenced;
   }
 
   private projectAssetUrl(projectId: string, filename: string): string {
@@ -398,7 +451,7 @@ export class UmbraUiCanvasProjectService {
   }
 
   private snapshotPath(projectId: string, snapshotIdInput: string): string {
-    const snapshotId = safeId(snapshotIdInput);
+    const snapshotId = storedId(snapshotIdInput);
     if (!snapshotId) throw new Error('A valid canvas restore point id is required.');
     const root = resolve(this.snapshotRoot(projectId));
     const target = resolve(root, `${snapshotId}.json`);
@@ -467,8 +520,16 @@ export class UmbraUiCanvasProjectService {
     rawProject: unknown,
     assetInputs: UmbraUiCanvasProjectAssetInput[],
   ): Promise<Record<string, any>> {
+    return this.locked(projectIdInput, () => this.saveProject(projectIdInput, rawProject, assetInputs));
+  }
+
+  private async saveProject(
+    projectIdInput: string,
+    rawProject: unknown,
+    assetInputs: UmbraUiCanvasProjectAssetInput[],
+  ): Promise<Record<string, any>> {
     await this.recoveryPromise;
-    const projectId = safeId(projectIdInput);
+    const projectId = storedId(projectIdInput);
     const source = migrateProjectDocument(rawProject);
     if (!projectId) throw new Error('Unsupported or invalid inpaint project document.');
     const rawJson = JSON.stringify(source);
@@ -560,6 +621,7 @@ export class UmbraUiCanvasProjectService {
       else if (/^(blob:|data:)/i.test(currentUrl)) throw new Error(`Pending job mask ${jobId} was not uploaded with the project.`);
     }
 
+    const referencedAssets = await this.assertProjectAssets(projectId, project, new Set(pendingAssetWrites.map(asset => asset.filename)));
     const serialized = JSON.stringify(project, null, 2);
     const transactionId = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const temporaryPaths = new Set<string>();
@@ -584,8 +646,6 @@ export class UmbraUiCanvasProjectService {
       await Promise.all(Array.from(temporaryPaths, (path) => rm(path, { force: true }).catch(() => undefined)));
       throw error;
     }
-    const referencedAssets = new Set<string>();
-    collectStoredAssetNames(project, referencedAssets);
     await this.collectSnapshotAssetNames(projectId, referencedAssets);
     const assetEntries = await readdir(assetsRoot, { withFileTypes: true }).catch(() => []);
     await Promise.all(assetEntries.map(async (entry) => {
@@ -597,10 +657,12 @@ export class UmbraUiCanvasProjectService {
 
   async get(projectIdInput: string): Promise<Record<string, any> | null> {
     await this.recoveryPromise;
-    const projectId = safeId(projectIdInput);
+    const projectId = storedId(projectIdInput);
     if (!projectId) return null;
-    const stored = await this.readStored(projectId);
-    return stored ? this.hydrateProject(projectId, migrateProjectDocument(stored)) : null;
+    return this.locked(projectId, async () => {
+      const stored = await this.readStored(projectId);
+      return stored ? this.hydrateProject(projectId, migrateProjectDocument(stored)) : null;
+    });
   }
 
   async list(): Promise<UmbraUiCanvasProjectSummary[]> {
@@ -609,10 +671,10 @@ export class UmbraUiCanvasProjectService {
     const entries = await readdir(this.root, { withFileTypes: true });
     const summaries: UmbraUiCanvasProjectSummary[] = [];
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const project = await this.readStored(entry.name);
+      if (!entry.isDirectory() || !storedId(entry.name)) continue;
+      const project = await this.locked(entry.name, () => this.readStored(entry.name));
       if (!project) continue;
-      const projectId = safeId(project.id, entry.name);
+      const projectId = storedId(project.id) || storedId(entry.name);
       const layers = Array.isArray(project.layers) ? project.layers : [];
       const staging = Array.isArray(project.staging) ? project.staging : [];
       const previewStageId = String(project.previewStageId || '').trim();
@@ -655,7 +717,7 @@ export class UmbraUiCanvasProjectService {
 
   async listSnapshots(projectIdInput: string): Promise<UmbraUiCanvasProjectSnapshotSummary[]> {
     await this.recoveryPromise;
-    const projectId = safeId(projectIdInput);
+    const projectId = storedId(projectIdInput);
     if (!projectId) return [];
     const entries = await readdir(this.snapshotRoot(projectId), { withFileTypes: true }).catch(() => []);
     const snapshots: UmbraUiCanvasProjectSnapshotSummary[] = [];
@@ -664,7 +726,7 @@ export class UmbraUiCanvasProjectService {
       try {
         const snapshot = asRecord(JSON.parse(await readFile(join(this.snapshotRoot(projectId), entry.name), 'utf8')));
         const project = asRecord(snapshot.project);
-        const id = safeId(snapshot.id, entry.name.slice(0, -5));
+        const id = storedId(snapshot.id) || storedId(entry.name.slice(0, -5));
         if (!id) continue;
         snapshots.push({
           id,
@@ -682,8 +744,12 @@ export class UmbraUiCanvasProjectService {
   }
 
   async createSnapshot(projectIdInput: string, nameInput: unknown): Promise<UmbraUiCanvasProjectSnapshotSummary> {
+    return this.locked(projectIdInput, () => this.createProjectSnapshot(projectIdInput, nameInput));
+  }
+
+  private async createProjectSnapshot(projectIdInput: string, nameInput: unknown): Promise<UmbraUiCanvasProjectSnapshotSummary> {
     await this.recoveryPromise;
-    const projectId = safeId(projectIdInput);
+    const projectId = storedId(projectIdInput);
     if (!projectId) throw new Error('A valid inpaint project id is required.');
     const stored = await this.readStored(projectId);
     if (!stored) throw new Error('Save the canvas project before creating a restore point.');
@@ -715,12 +781,17 @@ export class UmbraUiCanvasProjectService {
   }
 
   async restoreSnapshot(projectIdInput: string, snapshotIdInput: string): Promise<Record<string, any>> {
+    return this.locked(projectIdInput, () => this.restoreProjectSnapshot(projectIdInput, snapshotIdInput));
+  }
+
+  private async restoreProjectSnapshot(projectIdInput: string, snapshotIdInput: string): Promise<Record<string, any>> {
     await this.recoveryPromise;
-    const projectId = safeId(projectIdInput);
+    const projectId = storedId(projectIdInput);
     if (!projectId) throw new Error('A valid inpaint project id is required.');
     const snapshot = await this.readSnapshot(projectId, snapshotIdInput);
     if (!snapshot?.project) throw new Error('The canvas restore point was not found.');
     const project = migrateProjectDocument(snapshot.project);
+    await this.assertProjectAssets(projectId, project);
     project.id = projectId;
     project.updatedAt = Date.now();
     project.revision = Math.max(1, Math.round(Number(project.revision) || 0) + 1);
@@ -740,15 +811,13 @@ export class UmbraUiCanvasProjectService {
 
   async deleteSnapshot(projectIdInput: string, snapshotIdInput: string): Promise<void> {
     await this.recoveryPromise;
-    const projectId = safeId(projectIdInput);
+    const projectId = storedId(projectIdInput);
     if (!projectId) throw new Error('A valid inpaint project id is required.');
-    await rm(this.snapshotPath(projectId, snapshotIdInput), { force: true });
+    await this.locked(projectId, () => rm(this.snapshotPath(projectId, snapshotIdInput), { force: true }));
   }
 
   async delete(projectIdInput: string): Promise<void> {
-    await this.recoveryPromise;
-    const projectRoot = this.projectRoot(projectIdInput);
-    await rm(projectRoot, { recursive: true, force: true });
+    await this.locked(projectIdInput, () => rm(this.projectRoot(projectIdInput), { recursive: true, force: true }));
   }
 
   async resolveAsset(projectIdInput: string, filenameInput: string): Promise<{ path: string; size: number } | null> {
