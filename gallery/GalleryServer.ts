@@ -13,6 +13,7 @@ import {
 } from './GalleryDb';
 import { MetadataParser, type ImageMetadata } from '../backend/MetadataParser';
 import { galleryMediaCacheControl } from './GalleryMediaCache';
+import { resolveGalleryPublicDir } from './GalleryRuntimePaths';
 import { resolveSingleByteRange } from '../shared/httpByteRange';
 import { createVariantEtag, matchesIfNoneMatch, permitsConditionalRange } from '../shared/httpCache';
 
@@ -24,9 +25,7 @@ const BOOT_PREWARM_ROOTS_RELATIVE = [
   'Tools/ComfyUI/output',
 ];
 
-const runtimePublic = resolve(ROOT_DIR, 'gallery', 'public');
-const sourcePublic = resolve(import.meta.dir, 'public');
-const PUBLIC_DIR = existsSync(runtimePublic) ? runtimePublic : sourcePublic;
+const PUBLIC_DIR = resolveGalleryPublicDir(ROOT_DIR, import.meta.dir);
 
 function nowMs(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function'

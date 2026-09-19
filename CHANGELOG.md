@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.32.19 - Gallery Health Check Hotfix
+
+### TL;DR - Setup After Updating
+
+- Update through Umbra's updater, then restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux. Refresh open browser sessions after restarting.
+- No new models, custom nodes, or ComfyUI update are needed. Existing media and settings are unchanged.
+
+### Gallery Service Health
+
+- Use the same asset-directory resolution in Umbra and its Gallery process, including portable packages without the optional standalone Gallery assets.
+- Stop reporting a working Gallery process as unhealthy or still starting because the two processes chose different fallback paths.
+- Keep installation-root and asset-path identity checks intact; a Gallery process from a different installation is still rejected.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: incorrect Gallery service health and readiness reporting in portable installations.
+- Improved: consistent Gallery asset-path selection across development and packaged layouts.
+
 ## v0.32.18 - Regression Recovery And Dataset Download Repair
 
 ### TL;DR - Setup After Updating

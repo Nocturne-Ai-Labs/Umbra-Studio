@@ -35,6 +35,7 @@ import { seedBundledWorkflowDirectory } from './backend/BundledWorkflowService';
 import { settingsManager } from './backend/settings/SettingsManager';
 import { FsWorkerService } from './backend/FsWorkerService';
 import { GalleryTransferJournal } from './backend/GalleryTransferJournal';
+import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
 import { buildGalleryDownloadArchive, prepareGalleryDownloadResponse, getPreparedGalleryDownload, type GalleryDownloadEntry } from './backend/GalleryDownloadArchiveService';
 import { copyFileExclusive, moveTreeExclusive } from './backend/FsTransferCopy';
 import { AnimaModelMergeService } from './backend/AnimaModelMergeService';
@@ -11594,11 +11595,6 @@ const GALLERY_BRIDGE_SERVER_ENTRY_CANDIDATES = [
   join(ROOT_DIR, 'gallery', 'GalleryServer.ts'),
   join(SOURCE_DIR, 'gallery', 'GalleryServer.ts'),
 ];
-const GALLERY_PUBLIC_DIR_CANDIDATES = [
-  join(ROOT_DIR, 'resources', 'app', 'gallery', 'public'),
-  join(ROOT_DIR, 'gallery', 'public'),
-  join(SOURCE_DIR, 'gallery', 'public'),
-];
 const GALLERY_STATIC_MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
@@ -11613,18 +11609,6 @@ const GALLERY_STATIC_MIME_TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
 };
 
-function resolveGalleryPublicDir(): string {
-  for (const candidate of GALLERY_PUBLIC_DIR_CANDIDATES) {
-    if (!existsSync(candidate)) continue;
-    try {
-      if (statSync(candidate).isDirectory()) return candidate;
-    } catch {
-      // continue
-    }
-  }
-  return GALLERY_PUBLIC_DIR_CANDIDATES[1];
-}
-
 function resolveGalleryBridgeServerEntry(): string {
   for (const candidate of GALLERY_BRIDGE_SERVER_ENTRY_CANDIDATES) {
     if (!existsSync(candidate)) continue;
@@ -11638,7 +11622,7 @@ function resolveGalleryBridgeServerEntry(): string {
 }
 
 const GALLERY_BRIDGE_SERVER_ENTRY = resolveGalleryBridgeServerEntry();
-const GALLERY_PUBLIC_DIR = resolveGalleryPublicDir();
+const GALLERY_PUBLIC_DIR = resolveGalleryPublicDir(ROOT_DIR, dirname(GALLERY_BRIDGE_SERVER_ENTRY));
 let galleryBridgeProxyBackoffUntil = 0;
 let galleryBridgeDesired = false;
 let galleryBridgeWatchdogTimer: NodeJS.Timeout | null = null;
