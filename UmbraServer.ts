@@ -2542,6 +2542,7 @@ const REMOTE_LOGIN_RATE_WINDOW_MS = 5 * 60 * 1000;
 const REMOTE_LOGIN_RATE_MAX_FAILURES = 6;
 const REMOTE_PAIR_TOKEN_TTL_MS = 10 * 60 * 1000;
 const remoteLoginFailures = new Map<string, { count: number; resetAt: number }>();
+const remoteWebSockets = new Set<ServerWebSocket<UmbraSocketData>>();
 type RemoteConnectionMode = 'auto' | 'lan' | 'private-vpn' | 'reverse-proxy';
 
 interface RemoteAuthSessionRecord {
@@ -2707,6 +2708,7 @@ function loadRemoteConnectionSettings(): RemoteConnectionSettings {
 function saveRemoteConnectionSettings(settings: RemoteConnectionSettings): void {
   mkdirSync(REMOTE_AUTH_DIR, { recursive: true });
   writeFileSync(REMOTE_SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`, 'utf-8');
+  revalidateRemoteWebSockets();
 }
 
 function pickRemoteConnectionUrl(
@@ -2973,6 +2975,7 @@ function saveRemoteAuthConfig(config: RemoteAuthConfig): void {
     closed = true;
     // Keep read-modify-publish synchronous so device revocations cannot interleave.
     renameSync(temporary, REMOTE_AUTH_PATH);
+    revalidateRemoteWebSockets(config);
   } finally {
     if (!closed) { try { closeSync(descriptor); } catch { /* Preserve the original error. */ } }
     try { rmSync(temporary, { force: true }); } catch { /* Only the owned temporary file may remain. */ }
@@ -3037,13 +3040,40 @@ function isRemoteRequestAuthenticated(req: Request, config: RemoteAuthConfig | n
   if (!config) return true;
   const token = getRemoteSessionToken(req);
   if (!token) return false;
-  const tokenHash = hashRemoteSessionToken(token);
+  return isRemoteSessionHashAuthenticated(hashRemoteSessionToken(token), config);
+}
+
+function isRemoteSessionHashAuthenticated(tokenHash: string, config: RemoteAuthConfig | null): boolean {
+  if (!config || !tokenHash) return false;
   const now = Date.now();
   return (config.sessions || []).some((session) => {
     if (session.expiresAt <= now || !safeEqualHex(session.hash, tokenHash)) return false;
     if (!session.deviceId) return true;
     return (config.devices || []).some((device) => device.trusted && safeEqualHex(device.id, session.deviceId || ''));
   });
+}
+
+function getRemoteWebSocketAuthData(req: Request, url: URL, server?: RequestIpServer) {
+  const remoteClient = isRemoteRequest(req, url, server);
+  const token = remoteClient ? getRemoteSessionToken(req) : '';
+  return { remoteClient, remoteSessionHash: token ? hashRemoteSessionToken(token) : '' };
+}
+
+function isRemoteWebSocketAuthorized(ws: ServerWebSocket<UmbraSocketData>, config: RemoteAuthConfig | null): boolean {
+  if (!ws.data.remoteClient) return true;
+  const settings = loadRemoteConnectionSettings();
+  return settings.enabled && (!settings.requireRemoteAuth
+    || isRemoteSessionHashAuthenticated(ws.data.remoteSessionHash || '', config));
+}
+
+function revalidateRemoteWebSockets(config = loadRemoteAuthConfig()): void {
+  for (const ws of remoteWebSockets) {
+    if (isRemoteWebSocketAuthorized(ws, config)) continue;
+    remoteWebSockets.delete(ws);
+    // Revocation must also stop existing control channels and proxy relays.
+    try { ws.data.upstream?.close(); } catch { /* Already closed. */ }
+    try { ws.terminate(); } catch { /* Already closed. */ }
+  }
 }
 
 function getRemoteRequestAddress(req: Request, server?: RequestIpServer): string {
@@ -29794,6 +29824,7 @@ type UmbraSocketData = {
   endpoint: string;
   targetUrl?: string;
   remoteClient?: boolean;
+  remoteSessionHash?: string;
   queuedMessages?: Array<string | Buffer>;
   upstream?: WebSocket;
 };
@@ -30235,6 +30266,7 @@ const server = Bun.serve<UmbraSocketData>({
           const upgraded = server.upgrade(req, {
             data: {
               endpoint: '/comfy/ws',
+              ...getRemoteWebSocketAuthData(req, url, server),
               targetUrl: getComfyProxyWsUrl(url.search),
             },
           });
@@ -30276,6 +30308,7 @@ const server = Bun.serve<UmbraSocketData>({
           const upgraded = server.upgrade(req, {
             data: {
               endpoint: '/local-server-proxy/ws',
+              ...getRemoteWebSocketAuthData(req, url, server),
               targetUrl,
             },
           });
@@ -30500,7 +30533,7 @@ const server = Bun.serve<UmbraSocketData>({
           const upgraded = server.upgrade(req, {
             data: {
               endpoint: path,
-              remoteClient: isRemoteRequest(req, url, server),
+              ...getRemoteWebSocketAuthData(req, url, server),
             },
           });
           if (upgraded) return undefined;
@@ -36060,6 +36093,11 @@ const server = Bun.serve<UmbraSocketData>({
       decompress: 'shared',
     },
     open(ws) {
+      if (ws.data.remoteClient) {
+        remoteWebSockets.add(ws);
+        revalidateRemoteWebSockets();
+        if (ws.readyState !== 1) return;
+      }
       const endpoint = (ws.data as any)?.endpoint || '/ws/unknown';
       if (endpoint === '/comfy/ws') {
         const targetUrl = String((ws.data as any)?.targetUrl || getComfyProxyWsUrl());
@@ -36166,6 +36204,7 @@ const server = Bun.serve<UmbraSocketData>({
       handleWsConnection(ws, endpoint);
     },
     close(ws) {
+      remoteWebSockets.delete(ws);
       prompterQueueUploads.discard(ws);
       const endpoint = (ws.data as any)?.endpoint || '/ws/unknown';
       if (endpoint === '/comfy/ws') {
