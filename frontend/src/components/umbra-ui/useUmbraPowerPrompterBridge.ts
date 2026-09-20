@@ -1835,7 +1835,8 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       } else if (video.frameGuideMode === 'first_middle_last') {
         video.middleImageName = await stageFrame('middle frame', video.middleImagePath, video.middleImageName);
       }
-      if (video.frameGuideMode === 'first_last' || video.frameGuideMode === 'first_middle_last') {
+      if (video.mode === 'image_to_video'
+        && (video.frameGuideMode === 'first_last' || video.frameGuideMode === 'first_middle_last')) {
         video.lastImageName = await stageFrame('last frame', video.lastImagePath, video.lastImageName);
       }
     }
