@@ -6515,7 +6515,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
 
         if (messageType === 'queue_pause_result') {
           if (payload.success === false) {
-            setQueuePaused((prev) => (payload.paused === true ? false : prev));
+            if (typeof payload.paused === 'boolean') {
+              setQueuePaused(payload.paused !== true);
+            }
             showToast(String(payload.error || 'Queue pause change failed.'), 'error');
             return;
           }
