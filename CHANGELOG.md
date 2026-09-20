@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.32.23 - Umbra UI Queue Controls Hotfix
+
+### TL;DR - Setup After Updating
+
+- Update through Umbra's updater, then restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux. Refresh open browser and Remote sessions to load the corrected controls.
+- No new models or custom nodes are required. Existing media, models, and settings are retained. Targeted cancellation still requires a compatible ComfyUI version; unsupported cancellation is reported without falling back to interrupting unrelated work.
+
+### Umbra UI
+
+- Preserve the active ComfyUI prompt ID when reading queue snapshots and include it in Skip requests. This repairs the regression where the backend rejected Umbra UI's request because the required identity was missing.
+- Restore Stop All's active-image interruption after pending Umbra UI generations are canceled. Keep cancellation scoped to the selected Umbra UI jobs rather than unrelated Power Prompter work.
+- Report partial failure explicitly when pending jobs were stopped but the active generation could not be interrupted. Requests made before a prompt identity is available explain that the queue must update before retrying.
+
+### Validation
+
+- Passed 21 targeted queue regression tests, frontend TypeScript validation, lint, and the production frontend build. Tests cover precise prompt targeting, stale-client protection, pending-only cancellation, partial failures, and mixed-queue isolation.
+- The frontend hotfix was deployed to a matching personal installation and confirmed by the user. Windows and Linux packages retain the existing release privacy exclusions.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Umbra UI Skip requests missing the active generation's required identity.
+- Fixed: Stop All clearing pending jobs without successfully requesting interruption of the active image.
+- Improved: clear partial-stop feedback and safe rejection of unavailable or stale generation targets.
+
 ## v0.32.22 - Queue Reliability And Gallery Access Protection
 
 ### TL;DR - Setup After Updating

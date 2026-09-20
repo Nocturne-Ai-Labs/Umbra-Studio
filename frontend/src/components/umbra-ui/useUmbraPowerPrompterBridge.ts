@@ -64,6 +64,7 @@ export type UmbraQueuePlacement = 'next' | 'end' | 'interrupt';
 
 interface QueuePrompt {
   requestId: string;
+  promptId: string;
   promptIndex: number;
   prompt: string;
   status: QueuePromptStatus;
@@ -549,6 +550,7 @@ function normalizeQueueSnapshot(value: unknown): QueueSnapshot | null {
             .filter((prompt): prompt is Record<string, unknown> => !!prompt && typeof prompt === 'object')
             .map((prompt) => ({
               requestId: String(prompt.requestId || entry.requestId || '').trim(),
+              promptId: String(prompt.promptId || '').trim(),
               promptIndex: toFiniteInteger(prompt.promptIndex, 0, 0, Number.MAX_SAFE_INTEGER),
               prompt: String(prompt.prompt || '').trim(),
               status: String(prompt.status || 'pending').trim() as QueuePromptStatus,
@@ -1360,6 +1362,13 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         ? 'No Umbra UI generation is active.'
         : 'No Umbra UI generations are queued.'));
     }
+    const promptId = type === 'queue_interrupt_active'
+      ? queueSnapshot?.requests.find((request) => request.requestId === activeRequestId)
+        ?.prompts.find((prompt) => prompt.status === 'running' || prompt.status === 'submitting')?.promptId
+      : undefined;
+    if (type === 'queue_interrupt_active' && !promptId) {
+      return Promise.reject(new Error('The generation is still submitting or has finished. Wait for the queue to update and try again.'));
+    }
     const requestId = createRequestId();
     return new Promise<string>((resolve, reject) => {
       const timer = window.setTimeout(() => {
@@ -1376,6 +1385,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           queueTargetType: 'pipeline',
           requestIds: normalizedRequestIds,
           ...(activeRequestId ? { activeRequestId } : {}),
+          ...(promptId ? { promptId } : {}),
         }));
       } catch (error) {
         window.clearTimeout(timer);
@@ -1383,7 +1393,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         reject(error instanceof Error ? error : new Error('Failed to send the Umbra UI queue control.'));
       }
     });
-  }, [connected]);
+  }, [connected, queueSnapshot]);
 
   const skipActiveUmbraJob = React.useCallback(() => {
     const activeRequestId = queueSummary.umbraUiActiveRequestId;
@@ -1395,7 +1405,11 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     const activeRequestId = queueSummary.umbraUiActiveRequestId;
     await sendQueueControl('queue_cancel', requestIds, activeRequestId);
     if (activeRequestId) {
-      await sendQueueControl('queue_interrupt_active', [activeRequestId], activeRequestId);
+      try {
+        await sendQueueControl('queue_interrupt_active', [activeRequestId], activeRequestId);
+      } catch (error) {
+        throw new Error(`Pending Umbra UI generations were stopped, but the active generation could not be interrupted: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }, [queueSummary.umbraUiActiveRequestId, queueSummary.umbraUiRequestIds, sendQueueControl]);
 
