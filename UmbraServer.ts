@@ -5582,6 +5582,10 @@ function replacePowerPrompterQueueControllerGroup(
     const entry = Array.isArray(replacement.promptEntries) ? replacement.promptEntries[index] : null;
     return entry && typeof entry === 'object' ? entry : null;
   });
+  const replacementPromptSeedGroupIds = keptPromptIndices.map(({ index }, promptIndex) =>
+    String(Array.isArray(replacement.promptSeedGroupIds) ? replacement.promptSeedGroupIds[index] || '' : '').trim()
+      || `${replacementPromptSetIds[promptIndex]}:${promptIndex}`
+  );
 
   const now = Date.now();
   const previousPrompts = [...request.prompts].sort((a, b) => a.promptIndex - b.promptIndex);
@@ -5702,6 +5706,10 @@ function replacePowerPrompterQueueControllerGroup(
         promptOutputSubfolders: nextPromptOutputSubfolders,
         promptStyleNames: nextPromptStyleNames,
         promptEntries: nextPromptEntries,
+        promptSeedGroupIds: [
+          ...lockedPrompts.map((prompt) => previousState.promptSeedGroupIds?.[prompt.promptIndex] || `${prompt.setId}:${prompt.promptIndex}`),
+          ...replacementPromptSeedGroupIds,
+        ],
         generation: nextGenerationByPrompt[0] ?? replacementGeneration,
         generationByPrompt: nextGenerationByPrompt,
         ...(replacementEditorSnapshot && typeof replacementEditorSnapshot === 'object'
@@ -5717,6 +5725,10 @@ function replacePowerPrompterQueueControllerGroup(
     ...snapshot,
     sourceFile: snapshot.file,
     promptEntries: [...lockedPrompts.map((prompt) => snapshot.promptEntries?.[prompt.promptIndex] ?? null), ...replacementPromptEntries],
+    promptSeedGroupIds: [
+      ...lockedPrompts.map((prompt) => snapshot.promptSeedGroupIds[prompt.promptIndex]),
+      ...replacementPromptSeedGroupIds,
+    ],
     editorSnapshot: replacement.editorSnapshot ?? replacementGroup.editorSnapshot ?? snapshot.groupSnapshots?.[0]?.editorSnapshot,
   }) || snapshot);
   broadcastPowerPrompterQueueControllerSnapshot('group_replaced', preferredSourceWs);
