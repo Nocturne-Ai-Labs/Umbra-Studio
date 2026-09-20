@@ -34,6 +34,12 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
 
   useEffect(() => {
     const controller = new AbortController();
+    const trackedPaths = JSON.parse(pathsKey) as string[];
+    if (trackedPaths.length === 0) {
+      newestAt.current = 0;
+      setSnapshot(null);
+      return () => controller.abort();
+    }
     let timer: ReturnType<typeof setTimeout>;
     let busy = false;
     const refresh = async () => {
@@ -41,7 +47,7 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
       clearTimeout(timer);
       busy = true;
       try {
-        const next = await fetchActivity(JSON.parse(pathsKey), controller.signal);
+        const next = await fetchActivity(trackedPaths, controller.signal);
         if (controller.signal.aborted) return;
         setSnapshot(next);
         const recent = next.recentFolders.filter(folder => folder.updatedAt > newestAt.current);
