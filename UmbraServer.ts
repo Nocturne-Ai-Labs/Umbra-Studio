@@ -25900,12 +25900,21 @@ function applyRemoteGalleryBridgeFsOptimization(
   return true;
 }
 
+async function isRemoteMainMediaReadAllowed(req: Request, url: URL, path: string, server?: RequestIpServer): Promise<boolean> {
+  if (!isRemoteRequest(req, url, server)) return true;
+  const resolved = resolvePath(path, { allowOutsideRoot: true });
+  if (!resolved) return false;
+  const authorize = await createGalleryPathAuthorizer(getGalleryBridgeAllowedRoots()).catch(() => null);
+  return Boolean(authorize && await authorize(resolved.fullPath));
+}
+
 async function handleFsThumbnail(req: Request, url: URL, server?: RequestIpServer): Promise<Response> {
   const path = url.searchParams.get('path');
   const sizeParam = url.searchParams.get('size') as 'small' | 'medium' | 'large' || 'medium';
   const qualityParam = Number.parseInt(url.searchParams.get('q') ?? '', 10);
   const deferGeneration = String(url.searchParams.get('defer') || '').trim() === '1';
   if (!path) return new Response('Path parameter required', { status: 400 });
+  if (!(await isRemoteMainMediaReadAllowed(req, url, path, server))) return new Response('Access denied', { status: 403 });
 
   try {
     const resolved = resolvePath(path);
@@ -25995,10 +26004,11 @@ async function handleFsThumbnail(req: Request, url: URL, server?: RequestIpServe
 }
 
 
-async function handleFsPreview(req: Request, url: URL): Promise<Response> {
+async function handleFsPreview(req: Request, url: URL, server?: RequestIpServer): Promise<Response> {
   const path = url.searchParams.get('path');
   const sizeParam = url.searchParams.get('size') as 'small' | 'medium' | 'large' || 'medium';
   if (!path) return new Response('Path parameter required', { status: 400 });
+  if (!(await isRemoteMainMediaReadAllowed(req, url, path, server))) return new Response('Access denied', { status: 403 });
 
   try {
     const resolved = resolvePath(path);
@@ -26065,6 +26075,7 @@ async function handleFsPreview(req: Request, url: URL): Promise<Response> {
 async function handleFsImage(req: Request, url: URL, server?: RequestIpServer): Promise<Response> {
   const path = url.searchParams.get('path');
   if (!path) return new Response('Path parameter required', { status: 400 });
+  if (!(await isRemoteMainMediaReadAllowed(req, url, path, server))) return new Response('Access denied', { status: 403 });
 
   try {
     const resolved = resolvePath(path);
@@ -26367,9 +26378,10 @@ async function handleFsDownloadJpegZip(req: Request): Promise<Response> {
   }
 }
 
-async function handleFsMetadata(url: URL): Promise<Response> {
+async function handleFsMetadata(req: Request, url: URL, server?: RequestIpServer): Promise<Response> {
   const path = url.searchParams.get('path');
   if (!path) return json({ error: 'Path parameter required' }, 400);
+  if (!(await isRemoteMainMediaReadAllowed(req, url, path, server))) return json({ error: 'Access denied' }, 403);
 
   try {
     const resolved = resolvePath(path);
@@ -30823,7 +30835,7 @@ const server = Bun.serve<UmbraSocketData>({
           req,
           url,
           '/api/fs/metadata',
-          () => handleFsMetadata(url),
+          () => handleFsMetadata(req, url, server),
           server,
         );
       }
@@ -30831,7 +30843,7 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/fs/list' && method === 'GET') return handleFsList(url, req.signal);
       if (path === '/api/fs/list-progressive' && method === 'GET') return handleFsListProgressive(url, req.signal);
       if (path === '/api/fs/thumbnail' && method === 'GET') return handleFsThumbnail(req, url, server);
-      if (path === '/api/fs/preview' && method === 'GET') return handleFsPreview(req, url);
+      if (path === '/api/fs/preview' && method === 'GET') return handleFsPreview(req, url, server);
       if (path === '/api/fs/image' && method === 'GET') return handleFsImage(req, url, server);
       if (path === '/api/fs/download-zip' && method === 'POST') {
         server.timeout(req, 0);
@@ -30844,7 +30856,7 @@ const server = Bun.serve<UmbraSocketData>({
         server.timeout(req, 0);
         return handleFsDownloadJpegZip(req);
       }
-      if (path === '/api/fs/metadata' && method === 'GET') return handleFsMetadata(url);
+      if (path === '/api/fs/metadata' && method === 'GET') return handleFsMetadata(req, url, server);
       if (path === '/api/powerprompter/receipt' && method === 'GET') return handlePowerPrompterReceiptLookup(url);
       if (path === '/api/fs/read' && method === 'GET') return handleFsRead(url);
       if (path === '/api/fs/tree' && method === 'GET') return handleFsTree(url);
