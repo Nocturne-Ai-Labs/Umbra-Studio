@@ -7445,6 +7445,7 @@ export function UmbraInpaintWorkspace({
       checkpointName,
       modelFamily,
       modelSource,
+      workflowResources: { ...workflowResources },
       loras: loras.map((lora) => ({
         id: lora.id,
         name: lora.name,
@@ -7530,6 +7531,7 @@ export function UmbraInpaintWorkspace({
     seamlessY,
     source,
     steps,
+    workflowResources,
   ]);
 
   const saveCanvasToGallery = React.useCallback(async (regionOnly: boolean) => {

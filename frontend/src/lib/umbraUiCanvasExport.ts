@@ -10,6 +10,7 @@ export interface UmbraUiCanvasSaveMetadata {
   checkpointName: string;
   modelFamily: string;
   modelSource: string;
+  workflowResources?: Record<string, string>;
   loras: Array<{
     id: string;
     name: string;

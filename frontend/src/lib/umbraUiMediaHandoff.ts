@@ -479,8 +479,12 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
     : [];
   const inpaintLoras = normalizeMetadataLoras(inpaint.loras, 'metadata-inpaint-lora');
   const checkpointName = normalizePath(generation.checkpointName || inpaint.checkpointName || params.model);
-  const workflowResources = isRecord(generation.workflowResources)
-    ? Object.fromEntries(Object.entries(generation.workflowResources)
+  // Current generation metadata owns resource selection; do not mix in older lineage.
+  const rawWorkflowResources = isRecord(generation.workflowResources)
+    ? generation.workflowResources
+    : Object.keys(generation).length === 0 ? inpaint.workflowResources : undefined;
+  const workflowResources = isRecord(rawWorkflowResources)
+    ? Object.fromEntries(Object.entries(rawWorkflowResources)
       .map(([key, value]) => [String(key || '').trim(), normalizePath(value)])
       .filter(([key, value]) => !!key && !!value))
     : undefined;

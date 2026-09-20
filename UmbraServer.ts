@@ -20284,6 +20284,7 @@ async function handleUmbraUiCanvasSave(req: Request): Promise<Response> {
       checkpointName,
       modelFamily: String(metadata.modelFamily || '').trim().slice(0, 160),
       modelSource: String(metadata.modelSource || '').trim().slice(0, 80),
+      workflowResources: normalizePPWorkflowResources(metadata.workflowResources),
       loras,
       seed: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(Number(metadata.seed) || 0))),
       seedMode: normalizePPSeedControlMode(metadata.seedMode),
