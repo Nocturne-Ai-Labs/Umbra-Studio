@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.32.22 - Queue Reliability And Gallery Access Protection
+
+### TL;DR - Setup After Updating
+
+- Update through Umbra's updater, then restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux. Refresh open browser and Remote sessions. Back up important projects and settings before updating.
+- No new model downloads or custom nodes are required. Existing media, models, and settings are retained.
+- Queue Manager Skip now waits for targeted cancellation to succeed. If the connected ComfyUI does not support that operation, Umbra reports the failure and leaves the job running instead of interrupting unrelated work. Use Umbra's managed ComfyUI update controls when an update is needed.
+- Remote Gallery access continues to support explicitly configured external folders and linked roots; paths outside permitted roots are rejected. Host-local browsing behavior is preserved.
+
+### Queue Manager And Power Prompter
+
+- Preserve seed-group alignment when replacing queued prompts, including edited groups saved and restored later.
+- Target the actual running Power Prompter prompt, wait for ComfyUI's cancellation acknowledgment, and retain the job when cancellation fails. Stale clients cannot accidentally skip the next prompt or an unrelated Umbra UI job.
+- Handle priority placement while another prompt is still being submitted. Wait boundedly for its exact identity, stop waiting when ownership changes or incoming work is canceled, and release waiting upscale work on failure.
+- Reject duplicate request admissions that finish validation after the original request has already completed. This uses the existing short-lived terminal records; it is not permanent request deduplication, and intentional reruns with new IDs remain available.
+- Revalidate regrouping after asynchronous pipeline checks. Canceled or completed source groups cannot be resurrected, concurrent destination IDs cannot overwrite each other, and current queue order is respected.
+
+### Gallery And Remote
+
+- Keep the managed Gallery process on loopback and restrict browser admission and cross-origin responses to trusted app origins. Preserve authenticated Remote access through the main server.
+- Refresh Gallery lifecycle status after start and stop, and verify actual worker shutdown rather than reporting a stale cached health result. Other system-status sampling remains unchanged.
+- Apply consistent resolved-folder authorization to Remote requests sent through the Gallery worker, including combined search roots, folder summaries, and linked folders.
+- Authorize all resolved targets before Remote tag changes. Mixed permitted and forbidden selections fail before any tags are changed; ordinary permitted edits and host-local edits remain available.
+- Apply the same allowed-folder boundary to Remote image, thumbnail, preview, and metadata reads served directly by the main process, preserving each route's existing path aliases.
+- Remove the unused legacy Gallery iframe component and obsolete global queue-interrupt helper. The active React Gallery and separate Gallery process remain in place.
+
+### Validation And Compatibility
+
+- The final combined regression suites passed 161 tests, backend/frontend TypeScript checks, frontend lint, and the production frontend build.
+- Isolated actual-app checks covered Gallery loading, original-image delivery, viewer and IMG2IMG handoff on desktop/tablet/phone, desktop JPEG export, and repeated Gallery start/stop. Remote authorization was exercised with synthetic sessions and media, not a live VPN connection.
+- A 3,500-prompt browser fixture checked bounded queue rendering, selection, editing, and cancellation feedback. Power Prompter's longer-list browser check covered search focus, undo/redo, reorder/edit identity, and removal. Queue/session events in these fixtures were simulated; no live GPU throughput improvement is claimed.
+- Filmstrip checks covered unread badges, persisted acknowledgments, low-frequency discovery, reduced motion, and stopping inactive UI polling when the strip is hidden. Reopening the strip immediately checks activity again.
+- Live GPU generation and every external storage configuration were not requalified by this pass. These fixes do not establish that every possible application or filesystem race is resolved.
+- Windows BAT and Linux portable ZIPs remain the only release assets. Private audit reports, internal tests, personal media, installed tools, and model weights are excluded.
+- Linux managed-tool prerequisites remain `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit UI setup still requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: edited queue seed alignment, premature or misdirected Skip behavior, and priority interruption during prompt submission.
+- Fixed: duplicate late queue admission and regrouping that could recreate canceled or completed work.
+- Fixed: stale Gallery lifecycle status and Remote access gaps across worker requests, tag mutations, and direct media reads.
+- Improved: acknowledged queue controls, consistent permitted-folder enforcement, and removal of unused legacy code without changing the active Gallery architecture.
+
 ## v0.32.21 - Background Gallery And Headless ComfyUI
 
 ### TL;DR - Setup After Updating
