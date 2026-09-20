@@ -32755,7 +32755,7 @@ const server = Bun.serve<UmbraSocketData>({
                 caption = mergedTags.join(', ');
                 tagCount = mergedTags.length;
               }
-              await fs.writeFile(captionPath, caption, 'utf8');
+              await writeTextFileAtomic(captionPath, caption);
               results.push({
                 filename,
                 success: true,
@@ -33246,7 +33246,7 @@ const server = Bun.serve<UmbraSocketData>({
           const baseName = safeImageName.replace(/\.[^.]+$/, '');
           const captionPath = join(basePath, baseName + '.txt');
 
-          await fs.writeFile(captionPath, body.caption.trim());
+          await writeTextFileAtomic(captionPath, body.caption.trim());
 
           return json({ success: true, path: captionPath });
         } catch (error: any) {
