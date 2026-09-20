@@ -99,6 +99,7 @@ export type QueueStackItem = {
   id: string;
   requestId: string;
   promptIndex: number;
+  promptId?: string;
   prompt: string;
   styleName?: string;
   styleFolderName?: string;

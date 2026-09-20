@@ -342,6 +342,7 @@ function areQueueStackItemsEquivalent(a: QueueStackItem[], b: QueueStackItem[]):
       left.id !== right.id
       || left.requestId !== right.requestId
       || left.promptIndex !== right.promptIndex
+      || left.promptId !== right.promptId
       || left.prompt !== right.prompt
       || left.styleName !== right.styleName
       || left.styleFolderName !== right.styleFolderName
@@ -717,6 +718,11 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     reject: (reason?: unknown) => void;
     timer: ReturnType<typeof setTimeout>;
   }>());
+  const pendingQueueInterruptsRef = useRef(new Map<string, {
+    resolve: (value: any) => void;
+    reject: (reason?: unknown) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>());
   const pendingLoraCatalogRequestsRef = useRef(new Map<string, {
     resolve: (value: string[]) => void;
     reject: (reason?: unknown) => void;
@@ -923,7 +929,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const stalledQueuePromptKeysRef = useRef(powerPrompterQueueSession.stalledQueuePromptKeys);
   const queueDebugSeqRef = useRef(0);
   const powerPrompterDebugSeqRef = useRef(0);
-  const lastLocalQueueInterruptHandledAtRef = useRef(0);
   const lastQueueEstimateDiagnosticsSignatureRef = useRef('');
   const lastGenerationPreviewDiagnosticsSignatureRef = useRef('');
   const lastGenerationPreviewBroadcastSignatureRef = useRef('');
@@ -4402,6 +4407,11 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   };
 
   const rejectAllPendingQueueRequests = (reason: string) => {
+    for (const pending of pendingQueueInterruptsRef.current.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(reason));
+    }
+    pendingQueueInterruptsRef.current.clear();
     for (const [requestId, pending] of Array.from(pendingQueueRequestsRef.current.entries())) {
       clearTimeout(pending.timer);
       pendingQueueRequestsRef.current.delete(requestId);
@@ -4926,6 +4936,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           id: `${requestId}:${promptIndex}`,
           requestId,
           promptIndex,
+          promptId: String(entry?.promptId || '').trim(),
           prompt: String(entry?.prompt || ''),
           styleName: String(entry?.styleName || '').trim() || undefined,
           styleFolderName: String(entry?.outputSubfolder || '').trim() || undefined,
@@ -6577,12 +6588,16 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
 
         if (messageType === 'queue_interrupt_result') {
           logQueueDebug('ws:queue_interrupt_result:received', { payload });
+          const pending = pendingQueueInterruptsRef.current.get(String(payload.requestId || ''));
+          if (pending) {
+            clearTimeout(pending.timer);
+            pendingQueueInterruptsRef.current.delete(String(payload.requestId));
+            if (payload.success === false) pending.reject(new Error(String(payload.error || 'Failed to cancel the generation.')));
+            else pending.resolve(payload);
+            return;
+          }
+          if (payload.backendHandled === true) return;
           if (payload.success === false) {
-            const recentlyHandledLocally = Date.now() - lastLocalQueueInterruptHandledAtRef.current < 5000;
-            if (recentlyHandledLocally) {
-              logQueueDebug('ws:queue_interrupt_result:ignored_after_local_cancel', { payload });
-              return;
-            }
             showToast(String(payload.error || 'Failed to advance queue after cancel.'), 'error');
           } else {
             const requestId = String(payload.requestId || '').trim();
@@ -8215,24 +8230,37 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const requestQueueInterruptActiveThroughWebSocket = (
     activeRequestId?: string,
     targetBridgeId?: string,
-    queueTargetType?: PowerPrompterQueueTargetType
-  ): boolean => {
+    queueTargetType?: PowerPrompterQueueTargetType,
+    promptId?: string,
+  ): Promise<any> => {
     const normalizedActiveRequestId = String(activeRequestId || '').trim();
     logQueueDebug('ws:queue_interrupt_active:send:start', { activeRequestId: normalizedActiveRequestId, targetBridgeId, queueTargetType });
     if (!prompterWsReadyRef.current || !prompterWsRef.current || prompterWsRef.current.readyState !== WebSocket.OPEN) {
       logQueueDebug('ws:queue_interrupt_active:send:blocked');
-      return false;
+      return Promise.reject(new Error('Power Prompter websocket disconnected.'));
+    }
+    if (!normalizedActiveRequestId || !String(promptId || '').trim()) {
+      return Promise.reject(new Error('The active generation is still submitting. Try again once it is queued.'));
     }
     const resolvedTarget = resolveQueueControlTarget(targetBridgeId, queueTargetType);
-    const sent = sendPrompterWsMessage({
-      type: 'queue_interrupt_active',
-      requestId: createRequestId(),
-      ...(normalizedActiveRequestId ? { activeRequestId: normalizedActiveRequestId } : {}),
-      targetBridgeId: resolvedTarget.targetBridgeId || undefined,
-      queueTargetType: resolvedTarget.queueTargetType,
+    const requestId = createRequestId();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingQueueInterruptsRef.current.delete(requestId);
+        reject(new Error('Timed out waiting for generation cancellation. Refresh the queue before retrying.'));
+      }, 20_000);
+      pendingQueueInterruptsRef.current.set(requestId, { resolve, reject, timer });
+      const sent = sendPrompterWsMessage({
+        type: 'queue_interrupt_active', requestId, activeRequestId: normalizedActiveRequestId, promptId,
+        targetBridgeId: resolvedTarget.targetBridgeId || undefined,
+        queueTargetType: resolvedTarget.queueTargetType,
+      });
+      if (!sent) {
+        clearTimeout(timer);
+        pendingQueueInterruptsRef.current.delete(requestId);
+        reject(new Error('Power Prompter websocket disconnected.'));
+      }
     });
-    logQueueDebug('ws:queue_interrupt_active:send:done', { activeRequestId: normalizedActiveRequestId, sent, resolvedTarget });
-    return sent;
   };
 
   const requestQueueClearFutureThroughWebSocket = (
@@ -10310,23 +10338,11 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       const resolvedTargetBridgeId = activeRequestMeta?.targetBridgeId || effectiveQueueTargetBridgeId;
       const resolvedQueueTargetType = normalizeQueueTargetType(activeRequestMeta?.queueTargetType || selectedQueueTargetType);
       logQueueDebug('action:cancelActive:resolved', { activeRequestId, activePromptIndex, resolvedTargetBridgeId, resolvedQueueTargetType });
-      lastLocalQueueInterruptHandledAtRef.current = Date.now();
-      const bridgeInterruptSent = requestQueueInterruptActiveThroughWebSocket(activeRequestId, resolvedTargetBridgeId, resolvedQueueTargetType);
-
-      const interruptResponse = await fetch('/api/umbrabridge/comfyui/interrupt', { method: 'POST' });
-      const interruptPayload = await interruptResponse.json().catch(() => ({}));
-      if (!interruptResponse.ok || interruptPayload?.success === false) {
-        throw new Error(String(interruptPayload?.error || `ComfyUI interrupt failed (${interruptResponse.status})`));
-      }
-
-      retireInterruptedQueuePromptLocally(activeRequestId, activePromptIndex);
-      lastLocalQueueInterruptHandledAtRef.current = Date.now();
-      logQueueDebug('action:cancelActive:end', { activeRequestId, activePromptIndex, bridgeInterruptSent });
-      if (!bridgeInterruptSent) {
-        showToast('Canceled active job. Bridge sync unavailable; queue advancement may be delayed.', 'error');
-      } else {
-        showToast('Canceled active job and moved to next prompt', 'success');
-      }
+      const promptId = activeRunningItem?.promptId
+        || (activeVisual?.requestId === activeRequestId ? activeVisual.promptIds[activePromptIndex] : '');
+      await requestQueueInterruptActiveThroughWebSocket(activeRequestId, resolvedTargetBridgeId, resolvedQueueTargetType, promptId);
+      logQueueDebug('action:cancelActive:end', { activeRequestId, activePromptIndex });
+      showToast('Canceled active job', 'success');
     } catch (error: any) {
       logQueueDebug('action:cancelActive:error', { error: String(error?.message || error || '') });
       showToast(String(error?.message || 'Failed to cancel active generation.'), 'error');
