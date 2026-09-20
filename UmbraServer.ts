@@ -8821,16 +8821,6 @@ function interruptBackendPowerPrompterActivePrompt(
   return true;
 }
 
-async function requestBackendComfyPromptInterrupt(reason: string): Promise<void> {
-  const response = await fetch(`${getComfyProxyBaseUrl()}/interrupt`, { method: 'POST' });
-  if (!response.ok) {
-    throw new Error(`ComfyUI interrupt failed (${response.status}).`);
-  }
-  appendPowerPrompterQueueLog('backend_queue_comfy_interrupt_sent', {
-    reason: String(reason || 'interrupt').trim() || 'interrupt',
-  });
-}
-
 function collectBackendPowerPrompterRequestIdsForControl(data: any, type: 'queue_cancel' | 'queue_clear_future' | 'queue_interrupt_active'): string[] {
   const explicitIds = collectPrompterRequestIds(data?.requestIds);
   if (explicitIds.length > 0) return explicitIds;
