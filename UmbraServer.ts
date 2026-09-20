@@ -25446,7 +25446,7 @@ async function resolveAuthorizedGalleryTagUids(
 ): Promise<string[] | null> {
   const uids = Array.from(new Set([...directUids, ...(paths.length > 0 ? galleryDb.resolveUidsForPaths(paths) : [])]));
   if (!isRemoteRequest(req, url, server)) return uids;
-  const indexedPaths = galleryDb.resolvePathsForUids(directUids);
+  const indexedPaths = galleryDb.resolvePathsForUids(uids);
   if (!(await areGalleryBridgePathsAllowed(req, url, [...paths, ...indexedPaths], server))) return null;
   return uids;
 }
