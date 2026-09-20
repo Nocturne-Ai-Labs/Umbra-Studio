@@ -83,6 +83,7 @@ interface AppState {
   };
   setConnectionStatus: (backend: 'comfyui', status: 'connected' | 'disconnected' | 'connecting') => void;
   setComfyLaunchPhase: (phase: ComfyLaunchPhase) => void;
+  comfyStartupError: string | null;
 
   // Backend readiness/health (port/service responding)
   backendReady: boolean;
@@ -293,6 +294,7 @@ export const useStore = create<AppState>()(
           set({ activeWorkspace: 'localserver', selectedLocalServerAppId });
         },
 
+        comfyStartupError: null,
         connections: {
           comfyui: 'disconnected',
         },
@@ -529,11 +531,14 @@ export const useStore = create<AppState>()(
                 set({ backendReady: true });
               }
 
+              const comfyStartupError = typeof data.backends?.comfyui?.startup?.error === 'string' ? data.backends.comfyui.startup.error : null;
+              if (comfyStartupError !== current.comfyStartupError) set({ comfyStartupError });
               const comfyRuntime = reconcileComfyLaunchRuntimeState({
                 connection: current.connections.comfyui,
                 healthy: current.backendHealth.comfyui,
                 booting: current.booting.comfyui,
               }, {
+                failed: comfyStartupError !== null,
                 running: data.backends?.comfyui?.running === true,
                 healthy: data.backends?.comfyui?.healthy === true,
               });

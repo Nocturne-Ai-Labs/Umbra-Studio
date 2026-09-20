@@ -27,6 +27,7 @@ export interface AppSettings {
   'ui.idleFrameCapIdleTime': number;
   'ui.idleFrameCapFps': number;
   'ui.language': AppLanguage;
+  'comfyui.autoStart': boolean;
   'comfyui.path': string;
   'comfyui.url': string;
   'aitoolkit.path': string;
@@ -90,6 +91,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   'ui.idleFrameCapIdleTime': 3,
   'ui.idleFrameCapFps': 18,
   'ui.language': 'en',
+  'comfyui.autoStart': false,
   'comfyui.path': '',
   'comfyui.url': 'http://127.0.0.1:8188',
   'aitoolkit.path': '',
@@ -139,6 +141,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 };
 
 const BOOLEAN_KEYS: Array<keyof AppSettings> = [
+  'comfyui.autoStart',
   'enableToasts',
   'alerts.configured',
   'alerts.soundEnabled',

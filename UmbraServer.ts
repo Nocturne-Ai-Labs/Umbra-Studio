@@ -152,6 +152,8 @@ import {
   applyUmbraUiPrompterOutputLayout,
   resolveUmbraUiPrompterOutputLayout,
 } from './backend/UmbraUiPrompterOutputLayout';
+import { getComfyBridgeUnavailableError } from './backend/comfyBridgeAvailability';
+import { createComfyStartup, validateComfyAutoStartSetting } from './backend/comfyStartup';
 import { getComfyVramLaunchArguments } from './backend/comfyLaunchArguments';
 import {
   generateDataForgeWildcard,
@@ -10629,9 +10631,7 @@ function forwardPrompterQueueControlToComfyTarget(
   }
 
   if (!target) {
-    const error = preferredBridgeId
-      ? `Selected workflow target is not connected (${preferredBridgeId}).`
-      : 'No ComfyUI bridge is connected to /ws/prompter.';
+    const error = getComfyBridgeUnavailableError(preferredBridgeId, getAppSettings()['ui.language']);
 
     if (type === 'queue_pause' || type === 'queue_resume') {
       sendWs(ws, {
@@ -10758,9 +10758,7 @@ function forwardPrompterQueueMessageToComfyTarget(
   }
 
   if (!target) {
-    const error = preferredBridgeId
-      ? `Selected workflow target is not connected (${preferredBridgeId}).`
-      : 'No ComfyUI bridge is connected to /ws/prompter.';
+    const error = getComfyBridgeUnavailableError(preferredBridgeId, getAppSettings()['ui.language']);
 
     if (type === 'queue_delay_update') {
       sendWs(ws, {
@@ -10843,9 +10841,7 @@ function handlePrompterLoraRequest(ws: ServerWebSocket<unknown>, data: any, requ
       type: resultType,
       requestId: String(data?.requestId || ''),
       success: false,
-      error: preferredBridgeId
-        ? `Selected workflow target is not connected (${preferredBridgeId}).`
-        : 'No ComfyUI bridge is connected to /ws/prompter.',
+      error: getComfyBridgeUnavailableError(preferredBridgeId, getAppSettings()['ui.language']),
     });
     return;
   }
@@ -10877,9 +10873,7 @@ function handlePrompterModelRequest(
       type: resultType,
       requestId: String(data?.requestId || ''),
       success: false,
-      error: preferredBridgeId
-        ? `Selected workflow target is not connected (${preferredBridgeId}).`
-        : 'No ComfyUI bridge is connected to /ws/prompter.',
+      error: getComfyBridgeUnavailableError(preferredBridgeId, getAppSettings()['ui.language']),
     });
     return;
   }
@@ -15001,7 +14995,11 @@ function getBackendConfig() {
   };
 }
 
-async function startComfyUI() {
+let comfyStopRequested = false;
+const comfyStartup = createComfyStartup(startComfyUIProcess);
+const startComfyUI = () => comfyStartup.start();
+
+async function startComfyUIProcess() {
   try {
     if (isChildProcessAlive(comfyProcess)) {
       return { success: true, message: 'Already running' };
@@ -15074,6 +15072,7 @@ async function startComfyUI() {
       comfyEnv.UMBRA_EXTERNAL_OUTPUT_DIR = resolvePathCandidate(configuredExternalOutput);
     }
 
+    comfyStopRequested = false;
     comfyProcess = spawn(config.executable, config.args, {
       cwd: config.cwd,
       env: comfyEnv,
@@ -15097,6 +15096,7 @@ async function startComfyUI() {
         message: err.message,
         stack: err.stack,
       });
+      comfyStartup.fail(`ComfyUI failed to start: ${err.message}`);
       appendBackendStreamLog('comfyui', 'stderr', `Spawn error: ${err.message}`);
       broadcastToClients('backend_log', { backend: 'comfyui', stream: 'stderr', message: `Spawn error: ${err.message}` });
       failPrompterRequestsForBridge(null, `ComfyUI failed to start: ${err.message}`);
@@ -15135,6 +15135,7 @@ async function startComfyUI() {
       const uptimeMs = comfyStartTime ? Date.now() - comfyStartTime : null;
       const trackedPid = comfyProcess?.pid ?? null;
       const message = `Process exited with code ${code}${signal ? ` signal ${signal}` : ''}`;
+      if (!comfyStopRequested && (code !== 0 || signal != null)) comfyStartup.fail(message);
       console.log(`\x1b[36m[COMFYUI]\x1b[0m ${message}`);
       appendBackendLifecycleLog('comfyui', 'exit', {
         pid: trackedPid,
@@ -15167,6 +15168,8 @@ async function startComfyUI() {
 }
 
 async function stopComfyUI() {
+  comfyStopRequested = true;
+  comfyStartup.clearError();
   const ownership = getComfyProcessOwnershipSnapshot({ force: true });
   const tracked = comfyProcess;
   const trackedPid = tracked?.pid ?? null;
@@ -31280,7 +31283,7 @@ const server = Bun.serve<UmbraSocketData>({
           stale: controlPlane.stale,
           refreshing: controlPlane.refreshing,
           backends: {
-            comfyui: controlPlane.backends.comfyui,
+            comfyui: { ...controlPlane.backends.comfyui, startup: comfyStartup.getState() },
             gallery: controlPlane.backends.gallery
           },
           vram: {
@@ -34355,6 +34358,8 @@ const server = Bun.serve<UmbraSocketData>({
             ...nextSettings,
           } as Record<string, unknown>);
 
+          const autoStartError = validateComfyAutoStartSetting(mergedNextSettings, settingsManager.getAppSettings(), isHostRequest(req, url, server));
+          if (autoStartError) return json({ error: autoStartError }, isHostRequest(req, url, server) ? 400 : 403);
           settingsManager.updateAppSettings(mergedNextSettings);
           let comfySecurityResult: ComfySecurityApplyResult | undefined;
           if (Object.prototype.hasOwnProperty.call(mergedNextSettings, 'comfyui.securityLevel') ||
@@ -34393,6 +34398,8 @@ const server = Bun.serve<UmbraSocketData>({
           const nextBundle = normalizeUmbraUserSettingsBundle(rawBundle, currentBundle);
 
           const portableBundleAppSettings = normalizeGalleryAppSettingsForStorage(nextBundle.appSettings);
+          const autoStartError = validateComfyAutoStartSetting(portableBundleAppSettings, settingsManager.getAppSettings(), isHostRequest(req, url, server));
+          if (autoStartError) return json({ error: autoStartError }, isHostRequest(req, url, server) ? 400 : 403);
           settingsManager.updateAppSettings(portableBundleAppSettings);
           nextBundle.appSettings = portableBundleAppSettings;
           await savePPSettings(nextBundle.powerPrompterSettings);
@@ -36358,6 +36365,15 @@ if (lanUrls.length > 0) {
 setTimeout(() => {
   void EditorDb.initDatabase().catch((error) => {
     console.warn('[EditorDb] Database initialization failed:', error);
+  });
+}, 0);
+
+// SettingsManager loads synchronously before the listener is created. Defer the
+// optional managed launch until Umbra is serving, once per server lifetime.
+setTimeout(() => {
+  if (isShuttingDown) return;
+  void comfyStartup.autoStart(settingsManager.getAppSettings()['comfyui.autoStart'])?.catch((error) => {
+    console.warn('[ComfyUI] Automatic startup failed:', error);
   });
 }, 0);
 
