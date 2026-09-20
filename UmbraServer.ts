@@ -25437,7 +25437,21 @@ async function handleFsReorder(req: Request): Promise<Response> {
   }
 }
 
-async function handleFsTagsAdd(req: Request): Promise<Response> {
+async function resolveAuthorizedGalleryTagUids(
+  req: Request,
+  url: URL,
+  server: RequestIpServer,
+  directUids: string[],
+  paths: string[],
+): Promise<string[] | null> {
+  const uids = Array.from(new Set([...directUids, ...(paths.length > 0 ? galleryDb.resolveUidsForPaths(paths) : [])]));
+  if (!isRemoteRequest(req, url, server)) return uids;
+  const indexedPaths = galleryDb.resolvePathsForUids(directUids);
+  if (!(await areGalleryBridgePathsAllowed(req, url, [...paths, ...indexedPaths], server))) return null;
+  return uids;
+}
+
+async function handleFsTagsAdd(req: Request, url: URL, server: RequestIpServer): Promise<Response> {
   try {
     const payload = await readJsonObject(req);
     if (!payload || !Array.isArray(payload.tags) || !payload.tags.every(tag => typeof tag === 'string')) return json({ error: 'Expected a tags array of strings.' }, 400);
@@ -25455,16 +25469,14 @@ async function handleFsTagsAdd(req: Request): Promise<Response> {
         .map((entry: unknown) => normalizeOutputPathInput(String(entry || '').trim()))
         .filter(Boolean),
     ));
-    const uids = Array.from(new Set([
-      ...directUids,
-      ...(paths.length > 0 ? galleryDb.resolveUidsForPaths(paths) : []),
-    ]));
+    const uids = await resolveAuthorizedGalleryTagUids(req, url, server, directUids, paths);
     const tags = Array.from(new Set(
       rawTags
         .map((entry: unknown) => normalizeFsTag(entry))
         .filter(Boolean),
     ));
 
+    if (uids === null) return json({ error: 'Access denied' }, 403);
     if (uids.length === 0) return json({ error: 'Missing uids or paths' }, 400);
     if (tags.length === 0) return json({ error: 'Missing tags' }, 400);
 
@@ -25491,7 +25503,7 @@ async function handleFsTagsAdd(req: Request): Promise<Response> {
   }
 }
 
-async function handleFsTagsRemove(req: Request): Promise<Response> {
+async function handleFsTagsRemove(req: Request, url: URL, server: RequestIpServer): Promise<Response> {
   try {
     const payload = await readJsonObject(req);
     if (!payload || !Array.isArray(payload.tags) || !payload.tags.every(tag => typeof tag === 'string')) return json({ error: 'Expected a tags array of strings.' }, 400);
@@ -25509,16 +25521,14 @@ async function handleFsTagsRemove(req: Request): Promise<Response> {
         .map((entry: unknown) => normalizeOutputPathInput(String(entry || '').trim()))
         .filter(Boolean),
     ));
-    const uids = Array.from(new Set([
-      ...directUids,
-      ...(paths.length > 0 ? galleryDb.resolveUidsForPaths(paths) : []),
-    ]));
+    const uids = await resolveAuthorizedGalleryTagUids(req, url, server, directUids, paths);
     const tags = Array.from(new Set(
       rawTags
         .map((entry: unknown) => normalizeFsTag(entry))
         .filter(Boolean),
     ));
 
+    if (uids === null) return json({ error: 'Access denied' }, 403);
     if (uids.length === 0) return json({ error: 'Missing uids or paths' }, 400);
     if (tags.length === 0) return json({ error: 'Missing tags' }, 400);
 
@@ -25545,7 +25555,7 @@ async function handleFsTagsRemove(req: Request): Promise<Response> {
   }
 }
 
-async function handleFsTagsSet(req: Request): Promise<Response> {
+async function handleFsTagsSet(req: Request, url: URL, server: RequestIpServer): Promise<Response> {
   try {
     const payload = await readJsonObject(req);
     if (!payload || !Array.isArray(payload.tags) || !payload.tags.every(tag => typeof tag === 'string')) return json({ error: 'Expected a tags array of strings.' }, 400);
@@ -25563,16 +25573,14 @@ async function handleFsTagsSet(req: Request): Promise<Response> {
         .map((entry: unknown) => normalizeOutputPathInput(String(entry || '').trim()))
         .filter(Boolean),
     ));
-    const pathResolvedUids = paths.length > 0
-      ? galleryDb.resolveUidsForPaths(paths)
-      : [];
-    const uids = Array.from(new Set([...directUids, ...pathResolvedUids]));
+    const uids = await resolveAuthorizedGalleryTagUids(req, url, server, directUids, paths);
     const tags = Array.from(new Set(
       rawTags
         .map((entry: unknown) => normalizeFsTag(entry))
         .filter(Boolean),
     ));
 
+    if (uids === null) return json({ error: 'Access denied' }, 403);
     if (uids.length === 0) return json({ error: 'Missing uids or paths' }, 400);
 
     if (rawTags.length > 0 && tags.length === 0) return json({ error: 'Tags cannot contain only blank values. Use an empty array to clear tags.' }, 400);
@@ -30781,8 +30789,8 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/gallery-bridge/fs/empty-folders/delete' && method === 'POST') {
         return proxyGalleryBridgeFsPost(req, url, '/api/fs/empty-folders/delete', server);
       }
-      if (path === '/api/gallery-bridge/fs/tags/add' && method === 'POST') return handleFsTagsAdd(req);
-      if (path === '/api/gallery-bridge/fs/tags/set' && method === 'POST') return handleFsTagsSet(req);
+      if (path === '/api/gallery-bridge/fs/tags/add' && method === 'POST') return handleFsTagsAdd(req, url, server);
+      if (path === '/api/gallery-bridge/fs/tags/set' && method === 'POST') return handleFsTagsSet(req, url, server);
       if (path === '/api/gallery-bridge/fs/tags/summary' && method === 'GET') {
         return proxyGalleryBridgeFsGet(
           req,
@@ -30862,9 +30870,9 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/fs/upload' && method === 'POST') return handleFsUpload(req);
       if (path === '/api/fs/write' && method === 'POST') return handleFsWrite(req);
       if (path === '/api/fs/reorder' && method === 'POST') return handleFsReorder(req);
-      if (path === '/api/fs/tags/add' && method === 'POST') return handleFsTagsAdd(req);
-      if (path === '/api/fs/tags/remove' && method === 'POST') return handleFsTagsRemove(req);
-      if (path === '/api/fs/tags/set' && method === 'POST') return handleFsTagsSet(req);
+      if (path === '/api/fs/tags/add' && method === 'POST') return handleFsTagsAdd(req, url, server);
+      if (path === '/api/fs/tags/remove' && method === 'POST') return handleFsTagsRemove(req, url, server);
+      if (path === '/api/fs/tags/set' && method === 'POST') return handleFsTagsSet(req, url, server);
       if (path === '/api/fs/tags/summary' && method === 'GET') return handleFsTagsSummary(url);
 
       // ============================================

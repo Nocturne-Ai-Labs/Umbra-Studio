@@ -897,6 +897,26 @@ export class GalleryDb {
     return orderedUids;
   }
 
+  resolvePathsForUids(uidInputs: string[]): string[] {
+    const uids = Array.from(new Set((uidInputs || []).map((entry) => String(entry || '').trim()).filter(Boolean)));
+    if (uids.length === 0) return [];
+    const paths: string[] = [];
+    const seenPaths = new Set<string>();
+    const chunkSize = 300;
+    for (let offset = 0; offset < uids.length; offset += chunkSize) {
+      const chunk = uids.slice(offset, offset + chunkSize);
+      const placeholders = chunk.map(() => '?').join(', ');
+      const rows = this.db.query(`SELECT path FROM files WHERE uid IN (${placeholders})`).all(...chunk) as Array<{ path: string }>;
+      for (const row of rows) {
+        const path = normalizePath(String(row?.path || ''));
+        if (!path || seenPaths.has(path)) continue;
+        seenPaths.add(path);
+        paths.push(path);
+      }
+    }
+    return paths;
+  }
+
   addTagsToFiles(uidInputs: string[], tagInputs: string[]): Map<string, string[]> {
     const uids = Array.from(new Set((uidInputs || []).map((entry) => String(entry || '').trim()).filter(Boolean)));
     const tags = normalizeTagList(tagInputs || []);
