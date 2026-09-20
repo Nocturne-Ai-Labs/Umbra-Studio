@@ -10576,6 +10576,37 @@ function forwardPrompterQueueControlToComfyTarget(
     || ['pipeline', 'api_workflow'].includes(String(data?.queueTargetType || '').trim().toLowerCase());
   const target = resolvePrompterComfyTarget(preferredBridgeId);
   const requestId = String(data?.requestId || crypto.randomUUID());
+  if (isBackendPipelineTarget && type === 'queue_interrupt_active') {
+    const activeRequestId = String(data?.activeRequestId || '').trim();
+    const expectedPromptId = String(data?.promptId || '').trim();
+    void (async () => {
+      const task = backendPowerPrompterQueueTasks.get(activeRequestId);
+      const index = task?.activePromptIndex;
+      const promptId = task && index !== undefined ? task.promptIds[index] : '';
+      if (!task || task.canceled || task.abortController.signal.aborted || index === undefined
+        || !expectedPromptId || promptId !== expectedPromptId || task.interruptedPromptIndices.has(index)) {
+        throw new Error('The active generation changed or is still submitting. Refresh the queue and try again.');
+      }
+      if (!await cancelComfyJobById(getComfyProxyBaseUrl(), promptId)) {
+        throw new Error('The generation already finished or could not be canceled.');
+      }
+      // A delayed response must never retire the next prompt (or a replacement task).
+      if (backendPowerPrompterQueueTasks.get(activeRequestId) === task
+        && task.activePromptIndex === index && task.promptIds[index] === promptId) {
+        interruptBackendPowerPrompterActivePrompt(activeRequestId, 'interrupt', ws);
+      }
+      sendWs(ws, {
+        type: 'queue_interrupt_result', requestId, activeRequestId, promptId,
+        success: true, requestIds: [activeRequestId], backendHandled: true,
+      });
+    })().catch((error: any) => {
+      sendWs(ws, {
+        type: 'queue_interrupt_result', requestId, success: false, backendHandled: true,
+        error: String(error?.message || error || 'Failed to cancel the generation.'),
+      });
+    });
+    return;
+  }
   const backendAffectedRequestIds = type === 'queue_cancel'
     || type === 'queue_clear_future'
     || type === 'queue_interrupt_active'
@@ -10594,26 +10625,6 @@ function forwardPrompterQueueControlToComfyTarget(
         success: true,
         paused,
         backendHandled: true,
-      });
-      return;
-    }
-
-    if (type === 'queue_interrupt_active') {
-      if (backendAffectedRequestIds.length > 0) {
-        void requestBackendComfyPromptInterrupt('umbra_ui_skip').catch((error: any) => {
-          appendPowerPrompterQueueLog('backend_queue_comfy_interrupt_failed', {
-            requestIds: backendAffectedRequestIds,
-            error: String(error?.message || error || 'Failed to interrupt ComfyUI.'),
-          });
-        });
-      }
-      sendWs(ws, {
-        type: 'queue_interrupt_result',
-        requestId,
-        success: backendAffectedRequestIds.length > 0,
-        requestIds: backendAffectedRequestIds,
-        backendHandled: true,
-        ...(backendAffectedRequestIds.length > 0 ? {} : { error: 'No backend pipeline queue job is active.' }),
       });
       return;
     }
