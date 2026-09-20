@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 
 const CHECK_INTERVAL_MS = 1_500;
 const BRANCH_REFRESH_MS = 15_000;
+const BACKGROUND_REFRESH_MS = 60_000;
 const RETRY_MS = 60_000;
 const keyOf = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 
@@ -42,39 +43,78 @@ export class GalleryTreeRefreshQueue {
     return selected;
   }
 
-  complete(path: string, now: number, succeeded: boolean) {
+  complete(path: string, now: number, succeeded: boolean, refreshMs = BRANCH_REFRESH_MS) {
     const key = keyOf(path);
     const dirty = succeeded && (this.entries.get(key)?.dirty ?? false);
-    this.entries.set(key, { due: now + (succeeded ? BRANCH_REFRESH_MS : RETRY_MS), dirty, checked: now, retryAt: succeeded ? 0 : now + RETRY_MS });
+    this.entries.set(key, { due: now + (succeeded ? refreshMs : RETRY_MS), dirty, checked: now, retryAt: succeeded ? 0 : now + RETRY_MS });
+  }
+}
+
+interface TreeRefreshWork {
+  path: string;
+  background: boolean;
+}
+
+export class GalleryTreeRefreshScheduler {
+  private foreground = new GalleryTreeRefreshQueue();
+  private background = new GalleryTreeRefreshQueue();
+  private preferBackground = false;
+
+  invalidate(paths: string[]) {
+    this.foreground.invalidate(paths);
+    this.background.invalidate(paths);
+  }
+
+  next(paths: string[], backgroundPaths: string[], now: number): TreeRefreshWork | undefined {
+    const foregroundKeys = new Set(paths.map(keyOf));
+    const backgroundOnly = backgroundPaths.filter(path => !foregroundKeys.has(keyOf(path)));
+    // One request at a time, alternating when both lanes have due work.
+    for (const background of [this.preferBackground, !this.preferBackground]) {
+      const queue = background ? this.background : this.foreground;
+      const path = queue.next(background ? backgroundOnly : paths, now);
+      if (path) {
+        this.preferBackground = !background;
+        return { path, background };
+      }
+    }
+  }
+
+  complete(work: TreeRefreshWork, now: number, succeeded: boolean, refreshMs = BRANCH_REFRESH_MS) {
+    const queue = work.background ? this.background : this.foreground;
+    queue.complete(work.path, now, succeeded, work.background ? BACKGROUND_REFRESH_MS : refreshMs);
   }
 }
 
 export function useGalleryTreeRefresh(options: {
   paths: string[];
+  backgroundPaths?: string[];
   paused: boolean;
+  refreshMs?: number;
   refresh: (path: string) => Promise<unknown>;
 }) {
   const latest = useRef(options);
   latest.current = options;
-  const queue = useRef(new GalleryTreeRefreshQueue());
+  const queue = useRef(new GalleryTreeRefreshScheduler());
   const inFlight = useRef(false);
   const invalidate = useCallback((changedPath: string) => {
-    queue.current.invalidate(affectedGalleryTreeBranches(latest.current.paths, changedPath));
+    queue.current.invalidate(affectedGalleryTreeBranches([
+      ...latest.current.paths, ...(latest.current.backgroundPaths || []),
+    ], changedPath));
   }, []);
 
   useEffect(() => {
     let disposed = false;
     const poll = async () => {
       if (disposed || inFlight.current || latest.current.paused || document.visibilityState === 'hidden') return;
-      const path = queue.current.next(latest.current.paths, Date.now());
-      if (!path) return;
+      const work = queue.current.next(latest.current.paths, latest.current.backgroundPaths || [], Date.now());
+      if (!work) return;
       inFlight.current = true;
       try {
-        await latest.current.refresh(path);
-        queue.current.complete(path, Date.now(), true);
+        await latest.current.refresh(work.path);
+        queue.current.complete(work, Date.now(), true, latest.current.refreshMs);
       } catch {
         // Keep the last good branch and back off for offline/cloud folders.
-        queue.current.complete(path, Date.now(), false);
+        queue.current.complete(work, Date.now(), false);
       } finally {
         inFlight.current = false;
       }

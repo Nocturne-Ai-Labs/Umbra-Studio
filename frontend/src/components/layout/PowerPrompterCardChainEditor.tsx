@@ -102,7 +102,6 @@ export interface PowerPrompterPromptInsertOptions {
 
 export interface PowerPrompterCardChainEditorRef {
   insertAtCursor: (text: string, options?: PowerPrompterPromptInsertOptions) => void;
-  refreshOutputPreview: () => void;
 }
 
 export interface PowerPrompterOutputPreviewItem {
@@ -113,12 +112,6 @@ export interface PowerPrompterOutputPreviewItem {
   imageUrl: string;
   type: OutputPreviewType;
   modified: number;
-}
-
-export interface PowerPrompterOutputPreviewSnapshot {
-  items: PowerPrompterOutputPreviewItem[];
-  isLoading: boolean;
-  error: string | null;
 }
 
 interface PowerPrompterQueuePromptEntry {
@@ -184,7 +177,6 @@ interface PowerPrompterCardChainEditorProps {
   mobileSelectionMode?: boolean;
   touchRemoteMode?: boolean;
   queueTrackerCard?: React.ReactNode;
-  onOutputPreviewSnapshotChange?: (snapshot: PowerPrompterOutputPreviewSnapshot) => void;
 }
 
 interface PowerPrompterLoraInfoPayload {
@@ -2847,7 +2839,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   overlayMode = false,
   mobileSelectionMode = false,
   touchRemoteMode = false,
-  onOutputPreviewSnapshotChange,
 }, ref) => {
   const isForgeMode = false;
   const showToast = useStore((state) => state.showToast);
@@ -7583,18 +7574,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
         preserveExistingText: options.preserveExistingText === true,
       });
     },
-    refreshOutputPreview: () => {
-      void refreshOutputPreview({ notifyOnError: true, emitGallerySidebarRefresh: true });
-    },
-  }), [activeSlot, activeVariant, applyDraftTokenToExpandedVariantEditor, applyDraftTokenToVariant, expandedVariantEditor, refreshOutputPreview]);
-
-  useEffect(() => {
-    onOutputPreviewSnapshotChange?.({
-      items: outputPreviewItems,
-      isLoading: isLoadingOutputPreview,
-      error: outputPreviewError,
-    });
-  }, [isLoadingOutputPreview, onOutputPreviewSnapshotChange, outputPreviewError, outputPreviewItems]);
+  }), [activeSlot, activeVariant, applyDraftTokenToExpandedVariantEditor, applyDraftTokenToVariant, expandedVariantEditor]);
 
   useEffect(() => {
     outputPreviewItemsRef.current = outputPreviewItems;

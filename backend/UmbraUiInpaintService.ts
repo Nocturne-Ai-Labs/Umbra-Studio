@@ -2,6 +2,7 @@ import { closeSync, fsyncSync, openSync, readFileSync, readdirSync, renameSync, 
 import { mkdir, open, rename, rm } from 'fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'path';
 import { cancelComfyJobById } from './UmbraQueueJobControl';
+import { recordGeneratedMediaOutputs } from './GeneratedMediaActivity';
 import { fetchComfyOutput } from './ComfyOutputTransfer';
 import {
   normalizeUmbraUiModelFamilyKey,
@@ -3242,6 +3243,7 @@ export class UmbraUiInpaintService {
         if (item.outputs.length <= 0) throw new Error('ComfyUI finished the inpaint sample without reporting a saved output.');
         await this.stampPowerPrompterMetadata(item);
         if (canceled()) return;
+        recordGeneratedMediaOutputs(item.outputs);
         item.status = 'completed';
       } catch (error: any) {
         if (!canceled()) {

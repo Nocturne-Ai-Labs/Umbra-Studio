@@ -1,4 +1,5 @@
 import { mkdir, rm } from 'fs/promises';
+import { recordGeneratedMediaOutputs } from './GeneratedMediaActivity';
 import { dirname, extname, join, resolve, sep } from 'path';
 
 const IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);
@@ -480,6 +481,7 @@ export class UmbraUiUpscaleService {
         if (executionError || status === 'error') throw new Error(executionError || 'ComfyUI upscale execution failed.');
         item.outputs = collectOutputs(record);
         if (item.outputs.length <= 0) throw new Error('ComfyUI finished the upscale without reporting a saved output.');
+        recordGeneratedMediaOutputs(item.outputs);
         item.status = 'completed';
       } catch (error: any) {
         if (error?.code === 'UPSCALE_PROMPT_MISSING') promptOutstanding = false;

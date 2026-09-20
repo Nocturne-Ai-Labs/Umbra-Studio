@@ -89,7 +89,6 @@ export function UmbraImg2ImgSourceControls({
       }
       const path = String(payload.sourcePath).replace(/\\/g, '/');
       onSourceChange({ path, originalPath: path, name: String(payload.filename), imageUrl: '', width: 0, height: 0 });
-      showToast('IMG2IMG source loaded.', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to upload the IMG2IMG source.', 'error');
     } finally {

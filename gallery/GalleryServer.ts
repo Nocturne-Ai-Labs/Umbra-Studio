@@ -1,6 +1,5 @@
 import { existsSync, type Dirent } from 'fs';
 import * as fs from 'fs/promises';
-import { spawn } from 'child_process';
 import { basename, extname, join, relative, resolve, isAbsolute } from 'path';
 import { availableParallelism, cpus } from 'os';
 import sharp from 'sharp';
@@ -12,8 +11,16 @@ import {
   type GallerySortOrder,
 } from './GalleryDb';
 import { MetadataParser, type ImageMetadata } from '../backend/MetadataParser';
+import { metadataFileRevision } from '../backend/metadataFileRevision';
 import { galleryMediaCacheControl } from './GalleryMediaCache';
 import { resolveGalleryPublicDir } from './GalleryRuntimePaths';
+import { GalleryWarmupScheduler } from './GalleryWarmupScheduler';
+import { GalleryFolderRevisions } from './GalleryFolderRevisions';
+import { GalleryWorkQueue as AsyncWorkerQueue } from './GalleryWorkQueue';
+import { extractVideoFrame } from './GalleryVideoThumbnail';
+import { ThumbnailService } from '../backend/ThumbnailService';
+import { mediaFileRevision } from '../backend/mediaFileRevision';
+import { createHash } from 'node:crypto';
 import { resolveSingleByteRange } from '../shared/httpByteRange';
 import { createVariantEtag, matchesIfNoneMatch, permitsConditionalRange } from '../shared/httpCache';
 
@@ -97,6 +104,7 @@ type ThumbCacheEntry = {
 };
 
 type FolderSummary = {
+  signature?: string;
   path: string;
   subfolderCount: number;
   imageCount: number;
@@ -133,84 +141,9 @@ type MetadataCacheEntry = {
   scannedAt: number;
 };
 
-type WorkerTask<T> = {
-  key: string;
-  run: () => Promise<T>;
-  resolve: (value: T) => void;
-  reject: (error: unknown) => void;
-};
-
-class AsyncWorkerQueue {
-  private readonly concurrency: number;
-  private readonly maxQueued: number;
-  private readonly queue: WorkerTask<any>[] = [];
-  private readonly inFlight = new Map<string, Promise<any>>();
-  private active = 0;
-
-  constructor(concurrency: number, maxQueued = 512) {
-    this.concurrency = Math.max(1, Math.floor(concurrency));
-    this.maxQueued = Math.max(this.concurrency, Math.floor(maxQueued));
-  }
-
-  run<T>(key: string, run: () => Promise<T>): Promise<T> {
-    const normalizedKey = String(key || '').trim();
-    if (!normalizedKey) {
-      return Promise.reject(new Error('Worker task key is required'));
-    }
-
-    const existing = this.inFlight.get(normalizedKey);
-    if (existing) return existing as Promise<T>;
-
-    const taskPromise = new Promise<T>((resolve, reject) => {
-      if (this.queue.length >= this.maxQueued) {
-        reject(new Error('Gallery worker queue is busy'));
-        return;
-      }
-      this.queue.push({ key: normalizedKey, run, resolve, reject });
-      this.pump();
-    });
-
-    this.inFlight.set(normalizedKey, taskPromise);
-    return taskPromise.finally(() => {
-      this.inFlight.delete(normalizedKey);
-    });
-  }
-
-  schedule<T>(key: string, run: () => Promise<T>) {
-    if (this.queue.length >= this.maxQueued) return;
-    this.run(key, run).catch(() => undefined);
-  }
-
-  stats() {
-    return {
-      active: this.active,
-      queued: this.queue.length,
-      inFlight: this.inFlight.size,
-      concurrency: this.concurrency,
-      maxQueued: this.maxQueued,
-    };
-  }
-
-  private pump() {
-    while (this.active < this.concurrency && this.queue.length > 0) {
-      const next = this.queue.shift();
-      if (!next) continue;
-
-      this.active += 1;
-      Promise.resolve()
-        .then(next.run)
-        .then((value) => next.resolve(value))
-        .catch((error) => next.reject(error))
-        .finally(() => {
-          this.active = Math.max(0, this.active - 1);
-          this.pump();
-        });
-    }
-  }
-}
-
 const FOLDER_SUMMARY_CACHE_TTL_MS = 30_000;
-const FOLDER_SUMMARY_PREWARM_INTERVAL_MS = 60_000;
+const FOLDER_SUMMARY_CACHE_MAX_ENTRIES = 1024;
+const FOLDER_SUMMARY_PREWARM_INTERVAL_MS = 1000;
 const FOLDER_SUMMARY_PREWARM_CHILD_LIMIT = 48;
 const FOLDER_TREE_CACHE_TTL_MS = 120_000;
 const FOLDER_TREE_CACHE_MAX_ENTRIES = 1024;
@@ -225,10 +158,19 @@ const SEARCH_CONTAINS_MIN_QUERY_LENGTH = 3;
 const thumbnailCache = new Map<string, ThumbCacheEntry>();
 let thumbnailCacheBytes = 0;
 const thumbnailBuildInFlight = new Map<string, Promise<ThumbCacheEntry>>();
+const thumbnailDiskCache = (() => {
+  try { return new ThumbnailService(); }
+  catch {
+    console.warn('[Gallery] Disk thumbnail cache unavailable; using memory only');
+    return null;
+  }
+})();
 const folderSummaryCache = new Map<string, FolderSummaryCacheEntry>();
 const folderTreeCache = new Map<string, FolderTreeCacheEntry>();
 const metadataCache = new Map<string, MetadataCacheEntry>();
-const prewarmRoots = new Set<string>();
+const backgroundWarmup = new GalleryWarmupScheduler();
+const folderRevisions = new GalleryFolderRevisions();
+const recentlyOpenedMediaFolders = new Map<string, number>();
 const CPU_THREADS = Math.max(1, Number((typeof availableParallelism === 'function' ? availableParallelism() : cpus().length) || 4));
 const TREE_WORKER_CONCURRENCY = Math.max(2, Math.min(4, Math.floor(CPU_THREADS / 3) || 2));
 const SIDEBAR_WORKER_CONCURRENCY = Math.max(1, Math.min(2, Math.floor(CPU_THREADS / 6) || 1));
@@ -240,6 +182,7 @@ const sidebarWorker = new AsyncWorkerQueue(SIDEBAR_WORKER_CONCURRENCY, 128);
 const galleryWorker = new AsyncWorkerQueue(GALLERY_WORKER_CONCURRENCY, 160);
 const filmstripWorker = new AsyncWorkerQueue(FILMSTRIP_WORKER_CONCURRENCY, 128);
 const metadataWorker = new AsyncWorkerQueue(METADATA_WORKER_CONCURRENCY, 64);
+const mediaStatWorker = new AsyncWorkerQueue(8, 128);
 const galleryDb = new GalleryDb(ROOT_DIR);
 
 function json(data: unknown, status = 200): Response {
@@ -345,12 +288,13 @@ function pruneThumbnailCache() {
   }
 }
 
-function buildThumbnailRevisionToken(input: { createdMs?: number; ctimeMs?: number; birthtimeMs?: number; modifiedMs: number; size: number }): string {
+function buildThumbnailRevisionToken(input: { revision?: string; createdMs?: number; ctimeMs?: number; birthtimeMs?: number; modifiedMs: number; size: number }): string {
+  if (typeof input.revision === 'string') return input.revision;
   const createdMs = Math.max(
     0,
-    Math.trunc(Number(input?.createdMs || input?.ctimeMs || input?.birthtimeMs || 0)),
+    Number(input?.createdMs || input?.ctimeMs || input?.birthtimeMs || 0),
   );
-  const modifiedMs = Math.max(0, Math.trunc(Number(input?.modifiedMs || 0)));
+  const modifiedMs = Math.max(0, Number(input?.modifiedMs || 0));
   const size = Math.max(0, Math.trunc(Number(input?.size || 0)));
   return `${createdMs}-${modifiedMs}-${size}`;
 }
@@ -360,18 +304,13 @@ function buildMediaRevisionToken(input: MediaFileRecord): string {
 }
 
 function getMediaEtag(
-  stat: { mtimeMs: number; ctimeMs?: number; birthtimeMs?: number; size: number },
+  stat: { mtimeMs: number; ctimeMs?: number; birthtimeMs?: number; ino?: number; size: number },
 ): string {
-  const changeMs = Number.isFinite(stat?.ctimeMs) && Number(stat.ctimeMs) > 0
-    ? Number(stat.ctimeMs)
-    : (Number.isFinite(stat?.birthtimeMs) && Number(stat.birthtimeMs) > 0
-      ? Number(stat.birthtimeMs)
-      : Number(stat.mtimeMs));
-  return `W/"media-${Math.trunc(changeMs)}-${Math.trunc(stat.mtimeMs)}-${stat.size}"`;
+  return `W/"media-${mediaFileRevision(stat)}"`;
 }
 
 function getMetadataCacheKey(filePath: string): string {
-  return normalizePath(filePath).toLowerCase();
+  return normalizePath(filePath);
 }
 
 function getCachedMetadata(filePath: string, etag: string): MetadataCacheEntry['value'] | null {
@@ -403,17 +342,12 @@ function setCachedMetadata(filePath: string, etag: string, value: MetadataCacheE
 }
 
 function getThumbnailEtag(
-  stat: { mtimeMs: number; ctimeMs?: number; birthtimeMs?: number; size: number },
+  stat: { mtimeMs: number; ctimeMs?: number; birthtimeMs?: number; ino?: number; size: number },
   sizePx: number,
   quality: number,
   fitMode: 'cover' | 'contain',
 ): string {
-  const changeMs = Number.isFinite(stat?.ctimeMs) && Number(stat.ctimeMs) > 0
-    ? Number(stat.ctimeMs)
-    : (Number.isFinite(stat?.birthtimeMs) && Number(stat.birthtimeMs) > 0
-      ? Number(stat.birthtimeMs)
-      : Number(stat.mtimeMs));
-  return `W/"thumb-${sizePx}-${quality}-${fitMode}-${Math.trunc(changeMs)}-${Math.trunc(stat.mtimeMs)}-${stat.size}"`;
+  return `W/"thumb-${sizePx}-${quality}-${fitMode}-${mediaFileRevision(stat)}"`;
 }
 
 type WorkerLane = 'gallery' | 'filmstrip';
@@ -428,6 +362,11 @@ function getLaneWorker(lane: WorkerLane): AsyncWorkerQueue {
 
 async function computeFolderSummary(dirPath: string): Promise<FolderSummary> {
   const entries = await fs.readdir(dirPath, { withFileTypes: true });
+  return summarizeFolderEntries(dirPath, entries, true);
+}
+
+function summarizeFolderEntries(dirPath: string, entries: Dirent<string>[], monitor = false): FolderSummary {
+  const signature = createHash('sha256');
   let subfolderCount = 0;
   let imageCount = 0;
   let videoCount = 0;
@@ -441,11 +380,13 @@ async function computeFolderSummary(dirPath: string): Promise<FolderSummary> {
 
   for (const entry of sortedEntries) {
     if (entry.isDirectory()) {
+      signature.update(`d:${entry.name.length}:${entry.name}`);
       subfolderCount += 1;
       continue;
     }
     if (!entry.isFile()) continue;
     if (!isSupportedMediaPath(entry.name)) continue;
+    signature.update(`f:${entry.name.length}:${entry.name}`);
     const type = mediaTypeFromPath(entry.name);
     if (!firstMediaPath) {
       firstMediaPath = normalizePath(join(dirPath, entry.name));
@@ -460,7 +401,13 @@ async function computeFolderSummary(dirPath: string): Promise<FolderSummary> {
     }
   }
 
+  const namesSignature = signature.digest('hex');
+  const folderKey = normalizePath(dirPath);
+  const revision = monitor
+    ? folderRevisions.observe(folderKey, namesSignature, sortedEntries.filter(entry => entry.isFile() && isSupportedMediaPath(entry.name)).map(entry => join(dirPath, entry.name)))
+    : folderRevisions.peek(folderKey);
   return {
+    signature: `${namesSignature}:${revision}`,
     path: normalizePath(dirPath),
     subfolderCount,
     imageCount,
@@ -476,8 +423,22 @@ function getCachedFolderSummary(pathValue: string): FolderSummary | null {
   const key = getFolderSummaryCacheKey(pathValue);
   const cached = folderSummaryCache.get(key);
   if (!cached) return null;
-  if (Date.now() - cached.scannedAt > FOLDER_SUMMARY_CACHE_TTL_MS) return null;
+  if (Date.now() - cached.scannedAt > FOLDER_SUMMARY_CACHE_TTL_MS) {
+    folderSummaryCache.delete(key);
+    return null;
+  }
+  folderSummaryCache.delete(key);
+  folderSummaryCache.set(key, cached);
   return cached.value;
+}
+
+function setCachedFolderSummary(pathValue: string, summary: FolderSummary) {
+  const key = getFolderSummaryCacheKey(pathValue);
+  folderSummaryCache.delete(key);
+  folderSummaryCache.set(key, { value: summary, scannedAt: Date.now() });
+  while (folderSummaryCache.size > FOLDER_SUMMARY_CACHE_MAX_ENTRIES) {
+    folderSummaryCache.delete(folderSummaryCache.keys().next().value!);
+  }
 }
 
 function getCachedFolderTree(pathValue: string): FolderTreeNode[] | null {
@@ -541,53 +502,32 @@ async function getFolderSummary(pathValue: string, force = false): Promise<Folde
   const key = `folder-summary:${normalizedPath}`;
   return sidebarWorker.run(key, async () => {
     const summary = await computeFolderSummary(normalizedPath);
-    folderSummaryCache.set(normalizedPath, {
-      value: summary,
-      scannedAt: Date.now(),
-    });
+    setCachedFolderSummary(normalizedPath, summary);
     return summary;
   });
 }
 
 function scheduleFolderSummaryPrewarm(pathValue: string) {
-  const normalizedPath = normalizePath(pathValue);
+  const normalizedPath = normalizePath(resolveGalleryPath(pathValue));
   if (!normalizedPath) return;
   const cached = getCachedFolderSummary(normalizedPath);
   if (cached) return;
 
   sidebarWorker.schedule(`folder-summary:${normalizedPath}`, async () => {
     const summary = await computeFolderSummary(normalizedPath);
-    folderSummaryCache.set(normalizedPath, {
-      value: summary,
-      scannedAt: Date.now(),
-    });
+    setCachedFolderSummary(normalizedPath, summary);
     return summary;
   });
 }
 
-function registerPrewarmRoot(pathValue: string) {
-  const normalizedPath = normalizePath(pathValue);
+function registerPrewarmRoot(pathValue: string, permanent = false) {
+  const normalizedPath = normalizePath(resolveGalleryPath(pathValue));
   if (!normalizedPath) return;
-  prewarmRoots.add(normalizedPath);
+  backgroundWarmup.register(normalizedPath, true, permanent ? 0 : Date.now() + 5 * 60_000);
 }
 
 async function prewarmChildFolderSummaries(rootPath: string) {
-  const normalizedRoot = normalizePath(rootPath);
-  if (!normalizedRoot) return;
-  let entries: Dirent<string>[] = [];
-  try {
-    entries = await fs.readdir(normalizedRoot, { withFileTypes: true });
-  } catch {
-    return;
-  }
-
-  let scheduled = 0;
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (scheduled >= FOLDER_SUMMARY_PREWARM_CHILD_LIMIT) break;
-    scheduleFolderSummaryPrewarm(join(normalizedRoot, entry.name));
-    scheduled += 1;
-  }
+  registerPrewarmRoot(rootPath);
 }
 
 async function getOrBuildThumbnailBuffer(
@@ -603,19 +543,12 @@ async function getOrBuildThumbnailBuffer(
   if (cached && (!expectedEtag || cached.etag === expectedEtag)) return cached;
 
   const laneWorker = getLaneWorker(lane);
-  return laneWorker.run(`thumb:${cacheKey}`, async () => {
+  const buildKey = `${cacheKey}:${expectedEtag || 'unversioned'}`;
+  return laneWorker.run(`thumb:${buildKey}`, async () => {
     const cachedEntry = getCachedThumbnail(cacheKey, expectedEtag);
     if (cachedEntry && (!expectedEtag || cachedEntry.etag === expectedEtag)) return cachedEntry;
 
-    const inFlight = thumbnailBuildInFlight.get(cacheKey);
-    if (inFlight) return inFlight;
-
-    const buildPromise = buildAndCacheThumbnail(filePath, sizePx, quality, fitMode)
-      .finally(() => {
-        thumbnailBuildInFlight.delete(cacheKey);
-      });
-    thumbnailBuildInFlight.set(cacheKey, buildPromise);
-    return buildPromise;
+    return buildAndCacheThumbnail(filePath, sizePx, quality, fitMode);
   });
 }
 
@@ -624,6 +557,7 @@ async function buildAndCacheThumbnail(
   sizePx: number,
   quality: number,
   fitMode: 'cover' | 'contain',
+  sourceRetry = 0,
 ): Promise<ThumbCacheEntry> {
   const cacheKey = getThumbnailCacheKey(filePath, sizePx, quality, fitMode);
   const stat = await fs.stat(filePath);
@@ -631,10 +565,35 @@ async function buildAndCacheThumbnail(
   const reused = getCachedThumbnail(cacheKey, etag);
   if (reused && reused.etag === etag) return reused;
 
-  const buffer = await buildThumbnail(filePath, sizePx, quality, fitMode);
-  const nextEntry: ThumbCacheEntry = { etag, buffer, sizePx, quality, fitMode, bytes: buffer.byteLength };
-  setCachedThumbnail(cacheKey, nextEntry);
-  return nextEntry;
+  const buildKey = `${cacheKey}:${etag}`;
+  const inFlight = thumbnailBuildInFlight.get(buildKey);
+  if (inFlight) return inFlight;
+  // Both prefetch and visible requests enter here, including across worker lanes.
+  const buildPromise = (async () => {
+    try {
+      const generate = () => buildThumbnail(filePath, sizePx, quality, fitMode);
+      const buffer = thumbnailDiskCache
+        ? await thumbnailDiskCache.getOrGenerateDerivedPreview(
+          filePath, `gallery-webp-v1:${sizePx}:${quality}:${fitMode}`, mediaFileRevision(stat), generate,
+        )
+        : await generate();
+      const currentStat = await fs.stat(filePath);
+      if (getThumbnailEtag(currentStat, sizePx, quality, fitMode) !== etag) {
+        throw new Error('Thumbnail source changed during generation');
+      }
+      const nextEntry: ThumbCacheEntry = { etag, buffer, sizePx, quality, fitMode, bytes: buffer.byteLength };
+      setCachedThumbnail(cacheKey, nextEntry);
+      return nextEntry;
+    } catch (error) {
+      const latest = await fs.stat(filePath).catch(() => null);
+      if (sourceRetry === 0 && latest && getThumbnailEtag(latest, sizePx, quality, fitMode) !== etag) {
+        return buildAndCacheThumbnail(filePath, sizePx, quality, fitMode, sourceRetry + 1);
+      }
+      throw error;
+    }
+  })().finally(() => { thumbnailBuildInFlight.delete(buildKey); });
+  thumbnailBuildInFlight.set(buildKey, buildPromise);
+  return buildPromise;
 }
 
 function scheduleThumbnailPrewarm(filePath: string, sizePx: number, quality: number, fitMode: 'cover' | 'contain' = 'cover') {
@@ -653,25 +612,64 @@ function schedulePageThumbnailPrewarm(files: MediaFileRecord[]) {
     const file = files[index];
     if (!file) continue;
     if (file.type !== 'image' && file.type !== 'gif' && file.type !== 'video') continue;
-    scheduleThumbnailPrewarm(file.path, THUMB_SIZE_MAP.small, 70);
+    scheduleThumbnailPrewarm(resolveGalleryPath(file.path), THUMB_SIZE_MAP.small, 70, 'contain');
   }
 }
 
 function seedPrewarmRoots() {
   for (const relativeRoot of BOOT_PREWARM_ROOTS_RELATIVE) {
     const resolved = resolve(ROOT_DIR, relativeRoot);
-    if (!existsSync(resolved)) continue;
-    registerPrewarmRoot(resolved);
-    scheduleFolderSummaryPrewarm(resolved);
-    prewarmChildFolderSummaries(resolved).catch(() => undefined);
+    registerPrewarmRoot(resolved, true);
   }
 }
 
+async function isManagedOutputFolder(folder: string): Promise<boolean> {
+  const output = resolve(ROOT_DIR, 'Tools/ComfyUI/output');
+  const within = (root: string, candidate: string) => {
+    const rel = relative(root, candidate).replace(/\\/g, '/');
+    return !isAbsolute(rel) && rel !== '..' && !rel.startsWith('../');
+  };
+  if (!within(output, folder)) return false;
+  try {
+    // A child junction must not turn managed-output warming into an implicit
+    // recursive scan or download of an external/cloud library.
+    const realOutput = await fs.realpath(output);
+    return within(realOutput, await fs.realpath(folder));
+  } catch { return false; }
+}
+
 function runPeriodicPrewarmCycle() {
-  for (const rootPath of prewarmRoots) {
-    scheduleFolderSummaryPrewarm(rootPath);
-    prewarmChildFolderSummaries(rootPath).catch(() => undefined);
-  }
+  folderRevisions.retireIdle();
+  const busy = [galleryWorker, filmstripWorker, treeWorker, sidebarWorker].some(worker => worker.stats().inFlight > 0);
+  void backgroundWarmup.tick(busy, async (folder, cursor) => {
+    const insideManagedOutput = await isManagedOutputFolder(folder);
+    const entries = await fs.readdir(folder, { withFileTypes: true });
+    const directories = entries.filter(entry => entry.isDirectory() && !entry.isSymbolicLink() && !entry.name.startsWith('.'));
+    // Rotate through children rather than forever warming the first 48.
+    const count = Math.min(16, directories.length);
+    if (insideManagedOutput) {
+      for (let i = 0; i < count; i++) backgroundWarmup.register(normalizePath(join(folder, directories[(cursor * 16 + i) % directories.length].name)));
+    }
+    const summary = summarizeFolderEntries(folder, entries);
+    setCachedFolderSummary(folder, summary);
+    // External folders retain shallow periodic summaries while recently used.
+    // Do not hydrate their cloud-only media before an explicit folder listing.
+    if (!insideManagedOutput && (recentlyOpenedMediaFolders.get(folder) || 0) < Date.now() - 15 * 60_000) return cursor + 1;
+    const media = entries.filter(entry => entry.isFile() && isSupportedMediaPath(entry.name)).sort((a, b) => galleryNameCollator.compare(a.name, b.name));
+    // Warm a small visible-page window; never eagerly decode the whole library.
+    const offset = media.length ? (Math.floor(cursor / 2) * 2) % Math.min(media.length, 24) : 0;
+    const candidates = cursor % 2 === 0
+      ? media.slice(Math.max(0, media.length - offset - 2), media.length - offset).reverse()
+      : media.slice(offset, offset + 2);
+    for (const entry of candidates) {
+      if ([galleryWorker, filmstripWorker].some(worker => worker.stats().inFlight > 0)) break;
+      const path = join(folder, entry.name);
+      const stat = await fs.stat(path);
+      const etag = getThumbnailEtag(stat, THUMB_SIZE_MAP.small, 70, 'contain');
+      await getOrBuildThumbnailBuffer(path, THUMB_SIZE_MAP.small, 70, 'contain', 'gallery', etag).catch(() => undefined);
+    }
+    return cursor + 1;
+  });
 }
 
 function parseSortBy(value: string | null): GallerySortBy {
@@ -686,7 +684,7 @@ function parseSortOrder(value: string | null): GallerySortOrder {
   return String(value || '').trim().toLowerCase() === 'desc' ? 'desc' : 'asc';
 }
 
-type MediaFileRecord = GalleryIndexedFile;
+type MediaFileRecord = GalleryIndexedFile & { revision?: string; metadataRevision?: string };
 
 type MediaCandidate = {
   name: string;
@@ -747,9 +745,10 @@ function compareMediaCandidatesByName(a: MediaCandidate, b: MediaCandidate): num
 }
 
 function serializeGalleryFile(file: MediaFileRecord) {
-  const revision = buildMediaRevisionToken(file);
+  const revision = file.revision ?? buildMediaRevisionToken(file);
   return {
     uid: file.uid,
+    revision,
     name: file.name,
     path: file.path,
     url: `/api/fs/image?path=${encodeURIComponent(file.path)}&rev=${encodeURIComponent(revision)}`,
@@ -762,10 +761,37 @@ function serializeGalleryFile(file: MediaFileRecord) {
     width: file.width,
     height: file.height,
     metadataReady: file.metadataReady,
+    metadataRevision: file.metadataRevision,
     metadataFormat: file.metadataFormat,
     tags: Array.isArray(file.tags) ? file.tags : [],
     privacyClass: file.privacyClass,
   };
+}
+
+async function serializeGalleryFiles(files: MediaFileRecord[], signal?: AbortSignal) {
+  const serialized: ReturnType<typeof serializeGalleryFile>[] = [];
+  // Indexed search hits may lack a live revision; stat only returned rows, in small batches.
+  for (let offset = 0; offset < files.length; offset += 8) {
+    signal?.throwIfAborted();
+    serialized.push(...await Promise.all(files.slice(offset, offset + 8).map(async file => {
+      if (typeof file.revision === 'string') return serializeGalleryFile(file);
+      const revision = await fs.stat(resolveGalleryPath(file.path)).then(mediaFileRevision).catch(() => '');
+      const metadataRevision = revision
+        ? await metadataFileRevision(resolveGalleryPath(file.path), revision).catch(() => '')
+        : '';
+      return serializeGalleryFile({ ...file, revision, metadataRevision });
+    })));
+  }
+  signal?.throwIfAborted();
+  return serialized;
+}
+
+function upsertGalleryFiles(folderPath: string, inputs: Awaited<ReturnType<typeof statMediaCandidates>>): MediaFileRecord[] {
+  const revisions = new Map(inputs.map(input => [normalizePath(input.path), input]));
+  return galleryDb.upsertFolderFiles(folderPath, inputs).map(file => {
+    const input = revisions.get(normalizePath(file.path));
+    return { ...file, revision: input?.revision, metadataRevision: input?.metadataRevision };
+  });
 }
 
 function normalizeSearchQuery(value: unknown): string {
@@ -826,10 +852,12 @@ function compareSearchFiles(a: MediaFileRecord, b: MediaFileRecord, needle: stri
 async function statMediaCandidates(
   candidates: MediaCandidate[],
   folderPath: string,
+  signal?: AbortSignal,
 ) {
-  const mediaInputs = await Promise.allSettled(
-    candidates.map(async (entry) => {
+  const mediaInputs = await mediaStatWorker.mapSettled(
+    candidates, async (entry) => {
       const stat = await fs.stat(entry.absolutePath);
+      signal?.throwIfAborted();
       const createdMs = Number.isFinite(stat.birthtimeMs) && stat.birthtimeMs > 0
         ? stat.birthtimeMs
         : (Number.isFinite(stat.ctimeMs) && stat.ctimeMs > 0 ? stat.ctimeMs : stat.mtimeMs);
@@ -842,8 +870,10 @@ async function statMediaCandidates(
         size: Number.isFinite(stat.size) ? Number(stat.size) : 0,
         createdMs,
         modifiedMs,
+        revision: mediaFileRevision(stat),
+        metadataRevision: await metadataFileRevision(entry.absolutePath, mediaFileRevision(stat)).catch(() => ''),
       };
-    }),
+    }, signal,
   );
 
   return mediaInputs
@@ -855,6 +885,8 @@ async function statMediaCandidates(
       size: number;
       createdMs: number;
       modifiedMs: number;
+      revision: string;
+      metadataRevision: string;
     }> => result.status === 'fulfilled')
     .map((result) => result.value);
 }
@@ -985,7 +1017,7 @@ async function handleTree(reqUrl: URL): Promise<Response> {
     const dirPath = await ensureDirectory(pathValue);
     const ensureMs = nowMs() - ensureStartedAt;
     const toClientPath = createClientPathMapper(pathValue, dirPath);
-    if (!shallow) registerPrewarmRoot(dirPath);
+    registerPrewarmRoot(dirPath);
     if (force) {
       invalidateFolderTree(dirPath);
       if (!shallow) invalidateFolderSummary(dirPath);
@@ -1022,9 +1054,7 @@ async function handleTree(reqUrl: URL): Promise<Response> {
 
     if (!shallow) setTimeout(() => {
       scheduleFolderSummaryPrewarm(dirPath);
-      for (const folder of folders) {
-        scheduleFolderSummaryPrewarm(folder.path);
-      }
+      // Child discovery and warming are paced by the background scheduler.
     }, 0);
     traceGalleryService('tree', {
       folderPath: normalizePath(pathValue) || dirPath,
@@ -1107,7 +1137,9 @@ async function buildListProgressivePayload(
   sortOrder: GallerySortOrder,
   fastPage: boolean,
   requestedSnapshot?: string,
+  signal?: AbortSignal,
 ) {
+  signal?.throwIfAborted();
   const traceStartedAt = nowMs();
   let readdirMs = 0;
   let statUpsertMs = 0;
@@ -1123,6 +1155,7 @@ async function buildListProgressivePayload(
   let snapshotId = requestedSnapshot;
   if (!snapshot) {
     const entries = await fs.readdir(dirPath, { withFileTypes: true });
+    signal?.throwIfAborted();
     readdirMs = nowMs() - readdirStartedAt;
     const folders = entries
       .filter((entry) => entry.isDirectory())
@@ -1158,7 +1191,8 @@ async function buildListProgressivePayload(
       ? mediaCandidates.slice(Math.max(0, total - cursor - limit), Math.max(0, total - cursor)).reverse()
       : mediaCandidates.slice(cursor, cursor + limit);
     const statStartedAt = nowMs();
-    const validInputs = await statMediaCandidates(pageCandidates, normalizedClientFolderPath);
+    const validInputs = await statMediaCandidates(pageCandidates, normalizedClientFolderPath, signal);
+    signal?.throwIfAborted();
     const inputsByFolder = new Map<string, typeof validInputs>();
     for (const input of validInputs) {
       const key = normalizePath(input.folderPath || normalizedClientFolderPath);
@@ -1168,7 +1202,7 @@ async function buildListProgressivePayload(
     }
     const mediaFiles: MediaFileRecord[] = [];
     for (const [folderPath, inputs] of inputsByFolder) {
-      mediaFiles.push(...galleryDb.upsertFolderFiles(folderPath, inputs));
+      mediaFiles.push(...upsertGalleryFiles(folderPath, inputs));
     }
     statUpsertMs = nowMs() - statStartedAt;
     mediaFiles.sort((a, b) => compareMedia(a, b, sortBy, sortOrder));
@@ -1176,7 +1210,8 @@ async function buildListProgressivePayload(
     nextCursor = cursor + pageCandidates.length < total ? cursor + pageCandidates.length : null;
   } else {
     const statStartedAt = nowMs();
-    const validInputs = await statMediaCandidates(mediaCandidates, normalizedClientFolderPath);
+    const validInputs = await statMediaCandidates(mediaCandidates, normalizedClientFolderPath, signal);
+    signal?.throwIfAborted();
     const inputsByFolder = new Map<string, typeof validInputs>();
     for (const input of validInputs) {
       const key = normalizePath(input.folderPath || normalizedClientFolderPath);
@@ -1186,7 +1221,7 @@ async function buildListProgressivePayload(
     }
     const mediaFiles: MediaFileRecord[] = [];
     for (const [folderPath, inputs] of inputsByFolder) {
-      mediaFiles.push(...galleryDb.upsertFolderFiles(folderPath, inputs));
+      mediaFiles.push(...upsertGalleryFiles(folderPath, inputs));
     }
     statUpsertMs = nowMs() - statStartedAt;
     mediaFiles.sort((a, b) => compareMedia(a, b, sortBy, sortOrder));
@@ -1202,7 +1237,7 @@ async function buildListProgressivePayload(
       scheduleFolderSummaryPrewarm(folder.path);
     }
   }
-  if (!fastPage) schedulePageThumbnailPrewarm(page);
+  if (cursor === 0) schedulePageThumbnailPrewarm(page);
   traceGalleryService('list_build', {
     folderPath: normalizedClientFolderPath,
     cursor,
@@ -1223,7 +1258,7 @@ async function buildListProgressivePayload(
 
   return {
     folders,
-    files: page.map(serializeGalleryFile),
+    files: await serializeGalleryFiles(page, signal),
     done: nextCursor == null,
     nextCursor,
     total,
@@ -1233,14 +1268,20 @@ async function buildListProgressivePayload(
   };
 }
 
-async function handleListProgressive(reqUrl: URL): Promise<Response> {
+async function handleListProgressive(reqUrl: URL, signal?: AbortSignal): Promise<Response> {
   const startedAt = nowMs();
   const pathValue = reqUrl.searchParams.get('path') || '';
   try {
+    signal?.throwIfAborted();
     const ensureStartedAt = nowMs();
     const dirPath = await ensureDirectory(pathValue);
+    signal?.throwIfAborted();
     const ensureMs = nowMs() - ensureStartedAt;
     registerPrewarmRoot(dirPath);
+    const mediaFolderKey = normalizePath(dirPath);
+    recentlyOpenedMediaFolders.delete(mediaFolderKey);
+    recentlyOpenedMediaFolders.set(mediaFolderKey, Date.now());
+    while (recentlyOpenedMediaFolders.size > 64) recentlyOpenedMediaFolders.delete(recentlyOpenedMediaFolders.keys().next().value!);
     const cursor = Math.max(0, Number(reqUrl.searchParams.get('cursor') || 0) || 0);
     const limit = clamp(Number(reqUrl.searchParams.get('limit') || 72) || 72, 1, 256);
     const sortBy = parseSortBy(reqUrl.searchParams.get('sortBy'));
@@ -1254,9 +1295,9 @@ async function handleListProgressive(reqUrl: URL): Promise<Response> {
     const snapshot = cursor > 0 ? reqUrl.searchParams.get('snapshot') || undefined : undefined;
     const requestKey = `list:${dirPath}:${normalizePath(pathValue)}:${sortBy}:${sortOrder}:${cursor}:${limit}:fast:${fastPage ? 1 : 0}:snapshot:${snapshot || ''}:force:${force ? startedAt : 0}`;
     const workerStartedAt = nowMs();
-    const payload = await galleryWorker.run(requestKey, async () => (
-      buildListProgressivePayload(dirPath, normalizePath(pathValue) || dirPath, cursor, limit, sortBy, sortOrder, fastPage, snapshot)
-    ));
+    const payload = await galleryWorker.runCancellable(requestKey, async workSignal => (
+      buildListProgressivePayload(dirPath, normalizePath(pathValue) || dirPath, cursor, limit, sortBy, sortOrder, fastPage, snapshot, workSignal)
+    ), signal);
     const workerMs = nowMs() - workerStartedAt;
     traceGalleryService('list_progressive', {
       folderPath: normalizePath(pathValue) || dirPath,
@@ -1276,6 +1317,7 @@ async function handleListProgressive(reqUrl: URL): Promise<Response> {
     }, 250);
     return json(payload);
   } catch (error: any) {
+    if (signal?.aborted) return new Response(null, { status: 499 });
     if (isMissingFsPathError(error)) {
       const sortBy = parseSortBy(reqUrl.searchParams.get('sortBy'));
       const sortOrder = parseSortOrder(reqUrl.searchParams.get('sortOrder'));
@@ -1304,7 +1346,7 @@ async function handleFolderSummary(reqUrl: URL): Promise<Response> {
     const summary = await getFolderSummary(dirPath, force);
     prewarmChildFolderSummaries(dirPath).catch(() => undefined);
 
-    return json(summary);
+    return json({ ...summary, signature: `${summary.signature || ''}:metadata:${galleryDb.getFolderMetadataRevision(dirPath)}` });
   } catch (error: any) {
     if (isMissingFsPathError(error)) {
       return json(createEmptyFolderSummary(normalizedInputPath || pathValue));
@@ -1313,7 +1355,7 @@ async function handleFolderSummary(reqUrl: URL): Promise<Response> {
   }
 }
 
-async function handleSearch(reqUrl: URL): Promise<Response> {
+async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response> {
   const startedAt = nowMs();
   const query = normalizeSearchQuery(reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '');
   const sortBy = parseSortBy(reqUrl.searchParams.get('sortBy'));
@@ -1347,8 +1389,10 @@ async function handleSearch(reqUrl: URL): Promise<Response> {
     }> = [];
     const seenRoots = new Set<string>();
     for (const rootValue of rootValues) {
+      signal?.throwIfAborted();
       try {
         const dirPath = await ensureDirectory(rootValue);
+        signal?.throwIfAborted();
         const key = normalizePath(dirPath).toLowerCase();
         if (!key || seenRoots.has(key)) continue;
         seenRoots.add(key);
@@ -1365,6 +1409,7 @@ async function handleSearch(reqUrl: URL): Promise<Response> {
       }
     }
 
+    signal?.throwIfAborted();
     if (resolvedRoots.length === 0) {
       return json({
         query,
@@ -1412,6 +1457,7 @@ async function handleSearch(reqUrl: URL): Promise<Response> {
     }
 
     while (queue.length > 0 && scannedFolders < maxFolders && nowMs() - startedAt < maxDurationMs) {
+      signal?.throwIfAborted();
       const current = queue.shift();
       if (!current) continue;
       scannedFolders += 1;
@@ -1422,6 +1468,7 @@ async function handleSearch(reqUrl: URL): Promise<Response> {
         continue;
       }
 
+      signal?.throwIfAborted();
       const directories = entries
         .filter((entry) => entry.isDirectory())
         .sort((a, b) => galleryNameCollator.compare(a.name, b.name));
@@ -1460,8 +1507,9 @@ async function handleSearch(reqUrl: URL): Promise<Response> {
         .filter((candidate) => !filesByPath.has(normalizePath(candidate.clientPath).toLowerCase()))
         .slice(0, Math.max(0, fileLimit - filesByPath.size));
       if (filenameMatches.length > 0) {
-        const inputs = await statMediaCandidates(filenameMatches, normalizePath(current.clientPath));
-        const indexed = galleryDb.upsertFolderFiles(normalizePath(current.clientPath), inputs);
+        const inputs = await statMediaCandidates(filenameMatches, normalizePath(current.clientPath), signal);
+        signal?.throwIfAborted();
+        const indexed = upsertGalleryFiles(normalizePath(current.clientPath), inputs);
         for (const file of indexed) {
           if (!fileMatchesSearch(file, query)) continue;
           const key = normalizePath(file.path).toLowerCase();
@@ -1472,6 +1520,7 @@ async function handleSearch(reqUrl: URL): Promise<Response> {
       }
       if (filesByPath.size >= fileLimit && foldersByPath.size >= folderLimit) break;
     }
+    signal?.throwIfAborted();
     if (queue.length > 0) capped = true;
 
     const files = Array.from(filesByPath.values())
@@ -1494,7 +1543,7 @@ async function handleSearch(reqUrl: URL): Promise<Response> {
 
     return json({
       query,
-      files: files.map(serializeGalleryFile),
+      files: await serializeGalleryFiles(files, signal),
       folders,
       scannedFolders,
       done: !capped,
@@ -1502,6 +1551,7 @@ async function handleSearch(reqUrl: URL): Promise<Response> {
       sortOrder,
     });
   } catch (error: any) {
+    if (signal?.aborted) return new Response(null, { status: 499 });
     traceGalleryService('search_error', {
       query,
       error: error?.message || 'Gallery search failed',
@@ -1790,63 +1840,6 @@ async function handleSetTags(req: Request): Promise<Response> {
   }
 }
 
-async function extractVideoFrame(filePath: string): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const ffmpeg = spawn('ffmpeg', [
-      '-hide_banner',
-      '-loglevel', 'error',
-      '-ss', '0.15',
-      '-i', filePath,
-      '-frames:v', '1',
-      '-f', 'image2pipe',
-      '-vcodec', 'png',
-      'pipe:1',
-    ], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-    const chunks: Buffer[] = [];
-    const errors: Buffer[] = [];
-    let settled = false;
-    const finish = (error: Error | null, buffer?: Buffer) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve(buffer || Buffer.alloc(0));
-    };
-    const timer = setTimeout(() => {
-      try {
-        ffmpeg.kill();
-      } catch {
-        // ignore kill failures on timeout
-      }
-      finish(new Error('Timed out while extracting video thumbnail'));
-    }, 10000);
-
-    ffmpeg.stdout.on('data', (chunk) => {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    });
-    ffmpeg.stderr.on('data', (chunk) => {
-      errors.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    });
-    ffmpeg.on('error', (error) => {
-      finish(error instanceof Error ? error : new Error(String(error || 'ffmpeg failed')));
-    });
-    ffmpeg.on('close', (code) => {
-      if (code !== 0 || chunks.length === 0) {
-        const detail = Buffer.concat(errors).toString('utf8').trim();
-        finish(new Error(detail || `Failed to extract video thumbnail (exit ${code ?? 'unknown'})`));
-        return;
-      }
-      finish(null, Buffer.concat(chunks));
-    });
-  });
-}
-
 async function buildBunImageThumbnail(filePath: string, sizePx: number, quality: number, fitMode: 'cover' | 'contain'): Promise<Buffer | null> {
   if (fitMode !== 'contain') return null;
   if (!BUN_IMAGE_STILL_EXTENSIONS.has(extname(filePath).toLowerCase())) return null;
@@ -1873,7 +1866,7 @@ async function buildThumbnail(filePath: string, sizePx: number, quality: number,
 
   const normalizedFit = normalizeThumbnailFitMode(fitMode);
   const input = isVideoPath(filePath)
-    ? await extractVideoFrame(filePath)
+    ? await extractVideoFrame(filePath, sizePx, fitMode)
     : filePath;
   return sharp(input, { failOn: 'none', animated: true })
     .rotate()
@@ -1906,6 +1899,7 @@ async function handleThumbnail(req: Request, reqUrl: URL): Promise<Response> {
 
     const stat = await fs.stat(filePath);
     const etag = getThumbnailEtag(stat, sizePx, quality, fitMode);
+    const cacheControl = galleryMediaCacheControl(reqUrl.searchParams.get('rev'));
 
     const ifNoneMatch = req.headers.get('if-none-match') || '';
     if (ifNoneMatch && ifNoneMatch === etag) {
@@ -1922,7 +1916,7 @@ async function handleThumbnail(req: Request, reqUrl: URL): Promise<Response> {
       return new Response(null, {
         status: 304,
         headers: {
-          'Cache-Control': 'public, max-age=31536000, immutable',
+          'Cache-Control': cacheControl,
           ETag: etag,
         },
       });
@@ -1942,7 +1936,7 @@ async function handleThumbnail(req: Request, reqUrl: URL): Promise<Response> {
       headers: {
         'Content-Type': 'image/webp',
         'Content-Length': String(buffer.byteLength),
-        'Cache-Control': 'public, max-age=31536000, immutable',
+        'Cache-Control': cacheControl,
         ETag: responseEtag,
         'X-Thumbnail-Size': sizeKey,
         'X-Thumbnail-Quality': String(quality),
@@ -2015,7 +2009,10 @@ async function handleImage(req: Request, reqUrl: URL): Promise<Response> {
       if (matchesIfNoneMatch(ifNoneMatch, previewHeaders.ETag)) {
         return new Response(null, { status: 304, headers: previewHeaders });
       }
-      const preview = await getOrBuildThumbnailBuffer(filePath, maxLongSide, quality, 'contain', lane);
+      const preview = await getOrBuildThumbnailBuffer(
+        filePath, maxLongSide, quality, 'contain', lane,
+        getThumbnailEtag(stat, maxLongSide, quality, 'contain'),
+      );
       return new Response(preview.buffer, {
         headers: { ...previewHeaders, 'Content-Length': String(preview.buffer.byteLength) },
       });
@@ -2083,7 +2080,7 @@ async function handleMetadata(reqUrl: URL): Promise<Response> {
     }
 
     const stat = await fs.stat(filePath);
-    const etag = getMediaEtag(stat);
+    const etag = await metadataFileRevision(filePath, mediaFileRevision(stat));
     const cached = getCachedMetadata(filePath, etag);
     if (cached) {
       traceGalleryService('metadata', {
@@ -2098,7 +2095,10 @@ async function handleMetadata(reqUrl: URL): Promise<Response> {
     const value = await metadataWorker.run(`metadata:${filePath}:${etag}`, async () => {
       const workerCached = getCachedMetadata(filePath, etag);
       if (workerCached) return workerCached;
+      const currentRevision = async () => metadataFileRevision(filePath, mediaFileRevision(await fs.stat(filePath)));
+      if (await currentRevision() !== etag) throw new Error('Media metadata changed; retry the request');
       const parsed = (await MetadataParser.parse(filePath)) || {};
+      if (await currentRevision() !== etag) throw new Error('Media metadata changed; retry the request');
       const mediaKind = mediaTypeFromPath(filePath) === 'video' ? 'video' : 'image';
       const payload: MetadataCacheEntry['value'] = {
         type: mediaKind,
@@ -2158,7 +2158,7 @@ const server = Bun.serve({
           folderTrees: folderTreeCache.size,
           folderSummaries: folderSummaryCache.size,
           metadata: metadataCache.size,
-          prewarmRoots: prewarmRoots.size,
+          prewarmRoots: backgroundWarmup.size,
         },
         core: {
           engine: 'bun',
@@ -2173,7 +2173,7 @@ const server = Bun.serve({
     }
 
     if (reqUrl.pathname === '/api/fs/list-progressive' && req.method === 'GET') {
-      return runBunGalleryFsGet(reqUrl, () => handleListProgressive(reqUrl));
+      return runBunGalleryFsGet(reqUrl, () => handleListProgressive(reqUrl, req.signal));
     }
 
     if (reqUrl.pathname === '/api/fs/folder-summary' && req.method === 'GET') {
@@ -2181,7 +2181,7 @@ const server = Bun.serve({
     }
 
     if (reqUrl.pathname === '/api/fs/search' && req.method === 'GET') {
-      return runBunGalleryFsGet(reqUrl, () => handleSearch(reqUrl));
+      return runBunGalleryFsGet(reqUrl, () => handleSearch(reqUrl, req.signal));
     }
 
     if (reqUrl.pathname === '/api/fs/metadata-search' && req.method === 'GET') {
@@ -2273,6 +2273,8 @@ if (typeof (folderPrewarmTimer as any).unref === 'function') {
 
 process.on('exit', () => {
   clearInterval(folderPrewarmTimer);
+  folderRevisions.close();
+  backgroundWarmup.close();
   try {
     galleryDb.close();
   } catch {

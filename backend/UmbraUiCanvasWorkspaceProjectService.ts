@@ -429,6 +429,7 @@ function normalizeProject(rawProject: unknown): Record<string, any> {
       staging,
     },
     revision: Math.max(0, Math.round(Number(source.revision) || 0)),
+    serverRevision: Math.max(0, Math.round(Number(source.serverRevision) || 0)),
     createdAt: Math.max(0, Math.round(Number(source.createdAt) || Date.now())),
     updatedAt: Math.max(0, Math.round(Number(source.updatedAt) || Date.now())),
   };
@@ -595,30 +596,25 @@ export class UmbraUiCanvasWorkspaceProjectService {
   }
 
   private async collectRestorePointAssetNames(projectId: string, names: Set<string>): Promise<void> {
-    const entries = await readdir(this.restorePointRoot(projectId), { withFileTypes: true }).catch(() => []);
+    const entries = await readdir(this.restorePointRoot(projectId), { withFileTypes: true }).catch((error) => {
+      if (error?.code === 'ENOENT') return [];
+      throw error;
+    });
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
-      try {
-        const restorePoint = asRecord(JSON.parse(await readFile(join(this.restorePointRoot(projectId), entry.name), 'utf8')));
-        const project = asRecord(restorePoint.project);
-        for (const entity of Array.isArray(project.entities) ? project.entities : []) {
-          const imageUrl = String(asRecord(entity).imageUrl || '');
-          if (!imageUrl.startsWith(PROJECT_ASSET_PREFIX)) continue;
-          const filename = safeStoredFilename(imageUrl.slice(PROJECT_ASSET_PREFIX.length));
-          if (filename) names.add(filename);
-        }
-        const generation = asRecord(project.generation);
-        for (const entry of [
-          ...(Array.isArray(generation.pending) ? generation.pending : []),
-          ...(Array.isArray(generation.staging) ? generation.staging : []),
-        ]) {
-          const acceptanceMaskUrl = String(asRecord(entry).acceptanceMaskUrl || '');
-          if (!acceptanceMaskUrl.startsWith(PROJECT_ASSET_PREFIX)) continue;
-          const filename = safeStoredFilename(acceptanceMaskUrl.slice(PROJECT_ASSET_PREFIX.length));
-          if (filename) names.add(filename);
-        }
-      } catch {
-        // A malformed restore point must not prevent a normal project save.
+      const restorePoint = asRecord(JSON.parse(await readFile(join(this.restorePointRoot(projectId), entry.name), 'utf8')));
+      const project = normalizeProject(restorePoint.project);
+      for (const entity of project.entities) {
+        const imageUrl = String(entity.imageUrl || '');
+        if (!imageUrl.startsWith(PROJECT_ASSET_PREFIX)) continue;
+        const filename = safeStoredFilename(imageUrl.slice(PROJECT_ASSET_PREFIX.length));
+        if (filename) names.add(filename);
+      }
+      for (const item of [...project.generation.pending, ...project.generation.staging]) {
+        const acceptanceMaskUrl = String(item.acceptanceMaskUrl || '');
+        if (!acceptanceMaskUrl.startsWith(PROJECT_ASSET_PREFIX)) continue;
+        const filename = safeStoredFilename(acceptanceMaskUrl.slice(PROJECT_ASSET_PREFIX.length));
+        if (filename) names.add(filename);
       }
     }
   }
@@ -655,9 +651,40 @@ export class UmbraUiCanvasWorkspaceProjectService {
   private async readStored(projectId: string): Promise<Record<string, any> | null> {
     try {
       return asRecord(JSON.parse(await readFile(join(this.projectRoot(projectId), 'project.json'), 'utf8')));
-    } catch {
-      return null;
+    } catch (error: any) {
+      if (error?.code === 'ENOENT') return null;
+      throw error;
     }
+  }
+
+  private nextServerRevision(stored: Record<string, any> | null, expected: unknown): number {
+    if (stored) normalizeProject(stored);
+    const base = expected ?? 0;
+    const current = stored?.serverRevision ?? 0;
+    if (!Number.isSafeInteger(base) || Number(base) < 0) throw new Error('Invalid Canvas server revision.');
+    if (!Number.isSafeInteger(current) || current < 0 || current >= Number.MAX_SAFE_INTEGER) throw new Error('Invalid saved Canvas server revision.');
+    if (base !== current || (!stored && base !== 0)) {
+      throw Object.assign(new Error('This Canvas project changed or was deleted elsewhere. Save your draft as a copy or reload the saved project.'), { status: 409 });
+    }
+    return current + 1;
+  }
+
+  private async assertProjectAssets(projectId: string, project: Record<string, any>): Promise<Set<string>> {
+    const referenced = new Set<string>();
+    const assetUrls = [
+      ...project.entities.map((entity: Record<string, any>) => entity.imageUrl),
+      ...[...project.generation.pending, ...project.generation.staging].map((entry: Record<string, any>) => entry.acceptanceMaskUrl),
+    ];
+    for (const url of assetUrls) {
+      if (!String(url || '').startsWith(PROJECT_ASSET_PREFIX)) continue;
+      const filename = safeStoredFilename(String(url).slice(PROJECT_ASSET_PREFIX.length));
+      if (!filename) throw new Error('Canvas project references an invalid image asset.');
+      referenced.add(filename);
+    }
+    for (const filename of referenced) {
+      if (!((await this.resolveAsset(projectId, filename))?.size > 0)) throw new Error('A Canvas image asset is missing or empty. Restore its file before saving, copying or restoring this project.');
+    }
+    return referenced;
   }
 
   async save(
@@ -684,8 +711,9 @@ export class UmbraUiCanvasWorkspaceProjectService {
     if (Buffer.byteLength(rawJson, 'utf8') > MAX_PROJECT_JSON_BYTES) throw new Error('The Canvas project document exceeds the 16 MB limit.');
     const projectRoot = this.projectRoot(projectId);
     const assetsRoot = join(projectRoot, 'assets');
-    await mkdir(assetsRoot, { recursive: true });
     const stored = await this.readStored(projectId);
+    project.serverRevision = this.nextServerRevision(stored, asRecord(rawProject).serverRevision);
+    await mkdir(assetsRoot, { recursive: true });
     const previousById = new Map((Array.isArray(stored?.entities) ? stored.entities : []).map((entity: any) => [String(entity.id || ''), entity]));
     const previousGeneration = asRecord(stored?.generation);
     const previousPendingByJob = new Map((Array.isArray(previousGeneration.pending) ? previousGeneration.pending : []).map((entry: any) => [String(entry.jobId || ''), entry]));
@@ -742,20 +770,7 @@ export class UmbraUiCanvasWorkspaceProjectService {
       if (/^(blob:|data:)/i.test(currentUrl)) throw new Error(`Canvas staging mask ${entry.id} was not uploaded with the project.`);
       return { ...entry, acceptanceMaskUrl: '' };
     });
-    const referenced = new Set<string>();
-    const assetUrls = [
-      ...project.entities.map((entity: Record<string, any>) => entity.imageUrl),
-      ...[...project.generation.pending, ...project.generation.staging].map((entry: Record<string, any>) => entry.acceptanceMaskUrl),
-    ];
-    for (const url of assetUrls) {
-      if (!String(url || '').startsWith(PROJECT_ASSET_PREFIX)) continue;
-      const filename = safeStoredFilename(String(url).slice(PROJECT_ASSET_PREFIX.length));
-      if (!filename) throw new Error('Canvas project references an invalid image asset.');
-      referenced.add(filename);
-    }
-    for (const filename of referenced) {
-      if (!await this.resolveAsset(projectId, filename)) throw new Error('A Canvas image asset is missing. Reload the saved project before saving again.');
-    }
+    const referenced = await this.assertProjectAssets(projectId, project);
     project.updatedAt = Date.now();
     const serialized = JSON.stringify(project, null, 2);
     const temporaryProjectPath = join(projectRoot, `project.${Date.now()}.tmp`);
@@ -799,21 +814,24 @@ export class UmbraUiCanvasWorkspaceProjectService {
     });
   }
 
-  async fork(projectIdInput: string, nameInput: unknown): Promise<Record<string, any>> {
-    return this.locked(projectIdInput, () => this.forkProject(projectIdInput, nameInput));
+  async fork(projectIdInput: string, nameInput: unknown, expectedServerRevision?: unknown): Promise<Record<string, any>> {
+    return this.locked(projectIdInput, () => this.forkProject(projectIdInput, nameInput, expectedServerRevision));
   }
 
-  private async forkProject(projectIdInput: string, nameInput: unknown): Promise<Record<string, any>> {
+  private async forkProject(projectIdInput: string, nameInput: unknown, expectedServerRevision?: unknown): Promise<Record<string, any>> {
     const sourceId = safeId(projectIdInput);
     if (!sourceId) throw new Error('A valid Canvas project id is required.');
     const stored = await this.readStored(sourceId);
     if (!stored) throw new Error('Save the Canvas project before creating a copy.');
+    if (expectedServerRevision !== undefined) this.nextServerRevision(stored, expectedServerRevision);
     const now = Date.now();
     const targetId = safeId(`canvas-${now}-${Math.random().toString(36).slice(2, 10)}`);
     const project = normalizeProject(stored);
+    await this.assertProjectAssets(sourceId, project);
     project.id = targetId;
     project.name = String(nameInput || `${project.name} Copy`).trim().slice(0, 160) || `${project.name} Copy`;
     project.revision = 0;
+    project.serverRevision = 1;
     project.createdAt = now;
     project.updatedAt = now;
     const sourceRoot = this.projectRoot(sourceId);
@@ -845,7 +863,7 @@ export class UmbraUiCanvasWorkspaceProjectService {
     const summaries: UmbraUiCanvasWorkspaceProjectSummary[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const stored = await this.locked(entry.name, () => this.readStored(entry.name));
+      const stored = await this.locked(entry.name, () => this.readStored(entry.name)).catch(() => null);
       if (!stored) continue;
       let project: Record<string, any>;
       try { project = normalizeProject(stored); }
@@ -931,16 +949,19 @@ export class UmbraUiCanvasWorkspaceProjectService {
     };
   }
 
-  async restoreRestorePoint(projectIdInput: string, restorePointIdInput: string): Promise<Record<string, any>> {
-    return this.locked(projectIdInput, () => this.restoreProjectRestorePoint(projectIdInput, restorePointIdInput));
+  async restoreRestorePoint(projectIdInput: string, restorePointIdInput: string, expectedServerRevision?: unknown): Promise<Record<string, any>> {
+    return this.locked(projectIdInput, () => this.restoreProjectRestorePoint(projectIdInput, restorePointIdInput, expectedServerRevision));
   }
 
-  private async restoreProjectRestorePoint(projectIdInput: string, restorePointIdInput: string): Promise<Record<string, any>> {
+  private async restoreProjectRestorePoint(projectIdInput: string, restorePointIdInput: string, expectedServerRevision?: unknown): Promise<Record<string, any>> {
     const projectId = safeId(projectIdInput);
     if (!projectId) throw new Error('A valid Canvas project id is required.');
     const restorePoint = await this.readRestorePoint(projectId, restorePointIdInput);
     if (!restorePoint?.project) throw new Error('The Canvas restore point was not found.');
     const project = normalizeProject(restorePoint.project);
+    const stored = await this.readStored(projectId);
+    project.serverRevision = this.nextServerRevision(stored, expectedServerRevision);
+    await this.assertProjectAssets(projectId, project);
     project.id = projectId;
     project.revision = Math.max(1, project.revision + 1);
     project.updatedAt = Date.now();

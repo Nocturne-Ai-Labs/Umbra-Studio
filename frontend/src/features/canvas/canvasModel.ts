@@ -370,6 +370,7 @@ export interface UmbraCanvasProjectDocument {
   viewport: UmbraCanvasViewport;
   generation: UmbraCanvasGenerationState;
   revision: number;
+  serverRevision?: number;
   createdAt: number;
   updatedAt: number;
 }

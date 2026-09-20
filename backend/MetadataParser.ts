@@ -4,10 +4,10 @@
  * Supports: A1111, ComfyUI, Umbra Studio
  */
 
-import { open } from 'fs/promises';
-import { existsSync } from 'fs';
-import { spawnSync } from 'child_process';
-import { extname, basename, dirname, join } from 'path';
+import { open, type FileHandle } from 'fs/promises';
+import { extname } from 'path';
+import { probeVideoMetadata } from './VideoMetadataProbe';
+import { metadataSidecarPath } from './metadataFileRevision';
 
 export interface ImageMetadata {
   positive_prompt?: string;
@@ -31,18 +31,31 @@ export interface ImageMetadata {
   format?: 'comfyui' | 'a1111' | 'cozyui' | 'unknown';
 }
 
+interface MetadataReadOptions {
+  throwOnReadError?: boolean;
+}
+
+async function readMetadataBytes(handle: FileHandle, buffer: Buffer, position: number): Promise<void> {
+  let offset = 0;
+  while (offset < buffer.length) {
+    const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, position + offset);
+    if (bytesRead === 0) throw new Error('PNG metadata is truncated');
+    offset += bytesRead;
+  }
+}
+
 export class MetadataParser {
   private static readonly VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v', '.flv', '.wmv', '.gif']);
 
-  static async parse(filePath: string): Promise<ImageMetadata> {
+  static async parse(filePath: string, options: MetadataReadOptions = {}): Promise<ImageMetadata> {
     const ext = extname(filePath).toLowerCase();
     if (this.VIDEO_EXTENSIONS.has(ext)) {
-      return await this.parseVideo(filePath);
+      return await this.parseVideo(filePath, options);
     }
 
     // Allow non-PNG media (e.g. GIF) to read metadata from sidecar PNG.
     if (ext !== '.png') {
-      const sidecarMeta = await this.parseSidecarPng(filePath);
+      const sidecarMeta = await this.parseSidecarPng(filePath, options);
       if (Object.keys(sidecarMeta).length > 0) {
         return sidecarMeta;
       }
@@ -52,36 +65,28 @@ export class MetadataParser {
     try {
       fileHandle = await open(filePath, 'r');
       const headerBuffer = Buffer.alloc(8);
-      await fileHandle.read(headerBuffer, 0, 8, 0);
+      await readMetadataBytes(fileHandle, headerBuffer, 0);
 
       // Only PNG supported for now
       if (headerBuffer.toString('hex') === '89504e470d0a1a0a') {
-        return await this.parsePNG(fileHandle);
+        return await this.parsePNG(fileHandle, options);
       }
+      if (ext === '.png' && options.throwOnReadError) throw new Error('Invalid PNG signature');
       return {};
-    } catch { return {}; }
+    } catch (error) {
+      if (options.throwOnReadError) throw error;
+      return {};
+    }
     finally { if (fileHandle) await fileHandle.close(); }
   }
 
-  private static async parseVideo(filePath: string): Promise<ImageMetadata> {
-    const result: ImageMetadata = await this.parseSidecarPng(filePath);
+  private static async parseVideo(filePath: string, options: MetadataReadOptions = {}): Promise<ImageMetadata> {
+    const result: ImageMetadata = await this.parseSidecarPng(filePath, options);
 
     // Probe the first video stream for source sizing and read generation metadata.
     try {
-      const probe = spawnSync(
-        'ffprobe',
-        [
-          '-v', 'error',
-          '-select_streams', 'v:0',
-          '-show_entries', 'stream=width,height:format_tags=comment',
-          '-of', 'json',
-          filePath,
-        ],
-        { encoding: 'utf-8' }
-      );
-      if (probe.status !== 0) return result;
-
-      const raw = (probe.stdout || '').trim();
+      const probe = await probeVideoMetadata(filePath);
+      const raw = probe?.toString('utf8').trim();
       if (!raw) return result;
       const payload = JSON.parse(raw) as {
         streams?: Array<{ width?: number; height?: number }>;
@@ -96,7 +101,8 @@ export class MetadataParser {
       const tags = payload.format?.tags || {};
       const comment = String(tags.comment ?? tags.COMMENT ?? '').trim();
       return comment ? { ...result, ...this.parseVideoComment(comment) } : result;
-    } catch {
+    } catch (error) {
+      if (options.throwOnReadError) throw error;
       return result;
     }
   }
@@ -147,39 +153,47 @@ export class MetadataParser {
     return recovered;
   }
 
-  private static async parseSidecarPng(filePath: string): Promise<ImageMetadata> {
-    const stem = basename(filePath, extname(filePath));
-    const sidecarPng = join(dirname(filePath), `${stem}.png`);
-    if (!existsSync(sidecarPng)) return {};
+  private static async parseSidecarPng(filePath: string, options: MetadataReadOptions = {}): Promise<ImageMetadata> {
+    const sidecarPng = metadataSidecarPath(filePath);
+    if (!sidecarPng) return {};
 
     let sidecarHandle;
     try {
       sidecarHandle = await open(sidecarPng, 'r');
-      return await this.parsePNG(sidecarHandle);
-    } catch {
+      return await this.parsePNG(sidecarHandle, options);
+    } catch (error) {
+      if (options.throwOnReadError && (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       return {};
     } finally {
       if (sidecarHandle) await sidecarHandle.close();
     }
   }
 
-  private static async parsePNG(fileHandle: any): Promise<ImageMetadata> {
+  private static async parsePNG(fileHandle: FileHandle, options: MetadataReadOptions = {}): Promise<ImageMetadata> {
     const chunks: Record<string, string> = {};
     let offset = 8;
     const buffer = Buffer.alloc(8);
 
     try {
-      while (true) {
-        const { bytesRead } = await fileHandle.read(buffer, 0, 8, offset);
-        if (bytesRead < 8) break;
+      await readMetadataBytes(fileHandle, buffer, 0);
+      if (buffer.toString('hex') !== '89504e470d0a1a0a') throw new Error('Invalid PNG signature');
+      const { size } = await fileHandle.stat();
+      let metadataBytes = 0;
+      let foundEnd = false;
+      for (let chunk = 0; chunk < 100_000; chunk++) {
+        if (offset + 12 > size) throw new Error('PNG metadata is truncated');
+        await readMetadataBytes(fileHandle, buffer, offset);
 
         const length = buffer.readUInt32BE(0);
         const type = buffer.toString('ascii', 4, 8);
         offset += 8;
+        if (offset + length + 4 > size) throw new Error('PNG metadata is truncated');
 
         if (type === 'tEXt' || type === 'iTXt') {
+          metadataBytes += length;
+          if (metadataBytes > 16 * 1024 * 1024) throw new Error('PNG metadata exceeds the read limit');
           const dataBuffer = Buffer.alloc(length);
-          await fileHandle.read(dataBuffer, 0, length, offset);
+          await readMetadataBytes(fileHandle, dataBuffer, offset);
 
           let keyword = '', text = '';
 
@@ -208,9 +222,12 @@ export class MetadataParser {
         }
 
         offset += length + 4;
-        if (type === 'IEND') break;
+        if (type === 'IEND') { foundEnd = true; break; }
       }
-    } catch { }
+      if (!foundEnd) throw new Error('PNG is missing its IEND chunk or exceeds the chunk limit');
+    } catch (error) {
+      if (options.throwOnReadError) throw error;
+    }
 
     return this.processChunks(chunks);
   }

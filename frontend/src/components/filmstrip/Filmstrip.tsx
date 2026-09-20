@@ -103,16 +103,19 @@ export interface FilmstripProps {
   onDataChanged?: () => void;
   onHeightChange?: (height: number) => void;
   folderLabel?: string;
+  unreadFolderMediaCount?: number;
   pinnedFolders?: Array<{
     path: string;
     label: string;
     isCurrent?: boolean;
     isDropActive?: boolean;
+    unreadCount?: number;
   }>;
   newestFolders?: Array<{
     path: string;
     label: string;
     isCurrent?: boolean;
+    unreadCount?: number;
   }>;
   onOpenPinnedFolder?: (path: string) => void;
   onOpenNewestFolder?: (path: string) => void;
@@ -268,7 +271,17 @@ type MenuAction = {
   onClick: () => void;
 };
 
-function FilmstripFolderSelector({
+function FolderActivityBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return <span
+    title={`${count.toLocaleString()} new media files since last opened`}
+    aria-label={`${count} new media files since last opened`}
+    className="inline-flex h-5 w-9 shrink-0 items-center justify-center rounded-sm border border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] text-[10px] font-bold text-[var(--umbra-accent)] motion-safe:animate-pulse"
+  >{count > 999 ? '999+' : count}</span>;
+}
+
+export function FilmstripFolderSelector({
+  unreadCount = 0,
   pinnedFolders,
   historyFolders,
   onOpenPinnedFolder,
@@ -277,6 +290,7 @@ function FilmstripFolderSelector({
   onPinnedDrop,
   onPinnedDropTargetChange,
 }: {
+  unreadCount?: number;
   pinnedFolders: NonNullable<FilmstripProps['pinnedFolders']>;
   historyFolders: NonNullable<FilmstripProps['newestFolders']>;
   onOpenPinnedFolder?: (path: string) => void;
@@ -369,6 +383,7 @@ function FilmstripFolderSelector({
           {totalFolderCount}
         </span>
         <ChevronUp size={12} className={cn('transition-transform', open && 'rotate-180')} />
+        <FolderActivityBadge count={unreadCount} />
       </button>
 
       {open ? (
@@ -394,6 +409,7 @@ function FilmstripFolderSelector({
               <Pin size={12} />
               Pinned
               <span className="text-[9px] text-zinc-500">{pinnedFolders.length}</span>
+              {pinnedFolders.some(folder => (folder.unreadCount || 0) > 0) ? <span title="New media" className="h-2 w-2 rounded-full bg-[var(--umbra-accent)] motion-safe:animate-pulse" /> : null}
             </button>
             <button
               type="button"
@@ -410,6 +426,7 @@ function FilmstripFolderSelector({
               <History size={12} />
               History
               <span className="text-[9px] text-zinc-500">{historyFolders.length}</span>
+              {historyFolders.some(folder => (folder.unreadCount || 0) > 0) ? <span title="New media" className="h-2 w-2 rounded-full bg-[var(--umbra-accent)] motion-safe:animate-pulse" /> : null}
             </button>
           </div>
 
@@ -450,6 +467,7 @@ function FilmstripFolderSelector({
                       <span className="block truncate text-[10px] text-zinc-600">{folder.path}</span>
                     </span>
                     {folder.isCurrent ? <span className="shrink-0 text-[8px] font-black uppercase text-[var(--umbra-accent)]">Open</span> : null}
+                    <FolderActivityBadge count={folder.unreadCount || 0} />
                   </button>
                   <button
                     type="button"
@@ -489,6 +507,7 @@ function FilmstripFolderSelector({
                   <span className="block truncate text-[10px] text-zinc-600">{folder.path}</span>
                 </span>
                 {folder.isCurrent ? <span className="shrink-0 text-[8px] font-black uppercase text-[var(--umbra-accent)]">Open</span> : null}
+                <FolderActivityBadge count={folder.unreadCount || 0} />
               </button>
             )) : (
               <div className="flex min-h-24 flex-col items-center justify-center gap-2 text-center text-zinc-600">
@@ -857,6 +876,7 @@ export function Filmstrip({
   fillContainer = false,
   onHeightChange,
   folderLabel = '',
+  unreadFolderMediaCount = 0,
   pinnedFolders = [],
   newestFolders = [],
   onOpenPinnedFolder,
@@ -1268,6 +1288,7 @@ export function Filmstrip({
 
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
           <FilmstripFolderSelector
+            unreadCount={unreadFolderMediaCount}
             pinnedFolders={pinnedFolders}
             historyFolders={newestFolders}
             onOpenPinnedFolder={onOpenPinnedFolder}

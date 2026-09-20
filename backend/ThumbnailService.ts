@@ -6,9 +6,13 @@
 
 import { join, extname } from 'path';
 import { homedir } from 'os';
-import { existsSync, mkdirSync, readdirSync, statSync } from 'fs';
-import { unlink, readdir, readFile, writeFile } from 'fs/promises';
-import { createHash } from 'crypto';
+import { existsSync, mkdirSync, statSync } from 'fs';
+import { unlink, readdir, readFile, open, rename, lstat, stat } from 'fs/promises';
+import { createHash, randomUUID } from 'crypto';
+import { extractVideoFrame } from '../gallery/GalleryVideoThumbnail';
+import { runFfmpegPreview } from './FfmpegPreviewProcess';
+import { mediaFileRevision } from './mediaFileRevision';
+import { decodeThumbnailCacheEntry, encodeThumbnailCacheEntry } from './ThumbnailCacheEntry';
 
 // Sizes in pixels (width)
 const SIZES = {
@@ -28,6 +32,7 @@ const CACHE_KEY_VERSION = 'v2';
 const MAX_MEMORY_CACHE_BYTES = 96 * 1024 * 1024;
 const MAX_MEMORY_CACHE_ENTRIES = 320;
 const CACHE_LIMIT_ENFORCE_MIN_INTERVAL_MS = 60_000;
+const CACHE_INVENTORY_CONCURRENCY = 8;
 const MAX_GENERATION_CONCURRENCY = Math.max(
   1,
   Math.min(6, Number.parseInt(process.env.UMBRA_THUMBNAIL_GENERATION_CONCURRENCY || '3', 10) || 3),
@@ -41,6 +46,19 @@ interface MemoryCacheEntry {
   buffer: Buffer;
   size: number;
   touchedAt: number;
+}
+
+interface CacheOperation {
+  valid: boolean;
+}
+
+interface CacheFile {
+  path: string;
+  name: string;
+  size: number;
+  mtime: number;
+  ctime: number;
+  ino: number;
 }
 
 function resolveDefaultThumbnailCacheDir(): string {
@@ -70,6 +88,10 @@ export class ThumbnailService {
   private memoryCache = new Map<string, MemoryCacheEntry>();
   private memoryCacheSizeBytes = 0;
   private pendingGenerations = new Map<string, Promise<Buffer | null>>();
+  private cacheOperations = new Map<string, Set<CacheOperation>>();
+  private cacheMutationTail: Promise<void> = Promise.resolve();
+  private cacheClearBarrier: Promise<void> | null = null;
+  private cacheInventoryInFlight: Promise<CacheFile[]> | null = null;
   private cacheLimitEnforceInFlight = false;
   private lastCacheLimitEnforceAt = 0;
   private activeGenerationCount = 0;
@@ -165,7 +187,7 @@ export class ThumbnailService {
    * Get the cache file path for a thumbnail
    */
   private getCachePath(cacheKey: string): string {
-    return join(this.cacheDir, cacheKey);
+    return join(this.cacheDir, `${cacheKey}.cache`);
   }
 
   private normalizeQuality(input: unknown, fallback = FULL_QUALITY): number {
@@ -193,7 +215,7 @@ export class ThumbnailService {
     }
 
     const ext = extname(imagePath).toLowerCase();
-    const baseRevision = `m${Math.max(0, Math.floor(stats.mtimeMs))}-s${Math.max(0, Math.floor(stats.size))}`;
+    const baseRevision = mediaFileRevision(stats);
     const revision = VIDEO_EXTS.includes(ext)
       ? baseRevision
       : `${baseRevision}-${this.getSidecarHash(sidecar)}`;
@@ -292,17 +314,68 @@ export class ThumbnailService {
   }
 
   private async readCachedBuffer(cacheKey: string, cachePath: string): Promise<Buffer | null> {
+    while (this.cacheClearBarrier) await this.cacheClearBarrier;
     const cachedInMemory = this.getMemoryCache(cacheKey);
     if (cachedInMemory) return cachedInMemory;
 
     if (!existsSync(cachePath)) return null;
 
+    const operation = this.beginCacheOperation(cacheKey);
     try {
-      const buffer = await readFile(cachePath);
+      const stored = await readFile(cachePath);
+      if (!operation.valid) return null;
+      const buffer = decodeThumbnailCacheEntry(cacheKey, stored);
+      if (!buffer) return null;
       this.setMemoryCache(cacheKey, buffer);
       return buffer;
     } catch {
       return null;
+    } finally {
+      this.endCacheOperation(cacheKey, operation);
+    }
+  }
+
+  private beginCacheOperation(cacheKey: string): CacheOperation {
+    const operation = { valid: true };
+    const operations = this.cacheOperations.get(cacheKey) || new Set<CacheOperation>();
+    operations.add(operation);
+    this.cacheOperations.set(cacheKey, operations);
+    return operation;
+  }
+
+  private endCacheOperation(cacheKey: string, operation: CacheOperation): void {
+    const operations = this.cacheOperations.get(cacheKey);
+    operations?.delete(operation);
+    if (operations?.size === 0) this.cacheOperations.delete(cacheKey);
+  }
+
+  private queueCacheMutation<T>(mutate: () => Promise<T>): Promise<T> {
+    const next = this.cacheMutationTail.then(mutate);
+    this.cacheMutationTail = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
+  private async publishCacheBuffer(cacheKey: string, buffer: Buffer, operation: CacheOperation): Promise<void> {
+    if (!operation.valid || buffer.length === 0) return;
+    this.setMemoryCache(cacheKey, buffer);
+    const cachePath = this.getCachePath(cacheKey);
+    const temporaryPath = `${cachePath}.${randomUUID()}.tmp`;
+    let owned = false;
+    try {
+      // Readers only see the completed file; clears and final renames are ordered.
+      const handle = await open(temporaryPath, 'wx');
+      owned = true;
+      try { await handle.writeFile(encodeThumbnailCacheEntry(cacheKey, buffer)); } finally { await handle.close(); }
+      await this.queueCacheMutation(async () => {
+        if (!operation.valid) return;
+        await rename(temporaryPath, cachePath);
+        owned = false;
+        this.scheduleCacheLimitEnforcement();
+      });
+    } catch {
+      // Disk caching is optional; a successful decode remains usable in memory.
+    } finally {
+      if (owned) await unlink(temporaryPath).catch(() => {});
     }
   }
 
@@ -318,6 +391,22 @@ export class ThumbnailService {
     const descriptor = this.getThumbnailCacheDescriptor(imagePath, options);
     if (!descriptor) return null;
     return this.readCachedBuffer(descriptor.cacheKey, descriptor.cachePath);
+  }
+
+  async getOrGenerateDerivedPreview(
+    sourcePath: string,
+    recipe: string,
+    revision: string,
+    generate: () => Promise<Buffer>,
+  ): Promise<Buffer> {
+    const hash = createHash('sha256').update(JSON.stringify(['derived-v1', recipe, revision])).digest('hex');
+    const cacheKey = `${this.getSourceCachePrefix(sourcePath)}${hash}_derived.webp`;
+    const cached = await this.readCachedBuffer(cacheKey, this.getCachePath(cacheKey));
+    if (cached) return cached;
+    // The owning surface retains its foreground/background scheduling policy.
+    const generated = await this.getOrGenerate(cacheKey, generate, { path: sourcePath, revision });
+    if (!generated) throw new Error('Preview generation returned no data');
+    return generated;
   }
 
   enqueueThumbnailGeneration(
@@ -337,17 +426,27 @@ export class ThumbnailService {
   private async getOrGenerate(
     cacheKey: string,
     generate: () => Promise<Buffer | null>,
+    source?: { path: string; revision: string },
   ): Promise<Buffer | null> {
+    while (this.cacheClearBarrier) await this.cacheClearBarrier;
     const existing = this.pendingGenerations.get(cacheKey);
     if (existing) return existing;
 
-    const nextPromise = (async () => {
-      try {
-        return await generate();
-      } finally {
-        this.pendingGenerations.delete(cacheKey);
+    const operation = this.beginCacheOperation(cacheKey);
+    const nextPromise = Promise.resolve().then(generate).then(async buffer => {
+      if (buffer && source) {
+        try {
+          if (mediaFileRevision(await stat(source.path)) !== source.revision) return null;
+        } catch {
+          return null;
+        }
       }
-    })();
+      if (buffer) await this.publishCacheBuffer(cacheKey, buffer, operation);
+      return buffer;
+    }).finally(() => {
+      this.endCacheOperation(cacheKey, operation);
+      if (this.pendingGenerations.get(cacheKey) === nextPromise) this.pendingGenerations.delete(cacheKey);
+    });
 
     this.pendingGenerations.set(cacheKey, nextPromise);
     return nextPromise;
@@ -394,23 +493,8 @@ export class ThumbnailService {
    */
   async enforceCacheLimit(): Promise<void> {
     try {
-      const files = await readdir(this.cacheDir);
-      const fileStats: Array<{ path: string; mtime: number; size: number }> = [];
-      let totalSize = 0;
-
-      // Collect file stats
-      for (const file of files) {
-        const filePath = join(this.cacheDir, file);
-        try {
-          const stats = statSync(filePath);
-          fileStats.push({
-            path: filePath,
-            mtime: stats.mtimeMs,
-            size: stats.size,
-          });
-          totalSize += stats.size;
-        } catch { }
-      }
+      const fileStats = await this.collectCacheFiles();
+      const totalSize = fileStats.reduce((total, file) => total + file.size, 0);
 
       // If under limit, nothing to do
       if (totalSize <= MAX_CACHE_SIZE_BYTES) return;
@@ -426,7 +510,15 @@ export class ThumbnailService {
         if (bytesToFree <= 0) break;
 
         try {
-          await unlink(file.path);
+          const removed = await this.queueCacheMutation(async () => {
+            const current = await lstat(file.path);
+            // A conversion may have replaced this filename since the inventory.
+            if (!current.isFile() || current.ino !== file.ino || current.size !== file.size
+              || current.mtimeMs !== file.mtime || current.ctimeMs !== file.ctime) return false;
+            await unlink(file.path);
+            return true;
+          });
+          if (!removed) continue;
           bytesToFree -= file.size;
           filesRemoved++;
         } catch { }
@@ -469,7 +561,7 @@ export class ThumbnailService {
       return null;
     }
 
-    const revision = `m${Math.max(0, Math.floor(stats.mtimeMs))}-s${Math.max(0, Math.floor(stats.size))}-${this.getSidecarHash(sidecar)}`;
+    const revision = `${mediaFileRevision(stats)}-${this.getSidecarHash(sidecar)}`;
     const cacheKey = this.getCacheKey(imagePath, size, format, revision, quality);
     const cachePath = this.getCachePath(cacheKey);
 
@@ -486,9 +578,6 @@ export class ThumbnailService {
       if (!hasActiveSidecar) {
         const bunThumbnail = await this.generateBunImageThumbnail(imagePath, targetWidth, format, quality);
         if (bunThumbnail) {
-          this.setMemoryCache(cacheKey, bunThumbnail);
-          writeFile(cachePath, bunThumbnail).catch(() => { /* best effort */ });
-          this.scheduleCacheLimitEnforcement();
           return bunThumbnail;
         }
       }
@@ -557,12 +646,8 @@ export class ThumbnailService {
               .toBuffer();
       }
 
-      this.setMemoryCache(cacheKey, thumbnail);
-      writeFile(cachePath, thumbnail).catch(() => { /* best effort */ });
-      this.scheduleCacheLimitEnforcement();
-
       return thumbnail;
-    })).catch((error) => {
+    }), { path: imagePath, revision: mediaFileRevision(stats) }).catch((error) => {
       console.error(`[ThumbnailService] Failed to generate thumbnail for ${imagePath}:`, error);
       return null;
     });
@@ -595,7 +680,7 @@ export class ThumbnailService {
     const quality = Number.isFinite(Number(options.quality))
       ? Math.max(1, Math.min(100, Math.floor(Number(options.quality))))
       : 90;
-    const revision = `m${Math.max(0, Math.floor(stats.mtimeMs))}-s${Math.max(0, Math.floor(stats.size))}`;
+    const revision = mediaFileRevision(stats);
     const sourceHash = this.getSourceHash(imagePath);
     const cacheKey = `${sourceHash}_${createHash('md5')
       .update(`${CACHE_KEY_VERSION}|grid|${imagePath}|${revision}|${maxLongSide}|${quality}|${format}`)
@@ -613,12 +698,9 @@ export class ThumbnailService {
       return null;
     }
 
-    return this.getOrGenerate(cacheKey, async () => {
+    return this.getOrGenerate(cacheKey, () => this.withGenerationSlot(async () => {
       const bunPreview = await this.generateBunImageThumbnail(imagePath, maxLongSide, format, quality);
       if (bunPreview) {
-        this.setMemoryCache(cacheKey, bunPreview);
-        writeFile(cachePath, bunPreview).catch(() => { /* best effort */ });
-        this.scheduleCacheLimitEnforcement();
         return bunPreview;
       }
 
@@ -645,11 +727,8 @@ export class ThumbnailService {
             })
             .toBuffer();
 
-      this.setMemoryCache(cacheKey, preview);
-      writeFile(cachePath, preview).catch(() => { /* best effort */ });
-      this.scheduleCacheLimitEnforcement();
       return preview;
-    }).catch((error) => {
+    }), { path: imagePath, revision }).catch((error) => {
       console.error(`[ThumbnailService] Failed to generate grid preview for ${imagePath}:`, error);
       return null;
     });
@@ -676,7 +755,7 @@ export class ThumbnailService {
     const quality = Number.isFinite(Number(options.quality))
       ? Math.max(1, Math.min(100, Math.floor(Number(options.quality))))
       : 100;
-    const revision = `m${Math.max(0, Math.floor(stats.mtimeMs))}-s${Math.max(0, Math.floor(stats.size))}`;
+    const revision = mediaFileRevision(stats);
     const sourceHash = this.getSourceHash(imagePath);
     const cacheKey = `${sourceHash}_${createHash('md5')
       .update(`${CACHE_KEY_VERSION}|viewer-webp|${imagePath}|${revision}|${quality}`)
@@ -694,7 +773,7 @@ export class ThumbnailService {
       return null;
     }
 
-    return this.getOrGenerate(cacheKey, async () => {
+    return this.getOrGenerate(cacheKey, () => this.withGenerationSlot(async () => {
       const preview = await sharp(imagePath)
         .rotate()
         .webp({
@@ -706,11 +785,8 @@ export class ThumbnailService {
         })
         .toBuffer();
 
-      this.setMemoryCache(cacheKey, preview);
-      writeFile(cachePath, preview).catch(() => { /* best effort */ });
-      this.scheduleCacheLimitEnforcement();
       return preview;
-    }).catch((error) => {
+    }), { path: imagePath, revision }).catch((error) => {
       console.error(`[ThumbnailService] Failed to generate original WebP preview for ${imagePath}:`, error);
       return null;
     });
@@ -873,7 +949,7 @@ export class ThumbnailService {
     } catch {
       return null;
     }
-    const revision = `preview-m${Math.max(0, Math.floor(stats.mtimeMs))}-s${Math.max(0, Math.floor(stats.size))}-d${duration}-f${fps}`;
+    const revision = `preview-${mediaFileRevision(stats)}-d${duration}-f${fps}`;
     const cacheKey = this.getCacheKey(videoPath, size, 'webp', revision, FULL_QUALITY).replace(/\.webp$/, '.webm');
     const cachePath = this.getCachePath(cacheKey);
 
@@ -881,57 +957,16 @@ export class ThumbnailService {
     if (cached) return cached;
 
     try {
-      return this.getOrGenerate(cacheKey, () => this.withGenerationSlot(async () => {
-        const { spawn } = await import('child_process');
+      return await this.getOrGenerate(cacheKey, () => this.withGenerationSlot(async () => {
         const targetWidth = SIZES[size];
-
-        return new Promise<Buffer | null>((resolve) => {
-          // Generate preview: start at 1s, low fps, short duration, small size
-          const ffmpegProcess = spawn('ffmpeg', [
-            '-ss', '1',                          // Start at 1 second
-            '-i', videoPath,
-            '-t', String(duration),              // Duration in seconds
-            '-vf', `scale=${targetWidth}:-2,fps=${fps}`, // Scale and reduce fps
-            '-an',                               // No audio
-            '-c:v', 'libvpx-vp9',               // VP9 codec for webm
-            '-b:v', '200k',                      // Low bitrate
-            '-crf', '40',                        // Quality (higher = smaller)
-            '-f', 'webm',
-            'pipe:1'
-          ], {
-            stdio: ['pipe', 'pipe', 'pipe']
-          });
-          const chunks: Buffer[] = [];
-
-          ffmpegProcess.stdout.on('data', (chunk) => chunks.push(chunk));
-
-          ffmpegProcess.on('close', (code) => {
-            if (code !== 0 || chunks.length === 0) {
-              console.error(`[ThumbnailService] Preview generation failed for ${videoPath}`);
-              resolve(null);
-              return;
-            }
-
-            const preview = Buffer.concat(chunks);
-            this.setMemoryCache(cacheKey, preview);
-            writeFile(cachePath, preview).catch(() => { /* best effort */ });
-            this.scheduleCacheLimitEnforcement();
-            console.log(`[ThumbnailService] Generated preview for ${videoPath}: ${Math.round(preview.length / 1024)}KB`);
-            resolve(preview);
-          });
-
-          ffmpegProcess.on('error', (err) => {
-            console.error(`[ThumbnailService] FFmpeg error:`, err);
-            resolve(null);
-          });
-
-          // Timeout after 30 seconds for longer videos
-          setTimeout(() => {
-            ffmpegProcess.kill();
-            resolve(null);
-          }, 30000);
-        });
-      }));
+        return runFfmpegPreview([
+          '-hide_banner', '-loglevel', 'error', '-nostdin',
+          '-threads', '1', '-i', videoPath, '-map', '0:v:0', '-t', String(duration),
+          '-filter_threads', '1', '-vf', `scale=${targetWidth}:${targetWidth}:force_original_aspect_ratio=decrease:force_divisible_by=2,fps=${fps}`,
+          '-an', '-sn', '-dn', '-threads', '1', '-c:v', 'libvpx-vp9',
+          '-b:v', '200k', '-crf', '40', '-f', 'webm', 'pipe:1',
+        ], { timeoutMs: 30000, maxBytes: 16 * 1024 * 1024 });
+      }), { path: videoPath, revision: mediaFileRevision(stats) });
     } catch (error) {
       console.error(`[ThumbnailService] Failed to generate video preview for ${videoPath}:`, error);
       return null;
@@ -959,7 +994,7 @@ export class ThumbnailService {
       return null;
     }
 
-    const revision = `m${Math.max(0, Math.floor(stats.mtimeMs))}-s${Math.max(0, Math.floor(stats.size))}`;
+    const revision = mediaFileRevision(stats);
     const cacheKey = this.getCacheKey(videoPath, size, format, revision, quality);
     const cachePath = this.getCachePath(cacheKey);
 
@@ -967,66 +1002,8 @@ export class ThumbnailService {
     if (cached) return cached;
 
     try {
-      return this.getOrGenerate(cacheKey, () => this.withGenerationSlot(async () => {
-        const { spawn } = await import('child_process');
-        const targetWidth = SIZES[size];
-
-        // Extract frame at 1 second using ffmpeg
-        const ffmpegArgs = [
-          '-ss', '1',
-          '-i', videoPath,
-          '-vframes', '1',
-          '-vf', `scale=${targetWidth}:-1`,
-          '-f', 'image2pipe',
-        ];
-
-        if (format === 'webp') {
-          ffmpegArgs.push(
-            '-vcodec', 'libwebp',
-            '-q:v', String(quality),
-            '-compression_level', '6'
-          );
-        } else {
-          ffmpegArgs.push(
-            '-vcodec', 'mjpeg',
-            '-q:v', '1'
-          );
-        }
-
-        ffmpegArgs.push('pipe:1');
-
-        return new Promise<Buffer | null>((resolve) => {
-          const ffmpegProcess = spawn('ffmpeg', ffmpegArgs, {
-            stdio: ['pipe', 'pipe', 'pipe']
-          });
-          const chunks: Buffer[] = [];
-
-          ffmpegProcess.stdout.on('data', (chunk) => chunks.push(chunk));
-
-          ffmpegProcess.on('close', async (code) => {
-            if (code !== 0 || chunks.length === 0) {
-              resolve(null);
-              return;
-            }
-
-            const thumbnail = Buffer.concat(chunks);
-
-            this.setMemoryCache(cacheKey, thumbnail);
-            writeFile(cachePath, thumbnail).catch(() => { /* best effort */ });
-            this.scheduleCacheLimitEnforcement();
-
-            resolve(thumbnail);
-          });
-
-          ffmpegProcess.on('error', () => resolve(null));
-
-          // Timeout after 10 seconds
-          setTimeout(() => {
-            ffmpegProcess.kill();
-            resolve(null);
-          }, 10000);
-        });
-      }));
+      return await this.getOrGenerate(cacheKey, () => this.withGenerationSlot(() =>
+        extractVideoFrame(videoPath, SIZES[size], 'contain', { format, quality })), { path: videoPath, revision });
     } catch (error) {
       console.error(`[ThumbnailService] Failed to generate video thumbnail for ${videoPath}:`, error);
       return null;
@@ -1072,7 +1049,13 @@ export class ThumbnailService {
     ));
     if (prefixes.length === 0) return;
 
-    const matchesPrefix = (cacheKey: string) => prefixes.some((prefix) => cacheKey.startsWith(prefix));
+    await this.clearMatchingCache(cacheKey => prefixes.some(prefix => cacheKey.startsWith(prefix)));
+  }
+
+  private clearMatchingCache(matchesPrefix: (cacheKey: string) => boolean): Promise<void> {
+    for (const [cacheKey, operations] of this.cacheOperations) {
+      if (matchesPrefix(cacheKey)) for (const operation of operations) operation.valid = false;
+    }
     for (const [cacheKey, entry] of Array.from(this.memoryCache.entries())) {
       if (!matchesPrefix(cacheKey)) continue;
       this.memoryCache.delete(cacheKey);
@@ -1084,58 +1067,63 @@ export class ThumbnailService {
       }
     });
 
-    try {
-      const files = await readdir(this.cacheDir);
-      await Promise.all(
-        files
-          .filter((file) => matchesPrefix(file))
-          .map((file) => unlink(join(this.cacheDir, file)).catch(() => { }))
-      );
-    } catch { }
+    const clearing = this.queueCacheMutation(async () => {
+      try {
+        const files = await readdir(this.cacheDir);
+        await Promise.all(
+          files
+            .filter((file) => matchesPrefix(file))
+            .map((file) => unlink(join(this.cacheDir, file)).catch(() => { }))
+        );
+      } catch { }
+    });
+    this.cacheClearBarrier = clearing;
+    void clearing.then(() => {
+      if (this.cacheClearBarrier === clearing) this.cacheClearBarrier = null;
+    });
+    return clearing;
   }
 
   async clearCache(imagePath?: string): Promise<void> {
     if (imagePath) {
       await this.clearCacheForPaths([imagePath]);
     } else {
-      this.memoryCache.clear();
-      this.memoryCacheSizeBytes = 0;
-      this.pendingGenerations.clear();
-      // Clear all cache
-      try {
-        const files = await readdir(this.cacheDir);
-        await Promise.all(
-          files.map(file => unlink(join(this.cacheDir, file)).catch(() => { }))
-        );
-      } catch { }
+      await this.clearMatchingCache(() => true);
     }
   }
 
-  private collectCacheFiles(): Array<{ path: string; name: string }> {
-    try {
-      return readdirSync(this.cacheDir).map((file) => ({
-        path: join(this.cacheDir, file),
-        name: file,
-      }));
-    } catch {
-      return [];
-    }
+  private collectCacheFiles(): Promise<CacheFile[]> {
+    if (this.cacheInventoryInFlight) return this.cacheInventoryInFlight;
+    const inventory = (async () => {
+      const names = (await readdir(this.cacheDir)).filter(name => !name.endsWith('.tmp'));
+      const files: CacheFile[] = [];
+      for (let offset = 0; offset < names.length; offset += CACHE_INVENTORY_CONCURRENCY) {
+        await Promise.all(names.slice(offset, offset + CACHE_INVENTORY_CONCURRENCY).map(async name => {
+          const path = join(this.cacheDir, name);
+          try {
+            const stats = await lstat(path);
+            if (!stats.isFile()) return;
+            files.push({ path, name, size: stats.size, mtime: stats.mtimeMs, ctime: stats.ctimeMs, ino: stats.ino });
+          } catch { /* Cache entries can disappear during a scan. */ }
+        }));
+      }
+      return files;
+    })();
+    this.cacheInventoryInFlight = inventory;
+    const clear = () => {
+      if (this.cacheInventoryInFlight === inventory) this.cacheInventoryInFlight = null;
+    };
+    void inventory.then(clear, clear);
+    return inventory;
   }
 
   /**
    * Get cache statistics
    */
-  getCacheStats(): { count: number; sizeBytes: number; sizeMB: number; maxSizeMB: number; percentUsed: number; memoryCount: number; memorySizeMB: number } {
+  async getCacheStats(): Promise<{ count: number; sizeBytes: number; sizeMB: number; maxSizeMB: number; percentUsed: number; memoryCount: number; memorySizeMB: number }> {
     try {
-      const files = this.collectCacheFiles();
-      let totalSize = 0;
-
-      for (const file of files) {
-        try {
-          const stats = statSync(file.path);
-          totalSize += stats.size;
-        } catch { }
-      }
+      const files = await this.collectCacheFiles();
+      const totalSize = files.reduce((total, file) => total + file.size, 0);
 
       const sizeMB = Math.round(totalSize / (1024 * 1024));
       const maxSizeMB = Math.round(MAX_CACHE_SIZE_BYTES / (1024 * 1024));

@@ -3314,7 +3314,20 @@ export function ModelManagerWorkspace() {
   }, []);
 
   const downloadJobsRef = React.useRef(downloadJobs);
+  const dismissedDownloadIdsRef = React.useRef(new Set<string>());
   downloadJobsRef.current = downloadJobs;
+  React.useEffect(() => {
+    const controller = new AbortController();
+    void fetchJson<{ jobs: DownloadJob[] }>('/api/model-manager/downloads', { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) })
+      .then(({ jobs }) => {
+        if (controller.signal.aborted) return;
+        const restored = Object.fromEntries(jobs.filter(job => !dismissedDownloadIdsRef.current.has(job.jobId)).map(job => [job.jobId, job]));
+        setDownloadJobs(current => ({ ...restored, ...current }));
+      }).catch(() => {
+        if (!controller.signal.aborted) addToast({ type: 'error', message: 'Could not restore download history. Reopen Model Manager to retry.' });
+      });
+    return () => controller.abort();
+  }, [addToast]);
   const activeDownloadIds = JSON.stringify(Object.values(downloadJobs).filter(job => job.status === 'queued' || job.status === 'downloading').map(job => job.jobId).sort());
   const localTransferJobsRef = React.useRef(localTransferJobs);
   localTransferJobsRef.current = localTransferJobs;
@@ -3510,19 +3523,21 @@ export function ModelManagerWorkspace() {
     }
   }, [addToast]);
 
-  const clearFinishedDownloads = React.useCallback(() => {
-    setDownloadJobs((prev) => {
-      const next: Record<string, DownloadJob> = {};
-      for (const [jobId, job] of Object.entries(prev)) {
-        if (job.status === 'queued' || job.status === 'downloading') {
-          next[jobId] = job;
-          continue;
-        }
-        announcedTerminalJobsRef.current.delete(jobId);
-      }
-      return next;
-    });
-  }, []);
+  const clearFinishedDownloads = React.useCallback(async () => {
+    const jobIds = Object.values(downloadJobsRef.current).filter(job => !['queued', 'downloading'].includes(job.status)).map(job => job.jobId);
+    try {
+      const { removed } = await fetchJson<{ removed: string[] }>('/api/model-manager/downloads', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobIds }),
+      });
+      for (const id of removed) dismissedDownloadIdsRef.current.add(id);
+      setDownloadJobs(current => {
+        const next = { ...current };
+        for (const id of removed) { delete next[id]; announcedTerminalJobsRef.current.delete(id); }
+        return next;
+      });
+      if (removed.length < jobIds.length) addToast({ type: 'info', message: 'Downloads still finishing or needing file recovery were kept in the list.' });
+    } catch (error: any) { addToast({ type: 'error', message: error?.message || 'Could not clear download history' }); }
+  }, [addToast]);
 
   const clearFinishedTransfers = React.useCallback(() => {
     setLocalTransferJobs((prev) => {
@@ -5831,7 +5846,7 @@ export function ModelManagerWorkspace() {
               <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Downloads</div>
               <button
                 type="button"
-                onClick={clearFinishedDownloads}
+                onClick={() => void clearFinishedDownloads()}
                 className="rounded border border-white/10 px-2 py-1 text-[10px] text-zinc-300 hover:text-white"
               >
                 Clear Finished
@@ -5879,6 +5894,7 @@ export function ModelManagerWorkspace() {
                     <div className="mt-1 truncate text-[10px] text-zinc-500" title={job.destinationPath || '-'}>
                       {job.destinationPath || '-'}
                     </div>
+                    {job.error ? <div className="mt-1 break-words text-[11px] text-amber-300">{job.error}</div> : null}
                   </div>
                 ))}
             </div>

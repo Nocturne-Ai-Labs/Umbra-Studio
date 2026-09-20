@@ -1,9 +1,7 @@
-import type { PowerPrompterOutputPreviewItem } from '@/components/layout/PowerPrompterCardChainEditor';
 import {
   clampQueueSetId,
 } from '@/components/power-prompter/queue/queueCore';
 import type {
-  QueueManagerOutputBucket,
   QueueRequestGroup,
   QueueRequestMeta,
   QueueSetGroup,
@@ -11,7 +9,6 @@ import type {
   QueueVisualState,
 } from '@/components/power-prompter/queue/queueCore';
 import { getQueuePromptEventKey } from '@/components/power-prompter/queue/queueProgression';
-import { getQueueManagerOutputBucketMeta } from '@/components/power-prompter/powerPrompterSupport';
 
 export interface BuildQueueRequestGroupsOptions {
   queueStackItems: QueueStackItem[];
@@ -336,51 +333,6 @@ export function getQueueManagerActivePromptText(
   return '';
 }
 
-export function buildQueueManagerOutputBuckets(queueManagerMediaItems: PowerPrompterOutputPreviewItem[]): QueueManagerOutputBucket[] {
-  const bucketMap = new Map<string, QueueManagerOutputBucket>();
-  const addStyleCounts = (bucket: QueueManagerOutputBucket, styleLabels: string[]) => {
-    for (const styleLabelRaw of styleLabels) {
-      const styleLabel = String(styleLabelRaw || '').trim();
-      if (!styleLabel) continue;
-      const existingStyle = bucket.styleCounts.find((entry) => entry.label.toLowerCase() === styleLabel.toLowerCase());
-      if (existingStyle) {
-        existingStyle.count += 1;
-      } else {
-        bucket.styleCounts.push({ label: styleLabel, count: 1 });
-      }
-    }
-    bucket.styleCounts.sort((a, b) => a.label.localeCompare(b.label));
-  };
-  queueManagerMediaItems.forEach((item) => {
-    const meta = getQueueManagerOutputBucketMeta(item.path);
-    const existing = bucketMap.get(meta.key);
-    if (existing) {
-      existing.items.push(item);
-      for (const styleLabel of meta.styleLabels) {
-        if (!existing.styleLabels.some((entry) => entry.toLowerCase() === styleLabel.toLowerCase())) {
-          existing.styleLabels.push(styleLabel);
-        }
-      }
-      addStyleCounts(existing, meta.styleLabels);
-      return;
-    }
-    const bucket: QueueManagerOutputBucket = {
-      key: meta.key,
-      sortSetOrder: meta.setOrder,
-      setLabel: meta.setLabel,
-      groupLabel: meta.groupLabel,
-      styleLabels: [...meta.styleLabels],
-      styleCounts: [],
-      items: [item],
-    };
-    addStyleCounts(bucket, meta.styleLabels);
-    bucketMap.set(meta.key, bucket);
-  });
-  return Array.from(bucketMap.values()).sort((a, b) => {
-    if (a.sortSetOrder !== b.sortSetOrder) return a.sortSetOrder - b.sortSetOrder;
-    return a.key.localeCompare(b.key);
-  });
-}
 
 export function buildQueueSummaryCounts(queueStackItems: QueueStackItem[]) {
   const counts = { queued: 0, running: 0, pending: 0, failed: 0 };

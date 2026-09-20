@@ -33,6 +33,8 @@ export interface UmbraFirstRunState {
     processedBytes: number;
     currentItem: string;
     error: string;
+    recoveryRoot?: string;
+    conflictFiles?: number;
   } | null;
 }
 
@@ -99,6 +101,8 @@ export function normalizeFirstRunState(value: unknown): UmbraFirstRunState {
         processedBytes: Math.max(0, Number(candidate.migration.processedBytes) || 0),
         currentItem: String(candidate.migration.currentItem || ''),
         error: String(candidate.migration.error || ''),
+        ...(candidate.migration.recoveryRoot ? { recoveryRoot: String(candidate.migration.recoveryRoot) } : {}),
+        ...(candidate.migration.conflictFiles !== undefined ? { conflictFiles: Math.max(0, Math.floor(Number(candidate.migration.conflictFiles) || 0)) } : {}),
       }
     : null;
   return {

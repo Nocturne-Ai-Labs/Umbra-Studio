@@ -1,14 +1,32 @@
 import { resolve, join } from 'node:path';
-import { existsSync, statSync, mkdirSync } from 'node:fs';
+import { statSync, mkdirSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
+
+const PINNED_OUTPUT_RECOVERY = 'Select a different output folder or Default dated output, then generate again.';
+
+export async function assertUmbraUiPinnedOutputAvailable(requested: unknown, pins: unknown, resolveCandidate: (value: string) => string): Promise<void> {
+  const root = resolveUmbraUiPinnedOutputFolder(requested, pins, resolveCandidate);
+  if (!root) return;
+  const available = await stat(root).then(entry => entry.isDirectory()).catch(() => false);
+  if (!available) throw new Error(`The pinned output folder is unavailable. ${PINNED_OUTPUT_RECOVERY}`);
+}
 
 export type UmbraPinnedOutputTask = 'txt2img' | 'img2img' | 'inpainting' | 'canvas' | 'Video' | 'Upscaled' | 'Censored' | 'Watermarked' | 'GIF';
 
 export function resolveUmbraPinnedTaskFolder(requested: unknown, pins: unknown, resolveCandidate: (value: string) => string, task: UmbraPinnedOutputTask): string {
   const root = resolveUmbraUiPinnedOutputFolder(requested, pins, resolveCandidate);
   if (!root) return '';
-  if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error('The pinned output folder is unavailable.');
+  try {
+    if (!statSync(root).isDirectory()) throw new Error('Not a directory');
+  } catch {
+    throw new Error(`The pinned output folder is unavailable. ${PINNED_OUTPUT_RECOVERY}`);
+  }
   const folder = join(root, task);
-  mkdirSync(folder, { recursive: true });
+  try {
+    mkdirSync(folder, { recursive: true });
+  } catch {
+    throw new Error(`The pinned output folder cannot be written to. ${PINNED_OUTPUT_RECOVERY}`);
+  }
   return folder;
 }
 
@@ -44,5 +62,5 @@ export function resolveUmbraUiPinnedOutputFolder(
     }
   }
 
-  throw new Error('The selected Umbra UI output folder is no longer pinned. Pin it in Gallery and choose it again.');
+  throw new Error(`The selected Umbra UI output folder is no longer pinned. ${PINNED_OUTPUT_RECOVERY}`);
 }

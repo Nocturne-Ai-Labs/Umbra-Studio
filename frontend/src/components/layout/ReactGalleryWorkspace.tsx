@@ -63,7 +63,7 @@ import {
   galleryBridgeFsUrl,
   normalizeGalleryFsUrl,
 } from '@/lib/galleryBridgeFs';
-import { galleryMediaCacheKey, galleryMediaRevision } from '@/lib/galleryMediaIdentity';
+import { galleryMetadataCacheKey, galleryMediaRevision } from '@/lib/galleryMediaIdentity';
 import { buildTrashThumbnailUrl } from '@/lib/galleryTrashMedia';
 import { reconcileGalleryViewerNavigation } from '@/lib/galleryViewerNavigation';
 import { isGalleryDoubleTap, type GalleryTapSample } from '@/lib/galleryTouchNavigation';
@@ -125,6 +125,7 @@ type GalleryFolderTreeNode = GalleryFolder & {
 };
 
 type GalleryFile = {
+  revision?: string;
   privacyClass?: 'normal' | 'nsfw';
   uid?: string;
   id?: string;
@@ -140,6 +141,7 @@ type GalleryFile = {
   width?: number;
   height?: number;
   metadataReady?: boolean;
+  metadataRevision?: string;
   metadataFormat?: string | null;
   tags?: string[];
   originalPath?: string;
@@ -399,6 +401,7 @@ type GalleryFolderPreviewGroup = {
 };
 
 type GalleryFolderSummary = {
+  signature?: string;
   path?: string;
   subfolderCount?: number;
   imageCount?: number;
@@ -1423,6 +1426,7 @@ function compareGalleryFiles(
 function folderSummarySignature(summary: GalleryFolderSummary | null | undefined): string {
   if (!summary) return '';
   return [
+    summary.signature || '',
     Math.max(0, Math.trunc(Number(summary.totalMediaCount || 0))),
     Math.max(0, Math.trunc(Number(summary.subfolderCount || 0))),
     Math.max(0, Math.trunc(Number(summary.imageCount || 0))),
@@ -1439,6 +1443,7 @@ function galleryFilesEquivalent(left: GalleryFile | null | undefined, right: Gal
   return (
     normalizePath(left.path) === normalizePath(right.path)
     && String(left.uid || left.id || '') === String(right.uid || right.id || '')
+    && revisionFor(left) === revisionFor(right)
     && String(left.name || '') === String(right.name || '')
     && String(left.type || '') === String(right.type || '')
     && Number(left.size || 0) === Number(right.size || 0)
@@ -1449,6 +1454,8 @@ function galleryFilesEquivalent(left: GalleryFile | null | undefined, right: Gal
     && Number(left.height || 0) === Number(right.height || 0)
     && String(left.metadataFormat || '') === String(right.metadataFormat || '')
     && (left.metadataReady === right.metadataReady)
+    && (left.metadataRevision === right.metadataRevision)
+    && left.privacyClass === right.privacyClass
     && (left.tags || []).join('\u0001') === (right.tags || []).join('\u0001')
   );
 }
@@ -1457,6 +1464,7 @@ function mergeGalleryFilePreservingIdentity(previous: GalleryFile | undefined, i
   if (!previous) return incoming;
   const samePhysicalFile = (
     normalizePath(previous.path) === normalizePath(incoming.path)
+    && previous.revision === incoming.revision
     && Number(previous.size || 0) === Number(incoming.size || 0)
     && Number(previous.createdMs || 0) === Number(incoming.createdMs || 0)
     && Number(previous.modifiedMs || 0) === Number(incoming.modifiedMs || 0)
@@ -1842,9 +1850,7 @@ function compactText(value: unknown, maxLength = 700): string {
 }
 
 function getCachedViewerMetadata(pathValue: string, file?: GalleryFile): GalleryViewerMetadata | null {
-  const key = file
-    ? galleryMediaCacheKey(pathValue, file)
-    : `${normalizePath(pathValue).toLowerCase()}\u0000unversioned`;
+  const key = galleryMetadataCacheKey(pathValue, file);
   if (!key) return null;
   const cached = viewerMetadataCache.get(key);
   if (!cached) return null;
@@ -1858,9 +1864,7 @@ function getCachedViewerMetadata(pathValue: string, file?: GalleryFile): Gallery
 }
 
 function setCachedViewerMetadata(pathValue: string, value: GalleryViewerMetadata, file?: GalleryFile) {
-  const key = file
-    ? galleryMediaCacheKey(pathValue, file)
-    : `${normalizePath(pathValue).toLowerCase()}\u0000unversioned`;
+  const key = galleryMetadataCacheKey(pathValue, file);
   if (!key) return;
   viewerMetadataCache.set(key, { value, cachedAt: Date.now() });
   while (viewerMetadataCache.size > VIEWER_METADATA_CACHE_LIMIT) {
@@ -1871,7 +1875,7 @@ function setCachedViewerMetadata(pathValue: string, value: GalleryViewerMetadata
 }
 
 function clearCachedViewerMetadata(pathValue: string) {
-  const prefix = `${normalizePath(pathValue).toLowerCase()}\u0000`;
+  const prefix = `${normalizePath(pathValue)}\u0000`;
   if (prefix === '\u0000') return;
   for (const key of Array.from(viewerMetadataCache.keys())) {
     if (key.startsWith(prefix)) viewerMetadataCache.delete(key);
@@ -2665,6 +2669,7 @@ function GalleryImageTile({
   const selectionPointerHandledRef = useRef(false);
   const path = normalizePath(file.path);
   const stableSrc = useMemo(() => thumbnailUrl(file, { defer: true }), [
+    file.revision,
     file.createdMs,
     file.id,
     file.modifiedMs,
@@ -4717,6 +4722,7 @@ function GalleryDatasetTargetPicker({
 
 export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const appSettings = useStore((state) => state.appSettings);
+  const showFilmstrip = useStore((state) => state.ui.showFilmstrip);
   const externalOutputPath = useStore((state) => state.appSettings['comfyui.externalOutputPath']);
   const externalRootsSetting = useStore((state) => state.appSettings['library.externalRoots']);
   const externalRootsEnabled = useStore((state) => state.appSettings['library.enableExternalRoots'] !== false);
@@ -5241,8 +5247,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     return Array.from(visible);
   }, [expandedFolders, rootChoices, treeChildrenByPath]);
   const invalidateChangedTreeBranches = useGalleryTreeRefresh({
-    paths: visibleTreeBranches,
-    paused: !active || transferInProgress || (isPhoneRemote && galleryMobileView !== 'folders'),
+    paths: uniqueNormalizedPaths([currentFolder, ...(active ? visibleTreeBranches : [])]).filter(path => !isTrashPath(path)),
+    backgroundPaths: uniqueNormalizedPaths([
+      ...pinnedFolders, ...rootChoices.filter(root => root.kind !== 'trash').map(root => root.path),
+    ]).filter(path => !isTrashPath(path)),
+    paused: transferInProgress || (isPhoneRemote && (!active || galleryMobileView !== 'folders')),
+    refreshMs: active ? 15_000 : 60_000,
     refresh: (path) => loadTreeChildren(path, true, true),
   });
 
@@ -5727,7 +5737,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
 
     const reconcilePromise = (async () => {
       const startedAt = nowMs();
-      const isStillCurrentFolder = () => pathsEqual(folderPath, currentFolderRef.current);
+      const sequence = loadSeqRef.current;
+      const isStillCurrentFolder = () => sequence === loadSeqRef.current && pathsEqual(folderPath, currentFolderRef.current);
       if (!isStillCurrentFolder()) return false;
 
       const currentFiles = filesRef.current;
@@ -5764,20 +5775,15 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       if (!response.ok) throw new Error(String((payload as GalleryListPayload & { error?: string })?.error || 'Failed to reconcile gallery folder'));
       if (payload.missing) throw new Error('Folder is currently unavailable');
 
+      if (filesRef.current !== currentFiles) throw new Error('Gallery changed during reconciliation; retrying on the next check');
       const incomingFiles = Array.isArray(payload.files)
         ? payload.files.map((file, index) => normalizeGalleryFile(file, index))
         : [];
       const incomingFolders = Array.isArray(payload.folders) ? galleryFoldersToTreeNodes(payload.folders) : [];
-      if (incomingFolders.length > 0) {
-        writeTreeChildrenCache(folderPath, incomingFolders);
-      }
+      writeTreeChildrenCache(folderPath, incomingFolders);
 
       const existingByPath = new Map(currentFiles.map((file) => [normalizePath(file.path).toLowerCase(), file]));
       const mergedByPath = new Map<string, GalleryFile>();
-      for (const file of currentFiles) {
-        const key = normalizePath(file.path).toLowerCase();
-        if (key) mergedByPath.set(key, file);
-      }
 
       let added = 0;
       let updated = 0;
@@ -5797,19 +5803,25 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       }
 
       const nextFiles = Array.from(mergedByPath.values()).sort((left, right) => compareGalleryFiles(left, right, sortBy, sortOrder));
+      const removed = currentFiles.some(file => !mergedByPath.has(normalizePath(file.path).toLowerCase()));
+      if (removed) {
+        setSelectedPaths(current => new Set([...current].filter(path => mergedByPath.has(normalizePath(path).toLowerCase()))));
+        setLastSelectedPath(current => mergedByPath.has(normalizePath(current).toLowerCase()) ? current : '');
+      }
       if (!galleryFileArraysEquivalent(currentFiles, nextFiles)) {
         filesRef.current = nextFiles;
         setFiles(nextFiles);
       }
 
-      const nextTotal = Math.max(summaryTotal, Number(payload.total || 0), nextFiles.length);
+      const nextTotal = Math.max(Number(payload.total || 0), nextFiles.length);
       setTotal(nextTotal);
       clearPageCacheForFolder(folderPath);
 
-      if (added > 0 || updated > 0) {
-        emitFilmstripFeed(folderPath, added > 0 ? additions : nextFiles, {
-          mode: added > 0 ? 'append' : 'replace',
-          files: added > 0 ? additions : nextFiles,
+      if (added > 0 || updated > 0 || removed) {
+        const appendOnly = added > 0 && !updated && !removed;
+        emitFilmstripFeed(folderPath, appendOnly ? additions : nextFiles, {
+          mode: appendOnly ? 'append' : 'replace',
+          files: appendOnly ? additions : nextFiles,
           total: nextTotal,
           done: true,
           nextCursor: null,
@@ -5828,8 +5840,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         summaryTotal,
         durationMs: nowMs() - startedAt,
       });
-      return added > 0 || updated > 0;
+      return added > 0 || updated > 0 || removed;
     })().catch((error) => {
+      const snapshot = folderSummarySnapshotRef.current;
+      if (snapshot && pathsEqual(snapshot.path, folderPath)) {
+        folderSummarySnapshotRef.current = { ...snapshot, signature: '' };
+      }
       traceGalleryLoad({
         event: 'summary_reconcile_error',
         folderPath,
@@ -7495,7 +7511,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     let lastError = '';
     for (const path of normalized) {
       try {
-        const cachedMetadata = getCachedViewerMetadata(path);
+        const cachedMetadata = isLiveGenerationPreviewPath(path) ? getCachedViewerMetadata(path) : null;
         const cachedApiPayload = cachedMetadata
           ? await resolveGalleryApiWorkflowOpenPayload(cachedMetadata, pathLeaf(path) || 'API workflow')
           : null;
@@ -8592,19 +8608,23 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
 
   useEffect(() => {
     const folderPath = normalizePath(currentFolder);
-    if (!folderPath || isTrashPath(folderPath) || globalSearchActive) {
+    if (!folderPath || isTrashPath(folderPath) || (globalSearchActive && active)) {
       folderSummarySnapshotRef.current = null;
       return;
     }
 
     let disposed = false;
     let controller: AbortController | null = null;
+    let lastPollAt = 0;
+    const pollInterval = active ? CURRENT_FOLDER_SUMMARY_POLL_MS : 15_000;
 
     const poll = async () => {
       if (disposed) return;
       if (folderSummaryPollInFlightRef.current) return;
-      if (!active || loading || folderLoadAbortRef.current || transferInProgress || selectAllLoading) return;
+      if ((!active && (!showFilmstrip || isPhoneRemote)) || loading || folderLoadAbortRef.current || transferInProgress || selectAllLoading) return;
       if (typeof document !== 'undefined' && document.visibilityState && document.visibilityState !== 'visible') return;
+      if (Date.now() - lastPollAt < pollInterval) return;
+      lastPollAt = Date.now();
 
       folderSummaryPollInFlightRef.current = true;
       controller?.abort();
@@ -8632,7 +8652,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         const signatureChanged = previous?.signature !== signature;
         const mediaChanged = previous
           ? previous.totalMediaCount !== summaryTotal
-          : (filesRef.current.length > 0 && summaryTotal !== stateTotal);
+          : summaryTotal !== stateTotal;
         const subfoldersChanged = previous
           ? previous.subfolderCount !== summarySubfolders
           : false;
@@ -8682,11 +8702,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     };
 
     void poll();
-    const interval = window.setInterval(poll, CURRENT_FOLDER_SUMMARY_POLL_MS);
+    const interval = window.setInterval(poll, pollInterval);
     const onWake = () => {
       void poll();
     };
     window.addEventListener('focus', onWake);
+    window.addEventListener('umbra:gallery-request-filmstrip-feed', onWake);
     document.addEventListener('visibilitychange', onWake);
 
     return () => {
@@ -8694,6 +8715,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       controller?.abort();
       window.clearInterval(interval);
       window.removeEventListener('focus', onWake);
+      window.removeEventListener('umbra:gallery-request-filmstrip-feed', onWake);
       document.removeEventListener('visibilitychange', onWake);
     };
   }, [
@@ -8701,6 +8723,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     fetchFolderSummary,
     globalSearchActive,
     active,
+    showFilmstrip,
+    isPhoneRemote,
     invalidateTreeChildrenCache,
     loadTreeChildren,
     loading,

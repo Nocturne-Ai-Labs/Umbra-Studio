@@ -605,14 +605,13 @@ function MediaSourceField({ kind, label, path, onChange, onUploaded, onClear, on
       const filename = String(payload?.filename || '').trim();
       if (!sourcePath || !filename) throw new Error(`Umbra did not return the uploaded ${kind}.`);
       onUploaded(sourcePath, filename);
-      showToast(`${label} ready.`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : `Failed to upload ${kind}.`, 'error');
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = '';
     }
-  }, [kind, label, onUploaded, showToast, uploading]);
+  }, [kind, onUploaded, showToast, uploading]);
   return (
     <div className="grid grid-cols-[72px_minmax(0,1fr)_28px_28px] items-center gap-2 border-t border-white/[0.07] py-2 first:border-t-0">
       <div className="flex h-12 items-center justify-center overflow-hidden border border-white/10 bg-black/40">

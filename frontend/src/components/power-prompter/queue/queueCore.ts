@@ -7,7 +7,6 @@ import type {
 } from '@/types/powerPrompter';
 import type { normalizePowerPrompterGenerationControls } from '@/lib/powerPrompter';
 import { POWER_PROMPTER_MAX_QUEUE_CYCLE_WEIGHT, POWER_PROMPTER_MAX_QUEUE_SETS } from '@/lib/powerPrompter';
-import type { PowerPrompterOutputPreviewItem } from '@/components/layout/PowerPrompterCardChainEditor';
 
 export const QUEUE_MANAGER_DISPATCH_DELAY_OPTIONS = [
   { label: 'Instant', value: 0 },
@@ -26,9 +25,6 @@ export const QUEUE_DIVERSITY_MAX = 100;
 export const QUEUE_DIVERSITY_DECIMAL_SCALE = 100;
 export const QUEUE_DIVERSITY_STEP = 1 / QUEUE_DIVERSITY_DECIMAL_SCALE;
 
-export const QUEUE_MANAGER_PREVIEW_SPLIT_MIN = 0.34;
-export const QUEUE_MANAGER_PREVIEW_SPLIT_MAX = 0.78;
-export const DEFAULT_QUEUE_MANAGER_PREVIEW_SPLIT = 0.58;
 export const QUEUE_MANAGER_PROMPT_ROW_VISIBILITY_STYLE = {
   contentVisibility: 'auto',
   containIntrinsicSize: '86px',
@@ -51,21 +47,7 @@ export type PowerPrompterQueueMode = 'prompt' | 'selected' | 'variants';
 export type PowerPrompterPanelMode = 'editor' | 'preset-editor' | 'queue-manager' | 'queue-editor';
 export type QueueManagerSequenceMode = 'default' | 'similar' | 'balanced' | 'unique';
 
-export type QueueManagerOutputMenuState = {
-  item: PowerPrompterOutputPreviewItem;
-  x: number;
-  y: number;
-};
 
-export type QueueManagerOutputBucket = {
-  key: string;
-  sortSetOrder: number;
-  setLabel: string;
-  groupLabel: string;
-  styleLabels: string[];
-  styleCounts: Array<{ label: string; count: number }>;
-  items: PowerPrompterOutputPreviewItem[];
-};
 
 export type QueuePromptToken = {
   text: string;
@@ -388,11 +370,6 @@ export const powerPrompterQueueSession: PowerPrompterQueueSessionState = {
   },
 };
 
-export function normalizeQueueManagerPreviewSplit(rawValue: unknown): number {
-  const numeric = Number(rawValue);
-  if (!Number.isFinite(numeric)) return DEFAULT_QUEUE_MANAGER_PREVIEW_SPLIT;
-  return Math.min(QUEUE_MANAGER_PREVIEW_SPLIT_MAX, Math.max(QUEUE_MANAGER_PREVIEW_SPLIT_MIN, numeric));
-}
 
 export function normalizeQueueTraversalMode(rawMode: unknown): PowerPrompterQueueTraversalMode {
   const mode = String(rawMode || '').trim().toLowerCase();

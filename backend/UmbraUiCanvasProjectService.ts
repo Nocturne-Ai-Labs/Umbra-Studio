@@ -468,15 +468,14 @@ export class UmbraUiCanvasProjectService {
   }
 
   private async collectSnapshotAssetNames(projectId: string, names: Set<string>): Promise<void> {
-    const entries = await readdir(this.snapshotRoot(projectId), { withFileTypes: true }).catch(() => []);
+    const entries = await readdir(this.snapshotRoot(projectId), { withFileTypes: true }).catch((error) => {
+      if (error?.code === 'ENOENT') return [];
+      throw error;
+    });
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
-      try {
-        const snapshot = asRecord(JSON.parse(await readFile(join(this.snapshotRoot(projectId), entry.name), 'utf8')));
-        collectStoredAssetNames(snapshot.project, names);
-      } catch {
-        // Ignore a malformed restore point while preserving normal project saves.
-      }
+      const snapshot = asRecord(JSON.parse(await readFile(join(this.snapshotRoot(projectId), entry.name), 'utf8')));
+      collectStoredAssetNames(migrateProjectDocument(snapshot.project), names, true);
     }
   }
 
@@ -509,9 +508,10 @@ export class UmbraUiCanvasProjectService {
   private async readStored(projectId: string): Promise<Record<string, any> | null> {
     try {
       const raw = await readFile(join(this.projectRoot(projectId), 'project.json'), 'utf8');
-      return asRecord(JSON.parse(raw));
-    } catch {
-      return null;
+      return migrateProjectDocument(JSON.parse(raw));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
+      throw error;
     }
   }
 
@@ -537,8 +537,8 @@ export class UmbraUiCanvasProjectService {
 
     const projectRoot = this.projectRoot(projectId);
     const assetsRoot = join(projectRoot, 'assets');
-    await mkdir(assetsRoot, { recursive: true });
     const stored = await this.readStored(projectId);
+    await mkdir(assetsRoot, { recursive: true });
     const project = cloneJson(source);
     project.id = projectId;
     project.version = PROJECT_VERSION;
@@ -646,12 +646,17 @@ export class UmbraUiCanvasProjectService {
       await Promise.all(Array.from(temporaryPaths, (path) => rm(path, { force: true }).catch(() => undefined)));
       throw error;
     }
-    await this.collectSnapshotAssetNames(projectId, referencedAssets);
-    const assetEntries = await readdir(assetsRoot, { withFileTypes: true }).catch(() => []);
-    await Promise.all(assetEntries.map(async (entry) => {
-      if (!entry.isFile() || referencedAssets.has(entry.name)) return;
-      await rm(join(assetsRoot, entry.name), { force: true });
-    }));
+    try {
+      // Never collect assets unless every restore point can be inspected.
+      await this.collectSnapshotAssetNames(projectId, referencedAssets);
+      const assetEntries = await readdir(assetsRoot, { withFileTypes: true });
+      await Promise.all(assetEntries.map(async (entry) => {
+        if (!entry.isFile() || referencedAssets.has(entry.name)) return;
+        await rm(join(assetsRoot, entry.name), { force: true });
+      }));
+    } catch (error) {
+      console.warn('[InpaintProjects] Project saved, but unused assets could not be cleaned:', error);
+    }
     return this.hydrateProject(projectId, project);
   }
 
@@ -672,7 +677,7 @@ export class UmbraUiCanvasProjectService {
     const summaries: UmbraUiCanvasProjectSummary[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory() || !storedId(entry.name)) continue;
-      const project = await this.locked(entry.name, () => this.readStored(entry.name));
+      const project = await this.locked(entry.name, () => this.readStored(entry.name)).catch(() => null);
       if (!project) continue;
       const projectId = storedId(project.id) || storedId(entry.name);
       const layers = Array.isArray(project.layers) ? project.layers : [];

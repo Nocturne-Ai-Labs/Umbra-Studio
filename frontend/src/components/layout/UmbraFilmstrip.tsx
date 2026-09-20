@@ -12,6 +12,7 @@ import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import { galleryMediaRevision } from '@/lib/galleryMediaIdentity';
 import { openUmbraUiExtrasTool } from '@/lib/umbraUiExtrasNavigation';
 import { classifyUmbraPrompt, type UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
+import { useFilmstripFolderActivity } from '@/lib/useFilmstripFolderActivity';
 
 interface UmbraFilmstripProps {
   initialHeight?: number;
@@ -35,6 +36,7 @@ type FsListMediaFile = {
   modified?: number;
   createdMs?: number;
   modifiedMs?: number;
+  revision?: string;
   customOrder?: number;
   tags?: string[];
   privacyClass?: UmbraPrivacyClass;
@@ -173,6 +175,7 @@ function toFilmstripImage(item: FsListMediaFile): FilmstripImage {
   const createdMs = safeNumber(item.createdMs ?? item.created);
   const modifiedMs = safeNumber(item.modifiedMs ?? item.modified);
   const revision = galleryMediaRevision({
+    revision: item.revision,
     uid: normalizedUid,
     id: fallbackId,
     path: normalizedPath,
@@ -463,6 +466,8 @@ export function UmbraFilmstrip({
       && nextFolders.every((entry, index) => entry.toLowerCase() === currentFolders[index]?.toLowerCase())) return;
     setAppSetting('library.recentFolders', nextFolders);
   }, [rootPath, setAppSetting]);
+
+  const folderActivity = useFilmstripFolderActivity([...pinnedFolders, ...recentFolders], rememberRecentFolders);
 
   const displayedImages = useMemo(() => {
     const sortedImages = sortFilmstripImages(images, sortField, sortDirection, customOrder)
@@ -898,7 +903,6 @@ export function UmbraFilmstrip({
       if (
         source === 'filmstrip'
         || source === 'powerprompter-recent-output'
-        || source === 'powerprompter-queue-output'
       ) return;
       refreshImages();
     };
@@ -1880,6 +1884,7 @@ export function UmbraFilmstrip({
   const openFilmstripFolder = useCallback((folderPath: string, source: string) => {
     const normalized = normalizePath(folderPath);
     if (!normalized) return;
+    folderActivity.markOpened(normalized);
     setCurrentFolder(normalized);
     setSelectedIds(new Set());
     setLastSelectedId('');
@@ -1891,7 +1896,7 @@ export function UmbraFilmstrip({
         source,
       },
     }));
-  }, [rememberRecentFolders]);
+  }, [rememberRecentFolders, folderActivity.markOpened]);
 
   const openPinnedFolder = useCallback((folderPath: string) => {
     openFilmstripFolder(folderPath, 'filmstrip-pinned-local');
@@ -1973,8 +1978,9 @@ export function UmbraFilmstrip({
       label: pathLeaf(folderPath) || folderPath,
       isCurrent: normalizePath(folderPath) === normalizePath(currentFolder),
       isDropActive: normalizePath(folderPath) === dropTargetPath,
+      unreadCount: folderActivity.counts[folderPath] || 0,
     }))
-  ), [currentFolder, dropTargetPath, pinnedFolders]);
+  ), [currentFolder, dropTargetPath, pinnedFolders, folderActivity.counts]);
   const newestFolderItems = useMemo(() => {
     const pinned = new Set(pinnedFolders.map((folderPath) => normalizePath(folderPath).toLowerCase()));
     return recentFolders
@@ -1983,8 +1989,9 @@ export function UmbraFilmstrip({
         path: folderPath,
         label: pathLeaf(folderPath) || folderPath,
         isCurrent: normalizePath(folderPath) === normalizePath(currentFolder),
+        unreadCount: folderActivity.counts[folderPath] || 0,
       }));
-  }, [currentFolder, pinnedFolders, recentFolders]);
+  }, [currentFolder, pinnedFolders, recentFolders, folderActivity.counts]);
   const recentGenerationPathSet = useMemo(() => new Set(
     recentGenerationLaneImages.map((image) => normalizePath(image.path).toLowerCase()).filter(Boolean)
   ), [recentGenerationLaneImages]);
@@ -1992,6 +1999,7 @@ export function UmbraFilmstrip({
   return (
     <>
       <Filmstrip
+        unreadFolderMediaCount={folderActivity.total}
         images={displayedImages}
         recentGenerationImages={recentGenerationLaneImages}
         recentGenerationExpanded={recentGenerationsExpanded}

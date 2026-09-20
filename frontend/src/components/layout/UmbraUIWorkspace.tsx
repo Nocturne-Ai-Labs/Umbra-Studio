@@ -2424,13 +2424,6 @@ export function UmbraUIWorkspace() {
           },
         }));
         window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
-        const backupPath = String(payload?.backupPath || '').trim();
-        showToast(
-          backupPath
-            ? `Original image replaced. Recovery copy: ${backupPath}`
-            : 'Original image replaced and a recovery copy was saved.',
-          'success',
-        );
       } catch (error) {
         if (!canceled) showToast(error instanceof Error ? error.message : 'Failed to replace the original image.', 'error');
       }

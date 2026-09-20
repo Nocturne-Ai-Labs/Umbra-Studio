@@ -36,6 +36,7 @@ import {
   GripVertical,
   Grid3X3,
   ImagePlus,
+  ImageUp,
   Layers3,
   LassoSelect,
   Loader2,
@@ -77,6 +78,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { stageUmbraUiUpscaleHandoff } from '@/lib/umbraUiUpscale';
 import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import { UmbraCheckpointControls } from '@/components/umbra-ui/UmbraCheckpointControls';
 import { UmbraLoraStackControls } from '@/components/umbra-ui/UmbraLoraStackControls';
@@ -4547,7 +4549,6 @@ export function UmbraInpaintWorkspace({
         let missing = false;
         if (await openProject(handoff.canvasProjectId, true, () => { missing = true; })) {
           clearPendingUmbraUiMediaHandoff(handoff);
-          showToast(`Editable ${handoff.canvasOperationMode || 'inpaint'} project restored.`, 'success');
           return;
         }
         if (!missing) {
@@ -4573,14 +4574,14 @@ export function UmbraInpaintWorkspace({
         ? handoff.generation.inpaint.controlLayerCount
           + handoff.generation.inpaint.referenceLayerCount
         : 0;
-      showToast(
-        handoff.canvasProjectId
-          ? omittedLayerCount > 0
+      if (handoff.canvasProjectId) {
+        showToast(
+          omittedLayerCount > 0
             ? `The linked project was unavailable. Recoverable settings were restored; ${omittedLayerCount} guidance layer${omittedLayerCount === 1 ? '' : 's'} require the original project assets.`
-            : 'The linked project was unavailable, so the image opened as a new canvas with its recoverable settings.'
-          : 'Image opened in Inpaint.',
-        'success',
-      );
+            : 'The linked project was unavailable, so the image opened as a new canvas with its recoverable settings.',
+          'error',
+        );
+      }
     })().catch((error) => {
       consumedMediaHandoffKeysRef.current.delete(handoffKey);
       showToast(error instanceof Error ? error.message : 'Failed to open the image.', 'error');
@@ -7609,18 +7610,11 @@ export function UmbraInpaintWorkspace({
           },
         }));
         window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
-        const backupPath = String(payload?.backupPath || '').trim();
-        showToast(
-          backupPath
-            ? `Original image replaced. Recovery copy: ${backupPath}`
-            : 'Original image replaced and a recovery copy was saved.',
-          'success',
-        );
       } finally {
         setIsSavingCanvas(false);
       }
     });
-  }, [buildCanvasSaveMetadata, canvasDocument, isSavingCanvas, renderCommittedCanvas, runFullResolutionOperation, seed, showToast, source]);
+  }, [buildCanvasSaveMetadata, canvasDocument, isSavingCanvas, renderCommittedCanvas, runFullResolutionOperation, seed, source]);
 
   const sendCanvasToImg2Img = React.useCallback(async () => {
     if (!canvasDocument || isSavingCanvas) return;
@@ -7648,12 +7642,43 @@ export function UmbraInpaintWorkspace({
           name: result.filename,
           source: 'umbra-ui-inpaint-result',
         });
-        showToast('Accepted inpaint canvas opened in IMG2IMG. Your detailer pipeline is still enabled.', 'success');
       } finally {
         setIsSavingCanvas(false);
       }
     });
   }, [buildCanvasSaveMetadata, canvasDocument, isSavingCanvas, previewStage, renderCommittedCanvas, runFullResolutionOperation, seed, showToast, source]);
+
+  const sendCanvasToUpscale = React.useCallback(async (autoStart: boolean) => {
+    if (!canvasDocument || isSavingCanvas) return;
+    if (previewStage) {
+      showToast('Accept the staged inpaint result before sending it to upscale.', 'error');
+      return;
+    }
+    if (autoStart && !comfyConnected) {
+      showToast('Connect ComfyUI before starting an upscale.', 'error');
+      return;
+    }
+    await runFullResolutionOperation(autoStart ? 'Upscale accepted image' : 'Add accepted image to upscale batch', async ({ signal, setPhase }) => {
+      setIsSavingCanvas(true);
+      try {
+        const output = await renderCommittedCanvas({ signal });
+        setPhase('encoding');
+        const blob = await encodeFullResolutionCanvas(output, { signal });
+        setPhase('saving');
+        const result = await saveUmbraUiCanvasToGallery(
+          blob,
+          `${canvasDocument.name} Upscale`,
+          { ...buildCanvasSaveMetadata(output.width, output.height, Number(seed) || 0), regionOnly: false },
+          signal,
+        );
+        signal.throwIfAborted();
+        if (!result.path) throw new Error('Umbra could not save the accepted image for upscale.');
+        stageUmbraUiUpscaleHandoff({ path: result.path, name: result.filename, autoStart });
+      } finally {
+        setIsSavingCanvas(false);
+      }
+    });
+  }, [buildCanvasSaveMetadata, canvasDocument, comfyConnected, isSavingCanvas, previewStage, renderCommittedCanvas, runFullResolutionOperation, seed, showToast]);
 
   const transformCanvasArtboard = React.useCallback(async (operation: CanvasArtboardTransformOperation) => {
     if (!canvasDocument) return;
@@ -10311,20 +10336,6 @@ export function UmbraInpaintWorkspace({
 
 
 
-          {source ? (
-            <button
-              type="button"
-              onClick={() => void sendCanvasToImg2Img()}
-              disabled={isSavingCanvas || !!fullResolutionOperation || isExportingPsd}
-              title={previewStage
-                ? 'Accept the staged inpaint result before continuing in IMG2IMG'
-                : 'Flatten the accepted canvas, preserve its generation metadata, and continue through IMG2IMG with the current detailers'}
-              className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-cyan-300/25 bg-cyan-500/[0.07] text-[9px] font-black uppercase tracking-[0.12em] text-cyan-100 transition-colors hover:bg-cyan-500/[0.12] disabled:border-white/10 disabled:bg-white/[0.025] disabled:text-zinc-700"
-            >
-              {isSavingCanvas ? <Loader2 size={11} className="animate-spin" /> : <ImagePlus size={11} />}
-              Continue in IMG2IMG
-            </button>
-          ) : null}
         </div>
       </aside>
 
@@ -10351,9 +10362,6 @@ export function UmbraInpaintWorkspace({
           >
             <X size={12} /> Stop All Samples
           </button>
-        </div>
-        <div className="pointer-events-auto absolute bottom-12 left-2 z-40 max-w-[calc(100%-16px)]">
-          <UmbraInpaintLivePreviewStream job={job} />
         </div>
         <div data-umbra-inpaint-toolbar="" className="relative z-30 shrink-0 border-b border-white/10 bg-[#050708]/95 shadow-md shadow-black/35 backdrop-blur-sm">
           <div className="flex min-h-10 min-w-0 flex-wrap items-center gap-1.5 px-2.5 py-1.5 [&>*]:shrink-0">
@@ -10812,6 +10820,12 @@ export function UmbraInpaintWorkspace({
                   </>
                 ) : null}
                 <canvas data-umbra-inpaint-image="" ref={imageCanvasRef} className="absolute inset-0 h-full w-full" style={{ imageRendering: 'auto' }} />
+                <UmbraInpaintLivePreviewStream
+                  job={job}
+                  context={canvasDocument?.pendingJobs.find((pending) => pending.id === job?.id) || null}
+                  canvasWidth={canvasSize.width}
+                  canvasHeight={canvasSize.height}
+                />
                 <canvas data-umbra-inpaint-guidance="" ref={guidanceCanvasRef} className="pointer-events-none absolute inset-0 z-[5] h-full w-full" />
                 {tool === 'sam' && assistedSelectionPreview ? <img src={assistedSelectionPreview.imageUrl} alt="" draggable={false} className={cn('pointer-events-none absolute inset-0 z-[7] h-full w-full object-fill transition-opacity', assistedSelectionPreviewCurrent ? 'opacity-55' : 'opacity-20')} /> : null}
                 {canvasPreferences.ruleOfThirds ? (
@@ -11252,8 +11266,15 @@ export function UmbraInpaintWorkspace({
           <button type="button" onClick={() => void saveCanvasToGallery(false)} disabled={!source || isSavingCanvas || !!fullResolutionOperation}
             title="Save accepted image to the selected output destination" aria-label="Save accepted image"
             className="inline-flex h-9 w-9 items-center justify-center rounded-sm border border-white/10 text-zinc-300 disabled:text-zinc-600"><Save size={13} /></button>
-          <button type="button" onClick={() => void sendCanvasToImg2Img()} disabled={!source || isSavingCanvas || !!fullResolutionOperation}
-            title="Continue accepted image in IMG2IMG" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-cyan-300/20 px-2.5 text-[10px] font-bold text-cyan-100 disabled:text-zinc-600"><ImagePlus size={12} /> IMG2IMG</button>
+          <button type="button" onClick={() => void sendCanvasToImg2Img()} disabled={!source || !canvasDocument || isSavingCanvas || !!fullResolutionOperation || isExportingPsd}
+            title={previewStage ? 'Accept the staged inpaint result before continuing in IMG2IMG' : 'Continue the full accepted image in IMG2IMG with its generation metadata'}
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-sm border border-cyan-300/20 px-2.5 text-[10px] font-bold text-cyan-100 disabled:text-zinc-600"><ImagePlus size={12} /> Continue in IMG2IMG</button>
+          <button type="button" onClick={() => void sendCanvasToUpscale(false)} disabled={!source || !canvasDocument || isSavingCanvas || !!fullResolutionOperation || isExportingPsd}
+            title={previewStage ? 'Accept the staged inpaint result before adding it to the upscale batch' : 'Add the full accepted image to the Extras upscale batch'}
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-sm border border-white/10 px-2.5 text-[10px] font-bold text-zinc-300 hover:text-amber-100 disabled:text-zinc-600"><Layers3 size={12} /> Add to Batch</button>
+          <button type="button" onClick={() => void sendCanvasToUpscale(true)} disabled={!source || !canvasDocument || !comfyConnected || isSavingCanvas || !!fullResolutionOperation || isExportingPsd}
+            title={previewStage ? 'Accept the staged inpaint result before upscaling' : 'Upscale the full accepted image now using the Extras settings'}
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-sm border border-amber-300/25 bg-amber-500/[0.08] px-2.5 text-[10px] font-bold text-amber-100 hover:bg-amber-500/[0.14] disabled:text-zinc-600"><ImageUp size={12} /> Upscale Now</button>
         </UmbraGenerationActionBar>
         </main>
       </UmbraMobileWorkspaceSheet>

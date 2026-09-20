@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useToastStore } from '@/store/useToastStore';
 import { classifyUmbraMediaMetadata, classifyUmbraPrompt, type UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
 import { ModelInfoRequestCache } from '@/lib/modelInfoRequestCache';
 import {
@@ -1173,7 +1174,16 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         ) {
           const requestId = String(payload?.requestId || '').trim();
           const pending = pendingQueueAcksRef.current.get(requestId);
-          if (!pending) return;
+          if (!pending) {
+            if (type === 'queue_result' && payload?.success === false && !payload?.canceled
+              && ownedRequestIdsRef.current.has(requestId)) {
+              useToastStore.getState().addToast({
+                type: 'error',
+                message: String(payload?.error || 'Umbra UI generation failed. Check the queue details and try again.'),
+              });
+            }
+            return;
+          }
           window.clearTimeout(pending.timer);
           pendingQueueAcksRef.current.delete(requestId);
           if (payload?.success === false) {

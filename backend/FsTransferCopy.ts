@@ -19,7 +19,7 @@ async function removeOwnedCopy(entry: CopiedPath): Promise<void> {
 }
 
 // Own the destination exclusively; never replace a file created by another job.
-export async function copyFileExclusive(source: string, target: string, onProgress?: CopyProgress) {
+export async function copyFileExclusive(source: string, target: string, onProgress?: CopyProgress, onCreated?: (stat: BigIntStats) => void | Promise<void>) {
   const input = await fs.open(source, 'r');
   let output: Awaited<ReturnType<typeof fs.open>> | undefined;
   let complete = false;
@@ -28,6 +28,7 @@ export async function copyFileExclusive(source: string, target: string, onProgre
     const before = await input.stat({ bigint: true });
     output = await fs.open(target, 'wx');
     owned = { path: target, stat: await output.stat({ bigint: true }) };
+    await onCreated?.(owned.stat);
     const buffer = Buffer.allocUnsafe(1024 * 1024);
     let copied = 0;
     let lastReport = 0;

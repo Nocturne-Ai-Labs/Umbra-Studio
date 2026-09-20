@@ -1,4 +1,7 @@
 export type GalleryMediaIdentitySource = {
+  revision?: unknown;
+  metadataRevision?: unknown;
+  metadataReady?: unknown;
   uid?: unknown;
   id?: unknown;
   path?: unknown;
@@ -13,10 +16,11 @@ function normalizeIdentityPath(value: unknown): string {
 
 function normalizeRevisionNumber(value: unknown): number {
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? Math.max(0, Math.trunc(numeric)) : 0;
+  return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
 }
 
 export function galleryMediaRevision(source: GalleryMediaIdentitySource): string {
+  if (typeof source.revision === 'string') return source.revision;
   const path = normalizeIdentityPath(source.path);
   const uid = String(source.uid || '').trim();
   const id = String(source.id || '').trim();
@@ -33,7 +37,14 @@ export function galleryMediaRevision(source: GalleryMediaIdentitySource): string
 }
 
 export function galleryMediaCacheKey(pathValue: unknown, source: GalleryMediaIdentitySource): string {
-  const path = normalizeIdentityPath(pathValue).toLowerCase();
+  const path = normalizeIdentityPath(pathValue);
   if (!path) return '';
   return `${path}\u0000${galleryMediaRevision(source) || 'unversioned'}`;
+}
+
+export function galleryMetadataCacheKey(pathValue: unknown, source?: GalleryMediaIdentitySource): string {
+  const key = galleryMediaCacheKey(pathValue, source || {});
+  if (!key || source?.metadataRevision === '') return '';
+  if (!source) return key;
+  return `${key}\u0000${JSON.stringify([source.metadataRevision ?? null, source.metadataReady ?? null])}`;
 }

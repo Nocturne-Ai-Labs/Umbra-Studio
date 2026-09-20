@@ -325,25 +325,9 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
     handleQueueManagerPromptDrop,
     handleOpenQueueGroupEditor,
     queueManagerSearchKey,
-    queueManagerRightPaneRef,
-    queueManagerPreviewSplit,
-    beginQueueManagerPaneResize,
     hasActiveGenerationPreview,
     generationPreviewStatusLabel,
     generationPreviewStepLabel,
-    isLoadingOutputPreview,
-    queueManagerMediaItems,
-    outputPreviewError,
-    queueManagerOutputBuckets,
-    handleRefreshQueueManagerOutputs,
-    openQueueManagerOutputInViewer,
-    openQueueManagerOutputInLibrary,
-    pinQueueManagerOutputFolder,
-    openQueueManagerOutputInExplorer,
-    sendQueueManagerOutputToTrash,
-    sendQueueManagerOutputToWorkspace,
-    queueOutputMenu,
-    setQueueOutputMenu,
     umbraQueueActivities = [],
   } = props;
 
@@ -1250,28 +1234,10 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
           </div>
         </div>
         <PowerPrompterQueueManagerSidePane
-          queueManagerRightPaneRef={queueManagerRightPaneRef}
-          queueManagerPreviewSplit={queueManagerPreviewSplit}
-          beginQueueManagerPaneResize={beginQueueManagerPaneResize}
           hasActiveGenerationPreview={hasActiveGenerationPreview}
           generationPreview={generationPreview}
           generationPreviewStatusLabel={generationPreviewStatusLabel}
           generationPreviewStepLabel={generationPreviewStepLabel}
-          isLoadingOutputPreview={isLoadingOutputPreview}
-          queueManagerMediaItems={queueManagerMediaItems}
-          outputPreviewError={outputPreviewError}
-          queueManagerOutputBuckets={queueManagerOutputBuckets}
-          queueManagerStyleFilter={queueManagerStyleFilter}
-          setQueueManagerStyleFilter={setQueueManagerStyleFilter}
-          handleRefreshQueueManagerOutputs={handleRefreshQueueManagerOutputs}
-          openQueueManagerOutputInViewer={openQueueManagerOutputInViewer}
-          openQueueManagerOutputInLibrary={openQueueManagerOutputInLibrary}
-          pinQueueManagerOutputFolder={pinQueueManagerOutputFolder}
-          openQueueManagerOutputInExplorer={openQueueManagerOutputInExplorer}
-          sendQueueManagerOutputToTrash={sendQueueManagerOutputToTrash}
-          sendQueueManagerOutputToWorkspace={sendQueueManagerOutputToWorkspace}
-          queueOutputMenu={queueOutputMenu}
-          setQueueOutputMenu={setQueueOutputMenu}
         />
       </div>
     </div>

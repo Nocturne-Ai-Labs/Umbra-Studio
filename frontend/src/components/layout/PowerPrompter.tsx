@@ -7,11 +7,8 @@ import { PowerPrompterSidebar } from './PowerPrompterSidebar';
 import { PowerPrompterActivePromptInline } from './PowerPrompterActivePromptInline';
 import type { PowerPrompterPromptChipConfig } from './PowerPrompterPromptChips';
 import {
-  fetchPowerPrompterOutputPreviewItems,
   PowerPrompterCardChainEditor,
   PowerPrompterCardChainEditorRef,
-  PowerPrompterOutputPreviewItem,
-  PowerPrompterOutputPreviewSnapshot,
   type PowerPrompterPromptInsertOptions,
 } from './PowerPrompterCardChainEditor';
 import { PowerPrompterSearchPanel } from './PowerPrompterSearchPanel';
@@ -23,7 +20,6 @@ import { PowerPrompterWorkspacePanels } from '@/components/power-prompter/PowerP
 import { usePowerPrompterAudioControls } from '@/components/power-prompter/usePowerPrompterAudioControls';
 import { usePowerPrompterGlobalSearch } from '@/components/power-prompter/usePowerPrompterGlobalSearch';
 import { usePowerPrompterPipelines } from '@/components/power-prompter/pipelines/usePowerPrompterPipelines';
-import { PowerPrompterQueueManagerSidePane } from '@/components/power-prompter/queue/PowerPrompterQueueManagerSidePane';
 import { PowerPrompterQueueManagerView } from '@/components/power-prompter/queue/PowerPrompterQueueManagerView';
 import {
   claimQueuePromptCompletionNotification,
@@ -35,8 +31,6 @@ import { PowerPrompterQueueConfirmModal, PowerPrompterSaveQueueModal } from '@/c
 import { PowerPrompterSettingsModal } from '@/components/modals/PowerPrompterSettingsModal';
 import { UmbraAgentPromptPanel } from '@/components/umbra-ui/UmbraAgentPromptPanel';
 import { useStore } from '@/store/useStore';
-import { useToastStore } from '@/store/useToastStore';
-import { openUmbraUiExtrasTool } from '@/lib/umbraUiExtrasNavigation';
 import type {
   PowerPrompterCardDocument,
   PowerPrompterQueueTraversalMode,
@@ -57,7 +51,6 @@ import {
 } from '@/lib/powerPrompter';
 import { buildPowerPrompterActivePromptBlocks } from '@/lib/powerPrompterActivePrompt';
 import { governorShouldRun, governorTryAcquire } from '@/lib/loadGovernor';
-import { loadAppSettings, pushAppSettingsToBackend } from '@/lib/appSettings';
 import { readUserConfig, readUserConfigStrict, writeUserConfig } from '@/lib/userConfig';
 import { subscribeUiSession } from '@/lib/uiSessionSocket';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
@@ -69,7 +62,6 @@ import {
   setPowerPrompterStagedCount,
   type UmbraQueueActivity,
 } from '@/lib/umbraQueueActivity';
-import { deletePathsWithSettings } from '@/utils/trashActions';
 import {
   decodePowerPrompterImageRestore,
   type PowerPrompterImageRestoreResult,
@@ -92,7 +84,6 @@ import {
   type UmbraUiGenerationControlsHandoff,
 } from '@/lib/umbraUiGenerationControlsHandoff';
 import {
-  DEFAULT_QUEUE_MANAGER_PREVIEW_SPLIT,
   QUEUE_DIVERSITY_MAX,
   QUEUE_DIVERSITY_MIN,
   QUEUE_DIVERSITY_STEP,
@@ -115,7 +106,6 @@ import {
   moveArrayEntry,
   normalizeQueueCycleWeights,
   normalizeQueueDiversity,
-  normalizeQueueManagerPreviewSplit,
   normalizeQueuePromptLimit,
   normalizeQueueSetIds,
   normalizeQueueTargetType,
@@ -139,7 +129,6 @@ import type {
   QueueEditorBuildSettings,
   QueueEditorDraft,
   QueueManagerDragState,
-  QueueManagerOutputMenuState,
   QueueManagerSequenceMode,
   QueuePromptBlock,
   QueuePromptBuildEntry,
@@ -205,7 +194,6 @@ import type { QueueSnapshotWorkerPending } from '@/components/power-prompter/que
 import { expandPowerPrompterQueueForResolutionSplit } from '@/components/power-prompter/queue/queueResolutionSplit';
 import {
   buildActiveQueuePosition,
-  buildQueueManagerOutputBuckets,
   buildQueueManagerStyleOptions,
   buildQueueRequestGroups,
   buildQueueSetGroups,
@@ -240,11 +228,9 @@ import {
   createPrompterWsUrl,
   getDefaultApiWorkflowTargetId,
   getPrompterCatalogAliasKeys,
-  getPrompterParentFolderPath,
   mapMetadataSamplerToPrompter,
   mapMetadataSchedulerToPrompter,
   normalizeBridgeTarget,
-  normalizePrompterMediaPath,
   parseApiWorkflowTargetId,
   resolveCheckpointNameFromMetadata,
   stripLegacySelectionMarkers,
@@ -270,7 +256,6 @@ import {
   isPowerPrompterDiagnosticEnabled,
   postPowerPrompterDiagnosticPayload,
 } from '@/components/power-prompter/powerPrompterDiagnostics';
-import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import { stageUmbraUiPowerPrompterHandoff } from '@/lib/umbraUiPowerPrompterHandoff';
 import {
   generateUmbraUiAgentPrompt,
@@ -287,7 +272,6 @@ import {
   normalizeUmbraUiPipelineSelection,
 } from '../../../../shared/umbra-ui/pipelineTypes';
 import type {
-  PendingGalleryOpenPathPayload,
   PowerPrompterBridgeTarget,
   PowerPrompterInfoRequestOptions,
   PowerPrompterLoraInfoPayload,
@@ -494,7 +478,6 @@ interface PowerPrompterProps {
 
 type PowerPrompterUiPreferences = {
   selectedBridgeId?: string;
-  queueManagerPreviewSplit?: unknown;
   activeQueueSet?: number;
   queueManagerSearchQuery?: string;
   queueManagerStyleFilter?: string;
@@ -873,20 +856,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const [queueEditorDraft, setQueueEditorDraft] = useState<QueueEditorDraft | null>(null);
   const [queueEditorSaving, setQueueEditorSaving] = useState(false);
   const queueEditorDocumentRef = useRef<PowerPrompterCardDocument>(queueEditorDocument);
-  const [outputPreviewSnapshot, setOutputPreviewSnapshot] = useState<PowerPrompterOutputPreviewSnapshot>({
-    items: [],
-    isLoading: false,
-    error: null,
-  });
-  const queueManagerOutputPreviewSeqRef = useRef(0);
-  const queueManagerOutputPreviewItemCountRef = useRef(0);
   const [powerPrompterPresets, setPowerPrompterPresets] = useState<PowerPrompterPresetDocument[]>([]);
   const [selectedPowerPrompterPresetId, setSelectedPowerPrompterPresetId] = useState('');
   const [powerPrompterPresetNameDraft, setPowerPrompterPresetNameDraft] = useState('');
   const [powerPrompterPresetBusy, setPowerPrompterPresetBusy] = useState<'refresh' | 'save' | 'load' | 'delete' | null>(null);
   const [queueManagerDragState, setQueueManagerDragState] = useState<QueueManagerDragState | null>(null);
   const [queueManagerStyleFilter, setQueueManagerStyleFilter] = useState('');
-  const [queueOutputMenu, setQueueOutputMenu] = useState<QueueManagerOutputMenuState | null>(null);
   const [savedQueues, setSavedQueues] = useState<SavedPowerPrompterQueueSummary[]>([]);
   const [selectedSavedQueueId, setSelectedSavedQueueId] = useState('');
   const [savedQueueBusy, setSavedQueueBusy] = useState<'list' | 'save' | 'load' | 'delete' | null>(null);
@@ -911,7 +886,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const queueDiversityHoldIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const queueDiversityHoldDirtyRef = useRef(false);
   const [generationPreviewHoldMs, setGenerationPreviewHoldMs] = useState<number | null>(PREVIEW_CARD_HIDE_DELAY_MS);
-  const [queueManagerPreviewSplit, setQueueManagerPreviewSplit] = useState<number>(DEFAULT_QUEUE_MANAGER_PREVIEW_SPLIT);
   const [loadingPromptFileName, setLoadingPromptFileName] = useState<string | null>(null);
   const [loraCatalog, setLoraCatalog] = useState<string[]>([]);
   const [loraInfoCache, setLoraInfoCache] = useState<Record<string, PowerPrompterLoraInfoPayload>>({});
@@ -939,8 +913,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState<boolean>(true);
   const queueStackRemoveTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const generationPreviewHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const queueManagerRightPaneRef = useRef<HTMLDivElement | null>(null);
-  const queueManagerResizeCleanupRef = useRef<(() => void) | null>(null);
   const [queueTimingRevision, setQueueTimingRevision] = useState(0);
   const completedPromptIndicesRef = useRef(powerPrompterQueueSession.completedPromptIndices);
   const notifiedCompletedPromptKeysRef = useRef(new Set<string>());
@@ -1093,7 +1065,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const effectiveQueueTargetBridgeIdRef = useRef('');
   const effectiveQueueTargetSelectionIdRef = useRef('');
   const generationPreviewHoldMsRef = useRef<number | null>(PREVIEW_CARD_HIDE_DELAY_MS);
-  const { showToast, setActiveWorkspace, addScannedImport, setAppSetting, appSettings } = useStore();
+  const { showToast, setActiveWorkspace, setAppSetting, appSettings } = useStore();
   const syncUiAcrossDevices = appSettings['remote.syncUiAcrossDevices'] !== false;
   const { pipelines: powerPrompterPipelines } = usePowerPrompterPipelines(showToast);
   const apiWorkflowItems = useMemo(() => [{
@@ -1109,7 +1081,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   }], [powerPrompterPipelines]);
   const [umbraUiHandoffBusy, setUmbraUiHandoffBusy] = useState(false);
   const showToastRef = useRef(showToast);
-  const addToast = useToastStore((state) => state.addToast);
 
   const buildQueueDebugSnapshot = () => {
     const stackItems = queueStackItemsRef.current || [];
@@ -1883,12 +1854,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     const imageDataUrl = String(generationPreview?.imageDataUrl || '').trim();
     return imageDataUrl;
   }, [generationPreview]);
-  const outputPreviewItems = outputPreviewSnapshot.items;
-  const isLoadingOutputPreview = outputPreviewSnapshot.isLoading;
-  const outputPreviewError = outputPreviewSnapshot.error;
-  useEffect(() => {
-    queueManagerOutputPreviewItemCountRef.current = outputPreviewItems.length;
-  }, [outputPreviewItems.length]);
   const queueManagerActivePromptText = useMemo(
     () => getQueueManagerActivePromptText(activeQueueItem, queueVisualState),
     [activeQueueItem, queueVisualState]
@@ -1932,17 +1897,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const queueManagerAvailable = queueStackItems.length > 0
     || queueRequestGroups.length > 0
     || Boolean(queueVisualState?.requestId)
-    || hasActiveGenerationPreview
-    || outputPreviewItems.length > 0
-    || isLoadingOutputPreview;
-  const queueManagerMediaItems = useMemo(
-    () => outputPreviewItems.slice(0, 300),
-    [outputPreviewItems]
-  );
-  const queueManagerOutputBuckets = useMemo(
-    () => buildQueueManagerOutputBuckets(queueManagerMediaItems),
-    [queueManagerMediaItems]
-  );
+    || hasActiveGenerationPreview;
   const queueSummaryCounts = useMemo(
     () => buildQueueSummaryCounts(queueStackItems),
     [queueStackItems]
@@ -2566,53 +2521,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     showToast(`Queue dispatch delay set to ${optionLabel}`, 'success');
   }, [effectiveQueueTargetBridgeId, selectedQueueTargetType, showToast]);
 
-  useEffect(() => {
-    return () => {
-      queueManagerResizeCleanupRef.current?.();
-      queueManagerResizeCleanupRef.current = null;
-    };
-  }, []);
-
-  const beginQueueManagerPaneResize = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    if (typeof window === 'undefined') return;
-    event.preventDefault();
-    queueManagerResizeCleanupRef.current?.();
-    queueManagerResizeCleanupRef.current = null;
-    const pane = queueManagerRightPaneRef.current;
-    if (!pane) return;
-
-    const updateSplitFromPointer = (clientY: number) => {
-      const rect = pane.getBoundingClientRect();
-      if (rect.height <= 0) return;
-      const nextRatio = normalizeQueueManagerPreviewSplit((clientY - rect.top) / rect.height);
-      setQueueManagerPreviewSplit(nextRatio);
-    };
-
-    updateSplitFromPointer(event.clientY);
-    const originalCursor = document.body.style.cursor;
-    const originalUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = 'row-resize';
-    document.body.style.userSelect = 'none';
-
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      updateSplitFromPointer(moveEvent.clientY);
-    };
-    const finishResize = () => {
-      document.body.style.cursor = originalCursor;
-      document.body.style.userSelect = originalUserSelect;
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', finishResize);
-      window.removeEventListener('pointercancel', finishResize);
-      window.removeEventListener('blur', finishResize);
-      queueManagerResizeCleanupRef.current = null;
-    };
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', finishResize, { once: true });
-    window.addEventListener('pointercancel', finishResize, { once: true });
-    window.addEventListener('blur', finishResize, { once: true });
-    queueManagerResizeCleanupRef.current = finishResize;
-  }, []);
   const renderPromptBlockList = useCallback((
     blocks: Array<{ slotId: string; variantId: string; cardLabel: string; variantLabel: string; promptText: string }>,
     fallbackText: string
@@ -2666,350 +2574,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     }
     return nodes;
   }, []);
-  const postQueueManagerGalleryOpenPath = useCallback((rawDetail: PendingGalleryOpenPathPayload) => {
-    const path = String(rawDetail.path || rawDetail.folderPath || '').replace(/\\/g, '/').replace(/\/+$/, '').trim();
-    if (!path) return;
-    const imagePath = String(rawDetail.imagePath || '').replace(/\\/g, '/').trim();
-    const detail: PendingGalleryOpenPathPayload = {
-      path,
-      folderPath: path,
-      ...(imagePath ? { imagePath } : {}),
-      ...(String(rawDetail.source || '').trim() ? { source: String(rawDetail.source || '').trim() } : {}),
-    };
-
-    if (typeof window === 'undefined') return;
-    const windowWithPending = window as typeof window & { __umbraPendingGalleryOpenPath?: PendingGalleryOpenPathPayload | null };
-    windowWithPending.__umbraPendingGalleryOpenPath = detail;
-
-    const emitOpenPath = () => {
-      window.dispatchEvent(new CustomEvent('umbra:gallery-open-path', { detail }));
-    };
-
-    emitOpenPath();
-  }, []);
-  const postQueueManagerGalleryRevealPath = useCallback((rawDetail: PendingGalleryOpenPathPayload) => {
-    const path = String(rawDetail.path || rawDetail.folderPath || '').replace(/\\/g, '/').replace(/\/+$/, '').trim();
-    if (!path) return;
-    const imagePath = String(rawDetail.imagePath || '').replace(/\\/g, '/').trim();
-    const detail: PendingGalleryOpenPathPayload = {
-      path,
-      folderPath: path,
-      ...(imagePath ? { imagePath } : {}),
-      ...(String(rawDetail.source || '').trim() ? { source: String(rawDetail.source || '').trim() } : {}),
-    };
-
-    if (typeof window === 'undefined') return;
-    const windowWithPending = window as typeof window & { __umbraPendingGalleryRevealPath?: PendingGalleryOpenPathPayload | null };
-    windowWithPending.__umbraPendingGalleryRevealPath = detail;
-
-    const emitRevealPath = () => {
-      window.dispatchEvent(new CustomEvent('umbra:gallery-reveal-path', { detail }));
-    };
-
-    emitRevealPath();
-  }, []);
-  const openQueueManagerOutputInLibrary = useCallback((item: PowerPrompterOutputPreviewItem) => {
-    const normalizedFilePath = normalizePrompterMediaPath(item.path);
-    const folderPath = getPrompterParentFolderPath(normalizedFilePath);
-    if (!folderPath) {
-      showToast('Unable to locate output folder', 'error');
-      return;
-    }
-    const detail = {
-      path: folderPath,
-      folderPath,
-      imagePath: normalizedFilePath,
-      source: 'powerprompter-queue-manager',
-    };
-    setActiveWorkspace('library');
-    postQueueManagerGalleryOpenPath(detail);
-    showToast(`Opened in Gallery: ${item.name}`, 'success');
-  }, [postQueueManagerGalleryOpenPath, setActiveWorkspace, showToast]);
-  const revealQueueManagerOutputInLibrary = useCallback((item: PowerPrompterOutputPreviewItem) => {
-    const normalizedFilePath = normalizePrompterMediaPath(item.path);
-    const folderPath = getPrompterParentFolderPath(normalizedFilePath);
-    if (!folderPath) {
-      showToast('Unable to locate output folder', 'error');
-      return;
-    }
-    const detail = {
-      path: folderPath,
-      folderPath,
-      imagePath: normalizedFilePath,
-      source: 'powerprompter-queue-manager',
-    };
-    setActiveWorkspace('library');
-    postQueueManagerGalleryRevealPath(detail);
-    showToast(`Revealed in Gallery: ${item.name}`, 'success');
-  }, [postQueueManagerGalleryRevealPath, setActiveWorkspace, showToast]);
-  const openQueueManagerOutputInViewer = useCallback((item: PowerPrompterOutputPreviewItem) => {
-    const normalizedFilePath = normalizePrompterMediaPath(item.path);
-    if (!normalizedFilePath) {
-      showToast('Unable to open output preview', 'error');
-      return;
-    }
-    openQueueManagerOutputInLibrary(item);
-  }, [openQueueManagerOutputInLibrary, showToast]);
-  const openQueueManagerOutputInExplorer = useCallback(async (item: PowerPrompterOutputPreviewItem) => {
-    if (isUmbraRemoteClient()) {
-      showToast('Opening File Explorer is only available from the host PC.', 'error');
-      return;
-    }
-    const normalizedFilePath = normalizePrompterMediaPath(item.path);
-    const folderPath = getPrompterParentFolderPath(normalizedFilePath);
-    if (!folderPath) {
-      showToast('Unable to locate output folder', 'error');
-      return;
-    }
-    try {
-      const response = await fetch('/api/fs/reveal', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: folderPath }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload?.error) {
-        throw new Error(String(payload?.error || 'Failed to open folder in file explorer'));
-      }
-      showToast(`Opened in Explorer: ${folderPath}`, 'success');
-    } catch (error: any) {
-      showToast(String(error?.message || 'Failed to open folder in file explorer'), 'error');
-    }
-  }, [showToast]);
-  const pinQueueManagerOutputFolder = useCallback((item: PowerPrompterOutputPreviewItem) => {
-    const normalizedFilePath = normalizePrompterMediaPath(item.path);
-    const folderPath = normalizePrompterMediaPath(getPrompterParentFolderPath(normalizedFilePath));
-    if (!folderPath) {
-      showToast('Unable to locate output folder', 'error');
-      return;
-    }
-    const pinnedRaw = Array.isArray(appSettings['library.pinnedFolders'])
-      ? appSettings['library.pinnedFolders']
-      : [];
-    const pinned = Array.from(new Set(
-      pinnedRaw
-        .map((entry) => normalizePrompterMediaPath(String(entry || '')))
-        .filter(Boolean),
-    ));
-    if (pinned.includes(folderPath)) {
-      showToast('Folder already pinned in Gallery + Filmstrip', 'success');
-      return;
-    }
-    const nextPinned = [...pinned, folderPath];
-    setAppSetting('library.pinnedFolders', nextPinned);
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('umbra:gallery-pin-folder', {
-        detail: {
-          path: folderPath,
-          pinned: true,
-          source: 'powerprompter-queue-manager-pin',
-        },
-      }));
-    }
-    void pushAppSettingsToBackend(loadAppSettings()).catch(() => undefined);
-    showToast(`Pinned folder: ${folderPath}`, 'success');
-  }, [appSettings, setAppSetting, showToast]);
-  const sendQueueManagerOutputToWorkspace = useCallback((item: PowerPrompterOutputPreviewItem, workspace: 'waifudiffusion' | 'scanner') => {
-    const normalizedPath = normalizePrompterMediaPath(item.path);
-    if (!normalizedPath) {
-      showToast('Invalid output path', 'error');
-      return;
-    }
-    addScannedImport([normalizedPath]);
-    useStore.getState().setUI('imageInspectorTab', workspace === 'scanner' ? 'scanner' : 'waifu');
-    setActiveWorkspace('umbraui');
-    openUmbraUiExtrasTool(workspace === 'scanner' ? 'metadata-scanner' : 'visual-analysis');
-    showToast(
-      workspace === 'waifudiffusion'
-        ? `Sent to Visual Analysis: ${item.name}`
-        : `Sent to Metadata Scanner: ${item.name}`,
-      'success',
-    );
-  }, [addScannedImport, setActiveWorkspace, showToast]);
-  const sendQueueManagerOutputToTrash = useCallback(async (item: PowerPrompterOutputPreviewItem) => {
-    const normalizedPath = normalizePrompterMediaPath(item.path);
-    if (!normalizedPath) {
-      showToast('Invalid output path', 'error');
-      return;
-    }
-    try {
-      const currentSettings = loadAppSettings();
-      const result = await deletePathsWithSettings([normalizedPath], currentSettings);
-      setOutputPreviewSnapshot((prev) => ({
-        ...prev,
-        items: prev.items.filter((entry) => entry.id !== item.id),
-      }));
-      const deletedPaths = Array.from(new Set(
-        (result.deletedPaths || [])
-          .map((entry) => normalizePrompterMediaPath(entry))
-          .filter(Boolean),
-      ));
-      if (typeof window !== 'undefined' && deletedPaths.length > 0) {
-        window.dispatchEvent(new CustomEvent('umbra:gallery-remove-paths', {
-          detail: {
-            paths: deletedPaths,
-            source: 'powerprompter-queue-output',
-          },
-        }));
-        window.dispatchEvent(new CustomEvent('umbra:gallery-trash-updated', {
-          detail: { source: 'powerprompter-queue-output' },
-        }));
-      }
-      const undoItem = (result.trashItems || []).find((entry) =>
-        normalizePrompterMediaPath(entry?.originalPath) === normalizedPath);
-      addToast({
-        type: 'success',
-        message: `Moved to Trash: ${item.name}`,
-        ...(undoItem
-          ? {
-            action: {
-              label: 'Undo',
-              onClick: async () => {
-                try {
-                  const restoreResponse = await fetch('/api/trash/restore', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      items: [{ trashPath: undoItem.trashPath, originalPath: undoItem.originalPath }],
-                    }),
-                  });
-                  const restorePayload = await restoreResponse.json().catch(() => ({} as Record<string, unknown>));
-                  if (!restoreResponse.ok) {
-                    throw new Error(String(restorePayload?.error || 'Failed to restore from trash'));
-                  }
-                  setOutputPreviewSnapshot((prev) => {
-                    const exists = prev.items.some((entry) => entry.id === item.id);
-                    if (exists) return prev;
-                    return {
-                      ...prev,
-                      items: [item, ...prev.items].sort((a, b) => b.modified - a.modified),
-                    };
-                  });
-                  if (typeof window !== 'undefined') {
-                    window.dispatchEvent(new CustomEvent('umbra:gallery-restore-paths', {
-                      detail: {
-                        paths: [normalizedPath],
-                        source: 'powerprompter-queue-output',
-                      },
-                    }));
-                    window.dispatchEvent(new CustomEvent('umbra:gallery-trash-updated', {
-                      detail: { source: 'powerprompter-queue-output-restore' },
-                    }));
-                  }
-                  showToast(`Restored: ${item.name}`, 'success');
-                } catch (error: any) {
-                  showToast(String(error?.message || 'Failed to restore item'), 'error');
-                }
-              },
-            },
-          }
-          : {}),
-      });
-    } catch (error: any) {
-      showToast(String(error?.message || 'Failed to move output to Trash'), 'error');
-    }
-  }, [addToast, showToast]);
-  const refreshQueueManagerOutputPreview = useCallback(async (options?: { silent?: boolean; notifyOnError?: boolean }) => {
-    const sourcePath = String(currentFileRef.current || '').trim();
-    const seq = ++queueManagerOutputPreviewSeqRef.current;
-    if (!sourcePath) {
-      setOutputPreviewSnapshot({
-        items: [],
-        isLoading: false,
-        error: null,
-      });
-      return;
-    }
-
-    const silent = options?.silent === true;
-    if (!silent) {
-      setOutputPreviewSnapshot((prev) => ({
-        ...prev,
-        isLoading: true,
-        error: null,
-      }));
-    }
-
-    try {
-      const items = await fetchPowerPrompterOutputPreviewItems(sourcePath);
-      if (seq !== queueManagerOutputPreviewSeqRef.current) return;
-      setOutputPreviewSnapshot({
-        items,
-        isLoading: false,
-        error: null,
-      });
-    } catch (error: any) {
-      if (seq !== queueManagerOutputPreviewSeqRef.current) return;
-      const message = String(error?.message || 'Failed to load output preview');
-      setOutputPreviewSnapshot((prev) => ({
-        ...prev,
-        isLoading: false,
-        error: message,
-      }));
-      if (options?.notifyOnError) showToast(message, 'error');
-    }
-  }, [showToast]);
-
-  const handleRefreshQueueManagerOutputs = useCallback(() => {
-    const editor = editorRef.current;
-    if (editor) {
-      editor.refreshOutputPreview();
-      return;
-    }
-    void refreshQueueManagerOutputPreview({ notifyOnError: true });
-  }, [refreshQueueManagerOutputPreview]);
-  useEffect(() => {
-    if (!queueOutputMenu) return;
-    const dismiss = (event: Event) => {
-      if (event instanceof MouseEvent && event.button !== 0) return;
-      setQueueOutputMenu(null);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setQueueOutputMenu(null);
-    };
-    window.addEventListener('mousedown', dismiss);
-    window.addEventListener('resize', dismiss);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', dismiss);
-      window.removeEventListener('resize', dismiss);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [queueOutputMenu]);
-  useEffect(() => {
-    if (currentFile) return;
-    queueManagerOutputPreviewSeqRef.current += 1;
-    setOutputPreviewSnapshot({
-      items: [],
-      isLoading: false,
-      error: null,
-    });
-  }, [currentFile]);
-  useEffect(() => {
-    if (prompterPanelMode !== 'queue-manager') return;
-    if (!currentFile) return;
-    void refreshQueueManagerOutputPreview({ silent: queueManagerOutputPreviewItemCountRef.current > 0 });
-  }, [prompterPanelMode, currentFile, refreshQueueManagerOutputPreview]);
-  useEffect(() => {
-    if (!queueCompletionTick) return;
-    if (prompterPanelMode !== 'queue-manager') return;
-    if (!currentFile) return;
-    const timer = window.setTimeout(() => {
-      void refreshQueueManagerOutputPreview({ silent: true });
-    }, 1800);
-    return () => window.clearTimeout(timer);
-  }, [currentFile, prompterPanelMode, queueCompletionTick, refreshQueueManagerOutputPreview]);
-  useEffect(() => {
-    if (prompterPanelMode !== 'queue-manager') return;
-    if (!currentFile || typeof window === 'undefined') return;
-    const handleOutputSaved = () => {
-      void refreshQueueManagerOutputPreview({ silent: true });
-    };
-    window.addEventListener('umbra:powerprompter-output-saved', handleOutputSaved);
-    return () => {
-      window.removeEventListener('umbra:powerprompter-output-saved', handleOutputSaved);
-    };
-  }, [currentFile, prompterPanelMode, refreshQueueManagerOutputPreview]);
   const renderQueueTrackerCard = () => (
     <PowerPrompterQueueTrackerCard
       queueStackItems={queueStackItems}
@@ -3103,25 +2667,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       handleQueueManagerPromptDrop={handleQueueManagerPromptDrop}
       handleOpenQueueGroupEditor={handleOpenQueueGroupEditor}
       queueManagerSearchKey={queueManagerSearchKey}
-      queueManagerRightPaneRef={queueManagerRightPaneRef}
-      queueManagerPreviewSplit={queueManagerPreviewSplit}
-      beginQueueManagerPaneResize={beginQueueManagerPaneResize}
       hasActiveGenerationPreview={hasActiveGenerationPreview}
       generationPreviewStatusLabel={generationPreviewStatusLabel}
       generationPreviewStepLabel={generationPreviewStepLabel}
-      isLoadingOutputPreview={isLoadingOutputPreview}
-      queueManagerMediaItems={queueManagerMediaItems}
-      outputPreviewError={outputPreviewError}
-      queueManagerOutputBuckets={queueManagerOutputBuckets}
-      handleRefreshQueueManagerOutputs={handleRefreshQueueManagerOutputs}
-      openQueueManagerOutputInViewer={openQueueManagerOutputInViewer}
-      openQueueManagerOutputInLibrary={openQueueManagerOutputInLibrary}
-      pinQueueManagerOutputFolder={pinQueueManagerOutputFolder}
-      openQueueManagerOutputInExplorer={openQueueManagerOutputInExplorer}
-      sendQueueManagerOutputToTrash={sendQueueManagerOutputToTrash}
-      sendQueueManagerOutputToWorkspace={sendQueueManagerOutputToWorkspace}
-      queueOutputMenu={queueOutputMenu}
-      setQueueOutputMenu={setQueueOutputMenu}
     />
   );
   const [queueEstimate, setQueueEstimate] = useState<PowerPrompterQueueEstimate>(() =>
@@ -6554,7 +6102,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         powerPrompterUiSuppressPersistUntilRef.current = Date.now() + 1000;
         const next = String(preferences?.selectedBridgeId || '').trim();
         if (parseApiWorkflowTargetId(next)) setSelectedBridgeId(next);
-        setQueueManagerPreviewSplit(normalizeQueueManagerPreviewSplit(preferences?.queueManagerPreviewSplit));
         setLeftPanelCollapsed(preferences?.leftPanelCollapsed !== false);
         setRightPanelCollapsed(preferences?.rightPanelCollapsed !== false);
         if (Number.isFinite(Number(preferences?.activeQueueSet))) {
@@ -6601,7 +6148,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     powerPrompterUiSessionUpdatedAtRef.current = updatedAt;
     const preferences = {
       selectedBridgeId,
-      queueManagerPreviewSplit,
       activeQueueSet: queueSetTarget,
       queueManagerSearchQuery,
       queueManagerStyleFilter,
@@ -6627,7 +6173,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     globalSearchQuery,
     leftPanelCollapsed,
     editorPanelMode,
-    queueManagerPreviewSplit,
     queueManagerSearchQuery,
     queueManagerSequenceMode,
     queueManagerStyleFilter,
@@ -7778,9 +7323,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     const nextBridgeId = String(preferences.selectedBridgeId || '').trim();
     if (parseApiWorkflowTargetId(nextBridgeId)) {
       setSelectedBridgeId(nextBridgeId);
-    }
-    if (preferences.queueManagerPreviewSplit !== undefined) {
-      setQueueManagerPreviewSplit(normalizeQueueManagerPreviewSplit(preferences.queueManagerPreviewSplit));
     }
     if (preferences.leftPanelCollapsed !== undefined) {
       setLeftPanelCollapsed(preferences.leftPanelCollapsed === true);
@@ -12205,7 +11747,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           globalSearchFocusNonce={globalSearchFocusNonce}
           overlayMode={overlayMode}
           renderQueueTrackerCard={renderQueueTrackerCard}
-          setOutputPreviewSnapshot={setOutputPreviewSnapshot}
           renderQueueManagerView={renderQueueManagerView}
           queueEditorEnabled={POWER_PROMPTER_QUEUE_EDITOR_ENABLED}
           queueEditorDraft={queueEditorDraft}

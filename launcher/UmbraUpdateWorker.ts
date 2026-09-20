@@ -1,3 +1,4 @@
+import { writeUpdateJsonAtomic as writeJsonAtomic } from '../shared/updateStateFile';
 import {
   chmodSync,
   createWriteStream,
@@ -50,21 +51,6 @@ function log(request: UmbraUpdateWorkerRequest, message: string) {
   }
 }
 
-function writeJsonAtomic(filePath: string, value: unknown) {
-  mkdirSync(dirname(filePath), { recursive: true });
-  const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    try {
-      renameSync(temporaryPath, filePath);
-      return;
-    } catch (error) {
-      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
-      if (!['EACCES', 'EBUSY', 'EPERM'].includes(code) || attempt === 39) throw error;
-      Bun.sleepSync(50);
-    }
-  }
-}
 
 function readState(request: UmbraUpdateWorkerRequest): UmbraUpdateState {
   const workspaceStatePath = join(request.workspaceRoot, 'update-state.json');
@@ -80,17 +66,17 @@ function readState(request: UmbraUpdateWorkerRequest): UmbraUpdateState {
   return normalizeUmbraUpdateState({}, request.currentVersion);
 }
 
-function writeState(
+async function writeState(
   request: UmbraUpdateWorkerRequest,
   patch: Partial<UmbraUpdateState>,
-): UmbraUpdateState {
+): Promise<UmbraUpdateState> {
   const next = normalizeUmbraUpdateState({
     ...readState(request),
     ...patch,
   }, request.currentVersion);
-  writeJsonAtomic(join(request.workspaceRoot, 'update-state.json'), next);
+  await writeJsonAtomic(join(request.workspaceRoot, 'update-state.json'), next);
   try {
-    writeJsonAtomic(request.statePath, next);
+    await writeJsonAtomic(request.statePath, next);
   } catch {
     // User/ is temporarily outside the app root while files are swapped.
   }
@@ -260,7 +246,7 @@ export async function waitForProcesses(
 
   const remaining = pids.filter(isProcessAlive);
   log(request, `Umbra did not exit gracefully. Force-stopping owned PID(s): ${remaining.join(', ')}.`);
-  writeState(request, {
+  await writeState(request, {
     phase: 'stopping',
     currentItem: 'Stopping a hung Umbra process',
   });
@@ -332,7 +318,7 @@ async function extractZip(
         const now = Date.now();
         if (now - lastStateWriteAt >= 150) {
           lastStateWriteAt = now;
-          writeState(request, { phase: 'extracting', currentItem: relativePath });
+          await writeState(request, { phase: 'extracting', currentItem: relativePath });
         }
         if (/\/$/.test(relativePath)) {
           mkdirSync(destinationPath, { recursive: true });
@@ -571,23 +557,23 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
     }
     log(request, `Waiting for Umbra ${request.currentVersion} to close.`);
     await waitForProcesses(request);
-    writeState(request, {
+    await writeState(request, {
       phase: 'stopping',
       currentItem: 'Allowing the previous Umbra server to finish releasing resources',
     });
     await Bun.sleep(UMBRA_SHUTDOWN_SETTLE_MS);
-    writeState(request, { phase: 'extracting', currentItem: 'Opening release package' });
+    await writeState(request, { phase: 'extracting', currentItem: 'Opening release package' });
 
     const extractionRoot = join(request.workspaceRoot, 'payload');
     await extractZip(request.archivePath, extractionRoot, request);
     const payloadRoot = findPayloadRoot(extractionRoot);
     verifyPayload(payloadRoot, request);
 
-    writeState(request, { phase: 'applying', currentItem: 'Replacing application files' });
+    await writeState(request, { phase: 'applying', currentItem: 'Replacing application files' });
     ({ backupRoot, preservedRoot } = applyPayload(request, payloadRoot));
-    writeState(request, { phase: 'updating_nodes', currentItem: 'Updating Umbra Nodes' });
+    await writeState(request, { phase: 'updating_nodes', currentItem: 'Updating Umbra Nodes' });
     const nodeResult = updateUmbraNodes(request);
-    writeState(request, {
+    await writeState(request, {
       phase: 'complete',
       currentVersion: request.targetVersion,
       nodeUpdate: nodeResult.status,
@@ -614,7 +600,7 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
     } catch (rollbackError) {
       log(request, `Rollback also failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
     }
-    writeState(request, {
+    await writeState(request, {
       phase: 'failed',
       completedAt: new Date().toISOString(),
       currentItem: '',

@@ -138,6 +138,7 @@ export async function importUmbraCanvasWorkspaceArchive(file: Blob): Promise<{
       ? { ...entity, adjustments: normalizeUmbraCanvasRasterAdjustments(entity.adjustments) }
       : entity);
     project.id = `canvas-${crypto.randomUUID()}`;
+    project.serverRevision = 0;
     project.name = `${String(project.name || 'Imported Canvas').slice(0, 140)} imported`;
     project.activeEntityId = project.entities.some((entity) => entity.id === project.activeEntityId) ? project.activeEntityId : '';
     project.generation.pending = [];

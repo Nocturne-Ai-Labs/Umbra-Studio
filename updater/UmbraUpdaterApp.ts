@@ -1,9 +1,8 @@
+import { writeUpdateJsonAtomic as writeJsonAtomic } from '../shared/updateStateFile';
 import {
   appendFileSync,
   existsSync,
   readFileSync,
-  renameSync,
-  writeFileSync,
 } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
@@ -58,34 +57,20 @@ function json(value: unknown, status = 200): Response {
   });
 }
 
-function writeJsonAtomic(filePath: string, value: unknown) {
-  const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    try {
-      renameSync(temporaryPath, filePath);
-      return;
-    } catch (error) {
-      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
-      if (!['EACCES', 'EBUSY', 'EPERM'].includes(code) || attempt === 39) throw error;
-      Bun.sleepSync(50);
-    }
-  }
-}
 
 function localUmbraOrigin(session: UpdaterSession): string {
   const host = session.appHost === '::1' ? '[::1]' : '127.0.0.1';
   return `http://${host}:${session.appPort}`;
 }
 
-function startExternalRelaunch(session: UpdaterSession, sessionPath: string) {
+async function startExternalRelaunch(session: UpdaterSession, sessionPath: string) {
   const bunPath = join(session.workspaceRoot, process.platform === 'win32' ? 'bun.exe' : 'bun');
   const workerPath = join(session.workspaceRoot, 'UmbraRelaunchWorker.js');
   if (!existsSync(bunPath) || !existsSync(workerPath)) {
     throw new Error('The external Umbra Studio relaunch worker is missing.');
   }
   const requestPath = join(session.workspaceRoot, 'relaunch-request.json');
-  writeJsonAtomic(requestPath, {
+  await writeJsonAtomic(requestPath, {
     schemaVersion: 1,
     runtimeRoot: session.runtimeRoot,
     workspaceRoot: session.workspaceRoot,
@@ -105,12 +90,13 @@ function startExternalRelaunch(session: UpdaterSession, sessionPath: string) {
       UMBRA_ROOT: resolve(session.runtimeRoot),
     },
   });
-  if (!child.pid) throw new Error('The external Umbra Studio relaunch worker did not start.');
-  session.relaunchPid = child.pid;
-  writeJsonAtomic(sessionPath, session);
   child.once('error', (error) => {
     console.error('[UmbraUpdaterApp] Relaunch worker failed:', error);
   });
+  if (!child.pid) throw new Error('The external Umbra Studio relaunch worker did not start.');
+  session.relaunchPid = child.pid;
+  try { await writeJsonAtomic(sessionPath, session); }
+  catch { console.warn('[UmbraUpdaterApp] Relaunch started, but its session record could not be refreshed.'); }
   child.unref();
   return child.pid;
 }
@@ -138,14 +124,14 @@ function readState(service: AppUpdateService, session: UpdaterSession): UmbraUpd
   return service.readState();
 }
 
-function writeState(service: AppUpdateService, session: UpdaterSession, patch: Partial<UmbraUpdateState>) {
+async function writeState(service: AppUpdateService, session: UpdaterSession, patch: Partial<UmbraUpdateState>) {
   const next = normalizeUmbraUpdateState({
     ...readState(service, session),
     ...patch,
   }, service.currentVersion);
-  writeJsonAtomic(updaterStatePath(session), next);
+  await writeJsonAtomic(updaterStatePath(session), next);
   try {
-    service.writeState(next);
+    await service.writeState(next);
   } catch {
     // User/ can be momentarily unavailable during the atomic root swap.
   }
@@ -180,7 +166,7 @@ async function runWorker(
     createdAt: new Date().toISOString(),
     keepWorkspaceAlive: true,
   };
-  writeJsonAtomic(requestPath, request);
+  await writeJsonAtomic(requestPath, request);
   const workerProcessLogPath = join(session.workspaceRoot, 'worker-process.log');
   const appendWorkerOutput = (value: unknown) => {
     try {
@@ -202,12 +188,14 @@ async function runWorker(
   });
   worker.stdout?.on('data', appendWorkerOutput);
   worker.stderr?.on('data', appendWorkerOutput);
-  session.workerPid = Number(worker.pid || 0);
-  writeJsonAtomic(join(session.workspaceRoot, 'session.json'), session);
-  const code = await new Promise<number>((resolveExit) => {
+  const completion = new Promise<number>((resolveExit) => {
     worker.once('exit', (value) => resolveExit(value ?? 1));
     worker.once('error', () => resolveExit(1));
   });
+  session.workerPid = Number(worker.pid || 0);
+  try { await writeJsonAtomic(join(session.workspaceRoot, 'session.json'), session); }
+  catch { appendWorkerOutput('Update worker started, but its session record could not be refreshed.\n'); }
+  const code = await completion;
   if (code !== 0 && readState(service, session).phase !== 'failed') {
     throw new Error(`The external update worker exited with code ${code}.`);
   }
@@ -215,7 +203,7 @@ async function runWorker(
 
 async function runUpdate(service: AppUpdateService, session: UpdaterSession, release: UmbraReleaseBuild) {
   const startedAt = new Date().toISOString();
-  let state = writeState(service, session, {
+  let state = await writeState(service, session, {
     phase: 'downloading',
     currentVersion: service.currentVersion,
     targetVersion: release.version,
@@ -235,11 +223,11 @@ async function runUpdate(service: AppUpdateService, session: UpdaterSession, rel
     const downloaded = await service.downloadRelease(
       release,
       session.workspaceRoot,
-      (processedBytes, totalBytes) => {
+      async (processedBytes, totalBytes) => {
         const now = Date.now();
         if (now - lastProgressAt < 150 && processedBytes < totalBytes) return;
         lastProgressAt = now;
-        state = writeState(service, session, {
+        state = await writeState(service, session, {
           ...state,
           phase: 'downloading',
           processedBytes,
@@ -247,7 +235,7 @@ async function runUpdate(service: AppUpdateService, session: UpdaterSession, rel
         });
       },
     );
-    writeState(service, session, {
+    await writeState(service, session, {
       ...state,
       phase: 'stopping',
       processedBytes: downloaded.totalBytes,
@@ -256,7 +244,7 @@ async function runUpdate(service: AppUpdateService, session: UpdaterSession, rel
     });
     await runWorker(service, session, release, downloaded.archivePath);
   } catch (error) {
-    writeState(service, session, {
+    await writeState(service, session, {
       ...state,
       phase: 'failed',
       completedAt: new Date().toISOString(),
@@ -279,7 +267,7 @@ async function main() {
     throw new Error('The updater session failed path safety validation.');
   }
   session.updaterPid = process.pid;
-  writeJsonAtomic(sessionPath, session);
+  await writeJsonAtomic(sessionPath, session);
   markUmbraUpdaterProcessHeartbeat(session.workspaceRoot, 'updater');
   const heartbeat = setInterval(() => {
     try {
@@ -300,19 +288,20 @@ async function main() {
     && Number.isFinite(updateCompletedAt)
     && updateCompletedAt <= sessionStartedAt
   ) {
-    persistedState = writeState(service, session, createIdleUmbraUpdateState(currentVersion));
+    persistedState = await writeState(service, session, createIdleUmbraUpdateState(currentVersion));
     console.log('[UmbraUpdaterApp] Cleared the completed state from an earlier updater session.');
   }
   if (
     isUmbraUpdateStateActive(persistedState)
     && !hasActiveUmbraUpdaterProcess(session.runtimeRoot, session.workspaceRoot)
   ) {
-    writeState(service, session, recoverInterruptedUmbraUpdateState(persistedState, currentVersion));
+    await writeState(service, session, recoverInterruptedUmbraUpdateState(persistedState, currentVersion));
     console.warn(`[UmbraUpdaterApp] Recovered abandoned ${persistedState.phase} state from a previous updater session.`);
   }
   const html = readFileSync(join(session.workspaceRoot, 'index.html'), 'utf8');
   let activeUpdate: Promise<void> | null = null;
   let activeRelaunch: Promise<void> | null = null;
+  let admittingOperation = false;
   let relaunchState: { phase: 'idle' | 'starting' | 'ready' | 'failed'; error: string } = {
     phase: 'idle',
     error: '',
@@ -340,15 +329,16 @@ async function main() {
       }
       if (url.pathname === '/api/state' && request.method === 'GET') {
         const persisted = readState(service, session);
-        const state = !activeUpdate
+        const state = !activeUpdate && !admittingOperation
           && isUmbraUpdateStateActive(persisted)
           && !hasActiveUmbraUpdaterProcess(session.runtimeRoot, session.workspaceRoot)
-          ? writeState(service, session, recoverInterruptedUmbraUpdateState(persisted, currentVersion))
+          ? await writeState(service, session, recoverInterruptedUmbraUpdateState(persisted, currentVersion))
           : persisted;
         return json({ success: true, state });
       }
       if (url.pathname === '/api/update' && request.method === 'POST') {
-        if (activeUpdate || activeRelaunch) return json({ success: false, error: 'An update operation is already running.' }, 409);
+        if (activeUpdate || activeRelaunch || admittingOperation) return json({ success: false, error: 'An update operation is already running.' }, 409);
+        admittingOperation = true;
         try {
           const body = await request.json().catch(() => ({})) as Record<string, unknown>;
           const tag = String(body.tag || '').trim();
@@ -371,25 +361,26 @@ async function main() {
           return json({ success: true, accepted: true, targetVersion: release.version }, 202);
         } catch (error) {
           return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
-        }
+        } finally { admittingOperation = false; }
       }
       if (url.pathname === '/api/relaunch' && request.method === 'POST') {
-        if (activeUpdate) return json({ success: false, error: 'Wait for the current update to finish before launching Umbra Studio.' }, 409);
+        if (activeUpdate || admittingOperation) return json({ success: false, error: 'Wait for the current update to finish before launching Umbra Studio.' }, 409);
         if (activeRelaunch) return json({ success: false, error: 'Umbra Studio is already starting.' }, 409);
         const state = readState(service, session);
         if (state.phase !== 'complete') {
           return json({ success: false, error: 'Install an update successfully before launching Umbra Studio.' }, 409);
         }
         relaunchState = { phase: 'starting', error: '' };
+        admittingOperation = true;
         try {
-          startExternalRelaunch(session, sessionPath);
+          await startExternalRelaunch(session, sessionPath);
         } catch (error) {
           relaunchState = {
             phase: 'failed',
             error: error instanceof Error ? error.message : String(error),
           };
           return json({ success: false, error: relaunchState.error }, 500);
-        }
+        } finally { admittingOperation = false; }
         activeRelaunch = (async () => {
           await Bun.sleep(350);
           try {
@@ -404,7 +395,8 @@ async function main() {
         return json({ success: true, ...relaunchState });
       }
       if (url.pathname === '/api/close' && request.method === 'POST') {
-        if (activeUpdate || activeRelaunch) return json({ success: false, error: 'Wait for the current operation to finish before closing the updater.' }, 409);
+        if (activeUpdate || activeRelaunch || admittingOperation) return json({ success: false, error: 'Wait for the current operation to finish before closing the updater.' }, 409);
+        admittingOperation = true;
         setTimeout(async () => {
           await server.stop(true);
           requestUmbraUpdaterWorkspaceCleanup(session.workspaceRoot);
@@ -428,7 +420,7 @@ async function main() {
   console.log(`[UmbraUpdaterApp] Ready: http://127.0.0.1:${server.port}`);
   const stopAfterIdle = () => {
     setTimeout(async () => {
-      if (activeUpdate || activeRelaunch) {
+      if (activeUpdate || activeRelaunch || admittingOperation) {
         stopAfterIdle();
         return;
       }

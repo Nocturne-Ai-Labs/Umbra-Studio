@@ -1,25 +1,10 @@
 import {
-  copyFileSync,
-  constants,
-  closeSync,
   existsSync,
-  lstatSync,
   mkdirSync,
-  mkdtempSync,
-  openSync,
-  readSync,
-  fsyncSync,
   readFileSync,
-  readlinkSync,
   readdirSync,
-  renameSync,
-  rmdirSync,
-  rmSync,
-  statSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { FirstRunService } from '../backend/FirstRunService';
@@ -29,8 +14,8 @@ import {
 } from '../shared/onboarding/firstRun';
 import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
 import { assertSeparateMigrationPaths } from '../shared/migrationPaths';
+import { MigrationTransferJournal } from './MigrationTransferJournal';
 
-const UMBRA_NODES_DIRECTORY_NAME = 'umbra-nodes';
 const MIGRATION_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 
 function quoteSqlIdentifier(value: string): string {
@@ -86,192 +71,7 @@ function collectFiles(rootPath: string, extensions: Set<string>, results: string
   return results;
 }
 
-export function isExcludedMigrationPath(sourceRoot: string, candidatePath: string): boolean {
-  const rel = relative(resolve(sourceRoot), resolve(candidatePath));
-  if (!rel || rel === '.') return false;
-  return rel
-    .split(/[\\/]+/)
-    .some((segment) => segment.trim().toLowerCase() === UMBRA_NODES_DIRECTORY_NAME);
-}
-
-export interface UmbraMigrationProgress {
-  totalFiles: number;
-  processedFiles: number;
-  totalBytes: number;
-  processedBytes: number;
-  currentItem: string;
-}
-
-function addMigrationTreeTotals(
-  sourceRoot: string,
-  candidatePath: string,
-  totals: Pick<UmbraMigrationProgress, 'totalFiles' | 'totalBytes'>,
-) {
-  if (!existsSync(candidatePath) || isExcludedMigrationPath(sourceRoot, candidatePath)) return;
-  const stats = lstatSync(candidatePath);
-  if (stats.isDirectory() && !stats.isSymbolicLink()) {
-    for (const entry of readdirSync(candidatePath)) {
-      addMigrationTreeTotals(sourceRoot, join(candidatePath, entry), totals);
-    }
-    return;
-  }
-  totals.totalFiles += 1;
-  totals.totalBytes += stats.isFile() ? stats.size : 0;
-}
-
-export function measureMigrationTrees(sourceRoot: string): UmbraMigrationProgress {
-  const progress: UmbraMigrationProgress = {
-    totalFiles: 0,
-    processedFiles: 0,
-    totalBytes: 0,
-    processedBytes: 0,
-    currentItem: '',
-  };
-  for (const treeName of ['User', 'Tools']) {
-    const treeRoot = join(sourceRoot, treeName);
-    addMigrationTreeTotals(treeRoot, treeRoot, progress);
-  }
-  return progress;
-}
-
-function verifyMigrationCopy(sourcePath: string, stagedPath: string, original: ReturnType<typeof lstatSync>) {
-  const hash = (path: string) => {
-    const descriptor = openSync(path, 'r');
-    try {
-      const digest = createHash('sha256');
-      const buffer = Buffer.allocUnsafe(1024 * 1024);
-      for (;;) {
-        const count = readSync(descriptor, buffer, 0, buffer.length, null);
-        if (!count) break;
-        digest.update(buffer.subarray(0, count));
-      }
-      return digest.digest('hex');
-    } finally {
-      closeSync(descriptor);
-    }
-  };
-  if (lstatSync(stagedPath).size !== original.size || hash(sourcePath) !== hash(stagedPath)) {
-    throw new Error('Migration copy verification failed; the original files were preserved.');
-  }
-  const current = lstatSync(sourcePath);
-  if (current.dev !== original.dev || current.ino !== original.ino
-    || current.size !== original.size || current.mtimeMs !== original.mtimeMs) {
-    throw new Error('Migration source changed while copying; the original files were preserved.');
-  }
-  const descriptor = openSync(stagedPath, 'r+');
-  try {
-    fsyncSync(descriptor);
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
-function moveFileOrLink(sourcePath: string, destinationPath: string, stats: ReturnType<typeof lstatSync>) {
-  assertSeparateMigrationPaths(sourcePath, destinationPath);
-  mkdirSync(dirname(destinationPath), { recursive: true });
-  try {
-    renameSync(sourcePath, destinationPath);
-    return;
-  } catch (error: any) {
-    if (error?.code !== 'EXDEV') throw error;
-  }
-  // Stage cross-volume copies beside the destination; never truncate its last-good file.
-  const stagingDirectory = mkdtempSync(join(dirname(destinationPath), '.umbra-migration-'));
-  const stagedPath = join(stagingDirectory, 'replacement');
-  try {
-    if (stats.isSymbolicLink()) {
-      const target = readlinkSync(sourcePath);
-      let linkType: 'junction' | 'file' | undefined;
-      if (process.platform === 'win32') {
-        try {
-          linkType = statSync(sourcePath).isDirectory() ? 'junction' : 'file';
-        } catch {
-          linkType = 'file';
-        }
-      }
-      symlinkSync(target, stagedPath, linkType);
-      if (readlinkSync(sourcePath) !== target) throw new Error('Migration link changed while copying.');
-    } else {
-      copyFileSync(sourcePath, stagedPath, constants.COPYFILE_EXCL);
-      verifyMigrationCopy(sourcePath, stagedPath, stats);
-    }
-    assertSeparateMigrationPaths(sourcePath, destinationPath);
-    renameSync(stagedPath, destinationPath);
-    rmSync(sourcePath, { force: true });
-  } finally {
-    try {
-      rmSync(stagingDirectory, { recursive: true, force: true });
-    } catch (error) {
-      console.warn('[UmbraMigration] Could not clean staging directory:', error);
-    }
-  }
-}
-
-function moveMigrationEntry(
-  sourceRoot: string,
-  sourcePath: string,
-  destinationPath: string,
-  treeName: string,
-  progress: UmbraMigrationProgress,
-  onProgress?: (progress: UmbraMigrationProgress) => void,
-) {
-  if (!existsSync(sourcePath) || isExcludedMigrationPath(sourceRoot, sourcePath)) return;
-  assertSeparateMigrationPaths(sourcePath, destinationPath);
-  const stats = lstatSync(sourcePath);
-  if (stats.isDirectory() && !stats.isSymbolicLink()) {
-    mkdirSync(destinationPath, { recursive: true });
-    for (const entry of readdirSync(sourcePath)) {
-      moveMigrationEntry(
-        sourceRoot,
-        join(sourcePath, entry),
-        join(destinationPath, entry),
-        treeName,
-        progress,
-        onProgress,
-      );
-    }
-    try {
-      rmdirSync(sourcePath);
-    } catch {
-      // Excluded Umbra-Nodes content deliberately keeps its legacy parent tree.
-    }
-    return;
-  }
-
-  moveFileOrLink(sourcePath, destinationPath, stats);
-  progress.processedFiles += 1;
-  progress.processedBytes += stats.isFile() ? stats.size : 0;
-  progress.currentItem = `${treeName}/${relative(sourceRoot, sourcePath).split('\\').join('/')}`;
-  onProgress?.({ ...progress });
-}
-
-export function moveMigrationTree(
-  sourcePath: string,
-  destinationPath: string,
-  treeName: string,
-  progress: UmbraMigrationProgress,
-  onProgress?: (progress: UmbraMigrationProgress) => void,
-): boolean {
-  if (!existsSync(sourcePath)) return false;
-  assertSeparateMigrationPaths(sourcePath, destinationPath);
-  mkdirSync(destinationPath, { recursive: true });
-  for (const entry of readdirSync(sourcePath)) {
-    moveMigrationEntry(
-      sourcePath,
-      join(sourcePath, entry),
-      join(destinationPath, entry),
-      treeName,
-      progress,
-      onProgress,
-    );
-  }
-  try {
-    rmdirSync(sourcePath);
-  } catch {
-    // Excluded Umbra-Nodes content deliberately remains in the previous build.
-  }
-  return true;
-}
+export { isExcludedMigrationPath } from './MigrationTransferJournal';
 
 export function rewritePortableJsonFiles(
   destinationRoot: string,
@@ -304,7 +104,7 @@ export async function rewritePortableDatabasePaths(
   const databaseFiles = collectFiles(
     join(destinationRoot, 'User'),
     new Set(['.db', '.sqlite', '.sqlite3']),
-  );
+  ).filter(path => !/^Recovery[\\/]Migrations(?:[\\/]|$)/i.test(relative(join(destinationRoot, 'User'), path)));
   if (databaseFiles.length === 0) return 0;
   const { Database } = await import('bun:sqlite');
   let changedDatabases = 0;
@@ -488,6 +288,7 @@ export async function runMigrationRequest(
   }
   const shouldWaitForServer = options.waitForServer !== false;
   const shouldRelaunch = options.relaunch !== false;
+  let journal: MigrationTransferJournal | null = null;
   try {
     if (shouldWaitForServer) {
       appendMigrationLog(request, `Waiting for Umbra server process ${request.serverPid} to exit.`);
@@ -496,7 +297,9 @@ export async function runMigrationRequest(
     service.inspectMigrationSource(request.sourceRoot);
     appendMigrationLog(request, `Migrating from ${request.sourceRoot}.`);
     writeMigrationConsole(`Moving data from ${request.sourceRoot}`);
-    const progress = measureMigrationTrees(request.sourceRoot);
+    journal = new MigrationTransferJournal(request.sourceRoot, request.destinationRoot);
+    journal.plan();
+    const progress = journal.progress();
     let movedUser = false;
     let movedTools = false;
     let lastProgressWriteAt = 0;
@@ -541,27 +344,12 @@ export async function runMigrationRequest(
       `Move inventory ready: ${progress.totalFiles} files, ${progress.totalBytes} bytes.`,
     );
 
-    movedUser = moveMigrationTree(
-      join(request.sourceRoot, 'User'),
-      join(request.destinationRoot, 'User'),
-      'User',
-      progress,
-      () => writeProgress(),
-    );
+    journal.move((current) => { Object.assign(progress, current); writeProgress(); });
+    movedUser = journal.hasTree('User');
+    movedTools = journal.hasTree('Tools');
     writeProgress(true);
-    appendMigrationLog(request, movedUser ? 'User data move complete.' : 'No User data was present to move.');
-    writeMigrationConsole(movedUser ? 'User data move complete.' : 'No User data was present to move.');
-
-    movedTools = moveMigrationTree(
-      join(request.sourceRoot, 'Tools'),
-      join(request.destinationRoot, 'Tools'),
-      'Tools',
-      progress,
-      () => writeProgress(),
-    );
-    writeProgress(true);
-    appendMigrationLog(request, movedTools ? 'Tools move complete.' : 'No Tools data was present to move.');
-    writeMigrationConsole(movedTools ? 'Tools move complete.' : 'No Tools data was present to move.');
+    appendMigrationLog(request, 'User and Tools transfers committed; recovery receipts retained.');
+    writeMigrationConsole('User and Tools transfers complete.');
 
     const rewrittenJsonFiles = rewritePortableJsonFiles(request.destinationRoot, request.sourceRoot);
     const rewrittenDatabases = await rewritePortableDatabasePaths(request.destinationRoot, request.sourceRoot);
@@ -585,16 +373,26 @@ export async function runMigrationRequest(
         ...progress,
         currentItem: '',
         error: nodeSync.warning,
+        recoveryRoot: journal.root,
+        conflictFiles: journal.conflictCount(),
       },
     });
+    journal.complete();
+    try { journal.writeRecoveryReport(); }
+    catch (error) { console.warn('[UmbraMigration] Migration completed; the readable report could not be refreshed. SQLite receipts are retained.', error); }
+    appendMigrationLog(request, `Recovery receipts and ${journal.conflictCount()} retained conflict(s): ${journal.root}`);
     appendMigrationLog(
       request,
       `Migration complete. JSON files updated: ${rewrittenJsonFiles}; databases updated: ${rewrittenDatabases}.`,
     );
     writeMigrationConsole('Migration complete. Returning control to Umbra.');
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    try { journal?.writeRecoveryReport(); } catch { /* Preserve the original migration failure; SQLite receipts remain authoritative. */ }
+    const detail = error instanceof Error ? error.message : String(error);
+    const message = journal ? `${detail} Recovery receipts: ${journal.root}` : detail;
     const previous = service.readState().migration;
+    let durableProgress = {};
+    try { durableProgress = journal?.progress() || {}; } catch { /* Keep the last published UI progress if the journal itself is unavailable. */ }
     service.writeState({
       schemaVersion: 1,
       phase: 'failed',
@@ -613,13 +411,17 @@ export async function runMigrationRequest(
         totalBytes: previous?.totalBytes || 0,
         processedBytes: previous?.processedBytes || 0,
         currentItem: previous?.currentItem || '',
+        ...durableProgress,
         error: message,
+        recoveryRoot: journal?.root || previous?.recoveryRoot,
+        conflictFiles: journal?.conflictCount() || previous?.conflictFiles || 0,
       },
     });
     appendMigrationLog(request, `Migration failed: ${message}`);
     writeMigrationConsole(`Migration failed: ${message}`);
     throw error;
   } finally {
+    journal?.close();
     if (shouldRelaunch && request.restartOwner !== 'launcher') relaunchUmbra(request);
   }
 }

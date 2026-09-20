@@ -21,7 +21,7 @@ export interface UmbraCanvasWorkspaceRestorePointSummary {
 
 async function readApi<T>(response: Response, fallback: string): Promise<T> {
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
-  if (!response.ok || payload.success === false) throw new Error(String(payload.error || fallback));
+  if (!response.ok || payload.success === false) throw Object.assign(new Error(String(payload.error || fallback)), { status: response.status });
   return payload as T;
 }
 
@@ -110,6 +110,38 @@ export async function listUmbraCanvasWorkspaceProjects(signal?: AbortSignal): Pr
   return payload.projects;
 }
 
+export async function saveUmbraCanvasWorkspaceDraftCopy(project: UmbraCanvasProjectDocument): Promise<UmbraCanvasProjectDocument> {
+  if (project.generation.pending.length) throw new Error('Wait for pending Canvas generations to finish before copying this draft.');
+  const copy = structuredClone(project);
+  copy.id = `canvas-${crypto.randomUUID()}`;
+  copy.serverRevision = 0;
+  copy.name = `${project.name} Copy`;
+  copy.createdAt = Date.now();
+  const urls: string[] = [];
+  const copied = new Map<string, string>();
+  const preserve = async (url: string): Promise<string> => {
+    if (!url) return url;
+    const cached = copied.get(url);
+    if (cached) return cached;
+    const blob = await readCanvasBlob(url, 'draft copy');
+    const local = URL.createObjectURL(blob);
+    urls.push(local);
+    copied.set(url, local);
+    return local;
+  };
+  try {
+    for (const entity of copy.entities) {
+      if (entity.kind === 'raster' || entity.kind === 'mask') entity.imageUrl = await preserve(entity.imageUrl || '');
+    }
+    for (const stage of copy.generation.staging) {
+      stage.acceptanceMaskUrl = await preserve(stage.acceptanceMaskUrl || '');
+    }
+    return await saveUmbraCanvasWorkspaceProject(copy);
+  } finally {
+    for (const url of urls) URL.revokeObjectURL(url);
+  }
+}
+
 export async function loadUmbraCanvasWorkspaceProject(projectId: string, signal?: AbortSignal): Promise<UmbraCanvasProjectDocument> {
   const response = await fetch(`/api/umbra-ui/canvas/projects/${encodeURIComponent(projectId)}`, { signal });
   const payload = await readApi<{ success: true; project: UmbraCanvasProjectDocument }>(response, 'Failed to load the Canvas project.');
@@ -121,11 +153,11 @@ export async function deleteUmbraCanvasWorkspaceProject(projectId: string): Prom
   await readApi<{ success: true }>(response, 'Failed to delete the Canvas project.');
 }
 
-export async function forkUmbraCanvasWorkspaceProject(projectId: string, name: string): Promise<UmbraCanvasProjectDocument> {
+export async function forkUmbraCanvasWorkspaceProject(projectId: string, name: string, serverRevision: number): Promise<UmbraCanvasProjectDocument> {
   const response = await fetch(`/api/umbra-ui/canvas/projects/${encodeURIComponent(projectId)}/fork`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, serverRevision }),
   });
   const payload = await readApi<{ success: true; project: UmbraCanvasProjectDocument }>(response, 'Failed to copy the Canvas project.');
   return payload.project;
@@ -159,9 +191,12 @@ export async function createUmbraCanvasWorkspaceRestorePoint(
 export async function restoreUmbraCanvasWorkspaceRestorePoint(
   projectId: string,
   restorePointId: string,
+  serverRevision: number,
 ): Promise<UmbraCanvasProjectDocument> {
   const response = await fetch(`/api/umbra-ui/canvas/projects/${encodeURIComponent(projectId)}/restore-points/${encodeURIComponent(restorePointId)}/restore`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serverRevision }),
   });
   const payload = await readApi<{ success: true; project: UmbraCanvasProjectDocument }>(response, 'Failed to restore the Canvas restore point.');
   return payload.project;

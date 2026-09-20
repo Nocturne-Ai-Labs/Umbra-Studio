@@ -23,6 +23,8 @@ export interface ModelDownloadJob {
 }
 
 type ModelDownloadWorkerRequest =
+  | { id: string; type: 'list'; payload: Record<string, never> }
+  | { id: string; type: 'dismiss'; payload: { jobIds: string[] } }
   | {
       id: string;
       type: 'start';
@@ -95,6 +97,9 @@ export class ModelDownloadWorkerService {
     });
   }
 
+  async list() { return this.sendRequest({ type: 'list', payload: {} }); }
+  async dismiss(jobIds: string[]) { return this.sendRequest({ type: 'dismiss', payload: { jobIds } }); }
+
   async cancel(jobId: string) {
     return this.sendRequest({
       type: 'cancel',
@@ -146,6 +151,7 @@ export class ModelDownloadWorkerService {
       cwd: this.cwd,
       env: this.env,
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     });
     this.child = child;
     this.buffer = '';

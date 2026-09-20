@@ -44,7 +44,6 @@ export function PowerPrompterWorkspacePanels(props: PowerPrompterWorkspacePanels
     globalSearchFocusNonce,
     overlayMode,
     renderQueueTrackerCard,
-    setOutputPreviewSnapshot,
     renderQueueManagerView,
     queueEditorEnabled = false,
     queueEditorDraft,
@@ -111,7 +110,6 @@ export function PowerPrompterWorkspacePanels(props: PowerPrompterWorkspacePanels
                 overlayMode={overlayMode}
                 mobileSelectionMode={mobileSelectionMode}
                 queueTrackerCard={isEditorPanelActive ? renderQueueTrackerCard() : null}
-                onOutputPreviewSnapshotChange={setOutputPreviewSnapshot}
               />
             </div>
           )}
@@ -211,7 +209,6 @@ export function PowerPrompterWorkspacePanels(props: PowerPrompterWorkspacePanels
                   overlayMode={overlayMode}
                   mobileSelectionMode={mobileSelectionMode}
                   queueTrackerCard={isQueueEditorPanelActive ? renderQueueTrackerCard() : null}
-                  onOutputPreviewSnapshotChange={() => {}}
                 />
               </div>
             </div>

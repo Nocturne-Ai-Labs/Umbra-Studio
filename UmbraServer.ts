@@ -7,6 +7,7 @@
  */
 
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
+import { configureGeneratedMediaActivity, recordGeneratedMediaOutputs } from './backend/GeneratedMediaActivity';
 import { createReadStream, createWriteStream, existsSync, statSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, openSync, closeSync, renameSync, rmSync, type Dirent, type Stats, type BigIntStats } from 'fs';
 import * as fs from 'fs/promises';
 import { Readable } from 'node:stream';
@@ -24,6 +25,8 @@ import { ServerWebSocket } from 'bun';
 import { QueueUploadReceiver } from './shared/power-prompter/queueTransport';
 import { classifyUmbraPrompt } from './shared/nsfwPrivacyClassifier';
 import { resolveSingleByteRange } from './shared/httpByteRange';
+import { mediaFileRevision } from './backend/mediaFileRevision';
+import { galleryMediaCacheControl } from './gallery/GalleryMediaCache';
 import { createVariantEtag, matchesIfNoneMatch, permitsConditionalRange } from './shared/httpCache';
 import { compactQueueSnapshot } from './shared/power-prompter/queueSnapshotTransport';
 import { PowerPrompterHistoryStore } from './backend/PowerPrompterHistoryStore';
@@ -142,7 +145,7 @@ import {
   extractUmbraUiTrainingTags,
   extractUmbraUiTriggerWords,
 } from './backend/UmbraUiLoraMetadata';
-import { resolveUmbraUiPinnedOutputFolder, resolveUmbraPinnedTaskFolder } from './backend/UmbraUiPinnedOutput';
+import { assertUmbraUiPinnedOutputAvailable, resolveUmbraUiPinnedOutputFolder, resolveUmbraPinnedTaskFolder } from './backend/UmbraUiPinnedOutput';
 import { publishPinnedVideoOutput } from './backend/UmbraUiPinnedVideoOutput';
 import {
   applyUmbraUiPrompterOutputLayout,
@@ -158,6 +161,7 @@ import {
 } from './backend/DataForgeWildcardGenerator';
 import { ensureDefaultDanbooruTagCatalog } from './backend/DefaultDanbooruTagCatalog';
 import { DanbooruTagCorpusService } from './backend/DanbooruTagCorpusService';
+import { DanbooruRelatedWorkerService } from './backend/DanbooruRelatedWorkerService';
 
 // Route handlers we're keeping (will merge later)
 import * as trashRoutes from './backend/routes/trash';
@@ -262,6 +266,7 @@ const ROOT_PUBLIC_DIR = join(ROOT_DIR, 'public');
 const SOURCE_PUBLIC_DIR = join(SOURCE_DIR, 'public');
 const PUBLIC_DIR = existsSync(ROOT_PUBLIC_DIR) ? ROOT_PUBLIC_DIR : SOURCE_PUBLIC_DIR;
 const USER_DIR = join(ROOT_DIR, 'User');
+const generatedMediaActivity = configureGeneratedMediaActivity(ROOT_DIR, join(USER_DIR, 'Config', 'generated-media-activity.json'), () => resolvePathCandidate(getDefaultOutputRootPath()));
 const POWER_PROMPTER_RECEIPT_DIR = join(USER_DIR, 'PowerPrompter', 'Receipts');
 const REMOTE_BOOTSTRAP_SETTINGS_PATH = join(USER_DIR, 'Config', 'UmbraRemote', 'settings.json');
 const IS_UMBRA_DEV_MODE = process.env.UMBRA_DEV_MODE === '1';
@@ -385,6 +390,10 @@ const modelDownloadWorkerService = new ModelDownloadWorkerService({
 });
 const modelManagerStateDb = new ModelManagerStateDb(ROOT_DIR);
 const danbooruTagCorpusService = new DanbooruTagCorpusService(USER_DIR);
+const danbooruRelatedWorkerService = new DanbooruRelatedWorkerService({
+  sourceRoot: SOURCE_DIR,
+  databasePath: danbooruTagCorpusService.databasePath,
+});
 const animaModelMergeService = new AnimaModelMergeService(() => {
   const tool = detectComfyUI();
   if (!tool.detected || !tool.pythonPath) throw new Error('Configure a ComfyUI installation with its Python environment first.');
@@ -417,6 +426,7 @@ process.on('exit', () => {
   modelIndexWorkerService.dispose();
   modelDownloadWorkerService.dispose();
   modelManagerStateDb.close();
+  void danbooruRelatedWorkerService.dispose();
   danbooruTagCorpusService.close();
   try {
     galleryDb.close();
@@ -8619,6 +8629,7 @@ async function emitBackendPowerPrompterSavedOutputs(
     };
   }));
   const primaryPowerPrompterMetadata = stampedOutputs[0]?.umbra_power_prompter || basePowerPrompterMetadata;
+  recordGeneratedMediaOutputs(stampedOutputs);
   const payload = {
     type: 'queue_saved_outputs',
     requestId,
@@ -9588,6 +9599,7 @@ async function finalizeUmbraExtendedVideo(options: {
   }
   options.signal?.throwIfAborted();
   const portablePath = toClientPath(outputPath);
+  recordGeneratedMediaOutputs([{ path: outputPath }]);
   const reviewRequest = findPowerPrompterQueueControllerRequest(options.requestId);
   const finalPrompt = reviewRequest?.prompts[options.session.clipCount - 1];
   if (reviewRequest && finalPrompt) {
@@ -11190,6 +11202,7 @@ function handlePrompterMessage(ws: ServerWebSocket<unknown>, data: any) {
     });
     emitPowerPrompterRuntimeTerminalLog('queue_saved_outputs', data);
     const pendingRequest = requestId ? prompterPendingQueueRequests.get(requestId) || null : null;
+    recordGeneratedMediaOutputs(Array.isArray(data.outputs) ? data.outputs : []);
     void tagPowerPrompterSavedOutputs(data, pendingRequest);
     let requestSourceClient: ServerWebSocket<unknown> | null = null;
     if (requestId) {
@@ -15860,6 +15873,7 @@ async function proxyGalleryBridgeFsGet(
   fallback: () => Promise<Response> | Response,
   server?: RequestIpServer,
 ): Promise<Response> {
+  if (req.signal.aborted) return new Response(null, { status: 499 });
   const startedAt = performance.now();
   const traceProxy = (event: string, payload: Record<string, unknown>, thresholdMs = 250) => {
     if (!isBackendDiagnosticLoggingEnabled()) return;
@@ -15879,12 +15893,20 @@ async function proxyGalleryBridgeFsGet(
       // Best-effort diagnostics only.
     }
   };
-  if (!isChildProcessAlive(galleryBridgeProcess) && !(await isGalleryBridgeHealthy({ allowCached: false }))) {
-    await startGalleryBridge().catch(() => undefined);
+  if (!isChildProcessAlive(galleryBridgeProcess)) {
+    const healthy = await isGalleryBridgeHealthy({ allowCached: false });
+    if (req.signal.aborted) return new Response(null, { status: 499 });
+    if (!healthy) await startGalleryBridge().catch(() => undefined);
   }
+
+  if (req.signal.aborted) return new Response(null, { status: 499 });
 
   if (Date.now() < galleryBridgeProxyBackoffUntil) {
     const response = await fallback();
+    if (req.signal.aborted) {
+      void response.body?.cancel().catch(() => undefined);
+      return new Response(null, { status: 499 });
+    }
     response.headers.set('X-Gallery-Fallback', 'bridge-backoff');
     traceProxy('fallback_backoff', { status: response.status, fallback: true }, 0);
     return response;
@@ -15933,9 +15955,15 @@ async function proxyGalleryBridgeFsGet(
     galleryBridgeProxyFailures += 1;
     galleryBridgeProxyBackoffUntil = Date.now() + 2000;
     if (galleryBridgeProxyFailures >= 3 && !isChildProcessAlive(galleryBridgeProcess) && !(await isGalleryBridgeHealthy())) {
+      if (req.signal.aborted) return new Response(null, { status: 499 });
       scheduleGalleryBridgeSelfHeal('proxy_failure');
     }
+    if (req.signal.aborted) return new Response(null, { status: 499 });
     const response = await fallback();
+    if (req.signal.aborted) {
+      void response.body?.cancel().catch(() => undefined);
+      return new Response(null, { status: 499 });
+    }
     response.headers.set('X-Gallery-Fallback', 'bridge-error');
     traceProxy('proxy_error_fallback', {
       status: response.status,
@@ -19973,7 +20001,7 @@ async function handleUmbraUiCanvasWorkspaceProjectSave(req: Request, projectId: 
     const project = await umbraUiCanvasWorkspaceProjectService.save(projectId, JSON.parse(rawDocument), assets, thumbnail);
     return json({ success: true, project });
   } catch (error: any) {
-    return json({ success: false, error: String(error?.message || error || 'Failed to save the Canvas project.') }, 400);
+    return json({ success: false, error: String(error?.message || error || 'Failed to save the Canvas project.') }, error?.status === 409 ? 409 : 400);
   }
 }
 
@@ -19995,12 +20023,13 @@ async function handleUmbraUiCanvasWorkspaceRestorePointCreate(req: Request, proj
   }
 }
 
-async function handleUmbraUiCanvasWorkspaceRestorePointRestore(projectId: string, restorePointId: string): Promise<Response> {
+async function handleUmbraUiCanvasWorkspaceRestorePointRestore(req: Request, projectId: string, restorePointId: string): Promise<Response> {
   try {
-    const project = await umbraUiCanvasWorkspaceProjectService.restoreRestorePoint(projectId, restorePointId);
+    const body = await req.json() as Record<string, unknown>;
+    const project = await umbraUiCanvasWorkspaceProjectService.restoreRestorePoint(projectId, restorePointId, body.serverRevision);
     return json({ success: true, project });
   } catch (error: any) {
-    return json({ success: false, error: String(error?.message || error || 'Failed to restore the Canvas restore point.') }, 400);
+    return json({ success: false, error: String(error?.message || error || 'Failed to restore the Canvas restore point.') }, error?.status === 409 ? 409 : 400);
   }
 }
 
@@ -20036,10 +20065,10 @@ async function handleUmbraUiCanvasWorkspaceProjectDelete(projectId: string): Pro
 async function handleUmbraUiCanvasWorkspaceProjectFork(req: Request, projectId: string): Promise<Response> {
   try {
     const body = await req.json().catch(() => ({})) as Record<string, unknown>;
-    const project = await umbraUiCanvasWorkspaceProjectService.fork(projectId, body.name);
+    const project = await umbraUiCanvasWorkspaceProjectService.fork(projectId, body.name, body.serverRevision);
     return json({ success: true, project });
   } catch (error: any) {
-    return json({ success: false, error: String(error?.message || error || 'Failed to copy the Canvas project.') }, 400);
+    return json({ success: false, error: String(error?.message || error || 'Failed to copy the Canvas project.') }, error?.status === 409 ? 409 : 400);
   }
 }
 
@@ -20292,6 +20321,7 @@ async function handleUmbraUiCanvasSave(req: Request): Promise<Response> {
     const temporaryPath = `${fullPath}.tmp`;
     await fs.writeFile(temporaryPath, png);
     await fs.rename(temporaryPath, fullPath);
+    recordGeneratedMediaOutputs([{ path: fullPath }]);
     return json({ success: true, path: toClientPath(fullPath), filename });
   } catch (error: any) {
     return json({ success: false, error: String(error?.message || error || 'Failed to save the canvas to Gallery.') }, 400);
@@ -20530,6 +20560,7 @@ async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean
       Number(form.get('sequenceNumber')),
       renderedPath,
     );
+    recordGeneratedMediaOutputs([{ path: outputPath }]);
     return json({ success: true, path: toClientPath(outputPath), filename, mediaType });
   } catch (error: any) {
     console.error('[UmbraUI Media Tools] Watermark failed:', error);
@@ -20677,6 +20708,7 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
     const outputUids = galleryDb.resolveUidsForPaths([outputPath]);
     const galleryTag = censored ? 'censored' : 'uncensored';
     if (outputUids.length > 0) galleryDb.addTagsToFiles(outputUids, [galleryTag]);
+    recordGeneratedMediaOutputs([{ path: outputPath }]);
     reservedOutput = null;
     return json({
       success: true,
@@ -20738,6 +20770,7 @@ async function handleUmbraUiVideoToGif(req: Request, allowExternalOutput: boolea
     const { outputPath, filename } = await publishUmbraUiMediaToolSequencePath(
       outputFolder, 'gif-sequence', '.gif', Number(form.get('sequenceNumber')), renderedPath,
     );
+    recordGeneratedMediaOutputs([{ path: outputPath }]);
     return json({ success: true, path: toClientPath(outputPath), filename, mediaType: 'gif' });
   } catch (error: any) {
     console.error('[UmbraUI Media Tools] GIF conversion failed:', error);
@@ -22645,6 +22678,13 @@ async function assertPPApiWorkflowExecutionReady(
   }
   const catalog = validationContext.catalog;
   const generation = normalizePPGenerationControls(generationInput);
+  if (generation.outputOwner === 'umbra_ui' && generation.outputFolder) {
+    await assertUmbraUiPinnedOutputAvailable(
+      generation.outputFolder,
+      settingsManager.getAppSettings()['library.pinnedFolders'],
+      resolvePathCandidate,
+    );
+  }
   const workflowResourceValues = resolvePPWorkflowResourceValues(
     loaded.item.resources,
     generation.workflowResources,
@@ -24732,9 +24772,7 @@ async function handleFsList(url: URL): Promise<Response> {
   let singleFlightWaitMs = 0;
   let scanMs = 0;
   let singleFlightResolve: (() => void) | null = null;
-  let singleFlightReject: ((reason?: unknown) => void) | null = null;
-  let singleFlightOwned = false;
-  let singleFlightError: unknown = null;
+  let singleFlightPromise: Promise<void> | null = null;
   let cacheMutationVersionAtScanStart = fsListCacheMutationVersion;
 
   // Default to configured output root if no path provided, with legacy compatibility.
@@ -24800,15 +24838,11 @@ async function handleFsList(url: URL): Promise<Response> {
         return json(payload);
       }
 
-      const inFlight = fsListInFlight.get(cacheKey);
-      if (inFlight) {
+      let inFlight: Promise<void> | undefined;
+      while ((inFlight = fsListInFlight.get(cacheKey))) {
         const waitStartedAt = Date.now();
-        try {
-          await inFlight;
-        } catch {
-          // If the leading request failed, we continue and perform a fresh scan.
-        }
-        singleFlightWaitMs = Date.now() - waitStartedAt;
+        await inFlight;
+        singleFlightWaitMs += Date.now() - waitStartedAt;
         if (singleFlightWaitMs > FS_LIST_SINGLE_FLIGHT_WARN_MS) {
           console.warn(`[FS List] single-flight wait ${singleFlightWaitMs}ms path="${targetPath}"`);
         }
@@ -24825,15 +24859,13 @@ async function handleFsList(url: URL): Promise<Response> {
       }
 
       let resolveInFlight!: () => void;
-      let rejectInFlight!: (reason?: unknown) => void;
-      const runPromise = new Promise<void>((resolve, reject) => {
+      // This notifies waiters of completion; the owning request reports scan errors.
+      const runPromise = new Promise<void>((resolve) => {
         resolveInFlight = resolve;
-        rejectInFlight = reject;
       });
       fsListInFlight.set(cacheKey, runPromise);
       singleFlightResolve = resolveInFlight;
-      singleFlightReject = rejectInFlight;
-      singleFlightOwned = true;
+      singleFlightPromise = runPromise;
       cacheMutationVersionAtScanStart = fsListCacheMutationVersion;
     }
 
@@ -24870,23 +24902,18 @@ async function handleFsList(url: URL): Promise<Response> {
     return json(payload);
 
   } catch (error: any) {
-    singleFlightError = error;
     console.error('[FS List] Error:', error);
     return json({ error: error.message }, 500);
   } finally {
-    if (cacheKey && singleFlightOwned) {
-      if (singleFlightError) {
-        singleFlightReject?.(singleFlightError);
-      } else {
-        singleFlightResolve?.();
-      }
-      const active = fsListInFlight.get(cacheKey);
-      if (active) fsListInFlight.delete(cacheKey);
+    if (cacheKey && singleFlightPromise) {
+      if (fsListInFlight.get(cacheKey) === singleFlightPromise) fsListInFlight.delete(cacheKey);
+      singleFlightResolve?.();
     }
   }
 }
 
-async function handleFsListProgressive(url: URL): Promise<Response> {
+async function handleFsListProgressive(url: URL, signal?: AbortSignal): Promise<Response> {
+  if (signal?.aborted) return new Response(null, { status: 499 });
   const requestStartedAt = Date.now();
   const path = url.searchParams.get('path');
   const limit = Math.max(0, Math.min(1024, Math.trunc(Number(url.searchParams.get('limit')) || 0)));
@@ -24923,13 +24950,20 @@ async function handleFsListProgressive(url: URL): Promise<Response> {
       return json({ error: 'Access denied' }, 403);
     }
 
-    if (!existsSync(fullPath)) {
+    let stat = await fs.stat(fullPath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    signal?.throwIfAborted();
+    if (!stat) {
       if (
         targetPath === defaultOutputRoot ||
         targetPath === COMFY_OUTPUT_ROOT ||
         targetPath === LEGACY_OUTPUT_ROOT
       ) {
         await fs.mkdir(fullPath, { recursive: true });
+        signal?.throwIfAborted();
+        stat = await fs.stat(fullPath);
       } else {
         const normalizedFolderPath = normalizeOutputPathInput(targetPath);
         invalidateFsFolderSummaryForPaths([normalizedFolderPath]);
@@ -24947,13 +24981,14 @@ async function handleFsListProgressive(url: URL): Promise<Response> {
       }
     }
 
-    const stat = statSync(fullPath);
+    signal?.throwIfAborted();
     if (!stat.isDirectory()) return json({ error: 'Path is not a directory' }, 400);
     if (force) {
       invalidateFsFolderSummaryForPaths([targetPath]);
     }
 
     const workerStartedAt = Date.now();
+    signal?.throwIfAborted();
     const result = await galleryFsWorkerService.listProgressive({
       fullPath,
       targetPath,
@@ -24961,6 +24996,7 @@ async function handleFsListProgressive(url: URL): Promise<Response> {
       cursor,
       force,
     });
+    signal?.throwIfAborted();
     const workerMs = Date.now() - workerStartedAt;
     const files = Array.isArray((result as any)?.files) ? (result as any).files : [];
     const folders = Array.isArray((result as any)?.folders) ? (result as any).folders : [];
@@ -25087,6 +25123,7 @@ async function handleFsListProgressive(url: URL): Promise<Response> {
       })),
     });
   } catch (error: any) {
+    if (signal?.aborted) return new Response(null, { status: 499 });
     const code = String(error?.code || '').trim().toUpperCase();
     if (code === 'ENOENT' || code === 'ENOTDIR') {
       const normalizedFolderPath = normalizeOutputPathInput(String(path || '').trim() || getDefaultOutputRootPath());
@@ -25402,7 +25439,8 @@ async function handleFsTagsSet(req: Request): Promise<Response> {
   }
 }
 
-async function handleFsSearch(url: URL): Promise<Response> {
+async function handleFsSearch(url: URL, signal?: AbortSignal): Promise<Response> {
+  if (signal?.aborted) return new Response(null, { status: 499 });
   const startedAt = Date.now();
   const query = normalizeFsSearchQuery(url.searchParams.get('q') || url.searchParams.get('query') || '');
   const sortBy = String(url.searchParams.get('sortBy') || 'modified').trim().toLowerCase();
@@ -25426,13 +25464,19 @@ async function handleFsSearch(url: URL): Promise<Response> {
     const resolvedRoots: Array<{ clientRootPath: string; fullPath: string }> = [];
     const seenRoots = new Set<string>();
     for (const root of rootInputs) {
+      signal?.throwIfAborted();
       const resolved = resolvePath(root);
       if (!resolved) continue;
       const { fullPath } = resolved;
       const key = normalizeOutputPathInput(fullPath).toLowerCase();
       if (!key || seenRoots.has(key)) continue;
       if (!isPathInsideAllowedRoots(fullPath)) continue;
-      if (!existsSync(fullPath) || !statSync(fullPath).isDirectory()) continue;
+      const rootStat = await fs.stat(fullPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
+        throw error;
+      });
+      signal?.throwIfAborted();
+      if (!rootStat?.isDirectory()) continue;
       seenRoots.add(key);
       resolvedRoots.push({ clientRootPath: normalizeOutputPathInput(root), fullPath });
     }
@@ -25474,6 +25518,7 @@ async function handleFsSearch(url: URL): Promise<Response> {
     }
 
     while (queue.length > 0 && scannedFolders < maxFolders && Date.now() - startedAt < maxDurationMs) {
+      signal?.throwIfAborted();
       const current = queue.shift();
       if (!current) continue;
       scannedFolders += 1;
@@ -25484,6 +25529,7 @@ async function handleFsSearch(url: URL): Promise<Response> {
         continue;
       }
 
+      signal?.throwIfAborted();
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
         const absolutePath = join(current.absolutePath, entry.name);
@@ -25522,6 +25568,7 @@ async function handleFsSearch(url: URL): Promise<Response> {
       sortOrder,
     });
   } catch (error: any) {
+    if (signal?.aborted) return new Response(null, { status: 499 });
     console.error('[FS Search] Error:', error);
     return json({ error: error?.message || 'Gallery search failed' }, 500);
   }
@@ -25710,9 +25757,10 @@ async function handleFsThumbnail(req: Request, url: URL, server?: RequestIpServe
       : 100, remoteOptimized ? REMOTE_GALLERY_THUMBNAIL_QUALITY : 100);
 
     const requestedRevision = String(url.searchParams.get('rev') || '').trim();
-    const fallbackRevision = `m${Math.max(0, Math.floor(fileStat.mtimeMs))}-s${Math.max(0, Math.floor(fileStat.size))}`;
+    const fallbackRevision = mediaFileRevision(fileStat);
     const sidecarRevision = 'plain';
-    const effectiveRevision = requestedRevision || `${fallbackRevision}-${sidecarRevision}`;
+    const effectiveRevision = `${fallbackRevision}-${sidecarRevision}-${requestedRevision}`;
+    const cacheControl = galleryMediaCacheControl(requestedRevision);
     const etag = `W/"thumb-${createHash('md5').update(`${path}|${size}|${quality}|${effectiveRevision}`).digest('hex').slice(0, 16)}"`;
     const ifNoneMatch = String(req.headers.get('if-none-match') || '').trim();
     if (ifNoneMatch && ifNoneMatch === etag) {
@@ -25720,9 +25768,7 @@ async function handleFsThumbnail(req: Request, url: URL, server?: RequestIpServe
         status: 304,
         headers: {
           'ETag': etag,
-          'Cache-Control': requestedRevision
-            ? 'public, max-age=31536000, immutable'
-            : 'public, max-age=120, stale-while-revalidate=600',
+          'Cache-Control': cacheControl,
         },
       });
     }
@@ -25738,9 +25784,7 @@ async function handleFsThumbnail(req: Request, url: URL, server?: RequestIpServe
       if (cachedThumbnail) {
         return thumbnailResponse(cachedThumbnail, {
           'Content-Type': 'image/webp',
-          'Cache-Control': requestedRevision
-            ? 'public, max-age=31536000, immutable'
-            : 'public, max-age=120, stale-while-revalidate=600',
+          'Cache-Control': cacheControl,
           'ETag': etag,
           'X-Thumbnail-Size': size,
           'X-Thumbnail-Quality': String(quality),
@@ -25769,9 +25813,7 @@ async function handleFsThumbnail(req: Request, url: URL, server?: RequestIpServe
 
     return thumbnailResponse(thumbnail, {
         'Content-Type': 'image/webp',
-        'Cache-Control': requestedRevision
-          ? 'public, max-age=31536000, immutable'
-          : 'public, max-age=120, stale-while-revalidate=600',
+        'Cache-Control': cacheControl,
         'ETag': etag,
         'X-Thumbnail-Size': size,
         'X-Thumbnail-Quality': String(quality),
@@ -25809,8 +25851,9 @@ async function handleFsPreview(req: Request, url: URL): Promise<Response> {
 
     const size = ['small', 'medium', 'large'].includes(sizeParam) ? sizeParam : 'medium';
     const requestedRevision = String(url.searchParams.get('rev') || '').trim();
-    const fallbackRevision = `m${Math.max(0, Math.floor(fileStat.mtimeMs))}-s${Math.max(0, Math.floor(fileStat.size))}`;
-    const effectiveRevision = requestedRevision || `${fallbackRevision}-preview`;
+    const fallbackRevision = mediaFileRevision(fileStat);
+    const effectiveRevision = `${fallbackRevision}-preview-${requestedRevision}`;
+    const cacheControl = galleryMediaCacheControl(requestedRevision);
     const etag = `W/"preview-${createHash('md5').update(`${path}|${size}|${effectiveRevision}`).digest('hex').slice(0, 16)}"`;
     const ifNoneMatch = String(req.headers.get('if-none-match') || '').trim();
     if (ifNoneMatch && ifNoneMatch === etag) {
@@ -25818,9 +25861,7 @@ async function handleFsPreview(req: Request, url: URL): Promise<Response> {
         status: 304,
         headers: {
           'ETag': etag,
-          'Cache-Control': requestedRevision
-            ? 'public, max-age=31536000, immutable'
-            : 'public, max-age=60, stale-while-revalidate=300',
+          'Cache-Control': cacheControl,
         },
       });
     }
@@ -25835,16 +25876,14 @@ async function handleFsPreview(req: Request, url: URL): Promise<Response> {
       // Fallback: Return static thumbnail
       return new Response(null, {
         status: 302,
-        headers: { 'Location': `/api/fs/thumbnail?path=${encodeURIComponent(path)}&size=${size}&q=100&rev=v3` }
+        headers: { 'Location': `/api/fs/thumbnail?path=${encodeURIComponent(path)}&size=${size}&q=100` }
       });
     }
 
     return new Response(new Uint8Array(preview), {
       headers: {
         'Content-Type': 'video/webm',
-        'Cache-Control': requestedRevision
-          ? 'public, max-age=31536000, immutable'
-          : 'public, max-age=60, stale-while-revalidate=300',
+        'Cache-Control': cacheControl,
         'ETag': etag,
         'X-Preview-Size': size
       }
@@ -27576,6 +27615,19 @@ async function handleModelManagerDownloadStatus(jobId: string): Promise<Response
   } catch (error: any) {
     console.error('[ModelManager] download status error:', error);
     return json({ error: error?.message || 'Failed to read download status' }, 500);
+  }
+}
+
+async function handleModelManagerDownloadHistory(req: Request): Promise<Response> {
+  try {
+    if (req.method === 'GET') return json({ success: true, ...await modelDownloadWorkerService.list() });
+    const body = await req.json() as { jobIds?: unknown };
+    if (!Array.isArray(body.jobIds) || body.jobIds.length > 512 || body.jobIds.some(id => typeof id !== 'string')) {
+      return json({ error: 'Expected up to 512 download job IDs' }, 400);
+    }
+    return json({ success: true, ...await modelDownloadWorkerService.dismiss(body.jobIds) });
+  } catch (error: any) {
+    return json({ error: error?.message || 'Failed to read or clear download history' }, 500);
   }
 }
 
@@ -30436,7 +30488,7 @@ const server = Bun.serve<UmbraSocketData>({
           req,
           url,
           '/api/fs/list-progressive',
-          () => handleFsListProgressive(url),
+          () => handleFsListProgressive(url, req.signal),
         );
       }
       if (path === '/api/gallery-bridge/fs/tree' && method === 'GET') {
@@ -30460,7 +30512,7 @@ const server = Bun.serve<UmbraSocketData>({
           req,
           url,
           '/api/fs/search',
-          () => handleFsSearch(url),
+          () => handleFsSearch(url, req.signal),
         );
       }
       if (path === '/api/gallery-bridge/fs/search-suggestions' && method === 'GET') {
@@ -30515,7 +30567,7 @@ const server = Bun.serve<UmbraSocketData>({
       }
 
       if (path === '/api/fs/list' && method === 'GET') return handleFsList(url);
-      if (path === '/api/fs/list-progressive' && method === 'GET') return handleFsListProgressive(url);
+      if (path === '/api/fs/list-progressive' && method === 'GET') return handleFsListProgressive(url, req.signal);
       if (path === '/api/fs/thumbnail' && method === 'GET') return handleFsThumbnail(req, url, server);
       if (path === '/api/fs/preview' && method === 'GET') return handleFsPreview(req, url);
       if (path === '/api/fs/image' && method === 'GET') return handleFsImage(req, url, server);
@@ -30535,7 +30587,12 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/fs/read' && method === 'GET') return handleFsRead(url);
       if (path === '/api/fs/tree' && method === 'GET') return handleFsTree(url);
       if (path === '/api/fs/folder-summary' && method === 'GET') return handleFsFolderSummary(url);
-      if (path === '/api/fs/search' && method === 'GET') return handleFsSearch(url);
+      if (path === '/api/fs/generated-media-activity' && method === 'GET') {
+        const folders = url.searchParams.getAll('folder').filter(value => value.length <= 4096).slice(0, 256);
+        const host = isHostRequest(req, url, server);
+        return json(generatedMediaActivity.snapshot(folders, folder => host || isPathInsideAllowedRoots(folder), toClientPath));
+      }
+      if (path === '/api/fs/search' && method === 'GET') return handleFsSearch(url, req.signal);
       if (path === '/api/fs/search-suggestions' && method === 'GET') return handleFsSearchSuggestions(url);
       if (path === '/api/fs/reveal' && method === 'POST') return handleFsReveal(req, server);
       if (path === '/api/fs/mkdir' && method === 'POST') return handleFsMkdir(req);
@@ -30585,6 +30642,7 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/model-manager/opened-models' && method === 'POST') return handleModelManagerOpenedModelsPost(req);
       if (path === '/api/model-manager/opened-models/refresh' && method === 'POST') return handleModelManagerOpenedModelsRefresh(req);
       if (path === '/api/model-manager/opened-models/delete' && method === 'POST') return handleModelManagerOpenedModelsDelete(req);
+      if (path === '/api/model-manager/downloads' && (method === 'GET' || method === 'DELETE')) return handleModelManagerDownloadHistory(req);
       const modelDownloadMatch = path.match(/^\/api\/model-manager\/downloads\/([^/]+)$/);
       if (modelDownloadMatch && method === 'GET') {
         const jobId = decodeURIComponent(modelDownloadMatch[1]);
@@ -30788,7 +30846,7 @@ const server = Bun.serve<UmbraSocketData>({
 
       // Thumbnail cache stats and precache progress
       if (path === '/api/cache/stats' && method === 'GET') {
-        const stats = thumbnailService.getCacheStats();
+        const stats = await thumbnailService.getCacheStats();
         const progress = thumbnailService.getPrecacheProgress();
         return new Response(JSON.stringify({ ...stats, precache: progress }), {
           headers: { ...getCorsHeaders(), 'Content-Type': 'application/json' }
@@ -31760,17 +31818,18 @@ const server = Bun.serve<UmbraSocketData>({
             .split(',')
             .map((entry) => entry.trim())
             .filter(Boolean);
-          const result = danbooruTagCorpusService.getRelatedTags({
+          const result = await danbooruRelatedWorkerService.query({
             tags,
             classifier: url.searchParams.get('classifier') || 'smart',
             includeExplicit: url.searchParams.get('includeExplicit') === '1',
             limit: Number(url.searchParams.get('limit') || 80),
             minimumSupport: Number(url.searchParams.get('minimumSupport') || 20),
             sampleLimit: Number(url.searchParams.get('sampleLimit') || 500_000),
-          });
+          }, req.signal);
           return json({ ok: true, ...result });
         } catch (error: any) {
-          return json({ ok: false, error: error?.message || 'Could not calculate related Danbooru tags.' }, 400);
+          return json({ ok: false, error: error?.message || 'Could not calculate related Danbooru tags.' },
+            error?.name === 'AbortError' ? 499 : [429, 504].includes(error?.status) ? error.status : 400);
         }
       }
 
@@ -34559,6 +34618,7 @@ const server = Bun.serve<UmbraSocketData>({
               name: basename(outputPath), type: 'image', size: stat.size, createdMs: stat.birthtimeMs, modifiedMs: stat.mtimeMs }]);
             const uids = galleryDb.resolveUidsForPaths([outputPath]);
             galleryDb.addTagsToFiles(uids, [censored ? 'censored' : 'uncensored', ...(protectedMedia ? ['umbra:manual-nsfw'] : [])]);
+            recordGeneratedMediaOutputs([{ path: outputPath }]);
           },
         });
       }
@@ -34684,7 +34744,7 @@ const server = Bun.serve<UmbraSocketData>({
           if (projectSegments.length === 2 && method === 'POST') return handleUmbraUiCanvasWorkspaceRestorePointCreate(req, projectId);
           if (projectSegments.length === 3 && method === 'DELETE') return handleUmbraUiCanvasWorkspaceRestorePointDelete(projectId, projectSegments[2]);
           if (projectSegments.length === 4 && projectSegments[3] === 'restore' && method === 'POST') {
-            return handleUmbraUiCanvasWorkspaceRestorePointRestore(projectId, projectSegments[2]);
+            return handleUmbraUiCanvasWorkspaceRestorePointRestore(req, projectId, projectSegments[2]);
           }
           return json({ success: false, error: 'Unsupported Canvas restore-point operation.' }, 405);
         }
@@ -36300,6 +36360,7 @@ async function gracefulShutdown(signal: string) {
     clientSet.clear();
   }
   console.log(`\x1b[32m[Shutdown]\x1b[0m Closed ${closedCount} WebSocket connections`);
+  await generatedMediaActivity.flush();
 
   // Give Bun's native listener a final drain window before process.exit.
   await new Promise((resolveWait) => setTimeout(resolveWait, 2_000));

@@ -285,6 +285,7 @@ function hydratePersistedAssets(
   });
   return {
     ...current,
+    serverRevision: persisted.serverRevision,
     entities,
     generation: { ...current.generation, pending, staging },
   };
@@ -297,6 +298,7 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
   replaceProject: (project) => set({ past: [], present: cloneProject(project), future: [] }),
   syncPersistedProject: (project) => set((state) => {
     if (state.present.id !== project.id) return state;
+    if ((project.serverRevision ?? 0) < (state.present.serverRevision ?? 0)) return state;
     if (state.present.revision === project.revision) return { present: cloneProject(project) };
     return { present: hydratePersistedAssets(state.present, project) };
   }),
@@ -696,7 +698,7 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
     if (!previous) return state;
     return {
       past: state.past.slice(0, -1),
-      present: cloneProject(previous),
+      present: { ...cloneProject(previous), serverRevision: state.present.serverRevision, revision: state.present.revision + 1, updatedAt: Date.now() },
       future: [cloneProject(state.present), ...state.future.slice(0, 79)],
     };
   }),
@@ -705,7 +707,7 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
     if (!next) return state;
     return {
       past: [...state.past.slice(-79), cloneProject(state.present)],
-      present: cloneProject(next),
+      present: { ...cloneProject(next), serverRevision: state.present.serverRevision, revision: state.present.revision + 1, updatedAt: Date.now() },
       future: state.future.slice(1),
     };
   }),

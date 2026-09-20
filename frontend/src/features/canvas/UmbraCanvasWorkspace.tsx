@@ -5,7 +5,6 @@ import { usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputCo
 import { UmbraGenerationActionBar } from '@/components/umbra-ui/UmbraGenerationActionBar';
 import React from 'react';
 import { useInpaintSamplingPreview } from '@/hooks/useInpaintSamplingPreview';
-import { UmbraInpaintLivePreview } from '@/components/umbra-ui/UmbraInpaintLivePreview';
 import { useNsfwPrivacy } from '@/components/privacy/NsfwPrivacyProvider';
 import { isProtectedLivePreview } from '@/lib/livePreviewPrivacy';
 import {
@@ -113,6 +112,7 @@ import {
   loadUmbraCanvasWorkspaceProject,
   restoreUmbraCanvasWorkspaceRestorePoint,
   saveUmbraCanvasWorkspaceProject,
+  saveUmbraCanvasWorkspaceDraftCopy,
   type UmbraCanvasWorkspaceProjectSummary,
   type UmbraCanvasWorkspaceRestorePointSummary,
 } from '@/lib/umbraUiCanvasWorkspaceProjects';
@@ -447,6 +447,11 @@ export function UmbraCanvasWorkspace({
   const [restorePointBusy, setRestorePointBusy] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState('');
+  const [conflictedProjectId, setConflictedProjectId] = React.useState('');
+  React.useEffect(() => {
+    setSaveError('');
+    setConflictedProjectId('');
+  }, [project.id]);
   const [forkingProject, setForkingProject] = React.useState(false);
   const [croppingRaster, setCroppingRaster] = React.useState(false);
   const [mergingLayers, setMergingLayers] = React.useState(false);
@@ -869,22 +874,25 @@ export function UmbraCanvasWorkspace({
   const projectTransitionRef = React.useRef(0);
   const saveProject = React.useCallback((notify = true): Promise<UmbraCanvasProjectDocument | null> => {
     if (projectSavePromiseRef.current) return projectSavePromiseRef.current;
+    if (conflictedProjectId === useUmbraCanvasStore.getState().present.id) return Promise.resolve(null);
     setSaving(true);
+    const current = useUmbraCanvasStore.getState().present;
     const request = (async () => {
       try {
-        const current = useUmbraCanvasStore.getState().present;
         const thumbnail = await composeUmbraCanvasProjectThumbnail(current).catch(() => null);
         const saved = await saveUmbraCanvasWorkspaceProject(current, thumbnail);
         syncPersistedProject(saved);
         window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, saved.id);
         setLastSavedRevision(saved.revision);
         setSaveError('');
+        setConflictedProjectId('');
         if (projectBrowserOpen) void refreshProjects();
         if (notify) showToast('Canvas project saved.', 'success');
         return saved;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to save the Canvas project.';
         setSaveError(message);
+        if ((error as { status?: number })?.status === 409) setConflictedProjectId(current.id);
         if (notify) showToast(`Canvas save failed: ${message}`, 'error');
         else console.warn(`[Canvas] Autosave failed: ${message}`);
         return null;
@@ -895,7 +903,7 @@ export function UmbraCanvasWorkspace({
     projectSavePromiseRef.current = request;
     void request.finally(() => { if (projectSavePromiseRef.current === request) projectSavePromiseRef.current = null; });
     return request;
-  }, [projectBrowserOpen, refreshProjects, showToast, syncPersistedProject]);
+  }, [conflictedProjectId, projectBrowserOpen, refreshProjects, showToast, syncPersistedProject]);
 
   const prepareProjectTransition = React.useCallback(async () => {
     const token = ++projectTransitionRef.current;
@@ -952,10 +960,10 @@ export function UmbraCanvasWorkspace({
   }, [archiving, onRestoreGenerationSettings, prepareProjectTransition, replaceProject, showToast]);
 
   React.useEffect(() => {
-    if (project.entities.length === 0 || project.revision === lastSavedRevision || saving) return;
+    if (conflictedProjectId === project.id || project.entities.length === 0 || project.revision === lastSavedRevision || saving) return;
     const timer = window.setTimeout(() => void saveProject(false), 30_000);
     return () => window.clearTimeout(timer);
-  }, [lastSavedRevision, project.entities.length, project.revision, saveProject, saving]);
+  }, [conflictedProjectId, lastSavedRevision, project.id, project.entities.length, project.revision, saveProject, saving]);
 
   const openProjectBrowser = React.useCallback(() => {
     setProjectBrowserOpen(true);
@@ -965,11 +973,19 @@ export function UmbraCanvasWorkspace({
 
   const loadProject = React.useCallback(async (projectId: string) => {
     try {
-      const canReplace = await prepareProjectTransition();
+      const current = useUmbraCanvasStore.getState().present;
+      const discardingConflict = conflictedProjectId === current.id;
+      if (discardingConflict && !window.confirm('Discard this unsaved Canvas draft and load the saved project? Use Save as Copy or Export first to keep your draft.')) return;
+      const token = discardingConflict ? ++projectTransitionRef.current : 0;
+      const canReplace = discardingConflict
+        ? () => token === projectTransitionRef.current && useUmbraCanvasStore.getState().present === current
+        : await prepareProjectTransition();
       if (!canReplace) return;
       const loaded = await loadUmbraCanvasWorkspaceProject(projectId);
       if (!canReplace()) return;
       replaceProject(loaded);
+      setConflictedProjectId('');
+      setSaveError('');
       window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, loaded.id);
       setLastSavedRevision(loaded.revision);
       if (loaded.generation.settings) {
@@ -1002,7 +1018,7 @@ export function UmbraCanvasWorkspace({
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to open the Canvas project.', 'error');
     }
-  }, [onRestoreGenerationSettings, prepareProjectTransition, replaceProject, showToast]);
+  }, [conflictedProjectId, onRestoreGenerationSettings, prepareProjectTransition, replaceProject, showToast]);
 
   React.useEffect(() => {
     if (!active || !mediaHandoff || mediaHandoff.mode !== 'canvas') return;
@@ -1128,11 +1144,25 @@ export function UmbraCanvasWorkspace({
   const forkProject = React.useCallback(async () => {
     if (forkingProject || saving || project.entities.length === 0) return;
     setForkingProject(true);
+    const current = useUmbraCanvasStore.getState().present;
     try {
-      const saved = await saveProject(false);
-      if (!saved) return;
-      const forked = await forkUmbraCanvasWorkspaceProject(saved.id, `${saved.name} Copy`);
+      let forked: UmbraCanvasProjectDocument;
+      if (conflictedProjectId === current.id) {
+        // Preserve the local draft, not the other client's latest server document.
+        forked = await saveUmbraCanvasWorkspaceDraftCopy(current);
+      } else {
+        const saved = await saveProject(false);
+        if (!saved) return;
+        forked = await forkUmbraCanvasWorkspaceProject(saved.id, `${saved.name} Copy`, saved.serverRevision ?? 0);
+      }
+      if (useUmbraCanvasStore.getState().present.id !== current.id || useUmbraCanvasStore.getState().present.revision !== current.revision) {
+        showToast(`Saved ${forked.name}. Your newer edits remain open.`, 'success');
+        void refreshProjects();
+        return;
+      }
       replaceProject(forked);
+      setConflictedProjectId('');
+      setSaveError('');
       window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, forked.id);
       setLastSavedRevision(forked.revision);
       if (forked.generation.settings) onRestoreGenerationSettings(forked.generation.settings);
@@ -1140,11 +1170,15 @@ export function UmbraCanvasWorkspace({
       requestAnimationFrame(() => managerRef.current?.fitToContent());
       showToast(`Created ${forked.name}.`, 'success');
     } catch (error) {
+      if ((error as { status?: number })?.status === 409 && useUmbraCanvasStore.getState().present.id === current.id) {
+        setConflictedProjectId(current.id);
+        setSaveError(error instanceof Error ? error.message : 'The saved Canvas project changed.');
+      }
       showToast(error instanceof Error ? error.message : 'The Canvas project could not be copied.', 'error');
     } finally {
       setForkingProject(false);
     }
-  }, [forkingProject, onRestoreGenerationSettings, project.entities.length, replaceProject, saveProject, saving, showToast]);
+  }, [conflictedProjectId, forkingProject, onRestoreGenerationSettings, project.entities.length, refreshProjects, replaceProject, saveProject, saving, showToast]);
 
   React.useEffect(() => {
     if (!active || recoveredProjectRef.current) return;
@@ -1205,8 +1239,22 @@ export function UmbraCanvasWorkspace({
     try {
       const saved = await saveProject(false);
       if (!saved) return;
+      const stillCurrent = () => {
+        const current = useUmbraCanvasStore.getState().present;
+        return current.id === saved.id && current.revision === saved.revision;
+      };
+      if (!stillCurrent()) return;
       await createUmbraCanvasWorkspaceRestorePoint(saved.id, `Before restoring ${restorePoint.name}`);
-      const restored = await restoreUmbraCanvasWorkspaceRestorePoint(project.id, restorePoint.id);
+      if (!stillCurrent()) return;
+      const restored = await restoreUmbraCanvasWorkspaceRestorePoint(saved.id, restorePoint.id, saved.serverRevision ?? 0);
+      if (!stillCurrent()) {
+        if (useUmbraCanvasStore.getState().present.id === saved.id) {
+          setConflictedProjectId(saved.id);
+          setSaveError('The saved project was restored while this draft changed. Save as Copy or reload to continue.');
+        }
+        showToast('The saved project was restored. Newer work in the editor was kept open.', 'info');
+        return;
+      }
       replaceProject(restored);
       window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, restored.id);
       setLastSavedRevision(restored.revision);
@@ -1223,6 +1271,10 @@ export function UmbraCanvasWorkspace({
       requestAnimationFrame(() => managerRef.current?.fitToContent());
       showToast(`Restored ${restorePoint.name}.`, 'success');
     } catch (error) {
+      if ((error as { status?: number })?.status === 409) {
+        setConflictedProjectId(project.id);
+        setSaveError(error instanceof Error ? error.message : 'The saved Canvas project changed.');
+      }
       showToast(error instanceof Error ? error.message : 'Failed to restore the Canvas restore point.', 'error');
     } finally {
       setRestorePointBusy(false);
@@ -2284,7 +2336,8 @@ export function UmbraCanvasWorkspace({
           />
           <button type="button" onClick={startBlankProject} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-500 hover:text-cyan-100"><Layers3 size={12} /> New</button>
           <button type="button" onClick={openProjectBrowser} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-500 hover:text-cyan-100"><FolderOpen size={12} /> Projects</button>
-          <button type="button" title={saveError ? `Last save failed: ${saveError}` : 'Save Canvas project'} onClick={() => void saveProject()} disabled={saving || project.entities.length === 0} className={cn('inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[9px] font-black uppercase disabled:border-white/10 disabled:bg-transparent disabled:text-zinc-700', saveError ? 'border-amber-300/35 bg-amber-400/[0.08] text-amber-100' : 'border-cyan-300/20 bg-cyan-500/[0.06] text-cyan-100')}><Save size={12} /> {saving ? 'Saving' : saveError ? 'Retry Save' : 'Save'}</button>
+          <button type="button" title={saveError ? `Last save failed: ${saveError}` : 'Save Canvas project'} onClick={() => void saveProject()} disabled={saving || project.entities.length === 0 || conflictedProjectId === project.id} className={cn('inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[9px] font-black uppercase disabled:border-white/10 disabled:bg-transparent disabled:text-zinc-700', saveError ? 'border-amber-300/35 bg-amber-400/[0.08] text-amber-100' : 'border-cyan-300/20 bg-cyan-500/[0.06] text-cyan-100')}><Save size={12} /> {saving ? 'Saving' : conflictedProjectId === project.id ? 'Conflict' : saveError ? 'Retry Save' : 'Save'}</button>
+          {conflictedProjectId === project.id && <button type="button" title="Reload saved project; asks before discarding your draft" aria-label="Reload saved project" onClick={() => void loadProject(project.id)} disabled={saving} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-amber-300/35 text-amber-100"><RotateCcw size={12} /></button>}
           <button type="button" title="Save project as a new copy" aria-label="Save project as a new copy" onClick={() => void forkProject()} disabled={forkingProject || saving || project.entities.length === 0} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100 disabled:text-zinc-800">{forkingProject ? <LoaderCircle size={12} className="animate-spin" /> : <Copy size={12} />}</button>
           <button type="button" title="Export portable Canvas project" aria-label="Export portable Canvas project" onClick={() => void exportProject()} disabled={archiving || project.entities.length === 0} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100 disabled:text-zinc-800"><Download size={12} /></button>
           <button type="button" title="Import portable Canvas project" aria-label="Import portable Canvas project" onClick={() => archiveInputRef.current?.click()} disabled={archiving} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100 disabled:text-zinc-800"><Upload size={12} /></button>
@@ -2384,9 +2437,6 @@ export function UmbraCanvasWorkspace({
           }}
           className="relative min-h-0 overflow-hidden bg-[#090b0c] [background-image:linear-gradient(45deg,rgba(255,255,255,0.018)_25%,transparent_25%),linear-gradient(-45deg,rgba(255,255,255,0.018)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,rgba(255,255,255,0.018)_75%),linear-gradient(-45deg,transparent_75%,rgba(255,255,255,0.018)_75%)] [background-position:0_0,0_8px,8px_-8px,-8px_0px] [background-size:16px_16px]"
         />
-        <div className="absolute bottom-2 right-2 z-20 max-w-[calc(100%-16px)]">
-          <UmbraInpaintLivePreview job={job} preview={liveSamplingPreview} />
-        </div>
         </div>
         {stages.length > 0 ? (
           <section data-umbra-canvas-staging-strip="" aria-label="Canvas staging strip" className="flex min-h-28 items-stretch gap-2 overflow-x-auto border-t border-white/10 bg-black/40 p-2 custom-scrollbar">

@@ -1,15 +1,14 @@
+import { writeUpdateJsonAtomic as writeJsonAtomic } from '../shared/updateStateFile';
 import {
   createReadStream,
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
-  writeFileSync,
 } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import {
   compareUmbraVersions as compareSharedUmbraVersions,
   createIdleUmbraUpdateState,
@@ -126,21 +125,6 @@ export function normalizeGithubRelease(
   };
 }
 
-function writeJsonAtomic(filePath: string, value: unknown) {
-  mkdirSync(dirname(filePath), { recursive: true });
-  const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    try {
-      renameSync(temporaryPath, filePath);
-      return;
-    } catch (error) {
-      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
-      if (!['EACCES', 'EBUSY', 'EPERM'].includes(code) || attempt === 39) throw error;
-      Bun.sleepSync(50);
-    }
-  }
-}
 
 export class AppUpdateService {
   readonly runtimeRoot: string;
@@ -167,9 +151,9 @@ export class AppUpdateService {
     }
   }
 
-  writeState(state: UmbraUpdateState): UmbraUpdateState {
+  async writeState(state: UmbraUpdateState): Promise<UmbraUpdateState> {
     const normalized = normalizeUmbraUpdateState(state, this.currentVersion);
-    writeJsonAtomic(this.statePath, normalized);
+    await writeJsonAtomic(this.statePath, normalized);
     return normalized;
   }
 
@@ -235,7 +219,7 @@ export class AppUpdateService {
   async downloadRelease(
     release: UmbraReleaseBuild,
     workspaceRoot: string,
-    onProgress: (processedBytes: number, totalBytes: number) => void,
+    onProgress: (processedBytes: number, totalBytes: number) => void | Promise<void>,
   ): Promise<{ archivePath: string; sha256: string; totalBytes: number }> {
     if (!release.packageName || /[<>:"/\\|?*\x00-\x1f]/.test(release.packageName) || !/\.zip$/i.test(release.packageName))
       throw new Error('Invalid release package filename.');
@@ -297,7 +281,7 @@ export class AppUpdateService {
           if (!bytesWritten) throw new Error('Release package could not be written.');
           offset += bytesWritten;
         }
-        onProgress(processedBytes, contentLength);
+        await onProgress(processedBytes, contentLength);
       }
       if (!processedBytes || (contentLength && processedBytes !== contentLength))
         throw new Error('Downloaded release package is empty or incomplete.');

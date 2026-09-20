@@ -1,14 +1,19 @@
 import { Database } from 'bun:sqlite';
 import { existsSync, mkdirSync, statSync } from 'fs';
+import { stat } from 'fs/promises';
 import { basename, dirname, extname, join, resolve } from 'path';
 import { MetadataParser, type ImageMetadata } from '../backend/MetadataParser';
 import { classifyUmbraMediaMetadata, type UmbraPrivacyClass } from '../shared/nsfwPrivacyClassifier';
+import { mediaFileRevision } from '../backend/mediaFileRevision';
+import { metadataFileRevision } from '../backend/metadataFileRevision';
 
 export type GalleryMediaType = 'image' | 'gif' | 'video';
 export type GallerySortBy = 'created' | 'modified' | 'name' | 'custom';
 export type GallerySortOrder = 'asc' | 'desc';
 
 export type GalleryFileInput = {
+  revision?: string;
+  metadataRevision?: string;
   path: string;
   folderPath: string;
   name: string;
@@ -73,13 +78,18 @@ type FileRow = {
   metadataJson: string | null;
   metadataUpdatedMs: number | null;
   metadataFormat: string | null;
+  metadataSourceRevision?: string | null;
 };
 
 type MetadataQueueRow = {
   uid: string;
   path: string;
+  folderPath: string;
   modifiedMs: number;
   type: GalleryMediaType;
+  size: number;
+  fileSig: string;
+  metadataSourceRevision: string | null;
 };
 
 const DEFAULT_DB_RELATIVE_PATH = join('User', 'Config', 'GalleryDb.db');
@@ -244,8 +254,11 @@ export class GalleryDb {
   private readonly metadataQueue: string[] = [];
 
   private readonly metadataQueuedSet = new Set<string>();
+  private readonly metadataActiveUids = new Set<string>();
+  private readonly metadataRefreshRequested = new Set<string>();
 
   private metadataActive = 0;
+  private closed = false;
 
   private readonly metadataConcurrency = 2;
 
@@ -276,7 +289,20 @@ export class GalleryDb {
   }
 
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.metadataQueue.length = 0;
+    this.metadataQueuedSet.clear();
+    this.metadataActiveUids.clear();
+    this.metadataRefreshRequested.clear();
     this.db.close();
+  }
+
+  getFolderMetadataRevision(folderPath: string): number {
+    if (this.closed) return 0;
+    const key = normalizePath(resolve(this.rootDir, folderPath));
+    const row = this.db.query('SELECT revision FROM folder_metadata_revisions WHERE folder_path = ?').get(key) as { revision: number } | null;
+    return row?.revision || 0;
   }
 
   upsertFolderFiles(folderPathInput: string, files: GalleryFileInput[]): GalleryIndexedFile[] {
@@ -301,6 +327,7 @@ export class GalleryDb {
         file_sig AS fileSig,
         metadata_json AS metadataJson,
         metadata_updated_ms AS metadataUpdatedMs,
+        metadata_source_revision AS metadataSourceRevision,
         metadata_format AS metadataFormat
       FROM files
       WHERE path = ?
@@ -340,7 +367,8 @@ export class GalleryDb {
         created_ms = ?,
         modified_ms = ?,
         file_sig = ?,
-        last_seen_ms = ?
+        last_seen_ms = ?,
+        metadata_updated_ms = CASE WHEN ? THEN NULL ELSE metadata_updated_ms END
       WHERE uid = ?
     `);
     const deleteFileTags = this.db.prepare('DELETE FROM file_tags WHERE uid = ?');
@@ -366,6 +394,8 @@ export class GalleryDb {
           existing = null;
           uid = undefined;
         }
+        const metadataRevision = input.metadataRevision ?? input.revision;
+        const sourceRevisionChanged = metadataRevision !== undefined && metadataRevision !== existing?.metadataSourceRevision;
         if (!uid) {
           uid = crypto.randomUUID();
           insertFile.run(
@@ -391,6 +421,7 @@ export class GalleryDb {
             modifiedMs,
             fileSig,
             now,
+            sourceRevisionChanged ? 1 : 0,
             uid,
           );
         }
@@ -405,7 +436,7 @@ export class GalleryDb {
           nextIndex += 1;
         }
 
-        const metadataUpdatedMs = existing?.metadataUpdatedMs == null ? null : normalizeTimestamp(existing.metadataUpdatedMs);
+        const metadataUpdatedMs = sourceRevisionChanged || existing?.metadataUpdatedMs == null ? null : normalizeTimestamp(existing.metadataUpdatedMs);
         const existingDimensions = parseMetadataDimensions(existing?.metadataJson || null);
         if (
           isMetadataSupportedType(path, input.type)
@@ -438,7 +469,16 @@ export class GalleryDb {
       }
     });
 
-    transaction(files);
+    try {
+      transaction(files);
+    } finally {
+      upsertOrder.finalize();
+      insertFile.finalize();
+      updateFile.finalize();
+      deleteFileTags.finalize();
+      deleteFolderOrder.finalize();
+      deleteFile.finalize();
+    }
 
     for (const candidate of metadataCandidates) {
       this.enqueueMetadataRefresh(candidate.uid);
@@ -862,7 +902,7 @@ export class GalleryDb {
     const tags = normalizeTagList(tagInputs || []);
     if (uids.length === 0 || tags.length === 0) return new Map<string, string[]>();
 
-    const selectExistingUid = this.db.prepare('SELECT uid FROM files WHERE uid = ? LIMIT 1');
+    const selectExistingUid = this.db.query('SELECT uid FROM files WHERE uid = ? LIMIT 1');
     const validUids = uids.filter((uid) => Boolean(selectExistingUid.get(uid)));
     if (validUids.length === 0) return new Map<string, string[]>();
 
@@ -889,7 +929,12 @@ export class GalleryDb {
         }
       }
     });
-    transaction(validUids, tags);
+    try {
+      transaction(validUids, tags);
+    } finally {
+      upsertTag.finalize();
+      upsertFileTag.finalize();
+    }
 
     return this.getTagsForUids(validUids);
   }
@@ -899,7 +944,7 @@ export class GalleryDb {
     const tags = normalizeTagList(tagInputs || []);
     if (uids.length === 0 || tags.length === 0) return new Map<string, string[]>();
 
-    const selectExistingUid = this.db.prepare('SELECT uid FROM files WHERE uid = ? LIMIT 1');
+    const selectExistingUid = this.db.query('SELECT uid FROM files WHERE uid = ? LIMIT 1');
     const validUids = uids.filter((uid) => Boolean(selectExistingUid.get(uid)));
     if (validUids.length === 0) return new Map<string, string[]>();
 
@@ -909,7 +954,11 @@ export class GalleryDb {
         for (const tag of txTags) deleteFileTag.run(uid, tag);
       }
     });
-    transaction(validUids, tags);
+    try {
+      transaction(validUids, tags);
+    } finally {
+      deleteFileTag.finalize();
+    }
 
     return this.getTagsForUids(validUids);
   }
@@ -919,7 +968,7 @@ export class GalleryDb {
     const tags = normalizeTagList(tagInputs || []);
     if (uids.length === 0) return new Map<string, string[]>();
 
-    const selectExistingUid = this.db.prepare('SELECT uid FROM files WHERE uid = ? LIMIT 1');
+    const selectExistingUid = this.db.query('SELECT uid FROM files WHERE uid = ? LIMIT 1');
     const validUids = uids.filter((uid) => Boolean(selectExistingUid.get(uid)));
     if (validUids.length === 0) return new Map<string, string[]>();
 
@@ -948,7 +997,13 @@ export class GalleryDb {
         }
       }
     });
-    transaction(validUids, tags);
+    try {
+      transaction(validUids, tags);
+    } finally {
+      upsertTag.finalize();
+      deleteFileTags.finalize();
+      upsertFileTag.finalize();
+    }
 
     return this.getTagsForUids(validUids);
   }
@@ -1028,7 +1083,19 @@ export class GalleryDb {
         }
       }
     });
-    transaction.immediate(normalizedPairs);
+    try {
+      transaction.immediate(normalizedPairs);
+    } finally {
+      selectRows.finalize();
+      selectTargetUid.finalize();
+      deleteFileTags.finalize();
+      deleteFolderOrder.finalize();
+      deleteFile.finalize();
+      updateFile.finalize();
+      selectNextIndex.finalize();
+      deleteOrderForUid.finalize();
+      upsertOrder.finalize();
+    }
     return changed;
   }
 
@@ -1148,7 +1215,19 @@ export class GalleryDb {
         }
       }
     });
-    transaction.immediate(normalizedPairs);
+    try {
+      transaction.immediate(normalizedPairs);
+    } finally {
+      selectRows.finalize();
+      selectTargetUid.finalize();
+      insertFile.finalize();
+      updateFile.finalize();
+      selectTags.finalize();
+      upsertTag.finalize();
+      upsertFileTag.finalize();
+      selectNextIndex.finalize();
+      upsertOrder.finalize();
+    }
     return changed;
   }
 
@@ -1177,7 +1256,15 @@ export class GalleryDb {
         deleteFolderOrders.run(path, `${path}/`, `${path}0`);
       }
     });
-    transaction.immediate(paths);
+    try {
+      transaction.immediate(paths);
+    } finally {
+      selectRows.finalize();
+      deleteFileTags.finalize();
+      deleteFolderOrderByUid.finalize();
+      deleteFile.finalize();
+      deleteFolderOrders.finalize();
+    }
     return removed;
   }
 
@@ -1218,7 +1305,11 @@ export class GalleryDb {
       });
     });
 
-    transaction(merged);
+    try {
+      transaction(merged);
+    } finally {
+      upsertOrder.finalize();
+    }
     return merged;
   }
 
@@ -1265,30 +1356,56 @@ export class GalleryDb {
   }
 
   private enqueueMetadataRefresh(uid: string): void {
+    if (this.closed) return;
     const normalized = String(uid || '').trim();
-    if (!normalized || this.metadataQueuedSet.has(normalized)) return;
+    if (!normalized) return;
+    if (this.metadataQueuedSet.has(normalized)) {
+      if (this.metadataActiveUids.has(normalized)) this.metadataRefreshRequested.add(normalized);
+      return;
+    }
     this.metadataQueuedSet.add(normalized);
     this.metadataQueue.push(normalized);
     this.pumpMetadataQueue();
   }
 
   private pumpMetadataQueue(): void {
+    if (this.closed) return;
     while (this.metadataActive < this.metadataConcurrency && this.metadataQueue.length > 0) {
       const uid = this.metadataQueue.shift() as string;
-      this.metadataQueuedSet.delete(uid);
+      this.metadataActiveUids.add(uid);
       this.metadataActive += 1;
       this.processMetadataJob(uid)
         .catch(() => {})
         .finally(() => {
+          this.metadataQueuedSet.delete(uid);
+          this.metadataActiveUids.delete(uid);
+          const requestedAgain = this.metadataRefreshRequested.delete(uid);
           this.metadataActive = Math.max(0, this.metadataActive - 1);
+          if (!this.closed && requestedAgain) {
+            // Only requeue an observed pending change; successful duplicate requests need no decode.
+            try {
+              const row = this.db.query(`
+                SELECT metadata_updated_ms AS updatedMs, modified_ms AS modifiedMs, metadata_json AS metadataJson
+                FROM files WHERE uid = ?
+              `).get(uid) as { updatedMs: number | null; modifiedMs: number; metadataJson: string | null } | null;
+              const dimensions = parseMetadataDimensions(row?.metadataJson || null);
+              if (row && (row.updatedMs == null || row.updatedMs !== row.modifiedMs || dimensions.width <= 0 || dimensions.height <= 0)) {
+                this.enqueueMetadataRefresh(uid);
+              }
+            } catch {
+              // A later listing retries if the database is temporarily unavailable.
+            }
+          }
           this.pumpMetadataQueue();
         });
     }
   }
 
   private async processMetadataJob(uid: string): Promise<void> {
+    if (this.closed) return;
     const row = this.db.query(`
-      SELECT uid, path, modified_ms AS modifiedMs, file_type AS type
+      SELECT uid, path, folder_path AS folderPath, modified_ms AS modifiedMs, file_type AS type,
+        file_size AS size, file_sig AS fileSig, metadata_source_revision AS metadataSourceRevision
       FROM files
       WHERE uid = ?
       LIMIT 1
@@ -1297,10 +1414,16 @@ export class GalleryDb {
 
     let metadataJson: string | null = null;
     let metadataFormat: string | null = null;
+    const filePath = resolve(this.rootDir, row.path);
+    let sourceRevision: string;
 
     try {
-      const parsed = (await MetadataParser.parse(row.path)) || {};
-      const dimensions = await readImageDimensions(row.path);
+      const before = await stat(filePath);
+      if (before.size !== row.size || normalizeTimestamp(before.mtimeMs) !== normalizeTimestamp(row.modifiedMs)) return;
+      sourceRevision = await metadataFileRevision(filePath, mediaFileRevision(before));
+      const parsed = (await MetadataParser.parse(filePath, { throwOnReadError: true })) || {};
+      const dimensions = await readImageDimensions(filePath);
+      if (dimensions.width <= 0 || dimensions.height <= 0) return;
       const merged = {
         ...parsed,
         ...(dimensions.width > 0 ? { width: dimensions.width } : {}),
@@ -1309,20 +1432,32 @@ export class GalleryDb {
       const sanitized = sanitizeMetadata(merged);
       metadataJson = sanitized ? JSON.stringify(sanitized) : null;
       metadataFormat = sanitized && typeof sanitized.format === 'string' ? String(sanitized.format) : null;
+      if (await metadataFileRevision(filePath, mediaFileRevision(await stat(filePath))) !== sourceRevision) return;
     } catch {
-      metadataJson = null;
-      metadataFormat = null;
+      return;
     }
 
+    if (this.closed) return;
     const modifiedMs = normalizeTimestamp(row.modifiedMs);
-    this.db.prepare(`
-      UPDATE files
-      SET
-        metadata_json = ?,
-        metadata_format = ?,
-        metadata_updated_ms = ?
-      WHERE uid = ?
-    `).run(metadataJson, metadataFormat, modifiedMs, row.uid);
+    this.db.transaction(() => {
+      const updated = this.db.query(`
+        UPDATE files
+        SET
+          metadata_json = ?,
+          metadata_format = ?,
+          metadata_updated_ms = ?,
+          metadata_source_revision = ?
+        WHERE uid = ? AND path = ? AND file_sig = ? AND metadata_source_revision IS ?
+          AND (metadata_json IS NOT ? OR metadata_format IS NOT ?
+            OR metadata_updated_ms IS NOT ? OR metadata_source_revision IS NOT ?)
+      `).run(metadataJson, metadataFormat, modifiedMs, sourceRevision, row.uid, row.path, row.fileSig, row.metadataSourceRevision,
+        metadataJson, metadataFormat, modifiedMs, sourceRevision);
+      if (updated.changes === 0) return;
+      this.db.query(`
+        INSERT INTO folder_metadata_revisions (folder_path, revision) VALUES (?, 1)
+        ON CONFLICT(folder_path) DO UPDATE SET revision = revision + 1
+      `).run(normalizePath(resolve(this.rootDir, row.folderPath)));
+    })();
   }
 
   private ensureSchema(): void {
@@ -1340,10 +1475,18 @@ export class GalleryDb {
         metadata_json TEXT,
         metadata_format TEXT,
         metadata_updated_ms REAL,
+        metadata_source_revision TEXT,
         first_seen_ms REAL NOT NULL,
         last_seen_ms REAL NOT NULL
       )
     `);
+
+    this.db.transaction(() => {
+      const columns = this.db.query('PRAGMA table_info(files)').all() as Array<{ name: string }>;
+      if (!columns.some(column => column.name === 'metadata_source_revision')) {
+        this.db.run('ALTER TABLE files ADD COLUMN metadata_source_revision TEXT');
+      }
+    }).immediate();
 
     this.db.run(`
       CREATE INDEX IF NOT EXISTS idx_files_folder_path
@@ -1390,6 +1533,13 @@ export class GalleryDb {
     this.db.run(`
       CREATE INDEX IF NOT EXISTS idx_file_tags_tag
       ON file_tags(tag)
+    `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS folder_metadata_revisions (
+        folder_path TEXT PRIMARY KEY,
+        revision INTEGER NOT NULL
+      )
     `);
   }
 }

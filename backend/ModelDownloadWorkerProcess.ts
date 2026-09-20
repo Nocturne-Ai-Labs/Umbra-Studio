@@ -4,6 +4,7 @@ import { existsSync } from 'fs';
 import { randomUUID } from 'node:crypto';
 import { copyFileExclusive } from './FsTransferCopy';
 import { fetchModelDownload } from './ModelDownloadHttp';
+import { ModelDownloadJournal, downloadFileIdentity, type DownloadReceipt } from './ModelDownloadJournal';
 
 type ModelDownloadJobStatus = 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled';
 
@@ -28,6 +29,8 @@ type ModelDownloadJob = {
 };
 
 type ModelDownloadWorkerRequest =
+  | { id: string; type: 'list'; payload: Record<string, never> }
+  | { id: string; type: 'dismiss'; payload: { jobIds: string[] } }
   | {
       id: string;
       type: 'start';
@@ -69,6 +72,8 @@ const DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
 const MODEL_SNAPSHOT_SUFFIX = '.umbra-model.json';
 const MODEL_THUMB_SUFFIX = '.umbra-model-thumb';
 const MODEL_ARTIFACT_DIR = '.umbra';
+const journal = new ModelDownloadJournal(process.env.UMBRA_ROOT || '');
+const receipts = new Map<string, DownloadReceipt>();
 
 function getModelArtifactDir(destinationPath: string): string {
   return join(dirname(destinationPath), MODEL_ARTIFACT_DIR);
@@ -298,6 +303,7 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
   let committed = false;
   let downloadTimedOut = false;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const receipt = receipts.get(jobId)!;
   const stopIdleTimer = () => { if (idleTimer) clearTimeout(idleTimer); idleTimer = undefined; };
   const waitForNetwork = () => {
     stopIdleTimer();
@@ -314,6 +320,9 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
     targetPath = resolveUniqueDestinationPath(join(destinationDir, sanitizeFileName(job.fileName || 'model.safetensors')));
     tempPath = `${targetPath}.${randomUUID()}.part`;
     job.destinationPath = targetPath;
+    receipt.partial = tempPath;
+    receipt.directory = await fs.realpath(destinationDir);
+    journal.save(receipt);
     waitForNetwork();
     const response = await fetchModelDownload(job.downloadUrl, civitaiToken, controller.signal);
     stopIdleTimer();
@@ -335,6 +344,9 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
 
     const fileHandle = await fs.open(tempPath, 'wx');
     try {
+      receipt.partialIdentity = downloadFileIdentity(await fileHandle.stat({ bigint: true }));
+      journal.save(receipt);
+      let lastSaved = Date.now();
       while (true) {
         controller.signal.throwIfAborted();
         waitForNetwork();
@@ -353,10 +365,14 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
         if (job.bytesTotal > 0) {
           job.progress = Math.max(0, Math.min(100, (job.bytesDownloaded / job.bytesTotal) * 100));
         }
+        if (Date.now() - lastSaved >= 2000) { journal.save(receipt); lastSaved = Date.now(); }
       }
       if (job.bytesTotal > 0 && job.bytesDownloaded !== job.bytesTotal) throw new Error('Incomplete model download');
       if (!job.bytesDownloaded) throw new Error('Empty model download');
       await fileHandle.sync();
+      receipt.partialIdentity = downloadFileIdentity(await fileHandle.stat({ bigint: true }));
+      receipt.phase = 'ready';
+      journal.save(receipt);
     } finally {
       await fileHandle.close();
       await reader.cancel().catch(() => undefined);
@@ -370,7 +386,11 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
         try { await fs.link(tempPath, targetPath); }
         catch (error: any) {
           if (!['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS'].includes(error?.code)) throw error;
-          await copyFileExclusive(tempPath, targetPath, () => controller.signal.throwIfAborted());
+          await copyFileExclusive(tempPath, targetPath, () => controller.signal.throwIfAborted(), (stat) => {
+            receipt.phase = 'copying';
+            receipt.targetIdentity = downloadFileIdentity(stat);
+            journal.save(receipt);
+          });
         }
         break;
       } catch (error: any) {
@@ -378,10 +398,16 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
         reservedDestinations.delete(targetPath.toLowerCase());
         targetPath = resolveUniqueDestinationPath(targetPath);
         job.destinationPath = targetPath;
+        receipt.phase = 'ready';
+        receipt.targetIdentity = undefined;
+        journal.save(receipt);
         controller.signal.throwIfAborted();
       }
     }
     committed = true;
+    receipt.targetIdentity = downloadFileIdentity(await fs.lstat(targetPath, { bigint: true }));
+    receipt.phase = 'published';
+    journal.save(receipt);
     await persistModelSnapshot(job, snapshotRaw, civitaiToken, controller.signal).catch(() => undefined);
     job.status = 'completed';
     job.progress = 100;
@@ -404,7 +430,15 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
   } finally {
     stopIdleTimer();
     controller.abort();
-    if (tempPath) await fs.unlink(tempPath).catch(() => undefined);
+    try {
+      await journal.cleanup(receipt);
+      receipt.recoveryPending = false;
+    } catch (error) {
+      receipt.recoveryPending = true;
+      job.error = `${job.error || 'Model saved.'} Partial cleanup needs attention: ${(error as Error).message}`;
+    }
+    try { journal.save(receipt); }
+    catch { console.error('[ModelDownloadWorker] Could not persist final download status; recovery record retained.'); }
     if (targetPath) reservedDestinations.delete(targetPath.toLowerCase());
     jobControllers.delete(jobId);
   }
@@ -413,17 +447,34 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
 function pruneJobs() {
   if (jobs.size <= MAX_JOBS) return;
   const removable = Array.from(jobs.values())
-    .filter((job) => job.status !== 'queued' && job.status !== 'downloading')
+    .filter((job) => job.status !== 'queued' && job.status !== 'downloading' && !receipts.get(job.jobId)?.recoveryPending)
     .sort((a, b) => a.createdAt - b.createdAt);
   while (jobs.size > MAX_JOBS && removable.length > 0) {
     const next = removable.shift();
     if (!next) break;
     jobs.delete(next.jobId);
+    receipts.delete(next.jobId);
+    journal.remove(next.jobId);
   }
 }
 
 async function handleRequest(request: ModelDownloadWorkerRequest) {
   switch (request.type) {
+    case 'list': return { jobs: Array.from(jobs.values(), toPublicJob) };
+    case 'dismiss': {
+      const removed: string[] = [];
+      for (const id of request.payload.jobIds.slice(0, MAX_JOBS)) {
+        const job = jobs.get(id);
+        if (!job || job.status === 'queued' || job.status === 'downloading' || jobControllers.has(id)) continue;
+        const receipt = receipts.get(id);
+        if (receipt?.recoveryPending) continue;
+        journal.remove(id);
+        receipts.delete(id);
+        jobs.delete(id);
+        removed.push(id);
+      }
+      return { removed };
+    }
     case 'start': {
       const payload = request.payload;
       const jobId = String(payload.jobId || '').trim();
@@ -457,6 +508,9 @@ async function handleRequest(request: ModelDownloadWorkerRequest) {
       if (!job.downloadUrl) throw new Error('Missing download URL');
       if (!job.destinationRoot) throw new Error('Missing destination root');
 
+      const receipt: DownloadReceipt = { job, phase: 'downloading', recoveryPending: true };
+      journal.save(receipt);
+      receipts.set(jobId, receipt);
       jobs.set(jobId, job);
       pruneJobs();
       void runDownload(jobId, String(payload.civitaiToken || '').trim(), payload.snapshot);
@@ -524,6 +578,12 @@ async function processLine(line: string) {
 
 const decoder = new TextDecoder();
 let buffer = '';
+for (const receipt of await journal.recover()) {
+  receipts.set(receipt.job.jobId, receipt);
+  jobs.set(receipt.job.jobId, { ...receipt.job, useExactDestination: true });
+  receipt.job = jobs.get(receipt.job.jobId)!;
+}
+pruneJobs();
 
 process.stdin.on('data', (chunk: Buffer) => {
   buffer += decoder.decode(chunk, { stream: true });

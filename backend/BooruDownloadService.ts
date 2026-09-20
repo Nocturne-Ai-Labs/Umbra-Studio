@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { basename, extname, join, resolve } from 'node:path';
 import * as fs from 'node:fs/promises';
 import sharp from 'sharp';
+import { copyFileExclusive } from './FsTransferCopy';
 import {
   buildBooruMediaRequestHeaders, fetchDanbooruPosts, fetchE621Posts,
   fetchGelbooruPosts, fetchRule34Posts,
@@ -88,6 +89,42 @@ async function fetchOriginal(url: URL, signal: AbortSignal): Promise<Response> {
   throw new Error('Too many image download redirects.');
 }
 
+async function ensureCaption(conceptPath: string, filename: string, tags?: string[]): Promise<void> {
+  if (!tags?.length) return;
+  if (!Array.isArray(tags) || tags.some(tag => typeof tag !== 'string')) throw new Error('Dataset tags must be a list of strings.');
+  const destination = join(conceptPath, `${basename(filename, extname(filename))}.txt`);
+  const existingCaption = async () => {
+    const existing = await fs.lstat(destination).catch(error => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    if (existing && !existing.isFile()) throw new Error('The caption destination is not a regular file.');
+    return Boolean(existing);
+  };
+  // Existing captions, including empty ones, may have been edited deliberately.
+  if (await existingCaption()) return;
+  const temporary = join(conceptPath, `.caption-${randomUUID()}.tmp`);
+  try {
+    const handle = await fs.open(temporary, 'wx');
+    try {
+      await handle.writeFile(tags.join(', '), 'utf8');
+      await handle.sync();
+    } finally { await handle.close(); }
+    try {
+      await fs.link(temporary, destination);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'EEXIST') { if (await existingCaption()) return; throw error; }
+      if (!['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'EPERM', 'EACCES', 'ENOSYS'].includes(code || '')) throw error;
+      // Cloud/portable filesystems may not support links; retain exclusive ownership and cleanup.
+      try { await copyFileExclusive(temporary, destination); }
+      catch (copyError) {
+        if ((copyError as NodeJS.ErrnoException).code !== 'EEXIST' || !await existingCaption()) throw copyError;
+      }
+    }
+  } finally { await fs.unlink(temporary).catch(() => undefined); }
+}
+
 export async function downloadBooruOriginal(options: {
   conceptPath: string; filename: string; source: BooruDownloadSource;
   replace?: boolean; tags?: string[]; signal?: AbortSignal;
@@ -112,6 +149,8 @@ export async function downloadBooruOriginal(options: {
     });
     if (original && !original.isFile()) throw new Error('The destination is not a regular image file.');
     if (!options.replace && await fileMatches(destination, md5)) {
+      options.signal?.throwIfAborted();
+      await ensureCaption(options.conceptPath, options.filename, options.tags);
       return { filename: options.filename, revision: original!.mtimeMs, alreadyExists: true };
     }
     const signal = AbortSignal.any([AbortSignal.timeout(120_000), ...(options.signal ? [options.signal] : [])]);
@@ -153,11 +192,7 @@ export async function downloadBooruOriginal(options: {
     await fs.writeFile(sourceTemporary, JSON.stringify(record), { flag: 'wx' });
     await fs.rename(sourceTemporary, join(options.conceptPath, booruSourceSidecar(options.filename)));
     await fs.rename(temporary, destination);
-    // Re-downloads never replace hand-edited captions, including deliberately empty captions.
-    if (!original && options.tags?.length) {
-      await fs.writeFile(join(options.conceptPath, `${basename(options.filename, extname(options.filename))}.txt`), options.tags.join(', '), { flag: 'wx' })
-        .catch(error => { if (error.code !== 'EEXIST') throw error; });
-    }
+    await ensureCaption(options.conceptPath, options.filename, options.tags);
     return { filename: options.filename, revision: (await fs.stat(destination)).mtimeMs, alreadyExists: false };
   } finally {
     await output?.close().catch(() => undefined);
