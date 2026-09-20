@@ -85,17 +85,23 @@ export class GalleryFolderRevisions {
   }
 
   private async sample(path: string, entry: Entry, signature: string, files: string[]) {
+    // Digest identity also distinguishes inventories that changed and then
+    // returned to the same names while a stat batch was in flight.
+    const digest = entry.digest;
+    const isCurrent = () => this.entries.get(path) === entry
+      && entry.signature === signature && entry.digest === digest;
     try {
       const page = files.slice(entry.cursor, entry.cursor + this.sampleSize);
       const stats: FileStat[] = [];
       for (let offset = 0; offset < page.length; offset += 8) {
+        if (!isCurrent()) return;
         const batch = await Promise.allSettled(page.slice(offset, offset + 8).map(file => this.stat(file)));
         for (const result of batch) {
           if (result.status === 'rejected') throw result.reason;
           stats.push(result.value);
         }
       }
-      if (this.entries.get(path) !== entry || entry.signature !== signature) return;
+      if (!isCurrent()) return;
       for (let i = 0; i < page.length; i++) {
         const stat = stats[i];
         entry.digest.update(JSON.stringify([page[i], stat.size, stat.mtimeMs, stat.ctimeMs]));
@@ -111,7 +117,7 @@ export class GalleryFolderRevisions {
     } catch {
       // Keep the previous revision and retry later; never interpret an offline
       // cloud folder or a sharing violation as an empty/deleted directory.
-      entry.nextSample = this.now() + 30000;
+      if (isCurrent()) entry.nextSample = this.now() + 30000;
     }
   }
 
