@@ -10249,8 +10249,10 @@ function enqueueBackendPowerPrompterQueueWork(work: BackendPowerPrompterQueuedWo
       const activePrompt = activeRequest?.prompts[activeTask.activePromptIndex];
       if (activeRequest?.origin !== 'power_prompter') continue;
       if (activePrompt?.status !== 'running' && activePrompt?.status !== 'submitting') continue;
-      if (!interruptBackendPowerPrompterActivePrompt(activeRequestId, 'umbra_ui_interrupt', work.sourceWs)) continue;
-      void requestBackendComfyPromptInterrupt('umbra_ui_interrupt').catch((error: any) => {
+      void interruptBackendPowerPrompterPromptForPlacement(
+        activeRequestId, 'umbra_ui_interrupt', work.sourceWs,
+        () => !backendPowerPrompterQueuedWork.includes(normalizedWork),
+      ).catch((error: any) => {
         appendPowerPrompterQueueLog('backend_queue_comfy_interrupt_failed', {
           requestId: activeRequestId,
           error: String(error?.message || error || 'Failed to interrupt ComfyUI.'),
@@ -10304,17 +10306,56 @@ function hasRunningBackendPowerPrompterWork(): boolean {
   ));
 }
 
-async function interruptRunningBackendPowerPrompterForUmbraUi(reason: string): Promise<void> {
-  let interrupted = false;
+async function interruptBackendPowerPrompterPromptForPlacement(
+  requestId: string,
+  reason: string,
+  preferredSourceWs?: ServerWebSocket<unknown> | null,
+  isCanceled: () => boolean = () => false,
+): Promise<boolean> {
+  const task = backendPowerPrompterQueueTasks.get(requestId);
+  if (!task) return false;
+  const index = task.activePromptIndex;
+  const submissionDeadline = Date.now() + 15_000;
+  let promptId = '';
+  while (true) {
+    if (isCanceled() || backendPowerPrompterQueueTasks.get(requestId) !== task
+      || task.canceled || task.abortController.signal.aborted || task.activePromptIndex !== index
+      || task.interruptedPromptIndices.has(index)) return false;
+    const request = findPowerPrompterQueueControllerRequest(requestId);
+    const prompt = request?.prompts[index];
+    if (request?.origin !== 'power_prompter'
+      || (prompt?.status !== 'running' && prompt?.status !== 'submitting')) return false;
+    promptId = String(task.promptIds[index] || '').trim();
+    if (promptId) break;
+    if (prompt.status !== 'submitting') return false;
+    if (Date.now() >= submissionDeadline) {
+      throw new Error('Timed out waiting for the Power Prompter submission before targeted cancellation.');
+    }
+    // Submission may still be awaiting ComfyUI's ID. Never interrupt another owner.
+    await Bun.sleep(25);
+  }
+  if (!await cancelComfyJobById(getComfyProxyBaseUrl(), promptId)) return false;
+  const prompt = findPowerPrompterQueueControllerRequest(requestId)?.prompts[index];
+  if (backendPowerPrompterQueueTasks.get(requestId) !== task || task.activePromptIndex !== index
+    || task.promptIds[index] !== promptId
+    || (prompt?.status !== 'running' && prompt?.status !== 'submitting')) return false;
+  return interruptBackendPowerPrompterActivePrompt(requestId, reason, preferredSourceWs);
+}
+
+async function interruptRunningBackendPowerPrompterForUmbraUi(
+  reason: string,
+  isCanceled: () => boolean = () => false,
+): Promise<void> {
+  const interrupts: Promise<boolean>[] = [];
   for (const [requestId, task] of backendPowerPrompterQueueTasks) {
     if (task.canceled || task.abortController.signal.aborted) continue;
     const request = findPowerPrompterQueueControllerRequest(requestId);
     const prompt = request?.prompts[task.activePromptIndex];
     if (request?.origin !== 'power_prompter') continue;
     if (prompt?.status !== 'running' && prompt?.status !== 'submitting') continue;
-    interrupted = interruptBackendPowerPrompterActivePrompt(requestId, reason) || interrupted;
+    interrupts.push(interruptBackendPowerPrompterPromptForPlacement(requestId, reason, null, isCanceled));
   }
-  if (interrupted) await requestBackendComfyPromptInterrupt(reason);
+  await Promise.all(interrupts);
 }
 
 async function prepareUmbraUiUpscaleExecution(context: {
@@ -10335,7 +10376,7 @@ async function prepareUmbraUiUpscaleExecution(context: {
   broadcastPowerPrompterQueueControllerSnapshot('umbra_ui_upscale_hold');
   try {
     if (placement === 'interrupt') {
-      await interruptRunningBackendPowerPrompterForUmbraUi('umbra_ui_upscale_interrupt');
+      await interruptRunningBackendPowerPrompterForUmbraUi('umbra_ui_upscale_interrupt', context.isCanceled);
     }
     while (hasRunningBackendPowerPrompterWork() && !context.isCanceled()) await Bun.sleep(100);
   } catch (error) {
