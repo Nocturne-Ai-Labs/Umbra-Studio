@@ -125,7 +125,7 @@ function useOutputFolder(scope: UmbraExtrasMediaToolMode) {
   const storageKey = `${OUTPUT_FOLDER_STORAGE_KEY}:${scope}`;
   const [outputFolder, setOutputFolder] = React.useState(() => {
     if (typeof window === 'undefined') return '';
-    try { return window.localStorage.getItem(storageKey) || window.localStorage.getItem(OUTPUT_FOLDER_STORAGE_KEY) || ''; } catch { return ''; }
+    try { return window.localStorage.getItem(storageKey) ?? window.localStorage.getItem(OUTPUT_FOLDER_STORAGE_KEY) ?? ''; } catch { return ''; }
   });
   const [browsing, setBrowsing] = React.useState(false);
   React.useEffect(() => {
