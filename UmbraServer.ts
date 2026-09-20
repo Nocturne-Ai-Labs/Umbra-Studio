@@ -15936,7 +15936,7 @@ async function proxyGalleryBridgeFsGet(
   if (req.signal.aborted) return new Response(null, { status: 499 });
   const requestedPaths = targetPath === '/api/fs/search'
     ? sourceUrl.searchParams.getAll('root').concat(sourceUrl.searchParams.getAll('roots'))
-      .flatMap((value) => String(value || '').split(/[|,]/))
+      .flatMap((value) => String(value || '').split('|'))
     : [sourceUrl.searchParams.get('path') || ''];
   if (!(await areGalleryBridgePathsAllowed(req, sourceUrl, requestedPaths, server))) {
     return json({ error: 'Access denied' }, 403);
@@ -16057,12 +16057,22 @@ async function areGalleryBridgePathsAllowed(
   const authorize = await createGalleryPathAuthorizer(getGalleryBridgeAllowedRoots()).catch(() => null);
   if (!authorize) return false;
   for (const rawPath of paths) {
-    const value = String(rawPath || '').trim();
-    if (!value) continue;
-    const resolved = resolvePath(value, { allowOutsideRoot: true });
-    if (!resolved || !(await authorize(resolved.fullPath))) return false;
+    const resolvedPath = resolveGalleryBridgeInputPath(rawPath);
+    if (!resolvedPath) continue;
+    if (!(await authorize(resolvedPath))) return false;
   }
   return true;
+}
+
+function resolveGalleryBridgeInputPath(input: unknown): string {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  if (isAbsolute(raw)) return resolve(raw);
+  const normalized = raw.replace(/\\/g, '/');
+  const mapped = normalized === 'User/Outputs' || normalized.startsWith('User/Outputs/')
+    ? `Tools/ComfyUI/output${normalized.slice('User/Outputs'.length)}`
+    : normalized;
+  return resolve(ROOT_DIR, mapped);
 }
 
 async function proxyGalleryBridgeFsPost(
