@@ -35,10 +35,10 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
   useEffect(() => {
     const controller = new AbortController();
     const trackedPaths = JSON.parse(pathsKey) as string[];
-    if (trackedPaths.length === 0) {
+    const discoveryOnly = trackedPaths.length === 0;
+    if (discoveryOnly) {
       newestAt.current = 0;
       setSnapshot(null);
-      return () => controller.abort();
     }
     let timer: ReturnType<typeof setTimeout>;
     let busy = false;
@@ -58,7 +58,9 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
       } catch { /* Keep existing badges through transient outages; never block the strip. */ }
       finally {
         busy = false;
-        if (!controller.signal.aborted) timer = setTimeout(() => { void refresh(); }, document.hidden ? 30_000 : 5000);
+        if (!controller.signal.aborted && !discoveryOnly) {
+          timer = setTimeout(() => { void refresh(); }, document.hidden ? 30_000 : 5000);
+        }
       }
     };
     const wake = () => { if (!document.hidden) void refresh(); };
