@@ -44,11 +44,6 @@ const GALLERY_BRIDGE_WATCHDOG_INTERVAL_MS = 8000;
 const GALLERY_BRIDGE_STATUS_CACHE_MS = 30000;
 const GALLERY_BRIDGE_RECOVERY_FAILURE_THRESHOLD = 3;
 const GALLERY_ACTIVE_INTERACTION_GRACE_MS = 15000;
-const GALLERY_BRIDGE_DIRECT_BASE_URLS = [
-  'http://127.0.0.1:8313',
-  'http://localhost:8313',
-] as const;
-
 async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -83,6 +78,15 @@ function isLoopbackUrl(value: string): boolean {
     return isLoopbackHost(new URL(value).hostname);
   } catch {
     return false;
+  }
+}
+
+function getLoopbackBridgeBaseUrl(value: unknown): string {
+  try {
+    const url = new URL(String(value || '').trim());
+    return isLoopbackHost(url.hostname) ? url.origin : '';
+  } catch {
+    return '';
   }
 }
 
@@ -318,24 +322,23 @@ export const LibraryWorkspaceHost = () => {
     }
     const fetchDirectGalleryBridgeStatus = async (): Promise<GalleryBridgeStatus | null> => {
       if (!isLoopbackBrowserHost()) return null;
-      for (const baseUrl of GALLERY_BRIDGE_DIRECT_BASE_URLS) {
-        try {
-          const response = await fetchWithTimeout(`${baseUrl}/health`, { cache: 'no-store' }, GALLERY_BRIDGE_STATUS_TIMEOUT_MS);
-          if (!response.ok) continue;
-          const payload = await response.json().catch(() => null) as { ok?: boolean } | null;
-          if (payload?.ok !== true) continue;
-          const status: GalleryBridgeStatus = {
-            running: true,
-            healthy: true,
-            url: `${baseUrl}/index.html`,
-          };
-          galleryBridgeStatusCacheRef.current = { status, checkedAt: Date.now() };
-          return status;
-        } catch {
-          // Try the next loopback host before giving up.
-        }
+      const baseUrl = getLoopbackBridgeBaseUrl(galleryBridgeStatusCacheRef.current.status?.url);
+      if (!baseUrl) return null;
+      try {
+        const response = await fetchWithTimeout(`${baseUrl}/health`, { cache: 'no-store' }, GALLERY_BRIDGE_STATUS_TIMEOUT_MS);
+        if (!response.ok) return null;
+        const payload = await response.json().catch(() => null) as { ok?: boolean } | null;
+        if (payload?.ok !== true) return null;
+        const status: GalleryBridgeStatus = {
+          running: true,
+          healthy: true,
+          url: `${baseUrl}/index.html`,
+        };
+        galleryBridgeStatusCacheRef.current = { status, checkedAt: Date.now() };
+        return status;
+      } catch {
+        return null;
       }
-      return null;
     };
     try {
       const response = await fetchWithTimeout('/api/gallery-bridge/status', { cache: 'no-store' }, GALLERY_BRIDGE_STATUS_TIMEOUT_MS);
