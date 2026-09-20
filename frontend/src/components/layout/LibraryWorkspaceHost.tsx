@@ -69,19 +69,27 @@ function isHealthyGalleryBridgeStatus(status: GalleryBridgeStatus | null | undef
   return Boolean(status?.running && status?.healthy !== false);
 }
 
-function isDirectGalleryBridgeUrl(value: string): boolean {
-  return GALLERY_BRIDGE_DIRECT_BASE_URLS.some((baseUrl) => value.startsWith(baseUrl));
+function isLoopbackHost(value: string): boolean {
+  const host = String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
 }
 
 function isLoopbackBrowserHost(): boolean {
-  const host = String(window.location.hostname || '').trim().toLowerCase();
-  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  return isLoopbackHost(window.location.hostname);
+}
+
+function isLoopbackUrl(value: string): boolean {
+  try {
+    return isLoopbackHost(new URL(value).hostname);
+  } catch {
+    return false;
+  }
 }
 
 function resolveGalleryWorkspaceUrlForBrowser(rawUrl: unknown): string {
   const value = String(rawUrl || '').trim();
   if (!value) return '';
-  if (!isLoopbackBrowserHost() && isDirectGalleryBridgeUrl(value)) return FALLBACK_GALLERY_URL;
+  if (!isLoopbackBrowserHost() && isLoopbackUrl(value)) return FALLBACK_GALLERY_URL;
   return value;
 }
 
@@ -413,7 +421,7 @@ export const LibraryWorkspaceHost = () => {
       try {
         const status = await fetchGalleryBridgeStatus({ allowCached: false });
         const currentUrl = String(url || '').trim();
-        const usingBridge = isDirectGalleryBridgeUrl(currentUrl);
+        const usingBridge = isLoopbackUrl(currentUrl);
         if (isHealthyGalleryBridgeStatus(status)) {
           galleryRecoveryFailureCountRef.current = 0;
           const healthyUrl = resolveGalleryWorkspaceUrlForBrowser(status.url);

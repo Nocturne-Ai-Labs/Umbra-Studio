@@ -25,9 +25,10 @@ import { resolveSingleByteRange } from '../shared/httpByteRange';
 import { createVariantEtag, matchesIfNoneMatch, permitsConditionalRange } from '../shared/httpCache';
 
 const ROOT_DIR = process.env.UMBRA_ROOT || process.cwd();
-const HOST = String(process.env.UMBRA_GALLERY_HOST || '127.0.0.1').trim();
+const HOST = '127.0.0.1';
 const PORT = Number(process.env.UMBRA_GALLERY_PORT || 8313);
 const BRIDGE_URL = String(process.env.UMBRA_BRIDGE_URL || 'http://127.0.0.1:8212').trim();
+const BRIDGE_TOKEN = String(process.env.UMBRA_GALLERY_BRIDGE_TOKEN || '').trim();
 const BOOT_PREWARM_ROOTS_RELATIVE = [
   'Tools/ComfyUI/output',
 ];
@@ -191,8 +192,6 @@ function json(data: unknown, status = 200): Response {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
-      'Access-Control-Allow-Origin': '*',
-      'Vary': 'Origin',
     },
   });
 }
@@ -944,13 +943,69 @@ function resolveStaticFile(pathname: string): string | null {
   return resolvedPath;
 }
 
-function corsPreflight(): Response {
+function isLoopbackHost(value: string): boolean {
+  const host = String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return host === '127.0.0.1' || host === '::1' || host === 'localhost';
+}
+
+function isTrustedBrowserOrigin(value: string): boolean {
+  try {
+    const origin = new URL(value);
+    const bridgeOrigin = new URL(BRIDGE_URL);
+    const isWorkerOrigin = isLoopbackHost(origin.hostname) && Number(origin.port || 80) === PORT;
+    const isMainOrigin = isLoopbackHost(origin.hostname)
+      && isLoopbackHost(bridgeOrigin.hostname)
+      && Number(origin.port || 80) === Number(bridgeOrigin.port || 80);
+    return (origin.protocol === 'http:' || origin.protocol === 'https:') && (isWorkerOrigin || isMainOrigin);
+  } catch {
+    return false;
+  }
+}
+
+function hasTrustedBrowserReferer(req: Request): boolean {
+  const referer = String(req.headers.get('referer') || '').trim();
+  if (!referer) return false;
+  try {
+    return isTrustedBrowserOrigin(new URL(referer).origin);
+  } catch {
+    return false;
+  }
+}
+
+function isAdmittedBridgeRequest(req: Request, reqUrl: URL): boolean {
+  if (!isLoopbackHost(reqUrl.hostname)) return false;
+  const origin = String(req.headers.get('origin') || '').trim();
+  if (origin) return isTrustedBrowserOrigin(origin);
+  if (BRIDGE_TOKEN && req.headers.get('x-umbra-gallery-bridge-token') === BRIDGE_TOKEN) return true;
+  // An iframe navigation can omit Origin while retaining its trusted parent
+  // Referer. This keeps localhost/127.0.0.1 aliases usable without admitting
+  // a foreign parent that embeds the worker directly.
+  if (hasTrustedBrowserReferer(req)) return true;
+  // Same-origin static media commonly has no Origin or Referer. Cross-site
+  // no-Origin navigations and subresource loads must not reach this API.
+  return String(req.headers.get('sec-fetch-site') || '').trim().toLowerCase() !== 'cross-site';
+}
+
+function withTrustedCors(req: Request, response: Response): Response {
+  const origin = String(req.headers.get('origin') || '').trim();
+  if (origin && isTrustedBrowserOrigin(origin)) {
+    response.headers.set('Access-Control-Allow-Origin', origin);
+    response.headers.set('Vary', 'Origin');
+  }
+  return response;
+}
+
+function corsPreflight(req: Request, reqUrl: URL): Response {
+  if (!isAdmittedBridgeRequest(req, reqUrl)) return json({ error: 'Gallery bridge request denied' }, 403);
+  const origin = String(req.headers.get('origin') || '').trim();
+  if (!origin || !isTrustedBrowserOrigin(origin)) return json({ error: 'Gallery bridge request denied' }, 403);
   return new Response(null, {
     status: 204,
     headers: {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': origin,
       'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Vary': 'Origin',
     },
   });
 }
@@ -970,7 +1025,7 @@ async function runBunGalleryFsGet(reqUrl: URL, handler: () => Promise<Response> 
 }
 
 async function proxyToMain(req: Request, reqUrl: URL): Promise<Response> {
-  if (req.method === 'OPTIONS') return corsPreflight();
+  if (req.method === 'OPTIONS') return corsPreflight(req, reqUrl);
 
   const bridgePath = reqUrl.pathname.replace(/^\/bridge/, '') || '/';
   const targetUrl = new URL(`${bridgePath}${reqUrl.search}`, BRIDGE_URL);
@@ -978,6 +1033,7 @@ async function proxyToMain(req: Request, reqUrl: URL): Promise<Response> {
   headers.delete('host');
   headers.delete('origin');
   headers.delete('referer');
+  headers.delete('x-umbra-gallery-bridge-token');
 
   const init: RequestInit = {
     method: req.method,
@@ -993,12 +1049,10 @@ async function proxyToMain(req: Request, reqUrl: URL): Promise<Response> {
   try {
     const upstream = await fetch(targetUrl.toString(), init);
     const responseHeaders = new Headers(upstream.headers);
-    responseHeaders.set('Access-Control-Allow-Origin', '*');
-    responseHeaders.set('Vary', 'Origin');
-    return new Response(upstream.body, {
+    return withTrustedCors(req, new Response(upstream.body, {
       status: upstream.status,
       headers: responseHeaders,
-    });
+    }));
   } catch (error: any) {
     return json({
       error: error?.message || 'Bridge request failed',
@@ -2134,10 +2188,11 @@ const server = Bun.serve({
   fetch: async (req) => {
     const reqUrl = new URL(req.url);
 
-    if (req.method === 'OPTIONS') return corsPreflight();
+    if (!isAdmittedBridgeRequest(req, reqUrl)) return json({ error: 'Gallery bridge request denied' }, 403);
+    if (req.method === 'OPTIONS') return corsPreflight(req, reqUrl);
 
     if (reqUrl.pathname === '/health') {
-      return json({
+      return withTrustedCors(req, json({
         ok: true,
         host: HOST,
         port: PORT,
@@ -2164,63 +2219,63 @@ const server = Bun.serve({
           engine: 'bun',
           rustEnabled: false,
         },
-      });
+      }));
     }
 
     // Local FS APIs run fully in the gallery process.
     if (reqUrl.pathname === '/api/fs/tree' && req.method === 'GET') {
-      return runBunGalleryFsGet(reqUrl, () => handleTree(reqUrl));
+      return withTrustedCors(req, await runBunGalleryFsGet(reqUrl, () => handleTree(reqUrl)));
     }
 
     if (reqUrl.pathname === '/api/fs/list-progressive' && req.method === 'GET') {
-      return runBunGalleryFsGet(reqUrl, () => handleListProgressive(reqUrl, req.signal));
+      return withTrustedCors(req, await runBunGalleryFsGet(reqUrl, () => handleListProgressive(reqUrl, req.signal)));
     }
 
     if (reqUrl.pathname === '/api/fs/folder-summary' && req.method === 'GET') {
-      return runBunGalleryFsGet(reqUrl, () => handleFolderSummary(reqUrl));
+      return withTrustedCors(req, await runBunGalleryFsGet(reqUrl, () => handleFolderSummary(reqUrl)));
     }
 
     if (reqUrl.pathname === '/api/fs/search' && req.method === 'GET') {
-      return runBunGalleryFsGet(reqUrl, () => handleSearch(reqUrl, req.signal));
+      return withTrustedCors(req, await runBunGalleryFsGet(reqUrl, () => handleSearch(reqUrl, req.signal)));
     }
 
     if (reqUrl.pathname === '/api/fs/metadata-search' && req.method === 'GET') {
-      return runBunGalleryFsGet(reqUrl, () => handleMetadataSearch(reqUrl));
+      return withTrustedCors(req, await runBunGalleryFsGet(reqUrl, () => handleMetadataSearch(reqUrl)));
     }
 
     if (reqUrl.pathname === '/api/fs/mkdir' && req.method === 'POST') {
-      return handleMkdir(req);
+      return withTrustedCors(req, await handleMkdir(req));
     }
 
     if (reqUrl.pathname === '/api/fs/empty-folders/preview' && req.method === 'POST') {
-      return handleEmptyFolders(req, 'preview');
+      return withTrustedCors(req, await handleEmptyFolders(req, 'preview'));
     }
 
     if (reqUrl.pathname === '/api/fs/empty-folders/delete' && req.method === 'POST') {
-      return handleEmptyFolders(req, 'delete');
+      return withTrustedCors(req, await handleEmptyFolders(req, 'delete'));
     }
 
     if (reqUrl.pathname === '/api/fs/reorder' && req.method === 'POST') {
-      return handleReorder(req);
+      return withTrustedCors(req, await handleReorder(req));
     }
 
     if (reqUrl.pathname === '/api/fs/tags/add' && req.method === 'POST') {
-      return handleAddTags(req);
+      return withTrustedCors(req, await handleAddTags(req));
     }
     if (reqUrl.pathname === '/api/fs/tags/set' && req.method === 'POST') {
-      return handleSetTags(req);
+      return withTrustedCors(req, await handleSetTags(req));
     }
 
     if (reqUrl.pathname === '/api/fs/thumbnail' && req.method === 'GET') {
-      return handleThumbnail(req, reqUrl);
+      return withTrustedCors(req, await handleThumbnail(req, reqUrl));
     }
 
     if (reqUrl.pathname === '/api/fs/image' && req.method === 'GET') {
-      return handleImage(req, reqUrl);
+      return withTrustedCors(req, await handleImage(req, reqUrl));
     }
 
     if (reqUrl.pathname === '/api/fs/metadata' && req.method === 'GET') {
-      return runBunGalleryFsGet(reqUrl, () => handleMetadata(reqUrl));
+      return withTrustedCors(req, await runBunGalleryFsGet(reqUrl, () => handleMetadata(reqUrl)));
     }
 
     // Everything else can still bridge to Umbra main process.

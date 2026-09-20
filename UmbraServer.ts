@@ -11668,7 +11668,10 @@ let aitoolkitNodeCapabilityCache: { available: boolean; version: string; major: 
 const IS_WINDOWS = process.platform === 'win32';
 const TOOLS_DIR = join(ROOT_DIR, 'Tools');
 const GALLERY_IN_PROCESS_WORKSPACE_URL = '/gallery/index.html';
-const GALLERY_BRIDGE_HOST = String(process.env.UMBRA_GALLERY_HOST || '127.0.0.1').trim() || '127.0.0.1';
+// The Gallery worker is an internal service. Remote browsers enter through the
+// main process, which admits the request before proxying heavy Gallery work.
+const GALLERY_BRIDGE_HOST = '127.0.0.1';
+const GALLERY_BRIDGE_TOKEN = randomBytes(32).toString('base64url');
 const DEFAULT_GALLERY_BRIDGE_PORT = PORT === 8212
   ? 8313
   : PORT + 100 <= 65535 ? PORT + 100 : PORT - 100;
@@ -11726,7 +11729,7 @@ let galleryBridgeHealthCache: { checkedAt: number; healthy: boolean } | null = n
 let isShuttingDown = false;
 
 function getGalleryBridgeHostForClient(): string {
-  return GALLERY_BRIDGE_HOST === '0.0.0.0' ? '127.0.0.1' : GALLERY_BRIDGE_HOST;
+  return GALLERY_BRIDGE_HOST;
 }
 
 function getGalleryBridgeBaseUrl(): string {
@@ -15592,6 +15595,7 @@ async function startGalleryBridgeInternal() {
         UMBRA_ROOT: ROOT_DIR,
         UMBRA_BRIDGE_URL: `http://127.0.0.1:${PORT}`,
         UMBRA_GALLERY_HOST: GALLERY_BRIDGE_HOST,
+        UMBRA_GALLERY_BRIDGE_TOKEN: GALLERY_BRIDGE_TOKEN,
         UMBRA_GALLERY_PORT: String(GALLERY_BRIDGE_PORT),
         UMBRA_DIAGNOSTICS: isBackendDiagnosticLoggingEnabled() ? '1' : '',
       },
@@ -15978,6 +15982,7 @@ async function proxyGalleryBridgeFsGet(
   headers.delete('host');
   headers.delete('origin');
   headers.delete('referer');
+  headers.set('X-Umbra-Gallery-Bridge-Token', GALLERY_BRIDGE_TOKEN);
 
   try {
     const proxyTimeoutMs = targetPath === '/api/fs/image'
@@ -16043,6 +16048,7 @@ async function proxyGalleryBridgeFsPost(req: Request, targetPath: string): Promi
   headers.delete('host');
   headers.delete('origin');
   headers.delete('referer');
+  headers.set('X-Umbra-Gallery-Bridge-Token', GALLERY_BRIDGE_TOKEN);
 
   try {
     const upstream = await fetch(targetUrl.toString(), {
