@@ -15936,7 +15936,7 @@ async function proxyGalleryBridgeFsGet(
   if (req.signal.aborted) return new Response(null, { status: 499 });
   const requestedPaths = targetPath === '/api/fs/search'
     ? sourceUrl.searchParams.getAll('root').concat(sourceUrl.searchParams.getAll('roots'))
-      .flatMap((value) => String(value || '').split('|'))
+      .flatMap((value) => String(value || '').split(/[|,]/))
     : [sourceUrl.searchParams.get('path') || ''];
   if (!areGalleryBridgePathsAllowed(req, sourceUrl, requestedPaths, server)) {
     return json({ error: 'Access denied' }, 403);
