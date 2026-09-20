@@ -15934,6 +15934,13 @@ async function proxyGalleryBridgeFsGet(
   server?: RequestIpServer,
 ): Promise<Response> {
   if (req.signal.aborted) return new Response(null, { status: 499 });
+  const requestedPaths = targetPath === '/api/fs/search'
+    ? sourceUrl.searchParams.getAll('root').concat(sourceUrl.searchParams.getAll('roots'))
+      .flatMap((value) => String(value || '').split('|'))
+    : [sourceUrl.searchParams.get('path') || ''];
+  if (!areGalleryBridgePathsAllowed(req, sourceUrl, requestedPaths, server)) {
+    return json({ error: 'Access denied' }, 403);
+  }
   const startedAt = performance.now();
   const traceProxy = (event: string, payload: Record<string, unknown>, thresholdMs = 250) => {
     if (!isBackendDiagnosticLoggingEnabled()) return;
@@ -16036,7 +16043,38 @@ async function proxyGalleryBridgeFsGet(
   }
 }
 
-async function proxyGalleryBridgeFsPost(req: Request, targetPath: string): Promise<Response> {
+function areGalleryBridgePathsAllowed(
+  req: Request,
+  sourceUrl: URL,
+  paths: string[],
+  server?: RequestIpServer,
+): boolean {
+  if (!isRemoteRequest(req, sourceUrl, server)) return true;
+  return paths.every((rawPath) => {
+    const value = String(rawPath || '').trim();
+    if (!value) return true;
+    const resolved = resolvePath(value, { allowOutsideRoot: true });
+    return Boolean(resolved && isPathInsideAllowedRoots(resolved.fullPath));
+  });
+}
+
+async function proxyGalleryBridgeFsPost(
+  req: Request,
+  sourceUrl: URL,
+  targetPath: string,
+  server?: RequestIpServer,
+): Promise<Response> {
+  const body = await req.arrayBuffer();
+  let pathValue = '';
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(body)) as { path?: unknown };
+    pathValue = String(payload.path || '');
+  } catch {
+    // The worker returns the established invalid-payload response.
+  }
+  if (!areGalleryBridgePathsAllowed(req, sourceUrl, [pathValue], server)) {
+    return json({ error: 'Access denied' }, 403);
+  }
   if (!isChildProcessAlive(galleryBridgeProcess) && !(await isGalleryBridgeHealthy({ allowCached: false }))) {
     await startGalleryBridge().catch(() => undefined);
   }
@@ -16052,7 +16090,7 @@ async function proxyGalleryBridgeFsPost(req: Request, targetPath: string): Promi
     const upstream = await fetch(targetUrl.toString(), {
       method: 'POST',
       headers,
-      body: await req.arrayBuffer(),
+      body,
       signal: AbortSignal.timeout(30000),
     });
     const responseHeaders = new Headers(upstream.headers);
@@ -30672,6 +30710,7 @@ const server = Bun.serve<UmbraSocketData>({
           url,
           '/api/fs/list-progressive',
           () => handleFsListProgressive(url, req.signal),
+          server,
         );
       }
       if (path === '/api/gallery-bridge/fs/tree' && method === 'GET') {
@@ -30680,6 +30719,7 @@ const server = Bun.serve<UmbraSocketData>({
           url,
           '/api/fs/tree',
           () => handleFsTree(url),
+          server,
         );
       }
       if (path === '/api/gallery-bridge/fs/folder-summary' && method === 'GET') {
@@ -30688,6 +30728,7 @@ const server = Bun.serve<UmbraSocketData>({
           url,
           '/api/fs/folder-summary',
           () => handleFsFolderSummary(url),
+          server,
         );
       }
       if (path === '/api/gallery-bridge/fs/search' && method === 'GET') {
@@ -30696,6 +30737,7 @@ const server = Bun.serve<UmbraSocketData>({
           url,
           '/api/fs/search',
           () => handleFsSearch(url, req.signal),
+          server,
         );
       }
       if (path === '/api/gallery-bridge/fs/search-suggestions' && method === 'GET') {
@@ -30704,13 +30746,14 @@ const server = Bun.serve<UmbraSocketData>({
           url,
           '/api/fs/search-suggestions',
           () => handleFsSearchSuggestions(url),
+          server,
         );
       }
       if (path === '/api/gallery-bridge/fs/empty-folders/preview' && method === 'POST') {
-        return proxyGalleryBridgeFsPost(req, '/api/fs/empty-folders/preview');
+        return proxyGalleryBridgeFsPost(req, url, '/api/fs/empty-folders/preview', server);
       }
       if (path === '/api/gallery-bridge/fs/empty-folders/delete' && method === 'POST') {
-        return proxyGalleryBridgeFsPost(req, '/api/fs/empty-folders/delete');
+        return proxyGalleryBridgeFsPost(req, url, '/api/fs/empty-folders/delete', server);
       }
       if (path === '/api/gallery-bridge/fs/tags/add' && method === 'POST') return handleFsTagsAdd(req);
       if (path === '/api/gallery-bridge/fs/tags/set' && method === 'POST') return handleFsTagsSet(req);
@@ -30720,6 +30763,7 @@ const server = Bun.serve<UmbraSocketData>({
           url,
           '/api/fs/tags/summary',
           () => handleFsTagsSummary(url),
+          server,
         );
       }
       if (path === '/api/gallery-bridge/fs/thumbnail' && method === 'GET') {
@@ -30746,6 +30790,7 @@ const server = Bun.serve<UmbraSocketData>({
           url,
           '/api/fs/metadata',
           () => handleFsMetadata(url),
+          server,
         );
       }
 
