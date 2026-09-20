@@ -12566,6 +12566,15 @@ function isPortOpen(port: number, timeoutMs = 1000): Promise<boolean> {
   });
 }
 
+async function waitForPortClosed(port: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!(await isPortOpen(port, 250))) return true;
+    await sleep(100);
+  }
+  return !(await isPortOpen(port, 250));
+}
+
 function getComfySignatureNeedles(): string[] {
   const config = getBackendConfig().comfyui;
   const needles = new Set<string>();
@@ -15447,9 +15456,16 @@ async function startGalleryBridge() {
   if (galleryBridgeStartInFlight) {
     return galleryBridgeStartInFlight;
   }
-  galleryBridgeStartInFlight = startGalleryBridgeInternal().finally(() => {
-    galleryBridgeStartInFlight = null;
-  });
+  galleryBridgeStartInFlight = startGalleryBridgeInternal()
+    .then((result) => {
+      // The status endpoint drives iframe recovery. Do not leave it showing a
+      // pre-start fallback until the periodic sampler's next 15-second tick.
+      void refreshGalleryBridgeStatusCache();
+      return result;
+    })
+    .finally(() => {
+      galleryBridgeStartInFlight = null;
+    });
   return galleryBridgeStartInFlight;
 }
 
@@ -15770,7 +15786,10 @@ async function stopGalleryBridge() {
     stopped = await stopProcessTree(proc, 'Gallery bridge');
   }
 
-  const stoppedByPort = await stopByPort(GALLERY_BRIDGE_PORT, 'Gallery bridge');
+  let stoppedByPort = await stopByPort(GALLERY_BRIDGE_PORT, 'Gallery bridge');
+  if (!stoppedByPort) {
+    stoppedByPort = await waitForPortClosed(GALLERY_BRIDGE_PORT, 2500);
+  }
   if (stoppedByPort) hadRunning = true;
   stopped = stopped || stoppedByPort;
 
@@ -15778,7 +15797,7 @@ async function stopGalleryBridge() {
   galleryBridgeStartTime = null;
   clearGalleryProcessTelemetry();
 
-  const stillHealthy = await isGalleryBridgeHealthy();
+  const stillHealthy = await isGalleryBridgeHealthy({ allowCached: false });
   appendBackendLifecycleLog('gallery', 'stop_completed', {
     trackedPid: proc?.pid ?? null,
     port: GALLERY_BRIDGE_PORT,
@@ -15788,6 +15807,7 @@ async function stopGalleryBridge() {
     stillHealthy,
   });
   if (stillHealthy) {
+    await refreshGalleryBridgeStatusCache();
     return {
       success: false,
       error: 'Failed to fully stop Gallery bridge',
@@ -15800,6 +15820,7 @@ async function stopGalleryBridge() {
     };
   }
 
+  await refreshGalleryBridgeStatusCache();
   return {
     success: true,
     message: hadRunning ? 'Gallery bridge stopped' : 'Gallery bridge already stopped',
@@ -15873,9 +15894,9 @@ async function restartGalleryBridgeForSelfHeal(reason: string, expectedPid: numb
   });
 }
 
-async function getGalleryStatusAsync() {
+async function getGalleryStatusAsync(options?: { allowCached?: boolean }) {
   const processRunning = isChildProcessAlive(galleryBridgeProcess);
-  const healthy = await isGalleryBridgeHealthy();
+  const healthy = await isGalleryBridgeHealthy(options);
   const startupGraceMs = 45000;
   const inStartupGrace = galleryBridgeDesired
     && !healthy
@@ -16179,6 +16200,25 @@ function refreshBackendControlPlaneStatus(): Promise<void> {
       backendStatusRefreshInFlight = null;
     });
   return backendStatusRefreshInFlight;
+}
+
+async function refreshGalleryBridgeStatusCache(): Promise<void> {
+  const activeRefresh = backendStatusRefreshInFlight;
+  if (activeRefresh) {
+    try {
+      await activeRefresh;
+    } catch {
+      // Preserve the Gallery lifecycle update even if a general sample fails.
+    }
+  }
+  const gallery = await getGalleryStatusAsync({ allowCached: false });
+  cachedBackendControlPlane = {
+    ...cachedBackendControlPlane,
+    backends: {
+      ...cachedBackendControlPlane.backends,
+      gallery,
+    },
+  };
 }
 
 async function forceRefreshBackendControlPlaneStatus(): Promise<void> {
