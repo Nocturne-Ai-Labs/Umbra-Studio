@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.32.25 - Dataset Caption Rewrite Hotfix
+
+### TL;DR - Setup After Updating
+
+- Restart Umbra with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux, then refresh open browser sessions. No new models or ComfyUI updates are required for this hotfix.
+- Data Forge **Tag/Caption** now replaces existing captions for the selected images (or all images when none are selected). Back up manually edited captions before regenerating. Updating Umbra alone does not rewrite dataset files.
+- Explicit trigger and prepend text remains included. The separate **Apply** action still adds that text without running a caption model or discarding the existing caption.
+
+### Data Forge
+
+- Remove the old caption-merge toggle and prevent legacy saved settings or stale clients from re-enabling merging during caption generation.
+- Keep disabled tag categories out of regenerated captions instead of reintroducing old tags from the previous caption.
+- Filter legacy uncategorized tagger responses through known catalog categories. Unknown tags in those responses are omitted when category restrictions are active; explicitly supplied trigger/prepend tags remain under user control.
+- Load the catalog filter only when a legacy response requires it, avoiding unnecessary indexing for normal categorized tagger output and prefix-only Apply.
+- Preserve the existing write-on-success behavior: failed generation does not replace that image's caption.
+
+### Validation
+
+- Passed focused caption-policy and category-filter tests, frontend TypeScript and lint checks, and production frontend/backend builds using synthetic fixtures. No personal dataset images or captions were accessed.
+- Windows and Linux packages retain the standard privacy exclusions for private tests, reports, datasets, runtime files, and model weights.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: old caption tags bypassing disabled categories during regeneration.
+- Fixed: uncategorized tagger fallback ignoring category restrictions.
+- Improved: predictable caption replacement with explicit trigger/prepend preservation and a separate non-destructive Apply action.
+
 ## v0.32.24 - Qwen Image 2.1 Support
 
 ### TL;DR - Setup After Updating

@@ -8,6 +8,7 @@
 
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { configureGeneratedMediaActivity, recordGeneratedMediaOutputs } from './backend/GeneratedMediaActivity';
+import { createCaptionCategoryFilter } from './backend/DatasetCaptionCategories';
 import { createReadStream, createWriteStream, existsSync, statSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, openSync, closeSync, renameSync, rmSync, type Dirent, type Stats, type BigIntStats } from 'fs';
 import * as fs from 'fs/promises';
 import { Readable } from 'node:stream';
@@ -510,7 +511,7 @@ function createDefaultDatasetConceptSettings(_datasetName: string, conceptFolder
     includeMetaTags: false,
     includeRatingTags: false,
     maxTags: 120,
-    preserveExisting: true,
+    preserveExisting: false,
     replaceUnderscoresWithSpaces: false,
   };
 }
@@ -563,7 +564,7 @@ function normalizeDatasetConceptSettings(
     includeMetaTags: parseBool(input?.includeMetaTags, defaults.includeMetaTags),
     includeRatingTags: parseBool(input?.includeRatingTags, defaults.includeRatingTags),
     maxTags: parseInteger(input?.maxTags, defaults.maxTags, 1, 500),
-    preserveExisting: parseBool(input?.preserveExisting, defaults.preserveExisting),
+    preserveExisting: false,
     replaceUnderscoresWithSpaces: parseBool(input?.replaceUnderscoresWithSpaces, defaults.replaceUnderscoresWithSpaces),
     updatedAt: Number.isFinite(Number(input?.updatedAt)) ? Number(input?.updatedAt) : undefined,
   };
@@ -32955,7 +32956,8 @@ const server = Bun.serve<UmbraSocketData>({
           if (!existsSync(conceptPath)) return json({ error: 'Concept not found' }, 404);
 
           const autoTag = parseBool(body.autoTag, true);
-          const preserveExisting = parseBool(body.preserveExisting, true);
+          // Generation replaces captions; prefix-only Apply must retain their contents.
+          const preserveExisting = !autoTag;
           const captionMode = body.captionMode === 'natural' ? 'natural' : 'tags';
           const modelRepo = String(body.modelRepo || 'SmilingWolf/wd-vit-tagger-v3').trim() || 'SmilingWolf/wd-vit-tagger-v3';
           const naturalModelRepo = String(body.naturalModelRepo || 'prithivMLmods/Qwen2-VL-2B-Abliterated-Caption-it').trim()
@@ -33042,6 +33044,13 @@ const server = Bun.serve<UmbraSocketData>({
             error?: string;
           }> = [];
 
+          const categorySelection = {
+            general: includeGeneralTags, character: includeCharacterTags,
+            copyright: includeCopyrightTags, artist: includeArtistTags,
+            meta: includeMetaTags, rating: includeRatingTags,
+          };
+          let filterCaptionCategories: ReturnType<typeof createCaptionCategoryFilter> | undefined;
+
           for (const filename of imageFiles) {
             const imagePath = join(conceptPath, filename);
             const baseName = filename.replace(/\.[^.]+$/, '');
@@ -33081,6 +33090,15 @@ const server = Bun.serve<UmbraSocketData>({
                   meta: includeMetaTags,
                   rating: includeRatingTags,
                 });
+                const categorized = ['general', 'character', 'copyright', 'artist', 'meta', 'rating']
+                  .some(field => Object.prototype.hasOwnProperty.call(result, field));
+                if (!categorized) {
+                  if (!filterCaptionCategories) {
+                    if (ppIndex.length === 0) await indexPowerPrompterCSVs();
+                    filterCaptionCategories = createCaptionCategoryFilter(ppIndex, categorySelection);
+                  }
+                  generatedTags = filterCaptionCategories(generatedTags, result, Object.values(categorySelection).every(Boolean));
+                }
               }
 
               let caption = '';

@@ -52,7 +52,7 @@ const DEFAULT_CONCEPT_SETTINGS: DatasetConceptSettings = {
   includeMetaTags: false,
   includeRatingTags: false,
   maxTags: 120,
-  preserveExisting: true,
+  preserveExisting: false,
   replaceUnderscoresWithSpaces: false,
 };
 
@@ -198,7 +198,6 @@ export function DatasetsTab() {
   const conceptSessions = useRef(new Map<string, ReturnType<typeof createConceptSettingsSession>>());
   const [conceptSaveStatus, setConceptSaveStatus] = useState<ConceptSaveStatus>({ state: 'saved' });
   const [autoTagging, setAutoTagging] = useState(false);
-  const [preserveExistingCaptions, setPreserveExistingCaptions] = useState(true);
   const [replaceUnderscoresWithSpaces, setReplaceUnderscoresWithSpaces] = useState(false);
   const [archivingDataset, setArchivingDataset] = useState<string | null>(null);
 
@@ -346,7 +345,6 @@ export function DatasetsTab() {
     setIncludeArtistTags(next.includeArtistTags === true);
     setIncludeMetaTags(next.includeMetaTags === true);
     setIncludeRatingTags(next.includeRatingTags === true);
-    setPreserveExistingCaptions(next.preserveExisting !== false);
     setReplaceUnderscoresWithSpaces(next.replaceUnderscoresWithSpaces === true);
   };
 
@@ -437,7 +435,7 @@ export function DatasetsTab() {
         includeMetaTags,
         includeRatingTags,
         maxTags,
-        preserveExisting: preserveExistingCaptions,
+        preserveExisting: false,
         replaceUnderscoresWithSpaces,
     });
   }, [
@@ -458,7 +456,6 @@ export function DatasetsTab() {
     naturalMaxNewTokens,
     naturalModel,
     prependTags,
-    preserveExistingCaptions,
     ratingThreshold,
     replaceUnderscoresWithSpaces,
     saveConceptSettings,
@@ -623,7 +620,7 @@ export function DatasetsTab() {
           includeMetaTags,
           includeRatingTags,
           maxTags,
-          preserveExisting: preserveExistingCaptions,
+          preserveExisting: !autoTag,
           replaceUnderscoresWithSpaces,
         }),
       });
@@ -1043,16 +1040,6 @@ export function DatasetsTab() {
                 <label className="flex h-8 items-center gap-1.5 rounded border border-white/10 px-2 text-[10px] font-bold uppercase tracking-[0.12em] text-zinc-400">
                   <input
                     type="checkbox"
-                    checked={preserveExistingCaptions}
-                    onChange={(e) => setPreserveExistingCaptions(e.target.checked)}
-                    className="h-3 w-3"
-                    style={{ accentColor: 'var(--umbra-accent)' }}
-                  />
-                  Keep old
-                </label>
-                <label className="flex h-8 items-center gap-1.5 rounded border border-white/10 px-2 text-[10px] font-bold uppercase tracking-[0.12em] text-zinc-400">
-                  <input
-                    type="checkbox"
                     checked={replaceUnderscoresWithSpaces}
                     onChange={(e) => setReplaceUnderscoresWithSpaces(e.target.checked)}
                     disabled={captionMode === 'natural'}
@@ -1073,7 +1060,7 @@ export function DatasetsTab() {
                   onClick={() => void handleBatchCaption(true)}
                   disabled={autoTagging || images.length === 0}
                   className="flex h-8 items-center gap-1.5 rounded border border-cyan-400/35 bg-cyan-500/15 px-2 text-xs font-bold uppercase tracking-[0.12em] text-cyan-100 transition-colors hover:bg-cyan-500/22 disabled:cursor-not-allowed disabled:opacity-50"
-                  title={captionMode === 'natural' ? 'Write local natural-language captions' : 'Run WD tagger and write tag captions'}
+                  title={captionMode === 'natural' ? 'Replace captions with new natural-language captions' : 'Replace captions with newly generated tags'}
                 >
                   {autoTagging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                   {selectedImages.size > 0
