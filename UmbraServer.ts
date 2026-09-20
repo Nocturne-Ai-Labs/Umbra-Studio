@@ -24760,7 +24760,8 @@ function paginateFsListResult(
   };
 }
 
-async function handleFsList(url: URL): Promise<Response> {
+async function handleFsList(url: URL, signal?: AbortSignal): Promise<Response> {
+  if (signal?.aborted) return new Response(null, { status: 499 });
   const requestStartedAt = Date.now();
   const path = url.searchParams.get('path');
   const limit = parseInt(url.searchParams.get('limit') || '0', 10);
@@ -24782,7 +24783,7 @@ async function handleFsList(url: URL): Promise<Response> {
       ? defaultOutputRoot
       : normalizeOutputPathInput(normalizedInputPath);
   const normalizedTargetPath = targetPath.replace(/\\/g, '/');
-  const isTrashPath = normalizedTargetPath.startsWith(TRASH_ROOT);
+  const isTrashPath = normalizedTargetPath === TRASH_ROOT || normalizedTargetPath.startsWith(`${TRASH_ROOT}/`);
   const isTrashRoot = normalizedTargetPath === TRASH_ROOT;
 
   try {
@@ -24804,7 +24805,13 @@ async function handleFsList(url: URL): Promise<Response> {
       }
     }
 
-    if (!existsSync(fullPath)) {
+    signal?.throwIfAborted();
+    let stat = await fs.stat(fullPath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    signal?.throwIfAborted();
+    if (!stat) {
       // Auto-create known user folders when missing
       if (
         targetPath === defaultOutputRoot ||
@@ -24815,12 +24822,14 @@ async function handleFsList(url: URL): Promise<Response> {
         targetPath.startsWith('User/PowerPrompter/')
       ) {
         await fs.mkdir(fullPath, { recursive: true });
+        signal?.throwIfAborted();
+        stat = await fs.stat(fullPath);
       } else {
         return json({ error: 'Path does not exist' }, 404);
       }
     }
 
-    const stat = statSync(fullPath);
+    signal?.throwIfAborted();
     if (!stat.isDirectory()) return json({ error: 'Path is not a directory' }, 400);
     const shouldCacheResult = !isTrashPath;
     cacheKey = shouldCacheResult
@@ -24842,6 +24851,7 @@ async function handleFsList(url: URL): Promise<Response> {
       while ((inFlight = fsListInFlight.get(cacheKey))) {
         const waitStartedAt = Date.now();
         await inFlight;
+        signal?.throwIfAborted();
         singleFlightWaitMs += Date.now() - waitStartedAt;
         if (singleFlightWaitMs > FS_LIST_SINGLE_FLIGHT_WARN_MS) {
           console.warn(`[FS List] single-flight wait ${singleFlightWaitMs}ms path="${targetPath}"`);
@@ -24870,6 +24880,7 @@ async function handleFsList(url: URL): Promise<Response> {
     }
 
     const scanStartedAt = Date.now();
+    signal?.throwIfAborted();
     const fullResult = await fsWorkerService.list({
       fullPath,
       targetPath,
@@ -24886,6 +24897,8 @@ async function handleFsList(url: URL): Promise<Response> {
       }
     }
 
+    // A completed shared scan remains useful to other callers, even if its owner left.
+    signal?.throwIfAborted();
     const payload = paginateFsListResult(fullResult as any, limit, offset);
     if (FS_LIST_DEBUG) {
       console.debug(`[FS List] scan path="${targetPath}" cacheHit=${cacheHit ? 1 : 0} total=${fullResult.total} scanMs=${scanMs} waitMs=${singleFlightWaitMs} elapsedMs=${Date.now() - requestStartedAt}`);
@@ -24902,6 +24915,7 @@ async function handleFsList(url: URL): Promise<Response> {
     return json(payload);
 
   } catch (error: any) {
+    if (signal?.aborted) return new Response(null, { status: 499 });
     console.error('[FS List] Error:', error);
     return json({ error: error.message }, 500);
   } finally {
@@ -24926,7 +24940,7 @@ async function handleFsListProgressive(url: URL, signal?: AbortSignal): Promise<
 
       // Keep the legacy/full path as the fallback for non-library variants.
   if (recursive || filter === 'text' || filter === 'font' || filter === 'all') {
-    return handleFsList(url);
+    return handleFsList(url, signal);
   }
 
   const normalizedInputPath = String(path || '').trim();
@@ -24935,10 +24949,10 @@ async function handleFsListProgressive(url: URL, signal?: AbortSignal): Promise<
     ? defaultOutputRoot
     : normalizeOutputPathInput(normalizedInputPath);
   const normalizedTargetPath = targetPath.replace(/\\/g, '/');
-  const isTrashPath = normalizedTargetPath.startsWith(TRASH_ROOT);
+  const isTrashPath = normalizedTargetPath === TRASH_ROOT || normalizedTargetPath.startsWith(`${TRASH_ROOT}/`);
 
   if (isTrashPath) {
-    return handleFsList(url);
+    return handleFsList(url, signal);
   }
 
   try {
@@ -30566,7 +30580,7 @@ const server = Bun.serve<UmbraSocketData>({
         );
       }
 
-      if (path === '/api/fs/list' && method === 'GET') return handleFsList(url);
+      if (path === '/api/fs/list' && method === 'GET') return handleFsList(url, req.signal);
       if (path === '/api/fs/list-progressive' && method === 'GET') return handleFsListProgressive(url, req.signal);
       if (path === '/api/fs/thumbnail' && method === 'GET') return handleFsThumbnail(req, url, server);
       if (path === '/api/fs/preview' && method === 'GET') return handleFsPreview(req, url);
@@ -36397,6 +36411,3 @@ process.on('unhandledRejection', async (reason) => {
   console.error('\x1b[31m[Fatal]\x1b[0m Unhandled rejection:', reason);
   // Don't exit on unhandled rejections, just log them
 });
-
-
-
