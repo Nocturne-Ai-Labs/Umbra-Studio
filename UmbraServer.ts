@@ -15934,10 +15934,7 @@ async function proxyGalleryBridgeFsGet(
   server?: RequestIpServer,
 ): Promise<Response> {
   if (req.signal.aborted) return new Response(null, { status: 499 });
-  const requestedPaths = targetPath === '/api/fs/search'
-    ? sourceUrl.searchParams.getAll('root').concat(sourceUrl.searchParams.getAll('roots'))
-      .flatMap((value) => String(value || '').split('|'))
-    : [sourceUrl.searchParams.get('path') || ''];
+  const requestedPaths = getGalleryBridgeRequestPaths(sourceUrl, targetPath);
   if (!(await areGalleryBridgePathsAllowed(req, sourceUrl, requestedPaths, server))) {
     return json({ error: 'Access denied' }, 403);
   }
@@ -16045,6 +16042,18 @@ async function proxyGalleryBridgeFsGet(
 
 function getGalleryBridgeAllowedRoots(): string[] {
   return [ROOT_DIR, getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate)];
+}
+
+function getGalleryBridgeRequestPaths(sourceUrl: URL, targetPath: string): string[] {
+  if (targetPath === '/api/fs/search' || targetPath === '/api/fs/search-suggestions') {
+    return sourceUrl.searchParams.getAll('root').concat(sourceUrl.searchParams.getAll('roots'))
+      .flatMap((value) => String(value || '').split('|'));
+  }
+  if (targetPath === '/api/fs/tags/summary') {
+    return sourceUrl.searchParams.getAll('folder').concat(sourceUrl.searchParams.getAll('path'))
+      .flatMap((value) => String(value || '').split('|'));
+  }
+  return [sourceUrl.searchParams.get('path') || ''];
 }
 
 async function areGalleryBridgePathsAllowed(
