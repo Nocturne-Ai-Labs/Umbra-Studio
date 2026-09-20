@@ -32705,8 +32705,11 @@ const server = Bun.serve<UmbraSocketData>({
             const captionPath = join(conceptPath, `${baseName}.txt`);
 
             try {
-              const existingCaption = existsSync(captionPath)
-                ? await fs.readFile(captionPath, 'utf8').catch(() => '')
+              const existingCaption = preserveExisting
+                ? await fs.readFile(captionPath, 'utf8').catch((error: NodeJS.ErrnoException) => {
+                  if (error.code === 'ENOENT') return '';
+                  throw error;
+                })
                 : '';
               const existingTags = preserveExisting && captionMode === 'tags'
                 ? parseTagList(existingCaption, replaceUnderscoresWithSpaces)
