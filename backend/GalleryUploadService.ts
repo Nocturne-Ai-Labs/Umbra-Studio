@@ -1,7 +1,8 @@
 import * as fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { extname, join, relative, resolve } from 'node:path';
 import { copyFileExclusive } from './FsTransferCopy';
+import { resolveAllowedGalleryPath } from './GalleryPathAccess';
 
 export type GalleryUploadStrategy = 'keepBoth' | 'replace' | 'skip';
 export interface GalleryUploadRequest {
@@ -21,29 +22,9 @@ export function isGalleryUploadStrategy(value: unknown): value is GalleryUploadS
   return value === 'keepBoth' || value === 'replace' || value === 'skip';
 }
 
-async function canonicalCandidate(path: string): Promise<string> {
-  let parent = resolve(path);
-  const missing: string[] = [];
-  while (true) {
-    try { return resolve(await fs.realpath(parent), ...missing); }
-    catch (error: any) {
-      if (error?.code !== 'ENOENT' || dirname(parent) === parent) throw error;
-      missing.unshift(basename(parent));
-      parent = dirname(parent);
-    }
-  }
-}
-
 export async function prepareGalleryUploadDirectory(destination: string, allowedRoots: string[]): Promise<string> {
-  const candidate = await canonicalCandidate(destination);
-  let allowed = false;
-  for (const root of allowedRoots) {
-    const physicalRoot = await canonicalCandidate(root).catch(() => null);
-    if (!physicalRoot) continue;
-    const rel = relative(physicalRoot, candidate);
-    if (!rel || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))) { allowed = true; break; }
-  }
-  if (!allowed) throw new Error('Upload destination resolves outside allowed roots');
+  const candidate = await resolveAllowedGalleryPath(destination, allowedRoots);
+  if (!candidate) throw new Error('Upload destination resolves outside allowed roots');
   await fs.mkdir(candidate, { recursive: true });
   await assertUploadDirectory(candidate);
   return candidate;
