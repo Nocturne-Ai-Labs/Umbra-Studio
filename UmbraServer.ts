@@ -10189,6 +10189,7 @@ function enqueueBackendPowerPrompterQueueWork(work: BackendPowerPrompterQueuedWo
   if (!requestId) return false;
   if (backendPowerPrompterQueueTasks.has(requestId)) return false;
   if (backendPowerPrompterQueuedWork.some((entry) => entry.requestId === requestId)) return false;
+  if (findPowerPrompterQueueControllerRequest(requestId)) return false;
   const state = work.data?.state && typeof work.data.state === 'object' ? work.data.state : {};
   const queuePlacement = normalizePowerPrompterQueuePlacement(
     work.queuePlacement ?? work.data?.queuePlacement ?? state.queuePlacement,
@@ -10444,7 +10445,7 @@ async function handlePrompterApiWorkflowQueueBatchRequest(
     const queuedIds = new Set(backendPowerPrompterQueuedWork.map(entry => entry.requestId));
     for (const { requestId } of groups) {
       if (seen.has(requestId) || backendPowerPrompterQueueTasks.has(requestId)
-        || queuedIds.has(requestId)) {
+        || queuedIds.has(requestId) || findPowerPrompterQueueControllerRequest(requestId)) {
         duplicates.add(requestId);
       }
       seen.add(requestId);
@@ -10456,7 +10457,7 @@ async function handlePrompterApiWorkflowQueueBatchRequest(
       requestId: batchRequestId,
       success: false,
       duplicate: true,
-      error: `Duplicate backend queue request id (${duplicateRequestIds[0]}) is already queued.`,
+      error: `Duplicate backend queue request id (${duplicateRequestIds[0]}) is already queued or recorded.`,
       acceptedRequestIds: [],
       duplicateRequestIds,
     });
@@ -10563,8 +10564,10 @@ async function handlePrompterApiWorkflowQueueRequest(
     return;
   }
 
-  if (backendPowerPrompterQueueTasks.has(requestId) || backendPowerPrompterQueuedWork.some((entry) => entry.requestId === requestId)) {
-    const duplicateLocation = backendPowerPrompterQueueTasks.has(requestId) ? 'active' : 'queued';
+  if (backendPowerPrompterQueueTasks.has(requestId) || backendPowerPrompterQueuedWork.some((entry) => entry.requestId === requestId)
+    || findPowerPrompterQueueControllerRequest(requestId)) {
+    const duplicateLocation = backendPowerPrompterQueueTasks.has(requestId) ? 'active'
+      : backendPowerPrompterQueuedWork.some((entry) => entry.requestId === requestId) ? 'queued' : 'recorded';
     emitPowerPrompterTerminalLine(`Backend rejected duplicate group req=${formatPowerPrompterRequestId(requestId)} location=${duplicateLocation}`);
     sendWs(ws, {
       type: 'queue_forwarded',
