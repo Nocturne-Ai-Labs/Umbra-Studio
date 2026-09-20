@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.32.24 - Qwen Image 2.1 Support
+
+### TL;DR - Setup After Updating
+
+- Restart Umbra with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux, and refresh open browser sessions.
+- For Qwen Image 2.1, update ComfyUI through Umbra's managed update controls and restart ComfyUI. The pipeline requires the native `TextEncodeQwenImage21` node; older installations receive an update-required message. Qualification used ComfyUI 0.37.0.
+- Open `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, then **Models > Model Families > Qwen Image 2.1 (Research Only)**. Install the three required files: the INT8 diffusion model, Qwen3 VL 8B INT8 text encoder, and dedicated 2.1 VAE. Total download is approximately 17.3 GB (16.1 GiB). The older Qwen Image encoder and VAE are not substitutes.
+- The model weights use the [Qwen Research License](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE), restricted to non-commercial research/evaluation unless separately licensed. Umbra provides optional model support; weights are not bundled with the application.
+- Existing media, models, and settings are retained. No data migration is required.
+
+### Qwen Image 2.1
+
+- Add a separate native TXT2IMG pipeline with model and resource selection, positive/negative conditioning, seed, resolution, sampler controls, normal queue handling, and saved generation metadata.
+- Add checksum-verified, revision-pinned downloads to the existing cross-platform Umbra Setup catalog.
+- Use 16-pixel resolution increments for the new latent format. Pipeline defaults follow the official template: 25 steps, CFG 1, Euler/simple, 1024 square. Negative conditioning has no effect at CFG 1.
+- This first integration supports TXT2IMG only. Qwen 2.1 LoRA, hires-fix, detailer, IMG2IMG, Canvas, and inpainting support are not advertised or qualified.
+
+### Compatibility And Validation
+
+- Supply current ComfyUI's required temporal defaults when converting standard image VAE encode/decode nodes to tiled nodes. This repairs native graph validation failures with the tiled-VAE option enabled.
+- Passed four focused regression tests, frontend TypeScript and lint checks, production frontend build, the complete pipeline audit, and independent code review.
+- Completed real scenic-image generation through both the Umbra queue and the UI Generate button, including a 1024x768 result with verified saved metadata and Gallery access. The shared-GPU test used CPU text encoding and tiled VAE; it is not a dedicated-GPU performance benchmark.
+- Windows and Linux archives exclude private test reports, skill instructions, generated images, runtime data, and downloaded model weights.
+- Linux managed-tool prerequisites remain `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit UI setup requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: tiled image VAE graphs missing required temporal inputs on current ComfyUI.
+- Improved: Qwen Image 2.1 setup, native generation support, resolution controls, and actionable ComfyUI update guidance.
+
 ## v0.32.23 - Umbra UI Queue Controls Hotfix
 
 ### TL;DR - Setup After Updating
