@@ -11,6 +11,7 @@ export type ComfyLaunchPhase = 'starting' | 'ready' | 'offline';
 export interface ComfyBackendStatusSample {
   running: boolean;
   healthy: boolean;
+  failed?: boolean;
 }
 
 export function reduceComfyLaunchRuntimeState(
@@ -47,7 +48,8 @@ export function reconcileComfyLaunchRuntimeState(
   const healthy = sample.running && sample.healthy;
   const explicitLaunchPending = current.booting
     && current.connection === 'connecting'
-    && !healthy;
+    && !healthy
+    && !sample.failed;
 
   return {
     connection: explicitLaunchPending
@@ -60,6 +62,7 @@ export function reconcileComfyLaunchRuntimeState(
       sample.running
       && !sample.healthy
       && !current.healthy
+      && !sample.failed
     ),
   };
 }

@@ -14,6 +14,7 @@ import { governorShouldRun, governorTryAcquire } from '@/lib/loadGovernor';
 import { logDiagnostic } from '@/lib/diagnostics';
 import { cn } from '@/lib/utils';
 import { UmbraFilmstrip } from './UmbraFilmstrip';
+import { ComfyLaunchScreen } from './ComfyLaunchScreen';
 import type { WorkspaceType } from '@/store/useStore';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import { useI18n } from '@/i18n';
@@ -72,6 +73,7 @@ async function importWithChunkRecovery<T>(key: string, importer: () => Promise<T
 
 const SUCCESS_TOAST_THRESHOLD = 3;
 const COMFY_BRIDGE_MESSAGE_TIMEOUT_MS = 4500;
+const COMFY_WORKFLOW_OPEN_TIMEOUT_MS = 30000;
 
 const loadModelManagerWorkspaceModule = () => importWithChunkRecovery('model-manager-workspace', () => import('./ModelManagerWorkspace'));
 const loadBoardBrowserModule = () => importWithChunkRecovery('board-browser', () => import('@/components/board/BoardBrowser'));
@@ -999,27 +1001,24 @@ export const BackendSplash = ({
   }
 
   return (
-    <div className="w-full h-full text-zinc-500 bg-black/60 backdrop-blur-3xl relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-[var(--umbra-accent-glow)] to-transparent opacity-10" />
+    <div className="w-full h-full text-zinc-400 bg-[var(--umbra-bg)] relative overflow-hidden">
 
       <div className="relative z-10 w-full h-full overflow-y-auto overscroll-contain custom-scrollbar">
-        <div className="text-center w-full max-w-2xl mx-auto px-8 py-8">
-        <div className="text-6xl mb-6 opacity-20">{icon}</div>
-        <div className="text-4xl font-black text-white mb-2 tracking-tighter uppercase">
-          {name} <span className={error ? 'text-red-500' : 'text-[var(--umbra-accent)]'}>
-            {error ? 'Error' : isLaunching ? 'Starting...' : 'Offline'}
-          </span>
+        <div className="w-full max-w-3xl mx-auto px-4 py-5 sm:px-8 sm:py-8">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-zinc-100"><Power className="h-5 w-5 text-[var(--umbra-accent)]" />{name}</h2>
+          <p role="status" className={`flex items-center gap-2 text-sm ${error ? 'text-red-300' : 'text-zinc-400'}`}>
+            {isLaunching && <Loader2 className="h-4 w-4 animate-spin" />}
+            {ui(error ? 'Failed to start backend' : isLaunching ? statusText || 'Starting backend...' : isBackendReady ? 'Ready!' : isBackendRunning ? 'Starting backend...' : 'Backend not connected')}
+          </p>
         </div>
-        <p className="font-mono text-xs uppercase tracking-[0.3em] opacity-40 mb-8">
-          {error ? 'Failed to start backend' : isLaunching ? statusText || 'Starting backend...' : 'Backend not connected'}
-        </p>
 
         {showConsolePanel && (
           <div className="mb-8 w-full">
             {/* Progress Bar */}
-            <div className="w-full bg-black/40 rounded-full h-3 mb-3 overflow-hidden border border-white/10">
+            <div className="w-full bg-white/5 rounded-full h-1.5 mb-3 overflow-hidden">
               <div
-                className={`h-full ${error ? 'bg-red-500' : 'bg-gradient-to-r from-[var(--umbra-accent)] to-[var(--umbra-accent-glow)]'}`}
+                className={`h-full ${error ? 'bg-red-500' : 'bg-[var(--umbra-accent)]'}`}
                 style={{ width: `${startupProgress}%`, transition: 'width 300ms ease-out' }}
               />
             </div>
@@ -1076,7 +1075,7 @@ export const BackendSplash = ({
           </div>
         )}
 
-        <div className="flex gap-4 justify-center mb-6">
+        <div className="flex flex-wrap gap-2 mb-6">
           {error ? (
             <button
               onClick={handleRetry}
@@ -1087,8 +1086,8 @@ export const BackendSplash = ({
             </button>
           ) : (
             <button
-              onClick={handleLaunch}
-              disabled={isLaunching || isSwitchingComfyVersion}
+              onClick={isBackendRunning ? handleStop : handleLaunch}
+              disabled={isLaunching || isStopping || isSwitchingComfyVersion}
               className="glass-panel px-6 py-3 bg-[var(--umbra-accent)]/20 hover:bg-[var(--umbra-accent)]/30 border-[var(--umbra-accent)] disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-2 group"
             >
               {isLaunching ? (
@@ -1099,7 +1098,7 @@ export const BackendSplash = ({
               ) : (
                 <>
                   <Power className="w-4 h-4 group-hover:text-[var(--umbra-accent)] transition-colors" />
-                  <span className="font-bold text-sm uppercase tracking-wider">Launch {name}</span>
+                  <span className="font-semibold text-sm">{ui(isBackendRunning ? `Stop ${name}` : `Launch ${name}`)}</span>
                 </>
               )}
             </button>
@@ -1124,7 +1123,7 @@ export const BackendSplash = ({
           </button>
         </div>
 
-        <div className="flex flex-wrap gap-3 justify-center mb-6">
+        <div className="flex flex-wrap gap-2 border-t border-white/10 pt-5 mb-6">
           <button
             onClick={() => handleToolAction('install')}
             disabled={managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
@@ -1271,7 +1270,12 @@ export const BackendSplash = ({
   );
 };
 
-const ComfyUIWorkspace = ({ isActive }: { isActive: boolean }) => {
+const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boolean; mobileManager?: boolean }) => {
+  const { t } = useI18n();
+  const [uiRequested, setUiRequested] = useState(false);
+  const [showManager, setShowManager] = useState(false);
+  const [confirmUnload, setConfirmUnload] = useState(false);
+  const workflowLoadGenerationRef = useRef(0);
   const comfyConnection = useStore((state) => state.connections.comfyui);
   const isConnected = comfyConnection === 'connected';
   const comfyUrl = useStore((state) => state.urls.comfyui);
@@ -1410,8 +1414,11 @@ const ComfyUIWorkspace = ({ isActive }: { isActive: boolean }) => {
       }
     };
 
-    const runLoad = (payload: Record<string, unknown>, attempt = 0) => {
-      if (canceled) return;
+    const runLoad = (payload: Record<string, unknown>, attempt = 0, generation = workflowLoadGenerationRef.current, deadline = Date.now() + COMFY_WORKFLOW_OPEN_TIMEOUT_MS) => {
+      if (canceled || generation !== workflowLoadGenerationRef.current) return;
+      // A workflow handoff is an explicit request to open the editor.
+      setUiRequested(true);
+      setShowManager(false);
       const workflowName = String(payload?.workflowName || payload?.name || 'API workflow').trim() || 'API workflow';
       const workflowKey = String(payload?.workflowId || workflowName).trim() || workflowName;
       const lastToast = loadedComfyWorkflowToastRef.current;
@@ -1426,9 +1433,9 @@ const ComfyUIWorkspace = ({ isActive }: { isActive: boolean }) => {
           }
         })
         .catch((error: any) => {
-          if (canceled) return;
-          if (attempt < 6) {
-            window.setTimeout(() => runLoad(payload, attempt + 1), 450);
+          if (canceled || generation !== workflowLoadGenerationRef.current) return;
+          if (attempt < 60 && Date.now() < deadline) {
+            window.setTimeout(() => runLoad(payload, attempt + 1, generation, deadline), 450);
             return;
           }
           addToast({
@@ -1667,11 +1674,11 @@ const ComfyUIWorkspace = ({ isActive }: { isActive: boolean }) => {
   const [comfyFrameLoadState, setComfyFrameLoadState] = useState<'idle' | 'loading' | 'ready'>('idle');
   const [isComfyFrameSlow, setIsComfyFrameSlow] = useState(false);
   const comfyFrameLoadedRef = useRef(false);
-  const shouldRenderIframe = hasReadyIframe || isHealthy;
+  const shouldRenderIframe = uiRequested && (hasReadyIframe || isHealthy);
 
   useEffect(() => {
-    if (isHealthy) setHasReadyIframe(true);
-  }, [isHealthy]);
+    if (uiRequested && isHealthy) setHasReadyIframe(true);
+  }, [isHealthy, uiRequested]);
 
   useEffect(() => {
     if (comfyConnection !== 'disconnected') return;
@@ -1720,24 +1727,51 @@ const ComfyUIWorkspace = ({ isActive }: { isActive: boolean }) => {
     };
   }, []);
 
-  // Only mount the iframe after the service is actually healthy. A running
+  // Only mount the iframe after an explicit open and a healthy service. A running
   // process can still be mid-boot, and loading the iframe during that window
   // can leave the embedded browser holding a blank page. Once healthy, keep it mounted
   // through health dips while the process still exists, but tear it down after a confirmed stop.
   const showSplash = !shouldRenderIframe;
-  const showHealthWarning = hasReadyIframe && isConnected && !isBooting && !isHealthy;
+  const showHealthWarning = shouldRenderIframe && hasReadyIframe && isConnected && !isBooting && !isHealthy;
   useIframeVisibilityRecovery(comfyIframeRef, isActive, shouldRenderIframe, comfyFrameUrl);
+
+  const unloadComfyUi = () => {
+    workflowLoadGenerationRef.current++;
+    try { window.sessionStorage.removeItem('umbra.pendingComfyWorkflowLoad'); } catch { /* Storage can be disabled. */ }
+    setUiRequested(false);
+    setHasReadyIframe(false);
+    setConfirmUnload(false);
+    closeNodePicker();
+  };
 
   return (
     <DropZone id="workspace-comfy" type="workspace" workspaceType="comfy" actionType="copy" label="ComfyUI" onDrop={handleDrop}>
-      <div className="w-full h-full relative">
-        {showSplash && <BackendSplash name="ComfyUI" backend="comfyui" icon="🧠" />}
+      <div className="w-full h-full relative flex flex-col">
+        {showSplash && (showManager ? (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="shrink-0 border-b border-white/10 p-2">
+              <button type="button" className="min-h-9 px-3 text-sm text-zinc-200 hover:bg-white/10" onClick={() => setShowManager(false)}>{t('common.back')}</button>
+            </div>
+            <div className="min-h-0 flex-1"><BackendSplash name="ComfyUI" backend="comfyui" icon="" mobileManager={mobileManager} /></div>
+          </div>
+        ) : <ComfyLaunchScreen onOpen={() => setUiRequested(true)} onManage={() => setShowManager(true)} />)}
+        {!showSplash && (
+          <div className="z-30 flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/10 bg-[var(--umbra-bg)] px-3 py-1">
+            <span className="text-xs text-zinc-400">ComfyUI</span>
+            <button type="button" className="min-h-9 px-3 text-xs text-zinc-200 hover:bg-white/10" onClick={() => setConfirmUnload(true)}>{t('comfy.unload')}</button>
+            {confirmUnload && <div role="alertdialog" aria-label={t('comfy.unload')} className="flex w-full flex-wrap items-center gap-2 pb-2 text-sm text-zinc-300">
+              <p className="w-full">{t('comfy.unloadWarning')}</p>
+              <button type="button" className="min-h-9 rounded border border-white/15 px-3" onClick={unloadComfyUi}>{t('comfy.unload')}</button>
+              <button type="button" className="min-h-9 px-3" onClick={() => setConfirmUnload(false)}>{t('common.cancel')}</button>
+            </div>}
+          </div>
+        )}
         {!showSplash && comfyFrameUrl && (
           <iframe
             key={comfyFrameRevision}
             ref={comfyIframeRef}
             src={comfyFrameUrl}
-            className="w-full h-full border-none bg-black"
+            className="w-full min-h-0 flex-1 border-none bg-black"
             style={{
               transform: 'translateZ(0)',
               backfaceVisibility: 'hidden',
@@ -2547,11 +2581,7 @@ export const Workspace = () => {
         className="absolute inset-0 workspace-comfyui"
         style={getWorkspaceLayerStyle('comfyui')}
       >
-        {loadedWorkspaces.comfyui ? (
-          remoteMode === 'phone'
-            ? <BackendSplash name="ComfyUI" backend="comfyui" icon="" mobileManager />
-            : <ComfyUIWorkspace isActive={activeWorkspace === 'comfyui'} />
-        ) : null}
+        {loadedWorkspaces.comfyui ? <ComfyUIWorkspace isActive={activeWorkspace === 'comfyui'} mobileManager={remoteMode === 'phone'} /> : null}
       </div>
 
       {/* Umbra UI Layer */}
