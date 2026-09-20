@@ -15938,7 +15938,7 @@ async function proxyGalleryBridgeFsGet(
     ? sourceUrl.searchParams.getAll('root').concat(sourceUrl.searchParams.getAll('roots'))
       .flatMap((value) => String(value || '').split(/[|,]/))
     : [sourceUrl.searchParams.get('path') || ''];
-  if (!areGalleryBridgePathsAllowed(req, sourceUrl, requestedPaths, server)) {
+  if (!(await areGalleryBridgePathsAllowed(req, sourceUrl, requestedPaths, server))) {
     return json({ error: 'Access denied' }, 403);
   }
   const startedAt = performance.now();
@@ -16043,19 +16043,26 @@ async function proxyGalleryBridgeFsGet(
   }
 }
 
-function areGalleryBridgePathsAllowed(
+function getGalleryBridgeAllowedRoots(): string[] {
+  return [ROOT_DIR, getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate)];
+}
+
+async function areGalleryBridgePathsAllowed(
   req: Request,
   sourceUrl: URL,
   paths: string[],
   server?: RequestIpServer,
-): boolean {
+): Promise<boolean> {
   if (!isRemoteRequest(req, sourceUrl, server)) return true;
-  return paths.every((rawPath) => {
+  const authorize = await createGalleryPathAuthorizer(getGalleryBridgeAllowedRoots()).catch(() => null);
+  if (!authorize) return false;
+  for (const rawPath of paths) {
     const value = String(rawPath || '').trim();
-    if (!value) return true;
+    if (!value) continue;
     const resolved = resolvePath(value, { allowOutsideRoot: true });
-    return Boolean(resolved && isPathInsideAllowedRoots(resolved.fullPath));
-  });
+    if (!resolved || !(await authorize(resolved.fullPath))) return false;
+  }
+  return true;
 }
 
 async function proxyGalleryBridgeFsPost(
@@ -16072,7 +16079,7 @@ async function proxyGalleryBridgeFsPost(
   } catch {
     // The worker returns the established invalid-payload response.
   }
-  if (!areGalleryBridgePathsAllowed(req, sourceUrl, [pathValue], server)) {
+  if (!(await areGalleryBridgePathsAllowed(req, sourceUrl, [pathValue], server))) {
     return json({ error: 'Access denied' }, 403);
   }
   if (!isChildProcessAlive(galleryBridgeProcess) && !(await isGalleryBridgeHealthy({ allowCached: false }))) {
