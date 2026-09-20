@@ -10,6 +10,17 @@ type MergeConfig = { modelsRoot: string; python: string; comfyRoot?: string };
 type LoraEntry = { id: string; model: string; strength: number; enabled: boolean };
 type MergeInput = { mode?: unknown; a?: unknown; b?: unknown; ratio?: unknown; name?: unknown; blocks?: unknown; lorasA?: unknown; lorasB?: unknown; cleanMetadata?: unknown };
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`;
+  }
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) throw new Error('Invalid merge blueprint.');
+  return serialized;
+}
+
 export function mergeMode(value: unknown): 'merge' | 'lora_bake' {
   if (value === undefined || value === 'merge') return 'merge';
   if (value === 'lora_bake') return value;
@@ -160,7 +171,7 @@ export class AnimaModelMergeService {
     await mkdir(this.blueprintRoot(), { recursive: true });
     const destination = join(this.blueprintRoot(), `${id}.json`);
     if (existsSync(destination)) {
-      if (JSON.stringify(await this.blueprint(id)) !== JSON.stringify(value)) throw new Error('A different blueprint already uses this ID. Existing history was not changed.');
+      if (canonicalJson(await this.blueprint(id)) !== canonicalJson(value)) throw new Error('A different blueprint already uses this ID. Existing history was not changed.');
       return value;
     }
     const temporary = join(this.blueprintRoot(), `${id}.${randomUUID()}.tmp`);

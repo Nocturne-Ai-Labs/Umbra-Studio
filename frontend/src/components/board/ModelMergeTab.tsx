@@ -16,6 +16,10 @@ const terminal = new Set(['completed', 'cancelled', 'failed']);
 const size = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 const draftKey = 'umbra:data-forge-merge-draft';
 
+export function recipeIdForSave(recipes: Recipe[], recipeId: string) {
+  return recipes.some(recipe => recipe.id === recipeId) ? recipeId : undefined;
+}
+
 function readDraft(): Setup {
   try { return normalizeMergeDraft(JSON.parse(sessionStorage.getItem(draftKey) || '{}')); }
   catch { return normalizeMergeDraft(null); }
@@ -150,8 +154,7 @@ export function ModelMergeTab() {
   const saveRecipe = async () => {
     setRecipeBusy(true); setError('');
     try {
-      const existing = recipes.find(item => item.id === recipeId && item.title === recipeTitle.trim());
-      const result = await api<{ recipe: Recipe }>('recipes/save', { id: existing?.id, title: recipeTitle, setup });
+      const result = await api<{ recipe: Recipe }>('recipes/save', { id: recipeIdForSave(recipes, recipeId), title: recipeTitle, setup });
       setRecipeId(result.recipe.id); setRecipes(current => [...current.filter(item => item.id !== result.recipe.id), result.recipe]);
     } catch (reason) { setError((reason as Error).message); }
     finally { setRecipeBusy(false); }
