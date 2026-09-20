@@ -15991,6 +15991,10 @@ async function proxyGalleryBridgeFsGet(
   server?: RequestIpServer,
 ): Promise<Response> {
   if (req.signal.aborted) return new Response(null, { status: 499 });
+  const requestedPaths = getGalleryBridgeRequestPaths(sourceUrl, targetPath);
+  if (!(await areGalleryBridgePathsAllowed(req, sourceUrl, requestedPaths, server))) {
+    return json({ error: 'Access denied' }, 403);
+  }
   const startedAt = performance.now();
   const traceProxy = (event: string, payload: Record<string, unknown>, thresholdMs = 250) => {
     if (!isBackendDiagnosticLoggingEnabled()) return;
@@ -16093,7 +16097,67 @@ async function proxyGalleryBridgeFsGet(
   }
 }
 
-async function proxyGalleryBridgeFsPost(req: Request, targetPath: string): Promise<Response> {
+function getGalleryBridgeAllowedRoots(): string[] {
+  return [ROOT_DIR, getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate)];
+}
+
+function getGalleryBridgeRequestPaths(sourceUrl: URL, targetPath: string): string[] {
+  if (targetPath === '/api/fs/search' || targetPath === '/api/fs/search-suggestions') {
+    return sourceUrl.searchParams.getAll('root').concat(sourceUrl.searchParams.getAll('roots'))
+      .flatMap((value) => String(value || '').split('|'));
+  }
+  if (targetPath === '/api/fs/tags/summary') {
+    return sourceUrl.searchParams.getAll('folder').concat(sourceUrl.searchParams.getAll('path'))
+      .flatMap((value) => String(value || '').split('|'));
+  }
+  return [sourceUrl.searchParams.get('path') || ''];
+}
+
+async function areGalleryBridgePathsAllowed(
+  req: Request,
+  sourceUrl: URL,
+  paths: string[],
+  server?: RequestIpServer,
+): Promise<boolean> {
+  if (!isRemoteRequest(req, sourceUrl, server)) return true;
+  const authorize = await createGalleryPathAuthorizer(getGalleryBridgeAllowedRoots()).catch(() => null);
+  if (!authorize) return false;
+  for (const rawPath of paths) {
+    const resolvedPath = resolveGalleryBridgeInputPath(rawPath);
+    if (!resolvedPath) continue;
+    if (!(await authorize(resolvedPath))) return false;
+  }
+  return true;
+}
+
+function resolveGalleryBridgeInputPath(input: unknown): string {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  if (isAbsolute(raw)) return resolve(raw);
+  const normalized = raw.replace(/\\/g, '/');
+  const mapped = normalized === 'User/Outputs' || normalized.startsWith('User/Outputs/')
+    ? `Tools/ComfyUI/output${normalized.slice('User/Outputs'.length)}`
+    : normalized;
+  return resolve(ROOT_DIR, mapped);
+}
+
+async function proxyGalleryBridgeFsPost(
+  req: Request,
+  sourceUrl: URL,
+  targetPath: string,
+  server?: RequestIpServer,
+): Promise<Response> {
+  const body = await req.arrayBuffer();
+  let pathValue = '';
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(body)) as { path?: unknown };
+    pathValue = String(payload.path || '');
+  } catch {
+    // The worker returns the established invalid-payload response.
+  }
+  if (!(await areGalleryBridgePathsAllowed(req, sourceUrl, [pathValue], server))) {
+    return json({ error: 'Access denied' }, 403);
+  }
   if (!isChildProcessAlive(galleryBridgeProcess) && !(await isGalleryBridgeHealthy({ allowCached: false }))) {
     await startGalleryBridge().catch(() => undefined);
   }
@@ -16109,7 +16173,7 @@ async function proxyGalleryBridgeFsPost(req: Request, targetPath: string): Promi
     const upstream = await fetch(targetUrl.toString(), {
       method: 'POST',
       headers,
-      body: await req.arrayBuffer(),
+      body,
       signal: AbortSignal.timeout(30000),
     });
     const responseHeaders = new Headers(upstream.headers);
@@ -30729,6 +30793,7 @@ const server = Bun.serve<UmbraSocketData>({
           url,
           '/api/fs/list-progressive',
           () => handleFsListProgressive(url, req.signal),
+          server,
         );
       }
       if (path === '/api/gallery-bridge/fs/tree' && method === 'GET') {
@@ -30737,6 +30802,7 @@ const server = Bun.serve<UmbraSocketData>({
           url,
           '/api/fs/tree',
           () => handleFsTree(url),
+          server,
         );
       }
       if (path === '/api/gallery-bridge/fs/folder-summary' && method === 'GET') {
@@ -30745,6 +30811,7 @@ const server = Bun.serve<UmbraSocketData>({
           url,
           '/api/fs/folder-summary',
           () => handleFsFolderSummary(url),
+          server,
         );
       }
       if (path === '/api/gallery-bridge/fs/search' && method === 'GET') {
@@ -30753,6 +30820,7 @@ const server = Bun.serve<UmbraSocketData>({
           url,
           '/api/fs/search',
           () => handleFsSearch(url, req.signal),
+          server,
         );
       }
       if (path === '/api/gallery-bridge/fs/search-suggestions' && method === 'GET') {
@@ -30761,13 +30829,14 @@ const server = Bun.serve<UmbraSocketData>({
           url,
           '/api/fs/search-suggestions',
           () => handleFsSearchSuggestions(url),
+          server,
         );
       }
       if (path === '/api/gallery-bridge/fs/empty-folders/preview' && method === 'POST') {
-        return proxyGalleryBridgeFsPost(req, '/api/fs/empty-folders/preview');
+        return proxyGalleryBridgeFsPost(req, url, '/api/fs/empty-folders/preview', server);
       }
       if (path === '/api/gallery-bridge/fs/empty-folders/delete' && method === 'POST') {
-        return proxyGalleryBridgeFsPost(req, '/api/fs/empty-folders/delete');
+        return proxyGalleryBridgeFsPost(req, url, '/api/fs/empty-folders/delete', server);
       }
       if (path === '/api/gallery-bridge/fs/tags/add' && method === 'POST') return handleFsTagsAdd(req);
       if (path === '/api/gallery-bridge/fs/tags/set' && method === 'POST') return handleFsTagsSet(req);
@@ -30777,6 +30846,7 @@ const server = Bun.serve<UmbraSocketData>({
           url,
           '/api/fs/tags/summary',
           () => handleFsTagsSummary(url),
+          server,
         );
       }
       if (path === '/api/gallery-bridge/fs/thumbnail' && method === 'GET') {
@@ -30803,6 +30873,7 @@ const server = Bun.serve<UmbraSocketData>({
           url,
           '/api/fs/metadata',
           () => handleFsMetadata(url),
+          server,
         );
       }
 
