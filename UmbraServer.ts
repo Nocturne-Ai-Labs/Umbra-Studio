@@ -41,6 +41,7 @@ import { GalleryTransferJournal } from './backend/GalleryTransferJournal';
 import { isGalleryUploadFilename, isGalleryUploadStrategy, prepareGalleryUploadDirectory } from './backend/GalleryUploadService';
 import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
 import { fetchLocalServerProxy, readLocalServerProxyText } from './backend/LocalServerProxyTransfer';
+import { resolveAllowedGalleryPath } from './backend/GalleryPathAccess';
 import { buildGalleryDownloadArchive, prepareGalleryDownloadResponse, getPreparedGalleryDownload, type GalleryDownloadEntry } from './backend/GalleryDownloadArchiveService';
 import { copyFileExclusive, moveTreeExclusive } from './backend/FsTransferCopy';
 import { AnimaModelMergeService } from './backend/AnimaModelMergeService';
@@ -26084,17 +26085,21 @@ async function handleGalleryArchives(req: Request, url: URL): Promise<Response> 
     if (!path || path === TRASH_ROOT || path.startsWith(`${TRASH_ROOT}/`)) return json({ error: 'Select a normal Gallery folder' }, 400);
     const resolved = resolvePath(path);
     if (!resolved) return json({ error: 'Invalid archive path' }, 403);
+    const physicalPath = await resolveAllowedGalleryPath(resolved.fullPath, [
+      ROOT_DIR, getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate),
+    ]);
+    if (!physicalPath) return json({ error: 'Export path resolves outside allowed roots' }, 403);
     if (url.pathname.endsWith('/download')) {
-      if (extname(resolved.fullPath).toLowerCase() !== '.zip' || !(await fs.stat(resolved.fullPath)).isFile()) return json({ error: 'Select a ZIP file' }, 400);
-      return new Response(Bun.file(resolved.fullPath), { headers: {
+      if (extname(resolved.fullPath).toLowerCase() !== '.zip' || !(await fs.stat(physicalPath)).isFile()) return json({ error: 'Select a ZIP file' }, 400);
+      return new Response(Bun.file(physicalPath), { headers: {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(basename(resolved.fullPath))}`,
         'Cache-Control': 'no-store',
       } });
     }
-    if (!(await fs.stat(resolved.fullPath)).isDirectory()) return json({ error: 'Select a folder' }, 400);
-    if (req.method === 'POST') return json(queueGalleryArchive(resolved.fullPath, path), 202);
-    return json({ archives: await listGalleryArchives(resolved.fullPath, path) });
+    if (!(await fs.stat(physicalPath)).isDirectory()) return json({ error: 'Select a folder' }, 400);
+    if (req.method === 'POST') return json(queueGalleryArchive(physicalPath, path), 202);
+    return json({ archives: await listGalleryArchives(physicalPath, path) });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Archive operation failed' }, 400);
   }
@@ -26138,13 +26143,17 @@ async function handleFsDownloadZip(req: Request): Promise<Response> {
       req.signal.throwIfAborted();
       const resolved = resolvePath(path);
       if (!resolved) return json({ error: `Invalid path: ${path}` }, 403);
-      const stats = await fs.stat(resolved.fullPath);
+      const physicalPath = await resolveAllowedGalleryPath(resolved.fullPath, [
+        ROOT_DIR, getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate),
+      ]);
+      if (!physicalPath) return json({ error: 'Export path resolves outside allowed roots' }, 403);
+      const stats = await fs.stat(physicalPath);
       if (!stats.isFile()) continue;
       items.push({
         name: basename(resolved.fullPath),
         mtime: stats.mtime,
         size: stats.size,
-        open: () => createReadStream(resolved.fullPath),
+        open: () => createReadStream(physicalPath),
       });
     }
     if (items.length < 2) return json({ error: 'Select at least two files to download a zip' }, 400);
@@ -26174,7 +26183,11 @@ async function handleFsDownloadJpegZip(req: Request): Promise<Response> {
       req.signal.throwIfAborted();
       const resolved = resolvePath(path);
       if (!resolved) return json({ error: `Invalid path: ${path}` }, 403);
-      const stats = await fs.stat(resolved.fullPath);
+      const physicalPath = await resolveAllowedGalleryPath(resolved.fullPath, [
+        ROOT_DIR, getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate),
+      ]);
+      if (!physicalPath) return json({ error: 'Export path resolves outside allowed roots' }, 403);
+      const stats = await fs.stat(physicalPath);
       if (!stats.isFile()) continue;
       if (!imageExts.has(extname(resolved.fullPath).toLowerCase())) continue;
 
@@ -26183,7 +26196,7 @@ async function handleFsDownloadJpegZip(req: Request): Promise<Response> {
         name: `${sourceName || 'umbra-media'}.jpg`,
         mtime: stats.mtime,
         open: () => {
-          let image = sharp(resolved.fullPath, { animated: false }).rotate();
+          let image = sharp(physicalPath, { animated: false }).rotate();
           image = keepMetadata ? image.withMetadata() : image;
           return image.jpeg({ quality: 94, mozjpeg: true, chromaSubsampling: '4:4:4' });
         },
