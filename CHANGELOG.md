@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.32.21 - Background Gallery And Headless ComfyUI
+
+### TL;DR - Setup After Updating
+
+- Update through Umbra's updater, then restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux. Refresh open browser and Remote sessions after restarting. Back up important projects and settings before updating.
+- No new models, custom nodes, or ComfyUI update are required. Existing media, models, and settings are retained.
+- The ComfyUI workspace now opens a lightweight launch screen. Use **Open UI** when you need the node editor; built-in Umbra pipelines can generate without loading it. Editor-dependent controls explain when the editor needs to be opened.
+- Optional automatic ComfyUI startup is off by default. Enable it from the host's ComfyUI launch screen. Unloading the editor leaves the ComfyUI server running; confirm that unsaved editor changes are no longer needed before unloading it.
+
+### Gallery And Filmstrip
+
+- Keep managed output folders and saved roots fresh in the background without requiring a visit to each folder. Bound directory discovery, filesystem checks, and thumbnail work; prioritize visible requests over speculative previews and back off unavailable storage.
+- Detect same-name media replacement, metadata-only sidecar changes, and same-count folder changes. Preserve revision information through listings, thumbnails, viewer metadata, and the filmstrip so stale cached media is refreshed.
+- Reuse validated disk thumbnails across restarts, reject damaged cache entries, and prevent obsolete decodes or metadata extraction from publishing over newer sources.
+- Keep video thumbnail and metadata work asynchronous and bounded. Improve short-clip and portrait extraction and release decoder ownership only when the process has stopped.
+- Cancel abandoned listings and searches across the Gallery process and main-server fallback. Retire obsolete background samples and coalesce shared scans without unhandled failure promises.
+- Authorize Gallery exports, archives, uploads, copy/move operations, and undo against resolved allowed roots while retaining explicitly configured linked folders. Large tracked transfers return their progress receipt before bounded source validation instead of waiting on serial preflight work.
+- Show pulsing new-media counts in filmstrip folder menus for saved generation outputs, including descendants of pinned folders. Opening a folder acknowledges its count; background refresh does not. Reduced-motion preferences are respected, and empty-state discovery uses a slower polling interval.
+
+### ComfyUI Startup And Umbra UI
+
+- Modernize the ComfyUI launch and management screens for desktop, tablet, and phone. The editor is loaded only when explicitly opened or required by a workflow handoff; navigating between workspaces preserves an intentionally opened editor.
+- Add optional host-controlled ComfyUI autostart with shared launch ownership, visible failures, and retry support. Existing Remote management permissions remain unchanged.
+- Report unavailable pinned output destinations before accepting generation where possible, and retain actionable Issues entries for failures after queue acknowledgment. Choose another output folder to recover; Umbra does not silently substitute a destination.
+- Place Continue in IMG2IMG, Add to Batch, and Upscale Now together in the Inpaint action bar. Transfer accepted full-resolution images with their model resources and metadata while retaining the receiving workspace's output destination.
+- Show Inpaint sampling inside its workspace with the submitted region and mask, instead of a separate floating preview window. Remove the redundant floating Canvas preview without changing its existing inline renderer.
+- Remove routine successful source-import and replacement toasts while preserving failure feedback. Retire Queue Manager's legacy output feed without removing queue history, live preview, Gallery, or the app filmstrip.
+- Preserve paused queue controls after a rejected resume, prevent stale video refreshes from replacing newer results, allow optional references after video mode changes, and retain each Extras tool's explicit automatic output choice.
+
+### Data Forge, Remote, And Recovery
+
+- Publish manual and batch captions atomically, preserve unreadable existing captions instead of overwriting them, and retry missing requested captions without downloading a verified image again. Original-source repair lookups now honor cancellation.
+- Move uncached corpus suggestion queries to a bounded read-only worker so expensive searches do not block the main server. Ranking and the ingestion cursor are preserved; this isolates work rather than promising faster query computation.
+- Preserve equivalent Model Merge blueprints when JSON object fields are reordered, and keep recipe identity when renaming instead of creating a duplicate.
+- Close active Remote sockets when their device/session is revoked, logged out, reset, or disabled, while preserving unrelated sessions and host access. Remote dataset URL imports reject local/private targets and redirect pivots, with bounded downloads; intentional host-local imports remain available.
+- Detect stale Canvas project saves with server revisions, retain local drafts on conflicts, and offer reload or save-as-copy recovery. Protect unreadable project documents and treat optional post-save cleanup separately from a successful commit.
+- Retain model-download recovery receipts and history across restarts, expose interrupted work for retry, and preserve ambiguous or externally changed files. This does not add HTTP range resume.
+- Keep updater file-lock retries asynchronous, serialize state writes, and prevent overlapping update/relaunch admission. Journal migration progress and retain replaced destination files for recovery rather than discarding them during interrupted transfers.
+
+### Validation And Compatibility
+
+- Final combined checks passed 320 focused tests, desktop/tablet/phone browser fixtures, an isolated application startup and Gallery smoke test, backend/frontend TypeScript, frontend lint, and the production frontend build. Earlier focused audit checks also cover thumbnail, migration, download-recovery, Canvas, and updater changes.
+- Live GPU generation, physical power-loss recovery, and every external storage configuration were not requalified by this pass. Remaining audit work includes full Inpaint cross-writer revision coordination and complete auxiliary-job cancellation/reconciliation; this is not a claim that all issues are resolved.
+- Windows BAT and Linux portable ZIPs remain the only release assets. Private audit reports, internal tests, personal media, installed tools, and model weights are excluded.
+- Linux managed-tool prerequisites remain `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit UI setup still requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: stale Gallery/filmstrip content, obsolete thumbnail and metadata results, abandoned scan work, and long transfer-admission waits.
+- Fixed: unavailable pinned outputs failing without recovery guidance, Inpaint resource handoff loss, stale video state, and rejected queue resumes leaving misleading controls.
+- Fixed: caption overwrite and repair-cancellation paths, duplicate renamed merge recipes, and equivalent blueprint reimports being rejected.
+- Fixed: revoked Remote sessions retaining live sockets and several resolved-path and URL-import authorization gaps.
+- Improved: lightweight ComfyUI startup, optional autostart, background folder readiness, unread-media badges, inline sampling, project conflict recovery, and durable transfer/download progress.
+
 ## v0.32.20 - Verified Reliability And Save Recovery
 
 ### TL;DR - Setup After Updating
