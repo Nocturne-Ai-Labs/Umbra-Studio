@@ -656,6 +656,8 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   const [videoJobsLoading, setVideoJobsLoading] = React.useState(true);
   const [videoJobsError, setVideoJobsError] = React.useState('');
   const videoJobsMutationRevisionRef = React.useRef(0);
+  const videoJobsRequestRevisionRef = React.useRef(0);
+  const videoJobsAppliedRevisionRef = React.useRef(0);
   const [workflows, setWorkflows] = React.useState<ApiWorkflowItem[]>([]);
   const [inheritedGeneration, setInheritedGeneration] = React.useState<Record<string, unknown> | null>(null);
   const [modelCatalog, setModelCatalog] = React.useState<UmbraModelCatalog>(EMPTY_MODEL_CATALOG);
@@ -669,20 +671,26 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
 
   const refreshVideoJobs = React.useCallback(async () => {
     const mutationRevision = videoJobsMutationRevisionRef.current;
+    const requestRevision = ++videoJobsRequestRevisionRef.current;
+    // Allow slow polls to make progress, but never overwrite a newer settled request.
+    const canApply = () => mutationRevision === videoJobsMutationRevisionRef.current
+      && requestRevision >= videoJobsAppliedRevisionRef.current;
     try {
       const jobs = await fetchVideoReviewJobs();
-      if (mutationRevision === videoJobsMutationRevisionRef.current) {
+      if (canApply()) {
+        videoJobsAppliedRevisionRef.current = requestRevision;
         setVideoJobs(jobs);
         setVideoJobsError('');
       }
       return jobs;
     } catch (error) {
-      if (mutationRevision === videoJobsMutationRevisionRef.current) {
+      if (canApply()) {
+        videoJobsAppliedRevisionRef.current = requestRevision;
         setVideoJobsError(error instanceof Error ? error.message : 'Failed to load video review queue.');
       }
       return [];
     } finally {
-      if (mutationRevision === videoJobsMutationRevisionRef.current) {
+      if (canApply()) {
         setVideoJobsLoading(false);
       }
     }
