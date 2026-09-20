@@ -41,7 +41,7 @@ import { GalleryTransferJournal } from './backend/GalleryTransferJournal';
 import { isGalleryUploadFilename, isGalleryUploadStrategy, prepareGalleryUploadDirectory } from './backend/GalleryUploadService';
 import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
 import { fetchLocalServerProxy, readLocalServerProxyText } from './backend/LocalServerProxyTransfer';
-import { resolveAllowedGalleryPath } from './backend/GalleryPathAccess';
+import { createGalleryPathAuthorizer, resolveAllowedGalleryPath } from './backend/GalleryPathAccess';
 import { buildGalleryDownloadArchive, prepareGalleryDownloadResponse, getPreparedGalleryDownload, type GalleryDownloadEntry } from './backend/GalleryDownloadArchiveService';
 import { copyFileExclusive, moveTreeExclusive } from './backend/FsTransferCopy';
 import { AnimaModelMergeService } from './backend/AnimaModelMergeService';
@@ -29021,6 +29021,62 @@ async function syncGallerySidecarsAfterTransfer(results: Array<Record<string, un
   return warnings;
 }
 
+function getGalleryTransferAllowedRoots(): string[] {
+  return [ROOT_DIR, getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate)];
+}
+
+async function getGalleryTransferPathAuthorizer(): Promise<(fullPath: string) => Promise<boolean>> {
+  const authorize = await createGalleryPathAuthorizer(getGalleryTransferAllowedRoots());
+  return async fullPath => Boolean(await authorize(fullPath));
+}
+
+async function validateGalleryTransferRequest(paths: string[], destination: string, validateSources = true): Promise<string | null> {
+  const isAllowed = await getGalleryTransferPathAuthorizer().catch(() => null);
+  if (!isAllowed) return 'Transfer path authorization is unavailable';
+  const destinationResolved = resolvePath(destination);
+  if (!destinationResolved) return 'Invalid destination path';
+  if (!(await isAllowed(destinationResolved.fullPath))) {
+    return 'Transfer destination resolves outside allowed roots';
+  }
+  if (!validateSources) return null;
+  for (const sourcePath of paths) {
+    const sourceResolved = resolvePath(sourcePath);
+    // Keep ordinary missing/invalid-source reporting as a per-item transfer result.
+    if (sourceResolved && !(await isAllowed(sourceResolved.fullPath))) {
+      return 'A transfer source resolves outside allowed roots';
+    }
+  }
+  return null;
+}
+
+async function validateGalleryTransferItems(
+  items: Array<{ sourcePath: string; sourceFullPath: string; targetFullPath?: string }>,
+  job: FsMoveJob | FsCopyJob,
+  isAllowed: (fullPath: string) => Promise<boolean>,
+) {
+  const allowed = new Map<string, Promise<boolean>>();
+  const check = (path: string) => {
+    let result = allowed.get(path);
+    if (!result) {
+      result = isAllowed(path);
+      allowed.set(path, result);
+    }
+    return result;
+  };
+  job.phase = 'validating';
+  for (let offset = 0; offset < items.length; offset += 8) {
+    const batch = items.slice(offset, offset + 8);
+    job.currentPath = batch[0].sourcePath;
+    const results = await Promise.all(batch.map(async item => ({
+      source: await check(item.sourceFullPath),
+      target: item.targetFullPath ? await check(item.targetFullPath) : true,
+    })));
+    if (results.some(result => !result.source)) throw new Error('A transfer source resolves outside allowed roots');
+    if (results.some(result => !result.target)) throw new Error('A transfer restore target resolves outside allowed roots');
+  }
+  job.phase = 'preparing';
+}
+
 function normalizeGalleryTransferResults(paths: string[], value: unknown): FsMoveResult[] {
   const requested = new Set(paths);
   const entries = new Map<string, Record<string, unknown> | null>();
@@ -29076,8 +29132,12 @@ async function runFsMoveJob(job: FsMoveJob) {
   try {
     job.phase = 'queued';
     await galleryTransferJournal.save(job);
+    const isAllowed = await getGalleryTransferPathAuthorizer();
     const destinationResolved = resolvePath(job.destination);
     if (!destinationResolved) throw new Error('Invalid destination path');
+    if (!(await isAllowed(destinationResolved.fullPath))) {
+      throw new Error('Transfer destination resolves outside allowed roots');
+    }
     const items = job.paths.map((sourcePath) => {
       const sourceResolved = resolvePath(sourcePath);
       if (!sourceResolved) {
@@ -29096,6 +29156,7 @@ async function runFsMoveJob(job: FsMoveJob) {
     }
 
     const validItems = items.filter((item): item is NonNullable<typeof item> => !!item);
+    await validateGalleryTransferItems(validItems, job, isAllowed);
     if (validItems.length === 0) {
       job.status = 'failed';
       job.error = 'No valid source paths';
@@ -29153,8 +29214,12 @@ async function runFsCopyJob(job: FsCopyJob) {
   try {
     job.phase = 'queued';
     await galleryTransferJournal.save(job);
+    const isAllowed = await getGalleryTransferPathAuthorizer();
     const destinationResolved = resolvePath(job.destination);
     if (!destinationResolved) throw new Error('Invalid destination path');
+    if (!(await isAllowed(destinationResolved.fullPath))) {
+      throw new Error('Transfer destination resolves outside allowed roots');
+    }
     const items = job.paths.map((sourcePath) => {
       const sourceResolved = resolvePath(sourcePath);
       if (!sourceResolved) {
@@ -29172,6 +29237,7 @@ async function runFsCopyJob(job: FsCopyJob) {
     }
 
     const validItems = items.filter((item): item is NonNullable<typeof item> => !!item);
+    await validateGalleryTransferItems(validItems, job, isAllowed);
     if (validItems.length === 0) {
       job.status = 'failed';
       job.error = 'No valid source paths';
@@ -29458,6 +29524,9 @@ async function handleFsMove(req: Request): Promise<Response> {
     };
     if (!paths || !Array.isArray(paths) || !destination) return json({ error: 'Missing parameters' }, 400);
 
+    const authorizationError = await validateGalleryTransferRequest(paths, destination, !trackProgress);
+    if (authorizationError) return json({ error: authorizationError }, 403);
+
     const mode = sanitizeMoveTransferMode(transferMode);
     if (trackProgress) {
       const job = createFsMoveJob(paths, destination, mode);
@@ -29516,6 +29585,9 @@ async function handleFsCopy(req: Request): Promise<Response> {
   try {
     const { paths, destination, trackProgress } = await req.json() as { paths: string[]; destination: string; trackProgress?: boolean };
     if (!paths || !Array.isArray(paths) || !destination) return json({ error: 'Missing parameters' }, 400);
+
+    const authorizationError = await validateGalleryTransferRequest(paths, destination, !trackProgress);
+    if (authorizationError) return json({ error: authorizationError }, 403);
 
     if (trackProgress) {
       const job = createFsCopyJob(paths, destination);

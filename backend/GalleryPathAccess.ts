@@ -16,13 +16,19 @@ async function canonicalCandidate(path: string): Promise<string> {
 
 // Canonicalize configured roots as well as the candidate so explicitly linked
 // roots remain authorized while links escaping those roots do not.
+export async function createGalleryPathAuthorizer(allowedRoots: string[]) {
+  const physicalRoots = (await Promise.all(allowedRoots.map(root => canonicalCandidate(root).catch(() => null))))
+    .filter((root): root is string => Boolean(root));
+  return async (path: string): Promise<string | null> => {
+    const candidate = await canonicalCandidate(path);
+    for (const physicalRoot of physicalRoots) {
+      const rel = relative(physicalRoot, candidate);
+      if (!rel || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))) return candidate;
+    }
+    return null;
+  };
+}
+
 export async function resolveAllowedGalleryPath(path: string, allowedRoots: string[]): Promise<string | null> {
-  const candidate = await canonicalCandidate(path);
-  for (const root of allowedRoots) {
-    const physicalRoot = await canonicalCandidate(root).catch(() => null);
-    if (!physicalRoot) continue;
-    const rel = relative(physicalRoot, candidate);
-    if (!rel || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))) return candidate;
-  }
-  return null;
+  return (await createGalleryPathAuthorizer(allowedRoots))(path);
 }
