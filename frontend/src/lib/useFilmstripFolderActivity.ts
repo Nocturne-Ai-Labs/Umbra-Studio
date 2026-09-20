@@ -58,8 +58,8 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
       } catch { /* Keep existing badges through transient outages; never block the strip. */ }
       finally {
         busy = false;
-        if (!controller.signal.aborted && !discoveryOnly) {
-          timer = setTimeout(() => { void refresh(); }, document.hidden ? 30_000 : 5000);
+        if (!controller.signal.aborted) {
+          timer = setTimeout(() => { void refresh(); }, discoveryOnly ? 30_000 : (document.hidden ? 30_000 : 5000));
         }
       }
     };
