@@ -205,13 +205,15 @@ export async function downloadBooruOriginal(options: {
 export async function resolveBooruRepairSource(
   conceptPath: string, filename: string, config: BooruApiConfig, signal?: AbortSignal,
   lookup: (provider: Provider, md5: string) => Promise<BooruImageResult[]> = (provider, md5) =>
-    providers[provider](`md5:${md5}`, 1, 1, config[provider] as never),
+    providers[provider](`md5:${md5}`, 1, 1, config[provider] as never, signal),
   refresh = false,
 ): Promise<BooruDownloadSource> {
+  signal?.throwIfAborted();
   validateFilename(filename);
   let saved: BooruDownloadSource | null = null;
   try { saved = JSON.parse(await fs.readFile(join(conceptPath, booruSourceSidecar(filename)), 'utf8')); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('The saved download source is unreadable.'); }
+  signal?.throwIfAborted();
   if (!refresh && saved && MD5.test(saved.md5) && normalizeBooruMediaUrl(saved.url)) return saved;
   const md5 = (saved && MD5.test(saved.md5) ? saved.md5 : basename(filename, extname(filename))).toLowerCase();
   if (!MD5.test(md5)) throw new Error('No booru source is saved for this image, and its original hash filename is unavailable.');
@@ -225,9 +227,13 @@ export async function resolveBooruRepairSource(
     signal?.throwIfAborted();
     try {
       const posts = await lookup(provider, md5);
+      signal?.throwIfAborted();
       const post = posts.find(post => post.md5?.toLowerCase() === md5 && normalizeBooruMediaUrl(post.fullUrl));
       if (post?.fullUrl) return { url: post.fullUrl, md5, source: provider, postId: post.id };
-    } catch { failed = true; }
+    } catch {
+      signal?.throwIfAborted();
+      failed = true;
+    }
   }
   throw new Error(failed
     ? 'Could not recover the original. Check Data Forge source API keys and network access, then retry. The existing file was kept.'

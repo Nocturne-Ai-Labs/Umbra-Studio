@@ -198,7 +198,7 @@ export async function saveApiKeys(configPath: string, config: BooruApiConfig): P
   }
 }
 
-export async function fetchDanbooruPosts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['danbooru']): Promise<BooruImageResult[]> {
+export async function fetchDanbooruPosts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['danbooru'], signal?: AbortSignal): Promise<BooruImageResult[]> {
   const baseUrl = 'https://danbooru.donmai.us/posts.json';
   const params = new URLSearchParams({ tags, limit: limit.toString(), page: page.toString() });
   const fullUrl = `${baseUrl}?${params}`;
@@ -215,7 +215,7 @@ export async function fetchDanbooruPosts(tags: string, limit: number, page = 1, 
   }
 
   console.log(`[Booru] Danbooru fetch: ${fullUrl}`);
-  const res = await fetch(fullUrl, { headers, signal: AbortSignal.timeout(20000) });
+  const res = await fetch(fullUrl, { headers, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000) });
   if (!res.ok) {
     const errorText = await res.text().catch(() => '');
     console.error(`[Booru] Danbooru error ${res.status}: ${errorText.slice(0, 200)}`);
@@ -225,7 +225,7 @@ export async function fetchDanbooruPosts(tags: string, limit: number, page = 1, 
   return parseDanbooruPosts(await res.json());
 }
 
-export async function fetchGelbooruPosts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['gelbooru']): Promise<BooruImageResult[]> {
+export async function fetchGelbooruPosts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['gelbooru'], signal?: AbortSignal): Promise<BooruImageResult[]> {
   const pid = page - 1;
   let url = `https://gelbooru.com/index.php?page=dapi&s=post&q=index&json=1&tags=${encodeURIComponent(tags)}&pid=${pid}&limit=${limit}`;
 
@@ -239,7 +239,7 @@ export async function fetchGelbooruPosts(tags: string, limit: number, page = 1, 
       'User-Agent': BOORU_USER_AGENT,
       Accept: 'application/json',
     },
-    signal: AbortSignal.timeout(20000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000),
   });
 
   if (!res.ok) {
@@ -254,7 +254,7 @@ export async function fetchGelbooruPosts(tags: string, limit: number, page = 1, 
   return parseGelbooruPosts(data);
 }
 
-export async function fetchE621Posts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['e621']): Promise<BooruImageResult[]> {
+export async function fetchE621Posts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['e621'], signal?: AbortSignal): Promise<BooruImageResult[]> {
   const url = `https://e621.net/posts.json?tags=${encodeURIComponent(tags)}&page=${page}&limit=${limit}`;
 
   const identity = String(apiConfig?.username || 'local-user').replace(/[^a-zA-Z0-9_.-]/g, '') || 'local-user';
@@ -268,13 +268,13 @@ export async function fetchE621Posts(tags: string, limit: number, page = 1, apiC
   }
 
   console.log(`[Booru] e621 fetch: ${url}`);
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(20000) });
+  const res = await fetch(url, { headers, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000) });
   if (!res.ok) throw new Error(`e621 API error: ${res.status}`);
 
   return parseE621Posts(await res.json());
 }
 
-export async function fetchRule34Posts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['rule34']): Promise<BooruImageResult[]> {
+export async function fetchRule34Posts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['rule34'], signal?: AbortSignal): Promise<BooruImageResult[]> {
   let url = `https://api.rule34.xxx/index.php?page=dapi&s=post&q=index&json=1&tags=${encodeURIComponent(tags)}&pid=${page - 1}&limit=${limit}`;
   if (apiConfig?.userId && apiConfig?.apiKey) {
     url += `&user_id=${encodeURIComponent(apiConfig.userId)}&api_key=${encodeURIComponent(apiConfig.apiKey)}`;
@@ -283,7 +283,7 @@ export async function fetchRule34Posts(tags: string, limit: number, page = 1, ap
   console.log(`[Booru] rule34 fetch: ${url.replace(/api_key=[^&]+/, 'api_key=***')}`);
   const res = await fetch(url, {
     headers: { 'User-Agent': BOORU_USER_AGENT, Accept: 'application/json' },
-    signal: AbortSignal.timeout(20000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000),
   });
   if (!res.ok) throw new Error(`Rule34 API error: ${res.status}`);
 
