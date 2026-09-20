@@ -5809,12 +5809,10 @@ async function addPowerPrompterQueueControllerGroup(
   const sourceRequestId = String(rawSourceRequestId || '').trim();
   if (!sourceRequestId) throw new Error('Source queue group request id is required.');
   if (!rawGroup || typeof rawGroup !== 'object') throw new Error('New queue group payload is required.');
-  const sourceRequest = findPowerPrompterQueueControllerRequest(sourceRequestId);
+  let sourceRequest = findPowerPrompterQueueControllerRequest(sourceRequestId);
   if (!sourceRequest) {
     throw new Error('The source queue group is no longer available in the backend queue. Reopen the queue editor from the current Queue Manager state.');
   }
-  const sourceControllerIndexBeforeCleanup = powerPrompterQueueControllerState.requests.findIndex((entry) => entry.requestId === sourceRequestId);
-  const sourceQueuedIndexBeforeCleanup = backendPowerPrompterQueuedWork.findIndex((entry) => entry.requestId === sourceRequestId);
 
   const group = rawGroup as Record<string, any>;
   const requestId = String(group.requestId || crypto.randomUUID()).trim();
@@ -5840,6 +5838,20 @@ async function addPowerPrompterQueueControllerGroup(
   if (!loaded.item.compatible) {
     throw new Error(`Selected generation pipeline is not compatible.${loaded.item.missing.length > 0 ? ` Missing: ${loaded.item.missing.join(', ')}` : ''}`);
   }
+
+  // Validation may outlive the source work or another admission of this ID.
+  sourceRequest = findPowerPrompterQueueControllerRequest(sourceRequestId);
+  const sourceTask = backendPowerPrompterQueueTasks.get(sourceRequestId);
+  const sourceQueuedIndexBeforeCleanup = backendPowerPrompterQueuedWork.findIndex((entry) => entry.requestId === sourceRequestId);
+  if (!sourceRequest || (!sourceTask && sourceQueuedIndexBeforeCleanup < 0)
+    || isPowerPrompterQueueControllerTerminalStatus(sourceRequest.status)
+    || sourceTask?.canceled || sourceTask?.abortController.signal.aborted || sourceTask?.stopAfterCurrent) {
+    throw new Error('The source queue group is no longer available in the backend queue. Reopen the queue editor from the current Queue Manager state.');
+  }
+  if (backendPowerPrompterQueueTasks.has(requestId) || backendPowerPrompterQueuedWork.some((entry) => entry.requestId === requestId) || findPowerPrompterQueueControllerRequest(requestId)) {
+    throw new Error(`Duplicate backend queue request id (${requestId}) is already queued.`);
+  }
+  const sourceControllerIndexBeforeCleanup = powerPrompterQueueControllerState.requests.findIndex((entry) => entry.requestId === sourceRequestId);
 
   const promptSetIds = prompts.map((_, index) => clampPPQueueSetId(Array.isArray(state.promptSetIds) ? state.promptSetIds[index] : group.activeSetId ?? sourceRequest.activeSetId));
   const promptOutputSubfolders = prompts.map((_, index) => String(Array.isArray(state.promptOutputSubfolders) ? state.promptOutputSubfolders[index] || '' : '').trim());
