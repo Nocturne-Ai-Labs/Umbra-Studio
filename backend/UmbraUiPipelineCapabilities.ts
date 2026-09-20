@@ -1,3 +1,4 @@
+import { formatMissingUmbraUiNodes } from '../shared/umbra-ui/runtimeNodeMessages';
 import {
   filterUmbraUiDetailerStages,
   matchUmbraUiResourceCatalog,
@@ -575,7 +576,7 @@ export function getUmbraUiRuntimeNodeExecutionError(
   nodes: UmbraUiPipelineReadiness['runtime']['nodes'],
 ): string {
   if (nodes.status === 'missing') {
-    return `ComfyUI is missing required node classes: ${nodes.missing.join(', ') || 'unknown node class'}.`;
+    return formatMissingUmbraUiNodes(nodes.missing);
   }
   if (nodes.status === 'unverified') {
     return 'ComfyUI node availability could not be verified.';
@@ -604,9 +605,10 @@ export function deriveUmbraUiTxt2ImgCapabilities(
 
   const unifiedPromptNodes = nodes.filter((node) => node.classType === 'UmbraPowerPrompter');
   const negativeEncoderNodes = nodes.filter((node) => (
-    (node.role === 'negative_prompt' || /negative/i.test(node.title))
+    (node.classType === 'TextEncodeQwenImage21' && hasInput(node, 'negative_prompt'))
+    || ((node.role === 'negative_prompt' || /negative/i.test(node.title))
     && /^CLIPTextEncode/.test(node.classType)
-    && (hasInput(node, 'text') || hasInput(node, 'prompt'))
+    && (hasInput(node, 'text') || hasInput(node, 'prompt')))
   ));
   const zeroNegativeNodes = nodes.filter((node) => (
     node.classType === 'ConditioningZeroOut'
@@ -764,6 +766,7 @@ export function deriveUmbraUiTxt2ImgCapabilities(
   const hasHiDreamPixelLatent = nodes.some((node) => node.classType === 'EmptyHiDreamO1LatentImage');
   const hasSixteenPixelLatent = nodes.some((node) => (
     node.classType === 'EmptyFlux2LatentImage' || node.classType === 'EmptySD3LatentImage'
+    || node.classType === 'TextEncodeQwenImage21'
   ));
   const resolutionStep = hasHiDreamPixelLatent ? 32 : hasSixteenPixelLatent ? 16 : 8;
   const maximumResolution = hasHiDreamPixelLatent ? 4096 : 16384;

@@ -4,6 +4,7 @@ import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { insertCatalogTagsAtCursor } from '@/lib/powerPrompterPromptInsertion';
 import { normalizeUmbraUiPinnedFolder } from '@/lib/pinnedOutputFolders';
 import React from 'react';
+import { formatMissingUmbraUiNodes } from '../../../../shared/umbra-ui/runtimeNodeMessages';
 import { UmbraPinnedOutputControl, usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
 import {
   Activity,
@@ -1440,7 +1441,7 @@ export function UmbraUIWorkspace() {
     return '';
   }, [imageCapabilities.finalModelUpscale, modelCatalog.upscaleModels, outputUpscale]);
   const imagePipelineRuntimeIssue = imageReadiness.runtime.nodes.status === 'missing'
-    ? `Missing ComfyUI nodes: ${imageReadiness.runtime.nodes.missing.join(', ')}`
+    ? formatMissingUmbraUiNodes(imageReadiness.runtime.nodes.missing)
     : primaryModelRuntimeIssue
       || workflowResourceRuntimeIssue
       || outputUpscaleRuntimeIssue;

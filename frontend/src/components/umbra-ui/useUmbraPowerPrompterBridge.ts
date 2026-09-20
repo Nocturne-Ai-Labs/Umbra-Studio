@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { formatMissingUmbraUiNodes } from '../../../../shared/umbra-ui/runtimeNodeMessages';
 import { useToastStore } from '@/store/useToastStore';
 import { classifyUmbraMediaMetadata, classifyUmbraPrompt, type UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
 import { ModelInfoRequestCache } from '@/lib/modelInfoRequestCache';
@@ -1543,7 +1544,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       pipelineMatch.pipeline.modelSources,
     );
     if (readiness.runtime.nodes.status === 'missing') {
-      throw new Error(`Missing ComfyUI nodes: ${readiness.runtime.nodes.missing.join(', ')}`);
+      throw new Error(formatMissingUmbraUiNodes(readiness.runtime.nodes.missing));
     }
     if (feature === 'img2img' && capabilities.denoise.support !== 'adjustable') {
       throw new Error(capabilities.denoise.reason || 'This pipeline cannot adjust IMG2IMG denoise.');

@@ -7557,10 +7557,10 @@ function applyPPTiledVaeToGraph(
     const inputs = (node as any).inputs && typeof (node as any).inputs === 'object' ? (node as any).inputs : {};
     if (classType === 'VAEEncode') {
       (node as any).class_type = 'VAEEncodeTiled';
-      (node as any).inputs = { pixels: inputs.pixels, vae: inputs.vae, tile_size: tileSize, overlap };
+      (node as any).inputs = { pixels: inputs.pixels, vae: inputs.vae, tile_size: tileSize, overlap, temporal_size: 64, temporal_overlap: 8 };
     } else if (classType === 'VAEDecode') {
       (node as any).class_type = 'VAEDecodeTiled';
-      (node as any).inputs = { samples: inputs.samples, vae: inputs.vae, tile_size: tileSize, overlap };
+      (node as any).inputs = { samples: inputs.samples, vae: inputs.vae, tile_size: tileSize, overlap, temporal_size: 64, temporal_overlap: 8 };
     }
   }
 }

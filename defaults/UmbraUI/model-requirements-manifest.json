@@ -21,6 +21,10 @@
       "label": "Qwen Image",
       "description": "Qwen 2.5 VL 7B FP8 text encoder and Qwen Image VAE."
     },
+    "qwen-image-2.1": {
+      "label": "Qwen Image 2.1 (Research Only)",
+      "description": "INT8 generation model, Qwen3 VL 8B encoder and dedicated 2.1 VAE. Non-commercial research/evaluation only under the Qwen Research License. Requires updated ComfyUI with TextEncodeQwenImage21 support. Not compatible with the older Qwen Image encoder/VAE."
+    },
     "krea-2": {
       "label": "Krea 2",
       "description": "Qwen 3 VL 4B FP8 text encoder and Qwen Image VAE."
@@ -101,6 +105,22 @@
     }
   },
   "models": [
+    {
+      "id": "qwen-image-2.1-int8",
+      "family": "Qwen Image 2.1",
+      "creator": "Qwen",
+      "repository": "Comfy-Org/Qwen-Image-2.1",
+      "revision": "6ba8d44168a20144423d886669a4eb524fc14b02",
+      "license": "qwen-research (non-commercial research/evaluation only)",
+      "installPolicy": "automatic",
+      "profiles": ["qwen-image-2.1"],
+      "purpose": "Native Qwen Image 2.1 text-to-image. Update ComfyUI for TextEncodeQwenImage21 before use. License: https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE",
+      "files": [
+        { "destination": "diffusion_models/qwen_image_2.1_int8_convrot.safetensors", "sourcePath": "diffusion_models/qwen_image_2.1_int8_convrot.safetensors", "bytes": 7256783064, "sha256": "cb74113cb03faecd79611b01fd7fd642f0aa60d6f0b95086abee214d75eaa57d" },
+        { "destination": "text_encoders/qwen3vl_8b_int8_convrot.safetensors", "sourcePath": "text_encoders/qwen3vl_8b_int8_convrot.safetensors", "bytes": 9350798360, "sha256": "8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f" },
+        { "destination": "vae/qwen_image_2.1_vae_bf16.safetensors", "sourcePath": "vae/qwen_image_2.1_vae_bf16.safetensors", "bytes": 675509688, "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9" }
+      ]
+    },
     {
       "id": "ltx-2.3-gemma-text-encoder",
       "installPolicy": "automatic",
