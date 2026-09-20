@@ -176,6 +176,7 @@ import { ModelIndexWorkerService, type ModelRootDescriptor } from './backend/Mod
 import { ModelDownloadWorkerService } from './backend/ModelDownloadWorkerService';
 import { ModelManagerStateDb } from './backend/ModelManagerStateDb';
 import { createDatasetArchive } from './backend/DatasetArchiveService';
+import { decodeDatasetImportDataUrl, fetchDatasetImportImage } from './backend/DatasetImportUrlService';
 import { getGalleryArchiveJob, listGalleryArchives, queueGalleryArchive } from './backend/GalleryArchiveService';
 import { FirstRunService } from './backend/FirstRunService';
 import { UMBRA_MIGRATION_EXIT_CODE } from './shared/onboarding/firstRun';
@@ -32984,33 +32985,17 @@ const server = Bun.serve<UmbraSocketData>({
 
           let buffer: Buffer;
           let contentType = '';
-          if (body.url.startsWith('data:image/')) {
-            const match = body.url.match(/^data:(image\/[^;,]+);base64,(.+)$/);
-            if (!match) return json({ error: 'Invalid image data URL' }, 400);
-            contentType = match[1];
-            buffer = Buffer.from(match[2], 'base64');
-          } else {
-            let parsedUrl: URL;
-            try {
-              parsedUrl = new URL(body.url);
-            } catch {
-              return json({ error: 'Invalid image URL' }, 400);
+          try {
+            if (body.url.startsWith('data:image/')) {
+              ({ bytes: buffer, contentType } = decodeDatasetImportDataUrl(body.url));
+            } else {
+              ({ bytes: buffer, contentType } = await fetchDatasetImportImage(body.url, {
+                // The host may intentionally import from a local image tool. Remote clients may not pivot through it.
+                allowPrivateNetwork: isHostRequest(req, url, server),
+              }));
             }
-            if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-              return json({ error: 'Only HTTP image URLs are supported' }, 400);
-            }
-
-            const response = await fetch(parsedUrl.toString(), {
-              headers: { 'User-Agent': 'UmbraStudio/1.0 (dataset-builder)' },
-            });
-            if (!response.ok) {
-              return json({ error: `Failed to download image: ${response.status}` }, 400);
-            }
-            contentType = response.headers.get('content-type') || '';
-            if (contentType && !contentType.toLowerCase().startsWith('image/')) {
-              return json({ error: 'Dropped URL did not return an image' }, 400);
-            }
-            buffer = Buffer.from(await response.arrayBuffer());
+          } catch (error) {
+            return json({ error: error instanceof Error ? error.message : 'Failed to import image URL' }, 400);
           }
 
           const extensionFromType = (() => {
