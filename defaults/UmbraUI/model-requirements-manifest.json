@@ -85,7 +85,8 @@
     },
     "minimax-h3-reference": {
       "label": "MiniMax H3 Reference Video",
-      "description": "Adds the MiniMax H3 Ref2VA INT8 ConvRot model for Umbra UI reference-to-video. Requires the MiniMax H3 Video support files and adds a 20.96 GB model download."
+      "description": "Adds the MiniMax H3 Ref2VA INT8 ConvRot model for Umbra UI reference-to-video. Requires the MiniMax H3 Video support files and adds a 20.96 GB model download.",
+      "requiresProfiles": ["minimax-h3"]
     },
     "ltx-2.3": {
       "label": "LTX-2.3 Video",
@@ -97,7 +98,8 @@
     },
     "ltx-2.5-prompt-enhancer": {
       "label": "LTX-2.5 Prompt Enhancer",
-      "description": "Optional Gemma 4 E2B instruction model for LTX-2.5 automatic prompt enhancement. Adds a 10.28 GB download."
+      "description": "Optional Gemma 4 E2B instruction model for LTX-2.5 automatic prompt enhancement. Adds a 10.28 GB download.",
+      "requiresProfiles": ["ltx-2.5"]
     },
     "video-postprocess": {
       "label": "Video Post-Processing",
@@ -112,6 +114,8 @@
       "repository": "Comfy-Org/Qwen-Image-2.1",
       "revision": "6ba8d44168a20144423d886669a4eb524fc14b02",
       "license": "qwen-research (non-commercial research/evaluation only)",
+      "licenseUrl": "https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE",
+      "licenseNotice": "Qwen’s clarification treats generated outputs as separate from the licensed Materials and users retain output rights; that does not permit commercial use of the Qwen model Materials under this research license.",
       "installPolicy": "automatic",
       "profiles": ["qwen-image-2.1"],
       "purpose": "Native Qwen Image 2.1 text-to-image. Update ComfyUI for TextEncodeQwenImage21 before use. License: https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE",

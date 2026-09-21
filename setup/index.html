@@ -124,6 +124,10 @@
     .model-files { max-height: 370px; overflow: auto; margin: 12px 0; }
     .model-file { border-bottom: 1px solid var(--line); padding: 9px 0; overflow-wrap: anywhere; font-size: 12px; }
     .model-file small { display: block; color: var(--muted); margin-top: 5px; }
+    .model-file a { color: #9ee8d0; }
+    .model-license-notice { color: #eab86b !important; }
+    .model-requirements { display: block; color: #eab86b; font-size: 11px; margin-top: 7px; }
+    .model-license-disclaimer { margin: 12px 0 16px; border-left: 3px solid #eab86b; padding: 10px 12px; background: #17120a; color: #e8dbc0; }
     #model-root { overflow-wrap: anywhere; font-size: 12px; margin: 10px 0; }
     #model-summary { color: var(--text); }
     #model-token { width: 100%; margin: 8px 0; }
@@ -175,6 +179,7 @@
       </section>
       <section id="models-panel" class="panel" role="tabpanel" aria-labelledby="tab-models" hidden>
         <h2 data-i18n="modelsTitle">Model setup</h2>
+        <p class="model-license-disclaimer" data-i18n="modelLicenseDisclaimer">Model licenses are separate from Umbra Studio’s license. You are responsible for reviewing and complying with each model’s terms, including any commercial-use restrictions. Supporting a model in Umbra does not grant additional rights.</p>
         <section class="model-recommended" aria-labelledby="recommended-title">
           <h3 id="recommended-title" data-i18n="recommendedModels">Recommended</h3>
           <div id="model-recommended" class="recommended-options"></div>

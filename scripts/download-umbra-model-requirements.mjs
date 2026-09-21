@@ -80,7 +80,17 @@ function normalizeFamilies(manifest, values) {
     if (!ids.includes(id)) throw new Error(`Unknown model family: ${id}`);
     if (!selected.includes(id)) selected.push(id);
   }
-  return selected;
+  const resolved = new Set(selected);
+  const addRequirements = (id) => {
+    for (const requirement of manifest.profiles[id].requiresProfiles || []) {
+      if (!manifest.profiles[requirement]) throw new Error(`Unknown required model family: ${requirement}`);
+      if (resolved.has(requirement)) continue;
+      resolved.add(requirement);
+      addRequirements(requirement);
+    }
+  };
+  for (const id of selected) addRequirements(id);
+  return [...resolved];
 }
 
 async function promptForFamilies(manifest) {

@@ -10,6 +10,8 @@ Object.assign(SETUP_TRANSLATIONS.en, {
   fullSize: 'full size', missingSize: 'missing / size mismatch', filesLabel: 'files',
   installerLog: 'Installer log',
   recommendedModels: 'Recommended',
+  includesRequired: 'Includes required prerequisites',
+  modelLicenseDisclaimer: 'Model licenses are separate from Umbra Studio’s license. You are responsible for reviewing and complying with each model’s terms, including any commercial-use restrictions. Supporting a model in Umbra does not grant additional rights.',
   'Installing selected models': 'Installing selected models', 'Verifying selected models': 'Verifying selected models',
   'Installation cancelled': 'Installation cancelled',
 });
@@ -25,6 +27,8 @@ Object.assign(SETUP_TRANSLATIONS.de, {
   fullSize: 'Gesamtgröße', missingSize: 'fehlend / abweichende Größe', filesLabel: 'Dateien',
   installerLog: 'Installationsprotokoll',
   recommendedModels: 'Empfohlen',
+  includesRequired: 'Enthält erforderliche Voraussetzungen',
+  modelLicenseDisclaimer: 'Modelllizenzen sind von der Lizenz von Umbra Studio getrennt. Sie sind selbst dafür verantwortlich, die Bedingungen jedes Modells, einschließlich etwaiger Einschränkungen der kommerziellen Nutzung, zu prüfen und einzuhalten. Die Unterstützung eines Modells in Umbra gewährt keine zusätzlichen Rechte.',
   'Installing selected models': 'Ausgewählte Modelle werden installiert', 'Verifying selected models': 'Ausgewählte Modelle werden geprüft',
   'Installation cancelled': 'Installation abgebrochen',
 });
@@ -57,7 +61,14 @@ function showSetupTab(tab) {
 });
 function currentModelPack() { return modelCatalog?.packs.find(pack => pack.id === modelPack); }
 function selectedModelFiles() {
-  return (currentModelPack()?.files || []).filter(file => file.profiles.some(id => modelSelections[modelPack].has(id)));
+  const pack = currentModelPack();
+  const selected = new Set(modelSelections[modelPack]);
+  for (const id of selected) {
+    for (const required of pack?.profiles.find(profile => profile.id === id)?.requiresProfiles || []) {
+      selected.add(required);
+    }
+  }
+  return (pack?.files || []).filter(file => file.profiles.some(id => selected.has(id)));
 }
 function setModelBusy(busy) {
   modelBusy = busy;
@@ -75,7 +86,22 @@ function renderModelReview() {
   for (const file of files) {
     const row = document.createElement('div'); row.className = 'model-file'; row.textContent = file.destination;
     const detail = document.createElement('small');
-    detail.textContent = `${modelBytes(file.bytes)} | ${tr(file.present ? 'presentFile' : 'missingFile')}${file.licenses.length ? ` | ${file.licenses.join(', ')}` : ''}`;
+    detail.textContent = `${modelBytes(file.bytes)} | ${tr(file.present ? 'presentFile' : 'missingFile')}`;
+    if (file.licenses.length) {
+      const licenses = document.createElement('span'); licenses.className = 'model-licenses'; licenses.append(' | ');
+      file.licenses.forEach((license, index) => {
+        if (index) licenses.append(', ');
+        if (license.url) {
+          const link = document.createElement('a'); link.href = license.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = license.label;
+          licenses.append(link);
+        } else licenses.append(license.label);
+        if (license.notice) {
+          const notice = document.createElement('small'); notice.className = 'model-license-notice'; notice.textContent = ` ${license.notice}`;
+          licenses.append(notice);
+        }
+      });
+      detail.append(licenses);
+    }
     row.append(detail); list.append(row);
   }
   setModelBusy(modelBusy);
@@ -118,7 +144,13 @@ function renderModelFamilies() {
     });
     const text = document.createElement('div'); const title = document.createElement('strong'); title.textContent = profile.label;
     const description = document.createElement('p'); description.textContent = profile.description;
-    text.append(title, description); label.append(checkbox, text); list.append(label);
+    text.append(title, description);
+    if (profile.requiresProfiles?.length) {
+      const required = document.createElement('small'); required.className = 'model-requirements';
+      required.textContent = `${tr('includesRequired')}: ${profile.requiresProfiles.map(id => currentModelPack().profiles.find(item => item.id === id)?.label || id).join(', ')}`;
+      text.append(required);
+    }
+    label.append(checkbox, text); list.append(label);
   }
   renderModelReview();
 }

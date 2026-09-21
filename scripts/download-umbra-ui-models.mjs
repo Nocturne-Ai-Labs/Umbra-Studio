@@ -166,6 +166,16 @@ function validateManifest(manifest) {
       }
     }
   }
+  for (const [id, profile] of Object.entries(manifest.profiles)) {
+    if (profile.requiresProfiles !== undefined && !Array.isArray(profile.requiresProfiles)) {
+      throw new Error(`Invalid required model families for ${id}`);
+    }
+    for (const requirement of profile.requiresProfiles || []) {
+      if (typeof requirement !== 'string' || !manifest.profiles[requirement]) {
+        throw new Error(`Unknown required model family ${requirement} on ${id}`);
+      }
+    }
+  }
   return manifest;
 }
 
@@ -319,13 +329,23 @@ async function testDownload(url, expected) {
 
 function selectedModels(manifest) {
   if (requestedProfiles.includes('all')) return manifest.models.filter(model => model.installPolicy === 'automatic');
-  const profiles = requestedProfiles.length > 0 ? requestedProfiles : ['core'];
-  for (const profile of profiles) {
+  const requested = requestedProfiles.length > 0 ? requestedProfiles : ['core'];
+  const profiles = new Set(requested);
+  const addRequirements = (profile) => {
+    for (const requirement of manifest.profiles[profile].requiresProfiles || []) {
+      if (profiles.has(requirement)) continue;
+      profiles.add(requirement);
+      addRequirements(requirement);
+    }
+  };
+  for (const profile of requested) {
     if (!manifest.profiles[profile]) throw new Error(`Unknown model profile: ${profile}`);
+    addRequirements(profile);
   }
+  const resolvedProfiles = [...profiles];
   return manifest.models.filter(model => (
     model.installPolicy === 'automatic'
-    && model.profiles.some(profile => profiles.includes(profile))
+    && model.profiles.some(profile => resolvedProfiles.includes(profile))
   ));
 }
 

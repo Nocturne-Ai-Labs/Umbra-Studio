@@ -10,8 +10,11 @@ export const MODEL_MANIFESTS: Record<ModelSetupPack, string> = {
 type ModelFile = { destination: string; bytes: number; sha256: string };
 type Manifest = {
   schemaVersion: number;
-  profiles: Record<string, { label: string; description: string; noDownload?: boolean }>;
-  models: { id: string; installPolicy: string; profiles: string[]; license?: string; files: ModelFile[] }[];
+  profiles: Record<string, { label: string; description: string; noDownload?: boolean; requiresProfiles?: string[] }>;
+  models: {
+    id: string; installPolicy: string; profiles: string[]; license?: string; licenseUrl?: string;
+    licenseNotice?: string; repository?: string; revision?: string; files: ModelFile[];
+  }[];
 };
 
 export function readModelSetupManifest(sourceRoot: string, pack: ModelSetupPack): Manifest {
@@ -26,7 +29,17 @@ export function modelSetupSelection(sourceRoot: string, pack: ModelSetupPack, va
   if (!Array.isArray(value) || value.length === 0 || value.length > Object.keys(manifest.profiles).length) throw new Error('Select at least one model family.');
   const profiles = [...new Set(value)];
   if (profiles.some(id => typeof id !== 'string' || !Object.hasOwn(manifest.profiles, id))) throw new Error('Unknown model family.');
-  return (profiles as string[]).filter(id => !manifest.profiles[id].noDownload);
+  const selected = new Set(profiles as string[]);
+  const addRequirements = (id: string) => {
+    for (const requirement of manifest.profiles[id].requiresProfiles || []) {
+      if (!Object.hasOwn(manifest.profiles, requirement)) throw new Error(`Unknown required model family: ${requirement}`);
+      if (selected.has(requirement)) continue;
+      selected.add(requirement);
+      addRequirements(requirement);
+    }
+  };
+  for (const id of selected) addRequirements(id);
+  return [...selected].filter(id => !manifest.profiles[id].noDownload);
 }
 
 export async function modelSetupCatalog(sourceRoot: string, runtimeRoot: string) {
@@ -34,7 +47,10 @@ export async function modelSetupCatalog(sourceRoot: string, runtimeRoot: string)
   const packs = [];
   for (const pack of Object.keys(MODEL_MANIFESTS) as ModelSetupPack[]) {
     const manifest = readModelSetupManifest(sourceRoot, pack);
-    const files = new Map<string, ModelFile & { present: boolean; profiles: string[]; licenses: string[] }>();
+    const files = new Map<string, ModelFile & {
+      present: boolean; profiles: string[];
+      licenses: { label: string; url: string; notice: string }[];
+    }>();
     for (const model of manifest.models.filter(item => item.installPolicy === 'automatic')) {
       for (const file of model.files) {
         const target = resolve(modelsRoot, file.destination);
@@ -48,7 +64,14 @@ export async function modelSetupCatalog(sourceRoot: string, runtimeRoot: string)
           files.set(key, entry);
         }
         entry.profiles = [...new Set([...entry.profiles, ...model.profiles])];
-        if (model.license) entry.licenses = [...new Set([...entry.licenses, model.license])];
+        if (model.license) {
+          const notice = {
+            label: model.license,
+            url: model.licenseUrl || (model.repository ? `https://huggingface.co/${model.repository}/tree/${model.revision || 'main'}` : ''),
+            notice: model.licenseNotice || '',
+          };
+          if (!entry.licenses.some(item => item.label === notice.label && item.url === notice.url)) entry.licenses.push(notice);
+        }
       }
     }
     packs.push({ id: pack, profiles: Object.entries(manifest.profiles).map(([id, profile]) => ({ id, ...profile })), files: [...files.values()] });
