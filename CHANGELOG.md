@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.32.26 - Model Setup Licenses And Required Downloads
+
+### TL;DR - Setup After Updating
+
+- Restart Umbra, then open `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux and select **Models**. Review the displayed files, total download size, and license notices before installing.
+- Model licenses are separate from Umbra Studio's license. Users are responsible for complying with each model's terms; application support grants no additional rights.
+- Qwen Image 2.1 retains its existing three-file download: diffusion weights, matching text encoder, and dedicated VAE. Its linked notice distinguishes output rights from restrictions on use of the model Materials. This release does not change those license terms or download models automatically.
+
+### Setup Improvements
+
+- Add a general model-license disclaimer and linked per-model notices to the graphical Models tab.
+- Resolve declared prerequisites in both Setup and the command-line downloaders. MiniMax H3 Reference includes MiniMax H3 core, and LTX-2.5 Prompt Enhancer includes its LTX-2.5 core profile.
+- Include prerequisites in the file review and total size estimate, deduplicating shared files so the review matches the actual download selection.
+- Preserve revision-pinned downloads, checksum validation, token handling, and cancellation behavior.
+
+### Validation
+
+- Verified UI/backend selection parity, the exact Qwen three-component bundle, official license link, and checksum metadata with synthetic assertions; passed the pipeline audit and frontend validation.
+- No personal models, datasets, training outputs, or private test files are included in Windows or Linux release packages.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: dependent model profiles omitting required base components when selected alone.
+- Improved: visible model-license responsibilities and links before downloading.
+- Improved: prerequisite file lists and size estimates match installation behavior.
+
 ## v0.32.25 - Dataset Caption Rewrite Hotfix
 
 ### TL;DR - Setup After Updating
