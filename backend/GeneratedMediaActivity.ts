@@ -4,16 +4,17 @@ import { dirname, extname, isAbsolute, resolve } from 'node:path';
 import { writeUpdateJsonAtomic } from '../shared/updateStateFile';
 
 const MEDIA = new Set(['.png', '.jpg', '.jpeg', '.webp', '.avif', '.bmp', '.tif', '.tiff', '.gif', '.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v', '.wmv']);
+const DUPLICATE_PUBLICATION_WINDOW_MS = 2000;
 type FolderActivity = { path: string; count: number; updatedAt: number };
 
 // Counts are updated only by successful output publishers, never by directory scans.
 export class GeneratedMediaActivity {
   private folders = new Map<string, FolderActivity>();
-  private seen = new Set<string>();
+  private seen = new Map<string, number>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private epoch = randomUUID();
 
-  constructor(private root: string, private statePath?: string) {
+  constructor(private root: string, private statePath?: string, private now = Date.now) {
     if (!statePath) return;
     try {
       const data = JSON.parse(readFileSync(statePath, 'utf8'));
@@ -24,7 +25,13 @@ export class GeneratedMediaActivity {
           this.folders.set(this.key(entry.path), entry);
         }
       }
-      this.seen = new Set((Array.isArray(data.seen) ? data.seen : []).filter((id: unknown) => typeof id === 'string').slice(-20_000));
+      for (const item of (Array.isArray(data.seen) ? data.seen : []).slice(-20_000)) {
+        const id = typeof item === 'string' ? item : item?.[0];
+        const timestamp = typeof item === 'string' ? this.now() : item?.[1];
+        if (typeof id === 'string' && /^[a-f0-9]{64}$/.test(id) && Number.isFinite(timestamp) && timestamp >= 0) {
+          this.seen.set(id, Math.min(timestamp, this.now()));
+        }
+      }
     } catch { /* A missing/corrupt notification cache must not affect generation. */ }
   }
 
@@ -47,12 +54,15 @@ export class GeneratedMediaActivity {
       if (!path || !MEDIA.has(extname(path).toLowerCase())) continue;
       const full = this.resolvePath(path);
       const id = createHash('sha256').update(this.key(full)).digest('hex');
-      if (this.seen.has(id)) continue;
-      this.seen.add(id);
-      if (this.seen.size > 20_000) this.seen.delete(this.seen.values().next().value!);
+      const now = this.now();
+      const lastSeen = this.seen.get(id);
+      if (lastSeen !== undefined && now >= lastSeen && now - lastSeen < DUPLICATE_PUBLICATION_WINDOW_MS) continue;
+      this.seen.delete(id);
+      this.seen.set(id, now);
+      if (this.seen.size > 20_000) this.seen.delete(this.seen.keys().next().value!);
       const folder = dirname(full);
       const key = this.key(folder);
-      this.folders.set(key, { path: folder, count: (this.folders.get(key)?.count || 0) + 1, updatedAt: Date.now() });
+      this.folders.set(key, { path: folder, count: (this.folders.get(key)?.count || 0) + 1, updatedAt: now });
       changed = true;
     }
     if (changed && this.statePath && !this.timer) {
