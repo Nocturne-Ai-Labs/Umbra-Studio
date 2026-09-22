@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { isPrivateDevelopmentSource } from './release-source-policy.mjs';
+import { findPrivatePackagedSource, isPrivateDevelopmentSource } from './release-source-policy.mjs';
 
 if (process.platform !== 'linux') {
   throw new Error('[linux-publish] Linux portable folder builds must be run on Linux.');
@@ -516,6 +516,12 @@ function publish() {
     const target = path.join(packagedAppDir, entry);
     const options = entry === 'frontend' ? { skipEntries: new Set(['node_modules']) } : {};
     copyTree(source, target, options);
+  }
+  for (const artifact of findPrivatePackagedSource(packagedAppDir, appTargets)) {
+    safeRemoveInside(publishRoot, artifact);
+  }
+  if (findPrivatePackagedSource(packagedAppDir, appTargets).length > 0) {
+    throw new Error('[linux-publish] Private development files remain in packaged source.');
   }
 
   copyTree(path.join(root, 'public'), path.join(packagedAppDir, 'public'));

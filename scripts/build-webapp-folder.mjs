@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { createHash } from 'crypto';
-import { isPrivateDevelopmentSource } from './release-source-policy.mjs';
+import { findPrivatePackagedSource, isPrivateDevelopmentSource } from './release-source-policy.mjs';
 
 const root = process.cwd();
 const pkgPath = path.join(root, 'package.json');
@@ -692,6 +692,12 @@ function publish() {
     const target = path.join(packagedAppDir, entry);
     const options = entry === 'frontend' ? { skipEntries: new Set(['node_modules']) } : {};
     copyTree(source, target, options);
+  }
+  for (const artifact of findPrivatePackagedSource(packagedAppDir, appTargets)) {
+    safeRemoveInside(publishRoot, artifact);
+  }
+  if (findPrivatePackagedSource(packagedAppDir, appTargets).length > 0) {
+    throw new Error('[webapp-publish] Private development files remain in packaged source.');
   }
 
   copyTree(path.join(root, 'public'), path.join(publishRoot, 'public'));
