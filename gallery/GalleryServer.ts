@@ -1073,6 +1073,10 @@ async function handleTree(reqUrl: URL): Promise<Response> {
     const dirPath = await ensureDirectory(pathValue);
     const ensureMs = nowMs() - ensureStartedAt;
     const toClientPath = createClientPathMapper(pathValue, dirPath);
+    const toResponseFolders = (folders: FolderTreeNode[]) => folders.map((folder) => ({
+      name: folder.name,
+      path: toClientPath(folder.path),
+    }));
     registerPrewarmRoot(dirPath);
     if (force) {
       invalidateFolderTree(dirPath);
@@ -1088,7 +1092,7 @@ async function handleTree(reqUrl: URL): Promise<Response> {
         cacheHit: true,
         durationMs: nowMs() - startedAt,
       });
-      return json({ folders: cachedFolders });
+      return json({ folders: toResponseFolders(cachedFolders) });
     }
 
     const workerStartedAt = nowMs();
@@ -1100,7 +1104,7 @@ async function handleTree(reqUrl: URL): Promise<Response> {
         .filter((entry) => entry.isDirectory())
         .map((entry) => ({
           name: entry.name,
-          path: toClientPath(join(dirPath, entry.name)),
+          path: join(dirPath, entry.name),
         }))
         .sort((a, b) => galleryNameCollator.compare(a.name, b.name));
       setCachedFolderTree(dirPath, nextFolders);
@@ -1120,7 +1124,7 @@ async function handleTree(reqUrl: URL): Promise<Response> {
       cacheHit: false,
       durationMs: nowMs() - startedAt,
     });
-    return json({ folders });
+    return json({ folders: toResponseFolders(folders) });
   } catch (error: any) {
     if (isMissingFsPathError(error)) {
       const folderPath = normalizePath(pathValue);
