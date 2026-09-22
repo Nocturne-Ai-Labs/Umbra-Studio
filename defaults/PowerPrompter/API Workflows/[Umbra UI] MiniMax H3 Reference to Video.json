@@ -32,24 +32,6 @@
       }
     }
   },
-  "2": {
-    "class_type": "PathchSageAttentionKJ",
-    "inputs": {
-      "model": [
-        "1",
-        0
-      ],
-      "sage_attention": "auto",
-      "allow_compile": true
-    },
-    "_meta": {
-      "title": "MiniMax H3 Sage Attention Acceleration",
-      "umbra_role": "minimax_h3_sage_attention",
-      "umbra_media_type": "video",
-      "umbra_video_family": "minimax_h3",
-      "umbra_video_mode": "reference_to_video"
-    }
-  },
   "3": {
     "class_type": "CLIPLoader",
     "inputs": {
@@ -182,7 +164,7 @@
     "class_type": "BasicGuider",
     "inputs": {
       "model": [
-        "19",
+        "20",
         0
       ],
       "conditioning": [
@@ -215,7 +197,7 @@
     "class_type": "BasicScheduler",
     "inputs": {
       "model": [
-        "19",
+        "20",
         0
       ],
       "scheduler": "simple",
@@ -342,31 +324,11 @@
       "umbra_video_mode": "reference_to_video"
     }
   },
-  "19": {
-    "class_type": "EasyCache",
-    "inputs": {
-      "model": [
-        "20",
-        0
-      ],
-      "reuse_threshold": 0.2,
-      "start_percent": 0.15,
-      "end_percent": 0.95,
-      "verbose": false
-    },
-    "_meta": {
-      "title": "MiniMax H3 EasyCache Acceleration",
-      "umbra_role": "minimax_h3_easycache",
-      "umbra_media_type": "video",
-      "umbra_video_family": "minimax_h3",
-      "umbra_video_mode": "reference_to_video"
-    }
-  },
   "20": {
     "class_type": "MiniMaxH3SigmaShift",
     "inputs": {
       "model": [
-        "2",
+        "1",
         0
       ],
       "shift_video": 10,

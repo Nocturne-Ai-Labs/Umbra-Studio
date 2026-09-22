@@ -1,3 +1,4 @@
+import { applyMiniMaxH3Acceleration } from '../backend/MiniMaxH3Workflow';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
@@ -383,6 +384,9 @@ const workflows: Array<[string, PromptGraph]> = [
   ['[Umbra UI] MiniMax H3 Image to Video.json', buildMiniMaxH3Workflow('image_to_video')],
   ['[Umbra UI] MiniMax H3 Reference to Video.json', buildMiniMaxH3ReferenceWorkflow()],
 ];
+
+// Ship standard-mode graphs; acceleration nodes are added only when requested.
+for (const [, graph] of workflows) applyMiniMaxH3Acceleration(graph);
 
 for (const targetDir of TARGET_DIRS) {
   mkdirSync(targetDir, { recursive: true });

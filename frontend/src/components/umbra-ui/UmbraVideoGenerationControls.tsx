@@ -2361,13 +2361,13 @@ export function UmbraVideoGenerationControls({
           summary={[
             video.minimaxH3.sageAttention === 'auto' ? 'sage' : '',
             video.minimaxH3.easyCacheEnabled ? 'cache' : '',
-            video.minimaxH3.allowCompile ? 'compile' : '',
+            video.minimaxH3.sageAttention === 'auto' && video.minimaxH3.allowCompile ? 'sage compile allowed' : '',
           ].filter(Boolean).join(' + ') || 'off'}
         >
           <div className="space-y-2.5">
             <div className="grid grid-cols-2 gap-1.5">
               <ToggleButton active={video.minimaxH3.sageAttention === 'auto'} label="Sage Attention" onClick={() => setMiniMaxH3('sageAttention', video.minimaxH3.sageAttention === 'auto' ? 'disabled' : 'auto')} />
-              <ToggleButton active={video.minimaxH3.allowCompile} label="Compile" onClick={() => setMiniMaxH3('allowCompile', !video.minimaxH3.allowCompile)} />
+              <ToggleButton active={video.minimaxH3.sageAttention === 'auto' && video.minimaxH3.allowCompile} disabled={video.minimaxH3.sageAttention !== 'auto'} label="Allow Sage Compile" onClick={() => setMiniMaxH3('allowCompile', !video.minimaxH3.allowCompile)} />
             </div>
             <ToggleButton active={video.minimaxH3.easyCacheEnabled} label="EasyCache" onClick={() => setMiniMaxH3('easyCacheEnabled', !video.minimaxH3.easyCacheEnabled)} />
             {video.minimaxH3.easyCacheEnabled ? <div className="grid grid-cols-3 gap-2">
@@ -2376,12 +2376,12 @@ export function UmbraVideoGenerationControls({
               <NumberField label="End" value={video.minimaxH3.easyCacheEndPercent} min={0} max={1} step={0.01} onChange={(value) => setMiniMaxH3('easyCacheEndPercent', value)} />
             </div> : null}
             <p className="rounded-md border border-fuchsia-300/15 bg-fuchsia-500/[0.045] px-2.5 py-2 font-mono text-[9px] leading-relaxed text-zinc-400">
-              Mirrors the accelerated MiniMax workflow. Compile can improve repeat-run speed after an initial warmup; disable it when diagnosing compatibility or memory pressure.
+              Optional acceleration requires compatible ComfyUI dependencies. Allow Sage Compile permits Sage attention inside an externally compiled model; it does not enable model compilation. Keep acceleration off for standard mode.
             </p>
           </div>
         </VideoAccordion> : null}
 
-        <VideoAccordion
+        {video.family !== 'minimax_h3' ? <VideoAccordion
           title="Decode Memory"
           icon={<Gauge size={11} className="text-zinc-500" />}
           summary={video.decodeMode}
@@ -2401,7 +2401,7 @@ export function UmbraVideoGenerationControls({
               </div>
             ) : null}
           </div>
-        </VideoAccordion>
+        </VideoAccordion> : null}
 
         <VideoAccordion
           title="Post Processing"

@@ -6,6 +6,7 @@
  * reduce runtime confusion and make the packaged app easier to maintain.
  */
 
+import { applyMiniMaxH3Acceleration, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { configureGeneratedMediaActivity, recordGeneratedMediaOutputs } from './backend/GeneratedMediaActivity';
 import { createCaptionCategoryFilter } from './backend/DatasetCaptionCategories';
@@ -7140,48 +7141,6 @@ function applyPPMiniMaxH3ReferenceTopology(
   setPPApiNodeInput(conditioning.node, 'ref_images', references);
 }
 
-function applyPPMiniMaxH3AccelerationTopology(
-  roleEntries: Map<string, { id: string; node: any }>,
-  generation: PowerPrompterGenerationControls,
-) {
-  const video = generation.video;
-  if (generation.mediaType !== 'video' || !video || video.family !== 'minimax_h3') return;
-
-  const source = roleEntries.get('minimax_h3_model');
-  const sageAttention = roleEntries.get('minimax_h3_sage_attention');
-  const sigmaShift = roleEntries.get('minimax_h3_sigma_shift');
-  const easyCache = roleEntries.get('minimax_h3_easycache');
-  const guider = roleEntries.get('minimax_h3_guider');
-  const scheduler = roleEntries.get('minimax_h3_scheduler');
-  if (!source || !guider || !scheduler) {
-    throw new Error('The locked MiniMax H3 pipeline is missing its model, guider, or scheduler roles.');
-  }
-
-  let activeModel: [string, number] = [source.id, 0];
-  if (video.minimaxH3.sageAttention !== 'disabled' && sageAttention) {
-    setPPApiNodeInput(sageAttention.node, 'model', activeModel);
-    setPPApiNodeInput(sageAttention.node, 'sage_attention', 'auto');
-    setPPApiNodeInput(sageAttention.node, 'allow_compile', video.minimaxH3.allowCompile);
-    activeModel = [sageAttention.id, 0];
-  }
-  if (sigmaShift) {
-    setPPApiNodeInput(sigmaShift.node, 'model', activeModel);
-    setPPApiNodeInput(sigmaShift.node, 'shift_video', video.minimaxH3.shiftVideo);
-    setPPApiNodeInput(sigmaShift.node, 'shift_audio', video.minimaxH3.shiftAudio);
-    activeModel = [sigmaShift.id, 0];
-  }
-  if (video.minimaxH3.easyCacheEnabled && easyCache) {
-    setPPApiNodeInput(easyCache.node, 'model', activeModel);
-    setPPApiNodeInput(easyCache.node, 'reuse_threshold', video.minimaxH3.easyCacheReuseThreshold);
-    setPPApiNodeInput(easyCache.node, 'start_percent', video.minimaxH3.easyCacheStartPercent);
-    setPPApiNodeInput(easyCache.node, 'end_percent', video.minimaxH3.easyCacheEndPercent);
-    setPPApiNodeInput(easyCache.node, 'verbose', false);
-    activeModel = [easyCache.id, 0];
-  }
-  setPPApiNodeInput(guider.node, 'model', activeModel);
-  setPPApiNodeInput(scheduler.node, 'model', activeModel);
-}
-
 function trimPPVideoSigmas(rawSigmas: unknown, denoise: number): string {
   const values = String(rawSigmas || '')
     .split(',')
@@ -8061,7 +8020,9 @@ function compileUmbraUiPipelineWorkflow(
 
   applyPPWanVideoTopology(promptGraph, videoRoleEntries, generation);
   applyPPWanVid2VidTopology(videoRoleEntries, generation);
-  applyPPMiniMaxH3AccelerationTopology(videoRoleEntries, generation);
+  if (generation.mediaType === 'video' && generation.video?.family === 'minimax_h3') {
+    applyMiniMaxH3Acceleration(promptGraph, generation.video.minimaxH3);
+  }
   applyPPMiniMaxH3ReferenceTopology(videoRoleEntries, generation);
   applyPPLtxVideoTopology(promptGraph, videoRoleEntries, generation, activePrompt);
   applyPPVideoSourceAudio(promptGraph, videoRoleEntries, generation);
@@ -22698,8 +22659,10 @@ function getUmbraUiPipelineValidationKey(pipeline: UmbraUiPipelineDescriptor): s
 function validatePPApiWorkflowDocument(
   rawDoc: unknown,
   availableComfyClassTypes: Set<string> | null = null,
+  miniMaxH3Acceleration: MiniMaxH3AccelerationControls = {},
 ): PPApiWorkflowValidation {
-  const promptGraph = extractPPApiPromptGraph(rawDoc);
+  const originalGraph = extractPPApiPromptGraph(rawDoc);
+  const promptGraph = originalGraph ? structuredClone(originalGraph) : null;
   if (!promptGraph) {
     return {
       ok: false,
@@ -22709,6 +22672,7 @@ function validatePPApiWorkflowDocument(
       pipelineGraphIssues: {},
     };
   }
+  applyMiniMaxH3Acceleration(promptGraph, miniMaxH3Acceleration);
   const classTypes = new Set(
     Object.values(promptGraph)
       .map((entry) => String((entry as any)?.class_type || '').trim())
@@ -22884,8 +22848,10 @@ async function assertPPApiWorkflowExecutionReady(
   context?: Awaited<ReturnType<typeof createPPQueueValidationContext>>,
 ): Promise<void> {
   const validationContext = context || await createPPQueueValidationContext();
-  if (!validationContext.validatedWorkflows.has(loaded)) {
-    const validation = validatePPApiWorkflowDocument(loaded.document, validationContext.availableClassTypes);
+  const generation = normalizePPGenerationControls(generationInput);
+  const isMiniMaxH3 = generation.mediaType === 'video' && generation.video?.family === 'minimax_h3';
+  if (isMiniMaxH3 || !validationContext.validatedWorkflows.has(loaded)) {
+    const validation = validatePPApiWorkflowDocument(loaded.document, validationContext.availableClassTypes, isMiniMaxH3 ? generation.video.minimaxH3 : {});
     if (!validation.ok) {
       throw new Error(`Selected generation pipeline has an invalid graph: ${validation.graph.issues.join(', ') || 'unknown graph issue'}.`);
     }
@@ -22894,7 +22860,6 @@ async function assertPPApiWorkflowExecutionReady(
     validationContext.validatedWorkflows.add(loaded);
   }
   const catalog = validationContext.catalog;
-  const generation = normalizePPGenerationControls(generationInput);
   if (generation.outputOwner === 'umbra_ui' && generation.outputFolder) {
     await assertUmbraUiPinnedOutputAvailable(
       generation.outputFolder,
