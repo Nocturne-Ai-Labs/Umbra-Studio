@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.32.27 - MiniMax H3 And Workspace Hotfix
+
+### TL;DR - Setup After Updating
+
+- Restart Umbra with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux. Update managed ComfyUI and its dependencies through Umbra before using the new H3 options, then restart ComfyUI.
+- Open `UmbraSetup.bat` or `./umbra-setup.sh`, select **Models**, and install the MiniMax H3 INT8 video VAE (approximately 2.8 GB) for new default configurations. Existing explicit VAE selections are preserved; the FP16 VAE remains an optional fallback.
+- Turbo adapters are optional, separately selected downloads with different FL2VA and Ref2VA compatibility. Review their licenses and prerequisites in Setup. Model weights are not bundled in these packages.
+- Linux managed tools require `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents.
+
+### Changes
+
+- Make H3 acceleration opt-in and validate the actual requested graph, including mixed queue variants and missing dependencies.
+- Add optional model-only Turbo adapters with explicit sampling presets and pinned Setup downloads.
+- Add timed image and audio guides with frame validation and refreshed media catalogs after staging.
+- Use the INT8 ConvRot video VAE for new H3 configurations while preserving saved decoder choices.
+- Bound ComfyUI WebSocket reachability checks and avoid querying GPU allocator statistics for connection probing.
+- Keep TXT2IMG, IMG2IMG, Inpaint, and Canvas prompt and generation drafts separate during navigation. Explicit image/settings transfers remain available.
+
+### Validation And Limits
+
+- Passed focused regression tests, frontend typechecking, lint, production build, and pipeline validation.
+- Verified a short INT8 image/audio-guide generation through the shared queue, output metadata, and Gallery. Full-length INT8 performance, repeated-run stability, and all optional acceleration combinations are not yet qualified; no controlled speedup claim is made.
+- Video extension and inpainting are outside this hotfix. Private reports, test media, and local models are excluded from both packages.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: optional acceleration dependencies blocking standard H3 workflows.
+- Fixed: stale media catalogs rejecting newly staged guide inputs.
+- Fixed: unbounded WebSocket reachability probes using heavyweight GPU statistics.
+- Fixed: switching image workspaces automatically carrying unrelated prompts and LoRAs across.
+- Improved: explicit H3 Turbo presets, timed guides, and Setup-managed INT8 decoder selection with FP16 fallback.
+
 ## v0.32.26 - Model Setup Licenses And Required Downloads
 
 ### TL;DR - Setup After Updating
