@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { dirname, extname, resolve, sep } from 'node:path';
+import { dirname, extname, resolve } from 'node:path';
 import { writeUpdateJsonAtomic } from '../shared/updateStateFile';
 
 const MEDIA = new Set(['.png', '.jpg', '.jpeg', '.webp', '.avif', '.bmp', '.tif', '.tiff', '.gif', '.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v', '.wmv']);
@@ -55,15 +55,27 @@ export class GeneratedMediaActivity {
 
   snapshot(paths: string[], allowed: (path: string) => boolean, clientPath: (path: string) => string) {
     const entries = [...this.folders.values()].filter(entry => allowed(entry.path));
+    const folders = paths.map(path => ({ path, entries: [] as Array<{ id: string; count: number }> }));
+    const requestedByKey = new Map<string, typeof folders>();
+    for (const folder of folders) {
+      const key = this.key(folder.path);
+      const matching = requestedByKey.get(key) || [];
+      matching.push(folder);
+      requestedByKey.set(key, matching);
+    }
+    for (const entry of entries) {
+      const item = { id: createHash('sha256').update(this.key(entry.path)).digest('hex'), count: entry.count };
+      let ancestor = this.key(entry.path);
+      while (true) {
+        for (const folder of requestedByKey.get(ancestor) || []) folder.entries.push(item);
+        const parent = dirname(ancestor);
+        if (parent === ancestor) break;
+        ancestor = parent;
+      }
+    }
     return {
       epoch: this.epoch,
-      folders: paths.map(path => {
-        const root = this.key(path);
-        return { path, entries: entries.filter(entry => {
-          const key = this.key(entry.path);
-          return key === root || key.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
-        }).map(entry => ({ id: createHash('sha256').update(this.key(entry.path)).digest('hex'), count: entry.count })) };
-      }),
+      folders,
       recentFolders: entries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8).map(entry => ({ path: clientPath(entry.path), updatedAt: entry.updatedAt })),
     };
   }
