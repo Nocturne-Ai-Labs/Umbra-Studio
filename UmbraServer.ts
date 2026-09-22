@@ -3693,11 +3693,13 @@ async function isComfyWsTargetReachable(targetUrl: string, timeoutMs = 650): Pro
   try {
     const parsed = new URL(targetUrl);
     parsed.protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:';
-    parsed.pathname = '/system_stats';
+    // Reachability must not wait on CUDA allocator statistics during generation.
+    parsed.pathname = '/queue';
     parsed.search = '';
     parsed.hash = '';
     const response = await fetch(parsed.toString(), {
       cache: 'no-store',
+      signal: AbortSignal.timeout(timeoutMs),
     });
     return response.ok;
   } catch {
