@@ -8771,97 +8771,99 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         let scannedFolders = 0;
         let failedFolders = 0;
 
-        while (queueIndex < queue.length && scannedFolders < GLOBAL_SEARCH_MAX_FOLDERS) {
-          if (controller.signal.aborted) return;
-          const folderPath = normalizePath(queue[queueIndex++]);
-          const folderKey = folderPath.toLowerCase();
-          if (!folderPath || isTrashPath(folderPath) || visited.has(folderKey)) continue;
-          visited.add(folderKey);
-          scannedFolders += 1;
-
-          const matchedFolders: GalleryFolder[] = [];
-          if (textMatchesSearch(pathLeaf(folderPath) || folderPath, searchNeedle) || textMatchesSearch(folderPath, searchNeedle)) {
-            matchedFolders.push({ name: pathLeaf(folderPath) || folderPath, path: folderPath });
-          }
-
-          try {
+        const scanNextFolder = async () => {
+          while (queueIndex < queue.length && scannedFolders < GLOBAL_SEARCH_MAX_FOLDERS) {
             if (controller.signal.aborted) return;
-            const params = new URLSearchParams({
-              path: folderPath,
-              sortBy,
-              sortOrder,
-              fast: '1',
-              recursive: 'false',
-            });
-            const response = await fetchGalleryFs('/list-progressive', params, {
-              cache: 'no-store',
-              signal: controller.signal,
-            }, (page) => {
+            const folderPath = normalizePath(queue[queueIndex++]);
+            const folderKey = folderPath.toLowerCase();
+            if (!folderPath || isTrashPath(folderPath) || visited.has(folderKey)) continue;
+            visited.add(folderKey);
+            scannedFolders += 1;
+
+            const matchedFolders: GalleryFolder[] = [];
+            if (textMatchesSearch(pathLeaf(folderPath) || folderPath, searchNeedle) || textMatchesSearch(folderPath, searchNeedle)) {
+              matchedFolders.push({ name: pathLeaf(folderPath) || folderPath, path: folderPath });
+            }
+
+            try {
               if (controller.signal.aborted) return;
+              const params = new URLSearchParams({
+                path: folderPath,
+                sortBy,
+                sortOrder,
+                fast: '1',
+                recursive: 'false',
+              });
+              const response = await fetchGalleryFs('/list-progressive', params, {
+                cache: 'no-store',
+                signal: controller.signal,
+              }, (page) => {
+                if (controller.signal.aborted) return;
+                appendResults({
+                  files: (page.files || [])
+                    .map((file, index) => normalizeGalleryFile(file as unknown as GalleryFile, index))
+                    .filter((file) => fileMatchesSearch(file, searchNeedle)),
+                  folders: matchedFolders,
+                  scannedFolders,
+                  done: false,
+                });
+              });
+              const payload: GalleryListPayload & { error?: string } = await response.json();
+              if (!response.ok) throw new Error(String(payload?.error || 'Gallery search failed'));
+              if (payload?.missing) throw new Error('Folder is currently unavailable');
+              if (controller.signal.aborted) return;
+              if (!payload || !Array.isArray(payload.files)) throw new Error('Invalid folder listing');
+              const folderFiles = payload.files
+                .map((file, index) => normalizeGalleryFile(file, index))
+                .filter((file) => fileMatchesSearch(file, searchNeedle));
               appendResults({
-                files: (page.files || [])
-                  .map((file, index) => normalizeGalleryFile(file as unknown as GalleryFile, index))
-                  .filter((file) => fileMatchesSearch(file, searchNeedle)),
+                files: folderFiles,
                 folders: matchedFolders,
                 scannedFolders,
                 done: false,
               });
-            });
-            const payload: GalleryListPayload & { error?: string } = await response.json();
-            if (!response.ok) throw new Error(String(payload?.error || 'Gallery search failed'));
-            if (payload?.missing) throw new Error('Folder is currently unavailable');
-            if (controller.signal.aborted) return;
-            if (!payload || !Array.isArray(payload.files)) throw new Error('Invalid folder listing');
-            const folderFiles = payload.files
-              .map((file, index) => normalizeGalleryFile(file, index))
-              .filter((file) => fileMatchesSearch(file, searchNeedle));
-            appendResults({
-              files: folderFiles,
-              folders: matchedFolders,
-              scannedFolders,
-              done: false,
-            });
-
-          } catch (folderError) {
-            if (controller.signal.aborted) return;
-            failedFolders += 1;
-            const message = folderError instanceof Error ? folderError.message : 'Folder unavailable';
-            setSearchError(`Search incomplete: ${failedFolders} scan failure${failedFolders === 1 ? '' : 's'}. ${message}`);
-            appendResults({ folders: matchedFolders, scannedFolders, done: false });
-          }
-
-          // A failed media listing must not hide accessible descendants. Keep this
-          // search-owned request cancellable and independent of sidebar tree state.
-          try {
-            controller.signal.throwIfAborted();
-            const treeResponse = await fetchGalleryFs('/tree', new URLSearchParams({
-              path: folderPath, maxDepth: '0', force: '1', shallow: '1',
-            }), { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(TREE_FETCH_TIMEOUT_MS)]) });
-            const treePayload = await treeResponse.json();
-            if (!treeResponse.ok || treePayload?.missing || !Array.isArray(treePayload?.folders)) {
-              throw new Error(String(treePayload?.error || 'Folder tree is currently unavailable'));
+            } catch (folderError) {
+              if (controller.signal.aborted) return;
+              failedFolders += 1;
+              const message = folderError instanceof Error ? folderError.message : 'Folder unavailable';
+              setSearchError(`Search incomplete: ${failedFolders} scan failure${failedFolders === 1 ? '' : 's'}. ${message}`);
+              appendResults({ folders: matchedFolders, scannedFolders, done: false });
             }
-            const children: GalleryFolderTreeNode[] = treePayload.folders;
-            if (controller.signal.aborted) return;
-            const childMatches: GalleryFolder[] = [];
-            for (const child of children) {
-              const childPath = normalizePath(child.path);
-              const childKey = childPath.toLowerCase();
-              if (!childPath || visited.has(childKey)) continue;
-              queue.push(childPath);
-              if (textMatchesSearch(child.name || pathLeaf(childPath), searchNeedle) || textMatchesSearch(childPath, searchNeedle)) {
-                childMatches.push({ name: child.name || pathLeaf(childPath) || childPath, path: childPath });
+
+            // A failed media listing must not hide accessible descendants. Keep this
+            // search-owned request cancellable and independent of sidebar tree state.
+            try {
+              controller.signal.throwIfAborted();
+              const treeResponse = await fetchGalleryFs('/tree', new URLSearchParams({
+                path: folderPath, maxDepth: '0', force: '1', shallow: '1',
+              }), { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(TREE_FETCH_TIMEOUT_MS)]) });
+              const treePayload = await treeResponse.json();
+              if (!treeResponse.ok || treePayload?.missing || !Array.isArray(treePayload?.folders)) {
+                throw new Error(String(treePayload?.error || 'Folder tree is currently unavailable'));
               }
+              const children: GalleryFolderTreeNode[] = treePayload.folders;
+              if (controller.signal.aborted) return;
+              const childMatches: GalleryFolder[] = [];
+              for (const child of children) {
+                const childPath = normalizePath(child.path);
+                const childKey = childPath.toLowerCase();
+                if (!childPath || visited.has(childKey)) continue;
+                queue.push(childPath);
+                if (textMatchesSearch(child.name || pathLeaf(childPath), searchNeedle) || textMatchesSearch(childPath, searchNeedle)) {
+                  childMatches.push({ name: child.name || pathLeaf(childPath) || childPath, path: childPath });
+                }
+              }
+              if (childMatches.length > 0) appendResults({ folders: childMatches, scannedFolders, done: false });
+            } catch (folderError) {
+              if (controller.signal.aborted) return;
+              failedFolders += 1;
+              const message = folderError instanceof Error ? folderError.message : 'Folder unavailable';
+              setSearchError(`Search incomplete: ${failedFolders} scan failure${failedFolders === 1 ? '' : 's'}. ${message}`);
+              appendResults({ scannedFolders, done: false });
             }
-            if (childMatches.length > 0) appendResults({ folders: childMatches, scannedFolders, done: false });
-          } catch (folderError) {
-            if (controller.signal.aborted) return;
-            failedFolders += 1;
-            const message = folderError instanceof Error ? folderError.message : 'Folder unavailable';
-            setSearchError(`Search incomplete: ${failedFolders} scan failure${failedFolders === 1 ? '' : 's'}. ${message}`);
-            appendResults({ scannedFolders, done: false });
           }
-        }
+        };
+        await Promise.all(Array.from({ length: Math.min(3, queue.length) }, () => scanNextFolder()));
 
         if (controller.signal.aborted) return;
         const limitReached = queue.slice(queueIndex).some((path) => normalizePath(path) && !isTrashPath(path) && !visited.has(normalizePath(path).toLowerCase()));
