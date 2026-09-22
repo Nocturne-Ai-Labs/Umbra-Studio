@@ -24050,15 +24050,17 @@ function getPPQueueRequestHistoryId(requestId: string): string {
 
 async function listPPQueueHistory() {
   const items = await ppHistoryStore.list();
-  for (let index = 0; index < items.length; index++) {
-    const item = items[index];
-    if (item.backendOwned && item.updatedAt < ppHistoryBootStartedAt
+  const stale = items.map((item, index) => ({ item, index })).filter(({ item }) =>
+    item.backendOwned && item.updatedAt < ppHistoryBootStartedAt
       && (item.status === 'queued' || item.status === 'running')
-      && !ppBackendHistory.has(item.requestId || '')) {
+      && !ppBackendHistory.has(item.requestId || ''),
+  );
+  for (let offset = 0; offset < stale.length; offset += 8) {
+    await Promise.all(stale.slice(offset, offset + 8).map(async ({ item, index }) => {
       // A stopped backend cannot finish its old queue. Keep unfinished prompts
       // available for resume instead of counting them as canceled.
       items[index] = await updatePPQueueHistory(item.id, { status: 'interrupted' }, true) || item;
-    }
+    }));
   }
   return items.sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt);
 }
