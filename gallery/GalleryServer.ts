@@ -1028,6 +1028,9 @@ async function proxyToMain(req: Request, reqUrl: URL): Promise<Response> {
 
   const bridgePath = reqUrl.pathname.replace(/^\/bridge/, '') || '/';
   const targetUrl = new URL(`${bridgePath}${reqUrl.search}`, BRIDGE_URL);
+  if (targetUrl.origin !== new URL(BRIDGE_URL).origin) {
+    return json({ error: 'Gallery bridge target denied' }, 400);
+  }
   const headers = new Headers(req.headers);
   headers.delete('host');
   headers.delete('origin');
