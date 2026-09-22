@@ -8766,13 +8766,14 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
 
       (async () => {
         const queue = [...searchableRoots];
+        let queueIndex = 0;
         const visited = new Set<string>();
         let scannedFolders = 0;
         let failedFolders = 0;
 
-        while (queue.length > 0 && scannedFolders < GLOBAL_SEARCH_MAX_FOLDERS) {
+        while (queueIndex < queue.length && scannedFolders < GLOBAL_SEARCH_MAX_FOLDERS) {
           if (controller.signal.aborted) return;
-          const folderPath = normalizePath(queue.shift());
+          const folderPath = normalizePath(queue[queueIndex++]);
           const folderKey = folderPath.toLowerCase();
           if (!folderPath || isTrashPath(folderPath) || visited.has(folderKey)) continue;
           visited.add(folderKey);
@@ -8863,7 +8864,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         }
 
         if (controller.signal.aborted) return;
-        const limitReached = queue.some((path) => normalizePath(path) && !isTrashPath(path) && !visited.has(normalizePath(path).toLowerCase()));
+        const limitReached = queue.slice(queueIndex).some((path) => normalizePath(path) && !isTrashPath(path) && !visited.has(normalizePath(path).toLowerCase()));
         if (limitReached) setSearchError(`Search incomplete: the ${GLOBAL_SEARCH_MAX_FOLDERS.toLocaleString()} folder scan limit was reached.${failedFolders ? ` ${failedFolders} folders could not be fully scanned.` : ''}`);
         const done = failedFolders === 0 && !limitReached;
         appendResults({ scannedFolders, done });
