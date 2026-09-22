@@ -1,3 +1,4 @@
+import { normalizeMiniMaxH3Guides } from '../../../shared/umbra-ui/minimaxH3Guides';
 import { normalizeMiniMaxH3Turbo } from '../../../shared/umbra-ui/minimaxH3Turbo';
 import type {
   PowerPrompterAutocompleteMode,
@@ -530,6 +531,7 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
       shiftAudio: 5,
       referenceImageSize: 'match',
       referenceNotes: ['', '', ''],
+      guides: [],
       ...normalizeMiniMaxH3Turbo({}),
       // Acceleration is opt-in; preserve explicit choices when restoring saved jobs.
       sageAttention: 'disabled',
@@ -1120,6 +1122,7 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
       shiftAudio: clampNumber(minimaxH3.shiftAudio, 5, 0.01, 100),
       referenceImageSize: String(minimaxH3.referenceImageSize || '').trim().toLowerCase() === 'max' ? 'max' : 'match',
       referenceNotes: [0, 1, 2].map((index) => String(Array.isArray(minimaxH3.referenceNotes) ? minimaxH3.referenceNotes[index] || '' : '').trim().slice(0, 500)) as [string, string, string],
+      guides: normalizeMiniMaxH3Guides(minimaxH3.guides),
       ...normalizeMiniMaxH3Turbo(minimaxH3),
       sageAttention: String(minimaxH3.sageAttention || '').trim().toLowerCase() === 'auto' ? 'auto' : 'disabled',
       allowCompile: minimaxH3.allowCompile === true,

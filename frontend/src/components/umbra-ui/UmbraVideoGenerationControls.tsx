@@ -1,4 +1,5 @@
 'use client';
+import { miniMaxH3GuideIssue, normalizeMiniMaxH3Guides } from '../../../../shared/umbra-ui/minimaxH3Guides';
 import { MINIMAX_H3_TURBO_PRESETS, miniMaxH3TurboIssue, miniMaxH3TurboSamplingPreset, type MiniMaxH3TurboPreset } from '../../../../shared/umbra-ui/minimaxH3Turbo';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
@@ -276,6 +277,7 @@ function createDefaultVideoControls(): PowerPrompterVideoControls {
       shiftAudio: 5,
       referenceImageSize: 'match',
       referenceNotes: ['', '', ''],
+      guides: [],
       turboPreset: 'none',
       turboLora: '',
       turboStrength: 1,
@@ -805,6 +807,10 @@ export function UmbraVideoGenerationControls({
             ...savedVideo,
             postprocess: { ...defaults.postprocess, ...(savedVideo.postprocess || {}) },
             wan: { ...defaults.wan, ...(savedVideo.wan || {}) },
+            minimaxH3: {
+              ...defaults.minimaxH3, ...(savedVideo.minimaxH3 || {}),
+              guides: normalizeMiniMaxH3Guides(savedVideo.minimaxH3?.guides),
+            },
             ltx: {
               ...defaults.ltx,
               ...(savedVideo.ltx || {}),
@@ -983,6 +989,7 @@ export function UmbraVideoGenerationControls({
       minimaxH3: {
         ...defaults.minimaxH3,
         ...(editorDraft.video.minimaxH3 || {}),
+        guides: normalizeMiniMaxH3Guides(editorDraft.video.minimaxH3?.guides),
       },
     });
     setSourcePreviewUrl(editorDraft.video.sourceImagePath
@@ -1454,7 +1461,8 @@ export function UmbraVideoGenerationControls({
     && !extendedOpen
     && (!video.sourceWidth || !video.sourceHeight);
   const turboIssue = video.family === 'minimax_h3'
-    ? miniMaxH3TurboIssue(video.minimaxH3, video.mode === 'reference_to_video')
+    ? miniMaxH3GuideIssue(video.minimaxH3.guides, video.frames, video.mode === 'reference_to_video')
+      || miniMaxH3TurboIssue(video.minimaxH3, video.mode === 'reference_to_video')
       || (video.minimaxH3.turboPreset !== 'none' && !catalog.loras.some((name) => name.replace(/\\/g, '/') === video.minimaxH3.turboLora)
         ? 'Install the matching Turbo pack in Umbra Setup > Models, refresh the catalog, and select the LoRA.' : '')
     : '';
@@ -2364,6 +2372,28 @@ export function UmbraVideoGenerationControls({
             </>
           )}
         </VideoAccordion>
+
+        {video.family === 'minimax_h3' ? <VideoAccordion
+          title="Timed Guides"
+          icon={<ImageIcon size={11} className="text-fuchsia-300" />}
+          summary={`${video.minimaxH3.guides.length} anchors`}
+        >
+          <p className="text-[10px] leading-relaxed text-zinc-400">Anchor an image or audio at a frame in Text to Video or Image to Video. Frame 0 is the start; -1 is the final frame. Audio is trimmed to the remaining duration.</p>
+          {video.minimaxH3.guides.map((guide, index) => {
+            const update = (patch: Partial<typeof guide>) => setMiniMaxH3('guides', video.minimaxH3.guides.map((entry, i) => i === index ? { ...entry, ...patch } : entry));
+            return <div key={guide.id} className="space-y-2 border-t border-white/10 pt-2">
+              <div className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
+                <SelectField label="Guide Type" value={guide.kind === 'image' ? 'Image' : 'Audio'} values={['Image', 'Audio']} onChange={(value) => update({ kind: value === 'Audio' ? 'audio' : 'image', sourcePath: '', sourceName: '' })} />
+                <NumberField label="Frame" value={guide.frameIndex} min={-video.frames} max={video.frames - 1} onChange={(value) => update({ frameIndex: Math.round(value) })} />
+                <button type="button" title={`Remove timed guide ${index + 1}`} className="h-8 px-2 text-zinc-400" onClick={() => setMiniMaxH3('guides', video.minimaxH3.guides.filter((_, i) => i !== index))}><X size={12} /></button>
+              </div>
+              {guide.kind === 'image' ? <FrameSourceField label={`Guide ${index + 1}`} path={guide.sourcePath} onChange={(path) => update({ sourcePath: path, sourceName: '' })} onClear={() => update({ sourcePath: '', sourceName: '' })} />
+                : <MediaSourceField kind="audio" label={`Guide ${index + 1}`} path={guide.sourcePath} onChange={(path) => update({ sourcePath: path, sourceName: '' })} onUploaded={(path, name) => update({ sourcePath: path, sourceName: name })} onClear={() => update({ sourcePath: '', sourceName: '' })} />}
+            </div>;
+          })}
+          <button type="button" disabled={video.minimaxH3.guides.length >= 16 || video.mode === 'reference_to_video'} className="w-full rounded-md border border-white/10 px-2 py-2 text-xs text-zinc-300 disabled:opacity-40" onClick={() => setMiniMaxH3('guides', [...video.minimaxH3.guides, { id: crypto.randomUUID(), kind: 'image', sourcePath: '', sourceName: '', frameIndex: 0 }])}>Add timed guide</button>
+          {miniMaxH3GuideIssue(video.minimaxH3.guides, video.frames, video.mode === 'reference_to_video') ? <p className="text-[10px] text-amber-200">{miniMaxH3GuideIssue(video.minimaxH3.guides, video.frames, video.mode === 'reference_to_video')}</p> : null}
+        </VideoAccordion> : null}
 
         {video.family === 'minimax_h3' ? <VideoAccordion
           title="Turbo LoRA (Experimental)"

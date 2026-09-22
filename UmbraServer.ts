@@ -1,3 +1,4 @@
+import { normalizeMiniMaxH3Guides, type MiniMaxH3Guide } from './shared/umbra-ui/minimaxH3Guides';
 import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
 /**
  * Umbra backend entrypoint.
@@ -7,7 +8,7 @@ import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
  * reduce runtime confusion and make the packaged app easier to maintain.
  */
 
-import { applyMiniMaxH3Acceleration, assertMiniMaxH3TurboInstalled, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
+import { applyMiniMaxH3Acceleration, assertMiniMaxH3TurboInstalled, assertMiniMaxH3GuidesInstalled, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { configureGeneratedMediaActivity, recordGeneratedMediaOutputs } from './backend/GeneratedMediaActivity';
 import { createCaptionCategoryFilter } from './backend/DatasetCaptionCategories';
@@ -8022,7 +8023,7 @@ function compileUmbraUiPipelineWorkflow(
   applyPPWanVideoTopology(promptGraph, videoRoleEntries, generation);
   applyPPWanVid2VidTopology(videoRoleEntries, generation);
   if (generation.mediaType === 'video' && generation.video?.family === 'minimax_h3') {
-    applyMiniMaxH3Acceleration(promptGraph, generation.video.minimaxH3);
+    applyMiniMaxH3Acceleration(promptGraph, { ...generation.video.minimaxH3, guideFrameCount: generation.video.frames });
   }
   applyPPMiniMaxH3ReferenceTopology(videoRoleEntries, generation);
   applyPPLtxVideoTopology(promptGraph, videoRoleEntries, generation, activePrompt);
@@ -16875,6 +16876,7 @@ interface PowerPrompterVideoControls {
     }>;
   };
   minimaxH3: {
+    guides: MiniMaxH3Guide[];
     turboPreset: 'none' | 'fl2va-v4-8step' | 'ref2va-4step';
     turboLora: string;
     turboStrength: number;
@@ -17206,6 +17208,7 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
       shiftAudio: 5,
       referenceImageSize: 'match',
       referenceNotes: ['', '', ''],
+      guides: [],
       ...normalizeMiniMaxH3Turbo({}),
       // Acceleration is opt-in; preserve explicit choices when restoring saved jobs.
       sageAttention: 'disabled',
@@ -18936,6 +18939,7 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
       shiftAudio: clampPPNumber(minimaxH3.shiftAudio, 5, 0.01, 100),
       referenceImageSize: String(minimaxH3.referenceImageSize || '').trim().toLowerCase() === 'max' ? 'max' : 'match',
       referenceNotes: [0, 1, 2].map((index) => String(Array.isArray(minimaxH3.referenceNotes) ? minimaxH3.referenceNotes[index] || '' : '').trim().slice(0, 500)) as [string, string, string],
+      guides: normalizeMiniMaxH3Guides(minimaxH3.guides),
       ...normalizeMiniMaxH3Turbo(minimaxH3),
       sageAttention: String(minimaxH3.sageAttention || '').trim().toLowerCase() === 'auto' ? 'auto' : 'disabled',
       allowCompile: minimaxH3.allowCompile === true,
@@ -22617,9 +22621,9 @@ let ppComfyObjectInfoCache: { expiresAt: number; objectInfo: Record<string, unkn
   objectInfo: null,
 };
 
-async function getPPComfyObjectInfoForValidation(): Promise<Record<string, unknown> | null> {
+async function getPPComfyObjectInfoForValidation(forceRefresh = false): Promise<Record<string, unknown> | null> {
   const now = Date.now();
-  if (ppComfyObjectInfoCache.expiresAt > now) return ppComfyObjectInfoCache.objectInfo;
+  if (!forceRefresh && ppComfyObjectInfoCache.expiresAt > now) return ppComfyObjectInfoCache.objectInfo;
   try {
     const response = await fetch(`${getComfyProxyBaseUrl()}/object_info`, {
       cache: 'no-store',
@@ -22827,7 +22831,8 @@ function formatUmbraUiQueueResourceIssue(issue: UmbraUiQueueResourceIssue): stri
 }
 
 async function createPPQueueValidationContext() {
-  const objectInfo = await getPPComfyObjectInfoForValidation();
+  // Media can be staged immediately before enqueue; validate against the live catalog.
+  const objectInfo = await getPPComfyObjectInfoForValidation(true);
   return {
     availableClassTypes: objectInfo ? new Set(Object.keys(objectInfo)) : null,
     objectInfo,
@@ -22858,7 +22863,7 @@ async function assertPPApiWorkflowExecutionReady(
   const generation = normalizePPGenerationControls(generationInput);
   const isMiniMaxH3 = generation.mediaType === 'video' && generation.video?.family === 'minimax_h3';
   if (isMiniMaxH3 || !validationContext.validatedWorkflows.has(loaded)) {
-    const validation = validatePPApiWorkflowDocument(loaded.document, validationContext.availableClassTypes, isMiniMaxH3 ? generation.video.minimaxH3 : {});
+    const validation = validatePPApiWorkflowDocument(loaded.document, validationContext.availableClassTypes, isMiniMaxH3 ? { ...generation.video.minimaxH3, guideFrameCount: generation.video.frames } : {});
     if (!validation.ok) {
       throw new Error(`Selected generation pipeline has an invalid graph: ${validation.graph.issues.join(', ') || 'unknown graph issue'}.`);
     }
@@ -22867,6 +22872,7 @@ async function assertPPApiWorkflowExecutionReady(
     validationContext.validatedWorkflows.add(loaded);
   }
   if (isMiniMaxH3) assertMiniMaxH3TurboInstalled(generation.video.minimaxH3, validationContext.objectInfo);
+  if (isMiniMaxH3) assertMiniMaxH3GuidesInstalled(generation.video.minimaxH3, validationContext.objectInfo);
   const catalog = validationContext.catalog;
   if (generation.outputOwner === 'umbra_ui' && generation.outputFolder) {
     await assertUmbraUiPinnedOutputAvailable(
