@@ -22,6 +22,16 @@ export interface UmbraUiPipelineMatch<T extends UmbraUiPipelineWorkflowItem> {
   error: string;
 }
 
+export function mergeUmbraUiWorkflowCatalog<T extends UmbraUiPipelineWorkflowItem>(
+  userWorkflows: T[],
+  bundledWorkflows: T[],
+): T[] {
+  // Managed pipelines use the shipped graph, not an older seeded user copy.
+  const workflows = new Map(userWorkflows.map((workflow) => [workflow.id, workflow]));
+  for (const workflow of bundledWorkflows) workflows.set(workflow.id, workflow);
+  return [...workflows.values()];
+}
+
 export function listUmbraUiPipelineFamilies<T extends UmbraUiPipelineWorkflowItem>(
   workflows: T[],
   featureInput: UmbraUiPipelineFeature | string,

@@ -34860,11 +34860,13 @@ const server = Bun.serve<UmbraSocketData>({
       }
 
       if (path === '/api/umbra-ui/pipelines' && method === 'GET') {
-        const pipelines = await listUmbraUiPipelines();
+        const items = await listBundledUmbraUiWorkflows();
+        const pipelines = buildUmbraUiPipelineRegistry(items);
         return json({
           success: true,
           autoPipelineId: UMBRA_UI_AUTO_PIPELINE_ID,
           pipelines,
+          items,
         });
       }
 

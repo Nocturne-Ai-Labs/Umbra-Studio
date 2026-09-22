@@ -18,7 +18,7 @@ import {
   type UmbraUiLoraEntry,
 } from '@/lib/umbraUiModels';
 import { readUmbraObjectInfoRequiredInputs } from '@/lib/umbraUiObjectInfo';
-import { resolveUmbraUiPipeline } from '@/lib/umbraUiPipelines';
+import { mergeUmbraUiWorkflowCatalog, resolveUmbraUiPipeline } from '@/lib/umbraUiPipelines';
 import {
   createUmbraUiPipelineTargetId,
   filterUmbraUiDetailerStages,
@@ -748,7 +748,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         if (!pipelineResponse.ok || pipelinePayload?.success === false) {
           throw new Error(pipelinePayload?.error || 'Failed to load Umbra UI pipelines.');
         }
-        const items = Array.isArray(workflowPayload?.items) ? workflowPayload.items as ApiWorkflowItem[] : [];
+        const items = mergeUmbraUiWorkflowCatalog(
+          Array.isArray(workflowPayload?.items) ? workflowPayload.items as ApiWorkflowItem[] : [],
+          Array.isArray(pipelinePayload?.items) ? pipelinePayload.items as ApiWorkflowItem[] : [],
+        );
         const pipelines = Array.isArray(pipelinePayload?.pipelines)
           ? pipelinePayload.pipelines as Array<UmbraUiPipelineDescriptor & { workflowId?: string }>
           : [];
