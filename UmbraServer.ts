@@ -11894,6 +11894,7 @@ async function isGalleryBridgeHealthy(options?: { allowCached?: boolean }): Prom
   try {
     const response = await fetch(`${getGalleryBridgeBaseUrl()}/health`, {
       method: 'GET',
+      headers: { 'x-umbra-gallery-bridge-token': GALLERY_BRIDGE_TOKEN },
       signal: AbortSignal.timeout(GALLERY_BRIDGE_HEALTH_TIMEOUT_MS),
     });
     if (!response.ok) {
@@ -11907,8 +11908,10 @@ async function isGalleryBridgeHealthy(options?: { allowCached?: boolean }): Prom
       return false;
     }
     const bridgeRoot = String(payload?.rootDir || '').trim();
+    const bridgeUrl = String(payload?.bridgeUrl || '').trim();
     const bridgePublicDir = String(payload?.publicDir || '').trim();
     const expectedRoot = normalizePathForCompare(ROOT_DIR);
+    const expectedBridgeUrl = `http://127.0.0.1:${PORT}`;
     const expectedPublicDir = normalizePathForCompare(GALLERY_PUBLIC_DIR);
     const hasRoot = bridgeRoot.length > 0;
     const hasPublicDir = bridgePublicDir.length > 0;
@@ -11918,10 +11921,12 @@ async function isGalleryBridgeHealthy(options?: { allowCached?: boolean }): Prom
     const publicDirMatches = hasPublicDir
       ? normalizePathForCompare(bridgePublicDir) === expectedPublicDir
       : true;
-    if ((hasRoot && !rootMatches) || (hasPublicDir && !publicDirMatches)) {
+    if ((hasRoot && !rootMatches) || bridgeUrl !== expectedBridgeUrl || (hasPublicDir && !publicDirMatches)) {
       appendBackendLifecycleLog('gallery', 'health_rejected_wrong_root', {
         bridgeRoot: bridgeRoot || null,
         expectedRoot: ROOT_DIR,
+        bridgeUrl: bridgeUrl || null,
+        expectedBridgeUrl,
         bridgePublicDir: bridgePublicDir || null,
         expectedPublicDir: GALLERY_PUBLIC_DIR,
       });
@@ -12532,41 +12537,6 @@ async function stopProcessTree(proc: ChildProcess | null, label: string): Promis
     return await waitForPidExit(pid, 3000);
   } catch (err: any) {
     console.error(`[${label}] Failed to stop process tree:`, err?.message || err);
-    return false;
-  }
-}
-
-async function stopByPort(port: number, label: string): Promise<boolean> {
-  const wasOpen = await isPortOpen(port);
-  if (!wasOpen) return true;
-
-  try {
-    if (IS_WINDOWS) {
-      const ps = [
-        '$ErrorActionPreference = "SilentlyContinue"',
-        `$pids = Get-NetTCPConnection -LocalPort ${port} -State Listen | Select-Object -ExpandProperty OwningProcess -Unique`,
-        'foreach ($pidValue in $pids) {',
-        '  try { Stop-Process -Id $pidValue -Force -ErrorAction SilentlyContinue } catch {}',
-        '}',
-      ].join('; ');
-      spawnSync(
-        'powershell',
-        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ps],
-        { stdio: 'ignore' }
-      );
-      await sleep(1200);
-      return !(await isPortOpen(port));
-    }
-
-    spawnSync('bash', ['-lc', `lsof -ti tcp:${port} 2>/dev/null | xargs -r kill -TERM; fuser -k -TERM ${port}/tcp >/dev/null 2>&1 || true`], { stdio: 'ignore' });
-    await sleep(1200);
-    if (await isPortOpen(port)) {
-      spawnSync('bash', ['-lc', `lsof -ti tcp:${port} 2>/dev/null | xargs -r kill -KILL; fuser -k -KILL ${port}/tcp >/dev/null 2>&1 || true`], { stdio: 'ignore' });
-      await sleep(800);
-    }
-    return !(await isPortOpen(port));
-  } catch (err: any) {
-    console.error(`[${label}] Failed to stop by port ${port}:`, err?.message || err);
     return false;
   }
 }
@@ -15570,27 +15540,20 @@ async function startGalleryBridgeInternal() {
 
   const occupiedGalleryPortPids = listPidsByPort(GALLERY_BRIDGE_PORT).filter((pid) => pid !== process.pid);
   if (occupiedGalleryPortPids.length > 0) {
-    appendBackendLifecycleLog('gallery', 'unhealthy_port_listener_detected', {
+    appendBackendLifecycleLog('gallery', 'unowned_port_listener_preserved', {
       port: GALLERY_BRIDGE_PORT,
       pids: occupiedGalleryPortPids,
     });
-    const released = await stopByPort(GALLERY_BRIDGE_PORT, 'Gallery bridge');
-    appendBackendLifecycleLog('gallery', released ? 'unhealthy_port_listener_released' : 'unhealthy_port_listener_release_failed', {
+    return {
+      success: false,
+      error: `Gallery bridge port ${GALLERY_BRIDGE_PORT} belongs to another process. Choose a different UMBRA_GALLERY_PORT.`,
+      running: false,
+      healthy: false,
+      host: getGalleryBridgeHostForClient(),
       port: GALLERY_BRIDGE_PORT,
-      pids: occupiedGalleryPortPids,
-    });
-    if (!released) {
-      return {
-        success: false,
-        error: `Gallery bridge port ${GALLERY_BRIDGE_PORT} is occupied by an unhealthy process`,
-        running: false,
-        healthy: false,
-        host: getGalleryBridgeHostForClient(),
-        port: GALLERY_BRIDGE_PORT,
-        url: GALLERY_IN_PROCESS_WORKSPACE_URL,
-        mode: 'split-process',
-      };
-    }
+      url: GALLERY_IN_PROCESS_WORKSPACE_URL,
+      mode: 'split-process',
+    };
   }
 
   if (!existsSync(GALLERY_BRIDGE_SERVER_ENTRY)) {
@@ -15822,13 +15785,6 @@ async function stopGalleryBridge() {
     stopped = await stopProcessTree(proc, 'Gallery bridge');
   }
 
-  let stoppedByPort = await stopByPort(GALLERY_BRIDGE_PORT, 'Gallery bridge');
-  if (!stoppedByPort) {
-    stoppedByPort = await waitForPortClosed(GALLERY_BRIDGE_PORT, 2500);
-  }
-  if (stoppedByPort) hadRunning = true;
-  stopped = stopped || stoppedByPort;
-
   galleryBridgeProcess = null;
   galleryBridgeStartTime = null;
   clearGalleryProcessTelemetry();
@@ -15839,7 +15795,6 @@ async function stopGalleryBridge() {
     port: GALLERY_BRIDGE_PORT,
     hadRunning,
     stopped,
-    stoppedByPort,
     stillHealthy,
   });
   if (stillHealthy) {
@@ -15892,7 +15847,6 @@ async function restartGalleryBridgeForSelfHeal(reason: string, expectedPid: numb
   const wasDesired = galleryBridgeDesired;
   const proc = galleryBridgeProcess;
   const trackedPid = proc?.pid ?? null;
-  let stoppedStalePortPids = false;
   if (isChildProcessAlive(proc)) {
     logBackendProcessSnapshot('gallery', 'before_self_heal_restart', [proc?.pid], { reason, port: GALLERY_BRIDGE_PORT });
     await stopProcessTree(proc, 'Gallery bridge');
@@ -15901,14 +15855,12 @@ async function restartGalleryBridgeForSelfHeal(reason: string, expectedPid: numb
     .filter((pid) => pid !== process.pid)
     .filter((pid) => pid !== trackedPid);
   if (stalePortPids.length > 0) {
-    appendBackendLifecycleLog('gallery', 'self_heal_stale_port_cleanup_requested', {
+    appendBackendLifecycleLog('gallery', 'self_heal_unowned_port_listener_preserved', {
       reason,
       port: GALLERY_BRIDGE_PORT,
       trackedPid,
       pids: stalePortPids,
     });
-    stoppedStalePortPids = stopPids(stalePortPids, 'Gallery bridge stale port listener');
-    await sleep(1200);
   }
 
   galleryBridgeProcess = null;
@@ -15921,7 +15873,7 @@ async function restartGalleryBridgeForSelfHeal(reason: string, expectedPid: numb
   const result = await startGalleryBridge();
   appendBackendLifecycleLog('gallery', result?.success ? 'self_heal_restart_completed' : 'self_heal_restart_failed', {
     reason,
-    stoppedStalePortPids,
+    preservedPortPids: stalePortPids,
     success: result?.success === true,
     message: result?.message,
     error: result?.error,

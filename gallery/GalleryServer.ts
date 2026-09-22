@@ -2192,6 +2192,9 @@ const server = Bun.serve({
     if (req.method === 'OPTIONS') return corsPreflight(req, reqUrl);
 
     if (reqUrl.pathname === '/health') {
+      if (BRIDGE_TOKEN && req.headers.get('x-umbra-gallery-bridge-token') !== BRIDGE_TOKEN) {
+        return json({ error: 'Gallery bridge health denied' }, 403);
+      }
       return withTrustedCors(req, json({
         ok: true,
         host: HOST,
