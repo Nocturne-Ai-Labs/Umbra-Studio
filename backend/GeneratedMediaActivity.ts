@@ -54,7 +54,7 @@ export class GeneratedMediaActivity {
   }
 
   snapshot(paths: string[], allowed: (path: string) => boolean, clientPath: (path: string) => string) {
-    const entries = [...this.folders.values()].filter(entry => allowed(entry.path));
+    const entries = [...this.folders.entries()].filter(([, entry]) => allowed(entry.path));
     const folders = paths.map(path => ({ path, entries: [] as Array<{ id: string; count: number }> }));
     const requestedByKey = new Map<string, typeof folders>();
     for (const folder of folders) {
@@ -63,11 +63,15 @@ export class GeneratedMediaActivity {
       matching.push(folder);
       requestedByKey.set(key, matching);
     }
-    for (const entry of entries) {
-      const item = { id: createHash('sha256').update(this.key(entry.path)).digest('hex'), count: entry.count };
-      let ancestor = this.key(entry.path);
+    for (const [key, entry] of entries) {
+      let item: { id: string; count: number } | null = null;
+      let ancestor = key;
       while (true) {
-        for (const folder of requestedByKey.get(ancestor) || []) folder.entries.push(item);
+        const matching = requestedByKey.get(ancestor);
+        if (matching) {
+          item ||= { id: createHash('sha256').update(key).digest('hex'), count: entry.count };
+          for (const folder of matching) folder.entries.push(item);
+        }
         const parent = dirname(ancestor);
         if (parent === ancestor) break;
         ancestor = parent;
@@ -76,7 +80,7 @@ export class GeneratedMediaActivity {
     return {
       epoch: this.epoch,
       folders,
-      recentFolders: entries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8).map(entry => ({ path: clientPath(entry.path), updatedAt: entry.updatedAt })),
+      recentFolders: entries.sort((a, b) => b[1].updatedAt - a[1].updatedAt).slice(0, 8).map(([, entry]) => ({ path: clientPath(entry.path), updatedAt: entry.updatedAt })),
     };
   }
 
