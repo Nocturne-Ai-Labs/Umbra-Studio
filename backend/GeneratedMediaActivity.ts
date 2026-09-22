@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { dirname, extname, resolve } from 'node:path';
+import { dirname, extname, isAbsolute, resolve } from 'node:path';
 import { writeUpdateJsonAtomic } from '../shared/updateStateFile';
 
 const MEDIA = new Set(['.png', '.jpg', '.jpeg', '.webp', '.avif', '.bmp', '.tif', '.tiff', '.gif', '.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v', '.wmv']);
@@ -28,8 +28,16 @@ export class GeneratedMediaActivity {
     } catch { /* A missing/corrupt notification cache must not affect generation. */ }
   }
 
+  private resolvePath(path: string): string {
+    const portable = path.replace(/\\/g, '/');
+    const mapped = !isAbsolute(path) && (portable === 'User/Outputs' || portable.startsWith('User/Outputs/'))
+      ? `Tools/ComfyUI/output${portable.slice('User/Outputs'.length)}`
+      : path;
+    return resolve(this.root, mapped);
+  }
+
   private key(path: string): string {
-    const full = resolve(this.root, path);
+    const full = this.resolvePath(path);
     return process.platform === 'win32' ? full.toLowerCase() : full;
   }
 
@@ -37,7 +45,7 @@ export class GeneratedMediaActivity {
     let changed = false;
     for (const path of paths) {
       if (!path || !MEDIA.has(extname(path).toLowerCase())) continue;
-      const full = resolve(this.root, path);
+      const full = this.resolvePath(path);
       const id = createHash('sha256').update(this.key(full)).digest('hex');
       if (this.seen.has(id)) continue;
       this.seen.add(id);
