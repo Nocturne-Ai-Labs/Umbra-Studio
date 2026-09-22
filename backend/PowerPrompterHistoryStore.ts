@@ -121,12 +121,13 @@ export class PowerPrompterHistoryStore<S extends HistorySummary, Q> {
     try { entries = await fs.readdir(this.options.directory); }
     catch (error: any) { if (error?.code === 'ENOENT') return []; throw error; }
     const items: S[] = [];
-    for (const file of entries) {
-      if (!file.endsWith('.pphistory.json')) continue;
-      try {
-        const item = await this.summary(file.slice(0, -'.pphistory.json'.length));
-        if (item) items.push(item);
-      } catch { /* Leave damaged histories on disk for manual recovery. */ }
+    const files = entries.filter(file => file.endsWith('.pphistory.json'));
+    for (let offset = 0; offset < files.length; offset += 16) {
+      const batch = await Promise.all(files.slice(offset, offset + 16).map(async file => {
+        try { return await this.summary(file.slice(0, -'.pphistory.json'.length)); }
+        catch { return null; /* Leave damaged histories on disk for manual recovery. */ }
+      }));
+      for (const item of batch) if (item) items.push(item);
     }
     return items.sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt);
   }
