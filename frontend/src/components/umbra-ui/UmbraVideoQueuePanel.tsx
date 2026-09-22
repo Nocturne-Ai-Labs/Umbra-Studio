@@ -268,7 +268,7 @@ function SettingsChips({ video, sequence, seed, seedMode, seedIncrement }: {
     sequence ? `${sequence.totalDurationSeconds.toFixed(1)}s total` : '',
     sequence?.finalClip ? 'Final Clip' : '',
     video.family === 'ltx23' && video.ltx.storyboard?.enabled ? 'Umbra Director' : '',
-    video.mode === 'video_to_video' ? 'VID2VID' : video.mode === 'image_to_video' ? 'IMG2VID' : 'TXT2VID',
+    video.mode === 'video_to_video' ? 'VID2VID' : video.mode === 'reference_to_video' ? 'REF2VID' : video.mode === 'image_to_video' ? 'IMG2VID' : 'TXT2VID',
     `${video.width}x${video.height}`,
     `${resolveUmbraVideoDurationSeconds(video.frames, video.fps).toFixed(1)} seconds`,
     `${video.fps} FPS`,

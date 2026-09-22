@@ -1,3 +1,6 @@
+import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from './shared/umbra-ui/minimaxH3Defaults';
+import { normalizeMiniMaxH3Guides, type MiniMaxH3Guide } from './shared/umbra-ui/minimaxH3Guides';
+import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
 /**
  * Umbra backend entrypoint.
  *
@@ -6,6 +9,7 @@
  * reduce runtime confusion and make the packaged app easier to maintain.
  */
 
+import { applyMiniMaxH3Acceleration, assertMiniMaxH3TurboInstalled, assertMiniMaxH3GuidesInstalled, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { configureGeneratedMediaActivity, recordGeneratedMediaOutputs } from './backend/GeneratedMediaActivity';
 import { createCaptionCategoryFilter } from './backend/DatasetCaptionCategories';
@@ -3689,11 +3693,13 @@ async function isComfyWsTargetReachable(targetUrl: string, timeoutMs = 650): Pro
   try {
     const parsed = new URL(targetUrl);
     parsed.protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:';
-    parsed.pathname = '/system_stats';
+    // Reachability must not wait on CUDA allocator statistics during generation.
+    parsed.pathname = '/queue';
     parsed.search = '';
     parsed.hash = '';
     const response = await fetch(parsed.toString(), {
       cache: 'no-store',
+      signal: AbortSignal.timeout(timeoutMs),
     });
     return response.ok;
   } catch {
@@ -7140,48 +7146,6 @@ function applyPPMiniMaxH3ReferenceTopology(
   setPPApiNodeInput(conditioning.node, 'ref_images', references);
 }
 
-function applyPPMiniMaxH3AccelerationTopology(
-  roleEntries: Map<string, { id: string; node: any }>,
-  generation: PowerPrompterGenerationControls,
-) {
-  const video = generation.video;
-  if (generation.mediaType !== 'video' || !video || video.family !== 'minimax_h3') return;
-
-  const source = roleEntries.get('minimax_h3_model');
-  const sageAttention = roleEntries.get('minimax_h3_sage_attention');
-  const sigmaShift = roleEntries.get('minimax_h3_sigma_shift');
-  const easyCache = roleEntries.get('minimax_h3_easycache');
-  const guider = roleEntries.get('minimax_h3_guider');
-  const scheduler = roleEntries.get('minimax_h3_scheduler');
-  if (!source || !guider || !scheduler) {
-    throw new Error('The locked MiniMax H3 pipeline is missing its model, guider, or scheduler roles.');
-  }
-
-  let activeModel: [string, number] = [source.id, 0];
-  if (video.minimaxH3.sageAttention !== 'disabled' && sageAttention) {
-    setPPApiNodeInput(sageAttention.node, 'model', activeModel);
-    setPPApiNodeInput(sageAttention.node, 'sage_attention', 'auto');
-    setPPApiNodeInput(sageAttention.node, 'allow_compile', video.minimaxH3.allowCompile);
-    activeModel = [sageAttention.id, 0];
-  }
-  if (sigmaShift) {
-    setPPApiNodeInput(sigmaShift.node, 'model', activeModel);
-    setPPApiNodeInput(sigmaShift.node, 'shift_video', video.minimaxH3.shiftVideo);
-    setPPApiNodeInput(sigmaShift.node, 'shift_audio', video.minimaxH3.shiftAudio);
-    activeModel = [sigmaShift.id, 0];
-  }
-  if (video.minimaxH3.easyCacheEnabled && easyCache) {
-    setPPApiNodeInput(easyCache.node, 'model', activeModel);
-    setPPApiNodeInput(easyCache.node, 'reuse_threshold', video.minimaxH3.easyCacheReuseThreshold);
-    setPPApiNodeInput(easyCache.node, 'start_percent', video.minimaxH3.easyCacheStartPercent);
-    setPPApiNodeInput(easyCache.node, 'end_percent', video.minimaxH3.easyCacheEndPercent);
-    setPPApiNodeInput(easyCache.node, 'verbose', false);
-    activeModel = [easyCache.id, 0];
-  }
-  setPPApiNodeInput(guider.node, 'model', activeModel);
-  setPPApiNodeInput(scheduler.node, 'model', activeModel);
-}
-
 function trimPPVideoSigmas(rawSigmas: unknown, denoise: number): string {
   const values = String(rawSigmas || '')
     .split(',')
@@ -8061,7 +8025,9 @@ function compileUmbraUiPipelineWorkflow(
 
   applyPPWanVideoTopology(promptGraph, videoRoleEntries, generation);
   applyPPWanVid2VidTopology(videoRoleEntries, generation);
-  applyPPMiniMaxH3AccelerationTopology(videoRoleEntries, generation);
+  if (generation.mediaType === 'video' && generation.video?.family === 'minimax_h3') {
+    applyMiniMaxH3Acceleration(promptGraph, { ...generation.video.minimaxH3, guideFrameCount: generation.video.frames });
+  }
   applyPPMiniMaxH3ReferenceTopology(videoRoleEntries, generation);
   applyPPLtxVideoTopology(promptGraph, videoRoleEntries, generation, activePrompt);
   applyPPVideoSourceAudio(promptGraph, videoRoleEntries, generation);
@@ -16913,6 +16879,10 @@ interface PowerPrompterVideoControls {
     }>;
   };
   minimaxH3: {
+    guides: MiniMaxH3Guide[];
+    turboPreset: 'none' | 'fl2va-v4-8step' | 'ref2va-4step';
+    turboLora: string;
+    turboStrength: number;
     model: string;
     textEncoder: string;
     videoVae: string;
@@ -17235,15 +17205,18 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
     minimaxH3: {
       model: '',
       textEncoder: '',
-      videoVae: '',
+      videoVae: MINIMAX_H3_DEFAULT_VIDEO_VAE,
       audioVae: '',
       shiftVideo: 10,
       shiftAudio: 5,
       referenceImageSize: 'match',
       referenceNotes: ['', '', ''],
-      sageAttention: 'auto',
-      allowCompile: true,
-      easyCacheEnabled: true,
+      guides: [],
+      ...normalizeMiniMaxH3Turbo({}),
+      // Acceleration is opt-in; preserve explicit choices when restoring saved jobs.
+      sageAttention: 'disabled',
+      allowCompile: false,
+      easyCacheEnabled: false,
       easyCacheReuseThreshold: 0.2,
       easyCacheStartPercent: 0.15,
       easyCacheEndPercent: 0.95,
@@ -18963,15 +18936,17 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
     minimaxH3: {
       model: String(minimaxH3.model || '').trim().replace(/\\/g, '/'),
       textEncoder: String(minimaxH3.textEncoder || '').trim().replace(/\\/g, '/'),
-      videoVae: String(minimaxH3.videoVae || '').trim().replace(/\\/g, '/'),
+      videoVae: String(minimaxH3.videoVae ?? MINIMAX_H3_DEFAULT_VIDEO_VAE).trim().replace(/\\/g, '/'),
       audioVae: String(minimaxH3.audioVae || '').trim().replace(/\\/g, '/'),
       shiftVideo: clampPPNumber(minimaxH3.shiftVideo, 10, 0.01, 100),
       shiftAudio: clampPPNumber(minimaxH3.shiftAudio, 5, 0.01, 100),
       referenceImageSize: String(minimaxH3.referenceImageSize || '').trim().toLowerCase() === 'max' ? 'max' : 'match',
       referenceNotes: [0, 1, 2].map((index) => String(Array.isArray(minimaxH3.referenceNotes) ? minimaxH3.referenceNotes[index] || '' : '').trim().slice(0, 500)) as [string, string, string],
-      sageAttention: String(minimaxH3.sageAttention || '').trim().toLowerCase() === 'disabled' ? 'disabled' : 'auto',
-      allowCompile: minimaxH3.allowCompile !== false,
-      easyCacheEnabled: minimaxH3.easyCacheEnabled !== false,
+      guides: normalizeMiniMaxH3Guides(minimaxH3.guides),
+      ...normalizeMiniMaxH3Turbo(minimaxH3),
+      sageAttention: String(minimaxH3.sageAttention || '').trim().toLowerCase() === 'auto' ? 'auto' : 'disabled',
+      allowCompile: minimaxH3.allowCompile === true,
+      easyCacheEnabled: minimaxH3.easyCacheEnabled === true,
       easyCacheReuseThreshold: clampPPNumber(minimaxH3.easyCacheReuseThreshold, 0.2, 0, 3),
       easyCacheStartPercent: clampPPNumber(minimaxH3.easyCacheStartPercent, 0.15, 0, 1),
       easyCacheEndPercent: clampPPNumber(minimaxH3.easyCacheEndPercent, 0.95, 0, 1),
@@ -22649,9 +22624,9 @@ let ppComfyObjectInfoCache: { expiresAt: number; objectInfo: Record<string, unkn
   objectInfo: null,
 };
 
-async function getPPComfyObjectInfoForValidation(): Promise<Record<string, unknown> | null> {
+async function getPPComfyObjectInfoForValidation(forceRefresh = false): Promise<Record<string, unknown> | null> {
   const now = Date.now();
-  if (ppComfyObjectInfoCache.expiresAt > now) return ppComfyObjectInfoCache.objectInfo;
+  if (!forceRefresh && ppComfyObjectInfoCache.expiresAt > now) return ppComfyObjectInfoCache.objectInfo;
   try {
     const response = await fetch(`${getComfyProxyBaseUrl()}/object_info`, {
       cache: 'no-store',
@@ -22697,8 +22672,10 @@ function getUmbraUiPipelineValidationKey(pipeline: UmbraUiPipelineDescriptor): s
 function validatePPApiWorkflowDocument(
   rawDoc: unknown,
   availableComfyClassTypes: Set<string> | null = null,
+  miniMaxH3Acceleration: MiniMaxH3AccelerationControls = {},
 ): PPApiWorkflowValidation {
-  const promptGraph = extractPPApiPromptGraph(rawDoc);
+  const originalGraph = extractPPApiPromptGraph(rawDoc);
+  const promptGraph = originalGraph ? structuredClone(originalGraph) : null;
   if (!promptGraph) {
     return {
       ok: false,
@@ -22708,6 +22685,7 @@ function validatePPApiWorkflowDocument(
       pipelineGraphIssues: {},
     };
   }
+  applyMiniMaxH3Acceleration(promptGraph, miniMaxH3Acceleration);
   const classTypes = new Set(
     Object.values(promptGraph)
       .map((entry) => String((entry as any)?.class_type || '').trim())
@@ -22850,15 +22828,20 @@ function formatUmbraUiQueueResourceIssue(issue: UmbraUiQueueResourceIssue): stri
     return `${issue.label} "${issue.value}" is ambiguous. Choose an exact relative path${issue.matches.length > 0 ? ` (${issue.matches.join(', ')})` : ''}.`;
   }
   if (issue.type === 'missing') {
+    if (issue.value === MINIMAX_H3_DEFAULT_VIDEO_VAE) {
+      return 'MiniMax H3 INT8 Video VAE is not installed. Install MiniMax H3 INT8 Video VAE in Umbra Setup > Models, then refresh the catalog. An installed FP16 VAE can still be selected manually.';
+    }
     return `${issue.label} "${issue.value}" is not installed in ComfyUI.`;
   }
   return `${issue.label} "${issue.value}" could not be verified against the live ComfyUI resource catalog.`;
 }
 
 async function createPPQueueValidationContext() {
-  const objectInfo = await getPPComfyObjectInfoForValidation();
+  // Media can be staged immediately before enqueue; validate against the live catalog.
+  const objectInfo = await getPPComfyObjectInfoForValidation(true);
   return {
     availableClassTypes: objectInfo ? new Set(Object.keys(objectInfo)) : null,
+    objectInfo,
     catalog: buildPPComfyResourceCatalog(objectInfo),
     validatedWorkflows: new Set<LoadedPPApiWorkflow>(),
   };
@@ -22883,8 +22866,10 @@ async function assertPPApiWorkflowExecutionReady(
   context?: Awaited<ReturnType<typeof createPPQueueValidationContext>>,
 ): Promise<void> {
   const validationContext = context || await createPPQueueValidationContext();
-  if (!validationContext.validatedWorkflows.has(loaded)) {
-    const validation = validatePPApiWorkflowDocument(loaded.document, validationContext.availableClassTypes);
+  const generation = normalizePPGenerationControls(generationInput);
+  const isMiniMaxH3 = generation.mediaType === 'video' && generation.video?.family === 'minimax_h3';
+  if (isMiniMaxH3 || !validationContext.validatedWorkflows.has(loaded)) {
+    const validation = validatePPApiWorkflowDocument(loaded.document, validationContext.availableClassTypes, isMiniMaxH3 ? { ...generation.video.minimaxH3, guideFrameCount: generation.video.frames } : {});
     if (!validation.ok) {
       throw new Error(`Selected generation pipeline has an invalid graph: ${validation.graph.issues.join(', ') || 'unknown graph issue'}.`);
     }
@@ -22892,8 +22877,9 @@ async function assertPPApiWorkflowExecutionReady(
     if (nodeError) throw new Error(nodeError);
     validationContext.validatedWorkflows.add(loaded);
   }
+  if (isMiniMaxH3) assertMiniMaxH3TurboInstalled(generation.video.minimaxH3, validationContext.objectInfo);
+  if (isMiniMaxH3) assertMiniMaxH3GuidesInstalled(generation.video.minimaxH3, validationContext.objectInfo);
   const catalog = validationContext.catalog;
-  const generation = normalizePPGenerationControls(generationInput);
   if (generation.outputOwner === 'umbra_ui' && generation.outputFolder) {
     await assertUmbraUiPinnedOutputAvailable(
       generation.outputFolder,

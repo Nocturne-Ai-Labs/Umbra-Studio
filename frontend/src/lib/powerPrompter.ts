@@ -1,3 +1,6 @@
+import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from '../../../shared/umbra-ui/minimaxH3Defaults';
+import { normalizeMiniMaxH3Guides } from '../../../shared/umbra-ui/minimaxH3Guides';
+import { normalizeMiniMaxH3Turbo } from '../../../shared/umbra-ui/minimaxH3Turbo';
 import type {
   PowerPrompterAutocompleteMode,
   PowerPrompterAutocompleteSettings,
@@ -523,15 +526,18 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
     minimaxH3: {
       model: '',
       textEncoder: '',
-      videoVae: '',
+      videoVae: MINIMAX_H3_DEFAULT_VIDEO_VAE,
       audioVae: '',
       shiftVideo: 10,
       shiftAudio: 5,
       referenceImageSize: 'match',
       referenceNotes: ['', '', ''],
-      sageAttention: 'auto',
-      allowCompile: true,
-      easyCacheEnabled: true,
+      guides: [],
+      ...normalizeMiniMaxH3Turbo({}),
+      // Acceleration is opt-in; preserve explicit choices when restoring saved jobs.
+      sageAttention: 'disabled',
+      allowCompile: false,
+      easyCacheEnabled: false,
       easyCacheReuseThreshold: 0.2,
       easyCacheStartPercent: 0.15,
       easyCacheEndPercent: 0.95,
@@ -1111,15 +1117,17 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
     minimaxH3: {
       model: String(minimaxH3.model || '').trim().replace(/\\/g, '/'),
       textEncoder: String(minimaxH3.textEncoder || '').trim().replace(/\\/g, '/'),
-      videoVae: String(minimaxH3.videoVae || '').trim().replace(/\\/g, '/'),
+      videoVae: String(minimaxH3.videoVae ?? MINIMAX_H3_DEFAULT_VIDEO_VAE).trim().replace(/\\/g, '/'),
       audioVae: String(minimaxH3.audioVae || '').trim().replace(/\\/g, '/'),
       shiftVideo: clampNumber(minimaxH3.shiftVideo, 10, 0.01, 100),
       shiftAudio: clampNumber(minimaxH3.shiftAudio, 5, 0.01, 100),
       referenceImageSize: String(minimaxH3.referenceImageSize || '').trim().toLowerCase() === 'max' ? 'max' : 'match',
       referenceNotes: [0, 1, 2].map((index) => String(Array.isArray(minimaxH3.referenceNotes) ? minimaxH3.referenceNotes[index] || '' : '').trim().slice(0, 500)) as [string, string, string],
-      sageAttention: String(minimaxH3.sageAttention || '').trim().toLowerCase() === 'disabled' ? 'disabled' : 'auto',
-      allowCompile: minimaxH3.allowCompile !== false,
-      easyCacheEnabled: minimaxH3.easyCacheEnabled !== false,
+      guides: normalizeMiniMaxH3Guides(minimaxH3.guides),
+      ...normalizeMiniMaxH3Turbo(minimaxH3),
+      sageAttention: String(minimaxH3.sageAttention || '').trim().toLowerCase() === 'auto' ? 'auto' : 'disabled',
+      allowCompile: minimaxH3.allowCompile === true,
+      easyCacheEnabled: minimaxH3.easyCacheEnabled === true,
       easyCacheReuseThreshold: clampNumber(minimaxH3.easyCacheReuseThreshold, 0.2, 0, 3),
       easyCacheStartPercent: clampNumber(minimaxH3.easyCacheStartPercent, 0.15, 0, 1),
       easyCacheEndPercent: clampNumber(minimaxH3.easyCacheEndPercent, 0.95, 0, 1),

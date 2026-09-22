@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { normalizeMiniMaxH3Guides } from '../../../../shared/umbra-ui/minimaxH3Guides';
 import { formatMissingUmbraUiNodes } from '../../../../shared/umbra-ui/runtimeNodeMessages';
 import { useToastStore } from '@/store/useToastStore';
 import { classifyUmbraMediaMetadata, classifyUmbraPrompt, type UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
@@ -1735,7 +1736,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       ...options.video,
       postprocess: { ...options.video.postprocess },
       wan: { ...options.video.wan },
-      minimaxH3: { ...options.video.minimaxH3 },
+      minimaxH3: { ...options.video.minimaxH3, guides: normalizeMiniMaxH3Guides(options.video.minimaxH3.guides) },
       ltx25: {
         ...options.video.ltx25,
         keyframes: options.video.ltx25.keyframes.map((keyframe) => ({ ...keyframe })),
@@ -1853,6 +1854,22 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       if (video.mode === 'image_to_video'
         && (video.frameGuideMode === 'first_last' || video.frameGuideMode === 'first_middle_last')) {
         video.lastImageName = await stageFrame('last frame', video.lastImagePath, video.lastImageName);
+      }
+    }
+
+    if (video.family === 'minimax_h3') {
+      for (const guide of video.minimaxH3.guides) {
+        if (!guide.sourceName && guide.sourcePath) {
+          const response = await fetch('/api/comfy/copy-media', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sourcePath: guide.sourcePath, kind: guide.kind }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || payload?.success === false || !payload?.filename) {
+            throw new Error(String(payload?.error || `Failed to stage timed guide at frame ${guide.frameIndex}.`));
+          }
+          guide.sourceName = String(payload.filename);
+        }
       }
     }
 
