@@ -27,6 +27,11 @@ export function isPrivateDevelopmentSource(relativePath) {
 
 export function findPrivatePackagedSource(appRoot, managedEntries) {
   const found = [];
+  if (fs.existsSync(appRoot)) {
+    for (const child of fs.readdirSync(appRoot, { withFileTypes: true })) {
+      if (isPrivateDevelopmentSource(child.name)) found.push(path.join(appRoot, child.name));
+    }
+  }
   for (const entry of managedEntries) {
     if (entry === 'node_modules') continue;
     const target = path.resolve(appRoot, entry);
