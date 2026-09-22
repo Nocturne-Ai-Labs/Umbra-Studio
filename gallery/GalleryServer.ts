@@ -2196,6 +2196,7 @@ const server = Bun.serve({
       }
       return withTrustedCors(req, json({
         ok: true,
+        tokenAccepted: BRIDGE_TOKEN.length > 0,
         host: HOST,
         port: PORT,
         rootDir: ROOT_DIR,

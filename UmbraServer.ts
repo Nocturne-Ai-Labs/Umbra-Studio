@@ -11910,7 +11910,7 @@ async function isGalleryBridgeHealthy(options?: { allowCached?: boolean }): Prom
       return false;
     }
     const payload = await response.json().catch(() => null) as any;
-    const healthOk = payload?.ok === true;
+    const healthOk = payload?.ok === true && payload?.tokenAccepted === true;
     if (!healthOk) {
       galleryBridgeHealthCache = { checkedAt: Date.now(), healthy: false };
       return false;
