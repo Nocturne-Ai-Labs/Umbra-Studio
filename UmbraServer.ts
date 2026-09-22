@@ -12588,13 +12588,10 @@ function getComfySignatureNeedles(): string[] {
   const cwdRaw = String(config.cwd || '').trim();
   if (cwdRaw) {
     const normalizedCwd = resolve(cwdRaw).replace(/\\/g, '/').toLowerCase();
-    if (normalizedCwd) {
-      needles.add(normalizedCwd);
-      needles.add(`${normalizedCwd}/main.py`);
-    }
+    if (normalizedCwd) needles.add(`${normalizedCwd}/main.py`);
   }
 
-  const mainArgRaw = String(config.args?.[0] || '').trim();
+  const mainArgRaw = String(config.args?.find((arg) => /(?:^|[\\/])main\.py$/i.test(String(arg).trim())) || '').trim();
   if (mainArgRaw) {
     const resolvedMain = isAbsolute(mainArgRaw)
       ? resolve(mainArgRaw)
@@ -12603,7 +12600,6 @@ function getComfySignatureNeedles(): string[] {
     if (normalizedMain) needles.add(normalizedMain);
   }
 
-  needles.add('/tools/comfyui/');
   return Array.from(needles).filter((entry) => entry.length > 0);
 }
 
@@ -12771,11 +12767,12 @@ function getComfyProcessOwnershipSnapshot(options: { force?: boolean } = {}): Co
   if (trackedAlive && trackedPid) ownedPidSet.add(trackedPid);
   for (const pid of signaturePids) ownedPidSet.add(pid);
   const ownedPids = Array.from(ownedPidSet);
+  const compatiblePortPids = portPids.filter((pid) => ownedPidSet.has(pid));
   const unknownPortPids = portPids.filter((pid) => !ownedPidSet.has(pid));
   const externalPids = signaturePids.filter((pid) => pid !== trackedPid);
   const kind: BackendProcessOwnershipKind = trackedAlive
     ? 'owned'
-    : (signaturePids.length > 0 && portPids.length > 0)
+    : compatiblePortPids.length > 0
       ? 'external-compatible'
       : unknownPortPids.length > 0
         ? 'unknown-port'
