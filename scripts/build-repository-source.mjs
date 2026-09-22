@@ -33,10 +33,8 @@ const SOURCE_DIRECTORIES = [
 const SOURCE_FILES = [
   '.gitattributes',
   '.gitignore',
-  'AGENTS.md',
   'bun.lock',
   'CHANGELOG.md',
-  'CENSORING.md',
   'Credits.md',
   'install-tools.bat',
   'install-tools.sh',
@@ -46,7 +44,6 @@ const SOURCE_FILES = [
   'manage-tools.ts',
   'NOTICE',
   'package.json',
-  'PUBLISHING.md',
   'README.md',
   'REQUIREMENTS.md',
   'setup-tools.ts',
@@ -171,6 +168,11 @@ function writeRuntimeSkeleton() {
 }
 
 function verifyOutput() {
+  for (const forbidden of ['AGENTS.md', 'PUBLISHING.md', 'CENSORING.md', 'skills.md']) {
+    if (fs.existsSync(path.join(outputRoot, forbidden))) {
+      throw new Error(`Clean repository source contains private document: ${forbidden}`);
+    }
+  }
   const required = [
     'CHANGELOG.md',
     '.github/assets/nocturne-labs-icon.png',

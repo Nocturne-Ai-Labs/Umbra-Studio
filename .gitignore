@@ -23,6 +23,11 @@ docs/
 # Local agent skills, including the private Umbra wildcard authoring skill.
 .agents/
 agents.d/
+# Internal handoff and implementation documents are never public source.
+/AGENTS.md
+/PUBLISHING.md
+/CENSORING.md
+/skills.md
 
 # Private Power Prompter wildcard libraries and their authoring generators.
 /defaults/PowerPrompter/Wildcards/

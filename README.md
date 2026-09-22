@@ -428,7 +428,8 @@ native LTX guide nodes.
 
 Published updates default to a patch version bump. A no-bump build is reserved
 for local testing or an in-place local update when the user explicitly requests
-it. See `PUBLISHING.md` for the full agent/developer publishing flow.
+it. The commands below cover local builds; tagged releases use the GitHub
+Actions workflow.
 
 Future agents should confirm any details not already supplied:
 
@@ -439,9 +440,7 @@ The version is bumped once before multi-platform packaging. Tagged GitHub
 Actions builds use the no-bump packaging commands because the source version is
 already final.
 
-GitHub releases are built by `.github/workflows/release.yml`. See
-`PUBLISHING.md` for the clean-source command, model packaging policy, and the
-full Windows/Linux validation matrix.
+GitHub releases are built by `.github/workflows/release.yml`.
 
 Windows portable folder builds:
 
@@ -506,7 +505,6 @@ Tools are intentionally **not** stored in `resources/app`.
 ## Documentation
 
 - System and feature requirements: `REQUIREMENTS.md`
-- Publishing guide for agents/developers: `PUBLISHING.md`
 - Root distributable credits: `Credits.md`
 - License: `LICENSE`
 - Attribution notice for public forks / redistributed builds: `NOTICE`
