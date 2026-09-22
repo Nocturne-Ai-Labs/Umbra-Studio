@@ -99,6 +99,7 @@ import {
 } from '@/components/umbra-ui/UmbraModelPickerModal';
 import { stageUmbraUiUpscaleHandoff } from '@/lib/umbraUiUpscale';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
+import { createImageWorkspaceDraft, isImageWorkspace, normalizeImageWorkspaceDrafts, type ImageWorkspaceDraft } from '@/lib/umbraUiWorkspaceDrafts';
 import { readUserConfigStrict, readUserConfigWithRetry, writeUserConfig } from '@/lib/userConfig';
 import {
   resolveUmbraUiInpaintControlAvailability,
@@ -909,6 +910,8 @@ export function UmbraUIWorkspace() {
   );
   const imageControlsPersistedFingerprintRef = React.useRef('');
   const imageControlsWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+  const [initialWorkspaceDrafts] = React.useState(() => normalizeImageWorkspaceDrafts(readDeviceUiResume('umbra-ui-workspace-drafts')));
+  const workspaceDraftsRef = React.useRef(initialWorkspaceDrafts);
 
   const syncImageDimensions = React.useCallback((nextWidth: number, nextHeight: number) => {
     if (!Number.isFinite(nextWidth) || !Number.isFinite(nextHeight) || nextWidth <= 0 || nextHeight <= 0) return;
@@ -969,6 +972,14 @@ export function UmbraUIWorkspace() {
     setDetailerPipeline(stages.map((stage) => ({ ...stage })));
   }, []);
 
+  const restoreWorkspaceDraft = React.useCallback((draft: ImageWorkspaceDraft) => {
+    applyPersistedImageControls(draft.controls);
+    setPromptSegments(structuredClone(draft.promptSegments));
+    setActivePromptSegmentId(draft.activePromptSegmentId);
+    setImageAgentModeEnabled(draft.imageAgentModeEnabled);
+    setImageAgentPrompt(draft.imageAgentPrompt);
+  }, [applyPersistedImageControls]);
+
   React.useEffect(() => {
     let canceled = false;
     imageControlsSaveEnabledRef.current = false;
@@ -981,6 +992,9 @@ export function UmbraUIWorkspace() {
           imageControlsPersistedFingerprintRef.current = getUmbraUiImageControlsFingerprint(snapshot);
           applyPersistedImageControls(snapshot);
         }
+        const mode = activeModeRef.current;
+        const draft = isImageWorkspace(mode) ? workspaceDraftsRef.current[mode] : undefined;
+        if (draft) restoreWorkspaceDraft(draft);
         imageControlsSaveEnabledRef.current = true;
         setImageControlsHydrated(true);
       })
@@ -994,7 +1008,7 @@ export function UmbraUIWorkspace() {
     return () => {
       canceled = true;
     };
-  }, [applyPersistedImageControls, showToast]);
+  }, [applyPersistedImageControls, restoreWorkspaceDraft, showToast]);
 
   React.useEffect(() => {
     setMountedModes((current) => {
@@ -1246,6 +1260,37 @@ export function UmbraUIWorkspace() {
     }, 500);
     return () => window.clearTimeout(timer);
   }, [imageControlsHydrated, imageControlsSnapshot]);
+
+  const currentWorkspaceDraft = React.useMemo<ImageWorkspaceDraft | null>(() => imageControlsSnapshot ? ({
+    controls: imageControlsSnapshot,
+    promptSegments,
+    activePromptSegmentId,
+    imageAgentModeEnabled,
+    imageAgentPrompt,
+  }) : null, [imageControlsSnapshot, promptSegments, activePromptSegmentId, imageAgentModeEnabled, imageAgentPrompt]);
+
+  React.useEffect(() => {
+    if (!imageControlsHydrated || !isImageWorkspace(activeMode) || !currentWorkspaceDraft) return;
+    workspaceDraftsRef.current[activeMode] = structuredClone(currentWorkspaceDraft);
+    const timer = window.setTimeout(() => {
+      writeDeviceUiResume('umbra-ui-workspace-drafts', workspaceDraftsRef.current);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [activeMode, currentWorkspaceDraft, imageControlsHydrated]);
+
+  // Navigation restores a destination draft. Explicit media handoffs continue
+  // to use setActiveMode and apply the settings the user chose to transfer.
+  const navigateWorkspace = React.useCallback((mode: UmbraGenerationMode) => {
+    if (mode === activeMode || !imageControlsHydrated) return;
+    if (isImageWorkspace(activeMode) && currentWorkspaceDraft) {
+      workspaceDraftsRef.current[activeMode] = structuredClone(currentWorkspaceDraft);
+    }
+    if (isImageWorkspace(mode)) {
+      restoreWorkspaceDraft(workspaceDraftsRef.current[mode] || createImageWorkspaceDraft());
+    }
+    writeDeviceUiResume('umbra-ui-workspace-drafts', workspaceDraftsRef.current);
+    setActiveMode(mode);
+  }, [activeMode, currentWorkspaceDraft, imageControlsHydrated, restoreWorkspaceDraft]);
 
   const modeIsMounted = React.useCallback(
     (mode: UmbraGenerationMode) => activeMode === mode || mountedModes.has(mode),
@@ -2918,7 +2963,7 @@ export function UmbraUIWorkspace() {
                 { value: 'extras', label: 'Extras', icon: <ImageUp size={14} /> },
                 { value: 'queue', label: 'Queue Manager', icon: <ListOrdered size={14} /> },
               ]}
-              onValueChange={(nextValue) => setActiveMode(nextValue as UmbraGenerationMode)}
+              onValueChange={(nextValue) => navigateWorkspace(nextValue as UmbraGenerationMode)}
               ariaLabel={t('nav.umbraUiWorkspace')}
               menuTitle="Umbra UI"
               menuSubtitle={t('nav.chooseWorkspace')}
@@ -2936,7 +2981,7 @@ export function UmbraUIWorkspace() {
           <button
             type="button"
             data-umbra-ui-mode="image"
-            onClick={() => setActiveMode('image')}
+            onClick={() => navigateWorkspace('image')}
             className={cn(
               'inline-flex items-center gap-2 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
               activeMode === 'image' ? 'bg-cyan-500/[0.12] text-cyan-100' : 'text-zinc-600 hover:text-zinc-300',
@@ -2947,7 +2992,7 @@ export function UmbraUIWorkspace() {
           <button
             type="button"
             data-umbra-ui-mode="prompter"
-            onClick={() => setActiveMode('prompter')}
+            onClick={() => navigateWorkspace('prompter')}
             className={cn(
               'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
               activeMode === 'prompter' ? 'bg-emerald-500/[0.12] text-emerald-100' : 'text-zinc-600 hover:text-zinc-300',
@@ -2958,7 +3003,7 @@ export function UmbraUIWorkspace() {
           <button
             type="button"
             data-umbra-ui-mode="img2img"
-            onClick={() => setActiveMode('img2img')}
+            onClick={() => navigateWorkspace('img2img')}
             className={cn(
               'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
               activeMode === 'img2img' ? 'bg-cyan-500/[0.12] text-cyan-100' : 'text-zinc-600 hover:text-zinc-300',
@@ -2969,7 +3014,7 @@ export function UmbraUIWorkspace() {
           <button
             type="button"
             data-umbra-ui-mode="inpaint"
-            onClick={() => setActiveMode('inpaint')}
+            onClick={() => navigateWorkspace('inpaint')}
             className={cn(
               'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
               activeMode === 'inpaint' ? 'bg-rose-500/[0.12] text-rose-100' : 'text-zinc-600 hover:text-zinc-300',
@@ -2981,7 +3026,7 @@ export function UmbraUIWorkspace() {
             <button
               type="button"
               data-umbra-ui-mode="canvas"
-              onClick={() => setActiveMode('canvas')}
+              onClick={() => navigateWorkspace('canvas')}
               className={cn(
                 'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
                 activeMode === 'canvas' ? 'bg-cyan-500/[0.12] text-cyan-100' : 'text-zinc-600 hover:text-zinc-300',
@@ -2993,7 +3038,7 @@ export function UmbraUIWorkspace() {
           <button
             type="button"
             data-umbra-ui-mode="video"
-            onClick={() => setActiveMode('video')}
+            onClick={() => navigateWorkspace('video')}
             className={cn(
               'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
               activeMode === 'video' ? 'bg-fuchsia-500/[0.12] text-fuchsia-100' : 'text-zinc-600 hover:text-zinc-300',
@@ -3005,7 +3050,7 @@ export function UmbraUIWorkspace() {
           <button
             type="button"
             data-umbra-ui-mode="extras"
-            onClick={() => setActiveMode('extras')}
+            onClick={() => navigateWorkspace('extras')}
             className={cn(
               'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
               activeMode === 'extras' ? 'bg-amber-500/[0.12] text-amber-100' : 'text-zinc-600 hover:text-zinc-300',
