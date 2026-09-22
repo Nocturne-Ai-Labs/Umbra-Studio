@@ -1509,9 +1509,10 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
       }
     }
 
-    while (queue.length > 0 && scannedFolders < maxFolders && nowMs() - startedAt < maxDurationMs) {
+    let queueIndex = 0;
+    while (queueIndex < queue.length && scannedFolders < maxFolders && nowMs() - startedAt < maxDurationMs) {
       signal?.throwIfAborted();
-      const current = queue.shift();
+      const current = queue[queueIndex++];
       if (!current) continue;
       scannedFolders += 1;
       let entries: Dirent<string>[];
@@ -1574,7 +1575,7 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
       if (filesByPath.size >= fileLimit && foldersByPath.size >= folderLimit) break;
     }
     signal?.throwIfAborted();
-    if (queue.length > 0) capped = true;
+    if (queueIndex < queue.length) capped = true;
 
     const files = Array.from(filesByPath.values())
       .filter((file) => fileMatchesSearch(file, query))
