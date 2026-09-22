@@ -47,7 +47,9 @@ export function buildTrashThumbnailUrl(
     size,
     q: quality,
     fit: 'contain',
-    defer: options.defer ? 1 : undefined,
+    // Visible Trash tiles already use a bounded load scheduler. Return the
+    // actual thumbnail, not a placeholder that browsers can reuse on remount.
+    defer: 0,
     retry: retry > 0 ? Math.floor(retry) : undefined,
     rev: existingSearch.has('rev') ? undefined : options.fallbackRevision,
   });

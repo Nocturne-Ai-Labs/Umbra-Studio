@@ -1527,7 +1527,7 @@ function normalizeSearchQuery(value: unknown): string {
 function tokenizeSearchText(value: unknown): string[] {
   return String(value || '')
     .toLowerCase()
-    .split(/[^a-z0-9]+/g)
+    .split(/[^\p{L}\p{N}]+/gu)
     .map((part) => part.trim())
     .filter(Boolean);
 }
@@ -1545,7 +1545,7 @@ function tagSearchPriority(tags: string[] | undefined, needle: string): number {
   if (!needle) return 0;
   let best = 0;
   for (const tag of tags || []) {
-    const normalized = String(tag || '').toLowerCase().trim();
+    const normalized = normalizeSearchQuery(tag);
     if (!normalized) continue;
     if (normalized === needle) return 4;
     if (normalized.startsWith(needle)) best = Math.max(best, 3);
@@ -5697,6 +5697,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     window.dispatchEvent(new Event('umbra:gallery-archives-refresh'));
     const folderPath = normalizePath(currentFolder || rootPath);
     if (!folderPath) return;
+    if (isTrashPath(folderPath)) clearTrashCache();
     clearPageCacheForFolder(folderPath);
     invalidateTreeChildrenCache(folderPath);
     void loadTreeChildren(folderPath, true);
@@ -5714,6 +5715,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     });
   }, [
     clearPageCacheForFolder,
+    clearTrashCache,
     currentFolder,
     invalidateTreeChildrenCache,
     loadFolder,
@@ -8553,12 +8555,14 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       .filter((file) => fileMatchesSearch(file, searchNeedle))
       .sort((left, right) => compareSearchFiles(left, right, searchNeedle, sortBy, sortOrder));
   }, [files, searchNeedle, sortBy, sortOrder]);
-  const searchableRoots = useMemo(() => (
+  // Settings synchronization can replace arrays without changing any root paths.
+  const searchableRootsKey = JSON.stringify(
     rootChoices
       .filter((root) => root.kind !== 'trash')
       .map((root) => normalizePath(root.path))
       .filter(Boolean)
-  ), [rootChoices]);
+  );
+  const searchableRoots = useMemo<string[]>(() => JSON.parse(searchableRootsKey), [searchableRootsKey]);
 
   useEffect(() => {
     const folderPath = normalizePath(currentFolder);
@@ -8788,6 +8792,16 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
             const response = await fetchGalleryFs('/list-progressive', params, {
               cache: 'no-store',
               signal: controller.signal,
+            }, (page) => {
+              if (controller.signal.aborted) return;
+              appendResults({
+                files: (page.files || [])
+                  .map((file, index) => normalizeGalleryFile(file as unknown as GalleryFile, index))
+                  .filter((file) => fileMatchesSearch(file, searchNeedle)),
+                folders: matchedFolders,
+                scannedFolders,
+                done: false,
+              });
             });
             const payload: GalleryListPayload & { error?: string } = await response.json();
             if (!response.ok) throw new Error(String(payload?.error || 'Gallery search failed'));
@@ -8804,7 +8818,26 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
               done: false,
             });
 
-            const children = await loadTreeChildren(folderPath, true, true);
+          } catch (folderError) {
+            if (controller.signal.aborted) return;
+            failedFolders += 1;
+            const message = folderError instanceof Error ? folderError.message : 'Folder unavailable';
+            setSearchError(`Search incomplete: ${failedFolders} scan failure${failedFolders === 1 ? '' : 's'}. ${message}`);
+            appendResults({ folders: matchedFolders, scannedFolders, done: false });
+          }
+
+          // A failed media listing must not hide accessible descendants. Keep this
+          // search-owned request cancellable and independent of sidebar tree state.
+          try {
+            controller.signal.throwIfAborted();
+            const treeResponse = await fetchGalleryFs('/tree', new URLSearchParams({
+              path: folderPath, maxDepth: '0', force: '1', shallow: '1',
+            }), { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(TREE_FETCH_TIMEOUT_MS)]) });
+            const treePayload = await treeResponse.json();
+            if (!treeResponse.ok || treePayload?.missing || !Array.isArray(treePayload?.folders)) {
+              throw new Error(String(treePayload?.error || 'Folder tree is currently unavailable'));
+            }
+            const children: GalleryFolderTreeNode[] = treePayload.folders;
             if (controller.signal.aborted) return;
             const childMatches: GalleryFolder[] = [];
             for (const child of children) {
@@ -8821,7 +8854,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
             if (controller.signal.aborted) return;
             failedFolders += 1;
             const message = folderError instanceof Error ? folderError.message : 'Folder unavailable';
-            setSearchError(`Search incomplete: ${failedFolders} folder${failedFolders === 1 ? '' : 's'} could not be fully scanned. ${message}`);
+            setSearchError(`Search incomplete: ${failedFolders} scan failure${failedFolders === 1 ? '' : 's'}. ${message}`);
             appendResults({ scannedFolders, done: false });
           }
         }
@@ -8860,7 +8893,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [galleryPathRevision, globalSearchActive, loadTreeChildren, searchableRoots, searchNeedle, sortBy, sortOrder]);
+  }, [galleryPathRevision, globalSearchActive, searchableRoots, searchNeedle, sortBy, sortOrder]);
 
   const searchFiles = globalSearchActive && Array.isArray(searchResults?.files) ? searchResults.files : [];
   const searchFolders = globalSearchActive && Array.isArray(searchResults?.folders) ? searchResults.folders : [];
