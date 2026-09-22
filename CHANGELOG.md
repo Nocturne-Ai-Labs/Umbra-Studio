@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.32.28 - MiniMax H3 Pipeline Discovery Hotfix
+
+### TL;DR - Setup After Updating
+
+- Install the new Umbra Studio package, restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux, and refresh any open browser tab. No new models, Umbra Nodes update, or ComfyUI update is required for this fix.
+- Existing MiniMax H3 image-to-video, text-to-video, and reference-to-video model requirements still apply. Linux managed tools require `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents.
+
+### Changes
+
+- Include bundled Umbra UI workflows directly in the pipeline catalog sent to the video workspace. This restores MiniMax H3 image-to-video and text-to-video when older user workflow lists lack those entries.
+- Prefer the shipped managed workflow over an older user copy with the same ID while preserving unrelated user workflows.
+
+### Validation
+
+- Verified all three MiniMax H3 modes resolve with an empty user workflow catalog. Passed focused regression tests, frontend typechecking, lint, and production build.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: the video workspace reporting that an installed MiniMax H3 image-to-video pipeline was missing.
+- Improved: bundled workflow discovery after updating an older installation.
+
 ## v0.32.27 - MiniMax H3 And Workspace Hotfix
 
 ### TL;DR - Setup After Updating
