@@ -1,6 +1,6 @@
 import { existsSync, type Dirent } from 'fs';
 import * as fs from 'fs/promises';
-import { basename, extname, join, relative, resolve, isAbsolute } from 'path';
+import { basename, extname, join, relative, resolve, isAbsolute, sep } from 'path';
 import { availableParallelism, cpus } from 'os';
 import sharp from 'sharp';
 import {
@@ -937,9 +937,8 @@ function resolveStaticFile(pathname: string): string | null {
   const normalized = pathname.replace(/\\/g, '/');
   const candidate = normalized === '/' ? '/index.html' : normalized;
   const resolvedPath = resolve(PUBLIC_DIR, `.${candidate}`);
-  const publicLower = `${PUBLIC_DIR}`.toLowerCase();
-  const resolvedLower = `${resolvedPath}`.toLowerCase();
-  if (!resolvedLower.startsWith(publicLower)) return null;
+  const relativePath = relative(PUBLIC_DIR, resolvedPath);
+  if (relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) return null;
   return resolvedPath;
 }
 
