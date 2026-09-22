@@ -5515,7 +5515,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     let appliedPage = false;
     const applyPayload = (payload: GalleryListPayload) => {
       const incomingFiles = Array.isArray(payload.files) ? payload.files : [];
-      const nextFiles = incomingFiles;
+      const nextFiles = payload.done === true && payload.nextCursor == null
+        ? [...incomingFiles].sort((left, right) => compareGalleryFiles(left, right, sortBy, sortOrder))
+        : incomingFiles;
       const appendedFiles = incomingFiles.length;
 
       if (seq !== loadSeqRef.current) {
@@ -5545,7 +5547,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         emitSelectionChanged([]);
       }
       emitFolderChanged(folderPath);
-      emitFilmstripFeed(folderPath, incomingFiles, {
+      emitFilmstripFeed(folderPath, nextFiles, {
         ...payload,
         mode: 'replace',
       });
