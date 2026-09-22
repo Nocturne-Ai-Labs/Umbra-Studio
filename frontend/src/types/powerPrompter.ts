@@ -1,3 +1,4 @@
+import type { MiniMaxH3TurboControls } from '../../../shared/umbra-ui/minimaxH3Turbo';
 import type { UmbraUiPipelineSelection } from '../../../shared/umbra-ui/pipelineTypes';
 import type { UmbraLtxStoryboardControls } from '../../../shared/umbra-ui/videoStoryboard';
 import type {
@@ -132,7 +133,7 @@ export interface PowerPrompterLtx25VideoControls {
   keyframes: PowerPrompterLtxVideoKeyframe[];
 }
 
-export interface PowerPrompterMiniMaxH3VideoControls {
+export interface PowerPrompterMiniMaxH3VideoControls extends MiniMaxH3TurboControls {
   model: string;
   textEncoder: string;
   videoVae: string;

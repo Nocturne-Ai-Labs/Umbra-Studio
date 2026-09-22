@@ -1,3 +1,4 @@
+import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
 /**
  * Umbra backend entrypoint.
  *
@@ -6,7 +7,7 @@
  * reduce runtime confusion and make the packaged app easier to maintain.
  */
 
-import { applyMiniMaxH3Acceleration, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
+import { applyMiniMaxH3Acceleration, assertMiniMaxH3TurboInstalled, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { configureGeneratedMediaActivity, recordGeneratedMediaOutputs } from './backend/GeneratedMediaActivity';
 import { createCaptionCategoryFilter } from './backend/DatasetCaptionCategories';
@@ -16874,6 +16875,9 @@ interface PowerPrompterVideoControls {
     }>;
   };
   minimaxH3: {
+    turboPreset: 'none' | 'fl2va-v4-8step' | 'ref2va-4step';
+    turboLora: string;
+    turboStrength: number;
     model: string;
     textEncoder: string;
     videoVae: string;
@@ -17202,6 +17206,7 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
       shiftAudio: 5,
       referenceImageSize: 'match',
       referenceNotes: ['', '', ''],
+      ...normalizeMiniMaxH3Turbo({}),
       // Acceleration is opt-in; preserve explicit choices when restoring saved jobs.
       sageAttention: 'disabled',
       allowCompile: false,
@@ -18931,6 +18936,7 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
       shiftAudio: clampPPNumber(minimaxH3.shiftAudio, 5, 0.01, 100),
       referenceImageSize: String(minimaxH3.referenceImageSize || '').trim().toLowerCase() === 'max' ? 'max' : 'match',
       referenceNotes: [0, 1, 2].map((index) => String(Array.isArray(minimaxH3.referenceNotes) ? minimaxH3.referenceNotes[index] || '' : '').trim().slice(0, 500)) as [string, string, string],
+      ...normalizeMiniMaxH3Turbo(minimaxH3),
       sageAttention: String(minimaxH3.sageAttention || '').trim().toLowerCase() === 'auto' ? 'auto' : 'disabled',
       allowCompile: minimaxH3.allowCompile === true,
       easyCacheEnabled: minimaxH3.easyCacheEnabled === true,
@@ -22824,6 +22830,7 @@ async function createPPQueueValidationContext() {
   const objectInfo = await getPPComfyObjectInfoForValidation();
   return {
     availableClassTypes: objectInfo ? new Set(Object.keys(objectInfo)) : null,
+    objectInfo,
     catalog: buildPPComfyResourceCatalog(objectInfo),
     validatedWorkflows: new Set<LoadedPPApiWorkflow>(),
   };
@@ -22859,6 +22866,7 @@ async function assertPPApiWorkflowExecutionReady(
     if (nodeError) throw new Error(nodeError);
     validationContext.validatedWorkflows.add(loaded);
   }
+  if (isMiniMaxH3) assertMiniMaxH3TurboInstalled(generation.video.minimaxH3, validationContext.objectInfo);
   const catalog = validationContext.catalog;
   if (generation.outputOwner === 'umbra_ui' && generation.outputFolder) {
     await assertUmbraUiPinnedOutputAvailable(

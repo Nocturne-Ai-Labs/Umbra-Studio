@@ -1,7 +1,10 @@
+import { miniMaxH3TurboIssue, normalizeMiniMaxH3Turbo, type MiniMaxH3TurboControls } from '../shared/umbra-ui/minimaxH3Turbo';
+
 type PromptNode = { class_type: string; inputs: Record<string, unknown>; _meta?: Record<string, unknown> };
 type PromptGraph = Record<string, unknown>;
 
-export interface MiniMaxH3AccelerationControls {
+export interface MiniMaxH3AccelerationControls extends Partial<MiniMaxH3TurboControls> {
+  model?: string;
   sageAttention?: 'auto' | 'disabled';
   allowCompile?: boolean;
   easyCacheEnabled?: boolean;
@@ -46,6 +49,15 @@ export function applyMiniMaxH3Acceleration(
     };
     model = [id, 0];
   };
+  const turbo = normalizeMiniMaxH3Turbo({ ...controls });
+  const turboIssue = miniMaxH3TurboIssue(
+    { ...turbo, model: controls.model ?? String(source.node.inputs.unet_name || '') },
+    roles.get('minimax_h3_conditioning')?.node.class_type === 'MiniMaxH3ReferenceToVideo',
+  );
+  if (turboIssue) throw new Error(turboIssue);
+  optional('minimax_h3_turbo_lora', 'LoraLoaderModelOnly', turbo.turboPreset !== 'none', {
+    lora_name: turbo.turboLora, strength_model: turbo.turboStrength,
+  });
   optional('minimax_h3_sage_attention', 'PathchSageAttentionKJ', controls.sageAttention === 'auto', {
     sage_attention: 'auto', allow_compile: controls.allowCompile === true,
   });
@@ -65,4 +77,19 @@ export function applyMiniMaxH3Acceleration(
   guider.node.inputs.model = model;
   scheduler.node.inputs.model = model;
   return true;
+}
+
+export function assertMiniMaxH3TurboInstalled(
+  controls: MiniMaxH3AccelerationControls,
+  objectInfo: Record<string, unknown> | null,
+): void {
+  const turbo = normalizeMiniMaxH3Turbo({ ...controls });
+  if (turbo.turboPreset === 'none') return;
+  const node = objectInfo?.LoraLoaderModelOnly as { input?: { required?: { lora_name?: unknown } } } | undefined;
+  const descriptor = node?.input?.required?.lora_name;
+  const options = Array.isArray(descriptor) && Array.isArray(descriptor[0]) ? descriptor[0] : null;
+  if (!options) throw new Error('MiniMax H3 Turbo LoRA availability could not be verified. Start or update the managed ComfyUI server and refresh its catalog.');
+  if (!options.some((name) => typeof name === 'string' && name.replace(/\\/g, '/') === turbo.turboLora)) {
+    throw new Error(`MiniMax H3 Turbo LoRA "${turbo.turboLora}" is not installed. Install the matching Turbo pack in Umbra Setup > Models, then select its exact relative path.`);
+  }
 }

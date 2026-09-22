@@ -1,4 +1,5 @@
 'use client';
+import { MINIMAX_H3_TURBO_PRESETS, miniMaxH3TurboIssue, miniMaxH3TurboSamplingPreset, type MiniMaxH3TurboPreset } from '../../../../shared/umbra-ui/minimaxH3Turbo';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { UmbraPinnedOutputControl, usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
@@ -275,9 +276,12 @@ function createDefaultVideoControls(): PowerPrompterVideoControls {
       shiftAudio: 5,
       referenceImageSize: 'match',
       referenceNotes: ['', '', ''],
-      sageAttention: 'auto',
-      allowCompile: true,
-      easyCacheEnabled: true,
+      turboPreset: 'none',
+      turboLora: '',
+      turboStrength: 1,
+      sageAttention: 'disabled',
+      allowCompile: false,
+      easyCacheEnabled: false,
       easyCacheReuseThreshold: 0.2,
       easyCacheStartPercent: 0.15,
       easyCacheEndPercent: 0.95,
@@ -1449,6 +1453,11 @@ export function UmbraVideoGenerationControls({
   const sourceDimensionsMissing = video.mode !== 'text_to_video'
     && !extendedOpen
     && (!video.sourceWidth || !video.sourceHeight);
+  const turboIssue = video.family === 'minimax_h3'
+    ? miniMaxH3TurboIssue(video.minimaxH3, video.mode === 'reference_to_video')
+      || (video.minimaxH3.turboPreset !== 'none' && !catalog.loras.some((name) => name.replace(/\\/g, '/') === video.minimaxH3.turboLora)
+        ? 'Install the matching Turbo pack in Umbra Setup > Models, refresh the catalog, and select the LoRA.' : '')
+    : '';
   const requiredMissing = React.useMemo(() => {
     const sourceVideoMissing = video.mode === 'video_to_video'
       && !video.sourceVideoPath
@@ -1523,6 +1532,7 @@ export function UmbraVideoGenerationControls({
 
   const handleQueue = async (requestedPlacement: UmbraQueuePlacement = effectivePlacement) => {
     if (isQueueing) return;
+    if (turboIssue) { showToast(turboIssue, 'error'); return; }
     const queuePlacement = queueSummary.powerPrompterActive ? requestedPlacement : 'end';
     if (queuePlacement === 'interrupt' && !window.confirm(
       'Stop the current Power Prompter image and run this Umbra UI video next?',
@@ -1582,7 +1592,7 @@ export function UmbraVideoGenerationControls({
 
   const samplerOptions = catalog.samplers.length > 0 ? catalog.samplers : ['euler', 'uni_pc'];
   const schedulerOptions = catalog.schedulers.length > 0 ? catalog.schedulers : ['simple', 'beta'];
-  const queueDisabled = isQueueing || !queueConnected || !comfyConnected || !pipelineMatch.workflow || !queuePrompt || requiredMissing;
+  const queueDisabled = isQueueing || !queueConnected || !comfyConnected || !pipelineMatch.workflow || !queuePrompt || requiredMissing || !!turboIssue;
 
   return (
     <>
@@ -2163,13 +2173,13 @@ export function UmbraVideoGenerationControls({
               <VideoResourceField label="Audio VAE" value={video.minimaxH3.audioVae} values={catalog.vaes} onChange={(value) => setMiniMaxH3('audioVae', value)} onChoose={setResourcePicker} />
               <div className="grid grid-cols-2 gap-2">
                 <NumberField label="Sampling Steps" value={video.minimaxH3.steps} min={1} max={1000} onChange={(value) => setMiniMaxH3('steps', value)} />
-                <SelectField label="Sampler" value={video.minimaxH3.samplerName} values={['res_multistep']} onChange={(value) => setMiniMaxH3('samplerName', value)} />
+                <SelectField label="Sampler" value={video.minimaxH3.samplerName} values={['res_multistep', 'euler']} onChange={(value) => setMiniMaxH3('samplerName', value)} />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <NumberField label="Video Shift" value={video.minimaxH3.shiftVideo} min={0.01} max={100} step={0.01} onChange={(value) => setMiniMaxH3('shiftVideo', value)} />
                 <NumberField label="Audio Shift" value={video.minimaxH3.shiftAudio} min={0.01} max={100} step={0.01} onChange={(value) => setMiniMaxH3('shiftAudio', value)} />
               </div>
-              <SelectField label="Scheduler" value={video.minimaxH3.scheduler} values={['simple']} onChange={(value) => setMiniMaxH3('scheduler', value)} />
+              <SelectField label="Scheduler" value={video.minimaxH3.scheduler} values={['simple', 'beta']} onChange={(value) => setMiniMaxH3('scheduler', value)} />
               <p className="rounded-md border border-fuchsia-300/15 bg-fuchsia-500/[0.045] px-2.5 py-2 font-mono text-[9px] leading-relaxed text-zinc-400">
                 MiniMax H3 generates video and audio together at 24 FPS. Duration snaps to its required frame grid.
               </p>
@@ -2354,6 +2364,38 @@ export function UmbraVideoGenerationControls({
             </>
           )}
         </VideoAccordion>
+
+        {video.family === 'minimax_h3' ? <VideoAccordion
+          title="Turbo LoRA (Experimental)"
+          icon={<Gauge size={11} className="text-fuchsia-300" />}
+          summary={video.minimaxH3.turboPreset === 'none' ? 'off' : video.minimaxH3.turboPreset}
+        >
+          <div className="space-y-2.5">
+            <SelectField
+              label="Turbo Adapter"
+              value={video.minimaxH3.turboPreset === 'none' ? 'None' : MINIMAX_H3_TURBO_PRESETS[video.minimaxH3.turboPreset].label}
+              values={['None', ...Object.values(MINIMAX_H3_TURBO_PRESETS).map((preset) => preset.label)]}
+              onChange={(label) => {
+                const id = (Object.entries(MINIMAX_H3_TURBO_PRESETS).find(([, preset]) => preset.label === label)?.[0] || 'none') as MiniMaxH3TurboPreset;
+                const preset = id === 'none' ? null : MINIMAX_H3_TURBO_PRESETS[id];
+                setVideo((current) => ({ ...current, minimaxH3: {
+                  ...current.minimaxH3,
+                  turboPreset: id,
+                  turboLora: preset ? catalog.loras.find((name) => name.replace(/\\/g, '/').split('/').pop() === preset.lora) || preset.lora : current.minimaxH3.turboLora,
+                } }));
+              }}
+            />
+            {video.minimaxH3.turboPreset !== 'none' ? <>
+              <VideoResourceField label="Turbo LoRA" value={video.minimaxH3.turboLora} values={catalog.loras} onChange={(value) => setMiniMaxH3('turboLora', value.replace(/\\/g, '/'))} onChoose={setResourcePicker} />
+              <NumberField label="Turbo Strength" value={video.minimaxH3.turboStrength} min={0.01} max={2} step={0.05} onChange={(value) => setMiniMaxH3('turboStrength', value)} />
+            </> : null}
+            <button type="button" className="w-full rounded-md border border-white/10 px-2 py-2 text-xs text-zinc-300" onClick={() => setVideo((current) => ({ ...current, minimaxH3: { ...current.minimaxH3, ...miniMaxH3TurboSamplingPreset(current.minimaxH3.turboPreset) } }))}>
+              {video.minimaxH3.turboPreset === 'none' ? 'Apply standard sampling' : `Apply ${MINIMAX_H3_TURBO_PRESETS[video.minimaxH3.turboPreset].steps}-step sampling preset`}
+            </button>
+            <p className="text-[10px] leading-relaxed text-zinc-400">Experimental: not yet generation-qualified in Umbra. FL2VA and Ref2VA require different adapters. Selecting an adapter leaves sampling unchanged; apply its preset explicitly.</p>
+            {turboIssue ? <p className="text-[10px] text-amber-200">{turboIssue}</p> : null}
+          </div>
+        </VideoAccordion> : null}
 
         {video.family === 'minimax_h3' ? <VideoAccordion
           title="MiniMax Acceleration"
