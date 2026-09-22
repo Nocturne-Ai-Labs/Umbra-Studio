@@ -8270,8 +8270,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     const onRequestFeed = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
       const folderPath = normalizePath(detail.folderPath || detail.path || currentFolder);
-      if (folderPath && folderPath !== currentFolder) {
-        void loadFolder({ folder: folderPath, keepSelection: true });
+      const manualRefresh = detail.source === 'filmstrip-manual-refresh';
+      if (folderPath && (folderPath !== currentFolder || manualRefresh)) {
+        void loadFolder({ folder: folderPath, keepSelection: true, forceRefresh: manualRefresh });
       } else {
         emitFilmstripFeed(currentFolder, files);
       }

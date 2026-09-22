@@ -639,17 +639,17 @@ export function UmbraFilmstrip({
     }
   }, [addToast, currentFolder, images, rootPath]);
 
-  const refreshImages = useCallback((options?: { force?: boolean }) => {
+  const refreshImages = useCallback((options?: { force?: boolean; reload?: boolean }) => {
     const folder = normalizePath(currentFolderRef.current || rootPath);
     if (!folder) return;
     const now = Date.now();
-    if (!options?.force && now - lastFeedRequestAtRef.current < 850) return;
+    if (!options?.force && !options?.reload && now - lastFeedRequestAtRef.current < 850) return;
     lastFeedRequestAtRef.current = now;
     window.dispatchEvent(new CustomEvent('umbra:gallery-request-filmstrip-feed', {
       detail: {
         path: folder,
         folderPath: folder,
-        source: options?.force ? 'gallery-content-changed' : 'filmstrip-refresh',
+        source: options?.reload ? 'filmstrip-manual-refresh' : (options?.force ? 'gallery-content-changed' : 'filmstrip-refresh'),
       },
     }));
   }, [rootPath]);
@@ -2095,7 +2095,7 @@ export function UmbraFilmstrip({
         onRemovePinnedFolder={removePinnedFolder}
         onPinnedDrop={onPinnedDrop}
         onPinnedDropTargetChange={setDropTargetPath}
-        onRefresh={refreshImages}
+        onRefresh={() => refreshImages({ reload: true })}
         expanded={false}
         onRequestMore={() => {
           window.dispatchEvent(new CustomEvent('umbra:gallery-load-more', {
