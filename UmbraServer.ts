@@ -12620,8 +12620,8 @@ function listWindowsPidsByCommandNeedles(needles: string[]): number[] {
 $needles = @(${quotedNeedles})
 $matches = @()
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object {
-  $pid = [int]$_.ProcessId
-  if ($pid -le 0) { return }
+  $candidatePid = [int]$_.ProcessId
+  if ($candidatePid -le 0 -or $candidatePid -eq $PID) { return }
   $cmd = [string]$_.CommandLine
   if ([string]::IsNullOrWhiteSpace($cmd)) { return }
   $scan = $cmd.ToLowerInvariant().Replace('\\','/')
@@ -12629,7 +12629,7 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object {
   foreach ($needle in $needles) {
     if ($needle -and $scan.Contains($needle)) { $matched = $true; break }
   }
-  if ($matched) { $matches += $pid }
+  if ($matched) { $matches += $candidatePid }
 }
 $matches | Sort-Object -Unique | ForEach-Object { Write-Output $_ }
 `;
