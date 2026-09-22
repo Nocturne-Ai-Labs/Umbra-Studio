@@ -3657,6 +3657,14 @@ const COMFY_PROXY_ROOT_PATHS = [
 ];
 
 function getComfyProxyTarget() {
+  const isolatedPortValue = String(process.env.UMBRA_COMFY_PORT || '').trim();
+  if (isolatedPortValue) {
+    const isolatedPort = Number(isolatedPortValue);
+    if (!Number.isInteger(isolatedPort) || isolatedPort < 1 || isolatedPort > 65535) {
+      throw new Error('UMBRA_COMFY_PORT must be an integer between 1 and 65535');
+    }
+    return { host: '127.0.0.1', port: isolatedPort };
+  }
   const settings = settingsManager.getSettings();
   const comfyDefaultPort = settings?.servers?.comfyui?.port || 8188;
   const comfyDefaultHost = settings?.servers?.comfyui?.host || '127.0.0.1';
@@ -14930,10 +14938,7 @@ function getBackendConfig() {
 
   // ComfyUI config
   const comfy = detected.comfyui;
-  const comfyDefaultPort = settings?.servers?.comfyui?.port || 8188;
-  const comfyDefaultHost = settings?.servers?.comfyui?.host || '127.0.0.1';
-  const comfyUrl = getAppSettingString('comfyui.url');
-  const comfyTarget = parseHostPortFromUrl(comfyUrl, comfyDefaultHost, comfyDefaultPort);
+  const comfyTarget = getComfyProxyTarget();
   const comfyPort = comfyTarget.port;
   const comfyHost = comfyTarget.host;
   const comfyLaunchHost = !IS_UMBRA_DEV_MODE && isLoopbackHostname(comfyHost)
