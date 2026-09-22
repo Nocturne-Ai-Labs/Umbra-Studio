@@ -273,7 +273,7 @@ function buildMiniMaxH3Workflow(mode: 'text_to_video' | 'image_to_video'): Promp
       clip_name: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', type: 'minimax', device: 'default',
     }, 'MiniMax H3 Text Encoder', 'minimax_h3_text_encoder'),
     '3': node('VAELoader', {
-      vae_name: 'minimax_h3_video_vae_fp16.safetensors',
+      vae_name: 'minimax_h3_video_vae_int8_convrot.safetensors',
     }, 'MiniMax H3 Video VAE', 'minimax_h3_video_vae'),
     '4': node('VAELoader', {
       vae_name: 'minimax_h3_audio_vae_fp32.safetensors',
@@ -339,7 +339,7 @@ function buildMiniMaxH3ReferenceWorkflow(): PromptGraph {
     '3': node('CLIPLoader', {
       clip_name: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', type: 'minimax', device: 'default',
     }, 'MiniMax H3 Text Encoder', 'minimax_h3_text_encoder', descriptor),
-    '4': node('VAELoader', { vae_name: 'minimax_h3_video_vae_fp16.safetensors' }, 'MiniMax H3 Video VAE', 'minimax_h3_video_vae', descriptor),
+    '4': node('VAELoader', { vae_name: 'minimax_h3_video_vae_int8_convrot.safetensors' }, 'MiniMax H3 Video VAE', 'minimax_h3_video_vae', descriptor),
     '5': node('VAELoader', { vae_name: 'minimax_h3_audio_vae_fp32.safetensors' }, 'MiniMax H3 Audio VAE', 'minimax_h3_audio_vae', descriptor),
     '6': node('LoadImage', { image: 'reference-1.png' }, 'Reference Image 1', 'reference_image_0', descriptor),
     '7': node('LoadImage', { image: 'reference-2.png' }, 'Reference Image 2', 'reference_image_1', descriptor),

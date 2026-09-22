@@ -1,3 +1,4 @@
+import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from '../../../shared/umbra-ui/minimaxH3Defaults';
 import { normalizeMiniMaxH3Guides } from '../../../shared/umbra-ui/minimaxH3Guides';
 import { normalizeMiniMaxH3Turbo } from '../../../shared/umbra-ui/minimaxH3Turbo';
 import type {
@@ -525,7 +526,7 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
     minimaxH3: {
       model: '',
       textEncoder: '',
-      videoVae: '',
+      videoVae: MINIMAX_H3_DEFAULT_VIDEO_VAE,
       audioVae: '',
       shiftVideo: 10,
       shiftAudio: 5,
@@ -1116,7 +1117,7 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
     minimaxH3: {
       model: String(minimaxH3.model || '').trim().replace(/\\/g, '/'),
       textEncoder: String(minimaxH3.textEncoder || '').trim().replace(/\\/g, '/'),
-      videoVae: String(minimaxH3.videoVae || '').trim().replace(/\\/g, '/'),
+      videoVae: String(minimaxH3.videoVae ?? MINIMAX_H3_DEFAULT_VIDEO_VAE).trim().replace(/\\/g, '/'),
       audioVae: String(minimaxH3.audioVae || '').trim().replace(/\\/g, '/'),
       shiftVideo: clampNumber(minimaxH3.shiftVideo, 10, 0.01, 100),
       shiftAudio: clampNumber(minimaxH3.shiftAudio, 5, 0.01, 100),

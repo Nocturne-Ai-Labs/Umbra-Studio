@@ -1,4 +1,6 @@
 'use client';
+import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from '../../../../shared/umbra-ui/minimaxH3Defaults';
+
 import { miniMaxH3GuideIssue, normalizeMiniMaxH3Guides } from '../../../../shared/umbra-ui/minimaxH3Guides';
 import { MINIMAX_H3_TURBO_PRESETS, miniMaxH3TurboIssue, miniMaxH3TurboSamplingPreset, type MiniMaxH3TurboPreset } from '../../../../shared/umbra-ui/minimaxH3Turbo';
 
@@ -271,7 +273,7 @@ function createDefaultVideoControls(): PowerPrompterVideoControls {
     minimaxH3: {
       model: '',
       textEncoder: '',
-      videoVae: '',
+      videoVae: MINIMAX_H3_DEFAULT_VIDEO_VAE,
       audioVae: '',
       shiftVideo: 10,
       shiftAudio: 5,

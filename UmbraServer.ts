@@ -1,3 +1,4 @@
+import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from './shared/umbra-ui/minimaxH3Defaults';
 import { normalizeMiniMaxH3Guides, type MiniMaxH3Guide } from './shared/umbra-ui/minimaxH3Guides';
 import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
 /**
@@ -17202,7 +17203,7 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
     minimaxH3: {
       model: '',
       textEncoder: '',
-      videoVae: '',
+      videoVae: MINIMAX_H3_DEFAULT_VIDEO_VAE,
       audioVae: '',
       shiftVideo: 10,
       shiftAudio: 5,
@@ -18933,7 +18934,7 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
     minimaxH3: {
       model: String(minimaxH3.model || '').trim().replace(/\\/g, '/'),
       textEncoder: String(minimaxH3.textEncoder || '').trim().replace(/\\/g, '/'),
-      videoVae: String(minimaxH3.videoVae || '').trim().replace(/\\/g, '/'),
+      videoVae: String(minimaxH3.videoVae ?? MINIMAX_H3_DEFAULT_VIDEO_VAE).trim().replace(/\\/g, '/'),
       audioVae: String(minimaxH3.audioVae || '').trim().replace(/\\/g, '/'),
       shiftVideo: clampPPNumber(minimaxH3.shiftVideo, 10, 0.01, 100),
       shiftAudio: clampPPNumber(minimaxH3.shiftAudio, 5, 0.01, 100),
@@ -22825,6 +22826,9 @@ function formatUmbraUiQueueResourceIssue(issue: UmbraUiQueueResourceIssue): stri
     return `${issue.label} "${issue.value}" is ambiguous. Choose an exact relative path${issue.matches.length > 0 ? ` (${issue.matches.join(', ')})` : ''}.`;
   }
   if (issue.type === 'missing') {
+    if (issue.value === MINIMAX_H3_DEFAULT_VIDEO_VAE) {
+      return 'MiniMax H3 INT8 Video VAE is not installed. Install MiniMax H3 INT8 Video VAE in Umbra Setup > Models, then refresh the catalog. An installed FP16 VAE can still be selected manually.';
+    }
     return `${issue.label} "${issue.value}" is not installed in ComfyUI.`;
   }
   return `${issue.label} "${issue.value}" could not be verified against the live ComfyUI resource catalog.`;

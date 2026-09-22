@@ -83,6 +83,14 @@
       "label": "MiniMax H3 Video",
       "description": "MiniMax H3 diffusion model, Qwen 3 VL text encoder, and video/audio VAEs for Umbra UI text-to-video and image-to-video. Very large download."
     },
+    "minimax-h3-vae-int8": {
+      "label": "MiniMax H3 INT8 Video VAE",
+      "description": "Default video decoder for new H3 setups. Requires current managed ComfyUI and comfy-kitchen CUDA support. Existing FP16 selections are preserved."
+    },
+    "minimax-h3-vae-fp16": {
+      "label": "MiniMax H3 FP16 Video VAE (Fallback)",
+      "description": "Optional full-precision decoder fallback. Select manually in Video VAE; does not replace saved selections."
+    },
     "minimax-h3-turbo-fl2va": {
       "label": "MiniMax H3 Turbo FL2VA (Experimental)",
       "description": "Optional 620 MB v4 step600 EMA partial-conversion adapter for the pruned FL2VA INT8 model. For text/image-to-video only; not Ref2VA. Not yet generation-qualified in Umbra. Requires updated native ComfyUI LoRA support.",
@@ -602,16 +610,55 @@
           "sha256": "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6"
         },
         {
-          "destination": "vae/minimax_h3_video_vae_fp16.safetensors",
-          "sourcePath": "vae/minimax_h3_video_vae_fp16.safetensors",
-          "bytes": 5207808496,
-          "sha256": "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522"
-        },
-        {
           "destination": "vae/minimax_h3_audio_vae_fp32.safetensors",
           "sourcePath": "vae/minimax_h3_audio_vae_fp32.safetensors",
           "bytes": 605254808,
           "sha256": "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48"
+        }
+      ]
+    },
+    {
+      "id": "minimax-h3-video-vae-int8",
+      "family": "Video",
+      "creator": "MiniMax / Comfy Org",
+      "repository": "Comfy-Org/MiniMax-H3",
+      "revision": "7e75982b97cd5a41d2dcfa1904ee88d0686d6fd1",
+      "license": "minimax-h3-community-license-agreement",
+      "licenseUrl": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE",
+      "installPolicy": "automatic",
+      "profiles": [
+        "minimax-h3",
+        "minimax-h3-vae-int8"
+      ],
+      "purpose": "Default native INT8 ConvRot MiniMax H3 video decoder; existing saved VAE selections remain unchanged",
+      "files": [
+        {
+          "destination": "vae/minimax_h3_video_vae_int8_convrot.safetensors",
+          "sourcePath": "vae/minimax_h3_video_vae_int8_convrot.safetensors",
+          "bytes": 2811065184,
+          "sha256": "52a2c8c73583c86e4f41cdcce3a6ad0ea562987bc0bf3d60a0cef5f5c8e60c0e"
+        }
+      ]
+    },
+    {
+      "id": "minimax-h3-video-vae-fp16",
+      "family": "Video",
+      "creator": "MiniMax / Comfy Org",
+      "repository": "Comfy-Org/MiniMax-H3",
+      "revision": "7e75982b97cd5a41d2dcfa1904ee88d0686d6fd1",
+      "license": "minimax-h3-community-license-agreement",
+      "licenseUrl": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE",
+      "installPolicy": "automatic",
+      "profiles": [
+        "minimax-h3-vae-fp16"
+      ],
+      "purpose": "Optional FP16 MiniMax H3 video decoder fallback",
+      "files": [
+        {
+          "destination": "vae/minimax_h3_video_vae_fp16.safetensors",
+          "sourcePath": "vae/minimax_h3_video_vae_fp16.safetensors",
+          "bytes": 5207808496,
+          "sha256": "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522"
         }
       ]
     },
