@@ -1166,7 +1166,7 @@ function resolveModelManagerPath(inputPath: string): {
   if (!normalizedInput) return null;
   const resolved = resolvePath(normalizedInput, { allowOutsideRoot: true });
   if (!resolved) return null;
-  if (!isPathInsideModelManagerRoots(resolved.fullPath)) return null;
+  if (!resolveAllowedExistingGalleryPath(resolved.fullPath, getModelManagerRootsResolved().map(root => root.fullPath))) return null;
   return {
     clientPath: toClientPath(resolved.fullPath),
     fullPath: resolved.fullPath,
@@ -1229,10 +1229,11 @@ async function listModelThumbArtifactsForFile(fullPath: string): Promise<string[
 
 async function expandModelArtifactPaths(fullPaths: string[]): Promise<string[]> {
   const dedup = new Set<string>();
+  const roots = getModelManagerRootsResolved().map(root => root.fullPath);
   for (const fullPathRaw of fullPaths) {
     const fullPath = String(fullPathRaw || '').trim();
     if (!fullPath) continue;
-    if (!isPathInsideModelManagerRoots(fullPath)) continue;
+    if (!resolveAllowedExistingGalleryPath(fullPath, roots)) continue;
     dedup.add(fullPath);
 
     const snapshotPaths = [
@@ -1241,14 +1242,14 @@ async function expandModelArtifactPaths(fullPaths: string[]): Promise<string[]> 
       getPreferredModelInspectionReportFullPath(fullPath),
     ];
     for (const snapshotPath of snapshotPaths) {
-      if (existsSync(snapshotPath) && isPathInsideModelManagerRoots(snapshotPath)) {
+      if (existsSync(snapshotPath) && resolveAllowedExistingGalleryPath(snapshotPath, roots)) {
         dedup.add(snapshotPath);
       }
     }
 
     const thumbArtifacts = await listModelThumbArtifactsForFile(fullPath);
     for (const artifactPath of thumbArtifacts) {
-      dedup.add(artifactPath);
+      if (resolveAllowedExistingGalleryPath(artifactPath, roots)) dedup.add(artifactPath);
     }
   }
   return Array.from(dedup);
@@ -27066,7 +27067,8 @@ async function handleModelManagerFsRename(req: Request): Promise<Response> {
     if (!source) return json({ error: 'Invalid source path' }, 400);
 
     const targetFullPath = resolve(dirname(source.fullPath), newName);
-    if (!isPathInsideModelManagerRoots(targetFullPath)) return json({ error: 'Access denied' }, 403);
+    const modelRoots = getModelManagerRootsResolved().map(root => root.fullPath);
+    if (!resolveAllowedExistingGalleryPath(targetFullPath, modelRoots)) return json({ error: 'Access denied' }, 403);
     const targetPath = toClientPath(targetFullPath);
     const oldThumbArtifacts = await listModelThumbArtifactsForFile(source.fullPath);
     const oldBaseName = basename(source.fullPath);
@@ -27093,7 +27095,9 @@ async function handleModelManagerFsRename(req: Request): Promise<Response> {
       },
     ];
     for (const snapshotRename of snapshotRenames) {
-      if (!existsSync(snapshotRename.oldPath) || !isPathInsideModelManagerRoots(snapshotRename.nextPath)) continue;
+      if (!existsSync(snapshotRename.oldPath)
+        || !resolveAllowedExistingGalleryPath(snapshotRename.oldPath, modelRoots)
+        || !resolveAllowedExistingGalleryPath(snapshotRename.nextPath, modelRoots)) continue;
       await fs.mkdir(dirname(snapshotRename.nextPath), { recursive: true }).catch(() => undefined);
       await fsWorkerService.rename({
         oldFullPath: snapshotRename.oldPath,
@@ -27107,7 +27111,8 @@ async function handleModelManagerFsRename(req: Request): Promise<Response> {
       const oldFileName = basename(oldThumbPath);
       const nextFileName = oldFileName.replace(`${oldBaseName}${MODEL_THUMB_PREFIX}`, `${nextBaseName}${MODEL_THUMB_PREFIX}`);
       const nextThumbPath = join(parentDir, nextFileName);
-      if (!isPathInsideModelManagerRoots(nextThumbPath)) continue;
+      if (!resolveAllowedExistingGalleryPath(oldThumbPath, modelRoots)
+        || !resolveAllowedExistingGalleryPath(nextThumbPath, modelRoots)) continue;
       await fsWorkerService.rename({
         oldFullPath: oldThumbPath,
         newFullPath: nextThumbPath,
