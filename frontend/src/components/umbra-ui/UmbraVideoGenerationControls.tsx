@@ -1214,8 +1214,6 @@ export function UmbraVideoGenerationControls({
     if (detail.createdAt <= handoffAppliedAtRef.current) return;
     handoffAppliedAtRef.current = detail.createdAt;
     const role: UmbraUiVideoFrameRole = detail.videoFrameRole || 'first';
-    const handoffWidth = Math.max(0, Math.round(Number(detail.generation?.width) || 0));
-    const handoffHeight = Math.max(0, Math.round(Number(detail.generation?.height) || 0));
     handoffRolesRef.current.add(role);
     setVideo((current) => {
       if (role === 'source_video') {
@@ -1224,8 +1222,8 @@ export function UmbraVideoGenerationControls({
           mode: 'video_to_video',
           sourceVideoPath: detail.path,
           sourceVideoName: '',
-          sourceWidth: handoffWidth,
-          sourceHeight: handoffHeight,
+          sourceWidth: 0,
+          sourceHeight: 0,
         };
       }
       if (role === 'middle') {
@@ -1251,8 +1249,8 @@ export function UmbraVideoGenerationControls({
         mode: 'image_to_video',
         sourceImagePath: detail.path,
         sourceImageName: '',
-        sourceWidth: handoffWidth,
-        sourceHeight: handoffHeight,
+        sourceWidth: 0,
+        sourceHeight: 0,
       };
     });
     if (role === 'first') setSourcePreviewUrl(detail.imageUrl || `/api/fs/image?path=${encodeURIComponent(detail.path)}`);

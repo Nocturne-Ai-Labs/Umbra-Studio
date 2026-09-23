@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { FolderOutput } from 'lucide-react';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { useStore } from '@/store/useStore';
-import { getUmbraUiPinnedFolderLabel, normalizeUmbraUiPinnedFolder } from '@/lib/pinnedOutputFolders';
+import { getUmbraUiPinnedFolderLabel, normalizeUmbraUiPinnedFolder, resolveUmbraUiPinnedFolderOption } from '@/lib/pinnedOutputFolders';
 
 export function PowerPrompterOutputFolder({ value, onChange }: {
   value: string;
@@ -12,7 +12,7 @@ export function PowerPrompterOutputFolder({ value, onChange }: {
   const folders = useMemo(() => Array.from(new Set(
     (Array.isArray(pins) ? pins : []).map(normalizeUmbraUiPinnedFolder).filter(Boolean),
   )), [pins]);
-  const selected = normalizeUmbraUiPinnedFolder(value);
+  const selected = resolveUmbraUiPinnedFolderOption(value, folders);
   const missing = Boolean(selected && !folders.includes(selected));
 
   return (

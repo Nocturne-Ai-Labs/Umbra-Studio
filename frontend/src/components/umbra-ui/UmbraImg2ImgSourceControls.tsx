@@ -69,6 +69,7 @@ export function UmbraImg2ImgSourceControls({
 }: UmbraImg2ImgSourceControlsProps) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = React.useState(false);
+  const uploadGenerationRef = React.useRef(0);
   const sourceIdentity = JSON.stringify([source.path, source.originalPath, source.name, source.imageUrl]);
   const sourceRevisionRef = React.useRef({ identity: sourceIdentity, revision: 0 });
   React.useLayoutEffect(() => {
@@ -76,7 +77,10 @@ export function UmbraImg2ImgSourceControls({
       sourceRevisionRef.current = { identity: sourceIdentity, revision: sourceRevisionRef.current.revision + 1 };
     }
   }, [sourceIdentity]);
-  React.useEffect(() => () => { sourceRevisionRef.current.revision += 1; }, []);
+  React.useEffect(() => () => {
+    sourceRevisionRef.current.revision += 1;
+    uploadGenerationRef.current += 1;
+  }, []);
   const changeSource = React.useCallback((nextSource: UmbraImg2ImgSourceValue) => {
     sourceRevisionRef.current = {
       identity: JSON.stringify([nextSource.path, nextSource.originalPath, nextSource.name, nextSource.imageUrl]),
@@ -94,6 +98,7 @@ export function UmbraImg2ImgSourceControls({
 
   const upload = React.useCallback(async (file: File) => {
     if (uploading) return;
+    const uploadGeneration = ++uploadGenerationRef.current;
     const sourceRevision = sourceRevisionRef.current.revision;
     setUploading(true);
     try {
@@ -112,15 +117,17 @@ export function UmbraImg2ImgSourceControls({
       }
       const path = String(payload.sourcePath).replace(/\\/g, '/');
       const name = String(payload.filename);
-      if (sourceRevision !== sourceRevisionRef.current.revision) return;
+      if (uploadGeneration !== uploadGenerationRef.current || sourceRevision !== sourceRevisionRef.current.revision) return;
       changeSource({ path, originalPath: '', name, imageUrl: comfyInputPreviewUrl(name), width: 0, height: 0 });
     } catch (error) {
-      if (sourceRevision === sourceRevisionRef.current.revision) {
+      if (uploadGeneration === uploadGenerationRef.current && sourceRevision === sourceRevisionRef.current.revision) {
         showToast(error instanceof Error ? error.message : 'Failed to upload the IMG2IMG source.', 'error');
       }
     } finally {
-      setUploading(false);
-      if (inputRef.current) inputRef.current.value = '';
+      if (uploadGeneration === uploadGenerationRef.current) {
+        setUploading(false);
+        if (inputRef.current) inputRef.current.value = '';
+      }
     }
   }, [changeSource, showToast, uploading]);
   const canReplaceSource = Boolean(source.path && source.originalPath && source.imageUrl.startsWith('/api/fs/image?'));
