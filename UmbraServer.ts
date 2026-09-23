@@ -225,6 +225,7 @@ import { composePowerPrompterDocumentPrompt } from './backend/PowerPrompterDocum
 import { doesPowerPrompterTrashAffectSession, doesPowerPrompterTrashRemoveActiveFile, powerPrompterTrashModeForPath, resolvePowerPrompterTrashTargetPaths, runGuardedPowerPrompterTrashMutation, shouldGatePowerPrompterTrash } from './backend/PowerPrompterDeleteGuard';
 import { advancePowerPrompterRawWriteSession, choosePowerPrompterRawCardSaveFile, getPowerPrompterRawCardLogicalFile, isPowerPrompterRawWriteActiveTarget, isPowerPrompterRawWriteCandidate, isPowerPrompterRawWritePhysicalTarget, runGuardedPowerPrompterRawWrite } from './backend/PowerPrompterRawWriteGuard';
 import { assertPowerPrompterCardEditorRevision, assertPowerPrompterCardStorageRevision, assertPowerPrompterSessionCanOpen, assertPowerPrompterSessionFile, assertPowerPrompterSessionRevision, createPowerPrompterSessionGate, PowerPrompterSessionConflictError, shouldReusePowerPrompterSession } from './backend/PowerPrompterSessionGate';
+import { buildPowerPrompterSessionRecord, getPowerPrompterCanonicalStorageToken, getRestorablePowerPrompterDraft, parsePowerPrompterSessionRecord, type PersistedPowerPrompterDocumentSession } from './backend/PowerPrompterSessionPersistence';
 import { mergePowerPrompterSettingsPatch } from './backend/PowerPrompterSettingsPatch';
 import {
   UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
@@ -22217,14 +22218,6 @@ interface PowerPrompterDocumentSession {
   sourceClientId: string;
 }
 
-interface PersistedPowerPrompterDocumentSession {
-  version: 1;
-  file: string | null;
-  revision: number;
-  lastSavedAt: number;
-  updatedAt: number;
-}
-
 let powerPrompterDocumentSession: PowerPrompterDocumentSession = {
   version: 1,
   file: null,
@@ -22236,6 +22229,7 @@ let powerPrompterDocumentSession: PowerPrompterDocumentSession = {
   updatedAt: 0,
   sourceClientId: '',
 };
+let powerPrompterSessionStorageToken: string | null = null;
 const mutatePowerPrompterDocumentSession = createPowerPrompterSessionGate();
 
 function clonePowerPrompterDocumentSession(reason = 'snapshot', source = powerPrompterDocumentSession) {
@@ -22252,33 +22246,60 @@ function clonePowerPrompterDocumentSession(reason = 'snapshot', source = powerPr
 }
 
 async function readPersistedPowerPrompterDocumentSession(): Promise<PersistedPowerPrompterDocumentSession | null> {
+  let raw: string;
   try {
-    if (!existsSync(PP_SESSION_STATE_PATH)) return null;
-    const raw = await fs.readFile(PP_SESSION_STATE_PATH, 'utf-8');
-    const parsed = JSON.parse(raw) as Partial<PersistedPowerPrompterDocumentSession>;
-    const file = String(parsed?.file || '').trim().replace(/\\/g, '/') || null;
-    return {
-      version: 1,
-      file,
-      revision: Math.max(0, Math.floor(Number(parsed?.revision) || 0)),
-      lastSavedAt: Math.max(0, Math.floor(Number(parsed?.lastSavedAt) || 0)),
-      updatedAt: Math.max(0, Math.floor(Number(parsed?.updatedAt) || 0)),
-    };
-  } catch {
-    return null;
+    raw = await fs.readFile(PP_SESSION_STATE_PATH, 'utf-8');
+  } catch (error: any) {
+    if (error?.code === 'ENOENT') return null;
+    throw new PowerPrompterSessionConflictError('The saved Power Prompter session could not be read. Its file was left untouched.');
   }
+  try {
+    const parsed = parsePowerPrompterSessionRecord(JSON.parse(raw));
+    if (parsed) return parsed;
+  } catch {
+    // Keep an invalid or incomplete recovery record for manual inspection.
+  }
+  throw new PowerPrompterSessionConflictError('The saved Power Prompter session is invalid. Its file was left untouched.');
 }
 
-async function persistPowerPrompterDocumentSessionSummary(): Promise<void> {
-  const payload: PersistedPowerPrompterDocumentSession = {
-    version: 1,
-    file: powerPrompterDocumentSession.file,
-    revision: powerPrompterDocumentSession.revision,
-    lastSavedAt: powerPrompterDocumentSession.lastSavedAt,
-    updatedAt: powerPrompterDocumentSession.updatedAt,
-  };
+async function persistPowerPrompterDocumentSessionSummary(
+  session = powerPrompterDocumentSession,
+  storageToken?: string | null,
+): Promise<void> {
+  const payload = buildPowerPrompterSessionRecord(session, storageToken);
   await fs.mkdir(dirname(PP_SESSION_STATE_PATH), { recursive: true });
   await writeTextFileAtomic(PP_SESSION_STATE_PATH, JSON.stringify(payload, null, 2));
+}
+
+/** Called while holding the session gate, including direct /session/open requests. */
+async function restorePowerPrompterDirtySessionUnlocked(): Promise<PersistedPowerPrompterDocumentSession | null> {
+  if (powerPrompterDocumentSession.document) return null;
+  const persisted = await readPersistedPowerPrompterDocumentSession();
+  if (!persisted?.dirty || !persisted.file) return persisted;
+  const resolved = resolvePPPromptFile(persisted.file);
+  if (!resolved || resolved.filePath !== persisted.file) {
+    throw new PowerPrompterSessionConflictError('A recovered Power Prompter draft has an invalid card path. The draft remains in the session file.');
+  }
+  const storageToken = await getPowerPrompterCanonicalStorageToken(resolved);
+  const draft = getRestorablePowerPrompterDraft(persisted, resolved.filePath, storageToken);
+  if (!draft) {
+    throw new PowerPrompterSessionConflictError('A recovered Power Prompter draft conflicts with the card on disk. The draft remains in the session file.');
+  }
+  const document = normalizePPCardDocument(draft, resolved.filePath);
+  powerPrompterDocumentSession = {
+    version: 1,
+    file: resolved.filePath,
+    document,
+    composedPrompt: composePowerPrompterDocumentPrompt(document),
+    revision: persisted.revision,
+    dirty: true,
+    lastSavedAt: persisted.lastSavedAt,
+    updatedAt: persisted.updatedAt,
+    sourceClientId: '',
+  };
+  powerPrompterSessionStorageToken = storageToken;
+  broadcastPowerPrompterDocumentSession('document_restored');
+  return persisted;
 }
 
 function broadcastPowerPrompterDocumentSession(reason: string, preferredSourceWs?: ServerWebSocket<unknown> | null): void {
@@ -22289,6 +22310,7 @@ async function openPowerPrompterDocumentSessionUnlocked(
   filePath: string,
   options: { sourceClientId?: string; preferredSourceWs?: ServerWebSocket<unknown> | null; reason?: string } = {}
 ): Promise<PowerPrompterDocumentSession> {
+  await restorePowerPrompterDirtySessionUnlocked();
   const resolved = resolvePPPromptFile(filePath);
   if (!resolved) throw new Error('Invalid Power Prompter file path');
   if (shouldReusePowerPrompterSession(powerPrompterDocumentSession.file, resolved.filePath, !!powerPrompterDocumentSession.document)) {
@@ -22297,6 +22319,7 @@ async function openPowerPrompterDocumentSessionUnlocked(
   assertPowerPrompterSessionCanOpen(powerPrompterDocumentSession.file, resolved.filePath, powerPrompterDocumentSession.dirty);
   const loaded = await loadPPCardDocumentForFile(resolved.filePath);
   const normalized = normalizePPCardDocument(loaded.document, resolved.filePath);
+  const storageToken = await getPowerPrompterCanonicalStorageToken(resolved);
   const now = Date.now();
   powerPrompterDocumentSession = {
     version: 1,
@@ -22309,6 +22332,7 @@ async function openPowerPrompterDocumentSessionUnlocked(
     updatedAt: now,
     sourceClientId: String(options.sourceClientId || '').trim(),
   };
+  powerPrompterSessionStorageToken = storageToken;
   await persistPowerPrompterDocumentSessionSummary().catch(() => undefined);
   broadcastPowerPrompterDocumentSession(options.reason || 'document_opened', options.preferredSourceWs);
   return powerPrompterDocumentSession;
@@ -22323,6 +22347,7 @@ function openPowerPrompterDocumentSession(
 
 async function ensurePowerPrompterDocumentSession(filePath?: string | null): Promise<PowerPrompterDocumentSession> {
   return mutatePowerPrompterDocumentSession(async () => {
+    const persisted = await restorePowerPrompterDirtySessionUnlocked();
     const requestedFile = String(filePath || '').trim().replace(/\\/g, '/');
     if (requestedFile) {
       const resolved = resolvePPPromptFile(requestedFile);
@@ -22350,8 +22375,7 @@ async function ensurePowerPrompterDocumentSession(filePath?: string | null): Pro
       return powerPrompterDocumentSession;
     }
 
-    const persisted = await readPersistedPowerPrompterDocumentSession();
-    if (persisted?.file) {
+    if (persisted?.file && resolvePPPromptFile(persisted.file)?.filePath === persisted.file) {
       return openPowerPrompterDocumentSessionUnlocked(persisted.file, { reason: 'document_restored' });
     }
 
@@ -22393,6 +22417,13 @@ async function updatePowerPrompterDocumentSession(
     const now = Date.now();
     let savedDocument = normalized;
     let savedAt = powerPrompterDocumentSession.lastSavedAt || 0;
+    const currentStorageToken = await getPowerPrompterCanonicalStorageToken(resolved);
+    if (currentStorageToken !== powerPrompterSessionStorageToken
+      && (!options.save || options.forceOverwrite !== true)) {
+      throw new PowerPrompterSessionConflictError(powerPrompterDocumentSession.dirty
+        ? 'The card changed on disk. The unsaved draft remains in the session file.'
+        : 'The card changed on disk. Reload it before saving.');
+    }
 
     if (options.save) {
       const intent = String(options.intent || '').trim();
@@ -22407,7 +22438,7 @@ async function updatePowerPrompterDocumentSession(
       savedAt = now;
     }
 
-    powerPrompterDocumentSession = {
+    const nextSession: PowerPrompterDocumentSession = {
       version: 1,
       file: savedDocument.file || resolved.filePath,
       document: savedDocument,
@@ -22418,7 +22449,23 @@ async function updatePowerPrompterDocumentSession(
       updatedAt: now,
       sourceClientId: String(options.sourceClientId || '').trim(),
     };
-    await persistPowerPrompterDocumentSessionSummary().catch(() => undefined);
+    if (!options.save) {
+      const storageToken = powerPrompterSessionStorageToken;
+      if (!storageToken || currentStorageToken !== storageToken) {
+        throw new PowerPrompterSessionConflictError('The card changed on disk. Save or reopen it before editing.');
+      }
+      // A live edit is acknowledged only after its full draft is recoverable.
+      await persistPowerPrompterDocumentSessionSummary(nextSession, storageToken);
+      powerPrompterSessionStorageToken = storageToken;
+    } else {
+      powerPrompterSessionStorageToken = await getPowerPrompterCanonicalStorageToken(resolved);
+    }
+    powerPrompterDocumentSession = nextSession;
+    if (options.save) {
+      // The card file is already durable. A stale dirty draft cannot replay after
+      // this write because its captured storage token no longer matches.
+      await persistPowerPrompterDocumentSessionSummary().catch(() => undefined);
+    }
     broadcastPowerPrompterDocumentSession(options.reason || (options.save ? 'document_saved' : 'document_updated'), options.preferredSourceWs);
     return powerPrompterDocumentSession;
   });
@@ -22426,11 +22473,13 @@ async function updatePowerPrompterDocumentSession(
 
 async function publishPowerPrompterRawWrite(document: PowerPrompterCardDocument, reason: string): Promise<number> {
   const now = Date.now();
+  const resolved = powerPrompterDocumentSession.file ? resolvePPPromptFile(powerPrompterDocumentSession.file) : null;
   powerPrompterDocumentSession = advancePowerPrompterRawWriteSession(
     powerPrompterDocumentSession,
     now,
     { document, composedPrompt: composePowerPrompterDocumentPrompt(document) },
   );
+  powerPrompterSessionStorageToken = resolved ? await getPowerPrompterCanonicalStorageToken(resolved) : null;
   await persistPowerPrompterDocumentSessionSummary().catch(() => undefined);
   broadcastPowerPrompterDocumentSession(reason);
   return powerPrompterDocumentSession.revision;
@@ -22450,7 +22499,7 @@ async function clearPowerPrompterDocumentSessionUnlocked(options: ClearPowerProm
   assertPowerPrompterSessionFile(powerPrompterDocumentSession.file, resolved.filePath);
   assertPowerPrompterSessionRevision(powerPrompterDocumentSession.revision, options.expectedRevision);
   const now = Date.now();
-  powerPrompterDocumentSession = {
+  const nextSession: PowerPrompterDocumentSession = {
     version: 1,
     file: null,
     document: null,
@@ -22461,7 +22510,10 @@ async function clearPowerPrompterDocumentSessionUnlocked(options: ClearPowerProm
     updatedAt: now,
     sourceClientId: String(options.sourceClientId || '').trim(),
   };
-  await persistPowerPrompterDocumentSessionSummary().catch(() => undefined);
+  // Clear has no canonical card write to invalidate an older draft.
+  await persistPowerPrompterDocumentSessionSummary(nextSession);
+  powerPrompterDocumentSession = nextSession;
+  powerPrompterSessionStorageToken = null;
   broadcastPowerPrompterDocumentSession(options.reason || 'document_cleared', options.preferredSourceWs);
   return powerPrompterDocumentSession;
 }
@@ -22485,6 +22537,9 @@ async function loadPowerPrompterCardWithStorageRevision(resolved: { filePath: st
 }
 
 async function readPowerPrompterCardForEditor(filePath: string) {
+  if (!powerPrompterDocumentSession.document) {
+    await mutatePowerPrompterDocumentSession(restorePowerPrompterDirtySessionUnlocked);
+  }
   const resolved = resolvePPPromptFile(filePath);
   if (!resolved) throw new Error('Invalid Power Prompter file path');
   if (powerPrompterDocumentSession.file !== resolved.filePath) {
@@ -22510,6 +22565,7 @@ async function savePowerPrompterCardFromEditor(
   options: { intent: string; expectedRevision: unknown; expectedStorageRevision: unknown; forceOverwrite: boolean; sourceClientId?: string },
 ) {
   return mutatePowerPrompterDocumentSession(async () => {
+    await restorePowerPrompterDirtySessionUnlocked();
     const resolved = resolvePPPromptFile(filePath);
     if (!resolved) throw new Error('Invalid Power Prompter file path');
     if (options.intent === 'create-card' && (existsSync(resolved.sidecarPath) || existsSync(resolved.fullPath))) {
@@ -22522,6 +22578,12 @@ async function savePowerPrompterCardFromEditor(
       powerPrompterDocumentSession.revision,
       options.expectedRevision,
     );
+    if (active && !options.forceOverwrite) {
+      const currentStorageToken = await getPowerPrompterCanonicalStorageToken(resolved);
+      if (currentStorageToken !== powerPrompterSessionStorageToken) {
+        throw new PowerPrompterSessionConflictError('The card changed on disk. Reload it before saving.');
+      }
+    }
     if (!active && options.intent !== 'create-card') {
       assertPowerPrompterCardStorageRevision(
         await getPowerPrompterCardStorageRevision(resolved),
@@ -22546,6 +22608,7 @@ async function savePowerPrompterCardFromEditor(
       updatedAt: now,
       sourceClientId: String(options.sourceClientId || 'sidebar-card-operation').trim(),
     };
+    powerPrompterSessionStorageToken = await getPowerPrompterCanonicalStorageToken(resolved);
     await persistPowerPrompterDocumentSessionSummary().catch(() => undefined);
     broadcastPowerPrompterDocumentSession('document_saved');
     return { document: saved, sessionRevision: powerPrompterDocumentSession.revision };
@@ -25361,6 +25424,7 @@ async function handleTrashMutationWithCacheInvalidation(
   }
 
   return mutatePowerPrompterDocumentSession(async () => {
+    await restorePowerPrompterDirtySessionUnlocked();
     const targets = await resolvePowerPrompterTrashTargetPaths(requestedPaths, resolvePath);
     const activeFile = powerPrompterDocumentSession.file;
     const activeResolved = activeFile ? resolvePPPromptFile(activeFile) : null;
@@ -27066,6 +27130,7 @@ async function handleFsWrite(req: Request): Promise<Response> {
       }
       try {
         return await mutatePowerPrompterDocumentSession(async () => {
+          await restorePowerPrompterDirtySessionUnlocked();
           const [currentAuthorized, physicalRoot] = await Promise.all([
             resolveAllowedGalleryPath(logical.sidecarPath, [PP_PROMPTS_ROOT_ABS]),
             resolveAllowedGalleryPath(PP_PROMPTS_ROOT_ABS, [PP_PROMPTS_ROOT_ABS]),
@@ -27116,6 +27181,7 @@ async function handleFsWrite(req: Request): Promise<Response> {
     if (extension === '.txt') {
       try {
         return await mutatePowerPrompterDocumentSession(async () => {
+          await restorePowerPrompterDirtySessionUnlocked();
           const [currentAuthorized, physicalRoot] = await Promise.all([
             resolveAllowedGalleryPath(resolved.fullPath, [PP_PROMPTS_ROOT_ABS]),
             resolveAllowedGalleryPath(PP_PROMPTS_ROOT_ABS, [PP_PROMPTS_ROOT_ABS]),
@@ -36201,7 +36267,7 @@ const server = Bun.serve<UmbraSocketData>({
           const session = await ensurePowerPrompterDocumentSession(file || null);
           return json({ success: true, ...clonePowerPrompterDocumentSession(file ? 'document_requested' : 'session_requested', session) });
         } catch (error: any) {
-          return json({ success: false, error: error?.message || 'Failed to load Power Prompter session' }, 400);
+          return json({ success: false, error: error?.message || 'Failed to load Power Prompter session' }, error instanceof PowerPrompterSessionConflictError ? 409 : 400);
         }
       }
 
