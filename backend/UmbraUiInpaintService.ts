@@ -3349,8 +3349,11 @@ export class UmbraUiInpaintService {
         signal: AbortSignal.timeout(15_000),
       });
       if (!response.ok) throw new Error(`Unable to inspect ComfyUI inpaint support (${response.status}).`);
-      const payload = await response.json().catch(() => ({}));
-      const objectInfo = payload && typeof payload === 'object' ? payload as Record<string, any> : {};
+      const payload = await response.json().catch(() => null);
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload) || Object.keys(payload).length === 0) {
+        throw new Error('ComfyUI returned an invalid node catalog. Retry when ComfyUI is ready.');
+      }
+      const objectInfo = payload as Record<string, any>;
       const values = new Set(Object.keys(objectInfo));
       this.nodeTypesCache = { fetchedAt: Date.now(), values, objectInfo };
       return values;
