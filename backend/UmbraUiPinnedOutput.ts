@@ -28,7 +28,11 @@ export function resolveUmbraPinnedTaskFolder(requested: unknown, pins: unknown, 
   } catch {
     throw new Error(`The pinned output folder cannot be written to. ${PINNED_OUTPUT_RECOVERY}`);
   }
-  return folder;
+  const authorizedFolder = resolveAllowedExistingGalleryPath(folder, allowedRoots);
+  if (!authorizedFolder) {
+    throw new Error(`The pinned output folder is outside the currently allowed Gallery roots. ${PINNED_OUTPUT_RECOVERY}`);
+  }
+  return authorizedFolder;
 }
 
 function resolveAuthorizedPinnedOutputRoot(requested: unknown, pins: unknown, resolveCandidate: (value: string) => string, allowedRoots: string[]): string {
