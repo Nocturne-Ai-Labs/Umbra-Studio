@@ -22993,7 +22993,7 @@ async function assertPPApiWorkflowExecutionReady(
     assertUmbraUiVideoLoraStackInstalled(generation.video.family, generation.video.loraStack, validationContext.objectInfo);
   }
   const catalog = validationContext.catalog;
-  if (generation.outputOwner === 'umbra_ui' && generation.outputFolder) {
+  if (generation.outputFolder) {
     await assertUmbraUiPinnedOutputAvailable(
       generation.outputFolder,
       settingsManager.getAppSettings()['library.pinnedFolders'],
