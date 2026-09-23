@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { normalizeMiniMaxH3Guides } from '../../../../shared/umbra-ui/minimaxH3Guides';
+import { hasUmbraVideoSourceDimensions, normalizeUmbraVideoQueueSources } from '@/lib/umbraVideoQueueSource';
 import { formatMissingUmbraUiNodes } from '../../../../shared/umbra-ui/runtimeNodeMessages';
 import { useToastStore } from '@/store/useToastStore';
 import { classifyUmbraMediaMetadata, classifyUmbraPrompt, type UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
@@ -1836,28 +1837,8 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       sourceAudioPath: String(options.video.sourceAudioPath || '').trim(),
       sourceAudioName: String(options.video.sourceAudioName || '').trim(),
     };
-    const extendedStartsFromImage = extendedEnabled
-      && !!(video.sourceImagePath || video.sourceImageName);
-    if (extendedEnabled) {
-      video.mode = extendedStartsFromImage ? 'image_to_video' : 'text_to_video';
-    }
-    if (video.mode !== 'video_to_video') {
-      video.sourceVideoPath = '';
-      video.sourceVideoName = '';
-    }
-    if (video.mode === 'text_to_video' || video.mode === 'video_to_video') {
-      video.sourceImagePath = '';
-      video.sourceImageName = '';
-      video.middleImagePath = '';
-      video.middleImageName = '';
-      video.lastImagePath = '';
-      video.lastImageName = '';
-      if (video.mode === 'text_to_video') {
-        video.sourceWidth = 0;
-        video.sourceHeight = 0;
-      }
-    }
-    if (!extendedEnabled && video.mode !== 'text_to_video' && (!video.sourceWidth || !video.sourceHeight)) {
+    const extendedStartsFromImage = normalizeUmbraVideoQueueSources(video, extendedEnabled);
+    if (!hasUmbraVideoSourceDimensions(video)) {
       throw new Error('Umbra could not read the source media dimensions. Reload the source before queueing.');
     }
     const targetDimensions = resolveUmbraVideoTargetDimensions({
