@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Dataset, DatasetImage } from '../types';
 
 export interface DatasetConceptSettings {
@@ -42,6 +42,7 @@ export function useDatasets() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const listRequestSequence = useRef(0);
 
   const getResponseError = async (response: Response, fallback: string): Promise<string> => {
     try {
@@ -54,6 +55,7 @@ export function useDatasets() {
 
   // Fetch all datasets
   const fetchDatasets = useCallback(async () => {
+    const requestSequence = ++listRequestSequence.current;
     setIsLoading(true);
     setError(null);
 
@@ -62,11 +64,11 @@ export function useDatasets() {
       if (!response.ok) throw new Error(await getResponseError(response, 'Failed to fetch datasets'));
 
       const data = await response.json();
-      setDatasets(data.datasets || []);
+      if (requestSequence === listRequestSequence.current) setDatasets(data.datasets || []);
     } catch (err: any) {
-      setError(err.message);
+      if (requestSequence === listRequestSequence.current) setError(err.message);
     } finally {
-      setIsLoading(false);
+      if (requestSequence === listRequestSequence.current) setIsLoading(false);
     }
   }, []);
 
