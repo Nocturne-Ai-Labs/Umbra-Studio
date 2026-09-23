@@ -169,6 +169,7 @@ const thumbnailDiskCache = (() => {
   }
 })();
 const folderSummaryCache = new Map<string, FolderSummaryCacheEntry>();
+const forcedFolderSummaryScans = new Map<string, Promise<FolderSummary>>();
 const folderTreeCache = new Map<string, FolderTreeCacheEntry>();
 const metadataCache = new Map<string, MetadataCacheEntry>();
 const backgroundWarmup = new GalleryWarmupScheduler();
@@ -504,16 +505,39 @@ async function getFolderSummary(pathValue: string, force = false): Promise<Folde
   }
 
   const key = `folder-summary:${normalizedPath}`;
-  return sidebarWorker.run(key, async () => {
+  const scan = (queueKey: string, onStart?: () => void) => sidebarWorker.run(queueKey, async () => {
+    onStart?.();
     const summary = await computeFolderSummary(normalizedPath);
     setCachedFolderSummary(normalizedPath, summary);
     return summary;
   });
+  if (!force) return scan(key);
+
+  const existing = forcedFolderSummaryScans.get(normalizedPath);
+  if (existing) return existing;
+  const forcedScan = (async () => {
+    // A queued or running prewarm may already own this key. Wait for it, then
+    // scan again so a force request never inherits its earlier snapshot.
+    let started = false;
+    try {
+      const summary = await scan(key, () => { started = true; });
+      if (started) return summary;
+    } catch (error) {
+      if (started) throw error;
+    }
+    return scan(`folder-summary-force:${normalizedPath}`);
+  })();
+  forcedFolderSummaryScans.set(normalizedPath, forcedScan);
+  try { return await forcedScan; }
+  finally {
+    if (forcedFolderSummaryScans.get(normalizedPath) === forcedScan) forcedFolderSummaryScans.delete(normalizedPath);
+  }
 }
 
 function scheduleFolderSummaryPrewarm(pathValue: string) {
   const normalizedPath = normalizePath(resolveGalleryPath(pathValue));
   if (!normalizedPath) return;
+  if (forcedFolderSummaryScans.has(normalizedPath)) return;
   const cached = getCachedFolderSummary(normalizedPath);
   if (cached) return;
 
