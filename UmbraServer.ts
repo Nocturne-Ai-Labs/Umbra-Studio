@@ -2019,10 +2019,11 @@ async function writeModelManagerSnapshotForFile(modelFullPath: string, snapshot:
 }
 
 async function reconcileModelManagerFolder(fullPath: string, options: { recoverFromCivitai?: boolean } = {}) {
-  if (!isPathInsideModelManagerRoots(fullPath)) throw new Error('Invalid model path');
+  assertModelManagerArtifactPath(fullPath);
   if (!existsSync(fullPath)) await fs.mkdir(fullPath, { recursive: true });
   const stat = await fs.stat(fullPath);
   const folderFullPath = stat.isDirectory() ? fullPath : dirname(fullPath);
+  assertModelManagerArtifactPath(join(folderFullPath, MODEL_ARTIFACT_DIR));
   const modelFiles = stat.isFile()
     ? (isModelManagerModelFileName(basename(fullPath)) ? [fullPath] : [])
     : (await fs.readdir(folderFullPath, { withFileTypes: true }))
@@ -2193,7 +2194,7 @@ function readModelManagerSnapshotSummaryFromPayload(
 }
 
 async function listModelManagerSnapshotFilesRecursive(fullPath: string) {
-  if (!isPathInsideModelManagerRoots(fullPath)) throw new Error('Invalid model path');
+  assertModelManagerArtifactPath(fullPath);
   if (!existsSync(fullPath)) await fs.mkdir(fullPath, { recursive: true });
   const rootStat = await fs.stat(fullPath);
   const rootFolder = rootStat.isDirectory() ? fullPath : dirname(fullPath);
