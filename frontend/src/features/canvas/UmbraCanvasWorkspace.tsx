@@ -69,6 +69,7 @@ import { UmbraTiledVaeControls } from '@/components/umbra-ui/UmbraTiledVaeContro
 import { compileUmbraUiPromptSegments, type UmbraUiPromptSegment } from '@/lib/umbraUiPromptSegments';
 import { composeUmbraUiPromptWithLoras, type UmbraUiLoraEntry } from '@/lib/umbraUiModels';
 import { stageUmbraUiMediaHandoff, type UmbraUiMediaHandoff, type UmbraUiMediaHandoffMode } from '@/lib/umbraUiMediaHandoff';
+import { UmbraCanvasMediaImportGate } from '@/lib/umbraCanvasMediaImportGate';
 import { stageUmbraUiUpscaleHandoff } from '@/lib/umbraUiUpscale';
 import {
   usePublishUmbraQueueActivity,
@@ -224,7 +225,7 @@ interface UmbraCanvasWorkspaceProps {
   pinnedOutputFolders: string[];
   comfyConnected: boolean;
   mediaHandoff: UmbraUiMediaHandoff | null;
-  onMediaHandoffConsumed: () => void;
+  onMediaHandoffConsumed: (handoff: UmbraUiMediaHandoff) => void;
   onRestoreGenerationSettings: (settings: UmbraCanvasGenerationSettingsSnapshot) => void;
 }
 
@@ -519,6 +520,7 @@ export function UmbraCanvasWorkspace({
   const jobRef = React.useRef(job);
   const seenStageIdsRef = React.useRef(new Set<string>());
   const consumedHandoffAtRef = React.useRef(0);
+  const mediaImportGateRef = React.useRef(new UmbraCanvasMediaImportGate());
   const recoveredProjectRef = React.useRef(false);
   const projectRef = React.useRef(project);
   projectRef.current = project;
@@ -1051,30 +1053,32 @@ export function UmbraCanvasWorkspace({
     if (!active || !mediaHandoff || mediaHandoff.mode !== 'canvas') return;
     if (mediaHandoff.createdAt <= consumedHandoffAtRef.current) return;
     consumedHandoffAtRef.current = mediaHandoff.createdAt;
+    mediaImportGateRef.current.select(mediaHandoff);
     setPendingMediaImport(mediaHandoff);
     void refreshProjects();
   }, [active, mediaHandoff, refreshProjects]);
 
   const importMediaHandoff = React.useCallback(async (destinationProjectId: string) => {
     const handoff = pendingMediaImport;
-    if (!handoff || mediaImportBusy) return;
+    const gate = mediaImportGateRef.current;
+    if (!handoff || mediaImportBusy || !gate.begin(handoff)) return;
     setMediaImportBusy(true);
     let bitmap: ImageBitmap | null = null;
     let destinationSettings: UmbraCanvasGenerationSettingsSnapshot | null = null;
     try {
       const canReplace = await prepareProjectTransition();
-      if (!canReplace) return;
+      if (!canReplace || !gate.isCurrent(handoff)) return;
       const response = await fetch(handoff.imageUrl, { cache: 'no-store' });
       if (!response.ok) throw new Error(`The Canvas source returned ${response.status}.`);
       const blob = await response.blob();
       bitmap = await createImageBitmap(blob);
       const name = String(handoff.name || handoff.path.split(/[\\/]/).pop() || 'Canvas Source').trim();
-      if (!canReplace()) return;
+      if (!canReplace() || !gate.isCurrent(handoff)) return;
 
       if (destinationProjectId) {
         if (destinationProjectId !== useUmbraCanvasStore.getState().present.id) {
           const loaded = await loadUmbraCanvasWorkspaceProject(destinationProjectId);
-          if (!canReplace()) return;
+          if (!canReplace() || !gate.isCurrent(handoff)) return;
           replaceProject(loaded);
           resetGenerationTracking(loaded.generation.staging);
           window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, loaded.id);
@@ -1151,24 +1155,27 @@ export function UmbraCanvasWorkspace({
         setSamples(destinationSettings.samples);
       }
 
+      if (!gate.dismiss(handoff)) return;
       setPendingMediaImport(null);
-      onMediaHandoffConsumed();
+      onMediaHandoffConsumed(handoff);
       window.setTimeout(() => void saveProject(false), 0);
       requestAnimationFrame(() => managerRef.current?.fitToContent());
       showToast(destinationProjectId ? 'Image added to the selected Canvas project.' : 'Image and generation metadata opened in a new Canvas project.', 'success');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'The image could not be opened in Canvas.', 'error');
+      if (gate.isCurrent(handoff)) showToast(error instanceof Error ? error.message : 'The image could not be opened in Canvas.', 'error');
     } finally {
       bitmap?.close();
+      gate.finish(handoff);
       setMediaImportBusy(false);
     }
   }, [addRaster, mediaImportBusy, newProject, onMediaHandoffConsumed, onRestoreGenerationSettings, pendingMediaImport, prepareProjectTransition, renameProject, replaceProject, resetGenerationTracking, saveProject, setGenerationBbox, setGenerationSettings, showToast, tiledVae]);
 
   const cancelMediaHandoff = React.useCallback(() => {
-    if (mediaImportBusy) return;
+    const handoff = pendingMediaImport;
+    if (!handoff || mediaImportBusy || !mediaImportGateRef.current.dismiss(handoff)) return;
     setPendingMediaImport(null);
-    onMediaHandoffConsumed();
-  }, [mediaImportBusy, onMediaHandoffConsumed]);
+    onMediaHandoffConsumed(handoff);
+  }, [mediaImportBusy, onMediaHandoffConsumed, pendingMediaImport]);
 
   const forkProject = React.useCallback(async () => {
     if (forkingProject || saving || project.entities.length === 0) return;

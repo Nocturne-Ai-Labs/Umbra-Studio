@@ -3,6 +3,7 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { insertCatalogTagsAtCursor } from '@/lib/powerPrompterPromptInsertion';
 import { normalizeUmbraUiPinnedFolder } from '@/lib/pinnedOutputFolders';
+import { isSameUmbraCanvasImportHandoff } from '@/lib/umbraCanvasMediaImportGate';
 import React from 'react';
 import { formatMissingUmbraUiNodes } from '../../../../shared/umbra-ui/runtimeNodeMessages';
 import { UmbraPinnedOutputControl, usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
@@ -905,7 +906,10 @@ export function UmbraUIWorkspace() {
   const pendingMediaHandoffRef = React.useRef<UmbraUiMediaHandoff | null>(null);
   const pendingPowerPrompterHandoffRef = React.useRef<UmbraUiPowerPrompterHandoff | null>(null);
   const [canvasMediaHandoff, setCanvasMediaHandoff] = React.useState<UmbraUiMediaHandoff | null>(null);
-  const clearCanvasMediaHandoff = React.useCallback(() => setCanvasMediaHandoff(null), []);
+  const clearCanvasMediaHandoff = React.useCallback((handoff: UmbraUiMediaHandoff) => {
+    clearPendingUmbraUiMediaHandoff(handoff);
+    setCanvasMediaHandoff((current) => isSameUmbraCanvasImportHandoff(current, handoff) ? null : current);
+  }, []);
   const [initialImg2ImgReplacementIntents] = React.useState(readImg2ImgReplacementIntents);
   const img2imgSourceReplacementRequestsRef = React.useRef(initialImg2ImgReplacementIntents);
   const [img2imgReplacementIntentRevision, setImg2imgReplacementIntentRevision] = React.useState(0);
@@ -2686,7 +2690,9 @@ export function UmbraUIWorkspace() {
       if (handoff.createdAt <= mediaHandoffAppliedAtRef.current) return;
       mediaHandoffAppliedAtRef.current = handoff.createdAt;
       // Child consumers acknowledge after mounting, not after an arbitrary timeout.
-      if (handoff.mode !== 'inpaint' && handoff.mode !== 'video') clearPendingUmbraUiMediaHandoff(handoff);
+      if (handoff.mode !== 'inpaint' && handoff.mode !== 'video' && handoff.mode !== 'canvas') {
+        clearPendingUmbraUiMediaHandoff(handoff);
+      }
       if (handoff.mode === 'video') setActiveMode('video');
       if (handoff.mode === 'txt2img') setActiveMode('image');
       if (handoff.mode === 'img2img') {
@@ -2729,10 +2735,25 @@ export function UmbraUIWorkspace() {
         setPromptSegments([segment]);
         setActivePromptSegmentId(segment.id);
       }
-      const requestedModelType = PRIMARY_MODEL_TYPE_OPTIONS.some((option) => option.value === snapshot.modelType)
-        ? snapshot.modelType as PowerPrompterModelType
-        : 'checkpoint';
-      const modelItems = getPrimaryModelItems(modelCatalog, requestedModelType);
+      const hasGenerationControls = Boolean(
+        snapshot.checkpointName || snapshot.modelFamily || snapshot.vaeName
+        || snapshot.seed !== undefined || snapshot.steps !== undefined || snapshot.cfg !== undefined
+        || snapshot.clipSkip !== undefined || snapshot.samplerName || snapshot.scheduler
+        || snapshot.denoise !== undefined
+        || snapshot.controlAfterGenerate !== undefined || snapshot.seedIncrement !== undefined
+        || snapshot.hiresFix || snapshot.detailerPipeline || snapshot.outputUpscale || snapshot.tiledVae
+        || Object.keys(snapshot.workflowResources || {}).length > 0 || snapshot.loras.length,
+      );
+      if (!hasGenerationControls) {
+        if (snapshot.negativePrompt) setNegativePrompt(snapshot.negativePrompt);
+        return;
+      }
+      const requestedModelType = snapshot.checkpointName
+        ? PRIMARY_MODEL_TYPE_OPTIONS.some((option) => option.value === snapshot.modelType)
+          ? snapshot.modelType as PowerPrompterModelType
+          : 'checkpoint'
+        : '';
+      const modelItems = requestedModelType ? getPrimaryModelItems(modelCatalog, requestedModelType) : [];
       const checkpoint = resolveUmbraUiImageHandoffCheckpoint(
         snapshot.checkpointName,
         modelItems,
@@ -2763,7 +2784,7 @@ export function UmbraUIWorkspace() {
         detailerPipeline: snapshot.detailerPipeline,
         outputUpscale: snapshot.outputUpscale,
         tiledVae: snapshot.tiledVae,
-      }, { replace: true, modelFamily: snapshot.modelFamily });
+      }, { replace: Boolean(snapshot.checkpointName), modelFamily: snapshot.modelFamily });
 
       if (snapshot.vaeName) {
         const vaeResource = selectedWorkflowResources.find((resource) => resource.kind === 'vae');
