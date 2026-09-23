@@ -6321,12 +6321,11 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     emitSelectionChanged([path], path);
     if (folderPath) {
       setFocusedFolder(folderPath);
-      void loadFolder({ folder: folderPath, keepSelection: true });
       window.dispatchEvent(new CustomEvent('umbra:gallery-reveal-path', {
-        detail: { path: folderPath, folderPath, imagePath: path, source: 'react-gallery' },
+        detail: { path: folderPath, folderPath, imagePath: path, forceRefresh: true, source: 'react-gallery' },
       }));
     }
-  }, [clearSearch, emitSelectionChanged, loadFolder]);
+  }, [clearSearch, emitSelectionChanged]);
 
   const closeViewer = useCallback(() => {
     followLiveGenerationViewerRef.current = false;
@@ -8292,7 +8291,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         setFocusedFolder(targetFolder);
         addOpenedFolder(targetFolder);
         pendingRevealPathRef.current = imagePath || targetFolder;
-        void loadFolder({ folder: targetFolder, keepSelection: Boolean(imagePath), forceRefresh: true });
+        if (detail.source !== 'react-gallery' || detail.forceRefresh === true || !pathsEqual(targetFolder, currentFolder)) {
+          void loadFolder({ folder: targetFolder, keepSelection: Boolean(imagePath), forceRefresh: true });
+        }
       }
       if (imagePath) {
         setSelectedPaths(new Set([imagePath]));
