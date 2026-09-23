@@ -169,7 +169,7 @@ import {
   extractUmbraUiTriggerWords,
 } from './backend/UmbraUiLoraMetadata';
 import { assertUmbraUiPinnedOutputAvailable, resolveUmbraUiPinnedOutputFolder, resolveUmbraPinnedTaskFolder } from './backend/UmbraUiPinnedOutput';
-import { publishPinnedVideoOutput } from './backend/UmbraUiPinnedVideoOutput';
+import { publishPinnedVideoOutput, resolvePinnedVideoSourcePath } from './backend/UmbraUiPinnedVideoOutput';
 import {
   applyUmbraUiPrompterOutputLayout,
   resolveUmbraUiPrompterOutputLayout,
@@ -9026,9 +9026,11 @@ async function emitBackendPowerPrompterSavedOutputs(
   }));
   if (generation?.outputOwner === 'umbra_ui' && generation.mediaType === 'video' && generation.outputFolder) {
     const destination = resolveUmbraPinnedTaskFolder(generation.outputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, 'Video', getGalleryTransferAllowedRoots());
-    for (const output of resolvedOutputs) {
-      const fullpath = await publishPinnedVideoOutput(output.fullpath, join(destination, formatUmbraUiLocalDate()), promptId);
-      if (fullpath !== output.fullpath) Object.assign(output, { fullpath, filename: basename(fullpath), subfolder: '' });
+    const comfyRoot = getComfyToolRootFast();
+    for (const [index, output] of resolvedOutputs.entries()) {
+      const sourcePath = resolvePinnedVideoSourcePath(outputs[index], ROOT_DIR, comfyRoot);
+      const fullpath = await publishPinnedVideoOutput(sourcePath, join(destination, formatUmbraUiLocalDate()), promptId, destination);
+      if (fullpath !== sourcePath) Object.assign(output, { fullpath, filename: basename(fullpath), subfolder: '' });
     }
   }
   const basePowerPrompterMetadata = metadata?.umbra_power_prompter && typeof metadata.umbra_power_prompter === 'object'
