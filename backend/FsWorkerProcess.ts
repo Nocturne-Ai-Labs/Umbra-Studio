@@ -908,9 +908,16 @@ async function runListProgressive(payload: FsListProgressiveRequest['payload']) 
   const entries = snapshot.entries;
   const cursor = Math.max(0, Math.trunc(payload.cursor || 0));
   const limit = Math.max(0, Math.trunc(payload.limit || 0));
-  const chunk = limit > 0 ? entries.slice(cursor, cursor + limit) : entries.slice(cursor);
-  const nextCursor = cursor + chunk.length;
-  const done = nextCursor >= entries.length;
+  // Match split Gallery's contract: folders accompany each response, while
+  // cursor and limit count media files only.
+  let fileStart = 0;
+  while (fileStart < entries.length && entries[fileStart].kind === 'folder') fileStart += 1;
+  const fileChunk = limit > 0
+    ? entries.slice(fileStart + cursor, fileStart + cursor + limit)
+    : entries.slice(fileStart + cursor);
+  const chunk = [...entries.slice(0, fileStart), ...fileChunk];
+  const nextCursor = cursor + fileChunk.length;
+  const done = nextCursor >= snapshot.totalMedia;
   const snapshotId = requestedSnapshot || (!done && limit > 0
     ? rememberProgressiveListingSnapshot(fullPath, targetPath, sortBy, sortOrder, snapshot)
     : undefined);

@@ -15676,6 +15676,14 @@ async function startGalleryBridgeInternal(stopEpoch = galleryBridgeStopEpoch) {
     startGalleryProcessTelemetry();
 
     proc.on('error', (err) => {
+      if (galleryBridgeProcess !== proc) {
+        appendBackendLifecycleLog('gallery', 'stale_spawn_error_ignored', {
+          pid: proc.pid ?? null,
+          trackedPid: galleryBridgeProcess?.pid ?? null,
+          message: err.message,
+        });
+        return;
+      }
       const message = `Spawn error: ${err.message}`;
       console.error(`\x1b[33m[GALLERY]\x1b[0m \x1b[31m${message}\x1b[0m`);
       appendBackendLifecycleLog('gallery', 'spawn_error', {
