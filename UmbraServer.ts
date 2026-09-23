@@ -12062,8 +12062,8 @@ function startGalleryBridgeWatchdog() {
       threshold: GALLERY_BRIDGE_WATCHDOG_FAILURE_THRESHOLD,
     });
 
-    if (!processRunning) {
-      scheduleGalleryBridgeSelfHeal('process_missing');
+    if (!processRunning || galleryBridgeWatchdogFailures >= GALLERY_BRIDGE_WATCHDOG_FAILURE_THRESHOLD) {
+      scheduleGalleryBridgeSelfHeal(processRunning ? 'health_check_failed' : 'process_missing');
     }
   }, GALLERY_BRIDGE_WATCHDOG_INTERVAL_MS);
   (galleryBridgeWatchdogTimer as any).unref?.();
@@ -15527,6 +15527,7 @@ async function startGalleryBridgeInternal() {
         port: GALLERY_BRIDGE_PORT,
       });
       galleryBridgeDesired = true;
+      startGalleryBridgeWatchdog();
       return {
         success: true,
         message: 'Gallery bridge process is running but health check failed; using fallback until it responds',
@@ -15760,8 +15761,9 @@ async function startGalleryBridgeInternal() {
 
     const exitCode = galleryBridgeProcess?.exitCode;
     const processRunning = isChildProcessAlive(galleryBridgeProcess);
-    if (processRunning && !GALLERY_BRIDGE_AUTO_RECOVERY_ENABLED) {
-      logGalleryRecoverySuppressed('start_timeout', 'start_request');
+    if (processRunning) startGalleryBridgeWatchdog();
+    if (processRunning) {
+      if (!GALLERY_BRIDGE_AUTO_RECOVERY_ENABLED) logGalleryRecoverySuppressed('start_timeout', 'start_request');
       return {
         success: true,
         message: 'Gallery bridge process started but did not become ready before the readiness check completed',
@@ -15891,7 +15893,13 @@ async function restartGalleryBridgeForSelfHeal(reason: string, expectedPid: numb
   const trackedPid = proc?.pid ?? null;
   if (isChildProcessAlive(proc)) {
     logBackendProcessSnapshot('gallery', 'before_self_heal_restart', [proc?.pid], { reason, port: GALLERY_BRIDGE_PORT });
-    await stopProcessTree(proc, 'Gallery bridge');
+    const stopped = await stopProcessTree(proc, 'Gallery bridge');
+    if (!stopped && isChildProcessAlive(proc)) {
+      appendBackendLifecycleLog('gallery', 'self_heal_stop_failed', {
+        reason, trackedPid, port: GALLERY_BRIDGE_PORT,
+      });
+      return;
+    }
   }
   const stalePortPids = listPidsByPort(GALLERY_BRIDGE_PORT)
     .filter((pid) => pid !== process.pid)
@@ -16028,9 +16036,16 @@ async function proxyGalleryBridgeFsGet(
   headers.set('X-Umbra-Gallery-Bridge-Token', GALLERY_BRIDGE_TOKEN);
 
   try {
+    // Date/custom order needs stats for the whole folder before page one. Let
+    // the split worker finish rather than timing it out and repeating that scan
+    // in the fallback worker. Name sorting with fast=1 only stats the page.
+    const fastNameListing = targetPath === '/api/fs/list-progressive'
+      && sourceUrl.searchParams.get('sortBy') === 'name'
+      && sourceUrl.searchParams.get('fast') === '1';
     const proxyTimeoutMs = targetPath === '/api/fs/image'
       ? 20000
-      : (targetPath === '/api/fs/thumbnail' ? 12000 : 6000);
+      : (targetPath === '/api/fs/thumbnail' ? 12000
+        : (targetPath === '/api/fs/list-progressive' && !fastNameListing ? 30000 : 6000));
     const upstream = await fetch(targetUrl.toString(), {
       method: 'GET',
       headers,
