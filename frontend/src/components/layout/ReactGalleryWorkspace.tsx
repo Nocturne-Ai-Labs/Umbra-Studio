@@ -8817,8 +8817,11 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
               if (controller.signal.aborted) return;
               const params = new URLSearchParams({
                 path: folderPath,
-                sortBy,
-                sortOrder,
+                // Search reads every page and sorts matches after merging them.
+                // Name paging lets the worker return the first page without
+                // statting the entire folder for a time or custom sort.
+                sortBy: 'name',
+                sortOrder: 'asc',
                 fast: '1',
                 recursive: 'false',
               });

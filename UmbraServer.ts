@@ -56,6 +56,7 @@ import { isCivitaiModelDownloadUrl } from './backend/ModelDownloadHttp';
 import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
 import { fetchLocalServerProxy, readLocalServerProxyText } from './backend/LocalServerProxyTransfer';
 import { createGalleryPathAuthorizer, resolveAllowedExistingGalleryPath, resolveAllowedGalleryPath } from './backend/GalleryPathAccess';
+import { galleryFallbackSearchMediaType, inspectGalleryFallbackSearchMedia } from './backend/GalleryFallbackSearchMedia';
 import { buildGalleryDownloadArchive, prepareGalleryDownloadResponse, getPreparedGalleryDownload, type GalleryDownloadEntry } from './backend/GalleryDownloadArchiveService';
 import { copyFileExclusive, moveTreeExclusive } from './backend/FsTransferCopy';
 import { AnimaModelMergeService } from './backend/AnimaModelMergeService';
@@ -2544,6 +2545,14 @@ function normalizeAppSettingsForClient(settings: Record<string, unknown>): Recor
     ...normalizedSettings,
     'library.defaultComfyOutputRoot': toClientPath(resolvePathCandidate(getDefaultOutputRootPath())),
   };
+}
+
+function validateRequestedTrashStorageSetting(settings: Record<string, unknown>): string | null {
+  if (!Object.prototype.hasOwnProperty.call(settings, 'library.trashStoragePath')) return null;
+  const raw = settings['library.trashStoragePath'];
+  const configured = typeof raw === 'string' ? raw.trim() : '';
+  const storageDir = configured ? resolvePathCandidate(configured) : join(ROOT_DIR, 'User', 'Trash');
+  return trashRoutes.validateTrashStorageDirectory({ ROOT_DIR, USER_DIR }, storageDir);
 }
 
 const {
@@ -26595,22 +26604,60 @@ async function handleFsSearch(url: URL, signal?: AbortSignal): Promise<Response>
     }
 
     const filesByPath = new Map<string, any>();
-    const indexedFiles = galleryDb.searchFiles(
-      resolvedRoots.map((root) => root.clientRootPath),
-      query,
-      fileLimit * 3,
-    );
-    for (const file of indexedFiles) {
-      if (!fsFileMatchesSearch(file, query)) continue;
-      const key = normalizeOutputPathInput(String(file?.path || '')).toLowerCase();
-      if (!key || filesByPath.has(key)) continue;
-      filesByPath.set(key, file);
-      if (filesByPath.size >= fileLimit) break;
+    const authorizeSearchFile = await createGalleryPathAuthorizer(resolvedRoots.map((root) => root.fullPath));
+    const keepBestFiles = () => {
+      if (filesByPath.size <= fileLimit) return;
+      const best = [...filesByPath.values()]
+        .sort((left, right) => compareFsSearchFiles(left, right, query, sortBy, sortOrder))
+        .slice(0, fileLimit);
+      filesByPath.clear();
+      for (const file of best) filesByPath.set(normalizeOutputPathInput(file.path).toLowerCase(), file);
+    };
+    const indexedPageSize = Math.max(64, Math.min(256, fileLimit * 3));
+    // Leave time to discover files that have not reached the index yet.
+    const indexedDeadline = startedAt + Math.floor(maxDurationMs / 2);
+    let indexedOffset = 0;
+    let indexedCapped = false;
+    while (true) {
+      signal?.throwIfAborted();
+      if (indexedOffset > 0 && Date.now() >= indexedDeadline) {
+        indexedCapped = true;
+        break;
+      }
+      const indexedFiles = galleryDb.searchFiles(
+        resolvedRoots.map((root) => root.clientRootPath), query, indexedPageSize, indexedOffset,
+      );
+      indexedOffset += indexedFiles.length;
+      if (indexedFiles.length === 0) break;
+      for (let offset = 0; offset < indexedFiles.length; offset += 16) {
+        if (offset > 0 && Date.now() >= indexedDeadline) {
+          indexedCapped = true;
+          break;
+        }
+        const batch = indexedFiles.slice(offset, offset + 16);
+        const live = await Promise.all(batch.map(async (file) => {
+          if (!fsFileMatchesSearch(file, query)) return null;
+          const clientPath = normalizeOutputPathInput(String(file?.path || ''));
+          const resolved = resolvePath(clientPath);
+          if (!resolved) return null;
+          const input = await inspectGalleryFallbackSearchMedia(
+            resolved.fullPath, clientPath, normalizeOutputPathInput(file.folderPath), authorizeSearchFile,
+          );
+          return input ? { ...file, size: input.size, createdMs: input.createdMs, modifiedMs: input.modifiedMs } : null;
+        }));
+        signal?.throwIfAborted();
+        for (const file of live) {
+          if (!file || !fsFileMatchesSearch(file, query)) continue;
+          filesByPath.set(normalizeOutputPathInput(file.path).toLowerCase(), file);
+        }
+        keepBestFiles();
+      }
+      if (indexedCapped || indexedFiles.length < indexedPageSize) break;
     }
 
     const foldersByPath = new Map<string, { name: string; path: string; rootPath: string }>();
     let scannedFolders = 0;
-    let capped = false;
+    let scanCapped = false;
     const queue = resolvedRoots.map((root) => ({
       absolutePath: root.fullPath,
       clientPath: root.clientRootPath,
@@ -26626,11 +26673,13 @@ async function handleFsSearch(url: URL, signal?: AbortSignal): Promise<Response>
       }
     }
 
-    while (queue.length > 0 && scannedFolders < maxFolders && Date.now() - startedAt < maxDurationMs) {
+    let queueIndex = 0;
+    while (queueIndex < queue.length && scannedFolders < maxFolders && Date.now() - startedAt < maxDurationMs) {
       signal?.throwIfAborted();
-      const current = queue.shift();
+      const current = queue[queueIndex++];
       if (!current) continue;
       scannedFolders += 1;
+      if (!(await authorizeSearchFile(current.absolutePath))) continue;
       let entries: Dirent[] = [];
       try {
         entries = await fs.readdir(current.absolutePath, { withFileTypes: true });
@@ -26656,8 +26705,33 @@ async function handleFsSearch(url: URL, signal?: AbortSignal): Promise<Response>
           absoluteRootPath: current.absoluteRootPath,
         });
       }
+
+      const matchingMedia = entries.filter((entry) => entry.isFile()
+        && galleryFallbackSearchMediaType(entry.name)
+        && (fsTextMatchesSearch(entry.name, query) || fsTextMatchesSearch(current.clientPath, query)));
+      for (let offset = 0; offset < matchingMedia.length; offset += 16) {
+        if (Date.now() - startedAt >= maxDurationMs) {
+          scanCapped = true;
+          break;
+        }
+        const inputs = (await Promise.all(matchingMedia.slice(offset, offset + 16).map((entry) => {
+          const absolutePath = join(current.absolutePath, entry.name);
+          const clientPath = mapAbsolutePathToGalleryPath(current.rootPath, current.absoluteRootPath, absolutePath);
+          return inspectGalleryFallbackSearchMedia(
+            absolutePath, clientPath, current.clientPath, authorizeSearchFile,
+          );
+        }))).filter((input): input is GalleryFileInput => Boolean(input));
+        signal?.throwIfAborted();
+        if (inputs.length === 0) continue;
+        for (const file of galleryDb.upsertFolderFiles(current.clientPath, inputs)) {
+          if (!fsFileMatchesSearch(file, query)) continue;
+          filesByPath.set(normalizeOutputPathInput(file.path).toLowerCase(), file);
+        }
+        keepBestFiles();
+      }
+      if (scanCapped) break;
     }
-    if (queue.length > 0) capped = true;
+    const capped = indexedCapped || scanCapped || queueIndex < queue.length;
 
     const files = Array.from(filesByPath.values())
       .filter((file) => fsFileMatchesSearch(file, query))
@@ -35574,6 +35648,8 @@ const server = Bun.serve<UmbraSocketData>({
           if (autoStartError) return json({ error: autoStartError }, hostRequest ? 400 : 403);
           const comfySettingsError = validateHostOnlyServiceSettings(mergedNextSettings, currentSettings, hostRequest);
           if (comfySettingsError) return json({ error: comfySettingsError }, hostRequest ? 400 : 403);
+          const trashStorageError = validateRequestedTrashStorageSetting(mergedNextSettings);
+          if (trashStorageError) return json({ error: trashStorageError }, 400);
           settingsManager.updateAppSettings(mergedNextSettings);
           let comfySecurityResult: ComfySecurityApplyResult | undefined;
           if (Object.prototype.hasOwnProperty.call(mergedNextSettings, 'comfyui.securityLevel') ||
@@ -35618,6 +35694,8 @@ const server = Bun.serve<UmbraSocketData>({
           if (autoStartError) return json({ error: autoStartError }, hostRequest ? 400 : 403);
           const comfySettingsError = validateHostOnlyServiceSettings(portableBundleAppSettings, currentSettings, hostRequest);
           if (comfySettingsError) return json({ error: comfySettingsError }, hostRequest ? 400 : 403);
+          const trashStorageError = validateRequestedTrashStorageSetting(portableBundleAppSettings);
+          if (trashStorageError) return json({ error: trashStorageError }, 400);
           settingsManager.updateAppSettings(portableBundleAppSettings);
           nextBundle.appSettings = portableBundleAppSettings;
           await savePPSettings(nextBundle.powerPrompterSettings);

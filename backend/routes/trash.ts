@@ -1,5 +1,5 @@
 import { rename, rm, mkdir, stat, writeFile, readFile, readdir, cp } from 'fs/promises';
-import { join, basename, dirname, resolve, relative, sep } from 'path';
+import { join, basename, dirname, resolve, relative, sep, isAbsolute } from 'path';
 import { existsSync } from 'fs';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -75,10 +75,32 @@ type TrashListItem = TrashMetadata['items'][number] & {
 
 function getTrashDir(context: RouteContext) {
   // Use configured Trash location, while API path remains virtual User/Trash.
-  if (typeof context.getTrashDir === 'function') {
-    return context.getTrashDir();
+  const trashDir = resolve(typeof context.getTrashDir === 'function'
+    ? context.getTrashDir()
+    : join(context.ROOT_DIR, 'User', 'Trash'));
+  const error = validateTrashStorageDirectory(context, trashDir);
+  if (error) throw new Error(error);
+  return trashDir;
+}
+
+export function validateTrashStorageDirectory(
+  context: Pick<RouteContext, 'ROOT_DIR' | 'USER_DIR'>,
+  storageDir: string,
+): string | null {
+  const trashDir = resolve(storageDir);
+  const physicalTrash = resolveAllowedExistingGalleryPath(trashDir, [trashDir]);
+  const physicalRoot = resolveAllowedExistingGalleryPath(context.ROOT_DIR, [context.ROOT_DIR]);
+  const physicalUser = resolveAllowedExistingGalleryPath(context.USER_DIR, [context.USER_DIR]);
+  const contains = (parent: string, child: string) => {
+    const rel = relative(parent, child);
+    return !rel || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`));
+  };
+  if (!physicalTrash || !physicalRoot || !physicalUser
+    || dirname(physicalTrash) === physicalTrash
+    || contains(physicalTrash, physicalRoot) || contains(physicalTrash, physicalUser)) {
+    return 'Trash storage path cannot be the app root, User directory, or an ancestor';
   }
-  return join(context.ROOT_DIR, 'User', 'Trash');
+  return null;
 }
 
 function getConfigDir(context: RouteContext) {
@@ -123,7 +145,7 @@ function sanitizeMetadata(data: any): TrashMetadata {
       const type: 'image' | 'video' | 'folder' =
         rawType === 'video' ? 'video' : rawType === 'folder' ? 'folder' : 'image';
 
-      if (!id || !originalPath || !trashPath || !name || !deletedAt || !expiresAt) return null;
+      if (!id || !originalPath || !isTrashItemPath(trashPath) || !name || !deletedAt || !expiresAt) return null;
       return { id, originalPath, trashPath, name, type, size, deletedAt, expiresAt };
     })
     .filter((item: TrashMetadata['items'][number] | null): item is TrashMetadata['items'][number] => !!item);
@@ -301,6 +323,10 @@ function isTrashPath(path: string): boolean {
   return normalized === TRASH_ROOT || normalized.startsWith(`${TRASH_ROOT}/`);
 }
 
+function isTrashItemPath(path: string): boolean {
+  return normalizeRelPath(path).startsWith(`${TRASH_ROOT}/`);
+}
+
 function inferOriginalPath(
   trashPath: string,
   explicitOriginalPath: string | undefined,
@@ -437,7 +463,7 @@ async function cleanupTrash(context: RouteContext) {
       if (item.expiresAt && new Date(item.expiresAt) < now) {
         try {
           const { relativePath, fullPath } = resolveWorkspacePath(item.trashPath, context);
-          if (isTrashPath(relativePath) && existsSync(fullPath)) {
+          if (isTrashItemPath(relativePath) && existsSync(fullPath)) {
             try {
               await sendPathToSystemTrash(fullPath, context);
               console.log(`[Trash] Auto-expired to OS Trash: ${item.name}`);
@@ -872,6 +898,10 @@ async function restoreFromTrashUnlocked(req: Request, _url: URL, context: RouteC
           failed.push({ trashPath, error: 'Path is not in Trash' });
           continue;
         }
+        if (!isTrashItemPath(resolvedTrashPath.relativePath)) {
+          failed.push({ trashPath, error: 'Trash storage root cannot be restored' });
+          continue;
+        }
         if (!existsSync(resolvedTrashPath.fullPath)) {
           failed.push({ trashPath, error: 'Trash item does not exist' });
           continue;
@@ -1088,8 +1118,8 @@ async function permanentlyDeleteUnlocked(req: Request, _url: URL, context: Route
     }
 
     const resolvedPaths = Array.from(new Set(paths)).map((trashPath) => resolveWorkspacePath(trashPath, context));
-    if (resolvedPaths.some((p) => !isTrashPath(p.relativePath))) {
-      return json({ error: 'Only User/Trash paths are allowed' }, 400, context.corsHeaders);
+    if (resolvedPaths.some((p) => !isTrashItemPath(p.relativePath))) {
+      return json({ error: 'Only items inside User/Trash are allowed' }, 400, context.corsHeaders);
     }
 
     let results: Array<{ path: string; success: boolean; error?: string }>;
@@ -1278,6 +1308,9 @@ async function permanentlyDeleteDirectUnlocked(req: Request, _url: URL, context:
       } catch (err: any) {
         return { inputPath, error: err?.message || 'Invalid path' } as any;
       }
+      if (isTrashPath(resolved.relativePath) && !isTrashItemPath(resolved.relativePath)) {
+        return { inputPath, error: 'Trash storage root cannot be deleted' } as any;
+      }
       return { inputPath, resolved };
     });
     const invalidResults = resolvedItems
@@ -1375,6 +1408,10 @@ async function deleteToSystemTrashUnlocked(req: Request, _url: URL, context: Rou
         resolved = resolveWorkspacePath(p, context);
       } catch (err: any) {
         return { path: p, success: false, error: err?.message || 'Invalid path' };
+      }
+
+      if (isTrashPath(resolved.relativePath) && !isTrashItemPath(resolved.relativePath)) {
+        return { path: p, success: false, error: 'Trash storage root cannot be deleted' };
       }
 
       const fullPath = resolved.fullPath;
