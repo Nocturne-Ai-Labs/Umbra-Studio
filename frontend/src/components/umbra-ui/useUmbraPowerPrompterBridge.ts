@@ -1841,6 +1841,22 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     if (extendedEnabled) {
       video.mode = extendedStartsFromImage ? 'image_to_video' : 'text_to_video';
     }
+    if (video.mode !== 'video_to_video') {
+      video.sourceVideoPath = '';
+      video.sourceVideoName = '';
+    }
+    if (video.mode === 'text_to_video' || video.mode === 'video_to_video') {
+      video.sourceImagePath = '';
+      video.sourceImageName = '';
+      video.middleImagePath = '';
+      video.middleImageName = '';
+      video.lastImagePath = '';
+      video.lastImageName = '';
+      if (video.mode === 'text_to_video') {
+        video.sourceWidth = 0;
+        video.sourceHeight = 0;
+      }
+    }
     if (!extendedEnabled && video.mode !== 'text_to_video' && (!video.sourceWidth || !video.sourceHeight)) {
       throw new Error('Umbra could not read the source media dimensions. Reload the source before queueing.');
     }
