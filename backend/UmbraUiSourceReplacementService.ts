@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
-import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'path';
+import { basename, dirname, extname, join, resolve } from 'path';
 import * as fs from 'fs/promises';
+import { resolveAllowedGalleryPath } from './GalleryPathAccess';
 
 const REPLACEABLE_IMAGE_EXTENSIONS = new Set([
   '.avif',
@@ -44,21 +45,6 @@ function normalizeForCompare(pathValue: string): string {
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
-function isInsideRoot(pathValue: string, rootValue: string): boolean {
-  const target = normalizeForCompare(pathValue);
-  const root = normalizeForCompare(rootValue);
-  if (!target || !root) return false;
-  if (target === root) return true;
-  const relation = relative(root, target);
-  return !!relation && !relation.startsWith('..') && !isAbsolute(relation);
-}
-
-function assertAllowedPath(pathValue: string, allowedRoots: string[], label: string): void {
-  if (!allowedRoots.some((root) => root && isInsideRoot(pathValue, root))) {
-    throw new Error(`${label} is outside Umbra's configured output and Gallery roots.`);
-  }
-}
-
 function sanitizeStem(pathValue: string): string {
   const extension = extname(pathValue);
   return basename(pathValue, extension)
@@ -91,17 +77,17 @@ async function writeReplacementFile(resultPath: string, temporaryPath: string, o
 export async function replaceUmbraUiImageSource(
   options: UmbraUiSourceReplacementOptions,
 ): Promise<UmbraUiSourceReplacementResult> {
-  const originalPath = resolve(String(options.originalPath || '').trim());
-  const resultPath = resolve(String(options.resultPath || '').trim());
   const recoveryRoot = resolve(String(options.recoveryRoot || '').trim());
   const allowedRoots = options.allowedRoots.map((root) => resolve(root)).filter(Boolean);
 
   if (!options.originalPath || !options.resultPath) throw new Error('Both the original source and completed result paths are required.');
+  const originalPath = await resolveAllowedGalleryPath(resolve(options.originalPath.trim()), allowedRoots);
+  if (!originalPath) throw new Error('Original source is outside Umbra\'s configured output and Gallery roots.');
+  const resultPath = await resolveAllowedGalleryPath(resolve(options.resultPath.trim()), allowedRoots);
+  if (!resultPath) throw new Error('Completed result is outside Umbra\'s configured output and Gallery roots.');
   if (normalizeForCompare(originalPath) === normalizeForCompare(resultPath)) {
     throw new Error('The completed result already points to the original source file.');
   }
-  assertAllowedPath(originalPath, allowedRoots, 'Original source');
-  assertAllowedPath(resultPath, allowedRoots, 'Completed result');
 
   const originalExtension = extname(originalPath).toLowerCase();
   const resultExtension = extname(resultPath).toLowerCase();
