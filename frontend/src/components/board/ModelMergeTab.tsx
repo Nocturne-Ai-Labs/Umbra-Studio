@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ArrowRightLeft, CheckCircle2, ChevronDown, ChevronUp, CircleAlert, Combine, Cpu, FolderOpen, Loader2, RefreshCw, RotateCcw, Save, Square, Trash2, Workflow } from 'lucide-react';
 import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import { ModelMergePreview } from './ModelMergePreview';
@@ -62,6 +62,7 @@ export function ModelMergeTab() {
   const [testBusy, setTestBusy] = useState(false);
   const [testView, setTestView] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
+  const refreshedCompletedJob = useRef('');
   const [error, setError] = useState('');
   const [checkError, setCheckError] = useState('');
   const running = !!job && !terminal.has(job.phase);
@@ -85,6 +86,11 @@ export function ModelMergeTab() {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    if (job?.phase !== 'completed' || !job.id || refreshedCompletedJob.current === job.id) return;
+    refreshedCompletedJob.current = job.id;
+    void refresh();
+  }, [job?.id, job?.phase, refresh]);
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;

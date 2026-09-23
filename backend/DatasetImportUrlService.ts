@@ -1,4 +1,8 @@
 import { lookup as resolveHostname } from 'node:dns/promises';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { isIP } from 'node:net';
+import { Readable } from 'node:stream';
 import sharp from 'sharp';
 
 const MAX_DATASET_IMPORT_BYTES = 256 * 1024 * 1024;
@@ -56,7 +60,7 @@ async function validateDatasetImportUrl(
   value: string | URL,
   allowPrivateNetwork: boolean,
   lookup: HostLookup,
-): Promise<URL> {
+): Promise<{ url: URL; address: string }> {
   let url: URL;
   try {
     url = value instanceof URL ? value : new URL(value);
@@ -66,9 +70,8 @@ async function validateDatasetImportUrl(
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
     throw new Error('Only credential-free HTTP image URLs are supported');
   }
-  if (allowPrivateNetwork) return url;
   const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') || isPrivateNetworkAddress(hostname)) {
+  if (!allowPrivateNetwork && (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') || isPrivateNetworkAddress(hostname))) {
     throw new Error('Remote image import cannot access local or private network addresses');
   }
   let addresses: Array<{ address: string }>;
@@ -77,18 +80,69 @@ async function validateDatasetImportUrl(
   } catch {
     throw new Error('Remote image host could not be resolved');
   }
-  if (!addresses.length || addresses.some(entry => isPrivateNetworkAddress(entry.address))) {
+  if (!addresses.length || addresses.some(entry => !isIP(entry.address) || (!allowPrivateNetwork && isPrivateNetworkAddress(entry.address)))) {
     throw new Error('Remote image import cannot access local or private network addresses');
   }
-  return url;
+  return { url, address: addresses[0].address };
 }
 
-async function detectImageContentType(bytes: Buffer): Promise<string> {
+function fetchPinnedImage(url: URL, address: string, init: RequestInit): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, {
+      method: 'GET',
+      headers: init.headers as Record<string, string>,
+      signal: init.signal as AbortSignal,
+      lookup: (_hostname, lookupOptions, callback) => {
+        const family = isIP(address) as 4 | 6;
+        if (typeof lookupOptions === 'object' && lookupOptions.all) {
+          (callback as (error: null, addresses: Array<{ address: string; family: 4 | 6 }>) => void)(null, [{ address, family }]);
+        } else {
+          callback(null, address, family);
+        }
+      },
+    }, response => {
+      const headers = new Headers();
+      for (const [name, value] of Object.entries(response.headers)) {
+        if (Array.isArray(value)) value.forEach(item => headers.append(name, item));
+        else if (value !== undefined) headers.set(name, value);
+      }
+      const status = response.statusCode || 502;
+      if (status < 200 || status > 599) {
+        response.destroy();
+        reject(new Error(`Image server returned an unsupported HTTP status: ${status}`));
+        return;
+      }
+      const body = status === 204 || status === 205 || status === 304
+        ? null : Readable.toWeb(response) as ReadableStream<Uint8Array>;
+      resolve(new Response(body, { status, headers }));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
+
+export async function detectDatasetImportImage(bytes: Buffer): Promise<{ contentType: string; extension: string }> {
+  if (!bytes.length || bytes.length > MAX_DATASET_IMPORT_BYTES) {
+    throw new Error(bytes.length ? 'Dropped image exceeds the 256 MB import limit' : 'Dropped image was empty');
+  }
   const image = sharp(bytes, { failOn: 'warning', animated: true, limitInputPixels: 100_000_000 });
   const metadata = await image.metadata();
   if (!metadata.format || !metadata.width || !metadata.height) throw new Error('Dropped URL did not return an image');
+  const formats: Record<string, { contentType: string; extension: string }> = {
+    jpeg: { contentType: 'image/jpeg', extension: '.jpg' },
+    png: { contentType: 'image/png', extension: '.png' },
+    webp: { contentType: 'image/webp', extension: '.webp' },
+    gif: { contentType: 'image/gif', extension: '.gif' },
+    bmp: { contentType: 'image/bmp', extension: '.bmp' },
+    heif: { contentType: 'image/avif', extension: '.avif' },
+  };
+  const detected = formats[metadata.format];
+  if (!detected) throw new Error('Only JPEG, PNG, WebP, GIF, BMP, and AVIF images can be imported');
+  if (metadata.format === 'heif' && metadata.compression !== 'av1') {
+    throw new Error('Only AVIF images are supported in this image format');
+  }
   await image.stats();
-  return metadata.format === 'jpeg' ? 'image/jpeg' : metadata.format === 'heif' ? 'image/avif' : `image/${metadata.format}`;
+  return detected;
 }
 
 async function readLimitedImageResponse(response: Response, signal: AbortSignal, maxBytes: number): Promise<{ bytes: Buffer; contentType: string }> {
@@ -116,7 +170,7 @@ async function readLimitedImageResponse(response: Response, signal: AbortSignal,
     const encoding = response.headers.get('content-encoding')?.trim().toLowerCase();
     if ((!encoding || encoding === 'identity') && declaredSize && bytesRead !== declaredSize) throw new Error('Dropped image download was incomplete');
     const bytes = Buffer.concat(chunks, bytesRead);
-    return { bytes, contentType: contentType || await detectImageContentType(bytes) };
+    return { bytes, contentType: (await detectDatasetImportImage(bytes)).contentType };
   } finally {
     await reader.cancel().catch(() => undefined);
     reader.releaseLock();
@@ -127,12 +181,11 @@ export async function fetchDatasetImportImage(
   value: string,
   options: { allowPrivateNetwork: boolean; fetch?: HttpFetch; lookup?: HostLookup; timeoutMs?: number; maxBytes?: number } = { allowPrivateNetwork: false },
 ): Promise<{ bytes: Buffer; contentType: string }> {
-  const request = options.fetch || ((url, init) => fetch(url, init));
   const lookup = options.lookup || resolveHostname;
   const signal = AbortSignal.timeout(options.timeoutMs ?? 120_000);
-  let url = await validateDatasetImportUrl(value, options.allowPrivateNetwork, lookup);
+  let target = await validateDatasetImportUrl(value, options.allowPrivateNetwork, lookup);
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
-    const response = await request(url, {
+    const response = await (options.fetch || ((url, init) => fetchPinnedImage(url, target.address, init)))(target.url, {
       signal,
       redirect: 'manual',
       headers: { 'User-Agent': 'UmbraStudio/1.0 (dataset-builder)', Accept: 'image/*;q=1,*/*;q=0.1', 'Accept-Encoding': 'identity' },
@@ -141,7 +194,7 @@ export async function fetchDatasetImportImage(
       const location = response.headers.get('location');
       await response.body?.cancel().catch(() => undefined);
       if (!location) throw new Error('Image redirect is missing its destination');
-      url = await validateDatasetImportUrl(new URL(location, url), options.allowPrivateNetwork, lookup);
+      target = await validateDatasetImportUrl(new URL(location, target.url), options.allowPrivateNetwork, lookup);
       continue;
     }
     return readLimitedImageResponse(response, signal, options.maxBytes ?? MAX_DATASET_IMPORT_BYTES);

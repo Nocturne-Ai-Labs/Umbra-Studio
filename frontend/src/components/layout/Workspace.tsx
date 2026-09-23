@@ -1996,11 +1996,12 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
   const sortedApps = useMemo(() => [...apps].sort((left, right) => left.order - right.order || left.name.localeCompare(right.name)), [apps]);
 
   const persistApps = useCallback(async (nextApps: LocalServerApp[]) => {
+    if (isRemoteClient) throw new Error('Local apps can only be configured from the host PC.');
     if (!appsReadyRef.current) throw new Error('Reload the local server list before saving changes.');
     const normalized = await saveLocalServerApps(nextApps.map((app, index) => ({ ...app, order: index })));
     setApps(normalized);
     return normalized;
-  }, []);
+  }, [isRemoteClient]);
 
   const startAdd = useCallback(() => {
     setEditor(emptyLocalServerEditor());
@@ -2139,6 +2140,7 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
                 <button
                   type="button"
                   onClick={startAdd}
+                  disabled={isRemoteClient}
                   className="inline-flex h-8 items-center gap-2 rounded-md border border-cyan-300/25 bg-cyan-500/10 px-3 text-[10px] font-black uppercase tracking-wider text-cyan-100 hover:border-cyan-200/45"
                 >
                   <Plus size={13} />
@@ -2178,6 +2180,7 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
                         <button
                           type="button"
                           onClick={() => startEdit(app)}
+                          disabled={isRemoteClient}
                           className="rounded border border-white/10 bg-white/[0.035] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-300 hover:border-white/20"
                         >
                           Edit
@@ -2190,7 +2193,7 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
                         >
                           <ExternalLink size={12} />
                         </button>
-                        {app.folderPath ? (
+                        {app.folderPath && !isRemoteClient ? (
                           <button
                             type="button"
                             onClick={() => void handleOpenAppFolder(app.folderPath)}
@@ -2203,7 +2206,7 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
                         <button
                           type="button"
                           onClick={() => void moveApp(app, -1)}
-                          disabled={index === 0}
+                          disabled={isRemoteClient || index === 0}
                           className="ml-auto rounded border border-white/10 bg-white/[0.03] p-1.5 text-zinc-500 hover:text-zinc-100 disabled:opacity-30"
                           title="Move up"
                         >
@@ -2212,7 +2215,7 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
                         <button
                           type="button"
                           onClick={() => void moveApp(app, 1)}
-                          disabled={index >= sortedApps.length - 1}
+                          disabled={isRemoteClient || index >= sortedApps.length - 1}
                           className="rounded border border-white/10 bg-white/[0.03] p-1.5 text-zinc-500 hover:text-zinc-100 disabled:opacity-30"
                           title="Move down"
                         >
@@ -2221,6 +2224,7 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
                         <button
                           type="button"
                           onClick={() => void handleDelete(app)}
+                          disabled={isRemoteClient}
                           className="rounded border border-red-300/20 bg-red-500/10 p-1.5 text-red-200 hover:border-red-200/45"
                           title="Delete"
                         >
@@ -2236,9 +2240,9 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
             <section className="rounded-xl border border-white/10 bg-black/25 p-4">
               <div className="mb-4">
                 <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">{editor.id ? 'Edit Server' : 'Add Server'}</div>
-                <div className="mt-1 text-xs text-zinc-600">Only localhost, private LAN, plain hostnames, and .local URLs are allowed.</div>
+                <div className="mt-1 text-xs text-zinc-600">{isRemoteClient ? 'Configure local server apps from the host PC. Saved apps remain available here.' : 'Only localhost, private LAN, plain hostnames, and .local URLs are allowed.'}</div>
               </div>
-              <div className="space-y-3">
+              <fieldset disabled={isRemoteClient} className="space-y-3">
                 <div>
                   <label htmlFor={`${editorId}-name`} className="mb-1 block text-[10px] font-black uppercase tracking-wider text-zinc-500">Name</label>
                   <input
@@ -2292,7 +2296,7 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
                     </button>
                   ) : null}
                 </div>
-              </div>
+              </fieldset>
             </section>
           </div>
         </div>
@@ -2326,7 +2330,7 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
           <ExternalLink size={12} />
           Open
         </button>
-        {selectedApp.folderPath ? (
+        {selectedApp.folderPath && !isRemoteClient ? (
           <button
             type="button"
             onClick={() => void handleOpenAppFolder()}
@@ -2340,6 +2344,7 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
         <button
           type="button"
           onClick={handleEdit}
+          disabled={isRemoteClient}
           className="inline-flex h-8 items-center gap-2 rounded-md border border-white/10 bg-white/[0.035] px-2.5 text-[10px] font-black uppercase tracking-wider text-zinc-300 hover:border-white/20 hover:bg-white/[0.06]"
           title="Edit local server apps"
         >
@@ -2673,4 +2678,3 @@ export const Workspace = () => {
     </div>
   );
 };
-

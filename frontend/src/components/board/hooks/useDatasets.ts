@@ -36,6 +36,8 @@ export interface DatasetArchiveResult {
   directoryCount: number;
 }
 
+type DatasetActionResult = { success: true } | { success: false; error: string };
+
 export function useDatasets() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -280,7 +282,7 @@ export function useDatasets() {
     images: string[],
     fromConcept: string,
     toConcept: string
-  ): Promise<boolean> => {
+  ): Promise<DatasetActionResult> => {
     try {
       const response = await fetch('/api/datasets/move-images', {
         method: 'POST',
@@ -296,10 +298,11 @@ export function useDatasets() {
       if (!response.ok) throw new Error(await getResponseError(response, 'Failed to move images'));
 
       await fetchDatasets();
-      return true;
+      return { success: true };
     } catch (err: any) {
-      setError(err.message);
-      return false;
+      const message = err instanceof Error ? err.message : 'Failed to move images';
+      setError(message);
+      return { success: false, error: message };
     }
   }, [fetchDatasets]);
 
@@ -308,7 +311,7 @@ export function useDatasets() {
     datasetName: string,
     conceptFolder: string,
     images: string[]
-  ): Promise<boolean> => {
+  ): Promise<DatasetActionResult> => {
     try {
       const response = await fetch('/api/datasets/delete-images', {
         method: 'POST',
@@ -320,11 +323,17 @@ export function useDatasets() {
         }),
       });
 
-      return response.ok;
-    } catch {
-      return false;
+      if (!response.ok) throw new Error(await getResponseError(response, 'Failed to delete images'));
+      await fetchDatasets();
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete images';
+      // A filesystem error can occur after some images were deleted.
+      await fetchDatasets();
+      setError(message);
+      return { success: false, error: message };
     }
-  }, []);
+  }, [fetchDatasets]);
 
   // Load on mount
   useEffect(() => {

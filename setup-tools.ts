@@ -10,7 +10,7 @@
  */
 
 import { join, basename, dirname, relative } from 'path';
-import { existsSync, readdirSync, statSync, lstatSync, unlinkSync, rmSync, mkdirSync, readFileSync, writeFileSync, cpSync, renameSync, symlinkSync } from 'fs';
+import { existsSync, readdirSync, statSync, lstatSync, realpathSync, unlinkSync, rmSync, mkdirSync, readFileSync, writeFileSync, cpSync, renameSync, symlinkSync } from 'fs';
 import { spawn, spawnSync, execSync } from 'child_process';
 
 const ROOT_DIR = process.env.UMBRA_ROOT || import.meta.dir;
@@ -1344,7 +1344,14 @@ function ensureAIToolkitDatasetsLink(toolDir: string) {
         try {
             const existing = lstatSync(toolkitDatasetsDir);
             if (existing.isSymbolicLink()) {
-                unlinkSync(toolkitDatasetsDir);
+                const currentTarget = realpathSync(toolkitDatasetsDir);
+                const desiredTarget = realpathSync(userDatasetsDir);
+                if ((IS_WINDOWS ? currentTarget.toLowerCase() : currentTarget) === (IS_WINDOWS ? desiredTarget.toLowerCase() : desiredTarget)) {
+                    log('OK', 'AI-Toolkit datasets already share User/Datasets');
+                    return;
+                }
+                log(`${c.yellow}!${c.reset}`, 'AI-Toolkit datasets link points elsewhere; leaving it unchanged');
+                return;
             } else if (existing.isDirectory()) {
                 const entries = readdirSync(toolkitDatasetsDir);
                 if (entries.length > 0) {
@@ -1638,6 +1645,17 @@ function setupAIToolkitUI(toolDir: string): boolean {
         readFileSync(packageJsonPath, 'utf-8'),
         existsSync(lockPath) ? readFileSync(lockPath, 'utf-8') : ''
     ].join('\n')).toString();
+    // Rebuild when an upstream UI or cron source commit changes, even if npm
+    // manifests did not. A checkout without a readable revision is rebuilt.
+    const getBuildFingerprint = (manifest: string): string => {
+        const result = spawnSync('git', ['rev-parse', '--verify', 'HEAD'], {
+            cwd: toolDir, encoding: 'utf-8', shell: false
+        });
+        const revision = String(result.stdout || '').trim();
+        return result.status === 0 && /^[a-f0-9]{40}$/i.test(revision)
+            ? Bun.hash(`${manifest}\n${revision}`).toString()
+            : '';
+    };
     let manifestFingerprint = getManifestFingerprint();
     const nodeModulesPath = join(uiDir, 'node_modules');
     let dependenciesReady = false;
@@ -1673,12 +1691,13 @@ function setupAIToolkitUI(toolDir: string): boolean {
         log('OK', `AI-Toolkit UI dependencies already installed (Node ${nodeVersion})`);
     }
 
+    const buildFingerprint = getBuildFingerprint(manifestFingerprint);
     let buildReady = false;
     if (existsSync(join(uiDir, '.next', 'BUILD_ID'))
         && existsSync(join(uiDir, 'dist', 'cron', 'worker.js'))
         && existsSync(buildMarkerPath)) {
         try {
-            buildReady = readFileSync(buildMarkerPath, 'utf-8').trim() === manifestFingerprint;
+            buildReady = Boolean(buildFingerprint) && readFileSync(buildMarkerPath, 'utf-8').trim() === buildFingerprint;
         } catch {
             // Rebuild below when the marker cannot be read.
         }
@@ -1708,7 +1727,7 @@ function setupAIToolkitUI(toolDir: string): boolean {
         );
     }
     try {
-        writeFileSync(buildMarkerPath, manifestFingerprint, 'utf-8');
+        if (buildFingerprint) writeFileSync(buildMarkerPath, buildFingerprint, 'utf-8');
     } catch {
         // The marker is only a performance optimization.
     }

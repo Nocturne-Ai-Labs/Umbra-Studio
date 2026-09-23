@@ -32,6 +32,7 @@ interface AIToolkitStatus {
   nodeVersion: string;
   uiDependenciesInstalled: boolean;
   datasetsPath: string;
+  datasetsShared: boolean;
 }
 
 interface ToolActionResult {
@@ -56,6 +57,7 @@ const EMPTY_STATUS: AIToolkitStatus = {
   nodeVersion: '',
   uiDependenciesInstalled: false,
   datasetsPath: '',
+  datasetsShared: false,
 };
 
 type BusyAction = 'install' | 'update' | 'launch' | 'stop' | null;
@@ -77,6 +79,15 @@ function formatUptime(seconds: number): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+function DatasetHandoffWarning({ path }: { path: string }) {
+  return (
+    <div role="alert" className="flex items-start gap-2 border border-amber-400/25 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-100">
+      <AlertTriangle size={15} className="mt-0.5 flex-none text-amber-300" />
+      <span>Dataset sharing with Data Forge could not be verified{path ? ` for ${path}` : ''}. Check the Dataset Folder Path in AI-Toolkit settings on the host.</span>
+    </div>
+  );
+}
+
 export function AIToolkitTab({ isActive }: { isActive: boolean }) {
   const addToast = useToastStore((state) => state.addToast);
   const [status, setStatus] = useState<AIToolkitStatus>(EMPTY_STATUS);
@@ -94,8 +105,9 @@ export function AIToolkitTab({ isActive }: { isActive: boolean }) {
     [remoteClient, status.url],
   );
 
-  useEffect(() => () => {
-    mountedRef.current = false;
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
   }, []);
 
   const fetchStatus = useCallback(async (quiet = false) => {
@@ -288,8 +300,8 @@ export function AIToolkitTab({ isActive }: { isActive: boolean }) {
 
             <div className="grid gap-3 py-5 sm:grid-cols-2">
               <div className="border-l-2 border-emerald-400/40 pl-3">
-                <div className="text-xs font-bold uppercase tracking-wider text-zinc-300">Shared datasets</div>
-                <div className="mt-1 break-all text-xs leading-5 text-zinc-500">{status.datasetsPath || 'User/Datasets'}</div>
+                <div className="text-xs font-bold uppercase tracking-wider text-zinc-300">{!status.installed ? 'Data Forge datasets' : status.datasetsShared ? 'Shared datasets' : 'AI-Toolkit datasets'}</div>
+                <div className="mt-1 break-all text-xs leading-5 text-zinc-500">{status.datasetsPath || 'Folder not verified'}</div>
               </div>
               <div className="border-l-2 border-cyan-400/40 pl-3">
                 <div className="text-xs font-bold uppercase tracking-wider text-zinc-300">Host runtime</div>
@@ -298,6 +310,8 @@ export function AIToolkitTab({ isActive }: { isActive: boolean }) {
                 </div>
               </div>
             </div>
+
+            {status.installed && !status.datasetsShared && <DatasetHandoffWarning path={status.datasetsPath} />}
 
             {(statusError || (!status.nodeAvailable && !statusLoading)) && (
               <div className="mb-4 flex items-start gap-3 border border-amber-400/25 bg-amber-500/[0.06] px-3 py-3 text-sm text-amber-100">
@@ -414,6 +428,8 @@ export function AIToolkitTab({ isActive }: { isActive: boolean }) {
           {busyAction === 'stop' ? <Loader2 size={14} className="animate-spin" /> : <Square size={13} />}
         </button>
       </div>
+
+      {status.installed && !status.datasetsShared && <DatasetHandoffWarning path={status.datasetsPath} />}
 
       <div className="relative min-h-0 flex-1 bg-black">
         <iframe

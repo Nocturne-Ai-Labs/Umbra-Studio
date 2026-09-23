@@ -97,6 +97,8 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   useComponentDebug('GlobalSettings', { activeSection, isOpen });
   const [settings, setSettings] = useState<Settings>({ ...defaultSettings });
+  const [saveError, setSaveError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   // Load settings when modal opens to avoid stale state.
   useEffect(() => {
@@ -136,31 +138,33 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
   };
 
   const saveSettings = async () => {
+    if (saving) return;
+    setSaving(true);
+    setSaveError('');
     try {
-      const normalized = saveAppSettings(settings, { replace: true });
-      const store = useStore.getState();
-      store.applyAppSettings(normalized);
-
-      try {
-        await pushAppSettingsToBackend(normalized);
-        await fetch('/api/settings/bundle', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            bundle: {
-              schemaVersion: 1,
-              appSettings: normalized,
-              themeSettings: getThemeSettingsSnapshot(),
-            },
-          }),
-        });
-      } catch (syncError) {
-        console.warn('[GlobalSettings] Failed to sync settings to backend:', syncError);
-      }
+      const normalized = normalizeAppSettings(settings);
+      await pushAppSettingsToBackend(normalized);
+      const bundleResponse = await fetch('/api/settings/bundle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bundle: {
+            schemaVersion: 1,
+            appSettings: normalized,
+            themeSettings: getThemeSettingsSnapshot(),
+          },
+        }),
+      });
+      if (!bundleResponse.ok) throw new Error(`Settings bundle sync failed (${bundleResponse.status})`);
+      saveAppSettings(normalized, { replace: true });
+      useStore.getState().applyAppSettings(normalized);
       console.log('[GlobalSettings] Settings saved successfully');
       onClose();
     } catch (err) {
       console.error('[GlobalSettings] Failed to save settings:', err);
+      setSaveError(err instanceof Error ? err.message : 'Failed to save settings');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -503,13 +507,15 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
               <button
                 data-umbra-settings-reset
                 onClick={resetSettings}
-                className="glass-panel px-4 py-2 bg-white/5 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 text-sm font-medium transition-all flex items-center gap-2 hover:scale-105"
-                title={t('settings.reset')}
+                disabled={isUmbraRemoteClient()}
+                className="glass-panel px-4 py-2 bg-white/5 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 text-sm font-medium transition-all flex items-center gap-2 hover:scale-105 disabled:cursor-not-allowed disabled:opacity-50"
+                title={isUmbraRemoteClient() ? 'Reset all settings from the host PC.' : t('settings.reset')}
               >
                 <RotateCcw size={14} />
                 <span>{t('settings.reset')}</span>
               </button>
-              <div data-umbra-settings-footer-actions className="flex gap-2">
+              <div data-umbra-settings-footer-actions className="flex items-center gap-2">
+                {saveError && <span role="alert" className="max-w-64 text-xs text-red-300">{saveError}</span>}
                 <button
                   data-umbra-settings-cancel
                   onClick={onClose}
@@ -520,7 +526,8 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
                 <button
                   data-umbra-settings-save
                   onClick={saveSettings}
-                  className="glass-panel px-4 py-2 bg-[var(--umbra-accent)] hover:brightness-110 text-white text-sm font-medium transition-all flex items-center gap-2 hover:scale-105"
+                  disabled={saving}
+                  className="glass-panel px-4 py-2 bg-[var(--umbra-accent)] hover:brightness-110 text-white text-sm font-medium transition-all flex items-center gap-2 hover:scale-105 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Save size={14} />
                   {t('settings.save')}
@@ -741,6 +748,7 @@ const GeneralSettings = ({ settings, updateSetting }: any) => {
 
 const StorageSettings = ({ settings, updateSetting }: any) => {
   useComponentDebug('StorageSettings');
+  const isRemoteClient = isUmbraRemoteClient();
 
   const toExternalRootsDraft = (roots: unknown): string[] => {
     if (!Array.isArray(roots)) return [''];
@@ -794,12 +802,14 @@ const StorageSettings = ({ settings, updateSetting }: any) => {
 
       <div className="glass-panel p-4 space-y-4">
         <h4 className="text-sm font-bold text-white uppercase tracking-wider">Tool Root Directories</h4>
+        {isRemoteClient && <SettingHint>Tool paths and connection URLs are configured on the host PC.</SettingHint>}
 
         <SettingGroup label="ComfyUI Root Directory">
           <SettingInput
             value={settings['comfyui.path']}
             onChange={(val: string) => updateSetting('comfyui.path', val)}
             placeholder="D:/Tools/ComfyUI"
+            disabled={isRemoteClient}
           />
         </SettingGroup>
 
@@ -808,6 +818,7 @@ const StorageSettings = ({ settings, updateSetting }: any) => {
             value={settings['aitoolkit.path']}
             onChange={(val: string) => updateSetting('aitoolkit.path', val)}
             placeholder="D:/Tools/AI-Toolkit"
+            disabled={isRemoteClient}
           />
         </SettingGroup>
 
@@ -816,6 +827,7 @@ const StorageSettings = ({ settings, updateSetting }: any) => {
             value={settings['aitoolkit.url']}
             onChange={(val: string) => updateSetting('aitoolkit.url', val)}
             placeholder="http://127.0.0.1:8675"
+            disabled={isRemoteClient}
           />
         </SettingGroup>
 
@@ -1140,6 +1152,7 @@ const ToolVersionManager = ({
 
 const ComfyUISettings = ({ settings, updateSetting }: any) => {
   useComponentDebug('ComfyUISettings');
+  const isRemoteClient = isUmbraRemoteClient();
   const vramModeDescriptions: Record<(typeof COMFY_VRAM_MODES)[number], string> = {
     auto: 'ComfyUI chooses Dynamic VRAM behavior automatically. Recommended for most systems.',
     'gpu-only': 'Keeps text encoders, CLIP, models, and execution on the GPU. Uses the most VRAM.',
@@ -1174,8 +1187,9 @@ const ComfyUISettings = ({ settings, updateSetting }: any) => {
             value={settings['comfyui.url']}
             onChange={(val: string) => updateSetting('comfyui.url', val)}
             placeholder="http://127.0.0.1:8188"
+            disabled={isRemoteClient}
           />
-          <SettingHint>Used for the embedded ComfyUI view and backend launch host/port</SettingHint>
+          <SettingHint>{isRemoteClient ? 'The host PC configures this connection.' : 'Used for the embedded ComfyUI view and backend launch host/port'}</SettingHint>
         </SettingGroup>
 
         <SettingGroup label="ComfyUI VRAM Mode">
@@ -1225,9 +1239,10 @@ const ComfyUISettings = ({ settings, updateSetting }: any) => {
                 <button
                   key={level}
                   type="button"
+                  disabled={isRemoteClient}
                   onClick={() => updateSetting('comfyui.securityLevel', level)}
                   className={cn(
-                    'px-3 py-2 rounded-md border text-xs font-bold uppercase tracking-wide transition-colors',
+                    'px-3 py-2 rounded-md border text-xs font-bold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50',
                     selected
                       ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent)]/20 text-white'
                       : 'border-white/10 bg-black/20 text-zinc-300 hover:border-white/20 hover:text-white'
@@ -1487,6 +1502,3 @@ const AdvancedSettings = ({ settings, updateSetting, exportSettings, importSetti
     </div>
   );
 };
-
-
-
