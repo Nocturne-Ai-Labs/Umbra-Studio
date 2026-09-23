@@ -7252,6 +7252,10 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     void (async () => {
       const loadSeq = fileLoadRequestSeqRef.current + 1;
       fileLoadRequestSeqRef.current = loadSeq;
+      if (powerPrompterSessionUpdateTimerRef.current) {
+        clearTimeout(powerPrompterSessionUpdateTimerRef.current);
+        powerPrompterSessionUpdateTimerRef.current = null;
+      }
       const fileName = String(path || '').replace(/\\/g, '/').split('/').pop() || 'prompt file';
       setLoadingPromptFileName(fileName);
       await waitForNextUiPaint();
@@ -7396,7 +7400,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
 
   const handleDeleteFile = (path: string) => {
     if (currentFile !== path) return;
-    void fetch(`/api/powerprompter/session?clientId=${encodeURIComponent(powerPrompterUiClientIdRef.current)}`, {
+    fileLoadRequestSeqRef.current += 1;
+    if (powerPrompterSessionUpdateTimerRef.current) {
+      clearTimeout(powerPrompterSessionUpdateTimerRef.current);
+      powerPrompterSessionUpdateTimerRef.current = null;
+    }
+    void fetch(`/api/powerprompter/session?clientId=${encodeURIComponent(powerPrompterUiClientIdRef.current)}&file=${encodeURIComponent(path)}`, {
       method: 'DELETE',
     }).catch(() => undefined);
     setCurrentFile(null);

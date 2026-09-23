@@ -5,6 +5,7 @@ import {
   normalizePowerPrompterPromptText,
 } from '@/lib/powerPrompter';
 import { normalizeChainCards } from '@/lib/powerPrompterChain';
+import { collectQueueSnapshotPromptRows } from '../../../../../shared/power-prompter/queueSnapshotRows';
 import {
   clampQueueSetId,
   normalizeQueueDiversity,
@@ -165,9 +166,14 @@ export function normalizeQueueEditorSnapshot(rawValue: unknown): PersistedQueueE
 export function normalizePersistedQueueGroupSnapshots(
   rawValue: unknown,
   requestIds: string[],
-  promptCount: number
+  promptCount: number,
+  sourceIndices?: readonly number[]
 ): PersistedQueueGroupSnapshot[] {
   if (!Array.isArray(rawValue) || promptCount <= 0) return [];
+  const compactIndexBySource = new Map(
+    (sourceIndices || Array.from({ length: promptCount }, (_, index) => index))
+      .map((sourceIndex, compactIndex) => [sourceIndex, compactIndex] as const)
+  );
   const indicesByRequestId = new Map<string, number[]>();
   requestIds.forEach((requestId, index) => {
     const indices = indicesByRequestId.get(requestId) || [];
@@ -182,10 +188,14 @@ export function normalizePersistedQueueGroupSnapshots(
       const fallbackIndices = indicesByRequestId.get(requestId) || [];
       const rawPromptIndices: number[] = (Array.isArray(entry.promptIndices) ? entry.promptIndices : fallbackIndices)
         .map((value: unknown) => Math.floor(Number(value)))
-        .filter((value: number) => Number.isFinite(value) && value >= 0 && value < promptCount);
+        .map((value: number) => Array.isArray(entry.promptIndices) ? compactIndexBySource.get(value) : value)
+        .filter((value: number | undefined): value is number => value !== undefined && Number.isFinite(value) && value >= 0 && value < promptCount);
       const promptIndices = Array.from(new Set<number>(rawPromptIndices));
+      if (promptIndices.length <= 0 && fallbackIndices.length <= 0) return null;
       const firstIndex = promptIndices[0] ?? fallbackIndices[0] ?? 0;
-      const promptStartIndex = Math.max(0, Math.min(promptCount - 1, Math.floor(Number(entry.promptStartIndex) || firstIndex)));
+      const sourceStartIndex = Math.floor(Number(entry.promptStartIndex));
+      const mappedStartIndex = compactIndexBySource.get(sourceStartIndex);
+      const promptStartIndex = Math.max(0, Math.min(promptCount - 1, mappedStartIndex ?? firstIndex));
       const normalizedMode = String(entry.mode || '') === 'prompt' || String(entry.mode || '') === 'variants'
         ? String(entry.mode) as PowerPrompterQueueMode
         : (String(entry.mode || '') === 'selected' ? 'selected' : undefined);
@@ -197,7 +207,7 @@ export function normalizePersistedQueueGroupSnapshots(
         ...(normalizedMode ? { mode: normalizedMode } : {}),
         ...(entry.activeSetId !== undefined ? { activeSetId: clampQueueSetId(entry.activeSetId) } : {}),
         promptStartIndex,
-        promptCount: Math.max(0, Math.floor(Number(entry.promptCount) || promptIndices.length || fallbackIndices.length)),
+        promptCount: promptIndices.length || fallbackIndices.length,
         ...(promptIndices.length > 0 ? { promptIndices } : {}),
         ...(editorSnapshot ? { editorSnapshot } : {}),
       };
@@ -209,37 +219,38 @@ export function normalizePersistedPausedQueueSnapshot(rawValue: unknown): Persis
   try {
     const parsed = rawValue && typeof rawValue === 'object' ? rawValue : JSON.parse(String(rawValue || 'null'));
     if (!parsed || typeof parsed !== 'object') return null;
-    const prompts: string[] = Array.isArray((parsed as any).prompts)
-      ? (parsed as any).prompts.map((entry: unknown) => normalizePowerPrompterPromptText(String(entry || '').trim())).filter(Boolean)
-      : [];
+    const promptRows = collectQueueSnapshotPromptRows(
+      (parsed as any).prompts,
+      (entry) => normalizePowerPrompterPromptText(String(entry || '').trim())
+    );
+    const prompts = promptRows.map((row) => row.prompt);
+    const sourceIndices = promptRows.map((row) => row.sourceIndex);
     if (prompts.length <= 0) return null;
-    const promptSetIds = prompts.map((_, index) => clampQueueSetId((parsed as any).promptSetIds?.[index] ?? (parsed as any).activeSetId ?? 1));
-    const promptOutputSubfolders = prompts.map((_, index) => String((parsed as any).promptOutputSubfolders?.[index] || '').trim());
-    const promptStyleNames = prompts.map((_, index) => String((parsed as any).promptStyleNames?.[index] || '').trim());
-    const promptSeedGroupIds = prompts.map((_, index) => String((parsed as any).promptSeedGroupIds?.[index] || `${promptSetIds[index]}:${index}`).trim());
+    const promptSetIds = sourceIndices.map((sourceIndex) => clampQueueSetId((parsed as any).promptSetIds?.[sourceIndex] ?? (parsed as any).activeSetId ?? 1));
+    const promptOutputSubfolders = sourceIndices.map((sourceIndex) => String((parsed as any).promptOutputSubfolders?.[sourceIndex] || '').trim());
+    const promptStyleNames = sourceIndices.map((sourceIndex) => String((parsed as any).promptStyleNames?.[sourceIndex] || '').trim());
+    const promptSeedGroupIds = sourceIndices.map((sourceIndex, index) => String((parsed as any).promptSeedGroupIds?.[sourceIndex] || `${promptSetIds[index]}:${index}`).trim());
     const rawGenerationByPrompt = Array.isArray((parsed as any).generationByPrompt)
       ? (parsed as any).generationByPrompt
       : [];
     const fallbackGeneration = normalizePowerPrompterGenerationControls((parsed as any).generation);
-    const generationByPrompt = prompts.map((_, index) =>
-      normalizePowerPrompterGenerationControls(rawGenerationByPrompt[index] ?? fallbackGeneration)
+    const generationByPrompt = sourceIndices.map((sourceIndex) =>
+      normalizePowerPrompterGenerationControls(rawGenerationByPrompt[sourceIndex] ?? fallbackGeneration)
     );
     const generation = normalizePowerPrompterGenerationControls(generationByPrompt[0] ?? fallbackGeneration);
-    const rawRequestIds = Array.isArray((parsed as any).requestIds)
-      ? (parsed as any).requestIds
-        .map((entry: unknown) => String(entry || '').trim())
-        .filter((entry: string) => entry.length > 0)
+    const rawRequestIds: string[] = Array.isArray((parsed as any).requestIds)
+      ? (parsed as any).requestIds.map((entry: unknown) => String(entry || '').trim())
       : [];
     const savedAt = Number((parsed as any).savedAt) || Date.now();
-    const fallbackRequestId = rawRequestIds[0] || `paused-${savedAt}`;
-    const requestIds = prompts.map((_, index) => rawRequestIds[index] || fallbackRequestId);
-    const groupSnapshots = normalizePersistedQueueGroupSnapshots((parsed as any).groupSnapshots, requestIds, prompts.length);
+    const fallbackRequestId = rawRequestIds.find(Boolean) || `paused-${savedAt}`;
+    const requestIds = sourceIndices.map((sourceIndex) => rawRequestIds[sourceIndex] || fallbackRequestId);
+    const groupSnapshots = normalizePersistedQueueGroupSnapshots((parsed as any).groupSnapshots, requestIds, prompts.length, sourceIndices);
     const rawPromptEntries = Array.isArray((parsed as any).promptEntries)
       ? (parsed as any).promptEntries
       : null;
     const promptEntries = rawPromptEntries
       ? prompts.map((prompt, index): QueuePromptPreviewEntry => {
-        const entry = rawPromptEntries[index];
+        const entry = rawPromptEntries[sourceIndices[index]];
         return {
           prompt: normalizePowerPrompterPromptText(String(entry?.prompt || prompt || '').trim()),
           tokens: Array.isArray(entry?.tokens)

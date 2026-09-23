@@ -1501,12 +1501,15 @@ export class UmbraUiInpaintService {
     const item = job.items.find((candidate) => candidate.promptId === promptId && ['queued', 'running'].includes(candidate.status));
     if (!item) throw new Error('The sample changed or finished. Refresh the queue and try again.');
     if (!await cancelComfyJobById(this.getComfyBaseUrl(), promptId)) throw new Error('The sample has already finished.');
-    if (item.status !== 'completed') {
-      item.status = 'canceled';
-      item.error = 'Skipped by user.';
-      job.updatedAt = Date.now();
-      this.persistJobs();
+    // History may have settled, or the whole job may have been canceled,
+    // while the targeted ComfyUI cancellation request was in flight.
+    if (!['queued', 'running'].includes(item.status) || ['completed', 'partial', 'failed', 'canceled'].includes(job.status)) {
+      throw new Error('The sample changed or finished. Refresh the queue and try again.');
     }
+    item.status = 'canceled';
+    item.error = 'Skipped by user.';
+    job.updatedAt = Date.now();
+    this.persistJobs();
     return cloneJob(job);
   }
 
