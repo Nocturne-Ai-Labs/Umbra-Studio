@@ -316,22 +316,33 @@ function pruneProgressiveSeedCache() {
   }
 }
 
-function compareProgressiveSeedEntries(a: ProgressiveSeedEntry, b: ProgressiveSeedEntry) {
-  if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1;
+function compareProgressiveSeedNames(a: ProgressiveSeedEntry, b: ProgressiveSeedEntry) {
   return progressiveNameCollator.compare(a.name, b.name) || a.name.localeCompare(b.name);
 }
 
+function compareProgressiveSeedEntries(a: ProgressiveSeedEntry, b: ProgressiveSeedEntry) {
+  if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1;
+  return compareProgressiveSeedNames(a, b);
+}
+
 function createSeedCacheEntry(entries: ProgressiveSeedEntry[]): ProgressiveSeedCacheEntry {
-  let totalMedia = 0;
+  // The listing keeps folders first, while Gallery summaries hash all names
+  // together. Merge the two sorted runs without changing listing order.
+  let fileStart = 0;
+  while (fileStart < entries.length && entries[fileStart].kind === 'folder') fileStart += 1;
   const hash = createHash('sha256');
-  for (const entry of entries) {
-    if (entry.kind === 'file') totalMedia += 1;
+  let folderIndex = 0;
+  let fileIndex = fileStart;
+  while (folderIndex < fileStart || fileIndex < entries.length) {
+    const takeFolder = folderIndex < fileStart && (fileIndex >= entries.length
+      || compareProgressiveSeedNames(entries[folderIndex], entries[fileIndex]) < 0);
+    const entry = takeFolder ? entries[folderIndex++] : entries[fileIndex++];
     hash.update(`${entry.kind === 'folder' ? 'd' : 'f'}:${entry.name.length}:${entry.name}`);
   }
   return {
     createdAt: Date.now(),
     entries,
-    totalMedia,
+    totalMedia: entries.length - fileStart,
     inventorySignature: hash.digest('hex'),
   };
 }
