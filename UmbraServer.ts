@@ -1123,6 +1123,13 @@ const MODEL_INSPECTION_SUFFIX = '.umbra-model-inspection.txt';
 const MODEL_ARTIFACT_DIR = '.umbra';
 const DATASET_IMPORT_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.avif']);
 
+function datasetCaptionPath(directory: string, imageName: string, imageSpecificFirst = false): string {
+  const standard = join(directory, `${basename(imageName, extname(imageName))}.txt`);
+  const imageSpecific = join(directory, `${imageName}.txt`);
+  if (imageSpecificFirst) return existsSync(imageSpecific) ? imageSpecific : standard;
+  return existsSync(standard) ? standard : (existsSync(imageSpecific) ? imageSpecific : standard);
+}
+
 function resolveDatasetImportSourcePath(rawPath: unknown): string | null {
   const inputPath = String(rawPath || '').trim();
   if (!inputPath || inputPath.includes('\0')) return null;
@@ -1162,13 +1169,15 @@ async function copyLocalImageIntoDatasetConcept(
   const parsedExt = extname(originalName) || '.png';
   const sourceBaseName = sourcePath.replace(/\.[^.]+$/, '');
   const sourceSidecars = [
+    // Gallery-dl captions take precedence in the legacy dataset viewer; copy one canonical caption.
+    { source: `${sourcePath}.txt`, suffix: '.txt', fullName: false },
     { source: `${sourceBaseName}.txt`, suffix: '.txt', fullName: false },
-    { source: `${sourcePath}.txt`, suffix: '.txt', fullName: true },
     { source: `${sourceBaseName}.json`, suffix: '.json', fullName: false },
     { source: `${sourcePath}.json`, suffix: '.json', fullName: true },
   ];
   const authorizedSidecars: typeof sourceSidecars = [];
   for (const sidecar of sourceSidecars) {
+    if (sidecar.suffix === '.txt' && authorizedSidecars.some(entry => entry.suffix === '.txt')) continue;
     if (!existsSync(sidecar.source)) continue;
     if (allowedSourceRoots && !await resolveAllowedGalleryPath(sidecar.source, allowedSourceRoots)) continue;
     if ((await fs.lstat(sidecar.source)).isFile()) authorizedSidecars.push(sidecar);
@@ -4168,6 +4177,18 @@ function rewriteComfyHtml(html: string, options: { directRemoteBaseUrl?: string 
 
 const REMOTE_PROXY_COMPRESSION_MIN_BYTES = 2048;
 
+function anonymizeProxyRequestHeaders(headers: Headers): void {
+  for (const name of Array.from(headers.keys())) {
+    if (name.toLowerCase().startsWith('x-forwarded-')) headers.delete(name);
+  }
+  for (const name of [
+    'forwarded', 'x-real-ip', 'cf-connecting-ip', 'true-client-ip',
+    'x-client-ip', 'x-cluster-client-ip', 'fastly-client-ip',
+    'x-original-forwarded-for', 'x-envoy-external-address',
+  ]) headers.delete(name);
+  headers.set('x-forwarded-for', '0.0.0.0');
+}
+
 function addResponseVary(headers: Headers, value: string): void {
   const values = String(headers.get('vary') || '')
     .split(',')
@@ -4221,12 +4242,7 @@ async function proxyComfyHttp(req: Request, sourceUrl: URL, targetPath: string):
   headers.delete('host');
   headers.delete('origin');
   headers.delete('referer');
-  headers.delete('x-forwarded-for');
-  headers.delete('x-forwarded-host');
-  headers.delete('x-forwarded-proto');
-  headers.delete('x-real-ip');
-  headers.delete('cf-connecting-ip');
-  headers.set('x-forwarded-for', '0.0.0.0');
+  anonymizeProxyRequestHeaders(headers);
   removeUmbraRemoteCookies(headers);
 
   let upstream: Response;
@@ -4567,9 +4583,7 @@ async function proxyLocalServerHttp(req: Request, sourceUrl: URL, server: Reques
   headers.delete('origin');
   headers.delete('referer');
   headers.delete('cookie');
-  headers.delete('x-real-ip');
-  headers.delete('cf-connecting-ip');
-  headers.set('x-forwarded-for', '0.0.0.0');
+  anonymizeProxyRequestHeaders(headers);
   headers.set('accept-encoding', 'identity');
 
   let upstream: Response;
@@ -33010,8 +33024,7 @@ const server = Bun.serve<UmbraSocketData>({
             files
               .filter(f => /\.(jpg|jpeg|png|webp|bmp|gif|avif)$/i.test(f))
               .map(async (f) => {
-                const baseName = f.replace(/\.[^.]+$/, '');
-                const captionPath = join(conceptPath, baseName + '.txt');
+                const captionPath = datasetCaptionPath(conceptPath, f);
                 let caption = '';
                 let tags: string[] = [];
 
@@ -33398,8 +33411,7 @@ const server = Bun.serve<UmbraSocketData>({
 
           for (const filename of imageFiles) {
             const imagePath = join(conceptPath, filename);
-            const baseName = filename.replace(/\.[^.]+$/, '');
-            const captionPath = join(conceptPath, `${baseName}.txt`);
+            const captionPath = datasetCaptionPath(conceptPath, filename);
 
             try {
               const existingCaption = preserveExisting
@@ -33876,9 +33888,8 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'Image not found' }, 404);
           }
 
-          // Use baseName.txt format next to the image.
-          const baseName = safeImageName.replace(/\.[^.]+$/, '');
-          const captionPath = join(basePath, baseName + '.txt');
+          // Edit the caption format this dataset already displays.
+          const captionPath = datasetCaptionPath(basePath, safeImageName, !body.concept);
 
           await writeTextFileAtomic(captionPath, body.caption.trim());
 
