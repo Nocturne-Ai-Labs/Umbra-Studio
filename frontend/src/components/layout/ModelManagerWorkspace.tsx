@@ -1088,6 +1088,7 @@ export function ModelManagerWorkspace() {
   });
   const [localFilterQuery, setLocalFilterQuery] = React.useState('');
   const [renderedLocalCount, setRenderedLocalCount] = React.useState(200);
+  const localListScrollRef = React.useRef<HTMLDivElement | null>(null);
   const [localLoading, setLocalLoading] = React.useState(false);
   const [selectedPaths, setSelectedPaths] = React.useState<Set<string>>(new Set());
   const [selectionAnchorPath, setSelectionAnchorPath] = React.useState('');
@@ -1447,6 +1448,7 @@ export function ModelManagerWorkspace() {
 
   React.useEffect(() => {
     setRenderedLocalCount(200);
+    if (localListScrollRef.current) localListScrollRef.current.scrollTop = 0;
   }, [currentFolderPath, localFilterQuery]);
 
   const selectedPathsArray = React.useMemo(() => Array.from(selectedPaths), [selectedPaths]);
@@ -4324,7 +4326,7 @@ export function ModelManagerWorkspace() {
                 </div>
               </div>
 
-              <div className="relative min-h-0 flex-1 overflow-y-auto custom-scrollbar" onScroll={(event) => {
+              <div ref={localListScrollRef} className="relative min-h-0 flex-1 overflow-y-auto custom-scrollbar" onScroll={(event) => {
                 const view = event.currentTarget;
                 if (view.scrollHeight - view.scrollTop - view.clientHeight < 160) {
                   setRenderedLocalCount(count => Math.min(visibleLocalEntries.length, count + 200));

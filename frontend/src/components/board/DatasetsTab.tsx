@@ -138,6 +138,7 @@ export function DatasetsTab() {
   const conceptKey = JSON.stringify([selectedDataset, selectedConcept]);
   const activeConcept = useRef(conceptKey);
   const imageLoadSequence = useRef(0);
+  const imageScrollRef = useRef<HTMLDivElement | null>(null);
   activeConcept.current = conceptKey;
   const repairKey = (filename: string) => JSON.stringify([selectedDataset, selectedConcept, filename]);
   const handleRedownload = async (image: DatasetImage) => {
@@ -371,6 +372,7 @@ export function DatasetsTab() {
 
   // Load images when concept is selected
   useEffect(() => {
+    if (imageScrollRef.current) imageScrollRef.current.scrollTop = 0;
     setImages([]);
     setVisibleImageCount(DATASET_IMAGE_PAGE_SIZE);
     setSelectedImages(new Set());
@@ -1275,7 +1277,7 @@ export function DatasetsTab() {
 
         {/* Image grid - droppable */}
         <div
-          ref={setDropRef}
+          ref={(node) => { imageScrollRef.current = node; setDropRef(node); }}
           {...dropHandlers}
           onDragOver={(e) => {
             if (!handleNativeDragOver(e)) {
