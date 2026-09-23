@@ -1,7 +1,50 @@
 import { getSavedQueueAvailability } from '../shared/power-prompter/savedQueue';
 import { parseUmbraUiPipelineTargetId } from '../shared/umbra-ui/pipelineTypes';
+import { readFile, stat } from 'fs/promises';
 
 type RecordValue = Record<string, any>;
+
+export function appendSavedQueueIdSuffix(base: string, suffix: string, maxLength = 96): string {
+  return `${base.slice(0, Math.max(0, maxLength - suffix.length - 1))}-${suffix}`;
+}
+
+export interface SavedQueueSummaryIndex {
+  version: 1;
+  id: string;
+  name: string;
+  savedAt: number;
+  file: string | null;
+  promptCount: number;
+  activeSetId: number;
+  mode: 'prompt' | 'selected' | 'variants';
+  sourceSize: number;
+}
+
+export function getSavedQueueSummaryIndexPath(snapshotPath: string): string {
+  return `${snapshotPath}.index`;
+}
+
+export async function readSavedQueueSummaryIndex(
+  snapshotPath: string,
+  expectedId: string,
+): Promise<SavedQueueSummaryIndex | null> {
+  try {
+    const indexPath = getSavedQueueSummaryIndexPath(snapshotPath);
+    const [source, indexFile] = await Promise.all([stat(snapshotPath), stat(indexPath)]);
+    if (indexFile.size > 16_384 || indexFile.mtimeMs < source.mtimeMs) return null;
+    const value = JSON.parse(await readFile(indexPath, 'utf-8')) as Partial<SavedQueueSummaryIndex>;
+    if (value.version !== 1 || value.id !== expectedId || value.sourceSize !== source.size
+      || typeof value.name !== 'string' || !value.name.trim()
+      || !Number.isFinite(value.savedAt) || Number(value.savedAt) <= 0
+      || !Number.isSafeInteger(value.promptCount) || Number(value.promptCount) <= 0
+      || !Number.isSafeInteger(value.activeSetId) || Number(value.activeSetId) <= 0
+      || (value.mode !== 'prompt' && value.mode !== 'selected' && value.mode !== 'variants')
+      || (value.file !== null && typeof value.file !== 'string')) return null;
+    return value as SavedQueueSummaryIndex;
+  } catch {
+    return null;
+  }
+}
 interface SavedQueueRequest {
   requestId: string;
   origin: string;

@@ -37,28 +37,32 @@ async function fetchTextWithTimeout(url: string, timeoutMs = 8000): Promise<Resp
 export function getCardDocSignature(document: PowerPrompterCardDocument | null): string {
   if (!document) return '';
   const generation = normalizePowerPrompterGenerationControls(document.generation);
+  const cardSignature = (card: PowerPrompterCardDocument['cards'][number]) => ({
+    id: card.id,
+    slotId: String(card.slotId || '').trim() || createSlotId(card.type, card.label),
+    type: card.type,
+    utilityKind: (card as any).utilityKind === 'wildcard' ? 'wildcard' : undefined,
+    label: card.label,
+    variantName: String(card.variantName || '').trim(),
+    variantTags: normalizeVariantTags((card as any).variantTags),
+    skipVariant: (card as any).skipVariant === true,
+    text: card.text,
+    randomEnabled: card.randomEnabled === true,
+    randomSetIds: normalizeRandomSetIds(card.randomSetIds),
+    queueEnabled: card.queueEnabled !== false,
+    queueSetIds: normalizeQueueSetIds(card.queueSetIds, false),
+    queueSetOrders: card.queueSetOrders || {},
+    queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
+    queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, normalizeQueueSetIds(card.queueSetIds, false)),
+    wildcardRerolls: Math.max(1, Math.min(1000, Math.floor(Number((card as any).wildcardRerolls) || 1))),
+    wildcardHoldSelections: card.wildcardHoldSelections || {},
+    wildcardContextEnabled: card.wildcardContextEnabled === true,
+    chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
+    blockLinks: normalizeBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
+    order: card.order,
+  });
   const payload = document.cards
-    .map((card) => ({
-      id: card.id,
-      slotId: String(card.slotId || '').trim() || createSlotId(card.type, card.label),
-      type: card.type,
-      utilityKind: (card as any).utilityKind === 'wildcard' ? 'wildcard' : undefined,
-      label: card.label,
-      variantName: String(card.variantName || '').trim(),
-      variantTags: normalizeVariantTags((card as any).variantTags),
-      skipVariant: (card as any).skipVariant === true,
-      text: card.text,
-      randomEnabled: card.randomEnabled === true,
-      randomSetIds: normalizeRandomSetIds(card.randomSetIds),
-      queueEnabled: card.queueEnabled !== false,
-      queueSetIds: normalizeQueueSetIds(card.queueSetIds, false),
-      queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
-      queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, normalizeQueueSetIds(card.queueSetIds, false)),
-      wildcardRerolls: Math.max(1, Math.min(1000, Math.floor(Number((card as any).wildcardRerolls) || 1))),
-      chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
-      blockLinks: normalizeBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
-      order: card.order,
-    }))
+    .map(cardSignature)
     .sort((a, b) => a.order - b.order);
   const deletedCardGroups = document.deletedCardGroups && typeof document.deletedCardGroups === 'object'
     ? Object.values(document.deletedCardGroups)
@@ -66,32 +70,17 @@ export function getCardDocSignature(document: PowerPrompterCardDocument | null):
         key: String(group?.key || '').trim(),
         type: String(group?.type || '').trim(),
         label: String(group?.label || '').trim(),
+        deletedAt: String(group?.deletedAt || '').trim(),
         cards: Array.isArray(group?.cards)
-          ? group.cards.map((card) => ({
-            id: String(card.id || '').trim(),
-            type: String(card.type || '').trim(),
-            utilityKind: (card as any).utilityKind === 'wildcard' ? 'wildcard' : undefined,
-            label: String(card.label || '').trim(),
-            variantName: String(card.variantName || '').trim(),
-            variantTags: normalizeVariantTags((card as any).variantTags),
-            skipVariant: (card as any).skipVariant === true,
-            text: String(card.text || ''),
-            randomEnabled: card.randomEnabled === true,
-            randomSetIds: normalizeRandomSetIds(card.randomSetIds),
-            queueEnabled: card.queueEnabled !== false,
-            queueSetIds: normalizeQueueSetIds(card.queueSetIds, false),
-            queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
-            queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, normalizeQueueSetIds(card.queueSetIds, false)),
-            wildcardRerolls: Math.max(1, Math.min(1000, Math.floor(Number((card as any).wildcardRerolls) || 1))),
-            chainLinks: normalizeChainLinks((card as any).chainLinks, String(card.id || '').trim()),
-            blockLinks: normalizeBlockLinks((card as any).blockLinks, String(card.id || '').trim()),
-            order: Number.isFinite(Number(card.order)) ? Math.max(0, Math.floor(Number(card.order))) : 0,
-          }))
+          ? group.cards.map(cardSignature)
           : [],
       }))
       .sort((a, b) => a.key.localeCompare(b.key))
     : [];
   return JSON.stringify({
+    modelType: document.modelType || '',
+    modelColor: document.modelColor || '',
+    pipeline: document.pipeline || null,
     activeQueueSet: clampQueueSetId(document.activeQueueSet),
     styleSeedMode: String((document as any).styleSeedMode || 'same') === 'different' ? 'different' : 'same',
     generation,

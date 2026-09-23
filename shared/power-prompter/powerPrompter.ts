@@ -23,6 +23,7 @@ import type {
 } from './types';
 import { normalizeUmbraUiPipelineSelection } from '../umbra-ui/pipelineTypes';
 import { normalizeUmbraWildcardHoldSelections } from '../promptWildcards';
+import { normalizeQueueSetOrders } from './cardQueueSetOrders';
 
 interface PowerPrompterBaseCardConfig {
   type: Exclude<PowerPrompterCardType, 'custom'>;
@@ -540,23 +541,6 @@ function normalizeCardQueueSetIds(rawSets: unknown, queueEnabled: unknown, fallb
   return [fallback];
 }
 
-function normalizeQueueSetOrders(
-  rawOrders: unknown,
-  allowedSetIds: number[],
-  fallbackOrder: number,
-): Record<string, number> {
-  const source = rawOrders && typeof rawOrders === 'object' && !Array.isArray(rawOrders)
-    ? rawOrders as Record<string, unknown>
-    : {};
-  const normalized: Record<string, number> = {};
-  const fallback = Math.max(0, Math.floor(Number(fallbackOrder) || 0));
-  for (const setId of allowedSetIds) {
-    const order = Math.floor(Number(source[String(setId)]));
-    normalized[String(setId)] = Number.isFinite(order) && order >= 0 ? order : fallback;
-  }
-  return normalized;
-}
-
 function normalizeRandomSetIds(rawSets: unknown): number[] {
   return normalizeQueueSetIds(rawSets, false);
 }
@@ -1005,10 +989,9 @@ export function importLegacyPromptToCardDocument(
   });
 
   if (segments.length > cards.length) {
-    let nextOrder = cards.length;
-    for (let idx = cards.length; idx < segments.length; idx += 1) {
-      cards.push(createPowerPrompterCardNode('custom', `Custom ${idx - cards.length + 1}`, segments[idx], nextOrder));
-      nextOrder += 1;
+    const firstNewCard = cards.length;
+    for (let idx = firstNewCard; idx < segments.length; idx += 1) {
+      cards.push(createPowerPrompterCardNode('custom', `Custom ${idx - firstNewCard + 1}`, segments[idx], idx));
     }
   }
 

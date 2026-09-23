@@ -1,4 +1,5 @@
 import type { PowerPrompterCardDocument } from '@/types/powerPrompter';
+import { collectQueueSnapshotPromptRows } from '../../../../../shared/power-prompter/queueSnapshotRows';
 import {
   normalizePowerPrompterGenerationControls,
   normalizePowerPrompterPromptText,
@@ -88,9 +89,12 @@ export function buildQueueHistorySnapshotForRequest(input: {
       },
     };
   }
-  const prompts = meta.prompts
-    .map((entry) => normalizePowerPrompterPromptText(String(entry || '').trim()))
-    .filter(Boolean);
+  const promptRows = collectQueueSnapshotPromptRows(
+    meta.prompts,
+    (entry) => normalizePowerPrompterPromptText(String(entry || '').trim())
+  );
+  const prompts = promptRows.map((row) => row.prompt);
+  const sourceIndices = promptRows.map((row) => row.sourceIndex);
   if (prompts.length <= 0) {
     return {
       snapshot: null,
@@ -125,13 +129,19 @@ export function buildQueueHistorySnapshotForRequest(input: {
       targetBridgeId: String(meta.targetBridgeId || '').trim(),
       requestIds: prompts.map(() => normalizedRequestId),
       prompts,
-      promptEntries: meta.promptEntries?.slice(0, prompts.length),
-      promptSetIds: prompts.map((_, index) => clampQueueSetId(meta.promptSetIds[index] ?? activeSetId)),
-      promptOutputSubfolders: prompts.map((_, index) => String(meta.promptOutputSubfolders[index] || '').trim()),
-      promptStyleNames: prompts.map((_, index) => String(meta.promptStyleNames[index] || '').trim()),
-      promptSeedGroupIds: prompts.map((_, index) => String(meta.promptSeedGroupIds[index] || `${activeSetId}:${index}`).trim()),
-      generation: normalizePowerPrompterGenerationControls(meta.generationByPrompt[0] ?? input.cardDocument.generation),
-      generationByPrompt: prompts.map((_, index) => normalizePowerPrompterGenerationControls(meta.generationByPrompt[index])),
+      promptEntries: meta.promptEntries?.length
+        ? sourceIndices.map((sourceIndex, index) => meta.promptEntries?.[sourceIndex] ?? { prompt: prompts[index], tokens: [] })
+        : undefined,
+      promptSetIds: sourceIndices.map((sourceIndex) => clampQueueSetId(meta.promptSetIds[sourceIndex] ?? activeSetId)),
+      promptOutputSubfolders: sourceIndices.map((sourceIndex) => String(meta.promptOutputSubfolders[sourceIndex] || '').trim()),
+      promptStyleNames: sourceIndices.map((sourceIndex) => String(meta.promptStyleNames[sourceIndex] || '').trim()),
+      promptSeedGroupIds: sourceIndices.map((sourceIndex, index) => String(meta.promptSeedGroupIds[sourceIndex] || `${activeSetId}:${index}`).trim()),
+      generation: normalizePowerPrompterGenerationControls(meta.generationByPrompt[sourceIndices[0]] ?? input.cardDocument.generation),
+      generationByPrompt: sourceIndices.map((sourceIndex) => normalizePowerPrompterGenerationControls(
+        meta.generationByPrompt[sourceIndex]
+        ?? meta.generationByPrompt[sourceIndices[0]]
+        ?? input.cardDocument.generation
+      )),
       randomApplied: meta.randomApplied === true,
       paused: true,
       dispatchDelayMs: Math.max(0, Math.floor(Number(meta.dispatchDelayMs) || 0)),

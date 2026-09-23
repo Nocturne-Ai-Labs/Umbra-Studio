@@ -27,6 +27,7 @@ import type {
 } from '@/types/powerPrompter';
 import { UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID } from '../../../shared/umbra-ui/agentTypes';
 import { normalizeUmbraWildcardHoldSelections } from '../../../shared/promptWildcards';
+import { normalizeQueueSetOrders } from '../../../shared/power-prompter/cardQueueSetOrders';
 import {
   inferUmbraVideoResolutionPreset,
   normalizeUmbraVideoAspectPreset,
@@ -1422,6 +1423,7 @@ export function createPowerPrompterCardNode(
     randomSetIds: [],
     queueEnabled: true,
     queueSetIds,
+    queueSetOrders: { '1': order },
     queueTraversalRole: 'cycle',
     queueCycleWeights: {},
     wildcardRerolls: 1,
@@ -1499,6 +1501,7 @@ export function importLegacyPromptToCardDocument(
       randomSetIds: normalizeRandomSetIds(card.randomSetIds),
       queueEnabled: queueSetIds.length > 0,
       queueSetIds,
+      queueSetOrders: normalizeQueueSetOrders((card as any).queueSetOrders, queueSetIds, idx),
       queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
       queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
       wildcardRerolls: normalizeWildcardRerolls((card as any).wildcardRerolls),
@@ -1515,10 +1518,9 @@ export function importLegacyPromptToCardDocument(
   });
 
   if (segments.length > cards.length) {
-    let nextOrder = cards.length;
-    for (let idx = cards.length; idx < segments.length; idx += 1) {
-      cards.push(createPowerPrompterCardNode('custom', `Custom ${idx - cards.length + 1}`, segments[idx], nextOrder));
-      nextOrder += 1;
+    const firstNewCard = cards.length;
+    for (let idx = firstNewCard; idx < segments.length; idx += 1) {
+      cards.push(createPowerPrompterCardNode('custom', `Custom ${idx - firstNewCard + 1}`, segments[idx], idx));
     }
   }
 
@@ -1573,6 +1575,7 @@ function normalizeDeletedCardGroups(rawGroups: unknown, now: string): Record<str
         randomSetIds: normalizeRandomSetIds(card.randomSetIds),
         queueEnabled: queueSetIds.length > 0,
         queueSetIds,
+        queueSetOrders: normalizeQueueSetOrders((card as any).queueSetOrders, queueSetIds, idx),
         queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
         queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
         wildcardRerolls: normalizeWildcardRerolls((card as any).wildcardRerolls),
@@ -1630,6 +1633,7 @@ export function normalizePowerPrompterCardDocument(
       randomSetIds: normalizeRandomSetIds(card.randomSetIds),
       queueEnabled: queueSetIds.length > 0,
       queueSetIds,
+      queueSetOrders: normalizeQueueSetOrders((card as any).queueSetOrders, queueSetIds, idx),
       queueTraversalRole: normalizeQueueTraversalRole((card as any).queueTraversalRole),
       queueCycleWeights: normalizeQueueCycleWeights((card as any).queueCycleWeights, queueSetIds),
       wildcardRerolls: normalizeWildcardRerolls((card as any).wildcardRerolls),
