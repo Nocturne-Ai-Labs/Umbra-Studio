@@ -26591,6 +26591,9 @@ async function handleFsWrite(req: Request): Promise<Response> {
     if (encoding === 'base64' ? extension !== '.png' && extension !== '.webp' : extension !== '.txt') {
       return json({ error: 'Unsupported file write type' }, 403);
     }
+    if (extension === '.txt' && !await resolveAllowedGalleryPath(fullPath, [join(USER_DIR, 'PowerPrompter', 'Prompts')])) {
+      return json({ error: 'Text writes must stay in Power Prompter prompts' }, 403);
+    }
 
     await fsWorkerService.write({
       fullPath,
