@@ -16,6 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { useStore } from '@/store/useStore';
 import type {
   PowerPrompterSeedControlMode,
@@ -29,7 +30,7 @@ import type {
 } from '@/components/umbra-ui/useUmbraPowerPrompterBridge';
 import type { UmbraVideoEditorDraft } from '@/components/umbra-ui/UmbraVideoGenerationControls';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
-import { normalizeUmbraUiSeed } from '@/lib/umbraUiSeed';
+import { advanceUmbraUiSeed, normalizeUmbraUiSeed, resolveUmbraUiQueueSeed } from '@/lib/umbraUiSeed';
 import { resolveUmbraVideoQueueSourceUrl } from '@/lib/umbraVideoQueuePreview';
 import { refreshUmbraVideoRequeueSourceDimensions } from '@/lib/umbraVideoRequeueSource';
 import { NsfwPrivacyShield } from '@/components/privacy/NsfwPrivacyProvider';
@@ -44,6 +45,10 @@ import {
   resolveUmbraLtxExtendedTotalSeconds,
   type UmbraLtxExtendedSequenceMetadata,
 } from '../../../../shared/umbra-ui/videoExtension';
+import {
+  UMBRA_VIDEO_ASPECT_PRESETS,
+  UMBRA_VIDEO_RESOLUTION_PRESETS,
+} from '../../../../shared/umbra-ui/videoSizing';
 
 interface UmbraVideoQueuePanelProps {
   jobs: UmbraVideoReviewJob[];
@@ -425,6 +430,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
   const [draftNegative, setDraftNegative] = React.useState('');
   const [draftVideo, setDraftVideo] = React.useState<PowerPrompterVideoControls | null>(null);
   const [requeueing, setRequeueing] = React.useState(false);
+  const requeueInFlightRef = React.useRef(false);
   const [clearPending, setClearPending] = React.useState(false);
   const [clearing, setClearing] = React.useState(false);
   const clearPendingRef = React.useRef(false);
@@ -581,10 +587,12 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
   }, []);
 
   const requeue = React.useCallback(async () => {
-    if (!draftVideo || !draftPrompt.trim() || requeueing) return;
+    if (!draftVideo || !draftPrompt.trim() || requeueInFlightRef.current || requeueing) return;
+    requeueInFlightRef.current = true;
     setRequeueing(true);
     try {
-      const videoForQueue = cloneVideo(draftVideo);
+      const queuedSeed = resolveUmbraUiQueueSeed(draftVideo.seed, draftVideo.seedMode);
+      const videoForQueue = { ...cloneVideo(draftVideo), seed: queuedSeed };
       if (selected?.sequence && videoForQueue.ltx.extended.enabled) {
         videoForQueue.ltx.extended.clips = videoForQueue.ltx.extended.clips.map((clip) => (
           clip.id === selected.sequence?.clipId ? { ...clip, prompt: draftPrompt.trim() } : clip
@@ -592,10 +600,18 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
       }
       const preparedVideo = await refreshUmbraVideoRequeueSourceDimensions(videoForQueue);
       await queueVideo({ prompt: draftPrompt, negativePrompt: draftNegative, video: preparedVideo, outputFolder: selected?.generation.outputFolder });
+      const nextSeed = advanceUmbraUiSeed(queuedSeed, draftVideo.seedMode, draftVideo.seedIncrement);
+      setDraftVideo((current) => current
+        && current.seed === draftVideo.seed
+        && current.seedMode === draftVideo.seedMode
+        && current.seedIncrement === draftVideo.seedIncrement
+        ? { ...current, seed: nextSeed }
+        : current);
       await onRefresh();
     } catch (queueError) {
       showToast(queueError instanceof Error ? queueError.message : 'Failed to requeue video.', 'error');
     } finally {
+      requeueInFlightRef.current = false;
       setRequeueing(false);
     }
   }, [draftNegative, draftPrompt, draftVideo, onRefresh, queueVideo, requeueing, selected?.sequence, selected?.generation.outputFolder, showToast]);
@@ -775,8 +791,31 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
                 <div className="rounded-md border border-white/10 bg-white/[0.02] p-3">
                   <div className="mb-3 flex items-center gap-2"><Settings2 size={13} className="text-fuchsia-300" /><span className={labelClass}>Generation Settings</span></div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    <NumberEditor label="Width" value={draftVideo.width} min={64} step={16} onChange={(value) => patchVideo('width', value)} />
-                    <NumberEditor label="Height" value={draftVideo.height} min={64} step={16} onChange={(value) => patchVideo('height', value)} />
+                    <label className="col-span-2 space-y-1.5 sm:col-span-3">
+                      <span className={labelClass}>Target Resolution</span>
+                      <UmbraSelectControl value={draftVideo.resolutionPreset} onChange={(event) => patchVideo('resolutionPreset', event.target.value)} className={inputClass}>
+                        <optgroup label="Resolution presets">
+                          {UMBRA_VIDEO_RESOLUTION_PRESETS.filter((preset) => preset.group === 'standard').map((preset) => (
+                            <option key={preset.id} value={preset.id}>{preset.label}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Megapixel tiers">
+                          {UMBRA_VIDEO_RESOLUTION_PRESETS.filter((preset) => preset.group === 'budget').map((preset) => (
+                            <option key={preset.id} value={preset.id}>{preset.label}</option>
+                          ))}
+                        </optgroup>
+                      </UmbraSelectControl>
+                    </label>
+                    {draftVideo.mode === 'text_to_video' ? (
+                      <label className="col-span-2 space-y-1.5 sm:col-span-3">
+                        <span className={labelClass}>Frame Aspect</span>
+                        <UmbraSelectControl value={draftVideo.aspectRatio} onChange={(event) => patchVideo('aspectRatio', event.target.value)} className={inputClass}>
+                          {UMBRA_VIDEO_ASPECT_PRESETS.map((preset) => (
+                            <option key={preset.id} value={preset.id}>{preset.label}</option>
+                          ))}
+                        </UmbraSelectControl>
+                      </label>
+                    ) : null}
                     {draftVideo.family === 'ltx23' && draftVideo.ltx.extended.enabled ? (
                       <div className="space-y-1.5">
                         <span className={labelClass}>Sequence Duration</span>

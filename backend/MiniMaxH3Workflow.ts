@@ -1,4 +1,5 @@
 import { miniMaxH3TurboIssue, normalizeMiniMaxH3Turbo, type MiniMaxH3TurboControls } from '../shared/umbra-ui/minimaxH3Turbo';
+import { readComfyInputChoices } from '../shared/umbra-ui/comfyInputChoices';
 import { miniMaxH3GuideIssue, normalizeMiniMaxH3Guides, type MiniMaxH3Guide } from '../shared/umbra-ui/minimaxH3Guides';
 
 type PromptNode = { class_type: string; inputs: Record<string, unknown>; _meta?: Record<string, unknown> };
@@ -128,7 +129,7 @@ export function assertMiniMaxH3TurboInstalled(
   if (turbo.turboPreset === 'none') return;
   const node = objectInfo?.LoraLoaderModelOnly as { input?: { required?: { lora_name?: unknown } } } | undefined;
   const descriptor = node?.input?.required?.lora_name;
-  const options = Array.isArray(descriptor) && Array.isArray(descriptor[0]) ? descriptor[0] : null;
+  const options = readComfyInputChoices(descriptor);
   if (!options) throw new Error('MiniMax H3 Turbo LoRA availability could not be verified. Start or update the managed ComfyUI server and refresh its catalog.');
   if (!options.some((name) => typeof name === 'string' && name.replace(/\\/g, '/') === turbo.turboLora)) {
     throw new Error(`MiniMax H3 Turbo LoRA "${turbo.turboLora}" is not installed. Install the matching Turbo pack in Umbra Setup > Models, then select its exact relative path.`);

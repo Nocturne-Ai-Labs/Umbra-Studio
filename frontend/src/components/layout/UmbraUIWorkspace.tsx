@@ -185,6 +185,7 @@ import {
   resolveUmbraUiHiresResizeMode,
 } from '../../../../shared/umbra-ui/pipelineTypes';
 import { UMBRA_UI_EXTRAS_TOOL_EVENT } from '@/lib/umbraUiExtrasNavigation';
+import { selectUmbraUiImagePreviewState } from '@/lib/umbraUiImagePreviewState';
 import { resolveUmbraUiImageHandoffCheckpoint, selectUmbraUiImageCheckpoint } from '@/lib/umbraUiImageCheckpointSelection';
 import {
   readImg2ImgReplacementIntents,
@@ -2565,15 +2566,11 @@ export function UmbraUIWorkspace() {
   const previewProgress = generationPreview?.maxStep
     ? Math.max(0, Math.min(1, generationPreview.step / generationPreview.maxStep))
     : 0;
-  const showingLivePreview = queueSummary.umbraUiRunning > 0
-    && !!queueSummary.umbraUiActiveRequestId
-    && generationPreview?.requestId === queueSummary.umbraUiActiveRequestId
-    && generationPreview.promptIndex === queueSummary.activePosition - 1
-    && !!generationPreview.imageDataUrl;
-  const imagePreviewUrl = showingLivePreview
-    ? generationPreview?.imageDataUrl || ''
-    : latestSavedImage?.imageUrl || generationPreview?.imageDataUrl || '';
-  const imagePreviewIsNsfw = (showingLivePreview ? generationPreview : latestSavedImage || generationPreview)?.privacyClass === 'nsfw';
+  const { showingLivePreview, imagePreviewUrl, imagePreviewIsNsfw } = selectUmbraUiImagePreviewState(
+    queueSummary,
+    generationPreview,
+    latestSavedImage,
+  );
   const samplerOptions = modelCatalog.samplers.length > 0
     ? modelCatalog.samplers
     : ['er_sde', 'euler', 'dpmpp_2m_sde'];

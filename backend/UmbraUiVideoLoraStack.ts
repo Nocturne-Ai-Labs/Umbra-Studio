@@ -1,4 +1,5 @@
 import type { UmbraVideoLoraEntry, UmbraVideoLoraFamily } from '../shared/umbra-ui/videoLoraStack';
+import { readComfyInputChoices } from '../shared/umbra-ui/comfyInputChoices';
 
 type PromptNode = { class_type: string; inputs?: Record<string, unknown>; _meta?: Record<string, unknown> };
 type PromptGraph = Record<string, unknown>;
@@ -27,7 +28,7 @@ export function assertUmbraUiVideoLoraStackInstalled(
   if (selected.some(item => !item.name)) throw new Error('Choose a file for each enabled video LoRA, or disable the empty row.');
   const loader = objectInfo?.LoraLoaderModelOnly as { input?: { required?: { lora_name?: unknown } } } | undefined;
   const descriptor = loader?.input?.required?.lora_name;
-  const choices = Array.isArray(descriptor) && Array.isArray(descriptor[0]) ? descriptor[0] as string[] : null;
+  const choices = readComfyInputChoices(descriptor);
   if (!choices) throw new Error('Video LoRA support could not be verified in ComfyUI. Start or update the managed ComfyUI server and refresh its catalog.');
   const installed = new Set(choices.map(name => String(name).replace(/\\/g, '/')));
   for (const item of selected) {

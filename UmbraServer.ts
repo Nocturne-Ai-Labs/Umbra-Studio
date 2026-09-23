@@ -12,6 +12,7 @@ import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
 import { applyMiniMaxH3Acceleration, assertMiniMaxH3TurboInstalled, assertMiniMaxH3GuidesInstalled, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
 import { applyUmbraUiVideoLoraStack, assertUmbraUiVideoLoraStackInstalled } from './backend/UmbraUiVideoLoraStack';
 import { normalizeUmbraVideoLoraStack, type UmbraVideoLoraEntry } from './shared/umbra-ui/videoLoraStack';
+import { readComfyInputChoices } from './shared/umbra-ui/comfyInputChoices';
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { configureGeneratedMediaActivity, recordGeneratedMediaOutputs } from './backend/GeneratedMediaActivity';
 import { createCaptionCategoryFilter } from './backend/DatasetCaptionCategories';
@@ -8673,6 +8674,19 @@ function emitBackendPowerPrompterJobProgress(
   sendPrompterEventToTargets(payload, sourceWs);
 }
 
+function getPowerPrompterGenerationMediaType(generation: PowerPrompterGenerationControls | undefined): 'image' | 'video' | '' {
+  if (generation?.mediaType === 'video' || generation?.outputMode === 'txt2vid'
+    || generation?.outputMode === 'img2vid' || generation?.outputMode === 'ref2vid'
+    || generation?.outputMode === 'vid2vid') return 'video';
+  return generation?.mediaType === 'image' ? 'image' : '';
+}
+
+function getPowerPrompterRequestMediaType(requestId: string, promptIndex: number): 'image' | 'video' | '' {
+  const generation = backendPowerPrompterQueueTasks.get(requestId)?.generationByPrompt[promptIndex]
+    || findPowerPrompterQueueControllerRequest(requestId)?.prompts.find((prompt) => prompt.promptIndex === promptIndex)?.generation;
+  return getPowerPrompterGenerationMediaType(generation);
+}
+
 function startBackendPowerPrompterPreviewMonitor(
   requestId: string,
   task: BackendPowerPrompterQueueTask,
@@ -8751,6 +8765,7 @@ function startBackendPowerPrompterPreviewMonitor(
             requestId,
             promptIndex,
             promptId,
+            mediaType: getPowerPrompterRequestMediaType(requestId, promptIndex),
             imageDataUrl: dataUrl,
             privacyClass: classifyUmbraPrompt(prompt),
             step: Number.isFinite(stepRaw) ? Math.max(0, Math.floor(stepRaw)) : 0,
@@ -9098,6 +9113,8 @@ async function emitBackendPowerPrompterSavedOutputs(
     requestId,
     promptIndex,
     promptId,
+    mediaType: getPowerPrompterGenerationMediaType(generation)
+      || getPowerPrompterRequestMediaType(requestId, promptIndex),
     promptSetId,
     setId: promptSetId,
     sourceFile,
@@ -10164,6 +10181,7 @@ async function finalizeUmbraExtendedVideo(options: {
     requestId: options.requestId,
     promptIndex: options.session.clipCount - 1,
     promptId: finalPrompt?.promptId || '',
+    mediaType: 'video',
     source: 'backend_pipeline',
     extended: {
       sessionId: options.session.sessionId,
@@ -11898,6 +11916,11 @@ function handlePrompterMessage(ws: ServerWebSocket<unknown>, data: any) {
     const meta = getPrompterMeta(ws);
     if (meta.role !== 'comfy_bridge') return;
     const requestId = String(data?.requestId || '');
+    const promptIndex = Math.max(0, Math.floor(Number(data?.promptIndex) || 0));
+    const payload = {
+      ...data,
+      mediaType: getPowerPrompterRequestMediaType(requestId, promptIndex),
+    };
     appendPowerPrompterQueueLog('queue_saved_outputs_from_bridge', {
       ...summarizePrompterQueueMessage(data),
       bridgeId: meta.bridgeId || '',
@@ -11913,12 +11936,12 @@ function handlePrompterMessage(ws: ServerWebSocket<unknown>, data: any) {
     }
 
     if (requestSourceClient && requestSourceClient.readyState === 1) {
-      sendWs(requestSourceClient, data);
+      sendWs(requestSourceClient, payload);
     }
 
     for (const target of getPowerPrompterTargets()) {
       if (target === requestSourceClient) continue;
-      sendWs(target, data);
+      sendWs(target, payload);
     }
     return;
   }
@@ -11969,7 +11992,11 @@ function handlePrompterMessage(ws: ServerWebSocket<unknown>, data: any) {
     const previewPrompt = backendPowerPrompterQueueTasks.get(requestId)?.prompts[promptIndex]
       ?? findPowerPrompterQueueControllerRequest(requestId)?.prompts[promptIndex]?.prompt
       ?? data?.prompt;
-    const payload = { ...data, privacyClass: data?.privacyClass === 'nsfw' ? 'nsfw' : classifyUmbraPrompt(previewPrompt) };
+    const payload = {
+      ...data,
+      mediaType: getPowerPrompterRequestMediaType(requestId, promptIndex),
+      privacyClass: data?.privacyClass === 'nsfw' ? 'nsfw' : classifyUmbraPrompt(previewPrompt),
+    };
     let requestSourceClient: ServerWebSocket<unknown> | null = null;
     if (requestId) {
       requestSourceClient = prompterPendingQueueRequests.get(requestId)?.sourceWs || null;
@@ -20211,9 +20238,9 @@ async function handleUmbraUiCatalog(url: URL): Promise<Response> {
       for (const sectionRaw of [input.required, input.optional]) {
         const section = toRecord(sectionRaw);
         for (const inputName of inputNames) {
-          const descriptor = section[inputName];
-          if (!Array.isArray(descriptor) || !Array.isArray(descriptor[0])) continue;
-          for (const rawItem of descriptor[0]) {
+          const choices = readComfyInputChoices(section[inputName]);
+          if (!choices) continue;
+          for (const rawItem of choices) {
             const item = normalizeUmbraUiCatalogName(rawItem);
             if (item && !['[none]', 'none'].includes(item.toLowerCase())) items.add(item);
           }
@@ -23942,8 +23969,7 @@ function buildPPComfyResourceCatalog(
     for (const rawSection of [input.required, input.optional]) {
       const section = toRecord(rawSection);
       for (const [inputName, rawDescriptor] of Object.entries(section)) {
-        const descriptor = Array.isArray(rawDescriptor) ? rawDescriptor : [];
-        const options = Array.isArray(descriptor[0]) ? descriptor[0] : [];
+        const options = readComfyInputChoices(rawDescriptor) || [];
         if (options.length <= 0) continue;
         for (const kind of getPPComfyResourceKinds(nodeType, inputName)) {
           const values = catalog.get(kind) || new Set<string>();

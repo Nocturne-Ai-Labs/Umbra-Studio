@@ -57,6 +57,12 @@ import {
 import { resolveUmbraUiQueueControlTargets } from '@/lib/umbraUiQueueControls';
 import type { UmbraUiPromptSegment } from '@/lib/umbraUiPromptSegments';
 import { buildUmbraQueueActivitiesFromControllerSnapshot } from '@/lib/umbraQueueActivity';
+import {
+  isUmbraUiImageMediaEvent,
+  readUmbraUiGenerationMediaKind,
+  readUmbraUiSnapshotRequestMediaKinds,
+  type UmbraUiRequestMediaKind,
+} from '@/lib/umbraUiImageMediaEvent';
 
 const RECONNECT_DELAY_MS = 1500;
 const QUEUE_ACK_TIMEOUT_MS = 15000;
@@ -649,6 +655,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   const pendingLoraInfoRef = React.useRef(new Map<string, PendingCatalogRequest<PowerPrompterLoraInfoPayload>>());
   const pendingModelInfoRef = React.useRef(new Map<string, PendingCatalogRequest<PowerPrompterModelInfoPayload>>());
   const ownedRequestIdsRef = React.useRef(new Set<string>());
+  const ownedRequestKindsRef = React.useRef(new Map<string, UmbraUiRequestMediaKind>());
   const ownedRequestPromptsRef = React.useRef(new Map<string, string[]>());
   const reportedPromptFailuresRef = React.useRef(new Set<string>());
   const reportedRequestFailuresRef = React.useRef(new Set<string>());
@@ -1034,11 +1041,14 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           return;
         }
         if (type === 'queue_snapshot') {
+          const snapshotKinds = readUmbraUiSnapshotRequestMediaKinds(payload?.snapshot);
           const snapshot = normalizeQueueSnapshot(payload?.snapshot);
           const snapshotUpdatedAt = snapshot?.updatedAt ?? 0;
           for (const request of snapshot?.requests || []) {
             if (request.origin !== 'umbra_ui') continue;
             ownedRequestIdsRef.current.add(request.requestId);
+            const kind = snapshotKinds.get(request.requestId);
+            if (kind) ownedRequestKindsRef.current.set(request.requestId, kind);
             if (request.prompts.length > 0) {
               const prompts: string[] = [];
               for (const prompt of request.prompts) prompts[prompt.promptIndex] = prompt.prompt;
@@ -1153,7 +1163,9 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         }
         if (type === 'generation_preview') {
           const requestId = String(payload?.requestId || '').trim();
-          if (!requestId || !ownedRequestIdsRef.current.has(requestId)) return;
+          if (!requestId || !isUmbraUiImageMediaEvent(
+            payload, ownedRequestIdsRef.current.has(requestId), ownedRequestKindsRef.current.get(requestId),
+          )) return;
           const imageDataUrl = String(payload?.imageDataUrl || '').trim();
           if (!imageDataUrl.startsWith('data:image/')) return;
           setGenerationPreview({
@@ -1209,6 +1221,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           const requestId = String(payload?.requestId || '').trim();
           if (!ownedRequestIdsRef.current.has(requestId)) return;
           void refreshVideoJobs();
+          if (!isUmbraUiImageMediaEvent(payload, true, ownedRequestKindsRef.current.get(requestId))) {
+            window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
+            return;
+          }
           const outputs = Array.isArray(payload?.outputs) ? payload.outputs : [];
           const image = outputs.find((entry) => {
             if (!entry || typeof entry !== 'object') return false;
@@ -1503,11 +1519,17 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     }
     const requestId = createRequestId();
     ownedRequestIdsRef.current.add(requestId);
+    const generationKinds = generations.map(readUmbraUiGenerationMediaKind);
+    const requestKind = generationKinds[0];
+    if (requestKind && generationKinds.every((kind) => kind === requestKind)) {
+      ownedRequestKindsRef.current.set(requestId, requestKind);
+    }
     ownedRequestPromptsRef.current.set(requestId, [...prompts]);
     if (ownedRequestIdsRef.current.size > 100) {
       const oldest = ownedRequestIdsRef.current.values().next().value;
       if (oldest) {
         ownedRequestIdsRef.current.delete(oldest);
+        ownedRequestKindsRef.current.delete(oldest);
         ownedRequestPromptsRef.current.delete(oldest);
       }
     }
