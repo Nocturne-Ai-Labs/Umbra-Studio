@@ -37876,7 +37876,7 @@ const server = Bun.serve<UmbraSocketData>({
           const upstreamHeaders: Record<string, string> = { 'x-forwarded-for': '0.0.0.0' };
           if (proxyCookieHeader) upstreamHeaders.cookie = proxyCookieHeader;
           const upstream = new WebSocket(targetUrl, proxyWsProtocol
-            ? { headers: upstreamHeaders, protocol: proxyWsProtocol }
+            ? { headers: upstreamHeaders, protocols: [proxyWsProtocol] }
             : { headers: upstreamHeaders });
           (ws.data as any).upstream = upstream;
           upstream.binaryType = 'arraybuffer';
