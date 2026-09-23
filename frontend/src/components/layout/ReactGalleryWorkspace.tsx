@@ -8316,10 +8316,15 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       if (detail.source === 'react-gallery') return;
       const nextSortBy = String(detail.sortBy || '').toLowerCase();
       const nextSortOrder = String(detail.sortOrder || '').toLowerCase();
+      const normalizedSortOrder = nextSortOrder === 'desc' ? 'desc' : 'asc';
       if (nextSortBy === 'created' || nextSortBy === 'modified' || nextSortBy === 'name' || nextSortBy === 'custom') {
         setSortBy(nextSortBy);
+        if (detail.forceRefresh === true && nextSortBy === sortBy && normalizedSortOrder === sortOrder) {
+          clearPageCacheForFolder(currentFolder);
+          void loadFolder({ folder: currentFolder, keepSelection: true, forceRefresh: true, preserveScroll: true });
+        }
       }
-      setSortOrder(nextSortOrder === 'desc' ? 'desc' : 'asc');
+      setSortOrder(normalizedSortOrder);
     };
     const onPowerPrompterOutputSaved = (event: Event) => {
       const savedFiles = collectSavedOutputFiles((event as CustomEvent<unknown>)?.detail);
@@ -8512,7 +8517,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       window.removeEventListener('umbra:gallery-trash-updated', onTrashUpdated as EventListener);
       window.removeEventListener('umbra:gallery-content-changed', onContentChanged as EventListener);
     };
-  }, [addOpenedFolder, clearPageCacheForFolder, clearTrashCache, currentFolder, emitFilmstripFeed, emitSelectionChanged, files, getSelectionOrderedFiles, invalidateChangedTreeBranches, invalidateTreeChildrenCache, liveGenerationPreviewFile, loadFolder, loadTreeChildren, rememberRestoredHighlights, trashMode, updateViewerSessionFiles, upsertDirectSavedOutputs, viewerFileFallback]);
+  }, [addOpenedFolder, clearPageCacheForFolder, clearTrashCache, currentFolder, emitFilmstripFeed, emitSelectionChanged, files, getSelectionOrderedFiles, invalidateChangedTreeBranches, invalidateTreeChildrenCache, liveGenerationPreviewFile, loadFolder, loadTreeChildren, rememberRestoredHighlights, sortBy, sortOrder, trashMode, updateViewerSessionFiles, upsertDirectSavedOutputs, viewerFileFallback]);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('umbra:gallery-sort-changed', {

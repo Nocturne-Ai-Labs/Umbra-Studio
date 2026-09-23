@@ -54,6 +54,8 @@ type FsListProgressiveRequest = {
     cursor: number;
     force?: boolean;
     snapshot?: string;
+    sortBy?: 'created' | 'modified' | 'name' | 'custom';
+    sortOrder?: 'asc' | 'desc';
   };
 };
 
@@ -229,6 +231,10 @@ type ProgressiveSeedEntry = {
   name: string;
   kind: 'folder' | 'file';
   mediaType?: 'image' | 'video';
+  size?: number;
+  createdMs?: number;
+  modifiedMs?: number;
+  customOrder?: number;
 };
 
 type ProgressiveSeedCacheEntry = {
@@ -248,7 +254,10 @@ const PROGRESSIVE_SEED_CACHE_MAX = 256;
 const DIRECTORY_TREE_SEED_TTL_MS = 30_000;
 const DIRECTORY_TREE_SEED_CACHE_MAX = 256;
 const progressiveSeedCache = new Map<string, ProgressiveSeedCacheEntry>();
-const progressiveListingSnapshots = new Map<string, { fullPath: string; seed: ProgressiveSeedCacheEntry; expiresAt: number }>();
+const progressiveListingSnapshots = new Map<string, {
+  fullPath: string; targetPath: string; sortBy: string; sortOrder: string;
+  seed: ProgressiveSeedCacheEntry; expiresAt: number;
+}>();
 const directoryTreeSeedCache = new Map<string, ProgressiveSeedCacheEntry>();
 const progressiveSeedInFlight = new Map<string, Promise<ProgressiveSeedEntry[]>>();
 const directoryTreeSeedInFlight = new Map<string, Promise<ProgressiveSeedEntry[]>>();
@@ -256,10 +265,12 @@ const progressiveNameCollator = new Intl.Collator(undefined, { numeric: true, se
 const PROGRESSIVE_LISTING_SNAPSHOT_MAX = 8;
 const PROGRESSIVE_LISTING_SNAPSHOT_MAX_ENTRIES = 100_000;
 
-function getProgressiveListingSnapshot(id: string, fullPath: string): ProgressiveSeedCacheEntry {
+function getProgressiveListingSnapshot(id: string, fullPath: string, targetPath: string, sortBy: string, sortOrder: string): ProgressiveSeedCacheEntry {
   const now = Date.now();
   const entry = progressiveListingSnapshots.get(id);
-  if (!entry || entry.expiresAt <= now || entry.fullPath !== resolve(fullPath)) {
+  if (!entry || entry.expiresAt <= now || entry.fullPath !== resolve(fullPath)
+    || entry.targetPath !== targetPath
+    || entry.sortBy !== sortBy || entry.sortOrder !== sortOrder) {
     throw new Error('Gallery listing expired. Refresh the folder to retry.');
   }
   progressiveListingSnapshots.delete(id);
@@ -268,7 +279,7 @@ function getProgressiveListingSnapshot(id: string, fullPath: string): Progressiv
   return entry.seed;
 }
 
-function rememberProgressiveListingSnapshot(fullPath: string, seed: ProgressiveSeedCacheEntry): string | undefined {
+function rememberProgressiveListingSnapshot(fullPath: string, targetPath: string, sortBy: string, sortOrder: string, seed: ProgressiveSeedCacheEntry): string | undefined {
   const now = Date.now();
   for (const [id, entry] of progressiveListingSnapshots) {
     if (entry.expiresAt <= now) progressiveListingSnapshots.delete(id);
@@ -284,7 +295,7 @@ function rememberProgressiveListingSnapshot(fullPath: string, seed: ProgressiveS
     progressiveListingSnapshots.delete(oldest[0]);
   }
   const id = `fs:${crypto.randomUUID()}`;
-  progressiveListingSnapshots.set(id, { fullPath: resolve(fullPath), seed, expiresAt: now + PROGRESSIVE_SEED_TTL_MS });
+  progressiveListingSnapshots.set(id, { fullPath: resolve(fullPath), targetPath, sortBy, sortOrder, seed, expiresAt: now + PROGRESSIVE_SEED_TTL_MS });
   return id;
 }
 
@@ -305,7 +316,7 @@ function pruneProgressiveSeedCache() {
 
 function compareProgressiveSeedEntries(a: ProgressiveSeedEntry, b: ProgressiveSeedEntry) {
   if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1;
-  return progressiveNameCollator.compare(a.name, b.name);
+  return progressiveNameCollator.compare(a.name, b.name) || a.name.localeCompare(b.name);
 }
 
 function createSeedCacheEntry(entries: ProgressiveSeedEntry[]): ProgressiveSeedCacheEntry {
@@ -433,6 +444,69 @@ async function getProgressiveSeedSnapshot(fullPath: string, force = false): Prom
 
 async function getProgressiveSeed(fullPath: string, force = false) {
   return (await getProgressiveSeedSnapshot(fullPath, force)).entries;
+}
+
+async function sortedProgressiveSeed(
+  seed: ProgressiveSeedCacheEntry,
+  fullPath: string,
+  targetPath: string,
+  sortBy: 'created' | 'modified' | 'name' | 'custom',
+  sortOrder: 'asc' | 'desc',
+): Promise<ProgressiveSeedCacheEntry> {
+  if (sortBy === 'name' && sortOrder === 'asc') return seed;
+  const folders = seed.entries.filter(entry => entry.kind === 'folder');
+  let files = seed.entries.filter(entry => entry.kind === 'file');
+  if (sortBy === 'created' || sortBy === 'modified') {
+    files = (await mapWithConcurrency(files, 16, async entry => {
+      let stat: Awaited<ReturnType<typeof fs.lstat>>;
+      try {
+        stat = await fs.lstat(join(fullPath, entry.name));
+      } catch (error: any) {
+        if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return null;
+        throw error;
+      }
+      if (!stat.isFile()) return null;
+      const createdMs = Number.isFinite(stat.birthtimeMs) && stat.birthtimeMs > 0
+        ? stat.birthtimeMs
+        : (Number.isFinite(stat.ctimeMs) && stat.ctimeMs > 0 ? stat.ctimeMs : stat.mtimeMs);
+      return {
+        ...entry,
+        size: Number.isFinite(stat.size) ? Number(stat.size) : 0,
+        createdMs,
+        modifiedMs: Number.isFinite(stat.mtimeMs) ? stat.mtimeMs : createdMs,
+      };
+    })).filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+  } else if (sortBy === 'custom') {
+    const paths = files.map(entry => normalizeRelPath(join(targetPath, entry.name)));
+    let ranking: ReturnType<GalleryDb['getFolderOrderByPaths']>;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        transferDb ??= new GalleryDb(process.env.UMBRA_ROOT || process.cwd(), undefined, { busyTimeoutMs: 50, quiet: true });
+        ranking = transferDb.getFolderOrderByPaths(targetPath, paths);
+        break;
+      } catch (error) {
+        if (attempt >= 4 || !/database is (locked|busy)|SQLITE_BUSY|SQLITE_LOCKED/i.test(String(error))) throw error;
+        await sleep(50 * (attempt + 1));
+      }
+    }
+    const { orders, nextIndex } = ranking;
+    files = files.map((entry, index) => ({
+      ...entry,
+      customOrder: orders.get(paths[index]) ?? nextIndex + index,
+    }));
+  }
+  files.sort((left, right) => {
+    const value = sortBy === 'created'
+      ? (left.createdMs || 0) - (right.createdMs || 0)
+      : sortBy === 'modified'
+        ? (left.modifiedMs || 0) - (right.modifiedMs || 0)
+        : sortBy === 'custom'
+          ? (left.customOrder || 0) - (right.customOrder || 0)
+          : 0;
+    const tie = progressiveNameCollator.compare(left.name, right.name) || left.name.localeCompare(right.name);
+    return (sortOrder === 'desc' ? -1 : 1) * (value || tie);
+  });
+  return { ...seed, entries: [...folders, ...files], totalMedia: files.length };
 }
 
 async function buildDirectoryTreeSeed(fullPath: string) {
@@ -805,13 +879,19 @@ async function runList(payload: FsListRequest['payload']) {
 async function runListProgressive(payload: FsListProgressiveRequest['payload']) {
   const requestStartedAt = Date.now();
   const { fullPath, targetPath, force } = payload;
+  const sortBy = payload.sortBy === 'name' || payload.sortBy === 'modified' || payload.sortBy === 'custom'
+    ? payload.sortBy : 'created';
+  const sortOrder = payload.sortOrder === 'desc' ? 'desc' : 'asc';
   const folders: any[] = [];
   const files: any[] = [];
   const seedStartedAt = Date.now();
   const requestedSnapshot = String(payload.snapshot || '').trim();
   const snapshot = requestedSnapshot
-    ? { ...getProgressiveListingSnapshot(requestedSnapshot, fullPath), seedSource: 'snapshot' as const, seedWaitMs: 0, seedBuildMs: 0 }
-    : await getProgressiveSeedSnapshot(fullPath, force === true);
+    ? { ...getProgressiveListingSnapshot(requestedSnapshot, fullPath, targetPath, sortBy, sortOrder), seedSource: 'snapshot' as const, seedWaitMs: 0, seedBuildMs: 0 }
+    : await (async () => {
+      const seed = await getProgressiveSeedSnapshot(fullPath, force === true);
+      return { ...await sortedProgressiveSeed(seed, fullPath, targetPath, sortBy, sortOrder), seedSource: seed.seedSource, seedWaitMs: seed.seedWaitMs, seedBuildMs: seed.seedBuildMs };
+    })();
   const seedMs = Date.now() - seedStartedAt;
   const entries = snapshot.entries;
   const cursor = Math.max(0, Math.trunc(payload.cursor || 0));
@@ -820,7 +900,7 @@ async function runListProgressive(payload: FsListProgressiveRequest['payload']) 
   const nextCursor = cursor + chunk.length;
   const done = nextCursor >= entries.length;
   const snapshotId = requestedSnapshot || (!done && limit > 0
-    ? rememberProgressiveListingSnapshot(fullPath, snapshot)
+    ? rememberProgressiveListingSnapshot(fullPath, targetPath, sortBy, sortOrder, snapshot)
     : undefined);
 
   for (const entry of chunk) {
@@ -850,7 +930,10 @@ async function runListProgressive(payload: FsListProgressiveRequest['payload']) 
       height: 512,
       created: 0,
       modified: 0,
-      size: 0,
+      size: entry.size || 0,
+      ...(entry.createdMs !== undefined ? { createdMs: entry.createdMs } : {}),
+      ...(entry.modifiedMs !== undefined ? { modifiedMs: entry.modifiedMs } : {}),
+      ...(entry.customOrder !== undefined ? { customOrder: entry.customOrder } : {}),
     });
   }
 
@@ -871,6 +954,8 @@ async function runListProgressive(payload: FsListProgressiveRequest['payload']) 
       seedBuildMs: snapshot.seedBuildMs,
       totalEntries: entries.length,
       totalMedia: snapshot.totalMedia,
+      sortBy,
+      sortOrder,
       chunkEntries: chunk.length,
       folderCount: folders.length,
       fileCount: files.length,

@@ -51,14 +51,29 @@ export async function fetchGalleryFs(pathname: string, params: URLSearchParams, 
   const firstPage = page;
   let total = 0;
   let cursor = 0;
+  let hasPublished = false;
+  let publishedCount = 0;
+  let lastPublishedAt = 0;
   while (true) {
     init?.signal?.throwIfAborted();
     if (page.missing === true) throw new Error('Folder is currently unavailable');
     append(files, page.files);
     append(folders, page.folders);
     total = Math.max(total, Number(page.total) || 0);
-    onPage?.({ ...firstPage, files: [...files.values()], folders: [...folders.values()], total,
-      done: page.done !== false && page.nextCursor == null, nextCursor: page.nextCursor });
+    const done = page.done !== false && page.nextCursor == null;
+    // Each callback copies the entire accumulated list and makes the Gallery
+    // render it. Publish the first and final pages, then grow intermediate
+    // updates geometrically while keeping a time limit for slow listings.
+    const now = Date.now();
+    if (onPage && (!hasPublished || done
+      || files.size >= Math.max(512, publishedCount * 2)
+      || now - lastPublishedAt >= 750)) {
+      onPage({ ...firstPage, files: [...files.values()], folders: [...folders.values()], total,
+        done, nextCursor: page.nextCursor });
+      hasPublished = true;
+      publishedCount = files.size;
+      lastPublishedAt = now;
+    }
     if (page.nextCursor == null && page.done !== false) break;
     const nextCursor = page.nextCursor;
     if (typeof nextCursor !== 'number' || !Number.isSafeInteger(nextCursor) || nextCursor <= cursor) {
