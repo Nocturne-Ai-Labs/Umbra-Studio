@@ -34,6 +34,8 @@ const ALREADY_COMPRESSED_EXTENSIONS = new Set([
 const IMPORT_WRITE_TEMP_NAME = /^\.import-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/i;
 const IMPORT_RESERVATION_NAME = /^\.import-[^/\\]+\.lock$/;
 const ATOMIC_TEXT_TEMP_NAME = /^\..+\.(?:txt|json)\.\d+\.\d{13}\.[0-9a-f]{8}\.tmp$/i;
+const BOORU_DOWNLOAD_TEMP_NAME = /^\.download-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.part$/i;
+const BOORU_SIDECAR_TEMP_NAME = /^\.(?:source|caption)-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/i;
 
 const ZIP_CRC32_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -137,9 +139,12 @@ async function collectDatasetEntries(datasetPath: string, datasetName: string): 
         continue;
       }
       if (!child.isFile()) continue;
-      // Imports and atomic caption/settings saves stage files inside the dataset.
+      // Imports, downloads, and atomic caption/settings saves stage files inside the dataset.
       // They are incomplete snapshots, so never include their exact temporary names.
-      if (IMPORT_WRITE_TEMP_NAME.test(child.name) || ATOMIC_TEXT_TEMP_NAME.test(child.name)) continue;
+      if (IMPORT_WRITE_TEMP_NAME.test(child.name)
+        || ATOMIC_TEXT_TEMP_NAME.test(child.name)
+        || BOORU_DOWNLOAD_TEMP_NAME.test(child.name)
+        || BOORU_SIDECAR_TEMP_NAME.test(child.name)) continue;
       const stat = await fs.stat(fullPath).catch((error: NodeJS.ErrnoException) => {
         if (error.code === 'ENOENT' && IMPORT_RESERVATION_NAME.test(child.name)) return null;
         throw error;
