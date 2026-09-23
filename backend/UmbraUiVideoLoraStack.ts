@@ -1,7 +1,14 @@
 import type { UmbraVideoLoraEntry, UmbraVideoLoraFamily } from '../shared/umbra-ui/videoLoraStack';
 
-type PromptNode = { class_type: string; inputs: Record<string, unknown>; _meta?: Record<string, unknown> };
-type PromptGraph = Record<string, PromptNode>;
+type PromptNode = { class_type: string; inputs?: Record<string, unknown>; _meta?: Record<string, unknown> };
+type PromptGraph = Record<string, unknown>;
+
+function isPromptNode(value: unknown): value is PromptNode {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const node = value as Record<string, unknown>;
+  return typeof node.class_type === 'string'
+    && (!node.inputs || (typeof node.inputs === 'object' && !Array.isArray(node.inputs)));
+}
 
 const MODEL_ROLES: Record<UmbraVideoLoraFamily, Record<string, string>> = {
   wan22: { high: 'wan_high_model', low: 'wan_low_model' },
@@ -35,7 +42,7 @@ export function applyUmbraUiVideoLoraStack(graph: PromptGraph, family: UmbraVide
   for (const [stage, role] of Object.entries(MODEL_ROLES[family])) {
     const selected = entries.filter(item => family !== 'wan22' || item.wanStage === 'both' || item.wanStage === stage);
     if (!selected.length) continue;
-    const source = Object.entries(graph).find(([, node]) => node?._meta?.umbra_role === role);
+    const source = Object.entries(graph).find(([, node]) => isPromptNode(node) && node._meta?.umbra_role === role);
     if (!source) throw new Error(`This ${family} workflow has no ${role} model connection for the video LoRA stack.`);
     const [sourceId] = source;
     let output: [string, number] = [sourceId, 0];
@@ -53,8 +60,8 @@ export function applyUmbraUiVideoLoraStack(graph: PromptGraph, family: UmbraVide
       output = [id, 0];
     }
     for (const node of Object.values(graph)) {
-      if (inserted.includes(node)) continue;
-      for (const [key, value] of Object.entries(node.inputs || {})) {
+      if (!isPromptNode(node) || inserted.includes(node) || !node.inputs) continue;
+      for (const [key, value] of Object.entries(node.inputs)) {
         if (Array.isArray(value) && value.length === 2 && value[0] === sourceId && value[1] === 0) {
           node.inputs[key] = output;
         }

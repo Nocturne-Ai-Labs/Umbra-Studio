@@ -70,7 +70,7 @@ export async function handleCensorReviewRoute(req: Request, context: Context): P
       if (!itemId && req.method === 'POST') {
         // Stay below Bun's default request limit; local-file imports allow larger sources.
         const bytes = await readLimited(req, 121 * 1024 * 1024, 'Review uploads exceed the 120 MB limit.');
-        const form = await new Response(bytes, { headers: { 'Content-Type': req.headers.get('content-type') || '' } }).formData();
+        const form = await new Response(bytes.buffer as ArrayBuffer, { headers: { 'Content-Type': req.headers.get('content-type') || '' } }).formData();
         const upload = form.get('file');
         const path = context.source(form.get('path'));
         const initial = JSON.parse(String(form.get('settings') || '{}'));
