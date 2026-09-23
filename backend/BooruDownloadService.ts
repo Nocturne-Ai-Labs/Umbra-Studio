@@ -230,8 +230,12 @@ export async function resolveBooruRepairSource(
     }
   }
   signal?.throwIfAborted();
+  const filenameHash = basename(filename, extname(filename)).toLowerCase();
+  // A hash-named image must not be repaired with bytes from a stale sidecar
+  // belonging to a different image.
+  if (saved && MD5.test(filenameHash) && String(saved.md5 || '').toLowerCase() !== filenameHash) saved = null;
   if (!refresh && saved && MD5.test(saved.md5) && normalizeBooruMediaUrl(saved.url)) return saved;
-  const md5 = (saved && MD5.test(saved.md5) ? saved.md5 : basename(filename, extname(filename))).toLowerCase();
+  const md5 = (saved && MD5.test(saved.md5) ? saved.md5 : filenameHash).toLowerCase();
   if (!MD5.test(md5)) throw new Error('No booru source is saved for this image, and its original hash filename is unavailable.');
   let failed = false;
   const providerOrder = Object.keys(providers) as Provider[];
