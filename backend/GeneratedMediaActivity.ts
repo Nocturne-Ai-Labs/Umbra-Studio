@@ -25,11 +25,13 @@ export class GeneratedMediaActivity {
           this.folders.set(this.key(entry.path), entry);
         }
       }
+      const now = this.now();
       for (const item of (Array.isArray(data.seen) ? data.seen : []).slice(-20_000)) {
         const id = typeof item === 'string' ? item : item?.[0];
-        const timestamp = typeof item === 'string' ? this.now() : item?.[1];
-        if (typeof id === 'string' && /^[a-f0-9]{64}$/.test(id) && Number.isFinite(timestamp) && timestamp >= 0) {
-          this.seen.set(id, Math.min(timestamp, this.now()));
+        const timestamp = typeof item === 'string' ? now : item?.[1];
+        if (typeof id === 'string' && /^[a-f0-9]{64}$/.test(id) && Number.isFinite(timestamp)
+          && timestamp <= now && now - timestamp < DUPLICATE_PUBLICATION_WINDOW_MS) {
+          this.seen.set(id, timestamp);
         }
       }
     } catch { /* A missing/corrupt notification cache must not affect generation. */ }
@@ -50,6 +52,10 @@ export class GeneratedMediaActivity {
 
   record(paths: string[]): void {
     let changed = false;
+    const now = this.now();
+    for (const [id, timestamp] of this.seen) {
+      if (timestamp > now || now - timestamp >= DUPLICATE_PUBLICATION_WINDOW_MS) this.seen.delete(id);
+    }
     for (const path of paths) {
       if (!path || !MEDIA.has(extname(path).toLowerCase())) continue;
       const full = this.resolvePath(path);
@@ -107,6 +113,10 @@ export class GeneratedMediaActivity {
     this.timer = undefined;
     if (!this.statePath) return;
     try {
+      const now = this.now();
+      for (const [id, timestamp] of this.seen) {
+        if (timestamp > now || now - timestamp >= DUPLICATE_PUBLICATION_WINDOW_MS) this.seen.delete(id);
+      }
       await writeUpdateJsonAtomic(this.statePath, { version: 1, epoch: this.epoch, folders: [...this.folders.values()], seen: [...this.seen] });
     } catch (error) { console.warn('[GeneratedMediaActivity] Could not save notification counts', error); }
   }
