@@ -26629,12 +26629,13 @@ async function handleFsReveal(req: Request, server?: RequestIpServer): Promise<R
 
 // Call only after checking the original HTTP request's host identity.
 async function revealValidatedHostPath(fullPath: string): Promise<Response> {
-  if (!isPathInsideAllowedRoots(fullPath)) return json({ error: 'Access denied' }, 403);
-  const targetStat = await fs.stat(fullPath).catch(() => null);
+  const allowedPath = await resolveAllowedGalleryPath(fullPath, getGalleryTransferAllowedRoots());
+  if (!allowedPath) return json({ error: 'Access denied' }, 403);
+  const targetStat = await fs.stat(allowedPath).catch(() => null);
   if (!targetStat) return json({ error: 'File not found' }, 404);
-  const opened = await openPathInHostFileExplorer(fullPath, targetStat);
+  const opened = await openPathInHostFileExplorer(allowedPath, targetStat);
   if (!opened.opened) return json({ error: 'Failed to open file explorer' }, 500);
-  return json({ success: true, highlighted: opened.highlighted, fullPath });
+  return json({ success: true, highlighted: opened.highlighted, fullPath: allowedPath });
 }
 
 async function openPathInHostFileExplorer(
