@@ -219,8 +219,16 @@ export async function resolveBooruRepairSource(
   signal?.throwIfAborted();
   validateFilename(filename);
   let saved: BooruDownloadSource | null = null;
-  try { saved = JSON.parse(await fs.readFile(join(conceptPath, booruSourceSidecar(filename)), 'utf8')); }
+  let sourceContents: string | null = null;
+  try { sourceContents = await fs.readFile(join(conceptPath, booruSourceSidecar(filename)), 'utf8'); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('The saved download source is unreadable.'); }
+  if (sourceContents !== null) {
+    try { saved = JSON.parse(sourceContents); }
+    catch {
+      // An original MD5 filename can still recover its source if the sidecar was damaged.
+      if (!MD5.test(basename(filename, extname(filename)))) throw new Error('The saved download source is unreadable.');
+    }
+  }
   signal?.throwIfAborted();
   if (!refresh && saved && MD5.test(saved.md5) && normalizeBooruMediaUrl(saved.url)) return saved;
   const md5 = (saved && MD5.test(saved.md5) ? saved.md5 : basename(filename, extname(filename))).toLowerCase();
