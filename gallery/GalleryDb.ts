@@ -638,11 +638,11 @@ export class GalleryDb {
     const rootParams: string[] = [];
     for (const root of roots) {
       const lowerRoot = root.toLowerCase();
-      rootClauses.push('(lower(f.path) = ? OR lower(f.path) LIKE ?)');
-      rootParams.push(lowerRoot, `${lowerRoot}/%`);
+      rootClauses.push("(lower(f.path) = ? OR lower(f.path) LIKE ? ESCAPE '\\')");
+      rootParams.push(lowerRoot, `${escapeSqlLike(lowerRoot)}/%`);
     }
 
-    const needle = `%${query.replace(/[%_]/g, (char) => `\\${char}`)}%`;
+    const needle = `%${escapeSqlLike(query)}%`;
     const rows = this.db.query(`
       SELECT DISTINCT
         f.uid AS uid,
@@ -755,11 +755,11 @@ export class GalleryDb {
     const rootParams: string[] = [];
     for (const root of roots) {
       const lowerRoot = root.toLowerCase();
-      rootClauses.push('(lower(f.path) = ? OR lower(f.path) LIKE ?)');
-      rootParams.push(lowerRoot, `${lowerRoot}/%`);
+      rootClauses.push("(lower(f.path) = ? OR lower(f.path) LIKE ? ESCAPE '\\')");
+      rootParams.push(lowerRoot, `${escapeSqlLike(lowerRoot)}/%`);
     }
 
-    const escaped = query.replace(/[%_]/g, (char) => `\\${char}`);
+    const escaped = escapeSqlLike(query);
     const containsNeedle = `%${escaped}%`;
     const prefixNeedle = `${escaped}%`;
     const perKindLimit = Math.max(4, Math.ceil(limit / 2));
