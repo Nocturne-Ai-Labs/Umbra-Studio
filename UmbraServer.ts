@@ -26511,7 +26511,8 @@ async function handleFsRead(url: URL): Promise<Response> {
     const resolved = resolvePath(path);
     if (!resolved) return new Response('Invalid path', { status: 403 });
 
-    const { fullPath } = resolved;
+    const fullPath = await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
+    if (!fullPath) return new Response('Invalid path', { status: 403 });
     if (!existsSync(fullPath)) return new Response('File not found', { status: 404 });
     if (!statSync(fullPath).isFile()) return new Response('Not a file', { status: 400 });
 
@@ -26536,7 +26537,8 @@ async function handleFsWrite(req: Request): Promise<Response> {
     const resolved = resolvePath(filePath);
     if (!resolved) return json({ error: 'Invalid path' }, 400);
 
-    const { fullPath } = resolved;
+    const fullPath = await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
+    if (!fullPath) return json({ error: 'Invalid path' }, 403);
     if (resolved.relativePath.toLowerCase().endsWith(PP_CARD_DOC_EXT)) {
       if (encoding === 'base64') {
         return json({ error: 'Power Prompter card writes must use JSON text.' }, 400);
