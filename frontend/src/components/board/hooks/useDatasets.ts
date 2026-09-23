@@ -258,22 +258,18 @@ export function useDatasets() {
     imageName: string,
     caption: string
   ): Promise<boolean> => {
-    try {
-      const response = await fetch('/api/dataset/save-caption', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          dataset: datasetName,
-          concept: conceptFolder,
-          image: imageName,
-          caption,
-        }),
-      });
-
-      return response.ok;
-    } catch {
-      return false;
-    }
+    const response = await fetch('/api/dataset/save-caption', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dataset: datasetName,
+        concept: conceptFolder,
+        image: imageName,
+        caption,
+      }),
+    });
+    if (!response.ok) throw new Error(await getResponseError(response, 'Could not save caption.'));
+    return true;
   }, []);
 
   // Move images between concepts

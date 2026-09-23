@@ -1151,6 +1151,21 @@ function datasetCaptionPath(directory: string, imageName: string, imageSpecificF
   return existsSync(standard) ? standard : (existsSync(imageSpecific) ? imageSpecific : standard);
 }
 
+function findDatasetImageStemSibling(imageName: string, filenames: Iterable<string>): string | null {
+  const extension = extname(imageName).toLowerCase();
+  if (!DATASET_IMPORT_IMAGE_EXTENSIONS.has(extension)) return null;
+  const stem = basename(imageName, extname(imageName)).toLowerCase();
+  for (const filename of filenames) {
+    if (filename !== imageName && DATASET_IMPORT_IMAGE_EXTENSIONS.has(extname(filename).toLowerCase())
+      && basename(filename, extname(filename)).toLowerCase() === stem) return filename;
+  }
+  return null;
+}
+
+function datasetImageStemCollisionMessage(imageName: string, sibling: string): string {
+  return `${imageName} and ${sibling} share the name before their extensions. Rename one image before editing captions.`;
+}
+
 function resolveDatasetImportSourcePath(rawPath: unknown): string | null {
   const inputPath = String(rawPath || '').trim();
   if (!inputPath || inputPath.includes('\0')) return null;
@@ -34342,6 +34357,10 @@ const server = Bun.serve<UmbraSocketData>({
               .map((part) => normalizeCaptionTag(part, useSpaces))
               .filter(Boolean);
           };
+          const parseExistingCaptionTags = (caption: string): string[] => caption
+            .split(',')
+            .map((tag) => tag.trim())
+            .filter(Boolean);
           const mergeTags = (...groups: string[][]): string[] => {
             const merged: string[] = [];
             const seen = new Set<string>();
@@ -34456,6 +34475,32 @@ const server = Bun.serve<UmbraSocketData>({
           const triggerTags = parseTagList(body.triggerTags, replaceUnderscoresWithSpaces);
           const prependTags = parseTagList(body.prependTags, replaceUnderscoresWithSpaces);
           const prefixTags = mergeTags(triggerTags, prependTags);
+          if (body.images !== undefined && !Array.isArray(body.images)) {
+            return json({ error: 'Invalid image selection' }, 400);
+          }
+          const requestedImages = Array.isArray(body.images) ? body.images : [];
+          if (requestedImages.some((entry) => typeof entry !== 'string'
+            || sanitizeDatasetSegment(entry) !== entry || !imageExts.has(extname(entry).toLowerCase()))) {
+            return json({ error: 'Invalid image selection' }, 400);
+          }
+          const allFiles = await fs.readdir(conceptPath);
+          if (requestedImages.some((entry) => !allFiles.includes(entry))) {
+            return json({ error: 'A selected image no longer exists' }, 400);
+          }
+          const imageFiles = allFiles
+            .filter((file) => imageExts.has(extname(file).toLowerCase()))
+            .filter((file) => requestedImages.length === 0 || requestedImages.includes(file))
+            .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+          if (imageFiles.length === 0) {
+            return json({ error: 'No images found to caption' }, 400);
+          }
+
+          for (const filename of imageFiles) {
+            const sibling = findDatasetImageStemSibling(filename, allFiles);
+            if (sibling) return json({ error: datasetImageStemCollisionMessage(filename, sibling) }, 409);
+          }
+
           if (body.persistSettings !== false) await writeDatasetConceptSettings(datasetName, conceptName, conceptPath, {
             triggerTags: String(body.triggerTags ?? ''),
             prependTags: String(body.prependTags ?? ''),
@@ -34481,27 +34526,6 @@ const server = Bun.serve<UmbraSocketData>({
           }).catch((error) => {
             console.warn('[Datasets] Failed to persist concept auto-tag settings:', error);
           });
-
-          if (body.images !== undefined && !Array.isArray(body.images)) {
-            return json({ error: 'Invalid image selection' }, 400);
-          }
-          const requestedImages = Array.isArray(body.images) ? body.images : [];
-          if (requestedImages.some((entry) => typeof entry !== 'string'
-            || sanitizeDatasetSegment(entry) !== entry || !imageExts.has(extname(entry).toLowerCase()))) {
-            return json({ error: 'Invalid image selection' }, 400);
-          }
-          const allFiles = await fs.readdir(conceptPath);
-          if (requestedImages.some((entry) => !allFiles.includes(entry))) {
-            return json({ error: 'A selected image no longer exists' }, 400);
-          }
-          const imageFiles = allFiles
-            .filter((file) => imageExts.has(extname(file).toLowerCase()))
-            .filter((file) => requestedImages.length === 0 || requestedImages.includes(file))
-            .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-
-          if (imageFiles.length === 0) {
-            return json({ error: 'No images found to caption' }, 400);
-          }
 
           const naturalCaptionResults = new Map<string, { caption?: string; error?: string }>();
           if (autoTag && captionMode === 'natural') {
@@ -34547,7 +34571,7 @@ const server = Bun.serve<UmbraSocketData>({
                 })
                 : '';
               const existingTags = preserveExisting && captionMode === 'tags'
-                ? parseTagList(existingCaption, replaceUnderscoresWithSpaces)
+                ? parseExistingCaptionTags(existingCaption)
                 : [];
               let generatedTags: string[] = [];
 
@@ -35049,6 +35073,9 @@ const server = Bun.serve<UmbraSocketData>({
           if (!imageStat?.isFile()) {
             return json({ error: 'Image not found' }, 404);
           }
+
+          const sibling = findDatasetImageStemSibling(safeImageName, await fs.readdir(basePath));
+          if (sibling) return json({ error: datasetImageStemCollisionMessage(safeImageName, sibling) }, 409);
 
           // Edit the caption format this dataset already displays.
           const captionPath = datasetCaptionPath(basePath, safeImageName, !body.concept);
