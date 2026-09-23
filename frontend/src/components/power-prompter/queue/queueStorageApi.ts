@@ -15,11 +15,12 @@ import {
 type JsonPayload = Record<string, unknown>;
 
 async function readJsonPayload(response: Response, fallbackMessage: string): Promise<JsonPayload> {
-  const payload = await response.json().catch(() => ({})) as JsonPayload;
-  if (!response.ok || payload?.success === false) {
-    throw new Error(String(payload?.error || `${fallbackMessage} (${response.status})`));
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload || typeof payload !== 'object' || Array.isArray(payload) || payload.success !== true) {
+    const error = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload.error : null;
+    throw new Error(typeof error === 'string' && error.trim() ? error : `${fallbackMessage} (${response.status})`);
   }
-  return payload;
+  return payload as JsonPayload;
 }
 
 export async function listSavedPowerPrompterQueues(): Promise<SavedPowerPrompterQueueSummary[]> {
