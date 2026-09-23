@@ -635,6 +635,7 @@ function VideoToGifTool() {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const remoteClient = isUmbraRemoteClient();
   const selected = items.find((item) => item.id === selectedId) || items[0];
+  const runnableItems = React.useMemo(() => items.filter((item) => item.status !== 'completed'), [items]);
   const localSourceUrl = useFilePreview(selected?.file || null);
   const sourceUrl = localSourceUrl || itemPreviewUrl(selected);
   React.useEffect(() => {
@@ -666,14 +667,17 @@ function VideoToGifTool() {
   }, [addPaths, browsingSources, pinnedOutputFolder, outputFolder, remoteClient, selected?.path, showToast]);
 
   const run = React.useCallback(async () => {
-    if (processing || items.length === 0) return;
+    if (processing || runnableItems.length === 0) return;
     batchControl.reset();
     activityStartedAtRef.current = Date.now();
     setProcessing(true);
-    setSummary({ completed: 0, failed: 0, total: items.length });
-    setItems((current) => current.map((item) => ({ ...item, status: 'staged', error: undefined, result: undefined })));
+    setSummary({ completed: 0, failed: 0, total: runnableItems.length });
+    const runnableIds = new Set(runnableItems.map((item) => item.id));
+    setItems((current) => current.map((item) => runnableIds.has(item.id)
+      ? { ...item, status: 'staged', error: undefined, result: undefined }
+      : item));
     const result = await runUmbraUiMediaBatch({
-      items,
+      items: runnableItems,
       shouldStop: batchControl.shouldStop,
       onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
       runItem: async (item, sequenceNumber) => {
@@ -685,11 +689,10 @@ function VideoToGifTool() {
         setSummary((current) => ({ ...current, completed: current.completed + (error ? 0 : 1), failed: current.failed + (error ? 1 : 0) }));
       },
     });
-    setItems((current) => clearCompletedUmbraUiMediaBatch(current, items));
     setProcessing(false);
     window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
     showToast(result.failed ? `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed; ${result.failed} failed.` : `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed.`, result.failed ? 'error' : 'success');
-  }, [batchControl, items, pinnedOutputFolder, outputFolder, processing, setItems, showToast, width]);
+  }, [batchControl, runnableItems, pinnedOutputFolder, outputFolder, processing, setItems, showToast, width]);
 
   return (
     <div data-umbra-ui-gif-tool="" className="grid min-h-0 flex-1 grid-cols-[minmax(300px,360px)_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:overflow-y-auto">
@@ -706,7 +709,7 @@ function VideoToGifTool() {
             <label className="block space-y-1.5"><span className={labelClass}>Output Width</span><input type="number" min={64} max={3840} step={2} value={width} onChange={(event) => setWidth(Math.max(64, Math.min(3840, Number(event.target.value) || 720)))} className={controlClass} /></label>
           </div>
           <div className="rounded-md border border-amber-300/15 bg-amber-500/[0.04] px-2.5 py-2 font-mono text-[8px] uppercase text-zinc-500">Full source duration · Original frame timing · {width}px wide</div>
-          <button type="button" onClick={() => void run()} disabled={items.length === 0 || processing} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-amber-300/30 bg-amber-500/[0.1] text-[10px] font-black uppercase tracking-[0.16em] text-amber-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600">{processing ? <Loader2 size={13} className="animate-spin" /> : <Film size={13} />}{processing ? `Encoding ${summary.completed + summary.failed}/${summary.total}` : 'Create GIF Batch'}</button>
+          <button type="button" onClick={() => void run()} disabled={runnableItems.length === 0 || processing} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-amber-300/30 bg-amber-500/[0.1] text-[10px] font-black uppercase tracking-[0.16em] text-amber-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600">{processing ? <Loader2 size={13} className="animate-spin" /> : <Film size={13} />}{processing ? `Encoding ${summary.completed + summary.failed}/${summary.total}` : 'Create GIF Batch'}</button>
           <BatchSummary {...summary} />
         </div>
       </section>
