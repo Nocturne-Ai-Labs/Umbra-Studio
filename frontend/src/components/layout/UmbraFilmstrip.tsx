@@ -480,6 +480,7 @@ export function UmbraFilmstrip({
 
   const recentGenerationLaneImages = useMemo(() => {
     const recentLimit = recentGenerationsExpanded ? 10 : 3;
+    const currentByPath = new Map(displayedImages.map((image) => [normalizePath(image.path).toLowerCase(), image]));
     const lane = [
       ...(liveGenerationPreviewsEnabled && liveGenerationPreviewImage ? [liveGenerationPreviewImage] : []),
       ...recentGenerationOutputImages.slice(0, recentLimit),
@@ -490,8 +491,15 @@ export function UmbraFilmstrip({
       if (!key || seen.has(key)) return false;
       seen.add(key);
       return true;
+    }).map((image): FilmstripImage => {
+      const current = currentByPath.get(normalizePath(image.path).toLowerCase());
+      if (!current) return image;
+      return {
+        ...image, ...current, id: image.id,
+        privacyClass: image.privacyClass === 'nsfw' || current.privacyClass === 'nsfw' ? 'nsfw' : 'normal',
+      };
     });
-  }, [liveGenerationPreviewImage, liveGenerationPreviewsEnabled, recentGenerationOutputImages, recentGenerationsExpanded]);
+  }, [displayedImages, liveGenerationPreviewImage, liveGenerationPreviewsEnabled, recentGenerationOutputImages, recentGenerationsExpanded]);
 
   useEffect(() => {
     if (!liveGenerationPreviewsEnabled) setLiveGenerationPreviewImage(null);
