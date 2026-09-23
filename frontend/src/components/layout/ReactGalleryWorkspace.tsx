@@ -9376,11 +9376,21 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           nextCursor: typeof payload.nextCursor === 'number' ? payload.nextCursor : null,
           done: payload.done === true || payload.nextCursor == null,
         };
-        folderPreviewCacheRef.current.set(groupKey, nextGroup);
         if (!controller.signal.aborted) {
-          setFolderPreviewGroups((current) => current.map((group) => (
-            pathsEqual(group.folder.path, folder.path) ? nextGroup : group
-          )));
+          setFolderPreviewGroups((current) => {
+            const previous = current.find((group) => pathsEqual(group.folder.path, folder.path))
+              || folderPreviewCacheRef.current.get(groupKey);
+            const expansionLevel = previous?.expansionLevel || 0;
+            const merged = {
+              ...nextGroup,
+              expansionLevel,
+              visibleCount: expansionLevel >= 2 ? nextGroup.files.length : FOLDER_PREVIEW_PAGE_SIZE,
+            };
+            folderPreviewCacheRef.current.set(groupKey, merged);
+            return current.map((group) => (
+              pathsEqual(group.folder.path, folder.path) ? merged : group
+            ));
+          });
         }
       } catch (error) {
         if (controller.signal.aborted || isAbortError(error)) return;
