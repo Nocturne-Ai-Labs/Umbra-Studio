@@ -26537,6 +26537,14 @@ async function handleFsRead(url: URL): Promise<Response> {
 
     const fullPath = await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
     if (!fullPath) return new Response('Invalid path', { status: 403 });
+    const lowerPath = fullPath.toLowerCase();
+    const isPromptDocument = lowerPath.endsWith('.txt') || lowerPath.endsWith(PP_CARD_DOC_EXT);
+    const isMedia = /\.(?:png|jpe?g|webp|gif|bmp|avif|tiff?|heic|heif|jxl|mp4|webm|mov|mkv|avi|m4v|wmv|flv)$/.test(lowerPath);
+    if (isPromptDocument) {
+      if (!await resolveAllowedGalleryPath(fullPath, [join(USER_DIR, 'PowerPrompter')])) return new Response('Invalid path', { status: 403 });
+    } else if (!isMedia) {
+      return new Response('Unsupported file read type', { status: 403 });
+    }
     if (!existsSync(fullPath)) return new Response('File not found', { status: 404 });
     if (!statSync(fullPath).isFile()) return new Response('Not a file', { status: 400 });
 
