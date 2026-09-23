@@ -883,11 +883,13 @@ export function UmbraCanvasWorkspace({
 
   const projectSavePromiseRef = React.useRef<Promise<UmbraCanvasProjectDocument | null> | null>(null);
   const projectTransitionRef = React.useRef(0);
+  const deletingProjectIdsRef = React.useRef(new Set<string>());
   const saveProject = React.useCallback((notify = true): Promise<UmbraCanvasProjectDocument | null> => {
-    if (projectSavePromiseRef.current) return projectSavePromiseRef.current;
-    if (conflictedProjectId === useUmbraCanvasStore.getState().present.id) return Promise.resolve(null);
-    setSaving(true);
     const current = useUmbraCanvasStore.getState().present;
+    if (deletingProjectIdsRef.current.has(current.id)) return Promise.resolve(null);
+    if (projectSavePromiseRef.current) return projectSavePromiseRef.current;
+    if (conflictedProjectId === current.id) return Promise.resolve(null);
+    setSaving(true);
     const request = (async () => {
       try {
         const thumbnail = await composeUmbraCanvasProjectThumbnail(current).catch(() => null);
@@ -984,6 +986,7 @@ export function UmbraCanvasWorkspace({
   }, [refreshProjects, refreshRestorePoints]);
 
   const loadProject = React.useCallback(async (projectId: string) => {
+    if (deletingProjectIdsRef.current.has(projectId)) return;
     try {
       const current = useUmbraCanvasStore.getState().present;
       const discardingConflict = conflictedProjectId === current.id;
@@ -995,7 +998,7 @@ export function UmbraCanvasWorkspace({
       if (!canReplace) return;
       const loadToken = projectTransitionRef.current;
       const loaded = await loadUmbraCanvasWorkspaceProject(projectId);
-      if (!canReplace()) return;
+      if (!canReplace() || deletingProjectIdsRef.current.has(projectId)) return;
       replaceProject(loaded);
       resetGenerationTracking(loaded.generation.staging);
       setConflictedProjectId('');
@@ -1231,18 +1234,35 @@ export function UmbraCanvasWorkspace({
   }, [active, loadProject]);
 
   const deleteProject = React.useCallback(async (summary: UmbraCanvasWorkspaceProjectSummary) => {
+    if (deletingProjectIdsRef.current.has(summary.id)) return;
+    if (submitting && useUmbraCanvasStore.getState().present.id === summary.id) {
+      showToast('Wait for the Canvas job to finish queueing before deleting this project.', 'error');
+      return;
+    }
     if (!window.confirm(`Delete the Canvas project "${summary.name}" and its saved assets?`)) return;
+    deletingProjectIdsRef.current.add(summary.id);
+    if (useUmbraCanvasStore.getState().present.id === summary.id) projectTransitionRef.current += 1;
     try {
+      if (projectSavePromiseRef.current) await projectSavePromiseRef.current;
       await deleteUmbraCanvasWorkspaceProject(summary.id);
-      if (window.localStorage.getItem(UMBRA_CANVAS_LAST_PROJECT_KEY) === summary.id) {
-        window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, UMBRA_CANVAS_BLANK_PROJECT);
+      if (useUmbraCanvasStore.getState().present.id === summary.id) {
+        newProject();
+        resetGenerationTracking();
+        setLastSavedRevision(-1);
       }
+      try {
+        if (window.localStorage.getItem(UMBRA_CANVAS_LAST_PROJECT_KEY) === summary.id) {
+          window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, UMBRA_CANVAS_BLANK_PROJECT);
+        }
+      } catch { /* best effort */ }
       await refreshProjects();
       showToast(`Deleted ${summary.name}.`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to delete the Canvas project.', 'error');
+    } finally {
+      deletingProjectIdsRef.current.delete(summary.id);
     }
-  }, [refreshProjects, showToast]);
+  }, [newProject, refreshProjects, resetGenerationTracking, showToast, submitting]);
 
   const createRestorePoint = React.useCallback(async () => {
     if (restorePointBusy || saving || project.entities.length === 0) return;
@@ -1324,10 +1344,17 @@ export function UmbraCanvasWorkspace({
   }, [project.id, refreshRestorePoints, restorePointBusy, showToast]);
 
   const importImages = React.useCallback(async (files: FileList | File[]) => {
+    const targetProjectId = useUmbraCanvasStore.getState().present.id;
+    const targetTransition = projectTransitionRef.current;
+    const isTargetOpen = () => projectTransitionRef.current === targetTransition
+      && useUmbraCanvasStore.getState().present.id === targetProjectId;
     for (const file of Array.from(files)) {
+      if (!isTargetOpen()) break;
       if (!file.type.startsWith('image/')) continue;
+      let bitmap: ImageBitmap | null = null;
       try {
-        const bitmap = await createImageBitmap(file);
+        bitmap = await createImageBitmap(file);
+        if (!isTargetOpen()) break;
         const imageUrl = URL.createObjectURL(file);
         const bbox = useUmbraCanvasStore.getState().present.generationBbox;
         addRaster(createUmbraCanvasRasterEntity({
@@ -1338,22 +1365,32 @@ export function UmbraCanvasWorkspace({
           x: Math.round(bbox.x + (bbox.width - bitmap.width) / 2),
           y: Math.round(bbox.y + (bbox.height - bitmap.height) / 2),
         }));
-        bitmap.close();
       } catch (error) {
         showToast(error instanceof Error ? error.message : `Could not import ${file.name}.`, 'error');
+      } finally {
+        bitmap?.close();
       }
     }
   }, [addRaster, showToast]);
 
   const importGalleryPaths = React.useCallback(async (paths: string[]) => {
     const uniquePaths = Array.from(new Set(paths.map((path) => String(path || '').trim()).filter(Boolean)));
+    const targetProjectId = useUmbraCanvasStore.getState().present.id;
+    const targetTransition = projectTransitionRef.current;
+    const isTargetOpen = () => projectTransitionRef.current === targetTransition
+      && useUmbraCanvasStore.getState().present.id === targetProjectId;
     let importedCount = 0;
     for (const path of uniquePaths) {
+      if (!isTargetOpen()) break;
+      let bitmap: ImageBitmap | null = null;
       try {
         const response = await fetch(`/api/fs/image?${new URLSearchParams({ path }).toString()}`, { cache: 'no-store' });
+        if (!isTargetOpen()) break;
         if (!response.ok) throw new Error(`The media source returned ${response.status}.`);
         const blob = await response.blob();
-        const bitmap = await createImageBitmap(blob);
+        if (!isTargetOpen()) break;
+        bitmap = await createImageBitmap(blob);
+        if (!isTargetOpen()) break;
         const imageUrl = URL.createObjectURL(blob);
         const bbox = useUmbraCanvasStore.getState().present.generationBbox;
         const name = path.replace(/\\/g, '/').split('/').pop() || 'Gallery Image';
@@ -1366,10 +1403,11 @@ export function UmbraCanvasWorkspace({
           x: Math.round(bbox.x + (bbox.width - bitmap.width) / 2),
           y: Math.round(bbox.y + (bbox.height - bitmap.height) / 2),
         }));
-        bitmap.close();
         importedCount += 1;
       } catch (error) {
         showToast(error instanceof Error ? error.message : `Could not import ${path}.`, 'error');
+      } finally {
+        bitmap?.close();
       }
     }
     if (importedCount > 0) {
@@ -1439,10 +1477,17 @@ export function UmbraCanvasWorkspace({
   }, [savingStagedResults, selectedStageIds, showToast, stages, stagingSaveDestination]);
 
   const importMaskImages = React.useCallback(async (files: FileList | File[]) => {
+    const targetProjectId = useUmbraCanvasStore.getState().present.id;
+    const targetTransition = projectTransitionRef.current;
+    const isTargetOpen = () => projectTransitionRef.current === targetTransition
+      && useUmbraCanvasStore.getState().present.id === targetProjectId;
     for (const file of Array.from(files)) {
+      if (!isTargetOpen()) break;
       if (!file.type.startsWith('image/')) continue;
+      let bitmap: ImageBitmap | null = null;
       try {
-        const bitmap = await createImageBitmap(file);
+        bitmap = await createImageBitmap(file);
+        if (!isTargetOpen()) break;
         const imageUrl = URL.createObjectURL(file);
         const bbox = useUmbraCanvasStore.getState().present.generationBbox;
         addMask(createUmbraCanvasMaskEntity({
@@ -1455,11 +1500,12 @@ export function UmbraCanvasWorkspace({
             height: bitmap.height,
           },
         }));
-        bitmap.close();
         setTool('mask-brush');
         showToast(`Imported ${file.name} as a mask layer.`, 'success');
       } catch (error) {
         showToast(error instanceof Error ? error.message : `Could not import ${file.name} as a mask.`, 'error');
+      } finally {
+        bitmap?.close();
       }
     }
   }, [addMask, showToast]);
@@ -1553,8 +1599,15 @@ export function UmbraCanvasWorkspace({
         softInpaintMaskInfluence,
       };
       setGenerationSettings(settingsSnapshot);
-      await saveProject(false);
-      if (!isSubmissionProjectOpen()) throw new Error('The Canvas project changed while queueing. Generate again from the open project.');
+      const projectToSave = useUmbraCanvasStore.getState().present;
+      const saved = await saveProject(false);
+      const currentProject = useUmbraCanvasStore.getState().present;
+      if (!saved || saved.id !== projectToSave.id || saved.revision !== projectToSave.revision) {
+        throw new Error('The Canvas project could not be saved before generation. Save the project and try again.');
+      }
+      if (currentProject.id !== projectToSave.id || currentProject.revision !== projectToSave.revision) {
+        throw new Error('The Canvas project changed while saving. Generate again from the latest layers.');
+      }
       const queuedSeed = resolveUmbraUiQueueSeed(seed, seedMode);
       const promptWithLoras = capabilities.loras.support === 'adjustable'
         ? composeUmbraUiPromptWithLoras(compiledPrompt, loras)
@@ -1611,7 +1664,11 @@ export function UmbraCanvasWorkspace({
       const sourceFreeGeneration = preparedRegion.sourceContentPixels === 0
         && submittedControlLayers.length === 0
         && submittedReferenceLayers.length === 0;
-      if (!isSubmissionProjectOpen()) throw new Error('The Canvas project changed while queueing. Generate again from the open project.');
+      const beforeQueue = useUmbraCanvasStore.getState().present;
+      if (beforeQueue.id !== projectToSave.id || beforeQueue.revision !== projectToSave.revision
+        || deletingProjectIdsRef.current.has(projectToSave.id)) {
+        throw new Error('The Canvas project changed while preparing the job. Generate again from the latest layers.');
+      }
       const nextJob = await submitUmbraUiInpaintJob({
         pinnedOutputFolder,
         outputTask: 'canvas',
@@ -1705,7 +1762,11 @@ export function UmbraCanvasWorkspace({
         updatedAt: nextJob.updatedAt,
       });
       setJob(nextJob);
-      await saveProject(false);
+      const pendingProject = useUmbraCanvasStore.getState().present;
+      const savedPending = await saveProject(false);
+      if (!savedPending || savedPending.id !== pendingProject.id || savedPending.revision < pendingProject.revision) {
+        showToast('Canvas job queued, but its project recovery pointer was not saved. Retry Save before leaving Canvas.', 'error');
+      }
       if (isSubmissionProjectOpen()) onSeedChange(String(advanceUmbraUiSeed(queuedSeed, seedMode, seedIncrement, samples)));
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Canvas generation could not be queued.', 'error');
