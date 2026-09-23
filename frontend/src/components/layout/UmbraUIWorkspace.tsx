@@ -716,14 +716,18 @@ export function UmbraUIWorkspace() {
     catalogSettingsRef.current = nextSettings;
     try {
       const response = await fetch('/api/powerprompter/settings', {
-        method: 'POST',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(nextSettings),
+        body: JSON.stringify({ changes: { enabledCSVs: nextEnabled, editorMode: 'cards' } }),
       });
       if (!response.ok) throw new Error('Could not save tag catalog sources.');
+      const payload = await response.json() as { settings?: Record<string, unknown> };
+      if (!payload?.settings) throw new Error('The settings response was incomplete.');
+      catalogSettingsRef.current = payload.settings;
+      setCatalogEnabledCSVs(Array.isArray(payload.settings.enabledCSVs) ? payload.settings.enabledCSVs.map(String) : nextEnabled);
       try {
         const channel = new BroadcastChannel('umbra-powerprompter-settings-sync');
-        channel.postMessage({ settings: nextSettings });
+        channel.postMessage({ settings: payload.settings });
         channel.close();
       } catch {
         // BroadcastChannel may be unavailable in an embedded browser.

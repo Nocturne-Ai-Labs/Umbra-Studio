@@ -50,6 +50,7 @@ import {
   sortPowerPrompterCards,
 } from '@/lib/powerPrompter';
 import { buildPowerPrompterActivePromptBlocks } from '@/lib/powerPrompterActivePrompt';
+import { diffPowerPrompterSettings } from '@/lib/powerPrompterSettingsPatch';
 import { governorShouldRun, governorTryAcquire } from '@/lib/loadGovernor';
 import { readUserConfig, readUserConfigStrict, writeUserConfig } from '@/lib/userConfig';
 import { subscribeUiSession } from '@/lib/uiSessionSocket';
@@ -165,6 +166,7 @@ import {
   readPersistedPausedQueueSnapshot,
   writePersistedPausedQueueSnapshot,
 } from '@/components/power-prompter/queue/queuePersistence';
+import { hasQueueBuildSourceChanged, resolveQueueDispatchSource } from '@/components/power-prompter/queue/queueDispatchSource';
 import {
   applyQueueHistorySummaryPatch,
   buildOptimisticQueueHistorySummary,
@@ -288,6 +290,86 @@ const PROMPTER_ACTIVE_PROMPT_STALL_CHECK_MS = 15000;
 const PROMPTER_LORA_TIMEOUT_MS = 20000;
 const QUEUE_ITEM_EXIT_MS = 260;
 const QUEUE_PREVIEW_PROMPT_LIMIT = 160;
+
+export function queuePausedAfterRemovingWork(
+  wasPaused: boolean,
+  items: ReadonlyArray<Pick<QueueStackItem, 'requestId' | 'promptIndex' | 'status' | 'exiting'>>,
+  removedRequestIds: ReadonlySet<string>,
+  removedPromptIndicesByRequest?: ReadonlyMap<string, ReadonlySet<number>>,
+): boolean {
+  if (!wasPaused) return false;
+  return items.some((item) => {
+    if (item.exiting || (item.status !== 'pending' && item.status !== 'running')) return false;
+    const requestId = String(item.requestId || '').trim();
+    if (removedRequestIds.has(requestId)) return false;
+    const removedIndices = removedPromptIndicesByRequest?.get(requestId);
+    return !removedIndices?.has(Math.max(0, Math.floor(Number(item.promptIndex) || 0)));
+  });
+}
+
+export function queuePausedFromBackendSnapshot(
+  snapshotPaused: boolean,
+  hasLiveBackendPrompts: boolean,
+  pauseRequestedWithPending: boolean,
+  waitingBetweenPrompts: boolean,
+  hasLocalStagedWork = false,
+): boolean {
+  return (snapshotPaused && hasLiveBackendPrompts)
+    || pauseRequestedWithPending
+    || waitingBetweenPrompts
+    || (!hasLiveBackendPrompts && hasLocalStagedWork);
+}
+
+export function mergeBackendQueueSnapshotWithLocalStage(
+  backendItems: ReadonlyArray<QueueStackItem>,
+  previousItems: ReadonlyArray<QueueStackItem>,
+  backendRequestIds: ReadonlySet<string>,
+  localStagedRequestIds: ReadonlySet<string>,
+): QueueStackItem[] {
+  return [
+    ...backendItems,
+    ...previousItems.filter((item) => {
+      const requestId = String(item.requestId || '').trim();
+      return !item.exiting
+        && (item.status === 'pending' || item.status === 'running')
+        && isLocalStagedQueueRequestId(requestId)
+        && localStagedRequestIds.has(requestId)
+        && !backendRequestIds.has(requestId);
+    }),
+  ];
+}
+
+export function queueVisualForSnapshotWithLocalStage(
+  backendVisual: QueueVisualState | null,
+  previousVisual: QueueVisualState | null,
+  stagedItems: ReadonlyArray<QueueStackItem>,
+  requestMeta: ReadonlyMap<string, QueueRequestMeta>,
+  localStagedRequestIds: ReadonlySet<string>,
+): QueueVisualState | null {
+  if (backendVisual) return backendVisual;
+  const previousRequestId = String(previousVisual?.requestId || '').trim();
+  if (previousVisual && stagedItems.some((item) => String(item.requestId || '').trim() === previousRequestId)) {
+    return previousVisual;
+  }
+  const firstStagedItem = stagedItems.find((item) => localStagedRequestIds.has(String(item.requestId || '').trim()));
+  if (!firstStagedItem) return null;
+  const requestId = String(firstStagedItem.requestId || '').trim();
+  const meta = requestMeta.get(requestId);
+  if (!meta) return null;
+  return {
+    requestId,
+    mode: meta.mode,
+    activeSetId: clampQueueSetId(meta.promptSetIds[0] ?? meta.setId),
+    prompts: [...meta.prompts],
+    promptEntries: meta.promptEntries ? [...meta.promptEntries] : undefined,
+    promptIds: meta.prompts.map(() => ''),
+    promptSeeds: meta.prompts.map(() => 0),
+    activeIndex: 0,
+    jobProgress: 0,
+    updatedAt: Date.now(),
+  };
+}
+
 const QUEUE_STACK_VISIBLE_LIMIT = 3;
 const PREVIEW_CARD_HIDE_DELAY_MS = 120000;
 const QUEUE_COMPLETION_SNAPSHOT_PERSIST_DELAY_MS = 2500;
@@ -775,6 +857,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [agentPromptPanelOpen, setAgentPromptPanelOpen] = useState(false);
   const [settings, setSettings] = useState<PowerPrompterSettings>(DEFAULT_POWER_PROMPTER_SETTINGS);
+  const settingsWriteTailRef = useRef<Promise<void>>(Promise.resolve());
+  const settingsWriteSeqRef = useRef(0);
   const [queueDiversityDraft, setQueueDiversityDraft] = useState<number>(() =>
     normalizeQueueDiversity(DEFAULT_POWER_PROMPTER_SETTINGS.queueDiversity, DEFAULT_POWER_PROMPTER_SETTINGS.queueTraversalMode)
   );
@@ -3003,25 +3087,35 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
 
   const persistSettings = async (
     nextSettings: PowerPrompterSettings,
-    options?: { silent?: boolean; broadcast?: boolean; }
+    options?: { silent?: boolean; broadcast?: boolean; baseSettings?: PowerPrompterSettings; changes?: Record<string, unknown> }
   ): Promise<boolean> => {
-    try {
-      await fetch('/api/powerprompter/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(nextSettings),
-      });
-      setSettings(nextSettings);
-      if (options?.broadcast !== false) {
-        broadcastSettingsSync(nextSettings);
+    const changes = options?.changes ?? diffPowerPrompterSettings(options?.baseSettings ?? settings, nextSettings);
+    if (Object.keys(changes).length === 0) return true;
+    const writeSeq = ++settingsWriteSeqRef.current;
+    const write = async (): Promise<boolean> => {
+      try {
+        const response = await fetch('/api/powerprompter/settings', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ changes }),
+        });
+        if (!response.ok) throw new Error(`Failed to save settings (${response.status})`);
+        const payload = await response.json() as { settings?: PowerPrompterSettings };
+        if (!payload?.settings) throw new Error('The settings response was incomplete');
+        if (writeSeq === settingsWriteSeqRef.current) {
+          const committed = normalizePowerPrompterSettings(payload.settings);
+          setSettings(committed);
+          if (options?.broadcast !== false) broadcastSettingsSync(committed);
+        }
+        return true;
+      } catch {
+        if (!options?.silent) showToast('Failed to save settings', 'error');
+        return false;
       }
-      return true;
-    } catch {
-      if (!options?.silent) {
-        showToast('Failed to save settings', 'error');
-      }
-      return false;
-    }
+    };
+    const pending = settingsWriteTailRef.current.then(write, write);
+    settingsWriteTailRef.current = pending.then(() => undefined, () => undefined);
+    return pending;
   };
 
   useEffect(() => {
@@ -4752,6 +4846,11 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     const key = String(requestId || '').trim();
     if (!key) return;
     logQueueDebug('cancelTrackedQueueRequest:start', { requestId: key, reason, status });
+    const nextPaused = queuePausedAfterRemovingWork(
+      queuePausedRef.current,
+      queueStackItemsRef.current,
+      new Set([key]),
+    );
     if (pending) {
       clearTimeout(pending.timer);
       pendingQueueRequestsRef.current.delete(key);
@@ -4760,8 +4859,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     dropTrackedQueueRequestState([key], status);
     intentionallyCanceledQueueRequestIdsRef.current.delete(key);
     clearedQueueRequestIdsRef.current.delete(key);
-    setQueuePaused(false);
-    scheduleRecoverableQueueSnapshotPersist({ paused: false, clearWhenEmpty: true, delayMs: 50 });
+    setQueuePaused(nextPaused);
+    scheduleRecoverableQueueSnapshotPersist({ paused: nextPaused, clearWhenEmpty: true, delayMs: 50 });
     logQueueDebug('cancelTrackedQueueRequest:end', { requestId: key, reason, status });
   };
 
@@ -5023,9 +5122,10 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     if (!hasPendingBackendPrompt && activeBackendIds.size <= 0) {
       backendQueuePauseRequestedRef.current = false;
     }
-    const backendRequestOrder = powerPrompterRequests
+    const backendRequestOrder: string[] = powerPrompterRequests
       .map((request: any) => normalizeRequestId(request?.requestId))
       .filter(Boolean);
+    const backendRequestIds = new Set(backendRequestOrder);
     const staleBackendDrivenRequestIds = getStaleBackendDrivenRequestIds({
       backendRequestIds: backendRequestOrder,
       localStackItems: queueStackItemsRef.current,
@@ -5054,7 +5154,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         .map((requestId) => normalizeRequestId(requestId))
         .filter((requestId) => (
           !!requestId
-          && !backendRequestOrder.includes(requestId)
+          && !isLocalStagedQueueRequestId(requestId)
+          && !backendRequestIds.has(requestId)
           && !pendingQueueRequestsRef.current.has(requestId)
         ))
       : [];
@@ -5073,19 +5174,37 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       }
       pruneBridgeQueueStateRequestIds(prunedBackendRequestIds);
     }
-    const nextQueueStackItems = applyQueueStackRunningState(
+    const backendQueueStackItems = applyQueueStackRunningState(
       applyQueueRequestOrderToStackItems(backendStackItems, backendRequestOrder)
     );
-    const nextQueuePaused = snapshot?.paused === true
-      || (backendQueuePauseRequestedRef.current && hasPendingBackendPrompt)
-      || backendQueueIsWaitingBetweenPrompts;
-    updateQueueStackItemsSynced(nextQueueStackItems);
+    const localStagedRequestIds = new Set(
+      Array.from(queueRequestMetaRef.current.keys()).filter((requestId) =>
+        isLocalStagedQueueRequestId(requestId) && !backendRequestIds.has(requestId)
+      )
+    );
+    const stagedItemsAtReceipt = mergeBackendQueueSnapshotWithLocalStage(
+      [], queueStackItemsRef.current, backendRequestIds, localStagedRequestIds,
+    );
+    const hasLocalStagedWork = stagedItemsAtReceipt.length > 0;
+    const nextQueuePaused = queuePausedFromBackendSnapshot(
+      snapshot?.paused === true,
+      backendStackItems.length > 0,
+      backendQueuePauseRequestedRef.current && hasPendingBackendPrompt,
+      backendQueueIsWaitingBetweenPrompts,
+      hasLocalStagedWork,
+    );
+    updateQueueStackItemsSynced((previousItems) => mergeBackendQueueSnapshotWithLocalStage(
+      backendQueueStackItems, previousItems, backendRequestIds, localStagedRequestIds,
+    ));
     setQueuePaused(nextQueuePaused);
-    setQueueVisualState(nextVisual);
+    setQueueVisualState((previousVisual) => queueVisualForSnapshotWithLocalStage(
+      nextVisual, previousVisual, stagedItemsAtReceipt, queueRequestMetaRef.current, localStagedRequestIds,
+    ));
     logQueueDebug('ws:queue_snapshot:applied', {
       activeRequestIds: Array.from(activeBackendIds),
       terminalRequestIds: Array.from(terminalBackendIds),
       stackItems: backendStackItems.length,
+      localStagedItems: stagedItemsAtReceipt.length,
       umbraUiActivities: nextUmbraUiControllerActivities.length,
       requestOrder: backendRequestOrder,
       staleRequestIdsPruned: prunedBackendRequestIds,
@@ -5179,19 +5298,24 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     const queueTargetType = normalizeQueueTargetType(queueTargetTypeOverride || 'pipeline');
 
     const requestId = String(requestIdOverride || createRequestId());
+    const editorSnapshot = normalizeQueueEditorSnapshot(stateOverride?.editorSnapshot)
+      || queueRequestMetaRef.current.get(requestId)?.editorSnapshot;
+    const source = resolveQueueDispatchSource(editorSnapshot, cardDocumentRef.current, currentFileRef.current);
+    const sourceDocument = source.document;
+    const sourceFile = typeof stateOverride?.sourceFile === 'string' ? stateOverride.sourceFile : source.file;
     const fallbackSetId = clampQueueSetId(
       stateOverride?.activeQueueSet
       ?? (stateOverride as any)?.activeSetId
-      ?? cardDocumentRef.current.activeQueueSet
+      ?? sourceDocument.activeQueueSet
     );
     const normalizedGeneration = normalizePowerPrompterGenerationControls(
-      (stateOverride as any)?.generation ?? cardDocumentRef.current.generation
+      (stateOverride as any)?.generation ?? sourceDocument.generation
     );
     const pipeline = normalizeUmbraUiPipelineSelection(
-      (stateOverride as any)?.pipeline ?? cardDocumentRef.current.pipeline,
+      (stateOverride as any)?.pipeline ?? sourceDocument.pipeline,
       {
         feature: 'txt2img',
-        modelFamily: (stateOverride as any)?.modelFamily ?? cardDocumentRef.current.modelType,
+        modelFamily: (stateOverride as any)?.modelFamily ?? sourceDocument.modelType,
         modelSource: normalizedGeneration.modelType,
       },
     );
@@ -5231,13 +5355,14 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     );
     const normalizedStyleSeedMode = String(
       (stateOverride as any)?.styleSeedMode
-      ?? (cardDocumentRef.current as any).styleSeedMode
+      ?? (sourceDocument as any).styleSeedMode
       ?? 'same'
     ) === 'different' ? 'different' : 'same';
     const state = {
       ...buildPrompterSyncState(),
       ...(stateOverride || {}),
-      sourceFile: normalizePrompterSourceFilePath(stateOverride?.sourceFile || currentFileRef.current || ''),
+      file: source.file,
+      sourceFile: normalizePrompterSourceFilePath(sourceFile || ''),
       activePrompt: normalizePowerPrompterPromptText(String(stateOverride?.activePrompt || cleanedPrompts[0] || '')),
       prompts: cleanedPrompts,
       joinedPrompt: normalizePowerPrompterPromptText(String(stateOverride?.joinedPrompt || cleanedPrompts.join(', '))),
@@ -5255,9 +5380,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       promptEntries: Array.isArray(stateOverride?.promptEntries)
         ? stateOverride.promptEntries.slice(0, cleanedPrompts.length)
         : undefined,
-      editorSnapshot: normalizeQueueEditorSnapshot(stateOverride?.editorSnapshot)
-        || queueRequestMetaRef.current.get(requestId)?.editorSnapshot
-        || createQueueEditorSnapshot(cardDocumentRef.current, currentFileRef.current, {
+      editorSnapshot: editorSnapshot
+        || createQueueEditorSnapshot(sourceDocument, source.file, {
           traversalMode: queueTraversalMode, diversity: queueDiversity, promptLimit: queuePromptLimit,
           shuffleEnabled: queueShuffleEnabled, shuffleSeed: settings.queueShuffleSeed,
         }),
@@ -5325,8 +5449,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
 
   const buildQueueWebSocketStateFromMeta = (meta: QueueRequestMeta) => {
     const cleanedPrompts = meta.prompts.map((entry) => String(entry || '').trim()).filter(Boolean);
-    const groupGeneration = normalizePowerPrompterGenerationControls(meta.generationByPrompt[0] ?? cardDocumentRef.current.generation);
-    const sourceDocument = meta.editorSnapshot?.document || cardDocumentRef.current;
+    const source = resolveQueueDispatchSource(meta.editorSnapshot, cardDocumentRef.current, currentFileRef.current);
+    const sourceDocument = source.document;
+    const groupGeneration = normalizePowerPrompterGenerationControls(meta.generationByPrompt[0] ?? sourceDocument.generation);
     const pipeline = normalizeUmbraUiPipelineSelection(sourceDocument.pipeline, {
       feature: 'txt2img',
       modelFamily: sourceDocument.modelType,
@@ -5334,7 +5459,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     });
     return {
       activePrompt: normalizePowerPrompterPromptText(cleanedPrompts[0] || ''),
-      sourceFile: normalizePrompterSourceFilePath(meta.editorSnapshot?.sourceFile || currentFileRef.current || ''),
+      sourceFile: normalizePrompterSourceFilePath(source.file || ''),
       prompts: cleanedPrompts,
       joinedPrompt: normalizePowerPrompterPromptText(cleanedPrompts.join(', ')),
       activeQueueSet: clampQueueSetId(meta.promptSetIds[0] ?? meta.setId),
@@ -5349,7 +5474,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       promptSeedGroupIds: cleanedPrompts.map((_, index) => String(meta.promptSeedGroupIds[index] || `${meta.setId}:${index}`).trim()),
       promptEntries: meta.promptEntries?.slice(0, cleanedPrompts.length),
       editorSnapshot: meta.editorSnapshot,
-      styleSeedMode: String((cardDocumentRef.current as any).styleSeedMode || 'same') === 'different' ? 'different' : 'same',
+      styleSeedMode: String((sourceDocument as any).styleSeedMode || 'same') === 'different' ? 'different' : 'same',
       pipeline,
       modelFamily: pipeline.modelFamily,
       umbraUiFeature: 'txt2img' as const,
@@ -5500,7 +5625,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     }
 
     queueBridgeDispatchedRequestIdsRef.current.add(requestId);
-    const groupGeneration = normalizePowerPrompterGenerationControls(meta.generationByPrompt[0] ?? cardDocumentRef.current.generation);
+    const source = resolveQueueDispatchSource(meta.editorSnapshot, cardDocumentRef.current, currentFileRef.current);
+    const groupGeneration = normalizePowerPrompterGenerationControls(meta.generationByPrompt[0] ?? source.document.generation);
     logPowerPrompterDebug('queue:dispatchGroup:start', {
       requestId,
       reason: reason || '',
@@ -5515,7 +5641,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       await createQueueHistoryEntryForRequest(requestId);
       const result = await requestQueueThroughWebSocket(meta.mode, meta.prompts, {
         activePrompt: normalizePowerPrompterPromptText(meta.prompts[0] || ''),
-        sourceFile: normalizePrompterSourceFilePath(meta.editorSnapshot?.sourceFile || currentFileRef.current || ''),
+        sourceFile: normalizePrompterSourceFilePath(source.file || ''),
         prompts: meta.prompts,
         joinedPrompt: normalizePowerPrompterPromptText(meta.prompts.join(', ')),
         generation: groupGeneration,
@@ -5527,6 +5653,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         // Wildcard Hold is resolved by the backend from the segmented token
         // metadata. Keep it attached for staged queue groups as well.
         promptEntries: meta.promptEntries,
+        editorSnapshot: meta.editorSnapshot,
       }, requestId, meta.targetBridgeId, meta.queueTargetType);
       logPowerPrompterDebug('queue:dispatchGroup:accepted', {
         requestId,
@@ -5874,14 +6001,14 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     }
   };
 
-  const saveSettings = async (newSettings: PowerPrompterSettings) => {
+  const saveSettings = async (newSettings: PowerPrompterSettings, baseSettings: PowerPrompterSettings) => {
     const merged: PowerPrompterSettings = {
       ...DEFAULT_POWER_PROMPTER_SETTINGS,
       ...newSettings,
       enabledCSVs: enabledCSVs,
       editorMode: 'cards',
     };
-    await persistSettings(merged);
+    await persistSettings(merged, { changes: diffPowerPrompterSettings(baseSettings, newSettings) });
   };
 
   const savePromptFile = async (
@@ -6013,7 +6140,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           || normalized.generationCompleteSoundEnabled !== rawSettings?.generationCompleteSoundEnabled
           || normalized.generationCompleteSoundStyle !== rawSettings?.generationCompleteSoundStyle
         ) {
-          void persistSettings(normalized, { silent: true, broadcast: false });
+          const changes = Object.fromEntries(
+            ['editorMode', 'queueTraversalMode', 'queueDiversity', 'queuePromptLimit',
+              'generationCompleteSoundEnabled', 'generationCompleteSoundStyle']
+              .filter((key) => JSON.stringify(normalized[key as keyof PowerPrompterSettings]) !== JSON.stringify(rawSettings?.[key]))
+              .map((key) => [key, normalized[key as keyof PowerPrompterSettings]]),
+          );
+          void persistSettings(normalized, { silent: true, broadcast: false, changes });
         }
       } catch (error) {
         console.error('Failed to load power prompter settings', error);
@@ -6648,12 +6781,17 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
                 : pendingCancelScope
             )
             : canceledRequestIds;
+          const nextPaused = queuePausedAfterRemovingWork(
+            queuePausedRef.current,
+            queueStackItemsRef.current,
+            new Set(effectiveCanceledRequestIds),
+          );
           pendingQueueCancelScopeRef.current = [];
           if (effectiveCanceledRequestIds.length > 0) {
             rejectPendingQueueRequestsByIds(effectiveCanceledRequestIds, 'Queue canceled by user.');
             dropTrackedQueueRequestState(effectiveCanceledRequestIds, 'canceled');
           }
-          setQueuePaused(false);
+          setQueuePaused(nextPaused);
           logQueueDebug('ws:queue_cancel_result:applied', { canceledRequestIds, pendingCancelScope, effectiveCanceledRequestIds });
           return;
         }
@@ -10528,15 +10666,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       const removalIndexByRequestId = new Map(
         promptRemovals.map((entry) => [entry.requestId, new Set(entry.promptIndices)] as const)
       );
-      const hasRemainingLocalStagedQueueWork = queueStackItemsRef.current.some((item) => {
-        if (item.exiting || (item.status !== 'pending' && item.status !== 'running')) return false;
-        const itemRequestId = String(item.requestId || '').trim();
-        if (!isLocalStagedQueueRequestId(itemRequestId)) return false;
-        const removalSet = removalIndexByRequestId.get(itemRequestId);
-        if (!removalSet) return true;
-        const promptIndex = Math.max(0, Math.floor(Number(item.promptIndex) || 0));
-        return !removalSet.has(promptIndex);
-      });
+      const nextPaused = queuePausedAfterRemovingWork(
+        queuePausedRef.current,
+        queueStackItemsRef.current,
+        new Set(),
+        removalIndexByRequestId,
+      );
       const localPromptRemovals = promptRemovals.filter((entry) => isLocalStagedQueueRequestId(entry.requestId));
       const livePromptRemovals = promptRemovals.filter((entry) => !isLocalStagedQueueRequestId(entry.requestId));
       const firstMeta = queueRequestMetaRef.current.get(livePromptRemovals[0]?.requestId || promptRemovals[0]?.requestId || '');
@@ -10564,7 +10699,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       if (livePromptRemovals.length > 0) {
         void persistQueuePromptRemovalMutation(livePromptRemovals);
       }
-      setQueuePaused(hasRemainingLocalStagedQueueWork);
+      setQueuePaused(nextPaused);
       const removedPromptCount = promptRemovals.reduce((total, entry) => total + entry.promptIndices.length, 0);
       logQueueDebug('action:cancelQueueSetGroup:end', {
         setId,
@@ -10573,7 +10708,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         removedPromptCount,
         localRemovalCount: localPromptRemovals.length,
         liveRemovalCount: livePromptRemovals.length,
-        hasRemainingLocalStagedQueueWork,
+        nextPaused,
         removalRequestId,
       });
       showToast(
@@ -10608,12 +10743,17 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
             .map((entry) => Math.max(0, Math.floor(Number(entry.promptIndex) || 0)))
           : [];
         if (pendingPromptIndices.length <= 0) {
+          const nextPaused = queuePausedAfterRemovingWork(
+            queuePausedRef.current,
+            queueStackItemsRef.current,
+            new Set(),
+          );
           clearedQueueRequestIdsRef.current.add(requestId);
           pruneTrackedQueueRequestToActivePrompt(requestId);
           if (isLocalStagedRequest) {
             clearMatchingLocalPausedSnapshotRequestIds([requestId]);
           }
-          setQueuePaused(false);
+          setQueuePaused(nextPaused);
           logQueueDebug('action:cancelQueueRequestGroup:activeNoPending', { requestId });
           showToast('Cleared group from the manager. Current render will finish.', 'success');
           return;
@@ -10630,6 +10770,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           pendingQueuePromptRemovalKeysRef.current.clear();
           throw new Error('Power Prompter queue tracker is not connected. Unable to clear queued group prompts safely.');
         }
+        const nextPaused = queuePausedAfterRemovingWork(
+          queuePausedRef.current,
+          queueStackItemsRef.current,
+          new Set(),
+          new Map([[requestId, new Set(pendingPromptIndices)]]),
+        );
         pruneTrackedQueueRequestToActivePrompt(requestId);
         if (isLocalStagedRequest) {
           removeLocalPausedSnapshotPromptIndices(requestId, pendingPromptIndices);
@@ -10637,7 +10783,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           void persistQueuePromptRemovalMutation([{ requestId, promptIndices: pendingPromptIndices }]);
         }
         clearedQueueRequestIdsRef.current.add(requestId);
-        setQueuePaused(false);
+        setQueuePaused(nextPaused);
         logQueueDebug('action:cancelQueueRequestGroup:activePruned', { requestId, pendingPromptIndices, removalRequestId });
         showToast(
           removalRequestId
@@ -10660,16 +10806,15 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         pendingQueueCancelScopeRef.current = [];
         throw new Error('Power Prompter queue tracker is not connected. Unable to cancel queued group safely.');
       }
-      const hasRemainingLocalStagedQueueWork = queueStackItemsRef.current.some((item) =>
-        !item.exiting
-        && (item.status === 'pending' || item.status === 'running')
-        && String(item.requestId || '').trim() !== requestId
-        && isLocalStagedQueueRequestId(item.requestId)
+      const nextPaused = queuePausedAfterRemovingWork(
+        queuePausedRef.current,
+        queueStackItemsRef.current,
+        new Set([requestId]),
       );
       rejectPendingQueueRequestById(requestId, 'Queue canceled by user.');
       dropTrackedQueueRequestState([requestId]);
-      setQueuePaused(isLocalStagedRequest && hasRemainingLocalStagedQueueWork);
-      logQueueDebug('action:cancelQueueRequestGroup:inactiveDropped', { requestId, sent, isLocalStagedRequest, hasRemainingLocalStagedQueueWork });
+      setQueuePaused(nextPaused);
+      logQueueDebug('action:cancelQueueRequestGroup:inactiveDropped', { requestId, sent, isLocalStagedRequest, nextPaused });
       showToast(
         sent
           ? `Canceled Set ${clampQueueSetId(meta?.setId ?? 1)} group`
@@ -11022,6 +11167,20 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       logQueueDebug('queue:submit:blockedInFlight', { mode, requestedSetId: options?.setId ?? cardDocumentRef.current.activeQueueSet });
       return;
     }
+    const queueSource = {
+      file: currentFileRef.current,
+      documentSignature: getCardDocSignature(cardDocumentRef.current),
+      fileLoadSequence: fileLoadRequestSeqRef.current,
+    };
+    const assertQueueSourceUnchanged = () => {
+      if (hasQueueBuildSourceChanged(queueSource, {
+        file: currentFileRef.current,
+        documentSignature: getCardDocSignature(cardDocumentRef.current),
+        fileLoadSequence: fileLoadRequestSeqRef.current,
+      })) {
+        throw new Error('The card changed while preparing this queue. Queue it again from the current card.');
+      }
+    };
     queueSubmissionInFlightRef.current = true;
     const activeVisualRequestId = String(queueVisualStateRef.current?.requestId || '').trim();
     const hasTrackedDispatchQueue = queueStackItemsRef.current.some((item) =>
@@ -11053,6 +11212,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     });
     try {
       const response = await fetch(`/api/umbra-ui/pipelines/resolve?${params.toString()}`, { cache: 'no-store' });
+      assertQueueSourceUnchanged();
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.success === false) {
         throw new Error(String(payload?.error || 'No compatible Umbra UI pipeline is installed.'));
@@ -11088,6 +11248,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
 
     try {
       await waitForNextUiPaint();
+      assertQueueSourceUnchanged();
       let {
         prompts,
         promptEntries,
@@ -11107,6 +11268,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         shuffleEnabled,
         shuffleSeed,
       });
+      assertQueueSourceUnchanged();
       logPowerPrompterDebug('queue:stage:promptsBuilt', {
         mode,
         targetSetId,
@@ -11172,6 +11334,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         );
         prompts = enhancedQueue.prompts;
         promptEntries = enhancedQueue.promptEntries;
+        assertQueueSourceUnchanged();
         logPowerPrompterDebug('queue:stage:agentEnhanced', {
           mode,
           targetSetId,
