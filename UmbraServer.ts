@@ -25681,10 +25681,10 @@ async function handleFsSearch(url: URL, signal?: AbortSignal): Promise<Response>
       signal?.throwIfAborted();
       const resolved = resolvePath(root);
       if (!resolved) continue;
-      const { fullPath } = resolved;
+      const fullPath = await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
+      if (!fullPath) continue;
       const key = normalizeOutputPathInput(fullPath).toLowerCase();
       if (!key || seenRoots.has(key)) continue;
-      if (!isPathInsideAllowedRoots(fullPath)) continue;
       const rootStat = await fs.stat(fullPath).catch((error: NodeJS.ErrnoException) => {
         if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
         throw error;
@@ -25808,10 +25808,11 @@ async function handleFsSearchSuggestions(url: URL): Promise<Response> {
     for (const root of rootInputs) {
       const resolved = resolvePath(root);
       if (!resolved) continue;
-      const key = normalizeOutputPathInput(resolved.fullPath).toLowerCase();
+      const fullPath = await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
+      if (!fullPath) continue;
+      const key = normalizeOutputPathInput(fullPath).toLowerCase();
       if (!key || seenRoots.has(key)) continue;
-      if (!isPathInsideAllowedRoots(resolved.fullPath)) continue;
-      if (!existsSync(resolved.fullPath) || !statSync(resolved.fullPath).isDirectory()) continue;
+      if (!existsSync(fullPath) || !statSync(fullPath).isDirectory()) continue;
       seenRoots.add(key);
       resolvedRoots.push(normalizeOutputPathInput(root));
     }
@@ -25838,9 +25839,9 @@ async function handleFsTagsSummary(url: URL): Promise<Response> {
     for (const folder of folders) {
       const resolved = resolvePath(folder);
       if (!resolved) continue;
+      if (!(await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots()))) continue;
       const key = normalizeOutputPathInput(folder).toLowerCase();
       if (!key || seenFolders.has(key)) continue;
-      if (!isPathInsideAllowedRoots(resolved.fullPath)) continue;
       seenFolders.add(key);
       validFolders.push(normalizeOutputPathInput(folder));
       if (validFolders.length >= 240) break;
