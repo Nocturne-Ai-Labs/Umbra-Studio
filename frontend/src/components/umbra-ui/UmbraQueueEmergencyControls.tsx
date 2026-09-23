@@ -7,6 +7,7 @@ import type { UmbraQueueSummary } from '@/components/umbra-ui/useUmbraPowerPromp
 
 interface UmbraQueueEmergencyControlsProps {
   queueSummary: UmbraQueueSummary;
+  queueConnected: boolean;
   busyAction: 'skip' | 'stop' | '';
   onSkip: () => void;
   onStopAll: () => void;
@@ -15,13 +16,15 @@ interface UmbraQueueEmergencyControlsProps {
 
 export function UmbraQueueEmergencyControls({
   queueSummary,
+  queueConnected,
   busyAction,
   onSkip,
   onStopAll,
   mobileOnly = false,
 }: UmbraQueueEmergencyControlsProps) {
   const skipDisabled = busyAction !== '' || !queueSummary.umbraUiActive;
-  const stopDisabled = busyAction !== '' || queueSummary.umbraUiRemaining <= 0;
+  // Other clients can own inpaint or upscale jobs absent from this queue snapshot.
+  const stopDisabled = busyAction !== '' || !queueConnected;
 
   return (
     <div
@@ -50,9 +53,9 @@ export function UmbraQueueEmergencyControls({
         onClick={onStopAll}
         disabled={stopDisabled}
         className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-red-300/25 bg-red-500/[0.07] px-2.5 text-[9px] font-black uppercase tracking-[0.1em] text-red-100 transition-colors hover:bg-red-500/[0.13] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.025] disabled:text-zinc-700"
-        title={queueSummary.umbraUiRemaining > 0
-          ? `Stop ${queueSummary.umbraUiRemaining} running or queued Umbra UI item${queueSummary.umbraUiRemaining === 1 ? '' : 's'}`
-          : 'No Umbra UI generations are running or queued'}
+        title={queueConnected
+          ? 'Stop running or queued Umbra UI generations across connected clients'
+          : 'Connect to the shared queue to stop Umbra UI generations'}
       >
         {busyAction === 'stop' ? <Loader2 size={12} className="animate-spin" /> : <OctagonX size={12} />}
         Stop All

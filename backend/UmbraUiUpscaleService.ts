@@ -1,5 +1,6 @@
 import { mkdir, rm } from 'fs/promises';
 import { recordGeneratedMediaOutputs } from './GeneratedMediaActivity';
+import { cancelComfyJobById } from './UmbraQueueJobControl';
 import { dirname, extname, join, resolve, sep } from 'path';
 
 const IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);
@@ -190,6 +191,9 @@ function cloneJob(job: UmbraUiUpscaleJob): UmbraUiUpscaleJob {
 
 export class UmbraUiUpscaleService {
   private readonly jobs = new Map<string, UmbraUiUpscaleJob>();
+  private readonly stopActiveJobIds = new Set<string>();
+  private readonly acknowledgedStopPromptIds = new Set<string>();
+  private readonly stoppingPrompts = new Map<string, Promise<boolean>>();
   private readonly getComfyBaseUrl: () => string;
   private readonly getComfyInputRoot?: () => string;
   private readonly getDefaultOutputRoot?: () => string;
@@ -217,6 +221,14 @@ export class UmbraUiUpscaleService {
       .map(cloneJob);
   }
 
+  listActiveJobIds(): string[] {
+    this.prune();
+    return Array.from(this.jobs.values())
+      .filter((job) => ['staging', 'queued', 'running'].includes(job.status)
+        && job.items.some((item) => ['staging', 'queued', 'running'].includes(item.status)))
+      .map((job) => job.id);
+  }
+
   cancel(jobId: string): UmbraUiUpscaleJob | null {
     const job = this.jobs.get(jobId);
     if (!job) return null;
@@ -225,6 +237,43 @@ export class UmbraUiUpscaleService {
       job.updatedAt = Date.now();
     }
     return cloneJob(job);
+  }
+
+  async stop(jobId: string): Promise<UmbraUiUpscaleJob | null> {
+    const job = this.jobs.get(String(jobId || '').trim());
+    if (!job) return null;
+    if (['completed', 'partial', 'failed', 'canceled'].includes(job.status)) return cloneJob(job);
+    job.cancelRequested = true;
+    job.updatedAt = Date.now();
+    this.stopActiveJobIds.add(job.id);
+    const active = job.items.find((item) => (item.status === 'queued' || item.status === 'running') && item.promptId);
+    if (active) {
+      try {
+        if (!await this.stopComfyPrompt(active.promptId)) {
+          throw new Error(`ComfyUI did not cancel the active upscale prompt ${active.promptId}.`);
+        }
+      } catch (error: any) {
+        job.warning = String(error?.message || error);
+        throw error;
+      }
+    }
+    // A submitting prompt has no ID yet. processSerialJob targets it as soon as ComfyUI replies.
+    return cloneJob(job);
+  }
+
+  private stopComfyPrompt(promptId: string): Promise<boolean> {
+    if (this.acknowledgedStopPromptIds.has(promptId)) return Promise.resolve(true);
+    const pending = this.stoppingPrompts.get(promptId);
+    if (pending) return pending;
+    const stop = cancelComfyJobById(this.getComfyBaseUrl(), promptId).then((acknowledged) => {
+      if (acknowledged) this.acknowledgedStopPromptIds.add(promptId);
+      return acknowledged;
+    });
+    this.stoppingPrompts.set(promptId, stop);
+    void stop.finally(() => {
+      if (this.stoppingPrompts.get(promptId) === stop) this.stoppingPrompts.delete(promptId);
+    }).catch(() => undefined);
+    return stop;
   }
 
   async submit(
@@ -297,6 +346,7 @@ export class UmbraUiUpscaleService {
         job.status = job.completed > 0 ? 'partial' : 'failed';
         job.updatedAt = Date.now();
       } finally {
+        this.stopActiveJobIds.delete(job.id);
         if (releaseExecution) {
           const finalStatus = job.status;
           job.status = 'running';
@@ -481,6 +531,15 @@ export class UmbraUiUpscaleService {
         item.promptId = promptId;
         item.status = 'running';
         job.updatedAt = Date.now();
+        if (this.stopActiveJobIds.has(job.id)) {
+          try {
+            if (!await this.stopComfyPrompt(promptId)) {
+              job.warning = `ComfyUI did not cancel the active upscale prompt ${promptId}.`;
+            }
+          } catch (error: any) {
+            job.warning = `Could not cancel the active upscale prompt ${promptId}: ${String(error?.message || error)}`;
+          }
+        }
         const record = await this.waitForHistory(item.promptId, job);
         promptOutstanding = false;
         const executionError = readExecutionError(record);
@@ -492,13 +551,17 @@ export class UmbraUiUpscaleService {
         item.status = 'completed';
       } catch (error: any) {
         if (error?.code === 'UPSCALE_PROMPT_MISSING') promptOutstanding = false;
-        item.status = job.cancelRequested && ['UPSCALE_PROMPT_MISSING', 'UPSCALE_CANCELED'].includes(error?.code) ? 'canceled' : 'failed';
+        item.status = job.cancelRequested && (
+          ['UPSCALE_PROMPT_MISSING', 'UPSCALE_CANCELED'].includes(error?.code)
+          || this.acknowledgedStopPromptIds.has(item.promptId)
+        ) ? 'canceled' : 'failed';
         item.error = String(error?.message || error || 'Upscale failed.');
         if (promptOutstanding) {
           uncertainSubmission = true;
           item.error += ' Submission or completion could not be confirmed. Uploaded inputs were retained; check the ComfyUI queue before retrying.';
         }
       } finally {
+        if (item.promptId) this.acknowledgedStopPromptIds.delete(item.promptId);
         if (!promptOutstanding) await this.cleanupStagedInputs(job.id);
         if (source.cleanup) await source.cleanup().catch(() => undefined);
       }

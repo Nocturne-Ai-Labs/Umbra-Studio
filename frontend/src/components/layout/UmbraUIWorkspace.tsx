@@ -2810,7 +2810,7 @@ export function UmbraUIWorkspace() {
     setQueueControlBusy('stop');
     try {
       await stopAllUmbraJobs();
-      showToast('Stopped all Umbra UI generations.', 'success');
+      showToast('Stop requested for Umbra UI generations.', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to stop Umbra UI generations.', 'error');
     } finally {
@@ -3064,6 +3064,7 @@ export function UmbraUIWorkspace() {
           <UmbraQueueManagerButton remaining={queueSummary.remaining} active={activeMode === 'queue'} onClick={openQueueManager} />
           <UmbraQueueEmergencyControls
             queueSummary={queueSummary}
+            queueConnected={queueConnected}
             busyAction={queueControlBusy}
             onSkip={() => void handleSkipUmbraJob()}
             onStopAll={() => void handleStopAllUmbraJobs()}
@@ -3672,6 +3673,7 @@ export function UmbraUIWorkspace() {
           <div className="flex min-h-11 flex-wrap items-center gap-2 border-t border-white/10 bg-black/20 px-3 py-2">
             <UmbraQueueEmergencyControls
               queueSummary={queueSummary}
+              queueConnected={queueConnected}
               busyAction={queueControlBusy}
               onSkip={() => void handleSkipUmbraJob()}
               onStopAll={() => void handleStopAllUmbraJobs()}
@@ -3810,6 +3812,7 @@ export function UmbraUIWorkspace() {
               <div data-umbra-ui-video-review-drawer="" className="contents">
                 <UmbraQueueEmergencyControls
                   queueSummary={queueSummary}
+                  queueConnected={queueConnected}
                   busyAction={queueControlBusy}
                   onSkip={() => void handleSkipUmbraJob()}
                   onStopAll={() => void handleStopAllUmbraJobs()}

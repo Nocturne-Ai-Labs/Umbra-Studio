@@ -75,6 +75,9 @@ export function UmbraQueueActivityCard({ activity }: { activity: UmbraQueueActiv
   const [dismissed, setDismissed] = React.useState(() => isUmbraQueueActivityDismissed(activity.id));
   const busyRef = React.useRef(false);
   const terminal = isUmbraQueueActivityTerminal(activity.status);
+  React.useEffect(() => {
+    if (!terminal && activity.cancelError && !activity.cancelRequested) setStopRequested(false);
+  }, [activity.cancelError, activity.cancelRequested, terminal]);
   const controls = getUmbraQueueActivityControls(activity);
   const act = async (action: 'skip' | 'remove') => {
     if (busyRef.current) return;
@@ -138,6 +141,7 @@ export function UmbraQueueActivityCard({ activity }: { activity: UmbraQueueActiv
               {activity.detail}
             </div>
           ) : null}
+          {activity.cancelError ? <div role="alert" className="mt-1 text-[10px] text-red-200">{activity.cancelError}</div> : null}
           <div className="mt-2 flex items-center gap-2">
             <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-black/35">
               <div className="h-full rounded-full bg-current/70 transition-[width] duration-300" style={{ width: `${progress}%` }} />

@@ -1354,6 +1354,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     type: 'queue_interrupt_active' | 'queue_cancel',
     requestIds: string[],
     activeRequestId = '',
+    scope?: 'umbra_ui_all',
   ) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN || !connected) {
@@ -1362,7 +1363,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     const normalizedRequestIds = Array.from(new Set(
       requestIds.map((requestId) => String(requestId || '').trim()).filter(Boolean),
     ));
-    if (normalizedRequestIds.length <= 0) {
+    if (normalizedRequestIds.length <= 0 && scope !== 'umbra_ui_all') {
       return Promise.reject(new Error(type === 'queue_interrupt_active'
         ? 'No Umbra UI generation is active.'
         : 'No Umbra UI generations are queued.'));
@@ -1381,7 +1382,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         reject(new Error(type === 'queue_interrupt_active'
           ? 'Umbra UI skip request timed out.'
           : 'Umbra UI stop request timed out.'));
-      }, QUEUE_ACK_TIMEOUT_MS);
+      }, scope === 'umbra_ui_all' ? QUEUE_ACK_TIMEOUT_MS * 2 : QUEUE_ACK_TIMEOUT_MS);
       pendingQueueAcksRef.current.set(requestId, { resolve, reject, timer });
       try {
         ws.send(JSON.stringify({
@@ -1389,6 +1390,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           requestId,
           queueTargetType: 'pipeline',
           requestIds: normalizedRequestIds,
+          ...(scope ? { scope } : {}),
           ...(activeRequestId ? { activeRequestId } : {}),
           ...(promptId ? { promptId } : {}),
         }));
@@ -1406,17 +1408,8 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   }, [queueSummary.umbraUiActiveRequestId, sendQueueControl]);
 
   const stopAllUmbraJobs = React.useCallback(async () => {
-    const requestIds = queueSummary.umbraUiRequestIds;
-    const activeRequestId = queueSummary.umbraUiActiveRequestId;
-    await sendQueueControl('queue_cancel', requestIds, activeRequestId);
-    if (activeRequestId) {
-      try {
-        await sendQueueControl('queue_interrupt_active', [activeRequestId], activeRequestId);
-      } catch (error) {
-        throw new Error(`Pending Umbra UI generations were stopped, but the active generation could not be interrupted: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-  }, [queueSummary.umbraUiActiveRequestId, queueSummary.umbraUiRequestIds, sendQueueControl]);
+    await sendQueueControl('queue_cancel', queueSummary.umbraUiRequestIds, '', 'umbra_ui_all');
+  }, [queueSummary.umbraUiRequestIds, sendQueueControl]);
 
   const cancelOwnedImage = React.useCallback(async (requestId: string) => {
     if (!ownedRequestIdsRef.current.has(requestId)) throw new Error('This generation belongs to another workspace.');

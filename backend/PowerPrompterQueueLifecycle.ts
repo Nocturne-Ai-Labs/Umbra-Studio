@@ -15,6 +15,39 @@ export function hasLivePowerPrompterQueuePrompts(prompts: readonly { status: str
   return prompts?.some((prompt) => prompt.status === 'pending' || prompt.status === 'submitting' || prompt.status === 'running') === true;
 }
 
+export function getLiveUmbraUiQueueRequestIds(
+  requests: readonly { requestId: string; origin: string; prompts: readonly { status: string }[] }[],
+): string[] {
+  return requests
+    .filter((request) => request.origin === 'umbra_ui' && hasLivePowerPrompterQueuePrompts(request.prompts))
+    .map((request) => request.requestId);
+}
+
+export function getQueueClearFutureKeepIds(
+  activeTaskIds: Iterable<string>,
+  requests: readonly { requestId: string; prompts: readonly { status: string }[] }[],
+): string[] {
+  const activeTasks = new Set(activeTaskIds);
+  const keep = new Set<string>();
+  for (const request of requests) {
+    if (!activeTasks.has(request.requestId)) continue;
+    if (request.prompts.some((prompt) => prompt.status === 'running')) {
+      keep.add(request.requestId);
+    }
+  }
+  return Array.from(keep);
+}
+
+export function shouldFinishStoppedPowerPrompterQueue(
+  stopAfterCurrent: boolean,
+  counts: { completed: number; failed: number; interrupted: number; removed: number; total: number },
+): boolean {
+  return stopAfterCurrent && (
+    counts.interrupted > 0
+    || counts.completed + counts.failed + counts.removed < counts.total
+  );
+}
+
 export function summarizePowerPrompterQueuePrompts(
   prompts: readonly { status: string; promptIndex: number; updatedAt?: number }[],
 ) {

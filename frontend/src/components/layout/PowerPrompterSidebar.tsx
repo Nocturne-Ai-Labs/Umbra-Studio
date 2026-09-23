@@ -203,20 +203,26 @@ export const PowerPrompterSidebar = React.memo(({
 
   const normalizeRandomSetIds = (rawSetIds: unknown): number[] => normalizeQueueSetIds(rawSetIds, false);
 
-  const loadCardDocument = async (path: string): Promise<PowerPrompterCardDocument> => {
+  const loadCardDocument = async (path: string): Promise<{ document: PowerPrompterCardDocument; sessionRevision: number | null; storageRevision: string | null }> => {
     const res = await fetch(`/api/powerprompter/cards?file=${encodeURIComponent(path)}`);
     if (!res.ok) throw new Error(`Failed to load card document (${res.status})`);
     const payload = await res.json();
-    return normalizePowerPrompterCardDocument(payload?.document, path);
+    return {
+      document: normalizePowerPrompterCardDocument(payload?.document, path),
+      sessionRevision: Number.isSafeInteger(payload?.sessionRevision) ? payload.sessionRevision : null,
+      storageRevision: typeof payload?.storageRevision === 'string' ? payload.storageRevision : null,
+    };
   };
 
-  const saveCardDocument = async (path: string, document: PowerPrompterCardDocument) => {
+  const saveCardDocument = async (path: string, document: PowerPrompterCardDocument, expectedRevision: number | null, expectedStorageRevision: string | null) => {
     const res = await fetch('/api/powerprompter/cards', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file: path, document, intent: 'sidebar-card-operation' }),
+      body: JSON.stringify({ file: path, document, expectedRevision, expectedStorageRevision, intent: 'sidebar-card-operation' }),
     });
-    if (!res.ok) throw new Error(`Failed to save card document (${res.status})`);
+    if (!res.ok) throw new Error(res.status === 409
+      ? 'The card changed while this operation was pending. Reload it and try again.'
+      : `Failed to save card document (${res.status})`);
   };
 
   const extractModelMeta = (document: PowerPrompterCardDocument): FileModelMeta => ({
@@ -249,8 +255,8 @@ export const PowerPrompterSidebar = React.memo(({
 
     const task = (async () => {
       try {
-        const doc = await loadCardDocument(path);
-        return extractModelMeta(doc);
+        const { document } = await loadCardDocument(path);
+        return extractModelMeta(document);
       } catch {
         return null;
       }
@@ -626,14 +632,14 @@ export const PowerPrompterSidebar = React.memo(({
     try {
       const targetPath = fileTagEditor.path;
       if (!targetPath) return;
-      const existingDoc = await loadCardDocument(targetPath);
+      const { document: existingDoc, sessionRevision, storageRevision } = await loadCardDocument(targetPath);
       const updatedDoc: PowerPrompterCardDocument = {
         ...existingDoc,
         modelType: nextModelType,
         modelColor: nextModelColor,
         updatedAt: new Date().toISOString(),
       };
-      await saveCardDocument(targetPath, updatedDoc);
+      await saveCardDocument(targetPath, updatedDoc, sessionRevision, storageRevision);
       setFileMetaByPath((prev) => ({
         ...prev,
         [targetPath]: { modelType: nextModelType, modelColor: nextModelColor },
@@ -644,8 +650,10 @@ export const PowerPrompterSidebar = React.memo(({
       await refreshOpenFileIfNeeded(targetPath);
       setFileTagEditor(null);
       showToast('File tag updated', 'success');
-    } catch {
-      showToast('Failed to update file tag', 'error');
+    } catch (error) {
+      showToast(error instanceof Error && error.message.includes('card changed')
+        ? error.message
+        : 'Failed to update file tag', 'error');
     }
   };
 
@@ -689,31 +697,37 @@ export const PowerPrompterSidebar = React.memo(({
     }
 
     try {
-      const targetDoc = await loadCardDocument(targetPath);
+      const { document: targetDoc, sessionRevision: targetRevision, storageRevision: targetStorageRevision } = await loadCardDocument(targetPath);
       const pastedDoc = pasteCardIntoDocument(targetDoc, targetPath, clipboardPayload);
-      await saveCardDocument(targetPath, pastedDoc);
+      await saveCardDocument(targetPath, pastedDoc, targetRevision, targetStorageRevision);
 
+      let moveCompleted = clipboardPayload.mode !== 'cut';
       if (clipboardPayload.mode === 'cut' && clipboardPayload.sourceFile) {
         const sourcePath = clipboardPayload.sourceFile;
         try {
-          const sourceDoc = await loadCardDocument(sourcePath);
+          const { document: sourceDoc, sessionRevision: sourceRevision, storageRevision: sourceStorageRevision } = await loadCardDocument(sourcePath);
           const cleanedSourceDoc = removeSlotFromDocument(sourceDoc, sourcePath, clipboardPayload.slot.slotId);
-          await saveCardDocument(sourcePath, cleanedSourceDoc);
-        } catch {
-          // Keep paste successful even if source cleanup fails.
+          await saveCardDocument(sourcePath, cleanedSourceDoc, sourceRevision, sourceStorageRevision);
+          moveCompleted = true;
+        } catch (error) {
+          console.error('Card was pasted, but its source could not be updated', error);
         }
         clearPowerPrompterCardClipboard();
       }
 
       await loadFiles(ROOT_PATH);
       await refreshOpenFileIfNeeded(targetPath);
-      if (clipboardPayload.mode === 'cut' && clipboardPayload.sourceFile) {
+      if (moveCompleted && clipboardPayload.mode === 'cut' && clipboardPayload.sourceFile) {
         await refreshOpenFileIfNeeded(clipboardPayload.sourceFile);
       }
-      showToast(clipboardPayload.mode === 'cut' ? 'Card moved' : 'Card pasted', 'success');
+      showToast(clipboardPayload.mode === 'cut'
+        ? (moveCompleted ? 'Card moved' : 'Card copied; the source could not be updated.')
+        : 'Card pasted', moveCompleted ? 'success' : 'error');
     } catch (error) {
       console.error('Failed to paste card into file', error);
-      showToast('Failed to paste card', 'error');
+      showToast(error instanceof Error && error.message.includes('card changed')
+        ? error.message
+        : 'Failed to paste card', 'error');
     }
   };
 
