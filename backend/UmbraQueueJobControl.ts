@@ -24,7 +24,9 @@ export async function controlUmbraControllerJob(options: {
   remove: () => boolean;
 }): Promise<void> {
   if (!options.request || options.request.origin !== 'umbra_ui') throw new Error('Umbra UI job was not found.');
-  if (['completed', 'partial', 'failed', 'canceled', 'interrupted'].includes(options.request.status)) return;
+  if (['completed', 'partial', 'failed', 'canceled', 'interrupted'].includes(options.request.status)) {
+    throw new Error('The job changed or finished. Refresh the queue and try again.');
+  }
   const changed = options.action === 'skip' ? await options.skip() : options.remove();
   if (!changed) throw new Error('The job changed or finished. Refresh the queue and try again.');
 }
