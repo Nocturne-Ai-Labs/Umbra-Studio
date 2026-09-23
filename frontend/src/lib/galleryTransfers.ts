@@ -261,7 +261,10 @@ export async function retryGalleryTransferIndex() {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: current.jobId }),
       signal: AbortSignal.timeout(15000),
     });
-    if (!response.ok) throw new Error('Unable to retry Gallery indexing');
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || payload?.success !== true || payload.jobId !== current.jobId) {
+      throw new Error(String(payload?.error || 'Unable to retry Gallery indexing'));
+    }
     if (state?.jobId === current.jobId && state.active) void monitorTransfer(current.jobId!);
   } catch (error) {
     if (state?.jobId !== current.jobId || !state.active) return;
