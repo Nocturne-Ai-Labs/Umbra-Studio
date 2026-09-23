@@ -71,7 +71,7 @@ import { extractGenerationParams, extractPrompts, getWorkflowJsonExport, type Im
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import type { ContextMenuItem } from '@/hooks/useContextMenu';
 import { BaseModal } from '@/components/modals/BaseModal';
-import { deletePathsWithSettings, permanentlyDeleteTrashPaths, validateTrashRestoreResult } from '@/utils/trashActions';
+import { deletePathsWithSettings, permanentlyDeleteTrashPaths, validateEmptyTrashResult, validateTrashRestoreResult } from '@/utils/trashActions';
 import { POWER_PROMPTER_MAX_QUEUE_SETS } from '@/lib/powerPrompter';
 import { readUserConfig, writeUserConfig } from '@/lib/userConfig';
 import { subscribeUiSession } from '@/lib/uiSessionSocket';
@@ -5148,7 +5148,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     // Keep the rendered branch while its replacement is loading or unavailable.
   }, []);
 
-  const loadTreeChildren = useCallback((folderPath: string, force = false, background = false): Promise<GalleryFolderTreeNode[]> => {
+  const loadTreeChildren = useCallback((folderPath: string, force = false, background = false, throwOnError = false): Promise<GalleryFolderTreeNode[]> => {
     const normalized = normalizePath(folderPath);
     if (!normalized || normalized === TRASH_ROOT || normalized.startsWith(`${TRASH_ROOT}/`)) {
       writeTreeChildrenCache(normalized, []);
@@ -5233,7 +5233,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     });
 
     treeRequestByPathRef.current.set(normalized, { token, promise: request });
-    return background ? request : request.catch(() => treeChildrenRef.current[normalized] || []);
+    return background || throwOnError ? request : request.catch(() => treeChildrenRef.current[normalized] || []);
   }, [writeTreeChildrenCache]);
 
   const visibleTreeBranches = useMemo(() => {
@@ -5285,8 +5285,10 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       next.add(normalized);
       return next;
     });
-    void loadTreeChildren(normalized, true);
-  }, [invalidateTreeChildrenCache, loadTreeChildren]);
+    void loadTreeChildren(normalized, true, false, true).catch((error: unknown) => {
+      addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to refresh folders' });
+    });
+  }, [addToast, invalidateTreeChildrenCache, loadTreeChildren]);
 
   const pruneDeletedFolderTreeState = useCallback((deletedPaths: string[]) => {
     const deleted = uniqueNormalizedPaths(deletedPaths);
@@ -5366,7 +5368,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       detail: {
         path: folderPath,
         folderPath,
-        files: nextFiles.map(galleryFileForFilmstrip),
+        files: nextFiles.filter((file) => file.type !== 'folder').map(galleryFileForFilmstrip),
         mode: payload?.mode || 'replace',
         done: true,
         nextCursor: null,
@@ -5685,6 +5687,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       });
       setError(message);
       addToast({ type: 'error', message });
+      window.dispatchEvent(new CustomEvent('umbra:gallery-folder-load-failed', {
+        detail: { folderPath, message },
+      }));
     } finally {
       if (abortController && folderLoadAbortRef.current === abortController) {
         folderLoadAbortRef.current = null;
@@ -7909,7 +7914,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     const refreshSequence = loadSeqRef.current;
     setSavingTrashSettings(true);
     try {
-      setAppSetting('library.trashAutoDeleteDays', days as any);
       const response = await fetch('/api/trash/retention', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -7917,6 +7921,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       });
       const payload = await response.json().catch(() => ({} as { error?: string }));
       if (!response.ok) throw new Error(String(payload?.error || 'Failed to update trash retention'));
+      setAppSetting('library.trashAutoDeleteDays', days as any);
       clearTrashCache();
       addToast({ type: 'success', message: `Trash retention set to ${days} day${days === 1 ? '' : 's'}` });
       if (loadSeqRef.current === refreshSequence && pathsEqual(currentFolderRef.current, currentFolder) && isTrashPath(currentFolder)) {
@@ -7932,22 +7937,32 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const emptyTrash = useCallback(async () => {
     if (emptyingTrash) return;
     const refreshSequence = loadSeqRef.current;
+    let responseReceived = false;
     setEmptyingTrash(true);
     try {
       const response = await fetch('/api/trash/empty', { method: 'POST' });
-      const payload = await response.json().catch(() => ({} as { error?: string }));
+      responseReceived = true;
+      const payload: { success?: boolean; error?: string } = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(String(payload?.error || 'Failed to empty Trash'));
-      clearTrashCache();
-      window.dispatchEvent(new CustomEvent('umbra:gallery-trash-updated', { detail: { source: 'react-gallery' } }));
+      validateEmptyTrashResult(payload);
       addToast({ type: 'success', message: 'Emptied Trash' });
-      if (loadSeqRef.current === refreshSequence && pathsEqual(currentFolderRef.current, currentFolder) && isTrashPath(currentFolder)) {
-        setSelectedPaths(new Set());
-        setLastSelectedPath('');
-        void loadFolder({ folder: TRASH_ROOT, keepSelection: false, forceRefresh: true, preserveScroll: true });
-      }
     } catch (error) {
       addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to empty Trash' });
     } finally {
+      clearTrashCache();
+      window.dispatchEvent(new CustomEvent('umbra:gallery-trash-updated', { detail: { source: 'react-gallery' } }));
+      if (loadSeqRef.current === refreshSequence && pathsEqual(currentFolderRef.current, currentFolder) && isTrashPath(currentFolder)) {
+        if (responseReceived) {
+          setSelectedPaths(new Set());
+          setLastSelectedPath('');
+        }
+        void loadFolder({
+          folder: responseReceived ? TRASH_ROOT : currentFolder,
+          keepSelection: !responseReceived,
+          forceRefresh: true,
+          preserveScroll: true,
+        });
+      }
       setEmptyingTrash(false);
     }
   }, [addToast, clearTrashCache, currentFolder, emptyingTrash, loadFolder]);
@@ -10103,6 +10118,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       };
 
       if (isEditableKeyboardTarget(event.target)) return;
+      if (!active) return;
 
       if (viewerOpen) {
         if (key === 'Escape') {
@@ -10127,6 +10143,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         return;
       }
 
+      if (event.target instanceof Element && event.target.closest('.filmstrip-container')) return;
       if (event.defaultPrevented) return;
       if (key !== 'Delete' && key !== 'Backspace') return;
       if (event.repeat) return;
@@ -10139,7 +10156,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [closeViewer, deleteTrashPathsForever, deleteViewerSelection, loading, movePathsToTrash, stepViewer, transferInProgress, viewerPath]);
+  }, [active, closeViewer, deleteTrashPathsForever, deleteViewerSelection, loading, movePathsToTrash, stepViewer, transferInProgress, viewerPath]);
 
   const reorderContextTargetPath = contextMenu?.kind === 'media' && (contextMenu.reorderPaths?.length || 0) > 0
     ? normalizePath(contextMenu.targetPath)

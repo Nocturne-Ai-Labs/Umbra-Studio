@@ -23,6 +23,7 @@ import { mediaFileRevision } from '../backend/mediaFileRevision';
 import { createHash } from 'node:crypto';
 import { resolveSingleByteRange } from '../shared/httpByteRange';
 import { createVariantEtag, matchesIfNoneMatch, permitsConditionalRange } from '../shared/httpCache';
+import { createGalleryPathAuthorizer } from '../backend/GalleryPathAccess';
 
 const ROOT_DIR = process.env.UMBRA_ROOT || process.cwd();
 const HOST = '127.0.0.1';
@@ -119,6 +120,7 @@ type FolderSummary = {
 type FolderSummaryCacheEntry = {
   value: FolderSummary;
   scannedAt: number;
+  revision: number;
 };
 
 type FolderTreeNode = {
@@ -422,7 +424,8 @@ function getCachedFolderSummary(pathValue: string): FolderSummary | null {
   const key = getFolderSummaryCacheKey(pathValue);
   const cached = folderSummaryCache.get(key);
   if (!cached) return null;
-  if (Date.now() - cached.scannedAt > FOLDER_SUMMARY_CACHE_TTL_MS) {
+  if (Date.now() - cached.scannedAt > FOLDER_SUMMARY_CACHE_TTL_MS
+    || cached.revision !== folderRevisions.peek(key)) {
     folderSummaryCache.delete(key);
     return null;
   }
@@ -434,7 +437,11 @@ function getCachedFolderSummary(pathValue: string): FolderSummary | null {
 function setCachedFolderSummary(pathValue: string, summary: FolderSummary) {
   const key = getFolderSummaryCacheKey(pathValue);
   folderSummaryCache.delete(key);
-  folderSummaryCache.set(key, { value: summary, scannedAt: Date.now() });
+  folderSummaryCache.set(key, {
+    value: summary,
+    scannedAt: Date.now(),
+    revision: Number(summary.signature?.split(':').at(-1) || 0),
+  });
   while (folderSummaryCache.size > FOLDER_SUMMARY_CACHE_MAX_ENTRIES) {
     folderSummaryCache.delete(folderSummaryCache.keys().next().value!);
   }
@@ -855,7 +862,10 @@ async function statMediaCandidates(
 ) {
   const mediaInputs = await mediaStatWorker.mapSettled(
     candidates, async (entry) => {
-      const stat = await fs.stat(entry.absolutePath);
+      const stat = await fs.lstat(entry.absolutePath);
+      if (!stat.isFile()) {
+        throw Object.assign(new Error('Media path is no longer a regular file'), { code: 'ENOENT' });
+      }
       signal?.throwIfAborted();
       const createdMs = Number.isFinite(stat.birthtimeMs) && stat.birthtimeMs > 0
         ? stat.birthtimeMs
@@ -874,6 +884,9 @@ async function statMediaCandidates(
       };
     }, signal,
   );
+
+  const unavailable = mediaInputs.find((result) => result.status === 'rejected' && !isMissingFsPathError(result.reason));
+  if (unavailable?.status === 'rejected') throw unavailable.reason;
 
   return mediaInputs
     .filter((result): result is PromiseFulfilledResult<{
@@ -901,6 +914,66 @@ function resolveGalleryPath(input: string): string {
     ? `Tools/ComfyUI/output${normalized.slice('User/Outputs'.length)}`
     : normalized;
   return resolve(ROOT_DIR, mapped);
+}
+
+type GalleryPathAuthorizer = Awaited<ReturnType<typeof createGalleryPathAuthorizer>>;
+let directPathAuthorizer: Promise<GalleryPathAuthorizer> | null = null;
+let directPathAuthorizerExpiresAt = 0;
+
+async function getDirectPathAuthorizer(): Promise<GalleryPathAuthorizer> {
+  if (directPathAuthorizer && Date.now() < directPathAuthorizerExpiresAt) return directPathAuthorizer;
+  directPathAuthorizerExpiresAt = Date.now() + 5000;
+  directPathAuthorizer = (async () => {
+    const roots = [ROOT_DIR];
+    let app: Record<string, unknown> = {};
+    try {
+      const settings = JSON.parse(await fs.readFile(join(ROOT_DIR, 'User', 'Config', 'settings.json'), 'utf8')) as { app?: unknown };
+      if (settings.app && typeof settings.app === 'object' && !Array.isArray(settings.app)) app = settings.app as Record<string, unknown>;
+    } catch { /* Default roots remain available when settings cannot be read. */ }
+    const addRoot = (value: unknown) => {
+      if (typeof value !== 'string' || !value.trim() || value.includes('\0')) return;
+      roots.push(resolveGalleryPath(value.replace(/\$\{PROJECT_ROOT\}/g, ROOT_DIR)));
+    };
+    addRoot(app['library.trashStoragePath'] || 'User/Trash');
+    addRoot(app['comfyui.externalOutputPath']);
+    if (app['library.enableExternalRoots'] !== false && Array.isArray(app['library.externalRoots'])) {
+      for (const root of app['library.externalRoots']) addRoot(root);
+    }
+    return createGalleryPathAuthorizer(roots);
+  })();
+  try { return await directPathAuthorizer; }
+  catch (error) { directPathAuthorizer = null; throw error; }
+}
+
+async function isDirectGalleryPathAllowed(pathValue: string): Promise<boolean> {
+  const path = resolveGalleryPath(pathValue);
+  if (!path) return false;
+  const authorize = await getDirectPathAuthorizer();
+  return Boolean(await authorize(path));
+}
+
+async function authorizeDirectGalleryFsRequest(req: Request, reqUrl: URL): Promise<Response | null> {
+  if (!reqUrl.pathname.startsWith('/api/fs/')
+    || (BRIDGE_TOKEN && req.headers.get('x-umbra-gallery-bridge-token') === BRIDGE_TOKEN)) return null;
+  const paths: string[] = [];
+  if (req.method === 'GET' && reqUrl.pathname === '/api/fs/search') {
+    paths.push(...reqUrl.searchParams.getAll('root').concat(reqUrl.searchParams.getAll('roots'))
+      .flatMap((value) => String(value || '').split('|')));
+  } else if (req.method === 'GET') {
+    const path = reqUrl.searchParams.get('path');
+    if (path) paths.push(path);
+  } else if (req.method === 'POST') {
+    const body = await req.clone().json().catch(() => null) as Record<string, unknown> | null;
+    if (typeof body?.path === 'string') paths.push(body.path);
+    if (Array.isArray(body?.paths)) paths.push(...body.paths.filter((value): value is string => typeof value === 'string'));
+    if (Array.isArray(body?.uids)) {
+      paths.push(...galleryDb.resolvePathsForUids(body.uids.map((value) => String(value || ''))));
+    }
+  }
+  for (const path of paths) {
+    if (!(await isDirectGalleryPathAllowed(path))) return json({ error: 'Access denied' }, 403);
+  }
+  return null;
 }
 
 function createClientPathMapper(inputRoot: string, resolvedRoot: string) {
@@ -981,8 +1054,10 @@ function isAdmittedBridgeRequest(req: Request, reqUrl: URL): boolean {
   // a foreign parent that embeds the worker directly.
   if (hasTrustedBrowserReferer(req)) return true;
   // Same-origin static media commonly has no Origin or Referer. Cross-site
-  // no-Origin navigations and subresource loads must not reach this API.
-  return String(req.headers.get('sec-fetch-site') || '').trim().toLowerCase() !== 'cross-site';
+  // no-Origin navigations and subresource loads must not reach this API. An
+  // absent Fetch Metadata header gives us no evidence of a trusted browser.
+  const fetchSite = String(req.headers.get('sec-fetch-site') || '').trim().toLowerCase();
+  return fetchSite === 'same-origin' || fetchSite === 'none';
 }
 
 function withTrustedCors(req: Request, response: Response): Response {
@@ -1163,8 +1238,13 @@ function createMissingListProgressivePayload(pathValue: string, sortBy: GalleryS
 type GalleryDirectorySnapshot = {
   dirPath: string;
   clientFolderPath: string;
+  sortBy: GallerySortBy;
+  sortOrder: GallerySortOrder;
+  fastPage: boolean;
   folders: Array<{ name: string; path: string }>;
   candidates: MediaCandidate[];
+  orderedFiles?: MediaFileRecord[];
+  candidateCount: number;
   expiresAt: number;
 };
 const directorySnapshots = new Map<string, GalleryDirectorySnapshot>();
@@ -1174,16 +1254,17 @@ function rememberDirectorySnapshot(snapshot: GalleryDirectorySnapshot): string |
   for (const [id, entry] of directorySnapshots) {
     if (entry.expiresAt <= Date.now()) directorySnapshots.delete(id);
   }
-  if (snapshot.candidates.length > 100_000) return undefined;
-  let total = snapshot.candidates.length;
-  for (const entry of directorySnapshots.values()) total += entry.candidates.length;
+  const snapshotSize = (entry: GalleryDirectorySnapshot) => entry.orderedFiles?.length || entry.candidates.length;
+  if (snapshotSize(snapshot) > 100_000) return undefined;
+  let total = snapshotSize(snapshot);
+  for (const entry of directorySnapshots.values()) total += snapshotSize(entry);
   while (directorySnapshots.size >= 8 || total > 100_000) {
     const oldest = directorySnapshots.entries().next().value;
     if (!oldest) break;
-    total -= oldest[1].candidates.length;
+    total -= snapshotSize(oldest[1]);
     directorySnapshots.delete(oldest[0]);
   }
-  const id = crypto.randomUUID();
+  const id = `bun:${crypto.randomUUID()}`;
   directorySnapshots.set(id, snapshot);
   return id;
 }
@@ -1209,7 +1290,8 @@ async function buildListProgressivePayload(
   const readdirStartedAt = nowMs();
   let snapshot = requestedSnapshot ? directorySnapshots.get(requestedSnapshot) : undefined;
   if (requestedSnapshot && (!snapshot || snapshot.expiresAt <= Date.now()
-    || snapshot.dirPath !== dirPath || snapshot.clientFolderPath !== normalizedClientFolderPath)) {
+    || snapshot.dirPath !== dirPath || snapshot.clientFolderPath !== normalizedClientFolderPath
+    || snapshot.sortBy !== sortBy || snapshot.sortOrder !== sortOrder || snapshot.fastPage !== fastPage)) {
     throw new Error('Gallery listing expired. Refresh the folder to retry.');
   }
   let snapshotId = requestedSnapshot;
@@ -1234,7 +1316,11 @@ async function buildListProgressivePayload(
         folderPath: normalizedClientFolderPath,
       }));
     mediaCandidates.sort(compareMediaCandidatesByName);
-    snapshot = { dirPath, clientFolderPath: normalizedClientFolderPath, folders, candidates: mediaCandidates, expiresAt: Date.now() + DIRECTORY_SNAPSHOT_TTL_MS };
+    snapshot = {
+      dirPath, clientFolderPath: normalizedClientFolderPath, sortBy, sortOrder, fastPage,
+      folders, candidates: mediaCandidates, candidateCount: mediaCandidates.length,
+      expiresAt: Date.now() + DIRECTORY_SNAPSHOT_TTL_MS,
+    };
     if (fastPage) snapshotId = rememberDirectorySnapshot(snapshot);
   }
   snapshot.expiresAt = Date.now() + DIRECTORY_SNAPSHOT_TTL_MS;
@@ -1242,11 +1328,15 @@ async function buildListProgressivePayload(
   const mediaCandidates = snapshot.candidates;
 
   let page: MediaFileRecord[] = [];
-  let total = mediaCandidates.length;
+  let total = snapshot.candidateCount;
   let nextCursor: number | null = null;
 
   const pageStartedAt = nowMs();
-  if (fastPage) {
+  if (snapshot.orderedFiles) {
+    total = snapshot.orderedFiles.length;
+    page = snapshot.orderedFiles.slice(cursor, cursor + limit);
+    nextCursor = cursor + page.length < total ? cursor + page.length : null;
+  } else if (fastPage) {
     const pageCandidates = sortOrder === 'desc'
       ? mediaCandidates.slice(Math.max(0, total - cursor - limit), Math.max(0, total - cursor)).reverse()
       : mediaCandidates.slice(cursor, cursor + limit);
@@ -1288,6 +1378,11 @@ async function buildListProgressivePayload(
     total = mediaFiles.length;
     page = mediaFiles.slice(cursor, cursor + limit);
     nextCursor = cursor + page.length < total ? cursor + page.length : null;
+    if (nextCursor !== null) {
+      snapshot.candidates = [];
+      snapshot.orderedFiles = mediaFiles;
+      snapshotId = rememberDirectorySnapshot(snapshot);
+    }
   }
   pageMs = nowMs() - pageStartedAt;
 
@@ -1306,7 +1401,7 @@ async function buildListProgressivePayload(
     sortOrder,
     fastPage,
     folders: folders.length,
-    mediaCandidates: mediaCandidates.length,
+    mediaCandidates: snapshot.candidateCount,
     pageFiles: page.length,
     total,
     nextCursor,
@@ -1346,7 +1441,9 @@ async function handleListProgressive(reqUrl: URL, signal?: AbortSignal): Promise
     const limit = clamp(Number(reqUrl.searchParams.get('limit') || 72) || 72, 1, 256);
     const sortBy = parseSortBy(reqUrl.searchParams.get('sortBy'));
     const sortOrder = parseSortOrder(reqUrl.searchParams.get('sortOrder'));
-    const fastPage = String(reqUrl.searchParams.get('fast') || '').trim() === '1';
+    // A name-ordered slice is only a valid page for name sorting. Time and
+    // custom order require the complete set of file stats before slicing.
+    const fastPage = String(reqUrl.searchParams.get('fast') || '').trim() === '1' && sortBy === 'name';
     const force = String(reqUrl.searchParams.get('force') || '').trim() === '1';
     if (force && cursor === 0) {
       invalidateFolderTree(dirPath);
@@ -1486,13 +1583,41 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
       resolvedRoots.map((root) => root.clientRootPath),
       query,
       fileLimit * 3,
-    );
-    for (const file of indexedFiles) {
-      if (!fileMatchesSearch(file, query)) continue;
-      const key = normalizePath(file.path).toLowerCase();
-      if (!key || filesByPath.has(key)) continue;
-      filesByPath.set(key, file);
-      if (filesByPath.size >= fileLimit) break;
+    ).filter((file) => fileMatchesSearch(file, query));
+    // The index can outlive external moves and deletes. Verify hits against
+    // disk before they consume the visible result limit, and refresh their
+    // current stats/metadata without discarding tags or custom order.
+    const indexedInputs: Awaited<ReturnType<typeof statMediaCandidates>> = [];
+    const authorizeIndexedPath = await createGalleryPathAuthorizer(resolvedRoots.map((root) => root.dirPath));
+    for (let offset = 0; offset < indexedFiles.length && indexedInputs.length < fileLimit; offset += 64) {
+      const batch = indexedFiles.slice(offset, offset + 64);
+      const authorized = await Promise.all(batch.map(async (file) => {
+        const absolutePath = resolveGalleryPath(file.path);
+        return await authorizeIndexedPath(absolutePath) ? {
+          name: file.name,
+          absolutePath,
+          clientPath: file.path,
+          folderPath: file.folderPath,
+        } : null;
+      }));
+      const permittedCandidates = authorized.filter((candidate): candidate is MediaCandidate => Boolean(candidate));
+      const valid = await statMediaCandidates(permittedCandidates, '', signal);
+      indexedInputs.push(...valid);
+    }
+    const indexedByFolder = new Map<string, typeof indexedInputs>();
+    for (const input of indexedInputs) {
+      const folder = normalizePath(input.folderPath);
+      const items = indexedByFolder.get(folder) || [];
+      items.push(input);
+      indexedByFolder.set(folder, items);
+    }
+    for (const [folder, inputs] of indexedByFolder) {
+      for (const file of upsertGalleryFiles(folder, inputs)) {
+        if (!fileMatchesSearch(file, query)) continue;
+        const key = normalizePath(file.path).toLowerCase();
+        if (!key || filesByPath.has(key)) continue;
+        filesByPath.set(key, file);
+      }
     }
 
     let scannedFolders = 0;
@@ -1639,7 +1764,24 @@ async function handleMetadataSearch(reqUrl: URL): Promise<Response> {
     const dirPath = await ensureDirectory(pathValue);
     registerPrewarmRoot(dirPath);
     const folderPath = normalizePath(pathValue) || normalizePath(dirPath);
-    const matches = galleryDb.searchFolderMetadata(folderPath, query, limit);
+    const indexedMatches = galleryDb.searchFolderMetadata(folderPath, query, limit);
+    const authorizeMatch = await createGalleryPathAuthorizer([dirPath]);
+    const matches: GalleryMetadataSearchMatch[] = [];
+    for (let offset = 0; offset < indexedMatches.length; offset += 16) {
+      const batch = indexedMatches.slice(offset, offset + 16);
+      const states = await Promise.all(batch.map(async (match): Promise<'live' | 'missing' | 'denied'> => {
+        const path = resolveGalleryPath(match.path);
+        if (!(await authorizeMatch(path))) return 'denied';
+        try { return (await fs.lstat(path)).isFile() ? 'live' : 'missing'; }
+        catch (error) {
+          if (isMissingFsPathError(error)) return 'missing';
+          throw error;
+        }
+      }));
+      for (let index = 0; index < batch.length; index++) {
+        if (states[index] === 'live') matches.push(batch[index]);
+      }
+    }
     traceGalleryService('metadata_search', {
       folderPath,
       query,
@@ -2197,6 +2339,8 @@ const server = Bun.serve({
 
     if (!isAdmittedBridgeRequest(req, reqUrl)) return json({ error: 'Gallery bridge request denied' }, 403);
     if (req.method === 'OPTIONS') return corsPreflight(req, reqUrl);
+    const directPathDenial = await authorizeDirectGalleryFsRequest(req, reqUrl);
+    if (directPathDenial) return directPathDenial;
 
     if (reqUrl.pathname === '/health') {
       if (BRIDGE_TOKEN && req.headers.get('x-umbra-gallery-bridge-token') !== BRIDGE_TOKEN) {

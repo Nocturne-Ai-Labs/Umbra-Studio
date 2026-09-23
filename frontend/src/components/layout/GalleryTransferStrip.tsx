@@ -50,7 +50,7 @@ export function GalleryTransferStrip({ transfer }: { transfer: GalleryTransferSt
         Current file: {bytes(transfer.fileBytes || 0)} / {bytes(transfer.fileTotalBytes || 0)}
         <progress aria-label="Current file copy progress" className="mt-1 block h-1 w-full accent-[var(--umbra-accent)]" max={transfer.fileTotalBytes} value={transfer.fileBytes || 0} />
       </div>}
-      {needsAttention && !transfer.active && <div className="mt-1 line-clamp-2 break-words text-amber-300" title={error}>{errorSummary}</div>}
+      {needsAttention && <div role="alert" className="mt-1 line-clamp-2 break-words text-amber-300" title={error}>{errorSummary}</div>}
       {expanded && <div className="mt-2 max-h-40 overflow-y-auto border-t border-zinc-800 pt-2">
         <div className="break-all text-zinc-400">Destination: {transfer.destination}</div>
         {transfer.error && <div className="break-words text-amber-300">{transfer.error}</div>}

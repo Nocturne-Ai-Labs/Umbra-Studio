@@ -15960,6 +15960,16 @@ async function proxyGalleryBridgeFsGet(
   if (!(await areGalleryBridgePathsAllowed(req, sourceUrl, requestedPaths, server))) {
     return json({ error: 'Access denied' }, 403);
   }
+  const listingSnapshot = targetPath === '/api/fs/list-progressive'
+    ? sourceUrl.searchParams.get('snapshot') || ''
+    : '';
+  const bridgeSnapshot = listingSnapshot.startsWith('bun:');
+  const expiredListing = () => json({ error: 'Gallery listing expired. Refresh the folder to retry.' }, 409);
+  if (listingSnapshot.startsWith('fs:')) {
+    const response = await fallback();
+    response.headers.set('X-Gallery-Fallback', 'snapshot-pinned');
+    return response;
+  }
   const startedAt = performance.now();
   const traceProxy = (event: string, payload: Record<string, unknown>, thresholdMs = 250) => {
     if (!isBackendDiagnosticLoggingEnabled()) return;
@@ -15988,6 +15998,7 @@ async function proxyGalleryBridgeFsGet(
   if (req.signal.aborted) return new Response(null, { status: 499 });
 
   if (Date.now() < galleryBridgeProxyBackoffUntil) {
+    if (bridgeSnapshot) return expiredListing();
     const response = await fallback();
     if (req.signal.aborted) {
       void response.body?.cancel().catch(() => undefined);
@@ -16046,6 +16057,7 @@ async function proxyGalleryBridgeFsGet(
       scheduleGalleryBridgeSelfHeal('proxy_failure');
     }
     if (req.signal.aborted) return new Response(null, { status: 499 });
+    if (bridgeSnapshot) return expiredListing();
     const response = await fallback();
     if (req.signal.aborted) {
       void response.body?.cancel().catch(() => undefined);
@@ -25031,10 +25043,17 @@ async function handleTrashMutationWithCacheInvalidation(
       || url.pathname === '/api/trash/delete-direct'
       || url.pathname === '/api/trash/system'
     ) {
-      const paths = Array.isArray((body as any)?.paths) ? (body as any).paths : [];
-      galleryDb.removeRecordsForPaths(paths.map((entry: unknown) => String(entry || '')));
+      const results = Array.isArray((responseBody as any)?.results) ? (responseBody as any).results : [];
+      galleryDb.removeRecordsForPaths(results
+        .filter((entry: any) => entry?.success === true && typeof entry?.path === 'string')
+        .map((entry: any) => entry.path));
     } else if (url.pathname === '/api/trash/empty') {
-      galleryDb.removeRecordsForPaths([TRASH_ROOT]);
+      if ((responseBody as any)?.success === true) {
+        galleryDb.removeRecordsForPaths([TRASH_ROOT]);
+      } else {
+        const deletedPaths = Array.isArray((responseBody as any)?.deletedPaths) ? (responseBody as any).deletedPaths : [];
+        galleryDb.removeRecordsForPaths(deletedPaths.filter((path: unknown): path is string => typeof path === 'string'));
+      }
     }
   } catch (error) {
     console.warn('[GalleryDb] Failed to sync trash metadata:', error);
@@ -25245,6 +25264,7 @@ async function handleFsListProgressive(url: URL, signal?: AbortSignal): Promise<
   const path = url.searchParams.get('path');
   const limit = Math.max(0, Math.min(1024, Math.trunc(Number(url.searchParams.get('limit')) || 0)));
   const cursor = Math.max(0, Math.trunc(Number(url.searchParams.get('cursor')) || 0));
+  const snapshot = cursor > 0 ? url.searchParams.get('snapshot') || undefined : undefined;
   const filter = url.searchParams.get('filter');
   const sortBy = String(url.searchParams.get('sortBy') || '').trim();
   const sortOrder = String(url.searchParams.get('sortOrder') || '').trim();
@@ -25322,6 +25342,7 @@ async function handleFsListProgressive(url: URL, signal?: AbortSignal): Promise<
       limit,
       cursor,
       force,
+      snapshot,
     });
     signal?.throwIfAborted();
     const workerMs = Date.now() - workerStartedAt;
@@ -26290,8 +26311,8 @@ async function handleFsImage(req: Request, url: URL, server?: RequestIpServer): 
       const previewHeaders: Record<string, string> = {
         'Content-Type': 'image/webp',
         'Cache-Control': hasRevision
-          ? 'public, max-age=31536000, immutable'
-          : 'public, max-age=120, stale-while-revalidate=600',
+          ? 'private, max-age=31536000, immutable'
+          : 'private, max-age=120, stale-while-revalidate=600',
         'ETag': createVariantEtag(etag, `grid-${maxLongSide}-${quality}`),
         'X-Grid-Preview': '1',
         'X-Grid-Preview-Max': String(maxLongSide),
@@ -26320,8 +26341,8 @@ async function handleFsImage(req: Request, url: URL, server?: RequestIpServer): 
       const previewHeaders: Record<string, string> = {
         'Content-Type': 'image/webp',
         'Cache-Control': hasRevision
-          ? 'public, max-age=31536000, immutable'
-          : 'public, max-age=120, stale-while-revalidate=600',
+          ? 'private, max-age=31536000, immutable'
+          : 'private, max-age=120, stale-while-revalidate=600',
         'ETag': createVariantEtag(etag, `viewer-webp-${quality}`),
         'X-Viewer-Preview': 'original-webp',
         'X-Viewer-Preview-Quality': String(quality),
@@ -26344,8 +26365,8 @@ async function handleFsImage(req: Request, url: URL, server?: RequestIpServer): 
     }
 
     const cacheControl = hasRevision
-      ? 'public, max-age=31536000, immutable'
-      : 'public, max-age=10, stale-while-revalidate=30';
+      ? 'private, max-age=31536000, immutable'
+      : 'private, max-age=10, stale-while-revalidate=30';
     const contentType = file.type || 'application/octet-stream';
     const lastModified = new Date(fileStat.mtimeMs).toUTCString();
     const baseHeaders: Record<string, string> = {
@@ -30060,13 +30081,17 @@ async function handleFsUpload(req: Request): Promise<Response> {
     }
 
     // Process uploads
-    const results = await Promise.all(files.map(async (file) => {
+    const results: Array<{ name: string; success: boolean; skipped?: boolean; path?: string; error?: string }> = [];
+    // Each file is already buffered by the multipart parser. Avoid also holding
+    // every decoded ArrayBuffer and base64 worker message at once.
+    for (const file of files) {
       try {
         const strategy = formData.get(`strategy_${file.name}`) as string || 'keepBoth';
 
         // Handle duplicate strategy
         if (strategy === 'skip') {
-          return { name: file.name, success: true, skipped: true };
+          results.push({ name: file.name, success: true, skipped: true });
+          continue;
         }
         if (!isGalleryUploadStrategy(strategy)) throw new Error('Invalid duplicate handling strategy');
         const buffer = await file.arrayBuffer();
@@ -30078,11 +30103,11 @@ async function handleFsUpload(req: Request): Promise<Response> {
         });
         if (!published.path) throw new Error('Upload did not publish a file');
         const filePath = join(resolved.fullPath, basename(published.path));
-        return { name: file.name, success: true, path: filePath };
+        results.push({ name: file.name, success: true, path: filePath });
       } catch (error: any) {
-        return { name: file.name, success: false, error: error.message };
+        results.push({ name: file.name, success: false, error: error.message });
       }
-    }));
+    }
 
     const uploadedTargets = results
       .filter((entry) => entry.success && !entry.skipped)

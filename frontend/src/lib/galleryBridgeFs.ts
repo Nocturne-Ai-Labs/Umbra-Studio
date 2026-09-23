@@ -30,7 +30,7 @@ function requireGalleryListing(value: unknown): GalleryListing {
   return page;
 }
 
-export async function fetchGalleryFs(pathname: string, params: URLSearchParams, init?: RequestInit, onPage?: (page: GalleryListing) => void): Promise<Response> {
+export async function fetchGalleryFs(pathname: string, params: URLSearchParams, init?: RequestInit, onPage?: (page: GalleryListing) => void, retryExpiredSnapshot = true): Promise<Response> {
   const response = await fetchGalleryFsPage(pathname, params, init);
   if (!response.ok || pathname !== '/list-progressive'
     || String(init?.method || 'GET').toUpperCase() !== 'GET'
@@ -72,7 +72,17 @@ export async function fetchGalleryFs(pathname: string, params: URLSearchParams, 
     nextParams.delete('force');
     nextParams.delete('refresh');
     const nextResponse = await fetchGalleryFsPage(pathname, nextParams, init);
-    if (!nextResponse.ok) return nextResponse;
+    if (!nextResponse.ok) {
+      const error = await nextResponse.clone().json().catch(() => null) as { error?: unknown } | null;
+      if (retryExpiredSnapshot && /Gallery listing expired/i.test(String(error?.error || ''))) {
+        const restartParams = new URLSearchParams(params);
+        restartParams.delete('cursor');
+        restartParams.delete('snapshot');
+        restartParams.set('force', '1');
+        return fetchGalleryFs(pathname, restartParams, init, onPage, false);
+      }
+      return nextResponse;
+    }
     page = requireGalleryListing(await nextResponse.json());
   }
   const headers = new Headers(response.headers);

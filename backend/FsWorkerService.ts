@@ -39,6 +39,7 @@ type FsWorkerRequest =
         limit: number;
         cursor: number;
         force?: boolean;
+        snapshot?: string;
       };
     }
   | {
