@@ -148,10 +148,13 @@ export async function downloadBooruOriginal(options: {
       throw error;
     });
     if (original && !original.isFile()) throw new Error('The destination is not a regular image file.');
-    if (!options.replace && await fileMatches(destination, md5)) {
+    if (original && !options.replace) {
+      if (!await fileMatches(destination, md5)) {
+        throw new Error('An image with this name already exists and differs from the original. Use Re-download to replace it.');
+      }
       options.signal?.throwIfAborted();
       await ensureCaption(options.conceptPath, options.filename, options.tags);
-      return { filename: options.filename, revision: original!.mtimeMs, alreadyExists: true };
+      return { filename: options.filename, revision: original.mtimeMs, alreadyExists: true };
     }
     const signal = AbortSignal.any([AbortSignal.timeout(120_000), ...(options.signal ? [options.signal] : [])]);
     const response = await fetchOriginal(url, signal);
