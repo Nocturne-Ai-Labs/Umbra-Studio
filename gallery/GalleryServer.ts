@@ -1685,6 +1685,7 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
       const current = queue[queueIndex++];
       if (!current) continue;
       scannedFolders += 1;
+      if (!(await authorizeIndexedPath(current.absolutePath))) continue;
       let entries: Dirent<string>[];
       try {
         entries = await fs.readdir(current.absolutePath, { withFileTypes: true });
@@ -1720,7 +1721,8 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
       }
 
       const filenameMatches = entries
-        .filter((entry) => entry.isFile() && isSupportedMediaPath(entry.name) && textMatchesSearch(entry.name, query))
+        .filter((entry) => entry.isFile() && isSupportedMediaPath(entry.name)
+          && (textMatchesSearch(entry.name, query) || textMatchesSearch(current.clientPath, query)))
         .map((entry) => ({
           name: entry.name,
           absolutePath: join(current.absolutePath, entry.name),

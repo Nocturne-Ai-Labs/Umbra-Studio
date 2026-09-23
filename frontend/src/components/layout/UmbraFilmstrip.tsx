@@ -670,7 +670,7 @@ export function UmbraFilmstrip({
       detail: {
         path: folder,
         folderPath: folder,
-        source: options?.reload ? 'filmstrip-manual-refresh' : (options?.force ? 'gallery-content-changed' : 'filmstrip-refresh'),
+        source: options?.reload || options?.force ? 'filmstrip-manual-refresh' : 'filmstrip-refresh',
       },
     }));
   }, [rootPath]);
