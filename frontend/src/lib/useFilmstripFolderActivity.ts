@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { acknowledgeFolderActivity, folderActivityCounts, FOLDER_ACTIVITY_READ_KEY, readFolderActivityState, type FolderActivitySnapshot } from './filmstripFolderActivity';
 
 async function fetchActivity(paths: string[], signal?: AbortSignal): Promise<FolderActivitySnapshot> {
@@ -29,7 +29,6 @@ async function fetchActivity(paths: string[], signal?: AbortSignal): Promise<Fol
 export function useFilmstripFolderActivity(paths: string[], rememberFolders: (paths: string[]) => void) {
   const [snapshot, setSnapshot] = useState<FolderActivitySnapshot | null>(null);
   const [read, setRead] = useState(readFolderActivityState);
-  const newestAt = useRef(0);
   const pathsKey = JSON.stringify([...new Set(paths)].slice(0, 256));
 
   useEffect(() => {
@@ -37,7 +36,6 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
     const trackedPaths = JSON.parse(pathsKey) as string[];
     const discoveryOnly = trackedPaths.length === 0;
     if (discoveryOnly) {
-      newestAt.current = 0;
       setSnapshot(null);
     }
     let timer: ReturnType<typeof setTimeout>;
@@ -50,11 +48,7 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
         const next = await fetchActivity(trackedPaths, controller.signal);
         if (controller.signal.aborted) return;
         setSnapshot(next);
-        const recent = next.recentFolders.filter(folder => folder.updatedAt > newestAt.current);
-        if (recent.length) {
-          newestAt.current = Math.max(...recent.map(folder => folder.updatedAt));
-          rememberFolders(recent.map(folder => folder.path));
-        }
+        if (next.recentFolders.length) rememberFolders(next.recentFolders.map(folder => folder.path));
       } catch { /* Keep existing badges through transient outages; never block the strip. */ }
       finally {
         busy = false;
