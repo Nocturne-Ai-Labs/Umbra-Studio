@@ -5,7 +5,7 @@ import type { GalleryFileInput, GalleryMediaType } from '../gallery/GalleryDb';
 const IMAGE_EXTENSIONS = new Set([
   '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.avif', '.heic', '.heif', '.jxl', '.tif', '.tiff', '.svg', '.apng',
 ]);
-const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mkv', '.mov', '.avi', '.m4v']);
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mkv', '.mov', '.avi', '.m4v', '.flv', '.wmv']);
 
 export function galleryFallbackSearchMediaType(name: string): GalleryMediaType | null {
   const extension = extname(name).toLowerCase();

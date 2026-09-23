@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
 import { writeUpdateJsonAtomic } from '../shared/updateStateFile';
 
-const MEDIA = new Set(['.png', '.jpg', '.jpeg', '.webp', '.avif', '.bmp', '.tif', '.tiff', '.gif', '.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v', '.wmv']);
+const MEDIA = new Set(['.png', '.jpg', '.jpeg', '.webp', '.avif', '.bmp', '.tif', '.tiff', '.gif', '.heic', '.heif', '.jxl', '.svg', '.apng', '.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v', '.flv', '.wmv']);
 const DUPLICATE_PUBLICATION_WINDOW_MS = 2000;
 type FolderActivity = { path: string; count: number; updatedAt: number };
 

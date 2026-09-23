@@ -12296,6 +12296,7 @@ const GALLERY_BRIDGE_SERVER_ENTRY = resolveGalleryBridgeServerEntry();
 const GALLERY_PUBLIC_DIR = resolveGalleryPublicDir(ROOT_DIR, dirname(GALLERY_BRIDGE_SERVER_ENTRY));
 let galleryBridgeProxyBackoffUntil = 0;
 let galleryBridgeDesired = false;
+let galleryBridgeAutoStartSuppressed = false;
 let galleryBridgeStopEpoch = 0;
 let galleryBridgeWatchdogTimer: NodeJS.Timeout | null = null;
 let galleryBridgeWatchdogFailures = 0;
@@ -16441,6 +16442,7 @@ async function startGalleryBridgeInternal(stopEpoch = galleryBridgeStopEpoch) {
 function stopGalleryBridge() {
   galleryBridgeStopEpoch += 1;
   galleryBridgeDesired = false;
+  galleryBridgeAutoStartSuppressed = true;
   clearGalleryBridgeWatchdog();
   galleryBridgeStartInFlight = null;
   if (galleryBridgeStopInFlight) return galleryBridgeStopInFlight;
@@ -16665,7 +16667,19 @@ async function proxyGalleryBridgeFsGet(
   if (!isChildProcessAlive(galleryBridgeProcess)) {
     const healthy = await isGalleryBridgeHealthy({ allowCached: false });
     if (req.signal.aborted) return new Response(null, { status: 499 });
-    if (!healthy) await startGalleryBridge().catch(() => undefined);
+    if (!healthy) {
+      if (galleryBridgeAutoStartSuppressed) {
+        if (bridgeSnapshot) return expiredListing();
+        const response = await fallback();
+        if (req.signal.aborted) {
+          void response.body?.cancel().catch(() => undefined);
+          return new Response(null, { status: 499 });
+        }
+        response.headers.set('X-Gallery-Fallback', 'bridge-stopped');
+        return response;
+      }
+      await startGalleryBridge().catch(() => undefined);
+    }
   }
 
   if (req.signal.aborted) return new Response(null, { status: 499 });
@@ -16816,6 +16830,9 @@ async function proxyGalleryBridgeFsPost(
     return json({ error: 'Access denied' }, 403);
   }
   if (!isChildProcessAlive(galleryBridgeProcess) && !(await isGalleryBridgeHealthy({ allowCached: false }))) {
+    if (galleryBridgeAutoStartSuppressed) {
+      return json({ error: 'Gallery bridge is stopped. Start it before using this action.' }, 503);
+    }
     await startGalleryBridge().catch(() => undefined);
   }
 
@@ -33316,7 +33333,10 @@ const server = Bun.serve<UmbraSocketData>({
         const { backend } = await req.json() as { backend: string };
         if (backend === 'comfyui') return json(await startComfyUI());
         if (backend === 'aitoolkit') return json(await startAIToolkit());
-        if (backend === 'gallery') return json(await startGalleryBridge());
+        if (backend === 'gallery') {
+          galleryBridgeAutoStartSuppressed = false;
+          return json(await startGalleryBridge());
+        }
         return json({ error: 'Invalid backend' }, 400);
       }
 
