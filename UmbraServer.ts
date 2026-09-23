@@ -4927,7 +4927,19 @@ interface BackendPowerPrompterQueueTask {
   previewProgressSignatures: Map<string, string>;
 }
 const backendPowerPrompterQueueTasks = new Map<string, BackendPowerPrompterQueueTask>();
-const pendingPowerPrompterBatchAdmissionTokens = new Set<symbol>();
+interface PendingPowerPrompterBatchAdmission {
+  sourceWs: ServerWebSocket<unknown>;
+  batchRequestId: string;
+  groupRequestIds: string[];
+  canceled: boolean;
+  cancelValidation: () => void;
+  cancellation: Promise<void>;
+}
+const pendingPowerPrompterBatchAdmissionTokens = new Map<symbol, PendingPowerPrompterBatchAdmission>();
+const recentPowerPrompterBatchOutcomes = new Map<ServerWebSocket<unknown>, Map<string, {
+  outcome: 'accepted' | 'rejected' | 'canceled';
+  timer: ReturnType<typeof setTimeout>;
+}>>();
 const BACKEND_PP_QUEUE_CANCELLED = 'Backend Power Prompter queue canceled.';
 const BACKEND_PP_QUEUE_HEARTBEAT_MS = 30000;
 const POWER_PROMPTER_QUEUE_STATE_SNAPSHOT_ENABLED = false;
@@ -10948,6 +10960,77 @@ async function drainBackendPowerPrompterQueue() {
   }
 }
 
+function getRecentPowerPrompterBatchOutcome(ws: ServerWebSocket<unknown>, requestId: string) {
+  return recentPowerPrompterBatchOutcomes.get(ws)?.get(requestId)?.outcome;
+}
+
+function clearRecentPowerPrompterBatchOutcome(ws: ServerWebSocket<unknown>, requestId: string) {
+  const outcomes = recentPowerPrompterBatchOutcomes.get(ws);
+  const prior = outcomes?.get(requestId);
+  if (!prior) return;
+  clearTimeout(prior.timer);
+  outcomes?.delete(requestId);
+  if (outcomes?.size === 0) recentPowerPrompterBatchOutcomes.delete(ws);
+}
+
+function rememberPowerPrompterBatchOutcome(
+  ws: ServerWebSocket<unknown>, requestId: string, outcome: 'accepted' | 'rejected' | 'canceled',
+) {
+  let outcomes = recentPowerPrompterBatchOutcomes.get(ws);
+  if (!outcomes) {
+    outcomes = new Map();
+    recentPowerPrompterBatchOutcomes.set(ws, outcomes);
+  }
+  const prior = outcomes.get(requestId);
+  if (prior) clearTimeout(prior.timer);
+  // The client can queue a batch upload behind another upload for up to its
+  // ten-minute batch-request timeout. Keep the canceled ID until then.
+  const timer = setTimeout(() => {
+    const current = recentPowerPrompterBatchOutcomes.get(ws);
+    if (current?.get(requestId)?.timer === timer) {
+      current.delete(requestId);
+      if (current.size === 0) recentPowerPrompterBatchOutcomes.delete(ws);
+    }
+  }, 600_000);
+  outcomes.set(requestId, { outcome, timer });
+}
+
+function sendPowerPrompterBatchAck(ws: ServerWebSocket<unknown>, payload: {
+  requestId: string; success: boolean; canceled?: boolean; [key: string]: unknown;
+}) {
+  if (getRecentPowerPrompterBatchOutcome(ws, payload.requestId) === 'canceled') return;
+  rememberPowerPrompterBatchOutcome(ws, payload.requestId, payload.success ? 'accepted' : 'rejected');
+  sendWs(ws, { type: 'queue_batch_forwarded', ...payload });
+}
+
+function cancelPowerPrompterBatchBeforeAdmission(ws: ServerWebSocket<unknown>, batchRequestId: string): boolean {
+  if (!batchRequestId || getRecentPowerPrompterBatchOutcome(ws, batchRequestId)) return false;
+  rememberPowerPrompterBatchOutcome(ws, batchRequestId, 'canceled');
+  sendWs(ws, {
+    type: 'queue_batch_forwarded', requestId: batchRequestId,
+    success: false, canceled: true, acceptedRequestIds: [],
+    error: 'Queue batch canceled by queue control.',
+  });
+  return true;
+}
+
+function clearPowerPrompterBatchOutcomesForSocket(ws: ServerWebSocket<unknown>) {
+  const outcomes = recentPowerPrompterBatchOutcomes.get(ws);
+  if (!outcomes) return;
+  for (const outcome of outcomes.values()) clearTimeout(outcome.timer);
+  recentPowerPrompterBatchOutcomes.delete(ws);
+}
+
+const POWER_PROMPTER_BATCH_ADMISSION_CANCELED = Symbol('power_prompter_batch_admission_canceled');
+async function awaitPowerPrompterBatchValidation<T>(
+  admission: PendingPowerPrompterBatchAdmission, pending: Promise<T>,
+): Promise<T | typeof POWER_PROMPTER_BATCH_ADMISSION_CANCELED> {
+  return Promise.race([
+    pending,
+    admission.cancellation.then((): typeof POWER_PROMPTER_BATCH_ADMISSION_CANCELED => POWER_PROMPTER_BATCH_ADMISSION_CANCELED),
+  ]);
+}
+
 async function handlePrompterApiWorkflowQueueBatchRequest(
   ws: ServerWebSocket<unknown>,
   data: any,
@@ -10956,10 +11039,22 @@ async function handlePrompterApiWorkflowQueueBatchRequest(
   // Reserve synchronously, before wildcard or pipeline validation can await.
   // Batch request IDs are client supplied and may collide, so use a unique token.
   const admissionToken = Symbol('power_prompter_batch_admission');
-  pendingPowerPrompterBatchAdmissionTokens.add(admissionToken);
+  let cancelValidation = () => {};
+  const cancellation = new Promise<void>((resolve) => { cancelValidation = resolve; });
+  const admission: PendingPowerPrompterBatchAdmission = {
+    sourceWs: ws,
+    batchRequestId,
+    groupRequestIds: collectPrompterRequestIds(Array.isArray(data?.groups)
+      ? data.groups.map((group: any) => group?.requestId)
+      : []),
+    canceled: false,
+    cancelValidation,
+    cancellation,
+  };
+  pendingPowerPrompterBatchAdmissionTokens.set(admissionToken, admission);
   broadcastPowerPrompterQueueControllerSnapshot('batch_admission_started', ws);
   try {
-    await processPrompterApiWorkflowQueueBatchRequest(ws, data, batchRequestId);
+    await processPrompterApiWorkflowQueueBatchRequest(ws, data, batchRequestId, admission);
   } finally {
     pendingPowerPrompterBatchAdmissionTokens.delete(admissionToken);
     broadcastPowerPrompterQueueControllerSnapshot('batch_admission_finished', ws);
@@ -10970,11 +11065,13 @@ async function processPrompterApiWorkflowQueueBatchRequest(
   ws: ServerWebSocket<unknown>,
   data: any,
   batchRequestId: string,
+  admission: PendingPowerPrompterBatchAdmission,
 ) {
   const rawGroups = Array.isArray(data?.groups) ? data.groups : [];
   const wildcards = rawGroups.some((group: any) => hasPrompterQueueWildcardReferences(group?.prompts, group?.state))
-    ? await listPowerPrompterWildcards()
+    ? await awaitPowerPrompterBatchValidation(admission, listPowerPrompterWildcards())
     : [];
+  if (admission.canceled || wildcards === POWER_PROMPTER_BATCH_ADMISSION_CANCELED) return;
   const groups = rawGroups
     .map((group: any) => ({
       requestId: String(group?.requestId || '').trim(),
@@ -10993,8 +11090,7 @@ async function processPrompterApiWorkflowQueueBatchRequest(
     });
 
   if (groups.length <= 0) {
-    sendWs(ws, {
-      type: 'queue_batch_forwarded',
+    sendPowerPrompterBatchAck(ws, {
       requestId: batchRequestId,
       success: false,
       error: 'No queue groups were provided.',
@@ -11016,8 +11112,7 @@ async function processPrompterApiWorkflowQueueBatchRequest(
     }
     if (duplicates.size === 0) return false;
     const duplicateRequestIds = Array.from(duplicates);
-    sendWs(ws, {
-      type: 'queue_batch_forwarded',
+    sendPowerPrompterBatchAck(ws, {
       requestId: batchRequestId,
       success: false,
       duplicate: true,
@@ -11034,17 +11129,23 @@ async function processPrompterApiWorkflowQueueBatchRequest(
     loaded: LoadedPPApiWorkflow;
   }> = [];
   try {
-    resolvedGroups = await Promise.all(groups.map(async (group) => ({
+    const resolved = await awaitPowerPrompterBatchValidation(admission, Promise.all(groups.map(async (group) => ({
       group,
       loaded: await loadRequestedPowerPrompterPipeline(group.state),
-    })));
-    const validationContext = await createPPQueueValidationContext();
+    }))));
+    if (resolved === POWER_PROMPTER_BATCH_ADMISSION_CANCELED || admission.canceled) return;
+    resolvedGroups = resolved;
+    const validationContext = await awaitPowerPrompterBatchValidation(admission, createPPQueueValidationContext());
+    if (validationContext === POWER_PROMPTER_BATCH_ADMISSION_CANCELED || admission.canceled) return;
     for (const { group, loaded } of resolvedGroups) {
-      await assertPPQueueExecutionReady(loaded, group.state, validationContext);
+      const validated = await awaitPowerPrompterBatchValidation(
+        admission, assertPPQueueExecutionReady(loaded, group.state, validationContext),
+      );
+      if (validated === POWER_PROMPTER_BATCH_ADMISSION_CANCELED || admission.canceled) return;
     }
   } catch (error: any) {
-    sendWs(ws, {
-      type: 'queue_batch_forwarded',
+    if (admission.canceled) return;
+    sendPowerPrompterBatchAck(ws, {
       requestId: batchRequestId,
       success: false,
       error: String(error?.message || error || 'Failed to resolve the selected generation pipeline.'),
@@ -11052,10 +11153,10 @@ async function processPrompterApiWorkflowQueueBatchRequest(
     });
     return;
   }
+  if (admission.canceled) return;
   const incompatible = resolvedGroups.find(({ loaded }) => !loaded.item.compatible);
   if (incompatible) {
-    sendWs(ws, {
-      type: 'queue_batch_forwarded',
+    sendPowerPrompterBatchAck(ws, {
       requestId: batchRequestId,
       success: false,
       error: `Selected generation pipeline is not compatible.${incompatible.loaded.item.missing.length > 0 ? ` Missing: ${incompatible.loaded.item.missing.join(', ')}` : ''}`,
@@ -11066,6 +11167,7 @@ async function processPrompterApiWorkflowQueueBatchRequest(
 
   // Validation awaits permit another batch to acquire these IDs. Recheck at
   // the admission boundary; the enqueue loop below must remain synchronous.
+  if (admission.canceled) return;
   if (rejectDuplicateRequests()) return;
   const acceptedRequestIds: string[] = [];
   for (const { group, loaded } of resolvedGroups) {
@@ -11086,8 +11188,7 @@ async function processPrompterApiWorkflowQueueBatchRequest(
     acceptedRequestIds.push(group.requestId);
   }
 
-  sendWs(ws, {
-    type: 'queue_batch_forwarded',
+  sendPowerPrompterBatchAck(ws, {
     requestId: batchRequestId,
     success: true,
     targetRole: 'backend_pipeline',
@@ -11161,6 +11262,68 @@ async function handlePrompterApiWorkflowQueueRequest(
       pipeline: getUmbraUiPipelineRequestFromQueueState(data?.state),
     },
   });
+}
+
+function cancelPendingPowerPrompterBatchesForControl(
+  ws: ServerWebSocket<unknown>, data: any, type: 'queue_cancel' | 'queue_clear_future',
+): { canceledBatchRequestIds: string[]; canceledGroupRequestIds: string[]; error?: string } {
+  const cancelPendingBatchRequestId = String(data?.cancelPendingBatchRequestId || '').trim();
+  if (cancelPendingBatchRequestId.length > 256) {
+    return {
+      canceledBatchRequestIds: [], canceledGroupRequestIds: [],
+      error: 'Invalid pending batch request id.',
+    };
+  }
+  const explicitIds = new Set(collectPrompterRequestIds(data?.requestIds));
+  const admissions = Array.from(pendingPowerPrompterBatchAdmissionTokens.values());
+  if (type === 'queue_cancel') {
+    const partial = admissions.find((admission) => {
+      if (admission.canceled || (admission.sourceWs === ws && admission.batchRequestId === cancelPendingBatchRequestId)) return false;
+      const matched = admission.groupRequestIds.filter((id) => explicitIds.has(id)).length;
+      return matched > 0 && matched < admission.groupRequestIds.length;
+    });
+    if (partial) {
+      return {
+        canceledBatchRequestIds: [], canceledGroupRequestIds: [],
+        error: 'A pending batch is atomic. Select every group in that batch, or retry after admission settles.',
+      };
+    }
+  }
+
+  const canceledBatchRequestIds = new Set<string>();
+  const canceledGroupRequestIds = new Set<string>();
+  for (const admission of admissions) {
+    if (admission.canceled) continue;
+    const targetedByBatchId = !!cancelPendingBatchRequestId
+      && admission.sourceWs === ws && admission.batchRequestId === cancelPendingBatchRequestId;
+    const targetedByGroupIds = admission.groupRequestIds.length > 0
+      && admission.groupRequestIds.every((id) => explicitIds.has(id));
+    if (type !== 'queue_clear_future' && !targetedByBatchId && !targetedByGroupIds) continue;
+    admission.canceled = true;
+    admission.cancelValidation();
+    if (cancelPowerPrompterBatchBeforeAdmission(admission.sourceWs, admission.batchRequestId)) {
+      canceledBatchRequestIds.add(admission.batchRequestId);
+      for (const id of admission.groupRequestIds) canceledGroupRequestIds.add(id);
+    }
+  }
+
+  if (type === 'queue_clear_future') {
+    for (const upload of prompterQueueUploads.cancelAllBatches()) {
+      if (cancelPowerPrompterBatchBeforeAdmission(upload.client, upload.requestId)) {
+        canceledBatchRequestIds.add(upload.requestId);
+      }
+    }
+  }
+  if (cancelPendingBatchRequestId) {
+    prompterQueueUploads.cancel(ws, cancelPendingBatchRequestId);
+    if (cancelPowerPrompterBatchBeforeAdmission(ws, cancelPendingBatchRequestId)) {
+      canceledBatchRequestIds.add(cancelPendingBatchRequestId);
+    }
+  }
+  return {
+    canceledBatchRequestIds: Array.from(canceledBatchRequestIds),
+    canceledGroupRequestIds: Array.from(canceledGroupRequestIds),
+  };
 }
 
 function forwardPrompterQueueControlToComfyTarget(
@@ -11248,10 +11411,12 @@ function forwardPrompterQueueControlToComfyTarget(
     });
     return;
   }
-  if (isBackendPipelineTarget
+  const pendingBatchControl = isBackendPipelineTarget
     && (type === 'queue_cancel' || type === 'queue_clear_future')
-    && pendingPowerPrompterBatchAdmissionTokens.size > 0) {
-    const error = 'A Power Prompter batch admission is still in progress. Wait for the backend queue to settle and try again.';
+    ? cancelPendingPowerPrompterBatchesForControl(ws, data, type)
+    : { canceledBatchRequestIds: [], canceledGroupRequestIds: [] };
+  if (pendingBatchControl.error) {
+    const error = pendingBatchControl.error;
     sendWs(ws, type === 'queue_clear_future'
       ? {
         type: 'queue_clear_future_result', requestId,
@@ -11285,20 +11450,30 @@ function forwardPrompterQueueControlToComfyTarget(
   // in flight if another client paused while submission was already underway.
   // Recently canceled requests can also have a submitted task after their
   // controller row becomes terminal, so inspect active backend workers too.
+  const targetedLiveBackendRequestsUnsubmitted = targetedLiveBackendRequestIds.every((id) => {
+    const request = findPowerPrompterQueueControllerRequest(id);
+    return request?.prompts.every((prompt) => prompt.status !== 'submitting' && prompt.status !== 'running') === true;
+  });
   const noSubmittedPromptBeforeControl = powerPrompterQueueControllerState.paused
     && !hasPotentialSubmittedBackendPrompt
     && targetedLiveBackendRequestIds.length > 0
-    && targetedLiveBackendRequestIds.every((id) => {
-      const request = findPowerPrompterQueueControllerRequest(id);
-      return request?.prompts.every((prompt) => prompt.status !== 'submitting' && prompt.status !== 'running') === true;
-    });
+    && targetedLiveBackendRequestsUnsubmitted;
   const backendAffectedRequestIds = type === 'queue_cancel'
     || type === 'queue_clear_future'
     || type === 'queue_interrupt_active'
     ? applyBackendPowerPrompterQueueControl(controlData, type)
     : [];
-  const noSubmittedPrompt = noSubmittedPromptBeforeControl
-    && targetedLiveBackendRequestIds.every((id) => backendAffectedRequestIds.includes(id));
+  const affectedRequestIds = Array.from(new Set([
+    ...backendAffectedRequestIds,
+    ...pendingBatchControl.canceledGroupRequestIds,
+  ]));
+  const noSubmittedPrompt = (noSubmittedPromptBeforeControl
+    && targetedLiveBackendRequestIds.every((id) => backendAffectedRequestIds.includes(id)))
+    || (pendingBatchControl.canceledBatchRequestIds.length > 0
+      && !hasPotentialSubmittedBackendPrompt
+      && targetedLiveBackendRequestsUnsubmitted
+      && targetedLiveBackendRequestIds.every((id) => backendAffectedRequestIds.includes(id)));
+  const controlSucceeded = affectedRequestIds.length > 0 || pendingBatchControl.canceledBatchRequestIds.length > 0;
 
   if (isBackendPipelineTarget) {
     if (type === 'queue_pause' || type === 'queue_resume') {
@@ -11321,11 +11496,12 @@ function forwardPrompterQueueControlToComfyTarget(
         type: 'queue_clear_future_result',
         requestId,
         activeRequestId: String(data?.activeRequestId || ''),
-        clearedRequestIds: backendAffectedRequestIds,
-        success: backendAffectedRequestIds.length > 0,
+        clearedRequestIds: affectedRequestIds,
+        canceledBatchRequestIds: pendingBatchControl.canceledBatchRequestIds,
+        success: controlSucceeded,
         backendHandled: true,
         ...(noSubmittedPrompt ? { noSubmittedPrompt: true } : {}),
-        ...(backendAffectedRequestIds.length > 0 ? {} : { error: 'No backend pipeline queue jobs were cleared.' }),
+        ...(controlSucceeded ? {} : { error: 'No backend pipeline queue jobs were cleared.' }),
       });
       return;
     }
@@ -11333,11 +11509,12 @@ function forwardPrompterQueueControlToComfyTarget(
     sendWs(ws, {
       type: 'queue_cancel_result',
       requestId,
-      requestIds: backendAffectedRequestIds,
-      success: backendAffectedRequestIds.length > 0,
+      requestIds: affectedRequestIds,
+      canceledBatchRequestIds: pendingBatchControl.canceledBatchRequestIds,
+      success: controlSucceeded,
       backendHandled: true,
       ...(noSubmittedPrompt ? { noSubmittedPrompt: true } : {}),
-      ...(backendAffectedRequestIds.length > 0 ? {} : { error: 'No backend pipeline queue jobs were canceled.' }),
+      ...(controlSucceeded ? {} : { error: 'No backend pipeline queue jobs were canceled.' }),
     });
     return;
   }
@@ -11604,13 +11781,21 @@ function handlePrompterModelRequest(
   }
 }
 
-const prompterQueueUploads = new QueueUploadReceiver<ServerWebSocket<unknown>>((ws, error) => { sendWs(ws, error); });
+const prompterQueueUploads = new QueueUploadReceiver<ServerWebSocket<unknown>>((ws, error) => {
+  if (error.type === 'queue_batch_forwarded') sendPowerPrompterBatchAck(ws, error);
+  else sendWs(ws, error);
+});
 
 function handlePrompterMessage(ws: ServerWebSocket<unknown>, data: any) {
   const type = String(data?.type || '').trim();
   if (!type) return;
   if (type.startsWith('queue_upload_')) {
     if (getPrompterMeta(ws).role !== 'powerprompter') return;
+    if (type === 'queue_upload_start' && data?.requestType === 'queue_batch_request'
+      && getRecentPowerPrompterBatchOutcome(ws, String(data?.requestId || '')) === 'canceled') return;
+    if (type === 'queue_upload_start' && data?.requestType === 'queue_batch_request') {
+      clearRecentPowerPrompterBatchOutcome(ws, String(data?.requestId || ''));
+    }
     const payload = prompterQueueUploads.receive(ws, data);
     if (payload) handlePrompterMessage(ws, payload);
     return;
@@ -11783,9 +11968,10 @@ function handlePrompterMessage(ws: ServerWebSocket<unknown>, data: any) {
     const meta = getPrompterMeta(ws);
     if (meta.role !== 'powerprompter') return;
     const requestId = String(data?.requestId || crypto.randomUUID());
+    if (getRecentPowerPrompterBatchOutcome(ws, requestId) === 'canceled') return;
+    clearRecentPowerPrompterBatchOutcome(ws, requestId);
     void handlePrompterApiWorkflowQueueBatchRequest(ws, data, requestId).catch((error: any) => {
-      sendWs(ws, {
-        type: 'queue_batch_forwarded',
+      sendPowerPrompterBatchAck(ws, {
         requestId,
         success: false,
         error: String(error?.message || 'Failed to enqueue generation pipeline batch.'),
@@ -38193,6 +38379,7 @@ const server = Bun.serve<UmbraSocketData>({
     close(ws) {
       remoteWebSockets.delete(ws);
       prompterQueueUploads.discard(ws);
+      clearPowerPrompterBatchOutcomesForSocket(ws);
       const endpoint = (ws.data as any)?.endpoint || '/ws/unknown';
       if (endpoint === '/comfy/ws') {
         try { (ws.data as any)?.upstream?.close?.(); } catch {}

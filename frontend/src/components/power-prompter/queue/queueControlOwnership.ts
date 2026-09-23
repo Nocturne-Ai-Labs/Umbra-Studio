@@ -94,3 +94,65 @@ export function resolveActiveQueueControlRequestId(
     || bridgeActiveRequestIds.some((id) => String(id || '').trim() === requestId)
   ) ? requestId : '';
 }
+
+type BackendQueueControlResult = {
+  success?: boolean;
+  backendHandled?: boolean;
+  noSubmittedPrompt?: boolean;
+  requestIds?: unknown;
+  clearedRequestIds?: unknown;
+  canceledBatchRequestIds?: unknown;
+};
+
+function affectedQueueControlRequestIds(result: BackendQueueControlResult, action: 'cancel' | 'clear'): Set<string> {
+  const raw = action === 'clear' ? result.clearedRequestIds : result.requestIds;
+  return new Set(Array.isArray(raw) ? raw.map((entry) => String(entry || '').trim()).filter(Boolean) : []);
+}
+
+export function hasAcknowledgedPendingBatchControl(input: {
+  result: BackendQueueControlResult;
+  action: 'cancel' | 'clear';
+  pendingBatchRequestId: string;
+  pendingBatchGroupRequestIds: Iterable<string>;
+}): boolean {
+  if (!input.pendingBatchRequestId) return true;
+  if (input.result.success !== true || input.result.backendHandled !== true) return false;
+  const canceledBatchIds = Array.isArray(input.result.canceledBatchRequestIds)
+    ? input.result.canceledBatchRequestIds
+    : [];
+  if (canceledBatchIds.includes(input.pendingBatchRequestId)) return true;
+  const affected = affectedQueueControlRequestIds(input.result, input.action);
+  const groupIds = Array.from(input.pendingBatchGroupRequestIds);
+  return groupIds.length > 0 && groupIds.every((requestId) => affected.has(requestId));
+}
+
+export function hasAcknowledgedUnsubmittedQueueControl(input: {
+  result: BackendQueueControlResult;
+  action: 'cancel' | 'clear';
+  backendRequestIds: Iterable<string>;
+  pendingBatchRequestId: string;
+  pendingBatchGroupRequestIds: Iterable<string>;
+}): boolean {
+  const { result } = input;
+  if (result.success !== true || result.backendHandled !== true || result.noSubmittedPrompt !== true) return false;
+  const affected = affectedQueueControlRequestIds(result, input.action);
+  for (const requestId of input.backendRequestIds) {
+    if (!affected.has(requestId)) return false;
+  }
+  return hasAcknowledgedPendingBatchControl(input);
+}
+
+export function resolveQueueStartStopDisposition(input: {
+  startSequence: number;
+  confirmedStopSequence: number;
+  failedStopSequence: number;
+  stopInFlight: boolean;
+}): { suppressStartError: boolean; restorePaused: boolean; keepStopBusy: boolean } {
+  const suppressStartError = input.startSequence > 0
+    && input.confirmedStopSequence === input.startSequence;
+  return {
+    suppressStartError,
+    restorePaused: suppressStartError && input.failedStopSequence === input.startSequence,
+    keepStopBusy: input.stopInFlight,
+  };
+}

@@ -62,6 +62,21 @@ export class QueueUploadReceiver<Client extends object> {
     if (upload) clearTimeout(upload.timer);
     this.uploads.delete(client);
   }
+  cancel(client: Client, requestId: string): boolean {
+    const upload = this.uploads.get(client);
+    if (!upload || upload.requestType !== 'queue_batch_request' || upload.requestId !== requestId) return false;
+    this.discard(client);
+    return true;
+  }
+  cancelAllBatches(): Array<{ client: Client; requestId: string }> {
+    const canceled: Array<{ client: Client; requestId: string }> = [];
+    for (const [client, upload] of this.uploads) {
+      if (upload.requestType !== 'queue_batch_request') continue;
+      canceled.push({ client, requestId: upload.requestId });
+      this.discard(client);
+    }
+    return canceled;
+  }
   private fail(client: Client, upload: Pick<Upload, 'requestId' | 'requestType'>, error: string) {
     this.discard(client);
     this.report(client, { type: upload.requestType === 'queue_batch_request' ? 'queue_batch_forwarded' : 'queue_forwarded', requestId: upload.requestId, success: false, error, acceptedRequestIds: [] });
