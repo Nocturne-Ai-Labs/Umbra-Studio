@@ -4240,6 +4240,34 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     })) return;
     powerPrompterSessionMutationQueueRef.current?.invalidatePendingUpdates();
 
+    if (!session.file && !session.document) {
+      fileLoadRequestSeqRef.current += 1;
+      if (powerPrompterSessionUpdateTimerRef.current) {
+        clearTimeout(powerPrompterSessionUpdateTimerRef.current);
+        powerPrompterSessionUpdateTimerRef.current = null;
+      }
+      clearAutosaveTimer();
+      const emptyDocument = createDefaultPowerPrompterCardDocument(null);
+      powerPrompterSessionApplyingRef.current = true;
+      powerPrompterSessionRevisionRef.current = Math.max(powerPrompterSessionRevisionRef.current, session.revision);
+      setCurrentFile(null);
+      setContent('');
+      setCardDocument(emptyDocument);
+      setQueueSetTarget(1);
+      setLoadingPromptFileName(null);
+      setActivePowerPrompterPresetSession(null);
+      activePowerPrompterPresetSessionRef.current = null;
+      currentFileRef.current = null;
+      contentRef.current = '';
+      cardDocumentRef.current = emptyDocument;
+      lastSavedContentRef.current = '';
+      lastSavedCardSignatureRef.current = '';
+      hasPendingChangesRef.current = false;
+      lastEditAtRef.current = 0;
+      powerPrompterSessionApplyingRef.current = false;
+      return;
+    }
+
     const normalizedBase = normalizePowerPrompterCardDocument(session.document, session.file);
     const normalized = {
       ...normalizedBase,
@@ -7400,9 +7428,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       powerPrompterSessionUpdateTimerRef.current = null;
     }
     powerPrompterSessionMutationQueueRef.current?.invalidatePendingUpdates();
-    void fetch(`/api/powerprompter/session?clientId=${encodeURIComponent(powerPrompterUiClientIdRef.current)}&file=${encodeURIComponent(path)}&expectedRevision=${encodeURIComponent(powerPrompterSessionRevisionRef.current)}`, {
-      method: 'DELETE',
-    }).catch(() => undefined);
     setCurrentFile(null);
     setContent('');
     setCardDocument(createDefaultPowerPrompterCardDocument(null));
@@ -11532,6 +11557,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         ) : (
           <PowerPrompterSidebar
             currentFile={currentFile}
+            getSessionRevision={() => powerPrompterSessionRevisionRef.current}
             onLoadFromPpuid={handleRestorePowerPrompterPpuid}
             ppuidRestoreBusy={powerPrompterPresetBusy === 'load'}
             onFileOpenStart={(path) => {
@@ -11666,6 +11692,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
               <div className="pointer-events-auto h-[min(52vh,620px)] min-h-[300px] w-[min(92vw,560px)] overflow-hidden rounded-xl border border-cyan-300/25 bg-[#050508]/98 shadow-[0_18px_46px_rgba(0,0,0,0.65)] backdrop-blur-md">
                 <PowerPrompterSidebar
                   currentFile={currentFile}
+                  getSessionRevision={() => powerPrompterSessionRevisionRef.current}
                   onLoadFromPpuid={handleRestorePowerPrompterPpuid}
                   ppuidRestoreBusy={powerPrompterPresetBusy === 'load'}
                   onFileOpenStart={handleFileOpenStart}

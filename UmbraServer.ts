@@ -222,6 +222,7 @@ import {
 import { buildQueuePromptsFromCards } from './shared/power-prompter/queuePromptBuilder';
 import { normalizeQueueSetOrders as normalizePPQueueSetOrders } from './shared/power-prompter/cardQueueSetOrders';
 import { composePowerPrompterDocumentPrompt } from './backend/PowerPrompterDocumentPrompt';
+import { doesPowerPrompterTrashAffectSession, doesPowerPrompterTrashRemoveActiveFile, powerPrompterTrashModeForPath, resolvePowerPrompterTrashTargetPaths, runGuardedPowerPrompterTrashMutation, shouldGatePowerPrompterTrash } from './backend/PowerPrompterDeleteGuard';
 import { assertPowerPrompterCardEditorRevision, assertPowerPrompterCardStorageRevision, assertPowerPrompterSessionCanOpen, assertPowerPrompterSessionFile, assertPowerPrompterSessionRevision, createPowerPrompterSessionGate, PowerPrompterSessionConflictError, shouldReusePowerPrompterSession } from './backend/PowerPrompterSessionGate';
 import {
   UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
@@ -22419,28 +22420,38 @@ async function updatePowerPrompterDocumentSession(
   });
 }
 
-async function clearPowerPrompterDocumentSession(options: { expectedFile: string; expectedRevision: unknown; sourceClientId?: string; preferredSourceWs?: ServerWebSocket<unknown> | null; reason?: string }): Promise<PowerPrompterDocumentSession> {
-  return mutatePowerPrompterDocumentSession(async () => {
-    const resolved = resolvePPPromptFile(options.expectedFile);
-    if (!resolved) throw new Error('Invalid Power Prompter file path');
-    assertPowerPrompterSessionFile(powerPrompterDocumentSession.file, resolved.filePath);
-    assertPowerPrompterSessionRevision(powerPrompterDocumentSession.revision, options.expectedRevision);
-    const now = Date.now();
-    powerPrompterDocumentSession = {
-      version: 1,
-      file: null,
-      document: null,
-      composedPrompt: '',
-      revision: Math.max(powerPrompterDocumentSession.revision + 1, now),
-      dirty: false,
-      lastSavedAt: 0,
-      updatedAt: now,
-      sourceClientId: String(options.sourceClientId || '').trim(),
-    };
-    await persistPowerPrompterDocumentSessionSummary().catch(() => undefined);
-    broadcastPowerPrompterDocumentSession(options.reason || 'document_cleared', options.preferredSourceWs);
-    return powerPrompterDocumentSession;
-  });
+interface ClearPowerPrompterDocumentSessionOptions {
+  expectedFile: string;
+  expectedRevision: unknown;
+  sourceClientId?: string;
+  preferredSourceWs?: ServerWebSocket<unknown> | null;
+  reason?: string;
+}
+
+async function clearPowerPrompterDocumentSessionUnlocked(options: ClearPowerPrompterDocumentSessionOptions): Promise<PowerPrompterDocumentSession> {
+  const resolved = resolvePPPromptFile(options.expectedFile);
+  if (!resolved) throw new Error('Invalid Power Prompter file path');
+  assertPowerPrompterSessionFile(powerPrompterDocumentSession.file, resolved.filePath);
+  assertPowerPrompterSessionRevision(powerPrompterDocumentSession.revision, options.expectedRevision);
+  const now = Date.now();
+  powerPrompterDocumentSession = {
+    version: 1,
+    file: null,
+    document: null,
+    composedPrompt: '',
+    revision: Math.max(powerPrompterDocumentSession.revision + 1, now),
+    dirty: false,
+    lastSavedAt: 0,
+    updatedAt: now,
+    sourceClientId: String(options.sourceClientId || '').trim(),
+  };
+  await persistPowerPrompterDocumentSessionSummary().catch(() => undefined);
+  broadcastPowerPrompterDocumentSession(options.reason || 'document_cleared', options.preferredSourceWs);
+  return powerPrompterDocumentSession;
+}
+
+function clearPowerPrompterDocumentSession(options: ClearPowerPrompterDocumentSessionOptions): Promise<PowerPrompterDocumentSession> {
+  return mutatePowerPrompterDocumentSession(() => clearPowerPrompterDocumentSessionUnlocked(options));
 }
 
 async function getPowerPrompterCardStorageRevision(resolved: { fullPath: string; sidecarPath: string }): Promise<string> {
@@ -25250,7 +25261,7 @@ async function tryReadJsonResponseBody(res: Response): Promise<unknown> {
   }
 }
 
-async function handleTrashMutationWithCacheInvalidation(
+async function handleTrashMutationWithCacheInvalidationUnlocked(
   req: Request,
   url: URL,
   handler: (request: Request, parsedUrl: URL, context: any) => Promise<Response>,
@@ -25283,8 +25294,11 @@ async function handleTrashMutationWithCacheInvalidation(
       || url.pathname === '/api/trash/delete-direct'
       || url.pathname === '/api/trash/system'
     ) {
-      const paths = Array.isArray((body as any)?.paths) ? (body as any).paths : [];
-      galleryDb.removeRecordsForPaths(paths.map((entry: unknown) => String(entry || '')));
+      const results = Array.isArray((responseBody as any)?.results) ? (responseBody as any).results : [];
+      galleryDb.removeRecordsForPaths(results
+        .filter((entry: any) => entry?.success === true)
+        .map((entry: any) => String(entry?.requestedPath || entry?.path || ''))
+        .filter(Boolean));
     } else if (url.pathname === '/api/trash/empty') {
       galleryDb.removeRecordsForPaths([TRASH_ROOT]);
     }
@@ -25298,6 +25312,72 @@ async function handleTrashMutationWithCacheInvalidation(
     ...Array.from(hintedPaths),
   ], 'trash-mutation');
   return response;
+}
+
+async function handleTrashMutationWithCacheInvalidation(
+  req: Request,
+  url: URL,
+  handler: (request: Request, parsedUrl: URL, context: any) => Promise<Response>,
+): Promise<Response> {
+  const mode = powerPrompterTrashModeForPath(url.pathname);
+  if (!mode) return handleTrashMutationWithCacheInvalidationUnlocked(req, url, handler);
+  const body = await tryReadJsonBody(req);
+  const input = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  const requestedPaths = Array.isArray(input.paths)
+    ? input.paths.filter((value): value is string => typeof value === 'string').map((value) => value.trim()).filter(Boolean)
+    : [];
+  if (!requestedPaths.length) return handleTrashMutationWithCacheInvalidationUnlocked(req, url, handler);
+  const initialTargets = await resolvePowerPrompterTrashTargetPaths(requestedPaths, resolvePath);
+  const initialRoot = await fs.realpath(PP_PROMPTS_ROOT_ABS).catch(() => PP_PROMPTS_ROOT_ABS);
+  if (!shouldGatePowerPrompterTrash(initialTargets.flatMap((target) => target.fullPaths), PP_PROMPTS_ROOT_ABS)
+    && !shouldGatePowerPrompterTrash(initialTargets.flatMap((target) => target.fullPaths), initialRoot)) {
+    return handleTrashMutationWithCacheInvalidationUnlocked(req, url, handler);
+  }
+
+  return mutatePowerPrompterDocumentSession(async () => {
+    const targets = await resolvePowerPrompterTrashTargetPaths(requestedPaths, resolvePath);
+    const activeFile = powerPrompterDocumentSession.file;
+    const activeResolved = activeFile ? resolvePPPromptFile(activeFile) : null;
+    const activeRealPath = activeResolved ? await fs.realpath(activeResolved.fullPath).catch(() => null) : null;
+    const activePaths = activeResolved
+      ? [activeResolved.fullPath, ...(activeRealPath && activeRealPath !== activeResolved.fullPath ? [activeRealPath] : [])]
+      : [];
+    const protectedPaths = targets
+      .filter((target) => activePaths.some((activePath) => doesPowerPrompterTrashAffectSession(target.fullPaths, activePath)))
+      .map((target) => target.requestedPath);
+    const primaryPaths = targets
+      .filter((target) => activePaths.some((activePath) => doesPowerPrompterTrashRemoveActiveFile(target.fullPaths, activePath)))
+      .map((target) => target.requestedPath);
+
+    return runGuardedPowerPrompterTrashMutation({
+      mode,
+      requestedPaths,
+      protectedPaths,
+      primaryPaths,
+      currentRevision: powerPrompterDocumentSession.revision,
+      expectedRevision: input.expectedRevision,
+      conflictHeaders: getCorsHeaders(),
+      perform: (allowedPaths) => {
+        const effectiveRequest = allowedPaths.length === requestedPaths.length
+          ? req
+          : new Request(req.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...input, paths: allowedPaths }),
+          });
+        return handleTrashMutationWithCacheInvalidationUnlocked(effectiveRequest, url, handler);
+      },
+      clearSession: async () => {
+        if (!activeFile) return;
+        await clearPowerPrompterDocumentSessionUnlocked({
+          expectedFile: activeFile,
+          expectedRevision: input.expectedRevision,
+          sourceClientId: '',
+          reason: 'document_deleted',
+        });
+      },
+    });
+  });
 }
 
 function paginateFsListResult(

@@ -77,6 +77,7 @@ interface FileTagEditorState {
 
 interface PowerPrompterSidebarProps {
   currentFile: string | null;
+  getSessionRevision: () => number;
   onFileOpenStart?: (path: string) => void;
   onFileOpenFailed?: () => void;
   onSelectFile: (path: string, content: string) => void;
@@ -89,6 +90,7 @@ interface PowerPrompterSidebarProps {
 
 export const PowerPrompterSidebar = React.memo(({
   currentFile,
+  getSessionRevision,
   onFileOpenStart,
   onFileOpenFailed,
   onSelectFile,
@@ -746,15 +748,23 @@ export const PowerPrompterSidebar = React.memo(({
           // no-op
         }
       }
-      const deleteResult = await deletePathsWithSettings(pathsToDelete, appSettings);
-      if (deleteResult.deletedPaths.length === 0 && deleteResult.failed.length > 0) {
-        throw new Error(deleteResult.failed[0].error || 'Failed to delete');
+      const deleteResult = await deletePathsWithSettings(pathsToDelete, appSettings, {
+        expectedRevision: getSessionRevision(),
+      });
+      void loadFiles(parentPath || ROOT_PATH);
+      const complete = deleteResult.failed.length === 0 && deleteResult.deletedPaths.length === pathsToDelete.length;
+      const normalizedDeletedPath = path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+      const normalizedCurrentFile = String(currentFile || '').replace(/\\/g, '/').toLowerCase();
+      if (currentFile && (complete || deleteResult.powerPrompterSessionCleared) && (normalizedCurrentFile === normalizedDeletedPath
+        || (isDirectory && normalizedCurrentFile.startsWith(`${normalizedDeletedPath}/`)))) {
+        onDeleteFile(currentFile);
       }
-      loadFiles(parentPath || ROOT_PATH);
-      if (currentFile === path) onDeleteFile(path);
+      if (!complete) {
+        throw new Error(deleteResult.failed[0]?.error || 'Some files could not be deleted.');
+      }
       showToast('Deleted', 'success');
     } catch (err) {
-      showToast('Failed to delete', 'error');
+      showToast(err instanceof Error ? err.message : 'Failed to delete', 'error');
     }
   };
 

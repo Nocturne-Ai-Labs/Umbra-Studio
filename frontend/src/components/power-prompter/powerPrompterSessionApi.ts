@@ -33,10 +33,12 @@ export function shouldApplyPowerPrompterDocumentSession(
   session: PowerPrompterDocumentSession,
   options: { fromRemote: boolean; clientId: string; hasPendingChanges: boolean; currentRevision: number },
 ): boolean {
-  if (!session.document || !session.file) return false;
+  const isClearedSession = !session.document && !session.file;
+  if (!isClearedSession && (!session.document || !session.file)) return false;
   const sourceClientId = String(session.sourceClientId || '').trim();
   if (options.fromRemote && sourceClientId && sourceClientId === options.clientId) return false;
   if (options.fromRemote && options.hasPendingChanges) return false;
+  if (isClearedSession) return session.revision > options.currentRevision;
   return session.revision <= 0 || session.revision >= options.currentRevision;
 }
 
