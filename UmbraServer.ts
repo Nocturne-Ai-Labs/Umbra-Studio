@@ -48,6 +48,7 @@ import { FsWorkerService } from './backend/FsWorkerService';
 import { GalleryTransferJournal } from './backend/GalleryTransferJournal';
 import { isGalleryUploadFilename, isGalleryUploadStrategy, prepareGalleryUploadDirectory } from './backend/GalleryUploadService';
 import { copyMediaIntoComfyInput, writeAllUploadedMediaBytes } from './backend/UmbraUiMediaUploadService';
+import { UmbraStagedVideoPreviewGrants } from './backend/UmbraStagedVideoPreviewGrants';
 import { isCivitaiModelDownloadUrl } from './backend/ModelDownloadHttp';
 import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
 import { fetchLocalServerProxy, readLocalServerProxyText } from './backend/LocalServerProxyTransfer';
@@ -281,6 +282,9 @@ const ROOT_PUBLIC_DIR = join(ROOT_DIR, 'public');
 const SOURCE_PUBLIC_DIR = join(SOURCE_DIR, 'public');
 const PUBLIC_DIR = existsSync(ROOT_PUBLIC_DIR) ? ROOT_PUBLIC_DIR : SOURCE_PUBLIC_DIR;
 const USER_DIR = join(ROOT_DIR, 'User');
+const umbraStagedVideoPreviewGrants = new UmbraStagedVideoPreviewGrants(
+  join(USER_DIR, 'UmbraUI', 'Queue', 'staged-video-previews.json'),
+);
 const umbraUiImg2ImgCompletionReceipts = new UmbraUiImg2ImgCompletionReceipts(
   join(USER_DIR, 'UmbraUI', 'ImageCompletionReceipts'),
 );
@@ -26459,6 +26463,57 @@ async function handleFsImage(req: Request, url: URL, server?: RequestIpServer): 
   }
 }
 
+async function handleUmbraStagedVideoPreview(req: Request, url: URL): Promise<Response> {
+  const unavailable = () => new Response('Staged video preview is unavailable', {
+    status: 404,
+    headers: { 'Cache-Control': 'private, no-store' },
+  });
+  const filename = url.searchParams.get('filename') || '';
+  const fullPath = await umbraStagedVideoPreviewGrants.resolve(getComfyInputRootFast(), filename);
+  if (!fullPath) return unavailable();
+
+  const fileStat = await fs.stat(fullPath).catch(() => null);
+  if (!fileStat?.isFile() || fileStat.size <= 0) return unavailable();
+  const contentType = ({
+    '.avi': 'video/x-msvideo',
+    '.m4v': 'video/mp4',
+    '.mkv': 'video/x-matroska',
+    '.mov': 'video/quicktime',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+  } as Record<string, string>)[extname(fullPath).toLowerCase()] || 'application/octet-stream';
+  const baseHeaders: Record<string, string> = {
+    'Content-Type': contentType,
+    'Content-Length': String(fileStat.size),
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
+  };
+  if (req.method === 'HEAD') return new Response(null, { headers: baseHeaders });
+
+  const file = Bun.file(fullPath);
+  const range = String(req.headers.get('range') || '').trim();
+  if (range) {
+    const bounds = resolveSingleByteRange(range, fileStat.size);
+    if (!bounds) {
+      return new Response(null, {
+        status: 416,
+        headers: { ...baseHeaders, 'Content-Length': '0', 'Content-Range': `bytes */${fileStat.size}` },
+      });
+    }
+    const { start, end } = bounds;
+    return new Response(file.slice(start, end + 1), {
+      status: 206,
+      headers: {
+        ...baseHeaders,
+        'Content-Length': String(end - start + 1),
+        'Content-Range': `bytes ${start}-${end}/${fileStat.size}`,
+      },
+    });
+  }
+  return new Response(file, { headers: baseHeaders });
+}
+
 
 async function handleGalleryArchives(req: Request, url: URL): Promise<Response> {
   try {
@@ -33632,7 +33687,12 @@ const server = Bun.serve<UmbraSocketData>({
           if (!detectedKind || (requestedKind && requestedKind !== detectedKind)) {
             return json({ error: `Unsupported ${requestedKind || 'media'} file: ${basename(sourcePath)}` }, 400);
           }
-          const { filename, destPath } = await copyMediaIntoComfyInput(sourcePath, getComfyInputRootFast());
+          const comfyInputRoot = getComfyInputRootFast();
+          const { filename, destPath } = await copyMediaIntoComfyInput(sourcePath, comfyInputRoot);
+          if (detectedKind === 'video') {
+            await umbraStagedVideoPreviewGrants.register(comfyInputRoot, filename, destPath)
+              .catch((error) => console.warn('[Umbra UI] Could not register staged video preview:', error));
+          }
           return json({ success: true, filename, destPath, kind: detectedKind });
         } catch (error: any) {
           return json({ error: error?.message || 'Failed to stage media for ComfyUI.' }, 500);
@@ -33706,6 +33766,10 @@ const server = Bun.serve<UmbraSocketData>({
           }
           await fs.rename(tempPath, destPath);
           tempPath = '';
+          if (requestedKind === 'video') {
+            await umbraStagedVideoPreviewGrants.register(comfyInputDir, filename, destPath)
+              .catch((error) => console.warn('[Umbra UI] Could not register uploaded video preview:', error));
+          }
           return json({
             success: true,
             filename,
@@ -33717,6 +33781,10 @@ const server = Bun.serve<UmbraSocketData>({
           if (tempPath) await fs.rm(tempPath, { force: true }).catch(() => undefined);
           return json({ error: error?.message || 'Failed to upload media for ComfyUI.' }, uploadTooLarge ? 413 : 500);
         }
+      }
+
+      if (path === '/api/comfy/staged-video-preview' && (method === 'GET' || method === 'HEAD')) {
+        return handleUmbraStagedVideoPreview(req, url);
       }
 
       if (path === '/api/comfy/staged-video-metadata' && method === 'GET') {

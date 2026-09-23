@@ -30,6 +30,7 @@ import type {
 import type { UmbraVideoEditorDraft } from '@/components/umbra-ui/UmbraVideoGenerationControls';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
 import { normalizeUmbraUiSeed } from '@/lib/umbraUiSeed';
+import { resolveUmbraVideoQueueSourceUrl } from '@/lib/umbraVideoQueuePreview';
 import { NsfwPrivacyShield } from '@/components/privacy/NsfwPrivacyProvider';
 import { classifyUmbraPrompt } from '@/lib/nsfwPrivacy';
 import {
@@ -239,7 +240,7 @@ function ReferenceStrip({ video, large = false }: { video: PowerPrompterVideoCon
           {reference.type === 'image' ? (
             <img src={mediaUrl(reference.path)} alt={reference.label} loading="lazy" className="h-full w-full object-cover" />
           ) : reference.type === 'video' ? (
-            <LazyVideo src={mediaUrl(reference.path)} muted className="h-full w-full object-cover" />
+            <LazyVideo src={resolveUmbraVideoQueueSourceUrl(video)} muted className="h-full w-full object-cover" />
           ) : (
             <div className="flex h-full items-center justify-center"><Music2 size={15} className="text-cyan-300/70" /></div>
           )}
