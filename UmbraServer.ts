@@ -225,7 +225,7 @@ import { composePowerPrompterDocumentPrompt } from './backend/PowerPrompterDocum
 import { doesPowerPrompterTrashAffectSession, doesPowerPrompterTrashRemoveActiveFile, powerPrompterTrashModeForPath, resolvePowerPrompterTrashTargetPaths, runGuardedPowerPrompterTrashMutation, shouldGatePowerPrompterTrash } from './backend/PowerPrompterDeleteGuard';
 import { advancePowerPrompterRawWriteSession, choosePowerPrompterRawCardSaveFile, getPowerPrompterRawCardLogicalFile, isPowerPrompterRawWriteActiveTarget, isPowerPrompterRawWriteCandidate, isPowerPrompterRawWritePhysicalTarget, runGuardedPowerPrompterRawWrite } from './backend/PowerPrompterRawWriteGuard';
 import { assertPowerPrompterCardEditorRevision, assertPowerPrompterCardStorageRevision, assertPowerPrompterSessionCanOpen, assertPowerPrompterSessionFile, assertPowerPrompterSessionRevision, createPowerPrompterSessionGate, PowerPrompterSessionConflictError, shouldReusePowerPrompterSession } from './backend/PowerPrompterSessionGate';
-import { buildPowerPrompterSessionRecord, getPowerPrompterCanonicalStorageToken, getRestorablePowerPrompterDraft, parsePowerPrompterSessionRecord, type PersistedPowerPrompterDocumentSession } from './backend/PowerPrompterSessionPersistence';
+import { buildPowerPrompterSessionRecord, commitPowerPrompterDirtySession, getPowerPrompterCanonicalStorageToken, getRestorablePowerPrompterDraft, parsePowerPrompterSessionRecord, type PersistedPowerPrompterDocumentSession } from './backend/PowerPrompterSessionPersistence';
 import { mergePowerPrompterSettingsPatch } from './backend/PowerPrompterSettingsPatch';
 import {
   UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
@@ -22409,6 +22409,7 @@ async function updatePowerPrompterDocumentSession(
   } = {}
 ): Promise<PowerPrompterDocumentSession> {
   return mutatePowerPrompterDocumentSession(async () => {
+    await restorePowerPrompterDirtySessionUnlocked();
     const resolved = resolvePPPromptFile(filePath);
     if (!resolved) throw new Error('Invalid Power Prompter file path');
     assertPowerPrompterSessionFile(powerPrompterDocumentSession.file, resolved.filePath);
@@ -22455,13 +22456,18 @@ async function updatePowerPrompterDocumentSession(
         throw new PowerPrompterSessionConflictError('The card changed on disk. Save or reopen it before editing.');
       }
       // A live edit is acknowledged only after its full draft is recoverable.
-      await persistPowerPrompterDocumentSessionSummary(nextSession, storageToken);
-      powerPrompterSessionStorageToken = storageToken;
+      await commitPowerPrompterDirtySession(
+        nextSession,
+        storageToken,
+        persistPowerPrompterDocumentSessionSummary,
+        (session, token) => {
+          powerPrompterDocumentSession = session;
+          powerPrompterSessionStorageToken = token;
+        },
+      );
     } else {
       powerPrompterSessionStorageToken = await getPowerPrompterCanonicalStorageToken(resolved);
-    }
-    powerPrompterDocumentSession = nextSession;
-    if (options.save) {
+      powerPrompterDocumentSession = nextSession;
       // The card file is already durable. A stale dirty draft cannot replay after
       // this write because its captured storage token no longer matches.
       await persistPowerPrompterDocumentSessionSummary().catch(() => undefined);
@@ -22494,6 +22500,7 @@ interface ClearPowerPrompterDocumentSessionOptions {
 }
 
 async function clearPowerPrompterDocumentSessionUnlocked(options: ClearPowerPrompterDocumentSessionOptions): Promise<PowerPrompterDocumentSession> {
+  await restorePowerPrompterDirtySessionUnlocked();
   const resolved = resolvePPPromptFile(options.expectedFile);
   if (!resolved) throw new Error('Invalid Power Prompter file path');
   assertPowerPrompterSessionFile(powerPrompterDocumentSession.file, resolved.filePath);
@@ -25467,6 +25474,11 @@ async function handleTrashMutationWithCacheInvalidation(
         });
       },
     });
+  }).catch((error) => {
+    if (error instanceof PowerPrompterSessionConflictError) {
+      return json({ error: error.message }, 409);
+    }
+    throw error;
   });
 }
 
