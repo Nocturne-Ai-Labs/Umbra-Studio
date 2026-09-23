@@ -31158,6 +31158,9 @@ const server = Bun.serve<UmbraSocketData>({
       // EXPORT API
       // ============================================
       if (path === '/api/export/save' && method === 'POST') {
+        if (!isHostRequest(req, url, server)) {
+          return json({ error: 'Saving to a host filesystem folder is only available from the host PC.' }, 403);
+        }
         try {
           const formData = await req.formData();
           const file = formData.get('file') as File;
@@ -31207,6 +31210,9 @@ const server = Bun.serve<UmbraSocketData>({
 
       // Embed metadata and return file (for single-image download export)
       if (path === '/api/export/embed-metadata' && method === 'POST') {
+        if (!isHostRequest(req, url, server)) {
+          return json({ error: 'Reading host file metadata is only available from the host PC.' }, 403);
+        }
         try {
           const formData = await req.formData();
           const file = formData.get('file') as File;
@@ -33592,10 +33598,16 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/comfy/upload-media' && method === 'POST') {
         let tempPath = '';
+        let uploadTooLarge = false;
         try {
           const requestedKind = String(req.headers.get('x-umbra-media-kind') || '').trim().toLowerCase();
           if (requestedKind !== 'image' && requestedKind !== 'video' && requestedKind !== 'audio') {
             return json({ error: 'An image, video, or audio media kind is required.' }, 400);
+          }
+          const maxBytes = requestedKind === 'video' ? 4 * 1024 * 1024 * 1024 : 512 * 1024 * 1024;
+          const contentLength = Number(req.headers.get('content-length'));
+          if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+            return json({ error: `The ${requestedKind} upload exceeds the size limit.` }, 413);
           }
           let originalName = String(req.headers.get('x-umbra-file-name') || '').trim();
           try {
@@ -33625,26 +33637,21 @@ const server = Bun.serve<UmbraSocketData>({
           const handle = await fs.open(tempPath, 'w');
           let totalBytes = 0;
           try {
-            const bodyStream = req.body as any;
-            if (typeof bodyStream.getReader === 'function') {
-              const reader = bodyStream.getReader();
+            const reader = req.body.getReader();
+            try {
               while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
                 if (!value?.byteLength) continue;
+                if (totalBytes + value.byteLength > maxBytes) {
+                  uploadTooLarge = true;
+                  await reader.cancel().catch(() => undefined);
+                  throw new Error(`The ${requestedKind} upload exceeds the size limit.`);
+                }
                 totalBytes += await writeAllUploadedMediaBytes(handle, value);
               }
-            } else if (typeof bodyStream[Symbol.asyncIterator] === 'function') {
-              for await (const value of bodyStream) {
-                const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
-                if (!bytes.byteLength) continue;
-                totalBytes += await writeAllUploadedMediaBytes(handle, bytes);
-              }
-            } else {
-              const bytes = new Uint8Array(await req.arrayBuffer());
-              if (bytes.byteLength) {
-                totalBytes = await writeAllUploadedMediaBytes(handle, bytes);
-              }
+            } finally {
+              reader.releaseLock();
             }
             if (typeof handle.sync === 'function') await handle.sync();
           } finally {
@@ -33665,7 +33672,7 @@ const server = Bun.serve<UmbraSocketData>({
           });
         } catch (error: any) {
           if (tempPath) await fs.rm(tempPath, { force: true }).catch(() => undefined);
-          return json({ error: error?.message || 'Failed to upload media for ComfyUI.' }, 500);
+          return json({ error: error?.message || 'Failed to upload media for ComfyUI.' }, uploadTooLarge ? 413 : 500);
         }
       }
 
