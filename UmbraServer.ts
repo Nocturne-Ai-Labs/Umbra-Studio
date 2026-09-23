@@ -33330,19 +33330,19 @@ const server = Bun.serve<UmbraSocketData>({
       // Copy image to ComfyUI input folder
       if (path === '/api/comfy/copy-image' && method === 'POST') {
         try {
-          const body = await req.json() as { sourcePath: string };
-          if (!body.sourcePath) {
+          const body = await req.json() as { sourcePath?: unknown };
+          if (typeof body.sourcePath !== 'string' || !body.sourcePath.trim()) {
             return json({ error: 'sourcePath required' }, 400);
           }
 
-          // Handle both absolute paths and relative paths
-          let sourcePath = body.sourcePath;
-          if (!isAbsolute(sourcePath)) {
-            sourcePath = join(ROOT_DIR, sourcePath);
-          }
-
-          if (!existsSync(sourcePath)) {
+          const requestedSourcePath = isAbsolute(body.sourcePath) ? body.sourcePath : join(ROOT_DIR, body.sourcePath);
+          const sourcePath = await resolveAllowedGalleryPath(requestedSourcePath, getGalleryTransferAllowedRoots());
+          if (!sourcePath) return json({ error: 'Source image is outside available Gallery folders' }, 403);
+          if (!existsSync(sourcePath) || !statSync(sourcePath).isFile()) {
             return json({ error: 'Source file not found' }, 404);
+          }
+          if (!UMBRA_UI_IMAGE_EXTENSIONS.has(extname(sourcePath).toLowerCase())) {
+            return json({ error: 'Select an image file' }, 400);
           }
 
           const comfyInputDir = getComfyInputRootFast();
@@ -33401,11 +33401,14 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/comfy/copy-media' && method === 'POST') {
         try {
-          const body = await req.json() as { sourcePath?: string; kind?: string };
-          if (!body.sourcePath) return json({ error: 'sourcePath required' }, 400);
-          let sourcePath = String(body.sourcePath || '').trim();
-          if (!isAbsolute(sourcePath)) sourcePath = join(ROOT_DIR, sourcePath);
-          sourcePath = resolve(sourcePath);
+          const body = await req.json() as { sourcePath?: unknown; kind?: string };
+          if (typeof body.sourcePath !== 'string' || !body.sourcePath.trim()) return json({ error: 'sourcePath required' }, 400);
+          const requestedSourcePath = body.sourcePath.trim();
+          const sourcePath = await resolveAllowedGalleryPath(
+            isAbsolute(requestedSourcePath) ? requestedSourcePath : join(ROOT_DIR, requestedSourcePath),
+            getGalleryTransferAllowedRoots(),
+          );
+          if (!sourcePath) return json({ error: 'Source media is outside available Gallery folders' }, 403);
           if (!existsSync(sourcePath) || !statSync(sourcePath).isFile()) {
             return json({ error: 'Source media file not found' }, 404);
           }
