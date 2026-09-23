@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.32.29 - Reliability And Security Audit
+
+### TL;DR - Setup After Updating
+
+- Install the new package, restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux, and refresh open browser tabs. No additional model, Umbra Nodes, or ComfyUI download is required for the fixes in this release. Video LoRAs still require models and pipelines that support their selected family.
+- Linux managed tools continue to require `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Existing portable `User/` and `Tools/` data should be preserved during an in-place update.
+
+### Changes
+
+- Add family-scoped video LoRA stacks across supported video workflows, including validation of legacy controls before queueing.
+- Harden Gallery and filmstrip loading, search, Trash thumbnails, output activity, privacy updates, transfers, and split-process recovery.
+- Repair cross-workspace media handoffs and generation state in TXT2IMG, IMG2IMG, Inpaint, Canvas, Video, and Extras.
+- Stabilize Power Prompter queue admission, cancellation, saved queues, history, and session recovery.
+- Improve Data Forge dataset imports, captions, Booru recovery, and archive filtering; tighten Model Manager and Umbra Remote access checks.
+- Strengthen file, upload, output-folder, proxy, and package-source boundaries, including isolation of development ComfyUI processes.
+
+### Validation And Limits
+
+- Passed 505 backend tests, frontend build, lint, root TypeScript check, and the 52-workflow pipeline audit. Targeted browser and split-process checks covered Gallery, filmstrip, saved queues, and responsive queue controls.
+- A detailed, user-facing fix inventory is attached to this GitHub release as `Umbra-Studio-v0.32.29-Bug-Fixes.md`, separate from both portable ZIPs.
+- The folder-preview pagination interaction remains under investigation; the main Gallery grid loaded all 600 items in an isolated test. Full live GPU qualification of every video pipeline was not part of this audit.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Gallery search, Trash thumbnails, refresh races, transfer acknowledgements, and folder/filmstrip state drift.
+- Fixed: stale or invalid generation destinations, media handoffs, source selection, and Video LoRA validation.
+- Fixed: Power Prompter queue admission, stop/cancel handling, saved-queue closing, and session persistence races.
+- Fixed: Data Forge caption/import/repair edge cases, unsafe model or media paths, and remote access leaks.
+- Improved: filmstrip output notices, split-process health checks, development ComfyUI isolation, and release privacy checks.
+
 ## v0.32.28 - MiniMax H3 Pipeline Discovery Hotfix
 
 ### TL;DR - Setup After Updating
