@@ -46,6 +46,7 @@ import { settingsManager } from './backend/settings/SettingsManager';
 import { FsWorkerService } from './backend/FsWorkerService';
 import { GalleryTransferJournal } from './backend/GalleryTransferJournal';
 import { isGalleryUploadFilename, isGalleryUploadStrategy, prepareGalleryUploadDirectory } from './backend/GalleryUploadService';
+import { writeAllUploadedMediaBytes } from './backend/UmbraUiMediaUploadService';
 import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
 import { fetchLocalServerProxy, readLocalServerProxyText } from './backend/LocalServerProxyTransfer';
 import { createGalleryPathAuthorizer, resolveAllowedGalleryPath } from './backend/GalleryPathAccess';
@@ -33473,21 +33474,18 @@ const server = Bun.serve<UmbraSocketData>({
                 const { done, value } = await reader.read();
                 if (done) break;
                 if (!value?.byteLength) continue;
-                await handle.write(value);
-                totalBytes += value.byteLength;
+                totalBytes += await writeAllUploadedMediaBytes(handle, value);
               }
             } else if (typeof bodyStream[Symbol.asyncIterator] === 'function') {
               for await (const value of bodyStream) {
                 const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
                 if (!bytes.byteLength) continue;
-                await handle.write(bytes);
-                totalBytes += bytes.byteLength;
+                totalBytes += await writeAllUploadedMediaBytes(handle, bytes);
               }
             } else {
               const bytes = new Uint8Array(await req.arrayBuffer());
               if (bytes.byteLength) {
-                await handle.write(bytes);
-                totalBytes = bytes.byteLength;
+                totalBytes = await writeAllUploadedMediaBytes(handle, bytes);
               }
             }
             if (typeof handle.sync === 'function') await handle.sync();
