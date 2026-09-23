@@ -375,9 +375,7 @@ function summarizeFolderEntries(dirPath: string, entries: Dirent<string>[], moni
   let firstMediaPath: string | null = null;
   let firstMediaType: 'image' | 'gif' | 'video' | null = null;
 
-  const sortedEntries = [...entries].sort((a, b) => (
-    galleryNameCollator.compare(a.name, b.name)
-  ));
+  const sortedEntries = [...entries].sort(compareGalleryEntryNames);
 
   for (const entry of sortedEntries) {
     if (entry.isDirectory()) {
@@ -714,6 +712,10 @@ type MetadataSearchPayload = {
 
 const galleryNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
+function compareGalleryEntryNames(a: { name: string }, b: { name: string }): number {
+  return galleryNameCollator.compare(a.name, b.name) || a.name.localeCompare(b.name);
+}
+
 function compareMediaByName(a: MediaFileRecord, b: MediaFileRecord): number {
   return galleryNameCollator.compare(a.name, b.name);
 }
@@ -745,9 +747,30 @@ function compareMedia(
 }
 
 function compareMediaCandidatesByName(a: MediaCandidate, b: MediaCandidate): number {
-  const byName = galleryNameCollator.compare(a.name, b.name);
+  const byName = compareGalleryEntryNames(a, b);
   if (byName !== 0) return byName;
   return a.clientPath.localeCompare(b.clientPath);
+}
+
+function inventorySignatureFromSortedEntries(
+  folders: Array<{ name: string }>,
+  mediaCandidates: MediaCandidate[],
+): string {
+  // Both arrays are already name sorted; merge them in the summary's entry order.
+  const hash = createHash('sha256');
+  let folderIndex = 0;
+  let mediaIndex = 0;
+  while (folderIndex < folders.length || mediaIndex < mediaCandidates.length) {
+    if (folderIndex < folders.length && (mediaIndex >= mediaCandidates.length
+      || compareGalleryEntryNames(folders[folderIndex], mediaCandidates[mediaIndex]) < 0)) {
+      const name = folders[folderIndex++].name;
+      hash.update(`d:${name.length}:${name}`);
+    } else {
+      const name = mediaCandidates[mediaIndex++].name;
+      hash.update(`f:${name.length}:${name}`);
+    }
+  }
+  return hash.digest('hex');
 }
 
 function serializeGalleryFile(file: MediaFileRecord) {
@@ -1245,6 +1268,7 @@ type GalleryDirectorySnapshot = {
   candidates: MediaCandidate[];
   orderedFiles?: MediaFileRecord[];
   candidateCount: number;
+  inventorySignature: string;
   expiresAt: number;
 };
 const directorySnapshots = new Map<string, GalleryDirectorySnapshot>();
@@ -1305,7 +1329,7 @@ async function buildListProgressivePayload(
         name: entry.name,
         path: toClientPath(join(dirPath, entry.name)),
       }))
-      .sort((a, b) => galleryNameCollator.compare(a.name, b.name));
+      .sort(compareGalleryEntryNames);
 
     const mediaCandidates = entries
       .filter((entry) => entry.isFile() && isSupportedMediaPath(entry.name))
@@ -1316,9 +1340,11 @@ async function buildListProgressivePayload(
         folderPath: normalizedClientFolderPath,
       }));
     mediaCandidates.sort(compareMediaCandidatesByName);
+    const namesSignature = inventorySignatureFromSortedEntries(folders, mediaCandidates);
     snapshot = {
       dirPath, clientFolderPath: normalizedClientFolderPath, sortBy, sortOrder, fastPage,
       folders, candidates: mediaCandidates, candidateCount: mediaCandidates.length,
+      inventorySignature: namesSignature,
       expiresAt: Date.now() + DIRECTORY_SNAPSHOT_TTL_MS,
     };
     if (fastPage) snapshotId = rememberDirectorySnapshot(snapshot);
@@ -1414,6 +1440,7 @@ async function buildListProgressivePayload(
   return {
     folders,
     files: await serializeGalleryFiles(page, signal),
+    inventorySignature: snapshot.inventorySignature,
     done: nextCursor == null,
     nextCursor,
     total,

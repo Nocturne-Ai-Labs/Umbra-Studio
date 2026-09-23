@@ -11779,10 +11779,12 @@ const GALLERY_BRIDGE_SERVER_ENTRY = resolveGalleryBridgeServerEntry();
 const GALLERY_PUBLIC_DIR = resolveGalleryPublicDir(ROOT_DIR, dirname(GALLERY_BRIDGE_SERVER_ENTRY));
 let galleryBridgeProxyBackoffUntil = 0;
 let galleryBridgeDesired = false;
+let galleryBridgeStopEpoch = 0;
 let galleryBridgeWatchdogTimer: NodeJS.Timeout | null = null;
 let galleryBridgeWatchdogFailures = 0;
 let galleryBridgeRestartInFlight: Promise<void> | null = null;
 let galleryBridgeStartInFlight: Promise<any> | null = null;
+let galleryBridgeStopInFlight: Promise<any> | null = null;
 let galleryBridgeLastRestartAt = 0;
 let galleryBridgeProxyFailures = 0;
 let galleryBridgeLastRecoverySuppressedLogAt = 0;
@@ -15501,10 +15503,17 @@ async function stopAIToolkit() {
 }
 
 async function startGalleryBridge() {
+  const requestedStopEpoch = galleryBridgeStopEpoch;
+  const stopping = galleryBridgeStopInFlight;
+  if (stopping) await stopping.catch(() => undefined);
+  if (requestedStopEpoch !== galleryBridgeStopEpoch || isShuttingDown) {
+    return startGalleryBridgeInternal(requestedStopEpoch);
+  }
   if (galleryBridgeStartInFlight) {
     return galleryBridgeStartInFlight;
   }
-  galleryBridgeStartInFlight = startGalleryBridgeInternal()
+  let request!: Promise<any>;
+  request = startGalleryBridgeInternal(requestedStopEpoch)
     .then((result) => {
       // The status endpoint drives iframe recovery. Do not leave it showing a
       // pre-start fallback until the periodic sampler's next 15-second tick.
@@ -15512,14 +15521,28 @@ async function startGalleryBridge() {
       return result;
     })
     .finally(() => {
-      galleryBridgeStartInFlight = null;
+      if (galleryBridgeStartInFlight === request) galleryBridgeStartInFlight = null;
     });
-  return galleryBridgeStartInFlight;
+  galleryBridgeStartInFlight = request;
+  return request;
 }
 
-async function startGalleryBridgeInternal() {
+async function startGalleryBridgeInternal(stopEpoch = galleryBridgeStopEpoch) {
+  const cancelledByStop = () => isShuttingDown || stopEpoch !== galleryBridgeStopEpoch;
+  const stoppedResult = () => ({
+    success: false,
+    error: 'Gallery bridge start was cancelled by Stop or shutdown',
+    running: false,
+    healthy: false,
+    host: getGalleryBridgeHostForClient(),
+    port: GALLERY_BRIDGE_PORT,
+    url: GALLERY_IN_PROCESS_WORKSPACE_URL,
+    mode: 'split-process',
+  });
+  if (cancelledByStop()) return stoppedResult();
   if (isChildProcessAlive(galleryBridgeProcess)) {
     const healthy = await isGalleryBridgeHealthy();
+    if (cancelledByStop()) return stoppedResult();
     if (!healthy) {
       appendBackendLifecycleLog('gallery', 'unhealthy_tracked_process_detected', {
         pid: galleryBridgeProcess?.pid ?? null,
@@ -15557,7 +15580,9 @@ async function startGalleryBridgeInternal() {
     }
   }
 
-  if (await isGalleryBridgeHealthy()) {
+  const existingHealthy = await isGalleryBridgeHealthy();
+  if (cancelledByStop()) return stoppedResult();
+  if (existingHealthy) {
     galleryBridgeProcess = null;
     galleryBridgeStartTime = null;
     galleryBridgeDesired = true;
@@ -15612,6 +15637,7 @@ async function startGalleryBridgeInternal() {
     };
   }
 
+  if (cancelledByStop()) return stoppedResult();
   try {
     const bunBin = process.execPath || 'bun';
     galleryBridgeDesired = true;
@@ -15723,8 +15749,11 @@ async function startGalleryBridgeInternal() {
 
     const startedAt = Date.now();
     while (Date.now() - startedAt < GALLERY_BRIDGE_START_TIMEOUT_MS) {
+      if (cancelledByStop()) return stoppedResult();
       if (!isChildProcessAlive(galleryBridgeProcess)) break;
-      if (await isGalleryBridgeHealthy()) {
+      const healthy = await isGalleryBridgeHealthy();
+      if (cancelledByStop()) return stoppedResult();
+      if (healthy) {
         galleryBridgeWatchdogFailures = 0;
         startGalleryBridgeWatchdog();
         return {
@@ -15743,6 +15772,7 @@ async function startGalleryBridgeInternal() {
     }
 
     const healthy = await isGalleryBridgeHealthy();
+    if (cancelledByStop()) return stoppedResult();
     if (healthy) {
       galleryBridgeWatchdogFailures = 0;
       startGalleryBridgeWatchdog();
@@ -15810,9 +15840,21 @@ async function startGalleryBridgeInternal() {
   }
 }
 
-async function stopGalleryBridge() {
+function stopGalleryBridge() {
+  galleryBridgeStopEpoch += 1;
   galleryBridgeDesired = false;
   clearGalleryBridgeWatchdog();
+  galleryBridgeStartInFlight = null;
+  if (galleryBridgeStopInFlight) return galleryBridgeStopInFlight;
+  let request!: Promise<any>;
+  request = stopGalleryBridgeInternal().finally(() => {
+    if (galleryBridgeStopInFlight === request) galleryBridgeStopInFlight = null;
+  });
+  galleryBridgeStopInFlight = request;
+  return request;
+}
+
+async function stopGalleryBridgeInternal() {
   let hadRunning = await isGalleryBridgeHealthy();
   let stopped = true;
   const proc = galleryBridgeProcess;
@@ -15829,29 +15871,34 @@ async function stopGalleryBridge() {
     stopped = await stopProcessTree(proc, 'Gallery bridge');
   }
 
-  galleryBridgeProcess = null;
-  galleryBridgeStartTime = null;
-  clearGalleryProcessTelemetry();
-
+  const processStillRunning = isChildProcessAlive(proc);
+  if (!processStillRunning && galleryBridgeProcess === proc) {
+    galleryBridgeProcess = null;
+    galleryBridgeStartTime = null;
+    clearGalleryProcessTelemetry();
+  }
   const stillHealthy = await isGalleryBridgeHealthy({ allowCached: false });
   appendBackendLifecycleLog('gallery', 'stop_completed', {
     trackedPid: proc?.pid ?? null,
     port: GALLERY_BRIDGE_PORT,
     hadRunning,
     stopped,
+    processStillRunning,
     stillHealthy,
   });
-  if (stillHealthy) {
+  if (processStillRunning || stillHealthy) {
     await refreshGalleryBridgeStatusCache();
     return {
       success: false,
       error: 'Failed to fully stop Gallery bridge',
       running: true,
-      healthy: true,
+      healthy: stillHealthy,
+      pid: processStillRunning ? proc?.pid ?? null : null,
       host: getGalleryBridgeHostForClient(),
       port: GALLERY_BRIDGE_PORT,
-      url: getGalleryWorkspaceUrl(),
-      mode: 'split-process',
+      url: stillHealthy ? getGalleryWorkspaceUrl() : GALLERY_IN_PROCESS_WORKSPACE_URL,
+      mode: stillHealthy ? 'split-process' : 'split-process-unhealthy',
+      stopped: !processStillRunning && stopped,
     };
   }
 
@@ -15900,6 +15947,18 @@ async function restartGalleryBridgeForSelfHeal(reason: string, expectedPid: numb
       });
       return;
     }
+  }
+  if (!galleryBridgeDesired || isShuttingDown) {
+    appendBackendLifecycleLog('gallery', 'self_heal_cancelled_by_stop', {
+      reason, trackedPid, port: GALLERY_BRIDGE_PORT,
+    });
+    return;
+  }
+  if (galleryBridgeProcess && galleryBridgeProcess !== proc) {
+    appendBackendLifecycleLog('gallery', 'stale_self_heal_ignored', {
+      reason, expectedPid: trackedPid, currentPid: galleryBridgeProcess.pid ?? null, port: GALLERY_BRIDGE_PORT,
+    });
+    return;
   }
   const stalePortPids = listPidsByPort(GALLERY_BRIDGE_PORT)
     .filter((pid) => pid !== process.pid)
@@ -24605,6 +24664,7 @@ const fsFolderSummaryCache = new Map<string, {
   expiresAt: number;
   value: {
     path: string;
+    signature?: string;
     subfolderCount: number;
     imageCount: number;
     videoCount: number;
@@ -24613,6 +24673,7 @@ const fsFolderSummaryCache = new Map<string, {
 }>();
 const fsFolderSummaryInFlight = new Map<string, Promise<{
   path: string;
+  signature?: string;
   subfolderCount: number;
   imageCount: number;
   videoCount: number;
@@ -24799,6 +24860,7 @@ function getFsFolderSummaryCache(pathKey: string) {
 
 function setFsFolderSummaryCache(pathKey: string, value: {
   path: string;
+  signature?: string;
   subfolderCount: number;
   imageCount: number;
   videoCount: number;
@@ -28385,6 +28447,7 @@ async function handleFsFolderSummary(url: URL): Promise<Response> {
         force,
       }) as {
         path?: string;
+        signature?: string;
         subfolderCount?: number;
         imageCount?: number;
         videoCount?: number;
@@ -28392,6 +28455,7 @@ async function handleFsFolderSummary(url: URL): Promise<Response> {
       };
       const normalizedSummary = {
         path: normalizeOutputPathInput(String(summary?.path || normalizedPath)),
+        signature: String(summary?.signature || ''),
         subfolderCount: Math.max(0, Number(summary?.subfolderCount || 0) || 0),
         imageCount: Math.max(0, Number(summary?.imageCount || 0) || 0),
         videoCount: Math.max(0, Number(summary?.videoCount || 0) || 0),
