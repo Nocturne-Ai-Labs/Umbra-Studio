@@ -963,10 +963,20 @@ export function UmbraFilmstrip({
 
   useEffect(() => {
     const retryTimers: number[] = [];
+    let trailingRefreshTimer: number | null = null;
     const forceRefreshBurst = () => {
       const now = Date.now();
       const burstCooldownMs = 2500;
-      if (now - lastForceRefreshBurstAtRef.current < burstCooldownMs) return;
+      const remainingCooldownMs = burstCooldownMs - (now - lastForceRefreshBurstAtRef.current);
+      if (remainingCooldownMs > 0) {
+        if (trailingRefreshTimer === null) {
+          trailingRefreshTimer = window.setTimeout(() => {
+            trailingRefreshTimer = null;
+            forceRefreshBurst();
+          }, remainingCooldownMs);
+        }
+        return;
+      }
       lastForceRefreshBurstAtRef.current = now;
       refreshImages({ force: true });
       retryTimers.push(window.setTimeout(() => {
@@ -1044,6 +1054,7 @@ export function UmbraFilmstrip({
       window.removeEventListener('umbra:gallery-generation-complete', onGenerationComplete as EventListener);
       window.removeEventListener('focus', onWake);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      if (trailingRefreshTimer !== null) window.clearTimeout(trailingRefreshTimer);
       retryTimers.forEach((timer) => window.clearTimeout(timer));
     };
   }, [currentFolder, liveGenerationPreviewsEnabled, refreshImages, rememberRecentFolders, rootPath]);
