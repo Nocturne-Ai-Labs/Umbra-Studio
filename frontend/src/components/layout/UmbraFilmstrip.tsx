@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Filmstrip, type FilmstripImage, type SortDirection, type SortField } from '@/components/filmstrip';
-import { resolveFilmstripSelectedImages } from '@/components/filmstrip/filmstripSelection';
+import { createFilmstripPathMatcher, resolveFilmstripSelectedImages } from '@/components/filmstrip/filmstripSelection';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
 import { deletePathsWithSettings, permanentlyDeleteTrashPaths, validateTrashRestoreResult } from '@/utils/trashActions';
@@ -765,9 +765,10 @@ export function UmbraFilmstrip({
 
       if (canRemove) {
         const removedList = removedPaths;
+        const isRemoved = createFilmstripPathMatcher(removedList);
         setFeedMode('remove');
         setImages((current) => {
-          const next = current.filter((item) => !removedList.some((pathValue) => pathsLikelySame(item.path, pathValue)));
+          const next = current.filter((item) => !isRemoved(item.path));
           if (next.length === current.length) return current;
           feedSignatureRef.current = buildFilmstripFeedSignature(folderPath, next);
           setCustomOrder(next.map((item) => item.id));
@@ -950,10 +951,11 @@ export function UmbraFilmstrip({
         ? custom.detail.paths.map((entry) => normalizePath(String(entry || ''))).filter(Boolean)
         : [];
       if (removedPaths.length <= 0) return;
+      const isRemoved = createFilmstripPathMatcher(removedPaths);
 
       setFeedMode('remove');
       setImages((current) => {
-        const next = current.filter((item) => !removedPaths.some((pathValue) => pathsLikelySame(item.path, pathValue)));
+        const next = current.filter((item) => !isRemoved(item.path));
         if (next.length === current.length) return current;
         const folder = normalizePath(currentFolderRef.current || rootPath);
         feedSignatureRef.current = buildFilmstripFeedSignature(folder, next);
@@ -964,7 +966,7 @@ export function UmbraFilmstrip({
         return next;
       });
       setRecentGenerationOutputImages((current) =>
-        current.filter((item) => !removedPaths.some((pathValue) => pathsLikelySame(item.path, pathValue)))
+        current.filter((item) => !isRemoved(item.path))
       );
     };
 
@@ -1239,7 +1241,7 @@ export function UmbraFilmstrip({
   const removeCompletedImages = useCallback((entries: FilmstripImage[], paths: string[]) => {
     const removedPaths = Array.from(new Set(paths.map(normalizePath).filter(Boolean)));
     if (removedPaths.length === 0) return;
-    const isRemoved = (path: string) => removedPaths.some((removed) => pathsLikelySame(path, removed));
+    const isRemoved = createFilmstripPathMatcher(removedPaths);
     const removedIds = new Set(entries.filter((entry) => isRemoved(entry.path)).map((entry) => normalizeId(entry.id)));
     setFeedMode('remove');
     setImages((current) => current.filter((item) => !isRemoved(item.path)));
@@ -1320,8 +1322,9 @@ export function UmbraFilmstrip({
     const resolveNextSelectionAfterRemoval = (removedPathsInput: string[]): FilmstripImage | null => {
       const removed = removedPathsInput.map((entry) => normalizePath(entry)).filter(Boolean);
       if (removed.length === 0) return null;
+      const isRemoved = createFilmstripPathMatcher(removed);
       const nextImages = displayedImages.filter((item) =>
-        !removed.some((removedPath) => pathsLikelySame(item.path, removedPath)));
+        !isRemoved(item.path));
       if (nextImages.length === 0) return null;
       const safeIndex = Math.max(0, Math.min(firstRemovedIndex >= 0 ? firstRemovedIndex : 0, nextImages.length - 1));
       return nextImages[safeIndex] || nextImages[nextImages.length - 1] || null;
@@ -1334,16 +1337,17 @@ export function UmbraFilmstrip({
         removePaths.map((entry) => normalizePath(entry)).filter(Boolean),
       ));
       if (normalizedRemovePaths.length === 0) return false;
+      const isRemoved = createFilmstripPathMatcher(normalizedRemovePaths);
       const removedIdSet = new Set(
         selectedEntries
-          .filter((entry) => normalizedRemovePaths.some((pathValue) => pathsLikelySame(entry.path, pathValue)))
+          .filter((entry) => isRemoved(entry.path))
           .map((entry) => normalizeId(entry.id)),
       );
       const nextSelection = resolveNextSelectionAfterRemoval(normalizedRemovePaths);
       setFeedMode('remove');
       notifyGalleryRemovePaths(normalizedRemovePaths);
       setImages((current) =>
-        current.filter((item) => !normalizedRemovePaths.some((pathValue) => pathsLikelySame(item.path, pathValue))));
+        current.filter((item) => !isRemoved(item.path)));
       setCustomOrder((current) => current.filter((id) => !removedIdSet.has(normalizeId(id))));
       if (nextSelection) {
         setSelectedIds(new Set([nextSelection.id]));

@@ -6,6 +6,28 @@ export function normalizeFilmstripSelectionId(value: unknown): string {
   return String(value || '').trim();
 }
 
+export function createFilmstripPathMatcher(paths: string[]): (path: string) => boolean {
+  const exact = new Set<string>();
+  const suffixes = new Set<string>();
+  for (const value of paths) {
+    const normalized = String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').trim().toLowerCase();
+    if (!normalized) continue;
+    exact.add(normalized);
+    for (let index = normalized.indexOf('/'); index >= 0; index = normalized.indexOf('/', index + 1)) {
+      suffixes.add(normalized.slice(index + 1));
+    }
+  }
+  return (value: string) => {
+    const normalized = String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').trim().toLowerCase();
+    if (!normalized) return false;
+    if (exact.has(normalized) || suffixes.has(normalized)) return true;
+    for (let index = normalized.indexOf('/'); index >= 0; index = normalized.indexOf('/', index + 1)) {
+      if (exact.has(normalized.slice(index + 1))) return true;
+    }
+    return false;
+  };
+}
+
 export function getSelectedIdsForTarget<T extends FilmstripSelectableImage>(
   orderedImages: T[],
   selectedIds: Set<string>,
