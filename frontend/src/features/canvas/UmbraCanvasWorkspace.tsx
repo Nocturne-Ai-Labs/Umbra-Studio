@@ -228,6 +228,7 @@ interface UmbraCanvasWorkspaceProps {
 }
 
 interface UmbraCanvasPreparedRegion extends UmbraCanvasCompositeResult {
+  projectId: string;
   projectRevision: number;
   snapshotSignature: string;
   bbox: { x: number; y: number; width: number; height: number };
@@ -1094,7 +1095,7 @@ export function UmbraCanvasWorkspace({
           seedMode: inherited.controlAfterGenerate || 'fixed',
           seedIncrement: inherited.seedIncrement || 1,
           steps: inherited.steps || 20,
-          cfg: inherited.cfg || 1,
+          cfg: inherited.cfg ?? 1,
           samplerName: inherited.samplerName || 'euler',
           scheduler: inherited.scheduler || 'normal',
           denoise: inherited.denoise ?? 0.65,
@@ -1444,8 +1445,15 @@ export function UmbraCanvasWorkspace({
     try {
       const frozenProject = useUmbraCanvasStore.getState().present;
       const composite = await composeUmbraCanvasGenerationRegion(frozenProject);
+      const currentProject = useUmbraCanvasStore.getState().present;
+      if (currentProject.id !== frozenProject.id || currentProject.revision !== frozenProject.revision) {
+        autoSubmitPreparedRegionRef.current = false;
+        showToast('Canvas changed while preparing the generation region. Generate again to use the latest layers.', 'error');
+        return;
+      }
       setPreparedRegion({
         ...composite,
+        projectId: frozenProject.id,
         projectRevision: frozenProject.revision,
         snapshotSignature: buildUmbraCanvasSnapshotSignature(frozenProject),
         bbox: { ...frozenProject.generationBbox },
@@ -1461,6 +1469,12 @@ export function UmbraCanvasWorkspace({
   const submitPreparedRegion = React.useCallback(async () => {
     if (!preparedRegion || submitting) return;
     const submissionProject = useUmbraCanvasStore.getState().present;
+    const isSubmissionProjectOpen = () => useUmbraCanvasStore.getState().present.id === submissionProject.id;
+    if (submissionProject.id !== preparedRegion.projectId || submissionProject.revision !== preparedRegion.projectRevision) {
+      showToast('Canvas changed after the generation region was prepared. Generate again to use the latest layers.', 'error');
+      closePreparedRegion();
+      return;
+    }
     const compiledPrompt = compileUmbraUiPromptSegments(promptSegments);
     if (!compiledPrompt.trim()) {
       showToast('Enter a Canvas prompt before generating.', 'error');
@@ -1479,6 +1493,8 @@ export function UmbraCanvasWorkspace({
     }
     setSubmitting(true);
     try {
+      const numericCfg = cfg.trim() ? Number(cfg) : NaN;
+      const normalizedCfg = Number.isFinite(numericCfg) ? numericCfg : 1;
       const settingsSnapshot: UmbraCanvasGenerationSettingsSnapshot = {
         modelFamily,
         modelSource,
@@ -1492,7 +1508,7 @@ export function UmbraCanvasWorkspace({
         seedMode,
         seedIncrement,
         steps: Number(steps) || 20,
-        cfg: Number(cfg) || 1,
+        cfg: normalizedCfg,
         samplerName: samplerName || 'euler',
         scheduler: scheduler || 'normal',
         denoise,
@@ -1512,6 +1528,7 @@ export function UmbraCanvasWorkspace({
       };
       setGenerationSettings(settingsSnapshot);
       await saveProject(false);
+      if (!isSubmissionProjectOpen()) throw new Error('The Canvas project changed while queueing. Generate again from the open project.');
       const queuedSeed = resolveUmbraUiQueueSeed(seed, seedMode);
       const promptWithLoras = capabilities.loras.support === 'adjustable'
         ? composeUmbraUiPromptWithLoras(compiledPrompt, loras)
@@ -1565,14 +1582,10 @@ export function UmbraCanvasWorkspace({
         ipAdapterCombineEmbeds: reference.ipAdapterCombineEmbeds,
         ipAdapterEmbedsScaling: reference.ipAdapterEmbedsScaling,
       })));
-      const hasCanvasDrawableContent = submissionProject.entities.some((entity) => (
-        entity.visible
-        && entity.generationEnabled
-        && (entity.kind === 'raster' || entity.kind === 'shape' || entity.kind === 'text' || entity.kind === 'gradient' || entity.kind === 'path')
-      ));
-      const sourceFreeGeneration = !hasCanvasDrawableContent
+      const sourceFreeGeneration = preparedRegion.sourceContentPixels === 0
         && submittedControlLayers.length === 0
         && submittedReferenceLayers.length === 0;
+      if (!isSubmissionProjectOpen()) throw new Error('The Canvas project changed while queueing. Generate again from the open project.');
       const nextJob = await submitUmbraUiInpaintJob({
         pinnedOutputFolder,
         outputTask: 'canvas',
@@ -1603,7 +1616,7 @@ export function UmbraCanvasWorkspace({
         seedMode,
         seedIncrement,
         steps: Number(steps) || 20,
-        cfg: Number(cfg) || 1,
+        cfg: normalizedCfg,
         samplerName: samplerName || 'euler',
         scheduler: scheduler || 'normal',
         denoise,
@@ -1640,7 +1653,11 @@ export function UmbraCanvasWorkspace({
         controlLayers: submittedControlLayers,
         referenceLayers: submittedReferenceLayers,
       });
-      const submittedRevision = useUmbraCanvasStore.getState().present.revision;
+      if (!isSubmissionProjectOpen()) {
+        showToast(`Canvas job ${nextJob.id} was queued for ${submissionProject.name}, but that project is no longer open. Its output will still be saved.`, 'error');
+        return;
+      }
+      const submittedRevision = preparedRegion.projectRevision;
       const acceptanceMaskUrl = URL.createObjectURL(preparedRegion.maskBlob);
       jobBboxesRef.current.set(nextJob.id, {
         bbox: { ...preparedRegion.bbox },
@@ -1662,7 +1679,7 @@ export function UmbraCanvasWorkspace({
       });
       setJob(nextJob);
       await saveProject(false);
-      onSeedChange(String(advanceUmbraUiSeed(queuedSeed, seedMode, seedIncrement, samples)));
+      if (isSubmissionProjectOpen()) onSeedChange(String(advanceUmbraUiSeed(queuedSeed, seedMode, seedIncrement, samples)));
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Canvas generation could not be queued.', 'error');
     } finally {

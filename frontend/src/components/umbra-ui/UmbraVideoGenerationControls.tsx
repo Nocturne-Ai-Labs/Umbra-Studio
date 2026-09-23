@@ -722,7 +722,7 @@ export function UmbraVideoGenerationControls({
   const { placement, setPlacement, effectivePlacement } = useUmbraQueuePlacement(queueSummary);
   const [settingsLoaded, setSettingsLoaded] = React.useState(false);
   const videoControlsWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
-  const handoffAppliedRef = React.useRef(false);
+  const handoffRolesRef = React.useRef(new Set<UmbraUiVideoFrameRole>());
   const handoffAppliedAtRef = React.useRef(0);
   const targetDimensions = React.useMemo(() => resolveUmbraVideoTargetDimensions({
     resolutionPreset: video.resolutionPreset,
@@ -837,22 +837,27 @@ export function UmbraVideoGenerationControls({
               },
             },
           };
-          setVideo((current) => handoffAppliedRef.current
-            ? {
+          setVideo((current) => {
+            const roles = handoffRolesRef.current;
+            if (roles.size === 0) return normalizedSavedVideo;
+            const middleImagePath = roles.has('middle') ? current.middleImagePath : normalizedSavedVideo.middleImagePath;
+            return {
               ...normalizedSavedVideo,
-              mode: 'image_to_video',
-              frameGuideMode: current.frameGuideMode,
-              sourceImagePath: current.sourceImagePath,
-              sourceImageName: current.sourceImageName,
-              middleImagePath: current.middleImagePath,
-              middleImageName: current.middleImageName,
-              lastImagePath: current.lastImagePath,
-              lastImageName: current.lastImageName,
-              sourceWidth: current.sourceWidth,
-              sourceHeight: current.sourceHeight,
-            }
-            : normalizedSavedVideo);
-          if (!handoffAppliedRef.current && savedVideo.sourceImagePath) {
+              mode: current.mode,
+              frameGuideMode: roles.has('last') && current.mode === 'image_to_video'
+                && current.frameGuideMode === 'first_last' && middleImagePath
+                ? 'first_middle_last'
+                : current.frameGuideMode,
+              ...(roles.has('first') ? { sourceImagePath: current.sourceImagePath, sourceImageName: current.sourceImageName } : {}),
+              ...(roles.has('middle') ? { middleImagePath: current.middleImagePath, middleImageName: current.middleImageName } : {}),
+              ...(roles.has('last') ? { lastImagePath: current.lastImagePath, lastImageName: current.lastImageName } : {}),
+              ...(roles.has('source_video') ? { sourceVideoPath: current.sourceVideoPath, sourceVideoName: current.sourceVideoName } : {}),
+              ...(roles.has('first') || roles.has('source_video')
+                ? { sourceWidth: current.sourceWidth, sourceHeight: current.sourceHeight }
+                : {}),
+            };
+          });
+          if (!handoffRolesRef.current.has('first') && savedVideo.sourceImagePath) {
             setSourcePreviewUrl(`/api/fs/image?path=${encodeURIComponent(savedVideo.sourceImagePath)}`);
           }
         }
@@ -1145,10 +1150,10 @@ export function UmbraVideoGenerationControls({
     if (!detail || detail.mode !== 'video' || !detail.path) return;
     if (detail.createdAt <= handoffAppliedAtRef.current) return;
     handoffAppliedAtRef.current = detail.createdAt;
-    handoffAppliedRef.current = true;
     const role: UmbraUiVideoFrameRole = detail.videoFrameRole || 'first';
     const handoffWidth = Math.max(0, Math.round(Number(detail.generation?.width) || 0));
     const handoffHeight = Math.max(0, Math.round(Number(detail.generation?.height) || 0));
+    handoffRolesRef.current.add(role);
     setVideo((current) => {
       if (role === 'source_video') {
         return {

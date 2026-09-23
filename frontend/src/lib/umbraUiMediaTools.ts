@@ -2,6 +2,8 @@ export interface UmbraUiMediaToolResult {
   path: string;
   filename: string;
   mediaType: 'image' | 'video' | 'gif';
+  previewUrl?: string;
+  downloadUrl?: string;
   censored?: boolean;
   galleryTags?: string[];
   warnings?: string[];
@@ -22,6 +24,12 @@ export interface UmbraUiWatermarkAsset {
   path: string;
   filename: string;
   previewUrl: string;
+}
+
+const hostPickedPreviewUrls = new Map<string, string>();
+
+export function getUmbraUiHostPickedPreviewUrl(path: string): string {
+  return hostPickedPreviewUrls.get(path) || '';
 }
 
 export function normalizeUmbraUiCensorDetectionSettings(value: Record<string, unknown>) {
@@ -59,6 +67,8 @@ async function readMediaToolResponse(response: Response, fallback: string): Prom
     path: String(payload.path),
     filename: String(payload.filename || '').trim(),
     mediaType: payload.mediaType === 'video' || payload.mediaType === 'gif' ? payload.mediaType : 'image',
+    previewUrl: typeof payload.previewUrl === 'string' ? payload.previewUrl : undefined,
+    downloadUrl: typeof payload.downloadUrl === 'string' ? payload.downloadUrl : undefined,
     censored: typeof payload.censored === 'boolean' ? payload.censored : undefined,
     galleryTags: Array.isArray(payload.galleryTags) ? payload.galleryTags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean) : undefined,
     detections: Array.isArray(payload.detections) ? payload.detections : undefined,
@@ -202,5 +212,22 @@ export async function browseUmbraUiMediaToolsSourceFiles(
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(String(payload?.error || `File picker failed (${response.status}).`));
-  return Array.isArray(payload?.paths) ? payload.paths.map((path: unknown) => String(path || '').trim()).filter(Boolean) : [];
+  const paths: string[] = Array.isArray(payload?.paths)
+    ? payload.paths.map((path: unknown) => String(path || '').trim()).filter(Boolean)
+    : [];
+  const previewUrls = payload?.previewUrls && typeof payload.previewUrls === 'object' && !Array.isArray(payload.previewUrls)
+    ? payload.previewUrls as Record<string, unknown>
+    : {};
+  for (const path of paths) {
+    const previewUrl = String(previewUrls[path] || '').trim();
+    hostPickedPreviewUrls.delete(path);
+    if (!previewUrl.startsWith('/api/umbra-ui/media-tools/file/')) continue;
+    hostPickedPreviewUrls.set(path, previewUrl);
+  }
+  while (hostPickedPreviewUrls.size > 1024) {
+    const oldest = hostPickedPreviewUrls.keys().next().value;
+    if (!oldest) break;
+    hostPickedPreviewUrls.delete(oldest);
+  }
+  return paths;
 }

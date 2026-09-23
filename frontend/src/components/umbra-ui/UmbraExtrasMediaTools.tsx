@@ -22,6 +22,7 @@ import { cn, buildFsImageUrl } from '@/lib/utils';
 import {
   browseUmbraUiMediaToolsOutputFolder,
   browseUmbraUiMediaToolsSourceFiles,
+  getUmbraUiHostPickedPreviewUrl,
   submitUmbraUiVideoToGif,
   submitUmbraUiWatermark,
   uploadUmbraUiWatermarkAsset,
@@ -116,6 +117,8 @@ function useFilePreview(file: File | null): string {
 function itemPreviewUrl(item: StagedMediaItem | undefined): string {
   if (item?.previewUrl) return item.previewUrl;
   if (!item?.path) return '';
+  const hostPickedPreviewUrl = getUmbraUiHostPickedPreviewUrl(item.path);
+  if (hostPickedPreviewUrl) return hostPickedPreviewUrl;
   return `/api/fs/image?${new URLSearchParams({ path: item.path }).toString()}`;
 }
 
@@ -164,10 +167,11 @@ function useStagedMedia(mode: UmbraExtrasMediaToolMode) {
   }, [targetKind]);
   const addFiles = React.useCallback((files: File[]) => {
     setItems((current) => {
-      const seen = new Set(current.map((item) => String(item.path || item.file?.name || '').toLowerCase()));
+      const fileKey = (file: File) => `${file.webkitRelativePath || file.name}:${file.size}:${file.lastModified}`.toLowerCase();
+      const seen = new Set(current.flatMap((item) => item.file ? [fileKey(item.file)] : []));
       const additions = files.flatMap((file) => {
         const kind = file.type.startsWith('video/') ? 'video' : file.type.startsWith('image/') ? 'image' : mediaKind(file.name);
-        const key = `${file.name}:${file.size}:${file.lastModified}`.toLowerCase();
+        const key = fileKey(file);
         if (!kind || kind !== targetKind || seen.has(key)) return [];
         seen.add(key);
         return [{ id: createId(), name: file.webkitRelativePath || file.name, file, kind, status: 'staged' as const }];
@@ -631,6 +635,7 @@ function VideoToGifTool() {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const remoteClient = isUmbraRemoteClient();
   const selected = items.find((item) => item.id === selectedId) || items[0];
+  const runnableItems = React.useMemo(() => items.filter((item) => item.status !== 'completed'), [items]);
   const localSourceUrl = useFilePreview(selected?.file || null);
   const sourceUrl = localSourceUrl || itemPreviewUrl(selected);
   React.useEffect(() => {
@@ -662,14 +667,17 @@ function VideoToGifTool() {
   }, [addPaths, browsingSources, pinnedOutputFolder, outputFolder, remoteClient, selected?.path, showToast]);
 
   const run = React.useCallback(async () => {
-    if (processing || items.length === 0) return;
+    if (processing || runnableItems.length === 0) return;
     batchControl.reset();
     activityStartedAtRef.current = Date.now();
     setProcessing(true);
-    setSummary({ completed: 0, failed: 0, total: items.length });
-    setItems((current) => current.map((item) => ({ ...item, status: 'staged', error: undefined, result: undefined })));
+    setSummary({ completed: 0, failed: 0, total: runnableItems.length });
+    const runnableIds = new Set(runnableItems.map((item) => item.id));
+    setItems((current) => current.map((item) => runnableIds.has(item.id)
+      ? { ...item, status: 'staged', error: undefined, result: undefined }
+      : item));
     const result = await runUmbraUiMediaBatch({
-      items,
+      items: runnableItems,
       shouldStop: batchControl.shouldStop,
       onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
       runItem: async (item, sequenceNumber) => {
@@ -681,11 +689,10 @@ function VideoToGifTool() {
         setSummary((current) => ({ ...current, completed: current.completed + (error ? 0 : 1), failed: current.failed + (error ? 1 : 0) }));
       },
     });
-    setItems((current) => clearCompletedUmbraUiMediaBatch(current, items));
     setProcessing(false);
     window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
     showToast(result.failed ? `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed; ${result.failed} failed.` : `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed.`, result.failed ? 'error' : 'success');
-  }, [batchControl, items, pinnedOutputFolder, outputFolder, processing, setItems, showToast, width]);
+  }, [batchControl, runnableItems, pinnedOutputFolder, outputFolder, processing, setItems, showToast, width]);
 
   return (
     <div data-umbra-ui-gif-tool="" className="grid min-h-0 flex-1 grid-cols-[minmax(300px,360px)_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:overflow-y-auto">
@@ -702,14 +709,14 @@ function VideoToGifTool() {
             <label className="block space-y-1.5"><span className={labelClass}>Output Width</span><input type="number" min={64} max={3840} step={2} value={width} onChange={(event) => setWidth(Math.max(64, Math.min(3840, Number(event.target.value) || 720)))} className={controlClass} /></label>
           </div>
           <div className="rounded-md border border-amber-300/15 bg-amber-500/[0.04] px-2.5 py-2 font-mono text-[8px] uppercase text-zinc-500">Full source duration · Original frame timing · {width}px wide</div>
-          <button type="button" onClick={() => void run()} disabled={items.length === 0 || processing} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-amber-300/30 bg-amber-500/[0.1] text-[10px] font-black uppercase tracking-[0.16em] text-amber-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600">{processing ? <Loader2 size={13} className="animate-spin" /> : <Film size={13} />}{processing ? `Encoding ${summary.completed + summary.failed}/${summary.total}` : 'Create GIF Batch'}</button>
+          <button type="button" onClick={() => void run()} disabled={runnableItems.length === 0 || processing} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-amber-300/30 bg-amber-500/[0.1] text-[10px] font-black uppercase tracking-[0.16em] text-amber-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600">{processing ? <Loader2 size={13} className="animate-spin" /> : <Film size={13} />}{processing ? `Encoding ${summary.completed + summary.failed}/${summary.total}` : 'Create GIF Batch'}</button>
           <BatchSummary {...summary} />
         </div>
       </section>
       <main data-umbra-ui-media-tool-preview="" className="flex min-h-0 min-w-0 flex-col bg-black/20">
         <div className="flex min-h-10 items-center gap-2 border-b border-white/10 px-3"><Video size={13} className="text-zinc-500" /><span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400">Clip Preview</span><span className="ml-auto max-w-[45%] truncate font-mono text-[8px] text-zinc-600">{selected?.name || 'No video selected'}</span></div>
         <div className="flex min-h-[320px] flex-1 items-center justify-center overflow-auto p-4 max-[900px]:min-h-[280px]">{sourceUrl ? <video key={selected?.id} src={sourceUrl} controls playsInline className="max-h-full max-w-full bg-black shadow-2xl" /> : <div className="text-center text-zinc-700"><Film size={34} className="mx-auto mb-3" /><div className="text-[10px] font-black uppercase tracking-[0.16em]">Stage videos to preview</div></div>}</div>
-        {selected?.result ? <div className="flex items-center gap-2 border-t border-emerald-300/15 bg-emerald-500/[0.035] px-3 py-2.5"><CheckCircle2 size={13} className="text-emerald-300" /><span className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-500">{selected.result.filename}</span><a href={`${buildFsImageUrl(selected.result.path, String(Date.now()), { preferServer: true })}&download=1`} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-300"><Download size={11} /> Save</a></div> : null}
+        {selected?.result ? <div className="flex items-center gap-2 border-t border-emerald-300/15 bg-emerald-500/[0.035] px-3 py-2.5"><CheckCircle2 size={13} className="text-emerald-300" /><span className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-500">{selected.result.filename}</span><a href={selected.result.downloadUrl || `${buildFsImageUrl(selected.result.path, String(Date.now()), { preferServer: true })}&download=1`} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-300"><Download size={11} /> Save</a></div> : null}
       </main>
     </div>
   );

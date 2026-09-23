@@ -3835,16 +3835,22 @@ export function UmbraInpaintWorkspace({
   }, [canvasSize.height, canvasSize.width, source]);
 
   const sourceTransitionRef = React.useRef(0);
+  const submissionInFlightRef = React.useRef(false);
   const flushSourceSaveRef = React.useRef<() => Promise<boolean>>(async () => false);
   const beginSourceTransition = React.useCallback(async () => {
+    if (submissionInFlightRef.current) {
+      showToast('Wait for the inpaint job to finish queueing before changing images.', 'error');
+      return null;
+    }
     const token = ++sourceTransitionRef.current;
     const before = latestDocumentRef.current;
     const isCurrent = () => token === sourceTransitionRef.current
+      && !submissionInFlightRef.current
       && latestDocumentRef.current?.id === before?.id
       && latestDocumentRef.current?.revision === before?.revision;
     if (!await flushSourceSaveRef.current() || !isCurrent()) return null;
     return isCurrent;
-  }, []);
+  }, [showToast]);
 
   const loadSource = React.useCallback(async (
     imageUrl: string,
@@ -4371,6 +4377,10 @@ export function UmbraInpaintWorkspace({
 
   const saveProjectAs = React.useCallback(async () => {
     if (!canvasDocument) return;
+    if (submissionInFlightRef.current) {
+      showToast('Wait for the inpaint job to finish queueing before saving a copy.', 'error');
+      return;
+    }
     const name = saveAsName.trim();
     if (!name) {
       showToast('Enter a name for the new canvas project.', 'error');
@@ -4384,6 +4394,10 @@ export function UmbraInpaintWorkspace({
 
   const deleteCurrentProject = React.useCallback(async () => {
     if (!canvasDocument) return;
+    if (submissionInFlightRef.current) {
+      showToast('Wait for the inpaint job to finish queueing before deleting this project.', 'error');
+      return;
+    }
     if (!window.confirm(`Delete the canvas project "${canvasDocument.name}" and its saved assets?`)) return;
     try {
       clearScheduledProjectAutoSave();
@@ -9321,7 +9335,7 @@ export function UmbraInpaintWorkspace({
   }, [canvasDocument, referenceLayersAvailable, referenceLayersMaxLayers, referenceMethods]);
 
   const generateSamples = React.useCallback(async (seedOverride?: number) => {
-    if (!source || !canvasDocument || !visibleGenerationRegion || !canvasReady || !inpaintRuntimeCapabilities || isSubmitting) return;
+    if (!source || !canvasDocument || !visibleGenerationRegion || !canvasReady || !inpaintRuntimeCapabilities || isSubmitting || submissionInFlightRef.current) return;
     const submissionRegion = alignGenerationRegion(expandCanvasRect(
       visibleGenerationRegion,
       contextPadding,
@@ -9341,6 +9355,8 @@ export function UmbraInpaintWorkspace({
       showToast(pipelineError || modelCompatibilityIssue || 'Choose a checkpoint.', 'error');
       return;
     }
+    const sourceTransition = sourceTransitionRef.current;
+    submissionInFlightRef.current = true;
     setIsSubmitting(true);
     try {
       const promptWithLoras = capabilities.loras.support === 'adjustable'
@@ -9489,6 +9505,7 @@ export function UmbraInpaintWorkspace({
         controlLayers: [],
         referenceLayers: [],
       });
+      if (sourceTransitionRef.current !== sourceTransition || latestDocumentRef.current?.id !== canvasDocument.id) return;
       terminalNoticeRef.current = '';
       autoSelectJobRef.current = nextJob.id;
       jobStageContextsRef.current.set(nextJob.id, {
@@ -9517,6 +9534,7 @@ export function UmbraInpaintWorkspace({
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to queue inpaint samples.', 'error');
     } finally {
+      submissionInFlightRef.current = false;
       setIsSubmitting(false);
     }
   }, [

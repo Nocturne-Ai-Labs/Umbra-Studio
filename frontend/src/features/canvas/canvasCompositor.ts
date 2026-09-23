@@ -20,6 +20,7 @@ export interface UmbraCanvasCompositeResult {
   rasterLayerCount: number;
   drawableLayerCount: number;
   maskLayerCount: number;
+  sourceContentPixels: number;
   automaticMaskPixels: number;
 }
 
@@ -377,10 +378,13 @@ export async function composeUmbraCanvasGenerationRegion(
 
   const sourcePixels = transparentContext.getImageData(0, 0, width, height);
   const maskPixels = explicitMaskContext.getImageData(0, 0, width, height);
+  let sourceContentPixels = 0;
   let automaticMaskPixels = 0;
   for (let index = 0; index < width * height; index += 1) {
     const offset = index * 4;
-    const automaticMask = 255 - sourcePixels.data[offset + 3];
+    const sourceAlpha = sourcePixels.data[offset + 3];
+    if (sourceAlpha > 0) sourceContentPixels += 1;
+    const automaticMask = 255 - sourceAlpha;
     if (automaticMask > 0) automaticMaskPixels += 1;
     const explicitValue = Math.max(maskPixels.data[offset], maskPixels.data[offset + 1], maskPixels.data[offset + 2]);
     const value = Math.max(automaticMask, explicitValue);
@@ -403,6 +407,7 @@ export async function composeUmbraCanvasGenerationRegion(
     rasterLayerCount,
     drawableLayerCount: drawableEntities.length,
     maskLayerCount: maskEntities.length,
+    sourceContentPixels,
     automaticMaskPixels,
   };
 }
