@@ -2684,17 +2684,7 @@ export function UmbraUIWorkspace() {
       // Child consumers acknowledge after mounting, not after an arbitrary timeout.
       if (handoff.mode !== 'inpaint' && handoff.mode !== 'video') clearPendingUmbraUiMediaHandoff(handoff);
       if (handoff.mode === 'video') setActiveMode('video');
-      if (handoff.mode === 'txt2img') {
-        setActiveMode('image');
-        setImg2imgSource({
-          path: '',
-          originalPath: '',
-          name: '',
-          imageUrl: '',
-          width: 0,
-          height: 0,
-        });
-      }
+      if (handoff.mode === 'txt2img') setActiveMode('image');
       if (handoff.mode === 'img2img') {
         setActiveMode('img2img');
         setReplaceImg2ImgSourceOnComplete(false);
