@@ -449,6 +449,7 @@ const PAGE_CACHE_TTL_MS = 90_000;
 const PAGE_CACHE_KEY_SEPARATOR = '\u0001';
 const TREE_CACHE_LIMIT = 220;
 const TREE_FETCH_TIMEOUT_MS = 8_000;
+const GLOBAL_SEARCH_FOLDER_TIMEOUT_MS = 12_000;
 const GRID_MIN_CARD_WIDTH = 216;
 const GRID_CARD_EXTRA_HEIGHT = 72;
 const PHONE_GRID_MIN_CARD_WIDTH = 104;
@@ -8796,7 +8797,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
               });
               const response = await fetchGalleryFs('/list-progressive', params, {
                 cache: 'no-store',
-                signal: controller.signal,
+                signal: AbortSignal.any([controller.signal, AbortSignal.timeout(GLOBAL_SEARCH_FOLDER_TIMEOUT_MS)]),
               }, (page) => {
                 if (controller.signal.aborted) return;
                 appendResults({
