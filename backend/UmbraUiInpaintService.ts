@@ -3337,7 +3337,10 @@ export class UmbraUiInpaintService {
     if (this.nodeTypesCache && Date.now() - this.nodeTypesCache.fetchedAt < 30_000) {
       return new Set(this.nodeTypesCache.values);
     }
-    const response = await fetch(`${this.getComfyBaseUrl()}/object_info`, { cache: 'no-store' });
+    const response = await fetch(`${this.getComfyBaseUrl()}/object_info`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(15_000),
+    });
     if (!response.ok) throw new Error(`Unable to inspect ComfyUI inpaint support (${response.status}).`);
     const payload = await response.json().catch(() => ({}));
     const objectInfo = payload && typeof payload === 'object' ? payload as Record<string, any> : {};
