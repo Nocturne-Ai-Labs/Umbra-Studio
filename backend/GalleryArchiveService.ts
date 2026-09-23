@@ -70,6 +70,8 @@ export async function createGalleryArchive(fullPath: string, job: GalleryArchive
     for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
       if (entry.name.startsWith('.umbra-archive-') && entry.name.endsWith('.partial')) continue;
+      if (directory === root && entry.isFile() && entry.name.startsWith(label)
+        && /^(?: \(\d+\))?\.zip$/i.test(entry.name.slice(label.length))) continue;
       if (entry.isSymbolicLink()) { job.skippedLinks++; continue; }
       const stat = await fs.lstat(path);
       if (stat.isSymbolicLink()) { job.skippedLinks++; continue; }
