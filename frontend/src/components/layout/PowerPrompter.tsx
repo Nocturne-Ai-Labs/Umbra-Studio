@@ -12287,7 +12287,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           onNameChange={setSaveQueueNameDraft}
           onSubmit={handleConfirmSaveCurrentQueueSnapshot}
           onCancel={() => {
-            if (savedQueueBusy) return;
+            if (savedQueueBusy && savedQueueBusy !== 'list') return;
             setSaveQueueModalOpen(false);
           }}
         />

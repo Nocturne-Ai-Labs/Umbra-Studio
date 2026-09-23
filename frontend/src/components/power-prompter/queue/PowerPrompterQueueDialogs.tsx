@@ -34,17 +34,18 @@ export function PowerPrompterSaveQueueModal(props: PowerPrompterSaveQueueModalPr
   React.useEffect(() => { setDeleteId(''); }, [props.selectedId]);
   const selected = props.queues.find((queue) => queue.id === props.selectedId);
   const busy = !!props.busy;
+  const blockingClose = busy && props.busy !== 'list';
 
   return createPortal(
     <dialog
       ref={dialogRef}
       aria-labelledby="saved-pp-queues-title"
       className="m-auto w-[600px] max-w-[calc(100vw-24px)] max-h-[calc(100dvh-32px)] overflow-y-auto rounded-lg border border-white/20 bg-[var(--umbra-bg)] p-0 text-[var(--umbra-text)] shadow-2xl backdrop:bg-black/70"
-      onCancel={(event) => { event.preventDefault(); if (!busy) props.onCancel(); }}
+      onCancel={(event) => { event.preventDefault(); if (!blockingClose) props.onCancel(); }}
     >
       <header className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
         <h2 id="saved-pp-queues-title" className="text-sm font-semibold">Saved Power Prompter Queues</h2>
-        <button type="button" className={savedQueueButtonClass} aria-label="Close saved queues" title="Close saved queues" disabled={busy} onClick={props.onCancel}><X size={16} /></button>
+        <button type="button" className={savedQueueButtonClass} aria-label="Close saved queues" title="Close saved queues" disabled={blockingClose} onClick={props.onCancel}><X size={16} /></button>
       </header>
       <form className="space-y-3 border-b border-white/10 p-4" onSubmit={(event) => { event.preventDefault(); if (props.availability.canSave && !busy) void props.onSubmit(); }}>
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
