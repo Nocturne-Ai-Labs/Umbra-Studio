@@ -26461,10 +26461,8 @@ async function handleFsMetadata(req: Request, url: URL, server?: RequestIpServer
   if (!(await isRemoteMainMediaReadAllowed(req, url, path, server))) return json({ error: 'Access denied' }, 403);
 
   try {
-    const resolved = resolvePath(path);
-    if (!resolved) return json({ error: 'Invalid path' }, 400);
-
-    const { fullPath } = resolved;
+    const fullPath = await resolveGalleryMediaReadPath(path);
+    if (!fullPath) return json({ error: 'Invalid media path' }, 403);
     if (!existsSync(fullPath)) return json({ error: 'File not found' }, 404);
 
     const stat = statSync(fullPath);
