@@ -8003,24 +8003,31 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       if (!response.ok) throw new Error(String(payload?.error || 'Failed to reorder items'));
       addToast({ type: 'success', message: `Reordered ${reordered.movingCount} item${reordered.movingCount === 1 ? '' : 's'}` });
     } catch (error) {
-      if (switchingToCustomSort) skipNextSortReloadRef.current = true;
-      filesRef.current = previousFiles;
-      setFiles(previousFiles);
-      if (targetSetId !== null) setSetSortRules(previousSetSortRules);
-      setSortBy(previousSortBy);
-      setSortOrder(previousSortOrder);
-      emitFilmstripFeed(currentFolder, previousFiles, {
-        mode: 'replace',
-        files: previousFiles,
-        total: Math.max(total, previousFiles.length),
-        done: true,
-        nextCursor: null,
-        sortBy: previousSortBy,
-        sortOrder: previousSortOrder,
-      });
+      const stillShowingReorder = pathsEqual(currentFolderRef.current, currentFolder)
+        && filesRef.current === reordered.files;
+      if (stillShowingReorder) {
+        if (switchingToCustomSort) skipNextSortReloadRef.current = true;
+        filesRef.current = previousFiles;
+        setFiles(previousFiles);
+        if (targetSetId !== null) setSetSortRules(previousSetSortRules);
+        setSortBy(previousSortBy);
+        setSortOrder(previousSortOrder);
+        emitFilmstripFeed(currentFolder, previousFiles, {
+          mode: 'replace',
+          files: previousFiles,
+          total: Math.max(total, previousFiles.length),
+          done: true,
+          nextCursor: null,
+          sortBy: previousSortBy,
+          sortOrder: previousSortOrder,
+        });
+      } else if (pathsEqual(currentFolderRef.current, currentFolder)) {
+        clearPageCacheForFolder(currentFolder);
+        void loadFolder({ folder: currentFolder, keepSelection: true, forceRefresh: true, preserveScroll: true });
+      }
       addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to reorder items' });
     }
-  }, [addToast, clearPageCacheForFolder, currentFolder, emitFilmstripFeed, groupBySet, markGalleryUiSessionDirty, setSortRules, sortBy, sortOrder, total]);
+  }, [addToast, clearPageCacheForFolder, currentFolder, emitFilmstripFeed, groupBySet, loadFolder, markGalleryUiSessionDirty, setSortRules, sortBy, sortOrder, total]);
 
   const selectAllInFolder = useCallback(async () => {
     const folderPath = normalizePath(currentFolder);
