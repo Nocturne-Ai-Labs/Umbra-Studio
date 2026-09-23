@@ -15,7 +15,7 @@ import { normalizeUmbraVideoLoraStack, type UmbraVideoLoraEntry } from './shared
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { configureGeneratedMediaActivity, recordGeneratedMediaOutputs } from './backend/GeneratedMediaActivity';
 import { createCaptionCategoryFilter } from './backend/DatasetCaptionCategories';
-import { createReadStream, createWriteStream, existsSync, statSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, openSync, closeSync, renameSync, rmSync, type Dirent, type Stats, type BigIntStats } from 'fs';
+import { createReadStream, createWriteStream, existsSync, statSync, realpathSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, openSync, closeSync, renameSync, rmSync, type Dirent, type Stats, type BigIntStats } from 'fs';
 import * as fs from 'fs/promises';
 import { Readable } from 'node:stream';
 import { LoraPresetWriteError, writeLoraPresetLibrary } from './backend/UmbraLoraPresetStore';
@@ -49,7 +49,7 @@ import { isGalleryUploadFilename, isGalleryUploadStrategy, prepareGalleryUploadD
 import { copyMediaIntoComfyInput, writeAllUploadedMediaBytes } from './backend/UmbraUiMediaUploadService';
 import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
 import { fetchLocalServerProxy, readLocalServerProxyText } from './backend/LocalServerProxyTransfer';
-import { createGalleryPathAuthorizer, resolveAllowedGalleryPath } from './backend/GalleryPathAccess';
+import { createGalleryPathAuthorizer, resolveAllowedExistingGalleryPath, resolveAllowedGalleryPath } from './backend/GalleryPathAccess';
 import { buildGalleryDownloadArchive, prepareGalleryDownloadResponse, getPreparedGalleryDownload, type GalleryDownloadEntry } from './backend/GalleryDownloadArchiveService';
 import { copyFileExclusive, moveTreeExclusive } from './backend/FsTransferCopy';
 import { AnimaModelMergeService } from './backend/AnimaModelMergeService';
@@ -20575,13 +20575,18 @@ function resolveUmbraUiMediaToolOutputFolder(
     return automaticFolder;
   }
   const resolved = resolvePath(rawPath, { allowOutsideRoot: true });
-  if (!resolved || (!allowExternal && !isPathInsideAllowedRoots(resolved.fullPath))) {
+  if (!resolved) {
     throw new Error('The selected output destination is not available to this client.');
   }
-  if (!existsSync(resolved.fullPath) || !statSync(resolved.fullPath).isDirectory()) {
+  if (allowExternal && (!existsSync(resolved.fullPath) || !statSync(resolved.fullPath).isDirectory())) {
     throw new Error('The selected output destination does not exist.');
   }
-  return resolved.fullPath;
+  const physicalPath = allowExternal
+    ? realpathSync(resolved.fullPath)
+    : resolveAllowedExistingGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
+  if (!physicalPath) throw new Error('The selected output destination is not available to this client.');
+  if (!existsSync(physicalPath) || !statSync(physicalPath).isDirectory()) throw new Error('The selected output destination does not exist.');
+  return physicalPath;
 }
 
 async function publishUmbraUiMediaToolSequencePath(
@@ -20620,16 +20625,21 @@ function resolveUmbraUiMediaToolSourcePath(value: unknown, supportedExtensions: 
   const rawPath = String(value || '').trim();
   if (!rawPath) return '';
   const resolved = resolvePath(rawPath, { allowOutsideRoot: true });
-  if (!resolved || (!allowExternal && !isPathInsideAllowedRoots(resolved.fullPath))) {
+  if (!resolved) {
     throw new Error('The selected Gallery source is outside Umbra Studio folders.');
   }
-  if (!existsSync(resolved.fullPath) || !statSync(resolved.fullPath).isFile()) {
+  if (allowExternal && (!existsSync(resolved.fullPath) || !statSync(resolved.fullPath).isFile())) {
     throw new Error(`The selected Gallery source was not found: ${rawPath}`);
   }
-  if (!supportedExtensions.has(extname(resolved.fullPath).toLowerCase())) {
-    throw new Error(`Unsupported media source: ${basename(resolved.fullPath)}`);
+  const physicalPath = allowExternal
+    ? realpathSync(resolved.fullPath)
+    : resolveAllowedExistingGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
+  if (!physicalPath) throw new Error('The selected Gallery source is outside Umbra Studio folders.');
+  if (!existsSync(physicalPath) || !statSync(physicalPath).isFile()) throw new Error(`The selected Gallery source was not found: ${rawPath}`);
+  if (!supportedExtensions.has(extname(physicalPath).toLowerCase())) {
+    throw new Error(`Unsupported media source: ${basename(physicalPath)}`);
   }
-  return resolved.fullPath;
+  return physicalPath;
 }
 
 async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean): Promise<Response> {

@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 async function canonicalCandidate(path: string): Promise<string> {
@@ -8,6 +9,19 @@ async function canonicalCandidate(path: string): Promise<string> {
     try { return resolve(await fs.realpath(parent), ...missing); }
     catch (error: any) {
       if (error?.code !== 'ENOENT' || dirname(parent) === parent) throw error;
+      missing.unshift(basename(parent));
+      parent = dirname(parent);
+    }
+  }
+}
+
+function canonicalCandidateSync(path: string): string {
+  let parent = resolve(path);
+  const missing: string[] = [];
+  while (true) {
+    try { return resolve(realpathSync(parent), ...missing); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || dirname(parent) === parent) throw error;
       missing.unshift(basename(parent));
       parent = dirname(parent);
     }
@@ -31,4 +45,18 @@ export async function createGalleryPathAuthorizer(allowedRoots: string[]) {
 
 export async function resolveAllowedGalleryPath(path: string, allowedRoots: string[]): Promise<string | null> {
   return (await createGalleryPathAuthorizer(allowedRoots))(path);
+}
+
+export function resolveAllowedExistingGalleryPath(path: string, allowedRoots: string[]): string | null {
+  let candidate: string;
+  try { candidate = canonicalCandidateSync(path); }
+  catch { return null; }
+  for (const root of allowedRoots) {
+    let physicalRoot: string;
+    try { physicalRoot = canonicalCandidateSync(root); }
+    catch { continue; }
+    const rel = relative(physicalRoot, candidate);
+    if (!rel || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))) return candidate;
+  }
+  return null;
 }
