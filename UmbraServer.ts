@@ -20567,7 +20567,7 @@ async function grantUmbraUiMediaToolFile(path: string): Promise<string> {
 }
 
 async function umbraUiMediaToolFileLinks(path: string, host: boolean): Promise<{ previewUrl?: string; downloadUrl?: string }> {
-  if (!host || await resolveAllowedGalleryPath(path, getGalleryTransferAllowedRoots())) return {};
+  if (!host || await resolveGalleryMediaReadPath(toClientPath(path))) return {};
   const previewUrl = await grantUmbraUiMediaToolFile(path);
   return { previewUrl, downloadUrl: `${previewUrl}?download=1` };
 }
