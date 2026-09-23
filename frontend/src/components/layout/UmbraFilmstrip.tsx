@@ -183,9 +183,9 @@ function toFilmstripImage(item: FsListMediaFile): FilmstripImage {
     modifiedMs,
     size,
   });
-  const inferredType = normalizedType === 'video' || /\.(mp4|webm|mkv|mov|avi|m4v)$/i.test(normalizedPath)
+  const inferredType = normalizedType === 'video' || /\.(mp4|webm|mkv|mov|avi|m4v|flv|wmv)$/i.test(normalizedPath)
     ? 'video'
-    : normalizedPath.toLowerCase().endsWith('.gif')
+    : normalizedType === 'gif' || normalizedPath.toLowerCase().endsWith('.gif')
       ? 'gif'
       : 'image';
 
@@ -224,7 +224,7 @@ export function filmstripImagesFromSavedOutputs(detail: unknown): FilmstripImage
     images.push(toFilmstripImage({
       path,
       name: String(item.filename || item.name || pathLeaf(path) || 'generation'),
-      type: String(item.type || '').toLowerCase() as FsListMediaFile['type'],
+      type: (item.mediaKind === 'videos' ? 'video' : item.mediaKind === 'gifs' ? 'gif' : String(item.type || '').toLowerCase()) as FsListMediaFile['type'],
       modifiedMs: safeNumber(item.modifiedMs ?? item.modified ?? Date.now()) || Date.now(),
       createdMs: safeNumber(item.createdMs ?? item.created ?? item.modifiedMs ?? item.modified ?? Date.now()) || Date.now(),
       size: safeNumber(item.size),
