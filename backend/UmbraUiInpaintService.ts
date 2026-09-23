@@ -2181,7 +2181,11 @@ export class UmbraUiInpaintService {
     form.append('type', 'input');
     form.append('subfolder', subfolder);
     form.append('overwrite', 'true');
-    const response = await fetch(`${this.getComfyBaseUrl()}/upload/image`, { method: 'POST', body: form });
+    const response = await fetch(`${this.getComfyBaseUrl()}/upload/image`, {
+      method: 'POST',
+      body: form,
+      signal: AbortSignal.timeout(5 * 60_000),
+    });
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
       throw new Error(detail || `ComfyUI rejected the ${role} input (${response.status}).`);
