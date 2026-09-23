@@ -1,6 +1,7 @@
 import { join, basename, extname, dirname, resolve } from 'path';
 import { existsSync, type Dirent } from 'fs';
 import * as fs from 'fs/promises';
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { GalleryDb } from '../gallery/GalleryDb';
 import { copyTreeExclusive, moveTreeExclusive, moveFileExclusive, type CopyProgress } from './FsTransferCopy';
@@ -241,6 +242,7 @@ type ProgressiveSeedCacheEntry = {
   createdAt: number;
   entries: ProgressiveSeedEntry[];
   totalMedia: number;
+  inventorySignature: string;
 };
 
 type ProgressiveSeedSnapshot = ProgressiveSeedCacheEntry & {
@@ -258,7 +260,7 @@ const progressiveListingSnapshots = new Map<string, {
   fullPath: string; targetPath: string; sortBy: string; sortOrder: string;
   seed: ProgressiveSeedCacheEntry; expiresAt: number;
 }>();
-const directoryTreeSeedCache = new Map<string, ProgressiveSeedCacheEntry>();
+const directoryTreeSeedCache = new Map<string, Pick<ProgressiveSeedCacheEntry, 'createdAt' | 'entries' | 'totalMedia'>>();
 const progressiveSeedInFlight = new Map<string, Promise<ProgressiveSeedEntry[]>>();
 const directoryTreeSeedInFlight = new Map<string, Promise<ProgressiveSeedEntry[]>>();
 const progressiveNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -314,20 +316,34 @@ function pruneProgressiveSeedCache() {
   }
 }
 
-function compareProgressiveSeedEntries(a: ProgressiveSeedEntry, b: ProgressiveSeedEntry) {
-  if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1;
+function compareProgressiveSeedNames(a: ProgressiveSeedEntry, b: ProgressiveSeedEntry) {
   return progressiveNameCollator.compare(a.name, b.name) || a.name.localeCompare(b.name);
 }
 
+function compareProgressiveSeedEntries(a: ProgressiveSeedEntry, b: ProgressiveSeedEntry) {
+  if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1;
+  return compareProgressiveSeedNames(a, b);
+}
+
 function createSeedCacheEntry(entries: ProgressiveSeedEntry[]): ProgressiveSeedCacheEntry {
-  let totalMedia = 0;
-  for (const entry of entries) {
-    if (entry.kind === 'file') totalMedia += 1;
+  // The listing keeps folders first, while Gallery summaries hash all names
+  // together. Merge the two sorted runs without changing listing order.
+  let fileStart = 0;
+  while (fileStart < entries.length && entries[fileStart].kind === 'folder') fileStart += 1;
+  const hash = createHash('sha256');
+  let folderIndex = 0;
+  let fileIndex = fileStart;
+  while (folderIndex < fileStart || fileIndex < entries.length) {
+    const takeFolder = folderIndex < fileStart && (fileIndex >= entries.length
+      || compareProgressiveSeedNames(entries[folderIndex], entries[fileIndex]) < 0);
+    const entry = takeFolder ? entries[folderIndex++] : entries[fileIndex++];
+    hash.update(`${entry.kind === 'folder' ? 'd' : 'f'}:${entry.name.length}:${entry.name}`);
   }
   return {
     createdAt: Date.now(),
     entries,
-    totalMedia,
+    totalMedia: entries.length - fileStart,
+    inventorySignature: hash.digest('hex'),
   };
 }
 
@@ -440,10 +456,6 @@ async function getProgressiveSeedSnapshot(fullPath: string, force = false): Prom
     seedWaitMs: 0,
     seedBuildMs: Date.now() - buildStartedAt,
   };
-}
-
-async function getProgressiveSeed(fullPath: string, force = false) {
-  return (await getProgressiveSeedSnapshot(fullPath, force)).entries;
 }
 
 async function sortedProgressiveSeed(
@@ -941,6 +953,7 @@ async function runListProgressive(payload: FsListProgressiveRequest['payload']) 
     path: targetPath,
     folders,
     files,
+    inventorySignature: snapshot.inventorySignature,
     total: snapshot.totalMedia,
     done,
     nextCursor: done ? null : nextCursor,
@@ -1002,7 +1015,8 @@ async function runTree(payload: FsTreeRequest['payload']) {
 
 async function runFolderSummary(payload: FsFolderSummaryRequest['payload']) {
   const { fullPath, targetPath, force } = payload;
-  const entries = await getProgressiveSeed(fullPath, force === true);
+  const seed = await getProgressiveSeedSnapshot(fullPath, force === true);
+  const entries = seed.entries;
   let subfolderCount = 0;
   let imageCount = 0;
   let videoCount = 0;
@@ -1026,6 +1040,7 @@ async function runFolderSummary(payload: FsFolderSummaryRequest['payload']) {
 
   return {
     path: targetPath,
+    signature: seed.inventorySignature,
     subfolderCount,
     imageCount,
     videoCount,

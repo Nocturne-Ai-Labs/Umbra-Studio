@@ -323,6 +323,7 @@ function dispatchGalleryWorkflowOpen(payload: GalleryApiWorkflowOpenPayload) {
 
 type GalleryListPayload = {
   missing?: boolean;
+  inventorySignature?: string;
   folders?: GalleryFolder[];
   files?: GalleryFile[];
   done?: boolean;
@@ -5781,6 +5782,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         sortBy,
         sortOrder,
         fast: '1',
+        force: '1',
         recursive: 'false',
       });
       const response = await fetchGalleryFs('/list-progressive', params, { cache: 'no-store' });
@@ -8686,9 +8688,14 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         const cachedPageNeedsRefresh = cachedPageValidationRef.current.needsRefreshForSummary(
           cacheKey, cachedPage?.summarySignature, signature,
         );
+        const firstSummaryNeedsRefresh = Boolean(cachedPage) && cachedPageValidationRef.current.needsRefreshForFirstSummary(
+          cacheKey, cachedPage?.summarySignature, cachedPage?.payload.inventorySignature, summary.signature,
+        );
         // A signature belongs to the listing that was rendered. Keep an old
         // signature until reconciliation replaces that listing.
-        if (!cachedPagePending && cachedPage && !cachedPage.summarySignature) cachedPage.summarySignature = signature;
+        if (!cachedPagePending && cachedPage && !cachedPage.summarySignature && !firstSummaryNeedsRefresh) {
+          cachedPage.summarySignature = signature;
+        }
         const previous = folderSummarySnapshotRef.current;
         folderSummarySnapshotRef.current = {
           path: folderPath,
@@ -8705,8 +8712,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           : previous!.totalMediaCount !== summaryTotal;
         const subfoldersChanged = !folderChanged && previous!.subfolderCount !== summarySubfolders;
 
-        if (folderChanged && !mediaChanged && !cachedPageNeedsRefresh) return;
-        if (!signatureChanged && !mediaChanged && !cachedPageNeedsRefresh) return;
+        if (folderChanged && !mediaChanged && !cachedPageNeedsRefresh && !firstSummaryNeedsRefresh) return;
+        if (!signatureChanged && !mediaChanged && !cachedPageNeedsRefresh && !firstSummaryNeedsRefresh) return;
 
         traceGalleryLoad({
           event: 'folder_summary_changed',
@@ -8723,7 +8730,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           setFolderPreviewRefreshVersion((current) => current + 1);
         }
 
-        if (mediaChanged || signatureChanged || cachedPageNeedsRefresh) {
+        if (mediaChanged || signatureChanged || cachedPageNeedsRefresh || firstSummaryNeedsRefresh) {
           scheduleCurrentFolderReconcile(folderPath, summary, 'summary-poll');
         }
       } catch (error) {

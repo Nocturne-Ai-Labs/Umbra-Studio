@@ -19,4 +19,17 @@ export class GalleryCachedPageValidation {
     this.pendingKey = '';
     return false;
   }
+
+  needsRefreshForFirstSummary(
+    key: string,
+    cachedSummarySignature: string | undefined,
+    listingInventorySignature: string | undefined,
+    currentSummarySignature: string | undefined,
+  ): boolean {
+    if (this.isPending(key) || cachedSummarySignature) return false;
+    // Split Gallery appends watcher and metadata revisions after the names hash.
+    const summaryInventorySignature = String(currentSummarySignature || '').split(':', 1)[0];
+    return Boolean(listingInventorySignature && summaryInventorySignature
+      && listingInventorySignature !== summaryInventorySignature);
+  }
 }
