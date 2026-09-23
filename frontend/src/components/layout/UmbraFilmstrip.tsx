@@ -411,9 +411,11 @@ export function UmbraFilmstrip({
   const externalSelectionRef = useRef<{ paths: string[]; primaryPath?: string } | null>(null);
   const pendingSelectionRef = useRef<{ folderPath?: string; paths: string[]; primaryPath?: string } | null>(null);
   const feedSignatureRef = useRef<string>('');
+  const initialFeedRootRef = useRef<string>('');
   const lastFeedRequestAtRef = useRef(0);
   const lastForceRefreshBurstAtRef = useRef(0);
   const currentFolderRef = useRef<string>('');
+  const activityOpenedFolderRef = useRef<string>('');
   const localSizeSortRef = useRef(false);
   const localCustomSortPendingRef = useRef<'saving' | 'syncing' | null>(null);
   const reorderInFlightRef = useRef(false);
@@ -692,6 +694,10 @@ export function UmbraFilmstrip({
       if (incoming.toLowerCase() !== normalizePath(currentFolderRef.current).toLowerCase()) {
         localCustomSortPendingRef.current = null;
       }
+      if (incoming.toLowerCase() !== normalizePath(activityOpenedFolderRef.current).toLowerCase()) {
+        folderActivity.markOpened(incoming);
+        activityOpenedFolderRef.current = incoming;
+      }
       currentFolderRef.current = incoming;
       setCurrentFolder(incoming);
       setFolderLoadError('');
@@ -701,7 +707,7 @@ export function UmbraFilmstrip({
     return () => {
       window.removeEventListener('umbra:gallery-folder-changed', onGalleryFolderChanged as EventListener);
     };
-  }, [rememberRecentFolders]);
+  }, [rememberRecentFolders, folderActivity.markOpened]);
 
   useEffect(() => {
     const onFolderLoadFailed = (event: Event) => {
@@ -868,6 +874,19 @@ export function UmbraFilmstrip({
       window.removeEventListener('umbra:gallery-filmstrip-feed', onFilmstripFeed as EventListener);
     };
   }, []);
+
+  useEffect(() => {
+    const rootKey = normalizePath(rootPath).toLowerCase();
+    const rootChanged = Boolean(initialFeedRootRef.current && initialFeedRootRef.current !== rootKey);
+    initialFeedRootRef.current = rootKey;
+    const timer = window.setTimeout(() => {
+      if (!feedSignatureRef.current || rootChanged) {
+        if (rootChanged) lastFeedRequestAtRef.current = 0;
+        refreshImages();
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshImages, rootPath]);
 
   useEffect(() => {
     const onGallerySortChanged = (event: Event) => {
@@ -2028,6 +2047,7 @@ export function UmbraFilmstrip({
     const normalized = normalizePath(folderPath);
     if (!normalized) return;
     folderActivity.markOpened(normalized);
+    activityOpenedFolderRef.current = normalized;
     if (normalized.toLowerCase() !== normalizePath(currentFolderRef.current).toLowerCase()) {
       localCustomSortPendingRef.current = null;
     }
