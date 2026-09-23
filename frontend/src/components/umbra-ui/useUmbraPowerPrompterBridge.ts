@@ -60,6 +60,7 @@ import { buildUmbraQueueActivitiesFromControllerSnapshot } from '@/lib/umbraQueu
 const RECONNECT_DELAY_MS = 1500;
 const QUEUE_ACK_TIMEOUT_MS = 15000;
 const CATALOG_REQUEST_TIMEOUT_MS = 30000;
+const SNAPSHOT_FAILURE_RECOVERY_MS = 60000;
 
 type QueuePromptStatus = 'pending' | 'submitting' | 'running' | 'completed' | 'canceled' | 'interrupted' | 'failed';
 export type UmbraQueuePlacement = 'next' | 'end' | 'interrupt';
@@ -648,6 +649,8 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   const pendingModelInfoRef = React.useRef(new Map<string, PendingCatalogRequest<PowerPrompterModelInfoPayload>>());
   const ownedRequestIdsRef = React.useRef(new Set<string>());
   const ownedRequestPromptsRef = React.useRef(new Map<string, string[]>());
+  const reportedPromptFailuresRef = React.useRef(new Set<string>());
+  const reportedRequestFailuresRef = React.useRef(new Set<string>());
   const [connected, setConnected] = React.useState(false);
   const [queueSnapshot, setQueueSnapshot] = React.useState<QueueSnapshot | null>(null);
   const queueActivities = React.useMemo(
@@ -986,6 +989,21 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       }
     };
 
+    const reportPromptFailure = (payload: Record<string, unknown>) => {
+      const requestId = String(payload.requestId || '').trim();
+      if (!requestId || !ownedRequestIdsRef.current.has(requestId) || payload.failed !== true || payload.canceled === true) return;
+      const promptIndex = toFiniteInteger(payload.promptIndex, 0, 0, Number.MAX_SAFE_INTEGER);
+      const key = `${requestId}:${promptIndex}`;
+      if (reportedPromptFailuresRef.current.has(key)) return;
+      reportedPromptFailuresRef.current.add(key);
+      reportedRequestFailuresRef.current.add(requestId);
+      const detail = String(payload.error || '').trim();
+      useToastStore.getState().addToast({
+        type: 'error',
+        message: detail || `Umbra UI generation ${promptIndex + 1} failed in ComfyUI. Check the queue details and try again.`,
+      });
+    };
+
     const connect = () => {
       if (disposed) return;
       const current = wsRef.current;
@@ -1015,7 +1033,30 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           return;
         }
         if (type === 'queue_snapshot') {
-          setQueueSnapshot(normalizeQueueSnapshot(payload?.snapshot));
+          const snapshot = normalizeQueueSnapshot(payload?.snapshot);
+          const snapshotUpdatedAt = snapshot?.updatedAt ?? 0;
+          for (const request of snapshot?.requests || []) {
+            if (request.origin !== 'umbra_ui') continue;
+            ownedRequestIdsRef.current.add(request.requestId);
+            if (request.prompts.length > 0) {
+              const prompts: string[] = [];
+              for (const prompt of request.prompts) prompts[prompt.promptIndex] = prompt.prompt;
+              ownedRequestPromptsRef.current.set(request.requestId, prompts);
+            }
+            for (const prompt of request.prompts) {
+              const failureAge = snapshotUpdatedAt - prompt.updatedAt;
+              if (prompt.status === 'failed' && prompt.error
+                && failureAge >= 0 && failureAge <= SNAPSHOT_FAILURE_RECOVERY_MS) {
+                reportPromptFailure({
+                  requestId: request.requestId,
+                  promptIndex: prompt.promptIndex,
+                  failed: true,
+                  error: prompt.error,
+                });
+              }
+            }
+          }
+          setQueueSnapshot(snapshot);
           void refreshVideoJobs();
           return;
         }
@@ -1143,6 +1184,23 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           });
           return;
         }
+        if (type === 'queue_progress') {
+          reportPromptFailure(payload);
+          return;
+        }
+        if (type === 'job_idle') {
+          const requestId = String(payload?.requestId || '').trim();
+          if (requestId && ownedRequestIdsRef.current.has(requestId)
+            && payload?.success === false && payload?.canceled !== true
+            && !reportedRequestFailuresRef.current.has(requestId)) {
+            reportedRequestFailuresRef.current.add(requestId);
+            useToastStore.getState().addToast({
+              type: 'error',
+              message: String(payload?.error || 'Umbra UI generation failed in ComfyUI. Check the queue details and try again.'),
+            });
+          }
+          return;
+        }
         if (type === 'queue_saved_outputs') {
           const requestId = String(payload?.requestId || '').trim();
           if (!ownedRequestIdsRef.current.has(requestId)) return;
@@ -1191,7 +1249,8 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           const pending = pendingQueueAcksRef.current.get(requestId);
           if (!pending) {
             if (type === 'queue_result' && payload?.success === false && !payload?.canceled
-              && ownedRequestIdsRef.current.has(requestId)) {
+              && ownedRequestIdsRef.current.has(requestId) && !reportedRequestFailuresRef.current.has(requestId)) {
+              reportedRequestFailuresRef.current.add(requestId);
               useToastStore.getState().addToast({
                 type: 'error',
                 message: String(payload?.error || 'Umbra UI generation failed. Check the queue details and try again.'),
@@ -1202,6 +1261,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           window.clearTimeout(pending.timer);
           pendingQueueAcksRef.current.delete(requestId);
           if (payload?.success === false) {
+            reportedRequestFailuresRef.current.add(requestId);
             pending.reject(new Error(String(payload?.error || 'Failed to queue generation.')));
           } else {
             pending.resolve(requestId);

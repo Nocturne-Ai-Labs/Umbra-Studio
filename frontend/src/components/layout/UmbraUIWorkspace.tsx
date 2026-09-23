@@ -893,6 +893,8 @@ export function UmbraUIWorkspace() {
   const inheritedControlsAppliedRef = React.useRef(false);
   const attemptedLoraInfoRef = React.useRef(new Set<string>());
   const mediaHandoffAppliedAtRef = React.useRef(0);
+  const pendingMediaHandoffRef = React.useRef<UmbraUiMediaHandoff | null>(null);
+  const pendingPowerPrompterHandoffRef = React.useRef<UmbraUiPowerPrompterHandoff | null>(null);
   const [canvasMediaHandoff, setCanvasMediaHandoff] = React.useState<UmbraUiMediaHandoff | null>(null);
   const clearCanvasMediaHandoff = React.useCallback(() => setCanvasMediaHandoff(null), []);
   const img2imgSourceReplacementRequestsRef = React.useRef(new Map<string, string>());
@@ -1646,6 +1648,7 @@ export function UmbraUIWorkspace() {
     const inheritedModelFamily = String(options.modelFamily || readString('modelFamily')).trim();
     if (inheritedModelFamily) setModelFamily(inheritedModelFamily);
     const inheritedModelFamilyKey = normalizeUmbraUiModelFamilyKey(inheritedModelFamily);
+    const targetLoraFamilyKey = inheritedModelFamilyKey || activeLoraFamilyKey;
     const inheritedCheckpoint = readString('checkpointName');
     if (inheritedCheckpoint) setCheckpointName(inheritedCheckpoint);
     const inheritedResources = generation.workflowResources;
@@ -1664,7 +1667,7 @@ export function UmbraUIWorkspace() {
           const trainedTags = Array.isArray(entry.trainedTags)
             ? entry.trainedTags.map((tag) => String(tag || '').trim()).filter(Boolean)
             : [];
-          const baseEntry = createUmbraUiLoraEntry(name, trainedTags, inheritedModelFamilyKey);
+          const baseEntry = createUmbraUiLoraEntry(name, trainedTags, targetLoraFamilyKey);
           return {
             ...baseEntry,
             id: String(entry.id || '').trim() || baseEntry.id,
@@ -1674,9 +1677,11 @@ export function UmbraUIWorkspace() {
           } satisfies UmbraUiLoraEntry;
         })
         .filter((entry): entry is UmbraUiLoraEntry => !!entry);
-      if (replace || inheritedLoras.length > 0) setLoras(inheritedLoras);
+      if (replace || inheritedLoras.length > 0) {
+        setLoras((current) => replaceUmbraUiLorasForFamily(current, targetLoraFamilyKey, inheritedLoras));
+      }
     } else if (replace) {
-      setLoras([]);
+      setLoras((current) => replaceUmbraUiLorasForFamily(current, targetLoraFamilyKey, []));
     }
     const inheritedNegative = readString('negativePrompt');
     if (replace || inheritedNegative) setNegativePrompt(inheritedNegative);
@@ -1758,7 +1763,7 @@ export function UmbraUIWorkspace() {
       const denoise = Number(img2img.denoise);
       if (Number.isFinite(denoise)) setImg2imgDenoise(Math.max(0.01, Math.min(1, denoise)));
     }
-  }, [syncImageDimensions]);
+  }, [activeLoraFamilyKey, syncImageDimensions]);
 
   React.useEffect(() => {
     if (!imageControlsHydrated || !inheritedGeneration || inheritedControlsAppliedRef.current) return;
@@ -1797,17 +1802,27 @@ export function UmbraUIWorkspace() {
       });
     };
 
-    applyHandoff(takePendingUmbraUiPowerPrompterHandoff());
     const onHandoff = (event: Event) => {
       const handoff = normalizeUmbraUiPowerPrompterHandoff(
         (event as CustomEvent<UmbraUiPowerPrompterHandoff>).detail,
       );
+      if (!handoff) return;
+      if (!imageControlsHydrated) {
+        pendingPowerPrompterHandoffRef.current = handoff;
+        return;
+      }
       clearPendingUmbraUiPowerPrompterHandoff();
       applyHandoff(handoff);
     };
     window.addEventListener(UMBRA_UI_POWER_PROMPTER_HANDOFF_EVENT, onHandoff);
+    if (imageControlsHydrated) {
+      const buffered = pendingPowerPrompterHandoffRef.current;
+      pendingPowerPrompterHandoffRef.current = null;
+      const stored = takePendingUmbraUiPowerPrompterHandoff();
+      applyHandoff(buffered && (!stored || buffered.createdAt >= stored.createdAt) ? buffered : stored);
+    }
     return () => window.removeEventListener(UMBRA_UI_POWER_PROMPTER_HANDOFF_EVENT, onHandoff);
-  }, [applyPowerPrompterGenerationControls]);
+  }, [applyPowerPrompterGenerationControls, imageControlsHydrated]);
 
   React.useEffect(() => {
     if (imageModelFamilies.length <= 0) return;
@@ -2698,7 +2713,13 @@ export function UmbraUIWorkspace() {
     };
 
     const onHandoff = (event: Event) => {
-      applyMediaHandoff(normalizeUmbraUiMediaHandoff((event as CustomEvent).detail));
+      const handoff = normalizeUmbraUiMediaHandoff((event as CustomEvent).detail);
+      if (!handoff) return;
+      if (!imageControlsHydrated) {
+        pendingMediaHandoffRef.current = handoff;
+        return;
+      }
+      applyMediaHandoff(handoff);
     };
     const onUpscaleHandoff = () => setActiveMode('extras');
     const onMediaToolsHandoff = () => setActiveMode('extras');
@@ -2708,8 +2729,13 @@ export function UmbraUIWorkspace() {
     try {
       storedHandoff = normalizeUmbraUiMediaHandoff(JSON.parse(window.sessionStorage.getItem(UMBRA_UI_MEDIA_HANDOFF_KEY) || 'null'));
     } catch { /* best effort */ }
-    applyMediaHandoff(normalizeUmbraUiMediaHandoff(target.__umbraPendingUmbraUiMediaHandoff) || storedHandoff);
     window.addEventListener(UMBRA_UI_MEDIA_HANDOFF_EVENT, onHandoff);
+    if (imageControlsHydrated) {
+      const buffered = pendingMediaHandoffRef.current;
+      pendingMediaHandoffRef.current = null;
+      const pending = normalizeUmbraUiMediaHandoff(target.__umbraPendingUmbraUiMediaHandoff) || storedHandoff;
+      applyMediaHandoff(buffered && (!pending || buffered.createdAt >= pending.createdAt) ? buffered : pending);
+    }
     window.addEventListener('umbra:umbra-ui-upscale-handoff', onUpscaleHandoff);
     window.addEventListener('umbra:umbra-ui-media-tools-handoff', onMediaToolsHandoff);
     window.addEventListener(UMBRA_UI_EXTRAS_TOOL_EVENT, onExtrasToolRequest);
@@ -2719,7 +2745,7 @@ export function UmbraUIWorkspace() {
       window.removeEventListener('umbra:umbra-ui-media-tools-handoff', onMediaToolsHandoff);
       window.removeEventListener(UMBRA_UI_EXTRAS_TOOL_EVENT, onExtrasToolRequest);
     };
-  }, [applyPowerPrompterGenerationControls, loraCatalog, modelCatalog, selectedWorkflowResources]);
+  }, [applyPowerPrompterGenerationControls, imageControlsHydrated, loraCatalog, modelCatalog, selectedWorkflowResources]);
 
   const [outputHandoffPending, setOutputHandoffPending] = React.useState(false);
   const outputHandoffBusyRef = React.useRef(false);

@@ -65,6 +65,21 @@ export function UmbraImg2ImgSourceControls({
 }: UmbraImg2ImgSourceControlsProps) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = React.useState(false);
+  const sourceIdentity = JSON.stringify([source.path, source.originalPath, source.name, source.imageUrl]);
+  const sourceRevisionRef = React.useRef({ identity: sourceIdentity, revision: 0 });
+  React.useLayoutEffect(() => {
+    if (sourceRevisionRef.current.identity !== sourceIdentity) {
+      sourceRevisionRef.current = { identity: sourceIdentity, revision: sourceRevisionRef.current.revision + 1 };
+    }
+  }, [sourceIdentity]);
+  React.useEffect(() => () => { sourceRevisionRef.current.revision += 1; }, []);
+  const changeSource = React.useCallback((nextSource: UmbraImg2ImgSourceValue) => {
+    sourceRevisionRef.current = {
+      identity: JSON.stringify([nextSource.path, nextSource.originalPath, nextSource.name, nextSource.imageUrl]),
+      revision: sourceRevisionRef.current.revision + 1,
+    };
+    onSourceChange(nextSource);
+  }, [onSourceChange]);
   const previewUrl = source.imageUrl || (source.path
     ? `/api/fs/image?${new URLSearchParams({ path: source.path }).toString()}`
     : '');
@@ -72,6 +87,7 @@ export function UmbraImg2ImgSourceControls({
 
   const upload = React.useCallback(async (file: File) => {
     if (uploading) return;
+    const sourceRevision = sourceRevisionRef.current.revision;
     setUploading(true);
     try {
       const response = await fetch('/api/comfy/upload-media', {
@@ -88,14 +104,17 @@ export function UmbraImg2ImgSourceControls({
         throw new Error(String(payload?.error || 'Failed to upload the IMG2IMG source.'));
       }
       const path = String(payload.sourcePath).replace(/\\/g, '/');
-      onSourceChange({ path, originalPath: path, name: String(payload.filename), imageUrl: '', width: 0, height: 0 });
+      if (sourceRevision !== sourceRevisionRef.current.revision) return;
+      changeSource({ path, originalPath: path, name: String(payload.filename), imageUrl: '', width: 0, height: 0 });
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Failed to upload the IMG2IMG source.', 'error');
+      if (sourceRevision === sourceRevisionRef.current.revision) {
+        showToast(error instanceof Error ? error.message : 'Failed to upload the IMG2IMG source.', 'error');
+      }
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = '';
     }
-  }, [onSourceChange, showToast, uploading]);
+  }, [changeSource, showToast, uploading]);
 
   return (
     <section data-umbra-img2img-source className="border border-cyan-300/20 bg-cyan-500/[0.035] p-3">
@@ -127,7 +146,7 @@ export function UmbraImg2ImgSourceControls({
         <div data-umbra-img2img-source-actions className="min-w-0 space-y-2">
           <input
             value={source.path}
-            onChange={(event) => onSourceChange({
+            onChange={(event) => changeSource({
               path: event.target.value,
               originalPath: event.target.value,
               name: '',
@@ -169,7 +188,7 @@ export function UmbraImg2ImgSourceControls({
             </button>
             <button
               type="button"
-              onClick={() => onSourceChange({ path: '', originalPath: '', name: '', imageUrl: '', width: 0, height: 0 })}
+              onClick={() => changeSource({ path: '', originalPath: '', name: '', imageUrl: '', width: 0, height: 0 })}
               disabled={!source.path && !source.name}
               className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:border-red-300/25 hover:text-red-300 disabled:opacity-30"
               title="Clear IMG2IMG source"
