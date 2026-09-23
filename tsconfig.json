@@ -19,10 +19,22 @@
     "jsx": "react-jsx"
   },
   "include": [
-    "**/*.ts"
+    "UmbraServer.ts",
+    "backend/**/*.ts",
+    "gallery/**/*.ts",
+    "shared/**/*.ts",
+    "launcher/**/*.ts",
+    "setup/**/*.ts",
+    "updater/**/*.ts"
   ],
   "exclude": [
     "node_modules",
+    "User",
+    "Tools",
+    "frontend",
+    "public",
+    "dist*",
+    "**/*.test.ts",
     "*.js"
   ]
 }
