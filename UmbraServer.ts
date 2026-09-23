@@ -52,7 +52,7 @@ import { copyMediaIntoComfyInput, writeAllUploadedMediaBytes } from './backend/U
 import { isCivitaiModelDownloadUrl } from './backend/ModelDownloadHttp';
 import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
 import { fetchLocalServerProxy, readLocalServerProxyText } from './backend/LocalServerProxyTransfer';
-import { getLocalServerProxyCookieHeader, rewriteLocalServerProxySetCookies } from './backend/LocalServerProxyCookies';
+import { getLocalServerProxyCookieHeader, getLocalServerProxyCookiePrefix, rewriteLocalServerProxySetCookies } from './backend/LocalServerProxyCookies';
 import { createGalleryPathAuthorizer, resolveAllowedExistingGalleryPath, resolveAllowedGalleryPath } from './backend/GalleryPathAccess';
 import { buildGalleryDownloadArchive, prepareGalleryDownloadResponse, getPreparedGalleryDownload, type GalleryDownloadEntry } from './backend/GalleryDownloadArchiveService';
 import { copyFileExclusive, moveTreeExclusive } from './backend/FsTransferCopy';
@@ -3587,6 +3587,21 @@ function estimateMessageBytes(message: unknown): number {
   }
 }
 
+const PROXY_WS_MAX_QUEUED_MESSAGES = 1024;
+const PROXY_WS_MAX_QUEUED_BYTES = 16 * 1024 * 1024;
+
+function queueProxyWebSocketMessage(ws: ServerWebSocket<UmbraSocketData>, payload: string | Buffer): void {
+  const queued = (ws.data.queuedMessages ||= []);
+  const bytes = estimateMessageBytes(payload);
+  if (queued.length >= PROXY_WS_MAX_QUEUED_MESSAGES
+    || (ws.data.queuedMessageBytes || 0) + bytes > PROXY_WS_MAX_QUEUED_BYTES) {
+    try { ws.close(1009, 'Proxy upstream is not ready'); } catch {}
+    return;
+  }
+  queued.push(payload);
+  ws.data.queuedMessageBytes = (ws.data.queuedMessageBytes || 0) + bytes;
+}
+
 function summarizeRemoteTelemetryEvents(events: Array<Record<string, unknown>>) {
   const pingEvents = events.filter((event) => event.type === 'ping');
   const interactionEvents = events.filter((event) => event.type === 'interaction');
@@ -4414,6 +4429,7 @@ function getLocalServerProxyWsUrl(sourceUrl: URL): string | null {
 
 function rewriteLocalServerHtml(html: string, token: string, targetUrl: URL): string {
   const proxyRoot = `${LOCAL_SERVER_PROXY_PREFIX}${token}`;
+  const cookiePrefix = getLocalServerProxyCookiePrefix(token);
   const targetOrigin = targetUrl.origin;
   const basePath = targetUrl.pathname.endsWith('/')
     ? targetUrl.pathname
@@ -4422,7 +4438,57 @@ function rewriteLocalServerHtml(html: string, token: string, targetUrl: URL): st
   const bridgeScript = `<script>
 (() => {
   const proxyRoot = ${JSON.stringify(proxyRoot)};
+  const cookiePrefix = ${JSON.stringify(cookiePrefix)};
   const targetOrigin = ${JSON.stringify(targetOrigin)};
+  // Keep JS-managed local app cookies in the same namespace as Set-Cookie.
+  let cookieOwner = document;
+  let nativeCookie = null;
+  while (cookieOwner && !nativeCookie) {
+    const descriptor = Object.getOwnPropertyDescriptor(cookieOwner, 'cookie');
+    if (descriptor && descriptor.get && descriptor.set) nativeCookie = descriptor;
+    cookieOwner = Object.getPrototypeOf(cookieOwner);
+  }
+  if (nativeCookie) {
+    try {
+      Object.defineProperty(document, 'cookie', {
+        configurable: true,
+        get() {
+          return String(nativeCookie.get.call(document) || '').split(';').flatMap((part) => {
+            const pair = part.trim();
+            const separator = pair.indexOf('=');
+            return separator > cookiePrefix.length && pair.startsWith(cookiePrefix)
+              ? [pair.slice(cookiePrefix.length)] : [];
+          }).join('; ');
+        },
+        set(value) {
+          const parts = String(value).split(';');
+          const pair = (parts.shift() || '').trim();
+          const separator = pair.indexOf('=');
+          if (separator <= 0) return;
+          const name = pair.slice(0, separator);
+          if ([...name].some((char) => char.charCodeAt(0) <= 32 || char === ';' || char === '=')) return;
+          let hasPath = false;
+          const attributes = parts.flatMap((part) => {
+            const attribute = part.trim();
+            if (!attribute) return [];
+            const equal = attribute.indexOf('=');
+            const attributeName = (equal < 0 ? attribute : attribute.slice(0, equal)).trim().toLowerCase();
+            if (attributeName === 'domain') return [];
+            if (attributeName === 'path') {
+              hasPath = true;
+              const path = equal < 0 ? '' : attribute.slice(equal + 1).trim();
+              const safePath = path.startsWith('/') && !path.includes(String.fromCharCode(92))
+                && !path.split('/').some((segment) => segment === '.' || segment === '..') ? path : '/';
+              return ['Path=' + proxyRoot + (safePath === '/' ? '' : safePath)];
+            }
+            return [attribute];
+          });
+          if (!hasPath && window.location.pathname === proxyRoot) attributes.push('Path=' + proxyRoot);
+          nativeCookie.set.call(document, cookiePrefix + pair + (attributes.length ? '; ' + attributes.join('; ') : ''));
+        },
+      });
+    } catch { /* Retain native cookies if this document disallows an own accessor. */ }
+  }
   const toBrowserWsUrl = (path) => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return protocol + '//' + window.location.host + path;
@@ -30449,9 +30515,11 @@ type UmbraSocketData = {
   endpoint: string;
   targetUrl?: string;
   proxyCookieHeader?: string;
+  proxyWsProtocol?: string;
   remoteClient?: boolean;
   remoteSessionHash?: string;
   queuedMessages?: Array<string | Buffer>;
+  queuedMessageBytes?: number;
   upstream?: WebSocket;
 };
 
@@ -30945,12 +31013,18 @@ const server = Bun.serve<UmbraSocketData>({
           if (!await isRemoteLocalServerTargetAllowed(req, url, parsed.targetUrl, server)) {
             return new Response('This local app must be configured on the host before remote access.', { status: 403 });
           }
+          // Bun selects the first offered protocol on upgrade; request the same upstream.
+          const proxyWsProtocol = req.headers.get('sec-websocket-protocol')?.split(',')[0]?.trim() || '';
+          if (proxyWsProtocol && !/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(proxyWsProtocol)) {
+            return new Response('Invalid local server websocket protocol', { status: 400 });
+          }
           const upgraded = server.upgrade(req, {
             data: {
               endpoint: '/local-server-proxy/ws',
               ...getRemoteWebSocketAuthData(req, url, server),
               targetUrl,
               proxyCookieHeader: getLocalServerProxyCookieHeader(req.headers.get('cookie'), parsed.token),
+              proxyWsProtocol,
             },
           });
           if (upgraded) return undefined;
@@ -36700,6 +36774,7 @@ const server = Bun.serve<UmbraSocketData>({
             upstream.binaryType = 'arraybuffer';
             upstream.onopen = () => {
               for (const queued of queuedMessages.splice(0)) upstream.send(queued as any);
+              ws.data.queuedMessageBytes = 0;
             };
             upstream.onmessage = (event) => {
               try {
@@ -36739,6 +36814,7 @@ const server = Bun.serve<UmbraSocketData>({
       if (endpoint === '/local-server-proxy/ws') {
         const targetUrl = String((ws.data as any)?.targetUrl || '');
         const proxyCookieHeader = String((ws.data as any)?.proxyCookieHeader || '');
+        const proxyWsProtocol = String((ws.data as any)?.proxyWsProtocol || '');
         const queuedMessages: Array<string | Buffer> = [];
         (ws.data as any).queuedMessages = queuedMessages;
         try {
@@ -36748,11 +36824,14 @@ const server = Bun.serve<UmbraSocketData>({
           }
           const upstreamHeaders: Record<string, string> = { 'x-forwarded-for': '0.0.0.0' };
           if (proxyCookieHeader) upstreamHeaders.cookie = proxyCookieHeader;
-          const upstream = new WebSocket(targetUrl, { headers: upstreamHeaders });
+          const upstream = new WebSocket(targetUrl, proxyWsProtocol
+            ? { headers: upstreamHeaders, protocol: proxyWsProtocol }
+            : { headers: upstreamHeaders });
           (ws.data as any).upstream = upstream;
           upstream.binaryType = 'arraybuffer';
           upstream.onopen = () => {
             for (const queued of queuedMessages.splice(0)) upstream.send(queued as any);
+            ws.data.queuedMessageBytes = 0;
           };
           upstream.onmessage = (event) => {
             try {
@@ -36817,7 +36896,7 @@ const server = Bun.serve<UmbraSocketData>({
         if (upstream?.readyState === WebSocket.OPEN) {
           upstream.send(payload as any);
         } else {
-          ((ws.data as any).queuedMessages ||= []).push(payload);
+          queueProxyWebSocketMessage(ws, payload);
         }
         return;
       }
@@ -36832,7 +36911,7 @@ const server = Bun.serve<UmbraSocketData>({
         if (upstream?.readyState === WebSocket.OPEN) {
           upstream.send(payload as any);
         } else {
-          ((ws.data as any).queuedMessages ||= []).push(payload);
+          queueProxyWebSocketMessage(ws, payload);
         }
         return;
       }
