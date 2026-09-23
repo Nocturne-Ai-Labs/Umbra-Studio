@@ -31,6 +31,7 @@ import type { UmbraVideoEditorDraft } from '@/components/umbra-ui/UmbraVideoGene
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
 import { normalizeUmbraUiSeed } from '@/lib/umbraUiSeed';
 import { resolveUmbraVideoQueueSourceUrl } from '@/lib/umbraVideoQueuePreview';
+import { refreshUmbraVideoRequeueSourceDimensions } from '@/lib/umbraVideoRequeueSource';
 import { NsfwPrivacyShield } from '@/components/privacy/NsfwPrivacyProvider';
 import { classifyUmbraPrompt } from '@/lib/nsfwPrivacy';
 import {
@@ -589,7 +590,8 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
           clip.id === selected.sequence?.clipId ? { ...clip, prompt: draftPrompt.trim() } : clip
         ));
       }
-      await queueVideo({ prompt: draftPrompt, negativePrompt: draftNegative, video: videoForQueue, outputFolder: selected?.generation.outputFolder });
+      const preparedVideo = await refreshUmbraVideoRequeueSourceDimensions(videoForQueue);
+      await queueVideo({ prompt: draftPrompt, negativePrompt: draftNegative, video: preparedVideo, outputFolder: selected?.generation.outputFolder });
       await onRefresh();
     } catch (queueError) {
       showToast(queueError instanceof Error ? queueError.message : 'Failed to requeue video.', 'error');
@@ -829,7 +831,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
                     </div>
                   </div>
                   <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <label className="space-y-1.5"><span className={labelClass}>Reference Video</span><input value={draftVideo.sourceVideoPath} onChange={(event) => setDraftVideo((current) => current ? { ...current, sourceVideoPath: event.target.value, sourceVideoName: '' } : current)} className={inputClass} /></label>
+                    <label className="space-y-1.5"><span className={labelClass}>Reference Video</span><input value={draftVideo.sourceVideoPath} onChange={(event) => setDraftVideo((current) => current ? { ...current, sourceVideoPath: event.target.value, sourceVideoName: '', sourceWidth: 0, sourceHeight: 0 } : current)} className={inputClass} /></label>
                     <label className="space-y-1.5"><span className={labelClass}>Audio Track</span><input value={draftVideo.sourceAudioPath} onChange={(event) => setDraftVideo((current) => current ? { ...current, sourceAudioPath: event.target.value, sourceAudioName: '' } : current)} className={inputClass} /></label>
                   </div>
                   {draftVideo.mode === 'video_to_video' ? (
