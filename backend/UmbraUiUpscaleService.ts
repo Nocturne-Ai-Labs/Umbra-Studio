@@ -331,9 +331,16 @@ export class UmbraUiUpscaleService {
       const detail = await response.text().catch(() => '');
       throw new Error(detail || `ComfyUI rejected the upscale input (${response.status}).`);
     }
-    const payload: any = await response.json().catch(() => ({}));
-    const returnedName = String(payload?.name || safeName).trim() || safeName;
-    const returnedSubfolder = String(payload?.subfolder || subfolder).trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    const payload: any = await response.json().catch(() => null);
+    if (!payload || typeof payload.name !== 'string' || !payload.name.trim()
+      || typeof payload.subfolder !== 'string' || payload.type !== 'input') {
+      throw new Error('ComfyUI returned an invalid upscale upload response. Retry the operation.');
+    }
+    const returnedName = payload.name.trim();
+    const returnedSubfolder = payload.subfolder.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    if (returnedName !== safeName || returnedSubfolder !== subfolder) {
+      throw new Error('ComfyUI returned an invalid upscale upload path. Retry the operation.');
+    }
     return returnedSubfolder ? `${returnedSubfolder}/${returnedName}` : returnedName;
   }
 
