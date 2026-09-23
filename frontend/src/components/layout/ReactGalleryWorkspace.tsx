@@ -5535,6 +5535,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           stale: true,
         };
       }
+      currentFolderRef.current = folderPath;
       setCurrentFolder((current) => (pathsEqual(current, folderPath) ? current : folderPath));
       setFocusedFolder((current) => (pathsEqual(current, folderPath) ? current : folderPath));
       setOpeningFolder((current) => (current && pathsEqual(current, folderPath) ? '' : current));
@@ -5691,10 +5692,14 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         durationMs: nowMs() - loadStartedAt,
         error: message,
       });
+      const committedFolder = normalizePath(currentFolderRef.current || currentFolder);
+      if (!appliedPage && committedFolder && !pathsEqual(committedFolder, folderPath)) {
+        setFocusedFolder(committedFolder);
+      }
       setError(message);
       addToast({ type: 'error', message });
       window.dispatchEvent(new CustomEvent('umbra:gallery-folder-load-failed', {
-        detail: { folderPath, message },
+        detail: { folderPath, currentFolderPath: committedFolder, message },
       }));
     } finally {
       if (abortController && folderLoadAbortRef.current === abortController) {
