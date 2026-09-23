@@ -757,6 +757,7 @@ export function UmbraVideoGenerationControls({
   const [pinnedOutputFolder, setPinnedOutputFolder] = usePinnedOutputFolder('video');
   const { placement, setPlacement, effectivePlacement } = useUmbraQueuePlacement(queueSummary);
   const [settingsLoaded, setSettingsLoaded] = React.useState(false);
+  const [settingsResolved, setSettingsResolved] = React.useState(false);
   const videoControlsWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const handoffRolesRef = React.useRef(new Set<UmbraUiVideoFrameRole>());
   const handoffAppliedAtRef = React.useRef(0);
@@ -830,6 +831,7 @@ export function UmbraVideoGenerationControls({
   React.useEffect(() => {
     let canceled = false;
     setSettingsLoaded(false);
+    setSettingsResolved(false);
     void fetch('/api/umbra-ui/video-controls', { cache: 'no-store' })
       .then(async (response) => {
         if (!response.ok) throw new Error(`Failed to load video controls (${response.status}).`);
@@ -904,11 +906,13 @@ export function UmbraVideoGenerationControls({
           }
         }
         setSettingsLoaded(true);
+        setSettingsResolved(true);
       })
       .catch((error) => {
         if (!canceled) {
           console.warn('[Umbra UI] Failed to restore video controls:', error);
           showToast('Saved video controls could not be loaded. Changes will not be saved; reload Umbra to retry.', 'error');
+          setSettingsResolved(true);
         }
       });
     return () => {
@@ -1002,7 +1006,7 @@ export function UmbraVideoGenerationControls({
   }, [agentDraft, onAgentDraftApplied]);
 
   React.useEffect(() => {
-    if (!editorDraft) return;
+    if (!editorDraft || !settingsResolved) return;
     const defaults = createDefaultVideoControls();
     replacePromptSegments(editorDraft.prompt);
     setAgentModeEnabled(false);
@@ -1049,7 +1053,7 @@ export function UmbraVideoGenerationControls({
       ? `/api/fs/image?path=${encodeURIComponent(editorDraft.video.sourceImagePath)}`
       : '');
     onEditorDraftApplied?.(editorDraft.id);
-  }, [editorDraft, onEditorDraftApplied, replacePromptSegments]);
+  }, [editorDraft, onEditorDraftApplied, replacePromptSegments, settingsResolved]);
 
   React.useEffect(() => {
     const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : video.family === 'ltx25' ? 'LTX-2.5' : 'MiniMax H3';
