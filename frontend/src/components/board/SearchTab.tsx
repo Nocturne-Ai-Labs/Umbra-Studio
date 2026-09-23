@@ -583,7 +583,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
           {selectedDataset && concepts.length > 0 && (
             <div data-umbra-data-forge-concepts className="flex items-center gap-1 flex-wrap flex-1 min-w-0">
               {concepts.slice(0, 20).map(c => {
-                const folder = `${c.repeats}_${c.isReg ? 'reg_' : ''}${c.name}`;
+                const folder = c.folder;
                 const isEnabled = enabledConcepts.has(folder);
                 return (
                   <button

@@ -777,8 +777,7 @@ export function DatasetsTab() {
   // Get current dataset concepts for move dropdown
   const currentDataset = datasets.find(d => d.name === selectedDataset);
   const otherConcepts = currentDataset?.concepts.filter(c => {
-    const folder = `${c.repeats}_${c.isReg ? 'reg_' : ''}${c.name}`;
-    return folder !== selectedConcept;
+    return c.folder !== selectedConcept;
   }) || [];
   const selectedConceptPath = currentDataset?.path && selectedConcept
     ? `${currentDataset.path.replace(/[\\/]+$/, '')}\\${selectedConcept}`
@@ -1555,7 +1554,7 @@ export function DatasetsTab() {
             >
               <option value="">Select concept...</option>
               {otherConcepts.map(c => {
-                const folder = `${c.repeats}_${c.isReg ? 'reg_' : ''}${c.name}`;
+                const folder = c.folder;
                 return (
                   <option key={folder} value={folder}>{folder}</option>
                 );

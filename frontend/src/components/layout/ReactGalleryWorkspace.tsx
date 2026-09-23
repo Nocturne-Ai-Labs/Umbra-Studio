@@ -4545,9 +4545,7 @@ function getDatasetConceptModifiedMs(concept: Dataset['concepts'][number]): numb
 }
 
 function getDatasetConceptFolder(concept: Dataset['concepts'][number]): string {
-  const explicitFolder = String((concept as Dataset['concepts'][number] & { folder?: string }).folder || '').trim();
-  if (explicitFolder) return explicitFolder;
-  return `${concept.repeats}_${concept.isReg ? 'reg_' : ''}${concept.name}`;
+  return concept.folder;
 }
 
 

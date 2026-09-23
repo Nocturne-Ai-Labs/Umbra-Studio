@@ -239,7 +239,7 @@ export function DatasetTree({
               {isExpanded && (
                 <div className="ml-4 mt-0.5 space-y-0.5 border-l border-white/10 pl-2">
                   {dataset.concepts.map(concept => {
-                    const conceptKey = `${concept.repeats}_${concept.isReg ? 'reg_' : ''}${concept.name}`;
+                    const conceptKey = concept.folder;
                     const isConceptSelected = selectedDataset === dataset.name && selectedConcept === conceptKey;
 
                     return (

@@ -57,6 +57,7 @@ export interface Concept {
   name: string;
   repeats: number;
   isReg: boolean;
+  folder: string;
   images: DatasetImage[];
 }
 
