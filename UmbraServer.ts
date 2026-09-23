@@ -34472,6 +34472,15 @@ const server = Bun.serve<UmbraSocketData>({
             }
             return segments.join(', ');
           };
+          const stripLeadingCaptionPrefixTags = (caption: string, prefixTags: string[]): string => {
+            const prefixes = new Set(prefixTags.map((tag) => tag.trim().toLowerCase()));
+            const segments = caption.split(',');
+            let firstRemaining = 0;
+            while (firstRemaining < segments.length && prefixes.has(segments[firstRemaining].trim().toLowerCase())) {
+              firstRemaining++;
+            }
+            return firstRemaining > 0 ? segments.slice(firstRemaining).join(',').trim() : caption;
+          };
           const tagsFromEntries = (entries: unknown, useSpaces: boolean): string[] => {
             if (!Array.isArray(entries)) return [];
             return entries
@@ -34701,7 +34710,7 @@ const server = Bun.serve<UmbraSocketData>({
                 caption = mergeCaptionSegments(
                   prefixTags.join(', '),
                   autoTag ? naturalResult?.caption : '',
-                  preserveExisting ? existingCaption : '',
+                  preserveExisting ? stripLeadingCaptionPrefixTags(existingCaption, prefixTags) : '',
                 );
                 tagCount = prefixTags.length + (autoTag && naturalResult?.caption ? 1 : 0);
               } else {
