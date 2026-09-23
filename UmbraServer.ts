@@ -34180,14 +34180,19 @@ const server = Bun.serve<UmbraSocketData>({
 
         try {
           const body = await req.json() as { name: string; repeats?: number; isReg?: boolean };
-          if (!body.name) return json({ error: 'Concept name required' }, 400);
+          if (typeof body.name !== 'string' || !body.name.trim()) return json({ error: 'Concept name required' }, 400);
 
           if (!existsSync(datasetPath)) {
             return json({ error: 'Dataset not found' }, 404);
           }
 
-          const repeats = body.repeats || 10;
-          const folderName = sanitizeDatasetSegment(`${repeats}_${body.isReg ? 'reg_' : ''}${body.name}`);
+          const repeats = body.repeats ?? 10;
+          if (!Number.isSafeInteger(repeats) || repeats < 1) return json({ error: 'Repeats must be a positive integer' }, 400);
+          const conceptName = body.name.trim();
+          if (!body.isReg && conceptName.startsWith('reg_')) {
+            return json({ error: 'Ordinary concept names cannot start with "reg_"' }, 400);
+          }
+          const folderName = sanitizeDatasetSegment(`${repeats}_${body.isReg ? 'reg_' : ''}${conceptName}`);
           if (!folderName) return json({ error: 'Invalid concept name' }, 400);
           const conceptPath = resolveDatasetPathSafe(datasetName, folderName);
           if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
