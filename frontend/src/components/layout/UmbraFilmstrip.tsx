@@ -695,6 +695,8 @@ export function UmbraFilmstrip({
       const removedPaths = Array.isArray(custom?.detail?.removedPaths)
         ? custom.detail.removedPaths.map((entry) => normalizePath(String(entry || ''))).filter(Boolean)
         : [];
+      const activeFolder = normalizePath(currentFolderRef.current || '');
+      if (mode !== 'replace' && (!folderPath || folderPath !== activeFolder)) return;
 
       const seenPaths = new Set<string>();
       const mapped: FilmstripImage[] = [];
@@ -712,7 +714,6 @@ export function UmbraFilmstrip({
       setSortField((current) => (current === nextFilmstripField ? current : nextFilmstripField));
       setSortDirection((current) => (current === nextSortOrder ? current : nextSortOrder));
 
-      const activeFolder = normalizePath(currentFolderRef.current || '');
       const canAppend = mode === 'append'
         && !!folderPath
         && !!activeFolder
