@@ -88,6 +88,7 @@ import { UmbraUiCensorReviewService } from './backend/UmbraUiCensorReviewService
 import { handleCensorReviewRoute } from './backend/routes/censorReviewRoutes';
 import { UmbraUiCanvasWorkspaceProjectService } from './backend/UmbraUiCanvasWorkspaceProjectService';
 import { replaceUmbraUiImageSource } from './backend/UmbraUiSourceReplacementService';
+import { UmbraUiImg2ImgCompletionReceipts } from './backend/UmbraUiImg2ImgCompletionReceipts';
 import {
   concatenateUmbraExtendedVideoClips,
   isUmbraExtendedVideoOutputPath,
@@ -280,6 +281,9 @@ const ROOT_PUBLIC_DIR = join(ROOT_DIR, 'public');
 const SOURCE_PUBLIC_DIR = join(SOURCE_DIR, 'public');
 const PUBLIC_DIR = existsSync(ROOT_PUBLIC_DIR) ? ROOT_PUBLIC_DIR : SOURCE_PUBLIC_DIR;
 const USER_DIR = join(ROOT_DIR, 'User');
+const umbraUiImg2ImgCompletionReceipts = new UmbraUiImg2ImgCompletionReceipts(
+  join(USER_DIR, 'UmbraUI', 'ImageCompletionReceipts'),
+);
 const generatedMediaActivity = configureGeneratedMediaActivity(ROOT_DIR, join(USER_DIR, 'Config', 'generated-media-activity.json'), () => resolvePathCandidate(getDefaultOutputRootPath()));
 const POWER_PROMPTER_RECEIPT_DIR = join(USER_DIR, 'PowerPrompter', 'Receipts');
 const REMOTE_BOOTSTRAP_SETTINGS_PATH = join(USER_DIR, 'Config', 'UmbraRemote', 'settings.json');
@@ -5329,8 +5333,28 @@ function updatePowerPrompterQueueControllerPrompt(
     requestId: item.requestId,
     updatedAt: Date.now(),
   };
+  recordUmbraUiImg2ImgPromptTerminal(request.prompts[index]);
   void upsertUmbraUiVideoReviewPrompt(request, request.prompts[index]);
   broadcastPowerPrompterQueueControllerSnapshot(reason, preferredSourceWs);
+}
+
+function recordUmbraUiImg2ImgPromptTerminal(prompt: PowerPrompterQueueControllerPrompt): void {
+  if (prompt.promptIndex !== 0 || !isPowerPrompterQueueControllerTerminalStatus(prompt.status)) return;
+  try {
+    umbraUiImg2ImgCompletionReceipts.recordTerminal({
+      requestId: prompt.requestId,
+      promptIndex: prompt.promptIndex,
+      status: prompt.status,
+      outputOwner: prompt.generation.outputOwner,
+      outputMode: prompt.generation.outputMode,
+    });
+  } catch (error) {
+    appendPowerPrompterQueueLog('umbra_ui_img2img_completion_receipt_terminal_failed', {
+      requestId: prompt.requestId,
+      status: prompt.status,
+      error: String(error instanceof Error ? error.message : error),
+    });
+  }
 }
 
 function normalizePowerPrompterPromptIndices(value: unknown): number[] {
@@ -6064,6 +6088,7 @@ function finishPowerPrompterQueueControllerRequest(
   request.status = status;
   request.updatedAt = now;
   for (const prompt of request.prompts) {
+    recordUmbraUiImg2ImgPromptTerminal(prompt);
     void upsertUmbraUiVideoReviewPrompt(request, prompt);
   }
   broadcastPowerPrompterQueueControllerSnapshot(reason, preferredSourceWs);
@@ -8695,6 +8720,24 @@ async function emitBackendPowerPrompterSavedOutputs(
   }));
   const primaryPowerPrompterMetadata = stampedOutputs[0]?.umbra_power_prompter || basePowerPrompterMetadata;
   recordGeneratedMediaOutputs(stampedOutputs);
+  if (promptIndex === 0 && generation?.outputOwner === 'umbra_ui' && generation.outputMode === 'img2img') {
+    try {
+      for (const output of stampedOutputs) {
+        if (umbraUiImg2ImgCompletionReceipts.recordSaved({
+          requestId,
+          promptIndex,
+          outputPath: output.fullpath,
+          outputOwner: generation.outputOwner,
+          outputMode: generation.outputMode,
+        })) break;
+      }
+    } catch (error) {
+      appendPowerPrompterQueueLog('umbra_ui_img2img_completion_receipt_save_failed', {
+        requestId,
+        error: String(error instanceof Error ? error.message : error),
+      });
+    }
+  }
   const payload = {
     type: 'queue_saved_outputs',
     requestId,
@@ -35180,6 +35223,21 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/umbra-ui/image/replace-source' && method === 'POST') {
         return handleUmbraUiReplaceImageSource(req);
+      }
+
+      if (path === '/api/umbra-ui/image/completion-receipt' && method === 'GET') {
+        const receipt = await umbraUiImg2ImgCompletionReceipts.get(
+          url.searchParams.get('requestId'),
+          async (outputPath) => {
+            const allowedPath = await resolveAllowedGalleryPath(outputPath, getGalleryTransferAllowedRoots());
+            if (!allowedPath) return null;
+            const outputStat = await fs.stat(allowedPath).catch(() => null);
+            return outputStat?.isFile() ? allowedPath : null;
+          },
+        );
+        return receipt
+          ? json({ success: true, receipt })
+          : json({ success: false, error: 'IMG2IMG completion receipt not found.' }, 404);
       }
 
       if (path === '/api/umbra-ui/inpaint/models' && method === 'GET') {
