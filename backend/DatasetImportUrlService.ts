@@ -148,10 +148,13 @@ export async function detectDatasetImportImage(bytes: Buffer): Promise<{ content
 async function readLimitedImageResponse(response: Response, signal: AbortSignal, maxBytes: number): Promise<{ bytes: Buffer; contentType: string }> {
   const contentType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
   const declaredSize = Number(response.headers.get('content-length') || 0);
-  if (!response.ok || (contentType && !contentType.startsWith('image/')) || declaredSize > maxBytes || !response.body) {
+  const unsupportedContentType = Boolean(contentType)
+    && !contentType.startsWith('image/')
+    && contentType !== 'application/octet-stream';
+  if (!response.ok || unsupportedContentType || declaredSize > maxBytes || !response.body) {
     await response.body?.cancel().catch(() => undefined);
     if (!response.ok) throw new Error(`Failed to download image: ${response.status}`);
-    if (contentType && !contentType.startsWith('image/')) throw new Error('Dropped URL did not return an image');
+    if (unsupportedContentType) throw new Error('Dropped URL did not return an image');
     throw new Error('Dropped image exceeds the 256 MB import limit');
   }
   const reader = response.body.getReader();
