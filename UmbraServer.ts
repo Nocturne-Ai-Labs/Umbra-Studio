@@ -225,6 +225,7 @@ import { composePowerPrompterDocumentPrompt } from './backend/PowerPrompterDocum
 import { doesPowerPrompterTrashAffectSession, doesPowerPrompterTrashRemoveActiveFile, powerPrompterTrashModeForPath, resolvePowerPrompterTrashTargetPaths, runGuardedPowerPrompterTrashMutation, shouldGatePowerPrompterTrash } from './backend/PowerPrompterDeleteGuard';
 import { advancePowerPrompterRawWriteSession, choosePowerPrompterRawCardSaveFile, getPowerPrompterRawCardLogicalFile, isPowerPrompterRawWriteActiveTarget, isPowerPrompterRawWriteCandidate, isPowerPrompterRawWritePhysicalTarget, runGuardedPowerPrompterRawWrite } from './backend/PowerPrompterRawWriteGuard';
 import { assertPowerPrompterCardEditorRevision, assertPowerPrompterCardStorageRevision, assertPowerPrompterSessionCanOpen, assertPowerPrompterSessionFile, assertPowerPrompterSessionRevision, createPowerPrompterSessionGate, PowerPrompterSessionConflictError, shouldReusePowerPrompterSession } from './backend/PowerPrompterSessionGate';
+import { mergePowerPrompterSettingsPatch } from './backend/PowerPrompterSettingsPatch';
 import {
   UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
   createDefaultUmbraUiAgentInstructions,
@@ -16603,6 +16604,8 @@ const PP_COMPLETION_SOUND_STYLE_OPTIONS: Array<PowerPrompterSettings['generation
 
 const PP_SETTINGS_PATH = join(USER_DIR, 'Config', 'powerprompter-settings.json');
 const USER_SETTINGS_BUNDLE_PATH = join(USER_DIR, 'Config', 'umbra-user-settings.json');
+const mutatePowerPrompterSettings = createPowerPrompterSessionGate();
+const mutateUserSettingsBundle = createPowerPrompterSessionGate();
 const PP_FAVORITES_PATH = join(USER_DIR, 'Config', 'powerprompter-favorites.json');
 const PP_SELECTIONS_PATH = join(USER_DIR, 'Config', 'powerprompter-selections.json');
 const PP_SESSION_STATE_PATH = join(USER_DIR, 'Config', 'powerprompter-session.json');
@@ -17556,24 +17559,24 @@ async function loadUserSettingsBundleSnapshot(): Promise<UmbraUserSettingsBundle
 }
 
 async function saveUserSettingsBundleSnapshot(bundleOverride?: Partial<UmbraUserSettingsBundle>): Promise<UmbraUserSettingsBundle> {
-  const current = await loadUserSettingsBundleSnapshot();
-  const merged = normalizeUmbraUserSettingsBundle(
-    {
-      ...current,
-      ...bundleOverride,
-      appSettings: bundleOverride?.appSettings ?? settingsManager.getAppSettings(),
-      powerPrompterSettings: bundleOverride?.powerPrompterSettings ?? await loadPPSettings(),
-      themeSettings: bundleOverride && 'themeSettings' in bundleOverride
-        ? (bundleOverride.themeSettings ?? null)
-        : (current.themeSettings ?? null),
-      exportedAt: new Date().toISOString(),
-    },
-    current,
-  );
-  const configDir = join(USER_DIR, 'Config');
-  if (!existsSync(configDir)) await fs.mkdir(configDir, { recursive: true });
-  await fs.writeFile(USER_SETTINGS_BUNDLE_PATH, JSON.stringify(merged, null, 2));
-  return merged;
+  return mutateUserSettingsBundle(async () => {
+    const current = await loadUserSettingsBundleSnapshot();
+    const merged = normalizeUmbraUserSettingsBundle(
+      {
+        ...current,
+        ...bundleOverride,
+        appSettings: bundleOverride?.appSettings ?? settingsManager.getAppSettings(),
+        powerPrompterSettings: bundleOverride?.powerPrompterSettings ?? await loadPPSettings(),
+        themeSettings: bundleOverride && 'themeSettings' in bundleOverride
+          ? (bundleOverride.themeSettings ?? null)
+          : (current.themeSettings ?? null),
+        exportedAt: new Date().toISOString(),
+      },
+      current,
+    );
+    await writeTextFileAtomic(USER_SETTINGS_BUNDLE_PATH, JSON.stringify(merged, null, 2));
+    return merged;
+  });
 }
 
 function resolveUserConfigPath(key: unknown): string | null {
@@ -24581,11 +24584,21 @@ async function loadPPSettings(): Promise<PowerPrompterSettings> {
   return DEFAULT_PP_SETTINGS;
 }
 
-async function savePPSettings(settings: PowerPrompterSettings) {
-  const configDir = join(USER_DIR, 'Config');
-  if (!existsSync(configDir)) await fs.mkdir(configDir, { recursive: true });
+async function savePPSettings(settings: PowerPrompterSettings): Promise<PowerPrompterSettings> {
   const normalized = normalizePPSettingsPayload(settings);
-  await fs.writeFile(PP_SETTINGS_PATH, JSON.stringify(normalized, null, 2));
+  await writeTextFileAtomic(PP_SETTINGS_PATH, JSON.stringify(normalized, null, 2));
+  return normalized;
+}
+
+async function savePPSettingsWithBundle(settings: unknown, patch: boolean): Promise<PowerPrompterSettings> {
+  return mutatePowerPrompterSettings(async () => {
+    const next = patch
+      ? mergePowerPrompterSettingsPatch(await loadPPSettings() as unknown as Record<string, unknown>, settings)
+      : settings;
+    const committed = await savePPSettings(normalizePPSettingsPayload(next));
+    await saveUserSettingsBundleSnapshot({ powerPrompterSettings: committed });
+    return committed;
+  });
 }
 
 function getPPCsvSourceId(type: 'tag' | 'character', fileName: string): string {
@@ -35167,30 +35180,32 @@ const server = Bun.serve<UmbraSocketData>({
           const rawBundle = (body && typeof body === 'object' && !Array.isArray(body) && 'bundle' in body)
             ? (body as any).bundle
             : body;
-          const currentBundle = await loadUserSettingsBundleSnapshot();
-          const nextBundle = normalizeUmbraUserSettingsBundle(rawBundle, currentBundle);
+          return await mutatePowerPrompterSettings(async () => {
+            const currentBundle = await loadUserSettingsBundleSnapshot();
+            const nextBundle = normalizeUmbraUserSettingsBundle(rawBundle, currentBundle);
 
-          const portableBundleAppSettings = normalizeGalleryAppSettingsForStorage(nextBundle.appSettings);
-          const autoStartError = validateComfyAutoStartSetting(portableBundleAppSettings, settingsManager.getAppSettings(), isHostRequest(req, url, server));
-          if (autoStartError) return json({ error: autoStartError }, isHostRequest(req, url, server) ? 400 : 403);
-          settingsManager.updateAppSettings(portableBundleAppSettings);
-          nextBundle.appSettings = portableBundleAppSettings;
-          await savePPSettings(nextBundle.powerPrompterSettings);
+            const portableBundleAppSettings = normalizeGalleryAppSettingsForStorage(nextBundle.appSettings);
+            const autoStartError = validateComfyAutoStartSetting(portableBundleAppSettings, settingsManager.getAppSettings(), isHostRequest(req, url, server));
+            if (autoStartError) return json({ error: autoStartError }, isHostRequest(req, url, server) ? 400 : 403);
+            settingsManager.updateAppSettings(portableBundleAppSettings);
+            nextBundle.appSettings = portableBundleAppSettings;
+            nextBundle.powerPrompterSettings = await savePPSettings(nextBundle.powerPrompterSettings);
 
-          let comfySecurityResult: ComfySecurityApplyResult | undefined;
-          if (
-            Object.prototype.hasOwnProperty.call(nextBundle.appSettings, 'comfyui.securityLevel') ||
-            Object.prototype.hasOwnProperty.call(nextBundle.appSettings, 'comfyui.path')
-          ) {
-            comfySecurityResult = applyComfySecurityLevelSetting();
-          }
+            let comfySecurityResult: ComfySecurityApplyResult | undefined;
+            if (
+              Object.prototype.hasOwnProperty.call(nextBundle.appSettings, 'comfyui.securityLevel') ||
+              Object.prototype.hasOwnProperty.call(nextBundle.appSettings, 'comfyui.path')
+            ) {
+              comfySecurityResult = applyComfySecurityLevelSetting();
+            }
 
-          const savedBundle = await saveUserSettingsBundleSnapshot(nextBundle);
-          return json({
-            success: true,
-            bundle: savedBundle,
-            settings: settingsManager.getAppSettings(),
-            ...(comfySecurityResult ? { comfySecurity: comfySecurityResult } : {}),
+            const savedBundle = await saveUserSettingsBundleSnapshot(nextBundle);
+            return json({
+              success: true,
+              bundle: savedBundle,
+              settings: settingsManager.getAppSettings(),
+              ...(comfySecurityResult ? { comfySecurity: comfySecurityResult } : {}),
+            });
           });
         } catch (error: any) {
           return json({ success: false, error: error?.message || 'Failed to import settings bundle' }, 500);
@@ -35810,13 +35825,17 @@ const server = Bun.serve<UmbraSocketData>({
         return json(await loadPPSettings());
       }
 
-      if (path === '/api/powerprompter/settings' && method === 'POST') {
-        const settings = await req.json() as PowerPrompterSettings;
-        await savePPSettings(settings);
-        await saveUserSettingsBundleSnapshot({
-          powerPrompterSettings: normalizePPSettingsPayload(settings),
-        });
-        return json({ success: true });
+      if (path === '/api/powerprompter/settings' && (method === 'POST' || method === 'PATCH')) {
+        const body = await req.json();
+        const patch = method === 'PATCH';
+        const changes = patch ? (body as { changes?: unknown })?.changes : body;
+        if (patch && (!changes || typeof changes !== 'object' || Array.isArray(changes)
+          || ('colors' in changes && (!changes.colors || typeof changes.colors !== 'object' || Array.isArray(changes.colors)))
+          || ('autocomplete' in changes && (!changes.autocomplete || typeof changes.autocomplete !== 'object' || Array.isArray(changes.autocomplete))))) {
+          return json({ success: false, error: 'Invalid Power Prompter settings patch' }, 400);
+        }
+        const committed = await savePPSettingsWithBundle(changes, patch);
+        return json({ success: true, settings: committed });
       }
 
       if (path === '/api/powerprompter/queue-prompts/build' && method === 'POST') {

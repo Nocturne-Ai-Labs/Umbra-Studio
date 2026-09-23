@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Save, RotateCcw } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 
@@ -6,14 +6,20 @@ interface PowerPrompterSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   settings: any;
-  onSave: (newSettings: any) => void;
+  onSave: (newSettings: any, baseSettings: any) => void;
 }
 
 export const PowerPrompterSettingsModal = ({ isOpen, onClose, settings, onSave }: PowerPrompterSettingsModalProps) => {
   const [localSettings, setLocalSettings] = useState(settings);
+  const [baseSettings, setBaseSettings] = useState(settings);
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
-    setLocalSettings(settings);
+    if (isOpen && !wasOpenRef.current) {
+      setLocalSettings(settings);
+      setBaseSettings(settings);
+    }
+    wasOpenRef.current = isOpen;
   }, [settings, isOpen]);
 
   if (!isOpen) return null;
@@ -26,7 +32,7 @@ export const PowerPrompterSettingsModal = ({ isOpen, onClose, settings, onSave }
   };
 
   const handleSave = () => {
-    onSave(localSettings);
+    onSave(localSettings, baseSettings);
     onClose();
   };
 

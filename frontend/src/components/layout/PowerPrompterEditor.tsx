@@ -3,6 +3,7 @@ import Editor, { Monaco } from '@monaco-editor/react';
 import { Settings, Copy, Save, CheckSquare, Square, Shuffle } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { PowerPrompterSettingsModal } from '@/components/modals/PowerPrompterSettingsModal';
+import { diffPowerPrompterSettings } from '@/lib/powerPrompterSettingsPatch';
 
 export interface PowerPrompterEditorRef {
   insertAtCursor: (text: string) => void;
@@ -51,6 +52,8 @@ export const PowerPrompterEditor = forwardRef<PowerPrompterEditorRef, PowerPromp
     },
     fuzzySensitivity: 0.6
   });
+  const settingsWriteTailRef = useRef<Promise<void>>(Promise.resolve());
+  const settingsWriteSeqRef = useRef(0);
   const [activeSelection, setActiveSelection] = useState<number[]>([]);
   const [hasStoredSelection, setHasStoredSelection] = useState(false);
   const { showToast } = useStore();
@@ -287,18 +290,37 @@ export const PowerPrompterEditor = forwardRef<PowerPrompterEditorRef, PowerPromp
     };
   }, [path]);
 
-  const saveSettings = async (newSettings: any) => {
-    try {
-      await fetch('/api/powerprompter/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newSettings)
-      });
-      setSettings(newSettings);
-      updateTheme(newSettings);
-    } catch (e) {
-      showToast('Failed to save settings', 'error');
-    }
+  const saveSettings = async (newSettings: any, baseSettings: any) => {
+    const changes = diffPowerPrompterSettings(baseSettings, newSettings);
+    if (Object.keys(changes).length === 0) return;
+    const writeSeq = ++settingsWriteSeqRef.current;
+    const write = async () => {
+      try {
+        const response = await fetch('/api/powerprompter/settings', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ changes }),
+        });
+        if (!response.ok) throw new Error(`Failed to save settings (${response.status})`);
+        const payload = await response.json() as { settings?: Record<string, unknown> };
+        if (!payload?.settings) throw new Error('The settings response was incomplete');
+        if (writeSeq !== settingsWriteSeqRef.current) return;
+        setSettings(payload.settings);
+        updateTheme(payload.settings);
+        try {
+          const channel = new BroadcastChannel('umbra-powerprompter-settings-sync');
+          channel.postMessage({ settings: payload.settings });
+          channel.close();
+        } catch {
+          // Settings are saved even when cross-tab sync is unavailable.
+        }
+      } catch (e) {
+        showToast('Failed to save settings', 'error');
+      }
+    };
+    const pending = settingsWriteTailRef.current.then(write, write);
+    settingsWriteTailRef.current = pending.then(() => undefined, () => undefined);
+    await pending;
   };
 
   const updateSelectionDecorations = useCallback(() => {
