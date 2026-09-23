@@ -2760,6 +2760,8 @@ export function UmbraInpaintWorkspace({
     placement: 'next',
     requestId: job.id,
     promptId: job.items.find((item) => item.status === 'running' || item.status === 'queued')?.promptId,
+    cancelRequested: job.cancelRequested,
+    cancelError: job.cancelError,
     readonly: true,
   }) : null, [job]);
   usePublishUmbraQueueActivity('umbra-ui-inpaint-workspace', queueActivity);
@@ -10025,6 +10027,8 @@ export function UmbraInpaintWorkspace({
               <button type="button" onClick={rerollSamples} disabled={!generationReady || isSubmitting} title={generationBlockedReason || 'Discard unpinned stages and retry with a new seed'} className="inline-flex h-8 items-center justify-center gap-1.5 border border-cyan-300/20 text-[8px] font-black uppercase text-cyan-200 disabled:text-zinc-800"><WandSparkles size={10} /> Reroll</button>
             </div>
           ) : null}
+          {job?.cancelRequested ? <div role="status" className="text-[9px] text-amber-200">Stopping inpaint job…</div> : null}
+          {job?.cancelError ? <div role="alert" className="text-[9px] text-red-300">{job.cancelError}</div> : null}
           {job ? (
             <div className="h-1 overflow-hidden bg-white/10">
               <div className="h-full bg-rose-400 transition-[width] duration-200" style={{ width: `${Math.max(3, progress * 100)}%` }} />

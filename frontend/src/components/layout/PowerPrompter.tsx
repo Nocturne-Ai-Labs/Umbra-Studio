@@ -236,11 +236,13 @@ import {
   stripLegacySelectionMarkers,
 } from '@/components/power-prompter/powerPrompterSupport';
 import { getCardDocSignature } from '@/components/power-prompter/powerPrompterDocuments';
+import { createPowerPrompterSessionMutationQueue } from '@/components/power-prompter/powerPrompterSessionMutationQueue';
 import {
   loadPowerPrompterDocumentSession,
   normalizePowerPrompterDocumentSessionEnvelope,
   openPowerPrompterDocumentSession,
-  updatePowerPrompterDocumentSession,
+  PowerPrompterSessionRequestError,
+  shouldApplyPowerPrompterDocumentSession,
   type PowerPrompterDocumentSession,
 } from '@/components/power-prompter/powerPrompterSessionApi';
 import {
@@ -845,6 +847,14 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     if (navigation.queueManagerActive) navigation.onOpenPrompter?.();
   }, []);
   const powerPrompterUiClientIdRef = useRef(`powerprompter-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
+  const powerPrompterSessionMutationQueueRef = useRef<ReturnType<typeof createPowerPrompterSessionMutationQueue> | null>(null);
+  if (!powerPrompterSessionMutationQueueRef.current) {
+    powerPrompterSessionMutationQueueRef.current = createPowerPrompterSessionMutationQueue(
+      () => powerPrompterSessionRevisionRef.current,
+      (revision) => { powerPrompterSessionRevisionRef.current = Math.max(powerPrompterSessionRevisionRef.current, revision); },
+      () => powerPrompterUiClientIdRef.current,
+    );
+  }
   const localPanelModeChangeRef = useRef<{ mode: PowerPrompterPanelMode; at: number } | null>(null);
   const handlePrompterPanelModeChange = useCallback((mode: PowerPrompterPanelMode) => {
     localPanelModeChangeRef.current = { mode, at: Date.now() };
@@ -4222,10 +4232,41 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     session: PowerPrompterDocumentSession,
     options?: { fromRemote?: boolean }
   ) => {
-    if (!session.document || !session.file) return;
-    const sourceClientId = String(session.sourceClientId || '').trim();
-    if (options?.fromRemote && sourceClientId && sourceClientId === powerPrompterUiClientIdRef.current) return;
-    if (session.revision > 0 && session.revision < powerPrompterSessionRevisionRef.current) return;
+    if (!shouldApplyPowerPrompterDocumentSession(session, {
+      fromRemote: options?.fromRemote === true,
+      clientId: powerPrompterUiClientIdRef.current,
+      hasPendingChanges: hasPendingChangesRef.current,
+      currentRevision: powerPrompterSessionRevisionRef.current,
+    })) return;
+    powerPrompterSessionMutationQueueRef.current?.invalidatePendingUpdates();
+
+    if (!session.file && !session.document) {
+      fileLoadRequestSeqRef.current += 1;
+      if (powerPrompterSessionUpdateTimerRef.current) {
+        clearTimeout(powerPrompterSessionUpdateTimerRef.current);
+        powerPrompterSessionUpdateTimerRef.current = null;
+      }
+      clearAutosaveTimer();
+      const emptyDocument = createDefaultPowerPrompterCardDocument(null);
+      powerPrompterSessionApplyingRef.current = true;
+      powerPrompterSessionRevisionRef.current = Math.max(powerPrompterSessionRevisionRef.current, session.revision);
+      setCurrentFile(null);
+      setContent('');
+      setCardDocument(emptyDocument);
+      setQueueSetTarget(1);
+      setLoadingPromptFileName(null);
+      setActivePowerPrompterPresetSession(null);
+      activePowerPrompterPresetSessionRef.current = null;
+      currentFileRef.current = null;
+      contentRef.current = '';
+      cardDocumentRef.current = emptyDocument;
+      lastSavedContentRef.current = '';
+      lastSavedCardSignatureRef.current = '';
+      hasPendingChangesRef.current = false;
+      lastEditAtRef.current = 0;
+      powerPrompterSessionApplyingRef.current = false;
+      return;
+    }
 
     const normalizedBase = normalizePowerPrompterCardDocument(session.document, session.file);
     const normalized = {
@@ -4261,17 +4302,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     if (!file || !document) return;
     powerPrompterSessionUpdateTimerRef.current = setTimeout(() => {
       powerPrompterSessionUpdateTimerRef.current = null;
-      void updatePowerPrompterDocumentSession({
-        file,
-        document,
-        clientId: powerPrompterUiClientIdRef.current,
-        save: false,
-        intent: 'session-update',
-      }).then((payload) => {
-        if (payload.session) {
-          powerPrompterSessionRevisionRef.current = Math.max(powerPrompterSessionRevisionRef.current, payload.session.revision);
-        }
-      }).catch(() => {
+      void powerPrompterSessionMutationQueueRef.current?.update(file, document).catch(() => {
         // Autosave still owns durable persistence feedback.
       });
     }, 500);
@@ -5875,7 +5906,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     }
 
     const source = options?.source || 'manual';
-    const isJsonDoc = String(pathToSave || '').toLowerCase().endsWith('.ppcards.json');
     const cleanContent = stripLegacySelectionMarkers(contentToSave);
     const sourceDoc = options?.cardDocumentOverride ?? cardDocumentRef.current;
     const normalizedDocBase = normalizePowerPrompterCardDocument(
@@ -5887,33 +5917,21 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       cards: normalizeChainCards(normalizedDocBase.cards),
       updatedAt: new Date().toISOString(),
     };
-    const strictPromptText = composeActivePromptFromCards(normalizedDoc.cards, normalizedDoc.activeQueueSet);
-
     autosaveInFlightRef.current = true;
     try {
-      if (!isJsonDoc) {
-        const textRes = await fetch('/api/fs/write', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: pathToSave, content: strictPromptText }),
-        });
-        if (!textRes.ok) {
-          throw new Error(`Prompt save failed (${textRes.status})`);
-        }
+      if (powerPrompterSessionUpdateTimerRef.current) {
+        clearTimeout(powerPrompterSessionUpdateTimerRef.current);
+        powerPrompterSessionUpdateTimerRef.current = null;
       }
-
-      const sessionPayload = await updatePowerPrompterDocumentSession({
-        file: pathToSave,
-        document: normalizedDoc,
-        clientId: powerPrompterUiClientIdRef.current,
-        save: true,
-        intent: source === 'autosave' ? 'session-autosave' : 'session-save',
-      });
+      const sessionPayload = await powerPrompterSessionMutationQueueRef.current!.save(
+        pathToSave,
+        normalizedDoc,
+        source === 'autosave' ? 'session-autosave' : 'session-save',
+      );
       const savedSession = sessionPayload.session;
       if (!savedSession?.document) {
         throw new Error('Card doc save failed');
       }
-      powerPrompterSessionRevisionRef.current = Math.max(powerPrompterSessionRevisionRef.current, savedSession.revision);
 
       if (pathToSave === currentFileRef.current) {
         const savedDocument = savedSession.document;
@@ -5946,12 +5964,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         showToast('Saved', 'success');
       }
       return true;
-    } catch {
+    } catch (error) {
+      const conflict = error instanceof PowerPrompterSessionRequestError && error.status === 409;
       if (source === 'manual') {
-        showToast('Failed to save', 'error');
+        showToast(conflict ? 'This card changed on another device. Your unsaved edits remain here.' : 'Failed to save', 'error');
       } else if (!autosaveErrorShownRef.current) {
         autosaveErrorShownRef.current = true;
-        showToast('Autosave failed', 'error');
+        showToast(conflict ? 'This card changed on another device. Your unsaved edits remain here.' : 'Autosave failed', 'error');
       }
       return false;
     } finally {
@@ -7208,6 +7227,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         clearTimeout(powerPrompterSessionUpdateTimerRef.current);
         powerPrompterSessionUpdateTimerRef.current = null;
       }
+      powerPrompterSessionMutationQueueRef.current?.invalidatePendingUpdates();
       prompterWsReadyRef.current = false;
 
       rejectAllPendingQueueRequests('Power Prompter websocket disconnected.');
@@ -7256,6 +7276,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         clearTimeout(powerPrompterSessionUpdateTimerRef.current);
         powerPrompterSessionUpdateTimerRef.current = null;
       }
+      powerPrompterSessionMutationQueueRef.current?.invalidatePendingUpdates();
       const fileName = String(path || '').replace(/\\/g, '/').split('/').pop() || 'prompt file';
       setLoadingPromptFileName(fileName);
       await waitForNextUiPaint();
@@ -7265,7 +7286,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           previousFile &&
           hasPendingChangesRef.current
         ) {
-          await savePromptFile(previousFile, contentRef.current, { source: 'autosave' });
+          const saved = await savePromptFile(previousFile, contentRef.current, { source: 'autosave' });
+          if (!saved) throw new Error('Save the current card before opening another file. Your edits are still here.');
         }
 
         clearAutosaveTimer();
@@ -7405,9 +7427,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       clearTimeout(powerPrompterSessionUpdateTimerRef.current);
       powerPrompterSessionUpdateTimerRef.current = null;
     }
-    void fetch(`/api/powerprompter/session?clientId=${encodeURIComponent(powerPrompterUiClientIdRef.current)}&file=${encodeURIComponent(path)}`, {
-      method: 'DELETE',
-    }).catch(() => undefined);
+    powerPrompterSessionMutationQueueRef.current?.invalidatePendingUpdates();
     setCurrentFile(null);
     setContent('');
     setCardDocument(createDefaultPowerPrompterCardDocument(null));
@@ -11537,6 +11557,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         ) : (
           <PowerPrompterSidebar
             currentFile={currentFile}
+            getSessionRevision={() => powerPrompterSessionRevisionRef.current}
             onLoadFromPpuid={handleRestorePowerPrompterPpuid}
             ppuidRestoreBusy={powerPrompterPresetBusy === 'load'}
             onFileOpenStart={(path) => {
@@ -11671,6 +11692,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
               <div className="pointer-events-auto h-[min(52vh,620px)] min-h-[300px] w-[min(92vw,560px)] overflow-hidden rounded-xl border border-cyan-300/25 bg-[#050508]/98 shadow-[0_18px_46px_rgba(0,0,0,0.65)] backdrop-blur-md">
                 <PowerPrompterSidebar
                   currentFile={currentFile}
+                  getSessionRevision={() => powerPrompterSessionRevisionRef.current}
                   onLoadFromPpuid={handleRestorePowerPrompterPpuid}
                   ppuidRestoreBusy={powerPrompterPresetBusy === 'load'}
                   onFileOpenStart={handleFileOpenStart}

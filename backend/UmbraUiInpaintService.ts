@@ -512,6 +512,8 @@ export interface UmbraUiInpaintJobItem {
 export interface UmbraUiInpaintJob {
   id: string;
   status: UmbraUiInpaintJobStatus;
+  cancelRequested?: boolean;
+  cancelError?: string;
   sourceName: string;
   workflowId: string;
   prompt: string;
@@ -523,6 +525,13 @@ export interface UmbraUiInpaintJob {
   createdAt: number;
   updatedAt: number;
   items: UmbraUiInpaintJobItem[];
+}
+
+export class UmbraUiInpaintCancellationError extends Error {
+  constructor(message: string, readonly job: UmbraUiInpaintJob) {
+    super(message);
+    this.name = 'UmbraUiInpaintCancellationError';
+  }
 }
 
 export interface UmbraUiInpaintPreview {
@@ -1129,6 +1138,7 @@ export class UmbraUiInpaintService {
   private readonly outputMetadataByPpuid = new Map<string, Record<string, unknown>>();
   private readonly previews = new Map<string, UmbraUiInpaintPreview>();
   private readonly previewSockets = new Map<string, WebSocket>();
+  private readonly targetedCancellations = new Map<string, Promise<boolean>>();
 
   constructor(options: UmbraUiInpaintServiceOptions) {
     this.getComfyBaseUrl = options.getComfyBaseUrl;
@@ -1148,6 +1158,7 @@ export class UmbraUiInpaintService {
       queueMicrotask(() => {
         for (const [job, items] of hydration.resumable) {
           void this.monitor(job, items).finally(() => this.cleanupStagedInputs(job.id));
+          if (job.cancelRequested) void this.cancel(job.id).catch(() => undefined);
         }
       });
     }
@@ -1252,6 +1263,13 @@ export class UmbraUiInpaintService {
       .sort((left, right) => right.createdAt - left.createdAt)
       .slice(0, 20)
       .map(cloneJob);
+  }
+
+  listActiveJobIds(): string[] {
+    this.prune();
+    return Array.from(this.jobs.values())
+      .filter((job) => !['completed', 'partial', 'failed', 'canceled'].includes(job.status))
+      .map((job) => job.id);
   }
 
   async preprocessControl(
@@ -1517,21 +1535,68 @@ export class UmbraUiInpaintService {
     const job = this.jobs.get(String(jobIdInput || '').trim());
     if (!job) return null;
     if (['completed', 'partial', 'failed', 'canceled'].includes(job.status)) return cloneJob(job);
-    const promptIds = job.items.filter((item) => !['completed', 'failed', 'canceled'].includes(item.status)).map((item) => item.promptId).filter(Boolean);
-    for (const promptId of promptIds) await cancelComfyJobById(this.getComfyBaseUrl(), promptId);
-    if (job.items.every((item) => ['completed', 'failed', 'canceled'].includes(item.status))) return cloneJob(job);
-    job.status = 'canceled';
-    for (const item of job.items) {
-      if (item.status === 'staging' || item.status === 'queued' || item.status === 'running') {
-        item.status = 'canceled';
-        item.error = 'Canceled by user.';
-      }
-    }
+    // A staging item may already have an in-flight /prompt request. The submitter
+    // keeps this intent until it receives an ID and can cancel that exact prompt.
+    job.cancelRequested = true;
+    job.cancelError = '';
     job.updatedAt = Date.now();
-    this.stopPreviewMonitor(job.id);
     this.persistJobs();
-    await this.cleanupStagedInputs(job.id);
+    const targets = job.items.filter((item) =>
+      ['queued', 'running'].includes(item.status) && !!String(item.promptId || '').trim());
+    const results = await Promise.allSettled(targets.map((item) => this.cancelSubmittedItem(job, item)));
+    const failures = results.flatMap((result, index) => {
+      if (result.status === 'fulfilled' && result.value) return [];
+      const detail = result.status === 'rejected'
+        ? String(result.reason instanceof Error ? result.reason.message : result.reason)
+        : 'ComfyUI did not cancel the prompt; it may have finished already.';
+      return [`Sample ${targets[index].id}: ${detail}`];
+    });
+    this.settleCanceledJobIfFinished(job);
+    if (failures.length > 0) job.cancelError = failures.join(' ');
+    if (failures.length > 0 && !job.items.some((item) => item.status === 'staging')) job.cancelRequested = false;
+    job.updatedAt = Date.now();
+    this.persistJobs();
+    if (failures.length > 0) {
+      throw new UmbraUiInpaintCancellationError(job.cancelError || 'Could not cancel every sample.', cloneJob(job));
+    }
     return cloneJob(job);
+  }
+
+  private async cancelSubmittedItem(job: UmbraUiInpaintJob, item: UmbraUiInpaintJobItem): Promise<boolean> {
+    if (item.status === 'canceled') return true;
+    if (item.status !== 'queued' && item.status !== 'running') return false;
+    const promptId = String(item.promptId || '').trim();
+    if (!promptId) return false;
+    let request = this.targetedCancellations.get(promptId);
+    if (!request) {
+      request = cancelComfyJobById(this.getComfyBaseUrl(), promptId);
+      this.targetedCancellations.set(promptId, request);
+    }
+    let canceled: boolean;
+    try {
+      canceled = await request;
+    } finally {
+      if (this.targetedCancellations.get(promptId) === request) this.targetedCancellations.delete(promptId);
+    }
+    if (canceled && ['queued', 'running'].includes(item.status) && item.outputs.length === 0) {
+      item.status = 'canceled';
+      item.error = 'Canceled by user.';
+      job.updatedAt = Date.now();
+      this.stopPreviewMonitor(job.id, item.id);
+      this.persistJobs();
+    }
+    return item.status === 'canceled';
+  }
+
+  private settleCanceledJobIfFinished(job: UmbraUiInpaintJob): void {
+    if (job.items.some((item) => ['staging', 'queued', 'running'].includes(item.status))) return;
+    job.completed = job.items.filter((item) => item.status === 'completed').length;
+    job.failed = job.items.filter((item) => item.status === 'failed').length;
+    job.status = job.items.every((item) => item.status === 'canceled') ? 'canceled'
+      : job.completed === job.total ? 'completed'
+      : job.completed > 0 ? 'partial' : 'failed';
+    job.cancelRequested = false;
+    this.stopPreviewMonitor(job.id);
   }
 
   async submit(
@@ -1986,6 +2051,13 @@ export class UmbraUiInpaintService {
 
       const queuedItems: UmbraUiInpaintJobItem[] = [];
       for (const item of job.items) {
+        if (job.cancelRequested) {
+          item.status = 'canceled';
+          item.error = 'Canceled by user before submission.';
+          job.updatedAt = Date.now();
+          this.persistJobs();
+          continue;
+        }
         try {
           item.ppuid ||= createId('pp').replace(/-/g, '_');
           const powerPrompterMetadata = buildUmbraUiInpaintPowerPrompterMetadata(settings, item, job.total);
@@ -2000,6 +2072,14 @@ export class UmbraUiInpaintService {
           }
           const previewClientId = `umbra-ui-inpaint-${job.id}-${item.id}`;
           await this.startPreviewMonitor(job, item, previewClientId);
+          if (job.cancelRequested) {
+            this.stopPreviewMonitor(job.id, item.id);
+            item.status = 'canceled';
+            item.error = 'Canceled by user before submission.';
+            job.updatedAt = Date.now();
+            this.persistJobs();
+            continue;
+          }
           const response = await fetch(`${this.getComfyBaseUrl()}/prompt`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2141,6 +2221,15 @@ export class UmbraUiInpaintService {
           item.status = 'queued';
           this.outputMetadataByPpuid.set(item.ppuid, powerPrompterMetadata);
           queuedItems.push(item);
+          if (job.cancelRequested) {
+            try {
+              if (!await this.cancelSubmittedItem(job, item)) {
+                job.cancelError = `Sample ${item.id} finished or could not be canceled in ComfyUI.`;
+              }
+            } catch (error: any) {
+              job.cancelError = `Sample ${item.id}: ${String(error?.message || error || 'Targeted cancellation failed.')}`;
+            }
+          }
         } catch (error: any) {
           this.stopPreviewMonitor(job.id, item.id);
           item.status = 'failed';
@@ -2151,7 +2240,9 @@ export class UmbraUiInpaintService {
       }
 
       job.failed = job.items.filter((item) => item.status === 'failed').length;
-      job.status = queuedItems.length > 0 ? 'queued' : 'failed';
+      if (job.items.some((item) => ['queued', 'running'].includes(item.status))) job.status = 'queued';
+      else this.settleCanceledJobIfFinished(job);
+      if (job.cancelError && !job.items.some((item) => item.status === 'staging')) job.cancelRequested = false;
       job.updatedAt = Date.now();
       this.persistJobs();
       if (queuedItems.length > 0) {
@@ -2168,8 +2259,8 @@ export class UmbraUiInpaintService {
           item.error = message;
         }
       }
-      job.failed = job.total;
-      job.status = 'failed';
+      job.failed = job.items.filter((item) => item.status === 'failed').length;
+      this.settleCanceledJobIfFinished(job);
       job.updatedAt = Date.now();
       this.persistJobs();
       await this.cleanupStagedInputs(job.id);
@@ -3277,6 +3368,7 @@ export class UmbraUiInpaintService {
     job.status = job.items.every((item) => item.status === 'canceled') ? 'canceled' : job.completed === job.total
       ? 'completed'
       : job.completed > 0 ? 'partial' : 'failed';
+    job.cancelRequested = false;
     job.updatedAt = Date.now();
     this.stopPreviewMonitor(job.id);
     this.persistJobs();
@@ -3470,6 +3562,10 @@ export class UmbraUiInpaintService {
                     : 'failed';
         if (job.status !== recoveredStatus) {
           job.status = recoveredStatus;
+          changed = true;
+        }
+        if (activeItems.length === 0 && job.cancelRequested) {
+          job.cancelRequested = false;
           changed = true;
         }
         this.jobs.set(job.id, job);

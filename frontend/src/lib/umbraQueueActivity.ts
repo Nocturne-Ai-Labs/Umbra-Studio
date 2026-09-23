@@ -44,6 +44,7 @@ export interface UmbraQueueActivity {
   requestId?: string;
   promptId?: string;
   cancelRequested?: boolean;
+  cancelError?: string;
   readonly: true;
 }
 
@@ -129,6 +130,7 @@ function normalizeActivity(owner: string, activity: UmbraQueueActivity): UmbraQu
       ? Math.max(0, Math.floor(Number(activity.queueIndex)))
       : undefined,
     requestId: String(activity.requestId || '').trim() || undefined,
+    cancelError: String(activity.cancelError || '').trim() || undefined,
     readonly: true,
   };
 }
@@ -151,6 +153,7 @@ function activitySignature(activities: UmbraQueueActivity[]): string {
     requestId: activity.requestId || '',
     promptId: activity.promptId || '',
     cancelRequested: activity.cancelRequested === true,
+    cancelError: activity.cancelError || '',
   })));
 }
 

@@ -42,7 +42,7 @@ import { compactQueueSnapshot } from './shared/power-prompter/queueSnapshotTrans
 import { collectQueueSnapshotPromptRows } from './shared/power-prompter/queueSnapshotRows';
 import { PowerPrompterHistoryStore } from './backend/PowerPrompterHistoryStore';
 import { appendSavedQueueIdSuffix, buildRemainingPowerPrompterQueueSnapshot, getSavedQueueSummaryIndexPath, readSavedQueueSummaryIndex, splitSavedPowerPrompterQueue } from './backend/PowerPrompterSavedQueue';
-import { canInterruptPowerPrompterPrompt, hasLivePowerPrompterQueuePrompts, summarizePowerPrompterQueuePrompts } from './backend/PowerPrompterQueueLifecycle';
+import { canInterruptPowerPrompterPrompt, getLiveUmbraUiQueueRequestIds, getQueueClearFutureKeepIds, hasLivePowerPrompterQueuePrompts, shouldFinishStoppedPowerPrompterQueue, summarizePowerPrompterQueuePrompts } from './backend/PowerPrompterQueueLifecycle';
 import { getSavedQueueAvailability } from './shared/power-prompter/savedQueue';
 import { ThumbnailService } from './backend/ThumbnailService';
 import { CIVITAI_PAGE_TIMEOUT_MS, CIVITAI_METADATA_TIMEOUT_MS, requestCivitaiPage, civitaiPageError } from './backend/CivitaiPageRequest';
@@ -81,6 +81,7 @@ import {
 import { UmbraUiUpscaleStagingStore, type UmbraUiUpscaleStagingLease } from './backend/UmbraUiUpscaleStagingStore';
 import {
   UmbraUiInpaintService,
+  UmbraUiInpaintCancellationError,
   type UmbraUiBackgroundRemovalSettings,
   type UmbraUiControlPreprocessorSettings,
   type UmbraUiInpaintControlLayer,
@@ -227,7 +228,10 @@ import {
 } from './backend/UmbraUiPipelineCapabilities';
 import { buildQueuePromptsFromCards } from './shared/power-prompter/queuePromptBuilder';
 import { normalizeQueueSetOrders as normalizePPQueueSetOrders } from './shared/power-prompter/cardQueueSetOrders';
-import { assertPowerPrompterSessionFile, createPowerPrompterSessionGate } from './backend/PowerPrompterSessionGate';
+import { composePowerPrompterDocumentPrompt } from './backend/PowerPrompterDocumentPrompt';
+import { doesPowerPrompterTrashAffectSession, doesPowerPrompterTrashRemoveActiveFile, powerPrompterTrashModeForPath, resolvePowerPrompterTrashTargetPaths, runGuardedPowerPrompterTrashMutation, shouldGatePowerPrompterTrash } from './backend/PowerPrompterDeleteGuard';
+import { advancePowerPrompterRawWriteSession, choosePowerPrompterRawCardSaveFile, getPowerPrompterRawCardLogicalFile, isPowerPrompterRawWriteActiveTarget, isPowerPrompterRawWriteCandidate, isPowerPrompterRawWritePhysicalTarget, runGuardedPowerPrompterRawWrite } from './backend/PowerPrompterRawWriteGuard';
+import { assertPowerPrompterCardEditorRevision, assertPowerPrompterCardStorageRevision, assertPowerPrompterSessionCanOpen, assertPowerPrompterSessionFile, assertPowerPrompterSessionRevision, createPowerPrompterSessionGate, PowerPrompterSessionConflictError, shouldReusePowerPrompterSession } from './backend/PowerPrompterSessionGate';
 import {
   UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
   createDefaultUmbraUiAgentInstructions,
@@ -4749,6 +4753,8 @@ interface BackendPowerPrompterQueueTask {
   canceled: boolean;
   cancelReason: string;
   stopAfterCurrent: boolean;
+  interruptCurrentRequested: boolean;
+  cancelInFlightPromptIds: Set<string>;
   prompts: string[];
   promptSetIds: number[];
   promptOutputSubfolders: string[];
@@ -8987,6 +8993,11 @@ function cancelBackendPowerPrompterQueueTask(requestId: string, reason: string):
   } catch {
     // AbortController may already be aborted.
   }
+  const activePrompt = findPowerPrompterQueueControllerRequest(normalizedRequestId)?.prompts[task.activePromptIndex];
+  const activePromptId = activePrompt?.status === 'submitting' || activePrompt?.status === 'running'
+    ? String(task.promptIds[task.activePromptIndex] || '').trim()
+    : '';
+  if (activePromptId) void cancelBackendPowerPrompterTaskPrompt(requestId, task, activePromptId);
   finishPowerPrompterQueueControllerRequest(
     normalizedRequestId,
     task.cancelReason === 'interrupt' ? 'interrupted' : 'canceled',
@@ -9047,8 +9058,73 @@ function interruptBackendPowerPrompterActivePrompt(
   return true;
 }
 
+async function cancelBackendPowerPrompterActivePromptForStopAll(
+  requestId: string,
+  task: BackendPowerPrompterQueueTask,
+  promptIndex: number,
+  promptId: string,
+): Promise<void> {
+  if (!promptId || task.cancelInFlightPromptIds.has(promptId)) return;
+  const prompt = findPowerPrompterQueueControllerRequest(requestId)?.prompts[promptIndex];
+  if (!canInterruptPowerPrompterPrompt(prompt, promptId, task.interruptedPromptIndices.has(promptIndex))) return;
+  task.cancelInFlightPromptIds.add(promptId);
+  try {
+    if (!await cancelComfyJobById(getComfyProxyBaseUrl(), promptId)) {
+      appendPowerPrompterQueueLog('backend_queue_stop_all_active_cancel_not_found', {
+        requestId, promptIndex, promptId,
+      });
+      return;
+    }
+    if (backendPowerPrompterQueueTasks.get(requestId) === task
+      && task.activePromptIndex === promptIndex && task.promptIds[promptIndex] === promptId) {
+      interruptBackendPowerPrompterActivePrompt(requestId, 'stop_all');
+    }
+  } catch (error: any) {
+    appendPowerPrompterQueueLog('backend_queue_stop_all_active_cancel_failed', {
+      requestId, promptIndex, promptId,
+      error: String(error?.message || error || 'Failed to cancel the active generation.'),
+    });
+  } finally {
+    task.cancelInFlightPromptIds.delete(promptId);
+  }
+}
+
+async function cancelBackendPowerPrompterTaskPrompt(
+  requestId: string,
+  task: BackendPowerPrompterQueueTask,
+  promptId: string,
+): Promise<void> {
+  if (!promptId || task.cancelInFlightPromptIds.has(promptId)) return;
+  task.cancelInFlightPromptIds.add(promptId);
+  try {
+    if (!await cancelComfyJobById(getComfyProxyBaseUrl(), promptId)) {
+      appendPowerPrompterQueueLog('backend_queue_canceled_task_prompt_not_found', { requestId, promptId });
+    }
+  } catch (error: any) {
+    appendPowerPrompterQueueLog('backend_queue_canceled_task_prompt_cancel_failed', {
+      requestId, promptId,
+      error: String(error?.message || error || 'Failed to cancel the submitted generation.'),
+    });
+  } finally {
+    task.cancelInFlightPromptIds.delete(promptId);
+  }
+}
+
 function collectBackendPowerPrompterRequestIdsForControl(data: any, type: 'queue_cancel' | 'queue_clear_future' | 'queue_interrupt_active'): string[] {
+  if (type === 'queue_cancel' && data?.scope === 'umbra_ui_all') {
+    return getLiveUmbraUiQueueRequestIds(powerPrompterQueueControllerState.requests);
+  }
   const explicitIds = collectPrompterRequestIds(data?.requestIds);
+  if (type === 'queue_clear_future') {
+    return Array.from(new Set([
+      ...explicitIds,
+      ...powerPrompterQueueControllerState.requests
+        .filter((request) => hasLivePowerPrompterQueuePrompts(request.prompts))
+        .map((request) => request.requestId),
+      ...backendPowerPrompterQueuedWork.map((entry) => entry.requestId),
+      ...backendPowerPrompterQueueTasks.keys(),
+    ]));
+  }
   if (explicitIds.length > 0) return explicitIds;
   const activeRequestId = String(data?.activeRequestId || '').trim();
   if (activeRequestId) return [activeRequestId];
@@ -9067,8 +9143,20 @@ function applyBackendPowerPrompterQueueControl(data: any, type: 'queue_cancel' |
   }
 
   if (type === 'queue_cancel') {
+    const stopAllUmbraUi = data?.scope === 'umbra_ui_all';
     for (const requestId of requestIds) {
-      if (markBackendPowerPrompterQueueStopAfterCurrent(requestId, 'cancel')) affected.push(requestId);
+      if (markBackendPowerPrompterQueueStopAfterCurrent(requestId, 'cancel')) {
+        affected.push(requestId);
+        if (stopAllUmbraUi) {
+          const task = backendPowerPrompterQueueTasks.get(requestId);
+          if (task?.origin === 'umbra_ui') {
+            task.interruptCurrentRequested = true;
+            const promptIndex = task.activePromptIndex;
+            const promptId = String(task.promptIds[promptIndex] || '').trim();
+            if (promptId) void cancelBackendPowerPrompterActivePromptForStopAll(requestId, task, promptIndex, promptId);
+          }
+        }
+      }
       else if (cancelBackendPowerPrompterQueuedWork(requestId, 'cancel')) affected.push(requestId);
     }
     if (affected.length > 0) {
@@ -9083,13 +9171,18 @@ function applyBackendPowerPrompterQueueControl(data: any, type: 'queue_cancel' |
     return affected;
   }
 
-  const activeRequestId = String(data?.activeRequestId || '').trim();
-  if (activeRequestId && markBackendPowerPrompterQueueStopAfterCurrent(activeRequestId, 'clear_future')) {
-    affected.push(activeRequestId);
+  const keepCurrentIds = getQueueClearFutureKeepIds(
+    backendPowerPrompterQueueTasks.keys(),
+    powerPrompterQueueControllerState.requests,
+  );
+  const protectedRequestIds = new Set<string>();
+  for (const requestId of keepCurrentIds) {
+    if (!markBackendPowerPrompterQueueStopAfterCurrent(requestId, 'clear_future')) continue;
+    protectedRequestIds.add(requestId);
+    affected.push(requestId);
   }
-  const futureRequestIds = requestIds.filter((requestId) => requestId !== activeRequestId);
+  const futureRequestIds = requestIds.filter((requestId) => !protectedRequestIds.has(requestId));
   for (const requestId of futureRequestIds) {
-    if (requestId === activeRequestId) continue;
     if (cancelBackendPowerPrompterQueueTask(requestId, 'clear_future')) affected.push(requestId);
     else if (cancelBackendPowerPrompterQueuedWork(requestId, 'clear_future')) affected.push(requestId);
   }
@@ -9931,6 +10024,8 @@ async function runBackendPowerPrompterPipelineQueue(
     canceled: false,
     cancelReason: '',
     stopAfterCurrent: false,
+    interruptCurrentRequested: false,
+    cancelInFlightPromptIds: new Set<string>(),
     prompts,
     promptSetIds,
     promptOutputSubfolders,
@@ -10150,6 +10245,9 @@ async function runBackendPowerPrompterPipelineQueue(
         },
         ...(sourceFile ? { source_file: sourceFile } : {}),
       };
+      if (task.interruptCurrentRequested) {
+        throw new Error(`${BACKEND_PP_QUEUE_CANCELLED} Reason: stop_all`);
+      }
       const response = await fetch(`${getComfyProxyBaseUrl()}/prompt`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -10162,7 +10260,6 @@ async function runBackendPowerPrompterPipelineQueue(
           },
         }),
       });
-      throwIfBackendPowerPrompterQueueCanceled(task);
       if (!response.ok) {
         const detail = await response.text().catch(() => '');
         throw new Error(detail || `ComfyUI rejected the compiled generation pipeline (${response.status}).`);
@@ -10171,6 +10268,13 @@ async function runBackendPowerPrompterPipelineQueue(
       const promptId = parseComfyPromptIdFromQueueResult(payload);
       promptIds[index] = promptId;
       task.promptIds[index] = promptId;
+      if (task.canceled || task.abortController.signal.aborted) {
+        await cancelBackendPowerPrompterTaskPrompt(requestId, task, promptId);
+        throwIfBackendPowerPrompterQueueCanceled(task);
+      }
+      if (task.interruptCurrentRequested) {
+        await cancelBackendPowerPrompterActivePromptForStopAll(requestId, task, index, promptId);
+      }
       if (!queueAcceptedSent) {
         queueAcceptedSent = true;
         sendPrompterEventToTargets({
@@ -10333,6 +10437,14 @@ async function runBackendPowerPrompterPipelineQueue(
       }, sourceWs);
     }
 
+    if (shouldFinishStoppedPowerPrompterQueue(task.stopAfterCurrent, {
+      completed: completedPromptCount,
+      failed: failedPromptCount,
+      interrupted: interruptedPromptCount,
+      removed: task.removedPromptIndices.size,
+      total: prompts.length,
+    }) && finishBeforeNextPromptIfStopped()) return;
+
     if (extendedSession && failedPromptCount <= 0) {
       throwIfBackendPowerPrompterQueueCanceled(task);
       await finalizeUmbraExtendedVideo({
@@ -10374,7 +10486,7 @@ async function runBackendPowerPrompterPipelineQueue(
     );
   } catch (error: any) {
     const message = String(error?.message || error || 'Backend queue failed.');
-    const canceled = message.includes(BACKEND_PP_QUEUE_CANCELLED) || task.canceled || task.abortController.signal.aborted;
+    const canceled = message.includes(BACKEND_PP_QUEUE_CANCELLED) || task.canceled || task.interruptCurrentRequested || task.abortController.signal.aborted;
     finishPowerPrompterQueueControllerRequest(
       requestId,
       canceled ? (task.cancelReason === 'interrupt' ? 'interrupted' : 'canceled') : 'failed',
@@ -10871,10 +10983,53 @@ function forwardPrompterQueueControlToComfyTarget(
     });
     return;
   }
+  if (isBackendPipelineTarget && type === 'queue_cancel' && data?.scope === 'umbra_ui_all') {
+    const backendRequestIds = applyBackendPowerPrompterQueueControl(data, type);
+    const inpaintJobIds = umbraUiInpaintService.listActiveJobIds();
+    const upscaleJobIds = umbraUiUpscaleService.listActiveJobIds();
+    void (async () => {
+      const targets = [
+        ...inpaintJobIds.map((jobId) => ({ kind: 'inpaint', jobId, cancel: () => umbraUiInpaintService.cancel(jobId) })),
+        ...upscaleJobIds.map((jobId) => ({ kind: 'upscale', jobId, cancel: () => umbraUiUpscaleService.stop(jobId) })),
+      ];
+      const results = await Promise.allSettled(targets.map((target) => target.cancel()));
+      const errors = results.flatMap((result, index) => {
+        if (result.status === 'fulfilled' && result.value) return [];
+        const target = targets[index];
+        const detail = result.status === 'rejected'
+          ? String(result.reason instanceof Error ? result.reason.message : result.reason)
+          : 'The job was not found.';
+        return [`${target.kind} ${target.jobId}: ${detail}`];
+      });
+      const affectedCount = backendRequestIds.length + inpaintJobIds.length + upscaleJobIds.length;
+      sendWs(ws, {
+        type: 'queue_cancel_result', requestId,
+        success: affectedCount > 0 && errors.length === 0,
+        backendHandled: true,
+        cancelRequested: true,
+        requestIds: backendRequestIds,
+        inpaintJobIds,
+        upscaleJobIds,
+        ...(errors.length > 0
+          ? { error: `Some Umbra UI jobs could not be stopped: ${errors.slice(0, 5).join(' ')}${errors.length > 5 ? ` (${errors.length - 5} more failures)` : ''}` }
+          : affectedCount <= 0 ? { error: 'No Umbra UI jobs are running or queued.' } : {}),
+      });
+    })().catch((error: any) => {
+      sendWs(ws, {
+        type: 'queue_cancel_result', requestId, success: false, backendHandled: true,
+        requestIds: backendRequestIds, inpaintJobIds, upscaleJobIds,
+        error: String(error?.message || error || 'Failed to stop Umbra UI jobs.'),
+      });
+    });
+    return;
+  }
+  const controlData = !isBackendPipelineTarget && data?.scope === 'umbra_ui_all'
+    ? { ...data, scope: undefined }
+    : data;
   const backendAffectedRequestIds = type === 'queue_cancel'
     || type === 'queue_clear_future'
     || type === 'queue_interrupt_active'
-    ? applyBackendPowerPrompterQueueControl(data, type)
+    ? applyBackendPowerPrompterQueueControl(controlData, type)
     : [];
 
   if (isBackendPipelineTarget) {
@@ -10978,7 +11133,7 @@ function forwardPrompterQueueControlToComfyTarget(
     backendHandledPowerPrompterQueueControlRequests.set(requestId, backendAffectedRequestIds);
   }
   sendWs(target, {
-    ...data,
+    ...controlData,
     type,
     requestId,
     requestIds: collectPrompterRequestIds(data?.requestIds),
@@ -11266,6 +11421,7 @@ function handlePrompterMessage(ws: ServerWebSocket<unknown>, data: any) {
     if (meta.role !== 'powerprompter') return;
     void updatePowerPrompterDocumentSession(String(data?.file || '').trim(), data?.document, {
       save: type === 'document_save' || data?.save === true,
+      expectedRevision: data?.expectedRevision,
       intent: String(data?.intent || (type === 'document_save' ? 'session-autosave' : 'session-update')).trim(),
       sourceClientId: String(data?.clientId || '').trim(),
       preferredSourceWs: ws,
@@ -20319,9 +20475,16 @@ async function handleUmbraUiInpaintJobCancel(path: string): Promise<Response> {
   const suffix = path.slice('/api/umbra-ui/inpaint/jobs/'.length);
   const jobId = decodeURIComponent(suffix.replace(/\/cancel$/, '')).trim();
   if (!jobId) return json({ success: false, error: 'Inpaint job id is required.' }, 400);
-  const job = await umbraUiInpaintService.cancel(jobId);
-  if (!job) return json({ success: false, error: 'Inpaint job was not found.' }, 404);
-  return json({ success: true, job });
+  try {
+    const job = await umbraUiInpaintService.cancel(jobId);
+    if (!job) return json({ success: false, error: 'Inpaint job was not found.' }, 404);
+    return json({ success: true, job });
+  } catch (error: any) {
+    if (error instanceof UmbraUiInpaintCancellationError) {
+      return json({ success: false, error: error.message, job: error.job }, 409);
+    }
+    throw error;
+  }
 }
 
 async function handleUmbraUiInpaintProjectList(): Promise<Response> {
@@ -21977,18 +22140,6 @@ function createDefaultPPCardDocument(filePath: string | null): PowerPrompterCard
   };
 }
 
-function composePPPromptFromCards(cards: PowerPrompterCardNode[]): string {
-  const raw = sortPPCards(cards)
-    .map((card) => String(card.text || '').trim())
-    .filter((value) => value.length > 0)
-    .join(', ');
-  return raw
-    .split(',')
-    .map((segment) => segment.replace(/\s+/g, ' ').trim())
-    .filter((segment) => segment.length > 0)
-    .join(', ');
-}
-
 function splitLegacyPromptSegments(text: string): string[] {
   return String(text || '')
     .split(/\r?\n|,/g)
@@ -22443,6 +22594,17 @@ async function savePPCardDocumentForFile(
   return normalizedDoc;
 }
 
+async function syncLegacyPPTextMirror(filePath: string, document: PowerPrompterCardDocument): Promise<void> {
+  const resolved = resolvePPPromptFile(filePath);
+  if (!resolved || !resolved.fullPath.toLowerCase().endsWith('.txt')) return;
+  try {
+    await writeTextFileAtomic(resolved.fullPath, composePowerPrompterDocumentPrompt(document));
+  } catch (error) {
+    // The sidecar is authoritative and was already committed. Keep the save successful.
+    console.warn('[PowerPrompter] Failed to update legacy text mirror:', resolved.filePath, error);
+  }
+}
+
 interface PowerPrompterDocumentSession {
   version: 1;
   file: string | null;
@@ -22527,14 +22689,20 @@ async function openPowerPrompterDocumentSessionUnlocked(
   filePath: string,
   options: { sourceClientId?: string; preferredSourceWs?: ServerWebSocket<unknown> | null; reason?: string } = {}
 ): Promise<PowerPrompterDocumentSession> {
-  const loaded = await loadPPCardDocumentForFile(filePath);
-  const normalized = normalizePPCardDocument(loaded.document, loaded.document.file || filePath);
+  const resolved = resolvePPPromptFile(filePath);
+  if (!resolved) throw new Error('Invalid Power Prompter file path');
+  if (shouldReusePowerPrompterSession(powerPrompterDocumentSession.file, resolved.filePath, !!powerPrompterDocumentSession.document)) {
+    return powerPrompterDocumentSession;
+  }
+  assertPowerPrompterSessionCanOpen(powerPrompterDocumentSession.file, resolved.filePath, powerPrompterDocumentSession.dirty);
+  const loaded = await loadPPCardDocumentForFile(resolved.filePath);
+  const normalized = normalizePPCardDocument(loaded.document, resolved.filePath);
   const now = Date.now();
   powerPrompterDocumentSession = {
     version: 1,
     file: normalized.file,
     document: normalized,
-    composedPrompt: composePPPromptFromCards(normalized.cards),
+    composedPrompt: composePowerPrompterDocumentPrompt(normalized),
     revision: Math.max(powerPrompterDocumentSession.revision + 1, now),
     dirty: false,
     lastSavedAt: now,
@@ -22567,7 +22735,7 @@ async function ensurePowerPrompterDocumentSession(filePath?: string | null): Pro
           version: 1,
           file: resolved.filePath,
           document,
-          composedPrompt: composePPPromptFromCards(document.cards),
+          composedPrompt: composePowerPrompterDocumentPrompt(document),
           revision: powerPrompterDocumentSession.revision,
           dirty: false,
           lastSavedAt: now,
@@ -22608,6 +22776,7 @@ async function updatePowerPrompterDocumentSession(
   document: unknown,
   options: {
     save?: boolean;
+    expectedRevision?: unknown;
     intent?: string;
     forceOverwrite?: boolean;
     sourceClientId?: string;
@@ -22619,6 +22788,7 @@ async function updatePowerPrompterDocumentSession(
     const resolved = resolvePPPromptFile(filePath);
     if (!resolved) throw new Error('Invalid Power Prompter file path');
     assertPowerPrompterSessionFile(powerPrompterDocumentSession.file, resolved.filePath);
+    assertPowerPrompterSessionRevision(powerPrompterDocumentSession.revision, options.expectedRevision);
     const normalized = normalizePPCardDocument(document, resolved.filePath);
     const now = Date.now();
     let savedDocument = normalized;
@@ -22633,6 +22803,7 @@ async function updatePowerPrompterDocumentSession(
       savedDocument = await savePPCardDocumentForFile(resolved.filePath, normalized, {
         forceOverwrite: options.forceOverwrite === true,
       });
+      await syncLegacyPPTextMirror(resolved.filePath, savedDocument);
       savedAt = now;
     }
 
@@ -22640,7 +22811,7 @@ async function updatePowerPrompterDocumentSession(
       version: 1,
       file: savedDocument.file || resolved.filePath,
       document: savedDocument,
-      composedPrompt: composePPPromptFromCards(savedDocument.cards),
+      composedPrompt: composePowerPrompterDocumentPrompt(savedDocument),
       revision: Math.max(powerPrompterDocumentSession.revision + 1, now),
       dirty: !options.save,
       lastSavedAt: savedAt,
@@ -22653,26 +22824,131 @@ async function updatePowerPrompterDocumentSession(
   });
 }
 
-async function clearPowerPrompterDocumentSession(options: { expectedFile: string; sourceClientId?: string; preferredSourceWs?: ServerWebSocket<unknown> | null; reason?: string }): Promise<PowerPrompterDocumentSession> {
+async function publishPowerPrompterRawWrite(document: PowerPrompterCardDocument, reason: string): Promise<number> {
+  const now = Date.now();
+  powerPrompterDocumentSession = advancePowerPrompterRawWriteSession(
+    powerPrompterDocumentSession,
+    now,
+    { document, composedPrompt: composePowerPrompterDocumentPrompt(document) },
+  );
+  await persistPowerPrompterDocumentSessionSummary().catch(() => undefined);
+  broadcastPowerPrompterDocumentSession(reason);
+  return powerPrompterDocumentSession.revision;
+}
+
+interface ClearPowerPrompterDocumentSessionOptions {
+  expectedFile: string;
+  expectedRevision: unknown;
+  sourceClientId?: string;
+  preferredSourceWs?: ServerWebSocket<unknown> | null;
+  reason?: string;
+}
+
+async function clearPowerPrompterDocumentSessionUnlocked(options: ClearPowerPrompterDocumentSessionOptions): Promise<PowerPrompterDocumentSession> {
+  const resolved = resolvePPPromptFile(options.expectedFile);
+  if (!resolved) throw new Error('Invalid Power Prompter file path');
+  assertPowerPrompterSessionFile(powerPrompterDocumentSession.file, resolved.filePath);
+  assertPowerPrompterSessionRevision(powerPrompterDocumentSession.revision, options.expectedRevision);
+  const now = Date.now();
+  powerPrompterDocumentSession = {
+    version: 1,
+    file: null,
+    document: null,
+    composedPrompt: '',
+    revision: Math.max(powerPrompterDocumentSession.revision + 1, now),
+    dirty: false,
+    lastSavedAt: 0,
+    updatedAt: now,
+    sourceClientId: String(options.sourceClientId || '').trim(),
+  };
+  await persistPowerPrompterDocumentSessionSummary().catch(() => undefined);
+  broadcastPowerPrompterDocumentSession(options.reason || 'document_cleared', options.preferredSourceWs);
+  return powerPrompterDocumentSession;
+}
+
+function clearPowerPrompterDocumentSession(options: ClearPowerPrompterDocumentSessionOptions): Promise<PowerPrompterDocumentSession> {
+  return mutatePowerPrompterDocumentSession(() => clearPowerPrompterDocumentSessionUnlocked(options));
+}
+
+async function getPowerPrompterCardStorageRevision(resolved: { fullPath: string; sidecarPath: string }): Promise<string> {
+  const storagePath = existsSync(resolved.sidecarPath) ? resolved.sidecarPath : resolved.fullPath;
+  const stat = await fs.stat(storagePath).catch(() => null);
+  return stat ? `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}` : 'missing';
+}
+
+async function loadPowerPrompterCardWithStorageRevision(resolved: { filePath: string; fullPath: string; sidecarPath: string }) {
+  const before = await getPowerPrompterCardStorageRevision(resolved);
+  const loaded = await loadPPCardDocumentForFile(resolved.filePath);
+  const after = await getPowerPrompterCardStorageRevision(resolved);
+  if (before !== after) throw new PowerPrompterSessionConflictError();
+  return { ...loaded, sessionRevision: null, storageRevision: after };
+}
+
+async function readPowerPrompterCardForEditor(filePath: string) {
+  const resolved = resolvePPPromptFile(filePath);
+  if (!resolved) throw new Error('Invalid Power Prompter file path');
+  if (powerPrompterDocumentSession.file !== resolved.filePath) {
+    return loadPowerPrompterCardWithStorageRevision(resolved);
+  }
   return mutatePowerPrompterDocumentSession(async () => {
-    const resolved = resolvePPPromptFile(options.expectedFile);
+    if (powerPrompterDocumentSession.file === resolved.filePath && powerPrompterDocumentSession.document) {
+      return {
+        document: normalizePPCardDocument(powerPrompterDocumentSession.document, resolved.filePath),
+        fromSidecar: !powerPrompterDocumentSession.dirty,
+        healed: false,
+        sessionRevision: powerPrompterDocumentSession.revision,
+        storageRevision: null,
+      };
+    }
+    return loadPowerPrompterCardWithStorageRevision(resolved);
+  });
+}
+
+async function savePowerPrompterCardFromEditor(
+  filePath: string,
+  document: unknown,
+  options: { intent: string; expectedRevision: unknown; expectedStorageRevision: unknown; forceOverwrite: boolean; sourceClientId?: string },
+) {
+  return mutatePowerPrompterDocumentSession(async () => {
+    const resolved = resolvePPPromptFile(filePath);
     if (!resolved) throw new Error('Invalid Power Prompter file path');
-    assertPowerPrompterSessionFile(powerPrompterDocumentSession.file, resolved.filePath);
+    if (options.intent === 'create-card' && (existsSync(resolved.sidecarPath) || existsSync(resolved.fullPath))) {
+      throw new PowerPrompterSessionConflictError('A card file with that name already exists.');
+    }
+    const active = assertPowerPrompterCardEditorRevision(
+      powerPrompterDocumentSession.file,
+      resolved.filePath,
+      !!powerPrompterDocumentSession.document,
+      powerPrompterDocumentSession.revision,
+      options.expectedRevision,
+    );
+    if (!active && options.intent !== 'create-card') {
+      assertPowerPrompterCardStorageRevision(
+        await getPowerPrompterCardStorageRevision(resolved),
+        options.expectedStorageRevision,
+      );
+    }
+    const saved = await savePPCardDocumentForFile(resolved.filePath, document, {
+      forceOverwrite: options.forceOverwrite,
+    });
+    await syncLegacyPPTextMirror(resolved.filePath, saved);
+    if (!active) return { document: saved, sessionRevision: null };
+
     const now = Date.now();
     powerPrompterDocumentSession = {
       version: 1,
-      file: null,
-      document: null,
-      composedPrompt: '',
+      file: resolved.filePath,
+      document: saved,
+      composedPrompt: composePowerPrompterDocumentPrompt(saved),
       revision: Math.max(powerPrompterDocumentSession.revision + 1, now),
       dirty: false,
-      lastSavedAt: 0,
+      lastSavedAt: now,
       updatedAt: now,
-      sourceClientId: String(options.sourceClientId || '').trim(),
+      sourceClientId: String(options.sourceClientId || 'sidebar-card-operation').trim(),
     };
     await persistPowerPrompterDocumentSessionSummary().catch(() => undefined);
-    broadcastPowerPrompterDocumentSession(options.reason || 'document_cleared', options.preferredSourceWs);
-    return powerPrompterDocumentSession;
+    broadcastPowerPrompterDocumentSession('document_saved');
+    return { document: saved, sessionRevision: powerPrompterDocumentSession.revision };
   });
 }
 
@@ -25403,7 +25679,7 @@ async function tryReadJsonResponseBody(res: Response): Promise<unknown> {
   }
 }
 
-async function handleTrashMutationWithCacheInvalidation(
+async function handleTrashMutationWithCacheInvalidationUnlocked(
   req: Request,
   url: URL,
   handler: (request: Request, parsedUrl: URL, context: any) => Promise<Response>,
@@ -25438,8 +25714,9 @@ async function handleTrashMutationWithCacheInvalidation(
     ) {
       const results = Array.isArray((responseBody as any)?.results) ? (responseBody as any).results : [];
       galleryDb.removeRecordsForPaths(results
-        .filter((entry: any) => entry?.success === true && typeof entry?.path === 'string')
-        .map((entry: any) => entry.path));
+        .filter((entry: any) => entry?.success === true)
+        .map((entry: any) => String(entry?.requestedPath || entry?.path || ''))
+        .filter(Boolean));
     } else if (url.pathname === '/api/trash/empty') {
       if ((responseBody as any)?.success === true) {
         galleryDb.removeRecordsForPaths([TRASH_ROOT]);
@@ -25458,6 +25735,72 @@ async function handleTrashMutationWithCacheInvalidation(
     ...Array.from(hintedPaths),
   ], 'trash-mutation');
   return response;
+}
+
+async function handleTrashMutationWithCacheInvalidation(
+  req: Request,
+  url: URL,
+  handler: (request: Request, parsedUrl: URL, context: any) => Promise<Response>,
+): Promise<Response> {
+  const mode = powerPrompterTrashModeForPath(url.pathname);
+  if (!mode) return handleTrashMutationWithCacheInvalidationUnlocked(req, url, handler);
+  const body = await tryReadJsonBody(req);
+  const input = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  const requestedPaths = Array.isArray(input.paths)
+    ? input.paths.filter((value): value is string => typeof value === 'string').map((value) => value.trim()).filter(Boolean)
+    : [];
+  if (!requestedPaths.length) return handleTrashMutationWithCacheInvalidationUnlocked(req, url, handler);
+  const initialTargets = await resolvePowerPrompterTrashTargetPaths(requestedPaths, resolvePath);
+  const initialRoot = await fs.realpath(PP_PROMPTS_ROOT_ABS).catch(() => PP_PROMPTS_ROOT_ABS);
+  if (!shouldGatePowerPrompterTrash(initialTargets.flatMap((target) => target.fullPaths), PP_PROMPTS_ROOT_ABS)
+    && !shouldGatePowerPrompterTrash(initialTargets.flatMap((target) => target.fullPaths), initialRoot)) {
+    return handleTrashMutationWithCacheInvalidationUnlocked(req, url, handler);
+  }
+
+  return mutatePowerPrompterDocumentSession(async () => {
+    const targets = await resolvePowerPrompterTrashTargetPaths(requestedPaths, resolvePath);
+    const activeFile = powerPrompterDocumentSession.file;
+    const activeResolved = activeFile ? resolvePPPromptFile(activeFile) : null;
+    const activeRealPath = activeResolved ? await fs.realpath(activeResolved.fullPath).catch(() => null) : null;
+    const activePaths = activeResolved
+      ? [activeResolved.fullPath, ...(activeRealPath && activeRealPath !== activeResolved.fullPath ? [activeRealPath] : [])]
+      : [];
+    const protectedPaths = targets
+      .filter((target) => activePaths.some((activePath) => doesPowerPrompterTrashAffectSession(target.fullPaths, activePath)))
+      .map((target) => target.requestedPath);
+    const primaryPaths = targets
+      .filter((target) => activePaths.some((activePath) => doesPowerPrompterTrashRemoveActiveFile(target.fullPaths, activePath)))
+      .map((target) => target.requestedPath);
+
+    return runGuardedPowerPrompterTrashMutation({
+      mode,
+      requestedPaths,
+      protectedPaths,
+      primaryPaths,
+      currentRevision: powerPrompterDocumentSession.revision,
+      expectedRevision: input.expectedRevision,
+      conflictHeaders: getCorsHeaders(),
+      perform: (allowedPaths) => {
+        const effectiveRequest = allowedPaths.length === requestedPaths.length
+          ? req
+          : new Request(req.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...input, paths: allowedPaths }),
+          });
+        return handleTrashMutationWithCacheInvalidationUnlocked(effectiveRequest, url, handler);
+      },
+      clearSession: async () => {
+        if (!activeFile) return;
+        await clearPowerPrompterDocumentSessionUnlocked({
+          expectedFile: activeFile,
+          expectedRevision: input.expectedRevision,
+          sourceClientId: '',
+          reason: 'document_deleted',
+        });
+      },
+    });
+  });
 }
 
 function paginateFsListResult(
@@ -27073,12 +27416,25 @@ async function handleFsRead(url: URL): Promise<Response> {
   }
 }
 
+async function getPowerPrompterRawWriteActivePaths(): Promise<{ file: string | null; sidecar: string | null }> {
+  const active = powerPrompterDocumentSession.file ? resolvePPPromptFile(powerPrompterDocumentSession.file) : null;
+  if (!active) return { file: null, sidecar: null };
+  const roots = [PP_PROMPTS_ROOT_ABS];
+  const [file, sidecar] = await Promise.all([
+    resolveAllowedGalleryPath(active.fullPath, roots),
+    resolveAllowedGalleryPath(active.sidecarPath, roots),
+  ]);
+  return { file, sidecar };
+}
+
 async function handleFsWrite(req: Request): Promise<Response> {
   try {
-    const { path: filePath, content, encoding } = await req.json() as {
+    const { path: filePath, content, encoding, expectedRevision, expectedStorageRevision } = await req.json() as {
       path: string;
       content?: string;
       encoding?: 'utf8' | 'base64';
+      expectedRevision?: unknown;
+      expectedStorageRevision?: unknown;
     };
     if (!filePath) return json({ error: 'Path required' }, 400);
 
@@ -27087,16 +27443,67 @@ async function handleFsWrite(req: Request): Promise<Response> {
 
     const fullPath = await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
     if (!fullPath) return json({ error: 'Invalid path' }, 403);
+    if (isPowerPrompterRawWriteCandidate(resolved.relativePath)) {
+      const physicalRoot = await resolveAllowedGalleryPath(PP_PROMPTS_ROOT_ABS, [PP_PROMPTS_ROOT_ABS]);
+      if (!physicalRoot || !isPowerPrompterRawWritePhysicalTarget(resolved.fullPath, fullPath, PP_PROMPTS_ROOT_ABS, physicalRoot)) {
+        return json({ error: 'Power Prompter writes require a canonical path inside Prompts.' }, 403);
+      }
+    }
     if (resolved.relativePath.toLowerCase().endsWith(PP_CARD_DOC_EXT)) {
       if (encoding === 'base64') {
         return json({ error: 'Power Prompter card writes must use JSON text.' }, 400);
       }
+      const logicalFilePath = getPowerPrompterRawCardLogicalFile(resolved.relativePath);
+      const logical = resolvePPPromptFile(logicalFilePath);
+      if (!logical) return json({ error: 'Invalid Power Prompter card path' }, 400);
+      const authorized = await resolveAllowedGalleryPath(logical.sidecarPath, [PP_PROMPTS_ROOT_ABS]);
+      if (!authorized || !isPowerPrompterRawWriteActiveTarget(fullPath, authorized, null)) {
+        return json({ error: 'Power Prompter card path changed or is outside Prompts.' }, 403);
+      }
+      let parsed: unknown;
       try {
-        const parsed = JSON.parse(String(content ?? ''));
-        const saved = await savePPCardDocumentForFile(resolved.relativePath, parsed, { forceOverwrite: false });
-        return json({ success: true, path: saved.file || resolved.relativePath, guarded: true });
+        parsed = JSON.parse(String(content ?? ''));
       } catch (error: any) {
-        return json({ error: error?.message || 'Failed to save Power Prompter card document' }, 400);
+        return json({ error: error?.message || 'Invalid Power Prompter card JSON' }, 400);
+      }
+      try {
+        return await mutatePowerPrompterDocumentSession(async () => {
+          const [currentAuthorized, physicalRoot] = await Promise.all([
+            resolveAllowedGalleryPath(logical.sidecarPath, [PP_PROMPTS_ROOT_ABS]),
+            resolveAllowedGalleryPath(PP_PROMPTS_ROOT_ABS, [PP_PROMPTS_ROOT_ABS]),
+          ]);
+          if (!currentAuthorized || !physicalRoot
+            || !isPowerPrompterRawWritePhysicalTarget(logical.sidecarPath, currentAuthorized, PP_PROMPTS_ROOT_ABS, physicalRoot)
+            || !isPowerPrompterRawWriteActiveTarget(fullPath, currentAuthorized, null)) {
+            throw new PowerPrompterSessionConflictError('The Power Prompter card path changed. Reload it before writing.');
+          }
+          const activePaths = await getPowerPrompterRawWriteActivePaths();
+          const active = isPowerPrompterRawWriteActiveTarget(fullPath, activePaths.file, activePaths.sidecar);
+          const storageRevision = active ? 'missing' : await getPowerPrompterCardStorageRevision(logical);
+          const outcome = await runGuardedPowerPrompterRawWrite({
+            kind: 'card',
+            active,
+            currentRevision: powerPrompterDocumentSession.revision,
+            expectedRevision,
+            storageRevision,
+            expectedStorageRevision,
+            write: async () => {
+              const saveFile = choosePowerPrompterRawCardSaveFile(active, powerPrompterDocumentSession.file, logical.filePath);
+              const saved = await savePPCardDocumentForFile(saveFile, parsed, { forceOverwrite: false });
+              await syncLegacyPPTextMirror(saveFile, saved);
+              return saved;
+            },
+            publishActiveWrite: (saved) => publishPowerPrompterRawWrite(saved, 'document_saved'),
+          });
+          return json({
+            success: true,
+            path: resolved.relativePath,
+            guarded: true,
+            sessionRevision: outcome.sessionRevision,
+          });
+        });
+      } catch (error: any) {
+        return json({ error: error?.message || 'Failed to save Power Prompter card document' }, error instanceof PowerPrompterSessionConflictError ? 409 : 400);
       }
     }
 
@@ -27106,6 +27513,50 @@ async function handleFsWrite(req: Request): Promise<Response> {
     }
     if (extension === '.txt' && !await resolveAllowedGalleryPath(fullPath, [join(USER_DIR, 'PowerPrompter', 'Prompts')])) {
       return json({ error: 'Text writes must stay in Power Prompter prompts' }, 403);
+    }
+
+    if (extension === '.txt') {
+      try {
+        return await mutatePowerPrompterDocumentSession(async () => {
+          const [currentAuthorized, physicalRoot] = await Promise.all([
+            resolveAllowedGalleryPath(resolved.fullPath, [PP_PROMPTS_ROOT_ABS]),
+            resolveAllowedGalleryPath(PP_PROMPTS_ROOT_ABS, [PP_PROMPTS_ROOT_ABS]),
+          ]);
+          if (!currentAuthorized || !physicalRoot
+            || !isPowerPrompterRawWritePhysicalTarget(resolved.fullPath, currentAuthorized, PP_PROMPTS_ROOT_ABS, physicalRoot)
+            || !isPowerPrompterRawWriteActiveTarget(fullPath, currentAuthorized, null)) {
+            throw new PowerPrompterSessionConflictError('The Power Prompter text path changed. Reload it before writing.');
+          }
+          const activePaths = await getPowerPrompterRawWriteActivePaths();
+          const active = isPowerPrompterRawWriteActiveTarget(fullPath, activePaths.file, null);
+          const storageRevision = active ? 'missing' : await getPowerPrompterCardStorageRevision({
+            fullPath,
+            sidecarPath: `${fullPath}${PP_CARD_DOC_EXT}`,
+          });
+          const textStat = await fs.stat(fullPath).catch((error: NodeJS.ErrnoException) => {
+            if (error.code === 'ENOENT') return null;
+            throw error;
+          });
+          const outcome = await runGuardedPowerPrompterRawWrite({
+            kind: 'text',
+            textHasCardSidecar: existsSync(`${fullPath}${PP_CARD_DOC_EXT}`),
+            textHasOtherHardlinks: (textStat?.nlink || 0) > 1,
+            active,
+            currentRevision: powerPrompterDocumentSession.revision,
+            expectedRevision,
+            storageRevision,
+            expectedStorageRevision,
+            write: () => fsWorkerService.write({ fullPath, content: content ?? '', encoding: 'utf8' }),
+            publishActiveWrite: async () => { throw new Error('Active Power Prompter text writes are not supported.'); },
+          });
+          return json({ success: true, path: filePath, guarded: true, sessionRevision: outcome.sessionRevision });
+        });
+      } catch (error: any) {
+        if (error instanceof PowerPrompterSessionConflictError) {
+          return json({ error: error.message }, 409);
+        }
+        throw error;
+      }
     }
 
     await fsWorkerService.write({
@@ -36150,16 +36601,18 @@ const server = Bun.serve<UmbraSocketData>({
         if (!file) return json({ error: 'file is required' }, 400);
 
         try {
-          const loaded = await loadPPCardDocumentForFile(file);
+          const loaded = await readPowerPrompterCardForEditor(file);
           return json({
             success: true,
             document: loaded.document,
             fromSidecar: loaded.fromSidecar,
             healed: loaded.healed,
-            composedPrompt: composePPPromptFromCards(loaded.document.cards),
+            sessionRevision: loaded.sessionRevision,
+            storageRevision: loaded.storageRevision,
+            composedPrompt: composePowerPrompterDocumentPrompt(loaded.document),
           });
         } catch (error: any) {
-          return json({ success: false, error: error?.message || 'Failed to load card document' }, 400);
+          return json({ success: false, error: error?.message || 'Failed to load card document' }, error instanceof PowerPrompterSessionConflictError ? 409 : 400);
         }
       }
 
@@ -36184,7 +36637,7 @@ const server = Bun.serve<UmbraSocketData>({
           });
           return json({ success: true, ...clonePowerPrompterDocumentSession('document_opened', session) });
         } catch (error: any) {
-          return json({ success: false, error: error?.message || 'Failed to open Power Prompter session' }, 400);
+          return json({ success: false, error: error?.message || 'Failed to open Power Prompter session' }, error instanceof PowerPrompterSessionConflictError ? 409 : 400);
         }
       }
 
@@ -36194,6 +36647,7 @@ const server = Bun.serve<UmbraSocketData>({
             file?: string;
             document?: unknown;
             save?: boolean;
+            expectedRevision?: unknown;
             intent?: string;
             clientId?: string;
             forceOverwrite?: boolean;
@@ -36202,6 +36656,7 @@ const server = Bun.serve<UmbraSocketData>({
           if (!file) return json({ success: false, error: 'file is required' }, 400);
           const session = await updatePowerPrompterDocumentSession(file, body?.document, {
             save: body?.save === true,
+            expectedRevision: body?.expectedRevision,
             intent: String(body?.intent || (body?.save === true ? 'session-autosave' : 'session-update')).trim(),
             sourceClientId: String(body?.clientId || '').trim(),
             forceOverwrite: body?.forceOverwrite === true,
@@ -36209,7 +36664,7 @@ const server = Bun.serve<UmbraSocketData>({
           });
           return json({ success: true, ...clonePowerPrompterDocumentSession(body?.save === true ? 'document_saved' : 'document_updated', session) });
         } catch (error: any) {
-          return json({ success: false, error: error?.message || 'Failed to update Power Prompter session' }, 400);
+          return json({ success: false, error: error?.message || 'Failed to update Power Prompter session' }, error instanceof PowerPrompterSessionConflictError ? 409 : 400);
         }
       }
 
@@ -36217,15 +36672,17 @@ const server = Bun.serve<UmbraSocketData>({
         try {
           const clientId = String(url.searchParams.get('clientId') || '').trim();
           const expectedFile = String(url.searchParams.get('file') || '').trim();
-          const session = await clearPowerPrompterDocumentSession({ expectedFile, sourceClientId: clientId, reason: 'document_cleared' });
+          const expectedRevisionParam = url.searchParams.get('expectedRevision');
+          const expectedRevision = expectedRevisionParam === null ? undefined : Number(expectedRevisionParam);
+          const session = await clearPowerPrompterDocumentSession({ expectedFile, expectedRevision, sourceClientId: clientId, reason: 'document_cleared' });
           return json({ success: true, ...clonePowerPrompterDocumentSession('document_cleared', session) });
         } catch (error: any) {
-          return json({ success: false, error: error?.message || 'Failed to clear Power Prompter session' }, 400);
+          return json({ success: false, error: error?.message || 'Failed to clear Power Prompter session' }, error instanceof PowerPrompterSessionConflictError ? 409 : 400);
         }
       }
 
       if (path === '/api/powerprompter/cards' && method === 'POST') {
-        const body = await req.json() as { file?: string; document?: unknown; forceOverwrite?: boolean; intent?: string };
+        const body = await req.json() as { file?: string; document?: unknown; forceOverwrite?: boolean; intent?: string; expectedRevision?: unknown; expectedStorageRevision?: unknown; clientId?: string };
         const file = String(body?.file || '').trim();
         if (!file) return json({ error: 'file is required' }, 400);
         const intent = String(body?.intent || '').trim();
@@ -36238,14 +36695,21 @@ const server = Bun.serve<UmbraSocketData>({
         }
 
         try {
-          const saved = await savePPCardDocumentForFile(file, body?.document, { forceOverwrite: body?.forceOverwrite === true });
+          const result = await savePowerPrompterCardFromEditor(file, body?.document, {
+            intent,
+            expectedRevision: body?.expectedRevision ?? null,
+            expectedStorageRevision: body?.expectedStorageRevision,
+            forceOverwrite: body?.forceOverwrite === true,
+            sourceClientId: String(body?.clientId || '').trim(),
+          });
           return json({
             success: true,
-            document: saved,
-            composedPrompt: composePPPromptFromCards(saved.cards),
+            document: result.document,
+            sessionRevision: result.sessionRevision,
+            composedPrompt: composePowerPrompterDocumentPrompt(result.document),
           });
         } catch (error: any) {
-          return json({ success: false, error: error?.message || 'Failed to save card document' }, 400);
+          return json({ success: false, error: error?.message || 'Failed to save card document' }, error instanceof PowerPrompterSessionConflictError ? 409 : 400);
         }
       }
 

@@ -12,6 +12,7 @@ export interface DeleteExecutionResult {
   deletedPaths: string[];
   failed: Array<{ path: string; error: string }>;
   trashItems: TrashItemRef[];
+  powerPrompterSessionCleared?: boolean;
   warning?: string;
 }
 
@@ -127,6 +128,7 @@ export async function permanentlyDeleteTrashPaths(paths: string[]): Promise<Pick
 export async function deletePathsWithSettings(
   paths: string[],
   settings: Partial<AppSettings> | Record<string, unknown>,
+  options?: { expectedRevision?: number },
 ): Promise<DeleteExecutionResult> {
   const normalizedPaths = normalizeDeletePaths(paths);
   if (normalizedPaths.length === 0) {
@@ -139,13 +141,16 @@ export async function deletePathsWithSettings(
   }
 
   const mode: TrashDeleteMode = isUmbraRemoteClient() ? 'umbra-trash' : getTrashDeleteMode(settings);
+  const expectedRevision = Number.isSafeInteger(options?.expectedRevision)
+    ? options?.expectedRevision
+    : undefined;
 
   if (mode === 'umbra-trash') {
     const autoDeleteDays = getTrashAutoDeleteDays(settings);
     const response = await fetch('/api/trash/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths: normalizedPaths, autoDeleteDays }),
+      body: JSON.stringify({ paths: normalizedPaths, autoDeleteDays, expectedRevision }),
     });
 
     const result = await parseJsonSafe(response);
@@ -171,6 +176,7 @@ export async function deletePathsWithSettings(
       deletedPaths,
       failed,
       trashItems,
+      powerPrompterSessionCleared: result?.powerPrompterSessionCleared === true,
       warning: typeof result?.warning === 'string' ? result.warning : undefined,
     };
   }
@@ -179,7 +185,7 @@ export async function deletePathsWithSettings(
     const response = await fetch('/api/trash/system', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths: normalizedPaths }),
+      body: JSON.stringify({ paths: normalizedPaths, expectedRevision }),
     });
     const result = await parseJsonSafe(response);
     if (!response.ok) {
@@ -197,6 +203,7 @@ export async function deletePathsWithSettings(
       deletedPaths,
       failed,
       trashItems: [],
+      powerPrompterSessionCleared: result?.powerPrompterSessionCleared === true,
       warning: typeof result?.warning === 'string' ? result.warning : undefined,
     };
   }
@@ -204,7 +211,7 @@ export async function deletePathsWithSettings(
   const response = await fetch('/api/trash/delete-direct', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ paths: normalizedPaths }),
+    body: JSON.stringify({ paths: normalizedPaths, expectedRevision }),
   });
   const result = await parseJsonSafe(response);
   if (!response.ok) {
@@ -222,6 +229,7 @@ export async function deletePathsWithSettings(
     deletedPaths,
     failed,
     trashItems: [],
+    powerPrompterSessionCleared: result?.powerPrompterSessionCleared === true,
     warning: typeof result?.warning === 'string' ? result.warning : undefined,
   };
 }

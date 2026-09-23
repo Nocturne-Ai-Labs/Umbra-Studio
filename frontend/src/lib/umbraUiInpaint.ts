@@ -71,6 +71,8 @@ export interface UmbraUiInpaintJob {
   failed: number;
   createdAt: number;
   updatedAt: number;
+  cancelRequested?: boolean;
+  cancelError?: string;
   items: UmbraUiInpaintJobItem[];
   preview?: UmbraUiInpaintPreview | null;
 }

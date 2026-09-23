@@ -22,6 +22,26 @@ export interface PowerPrompterDocumentSessionEnvelope {
   error?: string;
 }
 
+export class PowerPrompterSessionRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'PowerPrompterSessionRequestError';
+  }
+}
+
+export function shouldApplyPowerPrompterDocumentSession(
+  session: PowerPrompterDocumentSession,
+  options: { fromRemote: boolean; clientId: string; hasPendingChanges: boolean; currentRevision: number },
+): boolean {
+  const isClearedSession = !session.document && !session.file;
+  if (!isClearedSession && (!session.document || !session.file)) return false;
+  const sourceClientId = String(session.sourceClientId || '').trim();
+  if (options.fromRemote && sourceClientId && sourceClientId === options.clientId) return false;
+  if (options.fromRemote && options.hasPendingChanges) return false;
+  if (isClearedSession) return session.revision > options.currentRevision;
+  return session.revision <= 0 || session.revision >= options.currentRevision;
+}
+
 function normalizeSession(rawValue: unknown): PowerPrompterDocumentSession | null {
   const raw = rawValue as Partial<PowerPrompterDocumentSession> | null | undefined;
   if (!raw || typeof raw !== 'object') return null;
@@ -49,7 +69,10 @@ function normalizeSession(rawValue: unknown): PowerPrompterDocumentSession | nul
 async function readSessionResponse(response: Response): Promise<PowerPrompterDocumentSessionEnvelope> {
   const payload = await response.json().catch(() => null) as PowerPrompterDocumentSessionEnvelope | null;
   if (!response.ok || payload?.success === false) {
-    throw new Error(String(payload?.error || `Power Prompter session request failed (${response.status})`));
+    throw new PowerPrompterSessionRequestError(
+      String(payload?.error || `Power Prompter session request failed (${response.status})`),
+      response.status,
+    );
   }
   return {
     ...payload,
@@ -76,6 +99,7 @@ export async function updatePowerPrompterDocumentSession(input: {
   file: string;
   document: PowerPrompterCardDocument;
   clientId: string;
+  expectedRevision: number;
   save?: boolean;
   intent?: string;
 }): Promise<PowerPrompterDocumentSessionEnvelope> {
