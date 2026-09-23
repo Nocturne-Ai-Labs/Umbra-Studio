@@ -24984,10 +24984,8 @@ async function handleFsList(url: URL, signal?: AbortSignal): Promise<Response> {
     const resolved = resolvePath(targetPath);
     if (!resolved) return json({ error: 'Invalid path' }, 400);
 
-    const { fullPath } = resolved;
-
-    // Security check: ensure we are within allowed roots
-    if (!isPathInsideAllowedRoots(fullPath)) {
+    const fullPath = await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
+    if (!fullPath) {
       return json({ error: 'Access denied' }, 403);
     }
 
@@ -25153,8 +25151,8 @@ async function handleFsListProgressive(url: URL, signal?: AbortSignal): Promise<
     const resolved = resolvePath(targetPath);
     if (!resolved) return json({ error: 'Invalid path' }, 400);
 
-    const { fullPath } = resolved;
-    if (!isPathInsideAllowedRoots(fullPath)) {
+    const fullPath = await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
+    if (!fullPath) {
       return json({ error: 'Access denied' }, 403);
     }
 
@@ -28138,7 +28136,8 @@ async function handleFsTree(url: URL): Promise<Response> {
     const resolved = resolvePath(path);
     if (!resolved) return json({ error: 'Invalid path' }, 400);
 
-    const { fullPath } = resolved;
+    const fullPath = await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
+    if (!fullPath) return json({ error: 'Access denied' }, 403);
     if (!existsSync(fullPath)) return json({ folders: [], missing: true, path: normalizedPath });
 
     const result = await fsWorkerService.tree({
@@ -28198,8 +28197,8 @@ async function handleFsFolderSummary(url: URL): Promise<Response> {
 
     const resolved = resolvePath(path);
     if (!resolved) return json({ error: 'Invalid path' }, 400);
-    const { fullPath } = resolved;
-    if (!isPathInsideAllowedRoots(fullPath)) return json({ error: 'Access denied' }, 403);
+    const fullPath = await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
+    if (!fullPath) return json({ error: 'Access denied' }, 403);
     if (!existsSync(fullPath)) {
       const empty = {
         path: normalizedPath,
