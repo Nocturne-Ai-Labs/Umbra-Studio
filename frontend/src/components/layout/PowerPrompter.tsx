@@ -784,6 +784,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const powerPrompterSessionRevisionRef = useRef(0);
   const powerPrompterSessionApplyingRef = useRef(false);
   const powerPrompterSessionUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const powerPrompterSessionUpdateSeqRef = useRef(0);
   const queuePauseActionRef = useRef<() => void | Promise<void>>(() => {});
   const queueStartActionRef = useRef<() => void | Promise<void>>(() => {});
   const queueCancelActionRef = useRef<() => void | Promise<void>>(() => {});
@@ -4333,6 +4334,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       currentRevision: powerPrompterSessionRevisionRef.current,
     })) return;
     powerPrompterSessionMutationQueueRef.current?.invalidatePendingUpdates();
+    powerPrompterSessionUpdateSeqRef.current += 1;
 
     if (!session.file && !session.document) {
       fileLoadRequestSeqRef.current += 1;
@@ -4387,6 +4389,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   }, []);
 
   const schedulePowerPrompterDocumentSessionUpdate = useCallback((documentOverride?: PowerPrompterCardDocument) => {
+    const updateSeq = ++powerPrompterSessionUpdateSeqRef.current;
     if (powerPrompterSessionUpdateTimerRef.current) {
       clearTimeout(powerPrompterSessionUpdateTimerRef.current);
       powerPrompterSessionUpdateTimerRef.current = null;
@@ -4396,9 +4399,21 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     if (!file || !document) return;
     powerPrompterSessionUpdateTimerRef.current = setTimeout(() => {
       powerPrompterSessionUpdateTimerRef.current = null;
-      void powerPrompterSessionMutationQueueRef.current?.update(file, document).catch(() => {
-        // Autosave still owns durable persistence feedback.
-      });
+      void powerPrompterSessionMutationQueueRef.current?.update(file, document)
+        .then((payload) => {
+          if (payload?.session && updateSeq === powerPrompterSessionUpdateSeqRef.current && currentFileRef.current === file) {
+            autosaveErrorShownRef.current = false;
+          }
+        })
+        .catch((error) => {
+          if (updateSeq !== powerPrompterSessionUpdateSeqRef.current || currentFileRef.current !== file || !hasPendingChangesRef.current) return;
+          if (autosaveErrorShownRef.current) return;
+          autosaveErrorShownRef.current = true;
+          const conflict = error instanceof PowerPrompterSessionRequestError && error.status === 409;
+          showToastRef.current(conflict
+            ? 'This card changed outside this editor. Your unsaved edits remain here.'
+            : 'Could not protect this edit yet. Keep Power Prompter open and try saving.', 'error');
+        });
     }, 500);
   }, []);
 
@@ -6046,6 +6061,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     };
     autosaveInFlightRef.current = true;
     try {
+      powerPrompterSessionUpdateSeqRef.current += 1;
       if (powerPrompterSessionUpdateTimerRef.current) {
         clearTimeout(powerPrompterSessionUpdateTimerRef.current);
         powerPrompterSessionUpdateTimerRef.current = null;
@@ -6082,7 +6098,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           hasPendingChangesRef.current = false;
         } else {
           hasPendingChangesRef.current = true;
-          scheduleAutosaveAfterIdle();
+          if (!autosaveTimerRef.current) scheduleAutosaveAfterIdle();
         }
       }
 
@@ -7365,6 +7381,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         clearTimeout(powerPrompterSessionUpdateTimerRef.current);
         powerPrompterSessionUpdateTimerRef.current = null;
       }
+      powerPrompterSessionUpdateSeqRef.current += 1;
       powerPrompterSessionMutationQueueRef.current?.invalidatePendingUpdates();
       prompterWsReadyRef.current = false;
 
@@ -7414,6 +7431,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         clearTimeout(powerPrompterSessionUpdateTimerRef.current);
         powerPrompterSessionUpdateTimerRef.current = null;
       }
+      powerPrompterSessionUpdateSeqRef.current += 1;
       powerPrompterSessionMutationQueueRef.current?.invalidatePendingUpdates();
       const fileName = String(path || '').replace(/\\/g, '/').split('/').pop() || 'prompt file';
       setLoadingPromptFileName(fileName);
@@ -7484,7 +7502,11 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           applyPowerPrompterDocumentSession(payload.session);
         }
       })
-      .catch(() => undefined);
+      .catch((error) => {
+        if (error instanceof PowerPrompterSessionRequestError && error.status === 409) {
+          showToast(error.message, 'error');
+        }
+      });
   });
 
   useEffect(() => subscribeUiSession((event) => {
@@ -7565,6 +7587,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       clearTimeout(powerPrompterSessionUpdateTimerRef.current);
       powerPrompterSessionUpdateTimerRef.current = null;
     }
+    powerPrompterSessionUpdateSeqRef.current += 1;
     powerPrompterSessionMutationQueueRef.current?.invalidatePendingUpdates();
     setCurrentFile(null);
     setContent('');
@@ -7625,6 +7648,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       return;
     }
 
+    const hadPendingChanges = hasPendingChangesRef.current;
     hasPendingChangesRef.current = !!currentFileRef.current && (
       composed !== lastSavedContentRef.current ||
       nextSignature !== lastSavedCardSignatureRef.current
@@ -7632,6 +7656,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     if (hasPendingChangesRef.current) {
       markPendingChange();
       schedulePowerPrompterDocumentSessionUpdate(normalized);
+    } else if (hadPendingChanges && currentFileRef.current) {
+      // A dirty update may already be in flight; save the reverted document after it.
+      markPendingChange();
+      void savePromptFile(currentFileRef.current, composed, {
+        source: 'autosave',
+        cardDocumentOverride: normalized,
+      });
     }
   };
 
