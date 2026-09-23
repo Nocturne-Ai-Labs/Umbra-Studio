@@ -28,7 +28,7 @@ import { gzip } from 'zlib';
 import { promisify } from 'util';
 import { AsyncLocalStorage } from 'async_hooks';
 import { pathToFileURL } from 'url';
-import { createConnection } from 'net';
+import { createConnection, isIP } from 'net';
 import { lookup as lookupHostname } from 'node:dns/promises';
 import { ServerWebSocket } from 'bun';
 import { QueueUploadReceiver } from './shared/power-prompter/queueTransport';
@@ -1148,7 +1148,8 @@ async function copyLocalImageIntoDatasetConcept(
   if (!sourceStat.isFile() || sourceStat.size === 0 || sourceStat.size > 256 * 1024 * 1024) {
     throw new Error('Select a regular image file smaller than 256 MB');
   }
-  const detectedImage = await detectDatasetImportImage(await fs.readFile(sourcePath));
+  const sourceBytes = await fs.readFile(sourcePath);
+  const detectedImage = await detectDatasetImportImage(sourceBytes);
   if (sourceExt !== detectedImage.extension && !(sourceExt === '.jpeg' && detectedImage.extension === '.jpg')) {
     throw new Error('Source image format does not match its filename');
   }
@@ -1159,9 +1160,6 @@ async function copyLocalImageIntoDatasetConcept(
 
   const parsedBase = basename(originalName, extname(originalName)) || 'image';
   const parsedExt = extname(originalName) || '.png';
-  let filename = `${parsedBase}${parsedExt}`;
-  let destPath = join(conceptPath, filename);
-  let counter = 1;
   const sourceBaseName = sourcePath.replace(/\.[^.]+$/, '');
   const sourceSidecars = [
     { source: `${sourceBaseName}.txt`, suffix: '.txt', fullName: false },
@@ -1179,16 +1177,11 @@ async function copyLocalImageIntoDatasetConcept(
     const base = name.slice(0, -extname(name).length);
     return authorizedSidecars.map(sidecar => join(conceptPath, `${sidecar.fullName ? name : base}${sidecar.suffix}`));
   };
-  while (existsSync(destPath) || sidecarDestinations(filename).some(existsSync)) {
-    filename = `${parsedBase}_${counter}${parsedExt}`;
-    destPath = join(conceptPath, filename);
-    counter += 1;
-  }
+  const filename = await saveDatasetImportedImage(conceptPath, parsedBase, parsedExt, sourceBytes);
+  const destPath = join(conceptPath, filename);
   const copiedSidecars: string[] = [];
-  const created: string[] = [];
+  const created: string[] = [destPath];
   try {
-    await copyFileExclusive(sourcePath, destPath);
-    created.push(destPath);
     for (const [index, sidecar] of authorizedSidecars.entries()) {
       const destination = sidecarDestinations(filename)[index];
       await copyFileExclusive(sidecar.source, destination);
@@ -3264,6 +3257,19 @@ function getRemoteCookieSecuritySuffix(req: Request): string {
 }
 
 function getRemoteLoginRateKey(req: Request, server?: RequestIpServer): string {
+  const socketAddress = getRequestSocketAddress(req, server);
+  if (isLoopbackIpAddress(socketAddress)) {
+    const host = normalizeRequestHostname(req.headers.get('host'));
+    const forwardedHost = normalizeRequestHostname(req.headers.get('x-forwarded-host'));
+    const forwardedProto = req.headers.get('x-forwarded-proto')?.trim().toLowerCase();
+    const forwardedFor = req.headers.get('x-forwarded-for')?.trim() || '';
+    const peerAddress = normalizeIpAddress(forwardedFor);
+    // Tailscale Serve replaces these forwarded headers before relaying to our loopback listener.
+    if (host.endsWith('.ts.net') && host === forwardedHost && forwardedProto === 'https'
+      && !forwardedFor.includes(',') && isIP(peerAddress) && isTailscaleIpAddress(peerAddress)) {
+      return `tailscale-serve:${peerAddress}`;
+    }
+  }
   return getRemoteRequestAddress(req, server);
 }
 
@@ -33125,7 +33131,8 @@ const server = Bun.serve<UmbraSocketData>({
             deleted += 1;
             const baseName = img.slice(0, -extname(img).length);
             const remainingSibling = (await fs.readdir(conceptPath)).some(name =>
-              name.slice(0, -extname(name).length) === baseName && DATASET_IMPORT_IMAGE_EXTENSIONS.has(extname(name).toLowerCase())
+              name.slice(0, -extname(name).length).toLowerCase() === baseName.toLowerCase()
+                && DATASET_IMPORT_IMAGE_EXTENSIONS.has(extname(name).toLowerCase())
             );
             if (!remainingSibling) {
               for (const sidecar of [`${baseName}.txt`, `${baseName}.json`]) {

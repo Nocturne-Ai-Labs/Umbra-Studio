@@ -50,8 +50,15 @@ export async function moveDatasetImages(fromPath: string, toPath: string, filena
       && other.slice(0, -extname(other).length).toLowerCase() === base.toLowerCase())) {
       throw new Error(`Destination already contains an image named ${base}.`);
     }
+    const associatedNames = new Set([
+      `${base}.txt`, `${base}.json`, `${name}.txt`, `${name}.json`, booruSourceSidecar(name),
+    ].map(other => other.toLowerCase()));
+    if (allDestinationNames.some(other => associatedNames.has(other.toLowerCase()))) {
+      throw new Error(`Destination already contains data associated with ${name}.`);
+    }
     const hasRemainingSibling = allSourceNames.some(other =>
-      !selected.has(other) && other.slice(0, -extname(other).length) === base && IMAGE_EXTENSIONS.has(extname(other).toLowerCase())
+      !selected.has(other) && other.slice(0, -extname(other).length).toLowerCase() === base.toLowerCase()
+        && IMAGE_EXTENSIONS.has(extname(other).toLowerCase())
     );
     await add(name);
     await add(`${base}.txt`, hasRemainingSibling);
