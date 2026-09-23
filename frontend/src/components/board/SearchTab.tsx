@@ -239,7 +239,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
     setIsCreatingDataset(true);
     const success = await createDataset(newDatasetName.trim());
     if (success) {
-      setSelectedDataset(newDatasetName.trim());
+      setSelectedDataset(newDatasetName.trim().replace(/[^a-zA-Z0-9_-]/g, '_'));
     }
     setIsCreatingDataset(false);
     setShowNewDatasetModal(false);
