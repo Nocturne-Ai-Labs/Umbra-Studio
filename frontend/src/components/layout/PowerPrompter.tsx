@@ -8619,7 +8619,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       return Promise.reject(new Error('Power Prompter queue tracker is not connected.'));
     }
     const normalizedRequestIds = Array.from(new Set(requestIds.map((id) => String(id || '').trim()).filter(Boolean)));
-    if (normalizedRequestIds.length <= 0) {
+    const normalizedPendingBatchRequestId = String(cancelPendingBatchRequestId || '').trim();
+    if (normalizedRequestIds.length <= 0 && !normalizedPendingBatchRequestId) {
       return Promise.reject(new Error('No backend queue requests are available to stop.'));
     }
     const requestId = createRequestId();
@@ -8636,7 +8637,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         type: action === 'cancel' ? 'queue_cancel' : 'queue_clear_future',
         requestId,
         requestIds: normalizedRequestIds,
-        ...(cancelPendingBatchRequestId ? { cancelPendingBatchRequestId } : {}),
+        ...(normalizedPendingBatchRequestId ? { cancelPendingBatchRequestId: normalizedPendingBatchRequestId } : {}),
         ...(action === 'clear' ? { activeRequestId: '' } : {}),
         targetBridgeId: target.targetBridgeId || undefined,
         queueTargetType: target.queueTargetType,
@@ -10584,9 +10585,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         return;
       }
 
-      const requestIds = collectTrackedQueueRequestIds();
-      const intendedBackendRequestIds = Array.from(backendQueueSnapshotRequestIdsRef.current);
       const pendingBatchGroupRequestIds = [...activeQueueBatchGroupRequestIdsRef.current];
+      const requestIds = Array.from(new Set([
+        ...collectTrackedQueueRequestIds(),
+        ...pendingBatchGroupRequestIds,
+      ]));
+      const intendedBackendRequestIds = Array.from(backendQueueSnapshotRequestIdsRef.current);
       const activeVisual = queueVisualStateRef.current;
       const activeRequestId = String(activeVisual?.requestId || '').trim();
       let activeIndex = Math.max(0, Math.floor(Number(activeVisual?.activeIndex) || 0));
