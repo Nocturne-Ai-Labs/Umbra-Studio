@@ -46,7 +46,7 @@ import { settingsManager } from './backend/settings/SettingsManager';
 import { FsWorkerService } from './backend/FsWorkerService';
 import { GalleryTransferJournal } from './backend/GalleryTransferJournal';
 import { isGalleryUploadFilename, isGalleryUploadStrategy, prepareGalleryUploadDirectory } from './backend/GalleryUploadService';
-import { writeAllUploadedMediaBytes } from './backend/UmbraUiMediaUploadService';
+import { copyMediaIntoComfyInput, writeAllUploadedMediaBytes } from './backend/UmbraUiMediaUploadService';
 import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
 import { fetchLocalServerProxy, readLocalServerProxyText } from './backend/LocalServerProxyTransfer';
 import { createGalleryPathAuthorizer, resolveAllowedGalleryPath } from './backend/GalleryPathAccess';
@@ -33345,54 +33345,11 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'Select an image file' }, 400);
           }
 
-          const comfyInputDir = getComfyInputRootFast();
-          if (!existsSync(comfyInputDir)) {
-            await fs.mkdir(comfyInputDir, { recursive: true });
-          }
-
-          const filename = basename(sourcePath) || 'image.png';
-          const destPath = join(comfyInputDir, filename);
-
-          // Copy the file
-          await fs.copyFile(sourcePath, destPath);
-
-          // Best-effort sync: also hit ComfyUI's upload API so new inputs are immediately indexed.
-          let comfyUploadSynced = false;
-          let comfyUploadError: string | null = null;
-          try {
-            const config = getBackendConfig().comfyui;
-            const uploadUrl = `http://${config.host}:${config.port}/upload/image`;
-            const fileBuffer = await fs.readFile(sourcePath);
-            const formData = new FormData();
-            formData.append('image', new Blob([fileBuffer]), filename);
-            formData.append('type', 'input');
-            formData.append('overwrite', 'true');
-
-            const uploadResponse = await fetch(uploadUrl, {
-              method: 'POST',
-              body: formData,
-            });
-
-            if (!uploadResponse.ok) {
-              const details = (await uploadResponse.text().catch(() => '')).slice(0, 200);
-              throw new Error(`HTTP ${uploadResponse.status}${details ? `: ${details}` : ''}`);
-            }
-
-            comfyUploadSynced = true;
-          } catch (error: any) {
-            comfyUploadError = error?.message || String(error);
-            console.warn(`[ComfyUI] upload/image sync failed for ${filename}: ${comfyUploadError}`);
-          }
-
+          const { filename, destPath } = await copyMediaIntoComfyInput(sourcePath, getComfyInputRootFast());
           return json({
             success: true,
             filename,
             destPath,
-            uploadApi: {
-              attempted: true,
-              synced: comfyUploadSynced,
-              error: comfyUploadError,
-            },
           });
         } catch (error: any) {
           return json({ error: error.message }, 500);
@@ -33424,11 +33381,7 @@ const server = Bun.serve<UmbraSocketData>({
           if (!detectedKind || (requestedKind && requestedKind !== detectedKind)) {
             return json({ error: `Unsupported ${requestedKind || 'media'} file: ${basename(sourcePath)}` }, 400);
           }
-          const comfyInputDir = getComfyInputRootFast();
-          await fs.mkdir(comfyInputDir, { recursive: true });
-          const filename = `${Date.now().toString(36)}-${randomBytes(4).toString('hex')}-${basename(sourcePath)}`;
-          const destPath = join(comfyInputDir, filename);
-          await fs.copyFile(sourcePath, destPath);
+          const { filename, destPath } = await copyMediaIntoComfyInput(sourcePath, getComfyInputRootFast());
           return json({ success: true, filename, destPath, kind: detectedKind });
         } catch (error: any) {
           return json({ error: error?.message || 'Failed to stage media for ComfyUI.' }, 500);
