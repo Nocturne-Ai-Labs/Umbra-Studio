@@ -3473,7 +3473,7 @@ export class UmbraUiInpaintService {
   private async cleanupStagedInputs(jobId: string): Promise<void> {
     try {
       const inputRoot = String(this.getComfyInputRoot?.() || '').trim();
-      if (!inputRoot || !/^umbra-inpaint-[a-z0-9-]+$/i.test(jobId)) return;
+      if (!inputRoot || !/^(?:umbra-inpaint|control-preview|layer-upscale|background-removal)-[a-z0-9-]+$/i.test(jobId)) return;
       const stagingRoot = resolve(join(inputRoot, 'umbra-ui-inpaint'));
       const target = resolve(join(stagingRoot, jobId));
       if (!target.startsWith(`${stagingRoot}${sep}`)) return;
