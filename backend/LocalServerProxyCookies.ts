@@ -2,14 +2,14 @@ import { createHash } from 'node:crypto';
 
 // Browser cookies belong to Umbra's origin, so each proxied app needs its own
 // name and path scope before any cookie can cross the proxy boundary.
-function proxyCookiePrefix(token: string): string {
+export function getLocalServerProxyCookiePrefix(token: string): string {
   const scope = createHash('sha256').update(token).digest('hex').slice(0, 32);
   return `umbra_local_${scope}_`;
 }
 
 export function getLocalServerProxyCookieHeader(cookieHeader: string | null, token: string): string {
   if (!cookieHeader) return '';
-  const prefix = proxyCookiePrefix(token);
+  const prefix = getLocalServerProxyCookiePrefix(token);
   return cookieHeader.split(';').flatMap((part) => {
     const pair = part.trim();
     const separator = pair.indexOf('=');
@@ -21,7 +21,7 @@ export function getLocalServerProxyCookieHeader(cookieHeader: string | null, tok
 export function rewriteLocalServerProxySetCookies(headers: Headers, token: string, proxyRoot: string, requestPath: string): void {
   const upstreamCookies = headers.getSetCookie();
   headers.delete('set-cookie');
-  const prefix = proxyCookiePrefix(token);
+  const prefix = getLocalServerProxyCookiePrefix(token);
   for (const cookie of upstreamCookies) {
     const parts = cookie.split(';');
     const pair = parts.shift()?.trim() || '';
