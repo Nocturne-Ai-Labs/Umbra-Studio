@@ -237,9 +237,12 @@ function filmstripImagesFromSavedOutputs(detail: unknown): FilmstripImage[] {
 
 function buildFilmstripFeedSignature(folderPath: string, items: FilmstripImage[]): string {
   const normalizedFolder = normalizePath(folderPath);
-  if (!Array.isArray(items) || items.length === 0) return `${normalizedFolder}|0`;
-  const parts = items.map((item) => `${normalizeId(item.id)}|${normalizePath(item.path)}|${String(item.thumbnailUrl || '')}`);
-  return `${normalizedFolder}|${items.length}|${parts.join('||')}`;
+  return JSON.stringify([normalizedFolder, (items || []).map((item) => [
+    normalizeId(item.id), normalizeId(item.uid), normalizePath(item.path),
+    item.name, item.url, item.thumbnailUrl, item.type,
+    item.width, item.height, item.size, item.dateCreated, item.dateModified,
+    item.privacyClass,
+  ])]);
 }
 
 function shouldTraceFilmstrip(): boolean {
