@@ -64,6 +64,7 @@ import {
 } from '@/components/umbra-ui/UmbraQueuePlacementControls';
 import { resolveUmbraUiPipeline } from '@/lib/umbraUiPipelines';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
+import { prepareVideoControlsForHandoff } from '@/lib/umbraUiVideoHandoffControls';
 import { readUserConfigWithRetry, writeUserConfig } from '@/lib/userConfig';
 import { advanceUmbraUiSeed, normalizeUmbraUiSeed, resolveUmbraUiQueueSeed } from '@/lib/umbraUiSeed';
 import {
@@ -858,7 +859,7 @@ export function UmbraVideoGenerationControls({
             const roles = handoffRolesRef.current;
             if (roles.size === 0) return normalizedSavedVideo;
             const middleImagePath = roles.has('middle') ? current.middleImagePath : normalizedSavedVideo.middleImagePath;
-            return {
+            const restoredWithHandoff: PowerPrompterVideoControls = {
               ...normalizedSavedVideo,
               mode: current.mode,
               frameGuideMode: roles.has('last') && current.mode === 'image_to_video'
@@ -873,6 +874,12 @@ export function UmbraVideoGenerationControls({
                 ? { sourceWidth: current.sourceWidth, sourceHeight: current.sourceHeight }
                 : {}),
             };
+            return prepareVideoControlsForHandoff(
+              restoredWithHandoff,
+              restoredWithHandoff.mode === 'video_to_video'
+                || (restoredWithHandoff.mode === 'image_to_video'
+                  && restoredWithHandoff.frameGuideMode === 'first_middle_last'),
+            );
           });
           if (!handoffRolesRef.current.has('first') && savedVideo.sourceImagePath) {
             setSourcePreviewUrl(`/api/fs/image?path=${encodeURIComponent(savedVideo.sourceImagePath)}`);
@@ -1195,7 +1202,7 @@ export function UmbraVideoGenerationControls({
     setVideo((current) => {
       if (role === 'source_video') {
         return {
-          ...current,
+          ...prepareVideoControlsForHandoff(current, true),
           mode: 'video_to_video',
           sourceVideoPath: detail.path,
           sourceVideoName: '',
@@ -1205,7 +1212,7 @@ export function UmbraVideoGenerationControls({
       }
       if (role === 'middle') {
         return {
-          ...current,
+          ...prepareVideoControlsForHandoff(current, true),
           mode: 'image_to_video',
           frameGuideMode: 'first_middle_last',
           middleImagePath: detail.path,
@@ -1214,7 +1221,7 @@ export function UmbraVideoGenerationControls({
       }
       if (role === 'last') {
         return {
-          ...current,
+          ...prepareVideoControlsForHandoff(current, !!current.middleImagePath),
           mode: 'image_to_video',
           frameGuideMode: current.middleImagePath ? 'first_middle_last' : 'first_last',
           lastImagePath: detail.path,
@@ -1222,7 +1229,7 @@ export function UmbraVideoGenerationControls({
         };
       }
       return {
-        ...current,
+        ...prepareVideoControlsForHandoff(current, false),
         mode: 'image_to_video',
         sourceImagePath: detail.path,
         sourceImageName: '',
