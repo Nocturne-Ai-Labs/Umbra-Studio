@@ -11248,6 +11248,22 @@ function forwardPrompterQueueControlToComfyTarget(
     });
     return;
   }
+  if (isBackendPipelineTarget
+    && (type === 'queue_cancel' || type === 'queue_clear_future')
+    && pendingPowerPrompterBatchAdmissionTokens.size > 0) {
+    const error = 'A Power Prompter batch admission is still in progress. Wait for the backend queue to settle and try again.';
+    sendWs(ws, type === 'queue_clear_future'
+      ? {
+        type: 'queue_clear_future_result', requestId,
+        activeRequestId: String(data?.activeRequestId || ''),
+        clearedRequestIds: [], success: false, backendHandled: true, error,
+      }
+      : {
+        type: 'queue_cancel_result', requestId,
+        requestIds: [], success: false, backendHandled: true, error,
+      });
+    return;
+  }
   const controlData = !isBackendPipelineTarget && data?.scope === 'umbra_ui_all'
     ? { ...data, scope: undefined }
     : data;
