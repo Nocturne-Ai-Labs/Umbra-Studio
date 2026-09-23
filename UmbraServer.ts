@@ -12049,8 +12049,12 @@ function startGalleryBridgeWatchdog() {
     if (!galleryBridgeDesired || isShuttingDown) return;
     if (galleryBridgeRestartInFlight) return;
 
-    const processRunning = isChildProcessAlive(galleryBridgeProcess);
+    const checkedProcess = galleryBridgeProcess;
+    const checkedStopEpoch = galleryBridgeStopEpoch;
+    const processRunning = isChildProcessAlive(checkedProcess);
     const healthy = await isGalleryBridgeHealthy();
+    if (!galleryBridgeDesired || isShuttingDown || galleryBridgeRestartInFlight
+      || galleryBridgeStopEpoch !== checkedStopEpoch || galleryBridgeProcess !== checkedProcess) return;
     if (healthy) {
       galleryBridgeWatchdogFailures = 0;
       return;

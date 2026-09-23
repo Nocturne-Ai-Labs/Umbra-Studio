@@ -8256,6 +8256,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       }
       const targetFolder = imagePath ? pathParent(imagePath) || folderPath : folderPath;
       if (targetFolder) {
+        clearSearch();
         setFocusedFolder(targetFolder);
         addOpenedFolder(targetFolder);
         void loadFolder({ folder: targetFolder, keepSelection: Boolean(imagePath) });
@@ -8530,7 +8531,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       window.removeEventListener('umbra:gallery-trash-updated', onTrashUpdated as EventListener);
       window.removeEventListener('umbra:gallery-content-changed', onContentChanged as EventListener);
     };
-  }, [addOpenedFolder, clearPageCacheForFolder, clearTrashCache, currentFolder, emitFilmstripFeed, emitFolderChanged, emitSelectionChanged, files, getSelectionOrderedFiles, invalidateChangedTreeBranches, invalidateTreeChildrenCache, liveGenerationPreviewFile, loadFolder, loadTreeChildren, rememberRestoredHighlights, sortBy, sortOrder, trashMode, updateViewerSessionFiles, upsertDirectSavedOutputs, viewerFileFallback]);
+  }, [addOpenedFolder, clearPageCacheForFolder, clearSearch, clearTrashCache, currentFolder, emitFilmstripFeed, emitFolderChanged, emitSelectionChanged, files, getSelectionOrderedFiles, invalidateChangedTreeBranches, invalidateTreeChildrenCache, liveGenerationPreviewFile, loadFolder, loadTreeChildren, rememberRestoredHighlights, sortBy, sortOrder, trashMode, updateViewerSessionFiles, upsertDirectSavedOutputs, viewerFileFallback]);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('umbra:gallery-sort-changed', {

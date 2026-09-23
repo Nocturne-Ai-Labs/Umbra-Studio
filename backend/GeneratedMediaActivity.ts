@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { dirname, extname, isAbsolute, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
 import { writeUpdateJsonAtomic } from '../shared/updateStateFile';
 
 const MEDIA = new Set(['.png', '.jpg', '.jpeg', '.webp', '.avif', '.bmp', '.tif', '.tiff', '.gif', '.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v', '.wmv']);
@@ -22,7 +22,13 @@ export class GeneratedMediaActivity {
       this.epoch = data.epoch;
       for (const entry of data.folders) {
         if (typeof entry.path === 'string' && Number.isSafeInteger(entry.count) && entry.count > 0 && Number.isFinite(entry.updatedAt)) {
-          this.folders.set(this.key(entry.path), entry);
+          const key = this.key(entry.path);
+          const previous = this.folders.get(key);
+          this.folders.set(key, previous ? {
+            path: entry.updatedAt >= previous.updatedAt ? entry.path : previous.path,
+            count: Math.min(Number.MAX_SAFE_INTEGER, previous.count + entry.count),
+            updatedAt: Math.max(previous.updatedAt, entry.updatedAt),
+          } : entry);
         }
       }
       const now = this.now();
@@ -47,6 +53,20 @@ export class GeneratedMediaActivity {
 
   private key(path: string): string {
     const full = this.resolvePath(path);
+    let existing = full;
+    const missing: string[] = [];
+    while (true) {
+      try {
+        const physical = realpathSync.native(existing);
+        const canonical = missing.length > 0 ? resolve(physical, ...missing.reverse()) : physical;
+        return process.platform === 'win32' ? canonical.toLowerCase() : canonical;
+      } catch {
+        const parent = dirname(existing);
+        if (parent === existing) break;
+        missing.push(basename(existing));
+        existing = parent;
+      }
+    }
     return process.platform === 'win32' ? full.toLowerCase() : full;
   }
 

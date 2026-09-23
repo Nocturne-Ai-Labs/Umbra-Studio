@@ -86,8 +86,14 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
       try { localStorage.setItem(FOLDER_ACTIVITY_READ_KEY, JSON.stringify(next)); } catch { /* In-memory counts still work. */ }
       return next;
     });
-    if (snapshot) acknowledge(snapshot);
-    // Include outputs that arrived since the last periodic poll, without waiting to open the folder.
+    // A matching polled snapshot is the click-time ceiling. A later response could
+    // include outputs published after the folder was opened and mark them read.
+    if (snapshot?.folders.some(folder => folder.path === path)) {
+      acknowledge(snapshot);
+      return;
+    }
+    // Cold or untracked folders still need a fetch; their read cutoff is when
+    // that response arrives, so an output published during the request may be read.
     void fetchActivity([path]).then(acknowledge).catch(() => undefined);
   }, [snapshot]);
 
