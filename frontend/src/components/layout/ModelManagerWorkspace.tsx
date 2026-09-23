@@ -701,7 +701,7 @@ function getModelThumbnailSrc(snapshot?: ModelSnapshotSummary | null): string {
   if (!snapshot) return '';
   const localPath = String(snapshot.thumbnailPath || '').trim();
   if (localPath) {
-    return `/api/fs/thumbnail?path=${encodeURIComponent(localPath)}&size=small&q=92&rev=model-thumb-v1`;
+    return `/api/fs/thumbnail?path=${encodeURIComponent(localPath)}&size=small&q=92`;
   }
   const previewUrl = String(snapshot.previewImageUrl || '').trim();
   if (!previewUrl) return '';
