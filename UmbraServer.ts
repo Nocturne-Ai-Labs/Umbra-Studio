@@ -47,6 +47,7 @@ import { FsWorkerService } from './backend/FsWorkerService';
 import { GalleryTransferJournal } from './backend/GalleryTransferJournal';
 import { isGalleryUploadFilename, isGalleryUploadStrategy, prepareGalleryUploadDirectory } from './backend/GalleryUploadService';
 import { copyMediaIntoComfyInput, writeAllUploadedMediaBytes } from './backend/UmbraUiMediaUploadService';
+import { isCivitaiModelDownloadUrl } from './backend/ModelDownloadHttp';
 import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
 import { fetchLocalServerProxy, readLocalServerProxyText } from './backend/LocalServerProxyTransfer';
 import { createGalleryPathAuthorizer, resolveAllowedExistingGalleryPath, resolveAllowedGalleryPath } from './backend/GalleryPathAccess';
@@ -27809,6 +27810,7 @@ async function handleModelManagerCivitaiDownload(req: Request): Promise<Response
     const fileName = String(body.fileName || '').trim();
     const modelType = String(body.modelType || '').trim();
     if (!downloadUrl) return json({ error: 'Missing download URL' }, 400);
+    if (!isCivitaiModelDownloadUrl(downloadUrl)) return json({ error: 'Invalid CivitAI model download URL' }, 400);
 
     const userRoot = getModelManagerRootsResolved().find((root) => root.key === 'user');
     if (!userRoot) return json({ error: 'User models root unavailable' }, 500);

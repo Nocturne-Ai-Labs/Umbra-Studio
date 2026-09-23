@@ -1,3 +1,14 @@
+export function isCivitaiModelDownloadUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.origin === 'https://civitai.com'
+      && !url.username && !url.password
+      && /^\/api\/download\/models\/\d+\/?$/.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchModelDownload(urlValue: string, token = '', signal?: AbortSignal): Promise<Response> {
   let url = new URL(urlValue);
   const authenticatedOrigin = url.origin === 'https://civitai.com';
