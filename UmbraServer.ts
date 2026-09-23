@@ -1218,6 +1218,25 @@ async function copyLocalImageIntoDatasetConcept(
     if (allowedSourceRoots && !await resolveAllowedGalleryPath(sidecar.source, allowedSourceRoots)) continue;
     if ((await fs.lstat(sidecar.source)).isFile()) authorizedSidecars.push(sidecar);
   }
+  // Keep a saved Booru repair source only when it belongs to these exact image bytes.
+  const repairSourcePath = join(dirname(sourcePath), booruSourceSidecar(basename(sourcePath)));
+  let repairSourceContents: string | null = null;
+  try {
+    if (existsSync(repairSourcePath)
+      && (!allowedSourceRoots || await resolveAllowedGalleryPath(repairSourcePath, allowedSourceRoots))) {
+      const repairSourceStat = await fs.lstat(repairSourcePath);
+      if (repairSourceStat.isFile() && repairSourceStat.size > 0 && repairSourceStat.size <= 64 * 1024) {
+        const contents = await fs.readFile(repairSourcePath, 'utf8');
+        const record = JSON.parse(contents) as Record<string, unknown>;
+        if (record && typeof record === 'object' && !Array.isArray(record)
+          && typeof record.md5 === 'string'
+          && record.md5.toLowerCase() === createHash('md5').update(sourceBytes).digest('hex')
+          && normalizeBooruMediaUrl(record.url)) repairSourceContents = contents;
+      }
+    }
+  } catch {
+    // Optional repair metadata must not prevent importing the image.
+  }
   const sidecarDestinations = (name: string) => {
     const base = name.slice(0, -extname(name).length);
     return authorizedSidecars.map(sidecar => join(conceptPath, `${sidecar.fullName ? name : base}${sidecar.suffix}`));
@@ -1231,6 +1250,14 @@ async function copyLocalImageIntoDatasetConcept(
       const destination = sidecarDestinations(filename)[index];
       await copyFileExclusive(sidecar.source, destination);
       created.push(destination);
+      copiedSidecars.push(basename(destination));
+    }
+    if (repairSourceContents !== null) {
+      const destination = join(conceptPath, booruSourceSidecar(filename));
+      const handle = await fs.open(destination, 'wx');
+      created.push(destination);
+      try { await handle.writeFile(repairSourceContents, 'utf8'); await handle.sync(); }
+      finally { await handle.close(); }
       copiedSidecars.push(basename(destination));
     }
   } catch (error) {
