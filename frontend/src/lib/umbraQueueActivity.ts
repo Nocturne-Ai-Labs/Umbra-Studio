@@ -379,6 +379,8 @@ export async function controlUmbraQueueActivity(activity: UmbraQueueActivity, ac
     if (action === 'skip') body = JSON.stringify({ promptId: activity.promptId });
   } else throw new Error('This job does not support that action.');
   const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.success === false) throw new Error(String(payload.error || `Job control failed (${response.status}).`));
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload || typeof payload !== 'object' || payload.success !== true) {
+    throw new Error(String(payload?.error || `Job control failed (${response.status}).`));
+  }
 }
