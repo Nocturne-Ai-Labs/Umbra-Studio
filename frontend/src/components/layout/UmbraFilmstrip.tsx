@@ -711,9 +711,14 @@ export function UmbraFilmstrip({
 
   useEffect(() => {
     const onFolderLoadFailed = (event: Event) => {
-      const detail = (event as CustomEvent<{ folderPath?: string; message?: string }>).detail;
+      const detail = (event as CustomEvent<{ folderPath?: string; currentFolderPath?: string; message?: string }>).detail;
       const failedFolder = normalizePath(detail?.folderPath || '');
       if (!failedFolder || failedFolder.toLowerCase() !== normalizePath(currentFolderRef.current || rootPath).toLowerCase()) return;
+      const committedFolder = normalizePath(detail?.currentFolderPath || '');
+      if (committedFolder && committedFolder.toLowerCase() !== failedFolder.toLowerCase()) {
+        currentFolderRef.current = committedFolder;
+        setCurrentFolder(committedFolder);
+      }
       setFolderLoadError(String(detail?.message || 'Failed to load folder'));
     };
     window.addEventListener('umbra:gallery-folder-load-failed', onFolderLoadFailed as EventListener);
@@ -2046,17 +2051,16 @@ export function UmbraFilmstrip({
   const openFilmstripFolder = useCallback((folderPath: string, source: string) => {
     const normalized = normalizePath(folderPath);
     if (!normalized) return;
-    folderActivity.markOpened(normalized);
-    activityOpenedFolderRef.current = normalized;
     if (normalized.toLowerCase() !== normalizePath(currentFolderRef.current).toLowerCase()) {
       localCustomSortPendingRef.current = null;
+    } else if (normalized.toLowerCase() === normalizePath(activityOpenedFolderRef.current).toLowerCase()) {
+      folderActivity.markOpened(normalized);
     }
     currentFolderRef.current = normalized;
     setCurrentFolder(normalized);
     setFolderLoadError('');
     setSelectedIds(new Set());
     setLastSelectedId('');
-    rememberRecentFolders([normalized]);
     window.dispatchEvent(new CustomEvent('umbra:gallery-open-path', {
       detail: {
         path: normalized,
@@ -2064,7 +2068,7 @@ export function UmbraFilmstrip({
         source,
       },
     }));
-  }, [rememberRecentFolders, folderActivity.markOpened]);
+  }, [folderActivity.markOpened]);
 
   const openPinnedFolder = useCallback((folderPath: string) => {
     openFilmstripFolder(folderPath, 'filmstrip-pinned-local');

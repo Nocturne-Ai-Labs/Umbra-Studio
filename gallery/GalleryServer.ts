@@ -1045,6 +1045,20 @@ async function ensureDirectory(pathValue: string): Promise<string> {
   return resolved;
 }
 
+async function ensureListDirectory(pathValue: string): Promise<string> {
+  try {
+    return await ensureDirectory(pathValue);
+  } catch (error) {
+    // Match the main fallback's first-run behavior for the managed output root.
+    // Missing user folders must stay missing instead of being created by browsing.
+    const requested = normalizePath(pathValue);
+    const managedOutputRoot = requested === 'Tools/ComfyUI/output' || requested === 'User/Outputs';
+    if (!managedOutputRoot || (error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
+    await fs.mkdir(resolve(ROOT_DIR, 'Tools/ComfyUI/output'), { recursive: true });
+    return ensureDirectory(pathValue);
+  }
+}
+
 async function ensureFile(pathValue: string): Promise<string> {
   const resolved = resolveGalleryPath(pathValue);
   if (!resolved) throw new Error('Missing path');
@@ -1476,11 +1490,11 @@ async function buildListProgressivePayload(
 
 async function handleListProgressive(reqUrl: URL, signal?: AbortSignal): Promise<Response> {
   const startedAt = nowMs();
-  const pathValue = reqUrl.searchParams.get('path') || '';
+  const pathValue = reqUrl.searchParams.get('path') || 'Tools/ComfyUI/output';
   try {
     signal?.throwIfAborted();
     const ensureStartedAt = nowMs();
-    const dirPath = await ensureDirectory(pathValue);
+    const dirPath = await ensureListDirectory(pathValue);
     signal?.throwIfAborted();
     const ensureMs = nowMs() - ensureStartedAt;
     registerPrewarmRoot(dirPath);
