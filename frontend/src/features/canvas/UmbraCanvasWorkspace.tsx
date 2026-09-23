@@ -527,6 +527,7 @@ export function UmbraCanvasWorkspace({
     setJob(null);
     setPreviewStageId('');
     setSelectedStageIds(new Set());
+    setConflictStageId('');
     jobBboxesRef.current.clear();
     seenStageIdsRef.current = new Set(stages.map((stage) => stage.id));
   }, []);
@@ -1874,12 +1875,25 @@ export function UmbraCanvasWorkspace({
     mode: 'replace' | 'layer',
     allowConflict = false,
   ) => {
-    const currentSignature = buildUmbraCanvasSnapshotSignature(useUmbraCanvasStore.getState().present);
-    if (!allowConflict && stage.snapshotSignature && currentSignature !== stage.snapshotSignature) {
-      setConflictStageId(stage.id);
-      return;
-    }
+    const acceptanceProjectId = project.id;
+    const canAcceptStage = () => {
+      const current = useUmbraCanvasStore.getState().present;
+      if (current.id !== acceptanceProjectId
+        || !current.generation.staging.some((entry) => entry.id === stage.id && !entry.acceptedEntityId)) {
+        throw new Error('The Canvas project or staged sample changed while accepting. Open the sample and try again.');
+      }
+      if (!allowConflict && stage.snapshotSignature
+        && buildUmbraCanvasSnapshotSignature(current) !== stage.snapshotSignature) {
+        setConflictStageId(stage.id);
+        return false;
+      }
+      return true;
+    };
+    let bitmap: ImageBitmap | null = null;
+    let imageUrl = '';
+    let accepted = false;
     try {
+      if (!canAcceptStage()) return;
       let temporaryMaskUrl = '';
       let blob: Blob;
       if (mode === 'replace') {
@@ -1899,8 +1913,9 @@ export function UmbraCanvasWorkspace({
         if (!response.ok) throw new Error(`The staged sample returned ${response.status}.`);
         blob = await response.blob();
       }
-      const bitmap = await createImageBitmap(blob);
-      const imageUrl = URL.createObjectURL(blob);
+      bitmap = await createImageBitmap(blob);
+      if (!canAcceptStage()) return;
+      imageUrl = URL.createObjectURL(blob);
       const entity = createUmbraCanvasRasterEntity({
         name: mode === 'replace' ? `Generated Region ${stage.seed}` : `Canvas Sample ${stage.seed}`,
         imageUrl,
@@ -1911,16 +1926,21 @@ export function UmbraCanvasWorkspace({
         y: stage.bbox.y,
       });
       acceptStagedGeneration(stage.id, entity);
+      accepted = useUmbraCanvasStore.getState().present.generation.staging
+        .some((entry) => entry.id === stage.id && entry.acceptedEntityId === entity.id);
+      if (!accepted) throw new Error('The staged sample changed before it could be accepted.');
       setPreviewStageId((current) => current === stage.id ? '' : current);
-      bitmap.close();
       window.setTimeout(() => void saveProject(false), 0);
       showToast(mode === 'replace'
         ? 'Generated region accepted non-destructively at its frozen coordinates.'
         : 'Staged sample accepted as a movable layer.', 'success');
     } catch (error) {
+      if (imageUrl && !accepted) URL.revokeObjectURL(imageUrl);
       showToast(error instanceof Error ? error.message : 'The staged sample could not be accepted.', 'error');
+    } finally {
+      bitmap?.close();
     }
-  }, [acceptStagedGeneration, saveProject, showToast]);
+  }, [acceptStagedGeneration, project.id, saveProject, showToast]);
 
   const activeEntity = project.entities.find((entity) => entity.id === project.activeEntityId) || null;
   const controlLayers = project.entities.filter((entity) => entity.kind === 'control');
