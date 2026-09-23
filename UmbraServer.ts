@@ -28167,7 +28167,9 @@ async function handleModelManagerTree(url: URL): Promise<Response> {
     const rawPath = String(url.searchParams.get('path') || MODEL_MANAGER_ROOTS[0].path).trim();
     const resolved = resolveModelManagerPath(rawPath);
     if (!resolved) return json({ error: 'Invalid model path' }, 400);
-    if (!existsSync(resolved.fullPath)) await fs.mkdir(resolved.fullPath, { recursive: true });
+    const folder = await fs.stat(resolved.fullPath).catch(() => null);
+    if (!folder) return json({ error: 'Model folder not found' }, 404);
+    if (!folder.isDirectory()) return json({ error: 'Model path is not a folder' }, 400);
     const payload = await modelIndexWorkerService.tree({
       path: resolved.clientPath,
       fullPath: resolved.fullPath,
@@ -28185,7 +28187,9 @@ async function handleModelManagerList(url: URL): Promise<Response> {
     const rawPath = String(url.searchParams.get('path') || MODEL_MANAGER_ROOTS[0].path).trim();
     const resolved = resolveModelManagerPath(rawPath);
     if (!resolved) return json({ error: 'Invalid model path' }, 400);
-    if (!existsSync(resolved.fullPath)) await fs.mkdir(resolved.fullPath, { recursive: true });
+    const folder = await fs.stat(resolved.fullPath).catch(() => null);
+    if (!folder) return json({ error: 'Model folder not found' }, 404);
+    if (!folder.isDirectory()) return json({ error: 'Model path is not a folder' }, 400);
     if (url.searchParams.get('recursive') === '1') {
       const payload = await listModelManagerSnapshotFilesRecursive(resolved.fullPath);
       return json(payload);
