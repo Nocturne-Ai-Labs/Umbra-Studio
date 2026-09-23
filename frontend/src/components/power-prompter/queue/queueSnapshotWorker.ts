@@ -185,6 +185,7 @@ export function buildQueuePromptsOnWorker(input: {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     cache: 'no-store',
+    signal: AbortSignal.timeout(120_000),
     body: JSON.stringify({
       document: input.document,
       mode: input.mode,
@@ -195,7 +196,12 @@ export function buildQueuePromptsOnWorker(input: {
     if (!response.ok || payload?.success === false) {
       throw new Error(String(payload?.error || 'Failed to build queue prompts.'));
     }
-    return (payload?.result ?? payload) as QueuePromptBuildWorkerResult;
+    const result = payload?.result ?? payload;
+    const fields = ['prompts', 'promptEntries', 'promptSetIds', 'promptOutputSubfolders', 'promptStyleNames', 'promptSeedGroupIds'];
+    if (!result || typeof result !== 'object' || !fields.every((field) => Array.isArray(result[field]))) {
+      throw new Error('The prompt builder returned an invalid response. Try building the queue again.');
+    }
+    return result as QueuePromptBuildWorkerResult;
   });
 }
 
