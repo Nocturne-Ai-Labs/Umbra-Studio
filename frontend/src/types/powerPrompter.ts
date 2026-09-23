@@ -2,6 +2,7 @@ import type { MiniMaxH3Guide } from '../../../shared/umbra-ui/minimaxH3Guides';
 import type { MiniMaxH3TurboControls } from '../../../shared/umbra-ui/minimaxH3Turbo';
 import type { UmbraUiPipelineSelection } from '../../../shared/umbra-ui/pipelineTypes';
 import type { UmbraLtxStoryboardControls } from '../../../shared/umbra-ui/videoStoryboard';
+import type { UmbraVideoLoraEntry } from '../../../shared/umbra-ui/videoLoraStack';
 import type {
   UmbraLtxExtendedControls,
   UmbraLtxExtendedSequenceMetadata,
@@ -177,6 +178,7 @@ export interface PowerPrompterVideoPostprocessControls {
 
 export interface PowerPrompterVideoControls {
   family: PowerPrompterVideoFamily;
+  loraStack?: UmbraVideoLoraEntry[];
   mode: PowerPrompterVideoMode;
   frameGuideMode: PowerPrompterVideoFrameGuideMode;
   sourceImagePath: string;

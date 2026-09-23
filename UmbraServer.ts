@@ -10,6 +10,8 @@ import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
  */
 
 import { applyMiniMaxH3Acceleration, assertMiniMaxH3TurboInstalled, assertMiniMaxH3GuidesInstalled, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
+import { applyUmbraUiVideoLoraStack, assertUmbraUiVideoLoraStackInstalled } from './backend/UmbraUiVideoLoraStack';
+import { normalizeUmbraVideoLoraStack, type UmbraVideoLoraEntry } from './shared/umbra-ui/videoLoraStack';
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { configureGeneratedMediaActivity, recordGeneratedMediaOutputs } from './backend/GeneratedMediaActivity';
 import { createCaptionCategoryFilter } from './backend/DatasetCaptionCategories';
@@ -8040,6 +8042,9 @@ function compileUmbraUiPipelineWorkflow(
   applyPPLtxVideoTopology(promptGraph, videoRoleEntries, generation, activePrompt);
   applyPPVideoSourceAudio(promptGraph, videoRoleEntries, generation);
   applyPPVideoPostProcessing(promptGraph, videoRoleEntries, generation);
+  if (generation.mediaType === 'video' && generation.video) {
+    applyUmbraUiVideoLoraStack(promptGraph, generation.video.family, generation.video.loraStack);
+  }
 
   return {
     promptGraph,
@@ -16704,6 +16709,7 @@ interface PowerPrompterLoraEntry {
 }
 interface PowerPrompterVideoControls {
   family: PowerPrompterVideoFamily;
+  loraStack: UmbraVideoLoraEntry[];
   mode: PowerPrompterVideoMode;
   frameGuideMode: PowerPrompterVideoFrameGuideMode;
   sourceImagePath: string;
@@ -17036,6 +17042,7 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
   },
   video: {
     family: 'wan22',
+    loraStack: [],
     mode: 'text_to_video',
     frameGuideMode: 'first',
     sourceImagePath: '',
@@ -18759,6 +18766,7 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
   });
   return {
     family,
+    loraStack: normalizeUmbraVideoLoraStack(video.loraStack),
     mode: resolvedMode,
     frameGuideMode,
     sourceImagePath: String(video.sourceImagePath || '').trim().replace(/\\/g, '/'),
@@ -22833,6 +22841,9 @@ async function assertPPApiWorkflowExecutionReady(
   }
   if (isMiniMaxH3) assertMiniMaxH3TurboInstalled(generation.video.minimaxH3, validationContext.objectInfo);
   if (isMiniMaxH3) assertMiniMaxH3GuidesInstalled(generation.video.minimaxH3, validationContext.objectInfo);
+  if (generation.mediaType === 'video' && generation.video) {
+    assertUmbraUiVideoLoraStackInstalled(generation.video.family, generation.video.loraStack, validationContext.objectInfo);
+  }
   const catalog = validationContext.catalog;
   if (generation.outputOwner === 'umbra_ui' && generation.outputFolder) {
     await assertUmbraUiPinnedOutputAvailable(

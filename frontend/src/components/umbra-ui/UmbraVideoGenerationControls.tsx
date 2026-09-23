@@ -1,5 +1,6 @@
 'use client';
 import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from '../../../../shared/umbra-ui/minimaxH3Defaults';
+import { normalizeUmbraVideoLoraStack, type UmbraVideoLoraEntry } from '../../../../shared/umbra-ui/videoLoraStack';
 
 import { miniMaxH3GuideIssue, normalizeMiniMaxH3Guides } from '../../../../shared/umbra-ui/minimaxH3Guides';
 import { MINIMAX_H3_TURBO_PRESETS, miniMaxH3TurboIssue, miniMaxH3TurboSamplingPreset, type MiniMaxH3TurboPreset } from '../../../../shared/umbra-ui/minimaxH3Turbo';
@@ -19,6 +20,7 @@ import {
   ImagePlus,
   PanelRight,
   ListPlus,
+  Layers3,
   Loader2,
   Music2,
   Play,
@@ -150,6 +152,7 @@ interface UmbraVideoDeviceResume {
 function createDefaultVideoControls(): PowerPrompterVideoControls {
   return {
     family: 'wan22',
+    loraStack: [],
     mode: 'text_to_video',
     frameGuideMode: 'first',
     sourceImagePath: '',
@@ -807,6 +810,7 @@ export function UmbraVideoGenerationControls({
           const normalizedSavedVideo: PowerPrompterVideoControls = {
             ...defaults,
             ...savedVideo,
+            loraStack: normalizeUmbraVideoLoraStack(savedVideo.loraStack),
             postprocess: { ...defaults.postprocess, ...(savedVideo.postprocess || {}) },
             wan: { ...defaults.wan, ...(savedVideo.wan || {}) },
             minimaxH3: {
@@ -1434,6 +1438,18 @@ export function UmbraVideoGenerationControls({
   const setPostprocess = <K extends keyof PowerPrompterVideoControls['postprocess']>(key: K, value: PowerPrompterVideoControls['postprocess'][K]) => {
     setVideo((current) => ({ ...current, postprocess: { ...current.postprocess, [key]: value } }));
   };
+  const updateVideoLora = (id: string, patch: Partial<UmbraVideoLoraEntry>) => {
+    setVideo((current) => ({
+      ...current,
+      loraStack: (current.loraStack || []).map((entry) => entry.id === id ? { ...entry, ...patch } : entry),
+    }));
+  };
+  const videoLoras = (video.loraStack || []).filter((entry) => entry.family === video.family);
+  const videoLoraIssue = videoLoras.some((entry) => entry.enabled && !entry.name)
+    ? 'Choose a file for each enabled video LoRA, or disable the empty row.'
+    : videoLoras.find((entry) => entry.enabled && entry.name && !catalog.loras.includes(entry.name))
+      ? 'An enabled video LoRA is not installed. Refresh the catalog, select an installed file, or disable the row.'
+      : '';
   const sizing = resolveUmbraVideoSizing({
     width: targetDimensions.targetWidth,
     height: targetDimensions.targetHeight,
@@ -1543,6 +1559,7 @@ export function UmbraVideoGenerationControls({
   const handleQueue = async (requestedPlacement: UmbraQueuePlacement = effectivePlacement) => {
     if (isQueueing) return;
     if (turboIssue) { showToast(turboIssue, 'error'); return; }
+    if (videoLoraIssue) { showToast(videoLoraIssue, 'error'); return; }
     const queuePlacement = queueSummary.powerPrompterActive ? requestedPlacement : 'end';
     if (queuePlacement === 'interrupt' && !window.confirm(
       'Stop the current Power Prompter image and run this Umbra UI video next?',
@@ -2137,6 +2154,40 @@ export function UmbraVideoGenerationControls({
             <input value={video.outputPrefix} onChange={(event) => setCommon('outputPrefix', event.target.value)} className={inputClass} />
           </label>
           </div>
+        </VideoAccordion>
+
+        <VideoAccordion
+          title="Video LoRA Stack"
+          icon={<Layers3 size={12} className="text-cyan-300" />}
+          summary={videoLoraIssue ? 'Needs attention' : `${videoLoras.filter((entry) => entry.enabled && entry.name && entry.strength !== 0).length} active`}
+          accent="cyan"
+        >
+          {videoLoras.map((entry, index) => (
+            <div key={entry.id} className="space-y-2 border-t border-white/10 pt-2 first:border-t-0 first:pt-0">
+              <div className="flex items-center gap-2">
+                <label className="flex min-w-0 flex-1 items-center gap-2 text-[10px] text-zinc-300">
+                  <input type="checkbox" checked={entry.enabled} onChange={(event) => updateVideoLora(entry.id, { enabled: event.target.checked })} />
+                  LoRA {index + 1}
+                </label>
+                <button type="button" title="Remove video LoRA" aria-label={`Remove video LoRA ${index + 1}`} onClick={() => setVideo((current) => ({ ...current, loraStack: (current.loraStack || []).filter((item) => item.id !== entry.id) }))} className="inline-flex h-7 w-7 items-center justify-center border border-white/10 text-zinc-500 hover:text-red-300">
+                  <Trash2 size={12} />
+                </button>
+              </div>
+              <VideoResourceField label={`Video LoRA ${index + 1}`} value={entry.name} values={catalog.loras} kind="lora" onChange={(name) => updateVideoLora(entry.id, { name })} onChoose={setResourcePicker} />
+              <div className="grid grid-cols-2 gap-2">
+                <NumberField label="Model Strength" value={entry.strength} min={-10} max={10} step={0.05} onChange={(strength) => updateVideoLora(entry.id, { strength })} />
+                {video.family === 'wan22' ? <SelectField label="Wan Stage" value={entry.wanStage} values={['both', 'high', 'low']} onChange={(wanStage) => updateVideoLora(entry.id, { wanStage: wanStage as UmbraVideoLoraEntry['wanStage'] })} /> : null}
+              </div>
+            </div>
+          ))}
+          <button type="button" title="Add a model-only LoRA compatible with this video family" disabled={videoLoras.length >= 8} onClick={() => setVideo((current) => ({
+            ...current,
+            loraStack: [...(current.loraStack || []), {
+              id: crypto.randomUUID(), family: current.family, name: '', strength: 1, enabled: true, wanStage: 'both',
+            }],
+          }))} className="inline-flex h-8 items-center gap-1.5 border border-cyan-300/25 px-2.5 text-[10px] text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-40">
+            <Plus size={12} /> Add LoRA
+          </button>
         </VideoAccordion>
 
         <VideoAccordion
