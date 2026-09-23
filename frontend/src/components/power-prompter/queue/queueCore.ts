@@ -328,6 +328,9 @@ export type PowerPrompterQueueSessionState = {
   queuePaused: boolean;
   queueRequestMeta: Map<string, QueueRequestMeta>;
   queueBridgeDispatchedRequestIds: Set<string>;
+  queueAdmissionAttemptedRequestIds: Set<string>;
+  queueAdmissionUncertainRequestIds: Set<string>;
+  queueAdmissionObservedRequestIds: Set<string>;
   restoredPausedQueue: PersistedPausedQueueSnapshot | null;
   completedPromptIndices: Map<string, Set<number>>;
   queuePromptStartedAt: Map<string, number>;
@@ -353,6 +356,9 @@ export const powerPrompterQueueSession: PowerPrompterQueueSessionState = {
   queuePaused: false,
   queueRequestMeta: new Map<string, QueueRequestMeta>(),
   queueBridgeDispatchedRequestIds: new Set<string>(),
+  queueAdmissionAttemptedRequestIds: new Set<string>(),
+  queueAdmissionUncertainRequestIds: new Set<string>(),
+  queueAdmissionObservedRequestIds: new Set<string>(),
   restoredPausedQueue: null,
   completedPromptIndices: new Map<string, Set<number>>(),
   queuePromptStartedAt: new Map<string, number>(),
