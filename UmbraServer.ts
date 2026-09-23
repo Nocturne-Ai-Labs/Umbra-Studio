@@ -4936,6 +4936,14 @@ interface PendingPowerPrompterBatchAdmission {
   cancellation: Promise<void>;
 }
 const pendingPowerPrompterBatchAdmissionTokens = new Map<symbol, PendingPowerPrompterBatchAdmission>();
+interface PendingUmbraUiQueueAdmission {
+  sourceWs: ServerWebSocket<unknown>;
+  requestId: string;
+  canceled: boolean;
+  cancelValidation: () => void;
+  cancellation: Promise<void>;
+}
+const pendingUmbraUiQueueAdmissionTokens = new Map<symbol, PendingUmbraUiQueueAdmission>();
 const recentPowerPrompterBatchOutcomes = new Map<ServerWebSocket<unknown>, Map<string, {
   outcome: 'accepted' | 'rejected' | 'canceled';
   timer: ReturnType<typeof setTimeout>;
@@ -6788,6 +6796,16 @@ function hasPrompterQueueWildcardReferences(prompts: unknown, state: any): boole
   ));
 }
 
+const UMBRA_UI_QUEUE_ADMISSION_CANCELED = Symbol('umbra_ui_queue_admission_canceled');
+async function awaitUmbraUiQueueAdmissionValidation<T>(
+  admission: PendingUmbraUiQueueAdmission, pending: Promise<T>,
+): Promise<T | typeof UMBRA_UI_QUEUE_ADMISSION_CANCELED> {
+  return Promise.race([
+    pending,
+    admission.cancellation.then((): typeof UMBRA_UI_QUEUE_ADMISSION_CANCELED => UMBRA_UI_QUEUE_ADMISSION_CANCELED),
+  ]);
+}
+
 async function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: any) {
   const prompts = sanitizePrompterPromptLines(data?.prompts, { dedupe: false });
   if (prompts.length === 0) {
@@ -6801,51 +6819,57 @@ async function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: an
   }
 
   const requestId = String(data?.requestId || crypto.randomUUID());
-  const wildcards = hasPrompterQueueWildcardReferences(prompts, data?.state)
-    ? await listPowerPrompterWildcards()
-    : [];
-  const resolvedPayload = resolvePrompterQueuePayloadWildcards(prompts, data?.state, wildcards);
-  const resolvedPrompts = resolvedPayload.prompts;
-  data = {
-    ...data,
-    prompts: resolvedPrompts,
-    state: resolvedPayload.state,
-  };
-  const existingPending = prompterPendingQueueRequests.get(requestId);
-  if (existingPending) {
-    existingPending.sourceWs = ws;
-    appendPowerPrompterQueueLog('queue_duplicate_request_ignored', {
-      ...summarizePrompterQueueMessage({
-        ...data,
-        type: 'queue_request',
-        requestId,
-        prompts: resolvedPrompts,
-      }),
-      targetBridgeId: existingPending.targetBridgeId || (existingPending.targetWs ? getPrompterMeta(existingPending.targetWs).bridgeId : '') || '',
-      ageMs: Math.max(0, Date.now() - existingPending.createdAt),
-      reboundSource: true,
-    });
-    sendWs(ws, {
-      type: 'queue_forwarded',
-      requestId,
-      success: true,
-      duplicate: true,
-      targetRole: 'comfy_bridge',
-    });
-    return;
-  }
-
+  const isUmbraUiRequest = normalizePowerPrompterQueueRequestOrigin(
+    data?.queueOrigin ?? data?.state?.queueOrigin,
+  ) === 'umbra_ui';
+  const admissionToken = Symbol('umbra_ui_queue_admission');
+  let cancelValidation = () => {};
+  const cancellation = new Promise<void>((resolve) => { cancelValidation = resolve; });
+  const admission: PendingUmbraUiQueueAdmission | null = isUmbraUiRequest
+    ? { sourceWs: ws, requestId, canceled: false, cancelValidation, cancellation }
+    : null;
+  if (admission) pendingUmbraUiQueueAdmissionTokens.set(admissionToken, admission);
   try {
-    void handlePrompterApiWorkflowQueueRequest(ws, data, requestId, resolvedPrompts).catch((error: any) => {
-      prompterPendingQueueRequests.delete(requestId);
-      sendWs(ws, {
-        type: 'queue_result',
-        requestId,
-        success: false,
-        error: String(error?.message || 'Failed to enqueue generation pipeline request.'),
+    const wildcards = hasPrompterQueueWildcardReferences(prompts, data?.state)
+      ? admission
+        ? await awaitUmbraUiQueueAdmissionValidation(admission, listPowerPrompterWildcards())
+        : await listPowerPrompterWildcards()
+      : [];
+    if (admission?.canceled || wildcards === UMBRA_UI_QUEUE_ADMISSION_CANCELED) return;
+    const resolvedPayload = resolvePrompterQueuePayloadWildcards(prompts, data?.state, wildcards);
+    const resolvedPrompts = resolvedPayload.prompts;
+    data = {
+      ...data,
+      prompts: resolvedPrompts,
+      state: resolvedPayload.state,
+    };
+    const existingPending = prompterPendingQueueRequests.get(requestId);
+    if (existingPending) {
+      existingPending.sourceWs = ws;
+      appendPowerPrompterQueueLog('queue_duplicate_request_ignored', {
+        ...summarizePrompterQueueMessage({
+          ...data,
+          type: 'queue_request',
+          requestId,
+          prompts: resolvedPrompts,
+        }),
+        targetBridgeId: existingPending.targetBridgeId || (existingPending.targetWs ? getPrompterMeta(existingPending.targetWs).bridgeId : '') || '',
+        ageMs: Math.max(0, Date.now() - existingPending.createdAt),
+        reboundSource: true,
       });
-    });
+      sendWs(ws, {
+        type: 'queue_forwarded',
+        requestId,
+        success: true,
+        duplicate: true,
+        targetRole: 'comfy_bridge',
+      });
+      return;
+    }
+
+    await handlePrompterApiWorkflowQueueRequest(ws, data, requestId, resolvedPrompts, admission);
   } catch (error: any) {
+    if (admission?.canceled) return;
     prompterPendingQueueRequests.delete(requestId);
     sendWs(ws, {
       type: 'queue_result',
@@ -6853,6 +6877,8 @@ async function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: an
       success: false,
       error: String(error?.message || 'Failed to enqueue generation pipeline request.'),
     });
+  } finally {
+    if (admission) pendingUmbraUiQueueAdmissionTokens.delete(admissionToken);
   }
 }
 
@@ -11203,12 +11229,23 @@ async function handlePrompterApiWorkflowQueueRequest(
   data: any,
   requestId: string,
   prompts: string[],
+  admission: PendingUmbraUiQueueAdmission | null = null,
 ) {
   let loaded: LoadedPPApiWorkflow;
   try {
-    loaded = await loadRequestedPowerPrompterPipeline(data?.state);
-    await assertPPQueueExecutionReady(loaded, data?.state);
+    const pendingLoad = loadRequestedPowerPrompterPipeline(data?.state);
+    const loadedResult = admission
+      ? await awaitUmbraUiQueueAdmissionValidation(admission, pendingLoad)
+      : await pendingLoad;
+    if (admission?.canceled || loadedResult === UMBRA_UI_QUEUE_ADMISSION_CANCELED) return;
+    loaded = loadedResult;
+    const pendingReady = assertPPQueueExecutionReady(loaded, data?.state);
+    const readyResult = admission
+      ? await awaitUmbraUiQueueAdmissionValidation(admission, pendingReady)
+      : await pendingReady;
+    if (admission?.canceled || readyResult === UMBRA_UI_QUEUE_ADMISSION_CANCELED) return;
   } catch (error: any) {
+    if (admission?.canceled) return;
     prompterPendingQueueRequests.delete(requestId);
     sendWs(ws, {
       type: 'queue_result',
@@ -11245,6 +11282,7 @@ async function handlePrompterApiWorkflowQueueRequest(
     return;
   }
 
+  if (admission?.canceled) return;
   sendWs(ws, {
     type: 'queue_forwarded',
     requestId,
@@ -11326,6 +11364,24 @@ function cancelPendingPowerPrompterBatchesForControl(
   };
 }
 
+function cancelPendingUmbraUiQueueAdmissionsForStopAll(): string[] {
+  const requestIds = new Set<string>();
+  for (const admission of pendingUmbraUiQueueAdmissionTokens.values()) {
+    if (admission.canceled) continue;
+    admission.canceled = true;
+    admission.cancelValidation();
+    sendWs(admission.sourceWs, {
+      type: 'queue_result',
+      requestId: admission.requestId,
+      success: false,
+      canceled: true,
+      error: 'Umbra UI queue request canceled by Stop All.',
+    });
+    requestIds.add(admission.requestId);
+  }
+  return Array.from(requestIds);
+}
+
 function forwardPrompterQueueControlToComfyTarget(
   ws: ServerWebSocket<unknown>,
   data: any,
@@ -11372,7 +11428,11 @@ function forwardPrompterQueueControlToComfyTarget(
     return;
   }
   if (isBackendPipelineTarget && type === 'queue_cancel' && data?.scope === 'umbra_ui_all') {
-    const backendRequestIds = applyBackendPowerPrompterQueueControl(data, type);
+    const pendingRequestIds = cancelPendingUmbraUiQueueAdmissionsForStopAll();
+    const backendRequestIds = Array.from(new Set([
+      ...applyBackendPowerPrompterQueueControl(data, type),
+      ...pendingRequestIds,
+    ]));
     const inpaintJobIds = umbraUiInpaintService.listActiveJobIds();
     const upscaleJobIds = umbraUiUpscaleService.listActiveJobIds();
     void (async () => {
