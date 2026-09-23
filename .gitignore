@@ -50,6 +50,7 @@ dist-webapp/
 
 # Internal test sources stay in the development tree only. Repository-ready
 # source and public releases intentionally omit them.
+/work/
 *.test.*
 /scripts/gallery-operation-audit.ts
 /scripts/gallery-copy-collision-audit.ts

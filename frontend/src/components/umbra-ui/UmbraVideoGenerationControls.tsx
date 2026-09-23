@@ -65,6 +65,7 @@ import {
 import { resolveUmbraUiPipeline } from '@/lib/umbraUiPipelines';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import { prepareVideoControlsForHandoff } from '@/lib/umbraUiVideoHandoffControls';
+import { hasUmbraVideoSourceDimensions, selectUmbraVideoMode, startsUmbraLtxExtendedFromImage } from '@/lib/umbraVideoQueueSource';
 import { readUserConfigWithRetry, writeUserConfig } from '@/lib/userConfig';
 import { advanceUmbraUiSeed, normalizeUmbraUiSeed, resolveUmbraUiQueueSeed } from '@/lib/umbraUiSeed';
 import {
@@ -1299,21 +1300,7 @@ export function UmbraVideoGenerationControls({
       };
     });
   };
-  const setMode = (mode: PowerPrompterVideoMode) => setVideo((current) => ({
-    ...current,
-    mode,
-    ltx: {
-      ...current.ltx,
-      storyboard: {
-        ...current.ltx.storyboard,
-        enabled: false,
-      },
-      extended: {
-        ...current.ltx.extended,
-        enabled: false,
-      },
-    },
-  }));
+  const setMode = (mode: PowerPrompterVideoMode) => setVideo((current) => selectUmbraVideoMode(current, mode));
   const setCommon = <K extends keyof PowerPrompterVideoControls>(key: K, value: PowerPrompterVideoControls[K]) => {
     setVideo((current) => ({ ...current, [key]: value }));
   };
@@ -1372,15 +1359,28 @@ export function UmbraVideoGenerationControls({
     });
   }, []);
   const setExtendedEnabled = React.useCallback((enabled: boolean) => {
+    if (enabled && (video.mode !== 'image_to_video' || !video.sourceImagePath)) setSourcePreviewUrl('');
     setVideo((current) => {
       const clips = current.ltx.extended.clips.length > 0
         ? current.ltx.extended.clips
         : createDefaultUmbraLtxExtendedControls().clips;
+      const startsFromImage = enabled && startsUmbraLtxExtendedFromImage(current);
       return {
         ...current,
         mode: enabled
-          ? current.sourceImagePath ? 'image_to_video' : 'text_to_video'
+          ? startsFromImage ? 'image_to_video' : 'text_to_video'
           : current.mode,
+        ...(enabled ? {
+          frameGuideMode: 'first' as const,
+          sourceImagePath: startsFromImage ? current.sourceImagePath : '',
+          sourceImageName: startsFromImage ? current.sourceImageName : '',
+          sourceWidth: startsFromImage ? current.sourceWidth : 0,
+          sourceHeight: startsFromImage ? current.sourceHeight : 0,
+          middleImagePath: '',
+          middleImageName: '',
+          lastImagePath: '',
+          lastImageName: '',
+        } : {}),
         ltx: {
           ...current.ltx,
           keyframes: enabled ? [] : current.ltx.keyframes,
@@ -1396,7 +1396,7 @@ export function UmbraVideoGenerationControls({
         },
       };
     });
-  }, []);
+  }, [video.mode, video.sourceImagePath]);
   const setExtendedClips = React.useCallback((clips: UmbraLtxExtendedClip[]) => {
     setVideo((current) => ({
       ...current,
@@ -1525,9 +1525,7 @@ export function UmbraVideoGenerationControls({
     }));
   };
 
-  const sourceDimensionsMissing = video.mode !== 'text_to_video'
-    && !extendedOpen
-    && (!video.sourceWidth || !video.sourceHeight);
+  const sourceDimensionsMissing = !hasUmbraVideoSourceDimensions(video);
   const turboIssue = video.family === 'minimax_h3'
     ? miniMaxH3GuideIssue(video.minimaxH3.guides, video.frames, video.mode === 'reference_to_video')
       || miniMaxH3TurboIssue(video.minimaxH3, video.mode === 'reference_to_video')
@@ -1779,7 +1777,7 @@ export function UmbraVideoGenerationControls({
           <VideoAccordion
             title="Extended Starting Frame"
             icon={<ImageIcon size={12} className="text-fuchsia-300" />}
-            summary={video.sourceImagePath ? 'image guided' : 'text only'}
+            summary={startsUmbraLtxExtendedFromImage(video) ? 'image guided' : 'text only'}
             accent="fuchsia"
             defaultOpen={!video.sourceImagePath}
           >

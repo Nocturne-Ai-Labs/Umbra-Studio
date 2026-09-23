@@ -145,6 +145,7 @@ import {
 } from './canvasModel';
 import { composeUmbraCanvasAcceptedReplacementBlob, composeUmbraCanvasDrawableRegionBlob, composeUmbraCanvasGenerationRegion, composeUmbraCanvasMaskBlob, composeUmbraCanvasProjectThumbnail, composeUmbraCanvasRasterBlob, composeUmbraCanvasRasterCropBlob, type UmbraCanvasCompositeResult } from './canvasCompositor';
 import { releaseUmbraCanvasImageResource, UmbraCanvasManager, type UmbraCanvasTool } from './UmbraCanvasManager';
+import { saveUmbraCanvasRequiredRevision } from './canvasProjectSaveGate';
 import { useUmbraCanvasStore } from './useUmbraCanvasStore';
 
 interface UmbraCanvasWorkspaceProps {
@@ -1600,7 +1601,15 @@ export function UmbraCanvasWorkspace({
       };
       setGenerationSettings(settingsSnapshot);
       const projectToSave = useUmbraCanvasStore.getState().present;
-      const saved = await saveProject(false);
+      const saved = await saveUmbraCanvasRequiredRevision(
+        projectToSave,
+        () => saveProject(false),
+        () => {
+          const current = useUmbraCanvasStore.getState().present;
+          return current.id === projectToSave.id && current.revision === projectToSave.revision
+            && !deletingProjectIdsRef.current.has(projectToSave.id);
+        },
+      );
       const currentProject = useUmbraCanvasStore.getState().present;
       if (!saved || saved.id !== projectToSave.id || saved.revision !== projectToSave.revision) {
         throw new Error('The Canvas project could not be saved before generation. Save the project and try again.');
@@ -1763,7 +1772,15 @@ export function UmbraCanvasWorkspace({
       });
       setJob(nextJob);
       const pendingProject = useUmbraCanvasStore.getState().present;
-      const savedPending = await saveProject(false);
+      const savedPending = await saveUmbraCanvasRequiredRevision(
+        pendingProject,
+        () => saveProject(false),
+        () => {
+          const current = useUmbraCanvasStore.getState().present;
+          return current.id === pendingProject.id && !deletingProjectIdsRef.current.has(pendingProject.id)
+            && current.generation.pending.some((entry) => entry.jobId === nextJob.id);
+        },
+      );
       if (!savedPending || savedPending.id !== pendingProject.id || savedPending.revision < pendingProject.revision) {
         showToast('Canvas job queued, but its project recovery pointer was not saved. Retry Save before leaving Canvas.', 'error');
       }
