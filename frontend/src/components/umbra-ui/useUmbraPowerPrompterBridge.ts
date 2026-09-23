@@ -1658,8 +1658,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       outputMode: feature,
       outputFolder: String(options.outputFolder || '').trim().replace(/\\/g, '/'),
       img2img: {
-        sourceImagePath: String(options.sourceImagePath || '').trim().replace(/\\/g, '/'),
-        sourceImageName: String(options.sourceImageName || '').trim().replace(/\\/g, '/'),
+        sourceImagePath: feature === 'img2img'
+          ? String(options.sourceImagePath || '').trim().replace(/\\/g, '/') : '',
+        sourceImageName: feature === 'img2img'
+          ? String(options.sourceImageName || '').trim().replace(/\\/g, '/') : '',
         denoise: toFiniteNumber(options.denoise, 0.3, 0.01, 1),
       },
       negativePrompt: String(options.negativePrompt || '').trim(),

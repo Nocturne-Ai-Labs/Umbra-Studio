@@ -95,12 +95,13 @@ export class MetadataParser {
       const stream = payload.streams?.[0];
       const width = Number(stream?.width);
       const height = Number(stream?.height);
-      if (Number.isFinite(width) && width > 0) result.width = Math.round(width);
-      if (Number.isFinite(height) && height > 0) result.height = Math.round(height);
-
       const tags = payload.format?.tags || {};
       const comment = String(tags.comment ?? tags.COMMENT ?? '').trim();
-      return comment ? { ...result, ...this.parseVideoComment(comment) } : result;
+      const metadata = comment ? { ...result, ...this.parseVideoComment(comment) } : result;
+      // Comments and sidecars can describe an earlier render; the encoded stream owns physical dimensions.
+      if (Number.isFinite(width) && width > 0) metadata.width = Math.round(width);
+      if (Number.isFinite(height) && height > 0) metadata.height = Math.round(height);
+      return metadata;
     } catch (error) {
       if (options.throwOnReadError) throw error;
       return result;

@@ -96,6 +96,7 @@ import { UmbraUiCensorReviewService } from './backend/UmbraUiCensorReviewService
 import { handleCensorReviewRoute } from './backend/routes/censorReviewRoutes';
 import { UmbraUiCanvasWorkspaceProjectService } from './backend/UmbraUiCanvasWorkspaceProjectService';
 import { replaceUmbraUiImageSource } from './backend/UmbraUiSourceReplacementService';
+import { UmbraUiImg2ImgCompletionReceipts } from './backend/UmbraUiImg2ImgCompletionReceipts';
 import {
   concatenateUmbraExtendedVideoClips,
   isUmbraExtendedVideoOutputPath,
@@ -296,6 +297,9 @@ const ROOT_PUBLIC_DIR = join(ROOT_DIR, 'public');
 const SOURCE_PUBLIC_DIR = join(SOURCE_DIR, 'public');
 const PUBLIC_DIR = existsSync(ROOT_PUBLIC_DIR) ? ROOT_PUBLIC_DIR : SOURCE_PUBLIC_DIR;
 const USER_DIR = join(ROOT_DIR, 'User');
+const umbraUiImg2ImgCompletionReceipts = new UmbraUiImg2ImgCompletionReceipts(
+  join(USER_DIR, 'UmbraUI', 'ImageCompletionReceipts'),
+);
 const generatedMediaActivity = configureGeneratedMediaActivity(ROOT_DIR, join(USER_DIR, 'Config', 'generated-media-activity.json'), () => resolvePathCandidate(getDefaultOutputRootPath()));
 const POWER_PROMPTER_RECEIPT_DIR = join(USER_DIR, 'PowerPrompter', 'Receipts');
 const REMOTE_BOOTSTRAP_SETTINGS_PATH = join(USER_DIR, 'Config', 'UmbraRemote', 'settings.json');
@@ -5563,8 +5567,28 @@ function updatePowerPrompterQueueControllerPrompt(
     requestId: item.requestId,
     updatedAt: Date.now(),
   };
+  recordUmbraUiImg2ImgPromptTerminal(request.prompts[index]);
   void upsertUmbraUiVideoReviewPrompt(request, request.prompts[index]);
   broadcastPowerPrompterQueueControllerSnapshot(reason, preferredSourceWs);
+}
+
+function recordUmbraUiImg2ImgPromptTerminal(prompt: PowerPrompterQueueControllerPrompt): void {
+  if (prompt.promptIndex !== 0 || !isPowerPrompterQueueControllerTerminalStatus(prompt.status)) return;
+  try {
+    umbraUiImg2ImgCompletionReceipts.recordTerminal({
+      requestId: prompt.requestId,
+      promptIndex: prompt.promptIndex,
+      status: prompt.status,
+      outputOwner: prompt.generation.outputOwner,
+      outputMode: prompt.generation.outputMode,
+    });
+  } catch (error) {
+    appendPowerPrompterQueueLog('umbra_ui_img2img_completion_receipt_terminal_failed', {
+      requestId: prompt.requestId,
+      status: prompt.status,
+      error: String(error instanceof Error ? error.message : error),
+    });
+  }
 }
 
 function normalizePowerPrompterPromptIndices(value: unknown): number[] {
@@ -6299,6 +6323,7 @@ function finishPowerPrompterQueueControllerRequest(
   request.status = status;
   request.updatedAt = now;
   for (const prompt of request.prompts) {
+    recordUmbraUiImg2ImgPromptTerminal(prompt);
     void upsertUmbraUiVideoReviewPrompt(request, prompt);
   }
   broadcastPowerPrompterQueueControllerSnapshot(reason, preferredSourceWs);
@@ -8930,6 +8955,24 @@ async function emitBackendPowerPrompterSavedOutputs(
   }));
   const primaryPowerPrompterMetadata = stampedOutputs[0]?.umbra_power_prompter || basePowerPrompterMetadata;
   recordGeneratedMediaOutputs(stampedOutputs);
+  if (promptIndex === 0 && generation?.outputOwner === 'umbra_ui' && generation.outputMode === 'img2img') {
+    try {
+      for (const output of stampedOutputs) {
+        if (umbraUiImg2ImgCompletionReceipts.recordSaved({
+          requestId,
+          promptIndex,
+          outputPath: output.fullpath,
+          outputOwner: generation.outputOwner,
+          outputMode: generation.outputMode,
+        })) break;
+      }
+    } catch (error) {
+      appendPowerPrompterQueueLog('umbra_ui_img2img_completion_receipt_save_failed', {
+        requestId,
+        error: String(error instanceof Error ? error.message : error),
+      });
+    }
+  }
   const payload = {
     type: 'queue_saved_outputs',
     requestId,
@@ -32184,6 +32227,9 @@ const server = Bun.serve<UmbraSocketData>({
 
       // Embed metadata and return file (for single-image download export)
       if (path === '/api/export/embed-metadata' && method === 'POST') {
+        if (!isHostRequest(req, url, server)) {
+          return json({ error: 'Reading host file metadata is only available from the host PC.' }, 403);
+        }
         try {
           const formData = await req.formData();
           const file = formData.get('file') as File;
@@ -34550,10 +34596,16 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/comfy/upload-media' && method === 'POST') {
         let tempPath = '';
+        let uploadTooLarge = false;
         try {
           const requestedKind = String(req.headers.get('x-umbra-media-kind') || '').trim().toLowerCase();
           if (requestedKind !== 'image' && requestedKind !== 'video' && requestedKind !== 'audio') {
             return json({ error: 'An image, video, or audio media kind is required.' }, 400);
+          }
+          const maxBytes = requestedKind === 'video' ? 4 * 1024 * 1024 * 1024 : 512 * 1024 * 1024;
+          const contentLength = Number(req.headers.get('content-length'));
+          if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+            return json({ error: `The ${requestedKind} upload exceeds the size limit.` }, 413);
           }
           let originalName = String(req.headers.get('x-umbra-file-name') || '').trim();
           try {
@@ -34583,26 +34635,21 @@ const server = Bun.serve<UmbraSocketData>({
           const handle = await fs.open(tempPath, 'w');
           let totalBytes = 0;
           try {
-            const bodyStream = req.body as any;
-            if (typeof bodyStream.getReader === 'function') {
-              const reader = bodyStream.getReader();
+            const reader = req.body.getReader();
+            try {
               while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
                 if (!value?.byteLength) continue;
+                if (totalBytes + value.byteLength > maxBytes) {
+                  uploadTooLarge = true;
+                  await reader.cancel().catch(() => undefined);
+                  throw new Error(`The ${requestedKind} upload exceeds the size limit.`);
+                }
                 totalBytes += await writeAllUploadedMediaBytes(handle, value);
               }
-            } else if (typeof bodyStream[Symbol.asyncIterator] === 'function') {
-              for await (const value of bodyStream) {
-                const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
-                if (!bytes.byteLength) continue;
-                totalBytes += await writeAllUploadedMediaBytes(handle, bytes);
-              }
-            } else {
-              const bytes = new Uint8Array(await req.arrayBuffer());
-              if (bytes.byteLength) {
-                totalBytes = await writeAllUploadedMediaBytes(handle, bytes);
-              }
+            } finally {
+              reader.releaseLock();
             }
             if (typeof handle.sync === 'function') await handle.sync();
           } finally {
@@ -34623,7 +34670,7 @@ const server = Bun.serve<UmbraSocketData>({
           });
         } catch (error: any) {
           if (tempPath) await fs.rm(tempPath, { force: true }).catch(() => undefined);
-          return json({ error: error?.message || 'Failed to upload media for ComfyUI.' }, 500);
+          return json({ error: error?.message || 'Failed to upload media for ComfyUI.' }, uploadTooLarge ? 413 : 500);
         }
       }
 
@@ -36129,6 +36176,21 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/umbra-ui/image/replace-source' && method === 'POST') {
         return handleUmbraUiReplaceImageSource(req);
+      }
+
+      if (path === '/api/umbra-ui/image/completion-receipt' && method === 'GET') {
+        const receipt = await umbraUiImg2ImgCompletionReceipts.get(
+          url.searchParams.get('requestId'),
+          async (outputPath) => {
+            const allowedPath = await resolveAllowedGalleryPath(outputPath, getGalleryTransferAllowedRoots());
+            if (!allowedPath) return null;
+            const outputStat = await fs.stat(allowedPath).catch(() => null);
+            return outputStat?.isFile() ? allowedPath : null;
+          },
+        );
+        return receipt
+          ? json({ success: true, receipt })
+          : json({ success: false, error: 'IMG2IMG completion receipt not found.' }, 404);
       }
 
       if (path === '/api/umbra-ui/inpaint/models' && method === 'GET') {

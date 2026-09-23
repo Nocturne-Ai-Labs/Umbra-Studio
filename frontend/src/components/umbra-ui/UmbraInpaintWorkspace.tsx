@@ -766,6 +766,21 @@ const CANVAS_PREFERENCES_KEY = 'umbra-ui:canvas-preferences';
 const CANVAS_TOOL_SETTINGS_KEY = 'umbra-ui:canvas-tool-settings';
 const ACTIVE_CANVAS_PROJECT_KEY = 'umbra-ui:active-canvas-project';
 const CANVAS_PROJECT_AUTOSAVE_INTERVAL_MS = 30_000;
+const inpaintProjectSavesInFlight = new Map<string, Set<Promise<UmbraCanvasDocument>>>();
+const inpaintProjectsDeleting = new Set<string>();
+const inpaintProjectsDeleted = new Set<string>();
+
+function trackInpaintProjectSave(projectId: string, request: Promise<UmbraCanvasDocument>) {
+  const requests = inpaintProjectSavesInFlight.get(projectId) || new Set<Promise<UmbraCanvasDocument>>();
+  requests.add(request);
+  inpaintProjectSavesInFlight.set(projectId, requests);
+  const release = () => {
+    requests.delete(request);
+    if (requests.size === 0) inpaintProjectSavesInFlight.delete(projectId);
+  };
+  void request.then(release, release);
+  return request;
+}
 const GALLERY_DRAG_PATHS_MIME = 'application/x-umbra-gallery-paths';
 
 function isSimpleInpaintLayer(layer: UmbraCanvasLayer): boolean {
@@ -2522,6 +2537,7 @@ export function UmbraInpaintWorkspace({
   const latestDocumentRef = React.useRef<UmbraCanvasDocument | null>(null);
   const visualDocumentRef = React.useRef<{ key: string; document: UmbraCanvasDocument | null }>({ key: 'empty', document: null });
   const projectSaveRequestRef = React.useRef(0);
+  const deletingProjectIdRef = React.useRef('');
   const projectAutoSaveTimerRef = React.useRef<number | null>(null);
   const projectAutoSaveSnapshotRef = React.useRef<UmbraCanvasDocument | null>(null);
   const pendingOriginalSourceReplacementRef = React.useRef<{
@@ -3844,6 +3860,14 @@ export function UmbraInpaintWorkspace({
       showToast('Wait for the inpaint job to finish queueing before changing images.', 'error');
       return null;
     }
+    if (deletingProjectIdRef.current) {
+      showToast('Wait for the inpaint project to finish deleting before changing images.', 'error');
+      return null;
+    }
+    if (fullResolutionOperationRef.current || psdExportAbortControllerRef.current) {
+      showToast('Finish or cancel the current canvas operation before changing images.', 'error');
+      return null;
+    }
     const token = ++sourceTransitionRef.current;
     const before = latestDocumentRef.current;
     const isCurrent = () => token === sourceTransitionRef.current
@@ -3938,11 +3962,15 @@ export function UmbraInpaintWorkspace({
   }, []);
 
   const persistProject = React.useCallback(async (documentSnapshot: UmbraCanvasDocument, notify = false) => {
+    if (deletingProjectIdRef.current === documentSnapshot.id
+      || inpaintProjectsDeleting.has(documentSnapshot.id)
+      || inpaintProjectsDeleted.has(documentSnapshot.id)) return null;
     clearScheduledProjectAutoSave();
     const requestId = ++projectSaveRequestRef.current;
     setProjectSaveState('saving');
+    const saveRequest = trackInpaintProjectSave(documentSnapshot.id, saveUmbraCanvasProject(documentSnapshot));
     try {
-      const saved = await saveUmbraCanvasProject(documentSnapshot);
+      const saved = await saveRequest;
       if (requestId !== projectSaveRequestRef.current) return;
       const pendingSnapshot = projectAutoSaveSnapshotRef.current;
       if (pendingSnapshot?.id === documentSnapshot.id && pendingSnapshot.revision <= documentSnapshot.revision) {
@@ -3987,6 +4015,9 @@ export function UmbraInpaintWorkspace({
       clearScheduledProjectAutoSave();
       return;
     }
+    if (deletingProjectIdRef.current === canvasDocument.id
+      || inpaintProjectsDeleting.has(canvasDocument.id)
+      || inpaintProjectsDeleted.has(canvasDocument.id)) return;
     projectAutoSaveSnapshotRef.current = canvasDocument;
     if (projectAutoSaveTimerRef.current !== null) return;
     projectAutoSaveTimerRef.current = window.setTimeout(() => {
@@ -4000,7 +4031,11 @@ export function UmbraInpaintWorkspace({
     clearScheduledProjectAutoSave();
     const pendingSnapshot = projectAutoSaveSnapshotRef.current;
     projectAutoSaveSnapshotRef.current = null;
-    if (pendingSnapshot) void saveUmbraCanvasProject(pendingSnapshot).catch(() => undefined);
+    if (pendingSnapshot && deletingProjectIdRef.current !== pendingSnapshot.id
+      && !inpaintProjectsDeleting.has(pendingSnapshot.id)
+      && !inpaintProjectsDeleted.has(pendingSnapshot.id)) {
+      void trackInpaintProjectSave(pendingSnapshot.id, saveUmbraCanvasProject(pendingSnapshot)).catch(() => undefined);
+    }
   }, [clearScheduledProjectAutoSave]);
 
   React.useEffect(() => {
@@ -4383,29 +4418,70 @@ export function UmbraInpaintWorkspace({
       showToast('Wait for the inpaint job to finish queueing before saving a copy.', 'error');
       return;
     }
+    if (deletingProjectIdRef.current) {
+      showToast('Wait for the inpaint project to finish deleting before saving a copy.', 'error');
+      return;
+    }
+    if (fullResolutionOperationRef.current || psdExportAbortControllerRef.current) {
+      showToast('Finish or cancel the current canvas operation before saving a copy.', 'error');
+      return;
+    }
     const name = saveAsName.trim();
     if (!name) {
       showToast('Enter a name for the new canvas project.', 'error');
       return;
     }
     const fork = forkUmbraCanvasDocument(canvasDocument, name);
+    const sourceTransition = sourceTransitionRef.current;
     setProjectSaveState('saving');
     const saved = await persistProject(fork, true);
-    if (saved) dispatchCanvasHistory({ type: 'history_reset', document: saved });
+    if (saved && sourceTransitionRef.current === sourceTransition
+      && latestDocumentRef.current?.id === canvasDocument.id
+      && latestDocumentRef.current.revision === canvasDocument.revision) {
+      dispatchCanvasHistory({ type: 'history_reset', document: saved });
+    }
   }, [canvasDocument, persistProject, saveAsName, showToast]);
 
   const deleteCurrentProject = React.useCallback(async () => {
     if (!canvasDocument) return;
+    if (deletingProjectIdRef.current || inpaintProjectsDeleting.has(canvasDocument.id)) return;
     if (submissionInFlightRef.current) {
       showToast('Wait for the inpaint job to finish queueing before deleting this project.', 'error');
       return;
     }
+    if (fullResolutionOperationRef.current || psdExportAbortControllerRef.current) {
+      showToast('Finish or cancel the current canvas operation before deleting this project.', 'error');
+      return;
+    }
     if (!window.confirm(`Delete the canvas project "${canvasDocument.name}" and its saved assets?`)) return;
+    const deletingProjectId = canvasDocument.id;
+    const sourceTransition = sourceTransitionRef.current;
+    deletingProjectIdRef.current = deletingProjectId;
+    inpaintProjectsDeleting.add(deletingProjectId);
+    let deleted = false;
     try {
       clearScheduledProjectAutoSave();
       projectAutoSaveSnapshotRef.current = null;
       projectSaveRequestRef.current += 1;
-      await deleteUmbraCanvasProject(canvasDocument.id);
+      await Promise.allSettled([...inpaintProjectSavesInFlight.get(deletingProjectId) || []]);
+      await deleteUmbraCanvasProject(deletingProjectId);
+      deleted = true;
+      inpaintProjectsDeleted.add(deletingProjectId);
+      const pendingSnapshot = projectAutoSaveSnapshotRef.current as UmbraCanvasDocument | null;
+      if (pendingSnapshot?.id === deletingProjectId) {
+        clearScheduledProjectAutoSave();
+        projectAutoSaveSnapshotRef.current = null;
+      }
+      setProjects((current) => current.filter((project) => project.id !== deletingProjectId));
+      try {
+        if (window.localStorage.getItem(ACTIVE_CANVAS_PROJECT_KEY) === deletingProjectId) {
+          window.localStorage.removeItem(ACTIVE_CANVAS_PROJECT_KEY);
+        }
+      } catch { /* best effort */ }
+      if (sourceTransitionRef.current !== sourceTransition || latestDocumentRef.current?.id !== deletingProjectId) {
+        showToast('Canvas project deleted. Your current project remains open.', 'success');
+        return;
+      }
       releaseMaskSnapshotUrls();
       for (const assetUrl of layerAssetObjectUrlsRef.current) URL.revokeObjectURL(assetUrl);
       layerAssetObjectUrlsRef.current.clear();
@@ -4417,17 +4493,18 @@ export function UmbraInpaintWorkspace({
       setAppliedMargins(EMPTY_MARGINS);
       setJob(null);
       dispatchCanvasHistory({ type: 'history_reset' });
-      setProjects((current) => current.filter((project) => project.id !== canvasDocument.id));
-      try {
-        if (window.localStorage.getItem(ACTIVE_CANVAS_PROJECT_KEY) === canvasDocument.id) {
-          window.localStorage.removeItem(ACTIVE_CANVAS_PROJECT_KEY);
-        }
-      } catch { /* best effort */ }
       showToast('Canvas project deleted.', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to delete the canvas project.', 'error');
+    } finally {
+      if (deletingProjectIdRef.current === deletingProjectId) deletingProjectIdRef.current = '';
+      inpaintProjectsDeleting.delete(deletingProjectId);
+      if (!deleted && latestDocumentRef.current?.id === deletingProjectId) {
+        projectAutoSaveSnapshotRef.current = latestDocumentRef.current;
+        void persistProject(latestDocumentRef.current);
+      }
     }
-  }, [canvasDocument, clearScheduledProjectAutoSave, releaseMaskSnapshotUrls, showToast]);
+  }, [canvasDocument, clearScheduledProjectAutoSave, persistProject, releaseMaskSnapshotUrls, showToast]);
 
   React.useEffect(() => () => {
     if (sourceObjectUrlRef.current) URL.revokeObjectURL(sourceObjectUrlRef.current);

@@ -184,6 +184,10 @@ import {
   resolveUmbraUiHiresResizeMode,
 } from '../../../../shared/umbra-ui/pipelineTypes';
 import { UMBRA_UI_EXTRAS_TOOL_EVENT } from '@/lib/umbraUiExtrasNavigation';
+import {
+  readImg2ImgReplacementIntents,
+  writeImg2ImgReplacementIntents,
+} from '@/lib/umbraImg2ImgReplacementIntents';
 
 type UmbraGenerationMode = 'prompter' | 'queue' | 'image' | 'img2img' | 'inpaint' | 'canvas' | 'video' | 'extras';
 
@@ -901,7 +905,12 @@ export function UmbraUIWorkspace() {
   const pendingPowerPrompterHandoffRef = React.useRef<UmbraUiPowerPrompterHandoff | null>(null);
   const [canvasMediaHandoff, setCanvasMediaHandoff] = React.useState<UmbraUiMediaHandoff | null>(null);
   const clearCanvasMediaHandoff = React.useCallback(() => setCanvasMediaHandoff(null), []);
-  const img2imgSourceReplacementRequestsRef = React.useRef(new Map<string, string>());
+  const [initialImg2ImgReplacementIntents] = React.useState(readImg2ImgReplacementIntents);
+  const img2imgSourceReplacementRequestsRef = React.useRef(initialImg2ImgReplacementIntents);
+  const [img2imgReplacementIntentRevision, setImg2imgReplacementIntentRevision] = React.useState(0);
+  React.useEffect(() => {
+    writeImg2ImgReplacementIntents(img2imgSourceReplacementRequestsRef.current);
+  }, []);
   const appliedImagePipelineDefaultsRef = React.useRef('');
   const imagePipelineDefaultsInitializedRef = React.useRef(
     hasUmbraUiImageControls(initialDeviceResume),
@@ -2299,8 +2308,8 @@ export function UmbraUIWorkspace() {
         batchSize,
         outputMode: activeImageFeature,
         outputFolder: activeImageFeature === 'txt2img' ? activeTxt2imgOutputFolder : img2imgOutputFolder,
-        sourceImagePath: img2imgSource.path,
-        sourceImageName: img2imgSource.name,
+        sourceImagePath: activeImageFeature === 'img2img' ? img2imgSource.path : '',
+        sourceImageName: activeImageFeature === 'img2img' ? img2imgSource.name : '',
         denoise: img2imgDenoise,
         hiresFix: {
           enabled: imageCapabilities.hiresFix.support === 'adjustable' && !!effectiveHiresResizeMode && hiresEnabled,
@@ -2354,7 +2363,15 @@ export function UmbraUIWorkspace() {
       if (activeImageFeature === 'img2img' && replaceImg2ImgSourceOnComplete && requestId
         && img2imgSource.imageUrl.startsWith('/api/fs/image?')) {
         const originalPath = String(img2imgSource.originalPath || '').trim();
-        if (originalPath) img2imgSourceReplacementRequestsRef.current.set(requestId, originalPath);
+        if (originalPath) {
+          img2imgSourceReplacementRequestsRef.current.set(requestId, { originalPath, queuedAt: Date.now() });
+          if (!writeImg2ImgReplacementIntents(img2imgSourceReplacementRequestsRef.current)) {
+            img2imgSourceReplacementRequestsRef.current.delete(requestId);
+            showToast('Replace original could not be saved. This job will finish without replacing the original.', 'error');
+          } else {
+            setImg2imgReplacementIntentRevision((current) => current + 1);
+          }
+        }
       }
       if (seedIsAdjustable && imageSeedContextRef.current.revision === submittedSeedRevision) {
         setSeed((current) => current === seed
@@ -2439,62 +2456,98 @@ export function UmbraUIWorkspace() {
     }
   }, [handleQueueImage]);
 
-  React.useEffect(() => {
-    if (!latestSavedImage?.requestId) return;
-    const originalPath = img2imgSourceReplacementRequestsRef.current.get(latestSavedImage.requestId);
-    if (!originalPath) return;
-    img2imgSourceReplacementRequestsRef.current.delete(latestSavedImage.requestId);
+  const replaceQueuedImg2ImgSource = React.useCallback(async (requestId: string, resultPath: string) => {
+    const intent = img2imgSourceReplacementRequestsRef.current.get(requestId);
+    if (!intent || !resultPath) return;
+    // Claim before the destructive request so a reload cannot replay it.
+    img2imgSourceReplacementRequestsRef.current.delete(requestId);
+    if (!writeImg2ImgReplacementIntents(img2imgSourceReplacementRequestsRef.current)) {
+      img2imgSourceReplacementRequestsRef.current.set(requestId, intent);
+      showToast('Could not safely clear the IMG2IMG replacement intent. The original file was not changed.', 'error');
+      return;
+    }
+    const originalPath = intent.originalPath;
+    try {
+      const response = await fetch('/api/umbra-ui/image/replace-source', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ originalPath, resultPath }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.success === false) {
+        throw new Error(String(payload?.error || 'Failed to replace the original image.'));
+      }
+      const replacedPath = String(payload?.path || originalPath).trim() || originalPath;
+      const revision = String(payload?.revision || Date.now()).trim();
+      const replacedFolderPath = replacedPath.replace(/[\\/][^\\/]+$/, '');
+      setImg2imgSource((current) => {
+        const currentPath = String(current.originalPath || current.path || '').replace(/\\/g, '/');
+        if (currentPath !== originalPath.replace(/\\/g, '/')) return current;
+        return {
+          path: replacedPath,
+          originalPath: replacedPath,
+          name: '',
+          imageUrl: `/api/fs/image?${new URLSearchParams({ path: replacedPath, rev: revision }).toString()}`,
+          width: 0,
+          height: 0,
+        };
+      });
+      window.dispatchEvent(new CustomEvent('umbra:gallery-content-changed', {
+        detail: {
+          path: replacedPath,
+          mediaPath: replacedPath,
+          folderPath: replacedFolderPath,
+          reason: 'replace-source',
+          source: 'umbra-ui',
+          revision,
+          modifiedMs: Number(payload?.modifiedMs || Date.now()),
+          size: Number(payload?.size || 0),
+        },
+      }));
+      window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to replace the original image.', 'error');
+    }
+  }, [showToast]);
 
-    let canceled = false;
-    void (async () => {
-      try {
-        const response = await fetch('/api/umbra-ui/image/replace-source', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            originalPath,
-            resultPath: latestSavedImage.path,
-          }),
-        });
+  React.useEffect(() => {
+    if (!queueConnected || img2imgSourceReplacementRequestsRef.current.size <= 0) return;
+    const controller = new AbortController();
+    const requestIds = [...img2imgSourceReplacementRequestsRef.current.keys()];
+    for (const requestId of requestIds) {
+      void fetch(`/api/umbra-ui/image/completion-receipt?${new URLSearchParams({ requestId }).toString()}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      }).then(async (response) => {
+        if (response.status === 404) return null;
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || payload?.success === false) {
-          throw new Error(String(payload?.error || 'Failed to replace the original image.'));
+          throw new Error(String(payload?.error || 'Failed to load the IMG2IMG completion receipt.'));
         }
-        if (canceled) return;
-        const replacedPath = String(payload?.path || originalPath).trim() || originalPath;
-        const revision = String(payload?.revision || Date.now()).trim();
-        const replacedFolderPath = replacedPath.replace(/[\\/][^\\/]+$/, '');
-        setImg2imgSource((current) => {
-          const currentPath = String(current.originalPath || current.path || '').replace(/\\/g, '/');
-          if (currentPath !== originalPath.replace(/\\/g, '/')) return current;
-          return {
-            path: replacedPath,
-            originalPath: replacedPath,
-            name: '',
-            imageUrl: `/api/fs/image?${new URLSearchParams({ path: replacedPath, rev: revision }).toString()}`,
-            width: 0,
-            height: 0,
-          };
-        });
-        window.dispatchEvent(new CustomEvent('umbra:gallery-content-changed', {
-          detail: {
-            path: replacedPath,
-            mediaPath: replacedPath,
-            folderPath: replacedFolderPath,
-            reason: 'replace-source',
-            source: 'umbra-ui',
-            revision,
-            modifiedMs: Number(payload?.modifiedMs || Date.now()),
-            size: Number(payload?.size || 0),
-          },
-        }));
-        window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
-      } catch (error) {
-        if (!canceled) showToast(error instanceof Error ? error.message : 'Failed to replace the original image.', 'error');
-      }
-    })();
-    return () => { canceled = true; };
-  }, [latestSavedImage, showToast]);
+        return payload?.receipt && typeof payload.receipt === 'object'
+          ? payload.receipt as Record<string, unknown> : null;
+      }).then((receipt) => {
+        if (controller.signal.aborted || !receipt || String(receipt.requestId || '').trim() !== requestId
+          || Number(receipt.promptIndex) !== 0) return;
+        const status = String(receipt.status || '').trim();
+        if (status === 'completed') {
+          const resultPath = String(receipt.outputPath || '').trim();
+          if (resultPath) void replaceQueuedImg2ImgSource(requestId, resultPath);
+          else {
+            img2imgSourceReplacementRequestsRef.current.delete(requestId);
+            writeImg2ImgReplacementIntents(img2imgSourceReplacementRequestsRef.current);
+            showToast('The IMG2IMG job finished without a saved image to replace the original.', 'error');
+          }
+        } else if (status === 'failed' || status === 'canceled' || status === 'interrupted') {
+          img2imgSourceReplacementRequestsRef.current.delete(requestId);
+          writeImg2ImgReplacementIntents(img2imgSourceReplacementRequestsRef.current);
+        }
+      }).catch((error) => {
+        if (!controller.signal.aborted) console.warn('[Umbra UI] Failed to recover IMG2IMG replacement intent:', error);
+      });
+    }
+    return () => controller.abort();
+  }, [queueConnected, img2imgReplacementIntentRevision, latestSavedImage, queueSummary.completed, queueSummary.failed, queueSummary.canceled, replaceQueuedImg2ImgSource, showToast]);
 
   const previewProgress = generationPreview?.maxStep
     ? Math.max(0, Math.min(1, generationPreview.step / generationPreview.maxStep))
@@ -2538,8 +2591,8 @@ export function UmbraUIWorkspace() {
             modelFamily,
             outputMode: activeImageFeature,
             img2img: {
-              sourceImagePath: img2imgSource.path,
-              sourceImageName: img2imgSource.name,
+              sourceImagePath: activeImageFeature === 'img2img' ? img2imgSource.path : '',
+              sourceImageName: activeImageFeature === 'img2img' ? img2imgSource.name : '',
               denoise: img2imgDenoise,
             },
             workflowResources: workflowResourceValues,
