@@ -21259,13 +21259,27 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
     const seenPaths = new Set<string>();
     const stagedPaths: string[] = [];
     const uploadRoot = resolve(UMBRA_UI_UPSCALE_UPLOAD_ROOT);
-    const addPathSource = (fullPathInput: string, displayName = '', temporary = false, clientSourceId = '') => {
-      const fullPath = resolve(fullPathInput);
-      const uploadRelative = relative(uploadRoot, fullPath);
-      const isStagedUpload = !!uploadRelative && !uploadRelative.startsWith('..') && !isAbsolute(uploadRelative);
-      if (temporary ? !isStagedUpload : (!allowCustomOutputFolder && !isPathInsideAllowedRoots(fullPath))) {
+    const authorizeSourcePath = allowCustomOutputFolder
+      ? null
+      : await createGalleryPathAuthorizer(getGalleryTransferAllowedRoots());
+    const addPathSource = async (fullPathInput: string, displayName = '', temporary = false, clientSourceId = '') => {
+      let fullPath = resolve(fullPathInput);
+      const requestedRelative = relative(uploadRoot, fullPath);
+      const requestedStaged = !!requestedRelative && !requestedRelative.startsWith('..') && !isAbsolute(requestedRelative);
+      if (temporary && !requestedStaged) {
         throw new Error(`Upscale source is outside Umbra's allowed folders: ${fullPathInput}`);
       }
+      if (!temporary) {
+        if (authorizeSourcePath) {
+          const authorized = await authorizeSourcePath(fullPath);
+          if (!authorized) throw new Error(`Upscale source is outside Umbra's allowed folders: ${fullPathInput}`);
+          fullPath = authorized;
+        } else {
+          fullPath = await fs.realpath(fullPath);
+        }
+      }
+      const uploadRelative = relative(uploadRoot, fullPath);
+      const isStagedUpload = !!uploadRelative && !uploadRelative.startsWith('..') && !isAbsolute(uploadRelative);
       if (!existsSync(fullPath) || !statSync(fullPath).isFile()) {
         throw new Error(`Upscale source was not found: ${fullPathInput}`);
       }
@@ -21296,28 +21310,29 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
       if (!resolved) {
         throw new Error(`Upscale source is outside Umbra's allowed folders: ${rawPath}`);
       }
-      addPathSource(resolved.fullPath, '', false, String(sourceIds[rawPath] || '').slice(0, 200));
+      await addPathSource(resolved.fullPath, '', false, String(sourceIds[rawPath] || '').slice(0, 200));
     }
     for (const rawFolder of folders) {
       const resolved = resolvePath(rawFolder, { allowOutsideRoot: true });
-      if (!resolved || (!allowCustomOutputFolder && !isPathInsideAllowedRoots(resolved.fullPath))) {
+      const folderPath = resolved && authorizeSourcePath ? await authorizeSourcePath(resolved.fullPath) : resolved?.fullPath;
+      if (!folderPath) {
         throw new Error(`Upscale folder is outside Umbra's allowed folders: ${rawFolder}`);
       }
-      if (!existsSync(resolved.fullPath) || !statSync(resolved.fullPath).isDirectory()) {
+      if (!existsSync(folderPath) || !statSync(folderPath).isDirectory()) {
         throw new Error(`Upscale folder was not found: ${rawFolder}`);
       }
       const folderFiles = await collectUmbraUiUpscaleFolderFiles(
-        resolved.fullPath,
+        folderPath,
         Math.max(0, UMBRA_UI_UPSCALE_MAX_ITEMS - sources.length),
       );
-      for (const folderFile of folderFiles) addPathSource(folderFile);
+      for (const folderFile of folderFiles) await addPathSource(folderFile);
     }
     for (const entry of staged) {
       const stagedPath = isAbsolute(entry.path)
         ? entry.path
         : resolvePath(entry.path, { allowOutsideRoot: true })?.fullPath || '';
       if (!stagedPath) throw new Error(`Staged upscale source was not found: ${entry.path}`);
-      addPathSource(stagedPath, entry.name, true, entry.clientSourceId);
+      await addPathSource(stagedPath, entry.name, true, entry.clientSourceId);
     }
     for (const file of files) {
       if (!UMBRA_UI_UPSCALE_IMAGE_EXTENSIONS.has(extname(file.name).toLowerCase())) {
