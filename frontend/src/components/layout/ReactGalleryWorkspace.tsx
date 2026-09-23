@@ -8303,13 +8303,17 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     };
     const onRequestFeed = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
-      const folderPath = normalizePath(detail.folderPath || detail.path || currentFolder);
       const manualRefresh = detail.source === 'filmstrip-manual-refresh';
-      if (folderPath && (folderPath !== currentFolder || manualRefresh)) {
-        void loadFolder({ folder: folderPath, keepSelection: true, forceRefresh: manualRefresh });
-      } else {
-        emitFilmstripFeed(currentFolder, files);
+      if (!currentFolder || folderLoadAbortRef.current) return;
+      // A feed request observes Gallery's active folder. Folder navigation uses
+      // gallery-open-path, so a stale filmstrip path must not redirect Gallery.
+      const requestedFolder = normalizePath(detail.folderPath || detail.path || '');
+      if (requestedFolder && !pathsEqual(requestedFolder, currentFolder)) emitFolderChanged(currentFolder);
+      if (manualRefresh) {
+        void loadFolder({ folder: currentFolder, keepSelection: true, forceRefresh: true });
+        return;
       }
+      emitFilmstripFeed(currentFolder, files);
     };
     const onSetSelection = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
@@ -8526,7 +8530,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       window.removeEventListener('umbra:gallery-trash-updated', onTrashUpdated as EventListener);
       window.removeEventListener('umbra:gallery-content-changed', onContentChanged as EventListener);
     };
-  }, [addOpenedFolder, clearPageCacheForFolder, clearTrashCache, currentFolder, emitFilmstripFeed, emitSelectionChanged, files, getSelectionOrderedFiles, invalidateChangedTreeBranches, invalidateTreeChildrenCache, liveGenerationPreviewFile, loadFolder, loadTreeChildren, rememberRestoredHighlights, sortBy, sortOrder, trashMode, updateViewerSessionFiles, upsertDirectSavedOutputs, viewerFileFallback]);
+  }, [addOpenedFolder, clearPageCacheForFolder, clearTrashCache, currentFolder, emitFilmstripFeed, emitFolderChanged, emitSelectionChanged, files, getSelectionOrderedFiles, invalidateChangedTreeBranches, invalidateTreeChildrenCache, liveGenerationPreviewFile, loadFolder, loadTreeChildren, rememberRestoredHighlights, sortBy, sortOrder, trashMode, updateViewerSessionFiles, upsertDirectSavedOutputs, viewerFileFallback]);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('umbra:gallery-sort-changed', {
