@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 
@@ -10,7 +11,14 @@ export interface PersistedPowerPrompterDocumentSession<TDocument = unknown> {
   updatedAt: number;
   dirty?: true;
   document?: TDocument;
+  documentChecksum?: string;
   storageToken?: string;
+}
+
+function checksumPowerPrompterDocument(document: unknown): string {
+  const serialized = JSON.stringify(document);
+  if (typeof serialized !== 'string') throw new Error('Invalid Power Prompter recovery document.');
+  return createHash('sha256').update(serialized).digest('hex');
 }
 
 interface PowerPrompterSessionRecordSource<TDocument> {
@@ -37,7 +45,24 @@ export function buildPowerPrompterSessionRecord<TDocument>(
   if (!session.file || !session.document || !storageToken) {
     throw new Error('A dirty Power Prompter session needs a saved card and a storage token.');
   }
-  return { ...summary, dirty: true, document: session.document, storageToken };
+  return {
+    ...summary,
+    dirty: true,
+    document: session.document,
+    documentChecksum: checksumPowerPrompterDocument(session.document),
+    storageToken,
+  };
+}
+
+/** Publish a live dirty session only after its recovery record is durable. */
+export async function commitPowerPrompterDirtySession<TSession>(
+  session: TSession,
+  storageToken: string,
+  persist: (session: TSession, storageToken: string) => Promise<void>,
+  commit: (session: TSession, storageToken: string) => void,
+): Promise<void> {
+  await persist(session, storageToken);
+  commit(session, storageToken);
 }
 
 export function parsePowerPrompterSessionRecord(raw: unknown): PersistedPowerPrompterDocumentSession | null {
@@ -59,13 +84,31 @@ export function parsePowerPrompterSessionRecord(raw: unknown): PersistedPowerPro
     updatedAt,
   };
   if (value.dirty !== undefined && value.dirty !== false && value.dirty !== true) return null;
-  if (value.dirty !== true) return summary;
+  if (value.dirty !== true) {
+    if ('document' in value || 'documentChecksum' in value || 'storageToken' in value) return null;
+    return summary;
+  }
   const document = value.document;
+  const cards = document && typeof document === 'object' && !Array.isArray(document)
+    ? (document as Record<string, unknown>).cards
+    : null;
   if (!file || !document || typeof document !== 'object' || Array.isArray(document)
     || (document as Record<string, unknown>).file !== file
-    || !Array.isArray((document as Record<string, unknown>).cards)
+    || !Array.isArray(cards) || cards.length === 0
+    || !cards.every((card) => card && typeof card === 'object' && !Array.isArray(card)
+      && typeof card.id === 'string' && card.id.trim().length > 0
+      && ['character', 'location', 'expression', 'action', 'style', 'custom'].includes(card.type)
+      && typeof card.text === 'string')
+    || ('documentChecksum' in value && (typeof value.documentChecksum !== 'string'
+      || value.documentChecksum !== checksumPowerPrompterDocument(document)))
     || typeof value.storageToken !== 'string' || !value.storageToken) return null;
-  return { ...summary, dirty: true, document, storageToken: value.storageToken };
+  return {
+    ...summary,
+    dirty: true,
+    document,
+    ...(typeof value.documentChecksum === 'string' ? { documentChecksum: value.documentChecksum } : {}),
+    storageToken: value.storageToken,
+  };
 }
 
 export function getRestorablePowerPrompterDraft(
