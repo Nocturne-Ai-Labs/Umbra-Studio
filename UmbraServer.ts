@@ -29897,11 +29897,16 @@ async function handleFsUpload(req: Request): Promise<Response> {
       return json({ error: 'Upload destination is outside allowed roots' }, 403);
     }
 
+    const uploadRoots = [
+      getDefaultOutputRootPath(),
+      COMFY_OUTPUT_ROOT,
+      LEGACY_OUTPUT_ROOT,
+      join(USER_DIR, 'Temp', 'ImageInspector'),
+      ...getConfiguredExternalRoots(),
+    ].map(resolvePathCandidate);
     let uploadDirectory: string;
     try {
-      uploadDirectory = await prepareGalleryUploadDirectory(resolved.fullPath, [
-        ROOT_DIR, getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate),
-      ]);
+      uploadDirectory = await prepareGalleryUploadDirectory(resolved.fullPath, uploadRoots);
     } catch (error: any) {
       return json({ error: error?.message || 'Upload destination is unavailable' }, 400);
     }
