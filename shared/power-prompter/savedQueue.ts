@@ -18,7 +18,7 @@ export function getSavedQueueAvailability(state: SaveableQueueState): SavedQueue
   for (const request of state.requests) {
     for (const prompt of request.prompts) {
       if (request.origin === 'power_prompter' && prompt.status === 'pending') remaining++;
-      if (prompt.status === 'running' || prompt.status === 'submitting') running = true;
+      if (request.origin === 'power_prompter' && (prompt.status === 'running' || prompt.status === 'submitting')) running = true;
     }
   }
   const reason = !state.paused ? 'Pause Power Prompter before saving.'
