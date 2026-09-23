@@ -37,6 +37,11 @@ function canonicalCandidateSync(path: string): string {
   }
 }
 
+function isInsidePhysicalRoot(root: string, candidate: string): boolean {
+  const rel = relative(root, candidate);
+  return !rel || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`));
+}
+
 // Canonicalize configured roots as well as the candidate so explicitly linked
 // roots remain authorized while links escaping those roots do not.
 export async function createGalleryPathAuthorizer(allowedRoots: string[]) {
@@ -46,15 +51,20 @@ export async function createGalleryPathAuthorizer(allowedRoots: string[]) {
     const candidate = await canonicalCandidate(path).catch(() => null);
     if (!candidate) return null;
     for (const physicalRoot of physicalRoots) {
-      const rel = relative(physicalRoot, candidate);
-      if (!rel || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))) return candidate;
+      if (isInsidePhysicalRoot(physicalRoot, candidate)) return candidate;
     }
     return null;
   };
 }
 
 export async function resolveAllowedGalleryPath(path: string, allowedRoots: string[]): Promise<string | null> {
-  return (await createGalleryPathAuthorizer(allowedRoots))(path);
+  const candidate = await canonicalCandidate(path).catch(() => null);
+  if (!candidate) return null;
+  for (const root of allowedRoots) {
+    const physicalRoot = await canonicalCandidate(root).catch(() => null);
+    if (physicalRoot && isInsidePhysicalRoot(physicalRoot, candidate)) return candidate;
+  }
+  return null;
 }
 
 export function resolveAllowedExistingGalleryPath(path: string, allowedRoots: string[]): string | null {
@@ -65,8 +75,7 @@ export function resolveAllowedExistingGalleryPath(path: string, allowedRoots: st
     let physicalRoot: string;
     try { physicalRoot = canonicalCandidateSync(root); }
     catch { continue; }
-    const rel = relative(physicalRoot, candidate);
-    if (!rel || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))) return candidate;
+    if (isInsidePhysicalRoot(physicalRoot, candidate)) return candidate;
   }
   return null;
 }
