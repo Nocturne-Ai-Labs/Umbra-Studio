@@ -43,6 +43,7 @@ export const LocalServersSidebarSection = React.memo(({
   const [apps, setApps] = useState<LocalServerApp[]>([]);
   const appsLoadControllerRef = useRef<AbortController | null>(null);
   const [health, setHealth] = useState<Record<string, LocalServerHealth>>({});
+  const remoteClient = isUmbraRemoteClient();
 
   const selectedId = selectedLocalServerAppId || null;
 
@@ -129,7 +130,7 @@ export const LocalServersSidebarSection = React.memo(({
       >
         <Globe2 size={14} />
         <span>{t('nav.localServers')}</span>
-        <Plus size={12} className="ml-auto text-zinc-500" />
+        {!remoteClient && <Plus size={12} className="ml-auto text-zinc-500" />}
       </button>
 
       {sortedApps.map((app) => {
@@ -158,7 +159,7 @@ export const LocalServersSidebarSection = React.memo(({
             >
               <ExternalLink size={12} />
             </button>
-            {app.folderPath ? (
+            {app.folderPath && !remoteClient ? (
               <button
                 type="button"
                 onClick={(event) => handleOpenFolder(event, app)}

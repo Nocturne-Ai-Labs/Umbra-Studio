@@ -18,6 +18,7 @@ import { createCaptionCategoryFilter } from './backend/DatasetCaptionCategories'
 import { createReadStream, createWriteStream, existsSync, statSync, realpathSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, openSync, closeSync, renameSync, rmSync, type Dirent, type Stats, type BigIntStats } from 'fs';
 import * as fs from 'fs/promises';
 import { Readable } from 'node:stream';
+import { createInterface as createReadlineInterface } from 'node:readline';
 import { LoraPresetWriteError, writeLoraPresetLibrary } from './backend/UmbraLoraPresetStore';
 import * as os from 'os';
 import { cancelComfyJobById, controlUmbraControllerJob } from './backend/UmbraQueueJobControl';
@@ -28,6 +29,7 @@ import { promisify } from 'util';
 import { AsyncLocalStorage } from 'async_hooks';
 import { pathToFileURL } from 'url';
 import { createConnection } from 'net';
+import { lookup as lookupHostname } from 'node:dns/promises';
 import { ServerWebSocket } from 'bun';
 import { QueueUploadReceiver } from './shared/power-prompter/queueTransport';
 import { classifyUmbraPrompt } from './shared/nsfwPrivacyClassifier';
@@ -54,6 +56,8 @@ import { createGalleryPathAuthorizer, resolveAllowedExistingGalleryPath, resolve
 import { buildGalleryDownloadArchive, prepareGalleryDownloadResponse, getPreparedGalleryDownload, type GalleryDownloadEntry } from './backend/GalleryDownloadArchiveService';
 import { copyFileExclusive, moveTreeExclusive } from './backend/FsTransferCopy';
 import { AnimaModelMergeService } from './backend/AnimaModelMergeService';
+import { probeAIToolkit } from './backend/AIToolkitProbe';
+import { getAIToolkitDatasetsHandoff } from './backend/AIToolkitDatasetsHandoff';
 import {
   buildBooruMediaRequestHeaders,
   readApiKeys,
@@ -187,7 +191,9 @@ import { ModelIndexWorkerService, type ModelRootDescriptor } from './backend/Mod
 import { ModelDownloadWorkerService } from './backend/ModelDownloadWorkerService';
 import { ModelManagerStateDb } from './backend/ModelManagerStateDb';
 import { createDatasetArchive } from './backend/DatasetArchiveService';
-import { decodeDatasetImportDataUrl, fetchDatasetImportImage } from './backend/DatasetImportUrlService';
+import { decodeDatasetImportDataUrl, detectDatasetImportImage, fetchDatasetImportImage } from './backend/DatasetImportUrlService';
+import { moveDatasetImages } from './backend/DatasetImageMoveService';
+import { saveDatasetImportedImage } from './backend/DatasetImageStore';
 import { getGalleryArchiveJob, listGalleryArchives, queueGalleryArchive } from './backend/GalleryArchiveService';
 import { FirstRunService } from './backend/FirstRunService';
 import { UMBRA_MIGRATION_EXIT_CODE } from './shared/onboarding/firstRun';
@@ -729,6 +735,25 @@ type DanbooruDatasetGeneratorJob = {
 };
 
 const danbooruDatasetGeneratorJobs = new Map<string, DanbooruDatasetGeneratorJob>();
+const pendingDatasetGeneratorOutputs = new Set<string>();
+const DATASET_GENERATOR_LOG_LIMIT = 64 * 1024;
+const DATASET_GENERATOR_PREVIEW_LIMIT = 64 * 1024;
+const DATASET_GENERATOR_ACTIVE_JOB_LIMIT = 8;
+
+function appendDatasetGeneratorLog(previous: string, chunk: string): string {
+  return (previous + chunk).slice(-DATASET_GENERATOR_LOG_LIMIT);
+}
+
+function pruneDanbooruDatasetGeneratorJobs() {
+  const finished = [...danbooruDatasetGeneratorJobs.values()]
+    .filter(job => !job.running)
+    .sort((left, right) => (right.finishedAt || 0) - (left.finishedAt || 0));
+  for (const job of finished.slice(100)) danbooruDatasetGeneratorJobs.delete(job.id);
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const job of finished) {
+    if ((job.finishedAt || 0) < cutoff) danbooruDatasetGeneratorJobs.delete(job.id);
+  }
+}
 
 function buildDanbooruDatasetGeneratorCommand(body: Record<string, unknown>) {
   const mode = String(body.mode || 'character-attributes');
@@ -805,21 +830,60 @@ function buildDanbooruDatasetGeneratorCommand(body: Record<string, unknown>) {
 
 async function updateDanbooruDatasetGeneratorPreview(job: DanbooruDatasetGeneratorJob) {
   if (!existsSync(job.outFile)) return;
-  job.preview = (await fs.readFile(job.outFile, 'utf8').catch(() => '')).split(/\r?\n/).slice(0, 80).join('\n');
+  const handle = await fs.open(job.outFile, 'r').catch(() => null);
+  if (!handle) return;
+  try {
+    const buffer = Buffer.alloc(DATASET_GENERATOR_PREVIEW_LIMIT);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    job.preview = buffer.subarray(0, bytesRead).toString('utf8').split(/\r?\n/).slice(0, 80).join('\n');
+  } finally {
+    await handle.close();
+  }
 }
 
 async function applyAnimaArtistTokenTransform(outFile: string) {
-  const source = await fs.readFile(outFile, 'utf8');
-  const lines = source.split(/\r?\n/);
-  const transformed = lines.map((line, index) => {
-    if (index === 0 || !line.trim()) return line;
-    const firstComma = line.indexOf(',');
-    const rawTag = firstComma >= 0 ? line.slice(0, firstComma) : line;
-    const rest = firstComma >= 0 ? line.slice(firstComma) : '';
-    const token = `@${rawTag.replace(/^"|"$/g, '').replace(/["\s_]+/g, '')}`;
-    return `${token}${rest}`;
-  }).join('\n');
-  await fs.writeFile(outFile, transformed, 'utf8');
+  const sourceHandle = await fs.open(outFile, 'r');
+  let trailingNewline = false;
+  try {
+    const size = (await sourceHandle.stat()).size;
+    if (size > 0) {
+      const lastByte = Buffer.allocUnsafe(1);
+      await sourceHandle.read(lastByte, 0, 1, size - 1);
+      trailingNewline = lastByte[0] === 10;
+    }
+  } finally {
+    await sourceHandle.close();
+  }
+  const temporary = join(dirname(outFile), `.${basename(outFile)}.anima-${randomBytes(8).toString('hex')}.tmp`);
+  const output = await fs.open(temporary, 'wx');
+  const input = createReadStream(outFile, { encoding: 'utf8' });
+  const lines = createReadlineInterface({ input, crlfDelay: Infinity });
+  let published = false;
+  try {
+    let first = true;
+    for await (const line of lines) {
+      let transformed = line;
+      if (!first && line.trim()) {
+        const firstComma = line.indexOf(',');
+        const rawTag = firstComma >= 0 ? line.slice(0, firstComma) : line;
+        const rest = firstComma >= 0 ? line.slice(firstComma) : '';
+        const token = `@${rawTag.replace(/^"|"$/g, '').replace(/["\s_]+/g, '')}`;
+        transformed = `${token}${rest}`;
+      }
+      await output.writeFile(`${first ? '' : '\n'}${transformed}`, 'utf8');
+      first = false;
+    }
+    if (trailingNewline) await output.writeFile('\n', 'utf8');
+    await output.sync();
+    await output.close();
+    await fs.rename(temporary, outFile);
+    published = true;
+  } finally {
+    lines.close();
+    input.destroy();
+    await output.close().catch(() => undefined);
+    if (!published) await fs.rm(temporary, { force: true }).catch(() => undefined);
+  }
 }
 
 async function readGeneratorStream(stream: ReadableStream<Uint8Array> | null, onChunk: (text: string) => void) {
@@ -850,12 +914,16 @@ async function runDanbooruDatasetGeneratorJob(job: DanbooruDatasetGeneratorJob) 
     const previewTimer = setInterval(() => {
       void updateDanbooruDatasetGeneratorPreview(job).catch(() => {});
     }, 1000);
-    const [exitCode] = await Promise.all([
-      proc.exited,
-      readGeneratorStream(proc.stdout, (chunk) => { job.stdout += chunk; }),
-      readGeneratorStream(proc.stderr, (chunk) => { job.stderr += chunk; }),
-    ]);
-    clearInterval(previewTimer);
+    let exitCode: number;
+    try {
+      [exitCode] = await Promise.all([
+        proc.exited,
+        readGeneratorStream(proc.stdout, (chunk) => { job.stdout = appendDatasetGeneratorLog(job.stdout, chunk); }),
+        readGeneratorStream(proc.stderr, (chunk) => { job.stderr = appendDatasetGeneratorLog(job.stderr, chunk); }),
+      ]);
+    } finally {
+      clearInterval(previewTimer);
+    }
     job.exitCode = exitCode;
     if ((exitCode === 0 || exitCode === 75 || job.stopRequested) && job.animaArtistTokens && existsSync(job.outFile)) {
       await applyAnimaArtistTokenTransform(job.outFile);
@@ -916,37 +984,53 @@ async function handleBooruDatasetGeneratorRun(req: Request): Promise<Response> {
   try {
     const body = await req.json().catch(() => ({})) as Record<string, unknown>;
     const command = buildDanbooruDatasetGeneratorCommand(body);
-    await fs.mkdir(command.outputDir, { recursive: true });
+    pruneDanbooruDatasetGeneratorJobs();
+    if ([...danbooruDatasetGeneratorJobs.values()].filter(job => job.running).length + pendingDatasetGeneratorOutputs.size >= DATASET_GENERATOR_ACTIVE_JOB_LIMIT) {
+      return json({ error: 'Too many dataset generator jobs are running.' }, 429);
+    }
+    const outputKey = normalizePathForCompare(command.outFile);
+    if (pendingDatasetGeneratorOutputs.has(outputKey)
+      || [...danbooruDatasetGeneratorJobs.values()].some(job => job.running && normalizePathForCompare(job.outFile) === outputKey)) {
+      return json({ error: 'A dataset generator is already writing this output file.' }, 409);
+    }
+    pendingDatasetGeneratorOutputs.add(outputKey);
     const id = crypto.randomUUID();
-    const controlDir = join(USER_DIR, 'Temp', 'danbooru-dataset-generator');
-    const controlPath = join(controlDir, `${id}.json`);
-    await fs.mkdir(controlDir, { recursive: true });
-    await fs.writeFile(controlPath, JSON.stringify({ paused: false, stopRequested: false }), 'utf8');
-    const job: DanbooruDatasetGeneratorJob = {
-      id,
-      mode: command.mode,
-      outFile: command.outFile,
-      outputPath: toClientPath(command.outFile),
-      controlPath,
-      args: [...command.args, '--control-file', controlPath],
-      stdout: '',
-      stderr: '',
-      preview: '',
-      running: true,
-      paused: false,
-      stopRequested: false,
-      status: 'running',
-      startedAt: Date.now(),
-      finishedAt: null,
-      exitCode: null,
-      error: '',
-      animaArtistTokens: command.animaArtistTokens,
-      tagCategory: command.tagCategory,
-      process: null,
-    };
-    danbooruDatasetGeneratorJobs.set(id, job);
-    void runDanbooruDatasetGeneratorJob(job);
-    return json(serializeDanbooruDatasetGeneratorJob(job));
+    const controlPath = join(USER_DIR, 'Temp', 'danbooru-dataset-generator', `${id}.json`);
+    try {
+      await fs.mkdir(command.outputDir, { recursive: true });
+      await fs.mkdir(dirname(controlPath), { recursive: true });
+      await fs.writeFile(controlPath, JSON.stringify({ paused: false, stopRequested: false }), { encoding: 'utf8', flag: 'wx' });
+      const job: DanbooruDatasetGeneratorJob = {
+        id,
+        mode: command.mode,
+        outFile: command.outFile,
+        outputPath: toClientPath(command.outFile),
+        controlPath,
+        args: [...command.args, '--control-file', controlPath],
+        stdout: '',
+        stderr: '',
+        preview: '',
+        running: true,
+        paused: false,
+        stopRequested: false,
+        status: 'running',
+        startedAt: Date.now(),
+        finishedAt: null,
+        exitCode: null,
+        error: '',
+        animaArtistTokens: command.animaArtistTokens,
+        tagCategory: command.tagCategory,
+        process: null,
+      };
+      danbooruDatasetGeneratorJobs.set(id, job);
+      void runDanbooruDatasetGeneratorJob(job);
+      return json(serializeDanbooruDatasetGeneratorJob(job));
+    } catch (error) {
+      await fs.rm(controlPath, { force: true }).catch(() => undefined);
+      throw error;
+    } finally {
+      pendingDatasetGeneratorOutputs.delete(outputKey);
+    }
   } catch (error: any) {
     console.error('[Booru] Dataset generator error:', error);
     return json({ error: error?.message || 'Danbooru Dataset Generator failed' }, 500);
@@ -1037,7 +1121,7 @@ const MODEL_SNAPSHOT_SUFFIX = '.umbra-model.json';
 const MODEL_THUMB_PREFIX = '.umbra-model-thumb';
 const MODEL_INSPECTION_SUFFIX = '.umbra-model-inspection.txt';
 const MODEL_ARTIFACT_DIR = '.umbra';
-const DATASET_IMPORT_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']);
+const DATASET_IMPORT_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.avif']);
 
 function resolveDatasetImportSourcePath(rawPath: unknown): string | null {
   const inputPath = String(rawPath || '').trim();
@@ -1049,6 +1133,7 @@ function resolveDatasetImportSourcePath(rawPath: unknown): string | null {
 async function copyLocalImageIntoDatasetConcept(
   sourcePath: string,
   conceptPath: string,
+  allowedSourceRoots?: string[],
 ): Promise<{ filename: string; sourcePath: string; copiedSidecars: string[]; skipped?: boolean }> {
   if (!existsSync(sourcePath)) {
     throw new Error('Source file not found');
@@ -1058,6 +1143,14 @@ async function copyLocalImageIntoDatasetConcept(
   const sourceExt = extname(originalName).toLowerCase();
   if (!originalName || !DATASET_IMPORT_IMAGE_EXTENSIONS.has(sourceExt)) {
     throw new Error('Only image files can be added to datasets');
+  }
+  const sourceStat = await fs.lstat(sourcePath);
+  if (!sourceStat.isFile() || sourceStat.size === 0 || sourceStat.size > 256 * 1024 * 1024) {
+    throw new Error('Select a regular image file smaller than 256 MB');
+  }
+  const detectedImage = await detectDatasetImportImage(await fs.readFile(sourcePath));
+  if (sourceExt !== detectedImage.extension && !(sourceExt === '.jpeg' && detectedImage.extension === '.jpg')) {
+    throw new Error('Source image format does not match its filename');
   }
 
   if (!existsSync(conceptPath)) {
@@ -1069,29 +1162,42 @@ async function copyLocalImageIntoDatasetConcept(
   let filename = `${parsedBase}${parsedExt}`;
   let destPath = join(conceptPath, filename);
   let counter = 1;
-  while (existsSync(destPath)) {
+  const sourceBaseName = sourcePath.replace(/\.[^.]+$/, '');
+  const sourceSidecars = [
+    { source: `${sourceBaseName}.txt`, suffix: '.txt', fullName: false },
+    { source: `${sourcePath}.txt`, suffix: '.txt', fullName: true },
+    { source: `${sourceBaseName}.json`, suffix: '.json', fullName: false },
+    { source: `${sourcePath}.json`, suffix: '.json', fullName: true },
+  ];
+  const authorizedSidecars: typeof sourceSidecars = [];
+  for (const sidecar of sourceSidecars) {
+    if (!existsSync(sidecar.source)) continue;
+    if (allowedSourceRoots && !await resolveAllowedGalleryPath(sidecar.source, allowedSourceRoots)) continue;
+    if ((await fs.lstat(sidecar.source)).isFile()) authorizedSidecars.push(sidecar);
+  }
+  const sidecarDestinations = (name: string) => {
+    const base = name.slice(0, -extname(name).length);
+    return authorizedSidecars.map(sidecar => join(conceptPath, `${sidecar.fullName ? name : base}${sidecar.suffix}`));
+  };
+  while (existsSync(destPath) || sidecarDestinations(filename).some(existsSync)) {
     filename = `${parsedBase}_${counter}${parsedExt}`;
     destPath = join(conceptPath, filename);
     counter += 1;
   }
-
-  await fs.copyFile(sourcePath, destPath);
-
-  const destBaseName = filename.replace(/\.[^.]+$/, '');
-  const sourceBaseName = sourcePath.replace(/\.[^.]+$/, '');
   const copiedSidecars: string[] = [];
-  const sidecarCandidates = [
-    { source: `${sourceBaseName}.txt`, dest: join(conceptPath, `${destBaseName}.txt`) },
-    { source: `${sourcePath}.txt`, dest: join(conceptPath, `${filename}.txt`) },
-    { source: `${sourceBaseName}.json`, dest: join(conceptPath, `${destBaseName}.json`) },
-    { source: `${sourcePath}.json`, dest: join(conceptPath, `${filename}.json`) },
-  ];
-  const copiedSources = new Set<string>();
-  for (const sidecar of sidecarCandidates) {
-    if (!existsSync(sidecar.source) || copiedSources.has(sidecar.source)) continue;
-    await fs.copyFile(sidecar.source, sidecar.dest);
-    copiedSources.add(sidecar.source);
-    copiedSidecars.push(basename(sidecar.dest));
+  const created: string[] = [];
+  try {
+    await copyFileExclusive(sourcePath, destPath);
+    created.push(destPath);
+    for (const [index, sidecar] of authorizedSidecars.entries()) {
+      const destination = sidecarDestinations(filename)[index];
+      await copyFileExclusive(sidecar.source, destination);
+      created.push(destination);
+      copiedSidecars.push(basename(destination));
+    }
+  } catch (error) {
+    for (const path of created.reverse()) await fs.rm(path, { force: true }).catch(() => undefined);
+    throw error;
   }
 
   return { filename, sourcePath, copiedSidecars };
@@ -2481,24 +2587,15 @@ function resolveCorsOrigin(rawOrigin: unknown, req?: Request): string {
   if (!origin) return '';
   const normalizedOrigin = normalizeOrigin(origin);
   if (!normalizedOrigin) return '';
-  if (LOOPBACK_CORS_ORIGIN_PATTERN.test(origin)) return normalizedOrigin;
-  if (IS_LAN_BIND && IS_UMBRA_DEV_MODE && PRIVATE_LAN_CORS_ORIGIN_PATTERN.test(origin)) return normalizedOrigin;
-  if (IS_LAN_BIND && !IS_UMBRA_DEV_MODE && TAILSCALE_HTTP_CORS_ORIGIN_PATTERN.test(origin)) return normalizedOrigin;
   if (req) {
     const requestOrigin = normalizeOrigin(req.url);
     if (requestOrigin && requestOrigin === normalizedOrigin) return normalizedOrigin;
-    const host = String(req.headers.get('host') || '').trim();
-    const forwardedHost = String(req.headers.get('x-forwarded-host') || '').trim();
-    const forwardedProto = String(req.headers.get('x-forwarded-proto') || '').split(',')[0]?.trim().replace(/:$/, '') || '';
     const requestUrl = new URL(req.url);
-    const declaredOrigins = [
-      host ? `${requestUrl.protocol}//${host}` : '',
-      forwardedHost ? `${forwardedProto || requestUrl.protocol.replace(':', '')}://${forwardedHost}` : '',
-    ].map(normalizeOrigin).filter(Boolean);
-    if (declaredOrigins.includes(normalizedOrigin)) return normalizedOrigin;
+    if (getRequestVisibleOrigin(req, requestUrl) === normalizedOrigin) return normalizedOrigin;
   }
+  if (LOOPBACK_CORS_ORIGIN_PATTERN.test(origin)) return normalizedOrigin;
+  if (IS_LAN_BIND && IS_UMBRA_DEV_MODE && PRIVATE_LAN_CORS_ORIGIN_PATTERN.test(origin)) return normalizedOrigin;
   if (getRemoteConfiguredCorsOrigins().has(normalizedOrigin) && (IS_UMBRA_DEV_MODE || TAILSCALE_HTTP_CORS_ORIGIN_PATTERN.test(normalizedOrigin) || TAILSCALE_HTTPS_CORS_ORIGIN_PATTERN.test(normalizedOrigin))) return normalizedOrigin;
-  if (TAILSCALE_HTTPS_CORS_ORIGIN_PATTERN.test(normalizedOrigin)) return normalizedOrigin;
   return '';
 }
 
@@ -2813,6 +2910,29 @@ function getLocalNetworkAddressSet(): Set<string> {
   return values;
 }
 
+function isKnownUmbraListenerHost(hostname: string): boolean {
+  const host = normalizeIpAddress(hostname);
+  const computerName = os.hostname().toLowerCase();
+  return host === '0.0.0.0'
+    || isLoopbackIpAddress(host)
+    || getLocalNetworkAddressSet().has(host)
+    || host === computerName
+    || host === `${computerName}.local`;
+}
+
+async function isUmbraListenerTarget(targetUrl: URL): Promise<boolean> {
+  const port = Number(targetUrl.port || (['https:', 'wss:'].includes(targetUrl.protocol) ? 443 : 80));
+  if (port !== PORT) return false;
+  if (isKnownUmbraListenerHost(targetUrl.hostname)) return true;
+  try {
+    const addresses = await lookupHostname(targetUrl.hostname.replace(/^\[|\]$/g, ''), { all: true });
+    return addresses.some(entry => isKnownUmbraListenerHost(entry.address));
+  } catch {
+    // Do not proxy an unresolved same-port alias; it might later resolve to us.
+    return true;
+  }
+}
+
 function getRequestSocketAddress(req: Request, server?: RequestIpServer): string {
   try {
     return normalizeIpAddress(server?.requestIP?.(req)?.address || '');
@@ -2880,24 +3000,10 @@ function isHostRequest(req: Request, url: URL, server?: RequestIpServer): boolea
   // A remote peer can choose Host: localhost. Never grant host privileges from it.
   if (!socketAddress || (!isLoopbackIpAddress(socketAddress) && !localAddresses.has(socketAddress))) return false;
   if (getRequestHostCandidates(req, url).some(isTailscaleHostname)) return false;
-  const settings = loadRemoteConnectionSettings();
-  if (settings.trustProxyHeaders) {
-    const forwardedFor = normalizeIpAddress(
-      req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-      || req.headers.get('x-real-ip')?.trim()
-      || req.headers.get('cf-connecting-ip')?.trim()
-      || '',
-    );
-    if (forwardedFor) {
-      return isLoopbackIpAddress(forwardedFor) || localAddresses.has(forwardedFor);
-    }
-    const forwardedHost = normalizeRequestHostname(
-      req.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
-      || req.headers.get('host')
-      || '',
-    );
-    if (forwardedHost && !isLoopbackHostname(forwardedHost) && !localAddresses.has(forwardedHost)) return false;
-  }
+  // A local reverse proxy can relay remote requests over loopback. Forwarded
+  // peer headers are client supplied unless the proxy strips them first, so
+  // they cannot establish host privileges even when they say "localhost".
+  if (req.headers.has('x-forwarded-for') || req.headers.has('x-real-ip') || req.headers.has('cf-connecting-ip')) return false;
   return true;
 }
 
@@ -3048,7 +3154,8 @@ function parseCookieHeader(cookieHeader: string | null): Record<string, string> 
     const key = part.slice(0, index).trim();
     const value = part.slice(index + 1).trim();
     if (!key) continue;
-    cookies[key] = decodeURIComponent(value);
+    try { cookies[key] = decodeURIComponent(value); }
+    catch { /* A malformed cookie must not fail the entire request. */ }
   }
   return cookies;
 }
@@ -3059,6 +3166,17 @@ function getRemoteSessionToken(req: Request): string {
 
 function getRemoteDeviceToken(req: Request): string {
   return parseCookieHeader(req.headers.get('cookie'))[REMOTE_DEVICE_COOKIE] || '';
+}
+
+function removeUmbraRemoteCookies(headers: Headers): void {
+  const cookie = headers.get('cookie');
+  if (!cookie) return;
+  const retained = cookie.split(';').map(part => part.trim()).filter(part => {
+    const name = part.slice(0, part.indexOf('=') < 0 ? part.length : part.indexOf('=')).trim();
+    return name !== REMOTE_AUTH_COOKIE && name !== REMOTE_DEVICE_COOKIE;
+  });
+  if (retained.length > 0) headers.set('cookie', retained.join('; '));
+  else headers.delete('cookie');
 }
 
 function pruneRemoteSessions(config: RemoteAuthConfig, now = Date.now()): RemoteAuthConfig {
@@ -3691,16 +3809,49 @@ function getComfyProxyTarget() {
     if (!Number.isInteger(isolatedPort) || isolatedPort < 1 || isolatedPort > 65535) {
       throw new Error('UMBRA_COMFY_PORT must be an integer between 1 and 65535');
     }
+    if (isolatedPort === PORT) throw new Error('ComfyUI cannot use the Umbra Studio listener port.');
     return { host: '127.0.0.1', port: isolatedPort };
   }
   const settings = settingsManager.getSettings();
   const comfyDefaultPort = settings?.servers?.comfyui?.port || 8188;
   const comfyDefaultHost = settings?.servers?.comfyui?.host || '127.0.0.1';
   const comfyTarget = parseHostPortFromUrl(getAppSettingString('comfyui.url'), comfyDefaultHost, comfyDefaultPort);
+  if (comfyTarget.port === PORT && isKnownUmbraListenerHost(comfyTarget.host)) {
+    throw new Error('ComfyUI cannot use the Umbra Studio listener port.');
+  }
   return {
     host: comfyTarget.host,
     port: comfyTarget.port,
   };
+}
+
+const HOST_ONLY_SERVICE_SETTING_DEFAULTS: Record<string, unknown> = {
+  'comfyui.url': 'http://127.0.0.1:8188',
+  'comfyui.path': '',
+  'comfyui.securityLevel': 'normal',
+  'aitoolkit.url': 'http://127.0.0.1:8675',
+  'aitoolkit.path': '',
+};
+
+function validateHostOnlyServiceSettings(
+  patch: Record<string, unknown>,
+  current: Record<string, unknown>,
+  hostRequest: boolean,
+): string | null {
+  for (const key of Object.keys(HOST_ONLY_SERVICE_SETTING_DEFAULTS)) {
+    const effectiveCurrent = Object.prototype.hasOwnProperty.call(current, key) ? current[key] : HOST_ONLY_SERVICE_SETTING_DEFAULTS[key];
+    if (Object.prototype.hasOwnProperty.call(patch, key) && patch[key] !== effectiveCurrent && !hostRequest) {
+      return 'Local service connection and host settings can only be changed from the host PC.';
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'comfyui.url')
+    && patch['comfyui.url'] !== (current['comfyui.url'] ?? HOST_ONLY_SERVICE_SETTING_DEFAULTS['comfyui.url'])) {
+    const target = parseHostPortFromUrl(String(patch['comfyui.url'] || ''), '127.0.0.1', 8188);
+    if (target.port === PORT && isKnownUmbraListenerHost(target.host)) {
+      return 'ComfyUI cannot use the Umbra Studio listener port.';
+    }
+  }
+  return null;
 }
 
 function getComfyToolRootFast(): string {
@@ -4041,13 +4192,28 @@ async function createProxyTextResponse(
 }
 
 async function proxyComfyHttp(req: Request, sourceUrl: URL, targetPath: string): Promise<Response> {
-  const targetUrl = new URL(`${getComfyProxyBaseUrl()}${targetPath || '/'}`);
+  let targetUrl: URL;
+  try {
+    targetUrl = new URL(`${getComfyProxyBaseUrl()}${targetPath || '/'}`);
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : 'Invalid ComfyUI proxy target.' }, 502);
+  }
+  if (await isUmbraListenerTarget(targetUrl)) {
+    return json({ error: 'ComfyUI cannot proxy back to Umbra Studio.' }, 502);
+  }
   targetUrl.search = sourceUrl.search;
 
   const headers = new Headers(req.headers);
   headers.delete('host');
   headers.delete('origin');
   headers.delete('referer');
+  headers.delete('x-forwarded-for');
+  headers.delete('x-forwarded-host');
+  headers.delete('x-forwarded-proto');
+  headers.delete('x-real-ip');
+  headers.delete('cf-connecting-ip');
+  headers.set('x-forwarded-for', '0.0.0.0');
+  removeUmbraRemoteCookies(headers);
 
   let upstream: Response;
   try {
@@ -4132,9 +4298,33 @@ function parseLocalServerTargetUrl(rawUrl: unknown): URL | null {
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
   if (!isAllowedLocalServerHostname(parsed.hostname)) return null;
+  // A proxy request back into Umbra would turn a remote client into a loopback
+  // peer and bypass host-only route guards. Reject every alias on our port.
+  const targetPort = Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80));
+  if (targetPort === PORT && isKnownUmbraListenerHost(parsed.hostname)) return null;
   parsed.username = '';
   parsed.password = '';
   return parsed;
+}
+
+async function isRemoteLocalServerTargetAllowed(
+  req: Request,
+  sourceUrl: URL,
+  targetUrl: URL,
+  server?: RequestIpServer,
+): Promise<boolean> {
+  if (await isUmbraListenerTarget(targetUrl)) return false;
+  if (!isRemoteRequest(req, sourceUrl, server)) return true;
+  const configuredToolkit = getAppSettingString('aitoolkit.url', 'http://127.0.0.1:8675');
+  const toolkitUrl = parseLocalServerTargetUrl(configuredToolkit.includes('://') ? configuredToolkit : `http://${configuredToolkit}`);
+  if (toolkitUrl?.origin === targetUrl.origin) return true;
+
+  const saved = await readUserConfigValue('local-server-apps').catch(() => null);
+  const apps = Array.isArray(saved) ? saved : Array.isArray((saved as any)?.apps) ? (saved as any).apps : [];
+  return apps.slice(0, 48).some((app: unknown) => {
+    const rawUrl = app && typeof app === 'object' ? (app as Record<string, unknown>).url : null;
+    return parseLocalServerTargetUrl(rawUrl)?.origin === targetUrl.origin;
+  });
 }
 
 function normalizeLocalServerFetchUrl(targetUrl: URL): URL {
@@ -4350,16 +4540,22 @@ async function localServerHealth(rawUrl: string | null, requestSignal?: AbortSig
   }
 }
 
-async function proxyLocalServerHttp(req: Request, sourceUrl: URL): Promise<Response> {
+async function proxyLocalServerHttp(req: Request, sourceUrl: URL, server: RequestIpServer): Promise<Response> {
   const parsed = parseLocalServerProxyTarget(sourceUrl);
   if (!parsed) return json({ error: 'Invalid local server proxy target.' }, 400);
   const { token, targetUrl } = parsed;
+  if (!await isRemoteLocalServerTargetAllowed(req, sourceUrl, targetUrl, server)) {
+    return json({ error: 'This local app must be configured on the host before remote access.' }, 403);
+  }
   const fetchUrl = normalizeLocalServerFetchUrl(targetUrl);
   const headers = new Headers(req.headers);
   headers.delete('host');
   headers.delete('origin');
   headers.delete('referer');
   headers.delete('cookie');
+  headers.delete('x-real-ip');
+  headers.delete('cf-connecting-ip');
+  headers.set('x-forwarded-for', '0.0.0.0');
   headers.set('accept-encoding', 'identity');
 
   let upstream: Response;
@@ -11699,6 +11895,7 @@ import { spawnSync, type ChildProcess } from 'child_process';
 let comfyProcess: ChildProcess | null = null;
 let galleryBridgeProcess: ChildProcess | null = null;
 let aitoolkitProcess: ChildProcess | null = null;
+let aitoolkitLaunchedPort: number | null = null;
 let comfyStartTime: number | null = null;
 let galleryBridgeStartTime: number | null = null;
 let aitoolkitStartTime: number | null = null;
@@ -12751,6 +12948,48 @@ function listPidsByPort(port: number): number[] {
   return IS_WINDOWS ? listWindowsPidsByPort(port) : listPosixPidsByPort(port);
 }
 
+function getProcessParentMap(): Map<number, number> {
+  const parents = new Map<number, number>();
+  if (IS_WINDOWS) {
+    const result = spawnSync('powershell', [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
+      'Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId | ConvertTo-Json -Compress',
+    ], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000, maxBuffer: 2 * 1024 * 1024 });
+    for (const row of parsePowerShellJsonArray<{ ProcessId: number; ParentProcessId: number }>(String(result.stdout || ''))) {
+      if (Number.isInteger(row.ProcessId) && Number.isInteger(row.ParentProcessId)) {
+        parents.set(row.ProcessId, row.ParentProcessId);
+      }
+    }
+  } else {
+    const result = spawnSync('ps', ['-e', '-o', 'pid=,ppid='], {
+      encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000,
+    });
+    for (const line of String(result.stdout || '').split(/\r?\n/)) {
+      const match = line.trim().match(/^(\d+)\s+(\d+)$/);
+      if (match) parents.set(Number(match[1]), Number(match[2]));
+    }
+  }
+  return parents;
+}
+
+function isAIToolkitListenerOwned(port: number): boolean {
+  const trackedPid = aitoolkitProcess?.pid;
+  if (!trackedPid || !isChildProcessAlive(aitoolkitProcess) || aitoolkitLaunchedPort !== port) return false;
+  const listeners = listPidsByPort(port);
+  if (listeners.length === 0) return false;
+  const parents = getProcessParentMap();
+  return listeners.every(listenerPid => {
+    let pid = listenerPid;
+    const visited = new Set<number>();
+    while (pid > 0 && !visited.has(pid)) {
+      if (pid === trackedPid) return true;
+      visited.add(pid);
+      pid = parents.get(pid) || 0;
+    }
+    return false;
+  });
+}
+
 function stopPids(pids: number[], label: string): boolean {
   const uniquePids = uniquePositivePids(pids).filter((pid) => pid !== process.pid);
   if (uniquePids.length === 0) return true;
@@ -13088,6 +13327,7 @@ function createToolAction(action: string, args: string[], tool?: 'comfyui' | 'ai
       aitoolkitNodeCapabilityCache = null;
       if (!isChildProcessAlive(aitoolkitProcess)) {
         aitoolkitProcess = null;
+        aitoolkitLaunchedPort = null;
         aitoolkitStartTime = null;
       }
     }
@@ -15046,6 +15286,15 @@ function getBackendConfig() {
   };
 }
 
+async function probeConfiguredAIToolkit(config: ReturnType<typeof getBackendConfig>['aitoolkit']): Promise<boolean> {
+  if (await probeAIToolkit(config.url, fetch, 1200)) return true;
+  const token = String(process.env.AI_TOOLKIT_AUTH || '');
+  // The auth token belongs to the Umbra-managed process. A compatible server
+  // already occupying the configured port must never receive it.
+  if (!token || !isLoopbackHostname(config.host) || !isAIToolkitListenerOwned(config.port)) return false;
+  return probeAIToolkit(config.url, fetch, 1200, token);
+}
+
 let comfyStopRequested = false;
 const comfyStartup = createComfyStartup(startComfyUIProcess);
 const startComfyUI = () => comfyStartup.start();
@@ -15323,14 +15572,21 @@ async function stopComfyUI() {
 async function startAIToolkit() {
   try {
     if (isChildProcessAlive(aitoolkitProcess)) {
-      return { success: true, message: 'AI-Toolkit is already running', running: true, healthy: true };
+      return { success: true, message: 'AI-Toolkit is already running', running: true, healthy: await probeConfiguredAIToolkit(getBackendConfig().aitoolkit) };
     }
     if (aitoolkitProcess) {
       aitoolkitProcess = null;
+      aitoolkitLaunchedPort = null;
       aitoolkitStartTime = null;
     }
 
     const config = getBackendConfig().aitoolkit;
+    if (!isLoopbackHostname(config.host)) {
+      if (await probeConfiguredAIToolkit(config)) {
+        return { success: true, message: 'Connected to the configured external AI-Toolkit server', running: true, healthy: true, external: true, port: config.port };
+      }
+      return { success: false, error: 'The configured AI-Toolkit URL is unavailable. Use a loopback URL to launch the installed toolkit on this host.', running: false, healthy: false, port: config.port };
+    }
     if (!config.detected || !config.cwd || !existsSync(join(config.cwd, 'package.json'))) {
       return {
         success: false,
@@ -15339,14 +15595,17 @@ async function startAIToolkit() {
     }
 
     if (await isPortOpen(config.port, 700)) {
-      return {
-        success: true,
-        message: `An existing server is already available on AI-Toolkit port ${config.port}`,
-        running: true,
-        healthy: true,
-        external: true,
-        port: config.port,
-      };
+      if (await probeConfiguredAIToolkit(config)) {
+        return {
+          success: true,
+          message: `An existing AI-Toolkit server is available on port ${config.port}`,
+          running: true,
+          healthy: true,
+          external: true,
+          port: config.port,
+        };
+      }
+      return { success: false, error: `Port ${config.port} is in use by a server that could not be verified as AI-Toolkit.`, running: true, healthy: false, port: config.port };
     }
 
     const nodeCapability = getAIToolkitNodeCapability();
@@ -15392,6 +15651,7 @@ async function startAIToolkit() {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     aitoolkitProcess = spawnedProcess;
+    aitoolkitLaunchedPort = config.port;
     aitoolkitStartTime = Date.now();
     appendBackendLifecycleLog('aitoolkit', 'started', {
       pid: spawnedProcess.pid ?? null,
@@ -15411,6 +15671,7 @@ async function startAIToolkit() {
       broadcastToClients('backend_log', { backend: 'aitoolkit', stream: 'stderr', message });
       if (aitoolkitProcess === spawnedProcess) {
         aitoolkitProcess = null;
+        aitoolkitLaunchedPort = null;
         aitoolkitStartTime = null;
       }
     });
@@ -15438,6 +15699,7 @@ async function startAIToolkit() {
       broadcastToClients('backend_log', { backend: 'aitoolkit', stream: code === 0 ? 'stdout' : 'stderr', message });
       if (aitoolkitProcess === spawnedProcess) {
         aitoolkitProcess = null;
+        aitoolkitLaunchedPort = null;
         aitoolkitStartTime = null;
       }
     });
@@ -15454,17 +15716,20 @@ async function stopAIToolkit() {
   const config = getBackendConfig().aitoolkit;
   const trackedProcess = aitoolkitProcess;
   const wasTracked = isChildProcessAlive(trackedProcess);
-  const portWasOpen = await isPortOpen(config.port, 700);
+  const externalTarget = !isLoopbackHostname(config.host);
+  const portWasOpen = externalTarget ? false : await isPortOpen(config.port, 700);
+  const externalHealthy = (externalTarget || portWasOpen) && await probeConfiguredAIToolkit(config);
 
   if (!wasTracked) {
     aitoolkitProcess = null;
+    aitoolkitLaunchedPort = null;
     aitoolkitStartTime = null;
     return {
       success: true,
-      message: portWasOpen ? 'External AI-Toolkit server left running' : 'AI-Toolkit is already stopped',
-      running: portWasOpen,
-      healthy: portWasOpen,
-      external: portWasOpen,
+      message: externalHealthy ? 'External AI-Toolkit server left running' : (portWasOpen ? 'Configured port is in use by another server' : 'AI-Toolkit is already stopped'),
+      running: portWasOpen || externalHealthy,
+      healthy: externalHealthy,
+      external: externalHealthy,
       port: config.port,
     };
   }
@@ -15476,9 +15741,10 @@ async function stopAIToolkit() {
   });
   const stopped = await stopProcessTree(trackedProcess, 'AI-Toolkit');
   aitoolkitProcess = null;
+  aitoolkitLaunchedPort = null;
   aitoolkitStartTime = null;
   await sleep(300);
-  const stillOpen = await isPortOpen(config.port, 700);
+  const stillOpen = externalTarget ? await probeConfiguredAIToolkit(config) : await isPortOpen(config.port, 700);
   appendBackendLifecycleLog('aitoolkit', stillOpen ? 'stop_incomplete' : 'stop_completed', {
     pid: trackedProcess?.pid ?? null,
     port: config.port,
@@ -15486,7 +15752,7 @@ async function stopAIToolkit() {
     stillOpen,
   });
   if (stillOpen) {
-    return { success: false, error: 'AI-Toolkit stopped, but its configured port is still in use.', running: true, healthy: true, port: config.port };
+    return { success: false, error: 'AI-Toolkit stopped, but its configured port is still in use.', running: true, healthy: await probeConfiguredAIToolkit(config), port: config.port };
   }
   return { success: true, message: 'AI-Toolkit stopped', running: false, healthy: false, port: config.port };
 }
@@ -16173,14 +16439,17 @@ async function getBackendStatusAsync(backend: 'comfyui' | 'aitoolkit', portTimeo
   const processRunning = isChildProcessAlive(trackedProc);
 
   if (backend === 'aitoolkit') {
-    const portOpen = await isPortOpen(port, portTimeoutMs);
+    const config = getBackendConfig().aitoolkit;
+    const localTarget = isLoopbackHostname(config.host);
+    const portOpen = localTarget && await isPortOpen(port, portTimeoutMs);
+    const healthy = (portOpen || !localTarget) && await probeConfiguredAIToolkit(config);
     return {
-      running: processRunning || portOpen,
-      healthy: portOpen,
+      running: processRunning || portOpen || healthy,
+      healthy,
       port,
       pid: trackedProc?.pid ?? null,
-      uptime: startTime ? Math.floor((Date.now() - startTime) / 1000) : (portOpen ? 999 : 0),
-      ownership: processRunning ? 'owned' : (portOpen ? 'external-compatible' : 'none'),
+      uptime: startTime ? Math.floor((Date.now() - startTime) / 1000) : (healthy ? 999 : 0),
+      ownership: processRunning ? 'owned' : (healthy ? 'external-compatible' : (portOpen ? 'unknown-port' : 'none')),
       ownerPid: processRunning ? trackedProc?.pid ?? null : null,
       trackedPid: trackedProc?.pid ?? null,
       signaturePids: [],
@@ -30587,11 +30856,17 @@ const server = Bun.serve<UmbraSocketData>({
               message: 'Umbra avoids tunneling ComfyUI browser websockets through Bun in published builds. Use the direct Tailscale ComfyUI URL for full live ComfyUI browser status.',
             }, 426);
           }
+          let targetUrl: string;
+          try { targetUrl = getComfyProxyWsUrl(url.search); }
+          catch (error) { return json({ error: error instanceof Error ? error.message : 'Invalid ComfyUI proxy target.' }, 502); }
+          if (await isUmbraListenerTarget(new URL(targetUrl))) {
+            return json({ error: 'ComfyUI cannot proxy back to Umbra Studio.' }, 502);
+          }
           const upgraded = server.upgrade(req, {
             data: {
               endpoint: '/comfy/ws',
               ...getRemoteWebSocketAuthData(req, url, server),
-              targetUrl: getComfyProxyWsUrl(url.search),
+              targetUrl,
             },
           });
           if (upgraded) return undefined;
@@ -30620,6 +30895,10 @@ const server = Bun.serve<UmbraSocketData>({
         }
 
       if (path === '/api/local-server-proxy/health' && method === 'GET') {
+          const target = parseLocalServerTargetUrl(url.searchParams.get('url'));
+          if (target && !await isRemoteLocalServerTargetAllowed(req, url, target, server)) {
+            return json({ error: 'This local app must be configured on the host before remote access.' }, 403);
+          }
           return await localServerHealth(url.searchParams.get('url'), req.signal);
       }
       if (path === '/api/local-server-apps/open-folder' && method === 'POST') {
@@ -30627,8 +30906,12 @@ const server = Bun.serve<UmbraSocketData>({
       }
 
         if (path.startsWith(LOCAL_SERVER_PROXY_PREFIX) && method === 'GET' && req.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+          const parsed = parseLocalServerProxyTarget(url);
           const targetUrl = getLocalServerProxyWsUrl(url);
-          if (!targetUrl) return new Response('Invalid local server websocket target', { status: 400 });
+          if (!parsed || !targetUrl) return new Response('Invalid local server websocket target', { status: 400 });
+          if (!await isRemoteLocalServerTargetAllowed(req, url, parsed.targetUrl, server)) {
+            return new Response('This local app must be configured on the host before remote access.', { status: 403 });
+          }
           const upgraded = server.upgrade(req, {
             data: {
               endpoint: '/local-server-proxy/ws',
@@ -30641,7 +30924,7 @@ const server = Bun.serve<UmbraSocketData>({
         }
 
         if (path.startsWith(LOCAL_SERVER_PROXY_PREFIX)) {
-          return await proxyLocalServerHttp(req, url);
+          return await proxyLocalServerHttp(req, url, server);
         }
 
         if (path === '/api/healthz/ready' && method === 'GET') {
@@ -31049,6 +31332,9 @@ const server = Bun.serve<UmbraSocketData>({
       // EXPORT API
       // ============================================
       if (path === '/api/export/save' && method === 'POST') {
+        if (!isHostRequest(req, url, server)) {
+          return json({ error: 'Saving exports to host folders is only available from the host PC.' }, 403);
+        }
         try {
           const formData = await req.formData();
           const file = formData.get('file') as File;
@@ -31569,6 +31855,9 @@ const server = Bun.serve<UmbraSocketData>({
         const detected = detectAIToolkit();
         const config = getBackendConfig().aitoolkit;
         const status = await getBackendStatusAsync('aitoolkit', 900);
+        const localToolkit = isLoopbackHostname(config.host)
+          && (!status.running || (status.ownership === 'owned' && isAIToolkitListenerOwned(config.port)));
+        const handoff = await getAIToolkitDatasetsHandoff(detected.path, join(ROOT_DIR, 'User', 'Datasets'), localToolkit);
         const nodeCapability = getAIToolkitNodeCapability();
         return json({
           installed: detected.detected,
@@ -31585,7 +31874,7 @@ const server = Bun.serve<UmbraSocketData>({
           nodeAvailable: nodeCapability.available,
           nodeVersion: nodeCapability.version,
           uiDependenciesInstalled: Boolean(config.cwd && existsSync(join(config.cwd, 'node_modules'))),
-          datasetsPath: join(ROOT_DIR, 'User', 'Datasets'),
+          ...handoff,
         });
       }
 
@@ -31966,11 +32255,10 @@ const server = Bun.serve<UmbraSocketData>({
 
         while (!hasTimedOut()) {
           try {
-            const response = await fetch(readyUrl, {
-              method: 'GET',
-              signal: AbortSignal.timeout(1200),
-            });
-            if (response.ok) {
+            const ready = backend === 'aitoolkit'
+              ? await probeConfiguredAIToolkit(getBackendConfig().aitoolkit)
+              : (await fetch(readyUrl, { method: 'GET', signal: AbortSignal.timeout(1200) })).ok;
+            if (ready) {
               void forceRefreshBackendControlPlaneStatus();
               return json({ ready: true, backend, port, url: readyUrl, elapsed: Date.now() - startTime });
             }
@@ -32479,7 +32767,7 @@ const server = Bun.serve<UmbraSocketData>({
                       const conceptPath = join(datasetPath, conceptDir.name);
                       const conceptStats = await fs.stat(conceptPath).catch(() => null);
                       const files = await fs.readdir(conceptPath);
-                      const imageFiles = files.filter(f => /\.(jpg|jpeg|png|webp|bmp|gif)$/i.test(f));
+                      const imageFiles = files.filter(f => /\.(jpg|jpeg|png|webp|bmp|gif|avif)$/i.test(f));
 
                       return {
                         name,
@@ -32706,7 +32994,7 @@ const server = Bun.serve<UmbraSocketData>({
           const files = await fs.readdir(conceptPath);
           const images = await Promise.all(
             files
-              .filter(f => /\.(jpg|jpeg|png|webp|bmp|gif)$/i.test(f))
+              .filter(f => /\.(jpg|jpeg|png|webp|bmp|gif|avif)$/i.test(f))
               .map(async (f) => {
                 const baseName = f.replace(/\.[^.]+$/, '');
                 const captionPath = join(conceptPath, baseName + '.txt');
@@ -32770,7 +33058,7 @@ const server = Bun.serve<UmbraSocketData>({
             to: string;
           };
 
-          if (!body.dataset || !body.images?.length || !body.from || !body.to) {
+          if (!body.dataset || !Array.isArray(body.images) || !body.images.length || !body.from || !body.to) {
             return json({ error: 'dataset, images, from, and to required' }, 400);
           }
 
@@ -32790,38 +33078,16 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'Source or destination concept not found' }, 404);
           }
 
-          for (const img of body.images) {
-            const safeImgName = sanitizeDatasetSegment(img);
-            if (!safeImgName) continue;
-            const srcImg = join(fromPath, safeImgName);
-            const destImg = join(toPath, safeImgName);
-
-            if (existsSync(srcImg)) {
-              await fs.rename(srcImg, destImg);
-
-              // Also move caption file if exists
-              const baseName = safeImgName.replace(/\.[^.]+$/, '');
-              const srcCaption = join(fromPath, baseName + '.txt');
-              const destCaption = join(toPath, baseName + '.txt');
-
-              if (existsSync(srcCaption)) {
-                await fs.rename(srcCaption, destCaption);
-              }
-              const sourceRecord = booruSourceSidecar(safeImgName);
-              if (existsSync(join(fromPath, sourceRecord))) {
-                await fs.rename(join(fromPath, sourceRecord), join(toPath, sourceRecord));
-              }
-            }
-          }
-
-          return json({ success: true, moved: body.images.length });
+          const moved = await moveDatasetImages(fromPath, toPath, body.images);
+          return json({ success: true, moved });
         } catch (error: any) {
-          return json({ error: error.message }, 500);
+          return json({ error: error.message }, 400);
         }
       }
 
       // Delete images from concept
       if (path === '/api/datasets/delete-images' && method === 'POST') {
+        let deleted = 0;
         try {
           const body = await req.json() as {
             dataset: string;
@@ -32829,7 +33095,7 @@ const server = Bun.serve<UmbraSocketData>({
             images: string[];
           };
 
-          if (!body.dataset || !body.concept || !body.images?.length) {
+          if (!body.dataset || !body.concept || !Array.isArray(body.images) || !body.images.length) {
             return json({ error: 'dataset, concept, and images required' }, 400);
           }
 
@@ -32845,37 +33111,46 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'Concept not found' }, 404);
           }
 
+          const selected = new Set(body.images);
+          if (selected.size !== body.images.length || body.images.some(img => typeof img !== 'string'
+            || sanitizeDatasetSegment(img) !== img || !DATASET_IMPORT_IMAGE_EXTENSIONS.has(extname(img).toLowerCase()))) {
+            return json({ error: 'Invalid or duplicate image name' }, 400);
+          }
           for (const img of body.images) {
-            const safeImgName = sanitizeDatasetSegment(img);
-            if (!safeImgName) continue;
-            const imgPath = join(conceptPath, safeImgName);
-
-            if (existsSync(imgPath)) {
-              await fs.unlink(imgPath);
-
-              // Also delete caption file if exists
-              const baseName = safeImgName.replace(/\.[^.]+$/, '');
-              const captionPath = join(conceptPath, baseName + '.txt');
-
-              if (existsSync(captionPath)) {
-                await fs.unlink(captionPath);
+            const imageStat = await fs.lstat(join(conceptPath, img)).catch(() => null);
+            if (!imageStat?.isFile()) return json({ error: `Image not found: ${img}` }, 404);
+          }
+          for (const img of body.images) {
+            await fs.unlink(join(conceptPath, img));
+            deleted += 1;
+            const baseName = img.slice(0, -extname(img).length);
+            const remainingSibling = (await fs.readdir(conceptPath)).some(name =>
+              name.slice(0, -extname(name).length) === baseName && DATASET_IMPORT_IMAGE_EXTENSIONS.has(extname(name).toLowerCase())
+            );
+            if (!remainingSibling) {
+              for (const sidecar of [`${baseName}.txt`, `${baseName}.json`]) {
+                await fs.unlink(join(conceptPath, sidecar)).catch(error => {
+                  if (error.code !== 'ENOENT') throw error;
+                });
               }
-              await fs.unlink(join(conceptPath, booruSourceSidecar(safeImgName))).catch(error => {
+            }
+            for (const sidecar of [`${img}.txt`, `${img}.json`, booruSourceSidecar(img)]) {
+              await fs.unlink(join(conceptPath, sidecar)).catch(error => {
                 if (error.code !== 'ENOENT') throw error;
               });
             }
           }
 
-          return json({ success: true, deleted: body.images.length });
+          return json({ success: true, deleted });
         } catch (error: any) {
-          return json({ error: error.message }, 500);
+          return json({ error: error.message, deleted }, 500);
         }
       }
 
       // Batch prepend trigger text and optionally run the selected dataset caption model.
       if (path === '/api/datasets/auto-tag-captions' && method === 'POST') {
         try {
-          const imageExts = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']);
+          const imageExts = DATASET_IMPORT_IMAGE_EXTENSIONS;
           const parseBool = (value: unknown, fallback: boolean): boolean => {
             if (typeof value === 'boolean') return value;
             if (typeof value === 'number') return value !== 0;
@@ -33053,10 +33328,18 @@ const server = Bun.serve<UmbraSocketData>({
             console.warn('[Datasets] Failed to persist concept auto-tag settings:', error);
           });
 
-          const requestedImages = Array.isArray(body.images)
-            ? body.images.map((entry) => sanitizeDatasetSegment(entry)).filter(Boolean)
-            : [];
+          if (body.images !== undefined && !Array.isArray(body.images)) {
+            return json({ error: 'Invalid image selection' }, 400);
+          }
+          const requestedImages = Array.isArray(body.images) ? body.images : [];
+          if (requestedImages.some((entry) => typeof entry !== 'string'
+            || sanitizeDatasetSegment(entry) !== entry || !imageExts.has(extname(entry).toLowerCase()))) {
+            return json({ error: 'Invalid image selection' }, 400);
+          }
           const allFiles = await fs.readdir(conceptPath);
+          if (requestedImages.some((entry) => !allFiles.includes(entry))) {
+            return json({ error: 'A selected image no longer exists' }, 400);
+          }
           const imageFiles = allFiles
             .filter((file) => imageExts.has(extname(file).toLowerCase()))
             .filter((file) => requestedImages.length === 0 || requestedImages.includes(file))
@@ -33214,22 +33497,14 @@ const server = Bun.serve<UmbraSocketData>({
           if (!existsSync(conceptPath)) {
             await fs.mkdir(conceptPath, { recursive: true });
           }
-
-          const fallbackExt = file.type.split('/')[1] ? `.${file.type.split('/')[1].replace('jpeg', 'jpg')}` : '.png';
-          const originalName = sanitizeDatasetSegment(basename(file.name || `image${fallbackExt}`)) || `image${fallbackExt}`;
-          const parsedExt = extname(originalName) || fallbackExt;
-          const parsedBase = basename(originalName, extname(originalName)) || 'image';
-          let filename = `${parsedBase}${parsedExt}`;
-          let destPath = join(conceptPath, filename);
-          let counter = 1;
-          while (existsSync(destPath)) {
-            filename = `${parsedBase}_${counter}${parsedExt}`;
-            destPath = join(conceptPath, filename);
-            counter += 1;
+          if (!file.size || file.size > 256 * 1024 * 1024) {
+            return json({ error: 'Dropped image must be smaller than 256 MB' }, 400);
           }
-
           const buffer = Buffer.from(await file.arrayBuffer());
-          await fs.writeFile(destPath, buffer);
+          const { extension } = await detectDatasetImportImage(buffer);
+          const originalName = sanitizeDatasetSegment(basename(file.name || 'image')) || 'image';
+          const parsedBase = sanitizeDatasetSegment(basename(originalName, extname(originalName))) || 'image';
+          const filename = await saveDatasetImportedImage(conceptPath, parsedBase, extension, buffer);
           return json({ success: true, filename });
         } catch (error: any) {
           return json({ error: error.message }, 500);
@@ -33258,12 +33533,11 @@ const server = Bun.serve<UmbraSocketData>({
           }
 
           let buffer: Buffer;
-          let contentType = '';
           try {
             if (body.url.startsWith('data:image/')) {
-              ({ bytes: buffer, contentType } = decodeDatasetImportDataUrl(body.url));
+              ({ bytes: buffer } = decodeDatasetImportDataUrl(body.url));
             } else {
-              ({ bytes: buffer, contentType } = await fetchDatasetImportImage(body.url, {
+              ({ bytes: buffer } = await fetchDatasetImportImage(body.url, {
                 // The host may intentionally import from a local image tool. Remote clients may not pivot through it.
                 allowPrivateNetwork: isHostRequest(req, url, server),
               }));
@@ -33272,13 +33546,7 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: error instanceof Error ? error.message : 'Failed to import image URL' }, 400);
           }
 
-          const extensionFromType = (() => {
-            const subtype = contentType.split('/')[1]?.split(';')[0]?.toLowerCase();
-            if (!subtype) return '.jpg';
-            if (subtype === 'jpeg') return '.jpg';
-            if (subtype === 'svg+xml') return '.svg';
-            return `.${subtype}`;
-          })();
+          const { extension } = await detectDatasetImportImage(buffer);
 
           let baseName = 'image';
           try {
@@ -33290,17 +33558,7 @@ const server = Bun.serve<UmbraSocketData>({
           }
 
           const safeBaseName = sanitizeDatasetSegment(baseName) || 'image';
-          const safeExt = extensionFromType.replace(/[^.a-zA-Z0-9]/g, '') || '.jpg';
-          let filename = `${safeBaseName}${safeExt}`;
-          let destPath = join(conceptPath, filename);
-          let counter = 1;
-          while (existsSync(destPath)) {
-            filename = `${safeBaseName}_${counter}${safeExt}`;
-            destPath = join(conceptPath, filename);
-            counter += 1;
-          }
-
-          await fs.writeFile(destPath, buffer);
+          const filename = await saveDatasetImportedImage(conceptPath, safeBaseName, extension, buffer);
           return json({ success: true, filename });
         } catch (error: any) {
           return json({ error: error.message }, 500);
@@ -33320,9 +33578,14 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'sourcePath, dataset, and concept required' }, 400);
           }
 
-          const sourcePath = resolveDatasetImportSourcePath(body.sourcePath);
+          let sourcePath = resolveDatasetImportSourcePath(body.sourcePath);
           if (!sourcePath || !existsSync(sourcePath)) {
             return json({ error: 'Source file not found' }, 404);
+          }
+          const allowedSourceRoots = isRemoteRequest(req, url, server) ? getGalleryBridgeAllowedRoots() : undefined;
+          if (allowedSourceRoots) {
+            sourcePath = await resolveAllowedGalleryPath(sourcePath, allowedSourceRoots);
+            if (!sourcePath) return json({ error: 'Source image is outside available Gallery folders' }, 403);
           }
 
           const datasetName = sanitizeDatasetSegment(body.dataset);
@@ -33336,7 +33599,7 @@ const server = Bun.serve<UmbraSocketData>({
             await fs.mkdir(conceptPath, { recursive: true });
           }
 
-          const result = await copyLocalImageIntoDatasetConcept(sourcePath, conceptPath);
+          const result = await copyLocalImageIntoDatasetConcept(sourcePath, conceptPath, allowedSourceRoots);
 
           return json({ success: true, ...result });
         } catch (error: any) {
@@ -33378,12 +33641,17 @@ const server = Bun.serve<UmbraSocketData>({
             copiedSidecars?: string[];
             error?: string;
           }> = [];
+          const allowedSourceRoots = isRemoteRequest(req, url, server) ? getGalleryBridgeAllowedRoots() : undefined;
 
           for (const rawSourcePath of sourcePaths) {
             try {
-              const sourcePath = resolveDatasetImportSourcePath(rawSourcePath);
+              let sourcePath = resolveDatasetImportSourcePath(rawSourcePath);
               if (!sourcePath) throw new Error('Invalid source path');
-              const result = await copyLocalImageIntoDatasetConcept(sourcePath, conceptPath);
+              if (allowedSourceRoots) {
+                sourcePath = await resolveAllowedGalleryPath(sourcePath, allowedSourceRoots);
+                if (!sourcePath) throw new Error('Source image is outside available Gallery folders');
+              }
+              const result = await copyLocalImageIntoDatasetConcept(sourcePath, conceptPath, allowedSourceRoots);
               results.push({
                 sourcePath: rawSourcePath,
                 success: true,
@@ -33564,7 +33832,7 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/dataset/save-caption' && method === 'POST') {
         try {
           const body = await req.json() as { dataset: string; concept?: string; image: string; caption: string };
-          if (!body.dataset || !body.image) {
+          if (!body.dataset || !body.image || typeof body.caption !== 'string') {
             return json({ error: 'Dataset and image name required' }, 400);
           }
 
@@ -33584,9 +33852,12 @@ const server = Bun.serve<UmbraSocketData>({
           }
 
           const safeImageName = sanitizeDatasetSegment(body.image);
-          if (!safeImageName) return json({ error: 'Invalid image filename' }, 400);
+          if (!safeImageName || safeImageName !== body.image || !DATASET_IMPORT_IMAGE_EXTENSIONS.has(extname(safeImageName).toLowerCase())) {
+            return json({ error: 'Invalid image filename' }, 400);
+          }
           const imagePath = join(basePath, safeImageName);
-          if (!existsSync(imagePath)) {
+          const imageStat = await fs.lstat(imagePath).catch(() => null);
+          if (!imageStat?.isFile()) {
             return json({ error: 'Image not found' }, 404);
           }
 
@@ -33621,7 +33892,7 @@ const server = Bun.serve<UmbraSocketData>({
 
                 // Count images directly in dataset folder
                 let imageCount = subEntries.filter(f =>
-                  f.isFile() && /\.(jpg|jpeg|png|webp|bmp|gif)$/i.test(f.name)
+                  f.isFile() && /\.(jpg|jpeg|png|webp|bmp|gif|avif)$/i.test(f.name)
                 ).length;
 
                 // Count concepts (subfolders) and images in them
@@ -33632,7 +33903,7 @@ const server = Bun.serve<UmbraSocketData>({
                     const conceptPath = join(dirPath, sub.name);
                     const conceptFiles = await fs.readdir(conceptPath);
                     imageCount += conceptFiles.filter(f =>
-                      /\.(jpg|jpeg|png|webp|bmp|gif)$/i.test(f)
+                      /\.(jpg|jpeg|png|webp|bmp|gif|avif)$/i.test(f)
                     ).length;
                   }
                 }
@@ -33712,7 +33983,7 @@ const server = Bun.serve<UmbraSocketData>({
           const files = await fs.readdir(datasetPath);
           const images = await Promise.all(
             files
-              .filter(f => /\.(jpg|jpeg|png|webp|bmp|gif)$/i.test(f))
+              .filter(f => /\.(jpg|jpeg|png|webp|bmp|gif|avif)$/i.test(f))
               .map(async (f) => {
                 const baseName = f.replace(/\.[^.]+$/, '');
                 // Gallery-dl creates .jpg.txt and .jpg.json, not .txt and .json
@@ -33962,7 +34233,7 @@ const server = Bun.serve<UmbraSocketData>({
             images: Array<{ id: string; url: string; fullUrl?: string; tags?: string[] }>;
           };
 
-          if (!body.dataset || !body.images || body.images.length === 0) {
+          if (!body.dataset || !Array.isArray(body.images) || body.images.length === 0 || body.images.length > 100) {
             return json({ error: 'Dataset and images required' }, 400);
           }
 
@@ -33978,53 +34249,29 @@ const server = Bun.serve<UmbraSocketData>({
           let errors = 0;
           console.log(`[Download] Batch started dataset=${datasetName} images=${body.images.length}`);
 
-          // Download each image and create caption file
+          // Keep this legacy flat-dataset endpoint bounded and apply the same URL/image validation as drag imports.
           for (const img of body.images) {
             try {
-              // Use fullUrl for download if available, otherwise fall back to preview url
+              if (!img || typeof img.id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(img.id)
+                || (img.tags !== undefined && (!Array.isArray(img.tags) || img.tags.some(tag => typeof tag !== 'string')))) {
+                throw new Error('Invalid image ID or tags');
+              }
               const downloadUrl = img.fullUrl || img.url;
-
-              // Fetch the image with proper headers
-              const response = await fetch(downloadUrl, {
-                headers: { 'User-Agent': 'UmbraLab/1.0 (dataset-builder)' }
+              const { bytes } = await fetchDatasetImportImage(downloadUrl, {
+                allowPrivateNetwork: isHostRequest(req, url, server),
               });
-              if (!response.ok) {
-                console.error(`[Download] Failed to fetch ${downloadUrl}: ${response.status}`);
-                errors++;
-                continue;
+              const { extension } = await detectDatasetImportImage(bytes);
+              const filename = await saveDatasetImportedImage(datasetPath, img.id, extension, bytes);
+              if (img.tags?.length) {
+                const base = filename.slice(0, -extension.length);
+                const caption = img.tags.map(tag => tag.replace(/_/g, ' ')).join(', ');
+                await fs.writeFile(join(datasetPath, `${base}.txt`), caption, { flag: 'wx' }).catch((error: NodeJS.ErrnoException) => {
+                  if (error.code !== 'EEXIST') throw error;
+                });
               }
-
-              // Determine file extension from URL or content-type
-              const contentType = response.headers.get('content-type') || '';
-              let ext = 'jpg';
-              if (contentType.includes('png')) ext = 'png';
-              else if (contentType.includes('webp')) ext = 'webp';
-              else if (contentType.includes('gif')) ext = 'gif';
-              else if (downloadUrl.match(/\.(png|jpg|jpeg|webp|gif)$/i)) {
-                ext = downloadUrl.match(/\.(png|jpg|jpeg|webp|gif)$/i)![1].toLowerCase();
-                if (ext === 'jpeg') ext = 'jpg';
-              }
-
-              const filename = `${img.id}.${ext}`;
-              const imagePath = join(datasetPath, filename);
-              const captionPath = join(datasetPath, `${img.id}.txt`);
-
-              // Save image
-              const buffer = await response.arrayBuffer();
-              await fs.writeFile(imagePath, Buffer.from(buffer));
-
-              // Save caption (tags joined with commas for training)
-              if (img.tags && img.tags.length > 0) {
-                // Format tags for training: replace underscores, join with commas
-                const caption = img.tags
-                  .map(tag => tag.replace(/_/g, ' '))
-                  .join(', ');
-                await fs.writeFile(captionPath, caption);
-              }
-
               downloaded++;
             } catch (err) {
-              console.error(`[Download] Error downloading ${img.id}:`, err);
+              console.error(`[Download] Error downloading ${String(img?.id || '')}:`, err);
               errors++;
             }
           }
@@ -34106,7 +34353,7 @@ const server = Bun.serve<UmbraSocketData>({
             const files = await fs.readdir(datasetPath);
             const targetFiles = selectedFiles
               ? selectedFiles.filter(f => files.includes(f))
-              : files.filter(f => /\.(jpg|jpeg|png|webp|bmp|gif)$/i.test(f));
+              : files.filter(f => /\.(jpg|jpeg|png|webp|bmp|gif|avif)$/i.test(f));
 
             let processed = 0;
             for (const imgFile of targetFiles) {
@@ -34399,6 +34646,9 @@ const server = Bun.serve<UmbraSocketData>({
           if (!resolveUserConfigPath(normalizedKey)) {
             return json({ success: false, error: 'Unknown user config key' }, 400);
           }
+          if (normalizedKey === 'local-server-apps' && !isHostRequest(req, url, server)) {
+            return json({ success: false, error: 'Local apps can only be configured from the host PC.' }, 403);
+          }
           return await withUserConfigMutation(normalizedKey, async (configPath) => {
             let value = body.value ?? null;
             if (normalizedKey === 'umbra-ui-lora-presets') {
@@ -34458,6 +34708,9 @@ const server = Bun.serve<UmbraSocketData>({
           const key = String(url.searchParams.get('key') || '').trim().toLowerCase();
           if (!resolveUserConfigPath(key)) {
             return json({ success: false, error: 'Unknown user config key' }, 400);
+          }
+          if (key === 'local-server-apps' && !isHostRequest(req, url, server)) {
+            return json({ success: false, error: 'Local apps can only be configured from the host PC.' }, 403);
           }
           await deleteUserConfigValue(key);
           broadcastUiSessionUpdate(key, null);
@@ -34582,8 +34835,12 @@ const server = Bun.serve<UmbraSocketData>({
             ...nextSettings,
           } as Record<string, unknown>);
 
-          const autoStartError = validateComfyAutoStartSetting(mergedNextSettings, settingsManager.getAppSettings(), isHostRequest(req, url, server));
-          if (autoStartError) return json({ error: autoStartError }, isHostRequest(req, url, server) ? 400 : 403);
+          const hostRequest = isHostRequest(req, url, server);
+          const currentSettings = settingsManager.getAppSettings();
+          const autoStartError = validateComfyAutoStartSetting(mergedNextSettings, currentSettings, hostRequest);
+          if (autoStartError) return json({ error: autoStartError }, hostRequest ? 400 : 403);
+          const comfySettingsError = validateHostOnlyServiceSettings(mergedNextSettings, currentSettings, hostRequest);
+          if (comfySettingsError) return json({ error: comfySettingsError }, hostRequest ? 400 : 403);
           settingsManager.updateAppSettings(mergedNextSettings);
           let comfySecurityResult: ComfySecurityApplyResult | undefined;
           if (Object.prototype.hasOwnProperty.call(mergedNextSettings, 'comfyui.securityLevel') ||
@@ -34622,8 +34879,12 @@ const server = Bun.serve<UmbraSocketData>({
           const nextBundle = normalizeUmbraUserSettingsBundle(rawBundle, currentBundle);
 
           const portableBundleAppSettings = normalizeGalleryAppSettingsForStorage(nextBundle.appSettings);
-          const autoStartError = validateComfyAutoStartSetting(portableBundleAppSettings, settingsManager.getAppSettings(), isHostRequest(req, url, server));
-          if (autoStartError) return json({ error: autoStartError }, isHostRequest(req, url, server) ? 400 : 403);
+          const hostRequest = isHostRequest(req, url, server);
+          const currentSettings = settingsManager.getAppSettings();
+          const autoStartError = validateComfyAutoStartSetting(portableBundleAppSettings, currentSettings, hostRequest);
+          if (autoStartError) return json({ error: autoStartError }, hostRequest ? 400 : 403);
+          const comfySettingsError = validateHostOnlyServiceSettings(portableBundleAppSettings, currentSettings, hostRequest);
+          if (comfySettingsError) return json({ error: comfySettingsError }, hostRequest ? 400 : 403);
           settingsManager.updateAppSettings(portableBundleAppSettings);
           nextBundle.appSettings = portableBundleAppSettings;
           await savePPSettings(nextBundle.powerPrompterSettings);
@@ -36402,7 +36663,7 @@ const server = Bun.serve<UmbraSocketData>({
               return;
             }
             if (ws.readyState !== 1) return;
-            const upstream = new WebSocket(targetUrl);
+            const upstream = new WebSocket(targetUrl, { headers: { 'x-forwarded-for': '0.0.0.0' } });
             (ws.data as any).upstream = upstream;
             upstream.binaryType = 'arraybuffer';
             upstream.onopen = () => {
@@ -36452,7 +36713,7 @@ const server = Bun.serve<UmbraSocketData>({
             ws.close();
             return;
           }
-          const upstream = new WebSocket(targetUrl);
+          const upstream = new WebSocket(targetUrl, { headers: { 'x-forwarded-for': '0.0.0.0' } });
           (ws.data as any).upstream = upstream;
           upstream.binaryType = 'arraybuffer';
           upstream.onopen = () => {
@@ -36688,6 +36949,7 @@ async function gracefulShutdown(signal: string) {
     comfyOwnershipSnapshotCache = null;
     clearComfyProcessTelemetry();
     aitoolkitProcess = null;
+    aitoolkitLaunchedPort = null;
     aitoolkitStartTime = null;
     galleryBridgeProcess = null;
     galleryBridgeStartTime = null;

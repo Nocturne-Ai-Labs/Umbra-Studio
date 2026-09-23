@@ -190,8 +190,16 @@ export async function downloadBooruOriginal(options: {
     }
     const record = { version: 1, url: url.href, md5, source: options.source.source, postId: options.source.postId };
     await fs.writeFile(sourceTemporary, JSON.stringify(record), { flag: 'wx' });
-    await fs.rename(sourceTemporary, join(options.conceptPath, booruSourceSidecar(options.filename)));
     await fs.rename(temporary, destination);
+    // Publish source metadata only after the verified image has been installed.
+    // A failed image replacement must leave the old image and its source paired.
+    try {
+      await fs.rename(sourceTemporary, join(options.conceptPath, booruSourceSidecar(options.filename)));
+    } catch (error) {
+      // The old source must not be used later to repair a newly replaced image.
+      await fs.rm(join(options.conceptPath, booruSourceSidecar(options.filename)), { force: true }).catch(() => undefined);
+      throw error;
+    }
     await ensureCaption(options.conceptPath, options.filename, options.tags);
     return { filename: options.filename, revision: (await fs.stat(destination)).mtimeMs, alreadyExists: false };
   } finally {

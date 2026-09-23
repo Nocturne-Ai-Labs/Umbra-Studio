@@ -169,6 +169,7 @@ export function DatasetsTab() {
   const [isReg, setIsReg] = useState(false);
   const [moveToConcept, setMoveToConcept] = useState('');
   const [isImporting, setIsImporting] = useState(false);
+  const importInProgress = useRef(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [nativeDropActive, setNativeDropActive] = useState(false);
@@ -207,13 +208,11 @@ export function DatasetsTab() {
   const [flaggedForDeletion, setFlaggedForDeletion] = useState<Set<string>>(new Set());
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const importDroppedImage = async (img: any) => {
-    if (!selectedDataset || !selectedConcept) return;
-
+  const importDroppedImage = async (img: any, dataset: string, concept: string) => {
     if (img?.kind === 'file' && img.file instanceof File) {
       const formData = new FormData();
-      formData.append('dataset', selectedDataset);
-      formData.append('concept', selectedConcept);
+      formData.append('dataset', dataset);
+      formData.append('concept', concept);
       formData.append('image', img.file, img.name || img.file.name || 'image.png');
 
       const response = await fetch('/api/datasets/import-uploaded-image', {
@@ -233,8 +232,8 @@ export function DatasetsTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: img.url,
-          dataset: selectedDataset,
-          concept: selectedConcept,
+          dataset,
+          concept,
         }),
       });
       if (!response.ok) {
@@ -245,15 +244,15 @@ export function DatasetsTab() {
     }
 
     const sourcePath = img.relativePath || img.path;
-    if (!sourcePath) return;
+    if (!sourcePath) throw new Error('Dropped image has no source path');
 
     const response = await fetch('/api/datasets/import-image', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         sourcePath: sourcePath,
-        dataset: selectedDataset,
-        concept: selectedConcept,
+        dataset,
+        concept,
       }),
     });
     if (!response.ok) {
@@ -263,17 +262,37 @@ export function DatasetsTab() {
   };
 
   const importDroppedImages = async (droppedImages: any[]) => {
-    if (!selectedDataset || !selectedConcept || droppedImages.length === 0) return;
+    if (!selectedDataset || !selectedConcept || droppedImages.length === 0 || importInProgress.current) return;
 
+    const dataset = selectedDataset;
+    const concept = selectedConcept;
+    importInProgress.current = true;
     setIsImporting(true);
     try {
+      let imported = 0;
+      const failures: string[] = [];
       for (const img of droppedImages) {
-        await importDroppedImage(img);
+        try {
+          await importDroppedImage(img, dataset, concept);
+          imported++;
+        } catch (error) {
+          failures.push(error instanceof Error ? error.message : 'Image import failed');
+        }
       }
-      await loadImages();
-    } catch (err) {
-      console.error('[DatasetsTab] Failed to import images:', err);
+      const refreshed = await loadImages();
+      if (refreshed === null && activeConcept.current === conceptKey) {
+        showToast(`Imported ${imported} of ${droppedImages.length} images, but could not refresh the concept.`, 'error');
+        return;
+      }
+      if (failures.length > 0) {
+        showToast(`Imported ${imported} of ${droppedImages.length} images. ${failures[0]}`, 'error');
+      } else {
+        showToast(`Imported ${imported} image${imported === 1 ? '' : 's'} to ${concept}`, 'success');
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not refresh imported images', 'error');
     } finally {
+      importInProgress.current = false;
       setIsImporting(false);
       setNativeDropActive(false);
     }
@@ -466,18 +485,29 @@ export function DatasetsTab() {
     triggerTags,
   ]);
 
-  const loadImages = async () => {
-    if (!selectedDataset || !selectedConcept || activeConcept.current !== conceptKey) return;
+  const loadImages = async (): Promise<DatasetImage[] | null> => {
+    if (!selectedDataset || !selectedConcept || activeConcept.current !== conceptKey) return null;
     const sequence = ++imageLoadSequence.current;
     setIsLoadingImages(true);
     try {
       const imgs = await getConceptImages(selectedDataset, selectedConcept);
       if (activeConcept.current === conceptKey && sequence === imageLoadSequence.current && imgs !== null) {
         setImages(imgs);
+        return imgs;
       }
     } finally {
       if (activeConcept.current === conceptKey && sequence === imageLoadSequence.current) setIsLoadingImages(false);
     }
+    return null;
+  };
+
+  const refreshAfterFailedDelete = async () => {
+    const current = await loadImages();
+    if (!current) return;
+    const remaining = new Set(current.map(image => image.filename));
+    setSelectedImages(previous => new Set([...previous].filter(name => remaining.has(name))));
+    setFlaggedForDeletion(previous => new Set([...previous].filter(name => remaining.has(name))));
+    setFocusedImage(previous => previous && remaining.has(previous.filename) ? previous : null);
   };
 
   // Handlers
@@ -545,8 +575,13 @@ export function DatasetsTab() {
 
     if (!confirm(`Delete ${selectedImages.size} images?`)) return;
 
-    const success = await deleteImages(selectedDataset, selectedConcept, Array.from(selectedImages));
-    if (!success || activeConcept.current !== conceptKey) return;
+    const result = await deleteImages(selectedDataset, selectedConcept, Array.from(selectedImages));
+    if (!result.success) {
+      await refreshAfterFailedDelete();
+      showToast(result.error, 'error');
+      return;
+    }
+    if (activeConcept.current !== conceptKey) return;
     await loadImages();
     if (activeConcept.current !== conceptKey) return;
     setSelectedImages(new Set());
@@ -556,8 +591,12 @@ export function DatasetsTab() {
   const handleMoveSelected = async () => {
     if (!selectedDataset || !selectedConcept || !moveToConcept || selectedImages.size === 0) return;
 
-    const success = await moveImages(selectedDataset, Array.from(selectedImages), selectedConcept, moveToConcept);
-    if (!success || activeConcept.current !== conceptKey) return;
+    const result = await moveImages(selectedDataset, Array.from(selectedImages), selectedConcept, moveToConcept);
+    if (!result.success) {
+      showToast(result.error, 'error');
+      return;
+    }
+    if (activeConcept.current !== conceptKey) return;
     await loadImages();
     if (activeConcept.current !== conceptKey) return;
     setSelectedImages(new Set());
@@ -711,8 +750,13 @@ export function DatasetsTab() {
 
   const handleConfirmDelete = async () => {
     if (!selectedDataset || !selectedConcept) return;
-    const success = await deleteImages(selectedDataset, selectedConcept, Array.from(flaggedForDeletion));
-    if (!success || activeConcept.current !== conceptKey) return;
+    const result = await deleteImages(selectedDataset, selectedConcept, Array.from(flaggedForDeletion));
+    if (!result.success) {
+      await refreshAfterFailedDelete();
+      showToast(result.error, 'error');
+      return;
+    }
+    if (activeConcept.current !== conceptKey) return;
     await loadImages();
     if (activeConcept.current !== conceptKey) return;
     setFlaggedForDeletion(new Set());

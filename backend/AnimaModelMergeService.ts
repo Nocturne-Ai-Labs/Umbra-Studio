@@ -116,7 +116,7 @@ export class AnimaModelMergeService {
   }
 
   private async source(id: unknown, root: string, lora = false) {
-    if (typeof id !== 'string' || !(lora ? /^loras\// : /^(diffusion_models|checkpoints|unet)\//).test(id) || !id.endsWith('.safetensors')) throw new Error('Select a local safetensors model.');
+    if (typeof id !== 'string' || !(lora ? /^loras\// : /^(diffusion_models|checkpoints|unet)\//).test(id) || !/\.safetensors$/i.test(id)) throw new Error('Select a local safetensors model.');
     const base = await realpath(root);
     const path = await realpath(resolve(root, id));
     const rel = relative(base, path);
@@ -131,7 +131,7 @@ export class AnimaModelMergeService {
       for (const entry of await readdir(directory, { withFileTypes: true }).catch(() => [])) {
         const path = join(directory, entry.name);
         if (entry.isDirectory()) await walk(path);
-        else if (entry.isFile() && entry.name.endsWith('.safetensors')) items.push({ id: relative(modelsRoot, path).replaceAll('\\', '/'), name: entry.name, bytes: (await stat(path)).size });
+        else if (entry.isFile() && /\.safetensors$/i.test(entry.name)) items.push({ id: relative(modelsRoot, path).replaceAll('\\', '/'), name: entry.name, bytes: (await stat(path)).size });
       }
     };
     await walk(join(modelsRoot, 'loras'));
@@ -149,7 +149,7 @@ export class AnimaModelMergeService {
       const bytes = Buffer.alloc(length);
       await handle.read(bytes, 0, length, 8);
       const metadata = JSON.parse(bytes.toString('utf8')).__metadata__ || {};
-      const sidecar = await readFile(path.replace(/\.safetensors$/, '.civitai.info'), 'utf8').then(JSON.parse).catch(() => null);
+      const sidecar = await readFile(path.replace(/\.safetensors$/i, '.civitai.info'), 'utf8').then(JSON.parse).catch(() => null);
       return { triggers: extractUmbraUiTriggerWords(sidecar, metadata) };
     } finally { await handle.close(); }
   }
