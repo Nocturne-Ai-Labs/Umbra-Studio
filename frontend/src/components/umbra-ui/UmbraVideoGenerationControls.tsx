@@ -753,6 +753,7 @@ export function UmbraVideoGenerationControls({
   const [selectedStoryboardShotId, setSelectedStoryboardShotId] = React.useState('');
   const [sourcePreviewUrl, setSourcePreviewUrl] = React.useState('');
   const [isQueueing, setIsQueueing] = React.useState(false);
+  const queueInFlightRef = React.useRef(false);
   const [resourcePicker, setResourcePicker] = React.useState<VideoResourcePicker | null>(null);
   const [pinnedOutputFolder, setPinnedOutputFolder] = usePinnedOutputFolder('video');
   const { placement, setPlacement, effectivePlacement } = useUmbraQueuePlacement(queueSummary);
@@ -1624,13 +1625,14 @@ export function UmbraVideoGenerationControls({
     ));
 
   const handleQueue = async (requestedPlacement: UmbraQueuePlacement = effectivePlacement) => {
-    if (isQueueing) return;
+    if (queueInFlightRef.current) return;
     if (turboIssue) { showToast(turboIssue, 'error'); return; }
     if (videoLoraIssue) { showToast(videoLoraIssue, 'error'); return; }
     const queuePlacement = queueSummary.powerPrompterActive ? requestedPlacement : 'end';
     if (queuePlacement === 'interrupt' && !window.confirm(
       'Stop the current Power Prompter image and run this Umbra UI video next?',
     )) return;
+    queueInFlightRef.current = true;
     setIsQueueing(true);
     try {
       const queuedSeed = resolveUmbraUiQueueSeed(video.seed, video.seedMode);
@@ -1655,6 +1657,7 @@ export function UmbraVideoGenerationControls({
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to queue video.', 'error');
     } finally {
+      queueInFlightRef.current = false;
       setIsQueueing(false);
     }
   };
