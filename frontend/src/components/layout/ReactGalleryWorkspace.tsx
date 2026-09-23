@@ -9430,6 +9430,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       const payload = await response.json().catch(() => ({} as Record<string, unknown>));
       if (!response.ok) throw new Error(String(payload?.error || 'Failed to update NSFW protection'));
       applyManualNsfwToLoadedFiles(normalized, marked);
+      window.dispatchEvent(new CustomEvent('umbra:gallery-privacy-changed', {
+        detail: { paths: normalized, marked },
+      }));
       clearPageCacheForFolder(currentFolder);
       window.dispatchEvent(new CustomEvent('umbra:gallery-content-changed', {
         detail: { path: currentFolder, folderPath: currentFolder, source: 'react-gallery', reason: 'privacy' },

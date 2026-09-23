@@ -925,6 +925,25 @@ export function UmbraFilmstrip({
   }, [refreshImages]);
 
   useEffect(() => {
+    const onPrivacyChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ paths?: string[]; marked?: boolean }>).detail;
+      const paths = new Set((Array.isArray(detail?.paths) ? detail.paths : [])
+        .map((path) => normalizePath(path).toLowerCase()).filter(Boolean));
+      if (!paths.size) return;
+      if (detail?.marked) {
+        const protect = (image: FilmstripImage): FilmstripImage => paths.has(normalizePath(image.path).toLowerCase())
+          ? { ...image, privacyClass: 'nsfw' } : image;
+        setImages((current) => current.map(protect));
+        setRecentGenerationOutputImages((current) => current.map(protect));
+      } else {
+        setRecentGenerationOutputImages((current) => current.filter((image) => !paths.has(normalizePath(image.path).toLowerCase())));
+      }
+    };
+    window.addEventListener('umbra:gallery-privacy-changed', onPrivacyChanged as EventListener);
+    return () => window.removeEventListener('umbra:gallery-privacy-changed', onPrivacyChanged as EventListener);
+  }, []);
+
+  useEffect(() => {
     const onRemovePaths = (event: Event) => {
       const custom = event as CustomEvent<{ paths?: string[]; source?: string }>;
       const removedPaths = Array.isArray(custom?.detail?.paths)
