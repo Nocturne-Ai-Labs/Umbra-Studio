@@ -28258,6 +28258,9 @@ async function handleFsMkdir(req: Request): Promise<Response> {
 
     const resolved = resolvePath(path);
     if (!resolved) return json({ error: 'Invalid path' }, 400);
+    if (!(await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots()))) {
+      return json({ error: 'Access denied' }, 403);
+    }
 
     await fsWorkerService.mkdir({ fullPath: resolved.fullPath });
     invalidateFsListCacheForPaths([path, dirname(path)], 'mkdir');
@@ -28289,6 +28292,10 @@ async function handleFsRename(req: Request): Promise<Response> {
 
     const newPath = resolve(dirname(resolved.fullPath), name);
     if (!isPathInsideAllowedRoots(newPath)) return json({ error: 'Access denied' }, 403);
+    const authorize = await createGalleryPathAuthorizer(getGalleryTransferAllowedRoots());
+    if (!(await authorize(resolved.fullPath)) || !(await authorize(newPath))) {
+      return json({ error: 'Access denied' }, 403);
+    }
 
     if (resolve(resolved.fullPath) !== resolve(newPath)) {
       try {
@@ -28334,6 +28341,7 @@ async function handleFsRenameBatch(req: Request): Promise<Response> {
     };
     const rawItems = Array.isArray(body?.items) ? body.items : [];
     if (rawItems.length === 0) return json({ error: 'Missing items' }, 400);
+    const authorize = await createGalleryPathAuthorizer(getGalleryTransferAllowedRoots());
 
     const results: Array<{
       path: string;
@@ -28489,6 +28497,10 @@ async function handleFsRenameBatch(req: Request): Promise<Response> {
           ? Number(desiredTargetCounts.get(normalizedDesiredPath) || 0) > 1
           : false;
         newPath = await resolveUniqueRenameTarget(resolved.fullPath, desiredPath, forceSequence);
+        if (!(await authorize(resolved.fullPath)) || !(await authorize(newPath))) {
+          results.push({ path: oldPath, success: false, error: 'Access denied' });
+          continue;
+        }
       } catch (error: any) {
         results.push({
           path: oldPath,
