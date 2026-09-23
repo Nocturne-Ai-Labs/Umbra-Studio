@@ -52,6 +52,7 @@ import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
 import { useGalleryTransfer, startGalleryTransfer, useGalleryUndoMove, undoGalleryMove } from '@/lib/galleryTransfers';
 import { useGalleryTreeRefresh } from '@/lib/galleryTreeRefresh';
+import { GalleryCachedPageValidation } from '@/lib/galleryCachedPageValidation';
 import { prepareGalleryDownload, startGalleryDownload } from '@/lib/galleryDownloads';
 import { GalleryTransferStrip } from './GalleryTransferStrip';
 import { archiveIsActive, startGalleryArchive, useGalleryArchive } from '@/lib/galleryArchives';
@@ -434,6 +435,7 @@ type GalleryOptimisticRemovalSnapshot = GalleryOptimisticRemovalState & {
 type GalleryPageCacheEntry = {
   payload: GalleryListPayload;
   cachedAt: number;
+  summarySignature?: string;
 };
 
 const DEFAULT_OUTPUT_ROOT = 'Tools/ComfyUI/output';
@@ -4923,6 +4925,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const treeCacheRef = useRef<Map<string, GalleryFolderTreeNode[]>>(new Map());
   const treeRequestByPathRef = useRef<Map<string, { token: symbol; promise: Promise<GalleryFolderTreeNode[]> }>>(new Map());
   const pageCacheRef = useRef<Map<string, GalleryPageCacheEntry>>(new Map());
+  const cachedPageValidationRef = useRef(new GalleryCachedPageValidation());
   const folderLoadAbortRef = useRef<AbortController | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchSuggestAbortRef = useRef<AbortController | null>(null);
@@ -5570,6 +5573,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     if (!preserveScroll) scrollParentRef.current?.scrollTo({ top: 0 });
     setOpeningFolder((current) => (pathsEqual(current, folderPath) ? current : folderPath));
     if (cachedPayload) {
+      cachedPageValidationRef.current.markCachedPage(cacheKey);
       setLoading(false);
       const cachedResult = applyPayload(cachedPayload);
       if (cachedResult.stale) return;
@@ -5637,6 +5641,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       if (!isTrashFolder) writeCachedPage(cacheKey, payload);
       const applied = applyPayload(payload);
       if (applied.stale) return;
+      cachedPageValidationRef.current.clearAfterFreshPage(cacheKey);
       traceGalleryLoad({
         event: 'replace_complete',
         folderPath,
@@ -5826,6 +5831,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       const nextTotal = Math.max(Number(payload.total || 0), nextFiles.length);
       setTotal(nextTotal);
       clearPageCacheForFolder(folderPath);
+      cachedPageValidationRef.current.clearAfterFreshPage(galleryPageCacheKey(folderPath, sortBy, sortOrder));
 
       if (added > 0 || updated > 0 || removed) {
         const appendOnly = added > 0 && !updated && !removed;
@@ -8674,6 +8680,15 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         const signature = folderSummarySignature(summary);
         const summaryTotal = Math.max(0, Math.trunc(Number(summary.totalMediaCount || 0)));
         const summarySubfolders = Math.max(0, Math.trunc(Number(summary.subfolderCount || 0)));
+        const cacheKey = galleryPageCacheKey(folderPath, sortBy, sortOrder);
+        const cachedPage = pageCacheRef.current.get(cacheKey);
+        const cachedPagePending = cachedPageValidationRef.current.isPending(cacheKey);
+        const cachedPageNeedsRefresh = cachedPageValidationRef.current.needsRefreshForSummary(
+          cacheKey, cachedPage?.summarySignature, signature,
+        );
+        // A signature belongs to the listing that was rendered. Keep an old
+        // signature until reconciliation replaces that listing.
+        if (!cachedPagePending && cachedPage && !cachedPage.summarySignature) cachedPage.summarySignature = signature;
         const previous = folderSummarySnapshotRef.current;
         folderSummarySnapshotRef.current = {
           path: folderPath,
@@ -8685,15 +8700,13 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         const stateTotal = Math.max(0, Math.trunc(Number(total || filesRef.current.length)));
         const folderChanged = !previous || !pathsEqual(previous.path, folderPath);
         const signatureChanged = previous?.signature !== signature;
-        const mediaChanged = previous
-          ? previous.totalMediaCount !== summaryTotal
-          : summaryTotal !== stateTotal;
-        const subfoldersChanged = previous
-          ? previous.subfolderCount !== summarySubfolders
-          : false;
+        const mediaChanged = folderChanged
+          ? summaryTotal !== stateTotal
+          : previous!.totalMediaCount !== summaryTotal;
+        const subfoldersChanged = !folderChanged && previous!.subfolderCount !== summarySubfolders;
 
-        if (folderChanged && !mediaChanged) return;
-        if (!signatureChanged && !mediaChanged) return;
+        if (folderChanged && !mediaChanged && !cachedPageNeedsRefresh) return;
+        if (!signatureChanged && !mediaChanged && !cachedPageNeedsRefresh) return;
 
         traceGalleryLoad({
           event: 'folder_summary_changed',
@@ -8710,7 +8723,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           setFolderPreviewRefreshVersion((current) => current + 1);
         }
 
-        if (mediaChanged || previous?.signature !== signature) {
+        if (mediaChanged || signatureChanged || cachedPageNeedsRefresh) {
           scheduleCurrentFolderReconcile(folderPath, summary, 'summary-poll');
         }
       } catch (error) {
@@ -8765,6 +8778,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     loading,
     scheduleCurrentFolderReconcile,
     selectAllLoading,
+    sortBy,
+    sortOrder,
     total,
     transferInProgress,
   ]);
