@@ -56,6 +56,7 @@ import { UmbraStagedVideoPreviewGrants } from './backend/UmbraStagedVideoPreview
 import { isCivitaiModelDownloadUrl } from './backend/ModelDownloadHttp';
 import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
 import { fetchLocalServerProxy, readLocalServerProxyText } from './backend/LocalServerProxyTransfer';
+import { getLocalServerProxyCookieHeader, rewriteLocalServerProxySetCookies } from './backend/LocalServerProxyCookies';
 import { createGalleryPathAuthorizer, resolveAllowedExistingGalleryPath, resolveAllowedGalleryPath } from './backend/GalleryPathAccess';
 import { galleryFallbackSearchMediaType, inspectGalleryFallbackSearchMedia } from './backend/GalleryFallbackSearchMedia';
 import { buildGalleryDownloadArchive, prepareGalleryDownloadResponse, getPreparedGalleryDownload, type GalleryDownloadEntry } from './backend/GalleryDownloadArchiveService';
@@ -4611,6 +4612,8 @@ async function proxyLocalServerHttp(req: Request, sourceUrl: URL, server: Reques
   headers.delete('origin');
   headers.delete('referer');
   headers.delete('cookie');
+  const upstreamCookie = getLocalServerProxyCookieHeader(req.headers.get('cookie'), token);
+  if (upstreamCookie) headers.set('cookie', upstreamCookie);
   anonymizeProxyRequestHeaders(headers);
   headers.set('accept-encoding', 'identity');
 
@@ -4632,6 +4635,7 @@ async function proxyLocalServerHttp(req: Request, sourceUrl: URL, server: Reques
   }
 
   const responseHeaders = new Headers(upstream.headers);
+  rewriteLocalServerProxySetCookies(responseHeaders, token, `${LOCAL_SERVER_PROXY_PREFIX}${token}`, sourceUrl.pathname);
   responseHeaders.delete('content-encoding');
   responseHeaders.delete('content-length');
   responseHeaders.delete('access-control-allow-origin');
@@ -31392,6 +31396,7 @@ function crc32(buf: Buffer): number {
 type UmbraSocketData = {
   endpoint: string;
   targetUrl?: string;
+  proxyCookieHeader?: string;
   remoteClient?: boolean;
   remoteSessionHash?: string;
   queuedMessages?: Array<string | Buffer>;
@@ -31893,6 +31898,7 @@ const server = Bun.serve<UmbraSocketData>({
               endpoint: '/local-server-proxy/ws',
               ...getRemoteWebSocketAuthData(req, url, server),
               targetUrl,
+              proxyCookieHeader: getLocalServerProxyCookieHeader(req.headers.get('cookie'), parsed.token),
             },
           });
           if (upgraded) return undefined;
@@ -37768,6 +37774,7 @@ const server = Bun.serve<UmbraSocketData>({
       }
       if (endpoint === '/local-server-proxy/ws') {
         const targetUrl = String((ws.data as any)?.targetUrl || '');
+        const proxyCookieHeader = String((ws.data as any)?.proxyCookieHeader || '');
         const queuedMessages: Array<string | Buffer> = [];
         (ws.data as any).queuedMessages = queuedMessages;
         try {
@@ -37775,7 +37782,9 @@ const server = Bun.serve<UmbraSocketData>({
             ws.close();
             return;
           }
-          const upstream = new WebSocket(targetUrl, { headers: { 'x-forwarded-for': '0.0.0.0' } });
+          const upstreamHeaders: Record<string, string> = { 'x-forwarded-for': '0.0.0.0' };
+          if (proxyCookieHeader) upstreamHeaders.cookie = proxyCookieHeader;
+          const upstream = new WebSocket(targetUrl, { headers: upstreamHeaders });
           (ws.data as any).upstream = upstream;
           upstream.binaryType = 'arraybuffer';
           upstream.onopen = () => {
