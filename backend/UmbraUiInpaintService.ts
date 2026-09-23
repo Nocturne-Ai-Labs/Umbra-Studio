@@ -1125,6 +1125,7 @@ export class UmbraUiInpaintService {
   private readonly atomicReplacementHooks?: UmbraUiInpaintServiceOptions['atomicReplacementHooks'];
   private persistQueue = Promise.resolve();
   private nodeTypesCache: { fetchedAt: number; values: Set<string>; objectInfo: Record<string, any> } | null = null;
+  private nodeTypesLoading: Promise<Set<string>> | null = null;
   private readonly outputMetadataByPpuid = new Map<string, Record<string, unknown>>();
   private readonly previews = new Map<string, UmbraUiInpaintPreview>();
   private readonly previewSockets = new Map<string, WebSocket>();
@@ -3341,16 +3342,22 @@ export class UmbraUiInpaintService {
     if (this.nodeTypesCache && Date.now() - this.nodeTypesCache.fetchedAt < 30_000) {
       return new Set(this.nodeTypesCache.values);
     }
-    const response = await fetch(`${this.getComfyBaseUrl()}/object_info`, {
-      cache: 'no-store',
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!response.ok) throw new Error(`Unable to inspect ComfyUI inpaint support (${response.status}).`);
-    const payload = await response.json().catch(() => ({}));
-    const objectInfo = payload && typeof payload === 'object' ? payload as Record<string, any> : {};
-    const values = new Set(Object.keys(objectInfo));
-    this.nodeTypesCache = { fetchedAt: Date.now(), values, objectInfo };
-    return new Set(values);
+    if (this.nodeTypesLoading) return new Set(await this.nodeTypesLoading);
+    const request = (async () => {
+      const response = await fetch(`${this.getComfyBaseUrl()}/object_info`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) throw new Error(`Unable to inspect ComfyUI inpaint support (${response.status}).`);
+      const payload = await response.json().catch(() => ({}));
+      const objectInfo = payload && typeof payload === 'object' ? payload as Record<string, any> : {};
+      const values = new Set(Object.keys(objectInfo));
+      this.nodeTypesCache = { fetchedAt: Date.now(), values, objectInfo };
+      return values;
+    })();
+    this.nodeTypesLoading = request;
+    try { return new Set(await request); }
+    finally { if (this.nodeTypesLoading === request) this.nodeTypesLoading = null; }
   }
 
   private async getNodeInputChoices(nodeType: string, inputName: string): Promise<string[]> {
