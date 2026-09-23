@@ -2,6 +2,16 @@ import { isLocalStagedQueueRequestId } from './queueCore';
 
 type QueueRow = { requestId: string; exiting: boolean };
 
+export function hasQueueSnapshotForCurrentSocket(
+  websocketReady: boolean,
+  currentSocket: object | null,
+  snapshotSocket: object | null,
+  pendingBatchAdmissions = 0,
+): boolean {
+  return websocketReady && currentSocket !== null && currentSocket === snapshotSocket
+    && pendingBatchAdmissions <= 0;
+}
+
 export function shouldBlockStageForPausedBackendQueue(
   paused: boolean,
   backendRequestIds: ReadonlySet<string>,
@@ -71,4 +81,16 @@ export function collectQueueControlRequestIds(input: {
 
 export function hasOnlyLocalStagedQueue(staged: boolean, backendRequestIds: ReadonlySet<string>): boolean {
   return staged && backendRequestIds.size === 0;
+}
+
+export function resolveActiveQueueControlRequestId(
+  visualRequestId: string,
+  backendActivePromptRequestIds: ReadonlySet<string>,
+  bridgeActiveRequestIds: readonly string[],
+): string {
+  const requestId = String(visualRequestId || '').trim();
+  return requestId && (
+    backendActivePromptRequestIds.has(requestId)
+    || bridgeActiveRequestIds.some((id) => String(id || '').trim() === requestId)
+  ) ? requestId : '';
 }

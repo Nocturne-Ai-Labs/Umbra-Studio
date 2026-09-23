@@ -4899,6 +4899,7 @@ interface BackendPowerPrompterQueueTask {
   previewProgressSignatures: Map<string, string>;
 }
 const backendPowerPrompterQueueTasks = new Map<string, BackendPowerPrompterQueueTask>();
+const pendingPowerPrompterBatchAdmissionTokens = new Set<symbol>();
 const BACKEND_PP_QUEUE_CANCELLED = 'Backend Power Prompter queue canceled.';
 const BACKEND_PP_QUEUE_HEARTBEAT_MS = 30000;
 const POWER_PROMPTER_QUEUE_STATE_SNAPSHOT_ENABLED = false;
@@ -5337,8 +5338,10 @@ function clonePowerPrompterQueueControllerSnapshot(reason?: string) {
     backendOwnedHistory: true,
     savedQueues: {
       ...getSavedQueueAvailability(powerPrompterQueueControllerState),
-      canLoad: !powerPrompterQueueControllerState.requests.some((request) => request.prompts.some((prompt) => ['pending', 'submitting', 'running'].includes(prompt.status))),
+      canLoad: pendingPowerPrompterBatchAdmissionTokens.size === 0
+        && !powerPrompterQueueControllerState.requests.some((request) => request.prompts.some((prompt) => ['pending', 'submitting', 'running'].includes(prompt.status))),
     },
+    pendingBatchAdmissions: pendingPowerPrompterBatchAdmissionTokens.size,
     version: powerPrompterQueueControllerState.version,
     paused: powerPrompterQueueControllerState.paused,
     activeRequestId: powerPrompterQueueControllerState.activeRequestId,
@@ -10903,6 +10906,24 @@ async function handlePrompterApiWorkflowQueueBatchRequest(
   data: any,
   batchRequestId: string,
 ) {
+  // Reserve synchronously, before wildcard or pipeline validation can await.
+  // Batch request IDs are client supplied and may collide, so use a unique token.
+  const admissionToken = Symbol('power_prompter_batch_admission');
+  pendingPowerPrompterBatchAdmissionTokens.add(admissionToken);
+  broadcastPowerPrompterQueueControllerSnapshot('batch_admission_started', ws);
+  try {
+    await processPrompterApiWorkflowQueueBatchRequest(ws, data, batchRequestId);
+  } finally {
+    pendingPowerPrompterBatchAdmissionTokens.delete(admissionToken);
+    broadcastPowerPrompterQueueControllerSnapshot('batch_admission_finished', ws);
+  }
+}
+
+async function processPrompterApiWorkflowQueueBatchRequest(
+  ws: ServerWebSocket<unknown>,
+  data: any,
+  batchRequestId: string,
+) {
   const rawGroups = Array.isArray(data?.groups) ? data.groups : [];
   const wildcards = rawGroups.some((group: any) => hasPrompterQueueWildcardReferences(group?.prompts, group?.state))
     ? await listPowerPrompterWildcards()
@@ -11183,11 +11204,38 @@ function forwardPrompterQueueControlToComfyTarget(
   const controlData = !isBackendPipelineTarget && data?.scope === 'umbra_ui_all'
     ? { ...data, scope: undefined }
     : data;
+  const targetedLiveBackendRequestIds = isBackendPipelineTarget
+    && (type === 'queue_cancel' || type === 'queue_clear_future')
+    ? collectBackendPowerPrompterRequestIdsForControl(controlData, type)
+      .filter((id) => hasLivePowerPrompterQueuePrompts(findPowerPrompterQueueControllerRequest(id)?.prompts))
+    : [];
+  const hasPotentialSubmittedBackendPrompt = Array.from(backendPowerPrompterQueueTasks.entries())
+    .some(([id, task]) => {
+      const prompt = findPowerPrompterQueueControllerRequest(id)?.prompts[task.activePromptIndex];
+      const promptId = String(task.promptIds[task.activePromptIndex] || '').trim();
+      return task.canceled || task.abortController.signal.aborted
+        || prompt?.status === 'submitting' || prompt?.status === 'running'
+        || task.cancelInFlightPromptIds.size > 0
+        || (!!promptId && prompt?.status !== 'completed' && prompt?.status !== 'failed' && prompt?.status !== 'interrupted');
+    });
+  // Check before applying control: a paused controller can still have a prompt
+  // in flight if another client paused while submission was already underway.
+  // Recently canceled requests can also have a submitted task after their
+  // controller row becomes terminal, so inspect active backend workers too.
+  const noSubmittedPromptBeforeControl = powerPrompterQueueControllerState.paused
+    && !hasPotentialSubmittedBackendPrompt
+    && targetedLiveBackendRequestIds.length > 0
+    && targetedLiveBackendRequestIds.every((id) => {
+      const request = findPowerPrompterQueueControllerRequest(id);
+      return request?.prompts.every((prompt) => prompt.status !== 'submitting' && prompt.status !== 'running') === true;
+    });
   const backendAffectedRequestIds = type === 'queue_cancel'
     || type === 'queue_clear_future'
     || type === 'queue_interrupt_active'
     ? applyBackendPowerPrompterQueueControl(controlData, type)
     : [];
+  const noSubmittedPrompt = noSubmittedPromptBeforeControl
+    && targetedLiveBackendRequestIds.every((id) => backendAffectedRequestIds.includes(id));
 
   if (isBackendPipelineTarget) {
     if (type === 'queue_pause' || type === 'queue_resume') {
@@ -11213,6 +11261,7 @@ function forwardPrompterQueueControlToComfyTarget(
         clearedRequestIds: backendAffectedRequestIds,
         success: backendAffectedRequestIds.length > 0,
         backendHandled: true,
+        ...(noSubmittedPrompt ? { noSubmittedPrompt: true } : {}),
         ...(backendAffectedRequestIds.length > 0 ? {} : { error: 'No backend pipeline queue jobs were cleared.' }),
       });
       return;
@@ -11224,6 +11273,7 @@ function forwardPrompterQueueControlToComfyTarget(
       requestIds: backendAffectedRequestIds,
       success: backendAffectedRequestIds.length > 0,
       backendHandled: true,
+      ...(noSubmittedPrompt ? { noSubmittedPrompt: true } : {}),
       ...(backendAffectedRequestIds.length > 0 ? {} : { error: 'No backend pipeline queue jobs were canceled.' }),
     });
     return;
@@ -25058,6 +25108,9 @@ async function capturePausedPowerPrompterQueue() {
 }
 
 function assertSavedQueueCanLoad() {
+  if (pendingPowerPrompterBatchAdmissionTokens.size > 0) {
+    throw new Error('Wait for pending Power Prompter queue admission before loading a saved queue.');
+  }
   if (powerPrompterQueueControllerState.requests.some((request) => request.prompts.some((prompt) => ['pending', 'submitting', 'running'].includes(prompt.status)))) {
     throw new Error('Finish or clear the current queue before loading a saved Power Prompter queue.');
   }
