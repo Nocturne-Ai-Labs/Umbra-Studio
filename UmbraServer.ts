@@ -11,6 +11,7 @@ import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
 
 import { applyMiniMaxH3Acceleration, assertMiniMaxH3TurboInstalled, assertMiniMaxH3GuidesInstalled, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
 import { applyUmbraUiVideoLoraStack, assertUmbraUiVideoLoraStackInstalled } from './backend/UmbraUiVideoLoraStack';
+import { bindPPGenerationToWorkflowVideo } from './backend/UmbraUiVideoGenerationBinding';
 import { normalizeUmbraVideoLoraStack, type UmbraVideoLoraEntry } from './shared/umbra-ui/videoLoraStack';
 import { readComfyInputChoices } from './shared/umbra-ui/comfyInputChoices';
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
@@ -8039,22 +8040,11 @@ function compileUmbraUiPipelineWorkflow(
 
   const rawGeneration = options.generation || state?.generation;
   const workflowDescriptor = describePPApiWorkflow(rawWorkflow);
-  const rawGenerationRecord = rawGeneration && typeof rawGeneration === 'object'
-    ? rawGeneration as Record<string, unknown>
-    : {};
-  const generation = normalizePPGenerationControls(workflowDescriptor.mediaType === 'video'
-    ? {
-      ...rawGenerationRecord,
-      mediaType: 'video',
-      video: {
-        ...(String(rawGenerationRecord.mediaType || '').trim().toLowerCase() === 'video'
-          ? (rawGenerationRecord.video as Record<string, unknown> || {})
-          : getUmbraUiVideoControlsSession()),
-        family: workflowDescriptor.videoFamily || 'wan22',
-        mode: workflowDescriptor.videoMode || 'text_to_video',
-      },
-    }
-    : rawGeneration);
+  const generation = normalizePPGenerationControls(bindPPGenerationToWorkflowVideo(
+    rawGeneration,
+    workflowDescriptor,
+    getUmbraUiVideoControlsSession,
+  ));
   const activeImagePipeline = options.selectedPipeline;
   const activeImageCapabilities = activeImagePipeline?.capabilities;
   const optionalStagePolicy = resolveUmbraUiOptionalStagePolicy(
@@ -24296,7 +24286,11 @@ async function assertPPApiWorkflowExecutionReady(
   context?: Awaited<ReturnType<typeof createPPQueueValidationContext>>,
 ): Promise<void> {
   const validationContext = context || await createPPQueueValidationContext();
-  const generation = normalizePPGenerationControls(generationInput);
+  const generation = normalizePPGenerationControls(bindPPGenerationToWorkflowVideo(
+    generationInput,
+    describePPApiWorkflow(loaded.document),
+    getUmbraUiVideoControlsSession,
+  ));
   const isMiniMaxH3 = generation.mediaType === 'video' && generation.video?.family === 'minimax_h3';
   if (isMiniMaxH3 || !validationContext.validatedWorkflows.has(loaded)) {
     const validation = validatePPApiWorkflowDocument(loaded.document, validationContext.availableClassTypes, isMiniMaxH3 ? { ...generation.video.minimaxH3, guideFrameCount: generation.video.frames } : {});
