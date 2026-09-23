@@ -9,3 +9,13 @@ export function getUmbraUiPinnedFolderLabel(value: string): string {
   if (parts.length <= 1) return parts[0] || value;
   return `${parts.at(-1)} - ${parts.at(-2)}`;
 }
+
+export function resolveUmbraUiPinnedFolderOption(value: string, folders: readonly string[]): string {
+  const selected = normalizeUmbraUiPinnedFolder(value);
+  if (!selected) return '';
+  const windowsPath = /^[a-z]:\//i.test(selected) || selected.startsWith('//');
+  return folders.find((folder) => {
+    const option = normalizeUmbraUiPinnedFolder(folder);
+    return windowsPath ? option.toLowerCase() === selected.toLowerCase() : option === selected;
+  }) || selected;
+}
