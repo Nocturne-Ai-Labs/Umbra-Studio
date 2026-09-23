@@ -19,6 +19,7 @@ import { DatasetThumbnail } from './components/DatasetThumbnail';
 import { createConceptSettingsSession, type ConceptSaveStatus } from './conceptSettingsSession';
 
 const IMAGE_FILE_PATTERN = /\.(avif|bmp|gif|jpe?g|png|webp)$/i;
+const DATASET_IMAGE_PAGE_SIZE = 120;
 const WAIFU_MODEL_OPTIONS = [
   { id: 'SmilingWolf/wd-vit-tagger-v3', label: 'wd-vit' },
   { id: 'SmilingWolf/wd-convnext-tagger-v3', label: 'wd-convnext' },
@@ -128,6 +129,7 @@ export function DatasetsTab() {
   const [selectedDataset, setSelectedDataset] = useState<string | null>(null);
   const [selectedConcept, setSelectedConcept] = useState<string | null>(null);
   const [images, setImages] = useState<DatasetImage[]>([]);
+  const [visibleImageCount, setVisibleImageCount] = useState(DATASET_IMAGE_PAGE_SIZE);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [focusedImage, setFocusedImage] = useState<DatasetImage | null>(null);
   const [isLoadingImages, setIsLoadingImages] = useState(false);
@@ -370,6 +372,7 @@ export function DatasetsTab() {
   // Load images when concept is selected
   useEffect(() => {
     setImages([]);
+    setVisibleImageCount(DATASET_IMAGE_PAGE_SIZE);
     setSelectedImages(new Set());
     setFlaggedForDeletion(new Set());
     setFocusedImage(null);
@@ -1293,6 +1296,12 @@ export function DatasetsTab() {
               await dropHandlers.onDrop(e);
             }
           }}
+          onScroll={(event) => {
+            const view = event.currentTarget;
+            if (view.scrollHeight - view.scrollTop - view.clientHeight < 160) {
+              setVisibleImageCount(count => Math.min(images.length, count + DATASET_IMAGE_PAGE_SIZE));
+            }
+          }}
           className={`custom-scrollbar relative flex-1 overflow-y-auto p-3 transition-colors ${isOver || nativeDropActive ? 'bg-cyan-500/10' : ''}`}
         >
           {/* Drop overlay */}
@@ -1328,9 +1337,9 @@ export function DatasetsTab() {
             <div className="flex items-center justify-center h-full text-zinc-500">
               <p>No images - drag from filmstrip or download from Search</p>
             </div>
-          ) : (
+          ) : (<>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2">
-              {images.map((img, index) => {
+              {images.slice(0, visibleImageCount).map((img, index) => {
                 const isSelected = selectedImages.has(img.filename);
                 const isFocused = focusedImage?.filename === img.filename;
                 const isFlagged = flaggedForDeletion.has(img.filename);
@@ -1338,6 +1347,7 @@ export function DatasetsTab() {
                 return (
                   <div
                     key={img.filename}
+                    data-umbra-dataset-image
                     className={`relative aspect-square rounded overflow-hidden bg-zinc-800
                                border cursor-pointer transition-all
                                ${isFlagged ? 'ring-2 ring-red-500' : ''}
@@ -1380,7 +1390,12 @@ export function DatasetsTab() {
                 );
               })}
             </div>
-          )}
+            {visibleImageCount < images.length && (
+              <button type="button" className="mt-3 w-full rounded border border-white/10 px-3 py-2 text-xs text-zinc-300 hover:bg-white/5" onClick={() => setVisibleImageCount(count => Math.min(images.length, count + DATASET_IMAGE_PAGE_SIZE))}>
+                Show more images ({Math.min(visibleImageCount, images.length)} of {images.length})
+              </button>
+            )}
+          </>)}
         </div>
       </div>
 

@@ -1087,6 +1087,7 @@ export function ModelManagerWorkspace() {
     counts: { folders: 0, files: 0 },
   });
   const [localFilterQuery, setLocalFilterQuery] = React.useState('');
+  const [renderedLocalCount, setRenderedLocalCount] = React.useState(200);
   const [localLoading, setLocalLoading] = React.useState(false);
   const [selectedPaths, setSelectedPaths] = React.useState<Set<string>>(new Set());
   const [selectionAnchorPath, setSelectionAnchorPath] = React.useState('');
@@ -1443,6 +1444,10 @@ export function ModelManagerWorkspace() {
       return false;
     });
   }, [localEntries, localFilterQuery]);
+
+  React.useEffect(() => {
+    setRenderedLocalCount(200);
+  }, [currentFolderPath, localFilterQuery]);
 
   const selectedPathsArray = React.useMemo(() => Array.from(selectedPaths), [selectedPaths]);
   const nsfwBlurPx = React.useMemo(() => (nsfwThumbnailBlurIntensity / 100) * 20, [nsfwThumbnailBlurIntensity]);
@@ -4319,7 +4324,12 @@ export function ModelManagerWorkspace() {
                 </div>
               </div>
 
-              <div className="relative min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+              <div className="relative min-h-0 flex-1 overflow-y-auto custom-scrollbar" onScroll={(event) => {
+                const view = event.currentTarget;
+                if (view.scrollHeight - view.scrollTop - view.clientHeight < 160) {
+                  setRenderedLocalCount(count => Math.min(visibleLocalEntries.length, count + 200));
+                }
+              }}>
                 {localLoading ? (
                   <div className="flex items-center gap-2 px-4 py-3 text-xs text-zinc-400">
                     <Loader2 size={13} className="animate-spin" />
@@ -4334,7 +4344,7 @@ export function ModelManagerWorkspace() {
                 ) : null}
 
                 <div className="divide-y divide-white/5">
-                  {visibleLocalEntries.map((entry) => {
+                  {visibleLocalEntries.slice(0, renderedLocalCount).map((entry) => {
                     const path = normalizePath(entry.path);
                     const isSelected = selectedPaths.has(path);
                     const isDropTarget = entry.kind === 'folder' && dropTargetPath === path;
@@ -4441,6 +4451,11 @@ export function ModelManagerWorkspace() {
                       </button>
                     );
                   })}
+                  {renderedLocalCount < visibleLocalEntries.length ? (
+                    <button type="button" className="w-full border-t border-white/10 px-3 py-3 text-center text-xs text-zinc-400 hover:bg-white/5" onClick={() => setRenderedLocalCount(count => Math.min(visibleLocalEntries.length, count + 200))}>
+                      Show more models ({renderedLocalCount} of {visibleLocalEntries.length})
+                    </button>
+                  ) : null}
                   {!localLoading && visibleLocalEntries.length <= 0 ? (
                     <div className="px-4 py-6 text-center text-xs text-zinc-500">
                       {localFilterQuery.trim() ? 'No matches in this folder.' : 'This folder is empty.'}
