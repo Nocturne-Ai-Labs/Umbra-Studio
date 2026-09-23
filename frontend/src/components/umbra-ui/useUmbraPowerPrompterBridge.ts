@@ -1151,14 +1151,16 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           return;
         }
         if (type === 'generation_preview') {
+          const requestId = String(payload?.requestId || '').trim();
+          if (!requestId || !ownedRequestIdsRef.current.has(requestId)) return;
           const imageDataUrl = String(payload?.imageDataUrl || '').trim();
           if (!imageDataUrl.startsWith('data:image/')) return;
           setGenerationPreview({
             privacyClass: payload?.privacyClass === 'nsfw'
               || classifyUmbraMediaMetadata(payload) === 'nsfw'
-              || classifyUmbraPrompt(ownedRequestPromptsRef.current.get(String(payload?.requestId || ''))?.[Number(payload?.promptIndex) || 0]) === 'nsfw'
+              || classifyUmbraPrompt(ownedRequestPromptsRef.current.get(requestId)?.[Number(payload?.promptIndex) || 0]) === 'nsfw'
               ? 'nsfw' : 'normal',
-            requestId: String(payload?.requestId || '').trim(),
+            requestId,
             promptIndex: toFiniteInteger(payload?.promptIndex, 0, 0, Number.MAX_SAFE_INTEGER),
             promptId: String(payload?.promptId || '').trim(),
             imageDataUrl,
@@ -1170,6 +1172,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         }
         if (type === 'job_progress') {
           const requestId = String(payload?.requestId || '').trim();
+          if (!requestId || !ownedRequestIdsRef.current.has(requestId)) return;
           const promptIndex = toFiniteInteger(payload?.promptIndex, 0, 0, Number.MAX_SAFE_INTEGER);
           setGenerationPreview((currentPreview) => {
             if (!currentPreview || currentPreview.requestId !== requestId || currentPreview.promptIndex !== promptIndex) {
