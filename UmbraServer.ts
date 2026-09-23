@@ -15932,6 +15932,11 @@ async function stopGalleryBridgeInternal() {
 
 async function restartGalleryBridgeForSelfHeal(reason: string, expectedPid: number | null = null) {
   if (isShuttingDown) return;
+  // A child can exit during its readiness check. Let that Start settle first;
+  // otherwise the replacement joins its failed in-flight promise.
+  const priorStart = galleryBridgeStartInFlight;
+  if (priorStart) await priorStart.catch(() => undefined);
+  if (!galleryBridgeDesired || isShuttingDown) return;
   const currentPid = galleryBridgeProcess?.pid ?? null;
   if (isChildProcessAlive(galleryBridgeProcess) && currentPid !== expectedPid) {
     appendBackendLifecycleLog('gallery', 'stale_self_heal_ignored', {
