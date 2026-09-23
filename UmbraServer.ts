@@ -25007,6 +25007,7 @@ const routeContext = {
   broadcastToClients,
   fsWorkerService,
   getTrashDir: () => getResolvedTrashStorageDir(),
+  getExternalRoots: () => getConfiguredExternalRoots().map(resolvePathCandidate),
   resolvePath
 };
 
@@ -25711,6 +25712,8 @@ async function handleFsListProgressive(url: URL, signal?: AbortSignal): Promise<
       cursor,
       force,
       snapshot,
+      sortBy: sortBy === 'name' || sortBy === 'modified' || sortBy === 'custom' ? sortBy : 'created',
+      sortOrder: sortOrder === 'desc' ? 'desc' : 'asc',
     });
     signal?.throwIfAborted();
     const workerMs = Date.now() - workerStartedAt;
@@ -25742,9 +25745,10 @@ async function handleFsListProgressive(url: URL, signal?: AbortSignal): Promise<
           ...file,
           uid: indexed.uid,
           path: indexed.path,
-          createdMs: indexed.createdMs,
-          modifiedMs: indexed.modifiedMs,
-          customOrder: indexed.customOrder,
+          createdMs: sortBy === 'created' || sortBy === 'modified' ? file.createdMs : indexed.createdMs,
+          modifiedMs: sortBy === 'created' || sortBy === 'modified' ? file.modifiedMs : indexed.modifiedMs,
+          customOrder: sortBy === 'custom' ? file.customOrder : indexed.customOrder,
+          size: sortBy === 'created' || sortBy === 'modified' ? file.size : indexed.size,
           type: indexed.type,
           metadataReady: indexed.metadataReady,
           metadataFormat: indexed.metadataFormat,
@@ -25767,7 +25771,7 @@ async function handleFsListProgressive(url: URL, signal?: AbortSignal): Promise<
         path: normalizedPath || String(file?.path || file?.relativePath || '').trim(),
         createdMs,
         modifiedMs,
-        customOrder: cursor + index,
+        customOrder: Number.isFinite(Number(file?.customOrder)) ? Number(file.customOrder) : cursor + index,
         type: inferGalleryMediaType(normalizedPath, file?.type),
         tags: [],
         privacyClass: 'normal',

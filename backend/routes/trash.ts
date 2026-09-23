@@ -4,6 +4,7 @@ import { existsSync } from 'fs';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { FsWorkerService } from '../FsWorkerService';
+import { resolveAllowedExistingGalleryPath } from '../GalleryPathAccess';
 // import { db } from '../db';
 
 // Inline helpers
@@ -45,6 +46,7 @@ interface RouteContext {
   thumbnailService?: any;
   fsWorkerService?: FsWorkerService;
   getTrashDir?: () => string;
+  getExternalRoots?: () => string[];
   resolvePath?: (
     inputPath: string,
     options?: { allowOutsideRoot?: boolean }
@@ -257,13 +259,18 @@ function resolveWorkspacePath(input: string, context: RouteContext): { relativeP
   if (typeof context.resolvePath === 'function') {
     const resolved = context.resolvePath(raw);
     if (!resolved) throw new Error('Invalid path');
+    const fullPath = resolve(resolved.fullPath);
+    const allowedRoots = [context.ROOT_DIR, getTrashDir(context), ...(context.getExternalRoots?.() || [])];
+    if (!resolveAllowedExistingGalleryPath(fullPath, allowedRoots)) {
+      throw new Error('Path escapes configured roots');
+    }
     const canonicalRelative = normalizeRelPath(resolved.relativePath || '');
     if (!canonicalRelative || canonicalRelative === '.') {
       throw new Error('Path cannot target workspace root');
     }
     return {
       relativePath: canonicalRelative,
-      fullPath: resolve(resolved.fullPath),
+      fullPath,
     };
   }
 
@@ -274,6 +281,9 @@ function resolveWorkspacePath(input: string, context: RouteContext): { relativeP
   const fullPath = resolve(root, normalized);
   if (fullPath !== root && !fullPath.startsWith(`${root}${sep}`)) {
     throw new Error('Path escapes workspace');
+  }
+  if (!resolveAllowedExistingGalleryPath(fullPath, [root, getTrashDir(context)])) {
+    throw new Error('Path escapes configured roots');
   }
   const canonicalRelative = normalizeRelPath(relative(root, fullPath));
   if (!canonicalRelative || canonicalRelative === '.') {

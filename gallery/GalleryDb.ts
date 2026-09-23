@@ -587,6 +587,30 @@ export class GalleryDb {
     });
   }
 
+  getFolderOrderByPaths(folderPathInput: string, pathInputs: string[]): { orders: Map<string, number>; nextIndex: number } {
+    const folderPath = normalizePath(folderPathInput);
+    const orders = new Map<string, number>();
+    if (!folderPath) return { orders, nextIndex: 0 };
+    const next = this.db.query('SELECT COALESCE(MAX(order_index), -1) + 1 AS nextIndex FROM folder_order WHERE folder_path = ?')
+      .get(folderPath) as { nextIndex?: number } | null;
+    const nextIndex = Math.max(0, Math.trunc(Number(next?.nextIndex) || 0));
+    const paths = Array.from(new Set(pathInputs.map(normalizePath).filter(Boolean)));
+    for (let offset = 0; offset < paths.length; offset += 300) {
+      const chunk = paths.slice(offset, offset + 300);
+      const placeholders = chunk.map(() => '?').join(', ');
+      const rows = this.db.query(`
+        SELECT f.path AS path, fo.order_index AS customOrder
+        FROM files f
+        JOIN folder_order fo ON fo.uid = f.uid AND fo.folder_path = ?
+        WHERE f.folder_path = ? AND f.path IN (${placeholders})
+      `).all(folderPath, folderPath, ...chunk) as Array<{ path: string; customOrder: number }>;
+      for (const row of rows) {
+        if (Number.isFinite(row.customOrder)) orders.set(normalizePath(row.path), Math.trunc(row.customOrder));
+      }
+    }
+    return { orders, nextIndex };
+  }
+
   getTagsForUids(uidInputs: string[]): Map<string, string[]> {
     const uids = Array.from(new Set((uidInputs || []).map((entry) => String(entry || '').trim()).filter(Boolean)));
     const tagsByUid = new Map<string, string[]>();
@@ -623,10 +647,11 @@ export class GalleryDb {
     return tagsByUid;
   }
 
-  searchFiles(rootInputs: string[], queryInput: string, limitInput = 400): GalleryIndexedFile[] {
+  searchFiles(rootInputs: string[], queryInput: string, limitInput = 400, offsetInput = 0): GalleryIndexedFile[] {
     const query = String(queryInput || '').replace(/\s+/g, ' ').trim().toLowerCase();
     const roots = Array.from(new Set((rootInputs || []).map(normalizePath).filter(Boolean)));
     const limit = Math.max(1, Math.min(1200, Math.trunc(Number(limitInput || 400))));
+    const offset = Math.max(0, Math.trunc(Number(offsetInput || 0)));
     if (!query || roots.length === 0) return [];
 
     const rootClauses: string[] = [];
@@ -663,9 +688,9 @@ export class GalleryDb {
           OR lower(f.path) LIKE ? ESCAPE '\\'
           OR lower(ft.tag) LIKE ? ESCAPE '\\'
         )
-      ORDER BY f.modified_ms DESC, f.file_name COLLATE NOCASE ASC
-      LIMIT ?
-    `).all(...rootParams, needle, needle, needle, limit) as FileRow[];
+      ORDER BY f.modified_ms DESC, f.file_name COLLATE NOCASE ASC, f.path COLLATE NOCASE ASC
+      LIMIT ? OFFSET ?
+    `).all(...rootParams, needle, needle, needle, limit, offset) as FileRow[];
 
     const normalizedRows = rows.map((row) => {
       const dimensions = parseMetadataDimensions(row.metadataJson || null);
@@ -699,10 +724,11 @@ export class GalleryDb {
     }));
   }
 
-  searchFolderMetadata(folderPathInput: string, queryInput: string, limitInput = 2000): GalleryMetadataSearchMatch[] {
+  searchFolderMetadata(folderPathInput: string, queryInput: string, limitInput = 2000, offsetInput = 0): GalleryMetadataSearchMatch[] {
     const folderPath = normalizePath(folderPathInput);
     const terms = normalizeMetadataSearchTerms(queryInput);
     const limit = Math.max(1, Math.min(5000, Math.trunc(Number(limitInput || 2000))));
+    const offset = Math.max(0, Math.trunc(Number(offsetInput || 0)));
     if (!folderPath || terms.length === 0) return [];
 
     const whereTerms = terms.map(() => 'lower(COALESCE(metadata_json, \'\')) LIKE ? ESCAPE \'\\\'').join(' AND ');
@@ -720,8 +746,8 @@ export class GalleryDb {
         AND metadata_json IS NOT NULL
         AND ${whereTerms}
       ORDER BY file_name COLLATE NOCASE ASC, path COLLATE NOCASE ASC
-      LIMIT ?
-    `).all(folderPath.toLowerCase(), ...params, limit) as Array<{
+      LIMIT ? OFFSET ?
+    `).all(folderPath.toLowerCase(), ...params, limit, offset) as Array<{
       uid: string;
       path: string;
       folderPath: string;

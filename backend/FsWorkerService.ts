@@ -40,6 +40,8 @@ type FsWorkerRequest =
         cursor: number;
         force?: boolean;
         snapshot?: string;
+        sortBy?: 'created' | 'modified' | 'name' | 'custom';
+        sortOrder?: 'asc' | 'desc';
       };
     }
   | {

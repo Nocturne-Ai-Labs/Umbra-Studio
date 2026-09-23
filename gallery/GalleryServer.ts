@@ -1579,31 +1579,69 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
 
     const filesByPath = new Map<string, MediaFileRecord>();
     const foldersByPath = new Map<string, SearchFolderResult>();
-    const indexedFiles = galleryDb.searchFiles(
-      resolvedRoots.map((root) => root.clientRootPath),
-      query,
-      fileLimit * 3,
-    ).filter((file) => fileMatchesSearch(file, query));
     // The index can outlive external moves and deletes. Verify hits against
     // disk before they consume the visible result limit, and refresh their
     // current stats/metadata without discarding tags or custom order.
-    const indexedInputs: Awaited<ReturnType<typeof statMediaCandidates>> = [];
     const authorizeIndexedPath = await createGalleryPathAuthorizer(resolvedRoots.map((root) => root.dirPath));
-    for (let offset = 0; offset < indexedFiles.length && indexedInputs.length < fileLimit; offset += 64) {
-      const batch = indexedFiles.slice(offset, offset + 64);
-      const authorized = await Promise.all(batch.map(async (file) => {
-        const absolutePath = resolveGalleryPath(file.path);
-        return await authorizeIndexedPath(absolutePath) ? {
-          name: file.name,
-          absolutePath,
-          clientPath: file.path,
-          folderPath: file.folderPath,
-        } : null;
-      }));
-      const permittedCandidates = authorized.filter((candidate): candidate is MediaCandidate => Boolean(candidate));
-      const valid = await statMediaCandidates(permittedCandidates, '', signal);
-      indexedInputs.push(...valid);
+    const indexedPageSize = Math.max(64, Math.min(256, fileLimit * 3));
+    type IndexedInput = Awaited<ReturnType<typeof statMediaCandidates>>[number];
+    let bestIndexed: Array<{ file: MediaFileRecord; input: IndexedInput }> = [];
+    let indexedOffset = 0;
+    let indexedCapped = false;
+    while (true) {
+      signal?.throwIfAborted();
+      if (indexedOffset > 0 && nowMs() - startedAt >= maxDurationMs) {
+        indexedCapped = true;
+        break;
+      }
+      const indexedFiles = galleryDb.searchFiles(
+        resolvedRoots.map((root) => root.clientRootPath),
+        query,
+        indexedPageSize,
+        indexedOffset,
+      );
+      indexedOffset += indexedFiles.length;
+      if (indexedFiles.length === 0) break;
+      const matchingFiles = indexedFiles.filter((file) => fileMatchesSearch(file, query));
+      const matchingByPath = new Map(matchingFiles.map((file) => [normalizePath(file.path).toLowerCase(), file]));
+      const pageBest: Array<{ file: MediaFileRecord; input: IndexedInput }> = [];
+      for (let offset = 0; offset < matchingFiles.length; offset += 64) {
+        if (offset > 0 && nowMs() - startedAt >= maxDurationMs) {
+          indexedCapped = true;
+          break;
+        }
+        const batch = matchingFiles.slice(offset, offset + 64);
+        const authorized = await Promise.all(batch.map(async (file) => {
+          const absolutePath = resolveGalleryPath(file.path);
+          return await authorizeIndexedPath(absolutePath) ? {
+            name: file.name,
+            absolutePath,
+            clientPath: file.path,
+            folderPath: file.folderPath,
+          } : null;
+        }));
+        const permittedCandidates = authorized.filter((candidate): candidate is MediaCandidate => Boolean(candidate));
+        for (const input of await statMediaCandidates(permittedCandidates, '', signal)) {
+          const indexed = matchingByPath.get(normalizePath(input.path).toLowerCase());
+          if (!indexed) continue;
+          const file: MediaFileRecord = {
+            ...indexed,
+            size: input.size,
+            createdMs: input.createdMs,
+            modifiedMs: input.modifiedMs,
+            revision: input.revision,
+            metadataRevision: input.metadataRevision,
+          };
+          if (fileMatchesSearch(file, query)) pageBest.push({ file, input });
+        }
+      }
+      bestIndexed = bestIndexed.concat(pageBest)
+        .sort((a, b) => compareSearchFiles(a.file, b.file, query, sortBy, sortOrder))
+        .slice(0, fileLimit);
+      if (indexedCapped) break;
+      if (indexedFiles.length < indexedPageSize) break;
     }
+    const indexedInputs = bestIndexed.map((entry) => entry.input);
     const indexedByFolder = new Map<string, typeof indexedInputs>();
     for (const input of indexedInputs) {
       const folder = normalizePath(input.folderPath);
@@ -1621,7 +1659,7 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
     }
 
     let scannedFolders = 0;
-    let capped = false;
+    let capped = indexedCapped;
     const queue: Array<{ absolutePath: string; clientPath: string; rootPath: string; toClientPath: (resolvedPath: string) => string }> = [];
     const seenDirectories = new Set<string>();
     for (const root of resolvedRoots) {
@@ -1681,7 +1719,6 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
         });
       }
 
-      if (filesByPath.size >= fileLimit) continue;
       const filenameMatches = entries
         .filter((entry) => entry.isFile() && isSupportedMediaPath(entry.name) && textMatchesSearch(entry.name, query))
         .map((entry) => ({
@@ -1690,21 +1727,28 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
           clientPath: current.toClientPath(join(current.absolutePath, entry.name)),
           folderPath: normalizePath(current.clientPath),
         }))
-        .filter((candidate) => !filesByPath.has(normalizePath(candidate.clientPath).toLowerCase()))
-        .slice(0, Math.max(0, fileLimit - filesByPath.size));
-      if (filenameMatches.length > 0) {
-        const inputs = await statMediaCandidates(filenameMatches, normalizePath(current.clientPath), signal);
+        .filter((candidate) => !filesByPath.has(normalizePath(candidate.clientPath).toLowerCase()));
+      for (let offset = 0; offset < filenameMatches.length; offset += 64) {
+        if (nowMs() - startedAt >= maxDurationMs) {
+          capped = true;
+          break;
+        }
+        const inputs = await statMediaCandidates(filenameMatches.slice(offset, offset + 64), normalizePath(current.clientPath), signal);
         signal?.throwIfAborted();
         const indexed = upsertGalleryFiles(normalizePath(current.clientPath), inputs);
         for (const file of indexed) {
           if (!fileMatchesSearch(file, query)) continue;
           const key = normalizePath(file.path).toLowerCase();
-          if (!key || filesByPath.has(key)) continue;
+          if (!key) continue;
           filesByPath.set(key, file);
-          if (filesByPath.size >= fileLimit) break;
         }
+        const bestFiles = Array.from(filesByPath.values())
+          .sort((a, b) => compareSearchFiles(a, b, query, sortBy, sortOrder))
+          .slice(0, fileLimit);
+        filesByPath.clear();
+        for (const file of bestFiles) filesByPath.set(normalizePath(file.path).toLowerCase(), file);
       }
-      if (filesByPath.size >= fileLimit && foldersByPath.size >= folderLimit) break;
+      if (capped) break;
     }
     signal?.throwIfAborted();
     if (queueIndex < queue.length) capped = true;
@@ -1747,7 +1791,7 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
   }
 }
 
-async function handleMetadataSearch(reqUrl: URL): Promise<Response> {
+async function handleMetadataSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response> {
   const startedAt = nowMs();
   const pathValue = reqUrl.searchParams.get('path') || '';
   const query = String(reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '').replace(/\s+/g, ' ').trim();
@@ -1764,23 +1808,36 @@ async function handleMetadataSearch(reqUrl: URL): Promise<Response> {
     const dirPath = await ensureDirectory(pathValue);
     registerPrewarmRoot(dirPath);
     const folderPath = normalizePath(pathValue) || normalizePath(dirPath);
-    const indexedMatches = galleryDb.searchFolderMetadata(folderPath, query, limit);
     const authorizeMatch = await createGalleryPathAuthorizer([dirPath]);
     const matches: GalleryMetadataSearchMatch[] = [];
-    for (let offset = 0; offset < indexedMatches.length; offset += 16) {
-      const batch = indexedMatches.slice(offset, offset + 16);
-      const states = await Promise.all(batch.map(async (match): Promise<'live' | 'missing' | 'denied'> => {
-        const path = resolveGalleryPath(match.path);
-        if (!(await authorizeMatch(path))) return 'denied';
-        try { return (await fs.lstat(path)).isFile() ? 'live' : 'missing'; }
-        catch (error) {
-          if (isMissingFsPathError(error)) return 'missing';
-          throw error;
-        }
-      }));
-      for (let index = 0; index < batch.length; index++) {
-        if (states[index] === 'live') matches.push(batch[index]);
+    const pageSize = Math.max(64, Math.min(256, limit * 2));
+    let indexedOffset = 0;
+    while (matches.length < limit) {
+      signal?.throwIfAborted();
+      if (indexedOffset > 0 && nowMs() - startedAt >= 5000) {
+        return json({ error: 'Metadata search timed out; refine the query' }, 503);
       }
+      const indexedMatches = galleryDb.searchFolderMetadata(folderPath, query, pageSize, indexedOffset);
+      indexedOffset += indexedMatches.length;
+      if (indexedMatches.length === 0) break;
+      for (let offset = 0; offset < indexedMatches.length; offset += 16) {
+        signal?.throwIfAborted();
+        const batch = indexedMatches.slice(offset, offset + 16);
+        const states = await Promise.all(batch.map(async (match): Promise<'live' | 'missing' | 'denied'> => {
+          const path = resolveGalleryPath(match.path);
+          if (!(await authorizeMatch(path))) return 'denied';
+          try { return (await fs.lstat(path)).isFile() ? 'live' : 'missing'; }
+          catch (error) {
+            if (isMissingFsPathError(error)) return 'missing';
+            throw error;
+          }
+        }));
+        for (let index = 0; index < batch.length && matches.length < limit; index++) {
+          if (states[index] === 'live') matches.push(batch[index]);
+        }
+        if (matches.length >= limit) break;
+      }
+      if (indexedMatches.length < pageSize) break;
     }
     traceGalleryService('metadata_search', {
       folderPath,
@@ -1795,6 +1852,7 @@ async function handleMetadataSearch(reqUrl: URL): Promise<Response> {
       total: matches.length,
     } satisfies MetadataSearchPayload);
   } catch (error: any) {
+    if (signal?.aborted) return new Response(null, { status: 499 });
     traceGalleryService('metadata_search_error', {
       folderPath: normalizePath(pathValue),
       query,
@@ -2395,7 +2453,7 @@ const server = Bun.serve({
     }
 
     if (reqUrl.pathname === '/api/fs/metadata-search' && req.method === 'GET') {
-      return withTrustedCors(req, await runBunGalleryFsGet(reqUrl, () => handleMetadataSearch(reqUrl)));
+      return withTrustedCors(req, await runBunGalleryFsGet(reqUrl, () => handleMetadataSearch(reqUrl, req.signal)));
     }
 
     if (reqUrl.pathname === '/api/fs/mkdir' && req.method === 'POST') {

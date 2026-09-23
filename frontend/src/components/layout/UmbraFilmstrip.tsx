@@ -415,6 +415,8 @@ export function UmbraFilmstrip({
   const lastForceRefreshBurstAtRef = useRef(0);
   const currentFolderRef = useRef<string>('');
   const localSizeSortRef = useRef(false);
+  const localCustomSortPendingRef = useRef<'saving' | 'syncing' | null>(null);
+  const reorderInFlightRef = useRef(false);
   const deleteInFlightRef = useRef(false);
   const isTouchRemote = typeof document !== 'undefined'
     && (document.documentElement.dataset.umbraRemoteMode === 'phone' || document.documentElement.dataset.umbraRemoteMode === 'tablet');
@@ -610,9 +612,9 @@ export function UmbraFilmstrip({
     });
   }, [addScannedImport, addToast, setActiveWorkspace]);
 
-  const persistCustomOrder = useCallback(async (nextOrderIds: string[]) => {
+  const persistCustomOrder = useCallback(async (nextOrderIds: string[]): Promise<boolean> => {
     const folder = normalizePath(currentFolder || rootPath);
-    if (!folder) return;
+    if (!folder) return false;
 
     const orderIndex = new Map<string, number>();
     nextOrderIds.forEach((id, index) => {
@@ -632,7 +634,7 @@ export function UmbraFilmstrip({
     const orderedPaths = orderedFiles
       .map((file) => normalizePath(file.path))
       .filter(Boolean);
-    if (orderedUids.length === 0 && orderedPaths.length === 0) return;
+    if (orderedUids.length === 0 && orderedPaths.length === 0) return false;
 
     try {
       const response = await fetch('/api/fs/reorder', {
@@ -648,11 +650,13 @@ export function UmbraFilmstrip({
       if (!response.ok) {
         throw new Error(String(payload?.error || 'Failed to persist filmstrip order'));
       }
+      return true;
     } catch (error) {
       addToast({
         type: 'error',
         message: error instanceof Error ? error.message : 'Failed to persist filmstrip order',
       });
+      return false;
     }
   }, [addToast, currentFolder, images, rootPath]);
 
@@ -685,6 +689,9 @@ export function UmbraFilmstrip({
       const custom = event as CustomEvent<{ path?: string; folderPath?: string }>;
       const incoming = normalizePath(custom?.detail?.path || custom?.detail?.folderPath || '');
       if (!incoming) return;
+      if (incoming.toLowerCase() !== normalizePath(currentFolderRef.current).toLowerCase()) {
+        localCustomSortPendingRef.current = null;
+      }
       currentFolderRef.current = incoming;
       setCurrentFolder(incoming);
       setFolderLoadError('');
@@ -742,7 +749,11 @@ export function UmbraFilmstrip({
       const nextSortBy = normalizeGallerySortBy(custom?.detail?.sortBy);
       const nextSortOrder = normalizeGallerySortOrder(custom?.detail?.sortOrder);
       const nextFilmstripField = mapGallerySortByToFilmstrip(nextSortBy);
-      if (!localSizeSortRef.current) {
+      if (localCustomSortPendingRef.current === 'syncing' && nextSortBy === 'custom' && nextSortOrder === 'asc') {
+        localCustomSortPendingRef.current = null;
+      }
+      const preserveOptimisticOrder = localCustomSortPendingRef.current !== null;
+      if (!localSizeSortRef.current && !preserveOptimisticOrder) {
         setSortField((current) => (current === nextFilmstripField ? current : nextFilmstripField));
         setSortDirection((current) => (current === nextSortOrder ? current : nextSortOrder));
       }
@@ -825,7 +836,7 @@ export function UmbraFilmstrip({
           setCurrentFolder(folderPath);
         }
         setImages(mapped);
-        setCustomOrder(mapped.map((item) => item.id));
+        if (!preserveOptimisticOrder) setCustomOrder(mapped.map((item) => item.id));
         setSelectedIds((current) => {
           const valid = new Set(mapped.map((item) => item.id));
           const next = new Set(Array.from(current).filter((id) => valid.has(id)));
@@ -864,6 +875,9 @@ export function UmbraFilmstrip({
       const nextSortBy = normalizeGallerySortBy(custom?.detail?.sortBy);
       const nextSortOrder = normalizeGallerySortOrder(custom?.detail?.sortOrder);
       const nextFilmstripField = mapGallerySortByToFilmstrip(nextSortBy);
+      if (localCustomSortPendingRef.current && (nextSortBy !== 'custom' || nextSortOrder !== 'asc')) {
+        localCustomSortPendingRef.current = null;
+      }
       localSizeSortRef.current = false;
       setSortField((current) => (current === nextFilmstripField ? current : nextFilmstripField));
       setSortDirection((current) => (current === nextSortOrder ? current : nextSortOrder));
@@ -898,6 +912,7 @@ export function UmbraFilmstrip({
           paths: incomingPaths,
           primaryPath: incomingPrimaryPath || undefined,
         };
+        localCustomSortPendingRef.current = null;
         currentFolderRef.current = incomingFolderPath;
         setCurrentFolder(incomingFolderPath);
         setFolderLoadError('');
@@ -982,6 +997,10 @@ export function UmbraFilmstrip({
         : [];
       if (removedPaths.length <= 0) return;
       const isRemoved = createFilmstripPathMatcher(removedPaths);
+      if (custom?.detail?.source === 'filmstrip') {
+        setRecentGenerationOutputImages((current) => current.filter((item) => !isRemoved(item.path)));
+        return;
+      }
 
       setFeedMode('remove');
       setImages((current) => {
@@ -1183,6 +1202,9 @@ export function UmbraFilmstrip({
       ? pathParent(normalizedTargetPath) || normalizedTargetPath
       : normalizedTargetPath;
     const imagePath = treatAsFile ? normalizedTargetPath : '';
+    if (folderPath.toLowerCase() !== normalizePath(currentFolderRef.current).toLowerCase()) {
+      localCustomSortPendingRef.current = null;
+    }
     currentFolderRef.current = folderPath;
     setCurrentFolder(folderPath);
     setFolderLoadError('');
@@ -1401,6 +1423,7 @@ export function UmbraFilmstrip({
     const trashPaths = selectedPaths.filter((pathValue) => isTrashPath(pathValue));
     const deletePaths = selectedPaths.filter((pathValue) => !isTrashPath(pathValue));
     if (deleteInFlightRef.current) return;
+    clearExternalSelection();
     deleteInFlightRef.current = true;
     setDeletePending(true);
     if (trashPaths.length === selectedPaths.length) {
@@ -1580,6 +1603,7 @@ export function UmbraFilmstrip({
     addRestoredBatchToast,
     addToast,
     appSettings,
+    clearExternalSelection,
     displayedImages,
     notifyGalleryRemovePaths,
     notifyGalleryRestorePaths,
@@ -1947,23 +1971,52 @@ export function UmbraFilmstrip({
     openPathInGallery(imagePath, 'filmstrip-open', 'file');
   }, [openPathInGallery]);
 
-  const onReorderMany = useCallback((draggedIds: string[], overId: string, position: 'before' | 'after') => {
+  const onReorderMany = useCallback(async (draggedIds: string[], overId: string, position: 'before' | 'after') => {
+    if (reorderInFlightRef.current) return;
     const normalizedDraggedIds = Array.from(new Set(draggedIds.map((id) => normalizeId(id)).filter(Boolean)));
     const normalizedOverId = normalizeId(overId);
     if (!normalizedOverId) return;
     if (normalizedDraggedIds.length === 0) return;
+    const source = displayedImages.map((item) => item.id);
+    const next = reorderIdsAsBlock(source, normalizedDraggedIds, normalizedOverId, position);
+    if (arraysEqual(source, next)) return;
 
+    const operationFolder = normalizePath(currentFolderRef.current || rootPath);
+    const previousCustomOrder = customOrder;
+    const previousSortField = sortField;
+    const previousSortDirection = sortDirection;
+    reorderInFlightRef.current = true;
+    localCustomSortPendingRef.current = 'saving';
+    localSizeSortRef.current = false;
     setSortField('custom');
-    setCustomOrder((current) => {
-      const source = current.length > 0
-        ? [...current]
-        : displayedImages.map((item) => item.id);
-      const next = reorderIdsAsBlock(source, normalizedDraggedIds, normalizedOverId, position);
-      if (arraysEqual(source, next)) return source;
-      void persistCustomOrder(next);
-      return next;
-    });
-  }, [displayedImages, persistCustomOrder]);
+    setSortDirection('asc');
+    setCustomOrder(next);
+    try {
+      const saved = await persistCustomOrder(next);
+      const stillInFolder = normalizePath(currentFolderRef.current || rootPath).toLowerCase() === operationFolder.toLowerCase();
+      if (!stillInFolder) {
+        localCustomSortPendingRef.current = null;
+        return;
+      }
+      if (!saved) {
+        if (localCustomSortPendingRef.current === 'saving') {
+          localCustomSortPendingRef.current = null;
+          setCustomOrder(previousCustomOrder);
+          setSortField(previousSortField);
+          setSortDirection(previousSortDirection);
+          localSizeSortRef.current = previousSortField === 'size';
+        }
+        return;
+      }
+      if (localCustomSortPendingRef.current !== 'saving') return;
+      localCustomSortPendingRef.current = 'syncing';
+      window.dispatchEvent(new CustomEvent('umbra:gallery-set-sort', {
+        detail: { sortBy: 'custom', sortOrder: 'asc', forceRefresh: true, source: 'filmstrip' },
+      }));
+    } finally {
+      reorderInFlightRef.current = false;
+    }
+  }, [customOrder, displayedImages, persistCustomOrder, rootPath, sortDirection, sortField]);
 
   const onReorder = useCallback((draggedId: string, overId: string, position: 'before' | 'after') => {
     const normalizedDraggedId = normalizeId(draggedId);
@@ -1975,6 +2028,9 @@ export function UmbraFilmstrip({
     const normalized = normalizePath(folderPath);
     if (!normalized) return;
     folderActivity.markOpened(normalized);
+    if (normalized.toLowerCase() !== normalizePath(currentFolderRef.current).toLowerCase()) {
+      localCustomSortPendingRef.current = null;
+    }
     currentFolderRef.current = normalized;
     setCurrentFolder(normalized);
     setFolderLoadError('');
@@ -2159,6 +2215,7 @@ export function UmbraFilmstrip({
         sortField={sortField}
         sortDirection={sortDirection}
         onSortChange={(field, direction) => {
+          localCustomSortPendingRef.current = null;
           localSizeSortRef.current = field === 'size';
           setSortField(field);
           setSortDirection(direction);
