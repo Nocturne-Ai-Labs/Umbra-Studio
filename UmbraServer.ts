@@ -26576,6 +26576,11 @@ async function handleFsWrite(req: Request): Promise<Response> {
       }
     }
 
+    const extension = extname(resolved.relativePath).toLowerCase();
+    if (encoding === 'base64' ? extension !== '.png' && extension !== '.webp' : extension !== '.txt') {
+      return json({ error: 'Unsupported file write type' }, 403);
+    }
+
     await fsWorkerService.write({
       fullPath,
       content: content ?? '',
