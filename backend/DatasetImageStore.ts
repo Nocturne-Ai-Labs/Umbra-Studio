@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { copyFileExclusive } from './FsTransferCopy';
+import { booruSourceSidecar } from './BooruDownloadService';
 
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.avif'];
 
@@ -23,7 +24,12 @@ export async function saveDatasetImportedImage(conceptPath: string, baseName: st
       }
       try {
         const occupiedNames = new Set(
-          [...IMAGE_EXTENSIONS, '.txt', '.json'].map(ext => `${stem}${ext}`.toLowerCase()),
+          [
+            ...IMAGE_EXTENSIONS.map(ext => `${stem}${ext}`),
+            `${stem}.txt`, `${stem}.json`,
+            `${stem}${extension}.txt`, `${stem}${extension}.json`,
+            booruSourceSidecar(`${stem}${extension}`),
+          ].map(name => name.toLowerCase()),
         );
         if ((await fs.readdir(conceptPath)).some(name => occupiedNames.has(name.toLowerCase()))) continue;
         const filename = `${stem}${extension}`;

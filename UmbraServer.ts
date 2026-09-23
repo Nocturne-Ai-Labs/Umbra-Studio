@@ -28,7 +28,7 @@ import { gzip } from 'zlib';
 import { promisify } from 'util';
 import { AsyncLocalStorage } from 'async_hooks';
 import { pathToFileURL } from 'url';
-import { createConnection } from 'net';
+import { createConnection, isIP } from 'net';
 import { lookup as lookupHostname } from 'node:dns/promises';
 import { ServerWebSocket } from 'bun';
 import { QueueUploadReceiver } from './shared/power-prompter/queueTransport';
@@ -1153,7 +1153,8 @@ async function copyLocalImageIntoDatasetConcept(
   if (!sourceStat.isFile() || sourceStat.size === 0 || sourceStat.size > 256 * 1024 * 1024) {
     throw new Error('Select a regular image file smaller than 256 MB');
   }
-  const detectedImage = await detectDatasetImportImage(await fs.readFile(sourcePath));
+  const sourceBytes = await fs.readFile(sourcePath);
+  const detectedImage = await detectDatasetImportImage(sourceBytes);
   if (sourceExt !== detectedImage.extension && !(sourceExt === '.jpeg' && detectedImage.extension === '.jpg')) {
     throw new Error('Source image format does not match its filename');
   }
@@ -1164,9 +1165,6 @@ async function copyLocalImageIntoDatasetConcept(
 
   const parsedBase = basename(originalName, extname(originalName)) || 'image';
   const parsedExt = extname(originalName) || '.png';
-  let filename = `${parsedBase}${parsedExt}`;
-  let destPath = join(conceptPath, filename);
-  let counter = 1;
   const sourceBaseName = sourcePath.replace(/\.[^.]+$/, '');
   const sourceSidecars = [
     { source: `${sourceBaseName}.txt`, suffix: '.txt', fullName: false },
@@ -1184,16 +1182,11 @@ async function copyLocalImageIntoDatasetConcept(
     const base = name.slice(0, -extname(name).length);
     return authorizedSidecars.map(sidecar => join(conceptPath, `${sidecar.fullName ? name : base}${sidecar.suffix}`));
   };
-  while (existsSync(destPath) || sidecarDestinations(filename).some(existsSync)) {
-    filename = `${parsedBase}_${counter}${parsedExt}`;
-    destPath = join(conceptPath, filename);
-    counter += 1;
-  }
+  const filename = await saveDatasetImportedImage(conceptPath, parsedBase, parsedExt, sourceBytes);
+  const destPath = join(conceptPath, filename);
   const copiedSidecars: string[] = [];
-  const created: string[] = [];
+  const created: string[] = [destPath];
   try {
-    await copyFileExclusive(sourcePath, destPath);
-    created.push(destPath);
     for (const [index, sidecar] of authorizedSidecars.entries()) {
       const destination = sidecarDestinations(filename)[index];
       await copyFileExclusive(sidecar.source, destination);
@@ -2678,8 +2671,10 @@ const REMOTE_DEVICE_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 const REMOTE_AUTH_PBKDF2_ITERATIONS = 210_000;
 const REMOTE_LOGIN_RATE_WINDOW_MS = 5 * 60 * 1000;
 const REMOTE_LOGIN_RATE_MAX_FAILURES = 6;
+const REMOTE_LOGIN_RATE_MAX_SOCKET_FAILURES = 60;
 const REMOTE_PAIR_TOKEN_TTL_MS = 10 * 60 * 1000;
 const remoteLoginFailures = new Map<string, { count: number; resetAt: number }>();
+const remoteLoginSocketFailures = new Map<string, { count: number; resetAt: number }>();
 const remoteWebSockets = new Set<ServerWebSocket<UmbraSocketData>>();
 type RemoteConnectionMode = 'auto' | 'lan' | 'private-vpn' | 'reverse-proxy';
 
@@ -3269,30 +3264,49 @@ function getRemoteCookieSecuritySuffix(req: Request): string {
 }
 
 function getRemoteLoginRateKey(req: Request, server?: RequestIpServer): string {
+  const socketAddress = getRequestSocketAddress(req, server);
+  if (isLoopbackIpAddress(socketAddress)) {
+    const host = normalizeRequestHostname(req.headers.get('host'));
+    const forwardedHost = normalizeRequestHostname(req.headers.get('x-forwarded-host'));
+    const forwardedProto = req.headers.get('x-forwarded-proto')?.trim().toLowerCase();
+    const forwardedFor = req.headers.get('x-forwarded-for')?.trim() || '';
+    const peerAddress = normalizeIpAddress(forwardedFor);
+    // Use Serve-shaped headers for client fairness; the separate socket limit bounds forged values.
+    if (host.endsWith('.ts.net') && host === forwardedHost && forwardedProto === 'https'
+      && !forwardedFor.includes(',') && isIP(peerAddress) && isTailscaleIpAddress(peerAddress)) {
+      return `tailscale-serve:${peerAddress}`;
+    }
+  }
   return getRemoteRequestAddress(req, server);
 }
 
 function getRemoteLoginRateLimit(req: Request, server?: RequestIpServer): { limited: boolean; retryAfterSeconds: number } {
-  const key = getRemoteLoginRateKey(req, server);
   const now = Date.now();
-  const entry = remoteLoginFailures.get(key);
-  if (!entry || entry.resetAt <= now) {
-    remoteLoginFailures.delete(key);
-    return { limited: false, retryAfterSeconds: 0 };
+  for (const failures of [remoteLoginFailures, remoteLoginSocketFailures]) {
+    for (const [key, entry] of failures) {
+      if (entry.resetAt <= now) failures.delete(key);
+    }
   }
-  const limited = entry.count >= REMOTE_LOGIN_RATE_MAX_FAILURES;
-  return { limited, retryAfterSeconds: limited ? Math.max(1, Math.ceil((entry.resetAt - now) / 1000)) : 0 };
+  const client = remoteLoginFailures.get(getRemoteLoginRateKey(req, server));
+  const socket = remoteLoginSocketFailures.get(getRequestSocketAddress(req, server) || 'unknown');
+  const retryAfterSeconds = Math.max(
+    client && client.count >= REMOTE_LOGIN_RATE_MAX_FAILURES ? Math.ceil((client.resetAt - now) / 1000) : 0,
+    socket && socket.count >= REMOTE_LOGIN_RATE_MAX_SOCKET_FAILURES ? Math.ceil((socket.resetAt - now) / 1000) : 0,
+  );
+  return { limited: retryAfterSeconds > 0, retryAfterSeconds };
 }
 
 function recordRemoteLoginFailure(req: Request, server?: RequestIpServer): void {
-  const key = getRemoteLoginRateKey(req, server);
   const now = Date.now();
-  const existing = remoteLoginFailures.get(key);
-  if (!existing || existing.resetAt <= now) {
-    remoteLoginFailures.set(key, { count: 1, resetAt: now + REMOTE_LOGIN_RATE_WINDOW_MS });
-    return;
+  for (const [failures, key] of [
+    [remoteLoginFailures, getRemoteLoginRateKey(req, server)],
+    [remoteLoginSocketFailures, getRequestSocketAddress(req, server) || 'unknown'],
+  ] as const) {
+    const existing = failures.get(key);
+    failures.set(key, existing && existing.resetAt > now
+      ? { count: existing.count + 1, resetAt: existing.resetAt }
+      : { count: 1, resetAt: now + REMOTE_LOGIN_RATE_WINDOW_MS });
   }
-  remoteLoginFailures.set(key, { count: existing.count + 1, resetAt: existing.resetAt });
 }
 
 function clearRemoteLoginFailures(req: Request, server?: RequestIpServer): void {
@@ -33359,7 +33373,8 @@ const server = Bun.serve<UmbraSocketData>({
             deleted += 1;
             const baseName = img.slice(0, -extname(img).length);
             const remainingSibling = (await fs.readdir(conceptPath)).some(name =>
-              name.slice(0, -extname(name).length) === baseName && DATASET_IMPORT_IMAGE_EXTENSIONS.has(extname(name).toLowerCase())
+              name.slice(0, -extname(name).length).toLowerCase() === baseName.toLowerCase()
+                && DATASET_IMPORT_IMAGE_EXTENSIONS.has(extname(name).toLowerCase())
             );
             if (!remainingSibling) {
               for (const sidecar of [`${baseName}.txt`, `${baseName}.json`]) {
