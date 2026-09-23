@@ -244,10 +244,8 @@ export async function cancelGalleryTransfer() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jobId }), signal: AbortSignal.timeout(15000),
     });
-    if (!response.ok) {
-      const payload = await response.json();
-      throw new Error(payload.error || 'Unable to cancel transfer');
-    }
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || payload?.success !== true) throw new Error(String(payload?.error || 'Unable to cancel transfer'));
     if (state?.jobId === jobId && state.active) publish({ ...state, cancelRequested: true }, true);
   } catch (error) {
     if (state?.jobId === jobId && state.active) publish({ ...state, error: String(error) });
