@@ -2666,8 +2666,10 @@ const REMOTE_DEVICE_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 const REMOTE_AUTH_PBKDF2_ITERATIONS = 210_000;
 const REMOTE_LOGIN_RATE_WINDOW_MS = 5 * 60 * 1000;
 const REMOTE_LOGIN_RATE_MAX_FAILURES = 6;
+const REMOTE_LOGIN_RATE_MAX_SOCKET_FAILURES = 60;
 const REMOTE_PAIR_TOKEN_TTL_MS = 10 * 60 * 1000;
 const remoteLoginFailures = new Map<string, { count: number; resetAt: number }>();
+const remoteLoginSocketFailures = new Map<string, { count: number; resetAt: number }>();
 const remoteWebSockets = new Set<ServerWebSocket<UmbraSocketData>>();
 type RemoteConnectionMode = 'auto' | 'lan' | 'private-vpn' | 'reverse-proxy';
 
@@ -3264,7 +3266,7 @@ function getRemoteLoginRateKey(req: Request, server?: RequestIpServer): string {
     const forwardedProto = req.headers.get('x-forwarded-proto')?.trim().toLowerCase();
     const forwardedFor = req.headers.get('x-forwarded-for')?.trim() || '';
     const peerAddress = normalizeIpAddress(forwardedFor);
-    // Tailscale Serve replaces these forwarded headers before relaying to our loopback listener.
+    // Use Serve-shaped headers for client fairness; the separate socket limit bounds forged values.
     if (host.endsWith('.ts.net') && host === forwardedHost && forwardedProto === 'https'
       && !forwardedFor.includes(',') && isIP(peerAddress) && isTailscaleIpAddress(peerAddress)) {
       return `tailscale-serve:${peerAddress}`;
@@ -3274,26 +3276,32 @@ function getRemoteLoginRateKey(req: Request, server?: RequestIpServer): string {
 }
 
 function getRemoteLoginRateLimit(req: Request, server?: RequestIpServer): { limited: boolean; retryAfterSeconds: number } {
-  const key = getRemoteLoginRateKey(req, server);
   const now = Date.now();
-  const entry = remoteLoginFailures.get(key);
-  if (!entry || entry.resetAt <= now) {
-    remoteLoginFailures.delete(key);
-    return { limited: false, retryAfterSeconds: 0 };
+  for (const failures of [remoteLoginFailures, remoteLoginSocketFailures]) {
+    for (const [key, entry] of failures) {
+      if (entry.resetAt <= now) failures.delete(key);
+    }
   }
-  const limited = entry.count >= REMOTE_LOGIN_RATE_MAX_FAILURES;
-  return { limited, retryAfterSeconds: limited ? Math.max(1, Math.ceil((entry.resetAt - now) / 1000)) : 0 };
+  const client = remoteLoginFailures.get(getRemoteLoginRateKey(req, server));
+  const socket = remoteLoginSocketFailures.get(getRequestSocketAddress(req, server) || 'unknown');
+  const retryAfterSeconds = Math.max(
+    client && client.count >= REMOTE_LOGIN_RATE_MAX_FAILURES ? Math.ceil((client.resetAt - now) / 1000) : 0,
+    socket && socket.count >= REMOTE_LOGIN_RATE_MAX_SOCKET_FAILURES ? Math.ceil((socket.resetAt - now) / 1000) : 0,
+  );
+  return { limited: retryAfterSeconds > 0, retryAfterSeconds };
 }
 
 function recordRemoteLoginFailure(req: Request, server?: RequestIpServer): void {
-  const key = getRemoteLoginRateKey(req, server);
   const now = Date.now();
-  const existing = remoteLoginFailures.get(key);
-  if (!existing || existing.resetAt <= now) {
-    remoteLoginFailures.set(key, { count: 1, resetAt: now + REMOTE_LOGIN_RATE_WINDOW_MS });
-    return;
+  for (const [failures, key] of [
+    [remoteLoginFailures, getRemoteLoginRateKey(req, server)],
+    [remoteLoginSocketFailures, getRequestSocketAddress(req, server) || 'unknown'],
+  ] as const) {
+    const existing = failures.get(key);
+    failures.set(key, existing && existing.resetAt > now
+      ? { count: existing.count + 1, resetAt: existing.resetAt }
+      : { count: 1, resetAt: now + REMOTE_LOGIN_RATE_WINDOW_MS });
   }
-  remoteLoginFailures.set(key, { count: existing.count + 1, resetAt: existing.resetAt });
 }
 
 function clearRemoteLoginFailures(req: Request, server?: RequestIpServer): void {
