@@ -32,7 +32,6 @@ import {
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import {
   runUmbraUiMediaBatch,
-  clearCompletedUmbraUiMediaBatch,
   type UmbraUiMediaBatchKind,
 } from '@/lib/umbraUiMediaBatch';
 import {
@@ -379,6 +378,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
   const draggingRef = React.useRef(false);
   const remoteClient = isUmbraRemoteClient();
   const selected = items.find((item) => item.id === selectedId) || items[0];
+  const runnableItems = React.useMemo(() => items.filter((item) => item.status !== 'completed'), [items]);
   const localSourceUrl = useFilePreview(selected?.file || null);
   const sourceUrl = localSourceUrl || itemPreviewUrl(selected);
   const localWatermarkUrl = useFilePreview(watermark);
@@ -520,17 +520,20 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
   }, []);
 
   const run = React.useCallback(async () => {
-    if (processing || items.length === 0 || (!watermark && !watermarkAsset)) return;
+    if (processing || runnableItems.length === 0 || (!watermark && !watermarkAsset)) return;
     batchControl.reset();
     activityStartedAtRef.current = Date.now();
     setProcessing(true);
-    setSummary({ completed: 0, failed: 0, total: items.length });
-    setItems((current) => current.map((item) => ({ ...item, status: 'staged', error: undefined, result: undefined })));
-    const imageSequence = new Map(items.filter((item) => item.kind === 'image').map((item, index) => [item.id, index + 1]));
-    const videoSequence = new Map(items.filter((item) => item.kind === 'video').map((item, index) => [item.id, index + 1]));
+    setSummary({ completed: 0, failed: 0, total: runnableItems.length });
+    const runnableIds = new Set(runnableItems.map((item) => item.id));
+    setItems((current) => current.map((item) => runnableIds.has(item.id)
+      ? { ...item, status: 'staged', error: undefined, result: undefined }
+      : item));
+    const imageSequence = new Map(runnableItems.filter((item) => item.kind === 'image').map((item, index) => [item.id, index + 1]));
+    const videoSequence = new Map(runnableItems.filter((item) => item.kind === 'video').map((item, index) => [item.id, index + 1]));
     const result = await runUmbraUiMediaBatch({
       shouldStop: batchControl.shouldStop,
-      items,
+      items: runnableItems,
       onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
       runItem: async (item) => {
         const next = await submitUmbraUiWatermark({
@@ -557,11 +560,10 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
         setSummary((current) => ({ ...current, completed: current.completed + (error ? 0 : 1), failed: current.failed + (error ? 1 : 0) }));
       },
     });
-    setItems((current) => clearCompletedUmbraUiMediaBatch(current, items));
     setProcessing(false);
     window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
     showToast(result.failed ? `${result.completed} watermark${result.completed === 1 ? '' : 's'} completed; ${result.failed} failed.` : `${result.completed} watermark${result.completed === 1 ? '' : 's'} completed.`, result.failed ? 'error' : 'success');
-  }, [batchControl, exportSettings, items, opacity, pinnedOutputFolder, outputFolder, position.x, position.y, processing, scale, setItems, showToast, videoMode, videoOutputWidth, watermark, watermarkAsset]);
+  }, [batchControl, exportSettings, opacity, pinnedOutputFolder, outputFolder, position.x, position.y, processing, runnableItems, scale, setItems, showToast, videoMode, videoOutputWidth, watermark, watermarkAsset]);
 
   return (
     <div data-umbra-ui-watermark-tool="" className="grid min-h-0 flex-1 grid-cols-[minmax(300px,360px)_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:overflow-y-auto">
@@ -601,7 +603,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
             <div><div className={cn(labelClass, 'mb-1.5')}>Anchor</div><div className="grid aspect-square grid-cols-3 gap-1 rounded-md border border-white/10 bg-black/30 p-1.5">{ANCHORS.map((anchor) => <button key={anchor.title} type="button" title={anchor.title} onClick={() => setPosition({ x: anchor.x, y: anchor.y })} className={cn('flex items-center justify-center rounded-sm border', Math.abs(position.x - anchor.x) < 0.01 && Math.abs(position.y - anchor.y) < 0.01 ? 'border-cyan-300/55 bg-cyan-500/[0.14] text-cyan-200' : 'border-white/[0.06] text-zinc-700')}><span className="h-1.5 w-1.5 rounded-full bg-current" /></button>)}</div></div>
             <div className="space-y-4"><label className="block space-y-1.5"><span className="flex justify-between"><span className={labelClass}>Size</span><span className="font-mono text-[9px] text-cyan-200">{Math.round(scale * 100)}%</span></span><input type="range" min={0.03} max={0.75} step={0.01} value={scale} onChange={(event) => setScale(Number(event.target.value))} className="w-full accent-cyan-300" /></label><label className="block space-y-1.5"><span className="flex justify-between"><span className={labelClass}>Opacity</span><span className="font-mono text-[9px] text-cyan-200">{Math.round(opacity * 100)}%</span></span><input type="range" min={0.05} max={1} step={0.01} value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} className="w-full accent-cyan-300" /></label></div>
           </div>
-          <button type="button" onClick={() => void run()} disabled={items.length === 0 || (!watermark && !watermarkAsset) || watermarkUploading || processing} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-cyan-300/30 bg-cyan-500/[0.1] text-[10px] font-black uppercase tracking-[0.16em] text-cyan-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600">{processing ? <Loader2 size={13} className="animate-spin" /> : videoMode ? <Video size={13} /> : <Stamp size={13} />}{processing ? `Processing ${summary.completed + summary.failed}/${summary.total}` : videoMode ? 'Run Video Watermark Batch' : 'Run Image Watermark Batch'}</button>
+          <button type="button" onClick={() => void run()} disabled={runnableItems.length === 0 || (!watermark && !watermarkAsset) || watermarkUploading || processing} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-cyan-300/30 bg-cyan-500/[0.1] text-[10px] font-black uppercase tracking-[0.16em] text-cyan-100 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600">{processing ? <Loader2 size={13} className="animate-spin" /> : videoMode ? <Video size={13} /> : <Stamp size={13} />}{processing ? `Processing ${summary.completed + summary.failed}/${summary.total}` : videoMode ? 'Run Video Watermark Batch' : 'Run Image Watermark Batch'}</button>
           <BatchSummary {...summary} />
         </div>
       </section>
@@ -615,6 +617,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
             </div> : <div className="max-w-sm text-center text-zinc-700"><Stamp size={34} className="mx-auto mb-3" /><div className="text-[10px] font-black uppercase tracking-[0.16em]">{previewFailed ? 'Source preview unavailable' : 'Stage media to preview'}</div>{previewFailed ? <div className="mt-2 text-[9px] leading-relaxed text-zinc-600">This Gallery file is not present in the current Umbra Studio build. Choose an available source to preview and process it.</div> : null}</div>}
           </div>
         </div>
+        {selected?.status === 'completed' && selected.result ? <div className="flex items-center gap-2 border-t border-emerald-300/15 bg-emerald-500/[0.035] px-3 py-2.5"><CheckCircle2 size={13} className="text-emerald-300" /><span className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-500">{selected.result.filename}</span><a href={selected.result.previewUrl || buildFsImageUrl(selected.result.path, String(Date.now()), { preferServer: true })} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-300">Open</a><a href={selected.result.downloadUrl || `${buildFsImageUrl(selected.result.path, String(Date.now()), { preferServer: true })}&download=1`} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-300"><Download size={11} /> Save</a></div> : null}
       </main>
     </div>
   );
