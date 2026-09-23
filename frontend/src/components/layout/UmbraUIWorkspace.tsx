@@ -184,6 +184,7 @@ import {
   resolveUmbraUiHiresResizeMode,
 } from '../../../../shared/umbra-ui/pipelineTypes';
 import { UMBRA_UI_EXTRAS_TOOL_EVENT } from '@/lib/umbraUiExtrasNavigation';
+import { selectUmbraUiImageCheckpoint } from '@/lib/umbraUiImageCheckpointSelection';
 import {
   readImg2ImgReplacementIntents,
   writeImg2ImgReplacementIntents,
@@ -912,6 +913,7 @@ export function UmbraUIWorkspace() {
     writeImg2ImgReplacementIntents(img2imgSourceReplacementRequestsRef.current);
   }, []);
   const appliedImagePipelineDefaultsRef = React.useRef('');
+  const appliedImageCheckpointScopeRef = React.useRef('');
   const imagePipelineDefaultsInitializedRef = React.useRef(
     hasUmbraUiImageControls(initialDeviceResume),
   );
@@ -1540,34 +1542,36 @@ export function UmbraUIWorkspace() {
       ? filterUmbraUiInpaintPrimaryModels(discoveredModelItems, selected.pipeline.inpaintAdapter || 'native_edit')
       : discoveredModelItems;
     const preferredModelName = defaults?.modelNamesBySource?.[nextModelType]
-      || (nextModelType === selected.pipeline.modelSources[0] ? defaults?.modelName : '');
-    const preferredModel = preferredModelName
-      ? resolveCatalogMatch(preferredModelName, modelItems)
-      : '';
-    const hasPreferredModel = !!preferredModel && modelItems.includes(preferredModel);
+      || (nextModelType === selected.pipeline.modelSources[0] ? defaults?.modelName : '') || '';
     const modelSelectionKey = getUmbraUiPipelineModelSelectionKey(
       inpaintWorkspaceActive ? 'inpainting' : activeImageFeature,
       modelFamily,
       nextModelType,
     );
-    const rememberedModel = resolveCatalogMatch(pipelineModelSelections[modelSelectionKey] || '', modelItems);
-    const hasRememberedModel = !!rememberedModel && modelItems.includes(rememberedModel);
+    const checkpointScope = [selected.workflow.id, selected.pipeline.feature, selected.pipeline.modelFamilyKey, nextModelType].join(':');
     const defaultsKey = [
       selected.workflow.id,
+      selected.pipeline.feature,
       selected.pipeline.modelFamilyKey,
       nextModelType,
       JSON.stringify(defaults || {}),
+      JSON.stringify(modelItems),
     ].join(':');
     if (appliedImagePipelineDefaultsRef.current === defaultsKey) return;
 
-    setCheckpointName((current) => {
-      if (hasRememberedModel) return current === rememberedModel ? current : rememberedModel;
-      if (hasPreferredModel) return current === preferredModel ? current : preferredModel;
-      return modelItems.includes(current) ? current : '';
-    });
+    const preserveCurrentCheckpoint = imageControlsPreserveHydratedBaselineRef.current
+      || appliedImageCheckpointScopeRef.current === checkpointScope;
+    appliedImageCheckpointScopeRef.current = checkpointScope;
+    setCheckpointName((current) => selectUmbraUiImageCheckpoint({
+      current,
+      remembered: pipelineModelSelections[modelSelectionKey] || '',
+      preferred: preferredModelName,
+      installed: modelItems,
+      preserveCurrent: preserveCurrentCheckpoint,
+    }));
     const shouldApplyPipelineDefaults = !imagePipelineDefaultsInitializedRef.current
-      && !imageControlsPreserveHydratedBaselineRef.current;
-    imageControlsPreserveHydratedBaselineRef.current = false;
+      && !preserveCurrentCheckpoint;
+    if (modelItems.length > 0) imageControlsPreserveHydratedBaselineRef.current = false;
     if (!defaults) {
       appliedImagePipelineDefaultsRef.current = defaultsKey;
       imagePipelineDefaultsInitializedRef.current = true;
