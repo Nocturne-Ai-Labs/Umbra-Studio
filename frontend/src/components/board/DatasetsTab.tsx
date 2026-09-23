@@ -750,7 +750,8 @@ export function DatasetsTab() {
 
   const handleConfirmDelete = async () => {
     if (!selectedDataset || !selectedConcept) return;
-    const result = await deleteImages(selectedDataset, selectedConcept, Array.from(flaggedForDeletion));
+    const deletedNames = new Set(flaggedForDeletion);
+    const result = await deleteImages(selectedDataset, selectedConcept, Array.from(deletedNames));
     if (!result.success) {
       await refreshAfterFailedDelete();
       showToast(result.error, 'error');
@@ -759,6 +760,7 @@ export function DatasetsTab() {
     if (activeConcept.current !== conceptKey) return;
     await loadImages();
     if (activeConcept.current !== conceptKey) return;
+    setSelectedImages(previous => new Set([...previous].filter(name => !deletedNames.has(name))));
     setFlaggedForDeletion(new Set());
     setShowDeleteConfirm(false);
     setFocusedImage(null);
