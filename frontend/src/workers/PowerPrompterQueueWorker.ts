@@ -58,8 +58,6 @@ type QueueWorkerResponse =
 function buildSnapshotSignature(snapshot: any): string {
   return JSON.stringify({
     paused: snapshot?.paused === true,
-    snapshotSchemaVersion: snapshot?.snapshotSchemaVersion,
-    file: snapshot?.file,
     mode: snapshot?.mode,
     activeSetId: snapshot?.activeSetId,
     queueTargetType: snapshot?.queueTargetType,
@@ -67,15 +65,11 @@ function buildSnapshotSignature(snapshot: any): string {
     dispatchDelayMs: snapshot?.dispatchDelayMs,
     requestIds: Array.isArray(snapshot?.requestIds) ? snapshot.requestIds : [],
     prompts: Array.isArray(snapshot?.prompts) ? snapshot.prompts : [],
-    promptEntries: Array.isArray(snapshot?.promptEntries) ? snapshot.promptEntries : [],
     promptSetIds: Array.isArray(snapshot?.promptSetIds) ? snapshot.promptSetIds : [],
     promptOutputSubfolders: Array.isArray(snapshot?.promptOutputSubfolders) ? snapshot.promptOutputSubfolders : [],
     promptStyleNames: Array.isArray(snapshot?.promptStyleNames) ? snapshot.promptStyleNames : [],
     promptSeedGroupIds: Array.isArray(snapshot?.promptSeedGroupIds) ? snapshot.promptSeedGroupIds : [],
     generationByPrompt: Array.isArray(snapshot?.generationByPrompt) ? snapshot.generationByPrompt : [],
-    generation: snapshot?.generation,
-    randomApplied: snapshot?.randomApplied,
-    groupSnapshots: Array.isArray(snapshot?.groupSnapshots) ? snapshot.groupSnapshots : [],
   });
 }
 

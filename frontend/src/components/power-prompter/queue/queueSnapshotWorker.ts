@@ -39,8 +39,6 @@ export type QueuePromptBuildWorkerResult = ReturnType<typeof buildQueuePromptsFr
 function buildQueueSnapshotSignatureFallback(snapshot: PersistedPausedQueueSnapshot): string {
   return JSON.stringify({
     paused: snapshot.paused === true,
-    snapshotSchemaVersion: snapshot.snapshotSchemaVersion,
-    file: snapshot.file,
     mode: snapshot.mode,
     activeSetId: snapshot.activeSetId,
     queueTargetType: snapshot.queueTargetType,
@@ -48,15 +46,11 @@ function buildQueueSnapshotSignatureFallback(snapshot: PersistedPausedQueueSnaps
     dispatchDelayMs: snapshot.dispatchDelayMs,
     requestIds: snapshot.requestIds,
     prompts: snapshot.prompts,
-    promptEntries: Array.isArray(snapshot.promptEntries) ? snapshot.promptEntries : [],
     promptSetIds: snapshot.promptSetIds,
     promptOutputSubfolders: snapshot.promptOutputSubfolders,
     promptStyleNames: snapshot.promptStyleNames,
     promptSeedGroupIds: snapshot.promptSeedGroupIds,
     generationByPrompt: snapshot.generationByPrompt,
-    generation: snapshot.generation,
-    randomApplied: snapshot.randomApplied,
-    groupSnapshots: Array.isArray(snapshot.groupSnapshots) ? snapshot.groupSnapshots : [],
   });
 }
 
