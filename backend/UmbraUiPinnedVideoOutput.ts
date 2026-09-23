@@ -49,8 +49,10 @@ export async function publishPinnedVideoOutput(source: string, directory: string
 }
 
 async function publishVerifiedVideo(source: string, directory: string, promptId: string, pinnedTaskRoot: string): Promise<string> {
-  await mkdir(directory, { recursive: true });
-  const authorizedDirectory = resolveAllowedExistingGalleryPath(directory, [pinnedTaskRoot]);
+  const candidateDirectory = resolveAllowedExistingGalleryPath(directory, [pinnedTaskRoot]);
+  if (!candidateDirectory) throw new Error('The dated video output folder is outside the selected pinned folder.');
+  await mkdir(candidateDirectory, { recursive: true });
+  const authorizedDirectory = resolveAllowedExistingGalleryPath(candidateDirectory, [pinnedTaskRoot]);
   if (!authorizedDirectory) throw new Error('The dated video output folder is outside the selected pinned folder.');
   const extension = extname(source);
   const stem = basename(source, extension);
