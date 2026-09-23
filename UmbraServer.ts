@@ -223,6 +223,7 @@ import { buildQueuePromptsFromCards } from './shared/power-prompter/queuePromptB
 import { normalizeQueueSetOrders as normalizePPQueueSetOrders } from './shared/power-prompter/cardQueueSetOrders';
 import { composePowerPrompterDocumentPrompt } from './backend/PowerPrompterDocumentPrompt';
 import { doesPowerPrompterTrashAffectSession, doesPowerPrompterTrashRemoveActiveFile, powerPrompterTrashModeForPath, resolvePowerPrompterTrashTargetPaths, runGuardedPowerPrompterTrashMutation, shouldGatePowerPrompterTrash } from './backend/PowerPrompterDeleteGuard';
+import { advancePowerPrompterRawWriteSession, choosePowerPrompterRawCardSaveFile, getPowerPrompterRawCardLogicalFile, isPowerPrompterRawWriteActiveTarget, isPowerPrompterRawWriteCandidate, isPowerPrompterRawWritePhysicalTarget, runGuardedPowerPrompterRawWrite } from './backend/PowerPrompterRawWriteGuard';
 import { assertPowerPrompterCardEditorRevision, assertPowerPrompterCardStorageRevision, assertPowerPrompterSessionCanOpen, assertPowerPrompterSessionFile, assertPowerPrompterSessionRevision, createPowerPrompterSessionGate, PowerPrompterSessionConflictError, shouldReusePowerPrompterSession } from './backend/PowerPrompterSessionGate';
 import {
   UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
@@ -22420,6 +22421,18 @@ async function updatePowerPrompterDocumentSession(
   });
 }
 
+async function publishPowerPrompterRawWrite(document: PowerPrompterCardDocument, reason: string): Promise<number> {
+  const now = Date.now();
+  powerPrompterDocumentSession = advancePowerPrompterRawWriteSession(
+    powerPrompterDocumentSession,
+    now,
+    { document, composedPrompt: composePowerPrompterDocumentPrompt(document) },
+  );
+  await persistPowerPrompterDocumentSessionSummary().catch(() => undefined);
+  broadcastPowerPrompterDocumentSession(reason);
+  return powerPrompterDocumentSession.revision;
+}
+
 interface ClearPowerPrompterDocumentSessionOptions {
   expectedFile: string;
   expectedRevision: unknown;
@@ -26988,12 +27001,25 @@ async function handleFsRead(url: URL): Promise<Response> {
   }
 }
 
+async function getPowerPrompterRawWriteActivePaths(): Promise<{ file: string | null; sidecar: string | null }> {
+  const active = powerPrompterDocumentSession.file ? resolvePPPromptFile(powerPrompterDocumentSession.file) : null;
+  if (!active) return { file: null, sidecar: null };
+  const roots = [PP_PROMPTS_ROOT_ABS];
+  const [file, sidecar] = await Promise.all([
+    resolveAllowedGalleryPath(active.fullPath, roots),
+    resolveAllowedGalleryPath(active.sidecarPath, roots),
+  ]);
+  return { file, sidecar };
+}
+
 async function handleFsWrite(req: Request): Promise<Response> {
   try {
-    const { path: filePath, content, encoding } = await req.json() as {
+    const { path: filePath, content, encoding, expectedRevision, expectedStorageRevision } = await req.json() as {
       path: string;
       content?: string;
       encoding?: 'utf8' | 'base64';
+      expectedRevision?: unknown;
+      expectedStorageRevision?: unknown;
     };
     if (!filePath) return json({ error: 'Path required' }, 400);
 
@@ -27002,16 +27028,67 @@ async function handleFsWrite(req: Request): Promise<Response> {
 
     const fullPath = await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
     if (!fullPath) return json({ error: 'Invalid path' }, 403);
+    if (isPowerPrompterRawWriteCandidate(resolved.relativePath)) {
+      const physicalRoot = await resolveAllowedGalleryPath(PP_PROMPTS_ROOT_ABS, [PP_PROMPTS_ROOT_ABS]);
+      if (!physicalRoot || !isPowerPrompterRawWritePhysicalTarget(resolved.fullPath, fullPath, PP_PROMPTS_ROOT_ABS, physicalRoot)) {
+        return json({ error: 'Power Prompter writes require a canonical path inside Prompts.' }, 403);
+      }
+    }
     if (resolved.relativePath.toLowerCase().endsWith(PP_CARD_DOC_EXT)) {
       if (encoding === 'base64') {
         return json({ error: 'Power Prompter card writes must use JSON text.' }, 400);
       }
+      const logicalFilePath = getPowerPrompterRawCardLogicalFile(resolved.relativePath);
+      const logical = resolvePPPromptFile(logicalFilePath);
+      if (!logical) return json({ error: 'Invalid Power Prompter card path' }, 400);
+      const authorized = await resolveAllowedGalleryPath(logical.sidecarPath, [PP_PROMPTS_ROOT_ABS]);
+      if (!authorized || !isPowerPrompterRawWriteActiveTarget(fullPath, authorized, null)) {
+        return json({ error: 'Power Prompter card path changed or is outside Prompts.' }, 403);
+      }
+      let parsed: unknown;
       try {
-        const parsed = JSON.parse(String(content ?? ''));
-        const saved = await savePPCardDocumentForFile(resolved.relativePath, parsed, { forceOverwrite: false });
-        return json({ success: true, path: saved.file || resolved.relativePath, guarded: true });
+        parsed = JSON.parse(String(content ?? ''));
       } catch (error: any) {
-        return json({ error: error?.message || 'Failed to save Power Prompter card document' }, 400);
+        return json({ error: error?.message || 'Invalid Power Prompter card JSON' }, 400);
+      }
+      try {
+        return await mutatePowerPrompterDocumentSession(async () => {
+          const [currentAuthorized, physicalRoot] = await Promise.all([
+            resolveAllowedGalleryPath(logical.sidecarPath, [PP_PROMPTS_ROOT_ABS]),
+            resolveAllowedGalleryPath(PP_PROMPTS_ROOT_ABS, [PP_PROMPTS_ROOT_ABS]),
+          ]);
+          if (!currentAuthorized || !physicalRoot
+            || !isPowerPrompterRawWritePhysicalTarget(logical.sidecarPath, currentAuthorized, PP_PROMPTS_ROOT_ABS, physicalRoot)
+            || !isPowerPrompterRawWriteActiveTarget(fullPath, currentAuthorized, null)) {
+            throw new PowerPrompterSessionConflictError('The Power Prompter card path changed. Reload it before writing.');
+          }
+          const activePaths = await getPowerPrompterRawWriteActivePaths();
+          const active = isPowerPrompterRawWriteActiveTarget(fullPath, activePaths.file, activePaths.sidecar);
+          const storageRevision = active ? 'missing' : await getPowerPrompterCardStorageRevision(logical);
+          const outcome = await runGuardedPowerPrompterRawWrite({
+            kind: 'card',
+            active,
+            currentRevision: powerPrompterDocumentSession.revision,
+            expectedRevision,
+            storageRevision,
+            expectedStorageRevision,
+            write: async () => {
+              const saveFile = choosePowerPrompterRawCardSaveFile(active, powerPrompterDocumentSession.file, logical.filePath);
+              const saved = await savePPCardDocumentForFile(saveFile, parsed, { forceOverwrite: false });
+              await syncLegacyPPTextMirror(saveFile, saved);
+              return saved;
+            },
+            publishActiveWrite: (saved) => publishPowerPrompterRawWrite(saved, 'document_saved'),
+          });
+          return json({
+            success: true,
+            path: resolved.relativePath,
+            guarded: true,
+            sessionRevision: outcome.sessionRevision,
+          });
+        });
+      } catch (error: any) {
+        return json({ error: error?.message || 'Failed to save Power Prompter card document' }, error instanceof PowerPrompterSessionConflictError ? 409 : 400);
       }
     }
 
@@ -27021,6 +27098,50 @@ async function handleFsWrite(req: Request): Promise<Response> {
     }
     if (extension === '.txt' && !await resolveAllowedGalleryPath(fullPath, [join(USER_DIR, 'PowerPrompter', 'Prompts')])) {
       return json({ error: 'Text writes must stay in Power Prompter prompts' }, 403);
+    }
+
+    if (extension === '.txt') {
+      try {
+        return await mutatePowerPrompterDocumentSession(async () => {
+          const [currentAuthorized, physicalRoot] = await Promise.all([
+            resolveAllowedGalleryPath(resolved.fullPath, [PP_PROMPTS_ROOT_ABS]),
+            resolveAllowedGalleryPath(PP_PROMPTS_ROOT_ABS, [PP_PROMPTS_ROOT_ABS]),
+          ]);
+          if (!currentAuthorized || !physicalRoot
+            || !isPowerPrompterRawWritePhysicalTarget(resolved.fullPath, currentAuthorized, PP_PROMPTS_ROOT_ABS, physicalRoot)
+            || !isPowerPrompterRawWriteActiveTarget(fullPath, currentAuthorized, null)) {
+            throw new PowerPrompterSessionConflictError('The Power Prompter text path changed. Reload it before writing.');
+          }
+          const activePaths = await getPowerPrompterRawWriteActivePaths();
+          const active = isPowerPrompterRawWriteActiveTarget(fullPath, activePaths.file, null);
+          const storageRevision = active ? 'missing' : await getPowerPrompterCardStorageRevision({
+            fullPath,
+            sidecarPath: `${fullPath}${PP_CARD_DOC_EXT}`,
+          });
+          const textStat = await fs.stat(fullPath).catch((error: NodeJS.ErrnoException) => {
+            if (error.code === 'ENOENT') return null;
+            throw error;
+          });
+          const outcome = await runGuardedPowerPrompterRawWrite({
+            kind: 'text',
+            textHasCardSidecar: existsSync(`${fullPath}${PP_CARD_DOC_EXT}`),
+            textHasOtherHardlinks: (textStat?.nlink || 0) > 1,
+            active,
+            currentRevision: powerPrompterDocumentSession.revision,
+            expectedRevision,
+            storageRevision,
+            expectedStorageRevision,
+            write: () => fsWorkerService.write({ fullPath, content: content ?? '', encoding: 'utf8' }),
+            publishActiveWrite: async () => { throw new Error('Active Power Prompter text writes are not supported.'); },
+          });
+          return json({ success: true, path: filePath, guarded: true, sessionRevision: outcome.sessionRevision });
+        });
+      } catch (error: any) {
+        if (error instanceof PowerPrompterSessionConflictError) {
+          return json({ error: error.message }, 409);
+        }
+        throw error;
+      }
     }
 
     await fsWorkerService.write({
