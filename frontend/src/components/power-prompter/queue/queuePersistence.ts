@@ -168,14 +168,18 @@ export function normalizePersistedQueueGroupSnapshots(
   promptCount: number
 ): PersistedQueueGroupSnapshot[] {
   if (!Array.isArray(rawValue) || promptCount <= 0) return [];
+  const indicesByRequestId = new Map<string, number[]>();
+  requestIds.forEach((requestId, index) => {
+    const indices = indicesByRequestId.get(requestId) || [];
+    indices.push(index);
+    indicesByRequestId.set(requestId, indices);
+  });
   return rawValue
     .map((entry: any): PersistedQueueGroupSnapshot | null => {
       if (!entry || typeof entry !== 'object') return null;
       const requestId = String(entry.requestId || '').trim();
       if (!requestId) return null;
-      const fallbackIndices = requestIds
-        .map((candidate, index) => (candidate === requestId ? index : -1))
-        .filter((index) => index >= 0);
+      const fallbackIndices = indicesByRequestId.get(requestId) || [];
       const rawPromptIndices: number[] = (Array.isArray(entry.promptIndices) ? entry.promptIndices : fallbackIndices)
         .map((value: unknown) => Math.floor(Number(value)))
         .filter((value: number) => Number.isFinite(value) && value >= 0 && value < promptCount);
@@ -185,6 +189,7 @@ export function normalizePersistedQueueGroupSnapshots(
       const normalizedMode = String(entry.mode || '') === 'prompt' || String(entry.mode || '') === 'variants'
         ? String(entry.mode) as PowerPrompterQueueMode
         : (String(entry.mode || '') === 'selected' ? 'selected' : undefined);
+      const editorSnapshot = normalizeQueueEditorSnapshot(entry.editorSnapshot);
       return {
         id: String(entry.id || requestId).trim() || requestId,
         requestId,
@@ -194,7 +199,7 @@ export function normalizePersistedQueueGroupSnapshots(
         promptStartIndex,
         promptCount: Math.max(0, Math.floor(Number(entry.promptCount) || promptIndices.length || fallbackIndices.length)),
         ...(promptIndices.length > 0 ? { promptIndices } : {}),
-        ...(normalizeQueueEditorSnapshot(entry.editorSnapshot) ? { editorSnapshot: normalizeQueueEditorSnapshot(entry.editorSnapshot) } : {}),
+        ...(editorSnapshot ? { editorSnapshot } : {}),
       };
     })
     .filter((entry: PersistedQueueGroupSnapshot | null): entry is PersistedQueueGroupSnapshot => !!entry);
