@@ -7,6 +7,7 @@ interface Context {
   overlay: (path: string) => string;
   tags: (path: string) => string[];
   output: (source: string, folder: unknown, pinned: unknown) => string;
+  links: (path: string) => Promise<{ previewUrl?: string; downloadUrl?: string }>;
   register: (path: string, censored: boolean, protectedMedia: boolean) => Promise<void>;
 }
 const json = (data: unknown, status = 200) =>
@@ -105,6 +106,17 @@ export async function handleCensorReviewRoute(req: Request, context: Context): P
           headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
         });
       }
+      if (itemId && action === 'export-links' && req.method === 'GET') {
+        const item = await service.getItem(projectId, itemId);
+        const receipt = item.lastExport;
+        if (item.status !== 'approved' || !receipt?.registered || receipt.editRevision !== item.editRevision
+          || !receipt.path || !await Bun.file(receipt.path).exists()) {
+          return json({ error: 'The current export is unavailable.' }, 404);
+        }
+        const links: { previewUrl?: string; downloadUrl?: string } = await context.links(receipt.path).catch(() => ({}));
+        if (!links.previewUrl || !links.downloadUrl) return json({ error: 'The current export cannot be opened from this device.' }, 403);
+        return json({ path: receipt.path, ...links });
+      }
       if (itemId && req.method === 'POST') {
         const data = await body(req);
         if (action === 'detect') return json(await service.detect(projectId, itemId, data.revision));
@@ -113,16 +125,17 @@ export async function handleCensorReviewRoute(req: Request, context: Context): P
           return json(await service.approveUncensored(projectId, itemId, data.revision));
         if (action === 'review')
           return json(await service.review(projectId, itemId, data.revision, data.approve === true));
-        if (action === 'export')
-          return json(
-            await service.exportItem(
-              projectId,
-              itemId,
-              data.revision,
-              (source) => context.output(source, data.outputFolder, data.pinnedOutputFolder),
-              context.register,
-            ),
+        if (action === 'export') {
+          const exported = await service.exportItem(
+            projectId,
+            itemId,
+            data.revision,
+            (source) => context.output(source, data.outputFolder, data.pinnedOutputFolder),
+            context.register,
           );
+          const links = await context.links(exported.path).catch(() => ({}));
+          return json({ ...exported, ...links });
+        }
       }
     }
     return json({ error: 'Review route not found.' }, 404);

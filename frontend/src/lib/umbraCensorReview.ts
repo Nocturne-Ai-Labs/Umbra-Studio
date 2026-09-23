@@ -5,6 +5,14 @@ import type {
   CensorReviewSettings,
 } from '../../../shared/umbra-ui/censorReview';
 export * from '../../../shared/umbra-ui/censorReview';
+export interface CensorReviewExportLinks {
+  path: string;
+  previewUrl?: string;
+  downloadUrl?: string;
+}
+export interface CensorReviewExportResult extends CensorReviewExportLinks {
+  item: CensorReviewItem;
+}
 const base = '/api/umbra-ui/censor-review/projects';
 export function censorReviewId(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -64,11 +72,13 @@ export const censorReviewApi = {
       ...extra,
     }),
   export: (project: string, item: CensorReviewItem, outputFolder: string, pinnedOutputFolder: string) =>
-    request<{ item: CensorReviewItem; path: string }>(`${itemPath(project, item.id)}/export`, 'POST', {
+    request<CensorReviewExportResult>(`${itemPath(project, item.id)}/export`, 'POST', {
       revision: item.revision,
       outputFolder,
       pinnedOutputFolder,
     }),
+  exportLinks: (project: string, item: string) =>
+    request<CensorReviewExportLinks>(`${itemPath(project, item)}/export-links`),
   asset: (project: string, item: string, filename: string) =>
     `${base}${itemPath(project, item)}/assets/${encodeURIComponent(filename)}`,
 };

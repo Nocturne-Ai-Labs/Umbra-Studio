@@ -1753,7 +1753,7 @@ export function UmbraUIWorkspace() {
       if (sourceImagePath || sourceImageName || replace) {
         setImg2imgSource({
           path: sourceImagePath,
-          originalPath: sourceImagePath,
+          originalPath: '',
           name: sourceImageName,
           imageUrl: '',
           width: 0,
@@ -2347,10 +2347,10 @@ export function UmbraUIWorkspace() {
         promptSegments,
         negativePrompt,
       ));
-      if (activeImageFeature === 'img2img' && replaceImg2ImgSourceOnComplete && requestId) {
-        const originalPath = String(img2imgSource.originalPath || img2imgSource.path || '').trim();
-        if (!originalPath) throw new Error('Umbra could not identify the original Gallery image to replace.');
-        img2imgSourceReplacementRequestsRef.current.set(requestId, originalPath);
+      if (activeImageFeature === 'img2img' && replaceImg2ImgSourceOnComplete && requestId
+        && img2imgSource.imageUrl.startsWith('/api/fs/image?')) {
+        const originalPath = String(img2imgSource.originalPath || '').trim();
+        if (originalPath) img2imgSourceReplacementRequestsRef.current.set(requestId, originalPath);
       }
       if (seedIsAdjustable && imageSeedContextRef.current.revision === submittedSeedRevision) {
         setSeed((current) => current === seed
@@ -2495,7 +2495,11 @@ export function UmbraUIWorkspace() {
   const previewProgress = generationPreview?.maxStep
     ? Math.max(0, Math.min(1, generationPreview.step / generationPreview.maxStep))
     : 0;
-  const showingLivePreview = queueSummary.running > 0 && !!generationPreview?.imageDataUrl;
+  const showingLivePreview = queueSummary.umbraUiRunning > 0
+    && !!queueSummary.umbraUiActiveRequestId
+    && generationPreview?.requestId === queueSummary.umbraUiActiveRequestId
+    && generationPreview.promptIndex === queueSummary.activePosition - 1
+    && !!generationPreview.imageDataUrl;
   const imagePreviewUrl = showingLivePreview
     ? generationPreview?.imageDataUrl || ''
     : latestSavedImage?.imageUrl || generationPreview?.imageDataUrl || '';
@@ -2634,6 +2638,7 @@ export function UmbraUIWorkspace() {
       }
       if (handoff.mode === 'img2img') {
         setActiveMode('img2img');
+        setReplaceImg2ImgSourceOnComplete(false);
         setImg2imgSource({
           path: handoff.path,
           originalPath: handoff.originalSourcePath || handoff.path,

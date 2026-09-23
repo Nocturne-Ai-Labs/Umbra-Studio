@@ -35,6 +35,7 @@ import {
   normalizeCensorReviewSettings,
   summarizeCensorReviewItem,
   type CensorReviewItem,
+  type CensorReviewExportLinks,
   type CensorReviewProject,
   type CensorReviewProjectSummary,
   type CensorReviewSettings,
@@ -75,6 +76,11 @@ const pendingEdits = new Map<string, CensorReviewItem>();
 const draftKey = (projectId: string, itemId: string) => `${projectId}:${itemId}`;
 const statusLabel = (value: string) =>
   value === 'needs-review' ? 'Needs review' : value === 'approved' ? 'Approved' : 'Pending';
+const hasCurrentExport = (value: Pick<CensorReviewItem, 'status' | 'editRevision' | 'lastExport'>) =>
+  value.status === 'approved'
+  && value.lastExport?.registered === true
+  && value.lastExport.editRevision === value.editRevision
+  && !!value.lastExport.path;
 const newId = censorReviewId;
 function Range({
   label,
@@ -166,6 +172,7 @@ export function UmbraCensorReviewWorkspace() {
     startedAt: 0,
     running: false,
   });
+  const [exportResults, setExportResults] = React.useState<Record<string, CensorReviewExportLinks>>({});
   const stop = React.useRef(false),
     mounted = React.useRef(true);
   const files = React.useRef<HTMLInputElement>(null),
@@ -189,10 +196,33 @@ export function UmbraCensorReviewWorkspace() {
   const filtered = React.useMemo(
     () =>
       (project?.items || []).filter(
-        (i) => filter === 'all' || i.status === filter || (filter === 'failed' && i.error) || (filter === 'attention' && !!i.attention?.length),
+        (i) => filter === 'all' || i.status === filter || (filter === 'failed' && i.error)
+          || (filter === 'attention' && !!i.attention?.length)
+          || (filter === 'exported' && hasCurrentExport(i)),
       ),
     [project, filter],
   );
+  const selectedProjectId = project?.id || '';
+  const selectedItemId = item?.id || '';
+  const selectedExportPath = item && hasCurrentExport(item) ? item.lastExport!.path : '';
+  React.useEffect(() => {
+    if (!selectedProjectId || !selectedItemId || !selectedExportPath) return;
+    const key = draftKey(selectedProjectId, selectedItemId);
+    if (exportResults[key]?.path === selectedExportPath) return;
+    let canceled = false;
+    void api.exportLinks(selectedProjectId, selectedItemId).then((links) => {
+      const currentItem = itemRef.current;
+      if (canceled || links.path !== selectedExportPath
+        || projectRef.current?.id !== selectedProjectId
+        || !currentItem || currentItem.id !== selectedItemId
+        || !hasCurrentExport(currentItem)
+        || currentItem.lastExport?.path !== selectedExportPath) return;
+      setExportResults((results) => ({ ...results, [key]: links }));
+    }).catch(() => {
+      // The persisted export path remains visible if the file or grant is unavailable.
+    });
+    return () => { canceled = true; };
+  }, [exportResults, selectedExportPath, selectedItemId, selectedProjectId]);
   const virtual = useVirtualizer({
     count: filtered.length,
     getScrollElement: () => strip.current,
@@ -333,6 +363,16 @@ export function UmbraCensorReviewWorkspace() {
     current = await api.action(project.id, current, 'render');
     receive(current);
   };
+  const exportApprovedItem = async (current: CensorReviewItem) => {
+    if (!project) return;
+    const exported = await api.export(project.id, current, outputFolder, pinned);
+    receive(exported.item, false);
+    if (mounted.current) {
+      setExportResults((results) => ({ ...results, [draftKey(project.id, current.id)]: exported }));
+    }
+    pendingEdits.delete(draftKey(project.id, current.id));
+    window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
+  };
   const runBatch = async (kind: 'preview' | 'export') => {
     if (!project) return;
     await flush();
@@ -341,7 +381,7 @@ export function UmbraCensorReviewWorkspace() {
     setProject(refreshed);
     const rows = refreshed.items.filter((i) =>
       kind === 'export'
-        ? i.status === 'approved'
+        ? i.status === 'approved' && !hasCurrentExport(i)
         : i.status !== 'approved' && (!!i.error || i.needsDetection || i.renderedEditRevision !== i.editRevision),
     );
     setProgress({ total: rows.length, completed: 0, failed: 0, startedAt: Date.now(), running: true });
@@ -358,20 +398,7 @@ export function UmbraCensorReviewWorkspace() {
             current = await api.action(project.id, current, 'render');
             receive(current, false);
           } else {
-            current = (await api.export(project.id, current, outputFolder, pinned)).item;
-            const remaining = await api.remove(project.id, current);
-            pendingEdits.delete(draftKey(project.id, current.id));
-            if (mounted.current) {
-              projectRef.current = remaining;
-              setProject(remaining);
-              if (itemRef.current?.id === current.id) {
-                itemRef.current = null;
-                setItem(null);
-                markDirty(false);
-                setSelectedRect('');
-                setHistory({ undo: [], redo: [] });
-              }
-            }
+            await exportApprovedItem(current);
           }
         },
         onItemSettled: (row, failure) => {
@@ -582,6 +609,13 @@ export function UmbraCensorReviewWorkspace() {
       .find((image) => remaining.items.some((value) => value.id === image.id));
     if (next) await select(next.id, remaining);
   });
+  const exportReceipt = item && hasCurrentExport(item) ? item.lastExport : null;
+  const rememberedExport = project && item && exportReceipt
+    ? exportResults[draftKey(project.id, item.id)]
+    : undefined;
+  const linkedExport = rememberedExport?.path === exportReceipt?.path ? rememberedExport : undefined;
+  const exportPreviewUrl = linkedExport?.previewUrl || '';
+  const exportDownloadUrl = linkedExport?.downloadUrl || '';
   return (
     <div
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--umbra-bg)] text-zinc-200"
@@ -646,7 +680,7 @@ export function UmbraCensorReviewWorkspace() {
         <button
           className={censorButton}
           title="Export approved"
-          disabled={!project?.items.some((i) => i.status === 'approved') || !!busy || dirty}
+          disabled={!project?.items.some((i) => i.status === 'approved' && !hasCurrentExport(i)) || !!busy || dirty}
           onClick={() => void perform('Exporting approved images', () => runBatch('export'))}
         >
           <Download size={16} />
@@ -774,6 +808,27 @@ export function UmbraCensorReviewWorkspace() {
               <button className={censorButton} disabled={!!busy} onClick={chooseImage}>
                 <ImagePlus size={20} />
                 Add images
+              </button>
+            </div>
+          )}
+          {exportReceipt && (
+            <div data-censor-review="export-result" className="flex shrink-0 flex-wrap items-center gap-2 border-t border-emerald-300/15 bg-emerald-500/[0.035] px-3 py-2 text-xs">
+              <Check size={14} className="text-emerald-300" />
+              <span className="font-semibold text-emerald-200">Exported</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-zinc-400" title={exportReceipt.path}>{exportReceipt.path}</span>
+              {exportPreviewUrl && <a href={exportPreviewUrl} target="_blank" rel="noreferrer" className={censorButton}>Open</a>}
+              {exportDownloadUrl && <a href={exportDownloadUrl} className={censorButton}><Download size={13} /> Save</a>}
+              <button
+                type="button"
+                className={censorButton}
+                title="Export this approved image again to the current output destination"
+                disabled={!!busy || dirty}
+                onClick={() => void perform('Exporting image again', async () => {
+                  const current = await flush();
+                  if (current && hasCurrentExport(current)) await exportApprovedItem(current);
+                })}
+              >
+                <RefreshCw size={13} /> Export again
               </button>
             </div>
           )}
@@ -1208,6 +1263,9 @@ export function UmbraCensorReviewWorkspace() {
           <span className="text-emerald-200">
             {project?.items.filter((i) => i.status === 'approved').length || 0} approved
           </span>
+          <span className="text-cyan-200">
+            {project?.items.filter(hasCurrentExport).length || 0} exported
+          </span>
           <button
             className="inline-flex min-h-8 items-center gap-1 text-amber-200"
             onClick={() => setFilter('attention')}
@@ -1227,6 +1285,7 @@ export function UmbraCensorReviewWorkspace() {
             <option value="pending">Pending</option>
             <option value="needs-review">Needs review</option>
             <option value="approved">Approved</option>
+            <option value="exported">Exported</option>
             <option value="failed">Failed</option>
           </UmbraSelectControl>
         </div>
@@ -1246,7 +1305,7 @@ export function UmbraCensorReviewWorkspace() {
                       })
                     }
                     className={`w-full overflow-hidden rounded border ${item?.id === image.id ? 'border-emerald-300' : 'border-white/15'}`}
-                    title={`${image.name} - ${statusLabel(image.status)}${image.attention?.length ? ` - ${image.attention.join('; ')}` : ''}`}
+                    title={`${image.name} - ${hasCurrentExport(image) ? 'Exported' : statusLabel(image.status)}${image.attention?.length ? ` - ${image.attention.join('; ')}` : ''}`}
                   >
                     <div className="relative h-12 bg-black sm:h-16">
                       {!!image.attention?.length && (
@@ -1267,7 +1326,7 @@ export function UmbraCensorReviewWorkspace() {
                     <div
                       className={`truncate px-1 text-[10px] ${image.status === 'approved' ? 'text-emerald-300' : 'text-amber-200'}`}
                     >
-                      {statusLabel(image.status)}
+                      {hasCurrentExport(image) ? 'Exported' : statusLabel(image.status)}
                     </div>
                   </button>
                   {hidden && (

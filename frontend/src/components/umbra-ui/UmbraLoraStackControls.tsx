@@ -44,6 +44,34 @@ function formatStrength(value: number): string {
   return String(value);
 }
 
+function UmbraLoraStrengthInput({ value, label, name, onChange }: {
+  value: number;
+  label: string;
+  name: string;
+  onChange: (value: number) => void;
+}) {
+  const [draft, setDraft] = React.useState<string | null>(null);
+  return (
+    <input
+      type="text"
+      value={draft ?? formatStrength(value)}
+      onChange={(event) => {
+        const next = event.target.value;
+        setDraft(next);
+        if (next.trim() && Number.isFinite(Number(next))) onChange(clampStrength(next, value));
+      }}
+      onBlur={() => {
+        if (draft !== null) onChange(clampStrength(draft, value));
+        setDraft(null);
+      }}
+      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+      inputMode="decimal"
+      aria-label={`${label} strength for ${name}`}
+      className="umbra-lora-strength min-w-0 flex-1 bg-transparent px-1 text-center font-mono text-xs text-zinc-100 outline-none"
+    />
+  );
+}
+
 export function UmbraLoraStackControls({
   loras,
   availableCount,
@@ -206,17 +234,11 @@ export function UmbraLoraStackControls({
                           >
                             <Minus size={11} />
                           </button>
-                          <input
-                            type="number"
-                            min={-10}
-                            max={10}
-                            step={0.05}
-                            value={formatStrength(lora[key])}
-                            onChange={(event) => updateLora(lora.id, { [key]: clampStrength(event.target.value, lora[key]) })}
-                            onBlur={(event) => updateLora(lora.id, { [key]: clampStrength(event.target.value, lora[key]) })}
-                            inputMode="decimal"
-                            aria-label={`${label} strength for ${lora.name}`}
-                            className="umbra-lora-strength min-w-0 flex-1 bg-transparent px-1 text-center font-mono text-xs text-zinc-100 outline-none"
+                          <UmbraLoraStrengthInput
+                            value={lora[key]}
+                            label={label}
+                            name={lora.name}
+                            onChange={(value) => updateLora(lora.id, { [key]: value })}
                           />
                           <button
                             type="button"

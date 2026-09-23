@@ -35,6 +35,7 @@ import { QueueUploadReceiver } from './shared/power-prompter/queueTransport';
 import { classifyUmbraPrompt } from './shared/nsfwPrivacyClassifier';
 import { resolveSingleByteRange } from './shared/httpByteRange';
 import { mediaFileRevision } from './backend/mediaFileRevision';
+import { probeVideoMetadata } from './backend/VideoMetadataProbe';
 import { galleryMediaCacheControl } from './gallery/GalleryMediaCache';
 import { createVariantEtag, matchesIfNoneMatch, permitsConditionalRange } from './shared/httpCache';
 import { compactQueueSnapshot } from './shared/power-prompter/queueSnapshotTransport';
@@ -20854,6 +20855,15 @@ async function umbraUiMediaToolFileLinks(path: string, host: boolean): Promise<{
   return { previewUrl, downloadUrl: `${previewUrl}?download=1` };
 }
 
+async function umbraUiCensorExportLinks(path: string, host: boolean): Promise<{ previewUrl?: string; downloadUrl?: string }> {
+  const clientPath = toClientPath(path);
+  if (await resolveGalleryMediaReadPath(clientPath)) {
+    const previewUrl = `/api/fs/image?${new URLSearchParams({ path: clientPath }).toString()}`;
+    return { previewUrl, downloadUrl: `${previewUrl}&download=1` };
+  }
+  return umbraUiMediaToolFileLinks(path, host);
+}
+
 async function handleUmbraUiMediaToolFile(req: Request, url: URL): Promise<Response> {
   const token = url.pathname.slice('/api/umbra-ui/media-tools/file/'.length);
   if (!/^[a-f0-9]{48}$/.test(token)) return new Response('File not found', { status: 404 });
@@ -34052,6 +34062,28 @@ const server = Bun.serve<UmbraSocketData>({
         }
       }
 
+      if (path === '/api/comfy/staged-video-metadata' && method === 'GET') {
+        const filename = String(url.searchParams.get('filename') || '').trim();
+        if (!filename || filename.length > 255 || filename !== basename(filename)
+          || /[<>:"/\\|?*\x00-\x1f]/.test(filename) || !UMBRA_UI_VIDEO_EXTENSIONS.has(extname(filename).toLowerCase())) {
+          return json({ error: 'Select a staged video file.' }, 400);
+        }
+        const inputRoot = getComfyInputRootFast();
+        const sourcePath = await resolveAllowedGalleryPath(join(inputRoot, filename), [inputRoot]);
+        if (!sourcePath) return json({ error: 'Staged video is unavailable.' }, 403);
+        const sourceStat = await fs.stat(sourcePath).catch(() => null);
+        if (!sourceStat?.isFile()) return json({ error: 'Staged video is unavailable.' }, 404);
+        const probe = await probeVideoMetadata(sourcePath).catch(() => null);
+        let metadata: { streams?: Array<{ width?: number; height?: number }> } | null = null;
+        try { metadata = probe ? JSON.parse(probe.toString('utf8')) : null; } catch { /* Treat unreadable probe output as missing dimensions. */ }
+        const width = Math.round(Number(metadata?.streams?.[0]?.width));
+        const height = Math.round(Number(metadata?.streams?.[0]?.height));
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+          return json({ error: 'Could not read staged video dimensions.' }, 422);
+        }
+        return json({ success: true, width, height }, { headers: { 'Cache-Control': 'no-store' } });
+      }
+
       // Save caption for image in concept folder
       if (path === '/api/dataset/save-caption' && method === 'POST') {
         try {
@@ -35451,6 +35483,7 @@ const server = Bun.serve<UmbraSocketData>({
           tags: source => Array.from(galleryDb.getTagsForUids(galleryDb.resolveUidsForPaths([source])).values()).flat(),
           output: (source, folder, pinned) => resolveUmbraUiMediaToolOutputFolder(folder, host,
             host || isPathInsideAllowedRoots(source) ? source : '', 'Censored', pinned),
+          links: outputPath => umbraUiCensorExportLinks(outputPath, host),
           register: async (outputPath, censored, protectedMedia) => {
             const stat = await fs.stat(outputPath);
             galleryDb.upsertFolderFiles(dirname(outputPath), [{ path: outputPath, folderPath: dirname(outputPath),

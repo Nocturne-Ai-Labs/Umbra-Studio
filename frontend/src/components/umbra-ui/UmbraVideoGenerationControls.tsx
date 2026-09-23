@@ -594,7 +594,16 @@ function MediaSourceField({ kind, label, path, onChange, onUploaded, onClear, on
   const showToast = useStore((state) => state.showToast);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = React.useState(false);
-  const mediaUrl = path ? `/api/fs/image?path=${encodeURIComponent(path)}` : '';
+  const [uploadedPreview, setUploadedPreview] = React.useState<{ path: string; url: string } | null>(null);
+  React.useEffect(() => () => {
+    if (uploadedPreview) URL.revokeObjectURL(uploadedPreview.url);
+  }, [uploadedPreview]);
+  React.useEffect(() => {
+    if (uploadedPreview && uploadedPreview.path !== path) setUploadedPreview(null);
+  }, [path, uploadedPreview]);
+  const mediaUrl = kind === 'video' && uploadedPreview?.path === path
+    ? uploadedPreview.url
+    : path ? `/api/fs/image?path=${encodeURIComponent(path)}` : '';
   const upload = React.useCallback(async (file: File) => {
     if (uploading) return;
     setUploading(true);
@@ -616,6 +625,11 @@ function MediaSourceField({ kind, label, path, onChange, onUploaded, onClear, on
       const filename = String(payload?.filename || '').trim();
       if (!sourcePath || !filename) throw new Error(`Umbra did not return the uploaded ${kind}.`);
       onUploaded(sourcePath, filename);
+      if (kind === 'video') {
+        try {
+          setUploadedPreview({ path: sourcePath, url: URL.createObjectURL(file) });
+        } catch { /* The uploaded file remains usable if local preview is unavailable. */ }
+      }
     } catch (error) {
       showToast(error instanceof Error ? error.message : `Failed to upload ${kind}.`, 'error');
     } finally {
@@ -632,7 +646,10 @@ function MediaSourceField({ kind, label, path, onChange, onUploaded, onClear, on
             muted
             preload="metadata"
             className="h-full w-full object-cover"
-            onLoadedMetadata={(event) => onDimensions?.(event.currentTarget.videoWidth, event.currentTarget.videoHeight)}
+            onLoadedMetadata={(event) => {
+              const { videoWidth, videoHeight } = event.currentTarget;
+              if (videoWidth > 0 && videoHeight > 0) onDimensions?.(videoWidth, videoHeight);
+            }}
           />
         ) : kind === 'audio' && mediaUrl ? (
           <Music2 size={16} className="text-cyan-300/70" />
@@ -1065,31 +1082,52 @@ export function UmbraVideoGenerationControls({
   }, [showToast, video.mode, video.sourceImageName, video.sourceImagePath]);
 
   React.useEffect(() => {
+    const sourceMode = video.mode;
     const sourcePath = video.mode === 'image_to_video' || video.mode === 'reference_to_video'
       ? video.sourceImagePath
       : video.mode === 'video_to_video' ? video.sourceVideoPath : '';
-    if (!sourcePath) return;
+    const sourceVideoName = video.mode === 'video_to_video' ? video.sourceVideoName : '';
+    if (!sourcePath && !sourceVideoName) return;
     const controller = new AbortController();
-    void fetch(`/api/fs/metadata?${new URLSearchParams({ path: sourcePath }).toString()}`, {
-      cache: 'no-store',
-      signal: controller.signal,
-    }).then(async (response) => {
-      if (!response.ok) return;
-      const payload = await response.json().catch(() => ({}));
-      const width = Math.max(0, Math.round(Number(payload?.width) || 0));
-      const height = Math.max(0, Math.round(Number(payload?.height) || 0));
-      if (!width || !height) return;
+    const readDimensions = async () => {
+      let width = 0;
+      let height = 0;
+      if (sourcePath) {
+        try {
+          const response = await fetch(`/api/fs/metadata?${new URLSearchParams({ path: sourcePath }).toString()}`, {
+            cache: 'no-store', signal: controller.signal,
+          });
+          if (response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            width = Math.max(0, Math.round(Number(payload?.width) || 0));
+            height = Math.max(0, Math.round(Number(payload?.height) || 0));
+          }
+        } catch { /* A staged video can still be probed through its ComfyUI filename. */ }
+      }
+      if ((!width || !height) && sourceVideoName) {
+        const response = await fetch(`/api/comfy/staged-video-metadata?${new URLSearchParams({ filename: sourceVideoName }).toString()}`, {
+          cache: 'no-store', signal: controller.signal,
+        });
+        if (response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          width = Math.max(0, Math.round(Number(payload?.width) || 0));
+          height = Math.max(0, Math.round(Number(payload?.height) || 0));
+        }
+      }
+      if (!width || !height || controller.signal.aborted) return;
       setVideo((current) => {
         const currentPath = current.mode === 'image_to_video' || current.mode === 'reference_to_video'
           ? current.sourceImagePath
           : current.mode === 'video_to_video' ? current.sourceVideoPath : '';
-        return currentPath === sourcePath
-          ? { ...current, sourceWidth: width, sourceHeight: height }
-          : current;
+        if (current.mode !== sourceMode || currentPath !== sourcePath
+          || (sourceVideoName && current.sourceVideoName !== sourceVideoName)) return current;
+        return current.sourceWidth === width && current.sourceHeight === height
+          ? current : { ...current, sourceWidth: width, sourceHeight: height };
       });
-    }).catch(() => undefined);
+    };
+    void readDimensions().catch(() => undefined);
     return () => controller.abort();
-  }, [video.mode, video.sourceImagePath, video.sourceVideoPath]);
+  }, [video.mode, video.sourceImagePath, video.sourceVideoName, video.sourceVideoPath]);
 
   const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : video.family === 'ltx25' ? 'LTX-2.5' : 'MiniMax H3';
   const pipelineFeature = video.mode === 'video_to_video'

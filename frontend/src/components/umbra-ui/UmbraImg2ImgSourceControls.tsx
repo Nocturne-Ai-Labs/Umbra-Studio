@@ -53,6 +53,10 @@ function denoiseBand(denoise: number): { label: string; className: string; descr
   };
 }
 
+function comfyInputPreviewUrl(filename: string): string {
+  return `/comfy/view?${new URLSearchParams({ filename, subfolder: '', type: 'input' }).toString()}`;
+}
+
 export function UmbraImg2ImgSourceControls({
   source,
   denoise,
@@ -78,11 +82,14 @@ export function UmbraImg2ImgSourceControls({
       identity: JSON.stringify([nextSource.path, nextSource.originalPath, nextSource.name, nextSource.imageUrl]),
       revision: sourceRevisionRef.current.revision + 1,
     };
+    if (!nextSource.originalPath) onReplaceSourceOnCompleteChange(false);
     onSourceChange(nextSource);
-  }, [onSourceChange]);
-  const previewUrl = source.imageUrl || (source.path
-    ? `/api/fs/image?${new URLSearchParams({ path: source.path }).toString()}`
-    : '');
+  }, [onReplaceSourceOnCompleteChange, onSourceChange]);
+  const previewUrl = source.imageUrl || (source.name
+    ? comfyInputPreviewUrl(source.name)
+    : source.path
+      ? `/api/fs/image?${new URLSearchParams({ path: source.path }).toString()}`
+      : '');
   const band = denoiseBand(denoise);
 
   const upload = React.useCallback(async (file: File) => {
@@ -104,8 +111,9 @@ export function UmbraImg2ImgSourceControls({
         throw new Error(String(payload?.error || 'Failed to upload the IMG2IMG source.'));
       }
       const path = String(payload.sourcePath).replace(/\\/g, '/');
+      const name = String(payload.filename);
       if (sourceRevision !== sourceRevisionRef.current.revision) return;
-      changeSource({ path, originalPath: path, name: String(payload.filename), imageUrl: '', width: 0, height: 0 });
+      changeSource({ path, originalPath: '', name, imageUrl: comfyInputPreviewUrl(name), width: 0, height: 0 });
     } catch (error) {
       if (sourceRevision === sourceRevisionRef.current.revision) {
         showToast(error instanceof Error ? error.message : 'Failed to upload the IMG2IMG source.', 'error');
@@ -115,6 +123,7 @@ export function UmbraImg2ImgSourceControls({
       if (inputRef.current) inputRef.current.value = '';
     }
   }, [changeSource, showToast, uploading]);
+  const canReplaceSource = Boolean(source.path && source.originalPath && source.imageUrl.startsWith('/api/fs/image?'));
 
   return (
     <section data-umbra-img2img-source className="border border-cyan-300/20 bg-cyan-500/[0.035] p-3">
@@ -148,7 +157,7 @@ export function UmbraImg2ImgSourceControls({
             value={source.path}
             onChange={(event) => changeSource({
               path: event.target.value,
-              originalPath: event.target.value,
+              originalPath: '',
               name: '',
               imageUrl: '',
               width: 0,
@@ -202,22 +211,24 @@ export function UmbraImg2ImgSourceControls({
       <label
         className={cn(
           'mt-3 flex min-h-9 items-center gap-2 border bg-black/20 px-2.5 transition-colors',
-          replaceSourceOnComplete ? 'border-amber-300/30 bg-amber-500/[0.06]' : 'border-white/10',
-          source.path || source.name ? 'cursor-pointer hover:border-amber-300/30' : 'cursor-not-allowed opacity-40',
+          canReplaceSource && replaceSourceOnComplete ? 'border-amber-300/30 bg-amber-500/[0.06]' : 'border-white/10',
+          canReplaceSource ? 'cursor-pointer hover:border-amber-300/30' : 'cursor-not-allowed opacity-40',
         )}
-        title="After a successful IMG2IMG job, overwrite the original Gallery image. Umbra saves a recovery copy first."
+        title={canReplaceSource
+          ? 'After a successful IMG2IMG job, overwrite the original Gallery image. Umbra saves a recovery copy first.'
+          : 'Replace is available for images sent from Gallery.'}
       >
         <input
           type="checkbox"
-          checked={replaceSourceOnComplete}
-          disabled={!source.path && !source.name}
+          checked={canReplaceSource && replaceSourceOnComplete}
+          disabled={!canReplaceSource}
           onChange={(event) => onReplaceSourceOnCompleteChange(event.target.checked)}
           className="accent-amber-300"
         />
         <RefreshCw size={11} className="text-amber-300/80" />
         <span className="text-[10px] font-black uppercase tracking-[0.1em] text-zinc-300">Replace original file on completion</span>
-        <span className={cn('ml-auto font-mono text-[9px] uppercase', replaceSourceOnComplete ? 'text-amber-200' : 'text-zinc-600')}>
-          {replaceSourceOnComplete ? 'Backup on' : 'Off'}
+        <span className={cn('ml-auto font-mono text-[9px] uppercase', canReplaceSource && replaceSourceOnComplete ? 'text-amber-200' : 'text-zinc-600')}>
+          {canReplaceSource && replaceSourceOnComplete ? 'Backup on' : 'Off'}
         </span>
       </label>
 
