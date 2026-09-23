@@ -6591,7 +6591,7 @@ function applyPPVideoRoleToApiNode(
     }
     case 'video_output':
       if (generation.outputOwner === 'umbra_ui' && generation.outputFolder) {
-        resolveUmbraPinnedTaskFolder(generation.outputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, 'Video');
+        resolveUmbraPinnedTaskFolder(generation.outputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, 'Video', getGalleryTransferAllowedRoots());
       }
       setPPApiNodeInput(
         node,
@@ -8020,7 +8020,7 @@ function compileUmbraUiPipelineWorkflow(
         applyUmbraUiPrompterOutputLayout(classType, node, prompterOutputLayout);
         if (pinnedOutputFolder) pinnedOutputFolderApplied = true;
       } else if (isUmbraUiOutput) {
-        setPPApiNodeInput(node, 'output_folder', pinnedOutputFolder ? resolveUmbraPinnedTaskFolder(requestedPinnedOutputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, umbraUiOutputMode === 'img2img' ? 'img2img' : 'txt2img') : `Umbra UI/${umbraUiOutputMode}`);
+        setPPApiNodeInput(node, 'output_folder', pinnedOutputFolder ? resolveUmbraPinnedTaskFolder(requestedPinnedOutputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, umbraUiOutputMode === 'img2img' ? 'img2img' : 'txt2img', getGalleryTransferAllowedRoots()) : `Umbra UI/${umbraUiOutputMode}`);
         setPPApiNodeInput(node, 'save_to_yyyy_mm_dd_folder', true);
         setPPApiNodeInput(node, 'save_to_set_subfolder', false);
         setPPApiNodeInput(node, 'set_subfolder', '');
@@ -8629,7 +8629,7 @@ async function emitBackendPowerPrompterSavedOutputs(
     fullpath: resolveComfySavedOutputPath(output),
   }));
   if (generation?.outputOwner === 'umbra_ui' && generation.mediaType === 'video' && generation.outputFolder) {
-    const destination = resolveUmbraPinnedTaskFolder(generation.outputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, 'Video');
+    const destination = resolveUmbraPinnedTaskFolder(generation.outputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, 'Video', getGalleryTransferAllowedRoots());
     for (const output of resolvedOutputs) {
       const fullpath = await publishPinnedVideoOutput(output.fullpath, join(destination, formatUmbraUiLocalDate()), promptId);
       if (fullpath !== output.fullpath) Object.assign(output, { fullpath, filename: basename(fullpath), subfolder: '' });
@@ -19072,6 +19072,10 @@ function normalizePPGenerationControls(rawControls: unknown): PowerPrompterGener
   const outputModeRaw = String((controls as any).outputMode || '').trim().toLowerCase();
   const outputMode = (['txt2img', 'img2img', 'img2vid', 'ref2vid', 'txt2vid', 'vid2vid', 'inpainting', 'extras'] as const)
     .find((candidate) => candidate === outputModeRaw) || 'txt2img';
+  const rawCfg = (controls as any).cfg;
+  const cfg = rawCfg == null || (typeof rawCfg === 'string' && !rawCfg.trim())
+    ? PP_DEFAULT_GENERATION_CONTROLS.cfg
+    : clampPPNumber(rawCfg, PP_DEFAULT_GENERATION_CONTROLS.cfg, 0, 100);
   return {
     mediaType: String((controls as any).mediaType || '').trim().toLowerCase() === 'video' ? 'video' : 'image',
     outputOwner: String((controls as any).outputOwner || '').trim().toLowerCase() === 'umbra_ui'
@@ -19115,7 +19119,7 @@ function normalizePPGenerationControls(rawControls: unknown): PowerPrompterGener
     controlAfterGenerate: normalizePPSeedControlMode(controls.controlAfterGenerate),
     seedIncrement: normalizePPSeedIncrement(controls.seedIncrement),
     steps: clampPPInteger((controls as any).steps, PP_DEFAULT_GENERATION_CONTROLS.steps, 1, 10000),
-    cfg: Math.max(0, Math.min(100, Number((controls as any).cfg) || PP_DEFAULT_GENERATION_CONTROLS.cfg)),
+    cfg,
     clipSkip: clampPPInteger((controls as any).clipSkip ?? (controls as any).clip_skip, PP_DEFAULT_GENERATION_CONTROLS.clipSkip || 1, 1, 12),
     samplerName: String((controls as any).samplerName || PP_DEFAULT_GENERATION_CONTROLS.samplerName).trim() || PP_DEFAULT_GENERATION_CONTROLS.samplerName,
     scheduler: String((controls as any).scheduler || PP_DEFAULT_GENERATION_CONTROLS.scheduler).trim() || PP_DEFAULT_GENERATION_CONTROLS.scheduler,
@@ -19874,7 +19878,7 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
       throw new Error(`The selected pipeline requires width and height aligned to ${resolutionStep} pixels.`);
     }
     const settings: UmbraUiInpaintSettings = {
-      outputFolder: resolveUmbraPinnedTaskFolder(form.get('pinnedOutputFolder'), settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, form.get('outputTask') === 'canvas' ? 'canvas' : 'inpainting'),
+      outputFolder: resolveUmbraPinnedTaskFolder(form.get('pinnedOutputFolder'), settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, form.get('outputTask') === 'canvas' ? 'canvas' : 'inpainting', getGalleryTransferAllowedRoots()),
       workflowId: resolvedPipeline.loaded.item.id,
       canvasProjectId: String(form.get('canvasProjectId') || '').trim().slice(0, 160),
       sourceFreeGeneration: String(form.get('sourceFreeGeneration') || '').trim().toLowerCase() === 'true',
@@ -20486,9 +20490,10 @@ async function handleUmbraUiCanvasSave(req: Request): Promise<Response> {
 
     const configuredOutput = resolveConfiguredPath(String(settingsManager.getAppSettings()['comfyui.externalOutputPath'] || '').trim());
     const outputRoot = configuredOutput || resolvePathCandidate(getDefaultOutputRootPath());
-    const dateFolder = new Date().toISOString().slice(0, 10);
-    const pinnedFolder = resolveUmbraPinnedTaskFolder(form.get('pinnedOutputFolder'), settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, form.get('outputTask') === 'inpainting' ? 'inpainting' : 'canvas');
-    const outputFolder = pinnedFolder ? join(pinnedFolder, dateFolder) : join(outputRoot, 'Umbra UI', 'canvas', dateFolder);
+    const dateFolder = formatUmbraUiLocalDate();
+    const outputTask = form.get('outputTask') === 'inpainting' ? 'inpainting' : 'canvas';
+    const pinnedFolder = resolveUmbraPinnedTaskFolder(form.get('pinnedOutputFolder'), settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, outputTask, getGalleryTransferAllowedRoots());
+    const outputFolder = pinnedFolder ? join(pinnedFolder, dateFolder) : join(outputRoot, 'Umbra UI', outputTask, dateFolder);
     await fs.mkdir(outputFolder, { recursive: true });
     const requestedName = String(form.get('name') || inpaintMetadata.documentName || 'Umbra Canvas')
       .replace(/\.png$/i, '')
@@ -20518,10 +20523,93 @@ const UMBRA_UI_MEDIA_TOOL_SOURCE_EXTENSIONS = new Set([
   ...UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS,
   ...UMBRA_UI_MEDIA_TOOL_VIDEO_EXTENSIONS,
 ]);
+const UMBRA_UI_MEDIA_TOOL_FILE_EXTENSIONS = new Set([...UMBRA_UI_MEDIA_TOOL_SOURCE_EXTENSIONS, '.gif']);
+const UMBRA_UI_MEDIA_TOOL_FILE_GRANT_MS = 12 * 60 * 60 * 1000;
+const umbraUiMediaToolFileGrants = new Map<string, {
+  path: string;
+  dev: bigint;
+  ino: bigint;
+  size: bigint;
+  mtimeNs: bigint;
+  expiresAt: number;
+}>();
 const UMBRA_UI_MEDIA_TOOL_TEMP_ROOT = join(USER_DIR, 'Temp', 'UmbraUiMediaTools');
 const UMBRA_UI_WATERMARK_ASSET_ROOT = join(USER_DIR, 'UmbraUI', 'Watermarks');
 const UMBRA_UI_MEDIA_TOOL_MAX_SOURCE_BYTES = 4 * 1024 * 1024 * 1024;
 const UMBRA_UI_MEDIA_TOOL_MAX_WATERMARK_BYTES = 64 * 1024 * 1024;
+
+async function grantUmbraUiMediaToolFile(path: string): Promise<string> {
+  const physicalPath = await fs.realpath(path);
+  if (!UMBRA_UI_MEDIA_TOOL_FILE_EXTENSIONS.has(extname(physicalPath).toLowerCase())) {
+    throw new Error('The selected media file type is unsupported.');
+  }
+  const fileStat = await fs.stat(physicalPath, { bigint: true });
+  if (!fileStat.isFile()) throw new Error('The selected media file is unavailable.');
+  const now = Date.now();
+  for (const [token, grant] of umbraUiMediaToolFileGrants) {
+    if (grant.expiresAt <= now) umbraUiMediaToolFileGrants.delete(token);
+  }
+  while (umbraUiMediaToolFileGrants.size >= 2048) {
+    const oldestToken = umbraUiMediaToolFileGrants.keys().next().value;
+    if (!oldestToken) break;
+    umbraUiMediaToolFileGrants.delete(oldestToken);
+  }
+  const token = randomBytes(24).toString('hex');
+  umbraUiMediaToolFileGrants.set(token, {
+    path: physicalPath,
+    dev: fileStat.dev,
+    ino: fileStat.ino,
+    size: fileStat.size,
+    mtimeNs: fileStat.mtimeNs,
+    expiresAt: now + UMBRA_UI_MEDIA_TOOL_FILE_GRANT_MS,
+  });
+  return `/api/umbra-ui/media-tools/file/${token}`;
+}
+
+async function umbraUiMediaToolFileLinks(path: string, host: boolean): Promise<{ previewUrl?: string; downloadUrl?: string }> {
+  if (!host || await resolveAllowedGalleryPath(path, getGalleryTransferAllowedRoots())) return {};
+  const previewUrl = await grantUmbraUiMediaToolFile(path);
+  return { previewUrl, downloadUrl: `${previewUrl}?download=1` };
+}
+
+async function handleUmbraUiMediaToolFile(req: Request, url: URL): Promise<Response> {
+  const token = url.pathname.slice('/api/umbra-ui/media-tools/file/'.length);
+  if (!/^[a-f0-9]{48}$/.test(token)) return new Response('File not found', { status: 404 });
+  const grant = umbraUiMediaToolFileGrants.get(token);
+  if (!grant || grant.expiresAt <= Date.now()) {
+    umbraUiMediaToolFileGrants.delete(token);
+    return new Response('File link expired', { status: 404 });
+  }
+  const current = await fs.stat(grant.path, { bigint: true }).catch(() => null);
+  if (!current?.isFile() || current.dev !== grant.dev || current.ino !== grant.ino
+    || current.size !== grant.size || current.mtimeNs !== grant.mtimeNs) {
+    umbraUiMediaToolFileGrants.delete(token);
+    return new Response('File is no longer available', { status: 404 });
+  }
+  const file = Bun.file(grant.path);
+  const size = Number(current.size);
+  const download = url.searchParams.get('download') === '1';
+  const headers: Record<string, string> = {
+    'Content-Type': file.type || 'application/octet-stream',
+    'Cache-Control': 'private, no-store',
+    'Accept-Ranges': 'bytes',
+  };
+  if (download) {
+    const rawName = basename(grant.path) || 'umbra-media';
+    const asciiName = rawName.replace(/[^\x20-\x7e]+/g, '_').replace(/["\\\r\n]/g, '_') || 'umbra-media';
+    headers['Content-Disposition'] = `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(rawName)}`;
+  }
+  const range = String(req.headers.get('range') || '').trim();
+  if (range) {
+    const bounds = resolveSingleByteRange(range, size);
+    if (!bounds) return new Response(null, { status: 416, headers: { ...headers, 'Content-Range': `bytes */${size}` } });
+    headers['Content-Length'] = String(bounds.end - bounds.start + 1);
+    headers['Content-Range'] = `bytes ${bounds.start}-${bounds.end}/${size}`;
+    return new Response(file.slice(bounds.start, bounds.end + 1), { status: 206, headers });
+  }
+  headers['Content-Length'] = String(size);
+  return new Response(file, { headers });
+}
 
 function sanitizeUmbraUiMediaToolName(value: unknown, fallback: string): string {
   const rawName = basename(String(value || '').trim().replace(/\\/g, '/')) || fallback;
@@ -20588,7 +20676,7 @@ function resolveUmbraUiMediaToolOutputFolder(
   automaticSubfolder: 'Censored' | 'Watermarked' | 'GIF',
   pinnedOutputFolder?: unknown,
 ): string {
-  const pinned = resolveUmbraPinnedTaskFolder(pinnedOutputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, automaticSubfolder);
+  const pinned = resolveUmbraPinnedTaskFolder(pinnedOutputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, automaticSubfolder, getGalleryTransferAllowedRoots());
   if (pinned) return pinned;
   const rawPath = String(value || '').trim();
   if (!rawPath) {
@@ -20749,7 +20837,8 @@ async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean
       renderedPath,
     );
     recordGeneratedMediaOutputs([{ path: outputPath }]);
-    return json({ success: true, path: toClientPath(outputPath), filename, mediaType });
+    const fileLinks = await umbraUiMediaToolFileLinks(outputPath, allowExternalOutput);
+    return json({ success: true, path: toClientPath(outputPath), filename, mediaType, ...fileLinks });
   } catch (error: any) {
     console.error('[UmbraUI Media Tools] Watermark failed:', error);
     return json({ success: false, error: String(error?.message || error || 'Failed to apply watermark.') }, 400);
@@ -20898,11 +20987,13 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
     if (outputUids.length > 0) galleryDb.addTagsToFiles(outputUids, [galleryTag]);
     recordGeneratedMediaOutputs([{ path: outputPath }]);
     reservedOutput = null;
+    const fileLinks = await umbraUiMediaToolFileLinks(outputPath, allowExternalOutput);
     return json({
       success: true,
       path: toClientPath(outputPath),
       filename,
       mediaType: 'image',
+      ...fileLinks,
       censored,
       galleryTags: [galleryTag],
       warnings: censorWarnings,
@@ -20959,7 +21050,8 @@ async function handleUmbraUiVideoToGif(req: Request, allowExternalOutput: boolea
       outputFolder, 'gif-sequence', '.gif', Number(form.get('sequenceNumber')), renderedPath,
     );
     recordGeneratedMediaOutputs([{ path: outputPath }]);
-    return json({ success: true, path: toClientPath(outputPath), filename, mediaType: 'gif' });
+    const fileLinks = await umbraUiMediaToolFileLinks(outputPath, allowExternalOutput);
+    return json({ success: true, path: toClientPath(outputPath), filename, mediaType: 'gif', ...fileLinks });
   } catch (error: any) {
     console.error('[UmbraUI Media Tools] GIF conversion failed:', error);
     return json({ success: false, error: String(error?.message || error || 'Failed to convert video to GIF.') }, 400);
@@ -21155,7 +21247,13 @@ async function handleNativeMediaFileBrowse(req: Request): Promise<Response> {
       ? (statSync(requestedResolved).isDirectory() ? requestedResolved : dirname(requestedResolved))
       : defaultStartDir;
     const paths = await runNativeFilePicker(startDir, kind === 'video' ? 'Select Videos' : kind === 'image' ? 'Select Images' : 'Select Images or Videos', kind);
-    return json({ paths: paths.map(toClientPath) });
+    const clientPaths = paths.map(toClientPath);
+    const previewUrls: Record<string, string> = {};
+    for (let index = 0; index < paths.length; index += 1) {
+      const links = await umbraUiMediaToolFileLinks(paths[index], true);
+      if (links.previewUrl) previewUrls[clientPaths[index]] = links.previewUrl;
+    }
+    return json({ paths: clientPaths, previewUrls });
   } catch (error: any) {
     return json({ error: String(error?.message || error || 'File picker failed.') }, 500);
   }
@@ -21237,7 +21335,7 @@ async function handleUmbraUiUpscaleSubmit(req: Request, allowCustomOutputFolder:
     const quality = Math.max(1, Math.min(100, Math.round(Number(form.get('quality')) || 90)));
     const queuePlacement = normalizePowerPrompterQueuePlacement(form.get('queuePlacement'));
     const requestedOutputFolder = String(form.get('outputFolder') || '').trim();
-    let outputFolder = resolveUmbraPinnedTaskFolder(form.get('pinnedOutputFolder'), settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, 'Upscaled');
+    let outputFolder = resolveUmbraPinnedTaskFolder(form.get('pinnedOutputFolder'), settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, 'Upscaled', getGalleryTransferAllowedRoots());
     if (requestedOutputFolder && !outputFolder) {
       if (!allowCustomOutputFolder) {
         return json({ success: false, error: 'Custom upscale output folders can only be selected from the host PC.' }, 403);
@@ -22900,6 +22998,7 @@ async function assertPPApiWorkflowExecutionReady(
       generation.outputFolder,
       settingsManager.getAppSettings()['library.pinnedFolders'],
       resolvePathCandidate,
+      getGalleryTransferAllowedRoots(),
     );
   }
   const workflowResourceValues = resolvePPWorkflowResourceValues(
@@ -34983,6 +35082,11 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/umbra-ui/media-tools/video-to-gif' && method === 'POST') {
         return handleUmbraUiVideoToGif(req, isHostRequest(req, url, server));
+      }
+
+      if (path.startsWith('/api/umbra-ui/media-tools/file/') && method === 'GET') {
+        if (!isHostRequest(req, url, server)) return new Response('Access denied', { status: 403 });
+        return handleUmbraUiMediaToolFile(req, url);
       }
 
       if (path === '/api/umbra-ui/media-tools/browse-output-folder' && method === 'POST') {

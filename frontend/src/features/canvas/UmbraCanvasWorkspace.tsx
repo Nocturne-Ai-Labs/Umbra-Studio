@@ -1095,7 +1095,7 @@ export function UmbraCanvasWorkspace({
           seedMode: inherited.controlAfterGenerate || 'fixed',
           seedIncrement: inherited.seedIncrement || 1,
           steps: inherited.steps || 20,
-          cfg: inherited.cfg || 1,
+          cfg: inherited.cfg ?? 1,
           samplerName: inherited.samplerName || 'euler',
           scheduler: inherited.scheduler || 'normal',
           denoise: inherited.denoise ?? 0.65,
@@ -1493,6 +1493,8 @@ export function UmbraCanvasWorkspace({
     }
     setSubmitting(true);
     try {
+      const numericCfg = cfg.trim() ? Number(cfg) : NaN;
+      const normalizedCfg = Number.isFinite(numericCfg) ? numericCfg : 1;
       const settingsSnapshot: UmbraCanvasGenerationSettingsSnapshot = {
         modelFamily,
         modelSource,
@@ -1506,7 +1508,7 @@ export function UmbraCanvasWorkspace({
         seedMode,
         seedIncrement,
         steps: Number(steps) || 20,
-        cfg: Number(cfg) || 1,
+        cfg: normalizedCfg,
         samplerName: samplerName || 'euler',
         scheduler: scheduler || 'normal',
         denoise,
@@ -1580,12 +1582,7 @@ export function UmbraCanvasWorkspace({
         ipAdapterCombineEmbeds: reference.ipAdapterCombineEmbeds,
         ipAdapterEmbedsScaling: reference.ipAdapterEmbedsScaling,
       })));
-      const hasCanvasDrawableContent = submissionProject.entities.some((entity) => (
-        entity.visible
-        && entity.generationEnabled
-        && (entity.kind === 'raster' || entity.kind === 'shape' || entity.kind === 'text' || entity.kind === 'gradient' || entity.kind === 'path')
-      ));
-      const sourceFreeGeneration = !hasCanvasDrawableContent
+      const sourceFreeGeneration = preparedRegion.sourceContentPixels === 0
         && submittedControlLayers.length === 0
         && submittedReferenceLayers.length === 0;
       if (!isSubmissionProjectOpen()) throw new Error('The Canvas project changed while queueing. Generate again from the open project.');
@@ -1619,7 +1616,7 @@ export function UmbraCanvasWorkspace({
         seedMode,
         seedIncrement,
         steps: Number(steps) || 20,
-        cfg: Number(cfg) || 1,
+        cfg: normalizedCfg,
         samplerName: samplerName || 'euler',
         scheduler: scheduler || 'normal',
         denoise,

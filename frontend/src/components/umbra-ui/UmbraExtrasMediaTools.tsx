@@ -22,6 +22,7 @@ import { cn, buildFsImageUrl } from '@/lib/utils';
 import {
   browseUmbraUiMediaToolsOutputFolder,
   browseUmbraUiMediaToolsSourceFiles,
+  getUmbraUiHostPickedPreviewUrl,
   submitUmbraUiVideoToGif,
   submitUmbraUiWatermark,
   uploadUmbraUiWatermarkAsset,
@@ -116,6 +117,8 @@ function useFilePreview(file: File | null): string {
 function itemPreviewUrl(item: StagedMediaItem | undefined): string {
   if (item?.previewUrl) return item.previewUrl;
   if (!item?.path) return '';
+  const hostPickedPreviewUrl = getUmbraUiHostPickedPreviewUrl(item.path);
+  if (hostPickedPreviewUrl) return hostPickedPreviewUrl;
   return `/api/fs/image?${new URLSearchParams({ path: item.path }).toString()}`;
 }
 
@@ -710,7 +713,7 @@ function VideoToGifTool() {
       <main data-umbra-ui-media-tool-preview="" className="flex min-h-0 min-w-0 flex-col bg-black/20">
         <div className="flex min-h-10 items-center gap-2 border-b border-white/10 px-3"><Video size={13} className="text-zinc-500" /><span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400">Clip Preview</span><span className="ml-auto max-w-[45%] truncate font-mono text-[8px] text-zinc-600">{selected?.name || 'No video selected'}</span></div>
         <div className="flex min-h-[320px] flex-1 items-center justify-center overflow-auto p-4 max-[900px]:min-h-[280px]">{sourceUrl ? <video key={selected?.id} src={sourceUrl} controls playsInline className="max-h-full max-w-full bg-black shadow-2xl" /> : <div className="text-center text-zinc-700"><Film size={34} className="mx-auto mb-3" /><div className="text-[10px] font-black uppercase tracking-[0.16em]">Stage videos to preview</div></div>}</div>
-        {selected?.result ? <div className="flex items-center gap-2 border-t border-emerald-300/15 bg-emerald-500/[0.035] px-3 py-2.5"><CheckCircle2 size={13} className="text-emerald-300" /><span className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-500">{selected.result.filename}</span><a href={`${buildFsImageUrl(selected.result.path, String(Date.now()), { preferServer: true })}&download=1`} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-300"><Download size={11} /> Save</a></div> : null}
+        {selected?.result ? <div className="flex items-center gap-2 border-t border-emerald-300/15 bg-emerald-500/[0.035] px-3 py-2.5"><CheckCircle2 size={13} className="text-emerald-300" /><span className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-500">{selected.result.filename}</span><a href={selected.result.downloadUrl || `${buildFsImageUrl(selected.result.path, String(Date.now()), { preferServer: true })}&download=1`} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-300"><Download size={11} /> Save</a></div> : null}
       </main>
     </div>
   );

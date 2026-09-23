@@ -59,7 +59,7 @@ import {
   UmbraImageExportControls,
   type UmbraImageExportSettings,
 } from '@/components/umbra-ui/UmbraImageExportControls';
-import { browseUmbraUiMediaToolsSourceFiles } from '@/lib/umbraUiMediaTools';
+import { browseUmbraUiMediaToolsSourceFiles, getUmbraUiHostPickedPreviewUrl } from '@/lib/umbraUiMediaTools';
 import {
   usePublishUmbraQueueActivity,
   type UmbraQueueActivity,
@@ -218,7 +218,8 @@ function createSourceId(): string {
 }
 
 function buildPathPreview(path: string): string {
-  return `/api/fs/thumbnail?${new URLSearchParams({ path, size: 'small', q: '90', fit: 'cover', lane: 'umbra-ui-extras' }).toString()}`;
+  return getUmbraUiHostPickedPreviewUrl(path)
+    || `/api/fs/thumbnail?${new URLSearchParams({ path, size: 'small', q: '90', fit: 'cover', lane: 'umbra-ui-extras' }).toString()}`;
 }
 
 function normalizeHandoff(value: unknown): UmbraUiUpscaleHandoff[] {

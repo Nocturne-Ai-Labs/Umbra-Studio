@@ -167,8 +167,9 @@ async function applyVideoWatermark(options: {
   const ffmpeg = resolveUmbraExtendedVideoFfmpeg(options.comfyRoot);
   const filter = [
     `[0:v]scale=w=${outputWidth}:h=-2:flags=lanczos[scaled]`,
-    `[1:v]scale=w=${watermarkWidth}:h=-2:flags=lanczos,format=rgba,colorchannelmixer=aa=${placement.opacity.toFixed(4)}[watermark]`,
-    `[scaled][watermark]overlay=x=(main_w-overlay_w)*${placement.x.toFixed(4)}:y=(main_h-overlay_h)*${placement.y.toFixed(4)}:format=auto:eof_action=repeat:repeatlast=1[video]`,
+    `[1:v][scaled]scale2ref=w=min(${watermarkWidth}\\,ih*main_w/main_h):h=min(ih\\,${watermarkWidth}*main_h/main_w):flags=lanczos[watermark_scaled][video_base]`,
+    `[watermark_scaled]setsar=1,format=rgba,colorchannelmixer=aa=${placement.opacity.toFixed(4)}[watermark]`,
+    `[video_base][watermark]overlay=x=(main_w-overlay_w)*${placement.x.toFixed(4)}:y=(main_h-overlay_h)*${placement.y.toFixed(4)}:format=auto:eof_action=repeat:repeatlast=1[video]`,
   ].join(';');
 
   await fs.mkdir(dirname(options.outputPath), { recursive: true });

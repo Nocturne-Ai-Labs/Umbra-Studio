@@ -1,11 +1,12 @@
 import { resolve, join } from 'node:path';
 import { statSync, mkdirSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
+import { resolveAllowedExistingGalleryPath } from './GalleryPathAccess';
 
 const PINNED_OUTPUT_RECOVERY = 'Select a different output folder or Default dated output, then generate again.';
 
-export async function assertUmbraUiPinnedOutputAvailable(requested: unknown, pins: unknown, resolveCandidate: (value: string) => string): Promise<void> {
-  const root = resolveUmbraUiPinnedOutputFolder(requested, pins, resolveCandidate);
+export async function assertUmbraUiPinnedOutputAvailable(requested: unknown, pins: unknown, resolveCandidate: (value: string) => string, allowedRoots: string[]): Promise<void> {
+  const root = resolveAuthorizedPinnedOutputRoot(requested, pins, resolveCandidate, allowedRoots);
   if (!root) return;
   const available = await stat(root).then(entry => entry.isDirectory()).catch(() => false);
   if (!available) throw new Error(`The pinned output folder is unavailable. ${PINNED_OUTPUT_RECOVERY}`);
@@ -13,8 +14,8 @@ export async function assertUmbraUiPinnedOutputAvailable(requested: unknown, pin
 
 export type UmbraPinnedOutputTask = 'txt2img' | 'img2img' | 'inpainting' | 'canvas' | 'Video' | 'Upscaled' | 'Censored' | 'Watermarked' | 'GIF';
 
-export function resolveUmbraPinnedTaskFolder(requested: unknown, pins: unknown, resolveCandidate: (value: string) => string, task: UmbraPinnedOutputTask): string {
-  const root = resolveUmbraUiPinnedOutputFolder(requested, pins, resolveCandidate);
+export function resolveUmbraPinnedTaskFolder(requested: unknown, pins: unknown, resolveCandidate: (value: string) => string, task: UmbraPinnedOutputTask, allowedRoots: string[]): string {
+  const root = resolveAuthorizedPinnedOutputRoot(requested, pins, resolveCandidate, allowedRoots);
   if (!root) return '';
   try {
     if (!statSync(root).isDirectory()) throw new Error('Not a directory');
@@ -28,6 +29,14 @@ export function resolveUmbraPinnedTaskFolder(requested: unknown, pins: unknown, 
     throw new Error(`The pinned output folder cannot be written to. ${PINNED_OUTPUT_RECOVERY}`);
   }
   return folder;
+}
+
+function resolveAuthorizedPinnedOutputRoot(requested: unknown, pins: unknown, resolveCandidate: (value: string) => string, allowedRoots: string[]): string {
+  const root = resolveUmbraUiPinnedOutputFolder(requested, pins, resolveCandidate);
+  if (!root) return '';
+  const authorizedRoot = resolveAllowedExistingGalleryPath(root, allowedRoots);
+  if (!authorizedRoot) throw new Error(`The pinned output folder is outside the currently allowed Gallery roots. ${PINNED_OUTPUT_RECOVERY}`);
+  return authorizedRoot;
 }
 
 function normalizePinnedPathValue(value: unknown): string {
