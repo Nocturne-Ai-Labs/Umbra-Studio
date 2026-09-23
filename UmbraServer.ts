@@ -25980,6 +25980,14 @@ async function isRemoteMainMediaReadAllowed(req: Request, url: URL, path: string
   return Boolean(authorize && await authorize(resolved.fullPath));
 }
 
+const GALLERY_MEDIA_READ_PATTERN = /\.(?:png|jpe?g|webp|gif|bmp|avif|tiff?|heic|heif|jxl|mp4|webm|mov|mkv|avi|m4v|wmv|flv)$/i;
+
+async function resolveGalleryMediaReadPath(path: string): Promise<string | null> {
+  const resolved = resolvePath(path);
+  if (!resolved || !GALLERY_MEDIA_READ_PATTERN.test(resolved.fullPath)) return null;
+  return resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
+}
+
 async function handleFsThumbnail(req: Request, url: URL, server?: RequestIpServer): Promise<Response> {
   const path = url.searchParams.get('path');
   const sizeParam = url.searchParams.get('size') as 'small' | 'medium' | 'large' || 'medium';
@@ -25989,10 +25997,8 @@ async function handleFsThumbnail(req: Request, url: URL, server?: RequestIpServe
   if (!(await isRemoteMainMediaReadAllowed(req, url, path, server))) return new Response('Access denied', { status: 403 });
 
   try {
-    const resolved = resolvePath(path);
-    if (!resolved) return new Response('Invalid path', { status: 403 });
-
-    const { fullPath } = resolved;
+    const fullPath = await resolveGalleryMediaReadPath(path);
+    if (!fullPath) return new Response('Invalid media path', { status: 403 });
     if (!existsSync(fullPath)) {
       return new Response('File not found', { status: 404 });
     }
@@ -26083,10 +26089,8 @@ async function handleFsPreview(req: Request, url: URL, server?: RequestIpServer)
   if (!(await isRemoteMainMediaReadAllowed(req, url, path, server))) return new Response('Access denied', { status: 403 });
 
   try {
-    const resolved = resolvePath(path);
-    if (!resolved) return new Response('Invalid path', { status: 403 });
-
-    const { fullPath } = resolved;
+    const fullPath = await resolveGalleryMediaReadPath(path);
+    if (!fullPath) return new Response('Invalid media path', { status: 403 });
     if (!existsSync(fullPath)) {
       return new Response('File not found', { status: 404 });
     }
@@ -26150,10 +26154,8 @@ async function handleFsImage(req: Request, url: URL, server?: RequestIpServer): 
   if (!(await isRemoteMainMediaReadAllowed(req, url, path, server))) return new Response('Access denied', { status: 403 });
 
   try {
-    const resolved = resolvePath(path);
-    if (!resolved) return new Response('Invalid path', { status: 403 });
-
-    const { fullPath } = resolved;
+    const fullPath = await resolveGalleryMediaReadPath(path);
+    if (!fullPath) return new Response('Invalid media path', { status: 403 });
     if (!existsSync(fullPath)) {
       // try { db.exec(`DELETE FROM images WHERE path = '${fullPath.replace(/'/g, "''")}'`); } catch { }
       return new Response('File not found', { status: 404 });
