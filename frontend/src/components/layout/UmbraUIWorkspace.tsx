@@ -184,7 +184,7 @@ import {
   resolveUmbraUiHiresResizeMode,
 } from '../../../../shared/umbra-ui/pipelineTypes';
 import { UMBRA_UI_EXTRAS_TOOL_EVENT } from '@/lib/umbraUiExtrasNavigation';
-import { selectUmbraUiImageCheckpoint } from '@/lib/umbraUiImageCheckpointSelection';
+import { resolveUmbraUiImageHandoffCheckpoint, selectUmbraUiImageCheckpoint } from '@/lib/umbraUiImageCheckpointSelection';
 import {
   readImg2ImgReplacementIntents,
   writeImg2ImgReplacementIntents,
@@ -1552,6 +1552,7 @@ export function UmbraUIWorkspace() {
       nextModelType,
       JSON.stringify(defaults || {}),
       JSON.stringify(modelItems),
+      String(modelCatalog.loading),
     ].join(':');
     if (appliedImagePipelineDefaultsRef.current === defaultsKey) return;
 
@@ -1564,6 +1565,7 @@ export function UmbraUIWorkspace() {
       preferred: preferredModelName,
       installed: modelItems,
       preserveCurrent: preserveCurrentCheckpoint,
+      catalogLoading: modelCatalog.loading,
     }));
     const shouldApplyPipelineDefaults = !imagePipelineDefaultsInitializedRef.current
       && !preserveCurrentCheckpoint;
@@ -2737,7 +2739,11 @@ export function UmbraUIWorkspace() {
         ? snapshot.modelType as PowerPrompterModelType
         : 'checkpoint';
       const modelItems = getPrimaryModelItems(modelCatalog, requestedModelType);
-      const checkpoint = resolveCatalogMatch(snapshot.checkpointName, modelItems);
+      const checkpoint = resolveUmbraUiImageHandoffCheckpoint(
+        snapshot.checkpointName,
+        modelItems,
+        modelCatalog.loading,
+      );
       const inheritedLoras = snapshot.loras.map((entry) => ({
         ...entry,
         name: resolveLoraCatalogMatch(entry.name, loraCatalog),
