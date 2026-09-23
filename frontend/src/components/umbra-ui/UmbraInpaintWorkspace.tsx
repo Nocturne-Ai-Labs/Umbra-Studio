@@ -4620,6 +4620,14 @@ export function UmbraInpaintWorkspace({
     const pending = selectUmbraUiInpaintRecoveryTarget(canvasDocument?.pendingJobs || [], job);
     if (!pending) return;
     const controller = new AbortController();
+    const recoveryProjectId = canvasDocument?.id;
+    const isCurrentRecovery = () => {
+      const current = latestDocumentRef.current;
+      return !controller.signal.aborted
+        && current !== null
+        && current.id === recoveryProjectId
+        && current.pendingJobs.some((entry) => entry.id === pending.id);
+    };
     let retryTimer = 0;
     let attempts = 0;
     let warned = false;
@@ -4628,9 +4636,11 @@ export function UmbraInpaintWorkspace({
       attempts += 1;
       try {
         const restoredJob = await fetchUmbraUiInpaintJob(pending.id, controller.signal);
+        if (!isCurrentRecovery()) return;
         terminalNoticeRef.current = '';
-        setJob(restoredJob);
+        setJob((current) => !current && isCurrentRecovery() ? restoredJob : current);
       } catch (error) {
+        if (!isCurrentRecovery()) return;
         const disposition = classifyUmbraUiInpaintRecoveryError(error);
         if (disposition === 'aborted') return;
         if (disposition === 'missing') {
@@ -4690,7 +4700,7 @@ export function UmbraInpaintWorkspace({
   }, [job?.id, job?.status, showToast]);
 
   React.useEffect(() => {
-    if (!job) return;
+    if (!job || !canvasDocument?.pendingJobs.some((pending) => pending.id === job.id)) return;
     const context = jobStageContextsRef.current.get(job.id);
     const nextStages = context ? buildUmbraUiInpaintOutputStages(job, context) : [];
     const terminal = isUmbraUiInpaintJobTerminal(job);
@@ -9506,6 +9516,12 @@ export function UmbraInpaintWorkspace({
         referenceLayers: [],
       });
       if (sourceTransitionRef.current !== sourceTransition || latestDocumentRef.current?.id !== canvasDocument.id) return;
+      if (seedOverride !== undefined) {
+        const unpinnedStageIds = latestDocumentRef.current.staging
+          .filter((stage) => !stage.pinned)
+          .map((stage) => stage.id);
+        if (unpinnedStageIds.length > 0) dispatchCanvasDocument({ type: 'discard_stages', stageIds: unpinnedStageIds });
+      }
       terminalNoticeRef.current = '';
       autoSelectJobRef.current = nextJob.id;
       jobStageContextsRef.current.set(nextJob.id, {
@@ -9610,7 +9626,10 @@ export function UmbraInpaintWorkspace({
   const cancelActiveJob = React.useCallback(async () => {
     if (!job || isUmbraUiInpaintJobTerminal(job)) return;
     try {
-      setJob(await cancelUmbraUiInpaintJob(job.id));
+      const canceled = await cancelUmbraUiInpaintJob(job.id);
+      if (latestDocumentRef.current?.pendingJobs.some((pending) => pending.id === job.id)) {
+        setJob((current) => current?.id === job.id ? canceled : current);
+      }
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to cancel the inpaint job.', 'error');
     }
@@ -9641,12 +9660,9 @@ export function UmbraInpaintWorkspace({
   }, [generateSamples, onNegativePromptChange]);
 
   const rerollSamples = React.useCallback(() => {
-    const unpinnedStageIds = (canvasDocument?.staging || []).filter((stage) => !stage.pinned).map((stage) => stage.id);
-    if (unpinnedStageIds.length > 0) dispatchCanvasDocument({ type: 'discard_stages', stageIds: unpinnedStageIds });
     const rerollSeed = createRandomGenerationSeed();
-    if (seedMode !== 'randomize') onSeedChange(String(rerollSeed));
     void generateSamples(rerollSeed);
-  }, [canvasDocument?.staging, generateSamples, onSeedChange, seedMode]);
+  }, [generateSamples]);
 
   const handleFile = React.useCallback((file: File | null | undefined) => {
     if (!file || !file.type.startsWith('image/')) {
