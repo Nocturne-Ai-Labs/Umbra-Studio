@@ -26387,6 +26387,9 @@ async function handleFsDownloadZip(req: Request): Promise<Response> {
       if (!physicalPath) return json({ error: 'Export path resolves outside allowed roots' }, 403);
       const stats = await fs.stat(physicalPath);
       if (!stats.isFile()) continue;
+      if (!GALLERY_MEDIA_READ_PATTERN.test(physicalPath) && extname(physicalPath).toLowerCase() !== '.zip') {
+        return json({ error: 'Unsupported gallery export type' }, 403);
+      }
       items.push({
         name: basename(resolved.fullPath),
         mtime: stats.mtime,
