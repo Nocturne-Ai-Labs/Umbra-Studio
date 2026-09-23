@@ -56,6 +56,8 @@ const FILMSTRIP_ACCENT_COLOR_CACHE_LIMIT = 800;
 
 export interface FilmstripProps {
   images: FilmstripImage[];
+  statusMessage?: string;
+  statusIsError?: boolean;
   recentGenerationImages?: FilmstripImage[];
   recentGenerationExpanded?: boolean;
   onToggleRecentGenerationExpanded?: () => void;
@@ -839,6 +841,8 @@ function FilmstripTile({
 
 export function Filmstrip({
   images,
+  statusMessage,
+  statusIsError = false,
   recentGenerationImages = [],
   recentGenerationExpanded = false,
   onToggleRecentGenerationExpanded,
@@ -893,6 +897,7 @@ export function Filmstrip({
   const [menuState, setMenuState] = useState<MenuState>(null);
   const [dragIds, setDragIds] = useState<string[]>([]);
   const [dropTarget, setDropTarget] = useState<{ id: string; position: FilmstripReorderPosition } | null>(null);
+  const filmstripRef = useRef<HTMLDivElement | null>(null);
   const stripScrollRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollRestoreRef = useRef<{ left: number; top: number; folderLabel: string } | null>(null);
   const lastViewportLoadRequestRef = useRef('');
@@ -1021,6 +1026,8 @@ export function Filmstrip({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isEditableKeyTarget(event.target)) return;
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      if (event.repeat) return;
+      if (!(event.target instanceof Node) || !filmstripRef.current?.contains(event.target)) return;
       if (document.querySelector('[data-umbra-gallery-viewer]')) return;
       if (selectedIds.size <= 0) return;
       event.preventDefault();
@@ -1260,6 +1267,7 @@ export function Filmstrip({
 
   return (
     <div
+      ref={filmstripRef}
       className={cn(
         'filmstrip-container relative flex flex-col border-t border-zinc-800 bg-zinc-950/96 text-zinc-100 backdrop-blur-sm',
         className,
@@ -1277,6 +1285,11 @@ export function Filmstrip({
               <span className="shrink-0 text-[11px] text-zinc-500">
                 {images.length} {images.length === 1 ? 'image' : 'images'}
               </span>
+              {statusMessage ? (
+                <span className={cn('max-w-48 truncate text-[11px]', statusIsError ? 'text-red-400' : 'text-zinc-500')} title={statusMessage}>
+                  {statusMessage}
+                </span>
+              ) : null}
               {selectedCount > 0 ? (
                 <span className="shrink-0 text-[11px] text-[var(--umbra-accent)]">
                   {selectedCount} selected
@@ -1412,8 +1425,8 @@ export function Filmstrip({
         onWheel={handleStripWheel}
       >
         {images.length === 0 && visibleRecentGenerationImages.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-sm text-zinc-500">
-            No images in filmstrip
+          <div className={cn('flex h-full items-center justify-center text-sm', statusIsError ? 'text-red-400' : 'text-zinc-500')}>
+            {statusMessage || 'No images in filmstrip'}
           </div>
         ) : displayMode === 'strip' ? (
           <div

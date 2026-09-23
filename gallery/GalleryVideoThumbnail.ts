@@ -13,10 +13,12 @@ export async function extractVideoFrame(
   const maxBytes = pixels * pixels * 4 + 65536;
   const timeoutMs = options.timeoutMs ?? 10000;
 
-  const quality = Math.max(1, Math.min(100, Math.round(options.quality ?? 100) || 100));
+  const requestedQuality = Math.round(options.quality ?? 100);
+  const quality = Number.isFinite(requestedQuality) ? Math.max(1, Math.min(100, requestedQuality)) : 100;
+  const jpegQScale = 31 - Math.round((quality - 1) * 30 / 99);
   const encoding = options.format === 'webp'
     ? ['-vcodec', 'libwebp', '-q:v', String(quality), '-compression_level', '6']
-    : options.format === 'jpeg' ? ['-vcodec', 'mjpeg', '-q:v', '1']
+    : options.format === 'jpeg' ? ['-vcodec', 'mjpeg', '-q:v', String(jpegQScale)]
       : ['-pix_fmt', 'rgba', '-vcodec', 'png'];
   const attempt = (position: string) => runFfmpegPreview([
       '-hide_banner', '-loglevel', 'error', '-nostdin',

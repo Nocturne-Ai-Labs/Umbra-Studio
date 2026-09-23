@@ -93,6 +93,19 @@ export async function buildGalleryDownloadArchive(
 
 const preparedDownloads = new Map<string, { zipPath: string; size: number; filename: string }>();
 
+function removeExpiredArchive(zipPath: string, attempts = 0): void {
+  void fs.rm(zipPath, { force: true }).catch((error: NodeJS.ErrnoException) => {
+    // Windows keeps a ZIP locked while the browser streams it. Retry after the
+    // reader closes instead of leaving large exports behind indefinitely.
+    if (attempts >= 144 || !['EBUSY', 'EPERM', 'EACCES'].includes(error.code || '')) {
+      console.warn('[Gallery] Could not remove expired download archive:', zipPath, error);
+      return;
+    }
+    const retry = setTimeout(() => removeExpiredArchive(zipPath, attempts + 1), 10 * 60 * 1000);
+    retry.unref?.();
+  });
+}
+
 function archiveResponse(archive: { zipPath: string; size: number; filename: string }): Response {
   return new Response(Bun.file(archive.zipPath), { headers: {
     'Content-Type': 'application/zip',
@@ -109,7 +122,7 @@ export function prepareGalleryDownloadResponse(req: Request, archive: { zipPath:
   if (wantsReceipt) preparedDownloads.set(id, ready);
   const cleanup = setTimeout(() => {
     preparedDownloads.delete(id);
-    void fs.rm(archive.zipPath, { force: true }).catch(() => {});
+    removeExpiredArchive(archive.zipPath);
   }, 30 * 60 * 1000);
   cleanup.unref?.();
   // Preparing via fetch surfaces errors; a separate GET lets the browser stream

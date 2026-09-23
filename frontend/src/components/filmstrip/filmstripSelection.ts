@@ -7,22 +7,31 @@ export function normalizeFilmstripSelectionId(value: unknown): string {
 }
 
 export function createFilmstripPathMatcher(paths: string[]): (path: string) => boolean {
-  const exact = new Set<string>();
-  const suffixes = new Set<string>();
-  for (const value of paths) {
-    const normalized = String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').trim().toLowerCase();
-    if (!normalized) continue;
-    exact.add(normalized);
-    for (let index = normalized.indexOf('/'); index >= 0; index = normalized.indexOf('/', index + 1)) {
-      suffixes.add(normalized.slice(index + 1));
+  const normalize = (value: string) => String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').trim().toLowerCase();
+  const isAbsolute = (value: string) => /^[a-z]:\//.test(value) || value.startsWith('/');
+  const removed = new Set(paths.map(normalize).filter(Boolean));
+  const relative = new Set<string>();
+  const absoluteSuffixes = new Set<string>();
+  for (const path of removed) {
+    if (!isAbsolute(path)) {
+      if (path.includes('/')) relative.add(path);
+      continue;
+    }
+    for (let index = path.indexOf('/'); index >= 0; index = path.indexOf('/', index + 1)) {
+      const suffix = path.slice(index + 1);
+      if (suffix.includes('/')) absoluteSuffixes.add(suffix);
     }
   }
   return (value: string) => {
-    const normalized = String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').trim().toLowerCase();
+    const normalized = normalize(value);
     if (!normalized) return false;
-    if (exact.has(normalized) || suffixes.has(normalized)) return true;
+    if (removed.has(normalized)) return true;
+    // Gallery events can mix root-relative and absolute paths. Only bridge those
+    // forms when the relative path includes a folder; a shared filename alone
+    // must never remove a different item from the strip.
+    if (!isAbsolute(normalized)) return absoluteSuffixes.has(normalized);
     for (let index = normalized.indexOf('/'); index >= 0; index = normalized.indexOf('/', index + 1)) {
-      if (exact.has(normalized.slice(index + 1))) return true;
+      if (relative.has(normalized.slice(index + 1))) return true;
     }
     return false;
   };

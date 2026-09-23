@@ -45,8 +45,7 @@ function isTransferResult(value: unknown): value is GalleryTransferResult {
   const result = value as Record<string, unknown>;
   return typeof result.path === 'string' && Boolean(result.path.trim()) && typeof result.success === 'boolean'
     && (result.error === undefined || typeof result.error === 'string')
-    && (result.newPath === undefined || typeof result.newPath === 'string')
-    && (!result.success || (typeof result.newPath === 'string' && Boolean(result.newPath.trim())));
+    && (result.newPath === undefined || typeof result.newPath === 'string');
 }
 
 function isSavedGalleryTransfer(value: unknown): value is GalleryTransferState {
@@ -138,10 +137,13 @@ async function monitorTransfer(jobId: string) {
         const next = summarizeGalleryTransfer(payload.job, state);
         publish(next, !next.active);
         failures = 0;
-      } catch {
+      } catch (error) {
         if (state?.jobId !== jobId) break;
         failures++;
-        publish({ ...state, reconnecting: true });
+        const reason = error instanceof Error ? error.message : 'Transfer status unavailable';
+        publish({ ...state, reconnecting: true, error: failures >= 3
+          ? `Unable to read transfer progress (${reason}). The transfer may still be running; check the destination before retrying.`
+          : state.error });
       }
       if (state?.active) await new Promise(resolve => setTimeout(resolve, failures ? Math.min(5000, failures * 1000) : 500));
     }

@@ -530,7 +530,7 @@ async function updateTrashRetentionUnlocked(req: Request, _url: URL, context: Ro
   if (!Number.isFinite(rawDays) || rawDays <= 0) {
     return json({ error: 'days must be a positive number' }, 400, context.corsHeaders);
   }
-  const days = Math.min(Math.floor(rawDays), 3650);
+  const days = Math.max(1, Math.min(Math.floor(rawDays), 3650));
   const msPerDay = 24 * 60 * 60 * 1000;
 
   try {
@@ -1053,7 +1053,7 @@ async function emptyTrashUnlocked(_req: Request, _url: URL, context: RouteContex
 
     if (failed.length > 0) {
       await mergeMetadataItems(context, { removeTrashPaths: removedTrashPaths });
-      return json({ success: false, error: 'Some trash items could not be deleted.', failed }, 200, context.corsHeaders);
+      return json({ success: false, error: 'Some trash items could not be deleted.', failed, deletedPaths: [...removedTrashPaths] }, 200, context.corsHeaders);
     }
     await saveMetadata(context, { items: [] });
     return json({ success: true }, 200, context.corsHeaders);

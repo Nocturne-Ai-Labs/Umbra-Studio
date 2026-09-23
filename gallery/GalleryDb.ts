@@ -368,12 +368,12 @@ export class GalleryDb {
         modified_ms = ?,
         file_sig = ?,
         last_seen_ms = ?,
-        metadata_updated_ms = CASE WHEN ? THEN NULL ELSE metadata_updated_ms END
+        metadata_json = CASE WHEN ? THEN NULL ELSE metadata_json END,
+        metadata_format = CASE WHEN ? THEN NULL ELSE metadata_format END,
+        metadata_updated_ms = CASE WHEN ? THEN NULL ELSE metadata_updated_ms END,
+        metadata_source_revision = CASE WHEN ? THEN NULL ELSE metadata_source_revision END
       WHERE uid = ?
     `);
-    const deleteFileTags = this.db.prepare('DELETE FROM file_tags WHERE uid = ?');
-    const deleteFolderOrder = this.db.prepare('DELETE FROM folder_order WHERE uid = ?');
-    const deleteFile = this.db.prepare('DELETE FROM files WHERE uid = ?');
 
     const transaction = this.db.transaction((items: GalleryFileInput[]) => {
       for (const input of items) {
@@ -385,17 +385,11 @@ export class GalleryDb {
         const size = Math.max(0, Math.trunc(Number(input.size || 0)));
         const fileSig = buildFileSignature({ ...input, path, folderPath: folder, createdMs, modifiedMs, size });
 
-        let existing = selectByPath.get(path) as FileRow | null;
+        const existing = selectByPath.get(path) as FileRow | null;
         let uid = existing?.uid;
-        if (existing && existing.fileSig !== fileSig) {
-          deleteFileTags.run(existing.uid);
-          deleteFolderOrder.run(existing.uid);
-          deleteFile.run(existing.uid);
-          existing = null;
-          uid = undefined;
-        }
         const metadataRevision = input.metadataRevision ?? input.revision;
         const sourceRevisionChanged = metadataRevision !== undefined && metadataRevision !== existing?.metadataSourceRevision;
+        const metadataStale = Boolean(existing && (existing.fileSig !== fileSig || sourceRevisionChanged));
         if (!uid) {
           uid = crypto.randomUUID();
           insertFile.run(
@@ -421,7 +415,10 @@ export class GalleryDb {
             modifiedMs,
             fileSig,
             now,
-            sourceRevisionChanged ? 1 : 0,
+            metadataStale ? 1 : 0,
+            metadataStale ? 1 : 0,
+            metadataStale ? 1 : 0,
+            metadataStale ? 1 : 0,
             uid,
           );
         }
@@ -436,8 +433,9 @@ export class GalleryDb {
           nextIndex += 1;
         }
 
-        const metadataUpdatedMs = sourceRevisionChanged || existing?.metadataUpdatedMs == null ? null : normalizeTimestamp(existing.metadataUpdatedMs);
-        const existingDimensions = parseMetadataDimensions(existing?.metadataJson || null);
+        const metadataJson = metadataStale ? null : existing?.metadataJson || null;
+        const metadataUpdatedMs = metadataStale || existing?.metadataUpdatedMs == null ? null : normalizeTimestamp(existing.metadataUpdatedMs);
+        const existingDimensions = parseMetadataDimensions(metadataJson);
         if (
           isMetadataSupportedType(path, input.type)
           && (
@@ -462,9 +460,9 @@ export class GalleryDb {
           width: existingDimensions.width,
           height: existingDimensions.height,
           fileSig,
-          metadataJson: existing?.metadataJson || null,
+          metadataJson,
           metadataUpdatedMs,
-          metadataFormat: existing?.metadataFormat || null,
+          metadataFormat: metadataStale ? null : existing?.metadataFormat || null,
         });
       }
     });
@@ -475,9 +473,6 @@ export class GalleryDb {
       upsertOrder.finalize();
       insertFile.finalize();
       updateFile.finalize();
-      deleteFileTags.finalize();
-      deleteFolderOrder.finalize();
-      deleteFile.finalize();
     }
 
     for (const candidate of metadataCandidates) {

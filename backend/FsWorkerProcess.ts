@@ -53,6 +53,7 @@ type FsListProgressiveRequest = {
     limit: number;
     cursor: number;
     force?: boolean;
+    snapshot?: string;
   };
 };
 
@@ -247,10 +248,45 @@ const PROGRESSIVE_SEED_CACHE_MAX = 256;
 const DIRECTORY_TREE_SEED_TTL_MS = 30_000;
 const DIRECTORY_TREE_SEED_CACHE_MAX = 256;
 const progressiveSeedCache = new Map<string, ProgressiveSeedCacheEntry>();
+const progressiveListingSnapshots = new Map<string, { fullPath: string; seed: ProgressiveSeedCacheEntry; expiresAt: number }>();
 const directoryTreeSeedCache = new Map<string, ProgressiveSeedCacheEntry>();
 const progressiveSeedInFlight = new Map<string, Promise<ProgressiveSeedEntry[]>>();
 const directoryTreeSeedInFlight = new Map<string, Promise<ProgressiveSeedEntry[]>>();
 const progressiveNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const PROGRESSIVE_LISTING_SNAPSHOT_MAX = 8;
+const PROGRESSIVE_LISTING_SNAPSHOT_MAX_ENTRIES = 100_000;
+
+function getProgressiveListingSnapshot(id: string, fullPath: string): ProgressiveSeedCacheEntry {
+  const now = Date.now();
+  const entry = progressiveListingSnapshots.get(id);
+  if (!entry || entry.expiresAt <= now || entry.fullPath !== resolve(fullPath)) {
+    throw new Error('Gallery listing expired. Refresh the folder to retry.');
+  }
+  progressiveListingSnapshots.delete(id);
+  entry.expiresAt = now + PROGRESSIVE_SEED_TTL_MS;
+  progressiveListingSnapshots.set(id, entry);
+  return entry.seed;
+}
+
+function rememberProgressiveListingSnapshot(fullPath: string, seed: ProgressiveSeedCacheEntry): string | undefined {
+  const now = Date.now();
+  for (const [id, entry] of progressiveListingSnapshots) {
+    if (entry.expiresAt <= now) progressiveListingSnapshots.delete(id);
+  }
+  if (seed.entries.length > PROGRESSIVE_LISTING_SNAPSHOT_MAX_ENTRIES) return undefined;
+  let entries = seed.entries.length;
+  for (const entry of progressiveListingSnapshots.values()) entries += entry.seed.entries.length;
+  while (progressiveListingSnapshots.size >= PROGRESSIVE_LISTING_SNAPSHOT_MAX
+    || entries > PROGRESSIVE_LISTING_SNAPSHOT_MAX_ENTRIES) {
+    const oldest = progressiveListingSnapshots.entries().next().value;
+    if (!oldest) break;
+    entries -= oldest[1].seed.entries.length;
+    progressiveListingSnapshots.delete(oldest[0]);
+  }
+  const id = `fs:${crypto.randomUUID()}`;
+  progressiveListingSnapshots.set(id, { fullPath: resolve(fullPath), seed, expiresAt: now + PROGRESSIVE_SEED_TTL_MS });
+  return id;
+}
 
 function pruneProgressiveSeedCache() {
   const now = Date.now();
@@ -772,7 +808,10 @@ async function runListProgressive(payload: FsListProgressiveRequest['payload']) 
   const folders: any[] = [];
   const files: any[] = [];
   const seedStartedAt = Date.now();
-  const snapshot = await getProgressiveSeedSnapshot(fullPath, force === true);
+  const requestedSnapshot = String(payload.snapshot || '').trim();
+  const snapshot = requestedSnapshot
+    ? { ...getProgressiveListingSnapshot(requestedSnapshot, fullPath), seedSource: 'snapshot' as const, seedWaitMs: 0, seedBuildMs: 0 }
+    : await getProgressiveSeedSnapshot(fullPath, force === true);
   const seedMs = Date.now() - seedStartedAt;
   const entries = snapshot.entries;
   const cursor = Math.max(0, Math.trunc(payload.cursor || 0));
@@ -780,6 +819,9 @@ async function runListProgressive(payload: FsListProgressiveRequest['payload']) 
   const chunk = limit > 0 ? entries.slice(cursor, cursor + limit) : entries.slice(cursor);
   const nextCursor = cursor + chunk.length;
   const done = nextCursor >= entries.length;
+  const snapshotId = requestedSnapshot || (!done && limit > 0
+    ? rememberProgressiveListingSnapshot(fullPath, snapshot)
+    : undefined);
 
   for (const entry of chunk) {
     const itemPath = normalizeRelPath(join(targetPath, entry.name));
@@ -819,6 +861,7 @@ async function runListProgressive(payload: FsListProgressiveRequest['payload']) 
     total: snapshot.totalMedia,
     done,
     nextCursor: done ? null : nextCursor,
+    ...(snapshotId ? { snapshot: snapshotId } : {}),
     debug: {
       cursor,
       limit,

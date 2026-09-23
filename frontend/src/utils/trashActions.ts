@@ -83,6 +83,21 @@ export function validateTrashRestoreResult(payload: unknown, requestedPaths: str
   return { restored, failed, warning: typeof body.warning === 'string' ? body.warning : undefined };
 }
 
+export function validateEmptyTrashResult(payload: unknown): void {
+  const body = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  if (body.success === true) return;
+  const failed = Array.isArray(body.failed) ? body.failed : [];
+  const first = failed[0] && typeof failed[0] === 'object'
+    ? failed[0] as Record<string, unknown>
+    : {};
+  const message = typeof first.error === 'string' && first.error.trim()
+    ? first.error.trim()
+    : typeof body.error === 'string' && body.error.trim()
+      ? body.error.trim()
+      : 'Some Trash items could not be deleted';
+  throw new Error(failed.length > 1 ? `${message} (+${failed.length - 1} more)` : message);
+}
+
 export async function permanentlyDeleteTrashPaths(paths: string[]): Promise<Pick<DeleteExecutionResult, 'deletedPaths' | 'failed' | 'warning'>> {
   const requested = normalizeDeletePaths(paths);
   if (!requested.length) return { deletedPaths: [], failed: [] };

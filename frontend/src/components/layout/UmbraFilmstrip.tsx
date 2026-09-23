@@ -28,7 +28,7 @@ type FsListMediaFile = {
   path: string;
   url?: string;
   thumbnailUrl?: string;
-  type?: 'image' | 'video' | 'gif';
+  type?: 'image' | 'video' | 'gif' | 'folder';
   width?: number;
   height?: number;
   size?: number;
@@ -392,6 +392,9 @@ export function UmbraFilmstrip({
   const rootPath = DEFAULT_OUTPUT_ROOT;
 
   const [currentFolder, setCurrentFolder] = useState<string>('');
+  const [feedFolder, setFeedFolder] = useState<string>('');
+  const [folderLoadError, setFolderLoadError] = useState<string>('');
+  const [deletePending, setDeletePending] = useState(false);
   const [images, setImages] = useState<FilmstripImage[]>([]);
   const [liveGenerationPreviewImage, setLiveGenerationPreviewImage] = useState<FilmstripImage | null>(null);
   const [recentGenerationOutputImages, setRecentGenerationOutputImages] = useState<FilmstripImage[]>([]);
@@ -411,6 +414,8 @@ export function UmbraFilmstrip({
   const lastFeedRequestAtRef = useRef(0);
   const lastForceRefreshBurstAtRef = useRef(0);
   const currentFolderRef = useRef<string>('');
+  const localSizeSortRef = useRef(false);
+  const deleteInFlightRef = useRef(false);
   const isTouchRemote = typeof document !== 'undefined'
     && (document.documentElement.dataset.umbraRemoteMode === 'phone' || document.documentElement.dataset.umbraRemoteMode === 'tablet');
 
@@ -473,10 +478,11 @@ export function UmbraFilmstrip({
   const folderActivity = useFilmstripFolderActivity([...pinnedFolders, ...recentFolders], rememberRecentFolders);
 
   const displayedImages = useMemo(() => {
+    if (normalizePath(feedFolder).toLowerCase() !== normalizePath(currentFolder || rootPath).toLowerCase()) return [];
     const sortedImages = sortFilmstripImages(images, sortField, sortDirection, customOrder)
       .filter((image) => !isLiveGenerationPreviewPath(image.path));
     return sortedImages;
-  }, [customOrder, images, sortDirection, sortField]);
+  }, [currentFolder, customOrder, feedFolder, images, rootPath, sortDirection, sortField]);
 
   const recentGenerationLaneImages = useMemo(() => {
     const recentLimit = recentGenerationsExpanded ? 10 : 3;
@@ -679,7 +685,9 @@ export function UmbraFilmstrip({
       const custom = event as CustomEvent<{ path?: string; folderPath?: string }>;
       const incoming = normalizePath(custom?.detail?.path || custom?.detail?.folderPath || '');
       if (!incoming) return;
+      currentFolderRef.current = incoming;
       setCurrentFolder(incoming);
+      setFolderLoadError('');
       rememberRecentFolders([incoming]);
     };
     window.addEventListener('umbra:gallery-folder-changed', onGalleryFolderChanged as EventListener);
@@ -687,6 +695,17 @@ export function UmbraFilmstrip({
       window.removeEventListener('umbra:gallery-folder-changed', onGalleryFolderChanged as EventListener);
     };
   }, [rememberRecentFolders]);
+
+  useEffect(() => {
+    const onFolderLoadFailed = (event: Event) => {
+      const detail = (event as CustomEvent<{ folderPath?: string; message?: string }>).detail;
+      const failedFolder = normalizePath(detail?.folderPath || '');
+      if (!failedFolder || failedFolder.toLowerCase() !== normalizePath(currentFolderRef.current || rootPath).toLowerCase()) return;
+      setFolderLoadError(String(detail?.message || 'Failed to load folder'));
+    };
+    window.addEventListener('umbra:gallery-folder-load-failed', onFolderLoadFailed as EventListener);
+    return () => window.removeEventListener('umbra:gallery-folder-load-failed', onFolderLoadFailed as EventListener);
+  }, [rootPath]);
 
   useEffect(() => {
     const onFilmstripFeed = (event: Event) => {
@@ -707,11 +726,12 @@ export function UmbraFilmstrip({
         ? custom.detail.removedPaths.map((entry) => normalizePath(String(entry || ''))).filter(Boolean)
         : [];
       const activeFolder = normalizePath(currentFolderRef.current || '');
-      if (mode !== 'replace' && (!folderPath || folderPath !== activeFolder)) return;
+      if (activeFolder && (!folderPath || folderPath !== activeFolder)) return;
 
       const seenPaths = new Set<string>();
       const mapped: FilmstripImage[] = [];
       for (const entry of rawFiles) {
+        if (entry?.type === 'folder') continue;
         const image = toFilmstripImage(entry);
         const imagePath = normalizePath(image.path);
         if (!imagePath || seenPaths.has(imagePath)) continue;
@@ -722,8 +742,10 @@ export function UmbraFilmstrip({
       const nextSortBy = normalizeGallerySortBy(custom?.detail?.sortBy);
       const nextSortOrder = normalizeGallerySortOrder(custom?.detail?.sortOrder);
       const nextFilmstripField = mapGallerySortByToFilmstrip(nextSortBy);
-      setSortField((current) => (current === nextFilmstripField ? current : nextFilmstripField));
-      setSortDirection((current) => (current === nextSortOrder ? current : nextSortOrder));
+      if (!localSizeSortRef.current) {
+        setSortField((current) => (current === nextFilmstripField ? current : nextFilmstripField));
+        setSortDirection((current) => (current === nextSortOrder ? current : nextSortOrder));
+      }
 
       const canAppend = mode === 'append'
         && !!folderPath
@@ -782,6 +804,8 @@ export function UmbraFilmstrip({
       }
 
       const feedSignature = buildFilmstripFeedSignature(folderPath, mapped);
+      if (folderPath) setFeedFolder(folderPath);
+      setFolderLoadError('');
       if (shouldTraceFilmstrip()) {
         logDiagnostic('[Umbra Filmstrip]', {
           event: 'incoming-feed',
@@ -796,7 +820,10 @@ export function UmbraFilmstrip({
       if (feedChanged) {
         feedSignatureRef.current = feedSignature;
         setFeedMode(mode === 'append' ? 'append' : (mode === 'remove' ? 'remove' : 'replace'));
-        if (folderPath) setCurrentFolder(folderPath);
+        if (folderPath) {
+          currentFolderRef.current = folderPath;
+          setCurrentFolder(folderPath);
+        }
         setImages(mapped);
         setCustomOrder(mapped.map((item) => item.id));
         setSelectedIds((current) => {
@@ -837,6 +864,7 @@ export function UmbraFilmstrip({
       const nextSortBy = normalizeGallerySortBy(custom?.detail?.sortBy);
       const nextSortOrder = normalizeGallerySortOrder(custom?.detail?.sortOrder);
       const nextFilmstripField = mapGallerySortByToFilmstrip(nextSortBy);
+      localSizeSortRef.current = false;
       setSortField((current) => (current === nextFilmstripField ? current : nextFilmstripField));
       setSortDirection((current) => (current === nextSortOrder ? current : nextSortOrder));
     };
@@ -870,7 +898,9 @@ export function UmbraFilmstrip({
           paths: incomingPaths,
           primaryPath: incomingPrimaryPath || undefined,
         };
+        currentFolderRef.current = incomingFolderPath;
         setCurrentFolder(incomingFolderPath);
+        setFolderLoadError('');
         return;
       }
 
@@ -1153,7 +1183,9 @@ export function UmbraFilmstrip({
       ? pathParent(normalizedTargetPath) || normalizedTargetPath
       : normalizedTargetPath;
     const imagePath = treatAsFile ? normalizedTargetPath : '';
+    currentFolderRef.current = folderPath;
     setCurrentFolder(folderPath);
+    setFolderLoadError('');
     setActiveWorkspace('library');
     const detail = { path: folderPath, folderPath, ...(imagePath ? { imagePath } : {}), source };
     window.dispatchEvent(new CustomEvent('umbra:gallery-open-path', { detail }));
@@ -1238,9 +1270,13 @@ export function UmbraFilmstrip({
     }));
   }, []);
 
-  const removeCompletedImages = useCallback((entries: FilmstripImage[], paths: string[]) => {
+  const removeCompletedImages = useCallback((entries: FilmstripImage[], paths: string[], operationFolder?: string) => {
     const removedPaths = Array.from(new Set(paths.map(normalizePath).filter(Boolean)));
     if (removedPaths.length === 0) return;
+    if (operationFolder && normalizePath(currentFolderRef.current || rootPath).toLowerCase() !== operationFolder.toLowerCase()) {
+      notifyGalleryRemovePaths(removedPaths);
+      return;
+    }
     const isRemoved = createFilmstripPathMatcher(removedPaths);
     const removedIds = new Set(entries.filter((entry) => isRemoved(entry.path)).map((entry) => normalizeId(entry.id)));
     setFeedMode('remove');
@@ -1249,7 +1285,7 @@ export function UmbraFilmstrip({
     setSelectedIds((current) => new Set(Array.from(current).filter((id) => !removedIds.has(normalizeId(id)))));
     setLastSelectedId((current) => removedIds.has(normalizeId(current)) ? '' : current);
     notifyGalleryRemovePaths(removedPaths);
-  }, [notifyGalleryRemovePaths]);
+  }, [notifyGalleryRemovePaths, rootPath]);
 
   const notifyGalleryRestorePaths = useCallback((paths: string[]) => {
     const normalized = Array.from(new Set(paths.map((entry) => normalizePath(entry)).filter(Boolean)));
@@ -1317,6 +1353,7 @@ export function UmbraFilmstrip({
     const selectedEntries = resolveSelectedImages(ids);
     const selectedPaths = selectedEntries.map((item) => item.path);
     if (selectedPaths.length === 0) return;
+    const operationFolder = normalizePath(currentFolderRef.current || rootPath);
     const selectedPathSet = new Set(selectedPaths.map((entry) => normalizePath(entry)).filter(Boolean));
     const firstRemovedIndex = displayedImages.findIndex((item) => selectedPathSet.has(normalizePath(item.path)));
     const resolveNextSelectionAfterRemoval = (removedPathsInput: string[]): FilmstripImage | null => {
@@ -1332,11 +1369,15 @@ export function UmbraFilmstrip({
     const nameByPath = new Map<string, string>(
       selectedEntries.map((item) => [normalizePath(item.path), item.name || pathLeaf(item.path)]),
     );
-    const applyOptimisticRemoval = (removePaths: string[]) => {
+    const applyCompletedRemoval = (removePaths: string[]) => {
       const normalizedRemovePaths = Array.from(new Set(
         removePaths.map((entry) => normalizePath(entry)).filter(Boolean),
       ));
-      if (normalizedRemovePaths.length === 0) return false;
+      if (normalizedRemovePaths.length === 0) return;
+      if (normalizePath(currentFolderRef.current || rootPath).toLowerCase() !== operationFolder.toLowerCase()) {
+        notifyGalleryRemovePaths(normalizedRemovePaths);
+        return;
+      }
       const isRemoved = createFilmstripPathMatcher(normalizedRemovePaths);
       const removedIdSet = new Set(
         selectedEntries
@@ -1356,10 +1397,12 @@ export function UmbraFilmstrip({
         setSelectedIds(new Set());
         setLastSelectedId('');
       }
-      return true;
     };
     const trashPaths = selectedPaths.filter((pathValue) => isTrashPath(pathValue));
     const deletePaths = selectedPaths.filter((pathValue) => !isTrashPath(pathValue));
+    if (deleteInFlightRef.current) return;
+    deleteInFlightRef.current = true;
+    setDeletePending(true);
     if (trashPaths.length === selectedPaths.length) {
       try {
         const result = await permanentlyDeleteTrashPaths(trashPaths);
@@ -1370,7 +1413,7 @@ export function UmbraFilmstrip({
           type: 'success',
           message: `Deleted ${count} item${count === 1 ? '' : 's'} permanently`,
         });
-        removeCompletedImages(selectedEntries, result.deletedPaths);
+        removeCompletedImages(selectedEntries, result.deletedPaths, operationFolder);
         notifyGalleryTrashUpdated();
         void refreshImages({ force: true });
       } catch (error) {
@@ -1378,13 +1421,12 @@ export function UmbraFilmstrip({
           type: 'error',
           message: error instanceof Error ? error.message : 'Failed to permanently delete from trash',
         });
+      } finally {
+        deleteInFlightRef.current = false;
+        setDeletePending(false);
       }
       return;
     }
-
-    const didOptimisticRemove = deletePaths.length > 0
-      ? applyOptimisticRemoval(deletePaths)
-      : false;
 
     try {
       const failedItems: Array<{ path?: string; error?: string }> = [];
@@ -1515,25 +1557,24 @@ export function UmbraFilmstrip({
       }
 
       if (dedupedRemoveSignalPaths.length > 0) {
-        removeCompletedImages(selectedEntries, dedupedRemoveSignalPaths);
+        if (failedItems.length > 0) removeCompletedImages(selectedEntries, dedupedRemoveSignalPaths, operationFolder);
+        else applyCompletedRemoval(dedupedRemoveSignalPaths);
         notifyGalleryTrashUpdated();
         if (failedItems.length > 0) {
-          void refreshImages({ force: true });
+          refreshImages({ reload: true });
         }
-      } else if (didOptimisticRemove) {
-        void refreshImages({ force: true });
-      } else {
-        setSelectedIds(new Set());
-        setLastSelectedId('');
+      } else if (failedItems.length > 0) {
+        refreshImages({ reload: true });
       }
     } catch (error) {
-      if (didOptimisticRemove) {
-        void refreshImages({ force: true });
-      }
+      refreshImages({ reload: true });
       addToast({
         type: 'error',
         message: error instanceof Error ? error.message : 'Failed to delete items',
       });
+    } finally {
+      deleteInFlightRef.current = false;
+      setDeletePending(false);
     }
   }, [
     addRestoredBatchToast,
@@ -1546,12 +1587,14 @@ export function UmbraFilmstrip({
     refreshImages,
     removeCompletedImages,
     resolveSelectedImages,
+    rootPath,
   ]);
 
   const onRestoreFromTrash = useCallback(async (ids: string[]) => {
     const selectedEntries = resolveSelectedImages(ids);
     const selectedPaths = resolveSelectionPaths(ids).filter((pathValue) => isTrashPath(pathValue));
     if (selectedPaths.length === 0) return;
+    const operationFolder = normalizePath(currentFolderRef.current || rootPath);
 
     try {
       const response = await fetch('/api/trash/restore', {
@@ -1603,7 +1646,7 @@ export function UmbraFilmstrip({
       if (restoredPaths.length > 0) {
         notifyGalleryRestorePaths(restoredPaths);
       }
-      removeCompletedImages(selectedEntries, restoredItems.map((entry) => entry.trashPath));
+      removeCompletedImages(selectedEntries, restoredItems.map((entry) => entry.trashPath), operationFolder);
       notifyGalleryTrashUpdated();
       void refreshImages({ force: true });
     } catch (error) {
@@ -1612,12 +1655,13 @@ export function UmbraFilmstrip({
         message: error instanceof Error ? error.message : 'Failed to restore from trash',
       });
     }
-  }, [addRestoredToast, addToast, notifyGalleryRestorePaths, notifyGalleryTrashUpdated, openPathInGallery, refreshImages, removeCompletedImages, resolveSelectedImages, resolveSelectionPaths]);
+  }, [addRestoredToast, addToast, notifyGalleryRestorePaths, notifyGalleryTrashUpdated, openPathInGallery, refreshImages, removeCompletedImages, resolveSelectedImages, resolveSelectionPaths, rootPath]);
 
   const onDeleteForeverFromTrash = useCallback(async (ids: string[]) => {
     const selectedEntries = resolveSelectedImages(ids);
     const selectedPaths = resolveSelectionPaths(ids).filter((pathValue) => isTrashPath(pathValue));
     if (selectedPaths.length === 0) return;
+    const operationFolder = normalizePath(currentFolderRef.current || rootPath);
 
     try {
       const result = await permanentlyDeleteTrashPaths(selectedPaths);
@@ -1628,7 +1672,7 @@ export function UmbraFilmstrip({
         type: 'success',
         message: `Deleted ${count} item${count === 1 ? '' : 's'} permanently`,
       });
-      removeCompletedImages(selectedEntries, result.deletedPaths);
+      removeCompletedImages(selectedEntries, result.deletedPaths, operationFolder);
       notifyGalleryTrashUpdated();
       void refreshImages({ force: true });
     } catch (error) {
@@ -1637,7 +1681,7 @@ export function UmbraFilmstrip({
         message: error instanceof Error ? error.message : 'Failed to permanently delete from trash',
       });
     }
-  }, [addToast, notifyGalleryTrashUpdated, refreshImages, removeCompletedImages, resolveSelectedImages, resolveSelectionPaths]);
+  }, [addToast, notifyGalleryTrashUpdated, refreshImages, removeCompletedImages, resolveSelectedImages, resolveSelectionPaths, rootPath]);
 
   const onShowInExplorer = useCallback(async (ids: string[]) => {
     const targetPath = resolveSelectionPaths(ids).at(0) || '';
@@ -1931,7 +1975,9 @@ export function UmbraFilmstrip({
     const normalized = normalizePath(folderPath);
     if (!normalized) return;
     folderActivity.markOpened(normalized);
+    currentFolderRef.current = normalized;
     setCurrentFolder(normalized);
+    setFolderLoadError('');
     setSelectedIds(new Set());
     setLastSelectedId('');
     rememberRecentFolders([normalized]);
@@ -2045,6 +2091,8 @@ export function UmbraFilmstrip({
   return (
     <>
       <Filmstrip
+        statusMessage={folderLoadError || (deletePending ? 'Deleting selection…' : normalizePath(feedFolder).toLowerCase() !== normalizePath(currentFolder || rootPath).toLowerCase() ? 'Loading folder…' : '')}
+        statusIsError={Boolean(folderLoadError)}
         unreadFolderMediaCount={folderActivity.total}
         images={displayedImages}
         recentGenerationImages={recentGenerationLaneImages}
@@ -2111,6 +2159,7 @@ export function UmbraFilmstrip({
         sortField={sortField}
         sortDirection={sortDirection}
         onSortChange={(field, direction) => {
+          localSizeSortRef.current = field === 'size';
           setSortField(field);
           setSortDirection(direction);
           const mappedSortBy = mapFilmstripSortFieldToGallery(field);
@@ -2155,4 +2204,3 @@ export function UmbraFilmstrip({
 }
 
 export default UmbraFilmstrip;
-
