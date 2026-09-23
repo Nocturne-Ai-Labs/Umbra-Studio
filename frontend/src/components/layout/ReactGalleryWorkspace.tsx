@@ -8289,6 +8289,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       const imagePath = normalizePath(detail.imagePath || '');
       const targetFolder = imagePath ? pathParent(imagePath) || folderPath : folderPath;
       if (targetFolder) {
+        if (detail.source !== 'react-gallery') clearSearch();
         setFocusedFolder(targetFolder);
         addOpenedFolder(targetFolder);
         pendingRevealPathRef.current = imagePath || targetFolder;

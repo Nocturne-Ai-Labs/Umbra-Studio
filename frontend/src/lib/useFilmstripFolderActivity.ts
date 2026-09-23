@@ -77,11 +77,11 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
   const markOpened = useCallback((path: string) => {
     const acknowledge = (value: FolderActivitySnapshot) => setRead(previous => {
       const stored = readFolderActivityState();
-      const counts = { ...previous.counts };
-      if (stored.epoch === previous.epoch) {
+      const counts = previous.epoch === value.epoch ? { ...previous.counts } : {};
+      if (stored.epoch === value.epoch) {
         for (const [id, count] of Object.entries(stored.counts)) counts[id] = Math.max(counts[id] || 0, count);
       }
-      const base = { epoch: previous.epoch, counts };
+      const base = { epoch: value.epoch, counts };
       const next = acknowledgeFolderActivity(value, base, path);
       try { localStorage.setItem(FOLDER_ACTIVITY_READ_KEY, JSON.stringify(next)); } catch { /* In-memory counts still work. */ }
       return next;
