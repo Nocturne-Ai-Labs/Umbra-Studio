@@ -183,7 +183,7 @@ function toFilmstripImage(item: FsListMediaFile): FilmstripImage {
     modifiedMs,
     size,
   });
-  const inferredType = normalizedType === 'video'
+  const inferredType = normalizedType === 'video' || /\.(mp4|webm|mkv|mov|avi|m4v)$/i.test(normalizedPath)
     ? 'video'
     : normalizedPath.toLowerCase().endsWith('.gif')
       ? 'gif'
@@ -209,7 +209,7 @@ function toFilmstripImage(item: FsListMediaFile): FilmstripImage {
   };
 }
 
-function filmstripImagesFromSavedOutputs(detail: unknown): FilmstripImage[] {
+export function filmstripImagesFromSavedOutputs(detail: unknown): FilmstripImage[] {
   const payload = detail && typeof detail === 'object' ? detail as Record<string, unknown> : {};
   const outputs = Array.isArray(payload.outputs) ? payload.outputs : [];
   const seen = new Set<string>();
