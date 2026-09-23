@@ -372,7 +372,7 @@ export async function composeUmbraCanvasGenerationRegion(
     .map((entity) => entity.maskEntityId)
     .filter(Boolean));
   const maskEntities = project.entities.filter((entity): entity is UmbraCanvasMaskEntity => (
-    entity.kind === 'mask' && entity.generationEnabled && !conditioningMaskIds.has(entity.id)
+    entity.kind === 'mask' && entity.visible && entity.generationEnabled && !conditioningMaskIds.has(entity.id)
   ));
   for (const entity of maskEntities) await drawMask(explicitMaskContext, entity, bbox);
 

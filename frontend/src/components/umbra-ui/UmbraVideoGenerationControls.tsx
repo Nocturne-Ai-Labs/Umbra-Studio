@@ -66,6 +66,8 @@ import { resolveUmbraUiPipeline } from '@/lib/umbraUiPipelines';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import { prepareVideoControlsForHandoff } from '@/lib/umbraUiVideoHandoffControls';
 import { hasUmbraVideoSourceDimensions, selectUmbraVideoMode, startsUmbraLtxExtendedFromImage } from '@/lib/umbraVideoQueueSource';
+import { resolveUmbraVideoQueueSourceUrl } from '@/lib/umbraVideoQueuePreview';
+import { UmbraVideoMediaUploadSelection } from '@/lib/umbraVideoMediaUploadSelection';
 import { readUserConfigWithRetry, writeUserConfig } from '@/lib/userConfig';
 import { advanceUmbraUiSeed, normalizeUmbraUiSeed, resolveUmbraUiQueueSeed } from '@/lib/umbraUiSeed';
 import {
@@ -584,10 +586,11 @@ function FrameSourceField({ label, path, previewUrl, onChange, onClear, onDimens
   );
 }
 
-function MediaSourceField({ kind, label, path, onChange, onUploaded, onClear, onDimensions }: {
+function MediaSourceField({ kind, label, path, stagedName = '', onChange, onUploaded, onClear, onDimensions }: {
   kind: 'video' | 'audio';
   label: string;
   path: string;
+  stagedName?: string;
   onChange: (path: string) => void;
   onUploaded: (path: string, name: string) => void;
   onClear: () => void;
@@ -595,8 +598,14 @@ function MediaSourceField({ kind, label, path, onChange, onUploaded, onClear, on
 }) {
   const showToast = useStore((state) => state.showToast);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const uploadSelection = React.useRef(new UmbraVideoMediaUploadSelection(path)).current;
+  uploadSelection.observePath(path);
   const [uploading, setUploading] = React.useState(false);
   const [uploadedPreview, setUploadedPreview] = React.useState<{ path: string; url: string } | null>(null);
+  React.useEffect(() => {
+    uploadSelection.mount();
+    return () => uploadSelection.dispose();
+  }, [uploadSelection]);
   React.useEffect(() => () => {
     if (uploadedPreview) URL.revokeObjectURL(uploadedPreview.url);
   }, [uploadedPreview]);
@@ -605,9 +614,12 @@ function MediaSourceField({ kind, label, path, onChange, onUploaded, onClear, on
   }, [path, uploadedPreview]);
   const mediaUrl = kind === 'video' && uploadedPreview?.path === path
     ? uploadedPreview.url
-    : path ? `/api/fs/image?path=${encodeURIComponent(path)}` : '';
+    : kind === 'video'
+      ? resolveUmbraVideoQueueSourceUrl({ mode: 'video_to_video', sourceVideoPath: path, sourceVideoName: stagedName })
+      : path ? `/api/fs/image?path=${encodeURIComponent(path)}` : '';
   const upload = React.useCallback(async (file: File) => {
     if (uploading) return;
+    const uploadToken = uploadSelection.begin();
     setUploading(true);
     try {
       const response = await fetch('/api/comfy/upload-media', {
@@ -626,6 +638,7 @@ function MediaSourceField({ kind, label, path, onChange, onUploaded, onClear, on
       const sourcePath = String(payload?.sourcePath || '').trim();
       const filename = String(payload?.filename || '').trim();
       if (!sourcePath || !filename) throw new Error(`Umbra did not return the uploaded ${kind}.`);
+      if (!uploadSelection.isCurrent(uploadToken)) return;
       onUploaded(sourcePath, filename);
       if (kind === 'video') {
         try {
@@ -633,12 +646,16 @@ function MediaSourceField({ kind, label, path, onChange, onUploaded, onClear, on
         } catch { /* The uploaded file remains usable if local preview is unavailable. */ }
       }
     } catch (error) {
-      showToast(error instanceof Error ? error.message : `Failed to upload ${kind}.`, 'error');
+      if (uploadSelection.isCurrent(uploadToken)) {
+        showToast(error instanceof Error ? error.message : `Failed to upload ${kind}.`, 'error');
+      }
     } finally {
-      setUploading(false);
-      if (inputRef.current) inputRef.current.value = '';
+      if (uploadSelection.isLatestUpload(uploadToken)) {
+        setUploading(false);
+        if (inputRef.current) inputRef.current.value = '';
+      }
     }
-  }, [kind, onUploaded, showToast, uploading]);
+  }, [kind, onUploaded, showToast, uploadSelection, uploading]);
   return (
     <div className="grid grid-cols-[72px_minmax(0,1fr)_28px_28px] items-center gap-2 border-t border-white/[0.07] py-2 first:border-t-0">
       <div className="flex h-12 items-center justify-center overflow-hidden border border-white/10 bg-black/40">
@@ -659,7 +676,7 @@ function MediaSourceField({ kind, label, path, onChange, onUploaded, onClear, on
       </div>
       <label className="min-w-0 space-y-1">
         <span className={labelClass}>{label}</span>
-        <input value={path} onChange={(event) => onChange(event.target.value)} placeholder={`Paste a local ${kind} path`} className={inputClass} />
+        <input value={path} onChange={(event) => { uploadSelection.invalidate(); onChange(event.target.value); }} placeholder={`Paste a local ${kind} path`} className={inputClass} />
       </label>
       <input
         ref={inputRef}
@@ -682,7 +699,7 @@ function MediaSourceField({ kind, label, path, onChange, onUploaded, onClear, on
       </button>
       <button
         type="button"
-        onClick={onClear}
+        onClick={() => { uploadSelection.invalidate(); onClear(); }}
         disabled={!path}
         className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-zinc-600 hover:border-red-300/25 hover:text-red-300 disabled:opacity-25"
         title={`Clear ${label.toLowerCase()}`}
@@ -1941,6 +1958,7 @@ export function UmbraVideoGenerationControls({
               kind="video"
               label="Source Video"
               path={video.sourceVideoPath}
+              stagedName={video.sourceVideoName}
               onChange={(path) => setVideo((current) => ({
                 ...current,
                 sourceVideoPath: path,

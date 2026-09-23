@@ -3346,15 +3346,6 @@ export function UmbraInpaintWorkspace({
   }, [colorPrefillAvailable, fillMode, inpaintRuntimeCapabilities, maskedFillAvailable, modelInfillAvailable, tilePrefillAvailable]);
 
   React.useEffect(() => {
-    if (outputOnlyMaskedRegions) setOutputOnlyMaskedRegions(false);
-  }, [outputOnlyMaskedRegions]);
-
-  React.useEffect(() => {
-    if (!inpaintRuntimeCapabilities) return;
-    if (!semanticCutoutAvailable && semanticCutout) setSemanticCutout(false);
-  }, [inpaintRuntimeCapabilities, semanticCutout, semanticCutoutAvailable]);
-
-  React.useEffect(() => {
     if (!inpaintRuntimeCapabilities) return;
     if (!colorMatchAvailable && colorMatch !== 0) setColorMatch(0);
     if (!differentialDiffusionAvailable && differentialStrength !== 1) setDifferentialStrength(1);
@@ -4080,6 +4071,7 @@ export function UmbraInpaintWorkspace({
     setSeamlessX(false);
     setSeamlessY(false);
     setOutputOnlyMaskedRegions(false);
+    setSemanticCutout(false);
     setFillMode('neutral');
     setInfillColor(generation.infillColor);
     setInfillTileSize(generation.infillTileSize);
@@ -4127,6 +4119,7 @@ export function UmbraInpaintWorkspace({
     setSeamlessX(false);
     setSeamlessY(false);
     setOutputOnlyMaskedRegions(false);
+    setSemanticCutout(false);
     setFillMode('neutral');
     if (inpaint.infillColor !== undefined) setInfillColor(inpaint.infillColor);
     if (inpaint.infillTileSize !== undefined) setInfillTileSize(inpaint.infillTileSize);
@@ -4362,13 +4355,13 @@ export function UmbraInpaintWorkspace({
     applyProjectGenerationSettings(generation);
     const maskedLayerOutput = region.outputMode === 'cutout' || region.mode === 'standalone';
     setOutputOnlyMaskedRegions(maskedLayerOutput);
-    setSemanticCutout(region.outputMode === 'cutout' && semanticCutoutAvailable);
+    setSemanticCutout(region.outputMode === 'cutout');
     if (region.mode === 'standalone') {
       setDenoise(1);
       setFillMode('neutral');
     }
     if (region.mode === 'blend') setSoftInpaintEnabled(true);
-  }, [applyProjectGenerationSettings, canvasDocument, semanticCutoutAvailable]);
+  }, [applyProjectGenerationSettings, canvasDocument]);
 
   React.useEffect(() => {
     if (!studioMode || !canvasDocument || !canvasStudio.activeRegion) return;
@@ -9444,6 +9437,14 @@ export function UmbraInpaintWorkspace({
       showToast(pipelineError || modelCompatibilityIssue || 'Choose a checkpoint.', 'error');
       return;
     }
+    if (outputOnlyMaskedRegions && !maskedOutputAvailable) {
+      showToast('This region requires masked output support from the selected inpaint pipeline.', 'error');
+      return;
+    }
+    if (outputOnlyMaskedRegions && semanticCutout && !semanticCutoutAvailable) {
+      showToast('This character cutout requires background removal support from ComfyUI.', 'error');
+      return;
+    }
     const sourceTransition = sourceTransitionRef.current;
     submissionInFlightRef.current = true;
     setIsSubmitting(true);
@@ -9878,6 +9879,10 @@ export function UmbraInpaintWorkspace({
                   ? modelCompatibilityIssue
                   : !checkpointName
                     ? 'Choose a checkpoint.'
+                    : outputOnlyMaskedRegions && !maskedOutputAvailable
+                      ? 'This region requires masked output support from the selected inpaint pipeline.'
+                      : outputOnlyMaskedRegions && semanticCutout && !semanticCutoutAvailable
+                        ? 'This character cutout requires background removal support from ComfyUI.'
                     : '';
   const generationReady = !generationBlockedReason;
   const progress = job ? (job.completed + job.failed) / Math.max(1, job.total) : 0;

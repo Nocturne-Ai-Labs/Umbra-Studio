@@ -21,6 +21,7 @@ import {
   inferUmbraUiIpAdapterArchitecture,
 } from '../shared/umbra-ui/inpaintModelCompatibility';
 import { upsertPngTextMetadata } from './PngTextMetadata';
+import { resolveUmbraUiInpaintBaseSeed } from './UmbraUiInpaintSeed';
 
 const IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);
 const JOB_RETENTION_MS = 6 * 60 * 60 * 1000;
@@ -1611,12 +1612,7 @@ export class UmbraUiInpaintService {
     const seedIncrement = settings.seedIncrement === 100 || settings.seedIncrement === 1000
       ? settings.seedIncrement
       : 1;
-    const baseSeed = Number.isFinite(Number(settings.seed)) && Number(settings.seed) > 0
-      ? Math.min(
-        Number.MAX_SAFE_INTEGER - seedIncrement * Math.max(0, samples - 1),
-        Math.floor(Number(settings.seed)),
-      )
-      : randomSeed();
+    const baseSeed = resolveUmbraUiInpaintBaseSeed(settings.seed, seedIncrement, samples, randomSeed);
     const now = Date.now();
     const job: UmbraUiInpaintJob = {
       id: createId('umbra-inpaint'),
