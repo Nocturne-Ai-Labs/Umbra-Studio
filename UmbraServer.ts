@@ -20513,16 +20513,15 @@ function resolveUmbraUiWatermarkAssetPath(value: unknown): string {
   if (!rawPath) return '';
   const resolvedPath = isAbsolute(rawPath) ? resolve(rawPath) : resolve(ROOT_DIR, rawPath);
   const assetRoot = resolve(UMBRA_UI_WATERMARK_ASSET_ROOT);
-  if (resolvedPath !== assetRoot && !resolvedPath.startsWith(`${assetRoot}${sep}`)) {
-    throw new Error('The saved watermark is outside the Umbra UI watermark library.');
-  }
-  if (!existsSync(resolvedPath) || !statSync(resolvedPath).isFile()) {
+  const physicalPath = resolveAllowedExistingGalleryPath(resolvedPath, [assetRoot]);
+  if (!physicalPath) throw new Error('The saved watermark is outside the Umbra UI watermark library.');
+  if (!existsSync(physicalPath) || !statSync(physicalPath).isFile()) {
     throw new Error('The saved watermark file is missing. Choose it again or update the preset.');
   }
-  if (!UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS.has(extname(resolvedPath).toLowerCase())) {
+  if (!UMBRA_UI_MEDIA_TOOL_IMAGE_EXTENSIONS.has(extname(physicalPath).toLowerCase())) {
     throw new Error('The saved watermark uses an unsupported image format.');
   }
-  return resolvedPath;
+  return physicalPath;
 }
 
 async function handleUmbraUiWatermarkAssetUpload(req: Request): Promise<Response> {
