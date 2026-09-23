@@ -1191,6 +1191,12 @@ function getPreferredModelInspectionReportFullPath(fullPath: string): string {
   return join(dirname(fullPath), MODEL_ARTIFACT_DIR, `${basename(fullPath)}${MODEL_INSPECTION_SUFFIX}`);
 }
 
+function assertModelManagerArtifactPath(fullPath: string): void {
+  if (!resolveAllowedExistingGalleryPath(fullPath, getModelManagerRootsResolved().map(root => root.fullPath))) {
+    throw new Error('Invalid model artifact path');
+  }
+}
+
 async function listModelThumbArtifactsForFile(fullPath: string): Promise<string[]> {
   try {
     const stat = await fs.stat(fullPath);
@@ -1662,12 +1668,16 @@ async function inspectModelManagerModelFile(modelFullPath: string) {
   const format = ext === '.gguf' ? 'gguf' : 'safetensors';
   const summary = summarizeModelMetadata(metadata, format);
   const artifactDir = join(dirname(modelFullPath), MODEL_ARTIFACT_DIR);
-  await fs.mkdir(artifactDir, { recursive: true });
+  assertModelManagerArtifactPath(artifactDir);
   const reportPath = getPreferredModelInspectionReportFullPath(modelFullPath);
+  const preferredSnapshotPath = getPreferredModelSnapshotFullPath(modelFullPath);
+  assertModelManagerArtifactPath(reportPath);
+  assertModelManagerArtifactPath(preferredSnapshotPath);
+  await fs.mkdir(artifactDir, { recursive: true });
   await fs.writeFile(reportPath, buildModelInspectionReport(modelFullPath, metadata, summary), 'utf8');
 
-  const snapshotPath = existsSync(getPreferredModelSnapshotFullPath(modelFullPath))
-    ? getPreferredModelSnapshotFullPath(modelFullPath)
+  const snapshotPath = existsSync(preferredSnapshotPath)
+    ? preferredSnapshotPath
     : '';
   let snapshot = snapshotPath ? await readModelSnapshotPayload(snapshotPath) : null;
   if (!snapshot) {
@@ -1687,8 +1697,8 @@ async function inspectModelManagerModelFile(modelFullPath: string) {
   };
   snapshot.localMetadata = metadata;
   snapshot.metadata = snapshot.metadata ?? metadata;
-  await fs.writeFile(getPreferredModelSnapshotFullPath(modelFullPath), JSON.stringify(snapshot, null, 2), 'utf8');
-  await modelIndexWorkerService.invalidatePaths([modelFullPath, dirname(modelFullPath), reportPath, getPreferredModelSnapshotFullPath(modelFullPath)]);
+  await fs.writeFile(preferredSnapshotPath, JSON.stringify(snapshot, null, 2), 'utf8');
+  await modelIndexWorkerService.invalidatePaths([modelFullPath, dirname(modelFullPath), reportPath, preferredSnapshotPath]);
   return {
     success: true,
     reportPath: toClientPath(reportPath),
@@ -1709,6 +1719,7 @@ async function hashFileSha256(fullPath: string): Promise<string> {
 
 async function readModelSnapshotPayload(snapshotPath: string): Promise<Record<string, unknown> | null> {
   try {
+    assertModelManagerArtifactPath(snapshotPath);
     const raw = await fs.readFile(snapshotPath, 'utf8');
     const parsed = JSON.parse(String(raw || '{}'));
     const payload = toRecord(parsed);
@@ -1723,7 +1734,7 @@ async function listModelManagerSnapshotFiles(folderFullPath: string): Promise<st
   const artifactDir = join(folderFullPath, MODEL_ARTIFACT_DIR);
   const folders = [artifactDir, folderFullPath];
   for (const folder of folders) {
-    if (!existsSync(folder)) continue;
+    if (!existsSync(folder) || !resolveAllowedExistingGalleryPath(folder, getModelManagerRootsResolved().map(root => root.fullPath))) continue;
     let entries: string[] = [];
     try {
       entries = await fs.readdir(folder);
@@ -1732,7 +1743,8 @@ async function listModelManagerSnapshotFiles(folderFullPath: string): Promise<st
     }
     for (const entry of entries) {
       if (!entry.endsWith(MODEL_SNAPSHOT_SUFFIX)) continue;
-      paths.push(join(folder, entry));
+      const candidate = join(folder, entry);
+      if (resolveAllowedExistingGalleryPath(candidate, getModelManagerRootsResolved().map(root => root.fullPath))) paths.push(candidate);
     }
   }
   return Array.from(new Set(paths));
@@ -1742,8 +1754,11 @@ async function renameModelSnapshotArtifacts(sourceSnapshotPath: string, modelFul
   const changed: string[] = [];
   const modelParent = dirname(modelFullPath);
   const targetArtifactDir = join(modelParent, MODEL_ARTIFACT_DIR);
+  assertModelManagerArtifactPath(sourceSnapshotPath);
+  assertModelManagerArtifactPath(targetArtifactDir);
   await fs.mkdir(targetArtifactDir, { recursive: true });
   const targetSnapshotPath = getPreferredModelSnapshotFullPath(modelFullPath);
+  assertModelManagerArtifactPath(targetSnapshotPath);
 
   if (normalizePathForCompare(sourceSnapshotPath) !== normalizePathForCompare(targetSnapshotPath)) {
     await fs.rename(sourceSnapshotPath, targetSnapshotPath).catch(async () => {
@@ -1770,6 +1785,8 @@ async function renameModelSnapshotArtifacts(sourceSnapshotPath: string, modelFul
       const extension = entry.slice(`${oldBaseName}${MODEL_THUMB_PREFIX}`.length);
       const targetThumbPath = join(targetArtifactDir, `${newBaseName}${MODEL_THUMB_PREFIX}${extension}`);
       if (normalizePathForCompare(sourceThumbPath) === normalizePathForCompare(targetThumbPath)) continue;
+      if (!resolveAllowedExistingGalleryPath(sourceThumbPath, getModelManagerRootsResolved().map(root => root.fullPath))
+        || !resolveAllowedExistingGalleryPath(targetThumbPath, getModelManagerRootsResolved().map(root => root.fullPath))) continue;
       await fs.rename(sourceThumbPath, targetThumbPath).catch(async () => {
         await fs.copyFile(sourceThumbPath, targetThumbPath);
         await fs.rm(sourceThumbPath, { force: true }).catch(() => undefined);
@@ -1789,7 +1806,8 @@ async function removeModelSnapshotArtifacts(modelFullPath: string): Promise<stri
     ...(await listModelThumbArtifactsForFile(modelFullPath)),
   ];
   for (const artifactPath of Array.from(new Set(paths))) {
-    if (!existsSync(artifactPath) || !isPathInsideModelManagerRoots(artifactPath)) continue;
+    if (!existsSync(artifactPath)
+      || !resolveAllowedExistingGalleryPath(artifactPath, getModelManagerRootsResolved().map(root => root.fullPath))) continue;
     await fs.rm(artifactPath, { force: true }).catch(() => undefined);
     changed.push(artifactPath);
   }
@@ -1960,9 +1978,11 @@ async function saveModelManagerSnapshotThumbnailForFile(
       if (!mimeType.startsWith('image/')) return '';
 
       const artifactDir = join(dirname(modelFullPath), MODEL_ARTIFACT_DIR);
+      assertModelManagerArtifactPath(artifactDir);
       await fs.mkdir(artifactDir, { recursive: true });
       const extension = getModelManagerMediaExtension(imageUrl, mimeType);
       const thumbnailPath = join(artifactDir, `${basename(modelFullPath)}${MODEL_THUMB_PREFIX}.${extension}`);
+      assertModelManagerArtifactPath(thumbnailPath);
       await fs.writeFile(thumbnailPath, buffer);
       return thumbnailPath;
     });
@@ -1973,6 +1993,9 @@ async function saveModelManagerSnapshotThumbnailForFile(
 
 async function writeModelManagerSnapshotForFile(modelFullPath: string, snapshot: Record<string, unknown>) {
   const artifactDir = join(dirname(modelFullPath), MODEL_ARTIFACT_DIR);
+  assertModelManagerArtifactPath(artifactDir);
+  const snapshotPath = getPreferredModelSnapshotFullPath(modelFullPath);
+  assertModelManagerArtifactPath(snapshotPath);
   await fs.mkdir(artifactDir, { recursive: true });
   const thumbnailPath = await saveModelManagerSnapshotThumbnailForFile(modelFullPath, snapshot);
   const payload = {
@@ -1990,7 +2013,6 @@ async function writeModelManagerSnapshotForFile(modelFullPath: string, snapshot:
   if (thumbnailPath) {
     (payload as Record<string, unknown>).localThumbnailPath = thumbnailPath;
   }
-  const snapshotPath = getPreferredModelSnapshotFullPath(modelFullPath);
   await fs.writeFile(snapshotPath, JSON.stringify(payload, null, 2), 'utf8');
   return { snapshotPath, thumbnailPath };
 }
