@@ -884,6 +884,7 @@ export function UmbraUIWorkspace() {
     ...(initialDeviceResume?.tiledVae || {}),
   });
   const [isQueueing, setIsQueueing] = React.useState(false);
+  const imageQueueInFlightRef = React.useRef(false);
   const [imageGenerationInfoOpen, setImageGenerationInfoOpen] = React.useState(false);
   const [queuedImageGenerationInfo, setQueuedImageGenerationInfo] = React.useState<Record<string, UmbraImageGenerationInfo>>({});
   const [lastImageGenerationInfo, setLastImageGenerationInfo] = React.useState<UmbraImageGenerationInfo | null>(null);
@@ -2260,11 +2261,12 @@ export function UmbraUIWorkspace() {
     imageSeedContextRef.current = { key: imageSeedContext, revision: imageSeedContextRef.current.revision + 1 };
   }
   const handleQueueImage = React.useCallback(async (placement: UmbraQueuePlacement = 'end') => {
-    if (isQueueing) return;
+    if (imageQueueInFlightRef.current || isQueueing) return;
     const effectivePlacement = queueSummary.powerPrompterActive ? placement : 'end';
     if (effectivePlacement === 'interrupt' && !window.confirm(
       'Stop the current Power Prompter image and run this Umbra UI image next?',
     )) return;
+    imageQueueInFlightRef.current = true;
     setIsQueueing(true);
     const submittedSeedRevision = imageSeedContextRef.current.revision;
     try {
@@ -2391,6 +2393,7 @@ export function UmbraUIWorkspace() {
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to queue image.', 'error');
     } finally {
+      imageQueueInFlightRef.current = false;
       setIsQueueing(false);
     }
   }, [

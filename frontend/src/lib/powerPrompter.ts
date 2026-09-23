@@ -1,6 +1,7 @@
 import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from '../../../shared/umbra-ui/minimaxH3Defaults';
 import { normalizeMiniMaxH3Guides } from '../../../shared/umbra-ui/minimaxH3Guides';
 import { normalizeMiniMaxH3Turbo } from '../../../shared/umbra-ui/minimaxH3Turbo';
+import { normalizeUmbraVideoLoraStack } from '../../../shared/umbra-ui/videoLoraStack';
 import type {
   PowerPrompterAutocompleteMode,
   PowerPrompterAutocompleteSettings,
@@ -404,6 +405,7 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
   },
   video: {
     family: 'wan22',
+    loraStack: [],
     mode: 'text_to_video',
     frameGuideMode: 'first',
     sourceImagePath: '',
@@ -988,6 +990,7 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
   });
   return {
     family,
+    loraStack: normalizeUmbraVideoLoraStack(video.loraStack),
     mode: resolvedMode,
     frameGuideMode,
     sourceImagePath: String(video.sourceImagePath || '').trim().replace(/\\/g, '/'),
