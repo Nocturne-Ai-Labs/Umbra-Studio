@@ -35318,10 +35318,12 @@ const server = Bun.serve<UmbraSocketData>({
           let baseName = 'image';
           try {
             const parsedUrl = new URL(body.url);
-            const pathBase = decodeURIComponent(basename(parsedUrl.pathname || ''));
-            baseName = basename(pathBase, extname(pathBase)) || baseName;
+            if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
+              const pathBase = decodeURIComponent(basename(parsedUrl.pathname || ''));
+              baseName = basename(pathBase, extname(pathBase)) || baseName;
+            }
           } catch {
-            // Data URLs keep the default base name.
+            // Unusable URL filenames keep the default base name.
           }
 
           const safeBaseName = sanitizeDatasetSegment(baseName) || 'image';
