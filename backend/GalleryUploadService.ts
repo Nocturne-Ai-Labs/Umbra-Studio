@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
 import { extname, join, relative, resolve } from 'node:path';
 import { copyFileExclusive } from './FsTransferCopy';
 import { resolveAllowedGalleryPath } from './GalleryPathAccess';
@@ -46,6 +47,26 @@ export async function prepareGalleryUploadDirectory(destination: string, allowed
   await fs.mkdir(candidate, { recursive: true });
   await assertUploadDirectory(candidate);
   return candidate;
+}
+
+export async function compareGalleryUploadDuplicate(existingPath: string, existingSize: number, uploaded: File): Promise<boolean> {
+  if (existingSize !== uploaded.size) return false;
+
+  const existingHash = createHash('sha256');
+  for await (const chunk of createReadStream(existingPath)) existingHash.update(chunk);
+
+  const uploadedHash = createHash('sha256');
+  const reader = uploaded.stream().getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      uploadedHash.update(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return existingHash.digest('hex') === uploadedHash.digest('hex');
 }
 
 async function assertUploadDirectory(directory: string): Promise<void> {

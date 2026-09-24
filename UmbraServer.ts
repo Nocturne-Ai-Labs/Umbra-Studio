@@ -54,7 +54,7 @@ import { seedBundledWorkflowDirectory } from './backend/BundledWorkflowService';
 import { settingsManager } from './backend/settings/SettingsManager';
 import { FsWorkerService } from './backend/FsWorkerService';
 import { GalleryTransferJournal } from './backend/GalleryTransferJournal';
-import { isGalleryUploadFilename, isGalleryUploadStrategy, prepareGalleryUploadDirectory } from './backend/GalleryUploadService';
+import { compareGalleryUploadDuplicate, isGalleryUploadFilename, isGalleryUploadStrategy, prepareGalleryUploadDirectory } from './backend/GalleryUploadService';
 import { copyMediaIntoComfyInput, writeAllUploadedMediaBytes } from './backend/UmbraUiMediaUploadService';
 import { UmbraStagedVideoPreviewGrants } from './backend/UmbraStagedVideoPreviewGrants';
 import { isCivitaiModelDownloadUrl } from './backend/ModelDownloadHttp';
@@ -32026,22 +32026,17 @@ async function handleFsUpload(req: Request): Promise<Response> {
           const info = await fs.lstat(filePath);
           if (info.isSymbolicLink()) return json({ error: 'Cannot compare an upload with a linked file' }, 400);
           if (!info.isFile()) continue;
-          // File exists - check if it's actually the same file using hash
-          const existingBuffer = await Bun.file(filePath).arrayBuffer();
-          const newBuffer = await file.arrayBuffer();
-
-          const existingHash = Bun.hash(existingBuffer);
-          const newHash = Bun.hash(newBuffer);
-
           duplicates.push({
             name: file.name,
             exists: true,
-            identical: existingHash === newHash,
+            identical: await compareGalleryUploadDuplicate(filePath, info.size, file),
             size: file.size,
-            existingSize: existingBuffer.byteLength
+            existingSize: info.size
           });
-        } catch {
-          // File doesn't exist, not a duplicate
+        } catch (error: any) {
+          if (error?.code !== 'ENOENT') {
+            return json({ error: 'Could not check upload duplicates' }, 500);
+          }
         }
       }
 
