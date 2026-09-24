@@ -24,6 +24,7 @@ import { createHash } from 'node:crypto';
 import { resolveSingleByteRange } from '../shared/httpByteRange';
 import { createVariantEtag, matchesIfNoneMatch, permitsConditionalRange } from '../shared/httpCache';
 import { createGalleryPathAuthorizer } from '../backend/GalleryPathAccess';
+import { galleryMediaSecurityHeaders } from '../shared/galleryMediaResponse';
 
 const ROOT_DIR = process.env.UMBRA_ROOT || process.cwd();
 const HOST = '127.0.0.1';
@@ -2372,6 +2373,7 @@ async function handleImage(req: Request, reqUrl: URL): Promise<Response> {
     const lastModified = new Date(stat.mtimeMs).toUTCString();
     const baseHeaders: Record<string, string> = {
       'Content-Type': contentType,
+      ...galleryMediaSecurityHeaders(filePath),
       'Cache-Control': cacheControl,
       ETag: etag,
       'Last-Modified': lastModified,

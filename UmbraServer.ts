@@ -39,6 +39,7 @@ import { resolveSingleByteRange } from './shared/httpByteRange';
 import { mediaFileRevision } from './backend/mediaFileRevision';
 import { probeVideoMetadata } from './backend/VideoMetadataProbe';
 import { galleryMediaCacheControl } from './gallery/GalleryMediaCache';
+import { galleryMediaSecurityHeaders } from './shared/galleryMediaResponse';
 import { createVariantEtag, matchesIfNoneMatch, permitsConditionalRange } from './shared/httpCache';
 import { compactQueueSnapshot } from './shared/power-prompter/queueSnapshotTransport';
 import { collectQueueSnapshotPromptRows } from './shared/power-prompter/queueSnapshotRows';
@@ -28145,6 +28146,7 @@ async function handleFsImage(req: Request, url: URL, server?: RequestIpServer): 
     const lastModified = new Date(fileStat.mtimeMs).toUTCString();
     const baseHeaders: Record<string, string> = {
       'Content-Type': contentType,
+      ...galleryMediaSecurityHeaders(fullPath),
       'Cache-Control': cacheControl,
       'ETag': etag,
       'Last-Modified': lastModified,
