@@ -1608,7 +1608,20 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   const prepareImageQueueRequest = React.useCallback((options: UmbraImageQueueOptions) => {
     const prompt = String(options.prompt || '').trim();
     if (!prompt) throw new Error('Enter a prompt before queueing.');
-    const enabledLoras = (Array.isArray(options.loras) ? options.loras : []).filter((lora) => lora?.enabled !== false);
+    const installedLoras = loraCatalog.length > 0 ? loraCatalog : videoModelCatalog.loras;
+    const enabledLoras = (Array.isArray(options.loras) ? options.loras : [])
+      .filter((lora) => lora?.enabled !== false)
+      .map((lora) => {
+        const name = String(lora.name || '').trim().replace(/\\/g, '/');
+        if (!name) throw new Error('Select a file for every enabled LoRA.');
+        if (installedLoras.length <= 0) return { ...lora, name };
+        const match = matchUmbraUiResourceCatalog(name, installedLoras);
+        if (match.status === 'ambiguous') {
+          throw new Error(`The selected LoRA basename is ambiguous. Choose an exact relative path: ${match.matches.join(', ')}.`);
+        }
+        if (match.status === 'missing') throw new Error(`The selected LoRA is not installed: ${name}.`);
+        return { ...lora, name: match.match };
+      });
     const promptWithLoras = composeUmbraUiPromptWithLoras(prompt, enabledLoras);
     const modelFamily = String(options.modelFamily || '').trim();
     const feature: UmbraUiPipelineFeature = options.outputMode === 'img2img' ? 'img2img' : 'txt2img';
@@ -1776,7 +1789,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       modelFamily,
       feature,
     };
-  }, [modelCatalog, workflows]);
+  }, [loraCatalog, modelCatalog, videoModelCatalog.loras, workflows]);
 
   const queueImage = React.useCallback(async (options: UmbraImageQueueOptions) => {
     let preparedOptions = options;
@@ -2037,7 +2050,9 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       if (!response.ok || payload?.success === false) {
         throw new Error(String(payload?.error || `Failed to stage the source ${kind}.`));
       }
-      return String(payload?.filename || '').trim();
+      const stagedName = String(payload?.filename || '').trim();
+      if (!stagedName) throw new Error(`ComfyUI did not return a staged source ${kind} name.`);
+      return stagedName;
     };
     if (video.mode === 'video_to_video') {
       if (!video.sourceVideoPath && !video.sourceVideoName) throw new Error('Choose a source video for VID2VID.');
