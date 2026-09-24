@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.32.30 - Workflow Reliability Patch
+
+### TL;DR - Setup After Updating
+
+- Install the new package, restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux, and refresh open browser tabs. No new models, Umbra Nodes, or ComfyUI update is required for these fixes.
+- Linux managed tools continue to require `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Preserve existing portable `User/` and `Tools/` data during an in-place update.
+
+### Changes
+
+- Keep Gallery folder previews, filmstrip selection, and output activity consistent while large folders load or change in the background. Harden Gallery bridge, upload, and split-process recovery paths.
+- Keep Power Prompter searches, file opens, prompt edits, LoRA strengths, and workspace drafts responsive and independent. Strengthen queue admission, cancellation, and history persistence.
+- Validate video LoRA names against ComfyUI's exact catalog choices before submission, including Windows-style path separators, so supported video workflows do not fail graph validation on a matching installed LoRA.
+- Guard Data Forge concept mutations against deletion races, preserve valid repair sources, and improve large dataset and Model Manager list handling. Tighten model download destinations and media URL validation.
+
+### Validation And Limits
+
+- Passed 507 backend tests, backend and frontend TypeScript checks, frontend lint and production build, and the 52-workflow pipeline audit.
+- The video LoRA catalog fix was verified with focused graph tests; a live generation against an isolated development ComfyUI instance was not run. Existing models and custom nodes must still match the selected workflow.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Gallery and filmstrip state drift during background loads, folder changes, and media operations.
+- Fixed: Power Prompter and queue responsiveness, duplicate admission, and stale control/history transitions.
+- Fixed: video LoRA graph rejection caused by a path separator mismatch with ComfyUI's catalog.
+- Improved: Data Forge concept safety, model download boundaries, and large-list responsiveness.
+
 ## v0.32.29 - Reliability And Security Audit
 
 ### TL;DR - Setup After Updating
