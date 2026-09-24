@@ -174,7 +174,10 @@ type PendingRequest = {
 };
 
 const WORKER_REQUEST_TIMEOUT_MS = 60_000;
-const MUTATING_REQUESTS = new Set(['move', 'copy', 'delete', 'system-trash', 'mkdir', 'rename', 'write', 'gallery-transfer']);
+const MUTATING_REQUESTS = new Set(['move', 'copy', 'delete', 'system-trash', 'mkdir', 'rename', 'write', 'upload', 'gallery-transfer']);
+export function fsWorkerRequestTimeoutMs(type: FsWorkerRequest['type']): number | undefined {
+  return MUTATING_REQUESTS.has(type) ? undefined : WORKER_REQUEST_TIMEOUT_MS;
+}
 type RequestWithoutId = FsWorkerRequest extends infer R ? R extends { id: string } ? Omit<R, 'id'> : never : never;
 
 export class FsWorkerService {
@@ -431,10 +434,11 @@ export class FsWorkerService {
     return new Promise((resolve, reject) => {
       const writeStartedAt = Date.now();
       // Mutations must remain tracked until their actual result or worker exit.
-      const timeout = MUTATING_REQUESTS.has(request.type) ? undefined : setTimeout(() => {
+      const timeoutMs = fsWorkerRequestTimeoutMs(request.type);
+      const timeout = timeoutMs === undefined ? undefined : setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Filesystem worker request timed out (${request.type})`));
-      }, WORKER_REQUEST_TIMEOUT_MS);
+      }, timeoutMs);
 
       this.pending.set(id, {
         resolve,
