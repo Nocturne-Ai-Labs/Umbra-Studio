@@ -19,6 +19,7 @@ import type {
   PersistedQueueGroupSnapshot,
   PowerPrompterQueueHistoryPreviewImage,
   PowerPrompterQueueHistoryDocument,
+  PowerPrompterQueueHistoryPromptStatus,
   PowerPrompterQueueHistoryStatus,
   PowerPrompterQueueHistorySummary,
   PowerPrompterQueueMode,
@@ -366,6 +367,15 @@ export function normalizePowerPrompterQueueHistoryStatus(rawValue: unknown): Pow
   return 'queued';
 }
 
+function normalizePowerPrompterQueueHistoryPromptStatuses(rawValue: unknown, promptCount: number): PowerPrompterQueueHistoryPromptStatus[] | undefined {
+  if (!Array.isArray(rawValue) || rawValue.length !== promptCount) return undefined;
+  const valid = new Set(['pending', 'submitting', 'running', 'completed', 'canceled', 'interrupted', 'failed', 'unstarted']);
+  const statuses = rawValue.map((status) => String(status || '').trim());
+  return statuses.every((status) => valid.has(status))
+    ? statuses as PowerPrompterQueueHistoryPromptStatus[]
+    : undefined;
+}
+
 export function normalizePowerPrompterQueueHistorySummary(rawValue: unknown): PowerPrompterQueueHistorySummary | null {
   if (!rawValue || typeof rawValue !== 'object') return null;
   const entry = rawValue as Partial<PowerPrompterQueueHistorySummary>;
@@ -373,6 +383,7 @@ export function normalizePowerPrompterQueueHistorySummary(rawValue: unknown): Po
   if (!id) return null;
   const promptCount = Math.max(0, Math.floor(Number(entry.promptCount) || 0));
   const rawSnapshot = (rawValue as any).snapshot;
+  const promptStatuses = normalizePowerPrompterQueueHistoryPromptStatuses(entry.promptStatuses, promptCount);
   return {
     id,
     name: String(entry.name || id).trim() || id,
@@ -385,6 +396,10 @@ export function normalizePowerPrompterQueueHistorySummary(rawValue: unknown): Po
     completed: Math.max(0, Math.min(promptCount, Math.floor(Number(entry.completed) || 0))),
     failed: Math.max(0, Math.min(promptCount, Math.floor(Number(entry.failed) || 0))),
     canceled: Math.max(0, Math.min(promptCount, Math.floor(Number(entry.canceled) || 0))),
+    ...(promptStatuses ? { promptStatuses } : {}),
+    ...(Number.isSafeInteger(entry.resumablePromptCount) && Number(entry.resumablePromptCount) >= 0
+      ? { resumablePromptCount: Math.min(promptCount, Number(entry.resumablePromptCount)) }
+      : {}),
     activeSetId: clampQueueSetId(entry.activeSetId, 1),
     mode: String(entry.mode || '') === 'variants' ? 'variants' : (String(entry.mode || '') === 'selected' ? 'selected' : 'prompt'),
     status: normalizePowerPrompterQueueHistoryStatus(entry.status),

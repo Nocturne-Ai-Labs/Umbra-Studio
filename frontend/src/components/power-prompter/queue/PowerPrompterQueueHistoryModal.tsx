@@ -1,7 +1,7 @@
 import React from 'react';
 import { ImageIcon, Loader2, Pencil, Play, RefreshCw, Trash2, XCircle } from 'lucide-react';
 import type { PowerPrompterQueueHistorySummary } from './queueCore';
-import type { PowerPrompterQueueHistoryGroup } from './queueHistoryModel';
+import { getQueueHistoryReplayPromptIndices, type PowerPrompterQueueHistoryGroup } from './queueHistoryModel';
 
 function buildQueueHistoryPreviewThumbnailUrl(path: string, revision?: unknown): string {
   const encodedPath = encodeURIComponent(String(path || ''));
@@ -112,7 +112,10 @@ export function PowerPrompterQueueHistoryModal({
                           const restoreDisabled = !queueHistoryEditorRestoreEnabled || !item.hasEditorSnapshot || !!queueHistoryBusy;
                           const restoreTitle = restoreParkedTitle
                             || (item.hasEditorSnapshot ? 'Restore the exact editor snapshot captured for this run' : 'No editor snapshot available for this history entry');
-                          const canResumeRemaining = completedCount > 0 && completedCount < item.promptCount;
+                          const remainingCount = item.resumablePromptCount
+                            ?? getQueueHistoryReplayPromptIndices(item, item.promptCount, true).length;
+                          const canResumeRemaining = (item.status === 'interrupted' || item.status === 'canceled' || item.status === 'failed')
+                            && completedCount > 0 && remainingCount > 0;
                           return (
                             <div
                               key={`queue-history-${item.id}`}
@@ -205,7 +208,7 @@ export function PowerPrompterQueueHistoryModal({
                                         void handleRequeueQueueHistory(item.id, { resumeRemaining: true });
                                       }}
                                       disabled={!queueHistoryReplayEnabled || !!queueHistoryBusy}
-                                      title={replayTitle || `Resume from prompt ${completedCount + 1}`}
+                                      title={replayTitle || `Resume ${remainingCount} unfinished prompt${remainingCount === 1 ? '' : 's'}`}
                                       className="inline-flex items-center gap-1 rounded-md border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-100 transition-colors hover:border-amber-300/55 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
                                     >
                                       <Play size={11} />

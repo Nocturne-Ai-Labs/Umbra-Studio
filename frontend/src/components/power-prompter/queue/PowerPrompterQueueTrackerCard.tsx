@@ -35,7 +35,7 @@ type PowerPrompterQueueTrackerCardProps = {
   onEmergencyShutdown: () => void | Promise<void>;
   onOpenQueueHistory: () => void;
   onToggleSetExpanded: (setGroupId: string) => void;
-  onCancelSetGroup: (setId: number) => void | Promise<void>;
+  onCancelSetGroup: (setId: number, requestIds: string[]) => void | Promise<void>;
   onToggleGroupExpanded: (requestId: string) => void;
   onCancelRequestGroup: (requestId: string) => void | Promise<void>;
 };
@@ -240,7 +240,7 @@ export const PowerPrompterQueueTrackerCard = React.memo(function PowerPrompterQu
                       {setGroup.groups.length} group{setGroup.groups.length === 1 ? '' : 's'}
                     </span>
                     <button
-                      onClick={() => { void onCancelSetGroup(setGroup.setId); }}
+                      onClick={() => { void onCancelSetGroup(setGroup.setId, setGroup.groups.map((group) => group.requestId)); }}
                       disabled={queueDestructiveActionBusy || !setCanCancel}
                       className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-colors ${
                         queueDestructiveActionBusy || !setCanCancel

@@ -195,6 +195,7 @@ import {
   buildQueueHistoryGroups,
   buildQueueHistorySnapshotForRequest as buildQueueHistorySnapshotModel,
   findStaleQueueHistoryEntries,
+  getQueueHistoryReplayPromptIndices,
 } from '@/components/power-prompter/queue/queueHistoryModel';
 import {
   createPowerPrompterQueueHistory,
@@ -809,7 +810,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const queueEmergencyActionRef = useRef<() => void | Promise<void>>(() => {});
   const queueToggleSetExpandedRef = useRef<(setGroupId: string) => void>(() => {});
   const queueToggleGroupExpandedRef = useRef<(requestId: string) => void>(() => {});
-  const queueCancelSetGroupRef = useRef<(setId: number) => void | Promise<void>>(() => {});
+  const queueCancelSetGroupRef = useRef<(setId: number, requestIds: string[]) => void | Promise<void>>(() => {});
   const queueCancelRequestGroupRef = useRef<(requestId: string) => void | Promise<void>>(() => {});
   const prompterWsRef = useRef<WebSocket | null>(null);
   const initialQueueSnapshotWsRef = useRef<WebSocket | null>(null);
@@ -2736,7 +2737,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       onEmergencyShutdown={() => { void queueEmergencyActionRef.current?.(); }}
       onOpenQueueHistory={openQueueHistoryPanel}
       onToggleSetExpanded={(setId) => queueToggleSetExpandedRef.current?.(setId)}
-      onCancelSetGroup={(setId) => { void queueCancelSetGroupRef.current?.(setId); }}
+      onCancelSetGroup={(setId, requestIds) => { void queueCancelSetGroupRef.current?.(setId, requestIds); }}
       onToggleGroupExpanded={(requestId) => queueToggleGroupExpandedRef.current?.(requestId)}
       onCancelRequestGroup={(requestId) => { void queueCancelRequestGroupRef.current?.(requestId); }}
     />
@@ -4618,6 +4619,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       updateQueueHistoryForRequest(requestId, { status });
       backendQueueSnapshotRequestIdsRef.current.delete(requestId);
       queueBridgeDispatchedRequestIdsRef.current.delete(requestId);
+      queueAdmissionAttemptedRequestIdsRef.current.delete(requestId);
+      queueAdmissionUncertainRequestIdsRef.current.delete(requestId);
+      queueAdmissionObservedRequestIdsRef.current.delete(requestId);
       queueRequestMetaRef.current.delete(requestId);
       completedPromptIndicesRef.current.delete(requestId);
       intentionallyCanceledQueueRequestIdsRef.current.delete(requestId);
@@ -4855,6 +4859,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     updateQueueHistoryForRequest(key, { status: 'failed' });
     pruneBridgeQueueStateRequestIds([key]);
     queueBridgeDispatchedRequestIdsRef.current.delete(key);
+    queueAdmissionAttemptedRequestIdsRef.current.delete(key);
+    queueAdmissionUncertainRequestIdsRef.current.delete(key);
+    queueAdmissionObservedRequestIdsRef.current.delete(key);
     queueRequestMetaRef.current.delete(key);
     completedPromptIndicesRef.current.delete(key);
     intentionallyCanceledQueueRequestIdsRef.current.delete(key);
@@ -5362,12 +5369,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     queueTargetTypeOverride?: PowerPrompterQueueTargetType
   ): Promise<any> => {
     if (!prompterWsReadyRef.current || !prompterWsRef.current || prompterWsRef.current.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error('Power Prompter websocket is not connected yet.'));
+      return Promise.reject(createQueueAdmissionFailure('Power Prompter websocket is not connected yet.', 'not-sent'));
     }
 
     const cleanedPrompts = prompts.map((entry) => String(entry || '').trim()).filter((entry) => entry.length > 0);
     if (cleanedPrompts.length === 0) {
-      return Promise.reject(new Error('No prompts are available to queue.'));
+      return Promise.reject(createQueueAdmissionFailure('No prompts are available to queue.', 'not-sent'));
     }
     const queueTargetType = normalizeQueueTargetType(queueTargetTypeOverride || 'pipeline');
 
@@ -5395,7 +5402,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     );
     const targetBridgeId = createUmbraUiPipelineTargetId(pipeline);
     if (!targetBridgeId) {
-      return Promise.reject(new Error('Choose a model family pipeline before queueing.'));
+      return Promise.reject(createQueueAdmissionFailure('Choose a model family pipeline before queueing.', 'not-sent'));
     }
     const rawGenerationByPrompt = Array.isArray(stateOverride?.generationByPrompt)
       ? stateOverride.generationByPrompt
@@ -5489,9 +5496,10 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         }, { includeQueue: true });
         const pending = pendingQueueRequestsRef.current.get(requestId);
         if (pending) {
-          failTrackedQueueRequest(requestId, 'Queue request timed out.', pending);
+          pendingQueueRequestsRef.current.delete(requestId);
+          pending.reject(new Error('Queue request timed out before admission was confirmed.'));
         } else {
-          reject(new Error('Queue request timed out.'));
+          reject(new Error('Queue request timed out before admission was confirmed.'));
         }
       }, PROMPTER_QUEUE_TIMEOUT_MS);
 
@@ -5701,6 +5709,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     }
 
     queueBridgeDispatchedRequestIdsRef.current.add(requestId);
+    queueAdmissionAttemptedRequestIdsRef.current.add(requestId);
     const source = resolveQueueDispatchSource(meta.editorSnapshot, cardDocumentRef.current, currentFileRef.current);
     const groupGeneration = normalizePowerPrompterGenerationControls(meta.generationByPrompt[0] ?? source.document.generation);
     logPowerPrompterDebug('queue:dispatchGroup:start', {
@@ -5713,8 +5722,10 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       firstSeed: meta.generationByPrompt[0]?.seed ?? null,
       lastSeed: meta.generationByPrompt[meta.generationByPrompt.length - 1]?.seed ?? null,
     }, { includeQueue: true });
+    let submissionStarted = false;
     try {
       await createQueueHistoryEntryForRequest(requestId);
+      submissionStarted = true;
       const result = await requestQueueThroughWebSocket(meta.mode, meta.prompts, {
         activePrompt: normalizePowerPrompterPromptText(meta.prompts[0] || ''),
         sourceFile: normalizePrompterSourceFilePath(source.file || ''),
@@ -5736,9 +5747,22 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         queued: Number(result?.queued ?? meta.prompts.length),
         total: Number(result?.total ?? meta.prompts.length),
       }, { includeQueue: true });
+      queueAdmissionAttemptedRequestIdsRef.current.delete(requestId);
+      queueAdmissionUncertainRequestIdsRef.current.delete(requestId);
+      queueAdmissionObservedRequestIdsRef.current.delete(requestId);
       return true;
     } catch (error: any) {
-      queueBridgeDispatchedRequestIdsRef.current.delete(requestId);
+      if (isQueueAdmissionOutcomeUncertain(error, submissionStarted) && queueRequestMetaRef.current.has(requestId)) {
+        // A lost acknowledgment does not prove that the backend rejected the
+        // request. Hold its ID so another idle event cannot submit it twice.
+        queueAdmissionUncertainRequestIdsRef.current.add(requestId);
+        setQueuePaused(true);
+      } else {
+        queueBridgeDispatchedRequestIdsRef.current.delete(requestId);
+        queueAdmissionAttemptedRequestIdsRef.current.delete(requestId);
+        queueAdmissionUncertainRequestIdsRef.current.delete(requestId);
+        queueAdmissionObservedRequestIdsRef.current.delete(requestId);
+      }
       logPowerPrompterDebug('queue:dispatchGroup:error', {
         requestId,
         message: String(error?.message || error || 'Unknown error'),
@@ -5759,43 +5783,39 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         : [];
       if (prompts.length <= 0) throw new Error('Queue history has no prompts to requeue.');
 
-      const terminalCount = Math.max(0, Math.min(
-        prompts.length,
-        Math.floor(Number(document.completed || 0))
-          + Math.floor(Number(document.failed || 0))
-          + Math.floor(Number(document.canceled || 0))
-      ));
-      const shouldResumeRemaining = options?.resumeRemaining === true
-        || (document.status !== 'completed' && terminalCount > 0 && terminalCount < prompts.length);
-      const startIndex = shouldResumeRemaining ? terminalCount : 0;
-      const remainingPrompts = prompts.slice(startIndex);
+      const shouldResumeRemaining = options?.resumeRemaining === true;
+      if (shouldResumeRemaining && !['interrupted', 'canceled', 'failed'].includes(document.status)) {
+        throw new Error('Wait for the original queue run to stop before resuming unfinished prompts.');
+      }
+      const sourceIndices = getQueueHistoryReplayPromptIndices(document, prompts.length, shouldResumeRemaining);
+      const remainingPrompts = sourceIndices.map((index) => prompts[index]);
       if (remainingPrompts.length <= 0) {
         throw new Error('This history entry has no remaining prompts. Use Requeue All to run it again.');
       }
 
       const requestId = createRequestId();
-      const activeSetId = clampQueueSetId(snapshot.promptSetIds?.[startIndex] ?? snapshot.activeSetId ?? document.activeSetId);
+      const activeSetId = clampQueueSetId(snapshot.promptSetIds?.[sourceIndices[0]] ?? snapshot.activeSetId ?? document.activeSetId);
       const resolvedQueueTarget = resolveQueueControlTarget(snapshot.targetBridgeId, snapshot.queueTargetType);
       const groupGeneration = normalizePowerPrompterGenerationControls(
-        snapshot.generationByPrompt?.[startIndex] ?? snapshot.generation
+        snapshot.generationByPrompt?.[sourceIndices[0]] ?? snapshot.generation
       );
-      const promptSetIds = remainingPrompts.map((_, index) =>
-        clampQueueSetId(snapshot.promptSetIds?.[startIndex + index] ?? activeSetId)
+      const promptSetIds = sourceIndices.map((sourceIndex) =>
+        clampQueueSetId(snapshot.promptSetIds?.[sourceIndex] ?? activeSetId)
       );
-      const promptOutputSubfolders = remainingPrompts.map((_, index) =>
-        String(snapshot.promptOutputSubfolders?.[startIndex + index] || '').trim()
+      const promptOutputSubfolders = sourceIndices.map((sourceIndex) =>
+        String(snapshot.promptOutputSubfolders?.[sourceIndex] || '').trim()
       );
-      const promptStyleNames = remainingPrompts.map((_, index) =>
-        String(snapshot.promptStyleNames?.[startIndex + index] || '').trim()
+      const promptStyleNames = sourceIndices.map((sourceIndex) =>
+        String(snapshot.promptStyleNames?.[sourceIndex] || '').trim()
       );
-      const promptSeedGroupIds = remainingPrompts.map((_, index) =>
-        String(snapshot.promptSeedGroupIds?.[startIndex + index] || `${promptSetIds[index]}:${index}`).trim()
+      const promptSeedGroupIds = sourceIndices.map((sourceIndex, index) =>
+        String(snapshot.promptSeedGroupIds?.[sourceIndex] || `${promptSetIds[index]}:${index}`).trim()
       );
-      const generationByPrompt = remainingPrompts.map((_, index) =>
-        normalizePowerPrompterGenerationControls(snapshot.generationByPrompt?.[startIndex + index] ?? groupGeneration)
+      const generationByPrompt = sourceIndices.map((sourceIndex) =>
+        normalizePowerPrompterGenerationControls(snapshot.generationByPrompt?.[sourceIndex] ?? groupGeneration)
       );
       const promptEntries = snapshot.promptEntries
-        ? remainingPrompts.map((prompt, index) => snapshot.promptEntries?.[startIndex + index] || { prompt, tokens: [] })
+        ? remainingPrompts.map((prompt, index) => snapshot.promptEntries?.[sourceIndices[index]] || { prompt, tokens: [] })
         : undefined;
       const editorSnapshot = resolveQueueHistoryEditorSnapshot(document)?.editorSnapshot;
 
@@ -5845,9 +5865,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         updatedAt: Date.now(),
       });
 
-      await dispatchTrackedQueueGroupToBridge(requestId, shouldResumeRemaining ? 'queue history resume remaining' : 'queue history requeue all', {
+      const dispatched = await dispatchTrackedQueueGroupToBridge(requestId, shouldResumeRemaining ? 'queue history resume remaining' : 'queue history requeue all', {
         allowBridgeBacklog: true,
       });
+      if (!dispatched && !isQueueGroupSubmittedToBridge(requestId)) {
+        throw new Error('The history prompts were not admitted to the queue. Refresh Queue Manager before retrying.');
+      }
       setQueueHistoryOpen(false);
       showToast(
         shouldResumeRemaining
@@ -5895,6 +5918,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       all.indexOf(requestId) === index
       && !queueBridgeDispatchedRequestIdsRef.current.has(requestId)
       && !pendingQueueRequestsRef.current.has(requestId)
+      && !queueAdmissionUncertainRequestIdsRef.current.has(requestId)
+      && !backendQueueSnapshotRequestIdsRef.current.has(requestId)
       && !clearedQueueRequestIdsRef.current.has(requestId)
       && !intentionallyCanceledQueueRequestIdsRef.current.has(requestId)
     ) || '';
@@ -7369,6 +7394,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
             const errorMessage = String(payload.error || 'Queue failed.');
             failTrackedQueueRequest(requestId, errorMessage, null);
             showToast(errorMessage, 'error');
+          } else {
+            // The backend's result confirms admission even if the original
+            // request promise timed out before this event arrived.
+            queueAdmissionAttemptedRequestIdsRef.current.delete(requestId);
+            queueAdmissionUncertainRequestIdsRef.current.delete(requestId);
+            queueAdmissionObservedRequestIdsRef.current.delete(requestId);
           }
           return;
         }
@@ -10980,15 +11011,17 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     }));
   }, []);
 
-  const cancelQueueSetGroup = async (setIdInput: number) => {
+  const cancelQueueSetGroup = async (setIdInput: number, requestIdsInRun: string[]) => {
     const setId = clampQueueSetId(setIdInput);
+    const allowedRequestIds = new Set(requestIdsInRun.map((requestId) => String(requestId || '').trim()).filter(Boolean));
+    if (allowedRequestIds.size === 0) return;
     if (queueDestructiveActionBusy) return;
     logQueueDebug('action:cancelQueueSetGroup:start', { setId });
     const removalsByRequest = new Map<string, number[]>();
     for (const item of queueStackItemsRef.current) {
       if (item.exiting || item.status !== 'pending') continue;
       const requestId = String(item.requestId || '').trim();
-      if (!requestId) continue;
+      if (!allowedRequestIds.has(requestId)) continue;
       const promptIndex = Math.max(0, Math.floor(Number(item.promptIndex) || 0));
       const meta = queueRequestMetaRef.current.get(requestId);
       const promptSetId = clampQueueSetId(meta?.promptSetIds?.[promptIndex] ?? meta?.setId ?? 1);
@@ -11003,6 +11036,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       const hasRunningMatch = queueStackItemsRef.current.some((item) => {
         if (item.exiting || item.status !== 'running') return false;
         const requestId = String(item.requestId || '').trim();
+        if (!allowedRequestIds.has(requestId)) return false;
         const promptIndex = Math.max(0, Math.floor(Number(item.promptIndex) || 0));
         const meta = requestId ? queueRequestMetaRef.current.get(requestId) : null;
         const promptSetId = clampQueueSetId(meta?.promptSetIds?.[promptIndex] ?? meta?.setId ?? 1);
@@ -11908,6 +11942,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       }, { includeQueue: true });
 
       if (shouldAppendToLiveQueue) {
+        // A backend snapshot may arrive after the first group is accepted.
+        // Protect every later group while this sequential append is in flight.
+        for (const group of stagedGroups) queueAdmissionAttemptedRequestIdsRef.current.add(group.requestId);
         updateQueueStackItemsSynced(applyQueueStackRunningState([
           ...queueStackItemsRef.current,
           ...nextStackItems,
@@ -11933,13 +11970,25 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
             dispatchedRequestIds.push(group.requestId);
           }
         } catch (dispatchError) {
-          for (const group of stagedGroups) {
-            queueRequestMetaRef.current.delete(group.requestId);
+          // The failed request may already have reached the backend before its
+          // acknowledgement was lost. Keep it and every confirmed group until
+          // the next backend snapshot reconciles the live queue.
+          const failedRequestId = stagedGroups[dispatchedRequestIds.length]?.requestId || '';
+          const admissionUncertain = queueAdmissionUncertainRequestIdsRef.current.has(failedRequestId);
+          const unattemptedRequestIds = new Set(stagedGroups
+            .slice(dispatchedRequestIds.length + (admissionUncertain ? 1 : 0))
+            .map((group) => group.requestId));
+          for (const requestId of unattemptedRequestIds) {
+            queueRequestMetaRef.current.delete(requestId);
+            queueAdmissionAttemptedRequestIdsRef.current.delete(requestId);
+            queueAdmissionUncertainRequestIdsRef.current.delete(requestId);
+            queueAdmissionObservedRequestIdsRef.current.delete(requestId);
           }
           updateQueueStackItemsSynced((prev) =>
-            prev.filter((item) => !stagedGroups.some((group) => group.requestId === String(item.requestId || '').trim()))
+            prev.filter((item) => !unattemptedRequestIds.has(String(item.requestId || '').trim()))
           );
-          throw dispatchError;
+          const detail = dispatchError instanceof Error ? dispatchError.message : String(dispatchError);
+          throw new Error(`${dispatchedRequestIds.length} of ${stagedGroups.length} queue groups confirmed.${admissionUncertain ? ' Check Queue Manager before retrying; the current group may also have been accepted.' : ''} ${detail}`);
         }
         return;
       }

@@ -283,6 +283,7 @@ export type SavedPowerPrompterQueueDocument = {
 };
 
 export type PowerPrompterQueueHistoryStatus = 'queued' | 'running' | 'completed' | 'canceled' | 'failed' | 'interrupted';
+export type PowerPrompterQueueHistoryPromptStatus = 'pending' | 'submitting' | 'running' | 'completed' | 'canceled' | 'interrupted' | 'failed' | 'unstarted';
 
 export type PowerPrompterQueueHistoryPreviewImage = {
   id: string;
@@ -308,6 +309,8 @@ export type PowerPrompterQueueHistorySummary = {
   completed: number;
   failed: number;
   canceled: number;
+  promptStatuses?: PowerPrompterQueueHistoryPromptStatus[];
+  resumablePromptCount?: number;
   activeSetId: number;
   mode: PowerPrompterQueueMode;
   status: PowerPrompterQueueHistoryStatus;

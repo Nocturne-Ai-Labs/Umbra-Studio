@@ -351,7 +351,7 @@ export function buildQueueTrackerSummary(
 ): QueueTrackerSummary {
   const setGroupTotals = new Map<number, number>();
   for (const setGroup of queueSetGroups) {
-    setGroupTotals.set(setGroup.setId, setGroup.groups.length);
+    setGroupTotals.set(setGroup.setId, (setGroupTotals.get(setGroup.setId) || 0) + setGroup.groups.length);
   }
   const setGroupSeen = new Map<number, number>();
   const sourceGroups = Array.isArray(queueRequestGroups) && queueRequestGroups.length > 0
