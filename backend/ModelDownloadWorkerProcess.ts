@@ -248,8 +248,10 @@ async function persistModelSnapshot(
 
 function sanitizeFileName(input: string): string {
   const value = basename(String(input || '').trim()) || 'model';
-  const normalized = value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').trim();
-  return normalized || 'model';
+  // Dot-only names resolve to the destination directory or its parent. Windows
+  // also strips trailing dots/spaces and reserves device names even with an extension.
+  const normalized = value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').trim().replace(/[. ]+$/, '') || 'model';
+  return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(normalized) ? `_${normalized}` : normalized;
 }
 
 function normalizeCivitaiType(input: string): string {

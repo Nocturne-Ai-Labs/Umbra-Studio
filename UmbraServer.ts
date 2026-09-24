@@ -3008,7 +3008,7 @@ function isLoopbackIpAddress(value: unknown): boolean {
     || address === '[::1]'
     || address === '0:0:0:0:0:0:0:1'
     || address === '127.0.0.1'
-    || /^127\./.test(address);
+    || (isIP(address) === 4 && address.startsWith('127.'));
 }
 
 function getLocalNetworkAddressSet(): Set<string> {
@@ -3112,6 +3112,10 @@ function isHostRequest(req: Request, url: URL, server?: RequestIpServer): boolea
   const socketAddress = getRequestSocketAddress(req, server);
   // A remote peer can choose Host: localhost. Never grant host privileges from it.
   if (!socketAddress || (!isLoopbackIpAddress(socketAddress) && !localAddresses.has(socketAddress))) return false;
+  // DNS rebinding reaches loopback with an attacker-controlled HTTP hostname.
+  // Require a known local authority as well as a local socket before granting
+  // host privileges; custom proxy hostnames must use remote authentication.
+  if (!getRequestHostCandidates(req, url).every(isKnownUmbraListenerHost)) return false;
   if (getRequestHostCandidates(req, url).some(isTailscaleHostname)) return false;
   // A local reverse proxy can relay remote requests over loopback. Forwarded
   // peer headers are client supplied unless the proxy strips them first, so
@@ -35332,10 +35336,12 @@ const server = Bun.serve<UmbraSocketData>({
           let baseName = 'image';
           try {
             const parsedUrl = new URL(body.url);
-            const pathBase = decodeURIComponent(basename(parsedUrl.pathname || ''));
-            baseName = basename(pathBase, extname(pathBase)) || baseName;
+            if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
+              const pathBase = decodeURIComponent(basename(parsedUrl.pathname || ''));
+              baseName = basename(pathBase, extname(pathBase)) || baseName;
+            }
           } catch {
-            // Data URLs keep the default base name.
+            // Unusable URL filenames keep the default base name.
           }
 
           const safeBaseName = sanitizeDatasetSegment(baseName) || 'image';

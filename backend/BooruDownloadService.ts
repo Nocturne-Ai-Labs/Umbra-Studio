@@ -94,12 +94,18 @@ async function ensureCaption(conceptPath: string, filename: string, tags?: strin
   if (!Array.isArray(tags) || tags.some(tag => typeof tag !== 'string')) throw new Error('Dataset tags must be a list of strings.');
   const destination = join(conceptPath, `${basename(filename, extname(filename))}.txt`);
   const existingCaption = async () => {
-    const existing = await fs.lstat(destination).catch(error => {
-      if (error.code === 'ENOENT') return null;
-      throw error;
-    });
-    if (existing && !existing.isFile()) throw new Error('The caption destination is not a regular file.');
-    return Boolean(existing);
+    let found = false;
+    // Gallery-dl captions use image.png.txt. Creating image.txt would shadow
+    // that caption in Data Forge, including a deliberately empty edit.
+    for (const path of [destination, join(conceptPath, `${filename}.txt`)]) {
+      const existing = await fs.lstat(path).catch(error => {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      });
+      if (existing && !existing.isFile()) throw new Error('The caption destination is not a regular file.');
+      found ||= Boolean(existing);
+    }
+    return found;
   };
   // Existing captions, including empty ones, may have been edited deliberately.
   if (await existingCaption()) return;
