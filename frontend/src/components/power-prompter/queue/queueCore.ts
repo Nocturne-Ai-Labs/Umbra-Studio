@@ -165,6 +165,7 @@ export type PowerPrompterQueueTargetType = 'pipeline';
 
 export type QueueRequestMeta = {
   mode: PowerPrompterQueueMode;
+  backendFailedCount?: number;
   setId: number;
   randomApplied: boolean;
   queueTargetType: PowerPrompterQueueTargetType;

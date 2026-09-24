@@ -105,11 +105,16 @@ export function buildQueueRequestGroups({
   queuePaused,
 }: BuildQueueRequestGroupsOptions): QueueRequestGroup[] {
   const byRequest = new Map<string, { createdAt: number; items: QueueStackItem[] }>();
+  const localFailedByRequest = new Map<string, number>();
 
   for (const item of queueStackItems) {
     const requestId = String(item.requestId || '').trim();
     if (!requestId) continue;
     if (item.exiting) continue;
+    if (item.status === 'failed') {
+      localFailedByRequest.set(requestId, (localFailedByRequest.get(requestId) || 0) + 1);
+      continue;
+    }
     if (item.status !== 'pending' && item.status !== 'running') continue;
     const existing = byRequest.get(requestId);
     if (existing) {
@@ -163,7 +168,10 @@ export function buildQueueRequestGroups({
       else if (item.status === 'pending') pending += 1;
     }
     const completed = Math.max(0, Math.min(total, completedPromptIndices.get(requestId)?.size || 0));
-    const failed = 0;
+    const failed = Math.max(0, Math.min(
+      total - completed,
+      Math.max(meta?.backendFailedCount || 0, localFailedByRequest.get(requestId) || 0),
+    ));
     if (clearedQueueRequestIds.has(requestId) && pending <= 0 && running <= 0) {
       continue;
     }

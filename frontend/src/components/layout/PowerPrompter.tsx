@@ -5098,6 +5098,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           || createUmbraUiPipelineTargetId(snapshotPipeline);
         const meta: QueueRequestMeta = {
           mode: String(rawRequest?.mode || existingMeta?.mode || 'selected') as PowerPrompterQueueMode,
+          backendFailedCount: rawPrompts.filter((entry: any) => String(entry?.status || '').trim().toLowerCase() === 'failed').length,
           setId: clampQueueSetId(rawRequest?.activeSetId ?? promptSetIds[0] ?? existingMeta?.setId ?? 1),
           randomApplied: existingMeta?.randomApplied === true,
           queueTargetType: 'pipeline',
