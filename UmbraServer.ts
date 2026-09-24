@@ -34311,11 +34311,6 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'Invalid dataset path' }, 400);
           }
 
-          // Ensure concept folder exists
-          if (!existsSync(conceptPath)) {
-            await fs.mkdir(conceptPath, { recursive: true });
-          }
-
           // Download image
           const md5 = String(body.md5 || '').trim().toLowerCase();
           if (!/^[a-f0-9]{32}$/.test(md5)) {
@@ -34325,12 +34320,17 @@ const server = Bun.serve<UmbraSocketData>({
           const filename = `${md5}.${extSafe}`;
           const imagePath = join(conceptPath, filename);
 
-          const result = await downloadBooruOriginal({
-            conceptPath, filename,
-            source: { url: body.url, md5, source: body.source, postId: body.postId },
-            tags: body.tags, signal: req.signal,
+          return await withDatasetConceptLocks([conceptPath], async () => {
+            if (!(await fs.lstat(conceptPath).catch(() => null))?.isDirectory()) {
+              return json({ error: 'Concept not found' }, 404);
+            }
+            const result = await downloadBooruOriginal({
+              conceptPath, filename,
+              source: { url: body.url, md5, source: body.source, postId: body.postId },
+              tags: body.tags, signal: req.signal,
+            });
+            return json({ success: true, path: imagePath, ...result });
           });
-          return json({ success: true, path: imagePath, ...result });
         } catch (error: any) {
           console.error('[Booru] Download error:', error.message);
           return json({ error: error.message }, 500);
