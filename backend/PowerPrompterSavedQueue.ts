@@ -51,6 +51,7 @@ interface SavedQueueRequest {
   mode: string;
   activeSetId: number;
   pipelineId: string;
+  dispatchDelayMs?: number;
   prompts: Array<{
     promptIndex: number;
     status: string;
@@ -82,6 +83,7 @@ export function buildRemainingPowerPrompterQueueSnapshot(
     const source = snapshots.get(request.requestId);
     if (!source) throw new Error('Power Prompter queue metadata is unavailable. The queue was not saved.');
     const start = result.prompts.length;
+    const dispatchDelayMs = request.dispatchDelayMs ?? source.dispatchDelayMs ?? 0;
     const editorSnapshot = source.groupSnapshots?.find((group: RecordValue) => group.requestId === request.requestId)?.editorSnapshot;
     for (const prompt of remaining) {
       const index = prompt.promptIndex;
@@ -99,11 +101,11 @@ export function buildRemainingPowerPrompterQueueSnapshot(
       promptStartIndex: start, promptCount: remaining.length,
       promptIndices: remaining.map((_, index) => start + index),
       targetBridgeId: request.pipelineId, file: source.file || null,
-      dispatchDelayMs: source.dispatchDelayMs || 0, editorSnapshot,
+      dispatchDelayMs, editorSnapshot,
     });
     if (start === 0) Object.assign(result, {
       file: source.file || null, mode: request.mode, activeSetId: request.activeSetId,
-      targetBridgeId: request.pipelineId, dispatchDelayMs: source.dispatchDelayMs || 0,
+      targetBridgeId: request.pipelineId, dispatchDelayMs,
       generation: result.generationByPrompt[0],
     });
   }

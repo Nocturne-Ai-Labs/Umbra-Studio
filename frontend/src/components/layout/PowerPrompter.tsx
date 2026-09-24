@@ -88,7 +88,6 @@ import {
   QUEUE_DIVERSITY_MAX,
   QUEUE_DIVERSITY_MIN,
   QUEUE_DIVERSITY_STEP,
-  QUEUE_MANAGER_DISPATCH_DELAY_OPTIONS,
   QUEUE_MANAGER_PROMPT_ROW_VISIBILITY_STYLE,
   applyQueueStackRunningState,
   buildQueueSubmissionSignature,
@@ -2654,9 +2653,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       showToast('Power Prompter queue tracker is not connected. Unable to change dispatch delay.', 'error');
       return;
     }
-    setQueueDispatchDelayMs(normalizedDelay);
-    const optionLabel = QUEUE_MANAGER_DISPATCH_DELAY_OPTIONS.find((entry) => entry.value === normalizedDelay)?.label || `${Math.floor(normalizedDelay / 1000)}s`;
-    showToast(`Queue dispatch delay set to ${optionLabel}`, 'success');
   }, [effectiveQueueTargetBridgeId, selectedQueueTargetType, showToast]);
 
   const renderPromptBlockList = useCallback((
@@ -4938,6 +4934,10 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       ? (snapshotInput.snapshot && typeof snapshotInput.snapshot === 'object' ? snapshotInput.snapshot : snapshotInput)
       : null;
     backendOwnedHistoryRef.current = snapshot?.backendOwnedHistory === true;
+    if (typeof snapshot?.dispatchDelayMs === 'number' && Number.isFinite(snapshot.dispatchDelayMs)) {
+      queueDispatchDelayMsRef.current = Math.max(0, Math.floor(snapshot.dispatchDelayMs));
+      setQueueDispatchDelayMs(queueDispatchDelayMsRef.current);
+    }
     const availability = snapshot?.savedQueues;
     const nextAvailability = {
       canSave: availability?.canSave === true,
@@ -5102,7 +5102,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           randomApplied: existingMeta?.randomApplied === true,
           queueTargetType: 'pipeline',
           targetBridgeId: rawPipelineTargetId || existingMeta?.targetBridgeId || createUmbraUiPipelineTargetId(snapshotPipeline),
-          dispatchDelayMs: existingMeta?.dispatchDelayMs ?? queueDispatchDelayMsRef.current,
+          dispatchDelayMs: Number.isFinite(Number(rawRequest?.dispatchDelayMs))
+            ? Math.max(0, Math.floor(Number(rawRequest.dispatchDelayMs)))
+            : existingMeta?.dispatchDelayMs ?? queueDispatchDelayMsRef.current,
           prompts,
           promptSetIds,
           promptOutputSubfolders,

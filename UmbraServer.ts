@@ -43,6 +43,7 @@ import { createVariantEtag, matchesIfNoneMatch, permitsConditionalRange } from '
 import { compactQueueSnapshot } from './shared/power-prompter/queueSnapshotTransport';
 import { collectQueueSnapshotPromptRows } from './shared/power-prompter/queueSnapshotRows';
 import { PowerPrompterHistoryStore } from './backend/PowerPrompterHistoryStore';
+import { PowerPrompterDispatchDelayControl, waitForPowerPrompterDispatchDelay } from './backend/PowerPrompterDispatchDelay';
 import { appendSavedQueueIdSuffix, buildRemainingPowerPrompterQueueSnapshot, getSavedQueueSummaryIndexPath, readSavedQueueSummaryIndex, splitSavedPowerPrompterQueue } from './backend/PowerPrompterSavedQueue';
 import { canInterruptPowerPrompterPrompt, getLiveUmbraUiQueueRequestIds, getQueueClearFutureKeepIds, hasLivePowerPrompterQueuePrompts, shouldFinishStoppedPowerPrompterQueue, summarizePowerPrompterQueuePrompts } from './backend/PowerPrompterQueueLifecycle';
 import { isAllowedQueueControlBrowserOrigin } from './backend/QueueControlOriginPolicy';
@@ -4965,6 +4966,7 @@ interface BackendPowerPrompterQueueTask {
 }
 const backendPowerPrompterQueueTasks = new Map<string, BackendPowerPrompterQueueTask>();
 interface PendingPowerPrompterBatchAdmission {
+  dispatchDelayRevision: number;
   sourceWs: ServerWebSocket<unknown>;
   batchRequestId: string;
   groupRequestIds: string[];
@@ -5023,6 +5025,7 @@ interface PowerPrompterQueueControllerPrompt {
 }
 
 interface PowerPrompterQueueControllerRequest {
+  dispatchDelayMs: number;
   requestId: string;
   origin: PowerPrompterQueueRequestOrigin;
   queuePlacement: PowerPrompterQueuePlacement;
@@ -5062,6 +5065,7 @@ const powerPrompterQueueControllerState: PowerPrompterQueueControllerState = {
   updatedAt: 0,
 };
 const backendPowerPrompterExecutionBlocks = new Set<string>();
+const powerPrompterDispatchDelayControl = new PowerPrompterDispatchDelayControl();
 
 type UmbraUiVideoReviewStatus = PowerPrompterQueueControllerPromptStatus;
 
@@ -5287,6 +5291,7 @@ interface LoadedPPApiWorkflow {
 }
 
 interface BackendPowerPrompterQueuedWork {
+  dispatchDelayRevision?: number;
   sourceWs: ServerWebSocket<unknown> | null;
   requestId: string;
   prompts: string[];
@@ -5418,10 +5423,14 @@ function sendPrompterEventToTargets(data: any, preferredSourceWs?: ServerWebSock
 }
 
 function clonePowerPrompterQueueControllerSnapshot(reason?: string) {
+  const activePowerPrompterRequest = Array.from(backendPowerPrompterQueueTasks.keys())
+    .map(findPowerPrompterQueueControllerRequest)
+    .find((request) => request?.origin === 'power_prompter' && hasLivePowerPrompterQueuePrompts(request.prompts));
   return {
     type: 'queue_snapshot',
     backendAutoDispatch: true,
     backendOwnedHistory: true,
+    dispatchDelayMs: activePowerPrompterRequest?.dispatchDelayMs ?? powerPrompterDispatchDelayControl.value,
     savedQueues: {
       ...getSavedQueueAvailability(powerPrompterQueueControllerState),
       canLoad: pendingPowerPrompterBatchAdmissionTokens.size === 0
@@ -5477,6 +5486,7 @@ function reportBackendPPHistoryError(requestId: string, error: unknown) {
 function buildBackendPPHistorySnapshot(request: PowerPrompterQueueControllerRequest, state: Record<string, any>): PowerPrompterQueueSnapshot | null {
   return normalizePPQueueSnapshot({
     ...state,
+    dispatchDelayMs: request.dispatchDelayMs,
     version: 1,
     file: state.sourceFile || state.file || null,
     mode: request.mode,
@@ -5694,6 +5704,10 @@ function startPowerPrompterQueueControllerRequest(options: {
   const pipeline = normalizeUmbraUiPipelineSelection(options.pipeline);
   const request: PowerPrompterQueueControllerRequest = {
     requestId,
+    dispatchDelayMs: normalizePowerPrompterQueueRequestOrigin(options.origin) === 'power_prompter'
+      ? findPowerPrompterQueueControllerRequest(requestId)?.dispatchDelayMs
+        ?? powerPrompterDispatchDelayControl.resolve(options.historyState?.dispatchDelayMs)
+      : 0,
     origin: normalizePowerPrompterQueueRequestOrigin(options.origin),
     queuePlacement: normalizePowerPrompterQueuePlacement(options.queuePlacement),
     mode: String(options.mode || 'prompt').trim() || 'prompt',
@@ -6308,6 +6322,7 @@ async function addPowerPrompterQueueControllerGroup(
   promptCount: number;
   sourceCleanup: ReturnType<typeof applyPowerPrompterQueueControllerPromptRemovals>;
 }> {
+  const dispatchDelayRevision = powerPrompterDispatchDelayControl.revision;
   const sourceRequestId = String(rawSourceRequestId || '').trim();
   if (!sourceRequestId) throw new Error('Source queue group request id is required.');
   if (!rawGroup || typeof rawGroup !== 'object') throw new Error('New queue group payload is required.');
@@ -6342,6 +6357,7 @@ async function addPowerPrompterQueueControllerGroup(
   }
   await assertPPQueueExecutionReady(loaded, state);
 
+  state.dispatchDelayMs = powerPrompterDispatchDelayControl.resolve(state.dispatchDelayMs, dispatchDelayRevision);
   // Validation may outlive the source work or another admission of this ID.
   sourceRequest = findPowerPrompterQueueControllerRequest(sourceRequestId);
   const sourceTask = backendPowerPrompterQueueTasks.get(sourceRequestId);
@@ -6866,6 +6882,7 @@ async function awaitUmbraUiQueueAdmissionValidation<T>(
 }
 
 async function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: any) {
+  const dispatchDelayRevision = powerPrompterDispatchDelayControl.revision;
   const prompts = sanitizePrompterPromptLines(data?.prompts, { dedupe: false });
   if (prompts.length === 0) {
     sendWs(ws, {
@@ -6929,7 +6946,7 @@ async function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: an
       return;
     }
 
-    await handlePrompterApiWorkflowQueueRequest(ws, data, requestId, resolvedPrompts, admission);
+    await handlePrompterApiWorkflowQueueRequest(ws, data, requestId, resolvedPrompts, admission, dispatchDelayRevision);
   } catch (error: any) {
     if (admission?.canceled) return;
     prompterPendingQueueRequests.delete(requestId);
@@ -9569,11 +9586,12 @@ async function waitForBackendPowerPrompterQueueResume(
   task: BackendPowerPrompterQueueTask,
   requestId: string,
   sourceWs?: ServerWebSocket<unknown> | null,
+  shouldStopWaiting?: () => boolean,
 ) {
   let announced = false;
   while (powerPrompterQueueControllerState.paused || backendPowerPrompterExecutionBlocks.size > 0) {
     throwIfBackendPowerPrompterQueueCanceled(task);
-    if (task.stopAfterCurrent) return;
+    if (task.stopAfterCurrent || shouldStopWaiting?.()) return;
     if (!announced) {
       announced = true;
       appendPowerPrompterQueueLog('backend_queue_waiting_for_resume', { requestId });
@@ -10471,6 +10489,23 @@ async function runBackendPowerPrompterPipelineQueue(
         throwIfBackendPowerPrompterQueueCanceled(task);
         if (finishBeforeNextPromptIfStopped()) return;
       }
+      if (task.origin === 'power_prompter') {
+        const shouldStopWaiting = () => {
+          throwIfBackendPowerPrompterQueueCanceled(task);
+          return task.stopAfterCurrent || index >= prompts.length || task.removedPromptIndices.has(index);
+        };
+        await waitForPowerPrompterDispatchDelay({
+          getDelayMs: () => findPowerPrompterQueueControllerRequest(requestId)?.dispatchDelayMs ?? 0,
+          shouldStop: shouldStopWaiting,
+          waitUntilRunnable: () => waitForBackendPowerPrompterQueueResume(task, requestId, sourceWs, shouldStopWaiting),
+          runPriorityWork: () => drainBackendPowerPrompterPriorityWork(index === 0
+            ? normalizePowerPrompterQueuePlacement(data?.queuePlacement ?? state.queuePlacement) : undefined),
+        });
+        throwIfBackendPowerPrompterQueueCanceled(task);
+        if (finishBeforeNextPromptIfStopped()) return;
+        // Edits can replace or remove pending prompts while the delay yields.
+        if (index >= prompts.length) break;
+      }
       task.activePromptIndex = index;
       if (task.removedPromptIndices.has(index)) {
         appendPowerPrompterQueueLog('backend_queue_prompt_skipped_removed', {
@@ -10882,11 +10917,14 @@ function enqueueBackendPowerPrompterQueueWork(work: BackendPowerPrompterQueuedWo
   if (backendPowerPrompterQueuedWork.some((entry) => entry.requestId === requestId)) return false;
   if (findPowerPrompterQueueControllerRequest(requestId)) return false;
   const state = work.data?.state && typeof work.data.state === 'object' ? work.data.state : {};
+  const dispatchDelayMs = normalizePowerPrompterQueueRequestOrigin(work.data?.queueOrigin ?? state.queueOrigin) === 'power_prompter'
+    ? powerPrompterDispatchDelayControl.resolve(state.dispatchDelayMs, work.dispatchDelayRevision) : 0;
   const queuePlacement = normalizePowerPrompterQueuePlacement(
     work.queuePlacement ?? work.data?.queuePlacement ?? state.queuePlacement,
   );
   const normalizedWork: BackendPowerPrompterQueuedWork = {
     ...work,
+    data: { ...work.data, state: { ...state, dispatchDelayMs } },
     requestId,
     prompts: work.prompts.map((entry) => String(entry || '').trim()).filter(Boolean),
     queuePlacement,
@@ -10922,7 +10960,7 @@ function enqueueBackendPowerPrompterQueueWork(work: BackendPowerPrompterQueuedWo
     promptOutputSubfolders,
     promptStyleNames,
     generationByPrompt,
-    historyState: state,
+    historyState: { ...state, dispatchDelayMs },
     preservePaused: work.preservePaused ?? powerPrompterQueueControllerState.paused,
   }, work.sourceWs, 'request_enqueued');
   if (queuePlacement === 'interrupt') {
@@ -10963,10 +11001,13 @@ async function runBackendPowerPrompterQueuedWork(next: BackendPowerPrompterQueue
   await runBackendPowerPrompterPipelineQueue(next.sourceWs, next.requestId, next.prompts, next.loaded, next.data, next.removedPromptIndices);
 }
 
-async function drainBackendPowerPrompterPriorityWork(): Promise<void> {
+async function drainBackendPowerPrompterPriorityWork(beforePlacement?: PowerPrompterQueuePlacement): Promise<void> {
   while (backendPowerPrompterQueuedWork.length > 0) {
     const next = backendPowerPrompterQueuedWork[0];
-    if (!next || normalizePowerPrompterQueuePlacement(next.queuePlacement ?? next.data?.queuePlacement) === 'end') return;
+    if (!next) return;
+    const placement = normalizePowerPrompterQueuePlacement(next.queuePlacement ?? next.data?.queuePlacement);
+    if (placement === 'end' || beforePlacement === 'interrupt'
+      || (beforePlacement === 'next' && placement !== 'interrupt')) return;
     backendPowerPrompterQueuedWork.shift();
     await runBackendPowerPrompterQueuedWork(next);
   }
@@ -11175,6 +11216,7 @@ async function handlePrompterApiWorkflowQueueBatchRequest(
   let cancelValidation = () => {};
   const cancellation = new Promise<void>((resolve) => { cancelValidation = resolve; });
   const admission: PendingPowerPrompterBatchAdmission = {
+    dispatchDelayRevision: powerPrompterDispatchDelayControl.revision,
     sourceWs: ws,
     batchRequestId,
     groupRequestIds: collectPrompterRequestIds(Array.isArray(data?.groups)
@@ -11305,6 +11347,7 @@ async function processPrompterApiWorkflowQueueBatchRequest(
   const acceptedRequestIds: string[] = [];
   for (const { group, loaded } of resolvedGroups) {
     enqueueBackendPowerPrompterQueueWork({
+      dispatchDelayRevision: admission.dispatchDelayRevision,
       sourceWs: ws,
       requestId: group.requestId,
       prompts: group.prompts,
@@ -11337,6 +11380,7 @@ async function handlePrompterApiWorkflowQueueRequest(
   requestId: string,
   prompts: string[],
   admission: PendingUmbraUiQueueAdmission | null = null,
+  dispatchDelayRevision = powerPrompterDispatchDelayControl.revision,
 ) {
   let loaded: LoadedPPApiWorkflow;
   try {
@@ -11397,6 +11441,7 @@ async function handlePrompterApiWorkflowQueueRequest(
     targetRole: 'backend_pipeline',
   });
   enqueueBackendPowerPrompterQueueWork({
+    dispatchDelayRevision,
     sourceWs: ws,
     requestId,
     prompts,
@@ -11765,6 +11810,19 @@ function forwardPrompterQueueControl(ws: ServerWebSocket<unknown>, data: any, ty
   forwardPrompterQueueControlToComfyTarget(ws, data, type);
 }
 
+function updateBackendPowerPrompterDispatchDelay(value: unknown): number {
+  const dispatchDelayMs = powerPrompterDispatchDelayControl.update(value);
+  for (const request of powerPrompterQueueControllerState.requests) {
+    if (request.origin !== 'power_prompter' || !hasLivePowerPrompterQueuePrompts(request.prompts)) continue;
+    request.dispatchDelayMs = dispatchDelayMs;
+    // Worker startup preserves this controller value. Keep replay metadata in
+    // agreement too; paused saves read the controller without waiting on I/O.
+    reviseBackendPPQueueHistory(request, (snapshot) => ({ ...snapshot, dispatchDelayMs }));
+  }
+  broadcastPowerPrompterQueueControllerSnapshot('dispatch_delay_updated');
+  return dispatchDelayMs;
+}
+
 function forwardPrompterQueueMessageToComfyTarget(
   ws: ServerWebSocket<unknown>,
   data: any,
@@ -11785,12 +11843,20 @@ function forwardPrompterQueueMessageToComfyTarget(
 
   if (isBackendPipelineTarget) {
     if (type === 'queue_delay_update') {
+      let dispatchDelayMs: number;
+      try {
+        dispatchDelayMs = updateBackendPowerPrompterDispatchDelay(data?.dispatchDelayMs);
+      } catch (error) {
+        sendWs(ws, { type: 'queue_delay_result', requestId, success: false, backendHandled: true,
+          error: String(error instanceof Error ? error.message : error) });
+        return;
+      }
       sendWs(ws, {
         type: 'queue_delay_result',
         requestId,
         success: true,
         backendHandled: true,
-        dispatchDelayMs: Math.max(0, Math.floor(Number(data?.dispatchDelayMs) || 0)),
+        dispatchDelayMs,
       });
       return;
     }
@@ -25557,6 +25623,7 @@ function assertSavedQueueCanLoad() {
 }
 
 async function restoreSavedPowerPrompterQueue(id: unknown) {
+  const dispatchDelayRevision = powerPrompterDispatchDelayControl.revision;
   assertSavedQueueCanLoad();
   const document = await loadPPSavedQueue(id);
   if (!document) throw new Error('Saved queue not found.');
@@ -25568,6 +25635,7 @@ async function restoreSavedPowerPrompterQueue(id: unknown) {
     if (!loaded.item.compatible) throw new Error(`Saved queue pipeline is unavailable: ${loaded.item.name}`);
     await assertPPQueueExecutionReady(loaded, group.state, validationContext);
     prepared.push({
+      dispatchDelayRevision,
       sourceWs: null, requestId: crypto.randomUUID(), loaded, prompts: group.prompts, preservePaused: true,
       data: { mode: group.mode, queueOrigin: 'power_prompter', queuePlacement: 'end', state: group.state },
     });
