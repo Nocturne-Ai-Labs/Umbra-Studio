@@ -4,7 +4,12 @@ const CHECK_INTERVAL_MS = 1_500;
 const BRANCH_REFRESH_MS = 15_000;
 const BACKGROUND_REFRESH_MS = 60_000;
 const RETRY_MS = 60_000;
-const keyOf = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/, '');
+const keyOf = (path: string) => {
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  return /^[a-z]:($|\/)/i.test(normalized) || normalized.startsWith('//')
+    ? normalized.toLowerCase()
+    : normalized;
+};
 
 export function affectedGalleryTreeBranches(branches: string[], changedPath: string): string[] {
   const changed = keyOf(changedPath);
