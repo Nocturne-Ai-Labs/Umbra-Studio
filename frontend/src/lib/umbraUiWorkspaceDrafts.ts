@@ -25,8 +25,8 @@ export function normalizeImageWorkspaceDrafts(value: unknown): ImageWorkspaceDra
       ...raw.controls,
       generation: {
         ...generation,
-        controlAfterGenerate: generation?.seedMode,
-        img2img: { denoise: generation?.img2imgDenoise },
+        controlAfterGenerate: generation?.seedMode ?? generation?.controlAfterGenerate,
+        img2img: { denoise: generation?.img2imgDenoise ?? generation?.img2img?.denoise },
       },
     });
     if (!controls || !Array.isArray(raw.promptSegments)) continue;
