@@ -14,7 +14,11 @@ const IMAGE_EXTENSION_PATTERN = /\.(?:avif|bmp|gif|jpe?g|png|tiff?|webp)$/i;
 const VIDEO_EXTENSION_PATTERN = /\.(?:avi|m4v|mkv|mov|mp4|webm|wmv)$/i;
 
 function normalizePath(value: unknown): string {
-  return String(value || '').trim().replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+  const path = String(value || '').trim().replace(/\\/g, '/');
+  // A leading pair of slashes identifies a Windows network share.
+  return path.startsWith('//')
+    ? `//${path.slice(2).replace(/\/{2,}/g, '/')}`
+    : path.replace(/\/{2,}/g, '/');
 }
 
 export function normalizeUmbraUiMediaToolsHandoff(value: unknown): UmbraUiMediaToolsHandoff | null {
@@ -42,11 +46,13 @@ export function normalizeUmbraUiMediaToolsHandoff(value: unknown): UmbraUiMediaT
       return true;
     });
   if (paths.length === 0) return null;
-  const rawPreviewUrls = source.previewUrls && typeof source.previewUrls === 'object'
+  const rawPreviewUrls = source.previewUrls && typeof source.previewUrls === 'object' && !Array.isArray(source.previewUrls)
     ? source.previewUrls as Record<string, unknown>
     : {};
+  const normalizedPreviewUrls = new Map(Object.entries(rawPreviewUrls)
+    .map(([path, url]) => [normalizePath(path), url] as const));
   const previewUrls = Object.fromEntries(paths.flatMap((path) => {
-    const value = String(rawPreviewUrls[path] || '').trim();
+    const value = String(normalizedPreviewUrls.get(path) || '').trim();
     return value && value.length <= 4096 && !value.startsWith('data:') ? [[path, value]] : [];
   }));
   return { mode, paths, previewUrls, createdAt: Number(source.createdAt) || Date.now() };

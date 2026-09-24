@@ -36,8 +36,8 @@ function clampStrength(value: string, fallback: number): number {
   return Number.isFinite(numeric) ? Math.max(-10, Math.min(10, numeric)) : fallback;
 }
 
-function roundStrengthToStep(value: number): number {
-  return Math.max(-10, Math.min(10, Math.round(value / 0.05) * 0.05));
+function adjustStrengthBy(value: number, delta: number): number {
+  return Math.max(-10, Math.min(10, Number((value + delta).toFixed(6))));
 }
 
 function formatStrength(value: number): string {
@@ -121,7 +121,7 @@ export function UmbraLoraStackControls({
   ) => {
     const target = loras.find((lora) => lora.id === id);
     if (!target) return;
-    updateLora(id, { [key]: roundStrengthToStep(target[key] + delta) });
+    updateLora(id, { [key]: adjustStrengthBy(target[key], delta) });
   }, [loras, updateLora]);
 
   return (

@@ -1588,7 +1588,8 @@ export function UmbraVideoGenerationControls({
         video.ltx25.textEncoder,
         video.ltx25.videoVae,
         ...(video.ltx25.twoStage ? [video.ltx25.latentUpscaleModel] : []),
-        ...(video.ltx25.audioEnabled && !(video.mode === 'video_to_video' && video.preserveSourceAudio) ? [video.ltx25.audioVae] : []),
+        ...(video.ltx25.audioEnabled && !video.sourceAudioPath && !video.sourceAudioName
+          && !(video.mode === 'video_to_video' && video.preserveSourceAudio) ? [video.ltx25.audioVae] : []),
         ...(video.ltx25.promptEnhance ? [video.ltx25.promptEnhanceModel] : []),
         ...(video.mode === 'image_to_video' ? [video.sourceImagePath] : []),
       ].some((value) => !String(value || '').trim());
@@ -1609,7 +1610,8 @@ export function UmbraVideoGenerationControls({
       video.ltx.distilledLora,
       video.ltx.promptLora,
       ...(video.ltx.twoStage ? [video.ltx.latentUpscaleModel] : []),
-      ...(video.ltx.audioEnabled && !(video.mode === 'video_to_video' && video.preserveSourceAudio) ? [video.ltx.audioVae] : []),
+      ...(video.ltx.audioEnabled && !video.sourceAudioPath && !video.sourceAudioName
+        && !(video.mode === 'video_to_video' && video.preserveSourceAudio) ? [video.ltx.audioVae] : []),
       ...(video.mode === 'image_to_video' ? [video.sourceImagePath] : []),
     ].some((value) => !String(value || '').trim());
   }, [extendedOpen, extendedTotalSeconds, video])

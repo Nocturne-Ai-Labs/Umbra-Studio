@@ -22,18 +22,54 @@ function applyPromptWeightToToken(rawToken: string, delta: number): string {
   return `(${token}:${formatPromptWeight(1 + delta)})`;
 }
 
-function applyPromptWeightToSelection(rawSelection: string, delta: number): string {
-  return String(rawSelection || '')
-    .split(/(,)/g)
-    .map((part) => {
-      if (part === ',') return part;
-      const leading = part.match(/^\s*/)?.[0] || '';
-      const trailing = part.match(/\s*$/)?.[0] || '';
-      const token = part.slice(leading.length, part.length - trailing.length);
-      if (!token.trim()) return part;
-      return `${leading}${applyPromptWeightToToken(token, delta)}${trailing}`;
-    })
-    .join('');
+function findTopLevelPromptSeparators(value: string): number[] {
+  const separators: number[] = [];
+  const depth = { round: 0, square: 0, curly: 0, angle: 0 };
+  let quote = '';
+  let escaped = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    const apostropheAfterWord = character === "'" && /[\p{L}\p{N}]/u.test(value[index - 1] || '');
+    const apostropheWithinWord = apostropheAfterWord && /[\p{L}\p{N}]/u.test(value[index + 1] || '');
+    if (escaped) { escaped = false; continue; }
+    if (character === '\\') { escaped = true; continue; }
+    if (quote) {
+      if (character === quote && !apostropheWithinWord) quote = '';
+      continue;
+    }
+    if (apostropheAfterWord) continue;
+    if (character === '"' || character === "'") { quote = character; continue; }
+    if (character === '(') depth.round += 1;
+    else if (character === ')') depth.round = Math.max(0, depth.round - 1);
+    else if (character === '[') depth.square += 1;
+    else if (character === ']') depth.square = Math.max(0, depth.square - 1);
+    else if (character === '{') depth.curly += 1;
+    else if (character === '}') depth.curly = Math.max(0, depth.curly - 1);
+    else if (character === '<') depth.angle += 1;
+    else if (character === '>') depth.angle = Math.max(0, depth.angle - 1);
+    if ((character === ',' || character === '\n')
+      && depth.round === 0 && depth.square === 0 && depth.curly === 0 && depth.angle === 0) {
+      separators.push(index);
+    }
+  }
+  return separators;
+}
+
+function applyPromptWeightToSelection(rawSelection: string, delta: number, separatorPositions: number[]): string {
+  const weightPart = (part: string) => {
+    const leading = part.match(/^\s*/)?.[0] || '';
+    const trailing = part.match(/\s*$/)?.[0] || '';
+    const token = part.slice(leading.length, part.length - trailing.length);
+    if (!token.trim()) return part;
+    return `${leading}${applyPromptWeightToToken(token, delta)}${trailing}`;
+  };
+  let result = '';
+  let partStart = 0;
+  for (const position of separatorPositions) {
+    result += weightPart(rawSelection.slice(partStart, position)) + rawSelection[position];
+    partStart = position + 1;
+  }
+  return result + weightPart(rawSelection.slice(partStart));
 }
 
 export function applyUmbraPromptWeight(
@@ -45,14 +81,10 @@ export function applyUmbraPromptWeight(
   const source = String(value || '');
   let start = Math.max(0, Math.min(selectionStart, source.length));
   let end = Math.max(start, Math.min(selectionEnd, source.length));
+  const separators = findTopLevelPromptSeparators(source);
   if (start === end) {
-    const leftComma = source.lastIndexOf(',', Math.max(0, start - 1));
-    const leftNewline = source.lastIndexOf('\n', Math.max(0, start - 1));
-    const rightComma = source.indexOf(',', start);
-    const rightNewline = source.indexOf('\n', start);
-    start = Math.max(leftComma, leftNewline) + 1;
-    const rightCandidates = [rightComma, rightNewline].filter((index) => index >= 0);
-    end = rightCandidates.length > 0 ? Math.min(...rightCandidates) : source.length;
+    start = (separators.filter((position) => position < start).at(-1) ?? -1) + 1;
+    end = separators.find((position) => position >= end) ?? source.length;
   }
   const rawSelection = source.slice(start, end);
   const leading = rawSelection.match(/^\s*/)?.[0] || '';
@@ -60,7 +92,12 @@ export function applyUmbraPromptWeight(
   const innerStart = start + leading.length;
   const innerEnd = end - trailing.length;
   if (innerStart >= innerEnd) return null;
-  const replacement = applyPromptWeightToSelection(source.slice(innerStart, innerEnd), delta);
+  const replacement = applyPromptWeightToSelection(
+    source.slice(innerStart, innerEnd),
+    delta,
+    separators.filter((position) => position >= innerStart && position < innerEnd)
+      .map((position) => position - innerStart),
+  );
   return {
     nextValue: `${source.slice(0, innerStart)}${replacement}${source.slice(innerEnd)}`,
     selectionStart: innerStart,

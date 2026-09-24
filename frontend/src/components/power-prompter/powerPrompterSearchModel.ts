@@ -22,12 +22,13 @@ export function buildPowerPrompterGlobalSearchSuggestions(
 
   for (const card of Array.isArray(cards) ? cards : []) {
     const text = String((card as any).text || '');
-    if (!text.trim()) continue;
-    addSuggestion(text, 'prompt');
-    for (const segment of text.split(/[\r\n,]+/g)) {
-      const cleaned = String(segment || '').replace(/\s+/g, ' ').trim();
-      if (!cleaned) continue;
-      addSuggestion(cleaned, 'prompt');
+    if (text.trim()) {
+      addSuggestion(text, 'prompt');
+      for (const segment of text.split(/[\r\n,]+/g)) {
+        const cleaned = String(segment || '').replace(/\s+/g, ' ').trim();
+        if (!cleaned) continue;
+        addSuggestion(cleaned, 'prompt');
+      }
     }
     const variantName = String((card as any).variantName || '').replace(/\s+/g, ' ').trim();
     if (variantName) {
