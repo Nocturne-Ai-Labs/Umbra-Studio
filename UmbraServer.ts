@@ -17263,6 +17263,7 @@ async function proxyGalleryBridgeFsGet(
   headers.delete('referer');
   headers.set('X-Umbra-Gallery-Bridge-Token', GALLERY_BRIDGE_TOKEN);
 
+  let upstreamSignal: AbortSignal | null = null;
   try {
     // Date/custom order needs stats for the whole folder before page one. Let
     // the split worker finish rather than timing it out and repeating that scan
@@ -17274,10 +17275,11 @@ async function proxyGalleryBridgeFsGet(
       ? 20000
       : (targetPath === '/api/fs/thumbnail' ? 12000
         : (targetPath === '/api/fs/list-progressive' && !fastNameListing ? 30000 : 6000));
+    upstreamSignal = AbortSignal.any([req.signal, AbortSignal.timeout(proxyTimeoutMs)]);
     const upstream = await fetch(targetUrl.toString(), {
       method: 'GET',
       headers,
-      signal: AbortSignal.any([req.signal, AbortSignal.timeout(proxyTimeoutMs)]),
+      signal: upstreamSignal,
     });
     if (upstream.status >= 500) {
       await upstream.body?.cancel();
@@ -17301,6 +17303,10 @@ async function proxyGalleryBridgeFsGet(
     });
   } catch (error: any) {
     if (req.signal.aborted) return new Response(null, { status: 499 });
+    if (error?.name === 'TimeoutError' || upstreamSignal?.reason?.name === 'TimeoutError') {
+      traceProxy('proxy_timeout', { error: error?.message || String(error) }, 0);
+      return json({ error: 'Gallery worker timed out. Retry this request.' }, 504);
+    }
     galleryBridgeProxyFailures += 1;
     galleryBridgeProxyBackoffUntil = Date.now() + 2000;
     if (galleryBridgeProxyFailures >= 3 && !isChildProcessAlive(galleryBridgeProcess) && !(await isGalleryBridgeHealthy())) {
