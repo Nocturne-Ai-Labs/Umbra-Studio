@@ -9380,8 +9380,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           setFolderPreviewGroups((current) => {
             const previous = current.find((group) => pathsEqual(group.folder.path, folder.path))
               || folderPreviewCacheRef.current.get(groupKey);
-            const expansionLevel = previous?.expansionLevel || 0;
-            const merged = {
+            const expansionLevel: 0 | 1 | 2 = previous?.expansionLevel || 0;
+            const merged: GalleryFolderPreviewGroup = {
               ...nextGroup,
               expansionLevel,
               visibleCount: expansionLevel >= 2 ? nextGroup.files.length : FOLDER_PREVIEW_PAGE_SIZE,
