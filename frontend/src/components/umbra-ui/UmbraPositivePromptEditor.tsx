@@ -99,7 +99,7 @@ export function UmbraPositivePromptEditor({
   segmentsRef.current = segments;
   const compiledPrompt = React.useMemo(() => compileUmbraUiPromptSegments(segments), [segments]);
   const selectedAgentSegments = React.useMemo(
-    () => segments.filter((segment) => segment.agentEnabled === true),
+    () => segments.filter((segment) => segment.agentEnabled === true && segment.text.trim()),
     [segments],
   );
   const activeClasses = accent === 'rose'
@@ -267,7 +267,7 @@ export function UmbraPositivePromptEditor({
 
   const enhanceSelectedSegments = React.useCallback(async () => {
     if (enhancingFields) return;
-    const selected = segments.filter((segment) => segment.agentEnabled === true && segment.text.trim());
+    const selected = selectedAgentSegments;
     if (selected.length <= 0) {
       showToast('Enable the agent on at least one non-empty prompt field.', 'error');
       return;
@@ -275,9 +275,9 @@ export function UmbraPositivePromptEditor({
 
     const sourceTextById = new Map(selected.map((segment) => [segment.id, segment.text]));
     const enhancedTextById = new Map<string, string>();
-    const protectedFieldLabels = segments
-      .filter((segment) => segment.agentEnabled !== true)
-      .map((segment, index) => segment.label || `Field ${index + 1}`);
+    const protectedFieldLabels = segments.flatMap((segment, index) => segment.agentEnabled !== true
+      ? [segment.label || (index === 0 ? 'Base' : `Segment ${index + 1}`)]
+      : []);
     setEnhancingFields(true);
     try {
       for (const segment of selected) {
@@ -340,6 +340,7 @@ export function UmbraPositivePromptEditor({
     recordFieldCheckpoint,
     mediaType,
     segments,
+    selectedAgentSegments,
     showToast,
   ]);
 

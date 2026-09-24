@@ -44,7 +44,10 @@ function splitPromptTerms(value: string): string[] {
     current = '';
   };
 
-  for (const character of String(value || '')) {
+  const characters = Array.from(String(value || ''));
+  for (const [index, character] of characters.entries()) {
+    const apostropheAfterWord = character === "'" && /[\p{L}\p{N}]/u.test(characters[index - 1] || '');
+    const apostropheWithinWord = apostropheAfterWord && /[\p{L}\p{N}]/u.test(characters[index + 1] || '');
     if (escaped) {
       current += character;
       escaped = false;
@@ -57,7 +60,11 @@ function splitPromptTerms(value: string): string[] {
     }
     if (quote) {
       current += character;
-      if (character === quote) quote = '';
+      if (character === quote && !apostropheWithinWord) quote = '';
+      continue;
+    }
+    if (apostropheAfterWord) {
+      current += character;
       continue;
     }
     if (character === '"' || character === "'") {
