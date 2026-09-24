@@ -36,6 +36,30 @@ export function assertUmbraUiVideoLoraStackInstalled(
   }
 }
 
+export function resolveUmbraUiVideoLoraNames(
+  graph: PromptGraph,
+  objectInfo: Record<string, unknown> | null,
+): void {
+  const loader = objectInfo?.LoraLoaderModelOnly as { input?: { required?: { lora_name?: unknown } } } | undefined;
+  const choices = readComfyInputChoices(loader?.input?.required?.lora_name)
+    ?.filter((choice): choice is string => typeof choice === 'string');
+  const nodes = Object.values(graph).filter((node): node is PromptNode =>
+    isPromptNode(node) && node.class_type === 'LoraLoaderModelOnly' && typeof node.inputs?.lora_name === 'string');
+  if (!nodes.length) return;
+  if (!choices?.length) throw new Error('Video LoRA names could not be verified against ComfyUI. Refresh its model catalog and try again.');
+  for (const node of nodes) {
+    const selected = String(node.inputs?.lora_name || '');
+    const normalized = selected.replace(/\\/g, '/').toLowerCase();
+    const matches = choices.filter((choice) => choice.replace(/\\/g, '/').toLowerCase() === normalized);
+    if (matches.length !== 1) {
+      throw new Error(matches.length > 1
+        ? `Video LoRA "${selected}" is ambiguous in ComfyUI.`
+        : `Video LoRA "${selected}" is not installed in ComfyUI. Refresh the catalog or choose another file.`);
+    }
+    node.inputs!.lora_name = matches[0];
+  }
+}
+
 export function applyUmbraUiVideoLoraStack(graph: PromptGraph, family: UmbraVideoLoraFamily, stack: UmbraVideoLoraEntry[]): void {
   const entries = stack.filter(item => item.family === family && item.enabled && item.name && item.strength !== 0);
   if (!entries.length) return;

@@ -10,7 +10,7 @@ import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
  */
 
 import { applyMiniMaxH3Acceleration, assertMiniMaxH3TurboInstalled, assertMiniMaxH3GuidesInstalled, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
-import { applyUmbraUiVideoLoraStack, assertUmbraUiVideoLoraStackInstalled } from './backend/UmbraUiVideoLoraStack';
+import { applyUmbraUiVideoLoraStack, assertUmbraUiVideoLoraStackInstalled, resolveUmbraUiVideoLoraNames } from './backend/UmbraUiVideoLoraStack';
 import { bindPPGenerationToWorkflowVideo } from './backend/UmbraUiVideoGenerationBinding';
 import { normalizeUmbraVideoLoraStack, type UmbraVideoLoraEntry } from './shared/umbra-ui/videoLoraStack';
 import { readComfyInputChoices } from './shared/umbra-ui/comfyInputChoices';
@@ -10512,6 +10512,9 @@ async function runBackendPowerPrompterPipelineQueue(
         styleSeedMode: state.styleSeedMode,
         selectedPipeline: activePipeline.selectedPipeline,
       });
+      if (generation.mediaType === 'video') {
+        resolveUmbraUiVideoLoraNames(queuedWorkflow.promptGraph, await getPPComfyObjectInfoForValidation());
+      }
       const continuationPreviewNodeId = extendedSession && index < prompts.length - 1
         ? injectUmbraExtendedContinuationPreview(
           queuedWorkflow.promptGraph,
