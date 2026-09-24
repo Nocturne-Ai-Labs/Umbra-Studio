@@ -20,15 +20,7 @@ export function normalizeImageWorkspaceDrafts(value: unknown): ImageWorkspaceDra
   if (!value || typeof value !== 'object') return result;
   for (const [mode, raw] of Object.entries(value)) {
     if (!isImageWorkspace(mode) || !raw || typeof raw !== 'object' || !raw.controls) continue;
-    const generation = raw.controls.generation;
-    const controls = normalizeUmbraUiImageControlsSnapshot({
-      ...raw.controls,
-      generation: {
-        ...generation,
-        controlAfterGenerate: generation?.seedMode ?? generation?.controlAfterGenerate,
-        img2img: { denoise: generation?.img2imgDenoise ?? generation?.img2img?.denoise },
-      },
-    });
+    const controls = normalizeUmbraUiImageControlsSnapshot(raw.controls);
     if (!controls || !Array.isArray(raw.promptSegments)) continue;
     const promptSegments = raw.promptSegments.filter((segment: UmbraUiPromptSegment) => (
       segment && typeof segment.id === 'string' && typeof segment.text === 'string'

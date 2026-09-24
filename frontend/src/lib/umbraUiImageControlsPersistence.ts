@@ -197,6 +197,12 @@ export function normalizeUmbraUiImageControlsSnapshot(
   const source = isRecord(value.generation) ? value.generation : value;
   const normalizedGeneration = normalizePowerPrompterGenerationControls({
     ...source,
+    // Accept both live Power Prompter controls and our persisted snapshot shape.
+    controlAfterGenerate: source.seedMode ?? source.controlAfterGenerate,
+    img2img: {
+      ...(isRecord(source.img2img) ? source.img2img : {}),
+      denoise: source.img2imgDenoise ?? (isRecord(source.img2img) ? source.img2img.denoise : undefined),
+    },
     outputOwner: 'umbra_ui',
     outputMode: 'txt2img',
   });

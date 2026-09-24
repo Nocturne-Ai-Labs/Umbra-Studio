@@ -23,6 +23,7 @@ import { useStore } from '@/store/useStore';
 import type { PowerPrompterCardDocument, PowerPrompterCardNode, PowerPrompterCardType } from '@/types/powerPrompter';
 import { createDefaultPowerPrompterCardDocument, normalizePowerPrompterCardDocument } from '@/lib/powerPrompter';
 import {
+  canRemovePowerPrompterCutSource,
   clearPowerPrompterCardClipboard,
   readPowerPrompterCardClipboard,
   subscribePowerPrompterCardClipboard,
@@ -714,13 +715,16 @@ export const PowerPrompterSidebar = React.memo(({
         const sourcePath = clipboardPayload.sourceFile;
         try {
           const { document: sourceDoc, sessionRevision: sourceRevision, storageRevision: sourceStorageRevision } = await loadCardDocument(sourcePath);
+          if (!canRemovePowerPrompterCutSource(sourceDoc.cards, clipboardPayload)) {
+            throw new Error('The source card changed after it was cut. Its current variants were preserved.');
+          }
           const cleanedSourceDoc = removeSlotFromDocument(sourceDoc, sourcePath, clipboardPayload.slot.slotId);
           await saveCardDocument(sourcePath, cleanedSourceDoc, sourceRevision, sourceStorageRevision);
           moveCompleted = true;
         } catch (error) {
           console.error('Card was pasted, but its source could not be updated', error);
         }
-        clearPowerPrompterCardClipboard();
+        clearPowerPrompterCardClipboard(clipboardPayload);
       }
 
       await loadFiles(ROOT_PATH);
@@ -729,7 +733,7 @@ export const PowerPrompterSidebar = React.memo(({
         await refreshOpenFileIfNeeded(clipboardPayload.sourceFile);
       }
       showToast(clipboardPayload.mode === 'cut'
-        ? (moveCompleted ? 'Card moved' : 'Card copied; the source could not be updated.')
+        ? (moveCompleted ? 'Card moved' : 'Card copied; the source was changed or could not be updated, so it was preserved.')
         : 'Card pasted', moveCompleted ? 'success' : 'error');
     } catch (error) {
       console.error('Failed to paste card into file', error);
