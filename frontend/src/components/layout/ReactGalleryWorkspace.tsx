@@ -4926,6 +4926,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const pageCacheRef = useRef<Map<string, GalleryPageCacheEntry>>(new Map());
   const cachedPageValidationRef = useRef(new GalleryCachedPageValidation());
   const folderLoadAbortRef = useRef<AbortController | null>(null);
+  const selectAllAbortRef = useRef<AbortController | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchSuggestAbortRef = useRef<AbortController | null>(null);
   const metadataSearchAbortRef = useRef<AbortController | null>(null);
@@ -5010,6 +5011,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   useEffect(() => {
     currentFolderRef.current = currentFolder;
   }, [currentFolder]);
+
+  useEffect(() => () => selectAllAbortRef.current?.abort(), []);
 
   useEffect(() => {
     selectedPathsRef.current = selectedPaths;
@@ -5503,6 +5506,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     const preserveScroll = options?.preserveScroll === true && pathsEqual(folderPath, currentFolder);
     const preservedScrollTop = preserveScroll ? (scrollParentRef.current?.scrollTop ?? 0) : 0;
     const seq = ++loadSeqRef.current;
+    selectAllAbortRef.current?.abort();
+    selectAllAbortRef.current = null;
+    setSelectAllLoading(false);
     folderLoadAbortRef.current?.abort();
     folderLoadAbortRef.current = null;
     setError('');
@@ -5766,22 +5772,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       const summaryTotal = Math.max(0, Math.trunc(Number(summary.totalMediaCount || 0)));
       const currentTotal = Math.max(0, Math.trunc(Number(total || currentFiles.length)));
 
-      if (summaryTotal < currentFiles.length) {
-        if (!isStillCurrentFolder()) return false;
-        clearPageCacheForFolder(folderPath);
-        await loadFolder({ folder: folderPath, keepSelection: true, forceRefresh: true, preserveScroll: true });
-        if (!isStillCurrentFolder()) return false;
-        traceGalleryLoad({
-          event: 'summary_reconcile_full_refresh',
-          folderPath,
-          reason,
-          previousTotal: currentTotal,
-          summaryTotal,
-          durationMs: nowMs() - startedAt,
-        });
-        return true;
-      }
-
+      // Deletions use the same atomic listing reconciliation as additions.
+      // loadFolder catches failures itself, so delegating here would acknowledge
+      // a changed summary even when the replacement listing could not be read.
       const params = new URLSearchParams({
         path: folderPath,
         sortBy,
@@ -5888,7 +5881,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     currentFolderReconcileFolderRef.current = folderPath;
     currentFolderReconcileInFlightRef.current = reconcilePromise;
     return reconcilePromise;
-  }, [clearPageCacheForFolder, emitFilmstripFeed, loadFolder, sortBy, sortOrder, total, writeTreeChildrenCache]);
+  }, [clearPageCacheForFolder, emitFilmstripFeed, sortBy, sortOrder, total, writeTreeChildrenCache]);
 
   const scheduleCurrentFolderReconcile = useCallback((
     folderPath: string,
@@ -8058,13 +8051,20 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
 
   const selectAllInFolder = useCallback(async () => {
     const folderPath = normalizePath(currentFolder);
-    if (!folderPath || selectAllLoading) return;
+    if (!folderPath || selectAllAbortRef.current) return;
+    const controller = new AbortController();
+    selectAllAbortRef.current = controller;
+    const sequence = loadSeqRef.current;
+    const isCurrent = () => !controller.signal.aborted && sequence === loadSeqRef.current
+      && pathsEqual(folderPath, currentFolderRef.current);
     setSelectAllLoading(true);
     try {
       if (isTrashRootPath(folderPath)) {
-        const response = await fetch('/api/trash/list', { cache: 'no-store' });
+        const response = await fetch('/api/trash/list', { cache: 'no-store', signal: controller.signal });
         const payload: { items?: TrashMetadataItem[]; error?: string } = await response.json().catch(() => ({}));
+        if (!isCurrent()) return;
         if (!response.ok) throw new Error(String(payload?.error || 'Failed to select Trash items'));
+        if (!Array.isArray(payload.items)) throw new Error('Invalid Trash listing');
         const paths = (Array.isArray(payload.items) ? payload.items : [])
           .map((item) => normalizePath(item.trashPath))
           .filter(Boolean);
@@ -8087,9 +8087,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         fast: '1',
         recursive: 'false',
       });
-      const response = await fetchGalleryFs('/list-progressive', params);
+      const response = await fetchGalleryFs('/list-progressive', params, { cache: 'no-store', signal: controller.signal });
       const payload: GalleryListPayload & { error?: string } = await response.json().catch(() => ({}));
+      if (!isCurrent()) return;
       if (!response.ok) throw new Error(String(payload?.error || 'Failed to select folder media'));
+      if (payload.missing) throw new Error('Folder is currently unavailable');
+      if (!Array.isArray(payload.files)) throw new Error('Invalid folder listing');
       const selected = new Set<string>();
       for (const file of Array.isArray(payload.files) ? payload.files : []) {
         const path = normalizePath(file.path);
@@ -8107,14 +8110,18 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         message: `Selected ${paths.length} item${paths.length === 1 ? '' : 's'} in folder`,
       });
     } catch (selectError) {
+      if (!isCurrent() || isAbortError(selectError)) return;
       addToast({
         type: 'error',
         message: selectError instanceof Error ? selectError.message : 'Failed to select folder media',
       });
     } finally {
-      setSelectAllLoading(false);
+      if (selectAllAbortRef.current === controller) {
+        selectAllAbortRef.current = null;
+        setSelectAllLoading(false);
+      }
     }
-  }, [addToast, currentFolder, emitSelectionChanged, selectAllLoading, sortBy, sortOrder]);
+  }, [addToast, currentFolder, emitSelectionChanged, sortBy, sortOrder]);
 
   const selectMetadataMatches = useCallback(() => {
     const paths = uniqueNormalizedPaths(metadataMatches.map((match) => match.path));
