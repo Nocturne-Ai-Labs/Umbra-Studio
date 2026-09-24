@@ -5820,8 +5820,17 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       const nextFiles = Array.from(mergedByPath.values()).sort((left, right) => compareGalleryFiles(left, right, sortBy, sortOrder));
       const removed = currentFiles.some(file => !mergedByPath.has(normalizePath(file.path).toLowerCase()));
       if (removed) {
-        setSelectedPaths(current => new Set([...current].filter(path => mergedByPath.has(normalizePath(path).toLowerCase()))));
-        setLastSelectedPath(current => mergedByPath.has(normalizePath(current).toLowerCase()) ? current : '');
+        // This listing only establishes which direct children still exist.
+        // Selections can also contain child-folder previews or search results.
+        const keepPath = (path: string) => !pathsEqual(pathParent(path), folderPath)
+          || mergedByPath.has(normalizePath(path).toLowerCase());
+        const nextSelection = new Set([...selectedPathsRef.current].filter(keepPath));
+        if (nextSelection.size !== selectedPathsRef.current.size) {
+          selectedPathsRef.current = nextSelection;
+          setSelectedPaths(nextSelection);
+          emitSelectionChanged(Array.from(nextSelection));
+        }
+        setLastSelectedPath(current => keepPath(current) ? current : '');
       }
       if (!galleryFileArraysEquivalent(currentFiles, nextFiles)) {
         filesRef.current = nextFiles;
@@ -5881,7 +5890,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     currentFolderReconcileFolderRef.current = folderPath;
     currentFolderReconcileInFlightRef.current = reconcilePromise;
     return reconcilePromise;
-  }, [clearPageCacheForFolder, emitFilmstripFeed, sortBy, sortOrder, total, writeTreeChildrenCache]);
+  }, [clearPageCacheForFolder, emitFilmstripFeed, emitSelectionChanged, sortBy, sortOrder, total, writeTreeChildrenCache]);
 
   const scheduleCurrentFolderReconcile = useCallback((
     folderPath: string,

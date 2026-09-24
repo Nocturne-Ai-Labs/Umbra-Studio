@@ -3120,7 +3120,8 @@ function isHostRequest(req: Request, url: URL, server?: RequestIpServer): boolea
   // A local reverse proxy can relay remote requests over loopback. Forwarded
   // peer headers are client supplied unless the proxy strips them first, so
   // they cannot establish host privileges even when they say "localhost".
-  if (req.headers.has('x-forwarded-for') || req.headers.has('x-real-ip') || req.headers.has('cf-connecting-ip')) return false;
+  if (req.headers.has('forwarded') || req.headers.has('x-forwarded-for')
+    || req.headers.has('x-real-ip') || req.headers.has('cf-connecting-ip')) return false;
   return true;
 }
 
