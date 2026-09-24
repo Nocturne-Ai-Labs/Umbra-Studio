@@ -43,7 +43,7 @@ import {
   POWER_PROMPTER_SAMPLER_OPTIONS,
   POWER_PROMPTER_SCHEDULER_OPTIONS,
 } from '@/lib/powerPrompter';
-import { writePowerPrompterCardClipboard } from '@/lib/powerPrompterCardClipboard';
+import { getPowerPrompterCardSlotFingerprint, writePowerPrompterCardClipboard } from '@/lib/powerPrompterCardClipboard';
 import { generateUmbraUiAgentPrompt } from '@/lib/umbraUiAgent';
 import {
   buildPowerPrompterActivePromptBlocks,
@@ -8475,6 +8475,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       version: 1 as const,
       mode,
       sourceFile: path || null,
+      sourceFingerprint: getPowerPrompterCardSlotFingerprint(document.cards, slotId),
       createdAt: getNowIso(),
       slot: {
         slotId: slot.slotId,
@@ -8489,7 +8490,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     writePowerPrompterCardClipboard(payload);
     setCardMenu(null);
     showToast(mode === 'copy' ? 'Card copied. Right-click a file and paste card.' : 'Card cut. Right-click a file and paste card to move.', 'success');
-  }, [slots, path, showToast]);
+  }, [document.cards, slots, path, showToast]);
 
   const selectedCheckpointName = String(generation.checkpointName || '').trim();
   const selectedGenerationModelType = normalizePowerPrompterModelType(generation.modelType);
