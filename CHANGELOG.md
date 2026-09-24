@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.32.31 - Audit Reliability And Security Patch
+
+### TL;DR - Setup After Updating
+
+- Install the new package and restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux, then refresh open browser tabs. No new models, Umbra Nodes, or ComfyUI update is required.
+- Existing portable `User/` and `Tools/` data should be preserved. Linux managed tools continue to require `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents.
+
+### Changes
+
+- Tighten Umbra Remote host authorization against unrecognized hostnames and forwarded proxy headers so remote requests cannot inherit host-only privileges.
+- Keep Gallery bulk selections stable across folder reconciliation, retry failed deletion refreshes, and refresh case-distinct Linux folders independently. Track uploads until the filesystem worker confirms completion instead of reporting a premature timeout.
+- Preserve Power Prompter clipboard and edited cut sources, saved image seed mode and denoise settings, and the selected dispatch delay. Guard queue ownership, saved-queue admission, and uncertain ComfyUI drain states.
+- Keep Model Manager download destinations inside their intended folder, preserve image-specific Data Forge captions during redownload, and use safe fallback names for data URL imports.
+
+### Validation And Limits
+
+- Passed 507 backend tests, backend and frontend TypeScript checks, frontend lint and production build, the 52-workflow pipeline audit, and focused Gallery, queue, and browser regression tests.
+- A live image/video generation test against an isolated development ComfyUI installation was not run. The broader feature-by-feature interaction audit remains separate from this release.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Umbra Remote host-privilege authorization gaps.
+- Fixed: Gallery selection, deletion refresh, Linux folder refresh, and long-running upload tracking.
+- Fixed: Power Prompter queue ownership, save/load admission, dispatch timing, and prompt edit preservation.
+- Fixed: model download path safety and Data Forge caption/import handling.
+- Improved: saved image generation settings and queue recovery behavior.
+
 ## v0.32.30 - Workflow Reliability Patch
 
 ### TL;DR - Setup After Updating
