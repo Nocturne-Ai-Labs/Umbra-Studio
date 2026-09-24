@@ -5425,6 +5425,7 @@ function clonePowerPrompterQueueControllerSnapshot(reason?: string) {
     savedQueues: {
       ...getSavedQueueAvailability(powerPrompterQueueControllerState),
       canLoad: pendingPowerPrompterBatchAdmissionTokens.size === 0
+        && pendingUmbraUiQueueAdmissionTokens.size === 0
         && !powerPrompterQueueControllerState.requests.some((request) => request.prompts.some((prompt) => ['pending', 'submitting', 'running'].includes(prompt.status))),
     },
     pendingBatchAdmissions: pendingPowerPrompterBatchAdmissionTokens.size,
@@ -6886,7 +6887,10 @@ async function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: an
   const admission: PendingUmbraUiQueueAdmission | null = isUmbraUiRequest
     ? { sourceWs: ws, requestId, canceled: false, cancelValidation, cancellation }
     : null;
-  if (admission) pendingUmbraUiQueueAdmissionTokens.set(admissionToken, admission);
+  if (admission) {
+    pendingUmbraUiQueueAdmissionTokens.set(admissionToken, admission);
+    broadcastPowerPrompterQueueControllerSnapshot('umbra_ui_admission_started', ws);
+  }
   try {
     const wildcards = hasPrompterQueueWildcardReferences(prompts, data?.state)
       ? admission
@@ -6936,7 +6940,10 @@ async function handlePrompterQueueRequest(ws: ServerWebSocket<unknown>, data: an
       error: String(error?.message || 'Failed to enqueue generation pipeline request.'),
     });
   } finally {
-    if (admission) pendingUmbraUiQueueAdmissionTokens.delete(admissionToken);
+    if (admission) {
+      pendingUmbraUiQueueAdmissionTokens.delete(admissionToken);
+      broadcastPowerPrompterQueueControllerSnapshot('umbra_ui_admission_finished', ws);
+    }
   }
 }
 
@@ -8925,6 +8932,13 @@ async function waitForComfyPromptDrain(
   const startedAt = Date.now();
   let nextHeartbeatAt = 0;
   let lastHealthyAt = startedAt;
+  const failUncertainDrain = (detail: string): never => {
+    // Losing queue visibility does not prove that ComfyUI stopped the job.
+    // Preserve the same dispatch hold used for an unconfirmed submission.
+    powerPrompterQueueControllerState.paused = true;
+    broadcastPowerPrompterQueueControllerSnapshot('execution_outcome_unknown');
+    throw new Error(`${detail} The queue is paused; check ComfyUI before resuming.`);
+  };
   while (Date.now() - startedAt < timeoutMs) {
     shouldStop?.();
     let ids: Set<string> | null = null;
@@ -8932,7 +8946,8 @@ async function waitForComfyPromptDrain(
       ids = await getComfyQueuePromptIdSet(taskSignal);
       lastHealthyAt = Date.now();
     } catch (error) {
-      if (Date.now() - lastHealthyAt >= 120_000) throw new Error(`ComfyUI queue remained unavailable for two minutes: ${String(error)}`);
+      shouldStop?.();
+      if (Date.now() - lastHealthyAt >= 120_000) failUncertainDrain(`ComfyUI queue remained unavailable for two minutes: ${String(error)}`);
     }
     shouldStop?.();
     if (ids && !ids.has(normalizedPromptId)) return;
@@ -8947,7 +8962,8 @@ async function waitForComfyPromptDrain(
     }
     await Bun.sleep(1500);
   }
-  throw new Error(`Timed out waiting for ComfyUI prompt ${normalizedPromptId} to leave the queue.`);
+  shouldStop?.();
+  failUncertainDrain(`Timed out waiting for ComfyUI prompt ${normalizedPromptId} to leave the queue.`);
 }
 
 function collectComfyHistorySavedOutputs(historyPayload: any, promptId: string): Array<Record<string, unknown>> {
@@ -11615,9 +11631,9 @@ function forwardPrompterQueueControlToComfyTarget(
     && !hasPotentialSubmittedBackendPrompt
     && targetedLiveBackendRequestIds.length > 0
     && targetedLiveBackendRequestsUnsubmitted;
-  const backendAffectedRequestIds = type === 'queue_cancel'
+  const backendAffectedRequestIds = isBackendPipelineTarget && (type === 'queue_cancel'
     || type === 'queue_clear_future'
-    || type === 'queue_interrupt_active'
+    || type === 'queue_interrupt_active')
     ? applyBackendPowerPrompterQueueControl(controlData, type)
     : [];
   const affectedRequestIds = Array.from(new Set([
@@ -11760,10 +11776,10 @@ function forwardPrompterQueueMessageToComfyTarget(
     || ['pipeline', 'api_workflow'].includes(String(data?.queueTargetType || '').trim().toLowerCase());
   const target = resolvePrompterComfyTarget(preferredBridgeId);
   const requestId = String(data?.requestId || crypto.randomUUID());
-  const backendPromptRemovalResult = type === 'queue_prompt_remove'
+  const backendPromptRemovalResult = isBackendPipelineTarget && type === 'queue_prompt_remove'
     ? applyPowerPrompterQueueControllerPromptRemovals(data, ws)
     : { affectedRequestIds: [], removedRequestIds: [], promptRemovals: [] };
-  const backendReorderApplied = type === 'queue_reorder'
+  const backendReorderApplied = isBackendPipelineTarget && type === 'queue_reorder'
     ? applyPowerPrompterQueueControllerReorder(data, ws)
     : false;
 
@@ -25532,8 +25548,8 @@ async function capturePausedPowerPrompterQueue() {
 }
 
 function assertSavedQueueCanLoad() {
-  if (pendingPowerPrompterBatchAdmissionTokens.size > 0) {
-    throw new Error('Wait for pending Power Prompter queue admission before loading a saved queue.');
+  if (pendingPowerPrompterBatchAdmissionTokens.size > 0 || pendingUmbraUiQueueAdmissionTokens.size > 0) {
+    throw new Error('Wait for pending queue admission before loading a saved Power Prompter queue.');
   }
   if (powerPrompterQueueControllerState.requests.some((request) => request.prompts.some((prompt) => ['pending', 'submitting', 'running'].includes(prompt.status)))) {
     throw new Error('Finish or clear the current queue before loading a saved Power Prompter queue.');
@@ -25546,9 +25562,11 @@ async function restoreSavedPowerPrompterQueue(id: unknown) {
   if (!document) throw new Error('Saved queue not found.');
   const groups = splitSavedPowerPrompterQueue(document.snapshot);
   const prepared: BackendPowerPrompterQueuedWork[] = [];
+  const validationContext = await createPPQueueValidationContext();
   for (const group of groups) {
     const loaded = await loadRequestedPowerPrompterPipeline(group.state);
     if (!loaded.item.compatible) throw new Error(`Saved queue pipeline is unavailable: ${loaded.item.name}`);
+    await assertPPQueueExecutionReady(loaded, group.state, validationContext);
     prepared.push({
       sourceWs: null, requestId: crypto.randomUUID(), loaded, prompts: group.prompts, preservePaused: true,
       data: { mode: group.mode, queueOrigin: 'power_prompter', queuePlacement: 'end', state: group.state },
