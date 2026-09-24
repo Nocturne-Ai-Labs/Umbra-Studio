@@ -105,6 +105,7 @@ export interface FilmstripProps {
   onDataChanged?: () => void;
   onHeightChange?: (height: number) => void;
   folderLabel?: string;
+  folderPath?: string;
   unreadFolderMediaCount?: number;
   pinnedFolders?: Array<{
     path: string;
@@ -127,7 +128,6 @@ export interface FilmstripProps {
   onRefresh?: () => void;
   onToggleExpanded?: () => void;
   expanded?: boolean;
-  onRequestMore?: () => void;
   changeHint?: 'replace' | 'append' | 'remove' | 'reorder' | string;
 }
 
@@ -880,6 +880,7 @@ export function Filmstrip({
   fillContainer = false,
   onHeightChange,
   folderLabel = '',
+  folderPath = '',
   unreadFolderMediaCount = 0,
   pinnedFolders = [],
   newestFolders = [],
@@ -891,7 +892,6 @@ export function Filmstrip({
   onRefresh,
   onToggleExpanded,
   expanded = false,
-  onRequestMore,
 }: FilmstripProps) {
   const height = clampHeight(defaultHeight, minHeight, maxHeight);
   const [menuState, setMenuState] = useState<MenuState>(null);
@@ -899,8 +899,9 @@ export function Filmstrip({
   const [dropTarget, setDropTarget] = useState<{ id: string; position: FilmstripReorderPosition } | null>(null);
   const filmstripRef = useRef<HTMLDivElement | null>(null);
   const stripScrollRef = useRef<HTMLDivElement | null>(null);
-  const pendingScrollRestoreRef = useRef<{ left: number; top: number; folderLabel: string } | null>(null);
-  const lastViewportLoadRequestRef = useRef('');
+  const folderIdentity = normalizePath(folderPath || folderLabel).toLowerCase();
+  const previousFolderIdentityRef = useRef(folderIdentity);
+  const pendingScrollRestoreRef = useRef<{ left: number; top: number; folderIdentity: string } | null>(null);
   const isTouchRemote = typeof document !== 'undefined'
     && (document.documentElement.dataset.umbraRemoteMode === 'phone' || document.documentElement.dataset.umbraRemoteMode === 'tablet');
   const selectedCount = selectedIds.size;
@@ -952,9 +953,19 @@ export function Filmstrip({
 
   useLayoutEffect(() => {
     const pending = pendingScrollRestoreRef.current;
-    if (pending && pending.folderLabel === folderLabel) {
+    const folderChanged = previousFolderIdentityRef.current !== folderIdentity;
+    previousFolderIdentityRef.current = folderIdentity;
+    if (folderChanged) {
+      pendingScrollRestoreRef.current = null;
+      const node = stripScrollRef.current;
+      if (node) {
+        node.scrollLeft = 0;
+        node.scrollTop = 0;
+      }
+    } else if (pending && pending.folderIdentity === folderIdentity) {
       pendingScrollRestoreRef.current = null;
       window.requestAnimationFrame(() => {
+        if (previousFolderIdentityRef.current !== folderIdentity) return;
         const node = stripScrollRef.current;
         if (!node) return;
         const maxLeft = Math.max(0, node.scrollWidth - node.clientWidth);
@@ -972,22 +983,10 @@ export function Filmstrip({
       pendingScrollRestoreRef.current = {
         left: node.scrollLeft,
         top: node.scrollTop,
-        folderLabel,
+        folderIdentity,
       };
     };
-  }, [displayMode, folderLabel]);
-
-  useEffect(() => {
-    if (!onRequestMore || displayMode !== 'strip' || images.length <= 0) return;
-    const lastVirtualIndex = stripVirtualItems.at(-1)?.index ?? -1;
-    if (lastVirtualIndex < 0) return;
-    const loadAhead = 10;
-    if (images.length - 1 - lastVirtualIndex > loadAhead) return;
-    const requestKey = `${folderLabel}|${images.length}`;
-    if (lastViewportLoadRequestRef.current === requestKey) return;
-    lastViewportLoadRequestRef.current = requestKey;
-    onRequestMore();
-  }, [displayMode, folderLabel, images.length, onRequestMore, stripVirtualItems]);
+  }, [displayMode, folderIdentity]);
 
   useEffect(() => {
     const effectiveHeight = fillContainer ? Math.max(minHeight, height) : height;
@@ -1032,14 +1031,15 @@ export function Filmstrip({
       if (selectedIds.size <= 0) return;
       event.preventDefault();
       event.stopPropagation();
-      const ids = images
+      const ids = orderedSelectionImages
+        .filter((image) => !normalizePath(image.path).startsWith('umbra-live-generation://'))
         .map((image) => image.id)
         .filter((id) => normalizedSelectedIds.has(normalizeFilmstripSelectionId(id)));
       if (ids.length > 0) onDelete?.(ids);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [images, normalizedSelectedIds, onDelete, selectedIds.size]);
+  }, [normalizedSelectedIds, onDelete, orderedSelectionImages, selectedIds.size]);
 
   const menuActions = useMemo<MenuAction[]>(() => {
     if (!menuState) return [];
@@ -1053,7 +1053,16 @@ export function Filmstrip({
       .filter(Boolean);
     const allTrash = selectedPaths.length > 0 && selectedPaths.every(isTrashPath);
     const normalizedTargetId = normalizeFilmstripSelectionId(targetId);
-    const target = images.find((image) => normalizeFilmstripSelectionId(image.id) === normalizedTargetId);
+    const target = orderedSelectionImages.find((image) => normalizeFilmstripSelectionId(image.id) === normalizedTargetId);
+
+    if (normalizePath(target?.path).startsWith('umbra-live-generation://')) {
+      return [{
+        label: 'Open Live Preview',
+        icon: <ImageIcon size={14} />,
+        disabled: !onOpen,
+        onClick: () => target && onOpen?.(target),
+      }];
+    }
 
     if (allTrash) {
       return [
@@ -1161,6 +1170,7 @@ export function Filmstrip({
   }, [
     images,
     menuState,
+    orderedSelectionImages,
     onAddTag,
     onCopyComfyJson,
     onCopyPaths,
@@ -1470,12 +1480,13 @@ export function Filmstrip({
                       onContextMenu={(event) => {
                         event.preventDefault();
                         if (onContextMenuRequest) {
+                          const ids = selectedIdsForTarget(image.id);
                           onContextMenuRequest({
                             x: event.clientX,
                             y: event.clientY,
                             targetId: image.id,
-                            ids: [image.id],
-                            images: [image],
+                            ids,
+                            images: selectedImagesForTarget(image.id),
                           });
                         } else {
                           setMenuState({ x: event.clientX, y: event.clientY, targetId: image.id });

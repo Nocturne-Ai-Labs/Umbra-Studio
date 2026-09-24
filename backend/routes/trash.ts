@@ -1055,7 +1055,10 @@ async function emptyTrashUnlocked(_req: Request, _url: URL, context: RouteContex
     // Delete ALL files and folders in the Trash directory (not just tracked items)
     // This handles orphaned files that may not be in metadata
     if (existsSync(trashDir)) {
-      const entries = await readdir(trashDir, { withFileTypes: true });
+      // The source checkout keeps this marker in User/Trash. It is not a
+      // recoverable trash item and should survive an empty operation.
+      const entries = (await readdir(trashDir, { withFileTypes: true }))
+        .filter((entry) => entry.name !== '.gitkeep' || !entry.isFile());
       const fullEntries = entries.map((entry) => ({
         path: normalizeRelPath(join(TRASH_ROOT, entry.name)),
         fullPath: join(trashDir, entry.name),

@@ -12,8 +12,26 @@ export interface GalleryUploadRequest {
   contentBase64: string;
 }
 
+const MAX_UPLOAD_NAME_LENGTH = 255;
+
+function filenameLength(name: string): number {
+  return process.platform === 'win32' ? name.length : Buffer.byteLength(name, 'utf8');
+}
+
+function numberedUploadName(stem: string, extension: string, counter: number): string {
+  if (counter === 0) return `${stem}${extension}`;
+  const suffix = ` (${counter})${extension}`;
+  const available = MAX_UPLOAD_NAME_LENGTH - filenameLength(suffix);
+  if (available < 1) throw new Error('Upload filename is too long to keep both files');
+  const characters = Array.from(stem);
+  while (characters.length && filenameLength(characters.join('')) > available) characters.pop();
+  if (!characters.length) throw new Error('Upload filename is too long to keep both files');
+  return `${characters.join('')}${suffix}`;
+}
+
 export function isGalleryUploadFilename(name: unknown): name is string {
   return typeof name === 'string' && name.length > 0 && name !== '.' && name !== '..'
+    && filenameLength(name) <= MAX_UPLOAD_NAME_LENGTH
     && !/[<>:"/\\|?*\x00-\x1f]/.test(name) && !/[. ]$/.test(name)
     && !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name);
 }
@@ -58,7 +76,7 @@ export async function publishGalleryUpload(input: GalleryUploadRequest): Promise
       return { path: target };
     }
     for (let counter = 0; counter < 10000; counter++) {
-      const target = join(input.directory, counter ? `${stem} (${counter})${extension}` : input.name);
+      const target = join(input.directory, numberedUploadName(stem, extension, counter));
       try {
         try { await fs.link(temporaryPath, target); }
         catch (error: any) {
