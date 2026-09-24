@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.32.32 - Gallery And Queue Reliability Patch
+
+### TL;DR - Setup After Updating
+
+- Install the new package, restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux, and refresh open browser tabs. No new models, Umbra Nodes, or ComfyUI update is required.
+- Preserve the portable `User/` and `Tools/` folders during an in-place update. Linux managed tools continue to require `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents.
+
+### Changes
+
+- Compare Gallery upload duplicates as streams instead of loading both files into memory, and report filesystem read errors rather than treating them as a missing duplicate.
+- Return a retryable error when the Gallery worker times out instead of repeating the expensive scan on the main server process.
+- Match Windows Gallery folder-change paths case-insensitively so expanded branches refresh when event casing differs.
+- Count failed Power Prompter prompts as settled work in Queue Manager progress and remaining-time estimates.
+
+### Validation And Limits
+
+- Passed 509 backend tests, backend and frontend TypeScript checks, frontend lint and production build, the 52-workflow pipeline audit, and focused Gallery and queue regression tests.
+- Isolated browser checks covered Gallery, filmstrip, export and IMG2IMG handoff, expanded-folder stability, 3,500-prompt Queue Manager behavior, Power Prompter smart focus, and targeted Skip on desktop, tablet, and phone.
+- Live image or video generation against an isolated development ComfyUI installation was not part of this patch. The broader feature-by-feature interaction audit remains separate.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Gallery duplicate-upload memory spikes and hidden read failures.
+- Fixed: main-server rescans after Gallery worker timeouts and delayed Windows folder-tree refreshes.
+- Fixed: Queue Manager failure counts and remaining-time estimates after a prompt fails.
+
 ## v0.32.31 - Audit Reliability And Security Patch
 
 ### TL;DR - Setup After Updating
