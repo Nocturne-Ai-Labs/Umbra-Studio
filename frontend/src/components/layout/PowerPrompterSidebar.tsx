@@ -111,6 +111,7 @@ export const PowerPrompterSidebar = React.memo(({
   const pendingMetaLoadsRef = useRef(new Map<string, Promise<FileModelMeta | null>>());
   const metadataHydrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const metadataHydrationTokenRef = useRef(0);
+  const fileOpenRequestSeqRef = useRef(0);
   const { show, hide, isOpen, position, targetPath } = useContextMenu();
   const modal = useModal();
   const showToast = useStore((state) => state.showToast);
@@ -154,6 +155,7 @@ export const PowerPrompterSidebar = React.memo(({
   }, []);
 
   useEffect(() => () => {
+    fileOpenRequestSeqRef.current += 1;
     if (metadataHydrationTimerRef.current) {
       clearTimeout(metadataHydrationTimerRef.current);
       metadataHydrationTimerRef.current = null;
@@ -538,6 +540,7 @@ export const PowerPrompterSidebar = React.memo(({
       return;
     }
 
+    const requestSeq = ++fileOpenRequestSeqRef.current;
     try {
       if (metadataHydrationTimerRef.current) {
         clearTimeout(metadataHydrationTimerRef.current);
@@ -548,6 +551,7 @@ export const PowerPrompterSidebar = React.memo(({
         onFileOpenStart?.(item.path);
       });
       await waitForUiPaint();
+      if (requestSeq !== fileOpenRequestSeqRef.current) return;
       const isJsonDoc = item.format === 'ppcards' || String(item.path || '').toLowerCase().endsWith(PP_CARD_DOC_EXT);
       const content = isJsonDoc
         ? ''
@@ -556,8 +560,10 @@ export const PowerPrompterSidebar = React.memo(({
           if (!res.ok) throw new Error('Failed to read file');
           return await res.text();
         })();
+      if (requestSeq !== fileOpenRequestSeqRef.current) return;
       onSelectFile(item.path, content);
     } catch (err) {
+      if (requestSeq !== fileOpenRequestSeqRef.current) return;
       console.error('Failed to open file:', err);
       onFileOpenFailed?.();
       showToast('Failed to open file', 'error');
@@ -978,13 +984,6 @@ export const PowerPrompterSidebar = React.memo(({
             onDragEnter={(e) => handleDragEnter(e, item)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, item)}
-            onMouseDown={(event) => {
-              if (!item.isDirectory && event.button === 0) {
-                flushSync(() => {
-                  onFileOpenStart?.(item.path);
-                });
-              }
-            }}
             onClick={() => handleFileClick(item)}
             onContextMenu={(e) => show(e, item.path)}
             style={{ paddingLeft: `${depth * 12 + 12}px` }}
