@@ -94,6 +94,9 @@ const modelFileExtensions = new Set([
 const listCache = new Map<string, CachedEntry<any>>();
 const treeCache = new Map<string, CachedEntry<any>>();
 const summaryCache = new Map<string, CachedEntry<any>>();
+// Requests run concurrently. An invalidation must not let an older scan
+// publish its result back into a cache after the mutation has completed.
+let cacheGeneration = 0;
 
 function writeResponse(response: ModelIndexWorkerResponse) {
   process.stdout.write(`${JSON.stringify(response)}\n`);
@@ -141,6 +144,7 @@ function setCached<T>(cache: Map<string, CachedEntry<T>>, key: string, value: T)
 function invalidatePathCaches(fullPath: string) {
   const normalized = normalizePathForKey(fullPath);
   if (!normalized) return;
+  cacheGeneration += 1;
   for (const cache of [listCache, treeCache, summaryCache]) {
     for (const key of Array.from(cache.keys())) {
       if (key === normalized || key.startsWith(`${normalized}::`) || key.startsWith(`${normalized}/`)) {
@@ -190,6 +194,8 @@ async function readModelSnapshotSummary(fullPath: string, clientPath: string, di
   const snapshotPath = directory.artifacts.has(snapshotName) ? preferredSnapshotPath : legacySnapshotPath;
   if (!directory.artifacts.has(snapshotName) && !directory.files.has(snapshotName)) return null;
   try {
+    const snapshotStat = await fs.lstat(snapshotPath);
+    if (!snapshotStat.isFile() || snapshotStat.isSymbolicLink()) return null;
     const raw = await fs.readFile(snapshotPath, 'utf8');
     const parsed = toRecord(JSON.parse(String(raw || '{}')));
     const model = toRecord(parsed.model);
@@ -223,12 +229,22 @@ async function readModelSnapshotSummary(fullPath: string, clientPath: string, di
 }
 
 async function listDirectoryEntries(fullPath: string): Promise<Dirent[]> {
-  if (!existsSync(fullPath)) return [];
-  try {
-    return await fs.readdir(fullPath, { withFileTypes: true });
-  } catch {
-    return [];
+  return fs.readdir(fullPath, { withFileTypes: true });
+}
+
+async function listArtifactNames(fullPath: string): Promise<string[]> {
+  const artifactDir = join(fullPath, MODEL_ARTIFACT_DIR);
+  const stat = await fs.lstat(artifactDir).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (!stat) return [];
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Model artifact folder is not a regular directory');
+  const [parentRealPath, artifactRealPath] = await Promise.all([fs.realpath(fullPath), fs.realpath(artifactDir)]);
+  if (normalizePathForKey(dirname(artifactRealPath)) !== normalizePathForKey(parentRealPath)) {
+    throw new Error('Model artifact folder moved outside its model folder');
   }
+  return fs.readdir(artifactDir);
 }
 
 function compareNames(a: { name: string }, b: { name: string }) {
@@ -239,6 +255,7 @@ async function buildSummary(path: string, fullPath: string) {
   const cacheKey = normalizePathForKey(fullPath);
   const cached = getCached(summaryCache, cacheKey);
   if (cached) return cached;
+  const generation = cacheGeneration;
 
   const entries = await listDirectoryEntries(fullPath);
   let folderCount = 0;
@@ -259,7 +276,7 @@ async function buildSummary(path: string, fullPath: string) {
     folderCount,
     fileCount: modelFileCount,
   };
-  setCached(summaryCache, cacheKey, summary);
+  if (generation === cacheGeneration) setCached(summaryCache, cacheKey, summary);
   return summary;
 }
 
@@ -267,6 +284,7 @@ async function buildTree(path: string, fullPath: string) {
   const cacheKey = normalizePathForKey(fullPath);
   const cached = getCached(treeCache, cacheKey);
   if (cached) return cached;
+  const generation = cacheGeneration;
 
   const entries = await listDirectoryEntries(fullPath);
   const folders = entries
@@ -285,7 +303,7 @@ async function buildTree(path: string, fullPath: string) {
     path,
     folders,
   };
-  setCached(treeCache, cacheKey, tree);
+  if (generation === cacheGeneration) setCached(treeCache, cacheKey, tree);
   return tree;
 }
 
@@ -294,9 +312,10 @@ async function buildList(path: string, fullPath: string, options: { includeMetad
   const cacheKey = `${normalizePathForKey(fullPath)}::metadata=${includeMetadata ? '1' : '0'}`;
   const cached = getCached(listCache, cacheKey);
   if (cached) return cached;
+  const generation = cacheGeneration;
 
   const entries = await listDirectoryEntries(fullPath);
-  const artifactNames: string[] = includeMetadata ? await fs.readdir(join(fullPath, MODEL_ARTIFACT_DIR)).catch(() => []) : [];
+  const artifactNames: string[] = includeMetadata ? await listArtifactNames(fullPath) : [];
   const directory = { artifacts: new Set(artifactNames), files: new Set(entries.map(entry => entry.name)), thumbnails: new Map<string, string>() };
   if (includeMetadata) {
     for (const [names, parent] of [[artifactNames, join(path, MODEL_ARTIFACT_DIR)], [entries.map(entry => entry.name), path]] as const) {
@@ -371,7 +390,7 @@ async function buildList(path: string, fullPath: string, options: { includeMetad
     },
     complete: includeMetadata,
   };
-  setCached(listCache, cacheKey, list);
+  if (generation === cacheGeneration) setCached(listCache, cacheKey, list);
   return list;
 }
 

@@ -1,4 +1,5 @@
-import { basename, isAbsolute, relative, resolve } from 'path';
+import { lstatSync, realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'path';
 import { settingsManager } from './settings/SettingsManager';
 
 export interface ResolvedPath {
@@ -145,6 +146,32 @@ export function createRuntimePathHelpers(options: RuntimePathOptions) {
     return safeParts.join('/');
   }
 
+  // Resolve existing ancestors so a junction or symlink inside User/Datasets cannot
+  // redirect a dataset operation outside the configured datasets root. Missing
+  // descendants are kept lexical so new dataset and concept paths still work.
+  function canonicalizeNearestExisting(input: string): string | null {
+    let ancestor = input;
+    const missing: string[] = [];
+    while (true) {
+      try {
+        lstatSync(ancestor);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return null;
+        const parent = dirname(ancestor);
+        if (parent === ancestor) return null;
+        missing.push(basename(ancestor));
+        ancestor = parent;
+        continue;
+      }
+      try {
+        return resolve(realpathSync.native(ancestor), ...missing.reverse());
+      } catch {
+        // A dangling link or an inaccessible ancestor must never be treated as missing.
+        return null;
+      }
+    }
+  }
+
   function resolveDatasetPathSafe(...segments: Array<unknown>): string | null {
     const safeSegments: string[] = [];
     for (const rawSegment of segments) {
@@ -159,6 +186,11 @@ export function createRuntimePathHelpers(options: RuntimePathOptions) {
     if (candidateNormalized !== datasetsRootNormalized && !candidateNormalized.startsWith(`${datasetsRootNormalized}/`)) {
       return null;
     }
+    const canonicalRoot = canonicalizeNearestExisting(DATASETS_ROOT);
+    const canonicalCandidate = canonicalizeNearestExisting(candidate);
+    if (!canonicalRoot || !canonicalCandidate) return null;
+    const fromRoot = relative(canonicalRoot, canonicalCandidate);
+    if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) return null;
     return candidate;
   }
 

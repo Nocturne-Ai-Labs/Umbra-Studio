@@ -23,10 +23,11 @@ export function validateModelMediaUrl(value: string): URL {
 export async function fetchModelMedia(
   value: string,
   token = '',
-  options: { maxBytes?: number; timeoutMs?: number } = {},
+  options: { maxBytes?: number; timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<{ bytes: Buffer; mimeType: string }> {
   const maxBytes = options.maxBytes ?? 80 * 1024 * 1024;
-  const signal = AbortSignal.timeout(options.timeoutMs ?? 90_000);
+  const timeout = AbortSignal.timeout(options.timeoutMs ?? 90_000);
+  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   let url = validateModelMediaUrl(value);
   for (let redirects = 0; redirects <= 5; redirects++) {
     const headers = new Headers({ 'User-Agent': 'UmbraStudio', Accept: 'image/*,video/*;q=0.9', 'Accept-Encoding': 'identity' });

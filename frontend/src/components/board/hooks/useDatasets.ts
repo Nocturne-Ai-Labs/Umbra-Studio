@@ -60,11 +60,12 @@ export function useDatasets() {
     setError(null);
 
     try {
-      const response = await fetch('/api/datasets');
+      const response = await fetch('/api/datasets?summary=1');
       if (!response.ok) throw new Error(await getResponseError(response, 'Failed to fetch datasets'));
 
       const data = await response.json();
-      if (requestSequence === listRequestSequence.current) setDatasets(data.datasets || []);
+      if (!Array.isArray(data?.datasets)) throw new Error('Invalid dataset list response');
+      if (requestSequence === listRequestSequence.current) setDatasets(data.datasets);
     } catch (err: any) {
       if (requestSequence === listRequestSequence.current) setError(err.message);
     } finally {
@@ -109,7 +110,7 @@ export function useDatasets() {
   }, [fetchDatasets]);
 
   // Rename dataset
-  const renameDataset = useCallback(async (oldName: string, newName: string): Promise<boolean> => {
+  const renameDataset = useCallback(async (oldName: string, newName: string): Promise<string | null> => {
     try {
       const response = await fetch(`/api/datasets/${encodeURIComponent(oldName)}/rename`, {
         method: 'POST',
@@ -119,11 +120,13 @@ export function useDatasets() {
 
       if (!response.ok) throw new Error(await getResponseError(response, 'Failed to rename dataset'));
 
+      const data = await response.json();
+      if (typeof data?.name !== 'string' || !data.name) throw new Error('Invalid dataset rename response');
       await fetchDatasets();
-      return true;
+      return data.name;
     } catch (err: any) {
       setError(err.message);
-      return false;
+      return null;
     }
   }, [fetchDatasets]);
 
@@ -149,7 +152,7 @@ export function useDatasets() {
     conceptName: string,
     repeats: number = 10,
     isReg: boolean = false
-  ): Promise<boolean> => {
+  ): Promise<string | null> => {
     try {
       const response = await fetch(`/api/datasets/${encodeURIComponent(datasetName)}/concept`, {
         method: 'POST',
@@ -159,11 +162,13 @@ export function useDatasets() {
 
       if (!response.ok) throw new Error(await getResponseError(response, 'Failed to create concept'));
 
+      const data = await response.json();
+      if (typeof data?.folder !== 'string' || !data.folder) throw new Error('Invalid concept create response');
       await fetchDatasets();
-      return true;
+      return data.folder;
     } catch (err: any) {
       setError(err.message);
-      return false;
+      return null;
     }
   }, [fetchDatasets]);
 

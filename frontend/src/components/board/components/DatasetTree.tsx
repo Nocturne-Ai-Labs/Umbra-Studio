@@ -25,6 +25,8 @@ type DatasetTreeContextMenu =
   | { type: 'concept'; x: number; y: number; dataset: Dataset; conceptKey: string; conceptName: string }
   | { type: 'empty'; x: number; y: number };
 
+const TREE_PAGE_SIZE = 200;
+
 export function DatasetTree({
   datasets,
   selectedDataset,
@@ -42,6 +44,10 @@ export function DatasetTree({
 }: DatasetTreeProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<DatasetTreeContextMenu | null>(null);
+  const [visibleDatasetCount, setVisibleDatasetCount] = useState(TREE_PAGE_SIZE);
+  const [visibleConceptCounts, setVisibleConceptCounts] = useState<Record<string, number>>({});
+  const selectedDatasetIndex = datasets.findIndex(dataset => dataset.name === selectedDataset);
+  const shownDatasetCount = Math.max(visibleDatasetCount, selectedDatasetIndex + 1);
 
   const toggleExpand = (name: string) => {
     setExpanded(prev => {
@@ -179,9 +185,13 @@ export function DatasetTree({
       </div>
 
       <div className="custom-scrollbar flex-1 space-y-1 overflow-y-auto p-2">
-        {datasets.map(dataset => {
+        {datasets.slice(0, shownDatasetCount).map(dataset => {
           const isExpanded = expanded.has(dataset.name);
           const isSelected = selectedDataset === dataset.name && !selectedConcept;
+          const selectedConceptIndex = selectedDataset === dataset.name
+            ? dataset.concepts.findIndex(concept => concept.folder === selectedConcept)
+            : -1;
+          const shownConceptCount = Math.max(visibleConceptCounts[dataset.name] || TREE_PAGE_SIZE, selectedConceptIndex + 1);
 
           return (
             <div key={dataset.name}>
@@ -238,7 +248,7 @@ export function DatasetTree({
               {/* Concepts */}
               {isExpanded && (
                 <div className="ml-4 mt-0.5 space-y-0.5 border-l border-white/10 pl-2">
-                  {dataset.concepts.map(concept => {
+                  {dataset.concepts.slice(0, shownConceptCount).map(concept => {
                     const conceptKey = concept.folder;
                     const isConceptSelected = selectedDataset === dataset.name && selectedConcept === conceptKey;
 
@@ -261,7 +271,7 @@ export function DatasetTree({
                           {concept.name}
                         </span>
                         <span className="text-xs text-zinc-500">
-                          {concept.images.length}
+                          {concept.imageCount}
                         </span>
                         <button
                           onClick={(e) => {
@@ -276,6 +286,19 @@ export function DatasetTree({
                     );
                   })}
 
+                  {shownConceptCount < dataset.concepts.length && (
+                    <button
+                      type="button"
+                      onClick={() => setVisibleConceptCounts(previous => ({
+                        ...previous,
+                        [dataset.name]: shownConceptCount + TREE_PAGE_SIZE,
+                      }))}
+                      className="w-full rounded px-2 py-1 text-left text-xs text-cyan-300 hover:bg-white/5"
+                    >
+                      Show more concepts ({shownConceptCount} of {dataset.concepts.length})
+                    </button>
+                  )}
+
                   {dataset.concepts.length === 0 && (
                     <p className="px-2 py-1 text-xs italic text-zinc-500">
                       No concepts yet
@@ -286,6 +309,16 @@ export function DatasetTree({
             </div>
           );
         })}
+
+        {shownDatasetCount < datasets.length && (
+          <button
+            type="button"
+            onClick={() => setVisibleDatasetCount(shownDatasetCount + TREE_PAGE_SIZE)}
+            className="w-full rounded px-2 py-1 text-left text-xs text-cyan-300 hover:bg-white/5"
+          >
+            Show more datasets ({shownDatasetCount} of {datasets.length})
+          </button>
+        )}
 
         {datasets.length === 0 && (
           <div className="py-8 text-center text-zinc-500">
