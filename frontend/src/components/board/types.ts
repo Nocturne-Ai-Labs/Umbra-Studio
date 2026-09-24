@@ -58,7 +58,8 @@ export interface Concept {
   repeats: number;
   isReg: boolean;
   folder: string;
-  images: DatasetImage[];
+  imageCount: number;
+  images?: DatasetImage[];
 }
 
 // Image in a dataset

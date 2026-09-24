@@ -204,6 +204,9 @@ import { createDatasetArchive } from './backend/DatasetArchiveService';
 import { decodeDatasetImportDataUrl, detectDatasetImportImage, fetchDatasetImportImage } from './backend/DatasetImportUrlService';
 import { moveDatasetImages } from './backend/DatasetImageMoveService';
 import { saveDatasetImportedImage } from './backend/DatasetImageStore';
+import { listDatasetCatalog, mapBounded } from './backend/DatasetCatalog';
+import { withDatasetConceptLocks } from './backend/DatasetConceptLock';
+import { DatasetUploadTooLargeError, parseDatasetUploadFormData } from './backend/DatasetUpload';
 import { getGalleryArchiveJob, listGalleryArchives, queueGalleryArchive } from './backend/GalleryArchiveService';
 import { FirstRunService } from './backend/FirstRunService';
 import { UMBRA_MIGRATION_EXIT_CODE } from './shared/onboarding/firstRun';
@@ -637,7 +640,7 @@ async function writeDatasetConceptSettings(
     }
     const normalized = normalizeDatasetConceptSettings(settings, datasetName, conceptFolder);
     const saved = { ...normalized, updatedAt: Math.max(Date.now(), (current.updatedAt ?? 0) + 1) };
-    await writeTextFileAtomic(join(canonicalPath, DATASET_CONCEPT_SETTINGS_FILE), `${JSON.stringify(saved, null, 2)}\n`);
+    await writeTextFileAtomic(join(canonicalPath, DATASET_CONCEPT_SETTINGS_FILE), `${JSON.stringify(saved, null, 2)}\n`, false);
     return saved;
   });
   datasetConceptSettingsWrites.set(key, write);
@@ -649,24 +652,47 @@ async function handleBooruImageProxy(req: Request, url: URL): Promise<Response> 
   const targetUrl = normalizeBooruMediaUrl(url.searchParams.get('url'));
   if (!targetUrl) return json({ error: 'Only configured Data Forge source media can be proxied.' }, 400);
 
-  const requestHeaders = buildBooruMediaRequestHeaders(
-    targetUrl,
-    req.headers.get('accept') || undefined,
-    req.headers.get('range') || '',
-  );
-
   let upstream: Response;
   try {
-    upstream = await fetch(targetUrl.toString(), {
-      headers: requestHeaders,
-      signal: AbortSignal.timeout(20000),
-    });
+    const signal = AbortSignal.timeout(20000);
+    let currentUrl = targetUrl;
+    let response: Response | null = null;
+    for (let redirects = 0; redirects <= 4; redirects++) {
+      const nextResponse = await fetch(currentUrl, {
+        headers: buildBooruMediaRequestHeaders(
+          currentUrl,
+          req.headers.get('accept') || undefined,
+          req.headers.get('range') || '',
+        ),
+        redirect: 'manual',
+        signal,
+      });
+      if (nextResponse.status >= 300 && nextResponse.status < 400) {
+        const location = nextResponse.headers.get('location');
+        await nextResponse.body?.cancel();
+        const nextUrl = location && normalizeBooruMediaUrl(new URL(location, currentUrl).href);
+        if (!nextUrl) return json({ error: 'Booru media redirected outside configured sources.' }, 502);
+        currentUrl = nextUrl;
+        continue;
+      }
+      response = nextResponse;
+      break;
+    }
+    if (!response) return json({ error: 'Too many booru media redirects.' }, 502);
+    upstream = response;
   } catch (error: any) {
     return json({ error: error?.message || 'Failed to fetch booru media.' }, 502);
   }
 
   if (!upstream.ok && upstream.status !== 206) {
+    await upstream.body?.cancel();
     return json({ error: `Booru media request failed: ${upstream.status}` }, upstream.status >= 400 ? upstream.status : 502);
+  }
+  const mediaType = (upstream.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
+  if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif', 'image/bmp',
+    'video/mp4', 'video/webm', 'video/quicktime'].includes(mediaType)) {
+    await upstream.body?.cancel();
+    return json({ error: 'Booru source did not return supported media.' }, 502);
   }
 
   const responseHeaders = new Headers();
@@ -683,6 +709,7 @@ async function handleBooruImageProxy(req: Request, url: URL): Promise<Response> 
     if (value) responseHeaders.set(header, value);
   }
   responseHeaders.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+  responseHeaders.set('X-Content-Type-Options', 'nosniff');
   responseHeaders.set('X-Umbra-Booru-Proxy', '1');
 
   return new Response(upstream.body, {
@@ -1145,6 +1172,13 @@ const MODEL_THUMB_PREFIX = '.umbra-model-thumb';
 const MODEL_INSPECTION_SUFFIX = '.umbra-model-inspection.txt';
 const MODEL_ARTIFACT_DIR = '.umbra';
 const DATASET_IMPORT_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.avif']);
+const DATASET_TAGGER_MODEL_REPOS = new Set([
+  'SmilingWolf/wd-vit-tagger-v3',
+  'SmilingWolf/wd-convnext-tagger-v3',
+  'SmilingWolf/wd-eva02-large-tagger-v3',
+  'SmilingWolf/wd-swinv2-tagger-v3',
+]);
+const DATASET_NATURAL_MODEL_REPO = 'prithivMLmods/Qwen2-VL-2B-Abliterated-Caption-it';
 
 function datasetCaptionPath(directory: string, imageName: string, imageSpecificFirst = false): string {
   const standard = join(directory, `${basename(imageName, extname(imageName))}.txt`);
@@ -1199,8 +1233,9 @@ async function copyLocalImageIntoDatasetConcept(
     throw new Error('Source image format does not match its filename');
   }
 
-  if (!existsSync(conceptPath)) {
-    await fs.mkdir(conceptPath, { recursive: true });
+  const conceptStat = await fs.lstat(conceptPath).catch(() => null);
+  if (!conceptStat?.isDirectory()) {
+    throw new Error('Dataset concept no longer exists');
   }
 
   const parsedBase = basename(originalName, extname(originalName)) || 'image';
@@ -23133,9 +23168,9 @@ async function healPPCardDocumentFromBackup(filePath: string, targetPath: string
   return backup.document;
 }
 
-async function writeTextFileAtomic(targetPath: string, content: string): Promise<void> {
+async function writeTextFileAtomic(targetPath: string, content: string, createDirectory = true): Promise<void> {
   const targetDir = dirname(targetPath);
-  await fs.mkdir(targetDir, { recursive: true });
+  if (createDirectory) await fs.mkdir(targetDir, { recursive: true });
   const tempPath = join(targetDir, `.${basename(targetPath)}.${process.pid}.${Date.now()}.${randomBytes(4).toString('hex')}.tmp`);
   let handle: fs.FileHandle | null = null;
   try {
@@ -29054,16 +29089,21 @@ async function handleModelManagerFsReveal(req: Request, server?: RequestIpServer
 }
 
 const MODEL_MANAGER_MEDIA_MAX_BYTES = 80 * 1024 * 1024;
+const MODEL_MANAGER_MEDIA_CACHE_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+const MODEL_MANAGER_MEDIA_CACHE_MAX_ENTRIES = 2000;
 const MODEL_MANAGER_MEDIA_CONCURRENCY = 4;
+const MODEL_MANAGER_MEDIA_MAX_QUEUED = 128;
 let modelManagerMediaActive = 0;
 const modelManagerMediaQueue: Array<() => void> = [];
 const modelManagerMediaRequests = new Map<string, Promise<{ localPath: string; mimeType: string }>>();
+class ModelManagerMediaBusyError extends Error {}
 
 async function withModelManagerMediaSlot<T>(task: () => Promise<T>): Promise<T> {
   await new Promise<void>(resolve => {
     const acquire = () => { modelManagerMediaActive++; resolve(); };
     if (modelManagerMediaActive < MODEL_MANAGER_MEDIA_CONCURRENCY) acquire();
-    else modelManagerMediaQueue.push(acquire);
+    else if (modelManagerMediaQueue.length < MODEL_MANAGER_MEDIA_MAX_QUEUED) modelManagerMediaQueue.push(acquire);
+    else throw new ModelManagerMediaBusyError('Too many model media requests are waiting');
   });
   try { return await task(); }
   finally {
@@ -29179,6 +29219,19 @@ async function removeModelManagerMediaFileIfUnchanged(localPath: string, owned: 
   }
 }
 
+async function trimModelManagerMediaCache(protectedMediaUrl: string): Promise<void> {
+  const removed = await modelManagerStateDb.trimMediaCache(
+    MODEL_MANAGER_MEDIA_CACHE_MAX_BYTES,
+    MODEL_MANAGER_MEDIA_CACHE_MAX_ENTRIES,
+    protectedMediaUrl,
+  );
+  for (const entry of removed) {
+    if (!isPathInsideDirectory(MODEL_MANAGER_MEDIA_CACHE_DIR, entry.localPath)) continue;
+    const stat = await fs.lstat(entry.localPath, { bigint: true }).catch(() => null);
+    if (stat?.isFile()) await removeModelManagerMediaFileIfUnchanged(entry.localPath, stat);
+  }
+}
+
 async function loadModelManagerMediaCache(normalizedUrl: string): Promise<{ localPath: string; mimeType: string }> {
   await modelManagerStateDb.ready();
   const cached = modelManagerStateDb.getMediaCache(normalizedUrl);
@@ -29221,6 +29274,9 @@ async function loadModelManagerMediaCache(normalizedUrl: string): Promise<{ loca
         fetchedAt: Date.now(),
       });
       published = true;
+      await trimModelManagerMediaCache(normalizedUrl).catch(error => {
+        console.warn('[ModelManager] Could not trim media cache:', error);
+      });
       if (cached && cacheStat?.isFile() && cached.localPath !== localPath) {
         await removeModelManagerMediaFileIfUnchanged(cached.localPath, cacheStat);
       }
@@ -29316,7 +29372,7 @@ async function handleModelManagerMedia(url: URL): Promise<Response> {
   } catch (error: any) {
     const message = String(error?.message || 'Failed to load media');
     const badRequest = message.includes('Unsupported media URL') || message.includes('Unsupported media host') || message.includes('Missing media URL');
-    return json({ error: message }, badRequest ? 400 : 500);
+    return json({ error: message }, error instanceof ModelManagerMediaBusyError ? 503 : badRequest ? 400 : 500);
   }
 }
 
@@ -29638,7 +29694,8 @@ async function handleModelManagerCivitaiDownload(req: Request): Promise<Response
     if (!downloadUrl) return json({ error: 'Missing download URL' }, 400);
     if (!isCivitaiModelDownloadUrl(downloadUrl)) return json({ error: 'Invalid CivitAI model download URL' }, 400);
 
-    const userRoot = getModelManagerRootsResolved().find((root) => root.key === 'user');
+    const modelRoots = getModelManagerRootsResolved();
+    const userRoot = modelRoots.find((root) => root.key === 'user');
     if (!userRoot) return json({ error: 'User models root unavailable' }, 500);
     await fs.mkdir(userRoot.fullPath, { recursive: true });
     const requestedDestination = String(body.destinationFolder || '').trim();
@@ -29652,6 +29709,12 @@ async function handleModelManagerCivitaiDownload(req: Request): Promise<Response
         return json({ error: 'Download destination must be a folder' }, 400);
       }
     }
+    const selectedRoot = exactDestination
+      ? modelRoots.filter(root => isPathInsideDirectory(root.fullPath, exactDestination.fullPath))
+        .sort((a, b) => b.fullPath.length - a.fullPath.length)[0]
+      : userRoot;
+    if (!selectedRoot) return json({ error: 'Download destination is outside model roots' }, 400);
+    const allowedRootRealPath = await fs.realpath(selectedRoot.fullPath);
 
     const jobId = String(body.jobId || '').trim() || `model-download-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const resolvedFileName = fileName || `model-${Date.now()}.safetensors`;
@@ -29662,6 +29725,7 @@ async function handleModelManagerCivitaiDownload(req: Request): Promise<Response
       fileName: resolvedFileName,
       modelType: modelType || 'Other',
       destinationRoot: exactDestination?.fullPath || userRoot.fullPath,
+      allowedRootRealPath,
       useExactDestination: Boolean(exactDestination),
       civitaiToken: await getModelManagerCivitaiToken(),
       snapshot: body.snapshot,
@@ -29693,7 +29757,6 @@ async function handleModelManagerDownloadStatus(jobId: string): Promise<Response
     if (!job) return json({ success: true, job: null }, 404);
     const status = String(job.status || '').trim();
     if ((status === 'completed' || status === 'failed' || status === 'cancelled') && !modelManagerDownloadInvalidationSet.has(jobId)) {
-      modelManagerDownloadInvalidationSet.add(jobId);
       const fileName = String((job as any).fileName || basename(String(job.destinationPath || jobId)));
       console.log(`[ModelManager] Download ${status} file="${fileName}"`);
       const invalidatePaths: string[] = [];
@@ -29706,6 +29769,7 @@ async function handleModelManagerDownloadStatus(jobId: string): Promise<Response
       if (invalidatePaths.length > 0) {
         await modelIndexWorkerService.invalidatePaths(invalidatePaths);
       }
+      modelManagerDownloadInvalidationSet.add(jobId);
     }
     return json({ success: true, ...(result || {}) });
   } catch (error: any) {
@@ -29754,13 +29818,23 @@ async function handleModelManagerOpenedModelsPost(req: Request): Promise<Respons
   try {
     const body = await req.json() as {
       openedModelIds?: unknown;
+      addModelId?: unknown;
       modelSnapshot?: unknown;
     };
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'Invalid saved model update' }, 400);
+    const hasAddModelId = Object.prototype.hasOwnProperty.call(body, 'addModelId');
+    const hasOpenedModelIds = Object.prototype.hasOwnProperty.call(body, 'openedModelIds');
+    const addModelId = Number(body.addModelId);
+    if ((hasAddModelId && (!Number.isSafeInteger(addModelId) || addModelId <= 0))
+      || (hasAddModelId && hasOpenedModelIds)) return json({ error: 'Invalid model ID update' }, 400);
     const entry = Object.prototype.hasOwnProperty.call(body, 'modelSnapshot')
       ? normalizeModelManagerClipboardEntry({ model: body.modelSnapshot })
       : null;
+    if (hasAddModelId && entry && entry.id !== addModelId) return json({ error: 'Snapshot model ID does not match' }, 400);
     const nextState = await saveModelManagerState(currentState => ({
-      openedModelIds: Object.prototype.hasOwnProperty.call(body, 'openedModelIds')
+      openedModelIds: hasAddModelId
+        ? [addModelId, ...currentState.openedModelIds.filter(id => id !== addModelId)]
+        : hasOpenedModelIds
         ? normalizeModelManagerOpenedIds(body.openedModelIds)
         : currentState.openedModelIds,
       civitaiClipboard: entry
@@ -34276,7 +34350,9 @@ const server = Bun.serve<UmbraSocketData>({
           const filename = sanitizeDatasetSegment(body.filename);
           if (!dataset || !concept || !filename || filename !== body.filename) return json({ error: 'Invalid dataset image path' }, 400);
           const conceptPath = resolveDatasetPathSafe(dataset, concept);
-          if (!conceptPath || !existsSync(conceptPath)) return json({ error: 'Concept not found' }, 404);
+          if (!conceptPath) return json({ error: 'Concept not found' }, 404);
+          return await withDatasetConceptLocks([conceptPath], async () => {
+          if (!existsSync(conceptPath)) return json({ error: 'Concept not found' }, 404);
           const config = await readApiKeys(CONFIG_PATH) || await readApiKeys(LEGACY_CONFIG_PATH) || {};
           const source = await resolveBooruRepairSource(conceptPath, filename, config, req.signal);
           let result;
@@ -34288,6 +34364,7 @@ const server = Bun.serve<UmbraSocketData>({
             result = await downloadBooruOriginal({ conceptPath, filename, source: refreshed, replace: true, signal: req.signal });
           }
           return json({ success: true, ...result });
+          });
         } catch (error: any) {
           return json({ error: error?.message || 'Could not re-download the image. The existing file was kept.' }, 400);
         }
@@ -34297,67 +34374,8 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/datasets' && method === 'GET') {
         const datasetsDir = join(ROOT_DIR, 'User', 'Datasets');
         try {
-          if (!existsSync(datasetsDir)) {
-            await fs.mkdir(datasetsDir, { recursive: true });
-            return json({ datasets: [] });
-          }
-
-          const entries = await fs.readdir(datasetsDir, { withFileTypes: true });
-          const datasets = await Promise.all(
-            entries
-              .filter(e => e.isDirectory())
-              .map(async (dir) => {
-                const datasetPath = join(datasetsDir, dir.name);
-                const datasetStats = await fs.stat(datasetPath).catch(() => null);
-                const archivePath = join(datasetsDir, `${dir.name}.zip`);
-                const archiveStats = await fs.stat(archivePath).catch(() => null);
-                const subEntries = await fs.readdir(datasetPath, { withFileTypes: true });
-
-                // Parse concept folders (e.g., "10_base", "1_reg_face")
-                const concepts = await Promise.all(
-                  subEntries
-                    .filter(e => e.isDirectory())
-                    .map(async (conceptDir) => {
-                      const match = conceptDir.name.match(/^(\d+)_(reg_)?(.+)$/);
-                      if (!match) return null;
-
-                      const [, repeatsStr, regPrefix, name] = match;
-                      const conceptPath = join(datasetPath, conceptDir.name);
-                      const conceptStats = await fs.stat(conceptPath).catch(() => null);
-                      const files = await fs.readdir(conceptPath);
-                      const imageFiles = files.filter(f => /\.(jpg|jpeg|png|webp|bmp|gif|avif)$/i.test(f));
-
-                      return {
-                        name,
-                        repeats: parseInt(repeatsStr),
-                        isReg: !!regPrefix,
-                        folder: conceptDir.name,
-                        modifiedMs: conceptStats?.mtimeMs || 0,
-                        images: imageFiles.map((filename) => ({ filename })),
-                      };
-                    })
-                );
-                const sortedConcepts = concepts
-                  .filter(Boolean)
-                  .sort((a: any, b: any) => Number(b?.modifiedMs || 0) - Number(a?.modifiedMs || 0));
-
-                return {
-                  name: dir.name,
-                  path: datasetPath,
-                  modifiedMs: datasetStats?.mtimeMs || 0,
-                  archive: archiveStats?.isFile()
-                    ? {
-                        path: archivePath,
-                        size: archiveStats.size,
-                        modifiedMs: archiveStats.mtimeMs,
-                      }
-                    : null,
-                  concepts: sortedConcepts,
-                };
-              })
-          );
-
-          datasets.sort((a: any, b: any) => Number(b?.modifiedMs || 0) - Number(a?.modifiedMs || 0));
+          // Data Forge needs counts for its tree. Gallery still consumes image names from the default response.
+          const datasets = await listDatasetCatalog(datasetsDir, url.searchParams.get('summary') === '1');
           return json({ datasets });
         } catch (error: any) {
           return json({ error: error.message }, 500);
@@ -34378,10 +34396,11 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'Dataset already exists' }, 400);
           }
 
-          await fs.mkdir(datasetPath, { recursive: true });
+          await fs.mkdir(dirname(datasetPath), { recursive: true });
+          await fs.mkdir(datasetPath);
           return json({ success: true, name: sanitizedName });
         } catch (error: any) {
-          return json({ error: error.message }, 500);
+          return json({ error: error.message }, error?.code === 'EEXIST' ? 409 : 500);
         }
       }
 
@@ -34512,10 +34531,10 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'Concept folder already exists' }, 400);
           }
 
-          await fs.mkdir(conceptPath, { recursive: true });
+          await fs.mkdir(conceptPath);
           return json({ success: true, folder: folderName });
         } catch (error: any) {
-          return json({ error: error.message }, 500);
+          return json({ error: error.message }, error?.code === 'EEXIST' ? 409 : 500);
         }
       }
 
@@ -34529,12 +34548,13 @@ const server = Bun.serve<UmbraSocketData>({
         if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
 
         try {
-          if (!existsSync(conceptPath)) {
-            return json({ error: 'Concept not found' }, 404);
-          }
-
-          await fs.rm(conceptPath, { recursive: true, force: true });
-          return json({ success: true });
+          return await withDatasetConceptLocks([conceptPath], async () => {
+            if (!existsSync(conceptPath)) {
+              return json({ error: 'Concept not found' }, 404);
+            }
+            await fs.rm(conceptPath, { recursive: true, force: true });
+            return json({ success: true });
+          });
         } catch (error: any) {
           return json({ error: error.message }, 500);
         }
@@ -34554,16 +34574,26 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'Concept not found' }, 404);
           }
 
-          const files = await fs.readdir(conceptPath);
-          const images = await Promise.all(
-            files
-              .filter(f => /\.(jpg|jpeg|png|webp|bmp|gif|avif)$/i.test(f))
-              .map(async (f) => {
+          const files = await fs.readdir(conceptPath, { withFileTypes: true });
+          const listedImages = await mapBounded(
+            files.filter(entry => entry.isFile() && DATASET_IMPORT_IMAGE_EXTENSIONS.has(extname(entry.name).toLowerCase())),
+            12,
+            async (entry) => {
+                const f = entry.name;
+                const imageStat = await fs.lstat(join(conceptPath, f)).catch((error: NodeJS.ErrnoException) => {
+                  if (error.code === 'ENOENT') return null;
+                  throw error;
+                });
+                if (!imageStat?.isFile()) return null;
                 const captionPath = datasetCaptionPath(conceptPath, f);
                 let caption = '';
                 let tags: string[] = [];
 
-                if (existsSync(captionPath)) {
+                const captionStat = await fs.lstat(captionPath).catch((error: NodeJS.ErrnoException) => {
+                  if (error.code === 'ENOENT') return null;
+                  throw error;
+                });
+                if (captionStat?.isFile()) {
                   caption = await fs.readFile(captionPath, 'utf-8');
                   tags = caption.split(',').map(t => t.trim()).filter(Boolean);
                 }
@@ -34572,12 +34602,13 @@ const server = Bun.serve<UmbraSocketData>({
                   filename: f,
                   path: `/User/Datasets/${datasetName}/${conceptFolder}/${f}`,
                   canRedownload: /^[a-f0-9]{32}\.[a-z0-9]+$/i.test(f) || existsSync(join(conceptPath, booruSourceSidecar(f))),
-                  revision: (await fs.stat(join(conceptPath, f))).mtimeMs,
+                  revision: imageStat.mtimeMs,
                   caption,
                   tags,
                 };
-              })
+              }
           );
+          const images = listedImages.filter((image): image is NonNullable<typeof image> => image !== null);
 
           return json({ images });
         } catch (error: any) {
@@ -34636,12 +34667,13 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'Invalid dataset path' }, 400);
           }
 
-          if (!existsSync(fromPath) || !existsSync(toPath)) {
-            return json({ error: 'Source or destination concept not found' }, 404);
-          }
-
-          const moved = await moveDatasetImages(fromPath, toPath, body.images);
-          return json({ success: true, moved });
+          return await withDatasetConceptLocks([fromPath, toPath], async () => {
+            if (!existsSync(fromPath) || !existsSync(toPath)) {
+              return json({ error: 'Source or destination concept not found' }, 404);
+            }
+            const moved = await moveDatasetImages(fromPath, toPath, body.images);
+            return json({ success: true, moved });
+          });
         } catch (error: any) {
           return json({ error: error.message }, 400);
         }
@@ -34669,6 +34701,7 @@ const server = Bun.serve<UmbraSocketData>({
           const conceptPath = resolveDatasetPathSafe(datasetName, conceptName);
           if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
 
+          return await withDatasetConceptLocks([conceptPath], async () => {
           if (!existsSync(conceptPath)) {
             return json({ error: 'Concept not found' }, 404);
           }
@@ -34705,6 +34738,7 @@ const server = Bun.serve<UmbraSocketData>({
           }
 
           return json({ success: true, deleted });
+          });
         } catch (error: any) {
           return json({ error: error.message, deleted }, 500);
         }
@@ -34851,6 +34885,7 @@ const server = Bun.serve<UmbraSocketData>({
 
           const conceptPath = resolveDatasetPathSafe(datasetName, conceptName);
           if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
+          return await withDatasetConceptLocks([conceptPath], async () => {
           if (!existsSync(conceptPath)) return json({ error: 'Concept not found' }, 404);
 
           const autoTag = parseBool(body.autoTag, true);
@@ -34860,6 +34895,9 @@ const server = Bun.serve<UmbraSocketData>({
           const modelRepo = String(body.modelRepo || 'SmilingWolf/wd-vit-tagger-v3').trim() || 'SmilingWolf/wd-vit-tagger-v3';
           const naturalModelRepo = String(body.naturalModelRepo || 'prithivMLmods/Qwen2-VL-2B-Abliterated-Caption-it').trim()
             || 'prithivMLmods/Qwen2-VL-2B-Abliterated-Caption-it';
+          if (!DATASET_TAGGER_MODEL_REPOS.has(modelRepo) || naturalModelRepo !== DATASET_NATURAL_MODEL_REPO) {
+            return json({ error: 'Unsupported Data Forge caption model' }, 400);
+          }
           const naturalDevice = body.naturalDevice === 'cpu' || body.naturalDevice === 'cuda' ? body.naturalDevice : 'auto';
           const naturalMaxNewTokens = parseInteger(body.naturalMaxNewTokens, 192, 32, 512);
           const generalThreshold = parseNumber(body.generalThreshold, 0.35, 0, 1);
@@ -35029,7 +35067,7 @@ const server = Bun.serve<UmbraSocketData>({
                 caption = mergedTags.join(', ');
                 tagCount = mergedTags.length;
               }
-              await writeTextFileAtomic(captionPath, caption);
+              await writeTextFileAtomic(captionPath, caption, false);
               results.push({
                 filename,
                 success: true,
@@ -35055,6 +35093,7 @@ const server = Bun.serve<UmbraSocketData>({
             failed: results.filter((entry) => !entry.success).length,
             results,
           });
+          });
         } catch (error: any) {
           return json({ error: error.message }, 500);
         }
@@ -35063,7 +35102,7 @@ const server = Bun.serve<UmbraSocketData>({
       // Import browser/OS dropped image files to dataset concepts
       if (path === '/api/datasets/import-uploaded-image' && method === 'POST') {
         try {
-          const formData = await req.formData();
+          const formData = await parseDatasetUploadFormData(req, 257 * 1024 * 1024);
           const datasetName = sanitizeDatasetSegment(formData.get('dataset'));
           const conceptName = sanitizeDatasetSegment(formData.get('concept'));
           const file = formData.get('image');
@@ -35074,8 +35113,8 @@ const server = Bun.serve<UmbraSocketData>({
 
           const conceptPath = resolveDatasetPathSafe(datasetName, conceptName);
           if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
-          if (!existsSync(conceptPath)) {
-            await fs.mkdir(conceptPath, { recursive: true });
+          if (!(await fs.lstat(conceptPath).catch(() => null))?.isDirectory()) {
+            return json({ error: 'Concept not found' }, 404);
           }
           if (!file.size || file.size > 256 * 1024 * 1024) {
             return json({ error: 'Dropped image must be smaller than 256 MB' }, 400);
@@ -35084,10 +35123,14 @@ const server = Bun.serve<UmbraSocketData>({
           const { extension } = await detectDatasetImportImage(buffer);
           const originalName = sanitizeDatasetSegment(basename(file.name || 'image')) || 'image';
           const parsedBase = sanitizeDatasetSegment(basename(originalName, extname(originalName))) || 'image';
-          const filename = await saveDatasetImportedImage(conceptPath, parsedBase, extension, buffer);
+          const filename = await withDatasetConceptLocks([conceptPath], async () => {
+            if (!(await fs.lstat(conceptPath).catch(() => null))?.isDirectory()) return null;
+            return saveDatasetImportedImage(conceptPath, parsedBase, extension, buffer);
+          });
+          if (!filename) return json({ error: 'Concept not found' }, 404);
           return json({ success: true, filename });
         } catch (error: any) {
-          return json({ error: error.message }, 500);
+          return json({ error: error.message }, error instanceof DatasetUploadTooLargeError ? 413 : 500);
         }
       }
 
@@ -35108,8 +35151,8 @@ const server = Bun.serve<UmbraSocketData>({
 
           const conceptPath = resolveDatasetPathSafe(datasetName, conceptName);
           if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
-          if (!existsSync(conceptPath)) {
-            await fs.mkdir(conceptPath, { recursive: true });
+          if (!(await fs.lstat(conceptPath).catch(() => null))?.isDirectory()) {
+            return json({ error: 'Concept not found' }, 404);
           }
 
           let buffer: Buffer;
@@ -35138,7 +35181,11 @@ const server = Bun.serve<UmbraSocketData>({
           }
 
           const safeBaseName = sanitizeDatasetSegment(baseName) || 'image';
-          const filename = await saveDatasetImportedImage(conceptPath, safeBaseName, extension, buffer);
+          const filename = await withDatasetConceptLocks([conceptPath], async () => {
+            if (!(await fs.lstat(conceptPath).catch(() => null))?.isDirectory()) return null;
+            return saveDatasetImportedImage(conceptPath, safeBaseName, extension, buffer);
+          });
+          if (!filename) return json({ error: 'Concept not found' }, 404);
           return json({ success: true, filename });
         } catch (error: any) {
           return json({ error: error.message }, 500);
@@ -35175,11 +35222,12 @@ const server = Bun.serve<UmbraSocketData>({
           }
           const conceptPath = resolveDatasetPathSafe(datasetName, conceptName);
           if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
-          if (!existsSync(conceptPath)) {
-            await fs.mkdir(conceptPath, { recursive: true });
+          if (!(await fs.lstat(conceptPath).catch(() => null))?.isDirectory()) {
+            return json({ error: 'Concept not found' }, 404);
           }
 
-          const result = await copyLocalImageIntoDatasetConcept(sourcePath, conceptPath, allowedSourceRoots);
+          const result = await withDatasetConceptLocks([conceptPath], async () =>
+            copyLocalImageIntoDatasetConcept(sourcePath, conceptPath, allowedSourceRoots));
 
           return json({ success: true, ...result });
         } catch (error: any) {
@@ -35210,8 +35258,8 @@ const server = Bun.serve<UmbraSocketData>({
           }
           const conceptPath = resolveDatasetPathSafe(datasetName, conceptName);
           if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
-          if (!existsSync(conceptPath)) {
-            await fs.mkdir(conceptPath, { recursive: true });
+          if (!(await fs.lstat(conceptPath).catch(() => null))?.isDirectory()) {
+            return json({ error: 'Concept not found' }, 404);
           }
 
           const results: Array<{
@@ -35223,6 +35271,10 @@ const server = Bun.serve<UmbraSocketData>({
           }> = [];
           const allowedSourceRoots = isRemoteRequest(req, url, server) ? getGalleryBridgeAllowedRoots() : undefined;
 
+          await withDatasetConceptLocks([conceptPath], async () => {
+          if (!(await fs.lstat(conceptPath).catch(() => null))?.isDirectory()) {
+            throw new Error('Dataset concept no longer exists');
+          }
           for (const rawSourcePath of sourcePaths) {
             try {
               let sourcePath = resolveDatasetImportSourcePath(rawSourcePath);
@@ -35246,6 +35298,7 @@ const server = Bun.serve<UmbraSocketData>({
               });
             }
           }
+          });
 
           const imported = results.filter((entry) => entry.success).length;
           const failed = results.length - imported;
@@ -35463,6 +35516,7 @@ const server = Bun.serve<UmbraSocketData>({
             : resolveDatasetPathSafe(datasetName);
           if (!basePath) return json({ error: 'Invalid dataset path' }, 400);
 
+          return await withDatasetConceptLocks([basePath], async () => {
           if (!existsSync(basePath)) {
             return json({ error: 'Dataset/concept not found' }, 404);
           }
@@ -35483,9 +35537,10 @@ const server = Bun.serve<UmbraSocketData>({
           // Edit the caption format this dataset already displays.
           const captionPath = datasetCaptionPath(basePath, safeImageName, !body.concept);
 
-          await writeTextFileAtomic(captionPath, body.caption.trim());
+          await writeTextFileAtomic(captionPath, body.caption.trim(), false);
 
           return json({ success: true, path: captionPath });
+          });
         } catch (error: any) {
           return json({ error: error.message }, 500);
         }
@@ -35554,10 +35609,11 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'Dataset already exists' }, 400);
           }
 
-          await fs.mkdir(datasetPath, { recursive: true });
+          await fs.mkdir(dirname(datasetPath), { recursive: true });
+          await fs.mkdir(datasetPath);
           return json({ success: true, name: sanitizedName, path: datasetPath });
         } catch (error: any) {
-          return json({ error: error.message }, 500);
+          return json({ error: error.message }, error?.code === 'EEXIST' ? 409 : 500);
         }
       }
 

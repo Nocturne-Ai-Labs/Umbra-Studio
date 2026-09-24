@@ -495,20 +495,63 @@ function escapeHtml(input: string): string {
 }
 
 function sanitizeRichHtml(input: string): string {
-  let html = String(input || '');
+  const html = String(input || '');
   if (!html) return '';
+  if (typeof document === 'undefined') return escapeHtml(normalizeDescriptionText(html)).replace(/\n/g, '<br/>');
 
-  html = html
-    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
-    .replace(/<iframe[\s\S]*?>[\s\S]*?<\/iframe>/gi, '')
-    .replace(/<object[\s\S]*?>[\s\S]*?<\/object>/gi, '')
-    .replace(/<embed[\s\S]*?>[\s\S]*?<\/embed>/gi, '')
-    .replace(/\son[a-z]+\s*=\s*(['"]).*?\1/gi, '')
-    .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
-    .replace(/\s(href|src)\s*=\s*(['"])\s*javascript:[^'"]*\2/gi, ' $1="#"');
-
-  return html.trim();
+  const allowed = new Set(['a', 'b', 'blockquote', 'br', 'code', 'div', 'em', 'h1', 'h2', 'h3', 'h4', 'hr', 'i', 'img', 'li', 'ol', 'p', 'pre', 'span', 'strong', 'ul']);
+  const discard = new Set(['audio', 'button', 'embed', 'form', 'iframe', 'input', 'link', 'math', 'meta', 'object', 'script', 'style', 'svg', 'textarea', 'video']);
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  const output = document.createElement('div');
+  const safeUrl = (raw: string, image: boolean): URL | null => {
+    if (!raw.trim()) return null;
+    try {
+      const url = new URL(raw, 'https://civitai.com');
+      if (url.protocol !== 'https:' || url.username || url.password) return null;
+      if (image && !/(^|\.)civitai\.com$/i.test(url.hostname)) return null;
+      return url;
+    } catch {
+      return null;
+    }
+  };
+  const appendSafe = (source: Node, parent: Node) => {
+    if (source.nodeType === Node.TEXT_NODE) {
+      parent.appendChild(document.createTextNode(source.textContent || ''));
+      return;
+    }
+    if (source.nodeType !== Node.ELEMENT_NODE) return;
+    const element = source as Element;
+    const tag = element.localName.toLowerCase();
+    if (element.namespaceURI !== 'http://www.w3.org/1999/xhtml' || discard.has(tag)) return;
+    if (!allowed.has(tag)) {
+      for (const child of Array.from(element.childNodes)) appendSafe(child, parent);
+      return;
+    }
+    if (tag === 'img') {
+      const url = safeUrl(element.getAttribute('src') || '', true);
+      if (!url) return;
+      const image = document.createElement('img');
+      image.src = `/api/model-manager/media?url=${encodeURIComponent(url.href)}&thumb=1&size=640`;
+      image.alt = element.getAttribute('alt') || '';
+      image.loading = 'lazy';
+      parent.appendChild(image);
+      return;
+    }
+    const clean = document.createElement(tag);
+    if (tag === 'a') {
+      const url = safeUrl(element.getAttribute('href') || '', false);
+      if (url) {
+        clean.setAttribute('href', url.href);
+        clean.setAttribute('target', '_blank');
+        clean.setAttribute('rel', 'noopener noreferrer');
+      }
+    }
+    for (const child of Array.from(element.childNodes)) appendSafe(child, clean);
+    parent.appendChild(clean);
+  };
+  for (const child of Array.from(template.content.childNodes)) appendSafe(child, output);
+  return output.innerHTML.trim();
 }
 
 function toRichDescriptionHtml(input: string): string {
@@ -1162,15 +1205,19 @@ export function ModelManagerWorkspace() {
   const browserWebviewElementId = React.useId();
   const browserWebviewSupported = typeof window !== 'undefined' && Boolean((window as any).umbraDesktop);
   const detailRequestsRef = React.useRef<Map<number, Promise<CivitAIModel | null>>>(new Map());
+  const discoveryRequestRef = React.useRef<AbortController | null>(null);
   const modelUpdateRunRef = React.useRef(0);
   const modelUpdateCancelRef = React.useRef(false);
   const hydratedOpenedIdsRef = React.useRef<Set<number>>(new Set());
+  const openedModelsChangeRef = React.useRef(0);
   const civitaiLinkInputRef = React.useRef<HTMLInputElement | null>(null);
   const civitaiTokenInputRef = React.useRef<HTMLInputElement | null>(null);
   const civitaiAuthPendingRef = React.useRef(false);
   const civitaiAuthVersionRef = React.useRef(0);
   const civitaiAuthMountedRef = React.useRef(true);
   const browserConfigHydratedRef = React.useRef(false);
+
+  React.useEffect(() => () => discoveryRequestRef.current?.abort(), []);
 
   React.useEffect(() => {
     civitaiDetailsRef.current = civitaiDetails;
@@ -1932,10 +1979,11 @@ export function ModelManagerWorkspace() {
   React.useEffect(() => {
     if (sourceTab !== 'civitai') return;
     let cancelled = false;
+    const startingRevision = openedModelsChangeRef.current;
     const run = async () => {
       try {
         const data = await fetchJson<OpenedModelsPayload>('/api/model-manager/opened-models');
-        if (cancelled) return;
+        if (cancelled || openedModelsChangeRef.current !== startingRevision) return;
         applyOpenedModelsPayload(data);
       } catch (error: any) {
         if (cancelled) return;
@@ -2583,6 +2631,9 @@ export function ModelManagerWorkspace() {
     const append = options?.append === true;
     const queryText = String(options?.queryOverride ?? civitaiDiscoveryQuery).trim();
     const nextPage = append ? civitaiDiscoveryPage + 1 : 1;
+    discoveryRequestRef.current?.abort();
+    const controller = new AbortController();
+    discoveryRequestRef.current = controller;
     setCivitaiDiscoveryLoading(true);
     setCivitaiDiscoveryWarning('');
     try {
@@ -2601,10 +2652,11 @@ export function ModelManagerWorkspace() {
         warning?: string;
       }>(
         `/api/model-manager/civitai/search?${params.toString()}`,
-        { cache: 'no-store' },
+        { cache: 'no-store', signal: controller.signal },
         MODEL_MANAGER_DETAIL_TIMEOUT_MS,
         'CivitAI search timed out',
       );
+      if (discoveryRequestRef.current !== controller || controller.signal.aborted) return;
       const items = Array.isArray(payload.items) ? payload.items : [];
       if (payload.warning) {
         setCivitaiDiscoveryWarning(payload.warning);
@@ -2624,11 +2676,15 @@ export function ModelManagerWorkspace() {
         addToast({ type: 'info', message: 'No CivitAI models found' });
       }
     } catch (error: any) {
+      if (discoveryRequestRef.current !== controller || controller.signal.aborted) return;
       const message = error?.message || 'CivitAI search failed';
       setCivitaiDiscoveryWarning(message);
       addToast({ type: 'error', message });
     } finally {
-      setCivitaiDiscoveryLoading(false);
+      if (discoveryRequestRef.current === controller) {
+        discoveryRequestRef.current = null;
+        setCivitaiDiscoveryLoading(false);
+      }
     }
   }, [
     addToast,
@@ -2648,23 +2704,21 @@ export function ModelManagerWorkspace() {
     ));
   }, []);
 
-  const persistOpenedModelIds = React.useCallback(async (ids: number[], modelSnapshot?: CivitAIModel) => {
-    const normalized = Array.from(new Set(
-      (ids || [])
-        .map((value) => Number(value))
-        .filter((value) => Number.isFinite(value) && value > 0)
-        .map((value) => Math.floor(value)),
-    ));
-    setSavedOpenedModelIds(normalized);
+  const persistOpenedModelId = React.useCallback(async (id: number, modelSnapshot?: CivitAIModel) => {
+    const normalizedId = Math.floor(Number(id));
+    if (!Number.isFinite(normalizedId) || normalizedId <= 0) return;
+    openedModelsChangeRef.current += 1;
     try {
-      await fetchJson('/api/model-manager/opened-models', {
+      const payload = await fetchJson<OpenedModelsPayload>('/api/model-manager/opened-models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          openedModelIds: normalized,
+          addModelId: normalizedId,
           ...(modelSnapshot ? { modelSnapshot } : {}),
         }),
       });
+      const remoteIds = normalizeOpenedModelIds(payload.openedModelIds);
+      setSavedOpenedModelIds((current) => Array.from(new Set([normalizedId, ...current, ...remoteIds])));
     } catch (error: any) {
       addToast({ type: 'error', message: error?.message || 'Failed to save model collection' });
     }
@@ -3243,11 +3297,10 @@ export function ModelManagerWorkspace() {
       const withoutResolved = prev.filter((entry) => entry.id !== resolvedId);
       return [detail, ...withoutResolved];
     });
-    const nextOpened = [resolvedId, ...civitaiModels.map((entry) => Number(entry.id || 0))];
-    void persistOpenedModelIds(nextOpened, detail);
+    void persistOpenedModelId(resolvedId, detail);
     const preview = getModelPreviewImage(detail);
     if (preview?.url) setActiveModelImageUrl(preview.url);
-  }, [addToast, civitaiLinkInput, civitaiModels, loadModelDetail, mergedCivitaiModels, persistOpenedModelIds]);
+  }, [addToast, civitaiLinkInput, loadModelDetail, mergedCivitaiModels, persistOpenedModelId]);
 
   const refreshSavedModelCache = React.useCallback(async (modelId: number) => {
     if (!Number.isFinite(modelId) || modelId <= 0) return;
@@ -3370,8 +3423,10 @@ export function ModelManagerWorkspace() {
         if (job && ['completed', 'failed', 'cancelled'].includes(job.status) && !announcedTerminalJobsRef.current.has(jobId)) {
           announcedTerminalJobsRef.current.add(jobId);
           hasTerminalUpdate = true;
-          addToast({ type: job.status === 'completed' ? 'success' : job.status === 'cancelled' ? 'info' : 'error',
-            message: job.status === 'completed' ? `Downloaded ${job.fileName}` : `${job.fileName}: ${job.error || job.status}` });
+          addToast({ type: job.status === 'completed' && !job.error ? 'success' : job.status === 'cancelled' ? 'info' : 'error',
+            message: job.status === 'completed'
+              ? `Downloaded ${job.fileName}${job.error ? `: ${job.error}` : ''}`
+              : `${job.fileName}: ${job.error || job.status}` });
         }
       }
       setDownloadJobs((prev) => {

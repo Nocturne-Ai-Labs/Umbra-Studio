@@ -34,6 +34,7 @@ type ModelDownloadWorkerRequest =
         fileName: string;
         modelType: string;
         destinationRoot: string;
+        allowedRootRealPath: string;
         useExactDestination?: boolean;
         civitaiToken?: string;
         snapshot?: unknown;

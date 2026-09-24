@@ -133,6 +133,7 @@ export function DatasetsTab() {
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [focusedImage, setFocusedImage] = useState<DatasetImage | null>(null);
   const [isLoadingImages, setIsLoadingImages] = useState(false);
+  const [imageLoadError, setImageLoadError] = useState(false);
   const [repairingImages, setRepairingImages] = useState<Set<string>>(new Set());
   const repairLocks = useRef(new Set<string>());
   const conceptKey = JSON.stringify([selectedDataset, selectedConcept]);
@@ -374,6 +375,7 @@ export function DatasetsTab() {
   useEffect(() => {
     if (imageScrollRef.current) imageScrollRef.current.scrollTop = 0;
     setImages([]);
+    setImageLoadError(false);
     setVisibleImageCount(DATASET_IMAGE_PAGE_SIZE);
     setSelectedImages(new Set());
     setFlaggedForDeletion(new Set());
@@ -494,11 +496,15 @@ export function DatasetsTab() {
     if (!selectedDataset || !selectedConcept || activeConcept.current !== conceptKey) return null;
     const sequence = ++imageLoadSequence.current;
     setIsLoadingImages(true);
+    setImageLoadError(false);
     try {
       const imgs = await getConceptImages(selectedDataset, selectedConcept);
-      if (activeConcept.current === conceptKey && sequence === imageLoadSequence.current && imgs !== null) {
-        setImages(imgs);
-        return imgs;
+      if (activeConcept.current === conceptKey && sequence === imageLoadSequence.current) {
+        if (imgs === null) setImageLoadError(true);
+        else {
+          setImages(imgs);
+          return imgs;
+        }
       }
     } finally {
       if (activeConcept.current === conceptKey && sequence === imageLoadSequence.current) setIsLoadingImages(false);
@@ -562,6 +568,15 @@ export function DatasetsTab() {
     }
     setCreateError(null);
     setIsCreating(true);
+    const sessions = [...conceptSessions.current.entries()]
+      .filter(([key]) => key.startsWith(`${renameDatasetTarget}/`));
+    for (const [, session] of sessions) {
+      if (!await session.flush()) {
+        setIsCreating(false);
+        setCreateError('Save concept settings before renaming this dataset.');
+        return;
+      }
+    }
     const renamed = await renameDataset(renameDatasetTarget, nextName);
     setIsCreating(false);
     if (!renamed) {
@@ -569,8 +584,9 @@ export function DatasetsTab() {
       return;
     }
     if (selectedDataset === renameDatasetTarget) {
-      setSelectedDataset(nextName);
+      setSelectedDataset(renamed);
     }
+    for (const [key] of sessions) conceptSessions.current.delete(key);
     setRenameDatasetTarget(null);
     setRenameValue('');
   };
@@ -614,10 +630,11 @@ export function DatasetsTab() {
     const success = await saveCaption(selectedDataset, selectedConcept, imageName, caption);
     if (success && activeConcept.current === conceptKey) {
       // Update local state
+      const tags = caption.split(',').map(tag => tag.trim()).filter(Boolean);
       setImages(prev => prev.map(img =>
-        img.filename === imageName ? { ...img, caption } : img
+        img.filename === imageName ? { ...img, caption, tags } : img
       ));
-      setFocusedImage(previous => previous?.filename === imageName ? { ...previous, caption } : previous);
+      setFocusedImage(previous => previous?.filename === imageName ? { ...previous, caption, tags } : previous);
     }
     return success;
   };
@@ -871,8 +888,9 @@ export function DatasetsTab() {
           onRenameDataset={openRenameDataset}
           onDeleteDataset={async (name) => {
             if (confirm(`Delete dataset "${name}" and all its contents?`)) {
-              await deleteDataset(name);
-              if (selectedDataset === name) {
+              const deleted = await deleteDataset(name);
+              if (!deleted) showToast('Could not delete dataset.', 'error');
+              if (deleted && selectedDataset === name) {
                 setSelectedDataset(null);
                 setSelectedConcept(null);
               }
@@ -880,8 +898,9 @@ export function DatasetsTab() {
           }}
           onDeleteConcept={async (dataset, concept) => {
             if (confirm(`Delete concept folder "${concept}"?`)) {
-              await deleteConcept(dataset, concept);
-              if (selectedConcept === concept) {
+              const deleted = await deleteConcept(dataset, concept);
+              if (!deleted) showToast('Could not delete concept.', 'error');
+              if (deleted && selectedDataset === dataset && selectedConcept === concept) {
                 setSelectedConcept(null);
               }
             }
@@ -1330,6 +1349,11 @@ export function DatasetsTab() {
           {isLoadingImages ? (
             <div className="flex items-center justify-center h-full">
               <Loader2 className="h-8 w-8 animate-spin text-cyan-300" />
+            </div>
+          ) : imageLoadError ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-zinc-400">
+              <p>Could not load concept images.</p>
+              <button type="button" className="rounded border border-white/20 px-3 py-2 text-xs text-cyan-300 hover:bg-white/5" onClick={() => void loadImages()}>Retry</button>
             </div>
           ) : !selectedConcept ? (
             <div className="flex items-center justify-center h-full text-zinc-500">

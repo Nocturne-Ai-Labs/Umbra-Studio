@@ -247,6 +247,41 @@ export class ModelManagerStateDb {
     return existing;
   }
 
+  /** Remove the oldest cache rows until both limits are met. File cleanup belongs to the caller. */
+  async trimMediaCache(maxBytes: number, maxEntries: number, protectedMediaUrl = ''): Promise<ModelManagerMediaCacheEntry[]> {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 0
+      || !Number.isSafeInteger(maxEntries) || maxEntries < 0) {
+      throw new RangeError('Media cache limits must be nonnegative safe integers');
+    }
+    await this.ready();
+    return this.enqueueWrite(() => this.db.transaction(() => {
+      const totals = this.db.prepare(`
+        SELECT COUNT(*) AS entryCount, COALESCE(SUM(size_bytes), 0) AS totalBytes
+        FROM model_manager_media_cache
+      `).get() as { entryCount: number; totalBytes: number };
+      let entryCount = totals.entryCount;
+      let totalBytes = totals.totalBytes;
+      if (entryCount <= maxEntries && totalBytes <= maxBytes) return [];
+
+      const rows = this.db.prepare(`
+        SELECT media_url AS mediaUrl, local_path AS localPath, mime_type AS mimeType,
+               size_bytes AS sizeBytes, fetched_at AS fetchedAt
+        FROM model_manager_media_cache
+        ORDER BY CASE WHEN media_url = ? THEN 1 ELSE 0 END ASC, fetched_at ASC, media_url ASC
+      `).all(protectedMediaUrl) as ModelManagerMediaCacheEntry[];
+      const remove = this.db.prepare('DELETE FROM model_manager_media_cache WHERE media_url = ?');
+      const removed: ModelManagerMediaCacheEntry[] = [];
+      for (const row of rows) {
+        if (entryCount <= maxEntries && totalBytes <= maxBytes) break;
+        remove.run(row.mediaUrl);
+        removed.push(row);
+        entryCount -= 1;
+        totalBytes -= row.sizeBytes;
+      }
+      return removed;
+    }).immediate());
+  }
+
   private ensureSchema(db: Database): void {
     db.run(`
       CREATE TABLE IF NOT EXISTS model_manager_state (

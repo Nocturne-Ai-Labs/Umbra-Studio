@@ -1,9 +1,10 @@
-import { basename, dirname, extname, join } from 'path';
+import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'path';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
 import { randomUUID } from 'node:crypto';
 import { copyFileExclusive } from './FsTransferCopy';
 import { fetchModelDownload } from './ModelDownloadHttp';
+import { fetchModelMedia } from './ModelManagerMediaHttp';
 import { ModelDownloadJournal, downloadFileIdentity, type DownloadReceipt } from './ModelDownloadJournal';
 
 type ModelDownloadJobStatus = 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled';
@@ -40,6 +41,7 @@ type ModelDownloadWorkerRequest =
         fileName: string;
         modelType: string;
         destinationRoot: string;
+        allowedRootRealPath: string;
         useExactDestination?: boolean;
         civitaiToken?: string;
         snapshot?: unknown;
@@ -68,12 +70,18 @@ const jobs = new Map<string, ModelDownloadJob>();
 const jobControllers = new Map<string, AbortController>();
 const reservedDestinations = new Set<string>();
 const MAX_JOBS = 512;
+const MAX_CONCURRENT_DOWNLOADS = 3;
+const MAX_PENDING_DOWNLOADS = 128;
 const DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
 const MODEL_SNAPSHOT_SUFFIX = '.umbra-model.json';
 const MODEL_THUMB_SUFFIX = '.umbra-model-thumb';
 const MODEL_ARTIFACT_DIR = '.umbra';
+const THUMB_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp', 'image/x-ms-bmp', 'image/avif']);
+const BINARY_MODEL_EXTENSIONS = new Set(['.safetensors', '.ckpt', '.pt', '.pth', '.bin', '.onnx', '.gguf', '.engine']);
 const journal = new ModelDownloadJournal(process.env.UMBRA_ROOT || '');
 const receipts = new Map<string, DownloadReceipt>();
+const downloadQueue: Array<{ jobId: string; allowedRootRealPath: string; civitaiToken: string; snapshot: unknown }> = [];
+let activeDownloads = 0;
 
 function getModelArtifactDir(destinationPath: string): string {
   return join(dirname(destinationPath), MODEL_ARTIFACT_DIR);
@@ -83,9 +91,24 @@ function getModelArtifactBaseName(destinationPath: string): string {
   return basename(destinationPath);
 }
 
-async function ensureModelArtifactDir(destinationPath: string): Promise<string> {
+function isInsideRoot(root: string, path: string): boolean {
+  const offset = relative(root, path);
+  return offset === '' || (!isAbsolute(offset) && offset !== '..' && !offset.startsWith(`..${sep}`));
+}
+
+async function assertDestinationAllowed(path: string, allowedRootRealPath: string): Promise<string> {
+  const actualPath = await fs.realpath(path);
+  if (!isInsideRoot(allowedRootRealPath, actualPath)) throw new Error('Download destination moved outside its model root');
+  return actualPath;
+}
+
+async function ensureModelArtifactDir(destinationPath: string, allowedRootRealPath: string): Promise<string> {
+  await assertDestinationAllowed(dirname(destinationPath), allowedRootRealPath);
   const artifactDir = getModelArtifactDir(destinationPath);
   await fs.mkdir(artifactDir, { recursive: true });
+  const stat = await fs.lstat(artifactDir);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Model artifact folder is not a regular directory');
+  await assertDestinationAllowed(artifactDir, allowedRootRealPath);
   return artifactDir;
 }
 
@@ -160,6 +183,7 @@ function inferThumbExtension(urlValue: string, contentType: string): string {
 async function saveSnapshotThumbnail(
   imageUrl: string,
   destinationPath: string,
+  allowedRootRealPath: string,
   civitaiToken?: string,
   signal?: AbortSignal,
 ): Promise<string> {
@@ -167,29 +191,16 @@ async function saveSnapshotThumbnail(
   if (!normalizedUrl) return '';
 
   try {
-    const timeout = AbortSignal.timeout(5000);
-    const response = await fetchModelDownload(normalizedUrl, civitaiToken, signal ? AbortSignal.any([signal, timeout]) : timeout);
-    const reader = response.body?.getReader();
-    if (!reader) return '';
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    try {
-      if (!response.ok || !String(response.headers.get('content-type')).startsWith('image/')) return '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        size += value.byteLength;
-        if (size > 8 * 1024 * 1024) return '';
-        chunks.push(value);
-      }
-    } finally { await reader.cancel().catch(() => undefined); }
-    if (!size) return '';
-    const bytes = Buffer.concat(chunks);
-
-    const extension = inferThumbExtension(normalizedUrl, String(response.headers.get('content-type') || ''));
-    const artifactDir = await ensureModelArtifactDir(destinationPath);
+    const { bytes, mimeType } = await fetchModelMedia(normalizedUrl, civitaiToken, {
+      maxBytes: 8 * 1024 * 1024,
+      timeoutMs: 5000,
+      signal,
+    });
+    if (!THUMB_MIME_TYPES.has(mimeType)) return '';
+    const extension = inferThumbExtension(normalizedUrl, mimeType);
+    const artifactDir = await ensureModelArtifactDir(destinationPath, allowedRootRealPath);
     const thumbPath = join(artifactDir, `${getModelArtifactBaseName(destinationPath)}${MODEL_THUMB_SUFFIX}${extension}`);
-    await fs.writeFile(thumbPath, Buffer.from(bytes));
+    await fs.writeFile(thumbPath, bytes, { flag: 'wx' });
     return thumbPath;
   } catch {
     return '';
@@ -199,6 +210,7 @@ async function saveSnapshotThumbnail(
 async function persistModelSnapshot(
   job: ModelDownloadJob,
   snapshotRaw: unknown,
+  allowedRootRealPath: string,
   civitaiToken?: string,
   signal?: AbortSignal,
 ) {
@@ -208,6 +220,7 @@ async function persistModelSnapshot(
   const imageUrl = extractSnapshotImageUrl(snapshot);
   const payload: Record<string, unknown> = {
     ...snapshot,
+    file: { ...toRecord(snapshot.file), downloadUrl: undefined },
     snapshotVersion: 1,
     source: 'civitai',
     capturedAt: Number(snapshot.capturedAt || Date.now()),
@@ -217,23 +230,20 @@ async function persistModelSnapshot(
       destinationFolder: job.destinationFolder,
       modelType: job.modelType,
       fileName: basename(job.destinationPath),
-      downloadUrl: job.downloadUrl,
       bytesTotal: job.bytesTotal,
       bytesDownloaded: job.bytesDownloaded,
       completedAt: Date.now(),
     },
   };
 
-  const artifactDir = await ensureModelArtifactDir(job.destinationPath);
+  const artifactDir = await ensureModelArtifactDir(job.destinationPath, allowedRootRealPath);
   const snapshotPath = join(artifactDir, `${getModelArtifactBaseName(job.destinationPath)}${MODEL_SNAPSHOT_SUFFIX}`);
-  await fs.writeFile(snapshotPath, JSON.stringify(payload, null, 2), 'utf8');
   const thumbnailPath = imageUrl
-    ? await saveSnapshotThumbnail(imageUrl, job.destinationPath, civitaiToken, signal)
+    ? await saveSnapshotThumbnail(imageUrl, job.destinationPath, allowedRootRealPath, civitaiToken, signal)
     : '';
-  if (thumbnailPath) {
-    payload.localThumbnailPath = thumbnailPath;
-    await fs.writeFile(snapshotPath, JSON.stringify(payload, null, 2), 'utf8');
-  }
+  if (thumbnailPath) payload.localThumbnailPath = thumbnailPath;
+  await assertDestinationAllowed(artifactDir, allowedRootRealPath);
+  await fs.writeFile(snapshotPath, JSON.stringify(payload, null, 2), { encoding: 'utf8', flag: 'wx' });
 }
 
 function sanitizeFileName(input: string): string {
@@ -261,7 +271,9 @@ function resolveUniqueDestinationPath(targetPath: string): string {
   const stem = basename(targetPath, ext);
   let index = 1;
   let candidate = targetPath;
-  while (existsSync(candidate) || existsSync(`${candidate}.part`) || reservedDestinations.has(candidate.toLowerCase())) {
+  while (existsSync(candidate) || existsSync(`${candidate}.part`)
+    || existsSync(join(parent, MODEL_ARTIFACT_DIR, `${basename(candidate)}${MODEL_SNAPSHOT_SUFFIX}`))
+    || reservedDestinations.has(candidate.toLowerCase())) {
     candidate = join(parent, `${stem} (${index})${ext}`);
     index += 1;
   }
@@ -272,6 +284,7 @@ function resolveUniqueDestinationPath(targetPath: string): string {
 function toPublicJob(job: ModelDownloadJob) {
   return {
     ...job,
+    downloadUrl: '',
     progress: Math.max(
       0,
       Math.min(
@@ -288,7 +301,7 @@ function toPublicJob(job: ModelDownloadJob) {
   };
 }
 
-async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: unknown) {
+async function runDownload(jobId: string, allowedRootRealPath: string, civitaiToken?: string, snapshotRaw?: unknown) {
   const job = jobs.get(jobId);
   if (!job) return;
 
@@ -313,9 +326,16 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
     }, DOWNLOAD_IDLE_TIMEOUT_MS);
   };
   try {
-    const destinationDir = job.useExactDestination ? job.destinationRoot : join(job.destinationRoot, normalizeCivitaiType(job.modelType));
-    await fs.mkdir(destinationDir, { recursive: true });
+    const requestedDir = job.useExactDestination ? job.destinationRoot : join(job.destinationRoot, normalizeCivitaiType(job.modelType));
+    if (job.useExactDestination) {
+      const exactStat = await fs.stat(requestedDir);
+      if (!exactStat.isDirectory()) throw new Error('Download destination is no longer a folder');
+    } else {
+      await assertDestinationAllowed(job.destinationRoot, allowedRootRealPath);
+      await fs.mkdir(requestedDir, { recursive: true });
+    }
     controller.signal.throwIfAborted();
+    const destinationDir = await assertDestinationAllowed(requestedDir, allowedRootRealPath);
     job.destinationFolder = destinationDir;
     targetPath = resolveUniqueDestinationPath(join(destinationDir, sanitizeFileName(job.fileName || 'model.safetensors')));
     tempPath = `${targetPath}.${randomUUID()}.part`;
@@ -330,6 +350,15 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
       await response.body?.cancel().catch(() => undefined);
       throw new Error(`CivitAI download failed (${response.status})`);
     }
+    const contentType = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    const isDocument = contentType === 'text/html' || contentType === 'application/xhtml+xml';
+    const isTextForBinaryModel = BINARY_MODEL_EXTENSIONS.has(extname(job.fileName).toLowerCase())
+      && (contentType.startsWith('text/') || contentType === 'application/json'
+        || contentType.endsWith('+json') || contentType === 'application/xml' || contentType.endsWith('+xml'));
+    if (isDocument || isTextForBinaryModel) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error(`CivitAI returned a ${contentType || 'document'} response instead of a model file`);
+    }
 
     const totalHeader = Number(response.headers.get('content-length') || '0');
     const contentEncoding = response.headers.get('content-encoding')?.trim().toLowerCase();
@@ -342,6 +371,7 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
       throw new Error('Download stream unavailable');
     }
 
+    await assertDestinationAllowed(destinationDir, allowedRootRealPath);
     const fileHandle = await fs.open(tempPath, 'wx');
     try {
       receipt.partialIdentity = downloadFileIdentity(await fileHandle.stat({ bigint: true }));
@@ -379,6 +409,7 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
     }
 
     controller.signal.throwIfAborted();
+    await assertDestinationAllowed(destinationDir, allowedRootRealPath);
     // A hard link publishes the finished file without replacing a late arrival.
     // Filesystems without link support use an exclusive copy instead.
     while (true) {
@@ -408,7 +439,9 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
     receipt.targetIdentity = downloadFileIdentity(await fs.lstat(targetPath, { bigint: true }));
     receipt.phase = 'published';
     journal.save(receipt);
-    await persistModelSnapshot(job, snapshotRaw, civitaiToken, controller.signal).catch(() => undefined);
+    await persistModelSnapshot(job, snapshotRaw, allowedRootRealPath, civitaiToken, controller.signal).catch((error) => {
+      job.error = `Model saved, but metadata could not be saved: ${(error as Error).message}`;
+    });
     job.status = 'completed';
     job.progress = 100;
     job.finishedAt = Date.now();
@@ -441,6 +474,19 @@ async function runDownload(jobId: string, civitaiToken?: string, snapshotRaw?: u
     catch { console.error('[ModelDownloadWorker] Could not persist final download status; recovery record retained.'); }
     if (targetPath) reservedDestinations.delete(targetPath.toLowerCase());
     jobControllers.delete(jobId);
+  }
+}
+
+function drainDownloadQueue() {
+  while (activeDownloads < MAX_CONCURRENT_DOWNLOADS && downloadQueue.length > 0) {
+    const next = downloadQueue.shift()!;
+    if (jobs.get(next.jobId)?.status !== 'queued') continue;
+    activeDownloads += 1;
+    void runDownload(next.jobId, next.allowedRootRealPath, next.civitaiToken, next.snapshot)
+      .finally(() => {
+        activeDownloads -= 1;
+        drainDownloadQueue();
+      });
   }
 }
 
@@ -507,13 +553,17 @@ async function handleRequest(request: ModelDownloadWorkerRequest) {
 
       if (!job.downloadUrl) throw new Error('Missing download URL');
       if (!job.destinationRoot) throw new Error('Missing destination root');
+      const allowedRootRealPath = String(payload.allowedRootRealPath || '').trim();
+      if (!isAbsolute(allowedRootRealPath)) throw new Error('Missing canonical model root');
+      if (downloadQueue.length >= MAX_PENDING_DOWNLOADS) throw new Error('Too many model downloads are waiting');
 
       const receipt: DownloadReceipt = { job, phase: 'downloading', recoveryPending: true };
       journal.save(receipt);
       receipts.set(jobId, receipt);
       jobs.set(jobId, job);
       pruneJobs();
-      void runDownload(jobId, String(payload.civitaiToken || '').trim(), payload.snapshot);
+      downloadQueue.push({ jobId, allowedRootRealPath, civitaiToken: String(payload.civitaiToken || '').trim(), snapshot: payload.snapshot });
+      drainDownloadQueue();
       return { job: toPublicJob(job) };
     }
     case 'status': {
@@ -532,9 +582,16 @@ async function handleRequest(request: ModelDownloadWorkerRequest) {
       if (controller && !controller.signal.aborted) {
         controller.abort();
       } else if (job.status === 'queued') {
+        const queueIndex = downloadQueue.findIndex(entry => entry.jobId === jobId);
+        if (queueIndex >= 0) downloadQueue.splice(queueIndex, 1);
         job.status = 'cancelled';
         job.cancelledAt = Date.now();
         job.error = 'Cancelled';
+        const receipt = receipts.get(jobId);
+        if (receipt) {
+          receipt.recoveryPending = false;
+          journal.save(receipt);
+        }
       }
       return { success: true, job: toPublicJob(job) };
     }

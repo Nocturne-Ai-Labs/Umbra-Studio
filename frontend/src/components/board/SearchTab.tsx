@@ -33,7 +33,8 @@ export function SearchTab({ onDownload }: SearchTabProps) {
 
   const { search, error: searchError } = useBooru();
   const { config: apiKeyConfig } = useApiKeys();
-  const { datasets, createDataset, renameDataset, createConcept } = useDatasets();
+  const { datasets, createDataset, renameDataset, createConcept, error: datasetError } = useDatasets();
+  const [datasetActionError, setDatasetActionError] = useState('');
 
   const [selectedDataset, setSelectedDataset] = useState<string>('');
   const [enabledConcepts, setEnabledConcepts] = useState<Set<string>>(new Set());
@@ -49,6 +50,10 @@ export function SearchTab({ onDownload }: SearchTabProps) {
   const [newDatasetName, setNewDatasetName] = useState('');
   const [isCreatingDataset, setIsCreatingDataset] = useState(false);
   const [isRenamingDataset, setIsRenamingDataset] = useState(false);
+
+  useEffect(() => {
+    if (datasetError) setDatasetActionError(datasetError);
+  }, [datasetError]);
 
   // API Keys modal
   const [showApiKeysModal, setShowApiKeysModal] = useState(false);
@@ -219,14 +224,16 @@ export function SearchTab({ onDownload }: SearchTabProps) {
   // Create new concept
   const handleCreateConcept = async () => {
     if (!selectedDataset || !newConceptName.trim()) return;
+    setDatasetActionError('');
     setIsCreatingConcept(true);
-    const success = await createConcept(selectedDataset, newConceptName.trim(), newConceptRepeats, newConceptIsReg);
-    if (success) {
-      const folder = `${newConceptRepeats}_${newConceptIsReg ? 'reg_' : ''}${newConceptName.trim()}`;
-      // Auto-enable the new concept
-      setEnabledConcepts(prev => new Set([...prev, folder]));
-    }
+    const folder = await createConcept(selectedDataset, newConceptName.trim(), newConceptRepeats, newConceptIsReg);
     setIsCreatingConcept(false);
+    if (!folder) {
+      setDatasetActionError('Could not create concept');
+      return;
+    }
+    // Auto-enable the new concept
+    setEnabledConcepts(prev => new Set([...prev, folder]));
     setShowNewConceptModal(false);
     setNewConceptName('');
     setNewConceptRepeats(10);
@@ -236,12 +243,15 @@ export function SearchTab({ onDownload }: SearchTabProps) {
   // Create new dataset
   const handleCreateDataset = async () => {
     if (!newDatasetName.trim()) return;
+    setDatasetActionError('');
     setIsCreatingDataset(true);
     const success = await createDataset(newDatasetName.trim());
-    if (success) {
-      setSelectedDataset(newDatasetName.trim().replace(/[^a-zA-Z0-9_-]/g, '_'));
-    }
     setIsCreatingDataset(false);
+    if (!success) {
+      setDatasetActionError('Could not create dataset');
+      return;
+    }
+    setSelectedDataset(newDatasetName.trim().replace(/[^a-zA-Z0-9_-]/g, '_'));
     setShowNewDatasetModal(false);
     setNewDatasetName('');
   };
@@ -249,12 +259,15 @@ export function SearchTab({ onDownload }: SearchTabProps) {
   // Rename dataset
   const handleRenameDataset = async () => {
     if (!selectedDataset || !newDatasetName.trim()) return;
+    setDatasetActionError('');
     setIsRenamingDataset(true);
-    const success = await renameDataset(selectedDataset, newDatasetName.trim());
-    if (success) {
-      setSelectedDataset(newDatasetName.trim().replace(/[^a-zA-Z0-9_-]/g, '_'));
-    }
+    const renamed = await renameDataset(selectedDataset, newDatasetName.trim());
     setIsRenamingDataset(false);
+    if (!renamed) {
+      setDatasetActionError('Could not rename dataset');
+      return;
+    }
+    setSelectedDataset(renamed);
     setShowRenameDatasetModal(false);
     setNewDatasetName('');
   };
@@ -552,7 +565,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
             </UmbraSelectControl>
 
             <button
-              onClick={() => setShowNewDatasetModal(true)}
+              onClick={() => { setDatasetActionError(''); setShowNewDatasetModal(true); }}
               className="p-1 rounded transition-colors"
               style={{ color: 'rgba(255,255,255,0.5)' }}
               onMouseEnter={e => e.currentTarget.style.color = 'var(--umbra-accent)'}
@@ -566,6 +579,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
               <button
                 onClick={() => {
                   setNewDatasetName(selectedDataset);
+                  setDatasetActionError('');
                   setShowRenameDatasetModal(true);
                 }}
                 className="p-1 rounded transition-colors"
@@ -607,7 +621,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
           {selectedDataset && (
             <button
               data-umbra-data-forge-add-concept
-              onClick={() => setShowNewConceptModal(true)}
+              onClick={() => { setDatasetActionError(''); setShowNewConceptModal(true); }}
               className="p-1 rounded transition-colors flex-shrink-0"
               style={{ color: 'rgba(255,255,255,0.5)' }}
               onMouseEnter={e => e.currentTarget.style.color = 'var(--umbra-accent)'}
@@ -679,9 +693,11 @@ export function SearchTab({ onDownload }: SearchTabProps) {
             <p className="text-[10px] mt-2" style={{ color: 'rgba(255,255,255,0.4)' }}>
               Folder: {newConceptRepeats}_{newConceptIsReg ? 'reg_' : ''}{newConceptName || 'name'}
             </p>
+            {datasetActionError && <p role="alert" className="mt-2 text-xs text-red-300">{datasetActionError}</p>}
 
             <div className="flex justify-end gap-2 mt-3">
               <button
+                disabled={isCreatingConcept}
                 onClick={() => {
                   setShowNewConceptModal(false);
                   setNewConceptName('');
@@ -725,9 +741,11 @@ export function SearchTab({ onDownload }: SearchTabProps) {
             <p className="text-[10px] mt-2" style={{ color: 'rgba(255,255,255,0.4)' }}>
               Special characters will be replaced with underscores
             </p>
+            {datasetActionError && <p role="alert" className="mt-2 text-xs text-red-300">{datasetActionError}</p>}
 
             <div className="flex justify-end gap-2 mt-3">
               <button
+                disabled={isCreatingDataset}
                 onClick={() => {
                   setShowNewDatasetModal(false);
                   setNewDatasetName('');
@@ -769,9 +787,11 @@ export function SearchTab({ onDownload }: SearchTabProps) {
             <p className="text-[10px] mt-2" style={{ color: 'rgba(255,255,255,0.4)' }}>
               Renaming "{selectedDataset}" to "{newDatasetName.replace(/[^a-zA-Z0-9_-]/g, '_') || '...'}"
             </p>
+            {datasetActionError && <p role="alert" className="mt-2 text-xs text-red-300">{datasetActionError}</p>}
 
             <div className="flex justify-end gap-2 mt-3">
               <button
+                disabled={isRenamingDataset}
                 onClick={() => {
                   setShowRenameDatasetModal(false);
                   setNewDatasetName('');
