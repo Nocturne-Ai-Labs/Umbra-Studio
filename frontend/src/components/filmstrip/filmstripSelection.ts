@@ -2,8 +2,45 @@ export type FilmstripSelectableImage = {
   id: string;
 };
 
+export type FilmstripPathImage = FilmstripSelectableImage & { path: string };
+
 export function normalizeFilmstripSelectionId(value: unknown): string {
   return String(value || '').trim();
+}
+
+export function getFilmstripSelectableImages<T extends FilmstripPathImage>(recent: T[], current: T[]): T[] {
+  const byId = new Map<string, T>();
+  for (const image of [...recent, ...current]) {
+    if (String(image.path || '').replace(/\\/g, '/').startsWith('umbra-live-generation://')) continue;
+    const id = normalizeFilmstripSelectionId(image.id);
+    if (id && !byId.has(id)) byId.set(id, image);
+  }
+  return Array.from(byId.values());
+}
+
+export function reconcileFilmstripSelection<T extends FilmstripPathImage>(
+  selectedIds: Set<string>,
+  current: T[],
+  recent: T[],
+): Set<string> {
+  const normalizePath = (value: string) => String(value || '').replace(/\\/g, '/').trim().toLowerCase();
+  const currentIdsByPath = new Map(current.map((image) => [normalizePath(image.path), image.id]));
+  const recentById = new Map(recent.map((image) => [normalizeFilmstripSelectionId(image.id), image]));
+  const valid = new Set([...current.map((image) => image.id), ...recentById.keys()]);
+  return new Set(Array.from(selectedIds)
+    .map((id) => {
+      const recentImage = recentById.get(normalizeFilmstripSelectionId(id));
+      return recentImage ? currentIdsByPath.get(normalizePath(recentImage.path)) || id : id;
+    })
+    .filter((id) => valid.has(id)));
+}
+
+export function retainVisibleFilmstripSelection<T extends FilmstripSelectableImage>(
+  selectedIds: Set<string>,
+  visible: T[],
+): Set<string> {
+  const visibleIds = new Set(visible.map((image) => normalizeFilmstripSelectionId(image.id)));
+  return new Set(Array.from(selectedIds).filter((id) => visibleIds.has(normalizeFilmstripSelectionId(id))));
 }
 
 export function createFilmstripPathMatcher(paths: string[]): (path: string) => boolean {

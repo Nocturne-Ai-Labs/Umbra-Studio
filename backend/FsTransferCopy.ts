@@ -49,7 +49,12 @@ export async function copyFileExclusive(source: string, target: string, onProgre
       }
     }
     const after = await input.stat({ bigint: true });
-    if (BigInt(copied) !== before.size || after.size !== before.size || after.mtimeNs !== before.mtimeNs) {
+    // A producer may atomically replace the source path while this open handle
+    // still reads the old file. Do not publish a copy of a no-longer-current file.
+    const currentSource = await fs.stat(source, { bigint: true }).catch(() => null);
+    if (BigInt(copied) !== before.size || after.size !== before.size || after.mtimeNs !== before.mtimeNs
+      || !currentSource || currentSource.dev !== before.dev || currentSource.ino !== before.ino
+      || currentSource.size !== before.size || currentSource.mtimeNs !== before.mtimeNs) {
       throw new Error('Source changed during transfer; original retained');
     }
     await output.utimes(before.atime, before.mtime);

@@ -1009,7 +1009,9 @@ async function authorizeDirectGalleryFsRequest(req: Request, reqUrl: URL): Promi
   } else if (req.method === 'GET') {
     const path = reqUrl.searchParams.get('path');
     if (path) paths.push(path);
-  } else if (req.method === 'POST') {
+  } else if (req.method === 'POST' && !req.headers.get('content-type')?.toLowerCase().startsWith('multipart/form-data')) {
+    // Uploads are multipart. Parsing a clone as JSON would read the entire
+    // media body before proxying it, even though the parse always fails.
     const body = await req.clone().json().catch(() => null) as Record<string, unknown> | null;
     if (typeof body?.path === 'string') paths.push(body.path);
     if (Array.isArray(body?.paths)) paths.push(...body.paths.filter((value): value is string => typeof value === 'string'));
@@ -1173,15 +1175,20 @@ async function proxyToMain(req: Request, reqUrl: URL): Promise<Response> {
   headers.delete('referer');
   headers.delete('x-umbra-gallery-bridge-token');
 
-  const init: RequestInit = {
+  const init: RequestInit & { duplex?: 'half' } = {
     method: req.method,
     headers,
     redirect: 'manual',
-    signal: AbortSignal.timeout(10000),
+    // Gallery uploads, archive creation, and downloads can exceed a fixed
+    // request deadline. Let the browser cancel the work when it disconnects.
+    signal: req.signal,
   };
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
-    init.body = await req.arrayBuffer();
+    // Avoid buffering an entire upload in this process before the main server
+    // parses it. In particular, multipart media can be much larger than RAM.
+    init.body = req.body;
+    init.duplex = 'half';
   }
 
   try {
@@ -1651,6 +1658,7 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
     const indexedPageSize = Math.max(64, Math.min(256, fileLimit * 3));
     type IndexedInput = Awaited<ReturnType<typeof statMediaCandidates>>[number];
     let bestIndexed: Array<{ file: MediaFileRecord; input: IndexedInput }> = [];
+    const staleIndexedPaths = new Set<string>();
     let indexedOffset = 0;
     let indexedCapped = false;
     while (true) {
@@ -1686,7 +1694,15 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
           } : null;
         }));
         const permittedCandidates = authorized.filter((candidate): candidate is MediaCandidate => Boolean(candidate));
-        for (const input of await statMediaCandidates(permittedCandidates, '', signal)) {
+        const validInputs = await statMediaCandidates(permittedCandidates, '', signal);
+        signal?.throwIfAborted();
+        const validPaths = new Set(validInputs.map((input) => normalizePath(input.path).toLowerCase()));
+        for (const candidate of permittedCandidates) {
+          if (!validPaths.has(normalizePath(candidate.clientPath).toLowerCase())) {
+            staleIndexedPaths.add(candidate.clientPath);
+          }
+        }
+        for (const input of validInputs) {
           const indexed = matchingByPath.get(normalizePath(input.path).toLowerCase());
           if (!indexed) continue;
           const file: MediaFileRecord = {
@@ -1706,6 +1722,10 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
       if (indexedCapped) break;
       if (indexedFiles.length < indexedPageSize) break;
     }
+    // Keep deleted or externally moved files from consuming the same indexed
+    // search budget on every request. Defer removal until after pagination so
+    // offsets remain stable for this search.
+    if (staleIndexedPaths.size > 0) galleryDb.removeRecordsForPaths([...staleIndexedPaths]);
     const indexedInputs = bestIndexed.map((entry) => entry.input);
     const indexedByFolder = new Map<string, typeof indexedInputs>();
     for (const input of indexedInputs) {
@@ -2196,7 +2216,9 @@ async function buildThumbnail(filePath: string, sizePx: number, quality: number,
   const input = isVideoPath(filePath)
     ? await extractVideoFrame(filePath, sizePx, fitMode)
     : filePath;
-  return sharp(input, { failOn: 'none', animated: true })
+  // A grid thumbnail only needs the first frame. Decoding every GIF/APNG frame
+  // makes large folders expensive to scan and can create multi-frame WebP files.
+  return sharp(input, { failOn: 'none' })
     .rotate()
     .resize(sizePx, sizePx, {
       fit: normalizedFit,
@@ -2459,7 +2481,9 @@ async function handleMetadata(reqUrl: URL): Promise<Response> {
 const server = Bun.serve({
   hostname: HOST,
   port: PORT,
-  fetch: async (req) => {
+  // Match the main server's idle window for local Gallery scans and media.
+  idleTimeout: 120,
+  fetch: async (req, server) => {
     const reqUrl = new URL(req.url);
 
     if (!isAdmittedBridgeRequest(req, reqUrl)) return json({ error: 'Gallery bridge request denied' }, 403);
@@ -2560,12 +2584,16 @@ const server = Bun.serve({
 
     // Everything else can still bridge to Umbra main process.
     if (reqUrl.pathname.startsWith('/bridge')) {
+      // The main server controls request duration for proxied APIs. A second
+      // idle timer here would truncate slow archive creation and downloads.
+      server.timeout(req, 0);
       return proxyToMain(req, reqUrl);
     }
 
     // For non-local API endpoints, forward to Umbra main process.
     // Local FS-heavy gallery APIs are handled above in this process.
     if (reqUrl.pathname.startsWith('/api/')) {
+      server.timeout(req, 0);
       const bridgeUrl = new URL(req.url);
       bridgeUrl.pathname = `/bridge${reqUrl.pathname}`;
       return proxyToMain(req, bridgeUrl);

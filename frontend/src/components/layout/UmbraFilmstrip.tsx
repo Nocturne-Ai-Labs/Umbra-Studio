@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Filmstrip, type FilmstripImage, type SortDirection, type SortField } from '@/components/filmstrip';
-import { createFilmstripPathMatcher, resolveFilmstripSelectedImages } from '@/components/filmstrip/filmstripSelection';
+import { createFilmstripPathMatcher, getFilmstripSelectableImages, reconcileFilmstripSelection, resolveFilmstripSelectedImages, retainVisibleFilmstripSelection } from '@/components/filmstrip/filmstripSelection';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
 import { deletePathsWithSettings, permanentlyDeleteTrashPaths, validateTrashRestoreResult } from '@/utils/trashActions';
@@ -398,6 +398,7 @@ export function UmbraFilmstrip({
   const [images, setImages] = useState<FilmstripImage[]>([]);
   const [liveGenerationPreviewImage, setLiveGenerationPreviewImage] = useState<FilmstripImage | null>(null);
   const [recentGenerationOutputImages, setRecentGenerationOutputImages] = useState<FilmstripImage[]>([]);
+  const recentGenerationOutputImagesRef = useRef<FilmstripImage[]>([]);
   const [recentGenerationsExpanded, setRecentGenerationsExpanded] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastSelectedId, setLastSelectedId] = useState<string>('');
@@ -505,29 +506,32 @@ export function UmbraFilmstrip({
       const current = currentByPath.get(normalizePath(image.path).toLowerCase());
       if (!current) return image;
       return {
-        ...image, ...current, id: image.id,
+        ...image, ...current,
         privacyClass: image.privacyClass === 'nsfw' || current.privacyClass === 'nsfw' ? 'nsfw' : 'normal',
       };
     });
   }, [displayedImages, liveGenerationPreviewImage, liveGenerationPreviewsEnabled, recentGenerationOutputImages, recentGenerationsExpanded]);
 
   useEffect(() => {
+    recentGenerationOutputImagesRef.current = recentGenerationOutputImages;
+  }, [recentGenerationOutputImages]);
+
+  useEffect(() => {
     if (!liveGenerationPreviewsEnabled) setLiveGenerationPreviewImage(null);
   }, [liveGenerationPreviewsEnabled]);
 
-  const selectableImages = useMemo(() => {
-    if (recentGenerationLaneImages.length === 0) return displayedImages;
-    const byId = new Map<string, FilmstripImage>();
-    for (const image of recentGenerationLaneImages) {
-      const id = normalizeId(image.id);
-      if (id && !byId.has(id)) byId.set(id, image);
-    }
-    for (const image of displayedImages) {
-      const id = normalizeId(image.id);
-      if (id && !byId.has(id)) byId.set(id, image);
-    }
-    return Array.from(byId.values());
-  }, [displayedImages, recentGenerationLaneImages]);
+  const selectableImages = useMemo(() => getFilmstripSelectableImages(recentGenerationLaneImages, displayedImages), [
+    displayedImages, recentGenerationLaneImages,
+  ]);
+
+  useEffect(() => {
+    if (normalizePath(feedFolder).toLowerCase() !== normalizePath(currentFolder || rootPath).toLowerCase()) return;
+    setSelectedIds((current) => {
+      const next = retainVisibleFilmstripSelection(current, selectableImages);
+      return next.size === current.size && Array.from(next).every((id) => current.has(id)) ? current : next;
+    });
+    setLastSelectedId((current) => current && retainVisibleFilmstripSelection(new Set([current]), selectableImages).size === 0 ? '' : current);
+  }, [currentFolder, feedFolder, rootPath, selectableImages]);
 
   const resolveSelectedImages = useCallback((ids: string[]): FilmstripImage[] => {
     return resolveFilmstripSelectedImages(selectableImages, selectableImages, ids);
@@ -848,11 +852,10 @@ export function UmbraFilmstrip({
         }
         setImages(mapped);
         if (!preserveOptimisticOrder) setCustomOrder(mapped.map((item) => item.id));
-        setSelectedIds((current) => {
-          const valid = new Set(mapped.map((item) => item.id));
-          const next = new Set(Array.from(current).filter((id) => valid.has(id)));
-          return next;
-        });
+        setSelectedIds((current) => reconcileFilmstripSelection(current, mapped, recentGenerationOutputImagesRef.current));
+        setLastSelectedId((current) => current
+          ? Array.from(reconcileFilmstripSelection(new Set([current]), mapped, recentGenerationOutputImagesRef.current))[0] || ''
+          : current);
       }
       const pending = pendingSelectionRef.current;
       if (pending) {
@@ -1238,10 +1241,10 @@ export function UmbraFilmstrip({
   }, [setActiveWorkspace]);
 
   const onSelect = useCallback((id: string, event: React.MouseEvent) => {
-    clearExternalSelection();
-    const orderedIds = displayedImages.map((item) => item.id);
+    const orderedIds = selectableImages.map((item) => item.id);
     const clickedIndex = orderedIds.indexOf(id);
     if (clickedIndex < 0) return;
+    clearExternalSelection();
 
     if (isTouchRemote && touchSelectionMode) {
       if (event.shiftKey && lastSelectedId) {
@@ -1296,10 +1299,10 @@ export function UmbraFilmstrip({
     const viewerOpen = typeof document !== 'undefined'
       && Boolean(document.querySelector('[data-umbra-gallery-viewer]'));
     if (viewerOpen) {
-      const imagePath = normalizePath(displayedImages[clickedIndex]?.path || '');
+      const imagePath = normalizePath(selectableImages[clickedIndex]?.path || '');
       if (imagePath && !isLiveGenerationPreviewPath(imagePath)) openPathInGallery(imagePath, 'filmstrip-open', 'file');
     }
-  }, [clearExternalSelection, displayedImages, isTouchRemote, lastSelectedId, openPathInGallery, touchSelectionMode]);
+  }, [clearExternalSelection, isTouchRemote, lastSelectedId, openPathInGallery, selectableImages, touchSelectionMode]);
 
   const notifyGalleryTrashUpdated = useCallback(() => {
     window.dispatchEvent(new CustomEvent('umbra:gallery-trash-updated', { detail: { source: 'filmstrip' } }));
@@ -2264,6 +2267,7 @@ export function UmbraFilmstrip({
         onDataChanged={refreshImages}
         onHeightChange={onHeightChange}
         folderLabel={pathLeaf(currentFolder || rootPath) || 'No folder'}
+        folderPath={currentFolder || rootPath}
         pinnedFolders={pinnedFolderItems}
         newestFolders={newestFolderItems}
         onOpenPinnedFolder={openPinnedFolder}
@@ -2273,11 +2277,6 @@ export function UmbraFilmstrip({
         onPinnedDropTargetChange={setDropTargetPath}
         onRefresh={() => refreshImages({ reload: true })}
         expanded={false}
-        onRequestMore={() => {
-          window.dispatchEvent(new CustomEvent('umbra:gallery-load-more', {
-            detail: { source: 'filmstrip' },
-          }));
-        }}
         changeHint={feedMode}
       />
     </>

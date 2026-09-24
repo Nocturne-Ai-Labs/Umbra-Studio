@@ -5166,7 +5166,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       }
     }
 
-    const existingRequest = force && !background ? null : treeRequestByPathRef.current.get(normalized);
+    // A force refresh must start after the mutation that requested it. Reusing
+    // an older in-flight read can leave the branch stale despite force=1.
+    const existingRequest = force ? null : treeRequestByPathRef.current.get(normalized);
     if (existingRequest) return background ? existingRequest.promise : existingRequest.promise.catch(() => treeChildrenRef.current[normalized] || []);
 
     if (!background) setLoadingTreePaths((current) => {
@@ -8435,15 +8437,19 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     };
     const onRestorePaths = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
-      if (detail.source === 'react-gallery') return;
       const restoredPaths = Array.isArray(detail.paths)
         ? uniqueNormalizedPaths(detail.paths.map(normalizePath))
         : [];
       if (restoredPaths.length === 0) return;
-      rememberRestoredHighlights(restoredPaths);
-      for (const restoredPath of restoredPaths) {
-        clearPageCacheForFolder(pathParent(restoredPath));
+      const restoredParents = uniqueNormalizedPaths(restoredPaths.map(pathParent));
+      for (const parent of restoredParents) {
+        clearPageCacheForFolder(parent);
+        invalidateTreeChildrenCache(parent);
+        invalidateChangedTreeBranches(parent);
+        void loadTreeChildren(parent, true, true).catch(() => undefined);
       }
+      if (detail.source === 'react-gallery') return;
+      rememberRestoredHighlights(restoredPaths);
       if (
         trashMode
         || restoredPaths.some((path) => pathsEqual(pathParent(path), currentFolder) || pathIsInsideRoot(path, currentFolder))
@@ -8499,7 +8505,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       }
 
       if (!pathsEqual(changedPath, currentFolder) && pathIsInsideRoot(changedPath, currentFolder)) {
-        void loadTreeChildren(currentFolder);
+        void loadTreeChildren(currentFolder, true);
         return;
       }
 
