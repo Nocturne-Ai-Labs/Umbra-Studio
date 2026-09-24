@@ -83,6 +83,17 @@ function pathParent(pathValue: string): string {
   return normalizePath(normalized.slice(0, index));
 }
 
+export function shouldRefreshFilmstripForContentChange(
+  detail: { path?: string; folderPath?: string; mediaPath?: string; source?: string; reason?: string },
+  activeFolder: string,
+): boolean {
+  if (detail.source === 'filmstrip') return false;
+  const reason = String(detail.reason || '').trim().toLowerCase();
+  if (reason === 'reorder' || reason === 'delete') return false;
+  const changedFolder = normalizePath(detail.folderPath || (detail.mediaPath ? pathParent(detail.mediaPath) : detail.path));
+  return !changedFolder || changedFolder.toLowerCase() === normalizePath(activeFolder).toLowerCase();
+}
+
 function pathsLikelyRelated(left: string | null | undefined, right: string | null | undefined): boolean {
   const a = normalizePath(left || '');
   const b = normalizePath(right || '');
@@ -1054,13 +1065,9 @@ export function UmbraFilmstrip({
 
   useEffect(() => {
     const onContentChanged = (event: Event) => {
-      const custom = event as CustomEvent<{ path?: string; folderPath?: string; source?: string; reason?: string }>;
-      if (custom?.detail?.source === 'filmstrip') return;
-      const reason = String(custom?.detail?.reason || '').trim().toLowerCase();
-      if (reason === 'reorder' || reason === 'delete') return;
-      const changedPath = normalizePath(custom?.detail?.path || custom?.detail?.folderPath || '');
       const activeFolder = normalizePath(currentFolder || rootPath);
-      if (changedPath && activeFolder && changedPath !== activeFolder) return;
+      const detail = (event as CustomEvent<{ path?: string; folderPath?: string; mediaPath?: string; source?: string; reason?: string }>)?.detail || {};
+      if (!shouldRefreshFilmstripForContentChange(detail, activeFolder)) return;
       refreshImages();
     };
     window.addEventListener('umbra:gallery-content-changed', onContentChanged as EventListener);
