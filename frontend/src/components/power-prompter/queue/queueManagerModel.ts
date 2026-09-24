@@ -181,7 +181,7 @@ export function buildQueueRequestGroups({
       || Math.max(1, Math.min(total, completed + failed + (running > 0 || pending > 0 ? 1 : 0)));
     const hasActiveWork = running > 0 || pending > 0;
     const progressUnits = hasActiveWork
-      ? Math.max(completed + failed, visualPosition)
+      ? Math.min(total - 1, Math.max(completed + failed, visualPosition - 1))
       : Math.max(0, completed + failed);
     const progressRatio = Math.max(0, Math.min(1, progressUnits / Math.max(1, total)));
     const firstPromptMs = queueRequestFirstPromptMs.get(requestId) ?? null;
