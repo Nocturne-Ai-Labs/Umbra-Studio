@@ -37,6 +37,31 @@ export type QueueHistorySnapshotBuildResult = {
   failure: QueueHistorySnapshotBuildFailure | null;
 };
 
+export function getQueueHistoryReplayPromptIndices(
+  history: Pick<PowerPrompterQueueHistorySummary, 'promptCount' | 'completed' | 'failed' | 'canceled' | 'promptStatuses'>,
+  promptCount: number,
+  resumeRemaining: boolean,
+): number[] {
+  const count = Math.max(0, Math.floor(Number(promptCount) || 0));
+  const indices = Array.from({ length: count }, (_, index) => index);
+  if (!resumeRemaining) return indices;
+  if (history.promptStatuses?.length === count) {
+    return indices.filter((index) => {
+      const status = history.promptStatuses?.[index];
+      return status === 'pending' || status === 'submitting' || status === 'running'
+        || status === 'interrupted' || status === 'unstarted';
+    });
+  }
+  // Older history entries only recorded aggregate counts and assumed a
+  // completed prefix. Keep that fallback until those entries are replaced.
+  const terminalCount = Math.max(0, Math.min(count,
+    Math.floor(Number(history.completed) || 0)
+    + Math.floor(Number(history.failed) || 0)
+    + Math.floor(Number(history.canceled) || 0),
+  ));
+  return indices.slice(terminalCount);
+}
+
 export function buildQueueHistoryGroups(items: PowerPrompterQueueHistorySummary[]): PowerPrompterQueueHistoryGroup[] {
   const groups: PowerPrompterQueueHistoryGroup[] = [];
   const groupByKey = new Map<string, PowerPrompterQueueHistoryGroup>();

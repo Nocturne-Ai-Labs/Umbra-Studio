@@ -784,7 +784,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                           )}
                           <button
                             data-umbra-queue-set-clear=""
-                            onClick={() => { void queueCancelSetGroupRef.current?.(setGroup.setId); }}
+                            onClick={() => { void queueCancelSetGroupRef.current?.(setGroup.setId, setGroup.groups.map((group) => group.requestId)); }}
                             disabled={queueDestructiveActionBusy || !setCanCancel}
                             className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors ${
                               queueDestructiveActionBusy || !setCanCancel

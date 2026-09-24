@@ -31,7 +31,7 @@ export function getQueueClearFutureKeepIds(
   const keep = new Set<string>();
   for (const request of requests) {
     if (!activeTasks.has(request.requestId)) continue;
-    if (request.prompts.some((prompt) => prompt.status === 'running')) {
+    if (request.prompts.some((prompt) => prompt.status === 'running' || prompt.status === 'submitting')) {
       keep.add(request.requestId);
     }
   }
