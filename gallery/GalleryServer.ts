@@ -13,6 +13,7 @@ import {
 import { MetadataParser, type ImageMetadata } from '../backend/MetadataParser';
 import { metadataFileRevision } from '../backend/metadataFileRevision';
 import { galleryMediaCacheControl } from './GalleryMediaCache';
+import { gallerySearchPathKey } from './GallerySearchPathKey';
 import { resolveGalleryPublicDir } from './GalleryRuntimePaths';
 import { GalleryWarmupScheduler } from './GalleryWarmupScheduler';
 import { GalleryFolderRevisions } from './GalleryFolderRevisions';
@@ -1623,7 +1624,7 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
       try {
         const dirPath = await ensureDirectory(rootValue);
         signal?.throwIfAborted();
-        const key = normalizePath(dirPath).toLowerCase();
+        const key = gallerySearchPathKey(dirPath);
         if (!key || seenRoots.has(key)) continue;
         seenRoots.add(key);
         registerPrewarmRoot(dirPath);
@@ -1677,7 +1678,7 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
       indexedOffset += indexedFiles.length;
       if (indexedFiles.length === 0) break;
       const matchingFiles = indexedFiles.filter((file) => fileMatchesSearch(file, query));
-      const matchingByPath = new Map(matchingFiles.map((file) => [normalizePath(file.path).toLowerCase(), file]));
+      const matchingByPath = new Map(matchingFiles.map((file) => [gallerySearchPathKey(file.path), file]));
       const pageBest: Array<{ file: MediaFileRecord; input: IndexedInput }> = [];
       for (let offset = 0; offset < matchingFiles.length; offset += 64) {
         if (offset > 0 && nowMs() - startedAt >= maxDurationMs) {
@@ -1697,14 +1698,14 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
         const permittedCandidates = authorized.filter((candidate): candidate is MediaCandidate => Boolean(candidate));
         const validInputs = await statMediaCandidates(permittedCandidates, '', signal);
         signal?.throwIfAborted();
-        const validPaths = new Set(validInputs.map((input) => normalizePath(input.path).toLowerCase()));
+        const validPaths = new Set(validInputs.map((input) => gallerySearchPathKey(input.path)));
         for (const candidate of permittedCandidates) {
-          if (!validPaths.has(normalizePath(candidate.clientPath).toLowerCase())) {
+          if (!validPaths.has(gallerySearchPathKey(candidate.clientPath))) {
             staleIndexedPaths.add(candidate.clientPath);
           }
         }
         for (const input of validInputs) {
-          const indexed = matchingByPath.get(normalizePath(input.path).toLowerCase());
+          const indexed = matchingByPath.get(gallerySearchPathKey(input.path));
           if (!indexed) continue;
           const file: MediaFileRecord = {
             ...indexed,
@@ -1738,7 +1739,7 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
     for (const [folder, inputs] of indexedByFolder) {
       for (const file of upsertGalleryFiles(folder, inputs)) {
         if (!fileMatchesSearch(file, query)) continue;
-        const key = normalizePath(file.path).toLowerCase();
+        const key = gallerySearchPathKey(file.path);
         if (!key || filesByPath.has(key)) continue;
         filesByPath.set(key, file);
       }
@@ -1749,7 +1750,7 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
     const queue: Array<{ absolutePath: string; clientPath: string; rootPath: string; toClientPath: (resolvedPath: string) => string }> = [];
     const seenDirectories = new Set<string>();
     for (const root of resolvedRoots) {
-      seenDirectories.add(normalizePath(root.dirPath).toLowerCase());
+      seenDirectories.add(gallerySearchPathKey(root.dirPath));
       queue.push({
         absolutePath: root.dirPath,
         clientPath: root.clientRootPath,
@@ -1757,7 +1758,7 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
         toClientPath: root.toClientPath,
       });
       if (textMatchesSearch(basename(root.clientRootPath) || root.clientRootPath, query) || textMatchesSearch(root.clientRootPath, query)) {
-        foldersByPath.set(root.clientRootPath.toLowerCase(), {
+        foldersByPath.set(gallerySearchPathKey(root.clientRootPath), {
           name: basename(root.clientRootPath) || root.clientRootPath,
           path: root.clientRootPath,
           rootPath: root.clientRootPath,
@@ -1785,11 +1786,11 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
         .sort((a, b) => galleryNameCollator.compare(a.name, b.name));
       for (const entry of directories) {
         const absolutePath = join(current.absolutePath, entry.name);
-        const absoluteKey = normalizePath(absolutePath).toLowerCase();
+        const absoluteKey = gallerySearchPathKey(absolutePath);
         if (!absoluteKey || seenDirectories.has(absoluteKey)) continue;
         seenDirectories.add(absoluteKey);
         const clientPath = current.toClientPath(absolutePath);
-        const key = normalizePath(clientPath).toLowerCase();
+        const key = gallerySearchPathKey(clientPath);
         if (!key) continue;
         if (foldersByPath.size < folderLimit && (textMatchesSearch(entry.name, query) || textMatchesSearch(clientPath, query))) {
           foldersByPath.set(key, {
@@ -1815,7 +1816,7 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
           clientPath: current.toClientPath(join(current.absolutePath, entry.name)),
           folderPath: normalizePath(current.clientPath),
         }))
-        .filter((candidate) => !filesByPath.has(normalizePath(candidate.clientPath).toLowerCase()));
+        .filter((candidate) => !filesByPath.has(gallerySearchPathKey(candidate.clientPath)));
       for (let offset = 0; offset < filenameMatches.length; offset += 64) {
         if (nowMs() - startedAt >= maxDurationMs) {
           capped = true;
@@ -1826,7 +1827,7 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
         const indexed = upsertGalleryFiles(normalizePath(current.clientPath), inputs);
         for (const file of indexed) {
           if (!fileMatchesSearch(file, query)) continue;
-          const key = normalizePath(file.path).toLowerCase();
+          const key = gallerySearchPathKey(file.path);
           if (!key) continue;
           filesByPath.set(key, file);
         }
@@ -1834,7 +1835,7 @@ async function handleSearch(reqUrl: URL, signal?: AbortSignal): Promise<Response
           .sort((a, b) => compareSearchFiles(a, b, query, sortBy, sortOrder))
           .slice(0, fileLimit);
         filesByPath.clear();
-        for (const file of bestFiles) filesByPath.set(normalizePath(file.path).toLowerCase(), file);
+        for (const file of bestFiles) filesByPath.set(gallerySearchPathKey(file.path), file);
       }
       if (capped) break;
     }

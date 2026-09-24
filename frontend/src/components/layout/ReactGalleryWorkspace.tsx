@@ -1580,11 +1580,12 @@ function compareSearchFiles(left: GalleryFile, right: GalleryFile, needle: strin
 }
 
 function buildSearchGroups(files: GalleryFile[], folders: GalleryFolder[]): GallerySearchGroup[] {
+  // The server may run on a case-sensitive filesystem even when this browser runs on Windows.
   const groupsByPath = new Map<string, GallerySearchGroup>();
   for (const folder of folders) {
     const folderPath = normalizePath(folder.path);
     if (!folderPath) continue;
-    const key = folderPath.toLowerCase();
+    const key = folderPath;
     groupsByPath.set(key, {
       folder: { name: folder.name || pathLeaf(folderPath) || folderPath, path: folderPath },
       files: [],
@@ -1593,7 +1594,7 @@ function buildSearchGroups(files: GalleryFile[], folders: GalleryFolder[]): Gall
   for (const file of files) {
     const folderPath = pathParent(file.path) || normalizePath(file.path);
     if (!folderPath) continue;
-    const key = folderPath.toLowerCase();
+    const key = folderPath;
     const existing = groupsByPath.get(key);
     if (existing) {
       existing.files.push(file);
@@ -1624,22 +1625,22 @@ function mergeSearchPayload(
   const filesByPath = new Map<string, GalleryFile>();
   for (const file of current?.files || []) {
     const path = normalizePath(file.path);
-    if (path) filesByPath.set(path.toLowerCase(), file);
+    if (path) filesByPath.set(path, file);
   }
   for (const file of additions.files || []) {
     const normalized = normalizeGalleryFile(file, filesByPath.size);
     const path = normalizePath(normalized.path);
-    if (path && fileMatchesSearch(normalized, needle)) filesByPath.set(path.toLowerCase(), normalized);
+    if (path && fileMatchesSearch(normalized, needle)) filesByPath.set(path, normalized);
   }
 
   const foldersByPath = new Map<string, GalleryFolder>();
   for (const folder of current?.folders || []) {
     const path = normalizePath(folder.path);
-    if (path) foldersByPath.set(path.toLowerCase(), { name: folder.name || pathLeaf(path), path });
+    if (path) foldersByPath.set(path, { name: folder.name || pathLeaf(path), path });
   }
   for (const folder of additions.folders || []) {
     const path = normalizePath(folder.path);
-    if (path) foldersByPath.set(path.toLowerCase(), { name: folder.name || pathLeaf(path), path });
+    if (path) foldersByPath.set(path, { name: folder.name || pathLeaf(path), path });
   }
 
   const files = Array.from(filesByPath.values())
