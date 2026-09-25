@@ -26608,7 +26608,18 @@ async function capturePausedPowerPrompterQueue() {
   const snapshots = new Map<string, Record<string, any>>();
   for (const request of powerPrompterQueueControllerState.requests) {
     if (request.origin !== 'power_prompter' || !request.prompts.some((prompt) => prompt.status === 'pending')) continue;
-    await ppBackendHistory.get(request.requestId)?.ready;
+    const queueHistory = ppBackendHistory.get(request.requestId);
+    const unsavedEditError = 'A queue group edit could not be saved. Repair the group before saving the queue.';
+    if (queueHistory?.requiredRevisionFailed) throw new Error(unsavedEditError);
+    try {
+      // `ready` reports write failures but resolves them. A failed required
+      // revision must not produce a saved queue with stale prompt metadata.
+      await queueHistory?.requiredRevision;
+    } catch {
+      throw new Error(unsavedEditError);
+    }
+    await queueHistory?.ready;
+    if (queueHistory?.requiredRevisionFailed) throw new Error(unsavedEditError);
     const history = await loadPPQueueHistory(getPPQueueRequestHistoryId(request.requestId));
     if (history) snapshots.set(request.requestId, history.snapshot);
   }
