@@ -1,6 +1,20 @@
 import { useEffect, useSyncExternalStore } from 'react';
 
-export type GalleryTransferResult = { path: string; newPath?: string; success: boolean; error?: string };
+export type GalleryTransferResult = { path: string; newPath?: string; success: boolean; isDirectory?: boolean; error?: string };
+
+export function getCompletedGalleryFolderMoves(
+  results: GalleryTransferResult[],
+  mode: 'move' | 'copy',
+): Array<{ source: string; target: string }> {
+  if (mode !== 'move') return [];
+  return results.flatMap((result) => {
+    const source = String(result.path || '').trim();
+    const target = String(result.newPath || '').trim();
+    return result.success && result.isDirectory === true
+      && source && target && !source.includes('\0') && !target.includes('\0')
+      ? [{ source, target }] : [];
+  });
+}
 export type GalleryTransferState = {
   jobId?: string;
   active: boolean;
@@ -45,6 +59,7 @@ function isTransferResult(value: unknown): value is GalleryTransferResult {
   const result = value as Record<string, unknown>;
   return typeof result.path === 'string' && Boolean(result.path.trim()) && typeof result.success === 'boolean'
     && (result.error === undefined || typeof result.error === 'string')
+    && (result.isDirectory === undefined || typeof result.isDirectory === 'boolean')
     && (result.newPath === undefined || typeof result.newPath === 'string');
 }
 
