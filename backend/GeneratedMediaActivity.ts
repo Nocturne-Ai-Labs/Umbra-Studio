@@ -99,7 +99,7 @@ export class GeneratedMediaActivity {
 
   snapshot(paths: string[], allowed: (path: string) => boolean, clientPath: (path: string) => string) {
     const entries = [...this.folders.entries()].filter(([, entry]) => allowed(entry.path));
-    const folders = paths.map(path => ({ path, entries: [] as Array<{ id: string; count: number }> }));
+    const folders = paths.map(path => ({ path, entries: [] as Array<{ id: string; count: number; direct: boolean }> }));
     const requestedByKey = new Map<string, typeof folders>();
     for (const folder of folders) {
       const key = this.key(folder.path);
@@ -108,13 +108,13 @@ export class GeneratedMediaActivity {
       requestedByKey.set(key, matching);
     }
     for (const [key, entry] of entries) {
-      let item: { id: string; count: number } | null = null;
+      let id: string | null = null;
       let ancestor = key;
       while (true) {
         const matching = requestedByKey.get(ancestor);
         if (matching) {
-          item ||= { id: createHash('sha256').update(key).digest('hex'), count: entry.count };
-          for (const folder of matching) folder.entries.push(item);
+          id ||= createHash('sha256').update(key).digest('hex');
+          for (const folder of matching) folder.entries.push({ id, count: entry.count, direct: ancestor === key });
         }
         const parent = dirname(ancestor);
         if (parent === ancestor) break;

@@ -8191,6 +8191,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const upsertDirectSavedOutputs = useCallback((savedFiles: GallerySavedOutputFile[], source = 'powerprompter-output-saved') => {
     if (savedFiles.length === 0) return false;
 
+    // A saved output may land in a pinned folder while another folder is open.
+    // Invalidate its warm page so opening that pin reads the newly saved media.
+    for (const folderPath of uniqueNormalizedPaths(savedFiles.map((file) => pathParent(file.path)))) {
+      clearPageCacheForFolder(folderPath);
+    }
+
     for (const file of savedFiles) {
       if (!file.metadata) continue;
       const existing = getCachedViewerMetadata(file.path);
@@ -8258,7 +8264,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     filesRef.current = nextFiles;
     setFiles(nextFiles);
     setTotal((current) => Math.max(current, nextFiles.length));
-    clearPageCacheForFolder(normalizedCurrentFolder);
     const dirtyAfterDeleteAt = dirtyAfterDeleteFoldersRef.current.get(normalizedCurrentFolder.toLowerCase()) || 0;
     const shouldReconcileAfterDelete = dirtyAfterDeleteAt > 0 && now - dirtyAfterDeleteAt < 30_000;
     if (shouldReconcileAfterDelete) {
@@ -8536,6 +8541,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       if (!changedPath) return;
       // Refresh visible ancestors even when the changed folder is not the open grid.
       invalidateChangedTreeBranches(changedPath);
+      clearPageCacheForFolder(changedPath);
       if (
         !pathsEqual(changedPath, currentFolder)
         && !pathIsInsideRoot(currentFolder, changedPath)
@@ -8550,7 +8556,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       const source = String(detail.source || '').trim();
       if (source === 'react-gallery' && reason === 'delete') {
         clearPageCacheForFolder(currentFolder);
-        clearPageCacheForFolder(changedPath);
         dirtyAfterDeleteFoldersRef.current.set(changedPath.toLowerCase(), Date.now());
         if (pathsEqual(changedPath, currentFolder)) {
           void loadFolder({ folder: currentFolder, keepSelection: true, forceRefresh: true, preserveScroll: true });
@@ -8560,7 +8565,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
 
       const recentDirectSync = directOutputSyncRef.current.get(changedPath.toLowerCase()) || 0;
       if (reason === 'generation' && recentDirectSync && Date.now() - recentDirectSync < 5_000) {
-        clearPageCacheForFolder(changedPath);
         return;
       }
 
@@ -8573,7 +8577,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       if (contentRefreshKeyRef.current === refreshKey) return;
       contentRefreshKeyRef.current = refreshKey;
       clearPageCacheForFolder(currentFolder);
-      clearPageCacheForFolder(changedPath);
       void loadFolder({ folder: currentFolder, keepSelection: true, forceRefresh: true, preserveScroll: true });
     };
 
