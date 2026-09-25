@@ -6490,6 +6490,7 @@ async function applyBackendPromptRemovalsDurably(
     }
   }).then((result) => {
     if (!result.error && result.affectedRequestIds.length > 0) {
+      releaseBackendPowerPrompterPauseWhenIdle('backend_prompt_remove_resumed', preferredSourceWs);
       recentBackendPromptRemovals.set(key, { result, expiresAt: Date.now() + 2000 });
       while (recentBackendPromptRemovals.size > 128) {
         const oldest = recentBackendPromptRemovals.keys().next().value;
@@ -10167,6 +10168,31 @@ function cancelBackendPowerPrompterQueuedWork(requestId: string, reason: string)
   return true;
 }
 
+function releaseBackendPowerPrompterPauseWhenIdle(reason: string, preferredSourceWs?: ServerWebSocket<unknown> | null): boolean {
+  if (!powerPrompterQueueControllerState.paused) return false;
+  const hasLiveRequest = powerPrompterQueueControllerState.requests.some((request) =>
+    hasLivePowerPrompterQueuePrompts(request.prompts));
+  const hasLiveQueuedWork = backendPowerPrompterQueuedWork.some((work) => {
+    const request = findPowerPrompterQueueControllerRequest(work.requestId);
+    return !request || hasLivePowerPrompterQueuePrompts(request.prompts);
+  });
+  const hasLiveTask = Array.from(backendPowerPrompterQueueTasks.entries()).some(([requestId, task]) => {
+    if (task.canceled || task.abortController.signal.aborted) return false;
+    const request = findPowerPrompterQueueControllerRequest(requestId);
+    const activePrompt = request?.prompts[task.activePromptIndex];
+    return !request || hasLivePowerPrompterQueuePrompts(request.prompts)
+      || task.cancelInFlightPromptIds.size > 0
+      || (activePrompt?.status === 'interrupted' && activePrompt.interruptionDrainConfirmed !== true);
+  });
+  const hasPendingAdmission = Array.from(pendingPowerPrompterBatchAdmissionTokens.values()).some((admission) => !admission.canceled)
+    || Array.from(pendingUmbraUiQueueAdmissionTokens.values()).some((admission) => !admission.canceled);
+  if (hasLiveRequest || hasLiveQueuedWork || hasLiveTask || hasPendingAdmission) return false;
+  powerPrompterQueueControllerState.paused = false;
+  powerPrompterQueueControllerState.updatedAt = Date.now();
+  broadcastPowerPrompterQueueControllerSnapshot(reason, preferredSourceWs);
+  return true;
+}
+
 function interruptBackendPowerPrompterActivePrompt(
   requestId: string,
   reason: string,
@@ -12786,6 +12812,10 @@ function forwardPrompterQueueControlToComfyTarget(
       && targetedLiveBackendRequestIds.every((id) => backendAffectedRequestIds.includes(id)));
   const controlSucceeded = affectedRequestIds.length > 0 || pendingBatchControl.canceledBatchRequestIds.length > 0;
 
+  if (isBackendPipelineTarget && type === 'queue_cancel' && controlSucceeded) {
+    releaseBackendPowerPrompterPauseWhenIdle('backend_cancel_resumed', ws);
+  }
+
   if (isBackendPipelineTarget && type === 'queue_clear_future'
     && controlSucceeded && powerPrompterQueueControllerState.paused) {
     const clearedBackendRequestIds = new Set(backendAffectedRequestIds);
@@ -12840,6 +12870,7 @@ function forwardPrompterQueueControlToComfyTarget(
       canceledBatchRequestIds: pendingBatchControl.canceledBatchRequestIds,
       success: controlSucceeded,
       backendHandled: true,
+      paused: powerPrompterQueueControllerState.paused,
       ...(noSubmittedPrompt ? { noSubmittedPrompt: true } : {}),
       ...(controlSucceeded ? {} : { error: 'No backend pipeline queue jobs were canceled.' }),
     });
@@ -12951,6 +12982,7 @@ function forwardPrompterQueueMessageToComfyTarget(
         type: 'queue_prompt_remove_result', requestId,
         success: applied && !result.error,
         applied, backendHandled: true,
+        paused: powerPrompterQueueControllerState.paused,
         removedRequestIds: result.removedRequestIds,
         promptRemovals: result.promptRemovals,
         ...(result.partial ? { partial: true } : {}),
