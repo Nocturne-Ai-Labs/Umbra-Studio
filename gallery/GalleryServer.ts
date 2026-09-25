@@ -1,4 +1,4 @@
-import { existsSync, type Dirent } from 'fs';
+import { existsSync, readFileSync, type Dirent } from 'fs';
 import * as fs from 'fs/promises';
 import { basename, extname, join, relative, resolve, isAbsolute, sep } from 'path';
 import { availableParallelism, cpus } from 'os';
@@ -1046,17 +1046,45 @@ async function statMediaCandidates(
     .map((result) => result.value);
 }
 
-function resolveGalleryPath(input: string): string {
-  const raw = String(input || '').trim();
-  if (!raw) return '';
-  if (isAbsolute(raw)) return resolve(raw);
-  // Match the main API's legacy output alias so thumbnails, metadata and editor
-  // handoffs all resolve the same file. Absolute paths remain literal.
-  const normalized = raw.replace(/\\/g, '/');
+function resolveGalleryLiteralPath(input: string): string {
+  const normalized = input.replace(/\\/g, '/');
   const mapped = normalized === 'User/Outputs' || normalized.startsWith('User/Outputs/')
     ? `Tools/ComfyUI/output${normalized.slice('User/Outputs'.length)}`
     : normalized;
-  return resolve(ROOT_DIR, mapped);
+  return isAbsolute(mapped) ? resolve(mapped) : resolve(ROOT_DIR, mapped);
+}
+
+let trashStorageRootCache: { root: string; expiresAt: number } | null = null;
+
+function getConfiguredGalleryTrashRoot(): string {
+  const now = Date.now();
+  if (trashStorageRootCache && now < trashStorageRootCache.expiresAt) return trashStorageRootCache.root;
+  let configured = 'User/Trash';
+  try {
+    const settings = JSON.parse(readFileSync(join(ROOT_DIR, 'User', 'Config', 'settings.json'), 'utf8')) as { app?: Record<string, unknown> };
+    const value = settings.app?.['library.trashStoragePath'];
+    if (typeof value === 'string' && value.trim() && !value.includes('\0')) configured = value.trim();
+  } catch { /* Use the default Trash root until settings are available. */ }
+  const root = resolveGalleryLiteralPath(configured.replace(/\$\{PROJECT_ROOT\}/g, ROOT_DIR));
+  if (trashStorageRootCache && trashStorageRootCache.root !== root) {
+    directPathAuthorizer = null;
+    directPathAuthorizerExpiresAt = 0;
+  }
+  trashStorageRootCache = { root, expiresAt: now + 5000 };
+  return root;
+}
+
+function resolveGalleryPath(input: string): string {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  // Match the main API's virtual Trash and legacy output aliases. Absolute
+  // paths remain literal so configured storage roots do not recurse here.
+  const normalized = raw.replace(/\\/g, '/');
+  if (!isAbsolute(raw) && (normalized === 'User/Trash' || normalized.startsWith('User/Trash/'))) {
+    const suffix = normalized.slice('User/Trash'.length).replace(/^\/+/, '');
+    return suffix ? resolve(getConfiguredGalleryTrashRoot(), suffix) : getConfiguredGalleryTrashRoot();
+  }
+  return resolveGalleryLiteralPath(raw);
 }
 
 type GalleryPathAuthorizer = Awaited<ReturnType<typeof createGalleryPathAuthorizer>>;
@@ -1067,7 +1095,7 @@ async function getDirectPathAuthorizer(): Promise<GalleryPathAuthorizer> {
   if (directPathAuthorizer && Date.now() < directPathAuthorizerExpiresAt) return directPathAuthorizer;
   directPathAuthorizerExpiresAt = Date.now() + 5000;
   directPathAuthorizer = (async () => {
-    const roots = [ROOT_DIR];
+    const roots = [ROOT_DIR, getConfiguredGalleryTrashRoot()];
     let app: Record<string, unknown> = {};
     try {
       const settings = JSON.parse(await fs.readFile(join(ROOT_DIR, 'User', 'Config', 'settings.json'), 'utf8')) as { app?: unknown };
@@ -1075,9 +1103,8 @@ async function getDirectPathAuthorizer(): Promise<GalleryPathAuthorizer> {
     } catch { /* Default roots remain available when settings cannot be read. */ }
     const addRoot = (value: unknown) => {
       if (typeof value !== 'string' || !value.trim() || value.includes('\0')) return;
-      roots.push(resolveGalleryPath(value.replace(/\$\{PROJECT_ROOT\}/g, ROOT_DIR)));
+      roots.push(resolveGalleryLiteralPath(value.replace(/\$\{PROJECT_ROOT\}/g, ROOT_DIR)));
     };
-    addRoot(app['library.trashStoragePath'] || 'User/Trash');
     addRoot(app['comfyui.externalOutputPath']);
     if (app['library.enableExternalRoots'] !== false && Array.isArray(app['library.externalRoots'])) {
       for (const root of app['library.externalRoots']) addRoot(root);
