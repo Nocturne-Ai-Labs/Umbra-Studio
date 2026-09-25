@@ -26668,8 +26668,41 @@ async function restoreSavedPowerPrompterQueue(id: unknown) {
   }
   // Validate every group before committing any work; a failed load leaves the live queue alone.
   assertSavedQueueCanLoad();
+  const wasPaused = powerPrompterQueueControllerState.paused;
+  const admissionGate = createPowerPrompterAdmissionGate();
+  const acceptedRequestIds: string[] = [];
   powerPrompterQueueControllerState.paused = true;
-  for (const work of prepared) enqueueBackendPowerPrompterQueueWork(work);
+  let admissionError: unknown = null;
+  for (const work of prepared) {
+    try {
+      if (!enqueueBackendPowerPrompterQueueWork({ ...work, admissionGate })) {
+        admissionError = new Error('A saved queue group could not be loaded. Please try again.');
+        break;
+      }
+      acceptedRequestIds.push(work.requestId);
+    } catch (error) {
+      admissionError = error;
+      break;
+    }
+  }
+  // Wait even after a partial enqueue failure. Rollback must see which initial
+  // history writes created files so it can remove every accepted group's entry.
+  try {
+    await awaitBackendPowerPrompterInitialHistory(acceptedRequestIds);
+  } catch (error) {
+    admissionError ??= error;
+  }
+  if (admissionError || admissionGate.status !== 'pending') {
+    try {
+      await rollbackBackendPowerPrompterAdmission(acceptedRequestIds, admissionGate);
+    } finally {
+      powerPrompterQueueControllerState.paused = wasPaused;
+      broadcastPowerPrompterQueueControllerSnapshot('saved_queue_load_failed');
+    }
+    throw admissionError || new Error('Saved queue loading was canceled before its history was saved.');
+  }
+  powerPrompterQueueControllerState.paused = true;
+  releaseBackendPowerPrompterAdmission(admissionGate);
   broadcastPowerPrompterQueueControllerSnapshot('saved_queue_loaded');
   return { id: document.id, name: document.name, promptCount: document.snapshot.prompts.length, requestIds: prepared.map((work) => work.requestId) };
 }
