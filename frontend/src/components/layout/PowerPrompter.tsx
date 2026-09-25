@@ -875,7 +875,11 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const didRestorePausedQueueRef = useRef(false);
   const pendingQueueCancelScopeRef = useRef<string[]>([]);
   const pendingQueueClearFutureScopeRef = useRef<string[]>([]);
-  const pendingQueuePromptRemovalOpsRef = useRef(new Map<string, Array<{ requestId: string; promptIndices: number[] }>>());
+  const pendingQueuePromptRemovalOpsRef = useRef(new Map<string, {
+    removals: Array<{ requestId: string; promptIndices: number[] }>;
+    successKind: 'prompt' | 'selected' | 'set' | 'group';
+    setId?: number;
+  }>());
   const pendingQueuePromptRemovalKeysRef = useRef(new Set<string>());
   const syncSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedContentRef = useRef('');
@@ -1299,9 +1303,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       })),
       pendingCancelScope: [...pendingQueueCancelScopeRef.current],
       pendingClearFutureScope: [...pendingQueueClearFutureScopeRef.current],
-      pendingPromptRemovalOps: Array.from(pendingQueuePromptRemovalOpsRef.current.entries()).map(([requestId, removals]) => ({
+      pendingPromptRemovalOps: Array.from(pendingQueuePromptRemovalOpsRef.current.entries()).map(([requestId, operation]) => ({
         requestId,
-        removals,
+        removals: operation.removals,
       })),
       intentionallyCanceledIds: Array.from(intentionallyCanceledQueueRequestIdsRef.current),
       clearedIds: Array.from(clearedQueueRequestIdsRef.current),
@@ -2391,53 +2395,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     }
     applyLocalPromptOrder(requestId, nextPromptOrder);
   }, [queueRequestGroups, effectiveQueueTargetBridgeId, selectedQueueTargetType, showToast, applyLocalPromptOrder]);
-  const persistQueuePromptRemovalMutation = useCallback(async (
-    promptRemovals: Array<{ requestId: string; promptIndices: number[] }>,
-  ) => {
-    const normalizedPromptRemovals = Array.isArray(promptRemovals)
-      ? promptRemovals
-        .map((entry) => ({
-          requestId: String(entry?.requestId || '').trim(),
-          promptIndices: Array.isArray(entry?.promptIndices)
-            ? Array.from(new Set(
-              entry.promptIndices
-                .map((value) => Number(value))
-                .filter((value) => Number.isFinite(value))
-                .map((value) => Math.max(0, Math.floor(value)))
-            )).sort((a, b) => a - b)
-            : [],
-        }))
-        .filter((entry) => entry.requestId && entry.promptIndices.length > 0)
-      : [];
-    if (normalizedPromptRemovals.length <= 0) return null;
-    try {
-      const response = await fetch('/api/powerprompter/queue/mutate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        cache: 'no-store',
-        body: JSON.stringify({
-          op: 'remove_prompts',
-          promptRemovals: normalizedPromptRemovals,
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload?.success === false) {
-        throw new Error(String(payload?.error || 'Failed to persist queue prompt removal.'));
-      }
-      logQueueDebug('queue:mutation:removePrompts:persisted', {
-        removedRequestIds: payload?.removedRequestIds || [],
-        promptRemovals: payload?.promptRemovals || normalizedPromptRemovals,
-        hasSnapshot: Boolean(payload?.snapshot),
-      });
-      return payload;
-    } catch (error: any) {
-      logQueueDebug('queue:mutation:removePrompts:error', {
-        promptRemovals: normalizedPromptRemovals,
-        error: String(error?.message || error || ''),
-      });
-      return null;
-    }
-  }, [logQueueDebug]);
   const handleQueueManagerPromptRemove = useCallback((requestIdInput: string, promptIndexInput: number) => {
     const requestId = String(requestIdInput || '').trim();
     const promptIndex = Math.max(0, Math.floor(Number(promptIndexInput) || 0));
@@ -2464,16 +2421,16 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       [{ requestId, promptIndices: [promptIndex] }],
       queueRequestMetaRef.current.get(requestId)?.targetBridgeId || effectiveQueueTargetBridgeId,
       queueRequestMetaRef.current.get(requestId)?.queueTargetType || selectedQueueTargetType,
+      { successKind: 'prompt' },
     );
+    if (removalRequestId === 'deduped') return;
     if (!removalRequestId) {
       showToast('Power Prompter queue tracker is not connected. Unable to remove queued prompt.', 'error');
       return;
     }
     applyLocalPromptRemoval(requestId, [promptIndex]);
-    void persistQueuePromptRemovalMutation([{ requestId, promptIndices: [promptIndex] }]);
     scheduleRecoverableQueueSnapshotPersist({ clearWhenEmpty: true, delayMs: 50 });
-    showToast('Removed queued prompt', 'success');
-  }, [queueRequestGroups, effectiveQueueTargetBridgeId, persistQueuePromptRemovalMutation, selectedQueueTargetType, showToast]);
+  }, [queueRequestGroups, effectiveQueueTargetBridgeId, selectedQueueTargetType, showToast]);
   const getQueuePromptSelectionKey = useCallback((requestIdInput: unknown, promptIndexInput: unknown) => {
     const requestId = String(requestIdInput || '').trim();
     const promptIndex = Math.max(0, Math.floor(Number(promptIndexInput) || 0));
@@ -2600,7 +2557,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       selectedByRequest.set(requestId, existing);
     }
     if (selectedByRequest.size <= 0) return;
-    let removedCount = 0;
+    const handledSelections = new Map<string, number[]>();
+    let localRemovedCount = 0;
     for (const [requestId, promptIndices] of selectedByRequest.entries()) {
       const group = queueRequestGroups.find((entry) => entry.requestId === requestId);
       if (!group) continue;
@@ -2609,12 +2567,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       const normalizedPromptIndices = Array.from(new Set(promptIndices)).sort((a, b) => a - b);
       if (!runningItem && normalizedPromptIndices.length >= removablePendingItems.length) {
         void queueCancelRequestGroupRef.current?.(requestId);
-        removedCount += removablePendingItems.length;
+        handledSelections.set(requestId, normalizedPromptIndices);
         continue;
       }
       if (isLocalStagedQueueRequestId(requestId)) {
         if (applyLocalPromptRemoval(requestId, normalizedPromptIndices)) {
-          removedCount += normalizedPromptIndices.length;
+          localRemovedCount += normalizedPromptIndices.length;
+          handledSelections.set(requestId, normalizedPromptIndices);
         }
         continue;
       }
@@ -2622,19 +2581,20 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         [{ requestId, promptIndices: normalizedPromptIndices }],
         queueRequestMetaRef.current.get(requestId)?.targetBridgeId || effectiveQueueTargetBridgeId,
         queueRequestMetaRef.current.get(requestId)?.queueTargetType || selectedQueueTargetType,
+        { successKind: 'selected' },
       );
+      if (removalRequestId === 'deduped') continue;
       if (!removalRequestId) {
         showToast('Power Prompter queue tracker is not connected. Unable to remove selected prompts.', 'error');
         return;
       }
       applyLocalPromptRemoval(requestId, normalizedPromptIndices);
-      void persistQueuePromptRemovalMutation([{ requestId, promptIndices: normalizedPromptIndices }]);
-      removedCount += normalizedPromptIndices.length;
+      handledSelections.set(requestId, normalizedPromptIndices);
     }
-    if (removedCount > 0) {
+    if (handledSelections.size > 0) {
       setSelectedQueuePromptKeys((prev) => {
         const next = { ...prev };
-        for (const [requestId, promptIndices] of selectedByRequest.entries()) {
+        for (const [requestId, promptIndices] of handledSelections.entries()) {
           for (const promptIndex of promptIndices) {
             delete next[getQueuePromptSelectionKey(requestId, promptIndex)];
           }
@@ -2642,18 +2602,19 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         return next;
       });
       setQueuePromptSelectionAnchor(null);
-      if (Array.from(selectedByRequest.keys()).some((requestId) => isLocalStagedQueueRequestId(requestId))) {
+      if (Array.from(handledSelections.keys()).some((requestId) => isLocalStagedQueueRequestId(requestId))) {
         setQueuePaused(true);
         scheduleRecoverableQueueSnapshotPersist({ paused: true, clearWhenEmpty: true, delayMs: 50 });
       } else {
         scheduleRecoverableQueueSnapshotPersist({ clearWhenEmpty: true, delayMs: 50 });
       }
-      showToast(`Removed ${removedCount} queued prompt${removedCount === 1 ? '' : 's'}`, 'success');
+      if (localRemovedCount > 0) {
+        showToast(`Removed ${localRemovedCount} staged prompt${localRemovedCount === 1 ? '' : 's'} locally`, 'success');
+      }
     }
   }, [
     effectiveQueueTargetBridgeId,
     getQueuePromptSelectionKey,
-    persistQueuePromptRemovalMutation,
     queueRequestGroups,
     selectedQueuePromptKeys,
     selectedQueueTargetType,
@@ -7067,9 +7028,10 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         if (messageType === 'queue_prompt_remove_result') {
           logQueueDebug('ws:queue_prompt_remove_result:received', { payload });
           const controlRequestId = String(payload.requestId || '').trim();
-          const pendingRemovals = controlRequestId
-            ? (pendingQueuePromptRemovalOpsRef.current.get(controlRequestId) || [])
-            : [];
+          const pendingOperation = controlRequestId
+            ? pendingQueuePromptRemovalOpsRef.current.get(controlRequestId)
+            : undefined;
+          const pendingRemovals = pendingOperation?.removals || [];
           if (controlRequestId) {
             pendingQueuePromptRemovalOpsRef.current.delete(controlRequestId);
           }
@@ -7079,17 +7041,26 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
               pendingQueuePromptRemovalKeysRef.current.delete(`${removalRequestId}:${Math.max(0, Math.floor(Number(promptIndex) || 0))}`);
             }
           }
-          if (payload.success === false) {
+          if (payload.success !== true) {
             sendPrompterWsMessage({ type: 'bridge_catalog_request' });
+            const partialCount = Array.isArray(payload.promptRemovals)
+              ? payload.promptRemovals.reduce((count: number, entry: any) => count + (Array.isArray(entry?.promptIndices) ? entry.promptIndices.length : 0), 0)
+              : 0;
             logQueueDebug('ws:queue_prompt_remove_result:failed_refresh_requested', {
               controlRequestId,
               error: payload.error || '',
               pendingRemovals,
             });
-            showToast(String(payload.error || 'Failed to remove queued prompt.'), 'error');
+            showToast(
+              payload.partial === true && partialCount > 0
+                ? `${partialCount} queued prompt${partialCount === 1 ? ' was' : 's were'} removed, but the remaining removal failed: ${String(payload.error || 'Queue history could not be saved.')}`
+                : String(payload.error || 'Failed to remove queued prompt.'),
+              'error',
+            );
             return;
           }
           if (payload.applied !== true) {
+            sendPrompterWsMessage({ type: 'bridge_catalog_request' });
             showToast('Queued prompt update did not apply. Queue state may have changed.', 'error');
             return;
           }
@@ -7104,6 +7075,23 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
             : removedRequestIds;
           if (effectiveRemovedRequestIds.length > 0) {
             dropTrackedQueueRequestState(effectiveRemovedRequestIds);
+          }
+          if (pendingOperation) {
+            const appliedCount = Array.isArray(payload.promptRemovals)
+              ? payload.promptRemovals.reduce((count: number, entry: any) => count + (Array.isArray(entry?.promptIndices) ? entry.promptIndices.length : 0), 0)
+              : pendingRemovals.reduce((count, entry) => count + entry.promptIndices.length, 0);
+            if (appliedCount > 0) {
+              const plural = appliedCount === 1 ? '' : 's';
+              const setId = clampQueueSetId(pendingOperation.setId ?? 1);
+              const message = pendingOperation.successKind === 'set'
+                ? `Cleared ${appliedCount} future prompt${plural} from Set ${setId}`
+                : pendingOperation.successKind === 'group'
+                  ? `Cleared ${appliedCount} future prompt${plural} from Set ${setId} group. Current render will finish.`
+                  : pendingOperation.successKind === 'prompt' && appliedCount === 1
+                    ? 'Removed queued prompt'
+                    : `Removed ${appliedCount} queued prompt${plural}`;
+              showToast(message, 'success');
+            }
           }
           logQueueDebug('ws:queue_prompt_remove_result:applied', { controlRequestId, removedRequestIds, effectiveRemovedRequestIds, pendingRemovals });
           return;
@@ -9230,7 +9218,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const requestQueuePromptRemoveThroughWebSocket = (
     promptRemovals: Array<{ requestId: string; promptIndices: number[] }>,
     targetBridgeId?: string,
-    queueTargetType?: PowerPrompterQueueTargetType
+    queueTargetType?: PowerPrompterQueueTargetType,
+    success?: { successKind: 'prompt' | 'selected' | 'set' | 'group'; setId?: number },
   ): string | null => {
     logQueueDebug('ws:queue_prompt_remove:send:start', { promptRemovals, targetBridgeId, queueTargetType });
     if (!prompterWsReadyRef.current || !prompterWsRef.current || prompterWsRef.current.readyState !== WebSocket.OPEN) {
@@ -9282,7 +9271,11 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         pendingQueuePromptRemovalKeysRef.current.add(`${entry.requestId}:${promptIndex}`);
       }
     }
-    pendingQueuePromptRemovalOpsRef.current.set(requestId, dedupedPromptRemovals);
+    pendingQueuePromptRemovalOpsRef.current.set(requestId, {
+      removals: dedupedPromptRemovals,
+      successKind: success?.successKind || 'selected',
+      setId: success?.setId,
+    });
     logQueueDebug('ws:queue_prompt_remove:send:done', { requestId, normalizedPromptRemovals: dedupedPromptRemovals, resolvedTarget });
     return requestId;
   };
@@ -11193,15 +11186,17 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         livePromptRemovals,
         firstMeta?.targetBridgeId || effectiveQueueTargetBridgeId,
         firstMeta?.queueTargetType || selectedQueueTargetType,
+        { successKind: 'set', setId },
       )
         : null;
       if (livePromptRemovals.length > 0 && !removalRequestId) {
-        pendingQueuePromptRemovalOpsRef.current.clear();
-        pendingQueuePromptRemovalKeysRef.current.clear();
         throw new Error('Power Prompter queue tracker is not connected. Unable to clear queued set prompts safely.');
       }
+      const appliedPromptRemovals = removalRequestId === 'deduped'
+        ? localPromptRemovals : promptRemovals;
+      if (appliedPromptRemovals.length <= 0) return;
       const activeRequestId = String(lockedQueueRequestId || '').trim();
-      for (const entry of promptRemovals) {
+      for (const entry of appliedPromptRemovals) {
         if (String(entry.requestId || '').trim() === activeRequestId) {
           pruneTrackedQueueRequestToActivePrompt(entry.requestId);
         } else {
@@ -11209,11 +11204,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         }
         clearedQueueRequestIdsRef.current.add(entry.requestId);
       }
-      if (livePromptRemovals.length > 0) {
-        void persistQueuePromptRemovalMutation(livePromptRemovals);
-      }
       setQueuePaused(nextPaused);
-      const removedPromptCount = promptRemovals.reduce((total, entry) => total + entry.promptIndices.length, 0);
+      const removedPromptCount = appliedPromptRemovals.reduce((total, entry) => total + entry.promptIndices.length, 0);
+      const localRemovedPromptCount = localPromptRemovals.reduce((total, entry) => total + entry.promptIndices.length, 0);
       logQueueDebug('action:cancelQueueSetGroup:end', {
         setId,
         requestIds,
@@ -11224,12 +11217,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         nextPaused,
         removalRequestId,
       });
-      showToast(
-        removalRequestId
-          ? `Cleared ${removedPromptCount} future prompt${removedPromptCount === 1 ? '' : 's'} from Set ${setId}`
-          : `Cleared ${removedPromptCount} staged prompt${removedPromptCount === 1 ? '' : 's'} from Set ${setId} locally`,
-        'success',
-      );
+      if (localRemovedPromptCount > 0) {
+        showToast(`Cleared ${localRemovedPromptCount} staged prompt${localRemovedPromptCount === 1 ? '' : 's'} from Set ${setId} locally`, 'success');
+      }
     } catch (error: any) {
       logQueueDebug('action:cancelQueueSetGroup:error', { setId, error: String(error?.message || error || '') });
       showToast(String(error?.message || 'Failed to cancel queue set'), 'error');
@@ -11277,10 +11267,10 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           [{ requestId, promptIndices: pendingPromptIndices }],
           meta?.targetBridgeId || effectiveQueueTargetBridgeId,
           meta?.queueTargetType || selectedQueueTargetType,
+          { successKind: 'group', setId: clampQueueSetId(meta?.setId ?? 1) },
         );
+        if (removalRequestId === 'deduped') return;
         if (!isLocalStagedRequest && !removalRequestId) {
-          pendingQueuePromptRemovalOpsRef.current.clear();
-          pendingQueuePromptRemovalKeysRef.current.clear();
           throw new Error('Power Prompter queue tracker is not connected. Unable to clear queued group prompts safely.');
         }
         const nextPaused = queuePausedAfterRemovingWork(
@@ -11292,18 +11282,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         pruneTrackedQueueRequestToActivePrompt(requestId);
         if (isLocalStagedRequest) {
           removeLocalPausedSnapshotPromptIndices(requestId, pendingPromptIndices);
-        } else {
-          void persistQueuePromptRemovalMutation([{ requestId, promptIndices: pendingPromptIndices }]);
         }
         clearedQueueRequestIdsRef.current.add(requestId);
         setQueuePaused(nextPaused);
         logQueueDebug('action:cancelQueueRequestGroup:activePruned', { requestId, pendingPromptIndices, removalRequestId });
-        showToast(
-          removalRequestId
-            ? `Cleared ${pendingPromptIndices.length} future prompt${pendingPromptIndices.length === 1 ? '' : 's'} from Set ${clampQueueSetId(meta?.setId ?? 1)} group. Current render will finish.`
-            : `Cleared ${pendingPromptIndices.length} staged prompt${pendingPromptIndices.length === 1 ? '' : 's'} from Set ${clampQueueSetId(meta?.setId ?? 1)} group locally.`,
-          'success',
-        );
+        if (isLocalStagedRequest) {
+          showToast(`Cleared ${pendingPromptIndices.length} staged prompt${pendingPromptIndices.length === 1 ? '' : 's'} from Set ${clampQueueSetId(meta?.setId ?? 1)} group locally.`, 'success');
+        }
         return;
       }
 
