@@ -805,6 +805,9 @@ export function UmbraFilmstrip({
         && pathKey(folderPath) === pathKey(activeFolder);
 
       if (canAppend) {
+        if (custom?.detail?.done !== undefined || custom?.detail?.nextCursor !== undefined) {
+          setFeedComplete(feedDone);
+        }
         if (mapped.length === 0) return;
         setFeedMode('append');
         setImages((current) => {
