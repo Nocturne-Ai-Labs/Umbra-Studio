@@ -2770,7 +2770,10 @@ export function UmbraUIWorkspace() {
       if (handoff.mode !== 'inpaint' && handoff.mode !== 'video' && handoff.mode !== 'canvas') {
         clearPendingUmbraUiMediaHandoff(handoff);
       }
-      if (handoff.mode === 'video') setActiveMode('video');
+      if (handoff.mode === 'video') {
+        setActiveMode('video');
+        return;
+      }
       if (handoff.mode === 'txt2img') setActiveMode('image');
       if (handoff.mode === 'img2img') {
         setActiveMode('img2img');
