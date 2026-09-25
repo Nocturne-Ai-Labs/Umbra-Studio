@@ -31,6 +31,7 @@ import {
 } from '@/lib/umbraUiMediaTools';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import {
+  clearCompletedUmbraUiMediaBatch,
   runUmbraUiMediaBatch,
   type UmbraUiMediaBatchKind,
 } from '@/lib/umbraUiMediaBatch';
@@ -560,6 +561,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
         setSummary((current) => ({ ...current, completed: current.completed + (error ? 0 : 1), failed: current.failed + (error ? 1 : 0) }));
       },
     });
+    setItems((current) => clearCompletedUmbraUiMediaBatch(current, runnableItems));
     setProcessing(false);
     window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
     showToast(result.failed ? `${result.completed} watermark${result.completed === 1 ? '' : 's'} completed; ${result.failed} failed.` : `${result.completed} watermark${result.completed === 1 ? '' : 's'} completed.`, result.failed ? 'error' : 'success');
@@ -692,6 +694,7 @@ function VideoToGifTool() {
         setSummary((current) => ({ ...current, completed: current.completed + (error ? 0 : 1), failed: current.failed + (error ? 1 : 0) }));
       },
     });
+    setItems((current) => clearCompletedUmbraUiMediaBatch(current, runnableItems));
     setProcessing(false);
     window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
     showToast(result.failed ? `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed; ${result.failed} failed.` : `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed.`, result.failed ? 'error' : 'success');
