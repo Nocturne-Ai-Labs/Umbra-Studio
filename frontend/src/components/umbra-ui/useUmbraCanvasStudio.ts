@@ -251,6 +251,10 @@ export function useUmbraCanvasStudio({
   const latestProjectRef = React.useRef<UmbraCanvasStudioProject | null>(null);
   const autoSaveTimerRef = React.useRef<number | null>(null);
   const projectSaveQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+  const savedProjectRevisionsRef = React.useRef(new Map<string, number>());
+  const deletingProjectIdsRef = React.useRef(new Set<string>());
+  const deletedProjectIdsRef = React.useRef(new Set<string>());
+  const projectDeletionVersionsRef = React.useRef(new Map<string, number>());
   const artboardHistoryRef = React.useRef(artboardHistory);
   latestProjectRef.current = project;
   artboardHistoryRef.current = artboardHistory;
@@ -284,7 +288,21 @@ export function useUmbraCanvasStudio({
   const queueProjectSave = React.useCallback((snapshot: UmbraCanvasStudioProject) => {
     const request = projectSaveQueueRef.current
       .catch(() => undefined)
-      .then(() => saveUmbraStudioProject(snapshot));
+      .then(async () => {
+        if (deletingProjectIdsRef.current.has(snapshot.id) || deletedProjectIdsRef.current.has(snapshot.id)) {
+          throw new Error('This Canvas Studio project is being deleted.');
+        }
+        const savedRevision = savedProjectRevisionsRef.current.get(snapshot.id);
+        const candidate = savedRevision !== undefined && savedRevision > snapshot.revision
+          ? { ...snapshot, revision: savedRevision }
+          : snapshot;
+        const saved = await saveUmbraStudioProject(candidate);
+        savedProjectRevisionsRef.current.set(saved.id, saved.revision);
+        if (deletingProjectIdsRef.current.has(saved.id) || deletedProjectIdsRef.current.has(saved.id)) {
+          throw new Error('This Canvas Studio project is being deleted.');
+        }
+        return saved;
+      });
     projectSaveQueueRef.current = request.then(() => undefined, () => undefined);
     return request;
   }, []);
@@ -298,19 +316,27 @@ export function useUmbraCanvasStudio({
   }, [showToast]);
 
   const markProject = React.useCallback((updater: (current: UmbraCanvasStudioProject) => UmbraCanvasStudioProject) => {
+    const active = latestProjectRef.current;
+    if (!active || deletingProjectIdsRef.current.has(active.id) || deletedProjectIdsRef.current.has(active.id)) return;
     dirtyVersionRef.current += 1;
     setSaveState('idle');
-    setProject((current) => current ? updater(current) : current);
+    setProject((current) => current && !deletingProjectIdsRef.current.has(current.id) && !deletedProjectIdsRef.current.has(current.id)
+      ? updater(current)
+      : current);
   }, []);
 
   const persist = React.useCallback(async (snapshot?: UmbraCanvasStudioProject | null) => {
     clearScheduledAutoSave();
     const candidate = snapshot || latestProjectRef.current;
     if (!candidate) return true;
+    if (deletingProjectIdsRef.current.has(candidate.id) || deletedProjectIdsRef.current.has(candidate.id)) return false;
+    const deletionVersion = projectDeletionVersionsRef.current.get(candidate.id) || 0;
     const version = dirtyVersionRef.current;
     setSaveState('saving');
     try {
       const saved = await queueProjectSave(candidate);
+      if (deletionVersion !== (projectDeletionVersionsRef.current.get(candidate.id) || 0)
+        || deletingProjectIdsRef.current.has(candidate.id) || deletedProjectIdsRef.current.has(candidate.id)) return false;
       if (dirtyVersionRef.current === version) {
         dirtyVersionRef.current = 0;
         setProject(saved);
@@ -331,6 +357,8 @@ export function useUmbraCanvasStudio({
       try { window.localStorage.setItem(ACTIVE_STUDIO_PROJECT_KEY, saved.id); } catch { /* best effort */ }
       return dirtyVersionRef.current === 0;
     } catch (error) {
+      if (deletionVersion !== (projectDeletionVersionsRef.current.get(candidate.id) || 0)
+        || deletingProjectIdsRef.current.has(candidate.id) || deletedProjectIdsRef.current.has(candidate.id)) return false;
       if (dirtyVersionRef.current === version) setSaveState('error');
       showToast(error instanceof Error ? error.message : 'Failed to save the Canvas Studio project.', 'error');
       return false;
@@ -358,18 +386,21 @@ export function useUmbraCanvasStudio({
   }, [clearScheduledAutoSave, queueProjectSave]);
 
   const openProject = React.useCallback(async (projectId: string) => {
-    if (!projectId) return;
+    if (!projectId || deletingProjectIdsRef.current.has(projectId)) return;
     setLoading(true);
     try {
       if (latestProjectRef.current && dirtyVersionRef.current > 0 && !await persist(latestProjectRef.current)) return;
       const loaded = await loadUmbraStudioProject(projectId);
+      if (deletingProjectIdsRef.current.has(projectId)) return;
       if (dirtyVersionRef.current > 0) return;
       const active = loaded.artboards.find((artboard) => artboard.id === loaded.activeArtboardId) || loaded.artboards[0];
       if (active && active.documentId !== document?.id && !await openCanvasDocument(active.documentId, true)) {
         throw new Error(`The artboard document for ${active.name} is unavailable.`);
       }
-      if (dirtyVersionRef.current > 0) return;
+      if (dirtyVersionRef.current > 0 || deletingProjectIdsRef.current.has(projectId)) return;
       setProject(loaded);
+      deletedProjectIdsRef.current.delete(loaded.id);
+      savedProjectRevisionsRef.current.set(loaded.id, loaded.revision);
       setSaveState('saved');
       dirtyVersionRef.current = 0;
       resetArtboardHistory(loaded.id);
@@ -918,15 +949,39 @@ export function useUmbraCanvasStudio({
 
   const deleteProject = React.useCallback(async () => {
     if (!project) return;
+    const projectId = project.id;
+    if (deletingProjectIdsRef.current.has(projectId) || deletedProjectIdsRef.current.has(projectId)) return;
+    deletingProjectIdsRef.current.add(projectId);
+    projectDeletionVersionsRef.current.set(projectId, (projectDeletionVersionsRef.current.get(projectId) || 0) + 1);
     clearScheduledAutoSave();
-    await deleteUmbraStudioProject(project.id);
-    setProject(null);
-    dirtyVersionRef.current = 0;
-    setSaveState('idle');
-    resetArtboardHistory();
-    try { window.localStorage.removeItem(ACTIVE_STUDIO_PROJECT_KEY); } catch { /* best effort */ }
-    await refreshProjects();
-    showToast('Canvas Studio project deleted. Artboard documents were preserved.', 'success');
+    setLoading(true);
+    try {
+      await projectSaveQueueRef.current;
+      await deleteUmbraStudioProject(projectId);
+      deletedProjectIdsRef.current.add(projectId);
+      savedProjectRevisionsRef.current.delete(projectId);
+      if (latestProjectRef.current?.id === projectId) {
+        latestProjectRef.current = null;
+        setProject(null);
+        dirtyVersionRef.current = 0;
+        setSaveState('idle');
+      }
+      if (artboardHistoryRef.current.projectId === projectId) resetArtboardHistory();
+      setProjects((current) => current.filter((entry) => entry.id !== projectId));
+      try {
+        if (window.localStorage.getItem(ACTIVE_STUDIO_PROJECT_KEY) === projectId) {
+          window.localStorage.removeItem(ACTIVE_STUDIO_PROJECT_KEY);
+        }
+      } catch { /* best effort */ }
+      await refreshProjects();
+      showToast('Canvas Studio project deleted. Artboard documents were preserved.', 'success');
+    } catch (error) {
+      setSaveState('idle');
+      showToast(error instanceof Error ? error.message : 'Failed to delete the Canvas Studio project.', 'error');
+    } finally {
+      deletingProjectIdsRef.current.delete(projectId);
+      setLoading(false);
+    }
   }, [clearScheduledAutoSave, project, refreshProjects, resetArtboardHistory, showToast]);
 
   return {
