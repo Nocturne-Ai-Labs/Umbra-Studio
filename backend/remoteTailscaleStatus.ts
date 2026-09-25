@@ -1,3 +1,5 @@
+import { isIP } from 'node:net';
+
 export type TailscaleRuntimeStatus = {
   installed: boolean;
   backendState: string;
@@ -6,6 +8,7 @@ export type TailscaleRuntimeStatus = {
   health: string[];
   activeIpv4s: string[];
   activeIpv6s: string[];
+  activePeerIps: string[];
   activeDnsName: string;
   knownDnsName: string;
 };
@@ -32,6 +35,18 @@ function isTailscaleIpv4(value: string): boolean {
 
 function isTailscaleIpv6(value: string): boolean {
   return /^fd7a:115c:a1e0:/i.test(value.replace(/^\[/, '').replace(/\]$/, ''));
+}
+
+export function normalizeTailscalePeerIp(value: unknown): string {
+  const raw = String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
+  const family = isIP(raw);
+  if (family === 4) return raw;
+  if (family !== 6) return '';
+  try {
+    return new URL(`http://[${raw}]/`).hostname.replace(/^\[|\]$/g, '');
+  } catch {
+    return '';
+  }
 }
 
 function collectProxyTargets(value: unknown, targets: Set<string>): void {
@@ -102,6 +117,21 @@ export function parseTailscaleStatus(payload: unknown): TailscaleRuntimeStatus {
   const cachedIps = Array.isArray(record.TailscaleIPs)
     ? record.TailscaleIPs.map((value) => String(value || '').trim())
     : [];
+  const peers = record.Peer && typeof record.Peer === 'object'
+    ? Object.values(record.Peer as Record<string, unknown>)
+    : [];
+  const activePeerIps = new Set<string>();
+  if (connected) {
+    for (const entry of peers) {
+      if (!entry || typeof entry !== 'object') continue;
+      const peer = entry as Record<string, unknown>;
+      if (peer.Online !== true || !Array.isArray(peer.TailscaleIPs)) continue;
+      for (const rawIp of peer.TailscaleIPs) {
+        const ip = normalizeTailscalePeerIp(rawIp);
+        if (ip && (isTailscaleIpv4(ip) || isTailscaleIpv6(ip))) activePeerIps.add(ip);
+      }
+    }
+  }
 
   return {
     installed: true,
@@ -111,6 +141,7 @@ export function parseTailscaleStatus(payload: unknown): TailscaleRuntimeStatus {
     health,
     activeIpv4s: connected ? cachedIps.filter(isTailscaleIpv4) : [],
     activeIpv6s: connected ? cachedIps.filter(isTailscaleIpv6) : [],
+    activePeerIps: Array.from(activePeerIps),
     activeDnsName: connected ? knownDnsName : '',
     knownDnsName,
   };
@@ -125,6 +156,7 @@ export function createUnavailableTailscaleStatus(): TailscaleRuntimeStatus {
     health: [],
     activeIpv4s: [],
     activeIpv6s: [],
+    activePeerIps: [],
     activeDnsName: '',
     knownDnsName: '',
   };
