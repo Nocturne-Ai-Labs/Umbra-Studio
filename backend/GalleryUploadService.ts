@@ -1,17 +1,16 @@
 import * as fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { extname, join, relative, resolve } from 'node:path';
+import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { copyFileExclusive } from './FsTransferCopy';
 import { resolveAllowedGalleryPath } from './GalleryPathAccess';
 
 export type GalleryUploadStrategy = 'keepBoth' | 'replace' | 'skip';
-export interface GalleryUploadRequest {
+export type GalleryUploadRequest = {
   directory: string;
   name: string;
   strategy: GalleryUploadStrategy;
-  contentBase64: string;
-}
+} & ({ contentBase64: string; stagedPath?: never } | { stagedPath: string; contentBase64?: never });
 
 const MAX_UPLOAD_NAME_LENGTH = 255;
 
@@ -75,15 +74,58 @@ async function assertUploadDirectory(directory: string): Promise<void> {
   }
 }
 
+export async function stageGalleryUploadFile(directory: string, file: File): Promise<string> {
+  await assertUploadDirectory(directory);
+  const stagedPath = join(directory, `.umbra-upload-${randomUUID()}.part`);
+  const handle = await fs.open(stagedPath, 'wx');
+  let completed = false;
+  try {
+    const reader = file.stream().getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        await handle.writeFile(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    await assertUploadDirectory(directory);
+    await handle.close();
+    completed = true;
+    return stagedPath;
+  } finally {
+    if (!completed) {
+      await handle.close().catch(() => undefined);
+      await fs.rm(stagedPath, { force: true }).catch(() => undefined);
+    }
+  }
+}
+
 export async function publishGalleryUpload(input: GalleryUploadRequest): Promise<{ path?: string; skipped?: boolean }> {
   if (!isGalleryUploadFilename(input.name) || !isGalleryUploadStrategy(input.strategy)) throw new Error('Invalid upload filename or strategy');
   if (input.strategy === 'skip') return { skipped: true };
   await assertUploadDirectory(input.directory);
-  const temporaryPath = join(input.directory, `.umbra-upload-${randomUUID()}.part`);
+  if ((typeof input.stagedPath === 'string') === (typeof input.contentBase64 === 'string')
+    || input.stagedPath === '') {
+    throw new Error('Upload requires exactly one content source');
+  }
+  const temporaryPath = input.stagedPath || join(input.directory, `.umbra-upload-${randomUUID()}.part`);
+  if (input.stagedPath) {
+    const resolvedStage = resolve(input.stagedPath);
+    if (dirname(resolvedStage) !== resolve(input.directory)
+      || !/^\.umbra-upload-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.part$/i.test(basename(resolvedStage))
+      || !(await fs.lstat(resolvedStage)).isFile()
+      || await fs.realpath(resolvedStage) !== resolvedStage) {
+      throw new Error('Invalid staged upload');
+    }
+  }
   const extension = extname(input.name);
   const stem = input.name.slice(0, input.name.length - extension.length);
   try {
-    await fs.writeFile(temporaryPath, Buffer.from(input.contentBase64, 'base64'), { flag: 'wx' });
+    if (input.contentBase64 !== undefined) {
+      await fs.writeFile(temporaryPath, Buffer.from(input.contentBase64, 'base64'), { flag: 'wx' });
+    }
     await assertUploadDirectory(input.directory);
     if (input.strategy === 'replace') {
       const target = join(input.directory, input.name);

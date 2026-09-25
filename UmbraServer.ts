@@ -55,7 +55,7 @@ import { seedBundledWorkflowDirectory } from './backend/BundledWorkflowService';
 import { settingsManager } from './backend/settings/SettingsManager';
 import { FsWorkerService } from './backend/FsWorkerService';
 import { GalleryTransferJournal } from './backend/GalleryTransferJournal';
-import { compareGalleryUploadDuplicate, isGalleryUploadFilename, isGalleryUploadStrategy, prepareGalleryUploadDirectory } from './backend/GalleryUploadService';
+import { compareGalleryUploadDuplicate, isGalleryUploadFilename, isGalleryUploadStrategy, prepareGalleryUploadDirectory, stageGalleryUploadFile } from './backend/GalleryUploadService';
 import { copyMediaIntoComfyInput, writeAllUploadedMediaBytes } from './backend/UmbraUiMediaUploadService';
 import { UmbraStagedVideoPreviewGrants } from './backend/UmbraStagedVideoPreviewGrants';
 import { isCivitaiModelDownloadUrl } from './backend/ModelDownloadHttp';
@@ -32059,9 +32059,10 @@ async function handleFsUpload(req: Request): Promise<Response> {
 
     // Process uploads
     const results: Array<{ name: string; success: boolean; skipped?: boolean; path?: string; error?: string }> = [];
-    // Each file is already buffered by the multipart parser. Avoid also holding
-    // every decoded ArrayBuffer and base64 worker message at once.
+    // The multipart parser holds the request. Stage one file at a time so the
+    // worker IPC does not duplicate its bytes as an ArrayBuffer and base64 JSON.
     for (const file of files) {
+      let stagedPath: string | undefined;
       try {
         const strategy = formData.get(`strategy_${file.name}`) as string || 'keepBoth';
 
@@ -32071,18 +32072,20 @@ async function handleFsUpload(req: Request): Promise<Response> {
           continue;
         }
         if (!isGalleryUploadStrategy(strategy)) throw new Error('Invalid duplicate handling strategy');
-        const buffer = await file.arrayBuffer();
+        stagedPath = await stageGalleryUploadFile(uploadDirectory, file);
         const published = await fsWorkerService.upload({
           directory: uploadDirectory,
           name: file.name,
           strategy,
-          contentBase64: Buffer.from(buffer).toString('base64'),
+          stagedPath,
         });
         if (!published.path) throw new Error('Upload did not publish a file');
         const filePath = join(resolved.fullPath, basename(published.path));
         results.push({ name: file.name, success: true, path: filePath });
       } catch (error: any) {
         results.push({ name: file.name, success: false, error: error.message });
+      } finally {
+        if (stagedPath) await fs.rm(stagedPath, { force: true }).catch(() => undefined);
       }
     }
 
