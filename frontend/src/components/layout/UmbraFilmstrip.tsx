@@ -412,6 +412,7 @@ export function UmbraFilmstrip({
   const [folderLoadError, setFolderLoadError] = useState<string>('');
   const [deletePending, setDeletePending] = useState(false);
   const [images, setImages] = useState<FilmstripImage[]>([]);
+  const [feedComplete, setFeedComplete] = useState(true);
   const [liveGenerationPreviewImage, setLiveGenerationPreviewImage] = useState<FilmstripImage | null>(null);
   const [recentGenerationOutputImages, setRecentGenerationOutputImages] = useState<FilmstripImage[]>([]);
   const recentGenerationOutputImagesRef = useRef<FilmstripImage[]>([]);
@@ -541,13 +542,13 @@ export function UmbraFilmstrip({
   ]);
 
   useEffect(() => {
-    if (pathKey(feedFolder) !== pathKey(currentFolder || rootPath)) return;
+    if (!feedComplete || pathKey(feedFolder) !== pathKey(currentFolder || rootPath)) return;
     setSelectedIds((current) => {
       const next = retainVisibleFilmstripSelection(current, selectableImages);
       return next.size === current.size && Array.from(next).every((id) => current.has(id)) ? current : next;
     });
     setLastSelectedId((current) => current && retainVisibleFilmstripSelection(new Set([current]), selectableImages).size === 0 ? '' : current);
-  }, [currentFolder, feedFolder, rootPath, selectableImages]);
+  }, [currentFolder, feedComplete, feedFolder, rootPath, selectableImages]);
 
   const resolveSelectedImages = useCallback((ids: string[]): FilmstripImage[] => {
     return resolveFilmstripSelectedImages(selectableImages, selectableImages, ids);
@@ -610,6 +611,7 @@ export function UmbraFilmstrip({
 
   const clearExternalSelection = useCallback(() => {
     externalSelectionRef.current = null;
+    suppressSelectionEmitRef.current = false;
   }, []);
 
   const sendSelectionToWorkspace = useCallback((paths: string[], workspace: 'scanner' | 'waifudiffusion') => {
@@ -751,6 +753,8 @@ export function UmbraFilmstrip({
         folderPath?: string;
         files?: FsListMediaFile[];
         mode?: 'replace' | 'append' | 'remove' | string;
+        done?: boolean;
+        nextCursor?: number | null;
         removedPaths?: string[];
         sortBy?: string;
         sortOrder?: string;
@@ -760,11 +764,12 @@ export function UmbraFilmstrip({
       const rawFiles = Array.isArray(custom?.detail?.files) ? custom.detail.files : [];
       const rawMode = String(custom?.detail?.mode || '').trim().toLowerCase();
       const mode = rawMode === 'append' ? 'append' : (rawMode === 'remove' ? 'remove' : 'replace');
+      const feedDone = custom?.detail?.done !== false && custom?.detail?.nextCursor == null;
       const removedPaths = Array.isArray(custom?.detail?.removedPaths)
         ? custom.detail.removedPaths.map((entry) => normalizePath(String(entry || ''))).filter(Boolean)
         : [];
       const activeFolder = normalizePath(currentFolderRef.current || '');
-      if (activeFolder && (!folderPath || folderPath !== activeFolder)) return;
+      if (activeFolder && (!folderPath || pathKey(folderPath) !== pathKey(activeFolder))) return;
 
       const seenPaths = new Set<string>();
       const mapped: FilmstripImage[] = [];
@@ -792,14 +797,17 @@ export function UmbraFilmstrip({
       const canAppend = mode === 'append'
         && !!folderPath
         && !!activeFolder
-        && folderPath === activeFolder;
+        && pathKey(folderPath) === pathKey(activeFolder);
       const canRemove = mode === 'remove'
         && removedPaths.length > 0
         && !!folderPath
         && !!activeFolder
-        && folderPath === activeFolder;
+        && pathKey(folderPath) === pathKey(activeFolder);
 
       if (canAppend) {
+        if (custom?.detail?.done !== undefined || custom?.detail?.nextCursor !== undefined) {
+          setFeedComplete(feedDone);
+        }
         if (mapped.length === 0) return;
         setFeedMode('append');
         setImages((current) => {
@@ -845,6 +853,7 @@ export function UmbraFilmstrip({
         return;
       }
 
+      setFeedComplete(feedDone);
       const feedSignature = buildFilmstripFeedSignature(folderPath, mapped);
       if (folderPath) setFeedFolder(folderPath);
       setFolderLoadError('');
@@ -868,15 +877,17 @@ export function UmbraFilmstrip({
         }
         setImages(mapped);
         if (!preserveOptimisticOrder) setCustomOrder(mapped.map((item) => item.id));
-        setSelectedIds((current) => reconcileFilmstripSelection(current, mapped, recentGenerationOutputImagesRef.current));
-        setLastSelectedId((current) => current
-          ? Array.from(reconcileFilmstripSelection(new Set([current]), mapped, recentGenerationOutputImagesRef.current))[0] || ''
-          : current);
+        if (feedDone) {
+          setSelectedIds((current) => reconcileFilmstripSelection(current, mapped, recentGenerationOutputImagesRef.current));
+          setLastSelectedId((current) => current
+            ? Array.from(reconcileFilmstripSelection(new Set([current]), mapped, recentGenerationOutputImagesRef.current))[0] || ''
+            : current);
+        }
       }
       const pending = pendingSelectionRef.current;
-      if (pending) {
+      if (pending && feedDone) {
         const pendingFolder = normalizePath(pending.folderPath || '');
-        if (!pendingFolder || !folderPath || pendingFolder === folderPath) {
+        if (!pendingFolder || !folderPath || pathKey(pendingFolder) === pathKey(folderPath)) {
           pendingSelectionRef.current = null;
           const byPath = new Map<string, string>();
           for (const image of mapped) {
@@ -949,7 +960,7 @@ export function UmbraFilmstrip({
       const incomingFolderPath = normalizePath(String(custom?.detail?.folderPath || ''));
       const activeFolder = normalizePath(currentFolder || rootPath);
 
-      if (incomingFolderPath && activeFolder && incomingFolderPath !== activeFolder) {
+      if (incomingFolderPath && activeFolder && pathKey(incomingFolderPath) !== pathKey(activeFolder)) {
         pendingSelectionRef.current = {
           folderPath: incomingFolderPath,
           paths: incomingPaths,
@@ -973,14 +984,14 @@ export function UmbraFilmstrip({
 
   useEffect(() => {
     const pending = pendingSelectionRef.current;
-    if (!pending) return;
+    if (!pending || !feedComplete) return;
     const pendingFolder = normalizePath(pending.folderPath || '');
     const activeFolder = normalizePath(currentFolder || rootPath);
-    if (pendingFolder && activeFolder && pendingFolder !== activeFolder) return;
-    if (pendingFolder && activeFolder && pendingFolder === activeFolder && displayedImages.length === 0) return;
+    if (pendingFolder && activeFolder && pathKey(pendingFolder) !== pathKey(activeFolder)) return;
+    if (pendingFolder && activeFolder && pathKey(pendingFolder) === pathKey(activeFolder) && displayedImages.length === 0) return;
     pendingSelectionRef.current = null;
     applyIncomingSelection(pending.paths, pending.primaryPath);
-  }, [applyIncomingSelection, displayedImages, currentFolder, rootPath]);
+  }, [applyIncomingSelection, displayedImages, currentFolder, feedComplete, rootPath]);
 
   useEffect(() => {
     const externalSelection = externalSelectionRef.current;
@@ -1195,6 +1206,7 @@ export function UmbraFilmstrip({
   }, [activeWorkspace, currentFolder, refreshImages, rootPath]);
 
   useEffect(() => {
+    if (!feedComplete || pathKey(feedFolder) !== pathKey(currentFolder || rootPath)) return;
     if (suppressSelectionEmitRef.current) {
       suppressSelectionEmitRef.current = false;
       return;
@@ -1222,7 +1234,7 @@ export function UmbraFilmstrip({
         source: 'filmstrip',
       },
     }));
-  }, [currentFolder, lastSelectedId, rootPath, selectableImages, selectedIds]);
+  }, [currentFolder, feedComplete, feedFolder, lastSelectedId, rootPath, selectableImages, selectedIds]);
 
   const openPathInGallery = useCallback((targetPath: string, source: string, restoreType?: 'file' | 'folder') => {
     const normalizedTargetPath = normalizePath(targetPath);

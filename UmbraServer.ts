@@ -40,6 +40,7 @@ import { mediaFileRevision } from './backend/mediaFileRevision';
 import { probeVideoMetadata } from './backend/VideoMetadataProbe';
 import { galleryMediaCacheControl } from './gallery/GalleryMediaCache';
 import { galleryMediaSecurityHeaders } from './shared/galleryMediaResponse';
+import { isGalleryMediaReadPath } from './shared/galleryMediaPath';
 import { createVariantEtag, matchesIfNoneMatch, permitsConditionalRange } from './shared/httpCache';
 import { compactQueueSnapshot } from './shared/power-prompter/queueSnapshotTransport';
 import { collectQueueSnapshotPromptRows } from './shared/power-prompter/queueSnapshotRows';
@@ -199,7 +200,7 @@ import { MetadataParser } from './backend/MetadataParser';
 import { isAllowedLocalServerHostname } from './shared/localServerHost';
 import * as EditorDb from './backend/EditorDb';
 import { fetchModelMedia, isSafeModelMediaType, validateModelMediaUrl } from './backend/ModelManagerMediaHttp';
-import { GalleryDb, type GalleryFileInput, type GalleryMediaType } from './gallery/GalleryDb';
+import { GalleryDb, type GalleryFileInput, type GalleryMediaType, type GalleryMetadataSearchMatch } from './gallery/GalleryDb';
 import { ModelIndexWorkerService, type ModelRootDescriptor } from './backend/ModelIndexWorkerService';
 import { ModelDownloadWorkerService } from './backend/ModelDownloadWorkerService';
 import { ModelManagerStateDb } from './backend/ModelManagerStateDb';
@@ -17190,7 +17191,7 @@ async function proxyGalleryBridgeFsGet(
 ): Promise<Response> {
   if (req.signal.aborted) return new Response(null, { status: 499 });
   const requestedPaths = getGalleryBridgeRequestPaths(sourceUrl, targetPath);
-  if (!(await areGalleryBridgePathsAllowed(req, sourceUrl, requestedPaths, server))) {
+  if (!(await areGalleryBridgePathsAllowed(requestedPaths))) {
     return json({ error: 'Access denied' }, 403);
   }
   const listingSnapshot = targetPath === '/api/fs/list-progressive'
@@ -17348,14 +17349,38 @@ function getGalleryBridgeRequestPaths(sourceUrl: URL, targetPath: string): strin
   return [sourceUrl.searchParams.get('path') || ''];
 }
 
+let galleryBridgePathAuthorizerCache: {
+  key: string;
+  expiresAt: number;
+  promise: ReturnType<typeof createGalleryPathAuthorizer>;
+} | null = null;
+
+async function getGalleryBridgePathAuthorizer() {
+  const roots = getGalleryBridgeAllowedRoots();
+  const key = roots.join('\0');
+  const now = Date.now();
+  if (!galleryBridgePathAuthorizerCache
+    || galleryBridgePathAuthorizerCache.key !== key
+    || galleryBridgePathAuthorizerCache.expiresAt <= now) {
+    galleryBridgePathAuthorizerCache = {
+      key,
+      expiresAt: now + 5000,
+      promise: createGalleryPathAuthorizer(roots),
+    };
+  }
+  const cache = galleryBridgePathAuthorizerCache;
+  try { return await cache.promise; }
+  catch (error) {
+    if (galleryBridgePathAuthorizerCache === cache) galleryBridgePathAuthorizerCache = null;
+    throw error;
+  }
+}
+
 async function areGalleryBridgePathsAllowed(
-  req: Request,
-  sourceUrl: URL,
   paths: string[],
-  server?: RequestIpServer,
 ): Promise<boolean> {
-  if (!isRemoteRequest(req, sourceUrl, server)) return true;
-  const authorize = await createGalleryPathAuthorizer(getGalleryBridgeAllowedRoots()).catch(() => null);
+  if (!paths.some((path) => String(path || '').trim())) return true;
+  const authorize = await getGalleryBridgePathAuthorizer().catch(() => null);
   if (!authorize) return false;
   for (const rawPath of paths) {
     const resolvedPath = resolveGalleryBridgeInputPath(rawPath);
@@ -17378,9 +17403,7 @@ function resolveGalleryBridgeInputPath(input: unknown): string {
 
 async function proxyGalleryBridgeFsPost(
   req: Request,
-  sourceUrl: URL,
   targetPath: string,
-  server?: RequestIpServer,
 ): Promise<Response> {
   const body = await req.arrayBuffer();
   let pathValue = '';
@@ -17390,7 +17413,7 @@ async function proxyGalleryBridgeFsPost(
   } catch {
     // The worker returns the established invalid-payload response.
   }
-  if (!(await areGalleryBridgePathsAllowed(req, sourceUrl, [pathValue], server))) {
+  if (!(await areGalleryBridgePathsAllowed([pathValue]))) {
     return json({ error: 'Access denied' }, 403);
   }
   if (!isChildProcessAlive(galleryBridgeProcess) && !(await isGalleryBridgeHealthy({ allowCached: false }))) {
@@ -27361,7 +27384,7 @@ async function resolveAuthorizedGalleryTagUids(
   const uids = Array.from(new Set([...directUids, ...(paths.length > 0 ? galleryDb.resolveUidsForPaths(paths) : [])]));
   if (!isRemoteRequest(req, url, server)) return uids;
   const indexedPaths = galleryDb.resolvePathsForUids(uids);
-  if (!(await areGalleryBridgePathsAllowed(req, url, [...paths, ...indexedPaths], server))) return null;
+  if (!(await areGalleryBridgePathsAllowed([...paths, ...indexedPaths]))) return null;
   return uids;
 }
 
@@ -27758,6 +27781,59 @@ async function handleFsSearchSuggestions(url: URL): Promise<Response> {
   }
 }
 
+async function handleFsMetadataSearch(url: URL, signal?: AbortSignal): Promise<Response> {
+  const pathValue = normalizeOutputPathInput(url.searchParams.get('path') || '');
+  const query = String(url.searchParams.get('q') || url.searchParams.get('query') || '').replace(/\s+/g, ' ').trim();
+  const limit = Math.max(1, Math.min(5000, Number(url.searchParams.get('limit') || 2000) || 2000));
+  if (query.length < 2) return json({ query, folderPath: pathValue, matches: [], total: 0 });
+  if (!pathValue) return json({ error: 'Missing path' }, 400);
+
+  try {
+    const resolved = resolvePath(pathValue);
+    if (!resolved) return json({ error: 'Invalid path' }, 400);
+    const fullPath = await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
+    if (!fullPath) return json({ error: 'Access denied' }, 403);
+    const folderStat = await fs.stat(fullPath);
+    if (!folderStat.isDirectory()) return json({ error: 'Path is not a directory' }, 400);
+
+    const authorizeMatch = await createGalleryPathAuthorizer([fullPath]);
+    const matches: GalleryMetadataSearchMatch[] = [];
+    const pageSize = Math.max(64, Math.min(256, limit * 2));
+    const startedAt = Date.now();
+    let indexedOffset = 0;
+    while (matches.length < limit) {
+      signal?.throwIfAborted();
+      if (indexedOffset > 0 && Date.now() - startedAt >= 5000) {
+        return json({ error: 'Metadata search timed out; refine the query' }, 503);
+      }
+      const indexedMatches = galleryDb.searchFolderMetadata(pathValue, query, pageSize, indexedOffset);
+      indexedOffset += indexedMatches.length;
+      if (indexedMatches.length === 0) break;
+      for (let offset = 0; offset < indexedMatches.length && matches.length < limit; offset += 16) {
+        signal?.throwIfAborted();
+        const batch = indexedMatches.slice(offset, offset + 16);
+        const live = await Promise.all(batch.map(async (match) => {
+          const matchPath = resolvePath(match.path);
+          if (!matchPath || !(await authorizeMatch(matchPath.fullPath))) return false;
+          const stat = await fs.lstat(matchPath.fullPath).catch((error: NodeJS.ErrnoException) => {
+            if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
+            throw error;
+          });
+          return Boolean(stat?.isFile());
+        }));
+        for (let index = 0; index < batch.length && matches.length < limit; index++) {
+          if (live[index]) matches.push(batch[index]);
+        }
+      }
+      if (indexedMatches.length < pageSize) break;
+    }
+    return json({ query, folderPath: pathValue, matches, total: matches.length });
+  } catch (error: any) {
+    if (signal?.aborted) return new Response(null, { status: 499 });
+    return json({ error: error?.message || 'Failed to search metadata' }, 400);
+  }
+}
+
 async function handleFsTagsSummary(url: URL): Promise<Response> {
   const folders = url.searchParams.getAll('folder')
     .concat(url.searchParams.getAll('path'))
@@ -27888,11 +27964,9 @@ async function isRemoteMainMediaReadAllowed(req: Request, url: URL, path: string
   return Boolean(authorize && await authorize(resolved.fullPath));
 }
 
-const GALLERY_MEDIA_READ_PATTERN = /\.(?:png|jpe?g|webp|gif|bmp|avif|tiff?|heic|heif|jxl|mp4|webm|mov|mkv|avi|m4v|wmv|flv)$/i;
-
 async function resolveGalleryMediaReadPath(path: string): Promise<string | null> {
   const resolved = resolvePath(path);
-  if (!resolved || !GALLERY_MEDIA_READ_PATTERN.test(resolved.fullPath)) return null;
+  if (!resolved || !isGalleryMediaReadPath(resolved.fullPath)) return null;
   return resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
 }
 
@@ -28347,7 +28421,7 @@ async function handleFsDownloadZip(req: Request): Promise<Response> {
       if (!physicalPath) return json({ error: 'Export path resolves outside allowed roots' }, 403);
       const stats = await fs.stat(physicalPath);
       if (!stats.isFile()) continue;
-      if (!GALLERY_MEDIA_READ_PATTERN.test(physicalPath) && extname(physicalPath).toLowerCase() !== '.zip') {
+      if (!isGalleryMediaReadPath(physicalPath) && extname(physicalPath).toLowerCase() !== '.zip') {
         return json({ error: 'Unsupported gallery export type' }, 403);
       }
       items.push({
@@ -33062,6 +33136,15 @@ const server = Bun.serve<UmbraSocketData>({
           server,
         );
       }
+      if (path === '/api/gallery-bridge/fs/metadata-search' && method === 'GET') {
+        return proxyGalleryBridgeFsGet(
+          req,
+          url,
+          '/api/fs/metadata-search',
+          () => handleFsMetadataSearch(url, req.signal),
+          server,
+        );
+      }
       if (path === '/api/gallery-bridge/fs/search-suggestions' && method === 'GET') {
         return proxyGalleryBridgeFsGet(
           req,
@@ -33072,12 +33155,13 @@ const server = Bun.serve<UmbraSocketData>({
         );
       }
       if (path === '/api/gallery-bridge/fs/empty-folders/preview' && method === 'POST') {
-        return proxyGalleryBridgeFsPost(req, url, '/api/fs/empty-folders/preview', server);
+        return proxyGalleryBridgeFsPost(req, '/api/fs/empty-folders/preview');
       }
       if (path === '/api/gallery-bridge/fs/empty-folders/delete' && method === 'POST') {
-        return proxyGalleryBridgeFsPost(req, url, '/api/fs/empty-folders/delete', server);
+        return proxyGalleryBridgeFsPost(req, '/api/fs/empty-folders/delete');
       }
       if (path === '/api/gallery-bridge/fs/tags/add' && method === 'POST') return handleFsTagsAdd(req, url, server);
+      if (path === '/api/gallery-bridge/fs/tags/remove' && method === 'POST') return handleFsTagsRemove(req, url, server);
       if (path === '/api/gallery-bridge/fs/tags/set' && method === 'POST') return handleFsTagsSet(req, url, server);
       if (path === '/api/gallery-bridge/fs/tags/summary' && method === 'GET') {
         return proxyGalleryBridgeFsGet(
@@ -33143,6 +33227,7 @@ const server = Bun.serve<UmbraSocketData>({
         return json(generatedMediaActivity.snapshot(folders, folder => host || isPathInsideAllowedRoots(folder), toClientPath));
       }
       if (path === '/api/fs/search' && method === 'GET') return handleFsSearch(url, req.signal);
+      if (path === '/api/fs/metadata-search' && method === 'GET') return handleFsMetadataSearch(url, req.signal);
       if (path === '/api/fs/search-suggestions' && method === 'GET') return handleFsSearchSuggestions(url);
       if (path === '/api/fs/reveal' && method === 'POST') return handleFsReveal(req, server);
       if (path === '/api/fs/mkdir' && method === 'POST') return handleFsMkdir(req);
