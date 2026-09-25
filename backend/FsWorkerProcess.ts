@@ -542,21 +542,26 @@ async function getDirectoryTreeSeed(fullPath: string, force = false) {
     return cached.entries;
   }
 
-  const inFlight = directoryTreeSeedInFlight.get(cacheKey);
+  const inFlight = force ? null : directoryTreeSeedInFlight.get(cacheKey);
   if (inFlight) return inFlight;
 
-  const request = buildDirectoryTreeSeed(fullPath)
+  let request: Promise<ProgressiveSeedEntry[]>;
+  request = buildDirectoryTreeSeed(fullPath)
     .then((entries) => {
-      directoryTreeSeedCache.set(cacheKey, {
-        createdAt: Date.now(),
-        entries,
-        totalMedia: 0,
-      });
-      pruneDirectoryTreeSeedCache();
+      if (directoryTreeSeedInFlight.get(cacheKey) === request) {
+        directoryTreeSeedCache.set(cacheKey, {
+          createdAt: Date.now(),
+          entries,
+          totalMedia: 0,
+        });
+        pruneDirectoryTreeSeedCache();
+      }
       return entries;
     })
     .finally(() => {
-      directoryTreeSeedInFlight.delete(cacheKey);
+      if (directoryTreeSeedInFlight.get(cacheKey) === request) {
+        directoryTreeSeedInFlight.delete(cacheKey);
+      }
     });
   directoryTreeSeedInFlight.set(cacheKey, request);
   return request;
