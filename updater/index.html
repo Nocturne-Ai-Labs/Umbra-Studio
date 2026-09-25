@@ -226,11 +226,43 @@
       while (size >= 1024 && index < units.length - 1) { size /= 1024; index += 1; }
       return `${size.toFixed(index === 0 ? 0 : size >= 100 ? 0 : 1)} ${units[index]}`;
     };
-    const versionParts = (value) => String(value || '').replace(/^v/i, '').split('.').map((part) => Number.parseInt(part, 10) || 0);
+    const versionParts = (value) => {
+      const version = String(value || '').replace(/^v/i, '').split('+', 1)[0];
+      const prereleaseAt = version.indexOf('-');
+      return {
+        core: (prereleaseAt < 0 ? version : version.slice(0, prereleaseAt)).split('.'),
+        prerelease: prereleaseAt < 0 ? null : version.slice(prereleaseAt + 1).split('.'),
+      };
+    };
+    const compareNumericParts = (left, right) => {
+      const a = left.replace(/^0+(?=\d)/, '');
+      const b = right.replace(/^0+(?=\d)/, '');
+      if (a.length !== b.length) return a.length > b.length ? 1 : -1;
+      return a === b ? 0 : a > b ? 1 : -1;
+    };
     const compare = (left, right) => {
       const a = versionParts(left); const b = versionParts(right);
-      for (let i = 0; i < Math.max(a.length, b.length, 3); i += 1) {
-        if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0) ? 1 : -1;
+      for (let i = 0; i < 3; i += 1) {
+        const difference = compareNumericParts(a.core[i] || '0', b.core[i] || '0');
+        if (difference) return difference;
+      }
+      if (!a.prerelease || !b.prerelease) {
+        return a.prerelease ? -1 : b.prerelease ? 1 : 0;
+      }
+      for (let i = 0; i < Math.max(a.prerelease.length, b.prerelease.length); i += 1) {
+        const leftPart = a.prerelease[i];
+        const rightPart = b.prerelease[i];
+        if (leftPart === undefined || rightPart === undefined) return leftPart === undefined ? -1 : 1;
+        const leftNumeric = /^\d+$/.test(leftPart);
+        const rightNumeric = /^\d+$/.test(rightPart);
+        if (leftNumeric && rightNumeric) {
+          const difference = compareNumericParts(leftPart, rightPart);
+          if (difference) return difference;
+        } else if (leftNumeric !== rightNumeric) {
+          return leftNumeric ? -1 : 1;
+        } else if (leftPart !== rightPart) {
+          return leftPart > rightPart ? 1 : -1;
+        }
       }
       return 0;
     };
