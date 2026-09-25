@@ -8746,33 +8746,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     logQueueDebug('queue:pruneRequestToActivePrompt:end', { requestId, activeIndex });
   };
 
-  const requestQueueCancelThroughWebSocket = (
-    requestIds: string[],
-    targetBridgeId?: string,
-    queueTargetType?: PowerPrompterQueueTargetType
-  ): boolean => {
-    const normalizedRequestIds = Array.from(new Set(
-      requestIds.map((entry) => String(entry || '').trim()).filter((entry) => entry.length > 0)
-    ));
-    pendingQueueCancelScopeRef.current = normalizedRequestIds;
-    logQueueDebug('ws:queue_cancel:send:start', { requestIds: normalizedRequestIds, targetBridgeId, queueTargetType });
-    if (!prompterWsReadyRef.current || !prompterWsRef.current || prompterWsRef.current.readyState !== WebSocket.OPEN) {
-      pendingQueueCancelScopeRef.current = [];
-      logQueueDebug('ws:queue_cancel:send:blocked', { requestIds: normalizedRequestIds });
-      return false;
-    }
-    const resolvedTarget = resolveQueueControlTarget(targetBridgeId, queueTargetType);
-    const sent = sendPrompterWsMessage({
-      type: 'queue_cancel',
-      requestId: createRequestId(),
-      requestIds: normalizedRequestIds,
-      targetBridgeId: resolvedTarget.targetBridgeId || undefined,
-      queueTargetType: resolvedTarget.queueTargetType,
-    });
-    logQueueDebug('ws:queue_cancel:send:done', { requestIds: normalizedRequestIds, sent, resolvedTarget });
-    return sent;
-  };
-
   const requestQueueInterruptActiveThroughWebSocket = (
     activeRequestId?: string,
     targetBridgeId?: string,
@@ -10981,6 +10954,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       }
 
       let backendControlAcknowledged = false;
+      let backendPausedAfterClear: boolean | null = null;
       if (hasOnlyPausedBackendWork
         || (stoppedStartSequence > 0 && backendQueueSnapshotRequestIdsRef.current.size > 0)
         || (action === 'clear' && pendingBatchAdmissionsRef.current > 0)
@@ -10989,6 +10963,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           action, requestIds, activeQueueTargetBridgeId, pendingBatchRequestId,
         );
         backendControlAcknowledged = true;
+        if (action === 'clear' && typeof result?.paused === 'boolean') {
+          backendPausedAfterClear = result.paused;
+        }
         if (!hasAcknowledgedPendingBatchControl({
           result, action, pendingBatchRequestId, pendingBatchGroupRequestIds,
         })) {
@@ -11010,7 +10987,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         })) {
           rejectAllPendingQueueRequests('Queue stopped by user.');
           clearQueueManagerLiveDisplay(`backend ${action} completed`);
-          setQueuePaused(false);
+          setQueuePaused(action === 'clear' && backendPausedAfterClear === true);
           setGenerationPreview((prev) => prev ? { ...prev, status: 'idle', updatedAt: Date.now() } : prev);
           scheduleGenerationPreviewHide();
           showToast(action === 'clear' ? 'Cleared backend queue.' : 'Canceled backend queue.', 'success');
@@ -11035,7 +11012,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
             activeQueueTargetBridgeId,
             activeQueueTargetType
           );
+          if (typeof clearResult?.paused === 'boolean') backendPausedAfterClear = clearResult.paused;
           if (clearResult?.noMatchingWork === true) {
+            if (backendPausedAfterClear !== null) setQueuePaused(backendPausedAfterClear);
             showToast('Queue already finished. Updating Queue Manager.', 'success');
             return;
           }
@@ -11044,6 +11023,14 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         const clearPayload = await clearResponse.json().catch(() => ({}));
         if (!clearResponse.ok || clearPayload?.success === false) {
           throw new Error(String(clearPayload?.error || 'Failed to clear ComfyUI queue.'));
+        }
+
+        if (backendPausedAfterClear === true) {
+          // The backend kept live work paused. Its snapshot already contains
+          // the remaining work, so do not clear or prune that local display.
+          setQueuePaused(true);
+          showToast('Cleared future jobs. Remaining queue is paused.', 'success');
+          return;
         }
 
         if (effectiveActiveRequestId) {
@@ -11111,7 +11098,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           setGenerationPreview((prev) => prev ? { ...prev, status: 'idle', updatedAt: Date.now() } : prev);
           scheduleGenerationPreviewHide();
         }
-        setQueuePaused(false);
+        setQueuePaused(backendPausedAfterClear ?? false);
         logQueueDebug('action:hardStop:clear:end', { activeRequestId: effectiveActiveRequestId, requestIds });
         showToast(effectiveActiveRequestId ? 'Cleared future queued jobs. Current render will finish.' : 'Cleared queue.', 'success');
       } else {
@@ -11232,14 +11219,15 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     logQueueDebug('action:emergency:start');
     try {
       const requestIds = collectTrackedQueueRequestIds();
-      const activeVisualRequestId = String(queueVisualStateRef.current?.requestId || '').trim();
-      const activeMeta = activeVisualRequestId ? queueRequestMetaRef.current.get(activeVisualRequestId) : null;
-      logQueueDebug('action:emergency:resolved', { requestIds, activeVisualRequestId });
-      requestQueueCancelThroughWebSocket(
-        requestIds,
-        activeMeta?.targetBridgeId || effectiveQueueTargetBridgeId,
-        activeMeta?.queueTargetType || selectedQueueTargetType
-      );
+      const cancelResponse = await fetch('/api/powerprompter/queue/emergency-cancel', { method: 'POST' });
+      const cancelPayload = await cancelResponse.json().catch(() => ({}));
+      if (!cancelResponse.ok || cancelPayload?.success !== true || !Array.isArray(cancelPayload?.canceledRequestIds)) {
+        throw new Error(String(cancelPayload?.error || 'Failed to cancel the backend Power Prompter queue.'));
+      }
+      logQueueDebug('action:emergency:queueCanceled', {
+        trackedRequestIds: requestIds,
+        canceledRequestIds: cancelPayload.canceledRequestIds,
+      });
 
       await fetch('/api/umbrabridge/comfyui/queue/clear', { method: 'POST' }).catch(() => null);
       await fetch('/api/umbrabridge/comfyui/interrupt', { method: 'POST' }).catch(() => null);
@@ -11250,8 +11238,10 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         body: JSON.stringify({ backend: 'comfyui' }),
       });
       const stopPayload = await stopResponse.json().catch(() => ({}));
-      if (!stopResponse.ok || stopPayload?.success === false) {
-        throw new Error(String(stopPayload?.error || 'Failed to stop ComfyUI.'));
+      if (!stopResponse.ok || stopPayload?.success !== true || stopPayload?.running !== false) {
+        throw new Error(String(stopPayload?.error || (stopPayload?.running === true
+          ? 'ComfyUI is still running. Stop the external ComfyUI process before retrying emergency shutdown.'
+          : 'Failed to stop ComfyUI.')));
       }
 
       const startResponse = await fetch('/api/umbrabridge/backend/start', {
@@ -11260,8 +11250,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         body: JSON.stringify({ backend: 'comfyui' }),
       });
       const startPayload = await startResponse.json().catch(() => ({}));
-      if (!startResponse.ok || startPayload?.success === false) {
-        throw new Error(String(startPayload?.error || 'ComfyUI stopped, but restart failed.'));
+      if (!startResponse.ok || startPayload?.success !== true || startPayload?.message !== 'Started') {
+        throw new Error(String(startPayload?.error || 'ComfyUI stopped, but a new process was not started.'));
       }
 
       const waitReadyResponse = await fetch('/api/umbrabridge/backend/wait-ready', {

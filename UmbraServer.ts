@@ -10363,6 +10363,92 @@ function applyBackendPowerPrompterQueueControl(
   return affected;
 }
 
+async function cancelBackendPowerPrompterQueueForEmergency() {
+  const heldRequest = powerPrompterQueueControllerState.requests.find((request) =>
+    request.origin === 'power_prompter'
+    && hasLivePowerPrompterQueuePrompts(request.prompts)
+    && (isPowerPrompterGroupEditHeld(request.requestId)
+      || ppBackendHistory.get(request.requestId)?.requiredRevisionPending
+      || ppBackendHistory.get(request.requestId)?.requiredRevisionFailed));
+  if (heldRequest) {
+    throw new Error(`Queue group ${heldRequest.requestId} is still being saved. Retry emergency shutdown after it settles.`);
+  }
+
+  const canceledBatchRequestIds = new Set<string>();
+  for (const admission of pendingPowerPrompterBatchAdmissionTokens.values()) {
+    if (admission.canceled) continue;
+    admission.canceled = true;
+    admission.cancelValidation();
+    if (cancelPowerPrompterBatchBeforeAdmission(admission.sourceWs, admission.batchRequestId)) {
+      canceledBatchRequestIds.add(admission.batchRequestId);
+    }
+  }
+  for (const upload of prompterQueueUploads.cancelAllBatches()) {
+    if (cancelPowerPrompterBatchBeforeAdmission(upload.client, upload.requestId)) {
+      canceledBatchRequestIds.add(upload.requestId);
+    }
+  }
+
+  const requestIds = new Set<string>(powerPrompterQueueControllerState.requests
+    .filter((request) => request.origin === 'power_prompter' && hasLivePowerPrompterQueuePrompts(request.prompts))
+    .map((request) => request.requestId));
+  for (const [requestId, task] of backendPowerPrompterQueueTasks) {
+    if (task.origin === 'power_prompter') requestIds.add(requestId);
+  }
+  for (const work of backendPowerPrompterQueuedWork) {
+    if (normalizePowerPrompterQueueRequestOrigin(work.data?.queueOrigin ?? work.data?.state?.queueOrigin) === 'power_prompter') {
+      requestIds.add(work.requestId);
+    }
+  }
+
+  const canceledRequestIds: string[] = [];
+  for (const requestId of requestIds) {
+    const request = findPowerPrompterQueueControllerRequest(requestId);
+    if (request?.origin === 'umbra_ui') continue;
+    const task = backendPowerPrompterQueueTasks.get(requestId);
+    const work = backendPowerPrompterQueuedWork.find((entry) => entry.requestId === requestId);
+    let canceled = false;
+    if (task?.origin === 'power_prompter') {
+      canceled = cancelBackendPowerPrompterQueueTask(requestId, 'emergency_shutdown');
+    } else if (work && normalizePowerPrompterQueueRequestOrigin(work.data?.queueOrigin ?? work.data?.state?.queueOrigin) === 'power_prompter') {
+      canceled = cancelBackendPowerPrompterQueuedWork(requestId, 'emergency_shutdown');
+    } else if (request?.origin === 'power_prompter' && hasLivePowerPrompterQueuePrompts(request.prompts)) {
+      finishPowerPrompterQueueControllerRequest(requestId, 'canceled', 'emergency_shutdown', 'emergency_shutdown');
+      canceled = true;
+    }
+    if (canceled) canceledRequestIds.push(requestId);
+  }
+
+  await removePersistedPPQueueRequestIds(canceledRequestIds);
+  await Promise.all(canceledRequestIds
+    .map((requestId) => ppBackendHistory.get(requestId)?.lastWrite)
+    .filter((write): write is Promise<void> => !!write));
+
+  const remainingRequestIds = powerPrompterQueueControllerState.requests
+    .filter((request) => request.origin === 'power_prompter' && hasLivePowerPrompterQueuePrompts(request.prompts))
+    .map((request) => request.requestId);
+  for (const [requestId, task] of backendPowerPrompterQueueTasks) {
+    if (task.origin === 'power_prompter' && !task.canceled && !task.abortController.signal.aborted) {
+      remainingRequestIds.push(requestId);
+    }
+  }
+  for (const work of backendPowerPrompterQueuedWork) {
+    if (normalizePowerPrompterQueueRequestOrigin(work.data?.queueOrigin ?? work.data?.state?.queueOrigin) === 'power_prompter') {
+      remainingRequestIds.push(work.requestId);
+    }
+  }
+  appendPowerPrompterQueueLog('backend_queue_emergency_cancel', {
+    canceledRequestIds,
+    canceledBatchRequestIds: Array.from(canceledBatchRequestIds),
+    remainingRequestIds: Array.from(new Set(remainingRequestIds)),
+  });
+  return {
+    canceledRequestIds,
+    canceledBatchRequestIds: Array.from(canceledBatchRequestIds),
+    remainingRequestIds: Array.from(new Set(remainingRequestIds)),
+  };
+}
+
 async function handleUmbraQueueJobControl(req: Request): Promise<Response> {
   const data = await req.json().catch(() => null) as any;
   const requestId = String(data?.requestId || '').trim();
@@ -12710,6 +12796,21 @@ function forwardPrompterQueueControlToComfyTarget(
       && targetedLiveBackendRequestIds.every((id) => backendAffectedRequestIds.includes(id)));
   const controlSucceeded = affectedRequestIds.length > 0 || pendingBatchControl.canceledBatchRequestIds.length > 0;
 
+  if (isBackendPipelineTarget && type === 'queue_clear_future'
+    && controlSucceeded && powerPrompterQueueControllerState.paused) {
+    const clearedBackendRequestIds = new Set(backendAffectedRequestIds);
+    const hasUnclearedLiveBackendWork = powerPrompterQueueControllerState.requests.some((request) =>
+      !clearedBackendRequestIds.has(request.requestId) && hasLivePowerPrompterQueuePrompts(request.prompts))
+      || backendPowerPrompterQueuedWork.some((work) => !clearedBackendRequestIds.has(work.requestId))
+      || Array.from(backendPowerPrompterQueueTasks.entries()).some(([id, task]) =>
+        !clearedBackendRequestIds.has(id) && !task.canceled && !task.abortController.signal.aborted);
+    if (!hasUnclearedLiveBackendWork) {
+      powerPrompterQueueControllerState.paused = false;
+      powerPrompterQueueControllerState.updatedAt = Date.now();
+      broadcastPowerPrompterQueueControllerSnapshot('backend_clear_future_resumed', ws);
+    }
+  }
+
   if (isBackendPipelineTarget) {
     if (type === 'queue_pause' || type === 'queue_resume') {
       const paused = type === 'queue_pause';
@@ -12735,6 +12836,7 @@ function forwardPrompterQueueControlToComfyTarget(
         canceledBatchRequestIds: pendingBatchControl.canceledBatchRequestIds,
         success: controlSucceeded,
         backendHandled: true,
+        paused: powerPrompterQueueControllerState.paused,
         ...(noSubmittedPrompt ? { noSubmittedPrompt: true } : {}),
         ...(controlSucceeded ? {} : { noMatchingWork: true, error: 'No backend pipeline queue jobs were cleared.' }),
       });
@@ -39095,6 +39197,18 @@ const server = Bun.serve<UmbraSocketData>({
           deleted: true,
           revision: ppQueueStateRevision,
         });
+      }
+
+      if (path === '/api/powerprompter/queue/emergency-cancel' && method === 'POST') {
+        try {
+          const result = await cancelBackendPowerPrompterQueueForEmergency();
+          if (result.remainingRequestIds.length > 0) {
+            return json({ success: false, error: 'Some backend Power Prompter jobs could not be canceled.', ...result }, 409);
+          }
+          return json({ success: true, ...result });
+        } catch (error: any) {
+          return json({ success: false, error: String(error?.message || error || 'Failed to cancel backend Power Prompter queue.') }, 409);
+        }
       }
 
       if (path === '/api/powerprompter/queue/mutate' && method === 'POST') {
