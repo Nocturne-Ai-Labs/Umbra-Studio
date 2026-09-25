@@ -36651,11 +36651,12 @@ const server = Bun.serve<UmbraSocketData>({
       // Batch import local gallery images to a dataset concept.
       if (path === '/api/datasets/import-images' && method === 'POST') {
         try {
-          const body = await req.json() as {
+          const body = await readJsonObject(req, false, 1024 * 1024) as {
             sourcePaths: string[];
             dataset: string;
             concept: string;
-          };
+          } | null;
+          if (!body) return json({ error: 'Invalid dataset import request' }, 400);
 
           const sourcePaths = Array.isArray(body.sourcePaths)
             ? body.sourcePaths.map((entry) => String(entry || '').trim()).filter(Boolean)
@@ -36663,6 +36664,7 @@ const server = Bun.serve<UmbraSocketData>({
           if (sourcePaths.length === 0 || !body.dataset || !body.concept) {
             return json({ error: 'sourcePaths, dataset, and concept required' }, 400);
           }
+          if (sourcePaths.length > 1024) return json({ error: 'Select up to 1024 images per import.' }, 400);
 
           const datasetName = sanitizeDatasetSegment(body.dataset);
           const conceptName = sanitizeDatasetSegment(body.concept);
@@ -36684,11 +36686,13 @@ const server = Bun.serve<UmbraSocketData>({
           }> = [];
           const allowedSourceRoots = isRemoteRequest(req, url, server) ? getGalleryBridgeAllowedRoots() : undefined;
 
+          req.signal.throwIfAborted();
           await withDatasetConceptLocks([conceptPath], async () => {
           if (!(await fs.lstat(conceptPath).catch(() => null))?.isDirectory()) {
             throw new Error('Dataset concept no longer exists');
           }
           for (const rawSourcePath of sourcePaths) {
+            req.signal.throwIfAborted();
             try {
               let sourcePath = resolveDatasetImportSourcePath(rawSourcePath);
               if (!sourcePath) throw new Error('Invalid source path');
@@ -36704,6 +36708,7 @@ const server = Bun.serve<UmbraSocketData>({
                 copiedSidecars: result.copiedSidecars,
               });
             } catch (error: any) {
+              if (req.signal.aborted) throw error;
               results.push({
                 sourcePath: rawSourcePath,
                 success: false,
@@ -36725,7 +36730,8 @@ const server = Bun.serve<UmbraSocketData>({
             results,
           }, imported > 0 ? 200 : 400);
         } catch (error: any) {
-          return json({ error: error.message }, 500);
+          if (req.signal.aborted) return new Response(null, { status: 499 });
+          return json({ error: error.message }, error instanceof RequestBodyTooLargeError ? 413 : 500);
         }
       }
 

@@ -15,7 +15,8 @@ async function fetchActivity(paths: string[], signal?: AbortSignal): Promise<Fol
     const value: FolderActivitySnapshot = await response.json();
     if (typeof value?.epoch !== 'string' || !Array.isArray(value.folders) || !Array.isArray(value.recentFolders)
       || value.folders.some(folder => typeof folder?.path !== 'string' || !Array.isArray(folder.entries)
-        || folder.entries.some(entry => typeof entry?.id !== 'string' || !Number.isSafeInteger(entry.count) || entry.count < 0))
+        || folder.entries.some(entry => typeof entry?.id !== 'string' || !Number.isSafeInteger(entry.count) || entry.count < 0
+          || typeof entry.direct !== 'boolean'))
       || value.recentFolders.some(folder => typeof folder?.path !== 'string' || !Number.isFinite(folder.updatedAt))) {
       throw new Error('Invalid folder activity response');
     }
