@@ -46,6 +46,7 @@ function normalizeHistorySegments(value: unknown, entryIndex: number): UmbraUiPr
       ...(slotType ? { slotType } : {}),
       ...(variantId ? { variantId } : {}),
       ...(variantName ? { variantName } : {}),
+      ...(segment.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
     };
   });
 }
@@ -60,6 +61,7 @@ function promptHistoryEntryKey(
     slotType: normalizeMetadata(segment.slotType).toLowerCase(),
     variantId: normalizeMetadata(segment.variantId).toLowerCase(),
     variantName: normalizeMetadata(segment.variantName).toLowerCase(),
+    preserveRepeatedTerms: segment.preserveRepeatedTerms === true,
   }));
   return JSON.stringify({
     fields: groupedPrompt,

@@ -1788,6 +1788,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           variantId: String(segment?.variantId || '').trim(),
           variantName: String(segment?.variantName || '').trim(),
           text: String(segment?.text || '').trim(),
+          ...(segment?.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true } : {}),
         }))
         .filter((segment) => segment.text.length > 0),
     };

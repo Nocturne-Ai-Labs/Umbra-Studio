@@ -14,6 +14,7 @@ export interface UmbraCanvasStudioRect {
 export interface UmbraCanvasStudioPromptSegment {
   id: string;
   text: string;
+  preserveRepeatedTerms?: true;
 }
 
 export type UmbraCanvasStudioGenerationSnapshot = Record<string, unknown>;
@@ -174,6 +175,7 @@ function normalizePromptSegments(value: unknown): UmbraCanvasStudioPromptSegment
     return {
       id: uniqueId(source.id, `prompt-${index + 1}`, seen),
       text: text(source.text, '', 32_768),
+      ...(source.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
     };
   });
 }

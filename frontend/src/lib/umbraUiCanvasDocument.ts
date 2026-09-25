@@ -325,7 +325,7 @@ export interface UmbraCanvasGenerationSettings {
     trainedTags: string[];
     triggerWords?: string[];
   }>;
-  promptSegments: Array<{ id: string; text: string }>;
+  promptSegments: UmbraUiPromptSegment[];
   activePromptSegmentId: string;
   negativePrompt: string;
   promptHistory: UmbraCanvasPromptHistoryEntry[];
@@ -753,6 +753,12 @@ function normalizeGenerationSettings(value: unknown): UmbraCanvasGenerationSetti
     ? source.promptSegments.map((segment: Record<string, any>, index: number) => ({
       id: String(segment?.id || `umbra-prompt-${index + 1}`),
       text: String(segment?.text || ''),
+      ...(String(segment?.label || '').trim() ? { label: String(segment.label).trim() } : {}),
+      ...(String(segment?.slotType || '').trim() ? { slotType: String(segment.slotType).trim() } : {}),
+      ...(String(segment?.variantId || '').trim() ? { variantId: String(segment.variantId).trim() } : {}),
+      ...(String(segment?.variantName || '').trim() ? { variantName: String(segment.variantName).trim() } : {}),
+      ...(segment?.agentEnabled === true ? { agentEnabled: true } : {}),
+      ...(segment?.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
     }))
     : [];
   const loras = Array.isArray(source.loras) ? source.loras.map((lora: Record<string, any>, index: number) => ({

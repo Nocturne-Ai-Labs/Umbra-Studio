@@ -154,7 +154,7 @@ export function UmbraPositivePromptEditor({
     typingCheckpointIdsRef.current.delete(id);
     const current = segmentsRef.current.find((segment) => segment.id === id);
     if (!current) return;
-    updateSegment(id, normalizeUmbraUiPromptSegmentText(current.text), 'silent');
+    updateSegment(id, normalizeUmbraUiPromptSegmentText(current.text, current.preserveRepeatedTerms === true), 'silent');
   }, [updateSegment]);
 
   const undoField = React.useCallback((id: string) => {

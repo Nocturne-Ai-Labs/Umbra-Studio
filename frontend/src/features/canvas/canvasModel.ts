@@ -297,6 +297,7 @@ export interface UmbraCanvasGenerationSettingsSnapshot {
     variantId?: string;
     variantName?: string;
     agentEnabled?: boolean;
+    preserveRepeatedTerms?: true;
   }>;
   negativePrompt: string;
   loras: Array<Record<string, unknown>>;

@@ -1270,6 +1270,7 @@ export function UmbraVideoGenerationControls({
           slotType: segment.slotType,
           variantId: segment.variantId,
           variantName: segment.variantName,
+          preserveRepeatedTerms: segment.preserveRepeatedTerms,
         }))
         : [];
       replacePromptSegments(detail.generation.positivePrompt, handoffSegments);

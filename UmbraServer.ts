@@ -11129,6 +11129,7 @@ function buildPowerPrompterMetadataSegments(
       variantId,
       variantName: String(token.variantName || card?.variantName || '').trim(),
       text,
+      ...(token.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true } : {}),
     };
   }).filter((segment): segment is NonNullable<typeof segment> => segment !== null);
 
@@ -22405,6 +22406,7 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
         slotType: String(segment?.slotType || 'umbra_ui_prompt').trim().slice(0, 160),
         variantId: String(segment?.variantId || '').trim().slice(0, 160),
         variantName: String(segment?.variantName || '').trim().slice(0, 320),
+        ...(segment?.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
       }))
       .filter((segment) => segment.text.length > 0);
     const rawLoras = parseInpaintJsonField('loras', []);

@@ -86,6 +86,7 @@ function normalizeGenerationSettings(rawSettings: unknown): Record<string, any> 
       ...(String(segment.variantId || '').trim() ? { variantId: String(segment.variantId).trim().slice(0, 240) } : {}),
       ...(String(segment.variantName || '').trim() ? { variantName: String(segment.variantName).trim().slice(0, 240) } : {}),
       ...(segment.agentEnabled === true ? { agentEnabled: true } : {}),
+      ...(segment.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
     };
   });
   const loras = (Array.isArray(settings.loras) ? settings.loras : []).slice(0, 64).map((rawLora: unknown, index: number) => {
