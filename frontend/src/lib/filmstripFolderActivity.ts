@@ -1,4 +1,4 @@
-export type FolderActivityEntry = { id: string; count: number };
+export type FolderActivityEntry = { id: string; count: number; direct: boolean };
 export type FolderActivitySnapshot = {
   epoch: string;
   folders: Array<{ path: string; entries: FolderActivityEntry[] }>;
@@ -24,6 +24,7 @@ export function folderActivityCounts(snapshot: FolderActivitySnapshot | null, re
 export function acknowledgeFolderActivity(snapshot: FolderActivitySnapshot, read: FolderActivityReadState, path: string): FolderActivityReadState {
   const counts = read.epoch === snapshot.epoch ? { ...read.counts } : {};
   for (const entry of snapshot.folders.find(folder => folder.path === path)?.entries || []) {
+    if (!entry.direct) continue;
     counts[entry.id] = Math.max(counts[entry.id] || 0, entry.count);
   }
   return { epoch: snapshot.epoch, counts };
