@@ -28,6 +28,7 @@ import {
 import { useStore } from '@/store/useStore';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { WildcardLibraryManager, type WildcardLibraryEntry } from '@/components/shared/WildcardLibraryManager';
+import { allocateWholePercentages, normalizeStoredWildcardOptionChances, toggleWildcardOptionEnabled } from './wildcardOptionChances';
 
 type WildcardTag = {
   tag: string;
@@ -244,16 +245,16 @@ function normalizeStoredWildcardDefinition(rawDefinition: unknown): {
   const record = rawDefinition as Record<string, unknown>;
   const groups = (Array.isArray(record.groups) ? record.groups : []).map((rawGroup, groupIndex) => {
     const group = rawGroup && typeof rawGroup === 'object' && !Array.isArray(rawGroup) ? rawGroup as Record<string, unknown> : {};
-    const options = (Array.isArray(group.options) ? group.options : []).map((rawOption, optionIndex) => {
+    const options = normalizeStoredWildcardOptionChances((Array.isArray(group.options) ? group.options : []).map((rawOption, optionIndex) => {
       const option = rawOption && typeof rawOption === 'object' && !Array.isArray(rawOption) ? rawOption as Record<string, unknown> : {};
       const tags = (Array.isArray(option.tags) ? option.tags : []).map(normalizeStoredWildcardTag).filter((tag): tag is WildcardTag => Boolean(tag));
       return {
         id: String(option.id || createId(`option-${groupIndex}-${optionIndex}`)),
         tags,
-        chance: Math.max(0, Math.min(100, Math.round(Number(option.chance) || 0))),
+        chance: Math.max(0, Math.min(100, Number(option.chance) || 0)),
         enabled: option.enabled !== false,
       };
-    }).filter((option) => option.tags.length > 0);
+    }).filter((option) => option.tags.length > 0));
     return {
       id: String(group.id || createId(`group-${groupIndex}`)),
       name: String(group.name || `Group ${groupIndex + 1}`).trim() || `Group ${groupIndex + 1}`,
@@ -275,25 +276,6 @@ function normalizeStoredWildcardDefinition(rawDefinition: unknown): {
   };
 }
 
-function allocateWholePercentages(weights: number[], total = 100): number[] {
-  if (weights.length === 0) return [];
-  const normalizedWeights = weights.map((weight) => Math.max(0, Number(weight) || 0));
-  const weightTotal = normalizedWeights.reduce((sum, weight) => sum + weight, 0);
-  const effectiveWeights = weightTotal > 0 ? normalizedWeights : normalizedWeights.map(() => 1);
-  const effectiveTotal = effectiveWeights.reduce((sum, weight) => sum + weight, 0) || effectiveWeights.length;
-  const raw = effectiveWeights.map((weight) => (weight / effectiveTotal) * total);
-  const values = raw.map((value) => Math.floor(value));
-  let remainder = total - values.reduce((sum, value) => sum + value, 0);
-  const order = raw
-    .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
-    .sort((left, right) => right.fraction - left.fraction || left.index - right.index);
-  for (let index = 0; index < order.length && remainder > 0; index += 1) {
-    values[order[index].index] += 1;
-    remainder -= 1;
-  }
-  return values;
-}
-
 function evenlyDistributeOptions(options: WildcardOption[]): WildcardOption[] {
   const active = options.filter((option) => option.enabled);
   const chances = allocateWholePercentages(active.map(() => 1));
@@ -311,7 +293,10 @@ function randomlyDistributeOptions(options: WildcardOption[]): WildcardOption[] 
 function appendOptionWithBalancedChance(options: WildcardOption[], option: Omit<WildcardOption, 'chance' | 'enabled'>): WildcardOption[] {
   const active = options.filter((entry) => entry.enabled);
   if (active.length === 0) return [...options, { ...option, enabled: true, chance: 100 }];
-  const newChance = Math.max(1, Math.round(100 / (active.length + 1)));
+  const enabledCount = active.length + 1;
+  const newChance = enabledCount <= 100
+    ? Math.max(1, Math.round(100 / enabledCount))
+    : 100 / enabledCount;
   const existingChances = allocateWholePercentages(active.map((entry) => entry.chance), 100 - newChance);
   let activeIndex = 0;
   return [
@@ -330,7 +315,8 @@ function removeOptionAndRebalance(options: WildcardOption[], optionId: string): 
 function rebalanceOptionChance(options: WildcardOption[], optionId: string, rawChance: number): WildcardOption[] {
   const active = options.filter((option) => option.enabled);
   if (active.length <= 1) return options.map((option) => option.enabled ? { ...option, chance: 100 } : option);
-  const targetChance = Math.max(0, Math.min(100, Math.round(rawChance)));
+  const targetChance = Math.max(0, Math.min(100, active.length > 100
+    ? Math.round(rawChance * 10) / 10 : Math.round(rawChance)));
   const others = active.filter((option) => option.id !== optionId);
   const otherChances = allocateWholePercentages(others.map((option) => option.chance), 100 - targetChance);
   let otherIndex = 0;
@@ -1277,7 +1263,7 @@ function EditableWildcardOption({
           type="range"
           min={0}
           max={100}
-          step={1}
+          step={optionCount > 100 ? 0.1 : 1}
           value={option.chance}
           disabled={optionCount <= 1 || !groupEnabled || !option.enabled}
           onChange={(event) => onChanceChange(Number(event.target.value))}
@@ -1285,7 +1271,7 @@ function EditableWildcardOption({
           className="h-1.5 w-full cursor-pointer disabled:cursor-default disabled:opacity-50"
           style={{ accentColor: 'var(--umbra-accent)' }}
         />
-        <span className="rounded-sm border border-cyan-300/15 bg-cyan-500/[0.07] px-1.5 py-1 text-center font-mono text-[10px] text-cyan-100">{option.chance}%</span>
+        <span className="rounded-sm border border-cyan-300/15 bg-cyan-500/[0.07] px-1.5 py-1 text-center font-mono text-[10px] text-cyan-100">{option.chance > 0 && option.chance < 0.01 ? '<0.01' : Number(option.chance.toFixed(2))}%</span>
       </div>
     </div>
   );
@@ -1313,9 +1299,12 @@ function GroupPanel({
   };
 
   const updateOption = (nextOption: WildcardOption) => {
+    const previous = group.options.find((option) => option.id === nextOption.id);
     onChange({
       ...group,
-      options: group.options.map((option) => option.id === nextOption.id ? nextOption : option),
+      options: previous && previous.enabled !== nextOption.enabled
+        ? toggleWildcardOptionEnabled(group.options, nextOption.id)
+        : group.options.map((option) => option.id === nextOption.id ? nextOption : option),
     });
   };
 
@@ -1677,7 +1666,7 @@ export function WildcardGeneratorTab({ onOpenCorpus }: { onOpenCorpus?: () => vo
                     <div key={`${index}-${row.value}`} className="grid grid-cols-[2rem_minmax(0,1fr)_3.2rem_5.5rem] items-start gap-2 border-b border-white/[0.06] px-2.5 py-2 last:border-b-0 odd:bg-white/[0.018]">
                       <span className="font-mono text-[9px] text-zinc-700">{String(index + 1).padStart(3, '0')}</span>
                       <span className="break-words font-mono text-[10px] leading-4 text-zinc-300">{row.value}</span>
-                      <span className="rounded-sm border border-emerald-300/15 bg-emerald-500/[0.07] px-1 py-0.5 text-center font-mono text-[9px] text-emerald-100">{row.chance.toFixed(1)}%</span>
+                      <span className="rounded-sm border border-emerald-300/15 bg-emerald-500/[0.07] px-1 py-0.5 text-center font-mono text-[9px] text-emerald-100">{row.chance > 0 && row.chance < 0.1 ? '<0.1' : row.chance.toFixed(1)}%</span>
                       <span className="text-right font-mono text-[9px] text-cyan-200/70">{formatPostCount(row.minimumPostCount)}</span>
                     </div>
                   ))}

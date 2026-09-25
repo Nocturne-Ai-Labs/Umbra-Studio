@@ -2078,6 +2078,9 @@ export function ModelManagerWorkspace() {
       return true;
     } catch (error: any) {
       addToast({ type: 'error', message: error?.message || 'Action failed' });
+      if (endpoint === '/api/model-manager/fs/delete') {
+        await refreshLocalView().catch(() => undefined);
+      }
       return false;
     }
   }, [addToast, refreshLocalView]);

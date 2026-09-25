@@ -83,6 +83,7 @@ function RemoteAuthGateImpl({ children }: { children: React.ReactNode }) {
         setUsername(configuredUsername);
       }
     } catch (statusError) {
+      setStatus(null);
       setError(statusError instanceof Error ? statusError.message : 'Remote auth status failed');
     } finally {
       setLoading(false);
@@ -110,7 +111,7 @@ function RemoteAuthGateImpl({ children }: { children: React.ReactNode }) {
   }, []);
 
   React.useEffect(() => {
-    if (!status?.remote) {
+    if (status && !status.remote) {
       setEntryReady(true);
     }
   }, [status?.remote, status?.authenticated]);
@@ -170,7 +171,29 @@ function RemoteAuthGateImpl({ children }: { children: React.ReactNode }) {
     return <div className="h-screen w-screen bg-[#050508]" />;
   }
 
-  if (!status?.remote || status.authRequired === false) {
+  if (!status) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-[#050508] px-4 text-zinc-100">
+        <div className="w-full max-w-md rounded-xl border border-red-400/25 bg-black/45 p-5" role="alert">
+          <div className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.18em] text-white">
+            <ShieldAlert size={18} />
+            Connection Check Failed
+          </div>
+          <p className="mt-3 text-sm text-zinc-300">{error || 'Could not check Umbra Remote access.'}</p>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="mt-4 inline-flex h-9 items-center gap-2 rounded border border-white/15 px-3 text-xs font-bold text-zinc-100 hover:bg-white/5"
+          >
+            <RefreshCw size={14} />
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!status.remote || status.authRequired === false) {
     return <>{children}</>;
   }
 
