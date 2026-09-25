@@ -58,6 +58,7 @@ import { FsWorkerService } from './backend/FsWorkerService';
 import { GalleryTransferJournal } from './backend/GalleryTransferJournal';
 import { compareGalleryUploadDuplicate, isGalleryUploadFilename, isGalleryUploadStrategy, prepareGalleryUploadDirectory, stageGalleryUploadFile } from './backend/GalleryUploadService';
 import { copyMediaIntoComfyInput, writeAllUploadedMediaBytes } from './backend/UmbraUiMediaUploadService';
+import { ensureUmbraUiStagedMedia, UmbraUiStagedMediaError } from './backend/UmbraUiStagedMedia';
 import { UmbraStagedVideoPreviewGrants } from './backend/UmbraStagedVideoPreviewGrants';
 import { isCivitaiModelDownloadUrl } from './backend/ModelDownloadHttp';
 import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
@@ -100,6 +101,7 @@ import {
   type UmbraUiLayerUpscaleSettings,
 } from './backend/UmbraUiInpaintService';
 import { UmbraUiCanvasProjectService } from './backend/UmbraUiCanvasProjectService';
+import { UmbraCanvasStudioConflictError, UmbraUiCanvasStudioProjectService } from './backend/UmbraUiCanvasStudioProjectService';
 import { UmbraUiCensorReviewService } from './backend/UmbraUiCensorReviewService';
 import { handleCensorReviewRoute } from './backend/routes/censorReviewRoutes';
 import { UmbraUiCanvasWorkspaceProjectService } from './backend/UmbraUiCanvasWorkspaceProjectService';
@@ -464,6 +466,7 @@ const umbraUiInpaintService = new UmbraUiInpaintService({
   buildBaseWorkflow: (settings, seed) => buildUmbraUiInpaintBaseWorkflow(settings, seed),
 });
 const umbraUiCanvasProjectService = new UmbraUiCanvasProjectService(USER_DIR);
+const umbraUiCanvasStudioProjectService = new UmbraUiCanvasStudioProjectService(USER_DIR);
 const umbraUiCanvasWorkspaceProjectService = new UmbraUiCanvasWorkspaceProjectService(USER_DIR);
 void fsWorkerService.warmup();
 void galleryFsWorkerService.warmup();
@@ -21414,6 +21417,62 @@ async function handleUmbraUiInpaintProjectList(): Promise<Response> {
   }
 }
 
+async function handleUmbraUiCanvasStudioProjectList(): Promise<Response> {
+  try {
+    return json({ success: true, projects: await umbraUiCanvasStudioProjectService.list() });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || 'Failed to list Canvas Studio projects.') }, 500);
+  }
+}
+
+async function handleUmbraUiCanvasStudioProjectGet(projectId: string): Promise<Response> {
+  try {
+    const project = await umbraUiCanvasStudioProjectService.get(projectId);
+    return project
+      ? json({ success: true, project })
+      : json({ success: false, error: 'The Canvas Studio project was not found.' }, 404);
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || 'Failed to load the Canvas Studio project.') }, 400);
+  }
+}
+
+async function handleUmbraUiCanvasStudioProjectSave(req: Request, projectId: string): Promise<Response> {
+  try {
+    const body = await req.json() as { project?: unknown };
+    const project = await umbraUiCanvasStudioProjectService.save(projectId, body?.project);
+    return json({ success: true, project });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || 'Failed to save the Canvas Studio project.') },
+      error instanceof UmbraCanvasStudioConflictError ? 409 : 400);
+  }
+}
+
+async function handleUmbraUiCanvasStudioProjectDelete(projectId: string): Promise<Response> {
+  try {
+    await umbraUiCanvasStudioProjectService.delete(projectId);
+    return json({ success: true });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || 'Failed to delete the Canvas Studio project.') }, 400);
+  }
+}
+
+async function handleUmbraUiCanvasStudioRevisionList(projectId: string): Promise<Response> {
+  try {
+    return json({ success: true, revisions: await umbraUiCanvasStudioProjectService.listRevisions(projectId) });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || 'Failed to list Canvas Studio revisions.') }, 400);
+  }
+}
+
+async function handleUmbraUiCanvasStudioRevisionRestore(projectId: string, revisionId: string): Promise<Response> {
+  try {
+    return json({ success: true, project: await umbraUiCanvasStudioProjectService.restoreRevision(projectId, revisionId) });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || 'Failed to restore the Canvas Studio revision.') },
+      error?.code === 'ENOENT' ? 404 : 400);
+  }
+}
+
 async function handleUmbraUiInpaintProjectSave(req: Request, projectId: string): Promise<Response> {
   try {
     const form = await req.formData();
@@ -23646,9 +23705,15 @@ async function openPowerPrompterDocumentSessionUnlocked(
   await restorePowerPrompterDirtySessionUnlocked();
   const resolved = resolvePPPromptFile(filePath);
   if (!resolved) throw new Error('Invalid Power Prompter file path');
-  if (shouldReusePowerPrompterSession(powerPrompterDocumentSession.file, resolved.filePath, !!powerPrompterDocumentSession.document)) {
-    return powerPrompterDocumentSession;
+  const isOpenFile = shouldReusePowerPrompterSession(
+    powerPrompterDocumentSession.file, resolved.filePath, !!powerPrompterDocumentSession.document,
+  );
+  if (isOpenFile && powerPrompterDocumentSession.dirty) return powerPrompterDocumentSession;
+  const currentStorageToken = await getPowerPrompterCanonicalStorageToken(resolved);
+  if (!currentStorageToken) {
+    throw new PowerPrompterSessionConflictError('The card file is missing. Its open session was preserved.');
   }
+  if (isOpenFile && currentStorageToken === powerPrompterSessionStorageToken) return powerPrompterDocumentSession;
   assertPowerPrompterSessionCanOpen(powerPrompterDocumentSession.file, resolved.filePath, powerPrompterDocumentSession.dirty);
   const loaded = await loadPPCardDocumentForFile(resolved.filePath);
   const normalized = normalizePPCardDocument(loaded.document, resolved.filePath);
@@ -23708,8 +23773,10 @@ async function ensurePowerPrompterDocumentSession(filePath?: string | null): Pro
       return powerPrompterDocumentSession;
     }
 
-    if (persisted?.file && resolvePPPromptFile(persisted.file)?.filePath === persisted.file) {
-      return openPowerPrompterDocumentSessionUnlocked(persisted.file, { reason: 'document_restored' });
+    const persistedFile = persisted?.file ? resolvePPPromptFile(persisted.file) : null;
+    if (persistedFile?.filePath === persisted?.file
+      && await getPowerPrompterCanonicalStorageToken(persistedFile)) {
+      return openPowerPrompterDocumentSessionUnlocked(persistedFile.filePath, { reason: 'document_restored' });
     }
 
     try {
@@ -23870,6 +23937,9 @@ async function getPowerPrompterCardStorageRevision(resolved: { fullPath: string;
 
 async function loadPowerPrompterCardWithStorageRevision(resolved: { filePath: string; fullPath: string; sidecarPath: string }) {
   const before = await getPowerPrompterCardStorageRevision(resolved);
+  if (before === 'missing') {
+    throw new PowerPrompterSessionConflictError('The card file is missing. Refresh the file list before editing it.');
+  }
   const loaded = await loadPPCardDocumentForFile(resolved.filePath);
   const after = await getPowerPrompterCardStorageRevision(resolved);
   if (before !== after) throw new PowerPrompterSessionConflictError();
@@ -23925,8 +23995,12 @@ async function savePowerPrompterCardFromEditor(
       }
     }
     if (!active && options.intent !== 'create-card') {
+      const currentStorageRevision = await getPowerPrompterCardStorageRevision(resolved);
+      if (currentStorageRevision === 'missing') {
+        throw new PowerPrompterSessionConflictError('The card file is missing. Refresh the file list before editing it.');
+      }
       assertPowerPrompterCardStorageRevision(
-        await getPowerPrompterCardStorageRevision(resolved),
+        currentStorageRevision,
         options.expectedStorageRevision,
       );
     }
@@ -35817,6 +35891,35 @@ const server = Bun.serve<UmbraSocketData>({
         }
       }
 
+      if (path === '/api/comfy/ensure-media' && method === 'POST') {
+        try {
+          const body = await req.json() as { sourcePath?: unknown; filename?: unknown; kind?: unknown };
+          const kind = String(body?.kind || '').trim();
+          if (kind !== 'image' && kind !== 'video' && kind !== 'audio') {
+            return json({ error: 'An image, video, or audio media kind is required.' }, 400);
+          }
+          const inputRoot = getComfyInputRootFast();
+          const staged = await ensureUmbraUiStagedMedia({
+            sourcePath: typeof body.sourcePath === 'string' ? body.sourcePath : '',
+            filename: typeof body.filename === 'string' ? body.filename : '',
+            kind,
+            inputRoot,
+            galleryRoots: getGalleryTransferAllowedRoots(),
+            rootDir: ROOT_DIR,
+            allowedExtensions: kind === 'image' ? UMBRA_UI_IMAGE_EXTENSIONS
+              : kind === 'video' ? UMBRA_UI_VIDEO_EXTENSIONS : UMBRA_UI_AUDIO_EXTENSIONS,
+          });
+          if (kind === 'video') {
+            await umbraStagedVideoPreviewGrants.register(inputRoot, staged.filename, staged.destPath)
+              .catch((error) => console.warn('[Umbra UI] Could not register staged video preview:', error));
+          }
+          return json({ success: true, filename: staged.filename, kind, copied: staged.copied });
+        } catch (error: any) {
+          return json({ error: String(error?.message || 'Failed to stage media for ComfyUI.') },
+            error instanceof UmbraUiStagedMediaError ? error.status : 500);
+        }
+      }
+
       if (path === '/api/comfy/upload-media' && method === 'POST') {
         let tempPath = '';
         let uploadTooLarge = false;
@@ -37460,6 +37563,27 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/umbra-ui/inpaint/projects' && method === 'GET') {
         return handleUmbraUiInpaintProjectList();
+      }
+
+      if (path === '/api/umbra-ui/canvas-studio/projects' && method === 'GET') {
+        return handleUmbraUiCanvasStudioProjectList();
+      }
+
+      if (path.startsWith('/api/umbra-ui/canvas-studio/projects/')) {
+        const suffix = path.slice('/api/umbra-ui/canvas-studio/projects/'.length);
+        const segments = suffix.split('/').filter(Boolean).map((segment) => decodeURIComponent(segment));
+        if (segments.length === 1) {
+          if (method === 'GET') return handleUmbraUiCanvasStudioProjectGet(segments[0]);
+          if (method === 'PUT') return handleUmbraUiCanvasStudioProjectSave(req, segments[0]);
+          if (method === 'DELETE') return handleUmbraUiCanvasStudioProjectDelete(segments[0]);
+        }
+        if (segments.length === 2 && segments[1] === 'revisions' && method === 'GET') {
+          return handleUmbraUiCanvasStudioRevisionList(segments[0]);
+        }
+        if (segments.length === 4 && segments[1] === 'revisions' && segments[3] === 'restore' && method === 'POST') {
+          return handleUmbraUiCanvasStudioRevisionRestore(segments[0], segments[2]);
+        }
+        return json({ success: false, error: 'Unsupported Canvas Studio project operation.' }, 405);
       }
 
       if (path === '/api/umbra-ui/canvas/projects' && method === 'GET') {
