@@ -18281,9 +18281,9 @@ async function areGalleryBridgePathsAllowed(
   const authorize = await getGalleryBridgePathAuthorizer().catch(() => null);
   if (!authorize) return false;
   for (const rawPath of paths) {
+    if (!String(rawPath || '').trim()) continue;
     const resolvedPath = resolveGalleryBridgeInputPath(rawPath);
-    if (!resolvedPath) continue;
-    if (!(await authorize(resolvedPath))) return false;
+    if (!resolvedPath || !(await authorize(resolvedPath))) return false;
   }
   return true;
 }
@@ -18291,12 +18291,7 @@ async function areGalleryBridgePathsAllowed(
 function resolveGalleryBridgeInputPath(input: unknown): string {
   const raw = String(input || '').trim();
   if (!raw) return '';
-  if (isAbsolute(raw)) return resolve(raw);
-  const normalized = raw.replace(/\\/g, '/');
-  const mapped = normalized === 'User/Outputs' || normalized.startsWith('User/Outputs/')
-    ? `Tools/ComfyUI/output${normalized.slice('User/Outputs'.length)}`
-    : normalized;
-  return resolve(ROOT_DIR, mapped);
+  return resolvePath(raw, { allowOutsideRoot: true })?.fullPath || '';
 }
 
 async function proxyGalleryBridgeFsPost(
