@@ -2531,6 +2531,7 @@ export function UmbraInpaintWorkspace({
   const sourceObjectUrlRef = React.useRef('');
   const terminalNoticeRef = React.useRef('');
   const autoSelectJobRef = React.useRef('');
+  const acceptedInpaintSubmissionRef = React.useRef<{ projectId: string; jobId: string } | null>(null);
   const jobStageContextsRef = React.useRef(new Map<string, UmbraUiInpaintStageContext>());
   const stageGallerySaveInFlightRef = React.useRef(new Set<string>());
   const pendingMaskRestoreRef = React.useRef('');
@@ -2785,6 +2786,15 @@ export function UmbraInpaintWorkspace({
   }) : null, [job]);
   usePublishUmbraQueueActivity('umbra-ui-inpaint-workspace', queueActivity);
   const inpaintJobRunning = !!job && !isUmbraUiInpaintJobTerminal(job);
+  React.useEffect(() => {
+    const accepted = acceptedInpaintSubmissionRef.current;
+    if (!accepted) return;
+    if (canvasDocument?.id !== accepted.projectId
+      || job?.id === accepted.jobId
+      || canvasDocument.pendingJobs.some((pending) => pending.id === accepted.jobId)) {
+      acceptedInpaintSubmissionRef.current = null;
+    }
+  }, [canvasDocument, job?.id]);
   const resizeTarget = React.useMemo(() => ({
     width: alignInpaintResizeDimension(Number(resizeWidth) || canvasDocument?.width || 1024, 'width', capabilities.resolution),
     height: alignInpaintResizeDimension(Number(resizeHeight) || canvasDocument?.height || 1024, 'height', capabilities.resolution),
@@ -9420,7 +9430,10 @@ export function UmbraInpaintWorkspace({
   }, [canvasDocument, referenceLayersAvailable, referenceLayersMaxLayers, referenceMethods]);
 
   const generateSamples = React.useCallback(async (seedOverride?: number) => {
-    if (!source || !canvasDocument || !visibleGenerationRegion || !canvasReady || !inpaintRuntimeCapabilities || isSubmitting || submissionInFlightRef.current) return;
+    if (!source || !canvasDocument || !visibleGenerationRegion || !canvasReady || !inpaintRuntimeCapabilities
+      || isSubmitting || submissionInFlightRef.current || inpaintJobRunning
+      || canvasDocument.pendingJobs.length > 0
+      || acceptedInpaintSubmissionRef.current?.projectId === canvasDocument.id) return;
     const submissionRegion = alignGenerationRegion(expandCanvasRect(
       visibleGenerationRegion,
       contextPadding,
@@ -9621,6 +9634,7 @@ export function UmbraInpaintWorkspace({
           createdAt: nextJob.createdAt,
         },
       });
+      acceptedInpaintSubmissionRef.current = { projectId: canvasDocument.id, jobId: nextJob.id };
       setJob(nextJob);
       if (capabilities.seed.support === 'adjustable') {
         onSeedChange(String(advanceUmbraUiSeed(
@@ -9669,6 +9683,7 @@ export function UmbraInpaintWorkspace({
     inpaintAdapter,
     inpaintModelName,
     inpaintRuntimeCapabilities,
+    inpaintJobRunning,
     isSubmitting,
     loras,
     maskFeather,
@@ -9869,6 +9884,8 @@ export function UmbraInpaintWorkspace({
   ];
   const operationMode = canvasDocument?.operationMode || 'inpaint';
   const running = inpaintJobRunning;
+  const generationBusy = isSubmitting || running || (canvasDocument?.pendingJobs.length || 0) > 0
+    || (!!acceptedInpaintSubmissionRef.current && acceptedInpaintSubmissionRef.current.projectId === canvasDocument?.id);
   const generationBlockedReason = !source || !canvasDocument
     ? 'Open an image before generating.'
     : !visibleGenerationRegion
@@ -10113,8 +10130,8 @@ export function UmbraInpaintWorkspace({
             </button>
           ) : job && isUmbraUiInpaintJobTerminal(job) ? (
             <div className="grid grid-cols-2 gap-1.5">
-              <button type="button" onClick={() => void generateSamples()} disabled={!generationReady || isSubmitting} title={generationBlockedReason || 'Retry with the current seed and settings'} className="inline-flex h-8 items-center justify-center gap-1.5 border border-white/10 text-[8px] font-black uppercase text-zinc-400 disabled:text-zinc-800"><RotateCcw size={10} /> Retry</button>
-              <button type="button" onClick={rerollSamples} disabled={!generationReady || isSubmitting} title={generationBlockedReason || 'Discard unpinned stages and retry with a new seed'} className="inline-flex h-8 items-center justify-center gap-1.5 border border-cyan-300/20 text-[8px] font-black uppercase text-cyan-200 disabled:text-zinc-800"><WandSparkles size={10} /> Reroll</button>
+              <button type="button" onClick={() => void generateSamples()} disabled={!generationReady || generationBusy} title={generationBlockedReason || 'Retry with the current seed and settings'} className="inline-flex h-8 items-center justify-center gap-1.5 border border-white/10 text-[8px] font-black uppercase text-zinc-400 disabled:text-zinc-800"><RotateCcw size={10} /> Retry</button>
+              <button type="button" onClick={rerollSamples} disabled={!generationReady || generationBusy} title={generationBlockedReason || 'Discard unpinned stages and retry with a new seed'} className="inline-flex h-8 items-center justify-center gap-1.5 border border-cyan-300/20 text-[8px] font-black uppercase text-cyan-200 disabled:text-zinc-800"><WandSparkles size={10} /> Reroll</button>
             </div>
           ) : null}
           {job?.cancelRequested ? <div role="status" className="text-[9px] text-amber-200">Stopping inpaint job…</div> : null}
@@ -11389,9 +11406,9 @@ export function UmbraInpaintWorkspace({
           ) : null}
         </div>
         <UmbraGenerationActionBar task="Inpaint" onGenerate={() => void generateSamples()}
-          disabled={!generationReady || isSubmitting || running} busy={isSubmitting || running}
-          title={generationBlockedReason || (running ? 'Generation is already running.' : 'Generate with the current inpaint settings')}
-          label={running ? `Generating ${job?.completed || 0}/${job?.total || samples}` : 'Generate'}
+          disabled={!generationReady || generationBusy} busy={generationBusy}
+          title={generationBlockedReason || (generationBusy ? 'Wait for the current inpaint job to finish.' : 'Generate with the current inpaint settings')}
+          label={running ? `Generating ${job?.completed || 0}/${job?.total || samples}` : canvasDocument?.pendingJobs.length ? 'Recovering Job' : 'Generate'}
           folder={pinnedOutputFolder} onFolderChange={setPinnedOutputFolder}>
           <button type="button" onClick={() => void saveCanvasToGallery(false)} disabled={!source || isSavingCanvas || !!fullResolutionOperation}
             title="Save accepted image to the selected output destination" aria-label="Save accepted image"
