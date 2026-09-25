@@ -14,6 +14,7 @@ export function requiresQueueControlBrowserOrigin(path: string): boolean {
     || path.startsWith('/api/powerprompter/queue')
     || path === '/api/powerprompter/backend-queue-debug'
     || path === '/api/umbra-ui/queue/control'
+    || path === '/api/umbra-ui/media-tools/cancel'
     || path === '/api/umbra-ui/inpaint/jobs'
     || path.startsWith('/api/umbra-ui/inpaint/jobs/')
     || path === '/api/umbra-ui/upscale/jobs'

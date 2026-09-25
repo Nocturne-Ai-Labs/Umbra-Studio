@@ -28,6 +28,29 @@ export interface UmbraUiWatermarkAsset {
 
 const hostPickedPreviewUrls = new Map<string, string>();
 
+export function createUmbraUiMediaCancelId(): string {
+  const bytes = new Uint8Array(16);
+  if (!globalThis.crypto?.getRandomValues) throw new Error('Secure media cancellation is unavailable in this browser.');
+  globalThis.crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export async function cancelUmbraUiMediaTool(id: string): Promise<void> {
+  const response = await fetch('/api/umbra-ui/media-tools/cancel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || payload?.success !== true) {
+    throw new Error(`Media cancellation failed (${response.status}).`);
+  }
+}
+
 export function getUmbraUiHostPickedPreviewUrl(path: string): string {
   return hostPickedPreviewUrls.get(path) || '';
 }
@@ -93,6 +116,7 @@ export async function submitUmbraUiWatermark(options: {
   imageFormat: 'png' | 'jpeg' | 'webp';
   quality: number;
   outputWidth: number;
+  cancelId?: string;
   signal?: AbortSignal;
 }): Promise<UmbraUiMediaToolResult> {
   const form = new FormData();
@@ -112,7 +136,11 @@ export async function submitUmbraUiWatermark(options: {
   form.set('imageFormat', options.imageFormat);
   form.set('quality', String(options.quality));
   form.set('outputWidth', String(options.outputWidth));
-  const response = await fetch('/api/umbra-ui/media-tools/watermark', { method: 'POST', body: form, signal: options.signal });
+  if (options.cancelId) form.set('cancelId', options.cancelId);
+  const response = await fetch('/api/umbra-ui/media-tools/watermark', {
+    method: 'POST', body: form, signal: options.signal,
+    headers: options.cancelId ? { 'X-Umbra-Extras-Cancel-Id': options.cancelId } : undefined,
+  });
   return readMediaToolResponse(response, 'Watermark processing failed');
 }
 
@@ -179,6 +207,7 @@ export async function submitUmbraUiVideoToGif(options: {
   pinnedOutputFolder?: string;
   sequenceNumber: number;
   width: number;
+  cancelId?: string;
   signal?: AbortSignal;
 }): Promise<UmbraUiMediaToolResult> {
   const form = new FormData();
@@ -188,7 +217,11 @@ export async function submitUmbraUiVideoToGif(options: {
   form.set('pinnedOutputFolder', options.pinnedOutputFolder || '');
   form.set('sequenceNumber', String(options.sequenceNumber));
   form.set('width', String(options.width));
-  const response = await fetch('/api/umbra-ui/media-tools/video-to-gif', { method: 'POST', body: form, signal: options.signal });
+  if (options.cancelId) form.set('cancelId', options.cancelId);
+  const response = await fetch('/api/umbra-ui/media-tools/video-to-gif', {
+    method: 'POST', body: form, signal: options.signal,
+    headers: options.cancelId ? { 'X-Umbra-Extras-Cancel-Id': options.cancelId } : undefined,
+  });
   return readMediaToolResponse(response, 'GIF conversion failed');
 }
 

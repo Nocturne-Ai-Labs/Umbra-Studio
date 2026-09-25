@@ -22,6 +22,8 @@ import { cn, buildFsImageUrl } from '@/lib/utils';
 import {
   browseUmbraUiMediaToolsOutputFolder,
   browseUmbraUiMediaToolsSourceFiles,
+  cancelUmbraUiMediaTool,
+  createUmbraUiMediaCancelId,
   getUmbraUiHostPickedPreviewUrl,
   submitUmbraUiVideoToGif,
   submitUmbraUiWatermark,
@@ -316,16 +318,29 @@ function useMediaBatchQueueActivity({
 }) {
   const stopRef = React.useRef(false);
   const activeControllerRef = React.useRef<AbortController | null>(null);
+  const activeCancelIdRef = React.useRef<string | null>(null);
+  const cancelPromiseRef = React.useRef<Promise<void> | null>(null);
+  const cancelUncertainRef = React.useRef(false);
   const [cancelRequested, setCancelRequested] = React.useState(false);
+  const [cancelUncertain, setCancelUncertain] = React.useState(false);
   const activityId = startedAtRef.current > 0 ? `umbra-extras:${mode}:${startedAtRef.current}` : undefined;
   useUmbraQueueActivityActions(activityId, { remove: async () => {
+    if (stopRef.current) return;
     stopRef.current = true;
-    activeControllerRef.current?.abort();
     setCancelRequested(true);
+    const cancelId = activeCancelIdRef.current;
+    const controller = activeControllerRef.current;
+    const cancelPromise = cancelId ? cancelUmbraUiMediaTool(cancelId).catch(() => {
+      cancelUncertainRef.current = true;
+      setCancelUncertain(true);
+    }) : Promise.resolve();
+    cancelPromiseRef.current = cancelPromise;
+    await cancelPromise;
+    controller?.abort();
   } });
   const updatedAt = React.useMemo(
     () => Date.now(),
-    [processing, summary.completed, summary.failed, summary.total],
+    [cancelRequested, cancelUncertain, processing, summary.completed, summary.failed, summary.total],
   );
   const activity = React.useMemo<UmbraQueueActivity | null>(() => {
     if (summary.total <= 0 || startedAtRef.current <= 0) return null;
@@ -338,7 +353,7 @@ function useMediaBatchQueueActivity({
           : 'Video to GIF Batch';
     const status: UmbraQueueActivity['status'] = processing
       ? 'running'
-      : cancelRequested && summary.completed + summary.failed < summary.total ? 'canceled' : summary.failed >= summary.total
+      : cancelUncertain ? 'failed' : cancelRequested && summary.completed + summary.failed < summary.total ? 'canceled' : summary.failed >= summary.total
         ? 'failed'
         : summary.failed > 0
           ? 'partial'
@@ -349,7 +364,7 @@ function useMediaBatchQueueActivity({
       owner: `umbra-ui-extras-${mode}`,
       feature: mode,
       label,
-      detail: firstName
+      detail: cancelUncertain ? 'Cancellation unconfirmed. Check outputs on the host.' : firstName
         ? `${firstName}${summary.total > 1 ? ` +${summary.total - 1} more` : ''}`
         : `${summary.total} item${summary.total === 1 ? '' : 's'}`,
       status,
@@ -362,12 +377,29 @@ function useMediaBatchQueueActivity({
       placement: 'parallel',
       readonly: true,
     };
-  }, [cancelRequested, items, mode, processing, startedAtRef, summary.completed, summary.failed, summary.total, updatedAt]);
+  }, [cancelRequested, cancelUncertain, items, mode, processing, startedAtRef, summary.completed, summary.failed, summary.total, updatedAt]);
   usePublishUmbraQueueActivity(`umbra-ui-extras-${mode}`, activity);
   return React.useMemo(() => ({
-    reset: () => { stopRef.current = false; activeControllerRef.current = new AbortController(); setCancelRequested(false); },
+    reset: () => {
+      stopRef.current = false;
+      activeControllerRef.current = new AbortController();
+      activeCancelIdRef.current = null;
+      cancelPromiseRef.current = null;
+      cancelUncertainRef.current = false;
+      setCancelRequested(false);
+      setCancelUncertain(false);
+    },
     shouldStop: () => stopRef.current,
+    cancelUncertain: () => cancelUncertainRef.current,
+    waitForCancellation: () => cancelPromiseRef.current || Promise.resolve(),
     signal: () => activeControllerRef.current?.signal,
+    startVideo: (id: string) => {
+      if (stopRef.current) throw new DOMException('Media processing canceled.', 'AbortError');
+      activeCancelIdRef.current = id;
+    },
+    finishVideo: (id: string) => {
+      if (activeCancelIdRef.current === id) activeCancelIdRef.current = null;
+    },
   }), []);
 }
 
@@ -569,36 +601,46 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
       items: runnableItems,
       onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
       runItem: async (item) => {
-        const next = await submitUmbraUiWatermark({
-          source: item.file,
-          sourcePath: item.path,
-          watermark: watermarkAsset ? undefined : watermark || undefined,
-          watermarkPath: watermarkAsset?.path,
-          outputFolder: outputFolder.trim(), pinnedOutputFolder,
-          sequenceNumber: item.kind === 'video' ? videoSequence.get(item.id) || 1 : imageSequence.get(item.id) || 1,
-          x: position.x,
-          y: position.y,
-          scale,
-          opacity,
-          resizeEnabled: item.kind === 'image' && exportSettings.resizeEnabled,
-          longEdge: exportSettings.longEdge,
-          imageFormat: exportSettings.format,
-          quality: exportSettings.quality,
-          outputWidth: videoMode ? videoOutputWidth : 0,
-          signal: batchControl.signal(),
-        });
-        setCompletedOutputs((current) => [...current, { id: item.id, result: next }]);
+        const cancelId = videoMode ? createUmbraUiMediaCancelId() : undefined;
+        if (cancelId) batchControl.startVideo(cancelId);
+        try {
+          const next = await submitUmbraUiWatermark({
+            source: item.file,
+            sourcePath: item.path,
+            watermark: watermarkAsset ? undefined : watermark || undefined,
+            watermarkPath: watermarkAsset?.path,
+            outputFolder: outputFolder.trim(), pinnedOutputFolder,
+            sequenceNumber: item.kind === 'video' ? videoSequence.get(item.id) || 1 : imageSequence.get(item.id) || 1,
+            x: position.x,
+            y: position.y,
+            scale,
+            opacity,
+            resizeEnabled: item.kind === 'image' && exportSettings.resizeEnabled,
+            longEdge: exportSettings.longEdge,
+            imageFormat: exportSettings.format,
+            quality: exportSettings.quality,
+            outputWidth: videoMode ? videoOutputWidth : 0,
+            cancelId,
+            signal: batchControl.signal(),
+          });
+          setCompletedOutputs((current) => [...current, { id: item.id, result: next }]);
+        } finally {
+          if (cancelId) batchControl.finishVideo(cancelId);
+        }
       },
       onItemSettled: (item, error) => {
-        const canceled = !!error && batchControl.signal()?.aborted === true;
+        const canceled = !!error && batchControl.shouldStop();
         setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: canceled ? 'staged' : error ? 'failed' : 'completed', error: canceled ? undefined : error instanceof Error ? error.message : error ? String(error) : undefined } : entry));
         setSummary((current) => ({ ...current, completed: current.completed + (error ? 0 : 1), failed: current.failed + (error && !canceled ? 1 : 0) }));
       },
     });
+    await batchControl.waitForCancellation();
     setItems((current) => clearCompletedUmbraUiMediaBatch(current, runnableItems));
     setProcessing(false);
     window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
-    if (batchControl.shouldStop() && result.completed < runnableItems.length) {
+    if (batchControl.shouldStop() && batchControl.cancelUncertain()) {
+      showToast('Cancellation could not be confirmed. Check the output folder on the host.', 'error');
+    } else if (batchControl.shouldStop() && result.completed < runnableItems.length) {
       showToast('Watermark batch canceled. Completed files were kept.', 'success');
     } else {
       showToast(result.failed ? `${result.completed} watermark${result.completed === 1 ? '' : 's'} completed; ${result.failed} failed.` : `${result.completed} watermark${result.completed === 1 ? '' : 's'} completed.`, result.failed ? 'error' : 'success');
@@ -726,19 +768,28 @@ function VideoToGifTool() {
       shouldStop: batchControl.shouldStop,
       onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
       runItem: async (item, sequenceNumber) => {
-        const next = await submitUmbraUiVideoToGif({ source: item.file, sourcePath: item.path, outputFolder: outputFolder.trim(), pinnedOutputFolder, sequenceNumber, width, signal: batchControl.signal() });
-        setCompletedOutputs((current) => [...current, { id: item.id, result: next }]);
+        const cancelId = createUmbraUiMediaCancelId();
+        batchControl.startVideo(cancelId);
+        try {
+          const next = await submitUmbraUiVideoToGif({ source: item.file, sourcePath: item.path, outputFolder: outputFolder.trim(), pinnedOutputFolder, sequenceNumber, width, cancelId, signal: batchControl.signal() });
+          setCompletedOutputs((current) => [...current, { id: item.id, result: next }]);
+        } finally {
+          batchControl.finishVideo(cancelId);
+        }
       },
       onItemSettled: (item, error) => {
-        const canceled = !!error && batchControl.signal()?.aborted === true;
+        const canceled = !!error && batchControl.shouldStop();
         setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: canceled ? 'staged' : error ? 'failed' : 'completed', error: canceled ? undefined : error instanceof Error ? error.message : error ? String(error) : undefined } : entry));
         setSummary((current) => ({ ...current, completed: current.completed + (error ? 0 : 1), failed: current.failed + (error && !canceled ? 1 : 0) }));
       },
     });
+    await batchControl.waitForCancellation();
     setItems((current) => clearCompletedUmbraUiMediaBatch(current, runnableItems));
     setProcessing(false);
     window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
-    if (batchControl.shouldStop() && result.completed < runnableItems.length) {
+    if (batchControl.shouldStop() && batchControl.cancelUncertain()) {
+      showToast('Cancellation could not be confirmed. Check the output folder on the host.', 'error');
+    } else if (batchControl.shouldStop() && result.completed < runnableItems.length) {
       showToast('GIF batch canceled. Completed files were kept.', 'success');
     } else {
       showToast(result.failed ? `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed; ${result.failed} failed.` : `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed.`, result.failed ? 'error' : 'success');

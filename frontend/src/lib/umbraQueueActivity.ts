@@ -357,6 +357,7 @@ export function getUmbraQueueActivityControls(activity: UmbraQueueActivity) {
     remove: terminal || (!!activity.requestId && (controller || inpaint || upscale)) || localActivityActions.has(activity.id),
     removeTitle: terminal ? 'Remove from queue view (keep output files)'
       : inpaint ? 'Cancel this job and its remaining samples'
+        : activity.owner.startsWith('umbra-ui-extras-') ? 'Cancel the current item and stop remaining work'
         : 'Remove job; finish in-flight items and stop remaining work',
   };
 }

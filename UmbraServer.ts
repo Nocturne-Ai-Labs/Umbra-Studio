@@ -123,6 +123,7 @@ import {
   isUmbraUiWatermarkVideo,
   type UmbraUiCensorRegion,
 } from './backend/UmbraUiMediaToolsService';
+import { UmbraUiMediaToolCancellation } from './backend/UmbraUiMediaToolCancellation';
 import {
   detectUmbraUiCensorRegions,
   type UmbraUiCensorTarget,
@@ -2902,7 +2903,7 @@ function createCorsHeadersForOrigin(origin: string): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': origin || DEFAULT_CORS_ORIGIN,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Umbra-Extras-Cancel-Id',
     'Access-Control-Allow-Credentials': 'true',
     'Vary': 'Origin',
   };
@@ -23201,6 +23202,23 @@ const UMBRA_UI_MEDIA_TOOL_TEMP_ROOT = join(USER_DIR, 'Temp', 'UmbraUiMediaTools'
 const UMBRA_UI_WATERMARK_ASSET_ROOT = join(USER_DIR, 'UmbraUI', 'Watermarks');
 const UMBRA_UI_MEDIA_TOOL_MAX_SOURCE_BYTES = 4 * 1024 * 1024 * 1024;
 const UMBRA_UI_MEDIA_TOOL_MAX_WATERMARK_BYTES = 64 * 1024 * 1024;
+const umbraUiMediaToolCancellation = new UmbraUiMediaToolCancellation();
+
+function umbraUiMediaToolCancelOwner(req: Request, hostRequest: boolean): string {
+  if (hostRequest) return 'host';
+  const session = getRemoteSessionToken(req);
+  return session ? `remote:${hashRemoteSessionToken(session)}` : 'remote:anonymous';
+}
+
+async function handleUmbraUiMediaToolCancel(req: Request, owner: string): Promise<Response> {
+  const body = await readJsonObject(req, false, 1024);
+  const id = typeof body?.id === 'string' ? body.id : '';
+  if (!UmbraUiMediaToolCancellation.validId(id)) {
+    return json({ success: false, error: 'Invalid media cancel ID.' }, 400);
+  }
+  umbraUiMediaToolCancellation.cancel(id, owner);
+  return json({ success: true });
+}
 
 async function grantUmbraUiMediaToolFile(path: string): Promise<string> {
   const physicalPath = await fs.realpath(path);
@@ -23437,13 +23455,28 @@ function resolveUmbraUiMediaToolSourcePath(value: unknown, supportedExtensions: 
   return physicalPath;
 }
 
-async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean): Promise<Response> {
+async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean, cancelOwner: string): Promise<Response> {
   const jobId = `${Date.now()}-${randomBytes(5).toString('hex')}`;
   const workDirectory = join(UMBRA_UI_MEDIA_TOOL_TEMP_ROOT, jobId);
   let reservedOutput: { outputPath: string; stat: BigIntStats } | null = null;
+  let releaseCancellation: (() => void) | null = null;
   try {
+    const cancelId = req.headers.get('x-umbra-extras-cancel-id');
+    let lease = cancelId === null ? null : umbraUiMediaToolCancellation.register(cancelId, cancelOwner, req.signal);
+    releaseCancellation = lease?.release || null;
+    let signal = lease?.signal || req.signal;
+    signal.throwIfAborted();
     const form = await req.formData();
-    req.signal.throwIfAborted();
+    const bodyCancelId = form.get('cancelId');
+    if (bodyCancelId !== null && (typeof bodyCancelId !== 'string' || (cancelId !== null && bodyCancelId !== cancelId))) {
+      return json({ success: false, error: 'Invalid media cancel ID.' }, 400);
+    }
+    if (!lease && typeof bodyCancelId === 'string') {
+      lease = umbraUiMediaToolCancellation.register(bodyCancelId, cancelOwner, req.signal);
+      releaseCancellation = lease.release;
+      signal = lease.signal;
+    }
+    signal.throwIfAborted();
     const source = form.get('source') as any;
     const watermark = form.get('watermark') as any;
     const hasSourceUpload = source && typeof source.name === 'string' && typeof source.arrayBuffer === 'function' && Number(source.size) > 0;
@@ -23479,7 +23512,7 @@ async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean
       ...(hasSourceUpload ? [fs.writeFile(sourcePath, Buffer.from(await source.arrayBuffer()))] : []),
       ...(hasWatermarkUpload ? [fs.writeFile(watermarkPath, Buffer.from(await watermark.arrayBuffer()))] : []),
     ]);
-    req.signal.throwIfAborted();
+    signal.throwIfAborted();
     const outputFolder = resolveUmbraUiMediaToolOutputFolder(
       form.get('outputFolder'),
       allowExternalOutput,
@@ -23514,19 +23547,19 @@ async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean
         quality: Number(form.get('quality')),
       },
       outputWidth: Number(form.get('outputWidth')),
-      signal: req.signal,
+      signal,
     });
-    req.signal.throwIfAborted();
+    signal.throwIfAborted();
     const published = await publishUmbraUiMediaToolSequencePath(
       outputFolder,
       outputExtension === '.mp4' ? 'video-sequence' : 'image-sequence',
       outputExtension,
       Number(form.get('sequenceNumber')),
       renderedPath,
-      req.signal,
+      signal,
     );
     reservedOutput = published;
-    req.signal.throwIfAborted();
+    signal.throwIfAborted();
     const { outputPath, filename } = published;
     recordGeneratedMediaOutputs([{ path: outputPath }]);
     reservedOutput = null;
@@ -23538,6 +23571,7 @@ async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean
   } finally {
     if (reservedOutput) await removeUmbraUiMediaToolOutputIfUnchanged(reservedOutput);
     await fs.rm(workDirectory, { recursive: true, force: true }).catch(() => undefined);
+    releaseCancellation?.();
   }
 }
 
@@ -23702,13 +23736,28 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
   }
 }
 
-async function handleUmbraUiVideoToGif(req: Request, allowExternalOutput: boolean): Promise<Response> {
+async function handleUmbraUiVideoToGif(req: Request, allowExternalOutput: boolean, cancelOwner: string): Promise<Response> {
   const jobId = `${Date.now()}-${randomBytes(5).toString('hex')}`;
   const workDirectory = join(UMBRA_UI_MEDIA_TOOL_TEMP_ROOT, jobId);
   let reservedOutput: { outputPath: string; stat: BigIntStats } | null = null;
+  let releaseCancellation: (() => void) | null = null;
   try {
+    const cancelId = req.headers.get('x-umbra-extras-cancel-id');
+    let lease = cancelId === null ? null : umbraUiMediaToolCancellation.register(cancelId, cancelOwner, req.signal);
+    releaseCancellation = lease?.release || null;
+    let signal = lease?.signal || req.signal;
+    signal.throwIfAborted();
     const form = await req.formData();
-    req.signal.throwIfAborted();
+    const bodyCancelId = form.get('cancelId');
+    if (bodyCancelId !== null && (typeof bodyCancelId !== 'string' || (cancelId !== null && bodyCancelId !== cancelId))) {
+      return json({ success: false, error: 'Invalid media cancel ID.' }, 400);
+    }
+    if (!lease && typeof bodyCancelId === 'string') {
+      lease = umbraUiMediaToolCancellation.register(bodyCancelId, cancelOwner, req.signal);
+      releaseCancellation = lease.release;
+      signal = lease.signal;
+    }
+    signal.throwIfAborted();
     const source = form.get('source') as any;
     const hasSourceUpload = source && typeof source.name === 'string' && typeof source.arrayBuffer === 'function' && Number(source.size) > 0;
     const gallerySourcePath = resolveUmbraUiMediaToolSourcePath(form.get('sourcePath'), UMBRA_UI_MEDIA_TOOL_VIDEO_EXTENSIONS, allowExternalOutput);
@@ -23727,7 +23776,7 @@ async function handleUmbraUiVideoToGif(req: Request, allowExternalOutput: boolea
     await fs.mkdir(workDirectory, { recursive: true });
     const sourcePath = hasSourceUpload ? join(workDirectory, `source${sourceExtension}`) : gallerySourcePath;
     if (hasSourceUpload) await fs.writeFile(sourcePath, Buffer.from(await source.arrayBuffer()));
-    req.signal.throwIfAborted();
+    signal.throwIfAborted();
     const outputFolder = resolveUmbraUiMediaToolOutputFolder(
       form.get('outputFolder'),
       allowExternalOutput,
@@ -23742,14 +23791,14 @@ async function handleUmbraUiVideoToGif(req: Request, allowExternalOutput: boolea
       outputPath: renderedPath,
       workDirectory,
       width: Number(form.get('width')),
-      signal: req.signal,
+      signal,
     });
-    req.signal.throwIfAborted();
+    signal.throwIfAborted();
     const published = await publishUmbraUiMediaToolSequencePath(
-      outputFolder, 'gif-sequence', '.gif', Number(form.get('sequenceNumber')), renderedPath, req.signal,
+      outputFolder, 'gif-sequence', '.gif', Number(form.get('sequenceNumber')), renderedPath, signal,
     );
     reservedOutput = published;
-    req.signal.throwIfAborted();
+    signal.throwIfAborted();
     const { outputPath, filename } = published;
     recordGeneratedMediaOutputs([{ path: outputPath }]);
     reservedOutput = null;
@@ -23761,6 +23810,7 @@ async function handleUmbraUiVideoToGif(req: Request, allowExternalOutput: boolea
   } finally {
     if (reservedOutput) await removeUmbraUiMediaToolOutputIfUnchanged(reservedOutput);
     await fs.rm(workDirectory, { recursive: true, force: true }).catch(() => undefined);
+    releaseCancellation?.();
   }
 }
 
@@ -38882,7 +38932,12 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/umbra-ui/media-tools/watermark' && method === 'POST') {
         server.timeout(req, 0);
-        return handleUmbraUiWatermark(req, isHostRequest(req, url, server));
+        const hostRequest = isHostRequest(req, url, server);
+        return handleUmbraUiWatermark(req, hostRequest, umbraUiMediaToolCancelOwner(req, hostRequest));
+      }
+
+      if (path === '/api/umbra-ui/media-tools/cancel' && method === 'POST') {
+        return handleUmbraUiMediaToolCancel(req, umbraUiMediaToolCancelOwner(req, isHostRequest(req, url, server)));
       }
 
       if (path === '/api/umbra-ui/media-tools/censor' && method === 'POST') {
@@ -38918,7 +38973,8 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/umbra-ui/media-tools/video-to-gif' && method === 'POST') {
         server.timeout(req, 0);
-        return handleUmbraUiVideoToGif(req, isHostRequest(req, url, server));
+        const hostRequest = isHostRequest(req, url, server);
+        return handleUmbraUiVideoToGif(req, hostRequest, umbraUiMediaToolCancelOwner(req, hostRequest));
       }
 
       if (path.startsWith('/api/umbra-ui/media-tools/file/') && method === 'GET') {
