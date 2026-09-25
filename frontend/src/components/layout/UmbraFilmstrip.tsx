@@ -2243,6 +2243,9 @@ export function UmbraFilmstrip({
         onOpen={onOpen}
         onContextMenuRequest={({ x, y, targetId, ids, images: contextImages }) => {
           const resolvedImages = resolveSelectedImages(ids);
+          const mediaItems = (resolvedImages.length > 0 ? resolvedImages : contextImages)
+            .map((image) => ({ path: normalizePath(image.path), type: image.type }))
+            .filter((image) => image.path && (image.type === 'image' || image.type === 'gif' || image.type === 'video'));
           const resolvedPaths = resolvedImages.map((image) => normalizePath(image.path)).filter(Boolean);
           const fallbackPaths = contextImages.map((image) => normalizePath(image.path)).filter(Boolean);
           const paths = resolvedPaths.length > 0 ? resolvedPaths : fallbackPaths;
@@ -2259,6 +2262,7 @@ export function UmbraFilmstrip({
               y,
               targetPath,
               paths: paths.length > 0 ? paths : [targetPath],
+              mediaItems,
               reorderPaths: paths.length > 0 ? paths : [targetPath],
               source: recentGenerationPathSet.has(pathKey(targetPath))
                 ? 'powerprompter-recent-output'

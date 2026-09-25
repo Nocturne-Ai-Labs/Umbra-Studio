@@ -560,6 +560,7 @@ type GalleryContextMenuState = {
   targetPath: string;
   paths?: string[];
   reorderPaths?: string[];
+  mediaItems?: Array<{ path: string; type: 'image' | 'gif' | 'video' }>;
 };
 
 type GalleryDatasetPickerState = {
@@ -963,6 +964,10 @@ function galleryFileTypeFromPath(pathValue: unknown, explicitType?: unknown): Ga
   const normalizedType = String(explicitType || '').trim().toLowerCase();
   if (normalizedType === 'folder') return 'folder';
   return galleryMediaTypeFromPath(pathValue, explicitType);
+}
+
+function supportsGalleryJpegExport(pathValue: unknown): boolean {
+  return /\.(?:png|jpe?g|webp|bmp|gif|avif|tiff?)$/i.test(normalizePath(pathValue));
 }
 
 function parseIsoMs(value: unknown): number {
@@ -5734,6 +5739,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
 
   const refreshCurrentFolderFromDisk = useCallback(() => {
     window.dispatchEvent(new Event('umbra:gallery-archives-refresh'));
+    setGalleryPathRevision((revision) => revision + 1);
     const folderPath = normalizePath(currentFolder || rootPath);
     if (!folderPath) return;
     if (isTrashPath(folderPath)) clearTrashCache();
@@ -6428,13 +6434,19 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   }, [selectedOrViewerPaths, sendSelectionToWorkspace]);
 
   const sendViewerToWaifu = useCallback(() => {
-    const selected = new Set(selectedOrViewerPaths().map((path) => normalizePath(path).toLowerCase()));
-    const imagePaths = knownFilesRef.current
-      .filter((file) => selected.has(normalizePath(file.path).toLowerCase()))
-      .filter((file) => file.type === 'image' || file.type === 'gif')
-      .map((file) => normalizePath(file.path));
+    const filesByPath = new Map<string, GalleryFile>();
+    for (const file of [...knownFilesRef.current, ...viewerSessionFilesRef.current]) {
+      filesByPath.set(normalizePath(file.path).toLowerCase(), file);
+    }
+    if (viewerFileFallback) {
+      filesByPath.set(normalizePath(viewerFileFallback.path).toLowerCase(), viewerFileFallback);
+    }
+    const imagePaths = selectedOrViewerPaths().map(normalizePath).filter((path) => {
+      const file = filesByPath.get(path.toLowerCase());
+      return file?.type === 'image' || file?.type === 'gif';
+    });
     sendSelectionToWorkspace(imagePaths, 'waifudiffusion');
-  }, [selectedOrViewerPaths, sendSelectionToWorkspace]);
+  }, [selectedOrViewerPaths, sendSelectionToWorkspace, viewerFileFallback]);
 
   const sendPathToUmbraUi = useCallback(async (
     pathValue: string,
@@ -8672,9 +8684,10 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
 
     const controller = new AbortController();
     metadataSearchAbortRef.current = controller;
+    setMetadataMatches([]);
+    setMetadataSearchLoading(true);
+    setMetadataSearchError('');
     const timer = window.setTimeout(() => {
-      setMetadataSearchLoading(true);
-      setMetadataSearchError('');
       const params = new URLSearchParams({
         path: folderPath,
         q: metadataSearchNeedle,
@@ -9013,6 +9026,23 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
 
   const searchFiles = globalSearchActive && Array.isArray(searchResults?.files) ? searchResults.files : [];
   const searchFolders = globalSearchActive && Array.isArray(searchResults?.folders) ? searchResults.folders : [];
+  const searchSelectablePaths = globalSearchActive
+    ? uniqueNormalizedPaths(searchFiles
+      .filter((file) => file.type !== 'folder' && !isLiveGenerationPreviewPath(file.path))
+      .map((file) => file.path))
+    : [];
+  const selectAllForCurrentView = () => {
+    if (!globalSearchActive) {
+      void selectAllInFolder();
+      return;
+    }
+    if (searchSelectablePaths.length === 0) return;
+    applyGallerySelection(new Set(searchSelectablePaths), searchSelectablePaths.at(-1) || '');
+    addToast({
+      type: 'success',
+      message: `Selected ${searchSelectablePaths.length} search result${searchSelectablePaths.length === 1 ? '' : 's'}`,
+    });
+  };
   const liveDisplayFiles = useMemo(() => (
     liveGenerationPreviewFile && !trashMode ? [liveGenerationPreviewFile] : []
   ), [liveGenerationPreviewFile, trashMode]);
@@ -9776,6 +9806,16 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       const targetPath = normalizePath(detail.targetPath || paths.at(-1) || '');
       if (!targetPath) return;
       const selected = paths.length > 0 ? paths : [targetPath];
+      const mediaItems: NonNullable<GalleryContextMenuState['mediaItems']> = [];
+      if ((detail.source === 'filmstrip' || detail.source === 'powerprompter-recent-output') && Array.isArray(detail.mediaItems)) {
+        const selectedKeys = new Set(selected.map((path) => path.toLowerCase()));
+        for (const item of detail.mediaItems) {
+          const path = normalizePath(item?.path);
+          const type = String(item?.type || '').toLowerCase();
+          if (!path || !selectedKeys.has(path.toLowerCase())) continue;
+          if (type === 'image' || type === 'gif' || type === 'video') mediaItems.push({ path, type });
+        }
+      }
       const nextSelection = new Set(selected);
       setSelectedPaths(nextSelection);
       selectedPathsRef.current = nextSelection;
@@ -9788,6 +9828,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         targetPath,
         paths: selected,
         reorderPaths: reorderPaths.length > 0 ? reorderPaths : selected,
+        mediaItems,
       });
       setDatasetPicker(null);
     };
@@ -9934,7 +9975,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       });
       const downloadableImagePaths = paths.filter((path) => {
         const file = knownFiles.find((entry) => pathsEqual(entry.path, path));
-        return !file || file.type === 'image' || file.type === 'gif';
+        return supportsGalleryJpegExport(path) && (!file || file.type === 'image' || file.type === 'gif');
       });
       const trashExportItems: ContextMenuItem[] = [
         ...(isRemoteClient ? [
@@ -9964,33 +10005,36 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     }
 
     const targetFile = knownFiles.find((file) => pathsEqual(file.path, targetPath));
+    const filmstripMediaTypes = new Map((contextMenu.mediaItems || []).map((item) => [item.path.toLowerCase(), item.type]));
+    const mediaTypeForPath = (path: string) => knownFiles.find((file) => pathsEqual(file.path, path))?.type
+      || filmstripMediaTypes.get(path.toLowerCase());
     const downloadablePaths = paths.filter((path) => {
       const file = knownFiles.find((entry) => pathsEqual(entry.path, path));
       return !file || file.type !== 'folder';
     });
     const selectedImagePaths = paths.filter((path) => {
-      const file = knownFiles.find((entry) => pathsEqual(entry.path, path));
-      return !file || file.type === 'image' || file.type === 'gif';
+      const type = mediaTypeForPath(path);
+      return !type || type === 'image' || type === 'gif';
     });
+    const jpegExportPaths = selectedImagePaths.filter(supportsGalleryJpegExport);
     const selectedWatermarkImagePaths = paths.filter((path) => {
-      const file = knownFiles.find((entry) => pathsEqual(entry.path, path));
-      return !!file && file.type === 'image';
+      return mediaTypeForPath(path) === 'image';
     });
     const selectedVideoPaths = paths.filter((path) => {
-      const file = knownFiles.find((entry) => pathsEqual(entry.path, path));
-      return !!file && file.type === 'video';
+      return mediaTypeForPath(path) === 'video';
     });
     const manuallyMarkedPaths = paths.filter((path) => {
       const file = knownFiles.find((entry) => pathsEqual(entry.path, path));
       return normalizeTags(file?.tags).some((tag) => tag.toLowerCase() === UMBRA_MANUAL_NSFW_TAG);
     });
     const hasUnmarkedPaths = manuallyMarkedPaths.length < paths.length;
-    const targetImagePath = targetFile && (targetFile.type === 'image' || targetFile.type === 'gif')
-      ? normalizePath(targetFile.path)
+    const targetType = mediaTypeForPath(targetPath);
+    const targetImagePath = targetType === 'image' || targetType === 'gif'
+      ? targetPath
       : '';
     const targetPowerPrompterPngPath = /\.png$/i.test(targetPath) ? targetPath : '';
-    const targetVideoPath = targetFile?.type === 'video'
-      ? normalizePath(targetFile.path)
+    const targetVideoPath = targetType === 'video'
+      ? targetPath
       : '';
     const datasetImportItems: ContextMenuItem[] = selectedImagePaths.length === 0
       ? []
@@ -10071,8 +10115,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       ...(isRemoteClient ? [
         { label: downloadablePaths.length > 1 ? `Download ${downloadablePaths.length} Originals` : 'Download Original', icon: <Download size={14} />, disabled: downloadablePaths.length === 0, action: () => downloadOriginalPaths(downloadablePaths) },
       ] satisfies ContextMenuItem[] : []),
-      { label: selectedImagePaths.length > 1 ? `Download ${selectedImagePaths.length} JPEGs + Metadata` : 'Download JPEG + Metadata', icon: <Download size={14} />, disabled: selectedImagePaths.length === 0, action: () => downloadJpegZip(selectedImagePaths, 'keep') },
-      { label: selectedImagePaths.length > 1 ? `Download ${selectedImagePaths.length} Clean JPEGs` : 'Download Clean JPEG', icon: <Download size={14} />, disabled: selectedImagePaths.length === 0, action: () => downloadJpegZip(selectedImagePaths, 'strip') },
+      { label: jpegExportPaths.length > 1 ? `Download ${jpegExportPaths.length} JPEGs + Metadata` : 'Download JPEG + Metadata', icon: <Download size={14} />, disabled: jpegExportPaths.length === 0, action: () => downloadJpegZip(jpegExportPaths, 'keep') },
+      { label: jpegExportPaths.length > 1 ? `Download ${jpegExportPaths.length} Clean JPEGs` : 'Download Clean JPEG', icon: <Download size={14} />, disabled: jpegExportPaths.length === 0, action: () => downloadJpegZip(jpegExportPaths, 'strip') },
       ...(!isRemoteClient ? [
         { label: 'Show in File Explorer', icon: <FolderOpen size={14} />, action: () => void revealPaths(paths) },
       ] satisfies ContextMenuItem[] : []),
@@ -10540,8 +10584,10 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                     </button>
                     <button
                       type="button"
-                      disabled={selectAllLoading || (activeViewerFiles.length === 0 && files.length === 0 && total === 0)}
-                      onClick={() => void selectAllInFolder()}
+                      disabled={selectAllLoading || (globalSearchActive
+                        ? searchSelectablePaths.length === 0
+                        : activeViewerFiles.length === 0 && files.length === 0 && total === 0)}
+                      onClick={selectAllForCurrentView}
                       className="inline-flex h-7 items-center gap-1.5 rounded border border-zinc-800 px-2 text-xs text-zinc-400 hover:bg-white/5 hover:text-white disabled:opacity-40"
                     >
                       {selectAllLoading ? <Loader2 size={13} className="animate-spin" /> : <CheckSquare size={13} />}
@@ -10561,7 +10607,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                   <button
                     type="button"
                     data-umbra-gallery-mobile-select=""
-                    disabled={activeViewerFiles.length === 0 && files.length === 0 && total === 0}
+                    disabled={globalSearchActive
+                      ? searchSelectablePaths.length === 0
+                      : activeViewerFiles.length === 0 && files.length === 0 && total === 0}
                     onClick={() => setTouchSelectionMode(true)}
                     className="inline-flex h-7 items-center gap-1.5 rounded border border-zinc-800 px-2 text-xs text-zinc-400 hover:bg-white/5 hover:text-white disabled:opacity-40"
                   >
@@ -10572,8 +10620,10 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
               ) : (
                 <button
                   type="button"
-                  disabled={selectAllLoading || (files.length === 0 && total === 0)}
-                  onClick={() => void selectAllInFolder()}
+                  disabled={selectAllLoading || (globalSearchActive
+                    ? searchSelectablePaths.length === 0
+                    : files.length === 0 && total === 0)}
+                  onClick={selectAllForCurrentView}
                   className="inline-flex h-7 items-center gap-1.5 rounded border border-zinc-800 px-2 text-xs text-zinc-400 hover:bg-white/5 hover:text-white disabled:opacity-40"
                 >
                   {selectAllLoading ? <Loader2 size={13} className="animate-spin" /> : <CheckSquare size={13} />}
