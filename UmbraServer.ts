@@ -2901,6 +2901,7 @@ const REMOTE_LOGIN_RATE_WINDOW_MS = 5 * 60 * 1000;
 const REMOTE_LOGIN_RATE_MAX_FAILURES = 6;
 const REMOTE_LOGIN_RATE_MAX_SOCKET_FAILURES = 60;
 const REMOTE_PAIR_TOKEN_TTL_MS = 10 * 60 * 1000;
+const REMOTE_AUTH_REQUEST_MAX_BYTES = 16 * 1024;
 const remoteLoginFailures = new Map<string, { count: number; resetAt: number }>();
 const remoteLoginSocketFailures = new Map<string, { count: number; resetAt: number }>();
 const remoteWebSockets = new Set<ServerWebSocket<UmbraSocketData>>();
@@ -3462,6 +3463,29 @@ function pruneRemoteSessions(config: RemoteAuthConfig, now = Date.now()): Remote
   return changed ? { ...config, sessions, pairTokens, updatedAt: now } : config;
 }
 
+function getRemoteLogoutRevocations(
+  config: RemoteAuthConfig,
+  sessionHash: string,
+  deviceId: string,
+  forgetDevice: boolean,
+): { sessions: RemoteAuthSessionRecord[]; devices: RemoteAuthDeviceRecord[]; changed: boolean } {
+  const previousSessions = config.sessions || [];
+  const previousDevices = config.devices || [];
+  const sessions = previousSessions.filter((session) => {
+    if (sessionHash && safeEqualHex(session.hash, sessionHash)) return false;
+    if (forgetDevice && deviceId && session.deviceId && safeEqualHex(session.deviceId, deviceId)) return false;
+    return true;
+  });
+  const devices = forgetDevice && deviceId
+    ? previousDevices.filter((device) => !safeEqualHex(device.id, deviceId))
+    : previousDevices;
+  return {
+    sessions,
+    devices,
+    changed: sessions.length !== previousSessions.length || devices.length !== previousDevices.length,
+  };
+}
+
 function getRemoteSessionTtlMs(): number {
   return normalizeSessionTtlDays(loadRemoteConnectionSettings().sessionTtlDays) * 24 * 60 * 60 * 1000;
 }
@@ -3728,7 +3752,7 @@ function createRemotePairToken(config: RemoteAuthConfig, label: unknown): { toke
   };
 }
 
-function consumeRemotePairToken(config: RemoteAuthConfig, token: string): { ok: boolean; label?: string; config: RemoteAuthConfig } {
+function consumeRemotePairToken(config: RemoteAuthConfig, token: string): { ok: boolean; changed: boolean; label?: string; config: RemoteAuthConfig } {
   const tokenHash = hashRemotePairToken(token);
   const now = Date.now();
   let matched: RemoteAuthPairTokenRecord | null = null;
@@ -3740,13 +3764,15 @@ function consumeRemotePairToken(config: RemoteAuthConfig, token: string): { ok: 
     }
     return true;
   });
+  const changed = Boolean(matched) || pairTokens.length !== (config.pairTokens || []).length;
   return {
     ok: Boolean(matched),
+    changed,
     label: matched?.label,
     config: {
       ...config,
       pairTokens,
-      updatedAt: matched || pairTokens.length !== (config.pairTokens || []).length ? now : config.updatedAt,
+      updatedAt: changed ? now : config.updatedAt,
     },
   };
 }
@@ -30527,14 +30553,18 @@ async function handleModelManagerCivitaiVersion(url: URL): Promise<Response> {
 
 async function handleModelManagerCivitaiDownload(req: Request): Promise<Response> {
   try {
-    const body = await req.json() as {
+    // Snapshots are forwarded to the download worker and retained for queued jobs.
+    // Bound the request before parsing so one remote request cannot pin a large
+    // copy in both server and worker memory.
+    const body = await readJsonObject(req, false, 1024 * 1024) as {
       downloadUrl?: string;
       fileName?: string;
       modelType?: string;
       destinationFolder?: string;
       jobId?: string;
       snapshot?: unknown;
-    };
+    } | null;
+    if (!body) return json({ error: 'Invalid download request' }, 400);
     const downloadUrl = String(body.downloadUrl || '').trim();
     const fileName = String(body.fileName || '').trim();
     const modelType = String(body.modelType || '').trim();
@@ -30587,7 +30617,7 @@ async function handleModelManagerCivitaiDownload(req: Request): Promise<Response
     });
   } catch (error: any) {
     console.error('[ModelManager] CivitAI download error:', error);
-    return json({ error: error?.message || 'Failed to start download' }, 500);
+    return json({ error: error?.message || 'Failed to start download' }, error instanceof RequestBodyTooLargeError ? 413 : 500);
   }
 }
 
@@ -32994,7 +33024,7 @@ const server = Bun.serve<UmbraSocketData>({
           if (isRemoteRequest(req, url, server)) {
             return json({ error: 'Remote auth setup is only available from the host browser.' }, 403);
           }
-          const body = await readJsonObject(req);
+          const body = await readJsonObject(req, false, REMOTE_AUTH_REQUEST_MAX_BYTES);
           if (!body) return json({ error: 'Expected a JSON object.' }, 400);
           const username = String(body?.username || '').trim();
           const password = String(body?.password || '');
@@ -33037,7 +33067,7 @@ const server = Bun.serve<UmbraSocketData>({
         if (method === 'POST' && path === '/api/remote/auth/pair-token') {
           const guard = withRemoteAdminGuard(req, url, server);
           if (guard) return guard;
-          const body = await readJsonObject(req, true);
+          const body = await readJsonObject(req, true, REMOTE_AUTH_REQUEST_MAX_BYTES);
           if (!body) return json({ error: 'Expected a JSON object.' }, 400);
           const config = loadRemoteAuthConfig();
           if (!config) return json({ error: 'Remote auth is not configured on the host yet.' }, 409);
@@ -33059,7 +33089,7 @@ const server = Bun.serve<UmbraSocketData>({
           if (!token) return json({ error: 'Pair token is missing.' }, 400);
           const consumed = consumeRemotePairToken(config, token);
           if (!consumed.ok) {
-            saveRemoteAuthConfig(consumed.config);
+            if (consumed.changed) saveRemoteAuthConfig(consumed.config);
             console.warn(`[UmbraRemote] Pair link rejected secure=${isSecureRemoteRequest(req)} host="${req.headers.get('host') || ''}" from=${getRemoteRequestAddress(req, server)}`);
             return json({ error: 'Pair link expired or already used.' }, 401);
           }
@@ -33074,13 +33104,6 @@ const server = Bun.serve<UmbraSocketData>({
         }
 
         if (method === 'POST' && path === '/api/remote/auth/login') {
-          const body = await readJsonObject(req);
-          if (!body) return json({ error: 'Expected a JSON object.' }, 400);
-          // No async work may separate this fresh auth snapshot from its save.
-          const config = loadRemoteAuthConfig();
-          if (!config) return json({ error: 'Remote auth is not configured on the host yet.' }, 409);
-          const username = String(body?.username || '').trim();
-          const password = String(body?.password || '');
           const rateLimit = getRemoteLoginRateLimit(req, server);
           if (rateLimit.limited) {
             console.warn(`[UmbraRemote] Login rate limited for ${getRemoteRequestAddress(req, server)}`);
@@ -33089,6 +33112,13 @@ const server = Bun.serve<UmbraSocketData>({
               headers: { 'Retry-After': String(rateLimit.retryAfterSeconds) },
             });
           }
+          const body = await readJsonObject(req, false, REMOTE_AUTH_REQUEST_MAX_BYTES);
+          if (!body) return json({ error: 'Expected a JSON object.' }, 400);
+          // No async work may separate this fresh auth snapshot from its save.
+          const config = loadRemoteAuthConfig();
+          if (!config) return json({ error: 'Remote auth is not configured on the host yet.' }, 409);
+          const username = String(body?.username || '').trim();
+          const password = String(body?.password || '');
           const candidateHash = hashRemotePassword(password, config.salt, config.iterations || REMOTE_AUTH_PBKDF2_ITERATIONS);
           const usernameMatches = username === config.username;
           const passwordMatches = safeEqualHex(candidateHash, config.passwordHash);
@@ -33129,7 +33159,7 @@ const server = Bun.serve<UmbraSocketData>({
         }
 
         if (method === 'POST' && path === '/api/remote/auth/logout') {
-          const body = await readJsonObject(req, true);
+          const body = await readJsonObject(req, true, REMOTE_AUTH_REQUEST_MAX_BYTES);
           if (!body) return json({ error: 'Expected a JSON object.' }, 400);
           const config = loadRemoteAuthConfig();
           const forgetDevice = body?.forgetDevice !== false;
@@ -33138,18 +33168,10 @@ const server = Bun.serve<UmbraSocketData>({
           const deviceToken = getRemoteDeviceToken(req);
           const deviceId = deviceToken ? hashRemoteSessionToken(deviceToken) : '';
           if (config) {
-            saveRemoteAuthConfig({
-              ...config,
-              sessions: (config.sessions || []).filter((session) => {
-                if (sessionHash && safeEqualHex(session.hash, sessionHash)) return false;
-                if (forgetDevice && deviceId && session.deviceId && safeEqualHex(session.deviceId, deviceId)) return false;
-                return true;
-              }),
-              devices: forgetDevice && deviceId
-                ? (config.devices || []).filter((device) => !safeEqualHex(device.id, deviceId))
-                : (config.devices || []),
-              updatedAt: Date.now(),
-            });
+            const revoked = getRemoteLogoutRevocations(config, sessionHash, deviceId, forgetDevice);
+            if (revoked.changed) {
+              saveRemoteAuthConfig({ ...config, sessions: revoked.sessions, devices: revoked.devices, updatedAt: Date.now() });
+            }
           }
           console.log(`[UmbraRemote] Remote session logged out${forgetDevice ? ' and device forgotten' : ''}`);
           return json({
@@ -35171,9 +35193,8 @@ const server = Bun.serve<UmbraSocketData>({
 
       // Booru download to dataset
       if (path === '/api/booru/download' && method === 'POST') {
-        server.timeout(req, 0);
         try {
-          const body = await req.json() as {
+          const body = await readJsonObject(req, false, 128 * 1024) as {
             url: string;
             md5: string;
             ext: string;
@@ -35182,7 +35203,8 @@ const server = Bun.serve<UmbraSocketData>({
             concept: string;
             source?: string;
             postId?: string;
-          };
+          } | null;
+          if (!body) return json({ error: 'Invalid download request' }, 400);
 
           if (!body.url || !body.md5 || !body.dataset || !body.concept) {
             return json({ error: 'url, md5, dataset, and concept required' }, 400);
@@ -35209,6 +35231,7 @@ const server = Bun.serve<UmbraSocketData>({
           const filename = `${md5}.${extSafe}`;
           const imagePath = join(conceptPath, filename);
 
+          server.timeout(req, 0);
           return await withDatasetConceptLocks([conceptPath], async () => {
             if (!(await fs.lstat(conceptPath).catch(() => null))?.isDirectory()) {
               return json({ error: 'Concept not found' }, 404);
@@ -35222,7 +35245,7 @@ const server = Bun.serve<UmbraSocketData>({
           });
         } catch (error: any) {
           console.error('[Booru] Download error:', error.message);
-          return json({ error: error.message }, 500);
+          return json({ error: error.message }, error instanceof RequestBodyTooLargeError ? 413 : 500);
         }
       }
 
@@ -35231,15 +35254,16 @@ const server = Bun.serve<UmbraSocketData>({
       // ============================================
 
       if (path === '/api/datasets/redownload-image' && method === 'POST') {
-        server.timeout(req, 0);
         try {
-          const body = await req.json() as { dataset?: string; concept?: string; filename?: string };
+          const body = await readJsonObject(req, false, 4 * 1024) as { dataset?: string; concept?: string; filename?: string } | null;
+          if (!body) return json({ error: 'Invalid dataset image path' }, 400);
           const dataset = sanitizeDatasetSegment(body.dataset);
           const concept = sanitizeDatasetSegment(body.concept);
           const filename = sanitizeDatasetSegment(body.filename);
           if (!dataset || !concept || !filename || filename !== body.filename) return json({ error: 'Invalid dataset image path' }, 400);
           const conceptPath = resolveDatasetPathSafe(dataset, concept);
           if (!conceptPath) return json({ error: 'Concept not found' }, 404);
+          server.timeout(req, 0);
           return await withDatasetConceptLocks([conceptPath], async () => {
           if (!existsSync(conceptPath)) return json({ error: 'Concept not found' }, 404);
           const config = await readApiKeys(CONFIG_PATH) || await readApiKeys(LEGACY_CONFIG_PATH) || {};
@@ -35255,7 +35279,8 @@ const server = Bun.serve<UmbraSocketData>({
           return json({ success: true, ...result });
           });
         } catch (error: any) {
-          return json({ error: error?.message || 'Could not re-download the image. The existing file was kept.' }, 400);
+          return json({ error: error?.message || 'Could not re-download the image. The existing file was kept.' },
+            error instanceof RequestBodyTooLargeError ? 413 : 400);
         }
       }
 
@@ -35482,7 +35507,7 @@ const server = Bun.serve<UmbraSocketData>({
                   if (error.code === 'ENOENT') return null;
                   throw error;
                 });
-                if (captionStat?.isFile()) {
+                if (captionStat?.isFile() && captionStat.size <= 1024 * 1024) {
                   caption = await fs.readFile(captionPath, 'utf-8');
                   tags = caption.split(',').map(t => t.trim()).filter(Boolean);
                 }
@@ -35533,12 +35558,13 @@ const server = Bun.serve<UmbraSocketData>({
       // Move images between concepts
       if (path === '/api/datasets/move-images' && method === 'POST') {
         try {
-          const body = await req.json() as {
+          const body = await readJsonObject(req, false, 512 * 1024) as {
             dataset: string;
             images: string[];
             from: string;
             to: string;
-          };
+          } | null;
+          if (!body) return json({ error: 'Invalid move request' }, 400);
 
           if (!body.dataset || !Array.isArray(body.images) || !body.images.length || !body.from || !body.to) {
             return json({ error: 'dataset, images, from, and to required' }, 400);
@@ -35564,7 +35590,7 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ success: true, moved });
           });
         } catch (error: any) {
-          return json({ error: error.message }, 400);
+          return json({ error: error.message }, error instanceof RequestBodyTooLargeError ? 413 : 400);
         }
       }
 
@@ -35572,11 +35598,12 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/datasets/delete-images' && method === 'POST') {
         let deleted = 0;
         try {
-          const body = await req.json() as {
+          const body = await readJsonObject(req, false, 512 * 1024) as {
             dataset: string;
             concept: string;
             images: string[];
-          };
+          } | null;
+          if (!body) return json({ error: 'Invalid delete request' }, 400);
 
           if (!body.dataset || !body.concept || !Array.isArray(body.images) || !body.images.length) {
             return json({ error: 'dataset, concept, and images required' }, 400);
@@ -35596,40 +35623,58 @@ const server = Bun.serve<UmbraSocketData>({
           }
 
           const selected = new Set(body.images);
+          const selectedFolded = process.platform === 'win32'
+            ? new Set(body.images.map((image) => typeof image === 'string' ? image.toLowerCase() : image))
+            : selected;
           if (selected.size !== body.images.length || body.images.some(img => typeof img !== 'string'
-            || sanitizeDatasetSegment(img) !== img || !DATASET_IMPORT_IMAGE_EXTENSIONS.has(extname(img).toLowerCase()))) {
+            || sanitizeDatasetSegment(img) !== img || !DATASET_IMPORT_IMAGE_EXTENSIONS.has(extname(img).toLowerCase()))
+            || selectedFolded.size !== body.images.length) {
             return json({ error: 'Invalid or duplicate image name' }, 400);
           }
+          const allNames = await fs.readdir(conceptPath);
           for (const img of body.images) {
+            if (!allNames.includes(img)) return json({ error: `Image not found: ${img}` }, 404);
             const imageStat = await fs.lstat(join(conceptPath, img)).catch(() => null);
             if (!imageStat?.isFile()) return json({ error: `Image not found: ${img}` }, 404);
           }
+          const sidecars = new Set<string>();
           for (const img of body.images) {
-            await fs.unlink(join(conceptPath, img));
-            deleted += 1;
             const baseName = img.slice(0, -extname(img).length);
-            const remainingSibling = (await fs.readdir(conceptPath)).some(name =>
+            const remainingSibling = allNames.some(name => !selected.has(name) &&
               name.slice(0, -extname(name).length).toLowerCase() === baseName.toLowerCase()
                 && DATASET_IMPORT_IMAGE_EXTENSIONS.has(extname(name).toLowerCase())
             );
             if (!remainingSibling) {
-              for (const sidecar of [`${baseName}.txt`, `${baseName}.json`]) {
-                await fs.unlink(join(conceptPath, sidecar)).catch(error => {
-                  if (error.code !== 'ENOENT') throw error;
-                });
-              }
+              sidecars.add(`${baseName}.txt`);
+              sidecars.add(`${baseName}.json`);
             }
-            for (const sidecar of [`${img}.txt`, `${img}.json`, booruSourceSidecar(img)]) {
-              await fs.unlink(join(conceptPath, sidecar)).catch(error => {
-                if (error.code !== 'ENOENT') throw error;
-              });
+            sidecars.add(`${img}.txt`);
+            sidecars.add(`${img}.json`);
+            sidecars.add(booruSourceSidecar(img));
+          }
+          for (const sidecar of sidecars) {
+            const sidecarStat = await fs.lstat(join(conceptPath, sidecar)).catch((error: NodeJS.ErrnoException) => {
+              if (error.code === 'ENOENT') return null;
+              throw error;
+            });
+            if (sidecarStat && !sidecarStat.isFile()) {
+              return json({ error: `Dataset sidecar is not a file: ${sidecar}` }, 409);
             }
+          }
+          for (const img of body.images) {
+            await fs.unlink(join(conceptPath, img));
+            deleted += 1;
+          }
+          for (const sidecar of sidecars) {
+            await fs.unlink(join(conceptPath, sidecar)).catch((error: NodeJS.ErrnoException) => {
+              if (error.code !== 'ENOENT') throw error;
+            });
           }
 
           return json({ success: true, deleted });
           });
         } catch (error: any) {
-          return json({ error: error.message, deleted }, 500);
+          return json({ error: error.message, deleted }, error instanceof RequestBodyTooLargeError ? 413 : 500);
         }
       }
 
@@ -36052,6 +36097,7 @@ const server = Bun.serve<UmbraSocketData>({
               ({ bytes: buffer } = await fetchDatasetImportImage(body.url, {
                 // The host may intentionally import from a local image tool. Remote clients may not pivot through it.
                 allowPrivateNetwork: isHostRequest(req, url, server),
+                signal: req.signal,
               }));
             }
           } catch (error) {
@@ -36826,10 +36872,11 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/dataset/download-selected' && method === 'POST') {
         const startedAt = Date.now();
         try {
-          const body = await req.json() as {
+          const body = await readJsonObject(req, false, 1024 * 1024) as {
             dataset: string;
             images: Array<{ id: string; url: string; fullUrl?: string; tags?: string[] }>;
-          };
+          } | null;
+          if (!body) return json({ error: 'Invalid batch download request' }, 400);
 
           if (!body.dataset || !Array.isArray(body.images) || body.images.length === 0 || body.images.length > 100) {
             return json({ error: 'Dataset and images required' }, 400);
@@ -36850,6 +36897,7 @@ const server = Bun.serve<UmbraSocketData>({
           // Keep this legacy flat-dataset endpoint bounded and apply the same URL/image validation as drag imports.
           for (const img of body.images) {
             try {
+              req.signal.throwIfAborted();
               if (!img || typeof img.id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(img.id)
                 || (img.tags !== undefined && (!Array.isArray(img.tags) || img.tags.some(tag => typeof tag !== 'string')))) {
                 throw new Error('Invalid image ID or tags');
@@ -36857,6 +36905,7 @@ const server = Bun.serve<UmbraSocketData>({
               const downloadUrl = img.fullUrl || img.url;
               const { bytes } = await fetchDatasetImportImage(downloadUrl, {
                 allowPrivateNetwork: isHostRequest(req, url, server),
+                signal: req.signal,
               });
               const { extension } = await detectDatasetImportImage(bytes);
               const filename = await saveDatasetImportedImage(datasetPath, img.id, extension, bytes);
@@ -36869,6 +36918,7 @@ const server = Bun.serve<UmbraSocketData>({
               }
               downloaded++;
             } catch (err) {
+              if (req.signal.aborted) throw err;
               console.error(`[Download] Error downloading ${String(img?.id || '')}:`, err);
               errors++;
             }
@@ -36882,7 +36932,7 @@ const server = Bun.serve<UmbraSocketData>({
             message: `Downloaded ${downloaded} images with captions`
           });
         } catch (error: any) {
-          return json({ error: error.message }, 500);
+          return json({ error: error.message }, error instanceof RequestBodyTooLargeError ? 413 : 500);
         }
       }
 
@@ -39301,6 +39351,7 @@ const server = Bun.serve<UmbraSocketData>({
 
       return new Response('Not found', { status: 404 });
       } catch (error: any) {
+        if (error instanceof RequestBodyTooLargeError) return json({ error: error.message }, 413);
         console.error('[Server] Unhandled error in fetch handler:', error);
         return json({ error: 'Internal server error', message: error.message }, 500);
       }
