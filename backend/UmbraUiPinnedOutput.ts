@@ -2,6 +2,7 @@ import { resolve, join } from 'node:path';
 import { statSync, mkdirSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { resolveAllowedExistingGalleryPath } from './GalleryPathAccess';
+import { normalizeGalleryDirectoryPath } from './GalleryDirectoryPath';
 
 const PINNED_OUTPUT_RECOVERY = 'Select a different output folder or Default dated output, then generate again.';
 
@@ -44,8 +45,7 @@ function resolveAuthorizedPinnedOutputRoot(requested: unknown, pins: unknown, re
 }
 
 function normalizePinnedPathValue(value: unknown): string {
-  const normalized = String(value || '').trim().replace(/\\/g, '/');
-  return normalized && !normalized.includes('\0') ? normalized : '';
+  return normalizeGalleryDirectoryPath(value);
 }
 
 function comparablePath(value: string, caseInsensitive: boolean): string {

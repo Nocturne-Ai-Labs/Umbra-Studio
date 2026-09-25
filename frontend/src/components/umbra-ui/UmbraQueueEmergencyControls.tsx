@@ -22,7 +22,7 @@ export function UmbraQueueEmergencyControls({
   onStopAll,
   mobileOnly = false,
 }: UmbraQueueEmergencyControlsProps) {
-  const skipDisabled = busyAction !== '' || !queueSummary.umbraUiActive;
+  const skipDisabled = busyAction !== '' || !queueConnected || !queueSummary.umbraUiActive;
   // Other clients can own inpaint or upscale jobs absent from this queue snapshot.
   const stopDisabled = busyAction !== '' || !queueConnected;
 
@@ -41,9 +41,11 @@ export function UmbraQueueEmergencyControls({
         onClick={onSkip}
         disabled={skipDisabled}
         className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-amber-300/25 bg-amber-500/[0.07] px-2.5 text-[9px] font-black uppercase tracking-[0.1em] text-amber-100 transition-colors hover:bg-amber-500/[0.13] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.025] disabled:text-zinc-700"
-        title={queueSummary.umbraUiActive
-          ? 'Skip the currently generating Umbra UI item'
-          : 'No Umbra UI generation is currently running'}
+        title={!queueConnected
+          ? 'Connect to the shared queue to skip an Umbra UI generation'
+          : queueSummary.umbraUiActive
+            ? 'Skip the currently generating Umbra UI item'
+            : 'No Umbra UI generation is currently ready to skip'}
       >
         {busyAction === 'skip' ? <Loader2 size={12} className="animate-spin" /> : <SkipForward size={12} />}
         Skip

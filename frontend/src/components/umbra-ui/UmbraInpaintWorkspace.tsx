@@ -2762,6 +2762,8 @@ export function UmbraInpaintWorkspace({
   const [softInpaintTransitionContrast, setSoftInpaintTransitionContrast] = React.useState(SIMPLE_INPAINT_DEFAULT_TRANSITION_CONTRAST);
   const [softInpaintMaskInfluence, setSoftInpaintMaskInfluence] = React.useState(SIMPLE_INPAINT_DEFAULT_MASK_INFLUENCE);
   const [job, setJob] = React.useState<UmbraUiInpaintJob | null>(null);
+  const [cancelingJob, setCancelingJob] = React.useState(false);
+  const cancelJobInFlightRef = React.useRef(false);
   const queueActivity = React.useMemo<UmbraQueueActivity | null>(() => job ? ({
     id: `umbra-inpaint:${job.id}`,
     owner: 'umbra-ui-inpaint-workspace',
@@ -9705,7 +9707,9 @@ export function UmbraInpaintWorkspace({
   ]);
 
   const cancelActiveJob = React.useCallback(async () => {
-    if (!job || isUmbraUiInpaintJobTerminal(job)) return;
+    if (!job || isUmbraUiInpaintJobTerminal(job) || job.cancelRequested || cancelJobInFlightRef.current) return;
+    cancelJobInFlightRef.current = true;
+    setCancelingJob(true);
     try {
       const canceled = await cancelUmbraUiInpaintJob(job.id);
       if (latestDocumentRef.current?.pendingJobs.some((pending) => pending.id === job.id)) {
@@ -9713,6 +9717,9 @@ export function UmbraInpaintWorkspace({
       }
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to cancel the inpaint job.', 'error');
+    } finally {
+      cancelJobInFlightRef.current = false;
+      setCancelingJob(false);
     }
   }, [job, showToast]);
 
@@ -10101,8 +10108,8 @@ export function UmbraInpaintWorkspace({
             </label>
           </div>
           {running ? (
-            <button type="button" onClick={() => void cancelActiveJob()} className="inline-flex h-8 w-full items-center justify-center gap-2 border border-red-300/25 bg-red-500/[0.06] text-[8px] font-black uppercase tracking-[0.12em] text-red-200">
-              <X size={10} /> Cancel Current Job
+            <button type="button" onClick={() => void cancelActiveJob()} disabled={cancelingJob || job?.cancelRequested} className="inline-flex h-8 w-full items-center justify-center gap-2 border border-red-300/25 bg-red-500/[0.06] text-[8px] font-black uppercase tracking-[0.12em] text-red-200 disabled:opacity-50">
+              <X size={10} /> {cancelingJob || job?.cancelRequested ? 'Stopping Job' : 'Cancel Current Job'}
             </button>
           ) : job && isUmbraUiInpaintJobTerminal(job) ? (
             <div className="grid grid-cols-2 gap-1.5">
@@ -10480,7 +10487,7 @@ export function UmbraInpaintWorkspace({
           <button
             type="button"
             onClick={() => void cancelActiveJob()}
-            disabled={!running}
+            disabled={!running || cancelingJob || !!job?.cancelRequested}
             title={running ? 'Stop the active inpaint job and all remaining samples' : 'No inpaint job is running'}
           >
             <X size={12} /> Stop All Samples

@@ -1,6 +1,6 @@
 export function normalizeUmbraUiPinnedFolder(value: unknown): string {
   const path = String(value || '').trim().replace(/\\/g, '/');
-  if (/^[a-z]:\/+$/i.test(path)) return `${path.slice(0, 2)}/`;
+  if (/^[a-z]:\/*$/i.test(path)) return `${path.slice(0, 2)}/`;
   return path.replace(/\/+$/, '') || (path.startsWith('/') ? '/' : '');
 }
 
