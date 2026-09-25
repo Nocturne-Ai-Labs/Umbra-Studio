@@ -62,10 +62,11 @@ export async function fetchGalleryFs(pathname: string, params: URLSearchParams, 
     total = Math.max(total, Number(page.total) || 0);
     const done = page.done !== false && page.nextCursor == null;
     // Each callback copies the entire accumulated list and makes the Gallery
-    // render it. Publish the first and final pages, then grow intermediate
+    // render it. Publish the first partial page, then grow intermediate
     // updates geometrically while keeping a time limit for slow listings.
+    // Callers apply the final response themselves.
     const now = Date.now();
-    if (onPage && (!hasPublished || done
+    if (onPage && !done && (!hasPublished
       || files.size >= Math.max(512, publishedCount * 2)
       || now - lastPublishedAt >= 750)) {
       onPage({ ...firstPage, files: [...files.values()], folders: [...folders.values()], total,
