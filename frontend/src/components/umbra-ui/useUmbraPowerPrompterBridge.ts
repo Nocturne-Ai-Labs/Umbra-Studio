@@ -3,6 +3,7 @@
 import React from 'react';
 import { normalizeMiniMaxH3Guides } from '../../../../shared/umbra-ui/minimaxH3Guides';
 import { hasUmbraVideoSourceDimensions, normalizeUmbraVideoQueueSources } from '@/lib/umbraVideoQueueSource';
+import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
 import { formatMissingUmbraUiNodes } from '../../../../shared/umbra-ui/runtimeNodeMessages';
 import { useToastStore } from '@/store/useToastStore';
 import { classifyUmbraMediaMetadata, classifyUmbraPrompt, type UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
@@ -1801,20 +1802,9 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     let preparedOptions = options;
     if (options.outputMode === 'img2img') {
       const sourceImagePath = String(options.sourceImagePath || '').trim();
-      let sourceImageName = String(options.sourceImageName || '').trim();
-      if (!sourceImagePath && !sourceImageName) throw new Error('Choose a source image for IMG2IMG.');
-      if (!sourceImageName) {
-        const response = await fetch('/api/comfy/copy-media', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sourcePath: sourceImagePath, kind: 'image' }),
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || payload?.success === false || !payload?.filename) {
-          throw new Error(String(payload?.error || 'Failed to stage the IMG2IMG source in ComfyUI.'));
-        }
-        sourceImageName = String(payload.filename);
-      }
+      const currentSourceImageName = String(options.sourceImageName || '').trim();
+      if (!sourceImagePath && !currentSourceImageName) throw new Error('Choose a source image for IMG2IMG.');
+      const sourceImageName = await ensureUmbraUiQueuedMedia('image', sourceImagePath, currentSourceImageName, 'IMG2IMG source');
       preparedOptions = { ...options, sourceImagePath, sourceImageName };
     }
     const prepared = prepareImageQueueRequest(preparedOptions);
@@ -1923,20 +1913,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     if (!pipelineMatch.workflow) throw new Error(pipelineMatch.error || 'No compatible video pipeline is available.');
 
     if (video.mode === 'image_to_video' || video.mode === 'reference_to_video') {
-      if (!video.sourceImagePath) throw new Error('Choose a source image for image-to-video.');
+      if (!video.sourceImagePath && !video.sourceImageName) throw new Error('Choose a source image for image-to-video.');
       const stageFrame = async (label: string, path: string, name: string): Promise<string> => {
-        if (name) return name;
-        if (!path) throw new Error(`Choose a ${label.toLowerCase()} image.`);
-        const response = await fetch('/api/comfy/copy-media', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sourcePath: path, kind: 'image' }),
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || payload?.success === false) {
-          throw new Error(String(payload?.error || `Failed to stage the ${label.toLowerCase()} image in ComfyUI.`));
-        }
-        return String(payload?.filename || '').trim();
+        if (!path && !name) throw new Error(`Choose a ${label.toLowerCase()} image.`);
+        return ensureUmbraUiQueuedMedia('image', path, name, `${label.toLowerCase()} image`);
       };
       video.sourceImageName = await stageFrame(video.mode === 'reference_to_video' ? 'reference image 1' : 'first frame', video.sourceImagePath, video.sourceImageName);
       if (!video.sourceImageName) throw new Error('ComfyUI did not return a staged source image name.');
@@ -1958,16 +1938,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
 
     if (video.family === 'minimax_h3') {
       for (const guide of video.minimaxH3.guides) {
-        if (!guide.sourceName && guide.sourcePath) {
-          const response = await fetch('/api/comfy/copy-media', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sourcePath: guide.sourcePath, kind: guide.kind }),
-          });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok || payload?.success === false || !payload?.filename) {
-            throw new Error(String(payload?.error || `Failed to stage timed guide at frame ${guide.frameIndex}.`));
-          }
-          guide.sourceName = String(payload.filename);
+        if (guide.sourceName || guide.sourcePath) {
+          guide.sourceName = await ensureUmbraUiQueuedMedia(
+            guide.kind, guide.sourcePath, guide.sourceName, `timed guide at frame ${guide.frameIndex}`,
+          );
         }
       }
     }
@@ -1977,19 +1951,9 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         keyframe.sourceImagePath = String(keyframe.sourceImagePath || '').trim();
         keyframe.sourceImageName = String(keyframe.sourceImageName || '').trim();
         if (!keyframe.sourceImagePath && !keyframe.sourceImageName) continue;
-        if (!keyframe.sourceImageName) {
-          const response = await fetch('/api/comfy/copy-media', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sourcePath: keyframe.sourceImagePath, kind: 'image' }),
-          });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok || payload?.success === false) {
-            throw new Error(String(payload?.error || `Failed to stage LTX guide at frame ${keyframe.frameIndex}.`));
-          }
-          keyframe.sourceImageName = String(payload?.filename || '').trim();
-        }
-        if (!keyframe.sourceImageName) throw new Error(`ComfyUI did not stage the LTX guide at frame ${keyframe.frameIndex}.`);
+        keyframe.sourceImageName = await ensureUmbraUiQueuedMedia(
+          'image', keyframe.sourceImagePath, keyframe.sourceImageName, `LTX guide at frame ${keyframe.frameIndex}`,
+        );
       }
     }
     if (video.family === 'ltx25' && video.ltx25.keyframes.length > 0) {
@@ -1997,19 +1961,9 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         keyframe.sourceImagePath = String(keyframe.sourceImagePath || '').trim();
         keyframe.sourceImageName = String(keyframe.sourceImageName || '').trim();
         if (!keyframe.sourceImagePath && !keyframe.sourceImageName) continue;
-        if (!keyframe.sourceImageName) {
-          const response = await fetch('/api/comfy/copy-media', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sourcePath: keyframe.sourceImagePath, kind: 'image' }),
-          });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok || payload?.success === false) {
-            throw new Error(String(payload?.error || `Failed to stage LTX-2.5 guide at frame ${keyframe.frameIndex}.`));
-          }
-          keyframe.sourceImageName = String(payload?.filename || '').trim();
-        }
-        if (!keyframe.sourceImageName) throw new Error(`ComfyUI did not stage the LTX-2.5 guide at frame ${keyframe.frameIndex}.`);
+        keyframe.sourceImageName = await ensureUmbraUiQueuedMedia(
+          'image', keyframe.sourceImagePath, keyframe.sourceImageName, `LTX-2.5 guide at frame ${keyframe.frameIndex}`,
+        );
       }
     }
 
@@ -2026,39 +1980,15 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         shot.sourceImageName = String(shot.sourceImageName || '').trim();
         if (!shot.prompt) throw new Error(`Enter a prompt for storyboard shot ${index + 1}.`);
         if (!shot.sourceImagePath && !shot.sourceImageName) continue;
-        if (!shot.sourceImageName) {
-          const response = await fetch('/api/comfy/copy-media', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sourcePath: shot.sourceImagePath, kind: 'image' }),
-          });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok || payload?.success === false) {
-            throw new Error(String(payload?.error || `Failed to stage the guide image for storyboard shot ${index + 1}.`));
-          }
-          shot.sourceImageName = String(payload?.filename || '').trim();
-        }
-        if (!shot.sourceImageName) {
-          throw new Error(`ComfyUI did not stage the guide image for storyboard shot ${index + 1}.`);
-        }
+        shot.sourceImageName = await ensureUmbraUiQueuedMedia(
+          'image', shot.sourceImagePath, shot.sourceImageName, `guide image for storyboard shot ${index + 1}`,
+        );
       }
     }
 
     const stageMedia = async (kind: 'video' | 'audio', path: string, name: string): Promise<string> => {
-      if (name) return name;
-      if (!path) return '';
-      const response = await fetch('/api/comfy/copy-media', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourcePath: path, kind }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload?.success === false) {
-        throw new Error(String(payload?.error || `Failed to stage the source ${kind}.`));
-      }
-      const stagedName = String(payload?.filename || '').trim();
-      if (!stagedName) throw new Error(`ComfyUI did not return a staged source ${kind} name.`);
-      return stagedName;
+      if (!path && !name) return '';
+      return ensureUmbraUiQueuedMedia(kind, path, name, `source ${kind}`);
     };
     if (video.mode === 'video_to_video') {
       if (!video.sourceVideoPath && !video.sourceVideoName) throw new Error('Choose a source video for VID2VID.');

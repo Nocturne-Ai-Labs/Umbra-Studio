@@ -175,8 +175,10 @@ const thumbnailDiskCache = (() => {
   }
 })();
 const folderSummaryCache = new Map<string, FolderSummaryCacheEntry>();
+const folderSummaryScanStates = new Map<string, { generation: number; active: number }>();
 const forcedFolderSummaryScans = new Map<string, Promise<FolderSummary>>();
 const folderTreeCache = new Map<string, FolderTreeCacheEntry>();
+const folderTreeScanStates = new Map<string, { generation: number; active: number }>();
 const metadataCache = new Map<string, MetadataCacheEntry>();
 const backgroundWarmup = new GalleryWarmupScheduler();
 const folderRevisions = new GalleryFolderRevisions();
@@ -452,6 +454,38 @@ function setCachedFolderSummary(pathValue: string, summary: FolderSummary) {
   }
 }
 
+function beginFolderSummaryScan(pathValue: string) {
+  const key = getFolderSummaryCacheKey(pathValue);
+  const state = folderSummaryScanStates.get(key) ?? { generation: 0, active: 0 };
+  folderSummaryScanStates.set(key, state);
+  state.active += 1;
+  const generation = state.generation;
+  return {
+    cache(summary: FolderSummary) {
+      if (folderSummaryScanStates.get(key) === state && state.generation === generation) {
+        setCachedFolderSummary(key, summary);
+      }
+    },
+    release() {
+      state.active -= 1;
+      if (state.active === 0 && folderSummaryScanStates.get(key) === state) {
+        folderSummaryScanStates.delete(key);
+      }
+    },
+  };
+}
+
+async function scanAndCacheFolderSummary(pathValue: string): Promise<FolderSummary> {
+  const scan = beginFolderSummaryScan(pathValue);
+  try {
+    const summary = await computeFolderSummary(pathValue);
+    scan.cache(summary);
+    return summary;
+  } finally {
+    scan.release();
+  }
+}
+
 function getCachedFolderTree(pathValue: string): FolderTreeNode[] | null {
   const key = normalizePath(pathValue);
   const cached = folderTreeCache.get(key);
@@ -483,10 +517,43 @@ function invalidateFolderTree(pathValue: string, includeDescendants = false) {
   const normalized = normalizePath(pathValue);
   if (!normalized) return;
   folderTreeCache.delete(normalized);
+  const scanState = folderTreeScanStates.get(normalized);
+  if (scanState) scanState.generation += 1;
   if (!includeDescendants) return;
   const prefix = `${normalized}/`;
   for (const key of Array.from(folderTreeCache.keys())) {
     if (key.startsWith(prefix)) folderTreeCache.delete(key);
+  }
+  for (const [key, state] of folderTreeScanStates) {
+    if (key.startsWith(prefix)) state.generation += 1;
+  }
+}
+
+async function scanFolderTreeEntries(dirPath: string, force: boolean): Promise<FolderTreeNode[]> {
+  const cachedFolders = force ? null : getCachedFolderTree(dirPath);
+  if (cachedFolders) return cachedFolders;
+
+  const key = normalizePath(dirPath);
+  const scanState = folderTreeScanStates.get(key) ?? { generation: 0, active: 0 };
+  folderTreeScanStates.set(key, scanState);
+  scanState.active += 1;
+  const generation = scanState.generation;
+  try {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+    const folders = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => ({
+        name: entry.name,
+        path: join(dirPath, entry.name),
+      }))
+      .sort((a, b) => galleryNameCollator.compare(a.name, b.name));
+    if (scanState.generation === generation) setCachedFolderTree(dirPath, folders);
+    return folders;
+  } finally {
+    scanState.active -= 1;
+    if (scanState.active === 0 && folderTreeScanStates.get(key) === scanState) {
+      folderTreeScanStates.delete(key);
+    }
   }
 }
 
@@ -494,10 +561,19 @@ function invalidateFolderSummary(pathValue: string, includeDescendants = false) 
   const normalized = normalizePath(pathValue);
   if (!normalized) return;
   folderSummaryCache.delete(normalized);
+  forcedFolderSummaryScans.delete(normalized);
+  const scanState = folderSummaryScanStates.get(normalized);
+  if (scanState) scanState.generation += 1;
   if (!includeDescendants) return;
   const prefix = `${normalized}/`;
   for (const key of Array.from(folderSummaryCache.keys())) {
     if (key.startsWith(prefix)) folderSummaryCache.delete(key);
+  }
+  for (const [key, state] of folderSummaryScanStates) {
+    if (key.startsWith(prefix)) state.generation += 1;
+  }
+  for (const key of Array.from(forcedFolderSummaryScans.keys())) {
+    if (key.startsWith(prefix)) forcedFolderSummaryScans.delete(key);
   }
 }
 
@@ -505,34 +581,26 @@ async function getFolderSummary(pathValue: string, force = false): Promise<Folde
   const normalizedPath = normalizePath(pathValue);
   if (!normalizedPath) return createEmptyFolderSummary('');
 
-  if (!force) {
+  if (force) {
+    const existing = forcedFolderSummaryScans.get(normalizedPath);
+    if (existing) return existing;
+    invalidateFolderSummary(normalizedPath);
+  } else {
     const cached = getCachedFolderSummary(normalizedPath);
     if (cached) return cached;
   }
 
   const key = `folder-summary:${normalizedPath}`;
-  const scan = (queueKey: string, onStart?: () => void) => sidebarWorker.run(queueKey, async () => {
-    onStart?.();
-    const summary = await computeFolderSummary(normalizedPath);
-    setCachedFolderSummary(normalizedPath, summary);
-    return summary;
-  });
-  if (!force) return scan(key);
+  if (!force) {
+    await sidebarWorker.run(key, () => scanAndCacheFolderSummary(normalizedPath));
+    // A request can join a scan started before invalidation. Its stale result
+    // cannot enter the cache, so only rescan when no current result was saved.
+    return getCachedFolderSummary(normalizedPath) ?? getFolderSummary(normalizedPath, true);
+  }
 
-  const existing = forcedFolderSummaryScans.get(normalizedPath);
-  if (existing) return existing;
-  const forcedScan = (async () => {
-    // A queued or running prewarm may already own this key. Wait for it, then
-    // scan again so a force request never inherits its earlier snapshot.
-    let started = false;
-    try {
-      const summary = await scan(key, () => { started = true; });
-      if (started) return summary;
-    } catch (error) {
-      if (started) throw error;
-    }
-    return scan(`folder-summary-force:${normalizedPath}`);
-  })();
+  // A forced refresh must not join a pre-invalidation scan still in the queue.
+  const forceKey = `folder-summary-force:${normalizedPath}:${crypto.randomUUID()}`;
+  const forcedScan = sidebarWorker.run(forceKey, () => scanAndCacheFolderSummary(normalizedPath));
   forcedFolderSummaryScans.set(normalizedPath, forcedScan);
   try { return await forcedScan; }
   finally {
@@ -548,9 +616,7 @@ function scheduleFolderSummaryPrewarm(pathValue: string) {
   if (cached) return;
 
   sidebarWorker.schedule(`folder-summary:${normalizedPath}`, async () => {
-    const summary = await computeFolderSummary(normalizedPath);
-    setCachedFolderSummary(normalizedPath, summary);
-    return summary;
+    return scanAndCacheFolderSummary(normalizedPath);
   });
 }
 
@@ -676,33 +742,38 @@ function runPeriodicPrewarmCycle() {
   folderRevisions.retireIdle();
   const busy = [galleryWorker, filmstripWorker, treeWorker, sidebarWorker].some(worker => worker.stats().inFlight > 0);
   void backgroundWarmup.tick(busy, async (folder, cursor) => {
-    const insideManagedOutput = await isManagedOutputFolder(folder);
-    const entries = await fs.readdir(folder, { withFileTypes: true });
-    const directories = entries.filter(entry => entry.isDirectory() && !entry.isSymbolicLink() && !entry.name.startsWith('.'));
-    // Rotate through children rather than forever warming the first 48.
-    const count = Math.min(16, directories.length);
-    if (insideManagedOutput) {
-      for (let i = 0; i < count; i++) backgroundWarmup.register(normalizePath(join(folder, directories[(cursor * 16 + i) % directories.length].name)));
+    const scan = beginFolderSummaryScan(folder);
+    try {
+      const insideManagedOutput = await isManagedOutputFolder(folder);
+      const entries = await fs.readdir(folder, { withFileTypes: true });
+      const directories = entries.filter(entry => entry.isDirectory() && !entry.isSymbolicLink() && !entry.name.startsWith('.'));
+      // Rotate through children rather than forever warming the first 48.
+      const count = Math.min(16, directories.length);
+      if (insideManagedOutput) {
+        for (let i = 0; i < count; i++) backgroundWarmup.register(normalizePath(join(folder, directories[(cursor * 16 + i) % directories.length].name)));
+      }
+      const summary = summarizeFolderEntries(folder, entries);
+      scan.cache(summary);
+      // External folders retain shallow periodic summaries while recently used.
+      // Do not hydrate their cloud-only media before an explicit folder listing.
+      if (!insideManagedOutput && (recentlyOpenedMediaFolders.get(folder) || 0) < Date.now() - 15 * 60_000) return cursor + 1;
+      const media = entries.filter(entry => entry.isFile() && isSupportedMediaPath(entry.name)).sort((a, b) => galleryNameCollator.compare(a.name, b.name));
+      // Warm a small visible-page window; never eagerly decode the whole library.
+      const offset = media.length ? (Math.floor(cursor / 2) * 2) % Math.min(media.length, 24) : 0;
+      const candidates = cursor % 2 === 0
+        ? media.slice(Math.max(0, media.length - offset - 2), media.length - offset).reverse()
+        : media.slice(offset, offset + 2);
+      for (const entry of candidates) {
+        if ([galleryWorker, filmstripWorker].some(worker => worker.stats().inFlight > 0)) break;
+        const path = join(folder, entry.name);
+        const stat = await fs.stat(path);
+        const etag = getThumbnailEtag(stat, THUMB_SIZE_MAP.small, 70, 'contain');
+        await getOrBuildThumbnailBuffer(path, THUMB_SIZE_MAP.small, 70, 'contain', 'gallery', etag).catch(() => undefined);
+      }
+      return cursor + 1;
+    } finally {
+      scan.release();
     }
-    const summary = summarizeFolderEntries(folder, entries);
-    setCachedFolderSummary(folder, summary);
-    // External folders retain shallow periodic summaries while recently used.
-    // Do not hydrate their cloud-only media before an explicit folder listing.
-    if (!insideManagedOutput && (recentlyOpenedMediaFolders.get(folder) || 0) < Date.now() - 15 * 60_000) return cursor + 1;
-    const media = entries.filter(entry => entry.isFile() && isSupportedMediaPath(entry.name)).sort((a, b) => galleryNameCollator.compare(a.name, b.name));
-    // Warm a small visible-page window; never eagerly decode the whole library.
-    const offset = media.length ? (Math.floor(cursor / 2) * 2) % Math.min(media.length, 24) : 0;
-    const candidates = cursor % 2 === 0
-      ? media.slice(Math.max(0, media.length - offset - 2), media.length - offset).reverse()
-      : media.slice(offset, offset + 2);
-    for (const entry of candidates) {
-      if ([galleryWorker, filmstripWorker].some(worker => worker.stats().inFlight > 0)) break;
-      const path = join(folder, entry.name);
-      const stat = await fs.stat(path);
-      const etag = getThumbnailEtag(stat, THUMB_SIZE_MAP.small, 70, 'contain');
-      await getOrBuildThumbnailBuffer(path, THUMB_SIZE_MAP.small, 70, 'contain', 'gallery', etag).catch(() => undefined);
-    }
-    return cursor + 1;
   });
 }
 
@@ -851,6 +922,25 @@ function upsertGalleryFiles(folderPath: string, inputs: Awaited<ReturnType<typeo
     const input = revisions.get(normalizePath(file.path));
     return { ...file, revision: input?.revision, metadataRevision: input?.metadataRevision };
   });
+}
+
+async function upsertGalleryFilesBatched(
+  folderPath: string,
+  inputs: Awaited<ReturnType<typeof statMediaCandidates>>,
+  signal?: AbortSignal,
+): Promise<MediaFileRecord[]> {
+  const files: MediaFileRecord[] = [];
+  const batchSize = 32;
+  for (let offset = 0; offset < inputs.length; offset += batchSize) {
+    signal?.throwIfAborted();
+    files.push(...upsertGalleryFiles(folderPath, inputs.slice(offset, offset + batchSize)));
+    // SQLite transactions are synchronous. Give other requests a turn between
+    // batches when date/custom sorting indexes the whole folder.
+    if (offset + batchSize < inputs.length) {
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+    }
+  }
+  return files;
 }
 
 function normalizeSearchQuery(value: unknown): string {
@@ -1245,20 +1335,7 @@ async function handleTree(reqUrl: URL): Promise<Response> {
     }
 
     const workerStartedAt = nowMs();
-    const folders = await treeWorker.run(`tree:${dirPath}:force:${force ? startedAt : 0}`, async () => {
-      const workerCachedFolders = force ? null : getCachedFolderTree(dirPath);
-      if (workerCachedFolders) return workerCachedFolders;
-      const entries = await fs.readdir(dirPath, { withFileTypes: true });
-      const nextFolders = entries
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => ({
-          name: entry.name,
-          path: join(dirPath, entry.name),
-        }))
-        .sort((a, b) => galleryNameCollator.compare(a.name, b.name));
-      setCachedFolderTree(dirPath, nextFolders);
-      return nextFolders;
-    });
+    const folders = await treeWorker.run(`tree:${dirPath}:force:${force ? startedAt : 0}`, () => scanFolderTreeEntries(dirPath, force));
     const workerMs = nowMs() - workerStartedAt;
 
     if (!shallow) setTimeout(() => {
@@ -1448,7 +1525,7 @@ async function buildListProgressivePayload(
     }
     const mediaFiles: MediaFileRecord[] = [];
     for (const [folderPath, inputs] of inputsByFolder) {
-      mediaFiles.push(...upsertGalleryFiles(folderPath, inputs));
+      mediaFiles.push(...await upsertGalleryFilesBatched(folderPath, inputs, signal));
     }
     statUpsertMs = nowMs() - statStartedAt;
     mediaFiles.sort((a, b) => compareMedia(a, b, sortBy, sortOrder));
@@ -1979,8 +2056,8 @@ async function handleMkdir(req: Request): Promise<Response> {
     await ensureDirectory(parentPath);
     await fs.mkdir(targetPath, { recursive: true });
 
-    folderSummaryCache.delete(parentPath);
-    folderSummaryCache.delete(normalizePath(targetPath));
+    invalidateFolderSummary(parentPath);
+    invalidateFolderSummary(targetPath);
     invalidateFolderTree(parentPath);
     invalidateFolderTree(targetPath);
     registerPrewarmRoot(parentPath);
@@ -2062,7 +2139,6 @@ async function handleEmptyFolders(req: Request, mode: EmptyFolderCleanupMode): P
 
     invalidateFolderTree(rootPath, true);
     invalidateFolderSummary(rootPath, true);
-    folderSummaryCache.delete(normalizePath(rootPath));
     registerPrewarmRoot(rootPath);
     scheduleFolderSummaryPrewarm(rootPath);
 

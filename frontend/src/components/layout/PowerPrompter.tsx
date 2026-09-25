@@ -7697,6 +7697,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           throw new Error('Power Prompter session did not return a document');
         }
         if (fileLoadRequestSeqRef.current !== loadSeq) return;
+        if (session.revision < powerPrompterSessionRevisionRef.current) return;
         const syncedContent = session.composedPrompt || composeActivePromptFromCards(session.document.cards, session.document.activeQueueSet);
         const signature = getCardDocSignature(session.document);
         const shouldMarkPending = session.dirty === true;
@@ -7720,6 +7721,17 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         }
       } catch (error: any) {
         if (fileLoadRequestSeqRef.current !== loadSeq) return;
+        if (error instanceof PowerPrompterSessionRequestError && error.status === 409 && !currentFileRef.current) {
+          try {
+            const activeSession = (await loadPowerPrompterDocumentSession()).session;
+            if (fileLoadRequestSeqRef.current !== loadSeq) return;
+            if (!currentFileRef.current && activeSession?.file && activeSession.document) {
+              applyPowerPrompterDocumentSession(activeSession);
+            }
+          } catch {
+            // Keep the original open conflict; the recovery record remains on the server.
+          }
+        }
         showToast(String(error?.message || 'Failed to load prompt file'), 'error');
       } finally {
         if (fileLoadRequestSeqRef.current === loadSeq) {

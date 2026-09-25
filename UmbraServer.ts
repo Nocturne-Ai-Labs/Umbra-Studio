@@ -60,12 +60,14 @@ import { FsWorkerService } from './backend/FsWorkerService';
 import { GalleryTransferJournal } from './backend/GalleryTransferJournal';
 import { compareGalleryUploadDuplicate, isGalleryUploadFilename, isGalleryUploadStrategy, prepareGalleryUploadDirectory, stageGalleryUploadFile } from './backend/GalleryUploadService';
 import { copyMediaIntoComfyInput, writeAllUploadedMediaBytes } from './backend/UmbraUiMediaUploadService';
+import { ensureUmbraUiStagedMedia, UmbraUiStagedMediaError } from './backend/UmbraUiStagedMedia';
 import { UmbraStagedVideoPreviewGrants } from './backend/UmbraStagedVideoPreviewGrants';
 import { isCivitaiModelDownloadUrl } from './backend/ModelDownloadHttp';
 import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
 import { fetchLocalServerProxy, readLocalServerProxyText } from './backend/LocalServerProxyTransfer';
 import { getLocalServerProxyCookieHeader, getLocalServerProxyCookiePrefix, rewriteLocalServerProxySetCookies } from './backend/LocalServerProxyCookies';
 import { createGalleryPathAuthorizer, resolveAllowedExistingGalleryPath, resolveAllowedGalleryPath } from './backend/GalleryPathAccess';
+import { readRequestTextWithLimit, RequestBodyTooLargeError } from './backend/BoundedRequestBody';
 import { galleryFallbackSearchMediaType, inspectGalleryFallbackSearchMedia } from './backend/GalleryFallbackSearchMedia';
 import { buildGalleryDownloadArchive, prepareGalleryDownloadResponse, getPreparedGalleryDownload, type GalleryDownloadEntry } from './backend/GalleryDownloadArchiveService';
 import { copyFileExclusive, moveTreeExclusive } from './backend/FsTransferCopy';
@@ -102,6 +104,7 @@ import {
   type UmbraUiLayerUpscaleSettings,
 } from './backend/UmbraUiInpaintService';
 import { UmbraUiCanvasProjectService } from './backend/UmbraUiCanvasProjectService';
+import { UmbraCanvasStudioConflictError, UmbraUiCanvasStudioProjectService } from './backend/UmbraUiCanvasStudioProjectService';
 import { UmbraUiCensorReviewService } from './backend/UmbraUiCensorReviewService';
 import { handleCensorReviewRoute } from './backend/routes/censorReviewRoutes';
 import { UmbraUiCanvasWorkspaceProjectService } from './backend/UmbraUiCanvasWorkspaceProjectService';
@@ -127,6 +130,7 @@ import { applyLtx25PromptEnhancerInputs } from './backend/Ltx25PromptEnhancer';
 import { upsertPngTextMetadata } from './backend/PngTextMetadata';
 import {
   createUnavailableTailscaleStatus,
+  normalizeTailscalePeerIp,
   parseTailscaleServeStatus,
   parseTailscaleStatus,
   shouldRemoteSettingsRequireRestart,
@@ -466,6 +470,7 @@ const umbraUiInpaintService = new UmbraUiInpaintService({
   buildBaseWorkflow: (settings, seed) => buildUmbraUiInpaintBaseWorkflow(settings, seed),
 });
 const umbraUiCanvasProjectService = new UmbraUiCanvasProjectService(USER_DIR);
+const umbraUiCanvasStudioProjectService = new UmbraUiCanvasStudioProjectService(USER_DIR);
 const umbraUiCanvasWorkspaceProjectService = new UmbraUiCanvasWorkspaceProjectService(USER_DIR);
 void fsWorkerService.warmup();
 void galleryFsWorkerService.warmup();
@@ -1178,6 +1183,10 @@ const MODEL_SNAPSHOT_SUFFIX = '.umbra-model.json';
 const MODEL_THUMB_PREFIX = '.umbra-model-thumb';
 const MODEL_INSPECTION_SUFFIX = '.umbra-model-inspection.txt';
 const MODEL_ARTIFACT_DIR = '.umbra';
+const MODEL_THUMB_EXTENSIONS = new Set([
+  'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'tif', 'tiff', 'heic', 'heif', 'jxl',
+  'mp4', 'webm', 'mov', 'mpg', 'mpeg', 'ogg', 'ogv', 'bin',
+]);
 const DATASET_IMPORT_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.avif']);
 const DATASET_TAGGER_MODEL_REPOS = new Set([
   'SmilingWolf/wd-vit-tagger-v3',
@@ -1447,20 +1456,37 @@ function assertModelManagerArtifactPath(fullPath: string): void {
   }
 }
 
+async function isRegularModelArtifactDirectory(fullPath: string, roots: string[]): Promise<boolean> {
+  const stat = await fs.lstat(fullPath).catch(() => null);
+  if (!stat?.isDirectory() || stat.isSymbolicLink()) return false;
+  const physical = resolveAllowedExistingGalleryPath(fullPath, roots);
+  if (!physical) return false;
+  const physicalParent = await fs.realpath(dirname(fullPath)).catch(() => null);
+  return Boolean(physicalParent && normalizePathForCompare(dirname(physical)) === normalizePathForCompare(physicalParent));
+}
+
+async function getRegularModelArtifactStat(fullPath: string, roots: string[]): Promise<BigIntStats | null> {
+  if (basename(dirname(fullPath)) === MODEL_ARTIFACT_DIR
+    && !await isRegularModelArtifactDirectory(dirname(fullPath), roots)) return null;
+  if (!resolveAllowedExistingGalleryPath(fullPath, roots)) return null;
+  const stat = await fs.lstat(fullPath, { bigint: true }).catch(() => null);
+  return stat?.isFile() && !stat.isSymbolicLink() ? stat : null;
+}
+
+function isModelThumbArtifactName(modelName: string, name: string): boolean {
+  const prefix = `${modelName}${MODEL_THUMB_PREFIX}.`;
+  return name.startsWith(prefix) && MODEL_THUMB_EXTENSIONS.has(name.slice(prefix.length).toLowerCase());
+}
+
 async function listModelThumbArtifactsForFile(fullPath: string): Promise<string[]> {
-  try {
-    const stat = await fs.stat(fullPath);
-    if (!stat.isFile()) return [];
-  } catch {
-    return [];
-  }
+  const roots = getModelManagerRootsResolved().map(root => root.fullPath);
+  if (!await getRegularModelArtifactStat(fullPath, roots)) return [];
 
   const parentDir = dirname(fullPath);
   const fileName = basename(fullPath);
-  const thumbPrefix = `${fileName}${MODEL_THUMB_PREFIX}.`;
   const paths: string[] = [];
   const artifactDir = join(parentDir, MODEL_ARTIFACT_DIR);
-  if (existsSync(artifactDir)) {
+  if (await isRegularModelArtifactDirectory(artifactDir, roots)) {
     let artifactEntries: string[] = [];
     try {
       artifactEntries = await fs.readdir(artifactDir);
@@ -1468,19 +1494,23 @@ async function listModelThumbArtifactsForFile(fullPath: string): Promise<string[
       artifactEntries = [];
     }
     for (const entry of artifactEntries) {
-      if (entry.startsWith(thumbPrefix)) paths.push(join(artifactDir, entry));
+      const artifactPath = join(artifactDir, entry);
+      if (isModelThumbArtifactName(fileName, entry)
+        && await getRegularModelArtifactStat(artifactPath, roots)) paths.push(artifactPath);
     }
   }
   let entries: string[] = [];
   try {
     entries = await fs.readdir(parentDir);
   } catch {
-    return paths.filter((artifactPath) => isPathInsideModelManagerRoots(artifactPath));
+    return paths;
   }
-  paths.push(...entries
-    .filter((entry) => entry.startsWith(thumbPrefix))
-    .map((entry) => join(parentDir, entry)));
-  return paths.filter((artifactPath) => isPathInsideModelManagerRoots(artifactPath));
+  for (const entry of entries) {
+    const artifactPath = join(parentDir, entry);
+    if (isModelThumbArtifactName(fileName, entry)
+      && await getRegularModelArtifactStat(artifactPath, roots)) paths.push(artifactPath);
+  }
+  return paths;
 }
 
 async function expandModelArtifactPaths(fullPaths: string[]): Promise<string[]> {
@@ -1491,6 +1521,7 @@ async function expandModelArtifactPaths(fullPaths: string[]): Promise<string[]> 
     if (!fullPath) continue;
     if (!resolveAllowedExistingGalleryPath(fullPath, roots)) continue;
     dedup.add(fullPath);
+    if (!await getRegularModelArtifactStat(fullPath, roots)) continue;
 
     const snapshotPaths = [
       getPreferredModelSnapshotFullPath(fullPath),
@@ -1498,14 +1529,14 @@ async function expandModelArtifactPaths(fullPaths: string[]): Promise<string[]> 
       getPreferredModelInspectionReportFullPath(fullPath),
     ];
     for (const snapshotPath of snapshotPaths) {
-      if (existsSync(snapshotPath) && resolveAllowedExistingGalleryPath(snapshotPath, roots)) {
+      if (await getRegularModelArtifactStat(snapshotPath, roots)) {
         dedup.add(snapshotPath);
       }
     }
 
     const thumbArtifacts = await listModelThumbArtifactsForFile(fullPath);
     for (const artifactPath of thumbArtifacts) {
-      if (resolveAllowedExistingGalleryPath(artifactPath, roots)) dedup.add(artifactPath);
+      if (await getRegularModelArtifactStat(artifactPath, roots)) dedup.add(artifactPath);
     }
   }
   return Array.from(dedup);
@@ -1542,19 +1573,22 @@ async function buildModelManagerTransferItems(
     const fullPath = String(fullPathRaw || '').trim();
     if (!fullPath || !isPathInsideModelManagerRoots(fullPath)) continue;
 
-    const artifactPaths = [
+    const artifactPaths = await getRegularModelArtifactStat(fullPath, modelRoots) ? [
       getPreferredModelSnapshotFullPath(fullPath),
       getLegacyModelSnapshotFullPath(fullPath),
       getPreferredModelInspectionReportFullPath(fullPath),
       ...(await listModelThumbArtifactsForFile(fullPath)),
-    ].filter(artifactPath => existsSync(artifactPath)
-      && Boolean(resolveAllowedExistingGalleryPath(artifactPath, modelRoots)));
+    ] : [];
+    const validArtifactPaths: string[] = [];
+    for (const artifactPath of artifactPaths) {
+      if (await getRegularModelArtifactStat(artifactPath, modelRoots)) validArtifactPaths.push(artifactPath);
+    }
     const sourceStat = await fs.lstat(fullPath);
     const plan = planModelManagerTransferTarget(
       fullPath,
       destinationFullPath,
       sourceStat.isDirectory() && !sourceStat.isSymbolicLink(),
-      artifactPaths,
+      validArtifactPaths,
       reservedTargets,
       MODEL_ARTIFACT_DIR,
     );
@@ -1563,8 +1597,8 @@ async function buildModelManagerTransferItems(
       throw new InvalidModelManagerTransferTargetError('Model transfer target leaves a model root');
     }
     addItem(fullPath, plan.targetFullPath);
-    for (let index = 0; index < artifactPaths.length; index += 1) {
-      addItem(artifactPaths[index], plan.artifactTargets[index]);
+    for (let index = 0; index < validArtifactPaths.length; index += 1) {
+      addItem(validArtifactPaths[index], plan.artifactTargets[index]);
     }
   }
 
@@ -1931,7 +1965,8 @@ async function inspectModelManagerModelFile(modelFullPath: string) {
   await fs.mkdir(artifactDir, { recursive: true });
   await fs.writeFile(reportPath, buildModelInspectionReport(modelFullPath, metadata, summary), 'utf8');
 
-  const snapshotPath = existsSync(preferredSnapshotPath)
+  const roots = getModelManagerRootsResolved().map(root => root.fullPath);
+  const snapshotPath = await getRegularModelArtifactStat(preferredSnapshotPath, roots)
     ? preferredSnapshotPath
     : '';
   let snapshot = snapshotPath ? await readModelSnapshotPayload(snapshotPath) : null;
@@ -1974,7 +2009,7 @@ async function hashFileSha256(fullPath: string): Promise<string> {
 
 async function readModelSnapshotPayload(snapshotPath: string): Promise<Record<string, unknown> | null> {
   try {
-    assertModelManagerArtifactPath(snapshotPath);
+    if (!await getRegularModelArtifactStat(snapshotPath, getModelManagerRootsResolved().map(root => root.fullPath))) return null;
     const raw = await fs.readFile(snapshotPath, 'utf8');
     const parsed = JSON.parse(String(raw || '{}'));
     const payload = toRecord(parsed);
@@ -1988,8 +2023,10 @@ async function listModelManagerSnapshotFiles(folderFullPath: string): Promise<st
   const paths: string[] = [];
   const artifactDir = join(folderFullPath, MODEL_ARTIFACT_DIR);
   const folders = [artifactDir, folderFullPath];
+  const roots = getModelManagerRootsResolved().map(root => root.fullPath);
   for (const folder of folders) {
-    if (!existsSync(folder) || !resolveAllowedExistingGalleryPath(folder, getModelManagerRootsResolved().map(root => root.fullPath))) continue;
+    if (folder === artifactDir && !await isRegularModelArtifactDirectory(folder, roots)) continue;
+    if (!existsSync(folder) || !resolveAllowedExistingGalleryPath(folder, roots)) continue;
     let entries: string[] = [];
     try {
       entries = await fs.readdir(folder);
@@ -1999,7 +2036,7 @@ async function listModelManagerSnapshotFiles(folderFullPath: string): Promise<st
     for (const entry of entries) {
       if (!entry.endsWith(MODEL_SNAPSHOT_SUFFIX)) continue;
       const candidate = join(folder, entry);
-      if (resolveAllowedExistingGalleryPath(candidate, getModelManagerRootsResolved().map(root => root.fullPath))) paths.push(candidate);
+      if (await getRegularModelArtifactStat(candidate, roots)) paths.push(candidate);
     }
   }
   return Array.from(new Set(paths));
@@ -2009,24 +2046,33 @@ async function renameModelSnapshotArtifacts(sourceSnapshotPath: string, modelFul
   const changed: string[] = [];
   const modelParent = dirname(modelFullPath);
   const targetArtifactDir = join(modelParent, MODEL_ARTIFACT_DIR);
-  assertModelManagerArtifactPath(sourceSnapshotPath);
+  const roots = getModelManagerRootsResolved().map(root => root.fullPath);
+  if (!await getRegularModelArtifactStat(sourceSnapshotPath, roots)) throw new Error('Invalid model snapshot file');
   assertModelManagerArtifactPath(targetArtifactDir);
   await fs.mkdir(targetArtifactDir, { recursive: true });
+  if (!await isRegularModelArtifactDirectory(targetArtifactDir, roots)) {
+    throw new Error('Model artifact folder is not a regular directory');
+  }
   const targetSnapshotPath = getPreferredModelSnapshotFullPath(modelFullPath);
-  assertModelManagerArtifactPath(targetSnapshotPath);
-
+  const renames: Array<{ oldPath: string; nextPath: string }> = [];
   if (normalizePathForCompare(sourceSnapshotPath) !== normalizePathForCompare(targetSnapshotPath)) {
-    await fs.rename(sourceSnapshotPath, targetSnapshotPath).catch(async () => {
-      await fs.copyFile(sourceSnapshotPath, targetSnapshotPath);
-      await fs.rm(sourceSnapshotPath, { force: true }).catch(() => undefined);
-    });
-    changed.push(sourceSnapshotPath, targetSnapshotPath);
+    renames.push({ oldPath: sourceSnapshotPath, nextPath: targetSnapshotPath });
   }
 
   const oldBaseName = basename(sourceSnapshotPath).slice(0, -MODEL_SNAPSHOT_SUFFIX.length);
   const newBaseName = basename(modelFullPath);
-  const candidateDirs = Array.from(new Set([dirname(sourceSnapshotPath), modelParent, targetArtifactDir]));
+  const sourceArtifactDir = dirname(sourceSnapshotPath);
+  // Prefer the snapshot's own folder when it differs from the model folder;
+  // otherwise prefer the modern .umbra thumbnail over a legacy sibling.
+  const candidateDirs = Array.from(new Set([
+    sourceArtifactDir !== modelParent ? sourceArtifactDir : targetArtifactDir,
+    targetArtifactDir,
+    modelParent,
+  ]));
+  const selectedThumbTargets = new Set<string>();
   for (const candidateDir of candidateDirs) {
+    if (basename(candidateDir) === MODEL_ARTIFACT_DIR
+      && !await isRegularModelArtifactDirectory(candidateDir, roots)) continue;
     if (!existsSync(candidateDir)) continue;
     let entries: string[] = [];
     try {
@@ -2035,19 +2081,33 @@ async function renameModelSnapshotArtifacts(sourceSnapshotPath: string, modelFul
       entries = [];
     }
     for (const entry of entries) {
-      if (!entry.startsWith(`${oldBaseName}${MODEL_THUMB_PREFIX}.`)) continue;
+      if (!isModelThumbArtifactName(oldBaseName, entry)) continue;
       const sourceThumbPath = join(candidateDir, entry);
+      if (!await getRegularModelArtifactStat(sourceThumbPath, roots)) continue;
       const extension = entry.slice(`${oldBaseName}${MODEL_THUMB_PREFIX}`.length);
       const targetThumbPath = join(targetArtifactDir, `${newBaseName}${MODEL_THUMB_PREFIX}${extension}`);
-      if (normalizePathForCompare(sourceThumbPath) === normalizePathForCompare(targetThumbPath)) continue;
-      if (!resolveAllowedExistingGalleryPath(sourceThumbPath, getModelManagerRootsResolved().map(root => root.fullPath))
-        || !resolveAllowedExistingGalleryPath(targetThumbPath, getModelManagerRootsResolved().map(root => root.fullPath))) continue;
-      await fs.rename(sourceThumbPath, targetThumbPath).catch(async () => {
-        await fs.copyFile(sourceThumbPath, targetThumbPath);
-        await fs.rm(sourceThumbPath, { force: true }).catch(() => undefined);
-      });
-      changed.push(sourceThumbPath, targetThumbPath);
+      const targetKey = normalizePathForCompare(targetThumbPath);
+      if (selectedThumbTargets.has(targetKey)) continue;
+      selectedThumbTargets.add(targetKey);
+      if (normalizePathForCompare(sourceThumbPath) === targetKey) continue;
+      renames.push({ oldPath: sourceThumbPath, nextPath: targetThumbPath });
     }
+  }
+
+  const seenTargets = new Set<string>();
+  for (const entry of renames) {
+    const targetKey = normalizePathForCompare(entry.nextPath);
+    if (seenTargets.has(targetKey) || !resolveAllowedExistingGalleryPath(entry.nextPath, roots)) {
+      throw new Error('Invalid model artifact target');
+    }
+    seenTargets.add(targetKey);
+    if (await fs.lstat(entry.nextPath).catch(() => null)) {
+      throw new Error('Model artifact target already exists');
+    }
+  }
+  for (const entry of renames) {
+    await fsWorkerService.rename({ oldFullPath: entry.oldPath, newFullPath: entry.nextPath });
+    changed.push(entry.oldPath, entry.nextPath);
   }
 
   return changed;
@@ -2060,11 +2120,15 @@ async function removeModelSnapshotArtifacts(modelFullPath: string): Promise<stri
     getLegacyModelSnapshotFullPath(modelFullPath),
     ...(await listModelThumbArtifactsForFile(modelFullPath)),
   ];
+  const roots = getModelManagerRootsResolved().map(root => root.fullPath);
   for (const artifactPath of Array.from(new Set(paths))) {
-    if (!existsSync(artifactPath)
-      || !resolveAllowedExistingGalleryPath(artifactPath, getModelManagerRootsResolved().map(root => root.fullPath))) continue;
-    await fs.rm(artifactPath, { force: true }).catch(() => undefined);
-    changed.push(artifactPath);
+    if (!await getRegularModelArtifactStat(artifactPath, roots)) continue;
+    try {
+      await fs.unlink(artifactPath);
+      changed.push(artifactPath);
+    } catch {
+      // A concurrent mutation can remove this optional sidecar first.
+    }
   }
   return changed;
 }
@@ -2238,7 +2302,7 @@ async function saveModelManagerSnapshotThumbnailForFile(
       const extension = getModelManagerMediaExtension(imageUrl, mimeType);
       const thumbnailPath = join(artifactDir, `${basename(modelFullPath)}${MODEL_THUMB_PREFIX}.${extension}`);
       assertModelManagerArtifactPath(thumbnailPath);
-      await fs.writeFile(thumbnailPath, buffer);
+      await fs.writeFile(thumbnailPath, buffer, { flag: 'wx' });
       return thumbnailPath;
     });
   } catch {
@@ -2314,9 +2378,10 @@ async function reconcileModelManagerFolder(fullPath: string, options: { recoverF
 
     const preferredSnapshotPath = getPreferredModelSnapshotFullPath(modelFullPath);
     const legacySnapshotPath = getLegacyModelSnapshotFullPath(modelFullPath);
-    const existingSnapshotPath = existsSync(preferredSnapshotPath)
+    const roots = getModelManagerRootsResolved().map(root => root.fullPath);
+    const existingSnapshotPath = await getRegularModelArtifactStat(preferredSnapshotPath, roots)
       ? preferredSnapshotPath
-      : (existsSync(legacySnapshotPath) ? legacySnapshotPath : '');
+      : (await getRegularModelArtifactStat(legacySnapshotPath, roots) ? legacySnapshotPath : '');
     if (existingSnapshotPath) {
       continue;
     }
@@ -2749,7 +2814,9 @@ function resolveCorsOrigin(rawOrigin: unknown, req?: Request): string {
     const requestUrl = new URL(req.url);
     if (getRequestVisibleOrigin(req, requestUrl) === normalizedOrigin) return normalizedOrigin;
   }
-  if (LOOPBACK_CORS_ORIGIN_PATTERN.test(origin)) return normalizedOrigin;
+  // Published host-only routes trust the app's own origin, not arbitrary
+  // browser pages served by other loopback ports.
+  if (IS_UMBRA_DEV_MODE && LOOPBACK_CORS_ORIGIN_PATTERN.test(origin)) return normalizedOrigin;
   if (IS_LAN_BIND && IS_UMBRA_DEV_MODE && PRIVATE_LAN_CORS_ORIGIN_PATTERN.test(origin)) return normalizedOrigin;
   if (getRemoteConfiguredCorsOrigins().has(normalizedOrigin) && (IS_UMBRA_DEV_MODE || TAILSCALE_HTTP_CORS_ORIGIN_PATTERN.test(normalizedOrigin) || TAILSCALE_HTTPS_CORS_ORIGIN_PATTERN.test(normalizedOrigin))) return normalizedOrigin;
   return '';
@@ -2773,13 +2840,16 @@ function getCorsHeaders(): Record<string, string> {
 
 type JsonResponseInit = Omit<ResponseInit, 'headers'> & { headers?: ResponseInit['headers'] | Record<string, string | string[]> };
 
-async function readJsonObject(req: Request, allowEmpty = false): Promise<Record<string, unknown> | null> {
+async function readJsonObject(req: Request, allowEmpty = false, maxBytes?: number): Promise<Record<string, unknown> | null> {
   try {
-    const text = await req.text();
+    const text = maxBytes === undefined ? await req.text() : await readRequestTextWithLimit(req, maxBytes);
     if (allowEmpty && !text.trim()) return {};
     const value: unknown = JSON.parse(text);
     return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
-  } catch { return null; }
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) throw error;
+    return null;
+  }
 }
 
 function json(data: unknown, statusOrInit: number | JsonResponseInit = 200): Response {
@@ -3143,6 +3213,50 @@ function isTailscaleRequest(req: Request, url: URL, server?: RequestIpServer): b
   if (!socketAddress || (!isLoopbackIpAddress(socketAddress) && !getLocalNetworkAddressSet().has(socketAddress))) return false;
   return getRequestHostCandidates(req, url).some(isTailscaleHostname)
     || (loadRemoteConnectionSettings().trustProxyHeaders && getRequestAddressCandidates(req, server).some(isTailscaleIpAddress));
+}
+
+const REMOTE_TAILSCALE_PEER_CACHE_MS = 15_000;
+const REMOTE_TAILSCALE_PEER_FAILURE_CACHE_MS = 3_000;
+let remoteTailscalePeerCache: { expiresAt: number; addresses: ReadonlySet<string> } = {
+  expiresAt: 0,
+  addresses: new Set(),
+};
+let remoteTailscalePeerRefresh: Promise<ReadonlySet<string>> | null = null;
+
+async function getActiveTailscalePeerAddresses(): Promise<ReadonlySet<string>> {
+  if (Date.now() < remoteTailscalePeerCache.expiresAt) return remoteTailscalePeerCache.addresses;
+  if (!remoteTailscalePeerRefresh) {
+    remoteTailscalePeerRefresh = (async () => {
+      let addresses: ReadonlySet<string> = new Set();
+      let ttlMs = REMOTE_TAILSCALE_PEER_FAILURE_CACHE_MS;
+      try {
+        const { stdout } = await execAsync('tailscale status --json', { timeout: 2500, windowsHide: true });
+        const status = parseTailscaleStatus(JSON.parse(stdout || '{}'));
+        if (status.connected) {
+          addresses = new Set(status.activePeerIps);
+          ttlMs = REMOTE_TAILSCALE_PEER_CACHE_MS;
+        }
+      } catch {
+        // Missing/stale Tailscale status cannot authorize a direct socket.
+      }
+      remoteTailscalePeerCache = { expiresAt: Date.now() + ttlMs, addresses };
+      return addresses;
+    })().finally(() => { remoteTailscalePeerRefresh = null; });
+  }
+  return remoteTailscalePeerRefresh;
+}
+
+async function isVerifiedPublishedTailscaleRequest(req: Request, url: URL, server?: RequestIpServer): Promise<boolean> {
+  const socketAddress = getRequestSocketAddress(req, server);
+  if (!socketAddress) return false;
+  // Tailscale Serve forwards to this machine over loopback (or a local
+  // interface). Keep that existing front door separate from direct peers.
+  if (isLoopbackIpAddress(socketAddress) || getLocalNetworkAddressSet().has(socketAddress)) {
+    return isTailscaleRequest(req, url, server);
+  }
+  const peerAddress = normalizeTailscalePeerIp(socketAddress);
+  if (!peerAddress || !isTailscaleIpAddress(peerAddress)) return false;
+  return (await getActiveTailscalePeerAddresses()).has(peerAddress);
 }
 
 function isPublishedRemoteRequestAllowed(req: Request, url: URL, server?: RequestIpServer): boolean {
@@ -21610,6 +21724,62 @@ async function handleUmbraUiInpaintProjectList(): Promise<Response> {
   }
 }
 
+async function handleUmbraUiCanvasStudioProjectList(): Promise<Response> {
+  try {
+    return json({ success: true, projects: await umbraUiCanvasStudioProjectService.list() });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || 'Failed to list Canvas Studio projects.') }, 500);
+  }
+}
+
+async function handleUmbraUiCanvasStudioProjectGet(projectId: string): Promise<Response> {
+  try {
+    const project = await umbraUiCanvasStudioProjectService.get(projectId);
+    return project
+      ? json({ success: true, project })
+      : json({ success: false, error: 'The Canvas Studio project was not found.' }, 404);
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || 'Failed to load the Canvas Studio project.') }, 400);
+  }
+}
+
+async function handleUmbraUiCanvasStudioProjectSave(req: Request, projectId: string): Promise<Response> {
+  try {
+    const body = await req.json() as { project?: unknown };
+    const project = await umbraUiCanvasStudioProjectService.save(projectId, body?.project);
+    return json({ success: true, project });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || 'Failed to save the Canvas Studio project.') },
+      error instanceof UmbraCanvasStudioConflictError ? 409 : 400);
+  }
+}
+
+async function handleUmbraUiCanvasStudioProjectDelete(projectId: string): Promise<Response> {
+  try {
+    await umbraUiCanvasStudioProjectService.delete(projectId);
+    return json({ success: true });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || 'Failed to delete the Canvas Studio project.') }, 400);
+  }
+}
+
+async function handleUmbraUiCanvasStudioRevisionList(projectId: string): Promise<Response> {
+  try {
+    return json({ success: true, revisions: await umbraUiCanvasStudioProjectService.listRevisions(projectId) });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || 'Failed to list Canvas Studio revisions.') }, 400);
+  }
+}
+
+async function handleUmbraUiCanvasStudioRevisionRestore(projectId: string, revisionId: string): Promise<Response> {
+  try {
+    return json({ success: true, project: await umbraUiCanvasStudioProjectService.restoreRevision(projectId, revisionId) });
+  } catch (error: any) {
+    return json({ success: false, error: String(error?.message || 'Failed to restore the Canvas Studio revision.') },
+      error?.code === 'ENOENT' ? 404 : 400);
+  }
+}
+
 async function handleUmbraUiInpaintProjectSave(req: Request, projectId: string): Promise<Response> {
   try {
     const form = await req.formData();
@@ -23842,9 +24012,15 @@ async function openPowerPrompterDocumentSessionUnlocked(
   await restorePowerPrompterDirtySessionUnlocked();
   const resolved = resolvePPPromptFile(filePath);
   if (!resolved) throw new Error('Invalid Power Prompter file path');
-  if (shouldReusePowerPrompterSession(powerPrompterDocumentSession.file, resolved.filePath, !!powerPrompterDocumentSession.document)) {
-    return powerPrompterDocumentSession;
+  const isOpenFile = shouldReusePowerPrompterSession(
+    powerPrompterDocumentSession.file, resolved.filePath, !!powerPrompterDocumentSession.document,
+  );
+  if (isOpenFile && powerPrompterDocumentSession.dirty) return powerPrompterDocumentSession;
+  const currentStorageToken = await getPowerPrompterCanonicalStorageToken(resolved);
+  if (!currentStorageToken) {
+    throw new PowerPrompterSessionConflictError('The card file is missing. Its open session was preserved.');
   }
+  if (isOpenFile && currentStorageToken === powerPrompterSessionStorageToken) return powerPrompterDocumentSession;
   assertPowerPrompterSessionCanOpen(powerPrompterDocumentSession.file, resolved.filePath, powerPrompterDocumentSession.dirty);
   const loaded = await loadPPCardDocumentForFile(resolved.filePath);
   const normalized = normalizePPCardDocument(loaded.document, resolved.filePath);
@@ -23904,8 +24080,10 @@ async function ensurePowerPrompterDocumentSession(filePath?: string | null): Pro
       return powerPrompterDocumentSession;
     }
 
-    if (persisted?.file && resolvePPPromptFile(persisted.file)?.filePath === persisted.file) {
-      return openPowerPrompterDocumentSessionUnlocked(persisted.file, { reason: 'document_restored' });
+    const persistedFile = persisted?.file ? resolvePPPromptFile(persisted.file) : null;
+    if (persistedFile?.filePath === persisted?.file
+      && await getPowerPrompterCanonicalStorageToken(persistedFile)) {
+      return openPowerPrompterDocumentSessionUnlocked(persistedFile.filePath, { reason: 'document_restored' });
     }
 
     try {
@@ -24066,6 +24244,9 @@ async function getPowerPrompterCardStorageRevision(resolved: { fullPath: string;
 
 async function loadPowerPrompterCardWithStorageRevision(resolved: { filePath: string; fullPath: string; sidecarPath: string }) {
   const before = await getPowerPrompterCardStorageRevision(resolved);
+  if (before === 'missing') {
+    throw new PowerPrompterSessionConflictError('The card file is missing. Refresh the file list before editing it.');
+  }
   const loaded = await loadPPCardDocumentForFile(resolved.filePath);
   const after = await getPowerPrompterCardStorageRevision(resolved);
   if (before !== after) throw new PowerPrompterSessionConflictError();
@@ -24121,8 +24302,12 @@ async function savePowerPrompterCardFromEditor(
       }
     }
     if (!active && options.intent !== 'create-card') {
+      const currentStorageRevision = await getPowerPrompterCardStorageRevision(resolved);
+      if (currentStorageRevision === 'missing') {
+        throw new PowerPrompterSessionConflictError('The card file is missing. Refresh the file list before editing it.');
+      }
       assertPowerPrompterCardStorageRevision(
-        await getPowerPrompterCardStorageRevision(resolved),
+        currentStorageRevision,
         options.expectedStorageRevision,
       );
     }
@@ -26724,9 +26909,17 @@ async function runGalleryProgressiveMetadataRefresh(folderPath: string, files: G
     statMs = Date.now() - statStartedAt;
 
     if (fileInputs.length > 0) {
-      const dbStartedAt = Date.now();
-      galleryDb.upsertFolderFiles(folderPath, fileInputs);
-      dbMs = Date.now() - dbStartedAt;
+      const batchSize = 32;
+      for (let offset = 0; offset < fileInputs.length; offset += batchSize) {
+        const dbStartedAt = Date.now();
+        galleryDb.upsertFolderFiles(folderPath, fileInputs.slice(offset, offset + batchSize));
+        dbMs += Date.now() - dbStartedAt;
+        // The stat worker may return a whole folder. Keep each SQLite turn
+        // short so other main-server requests can run while indexing continues.
+        if (offset + batchSize < fileInputs.length) {
+          await new Promise<void>(resolve => setTimeout(resolve, 0));
+        }
+      }
     }
   } catch (error) {
     appendGalleryProgressiveListLog({
@@ -26834,13 +27027,16 @@ function invalidateFsFolderSummaryForPaths(paths: Array<string | null | undefine
     }
   }
   if (targets.size === 0) return;
-  for (const key of Array.from(fsFolderSummaryCache.keys())) {
+  for (const key of new Set([...fsFolderSummaryCache.keys(), ...fsFolderSummaryInFlight.keys()])) {
     const shouldDrop = Array.from(targets).some((target) => (
       key === target ||
       key.startsWith(`${target}/`) ||
       target.startsWith(`${key}/`)
     ));
-    if (shouldDrop) fsFolderSummaryCache.delete(key);
+    if (shouldDrop) {
+      fsFolderSummaryCache.delete(key);
+      fsFolderSummaryInFlight.delete(key);
+    }
   }
 }
 
@@ -27273,6 +27469,24 @@ async function handleFsList(url: URL, signal?: AbortSignal): Promise<Response> {
   }
 }
 
+async function getGalleryIndexedFilesByPathsBatched(folderPath: string, pathInputs: string[], signal?: AbortSignal) {
+  const files: ReturnType<GalleryDb['getFolderFilesByPaths']> = [];
+  const uniquePaths = Array.from(new Set(pathInputs.filter(Boolean)));
+  const batchSize = 128;
+  let dbMs = 0;
+  for (let offset = 0; offset < uniquePaths.length; offset += batchSize) {
+    signal?.throwIfAborted();
+    const dbStartedAt = Date.now();
+    files.push(...galleryDb.getFolderFilesByPaths(folderPath, uniquePaths.slice(offset, offset + batchSize)));
+    dbMs += Date.now() - dbStartedAt;
+    if (offset + batchSize < uniquePaths.length) {
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+    }
+  }
+  signal?.throwIfAborted();
+  return { files, dbMs };
+}
+
 async function handleFsListProgressive(url: URL, signal?: AbortSignal): Promise<Response> {
   if (signal?.aborted) return new Response(null, { status: 499 });
   const requestStartedAt = Date.now();
@@ -27367,14 +27581,12 @@ async function handleFsListProgressive(url: URL, signal?: AbortSignal): Promise<
     const folders = Array.isArray((result as any)?.folders) ? (result as any).folders : [];
     const normalizedFolderPath = normalizeOutputPathInput(targetPath);
 
-    const dbStartedAt = Date.now();
     const orderedPaths = files
       .map((file: any) => normalizeOutputPathInput(String(file?.path || file?.relativePath || '').trim()))
       .filter(Boolean);
-    const indexedFiles = orderedPaths.length > 0
-      ? galleryDb.getFolderFilesByPaths(normalizedFolderPath, orderedPaths)
-      : [];
-    const dbMs = Date.now() - dbStartedAt;
+    const { files: indexedFiles, dbMs } = await getGalleryIndexedFilesByPathsBatched(
+      normalizedFolderPath, orderedPaths, signal,
+    );
     const indexedByPath = new Map<string, (typeof indexedFiles)[number]>();
     for (const entry of indexedFiles) {
       const normalized = normalizeOutputPathInput(String(entry?.path || '').trim());
@@ -29551,9 +29763,57 @@ async function handleModelManagerFsRename(req: Request): Promise<Response> {
     const modelRoots = getModelManagerRootsResolved().map(root => root.fullPath);
     if (!resolveAllowedExistingGalleryPath(targetFullPath, modelRoots)) return json({ error: 'Access denied' }, 403);
     const targetPath = toClientPath(targetFullPath);
-    const oldThumbArtifacts = await listModelThumbArtifactsForFile(source.fullPath);
+    const sourceStat = await fs.lstat(source.fullPath, { bigint: true }).catch(() => null);
+    if (!sourceStat) return json({ error: 'Source not found' }, 404);
+    const targetStat = await fs.lstat(targetFullPath, { bigint: true }).catch(() => null);
+    if (targetStat && (normalizePathForCompare(targetFullPath) !== normalizePathForCompare(source.fullPath)
+      || targetStat.dev !== sourceStat.dev || targetStat.ino !== sourceStat.ino)) {
+      return json({ error: 'Destination already exists' }, 409);
+    }
     const oldBaseName = basename(source.fullPath);
     const nextBaseName = basename(targetFullPath);
+    const artifactRenames: Array<{ oldPath: string; nextPath: string }> = [];
+    if (sourceStat.isFile() && !sourceStat.isSymbolicLink()) {
+      const snapshotRenames = [
+        {
+          oldPath: getPreferredModelSnapshotFullPath(source.fullPath),
+          nextPath: getPreferredModelSnapshotFullPath(targetFullPath),
+        },
+        {
+          oldPath: getLegacyModelSnapshotFullPath(source.fullPath),
+          nextPath: getLegacyModelSnapshotFullPath(targetFullPath),
+        },
+        {
+          oldPath: getPreferredModelInspectionReportFullPath(source.fullPath),
+          nextPath: getPreferredModelInspectionReportFullPath(targetFullPath),
+        },
+      ];
+      for (const entry of snapshotRenames) {
+        if (await getRegularModelArtifactStat(entry.oldPath, modelRoots)) artifactRenames.push(entry);
+      }
+      for (const oldThumbPath of await listModelThumbArtifactsForFile(source.fullPath)) {
+        const oldFileName = basename(oldThumbPath);
+        const nextFileName = `${nextBaseName}${oldFileName.slice(oldBaseName.length)}`;
+        artifactRenames.push({ oldPath: oldThumbPath, nextPath: join(dirname(oldThumbPath), nextFileName) });
+      }
+    }
+    for (const entry of artifactRenames) {
+      if (!resolveAllowedExistingGalleryPath(entry.nextPath, modelRoots)) return json({ error: 'Access denied' }, 403);
+      const artifactDir = dirname(entry.nextPath);
+      if (basename(artifactDir) === MODEL_ARTIFACT_DIR && existsSync(artifactDir)
+        && !await isRegularModelArtifactDirectory(artifactDir, modelRoots)) {
+        return json({ error: 'Model artifact folder is not a regular directory' }, 409);
+      }
+      const oldStat = await fs.lstat(entry.oldPath, { bigint: true }).catch(() => null);
+      const nextStat = await fs.lstat(entry.nextPath, { bigint: true }).catch(() => null);
+      if (!oldStat?.isFile() || oldStat.isSymbolicLink()) {
+        return json({ error: 'Model artifact changed during rename' }, 409);
+      }
+      if (nextStat && (normalizePathForCompare(entry.nextPath) !== normalizePathForCompare(entry.oldPath)
+        || nextStat.dev !== oldStat.dev || nextStat.ino !== oldStat.ino)) {
+        return json({ error: 'Model artifact target already exists' }, 409);
+      }
+    }
     const startedAt = Date.now();
 
     await fsWorkerService.rename({
@@ -29561,53 +29821,34 @@ async function handleModelManagerFsRename(req: Request): Promise<Response> {
       newFullPath: targetFullPath,
     });
 
-    const snapshotRenames = [
-      {
-        oldPath: getPreferredModelSnapshotFullPath(source.fullPath),
-        nextPath: getPreferredModelSnapshotFullPath(targetFullPath),
-      },
-      {
-        oldPath: getLegacyModelSnapshotFullPath(source.fullPath),
-        nextPath: getLegacyModelSnapshotFullPath(targetFullPath),
-      },
-      {
-        oldPath: getPreferredModelInspectionReportFullPath(source.fullPath),
-        nextPath: getPreferredModelInspectionReportFullPath(targetFullPath),
-      },
-    ];
-    for (const snapshotRename of snapshotRenames) {
-      if (!existsSync(snapshotRename.oldPath)
-        || !resolveAllowedExistingGalleryPath(snapshotRename.oldPath, modelRoots)
-        || !resolveAllowedExistingGalleryPath(snapshotRename.nextPath, modelRoots)) continue;
-      await fs.mkdir(dirname(snapshotRename.nextPath), { recursive: true }).catch(() => undefined);
-      await fsWorkerService.rename({
-        oldFullPath: snapshotRename.oldPath,
-        newFullPath: snapshotRename.nextPath,
-        replaceExisting: true,
-      }).catch(() => undefined);
-    }
-
-    for (const oldThumbPath of oldThumbArtifacts) {
-      const parentDir = dirname(oldThumbPath);
-      const oldFileName = basename(oldThumbPath);
-      const nextFileName = oldFileName.replace(`${oldBaseName}${MODEL_THUMB_PREFIX}`, `${nextBaseName}${MODEL_THUMB_PREFIX}`);
-      const nextThumbPath = join(parentDir, nextFileName);
-      if (!resolveAllowedExistingGalleryPath(oldThumbPath, modelRoots)
-        || !resolveAllowedExistingGalleryPath(nextThumbPath, modelRoots)) continue;
-      await fsWorkerService.rename({
-        oldFullPath: oldThumbPath,
-        newFullPath: nextThumbPath,
-        replaceExisting: true,
-      }).catch(() => undefined);
+    const artifactFailures: string[] = [];
+    for (const entry of artifactRenames) {
+      try {
+        if (!await getRegularModelArtifactStat(entry.oldPath, modelRoots)) {
+          throw new Error('Artifact changed before transfer');
+        }
+        const artifactDir = dirname(entry.nextPath);
+        if (basename(artifactDir) === MODEL_ARTIFACT_DIR) {
+          assertModelManagerArtifactPath(artifactDir);
+          await fs.mkdir(artifactDir, { recursive: true });
+          if (!await isRegularModelArtifactDirectory(artifactDir, modelRoots)) {
+            throw new Error('Model artifact folder is not a regular directory');
+          }
+        }
+        await fsWorkerService.rename({ oldFullPath: entry.oldPath, newFullPath: entry.nextPath });
+      } catch (error: any) {
+        artifactFailures.push(`${basename(entry.oldPath)}: ${error?.message || 'Rename failed'}`);
+      }
     }
 
     await modelIndexWorkerService.invalidatePaths([source.fullPath, targetFullPath, dirname(source.fullPath)]);
     console.log(`[ModelManager] Rename completed from="${source.clientPath}" to="${targetPath}" ms=${Date.now() - startedAt}`);
     return json({
-      success: true,
+      success: artifactFailures.length === 0,
       path: source.clientPath,
       newPath: targetPath,
-    });
+      ...(artifactFailures.length ? { error: `Model renamed, but ${artifactFailures.length} artifact(s) could not be renamed: ${artifactFailures[0]}` } : {}),
+    }, artifactFailures.length ? 409 : 200);
   } catch (error: any) {
     console.error('[ModelManager] rename error:', error);
     return json({ error: error?.message || 'Rename failed' }, 500);
@@ -29718,14 +29959,21 @@ function getModelManagerMediaExtension(rawUrl: string, mimeTypeInput: string): s
   if (mimeType.includes('image/webp')) return 'webp';
   if (mimeType.includes('image/gif')) return 'gif';
   if (mimeType.includes('image/avif')) return 'avif';
+  if (mimeType.includes('image/bmp') || mimeType.includes('image/x-ms-bmp')) return 'bmp';
+  if (mimeType.includes('image/tiff')) return 'tiff';
+  if (mimeType.includes('image/heic')) return 'heic';
+  if (mimeType.includes('image/heif')) return 'heif';
+  if (mimeType.includes('image/jxl')) return 'jxl';
   if (mimeType.includes('video/mp4')) return 'mp4';
   if (mimeType.includes('video/webm')) return 'webm';
   if (mimeType.includes('video/quicktime')) return 'mov';
+  if (mimeType.includes('video/mpeg')) return 'mpeg';
+  if (mimeType.includes('video/ogg')) return 'ogv';
 
   try {
     const parsed = new URL(rawUrl);
     const match = parsed.pathname.match(/\.([a-z0-9]{2,8})$/i);
-    if (match && match[1]) return String(match[1]).toLowerCase();
+    if (match && MODEL_THUMB_EXTENSIONS.has(match[1].toLowerCase())) return match[1].toLowerCase();
   } catch {
     // ignore
   }
@@ -30698,7 +30946,14 @@ async function handleFsFolderSummary(url: URL): Promise<Response> {
   const path = normalizeOutputPathInput(rawPath);
   const normalizedPath = normalizeFsListPathKey(path);
   const force = ['1', 'true', 'yes'].includes(String(url.searchParams.get('force') || url.searchParams.get('refresh') || '').trim().toLowerCase());
-  let ownsInFlight = false;
+  let ownedInFlight: Promise<{
+    path: string;
+    signature?: string;
+    subfolderCount: number;
+    imageCount: number;
+    videoCount: number;
+    totalMediaCount: number;
+  }> | null = null;
 
   if (normalizedPath === TRASH_ROOT || normalizedPath.startsWith(`${TRASH_ROOT}/`)) {
     return json({
@@ -30763,20 +31018,21 @@ async function handleFsFolderSummary(url: URL): Promise<Response> {
         videoCount: Math.max(0, Number(summary?.videoCount || 0) || 0),
         totalMediaCount: Math.max(0, Number(summary?.totalMediaCount || 0) || 0),
       };
-      setFsFolderSummaryCache(normalizedPath, normalizedSummary);
+      if (fsFolderSummaryInFlight.get(normalizedPath) === ownedInFlight) {
+        setFsFolderSummaryCache(normalizedPath, normalizedSummary);
+      }
       return normalizedSummary;
     })();
     fsFolderSummaryInFlight.set(normalizedPath, pending);
-    ownsInFlight = true;
+    ownedInFlight = pending;
     const resolvedSummary = await pending;
     return json(resolvedSummary);
   } catch (error: any) {
     console.error('[FS Folder Summary] Error:', error);
     return json({ error: error.message }, 500);
   } finally {
-    if (ownsInFlight) {
-      const active = fsFolderSummaryInFlight.get(normalizedPath);
-      if (active) fsFolderSummaryInFlight.delete(normalizedPath);
+    if (ownedInFlight && fsFolderSummaryInFlight.get(normalizedPath) === ownedInFlight) {
+      fsFolderSummaryInFlight.delete(normalizedPath);
     }
   }
 }
@@ -32685,8 +32941,11 @@ const server = Bun.serve<UmbraSocketData>({
         if (method === 'OPTIONS') return new Response(null, { headers: getCorsHeaders() });
 
         const hostRequest = isHostRequest(req, url, server);
-        const tailscaleRequest = !hostRequest && isTailscaleRequest(req, url, server);
         const remoteConnectionSettings = loadRemoteConnectionSettings();
+        let tailscaleRequest = !hostRequest && isTailscaleRequest(req, url, server);
+        if (tailscaleRequest && remoteConnectionSettings.enabled && !IS_UMBRA_DEV_MODE) {
+          tailscaleRequest = await isVerifiedPublishedTailscaleRequest(req, url, server);
+        }
         const remoteAccess = resolveRemoteRequestAccess({
           enabled: remoteConnectionSettings.enabled,
           hostRequest,
@@ -34723,7 +34982,7 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/booru/corpus/start' && method === 'POST') {
         try {
-          const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+          const body = await readJsonObject(req, false, 32 * 1024) || {};
           const apiKeys = await loadStoredApiKeys();
           const username = String(apiKeys.danbooru?.username || '').trim();
           const status = await danbooruTagCorpusService.start({
@@ -34738,7 +34997,8 @@ const server = Bun.serve<UmbraSocketData>({
           });
           return json({ ok: true, status });
         } catch (error: any) {
-          return json({ ok: false, error: error?.message || 'Could not start the Danbooru relation corpus.' }, 400);
+          return json({ ok: false, error: error?.message || 'Could not start the Danbooru relation corpus.' },
+            error instanceof RequestBodyTooLargeError ? 413 : 400);
         }
       }
 
@@ -34827,7 +35087,7 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/data-forge/wildcard-generator/inspect' && method === 'POST') {
         try {
-          const body = await req.json().catch(() => ({})) as { tags?: unknown };
+          const body = await readJsonObject(req, false, 128 * 1024) || {};
           const values = await inspectDataForgeWildcardTags({
             csvPath: resolveDataForgeWildcardTagCsvPath(),
             tags: body.tags,
@@ -34835,20 +35095,22 @@ const server = Bun.serve<UmbraSocketData>({
           });
           return json({ ok: true, values });
         } catch (error: any) {
-          return json({ ok: false, error: error?.message || 'Wildcard tag inspection failed.' }, 400);
+          return json({ ok: false, error: error?.message || 'Wildcard tag inspection failed.' },
+            error instanceof RequestBodyTooLargeError ? 413 : 400);
         }
       }
 
       if (path === '/api/data-forge/wildcard-generator/generate' && method === 'POST') {
         try {
-          const body = await req.json().catch(() => ({})) as DataForgeWildcardGenerateRequest;
+          const body = (await readJsonObject(req, false, 1024 * 1024) || {}) as DataForgeWildcardGenerateRequest;
           const result = await generateDataForgeWildcard({
             csvPath: resolveDataForgeWildcardTagCsvPath(),
             request: body,
           });
           return json({ ok: true, ...result });
         } catch (error: any) {
-          return json({ ok: false, error: error?.message || 'Wildcard generation failed.' }, 400);
+          return json({ ok: false, error: error?.message || 'Wildcard generation failed.' },
+            error instanceof RequestBodyTooLargeError ? 413 : 400);
         }
       }
 
@@ -36016,6 +36278,35 @@ const server = Bun.serve<UmbraSocketData>({
         }
       }
 
+      if (path === '/api/comfy/ensure-media' && method === 'POST') {
+        try {
+          const body = await req.json() as { sourcePath?: unknown; filename?: unknown; kind?: unknown };
+          const kind = String(body?.kind || '').trim();
+          if (kind !== 'image' && kind !== 'video' && kind !== 'audio') {
+            return json({ error: 'An image, video, or audio media kind is required.' }, 400);
+          }
+          const inputRoot = getComfyInputRootFast();
+          const staged = await ensureUmbraUiStagedMedia({
+            sourcePath: typeof body.sourcePath === 'string' ? body.sourcePath : '',
+            filename: typeof body.filename === 'string' ? body.filename : '',
+            kind,
+            inputRoot,
+            galleryRoots: getGalleryTransferAllowedRoots(),
+            rootDir: ROOT_DIR,
+            allowedExtensions: kind === 'image' ? UMBRA_UI_IMAGE_EXTENSIONS
+              : kind === 'video' ? UMBRA_UI_VIDEO_EXTENSIONS : UMBRA_UI_AUDIO_EXTENSIONS,
+          });
+          if (kind === 'video') {
+            await umbraStagedVideoPreviewGrants.register(inputRoot, staged.filename, staged.destPath)
+              .catch((error) => console.warn('[Umbra UI] Could not register staged video preview:', error));
+          }
+          return json({ success: true, filename: staged.filename, kind, copied: staged.copied });
+        } catch (error: any) {
+          return json({ error: String(error?.message || 'Failed to stage media for ComfyUI.') },
+            error instanceof UmbraUiStagedMediaError ? error.status : 500);
+        }
+      }
+
       if (path === '/api/comfy/upload-media' && method === 'POST') {
         let tempPath = '';
         let uploadTooLarge = false;
@@ -36283,15 +36574,15 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'Dataset not found' }, 404);
           }
 
-          const files = await fs.readdir(datasetPath);
-          const images = await Promise.all(
-            files
-              .filter(f => /\.(jpg|jpeg|png|webp|bmp|gif|avif)$/i.test(f))
-              .map(async (f) => {
+          const files = await fs.readdir(datasetPath, { withFileTypes: true });
+          const images = await mapBounded(
+            files.filter(entry => entry.isFile() && /\.(jpg|jpeg|png|webp|bmp|gif|avif)$/i.test(entry.name)),
+            12,
+            async ({ name: f }) => {
                 const baseName = f.replace(/\.[^.]+$/, '');
-                // Gallery-dl creates .jpg.txt and .jpg.json, not .txt and .json
-                const hasCaption = files.includes(f + '.txt') || files.includes(baseName + '.txt');
-                const hasMetadata = files.includes(f + '.json') || files.includes(baseName + '.json');
+                let hasCaption = false;
+                let hasMetadata = false;
+                const maxSidecarBytes = 1024 * 1024;
 
                 // Try to read tags from metadata JSON if it exists
                 let tags: string[] = [];
@@ -36304,14 +36595,16 @@ const server = Bun.serve<UmbraSocketData>({
                 ];
 
                 for (const captionPath of captionPaths) {
-                  if (existsSync(captionPath)) {
-                    try {
-                      // Read caption as-is (keep underscores for training compatibility)
-                      captionText = (await fs.readFile(captionPath, 'utf-8')).trim();
-                      break;
-                    } catch {
-                      // Ignore read errors
-                    }
+                  const sidecarStat = await fs.lstat(captionPath).catch(() => null);
+                  if (!sidecarStat?.isFile()) continue;
+                  hasCaption = true;
+                  if (sidecarStat.size > maxSidecarBytes) continue;
+                  try {
+                    // Read caption as-is (keep underscores for training compatibility).
+                    captionText = (await fs.readFile(captionPath, 'utf-8')).trim();
+                    break;
+                  } catch {
+                    // Ignore unreadable sidecars.
                   }
                 }
 
@@ -36322,8 +36615,11 @@ const server = Bun.serve<UmbraSocketData>({
                 ];
 
                 for (const metaPath of metaPaths) {
-                  if (existsSync(metaPath)) {
-                    try {
+                  const sidecarStat = await fs.lstat(metaPath).catch(() => null);
+                  if (!sidecarStat?.isFile()) continue;
+                  hasMetadata = true;
+                  if (sidecarStat.size > maxSidecarBytes) continue;
+                  try {
                       const metaContent = await fs.readFile(metaPath, 'utf-8');
                       const meta = JSON.parse(metaContent);
 
@@ -36354,9 +36650,8 @@ const server = Bun.serve<UmbraSocketData>({
                         }
                       }
                       if (tags.length > 0) break;
-                    } catch {
-                      // Ignore metadata read errors
-                    }
+                  } catch {
+                    // Ignore unreadable or invalid metadata.
                   }
                 }
 
@@ -36373,7 +36668,7 @@ const server = Bun.serve<UmbraSocketData>({
                   hasMetadata,
                   tags: [...new Set(tags)].slice(0, 50) // Dedupe and limit to 50 tags
                 };
-              })
+            },
           );
 
           return json({ images });
@@ -37661,6 +37956,27 @@ const server = Bun.serve<UmbraSocketData>({
         return handleUmbraUiInpaintProjectList();
       }
 
+      if (path === '/api/umbra-ui/canvas-studio/projects' && method === 'GET') {
+        return handleUmbraUiCanvasStudioProjectList();
+      }
+
+      if (path.startsWith('/api/umbra-ui/canvas-studio/projects/')) {
+        const suffix = path.slice('/api/umbra-ui/canvas-studio/projects/'.length);
+        const segments = suffix.split('/').filter(Boolean).map((segment) => decodeURIComponent(segment));
+        if (segments.length === 1) {
+          if (method === 'GET') return handleUmbraUiCanvasStudioProjectGet(segments[0]);
+          if (method === 'PUT') return handleUmbraUiCanvasStudioProjectSave(req, segments[0]);
+          if (method === 'DELETE') return handleUmbraUiCanvasStudioProjectDelete(segments[0]);
+        }
+        if (segments.length === 2 && segments[1] === 'revisions' && method === 'GET') {
+          return handleUmbraUiCanvasStudioRevisionList(segments[0]);
+        }
+        if (segments.length === 4 && segments[1] === 'revisions' && segments[3] === 'restore' && method === 'POST') {
+          return handleUmbraUiCanvasStudioRevisionRestore(segments[0], segments[2]);
+        }
+        return json({ success: false, error: 'Unsupported Canvas Studio project operation.' }, 405);
+      }
+
       if (path === '/api/umbra-ui/canvas/projects' && method === 'GET') {
         return handleUmbraUiCanvasWorkspaceProjectList();
       }
@@ -38330,7 +38646,12 @@ const server = Bun.serve<UmbraSocketData>({
       }
 
       if (path === '/api/powerprompter/wildcards' && method === 'PUT') {
-        const body = await req.json().catch(() => ({})) as { name?: unknown; folder?: unknown; path?: unknown; values?: unknown; choices?: unknown; generatorDefinition?: unknown };
+        let body: { name?: unknown; folder?: unknown; path?: unknown; values?: unknown; choices?: unknown; generatorDefinition?: unknown };
+        try {
+          body = await readJsonObject(req, false, 16 * 1024 * 1024) || {};
+        } catch (error) {
+          return json({ success: false, error: error instanceof Error ? error.message : 'Request body is too large.' }, 413);
+        }
         const name = normalizePowerPrompterWildcardName(body.name);
         if (!name) return json({ success: false, error: 'Use letters, numbers, hyphens, or underscores for a wildcard name.' }, 400);
         const values = Array.isArray(body.values)

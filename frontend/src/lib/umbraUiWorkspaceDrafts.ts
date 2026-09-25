@@ -15,6 +15,10 @@ export function isImageWorkspace(mode: string): mode is ImageWorkspace {
   return mode === 'image' || mode === 'img2img' || mode === 'inpaint' || mode === 'canvas';
 }
 
+export function usesInpaintWorkspacePipeline(mode: string): boolean {
+  return mode === 'inpaint' || mode === 'canvas';
+}
+
 export function normalizeImageWorkspaceDrafts(value: unknown): ImageWorkspaceDrafts {
   const result: ImageWorkspaceDrafts = {};
   if (!value || typeof value !== 'object') return result;
@@ -44,4 +48,20 @@ export function createImageWorkspaceDraft(): ImageWorkspaceDraft {
     imageAgentModeEnabled: false,
     imageAgentPrompt: '',
   };
+}
+
+export function stageImageWorkspaceNavigation(
+  drafts: ImageWorkspaceDrafts,
+  fromMode: string,
+  fromDraft: ImageWorkspaceDraft | null,
+  toMode: string,
+): ImageWorkspaceDraft | null {
+  if (isImageWorkspace(fromMode) && fromDraft) {
+    drafts[fromMode] = structuredClone(fromDraft);
+  }
+  if (!isImageWorkspace(toMode)) return null;
+  // Save the first destination draft before the active mode changes. A reload
+  // during the debounced save must still restore this workspace's own controls.
+  drafts[toMode] ||= createImageWorkspaceDraft();
+  return drafts[toMode];
 }

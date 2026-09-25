@@ -426,6 +426,7 @@ export function UmbraFilmstrip({
   const [feedMode, setFeedMode] = useState<FeedMode>('replace');
   const [dropTargetPath, setDropTargetPath] = useState<string>('');
   const suppressSelectionEmitRef = useRef(false);
+  const localSelectionPendingRef = useRef(false);
   const externalSelectionRef = useRef<{ paths: string[]; primaryPath?: string } | null>(null);
   const pendingSelectionRef = useRef<{ folderPath?: string; paths: string[]; primaryPath?: string } | null>(null);
   const feedSignatureRef = useRef<string>('');
@@ -853,6 +854,7 @@ export function UmbraFilmstrip({
         return;
       }
 
+      if (!feedDone) localSelectionPendingRef.current = false;
       setFeedComplete(feedDone);
       const feedSignature = buildFilmstripFeedSignature(folderPath, mapped);
       if (folderPath) setFeedFolder(folderPath);
@@ -952,6 +954,7 @@ export function UmbraFilmstrip({
       }>;
       const source = String(custom?.detail?.source || '').trim();
       if (source === 'filmstrip') return;
+      localSelectionPendingRef.current = false;
 
       const incomingPaths = Array.isArray(custom?.detail?.paths)
         ? custom.detail.paths.map((entry) => normalizePath(String(entry || ''))).filter(Boolean)
@@ -1206,7 +1209,15 @@ export function UmbraFilmstrip({
   }, [activeWorkspace, currentFolder, refreshImages, rootPath]);
 
   useEffect(() => {
-    if (!feedComplete || pathKey(feedFolder) !== pathKey(currentFolder || rootPath)) return;
+    if (pathKey(feedFolder) !== pathKey(currentFolder || rootPath)) return;
+    if (!feedComplete) {
+      if (!folderLoadError || !localSelectionPendingRef.current) return;
+      const visibleIds = new Set(selectableImages.map((item) => normalizeId(item.id)).filter(Boolean));
+      if (Array.from(selectedIds).some((id) => !visibleIds.has(normalizeId(id)))) {
+        localSelectionPendingRef.current = false;
+        return;
+      }
+    }
     if (suppressSelectionEmitRef.current) {
       suppressSelectionEmitRef.current = false;
       return;
@@ -1234,7 +1245,8 @@ export function UmbraFilmstrip({
         source: 'filmstrip',
       },
     }));
-  }, [currentFolder, feedComplete, feedFolder, lastSelectedId, rootPath, selectableImages, selectedIds]);
+    localSelectionPendingRef.current = false;
+  }, [currentFolder, feedComplete, feedFolder, folderLoadError, lastSelectedId, rootPath, selectableImages, selectedIds]);
 
   const openPathInGallery = useCallback((targetPath: string, source: string, restoreType?: 'file' | 'folder') => {
     const normalizedTargetPath = normalizePath(targetPath);
@@ -1269,6 +1281,7 @@ export function UmbraFilmstrip({
     const clickedIndex = orderedIds.indexOf(id);
     if (clickedIndex < 0) return;
     clearExternalSelection();
+    localSelectionPendingRef.current = !feedComplete && Boolean(folderLoadError);
 
     if (isTouchRemote && touchSelectionMode) {
       if (event.shiftKey && lastSelectedId) {
@@ -1326,7 +1339,7 @@ export function UmbraFilmstrip({
       const imagePath = normalizePath(selectableImages[clickedIndex]?.path || '');
       if (imagePath && !isLiveGenerationPreviewPath(imagePath)) openPathInGallery(imagePath, 'filmstrip-open', 'file');
     }
-  }, [clearExternalSelection, isTouchRemote, lastSelectedId, openPathInGallery, selectableImages, touchSelectionMode]);
+  }, [clearExternalSelection, feedComplete, folderLoadError, isTouchRemote, lastSelectedId, openPathInGallery, selectableImages, touchSelectionMode]);
 
   const notifyGalleryTrashUpdated = useCallback(() => {
     window.dispatchEvent(new CustomEvent('umbra:gallery-trash-updated', { detail: { source: 'filmstrip' } }));
@@ -2209,6 +2222,7 @@ export function UmbraFilmstrip({
         onSelect={onSelect}
         onClearSelection={() => {
           clearExternalSelection();
+          localSelectionPendingRef.current = !feedComplete && Boolean(folderLoadError);
           setSelectedIds(new Set());
           setLastSelectedId('');
         }}
@@ -2221,6 +2235,7 @@ export function UmbraFilmstrip({
             setTouchSelectionMode(true);
             return;
           }
+          localSelectionPendingRef.current = !feedComplete && Boolean(folderLoadError);
           setSelectedIds(new Set(displayedImages.map((item) => item.id)));
           setLastSelectedId(displayedImages.at(-1)?.id || '');
         }}

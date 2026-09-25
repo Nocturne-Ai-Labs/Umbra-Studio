@@ -100,7 +100,8 @@ import {
 } from '@/components/umbra-ui/UmbraModelPickerModal';
 import { stageUmbraUiUpscaleHandoff } from '@/lib/umbraUiUpscale';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
-import { createImageWorkspaceDraft, isImageWorkspace, normalizeImageWorkspaceDrafts, type ImageWorkspaceDraft } from '@/lib/umbraUiWorkspaceDrafts';
+import { restoreUmbraImg2ImgSource } from '@/lib/umbraImg2ImgSourceResume';
+import { isImageWorkspace, normalizeImageWorkspaceDrafts, stageImageWorkspaceNavigation, usesInpaintWorkspacePipeline, type ImageWorkspaceDraft } from '@/lib/umbraUiWorkspaceDrafts';
 import { readUserConfigStrict, readUserConfigWithRetry, writeUserConfig } from '@/lib/userConfig';
 import {
   resolveUmbraUiInpaintControlAvailability,
@@ -635,10 +636,6 @@ export function UmbraUIWorkspace() {
     return () => observer.disconnect();
   }, []);
 
-  React.useEffect(() => {
-    if (!canvasEnabled && activeMode === 'canvas') setActiveMode('image');
-  }, [activeMode, canvasEnabled]);
-
   React.useLayoutEffect(() => {
     const navigation = modeNavigationRef.current;
     const activeButton = navigation?.querySelector<HTMLElement>(`[data-umbra-ui-mode="${activeMode}"]`);
@@ -840,7 +837,7 @@ export function UmbraUIWorkspace() {
   const [batchSize, setBatchSize] = React.useState(
     Math.max(1, Math.min(64, Math.round(initialDeviceResume?.batchSize || 1))),
   );
-  const [img2imgSource, setImg2imgSource] = React.useState<UmbraImg2ImgSourceValue>({
+  const [img2imgSource, setImg2imgSource] = React.useState<UmbraImg2ImgSourceValue>(() => restoreUmbraImg2ImgSource({
     path: '',
     originalPath: '',
     name: '',
@@ -848,7 +845,7 @@ export function UmbraUIWorkspace() {
     width: 0,
     height: 0,
     ...(initialDeviceResume?.img2imgSource || {}),
-  });
+  }));
   const [img2imgDenoise, setImg2imgDenoise] = React.useState(initialDeviceResume?.img2imgDenoise ?? 0.3);
   const [replaceImg2ImgSourceOnComplete, setReplaceImg2ImgSourceOnComplete] = React.useState(
     initialDeviceResume?.replaceImg2ImgSourceOnComplete === true,
@@ -1084,8 +1081,9 @@ export function UmbraUIWorkspace() {
       });
   }, [promptHistory]);
 
+  const lastDeviceResumeModeRef = React.useRef(activeMode);
   React.useEffect(() => {
-    const timer = window.setTimeout(() => {
+    const save = () => {
       writeDeviceUiResume<UmbraUiDeviceResume>('umbra-ui', {
         activeMode,
         txt2imgOutputFolder,
@@ -1131,7 +1129,13 @@ export function UmbraUIWorkspace() {
         outputUpscale,
         tiledVae,
       });
-    }, 250);
+    };
+    if (lastDeviceResumeModeRef.current !== activeMode) {
+      lastDeviceResumeModeRef.current = activeMode;
+      save();
+      return;
+    }
+    const timer = window.setTimeout(save, 250);
     return () => window.clearTimeout(timer);
   }, [
     activeMode,
@@ -1293,9 +1297,19 @@ export function UmbraUIWorkspace() {
     imageAgentPrompt,
   }) : null, [imageControlsSnapshot, promptSegments, activePromptSegmentId, imageAgentModeEnabled, imageAgentPrompt]);
 
+  const lastWorkspaceDraftModeRef = React.useRef(activeMode);
   React.useEffect(() => {
-    if (!imageControlsHydrated || !isImageWorkspace(activeMode) || !currentWorkspaceDraft) return;
-    workspaceDraftsRef.current[activeMode] = structuredClone(currentWorkspaceDraft);
+    const modeChanged = lastWorkspaceDraftModeRef.current !== activeMode;
+    lastWorkspaceDraftModeRef.current = activeMode;
+    if (!imageControlsHydrated) return;
+    if (isImageWorkspace(activeMode) && currentWorkspaceDraft) {
+      workspaceDraftsRef.current[activeMode] = structuredClone(currentWorkspaceDraft);
+    }
+    if (modeChanged) {
+      writeDeviceUiResume('umbra-ui-workspace-drafts', workspaceDraftsRef.current);
+      return;
+    }
+    if (!isImageWorkspace(activeMode) || !currentWorkspaceDraft) return;
     const timer = window.setTimeout(() => {
       writeDeviceUiResume('umbra-ui-workspace-drafts', workspaceDraftsRef.current);
     }, 250);
@@ -1306,15 +1320,22 @@ export function UmbraUIWorkspace() {
   // to use setActiveMode and apply the settings the user chose to transfer.
   const navigateWorkspace = React.useCallback((mode: UmbraGenerationMode) => {
     if (mode === activeMode || !imageControlsHydrated) return;
-    if (isImageWorkspace(activeMode) && currentWorkspaceDraft) {
-      workspaceDraftsRef.current[activeMode] = structuredClone(currentWorkspaceDraft);
-    }
-    if (isImageWorkspace(mode)) {
-      restoreWorkspaceDraft(workspaceDraftsRef.current[mode] || createImageWorkspaceDraft());
-    }
+    const destinationDraft = stageImageWorkspaceNavigation(
+      workspaceDraftsRef.current,
+      activeMode,
+      currentWorkspaceDraft,
+      mode,
+    );
+    if (destinationDraft) restoreWorkspaceDraft(destinationDraft);
     writeDeviceUiResume('umbra-ui-workspace-drafts', workspaceDraftsRef.current);
     setActiveMode(mode);
   }, [activeMode, currentWorkspaceDraft, imageControlsHydrated, restoreWorkspaceDraft]);
+
+  React.useEffect(() => {
+    if (canvasEnabled || activeMode !== 'canvas') return;
+    if (imageControlsHydrated) navigateWorkspace('image');
+    else setActiveMode('image');
+  }, [activeMode, canvasEnabled, imageControlsHydrated, navigateWorkspace]);
 
   const modeIsMounted = React.useCallback(
     (mode: UmbraGenerationMode) => activeMode === mode || mountedModes.has(mode),
@@ -1322,6 +1343,7 @@ export function UmbraUIWorkspace() {
   );
   const activeImageFeature = activeMode === 'img2img' ? 'img2img' : 'txt2img';
   const inpaintWorkspaceActive = activeMode === 'inpaint';
+  const inpaintModelControlsActive = usesInpaintWorkspacePipeline(activeMode);
   const imageModelFamilies = React.useMemo(
     () => listUmbraUiPipelineFamilies(workflows, activeImageFeature),
     [activeImageFeature, workflows],
@@ -1436,10 +1458,10 @@ export function UmbraUIWorkspace() {
     [selectedImageWorkflow],
   );
   const activePipelineModelSelectionKey = React.useMemo(() => getUmbraUiPipelineModelSelectionKey(
-    inpaintWorkspaceActive ? 'inpainting' : activeImageFeature,
+    inpaintModelControlsActive ? 'inpainting' : activeImageFeature,
     modelFamily,
     modelType,
-  ), [activeImageFeature, inpaintWorkspaceActive, modelFamily, modelType]);
+  ), [activeImageFeature, inpaintModelControlsActive, modelFamily, modelType]);
   const primaryModelItems = React.useMemo(
     () => getPrimaryModelItems(modelCatalog, modelType),
     [modelCatalog, modelType],
@@ -1452,9 +1474,9 @@ export function UmbraUIWorkspace() {
     [inpaintPipelineMatch.pipeline?.inpaintAdapter, primaryModelItems],
   );
   const primaryModelPickerItems = React.useMemo(() => {
-    const sourceOptions = inpaintWorkspaceActive ? inpaintModelTypeOptions : imageModelTypeOptions;
+    const sourceOptions = inpaintModelControlsActive ? inpaintModelTypeOptions : imageModelTypeOptions;
     const entries = getPrimaryModelPickerItems(modelCatalog, sourceOptions.map((option) => option.value));
-    if (!inpaintWorkspaceActive) return entries;
+    if (!inpaintModelControlsActive) return entries;
     return entries.filter((entry) => {
       const source = entry.source || 'checkpoint';
       const pipeline = [...selectedInpaintFamilyPipelines]
@@ -1465,7 +1487,7 @@ export function UmbraUIWorkspace() {
         pipeline?.inpaintAdapter || 'native_edit',
       ).length > 0;
     });
-  }, [imageModelTypeOptions, inpaintModelTypeOptions, inpaintWorkspaceActive, modelCatalog, selectedInpaintFamilyPipelines]);
+  }, [imageModelTypeOptions, inpaintModelTypeOptions, inpaintModelControlsActive, modelCatalog, selectedInpaintFamilyPipelines]);
   const primaryModelRuntimeIssue = React.useMemo(() => {
     if (!checkpointName || primaryModelItems.length <= 0) return '';
     const match = matchUmbraUiResourceCatalog(checkpointName, primaryModelItems);
@@ -1528,8 +1550,8 @@ export function UmbraUIWorkspace() {
 
   React.useEffect(() => {
     if (!imageControlsHydrated) return;
-    if (activeMode !== 'image' && activeMode !== 'img2img' && !inpaintWorkspaceActive) return;
-    const activeFamilyPipelines = inpaintWorkspaceActive
+    if (activeMode !== 'image' && activeMode !== 'img2img' && !inpaintModelControlsActive) return;
+    const activeFamilyPipelines = inpaintModelControlsActive
       ? selectedInpaintFamilyPipelines
       : selectedFamilyPipelines;
     if (activeFamilyPipelines.length <= 0) return;
@@ -1545,13 +1567,13 @@ export function UmbraUIWorkspace() {
     if (nextModelType !== modelType) setModelType(nextModelType);
     const defaults = selected.pipeline.defaults;
     const discoveredModelItems = getPrimaryModelItems(modelCatalog, nextModelType);
-    const modelItems = inpaintWorkspaceActive
+    const modelItems = inpaintModelControlsActive
       ? filterUmbraUiInpaintPrimaryModels(discoveredModelItems, selected.pipeline.inpaintAdapter || 'native_edit')
       : discoveredModelItems;
     const preferredModelName = defaults?.modelNamesBySource?.[nextModelType]
       || (nextModelType === selected.pipeline.modelSources[0] ? defaults?.modelName : '') || '';
     const modelSelectionKey = getUmbraUiPipelineModelSelectionKey(
-      inpaintWorkspaceActive ? 'inpainting' : activeImageFeature,
+      inpaintModelControlsActive ? 'inpainting' : activeImageFeature,
       modelFamily,
       nextModelType,
     );
@@ -1615,10 +1637,10 @@ export function UmbraUIWorkspace() {
     if (activeMode === 'img2img' && typeof denoiseDefault === 'number' && Number.isFinite(denoiseDefault)) {
       setImg2imgDenoise(Math.max(0.01, Math.min(1, denoiseDefault)));
     }
-  }, [activeImageFeature, activeMode, imageControlsHydrated, inpaintWorkspaceActive, modelCatalog, modelFamily, modelType, pipelineModelSelections, selectedFamilyPipelines, selectedInpaintFamilyPipelines, syncImageDimensions]);
+  }, [activeImageFeature, activeMode, imageControlsHydrated, inpaintModelControlsActive, modelCatalog, modelFamily, modelType, pipelineModelSelections, selectedFamilyPipelines, selectedInpaintFamilyPipelines, syncImageDimensions]);
 
   React.useEffect(() => {
-    if (!inpaintWorkspaceActive || inpaintModelFamilies.length <= 0) return;
+    if (!inpaintModelControlsActive || inpaintModelFamilies.length <= 0) return;
     const supportedSources = selectedInpaintFamilyPipelines.flatMap(({ pipeline }) => pipeline.modelSources);
     if (supportedSources.length <= 0 || supportedSources.includes(modelType)) return;
     const nextModelType = supportedSources[0];
@@ -1631,7 +1653,7 @@ export function UmbraUIWorkspace() {
       selectedPipeline?.inpaintAdapter || 'native_edit',
     );
     setCheckpointName((current) => modelItems.includes(current) ? current : modelItems[0] || '');
-  }, [inpaintWorkspaceActive, inpaintModelFamilies, modelCatalog, modelFamily, modelType, selectedInpaintFamilyPipelines]);
+  }, [inpaintModelControlsActive, inpaintModelFamilies, modelCatalog, modelFamily, modelType, selectedInpaintFamilyPipelines]);
 
   React.useEffect(() => {
     setWorkflowResourceValues((current) => {
@@ -1847,10 +1869,10 @@ export function UmbraUIWorkspace() {
   }, [applyPowerPrompterGenerationControls, imageControlsHydrated]);
 
   React.useEffect(() => {
-    const families = inpaintWorkspaceActive ? inpaintModelFamilies : imageModelFamilies;
+    const families = inpaintModelControlsActive ? inpaintModelFamilies : imageModelFamilies;
     const resolvedFamily = resolveUmbraUiPipelineFamily(families, modelFamily);
     if (resolvedFamily && resolvedFamily !== modelFamily) setModelFamily(resolvedFamily);
-  }, [imageModelFamilies, inpaintModelFamilies, inpaintWorkspaceActive, modelFamily]);
+  }, [imageModelFamilies, inpaintModelFamilies, inpaintModelControlsActive, modelFamily]);
 
   React.useEffect(() => {
     if (!modelFamily) return;
@@ -1933,14 +1955,18 @@ export function UmbraUIWorkspace() {
   const applyAgentDraft = React.useCallback((draft: UmbraUiAgentDraft) => {
     if (draft.mediaType === 'video') {
       setPendingVideoAgentDraft(draft);
-      setActiveMode('video');
+      if (imageControlsHydrated) navigateWorkspace('video');
+      else setActiveMode('video');
       return;
+    }
+    if (activeMode !== 'image' && activeMode !== 'inpaint' && activeMode !== 'img2img') {
+      if (imageControlsHydrated) navigateWorkspace('image');
+      else setActiveMode('image');
     }
     setImageAgentModeEnabled(true);
     setImageAgentPrompt(draft.prompt || draft.segments.join(', '));
     setNegativePrompt(draft.negativePrompt);
-    setActiveMode((current) => current === 'inpaint' || current === 'img2img' ? current : 'image');
-  }, []);
+  }, [activeMode, imageControlsHydrated, navigateWorkspace]);
 
   const rememberCurrentPipelineModelSelection = React.useCallback(() => {
     const modelName = String(checkpointName || '').trim().replace(/\\/g, '/');
@@ -2016,7 +2042,7 @@ export function UmbraUIWorkspace() {
       const selectedSource = source || modelType;
       if (selectedSource !== modelType) rememberCurrentPipelineModelSelection();
       const selectionKey = getUmbraUiPipelineModelSelectionKey(
-        inpaintWorkspaceActive ? 'inpainting' : activeImageFeature,
+        inpaintModelControlsActive ? 'inpainting' : activeImageFeature,
         modelFamily,
         selectedSource,
       );
@@ -2064,7 +2090,7 @@ export function UmbraUIWorkspace() {
       closeModelPicker();
       showToast(error instanceof Error ? `${error.message} Added without trained tokens.` : 'LoRA added without trained tokens.', 'error');
     }
-  }, [activeImageFeature, activeLoraFamilyKey, activeResourcePicker, closeModelPicker, inpaintWorkspaceActive, modelFamily, modelPickerKind, modelType, rememberCurrentPipelineModelSelection, requestLoraInfo, showToast, updateWorkflowResource]);
+  }, [activeImageFeature, activeLoraFamilyKey, activeResourcePicker, closeModelPicker, inpaintModelControlsActive, modelFamily, modelPickerKind, modelType, rememberCurrentPipelineModelSelection, requestLoraInfo, showToast, updateWorkflowResource]);
 
   React.useEffect(() => {
     const unresolved = loras.filter((lora) => {
