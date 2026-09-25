@@ -2974,6 +2974,7 @@ const REMOTE_LOGIN_RATE_WINDOW_MS = 5 * 60 * 1000;
 const REMOTE_LOGIN_RATE_MAX_FAILURES = 6;
 const REMOTE_LOGIN_RATE_MAX_SOCKET_FAILURES = 60;
 const REMOTE_PAIR_TOKEN_TTL_MS = 10 * 60 * 1000;
+const REMOTE_PAIR_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const REMOTE_AUTH_REQUEST_MAX_BYTES = 16 * 1024;
 const remoteLoginFailures = new Map<string, { count: number; resetAt: number }>();
 const remoteLoginSocketFailures = new Map<string, { count: number; resetAt: number }>();
@@ -3850,12 +3851,60 @@ function consumeRemotePairToken(config: RemoteAuthConfig, token: string): { ok: 
   };
 }
 
+function isUsableRemotePairToken(config: RemoteAuthConfig, token: string): boolean {
+  if (!REMOTE_PAIR_TOKEN_PATTERN.test(token)) return false;
+  const tokenHash = hashRemotePairToken(token);
+  const now = Date.now();
+  return (config.pairTokens || []).some((record) => record.expiresAt > now && safeEqualHex(record.hash, tokenHash));
+}
+
+function createRemotePairConfirmationPage(token: string): Response {
+  // Pair tokens are base64url, and this also keeps a direct call to this
+  // renderer from introducing HTML into the hidden form value.
+  const safeToken = encodeURIComponent(token);
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pair this device | Umbra Studio</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #10121a; color: #f4f5fa; font: 16px system-ui, sans-serif; }
+    main { width: min(100% - 40px, 420px); padding: 28px; border: 1px solid #343846; border-radius: 16px; background: #1b1e29; }
+    h1 { margin: 0 0 12px; font-size: 24px; }
+    p { color: #c7cbd8; line-height: 1.5; }
+    button { width: 100%; margin-top: 12px; padding: 12px; border: 0; border-radius: 8px; background: #8173ed; color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Pair this device</h1>
+    <p>Continue only if you received this link from your Umbra Studio host.</p>
+    <form method="post" action="/api/remote/auth/pair">
+      <input type="hidden" name="token" value="${safeToken}">
+      <button type="submit">Pair this device</button>
+    </form>
+  </main>
+</body>
+</html>`;
+  return new Response(html, {
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    },
+  });
+}
+
 function createRemoteRedirectWithCookies(location: string, cookies: string[]): Response {
   const headers = new Headers();
   headers.set('Location', location);
   headers.set('Cache-Control', 'no-store');
   for (const cookie of cookies) headers.append('Set-Cookie', cookie);
-  return new Response(null, { status: 302, headers });
+  return new Response(null, { status: 303, headers });
 }
 
 function createRemoteSessionCookie(token: string, req: Request): string {
@@ -33760,6 +33809,22 @@ const server = Bun.serve<UmbraSocketData>({
           if (!config) return json({ error: 'Remote auth is not configured on the host yet.' }, 409);
           const token = String(url.searchParams.get('token') || '').trim();
           if (!token) return json({ error: 'Pair token is missing.' }, 400);
+          if (!isUsableRemotePairToken(config, token)) {
+            return json({ error: 'Pair link expired or already used.' }, 401);
+          }
+          return createRemotePairConfirmationPage(token);
+        }
+
+        if (method === 'POST' && path === '/api/remote/auth/pair') {
+          const mediaType = req.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+          if (mediaType !== 'application/x-www-form-urlencoded') return json({ error: 'Expected a pairing form.' }, 415);
+          const form = new URLSearchParams(await readRequestTextWithLimit(req, REMOTE_AUTH_REQUEST_MAX_BYTES));
+          const token = String(form.get('token') || '').trim();
+          if (!token) return json({ error: 'Pair token is missing.' }, 400);
+          if (!REMOTE_PAIR_TOKEN_PATTERN.test(token)) return json({ error: 'Pair link expired or already used.' }, 401);
+          // No async work may separate this fresh auth snapshot from its save.
+          const config = loadRemoteAuthConfig();
+          if (!config) return json({ error: 'Remote auth is not configured on the host yet.' }, 409);
           const consumed = consumeRemotePairToken(config, token);
           if (!consumed.ok) {
             if (consumed.changed) saveRemoteAuthConfig(consumed.config);
