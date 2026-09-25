@@ -23084,7 +23084,7 @@ function resolveUmbraUiWatermarkAssetPath(value: unknown): string {
 
 async function handleUmbraUiWatermarkAssetUpload(req: Request): Promise<Response> {
   try {
-    const form = await req.formData();
+    const form = await parseDatasetUploadFormData(req, UMBRA_UI_MEDIA_TOOL_MAX_WATERMARK_BYTES + 1024 * 1024);
     const watermark = form.get('watermark') as any;
     if (!watermark || typeof watermark.name !== 'string' || typeof watermark.arrayBuffer !== 'function' || Number(watermark.size) <= 0) {
       return json({ success: false, error: 'Choose a watermark image to save.' }, 400);
@@ -23110,6 +23110,9 @@ async function handleUmbraUiWatermarkAssetUpload(req: Request): Promise<Response
       previewUrl: `/api/fs/image?${new URLSearchParams({ path: clientPath }).toString()}`,
     });
   } catch (error: any) {
+    if (error instanceof DatasetUploadTooLargeError) {
+      return json({ success: false, error: 'The watermark image exceeds the 64 MB limit.' }, 413);
+    }
     return json({ success: false, error: String(error?.message || error || 'Failed to save watermark asset.') }, 400);
   }
 }
