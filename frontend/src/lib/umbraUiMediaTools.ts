@@ -93,6 +93,7 @@ export async function submitUmbraUiWatermark(options: {
   imageFormat: 'png' | 'jpeg' | 'webp';
   quality: number;
   outputWidth: number;
+  signal?: AbortSignal;
 }): Promise<UmbraUiMediaToolResult> {
   const form = new FormData();
   if (options.source) form.set('source', options.source, options.source.name);
@@ -111,7 +112,7 @@ export async function submitUmbraUiWatermark(options: {
   form.set('imageFormat', options.imageFormat);
   form.set('quality', String(options.quality));
   form.set('outputWidth', String(options.outputWidth));
-  const response = await fetch('/api/umbra-ui/media-tools/watermark', { method: 'POST', body: form });
+  const response = await fetch('/api/umbra-ui/media-tools/watermark', { method: 'POST', body: form, signal: options.signal });
   return readMediaToolResponse(response, 'Watermark processing failed');
 }
 
@@ -178,6 +179,7 @@ export async function submitUmbraUiVideoToGif(options: {
   pinnedOutputFolder?: string;
   sequenceNumber: number;
   width: number;
+  signal?: AbortSignal;
 }): Promise<UmbraUiMediaToolResult> {
   const form = new FormData();
   if (options.source) form.set('source', options.source, options.source.name);
@@ -186,7 +188,7 @@ export async function submitUmbraUiVideoToGif(options: {
   form.set('pinnedOutputFolder', options.pinnedOutputFolder || '');
   form.set('sequenceNumber', String(options.sequenceNumber));
   form.set('width', String(options.width));
-  const response = await fetch('/api/umbra-ui/media-tools/video-to-gif', { method: 'POST', body: form });
+  const response = await fetch('/api/umbra-ui/media-tools/video-to-gif', { method: 'POST', body: form, signal: options.signal });
   return readMediaToolResponse(response, 'GIF conversion failed');
 }
 
