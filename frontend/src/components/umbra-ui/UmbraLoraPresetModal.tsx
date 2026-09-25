@@ -15,6 +15,7 @@ export function UmbraLoraPresetModal({ loras, onLoad, onClose }: {
 }) {
   const [presets, setPresets] = React.useState<UmbraLoraPreset[]>([]);
   const [ready, setReady] = React.useState(false);
+  const [loadAttempt, setLoadAttempt] = React.useState(0);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState('');
   const [search, setSearch] = React.useState('');
@@ -29,11 +30,17 @@ export function UmbraLoraPresetModal({ loras, onLoad, onClose }: {
 
   React.useEffect(() => {
     let disposed = false;
+    setReady(false);
+    setError('');
     void loadLoraPresets().then((items) => { if (!disposed) { setPresets(items); setReady(true); } })
-      .catch((e: Error) => { if (!disposed) setError(e.message); });
+      .catch((e: unknown) => { if (!disposed) setError(e instanceof Error ? e.message : 'Unable to load LoRA presets. Please retry.'); });
+    return () => { disposed = true; };
+  }, [loadAttempt]);
+
+  React.useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null;
     dialogRef.current?.focus();
-    return () => { disposed = true; previousFocus?.focus(); };
+    return () => { previousFocus?.focus(); };
   }, []);
 
   const select = (preset: UmbraLoraPreset | null) => {
@@ -70,7 +77,7 @@ export function UmbraLoraPresetModal({ loras, onLoad, onClose }: {
           <h2 className="min-w-0 flex-1 text-sm font-bold">LoRA Stack Presets</h2>
           <button type="button" className={buttonClass} onClick={close} disabled={busy} title="Close presets" aria-label="Close presets"><X size={16} /></button>
         </header>
-        {error && <div role="alert" className="px-3 py-2 text-sm text-red-300">{error}</div>}
+        {error && <div role="alert" className="flex items-center gap-2 px-3 py-2 text-sm text-red-300"><span className="min-w-0 flex-1 break-words">{error}</span>{!ready && <button type="button" className={buttonClass} onClick={() => setLoadAttempt((attempt) => attempt + 1)}>Retry</button>}</div>}
         <div className="grid min-h-0 grid-cols-1 overflow-y-auto sm:grid-cols-[minmax(180px,0.8fr)_minmax(0,1.2fr)]">
           <div className="min-w-0 border-b border-white/10 p-3 sm:border-b-0 sm:border-r">
             <div className="mb-3 flex items-center gap-2">

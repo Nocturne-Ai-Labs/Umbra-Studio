@@ -94,6 +94,7 @@ import { UmbraTiledVaeControls } from '@/components/umbra-ui/UmbraTiledVaeContro
 import { UmbraHiresFixControls } from '@/components/umbra-ui/UmbraHiresFixControls';
 import { UmbraDetailerPipelineControls } from '@/components/umbra-ui/UmbraDetailerPipelineControls';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
+import { restoreUmbraUiInpaintProjectModels } from '@/lib/umbraUiInpaintProjectModelRestore';
 import {
   composeUmbraUiPromptWithLoras,
   type UmbraUiLoraEntry,
@@ -630,7 +631,7 @@ export interface UmbraInpaintWorkspaceProps {
   onOpenCheckpointPicker: () => void;
   onRefreshModelCatalog: () => void;
   loras: UmbraUiLoraEntry[];
-  onLorasChange: (loras: UmbraUiLoraEntry[]) => void;
+  onLorasChange: (loras: UmbraUiLoraEntry[], family?: string) => void;
   workflowResources: Record<string, string>;
   loraAvailableCount: number;
   onOpenLoraPicker: () => void;
@@ -4035,10 +4036,11 @@ export function UmbraInpaintWorkspace({
   }, [canvasDocument?.id, source]);
 
   const applyProjectGenerationSettings = React.useCallback((generation: UmbraCanvasGenerationSettings) => {
-    if (generation.modelFamily) onModelFamilyChange(generation.modelFamily);
-    const supportedSource = modelSourceOptions.find((option) => option.value === generation.modelSource)?.value;
-    if (supportedSource) onModelSourceChange(supportedSource);
-    onLorasChange(generation.loras as UmbraUiLoraEntry[]);
+    restoreUmbraUiInpaintProjectModels(generation, {
+      onModelFamilyChange,
+      onModelSourceChange,
+      onLorasChange,
+    });
     const segments = generation.promptSegments.length > 0
       ? generation.promptSegments
       : [{ id: createLocalId('umbra-prompt'), text: '' }];
@@ -4084,7 +4086,6 @@ export function UmbraInpaintWorkspace({
     setSoftInpaintMaskInfluence(generation.softInpaintMaskInfluence);
     onTiledVaeChange(generation.tiledVae);
   }, [
-    modelSourceOptions,
     onActivePromptSegmentChange,
     onCfgChange,
     onClipSkipChange,

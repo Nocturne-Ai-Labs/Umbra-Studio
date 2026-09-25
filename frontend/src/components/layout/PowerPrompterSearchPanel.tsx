@@ -180,6 +180,8 @@ export const PowerPrompterSearchPanel = React.memo(({
   });
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: SearchResult } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const catalogRequestRevisionRef = useRef(0);
+  const paginationAbortRef = useRef<AbortController | null>(null);
   const showToast = useStore((state) => state.showToast);
   const setActiveWorkspace = useStore((state) => state.setActiveWorkspace);
   const explicitCatalogEnabled = useStore((state) => state.appSettings['ui.tagCatalogExplicitEnabled'] === true);
@@ -281,13 +283,15 @@ export const PowerPrompterSearchPanel = React.memo(({
     if (activeView !== 'catalog' || suggestionSeeds.length === 0 || !relationCorpusReady) {
       setSuggestionResult(null);
       setSuggestionError('');
+      setSuggestionLoading(false);
       return undefined;
     }
+    setSuggestionResult(null);
+    setSuggestionError('');
+    setSuggestionLoading(false);
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setSuggestionLoading(true);
-      setSuggestionError('');
-      setSuggestionResult(null);
       try {
         const params = new URLSearchParams({
           tags: suggestionSeeds.map((entry) => entry.tag).join(','),
@@ -300,6 +304,7 @@ export const PowerPrompterSearchPanel = React.memo(({
         const response = await fetch(`/api/booru/corpus/related?${params}`, { cache: 'no-store', signal: controller.signal });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(String(payload?.error || 'Could not calculate related tags.'));
+        if (controller.signal.aborted) return;
         setSuggestionResult(payload as RelatedResult);
       } catch (nextError) {
         if (controller.signal.aborted) return;
@@ -331,6 +336,7 @@ export const PowerPrompterSearchPanel = React.memo(({
       .then(async (response) => {
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(String(payload?.error || 'Could not load tag classifiers.'));
+        if (controller.signal.aborted) return;
         const values = Array.isArray(payload?.values) ? payload.values : [];
         setClassifiers(values);
         setClassifier((current) => current === 'all' || values.some((entry: ClassifierSummary) => entry.id === current) ? current : 'all');
@@ -346,10 +352,13 @@ export const PowerPrompterSearchPanel = React.memo(({
     return () => controller.abort();
   }, [activeView, enabledCSVs, explicitCatalogEnabled, refreshRevision, showToast]);
 
-  const loadResults = useCallback(async (nextPage: number, append: boolean, signal?: AbortSignal) => {
+  const loadResults = useCallback(async (nextPage: number, append: boolean, signal: AbortSignal, revision: number) => {
+    const isCurrentRequest = () => !signal.aborted && revision === catalogRequestRevisionRef.current;
+    if (!isCurrentRequest()) return;
     if (activeView !== 'catalog' || enabledCSVs.length === 0 || query.trim().length === 1) {
       setResults([]);
       setHasMore(false);
+      setLoading(false);
       return;
     }
     setLoading(true);
@@ -368,30 +377,41 @@ export const PowerPrompterSearchPanel = React.memo(({
       const response = await fetch(`/api/powerprompter/search?${params}`, { cache: 'no-store', signal });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(String(payload?.error || 'Could not search the tag catalog.'));
+      if (!isCurrentRequest()) return;
       const values = Array.isArray(payload?.results) ? payload.results : [];
       setResults((current) => append ? [...current, ...values] : values);
       setHasMore(payload?.hasMore === true);
       setPage(nextPage);
     } catch (nextError) {
-      if (signal?.aborted) return;
+      if (!isCurrentRequest()) return;
       if (!append) setResults([]);
       setError(nextError instanceof Error ? nextError.message : 'Could not search the tag catalog.');
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
   }, [activeView, category, classifier, enabledCSVs, explicitCatalogEnabled, query]);
 
   useEffect(() => {
-    if (activeView !== 'catalog') return undefined;
+    const revision = ++catalogRequestRevisionRef.current;
+    paginationAbortRef.current?.abort();
+    paginationAbortRef.current = null;
+    setResults([]);
+    setPage(0);
+    setHasMore(false);
+    setLoading(false);
+    setError('');
+    if (activeView !== 'catalog' || enabledCSVs.length === 0 || query.trim().length === 1) return undefined;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      void loadResults(0, false, controller.signal);
+      void loadResults(0, false, controller.signal, revision);
     }, query.trim() ? 180 : 0);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
+      paginationAbortRef.current?.abort();
+      paginationAbortRef.current = null;
     };
-  }, [activeView, loadResults, query, refreshRevision]);
+  }, [activeView, enabledCSVs, loadResults, query, refreshRevision]);
 
   const classifierLabels = useMemo(
     () => new Map(classifiers.map((entry) => [entry.id, entry.label])),
@@ -470,9 +490,15 @@ export const PowerPrompterSearchPanel = React.memo(({
   }, [drawerMode, setActiveWorkspace, setDrawerOpen]);
 
   const handleScroll = () => {
-    if (!scrollRef.current || loading || !hasMore) return;
+    if (!scrollRef.current || loading || !hasMore || paginationAbortRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-    if (scrollHeight - scrollTop <= clientHeight + 120) void loadResults(page + 1, true);
+    if (scrollHeight - scrollTop <= clientHeight + 120) {
+      const controller = new AbortController();
+      paginationAbortRef.current = controller;
+      void loadResults(page + 1, true, controller.signal, catalogRequestRevisionRef.current).finally(() => {
+        if (paginationAbortRef.current === controller) paginationAbortRef.current = null;
+      });
+    }
   };
 
   const getCategoryColor = (categoryValue: number) => {
@@ -487,10 +513,14 @@ export const PowerPrompterSearchPanel = React.memo(({
     `https://danbooru.donmai.us/posts?tags=${encodeURIComponent(String(item.tag || '').trim().replace(/\s+/g, '_'))}`
   );
 
-  const copyItem = (item: SearchResult) => {
-    void navigator.clipboard.writeText(buildTagInsertionText(item));
-    showToast('Copied to clipboard', 'success');
+  const copyItem = async (item: SearchResult) => {
     setContextMenu(null);
+    try {
+      await navigator.clipboard.writeText(buildTagInsertionText(item));
+      showToast('Copied to clipboard', 'success');
+    } catch {
+      showToast('Could not copy tag to clipboard', 'error');
+    }
   };
 
   const renderCatalogItem = (item: SearchResult, index: number) => {
@@ -830,7 +860,7 @@ export const PowerPrompterSearchPanel = React.memo(({
       {contextMenu ? (
         <div className="umbra-context-menu-panel fixed z-[100] min-w-[196px] p-1" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()}>
           <button type="button" onClick={() => { insertItems([contextMenu.item]); setContextMenu(null); }} className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-zinc-300"><Plus className="h-3.5 w-3.5 text-cyan-300" /> Insert Tag</button>
-          <button type="button" onClick={() => copyItem(contextMenu.item)} className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-zinc-300"><Copy className="h-3.5 w-3.5 text-zinc-500" /> Copy Tag</button>
+          <button type="button" onClick={() => void copyItem(contextMenu.item)} className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-zinc-300"><Copy className="h-3.5 w-3.5 text-zinc-500" /> Copy Tag</button>
           <a href={getDanbooruSearchUrl(contextMenu.item)} target="_blank" rel="noopener noreferrer" onClick={() => setContextMenu(null)} className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-zinc-300"><ExternalLink className="h-3.5 w-3.5 text-zinc-500" /> Search Danbooru</a>
           <div className="umbra-context-menu-separator mx-2 my-1.5" />
           {isFavorite(contextMenu.item) ? <button type="button" onClick={() => { void removeFavorite(contextMenu.item); setContextMenu(null); }} className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-red-300"><Trash2 className="h-3.5 w-3.5" /> Remove Favorite</button> : <button type="button" onClick={() => { void addFavorite(contextMenu.item); setContextMenu(null); }} className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-amber-200"><Star className="h-3.5 w-3.5" /> Add to Favorites</button>}

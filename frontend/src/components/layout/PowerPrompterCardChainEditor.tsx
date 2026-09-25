@@ -2852,6 +2852,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const [reorderPulseVariantId, setReorderPulseVariantId] = useState('');
   const [editingVariantId, setEditingVariantId] = useState('');
   const [variantTextDrafts, setVariantTextDrafts] = useState<Record<string, string>>({});
+  const cancelledVariantBlurRef = useRef(new Set<string>());
   const [variantAgentBusyId, setVariantAgentBusyId] = useState('');
   const [editingVariantNameId, setEditingVariantNameId] = useState('');
   const [variantNameDrafts, setVariantNameDrafts] = useState<Record<string, string>>({});
@@ -4752,6 +4753,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
 
   const startEditingVariantText = useCallback((slotId: string, variant: PowerPrompterCardNode) => {
     const currentText = String(variant.text || '');
+    cancelledVariantBlurRef.current.delete(`text:${variant.id}`);
     setActiveSlotId(slotId);
     setActiveVariantId(variant.id);
     setEditingVariantId(variant.id);
@@ -4799,6 +4801,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   }, [activeSlot, activeVariant, patchVariant, showToast]);
 
   const cancelVariantTextEdit = useCallback((variantId: string) => {
+    cancelledVariantBlurRef.current.add(`text:${variantId}`);
     setEditingPromptChip(null);
     setEditingVariantId((prev) => (prev === variantId ? '' : prev));
     setVariantTextDrafts((prev) => {
@@ -5143,6 +5146,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   }, [expandedVariantEditor]);
 
   const startEditingVariantName = useCallback((slotId: string, variant: PowerPrompterCardNode) => {
+    cancelledVariantBlurRef.current.delete(`name:${variant.id}`);
     setActiveSlotId(slotId);
     setActiveVariantId(variant.id);
     setEditingVariantNameId(variant.id);
@@ -5153,6 +5157,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   }, []);
 
   const cancelEditingVariantName = useCallback((variantId: string) => {
+    cancelledVariantBlurRef.current.add(`name:${variantId}`);
     setEditingVariantNameId((prev) => (prev === variantId ? '' : prev));
     setVariantNameDrafts((prev) => {
       if (!(variantId in prev)) return prev;
@@ -10898,7 +10903,9 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                   }
                                 }}
                                 onBlur={() => {
-                                  commitVariantName(slot.slotId, variant);
+                                  if (!cancelledVariantBlurRef.current.delete(`name:${variant.id}`)) {
+                                    commitVariantName(slot.slotId, variant);
+                                  }
                                 }}
                                 className="mt-1 w-full bg-black/30 border border-emerald-400/45 rounded px-2 py-1 text-[11px] text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-300"
                                 placeholder={`${formatVariantPositionLabel(variantIdx)} name...`}
@@ -11074,8 +11081,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                   }
                                   if (event.key === 'Enter') {
                                     event.preventDefault();
-                                    commitVariantTextEdit(slot.slotId, variant, event.currentTarget.value);
-                                    resetVariantTextareaHeight(event.currentTarget);
                                     event.currentTarget.blur();
                                     return;
                                   }
@@ -11118,7 +11123,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                 }}
                                 onBlur={(event) => {
                                   suppressedVariantDragIdRef.current = '';
-                                  if (!chainLinkModeActive) {
+                                  if (!chainLinkModeActive && !cancelledVariantBlurRef.current.delete(`text:${variant.id}`)) {
                                     commitVariantTextEdit(slot.slotId, variant, event.currentTarget.value);
                                   }
                                   resetVariantTextareaHeight(event.currentTarget);
