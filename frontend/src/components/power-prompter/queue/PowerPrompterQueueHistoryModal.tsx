@@ -1,7 +1,7 @@
 import React from 'react';
 import { ImageIcon, Loader2, Pencil, Play, RefreshCw, Trash2, XCircle } from 'lucide-react';
 import type { PowerPrompterQueueHistorySummary } from './queueCore';
-import { canResumeRemainingQueueHistory, getQueueHistoryReplayPromptIndices, type PowerPrompterQueueHistoryGroup } from './queueHistoryModel';
+import { canResumeRemainingQueueHistory, getQueueHistoryResumablePromptCount, type PowerPrompterQueueHistoryGroup } from './queueHistoryModel';
 
 function buildQueueHistoryPreviewThumbnailUrl(path: string, revision?: unknown): string {
   const encodedPath = encodeURIComponent(String(path || ''));
@@ -123,8 +123,7 @@ export function PowerPrompterQueueHistoryModal({
                           const restoreDisabled = !queueHistoryEditorRestoreEnabled || !item.hasEditorSnapshot || !!queueHistoryBusy;
                           const restoreTitle = restoreParkedTitle
                             || (item.hasEditorSnapshot ? 'Restore the exact editor snapshot captured for this run' : 'No editor snapshot available for this history entry');
-                          const remainingCount = item.resumablePromptCount
-                            ?? getQueueHistoryReplayPromptIndices(item, item.promptCount, true).length;
+                          const remainingCount = getQueueHistoryResumablePromptCount(item);
                           const canResumeRemaining = canResumeRemainingQueueHistory(item);
                           const mayHaveUncertainInFlightPrompt = item.backendOwned && item.status === 'interrupted';
                           return (
@@ -149,7 +148,7 @@ export function PowerPrompterQueueHistoryModal({
                                   </div>
                                   {mayHaveUncertainInFlightPrompt && (
                                     <div className="mt-2 text-[11px] text-amber-200/80">
-                                      A prompt may still be rendering. Check before requeueing; Resume skips in-flight prompts.
+                                      A prompt may still be rendering. Check before requeueing; Resume skips prompts without confirmed outcomes.
                                     </div>
                                   )}
                                   {item.outputFolders.length > 0 && (

@@ -76,10 +76,10 @@ export function getQueueHistoryReplayPromptIndices(
   if (history.promptStatuses?.length === count) {
     return indices.filter((index) => {
       const status = history.promptStatuses?.[index];
-      // A stopped backend cannot tell whether an in-flight ComfyUI prompt
-      // survived the restart. Never replay it automatically.
-      return status === 'pending' || status === 'interrupted' || status === 'unstarted'
-        || (history.backendOwned !== true && (status === 'submitting' || status === 'running'));
+      // A backend interruption is replayable only after ComfyUI drain is
+      // confirmed. Older "interrupted" records have no such confirmation.
+      return status === 'pending' || status === 'unstarted' || status === 'interrupted_confirmed'
+        || (history.backendOwned !== true && (status === 'submitting' || status === 'running' || status === 'interrupted'));
     });
   }
   if (history.backendOwned === true) return [];
@@ -97,9 +97,17 @@ export function canResumeRemainingQueueHistory(
   history: Pick<PowerPrompterQueueHistorySummary, 'status' | 'promptCount' | 'completed' | 'failed' | 'canceled' | 'promptStatuses' | 'backendOwned' | 'resumablePromptCount'>,
 ): boolean {
   if (history.status !== 'interrupted' && history.status !== 'canceled' && history.status !== 'failed') return false;
-  const remainingCount = history.resumablePromptCount
+  return getQueueHistoryResumablePromptCount(history) > 0;
+}
+
+export function getQueueHistoryResumablePromptCount(
+  history: Pick<PowerPrompterQueueHistorySummary, 'promptCount' | 'completed' | 'failed' | 'canceled' | 'promptStatuses' | 'backendOwned' | 'resumablePromptCount'>,
+): number {
+  if (history.promptStatuses?.length === history.promptCount) {
+    return getQueueHistoryReplayPromptIndices(history, history.promptCount, true).length;
+  }
+  return history.resumablePromptCount
     ?? getQueueHistoryReplayPromptIndices(history, history.promptCount, true).length;
-  return remainingCount > 0;
 }
 
 export function buildQueueHistoryGroups(items: PowerPrompterQueueHistorySummary[]): PowerPrompterQueueHistoryGroup[] {

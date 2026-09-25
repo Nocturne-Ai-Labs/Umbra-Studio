@@ -1,5 +1,13 @@
 type PromptState = { status: string; promptId?: string };
 
+export function getInterruptedPromptHistoryStatus(
+  prompt: PromptState & { interruptionDrainConfirmed?: boolean },
+): 'interrupted_confirmed' | 'running' | 'submitting' | null {
+  if (prompt.status !== 'interrupted') return null;
+  if (prompt.interruptionDrainConfirmed === true) return 'interrupted_confirmed';
+  return prompt.promptId ? 'running' : 'submitting';
+}
+
 export function canInterruptPowerPrompterPrompt(
   prompt: PromptState | null | undefined,
   taskPromptId: string,
@@ -25,13 +33,14 @@ export function getLiveUmbraUiQueueRequestIds(
 
 export function getQueueClearFutureKeepIds(
   activeTaskIds: Iterable<string>,
-  requests: readonly { requestId: string; prompts: readonly { status: string }[] }[],
+  requests: readonly { requestId: string; prompts: readonly PromptState[] }[],
 ): string[] {
   const activeTasks = new Set(activeTaskIds);
   const keep = new Set<string>();
   for (const request of requests) {
     if (!activeTasks.has(request.requestId)) continue;
-    if (request.prompts.some((prompt) => prompt.status === 'running' || prompt.status === 'submitting')) {
+    if (request.prompts.some((prompt) => prompt.status === 'running' || prompt.status === 'submitting'
+      || (prompt.status === 'interrupted' && !!prompt.promptId))) {
       keep.add(request.requestId);
     }
   }
