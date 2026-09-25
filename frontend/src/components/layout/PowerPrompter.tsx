@@ -4960,6 +4960,24 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     logQueueDebug('cancelTrackedQueueRequest:end', { requestId: key, reason, status });
   };
 
+  function hasQueuePromptIdentityChangedAtIndex(
+    before: QueueRequestMeta | undefined,
+    after: QueueRequestMeta | undefined,
+    promptIndex: number,
+  ): boolean {
+    if (!before || !after) return true;
+    if (before.prompts[promptIndex] === undefined || after.prompts[promptIndex] === undefined) return true;
+    return String(before.prompts[promptIndex]).trim() !== String(after.prompts[promptIndex]).trim()
+      || clampQueueSetId(before.promptSetIds[promptIndex] ?? before.setId)
+        !== clampQueueSetId(after.promptSetIds[promptIndex] ?? after.setId)
+      || String(before.promptOutputSubfolders?.[promptIndex] || '').trim()
+        !== String(after.promptOutputSubfolders?.[promptIndex] || '').trim()
+      || String(before.promptStyleNames?.[promptIndex] || '').trim()
+        !== String(after.promptStyleNames?.[promptIndex] || '').trim()
+      || JSON.stringify(before.generationByPrompt?.[promptIndex] ?? null)
+        !== JSON.stringify(after.generationByPrompt?.[promptIndex] ?? null);
+  }
+
   const applyBackendQueueSnapshot = (snapshotInput: any) => {
     const snapshot = snapshotInput && typeof snapshotInput === 'object'
       ? (snapshotInput.snapshot && typeof snapshotInput.snapshot === 'object' ? snapshotInput.snapshot : snapshotInput)
@@ -4988,6 +5006,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     const powerPrompterRequests = rawRequests.filter((request: any) => (
       String(request?.origin || '').trim().toLowerCase() !== 'umbra_ui'
     ));
+    const previousMetaById = new Map(queueRequestMetaRef.current);
     recordObservedQueueAdmissions(
       queueAdmissionAttemptedRequestIdsRef.current,
       powerPrompterRequests.map((request: any) => normalizeRequestId(request?.requestId)).filter(Boolean),
@@ -5212,6 +5231,29 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         };
       }
     }
+
+    const nextMetaById = new Map(queueRequestMetaRef.current);
+    setSelectedQueuePromptKeys((prev) => {
+      let next: Record<string, boolean> | null = null;
+      for (const key of Object.keys(prev)) {
+        if (prev[key] !== true) continue;
+        const separatorIndex = key.lastIndexOf(':');
+        const requestId = key.slice(0, separatorIndex);
+        const promptIndex = Number(key.slice(separatorIndex + 1));
+        if (separatorIndex <= 0 || !Number.isSafeInteger(promptIndex) || promptIndex < 0) continue;
+        if (!hasQueuePromptIdentityChangedAtIndex(
+          previousMetaById.get(requestId), nextMetaById.get(requestId), promptIndex,
+        )) continue;
+        if (!next) next = { ...prev };
+        delete next[key];
+      }
+      return next || prev;
+    });
+    setQueuePromptSelectionAnchor((prev) => (
+      prev && hasQueuePromptIdentityChangedAtIndex(
+        previousMetaById.get(prev.requestId), nextMetaById.get(prev.requestId), prev.promptIndex,
+      ) ? null : prev
+    ));
 
     if (terminalBackendIds.size > 0) {
       for (const requestId of terminalBackendIds) {
@@ -8601,6 +8643,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     if (!keptPrompt) return;
     logQueueDebug('queue:pruneRequestToActivePrompt:start', { requestId, activeIndex, total: activeMeta.prompts.length });
 
+    clearQueuePromptSelectionForRequest(requestId);
+
     queueRequestMetaRef.current.set(requestId, {
       mode: activeMeta.mode,
       setId: activeMeta.setId,
@@ -9312,6 +9356,15 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     return changed;
   }
 
+  function clearQueuePromptSelectionForRequest(requestId: string) {
+    const prefix = `${requestId}:`;
+    setSelectedQueuePromptKeys((prev) => {
+      if (!Object.keys(prev).some((key) => key.startsWith(prefix))) return prev;
+      return Object.fromEntries(Object.entries(prev).filter(([key]) => !key.startsWith(prefix)));
+    });
+    setQueuePromptSelectionAnchor((prev) => prev?.requestId === requestId ? null : prev);
+  }
+
   function applyLocalPromptOrder(requestId: string, promptOrder: number[]) {
     const normalizedRequestId = String(requestId || '').trim();
     if (!normalizedRequestId) return false;
@@ -9355,6 +9408,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     ];
     if (finalOrder.length !== sourceLength) return false;
     if (finalOrder.every((index, position) => index === position)) return false;
+
+    clearQueuePromptSelectionForRequest(normalizedRequestId);
 
     const reorderValues = <T,>(values: T[], fallbackFactory: (index: number) => T): T[] =>
       finalOrder.map((sourceIndex, targetIndex) => values[sourceIndex] ?? fallbackFactory(targetIndex));
@@ -9428,6 +9483,28 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     if (normalizedPromptIndices.length <= 0) return false;
     logQueueDebug('queue:applyLocalPromptRemoval:start', { requestId: normalizedRequestId, promptIndices: normalizedPromptIndices });
 
+    if (!isLocalStagedQueueRequestId(normalizedRequestId)) {
+      // The backend keeps promptIndex stable when it marks a prompt canceled.
+      // Hide only the pending rows until its authoritative snapshot arrives.
+      const removalSet = new Set(normalizedPromptIndices);
+      const hasPendingMatch = queueStackItemsRef.current.some((item) =>
+        String(item.requestId || '').trim() === normalizedRequestId
+        && !item.exiting
+        && item.status === 'pending'
+        && removalSet.has(item.promptIndex)
+      );
+      if (!hasPendingMatch) return false;
+      clearQueuePromptSelectionForRequest(normalizedRequestId);
+      updateQueueStackItemsSynced((prev) => prev.filter((item) =>
+        String(item.requestId || '').trim() !== normalizedRequestId
+        || item.exiting
+        || item.status !== 'pending'
+        || !removalSet.has(item.promptIndex)
+      ));
+      logQueueDebug('queue:applyLocalPromptRemoval:pendingHidden', { requestId: normalizedRequestId, promptIndices: normalizedPromptIndices });
+      return true;
+    }
+
     const activeVisual = queueVisualStateRef.current;
     const runningItem = queueStackItemsRef.current.find((item) =>
       !item.exiting
@@ -9462,9 +9539,11 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     const keepIndices = Array.from({ length: sourceLength }, (_, index) => index).filter((index) => !removalSet.has(index));
     if (keepIndices.length <= 0) {
       logQueueDebug('queue:applyLocalPromptRemoval:droppingRequest', { requestId: normalizedRequestId, removableIndices, sourceLength });
+      clearQueuePromptSelectionForRequest(normalizedRequestId);
       dropTrackedQueueRequestState([normalizedRequestId]);
       return true;
     }
+    clearQueuePromptSelectionForRequest(normalizedRequestId);
     removeLocalPausedSnapshotPromptIndices(normalizedRequestId, Array.from(removalSet));
 
     const keepValues = <T,>(values: T[], fallbackFactory: (index: number) => T): T[] =>
@@ -11198,7 +11277,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       if (appliedPromptRemovals.length <= 0) return;
       const activeRequestId = String(lockedQueueRequestId || '').trim();
       for (const entry of appliedPromptRemovals) {
-        if (String(entry.requestId || '').trim() === activeRequestId) {
+        if (String(entry.requestId || '').trim() === activeRequestId
+          && isLocalStagedQueueRequestId(entry.requestId)) {
           pruneTrackedQueueRequestToActivePrompt(entry.requestId);
         } else {
           applyLocalPromptRemoval(entry.requestId, entry.promptIndices);
@@ -11247,6 +11327,10 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
             .map((entry) => Math.max(0, Math.floor(Number(entry.promptIndex) || 0)))
           : [];
         if (pendingPromptIndices.length <= 0) {
+          if (!isLocalStagedRequest) {
+            showToast('Group has no future prompts to clear. Current render will finish.', 'success');
+            return;
+          }
           const nextPaused = queuePausedAfterRemovingWork(
             queuePausedRef.current,
             queueStackItemsRef.current,
@@ -11280,7 +11364,11 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           new Set(),
           new Map([[requestId, new Set(pendingPromptIndices)]]),
         );
-        pruneTrackedQueueRequestToActivePrompt(requestId);
+        if (isLocalStagedRequest) {
+          pruneTrackedQueueRequestToActivePrompt(requestId);
+        } else {
+          applyLocalPromptRemoval(requestId, pendingPromptIndices);
+        }
         if (isLocalStagedRequest) {
           removeLocalPausedSnapshotPromptIndices(requestId, pendingPromptIndices);
         }
