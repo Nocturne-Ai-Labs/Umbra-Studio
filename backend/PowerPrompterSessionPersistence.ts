@@ -21,6 +21,15 @@ function checksumPowerPrompterDocument(document: unknown): string {
   return createHash('sha256').update(serialized).digest('hex');
 }
 
+function checksumPowerPrompterDocumentWithoutUpdatedAt(document: unknown): string {
+  if (!document || typeof document !== 'object' || Array.isArray(document)) {
+    throw new Error('Invalid Power Prompter recovery document.');
+  }
+  const comparable = { ...(document as Record<string, unknown>) };
+  delete comparable.updatedAt;
+  return checksumPowerPrompterDocument(comparable);
+}
+
 interface PowerPrompterSessionRecordSource<TDocument> {
   file: string | null;
   revision: number;
@@ -120,6 +129,21 @@ export function getRestorablePowerPrompterDraft(
     && !!currentStorageToken && record.storageToken === currentStorageToken
     ? record.document ?? null
     : null;
+}
+
+/** A failed clean-summary write may leave a dirty record after its card was saved. */
+export function isPowerPrompterDirtyDraftAlreadySaved(
+  record: PersistedPowerPrompterDocumentSession | null,
+  resolvedFile: string,
+  canonicalDocument: unknown,
+): boolean {
+  if (record?.dirty !== true || record.file !== resolvedFile || !canonicalDocument) return false;
+  try {
+    return checksumPowerPrompterDocumentWithoutUpdatedAt(record.document)
+      === checksumPowerPrompterDocumentWithoutUpdatedAt(canonicalDocument);
+  } catch {
+    return false;
+  }
 }
 
 export async function getPowerPrompterCanonicalStorageToken(
