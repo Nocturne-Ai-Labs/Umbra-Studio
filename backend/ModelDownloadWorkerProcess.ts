@@ -1,11 +1,11 @@
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'path';
 import * as fs from 'fs/promises';
-import { existsSync } from 'fs';
 import { randomUUID } from 'node:crypto';
 import { copyFileExclusive } from './FsTransferCopy';
 import { fetchModelDownload } from './ModelDownloadHttp';
 import { fetchModelMedia } from './ModelManagerMediaHttp';
 import { ModelDownloadJournal, downloadFileIdentity, type DownloadReceipt } from './ModelDownloadJournal';
+import { MODEL_ARTIFACT_DIR, MODEL_SNAPSHOT_SUFFIX, reserveUniqueModelDownloadPath } from './ModelDownloadDestination';
 
 type ModelDownloadJobStatus = 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled';
 
@@ -73,9 +73,7 @@ const MAX_JOBS = 512;
 const MAX_CONCURRENT_DOWNLOADS = 3;
 const MAX_PENDING_DOWNLOADS = 128;
 const DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
-const MODEL_SNAPSHOT_SUFFIX = '.umbra-model.json';
 const MODEL_THUMB_SUFFIX = '.umbra-model-thumb';
-const MODEL_ARTIFACT_DIR = '.umbra';
 const THUMB_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp', 'image/x-ms-bmp', 'image/avif']);
 const BINARY_MODEL_EXTENSIONS = new Set(['.safetensors', '.ckpt', '.pt', '.pth', '.bin', '.onnx', '.gguf', '.engine']);
 const journal = new ModelDownloadJournal(process.env.UMBRA_ROOT || '');
@@ -267,22 +265,6 @@ function normalizeCivitaiType(input: string): string {
   return 'Other';
 }
 
-function resolveUniqueDestinationPath(targetPath: string): string {
-  const parent = dirname(targetPath);
-  const ext = extname(targetPath);
-  const stem = basename(targetPath, ext);
-  let index = 1;
-  let candidate = targetPath;
-  while (existsSync(candidate) || existsSync(`${candidate}.part`)
-    || existsSync(join(parent, MODEL_ARTIFACT_DIR, `${basename(candidate)}${MODEL_SNAPSHOT_SUFFIX}`))
-    || reservedDestinations.has(candidate.toLowerCase())) {
-    candidate = join(parent, `${stem} (${index})${ext}`);
-    index += 1;
-  }
-  reservedDestinations.add(candidate.toLowerCase());
-  return candidate;
-}
-
 function toPublicJob(job: ModelDownloadJob) {
   return {
     ...job,
@@ -339,7 +321,7 @@ async function runDownload(jobId: string, allowedRootRealPath: string, civitaiTo
     controller.signal.throwIfAborted();
     const destinationDir = await assertDestinationAllowed(requestedDir, allowedRootRealPath);
     job.destinationFolder = destinationDir;
-    targetPath = resolveUniqueDestinationPath(join(destinationDir, sanitizeFileName(job.fileName || 'model.safetensors')));
+    targetPath = reserveUniqueModelDownloadPath(join(destinationDir, sanitizeFileName(job.fileName || 'model.safetensors')), reservedDestinations);
     tempPath = `${targetPath}.${randomUUID()}.part`;
     job.destinationPath = targetPath;
     receipt.partial = tempPath;
@@ -429,7 +411,7 @@ async function runDownload(jobId: string, allowedRootRealPath: string, civitaiTo
       } catch (error: any) {
         if (error?.code !== 'EEXIST') throw error;
         reservedDestinations.delete(targetPath.toLowerCase());
-        targetPath = resolveUniqueDestinationPath(targetPath);
+        targetPath = reserveUniqueModelDownloadPath(targetPath, reservedDestinations);
         job.destinationPath = targetPath;
         receipt.phase = 'ready';
         receipt.targetIdentity = undefined;
