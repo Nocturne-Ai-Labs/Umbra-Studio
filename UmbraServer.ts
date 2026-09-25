@@ -26525,9 +26525,17 @@ async function runGalleryProgressiveMetadataRefresh(folderPath: string, files: G
     statMs = Date.now() - statStartedAt;
 
     if (fileInputs.length > 0) {
-      const dbStartedAt = Date.now();
-      galleryDb.upsertFolderFiles(folderPath, fileInputs);
-      dbMs = Date.now() - dbStartedAt;
+      const batchSize = 32;
+      for (let offset = 0; offset < fileInputs.length; offset += batchSize) {
+        const dbStartedAt = Date.now();
+        galleryDb.upsertFolderFiles(folderPath, fileInputs.slice(offset, offset + batchSize));
+        dbMs += Date.now() - dbStartedAt;
+        // The stat worker may return a whole folder. Keep each SQLite turn
+        // short so other main-server requests can run while indexing continues.
+        if (offset + batchSize < fileInputs.length) {
+          await new Promise<void>(resolve => setTimeout(resolve, 0));
+        }
+      }
     }
   } catch (error) {
     appendGalleryProgressiveListLog({
@@ -26635,13 +26643,16 @@ function invalidateFsFolderSummaryForPaths(paths: Array<string | null | undefine
     }
   }
   if (targets.size === 0) return;
-  for (const key of Array.from(fsFolderSummaryCache.keys())) {
+  for (const key of new Set([...fsFolderSummaryCache.keys(), ...fsFolderSummaryInFlight.keys()])) {
     const shouldDrop = Array.from(targets).some((target) => (
       key === target ||
       key.startsWith(`${target}/`) ||
       target.startsWith(`${key}/`)
     ));
-    if (shouldDrop) fsFolderSummaryCache.delete(key);
+    if (shouldDrop) {
+      fsFolderSummaryCache.delete(key);
+      fsFolderSummaryInFlight.delete(key);
+    }
   }
 }
 
@@ -27074,6 +27085,24 @@ async function handleFsList(url: URL, signal?: AbortSignal): Promise<Response> {
   }
 }
 
+async function getGalleryIndexedFilesByPathsBatched(folderPath: string, pathInputs: string[], signal?: AbortSignal) {
+  const files: ReturnType<GalleryDb['getFolderFilesByPaths']> = [];
+  const uniquePaths = Array.from(new Set(pathInputs.filter(Boolean)));
+  const batchSize = 128;
+  let dbMs = 0;
+  for (let offset = 0; offset < uniquePaths.length; offset += batchSize) {
+    signal?.throwIfAborted();
+    const dbStartedAt = Date.now();
+    files.push(...galleryDb.getFolderFilesByPaths(folderPath, uniquePaths.slice(offset, offset + batchSize)));
+    dbMs += Date.now() - dbStartedAt;
+    if (offset + batchSize < uniquePaths.length) {
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+    }
+  }
+  signal?.throwIfAborted();
+  return { files, dbMs };
+}
+
 async function handleFsListProgressive(url: URL, signal?: AbortSignal): Promise<Response> {
   if (signal?.aborted) return new Response(null, { status: 499 });
   const requestStartedAt = Date.now();
@@ -27168,14 +27197,12 @@ async function handleFsListProgressive(url: URL, signal?: AbortSignal): Promise<
     const folders = Array.isArray((result as any)?.folders) ? (result as any).folders : [];
     const normalizedFolderPath = normalizeOutputPathInput(targetPath);
 
-    const dbStartedAt = Date.now();
     const orderedPaths = files
       .map((file: any) => normalizeOutputPathInput(String(file?.path || file?.relativePath || '').trim()))
       .filter(Boolean);
-    const indexedFiles = orderedPaths.length > 0
-      ? galleryDb.getFolderFilesByPaths(normalizedFolderPath, orderedPaths)
-      : [];
-    const dbMs = Date.now() - dbStartedAt;
+    const { files: indexedFiles, dbMs } = await getGalleryIndexedFilesByPathsBatched(
+      normalizedFolderPath, orderedPaths, signal,
+    );
     const indexedByPath = new Map<string, (typeof indexedFiles)[number]>();
     for (const entry of indexedFiles) {
       const normalized = normalizeOutputPathInput(String(entry?.path || '').trim());
@@ -30499,7 +30526,14 @@ async function handleFsFolderSummary(url: URL): Promise<Response> {
   const path = normalizeOutputPathInput(rawPath);
   const normalizedPath = normalizeFsListPathKey(path);
   const force = ['1', 'true', 'yes'].includes(String(url.searchParams.get('force') || url.searchParams.get('refresh') || '').trim().toLowerCase());
-  let ownsInFlight = false;
+  let ownedInFlight: Promise<{
+    path: string;
+    signature?: string;
+    subfolderCount: number;
+    imageCount: number;
+    videoCount: number;
+    totalMediaCount: number;
+  }> | null = null;
 
   if (normalizedPath === TRASH_ROOT || normalizedPath.startsWith(`${TRASH_ROOT}/`)) {
     return json({
@@ -30564,20 +30598,21 @@ async function handleFsFolderSummary(url: URL): Promise<Response> {
         videoCount: Math.max(0, Number(summary?.videoCount || 0) || 0),
         totalMediaCount: Math.max(0, Number(summary?.totalMediaCount || 0) || 0),
       };
-      setFsFolderSummaryCache(normalizedPath, normalizedSummary);
+      if (fsFolderSummaryInFlight.get(normalizedPath) === ownedInFlight) {
+        setFsFolderSummaryCache(normalizedPath, normalizedSummary);
+      }
       return normalizedSummary;
     })();
     fsFolderSummaryInFlight.set(normalizedPath, pending);
-    ownsInFlight = true;
+    ownedInFlight = pending;
     const resolvedSummary = await pending;
     return json(resolvedSummary);
   } catch (error: any) {
     console.error('[FS Folder Summary] Error:', error);
     return json({ error: error.message }, 500);
   } finally {
-    if (ownsInFlight) {
-      const active = fsFolderSummaryInFlight.get(normalizedPath);
-      if (active) fsFolderSummaryInFlight.delete(normalizedPath);
+    if (ownedInFlight && fsFolderSummaryInFlight.get(normalizedPath) === ownedInFlight) {
+      fsFolderSummaryInFlight.delete(normalizedPath);
     }
   }
 }
