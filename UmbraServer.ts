@@ -190,6 +190,8 @@ import {
 } from './backend/UmbraUiPrompterOutputLayout';
 import { getComfyBridgeUnavailableError } from './backend/comfyBridgeAvailability';
 import { createComfyStartup, validateComfyAutoStartSetting } from './backend/comfyStartup';
+import { getTrackedComfyProcessPids } from './backend/comfyProcessOwnership';
+import { HOST_ONLY_SERVICE_SETTING_DEFAULTS, validateHostOnlySettingChanges } from './backend/hostOnlySettings';
 import { getComfyVramLaunchArguments } from './backend/comfyLaunchArguments';
 import {
   generateDataForgeWildcard,
@@ -4325,25 +4327,13 @@ function getComfyProxyTarget() {
   };
 }
 
-const HOST_ONLY_SERVICE_SETTING_DEFAULTS: Record<string, unknown> = {
-  'comfyui.url': 'http://127.0.0.1:8188',
-  'comfyui.path': '',
-  'comfyui.securityLevel': 'normal',
-  'aitoolkit.url': 'http://127.0.0.1:8675',
-  'aitoolkit.path': '',
-};
-
 function validateHostOnlyServiceSettings(
   patch: Record<string, unknown>,
   current: Record<string, unknown>,
   hostRequest: boolean,
 ): string | null {
-  for (const key of Object.keys(HOST_ONLY_SERVICE_SETTING_DEFAULTS)) {
-    const effectiveCurrent = Object.prototype.hasOwnProperty.call(current, key) ? current[key] : HOST_ONLY_SERVICE_SETTING_DEFAULTS[key];
-    if (Object.prototype.hasOwnProperty.call(patch, key) && patch[key] !== effectiveCurrent && !hostRequest) {
-      return 'Local service connection and host settings can only be changed from the host PC.';
-    }
-  }
+  const hostOnlyError = validateHostOnlySettingChanges(patch, current, hostRequest);
+  if (hostOnlyError) return hostOnlyError;
   if (Object.prototype.hasOwnProperty.call(patch, 'comfyui.url')
     && patch['comfyui.url'] !== (current['comfyui.url'] ?? HOST_ONLY_SERVICE_SETTING_DEFAULTS['comfyui.url'])) {
     const target = parseHostPortFromUrl(String(patch['comfyui.url'] || ''), '127.0.0.1', 8188);
@@ -15007,13 +14997,15 @@ function getComfyProcessOwnershipSnapshot(options: { force?: boolean } = {}): Co
   const trackedAlive = isChildProcessAlive(comfyProcess);
   const signaturePids = listComfyPidsBySignature().filter((pid) => pid !== process.pid);
   const portPids = listPidsByPort(port).filter((pid) => pid !== process.pid);
-  const ownedPidSet = new Set<number>();
-  if (trackedAlive && trackedPid) ownedPidSet.add(trackedPid);
-  for (const pid of signaturePids) ownedPidSet.add(pid);
-  const ownedPids = Array.from(ownedPidSet);
-  const compatiblePortPids = portPids.filter((pid) => ownedPidSet.has(pid));
-  const unknownPortPids = portPids.filter((pid) => !ownedPidSet.has(pid));
-  const externalPids = signaturePids.filter((pid) => pid !== trackedPid);
+  const parents = trackedAlive && signaturePids.some((pid) => pid !== trackedPid)
+    ? getProcessParentMap()
+    : new Map<number, number>();
+  const ownedPids = getTrackedComfyProcessPids(trackedPid, trackedAlive, signaturePids, parents);
+  const ownedPidSet = new Set(ownedPids);
+  const signaturePidSet = new Set(signaturePids);
+  const compatiblePortPids = portPids.filter((pid) => signaturePidSet.has(pid));
+  const unknownPortPids = portPids.filter((pid) => !signaturePidSet.has(pid));
+  const externalPids = signaturePids.filter((pid) => !ownedPidSet.has(pid));
   const kind: BackendProcessOwnershipKind = trackedAlive
     ? 'owned'
     : compatiblePortPids.length > 0
@@ -17283,6 +17275,9 @@ async function startComfyUIProcess() {
     }
 
     const ownership = getComfyProcessOwnershipSnapshot({ force: true });
+    // On Linux the listener PID probe may be unavailable (for example when
+    // lsof is not installed). A live port must still block a second launch.
+    const unresolvedPortOpen = !ownership.portOpen && await isPortOpen(ownership.port, 350);
     if (ownership.kind === 'external-compatible') {
       appendBackendLifecycleLog('comfyui', 'start_adopted_external_compatible', ownership as unknown as Record<string, unknown>);
       return {
@@ -17295,7 +17290,7 @@ async function startComfyUIProcess() {
         port: ownership.port,
       };
     }
-    if (ownership.kind === 'unknown-port') {
+    if (ownership.kind === 'unknown-port' || unresolvedPortOpen) {
       appendBackendLifecycleLog('comfyui', 'start_blocked_unknown_port_owner', ownership as unknown as Record<string, unknown>);
       logBackendProcessSnapshot('comfyui', 'unknown_port_owner', ownership.unknownPortPids, { port: ownership.port });
       return {
@@ -17439,6 +17434,8 @@ async function stopComfyUI() {
   const ownership = getComfyProcessOwnershipSnapshot({ force: true });
   const tracked = comfyProcess;
   const trackedPid = tracked?.pid ?? null;
+  const unresolvedPortOpen = !ownership.portOpen && await isPortOpen(ownership.port, 350);
+  const ownedPidsBeforeStop = ownership.ownedPids.filter((pid) => pid !== trackedPid);
   let hadRunning = ownership.portOpen || ownership.trackedAlive || ownership.ownedPids.length > 0;
   let stopped = true;
 
@@ -17457,7 +17454,7 @@ async function stopComfyUI() {
     ownership: ownership.kind,
   });
 
-  if (ownership.kind === 'unknown-port') {
+  if (ownership.kind === 'unknown-port' || (unresolvedPortOpen && !ownership.trackedAlive)) {
     return {
       success: false,
       error: `Port ${ownership.port} is owned by an unknown process. Umbra will not stop it automatically.`,
@@ -17485,9 +17482,10 @@ async function stopComfyUI() {
     stopped = await stopProcessTree(tracked, 'ComfyUI');
   }
 
-  const remainingOwnedPids = getComfyProcessOwnershipSnapshot({ force: true }).ownedPids
-    .filter((pid) => pid !== process.pid)
-    .filter((pid) => pid !== trackedPid);
+  // Process identity is established before stopping the tracked parent. Once
+  // it exits, an orphaned child no longer has a parent chain we can verify.
+  const remainingOwnedPids = listComfyPidsBySignature()
+    .filter((pid) => ownedPidsBeforeStop.includes(pid) && pid !== process.pid);
   if (remainingOwnedPids.length > 0) {
     stopped = stopPids(remainingOwnedPids, 'ComfyUI') && stopped;
     await sleep(800);
@@ -17499,7 +17497,9 @@ async function stopComfyUI() {
   clearComfyProcessTelemetry();
 
   const after = getComfyProcessOwnershipSnapshot({ force: true });
-  const stillOwned = after.kind === 'owned' || (after.ownedPids.length > 0 && after.portOpen);
+  const remainingOwnedSignatures = new Set(listComfyPidsBySignature());
+  const stillOwned = after.kind === 'owned'
+    || ownedPidsBeforeStop.some((pid) => remainingOwnedSignatures.has(pid));
   appendBackendLifecycleLog('comfyui', stillOwned ? 'stop_incomplete' : 'stop_completed', {
     trackedPid,
     port: after.port,
@@ -18570,7 +18570,7 @@ async function getBackendStatusAsync(backend: 'comfyui' | 'aitoolkit', portTimeo
     ownership: ownership.kind,
     ownerPid: ownership.trackedAlive
       ? ownership.trackedPid
-      : (ownership.signaturePids[0] ?? ownership.portPids[0] ?? null),
+      : (ownership.portPids[0] ?? null),
     trackedPid: ownership.trackedPid,
     signaturePids: ownership.signaturePids,
     portPids: ownership.portPids,
@@ -19765,7 +19765,11 @@ async function loadUserSettingsBundleSnapshot(): Promise<UmbraUserSettingsBundle
     if (!existsSync(USER_SETTINGS_BUNDLE_PATH)) return fallback;
     const content = await fs.readFile(USER_SETTINGS_BUNDLE_PATH, 'utf-8');
     const parsed = JSON.parse(content);
-    return normalizeUmbraUserSettingsBundle(parsed, fallback);
+    const snapshot = normalizeUmbraUserSettingsBundle(parsed, fallback);
+    // settings.json is the live source of app preferences. The bundle file can
+    // lag behind changes made by onboarding and internal startup migrations.
+    snapshot.appSettings = settingsManager.getAppSettings();
+    return snapshot;
   } catch {
     return fallback;
   }
