@@ -190,6 +190,7 @@ import {
 } from './backend/UmbraUiPrompterOutputLayout';
 import { getComfyBridgeUnavailableError } from './backend/comfyBridgeAvailability';
 import { createComfyStartup, validateComfyAutoStartSetting } from './backend/comfyStartup';
+import { getComfyHttpBaseUrl, getComfyWebSocketUrl, resolveComfyEndpoint } from './backend/comfyEndpoint';
 import { getTrackedComfyProcessPids } from './backend/comfyProcessOwnership';
 import { HOST_ONLY_SERVICE_SETTING_DEFAULTS, validateHostOnlySettingChanges } from './backend/hostOnlySettings';
 import { getComfyVramLaunchArguments } from './backend/comfyLaunchArguments';
@@ -4312,19 +4313,16 @@ function getComfyProxyTarget() {
       throw new Error('UMBRA_COMFY_PORT must be an integer between 1 and 65535');
     }
     if (isolatedPort === PORT) throw new Error('ComfyUI cannot use the Umbra Studio listener port.');
-    return { host: '127.0.0.1', port: isolatedPort };
+    return { protocol: 'http:' as const, host: '127.0.0.1', port: isolatedPort };
   }
   const settings = settingsManager.getSettings();
   const comfyDefaultPort = settings?.servers?.comfyui?.port || 8188;
   const comfyDefaultHost = settings?.servers?.comfyui?.host || '127.0.0.1';
-  const comfyTarget = parseHostPortFromUrl(getAppSettingString('comfyui.url'), comfyDefaultHost, comfyDefaultPort);
+  const comfyTarget = resolveComfyEndpoint(getAppSettingString('comfyui.url'), comfyDefaultHost, comfyDefaultPort);
   if (comfyTarget.port === PORT && isKnownUmbraListenerHost(comfyTarget.host)) {
     throw new Error('ComfyUI cannot use the Umbra Studio listener port.');
   }
-  return {
-    host: comfyTarget.host,
-    port: comfyTarget.port,
-  };
+  return comfyTarget;
 }
 
 function validateHostOnlyServiceSettings(
@@ -4336,7 +4334,7 @@ function validateHostOnlyServiceSettings(
   if (hostOnlyError) return hostOnlyError;
   if (Object.prototype.hasOwnProperty.call(patch, 'comfyui.url')
     && patch['comfyui.url'] !== (current['comfyui.url'] ?? HOST_ONLY_SERVICE_SETTING_DEFAULTS['comfyui.url'])) {
-    const target = parseHostPortFromUrl(String(patch['comfyui.url'] || ''), '127.0.0.1', 8188);
+    const target = resolveComfyEndpoint(String(patch['comfyui.url'] || ''), '127.0.0.1', 8188);
     if (target.port === PORT && isKnownUmbraListenerHost(target.host)) {
       return 'ComfyUI cannot use the Umbra Studio listener port.';
     }
@@ -4357,13 +4355,23 @@ function getComfyInputRootFast(): string {
 }
 
 function getComfyProxyBaseUrl(): string {
-  const config = getComfyProxyTarget();
-  return `http://${config.host}:${config.port}`;
+  return getComfyHttpBaseUrl(getComfyProxyTarget());
 }
 
 function getComfyProxyWsUrl(search = ''): string {
-  const config = getComfyProxyTarget();
-  return `ws://${config.host}:${config.port}/ws${search || ''}`;
+  return getComfyWebSocketUrl(getComfyProxyTarget(), search);
+}
+
+async function probeConfiguredComfyUI(timeoutMs = 1200): Promise<boolean> {
+  try {
+    const response = await fetch(`${getComfyProxyBaseUrl()}/queue`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 async function isComfyWsTargetReachable(targetUrl: string, timeoutMs = 650): Promise<boolean> {
@@ -4462,8 +4470,11 @@ function isComfyRootProxyPath(path: string): boolean {
 
 function getComfyDirectRemoteBaseUrl(sourceUrl: URL): string {
   if (isLoopbackHostname(sourceUrl.hostname)) return '';
-  if (sourceUrl.protocol !== 'http:') return '';
   const config = getComfyProxyTarget();
+  if (config.protocol === 'https:') {
+    return isLoopbackHostname(config.host) ? '' : getComfyProxyBaseUrl();
+  }
+  if (sourceUrl.protocol !== 'http:') return '';
   return `http://${sourceUrl.hostname}:${config.port}`;
 }
 
@@ -17371,6 +17382,14 @@ async function startComfyUIProcess() {
       comfyStartTime = null;
     }
 
+    const endpoint = getComfyProxyTarget();
+    if (endpoint.protocol === 'https:') {
+      const healthy = await probeConfiguredComfyUI();
+      return healthy
+        ? { success: true, message: 'Connected to the configured external HTTPS ComfyUI server', running: true, healthy, ownership: 'external-compatible', port: endpoint.port }
+        : { success: false, error: 'The configured HTTPS ComfyUI server is unavailable. Managed ComfyUI launch requires an HTTP URL.', running: false, healthy, port: endpoint.port };
+    }
+
     const config = getBackendConfig().comfyui;
     if (!config.detected || config.args.length === 0) {
       return { success: false, error: 'ComfyUI install is missing or incomplete. Run Reinstall ComfyUI to repair runtime and launch configuration.' };
@@ -17533,6 +17552,22 @@ async function startComfyUIProcess() {
 async function stopComfyUI() {
   comfyStopRequested = true;
   comfyStartup.clearError();
+  const endpoint = getComfyProxyTarget();
+  if (endpoint.protocol === 'https:' && !isChildProcessAlive(comfyProcess)) {
+    comfyProcess = null;
+    comfyStartTime = null;
+    comfyOwnershipSnapshotCache = null;
+    clearComfyProcessTelemetry();
+    const healthy = await probeConfiguredComfyUI();
+    return {
+      success: true,
+      message: 'External HTTPS ComfyUI is not managed by Umbra',
+      running: healthy,
+      healthy,
+      ownership: healthy ? 'external-compatible' : 'stopped',
+      port: endpoint.port,
+    };
+  }
   const ownership = getComfyProcessOwnershipSnapshot({ force: true });
   const tracked = comfyProcess;
   const trackedPid = tracked?.pid ?? null;
@@ -18641,6 +18676,22 @@ async function getBackendStatusAsync(backend: 'comfyui' | 'aitoolkit', portTimeo
 
   const trackedProc = (proc || null) as ChildProcess | null;
   const processRunning = isChildProcessAlive(trackedProc);
+
+  if (backend === 'comfyui' && getComfyProxyTarget().protocol === 'https:') {
+    const healthy = await probeConfiguredComfyUI(portTimeoutMs);
+    return {
+      running: processRunning || healthy,
+      healthy,
+      port,
+      pid: trackedProc?.pid ?? null,
+      uptime: processRunning && startTime ? Math.floor((Date.now() - startTime) / 1000) : (healthy ? 999 : 0),
+      ownership: processRunning ? 'owned' : (healthy ? 'external-compatible' : 'none'),
+      ownerPid: processRunning ? trackedProc?.pid ?? null : null,
+      trackedPid: trackedProc?.pid ?? null,
+      signaturePids: [],
+      portPids: [],
+    };
+  }
 
   if (backend === 'aitoolkit') {
     const config = getBackendConfig().aitoolkit;
@@ -35648,7 +35699,7 @@ const server = Bun.serve<UmbraSocketData>({
           const config = getComfyProxyTarget();
           host = config.host;
           port = config.port;
-          readyUrl = `http://${host}:${port}/queue`;
+          readyUrl = `${getComfyProxyBaseUrl()}/queue`;
         }
         else if (backend === 'aitoolkit') {
           const config = getBackendConfig().aitoolkit;
@@ -35678,9 +35729,7 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/umbrabridge/comfyui/queue' && method === 'GET') {
         try {
-          const config = getComfyProxyTarget();
-          const response = await fetch(`http://${config.host}:${config.port}/queue`, {
-          });
+          const response = await fetch(`${getComfyProxyBaseUrl()}/queue`);
           if (!response.ok) {
             return json({
               success: false,
@@ -35704,8 +35753,7 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/umbrabridge/comfyui/interrupt' && method === 'POST') {
         try {
-          const config = getComfyProxyTarget();
-          const response = await fetch(`http://${config.host}:${config.port}/interrupt`, {
+          const response = await fetch(`${getComfyProxyBaseUrl()}/interrupt`, {
             method: 'POST',
           });
           if (!response.ok) {
@@ -35719,8 +35767,7 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/umbrabridge/comfyui/queue/clear' && method === 'POST') {
         try {
-          const config = getComfyProxyTarget();
-          const queueUrl = `http://${config.host}:${config.port}/queue`;
+          const queueUrl = `${getComfyProxyBaseUrl()}/queue`;
           let cleared = false;
           const clearResponse = await fetch(queueUrl, {
             method: 'POST',
