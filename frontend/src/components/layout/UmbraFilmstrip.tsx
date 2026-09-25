@@ -55,16 +55,21 @@ function normalizePath(value: string | null | undefined): string {
   return String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').trim();
 }
 
+function pathKey(value: string | null | undefined): string {
+  const path = normalizePath(value);
+  return /^[a-z]:($|\/)/i.test(path) || path.startsWith('//') ? path.toLowerCase() : path;
+}
+
 function pathsLikelySame(left: string | null | undefined, right: string | null | undefined): boolean {
   const a = normalizePath(left || '');
   const b = normalizePath(right || '');
   if (!a || !b) return false;
   if (a === b) return true;
-  const aLower = a.toLowerCase();
-  const bLower = b.toLowerCase();
-  if (aLower === bLower) return true;
-  if (aLower.endsWith(`/${bLower}`)) return true;
-  if (bLower.endsWith(`/${aLower}`)) return true;
+  const aKey = pathKey(a);
+  const bKey = pathKey(b);
+  if (aKey === bKey) return true;
+  if (aKey.endsWith(`/${bKey}`)) return true;
+  if (bKey.endsWith(`/${aKey}`)) return true;
   return false;
 }
 
@@ -91,7 +96,7 @@ export function shouldRefreshFilmstripForContentChange(
   const reason = String(detail.reason || '').trim().toLowerCase();
   if (reason === 'reorder' || reason === 'delete') return false;
   const changedFolder = normalizePath(detail.folderPath || (detail.mediaPath ? pathParent(detail.mediaPath) : detail.path));
-  return !changedFolder || changedFolder.toLowerCase() === normalizePath(activeFolder).toLowerCase();
+  return !changedFolder || pathKey(changedFolder) === pathKey(activeFolder);
 }
 
 function pathsLikelyRelated(left: string | null | undefined, right: string | null | undefined): boolean {
@@ -99,9 +104,9 @@ function pathsLikelyRelated(left: string | null | undefined, right: string | nul
   const b = normalizePath(right || '');
   if (!a || !b) return false;
   if (pathsLikelySame(a, b)) return true;
-  const aLower = a.toLowerCase();
-  const bLower = b.toLowerCase();
-  return aLower.startsWith(`${bLower}/`) || bLower.startsWith(`${aLower}/`);
+  const aKey = pathKey(a);
+  const bKey = pathKey(b);
+  return aKey.startsWith(`${bKey}/`) || bKey.startsWith(`${aKey}/`);
 }
 
 function isLiveGenerationPreviewPath(pathValue: string | null | undefined): boolean {
@@ -228,7 +233,7 @@ export function filmstripImagesFromSavedOutputs(detail: unknown): FilmstripImage
   for (const output of outputs) {
     const item = output && typeof output === 'object' ? output as Record<string, unknown> : {};
     const path = normalizePath(String(item.fullpath || item.fullPath || item.path || ''));
-    const key = path.toLowerCase();
+    const key = pathKey(path);
     if (!path || seen.has(key)) continue;
     seen.add(key);
     const tags = Array.isArray(item.tags) ? item.tags.map((tag) => String(tag || '')).filter(Boolean) : undefined;
@@ -461,7 +466,7 @@ export function UmbraFilmstrip({
     if (Array.isArray(raw)) {
       for (const entry of raw) {
         const normalized = normalizePath(entry);
-        const key = normalized.toLowerCase();
+        const key = pathKey(normalized);
         if (normalized && !deduped.has(key)) deduped.set(key, normalized);
       }
     }
@@ -469,10 +474,10 @@ export function UmbraFilmstrip({
   }, [recentFoldersSetting]);
 
   const rememberRecentFolders = useCallback((folderPaths: string[]) => {
-    const normalizedRoot = normalizePath(rootPath).toLowerCase();
+    const normalizedRoot = pathKey(rootPath);
     const incoming = folderPaths
       .map((entry) => normalizePath(entry))
-      .filter((entry) => entry && entry.toLowerCase() !== normalizedRoot);
+      .filter((entry) => entry && pathKey(entry) !== normalizedRoot);
     if (incoming.length === 0) return;
 
     const stored = useStore.getState().appSettings['library.recentFolders'];
@@ -480,21 +485,21 @@ export function UmbraFilmstrip({
     const next = new Map<string, string>();
     for (const entry of [...incoming, ...current]) {
       const normalized = normalizePath(entry);
-      const key = normalized.toLowerCase();
+      const key = pathKey(normalized);
       if (normalized && key !== normalizedRoot && !next.has(key)) next.set(key, normalized);
       if (next.size >= 8) break;
     }
     const nextFolders = Array.from(next.values());
     const currentFolders = current.map((entry) => normalizePath(entry)).filter(Boolean).slice(0, 8);
     if (nextFolders.length === currentFolders.length
-      && nextFolders.every((entry, index) => entry.toLowerCase() === currentFolders[index]?.toLowerCase())) return;
+      && nextFolders.every((entry, index) => pathKey(entry) === pathKey(currentFolders[index]))) return;
     setAppSetting('library.recentFolders', nextFolders);
   }, [rootPath, setAppSetting]);
 
   const folderActivity = useFilmstripFolderActivity([...pinnedFolders, ...recentFolders], rememberRecentFolders);
 
   const displayedImages = useMemo(() => {
-    if (normalizePath(feedFolder).toLowerCase() !== normalizePath(currentFolder || rootPath).toLowerCase()) return [];
+    if (pathKey(feedFolder) !== pathKey(currentFolder || rootPath)) return [];
     const sortedImages = sortFilmstripImages(images, sortField, sortDirection, customOrder)
       .filter((image) => !isLiveGenerationPreviewPath(image.path));
     return sortedImages;
@@ -502,19 +507,19 @@ export function UmbraFilmstrip({
 
   const recentGenerationLaneImages = useMemo(() => {
     const recentLimit = recentGenerationsExpanded ? 10 : 3;
-    const currentByPath = new Map(displayedImages.map((image) => [normalizePath(image.path).toLowerCase(), image]));
+    const currentByPath = new Map(displayedImages.map((image) => [pathKey(image.path), image]));
     const lane = [
       ...(liveGenerationPreviewsEnabled && liveGenerationPreviewImage ? [liveGenerationPreviewImage] : []),
       ...recentGenerationOutputImages.slice(0, recentLimit),
     ];
     const seen = new Set<string>();
     return lane.filter((image) => {
-      const key = normalizePath(image.path).toLowerCase() || normalizeId(image.id);
+      const key = pathKey(image.path) || normalizeId(image.id);
       if (!key || seen.has(key)) return false;
       seen.add(key);
       return true;
     }).map((image): FilmstripImage => {
-      const current = currentByPath.get(normalizePath(image.path).toLowerCase());
+      const current = currentByPath.get(pathKey(image.path));
       if (!current) return image;
       return {
         ...image, ...current,
@@ -536,7 +541,7 @@ export function UmbraFilmstrip({
   ]);
 
   useEffect(() => {
-    if (normalizePath(feedFolder).toLowerCase() !== normalizePath(currentFolder || rootPath).toLowerCase()) return;
+    if (pathKey(feedFolder) !== pathKey(currentFolder || rootPath)) return;
     setSelectedIds((current) => {
       const next = retainVisibleFilmstripSelection(current, selectableImages);
       return next.size === current.size && Array.from(next).every((id) => current.has(id)) ? current : next;
@@ -706,10 +711,10 @@ export function UmbraFilmstrip({
       const custom = event as CustomEvent<{ path?: string; folderPath?: string }>;
       const incoming = normalizePath(custom?.detail?.path || custom?.detail?.folderPath || '');
       if (!incoming) return;
-      if (incoming.toLowerCase() !== normalizePath(currentFolderRef.current).toLowerCase()) {
+      if (pathKey(incoming) !== pathKey(currentFolderRef.current)) {
         localCustomSortPendingRef.current = null;
       }
-      if (incoming.toLowerCase() !== normalizePath(activityOpenedFolderRef.current).toLowerCase()) {
+      if (pathKey(incoming) !== pathKey(activityOpenedFolderRef.current)) {
         folderActivity.markOpened(incoming);
         activityOpenedFolderRef.current = incoming;
       }
@@ -728,9 +733,9 @@ export function UmbraFilmstrip({
     const onFolderLoadFailed = (event: Event) => {
       const detail = (event as CustomEvent<{ folderPath?: string; currentFolderPath?: string; message?: string }>).detail;
       const failedFolder = normalizePath(detail?.folderPath || '');
-      if (!failedFolder || failedFolder.toLowerCase() !== normalizePath(currentFolderRef.current || rootPath).toLowerCase()) return;
+      if (!failedFolder || pathKey(failedFolder) !== pathKey(currentFolderRef.current || rootPath)) return;
       const committedFolder = normalizePath(detail?.currentFolderPath || '');
-      if (committedFolder && committedFolder.toLowerCase() !== failedFolder.toLowerCase()) {
+      if (committedFolder && pathKey(committedFolder) !== pathKey(failedFolder)) {
         currentFolderRef.current = committedFolder;
         setCurrentFolder(committedFolder);
       }
@@ -895,7 +900,7 @@ export function UmbraFilmstrip({
   }, []);
 
   useEffect(() => {
-    const rootKey = normalizePath(rootPath).toLowerCase();
+    const rootKey = pathKey(rootPath);
     const rootChanged = Boolean(initialFeedRootRef.current && initialFeedRootRef.current !== rootKey);
     initialFeedRootRef.current = rootKey;
     const timer = window.setTimeout(() => {
@@ -1012,15 +1017,15 @@ export function UmbraFilmstrip({
     const onPrivacyChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ paths?: string[]; marked?: boolean }>).detail;
       const paths = new Set((Array.isArray(detail?.paths) ? detail.paths : [])
-        .map((path) => normalizePath(path).toLowerCase()).filter(Boolean));
+        .map((path) => pathKey(path)).filter(Boolean));
       if (!paths.size) return;
       if (detail?.marked) {
-        const protect = (image: FilmstripImage): FilmstripImage => paths.has(normalizePath(image.path).toLowerCase())
+        const protect = (image: FilmstripImage): FilmstripImage => paths.has(pathKey(image.path))
           ? { ...image, privacyClass: 'nsfw' } : image;
         setImages((current) => current.map(protect));
         setRecentGenerationOutputImages((current) => current.map(protect));
       } else {
-        setRecentGenerationOutputImages((current) => current.filter((image) => !paths.has(normalizePath(image.path).toLowerCase())));
+        setRecentGenerationOutputImages((current) => current.filter((image) => !paths.has(pathKey(image.path))));
       }
     };
     window.addEventListener('umbra:gallery-privacy-changed', onPrivacyChanged as EventListener);
@@ -1114,7 +1119,7 @@ export function UmbraFilmstrip({
         setRecentGenerationOutputImages((current) => {
           const byPath = new Map<string, FilmstripImage>();
           for (const image of [...savedImages, ...current]) {
-            const key = normalizePath(image.path).toLowerCase();
+            const key = pathKey(image.path);
             if (key && !byPath.has(key)) byPath.set(key, image);
           }
           return Array.from(byPath.values()).slice(0, 40);
@@ -1236,7 +1241,7 @@ export function UmbraFilmstrip({
       ? pathParent(normalizedTargetPath) || normalizedTargetPath
       : normalizedTargetPath;
     const imagePath = treatAsFile ? normalizedTargetPath : '';
-    if (folderPath.toLowerCase() !== normalizePath(currentFolderRef.current).toLowerCase()) {
+    if (pathKey(folderPath) !== pathKey(currentFolderRef.current)) {
       localCustomSortPendingRef.current = null;
     }
     currentFolderRef.current = folderPath;
@@ -1329,7 +1334,7 @@ export function UmbraFilmstrip({
   const removeCompletedImages = useCallback((entries: FilmstripImage[], paths: string[], operationFolder?: string) => {
     const removedPaths = Array.from(new Set(paths.map(normalizePath).filter(Boolean)));
     if (removedPaths.length === 0) return;
-    if (operationFolder && normalizePath(currentFolderRef.current || rootPath).toLowerCase() !== operationFolder.toLowerCase()) {
+    if (operationFolder && pathKey(currentFolderRef.current || rootPath) !== pathKey(operationFolder)) {
       notifyGalleryRemovePaths(removedPaths);
       return;
     }
@@ -1430,7 +1435,7 @@ export function UmbraFilmstrip({
         removePaths.map((entry) => normalizePath(entry)).filter(Boolean),
       ));
       if (normalizedRemovePaths.length === 0) return;
-      if (normalizePath(currentFolderRef.current || rootPath).toLowerCase() !== operationFolder.toLowerCase()) {
+      if (pathKey(currentFolderRef.current || rootPath) !== pathKey(operationFolder)) {
         notifyGalleryRemovePaths(normalizedRemovePaths);
         return;
       }
@@ -2027,7 +2032,7 @@ export function UmbraFilmstrip({
     setCustomOrder(next);
     try {
       const saved = await persistCustomOrder(next);
-      const stillInFolder = normalizePath(currentFolderRef.current || rootPath).toLowerCase() === operationFolder.toLowerCase();
+      const stillInFolder = pathKey(currentFolderRef.current || rootPath) === pathKey(operationFolder);
       if (!stillInFolder) {
         localCustomSortPendingRef.current = null;
         return;
@@ -2061,9 +2066,9 @@ export function UmbraFilmstrip({
   const openFilmstripFolder = useCallback((folderPath: string, source: string) => {
     const normalized = normalizePath(folderPath);
     if (!normalized) return;
-    if (normalized.toLowerCase() !== normalizePath(currentFolderRef.current).toLowerCase()) {
+    if (pathKey(normalized) !== pathKey(currentFolderRef.current)) {
       localCustomSortPendingRef.current = null;
-    } else if (normalized.toLowerCase() === normalizePath(activityOpenedFolderRef.current).toLowerCase()) {
+    } else if (pathKey(normalized) === pathKey(activityOpenedFolderRef.current)) {
       folderActivity.markOpened(normalized);
     }
     currentFolderRef.current = normalized;
@@ -2164,9 +2169,9 @@ export function UmbraFilmstrip({
     }))
   ), [currentFolder, dropTargetPath, pinnedFolders, folderActivity.counts]);
   const newestFolderItems = useMemo(() => {
-    const pinned = new Set(pinnedFolders.map((folderPath) => normalizePath(folderPath).toLowerCase()));
+    const pinned = new Set(pinnedFolders.map((folderPath) => pathKey(folderPath)));
     return recentFolders
-      .filter((folderPath) => !pinned.has(normalizePath(folderPath).toLowerCase()))
+      .filter((folderPath) => !pinned.has(pathKey(folderPath)))
       .map((folderPath) => ({
         path: folderPath,
         label: pathLeaf(folderPath) || folderPath,
@@ -2175,13 +2180,13 @@ export function UmbraFilmstrip({
       }));
   }, [currentFolder, pinnedFolders, recentFolders, folderActivity.counts]);
   const recentGenerationPathSet = useMemo(() => new Set(
-    recentGenerationLaneImages.map((image) => normalizePath(image.path).toLowerCase()).filter(Boolean)
+    recentGenerationLaneImages.map((image) => pathKey(image.path)).filter(Boolean)
   ), [recentGenerationLaneImages]);
 
   return (
     <>
       <Filmstrip
-        statusMessage={folderLoadError || (deletePending ? 'Deleting selection…' : normalizePath(feedFolder).toLowerCase() !== normalizePath(currentFolder || rootPath).toLowerCase() ? 'Loading folder…' : '')}
+        statusMessage={folderLoadError || (deletePending ? 'Deleting selection…' : pathKey(feedFolder) !== pathKey(currentFolder || rootPath) ? 'Loading folder…' : '')}
         statusIsError={Boolean(folderLoadError)}
         unreadFolderMediaCount={folderActivity.total}
         images={displayedImages}
@@ -2228,7 +2233,7 @@ export function UmbraFilmstrip({
               targetPath,
               paths: paths.length > 0 ? paths : [targetPath],
               reorderPaths: paths.length > 0 ? paths : [targetPath],
-              source: recentGenerationPathSet.has(targetPath.toLowerCase())
+              source: recentGenerationPathSet.has(pathKey(targetPath))
                 ? 'powerprompter-recent-output'
                 : 'filmstrip',
             },
