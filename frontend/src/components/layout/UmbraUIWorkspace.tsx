@@ -912,6 +912,7 @@ export function UmbraUIWorkspace() {
   }, []);
   const [initialImg2ImgReplacementIntents] = React.useState(readImg2ImgReplacementIntents);
   const img2imgSourceReplacementRequestsRef = React.useRef(initialImg2ImgReplacementIntents);
+  const img2imgReplacementReceiptWarningIdsRef = React.useRef(new Set<string>());
   const [img2imgReplacementIntentRevision, setImg2imgReplacementIntentRevision] = React.useState(0);
   React.useEffect(() => {
     writeImg2ImgReplacementIntents(img2imgSourceReplacementRequestsRef.current);
@@ -2279,6 +2280,9 @@ export function UmbraUIWorkspace() {
   if (imageSeedContextRef.current.key !== imageSeedContext) {
     imageSeedContextRef.current = { key: imageSeedContext, revision: imageSeedContextRef.current.revision + 1 };
   }
+  const activeImageOutputFolder = activeImageFeature === 'txt2img' ? activeTxt2imgOutputFolder : img2imgOutputFolder;
+  const imageOutputFolderUnavailable = !!activeImageOutputFolder
+    && !pinnedOutputFolders.some((folder) => folder.toLowerCase() === activeImageOutputFolder.toLowerCase());
   const imageQueueBlockReason = !imageControlsHydrated
     ? 'Loading saved image controls'
     : !queueConnected
@@ -2293,6 +2297,8 @@ export function UmbraUIWorkspace() {
               ? `Select ${missingWorkflowResource.label}`
               : imagePipelineRuntimeIssue
                 ? imagePipelineRuntimeIssue
+                : imageOutputFolderUnavailable
+                  ? 'The selected output folder is no longer pinned. Choose a pinned folder or Default output.'
                 : activeMode === 'img2img' && !img2imgSource.path && !img2imgSource.name
                   ? 'Choose a source image for IMG2IMG'
                   : !workflowImagePrompt.trim()
@@ -2361,7 +2367,7 @@ export function UmbraUIWorkspace() {
           : imageCapabilities.resolution.defaultHeight || Number(height),
         batchSize,
         outputMode: activeImageFeature,
-        outputFolder: activeImageFeature === 'txt2img' ? activeTxt2imgOutputFolder : img2imgOutputFolder,
+        outputFolder: activeImageOutputFolder,
         sourceImagePath: activeImageFeature === 'img2img' ? img2imgSource.path : '',
         sourceImageName: activeImageFeature === 'img2img' ? img2imgSource.name : '',
         denoise: img2imgDenoise,
@@ -2463,8 +2469,7 @@ export function UmbraUIWorkspace() {
     imageQueueBlockReason,
     isQueueing,
     activeLoras,
-    activeTxt2imgOutputFolder,
-    img2imgOutputFolder,
+    activeImageOutputFolder,
     modelFamily,
     modelType,
     negativePrompt,
@@ -2587,6 +2592,7 @@ export function UmbraUIWorkspace() {
           || Number(receipt.promptIndex) !== 0) return;
         const status = String(receipt.status || '').trim();
         if (status === 'completed') {
+          img2imgReplacementReceiptWarningIdsRef.current.delete(requestId);
           const resultPath = String(receipt.outputPath || '').trim();
           if (resultPath) void replaceQueuedImg2ImgSource(requestId, resultPath);
           else {
@@ -2595,11 +2601,16 @@ export function UmbraUIWorkspace() {
             showToast('The IMG2IMG job finished without a saved image to replace the original.', 'error');
           }
         } else if (status === 'failed' || status === 'canceled' || status === 'interrupted') {
+          img2imgReplacementReceiptWarningIdsRef.current.delete(requestId);
           img2imgSourceReplacementRequestsRef.current.delete(requestId);
           writeImg2ImgReplacementIntents(img2imgSourceReplacementRequestsRef.current);
         }
       }).catch((error) => {
-        if (!controller.signal.aborted) console.warn('[Umbra UI] Failed to recover IMG2IMG replacement intent:', error);
+        if (controller.signal.aborted) return;
+        console.warn('[Umbra UI] Failed to recover IMG2IMG replacement intent:', error);
+        if (img2imgReplacementReceiptWarningIdsRef.current.has(requestId)) return;
+        img2imgReplacementReceiptWarningIdsRef.current.add(requestId);
+        showToast('IMG2IMG replacement status could not be checked. The original image was preserved; reopen Umbra UI to retry recovery.', 'error');
       });
     }
     return () => controller.abort();

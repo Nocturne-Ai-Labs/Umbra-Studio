@@ -70,6 +70,8 @@ import { compileUmbraUiPromptSegments, type UmbraUiPromptSegment } from '@/lib/u
 import { composeUmbraUiPromptWithLoras, type UmbraUiLoraEntry } from '@/lib/umbraUiModels';
 import { stageUmbraUiMediaHandoff, type UmbraUiMediaHandoff, type UmbraUiMediaHandoffMode } from '@/lib/umbraUiMediaHandoff';
 import { UmbraCanvasMediaImportGate } from '@/lib/umbraCanvasMediaImportGate';
+import { getUmbraCanvasPinnedCopyFailure } from '@/lib/umbraUiCanvasPinnedCopy';
+import { selectNextUmbraCanvasPendingGeneration } from './canvasGenerationRecovery';
 import { stageUmbraUiUpscaleHandoff } from '@/lib/umbraUiUpscale';
 import {
   usePublishUmbraQueueActivity,
@@ -1486,6 +1488,8 @@ export function UmbraCanvasWorkspace({
       if (!response.ok || payload.success !== true) {
         throw new Error(String(payload.error || `Failed to save staged samples (${response.status}).`));
       }
+      const copyFailure = getUmbraCanvasPinnedCopyFailure(payload, paths.length);
+      if (copyFailure) throw new Error(copyFailure);
       const copied = Math.max(0, Number(payload.copied) || 0);
       showToast(`Saved ${copied} staged sample${copied === 1 ? '' : 's'} to the pinned Gallery folder.`, 'success');
     } catch (error) {
@@ -1531,6 +1535,10 @@ export function UmbraCanvasWorkspace({
 
   const prepareGenerationRegion = React.useCallback(async () => {
     if (preparingRegion || submitting) return;
+    if (useUmbraCanvasStore.getState().present.generation.pending.length > 0) {
+      showToast('Wait for the current Canvas generation to finish before starting another.', 'error');
+      return;
+    }
     autoSubmitPreparedRegionRef.current = true;
     setPreparingRegion(true);
     try {
@@ -1560,6 +1568,11 @@ export function UmbraCanvasWorkspace({
   const submitPreparedRegion = React.useCallback(async () => {
     if (!preparedRegion || submitting) return;
     const submissionProject = useUmbraCanvasStore.getState().present;
+    if (submissionProject.generation.pending.length > 0) {
+      showToast('Wait for the current Canvas generation to finish before starting another.', 'error');
+      closePreparedRegion();
+      return;
+    }
     const isSubmissionProjectOpen = () => useUmbraCanvasStore.getState().present.id === submissionProject.id;
     if (submissionProject.id !== preparedRegion.projectId || submissionProject.revision !== preparedRegion.projectRevision) {
       showToast('Canvas changed after the generation region was prepared. Generate again to use the latest layers.', 'error');
@@ -1913,6 +1926,56 @@ export function UmbraCanvasWorkspace({
       window.setTimeout(() => void saveProject(false), 0);
     }
   }, [addStagedGenerations, job, removePendingGeneration, saveProject, showToast]);
+
+  React.useEffect(() => {
+    if (!job || !isUmbraUiInpaintJobTerminal(job)) return;
+    const pending = selectNextUmbraCanvasPendingGeneration(project.generation.pending, job.id);
+    if (!pending) return;
+    const projectId = project.id;
+    const controller = new AbortController();
+    let retryTimer = 0;
+    let warned = false;
+    const isCurrent = () => {
+      const current = useUmbraCanvasStore.getState().present;
+      return !controller.signal.aborted && current.id === projectId
+        && current.generation.pending.some((entry) => entry.jobId === pending.jobId);
+    };
+    if (!jobBboxesRef.current.has(pending.jobId)) {
+      jobBboxesRef.current.set(pending.jobId, {
+        projectId,
+        bbox: { ...pending.bbox },
+        projectRevision: pending.projectRevision,
+        snapshotSignature: pending.snapshotSignature || '',
+        acceptanceMaskUrl: pending.acceptanceMaskUrl || '',
+      });
+    }
+    const recover = async () => {
+      try {
+        const restored = await fetchUmbraUiInpaintJob(pending.jobId, controller.signal);
+        if (!isCurrent()) return;
+        setJob((current) => current?.id === job.id && isUmbraUiInpaintJobTerminal(current) ? restored : current);
+      } catch (error) {
+        if (!isCurrent()) return;
+        if (error instanceof Error && 'status' in error && error.status === 404) {
+          removePendingGeneration(pending.jobId);
+          jobBboxesRef.current.delete(pending.jobId);
+          void saveProject(false);
+          showToast('An earlier Canvas job is no longer available. Its recovery pointer was cleared.', 'error');
+          return;
+        }
+        if (!warned) {
+          warned = true;
+          showToast('An earlier Canvas job is still reconnecting. Its recovery pointer was preserved.', 'error');
+        }
+        retryTimer = window.setTimeout(() => void recover(), 2500);
+      }
+    };
+    void recover();
+    return () => {
+      controller.abort();
+      if (retryTimer) window.clearTimeout(retryTimer);
+    };
+  }, [job, project.generation.pending, project.id, removePendingGeneration, saveProject, showToast]);
 
   React.useEffect(() => {
     if (!job || isUmbraUiInpaintJobTerminal(job)) return;
@@ -2673,8 +2736,9 @@ export function UmbraCanvasWorkspace({
           </section>
         ) : null}
         <UmbraGenerationActionBar task="Canvas" onGenerate={() => void prepareGenerationRegion()}
-          disabled={preparingRegion || submitting} busy={preparingRegion || submitting}
-          title="Generate the selected Canvas region" label={preparingRegion ? 'Preparing' : submitting ? 'Submitting' : 'Generate'}
+          disabled={preparingRegion || submitting || project.generation.pending.length > 0} busy={preparingRegion || submitting || project.generation.pending.length > 0}
+          title={project.generation.pending.length > 0 ? 'Wait for the current Canvas generation to finish before starting another' : 'Generate the selected Canvas region'}
+          label={preparingRegion ? 'Preparing' : submitting ? 'Submitting' : project.generation.pending.length > 0 ? 'Generating' : 'Generate'}
           folder={pinnedOutputFolder} onFolderChange={setPinnedOutputFolder}>
           <button type="button" disabled={!previewStage?.sourcePath} onClick={() => { if (previewStage) void sendStagedResult(previewStage, 'img2img'); }}
             title="Continue the previewed result in IMG2IMG" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-cyan-300/20 px-2.5 text-[10px] font-bold text-cyan-100 disabled:text-zinc-600"><ImagePlus size={12} /> IMG2IMG</button>

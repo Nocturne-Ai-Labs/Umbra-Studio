@@ -30,6 +30,8 @@ import type {
 } from '@/components/umbra-ui/useUmbraPowerPrompterBridge';
 import type { UmbraVideoEditorDraft } from '@/components/umbra-ui/UmbraVideoGenerationControls';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
+import { UmbraPinnedOutputControl } from '@/components/umbra-ui/UmbraPinnedOutputControl';
+import { normalizeUmbraUiPinnedFolder } from '@/lib/pinnedOutputFolders';
 import { advanceUmbraUiSeed, normalizeUmbraUiSeed, resolveUmbraUiQueueSeed } from '@/lib/umbraUiSeed';
 import { resolveUmbraVideoQueueSourceUrl } from '@/lib/umbraVideoQueuePreview';
 import { refreshUmbraVideoRequeueSourceDimensions } from '@/lib/umbraVideoRequeueSource';
@@ -361,7 +363,7 @@ function VideoJobCard({ job, onOpen }: { job: UmbraVideoReviewJob; onOpen: () =>
             {job.status === 'running' || job.status === 'submitting'
               ? <Loader2 size={24} className="mb-2 animate-spin text-cyan-300/50" />
               : <Clapperboard size={25} className="mb-2 text-fuchsia-300/25" />}
-            <span className="text-[9px] font-black uppercase tracking-[0.13em]">{job.status === 'pending' ? 'Queued for generation' : 'No video output yet'}</span>
+            <span className="text-[9px] font-black uppercase tracking-[0.13em]">{job.status === 'pending' ? 'Queued for generation' : job.status === 'failed' ? 'Generation failed' : 'No video output yet'}</span>
           </div>
         )}
         <div className="pointer-events-none absolute right-2 top-2 inline-flex h-7 items-center gap-1 border border-white/10 bg-black/75 px-2 text-[9px] font-black uppercase tracking-[0.09em] text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100">
@@ -372,6 +374,7 @@ function VideoJobCard({ job, onOpen }: { job: UmbraVideoReviewJob; onOpen: () =>
         ) : null}
       </div>
       <div className="space-y-2 border-t border-white/10 p-2.5">
+        {job.status === 'failed' && job.error ? <p className="line-clamp-2 text-[10px] leading-relaxed text-red-200/80" title={job.error}>{job.error}</p> : null}
         <p className="line-clamp-3 text-[11px] leading-relaxed text-zinc-300">{job.prompt || 'No prompt recorded.'}</p>
         <SettingsChips
           video={video}
@@ -430,6 +433,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
   const [draftPrompt, setDraftPrompt] = React.useState('');
   const [draftNegative, setDraftNegative] = React.useState('');
   const [draftVideo, setDraftVideo] = React.useState<PowerPrompterVideoControls | null>(null);
+  const [draftOutputFolder, setDraftOutputFolder] = React.useState('');
   const [requeueing, setRequeueing] = React.useState(false);
   const requeueInFlightRef = React.useRef(false);
   const [clearPending, setClearPending] = React.useState(false);
@@ -446,6 +450,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
     setDraftPrompt(selectedClip?.prompt || job.prompt);
     setDraftNegative(job.negativePrompt);
     setDraftVideo(clonedVideo);
+    setDraftOutputFolder(normalizeUmbraUiPinnedFolder(job.generation.outputFolder));
     setDrawerVisible(false);
     window.requestAnimationFrame(() => setDrawerVisible(true));
   }, []);
@@ -600,7 +605,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
         ));
       }
       const preparedVideo = await refreshUmbraVideoRequeueSourceDimensions(videoForQueue);
-      await queueVideo({ prompt: draftPrompt, negativePrompt: draftNegative, video: preparedVideo, outputFolder: selected?.generation.outputFolder });
+      await queueVideo({ prompt: draftPrompt, negativePrompt: draftNegative, video: preparedVideo, outputFolder: draftOutputFolder });
       const nextSeed = advanceUmbraUiSeed(queuedSeed, draftVideo.seedMode, draftVideo.seedIncrement);
       setDraftVideo((current) => current
         && current.seed === draftVideo.seed
@@ -615,7 +620,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
       requeueInFlightRef.current = false;
       setRequeueing(false);
     }
-  }, [draftNegative, draftPrompt, draftVideo, onRefresh, queueVideo, requeueing, selected?.sequence, selected?.generation.outputFolder, showToast]);
+  }, [draftNegative, draftOutputFolder, draftPrompt, draftVideo, onRefresh, queueVideo, requeueing, selected?.sequence, showToast]);
 
   return (
     <main data-umbra-ui-video-queue="" className="relative flex min-h-0 min-w-0 flex-col bg-black/15">
@@ -791,6 +796,9 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
 
                 <div className="rounded-md border border-white/10 bg-white/[0.02] p-3">
                   <div className="mb-3 flex items-center gap-2"><Settings2 size={13} className="text-fuchsia-300" /><span className={labelClass}>Generation Settings</span></div>
+                  <div className="mb-3">
+                    <UmbraPinnedOutputControl value={draftOutputFolder} onChange={setDraftOutputFolder} task="Video" />
+                  </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     <label className="col-span-2 space-y-1.5 sm:col-span-3">
                       <span className={labelClass}>Target Resolution</span>
@@ -897,7 +905,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
               <button
                 type="button"
                 onClick={() => {
-                  onLoadIntoEditor({ id: `${selected.id}:${Date.now()}`, prompt: draftPrompt, negativePrompt: draftNegative, video: cloneVideo(draftVideo) });
+                  onLoadIntoEditor({ id: `${selected.id}:${Date.now()}`, prompt: draftPrompt, negativePrompt: draftNegative, video: cloneVideo(draftVideo), outputFolder: draftOutputFolder });
                   closeDrawer();
                 }}
                 className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 bg-white/[0.03] px-3 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:border-fuchsia-300/25 hover:text-fuchsia-100"
