@@ -845,6 +845,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   }>());
   const pendingQueuePauseControlsRef = useRef(new Map<string, {
     paused: boolean;
+    requiresBackendHandled: boolean;
     promise: Promise<any>;
     resolve: (value: any) => void;
     reject: (reason?: unknown) => void;
@@ -6887,13 +6888,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           if (!pending) return;
           clearTimeout(pending.timer);
           pendingQueuePauseControlsRef.current.delete(controlRequestId);
-          if (payload.success !== true || payload.backendHandled !== true
+          if (payload.success !== true || (pending.requiresBackendHandled && payload.backendHandled !== true)
             || payload.paused !== pending.paused) {
             sendPrompterWsMessage({ type: 'bridge_catalog_request' });
             pending.reject(new Error(String(payload.error || 'Queue pause change was not confirmed. Refresh the queue before retrying.')));
             return;
           }
-          backendQueuePauseRequestedRef.current = pending.paused;
+          if (pending.requiresBackendHandled) backendQueuePauseRequestedRef.current = pending.paused;
           setQueuePaused(pending.paused);
           pending.resolve(payload);
           return;
@@ -9135,6 +9136,14 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         : Promise.reject(new Error('Wait for the current queue pause change before trying again.'));
     }
     const resolvedTarget = resolveQueueControlTarget(targetBridgeId, queueTargetType);
+    const resolvedBridgeId = String(resolvedTarget.targetBridgeId || '').trim();
+    // Match UmbraServer's isBackendPipelineTarget route, including its nonempty workflow ID fallback.
+    const apiWorkflowId = resolvedBridgeId.startsWith('api-workflow:')
+      ? resolvedBridgeId.slice('api-workflow:'.length).trim()
+      : resolvedBridgeId;
+    const requiresBackendHandled = resolvedBridgeId.toLowerCase().startsWith('pipeline:')
+      || !!apiWorkflowId
+      || ['pipeline', 'api_workflow'].includes(String(resolvedTarget.queueTargetType || '').trim().toLowerCase());
     const requestId = createRequestId();
     let resolvePending!: (value: any) => void;
     let rejectPending!: (reason?: unknown) => void;
@@ -9148,7 +9157,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       rejectPending(new Error('Timed out waiting for queue pause confirmation. Check the queue state before retrying.'));
     }, 20_000);
     pendingQueuePauseControlsRef.current.set(requestId, {
-      paused, promise, resolve: resolvePending, reject: rejectPending, timer,
+      paused, requiresBackendHandled, promise, resolve: resolvePending, reject: rejectPending, timer,
     });
     const sent = sendPrompterWsMessage({
       type: paused ? 'queue_pause' : 'queue_resume',
@@ -9161,8 +9170,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       pendingQueuePauseControlsRef.current.delete(requestId);
       rejectPending(new Error('Power Prompter websocket disconnected. Queue pause change was not confirmed.'));
     } else if (paused) {
-      // Hold local dispatch while waiting; only the backend ACK confirms success.
-      backendQueuePauseRequestedRef.current = true;
+      // Hold local dispatch while waiting; only the matching route ACK confirms success.
+      if (requiresBackendHandled) backendQueuePauseRequestedRef.current = true;
       setQueuePaused(true);
     }
     return promise;
