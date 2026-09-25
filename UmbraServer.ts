@@ -17,6 +17,7 @@ import { readComfyInputChoices } from './shared/umbra-ui/comfyInputChoices';
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { configureGeneratedMediaActivity, recordGeneratedMediaOutputs } from './backend/GeneratedMediaActivity';
 import { createCaptionCategoryFilter } from './backend/DatasetCaptionCategories';
+import { MAX_DATASET_CONCEPT_SETTINGS_REQUEST_BYTES, readDatasetConceptSettingsText, serializeDatasetConceptSettings } from './backend/DatasetConceptSettingsFile';
 import { checkDatasetCaptionSize, DatasetCaptionTooLargeError, MAX_DATASET_CAPTION_REQUEST_BYTES, readExistingDatasetCaption } from './backend/DatasetCaptionFile';
 import { createReadStream, createWriteStream, existsSync, statSync, realpathSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, openSync, closeSync, renameSync, rmSync, type Dirent, type Stats, type BigIntStats } from 'fs';
 import * as fs from 'fs/promises';
@@ -213,6 +214,7 @@ import { ModelIndexWorkerService, type ModelRootDescriptor } from './backend/Mod
 import { ModelDownloadWorkerService } from './backend/ModelDownloadWorkerService';
 import { ModelManagerStateDb } from './backend/ModelManagerStateDb';
 import { isProtectedModelManagerRoot, planModelManagerTransferTarget } from './backend/ModelManagerTransferPlan';
+import { ModelManagerFsPathLimitError, readModelManagerFsRequest } from './backend/ModelManagerFsRequest';
 import { createDatasetArchive } from './backend/DatasetArchiveService';
 import { decodeDatasetImportDataUrl, detectDatasetImportImage, fetchDatasetImportImage } from './backend/DatasetImportUrlService';
 import { moveDatasetImages } from './backend/DatasetImageMoveService';
@@ -626,14 +628,11 @@ function normalizeDatasetConceptSettings(
 
 async function readDatasetConceptSettings(datasetName: string, conceptFolder: string, conceptPath: string): Promise<DatasetConceptCaptionSettings> {
   const settingsPath = join(conceptPath, DATASET_CONCEPT_SETTINGS_FILE);
-  try {
-    const parsed = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as Record<string, unknown>;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid concept settings. Restore or repair the settings file before saving.');
-    return normalizeDatasetConceptSettings(parsed, datasetName, conceptFolder);
-  } catch (error: any) {
-    if (error?.code === 'ENOENT') return createDefaultDatasetConceptSettings(datasetName, conceptFolder);
-    throw error;
-  }
+  const text = await readDatasetConceptSettingsText(settingsPath);
+  if (text === null) return createDefaultDatasetConceptSettings(datasetName, conceptFolder);
+  const parsed = JSON.parse(text) as Record<string, unknown>;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid concept settings. Restore or repair the settings file before saving.');
+  return normalizeDatasetConceptSettings(parsed, datasetName, conceptFolder);
 }
 
 const datasetConceptSettingsWrites = new Map<string, Promise<unknown>>();
@@ -654,7 +653,7 @@ async function writeDatasetConceptSettings(
     }
     const normalized = normalizeDatasetConceptSettings(settings, datasetName, conceptFolder);
     const saved = { ...normalized, updatedAt: Math.max(Date.now(), (current.updatedAt ?? 0) + 1) };
-    await writeTextFileAtomic(join(canonicalPath, DATASET_CONCEPT_SETTINGS_FILE), `${JSON.stringify(saved, null, 2)}\n`, false);
+    await writeTextFileAtomic(join(canonicalPath, DATASET_CONCEPT_SETTINGS_FILE), serializeDatasetConceptSettings(saved), false);
     return saved;
   });
   datasetConceptSettingsWrites.set(key, write);
@@ -12948,7 +12947,12 @@ function handlePrompterMessage(ws: ServerWebSocket<unknown>, data: any) {
 
   if (type === 'register') {
     const meta = getPrompterMeta(ws);
-    meta.role = normalizePrompterRole(data?.role);
+    const requestedRole = normalizePrompterRole(data?.role);
+    if (requestedRole === 'comfy_bridge' && meta.remote) {
+      sendWs(ws, { type: 'register_rejected', role: requestedRole, error: 'ComfyUI bridge registration is only available from the host.' });
+      return;
+    }
+    meta.role = requestedRole;
     meta.source = String(data?.source || 'unknown');
     meta.compactQueueSnapshots = data?.compactQueueSnapshots === true;
     if (meta.role === 'comfy_bridge') {
@@ -26663,8 +26667,41 @@ async function restoreSavedPowerPrompterQueue(id: unknown) {
   }
   // Validate every group before committing any work; a failed load leaves the live queue alone.
   assertSavedQueueCanLoad();
+  const wasPaused = powerPrompterQueueControllerState.paused;
+  const admissionGate = createPowerPrompterAdmissionGate();
+  const acceptedRequestIds: string[] = [];
   powerPrompterQueueControllerState.paused = true;
-  for (const work of prepared) enqueueBackendPowerPrompterQueueWork(work);
+  let admissionError: unknown = null;
+  for (const work of prepared) {
+    try {
+      if (!enqueueBackendPowerPrompterQueueWork({ ...work, admissionGate })) {
+        admissionError = new Error('A saved queue group could not be loaded. Please try again.');
+        break;
+      }
+      acceptedRequestIds.push(work.requestId);
+    } catch (error) {
+      admissionError = error;
+      break;
+    }
+  }
+  // Wait even after a partial enqueue failure. Rollback must see which initial
+  // history writes created files so it can remove every accepted group's entry.
+  try {
+    await awaitBackendPowerPrompterInitialHistory(acceptedRequestIds);
+  } catch (error) {
+    admissionError ??= error;
+  }
+  if (admissionError || admissionGate.status !== 'pending') {
+    try {
+      await rollbackBackendPowerPrompterAdmission(acceptedRequestIds, admissionGate);
+    } finally {
+      powerPrompterQueueControllerState.paused = wasPaused;
+      broadcastPowerPrompterQueueControllerSnapshot('saved_queue_load_failed');
+    }
+    throw admissionError || new Error('Saved queue loading was canceled before its history was saved.');
+  }
+  powerPrompterQueueControllerState.paused = true;
+  releaseBackendPowerPrompterAdmission(admissionGate);
   broadcastPowerPrompterQueueControllerSnapshot('saved_queue_loaded');
   return { id: document.id, name: document.name, promptCount: document.snapshot.prompts.length, requestIds: prepared.map((work) => work.requestId) };
 }
@@ -30105,9 +30142,9 @@ function handleModelManagerFsTransferStatus(url: URL): Response {
 
 async function handleModelManagerFsMove(req: Request): Promise<Response> {
   try {
-    const body = await req.json() as { paths?: string[]; destination?: string; trackProgress?: boolean };
-    const paths = Array.isArray(body.paths) ? body.paths : [];
-    const destinationRaw = String(body.destination || '').trim();
+    const body = await readModelManagerFsRequest(req);
+    const paths = body?.paths || [];
+    const destinationRaw = body?.destination || '';
     if (paths.length <= 0 || !destinationRaw) return json({ error: 'Missing parameters' }, 400);
 
     const destination = resolveModelManagerPath(destinationRaw);
@@ -30130,7 +30167,7 @@ async function handleModelManagerFsMove(req: Request): Promise<Response> {
     );
     if (validItems.length <= 0) return json({ error: 'No valid source paths' }, 400);
 
-    if (body.trackProgress) {
+    if (body?.trackProgress) {
       const job = createModelManagerFsTransferJob(
         'move',
         resolvedSources.map(source => source.clientPath),
@@ -30181,15 +30218,17 @@ async function handleModelManagerFsMove(req: Request): Promise<Response> {
     }, failures.length ? 409 : 200);
   } catch (error: any) {
     console.error('[ModelManager] move error:', error);
-    return json({ error: error?.message || 'Move failed' }, error instanceof InvalidModelManagerTransferTargetError ? 403 : 500);
+    return json({ error: error?.message || 'Move failed' }, error instanceof RequestBodyTooLargeError ? 413
+      : error instanceof ModelManagerFsPathLimitError ? 400
+      : error instanceof InvalidModelManagerTransferTargetError ? 403 : 500);
   }
 }
 
 async function handleModelManagerFsCopy(req: Request): Promise<Response> {
   try {
-    const body = await req.json() as { paths?: string[]; destination?: string; trackProgress?: boolean };
-    const paths = Array.isArray(body.paths) ? body.paths : [];
-    const destinationRaw = String(body.destination || '').trim();
+    const body = await readModelManagerFsRequest(req);
+    const paths = body?.paths || [];
+    const destinationRaw = body?.destination || '';
     if (paths.length <= 0 || !destinationRaw) return json({ error: 'Missing parameters' }, 400);
 
     const destination = resolveModelManagerPath(destinationRaw);
@@ -30209,7 +30248,7 @@ async function handleModelManagerFsCopy(req: Request): Promise<Response> {
     );
     if (validItems.length <= 0) return json({ error: 'No valid source paths' }, 400);
 
-    if (body.trackProgress) {
+    if (body?.trackProgress) {
       const job = createModelManagerFsTransferJob(
         'copy',
         resolvedSources.map(source => source.clientPath),
@@ -30259,7 +30298,9 @@ async function handleModelManagerFsCopy(req: Request): Promise<Response> {
     }, failures.length ? 409 : 200);
   } catch (error: any) {
     console.error('[ModelManager] copy error:', error);
-    return json({ error: error?.message || 'Copy failed' }, error instanceof InvalidModelManagerTransferTargetError ? 403 : 500);
+    return json({ error: error?.message || 'Copy failed' }, error instanceof RequestBodyTooLargeError ? 413
+      : error instanceof ModelManagerFsPathLimitError ? 400
+      : error instanceof InvalidModelManagerTransferTargetError ? 403 : 500);
   }
 }
 
@@ -30377,8 +30418,8 @@ async function handleModelManagerFsRename(req: Request): Promise<Response> {
 
 async function handleModelManagerFsDelete(req: Request): Promise<Response> {
   try {
-    const body = await req.json() as { paths?: string[] };
-    const paths = Array.isArray(body.paths) ? body.paths : [];
+    const body = await readModelManagerFsRequest(req);
+    const paths = body?.paths || [];
     if (paths.length <= 0) return json({ error: 'Missing parameters' }, 400);
 
     const sourceResolution = resolveModelManagerMutationSources(paths);
@@ -30409,7 +30450,8 @@ async function handleModelManagerFsDelete(req: Request): Promise<Response> {
     }, failures.length ? 409 : 200);
   } catch (error: any) {
     console.error('[ModelManager] delete error:', error);
-    return json({ error: error?.message || 'Delete failed' }, 500);
+    return json({ error: error?.message || 'Delete failed' }, error instanceof RequestBodyTooLargeError ? 413
+      : error instanceof ModelManagerFsPathLimitError ? 400 : 500);
   }
 }
 
@@ -36040,12 +36082,12 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ settings });
           }
 
-          const body = await req.json() as Record<string, unknown>;
+          const body = await readJsonObject(req, false, MAX_DATASET_CONCEPT_SETTINGS_REQUEST_BYTES) as Record<string, unknown> | null;
           if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'Invalid concept settings' }, 400);
           const settings = await writeDatasetConceptSettings(datasetName, conceptFolder, conceptPath, body);
           return json({ success: true, settings });
         } catch (error: any) {
-          return json({ error: error.message }, error?.status === 409 ? 409 : 500);
+          return json({ error: error.message }, error instanceof RequestBodyTooLargeError ? 413 : error?.status === 409 || error?.status === 413 ? error.status : 500);
         }
       }
 
