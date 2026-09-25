@@ -955,7 +955,7 @@ function galleryMediaTypeFromPath(pathValue: unknown, explicitType?: unknown): '
   if (normalizedType === 'gif') return 'gif';
   const lowerPath = normalizePath(pathValue).toLowerCase();
   if (lowerPath.endsWith('.gif')) return 'gif';
-  if (/\.(mp4|webm|mkv|mov|avi|m4v)$/.test(lowerPath)) return 'video';
+  if (/\.(mp4|webm|mkv|mov|avi|m4v|wmv|flv)$/.test(lowerPath)) return 'video';
   return 'image';
 }
 
@@ -3346,13 +3346,33 @@ function GalleryMediaViewer({
     const start = touchStartRef.current;
     const last = touchLastRef.current;
     resetTouchNavigation();
-    if (!start || !last || event.changedTouches.length !== 1) return;
+    const settleSwipe = () => {
+      setSwipeDragging(false);
+      setSwipeAnimating(true);
+      setSwipeOffset(0);
+      if (swipeSettleTimerRef.current !== null) {
+        window.clearTimeout(swipeSettleTimerRef.current);
+      }
+      swipeSettleTimerRef.current = window.setTimeout(() => {
+        setSwipeAnimating(false);
+        swipeSettleTimerRef.current = null;
+      }, 180);
+    };
+    if (!start || !last || event.changedTouches.length !== 1) {
+      settleSwipe();
+      return;
+    }
 
     const dx = last.x - start.x;
     const dy = last.y - start.y;
     const absX = Math.abs(dx);
     const absY = Math.abs(dy);
     const durationMs = Date.now() - start.at;
+    if (start.cancelled) {
+      lastViewerTapRef.current = null;
+      settleSwipe();
+      return;
+    }
     const changedTouch = event.changedTouches[0];
     const isStationaryTap = !isVideo
       && durationMs <= 320
@@ -3379,11 +3399,10 @@ function GalleryMediaViewer({
       lastViewerTapRef.current = null;
     }
 
-    if (start.cancelled) {
-      setSwipeDragging(false);
+    if (durationMs > 900) {
+      settleSwipe();
       return;
     }
-    if (durationMs > 900) return;
 
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 390;
     const horizontalThreshold = Math.max(44, Math.min(92, viewportWidth * 0.12));
@@ -3413,13 +3432,7 @@ function GalleryMediaViewer({
     if (absY >= 64 && absY > absX * 1.15) {
       setShowInfo(dy > 0);
     }
-    setSwipeDragging(false);
-    setSwipeAnimating(true);
-    setSwipeOffset(0);
-    swipeSettleTimerRef.current = window.setTimeout(() => {
-      setSwipeAnimating(false);
-      swipeSettleTimerRef.current = null;
-    }, 180);
+    settleSwipe();
   }, [isTouchViewer, isVideo, onStep, resetTouchNavigation, viewerPath, zoom]);
 
   const handleMediaTouchCancel = useCallback(() => {
@@ -5378,8 +5391,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         folderPath,
         files: nextFiles.filter((file) => file.type !== 'folder').map(galleryFileForFilmstrip),
         mode: payload?.mode || 'replace',
-        done: true,
-        nextCursor: null,
+        done: payload?.done !== false && payload?.nextCursor == null,
+        nextCursor: payload?.nextCursor ?? null,
         total: payload?.total ?? total,
         sortBy,
         sortOrder,
@@ -5388,13 +5401,13 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     }));
   }, [sortBy, sortOrder, total]);
 
-  const emitSelectionChanged = useCallback((paths: string[], primaryPath?: string) => {
+  const emitSelectionChanged = useCallback((paths: string[], primaryPath?: string, folderPath?: string) => {
     window.dispatchEvent(new CustomEvent('umbra:gallery-selection-changed', {
       detail: {
         paths,
         selectedPaths: paths,
         primaryPath: primaryPath || paths.at(-1) || '',
-        folderPath: currentFolderRef.current,
+        folderPath: folderPath || currentFolderRef.current,
         source: 'react-gallery',
       },
     }));
@@ -6996,6 +7009,17 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           break;
         }
       }
+      if (!nextViewerFile) {
+        for (let index = currentIndex - 1; index >= 0; index -= 1) {
+          const candidate = ordered[index];
+          const candidatePath = normalizePath(candidate?.path || '');
+          if (candidatePath && !deleteSet.has(candidatePath.toLowerCase())) {
+            nextViewerPath = candidatePath;
+            nextViewerFile = candidate;
+            break;
+          }
+        }
+      }
     }
     const nextSessionFiles = ordered.filter((candidate) => {
       const candidatePath = normalizePath(candidate.path);
@@ -8302,7 +8326,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         setLastSelectedPath(imagePath);
         setViewerPath(imagePath);
         setViewerFileFallback(targetFile);
-        emitSelectionChanged([imagePath], imagePath);
+        emitSelectionChanged([imagePath], imagePath, targetFolder);
       }
     };
     const onRevealPath = (event: Event) => {
@@ -8322,7 +8346,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       if (imagePath) {
         setSelectedPaths(new Set([imagePath]));
         setLastSelectedPath(imagePath);
-        emitSelectionChanged([imagePath], imagePath);
+        emitSelectionChanged([imagePath], imagePath, targetFolder);
       }
     };
     const onRequestFeed = (event: Event) => {
