@@ -698,6 +698,18 @@ function remapGalleryFolderPath(value: unknown, source: string, target: string):
   return suffix ? `${targetPath.replace(/\/+$/, '')}/${suffix}` : targetPath;
 }
 
+export function folderClipboardAfterTransfer(
+  clipboard: { source: string; mode: 'copy' | 'move' } | null,
+  results: GalleryTransferResult[],
+  mode: 'copy' | 'move',
+): { source: string; mode: 'copy' | 'move' } | null {
+  if (mode !== 'move' || clipboard?.mode !== 'move') return clipboard;
+  return results.some((result) => result.success && (
+    pathsEqual(clipboard.source, result.path)
+    || (result.newPath && pathsEqual(clipboard.source, result.newPath))
+  )) ? null : clipboard;
+}
+
 function getValidTransferPathsForDestination(paths: string[], destinationPath: string): string[] {
   const destination = normalizePath(destinationPath);
   if (!destination || isTrashPath(destination)) return [];
@@ -7355,10 +7367,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     if (!transferProgress || transferProgress.active || lastRefreshedTransfer.current === transferProgress) return;
     lastRefreshedTransfer.current = transferProgress;
     const successfulResults = transferProgress.results.filter(result => result.success);
-    const successes = successfulResults.map(result => result.path);
     if (successfulResults.length) refreshAfterTransfer(successfulResults, transferProgress.destination, transferProgress.mode);
     if (transferProgress.mode === 'move') {
-      setFolderClipboard(current => current?.mode === 'move' && successes.some(path => pathsEqual(path, current.source)) ? null : current);
+      setFolderClipboard(current => folderClipboardAfterTransfer(current, successfulResults, transferProgress.mode));
     }
     const failures = transferProgress.results.filter(result => !result.success).length;
     addToast({
