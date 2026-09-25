@@ -718,14 +718,14 @@ export function folderClipboardAfterTransfer(
   )) ? null : clipboard;
 }
 
-function getValidTransferPathsForDestination(paths: string[], destinationPath: string): string[] {
+function getValidTransferPathsForDestination(paths: string[], destinationPath: string, mode: 'move' | 'copy'): string[] {
   const destination = normalizePath(destinationPath);
   if (!destination || isTrashPath(destination)) return [];
   return uniqueNormalizedPaths(paths).filter((pathValue) => {
     const path = normalizePath(pathValue);
     if (!path || isTrashPath(path)) return false;
     if (pathsEqual(path, destination)) return false;
-    if (pathsEqual(pathParent(path), destination)) return false;
+    if (mode === 'move' && pathsEqual(pathParent(path), destination)) return false;
     if (pathIsInsideRoot(destination, path)) return false;
     return true;
   });
@@ -7426,7 +7426,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       return;
     }
     const destination = normalizePath(destinationPath);
-    const validPaths = getValidTransferPathsForDestination(paths, destination);
+    const validPaths = getValidTransferPathsForDestination(paths, destination, mode);
     if (!destination || validPaths.length === 0) {
       addToast({ type: 'info', message: 'Nothing to transfer to that folder' });
       return;
@@ -7444,7 +7444,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
 
   const openTransferChoiceMenu = useCallback((event: React.MouseEvent | React.DragEvent, paths: string[], destinationPath: string) => {
     const destination = normalizePath(destinationPath);
-    const validPaths = getValidTransferPathsForDestination(paths, destination);
+    const validPaths = getValidTransferPathsForDestination(paths, destination, 'copy');
     if (!destination || validPaths.length === 0) return;
     setContextMenu({
       kind: 'transfer',
@@ -7488,13 +7488,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   }, [startGalleryPathDrag]);
 
   const handleFolderDropTargetDragOver = useCallback((event: React.DragEvent, folderPath: string) => {
-    const validPaths = getValidTransferPathsForDestination(
-      draggingPaths.length > 0 ? draggingPaths : readDragTransferPaths(event.dataTransfer),
-      folderPath,
-    );
-    if (validPaths.length === 0 || transferInProgress) return;
+    const paths = draggingPaths.length > 0 ? draggingPaths : readDragTransferPaths(event.dataTransfer);
+    const copyPaths = getValidTransferPathsForDestination(paths, folderPath, 'copy');
+    if (copyPaths.length === 0 || transferInProgress) return;
+    const movePaths = getValidTransferPathsForDestination(paths, folderPath, 'move');
     event.preventDefault();
-    event.dataTransfer.dropEffect = event.ctrlKey || event.metaKey ? 'copy' : 'move';
+    event.dataTransfer.dropEffect = event.ctrlKey || event.metaKey || movePaths.length === 0 ? 'copy' : 'move';
     setDropTargetFolder(normalizePath(folderPath));
   }, [draggingPaths, transferInProgress]);
 
@@ -7502,6 +7501,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     const validPaths = getValidTransferPathsForDestination(
       draggingPaths.length > 0 ? draggingPaths : readDragTransferPaths(event.dataTransfer),
       folderPath,
+      'copy',
     );
     clearMediaDrag();
     if (validPaths.length === 0 || transferInProgress) return;
@@ -9963,19 +9963,20 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     }
 
     if (contextMenu.kind === 'transfer') {
-      const paths = getValidTransferPathsForDestination(contextMenu.paths || [], targetPath);
+      const copyPaths = getValidTransferPathsForDestination(contextMenu.paths || [], targetPath, 'copy');
+      const movePaths = getValidTransferPathsForDestination(contextMenu.paths || [], targetPath, 'move');
       return [
         {
-          label: paths.length > 1 ? `Move ${paths.length} Items Here` : 'Move Here',
+          label: movePaths.length > 1 ? `Move ${movePaths.length} Items Here` : 'Move Here',
           icon: <FolderOpen size={14} />,
-          disabled: paths.length === 0 || transferInProgress,
-          action: () => void transferPathsToFolder(paths, targetPath, 'move'),
+          disabled: movePaths.length === 0 || transferInProgress,
+          action: () => void transferPathsToFolder(movePaths, targetPath, 'move'),
         },
         {
-          label: paths.length > 1 ? `Copy ${paths.length} Items Here` : 'Copy Here',
+          label: copyPaths.length > 1 ? `Copy ${copyPaths.length} Items Here` : 'Copy Here',
           icon: <Copy size={14} />,
-          disabled: paths.length === 0 || transferInProgress,
-          action: () => void transferPathsToFolder(paths, targetPath, 'copy'),
+          disabled: copyPaths.length === 0 || transferInProgress,
+          action: () => void transferPathsToFolder(copyPaths, targetPath, 'copy'),
         },
       ];
     }
@@ -9998,13 +9999,13 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         {
           label: selectedPaths.size > 1 ? `Move ${selectedPaths.size} Selected Here` : 'Move Selected Here',
           icon: <FolderOpen size={14} />,
-          disabled: getValidTransferPathsForDestination(Array.from(selectedPaths), targetPath).length === 0 || transferInProgress,
+          disabled: getValidTransferPathsForDestination(Array.from(selectedPaths), targetPath, 'move').length === 0 || transferInProgress,
           action: () => void transferPathsToFolder(Array.from(selectedPaths), targetPath, 'move'),
         },
         {
           label: selectedPaths.size > 1 ? `Copy ${selectedPaths.size} Selected Here` : 'Copy Selected Here',
           icon: <Copy size={14} />,
-          disabled: getValidTransferPathsForDestination(Array.from(selectedPaths), targetPath).length === 0 || transferInProgress,
+          disabled: getValidTransferPathsForDestination(Array.from(selectedPaths), targetPath, 'copy').length === 0 || transferInProgress,
           action: () => void transferPathsToFolder(Array.from(selectedPaths), targetPath, 'copy'),
         },
       ];
@@ -10050,7 +10051,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           label: 'Paste Folder',
           icon: <ClipboardPaste size={14} />,
           badge: folderClipboard?.mode === 'move' ? 'Move' : folderClipboard ? 'Copy' : undefined,
-          disabled: transferInProgress || !folderClipboard || getValidTransferPathsForDestination([folderClipboard.source], targetPath).length === 0,
+          disabled: transferInProgress || !folderClipboard || getValidTransferPathsForDestination([folderClipboard.source], targetPath, folderClipboard.mode).length === 0,
           action: () => {
             if (folderClipboard) void transferPathsToFolder([folderClipboard.source], targetPath, folderClipboard.mode);
           },
