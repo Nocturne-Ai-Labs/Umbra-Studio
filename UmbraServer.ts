@@ -5698,6 +5698,10 @@ function isPowerPrompterQueueControllerTerminalStatus(status: unknown) {
 type BackendPPHistory = {
   initialCommit: Promise<PPQueueHistorySummary> | null;
   lastWrite?: Promise<void>;
+  requiredRevision?: Promise<void>;
+  requiredRevisionPending?: boolean;
+  requiredRevisionFailed?: boolean;
+  deferredPreviews?: unknown[];
   createdByAdmission?: boolean;
   admissionGate?: PowerPrompterAdmissionGate;
   ready: Promise<unknown>;
@@ -5706,6 +5710,29 @@ type BackendPPHistory = {
   deleted?: boolean;
 };
 const ppBackendHistory = new Map<string, BackendPPHistory>();
+
+function requireBackendPPQueueHistoryRevision(request: PowerPrompterQueueControllerRequest, history: BackendPPHistory, write: Promise<void>) {
+  history.requiredRevision = write;
+  history.requiredRevisionPending = true;
+  history.requiredRevisionFailed = false;
+  void write.then(
+    () => {
+      if (history.requiredRevision !== write) return;
+      history.requiredRevisionPending = false;
+      history.progressSignature = '';
+      const previews = history.deferredPreviews;
+      history.deferredPreviews = undefined;
+      try { persistBackendPPQueueHistoryProgress(request, previews); }
+      catch (error) { reportBackendPPHistoryError(request.requestId, error); }
+    },
+    () => {
+      if (history.requiredRevision === write) {
+        history.requiredRevisionPending = false;
+        history.requiredRevisionFailed = true;
+      }
+    },
+  );
+}
 
 function isPowerPrompterGroupEditHeld(requestId: string): boolean {
   return pendingPowerPrompterGroupSourceEdits.has(requestId)
@@ -5791,6 +5818,11 @@ function initializeBackendPPQueueHistory(request: PowerPrompterQueueControllerRe
 function persistBackendPPQueueHistoryProgress(request: PowerPrompterQueueControllerRequest, previews?: unknown[]) {
   const history = ppBackendHistory.get(request.requestId);
   if (!history || history.deleted) return;
+  if (history.requiredRevisionPending || history.requiredRevisionFailed) {
+    history.progressSignature = '';
+    if (previews) history.deferredPreviews = previews;
+    return;
+  }
   const hasUnconfirmedInterruptedPrompt = request.prompts.some((prompt) =>
     prompt.status === 'interrupted' && prompt.interruptionDrainConfirmed !== true);
   const patch = {
@@ -5815,19 +5847,23 @@ function persistBackendPPQueueHistoryProgress(request: PowerPrompterQueueControl
 }
 
 // Edits are the only time a running queue replaces its immutable snapshot.
-function reviseBackendPPQueueHistory(request: PowerPrompterQueueControllerRequest, transform: (snapshot: PowerPrompterQueueSnapshot) => PowerPrompterQueueSnapshot) {
+function reviseBackendPPQueueHistory(request: PowerPrompterQueueControllerRequest, transform: (snapshot: PowerPrompterQueueSnapshot) => PowerPrompterQueueSnapshot): Promise<void> | null {
   const history = ppBackendHistory.get(request.requestId);
-  if (!history) return;
+  if (!history || history.deleted) return null;
   const promptStatuses = getBackendPPQueueHistoryPromptStatuses(request);
-  history.ready = history.ready.then(async () => {
+  const write = history.ready.then(async () => {
     const id = getPPQueueRequestHistoryId(request.requestId);
     const existing = await loadPPQueueHistory(id);
-    if (!existing) return;
-    publishBackendPPHistory(history, await updatePPQueueHistory(id, {
+    if (!existing) throw new Error('The queue history entry was not found.');
+    const summary = await updatePPQueueHistory(id, {
       snapshot: transform(existing.snapshot),
       promptStatuses,
-    }, true));
-  }).catch((error) => reportBackendPPHistoryError(request.requestId, error));
+    }, true);
+    if (!summary) throw new Error('The queue history entry was not found.');
+    publishBackendPPHistory(history, summary);
+  });
+  history.ready = write.catch((error) => reportBackendPPHistoryError(request.requestId, error));
+  return write;
 }
 
 function retainVisiblePowerPrompterQueueControllerRequests(requests: PowerPrompterQueueControllerRequest[]) {
@@ -6144,7 +6180,11 @@ function applyPowerPrompterQueueControllerPromptRemovals(
   };
 }
 
-function applyPowerPrompterQueueControllerReorder(data: any, preferredSourceWs?: ServerWebSocket<unknown> | null) {
+function applyPowerPrompterQueueControllerReorder(
+  data: any,
+  preferredSourceWs?: ServerWebSocket<unknown> | null,
+  historyWrites: Promise<void>[] = [],
+) {
   let changed = false;
   const requestOrder = Array.isArray(data?.requestOrder)
     ? data.requestOrder.map((entry: unknown) => String(entry || '').trim()).filter(Boolean)
@@ -6157,6 +6197,19 @@ function applyPowerPrompterQueueControllerReorder(data: any, preferredSourceWs?:
       }))
       .filter((entry) => entry.requestId && entry.promptOrder.length > 0)
     : [];
+
+  if (new Set(promptOrders.map((entry) => entry.requestId)).size !== promptOrders.length) {
+    throw new Error('A queue group appears more than once in the reorder request. Refresh Queue Manager and try again.');
+  }
+
+  for (const entry of promptOrders) {
+    const request = findPowerPrompterQueueControllerRequest(entry.requestId);
+    if (request?.origin !== 'power_prompter') continue;
+    const history = ppBackendHistory.get(entry.requestId);
+    if (!history || history.deleted) throw new Error('Queue history is unavailable. Reopen Queue Manager.');
+    if (history.requiredRevisionPending) throw new Error('A queue reorder is still being saved. Try again after it completes.');
+    if (history.requiredRevisionFailed) throw new Error('The previous queue reorder could not be saved. Reopen the group editor to repair it before reordering again.');
+  }
 
   if (requestOrder.length > 0) {
     const orderRank = new Map<string, number>();
@@ -6259,7 +6312,7 @@ function applyPowerPrompterQueueControllerReorder(data: any, preferredSourceWs?:
     }
     refreshBackendPowerPrompterQueuedWorkFromController(entry.requestId);
     const historyOrder = nextPrompts.map((prompt) => prompt.promptIndex);
-    reviseBackendPPQueueHistory(request, (snapshot) => {
+    const historyWrite = reviseBackendPPQueueHistory(request, (snapshot) => {
       const reorder = <T,>(values: T[]) => historyOrder.map((index) => values[index]);
       return {
         ...snapshot,
@@ -6270,6 +6323,12 @@ function applyPowerPrompterQueueControllerReorder(data: any, preferredSourceWs?:
         ...(snapshot.promptEntries ? { promptEntries: reorder(snapshot.promptEntries) } : {}),
       };
     });
+    if (request.origin === 'power_prompter') {
+      const history = ppBackendHistory.get(entry.requestId);
+      if (!history || !historyWrite) throw new Error('Queue history is unavailable.');
+      requireBackendPPQueueHistoryRevision(request, history, historyWrite);
+      historyWrites.push(historyWrite);
+    }
     changed = true;
   }
 
@@ -6325,7 +6384,7 @@ function replacePowerPrompterQueueControllerGroup(
   rawReplacement: unknown,
   preferredSourceWs?: ServerWebSocket<unknown> | null,
   pipelineBinding?: PowerPrompterQueuePipelineBinding | null,
-): { updated: boolean; lockedPromptCount: number; request: PowerPrompterQueueControllerRequest | null } {
+): { updated: boolean; lockedPromptCount: number; request: PowerPrompterQueueControllerRequest | null; historyWrite?: Promise<void> } {
   const normalizedRequestId = String(requestId || '').trim();
   const request = findPowerPrompterQueueControllerRequest(normalizedRequestId);
   if (!request || !rawReplacement || typeof rawReplacement !== 'object') return { updated: false, lockedPromptCount: 0, request: null };
@@ -6335,6 +6394,13 @@ function replacePowerPrompterQueueControllerGroup(
   if ((!task && !queuedWork) || isPowerPrompterQueueControllerTerminalStatus(request.status)
     || task?.canceled || task?.abortController.signal.aborted || task?.stopAfterCurrent) {
     return { updated: false, lockedPromptCount: 0, request: null };
+  }
+  const history = ppBackendHistory.get(normalizedRequestId);
+  if (request.origin !== 'power_prompter' || !history || history.deleted) {
+    throw new Error('The queue history is unavailable. Reopen the queue editor from the current Queue Manager state.');
+  }
+  if (history.requiredRevisionPending) {
+    throw new Error('A queue group edit is still being saved. Reopen the queue editor after it completes.');
   }
 
   const replacement = rawReplacement as Record<string, any>;
@@ -6510,7 +6576,7 @@ function replacePowerPrompterQueueControllerGroup(
 
   const historyPrompts = request.prompts.slice();
   const historyRequest = { ...request, prompts: historyPrompts };
-  reviseBackendPPQueueHistory(request, (snapshot) => buildBackendPPHistorySnapshot(historyRequest, {
+  const historyWrite = reviseBackendPPQueueHistory(request, (snapshot) => buildBackendPPHistorySnapshot(historyRequest, {
     ...snapshot,
     sourceFile: snapshot.file,
     promptEntries: [...lockedPrompts.map((prompt) => snapshot.promptEntries?.[prompt.promptIndex] ?? null), ...replacementPromptEntries],
@@ -6520,6 +6586,10 @@ function replacePowerPrompterQueueControllerGroup(
     ],
     editorSnapshot: replacement.editorSnapshot ?? replacementGroup.editorSnapshot ?? snapshot.groupSnapshots?.[0]?.editorSnapshot,
   }) || snapshot);
+  if (!historyWrite) throw new Error('The queue history is unavailable.');
+  // The worker must observe this exact edit, even if a later status-only write
+  // succeeds after its snapshot write fails.
+  requireBackendPPQueueHistoryRevision(request, history, historyWrite);
   broadcastPowerPrompterQueueControllerSnapshot('group_replaced', preferredSourceWs);
   appendPowerPrompterQueueLog('backend_queue_group_replaced', {
     requestId: normalizedRequestId,
@@ -6528,7 +6598,7 @@ function replacePowerPrompterQueueControllerGroup(
     total: nextControllerPrompts.length,
     hasRuntimeTask: Boolean(task),
   });
-  return { updated: true, lockedPromptCount: lockedPrompts.length, request };
+  return { updated: true, lockedPromptCount: lockedPrompts.length, request, historyWrite };
 }
 
 function refreshBackendPowerPrompterQueuedWorkFromController(requestId: string): boolean {
@@ -6675,6 +6745,9 @@ async function addPowerPrompterQueueControllerGroupReserved(
   const sourceControllerIndexBeforeCleanup = powerPrompterQueueControllerState.requests.findIndex((entry) => entry.requestId === sourceRequestId);
   const sourceHistory = ppBackendHistory.get(sourceRequestId);
   if (!sourceHistory || sourceHistory.deleted) throw new Error('The source queue history is unavailable. Reopen the queue editor.');
+  if (sourceHistory.requiredRevisionPending || sourceHistory.requiredRevisionFailed) {
+    throw new Error('The source queue group has an unsaved edit. Finish or repair that edit before moving its prompts.');
+  }
   const sourceQueuedWork = sourceQueuedIndexBeforeCleanup >= 0 ? backendPowerPrompterQueuedWork[sourceQueuedIndexBeforeCleanup] : null;
   const priorSourceAdmissionGate = sourceQueuedWork?.admissionGate;
   const sourceHoldGate = createPowerPrompterAdmissionGate();
@@ -10013,18 +10086,26 @@ async function waitForDurablePowerPrompterSubmitMarker(
   requestId: string,
   sourceWs?: ServerWebSocket<unknown> | null,
 ) {
-  if (task.origin !== 'power_prompter') return;
+  if (task.origin !== 'power_prompter') return null;
   while (true) {
     throwIfBackendPowerPrompterQueueCanceled(task);
     const request = findPowerPrompterQueueControllerRequest(requestId);
     const history = ppBackendHistory.get(requestId);
     try {
       if (!request || !history) throw new Error('Queue history is unavailable.');
+      const requiredRevision = history.requiredRevision;
+      if (requiredRevision) await requiredRevision;
       persistBackendPPQueueHistoryProgress(request);
       const write = history.lastWrite;
       if (!write) throw new Error('Queue submission status was not saved.');
       await write;
-      break;
+      // A group move may hold this worker while its history writes finish.
+      await waitForBackendPowerPrompterQueueResume(task, requestId, sourceWs);
+      // An edit can start while the status write is pending. Its snapshot must
+      // be durable before the worker is allowed to submit this prompt. Check
+      // after the last wait so a replacement started during a pause is seen.
+      if (history.requiredRevision !== requiredRevision) continue;
+      return { requiredRevision };
     } catch (error) {
       if (history) history.progressSignature = '';
       powerPrompterQueueControllerState.paused = true;
@@ -10036,9 +10117,6 @@ async function waitForDurablePowerPrompterSubmitMarker(
       await waitForBackendPowerPrompterQueueResume(task, requestId, sourceWs);
     }
   }
-  // A group edit can begin while this worker compiles its workflow. Recheck the
-  // scoped execution block after the durable marker and before the external POST.
-  await waitForBackendPowerPrompterQueueResume(task, requestId, sourceWs);
 }
 
 function getPPQueueSnapshotRequestGroups(snapshot: PowerPrompterQueueSnapshot | null): Array<{
@@ -10472,6 +10550,18 @@ async function replacePersistedPPQueueGroup(
     pipelineBinding,
   );
   const runtimeUpdated = runtimeUpdate.updated;
+  if (runtimeUpdated) {
+    try {
+      if (!runtimeUpdate.historyWrite) throw new Error('The queue history revision was not scheduled.');
+      await runtimeUpdate.historyWrite;
+    } catch (error) {
+      // The edited in-memory queue can be retried. Keep its failed revision as a
+      // submit barrier so resuming alone cannot POST prompts from stale history.
+      powerPrompterQueueControllerState.paused = true;
+      broadcastPowerPrompterQueueControllerSnapshot('group_replace_history_failed', preferredSourceWs);
+      throw new Error('The edited queue group could not be saved. The queue is paused; retry the edit before resuming.', { cause: error });
+    }
+  }
   const promptCount = findPowerPrompterQueueControllerRequest(requestId)?.prompts.length || 0;
   appendPowerPrompterQueueLog('backend_queue_group_replace_runtime_only', {
     requestId,
@@ -11065,7 +11155,12 @@ async function runBackendPowerPrompterPipelineQueue(
       if (task.interruptCurrentRequested) {
         throw new Error(`${BACKEND_PP_QUEUE_CANCELLED} Reason: stop_all`);
       }
-      await waitForDurablePowerPrompterSubmitMarker(task, requestId, sourceWs);
+      let durableMarker;
+      do {
+        durableMarker = await waitForDurablePowerPrompterSubmitMarker(task, requestId, sourceWs);
+      } while (task.origin === 'power_prompter'
+        && (!ppBackendHistory.has(requestId)
+          || ppBackendHistory.get(requestId)?.requiredRevision !== durableMarker?.requiredRevision));
       throwIfBackendPowerPrompterQueueCanceled(task);
       if (finishBeforeNextPromptIfStopped()) return;
       if (task.removedPromptIndices.has(index)) continue;
@@ -12400,9 +12495,19 @@ function forwardPrompterQueueMessageToComfyTarget(
   const backendPromptRemovalResult = isBackendPipelineTarget && type === 'queue_prompt_remove'
     ? applyPowerPrompterQueueControllerPromptRemovals(data, ws)
     : { affectedRequestIds: [], removedRequestIds: [], promptRemovals: [] };
-  const backendReorderApplied = isBackendPipelineTarget && type === 'queue_reorder'
-    ? applyPowerPrompterQueueControllerReorder(data, ws)
-    : false;
+  const backendReorderHistoryWrites: Promise<void>[] = [];
+  let backendReorderApplied = false;
+  if (isBackendPipelineTarget && type === 'queue_reorder') {
+    try {
+      backendReorderApplied = applyPowerPrompterQueueControllerReorder(data, ws, backendReorderHistoryWrites);
+    } catch (error) {
+      sendWs(ws, {
+        type: 'queue_reorder_result', requestId, success: false, applied: false, backendHandled: true,
+        error: String(error instanceof Error ? error.message : error),
+      });
+      return;
+    }
+  }
 
   if (isBackendPipelineTarget) {
     if (type === 'queue_delay_update') {
@@ -12438,13 +12543,23 @@ function forwardPrompterQueueMessageToComfyTarget(
       return;
     }
 
-    sendWs(ws, {
-      type: 'queue_reorder_result',
-      requestId,
-      success: true,
-      applied: backendReorderApplied,
-      backendHandled: true,
-    });
+    void Promise.all(backendReorderHistoryWrites).then(() => {
+      sendWs(ws, {
+        type: 'queue_reorder_result', requestId, success: true,
+        applied: backendReorderApplied, backendHandled: true,
+      });
+    }, (error) => {
+      powerPrompterQueueControllerState.paused = true;
+      broadcastPowerPrompterQueueControllerSnapshot('queue_reorder_history_failed', ws);
+      sendWs(ws, {
+        type: 'queue_reorder_result', requestId, success: false,
+        applied: backendReorderApplied, backendHandled: true,
+        error: 'The reordered queue could not be saved. The queue is paused; reopen the group editor to repair it before resuming.',
+      });
+      appendPowerPrompterQueueLog('backend_queue_reorder_history_failed', {
+        requestId, error: String(error instanceof Error ? error.message : error),
+      });
+    }).catch((error) => reportBackendPPHistoryError(requestId, error));
     return;
   }
 
