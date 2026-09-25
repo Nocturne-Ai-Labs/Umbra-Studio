@@ -25,6 +25,22 @@ export class PowerPrompterDispatchDelayControl {
   }
 }
 
+/** Queue Manager opts into the live delay; unflagged clients retain per-group delays. */
+export function resolvePowerPrompterAdmissionDispatchDelay(
+  control: PowerPrompterDispatchDelayControl,
+  options: {
+    requestedDelayMs: unknown;
+    admissionRevision?: number;
+    effectiveLiveDelayMs: number;
+    restoredSavedQueue?: boolean;
+    inheritQueueDispatchDelay?: boolean;
+  },
+): number {
+  return options.restoredSavedQueue === true || options.inheritQueueDispatchDelay !== true
+    ? control.resolve(options.requestedDelayMs, options.admissionRevision)
+    : normalizePowerPrompterDispatchDelay(options.effectiveLiveDelayMs);
+}
+
 /**
  * Delay each PP dispatch, including the first in a group. Once started, elapsed
  * wall time counts during pause/priority work, but neither bypasses the gates.

@@ -5533,6 +5533,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     const state = {
       ...buildPrompterSyncState(),
       ...(stateOverride || {}),
+      inheritQueueDispatchDelay: true,
       file: source.file,
       sourceFile: normalizePrompterSourceFilePath(sourceFile || ''),
       activePrompt: normalizePowerPrompterPromptText(String(stateOverride?.activePrompt || cleanedPrompts[0] || '')),
@@ -5631,6 +5632,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       modelSource: groupGeneration.modelType,
     });
     return {
+      inheritQueueDispatchDelay: true,
       activePrompt: normalizePowerPrompterPromptText(cleanedPrompts[0] || ''),
       sourceFile: normalizePrompterSourceFilePath(source.file || ''),
       prompts: cleanedPrompts,
@@ -10463,6 +10465,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
             activeSetId: queueEditorDraft.activeSetId,
             prompts: built.prompts,
             state: {
+              inheritQueueDispatchDelay: true,
               mode: queueEditorDraft.mode,
               activeSetId: queueEditorDraft.activeSetId,
               activeQueueSet: queueEditorDraft.activeSetId,

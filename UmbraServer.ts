@@ -49,7 +49,7 @@ import { collectQueueSnapshotPromptRows } from './shared/power-prompter/queueSna
 import { PowerPrompterHistoryStore } from './backend/PowerPrompterHistoryStore';
 import { createPowerPrompterAdmissionGate, takeAdmittedQueueHead } from './backend/PowerPrompterAdmissionGate';
 import type { PowerPrompterAdmissionGate } from './backend/PowerPrompterAdmissionGate';
-import { PowerPrompterDispatchDelayControl, waitForPowerPrompterDispatchDelay } from './backend/PowerPrompterDispatchDelay';
+import { PowerPrompterDispatchDelayControl, resolvePowerPrompterAdmissionDispatchDelay, waitForPowerPrompterDispatchDelay } from './backend/PowerPrompterDispatchDelay';
 import { appendSavedQueueIdSuffix, buildRemainingPowerPrompterQueueSnapshot, getSavedQueueSummaryIndexPath, readSavedQueueSummaryIndex, splitSavedPowerPrompterQueue } from './backend/PowerPrompterSavedQueue';
 import { canInterruptPowerPrompterPrompt, getInterruptedPromptHistoryStatus, getLiveUmbraUiQueueRequestIds, getQueueClearFutureKeepIds, hasLivePowerPrompterQueuePrompts, shouldFinishStoppedPowerPrompterQueue, summarizePowerPrompterQueuePrompts } from './backend/PowerPrompterQueueLifecycle';
 import { isAllowedQueueControlBrowserOrigin, requiresQueueControlBrowserOrigin } from './backend/QueueControlOriginPolicy';
@@ -5729,10 +5729,22 @@ function sendPrompterEventToTargets(data: any, preferredSourceWs?: ServerWebSock
   }
 }
 
+function getEffectiveBackendPowerPrompterDispatchDelay(): number {
+  const isVisibleLiveRequest = (request: PowerPrompterQueueControllerRequest | null) => {
+    if (request?.origin !== 'power_prompter' || !hasLivePowerPrompterQueuePrompts(request.prompts)) return false;
+    const gateStatus = ppBackendHistory.get(request.requestId)?.admissionGate?.status;
+    return gateStatus !== 'pending' && gateStatus !== 'rejected';
+  };
+  const activeRequest = Array.from(backendPowerPrompterQueueTasks.keys())
+    .map(findPowerPrompterQueueControllerRequest).find(isVisibleLiveRequest);
+  const queuedRequest = backendPowerPrompterQueuedWork
+    .map((work) => findPowerPrompterQueueControllerRequest(work.requestId)).find(isVisibleLiveRequest);
+  const controllerRequest = powerPrompterQueueControllerState.requests.find(isVisibleLiveRequest);
+  return activeRequest?.dispatchDelayMs ?? queuedRequest?.dispatchDelayMs
+    ?? controllerRequest?.dispatchDelayMs ?? powerPrompterDispatchDelayControl.value;
+}
+
 function clonePowerPrompterQueueControllerSnapshot(reason?: string) {
-  const activePowerPrompterRequest = Array.from(backendPowerPrompterQueueTasks.keys())
-    .map(findPowerPrompterQueueControllerRequest)
-    .find((request) => request?.origin === 'power_prompter' && hasLivePowerPrompterQueuePrompts(request.prompts));
   const visibleRequests = powerPrompterQueueControllerState.requests.filter((request) => {
     const status = ppBackendHistory.get(request.requestId)?.admissionGate?.status;
     return status !== 'pending' && status !== 'rejected';
@@ -5744,7 +5756,7 @@ function clonePowerPrompterQueueControllerSnapshot(reason?: string) {
     type: 'queue_snapshot',
     backendAutoDispatch: true,
     backendOwnedHistory: true,
-    dispatchDelayMs: activePowerPrompterRequest?.dispatchDelayMs ?? powerPrompterDispatchDelayControl.value,
+    dispatchDelayMs: getEffectiveBackendPowerPrompterDispatchDelay(),
     savedQueues: {
       ...getSavedQueueAvailability(powerPrompterQueueControllerState),
       canLoad: pendingPowerPrompterBatchAdmissionTokens.size === 0
@@ -6998,7 +7010,6 @@ async function addPowerPrompterQueueControllerGroupReserved(
   }
   await assertPPQueueExecutionReady(loaded, state);
 
-  state.dispatchDelayMs = powerPrompterDispatchDelayControl.resolve(state.dispatchDelayMs, dispatchDelayRevision);
   // Validation may outlive the source work or another admission of this ID.
   sourceRequest = findPowerPrompterQueueControllerRequest(sourceRequestId);
   const sourceTask = backendPowerPrompterQueueTasks.get(sourceRequestId);
@@ -7019,6 +7030,12 @@ async function addPowerPrompterQueueControllerGroupReserved(
   if (sourceHistory.requiredRevisionPending || sourceHistory.requiredRevisionFailed) {
     throw new Error('The source queue group has an unsaved edit. Finish or repair that edit before moving its prompts.');
   }
+  state.dispatchDelayMs = resolvePowerPrompterAdmissionDispatchDelay(powerPrompterDispatchDelayControl, {
+    requestedDelayMs: state.dispatchDelayMs,
+    admissionRevision: dispatchDelayRevision,
+    effectiveLiveDelayMs: sourceRequest.dispatchDelayMs,
+    inheritQueueDispatchDelay: state.inheritQueueDispatchDelay === true,
+  });
   const sourceQueuedWork = sourceQueuedIndexBeforeCleanup >= 0 ? backendPowerPrompterQueuedWork[sourceQueuedIndexBeforeCleanup] : null;
   const priorSourceAdmissionGate = sourceQueuedWork?.admissionGate;
   const sourceHoldGate = createPowerPrompterAdmissionGate();
@@ -11768,7 +11785,13 @@ function enqueueBackendPowerPrompterQueueWork(work: BackendPowerPrompterQueuedWo
   if (findPowerPrompterQueueControllerRequest(requestId)) return false;
   const state = work.data?.state && typeof work.data.state === 'object' ? work.data.state : {};
   const dispatchDelayMs = normalizePowerPrompterQueueRequestOrigin(work.data?.queueOrigin ?? state.queueOrigin) === 'power_prompter'
-    ? powerPrompterDispatchDelayControl.resolve(state.dispatchDelayMs, work.dispatchDelayRevision) : 0;
+    ? resolvePowerPrompterAdmissionDispatchDelay(powerPrompterDispatchDelayControl, {
+      requestedDelayMs: state.dispatchDelayMs,
+      admissionRevision: work.dispatchDelayRevision,
+      effectiveLiveDelayMs: getEffectiveBackendPowerPrompterDispatchDelay(),
+      restoredSavedQueue: state.restoredSavedQueue === true,
+      inheritQueueDispatchDelay: state.inheritQueueDispatchDelay === true,
+    }) : 0;
   const queuePlacement = normalizePowerPrompterQueuePlacement(
     work.queuePlacement ?? work.data?.queuePlacement ?? state.queuePlacement,
   );
