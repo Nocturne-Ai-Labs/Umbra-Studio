@@ -749,9 +749,10 @@ export function UmbraVideoGenerationControls({
   const [agentPrompt, setAgentPrompt] = React.useState(initialDeviceResume?.agentPrompt || '');
   const [autoPrompterEnabled, setAutoPrompterEnabled] = React.useState(initialDeviceResume?.autoPrompterEnabled === true);
   const [autoPrompterPrompt, setAutoPrompterPrompt] = React.useState(initialDeviceResume?.autoPrompterPrompt || '');
-  const workflowPrompt = autoPrompterEnabled ? autoPrompterPrompt.trim() : agentModeEnabled ? agentPrompt.trim() : prompt;
   const [negativePrompt, setNegativePrompt] = React.useState(initialDeviceResume?.negativePrompt || '');
   const [video, setVideo] = React.useState<PowerPrompterVideoControls>(() => createDefaultVideoControls());
+  const autoPrompterActive = video.family === 'minimax_h3' && autoPrompterEnabled;
+  const workflowPrompt = autoPrompterActive ? autoPrompterPrompt.trim() : agentModeEnabled ? agentPrompt.trim() : prompt;
   const [selectedStoryboardShotId, setSelectedStoryboardShotId] = React.useState('');
   const [sourcePreviewUrl, setSourcePreviewUrl] = React.useState('');
   const [isQueueing, setIsQueueing] = React.useState(false);
@@ -1079,11 +1080,11 @@ export function UmbraVideoGenerationControls({
         height: targetDimensions.targetHeight,
         agentModeEnabled,
         agentPrompt,
-        autoPrompterEnabled,
+        autoPrompterEnabled: autoPrompterActive,
         autoPrompterPrompt,
       },
     });
-  }, [agentModeEnabled, agentPrompt, autoPrompterEnabled, autoPrompterPrompt, negativePrompt, onAgentContextChange, targetDimensions.targetHeight, targetDimensions.targetWidth, video, workflowPrompt, workflows]);
+  }, [agentModeEnabled, agentPrompt, autoPrompterActive, autoPrompterPrompt, negativePrompt, onAgentContextChange, targetDimensions.targetHeight, targetDimensions.targetWidth, video, workflowPrompt, workflows]);
 
   React.useEffect(() => {
     if ((video.mode !== 'image_to_video' && video.mode !== 'reference_to_video') || !video.sourceImagePath || video.sourceImageName) return;
