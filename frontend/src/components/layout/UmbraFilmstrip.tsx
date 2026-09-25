@@ -273,6 +273,21 @@ export function reconcileVisibleFilmstripSelection(
   );
 }
 
+export function nextFilmstripSelectionAfterDelete(
+  displayedImages: FilmstripImage[],
+  removedPaths: string[],
+): FilmstripImage | null {
+  const removed = removedPaths.map(normalizePath).filter(Boolean);
+  if (removed.length === 0) return null;
+  const isRemoved = createFilmstripPathMatcher(removed);
+  const firstRemovedIndex = displayedImages.findIndex((item) => isRemoved(item.path));
+  if (firstRemovedIndex < 0) return null;
+  const nextImages = displayedImages.filter((item) => !isRemoved(item.path));
+  if (nextImages.length === 0) return null;
+  const safeIndex = Math.min(firstRemovedIndex, nextImages.length - 1);
+  return nextImages[safeIndex] || nextImages[nextImages.length - 1] || null;
+}
+
 function shouldTraceFilmstrip(): boolean {
   try {
     window.localStorage.removeItem('umbra.filmstripTrace');
@@ -1454,18 +1469,6 @@ export function UmbraFilmstrip({
     const selectedPaths = selectedEntries.map((item) => item.path);
     if (selectedPaths.length === 0) return;
     const operationFolder = normalizePath(currentFolderRef.current || rootPath);
-    const selectedPathSet = new Set(selectedPaths.map((entry) => normalizePath(entry)).filter(Boolean));
-    const firstRemovedIndex = displayedImages.findIndex((item) => selectedPathSet.has(normalizePath(item.path)));
-    const resolveNextSelectionAfterRemoval = (removedPathsInput: string[]): FilmstripImage | null => {
-      const removed = removedPathsInput.map((entry) => normalizePath(entry)).filter(Boolean);
-      if (removed.length === 0) return null;
-      const isRemoved = createFilmstripPathMatcher(removed);
-      const nextImages = displayedImages.filter((item) =>
-        !isRemoved(item.path));
-      if (nextImages.length === 0) return null;
-      const safeIndex = Math.max(0, Math.min(firstRemovedIndex >= 0 ? firstRemovedIndex : 0, nextImages.length - 1));
-      return nextImages[safeIndex] || nextImages[nextImages.length - 1] || null;
-    };
     const nameByPath = new Map<string, string>(
       selectedEntries.map((item) => [normalizePath(item.path), item.name || pathLeaf(item.path)]),
     );
@@ -1484,7 +1487,7 @@ export function UmbraFilmstrip({
           .filter((entry) => isRemoved(entry.path))
           .map((entry) => normalizeId(entry.id)),
       );
-      const nextSelection = resolveNextSelectionAfterRemoval(normalizedRemovePaths);
+      const nextSelection = nextFilmstripSelectionAfterDelete(displayedImages, normalizedRemovePaths);
       setFeedMode('remove');
       notifyGalleryRemovePaths(normalizedRemovePaths);
       setImages((current) =>

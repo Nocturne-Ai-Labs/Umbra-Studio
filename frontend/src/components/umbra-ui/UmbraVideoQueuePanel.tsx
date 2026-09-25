@@ -891,8 +891,10 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
                     </div>
                   </div>
                   <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <label className="space-y-1.5"><span className={labelClass}>Reference Video</span><input value={draftVideo.sourceVideoPath} onChange={(event) => setDraftVideo((current) => current ? { ...current, sourceVideoPath: event.target.value, sourceVideoName: '', sourceWidth: 0, sourceHeight: 0 } : current)} className={inputClass} /></label>
-                    <label className="space-y-1.5"><span className={labelClass}>Audio Track</span><input value={draftVideo.sourceAudioPath} onChange={(event) => setDraftVideo((current) => current ? { ...current, sourceAudioPath: event.target.value, sourceAudioName: '' } : current)} className={inputClass} /></label>
+                    {draftVideo.mode === 'video_to_video' ? (
+                      <label className="space-y-1.5"><span className={labelClass}>Reference Video</span><input value={draftVideo.sourceVideoPath} onChange={(event) => setDraftVideo((current) => current ? { ...current, sourceVideoPath: event.target.value, sourceVideoName: '', sourceWidth: 0, sourceHeight: 0 } : current)} className={inputClass} /></label>
+                    ) : null}
+                    <label className={cn('space-y-1.5', draftVideo.mode !== 'video_to_video' && 'sm:col-span-2')}><span className={labelClass}>Audio Track</span><input value={draftVideo.sourceAudioPath} onChange={(event) => setDraftVideo((current) => current ? { ...current, sourceAudioPath: event.target.value, sourceAudioName: '' } : current)} className={inputClass} /></label>
                   </div>
                   {draftVideo.mode === 'video_to_video' ? (
                     <label className="mt-3 flex h-9 items-center gap-2 border border-white/10 bg-black/25 px-2.5 text-[9px] font-black uppercase tracking-[0.1em] text-zinc-400">
