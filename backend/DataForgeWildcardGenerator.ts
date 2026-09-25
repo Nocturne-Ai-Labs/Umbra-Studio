@@ -597,31 +597,40 @@ export async function generateDataForgeWildcard(options: {
     }
   } else {
     const maximumAttempts = Math.min(500_000, Math.max(count * 200, 20_000));
+    const progressiveGroups = normalizedGroups.filter((group) => group.progressive);
+    const progressiveStages = Math.min(count, 1 + progressiveGroups.reduce((sum, group) => sum + group.options.length - 1, 0));
+    const progressiveStallLimit = Math.min(1_000, Math.floor(maximumAttempts / progressiveStages));
+    let progressiveFloor = 0;
+    let stalledAttempts = 0;
     for (let attempt = 0; attempt < maximumAttempts && rowsByValue.size < count; attempt += 1) {
+      const lineIndex = Math.max(rowsByValue.size, progressiveFloor);
       const combination = normalizedGroups.map((group) => group.progressive
-        ? progressivePick(group.options, attempt, count)
+        ? progressivePick(group.options, lineIndex, count)
         : weightedPick(group.options, random, prioritizePostCounts));
       const row = buildRow(baseTags, combination, forbidden, maxTagsPerLine);
-      if (row && !rowsByValue.has(row.value)) rowsByValue.set(row.value, row);
+      if (row && !rowsByValue.has(row.value)) {
+        rowsByValue.set(row.value, row);
+        stalledAttempts = 0;
+      } else if (progressiveGroups.length > 0 && ++stalledAttempts >= progressiveStallLimit) {
+        // A progressive option can be impossible or have fewer unique combinations
+        // than its share of requested lines. Give it repeated draws, then advance.
+        const nextBoundary = progressiveGroups.reduce((next, group) => {
+          const optionIndex = Math.floor((lineIndex * group.options.length) / count);
+          if (optionIndex >= group.options.length - 1) return next;
+          return Math.min(next, Math.ceil(((optionIndex + 1) * count) / group.options.length));
+        }, Number.POSITIVE_INFINITY);
+        if (Number.isFinite(nextBoundary)) progressiveFloor = nextBoundary;
+        stalledAttempts = 0;
+      }
     }
   }
 
   const weightedRows = [...rowsByValue.values()];
   const totalChanceWeight = weightedRows.reduce((sum, row) => sum + row.chanceWeight, 0);
-  const rawChanceUnits = weightedRows.map((row) => totalChanceWeight > 0 ? (row.chanceWeight / totalChanceWeight) * 1000 : 0);
-  const chanceUnits = rawChanceUnits.map((value) => Math.floor(value));
-  let remainingChanceUnits = Math.max(0, 1000 - chanceUnits.reduce((sum, value) => sum + value, 0));
-  const chanceRemainders = rawChanceUnits
-    .map((value, index) => ({ index, remainder: value - Math.floor(value) }))
-    .sort((left, right) => right.remainder - left.remainder || left.index - right.index);
-  for (let index = 0; index < chanceRemainders.length && remainingChanceUnits > 0; index += 1) {
-    chanceUnits[chanceRemainders[index].index] += 1;
-    remainingChanceUnits -= 1;
-  }
-  const rows: DataForgeWildcardGeneratedRow[] = weightedRows.map((row, index) => ({
+  const rows: DataForgeWildcardGeneratedRow[] = weightedRows.map((row) => ({
     value: row.value,
     score: row.score,
-    chance: (chanceUnits[index] || 0) / 10,
+    chance: totalChanceWeight > 0 ? (row.chanceWeight / totalChanceWeight) * 100 : 0,
     minimumPostCount: row.minimumPostCount,
     knownPostCountTags: row.knownPostCountTags,
   }));

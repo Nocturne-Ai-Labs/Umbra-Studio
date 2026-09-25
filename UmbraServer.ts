@@ -203,6 +203,7 @@ import { GalleryDb, type GalleryFileInput, type GalleryMediaType } from './galle
 import { ModelIndexWorkerService, type ModelRootDescriptor } from './backend/ModelIndexWorkerService';
 import { ModelDownloadWorkerService } from './backend/ModelDownloadWorkerService';
 import { ModelManagerStateDb } from './backend/ModelManagerStateDb';
+import { isProtectedModelManagerRoot, planModelManagerTransferTarget } from './backend/ModelManagerTransferPlan';
 import { createDatasetArchive } from './backend/DatasetArchiveService';
 import { decodeDatasetImportDataUrl, detectDatasetImportImage, fetchDatasetImportImage } from './backend/DatasetImportUrlService';
 import { moveDatasetImages } from './backend/DatasetImageMoveService';
@@ -1385,6 +1386,40 @@ function resolveModelManagerPath(inputPath: string): {
   };
 }
 
+function resolveModelManagerMutationSources(paths: string[]): {
+  sources: Array<{ clientPath: string; fullPath: string }>;
+  error: string | null;
+} {
+  const roots = getModelManagerRootsResolved().map(root => root.fullPath);
+  const resolved: Array<{ clientPath: string; fullPath: string }> = [];
+  const selectedPaths = new Set<string>();
+  for (const path of paths) {
+    const source = resolveModelManagerPath(String(path || '').trim());
+    if (!source || !existsSync(source.fullPath)) return { sources: [], error: 'Invalid source path' };
+    if (isProtectedModelManagerRoot(source.fullPath, roots)) {
+      return { sources: [], error: 'Model root folders cannot be modified' };
+    }
+    const key = normalizePathForCompare(source.fullPath);
+    if (!selectedPaths.has(key)) {
+      selectedPaths.add(key);
+      resolved.push(source);
+    }
+  }
+  // A selected folder already contains its selected descendants. Sending both to
+  // the filesystem worker would race a child against its parent's transfer.
+  return {
+    sources: resolved.filter(entry => {
+      let parent = dirname(entry.fullPath);
+      while (dirname(parent) !== parent) {
+        if (selectedPaths.has(normalizePathForCompare(parent))) return false;
+        parent = dirname(parent);
+      }
+      return !selectedPaths.has(normalizePathForCompare(parent));
+    }),
+    error: null,
+  };
+}
+
 function getModelSnapshotFullPath(fullPath: string): string {
   const preferredPath = join(dirname(fullPath), MODEL_ARTIFACT_DIR, `${basename(fullPath)}${MODEL_SNAPSHOT_SUFFIX}`);
   if (existsSync(preferredPath)) return preferredPath;
@@ -1478,6 +1513,7 @@ type ModelManagerTransferItem = {
   sourceFullPath: string;
   targetFullPath?: string;
 };
+class InvalidModelManagerTransferTargetError extends Error {}
 
 async function buildModelManagerTransferItems(
   fullPaths: string[],
@@ -1485,6 +1521,8 @@ async function buildModelManagerTransferItems(
 ): Promise<ModelManagerTransferItem[]> {
   const items: ModelManagerTransferItem[] = [];
   const seen = new Set<string>();
+  const reservedTargets = new Set<string>();
+  const modelRoots = getModelManagerRootsResolved().map(root => root.fullPath);
 
   const addItem = (sourceFullPath: string, targetFullPath?: string) => {
     const sourceNormalized = normalizePathForCompare(sourceFullPath);
@@ -1501,27 +1539,29 @@ async function buildModelManagerTransferItems(
     const fullPath = String(fullPathRaw || '').trim();
     if (!fullPath || !isPathInsideModelManagerRoots(fullPath)) continue;
 
-    addItem(fullPath);
-
-    const sourceParent = dirname(fullPath);
-    const artifactDir = join(sourceParent, MODEL_ARTIFACT_DIR);
-    const artifactDirNormalized = normalizePathForCompare(artifactDir);
-    const artifactTargetDir = join(destinationFullPath, MODEL_ARTIFACT_DIR);
-
     const artifactPaths = [
       getPreferredModelSnapshotFullPath(fullPath),
       getLegacyModelSnapshotFullPath(fullPath),
       getPreferredModelInspectionReportFullPath(fullPath),
       ...(await listModelThumbArtifactsForFile(fullPath)),
-    ];
-
-    for (const artifactPath of artifactPaths) {
-      if (!existsSync(artifactPath) || !isPathInsideModelManagerRoots(artifactPath)) continue;
-      const artifactParentNormalized = normalizePathForCompare(dirname(artifactPath));
-      const targetFullPath = artifactParentNormalized === artifactDirNormalized
-        ? join(artifactTargetDir, basename(artifactPath))
-        : join(destinationFullPath, basename(artifactPath));
-      addItem(artifactPath, targetFullPath);
+    ].filter(artifactPath => existsSync(artifactPath)
+      && Boolean(resolveAllowedExistingGalleryPath(artifactPath, modelRoots)));
+    const sourceStat = await fs.lstat(fullPath);
+    const plan = planModelManagerTransferTarget(
+      fullPath,
+      destinationFullPath,
+      sourceStat.isDirectory() && !sourceStat.isSymbolicLink(),
+      artifactPaths,
+      reservedTargets,
+      MODEL_ARTIFACT_DIR,
+    );
+    if (!resolveAllowedExistingGalleryPath(plan.targetFullPath, modelRoots)
+      || plan.artifactTargets.some(target => !resolveAllowedExistingGalleryPath(target, modelRoots))) {
+      throw new InvalidModelManagerTransferTargetError('Model transfer target leaves a model root');
+    }
+    addItem(fullPath, plan.targetFullPath);
+    for (let index = 0; index < artifactPaths.length; index += 1) {
+      addItem(artifactPaths[index], plan.artifactTargets[index]);
     }
   }
 
@@ -3088,9 +3128,8 @@ function getRequestVisibleOrigin(req: Request, url: URL): string {
   const host = forwardedHost || req.headers.get('host')?.trim() || url.host;
   if (!host) return '';
   const forwardedProto = req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim().replace(/:$/, '').toLowerCase() || '';
-  const normalizedHost = normalizeRequestHostname(host);
   const protocol = forwardedProto
-    || (normalizedHost.endsWith('.ts.net') ? 'https' : url.protocol.replace(':', '') || 'http');
+    || url.protocol.replace(':', '') || 'http';
   return normalizeOrigin(`${protocol}://${host}`);
 }
 
@@ -3318,37 +3357,69 @@ function isRemoteRequestAuthenticated(req: Request, config: RemoteAuthConfig | n
 }
 
 function isRemoteSessionHashAuthenticated(tokenHash: string, config: RemoteAuthConfig | null): boolean {
-  if (!config || !tokenHash) return false;
-  const now = Date.now();
-  return (config.sessions || []).some((session) => {
-    if (session.expiresAt <= now || !safeEqualHex(session.hash, tokenHash)) return false;
-    if (!session.deviceId) return true;
-    return (config.devices || []).some((device) => device.trusted && safeEqualHex(device.id, session.deviceId || ''));
-  });
+  return getRemoteSessionExpiry(tokenHash, config) > 0;
 }
 
-function getRemoteWebSocketAuthData(req: Request, url: URL, server?: RequestIpServer) {
+function getRemoteSessionExpiry(tokenHash: string, config: RemoteAuthConfig | null): number {
+  if (!config || !tokenHash) return 0;
+  const now = Date.now();
+  for (const session of config.sessions || []) {
+    const expiresAt = Number(session.expiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= now || !safeEqualHex(session.hash, tokenHash)) continue;
+    if (!session.deviceId || (config.devices || []).some((device) => device.trusted && safeEqualHex(device.id, session.deviceId || ''))) {
+      return expiresAt;
+    }
+  }
+  return 0;
+}
+
+function getRemoteWebSocketAuthData(
+  req: Request,
+  url: URL,
+  server: RequestIpServer | undefined,
+  config: RemoteAuthConfig | null,
+  requireRemoteAuth: boolean,
+) {
   const remoteClient = isRemoteRequest(req, url, server);
   const token = remoteClient ? getRemoteSessionToken(req) : '';
-  return { remoteClient, remoteSessionHash: token ? hashRemoteSessionToken(token) : '' };
+  const remoteSessionHash = token ? hashRemoteSessionToken(token) : '';
+  return {
+    remoteClient,
+    remoteSessionHash,
+    remoteSessionExpiresAt: !remoteClient || !requireRemoteAuth
+      ? Number.POSITIVE_INFINITY
+      : getRemoteSessionExpiry(remoteSessionHash, config),
+  };
 }
 
 function isRemoteWebSocketAuthorized(ws: ServerWebSocket<UmbraSocketData>, config: RemoteAuthConfig | null): boolean {
   if (!ws.data.remoteClient) return true;
   const settings = loadRemoteConnectionSettings();
-  return settings.enabled && (!settings.requireRemoteAuth
-    || isRemoteSessionHashAuthenticated(ws.data.remoteSessionHash || '', config));
+  if (!settings.enabled) return false;
+  const expiresAt = settings.requireRemoteAuth
+    ? getRemoteSessionExpiry(ws.data.remoteSessionHash || '', config)
+    : Number.POSITIVE_INFINITY;
+  ws.data.remoteSessionExpiresAt = expiresAt;
+  return expiresAt > 0;
+}
+
+function terminateUnauthorizedRemoteWebSocket(ws: ServerWebSocket<UmbraSocketData>): void {
+  remoteWebSockets.delete(ws);
+  try { ws.data.upstream?.close(); } catch { /* Already closed. */ }
+  try { ws.terminate(); } catch { /* Already closed. */ }
 }
 
 function revalidateRemoteWebSockets(config = loadRemoteAuthConfig()): void {
   for (const ws of remoteWebSockets) {
     if (isRemoteWebSocketAuthorized(ws, config)) continue;
-    remoteWebSockets.delete(ws);
     // Revocation must also stop existing control channels and proxy relays.
-    try { ws.data.upstream?.close(); } catch { /* Already closed. */ }
-    try { ws.terminate(); } catch { /* Already closed. */ }
+    terminateUnauthorizedRemoteWebSocket(ws);
   }
 }
+
+setInterval(() => {
+  if (remoteWebSockets.size > 0) revalidateRemoteWebSockets();
+}, 60_000).unref();
 
 function getRemoteRequestAddress(req: Request, server?: RequestIpServer): string {
   const socketAddress = getRequestSocketAddress(req, server);
@@ -3375,8 +3446,7 @@ function isSecureRemoteRequest(req: Request): boolean {
   if (forwardedProto === 'https') return true;
   const forwarded = req.headers.get('forwarded') || '';
   if (/\bproto=https\b/i.test(forwarded)) return true;
-  const host = (req.headers.get('host') || '').toLowerCase();
-  return host.endsWith('.ts.net') || host.includes('.ts.net:');
+  return false;
 }
 
 function getRemoteCookieSecuritySuffix(req: Request): string {
@@ -29022,9 +29092,17 @@ async function handleModelManagerFsMove(req: Request): Promise<Response> {
     const destination = resolveModelManagerPath(destinationRaw);
     if (!destination) return json({ error: 'Invalid destination path' }, 400);
 
-    const resolvedSources = paths
-      .map((rawPath) => resolveModelManagerPath(String(rawPath || '').trim()))
-      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+    const sourceResolution = resolveModelManagerMutationSources(paths);
+    if (sourceResolution.error) return json({ error: sourceResolution.error }, 400);
+    const resolvedSources = sourceResolution.sources;
+    const destinationStat = await fs.stat(destination.fullPath).catch(() => null);
+    if (destinationStat && !destinationStat.isDirectory()) return json({ error: 'Destination must be a folder' }, 400);
+    if (resolvedSources.some(source => isPathInsideDirectory(source.fullPath, destination.fullPath))) {
+      return json({ error: 'Cannot move a folder into itself' }, 400);
+    }
+    if (resolvedSources.some(source => normalizePathForCompare(dirname(source.fullPath)) === normalizePathForCompare(destination.fullPath))) {
+      return json({ error: 'Source and destination are the same folder' }, 400);
+    }
     const validItems = await buildModelManagerTransferItems(
       resolvedSources.map((entry) => entry.fullPath),
       destination.fullPath,
@@ -29034,7 +29112,7 @@ async function handleModelManagerFsMove(req: Request): Promise<Response> {
     if (body.trackProgress) {
       const job = createModelManagerFsTransferJob(
         'move',
-        paths,
+        resolvedSources.map(source => source.clientPath),
         destination.clientPath,
         destination.fullPath,
         validItems,
@@ -29074,13 +29152,15 @@ async function handleModelManagerFsMove(req: Request): Promise<Response> {
     const successCount = Number((execution as any)?.moved || (((execution as any)?.results || []) as any[]).filter((entry: any) => entry?.success).length || 0);
     console.log(`[ModelManager] Move completed paths=${validItems.length} success=${successCount} destination="${destination.clientPath}" ms=${Date.now() - startedAt}`);
 
+    const failures = (((execution as any)?.results || []) as Array<{ success: boolean; error?: string }>).filter(entry => !entry.success);
     return json({
-      success: true,
+      success: failures.length === 0,
       ...(execution as any),
-    });
+      ...(failures.length ? { error: `${failures.length} transfer item(s) failed: ${failures[0].error || 'Unknown error'}` } : {}),
+    }, failures.length ? 409 : 200);
   } catch (error: any) {
     console.error('[ModelManager] move error:', error);
-    return json({ error: error?.message || 'Move failed' }, 500);
+    return json({ error: error?.message || 'Move failed' }, error instanceof InvalidModelManagerTransferTargetError ? 403 : 500);
   }
 }
 
@@ -29094,9 +29174,14 @@ async function handleModelManagerFsCopy(req: Request): Promise<Response> {
     const destination = resolveModelManagerPath(destinationRaw);
     if (!destination) return json({ error: 'Invalid destination path' }, 400);
 
-    const resolvedSources = paths
-      .map((rawPath) => resolveModelManagerPath(String(rawPath || '').trim()))
-      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+    const sourceResolution = resolveModelManagerMutationSources(paths);
+    if (sourceResolution.error) return json({ error: sourceResolution.error }, 400);
+    const resolvedSources = sourceResolution.sources;
+    const destinationStat = await fs.stat(destination.fullPath).catch(() => null);
+    if (destinationStat && !destinationStat.isDirectory()) return json({ error: 'Destination must be a folder' }, 400);
+    if (resolvedSources.some(source => isPathInsideDirectory(source.fullPath, destination.fullPath))) {
+      return json({ error: 'Cannot copy a folder into itself' }, 400);
+    }
     const validItems = await buildModelManagerTransferItems(
       resolvedSources.map((entry) => entry.fullPath),
       destination.fullPath,
@@ -29106,7 +29191,7 @@ async function handleModelManagerFsCopy(req: Request): Promise<Response> {
     if (body.trackProgress) {
       const job = createModelManagerFsTransferJob(
         'copy',
-        paths,
+        resolvedSources.map(source => source.clientPath),
         destination.clientPath,
         destination.fullPath,
         validItems,
@@ -29145,13 +29230,15 @@ async function handleModelManagerFsCopy(req: Request): Promise<Response> {
     const successCount = Number((execution as any)?.copied || (((execution as any)?.results || []) as any[]).filter((entry: any) => entry?.success).length || 0);
     console.log(`[ModelManager] Copy completed paths=${validItems.length} success=${successCount} destination="${destination.clientPath}" ms=${Date.now() - startedAt}`);
 
+    const failures = (((execution as any)?.results || []) as Array<{ success: boolean; error?: string }>).filter(entry => !entry.success);
     return json({
-      success: true,
+      success: failures.length === 0,
       ...(execution as any),
-    });
+      ...(failures.length ? { error: `${failures.length} transfer item(s) failed: ${failures[0].error || 'Unknown error'}` } : {}),
+    }, failures.length ? 409 : 200);
   } catch (error: any) {
     console.error('[ModelManager] copy error:', error);
-    return json({ error: error?.message || 'Copy failed' }, 500);
+    return json({ error: error?.message || 'Copy failed' }, error instanceof InvalidModelManagerTransferTargetError ? 403 : 500);
   }
 }
 
@@ -29167,6 +29254,9 @@ async function handleModelManagerFsRename(req: Request): Promise<Response> {
 
     const source = resolveModelManagerPath(sourceRaw);
     if (!source) return json({ error: 'Invalid source path' }, 400);
+    if (isProtectedModelManagerRoot(source.fullPath, getModelManagerRootsResolved().map(root => root.fullPath))) {
+      return json({ error: 'Model root folders cannot be renamed' }, 400);
+    }
 
     const targetFullPath = resolve(dirname(source.fullPath), newName);
     const modelRoots = getModelManagerRootsResolved().map(root => root.fullPath);
@@ -29241,9 +29331,9 @@ async function handleModelManagerFsDelete(req: Request): Promise<Response> {
     const paths = Array.isArray(body.paths) ? body.paths : [];
     if (paths.length <= 0) return json({ error: 'Missing parameters' }, 400);
 
-    const resolvedItems = paths
-      .map((rawPath) => resolveModelManagerPath(String(rawPath || '').trim()))
-      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+    const sourceResolution = resolveModelManagerMutationSources(paths);
+    if (sourceResolution.error) return json({ error: sourceResolution.error }, 400);
+    const resolvedItems = sourceResolution.sources;
     const artifactPaths = await expandModelArtifactPaths(resolvedItems.map((entry) => entry.fullPath));
     const items = artifactPaths.map((fullPath) => ({
       path: toClientPath(fullPath),
@@ -29261,10 +29351,12 @@ async function handleModelManagerFsDelete(req: Request): Promise<Response> {
     ]);
     const successCount = Number((execution as any)?.deleted || (((execution as any)?.results || []) as any[]).filter((entry: any) => entry?.success).length || 0);
     console.log(`[ModelManager] Delete completed paths=${items.length} success=${successCount}`);
+    const failures = (((execution as any)?.results || []) as Array<{ success: boolean; error?: string }>).filter(entry => !entry.success);
     return json({
-      success: true,
+      success: failures.length === 0,
       ...(execution as any),
-    });
+      ...(failures.length ? { error: `${failures.length} delete item(s) failed: ${failures[0].error || 'Unknown error'}` } : {}),
+    }, failures.length ? 409 : 200);
   } catch (error: any) {
     console.error('[ModelManager] delete error:', error);
     return json({ error: error?.message || 'Delete failed' }, 500);
@@ -32252,6 +32344,7 @@ type UmbraSocketData = {
   proxyWsProtocol?: string;
   remoteClient?: boolean;
   remoteSessionHash?: string;
+  remoteSessionExpiresAt?: number;
   queuedMessages?: Array<string | Buffer>;
   queuedMessageBytes?: number;
   upstream?: WebSocket;
@@ -32721,7 +32814,7 @@ const server = Bun.serve<UmbraSocketData>({
           const upgraded = server.upgrade(req, {
             data: {
               endpoint: '/comfy/ws',
-              ...getRemoteWebSocketAuthData(req, url, server),
+              ...getRemoteWebSocketAuthData(req, url, server, effectiveRemoteAuthConfig, remoteConnectionSettings.requireRemoteAuth),
               targetUrl,
             },
           });
@@ -32776,7 +32869,7 @@ const server = Bun.serve<UmbraSocketData>({
           const upgraded = server.upgrade(req, {
             data: {
               endpoint: '/local-server-proxy/ws',
-              ...getRemoteWebSocketAuthData(req, url, server),
+              ...getRemoteWebSocketAuthData(req, url, server, effectiveRemoteAuthConfig, remoteConnectionSettings.requireRemoteAuth),
               targetUrl,
               proxyCookieHeader: getLocalServerProxyCookieHeader(req.headers.get('cookie'), parsed.token),
               proxyWsProtocol,
@@ -33003,7 +33096,7 @@ const server = Bun.serve<UmbraSocketData>({
           const upgraded = server.upgrade(req, {
             data: {
               endpoint: path,
-              ...getRemoteWebSocketAuthData(req, url, server),
+              ...getRemoteWebSocketAuthData(req, url, server, effectiveRemoteAuthConfig, remoteConnectionSettings.requireRemoteAuth),
             },
           });
           if (upgraded) return undefined;
@@ -38741,6 +38834,10 @@ const server = Bun.serve<UmbraSocketData>({
       handleWsDisconnection(ws, endpoint);
     },
     message(ws, message) {
+      if (ws.data.remoteClient && Date.now() >= (ws.data.remoteSessionExpiresAt ?? 0)) {
+        terminateUnauthorizedRemoteWebSocket(ws);
+        return;
+      }
       const endpoint = (ws.data as any)?.endpoint;
       if (endpoint === '/comfy/ws') {
         const upstream = (ws.data as any)?.upstream as WebSocket | undefined;
