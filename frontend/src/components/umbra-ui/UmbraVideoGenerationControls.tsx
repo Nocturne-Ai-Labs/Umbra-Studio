@@ -1452,10 +1452,27 @@ export function UmbraVideoGenerationControls({
     });
   }, []);
   const setDurationSeconds = React.useCallback((durationSeconds: number) => {
-    setVideo((current) => ({
-      ...current,
-      frames: resolveVideoFramesForDurationChange(durationSeconds, current.frames, current.fps, current.family),
-    }));
+    setVideo((current) => {
+      const frames = resolveVideoFramesForDurationChange(durationSeconds, current.frames, current.fps, current.family);
+      return {
+        ...current,
+        frames,
+        ...(current.family === 'ltx23' ? {
+          ltx: {
+            ...current.ltx,
+            keyframes: current.ltx.keyframes.map((keyframe) => ({
+              ...keyframe,
+              frameIndex: resolveUmbraVideoFrameIndexForSeconds(
+                keyframe.frameIndex / Math.max(1, current.fps),
+                current.fps,
+                8,
+                Math.max(0, frames - 1),
+              ),
+            })),
+          },
+        } : {}),
+      };
+    });
   }, []);
   const setOutputFps = React.useCallback((fpsInput: number) => {
     setVideo((current) => {
