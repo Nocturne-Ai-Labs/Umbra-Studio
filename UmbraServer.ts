@@ -45,9 +45,11 @@ import { createVariantEtag, matchesIfNoneMatch, permitsConditionalRange } from '
 import { compactQueueSnapshot } from './shared/power-prompter/queueSnapshotTransport';
 import { collectQueueSnapshotPromptRows } from './shared/power-prompter/queueSnapshotRows';
 import { PowerPrompterHistoryStore } from './backend/PowerPrompterHistoryStore';
+import { createPowerPrompterAdmissionGate, takeAdmittedQueueHead } from './backend/PowerPrompterAdmissionGate';
+import type { PowerPrompterAdmissionGate } from './backend/PowerPrompterAdmissionGate';
 import { PowerPrompterDispatchDelayControl, waitForPowerPrompterDispatchDelay } from './backend/PowerPrompterDispatchDelay';
 import { appendSavedQueueIdSuffix, buildRemainingPowerPrompterQueueSnapshot, getSavedQueueSummaryIndexPath, readSavedQueueSummaryIndex, splitSavedPowerPrompterQueue } from './backend/PowerPrompterSavedQueue';
-import { canInterruptPowerPrompterPrompt, getLiveUmbraUiQueueRequestIds, getQueueClearFutureKeepIds, hasLivePowerPrompterQueuePrompts, shouldFinishStoppedPowerPrompterQueue, summarizePowerPrompterQueuePrompts } from './backend/PowerPrompterQueueLifecycle';
+import { canInterruptPowerPrompterPrompt, getInterruptedPromptHistoryStatus, getLiveUmbraUiQueueRequestIds, getQueueClearFutureKeepIds, hasLivePowerPrompterQueuePrompts, shouldFinishStoppedPowerPrompterQueue, summarizePowerPrompterQueuePrompts } from './backend/PowerPrompterQueueLifecycle';
 import { isAllowedQueueControlBrowserOrigin, requiresQueueControlBrowserOrigin } from './backend/QueueControlOriginPolicy';
 import { getSavedQueueAvailability } from './shared/power-prompter/savedQueue';
 import { ThumbnailService } from './backend/ThumbnailService';
@@ -5070,7 +5072,7 @@ const POWER_PROMPTER_QUEUE_STATE_SNAPSHOT_ENABLED = false;
 const backendHandledPowerPrompterQueueControlRequests = new Map<string, string[]>();
 
 type PowerPrompterQueueControllerPromptStatus = 'pending' | 'submitting' | 'running' | 'completed' | 'canceled' | 'interrupted' | 'failed';
-type PPQueueHistoryPromptStatus = PowerPrompterQueueControllerPromptStatus | 'unstarted';
+type PPQueueHistoryPromptStatus = PowerPrompterQueueControllerPromptStatus | 'interrupted_confirmed' | 'unstarted';
 type PowerPrompterQueueControllerRequestStatus = 'pending' | 'running' | 'completed' | 'canceled' | 'interrupted' | 'failed';
 type PowerPrompterQueueRequestOrigin = 'power_prompter' | 'umbra_ui';
 type PowerPrompterQueuePlacement = 'next' | 'end' | 'interrupt';
@@ -5095,6 +5097,7 @@ interface PowerPrompterQueueControllerPrompt {
   outputSubfolder: string;
   styleName: string;
   status: PowerPrompterQueueControllerPromptStatus;
+  interruptionDrainConfirmed?: boolean;
   error?: string;
   startedAt?: number;
   completedAt?: number;
@@ -5303,6 +5306,8 @@ async function upsertUmbraUiVideoReviewPrompt(
   prompt: PowerPrompterQueueControllerPrompt,
   outputs?: unknown[],
 ) {
+  const admissionGate = ppBackendHistory.get(request.requestId)?.admissionGate;
+  if (admissionGate && admissionGate.status !== 'accepted') return;
   if (!isUmbraUiVideoGeneration(prompt.generation)) return;
   await ensureUmbraUiVideoReviewLoaded();
   const id = getUmbraUiVideoReviewJobId(request.requestId, prompt.promptIndex);
@@ -5377,6 +5382,7 @@ interface BackendPowerPrompterQueuedWork {
   queuePlacement?: PowerPrompterQueuePlacement;
   preservePaused?: boolean;
   removedPromptIndices?: Set<number>;
+  admissionGate?: PowerPrompterAdmissionGate;
 }
 
 const backendPowerPrompterQueuedWork: BackendPowerPrompterQueuedWork[] = [];
@@ -5503,6 +5509,13 @@ function clonePowerPrompterQueueControllerSnapshot(reason?: string) {
   const activePowerPrompterRequest = Array.from(backendPowerPrompterQueueTasks.keys())
     .map(findPowerPrompterQueueControllerRequest)
     .find((request) => request?.origin === 'power_prompter' && hasLivePowerPrompterQueuePrompts(request.prompts));
+  const visibleRequests = powerPrompterQueueControllerState.requests.filter((request) => {
+    const status = ppBackendHistory.get(request.requestId)?.admissionGate?.status;
+    return status !== 'pending' && status !== 'rejected';
+  });
+  const visibleActiveRequest = visibleRequests.find((request) => request.requestId === powerPrompterQueueControllerState.activeRequestId)
+    || visibleRequests.find((request) => request.prompts.some((prompt) => prompt.status === 'running' || prompt.status === 'submitting'))
+    || visibleRequests.find((request) => request.prompts.some((prompt) => prompt.status === 'pending'));
   return {
     type: 'queue_snapshot',
     backendAutoDispatch: true,
@@ -5517,9 +5530,9 @@ function clonePowerPrompterQueueControllerSnapshot(reason?: string) {
     pendingBatchAdmissions: pendingPowerPrompterBatchAdmissionTokens.size,
     version: powerPrompterQueueControllerState.version,
     paused: powerPrompterQueueControllerState.paused,
-    activeRequestId: powerPrompterQueueControllerState.activeRequestId,
-    activePromptIndex: powerPrompterQueueControllerState.activePromptIndex,
-    requests: powerPrompterQueueControllerState.requests.map((request) => {
+    activeRequestId: visibleActiveRequest?.requestId || '',
+    activePromptIndex: visibleActiveRequest?.activeIndex || 0,
+    requests: visibleRequests.map((request) => {
       const publicRequest: Partial<PowerPrompterQueueControllerRequest> = { ...request };
       const historySummary = ppBackendHistory.get(request.requestId)?.summary;
       delete publicRequest.workflowImplementationId;
@@ -5541,6 +5554,10 @@ function isPowerPrompterQueueControllerTerminalStatus(status: unknown) {
 }
 
 type BackendPPHistory = {
+  initialCommit: Promise<PPQueueHistorySummary> | null;
+  lastWrite?: Promise<void>;
+  createdByAdmission?: boolean;
+  admissionGate?: PowerPrompterAdmissionGate;
   ready: Promise<unknown>;
   summary: PPQueueHistorySummary | null;
   progressSignature: string;
@@ -5552,7 +5569,9 @@ function publishBackendPPHistory(history: BackendPPHistory, summary: PPQueueHist
   if (!summary || history.deleted) return;
   const changed = history.summary?.updatedAt !== summary.updatedAt;
   history.summary = summary;
-  if (changed) sendPrompterEventToTargets({ type: 'queue_history_updated', item: toPublicPPQueueHistorySummary(summary) });
+  if (changed && (!history.admissionGate || history.admissionGate.status === 'accepted')) {
+    sendPrompterEventToTargets({ type: 'queue_history_updated', item: toPublicPPQueueHistorySummary(summary) });
+  }
 }
 
 function reportBackendPPHistoryError(requestId: string, error: unknown) {
@@ -5589,6 +5608,8 @@ function getBackendPPQueueHistoryPromptStatuses(request: PowerPrompterQueueContr
   const task = backendPowerPrompterQueueTasks.get(request.requestId);
   const queuedWork = backendPowerPrompterQueuedWork.find((entry) => entry.requestId === request.requestId);
   return request.prompts.map((prompt) => {
+    const interruptedStatus = getInterruptedPromptHistoryStatus(prompt);
+    if (interruptedStatus) return interruptedStatus;
     if (prompt.status !== 'canceled') return prompt.status;
     const removedByEdit = task?.removedPromptIndices.has(prompt.promptIndex)
       || queuedWork?.removedPromptIndices?.has(prompt.promptIndex);
@@ -5598,22 +5619,35 @@ function getBackendPPQueueHistoryPromptStatuses(request: PowerPrompterQueueContr
   });
 }
 
-function initializeBackendPPQueueHistory(request: PowerPrompterQueueControllerRequest, state: Record<string, any>) {
+function initializeBackendPPQueueHistory(request: PowerPrompterQueueControllerRequest, state: Record<string, any>, admissionGate?: PowerPrompterAdmissionGate) {
   if (request.origin !== 'power_prompter' || ppBackendHistory.has(request.requestId)) return;
-  const history: BackendPPHistory = { ready: Promise.resolve(), summary: null, progressSignature: '' };
+  const history: BackendPPHistory = {
+    initialCommit: null,
+    admissionGate, ready: Promise.resolve(), summary: null, progressSignature: '',
+  };
   ppBackendHistory.set(request.requestId, history);
   const snapshot = buildBackendPPHistorySnapshot(request, state);
   const name = basename(String(state.sourceFile || state.file || 'Power Prompter')).replace(/\.ppcards\.json$/i, '');
-  history.ready = savePPQueueHistory(`${name} - Set ${request.activeSetId}`, snapshot, 'queued', [], request.requestId, true, getBackendPPQueueHistoryPromptStatuses(request))
-    .then((summary) => publishBackendPPHistory(history, summary))
-    .catch((error) => { reportBackendPPHistoryError(request.requestId, error); });
+  history.initialCommit = (async () => {
+    if (!snapshot) throw new Error('The queue history snapshot could not be prepared.');
+    const id = getPPQueueRequestHistoryId(request.requestId);
+    if (await ppHistoryStore.summary(id)) throw new Error('A queue history entry already exists for this request ID.');
+    const summary = await savePPQueueHistory(`${name} - Set ${request.activeSetId}`, snapshot, 'queued', [], request.requestId, true, getBackendPPQueueHistoryPromptStatuses(request));
+    if (!summary) throw new Error('The queue history snapshot could not be saved.');
+    history.createdByAdmission = true;
+    publishBackendPPHistory(history, summary);
+    return summary;
+  })();
+  history.ready = history.initialCommit.catch((error) => { reportBackendPPHistoryError(request.requestId, error); });
 }
 
 function persistBackendPPQueueHistoryProgress(request: PowerPrompterQueueControllerRequest, previews?: unknown[]) {
   const history = ppBackendHistory.get(request.requestId);
   if (!history || history.deleted) return;
+  const hasUnconfirmedInterruptedPrompt = request.prompts.some((prompt) =>
+    prompt.status === 'interrupted' && prompt.interruptionDrainConfirmed !== true);
   const patch = {
-    status: request.status === 'pending' ? 'queued' : request.status,
+    status: hasUnconfirmedInterruptedPrompt ? 'running' : request.status === 'pending' ? 'queued' : request.status,
     completed: request.completed, failed: request.failed, canceled: request.canceled,
     promptStatuses: getBackendPPQueueHistoryPromptStatuses(request),
     ...(previews ? { previewImages: normalizePPQueueHistoryPreviewImages(previews) } : {}),
@@ -5621,10 +5655,13 @@ function persistBackendPPQueueHistoryProgress(request: PowerPrompterQueueControl
   const signature = JSON.stringify(patch);
   if (!previews && history.progressSignature === signature) return;
   if (!previews) history.progressSignature = signature;
-  history.ready = history.ready.then(async () => {
+  const write = history.ready.then(async () => {
     const summary = await updatePPQueueHistory(getPPQueueRequestHistoryId(request.requestId), patch, true);
+    if (!summary) throw new Error('The queue history entry was not found.');
     publishBackendPPHistory(history, summary);
-  }).catch((error) => {
+  });
+  history.lastWrite = write;
+  history.ready = write.catch((error) => {
     history.progressSignature = '';
     reportBackendPPHistoryError(request.requestId, error);
   });
@@ -5649,14 +5686,19 @@ function reviseBackendPPQueueHistory(request: PowerPrompterQueueControllerReques
 function retainVisiblePowerPrompterQueueControllerRequests(requests: PowerPrompterQueueControllerRequest[]) {
   const terminalRequests = requests.filter((request) => isPowerPrompterQueueControllerTerminalStatus(request.status));
   const keepTerminalIds = new Set(terminalRequests.slice(-20).map((request) => request.requestId));
-  return requests.filter((request) => !isPowerPrompterQueueControllerTerminalStatus(request.status) || keepTerminalIds.has(request.requestId));
+  return requests.filter((request) => !isPowerPrompterQueueControllerTerminalStatus(request.status)
+    || keepTerminalIds.has(request.requestId)
+    || backendPowerPrompterQueueTasks.has(request.requestId)
+    || backendPowerPrompterQueuedWork.some((work) => work.requestId === request.requestId));
 }
 
 function recomputePowerPrompterQueueControllerState(reason?: string) {
   const now = Date.now();
   powerPrompterQueueControllerState.requests = powerPrompterQueueControllerState.requests.filter((request) => {
     if (!isPowerPrompterQueueControllerTerminalStatus(request.status)) return true;
-    const keep = now - Math.max(0, Number(request.updatedAt) || 0) < 30000;
+    const keep = backendPowerPrompterQueueTasks.has(request.requestId)
+      || backendPowerPrompterQueuedWork.some((work) => work.requestId === request.requestId)
+      || now - Math.max(0, Number(request.updatedAt) || 0) < 30000;
     if (!keep) ppBackendHistory.delete(request.requestId);
     return keep;
   });
@@ -5771,6 +5813,7 @@ function startPowerPrompterQueueControllerRequest(options: {
   promptStyleNames: string[];
   generationByPrompt: PowerPrompterGenerationControls[];
   historyState?: Record<string, any>;
+  admissionGate?: PowerPrompterAdmissionGate;
   preservePaused?: boolean;
   removedPromptIndices?: ReadonlySet<number>;
 }, preferredSourceWs?: ServerWebSocket<unknown> | null, reason = 'request_started') {
@@ -5832,10 +5875,10 @@ function startPowerPrompterQueueControllerRequest(options: {
   if (options.preservePaused !== true) {
     powerPrompterQueueControllerState.paused = false;
   }
+  initializeBackendPPQueueHistory(request, options.historyState || {}, options.admissionGate);
   for (const prompt of request.prompts) {
     void upsertUmbraUiVideoReviewPrompt(request, prompt);
   }
-  initializeBackendPPQueueHistory(request, options.historyState || {});
   broadcastPowerPrompterQueueControllerSnapshot(reason, preferredSourceWs);
 }
 
@@ -9425,7 +9468,8 @@ function cancelBackendPowerPrompterQueuedWork(requestId: string, reason: string)
   if (!normalizedRequestId) return false;
   const index = backendPowerPrompterQueuedWork.findIndex((entry) => entry.requestId === normalizedRequestId);
   if (index < 0) return false;
-  backendPowerPrompterQueuedWork.splice(index, 1);
+  const [work] = backendPowerPrompterQueuedWork.splice(index, 1);
+  work?.admissionGate?.settle(false);
   finishPowerPrompterQueueControllerRequest(
     normalizedRequestId,
     reason === 'interrupt' ? 'interrupted' : 'canceled',
@@ -9454,6 +9498,7 @@ function interruptBackendPowerPrompterActivePrompt(
   task.interruptedPromptIndices.add(promptIndex);
   updatePowerPrompterQueueControllerPrompt(normalizedRequestId, promptIndex, {
     status: 'interrupted',
+    interruptionDrainConfirmed: false,
     promptId,
     error: String(reason || 'interrupt').trim() || 'interrupt',
     completedAt: Date.now(),
@@ -9679,6 +9724,36 @@ async function waitForBackendPowerPrompterQueueResume(
   if (announced) {
     appendPowerPrompterQueueLog('backend_queue_resumed', { requestId });
     broadcastPowerPrompterQueueControllerSnapshot('request_resumed', sourceWs);
+  }
+}
+
+async function waitForDurablePowerPrompterSubmitMarker(
+  task: BackendPowerPrompterQueueTask,
+  requestId: string,
+  sourceWs?: ServerWebSocket<unknown> | null,
+) {
+  if (task.origin !== 'power_prompter') return;
+  while (true) {
+    throwIfBackendPowerPrompterQueueCanceled(task);
+    const request = findPowerPrompterQueueControllerRequest(requestId);
+    const history = ppBackendHistory.get(requestId);
+    try {
+      if (!request || !history) throw new Error('Queue history is unavailable.');
+      persistBackendPPQueueHistoryProgress(request);
+      const write = history.lastWrite;
+      if (!write) throw new Error('Queue submission status was not saved.');
+      await write;
+      return;
+    } catch (error) {
+      if (history) history.progressSignature = '';
+      powerPrompterQueueControllerState.paused = true;
+      broadcastPowerPrompterQueueControllerSnapshot('submit_waiting_for_history', sourceWs);
+      appendPowerPrompterQueueLog('backend_queue_submit_waiting_for_history', {
+        requestId,
+        error: String(error instanceof Error ? error.message : error),
+      });
+      await waitForBackendPowerPrompterQueueResume(task, requestId, sourceWs);
+    }
   }
 }
 
@@ -10700,6 +10775,11 @@ async function runBackendPowerPrompterPipelineQueue(
       if (task.interruptCurrentRequested) {
         throw new Error(`${BACKEND_PP_QUEUE_CANCELLED} Reason: stop_all`);
       }
+      await waitForDurablePowerPrompterSubmitMarker(task, requestId, sourceWs);
+      throwIfBackendPowerPrompterQueueCanceled(task);
+      if (finishBeforeNextPromptIfStopped()) return;
+      if (task.removedPromptIndices.has(index)) continue;
+      if (task.interruptCurrentRequested) throw new Error(`${BACKEND_PP_QUEUE_CANCELLED} Reason: stop_all`);
       let response: Response;
       try {
         response = await fetch(`${getComfyProxyBaseUrl()}/prompt`, {
@@ -10753,6 +10833,7 @@ async function runBackendPowerPrompterPipelineQueue(
       if (task.interruptedPromptIndices.has(index)) {
         updatePowerPrompterQueueControllerPrompt(requestId, index, {
           status: 'interrupted',
+          interruptionDrainConfirmed: false,
           promptId,
           error: 'interrupt',
           completedAt: Date.now(),
@@ -10789,6 +10870,7 @@ async function runBackendPowerPrompterPipelineQueue(
       if (task.interruptedPromptIndices.has(index)) {
         updatePowerPrompterQueueControllerPrompt(requestId, index, {
           status: 'interrupted',
+          interruptionDrainConfirmed: true,
           promptId,
           error: 'interrupt',
           completedAt: Date.now(),
@@ -10987,6 +11069,26 @@ async function runBackendPowerPrompterPipelineQueue(
   }
 }
 
+function interruptBackendPowerPrompterQueueForPlacement(work: BackendPowerPrompterQueuedWork) {
+  if (work.queuePlacement !== 'interrupt') return;
+  for (const [activeRequestId, activeTask] of backendPowerPrompterQueueTasks.entries()) {
+    const activeRequest = findPowerPrompterQueueControllerRequest(activeRequestId);
+    const activePrompt = activeRequest?.prompts[activeTask.activePromptIndex];
+    if (activeRequest?.origin !== 'power_prompter') continue;
+    if (activePrompt?.status !== 'running' && activePrompt?.status !== 'submitting') continue;
+    void interruptBackendPowerPrompterPromptForPlacement(
+      activeRequestId, 'umbra_ui_interrupt', work.sourceWs,
+      () => !backendPowerPrompterQueuedWork.includes(work),
+    ).catch((error: any) => {
+      appendPowerPrompterQueueLog('backend_queue_comfy_interrupt_failed', {
+        requestId: activeRequestId,
+        error: String(error?.message || error || 'Failed to interrupt ComfyUI.'),
+      });
+    });
+    break;
+  }
+}
+
 function enqueueBackendPowerPrompterQueueWork(work: BackendPowerPrompterQueuedWork): boolean {
   const requestId = String(work.requestId || '').trim();
   if (!requestId) return false;
@@ -11038,26 +11140,10 @@ function enqueueBackendPowerPrompterQueueWork(work: BackendPowerPrompterQueuedWo
     promptStyleNames,
     generationByPrompt,
     historyState: { ...state, dispatchDelayMs },
+    admissionGate: work.admissionGate,
     preservePaused: work.preservePaused ?? powerPrompterQueueControllerState.paused,
   }, work.sourceWs, 'request_enqueued');
-  if (queuePlacement === 'interrupt') {
-    for (const [activeRequestId, activeTask] of backendPowerPrompterQueueTasks.entries()) {
-      const activeRequest = findPowerPrompterQueueControllerRequest(activeRequestId);
-      const activePrompt = activeRequest?.prompts[activeTask.activePromptIndex];
-      if (activeRequest?.origin !== 'power_prompter') continue;
-      if (activePrompt?.status !== 'running' && activePrompt?.status !== 'submitting') continue;
-      void interruptBackendPowerPrompterPromptForPlacement(
-        activeRequestId, 'umbra_ui_interrupt', work.sourceWs,
-        () => !backendPowerPrompterQueuedWork.includes(normalizedWork),
-      ).catch((error: any) => {
-        appendPowerPrompterQueueLog('backend_queue_comfy_interrupt_failed', {
-          requestId: activeRequestId,
-          error: String(error?.message || error || 'Failed to interrupt ComfyUI.'),
-        });
-      });
-      break;
-    }
-  }
+  if (!normalizedWork.admissionGate) interruptBackendPowerPrompterQueueForPlacement(normalizedWork);
   emitPowerPrompterTerminalLine(`Backend enqueued group req=${formatPowerPrompterRequestId(requestId)} prompts=${work.prompts.length} backlog=${backendPowerPrompterQueuedWork.length}`);
   void drainBackendPowerPrompterQueue().catch((error: any) => {
     appendPowerPrompterQueueLog('backend_queue_drain_failed', {
@@ -11080,12 +11166,12 @@ async function runBackendPowerPrompterQueuedWork(next: BackendPowerPrompterQueue
 
 async function drainBackendPowerPrompterPriorityWork(beforePlacement?: PowerPrompterQueuePlacement): Promise<void> {
   while (backendPowerPrompterQueuedWork.length > 0) {
-    const next = backendPowerPrompterQueuedWork[0];
+    const next = await takeAdmittedQueueHead(backendPowerPrompterQueuedWork, (head) => {
+      const placement = normalizePowerPrompterQueuePlacement(head.queuePlacement ?? head.data?.queuePlacement);
+      return placement !== 'end' && beforePlacement !== 'interrupt'
+        && (beforePlacement !== 'next' || placement === 'interrupt');
+    });
     if (!next) return;
-    const placement = normalizePowerPrompterQueuePlacement(next.queuePlacement ?? next.data?.queuePlacement);
-    if (placement === 'end' || beforePlacement === 'interrupt'
-      || (beforePlacement === 'next' && placement !== 'interrupt')) return;
-    backendPowerPrompterQueuedWork.shift();
     await runBackendPowerPrompterQueuedWork(next);
   }
 }
@@ -11202,12 +11288,64 @@ async function drainBackendPowerPrompterQueue() {
   backendPowerPrompterQueueDrainActive = true;
   try {
     while (backendPowerPrompterQueuedWork.length > 0) {
-      const next = backendPowerPrompterQueuedWork.shift();
+      const next = await takeAdmittedQueueHead(backendPowerPrompterQueuedWork);
       if (!next) continue;
       await runBackendPowerPrompterQueuedWork(next);
     }
   } finally {
     backendPowerPrompterQueueDrainActive = false;
+  }
+}
+
+async function awaitBackendPowerPrompterInitialHistory(requestIds: string[]): Promise<void> {
+  // Wait for every write before rollback: a late manifest write must not recreate
+  // a history entry after a failed batch has been removed.
+  const results = await Promise.allSettled(requestIds.map((requestId) => {
+    const commit = ppBackendHistory.get(requestId)?.initialCommit;
+    return commit || Promise.reject(new Error(`Queue history was not initialized for ${requestId}.`));
+  }));
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (failure) throw failure.reason;
+}
+
+async function rollbackBackendPowerPrompterAdmission(requestIds: string[], gate: PowerPrompterAdmissionGate) {
+  gate.settle(false);
+  const ids = new Set(requestIds);
+  for (let index = backendPowerPrompterQueuedWork.length - 1; index >= 0; index -= 1) {
+    const work = backendPowerPrompterQueuedWork[index];
+    if (work.admissionGate === gate && ids.has(work.requestId)) backendPowerPrompterQueuedWork.splice(index, 1);
+  }
+  const histories = requestIds.map((requestId) => {
+    const history = ppBackendHistory.get(requestId);
+    if (history) {
+      history.deleted = true;
+      ppBackendHistory.delete(requestId);
+    }
+    return { requestId, created: history?.createdByAdmission === true, ready: history?.ready };
+  });
+  powerPrompterQueueControllerState.requests = powerPrompterQueueControllerState.requests.filter((request) => !ids.has(request.requestId));
+  broadcastPowerPrompterQueueControllerSnapshot('admission_rolled_back');
+  await Promise.allSettled(histories.map(({ ready }) => ready));
+  for (const { requestId, created } of histories) {
+    if (!created) continue;
+    try {
+      await ppHistoryStore.delete(getPPQueueRequestHistoryId(requestId));
+      sendPrompterEventToTargets({ type: 'queue_history_deleted', id: getPPQueueRequestHistoryId(requestId) });
+    } catch (error) {
+      reportBackendPPHistoryError(requestId, error);
+    }
+  }
+}
+
+function releaseBackendPowerPrompterAdmission(gate: PowerPrompterAdmissionGate) {
+  gate.settle(true);
+  for (const work of backendPowerPrompterQueuedWork) {
+    if (work.admissionGate !== gate) continue;
+    const request = findPowerPrompterQueueControllerRequest(work.requestId);
+    if (request) for (const prompt of request.prompts) void upsertUmbraUiVideoReviewPrompt(request, prompt);
+    const summary = ppBackendHistory.get(work.requestId)?.summary;
+    if (summary) sendPrompterEventToTargets({ type: 'queue_history_updated', item: toPublicPPQueueHistorySummary(summary) });
+    interruptBackendPowerPrompterQueueForPlacement(work);
   }
 }
 
@@ -11248,10 +11386,10 @@ function rememberPowerPrompterBatchOutcome(
 
 function sendPowerPrompterBatchAck(ws: ServerWebSocket<unknown>, payload: {
   requestId: string; success: boolean; canceled?: boolean; [key: string]: unknown;
-}) {
-  if (getRecentPowerPrompterBatchOutcome(ws, payload.requestId) === 'canceled') return;
+}): boolean {
+  if (getRecentPowerPrompterBatchOutcome(ws, payload.requestId) === 'canceled') return false;
   rememberPowerPrompterBatchOutcome(ws, payload.requestId, payload.success ? 'accepted' : 'rejected');
-  sendWs(ws, { type: 'queue_batch_forwarded', ...payload });
+  return sendWs(ws, { type: 'queue_batch_forwarded', ...payload });
 }
 
 function cancelPowerPrompterBatchBeforeAdmission(ws: ServerWebSocket<unknown>, batchRequestId: string): boolean {
@@ -11421,10 +11559,13 @@ async function processPrompterApiWorkflowQueueBatchRequest(
   // the admission boundary; the enqueue loop below must remain synchronous.
   if (admission.canceled) return;
   if (rejectDuplicateRequests()) return;
+  const admissionGate = createPowerPrompterAdmissionGate();
   const acceptedRequestIds: string[] = [];
+  let admissionError: unknown = null;
   for (const { group, loaded } of resolvedGroups) {
-    enqueueBackendPowerPrompterQueueWork({
+    const enqueued = enqueueBackendPowerPrompterQueueWork({
       dispatchDelayRevision: admission.dispatchDelayRevision,
+      admissionGate,
       sourceWs: ws,
       requestId: group.requestId,
       prompts: group.prompts,
@@ -11438,16 +11579,43 @@ async function processPrompterApiWorkflowQueueBatchRequest(
         pipeline: getUmbraUiPipelineRequestFromQueueState(group.state),
       },
     });
+    if (!enqueued) {
+      admissionError = new Error(`Backend queue request ${group.requestId} could not be enqueued.`);
+      break;
+    }
     acceptedRequestIds.push(group.requestId);
   }
 
-  sendPowerPrompterBatchAck(ws, {
+  try {
+    await awaitBackendPowerPrompterInitialHistory(acceptedRequestIds);
+  } catch (error) {
+    admissionError = error;
+  }
+  if (admissionError || admission.canceled || admissionGate.status === 'rejected' || ws.readyState !== 1
+    || getRecentPowerPrompterBatchOutcome(ws, batchRequestId) === 'canceled') {
+    await rollbackBackendPowerPrompterAdmission(acceptedRequestIds, admissionGate);
+    if (!admission.canceled) sendPowerPrompterBatchAck(ws, {
+      requestId: batchRequestId,
+      success: false,
+      error: String((admissionError as any)?.message || admissionError || 'Queue admission was canceled before its history was saved.'),
+      acceptedRequestIds: [],
+    });
+    return;
+  }
+
+  const ackSent = sendPowerPrompterBatchAck(ws, {
     requestId: batchRequestId,
     success: true,
     targetRole: 'backend_pipeline',
     acceptedRequestIds,
     groupCount: acceptedRequestIds.length,
   });
+  if (!ackSent) {
+    clearRecentPowerPrompterBatchOutcome(ws, batchRequestId);
+    await rollbackBackendPowerPrompterAdmission(acceptedRequestIds, admissionGate);
+    return;
+  }
+  releaseBackendPowerPrompterAdmission(admissionGate);
   broadcastPowerPrompterQueueControllerSnapshot('batch_request_enqueued', ws);
 }
 
@@ -11511,14 +11679,11 @@ async function handlePrompterApiWorkflowQueueRequest(
   }
 
   if (admission?.canceled) return;
-  sendWs(ws, {
-    type: 'queue_forwarded',
-    requestId,
-    success: true,
-    targetRole: 'backend_pipeline',
-  });
-  enqueueBackendPowerPrompterQueueWork({
+  const needsHistory = normalizePowerPrompterQueueRequestOrigin(data?.queueOrigin ?? data?.state?.queueOrigin) === 'power_prompter';
+  const admissionGate = needsHistory ? createPowerPrompterAdmissionGate() : null;
+  const enqueued = enqueueBackendPowerPrompterQueueWork({
     dispatchDelayRevision,
+    ...(admissionGate ? { admissionGate } : {}),
     sourceWs: ws,
     requestId,
     prompts,
@@ -11529,6 +11694,37 @@ async function handlePrompterApiWorkflowQueueRequest(
       pipeline: getUmbraUiPipelineRequestFromQueueState(data?.state),
     },
   });
+  if (!enqueued) {
+    sendWs(ws, { type: 'queue_forwarded', requestId, success: false,
+      targetRole: 'backend_pipeline', error: 'Backend queue request could not be enqueued.' });
+    return;
+  }
+  if (admissionGate) {
+    let admissionError: unknown = null;
+    try {
+      await awaitBackendPowerPrompterInitialHistory([requestId]);
+    } catch (error) {
+      admissionError = error;
+    }
+    if (admissionError || admission?.canceled || admissionGate.status === 'rejected' || ws.readyState !== 1) {
+      await rollbackBackendPowerPrompterAdmission([requestId], admissionGate);
+      if (!admission?.canceled) sendWs(ws, {
+        type: 'queue_forwarded', requestId, success: false, targetRole: 'backend_pipeline',
+        error: String((admissionError as any)?.message || admissionError || 'Queue admission was canceled before its history was saved.'),
+      });
+      return;
+    }
+  }
+  const ackSent = sendWs(ws, {
+    type: 'queue_forwarded', requestId, success: true, targetRole: 'backend_pipeline',
+  });
+  if (admissionGate) {
+    if (!ackSent) {
+      await rollbackBackendPowerPrompterAdmission([requestId], admissionGate);
+      return;
+    }
+    releaseBackendPowerPrompterAdmission(admissionGate);
+  }
 }
 
 function cancelPendingPowerPrompterBatchesForControl(
@@ -25801,7 +25997,7 @@ function normalizePPQueueHistoryStatus(rawStatus: unknown): PowerPrompterQueueHi
 }
 
 const PP_QUEUE_HISTORY_STATUS_CODES: Record<PPQueueHistoryPromptStatus, string> = {
-  pending: 'p', submitting: 's', running: 'r', completed: 'd', canceled: 'c', interrupted: 'i', failed: 'f', unstarted: 'u',
+  pending: 'p', submitting: 's', running: 'r', completed: 'd', canceled: 'c', interrupted: 'i', interrupted_confirmed: 'k', failed: 'f', unstarted: 'u',
 };
 const PP_QUEUE_HISTORY_CODE_STATUSES = Object.fromEntries(
   Object.entries(PP_QUEUE_HISTORY_STATUS_CODES).map(([status, code]) => [code, status]),
@@ -25916,8 +26112,8 @@ function toPublicPPQueueHistorySummary(summary: PPQueueHistorySummary): Omit<PPQ
   delete publicSummary.promptStatusCodes;
   const statuses = normalizePPQueueHistoryPromptStatuses(summary.promptStatusCodes, summary.promptCount);
   const resumablePromptCount = statuses?.filter((status) =>
-    status === 'pending' || status === 'interrupted' || status === 'unstarted'
-      || (!summary.backendOwned && (status === 'submitting' || status === 'running'))
+    status === 'pending' || status === 'unstarted' || status === 'interrupted_confirmed'
+      || (!summary.backendOwned && (status === 'submitting' || status === 'running' || status === 'interrupted'))
   ).length;
   return { ...publicSummary, ...(resumablePromptCount === undefined ? {} : { resumablePromptCount }) };
 }
@@ -26017,9 +26213,12 @@ async function updatePPQueueHistory(id: unknown, patch: unknown, backendOwned = 
 async function deletePPQueueHistory(id: unknown): Promise<boolean> {
   const key = normalizePPQueueHistoryId(id);
   if (!key) return false;
+  const hasLiveTask = Array.from(backendPowerPrompterQueueTasks.keys()).some((requestId) =>
+    getPPQueueRequestHistoryId(requestId) === key);
   const activeHistoryEntry = Array.from(ppBackendHistory.entries()).find(([requestId]) => getPPQueueRequestHistoryId(requestId) === key);
   const request = activeHistoryEntry ? findPowerPrompterQueueControllerRequest(activeHistoryEntry[0]) : null;
-  if (hasLivePowerPrompterQueuePrompts(request?.prompts)) {
+  if (hasLivePowerPrompterQueuePrompts(request?.prompts)
+    || hasLiveTask) {
     throw new Error('Finish or remove the live queue group before deleting its history.');
   }
   const history = activeHistoryEntry?.[1];

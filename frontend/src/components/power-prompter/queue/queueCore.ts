@@ -284,7 +284,7 @@ export type SavedPowerPrompterQueueDocument = {
 };
 
 export type PowerPrompterQueueHistoryStatus = 'queued' | 'running' | 'completed' | 'canceled' | 'failed' | 'interrupted';
-export type PowerPrompterQueueHistoryPromptStatus = 'pending' | 'submitting' | 'running' | 'completed' | 'canceled' | 'interrupted' | 'failed' | 'unstarted';
+export type PowerPrompterQueueHistoryPromptStatus = 'pending' | 'submitting' | 'running' | 'completed' | 'canceled' | 'interrupted' | 'interrupted_confirmed' | 'failed' | 'unstarted';
 
 export type PowerPrompterQueueHistoryPreviewImage = {
   id: string;

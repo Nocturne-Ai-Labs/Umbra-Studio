@@ -369,7 +369,7 @@ export function normalizePowerPrompterQueueHistoryStatus(rawValue: unknown): Pow
 
 function normalizePowerPrompterQueueHistoryPromptStatuses(rawValue: unknown, promptCount: number): PowerPrompterQueueHistoryPromptStatus[] | undefined {
   if (!Array.isArray(rawValue) || rawValue.length !== promptCount) return undefined;
-  const valid = new Set(['pending', 'submitting', 'running', 'completed', 'canceled', 'interrupted', 'failed', 'unstarted']);
+  const valid = new Set(['pending', 'submitting', 'running', 'completed', 'canceled', 'interrupted', 'interrupted_confirmed', 'failed', 'unstarted']);
   const statuses = rawValue.map((status) => String(status || '').trim());
   return statuses.every((status) => valid.has(status))
     ? statuses as PowerPrompterQueueHistoryPromptStatus[]
