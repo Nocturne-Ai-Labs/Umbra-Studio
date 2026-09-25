@@ -141,6 +141,7 @@ export async function downloadBooruOriginal(options: {
   const url = normalizeBooruMediaUrl(options.source.url);
   if (!url) throw new Error('The image URL is not from a supported Data Forge source.');
   const destination = join(options.conceptPath, options.filename);
+  const sourceDestination = join(options.conceptPath, booruSourceSidecar(options.filename));
   const lock = process.platform === 'win32' ? resolve(destination).toLowerCase() : resolve(destination);
   if (activeFiles.has(lock)) throw new Error('This image is already being downloaded.');
   activeFiles.add(lock);
@@ -161,6 +162,13 @@ export async function downloadBooruOriginal(options: {
       options.signal?.throwIfAborted();
       await ensureCaption(options.conceptPath, options.filename, options.tags);
       return { filename: options.filename, revision: original.mtimeMs, alreadyExists: true };
+    }
+    const existingSource = await fs.lstat(sourceDestination).catch(error => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    if (existingSource && !existingSource.isFile()) {
+      throw new Error('The saved download source is not a regular file. The existing image was kept.');
     }
     const signal = AbortSignal.any([AbortSignal.timeout(120_000), ...(options.signal ? [options.signal] : [])]);
     const response = await fetchOriginal(url, signal);
@@ -203,10 +211,10 @@ export async function downloadBooruOriginal(options: {
     // Publish source metadata only after the verified image has been installed.
     // A failed image replacement must leave the old image and its source paired.
     try {
-      await fs.rename(sourceTemporary, join(options.conceptPath, booruSourceSidecar(options.filename)));
+      await fs.rename(sourceTemporary, sourceDestination);
     } catch (error) {
       // The old source must not be used later to repair a newly replaced image.
-      await fs.rm(join(options.conceptPath, booruSourceSidecar(options.filename)), { force: true }).catch(() => undefined);
+      await fs.rm(sourceDestination, { force: true }).catch(() => undefined);
       throw error;
     }
     await ensureCaption(options.conceptPath, options.filename, options.tags);
@@ -229,8 +237,14 @@ export async function resolveBooruRepairSource(
   validateFilename(filename);
   let saved: BooruDownloadSource | null = null;
   let sourceContents: string | null = null;
-  try { sourceContents = await fs.readFile(join(conceptPath, booruSourceSidecar(filename)), 'utf8'); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('The saved download source is unreadable.'); }
+  try {
+    const sourcePath = join(conceptPath, booruSourceSidecar(filename));
+    const sourceStat = await fs.lstat(sourcePath);
+    if (!sourceStat.isFile() || sourceStat.size > 64 * 1024) throw new Error('The saved download source is unreadable.');
+    sourceContents = await fs.readFile(sourcePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('The saved download source is unreadable.');
+  }
   if (sourceContents !== null) {
     try { saved = JSON.parse(sourceContents); }
     catch {

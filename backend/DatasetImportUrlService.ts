@@ -182,12 +182,16 @@ async function readLimitedImageResponse(response: Response, signal: AbortSignal,
 
 export async function fetchDatasetImportImage(
   value: string,
-  options: { allowPrivateNetwork: boolean; fetch?: HttpFetch; lookup?: HostLookup; timeoutMs?: number; maxBytes?: number } = { allowPrivateNetwork: false },
+  options: { allowPrivateNetwork: boolean; fetch?: HttpFetch; lookup?: HostLookup; timeoutMs?: number; maxBytes?: number; signal?: AbortSignal } = { allowPrivateNetwork: false },
 ): Promise<{ bytes: Buffer; contentType: string }> {
   const lookup = options.lookup || resolveHostname;
-  const signal = AbortSignal.timeout(options.timeoutMs ?? 120_000);
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, AbortSignal.timeout(options.timeoutMs ?? 120_000)])
+    : AbortSignal.timeout(options.timeoutMs ?? 120_000);
+  signal.throwIfAborted();
   let target = await validateDatasetImportUrl(value, options.allowPrivateNetwork, lookup);
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
+    signal.throwIfAborted();
     const response = await (options.fetch || ((url, init) => fetchPinnedImage(url, target.address, init)))(target.url, {
       signal,
       redirect: 'manual',
