@@ -80,7 +80,7 @@ import {
   applyUmbraUiGenerationControlsToPowerPrompterDocument,
   clearPendingUmbraUiGenerationControlsHandoff,
   normalizeUmbraUiGenerationControlsHandoff,
-  takePendingUmbraUiGenerationControlsHandoff,
+  readPendingUmbraUiGenerationControlsHandoff,
   UMBRA_UI_GENERATION_CONTROLS_HANDOFF_EVENT,
   type UmbraUiGenerationControlsHandoff,
 } from '@/lib/umbraUiGenerationControlsHandoff';
@@ -7972,7 +7972,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     if (!handoff) return false;
     const activeFile = currentFileRef.current;
     if (!activeFile) {
-      showToast('Open a PPCard file before sending Umbra UI generation controls.', 'error');
+      showToast('Open a PPCard file to apply the queued Umbra UI generation controls.', 'error');
       return false;
     }
 
@@ -8018,11 +8018,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     const consumeHandoff = (value: unknown) => {
       const handoff = normalizeUmbraUiGenerationControlsHandoff(value);
       if (!handoff) return;
-      clearPendingUmbraUiGenerationControlsHandoff();
-      applyUmbraUiGenerationControlsHandoff(handoff);
+      if (applyUmbraUiGenerationControlsHandoff(handoff)) {
+        clearPendingUmbraUiGenerationControlsHandoff();
+      }
     };
-    const pendingHandoff = takePendingUmbraUiGenerationControlsHandoff();
-    if (pendingHandoff) applyUmbraUiGenerationControlsHandoff(pendingHandoff);
+    const pendingHandoff = readPendingUmbraUiGenerationControlsHandoff();
+    if (pendingHandoff) consumeHandoff(pendingHandoff);
     const onHandoff = (event: Event) => {
       consumeHandoff((event as CustomEvent<UmbraUiGenerationControlsHandoff>).detail);
     };
@@ -8036,7 +8037,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         onHandoff as EventListener,
       );
     };
-  }, [applyUmbraUiGenerationControlsHandoff]);
+  }, [applyUmbraUiGenerationControlsHandoff, currentFile]);
 
   const handleQueueEditorDocumentChange = (nextDocument: PowerPrompterCardDocument) => {
     const previousDocument = queueEditorDocumentRef.current;

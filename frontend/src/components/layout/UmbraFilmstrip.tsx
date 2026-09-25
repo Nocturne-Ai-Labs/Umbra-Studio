@@ -261,6 +261,18 @@ function buildFilmstripFeedSignature(folderPath: string, items: FilmstripImage[]
   ])]);
 }
 
+export function reconcileVisibleFilmstripSelection(
+  selectedIds: Set<string>,
+  displayedImages: FilmstripImage[],
+  recentGenerationImages: FilmstripImage[],
+  selectableImages: FilmstripImage[],
+): Set<string> {
+  return retainVisibleFilmstripSelection(
+    reconcileFilmstripSelection(selectedIds, displayedImages, recentGenerationImages),
+    selectableImages,
+  );
+}
+
 function shouldTraceFilmstrip(): boolean {
   try {
     window.localStorage.removeItem('umbra.filmstripTrace');
@@ -545,11 +557,13 @@ export function UmbraFilmstrip({
   useEffect(() => {
     if (!feedComplete || pathKey(feedFolder) !== pathKey(currentFolder || rootPath)) return;
     setSelectedIds((current) => {
-      const next = retainVisibleFilmstripSelection(current, selectableImages);
+      const next = reconcileVisibleFilmstripSelection(current, displayedImages, recentGenerationOutputImages, selectableImages);
       return next.size === current.size && Array.from(next).every((id) => current.has(id)) ? current : next;
     });
-    setLastSelectedId((current) => current && retainVisibleFilmstripSelection(new Set([current]), selectableImages).size === 0 ? '' : current);
-  }, [currentFolder, feedComplete, feedFolder, rootPath, selectableImages]);
+    setLastSelectedId((current) => current
+      ? Array.from(reconcileVisibleFilmstripSelection(new Set([current]), displayedImages, recentGenerationOutputImages, selectableImages))[0] || ''
+      : current);
+  }, [currentFolder, displayedImages, feedComplete, feedFolder, recentGenerationOutputImages, rootPath, selectableImages]);
 
   const resolveSelectedImages = useCallback((ids: string[]): FilmstripImage[] => {
     return resolveFilmstripSelectedImages(selectableImages, selectableImages, ids);

@@ -3,6 +3,7 @@
 import React from 'react';
 import { normalizeMiniMaxH3Guides } from '../../../../shared/umbra-ui/minimaxH3Guides';
 import { hasUmbraVideoSourceDimensions, normalizeUmbraVideoQueueSources } from '@/lib/umbraVideoQueueSource';
+import { resolveUmbraVideoQueueNegativePrompt } from '@/lib/umbraVideoQueuePrompt';
 import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
 import { formatMissingUmbraUiNodes } from '../../../../shared/umbra-ui/runtimeNodeMessages';
 import { useToastStore } from '@/store/useToastStore';
@@ -2079,7 +2080,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         ? 'vid2vid'
         : video.mode === 'reference_to_video' ? 'ref2vid'
         : video.mode === 'image_to_video' ? 'img2vid' : 'txt2vid',
-      negativePrompt: String(options.negativePrompt || '').trim(),
+      negativePrompt: resolveUmbraVideoQueueNegativePrompt(video, options.negativePrompt),
       seed: toFiniteInteger(video.seed, 0, 0, Number.MAX_SAFE_INTEGER),
       controlAfterGenerate: video.seedMode,
       seedIncrement: video.seedIncrement,

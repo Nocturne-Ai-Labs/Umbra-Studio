@@ -72,6 +72,7 @@ import { stageUmbraUiMediaHandoff, type UmbraUiMediaHandoff, type UmbraUiMediaHa
 import { UmbraCanvasMediaImportGate } from '@/lib/umbraCanvasMediaImportGate';
 import { getUmbraCanvasPinnedCopyFailure } from '@/lib/umbraUiCanvasPinnedCopy';
 import { selectNextUmbraCanvasPendingGeneration } from './canvasGenerationRecovery';
+import { resolveUmbraCanvasSampleCount, UMBRA_CANVAS_MAX_SAMPLES } from './canvasGenerationSamples';
 import { stageUmbraUiUpscaleHandoff } from '@/lib/umbraUiUpscale';
 import {
   usePublishUmbraQueueActivity,
@@ -559,7 +560,7 @@ export function UmbraCanvasWorkspace({
       : null;
     if (!settings) return;
     setDenoise(Math.max(0, Math.min(1, Number(settings.denoise) || 0)));
-    setSamples(Math.max(1, Math.min(16, Math.round(Number(settings.samples) || 1))));
+    setSamples(resolveUmbraCanvasSampleCount(settings.samples));
     setMaskGrow(Math.max(0, Math.min(2048, Math.round(Number(settings.maskGrow) || 0))));
     setMaskFeather(Math.max(0, Math.min(2048, Math.round(Number(settings.maskFeather) || 0))));
     setContextPadding(Math.max(0, Math.min(2048, Math.round(Number(settings.contextPadding) || 0))));
@@ -1024,7 +1025,7 @@ export function UmbraCanvasWorkspace({
       if (loaded.generation.settings) {
         onRestoreGenerationSettings(loaded.generation.settings);
         setDenoise(loaded.generation.settings.denoise);
-        setSamples(loaded.generation.settings.samples);
+        setSamples(resolveUmbraCanvasSampleCount(loaded.generation.settings.samples));
       }
       const pending = loaded.generation.pending.at(-1);
       if (pending) {
@@ -1161,11 +1162,11 @@ export function UmbraCanvasWorkspace({
         setGenerationSettings(restoredSettings);
         onRestoreGenerationSettings(restoredSettings);
         setDenoise(restoredSettings.denoise);
-        setSamples(restoredSettings.samples);
+        setSamples(resolveUmbraCanvasSampleCount(restoredSettings.samples));
       } else if (destinationSettings) {
         onRestoreGenerationSettings(destinationSettings);
         setDenoise(destinationSettings.denoise);
-        setSamples(destinationSettings.samples);
+        setSamples(resolveUmbraCanvasSampleCount(destinationSettings.samples));
       }
 
       if (!gate.dismiss(handoff)) return;
@@ -1333,7 +1334,7 @@ export function UmbraCanvasWorkspace({
       if (restored.generation.settings) {
         onRestoreGenerationSettings(restored.generation.settings);
         setDenoise(restored.generation.settings.denoise);
-        setSamples(restored.generation.settings.samples);
+        setSamples(resolveUmbraCanvasSampleCount(restored.generation.settings.samples));
       }
       await Promise.all([refreshProjects(), refreshRestorePoints(restored.id)]);
       requestAnimationFrame(() => managerRef.current?.fitToContent());
@@ -1599,6 +1600,7 @@ export function UmbraCanvasWorkspace({
     try {
       const numericCfg = cfg.trim() ? Number(cfg) : NaN;
       const normalizedCfg = Number.isFinite(numericCfg) ? numericCfg : 1;
+      const queuedSamples = resolveUmbraCanvasSampleCount(samples);
       const settingsSnapshot: UmbraCanvasGenerationSettingsSnapshot = {
         modelFamily,
         modelSource,
@@ -1616,7 +1618,7 @@ export function UmbraCanvasWorkspace({
         samplerName: samplerName || 'euler',
         scheduler: scheduler || 'normal',
         denoise,
-        samples,
+        samples: queuedSamples,
         tiledVae: { ...tiledVae } as unknown as Record<string, unknown>,
         hiresFix: { ...hiresFix } as unknown as Record<string, unknown>,
         detailerPipeline: detailerPipeline.map((stage) => ({ ...stage })) as unknown as Array<Record<string, unknown>>,
@@ -1743,7 +1745,7 @@ export function UmbraCanvasWorkspace({
         samplerName: samplerName || 'euler',
         scheduler: scheduler || 'normal',
         denoise,
-        samples,
+        samples: queuedSamples,
         width: preparedRegion.width,
         height: preparedRegion.height,
         maskGrow,
@@ -1815,7 +1817,7 @@ export function UmbraCanvasWorkspace({
       if (!savedPending || savedPending.id !== pendingProject.id || savedPending.revision < pendingProject.revision) {
         showToast('Canvas job queued, but its project recovery pointer was not saved. Retry Save before leaving Canvas.', 'error');
       }
-      if (isSubmissionProjectOpen()) onSeedChange(String(advanceUmbraUiSeed(queuedSeed, seedMode, seedIncrement, samples)));
+      if (isSubmissionProjectOpen()) onSeedChange(String(advanceUmbraUiSeed(queuedSeed, seedMode, seedIncrement, queuedSamples)));
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Canvas generation could not be queued.', 'error');
     } finally {
@@ -2443,7 +2445,7 @@ export function UmbraCanvasWorkspace({
             <label className="space-y-1"><span className="text-[8px] font-black uppercase text-zinc-500">{capabilities.guidance.label || 'Guidance'}</span><input value={cfg} onChange={(event) => onCfgChange(event.target.value)} inputMode="decimal" className="h-8 w-full rounded-md border border-white/10 bg-black/35 px-2 text-xs text-zinc-100 outline-none focus:border-rose-300/40" /></label>
             <label className="space-y-1"><span className="text-[8px] font-black uppercase text-zinc-500">Sampler</span><UmbraSelect value={samplerName} onValueChange={onSamplerNameChange} ariaLabel="Sampler" menuTitle="Sampler" options={samplerOptions.map((option) => ({ value: option, label: option }))} size="sm" /></label>
             <label className="space-y-1"><span className="text-[8px] font-black uppercase text-zinc-500">Scheduler</span><UmbraSelect value={scheduler} onValueChange={onSchedulerChange} ariaLabel="Scheduler" menuTitle="Scheduler" options={schedulerOptions.map((option) => ({ value: option, label: option }))} size="sm" /></label>
-            <label className="space-y-1"><span className="text-[8px] font-black uppercase text-zinc-500">Samples</span><input type="number" min="1" max="16" step="1" value={samples} onChange={(event) => setSamples(Math.max(1, Math.min(16, Math.round(Number(event.target.value) || 1))))} className="h-8 w-full rounded-md border border-white/10 bg-black/35 px-2 text-xs text-zinc-100 outline-none focus:border-rose-300/40" /></label>
+            <label className="space-y-1"><span className="text-[8px] font-black uppercase text-zinc-500">Samples</span><input type="number" min="1" max={UMBRA_CANVAS_MAX_SAMPLES} step="1" value={resolveUmbraCanvasSampleCount(samples)} onChange={(event) => setSamples(resolveUmbraCanvasSampleCount(event.target.value))} className="h-8 w-full rounded-md border border-white/10 bg-black/35 px-2 text-xs text-zinc-100 outline-none focus:border-rose-300/40" /></label>
           </div>
           {capabilities.hiresFix.support === 'adjustable' ? (
             <UmbraHiresFixControls

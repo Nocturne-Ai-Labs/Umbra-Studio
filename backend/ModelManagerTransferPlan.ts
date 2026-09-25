@@ -1,10 +1,20 @@
-import { existsSync } from 'node:fs';
+import { lstatSync } from 'node:fs';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { resolveAllowedExistingGalleryPath } from './GalleryPathAccess';
 
 function pathKey(path: string): string {
   const normalized = resolve(path).replace(/\\/g, '/').replace(/\/+$/, '');
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+function pathEntryExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
 }
 
 export function isProtectedModelManagerRoot(path: string, roots: string[]): boolean {
@@ -45,7 +55,7 @@ export function planModelManagerTransferTarget(
       return join(targetParent, renamed);
     });
     const targets = [targetFullPath, ...artifactTargets];
-    if (targets.some(target => existsSync(target) || reservedTargets.has(pathKey(target)))) continue;
+    if (targets.some(target => pathEntryExists(target) || reservedTargets.has(pathKey(target)))) continue;
     for (const target of targets) reservedTargets.add(pathKey(target));
     return { targetFullPath, artifactTargets };
   }

@@ -96,12 +96,11 @@ export function stageUmbraUiGenerationControlsHandoff(
   return payload;
 }
 
-export function takePendingUmbraUiGenerationControlsHandoff(): UmbraUiGenerationControlsHandoff | null {
+export function readPendingUmbraUiGenerationControlsHandoff(): UmbraUiGenerationControlsHandoff | null {
   if (typeof window === 'undefined') return null;
   let stored = '';
   try {
     stored = window.sessionStorage.getItem(UMBRA_UI_GENERATION_CONTROLS_HANDOFF_KEY) || '';
-    window.sessionStorage.removeItem(UMBRA_UI_GENERATION_CONTROLS_HANDOFF_KEY);
   } catch {
     return null;
   }
