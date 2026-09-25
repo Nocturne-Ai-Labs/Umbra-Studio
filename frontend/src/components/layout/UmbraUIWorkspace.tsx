@@ -2294,6 +2294,10 @@ export function UmbraUIWorkspace() {
   const activeImageOutputFolder = activeImageFeature === 'txt2img' ? activeTxt2imgOutputFolder : img2imgOutputFolder;
   const imageOutputFolderUnavailable = !!activeImageOutputFolder
     && !pinnedOutputFolders.some((folder) => folder.toLowerCase() === activeImageOutputFolder.toLowerCase());
+  const imageWidthMin = Math.max(64, imageCapabilities.resolution.minimumWidth ?? 64);
+  const imageWidthMax = Math.min(8192, imageCapabilities.resolution.maximumWidth ?? 8192);
+  const imageHeightMin = Math.max(64, imageCapabilities.resolution.minimumHeight ?? 64);
+  const imageHeightMax = Math.min(8192, imageCapabilities.resolution.maximumHeight ?? 8192);
   const imageQueueBlockReason = !imageControlsHydrated
     ? 'Loading saved image controls'
     : !queueConnected
@@ -2314,7 +2318,16 @@ export function UmbraUIWorkspace() {
                   ? 'Choose a source image for IMG2IMG'
                   : !workflowImagePrompt.trim()
                     ? imageAgentModeEnabled ? 'Compose or enter an agent prompt first' : 'Enter a positive prompt first'
-                    : '';
+                    : imageCapabilities.resolution.support === 'adjustable'
+                      && (!Number.isInteger(Number(width)) || Number(width) < imageWidthMin || Number(width) > imageWidthMax)
+                      ? `Enter a whole-number width from ${imageWidthMin} to ${imageWidthMax} pixels.`
+                      : imageCapabilities.resolution.support === 'adjustable'
+                        && (!Number.isInteger(Number(height)) || Number(height) < imageHeightMin || Number(height) > imageHeightMax)
+                        ? `Enter a whole-number height from ${imageHeightMin} to ${imageHeightMax} pixels.`
+                        : imageCapabilities.steps.support === 'adjustable'
+                          && (!Number.isInteger(Number(steps)) || Number(steps) < 1 || Number(steps) > 10000)
+                          ? 'Enter whole-number Steps from 1 to 10000.'
+                          : '';
   const handleQueueImage = React.useCallback(async (placement: UmbraQueuePlacement = 'end') => {
     if (imageQueueInFlightRef.current || isQueueing) return;
     if (imageQueueBlockReason) {

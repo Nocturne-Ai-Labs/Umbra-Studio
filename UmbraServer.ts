@@ -1668,7 +1668,6 @@ function collectModelMetadataHashes(metadataRaw: unknown): string[] {
     metadata['easyuse.sha256'],
     metadata.sha256,
     metadata['sshs_model_hash'],
-    metadata['ss_sd_model_hash'],
     metadata['modelspec.hash_sha256'],
     metadata['model_hash'],
   ];
@@ -2420,14 +2419,16 @@ async function reconcileModelManagerFolder(fullPath: string, options: { recoverF
   const changedPaths = new Set<string>([folderFullPath, join(folderFullPath, MODEL_ARTIFACT_DIR)]);
   for (const modelFullPath of modelFiles) {
     const localMetadata = await readSafetensorsMetadata(modelFullPath).catch(() => null);
-    const candidateHashSeed = [
-      ...collectModelMetadataHashes(localMetadata),
-    ];
+    let fileSha256 = '';
     if (options.recoverFromCivitai) {
-      const sha256 = await hashFileSha256(modelFullPath).catch(() => '');
-      if (sha256) candidateHashSeed.push(sha256);
+      fileSha256 = await hashFileSha256(modelFullPath).catch(() => '');
     }
-    const candidateHashes = Array.from(new Set(candidateHashSeed));
+    // Prefer the hash of the file on disk. Embedded ss_sd_model_hash describes
+    // its training base model and is excluded by collectModelMetadataHashes.
+    const candidateHashes = Array.from(new Set([
+      ...(fileSha256 ? [fileSha256] : []),
+      ...collectModelMetadataHashes(localMetadata),
+    ]));
 
     const preferredSnapshotPath = getPreferredModelSnapshotFullPath(modelFullPath);
     const legacySnapshotPath = getLegacyModelSnapshotFullPath(modelFullPath);
@@ -13908,7 +13909,41 @@ async function getTailscaleUrls(port: number): Promise<string[]> {
   return info.httpUrls;
 }
 
-async function getTailscaleAccessInfo(port: number, bindHost = HOST): Promise<{
+const TAILSCALE_ACCESS_INFO_CACHE_MS = 3_000;
+type TailscaleAccessInfo = Awaited<ReturnType<typeof readTailscaleAccessInfo>>;
+const tailscaleAccessInfoCache = new Map<string, { value: TailscaleAccessInfo; expiresAt: number }>();
+const tailscaleAccessInfoInFlight = new Map<string, Promise<TailscaleAccessInfo>>();
+let tailscaleAccessInfoGeneration = 0;
+
+function invalidateTailscaleAccessInfoCache(): void {
+  tailscaleAccessInfoGeneration++;
+  tailscaleAccessInfoCache.clear();
+  tailscaleAccessInfoInFlight.clear();
+}
+
+async function getTailscaleAccessInfo(port: number, bindHost = HOST): Promise<TailscaleAccessInfo> {
+  const key = `${bindHost}:${port}`;
+  const cached = tailscaleAccessInfoCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const inFlight = tailscaleAccessInfoInFlight.get(key);
+  if (inFlight) return inFlight;
+
+  const generation = tailscaleAccessInfoGeneration;
+  const request = readTailscaleAccessInfo(port, bindHost).then((value) => {
+    if (generation === tailscaleAccessInfoGeneration) {
+      tailscaleAccessInfoCache.set(key, { value, expiresAt: Date.now() + TAILSCALE_ACCESS_INFO_CACHE_MS });
+    }
+    return value;
+  });
+  tailscaleAccessInfoInFlight.set(key, request);
+  void request.then(
+    () => { if (tailscaleAccessInfoInFlight.get(key) === request) tailscaleAccessInfoInFlight.delete(key); },
+    () => { if (tailscaleAccessInfoInFlight.get(key) === request) tailscaleAccessInfoInFlight.delete(key); },
+  );
+  return request;
+}
+
+async function readTailscaleAccessInfo(port: number, bindHost = HOST): Promise<{
   installed: boolean;
   connected: boolean;
   online: boolean;
@@ -33946,6 +33981,7 @@ const server = Bun.serve<UmbraSocketData>({
           }
           try {
             const { stdout, stderr } = await execAsync(command, { timeout: 15000, windowsHide: true });
+            invalidateTailscaleAccessInfoCache();
             console.log(`[UmbraRemote] Tailscale Serve configured for port ${PORT}`);
             return json({ ok: true, command, stdout: stdout.trim(), stderr: stderr.trim() });
           } catch (error: any) {
