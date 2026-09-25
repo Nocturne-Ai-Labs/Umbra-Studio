@@ -244,6 +244,7 @@ import {
 import {
   buildDefaultPendingPromptOrderForGroup,
   buildQueuePromptBlocksForItem,
+  buildQueuePromptProgressBlocksFromPreviewEntry,
   buildSequencedPendingPromptOrderForGroup,
   captureDefaultPromptItemOrder,
   mergePendingPromptOrderIntoGroupOrder,
@@ -2484,6 +2485,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     const cards = meta?.editorSnapshot?.document?.cards || cardDocumentRef.current.cards;
     return buildQueuePromptBlocksForItem(item, cards, meta, setIdInput);
   }, []);
+  const getQueuePromptProgressBlocksForItem = useCallback((item: QueueStackItem, setIdInput?: number): QueuePromptBlock[] => {
+    const requestId = String(item.requestId || '').trim();
+    const meta = requestId ? queueRequestMetaRef.current.get(requestId) : null;
+    const promptIndex = Math.max(0, Math.floor(Number(item.promptIndex) || 0));
+    return buildQueuePromptProgressBlocksFromPreviewEntry(meta?.promptEntries?.[promptIndex])
+      ?? getQueuePromptBlocksForItem(item, setIdInput);
+  }, [getQueuePromptBlocksForItem]);
 
   const handleQueueManagerSequenceModeChange = useCallback((mode: QueueManagerSequenceMode) => {
     if (mode === queueManagerSequenceMode) return;
@@ -2812,6 +2820,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       lockedQueuePromptIndex={lockedQueuePromptIndex}
       getQueuePromptSelectionKey={getQueuePromptSelectionKey}
       getQueuePromptBlocksForItem={getQueuePromptBlocksForItem}
+      getQueuePromptProgressBlocksForItem={getQueuePromptProgressBlocksForItem}
       handleQueuePromptSelectionClick={handleQueuePromptSelectionClick}
       expandedQueuePromptRows={expandedQueuePromptRows}
       setExpandedQueuePromptRows={setExpandedQueuePromptRows}
@@ -10326,6 +10335,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
               promptOutputSubfolders,
               promptStyleNames,
               promptSeedGroupIds,
+              promptEntries: built.promptEntries,
+              editorSnapshot,
               sourceFile: normalizePrompterSourceFilePath(queueEditorDraft.sourceFile || currentFileRef.current || ''),
               pipeline: normalizeUmbraUiPipelineSelection(editorSnapshot.document.pipeline, {
                 feature: 'txt2img',
