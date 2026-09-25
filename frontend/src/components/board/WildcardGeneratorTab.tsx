@@ -266,7 +266,7 @@ function normalizeStoredWildcardDefinition(rawDefinition: unknown): {
   }).filter((group) => group.options.length > 0);
   if (groups.length === 0) return null;
   return {
-    count: Math.max(1, Math.floor(Number(record.count) || 50)),
+    count: Math.max(1, Math.min(10_000, Math.floor(Number(record.count) || 50))),
     seed: Math.max(0, Math.min(0xffffffff, Math.floor(Number(record.seed) || 0))),
     maxTagsPerLine: Math.max(2, Math.min(40, Math.floor(Number(record.maxTagsPerLine) || 12))),
     prioritizePostCounts: record.prioritizePostCounts !== false,
@@ -1556,7 +1556,7 @@ export function WildcardGeneratorTab({ onOpenCorpus }: { onOpenCorpus?: () => vo
           <div className="grid grid-cols-3 gap-2">
             <label>
               <span className="mb-1 block text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500">Output Lines</span>
-              <input type="number" min={1} value={count} onChange={(event) => setCount(Math.max(1, Math.floor(Number(event.target.value) || 1)))} className="settings-input h-9 !py-1.5 text-xs" />
+              <input type="number" min={1} max={10_000} value={count} onChange={(event) => setCount(Math.max(1, Math.min(10_000, Math.floor(Number(event.target.value) || 1))))} className="settings-input h-9 !py-1.5 text-xs" />
             </label>
             <label>
               <span className="mb-1 block text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500">Tags Per Line</span>

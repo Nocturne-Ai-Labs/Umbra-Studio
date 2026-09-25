@@ -98,6 +98,9 @@ interface CatalogCacheEntry {
 
 const catalogCache = new Map<string, CatalogCacheEntry>();
 const suggestionCache = new Map<string, { expiresAt: number; values: DataForgeWildcardTag[] }>();
+export const DATA_FORGE_WILDCARD_MAX_COUNT = 10_000;
+const MAX_GENERATED_LINE_JSON_BYTES = 4 * 1024;
+const MAX_GENERATED_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 function parseCsvRow(line: string): string[] {
   const cells: string[] = [];
@@ -479,8 +482,15 @@ function buildRow(
     .filter((tag) => tag.postCount !== null && tag.postCount !== undefined)
     .map((tag) => Number(tag.postCount))
     .filter((count) => Number.isFinite(count) && count >= 0);
+  const value = tags.map((tag) => tag.tag).join(', ');
+  // A JSON string needs at most six bytes per UTF-16 code unit. Skip the
+  // expensive encoded-size check for ordinary short lines.
+  if (value.length > Math.floor((MAX_GENERATED_LINE_JSON_BYTES - 2) / 6)
+    && Buffer.byteLength(JSON.stringify(value), 'utf8') > MAX_GENERATED_LINE_JSON_BYTES) {
+    throw new Error('A generated wildcard line exceeds 4 KiB. Shorten its content or reduce tags per line.');
+  }
   return {
-    value: tags.map((tag) => tag.tag).join(', '),
+    value,
     score: Math.round(combinationScore(options) * 100) / 100,
     chanceWeight: combinationChanceWeight(options),
     minimumPostCount: knownCounts.length > 0 ? Math.min(...knownCounts) : null,
@@ -489,24 +499,81 @@ function buildRow(
   };
 }
 
-function enumerateCombinations<T>(groups: T[][], limit: number): T[][] {
-  const output: T[][] = [];
+function visitCombinations<T>(groups: T[][], limit: number, visitCombination: (combination: T[], index: number) => void): void {
   const current: T[] = [];
+  let visited = 0;
   const visit = (index: number) => {
-    if (output.length >= limit) return;
+    if (visited >= limit) return;
     if (index >= groups.length) {
-      output.push([...current]);
+      visitCombination(current, visited++);
       return;
     }
     for (const option of groups[index]) {
       current.push(option);
       visit(index + 1);
       current.pop();
-      if (output.length >= limit) break;
+      if (visited >= limit) break;
     }
   };
   visit(0);
-  return output;
+}
+
+type RankedWildcardRow = { row: InternalGeneratedRow; rank: number; tie: number; index: number };
+
+function compareRankedRows(left: RankedWildcardRow, right: RankedWildcardRow): number {
+  return left.rank - right.rank || left.tie - right.tie || left.index - right.index;
+}
+
+function keepBestRankedRows(limit: number) {
+  // A max heap retains the worst selected row at index 0. Its index map lets a
+  // better combination replace an earlier one with the same rendered value.
+  const heap: RankedWildcardRow[] = [];
+  const indices = new Map<string, number>();
+  const swap = (left: number, right: number) => {
+    [heap[left], heap[right]] = [heap[right], heap[left]];
+    indices.set(heap[left].row.value, left);
+    indices.set(heap[right].row.value, right);
+  };
+  const siftUp = (start: number) => {
+    let index = start;
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      if (compareRankedRows(heap[parent], heap[index]) >= 0) break;
+      swap(parent, index);
+      index = parent;
+    }
+  };
+  const siftDown = (start: number) => {
+    let index = start;
+    while (index * 2 + 1 < heap.length) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      const worse = right < heap.length && compareRankedRows(heap[right], heap[left]) > 0 ? right : left;
+      if (compareRankedRows(heap[index], heap[worse]) >= 0) break;
+      swap(index, worse);
+      index = worse;
+    }
+  };
+  return {
+    add(entry: RankedWildcardRow) {
+      const existing = indices.get(entry.row.value);
+      if (existing !== undefined) {
+        if (compareRankedRows(entry, heap[existing]) >= 0) return;
+        heap[existing] = entry;
+        siftDown(existing);
+      } else if (heap.length < limit) {
+        indices.set(entry.row.value, heap.length);
+        heap.push(entry);
+        siftUp(heap.length - 1);
+      } else if (compareRankedRows(entry, heap[0]) < 0) {
+        indices.delete(heap[0].row.value);
+        heap[0] = entry;
+        indices.set(entry.row.value, 0);
+        siftDown(0);
+      }
+    },
+    sorted: () => heap.sort(compareRankedRows),
+  };
 }
 
 function weightedPick<T extends { tags: DataForgeWildcardTagRef[]; chance: number }>(
@@ -537,10 +604,13 @@ export async function generateDataForgeWildcard(options: {
   csvPath: string;
   request: DataForgeWildcardGenerateRequest;
 }): Promise<DataForgeWildcardGenerateResult> {
-  const catalog = await loadCatalog(options.csvPath);
   const request = options.request || {};
   const requestedCount = Number(request.count);
   const count = Math.max(1, Number.isFinite(requestedCount) ? Math.floor(requestedCount) : 50);
+  if (count > DATA_FORGE_WILDCARD_MAX_COUNT) {
+    throw new Error(`Output Lines cannot exceed ${DATA_FORGE_WILDCARD_MAX_COUNT.toLocaleString()}.`);
+  }
+  const catalog = await loadCatalog(options.csvPath);
   const seed = Math.max(0, Math.min(0xffffffff, Math.floor(Number(request.seed) || 1)));
   const maxTagsPerLine = Math.max(2, Math.min(40, Math.floor(Number(request.maxTagsPerLine) || 12)));
   const prioritizePostCounts = request.prioritizePostCounts !== false;
@@ -578,31 +648,31 @@ export async function generateDataForgeWildcard(options: {
   const hasProgressiveGroup = normalizedGroups.some((group) => group.progressive);
 
   if (possibleCombinations <= enumerationLimit && !hasProgressiveGroup) {
-    const combinations = enumerateCombinations(normalizedGroups.map((group) => group.options), enumerationLimit);
-    const ranked = combinations
-      .map((combination) => {
-        const row = buildRow(baseTags, combination, forbidden, maxTagsPerLine);
-        const popularity = combinationScore(combination);
-        const chanceWeight = combinationChanceWeight(combination);
-        const randomKey = Math.max(Number.EPSILON, random());
-        const selectionWeight = chanceWeight * (prioritizePostCounts ? Math.max(1, popularity) : 1);
-        const rank = selectionWeight > 0 ? -Math.log(randomKey) / selectionWeight : Number.POSITIVE_INFINITY;
-        return { row, rank, tie: stableHash(combination.flatMap((option) => option.tags.map((tag) => tag.tag)).join('|')) };
-      })
-      .filter((entry): entry is { row: InternalGeneratedRow; rank: number; tie: number } => entry.row !== null && Number.isFinite(entry.rank))
-      .sort((left, right) => left.rank - right.rank || left.tie - right.tie);
-    for (const entry of ranked) {
-      if (!rowsByValue.has(entry.row.value)) rowsByValue.set(entry.row.value, entry.row);
-      if (rowsByValue.size >= count) break;
-    }
+    const ranked = keepBestRankedRows(count);
+    visitCombinations(normalizedGroups.map((group) => group.options), enumerationLimit, (combination, index) => {
+      const row = buildRow(baseTags, combination, forbidden, maxTagsPerLine);
+      const popularity = combinationScore(combination);
+      const chanceWeight = combinationChanceWeight(combination);
+      const randomKey = Math.max(Number.EPSILON, random());
+      const selectionWeight = chanceWeight * (prioritizePostCounts ? Math.max(1, popularity) : 1);
+      const rank = selectionWeight > 0 ? -Math.log(randomKey) / selectionWeight : Number.POSITIVE_INFINITY;
+      if (row && Number.isFinite(rank)) {
+        ranked.add({
+          row, rank, index,
+          tie: stableHash(combination.flatMap((option) => option.tags.map((tag) => tag.tag)).join('|')),
+        });
+      }
+    });
+    for (const entry of ranked.sorted()) rowsByValue.set(entry.row.value, entry.row);
   } else {
-    const maximumAttempts = Math.min(500_000, Math.max(count * 200, 20_000));
+    const maximumAttempts = Math.min(100_000, Math.max(count * 200, 20_000));
     const progressiveGroups = normalizedGroups.filter((group) => group.progressive);
     const progressiveStages = Math.min(count, 1 + progressiveGroups.reduce((sum, group) => sum + group.options.length - 1, 0));
     const progressiveStallLimit = Math.min(1_000, Math.floor(maximumAttempts / progressiveStages));
     let progressiveFloor = 0;
     let stalledAttempts = 0;
     for (let attempt = 0; attempt < maximumAttempts && rowsByValue.size < count; attempt += 1) {
+      if (rowsByValue.size >= possibleCombinations) break;
       const lineIndex = Math.max(rowsByValue.size, progressiveFloor);
       const combination = normalizedGroups.map((group) => group.progressive
         ? progressivePick(group.options, lineIndex, count)
@@ -642,7 +712,7 @@ export async function generateDataForgeWildcard(options: {
   if (rows.length < count) warnings.push(`Generated ${rows.length} unique valid combinations from the requested ${count}.`);
   if (unknownPostCountTags.length > 0) warnings.push(`${unknownPostCountTags.length} tag${unknownPostCountTags.length === 1 ? '' : 's'} do not have stored or live post-count data.`);
 
-  return {
+  const result: DataForgeWildcardGenerateResult = {
     rows,
     values: rows.map((row) => row.value),
     requestedCount: count,
@@ -657,6 +727,10 @@ export async function generateDataForgeWildcard(options: {
       groupsUsed: groups.length,
     },
   };
+  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > MAX_GENERATED_RESPONSE_BYTES) {
+    throw new Error('Generated wildcard output exceeds 8 MiB. Reduce Output Lines or content length.');
+  }
+  return result;
 }
 
 export async function inspectDataForgeWildcardTags(options: {
