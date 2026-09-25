@@ -32500,6 +32500,14 @@ function normalizeFsTransferResultPath(value: unknown): string {
   }
 }
 
+function galleryTransferClientResults<T extends { path: string; newPath?: string }>(results: T[]): T[] {
+  return results.map((result) => ({
+    ...result,
+    path: isAbsolute(result.path) ? normalizeFsTransferResultPath(result.path) : result.path,
+    ...(result.newPath ? { newPath: normalizeFsTransferResultPath(result.newPath) } : {}),
+  }));
+}
+
 async function syncGalleryDbAfterTransfer(results: Array<Record<string, unknown>>, mode: 'move' | 'copy') {
   const pairs = (results || [])
     .filter((entry) => entry?.success === true)
@@ -32948,7 +32956,7 @@ async function handleFsMoveStatus(url: URL): Promise<Response> {
       fileTotalBytes: job.fileTotalBytes,
       lastProgressAt: job.lastProgressAt,
       transferMode: job.transferMode,
-      destination: job.destination,
+      destination: normalizeFsTransferResultPath(job.destination),
       totalPaths: job.paths.length,
       totalUnits: job.totalUnits,
       completedUnits: job.completedUnits,
@@ -32956,7 +32964,7 @@ async function handleFsMoveStatus(url: URL): Promise<Response> {
       currentPath: job.currentPath,
       error: job.error,
       moved,
-      results: job.results,
+      results: galleryTransferClientResults(job.results),
       startedAt: job.startedAt,
       finishedAt: job.finishedAt,
     },
@@ -32985,7 +32993,7 @@ async function handleFsCopyStatus(url: URL): Promise<Response> {
       fileBytes: job.fileBytes,
       fileTotalBytes: job.fileTotalBytes,
       lastProgressAt: job.lastProgressAt,
-      destination: job.destination,
+      destination: normalizeFsTransferResultPath(job.destination),
       totalPaths: job.paths.length,
       totalUnits: job.totalUnits,
       completedUnits: job.completedUnits,
@@ -32993,7 +33001,7 @@ async function handleFsCopyStatus(url: URL): Promise<Response> {
       currentPath: job.currentPath,
       error: job.error,
       copied,
-      results: job.results,
+      results: galleryTransferClientResults(job.results),
       startedAt: job.startedAt,
       finishedAt: job.finishedAt,
     },
