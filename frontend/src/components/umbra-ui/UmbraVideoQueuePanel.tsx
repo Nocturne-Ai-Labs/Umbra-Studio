@@ -425,6 +425,7 @@ function NumberEditor({ label, value, onChange, min = 0, step = 1 }: {
 export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadIntoEditor, onRefresh, onClear }: UmbraVideoQueuePanelProps) {
   const showToast = useStore((state) => state.showToast);
   const [selected, setSelected] = React.useState<UmbraVideoReviewJob | null>(null);
+  const liveSelectedJob = selected ? jobs.find((job) => job.id === selected.id) || selected : null;
   const [drawerVisible, setDrawerVisible] = React.useState(false);
   const [draftPrompt, setDraftPrompt] = React.useState('');
   const [draftNegative, setDraftNegative] = React.useState('');
@@ -663,7 +664,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
         </div>
       </div>
 
-      {selected && draftVideo ? (
+      {selected && liveSelectedJob && draftVideo ? (
         <div className={cn('fixed inset-0 z-[160] transition-colors duration-200', drawerVisible ? 'bg-black/70' : 'bg-black/0')} onPointerDown={closeDrawer}>
           <section
             className={cn(
@@ -676,10 +677,10 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
               <Clapperboard size={14} className="text-fuchsia-300" />
               <div className="min-w-0 flex-1">
                 <div className="text-[11px] font-black uppercase tracking-[0.13em] text-zinc-200">Video Quality Review</div>
-                <div className="truncate font-mono text-[9px] text-zinc-600">{selected.apiWorkflowName || selected.requestId}</div>
+                <div className="truncate font-mono text-[9px] text-zinc-600">{liveSelectedJob.apiWorkflowName || liveSelectedJob.requestId}</div>
               </div>
-              <span className={cn('inline-flex h-7 items-center gap-1 rounded-sm border px-2 text-[9px] font-black uppercase tracking-[0.08em]', statusTone(selected.status))}>
-                <StatusIcon status={selected.status} /> {selected.status}
+              <span className={cn('inline-flex h-7 items-center gap-1 rounded-sm border px-2 text-[9px] font-black uppercase tracking-[0.08em]', statusTone(liveSelectedJob.status))}>
+                <StatusIcon status={liveSelectedJob.status} /> {liveSelectedJob.status}
               </span>
               <button type="button" onClick={closeDrawer} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-zinc-100" title="Close review">
                 <X size={14} />
@@ -689,9 +690,9 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
             <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
               <ReferenceStrip video={draftVideo} large />
               <div className="grid gap-3 border-b border-white/10 bg-black/25 p-3">
-                {selected.outputs.length > 0 ? selected.outputs.map((output) => (
+                {liveSelectedJob.outputs.length > 0 ? liveSelectedJob.outputs.map((output) => (
                   <div key={output.id} className="overflow-hidden rounded-md border border-white/10 bg-black/45">
-                    <ReviewOutputPreview output={output} protectedMedia={classifyUmbraPrompt(selected.prompt) === 'nsfw'} />
+                    <ReviewOutputPreview output={output} protectedMedia={classifyUmbraPrompt(liveSelectedJob.prompt) === 'nsfw'} />
                     <div className="truncate border-t border-white/10 px-2 py-1.5 font-mono text-[9px] text-zinc-500">{output.name}</div>
                   </div>
                 )) : (
@@ -702,7 +703,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
               </div>
 
               <div className="space-y-4 p-4">
-                {selected.error ? <div className="border border-red-300/20 bg-red-500/[0.04] p-3 text-[11px] text-red-200/80">{selected.error}</div> : null}
+                {liveSelectedJob.error ? <div className="border border-red-300/20 bg-red-500/[0.04] p-3 text-[11px] text-red-200/80">{liveSelectedJob.error}</div> : null}
                 {selected.sequence && draftVideo.ltx.extended.enabled ? (
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">

@@ -1299,7 +1299,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         if (wsRef.current === ws) setConnected(false);
       };
       ws.onclose = () => {
-        if (wsRef.current === ws) wsRef.current = null;
+        if (wsRef.current === ws) {
+          wsRef.current = null;
+          rejectPendingAcks('Umbra UI queue connection closed before acknowledgement. The request may have been accepted; check the shared queue before retrying.');
+        }
         setConnected(false);
         rejectPendingCatalogRequests('The ComfyUI catalog bridge disconnected.');
         if (disposed) return;
@@ -1457,7 +1460,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     }
     const promptId = type === 'queue_interrupt_active'
       ? queueSnapshot?.requests.find((request) => request.requestId === activeRequestId)
-        ?.prompts.find((prompt) => prompt.status === 'running' || prompt.status === 'submitting')?.promptId
+        ?.prompts.find((prompt) => (prompt.status === 'running' || prompt.status === 'submitting') && !!prompt.promptId)?.promptId
       : undefined;
     if (type === 'queue_interrupt_active' && !promptId) {
       return Promise.reject(new Error('The generation is still submitting or has finished. Wait for the queue to update and try again.'));
@@ -1799,6 +1802,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   }, [loraCatalog, modelCatalog, videoModelCatalog.loras, workflows]);
 
   const queueImage = React.useCallback(async (options: UmbraImageQueueOptions) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !connected) {
+      throw new Error('Umbra UI is still connecting to the queue service.');
+    }
     let preparedOptions = options;
     if (options.outputMode === 'img2img') {
       const sourceImagePath = String(options.sourceImagePath || '').trim();
@@ -1812,9 +1819,13 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       feature: prepared.feature,
       modelFamily: prepared.modelFamily,
     }, preparedOptions.queuePlacement, prepared.promptEntry);
-  }, [prepareImageQueueRequest, submitQueueRequest]);
+  }, [connected, prepareImageQueueRequest, submitQueueRequest]);
 
   const queueVideo = React.useCallback(async (options: UmbraVideoQueueOptions) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !connected) {
+      throw new Error('Umbra UI is still connecting to the queue service.');
+    }
     const requestedExtended = normalizeUmbraLtxExtendedControls(options.video.ltx.extended);
     const extendedEnabled = options.video.family === 'ltx23'
       && requestedExtended.enabled
@@ -2165,6 +2176,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     await refreshVideoJobs();
     return requestId;
   }, [
+    connected,
     refreshVideoJobs,
     submitQueueBatchRequest,
     submitQueueRequest,

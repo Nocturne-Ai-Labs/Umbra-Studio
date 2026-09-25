@@ -1625,11 +1625,25 @@ export function UmbraVideoGenerationControls({
       || video.ltx.storyboard.shots.length < 2
       || video.ltx.storyboard.shots.some((shot) => !shot.prompt.trim())
     ));
+  const queueBlockReason = !queueConnected
+    ? 'Connecting to the shared queue.'
+    : !comfyConnected
+      ? 'ComfyUI is disconnected.'
+      : !pipelineMatch.workflow
+        ? pipelineMatch.error || 'Select a compatible video pipeline.'
+        : !queuePrompt
+          ? 'Enter a video prompt before queueing.'
+          : sourceDimensionsMissing
+            ? 'Wait for Umbra to read the source media dimensions.'
+            : requiredMissing
+              ? 'Select all required video models and source media first.'
+              : turboIssue;
+  const queueDisabled = isQueueing || !!queueBlockReason;
 
   const handleQueue = async (requestedPlacement: UmbraQueuePlacement = effectivePlacement) => {
     if (queueInFlightRef.current) return;
-    if (turboIssue) { showToast(turboIssue, 'error'); return; }
     if (videoLoraIssue) { showToast(videoLoraIssue, 'error'); return; }
+    if (queueBlockReason) { showToast(queueBlockReason, 'error'); return; }
     const queuePlacement = queueSummary.powerPrompterActive ? requestedPlacement : 'end';
     if (queuePlacement === 'interrupt' && !window.confirm(
       'Stop the current Power Prompter image and run this Umbra UI video next?',
@@ -1691,8 +1705,6 @@ export function UmbraVideoGenerationControls({
 
   const samplerOptions = catalog.samplers.length > 0 ? catalog.samplers : ['euler', 'uni_pc'];
   const schedulerOptions = catalog.schedulers.length > 0 ? catalog.schedulers : ['simple', 'beta'];
-  const queueDisabled = isQueueing || !queueConnected || !comfyConnected || !pipelineMatch.workflow || !queuePrompt || requiredMissing || !!turboIssue;
-
   return (
     <>
     <section data-umbra-ui-video-controls="" className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar">
@@ -2682,9 +2694,7 @@ export function UmbraVideoGenerationControls({
             onClick={() => void handleQueue(effectivePlacement)}
             disabled={queueDisabled}
             className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-fuchsia-300/30 bg-fuchsia-500/[0.1] text-[10px] font-black uppercase tracking-[0.16em] text-fuchsia-100 transition-colors hover:bg-fuchsia-500/[0.16] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
-            title={sourceDimensionsMissing
-              ? 'Wait for Umbra to read the source media dimensions'
-              : requiredMissing ? 'Select all required video models first' : 'Queue this video through the shared Power Prompter queue'}
+            title={queueBlockReason || 'Queue this video through the shared Power Prompter queue'}
           >
             {isQueueing ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
             {extendedOpen ? 'Generate Extended Video' : 'Generate Video'}
