@@ -106,6 +106,7 @@ interface AppState {
   };
   appSettings: AppSettings;
   applyAppSettings: (settings: AppSettings) => void;
+  setAppSettings: (patch: Partial<AppSettings>) => void;
   setAppSetting: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
 
   // System Stats
@@ -277,6 +278,24 @@ export const useStore = create<AppState>()(
       const deviceShellResume = readDeviceShellResume();
       const initialWorkspace = normalizeWorkspace(deviceShellResume?.activeWorkspace);
       const initialLocalServerAppId = normalizeLocalServerAppId(deviceShellResume?.selectedLocalServerAppId);
+      const setAppSettings = (patch: Partial<AppSettings>) => set((state) => {
+        const nextSettings = saveAppSettings(patch);
+        void pushAppSettingsToBackend(nextSettings).catch((error) => {
+          console.warn('[useStore] Failed to persist app setting:', error);
+        });
+        return {
+          appSettings: nextSettings,
+          logs: state.logs.slice(-(nextSettings['advanced.consoleMaxLogs'] || 1000)),
+          urls: {
+            ...state.urls,
+            comfyui: nextSettings['comfyui.url'] || 'http://127.0.0.1:8188',
+          },
+          ui: {
+            ...state.ui,
+            showFilmstrip: nextSettings['comfyui.showFilmstrip'] ?? state.ui.showFilmstrip,
+          },
+        };
+      });
 
       return {
         activeWorkspace: initialWorkspace,
@@ -343,24 +362,8 @@ export const useStore = create<AppState>()(
             showFilmstrip: settings['comfyui.showFilmstrip'] ?? state.ui.showFilmstrip,
           },
         })),
-        setAppSetting: (key, value) => set((state) => {
-          const nextSettings = saveAppSettings({ [key]: value });
-          void pushAppSettingsToBackend(nextSettings).catch((error) => {
-            console.warn('[useStore] Failed to persist app setting:', error);
-          });
-          return {
-            appSettings: nextSettings,
-            logs: state.logs.slice(-(nextSettings['advanced.consoleMaxLogs'] || 1000)),
-            urls: {
-              ...state.urls,
-              comfyui: nextSettings['comfyui.url'] || 'http://127.0.0.1:8188',
-            },
-            ui: {
-              ...state.ui,
-              showFilmstrip: nextSettings['comfyui.showFilmstrip'] ?? state.ui.showFilmstrip,
-            },
-          };
-        }),
+        setAppSettings,
+        setAppSetting: (key, value) => setAppSettings({ [key]: value } as Partial<AppSettings>),
 
         systemStats: {
           vramUsed: 0,

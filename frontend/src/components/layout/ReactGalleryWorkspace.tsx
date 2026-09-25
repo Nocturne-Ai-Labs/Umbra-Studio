@@ -50,7 +50,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
-import { useGalleryTransfer, startGalleryTransfer, useGalleryUndoMove, undoGalleryMove } from '@/lib/galleryTransfers';
+import { useGalleryTransfer, startGalleryTransfer, useGalleryUndoMove, undoGalleryMove, getCompletedGalleryFolderMoves, type GalleryTransferResult } from '@/lib/galleryTransfers';
 import { useGalleryTreeRefresh } from '@/lib/galleryTreeRefresh';
 import { GalleryCachedPageValidation } from '@/lib/galleryCachedPageValidation';
 import { prepareGalleryDownload, startGalleryDownload } from '@/lib/galleryDownloads';
@@ -4757,6 +4757,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const pinnedFoldersSetting = useStore((state) => state.appSettings['library.pinnedFolders']);
   const trashAutoDeleteSetting = useStore((state) => state.appSettings['library.trashAutoDeleteDays']);
   const setAppSetting = useStore((state) => state.setAppSetting);
+  const setAppSettings = useStore((state) => state.setAppSettings);
   const setActiveWorkspace = useStore((state) => state.setActiveWorkspace);
   const addScannedImport = useStore((state) => state.addScannedImport);
   const { addToast } = useToastStore();
@@ -7095,7 +7096,39 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       : [...pinnedFolders, normalized]);
   }, [pinnedFolders, setPinnedFolders]);
 
-  const applyRenamedFolder = useCallback((sourceInput: string, targetInput: string) => {
+  const remapSavedFolderSettings = useCallback((moves: Array<{ source: string; target: string }>) => {
+    if (moves.length === 0) return;
+    const settings = useStore.getState().appSettings;
+    const updates: Partial<typeof settings> = {};
+    const remap = (path: unknown) => moves.reduce(
+      (current, { source, target }) => remapGalleryFolderPath(current, source, target), normalizePath(path),
+    );
+    const currentPins = settings['library.pinnedFolders'];
+    if (Array.isArray(currentPins)) {
+      const nextPins = uniqueNormalizedPaths(currentPins.map(remap));
+      if (nextPins.length !== currentPins.length
+        || nextPins.some((path, index) => path !== normalizePath(currentPins[index]))) {
+        updates['library.pinnedFolders'] = nextPins;
+      }
+    }
+    const currentRecentFolders = settings['library.recentFolders'];
+    if (Array.isArray(currentRecentFolders)) {
+      const nextRecentFolders = uniqueNormalizedPaths(currentRecentFolders.map(remap));
+      if (nextRecentFolders.length !== currentRecentFolders.length
+        || nextRecentFolders.some((path, index) => path !== normalizePath(currentRecentFolders[index]))) {
+        updates['library.recentFolders'] = nextRecentFolders;
+      }
+    }
+    if (Object.keys(updates).length === 0) return;
+    setAppSettings(updates);
+    if (updates['library.pinnedFolders']) {
+      window.dispatchEvent(new CustomEvent('umbra:gallery-pinned-folders-changed', {
+        detail: { pinnedFolders: updates['library.pinnedFolders'], source: 'react-gallery' },
+      }));
+    }
+  }, [setAppSettings]);
+
+  const applyRelocatedFolder = useCallback((sourceInput: string, targetInput: string, options?: { reloadCurrentFolder?: boolean; updateFolderSettings?: boolean }) => {
     const source = normalizePath(sourceInput);
     const target = normalizePath(targetInput);
     if (!source || !target || source === target) return;
@@ -7122,12 +7155,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     setOpenedFolders((current) => uniqueNormalizedPaths(current.map(remap)));
     setOpeningFolder(remap);
     setFolderClipboard((current) => current ? { ...current, source: remap(current.source) } : current);
-
-    const currentPins = useStore.getState().appSettings['library.pinnedFolders'];
-    if (Array.isArray(currentPins)) {
-      const nextPins = currentPins.map(remap);
-      if (nextPins.some((path, index) => path !== normalizePath(currentPins[index]))) setPinnedFolders(nextPins);
-    }
+    if (options?.updateFolderSettings !== false) remapSavedFolderSettings([{ source, target }]);
 
     // Drop request ownership before remapping caches so old replies cannot restore the old branch.
     const invalidatedTreePaths = new Set<string>();
@@ -7180,10 +7208,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     if (nextFolder !== currentFolderRef.current) {
       currentFolderRef.current = nextFolder;
       setCurrentFolder(nextFolder);
-      if (!navigatingElsewhere) void loadFolder({ folder: nextFolder, keepSelection: true, forceRefresh: true });
+      if (options?.reloadCurrentFolder !== false && !navigatingElsewhere) {
+        void loadFolder({ folder: nextFolder, keepSelection: true, forceRefresh: true });
+      }
     }
     emitSelectionChanged(Array.from(nextSelection));
-  }, [emitSelectionChanged, loadFolder, markGalleryUiSessionDirty, setPinnedFolders, updateViewerSessionFiles]);
+  }, [emitSelectionChanged, loadFolder, markGalleryUiSessionDirty, remapSavedFolderSettings, updateViewerSessionFiles]);
 
   const createSubfolder = useCallback((parentPath: string) => {
     const parent = normalizePath(parentPath);
@@ -7249,7 +7279,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         if (!response.ok) throw new Error(String(payload?.error || 'Failed to rename folder'));
         const newPath = typeof payload?.newPath === 'string' ? normalizePath(payload.newPath) : '';
         if (payload?.success !== true || !newPath) throw new Error('Rename was not confirmed. Refresh the folder before retrying.');
-        applyRenamedFolder(normalized, newPath);
+        applyRelocatedFolder(normalized, newPath);
         const parent = pathParent(normalized);
         if (parent) {
           invalidateTreeChildrenCache(parent);
@@ -7263,7 +7293,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to save folder' });
       setFolderNameModal((current) => current ? { ...current, submitting: false } : current);
     }
-  }, [addToast, applyRenamedFolder, folderNameModal, invalidateTreeChildrenCache, loadTreeChildren]);
+  }, [addToast, applyRelocatedFolder, folderNameModal, invalidateTreeChildrenCache, loadTreeChildren]);
 
   const deleteSelection = useCallback(() => {
     void deleteGalleryPaths(Array.from(selectedPaths), { rollbackOnFailure: false });
@@ -7273,9 +7303,18 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     return stripLiveGenerationPreviewPaths(resolveGalleryContextSelectionPaths(state, selectedPaths));
   }, [contextMenu, selectedPaths]);
 
-  const refreshAfterTransfer = useCallback((sourcePaths: string[], destination: string, mode: 'move' | 'copy', targetPaths: string[] = []) => {
+  const refreshAfterTransfer = useCallback((results: GalleryTransferResult[], destination: string, mode: 'move' | 'copy') => {
+    const sourcePaths = results.map((result) => result.path);
+    const targetPaths = results.flatMap((result) => result.newPath ? [result.newPath] : []);
+    const folderMoves = getCompletedGalleryFolderMoves(results, mode);
+    const currentFolderBefore = currentFolderRef.current;
+    remapSavedFolderSettings(folderMoves);
+    for (const { source, target } of folderMoves) {
+      applyRelocatedFolder(source, target, { reloadCurrentFolder: false, updateFolderSettings: false });
+    }
     const affectedFolders = uniqueNormalizedPaths([
-      currentFolder,
+      currentFolderBefore,
+      currentFolderRef.current,
       destination,
       ...sourcePaths.map(pathParent),
       ...targetPaths.map(pathParent),
@@ -7290,28 +7329,34 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     setFolderPreviewRefreshVersion((current) => current + 1);
     if (mode === 'move') {
       const movedSet = new Set(sourcePaths.map((path) => normalizePath(path).toLowerCase()));
-      const nextSelection = new Set(Array.from(selectedPathsRef.current).filter((path) => !movedSet.has(normalizePath(path).toLowerCase())));
+      const wasMoved = (path: string) => movedSet.has(normalizePath(path).toLowerCase())
+        || folderMoves.some(({ source, target }) => pathIsInsideRoot(path, source) || pathIsInsideRoot(path, target));
+      const nextSelection = new Set(Array.from(selectedPathsRef.current).filter((path) => !wasMoved(path)));
       selectedPathsRef.current = nextSelection;
       setSelectedPaths(nextSelection);
-      const nextLastSelectedPath = movedSet.has(normalizePath(lastSelectedPath).toLowerCase()) ? '' : lastSelectedPath;
+      const nextLastSelectedPath = wasMoved(lastSelectedPath) ? '' : lastSelectedPath;
       setLastSelectedPath(nextLastSelectedPath);
       emitSelectionChanged(Array.from(nextSelection), nextLastSelectedPath);
       window.dispatchEvent(new CustomEvent('umbra:gallery-remove-paths', {
         detail: { paths: sourcePaths, source: 'react-gallery-transfer' },
       }));
     }
-    const nextFolder = mode === 'move' && sourcePaths.some((path) => pathIsInsideRoot(currentFolder, path))
-      ? destination : currentFolder;
+    const currentFolderWasMovedWithoutPath = mode === 'move'
+      && sourcePaths.some((path) => pathIsInsideRoot(currentFolderBefore, path))
+      && !folderMoves.some(({ source }) => pathIsInsideRoot(currentFolderBefore, source));
+    const nextFolder = currentFolderWasMovedWithoutPath ? destination : currentFolderRef.current;
     void loadFolder({ folder: nextFolder, keepSelection: mode !== 'move', forceRefresh: true, preserveScroll: true });
-    void loadTreeChildren(destination, true);
-  }, [clearPageCacheForFolder, currentFolder, emitSelectionChanged, invalidateTreeChildrenCache, lastSelectedPath, loadFolder, loadTreeChildren]);
+    for (const folder of uniqueNormalizedPaths([destination, ...sourcePaths.map(pathParent), ...targetPaths.map(pathParent)])) {
+      void loadTreeChildren(folder, true);
+    }
+  }, [applyRelocatedFolder, clearPageCacheForFolder, emitSelectionChanged, invalidateTreeChildrenCache, lastSelectedPath, loadFolder, loadTreeChildren, remapSavedFolderSettings]);
 
   useEffect(() => {
     if (!transferProgress || transferProgress.active || lastRefreshedTransfer.current === transferProgress) return;
     lastRefreshedTransfer.current = transferProgress;
-    const successes = transferProgress.results.filter(result => result.success).map(result => result.path);
-    if (successes.length) refreshAfterTransfer(successes, transferProgress.destination, transferProgress.mode,
-      transferProgress.results.flatMap(result => result.success && result.newPath ? [result.newPath] : []));
+    const successfulResults = transferProgress.results.filter(result => result.success);
+    const successes = successfulResults.map(result => result.path);
+    if (successfulResults.length) refreshAfterTransfer(successfulResults, transferProgress.destination, transferProgress.mode);
     if (transferProgress.mode === 'move') {
       setFolderClipboard(current => current?.mode === 'move' && successes.some(path => pathsEqual(path, current.source)) ? null : current);
     }
