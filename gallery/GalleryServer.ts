@@ -2590,6 +2590,29 @@ async function handleMetadata(reqUrl: URL): Promise<Response> {
   }
 }
 
+const LOCAL_GALLERY_FS_GET_ALIAS_PATHS = new Set([
+  'tree',
+  'list-progressive',
+  'folder-summary',
+  'search',
+  'metadata-search',
+  'thumbnail',
+  'image',
+  'metadata',
+]);
+
+function resolveLocalGalleryFsGetPath(reqUrl: URL, method: string): string {
+  const prefix = '/api/gallery-bridge/fs/';
+  if (method !== 'GET' || !reqUrl.pathname.startsWith(prefix)) return reqUrl.pathname;
+  const route = reqUrl.pathname.slice(prefix.length);
+  if (!LOCAL_GALLERY_FS_GET_ALIAS_PATHS.has(route)) return reqUrl.pathname;
+  // An fs: continuation belongs to the main-process fallback listing.
+  if (route === 'list-progressive' && String(reqUrl.searchParams.get('snapshot') || '').startsWith('fs:')) {
+    return reqUrl.pathname;
+  }
+  return `/api/fs/${route}`;
+}
+
 const server = Bun.serve({
   hostname: HOST,
   port: PORT,
@@ -2597,6 +2620,7 @@ const server = Bun.serve({
   idleTimeout: 120,
   fetch: async (req, server) => {
     const reqUrl = new URL(req.url);
+    reqUrl.pathname = resolveLocalGalleryFsGetPath(reqUrl, req.method);
 
     if (!isAdmittedBridgeRequest(req, reqUrl)) return json({ error: 'Gallery bridge request denied' }, 403);
     if (req.method === 'OPTIONS') return corsPreflight(req, reqUrl);
