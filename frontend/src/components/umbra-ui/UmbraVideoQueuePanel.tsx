@@ -34,6 +34,7 @@ import { UmbraPinnedOutputControl } from '@/components/umbra-ui/UmbraPinnedOutpu
 import { normalizeUmbraUiPinnedFolder } from '@/lib/pinnedOutputFolders';
 import { advanceUmbraUiSeed, normalizeUmbraUiSeed, resolveUmbraUiQueueSeed } from '@/lib/umbraUiSeed';
 import { resolveUmbraVideoQueueSourceUrl } from '@/lib/umbraVideoQueuePreview';
+import { resolveUmbraVideoQueueNegativePrompt } from '@/lib/umbraVideoQueuePrompt';
 import { refreshUmbraVideoRequeueSourceDimensions } from '@/lib/umbraVideoRequeueSource';
 import { NsfwPrivacyShield } from '@/components/privacy/NsfwPrivacyProvider';
 import { classifyUmbraPrompt } from '@/lib/nsfwPrivacy';
@@ -448,7 +449,7 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
       : null;
     setSelected(job);
     setDraftPrompt(selectedClip?.prompt || job.prompt);
-    setDraftNegative(job.negativePrompt);
+    setDraftNegative(resolveUmbraVideoQueueNegativePrompt(clonedVideo, job.negativePrompt));
     setDraftVideo(clonedVideo);
     setDraftOutputFolder(normalizeUmbraUiPinnedFolder(job.generation.outputFolder));
     setDrawerVisible(false);
@@ -605,7 +606,12 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
         ));
       }
       const preparedVideo = await refreshUmbraVideoRequeueSourceDimensions(videoForQueue);
-      await queueVideo({ prompt: draftPrompt, negativePrompt: draftNegative, video: preparedVideo, outputFolder: draftOutputFolder });
+      await queueVideo({
+        prompt: draftPrompt,
+        negativePrompt: resolveUmbraVideoQueueNegativePrompt(preparedVideo, draftNegative),
+        video: preparedVideo,
+        outputFolder: draftOutputFolder,
+      });
       const nextSeed = advanceUmbraUiSeed(queuedSeed, draftVideo.seedMode, draftVideo.seedIncrement);
       setDraftVideo((current) => current
         && current.seed === draftVideo.seed
@@ -789,10 +795,16 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
                     <textarea value={draftPrompt} onChange={(event) => setDraftPrompt(event.target.value)} className={`${inputClass} min-h-32 resize-y leading-relaxed`} />
                   </label>
                 )}
-                <label className="block space-y-1.5">
-                  <span className={labelClass}>Negative Prompt</span>
-                  <textarea value={draftNegative} onChange={(event) => setDraftNegative(event.target.value)} className={`${inputClass} min-h-20 resize-y leading-relaxed`} />
-                </label>
+                {draftVideo.family === 'minimax_h3' ? (
+                  <div className="border border-fuchsia-300/15 bg-fuchsia-500/[0.035] px-2.5 py-2 font-mono text-[9px] leading-relaxed text-fuchsia-100/70">
+                    MiniMax H3 uses one native audio-video prompt. Negative prompting is not part of this workflow.
+                  </div>
+                ) : (
+                  <label className="block space-y-1.5">
+                    <span className={labelClass}>Negative Prompt</span>
+                    <textarea value={draftNegative} onChange={(event) => setDraftNegative(event.target.value)} className={`${inputClass} min-h-20 resize-y leading-relaxed`} />
+                  </label>
+                )}
 
                 <div className="rounded-md border border-white/10 bg-white/[0.02] p-3">
                   <div className="mb-3 flex items-center gap-2"><Settings2 size={13} className="text-fuchsia-300" /><span className={labelClass}>Generation Settings</span></div>

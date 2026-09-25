@@ -66,6 +66,7 @@ import { resolveUmbraUiPipeline } from '@/lib/umbraUiPipelines';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import { prepareVideoControlsForHandoff } from '@/lib/umbraUiVideoHandoffControls';
 import { hasUmbraVideoSourceDimensions, selectUmbraVideoMode, startsUmbraLtxExtendedFromImage } from '@/lib/umbraVideoQueueSource';
+import { resolveUmbraVideoQueueNegativePrompt } from '@/lib/umbraVideoQueuePrompt';
 import { resolveUmbraVideoQueueSourceUrl } from '@/lib/umbraVideoQueuePreview';
 import { UmbraVideoMediaUploadSelection } from '@/lib/umbraVideoMediaUploadSelection';
 import { readUserConfigWithRetry, writeUserConfig } from '@/lib/userConfig';
@@ -1657,7 +1658,7 @@ export function UmbraVideoGenerationControls({
       await queueVideo({
         outputFolder: pinnedOutputFolder,
         prompt: queuePrompt,
-        negativePrompt,
+        negativePrompt: resolveUmbraVideoQueueNegativePrompt(video, negativePrompt),
         video: {
           ...video,
           seed: queuedSeed,
