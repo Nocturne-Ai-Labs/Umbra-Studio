@@ -180,6 +180,7 @@ import {
   extractUmbraUiTriggerWords,
 } from './backend/UmbraUiLoraMetadata';
 import { assertUmbraUiPinnedOutputAvailable, resolveUmbraUiPinnedOutputFolder, resolveUmbraPinnedTaskFolder } from './backend/UmbraUiPinnedOutput';
+import { normalizeGalleryDirectoryPath } from './backend/GalleryDirectoryPath';
 import { publishPinnedVideoOutput, resolvePinnedVideoSourcePath } from './backend/UmbraUiPinnedVideoOutput';
 import {
   applyUmbraUiPrompterOutputLayout,
@@ -2687,8 +2688,8 @@ async function saveModelManagerState(update: (current: ModelManagerState) => Mod
 }
 
 function normalizeGalleryPortablePath(value: unknown): string {
-  const normalized = String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').trim();
-  if (!normalized || normalized.includes('\0')) return '';
+  const normalized = normalizeGalleryDirectoryPath(value);
+  if (!normalized) return '';
   const resolved = resolvePathCandidate(normalized);
   if (isPathInsideDirectory(ROOT_DIR, resolved)) {
     return toClientPath(resolved);

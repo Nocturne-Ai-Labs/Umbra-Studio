@@ -301,6 +301,17 @@ function ToolButton({
   );
 }
 
+function getUmbraCanvasGenerationFailureMessage(job: UmbraUiInpaintJob): string {
+  if (job.status === 'canceled' || (job.status !== 'failed' && job.status !== 'partial' && job.failed <= 0)) return '';
+  const error = String(job.items.find((item) => item.status === 'failed' && item.error)?.error
+    || job.items.find((item) => item.error)?.error || '').trim();
+  const detail = error.length > 240 ? `${error.slice(0, 237)}…` : error;
+  if (job.completed > 0 && job.failed > 0) {
+    return `${job.completed} Canvas sample${job.completed === 1 ? '' : 's'} completed; ${job.failed} failed.${detail ? ` ${detail}` : ''}`;
+  }
+  return detail || 'Canvas generation failed.';
+}
+
 export function UmbraCanvasWorkspace({
   active,
   capabilities,
@@ -1895,11 +1906,13 @@ export function UmbraCanvasWorkspace({
       window.setTimeout(() => void saveProject(false), 0);
     }
     if (isUmbraUiInpaintJobTerminal(job)) {
+      const failureMessage = getUmbraCanvasGenerationFailureMessage(job);
+      if (failureMessage) showToast(failureMessage, 'error');
       removePendingGeneration(job.id);
       jobBboxesRef.current.delete(job.id);
       window.setTimeout(() => void saveProject(false), 0);
     }
-  }, [addStagedGenerations, job, removePendingGeneration, saveProject]);
+  }, [addStagedGenerations, job, removePendingGeneration, saveProject, showToast]);
 
   React.useEffect(() => {
     if (!job || isUmbraUiInpaintJobTerminal(job)) return;
@@ -1947,7 +1960,13 @@ export function UmbraCanvasWorkspace({
         && currentProject.generation.pending.some((pending) => pending.jobId === job.id)) {
         setJob((current) => current?.id === job.id ? canceled : current);
       }
-      showToast('Canvas generation canceled.', 'success');
+      if (canceled.status === 'canceled') {
+        showToast('Canvas generation canceled.', 'success');
+      } else if (canceled.cancelRequested) {
+        showToast('Canvas cancellation requested. Waiting for the active sample to stop.', 'info');
+      } else {
+        showToast(`Canvas generation is already ${canceled.status}.`, 'info');
+      }
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Canvas generation could not be canceled.', 'error');
     } finally {
@@ -2482,7 +2501,7 @@ export function UmbraCanvasWorkspace({
             <label className="block" title={inpaintAdapter === 'native_edit' ? 'This native edit pipeline owns its blend behavior.' : undefined}><span className="flex justify-between text-[8px] font-black uppercase text-zinc-500">Color Match <span className="font-mono text-rose-200">{inpaintAdapter === 'native_edit' ? 'Off' : `${Math.round(colorMatch * 100)}%`}</span></span><input type="range" aria-label="Color Match" min="0" max="1" step="0.05" disabled={inpaintAdapter === 'native_edit'} value={inpaintAdapter === 'native_edit' ? 0 : colorMatch} onChange={(event) => setColorMatch(Number(event.target.value))} className="mt-1 w-full accent-rose-300 disabled:opacity-40" /></label>
             <label className="block"><span className="flex justify-between text-[8px] font-black uppercase text-zinc-500">Mask Bias <span className="font-mono text-rose-200">{Math.round(softInpaintMaskInfluence * 100)}%</span></span><input type="range" min="0" max="1" step="0.05" value={softInpaintMaskInfluence} onChange={(event) => setSoftInpaintMaskInfluence(Number(event.target.value))} className="mt-1 w-full accent-rose-300" /></label>
           </section>
-          {job ? <div className="rounded-md border border-white/10 bg-black/30 p-2.5 font-mono text-[9px] text-zinc-500"><div className="flex items-center gap-2"><span className="font-black uppercase text-zinc-300">{job.status}</span><span>{job.completed}/{job.total}</span>{!isUmbraUiInpaintJobTerminal(job) ? <button type="button" onClick={() => void cancelGeneration()} disabled={canceling} className="ml-auto text-rose-300 hover:text-rose-100">{canceling ? 'Canceling' : 'Cancel'}</button> : null}</div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-rose-400 transition-[width]" style={{ width: `${Math.round(job.completed / Math.max(1, job.total) * 100)}%` }} /></div></div> : null}
+          {job ? <div className="rounded-md border border-white/10 bg-black/30 p-2.5 font-mono text-[9px] text-zinc-500"><div className="flex items-center gap-2"><span className="font-black uppercase text-zinc-300">{job.status}</span><span>{job.completed}/{job.total}</span>{!isUmbraUiInpaintJobTerminal(job) ? <button type="button" onClick={() => void cancelGeneration()} disabled={canceling || job.cancelRequested} className="ml-auto text-rose-300 hover:text-rose-100">{canceling || job.cancelRequested ? 'Canceling' : 'Cancel'}</button> : null}</div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-rose-400 transition-[width]" style={{ width: `${Math.round(job.completed / Math.max(1, job.total) * 100)}%` }} /></div></div> : null}
         </div>
         <div ref={onCatalogTriggerContainerChange} data-umbra-canvas-catalog-trigger-container="" className="mt-3 flex justify-end" />
       </aside>

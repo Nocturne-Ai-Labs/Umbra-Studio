@@ -628,7 +628,9 @@ type GalleryTrashUndoItem = {
 };
 
 function normalizePath(value: unknown): string {
-  return String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').trim();
+  const path = String(value || '').replace(/\\/g, '/').trim();
+  if (/^[a-z]:\/*$/i.test(path)) return `${path.slice(0, 2)}/`;
+  return path.replace(/\/+$/, '') || (path.startsWith('/') ? '/' : '');
 }
 
 function isMissingGalleryFolderMessage(value: unknown): boolean {
@@ -659,8 +661,9 @@ function pathLeaf(value: unknown): string {
 
 function pathParent(value: unknown): string {
   const normalized = normalizePath(value);
+  if (normalized === '/' || /^[a-z]:\/$/i.test(normalized)) return '';
   const index = normalized.lastIndexOf('/');
-  return index > 0 ? normalizePath(normalized.slice(0, index)) : '';
+  return index === 0 ? '/' : index > 0 ? normalizePath(normalized.slice(0, index)) : '';
 }
 
 function splitFileName(value: unknown): { base: string; extension: string } {
@@ -682,12 +685,16 @@ function pathsEqual(left: unknown, right: unknown): boolean {
 function pathIsInsideRoot(pathValue: unknown, rootValue: unknown): boolean {
   const path = normalizePath(pathValue).toLowerCase();
   const root = normalizePath(rootValue).toLowerCase();
-  return Boolean(path && root) && (path === root || path.startsWith(`${root}/`));
+  return Boolean(path && root) && (path === root || path.startsWith(root.endsWith('/') ? root : `${root}/`));
 }
 
 function remapGalleryFolderPath(value: unknown, source: string, target: string): string {
   const path = normalizePath(value);
-  return pathIsInsideRoot(path, source) ? `${target}${path.slice(source.length)}` : path;
+  const sourcePath = normalizePath(source);
+  if (!pathIsInsideRoot(path, sourcePath)) return path;
+  const suffix = path.slice(sourcePath.length).replace(/^\/+/, '');
+  const targetPath = normalizePath(target);
+  return suffix ? `${targetPath.replace(/\/+$/, '')}/${suffix}` : targetPath;
 }
 
 function getValidTransferPathsForDestination(paths: string[], destinationPath: string): string[] {
@@ -698,7 +705,7 @@ function getValidTransferPathsForDestination(paths: string[], destinationPath: s
     if (!path || isTrashPath(path)) return false;
     if (pathsEqual(path, destination)) return false;
     if (pathsEqual(pathParent(path), destination)) return false;
-    if (destination.toLowerCase().startsWith(`${path.toLowerCase()}/`)) return false;
+    if (pathIsInsideRoot(destination, path)) return false;
     return true;
   });
 }
@@ -5995,7 +6002,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         invalidateTreeChildrenCache(folder);
         void loadTreeChildren(folder, true);
       }
-      if (deleted.some((folder) => pathsEqual(folder, currentFolderRef.current) || currentFolderRef.current.startsWith(`${folder}/`))) {
+      if (deleted.some((folder) => pathIsInsideRoot(currentFolderRef.current, folder))) {
         openFolder(pending.rootPath, { showMedia: false });
       } else if (pathsEqual(currentFolderRef.current, pending.rootPath)) {
         void loadFolder({ folder: pending.rootPath, keepSelection: true, forceRefresh: true, preserveScroll: true });

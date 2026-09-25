@@ -1,6 +1,7 @@
 import { lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'path';
 import { settingsManager } from './settings/SettingsManager';
+import { normalizeGalleryDirectoryPath } from './GalleryDirectoryPath';
 
 export interface ResolvedPath {
   fullPath: string;
@@ -34,9 +35,7 @@ export function createRuntimePathHelpers(options: RuntimePathOptions) {
 
   function normalizeConfiguredPath(value: unknown): string {
     if (typeof value !== 'string') return '';
-    const trimmed = value.trim();
-    if (!trimmed || trimmed.includes('\0')) return '';
-    return trimmed.replace(/\\/g, '/').replace(/\/+$/, '');
+    return normalizeGalleryDirectoryPath(value);
   }
 
   function getDefaultOutputRootPath(): string {
@@ -58,7 +57,8 @@ export function createRuntimePathHelpers(options: RuntimePathOptions) {
   }
 
   function resolvePathCandidate(candidate: string): string {
-    const normalized = normalizeOutputPathInput(candidate);
+    const outputPath = normalizeOutputPathInput(candidate);
+    const normalized = /^[a-z]:$/i.test(outputPath) ? `${outputPath}/` : outputPath;
     if (isAbsolutePathInput(normalized)) return resolve(normalized);
     return resolve(ROOT_DIR_RESOLVED, normalized.replace(/^\/+/, ''));
   }

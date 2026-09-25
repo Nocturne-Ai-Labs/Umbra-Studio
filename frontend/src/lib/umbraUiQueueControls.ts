@@ -1,5 +1,6 @@
 export interface UmbraUiQueueControlPrompt {
   status: string;
+  promptId?: string;
 }
 
 export interface UmbraUiQueueControlRequest {
@@ -22,7 +23,10 @@ export function resolveUmbraUiQueueControlTargets(
   const umbraRequests = requests.filter((request) => request.origin === 'umbra_ui');
   const activeRequest = umbraRequests.find((request) => (
     request.requestId === activeRequestId
-    && request.prompts.some((prompt) => prompt.status === 'running' || prompt.status === 'submitting')
+    && request.prompts.some((prompt) => (
+      (prompt.status === 'running' || prompt.status === 'submitting')
+      && !!String(prompt.promptId || '').trim()
+    ))
   )) || null;
   const requestIds = umbraRequests
     .filter((request) => request.prompts.some((prompt) => (
