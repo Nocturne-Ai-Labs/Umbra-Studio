@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { acknowledgeFolderActivity, folderActivityCounts, FOLDER_ACTIVITY_READ_KEY, readFolderActivityState, type FolderActivitySnapshot } from './filmstripFolderActivity';
 
 async function fetchActivity(paths: string[], signal?: AbortSignal): Promise<FolderActivitySnapshot> {
@@ -30,10 +30,22 @@ async function fetchActivity(paths: string[], signal?: AbortSignal): Promise<Fol
 export function useFilmstripFolderActivity(paths: string[], rememberFolders: (paths: string[]) => void) {
   const [snapshot, setSnapshot] = useState<FolderActivitySnapshot | null>(null);
   const [read, setRead] = useState(readFolderActivityState);
+  const [deletionRevision, setDeletionRevision] = useState(0);
+  const deletionRevisionRef = useRef(0);
   const pathsKey = JSON.stringify([...new Set(paths)].slice(0, 256));
 
   useEffect(() => {
+    const onFoldersDeleted = () => {
+      deletionRevisionRef.current += 1;
+      setDeletionRevision(deletionRevisionRef.current);
+    };
+    window.addEventListener('umbra:gallery-empty-folders-deleted', onFoldersDeleted);
+    return () => window.removeEventListener('umbra:gallery-empty-folders-deleted', onFoldersDeleted);
+  }, []);
+
+  useEffect(() => {
     const controller = new AbortController();
+    const requestRevision = deletionRevisionRef.current;
     const trackedPaths = JSON.parse(pathsKey) as string[];
     const discoveryOnly = trackedPaths.length === 0;
     if (discoveryOnly) {
@@ -47,7 +59,7 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
       busy = true;
       try {
         const next = await fetchActivity(trackedPaths, controller.signal);
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || requestRevision !== deletionRevisionRef.current) return;
         setSnapshot(next);
         if (next.recentFolders.length) rememberFolders(next.recentFolders.map(folder => folder.path));
       } catch { /* Keep existing badges through transient outages; never block the strip. */ }
@@ -67,7 +79,7 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
       window.removeEventListener('focus', wake);
       document.removeEventListener('visibilitychange', wake);
     };
-  }, [pathsKey, rememberFolders]);
+  }, [deletionRevision, pathsKey, rememberFolders]);
 
   useEffect(() => {
     const sync = (event: StorageEvent) => { if (event.key === FOLDER_ACTIVITY_READ_KEY) setRead(readFolderActivityState()); };
