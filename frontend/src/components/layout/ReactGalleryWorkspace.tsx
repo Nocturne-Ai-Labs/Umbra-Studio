@@ -6020,6 +6020,32 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         : [];
       const failed = Array.isArray(payload.failed) ? payload.failed : [];
       pruneDeletedFolderTreeState(deleted);
+      if (deleted.length > 0) {
+        const wasDeleted = (path: string) => deleted.some((folder) => pathIsInsideRoot(path, folder));
+        const settings = useStore.getState().appSettings;
+        const updates: Partial<typeof settings> = {};
+        const savedPins = settings['library.pinnedFolders'];
+        if (Array.isArray(savedPins)) {
+          const nextPins = savedPins.filter((path) => !wasDeleted(path));
+          if (nextPins.length !== savedPins.length) updates['library.pinnedFolders'] = nextPins;
+        }
+        const savedRecent = settings['library.recentFolders'];
+        if (Array.isArray(savedRecent)) {
+          const nextRecent = savedRecent.filter((path) => !wasDeleted(path));
+          if (nextRecent.length !== savedRecent.length) updates['library.recentFolders'] = nextRecent;
+        }
+        if (Object.keys(updates).length > 0) setAppSettings(updates);
+        if (updates['library.pinnedFolders']) {
+          window.dispatchEvent(new CustomEvent('umbra:gallery-pinned-folders-changed', {
+            detail: { pinnedFolders: updates['library.pinnedFolders'], source: 'react-gallery' },
+          }));
+        }
+        setFocusedFolder((current) => wasDeleted(current) ? pending.rootPath : current);
+        setOpenedFolders((current) => current.filter((folder) => !wasDeleted(folder)));
+        window.dispatchEvent(new CustomEvent('umbra:gallery-empty-folders-deleted', {
+          detail: { paths: deleted, source: 'react-gallery' },
+        }));
+      }
       const touchedParents = uniqueNormalizedPaths([
         pending.rootPath,
         ...deleted.map(pathParent),
@@ -6054,6 +6080,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     loadTreeChildren,
     openFolder,
     pruneDeletedFolderTreeState,
+    setAppSettings,
   ]);
 
   const applyGalleryUiSession = useCallback((session: GalleryUiSession | null | undefined, options: { localRestore?: boolean } = {}) => {

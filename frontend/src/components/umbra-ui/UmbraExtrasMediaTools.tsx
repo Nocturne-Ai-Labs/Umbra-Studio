@@ -64,7 +64,6 @@ interface StagedMediaItem {
   file?: File;
   previewUrl?: string;
   status: BatchItemStatus;
-  result?: UmbraUiMediaToolResult;
   error?: string;
 }
 
@@ -275,6 +274,33 @@ function BatchSummary({ completed, failed, total }: { completed: number; failed:
   );
 }
 
+function CompletedOutputs({
+  results,
+  showOpen = true,
+}: {
+  results: Array<{ id: string; result: UmbraUiMediaToolResult }>;
+  showOpen?: boolean;
+}) {
+  if (results.length === 0) return null;
+  return (
+    <div className="max-h-40 overflow-y-auto border-t border-emerald-300/15 bg-emerald-500/[0.035] custom-scrollbar">
+      {results.map(({ id, result }) => {
+        const fallbackUrl = buildFsImageUrl(result.path, id, { preferServer: true });
+        const previewUrl = result.previewUrl || fallbackUrl;
+        const downloadUrl = result.downloadUrl || `${fallbackUrl}&download=1`;
+        return (
+          <div key={id} className="flex min-h-10 items-center gap-2 border-b border-white/[0.05] px-3 py-1 last:border-b-0">
+            <CheckCircle2 size={13} className="shrink-0 text-emerald-300" />
+            <span className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-500" title={result.filename}>{result.filename}</span>
+            {showOpen ? <a href={previewUrl} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-300">Open</a> : null}
+            <a href={downloadUrl} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-300"><Download size={11} /> Save</a>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function useMediaBatchQueueActivity({
   mode,
   processing,
@@ -368,6 +394,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
   const [processing, setProcessing] = React.useState(false);
   const [browsingSources, setBrowsingSources] = React.useState(false);
   const [summary, setSummary] = React.useState({ completed: 0, failed: 0, total: 0 });
+  const [completedOutputs, setCompletedOutputs] = React.useState<Array<{ id: string; result: UmbraUiMediaToolResult }>>([]);
   const activityStartedAtRef = React.useRef(0);
   const batchControl = useMediaBatchQueueActivity({ mode, processing, summary, items, startedAtRef: activityStartedAtRef });
   const [previewFailed, setPreviewFailed] = React.useState(false);
@@ -526,13 +553,15 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
     activityStartedAtRef.current = Date.now();
     setProcessing(true);
     setSummary({ completed: 0, failed: 0, total: runnableItems.length });
+    setCompletedOutputs([]);
     const runnableIds = new Set(runnableItems.map((item) => item.id));
     setItems((current) => current.map((item) => runnableIds.has(item.id)
-      ? { ...item, status: 'staged', error: undefined, result: undefined }
+      ? { ...item, status: 'staged', error: undefined }
       : item));
     const imageSequence = new Map(runnableItems.filter((item) => item.kind === 'image').map((item, index) => [item.id, index + 1]));
     const videoSequence = new Map(runnableItems.filter((item) => item.kind === 'video').map((item, index) => [item.id, index + 1]));
     const result = await runUmbraUiMediaBatch({
+      imageConcurrency: 2,
       shouldStop: batchControl.shouldStop,
       items: runnableItems,
       onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
@@ -554,7 +583,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
           quality: exportSettings.quality,
           outputWidth: videoMode ? videoOutputWidth : 0,
         });
-        setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, result: next } : entry));
+        setCompletedOutputs((current) => [...current, { id: item.id, result: next }]);
       },
       onItemSettled: (item, error) => {
         setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: error ? 'failed' : 'completed', error: error instanceof Error ? error.message : error ? String(error) : undefined } : entry));
@@ -570,7 +599,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
   return (
     <div data-umbra-ui-watermark-tool="" className="grid min-h-0 flex-1 grid-cols-[minmax(300px,360px)_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:overflow-y-auto">
       <section data-umbra-ui-media-tool-controls="" className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar max-[900px]:overflow-visible max-[900px]:border-b max-[900px]:border-r-0">
-        <div className="mb-3 flex items-center gap-2">{videoMode ? <Video size={13} className="text-amber-300" /> : <Stamp size={13} className="text-cyan-300" />}<h2 className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-300">{videoMode ? 'Video Watermark Batch' : 'Image Watermark Batch'}</h2><span className="ml-auto font-mono text-[8px] uppercase text-zinc-600">{videoMode ? '1 video at a time' : '25 images at a time'}</span></div>
+        <div className="mb-3 flex items-center gap-2">{videoMode ? <Video size={13} className="text-amber-300" /> : <Stamp size={13} className="text-cyan-300" />}<h2 className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-300">{videoMode ? 'Video Watermark Batch' : 'Image Watermark Batch'}</h2><span className="ml-auto font-mono text-[8px] uppercase text-zinc-600">{videoMode ? '1 video at a time' : '2 images at a time'}</span></div>
         <input ref={sourceInputRef} type="file" multiple accept={videoMode ? 'video/mp4,video/webm,video/quicktime,video/x-matroska,.avi,.m4v,.mkv,.mov,.mp4,.webm,.wmv' : 'image/png,image/jpeg,image/webp,image/avif,image/bmp,image/tiff'} className="hidden" onChange={(event) => { addFiles(Array.from(event.target.files || [])); setSummary({ completed: 0, failed: 0, total: 0 }); event.currentTarget.value = ''; }} />
         <input ref={watermarkInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/avif,image/bmp,image/tiff" className="hidden" onChange={(event) => { const file = event.target.files?.[0] || null; event.currentTarget.value = ''; void chooseWatermark(file); }} />
         <div className="space-y-3">
@@ -619,7 +648,7 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
             </div> : <div className="max-w-sm text-center text-zinc-700"><Stamp size={34} className="mx-auto mb-3" /><div className="text-[10px] font-black uppercase tracking-[0.16em]">{previewFailed ? 'Source preview unavailable' : 'Stage media to preview'}</div>{previewFailed ? <div className="mt-2 text-[9px] leading-relaxed text-zinc-600">This Gallery file is not present in the current Umbra Studio build. Choose an available source to preview and process it.</div> : null}</div>}
           </div>
         </div>
-        {selected?.status === 'completed' && selected.result ? <div className="flex items-center gap-2 border-t border-emerald-300/15 bg-emerald-500/[0.035] px-3 py-2.5"><CheckCircle2 size={13} className="text-emerald-300" /><span className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-500">{selected.result.filename}</span><a href={selected.result.previewUrl || buildFsImageUrl(selected.result.path, String(Date.now()), { preferServer: true })} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-300">Open</a><a href={selected.result.downloadUrl || `${buildFsImageUrl(selected.result.path, String(Date.now()), { preferServer: true })}&download=1`} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-300"><Download size={11} /> Save</a></div> : null}
+        <CompletedOutputs results={completedOutputs} />
       </main>
     </div>
   );
@@ -635,6 +664,7 @@ function VideoToGifTool() {
   const [processing, setProcessing] = React.useState(false);
   const [browsingSources, setBrowsingSources] = React.useState(false);
   const [summary, setSummary] = React.useState({ completed: 0, failed: 0, total: 0 });
+  const [completedOutputs, setCompletedOutputs] = React.useState<Array<{ id: string; result: UmbraUiMediaToolResult }>>([]);
   const activityStartedAtRef = React.useRef(0);
   const batchControl = useMediaBatchQueueActivity({ mode: 'gif', processing, summary, items, startedAtRef: activityStartedAtRef });
   const inputRef = React.useRef<HTMLInputElement | null>(null);
@@ -677,9 +707,10 @@ function VideoToGifTool() {
     activityStartedAtRef.current = Date.now();
     setProcessing(true);
     setSummary({ completed: 0, failed: 0, total: runnableItems.length });
+    setCompletedOutputs([]);
     const runnableIds = new Set(runnableItems.map((item) => item.id));
     setItems((current) => current.map((item) => runnableIds.has(item.id)
-      ? { ...item, status: 'staged', error: undefined, result: undefined }
+      ? { ...item, status: 'staged', error: undefined }
       : item));
     const result = await runUmbraUiMediaBatch({
       items: runnableItems,
@@ -687,7 +718,7 @@ function VideoToGifTool() {
       onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
       runItem: async (item, sequenceNumber) => {
         const next = await submitUmbraUiVideoToGif({ source: item.file, sourcePath: item.path, outputFolder: outputFolder.trim(), pinnedOutputFolder, sequenceNumber, width });
-        setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, result: next } : entry));
+        setCompletedOutputs((current) => [...current, { id: item.id, result: next }]);
       },
       onItemSettled: (item, error) => {
         setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: error ? 'failed' : 'completed', error: error instanceof Error ? error.message : error ? String(error) : undefined } : entry));
@@ -722,7 +753,7 @@ function VideoToGifTool() {
       <main data-umbra-ui-media-tool-preview="" className="flex min-h-0 min-w-0 flex-col bg-black/20">
         <div className="flex min-h-10 items-center gap-2 border-b border-white/10 px-3"><Video size={13} className="text-zinc-500" /><span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400">Clip Preview</span><span className="ml-auto max-w-[45%] truncate font-mono text-[8px] text-zinc-600">{selected?.name || 'No video selected'}</span></div>
         <div className="flex min-h-[320px] flex-1 items-center justify-center overflow-auto p-4 max-[900px]:min-h-[280px]">{sourceUrl ? <video key={selected?.id} src={sourceUrl} controls playsInline className="max-h-full max-w-full bg-black shadow-2xl" /> : <div className="text-center text-zinc-700"><Film size={34} className="mx-auto mb-3" /><div className="text-[10px] font-black uppercase tracking-[0.16em]">Stage videos to preview</div></div>}</div>
-        {selected?.result ? <div className="flex items-center gap-2 border-t border-emerald-300/15 bg-emerald-500/[0.035] px-3 py-2.5"><CheckCircle2 size={13} className="text-emerald-300" /><span className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-500">{selected.result.filename}</span><a href={selected.result.downloadUrl || `${buildFsImageUrl(selected.result.path, String(Date.now()), { preferServer: true })}&download=1`} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-300"><Download size={11} /> Save</a></div> : null}
+        <CompletedOutputs results={completedOutputs} showOpen={false} />
       </main>
     </div>
   );

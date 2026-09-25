@@ -121,7 +121,7 @@ export function UmbraImageExportControls({
 
   const savePreset = React.useCallback(() => {
     const name = presetName.trim().slice(0, 48);
-    if (!name) return;
+    if (!name || presetSaveDisabled) return;
     const existing = customPresets.find((preset) => preset.name.toLowerCase() === name.toLowerCase());
     const id = existing?.id || `custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const nextPreset: UmbraImageExportPreset = {
@@ -135,7 +135,7 @@ export function UmbraImageExportControls({
     setSelectedPresetId(id);
     setPresetName('');
     onPresetSelection?.({ id, value: normalizeSettings(value) });
-  }, [customPresets, persistCustomPresets, presetExtra, presetName, value, onPresetSelection]);
+  }, [customPresets, persistCustomPresets, presetExtra, presetName, presetSaveDisabled, value, onPresetSelection]);
 
   const deleteSelectedPreset = React.useCallback(() => {
     if (!activeId.startsWith('custom-')) return;

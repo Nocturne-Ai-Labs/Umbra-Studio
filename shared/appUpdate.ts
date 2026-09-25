@@ -79,28 +79,53 @@ export function normalizeUmbraVersion(value: unknown): string {
   return String(value || '').trim().replace(/^v/i, '');
 }
 
-function umbraVersionParts(value: string): number[] {
-  return normalizeUmbraVersion(value)
-    .split('.')
-    .map((entry) => Number.parseInt(entry.replace(/[^\d].*$/, ''), 10))
-    .map((entry) => Number.isFinite(entry) ? entry : 0);
+function umbraVersionParts(value: string): { core: string[]; prerelease: string[] | null } {
+  const version = normalizeUmbraVersion(value).split('+', 1)[0];
+  const prereleaseAt = version.indexOf('-');
+  return {
+    core: (prereleaseAt < 0 ? version : version.slice(0, prereleaseAt)).split('.'),
+    prerelease: prereleaseAt < 0 ? null : version.slice(prereleaseAt + 1).split('.'),
+  };
+}
+
+function compareNumericVersionParts(left: string, right: string): number {
+  const a = left.replace(/^0+(?=\d)/, '');
+  const b = right.replace(/^0+(?=\d)/, '');
+  if (a.length !== b.length) return a.length > b.length ? 1 : -1;
+  return a === b ? 0 : a > b ? 1 : -1;
 }
 
 export function isKnownUmbraVersion(value: unknown): boolean {
   const normalized = normalizeUmbraVersion(value);
   if (!/^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i.test(normalized)) return false;
-  return umbraVersionParts(normalized).some((entry) => entry > 0);
+  return umbraVersionParts(normalized).core.some((entry) => Number(entry) > 0);
 }
 
 export function compareUmbraVersions(left: string, right: string): number {
   const leftParts = umbraVersionParts(left);
   const rightParts = umbraVersionParts(right);
-  const length = Math.max(3, leftParts.length, rightParts.length);
+  for (let index = 0; index < 3; index += 1) {
+    const difference = compareNumericVersionParts(leftParts.core[index] || '0', rightParts.core[index] || '0');
+    if (difference) return difference;
+  }
+  if (!leftParts.prerelease || !rightParts.prerelease) {
+    return leftParts.prerelease ? -1 : rightParts.prerelease ? 1 : 0;
+  }
+  const length = Math.max(leftParts.prerelease.length, rightParts.prerelease.length);
   for (let index = 0; index < length; index += 1) {
-    const leftValue = leftParts[index] || 0;
-    const rightValue = rightParts[index] || 0;
-    if (leftValue > rightValue) return 1;
-    if (leftValue < rightValue) return -1;
+    const a = leftParts.prerelease[index];
+    const b = rightParts.prerelease[index];
+    if (a === undefined || b === undefined) return a === undefined ? -1 : 1;
+    const aNumeric = /^\d+$/.test(a);
+    const bNumeric = /^\d+$/.test(b);
+    if (aNumeric && bNumeric) {
+      const difference = compareNumericVersionParts(a, b);
+      if (difference) return difference;
+    } else if (aNumeric !== bNumeric) {
+      return aNumeric ? -1 : 1;
+    } else if (a !== b) {
+      return a > b ? 1 : -1;
+    }
   }
   return 0;
 }
