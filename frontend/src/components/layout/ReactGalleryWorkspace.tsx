@@ -6856,9 +6856,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     });
     if (shouldUseNextViewer) emitSelectionChanged([nextViewerPath], nextViewerPath);
 
-    window.dispatchEvent(new CustomEvent('umbra:gallery-remove-paths', {
-      detail: { paths: normalized, source: 'react-gallery' },
-    }));
     const touchedFolders = uniqueNormalizedPaths([currentFolderRef.current, ...normalized.map(pathParent)]);
     for (const folder of touchedFolders) {
       clearPageCacheForFolder(folder);
@@ -7010,8 +7007,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         });
       }
 
+      window.dispatchEvent(new CustomEvent('umbra:gallery-remove-paths', {
+        detail: { paths: dedupedRemovedPaths, source: 'react-gallery' },
+      }));
       window.dispatchEvent(new CustomEvent('umbra:gallery-trash-updated', { detail: { source: 'react-gallery' } }));
-      const touchedFolders = uniqueNormalizedPaths([currentFolder, ...dedupedRemovedPaths.map(pathParent)]);
+      const touchedFolders = uniqueNormalizedPaths([currentFolder, ...dedupedRemovedPaths.map(pathParent)])
+        .filter((folder) => !dedupedRemovedPaths.some((removedPath) => pathIsInsideRoot(folder, removedPath)));
       const deleteMarkedAt = Date.now();
       for (const folder of touchedFolders) {
         clearPageCacheForFolder(folder);
@@ -8004,19 +8005,24 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       if (!response.ok) throw new Error(String(payload?.error || 'Failed to restore from trash'));
       const { restored, failed, warning } = validateTrashRestoreResult(payload, normalized);
       if (warning) addToast({ type: 'info', message: warning });
+      const restoredTrashPaths = uniqueNormalizedPaths(
+        restored.map((entry) => normalizePath(entry.trashPath)).filter(Boolean),
+      );
       const restoredPaths = restored
         .map((entry) => normalizePath(entry.restoredPath))
         .filter(Boolean);
       if (failed.length > 0 && optimisticSnapshot) {
-        const restoredTrashPaths = uniqueNormalizedPaths(
-          restored.map((entry) => normalizePath(String(entry?.trashPath || ''))).filter(Boolean),
-        );
         rollbackOptimisticPathRemoval(optimisticSnapshot);
         optimisticSnapshot = applyOptimisticPathRemoval(restoredTrashPaths, {
           keepSelection: true,
           clearRemovedViewer: true,
           reason: 'restore',
         });
+      }
+      if (restoredTrashPaths.length > 0) {
+        window.dispatchEvent(new CustomEvent('umbra:gallery-remove-paths', {
+          detail: { paths: restoredTrashPaths, source: 'react-gallery' },
+        }));
       }
       if (restoredPaths.length > 0) {
         rememberRestoredHighlights(restoredPaths);
