@@ -5867,6 +5867,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const handleRequeueQueueHistory = useCallback(async (idInput?: string, options?: { resumeRemaining?: boolean }) => {
     if (queueHistoryBusy) return;
     setQueueHistoryBusy('requeue');
+    let requeueAttempt: {
+      requestId: string;
+      wasPaused: boolean;
+      snapshotSignature: string;
+      socket: WebSocket | null;
+      startSequence: number;
+    } | null = null;
     try {
       const document = await loadQueueHistoryDocument(idInput);
       if (!document) return;
@@ -5912,6 +5919,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         : undefined;
       const editorSnapshot = resolveQueueHistoryEditorSnapshot(document)?.editorSnapshot;
 
+      requeueAttempt = {
+        requestId,
+        wasPaused: queuePausedRef.current,
+        snapshotSignature: backendQueueSnapshotSignatureRef.current,
+        socket: prompterWsRef.current,
+        startSequence: queueStartSequenceRef.current,
+      };
       queueRequestMetaRef.current.set(requestId, {
         mode: snapshot.mode || document.mode || 'selected',
         setId: activeSetId,
@@ -5972,6 +5986,26 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         'success'
       );
     } catch (error: any) {
+      const attempt = requeueAttempt;
+      if (attempt && queueRequestMetaRef.current.has(attempt.requestId)
+        && !queueAdmissionUncertainRequestIdsRef.current.has(attempt.requestId)
+        && !queueAdmissionObservedRequestIdsRef.current.has(attempt.requestId)
+        && !backendQueueSnapshotRequestIdsRef.current.has(attempt.requestId)
+        && !isQueueGroupSubmittedToBridge(attempt.requestId)) {
+        if (queueHistoryByRequestIdRef.current.has(attempt.requestId)) {
+          updateQueueHistoryForRequest(attempt.requestId, { status: 'failed' });
+        }
+        queueRequestMetaRef.current.delete(attempt.requestId);
+        updateQueueStackItemsSynced((prev) => prev.filter((item) => item.requestId !== attempt.requestId));
+        setQueueVisualState((prev) => prev?.requestId === attempt.requestId ? null : prev);
+        if (attempt.wasPaused && !queuePausedRef.current
+          && prompterWsRef.current === attempt.socket
+          && backendQueueSnapshotSignatureRef.current === attempt.snapshotSignature
+          && queueStartSequenceRef.current === attempt.startSequence) {
+          setQueuePaused(true);
+        }
+        scheduleRecoverableQueueSnapshotPersist({ clearWhenEmpty: true, delayMs: 50 });
+      }
       showToast(String(error?.message || 'Failed to requeue history'), 'error');
     } finally {
       setQueueHistoryBusy(null);
@@ -5980,7 +6014,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     dispatchTrackedQueueGroupToBridge,
     loadQueueHistoryDocument,
     queueHistoryBusy,
+    scheduleRecoverableQueueSnapshotPersist,
     showToast,
+    updateQueueHistoryForRequest,
     updateQueueStackItemsSynced,
   ]);
 
