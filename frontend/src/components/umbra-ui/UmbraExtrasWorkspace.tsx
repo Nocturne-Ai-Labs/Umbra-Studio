@@ -393,18 +393,39 @@ export function UmbraExtrasWorkspace({
     }
   }, [browsingOutputFolder, outputFolder, remoteClient, showToast]);
 
-  const addHandoff = React.useCallback((handoff: UmbraUiUpscaleHandoff) => {
+  const addHandoffs = React.useCallback((handoffs: UmbraUiUpscaleHandoff[]) => {
+    const seenPaths = new Set(sources.map((source) => source.path.toLowerCase()).filter(Boolean));
+    const unique = handoffs.filter((handoff) => {
+      const key = handoff.path.toLowerCase();
+      if (!key || seenPaths.has(key)) return false;
+      seenPaths.add(key);
+      return true;
+    });
+    const availableSlots = Math.max(0, MAX_UPSCALE_BATCH_ITEMS - sources.length);
+    if (unique.length > availableSlots) {
+      showToast(`Upscale batches are limited to ${MAX_UPSCALE_BATCH_ITEMS} images.`, 'error');
+    }
+    const accepted = unique.slice(0, availableSlots);
     setSources((current) => {
-      if (current.some((source) => source.path && source.path.toLowerCase() === handoff.path.toLowerCase())) return current;
-      return [...current, {
+      const currentPaths = new Set(current.map((source) => source.path.toLowerCase()).filter(Boolean));
+      const additions = accepted.filter((handoff) => {
+        const key = handoff.path.toLowerCase();
+        if (currentPaths.has(key)) return false;
+        currentPaths.add(key);
+        return true;
+      }).slice(0, Math.max(0, MAX_UPSCALE_BATCH_ITEMS - current.length)).map((handoff) => ({
         id: createSourceId(),
         name: handoff.name,
         path: handoff.path,
         previewUrl: handoff.imageUrl || buildPathPreview(handoff.path),
-      }];
+      }));
+      return additions.length ? [...current, ...additions] : current;
     });
-    if (handoff.autoStart) setPendingAutoStartPath(handoff.path);
-  }, []);
+    const autoStart = handoffs.find((handoff) => handoff.autoStart
+      && (sources.some((source) => source.path.toLowerCase() === handoff.path.toLowerCase())
+        || accepted.includes(handoff)));
+    if (autoStart) setPendingAutoStartPath(autoStart.path);
+  }, [showToast, sources]);
 
   const browseSourceFiles = React.useCallback(async () => {
     if (remoteClient) {
@@ -415,26 +436,24 @@ export function UmbraExtrasWorkspace({
     setBrowsingSourceFiles(true);
     try {
       const paths = await browseUmbraUiMediaToolsSourceFiles('image', sources[0]?.path || outputFolder);
-      for (const path of paths) {
-        addHandoff({
+      addHandoffs(paths.map((path) => ({
           path,
           name: path.replace(/\\/g, '/').split('/').pop() || 'Image',
           createdAt: Date.now(),
-        });
-      }
+      })));
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to select source images.', 'error');
     } finally {
       setBrowsingSourceFiles(false);
     }
-  }, [addHandoff, browsingSourceFiles, outputFolder, remoteClient, showToast, sources]);
+  }, [addHandoffs, browsingSourceFiles, outputFolder, remoteClient, showToast, sources]);
 
   React.useEffect(() => {
     const consume = (rawValue: unknown) => {
       const handoffs = normalizeHandoff(rawValue);
       if (handoffs.length === 0) return;
       setActiveTool('upscale');
-      handoffs.forEach(addHandoff);
+      addHandoffs(handoffs);
     };
     try {
       consume(JSON.parse(window.sessionStorage.getItem(UMBRA_UI_UPSCALE_HANDOFF_KEY) || 'null'));
@@ -446,7 +465,7 @@ export function UmbraExtrasWorkspace({
     };
     window.addEventListener('umbra:umbra-ui-upscale-handoff', onHandoff);
     return () => window.removeEventListener('umbra:umbra-ui-upscale-handoff', onHandoff);
-  }, [addHandoff]);
+  }, [addHandoffs]);
 
   React.useEffect(() => {
     if (!activeJobId) return;
@@ -637,7 +656,10 @@ export function UmbraExtrasWorkspace({
   React.useEffect(() => {
     if (!pendingAutoStartPath || submitting || activeJobId) return;
     const source = sources.find((candidate) => candidate.path.toLowerCase() === pendingAutoStartPath.toLowerCase());
-    if (!source) return;
+    if (!source) {
+      setPendingAutoStartPath('');
+      return;
+    }
     setPendingAutoStartPath('');
     void runSources([source]);
   }, [activeJobId, pendingAutoStartPath, runSources, sources, submitting]);
