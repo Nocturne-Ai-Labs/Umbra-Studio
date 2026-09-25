@@ -9,6 +9,17 @@ export interface QueueControlOriginPolicyInput {
   remoteOrigins?: Iterable<string>;
 }
 
+export function requiresQueueControlBrowserOrigin(path: string): boolean {
+  return path === '/ws/prompter'
+    || path.startsWith('/api/powerprompter/queue')
+    || path === '/api/powerprompter/backend-queue-debug'
+    || path === '/api/umbra-ui/queue/control'
+    || path === '/api/umbra-ui/inpaint/jobs'
+    || path.startsWith('/api/umbra-ui/inpaint/jobs/')
+    || path === '/api/umbra-ui/upscale/jobs'
+    || path.startsWith('/api/umbra-ui/upscale/jobs/');
+}
+
 function parseOrigin(value: string): URL | null {
   try {
     const url = new URL(value);

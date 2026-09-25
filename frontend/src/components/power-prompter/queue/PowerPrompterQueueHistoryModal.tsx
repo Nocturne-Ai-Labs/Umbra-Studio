@@ -1,7 +1,7 @@
 import React from 'react';
 import { ImageIcon, Loader2, Pencil, Play, RefreshCw, Trash2, XCircle } from 'lucide-react';
 import type { PowerPrompterQueueHistorySummary } from './queueCore';
-import { getQueueHistoryReplayPromptIndices, type PowerPrompterQueueHistoryGroup } from './queueHistoryModel';
+import { canResumeRemainingQueueHistory, getQueueHistoryReplayPromptIndices, type PowerPrompterQueueHistoryGroup } from './queueHistoryModel';
 
 function buildQueueHistoryPreviewThumbnailUrl(path: string, revision?: unknown): string {
   const encodedPath = encodeURIComponent(String(path || ''));
@@ -48,7 +48,18 @@ export function PowerPrompterQueueHistoryModal({
   handleRequeueQueueHistory,
   handleDeleteQueueHistory,
 }: PowerPrompterQueueHistoryModalProps) {
+  const [visibleCount, setVisibleCount] = React.useState(100);
+  React.useEffect(() => {
+    if (queueHistoryOpen) setVisibleCount(100);
+  }, [queueHistoryOpen]);
   if (!queueHistoryOpen) return null;
+  let remainingVisible = visibleCount;
+  const visibleGroups = queueHistoryGroups.flatMap((group) => {
+    const items = group.items.slice(0, Math.max(0, remainingVisible));
+    remainingVisible -= items.length;
+    return items.length > 0 ? [{ ...group, items, totalCount: group.items.length }] : [];
+  });
+  const totalGroupedItems = queueHistoryGroups.reduce((count, group) => count + group.items.length, 0);
   const replayTitle = queueHistoryReplayEnabled
     ? ''
     : 'Queue history replay is parked while Queue Manager follows the live queue only';
@@ -95,11 +106,11 @@ export function PowerPrompterQueueHistoryModal({
                   </div>
                 ) : (
                   <div className="space-y-3 pb-2">
-                    {queueHistoryGroups.map((group) => (
+                    {visibleGroups.map((group) => (
                       <div key={`queue-history-group-${group.key}`} className="space-y-2.5">
                         <div className="sticky top-0 z-10 flex items-center justify-between rounded-md border border-white/10 bg-[#090b11]/95 px-2 py-1.5 shadow-[0_8px_18px_rgba(0,0,0,0.28)] backdrop-blur">
                           <span className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">{group.label}</span>
-                          <span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-600">{group.items.length} run{group.items.length === 1 ? '' : 's'}</span>
+                          <span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-600">{group.totalCount} run{group.totalCount === 1 ? '' : 's'}</span>
                         </div>
                         {group.items.map((item) => {
                           const active = item.id === selectedQueueHistoryId;
@@ -114,8 +125,8 @@ export function PowerPrompterQueueHistoryModal({
                             || (item.hasEditorSnapshot ? 'Restore the exact editor snapshot captured for this run' : 'No editor snapshot available for this history entry');
                           const remainingCount = item.resumablePromptCount
                             ?? getQueueHistoryReplayPromptIndices(item, item.promptCount, true).length;
-                          const canResumeRemaining = (item.status === 'interrupted' || item.status === 'canceled' || item.status === 'failed')
-                            && completedCount > 0 && remainingCount > 0;
+                          const canResumeRemaining = canResumeRemainingQueueHistory(item);
+                          const mayHaveUncertainInFlightPrompt = item.backendOwned && item.status === 'interrupted';
                           return (
                             <div
                               key={`queue-history-${item.id}`}
@@ -136,6 +147,11 @@ export function PowerPrompterQueueHistoryModal({
                                     <span>{item.mode}</span>
                                     <span>{dateLabel}</span>
                                   </div>
+                                  {mayHaveUncertainInFlightPrompt && (
+                                    <div className="mt-2 text-[11px] text-amber-200/80">
+                                      A prompt may still be rendering. Check before requeueing; Resume skips in-flight prompts.
+                                    </div>
+                                  )}
                                   {item.outputFolders.length > 0 && (
                                     <div className="mt-2 truncate text-[11px] font-semibold text-zinc-500">
                                       {item.outputFolders.slice(0, 3).join(' / ')}
@@ -234,6 +250,15 @@ export function PowerPrompterQueueHistoryModal({
                         })}
                       </div>
                     ))}
+                    {visibleCount < totalGroupedItems && (
+                      <button
+                        type="button"
+                        onClick={() => setVisibleCount((count) => count + 100)}
+                        className="w-full rounded-md border border-white/15 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-zinc-300 hover:border-white/30"
+                      >
+                        Show more history ({Math.min(visibleCount, totalGroupedItems)} of {totalGroupedItems})
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

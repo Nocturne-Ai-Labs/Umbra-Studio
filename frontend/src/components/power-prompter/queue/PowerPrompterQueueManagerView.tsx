@@ -290,6 +290,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
     queueCancelActionRef,
     queueDestructiveActionBusy,
     hasCancelableQueueWork,
+    hasInterruptibleActiveQueueJob,
     hasClearableQueueWork = hasCancelableQueueWork,
     queueClearActionRef,
     queueEmergencyActionRef,
@@ -518,9 +519,9 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
               </button>
               <button
                 onClick={() => { void queueCancelActionRef.current?.(); }}
-                disabled={queueDestructiveActionBusy || !hasCancelableQueueWork}
+                disabled={queueDestructiveActionBusy || !hasInterruptibleActiveQueueJob}
                 className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-                  queueDestructiveActionBusy || !hasCancelableQueueWork
+                  queueDestructiveActionBusy || !hasInterruptibleActiveQueueJob
                     ? 'border-white/10 bg-white/[0.03] text-zinc-600 cursor-not-allowed'
                     : 'border-amber-400/35 bg-amber-500/10 text-amber-200 hover:border-amber-300/55'
                 }`}

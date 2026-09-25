@@ -47,7 +47,7 @@ import { PowerPrompterHistoryStore } from './backend/PowerPrompterHistoryStore';
 import { PowerPrompterDispatchDelayControl, waitForPowerPrompterDispatchDelay } from './backend/PowerPrompterDispatchDelay';
 import { appendSavedQueueIdSuffix, buildRemainingPowerPrompterQueueSnapshot, getSavedQueueSummaryIndexPath, readSavedQueueSummaryIndex, splitSavedPowerPrompterQueue } from './backend/PowerPrompterSavedQueue';
 import { canInterruptPowerPrompterPrompt, getLiveUmbraUiQueueRequestIds, getQueueClearFutureKeepIds, hasLivePowerPrompterQueuePrompts, shouldFinishStoppedPowerPrompterQueue, summarizePowerPrompterQueuePrompts } from './backend/PowerPrompterQueueLifecycle';
-import { isAllowedQueueControlBrowserOrigin } from './backend/QueueControlOriginPolicy';
+import { isAllowedQueueControlBrowserOrigin, requiresQueueControlBrowserOrigin } from './backend/QueueControlOriginPolicy';
 import { getSavedQueueAvailability } from './shared/power-prompter/savedQueue';
 import { ThumbnailService } from './backend/ThumbnailService';
 import { CIVITAI_PAGE_TIMEOUT_MS, CIVITAI_METADATA_TIMEOUT_MS, requestCivitaiPage, civitaiPageError } from './backend/CivitaiPageRequest';
@@ -11725,7 +11725,7 @@ function forwardPrompterQueueControlToComfyTarget(
         success: controlSucceeded,
         backendHandled: true,
         ...(noSubmittedPrompt ? { noSubmittedPrompt: true } : {}),
-        ...(controlSucceeded ? {} : { error: 'No backend pipeline queue jobs were cleared.' }),
+        ...(controlSucceeded ? {} : { noMatchingWork: true, error: 'No backend pipeline queue jobs were cleared.' }),
       });
       return;
     }
@@ -25808,7 +25808,8 @@ function toPublicPPQueueHistorySummary(summary: PPQueueHistorySummary): Omit<PPQ
   delete publicSummary.promptStatusCodes;
   const statuses = normalizePPQueueHistoryPromptStatuses(summary.promptStatusCodes, summary.promptCount);
   const resumablePromptCount = statuses?.filter((status) =>
-    status === 'pending' || status === 'submitting' || status === 'running' || status === 'interrupted' || status === 'unstarted'
+    status === 'pending' || status === 'interrupted' || status === 'unstarted'
+      || (!summary.backendOwned && (status === 'submitting' || status === 'running'))
   ).length;
   return { ...publicSummary, ...(resumablePromptCount === undefined ? {} : { resumablePromptCount }) };
 }
@@ -32271,10 +32272,7 @@ const server = Bun.serve<UmbraSocketData>({
     const rawOrigin = req.headers.get('origin');
     const resolvedOrigin = resolveCorsOrigin(rawOrigin, req);
 
-    if ((path === '/ws/prompter'
-      || path.startsWith('/api/powerprompter/queue')
-      || path === '/api/powerprompter/backend-queue-debug'
-      || path === '/api/umbra-ui/queue/control')
+    if (requiresQueueControlBrowserOrigin(path)
       && !isAllowedQueueControlBrowserOrigin({
         origin: rawOrigin,
         host: req.headers.get('host'),

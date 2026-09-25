@@ -9,6 +9,7 @@ interface QueueManagerToolbarProps {
   paused: boolean;
   staged: boolean;
   destructiveDisabled: boolean;
+  cancelDisabled: boolean;
   clearDisabled: boolean;
   onStart: () => void;
   onPause: () => void;
@@ -89,7 +90,7 @@ export function QueueManagerToolbar(props: QueueManagerToolbarProps) {
           </button>
           {controlsOpen ? (
             <div className="absolute right-0 top-full z-[90] mt-2 grid w-64 max-w-[90vw] gap-2 rounded-md border border-white/15 bg-[var(--umbra-bg)] p-2 shadow-xl">
-              <button type="button" className={controlClassName} disabled={props.destructiveDisabled} onClick={() => { setControlsOpen(false); props.onCancel(); }}>
+              <button type="button" className={controlClassName} disabled={props.cancelDisabled} onClick={() => { setControlsOpen(false); props.onCancel(); }}>
                 <XCircle size={14} /> Cancel Current Job
               </button>
               <button type="button" className={controlClassName} disabled={props.clearDisabled} onClick={() => { setControlsOpen(false); props.onClear(); }}>
