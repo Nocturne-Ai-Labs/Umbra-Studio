@@ -2354,14 +2354,66 @@ async function reconcileModelManagerFolder(fullPath: string, options: { recoverF
     path: snapshotPath,
     payload: await readModelSnapshotPayload(snapshotPath),
   })));
-  const snapshotsByHash = new Map<string, { path: string; payload: Record<string, unknown> }>();
+  const snapshotOwners = new Map<string, string>();
+  const ownerSidecarCounts = new Map<string, number>();
+  for (const snapshot of snapshots) {
+    const modelName = basename(snapshot.path).slice(0, -MODEL_SNAPSHOT_SUFFIX.length);
+    if (!isModelManagerModelFileName(modelName)) continue;
+    const snapshotFolder = dirname(snapshot.path);
+    const modelFolder = basename(snapshotFolder) === MODEL_ARTIFACT_DIR ? dirname(snapshotFolder) : snapshotFolder;
+    const ownerPath = join(modelFolder, modelName);
+    snapshotOwners.set(snapshot.path, ownerPath);
+    const ownerKey = normalizePathForCompare(ownerPath);
+    ownerSidecarCounts.set(ownerKey, (ownerSidecarCounts.get(ownerKey) || 0) + 1);
+  }
+  const snapshotsByHash = new Map<string, Array<{ path: string; payload: Record<string, unknown> }>>();
   for (const snapshot of snapshots) {
     if (!snapshot.payload) continue;
-    for (const hash of collectModelSnapshotFileHashes(snapshot.payload)) {
-      if (!snapshotsByHash.has(hash)) snapshotsByHash.set(hash, { path: snapshot.path, payload: snapshot.payload });
+    const attachedModelPath = snapshotOwners.get(snapshot.path);
+    if (!attachedModelPath || ownerSidecarCounts.get(normalizePathForCompare(attachedModelPath)) !== 1) continue;
+    const modelName = basename(attachedModelPath);
+    let attachedModelExists = false;
+    try {
+      await fs.lstat(attachedModelPath);
+      attachedModelExists = true;
+    } catch (error: any) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    // Any entry at the original name reserves this snapshot; only a missing
+    // model path makes it available for relinking.
+    if (attachedModelExists) continue;
+    const primaryHashes = collectCivitaiFileHashes(snapshot.payload.file);
+    const versionFiles = toRecord(snapshot.payload.version).files;
+    const sameNameFiles = Array.isArray(versionFiles)
+      ? versionFiles.filter((fileRaw) => String(toRecord(fileRaw).name || '').trim() === modelName)
+      : [];
+    if (sameNameFiles.length > 1) continue;
+    const namedHashes = sameNameFiles.length === 1 ? collectCivitaiFileHashes(sameNameFiles[0]) : [];
+    const namedHashSet = new Set(namedHashes);
+    const reconciled = toRecord(snapshot.payload.reconciled);
+    let relinkHashes: string[];
+    if (reconciled.by === 'hash') {
+      const verifiedHash = String(reconciled.value || '').trim().toLowerCase();
+      const versionHashes = new Set(Array.isArray(versionFiles)
+        ? versionFiles.flatMap((fileRaw) => collectCivitaiFileHashes(fileRaw)) : []);
+      // By-hash recovery may select a later version file while snapshot.file
+      // still points at the first. Use the verified match only if the version
+      // actually lists that file hash.
+      relinkHashes = /^[a-z0-9]{8,128}$/.test(verifiedHash) && versionHashes.has(verifiedHash)
+        ? [verifiedHash] : [];
+    } else {
+      relinkHashes = primaryHashes.length > 0 && namedHashes.length > 0
+        ? primaryHashes.filter((hash) => namedHashSet.has(hash))
+        : namedHashes.length > 0 ? namedHashes : primaryHashes;
+    }
+    for (const hash of relinkHashes) {
+      const matches = snapshotsByHash.get(hash) || [];
+      matches.push({ path: snapshot.path, payload: snapshot.payload });
+      snapshotsByHash.set(hash, matches);
     }
   }
 
+  const consumedSnapshots = new Set<string>();
   let repaired = 0;
   let recovered = 0;
   let recoveredByName = 0;
@@ -2387,14 +2439,33 @@ async function reconcileModelManagerFolder(fullPath: string, options: { recoverF
       continue;
     }
 
-    const localSnapshot = candidateHashes
-      .map((hash) => snapshotsByHash.get(hash))
-      .find(Boolean);
+    const availableSnapshots = new Map<string, { path: string; payload: Record<string, unknown> }>();
+    for (const hash of candidateHashes) {
+      for (const snapshot of snapshotsByHash.get(hash) || []) {
+        if (!consumedSnapshots.has(snapshot.path)) availableSnapshots.set(snapshot.path, snapshot);
+      }
+    }
+    // Multiple orphan sidecars matching a file hash are ambiguous. Leave
+    // them in place rather than assign one model's metadata to another.
+    const localSnapshot = availableSnapshots.size === 1 ? availableSnapshots.values().next().value : undefined;
     if (localSnapshot) {
-      const artifactPaths = await renameModelSnapshotArtifacts(localSnapshot.path, modelFullPath);
-      artifactPaths.forEach((pathEntry) => changedPaths.add(pathEntry));
-      repaired += 1;
-      continue;
+      const originalModelPath = snapshotOwners.get(localSnapshot.path);
+      let ownerStillMissing = Boolean(originalModelPath);
+      if (originalModelPath) {
+        try {
+          await fs.lstat(originalModelPath);
+          ownerStillMissing = false;
+        } catch (error: any) {
+          if (error?.code !== 'ENOENT') throw error;
+        }
+      }
+      if (ownerStillMissing) {
+        const artifactPaths = await renameModelSnapshotArtifacts(localSnapshot.path, modelFullPath);
+        consumedSnapshots.add(localSnapshot.path);
+        artifactPaths.forEach((pathEntry) => changedPaths.add(pathEntry));
+        repaired += 1;
+        continue;
+      }
     }
 
     if (!options.recoverFromCivitai) continue;
