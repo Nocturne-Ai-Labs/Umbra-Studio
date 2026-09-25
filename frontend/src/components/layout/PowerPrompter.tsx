@@ -843,6 +843,14 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     timer: ReturnType<typeof setTimeout>;
     allowNoopClear?: boolean;
   }>());
+  const pendingQueuePauseControlsRef = useRef(new Map<string, {
+    paused: boolean;
+    requiresBackendHandled: boolean;
+    promise: Promise<any>;
+    resolve: (value: any) => void;
+    reject: (reason?: unknown) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>());
   const pendingLoraCatalogRequestsRef = useRef(new Map<string, {
     resolve: (value: string[]) => void;
     reject: (reason?: unknown) => void;
@@ -1049,7 +1057,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const [queuePaused, setQueuePausedState] = useState(() => powerPrompterQueueSession.queuePaused);
   const queuePausedRef = useRef(powerPrompterQueueSession.queuePaused);
   const [queueDispatchDelayMs, setQueueDispatchDelayMs] = useState(0);
-  const [queueControlBusy, setQueueControlBusy] = useState<'start' | 'cancel' | 'clear' | 'emergency' | null>(null);
+  const [queueControlBusy, setQueueControlBusy] = useState<'start' | 'pause' | 'cancel' | 'clear' | 'emergency' | null>(null);
   const [queueConfirmAction, setQueueConfirmAction] = useState<'cancel' | 'clear' | 'emergency' | null>(null);
   const [editorInteractionResetTick, setEditorInteractionResetTick] = useState(0);
   const [editorRemountTick, setEditorRemountTick] = useState(0);
@@ -1964,7 +1972,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     );
   }, [queuePaused, queueRequestGroups, queueStackItems]);
   const queueStartDisabled = !!queueControlBusy || !hasStartableQueuedDispatch;
-  const queueDestructiveActionBusy = queueControlBusy === 'cancel' || queueControlBusy === 'clear' || queueControlBusy === 'emergency';
+  const queueDestructiveActionBusy = queueControlBusy === 'pause' || queueControlBusy === 'cancel' || queueControlBusy === 'clear' || queueControlBusy === 'emergency';
   const activeQueuePosition = useMemo(() => {
     const activeRequestId = String(activeQueueItem?.requestId || queueVisualState?.requestId || '').trim();
     const activeGroup = (
@@ -4612,6 +4620,11 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   };
 
   const rejectAllPendingQueueRequests = (reason: string) => {
+    for (const pending of pendingQueuePauseControlsRef.current.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(reason));
+    }
+    pendingQueuePauseControlsRef.current.clear();
     for (const pending of pendingBackendQueueControlsRef.current.values()) {
       clearTimeout(pending.timer);
       pending.reject(new Error(reason));
@@ -5342,10 +5355,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       backendStackItems.length > 0,
       hasLocalStagedWork,
     );
+    const pauseAwaitingAck = Array.from(pendingQueuePauseControlsRef.current.values())
+      .some((pending) => pending.paused);
     updateQueueStackItemsSynced((previousItems) => mergeBackendQueueSnapshotWithLocalStage(
       backendQueueStackItems, previousItems, backendRequestIds, localStagedRequestIds,
     ));
-    setQueuePaused(nextQueuePaused);
+    setQueuePaused(nextQueuePaused || pauseAwaitingAck);
     setQueueVisualState((previousVisual) => queueVisualForSnapshotWithLocalStage(
       nextVisual, previousVisual, stagedItemsAtReceipt, queueRequestMetaRef.current, localStagedRequestIds,
     ));
@@ -6868,19 +6883,20 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         }
 
         if (messageType === 'queue_pause_result') {
-          if (payload.success === false) {
-            if (typeof payload.paused === 'boolean') {
-              setQueuePaused(payload.paused !== true);
-            }
-            showToast(String(payload.error || 'Queue pause change failed.'), 'error');
+          const controlRequestId = String(payload.requestId || '').trim();
+          const pending = pendingQueuePauseControlsRef.current.get(controlRequestId);
+          if (!pending) return;
+          clearTimeout(pending.timer);
+          pendingQueuePauseControlsRef.current.delete(controlRequestId);
+          if (payload.success !== true || (pending.requiresBackendHandled && payload.backendHandled !== true)
+            || payload.paused !== pending.paused) {
+            sendPrompterWsMessage({ type: 'bridge_catalog_request' });
+            pending.reject(new Error(String(payload.error || 'Queue pause change was not confirmed. Refresh the queue before retrying.')));
             return;
           }
-          if (typeof payload.paused === 'boolean') {
-            if (payload.backendHandled === true) {
-              backendQueuePauseRequestedRef.current = payload.paused === true;
-            }
-            setQueuePaused(payload.paused === true);
-          }
+          if (pending.requiresBackendHandled) backendQueuePauseRequestedRef.current = pending.paused;
+          setQueuePaused(pending.paused);
+          pending.resolve(payload);
           return;
         }
 
@@ -9109,17 +9125,56 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     paused: boolean,
     targetBridgeId?: string,
     queueTargetType?: PowerPrompterQueueTargetType
-  ): boolean => {
+  ): Promise<any> => {
     if (!prompterWsReadyRef.current || !prompterWsRef.current || prompterWsRef.current.readyState !== WebSocket.OPEN) {
-      return false;
+      return Promise.reject(new Error('Power Prompter websocket disconnected. Queue pause change was not confirmed.'));
+    }
+    const inFlight = Array.from(pendingQueuePauseControlsRef.current.values())[0];
+    if (inFlight) {
+      return inFlight.paused === paused
+        ? inFlight.promise
+        : Promise.reject(new Error('Wait for the current queue pause change before trying again.'));
     }
     const resolvedTarget = resolveQueueControlTarget(targetBridgeId, queueTargetType);
-    return sendPrompterWsMessage({
+    const resolvedBridgeId = String(resolvedTarget.targetBridgeId || '').trim();
+    // Match UmbraServer's isBackendPipelineTarget route, including its nonempty workflow ID fallback.
+    const apiWorkflowId = resolvedBridgeId.startsWith('api-workflow:')
+      ? resolvedBridgeId.slice('api-workflow:'.length).trim()
+      : resolvedBridgeId;
+    const requiresBackendHandled = resolvedBridgeId.toLowerCase().startsWith('pipeline:')
+      || !!apiWorkflowId
+      || ['pipeline', 'api_workflow'].includes(String(resolvedTarget.queueTargetType || '').trim().toLowerCase());
+    const requestId = createRequestId();
+    let resolvePending!: (value: any) => void;
+    let rejectPending!: (reason?: unknown) => void;
+    const promise = new Promise<any>((resolve, reject) => {
+      resolvePending = resolve;
+      rejectPending = reject;
+    });
+    const timer = setTimeout(() => {
+      pendingQueuePauseControlsRef.current.delete(requestId);
+      sendPrompterWsMessage({ type: 'bridge_catalog_request' });
+      rejectPending(new Error('Timed out waiting for queue pause confirmation. Check the queue state before retrying.'));
+    }, 20_000);
+    pendingQueuePauseControlsRef.current.set(requestId, {
+      paused, requiresBackendHandled, promise, resolve: resolvePending, reject: rejectPending, timer,
+    });
+    const sent = sendPrompterWsMessage({
       type: paused ? 'queue_pause' : 'queue_resume',
-      requestId: createRequestId(),
+      requestId,
       targetBridgeId: resolvedTarget.targetBridgeId || undefined,
       queueTargetType: resolvedTarget.queueTargetType,
     });
+    if (!sent) {
+      clearTimeout(timer);
+      pendingQueuePauseControlsRef.current.delete(requestId);
+      rejectPending(new Error('Power Prompter websocket disconnected. Queue pause change was not confirmed.'));
+    } else if (paused) {
+      // Hold local dispatch while waiting; only the matching route ACK confirms success.
+      if (requiresBackendHandled) backendQueuePauseRequestedRef.current = true;
+      setQueuePaused(true);
+    }
+    return promise;
   };
 
   const requestQueueDispatchDelayUpdateThroughWebSocket = (
@@ -9764,7 +9819,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   };
 
   const handleToggleQueuePause = async () => {
-    if (queueControlBusy || queueStackItems.length <= 0) return;
+    if (queueControlBusy || pendingQueuePauseControlsRef.current.size > 0 || queueStackItems.length <= 0) return;
     if (POWER_PROMPTER_QUEUE_SNAPSHOT_RECOVERY_ENABLED
       && queuePaused
       && backendQueueSnapshotRequestIdsRef.current.size === 0) {
@@ -9801,59 +9856,71 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     const targetPaused = !queuePaused;
     const activeVisualRequestId = String(queueVisualStateRef.current?.requestId || '').trim();
     const activeMeta = activeVisualRequestId ? queueRequestMetaRef.current.get(activeVisualRequestId) : null;
-    const sent = requestQueuePauseToggleThroughWebSocket(
-      targetPaused,
-      activeMeta?.targetBridgeId || effectiveQueueTargetBridgeId,
-      activeMeta?.queueTargetType || selectedQueueTargetType
-    );
-    if (!sent) {
-      showToast(`Failed to ${targetPaused ? 'pause' : 'resume'} queue`, 'error');
-      return;
+    setQueueControlBusy('pause');
+    try {
+      await requestQueuePauseToggleThroughWebSocket(
+        targetPaused,
+        activeMeta?.targetBridgeId || effectiveQueueTargetBridgeId,
+        activeMeta?.queueTargetType || selectedQueueTargetType
+      );
+      showToast(targetPaused ? 'Queue paused after current prompt' : 'Queue resumed', 'success');
+    } catch (error: any) {
+      showToast(String(error?.message || `Could not confirm queue ${targetPaused ? 'pause' : 'resume'}.`), 'error');
+    } finally {
+      setQueueControlBusy((prev) => prev === 'pause' ? null : prev);
     }
-    if ((activeMeta?.queueTargetType || selectedQueueTargetType) === 'pipeline') {
-      backendQueuePauseRequestedRef.current = targetPaused;
-    }
-    setQueuePaused(targetPaused);
-    showToast(targetPaused ? 'Queue paused after current prompt' : 'Queue resumed', 'success');
   };
 
-  const pauseQueueForQueueEditor = useCallback((
+  const pauseQueueForQueueEditor = useCallback(async (
     fallbackMeta?: QueueRequestMeta | null,
     options?: { silentIfAlreadyPaused?: boolean }
-  ) => {
-    if (queuePausedRef.current) {
+  ): Promise<boolean> => {
+    const hasLiveBackendWork = backendQueueSnapshotRequestIdsRef.current.size > 0
+      || queueStackItemsRef.current.some((item) =>
+        !item.exiting && !isLocalStagedQueueRequestId(item.requestId)
+        && (item.status === 'pending' || item.status === 'running')
+      );
+    const hasQueuedWork = queueStackItemsRef.current.some((item) =>
+      !item.exiting && (item.status === 'pending' || item.status === 'running')
+    );
+    const pausePending = Array.from(pendingQueuePauseControlsRef.current.values())[0];
+    if (queuePausedRef.current && !pausePending
+      && ((!hasQueuedWork && !hasLiveBackendWork) || (hasCurrentBackendQueueSnapshot()
+        && (!hasLiveBackendWork || backendQueueSnapshotPausedRef.current)))) {
       if (options?.silentIfAlreadyPaused !== true) {
         showToast('Queue is paused for editing.', 'success');
       }
       return true;
     }
-    if (queueStackItemsRef.current.length <= 0) return true;
+    if (queueStackItemsRef.current.length <= 0 && !hasLiveBackendWork && !pausePending) return true;
     const activeVisualRequestId = String(queueVisualStateRef.current?.requestId || '').trim();
     const activeMeta = activeVisualRequestId ? queueRequestMetaRef.current.get(activeVisualRequestId) : null;
     const queueTargetType = activeMeta?.queueTargetType || fallbackMeta?.queueTargetType || selectedQueueTargetTypeRef.current;
     const targetBridgeId = activeMeta?.targetBridgeId || fallbackMeta?.targetBridgeId || effectiveQueueTargetBridgeIdRef.current;
-    const sent = requestQueuePauseToggleThroughWebSocket(
-      true,
-      targetBridgeId,
-      queueTargetType
-    );
-    if (!sent) {
-      showToast('Queue editor opened, but Umbra could not send a pause command to the queue tracker.', 'error');
+    if (pausePending && !pausePending.paused) {
+      showToast('Wait for queue resume confirmation before editing.', 'error');
       return false;
     }
-    if (queueTargetType === 'pipeline') {
-      backendQueuePauseRequestedRef.current = true;
+    setQueueControlBusy('pause');
+    try {
+      await requestQueuePauseToggleThroughWebSocket(true, targetBridgeId, queueTargetType);
+      scheduleRecoverableQueueSnapshotPersist({ paused: true, clearWhenEmpty: false, delayMs: 50 });
+      if (options?.silentIfAlreadyPaused !== true) {
+        showToast('Queue paused for editing. The current prompt can finish, then edited groups apply safely.', 'success');
+      }
+      return true;
+    } catch (error: any) {
+      showToast(String(error?.message || 'Queue pause was not confirmed. Reopen the editor after reconnecting.'), 'error');
+      return false;
+    } finally {
+      setQueueControlBusy((prev) => prev === 'pause' ? null : prev);
     }
-    setQueuePaused(true);
-    scheduleRecoverableQueueSnapshotPersist({ paused: true, clearWhenEmpty: false, delayMs: 50 });
-    showToast('Queue paused for editing. The current prompt can finish, then edited groups apply safely.', 'success');
-    return true;
   }, [
     scheduleRecoverableQueueSnapshotPersist,
     showToast,
   ]);
 
-  const handleOpenQueueGroupEditor = useCallback((group: QueueRequestGroup) => {
+  const handleOpenQueueGroupEditor = useCallback(async (group: QueueRequestGroup) => {
     if (!POWER_PROMPTER_QUEUE_EDITOR_ENABLED) {
       showToast('Queue group editing is parked while Queue Manager uses the live queue only.', 'error');
       return;
@@ -9874,7 +9941,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     if (!meta?.editorSnapshot && !persistedGroupSnapshot?.editorSnapshot) {
       showToast('This group did not have an editor snapshot yet, so Umbra opened the current card state as a starting point.', 'error');
     }
-    if (!pauseQueueForQueueEditor(meta)) return;
+    if (!await pauseQueueForQueueEditor(meta)) return;
     const normalizedDocument = normalizePowerPrompterCardDocument(editorSnapshot.document, editorSnapshot.sourceFile);
     setQueueEditorDocument({
       ...normalizedDocument,
@@ -10046,7 +10113,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       buildSettings: queueEditorDraft.queueBuildSettings,
     }, { includeQueue: true });
     const editMeta = queueRequestMetaRef.current.get(queueEditorDraft.requestId) || null;
-    if (!pauseQueueForQueueEditor(editMeta, { silentIfAlreadyPaused: true })) {
+    if (!await pauseQueueForQueueEditor(editMeta, { silentIfAlreadyPaused: true })) {
       setQueueEditorSaving(false);
       return;
     }
@@ -10337,7 +10404,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       buildSettings: queueEditorDraft.queueBuildSettings,
     }, { includeQueue: true });
     const editMeta = queueRequestMetaRef.current.get(queueEditorDraft.requestId) || null;
-    if (!pauseQueueForQueueEditor(editMeta, { silentIfAlreadyPaused: true })) {
+    if (!await pauseQueueForQueueEditor(editMeta, { silentIfAlreadyPaused: true })) {
       setQueueEditorSaving(false);
       return;
     }
@@ -10584,17 +10651,18 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     // Backend-owned paused queues already contain their resolved prompts and seeds.
     // Resume them in place; remapping IDs and batching here would submit duplicates.
     if (effectiveQueuePaused && backendQueueSnapshotRequestIdsRef.current.size > 0) {
-      const sent = requestQueuePauseToggleThroughWebSocket(
-        false,
-        activeMeta?.targetBridgeId || effectiveQueueTargetBridgeId,
-        'pipeline',
-      );
-      if (!sent) {
-        showToast('Power Prompter is disconnected. Unable to resume the queue.', 'error');
-        return;
+      setQueueControlBusy('pause');
+      try {
+        await requestQueuePauseToggleThroughWebSocket(
+          false,
+          activeMeta?.targetBridgeId || effectiveQueueTargetBridgeId,
+          'pipeline',
+        );
+      } catch (error: any) {
+        showToast(String(error?.message || 'Queue resume was not confirmed.'), 'error');
+      } finally {
+        setQueueControlBusy((prev) => prev === 'pause' ? null : prev);
       }
-      backendQueuePauseRequestedRef.current = false;
-      setQueuePaused(false);
       return;
     }
     if (activeMeta && !effectiveQueuePaused && activeVisualHasLiveDispatch) {

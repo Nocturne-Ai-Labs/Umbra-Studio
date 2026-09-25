@@ -5,7 +5,7 @@ import { QUEUE_MANAGER_PROMPT_ROW_VISIBILITY_STYLE } from './queueCore';
 import type { GenerationPreviewState, QueueRequestGroup, QueueSetGroup, QueueStackItem, QueueVisualState } from './queueCore';
 import { classifyUmbraPrompt } from '@/lib/nsfwPrivacy';
 
-type QueueControlBusy = 'start' | 'cancel' | 'clear' | 'emergency' | null;
+type QueueControlBusy = 'start' | 'pause' | 'cancel' | 'clear' | 'emergency' | null;
 type ActiveQueuePosition = { position: number; total: number; remaining: number } | null;
 
 const TRACKER_PROMPT_VIRTUALIZE_THRESHOLD = 18;
