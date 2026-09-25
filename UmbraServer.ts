@@ -5259,6 +5259,7 @@ const powerPrompterQueueControllerState: PowerPrompterQueueControllerState = {
   updatedAt: 0,
 };
 const backendPowerPrompterExecutionBlocks = new Set<string>();
+const pendingPowerPrompterGroupSourceEdits = new Set<string>();
 const powerPrompterDispatchDelayControl = new PowerPrompterDispatchDelayControl();
 
 type UmbraUiVideoReviewStatus = PowerPrompterQueueControllerPromptStatus;
@@ -5679,6 +5680,11 @@ type BackendPPHistory = {
 };
 const ppBackendHistory = new Map<string, BackendPPHistory>();
 
+function isPowerPrompterGroupEditHeld(requestId: string): boolean {
+  return pendingPowerPrompterGroupSourceEdits.has(requestId)
+    || ppBackendHistory.get(requestId)?.admissionGate?.status === 'pending';
+}
+
 function publishBackendPPHistory(history: BackendPPHistory, summary: PPQueueHistorySummary | null) {
   if (!summary || history.deleted) return;
   const changed = history.summary?.updatedAt !== summary.updatedAt;
@@ -6044,7 +6050,11 @@ function normalizePowerPrompterPromptIndices(value: unknown): number[] {
   return Array.from(new Set(value.filter((index): index is number => typeof index === 'number' && Number.isSafeInteger(index) && index >= 0)));
 }
 
-function applyPowerPrompterQueueControllerPromptRemovals(data: any, preferredSourceWs?: ServerWebSocket<unknown> | null) {
+function applyPowerPrompterQueueControllerPromptRemovals(
+  data: any,
+  preferredSourceWs?: ServerWebSocket<unknown> | null,
+  deferQueuedWorkRefresh = false,
+) {
   const rawRemovals = Array.isArray(data?.promptRemovals) ? data.promptRemovals : [];
   const affectedRequestIds = new Set<string>();
   const removedRequestIds = new Set<string>();
@@ -6054,6 +6064,7 @@ function applyPowerPrompterQueueControllerPromptRemovals(data: any, preferredSou
   for (const rawRemoval of rawRemovals) {
     const requestId = String(rawRemoval?.requestId || '').trim();
     if (!requestId) continue;
+    if (!deferQueuedWorkRefresh && isPowerPrompterGroupEditHeld(requestId)) continue;
     const request = findPowerPrompterQueueControllerRequest(requestId);
     const task = backendPowerPrompterQueueTasks.get(requestId);
     if (!request && !task) continue;
@@ -6080,7 +6091,7 @@ function applyPowerPrompterQueueControllerPromptRemovals(data: any, preferredSou
     if (appliedIndices.length <= 0) continue;
     affectedRequestIds.add(requestId);
     appliedRemovals.push({ requestId, promptIndices: appliedIndices });
-    refreshBackendPowerPrompterQueuedWorkFromController(requestId);
+    if (!deferQueuedWorkRefresh) refreshBackendPowerPrompterQueuedWorkFromController(requestId);
     const remainingLivePrompts = request?.prompts.some((prompt) =>
       prompt.status === 'pending'
       || prompt.status === 'submitting'
@@ -6154,6 +6165,7 @@ function applyPowerPrompterQueueControllerReorder(data: any, preferredSourceWs?:
   }
 
   for (const entry of promptOrders) {
+    if (isPowerPrompterGroupEditHeld(entry.requestId)) continue;
     const request = findPowerPrompterQueueControllerRequest(entry.requestId);
     if (!request) continue;
     const oldPrompts = [...request.prompts].sort((a, b) => a.promptIndex - b.promptIndex);
@@ -6556,6 +6568,28 @@ async function addPowerPrompterQueueControllerGroup(
   promptCount: number;
   sourceCleanup: ReturnType<typeof applyPowerPrompterQueueControllerPromptRemovals>;
 }> {
+  const sourceRequestId = String(rawSourceRequestId || '').trim();
+  if (!sourceRequestId) throw new Error('Source queue group request id is required.');
+  if (pendingPowerPrompterGroupSourceEdits.has(sourceRequestId)) {
+    throw new Error('The source queue group is already being edited. Reopen the queue editor from the current Queue Manager state.');
+  }
+  pendingPowerPrompterGroupSourceEdits.add(sourceRequestId);
+  try {
+    return await addPowerPrompterQueueControllerGroupReserved(sourceRequestId, rawGroup, preferredSourceWs);
+  } finally {
+    pendingPowerPrompterGroupSourceEdits.delete(sourceRequestId);
+  }
+}
+
+async function addPowerPrompterQueueControllerGroupReserved(
+  rawSourceRequestId: unknown,
+  rawGroup: unknown,
+  preferredSourceWs?: ServerWebSocket<unknown> | null,
+): Promise<{
+  request: PowerPrompterQueueControllerRequest;
+  promptCount: number;
+  sourceCleanup: ReturnType<typeof applyPowerPrompterQueueControllerPromptRemovals>;
+}> {
   const dispatchDelayRevision = powerPrompterDispatchDelayControl.revision;
   const sourceRequestId = String(rawSourceRequestId || '').trim();
   if (!sourceRequestId) throw new Error('Source queue group request id is required.');
@@ -6564,6 +6598,11 @@ async function addPowerPrompterQueueControllerGroup(
   if (!sourceRequest) {
     throw new Error('The source queue group is no longer available in the backend queue. Reopen the queue editor from the current Queue Manager state.');
   }
+  if (sourceRequest.origin !== 'power_prompter') {
+    throw new Error('The source queue group has no durable Power Prompter history.');
+  }
+  const originalSourceRequest = sourceRequest;
+  const sourcePendingFingerprint = JSON.stringify(sourceRequest.prompts.filter((prompt) => prompt.status === 'pending'));
 
   const group = rawGroup as Record<string, any>;
   const requestId = String(group.requestId || crypto.randomUUID()).trim();
@@ -6598,13 +6637,36 @@ async function addPowerPrompterQueueControllerGroup(
   const sourceQueuedIndexBeforeCleanup = backendPowerPrompterQueuedWork.findIndex((entry) => entry.requestId === sourceRequestId);
   if (!sourceRequest || (!sourceTask && sourceQueuedIndexBeforeCleanup < 0)
     || isPowerPrompterQueueControllerTerminalStatus(sourceRequest.status)
-    || sourceTask?.canceled || sourceTask?.abortController.signal.aborted || sourceTask?.stopAfterCurrent) {
+    || sourceTask?.canceled || sourceTask?.abortController.signal.aborted || sourceTask?.stopAfterCurrent
+    || sourceRequest !== originalSourceRequest
+    || JSON.stringify(sourceRequest.prompts.filter((prompt) => prompt.status === 'pending')) !== sourcePendingFingerprint) {
     throw new Error('The source queue group is no longer available in the backend queue. Reopen the queue editor from the current Queue Manager state.');
   }
   if (backendPowerPrompterQueueTasks.has(requestId) || backendPowerPrompterQueuedWork.some((entry) => entry.requestId === requestId) || findPowerPrompterQueueControllerRequest(requestId)) {
     throw new Error(`Duplicate backend queue request id (${requestId}) is already queued.`);
   }
   const sourceControllerIndexBeforeCleanup = powerPrompterQueueControllerState.requests.findIndex((entry) => entry.requestId === sourceRequestId);
+  const sourceHistory = ppBackendHistory.get(sourceRequestId);
+  if (!sourceHistory || sourceHistory.deleted) throw new Error('The source queue history is unavailable. Reopen the queue editor.');
+  const sourceQueuedWork = sourceQueuedIndexBeforeCleanup >= 0 ? backendPowerPrompterQueuedWork[sourceQueuedIndexBeforeCleanup] : null;
+  const priorSourceAdmissionGate = sourceQueuedWork?.admissionGate;
+  const sourceHoldGate = createPowerPrompterAdmissionGate();
+  const newGroupGate = createPowerPrompterAdmissionGate();
+  const executionBlockId = `add_group:${requestId}`;
+  // A source worker may already be compiling a prompt. The submit-marker wait below
+  // observes this block before it can POST the next prompt to ComfyUI.
+  backendPowerPrompterExecutionBlocks.add(executionBlockId);
+  if (sourceQueuedWork) sourceQueuedWork.admissionGate = sourceHoldGate;
+  let sourceRemovalDurable = false;
+  let sourceCleanup: ReturnType<typeof applyPowerPrompterQueueControllerPromptRemovals> = {
+    affectedRequestIds: [], removedRequestIds: [], promptRemovals: [],
+  };
+  let newQueuedWork: BackendPowerPrompterQueuedWork | null = null;
+  const originalPendingPrompts = new Map(sourceRequest.prompts
+    .filter((prompt) => prompt.status === 'pending')
+    .map((prompt) => [prompt.promptIndex, { ...prompt }] as const));
+  const originalTaskRemovedPromptIndices = sourceTask ? new Set(sourceTask.removedPromptIndices) : null;
+  try {
 
   const promptSetIds = prompts.map((_, index) => clampPPQueueSetId(Array.isArray(state.promptSetIds) ? state.promptSetIds[index] : group.activeSetId ?? sourceRequest.activeSetId));
   const promptOutputSubfolders = prompts.map((_, index) => String(Array.isArray(state.promptOutputSubfolders) ? state.promptOutputSubfolders[index] || '' : '').trim());
@@ -6626,26 +6688,83 @@ async function addPowerPrompterQueueControllerGroup(
     generationByPrompt,
     preservePaused: true,
     historyState: state,
+    admissionGate: newGroupGate,
   }, preferredSourceWs, 'group_added');
 
   const request = findPowerPrompterQueueControllerRequest(requestId);
   if (!request) throw new Error('Failed to add the new queue group.');
+  await awaitBackendPowerPrompterInitialHistory([requestId]);
+  if (findPowerPrompterQueueControllerRequest(sourceRequestId) !== sourceRequest
+    || JSON.stringify(sourceRequest.prompts.filter((prompt) => prompt.status === 'pending')) !== sourcePendingFingerprint
+    || sourceTask?.canceled || sourceTask?.abortController.signal.aborted || sourceTask?.stopAfterCurrent) {
+    throw new Error('The source queue group changed while the new group was being saved. Reopen the queue editor.');
+  }
 
-  const sourcePendingPromptIndices = sourceRequest.prompts
-    .filter((prompt) => prompt.status === 'pending')
-    .map((prompt) => prompt.promptIndex);
-  let sourceCleanup = sourcePendingPromptIndices.length > 0
+  newQueuedWork = {
+    sourceWs: preferredSourceWs || null,
+    requestId,
+    admissionGate: newGroupGate,
+    prompts,
+    loaded,
+    data: {
+      ...group,
+      mode: group.mode || state.mode || sourceRequest.mode || 'selected',
+      pipeline,
+      state: {
+        ...state,
+        pipeline,
+        modelFamily: pipeline.modelFamily,
+        umbraUiFeature: pipeline.feature,
+        mode: group.mode || state.mode || sourceRequest.mode || 'selected',
+        activeSetId: promptSetIds[0] ?? sourceRequest.activeSetId,
+        activeQueueSet: promptSetIds[0] ?? sourceRequest.activeSetId,
+        activePrompt: prompts[0] || '',
+        prompts,
+        joinedPrompt: prompts.join(', '),
+        promptSetIds,
+        promptOutputSubfolders,
+        promptStyleNames,
+        generation: generationByPrompt[0] ?? normalizePPGenerationControls(state.generation),
+        generationByPrompt,
+      },
+    },
+  };
+  // Other drain paths may already be active. Put the new work behind its gate
+  // before the source removal write, so a post-commit exception cannot lose it.
+  backendPowerPrompterQueuedWork.push(newQueuedWork);
+
+  const sourcePendingPromptIndices = Array.from(originalPendingPrompts.keys());
+  sourceCleanup = sourcePendingPromptIndices.length > 0
     ? applyPowerPrompterQueueControllerPromptRemovals({
       promptRemovals: [{
         requestId: sourceRequestId,
         promptIndices: sourcePendingPromptIndices,
       }],
-    }, preferredSourceWs)
+    }, preferredSourceWs, true)
     : {
       affectedRequestIds: [],
       removedRequestIds: [],
       promptRemovals: [],
     };
+  if (sourceCleanup.promptRemovals.reduce((count, removal) => count + removal.promptIndices.length, 0) !== sourcePendingPromptIndices.length) {
+    throw new Error('The source queue group changed while its prompts were being moved. Reopen the queue editor.');
+  }
+  if (sourcePendingPromptIndices.length > 0) {
+    // `ready` absorbs write failures. This specific progress write rejects and is
+    // the source half of the add-group admission boundary.
+    const sourceRemovalWrite = sourceHistory.lastWrite;
+    if (!sourceRemovalWrite) throw new Error('The source queue removal was not saved.');
+    await sourceRemovalWrite;
+  }
+  sourceRemovalDurable = true;
+  if (findPowerPrompterQueueControllerRequest(sourceRequestId) !== sourceRequest
+    || sourcePendingPromptIndices.some((index) => {
+      const prompt = sourceRequest.prompts[index];
+      return prompt?.status !== 'canceled' || prompt.error !== 'removed';
+    })) {
+    throw new Error(`Queue group ${requestId} was saved, but the source changed during its transfer. Reopen Queue Manager before retrying.`);
+  }
+  if (sourcePendingPromptIndices.length > 0) refreshBackendPowerPrompterQueuedWorkFromController(sourceRequestId);
   const sourcePromptRemovalApplied = sourceCleanup.promptRemovals.some((entry) => entry.requestId === sourceRequestId && entry.promptIndices.length > 0);
   const sourceHasActiveLock = backendPowerPrompterQueueTasks.has(sourceRequestId)
     || (findPowerPrompterQueueControllerRequest(sourceRequestId)?.prompts.some((prompt) =>
@@ -6678,35 +6797,6 @@ async function addPowerPrompterQueueControllerGroup(
     powerPrompterQueueControllerState.requests.splice(insertIndex, 0, added);
   }
 
-  backendPowerPrompterQueuedWork.push({
-    sourceWs: preferredSourceWs || null,
-    requestId,
-    prompts,
-    loaded,
-    data: {
-      ...group,
-      mode: group.mode || state.mode || sourceRequest.mode || 'selected',
-      pipeline,
-      state: {
-        ...state,
-        pipeline,
-        modelFamily: pipeline.modelFamily,
-        umbraUiFeature: pipeline.feature,
-        mode: group.mode || state.mode || sourceRequest.mode || 'selected',
-        activeSetId: promptSetIds[0] ?? sourceRequest.activeSetId,
-        activeQueueSet: promptSetIds[0] ?? sourceRequest.activeSetId,
-        activePrompt: prompts[0] || '',
-        prompts,
-        joinedPrompt: prompts.join(', '),
-        promptSetIds,
-        promptOutputSubfolders,
-        promptStyleNames,
-        generation: generationByPrompt[0] ?? normalizePPGenerationControls(state.generation),
-        generationByPrompt,
-      },
-    },
-  });
-
   const currentSourceQueuedIndex = backendPowerPrompterQueuedWork.findIndex((entry) => entry.requestId === sourceRequestId);
   const sourceQueuedIndex = currentSourceQueuedIndex >= 0 ? currentSourceQueuedIndex : sourceQueuedIndexBeforeCleanup;
   const addedQueuedIndex = backendPowerPrompterQueuedWork.findIndex((entry) => entry.requestId === requestId);
@@ -6721,6 +6811,7 @@ async function addPowerPrompterQueueControllerGroup(
     backendPowerPrompterQueuedWork.splice(insertIndex, 0, addedWork);
   }
 
+  releaseBackendPowerPrompterAdmission(newGroupGate);
   broadcastPowerPrompterQueueControllerSnapshot('group_added', preferredSourceWs);
   appendPowerPrompterQueueLog('backend_queue_group_added', {
     sourceRequestId,
@@ -6742,6 +6833,52 @@ async function addPowerPrompterQueueControllerGroup(
     promptCount: prompts.length,
     sourceCleanup,
   };
+  } catch (error) {
+    if (!sourceRemovalDurable) {
+      let restored = false;
+      for (const [promptIndex, originalPrompt] of originalPendingPrompts) {
+        const current = sourceRequest.prompts[promptIndex];
+        if (current?.status === 'canceled' && current.error === 'removed') {
+          sourceRequest.prompts[promptIndex] = originalPrompt;
+          restored = true;
+        }
+        if (originalTaskRemovedPromptIndices && !originalTaskRemovedPromptIndices.has(promptIndex)) {
+          sourceTask?.removedPromptIndices.delete(promptIndex);
+        }
+      }
+      if (restored) broadcastPowerPrompterQueueControllerSnapshot('group_add_rolled_back', preferredSourceWs);
+      await rollbackBackendPowerPrompterAdmission([requestId], newGroupGate);
+    } else {
+      // The source removal and new snapshot are both committed. Keep the held
+      // new work runnable even if a later in-memory refresh or log fails.
+      if (newQueuedWork && !backendPowerPrompterQueuedWork.includes(newQueuedWork)
+        && !backendPowerPrompterQueueTasks.has(requestId)) {
+        backendPowerPrompterQueuedWork.push(newQueuedWork);
+      }
+      try { releaseBackendPowerPrompterAdmission(newGroupGate); }
+      catch (releaseError) {
+        console.warn('[PowerPrompter] Committed group admission notification failed:', requestId, releaseError);
+      }
+      void drainBackendPowerPrompterQueue().catch((drainError) => {
+        appendPowerPrompterQueueLog('backend_queue_drain_failed', {
+          error: String(drainError instanceof Error ? drainError.message : drainError),
+        });
+      });
+      const committedRequest = findPowerPrompterQueueControllerRequest(requestId);
+      if (committedRequest) {
+        return {
+          request: { ...committedRequest, prompts: committedRequest.prompts.map((prompt) => ({ ...prompt })) },
+          promptCount: prompts.length,
+          sourceCleanup,
+        };
+      }
+    }
+    throw error;
+  } finally {
+    if (sourceQueuedWork?.admissionGate === sourceHoldGate) sourceQueuedWork.admissionGate = priorSourceAdmissionGate;
+    sourceHoldGate.settle(true);
+    backendPowerPrompterExecutionBlocks.delete(executionBlockId);
+  }
 }
 
 function finishPowerPrompterQueueControllerRequest(
@@ -9719,6 +9856,7 @@ function applyBackendPowerPrompterQueueControl(
   if (type === 'queue_cancel') {
     const stopAllUmbraUi = data?.scope === 'umbra_ui_all';
     for (const requestId of requestIds) {
+      if (isPowerPrompterGroupEditHeld(requestId)) continue;
       if (markBackendPowerPrompterQueueStopAfterCurrent(requestId, 'cancel')) {
         affected.push(requestId);
         if (stopAllUmbraUi) {
@@ -9759,11 +9897,13 @@ function applyBackendPowerPrompterQueueControl(
   );
   const protectedRequestIds = new Set<string>();
   for (const requestId of keepCurrentIds) {
+    if (isPowerPrompterGroupEditHeld(requestId)) continue;
     if (!markBackendPowerPrompterQueueStopAfterCurrent(requestId, 'clear_future')) continue;
     protectedRequestIds.add(requestId);
     affected.push(requestId);
   }
-  const futureRequestIds = requestIds.filter((requestId) => !protectedRequestIds.has(requestId));
+  const futureRequestIds = requestIds.filter((requestId) => !protectedRequestIds.has(requestId)
+    && !isPowerPrompterGroupEditHeld(requestId));
   for (const requestId of futureRequestIds) {
     if (cancelBackendPowerPrompterQueueTask(requestId, 'clear_future')) affected.push(requestId);
     else if (cancelBackendPowerPrompterQueuedWork(requestId, 'clear_future')) affected.push(requestId);
@@ -9857,7 +9997,7 @@ async function waitForDurablePowerPrompterSubmitMarker(
       const write = history.lastWrite;
       if (!write) throw new Error('Queue submission status was not saved.');
       await write;
-      return;
+      break;
     } catch (error) {
       if (history) history.progressSignature = '';
       powerPrompterQueueControllerState.paused = true;
@@ -9869,6 +10009,9 @@ async function waitForDurablePowerPrompterSubmitMarker(
       await waitForBackendPowerPrompterQueueResume(task, requestId, sourceWs);
     }
   }
+  // A group edit can begin while this worker compiles its workflow. Recheck the
+  // scoped execution block after the durable marker and before the external POST.
+  await waitForBackendPowerPrompterQueueResume(task, requestId, sourceWs);
 }
 
 function getPPQueueSnapshotRequestGroups(snapshot: PowerPrompterQueueSnapshot | null): Array<{
@@ -10285,10 +10428,16 @@ async function replacePersistedPPQueueGroup(
   lockedPromptCount?: number;
   request?: PowerPrompterQueueControllerRequest | null;
 }> {
+  if (isPowerPrompterGroupEditHeld(requestId)) {
+    throw new Error('The queue group is being moved. Reopen the queue editor after the move completes.');
+  }
   const request = findPowerPrompterQueueControllerRequest(requestId);
   const pipelineBinding = request
     ? await resolvePowerPrompterQueueReplacementPipeline(request, replacement)
     : null;
+  if (isPowerPrompterGroupEditHeld(requestId)) {
+    throw new Error('The queue group is being moved. Reopen the queue editor after the move completes.');
+  }
   const runtimeUpdate = replacePowerPrompterQueueControllerGroup(
     requestId,
     replacement,

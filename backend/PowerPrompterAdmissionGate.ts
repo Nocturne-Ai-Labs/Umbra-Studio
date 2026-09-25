@@ -26,7 +26,12 @@ export async function takeAdmittedQueueHead<T extends { admissionGate?: PowerPro
   while (queue.length > 0) {
     const head = queue[0];
     if (!eligible(head)) return null;
-    if (head.admissionGate?.status === 'pending') await head.admissionGate.settled;
+    if (head.admissionGate?.status === 'pending') {
+      await head.admissionGate.settled;
+      // A group edit can replace a queued head's gate while the original
+      // admission is pending. Observe the current gate before dequeuing it.
+      continue;
+    }
     if (queue[0] !== head) continue;
     queue.shift();
     if (head.admissionGate?.status === 'rejected') continue;
