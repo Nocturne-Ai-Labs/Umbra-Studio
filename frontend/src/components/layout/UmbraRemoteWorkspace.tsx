@@ -680,7 +680,7 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
       if (!response.ok || !payload.path) throw new Error(String(payload?.error || 'Could not create pair link'));
       const pairUrl = new URL(payload.path, bestUrl).toString();
       await navigator.clipboard.writeText(pairUrl);
-      showToast('Remote pair link copied. Open it on the other device within 10 minutes.', 'success');
+      showToast('Remote pair link copied. Open it and confirm on the other device within 10 minutes.', 'success');
     } catch (pairError) {
       setError(pairError instanceof Error ? pairError.message : 'Could not create pair link');
       showToast('Could not create pair link', 'error');
