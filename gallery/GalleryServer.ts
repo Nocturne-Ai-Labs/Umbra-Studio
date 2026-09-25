@@ -591,7 +591,12 @@ async function getFolderSummary(pathValue: string, force = false): Promise<Folde
   }
 
   const key = `folder-summary:${normalizedPath}`;
-  if (!force) return sidebarWorker.run(key, () => scanAndCacheFolderSummary(normalizedPath));
+  if (!force) {
+    await sidebarWorker.run(key, () => scanAndCacheFolderSummary(normalizedPath));
+    // A request can join a scan started before invalidation. Its stale result
+    // cannot enter the cache, so only rescan when no current result was saved.
+    return getCachedFolderSummary(normalizedPath) ?? getFolderSummary(normalizedPath, true);
+  }
 
   // A forced refresh must not join a pre-invalidation scan still in the queue.
   const forceKey = `folder-summary-force:${normalizedPath}:${crypto.randomUUID()}`;
