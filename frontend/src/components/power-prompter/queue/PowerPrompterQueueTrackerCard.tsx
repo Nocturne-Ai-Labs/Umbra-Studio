@@ -22,6 +22,7 @@ type PowerPrompterQueueTrackerCardProps = {
   hasStagedQueue: boolean;
   queueDestructiveActionBusy: boolean;
   hasCancelableQueueWork: boolean;
+  hasInterruptibleActiveQueueJob: boolean;
   hasClearableQueueWork: boolean;
   queueSetGroups: QueueSetGroup[];
   expandedQueueSets: Record<string, boolean>;
@@ -51,6 +52,7 @@ export const PowerPrompterQueueTrackerCard = React.memo(function PowerPrompterQu
   hasStagedQueue,
   queueDestructiveActionBusy,
   hasCancelableQueueWork,
+  hasInterruptibleActiveQueueJob,
   hasClearableQueueWork,
   queueSetGroups,
   expandedQueueSets,
@@ -152,9 +154,9 @@ export const PowerPrompterQueueTrackerCard = React.memo(function PowerPrompterQu
         </button>
         <button
           onClick={() => { void onCancelActiveQueue(); }}
-          disabled={queueDestructiveActionBusy || !hasCancelableQueueWork}
+          disabled={queueDestructiveActionBusy || !hasInterruptibleActiveQueueJob}
           className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-            queueDestructiveActionBusy || !hasCancelableQueueWork
+            queueDestructiveActionBusy || !hasInterruptibleActiveQueueJob
               ? 'border-white/10 bg-white/[0.03] text-zinc-600 cursor-not-allowed'
               : 'border-amber-400/35 bg-amber-500/10 text-amber-200 hover:border-amber-300/55'
           }`}

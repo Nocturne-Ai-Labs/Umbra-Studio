@@ -195,7 +195,9 @@ import {
   buildQueueHistorySnapshotForRequest as buildQueueHistorySnapshotModel,
   findStaleQueueHistoryEntries,
   getQueueHistoryReplayPromptIndices,
+  mergeQueueHistoryRefresh,
 } from '@/components/power-prompter/queue/queueHistoryModel';
+import type { QueueHistoryRefreshMutation } from '@/components/power-prompter/queue/queueHistoryModel';
 import {
   createPowerPrompterQueueHistory,
   deletePowerPrompterQueueHistory,
@@ -838,6 +840,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     resolve: (value: any) => void;
     reject: (reason?: unknown) => void;
     timer: ReturnType<typeof setTimeout>;
+    allowNoopClear?: boolean;
   }>());
   const pendingLoraCatalogRequestsRef = useRef(new Map<string, {
     resolve: (value: string[]) => void;
@@ -1009,6 +1012,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const [selectedQueueHistoryId, setSelectedQueueHistoryId] = useState('');
   const [queueHistoryBusy, setQueueHistoryBusy] = useState<'list' | 'load' | 'requeue' | 'delete' | null>(null);
   const queueHistoryItemsRef = useRef<PowerPrompterQueueHistorySummary[]>([]);
+  const queueHistoryRefreshInFlightRef = useRef<Promise<PowerPrompterQueueHistorySummary[]> | null>(null);
+  const queueHistoryMutationRevisionRef = useRef(0);
+  const queueHistoryRefreshMutationsRef = useRef(new Map<string, QueueHistoryRefreshMutation>());
   const selectedQueueHistoryIdRef = useRef('');
   const queueHistoryByRequestIdRef = useRef(new Map<string, string>());
   const backendOwnedHistoryRef = useRef(false);
@@ -1916,6 +1922,17 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     const visualRequestId = String(queueVisualState?.requestId || '').trim();
     return visualRequestId.length > 0;
   }, [hasQueueStackCancelableWork, queueRequestGroups, queueVisualState]);
+  const hasInterruptibleActiveQueueJob = useMemo(() => {
+    const requestId = String(runningQueueItem?.requestId || '').trim();
+    if (!requestId) return false;
+    const promptIndex = Math.max(0, Math.floor(Number(runningQueueItem?.promptIndex) || 0));
+    const promptId = String(
+      runningQueueItem?.promptId
+      || (queueVisualState?.requestId === requestId ? queueVisualState.promptIds?.[promptIndex] : '')
+      || ''
+    ).trim();
+    return promptId.length > 0;
+  }, [queueVisualState, runningQueueItem]);
   const hasClearableQueueWork = useMemo(() => (
     hasCancelableQueueWork
     || queueStackItems.some((item) => !item.exiting)
@@ -2721,6 +2738,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       hasStagedQueue={stageOnlyQueue}
       queueDestructiveActionBusy={queueDestructiveActionBusy}
       hasCancelableQueueWork={hasCancelableQueueWork}
+      hasInterruptibleActiveQueueJob={hasInterruptibleActiveQueueJob}
       hasClearableQueueWork={hasClearableQueueWork}
       queueSetGroups={queueSetGroups}
       expandedQueueSets={expandedQueueSets}
@@ -2761,6 +2779,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       queueCancelActionRef={queueCancelActionRef}
       queueDestructiveActionBusy={queueDestructiveActionBusy}
       hasCancelableQueueWork={hasCancelableQueueWork}
+      hasInterruptibleActiveQueueJob={hasInterruptibleActiveQueueJob}
       hasClearableQueueWork={hasClearableQueueWork}
       queueClearActionRef={queueClearActionRef}
       queueEmergencyActionRef={queueEmergencyActionRef}
@@ -3964,22 +3983,39 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     return snapshot;
   }, [queueDiversity, queuePromptLimit, queueShuffleEnabled, queueTraversalMode, settings.queueShuffleSeed]);
 
-  const refreshQueueHistory = useCallback(async (): Promise<PowerPrompterQueueHistorySummary[]> => {
-    setQueueHistoryBusy((prev) => prev || 'list');
-    try {
-      const items = await listPowerPrompterQueueHistory();
-      setQueueHistoryItems(items);
-      setSelectedQueueHistoryId((prev) => {
-        if (prev && items.some((entry) => entry.id === prev)) return prev;
-        return items[0]?.id || '';
-      });
-      return items;
-    } catch (error: any) {
-      showToast(String(error?.message || 'Failed to load queue history'), 'error');
-      return [];
-    } finally {
-      setQueueHistoryBusy((prev) => (prev === 'list' ? null : prev));
-    }
+  const refreshQueueHistory = useCallback((): Promise<PowerPrompterQueueHistorySummary[]> => {
+    if (queueHistoryRefreshInFlightRef.current) return queueHistoryRefreshInFlightRef.current;
+    const startedAtRevision = queueHistoryMutationRevisionRef.current;
+    const request = (async () => {
+      setQueueHistoryBusy((prev) => prev || 'list');
+      try {
+        const fetched = await listPowerPrompterQueueHistory();
+        const items = mergeQueueHistoryRefresh(
+          fetched, queueHistoryRefreshMutationsRef.current.values(), startedAtRevision,
+        );
+        for (const [id, mutation] of queueHistoryRefreshMutationsRef.current) {
+          if (!id.startsWith('pending-') || !mutation.item) {
+            queueHistoryRefreshMutationsRef.current.delete(id);
+          }
+        }
+        setQueueHistoryItems(items);
+        setSelectedQueueHistoryId((prev) => {
+          if (prev && items.some((entry) => entry.id === prev)) return prev;
+          return items[0]?.id || '';
+        });
+        return items;
+      } catch (error: any) {
+        showToast(String(error?.message || 'Failed to load queue history'), 'error');
+        return [];
+      } finally {
+        setQueueHistoryBusy((prev) => (prev === 'list' ? null : prev));
+      }
+    })();
+    queueHistoryRefreshInFlightRef.current = request;
+    void request.finally(() => {
+      if (queueHistoryRefreshInFlightRef.current === request) queueHistoryRefreshInFlightRef.current = null;
+    });
+    return request;
   }, [showToast]);
 
   const interruptStaleQueueHistoryForDocument = useCallback(async (document: PowerPrompterQueueHistorySummary) => {
@@ -4046,6 +4082,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       : 'Power Prompter';
     const optimisticId = `pending-${normalizedRequestId}`;
     const optimisticSummary = buildOptimisticQueueHistorySummary({ optimisticId, baseName, snapshot });
+    queueHistoryRefreshMutationsRef.current.set(optimisticId, {
+      id: optimisticId, revision: ++queueHistoryMutationRevisionRef.current, item: optimisticSummary,
+    });
     queueHistoryByRequestIdRef.current.set(normalizedRequestId, optimisticId);
     setQueueHistoryItems((prev) => [optimisticSummary, ...prev.filter((entry) => entry.id !== optimisticId)]);
     setSelectedQueueHistoryId((prev) => prev || optimisticId);
@@ -4068,6 +4107,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         const pendingPatch = queueHistoryPendingPatchByRequestIdRef.current.get(normalizedRequestId);
         queueHistoryPendingPatchByRequestIdRef.current.delete(normalizedRequestId);
         const nextDocument = pendingPatch ? applyQueueHistorySummaryPatch(document, pendingPatch) : document;
+        queueHistoryRefreshMutationsRef.current.set(optimisticId, {
+          id: optimisticId, revision: ++queueHistoryMutationRevisionRef.current, item: null,
+        });
+        queueHistoryRefreshMutationsRef.current.set(document.id, {
+          id: document.id, revision: ++queueHistoryMutationRevisionRef.current, item: nextDocument,
+        });
         setQueueHistoryItems((prev) => [nextDocument, ...prev.filter((entry) => entry.id !== document.id && entry.id !== optimisticId)]);
         setSelectedQueueHistoryId((prev) => prev === optimisticId || !prev ? document.id : prev);
         if (pendingPatch) {
@@ -4098,6 +4143,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         message: String(error?.message || error || 'Unknown error'),
       }, { includeQueue: true });
       queueHistoryByRequestIdRef.current.delete(normalizedRequestId);
+      queueHistoryRefreshMutationsRef.current.set(optimisticId, {
+        id: optimisticId, revision: ++queueHistoryMutationRevisionRef.current, item: null,
+      });
       setQueueHistoryItems((prev) =>
         prev.map((entry) =>
           entry.id === optimisticId
@@ -4159,6 +4207,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           canceled: document.canceled,
         }, { includeQueue: true });
         setQueueHistoryItems((prev) => [document, ...prev.filter((entry) => entry.id !== document.id)]);
+        queueHistoryRefreshMutationsRef.current.set(document.id, {
+          id: document.id, revision: ++queueHistoryMutationRevisionRef.current, item: document,
+        });
       })
       .catch((error: any) => {
         logPowerPrompterDebug('history:update:error', {
@@ -4172,10 +4223,16 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const receiveBackendQueueHistory = (raw: unknown) => {
     const summary = normalizePowerPrompterQueueHistorySummary(raw);
     if (!summary) return;
+    const recorded = queueHistoryRefreshMutationsRef.current.get(summary.id)?.item;
+    const rendered = queueHistoryItemsRef.current.find((entry) => entry.id === summary.id);
+    if (Math.max(recorded?.updatedAt ?? 0, rendered?.updatedAt ?? 0) > summary.updatedAt) return;
+    queueHistoryRefreshMutationsRef.current.set(summary.id, {
+      id: summary.id, revision: ++queueHistoryMutationRevisionRef.current, item: summary,
+    });
     if (summary.requestId) queueHistoryByRequestIdRef.current.set(summary.requestId, summary.id);
     setQueueHistoryItems((previous) => {
       const existing = previous.find((entry) => entry.id === summary.id);
-      if (existing && existing.updatedAt >= summary.updatedAt) return previous;
+      if (existing && existing.updatedAt > summary.updatedAt) return previous;
       return [summary, ...previous.filter((entry) => entry.id !== summary.id)];
     });
     setSelectedQueueHistoryId((previous) => previous || summary.id);
@@ -4272,6 +4329,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     setQueueHistoryBusy('delete');
     try {
       await deletePowerPrompterQueueHistory(id);
+      queueHistoryRefreshMutationsRef.current.set(id, {
+        id, revision: ++queueHistoryMutationRevisionRef.current, item: null,
+      });
       setQueueHistoryItems((prev) => prev.filter((entry) => entry.id !== id));
       setSelectedQueueHistoryId((prev) => {
         if (prev !== id) return prev;
@@ -6759,6 +6819,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
 
         if (messageType === 'queue_history_deleted') {
           const id = String(payload.id || '');
+          if (id) queueHistoryRefreshMutationsRef.current.set(id, {
+            id, revision: ++queueHistoryMutationRevisionRef.current, item: null,
+          });
           setQueueHistoryItems((previous) => previous.filter((entry) => entry.id !== id));
           setSelectedQueueHistoryId((previous) => previous === id ? '' : previous);
           return;
@@ -6899,8 +6962,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
               pendingBackendControl.resolve(payload);
             }
           }
-          if (payload.success === false) {
+          if (payload.success === false || (pendingBackendControl && payload.backendHandled !== true)) {
+            for (const requestId of pendingQueueCancelScopeRef.current) {
+              intentionallyCanceledQueueRequestIdsRef.current.delete(requestId);
+            }
             pendingQueueCancelScopeRef.current = [];
+            sendPrompterWsMessage({ type: 'bridge_catalog_request' });
             if (!pendingBackendControl) showToast(String(payload.error || 'Queue cancel failed.'), 'error');
             return;
           }
@@ -6940,17 +7007,20 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         if (messageType === 'queue_clear_future_result') {
           logQueueDebug('ws:queue_clear_future_result:received', { payload });
           const pendingBackendControl = pendingBackendQueueControlsRef.current.get(String(payload.requestId || ''));
+          const noMatchingWork = pendingBackendControl?.allowNoopClear === true
+            && payload.backendHandled === true && payload.noMatchingWork === true;
           if (pendingBackendControl) {
             clearTimeout(pendingBackendControl.timer);
             pendingBackendQueueControlsRef.current.delete(String(payload.requestId || ''));
-            if (payload.success === false || payload.backendHandled !== true) {
+            if ((payload.success === false && !noMatchingWork) || payload.backendHandled !== true) {
               pendingBackendControl.reject(new Error(String(payload.error || 'Backend queue clear failed.')));
             } else {
               pendingBackendControl.resolve(payload);
             }
           }
-          if (payload.success === false) {
+          if (payload.success === false || (pendingBackendControl && payload.backendHandled !== true)) {
             pendingQueueClearFutureScopeRef.current = [];
+            sendPrompterWsMessage({ type: 'bridge_catalog_request' });
             if (!pendingBackendControl) showToast(String(payload.error || 'Failed to clear future queue jobs.'), 'error');
             return;
           }
@@ -6960,14 +7030,15 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
             queueStartStopConfirmedRef.current = queueStartSequenceRef.current;
           }
           const clearedRequestIds = normalizeRequestIdList(payload.clearedRequestIds);
-          const effectiveClearedRequestIds = Array.from(new Set([
-            ...pendingQueueClearFutureScopeRef.current,
-            ...clearedRequestIds,
-          ].map((entry) => String(entry || '').trim()).filter((requestId) => (
+          const confirmedClearedRequestIds = clearedRequestIds.length > 0 || payload.backendHandled === true
+            ? clearedRequestIds
+            : pendingQueueClearFutureScopeRef.current;
+          const effectiveClearedRequestIds = confirmedClearedRequestIds.filter((requestId) => (
             !!requestId
+            && requestId !== String(payload.activeRequestId || '').trim()
             && !backendQueueActivePromptRequestIdsRef.current.has(requestId)
             && !bridgeQueueStateRef.current.activeRequestIds.includes(requestId)
-          ))));
+          ));
           pendingQueueClearFutureScopeRef.current = [];
           if (effectiveClearedRequestIds.length > 0) {
             rejectPendingQueueRequestsByIds(effectiveClearedRequestIds, 'Queue cleared by user.');
@@ -7476,6 +7547,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         prompterWsRef.current = null;
         prompterWsReadyRef.current = false;
         rejectAllPendingQueueRequests('Power Prompter websocket disconnected.');
+        for (const requestId of pendingQueueCancelScopeRef.current) {
+          intentionallyCanceledQueueRequestIdsRef.current.delete(requestId);
+        }
+        pendingQueueCancelScopeRef.current = [];
+        pendingQueueClearFutureScopeRef.current = [];
+        pendingQueuePromptRemovalOpsRef.current.clear();
+        pendingQueuePromptRemovalKeysRef.current.clear();
         setQueueControlBusy(null);
         setQueueConfirmAction(null);
         setQueueingMode(null);
@@ -7541,6 +7619,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       pendingBatchAdmissionsRef.current = 0;
 
       rejectAllPendingQueueRequests('Power Prompter websocket disconnected.');
+      for (const requestId of pendingQueueCancelScopeRef.current) {
+        intentionallyCanceledQueueRequestIdsRef.current.delete(requestId);
+      }
+      pendingQueueCancelScopeRef.current = [];
+      pendingQueueClearFutureScopeRef.current = [];
+      pendingQueuePromptRemovalOpsRef.current.clear();
+      pendingQueuePromptRemovalKeysRef.current.clear();
       for (const pending of Array.from(pendingLoraCatalogRequestsRef.current.values())) {
         clearTimeout(pending.timer);
         pending.reject(new Error('Power Prompter websocket disconnected.'));
@@ -8621,7 +8706,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     requestIds: string[],
     targetBridgeId?: string,
     queueTargetType?: PowerPrompterQueueTargetType
-  ): boolean => {
+  ): Promise<any> => {
     const activeId = String(activeRequestId || '').trim();
     const normalizedRequestIds = Array.from(new Set(
       requestIds
@@ -8633,22 +8718,36 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     if (!prompterWsReadyRef.current || !prompterWsRef.current || prompterWsRef.current.readyState !== WebSocket.OPEN) {
       pendingQueueClearFutureScopeRef.current = [];
       logQueueDebug('ws:queue_clear_future:send:blocked', { activeRequestId: activeId, requestIds: normalizedRequestIds });
-      return false;
+      return Promise.reject(new Error('Power Prompter queue tracker is not connected. Unable to clear queued groups safely.'));
     }
     const resolvedTarget = resolveQueueControlTarget(targetBridgeId, queueTargetType);
-    const sent = sendPrompterWsMessage({
-      type: 'queue_clear_future',
-      requestId: createRequestId(),
-      activeRequestId,
-      requestIds: normalizedRequestIds,
-      targetBridgeId: resolvedTarget.targetBridgeId || undefined,
-      queueTargetType: resolvedTarget.queueTargetType,
+    const requestId = createRequestId();
+    return new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingBackendQueueControlsRef.current.delete(requestId);
+        pendingQueueClearFutureScopeRef.current = [];
+        reject(new Error('Timed out waiting for queue clear confirmation. Refresh the queue before retrying.'));
+      }, 20_000);
+      pendingBackendQueueControlsRef.current.set(requestId, { resolve, reject, timer, allowNoopClear: true });
+      const sent = sendPrompterWsMessage({
+        type: 'queue_clear_future',
+        requestId,
+        activeRequestId,
+        requestIds: normalizedRequestIds,
+        targetBridgeId: resolvedTarget.targetBridgeId || undefined,
+        queueTargetType: resolvedTarget.queueTargetType,
+      });
+      logQueueDebug('ws:queue_clear_future:send:done', { activeRequestId: activeId, requestIds: normalizedRequestIds, sent, resolvedTarget });
+      if (!sent) {
+        clearTimeout(timer);
+        pendingBackendQueueControlsRef.current.delete(requestId);
+        pendingQueueClearFutureScopeRef.current = [];
+        reject(new Error('Power Prompter queue tracker disconnected before the clear request was sent.'));
+      }
     });
-    logQueueDebug('ws:queue_clear_future:send:done', { activeRequestId: activeId, requestIds: normalizedRequestIds, sent, resolvedTarget });
-    return sent;
   };
 
-  const requestPausedBackendQueueControlThroughWebSocket = (
+  const requestBackendQueueControlThroughWebSocket = (
     action: 'cancel' | 'clear',
     requestIds: string[],
     targetBridgeId?: string,
@@ -9681,7 +9780,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     if (!meta?.editorSnapshot && !persistedGroupSnapshot?.editorSnapshot) {
       showToast('This group did not have an editor snapshot yet, so Umbra opened the current card state as a starting point.', 'error');
     }
-    pauseQueueForQueueEditor(meta);
+    if (!pauseQueueForQueueEditor(meta)) return;
     const normalizedDocument = normalizePowerPrompterCardDocument(editorSnapshot.document, editorSnapshot.sourceFile);
     setQueueEditorDocument({
       ...normalizedDocument,
@@ -10683,7 +10782,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         || (stoppedStartSequence > 0 && backendQueueSnapshotRequestIdsRef.current.size > 0)
         || (action === 'clear' && pendingBatchAdmissionsRef.current > 0)
         || pendingBatchRequestId) {
-        const result = await requestPausedBackendQueueControlThroughWebSocket(
+        const result = await requestBackendQueueControlThroughWebSocket(
           action, requestIds, activeQueueTargetBridgeId, pendingBatchRequestId,
         );
         backendControlAcknowledged = true;
@@ -10726,22 +10825,18 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       }
 
       if (action === 'clear') {
-        intentionallyCanceledQueueRequestIdsRef.current.clear();
-        for (const requestId of requestIds) {
-          if (requestId && requestId !== effectiveActiveRequestId) {
-            intentionallyCanceledQueueRequestIdsRef.current.add(requestId);
+        if (!backendControlAcknowledged && (requestIds.length > 0 || effectiveActiveRequestId)) {
+          const clearResult = await requestQueueClearFutureThroughWebSocket(
+            effectiveActiveRequestId,
+            requestIds,
+            activeQueueTargetBridgeId,
+            activeQueueTargetType
+          );
+          if (clearResult?.noMatchingWork === true) {
+            showToast('Queue already finished. Updating Queue Manager.', 'success');
+            return;
           }
         }
-        const clearFutureSent = backendControlAcknowledged || requestQueueClearFutureThroughWebSocket(
-          effectiveActiveRequestId,
-          requestIds,
-          activeQueueTargetBridgeId,
-          activeQueueTargetType
-        );
-        if (!clearFutureSent && (requestIds.length > 0 || effectiveActiveRequestId)) {
-          throw new Error('Power Prompter queue tracker is not connected. Unable to clear queued groups safely.');
-        }
-
         const clearResponse = await fetch('/api/umbrabridge/comfyui/queue/clear', { method: 'POST' });
         const clearPayload = await clearResponse.json().catch(() => ({}));
         if (!clearResponse.ok || clearPayload?.success === false) {
@@ -10817,13 +10912,10 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         logQueueDebug('action:hardStop:clear:end', { activeRequestId: effectiveActiveRequestId, requestIds });
         showToast(effectiveActiveRequestId ? 'Cleared future queued jobs. Current render will finish.' : 'Cleared queue.', 'success');
       } else {
-        const cancelSent = backendControlAcknowledged || requestQueueCancelThroughWebSocket(
-          requestIds,
-          activeQueueTargetBridgeId,
-          activeQueueTargetType
-        );
-        if (!cancelSent && requestIds.length > 0) {
-          throw new Error('Power Prompter queue tracker is not connected. Unable to cancel queued groups safely.');
+        if (!backendControlAcknowledged && requestIds.length > 0) {
+          await requestBackendQueueControlThroughWebSocket(
+            'cancel', requestIds, activeQueueTargetBridgeId,
+          );
         }
         const clearResponse = await fetch('/api/umbrabridge/comfyui/queue/clear', { method: 'POST' });
         const clearPayload = await clearResponse.json().catch(() => ({}));
@@ -10916,7 +11008,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
 
   useEffect(() => {
     const handleSidebarSkipActiveJob = (event: Event) => {
-      if (queueDestructiveActionBusy || !hasCancelableQueueWork) return;
+      if (queueDestructiveActionBusy || !hasInterruptibleActiveQueueJob) return;
       event.preventDefault();
       void executeCancelActiveComfyJob();
     };
@@ -10925,7 +11017,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     return () => {
       window.removeEventListener('umbra:powerprompter-skip-active-job', handleSidebarSkipActiveJob);
     };
-  }, [executeCancelActiveComfyJob, hasCancelableQueueWork, queueDestructiveActionBusy]);
+  }, [executeCancelActiveComfyJob, hasInterruptibleActiveQueueJob, queueDestructiveActionBusy]);
 
   const executeClearComfyQueue = async () => {
     await executeHardStopComfyQueue('clear');
@@ -11193,16 +11285,13 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       }
 
       intentionallyCanceledQueueRequestIdsRef.current.add(requestId);
-      const sent = isLocalStagedRequest
-        ? false
-        : requestQueueCancelThroughWebSocket(
-        [requestId],
-        meta?.targetBridgeId || effectiveQueueTargetBridgeId,
-        meta?.queueTargetType || selectedQueueTargetType,
-      );
-      if (!isLocalStagedRequest && !sent) {
-        pendingQueueCancelScopeRef.current = [];
-        throw new Error('Power Prompter queue tracker is not connected. Unable to cancel queued group safely.');
+      if (!isLocalStagedRequest) {
+        await requestBackendQueueControlThroughWebSocket(
+          'cancel', [requestId], meta?.targetBridgeId || effectiveQueueTargetBridgeId,
+        );
+        logQueueDebug('action:cancelQueueRequestGroup:confirmed', { requestId });
+        showToast(`Canceled Set ${clampQueueSetId(meta?.setId ?? 1)} group`, 'success');
+        return;
       }
       const nextPaused = queuePausedAfterRemovingWork(
         queuePausedRef.current,
@@ -11212,14 +11301,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       rejectPendingQueueRequestById(requestId, 'Queue canceled by user.');
       dropTrackedQueueRequestState([requestId]);
       setQueuePaused(nextPaused);
-      logQueueDebug('action:cancelQueueRequestGroup:inactiveDropped', { requestId, sent, isLocalStagedRequest, nextPaused });
-      showToast(
-        sent
-          ? `Canceled Set ${clampQueueSetId(meta?.setId ?? 1)} group`
-          : `Cleared Set ${clampQueueSetId(meta?.setId ?? 1)} group from the staged list locally`,
-        'success',
-      );
+      logQueueDebug('action:cancelQueueRequestGroup:inactiveDropped', { requestId, isLocalStagedRequest, nextPaused });
+      showToast(`Cleared Set ${clampQueueSetId(meta?.setId ?? 1)} group from the staged list locally`, 'success');
     } catch (error: any) {
+      intentionallyCanceledQueueRequestIdsRef.current.delete(requestId);
+      pendingQueueCancelScopeRef.current = [];
+      sendPrompterWsMessage({ type: 'bridge_catalog_request' });
       logQueueDebug('action:cancelQueueRequestGroup:error', { requestId, error: String(error?.message || error || '') });
       showToast(String(error?.message || 'Failed to cancel queue group'), 'error');
     } finally {
@@ -11228,7 +11315,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   };
 
   const handleCancelActiveComfyJob = () => {
-    if (queueDestructiveActionBusy || !hasCancelableQueueWork) return;
+    if (queueDestructiveActionBusy || !hasInterruptibleActiveQueueJob) return;
     setQueueConfirmAction('cancel');
   };
 
@@ -12191,6 +12278,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
             paused={queuePaused}
             staged={stageOnlyQueue}
             destructiveDisabled={queueDestructiveActionBusy || !hasCancelableQueueWork}
+            cancelDisabled={queueDestructiveActionBusy || !hasInterruptibleActiveQueueJob}
             clearDisabled={queueDestructiveActionBusy || !hasClearableQueueWork}
             onStart={() => { void queueStartActionRef.current?.(); }}
             onPause={() => { void queuePauseActionRef.current?.(); }}

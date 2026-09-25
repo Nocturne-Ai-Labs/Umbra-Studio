@@ -28,6 +28,34 @@ export type PowerPrompterQueueHistoryGroup = {
   items: PowerPrompterQueueHistorySummary[];
 };
 
+export type QueueHistoryRefreshMutation = {
+  id: string;
+  revision: number;
+  item: PowerPrompterQueueHistorySummary | null;
+};
+
+export function mergeQueueHistoryRefresh(
+  fetched: PowerPrompterQueueHistorySummary[],
+  mutations: Iterable<QueueHistoryRefreshMutation>,
+  startedAtRevision: number,
+): PowerPrompterQueueHistorySummary[] {
+  const byId = new Map(fetched.map((item) => [item.id, item]));
+  for (const mutation of mutations) {
+    if (mutation.revision <= startedAtRevision && !(mutation.id.startsWith('pending-') && mutation.item)) continue;
+    if (!mutation.item) {
+      byId.delete(mutation.id);
+      continue;
+    }
+    const fetchedItem = byId.get(mutation.id);
+    if (!fetchedItem || mutation.item.updatedAt >= fetchedItem.updatedAt) {
+      byId.set(mutation.id, mutation.item);
+    }
+  }
+  return Array.from(byId.values()).sort((a, b) =>
+    (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)
+  );
+}
+
 export type QueueHistorySnapshotBuildFailure =
   | { reason: 'missingMeta'; requestId: string; hasMeta: boolean; promptCount: number }
   | { reason: 'noPrompts'; requestId: string; rawPromptCount: number };
@@ -38,7 +66,7 @@ export type QueueHistorySnapshotBuildResult = {
 };
 
 export function getQueueHistoryReplayPromptIndices(
-  history: Pick<PowerPrompterQueueHistorySummary, 'promptCount' | 'completed' | 'failed' | 'canceled' | 'promptStatuses'>,
+  history: Pick<PowerPrompterQueueHistorySummary, 'promptCount' | 'completed' | 'failed' | 'canceled' | 'promptStatuses' | 'backendOwned'>,
   promptCount: number,
   resumeRemaining: boolean,
 ): number[] {
@@ -48,10 +76,13 @@ export function getQueueHistoryReplayPromptIndices(
   if (history.promptStatuses?.length === count) {
     return indices.filter((index) => {
       const status = history.promptStatuses?.[index];
-      return status === 'pending' || status === 'submitting' || status === 'running'
-        || status === 'interrupted' || status === 'unstarted';
+      // A stopped backend cannot tell whether an in-flight ComfyUI prompt
+      // survived the restart. Never replay it automatically.
+      return status === 'pending' || status === 'interrupted' || status === 'unstarted'
+        || (history.backendOwned !== true && (status === 'submitting' || status === 'running'));
     });
   }
+  if (history.backendOwned === true) return [];
   // Older history entries only recorded aggregate counts and assumed a
   // completed prefix. Keep that fallback until those entries are replaced.
   const terminalCount = Math.max(0, Math.min(count,
@@ -60,6 +91,15 @@ export function getQueueHistoryReplayPromptIndices(
     + Math.floor(Number(history.canceled) || 0),
   ));
   return indices.slice(terminalCount);
+}
+
+export function canResumeRemainingQueueHistory(
+  history: Pick<PowerPrompterQueueHistorySummary, 'status' | 'promptCount' | 'completed' | 'failed' | 'canceled' | 'promptStatuses' | 'backendOwned' | 'resumablePromptCount'>,
+): boolean {
+  if (history.status !== 'interrupted' && history.status !== 'canceled' && history.status !== 'failed') return false;
+  const remainingCount = history.resumablePromptCount
+    ?? getQueueHistoryReplayPromptIndices(history, history.promptCount, true).length;
+  return remainingCount > 0;
 }
 
 export function buildQueueHistoryGroups(items: PowerPrompterQueueHistorySummary[]): PowerPrompterQueueHistoryGroup[] {
