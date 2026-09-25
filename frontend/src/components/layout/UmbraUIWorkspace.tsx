@@ -130,6 +130,7 @@ import {
 import {
   compileUmbraUiPromptSegments,
   createUmbraUiPromptSegment,
+  getUmbraUiActiveImagePromptSegments,
   type UmbraUiPromptSegment,
 } from '@/lib/umbraUiPromptSegments';
 import {
@@ -667,6 +668,10 @@ export function UmbraUIWorkspace() {
   const [imageAgentModeEnabled, setImageAgentModeEnabled] = React.useState(initialDeviceResume?.imageAgentModeEnabled === true);
   const [imageAgentPrompt, setImageAgentPrompt] = React.useState(initialDeviceResume?.imageAgentPrompt || '');
   const workflowImagePrompt = imageAgentModeEnabled ? imageAgentPrompt.trim() : prompt;
+  const activeImagePromptSegments = React.useMemo(
+    () => getUmbraUiActiveImagePromptSegments(promptSegments, workflowImagePrompt, imageAgentModeEnabled),
+    [promptSegments, workflowImagePrompt, imageAgentModeEnabled],
+  );
   const [negativePrompt, setNegativePrompt] = React.useState(initialDeviceResume?.negativePrompt || '');
   const [catalogEnabledCSVs, setCatalogEnabledCSVs] = React.useState<string[]>([]);
   const [canvasCatalogTriggerContainer, setCanvasCatalogTriggerContainer] = React.useState<HTMLDivElement | null>(null);
@@ -1932,8 +1937,14 @@ export function UmbraUIWorkspace() {
   const restorePromptHistoryEntry = React.useCallback((entry: UmbraUiPromptHistoryEntry) => {
     const restoredSegments = entry.promptSegments.map((segment) => ({ ...segment }));
     if (restoredSegments.length <= 0) return;
-    setPromptSegments(restoredSegments);
-    setActivePromptSegmentId(restoredSegments[0].id);
+    if (restoredSegments.length === 1 && restoredSegments[0].slotType === 'umbra_ui_agent_prompt') {
+      setImageAgentPrompt(restoredSegments[0].text);
+      setImageAgentModeEnabled(true);
+    } else {
+      setPromptSegments(restoredSegments);
+      setActivePromptSegmentId(restoredSegments[0].id);
+      setImageAgentModeEnabled(false);
+    }
     setNegativePrompt(entry.negativePrompt);
     showToast(`Restored ${restoredSegments.length} prompt field${restoredSegments.length === 1 ? '' : 's'}.`, 'success');
   }, [showToast]);
@@ -2343,7 +2354,7 @@ export function UmbraUIWorkspace() {
         : controlNumber(seed, imageCapabilities.seed.value);
       const queueOptions: UmbraImageQueueOptions = {
         prompt: workflowImagePrompt,
-        promptSegments,
+        promptSegments: activeImagePromptSegments,
         negativePrompt: imageCapabilities.negativePrompt.support === 'adjustable' ? negativePrompt : '',
         modelFamily,
         modelType,
@@ -2417,7 +2428,7 @@ export function UmbraUIWorkspace() {
       promptHistoryRevisionRef.current += 1;
       setPromptHistory((current) => recordUmbraUiPromptHistory(
         current,
-        promptSegments,
+        activeImagePromptSegments,
         negativePrompt,
       ));
       if (activeImageFeature === 'img2img' && replaceImg2ImgSourceOnComplete && requestId
@@ -2475,7 +2486,7 @@ export function UmbraUIWorkspace() {
     negativePrompt,
     outputUpscale,
     tiledVae,
-    promptSegments,
+    activeImagePromptSegments,
     queueImage,
     queueSummary.powerPrompterActive,
     replaceImg2ImgSourceOnComplete,
@@ -2637,7 +2648,7 @@ export function UmbraUIWorkspace() {
         activeMode: activeMode === 'prompter' || activeMode === 'queue' ? 'image' : activeMode,
         image: {
           prompt: workflowImagePrompt,
-          promptSegments,
+          promptSegments: activeImagePromptSegments,
           negativePrompt,
           apiWorkflowId: selectedImageWorkflow?.id || '',
           checkpointName,
@@ -2719,7 +2730,7 @@ export function UmbraUIWorkspace() {
     modelType,
     negativePrompt,
     outputUpscale,
-    promptSegments,
+    activeImagePromptSegments,
     samplerName,
     scheduler,
     seed,

@@ -31,6 +31,20 @@ export function createUmbraUiPromptSegment(
   };
 }
 
+export function getUmbraUiActiveImagePromptSegments(
+  manualSegments: UmbraUiPromptSegment[],
+  activePrompt: string,
+  agentModeEnabled: boolean,
+): UmbraUiPromptSegment[] {
+  if (!agentModeEnabled) return manualSegments;
+  return [{
+    id: 'umbra-ui-agent-prompt',
+    label: 'Agent Prompt',
+    slotType: 'umbra_ui_agent_prompt',
+    text: String(activePrompt || '').trim(),
+  }];
+}
+
 function splitPromptTerms(value: string): string[] {
   const terms: string[] = [];
   let current = '';

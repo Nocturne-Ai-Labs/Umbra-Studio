@@ -73,6 +73,7 @@ import { UmbraCanvasMediaImportGate } from '@/lib/umbraCanvasMediaImportGate';
 import { getUmbraCanvasPinnedCopyFailure } from '@/lib/umbraUiCanvasPinnedCopy';
 import { selectNextUmbraCanvasPendingGeneration } from './canvasGenerationRecovery';
 import { resolveUmbraCanvasSampleCount, UMBRA_CANVAS_MAX_SAMPLES } from './canvasGenerationSamples';
+import { resolveUmbraCanvasGenerationChoice } from './canvasGenerationChoices';
 import { stageUmbraUiUpscaleHandoff } from '@/lib/umbraUiUpscale';
 import {
   usePublishUmbraQueueActivity,
@@ -1601,6 +1602,8 @@ export function UmbraCanvasWorkspace({
       const numericCfg = cfg.trim() ? Number(cfg) : NaN;
       const normalizedCfg = Number.isFinite(numericCfg) ? numericCfg : 1;
       const queuedSamples = resolveUmbraCanvasSampleCount(samples);
+      const queuedSamplerName = resolveUmbraCanvasGenerationChoice(capabilities.sampler, samplerName, 'euler');
+      const queuedScheduler = resolveUmbraCanvasGenerationChoice(capabilities.scheduler, scheduler, 'normal');
       const settingsSnapshot: UmbraCanvasGenerationSettingsSnapshot = {
         modelFamily,
         modelSource,
@@ -1615,8 +1618,8 @@ export function UmbraCanvasWorkspace({
         seedIncrement,
         steps: Number(steps) || 20,
         cfg: normalizedCfg,
-        samplerName: samplerName || 'euler',
-        scheduler: scheduler || 'normal',
+        samplerName: queuedSamplerName,
+        scheduler: queuedScheduler,
         denoise,
         samples: queuedSamples,
         tiledVae: { ...tiledVae } as unknown as Record<string, unknown>,
@@ -1742,8 +1745,8 @@ export function UmbraCanvasWorkspace({
         seedIncrement,
         steps: Number(steps) || 20,
         cfg: normalizedCfg,
-        samplerName: samplerName || 'euler',
-        scheduler: scheduler || 'normal',
+        samplerName: queuedSamplerName,
+        scheduler: queuedScheduler,
         denoise,
         samples: queuedSamples,
         width: preparedRegion.width,
@@ -1827,6 +1830,8 @@ export function UmbraCanvasWorkspace({
   }, [
     capabilities.loras.support,
     capabilities.negativePrompt.support,
+    capabilities.sampler,
+    capabilities.scheduler,
     canvasCapabilities.controlLayers.maxLayers,
     canvasCapabilities.referenceLayers.maxLayers,
     cfg,
@@ -2443,8 +2448,8 @@ export function UmbraCanvasWorkspace({
           <div className="grid grid-cols-2 gap-2">
             <label className="space-y-1"><span className="text-[8px] font-black uppercase text-zinc-500">Steps</span><input value={steps} onChange={(event) => onStepsChange(event.target.value)} inputMode="numeric" className="h-8 w-full rounded-md border border-white/10 bg-black/35 px-2 text-xs text-zinc-100 outline-none focus:border-rose-300/40" /></label>
             <label className="space-y-1"><span className="text-[8px] font-black uppercase text-zinc-500">{capabilities.guidance.label || 'Guidance'}</span><input value={cfg} onChange={(event) => onCfgChange(event.target.value)} inputMode="decimal" className="h-8 w-full rounded-md border border-white/10 bg-black/35 px-2 text-xs text-zinc-100 outline-none focus:border-rose-300/40" /></label>
-            <label className="space-y-1"><span className="text-[8px] font-black uppercase text-zinc-500">Sampler</span><UmbraSelect value={samplerName} onValueChange={onSamplerNameChange} ariaLabel="Sampler" menuTitle="Sampler" options={samplerOptions.map((option) => ({ value: option, label: option }))} size="sm" /></label>
-            <label className="space-y-1"><span className="text-[8px] font-black uppercase text-zinc-500">Scheduler</span><UmbraSelect value={scheduler} onValueChange={onSchedulerChange} ariaLabel="Scheduler" menuTitle="Scheduler" options={schedulerOptions.map((option) => ({ value: option, label: option }))} size="sm" /></label>
+            {capabilities.sampler.support === 'adjustable' ? <label className="space-y-1"><span className="text-[8px] font-black uppercase text-zinc-500">Sampler</span><UmbraSelect value={samplerName} onValueChange={onSamplerNameChange} ariaLabel="Sampler" menuTitle="Sampler" options={samplerOptions.map((option) => ({ value: option, label: option }))} size="sm" /></label> : null}
+            {capabilities.scheduler.support === 'adjustable' ? <label className="space-y-1"><span className="text-[8px] font-black uppercase text-zinc-500">Scheduler</span><UmbraSelect value={scheduler} onValueChange={onSchedulerChange} ariaLabel="Scheduler" menuTitle="Scheduler" options={schedulerOptions.map((option) => ({ value: option, label: option }))} size="sm" /></label> : null}
             <label className="space-y-1"><span className="text-[8px] font-black uppercase text-zinc-500">Samples</span><input type="number" min="1" max={UMBRA_CANVAS_MAX_SAMPLES} step="1" value={resolveUmbraCanvasSampleCount(samples)} onChange={(event) => setSamples(resolveUmbraCanvasSampleCount(event.target.value))} className="h-8 w-full rounded-md border border-white/10 bg-black/35 px-2 text-xs text-zinc-100 outline-none focus:border-rose-300/40" /></label>
           </div>
           {capabilities.hiresFix.support === 'adjustable' ? (
