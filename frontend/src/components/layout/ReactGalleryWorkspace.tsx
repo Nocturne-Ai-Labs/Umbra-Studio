@@ -689,6 +689,14 @@ function pathIsInsideRoot(pathValue: unknown, rootValue: unknown): boolean {
   return Boolean(path && root) && (path === root || path.startsWith(root.endsWith('/') ? root : `${root}/`));
 }
 
+function galleryFolderAfterRemovedPaths(currentFolder: string, removedPaths: string[], fallbackRoot: string): string {
+  let folder = normalizePath(currentFolder);
+  while (folder && removedPaths.some((path) => pathIsInsideRoot(folder, path))) {
+    folder = pathParent(folder);
+  }
+  return folder || normalizePath(fallbackRoot);
+}
+
 function remapGalleryFolderPath(value: unknown, source: string, target: string): string {
   const path = normalizePath(value);
   const sourcePath = normalizePath(source);
@@ -6998,6 +7006,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           addToast({ type: 'success', message: messages.join(', ') || `Deleted ${dedupedRemovedPaths.length} item${dedupedRemovedPaths.length === 1 ? '' : 's'}` });
         }
       }
+      const activeFolder = currentFolderRef.current;
+      const nextFolder = galleryFolderAfterRemovedPaths(activeFolder, dedupedRemovedPaths, rootPath);
+      if (loadSeqRef.current === refreshSequence && !pathsEqual(nextFolder, activeFolder)) {
+        void loadFolder({ folder: nextFolder, keepSelection: false, forceRefresh: true });
+        return;
+      }
       const refreshIfCurrent = () => {
         if (loadSeqRef.current !== refreshSequence || !pathsEqual(currentFolderRef.current, currentFolder)) return;
         void loadFolder({ folder: currentFolder, keepSelection: true, forceRefresh: true, preserveScroll: true });
@@ -7015,7 +7029,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       }
       addToast({ type: 'error', message: deleteError instanceof Error ? deleteError.message : 'Failed to delete selection' });
     }
-  }, [addToast, appSettings, applyOptimisticPathRemoval, clearPageCacheForFolder, clearTrashCache, currentFolder, loadFolder, pruneDeletedFolderTreeState, queueTrashUndoToast, rollbackOptimisticPathRemoval, trashMode]);
+  }, [addToast, appSettings, applyOptimisticPathRemoval, clearPageCacheForFolder, clearTrashCache, currentFolder, loadFolder, pruneDeletedFolderTreeState, queueTrashUndoToast, rollbackOptimisticPathRemoval, rootPath, trashMode]);
 
   const deleteViewerSelection = useCallback(() => {
     const currentViewerPath = normalizePath(viewerPath || lastSelectedPath);
