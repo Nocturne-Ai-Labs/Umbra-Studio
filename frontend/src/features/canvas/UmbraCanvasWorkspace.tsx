@@ -74,6 +74,7 @@ import { getUmbraCanvasPinnedCopyFailure } from '@/lib/umbraUiCanvasPinnedCopy';
 import { selectNextUmbraCanvasPendingGeneration } from './canvasGenerationRecovery';
 import { resolveUmbraCanvasSampleCount, UMBRA_CANVAS_MAX_SAMPLES } from './canvasGenerationSamples';
 import { resolveUmbraCanvasGenerationChoice } from './canvasGenerationChoices';
+import { getUmbraCanvasGenerationResolutionIssue } from './canvasGenerationResolution';
 import { stageUmbraUiUpscaleHandoff } from '@/lib/umbraUiUpscale';
 import {
   usePublishUmbraQueueActivity,
@@ -1537,14 +1538,19 @@ export function UmbraCanvasWorkspace({
 
   const prepareGenerationRegion = React.useCallback(async () => {
     if (preparingRegion || submitting) return;
-    if (useUmbraCanvasStore.getState().present.generation.pending.length > 0) {
+    const frozenProject = useUmbraCanvasStore.getState().present;
+    if (frozenProject.generation.pending.length > 0) {
       showToast('Wait for the current Canvas generation to finish before starting another.', 'error');
+      return;
+    }
+    const resolutionIssue = getUmbraCanvasGenerationResolutionIssue(frozenProject.generationBbox, capabilities.resolution);
+    if (resolutionIssue) {
+      showToast(resolutionIssue, 'error');
       return;
     }
     autoSubmitPreparedRegionRef.current = true;
     setPreparingRegion(true);
     try {
-      const frozenProject = useUmbraCanvasStore.getState().present;
       const composite = await composeUmbraCanvasGenerationRegion(frozenProject);
       const currentProject = useUmbraCanvasStore.getState().present;
       if (currentProject.id !== frozenProject.id || currentProject.revision !== frozenProject.revision) {
@@ -1565,7 +1571,7 @@ export function UmbraCanvasWorkspace({
     } finally {
       setPreparingRegion(false);
     }
-  }, [preparingRegion, showToast, submitting]);
+  }, [capabilities.resolution, preparingRegion, showToast, submitting]);
 
   const submitPreparedRegion = React.useCallback(async () => {
     if (!preparedRegion || submitting) return;
@@ -1578,6 +1584,12 @@ export function UmbraCanvasWorkspace({
     const isSubmissionProjectOpen = () => useUmbraCanvasStore.getState().present.id === submissionProject.id;
     if (submissionProject.id !== preparedRegion.projectId || submissionProject.revision !== preparedRegion.projectRevision) {
       showToast('Canvas changed after the generation region was prepared. Generate again to use the latest layers.', 'error');
+      closePreparedRegion();
+      return;
+    }
+    const resolutionIssue = getUmbraCanvasGenerationResolutionIssue(preparedRegion, capabilities.resolution);
+    if (resolutionIssue) {
+      showToast(resolutionIssue, 'error');
       closePreparedRegion();
       return;
     }
@@ -1830,6 +1842,7 @@ export function UmbraCanvasWorkspace({
   }, [
     capabilities.loras.support,
     capabilities.negativePrompt.support,
+    capabilities.resolution,
     capabilities.sampler,
     capabilities.scheduler,
     canvasCapabilities.controlLayers.maxLayers,
@@ -2377,6 +2390,8 @@ export function UmbraCanvasWorkspace({
     }
   };
 
+  const generationResolutionIssue = getUmbraCanvasGenerationResolutionIssue(project.generationBbox, capabilities.resolution);
+
   return (
     <section
       data-umbra-canvas-workspace=""
@@ -2600,6 +2615,7 @@ export function UmbraCanvasWorkspace({
                   <input type="number" aria-label={`Generation ${field}`} value={Math.round(project.generationBbox[field])} onChange={(event) => setGenerationBbox({ [field]: Number(event.target.value) })} className="ml-1 h-7 w-16 rounded-md border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none focus:border-rose-300/35" />
                 </label>
               ))}
+              {generationResolutionIssue ? <span role="alert" className="max-w-56 text-[8px] leading-tight text-amber-200">{generationResolutionIssue}</span> : null}
               <UmbraSelect
                 ariaLabel="Generation aspect ratio"
                 value=""
@@ -2743,8 +2759,8 @@ export function UmbraCanvasWorkspace({
           </section>
         ) : null}
         <UmbraGenerationActionBar task="Canvas" onGenerate={() => void prepareGenerationRegion()}
-          disabled={preparingRegion || submitting || project.generation.pending.length > 0} busy={preparingRegion || submitting || project.generation.pending.length > 0}
-          title={project.generation.pending.length > 0 ? 'Wait for the current Canvas generation to finish before starting another' : 'Generate the selected Canvas region'}
+          disabled={preparingRegion || submitting || project.generation.pending.length > 0 || !!generationResolutionIssue} busy={preparingRegion || submitting || project.generation.pending.length > 0}
+          title={generationResolutionIssue || (project.generation.pending.length > 0 ? 'Wait for the current Canvas generation to finish before starting another' : 'Generate the selected Canvas region')}
           label={preparingRegion ? 'Preparing' : submitting ? 'Submitting' : project.generation.pending.length > 0 ? 'Generating' : 'Generate'}
           folder={pinnedOutputFolder} onFolderChange={setPinnedOutputFolder}>
           <button type="button" disabled={!previewStage?.sourcePath} onClick={() => { if (previewStage) void sendStagedResult(previewStage, 'img2img'); }}
