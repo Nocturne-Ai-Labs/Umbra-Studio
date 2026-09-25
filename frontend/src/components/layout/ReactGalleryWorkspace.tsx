@@ -8019,9 +8019,11 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           reason: 'restore',
         });
       }
-      window.dispatchEvent(new CustomEvent('umbra:gallery-remove-paths', {
-        detail: { paths: restoredTrashPaths, source: 'react-gallery' },
-      }));
+      if (restoredTrashPaths.length > 0) {
+        window.dispatchEvent(new CustomEvent('umbra:gallery-remove-paths', {
+          detail: { paths: restoredTrashPaths, source: 'react-gallery' },
+        }));
+      }
       if (restoredPaths.length > 0) {
         rememberRestoredHighlights(restoredPaths);
         window.dispatchEvent(new CustomEvent('umbra:gallery-restore-paths', {
