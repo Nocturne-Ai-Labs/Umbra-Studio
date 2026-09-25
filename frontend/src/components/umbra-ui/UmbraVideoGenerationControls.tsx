@@ -1640,12 +1640,11 @@ export function UmbraVideoGenerationControls({
             ? 'Wait for Umbra to read the source media dimensions.'
             : requiredMissing
               ? 'Select all required video models and source media first.'
-              : turboIssue;
+              : videoLoraIssue || turboIssue;
   const queueDisabled = isQueueing || !!queueBlockReason;
 
   const handleQueue = async (requestedPlacement: UmbraQueuePlacement = effectivePlacement) => {
     if (queueInFlightRef.current) return;
-    if (videoLoraIssue) { showToast(videoLoraIssue, 'error'); return; }
     if (queueBlockReason) { showToast(queueBlockReason, 'error'); return; }
     const queuePlacement = queueSummary.powerPrompterActive ? requestedPlacement : 'end';
     if (queuePlacement === 'interrupt' && !window.confirm(
