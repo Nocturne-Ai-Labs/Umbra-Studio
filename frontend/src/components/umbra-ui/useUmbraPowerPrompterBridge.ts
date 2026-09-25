@@ -647,6 +647,64 @@ function createRequestId(): string {
   }
 }
 
+export async function loadUmbraUiWorkflowCatalog(fetcher: typeof fetch = fetch): Promise<ApiWorkflowItem[]> {
+  // User API workflows are optional for Umbra UI. A failure to list them must
+  // not hide the bundled, locked generation pipelines.
+  const [userWorkflows, pipelineResponse] = await Promise.all([
+    fetcher('/api/powerprompter/api-workflows', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) return [] as ApiWorkflowItem[];
+        const payload = await response.json().catch(() => ({}));
+        return payload?.success === false || !Array.isArray(payload?.items)
+          ? [] as ApiWorkflowItem[]
+          : payload.items as ApiWorkflowItem[];
+      })
+      .catch(() => [] as ApiWorkflowItem[]),
+    fetcher('/api/umbra-ui/pipelines', { cache: 'no-store' }),
+  ]);
+  const pipelinePayload = await pipelineResponse.json().catch(() => ({}));
+  if (!pipelineResponse.ok || pipelinePayload?.success === false) {
+    throw new Error(pipelinePayload?.error || 'Failed to load Umbra UI pipelines.');
+  }
+  const items = mergeUmbraUiWorkflowCatalog(
+    userWorkflows,
+    Array.isArray(pipelinePayload?.items) ? pipelinePayload.items as ApiWorkflowItem[] : [],
+  );
+  const pipelines = Array.isArray(pipelinePayload?.pipelines)
+    ? pipelinePayload.pipelines as Array<UmbraUiPipelineDescriptor & { workflowId?: string }>
+    : [];
+  const pipelinesByWorkflow = new Map<string, UmbraUiPipelineDescriptor[]>();
+  for (const pipeline of pipelines) {
+    const workflowId = String(pipeline.workflowId || '').trim();
+    if (!workflowId) continue;
+    const current = pipelinesByWorkflow.get(workflowId) || [];
+    const capabilities = normalizeUmbraUiPipelineCapabilities(pipeline.capabilities, pipeline.modelSources);
+    const readiness = normalizeUmbraUiPipelineReadiness(
+      pipeline.readiness,
+      capabilities,
+      pipeline.modelSources,
+    );
+    current.push({
+      feature: pipeline.feature,
+      modelFamily: pipeline.modelFamily,
+      modelFamilyKey: pipeline.modelFamilyKey,
+      modelSources: [...pipeline.modelSources],
+      priority: pipeline.priority,
+      locked: true,
+      ...(pipeline.inpaintAdapter ? { inpaintAdapter: pipeline.inpaintAdapter } : {}),
+      ...(pipeline.defaults ? { defaults: { ...pipeline.defaults } } : {}),
+      capabilities,
+      ...(pipeline.inpaintCanvas ? { inpaintCanvas: pipeline.inpaintCanvas } : {}),
+      readiness,
+    });
+    pipelinesByWorkflow.set(workflowId, current);
+  }
+  return items.map((item) => ({
+    ...item,
+    umbraUiPipelines: pipelinesByWorkflow.get(item.id) || item.umbraUiPipelines || [],
+  }));
+}
+
 export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   const wsRef = React.useRef<WebSocket | null>(null);
   const reconnectTimerRef = React.useRef<number | null>(null);
@@ -744,59 +802,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
 
   React.useEffect(() => {
     let canceled = false;
-    void Promise.all([
-      fetch('/api/powerprompter/api-workflows', { cache: 'no-store' }),
-      fetch('/api/umbra-ui/pipelines', { cache: 'no-store' }),
-    ])
-      .then(async ([workflowResponse, pipelineResponse]) => {
-        const [workflowPayload, pipelinePayload] = await Promise.all([
-          workflowResponse.json().catch(() => ({})),
-          pipelineResponse.json().catch(() => ({})),
-        ]);
-        if (!workflowResponse.ok || workflowPayload?.success === false) {
-          throw new Error(workflowPayload?.error || 'Failed to load API workflows.');
-        }
-        if (!pipelineResponse.ok || pipelinePayload?.success === false) {
-          throw new Error(pipelinePayload?.error || 'Failed to load Umbra UI pipelines.');
-        }
-        const items = mergeUmbraUiWorkflowCatalog(
-          Array.isArray(workflowPayload?.items) ? workflowPayload.items as ApiWorkflowItem[] : [],
-          Array.isArray(pipelinePayload?.items) ? pipelinePayload.items as ApiWorkflowItem[] : [],
-        );
-        const pipelines = Array.isArray(pipelinePayload?.pipelines)
-          ? pipelinePayload.pipelines as Array<UmbraUiPipelineDescriptor & { workflowId?: string }>
-          : [];
-        const pipelinesByWorkflow = new Map<string, UmbraUiPipelineDescriptor[]>();
-        for (const pipeline of pipelines) {
-          const workflowId = String(pipeline.workflowId || '').trim();
-          if (!workflowId) continue;
-          const current = pipelinesByWorkflow.get(workflowId) || [];
-          const capabilities = normalizeUmbraUiPipelineCapabilities(pipeline.capabilities, pipeline.modelSources);
-          const readiness = normalizeUmbraUiPipelineReadiness(
-            pipeline.readiness,
-            capabilities,
-            pipeline.modelSources,
-          );
-          current.push({
-            feature: pipeline.feature,
-            modelFamily: pipeline.modelFamily,
-            modelFamilyKey: pipeline.modelFamilyKey,
-            modelSources: [...pipeline.modelSources],
-            priority: pipeline.priority,
-            locked: true,
-            ...(pipeline.inpaintAdapter ? { inpaintAdapter: pipeline.inpaintAdapter } : {}),
-            ...(pipeline.defaults ? { defaults: { ...pipeline.defaults } } : {}),
-            capabilities,
-            ...(pipeline.inpaintCanvas ? { inpaintCanvas: pipeline.inpaintCanvas } : {}),
-            readiness,
-          });
-          pipelinesByWorkflow.set(workflowId, current);
-        }
-        return items.map((item) => ({
-          ...item,
-          umbraUiPipelines: pipelinesByWorkflow.get(item.id) || item.umbraUiPipelines || [],
-        }));
-      })
+    void loadUmbraUiWorkflowCatalog()
       .then((items) => {
         if (canceled) return;
         setWorkflows(items);

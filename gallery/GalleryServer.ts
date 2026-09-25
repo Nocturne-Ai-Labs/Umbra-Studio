@@ -26,6 +26,7 @@ import { resolveSingleByteRange } from '../shared/httpByteRange';
 import { createVariantEtag, matchesIfNoneMatch, permitsConditionalRange } from '../shared/httpCache';
 import { createGalleryPathAuthorizer } from '../backend/GalleryPathAccess';
 import { galleryMediaSecurityHeaders } from '../shared/galleryMediaResponse';
+import { isGalleryMediaReadPath } from '../shared/galleryMediaPath';
 
 const ROOT_DIR = process.env.UMBRA_ROOT || process.cwd();
 const HOST = '127.0.0.1';
@@ -64,7 +65,7 @@ const IMAGE_EXTENSIONS = new Set([
   '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.avif', '.heic', '.heif', '.jxl', '.tif', '.tiff', '.svg', '.apng',
 ]);
 const VIDEO_EXTENSIONS = new Set([
-  '.mp4', '.webm', '.mkv', '.mov', '.avi', '.m4v',
+  '.mp4', '.webm', '.mkv', '.mov', '.avi', '.m4v', '.wmv', '.flv',
 ]);
 const BUN_IMAGE_STILL_EXTENSIONS = new Set([
   '.jpg', '.jpeg', '.png', '.webp', '.bmp', '.avif', '.heic', '.heif', '.tif', '.tiff',
@@ -89,12 +90,15 @@ const MIME_TYPES: Record<string, string> = {
   '.bmp': 'image/bmp',
   '.avif': 'image/avif',
   '.svg': 'image/svg+xml',
+  '.apng': 'image/apng',
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
   '.mkv': 'video/x-matroska',
   '.mov': 'video/quicktime',
   '.avi': 'video/x-msvideo',
   '.m4v': 'video/x-m4v',
+  '.wmv': 'video/x-ms-wmv',
+  '.flv': 'video/x-flv',
   '.ico': 'image/x-icon',
 };
 
@@ -2031,12 +2035,13 @@ async function handleEmptyFolders(req: Request, mode: EmptyFolderCleanupMode): P
     if (!rawPath) return json({ error: 'Path required' }, 400);
 
     const rootPath = await ensureDirectory(rawPath);
+    const toClientPath = createClientPathMapper(rawPath, rootPath);
     const emptyFolders = await collectEmptyFoldersForCleanup(rootPath);
     if (mode === 'preview') {
       return json({
         success: true,
-        rootPath: normalizePath(rootPath),
-        folders: emptyFolders,
+        rootPath: toClientPath(rootPath),
+        folders: emptyFolders.map(toClientPath),
         count: emptyFolders.length,
       });
     }
@@ -2046,10 +2051,10 @@ async function handleEmptyFolders(req: Request, mode: EmptyFolderCleanupMode): P
     for (const folderPath of emptyFolders) {
       try {
         await fs.rmdir(folderPath);
-        deleted.push(normalizePath(folderPath));
+        deleted.push(toClientPath(folderPath));
       } catch (error: any) {
         failed.push({
-          path: normalizePath(folderPath),
+          path: toClientPath(folderPath),
           error: error?.message || 'Failed to remove folder',
         });
       }
@@ -2063,8 +2068,8 @@ async function handleEmptyFolders(req: Request, mode: EmptyFolderCleanupMode): P
 
     return json({
       success: failed.length === 0,
-      rootPath: normalizePath(rootPath),
-      folders: emptyFolders,
+      rootPath: toClientPath(rootPath),
+      folders: emptyFolders.map(toClientPath),
       deleted,
       failed,
       count: emptyFolders.length,
@@ -2322,6 +2327,7 @@ async function handleImage(req: Request, reqUrl: URL): Promise<Response> {
   try {
     const pathValue = reqUrl.searchParams.get('path') || '';
     const filePath = await ensureFile(pathValue);
+    if (!isGalleryMediaReadPath(filePath)) return json({ error: 'Invalid media path' }, 403);
     const lane = normalizeWorkerLane(
       reqUrl.searchParams.get('lane')
       || reqUrl.searchParams.get('worker')

@@ -44,6 +44,13 @@ export function listUmbraUiPipelineFamilies<T extends UmbraUiPipelineWorkflowIte
     .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }));
 }
 
+export function resolveUmbraUiPipelineFamily(families: string[], currentFamily: string): string {
+  const currentKey = normalizeUmbraUiModelFamilyKey(currentFamily);
+  return families.find((family) => normalizeUmbraUiModelFamilyKey(family) === currentKey)
+    || families[0]
+    || '';
+}
+
 export function resolveUmbraUiPipeline<T extends UmbraUiPipelineWorkflowItem>(
   workflows: T[],
   featureInput: UmbraUiPipelineFeature | string,

@@ -1474,7 +1474,7 @@ export function Filmstrip({
                       activeWorkspace={activeWorkspace}
                       showContextButton={isTouchRemote}
                       selectionMode={isTouchRemote && selectionMode}
-                      singleTapOpen
+                      singleTapOpen={!selectionMode}
                       onSelect={(event) => onSelect(image.id, event)}
                       onOpen={() => onOpen?.(image)}
                       onContextMenu={(event) => {

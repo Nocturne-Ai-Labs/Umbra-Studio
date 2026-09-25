@@ -866,6 +866,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   }>());
   const intentionallyCanceledQueueRequestIdsRef = useRef(new Set<string>());
   const fileLoadRequestSeqRef = useRef(0);
+  const fileOpenQueueRef = useRef<Promise<void>>(Promise.resolve());
   const queueRequestMetaRef = useRef(powerPrompterQueueSession.queueRequestMeta);
   const queueBridgeDispatchedRequestIdsRef = useRef(powerPrompterQueueSession.queueBridgeDispatchedRequestIds);
   const queueSequentialDispatchInFlightRef = useRef(false);
@@ -7663,19 +7664,20 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   }, [content, cardDocument, currentFile]);
 
   const handleSelectFile = (path: string, fileContent: string) => {
-    void (async () => {
-      const loadSeq = fileLoadRequestSeqRef.current + 1;
-      fileLoadRequestSeqRef.current = loadSeq;
-      if (powerPrompterSessionUpdateTimerRef.current) {
-        clearTimeout(powerPrompterSessionUpdateTimerRef.current);
-        powerPrompterSessionUpdateTimerRef.current = null;
-      }
-      powerPrompterSessionUpdateSeqRef.current += 1;
-      powerPrompterSessionMutationQueueRef.current?.invalidatePendingUpdates();
-      const fileName = String(path || '').replace(/\\/g, '/').split('/').pop() || 'prompt file';
-      setLoadingPromptFileName(fileName);
-      await waitForNextUiPaint();
+    const loadSeq = fileLoadRequestSeqRef.current + 1;
+    fileLoadRequestSeqRef.current = loadSeq;
+    if (powerPrompterSessionUpdateTimerRef.current) {
+      clearTimeout(powerPrompterSessionUpdateTimerRef.current);
+      powerPrompterSessionUpdateTimerRef.current = null;
+    }
+    powerPrompterSessionUpdateSeqRef.current += 1;
+    powerPrompterSessionMutationQueueRef.current?.invalidatePendingUpdates();
+    const fileName = String(path || '').replace(/\\/g, '/').split('/').pop() || 'prompt file';
+    setLoadingPromptFileName(fileName);
+    const openFile = async () => {
       try {
+        await waitForNextUiPaint();
+        if (fileLoadRequestSeqRef.current !== loadSeq) return;
         const previousFile = currentFileRef.current;
         if (
           previousFile &&
@@ -7684,6 +7686,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           const saved = await savePromptFile(previousFile, contentRef.current, { source: 'autosave' });
           if (!saved) throw new Error('Save the current card before opening another file. Your edits are still here.');
         }
+        if (fileLoadRequestSeqRef.current !== loadSeq) return;
 
         clearAutosaveTimer();
         setActivePowerPrompterPresetSession(null);
@@ -7723,7 +7726,9 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           setLoadingPromptFileName(null);
         }
       }
-    })();
+    };
+    // The server serializes opens by arrival, so send them in selection order too.
+    fileOpenQueueRef.current = fileOpenQueueRef.current.then(openFile, openFile);
   };
 
   useEffect(() => {

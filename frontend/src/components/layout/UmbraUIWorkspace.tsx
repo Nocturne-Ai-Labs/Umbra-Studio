@@ -150,7 +150,7 @@ import {
   type UmbraUiAgentDraft,
   type UmbraUiAgentVideoContext,
 } from '@/lib/umbraUiAgent';
-import { listUmbraUiPipelineFamilies, resolveUmbraUiPipeline } from '@/lib/umbraUiPipelines';
+import { listUmbraUiPipelineFamilies, resolveUmbraUiPipeline, resolveUmbraUiPipelineFamily } from '@/lib/umbraUiPipelines';
 import {
   advanceUmbraUiSeed,
   normalizeUmbraUiSeedIncrement,
@@ -815,9 +815,10 @@ export function UmbraUIWorkspace() {
     () => getUmbraUiLorasForFamily(loras, activeLoraFamilyKey),
     [activeLoraFamilyKey, loras],
   );
-  const replaceActiveLoras = React.useCallback((nextLoras: UmbraUiLoraEntry[]) => {
-    setLoras((current) => replaceUmbraUiLorasForFamily(current, activeLoraFamilyKey, nextLoras));
-  }, [activeLoraFamilyKey]);
+  const replaceActiveLoras = React.useCallback((nextLoras: UmbraUiLoraEntry[], targetFamily = modelFamily) => {
+    const targetFamilyKey = normalizeUmbraUiModelFamilyKey(targetFamily);
+    setLoras((current) => replaceUmbraUiLorasForFamily(current, targetFamilyKey, nextLoras));
+  }, [modelFamily]);
   const [modelPickerKind, setModelPickerKind] = React.useState<UmbraModelPickerKind | null>(null);
   const [resourcePickerId, setResourcePickerId] = React.useState<string | null>(null);
   const [clipSkip, setClipSkip] = React.useState(initialDeviceResume?.clipSkip || '1');
@@ -1618,10 +1619,6 @@ export function UmbraUIWorkspace() {
 
   React.useEffect(() => {
     if (!inpaintWorkspaceActive || inpaintModelFamilies.length <= 0) return;
-    if (!inpaintModelFamilies.includes(modelFamily)) {
-      setModelFamily(inpaintModelFamilies[0]);
-      return;
-    }
     const supportedSources = selectedInpaintFamilyPipelines.flatMap(({ pipeline }) => pipeline.modelSources);
     if (supportedSources.length <= 0 || supportedSources.includes(modelType)) return;
     const nextModelType = supportedSources[0];
@@ -1850,15 +1847,10 @@ export function UmbraUIWorkspace() {
   }, [applyPowerPrompterGenerationControls, imageControlsHydrated]);
 
   React.useEffect(() => {
-    if (imageModelFamilies.length <= 0) return;
-    const currentKey = normalizeUmbraUiModelFamilyKey(modelFamily);
-    const matchedFamily = imageModelFamilies.find((family) => normalizeUmbraUiModelFamilyKey(family) === currentKey);
-    if (matchedFamily) {
-      if (matchedFamily !== modelFamily) setModelFamily(matchedFamily);
-      return;
-    }
-    setModelFamily(imageModelFamilies[0]);
-  }, [imageModelFamilies, modelFamily]);
+    const families = inpaintWorkspaceActive ? inpaintModelFamilies : imageModelFamilies;
+    const resolvedFamily = resolveUmbraUiPipelineFamily(families, modelFamily);
+    if (resolvedFamily && resolvedFamily !== modelFamily) setModelFamily(resolvedFamily);
+  }, [imageModelFamilies, inpaintModelFamilies, inpaintWorkspaceActive, modelFamily]);
 
   React.useEffect(() => {
     if (!modelFamily) return;
@@ -2261,8 +2253,31 @@ export function UmbraUIWorkspace() {
   if (imageSeedContextRef.current.key !== imageSeedContext) {
     imageSeedContextRef.current = { key: imageSeedContext, revision: imageSeedContextRef.current.revision + 1 };
   }
+  const imageQueueBlockReason = !imageControlsHydrated
+    ? 'Loading saved image controls'
+    : !queueConnected
+      ? 'Connecting to the shared queue'
+      : !comfyConnected
+        ? 'ComfyUI is disconnected'
+        : !selectedImageWorkflow
+          ? imagePipelineMatch.error || 'Select an image pipeline'
+          : !checkpointName
+            ? 'Select a model first'
+            : missingWorkflowResource
+              ? `Select ${missingWorkflowResource.label}`
+              : imagePipelineRuntimeIssue
+                ? imagePipelineRuntimeIssue
+                : activeMode === 'img2img' && !img2imgSource.path && !img2imgSource.name
+                  ? 'Choose a source image for IMG2IMG'
+                  : !workflowImagePrompt.trim()
+                    ? imageAgentModeEnabled ? 'Compose or enter an agent prompt first' : 'Enter a positive prompt first'
+                    : '';
   const handleQueueImage = React.useCallback(async (placement: UmbraQueuePlacement = 'end') => {
     if (imageQueueInFlightRef.current || isQueueing) return;
+    if (imageQueueBlockReason) {
+      showToast(imageQueueBlockReason, 'error');
+      return;
+    }
     const effectivePlacement = queueSummary.powerPrompterActive ? placement : 'end';
     if (effectivePlacement === 'interrupt' && !window.confirm(
       'Stop the current Power Prompter image and run this Umbra UI image next?',
@@ -2419,6 +2434,7 @@ export function UmbraUIWorkspace() {
     imageCapabilities,
     img2imgDenoise,
     img2imgSource,
+    imageQueueBlockReason,
     isQueueing,
     activeLoras,
     activeTxt2imgOutputFolder,
@@ -2927,28 +2943,10 @@ export function UmbraUIWorkspace() {
     }
   }, [queueControlBusy, showToast, stopAllUmbraJobs]);
 
-  const imageQueueDisabled = isQueueing
-    || !queueConnected
-    || !comfyConnected
-    || !selectedImageWorkflow
-    || !checkpointName
-    || !!missingWorkflowResource
-    || !!imagePipelineRuntimeIssue
-    || (activeMode === 'img2img' && !img2imgSource.path && !img2imgSource.name)
-    || !workflowImagePrompt.trim();
-  const imageQueueTitle = !queueConnected
-    ? 'Connecting to the shared queue'
-    : (activeMode === 'image' || activeMode === 'img2img') && imageAgentModeEnabled && !imageAgentPrompt.trim()
-      ? 'Compose or enter an agent prompt first'
-      : activeMode === 'img2img' && !img2imgSource.path && !img2imgSource.name
-        ? 'Choose a source image for IMG2IMG'
-        : imagePipelineRuntimeIssue
-          ? imagePipelineRuntimeIssue
-          : missingWorkflowResource
-            ? `Select ${missingWorkflowResource.label}`
-            : imagePipelineMatch.error || (activeMode === 'img2img'
-              ? 'Queue this source through the locked Umbra UI IMG2IMG pipeline'
-              : 'Queue this image through the locked Umbra UI pipeline');
+  const imageQueueDisabled = isQueueing || !!imageQueueBlockReason;
+  const imageQueueTitle = imageQueueBlockReason || (activeMode === 'img2img'
+    ? 'Queue this source through the locked Umbra UI IMG2IMG pipeline'
+    : 'Queue this image through the locked Umbra UI pipeline');
   const imagePromptControls = (
     <div className="relative">
       <>
@@ -3026,12 +3024,14 @@ export function UmbraUIWorkspace() {
       onSendControlsToPowerPrompter={activeMode === 'image'
         ? handleSendGenerationControlsToPowerPrompter
         : undefined}
-      sendControlsDisabled={!selectedImagePipeline || !checkpointName}
-      sendControlsTitle={!selectedImagePipeline
-        ? 'Select a TXT2IMG model pipeline first'
-        : !checkpointName
-          ? 'Select a model first'
-          : 'Apply this TXT2IMG pipeline, model, LoRAs, seed, resolution, hires fix, detailers, and upscale settings to the active PPCard'}
+      sendControlsDisabled={!imageControlsHydrated || !selectedImagePipeline || !checkpointName}
+      sendControlsTitle={!imageControlsHydrated
+        ? 'Loading saved image controls'
+        : !selectedImagePipeline
+          ? 'Select a TXT2IMG model pipeline first'
+          : !checkpointName
+            ? 'Select a model first'
+            : 'Apply this TXT2IMG pipeline, model, LoRAs, seed, resolution, hires fix, detailers, and upscale settings to the active PPCard'}
       isQueueing={isQueueing}
       queueLabel={activeMode === 'img2img' ? 'Generate IMG2IMG' : 'Generate Image'}
       queueDisabled={imageQueueDisabled}
