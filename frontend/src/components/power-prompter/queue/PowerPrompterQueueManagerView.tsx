@@ -182,14 +182,14 @@ function UmbraQueueActivityLane({
 function QueueManagerGroupVariantProgress({
   group,
   setId,
-  getQueuePromptBlocksForItem,
+  getQueuePromptProgressBlocksForItem,
 }: {
   group: any;
   setId: number;
-  getQueuePromptBlocksForItem: (item: any, setId?: number) => any[];
+  getQueuePromptProgressBlocksForItem: (item: any, setId?: number) => any[];
 }) {
   const chips = React.useMemo(() => {
-    const getBlocksForItem = (item: any) => getQueuePromptBlocksForItem(item, setId);
+    const getBlocksForItem = (item: any) => getQueuePromptProgressBlocksForItem(item, setId);
     const items = Array.isArray(group?.items) ? group.items.filter((item: any) => item && item.exiting !== true) : [];
     if (items.length <= 0) return [];
     const activeItem = items.find((item: any) => item.status === 'running')
@@ -250,7 +250,7 @@ function QueueManagerGroupVariantProgress({
       })
       .filter(Boolean)
       .slice(0, QUEUE_MANAGER_GROUP_PROGRESS_CHIP_LIMIT);
-  }, [group, getQueuePromptBlocksForItem, setId]);
+  }, [group, getQueuePromptProgressBlocksForItem, setId]);
 
   if (chips.length <= 0) return null;
 
@@ -321,6 +321,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
     lockedQueuePromptIndex,
     getQueuePromptSelectionKey,
     getQueuePromptBlocksForItem,
+    getQueuePromptProgressBlocksForItem,
     handleQueuePromptSelectionClick,
     expandedQueuePromptRows,
     setExpandedQueuePromptRows,
@@ -992,7 +993,7 @@ export const PowerPrompterQueueManagerView = React.memo(function PowerPrompterQu
                                     <QueueManagerGroupVariantProgress
                                       group={group}
                                       setId={group.setId}
-                                      getQueuePromptBlocksForItem={getQueuePromptBlocksForItem}
+                                      getQueuePromptProgressBlocksForItem={getQueuePromptProgressBlocksForItem}
                                     />
                                   </div>
                                   {groupExpanded && (

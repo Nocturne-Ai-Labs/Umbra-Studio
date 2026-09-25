@@ -7,8 +7,30 @@ import type {
   QueuePromptBlock,
   QueueRequestGroup,
   QueueRequestMeta,
+  QueuePromptPreviewEntry,
   QueueStackItem,
 } from './queueCore';
+
+// Group progress only needs the variant identities captured when the queue was
+// built. Avoid sorting and indexing every card for each prompt in a large group.
+export function buildQueuePromptProgressBlocksFromPreviewEntry(
+  entry: QueuePromptPreviewEntry | null | undefined,
+): QueuePromptBlock[] | null {
+  if (!Array.isArray(entry?.tokens) || entry.tokens.length === 0) return null;
+  const blocks = entry.tokens.flatMap((token) => {
+    const slotId = String(token?.slotId || '').trim();
+    const variantId = String(token?.variantId || '').trim();
+    if (!slotId || !variantId) return [];
+    return [{
+      slotId,
+      variantId,
+      cardLabel: String(token.slotLabel || '').trim() || 'Card',
+      variantLabel: String(token.variantName || '').trim(),
+      promptText: String(token.text || '').trim(),
+    }];
+  });
+  return blocks.length > 0 ? blocks : null;
+}
 
 export function buildQueuePromptBlocksForItem(
   item: QueueStackItem,
