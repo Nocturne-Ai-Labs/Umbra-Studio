@@ -17,6 +17,7 @@ import { readComfyInputChoices } from './shared/umbra-ui/comfyInputChoices';
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { configureGeneratedMediaActivity, recordGeneratedMediaOutputs } from './backend/GeneratedMediaActivity';
 import { createCaptionCategoryFilter } from './backend/DatasetCaptionCategories';
+import { checkDatasetCaptionSize, DatasetCaptionTooLargeError, MAX_DATASET_CAPTION_REQUEST_BYTES, readExistingDatasetCaption } from './backend/DatasetCaptionFile';
 import { createReadStream, createWriteStream, existsSync, statSync, realpathSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, openSync, closeSync, renameSync, rmSync, type Dirent, type Stats, type BigIntStats } from 'fs';
 import * as fs from 'fs/promises';
 import { Readable } from 'node:stream';
@@ -3864,6 +3865,7 @@ const remoteTelemetryRecentEvents: Array<Record<string, unknown>> = [];
 const remoteTelemetryTransport = new Map<string, RemoteTransportStats>();
 const REMOTE_TELEMETRY_MAX_CLIENTS = 32;
 const REMOTE_TELEMETRY_MAX_EVENTS = 2000;
+const REMOTE_TELEMETRY_REQUEST_MAX_BYTES = 256 * 1024;
 const REMOTE_TELEMETRY_RECENT_WINDOW_MS = 60_000;
 const REMOTE_TELEMETRY_ACTIVE_CLIENT_MS = 30_000;
 let lastRemoteTelemetryConsoleAt = 0;
@@ -3883,6 +3885,16 @@ function sanitizeTelemetryPath(value: unknown): string {
   } catch {
     return raw.replace(/\?.*$/, '?...').slice(0, 180);
   }
+}
+
+function normalizeRemoteTelemetryViewport(value: unknown): { width: number; height: number; devicePixelRatio: number } | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const viewport = value as Record<string, unknown>;
+  const width = Number(viewport.width);
+  const height = Number(viewport.height);
+  const devicePixelRatio = Number(viewport.devicePixelRatio);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || !Number.isFinite(devicePixelRatio)) return undefined;
+  return { width, height, devicePixelRatio };
 }
 
 function recordRemoteTransport(endpoint: string, direction: 'in' | 'out', bytes: number): void {
@@ -3973,7 +3985,7 @@ function createRemoteTelemetryClient(req: Request, payload: any, server?: Reques
     url: sanitizeTelemetryPath(payload?.url),
     remoteAddress: getRemoteRequestAddress(req, server).slice(0, 120),
     userAgent: String(req.headers.get('user-agent') || '').slice(0, 240),
-    viewport: payload?.viewport,
+    viewport: normalizeRemoteTelemetryViewport(payload?.viewport),
     createdAt: now,
     lastSeenAt: now,
     eventCount: 0,
@@ -4000,12 +4012,12 @@ function recordRemoteTelemetryBatch(req: Request, payload: any, server?: Request
   stats.mode = String(payload?.mode || stats.mode || 'desktop').slice(0, 40);
   stats.url = sanitizeTelemetryPath(payload?.url || stats.url);
   stats.remoteAddress = getRemoteRequestAddress(req, server).slice(0, 120);
-  stats.viewport = payload?.viewport || stats.viewport;
+  stats.viewport = normalizeRemoteTelemetryViewport(payload?.viewport) || stats.viewport;
   stats.lastSeenAt = now;
 
   const events = Array.isArray(payload?.events) ? payload.events.slice(0, 120) : [];
   for (const rawEvent of events) {
-    const type = String(rawEvent?.type || '').trim();
+    const type = String(rawEvent?.type || '').trim().slice(0, 40);
     const rawObservedAt = Number(rawEvent?.at) || now;
     const observedAt = rawObservedAt > now + 30_000 || rawObservedAt < now - 10 * 60_000 ? now : rawObservedAt;
     stats.eventCount += 1;
@@ -33821,7 +33833,7 @@ const server = Bun.serve<UmbraSocketData>({
         }
 
         if (method === 'POST' && path === '/api/remote/metrics') {
-          const payload = await readJsonObject(req);
+          const payload = await readJsonObject(req, false, REMOTE_TELEMETRY_REQUEST_MAX_BYTES);
           if (!payload) return json({ error: 'Expected a JSON object.' }, 400);
           const stats = recordRemoteTelemetryBatch(req, payload, server);
           return json({ ok: true, clientId: stats.clientId, accepted: Array.isArray(payload?.events) ? payload.events.length : 0 });
@@ -36286,7 +36298,8 @@ const server = Bun.serve<UmbraSocketData>({
               : parseTagList(result?.booruTagString || '', useSpaces);
           };
 
-          const body = await req.json() as Record<string, unknown>;
+          const body = await readJsonObject(req, false, 512 * 1024) as Record<string, unknown> | null;
+          if (!body) return json({ error: 'Invalid caption request' }, 400);
           const datasetName = sanitizeDatasetSegment(body.dataset);
           const conceptName = sanitizeDatasetSegment(body.concept);
           if (!datasetName || !conceptName) {
@@ -36415,12 +36428,7 @@ const server = Bun.serve<UmbraSocketData>({
             const captionPath = datasetCaptionPath(conceptPath, filename);
 
             try {
-              const existingCaption = preserveExisting
-                ? await fs.readFile(captionPath, 'utf8').catch((error: NodeJS.ErrnoException) => {
-                  if (error.code === 'ENOENT') return '';
-                  throw error;
-                })
-                : '';
+              const existingCaption = preserveExisting ? await readExistingDatasetCaption(captionPath) : '';
               const existingTags = preserveExisting && captionMode === 'tags'
                 ? parseExistingCaptionTags(existingCaption)
                 : [];
@@ -36477,6 +36485,7 @@ const server = Bun.serve<UmbraSocketData>({
                 caption = mergedTags.join(', ');
                 tagCount = mergedTags.length;
               }
+              checkDatasetCaptionSize(caption);
               await writeTextFileAtomic(captionPath, caption, false);
               results.push({
                 filename,
@@ -36505,7 +36514,7 @@ const server = Bun.serve<UmbraSocketData>({
           });
           });
         } catch (error: any) {
-          return json({ error: error.message }, 500);
+          return json({ error: error.message }, error instanceof RequestBodyTooLargeError ? 413 : 500);
         }
       }
 
@@ -36948,8 +36957,10 @@ const server = Bun.serve<UmbraSocketData>({
       // Save caption for image in concept folder
       if (path === '/api/dataset/save-caption' && method === 'POST') {
         try {
-          const body = await req.json() as { dataset: string; concept?: string; image: string; caption: string };
-          if (!body.dataset || !body.image || typeof body.caption !== 'string') {
+          const body = await readJsonObject(req, false, MAX_DATASET_CAPTION_REQUEST_BYTES) as {
+            dataset?: string; concept?: string; image?: string; caption?: string;
+          } | null;
+          if (!body?.dataset || !body.image || typeof body.caption !== 'string') {
             return json({ error: 'Dataset and image name required' }, 400);
           }
 
@@ -36985,12 +36996,13 @@ const server = Bun.serve<UmbraSocketData>({
           // Edit the caption format this dataset already displays.
           const captionPath = datasetCaptionPath(basePath, safeImageName, !body.concept);
 
-          await writeTextFileAtomic(captionPath, body.caption.trim(), false);
+          await writeTextFileAtomic(captionPath, checkDatasetCaptionSize(body.caption.trim()), false);
 
           return json({ success: true, path: captionPath });
           });
         } catch (error: any) {
-          return json({ error: error.message }, 500);
+          return json({ error: error.message },
+            error instanceof RequestBodyTooLargeError || error instanceof DatasetCaptionTooLargeError ? 413 : 500);
         }
       }
 
