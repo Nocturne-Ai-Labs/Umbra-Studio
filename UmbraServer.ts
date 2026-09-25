@@ -34470,7 +34470,24 @@ const server = Bun.serve<UmbraSocketData>({
         return proxyGalleryBridgeFsPost(req, '/api/fs/empty-folders/preview');
       }
       if (path === '/api/gallery-bridge/fs/empty-folders/delete' && method === 'POST') {
-        return proxyGalleryBridgeFsPost(req, '/api/fs/empty-folders/delete');
+        const requestBody = toRecord(await req.clone().json().catch(() => ({})));
+        const requestedRoot = resolveGalleryBridgeInputPath(requestBody.path);
+        const response = await proxyGalleryBridgeFsPost(req, '/api/fs/empty-folders/delete');
+        if (response.ok && requestedRoot) {
+          try {
+            const result = toRecord(await response.clone().json());
+            const deleted = Array.isArray(result.deleted) ? result.deleted : [];
+            const confirmedPaths = deleted
+              .filter((entry): entry is string => typeof entry === 'string' && Boolean(entry.trim()))
+              .map(resolveGalleryBridgeInputPath)
+              .filter((entry) => entry && isPathInsideDirectory(requestedRoot, entry)
+                && normalizePathForCompare(entry) !== normalizePathForCompare(requestedRoot));
+            await generatedMediaActivity.forgetFolders(confirmedPaths);
+          } catch (error) {
+            console.warn('[Gallery] Could not retire activity for deleted empty folders', error);
+          }
+        }
+        return response;
       }
       if (path === '/api/gallery-bridge/fs/tags/add' && method === 'POST') return handleFsTagsAdd(req, url, server);
       if (path === '/api/gallery-bridge/fs/tags/remove' && method === 'POST') return handleFsTagsRemove(req, url, server);

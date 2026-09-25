@@ -1,6 +1,6 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, resolve, sep } from 'node:path';
 import { writeUpdateJsonAtomic } from '../shared/updateStateFile';
 
 const MEDIA = new Set(['.png', '.jpg', '.jpeg', '.webp', '.avif', '.bmp', '.tif', '.tiff', '.gif', '.heic', '.heif', '.jxl', '.svg', '.apng', '.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v', '.flv', '.wmv']);
@@ -95,6 +95,19 @@ export class GeneratedMediaActivity {
       this.timer = setTimeout(() => { void this.flush(); }, 1000);
       this.timer.unref?.();
     }
+  }
+
+  async forgetFolders(paths: string[]): Promise<void> {
+    const roots = paths.filter((path) => typeof path === 'string' && path.trim()).map((path) => this.key(path));
+    if (roots.length === 0) return;
+    let changed = false;
+    for (const key of this.folders.keys()) {
+      if (roots.some((root) => key === root || key.startsWith(root.endsWith(sep) ? root : `${root}${sep}`))) {
+        this.folders.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) await this.flush();
   }
 
   snapshot(paths: string[], allowed: (path: string) => boolean, clientPath: (path: string) => string) {
