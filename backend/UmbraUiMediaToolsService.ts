@@ -38,20 +38,45 @@ function clamp(value: unknown, minimum: number, maximum: number, fallback: numbe
   return Math.max(minimum, Math.min(maximum, numeric));
 }
 
-function runProcess(command: string, args: string[], cwd: string): Promise<void> {
+function runProcess(command: string, args: string[], cwd: string, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
+    signal?.throwIfAborted();
     const child = spawn(command, args, {
       cwd,
       windowsHide: true,
       stdio: ['ignore', 'ignore', 'pipe'],
     });
+    let processError: Error | null = null;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let abortRequested = false;
+    const abort = () => {
+      if (abortRequested) return;
+      abortRequested = true;
+      child.kill();
+      killTimer = setTimeout(() => child.kill('SIGKILL'), 2000);
+    };
+    const cleanup = () => {
+      signal?.removeEventListener('abort', abort);
+      if (killTimer) clearTimeout(killTimer);
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
     let stderr = '';
     child.stderr?.on('data', (chunk) => {
       stderr += String(chunk || '');
       if (stderr.length > 32000) stderr = stderr.slice(-32000);
     });
-    child.once('error', reject);
+    child.once('error', (error) => { processError = error; });
     child.once('close', (code) => {
+      cleanup();
+      if (signal?.aborted) {
+        reject(signal.reason || new Error('Media processing canceled.'));
+        return;
+      }
+      if (processError) {
+        reject(processError);
+        return;
+      }
       if (code === 0) {
         resolve();
         return;
@@ -160,6 +185,7 @@ async function applyVideoWatermark(options: {
   workDirectory: string;
   placement: UmbraUiWatermarkPlacement;
   outputWidth: number;
+  signal?: AbortSignal;
 }): Promise<void> {
   const placement = normalizePlacement(options.placement);
   const outputWidth = Math.round(clamp(options.outputWidth, 64, 7680, 1920) / 2) * 2;
@@ -190,7 +216,7 @@ async function applyVideoWatermark(options: {
     '-b:a', '192k',
     '-movflags', '+faststart',
     options.outputPath,
-  ], options.workDirectory);
+  ], options.workDirectory, options.signal);
 }
 
 export async function applyUmbraUiWatermark(options: {
@@ -202,6 +228,7 @@ export async function applyUmbraUiWatermark(options: {
   placement: UmbraUiWatermarkPlacement;
   exportSettings: UmbraUiImageExportSettings;
   outputWidth?: number;
+  signal?: AbortSignal;
 }): Promise<'image' | 'video'> {
   if (isUmbraUiWatermarkVideo(options.sourcePath)) {
     await applyVideoWatermark({ ...options, outputWidth: options.outputWidth || 1920 });
@@ -352,6 +379,7 @@ export async function convertUmbraUiVideoToGif(options: {
   outputPath: string;
   workDirectory: string;
   width: number;
+  signal?: AbortSignal;
 }): Promise<void> {
   const width = Math.round(clamp(options.width, 64, 3840, 720) / 2) * 2;
   const ffmpeg = resolveUmbraExtendedVideoFfmpeg(options.comfyRoot);
@@ -370,5 +398,5 @@ export async function convertUmbraUiVideoToGif(options: {
     '-filter_complex', filter,
     '-loop', '0',
     options.outputPath,
-  ], options.workDirectory);
+  ], options.workDirectory, options.signal);
 }

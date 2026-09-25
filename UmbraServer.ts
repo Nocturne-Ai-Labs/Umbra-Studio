@@ -23344,15 +23344,22 @@ async function publishUmbraUiMediaToolSequencePath(
   extension: '.gif' | '.jpg' | '.mp4' | '.png' | '.webp',
   requestedSequence: number,
   renderedPath: string,
+  signal?: AbortSignal,
 ): Promise<{ outputPath: string; filename: string; stat: BigIntStats }> {
+  signal?.throwIfAborted();
   const rendered = await fs.stat(renderedPath);
   if (!rendered.isFile() || rendered.size <= 0) throw new Error('The media tool did not produce a complete output file.');
   let sequence = Number.isInteger(requestedSequence) && requestedSequence > 0 ? requestedSequence : 1;
   while (sequence < 1_000_000) {
+    signal?.throwIfAborted();
     const filename = `${prefix}-${String(sequence).padStart(4, '0')}${extension}`;
     const outputPath = join(outputFolder, filename);
     try {
-      const stat = await copyFileExclusive(renderedPath, outputPath);
+      const stat = await copyFileExclusive(renderedPath, outputPath, () => signal?.throwIfAborted());
+      if (signal?.aborted) {
+        await removeUmbraUiMediaToolOutputIfUnchanged({ outputPath, stat });
+        signal.throwIfAborted();
+      }
       return { outputPath, filename, stat };
     } catch (error: any) {
       if (error?.code !== 'EEXIST') throw error;
@@ -23394,8 +23401,10 @@ function resolveUmbraUiMediaToolSourcePath(value: unknown, supportedExtensions: 
 async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean): Promise<Response> {
   const jobId = `${Date.now()}-${randomBytes(5).toString('hex')}`;
   const workDirectory = join(UMBRA_UI_MEDIA_TOOL_TEMP_ROOT, jobId);
+  let reservedOutput: { outputPath: string; stat: BigIntStats } | null = null;
   try {
     const form = await req.formData();
+    req.signal.throwIfAborted();
     const source = form.get('source') as any;
     const watermark = form.get('watermark') as any;
     const hasSourceUpload = source && typeof source.name === 'string' && typeof source.arrayBuffer === 'function' && Number(source.size) > 0;
@@ -23431,6 +23440,7 @@ async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean
       ...(hasSourceUpload ? [fs.writeFile(sourcePath, Buffer.from(await source.arrayBuffer()))] : []),
       ...(hasWatermarkUpload ? [fs.writeFile(watermarkPath, Buffer.from(await watermark.arrayBuffer()))] : []),
     ]);
+    req.signal.throwIfAborted();
     const outputFolder = resolveUmbraUiMediaToolOutputFolder(
       form.get('outputFolder'),
       allowExternalOutput,
@@ -23465,21 +23475,29 @@ async function handleUmbraUiWatermark(req: Request, allowExternalOutput: boolean
         quality: Number(form.get('quality')),
       },
       outputWidth: Number(form.get('outputWidth')),
+      signal: req.signal,
     });
-    const { outputPath, filename } = await publishUmbraUiMediaToolSequencePath(
+    req.signal.throwIfAborted();
+    const published = await publishUmbraUiMediaToolSequencePath(
       outputFolder,
       outputExtension === '.mp4' ? 'video-sequence' : 'image-sequence',
       outputExtension,
       Number(form.get('sequenceNumber')),
       renderedPath,
+      req.signal,
     );
+    reservedOutput = published;
+    req.signal.throwIfAborted();
+    const { outputPath, filename } = published;
     recordGeneratedMediaOutputs([{ path: outputPath }]);
+    reservedOutput = null;
     const fileLinks = await umbraUiMediaToolFileLinks(outputPath, allowExternalOutput);
     return json({ success: true, path: toClientPath(outputPath), filename, mediaType, ...fileLinks });
   } catch (error: any) {
     console.error('[UmbraUI Media Tools] Watermark failed:', error);
     return json({ success: false, error: String(error?.message || error || 'Failed to apply watermark.') }, 400);
   } finally {
+    if (reservedOutput) await removeUmbraUiMediaToolOutputIfUnchanged(reservedOutput);
     await fs.rm(workDirectory, { recursive: true, force: true }).catch(() => undefined);
   }
 }
@@ -23648,8 +23666,10 @@ async function handleUmbraUiImageCensor(req: Request, allowExternalOutput: boole
 async function handleUmbraUiVideoToGif(req: Request, allowExternalOutput: boolean): Promise<Response> {
   const jobId = `${Date.now()}-${randomBytes(5).toString('hex')}`;
   const workDirectory = join(UMBRA_UI_MEDIA_TOOL_TEMP_ROOT, jobId);
+  let reservedOutput: { outputPath: string; stat: BigIntStats } | null = null;
   try {
     const form = await req.formData();
+    req.signal.throwIfAborted();
     const source = form.get('source') as any;
     const hasSourceUpload = source && typeof source.name === 'string' && typeof source.arrayBuffer === 'function' && Number(source.size) > 0;
     const gallerySourcePath = resolveUmbraUiMediaToolSourcePath(form.get('sourcePath'), UMBRA_UI_MEDIA_TOOL_VIDEO_EXTENSIONS, allowExternalOutput);
@@ -23668,6 +23688,7 @@ async function handleUmbraUiVideoToGif(req: Request, allowExternalOutput: boolea
     await fs.mkdir(workDirectory, { recursive: true });
     const sourcePath = hasSourceUpload ? join(workDirectory, `source${sourceExtension}`) : gallerySourcePath;
     if (hasSourceUpload) await fs.writeFile(sourcePath, Buffer.from(await source.arrayBuffer()));
+    req.signal.throwIfAborted();
     const outputFolder = resolveUmbraUiMediaToolOutputFolder(
       form.get('outputFolder'),
       allowExternalOutput,
@@ -23682,17 +23703,24 @@ async function handleUmbraUiVideoToGif(req: Request, allowExternalOutput: boolea
       outputPath: renderedPath,
       workDirectory,
       width: Number(form.get('width')),
+      signal: req.signal,
     });
-    const { outputPath, filename } = await publishUmbraUiMediaToolSequencePath(
-      outputFolder, 'gif-sequence', '.gif', Number(form.get('sequenceNumber')), renderedPath,
+    req.signal.throwIfAborted();
+    const published = await publishUmbraUiMediaToolSequencePath(
+      outputFolder, 'gif-sequence', '.gif', Number(form.get('sequenceNumber')), renderedPath, req.signal,
     );
+    reservedOutput = published;
+    req.signal.throwIfAborted();
+    const { outputPath, filename } = published;
     recordGeneratedMediaOutputs([{ path: outputPath }]);
+    reservedOutput = null;
     const fileLinks = await umbraUiMediaToolFileLinks(outputPath, allowExternalOutput);
     return json({ success: true, path: toClientPath(outputPath), filename, mediaType: 'gif', ...fileLinks });
   } catch (error: any) {
     console.error('[UmbraUI Media Tools] GIF conversion failed:', error);
     return json({ success: false, error: String(error?.message || error || 'Failed to convert video to GIF.') }, 400);
   } finally {
+    if (reservedOutput) await removeUmbraUiMediaToolOutputIfUnchanged(reservedOutput);
     await fs.rm(workDirectory, { recursive: true, force: true }).catch(() => undefined);
   }
 }
@@ -38813,6 +38841,7 @@ const server = Bun.serve<UmbraSocketData>({
       }
 
       if (path === '/api/umbra-ui/media-tools/watermark' && method === 'POST') {
+        server.timeout(req, 0);
         return handleUmbraUiWatermark(req, isHostRequest(req, url, server));
       }
 
@@ -38848,6 +38877,7 @@ const server = Bun.serve<UmbraSocketData>({
       }
 
       if (path === '/api/umbra-ui/media-tools/video-to-gif' && method === 'POST') {
+        server.timeout(req, 0);
         return handleUmbraUiVideoToGif(req, isHostRequest(req, url, server));
       }
 

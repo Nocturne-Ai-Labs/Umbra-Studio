@@ -315,10 +315,12 @@ function useMediaBatchQueueActivity({
   startedAtRef: React.MutableRefObject<number>;
 }) {
   const stopRef = React.useRef(false);
+  const activeControllerRef = React.useRef<AbortController | null>(null);
   const [cancelRequested, setCancelRequested] = React.useState(false);
   const activityId = startedAtRef.current > 0 ? `umbra-extras:${mode}:${startedAtRef.current}` : undefined;
   useUmbraQueueActivityActions(activityId, { remove: async () => {
     stopRef.current = true;
+    activeControllerRef.current?.abort();
     setCancelRequested(true);
   } });
   const updatedAt = React.useMemo(
@@ -363,8 +365,9 @@ function useMediaBatchQueueActivity({
   }, [cancelRequested, items, mode, processing, startedAtRef, summary.completed, summary.failed, summary.total, updatedAt]);
   usePublishUmbraQueueActivity(`umbra-ui-extras-${mode}`, activity);
   return React.useMemo(() => ({
-    reset: () => { stopRef.current = false; setCancelRequested(false); },
+    reset: () => { stopRef.current = false; activeControllerRef.current = new AbortController(); setCancelRequested(false); },
     shouldStop: () => stopRef.current,
+    signal: () => activeControllerRef.current?.signal,
   }), []);
 }
 
@@ -582,18 +585,24 @@ function WatermarkTool({ targetKind }: { targetKind: 'image' | 'video' }) {
           imageFormat: exportSettings.format,
           quality: exportSettings.quality,
           outputWidth: videoMode ? videoOutputWidth : 0,
+          signal: batchControl.signal(),
         });
         setCompletedOutputs((current) => [...current, { id: item.id, result: next }]);
       },
       onItemSettled: (item, error) => {
-        setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: error ? 'failed' : 'completed', error: error instanceof Error ? error.message : error ? String(error) : undefined } : entry));
-        setSummary((current) => ({ ...current, completed: current.completed + (error ? 0 : 1), failed: current.failed + (error ? 1 : 0) }));
+        const canceled = !!error && batchControl.signal()?.aborted === true;
+        setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: canceled ? 'staged' : error ? 'failed' : 'completed', error: canceled ? undefined : error instanceof Error ? error.message : error ? String(error) : undefined } : entry));
+        setSummary((current) => ({ ...current, completed: current.completed + (error ? 0 : 1), failed: current.failed + (error && !canceled ? 1 : 0) }));
       },
     });
     setItems((current) => clearCompletedUmbraUiMediaBatch(current, runnableItems));
     setProcessing(false);
     window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
-    showToast(result.failed ? `${result.completed} watermark${result.completed === 1 ? '' : 's'} completed; ${result.failed} failed.` : `${result.completed} watermark${result.completed === 1 ? '' : 's'} completed.`, result.failed ? 'error' : 'success');
+    if (batchControl.shouldStop() && result.completed < runnableItems.length) {
+      showToast('Watermark batch canceled. Completed files were kept.', 'success');
+    } else {
+      showToast(result.failed ? `${result.completed} watermark${result.completed === 1 ? '' : 's'} completed; ${result.failed} failed.` : `${result.completed} watermark${result.completed === 1 ? '' : 's'} completed.`, result.failed ? 'error' : 'success');
+    }
   }, [batchControl, exportSettings, opacity, pinnedOutputFolder, outputFolder, position.x, position.y, processing, runnableItems, scale, setItems, showToast, videoMode, videoOutputWidth, watermark, watermarkAsset]);
 
   return (
@@ -717,18 +726,23 @@ function VideoToGifTool() {
       shouldStop: batchControl.shouldStop,
       onItemStart: (item) => setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'running' } : entry)),
       runItem: async (item, sequenceNumber) => {
-        const next = await submitUmbraUiVideoToGif({ source: item.file, sourcePath: item.path, outputFolder: outputFolder.trim(), pinnedOutputFolder, sequenceNumber, width });
+        const next = await submitUmbraUiVideoToGif({ source: item.file, sourcePath: item.path, outputFolder: outputFolder.trim(), pinnedOutputFolder, sequenceNumber, width, signal: batchControl.signal() });
         setCompletedOutputs((current) => [...current, { id: item.id, result: next }]);
       },
       onItemSettled: (item, error) => {
-        setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: error ? 'failed' : 'completed', error: error instanceof Error ? error.message : error ? String(error) : undefined } : entry));
-        setSummary((current) => ({ ...current, completed: current.completed + (error ? 0 : 1), failed: current.failed + (error ? 1 : 0) }));
+        const canceled = !!error && batchControl.signal()?.aborted === true;
+        setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: canceled ? 'staged' : error ? 'failed' : 'completed', error: canceled ? undefined : error instanceof Error ? error.message : error ? String(error) : undefined } : entry));
+        setSummary((current) => ({ ...current, completed: current.completed + (error ? 0 : 1), failed: current.failed + (error && !canceled ? 1 : 0) }));
       },
     });
     setItems((current) => clearCompletedUmbraUiMediaBatch(current, runnableItems));
     setProcessing(false);
     window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
-    showToast(result.failed ? `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed; ${result.failed} failed.` : `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed.`, result.failed ? 'error' : 'success');
+    if (batchControl.shouldStop() && result.completed < runnableItems.length) {
+      showToast('GIF batch canceled. Completed files were kept.', 'success');
+    } else {
+      showToast(result.failed ? `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed; ${result.failed} failed.` : `${result.completed} GIF${result.completed === 1 ? '' : 's'} completed.`, result.failed ? 'error' : 'success');
+    }
   }, [batchControl, runnableItems, pinnedOutputFolder, outputFolder, processing, setItems, showToast, width]);
 
   return (
