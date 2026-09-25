@@ -251,7 +251,7 @@ function normalizeStoredWildcardDefinition(rawDefinition: unknown): {
       return {
         id: String(option.id || createId(`option-${groupIndex}-${optionIndex}`)),
         tags,
-        chance: Math.max(0, Math.min(100, Math.round(Number(option.chance) || 0))),
+        chance: Math.max(0, Math.min(100, Number(option.chance) || 0)),
         enabled: option.enabled !== false,
       };
     }).filter((option) => option.tags.length > 0));
@@ -293,7 +293,10 @@ function randomlyDistributeOptions(options: WildcardOption[]): WildcardOption[] 
 function appendOptionWithBalancedChance(options: WildcardOption[], option: Omit<WildcardOption, 'chance' | 'enabled'>): WildcardOption[] {
   const active = options.filter((entry) => entry.enabled);
   if (active.length === 0) return [...options, { ...option, enabled: true, chance: 100 }];
-  const newChance = Math.max(1, Math.round(100 / (active.length + 1)));
+  const enabledCount = active.length + 1;
+  const newChance = enabledCount <= 100
+    ? Math.max(1, Math.round(100 / enabledCount))
+    : 100 / enabledCount;
   const existingChances = allocateWholePercentages(active.map((entry) => entry.chance), 100 - newChance);
   let activeIndex = 0;
   return [
@@ -312,7 +315,8 @@ function removeOptionAndRebalance(options: WildcardOption[], optionId: string): 
 function rebalanceOptionChance(options: WildcardOption[], optionId: string, rawChance: number): WildcardOption[] {
   const active = options.filter((option) => option.enabled);
   if (active.length <= 1) return options.map((option) => option.enabled ? { ...option, chance: 100 } : option);
-  const targetChance = Math.max(0, Math.min(100, Math.round(rawChance)));
+  const targetChance = Math.max(0, Math.min(100, active.length > 100
+    ? Math.round(rawChance * 10) / 10 : Math.round(rawChance)));
   const others = active.filter((option) => option.id !== optionId);
   const otherChances = allocateWholePercentages(others.map((option) => option.chance), 100 - targetChance);
   let otherIndex = 0;
@@ -1259,7 +1263,7 @@ function EditableWildcardOption({
           type="range"
           min={0}
           max={100}
-          step={1}
+          step={optionCount > 100 ? 0.1 : 1}
           value={option.chance}
           disabled={optionCount <= 1 || !groupEnabled || !option.enabled}
           onChange={(event) => onChanceChange(Number(event.target.value))}
@@ -1267,7 +1271,7 @@ function EditableWildcardOption({
           className="h-1.5 w-full cursor-pointer disabled:cursor-default disabled:opacity-50"
           style={{ accentColor: 'var(--umbra-accent)' }}
         />
-        <span className="rounded-sm border border-cyan-300/15 bg-cyan-500/[0.07] px-1.5 py-1 text-center font-mono text-[10px] text-cyan-100">{option.chance}%</span>
+        <span className="rounded-sm border border-cyan-300/15 bg-cyan-500/[0.07] px-1.5 py-1 text-center font-mono text-[10px] text-cyan-100">{option.chance > 0 && option.chance < 0.01 ? '<0.01' : Number(option.chance.toFixed(2))}%</span>
       </div>
     </div>
   );
