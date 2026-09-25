@@ -7065,8 +7065,14 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
             rejectPendingQueueRequestsByIds(effectiveCanceledRequestIds, 'Queue canceled by user.');
             dropTrackedQueueRequestState(effectiveCanceledRequestIds, 'canceled');
           }
-          setQueuePaused(nextPaused);
-          logQueueDebug('ws:queue_cancel_result:applied', { canceledRequestIds, pendingCancelScope, effectiveCanceledRequestIds });
+          const hasLocalStagedWork = queueStackItemsRef.current.some((item) =>
+            !item.exiting && isLocalStagedQueueRequestId(item.requestId)
+            && (item.status === 'pending' || item.status === 'running'));
+          const acknowledgedPaused = payload.backendHandled === true && typeof payload.paused === 'boolean'
+            ? payload.paused || hasLocalStagedWork
+            : nextPaused;
+          setQueuePaused(acknowledgedPaused);
+          logQueueDebug('ws:queue_cancel_result:applied', { canceledRequestIds, pendingCancelScope, effectiveCanceledRequestIds, acknowledgedPaused });
           return;
         }
 
@@ -7171,6 +7177,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
             : removedRequestIds;
           if (effectiveRemovedRequestIds.length > 0) {
             dropTrackedQueueRequestState(effectiveRemovedRequestIds);
+          }
+          if (payload.backendHandled === true && typeof payload.paused === 'boolean') {
+            const hasLocalStagedWork = queueStackItemsRef.current.some((item) =>
+              !item.exiting && isLocalStagedQueueRequestId(item.requestId)
+              && (item.status === 'pending' || item.status === 'running'));
+            setQueuePaused(payload.paused || hasLocalStagedWork);
           }
           if (pendingOperation) {
             const appliedCount = Array.isArray(payload.promptRemovals)
