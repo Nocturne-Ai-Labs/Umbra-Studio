@@ -1,3 +1,5 @@
+import { normalizePowerPrompterPromptText } from '../../../shared/power-prompter/powerPrompter';
+
 export interface UmbraUiPromptSegment {
   id: string;
   text: string;
@@ -6,6 +8,7 @@ export interface UmbraUiPromptSegment {
   variantId?: string;
   variantName?: string;
   agentEnabled?: boolean;
+  preserveRepeatedTerms?: true;
 }
 
 function createSegmentId(): string {
@@ -28,6 +31,7 @@ export function createUmbraUiPromptSegment(
     ...(String(metadata.variantId || '').trim() ? { variantId: String(metadata.variantId).trim() } : {}),
     ...(String(metadata.variantName || '').trim() ? { variantName: String(metadata.variantName).trim() } : {}),
     ...(metadata.agentEnabled === true ? { agentEnabled: true } : {}),
+    ...(metadata.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true } : {}),
   };
 }
 
@@ -120,14 +124,32 @@ function dedupeTerms(terms: string[]): string[] {
   return result;
 }
 
-export function normalizeUmbraUiPromptSegmentText(value: string): string {
+export function normalizeUmbraUiPromptSegmentText(value: string, preserveRepeatedTerms = false): string {
+  if (preserveRepeatedTerms) return normalizePowerPrompterPromptText(value);
   return dedupeTerms(splitPromptTerms(value)).join(', ');
 }
 
 export function compileUmbraUiPromptSegments(segments: UmbraUiPromptSegment[]): string {
-  const terms = (Array.isArray(segments) ? segments : [])
-    .flatMap((segment) => splitPromptTerms(String(segment?.text || '')));
-  return dedupeTerms(terms).join(', ');
+  const seen = new Set<string>();
+  const chunks: string[] = [];
+  for (const segment of Array.isArray(segments) ? segments : []) {
+    if (segment?.preserveRepeatedTerms === true) {
+      const importedText = normalizePowerPrompterPromptText(segment.text);
+      if (!importedText) continue;
+      chunks.push(importedText);
+      // Imported terms retain their full multiplicity. They still count as seen
+      // when a later, ordinary Umbra UI field is deduplicated.
+      splitPromptTerms(importedText).forEach((term) => seen.add(term.toLowerCase()));
+      continue;
+    }
+    for (const term of splitPromptTerms(String(segment?.text || ''))) {
+      const key = term.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      chunks.push(term);
+    }
+  }
+  return chunks.join(', ');
 }
 
 export function mergeUmbraUiPromptSegmentEnhancements(
@@ -163,13 +185,15 @@ export function appendUmbraUiPromptToken(
   segmentId: string,
   token: string,
 ): UmbraUiPromptSegment[] {
-  const normalizedToken = normalizeUmbraUiPromptSegmentText(token);
-  if (!normalizedToken) return segments;
   const targetId = segments.some((segment) => segment.id === segmentId)
     ? segmentId
     : segments[0]?.id || '';
+  const target = segments.find((segment) => segment.id === targetId);
+  const preserveRepeatedTerms = target?.preserveRepeatedTerms === true;
+  const normalizedToken = normalizeUmbraUiPromptSegmentText(token, preserveRepeatedTerms);
+  if (!normalizedToken) return segments;
   if (!targetId) return [createUmbraUiPromptSegment(normalizedToken)];
   return segments.map((segment) => segment.id === targetId
-    ? { ...segment, text: normalizeUmbraUiPromptSegmentText(`${segment.text}, ${normalizedToken}`) }
+    ? { ...segment, text: normalizeUmbraUiPromptSegmentText(`${segment.text}, ${normalizedToken}`, preserveRepeatedTerms) }
     : segment);
 }

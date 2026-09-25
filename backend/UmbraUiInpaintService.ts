@@ -389,6 +389,7 @@ export interface UmbraUiInpaintPromptSegment {
   slotType: string;
   variantId: string;
   variantName: string;
+  preserveRepeatedTerms?: true;
 }
 
 export interface UmbraUiInpaintLora {
@@ -1092,6 +1093,7 @@ export function buildUmbraUiInpaintPowerPrompterMetadata(
       variantId: String(segment?.variantId || '').trim(),
       variantName: String(segment?.variantName || '').trim(),
       text: String(segment?.text || '').trim(),
+      ...(segment?.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
     }))
     .filter((segment) => segment.text.length > 0);
   return {

@@ -141,6 +141,7 @@ import {
 } from '@/lib/umbraUiPromptHistory';
 import {
   clearPendingUmbraUiPowerPrompterHandoff,
+  createUmbraUiPowerPrompterPromptSegments,
   normalizeUmbraUiPowerPrompterHandoff,
   takePendingUmbraUiPowerPrompterHandoff,
   UMBRA_UI_POWER_PROMPTER_HANDOFF_EVENT,
@@ -1834,19 +1835,7 @@ export function UmbraUIWorkspace() {
         : handoff.target === 'img2img'
           ? 'img2img'
           : 'image');
-      const handoffSegments = Array.isArray(handoff.positivePromptSegments)
-        ? handoff.positivePromptSegments
-          .map((segment) => createUmbraUiPromptSegment(segment.text, {
-            label: segment.label,
-            slotType: segment.slotType,
-            variantId: segment.variantId,
-            variantName: segment.variantName,
-          }))
-          .filter((segment) => segment.text.trim())
-        : [];
-      const nextSegments = handoffSegments.length > 0
-        ? handoffSegments
-        : [createUmbraUiPromptSegment(handoff.prompt)];
+      const nextSegments = createUmbraUiPowerPrompterPromptSegments(handoff);
       setPromptSegments(nextSegments);
       setActivePromptSegmentId(nextSegments[0]?.id || '');
       applyPowerPrompterGenerationControls(handoff.generation, {
@@ -2809,6 +2798,7 @@ export function UmbraUIWorkspace() {
             slotType: segment.slotType,
             variantId: segment.variantId,
             variantName: segment.variantName,
+            preserveRepeatedTerms: segment.preserveRepeatedTerms,
           },
         ));
         setPromptSegments(segments);

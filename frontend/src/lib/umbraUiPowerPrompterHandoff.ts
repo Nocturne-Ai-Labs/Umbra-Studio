@@ -1,3 +1,10 @@
+import { normalizePowerPrompterPromptText } from '../../../shared/power-prompter/powerPrompter';
+import {
+  compileUmbraUiPromptSegments,
+  createUmbraUiPromptSegment,
+  type UmbraUiPromptSegment,
+} from './umbraUiPromptSegments';
+
 export const UMBRA_UI_POWER_PROMPTER_HANDOFF_KEY = 'umbra-ui:pending-power-prompter-handoff';
 export const UMBRA_UI_POWER_PROMPTER_HANDOFF_EVENT = 'umbra:umbra-ui-power-prompter-handoff';
 
@@ -60,6 +67,26 @@ export function normalizeUmbraUiPowerPrompterHandoff(value: unknown): UmbraUiPow
     sourceFile: String(source.sourceFile || '').trim(),
     createdAt: Number.isFinite(Number(source.createdAt)) ? Number(source.createdAt) : Date.now(),
   };
+}
+
+export function createUmbraUiPowerPrompterPromptSegments(
+  handoff: UmbraUiPowerPrompterHandoff,
+): UmbraUiPromptSegment[] {
+  const sourcePrompt = normalizePowerPrompterPromptText(handoff.prompt);
+  const cardSegments = (handoff.positivePromptSegments || [])
+    .map((segment) => createUmbraUiPromptSegment(segment.text, {
+      label: segment.label,
+      slotType: segment.slotType,
+      variantId: segment.variantId,
+      variantName: segment.variantName,
+      preserveRepeatedTerms: true,
+    }))
+    .filter((segment) => segment.text.trim());
+  if (cardSegments.length > 0 && cardSegments.length <= 24
+    && compileUmbraUiPromptSegments(cardSegments) === sourcePrompt) {
+    return cardSegments;
+  }
+  return [createUmbraUiPromptSegment(sourcePrompt, { preserveRepeatedTerms: true })];
 }
 
 export function stageUmbraUiPowerPrompterHandoff(
