@@ -5698,10 +5698,12 @@ function isPowerPrompterQueueControllerTerminalStatus(status: unknown) {
 type BackendPPHistory = {
   initialCommit: Promise<PPQueueHistorySummary> | null;
   lastWrite?: Promise<void>;
+  promptRemovalPending?: boolean;
+  promptRemovalEpoch?: number;
+  deferredPreviews?: unknown[];
   requiredRevision?: Promise<void>;
   requiredRevisionPending?: boolean;
   requiredRevisionFailed?: boolean;
-  deferredPreviews?: unknown[];
   createdByAdmission?: boolean;
   admissionGate?: PowerPrompterAdmissionGate;
   ready: Promise<unknown>;
@@ -5815,9 +5817,14 @@ function initializeBackendPPQueueHistory(request: PowerPrompterQueueControllerRe
   history.ready = history.initialCommit.catch((error) => { reportBackendPPHistoryError(request.requestId, error); });
 }
 
-function persistBackendPPQueueHistoryProgress(request: PowerPrompterQueueControllerRequest, previews?: unknown[]) {
+function persistBackendPPQueueHistoryProgress(request: PowerPrompterQueueControllerRequest, previews?: unknown[], forcePromptRemoval = false) {
   const history = ppBackendHistory.get(request.requestId);
   if (!history || history.deleted) return;
+  if (history.promptRemovalPending && !forcePromptRemoval) {
+    if (previews?.length) history.deferredPreviews = normalizePPQueueHistoryPreviewImages([...(history.deferredPreviews || []), ...previews]);
+    history.progressSignature = '';
+    return;
+  }
   if (history.requiredRevisionPending || history.requiredRevisionFailed) {
     history.progressSignature = '';
     if (previews) history.deferredPreviews = previews;
@@ -5881,6 +5888,7 @@ function recomputePowerPrompterQueueControllerState(reason?: string) {
     if (!isPowerPrompterQueueControllerTerminalStatus(request.status)) return true;
     const keep = backendPowerPrompterQueueTasks.has(request.requestId)
       || backendPowerPrompterQueuedWork.some((work) => work.requestId === request.requestId)
+      || pendingPowerPrompterGroupSourceEdits.has(request.requestId)
       || now - Math.max(0, Number(request.updatedAt) || 0) < 30000;
     if (!keep) ppBackendHistory.delete(request.requestId);
     return keep;
@@ -6178,6 +6186,187 @@ function applyPowerPrompterQueueControllerPromptRemovals(
     removedRequestIds: Array.from(removedRequestIds),
     promptRemovals: appliedRemovals,
   };
+}
+
+type BackendPromptRemovalResult = ReturnType<typeof applyPowerPrompterQueueControllerPromptRemovals> & {
+  error?: string;
+  partial?: boolean;
+  failedRequestId?: string;
+};
+type BackendPromptRemovalEntry = { requestId: string; promptIndices: number[] };
+const inFlightBackendPromptRemovals = new Map<string, Promise<BackendPromptRemovalResult>>();
+const recentBackendPromptRemovals = new Map<string, { result: BackendPromptRemovalResult; expiresAt: number }>();
+
+function normalizeBackendPromptRemovalEntries(data: any): BackendPromptRemovalEntry[] {
+  const byRequest = new Map<string, Set<number>>();
+  for (const raw of Array.isArray(data?.promptRemovals) ? data.promptRemovals : []) {
+    const requestId = String(raw?.requestId || '').trim();
+    const indices = normalizePowerPrompterPromptIndices(raw?.promptIndices);
+    if (!requestId || indices.length === 0) continue;
+    const combined = byRequest.get(requestId) || new Set<number>();
+    for (const index of indices) combined.add(index);
+    byRequest.set(requestId, combined);
+  }
+  return Array.from(byRequest, ([requestId, indices]) => ({
+    requestId,
+    promptIndices: Array.from(indices).sort((a, b) => a - b),
+  })).sort((left, right) => left.requestId.localeCompare(right.requestId));
+}
+
+async function applyBackendPromptRemovalsDurably(
+  data: any,
+  preferredSourceWs?: ServerWebSocket<unknown> | null,
+): Promise<BackendPromptRemovalResult> {
+  const entries = normalizeBackendPromptRemovalEntries(data);
+  const empty = (): BackendPromptRemovalResult => ({ affectedRequestIds: [], removedRequestIds: [], promptRemovals: [] });
+  if (entries.length === 0) return empty();
+  const key = JSON.stringify(entries);
+  const inFlight = inFlightBackendPromptRemovals.get(key);
+  if (inFlight) return inFlight;
+  const now = Date.now();
+  for (const [candidate, cached] of recentBackendPromptRemovals) {
+    if (cached.expiresAt <= now) recentBackendPromptRemovals.delete(candidate);
+  }
+  const recent = recentBackendPromptRemovals.get(key);
+  if (recent && recent.result.promptRemovals.every((entry) => entry.promptIndices.every((index) => {
+    const prompt = findPowerPrompterQueueControllerRequest(entry.requestId)?.prompts[index];
+    return !prompt || (prompt.status === 'canceled' && prompt.error === 'removed');
+  }))) return recent.result;
+
+  const operation = Promise.resolve().then(async (): Promise<BackendPromptRemovalResult> => {
+    const result = empty();
+    const powerPrompterEntries: Array<{
+      entry: BackendPromptRemovalEntry;
+      request: PowerPrompterQueueControllerRequest;
+      history: BackendPPHistory;
+      task: BackendPowerPrompterQueueTask | null;
+      originalRemovedIndices: Set<number> | null;
+      originalPending: Map<number, PowerPrompterQueueControllerPrompt>;
+      queuedWork: BackendPowerPrompterQueuedWork | null;
+      priorGate: PowerPrompterAdmissionGate | undefined;
+      holdGate: PowerPrompterAdmissionGate;
+    }> = [];
+    const otherEntries: BackendPromptRemovalEntry[] = [];
+    for (const entry of entries) {
+      if (isPowerPrompterGroupEditHeld(entry.requestId)) {
+        throw new Error('A queue group edit is still being saved. Refresh Queue Manager and try again.');
+      }
+      const request = findPowerPrompterQueueControllerRequest(entry.requestId);
+      const task = backendPowerPrompterQueueTasks.get(entry.requestId) || null;
+      if (request?.origin !== 'power_prompter' && task?.origin !== 'power_prompter') {
+        otherEntries.push(entry);
+        continue;
+      }
+      if (!request) throw new Error('The queue group is no longer available. Refresh Queue Manager and try again.');
+      const history = ppBackendHistory.get(entry.requestId);
+      if (!history || history.deleted) throw new Error('The queue group history is unavailable. Refresh Queue Manager and try again.');
+      if (history.requiredRevisionPending || history.requiredRevisionFailed) {
+        throw new Error('The queue group has an unsaved edit. Finish or repair that edit before removing prompts.');
+      }
+      const queuedWork = backendPowerPrompterQueuedWork.find((work) => work.requestId === entry.requestId) || null;
+      powerPrompterEntries.push({
+        entry, request, history, task,
+        originalRemovedIndices: task ? new Set(task.removedPromptIndices) : null,
+        originalPending: new Map(entry.promptIndices
+          .map((index) => [index, request.prompts[index]] as const)
+          .filter((pair): pair is readonly [number, PowerPrompterQueueControllerPrompt] => pair[1]?.status === 'pending')
+          .map(([index, prompt]) => [index, { ...prompt }] as const)),
+        queuedWork,
+        priorGate: queuedWork?.admissionGate,
+        holdGate: createPowerPrompterAdmissionGate(),
+      });
+    }
+
+    const blockId = `remove_prompts:${crypto.randomUUID()}`;
+    for (const entry of entries) pendingPowerPrompterGroupSourceEdits.add(entry.requestId);
+    if (powerPrompterEntries.length > 0) backendPowerPrompterExecutionBlocks.add(blockId);
+    for (const item of powerPrompterEntries) {
+      item.history.promptRemovalPending = true;
+      item.history.promptRemovalEpoch = (item.history.promptRemovalEpoch || 0) + 1;
+      if (item.queuedWork) item.queuedWork.admissionGate = item.holdGate;
+    }
+    try {
+      for (const item of powerPrompterEntries) {
+        let applied: ReturnType<typeof applyPowerPrompterQueueControllerPromptRemovals> | null = null;
+        let removalWrite: Promise<void> | undefined;
+        try {
+          applied = applyPowerPrompterQueueControllerPromptRemovals({ promptRemovals: [item.entry] }, preferredSourceWs, true);
+          if (applied.affectedRequestIds.length === 0) continue;
+          persistBackendPPQueueHistoryProgress(item.request, undefined, true);
+          removalWrite = item.history.lastWrite;
+          if (!removalWrite) throw new Error('The prompt removal was not saved.');
+          await removalWrite;
+        } catch (error) {
+          for (const [index, original] of item.originalPending) {
+            const current = item.request.prompts[index];
+            if (current?.status === 'canceled' && current.error === 'removed') item.request.prompts[index] = original;
+          }
+          if (item.task && item.originalRemovedIndices) item.task.removedPromptIndices = new Set(item.originalRemovedIndices);
+          broadcastPowerPrompterQueueControllerSnapshot('prompt_remove_rolled_back', preferredSourceWs);
+          persistBackendPPQueueHistoryProgress(item.request, undefined, true);
+          const restoreWrite = item.history.lastWrite;
+          if (restoreWrite && restoreWrite !== removalWrite) {
+            await restoreWrite.catch((restoreError) => reportBackendPPHistoryError(item.entry.requestId, restoreError));
+          }
+          result.error = String(error instanceof Error ? error.message : error);
+          result.failedRequestId = item.entry.requestId;
+          result.partial = result.affectedRequestIds.length > 0;
+          return result;
+        }
+        if (applied) {
+          result.affectedRequestIds.push(...applied.affectedRequestIds);
+          result.removedRequestIds.push(...applied.removedRequestIds);
+          result.promptRemovals.push(...applied.promptRemovals);
+          if (item.queuedWork) {
+            const removed = item.queuedWork.removedPromptIndices || new Set<number>();
+            for (const entry of applied.promptRemovals) for (const index of entry.promptIndices) removed.add(index);
+            item.queuedWork.removedPromptIndices = removed;
+          }
+          try { refreshBackendPowerPrompterQueuedWorkFromController(item.entry.requestId); }
+          catch (error) {
+            appendPowerPrompterQueueLog('backend_queue_prompt_remove_refresh_failed', {
+              requestId: item.entry.requestId,
+              error: String(error instanceof Error ? error.message : error),
+            });
+          }
+        }
+      }
+      if (otherEntries.length > 0) {
+        const applied = applyPowerPrompterQueueControllerPromptRemovals({ promptRemovals: otherEntries }, preferredSourceWs, true);
+        result.affectedRequestIds.push(...applied.affectedRequestIds);
+        result.removedRequestIds.push(...applied.removedRequestIds);
+        result.promptRemovals.push(...applied.promptRemovals);
+        for (const requestId of applied.affectedRequestIds) refreshBackendPowerPrompterQueuedWorkFromController(requestId);
+      }
+      return result;
+    } finally {
+      for (const item of powerPrompterEntries) {
+        item.history.promptRemovalPending = false;
+        item.history.promptRemovalEpoch = (item.history.promptRemovalEpoch || 0) + 1;
+        item.history.progressSignature = '';
+        const deferredPreviews = item.history.deferredPreviews;
+        item.history.deferredPreviews = undefined;
+        try { persistBackendPPQueueHistoryProgress(item.request, deferredPreviews); }
+        catch (error) { reportBackendPPHistoryError(item.entry.requestId, error); }
+        if (item.queuedWork?.admissionGate === item.holdGate) item.queuedWork.admissionGate = item.priorGate;
+        item.holdGate.settle(true);
+      }
+      backendPowerPrompterExecutionBlocks.delete(blockId);
+      for (const entry of entries) pendingPowerPrompterGroupSourceEdits.delete(entry.requestId);
+    }
+  }).then((result) => {
+    if (!result.error && result.affectedRequestIds.length > 0) {
+      recentBackendPromptRemovals.set(key, { result, expiresAt: Date.now() + 2000 });
+      while (recentBackendPromptRemovals.size > 128) {
+        const oldest = recentBackendPromptRemovals.keys().next().value;
+        if (!oldest) break;
+        recentBackendPromptRemovals.delete(oldest);
+      }
+    }
+    return result;
+  }).finally(() => { inFlightBackendPromptRemovals.delete(key); });
+  inFlightBackendPromptRemovals.set(key, operation);
+  return operation;
 }
 
 function applyPowerPrompterQueueControllerReorder(
@@ -10093,7 +10282,16 @@ async function waitForDurablePowerPrompterSubmitMarker(
     const history = ppBackendHistory.get(requestId);
     try {
       if (!request || !history) throw new Error('Queue history is unavailable.');
+      if (history.promptRemovalPending) {
+        await waitForBackendPowerPrompterQueueResume(task, requestId, sourceWs);
+        if (task.stopAfterCurrent) return {
+          requiredRevision: history.requiredRevision,
+          promptRemovalEpoch: history.promptRemovalEpoch || 0,
+        };
+        continue;
+      }
       const requiredRevision = history.requiredRevision;
+      const promptRemovalEpoch = history.promptRemovalEpoch || 0;
       if (requiredRevision) await requiredRevision;
       persistBackendPPQueueHistoryProgress(request);
       const write = history.lastWrite;
@@ -10104,8 +10302,8 @@ async function waitForDurablePowerPrompterSubmitMarker(
       // An edit can start while the status write is pending. Its snapshot must
       // be durable before the worker is allowed to submit this prompt. Check
       // after the last wait so a replacement started during a pause is seen.
-      if (history.requiredRevision !== requiredRevision) continue;
-      return { requiredRevision };
+      if (history.requiredRevision !== requiredRevision || (history.promptRemovalEpoch || 0) !== promptRemovalEpoch) continue;
+      return { requiredRevision, promptRemovalEpoch };
     } catch (error) {
       if (history) history.progressSignature = '';
       powerPrompterQueueControllerState.paused = true;
@@ -11160,7 +11358,8 @@ async function runBackendPowerPrompterPipelineQueue(
         durableMarker = await waitForDurablePowerPrompterSubmitMarker(task, requestId, sourceWs);
       } while (task.origin === 'power_prompter'
         && (!ppBackendHistory.has(requestId)
-          || ppBackendHistory.get(requestId)?.requiredRevision !== durableMarker?.requiredRevision));
+          || ppBackendHistory.get(requestId)?.requiredRevision !== durableMarker?.requiredRevision
+          || (ppBackendHistory.get(requestId)?.promptRemovalEpoch || 0) !== durableMarker?.promptRemovalEpoch));
       throwIfBackendPowerPrompterQueueCanceled(task);
       if (finishBeforeNextPromptIfStopped()) return;
       if (task.removedPromptIndices.has(index)) continue;
@@ -12492,9 +12691,30 @@ function forwardPrompterQueueMessageToComfyTarget(
     || ['pipeline', 'api_workflow'].includes(String(data?.queueTargetType || '').trim().toLowerCase());
   const target = resolvePrompterComfyTarget(preferredBridgeId);
   const requestId = String(data?.requestId || crypto.randomUUID());
-  const backendPromptRemovalResult = isBackendPipelineTarget && type === 'queue_prompt_remove'
-    ? applyPowerPrompterQueueControllerPromptRemovals(data, ws)
-    : { affectedRequestIds: [], removedRequestIds: [], promptRemovals: [] };
+  const backendPromptRemovalResult = { affectedRequestIds: [], removedRequestIds: [], promptRemovals: [] };
+  if (isBackendPipelineTarget && type === 'queue_prompt_remove') {
+    void applyBackendPromptRemovalsDurably(data, ws).then((result) => {
+      const applied = result.affectedRequestIds.length > 0;
+      sendWs(ws, {
+        type: 'queue_prompt_remove_result', requestId,
+        success: applied && !result.error,
+        applied, backendHandled: true,
+        removedRequestIds: result.removedRequestIds,
+        promptRemovals: result.promptRemovals,
+        ...(result.partial ? { partial: true } : {}),
+        ...(result.failedRequestId ? { failedRequestId: result.failedRequestId } : {}),
+        ...(result.error || !applied ? { error: result.error || 'No matching backend pipeline queued prompt was found.' } : {}),
+      });
+    }, (error) => {
+      sendWs(ws, {
+        type: 'queue_prompt_remove_result', requestId,
+        success: false, applied: false, backendHandled: true,
+        removedRequestIds: [], promptRemovals: [],
+        error: String(error instanceof Error ? error.message : error),
+      });
+    });
+    return;
+  }
   const backendReorderHistoryWrites: Promise<void>[] = [];
   let backendReorderApplied = false;
   if (isBackendPipelineTarget && type === 'queue_reorder') {
@@ -12525,20 +12745,6 @@ function forwardPrompterQueueMessageToComfyTarget(
         success: true,
         backendHandled: true,
         dispatchDelayMs,
-      });
-      return;
-    }
-
-    if (type === 'queue_prompt_remove') {
-      sendWs(ws, {
-        type: 'queue_prompt_remove_result',
-        requestId,
-        success: backendPromptRemovalResult.affectedRequestIds.length > 0,
-        applied: backendPromptRemovalResult.affectedRequestIds.length > 0,
-        backendHandled: true,
-        removedRequestIds: backendPromptRemovalResult.removedRequestIds,
-        promptRemovals: backendPromptRemovalResult.promptRemovals,
-        ...(backendPromptRemovalResult.affectedRequestIds.length > 0 ? {} : { error: 'No matching backend pipeline queued prompt was found.' }),
       });
       return;
     }
@@ -38691,7 +38897,19 @@ const server = Bun.serve<UmbraSocketData>({
           if (promptRemovals.length <= 0) {
             return json({ success: false, error: 'No queue prompts were selected.' }, 400);
           }
-          const runtimeResult = applyPowerPrompterQueueControllerPromptRemovals({ promptRemovals }, null);
+          const runtimeResult = await applyBackendPromptRemovalsDurably({ promptRemovals }, null);
+          if (runtimeResult.error) {
+            return json({
+              success: false,
+              error: runtimeResult.error,
+              partial: runtimeResult.partial === true,
+              failedRequestId: runtimeResult.failedRequestId,
+              applied: runtimeResult.affectedRequestIds.length > 0,
+              removedRequestIds: runtimeResult.removedRequestIds,
+              promptRemovals: runtimeResult.promptRemovals,
+              revision: ppQueueStateRevision,
+            }, 409);
+          }
           if (runtimeResult.affectedRequestIds.length > 0 || runtimeResult.removedRequestIds.length > 0) {
             return json({
               success: true,
