@@ -421,7 +421,6 @@ function launchFirstRunMigrationWorker(requestPath: string) {
 }
 const TRASH_ROOT = 'User/Trash';
 const COMFY_PROXY_TIMEOUT_MS = 4000;
-const COMFY_PROXY_WEBSOCKET_ENABLED = process.env.UMBRA_ENABLE_COMFY_WS_PROXY !== '0';
 const BACKEND_READY_PROBE_TIMEOUT_MS = 2000;
 const BACKEND_PP_PREVIEW_FRAME_THROTTLE_MS = 0;
 const BACKEND_PP_PREVIEW_MAX_DATA_URL_LENGTH = 8_000_000;
@@ -4326,6 +4325,10 @@ function getComfyProxyTarget() {
   return comfyTarget;
 }
 
+function isManagedComfyTarget(target: ReturnType<typeof getComfyProxyTarget>): boolean {
+  return target.protocol === 'http:' && isLoopbackIpAddress(target.host);
+}
+
 function validateHostOnlyServiceSettings(
   patch: Record<string, unknown>,
   current: Record<string, unknown>,
@@ -4469,29 +4472,14 @@ function isComfyRootProxyPath(path: string): boolean {
   return COMFY_PROXY_ROOT_PATHS.some((prefix) => path === prefix || path.startsWith(prefix));
 }
 
-function getComfyDirectRemoteBaseUrl(sourceUrl: URL): string {
-  if (isLoopbackHostname(sourceUrl.hostname)) return '';
-  const config = getComfyProxyTarget();
-  if (config.protocol === 'https:') {
-    return isLoopbackHostname(config.host) ? '' : getComfyProxyBaseUrl();
-  }
-  if (sourceUrl.protocol !== 'http:') return '';
-  return `http://${sourceUrl.hostname}:${config.port}`;
-}
-
-function rewriteComfyHtml(html: string, options: { directRemoteBaseUrl?: string } = {}): string {
-  const directRemoteBaseUrl = String(options.directRemoteBaseUrl || '').replace(/\/+$/, '');
-  const directRemoteWsUrl = directRemoteBaseUrl
-    ? `${directRemoteBaseUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:')}/ws`
-    : '';
-  const websocketTargetLiteral = directRemoteWsUrl
-    ? JSON.stringify(directRemoteWsUrl)
-    : JSON.stringify('ws://127.0.0.1:9/ws?umbraComfyProxyWsDisabled=1');
+function rewriteComfyHtml(html: string, directExternalWsUrl = ''): string {
   const bridgeScript = `
 <script>
 (() => {
   const prefix = '/comfy';
-  const comfyWebSocketTarget = ${websocketTargetLiteral};
+  const directExternalWsUrl = ${JSON.stringify(directExternalWsUrl)};
+  const comfyWebSocketTarget = new URL(directExternalWsUrl || '/comfy/ws', location.href);
+  if (!directExternalWsUrl) comfyWebSocketTarget.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const installWorkflowDraftStorageGuard = () => {
     try {
       const draftKey = 'Comfy.Workflow.Drafts';
@@ -4576,6 +4564,9 @@ function rewriteComfyHtml(html: string, options: { directRemoteBaseUrl?: string 
   installWorkflowDraftStorageGuard();
   const shouldRewrite = (path) => (
     path === '/ws' ||
+    path === '/api' || path.startsWith('/api/') ||
+    path === '/assets' || path.startsWith('/assets/') ||
+    path === '/scripts' || path.startsWith('/scripts/') ||
     path === '/embeddings' ||
     path === '/extensions' ||
     path === '/features' ||
@@ -4607,7 +4598,9 @@ function rewriteComfyHtml(html: string, options: { directRemoteBaseUrl?: string 
         return value;
       }
       if (value.startsWith('/comfy/')) return value;
-      if (value.startsWith('/') && shouldRewrite(value)) return prefix + value;
+      if (value.startsWith('/') && !value.startsWith('//') && shouldRewrite(new URL(value, location.href).pathname)) {
+        return prefix + value;
+      }
     } catch {}
     return value;
   };
@@ -4649,8 +4642,10 @@ function rewriteComfyHtml(html: string, options: { directRemoteBaseUrl?: string 
   const withBase = html.includes('<base ')
     ? html
     : html.replace(/<head([^>]*)>/i, `<head$1><base href="/comfy/">`);
-  return withBase.includes('</head>')
-    ? withBase.replace('</head>', `${bridgeScript}</head>`)
+  // Install before Comfy's own head scripts can open a direct socket or make
+  // root-relative requests that bypass Umbra's access checks.
+  return /<head(?:\s[^>]*)?>/i.test(withBase)
+    ? withBase.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${bridgeScript}`)
     : `${bridgeScript}${withBase}`;
 }
 
@@ -4758,10 +4753,13 @@ async function proxyComfyHttp(req: Request, sourceUrl: URL, targetPath: string):
   const contentType = responseHeaders.get('content-type') || '';
   if (contentType.includes('text/html')) {
     const html = await upstream.text();
+    const comfyTarget = getComfyProxyTarget();
+    // External HTTPS ComfyUI can rely on the browser's own WS credentials.
+    const directExternalWsUrl = comfyTarget.protocol === 'https:' && !isLoopbackHostname(comfyTarget.host)
+      ? getComfyProxyWsUrl()
+      : '';
     responseHeaders.set('content-type', 'text/html; charset=utf-8');
-    return createProxyTextResponse(req, sourceUrl, rewriteComfyHtml(html, {
-      directRemoteBaseUrl: getComfyDirectRemoteBaseUrl(sourceUrl),
-    }), upstream.status, responseHeaders);
+    return createProxyTextResponse(req, sourceUrl, rewriteComfyHtml(html, directExternalWsUrl), upstream.status, responseHeaders);
   }
 
   const contentLength = Number(responseHeaders.get('content-length') || 0);
@@ -17356,9 +17354,11 @@ function getBackendConfig() {
   const comfyTarget = getComfyProxyTarget();
   const comfyPort = comfyTarget.port;
   const comfyHost = comfyTarget.host;
-  const comfyLaunchHost = !IS_UMBRA_DEV_MODE && isLoopbackHostname(comfyHost)
-    ? '0.0.0.0'
-    : comfyHost;
+  // A managed ComfyUI process must never bind to a LAN or wildcard address.
+  // External and HTTPS endpoints are handled by startComfyUIProcess.
+  const comfyLaunchHost = isLoopbackIpAddress(comfyHost)
+    ? comfyHost.replace(/^\[|\]$/g, '')
+    : '127.0.0.1';
   const comfyLaunchCapability = resolveComfyLaunchCapability(comfy);
 
   const comfyArgs = comfy.detected ? [
@@ -17456,11 +17456,11 @@ async function startComfyUIProcess() {
     }
 
     const endpoint = getComfyProxyTarget();
-    if (endpoint.protocol === 'https:') {
+    if (!isManagedComfyTarget(endpoint)) {
       const healthy = await probeConfiguredComfyUI();
       return healthy
-        ? { success: true, message: 'Connected to the configured external HTTPS ComfyUI server', running: true, healthy, ownership: 'external-compatible', port: endpoint.port }
-        : { success: false, error: 'The configured HTTPS ComfyUI server is unavailable. Managed ComfyUI launch requires an HTTP URL.', running: false, healthy, port: endpoint.port };
+        ? { success: true, message: 'Connected to the configured external ComfyUI server', running: true, healthy, ownership: 'external-compatible', port: endpoint.port }
+        : { success: false, error: 'The configured external ComfyUI server is unavailable. Managed ComfyUI launch requires a loopback HTTP URL.', running: false, healthy, port: endpoint.port };
     }
 
     const config = getBackendConfig().comfyui;
@@ -17626,7 +17626,7 @@ async function stopComfyUI() {
   comfyStopRequested = true;
   comfyStartup.clearError();
   const endpoint = getComfyProxyTarget();
-  if (endpoint.protocol === 'https:' && !isChildProcessAlive(comfyProcess)) {
+  if (!isManagedComfyTarget(endpoint) && !isChildProcessAlive(comfyProcess)) {
     comfyProcess = null;
     comfyStartTime = null;
     comfyOwnershipSnapshotCache = null;
@@ -17634,7 +17634,7 @@ async function stopComfyUI() {
     const healthy = await probeConfiguredComfyUI();
     return {
       success: true,
-      message: 'External HTTPS ComfyUI is not managed by Umbra',
+      message: 'External ComfyUI is not managed by Umbra',
       running: healthy,
       healthy,
       ownership: healthy ? 'external-compatible' : 'stopped',
@@ -18734,9 +18734,11 @@ async function proxyGalleryBridgeFsPost(
 
 async function getBackendStatusAsync(backend: 'comfyui' | 'aitoolkit', portTimeoutMs = 3000) {
   let proc, startTime, port;
+  let comfyTarget: ReturnType<typeof getComfyProxyTarget> | null = null;
 
   if (backend === 'comfyui') {
     const config = getComfyProxyTarget();
+    comfyTarget = config;
     proc = comfyProcess;
     startTime = comfyStartTime;
     port = config.port;
@@ -18750,7 +18752,7 @@ async function getBackendStatusAsync(backend: 'comfyui' | 'aitoolkit', portTimeo
   const trackedProc = (proc || null) as ChildProcess | null;
   const processRunning = isChildProcessAlive(trackedProc);
 
-  if (backend === 'comfyui' && getComfyProxyTarget().protocol === 'https:') {
+  if (comfyTarget && !isManagedComfyTarget(comfyTarget)) {
     const healthy = await probeConfiguredComfyUI(portTimeoutMs);
     return {
       running: processRunning || healthy,
@@ -34417,12 +34419,6 @@ const server = Bun.serve<UmbraSocketData>({
         }
 
         if ((path === '/ws' || path === '/comfy/ws') && method === 'GET') {
-          if (!COMFY_PROXY_WEBSOCKET_ENABLED) {
-            return json({
-              error: 'ComfyUI websocket proxy disabled',
-              message: 'Umbra avoids tunneling ComfyUI browser websockets through Bun in published builds. Use the direct Tailscale ComfyUI URL for full live ComfyUI browser status.',
-            }, 426);
-          }
           let targetUrl: string;
           try { targetUrl = getComfyProxyWsUrl(url.search); }
           catch (error) { return json({ error: error instanceof Error ? error.message : 'Invalid ComfyUI proxy target.' }, 502); }
