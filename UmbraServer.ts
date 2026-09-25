@@ -5318,6 +5318,9 @@ interface BackendPowerPrompterQueueTask {
   previewProgressSignatures: Map<string, string>;
 }
 const backendPowerPrompterQueueTasks = new Map<string, BackendPowerPrompterQueueTask>();
+// A later explicit or safety pause supersedes a release deferred by Clear Group.
+let backendPowerPrompterPauseIntentEpoch = 0;
+let pendingBackendPowerPrompterPauseReleaseEpoch: number | null = null;
 interface PendingPowerPrompterBatchAdmission {
   dispatchDelayRevision: number;
   sourceWs: ServerWebSocket<unknown>;
@@ -6240,6 +6243,15 @@ function updatePowerPrompterQueueControllerPrompt(
   recordUmbraUiImg2ImgPromptTerminal(request.prompts[index]);
   void upsertUmbraUiVideoReviewPrompt(request, request.prompts[index]);
   broadcastPowerPrompterQueueControllerSnapshot(reason, preferredSourceWs);
+  const promptSettled = patch.status === 'completed' || patch.status === 'failed'
+    || (patch.status === 'interrupted' && patch.interruptionDrainConfirmed === true);
+  if (promptSettled && pendingBackendPowerPrompterPauseReleaseEpoch !== null) {
+    if (pendingBackendPowerPrompterPauseReleaseEpoch !== backendPowerPrompterPauseIntentEpoch) {
+      pendingBackendPowerPrompterPauseReleaseEpoch = null;
+    } else {
+      releaseBackendPowerPrompterPauseWhenIdle('backend_active_prompt_settled_resumed', preferredSourceWs);
+    }
+  }
 }
 
 function recordUmbraUiImg2ImgPromptTerminal(prompt: PowerPrompterQueueControllerPrompt): void {
@@ -6378,6 +6390,7 @@ async function applyBackendPromptRemovalsDurably(
     return !prompt || (prompt.status === 'canceled' && prompt.error === 'removed');
   }))) return recent.result;
 
+  const pauseIntentEpochAtRemoval = backendPowerPrompterPauseIntentEpoch;
   const operation = Promise.resolve().then(async (): Promise<BackendPromptRemovalResult> => {
     const result = empty();
     const powerPrompterEntries: Array<{
@@ -6501,7 +6514,10 @@ async function applyBackendPromptRemovalsDurably(
     }
   }).then((result) => {
     if (!result.error && result.affectedRequestIds.length > 0) {
-      releaseBackendPowerPrompterPauseWhenIdle('backend_prompt_remove_resumed', preferredSourceWs);
+      if (pauseIntentEpochAtRemoval === backendPowerPrompterPauseIntentEpoch) {
+        releaseBackendPowerPrompterPauseWhenIdle('backend_prompt_remove_resumed', preferredSourceWs);
+        deferBackendPowerPrompterPauseReleaseUntilPromptSettles(result.affectedRequestIds);
+      }
       recentBackendPromptRemovals.set(key, { result, expiresAt: Date.now() + 2000 });
       while (recentBackendPromptRemovals.size > 128) {
         const oldest = recentBackendPromptRemovals.keys().next().value;
@@ -9763,6 +9779,7 @@ async function waitForComfyPromptDrain(
   const failUncertainDrain = (detail: string): never => {
     // Losing queue visibility does not prove that ComfyUI stopped the job.
     // Preserve the same dispatch hold used for an unconfirmed submission.
+    backendPowerPrompterPauseIntentEpoch += 1;
     powerPrompterQueueControllerState.paused = true;
     broadcastPowerPrompterQueueControllerSnapshot('execution_outcome_unknown');
     throw new Error(`${detail} The queue is paused; check ComfyUI before resuming.`);
@@ -10200,8 +10217,24 @@ function releaseBackendPowerPrompterPauseWhenIdle(reason: string, preferredSourc
   if (hasLiveRequest || hasLiveQueuedWork || hasLiveTask || hasPendingAdmission) return false;
   powerPrompterQueueControllerState.paused = false;
   powerPrompterQueueControllerState.updatedAt = Date.now();
+  pendingBackendPowerPrompterPauseReleaseEpoch = null;
   broadcastPowerPrompterQueueControllerSnapshot(reason, preferredSourceWs);
   return true;
+}
+
+function deferBackendPowerPrompterPauseReleaseUntilPromptSettles(requestIds: readonly string[]) {
+  if (!powerPrompterQueueControllerState.paused) return;
+  // An in-flight render can outlive the durable removal. Retry the idle check
+  // when submitted prompts settle, before the worker waits to skip removed work.
+  const hasSubmittedTask = requestIds.some((requestId) => {
+    const task = backendPowerPrompterQueueTasks.get(requestId);
+    if (!task) return false;
+    if (task.canceled || task.abortController.signal.aborted) return false;
+    const activePrompt = findPowerPrompterQueueControllerRequest(requestId)?.prompts[task.activePromptIndex];
+    return activePrompt?.status === 'running' || activePrompt?.status === 'submitting'
+      || (activePrompt?.status === 'interrupted' && activePrompt.interruptionDrainConfirmed !== true);
+  });
+  if (hasSubmittedTask) pendingBackendPowerPrompterPauseReleaseEpoch = backendPowerPrompterPauseIntentEpoch;
 }
 
 function interruptBackendPowerPrompterActivePrompt(
@@ -10573,6 +10606,7 @@ async function waitForDurablePowerPrompterSubmitMarker(
       return { requiredRevision, promptRemovalEpoch };
     } catch (error) {
       if (history) history.progressSignature = '';
+      backendPowerPrompterPauseIntentEpoch += 1;
       powerPrompterQueueControllerState.paused = true;
       broadcastPowerPrompterQueueControllerSnapshot('submit_waiting_for_history', sourceWs);
       appendPowerPrompterQueueLog('backend_queue_submit_waiting_for_history', {
@@ -11022,6 +11056,7 @@ async function replacePersistedPPQueueGroup(
     } catch (error) {
       // The edited in-memory queue can be retried. Keep its failed revision as a
       // submit barrier so resuming alone cannot POST prompts from stale history.
+      backendPowerPrompterPauseIntentEpoch += 1;
       powerPrompterQueueControllerState.paused = true;
       broadcastPowerPrompterQueueControllerSnapshot('group_replace_history_failed', preferredSourceWs);
       throw new Error('The edited queue group could not be saved. The queue is paused; retry the edit before resuming.', { cause: error });
@@ -11453,6 +11488,7 @@ async function runBackendPowerPrompterPipelineQueue(
     return true;
   };
   const failUncertainSubmission = (promptIndex: number, cause: unknown): never => {
+    backendPowerPrompterPauseIntentEpoch += 1;
     powerPrompterQueueControllerState.paused = true;
     broadcastPowerPrompterQueueControllerSnapshot('submission_outcome_unknown', sourceWs);
     const detail = String(cause instanceof Error ? cause.message : cause || 'No prompt ID was returned.');
@@ -12825,6 +12861,7 @@ function forwardPrompterQueueControlToComfyTarget(
 
   if (isBackendPipelineTarget && type === 'queue_cancel' && controlSucceeded) {
     releaseBackendPowerPrompterPauseWhenIdle('backend_cancel_resumed', ws);
+    deferBackendPowerPrompterPauseReleaseUntilPromptSettles(backendAffectedRequestIds);
   }
 
   if (isBackendPipelineTarget && type === 'queue_clear_future'
@@ -12845,6 +12882,7 @@ function forwardPrompterQueueControlToComfyTarget(
   if (isBackendPipelineTarget) {
     if (type === 'queue_pause' || type === 'queue_resume') {
       const paused = type === 'queue_pause';
+      backendPowerPrompterPauseIntentEpoch += 1;
       powerPrompterQueueControllerState.paused = paused;
       powerPrompterQueueControllerState.updatedAt = Date.now();
       broadcastPowerPrompterQueueControllerSnapshot(paused ? 'backend_pause_requested' : 'backend_resume_requested', ws);
@@ -13050,6 +13088,7 @@ function forwardPrompterQueueMessageToComfyTarget(
         applied: backendReorderApplied, backendHandled: true,
       });
     }, (error) => {
+      backendPowerPrompterPauseIntentEpoch += 1;
       powerPrompterQueueControllerState.paused = true;
       broadcastPowerPrompterQueueControllerSnapshot('queue_reorder_history_failed', ws);
       sendWs(ws, {
@@ -27068,6 +27107,7 @@ async function restoreSavedPowerPrompterQueue(id: unknown) {
   const wasPaused = powerPrompterQueueControllerState.paused;
   const admissionGate = createPowerPrompterAdmissionGate();
   const acceptedRequestIds: string[] = [];
+  backendPowerPrompterPauseIntentEpoch += 1;
   powerPrompterQueueControllerState.paused = true;
   let admissionError: unknown = null;
   for (const work of prepared) {
