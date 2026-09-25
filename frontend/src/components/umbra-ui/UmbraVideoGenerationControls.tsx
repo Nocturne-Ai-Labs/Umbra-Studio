@@ -140,6 +140,7 @@ export interface UmbraVideoEditorDraft {
   prompt: string;
   negativePrompt: string;
   video: PowerPrompterVideoControls;
+  outputFolder?: string;
 }
 
 interface UmbraVideoDeviceResume {
@@ -1013,6 +1014,7 @@ export function UmbraVideoGenerationControls({
     setAgentModeEnabled(false);
     setAgentPrompt('');
     setNegativePrompt(editorDraft.negativePrompt);
+    if (editorDraft.outputFolder !== undefined) setPinnedOutputFolder(editorDraft.outputFolder);
     setVideo({
       ...defaults,
       ...editorDraft.video,
@@ -1054,7 +1056,7 @@ export function UmbraVideoGenerationControls({
       ? `/api/fs/image?path=${encodeURIComponent(editorDraft.video.sourceImagePath)}`
       : '');
     onEditorDraftApplied?.(editorDraft.id);
-  }, [editorDraft, onEditorDraftApplied, replacePromptSegments, settingsResolved]);
+  }, [editorDraft, onEditorDraftApplied, replacePromptSegments, setPinnedOutputFolder, settingsResolved]);
 
   React.useEffect(() => {
     const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : video.family === 'ltx25' ? 'LTX-2.5' : 'MiniMax H3';

@@ -9805,7 +9805,12 @@ async function emitBackendPowerPrompterSavedOutputs(
   signal?: AbortSignal,
 ): Promise<Array<Record<string, unknown>>> {
   const outputs = await fetchBackendPowerPrompterSavedOutputs(promptId, signal);
-  if (outputs.length === 0) return [];
+  if (outputs.length === 0) {
+    if (generation?.outputOwner === 'umbra_ui') {
+      throw new Error('ComfyUI completed, but Umbra UI found no saved output for this generation. Check ComfyUI history and the output folder, then try again.');
+    }
+    return [];
+  }
   const resolvedOutputs = outputs.map((output) => ({
     ...output,
     fullpath: resolveComfySavedOutputPath(output),
