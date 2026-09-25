@@ -1771,6 +1771,9 @@ export function UmbraUIWorkspace() {
     }
     if (inheritedHiresFix && typeof inheritedHiresFix === 'object') {
       const hiresFix = inheritedHiresFix as Record<string, unknown>;
+      const rawDenoise = hiresFix.denoise;
+      const numericDenoise = rawDenoise === null || rawDenoise === undefined || String(rawDenoise).trim() === ''
+        ? NaN : Number(rawDenoise);
       setHiresEnabled(hiresFix.enabled === true);
       setHiresUpscaler(String(hiresFix.upscaler || 'Latent'));
       setHiresResizeMode(String(hiresFix.resizeMode || '').toLowerCase() === 'dimensions' ? 'dimensions' : 'scale');
@@ -1778,7 +1781,7 @@ export function UmbraUIWorkspace() {
       setHiresTargetWidth(String(Math.max(0, Number(hiresFix.targetWidth) || 0)));
       setHiresTargetHeight(String(Math.max(0, Number(hiresFix.targetHeight) || 0)));
       setHiresSteps(String(Math.max(0, Number(hiresFix.steps) || 0)));
-      setHiresDenoise(Math.max(0, Math.min(1, Number(hiresFix.denoise) || 0.35)));
+      setHiresDenoise(Number.isFinite(numericDenoise) ? Math.max(0, Math.min(1, numericDenoise)) : 0.35);
       setHiresCfg(String(Math.max(0, Number(hiresFix.cfg) || 0)));
       setHiresSamplerName(String(hiresFix.samplerName || 'use_same'));
       setHiresScheduler(String(hiresFix.scheduler || 'use_same'));
