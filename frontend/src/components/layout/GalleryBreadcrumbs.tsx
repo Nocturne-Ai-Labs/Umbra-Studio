@@ -56,6 +56,7 @@ export function GalleryBreadcrumbs({ folder, roots, childrenByPath, loadingPaths
                 ...(loadingPaths.has(crumb.parent) ? [{ value: '__loading__', label: 'Loading folders...', disabled: true }] : []),
               ]}
               onValueChange={onOpen}
+              onOptionContextMenu={onContextMenu}
               ariaLabel={`Choose folder beside ${crumb.label}`}
               triggerTitle={crumb.parent ? `Folders in ${crumb.parent}` : 'Library roots'}
               menuTitle={crumb.parent ? 'Folders in this directory' : 'Library roots'}

@@ -7,6 +7,7 @@ export type ContextMenuItem =
       label: string;
       icon?: React.ReactNode;
       action?: () => void;
+      onContextMenu?: (event: React.MouseEvent<HTMLButtonElement>) => void;
       children?: ContextMenuItem[];
       description?: string;
       badge?: string | number;
@@ -19,6 +20,7 @@ export type ContextMenuItem =
       label?: never;
       icon?: never;
       action?: never;
+      onContextMenu?: never;
       children?: never;
       description?: never;
       badge?: never;

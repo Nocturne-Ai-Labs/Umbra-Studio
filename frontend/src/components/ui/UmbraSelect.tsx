@@ -19,6 +19,7 @@ interface UmbraSelectProps {
   value: string;
   options: UmbraSelectOption[];
   onValueChange: (value: string) => void;
+  onOptionContextMenu?: (event: React.MouseEvent<HTMLButtonElement>, value: string) => void;
   ariaLabel: string;
   placeholder?: string;
   disabled?: boolean;
@@ -97,6 +98,7 @@ export function UmbraSelect({
   value,
   options,
   onValueChange,
+  onOptionContextMenu,
   ariaLabel,
   placeholder = 'Select',
   disabled = false,
@@ -154,8 +156,12 @@ export function UmbraSelect({
         ? <Check size={13} />
         : option.icon || <span className="block h-3 w-3" />,
       action: () => onValueChange(option.value),
+      onContextMenu: onOptionContextMenu ? (event) => {
+        setOpen(false);
+        onOptionContextMenu(event, option.value);
+      } : undefined,
     };
-  }), [onValueChange, options, value]);
+  }), [onValueChange, onOptionContextMenu, options, value]);
 
   const displayLabel = selectedOption?.label || (value ? value : placeholder);
 

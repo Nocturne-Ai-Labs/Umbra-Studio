@@ -260,6 +260,11 @@ function MenuPanel({
                 ref={(node) => { itemRefs.current[index] = node; }}
                 type="button"
                 onClick={() => activateItem(item, index)}
+                onContextMenu={item.onContextMenu ? (event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (!item.disabled) item.onContextMenu?.(event);
+                } : undefined}
                 onPointerEnter={() => {
                   setActiveIndex(index);
                   setOpenIndex(hasChildren ? index : -1);
