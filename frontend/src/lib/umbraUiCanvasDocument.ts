@@ -757,7 +757,6 @@ function normalizeGenerationSettings(value: unknown): UmbraCanvasGenerationSetti
       ...(String(segment?.slotType || '').trim() ? { slotType: String(segment.slotType).trim() } : {}),
       ...(String(segment?.variantId || '').trim() ? { variantId: String(segment.variantId).trim() } : {}),
       ...(String(segment?.variantName || '').trim() ? { variantName: String(segment.variantName).trim() } : {}),
-      ...(segment?.agentEnabled === true ? { agentEnabled: true } : {}),
       ...(segment?.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
     }))
     : [];

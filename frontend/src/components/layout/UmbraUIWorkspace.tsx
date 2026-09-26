@@ -10,7 +10,6 @@ import { formatMissingUmbraUiNodes } from '../../../../shared/umbra-ui/runtimeNo
 import { UmbraPinnedOutputControl, usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
 import {
   Activity,
-  Bot,
   Clapperboard,
   FolderOutput,
   Info,
@@ -77,8 +76,6 @@ import { UmbraWorkflowResourceControls } from '@/components/umbra-ui/UmbraWorkfl
 import { UmbraLoraStackControls } from '@/components/umbra-ui/UmbraLoraStackControls';
 import { UmbraQueueManagerButton } from '@/components/umbra-ui/UmbraQueueManagerButton';
 import { UmbraPositivePromptEditor } from '@/components/umbra-ui/UmbraPositivePromptEditor';
-import { UmbraAgentPromptPanel } from '@/components/umbra-ui/UmbraAgentPromptPanel';
-import { UmbraInlineAgentPrompt } from '@/components/umbra-ui/UmbraInlineAgentPrompt';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
 import { UmbraImageResolutionControls } from '@/components/umbra-ui/UmbraImageResolutionControls';
 import {
@@ -131,7 +128,7 @@ import {
 import {
   compileUmbraUiPromptSegments,
   createUmbraUiPromptSegment,
-  getUmbraUiActiveImagePromptSegments,
+  migrateLegacyUmbraUiAgentPrompt,
   type UmbraUiPromptSegment,
 } from '@/lib/umbraUiPromptSegments';
 import {
@@ -149,11 +146,6 @@ import {
   type UmbraUiPowerPrompterHandoff,
 } from '@/lib/umbraUiPowerPrompterHandoff';
 import { stageUmbraUiGenerationControlsHandoff } from '@/lib/umbraUiGenerationControlsHandoff';
-import {
-  publishUmbraUiAgentContext,
-  type UmbraUiAgentDraft,
-  type UmbraUiAgentVideoContext,
-} from '@/lib/umbraUiAgent';
 import { listUmbraUiPipelineFamilies, resolveUmbraUiPipeline, resolveUmbraUiPipelineFamily } from '@/lib/umbraUiPipelines';
 import {
   advanceUmbraUiSeed,
@@ -655,10 +647,12 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     });
     return () => window.cancelAnimationFrame(frame);
   }, [activeMode, canvasEnabled, remoteMode]);
-  const [promptSegments, setPromptSegments] = React.useState<UmbraUiPromptSegment[]>(() => (
+  const [promptSegments, setPromptSegments] = React.useState<UmbraUiPromptSegment[]>(() => migrateLegacyUmbraUiAgentPrompt(
     Array.isArray(initialDeviceResume?.promptSegments) && initialDeviceResume.promptSegments.length > 0
       ? initialDeviceResume.promptSegments
-      : [createUmbraUiPromptSegment()]
+      : [createUmbraUiPromptSegment()],
+    initialDeviceResume?.imageAgentModeEnabled === true,
+    initialDeviceResume?.imageAgentPrompt || '',
   ));
   const [activePromptSegmentId, setActivePromptSegmentId] = React.useState(initialDeviceResume?.activePromptSegmentId || '');
   const [promptHistory, setPromptHistory] = React.useState<UmbraUiPromptHistoryEntry[]>([]);
@@ -668,13 +662,8 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const promptHistoryRevisionRef = React.useRef(0);
   const promptHistoryWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const prompt = React.useMemo(() => compileUmbraUiPromptSegments(promptSegments), [promptSegments]);
-  const [imageAgentModeEnabled, setImageAgentModeEnabled] = React.useState(initialDeviceResume?.imageAgentModeEnabled === true);
-  const [imageAgentPrompt, setImageAgentPrompt] = React.useState(initialDeviceResume?.imageAgentPrompt || '');
-  const workflowImagePrompt = imageAgentModeEnabled ? imageAgentPrompt.trim() : prompt;
-  const activeImagePromptSegments = React.useMemo(
-    () => getUmbraUiActiveImagePromptSegments(promptSegments, workflowImagePrompt, imageAgentModeEnabled),
-    [promptSegments, workflowImagePrompt, imageAgentModeEnabled],
-  );
+  const workflowImagePrompt = prompt;
+  const activeImagePromptSegments = promptSegments;
   const [negativePrompt, setNegativePrompt] = React.useState(initialDeviceResume?.negativePrompt || '');
   const [catalogEnabledCSVs, setCatalogEnabledCSVs] = React.useState<string[]>([]);
   const [canvasCatalogTriggerContainer, setCanvasCatalogTriggerContainer] = React.useState<HTMLDivElement | null>(null);
@@ -895,19 +884,8 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const [imageGenerationInfoOpen, setImageGenerationInfoOpen] = React.useState(false);
   const [queuedImageGenerationInfo, setQueuedImageGenerationInfo] = React.useState<Record<string, UmbraImageGenerationInfo>>({});
   const [lastImageGenerationInfo, setLastImageGenerationInfo] = React.useState<UmbraImageGenerationInfo | null>(null);
-  const [agentPanelOpen, setAgentPanelOpen] = React.useState(false);
-  const [agentDraftCount, setAgentDraftCount] = React.useState(0);
   const [videoStoryboardOpen, setVideoStoryboardOpen] = React.useState(false);
-  const [pendingVideoAgentDraft, setPendingVideoAgentDraft] = React.useState<UmbraUiAgentDraft | null>(null);
   const [videoEditorDraft, setVideoEditorDraft] = React.useState<UmbraVideoEditorDraft | null>(null);
-  const [videoAgentContext, setVideoAgentContext] = React.useState<UmbraUiAgentVideoContext>({
-    prompt: '',
-    negativePrompt: '',
-    apiWorkflowId: '',
-    family: '',
-    mode: '',
-    controls: {},
-  });
   const inheritedControlsAppliedRef = React.useRef(false);
   const attemptedLoraInfoRef = React.useRef(new Set<string>());
   const mediaHandoffAppliedAtRef = React.useRef(0);
@@ -1006,8 +984,6 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     applyPersistedImageControls(draft.controls);
     setPromptSegments(structuredClone(draft.promptSegments));
     setActivePromptSegmentId(draft.activePromptSegmentId);
-    setImageAgentModeEnabled(draft.imageAgentModeEnabled);
-    setImageAgentPrompt(draft.imageAgentPrompt);
   }, [applyPersistedImageControls]);
 
   React.useEffect(() => {
@@ -1098,8 +1074,6 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         txt2imgOutputFolder,
         promptSegments,
         activePromptSegmentId,
-        imageAgentModeEnabled,
-        imageAgentPrompt,
         negativePrompt,
         modelType,
         modelFamily,
@@ -1168,8 +1142,6 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     hiresTargetHeight,
     hiresTargetWidth,
     hiresUpscaler,
-    imageAgentModeEnabled,
-    imageAgentPrompt,
     img2imgDenoise,
     img2imgSource,
     loras,
@@ -1302,9 +1274,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     controls: imageControlsSnapshot,
     promptSegments,
     activePromptSegmentId,
-    imageAgentModeEnabled,
-    imageAgentPrompt,
-  }) : null, [imageControlsSnapshot, promptSegments, activePromptSegmentId, imageAgentModeEnabled, imageAgentPrompt]);
+  }) : null, [imageControlsSnapshot, promptSegments, activePromptSegmentId]);
 
   const lastWorkspaceDraftModeRef = React.useRef(activeMode);
   React.useEffect(() => {
@@ -1931,14 +1901,8 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const restorePromptHistoryEntry = React.useCallback((entry: UmbraUiPromptHistoryEntry) => {
     const restoredSegments = entry.promptSegments.map((segment) => ({ ...segment }));
     if (restoredSegments.length <= 0) return;
-    if (restoredSegments.length === 1 && restoredSegments[0].slotType === 'umbra_ui_agent_prompt') {
-      setImageAgentPrompt(restoredSegments[0].text);
-      setImageAgentModeEnabled(true);
-    } else {
-      setPromptSegments(restoredSegments);
-      setActivePromptSegmentId(restoredSegments[0].id);
-      setImageAgentModeEnabled(false);
-    }
+    setPromptSegments(restoredSegments);
+    setActivePromptSegmentId(restoredSegments[0].id);
     setNegativePrompt(entry.negativePrompt);
     showToast(`Restored ${restoredSegments.length} prompt field${restoredSegments.length === 1 ? '' : 's'}.`, 'success');
   }, [showToast]);
@@ -1957,22 +1921,6 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     setPromptHistory([]);
     showToast('Prompt history cleared.', 'success');
   }, [showToast]);
-
-  const applyAgentDraft = React.useCallback((draft: UmbraUiAgentDraft) => {
-    if (draft.mediaType === 'video') {
-      setPendingVideoAgentDraft(draft);
-      if (imageControlsHydrated) navigateWorkspace('video');
-      else setActiveMode('video');
-      return;
-    }
-    if (activeMode !== 'image' && activeMode !== 'inpaint' && activeMode !== 'img2img') {
-      if (imageControlsHydrated) navigateWorkspace('image');
-      else setActiveMode('image');
-    }
-    setImageAgentModeEnabled(true);
-    setImageAgentPrompt(draft.prompt || draft.segments.join(', '));
-    setNegativePrompt(draft.negativePrompt);
-  }, [activeMode, imageControlsHydrated, navigateWorkspace]);
 
   const rememberCurrentPipelineModelSelection = React.useCallback(() => {
     const modelName = String(checkpointName || '').trim().replace(/\\/g, '/');
@@ -2311,7 +2259,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
                 : activeMode === 'img2img' && !img2imgSource.path && !img2imgSource.name
                   ? 'Choose a source image for IMG2IMG'
                   : !workflowImagePrompt.trim()
-                    ? imageAgentModeEnabled ? 'Compose or enter an agent prompt first' : 'Enter a positive prompt first'
+                    ? 'Enter a positive prompt first'
                     : imageCapabilities.resolution.support === 'adjustable'
                       && (!Number.isInteger(Number(width)) || Number(width) < imageWidthMin || Number(width) > imageWidthMax)
                       ? `Enter a whole-number width from ${imageWidthMin} to ${imageWidthMax} pixels.`
@@ -2648,112 +2596,6 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const schedulerOptions = modelCatalog.schedulers.length > 0
     ? modelCatalog.schedulers
     : ['simple', 'normal', 'karras'];
-  React.useEffect(() => {
-    const publishContext = () => {
-      void publishUmbraUiAgentContext({
-        updatedAt: Date.now(),
-        activeMode: activeMode === 'prompter' || activeMode === 'queue' || activeMode === 'comfyui' ? 'image' : activeMode,
-        image: {
-          prompt: workflowImagePrompt,
-          promptSegments: activeImagePromptSegments,
-          negativePrompt,
-          apiWorkflowId: selectedImageWorkflow?.id || '',
-          checkpointName,
-          loras: activeLoras.filter((entry) => entry.enabled).map((entry) => ({
-            name: entry.name,
-            strengthModel: entry.strengthModel,
-            strengthClip: entry.strengthClip,
-            trainedTags: entry.trainedTags,
-          })),
-          controls: {
-            agentModeEnabled: imageAgentModeEnabled,
-            agentPrompt: imageAgentPrompt,
-            modelType,
-            modelFamily,
-            outputMode: activeImageFeature,
-            img2img: {
-              sourceImagePath: activeImageFeature === 'img2img' ? img2imgSource.path : '',
-              sourceImageName: activeImageFeature === 'img2img' ? img2imgSource.name : '',
-              denoise: img2imgDenoise,
-            },
-            workflowResources: workflowResourceValues,
-            clipSkip: Number(clipSkip),
-            seed: Number(seed),
-            seedMode,
-            seedIncrement,
-            steps: Number(steps),
-            cfg: Number(cfg),
-            width: Number(width),
-            height: Number(height),
-            samplerName,
-            scheduler,
-            hiresFix: {
-              enabled: hiresEnabled,
-              upscaler: hiresUpscaler,
-              resizeMode: hiresResizeMode,
-              scaleBy: hiresScaleBy,
-              targetWidth: Number(hiresTargetWidth),
-              targetHeight: Number(hiresTargetHeight),
-              steps: Number(hiresSteps),
-              denoise: hiresDenoise,
-              cfg: Number(hiresCfg),
-              samplerName: hiresSamplerName,
-              scheduler: hiresScheduler,
-            },
-            detailerPipeline,
-            outputUpscale,
-          },
-        },
-        video: videoAgentContext,
-      }).catch(() => undefined);
-    };
-    const timer = window.setTimeout(publishContext, 350);
-    const heartbeat = window.setInterval(publishContext, 30_000);
-    return () => {
-      window.clearTimeout(timer);
-      window.clearInterval(heartbeat);
-    };
-  }, [
-    activeMode,
-    activeImageFeature,
-    cfg,
-    checkpointName,
-    clipSkip,
-    detailerPipeline,
-    height,
-    hiresCfg,
-    hiresDenoise,
-    hiresEnabled,
-    hiresResizeMode,
-    hiresSamplerName,
-    hiresScaleBy,
-    hiresScheduler,
-    hiresSteps,
-    hiresTargetHeight,
-    hiresTargetWidth,
-    hiresUpscaler,
-    activeLoras,
-    modelFamily,
-    modelType,
-    negativePrompt,
-    outputUpscale,
-    activeImagePromptSegments,
-    samplerName,
-    scheduler,
-    seed,
-    seedIncrement,
-    seedMode,
-    selectedImageWorkflow?.id,
-    steps,
-    videoAgentContext,
-    width,
-    imageAgentModeEnabled,
-    imageAgentPrompt,
-    img2imgDenoise,
-    img2imgSource,
-    workflowImagePrompt,
-    workflowResourceValues,
-  ]);
 
   React.useEffect(() => {
     const applyMediaHandoff = (handoff: UmbraUiMediaHandoff | null) => {
@@ -3015,46 +2857,13 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         activeSegmentId={activePromptSegmentId}
         onChange={setPromptSegments}
         onActiveSegmentChange={setActivePromptSegmentId}
-        heading={imageAgentModeEnabled ? 'Prompt Request' : 'Positive Prompt'}
+        heading="Positive Prompt"
         history={promptHistory}
         onRememberCurrent={rememberCurrentPrompt}
         onRestoreHistory={restorePromptHistoryEntry}
         onRemoveHistory={removePromptHistoryEntry}
         onClearHistory={clearPromptHistory}
         onSubmit={() => { void handleQueueImage(imageQueuePlacement.effectivePlacement); }}
-        agentContext={{
-          mode: activeMode,
-          modelFamily,
-          modelType,
-          pipeline: selectedImageWorkflow?.name || '',
-          checkpointName,
-          width: Number(width),
-          height: Number(height),
-          enabledLoras: activeLoras.filter((entry) => entry.enabled).map((entry) => entry.name),
-        }}
-        onAgentEnhancementApplied={() => {
-          setImageAgentModeEnabled(false);
-          setImageAgentPrompt('');
-        }}
-      />
-
-      <UmbraInlineAgentPrompt
-        mediaType="image"
-        sourcePrompt={prompt}
-        enabled={imageAgentModeEnabled}
-        onEnabledChange={setImageAgentModeEnabled}
-        agentPrompt={imageAgentPrompt}
-        onAgentPromptChange={setImageAgentPrompt}
-        onSubmit={() => { void handleQueueImage(imageQueuePlacement.effectivePlacement); }}
-        context={{
-          modelFamily,
-          modelType,
-          pipeline: selectedImageWorkflow?.name || '',
-          checkpointName,
-          width: Number(width),
-          height: Number(height),
-          enabledLoras: activeLoras.filter((entry) => entry.enabled).map((entry) => entry.name),
-        }}
       />
 
       {imageCapabilities.negativePrompt.support === 'adjustable' ? (
@@ -3251,18 +3060,6 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
             onSkip={() => void handleSkipUmbraJob()}
             onStopAll={() => void handleStopAllUmbraJobs()}
           />
-          <button
-            type="button"
-            onClick={() => setAgentPanelOpen(true)}
-            data-umbra-ui-agent-button=""
-            className="relative inline-flex h-9 items-center gap-2 rounded-md border border-cyan-300/20 bg-cyan-500/[0.045] px-3 text-[10px] font-black uppercase tracking-[0.11em] text-cyan-100 transition-colors hover:bg-cyan-500/[0.1]"
-          >
-            <Bot size={13} />
-            <span data-umbra-ui-agent-label="">Agent</span>
-            {agentDraftCount > 0 ? (
-              <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-cyan-300 px-1 font-mono text-[9px] text-black">{agentDraftCount}</span>
-            ) : null}
-          </button>
           <span className={cn(
             'h-1.5 w-1.5 rounded-full shadow-[0_0_7px_currentColor]',
             comfyConnected ? 'bg-emerald-400 text-emerald-400' : 'bg-zinc-700 text-zinc-700',
@@ -3981,9 +3778,6 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               onRefreshCatalog={refreshModelCatalog}
               onOpenPowerPrompter={() => setActiveWorkspace('powerprompter')}
               queueVideo={queueVideo}
-              agentDraft={pendingVideoAgentDraft}
-              onAgentDraftApplied={(draftId) => setPendingVideoAgentDraft((current) => current?.id === draftId ? null : current)}
-              onAgentContextChange={setVideoAgentContext}
               editorDraft={videoEditorDraft}
               onEditorDraftApplied={(draftId) => setVideoEditorDraft((current) => current?.id === draftId ? null : current)}
               onStoryboardOpenChange={setVideoStoryboardOpen}
@@ -4049,12 +3843,6 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         titleOverride={activePickerTitle}
         searchPlaceholder={activePickerSearchPlaceholder}
         confirmLabel={activePickerConfirmLabel}
-      />
-      <UmbraAgentPromptPanel
-        open={agentPanelOpen}
-        onClose={() => setAgentPanelOpen(false)}
-        onApplyDraft={applyAgentDraft}
-        onPendingCountChange={setAgentDraftCount}
       />
     </div>
   );

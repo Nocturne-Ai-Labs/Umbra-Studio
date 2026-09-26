@@ -52,8 +52,6 @@ import type {
   UmbraVideoModelCatalog,
   UmbraVideoQueueOptions,
 } from '@/components/umbra-ui/useUmbraPowerPrompterBridge';
-import type { UmbraUiAgentDraft, UmbraUiAgentVideoContext } from '@/lib/umbraUiAgent';
-import { UmbraInlineAgentPrompt } from '@/components/umbra-ui/UmbraInlineAgentPrompt';
 import { UmbraPositivePromptEditor } from '@/components/umbra-ui/UmbraPositivePromptEditor';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
 import { UmbraLtxStoryboardPanel } from '@/components/umbra-ui/UmbraLtxStoryboardPanel';
@@ -69,6 +67,11 @@ import { hasUmbraVideoSourceDimensions, selectUmbraVideoMode, startsUmbraLtxExte
 import { resolveUmbraVideoQueueNegativePrompt } from '@/lib/umbraVideoQueuePrompt';
 import { resolveUmbraVideoQueueSourceUrl } from '@/lib/umbraVideoQueuePreview';
 import { UmbraVideoMediaUploadSelection } from '@/lib/umbraVideoMediaUploadSelection';
+import {
+  recoverLegacyUmbraVideoAutoPrompt,
+  restoreLegacyUmbraVideoAutoPrompt,
+  type UmbraVideoPromptRecoveryResume,
+} from '@/lib/umbraVideoPromptRecovery';
 import { readUserConfigWithRetry, writeUserConfig } from '@/lib/userConfig';
 import { advanceUmbraUiSeed, normalizeUmbraUiSeed, resolveUmbraUiQueueSeed } from '@/lib/umbraUiSeed';
 import {
@@ -80,6 +83,7 @@ import {
 import {
   compileUmbraUiPromptSegments,
   createUmbraUiPromptSegment,
+  migrateLegacyUmbraUiAgentPrompt,
   type UmbraUiPromptSegment,
 } from '@/lib/umbraUiPromptSegments';
 import {
@@ -128,9 +132,6 @@ interface UmbraVideoGenerationControlsProps {
   onRefreshCatalog: () => void;
   onOpenPowerPrompter: () => void;
   queueVideo: (options: UmbraVideoQueueOptions) => Promise<string>;
-  agentDraft?: UmbraUiAgentDraft | null;
-  onAgentDraftApplied?: (draftId: string) => void;
-  onAgentContextChange?: (context: UmbraUiAgentVideoContext) => void;
   editorDraft?: UmbraVideoEditorDraft | null;
   onEditorDraftApplied?: (draftId: string) => void;
   onStoryboardOpenChange?: (open: boolean) => void;
@@ -144,14 +145,13 @@ export interface UmbraVideoEditorDraft {
   outputFolder?: string;
 }
 
-interface UmbraVideoDeviceResume {
+interface UmbraVideoDeviceResume extends UmbraVideoPromptRecoveryResume {
   prompt?: string;
   promptSegments?: UmbraUiPromptSegment[];
   activePromptSegmentId?: string;
+  // Read only for migration into ordinary prompt segments.
   agentModeEnabled?: boolean;
   agentPrompt?: string;
-  autoPrompterEnabled?: boolean;
-  autoPrompterPrompt?: string;
   negativePrompt?: string;
 }
 
@@ -331,7 +331,6 @@ function createLtxStoryboardShot(index: number): UmbraLtxStoryboardShot {
     sourceImagePath: '',
     sourceImageName: '',
     strength: 1,
-    agentEnabled: false,
   };
 }
 
@@ -721,38 +720,40 @@ export function UmbraVideoGenerationControls({
   onRefreshCatalog,
   onOpenPowerPrompter,
   queueVideo,
-  agentDraft,
-  onAgentDraftApplied,
-  onAgentContextChange,
   editorDraft,
   onEditorDraftApplied,
   onStoryboardOpenChange,
 }: UmbraVideoGenerationControlsProps) {
   const showToast = useStore((state) => state.showToast);
   const [initialDeviceResume] = React.useState(() => readDeviceUiResume<UmbraVideoDeviceResume>('umbra-ui-video'));
-  const [promptSegments, setPromptSegments] = React.useState<UmbraUiPromptSegment[]>(() => (
-    Array.isArray(initialDeviceResume?.promptSegments) && initialDeviceResume.promptSegments.length > 0
+  const [legacyAutoPromptRecovery] = React.useState(() => recoverLegacyUmbraVideoAutoPrompt(initialDeviceResume));
+  const [recoveredPromptHistory, setRecoveredPromptHistory] = React.useState(legacyAutoPromptRecovery.history);
+  const [promptSegments, setPromptSegments] = React.useState<UmbraUiPromptSegment[]>(() => {
+    const segments = Array.isArray(initialDeviceResume?.promptSegments) && initialDeviceResume.promptSegments.length > 0
       ? initialDeviceResume.promptSegments.map((segment) => ({ ...segment }))
-      : [createUmbraUiPromptSegment(initialDeviceResume?.prompt || '', { label: 'Video Prompt' })]
-  ));
+      : [createUmbraUiPromptSegment(initialDeviceResume?.prompt || '', { label: 'Video Prompt' })];
+    return migrateLegacyUmbraUiAgentPrompt(
+      segments,
+      initialDeviceResume?.agentModeEnabled === true,
+      initialDeviceResume?.agentPrompt || '',
+    );
+  });
   const [activePromptSegmentId, setActivePromptSegmentId] = React.useState(
-    initialDeviceResume?.activePromptSegmentId || promptSegments[0]?.id || '',
+    promptSegments.find((segment) => segment.id === initialDeviceResume?.activePromptSegmentId)?.id
+      || promptSegments[0]?.id || '',
   );
-  const [promptHistory, setPromptHistory] = React.useState<UmbraUiPromptHistoryEntry[]>([]);
+  const initialPromptSegmentsRef = React.useRef(promptSegments);
+  const legacyAutoPromptRestoredRef = React.useRef(false);
+  const savedVideoFamilyRef = React.useRef<string | null>(null);
+  const [promptHistory, setPromptHistory] = React.useState<UmbraUiPromptHistoryEntry[]>(legacyAutoPromptRecovery.history);
   const promptHistoryLoadedRef = React.useRef(false);
   const promptHistoryPendingEditsRef = React.useRef({ cleared: false, removed: new Set<string>() });
-  const promptHistoryDirtyRef = React.useRef(false);
+  const promptHistoryDirtyRef = React.useRef(legacyAutoPromptRecovery.history.length > 0);
   const promptHistoryRevisionRef = React.useRef(0);
   const promptHistoryWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const prompt = React.useMemo(() => compileUmbraUiPromptSegments(promptSegments), [promptSegments]);
-  const [agentModeEnabled, setAgentModeEnabled] = React.useState(initialDeviceResume?.agentModeEnabled === true);
-  const [agentPrompt, setAgentPrompt] = React.useState(initialDeviceResume?.agentPrompt || '');
-  const [autoPrompterEnabled, setAutoPrompterEnabled] = React.useState(initialDeviceResume?.autoPrompterEnabled === true);
-  const [autoPrompterPrompt, setAutoPrompterPrompt] = React.useState(initialDeviceResume?.autoPrompterPrompt || '');
   const [negativePrompt, setNegativePrompt] = React.useState(initialDeviceResume?.negativePrompt || '');
   const [video, setVideo] = React.useState<PowerPrompterVideoControls>(() => createDefaultVideoControls());
-  const autoPrompterActive = video.family === 'minimax_h3' && autoPrompterEnabled;
-  const workflowPrompt = autoPrompterActive ? autoPrompterPrompt.trim() : agentModeEnabled ? agentPrompt.trim() : prompt;
   const [selectedStoryboardShotId, setSelectedStoryboardShotId] = React.useState('');
   const [sourcePreviewUrl, setSourcePreviewUrl] = React.useState('');
   const [isQueueing, setIsQueueing] = React.useState(false);
@@ -788,7 +789,7 @@ export function UmbraVideoGenerationControls({
     : resolveUmbraVideoDurationSeconds(video.frames, video.fps);
   const queuePrompt = extendedOpen
     ? String(video.ltx.extended.clips[0]?.prompt || '').trim()
-    : workflowPrompt;
+    : prompt;
 
   const replacePromptSegments = React.useCallback((
     text: string,
@@ -847,6 +848,7 @@ export function UmbraVideoGenerationControls({
       })
       .then((savedVideo) => {
         if (canceled) return;
+        savedVideoFamilyRef.current = savedVideo.family || null;
         if (savedVideo) {
           const defaults = createDefaultVideoControls();
           const normalizedSavedVideo: PowerPrompterVideoControls = {
@@ -925,6 +927,21 @@ export function UmbraVideoGenerationControls({
   }, [showToast]);
 
   React.useEffect(() => {
+    if (!settingsResolved || legacyAutoPromptRestoredRef.current) return;
+    legacyAutoPromptRestoredRef.current = true;
+    if (editorDraft) return;
+    const restored = restoreLegacyUmbraVideoAutoPrompt(
+      promptSegments,
+      initialPromptSegmentsRef.current,
+      savedVideoFamilyRef.current,
+      legacyAutoPromptRecovery.autoPromptSegments,
+    );
+    if (restored === promptSegments) return;
+    setPromptSegments(restored);
+    setActivePromptSegmentId(restored[0]?.id || '');
+  }, [editorDraft, legacyAutoPromptRecovery, promptSegments, settingsResolved]);
+
+  React.useEffect(() => {
     if (!settingsLoaded) return;
     const timer = window.setTimeout(() => {
       videoControlsWriteQueueRef.current = videoControlsWriteQueueRef.current
@@ -976,6 +993,7 @@ export function UmbraVideoGenerationControls({
       .catch(() => undefined)
       .then(() => writeUserConfig('umbra-ui-video-prompt-history', promptHistory))
       .then(() => {
+        setRecoveredPromptHistory([]);
         if (promptHistoryRevisionRef.current === revision) {
           promptHistoryDirtyRef.current = false;
         }
@@ -991,30 +1009,17 @@ export function UmbraVideoGenerationControls({
         prompt,
         promptSegments,
         activePromptSegmentId,
-        agentModeEnabled,
-        agentPrompt,
-        autoPrompterEnabled,
-        autoPrompterPrompt,
         negativePrompt,
+        ...(recoveredPromptHistory.length > 0 ? { recoveredPromptHistory } : {}),
       });
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [activePromptSegmentId, agentModeEnabled, agentPrompt, autoPrompterEnabled, autoPrompterPrompt, negativePrompt, prompt, promptSegments]);
-
-  React.useEffect(() => {
-    if (!agentDraft || agentDraft.mediaType !== 'video') return;
-    setAgentModeEnabled(true);
-    setAgentPrompt(agentDraft.prompt || agentDraft.segments.join(' '));
-    setNegativePrompt(agentDraft.negativePrompt);
-    onAgentDraftApplied?.(agentDraft.id);
-  }, [agentDraft, onAgentDraftApplied]);
+  }, [activePromptSegmentId, negativePrompt, prompt, promptSegments, recoveredPromptHistory]);
 
   React.useEffect(() => {
     if (!editorDraft || !settingsResolved) return;
     const defaults = createDefaultVideoControls();
     replacePromptSegments(editorDraft.prompt);
-    setAgentModeEnabled(false);
-    setAgentPrompt('');
     setNegativePrompt(editorDraft.negativePrompt);
     if (editorDraft.outputFolder !== undefined) setPinnedOutputFolder(editorDraft.outputFolder);
     setVideo({
@@ -1059,32 +1064,6 @@ export function UmbraVideoGenerationControls({
       : '');
     onEditorDraftApplied?.(editorDraft.id);
   }, [editorDraft, onEditorDraftApplied, replacePromptSegments, setPinnedOutputFolder, settingsResolved]);
-
-  React.useEffect(() => {
-    const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : video.family === 'ltx25' ? 'LTX-2.5' : 'MiniMax H3';
-    const feature = video.mode === 'video_to_video'
-      ? 'vid2vid'
-      : video.mode === 'reference_to_video' ? 'ref2vid'
-      : video.mode === 'image_to_video' ? 'img2vid' : 'txt2vid';
-    const modelSource = video.family === 'ltx23' ? 'checkpoint' : 'unet';
-    const pipelineMatch = resolveUmbraUiPipeline(workflows, feature, modelFamily, modelSource);
-    onAgentContextChange?.({
-      prompt: workflowPrompt,
-      negativePrompt,
-      apiWorkflowId: pipelineMatch.workflow?.id || '',
-      family: video.family,
-      mode: video.mode,
-      controls: {
-        ...(video as unknown as Record<string, unknown>),
-        width: targetDimensions.targetWidth,
-        height: targetDimensions.targetHeight,
-        agentModeEnabled,
-        agentPrompt,
-        autoPrompterEnabled: autoPrompterActive,
-        autoPrompterPrompt,
-      },
-    });
-  }, [agentModeEnabled, agentPrompt, autoPrompterActive, autoPrompterPrompt, negativePrompt, onAgentContextChange, targetDimensions.targetHeight, targetDimensions.targetWidth, video, workflowPrompt, workflows]);
 
   React.useEffect(() => {
     if ((video.mode !== 'image_to_video' && video.mode !== 'reference_to_video') || !video.sourceImagePath || video.sourceImageName) return;
@@ -2068,77 +2047,14 @@ export function UmbraVideoGenerationControls({
           activeSegmentId={activePromptSegmentId}
           onChange={setPromptSegments}
           onActiveSegmentChange={setActivePromptSegmentId}
-          heading={video.mode === 'reference_to_video' ? 'Reference Shot Direction' : agentModeEnabled ? 'Video Prompt Request' : 'Video Prompt'}
+          heading={video.mode === 'reference_to_video' ? 'Reference Shot Direction' : 'Video Prompt'}
           history={promptHistory}
           onRememberCurrent={rememberCurrentPrompt}
           onRestoreHistory={restorePromptHistoryEntry}
           onRemoveHistory={removePromptHistoryEntry}
           onClearHistory={clearPromptHistory}
           onSubmit={() => { void handleQueue(); }}
-          mediaType="video"
           accent="fuchsia"
-          agentContext={{
-            family: video.family,
-            mode: video.mode,
-            pipeline: pipelineMatch.workflow?.name || '',
-            width: targetDimensions.targetWidth,
-            height: targetDimensions.targetHeight,
-            frames: video.frames,
-            fps: video.fps,
-            frameGuideMode: video.frameGuideMode,
-            referenceNotes: video.mode === 'reference_to_video' ? video.minimaxH3.referenceNotes : [],
-            referenceImageSize: video.mode === 'reference_to_video' ? video.minimaxH3.referenceImageSize : '',
-          }}
-          onAgentEnhancementApplied={() => {
-            setAgentModeEnabled(false);
-            setAgentPrompt('');
-          }}
-        />
-        {video.family === 'minimax_h3' ? <UmbraInlineAgentPrompt
-          mediaType="video"
-          sourcePrompt={agentModeEnabled && agentPrompt.trim() ? agentPrompt : prompt}
-          enabled={autoPrompterEnabled}
-          onEnabledChange={setAutoPrompterEnabled}
-          agentPrompt={autoPrompterPrompt}
-          onAgentPromptChange={setAutoPrompterPrompt}
-          onSubmit={() => { void handleQueue(); }}
-          accent="fuchsia"
-          title="Auto Prompter"
-          subtitle="Optional MiniMax H3 prompt pass"
-          context={{
-            family: video.family,
-            mode: video.mode,
-            pipeline: pipelineMatch.workflow?.name || '',
-            width: targetDimensions.targetWidth,
-            height: targetDimensions.targetHeight,
-            frames: video.frames,
-            fps: video.fps,
-            frameGuideMode: video.frameGuideMode,
-            referenceNotes: video.mode === 'reference_to_video' ? video.minimaxH3.referenceNotes : [],
-            referenceImageSize: video.mode === 'reference_to_video' ? video.minimaxH3.referenceImageSize : '',
-          }}
-        /> : null}
-        <UmbraInlineAgentPrompt
-          mediaType="video"
-          sourcePrompt={prompt}
-          enabled={agentModeEnabled}
-          onEnabledChange={setAgentModeEnabled}
-          agentPrompt={agentPrompt}
-          onAgentPromptChange={setAgentPrompt}
-          onSubmit={() => { void handleQueue(); }}
-          accent="fuchsia"
-          context={{
-            family: video.family,
-            mode: video.mode,
-            pipeline: pipelineMatch.workflow?.name || '',
-            width: targetDimensions.targetWidth,
-            height: targetDimensions.targetHeight,
-            frames: video.frames,
-            fps: video.fps,
-            frameGuideMode: video.frameGuideMode,
-            referenceNotes: video.mode === 'reference_to_video' ? video.minimaxH3.referenceNotes : [],
-            referenceImageSize: video.mode === 'reference_to_video' ? video.minimaxH3.referenceImageSize : '',
-          }}
         />
         </>}
         {video.family === 'minimax_h3' ? (
@@ -2371,7 +2287,7 @@ export function UmbraVideoGenerationControls({
                 <div className="space-y-2 rounded-md border border-fuchsia-300/15 bg-fuchsia-500/[0.035] p-2.5">
                   <VideoResourceField label="Official Gemma 4 Enhancer Model" value={video.ltx25.promptEnhanceModel} values={catalog.textEncoders} onChange={(value) => setLtx25('promptEnhanceModel', value)} onChoose={setResourcePicker} />
                   <p className="font-mono text-[9px] leading-relaxed text-zinc-400">
-                    Uses ComfyUI&apos;s official LTX-2.5 {video.mode === 'image_to_video' ? 'image-grounded I2V' : 'audiovisual T2V'} system prompt. The official template is always preserved. {agentModeEnabled ? 'Umbra Agent drafts first; the native enhancer performs the final LTX-specific pass.' : 'This is separate from Umbra Agent.'}
+                    Uses ComfyUI&apos;s official LTX-2.5 {video.mode === 'image_to_video' ? 'image-grounded I2V' : 'audiovisual T2V'} system prompt. The official template is always preserved.
                   </p>
                   <div className="grid grid-cols-2 gap-1.5">
                     <ToggleButton active={video.ltx25.promptEnhanceSampling} label="Sampling" onClick={() => setLtx25('promptEnhanceSampling', !video.ltx25.promptEnhanceSampling)} />
@@ -2736,14 +2652,6 @@ export function UmbraVideoGenerationControls({
       <UmbraLtxStoryboardPanel
         shots={video.ltx.storyboard.shots}
         selectedShotId={selectedStoryboardShotId}
-        agentContext={{
-          prompt: workflowPrompt,
-          negativePrompt,
-          family: video.family,
-          mode: video.mode,
-          width: targetDimensions.targetWidth,
-          height: targetDimensions.targetHeight,
-        }}
         onSelectedShotChange={setSelectedStoryboardShotId}
         onShotsChange={setStoryboardShots}
         onAddShot={addStoryboardShot}

@@ -26,7 +26,6 @@ import type {
   PowerPrompterStyleSeedMode,
   PowerPrompterVideoControls,
 } from '@/types/powerPrompter';
-import { UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID } from '../../../shared/umbra-ui/agentTypes';
 import { normalizeUmbraWildcardHoldSelections } from '../../../shared/promptWildcards';
 import { normalizeQueueSetOrders } from '../../../shared/power-prompter/cardQueueSetOrders';
 import {
@@ -695,8 +694,6 @@ export const DEFAULT_POWER_PROMPTER_SETTINGS: PowerPrompterSettings = {
   queuePromptLimit: null,
   queueShuffleEnabled: false,
   queueShuffleSeed: 0,
-  agentEnhanceCompletePrompts: false,
-  agentInstructionId: UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
   generationCompleteSoundEnabled: true,
   generationCompleteSoundStyle: 'glass_tick',
   generationCompleteSoundVolume: 0.42,
@@ -1856,9 +1853,6 @@ export function normalizePowerPrompterSettings(
     queuePromptLimit: normalizeQueuePromptLimit((settings as any).queuePromptLimit),
     queueShuffleEnabled: settings.queueShuffleEnabled === true,
     queueShuffleSeed: normalizeQueueShuffleSeed((settings as any).queueShuffleSeed),
-    agentEnhanceCompletePrompts: settings.agentEnhanceCompletePrompts === true,
-    agentInstructionId: String(settings.agentInstructionId || UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID).trim().slice(0, 120)
-      || UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
     generationCompleteSoundEnabled: settings.generationCompleteSoundEnabled !== false,
     generationCompleteSoundStyle: normalizeCompletionSoundStyle(settings.generationCompleteSoundStyle),
     generationCompleteSoundVolume: normalizeCompletionSoundVolume(settings.generationCompleteSoundVolume),

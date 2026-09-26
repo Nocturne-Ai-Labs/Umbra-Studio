@@ -9,7 +9,6 @@ export type UserConfigKey =
   | 'powerprompter-presets'
   | 'powerprompter-thumbnail-overrides'
   | 'local-server-apps'
-  | 'umbra-ui-agent-instructions'
   | 'umbra-ui-image-controls'
   | 'umbra-ui-prompt-history'
   | 'umbra-ui-lora-presets'

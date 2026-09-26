@@ -48,8 +48,6 @@ export type QueuePromptPreviewToken = {
 export type QueuePromptPreviewEntry = {
   prompt: string;
   tokens: QueuePromptPreviewToken[];
-  originalPrompt?: string;
-  agentEnhanced?: boolean;
 };
 
 export type QueuePromptStyleMeta = {

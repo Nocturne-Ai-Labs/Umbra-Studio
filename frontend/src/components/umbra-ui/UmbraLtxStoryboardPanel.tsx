@@ -1,27 +1,19 @@
 'use client';
 
-import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import {
   ArrowDown,
   ArrowUp,
-  Bot,
   Clock3,
   Image as ImageIcon,
   Loader2,
   Plus,
   Trash2,
   Upload,
-  WandSparkles,
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useStore } from '@/store/useStore';
-import {
-  generateUmbraUiAgentPrompt,
-  loadUmbraUiAgentInstructions,
-  type UmbraUiAgentInstruction,
-} from '@/lib/umbraUiAgent';
 import {
   isUmbraDirectorImageName,
   readUmbraDirectorDraggedImagePath,
@@ -35,7 +27,6 @@ const labelClass = 'text-[9px] font-black uppercase tracking-[0.14em] text-zinc-
 interface UmbraLtxStoryboardPanelProps {
   shots: UmbraLtxStoryboardShot[];
   selectedShotId: string;
-  agentContext?: Record<string, unknown>;
   onSelectedShotChange: (shotId: string) => void;
   onShotsChange: (shots: UmbraLtxStoryboardShot[]) => void;
   onAddShot: () => void;
@@ -45,7 +36,6 @@ interface UmbraLtxStoryboardPanelProps {
 export function UmbraLtxStoryboardPanel({
   shots,
   selectedShotId,
-  agentContext,
   onSelectedShotChange,
   onShotsChange,
   onAddShot,
@@ -55,31 +45,10 @@ export function UmbraLtxStoryboardPanel({
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const [uploadingShotId, setUploadingShotId] = React.useState('');
   const [imageDropActive, setImageDropActive] = React.useState(false);
-  const [enhancing, setEnhancing] = React.useState(false);
-  const [instructions, setInstructions] = React.useState<UmbraUiAgentInstruction[]>([]);
-  const [instructionId, setInstructionId] = React.useState('');
   const selectedShot = shots.find((shot) => shot.id === selectedShotId) || shots[0] || null;
-  const selectedAgentShots = shots.filter((shot) => shot.agentEnabled && shot.prompt.trim());
   const totalSeconds = shots.reduce((sum, shot) => sum + shot.durationSeconds, 0);
   const minimumTotalSeconds = Math.max(0.5, shots.length * 0.5);
   const maximumTotalSeconds = Math.min(600, Math.max(minimumTotalSeconds, shots.length * 60));
-
-  React.useEffect(() => {
-    let canceled = false;
-    void loadUmbraUiAgentInstructions()
-      .then((entries) => {
-        if (canceled) return;
-        const compatible = entries.filter((entry) => entry.mediaType === 'video' || entry.mediaType === 'both');
-        setInstructions(compatible);
-        setInstructionId((current) => compatible.some((entry) => entry.id === current)
-          ? current
-          : compatible[0]?.id || '');
-      })
-      .catch(() => undefined);
-    return () => {
-      canceled = true;
-    };
-  }, []);
 
   React.useEffect(() => {
     if (selectedShot || shots.length <= 0) return;
@@ -178,56 +147,6 @@ export function UmbraLtxStoryboardPanel({
     showToast('Drop an image from the filmstrip, Gallery, or your computer.', 'error');
   }, [selectedShot, shots, showToast, updateShot, uploadImage, uploadingShotId]);
 
-  const enhanceShots = React.useCallback(async () => {
-    if (enhancing || selectedAgentShots.length <= 0) return;
-    const sourceById = new Map(selectedAgentShots.map((shot) => [shot.id, shot.prompt]));
-    const enhancedById = new Map<string, string>();
-    setEnhancing(true);
-    try {
-      for (const shot of selectedAgentShots) {
-        const index = shots.findIndex((entry) => entry.id === shot.id);
-        const result = await generateUmbraUiAgentPrompt({
-          mediaType: 'video',
-          task: 'enhance-field',
-          fieldLabel: `Umbra Director shot ${index + 1}`,
-          prompt: shot.prompt,
-          instructionId,
-          context: {
-            ...(agentContext || {}),
-            storyboardShot: {
-              id: shot.id,
-              position: index + 1,
-              shotCount: shots.length,
-              durationSeconds: shot.durationSeconds,
-              hasImageGuide: Boolean(shot.sourceImagePath || shot.sourceImageName),
-            },
-          },
-        });
-        enhancedById.set(shot.id, result.prompt);
-      }
-      let applied = 0;
-      onShotsChange(shots.map((shot) => {
-        const enhanced = enhancedById.get(shot.id);
-        if (!enhanced || sourceById.get(shot.id) !== shot.prompt) return shot;
-        applied += 1;
-        return { ...shot, prompt: enhanced };
-      }));
-      showToast(`Agent enhanced ${applied} storyboard prompt${applied === 1 ? '' : 's'}.`, 'success');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Agent failed to enhance the storyboard prompts.', 'error');
-    } finally {
-      setEnhancing(false);
-    }
-  }, [
-    agentContext,
-    enhancing,
-    instructionId,
-    onShotsChange,
-    selectedAgentShots,
-    shots,
-    showToast,
-  ]);
-
   return (
     <aside
       data-umbra-ltx-storyboard=""
@@ -311,30 +230,6 @@ export function UmbraLtxStoryboardPanel({
         />
       </label>
 
-      <div className="mb-3 flex items-center gap-2">
-        <UmbraSelectControl
-          value={instructionId}
-          onChange={(event) => setInstructionId(event.target.value)}
-          className={`${inputClass} h-9 min-w-0 flex-1 py-1.5 text-[10px]`}
-          title="Agent instruction for selected Umbra Director prompts"
-        >
-          {instructions.length <= 0 ? <option value="">Default video instruction</option> : null}
-          {instructions.map((instruction) => (
-            <option key={instruction.id} value={instruction.id}>{instruction.name}</option>
-          ))}
-        </UmbraSelectControl>
-        <button
-          type="button"
-          onClick={() => void enhanceShots()}
-          disabled={enhancing || selectedAgentShots.length <= 0}
-          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-fuchsia-300/25 bg-fuchsia-500/[0.07] px-2.5 text-[9px] font-black uppercase tracking-[0.08em] text-fuchsia-100 hover:bg-fuchsia-500/[0.12] disabled:border-white/10 disabled:bg-transparent disabled:text-zinc-700"
-          title="Enhance only shots with their agent icon enabled"
-        >
-          {enhancing ? <Loader2 size={12} className="animate-spin" /> : <WandSparkles size={12} />}
-          {enhancing ? 'Enhancing' : `Enhance ${selectedAgentShots.length}`}
-        </button>
-      </div>
-
       <div className="space-y-1.5">
         {shots.map((shot, index) => (
           <div
@@ -370,19 +265,6 @@ export function UmbraLtxStoryboardPanel({
               <span className="block font-mono text-[8px] text-cyan-200/65">{shot.durationSeconds.toFixed(1)} seconds</span>
             </button>
             <div className="grid grid-cols-2 gap-1">
-              <button
-                type="button"
-                onClick={() => updateShot(shot.id, { agentEnabled: !shot.agentEnabled })}
-                className={cn(
-                  'inline-flex h-7 w-7 items-center justify-center rounded-sm border',
-                  shot.agentEnabled
-                    ? 'border-fuchsia-300/35 bg-fuchsia-500/[0.1] text-fuchsia-100'
-                    : 'border-white/10 text-zinc-600',
-                )}
-                title={shot.agentEnabled ? 'Agent enhancement enabled' : 'Enable agent enhancement'}
-              >
-                <Bot size={11} />
-              </button>
               <button
                 type="button"
                 onClick={() => removeShot(shot.id)}
@@ -515,22 +397,7 @@ export function UmbraLtxStoryboardPanel({
           </div>
 
           <label className="block space-y-1.5">
-            <span className="flex items-center gap-2">
-              <span className={labelClass}>Shot Prompt</span>
-              <button
-                type="button"
-                onClick={() => updateShot(selectedShot.id, { agentEnabled: !selectedShot.agentEnabled })}
-                className={cn(
-                  'ml-auto inline-flex h-7 w-7 items-center justify-center rounded-sm border',
-                  selectedShot.agentEnabled
-                    ? 'border-fuchsia-300/35 bg-fuchsia-500/[0.1] text-fuchsia-100'
-                    : 'border-white/10 text-zinc-600',
-                )}
-                title="Toggle agent enhancement for this shot"
-              >
-                <Bot size={11} />
-              </button>
-            </span>
+            <span className={labelClass}>Shot Prompt</span>
             <textarea
               value={selectedShot.prompt}
               onChange={(event) => updateShot(selectedShot.id, { prompt: event.target.value.replace(/\|/g, ',') })}

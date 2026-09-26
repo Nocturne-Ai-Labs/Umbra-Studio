@@ -5,7 +5,6 @@ export interface UmbraLtxStoryboardShot {
   sourceImagePath: string;
   sourceImageName: string;
   strength: number;
-  agentEnabled: boolean;
 }
 
 export interface UmbraLtxStoryboardControls {
@@ -83,7 +82,6 @@ export function normalizeUmbraLtxStoryboardControls(
         sourceImagePath: String(shot.sourceImagePath || '').trim().replace(/\\/g, '/').slice(0, 4_000),
         sourceImageName: String(shot.sourceImageName || '').trim().replace(/\\/g, '/').slice(0, 1_000),
         strength: clamp(finiteNumber(shot.strength, 1), 0, 1),
-        agentEnabled: shot.agentEnabled === true,
       };
     });
   return {

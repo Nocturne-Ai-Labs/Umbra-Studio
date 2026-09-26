@@ -21,7 +21,6 @@ import {
   Settings as SettingsIcon,
   AlertTriangle,
   Palette,
-  Bot,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ThemeStudioSettings } from './ThemeStudioComponents';
@@ -47,7 +46,6 @@ import {
   saveAppSettings,
 } from '@/lib/appSettings';
 import { useI18n } from '@/i18n';
-import { UmbraAgentSettings } from '@/components/settings/UmbraAgentSettings';
 
 interface GlobalSettingsProps {
   isOpen: boolean;
@@ -67,7 +65,6 @@ type SettingsSection =
   | 'general'
   | 'storage'
   | 'theme'
-  | 'agent'
   | 'comfyui'
   | 'system'
   | 'advanced';
@@ -379,7 +376,6 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
     { id: 'general' as SettingsSection, name: t('settings.general'), icon: Sliders },
     { id: 'storage' as SettingsSection, name: t('settings.storage'), icon: Save },
     { id: 'theme' as SettingsSection, name: t('settings.theme'), icon: Palette },
-    { id: 'agent' as SettingsSection, name: 'Agent', icon: Bot },
     { id: 'comfyui' as SettingsSection, name: t('settings.comfyUi'), icon: Wand2 },
     { id: 'system' as SettingsSection, name: t('settings.system'), icon: Bolt },
     { id: 'advanced' as SettingsSection, name: t('settings.advanced'), icon: Code },
@@ -479,9 +475,6 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
                 )}
                 {activeSection === 'theme' && (
                   <ThemeStudioSettings />
-                )}
-                {activeSection === 'agent' && (
-                  <UmbraAgentSettings />
                 )}
                 {activeSection === 'comfyui' && (
                   <ComfyUISettings settings={settings} updateSetting={updateSetting} />

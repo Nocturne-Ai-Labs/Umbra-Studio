@@ -44,7 +44,6 @@ import {
   POWER_PROMPTER_SCHEDULER_OPTIONS,
 } from '@/lib/powerPrompter';
 import { getPowerPrompterCardSlotFingerprint, writePowerPrompterCardClipboard } from '@/lib/powerPrompterCardClipboard';
-import { generateUmbraUiAgentPrompt } from '@/lib/umbraUiAgent';
 import {
   buildPowerPrompterActivePromptBlocks,
 } from '@/lib/powerPrompterActivePrompt';
@@ -83,7 +82,6 @@ import {
   normalizeUmbraUiPipelineSelection,
   type UmbraUiPipelineModelSource,
 } from '../../../../shared/umbra-ui/pipelineTypes';
-import { UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID } from '../../../../shared/umbra-ui/agentTypes';
 import { getPowerPrompterCardGroupingKey, movePrompterVariantWithinSlot } from '../../../../shared/power-prompter/powerPrompterChain';
 import { insertCatalogTagsAtCursor } from '@/lib/powerPrompterPromptInsertion';
 import {
@@ -146,7 +144,6 @@ interface PowerPrompterCardChainEditorProps {
   queueCyclePreviewEntries?: PowerPrompterQueuePromptEntry[];
   queueShuffleEnabled?: boolean;
   queueShuffleSeed?: number;
-  agentInstructionId?: string;
   queueTraversalMode?: PowerPrompterQueueTraversalMode;
   queuePreviewSetId?: number;
   queueCompletionTick?: number;
@@ -2815,7 +2812,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   queuePreviewEntries = [],
   queueCyclePreviewPrompts = [],
   queueCyclePreviewEntries = [],
-  agentInstructionId = UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
   queueTraversalMode = 'cycle',
   queuePreviewSetId = 1,
   queueCompletionTick = 0,
@@ -2853,7 +2849,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
   const [editingVariantId, setEditingVariantId] = useState('');
   const [variantTextDrafts, setVariantTextDrafts] = useState<Record<string, string>>({});
   const cancelledVariantBlurRef = useRef(new Set<string>());
-  const [variantAgentBusyId, setVariantAgentBusyId] = useState('');
   const [editingVariantNameId, setEditingVariantNameId] = useState('');
   const [variantNameDrafts, setVariantNameDrafts] = useState<Record<string, string>>({});
   const [editingPromptChip, setEditingPromptChip] = useState<PromptChipEditState | null>(null);
@@ -4539,97 +4534,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
     const current = normalizeWildcardRerolls(latestVariant?.wildcardRerolls);
     setWildcardVariantRerolls(slotId, variantId, current + delta);
   }, [setWildcardVariantRerolls]);
-
-  const enhanceVariantWithAgent = useCallback(async (
-    slotId: string,
-    variant: PowerPrompterCardNode,
-    slotLabel = '',
-  ) => {
-    const variantId = String(variant.id || '').trim();
-    if (!variantId || variantAgentBusyId) return;
-    const expanded = expandedVariantEditorRef.current;
-    const isExpandedTarget = expanded?.slotId === slotId && expanded.variantId === variantId;
-    const hasInlineDraft = Object.prototype.hasOwnProperty.call(variantTextDraftsRef.current, variantId);
-    const sourceText = String(
-      isExpandedTarget
-        ? expanded?.draft
-        : hasInlineDraft
-          ? variantTextDraftsRef.current[variantId]
-          : variant.text
-    || '').trim();
-    if (!sourceText) {
-      showToast('Enter variant prompt text before asking the agent to enhance it.', 'error');
-      return;
-    }
-    const sourceDocumentText = String(variant.text || '');
-    setVariantAgentBusyId(variantId);
-    try {
-      const result = await generateUmbraUiAgentPrompt({
-        mediaType: 'image',
-        task: 'enhance-field',
-        instructionId: agentInstructionId || UMBRA_UI_DANBOORU_TAG_INSTRUCTION_ID,
-        fieldLabel: [
-          String(slotLabel || variant.label || 'Power Prompter card').trim(),
-          normalizeVariantName(variant.variantName),
-        ].filter(Boolean).join(' - '),
-        prompt: sourceText,
-        context: {
-          powerPrompter: {
-            slotId,
-            variantId,
-            slotLabel: String(slotLabel || variant.label || '').trim(),
-            variantName: normalizeVariantName(variant.variantName),
-          },
-        },
-      });
-      const enhancedText = String(result.prompt || '').trim();
-      if (!enhancedText) throw new Error('The agent returned an empty variant prompt.');
-
-      const latestExpanded = expandedVariantEditorRef.current;
-      if (latestExpanded?.slotId === slotId && latestExpanded.variantId === variantId) {
-        if (String(latestExpanded.draft || '').trim() !== sourceText) {
-          showToast('Variant text changed while the agent was working, so the newer text was preserved.', 'error');
-          return;
-        }
-        setExpandedVariantEditor((current) => (
-          current?.slotId === slotId && current.variantId === variantId
-            ? { ...current, draft: enhancedText, dirty: true }
-            : current
-        ));
-        showToast('Agent enhancement is ready to review. Save the expanded editor to apply it.', 'success');
-        return;
-      }
-
-      const latestSlots = buildSlots(documentRef.current.cards);
-      const latestVariant = latestSlots
-        .find((slot) => slot.slotId === slotId)
-        ?.variants.find((entry) => entry.id === variantId);
-      const latestInlineDraft = Object.prototype.hasOwnProperty.call(variantTextDraftsRef.current, variantId)
-        ? String(variantTextDraftsRef.current[variantId] || '').trim()
-        : null;
-      if (
-        !latestVariant
-        || String(latestVariant.text || '') !== sourceDocumentText
-        || (hasInlineDraft && latestInlineDraft !== sourceText)
-      ) {
-        showToast('Variant text changed while the agent was working, so the newer text was preserved.', 'error');
-        return;
-      }
-      patchVariantFromLatestDocument(slotId, variantId, { text: enhancedText });
-      setEditingVariantId((current) => (current === variantId ? '' : current));
-      setVariantTextDrafts((current) => {
-        if (!(variantId in current)) return current;
-        const next = { ...current };
-        delete next[variantId];
-        return next;
-      });
-      showToast('Variant prompt enhanced by the configured agent.', 'success');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Agent failed to enhance this variant.', 'error');
-    } finally {
-      setVariantAgentBusyId((current) => (current === variantId ? '' : current));
-    }
-  }, [agentInstructionId, patchVariantFromLatestDocument, showToast, variantAgentBusyId]);
 
   const cleanVariantPrompt = useCallback((
     slotId: string,
@@ -10630,31 +10534,9 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                       event.preventDefault();
                                       event.stopPropagation();
                                       if (chainLinkModeActive) return;
-                                      void enhanceVariantWithAgent(slot.slotId, variant, slot.label);
-                                    }}
-                                    disabled={chainLinkModeActive || !!variantAgentBusyId}
-                                    className="p-0.5 rounded border border-violet-300/30 bg-violet-500/8 text-violet-200 hover:border-violet-200/60 hover:bg-violet-500/14 disabled:cursor-not-allowed disabled:opacity-40"
-                                    title="Enhance this variant with the configured agent"
-                                  >
-                                    {variantAgentBusyId === variant.id
-                                      ? <Loader2 size={12} className="animate-spin" />
-                                      : <Sparkles size={12} />}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    draggable={false}
-                                    data-no-variant-drag="true"
-                                    onMouseDown={(event) => {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                    }}
-                                    onClick={(event) => {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      if (chainLinkModeActive) return;
                                       cleanVariantPrompt(slot.slotId, variant);
                                     }}
-                                    disabled={chainLinkModeActive || !!variantAgentBusyId}
+                                    disabled={chainLinkModeActive}
                                     className="rounded border border-cyan-300/25 bg-cyan-500/[0.07] p-0.5 text-cyan-200 hover:border-cyan-200/55 hover:bg-cyan-500/12 disabled:cursor-not-allowed disabled:opacity-40"
                                     title="Clean underscores, whitespace, duplicate tags, and commas"
                                     aria-label="Clean variant tags"
@@ -10778,31 +10660,9 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                       event.preventDefault();
                                       event.stopPropagation();
                                       if (chainLinkModeActive) return;
-                                      void enhanceVariantWithAgent(slot.slotId, variant, slot.label);
-                                    }}
-                                    disabled={chainLinkModeActive || !!variantAgentBusyId}
-                                    className="p-0.5 rounded border border-violet-300/30 bg-violet-500/8 text-violet-200 hover:border-violet-200/60 hover:bg-violet-500/14 disabled:cursor-not-allowed disabled:opacity-40"
-                                    title="Enhance this variant with the configured agent"
-                                  >
-                                    {variantAgentBusyId === variant.id
-                                      ? <Loader2 size={12} className="animate-spin" />
-                                      : <Sparkles size={12} />}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    draggable={false}
-                                    data-no-variant-drag="true"
-                                    onMouseDown={(event) => {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                    }}
-                                    onClick={(event) => {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      if (chainLinkModeActive) return;
                                       cleanVariantPrompt(slot.slotId, variant);
                                     }}
-                                    disabled={chainLinkModeActive || !!variantAgentBusyId}
+                                    disabled={chainLinkModeActive}
                                     className="rounded border border-cyan-300/25 bg-cyan-500/[0.07] p-0.5 text-cyan-200 hover:border-cyan-200/55 hover:bg-cyan-500/12 disabled:cursor-not-allowed disabled:opacity-40"
                                     title="Clean underscores, whitespace, duplicate tags, and commas"
                                     aria-label="Clean variant tags"
@@ -11046,7 +10906,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                 data-variant-plain-edit="true"
                                 data-no-variant-drag="true"
                                 draggable={false}
-                                readOnly={chainLinkModeActive || isSkipVariant || variantAgentBusyId === variant.id}
+                                readOnly={chainLinkModeActive || isSkipVariant}
                                 value={plainEditDraft}
                                 onChange={(event) => {
                                   if (chainLinkModeActive) return;
@@ -12051,32 +11911,13 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       expandedVariantEditorTarget.variant,
                     );
                   }}
-                  disabled={!expandedVariantEditorTarget || !!variantAgentBusyId}
+                  disabled={!expandedVariantEditorTarget}
                   className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-cyan-300/25 bg-cyan-500/[0.07] text-[10px] font-bold uppercase tracking-wider text-cyan-100 hover:border-cyan-200/55 disabled:cursor-not-allowed disabled:opacity-40 ${mobileSelectionMode ? 'w-8 px-0' : 'px-2.5'}`}
                   title="Remove tag underscores, normalize commas and whitespace, and remove duplicates"
                   aria-label="Clean variant tags"
                 >
                   <Eraser size={13} />
                   {!mobileSelectionMode ? <span>Clean</span> : null}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!expandedVariantEditorTarget) return;
-                    void enhanceVariantWithAgent(
-                      expandedVariantEditorTarget.slot.slotId,
-                      expandedVariantEditorTarget.variant,
-                      expandedVariantEditorTarget.slot.label,
-                    );
-                  }}
-                  disabled={!expandedVariantEditorTarget || !!variantAgentBusyId}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-violet-300/30 bg-violet-500/10 px-2.5 text-[10px] font-bold uppercase tracking-wider text-violet-100 hover:border-violet-200/60 disabled:cursor-not-allowed disabled:opacity-40"
-                  title="Enhance this variant draft with the configured agent"
-                >
-                  {variantAgentBusyId === expandedVariantEditor.variantId
-                    ? <Loader2 size={13} className="animate-spin" />
-                    : <Sparkles size={13} />}
-                  Agent
                 </button>
                 <button
                   onClick={() => {
@@ -13542,8 +13383,3 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
 }));
 
 PowerPrompterCardChainEditor.displayName = 'PowerPrompterCardChainEditor';
-
-
-
-
-

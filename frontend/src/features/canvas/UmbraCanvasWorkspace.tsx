@@ -2547,15 +2547,6 @@ export function UmbraCanvasWorkspace({
             accent="rose"
             heading="Canvas Prompt"
             onSubmit={() => void prepareGenerationRegion()}
-            agentContext={{
-              mode: 'canvas',
-              modelFamily,
-              modelType: modelSource,
-              checkpointName,
-              width: project.generationBbox.width,
-              height: project.generationBbox.height,
-              enabledLoras: loras.filter((entry) => entry.enabled).map((entry) => entry.name),
-            }}
           />
           {capabilities.negativePrompt.support === 'adjustable' ? (
             <label className="block space-y-1.5">

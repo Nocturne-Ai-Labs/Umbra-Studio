@@ -1,13 +1,11 @@
 import { normalizeUmbraUiImageControlsSnapshot, type UmbraUiImageControlsSnapshot } from '@/lib/umbraUiImageControlsPersistence';
-import { createUmbraUiPromptSegment, type UmbraUiPromptSegment } from '@/lib/umbraUiPromptSegments';
+import { createUmbraUiPromptSegment, migrateLegacyUmbraUiAgentPrompt, type UmbraUiPromptSegment } from '@/lib/umbraUiPromptSegments';
 
 export type ImageWorkspace = 'image' | 'img2img' | 'inpaint' | 'canvas';
 export interface ImageWorkspaceDraft {
   controls: UmbraUiImageControlsSnapshot;
   promptSegments: UmbraUiPromptSegment[];
   activePromptSegmentId: string;
-  imageAgentModeEnabled: boolean;
-  imageAgentPrompt: string;
 }
 export type ImageWorkspaceDrafts = Partial<Record<ImageWorkspace, ImageWorkspaceDraft>>;
 
@@ -31,10 +29,12 @@ export function normalizeImageWorkspaceDrafts(value: unknown): ImageWorkspaceDra
     ));
     result[mode] = {
       controls,
-      promptSegments: promptSegments.length ? promptSegments : [createUmbraUiPromptSegment()],
+      promptSegments: migrateLegacyUmbraUiAgentPrompt(
+        promptSegments.length ? promptSegments : [createUmbraUiPromptSegment()],
+        raw.imageAgentModeEnabled === true,
+        typeof raw.imageAgentPrompt === 'string' ? raw.imageAgentPrompt : '',
+      ),
       activePromptSegmentId: typeof raw.activePromptSegmentId === 'string' ? raw.activePromptSegmentId : '',
-      imageAgentModeEnabled: raw.imageAgentModeEnabled === true,
-      imageAgentPrompt: typeof raw.imageAgentPrompt === 'string' ? raw.imageAgentPrompt : '',
     };
   }
   return result;
@@ -45,8 +45,6 @@ export function createImageWorkspaceDraft(): ImageWorkspaceDraft {
     controls: normalizeUmbraUiImageControlsSnapshot({ modelFamily: 'Anima', generation: {} })!,
     promptSegments: [createUmbraUiPromptSegment()],
     activePromptSegmentId: '',
-    imageAgentModeEnabled: false,
-    imageAgentPrompt: '',
   };
 }
 

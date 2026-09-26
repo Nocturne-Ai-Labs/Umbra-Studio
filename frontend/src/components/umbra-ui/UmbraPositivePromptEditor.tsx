@@ -4,23 +4,18 @@ import React from 'react';
 import {
   ArrowDown,
   ArrowUp,
-  Bot,
   BookmarkPlus,
   Copy,
   History,
   ListPlus,
-  Loader2,
   Redo2,
   RotateCcw,
   Sparkles,
   Trash2,
   Undo2,
-  WandSparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useStore } from '@/store/useStore';
 import { PromptWildcardLibrary } from '@/components/shared/PromptWildcardLibrary';
-import { generateUmbraUiAgentPrompt } from '@/lib/umbraUiAgent';
 import {
   getUmbraUiPromptHistoryFieldCount,
   type UmbraUiPromptHistoryEntry,
@@ -29,7 +24,6 @@ import {
   compileUmbraUiPromptSegments,
   createUmbraUiPromptSegment,
   getUmbraUiSinglePromptField,
-  mergeUmbraUiPromptSegmentEnhancements,
   normalizeUmbraUiPromptSegmentText,
   type UmbraUiPromptSegment,
 } from '@/lib/umbraUiPromptSegments';
@@ -59,9 +53,6 @@ interface UmbraPositivePromptEditorProps {
   accent?: 'cyan' | 'rose' | 'fuchsia';
   heading?: string;
   onSubmit?: () => void;
-  agentContext?: Record<string, unknown>;
-  onAgentEnhancementApplied?: () => void;
-  mediaType?: 'image' | 'video';
   singleField?: boolean;
 }
 
@@ -84,18 +75,13 @@ export function UmbraPositivePromptEditor({
   accent = 'cyan',
   heading = 'Positive Prompt',
   onSubmit,
-  agentContext,
-  onAgentEnhancementApplied,
-  mediaType = 'image',
   singleField = false,
 }: UmbraPositivePromptEditorProps) {
   const segments = React.useMemo(
     () => singleField ? getUmbraUiSinglePromptField(sourceSegments) : sourceSegments,
     [singleField, sourceSegments],
   );
-  const showToast = useStore((state) => state.showToast);
   const [historyOpen, setHistoryOpen] = React.useState(false);
-  const [enhancingFields, setEnhancingFields] = React.useState(false);
   const textareaRefs = React.useRef(new Map<string, HTMLTextAreaElement>());
   const fieldHistoriesRef = React.useRef(new Map<string, UmbraUiPromptFieldHistory>());
   const typingCheckpointIdsRef = React.useRef(new Set<string>());
@@ -105,10 +91,6 @@ export function UmbraPositivePromptEditor({
   const segmentsRef = React.useRef(segments);
   segmentsRef.current = segments;
   const compiledPrompt = React.useMemo(() => compileUmbraUiPromptSegments(segments), [segments]);
-  const selectedAgentSegments = React.useMemo(
-    () => segments.filter((segment) => segment.agentEnabled === true && segment.text.trim()),
-    [segments],
-  );
   const activeClasses = accent === 'rose'
     ? 'border-rose-300/35 bg-rose-500/[0.045]'
     : accent === 'fuchsia'
@@ -266,91 +248,6 @@ export function UmbraPositivePromptEditor({
     emitSegments(next);
   }, [emitSegments]);
 
-  const toggleAgentSegment = React.useCallback((id: string) => {
-    if (enhancingFields) return;
-    emitSegments(segmentsRef.current.map((segment) => segment.id === id
-      ? { ...segment, agentEnabled: segment.agentEnabled !== true }
-      : segment));
-  }, [emitSegments, enhancingFields]);
-
-  const enhanceSelectedSegments = React.useCallback(async () => {
-    if (enhancingFields) return;
-    const selected = selectedAgentSegments;
-    if (selected.length <= 0) {
-      showToast('Enable the agent on at least one non-empty prompt field.', 'error');
-      return;
-    }
-
-    const sourceTextById = new Map(selected.map((segment) => [segment.id, segment.text]));
-    const enhancedTextById = new Map<string, string>();
-    const protectedFieldLabels = segments.flatMap((segment, index) => segment.agentEnabled !== true
-      ? [segment.label || (index === 0 ? 'Base' : `Segment ${index + 1}`)]
-      : []);
-    setEnhancingFields(true);
-    try {
-      for (const segment of selected) {
-        const index = segments.findIndex((entry) => entry.id === segment.id);
-        const fieldLabel = segment.label || (index === 0 ? 'Base' : `Segment ${index + 1}`);
-        const result = await generateUmbraUiAgentPrompt({
-          mediaType,
-          task: 'enhance-field',
-          fieldLabel,
-          prompt: segment.text,
-          context: {
-            ...(agentContext || {}),
-            promptField: {
-              id: segment.id,
-              label: fieldLabel,
-              position: index + 1,
-              fieldCount: segments.length,
-            },
-            protectedFieldLabels,
-          },
-        });
-        enhancedTextById.set(segment.id, result.prompt);
-      }
-
-      const merged = mergeUmbraUiPromptSegmentEnhancements(
-        segmentsRef.current,
-        sourceTextById,
-        enhancedTextById,
-      );
-      if (merged.applied > 0) {
-        const currentById = new Map(segmentsRef.current.map((segment) => [segment.id, segment]));
-        merged.segments.forEach((segment) => {
-          const current = currentById.get(segment.id);
-          if (current && current.text !== segment.text) {
-            recordFieldCheckpoint(segment.id, current.text);
-          }
-        });
-        emitSegments(merged.segments);
-        onAgentEnhancementApplied?.();
-      }
-      const skippedMessage = merged.skipped > 0
-        ? ` ${merged.skipped} field${merged.skipped === 1 ? ' was' : 's were'} preserved because the text changed while the agent was working.`
-        : '';
-      showToast(
-        merged.applied > 0
-          ? `Agent enhanced ${merged.applied} prompt field${merged.applied === 1 ? '' : 's'}.${skippedMessage}`
-          : `No prompt fields were replaced.${skippedMessage}`,
-        merged.applied > 0 ? 'success' : 'error',
-      );
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Agent failed to enhance the selected prompt fields.', 'error');
-    } finally {
-      setEnhancingFields(false);
-    }
-  }, [
-    agentContext,
-    enhancingFields,
-    emitSegments,
-    onAgentEnhancementApplied,
-    recordFieldCheckpoint,
-    mediaType,
-    segments,
-    selectedAgentSegments,
-    showToast,
-  ]);
 
   return (
     <section className="rounded-md border border-white/10 bg-white/[0.02]">
@@ -362,25 +259,6 @@ export function UmbraPositivePromptEditor({
         </span>}
         <div data-umbra-prompt-toolbar="" className="flex w-full min-w-0 flex-wrap items-center gap-1">
           <PromptWildcardLibrary onInsert={insertWildcard} compact />
-          <button
-            type="button"
-            onClick={() => void enhanceSelectedSegments()}
-            disabled={enhancingFields || selectedAgentSegments.length <= 0}
-            className={cn(
-              'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border transition-colors',
-              selectedAgentSegments.length > 0
-                ? accent === 'rose'
-                  ? 'border-rose-300/30 bg-rose-500/[0.08] text-rose-100'
-                  : accent === 'fuchsia'
-                    ? 'border-fuchsia-300/30 bg-fuchsia-500/[0.08] text-fuchsia-100'
-                    : 'border-cyan-300/30 bg-cyan-500/[0.08] text-cyan-100'
-                : 'border-white/10 text-zinc-700',
-            )}
-            title="Enhance only the prompt fields with an enabled agent icon"
-            aria-label={enhancingFields ? 'Enhancing prompt fields' : `Enhance ${selectedAgentSegments.length} prompt fields`}
-          >
-            {enhancingFields ? <Loader2 size={11} className="animate-spin" /> : <WandSparkles size={11} />}
-          </button>
           <button
             type="button"
             onClick={onRememberCurrent}
@@ -508,27 +386,6 @@ export function UmbraPositivePromptEditor({
                     title="Redo the last change to this prompt field"
                   >
                     <Redo2 size={12} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => toggleAgentSegment(segment.id)}
-                    disabled={enhancingFields}
-                    aria-pressed={segment.agentEnabled === true}
-                    className={cn(
-                      'inline-flex h-7 w-7 items-center justify-center rounded-sm border transition-colors disabled:opacity-40',
-                      segment.agentEnabled === true
-                        ? accent === 'rose'
-                          ? 'border-rose-300/40 bg-rose-500/[0.12] text-rose-100'
-                          : accent === 'fuchsia'
-                            ? 'border-fuchsia-300/40 bg-fuchsia-500/[0.12] text-fuchsia-100'
-                            : 'border-cyan-300/40 bg-cyan-500/[0.12] text-cyan-100'
-                        : 'border-white/10 text-zinc-600 hover:text-zinc-300',
-                    )}
-                    title={segment.agentEnabled === true
-                      ? 'Agent enhancement enabled for this field'
-                      : 'Enable agent enhancement for this field'}
-                  >
-                    <Bot size={12} />
                   </button>
                   {!singleField && <button
                     type="button"

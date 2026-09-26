@@ -296,7 +296,6 @@ export interface UmbraCanvasGenerationSettingsSnapshot {
     slotType?: string;
     variantId?: string;
     variantName?: string;
-    agentEnabled?: boolean;
     preserveRepeatedTerms?: true;
   }>;
   negativePrompt: string;

@@ -7,7 +7,6 @@ export interface UmbraUiPromptSegment {
   slotType?: string;
   variantId?: string;
   variantName?: string;
-  agentEnabled?: boolean;
   preserveRepeatedTerms?: true;
 }
 
@@ -30,23 +29,18 @@ export function createUmbraUiPromptSegment(
     ...(String(metadata.slotType || '').trim() ? { slotType: String(metadata.slotType).trim() } : {}),
     ...(String(metadata.variantId || '').trim() ? { variantId: String(metadata.variantId).trim() } : {}),
     ...(String(metadata.variantName || '').trim() ? { variantName: String(metadata.variantName).trim() } : {}),
-    ...(metadata.agentEnabled === true ? { agentEnabled: true } : {}),
     ...(metadata.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true } : {}),
   };
 }
 
-export function getUmbraUiActiveImagePromptSegments(
+export function migrateLegacyUmbraUiAgentPrompt(
   manualSegments: UmbraUiPromptSegment[],
-  activePrompt: string,
   agentModeEnabled: boolean,
+  activePrompt: string,
 ): UmbraUiPromptSegment[] {
-  if (!agentModeEnabled) return manualSegments;
-  return [{
-    id: 'umbra-ui-agent-prompt',
-    label: 'Agent Prompt',
-    slotType: 'umbra_ui_agent_prompt',
-    text: String(activePrompt || '').trim(),
-  }];
+  if (!agentModeEnabled || !String(activePrompt || '').trim()) return manualSegments;
+  // Retain saved output as editable text without restoring retired agent behavior.
+  return [createUmbraUiPromptSegment(String(activePrompt).trim(), { preserveRepeatedTerms: true })];
 }
 
 function splitPromptTerms(value: string): string[] {
@@ -159,37 +153,9 @@ export function getUmbraUiSinglePromptField(segments: UmbraUiPromptSegment[]): U
     id: segments[0].id,
     text: compileUmbraUiPromptSegments(segments),
     preserveRepeatedTerms: true,
-    agentEnabled: segments.every((segment) => segment.agentEnabled === true),
   }];
 }
 
-export function mergeUmbraUiPromptSegmentEnhancements(
-  segments: UmbraUiPromptSegment[],
-  sourceTextById: ReadonlyMap<string, string>,
-  enhancedTextById: ReadonlyMap<string, string>,
-): {
-  segments: UmbraUiPromptSegment[];
-  applied: number;
-  skipped: number;
-} {
-  let applied = 0;
-  let skipped = 0;
-  const next = segments.map((segment) => {
-    if (!enhancedTextById.has(segment.id)) return segment;
-    if (segment.text !== sourceTextById.get(segment.id)) {
-      skipped += 1;
-      return segment;
-    }
-    const enhancedText = String(enhancedTextById.get(segment.id) || '').trim();
-    if (!enhancedText) {
-      skipped += 1;
-      return segment;
-    }
-    applied += 1;
-    return { ...segment, text: enhancedText };
-  });
-  return { segments: next, applied, skipped };
-}
 
 export function appendUmbraUiPromptToken(
   segments: UmbraUiPromptSegment[],

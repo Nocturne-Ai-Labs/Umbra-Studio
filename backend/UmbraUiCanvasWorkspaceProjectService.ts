@@ -85,7 +85,6 @@ function normalizeGenerationSettings(rawSettings: unknown): Record<string, any> 
       ...(String(segment.slotType || '').trim() ? { slotType: String(segment.slotType).trim().slice(0, 160) } : {}),
       ...(String(segment.variantId || '').trim() ? { variantId: String(segment.variantId).trim().slice(0, 240) } : {}),
       ...(String(segment.variantName || '').trim() ? { variantName: String(segment.variantName).trim().slice(0, 240) } : {}),
-      ...(segment.agentEnabled === true ? { agentEnabled: true } : {}),
       ...(segment.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
     };
   });

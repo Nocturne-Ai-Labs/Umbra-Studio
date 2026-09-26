@@ -10015,15 +10015,6 @@ export function UmbraInpaintWorkspace({
             onRemoveHistory={removePromptHistoryEntry}
             onClearHistory={clearPromptHistory}
             accent="rose"
-            agentContext={{
-              mode: 'inpaint',
-              modelFamily,
-              modelSource,
-              checkpointName,
-              width: resizeTarget.width,
-              height: resizeTarget.height,
-              enabledLoras: loras.filter((entry) => entry.enabled).map((entry) => entry.name),
-            }}
           />
           {capabilities.negativePrompt.support === 'adjustable' ? (
             <label className="block space-y-1.5">

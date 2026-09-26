@@ -29,7 +29,6 @@ import { PowerPrompterQueueTrackerCard } from '@/components/power-prompter/queue
 import { PowerPrompterQueueHistoryModal } from '@/components/power-prompter/queue/PowerPrompterQueueHistoryModal';
 import { PowerPrompterQueueConfirmModal, PowerPrompterSaveQueueModal } from '@/components/power-prompter/queue/PowerPrompterQueueDialogs';
 import { PowerPrompterSettingsModal } from '@/components/modals/PowerPrompterSettingsModal';
-import { UmbraAgentPromptPanel } from '@/components/umbra-ui/UmbraAgentPromptPanel';
 import { useStore } from '@/store/useStore';
 import type {
   PowerPrompterCardDocument,
@@ -286,15 +285,6 @@ import {
   postPowerPrompterDiagnosticPayload,
 } from '@/components/power-prompter/powerPrompterDiagnostics';
 import { stageUmbraUiPowerPrompterHandoff } from '@/lib/umbraUiPowerPrompterHandoff';
-import {
-  generateUmbraUiAgentPrompt,
-  type UmbraUiAgentDraft,
-} from '@/lib/umbraUiAgent';
-import {
-  applyAgentDraftToPowerPrompterDocument,
-  enhancePowerPrompterQueuePrompts,
-  type PowerPrompterAgentProgress,
-} from '@/lib/powerPrompterAgent';
 import {
   UMBRA_UI_AUTO_PIPELINE_ID,
   createUmbraUiPipelineTargetId,
@@ -904,7 +894,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const powerPrompterUiSuppressPersistUntilRef = useRef(0);
   const [powerPrompterUiHydrationTick, setPowerPrompterUiHydrationTick] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [agentPromptPanelOpen, setAgentPromptPanelOpen] = useState(false);
   const [settings, setSettings] = useState<PowerPrompterSettings>(DEFAULT_POWER_PROMPTER_SETTINGS);
   const settingsWriteTailRef = useRef<Promise<void>>(Promise.resolve());
   const settingsWriteSeqRef = useRef(0);
@@ -940,7 +929,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
   const [bridgeTargets, setBridgeTargets] = useState<PowerPrompterBridgeTarget[]>([]);
   const [selectedBridgeId, setSelectedBridgeId] = useState<string>('');
   const [queueingMode, setQueueingMode] = useState<PowerPrompterQueueMode | null>(null);
-  const [queueAgentEnhancementProgress, setQueueAgentEnhancementProgress] = useState<PowerPrompterAgentProgress | null>(null);
   const [queueStackItems, setQueueStackItemsState] = useState<QueueStackItem[]>(() => (
     powerPrompterQueueSession.queueStackItems.filter((item) => (
       !item.exiting && (item.status === 'pending' || item.status === 'running')
@@ -8027,12 +8015,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     }
   };
 
-  const handleApplyAgentDraftToPowerPrompter = useCallback(async (draft: UmbraUiAgentDraft) => {
-    const targetSetId = clampQueueSetId(queueSetTarget);
-    const applied = applyAgentDraftToPowerPrompterDocument(cardDocumentRef.current, draft, targetSetId);
-    handleCardDocumentChange(applied.document);
-  }, [handleCardDocumentChange, queueSetTarget]);
-
   const applyUmbraUiGenerationControlsHandoff = useCallback((value: unknown): boolean => {
     const handoff = normalizeUmbraUiGenerationControlsHandoff(value);
     if (!handoff) return false;
@@ -10030,51 +10012,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         elapsedMs,
       });
     }
-    if (settings.agentEnhanceCompletePrompts === true && built.prompts.length > 0) {
-      setQueueAgentEnhancementProgress({ completed: 0, current: 1, total: built.prompts.length });
-      try {
-        const pipeline = normalizeUmbraUiPipelineSelection(editorDocument.pipeline, {
-          feature: 'txt2img',
-          modelFamily: editorDocument.modelType,
-          modelSource: editorDocument.generation.modelType,
-        });
-        const enhancedQueue = await enhancePowerPrompterQueuePrompts(
-          built.prompts,
-          built.promptEntries,
-          async (prompt, promptIndex, total) => {
-            const result = await generateUmbraUiAgentPrompt({
-              mediaType: 'image',
-              task: 'enhance-complete-prompt',
-              instructionId: settings.agentInstructionId,
-              fieldLabel: 'Complete assembled Power Prompter prompt',
-              prompt,
-              context: {
-                powerPrompter: {
-                  sourceFile: queueEditorDraft.sourceFile,
-                  queueMode: queueEditorDraft.mode,
-                  targetSetId: queueEditorDraft.activeSetId,
-                  promptSetId: clampQueueSetId(built.promptSetIds[promptIndex] ?? queueEditorDraft.activeSetId),
-                  promptPosition: promptIndex + 1,
-                  promptCount: total,
-                  modelFamily: pipeline.modelFamily,
-                  modelSource: pipeline.modelSource,
-                  queueEditor: true,
-                },
-              },
-            });
-            return result.prompt;
-          },
-          setQueueAgentEnhancementProgress,
-        );
-        built = {
-          ...built,
-          prompts: enhancedQueue.prompts,
-          promptEntries: enhancedQueue.promptEntries,
-        };
-      } finally {
-        setQueueAgentEnhancementProgress(null);
-      }
-    }
     const normalizedGeneration = normalizePowerPrompterGenerationControls(editorDocument.generation);
     const queueSeedSalt = normalizedGeneration.controlAfterGenerate === 'randomize'
       ? createQueueShuffleSeed()
@@ -10118,7 +10055,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       generationByPrompt,
       editorSnapshot: createQueueEditorSnapshot(editorDocument, queueEditorDraft.sourceFile, buildSettings),
     };
-  }, [queueEditorDraft, settings.agentEnhanceCompletePrompts, settings.agentInstructionId]);
+  }, [queueEditorDraft]);
 
   const handleSaveQueueEditorDraft = useCallback(async () => {
     if (!POWER_PROMPTER_QUEUE_EDITOR_ENABLED) {
@@ -11673,40 +11610,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
     }
   };
 
-  const handleToggleCompletePromptAgent = async () => {
-    if (queueingMode || queueSubmissionInFlightRef.current) return;
-    const nextSettings = normalizePowerPrompterSettings({
-      ...settings,
-      agentEnhanceCompletePrompts: settings.agentEnhanceCompletePrompts !== true,
-    });
-    setSettings(nextSettings);
-    const persisted = await persistSettings(nextSettings, { silent: true });
-    if (!persisted) {
-      showToast('Failed to update complete-prompt agent mode', 'error');
-      return;
-    }
-    showToast(
-      nextSettings.agentEnhanceCompletePrompts
-        ? 'Complete-prompt agent mode enabled. Every assembled prompt will be enhanced before staging.'
-        : 'Complete-prompt agent mode disabled.',
-      'success',
-    );
-  };
-
-  const handleSetAgentInstruction = async (instructionId: string) => {
-    const nextSettings = normalizePowerPrompterSettings({
-      ...settings,
-      agentInstructionId: instructionId,
-    });
-    setSettings(nextSettings);
-    const persisted = await persistSettings(nextSettings, { silent: true });
-    if (!persisted) {
-      setSettings(settings);
-      throw new Error('Failed to save the active Power Prompter agent instruction.');
-    }
-    showToast('Power Prompter agent instruction updated.', 'success');
-  };
-
   const resolveQueuePrompts = async (
     mode: PowerPrompterQueueMode,
     options?: {
@@ -12009,45 +11912,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           `Random set skipped cards with no enabled variants: ${names}${suffix}.`,
           'error'
         );
-      }
-
-      if (settings.agentEnhanceCompletePrompts === true) {
-        setQueueAgentEnhancementProgress({ completed: 0, current: 1, total: prompts.length });
-        const enhancedQueue = await enhancePowerPrompterQueuePrompts(
-          prompts,
-          promptEntries,
-          async (prompt, promptIndex, total) => {
-            const result = await generateUmbraUiAgentPrompt({
-              mediaType: 'image',
-              task: 'enhance-complete-prompt',
-              instructionId: settings.agentInstructionId,
-              fieldLabel: 'Complete assembled Power Prompter prompt',
-              prompt,
-              context: {
-                powerPrompter: {
-                  sourceFile: currentFileRef.current || null,
-                  queueMode: mode,
-                  targetSetId,
-                  promptSetId: clampQueueSetId(promptSetIds[promptIndex] ?? targetSetId),
-                  promptPosition: promptIndex + 1,
-                  promptCount: total,
-                  modelFamily: pipeline.modelFamily,
-                  modelSource: pipeline.modelSource,
-                },
-              },
-            });
-            return result.prompt;
-          },
-          setQueueAgentEnhancementProgress,
-        );
-        prompts = enhancedQueue.prompts;
-        promptEntries = enhancedQueue.promptEntries;
-        assertQueueSourceUnchanged();
-        logPowerPrompterDebug('queue:stage:agentEnhanced', {
-          mode,
-          targetSetId,
-          promptCount: prompts.length,
-        }, { includeQueue: true });
       }
 
       const resolvedQueueTarget = resolveQueueControlTarget(effectiveQueueTargetBridgeId, selectedQueueTargetType);
@@ -12375,7 +12239,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       showToast(String(error?.message || 'Failed to queue prompts'), 'error');
     } finally {
       queueSubmissionInFlightRef.current = false;
-      setQueueAgentEnhancementProgress(null);
       setQueueingMode(null);
     }
   };
@@ -12531,10 +12394,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           totalQueueSetAssignmentCount={totalQueueSetAssignmentCount}
           handleToggleQueueShuffle={handleToggleQueueShuffle}
           queueShuffleEnabled={queueShuffleEnabled}
-          completePromptAgentEnabled={settings.agentEnhanceCompletePrompts === true}
-          handleToggleCompletePromptAgent={handleToggleCompletePromptAgent}
-          openAgentPromptPanel={() => setAgentPromptPanelOpen(true)}
-          queueAgentEnhancementProgress={queueAgentEnhancementProgress}
           hasLiveQueue={hasLiveQueue}
           estimatedBatchSize={estimatedBatchSize}
           handleQueuePrompts={handleQueuePrompts}
@@ -12726,17 +12585,6 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         onClose={() => setSettingsOpen(false)}
         settings={settings}
         onSave={saveSettings}
-      />
-      <UmbraAgentPromptPanel
-        open={agentPromptPanelOpen}
-        onClose={() => setAgentPromptPanelOpen(false)}
-        onApplyDraft={handleApplyAgentDraftToPowerPrompter}
-        activeInstructionId={settings.agentInstructionId}
-        onActiveInstructionChange={handleSetAgentInstruction}
-        activeInstructionLabel="Active in Power Prompter"
-        title="Power Prompter Agent"
-        subtitle="Choose the active instruction, review drafts, and manage reusable instructions"
-        applySuccessMessage="Agent draft added to Power Prompter."
       />
 
     </div>

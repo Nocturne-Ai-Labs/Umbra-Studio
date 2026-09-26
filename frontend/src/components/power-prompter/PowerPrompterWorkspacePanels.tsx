@@ -84,7 +84,6 @@ export function PowerPrompterWorkspacePanels(props: PowerPrompterWorkspacePanels
                 queueCyclePreviewEntries={queueEstimate.setCyclePromptEntries}
                 queueShuffleEnabled={queueShuffleEnabled}
                 queueShuffleSeed={settings.queueShuffleSeed}
-                agentInstructionId={settings.agentInstructionId}
                 queueTraversalMode={queueTraversalMode}
                 queuePreviewSetId={queueSetTarget}
                 queueCompletionTick={isEditorPanelActive ? queueCompletionTick : 0}
@@ -183,7 +182,6 @@ export function PowerPrompterWorkspacePanels(props: PowerPrompterWorkspacePanels
                   queueCyclePreviewEntries={queueEditorEstimate.setCyclePromptEntries}
                   queueShuffleEnabled={queueEditorDraft.queueBuildSettings.shuffleEnabled}
                   queueShuffleSeed={queueEditorDraft.queueBuildSettings.shuffleSeed}
-                  agentInstructionId={settings.agentInstructionId}
                   queueTraversalMode={queueEditorDraft.queueBuildSettings.traversalMode}
                   queuePreviewSetId={queueEditorDraft.activeSetId}
                   queueCompletionTick={isQueueEditorPanelActive ? queueCompletionTick : 0}
