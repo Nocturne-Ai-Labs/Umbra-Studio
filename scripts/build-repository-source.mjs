@@ -85,7 +85,6 @@ const RUNTIME_SKELETON_LEAF_DIRECTORIES = [
   'User/Recovery/Replaced Sources',
   'User/Temp',
   'User/Trash',
-  'User/UmbraUI/Agent',
   'User/UmbraUI/InpaintProjects',
   'User/UmbraUI/Queue',
 ];

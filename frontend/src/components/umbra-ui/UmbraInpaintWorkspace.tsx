@@ -44,6 +44,7 @@ import {
   Magnet,
   Maximize2,
   Minimize2,
+  MoreHorizontal,
   Move,
   Paintbrush,
   Palette,
@@ -2512,6 +2513,9 @@ export function UmbraInpaintWorkspace({
 }: UmbraInpaintWorkspaceProps) {
   const [pinnedOutputFolder, setPinnedOutputFolder] = usePinnedOutputFolder('inpaint');
   const studioMode = false;
+  const [mobileToolsExpanded, setMobileToolsExpanded] = React.useState(false);
+  const [mobileActionsExpanded, setMobileActionsExpanded] = React.useState(false);
+  const mobileToolbarId = React.useId();
   const [mobileControlsTab, setMobileControlsTab] = React.useState<'generation' | 'inpaint'>(() => {
     const saved = readDeviceUiResume<{ controlsTab?: 'generation' | 'inpaint' }>('umbra-ui-inpaint');
     return saved?.controlsTab === 'inpaint' ? 'inpaint' : 'generation';
@@ -10479,6 +10483,7 @@ export function UmbraInpaintWorkspace({
 
       <UmbraMobileWorkspaceSheet
         active={active}
+        kind="inpaint"
         title="Inpaint Editor"
         subtitle={source ? `${source.width}x${source.height} canvas` : 'Open an image to begin'}
         badge={canvasDocument?.staging.length ? `${canvasDocument.staging.length}` : undefined}
@@ -10488,20 +10493,32 @@ export function UmbraInpaintWorkspace({
       >
         <main
           data-umbra-inpaint-editor=""
+          data-mobile-tools-expanded={mobileToolsExpanded ? '1' : '0'}
+          data-mobile-actions-expanded={mobileActionsExpanded ? '1' : '0'}
           className="relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-black/25 transition-[padding-right] duration-150 ease-out"
           style={{ paddingRight: layersExpanded ? 'clamp(248px, 22vw, 320px)' : '40px' }}
         >
         <div data-umbra-inpaint-mobile-job-controls="" className="hidden">
+          <button type="button" onClick={() => setMobileToolsExpanded((value) => !value)}
+            aria-expanded={mobileToolsExpanded} aria-controls={mobileToolbarId}
+            aria-label={mobileToolsExpanded ? 'Hide inpaint tools' : 'Show inpaint tools'}
+            title={mobileToolsExpanded ? 'Hide inpaint tools' : 'Show inpaint tools'}>
+            <Settings2 size={16} /><span>Tools</span><ChevronDown size={12} className={mobileToolsExpanded ? 'rotate-180' : ''} />
+          </button>
+          <button type="button" onClick={undoDocument} disabled={documentHistory.past.length <= 0} title="Undo last edit" aria-label="Undo last edit"><Undo2 size={16} /></button>
+          <button type="button" onClick={redoDocument} disabled={documentHistory.future.length <= 0} title="Redo last edit" aria-label="Redo last edit"><Redo2 size={16} /></button>
+          <button type="button" onClick={() => setZoom(1)} title="Fit image" aria-label="Fit image"><Maximize2 size={16} /></button>
           <button
             type="button"
             onClick={() => void cancelActiveJob()}
             disabled={!running || cancelingJob || !!job?.cancelRequested}
             title={running ? 'Stop the active inpaint job and all remaining samples' : 'No inpaint job is running'}
+            aria-label="Stop all samples"
           >
-            <X size={12} /> Stop All Samples
+            <Square size={14} />
           </button>
         </div>
-        <div data-umbra-inpaint-toolbar="" className="relative z-30 shrink-0 border-b border-white/10 bg-[#050708]/95 shadow-md shadow-black/35 backdrop-blur-sm">
+        <div id={mobileToolbarId} data-umbra-inpaint-toolbar="" className="relative z-30 shrink-0 border-b border-white/10 bg-[#050708]/95 shadow-md shadow-black/35 backdrop-blur-sm">
           <div className="flex min-h-10 min-w-0 flex-wrap items-center gap-1.5 px-2.5 py-1.5 [&>*]:shrink-0">
           {(
             <>
@@ -11178,7 +11195,7 @@ export function UmbraInpaintWorkspace({
             </div>
           )}
           {source ? (
-            <div className="sticky bottom-2 z-20 ml-auto mr-2 w-fit border border-white/15 bg-black/85 p-1 shadow-lg shadow-black/60">
+            <div data-umbra-inpaint-minimap-container="" className="sticky bottom-2 z-20 ml-auto mr-2 w-fit border border-white/15 bg-black/85 p-1 shadow-lg shadow-black/60">
               <div className="relative">
                 <canvas data-umbra-inpaint-minimap="" ref={minimapCanvasRef} onPointerDown={navigateMinimap} className="block max-h-24 max-w-36 cursor-crosshair" title="Navigate canvas" />
                 <span
@@ -11401,18 +11418,22 @@ export function UmbraInpaintWorkspace({
           title={generationBlockedReason || (generationBusy ? 'Wait for the current inpaint job to finish.' : 'Generate with the current inpaint settings')}
           label={running ? `Generating ${job?.completed || 0}/${job?.total || samples}` : canvasDocument?.pendingJobs.length ? 'Recovering Job' : 'Generate'}
           folder={pinnedOutputFolder} onFolderChange={setPinnedOutputFolder}>
-          <button type="button" onClick={() => void saveCanvasToGallery(false)} disabled={!source || isSavingCanvas || !!fullResolutionOperation}
+          <button type="button" data-umbra-inpaint-action-toggle="" className="hidden"
+            aria-expanded={mobileActionsExpanded} aria-label={mobileActionsExpanded ? 'Hide image actions' : 'Show image actions'}
+            title={mobileActionsExpanded ? 'Hide image actions' : 'Show image actions'}
+            onClick={() => setMobileActionsExpanded((value) => !value)}><MoreHorizontal size={18} /></button>
+          <button type="button" data-umbra-inpaint-secondary-action="" onClick={() => void saveCanvasToGallery(false)} disabled={!source || isSavingCanvas || !!fullResolutionOperation}
             title="Save accepted image to the selected output destination" aria-label="Save accepted image"
             className="inline-flex h-9 w-9 items-center justify-center rounded-sm border border-white/10 text-zinc-300 disabled:text-zinc-600"><Save size={13} /></button>
-          <button type="button" onClick={() => void sendCanvasToImg2Img()} disabled={!source || !canvasDocument || isSavingCanvas || !!fullResolutionOperation || isExportingPsd}
+          <button type="button" data-umbra-inpaint-secondary-action="" aria-label="Continue in IMG2IMG" onClick={() => void sendCanvasToImg2Img()} disabled={!source || !canvasDocument || isSavingCanvas || !!fullResolutionOperation || isExportingPsd}
             title={previewStage ? 'Accept the staged inpaint result before continuing in IMG2IMG' : 'Continue the full accepted image in IMG2IMG with its generation metadata'}
-            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-sm border border-cyan-300/20 px-2.5 text-[10px] font-bold text-cyan-100 disabled:text-zinc-600"><ImagePlus size={12} /> Continue in IMG2IMG</button>
-          <button type="button" onClick={() => void sendCanvasToUpscale(false)} disabled={!source || !canvasDocument || isSavingCanvas || !!fullResolutionOperation || isExportingPsd}
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-sm border border-cyan-300/20 px-2.5 text-[10px] font-bold text-cyan-100 disabled:text-zinc-600"><ImagePlus size={12} /><span data-umbra-inpaint-action-label="">Continue in IMG2IMG</span></button>
+          <button type="button" data-umbra-inpaint-secondary-action="" aria-label="Add to upscale batch" onClick={() => void sendCanvasToUpscale(false)} disabled={!source || !canvasDocument || isSavingCanvas || !!fullResolutionOperation || isExportingPsd}
             title={previewStage ? 'Accept the staged inpaint result before adding it to the upscale batch' : 'Add the full accepted image to the Extras upscale batch'}
-            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-sm border border-white/10 px-2.5 text-[10px] font-bold text-zinc-300 hover:text-amber-100 disabled:text-zinc-600"><Layers3 size={12} /> Add to Batch</button>
-          <button type="button" onClick={() => void sendCanvasToUpscale(true)} disabled={!source || !canvasDocument || !comfyConnected || isSavingCanvas || !!fullResolutionOperation || isExportingPsd}
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-sm border border-white/10 px-2.5 text-[10px] font-bold text-zinc-300 hover:text-amber-100 disabled:text-zinc-600"><Layers3 size={12} /><span data-umbra-inpaint-action-label="">Add to Batch</span></button>
+          <button type="button" data-umbra-inpaint-secondary-action="" aria-label="Upscale now" onClick={() => void sendCanvasToUpscale(true)} disabled={!source || !canvasDocument || !comfyConnected || isSavingCanvas || !!fullResolutionOperation || isExportingPsd}
             title={previewStage ? 'Accept the staged inpaint result before upscaling' : 'Upscale the full accepted image now using the Extras settings'}
-            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-sm border border-amber-300/25 bg-amber-500/[0.08] px-2.5 text-[10px] font-bold text-amber-100 hover:bg-amber-500/[0.14] disabled:text-zinc-600"><ImageUp size={12} /> Upscale Now</button>
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-sm border border-amber-300/25 bg-amber-500/[0.08] px-2.5 text-[10px] font-bold text-amber-100 hover:bg-amber-500/[0.14] disabled:text-zinc-600"><ImageUp size={12} /><span data-umbra-inpaint-action-label="">Upscale Now</span></button>
         </UmbraGenerationActionBar>
         </main>
       </UmbraMobileWorkspaceSheet>

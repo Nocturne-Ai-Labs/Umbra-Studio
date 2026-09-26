@@ -7758,3 +7758,145 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tag-modal] button {
 .umbra-themed-select:focus {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--umbra-accent) 45%, transparent);
 }
+
+/* Phone inpaint canvas polish: scoped overrides; desktop and other sheets unchanged. */
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-kind="inpaint"] > [data-umbra-mobile-workspace-sheet-panel] {
+  inset: max(0.25rem, env(safe-area-inset-top)) max(0.25rem, env(safe-area-inset-right)) max(0.25rem, env(safe-area-inset-bottom)) max(0.25rem, env(safe-area-inset-left)) !important;
+  height: auto !important;
+  max-height: none !important;
+  min-height: 0;
+  border-radius: 8px;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-kind="inpaint"] [data-umbra-mobile-workspace-sheet-header] {
+  min-height: 48px;
+  gap: 8px;
+  padding: 2px 8px;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-kind="inpaint"] [data-umbra-mobile-workspace-sheet-handle],
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-kind="inpaint"] [data-umbra-mobile-workspace-sheet-header] small,
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-minimap-container] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-mobile-job-controls] {
+  display: flex !important;
+  height: 52px;
+  min-height: 52px;
+  flex: 0 0 52px;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--umbra-border);
+  background: #080a0b;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-mobile-job-controls] button {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0;
+  border: 1px solid var(--umbra-border);
+  border-radius: 6px;
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--umbra-text);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-mobile-job-controls] button:first-child {
+  width: auto;
+  flex: 1 1 auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-mobile-job-controls] button[aria-expanded="true"] {
+  border-color: #fda4af;
+  background: #3b1720;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-mobile-job-controls] button:disabled {
+  opacity: 0.35;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor][data-mobile-tools-expanded="0"] [data-umbra-inpaint-toolbar] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-toolbar] {
+  position: absolute;
+  inset: 52px 0 auto;
+  max-height: 45%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-generation-action-bar="Inpaint"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px;
+  gap: 4px;
+  padding: 4px 8px;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-generation-action-bar="Inpaint"] > button {
+  min-width: 0;
+  height: 44px;
+  justify-content: center;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  letter-spacing: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-generation-action-bar="Inpaint"] > div > label {
+  flex-wrap: nowrap;
+  gap: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-generation-action-bar="Inpaint"] > div > label > span {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-generation-action-bar="Inpaint"] > div button {
+  width: 100%;
+  min-width: 0;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-action-toggle] {
+  display: inline-flex;
+  align-items: center;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-secondary-action],
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-action-label] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor][data-mobile-actions-expanded="1"] [data-umbra-generation-action-bar="Inpaint"] {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor][data-mobile-actions-expanded="1"] [data-umbra-generation-action-bar="Inpaint"] > button:first-child {
+  grid-column: span 5;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor][data-mobile-actions-expanded="1"] [data-umbra-generation-action-bar="Inpaint"] > div {
+  grid-column: span 5;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor][data-mobile-actions-expanded="1"] [data-umbra-inpaint-action-toggle] {
+  grid-column: span 2;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor][data-mobile-actions-expanded="1"] [data-umbra-inpaint-secondary-action] {
+  display: inline-flex;
+  grid-column: span 3;
+  width: 100%;
+}

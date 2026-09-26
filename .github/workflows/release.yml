@@ -150,4 +150,8 @@ jobs:
             echo "Release notes for ${tag} were not found in CHANGELOG.md" >&2
             exit 1
           fi
+          if ! grep -Fq 'Umbra Studio Mobile is experimental and is not ready for feedback.' release-notes.md; then
+            { printf '**Umbra Studio Mobile is experimental and is not ready for feedback.**\n\n'; cat release-notes.md; } > release-notes-mobile.md
+            mv release-notes-mobile.md release-notes.md
+          fi
           gh release create "${tag}" artifacts/* --repo "${GITHUB_REPOSITORY}" --notes-file release-notes.md --title "Umbra Studio ${tag}"

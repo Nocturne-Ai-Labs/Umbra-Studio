@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.32.34 - Gallery Explorer And Workspace Polish
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+- Restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux, then refresh browser tabs. No new model downloads, Umbra Nodes, or ComfyUI update is required.
+- Preserve existing `User/` and `Tools/` folders. Agent Mode has been removed throughout the app; saved active generated prompt text is recovered as editable text, with legacy MiniMax output retained in prompt history where necessary.
+- Linux managed tools require `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Gallery And Filmstrip
+
+- Default to a single-folder Gallery view, with nested multi-folder previews available through a toggle. Show folders and ZIP archives in their own sections.
+- Add clickable folder breadcrumbs, sibling-folder selectors, and folder context actions within those selectors. Promote Rename Folder above New Subfolder.
+- Support ZIP archive Trash, restore, and permanent-delete operations.
+- Use neutral Gallery media cards with a clearer selection outline. Keep context-menu backgrounds dark at 97% opacity across themes.
+- Add thumbnail-anchored filmstrip hover previews, with muted video playback. Add targeted Skip to the generation preview, a clearer separator, and a toggle for recent generations.
+
+### Umbra UI And Sidebar
+
+- Move ComfyUI into an Umbra UI tab after Extras. Remove the sidebar generation preview and show ComfyUI startup/restart status and supported training progress instead.
+- Remove Agent Mode panels, settings, automatic enhancement, context polling, queue-time enhancement, and provider execution. Retired endpoints return an explicit retirement response. Manual prompts, wildcards, captioning, and native LTX enhancement remain available.
+- Simplify phone TXT2IMG to one positive prompt field while preserving desktop multi-field drafts.
+- Improve experimental phone preview docks and Inpaint editing with a larger canvas, collapsible tools, and compact generation actions.
+
+### Validation And Limits
+
+- Checked frontend types, lint, production build, targeted regression suites, and all 52 workflow definitions. Tested mobile layouts using isolated development media.
+- Real GPU generation was not run for this release. Mobile remains unfinished and is not ready for feedback. The full interaction audit and previously documented unrelated issues remain separate work.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: ZIP archive Trash and recovery support in Gallery.
+- Improved: folder navigation, folder context actions, media selection visibility, and context-menu readability.
+- Improved: filmstrip hover previews, targeted Skip, recent-generation visibility, and sidebar status signals.
+- Improved: simpler manual prompting after Agent Mode removal, with recovery of saved output text.
+- Improved: experimental phone preview and Inpaint layouts without changing desktop editing behavior.
+
 ## v0.32.33 - Integrated Workflow Reliability Patch
 
 ### TL;DR - Setup After Updating
