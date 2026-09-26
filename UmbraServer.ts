@@ -76,6 +76,7 @@ import { copyFileExclusive, moveTreeExclusive } from './backend/FsTransferCopy';
 import { AnimaModelMergeService } from './backend/AnimaModelMergeService';
 import { probeAIToolkit } from './backend/AIToolkitProbe';
 import { getAIToolkitDatasetsHandoff } from './backend/AIToolkitDatasetsHandoff';
+import { datasetConceptImagePath, resolveDatasetConceptPath } from './backend/DatasetConceptPath';
 import {
   buildBooruMediaRequestHeaders,
   readApiKeys,
@@ -1161,6 +1162,9 @@ const {
   trashRoot: TRASH_ROOT,
   datasetsRelativeRoot: 'User/Datasets',
 });
+
+const resolveDatasetConceptPathSafe = (dataset: string, concept: string) =>
+  resolveDatasetConceptPath(dataset, concept, resolveDatasetPathSafe);
 
 const datasetArchiveBuilds = new Set<string>();
 
@@ -35320,7 +35324,7 @@ const server = Bun.serve<UmbraSocketData>({
           }
 
           const datasetPath = resolveDatasetPathSafe(datasetName);
-          const conceptPath = resolveDatasetPathSafe(datasetName, conceptName);
+          const conceptPath = resolveDatasetConceptPathSafe(datasetName, conceptName);
           if (!datasetPath || !conceptPath) {
             return json({ error: 'Invalid dataset path' }, 400);
           }
@@ -35364,7 +35368,7 @@ const server = Bun.serve<UmbraSocketData>({
           const concept = sanitizeDatasetSegment(body.concept);
           const filename = sanitizeDatasetSegment(body.filename);
           if (!dataset || !concept || !filename || filename !== body.filename) return json({ error: 'Invalid dataset image path' }, 400);
-          const conceptPath = resolveDatasetPathSafe(dataset, concept);
+          const conceptPath = resolveDatasetConceptPathSafe(dataset, concept);
           if (!conceptPath) return json({ error: 'Concept not found' }, 404);
           server.timeout(req, 0);
           return await withDatasetConceptLocks([conceptPath], async () => {
@@ -35518,20 +35522,11 @@ const server = Bun.serve<UmbraSocketData>({
         }
       }
 
-      // Create concept folder
-      if (path.match(/^\/api\/datasets\/[^/]+\/concept$/) && method === 'POST') {
-        const datasetName = sanitizeDatasetSegment(decodeURIComponent(path.split('/')[3] || ''));
-        if (!datasetName) return json({ error: 'Invalid dataset name' }, 400);
-        const datasetPath = resolveDatasetPathSafe(datasetName);
-        if (!datasetPath) return json({ error: 'Invalid dataset path' }, 400);
-
+      // A concept is an AI-Toolkit-selectable dataset root, not a nested folder.
+      if ((path === '/api/datasets/concept' || path.match(/^\/api\/datasets\/[^/]+\/concept$/)) && method === 'POST') {
         try {
           const body = await req.json() as { name: string; repeats?: number; isReg?: boolean };
           if (typeof body.name !== 'string' || !body.name.trim()) return json({ error: 'Concept name required' }, 400);
-
-          if (!existsSync(datasetPath)) {
-            return json({ error: 'Dataset not found' }, 404);
-          }
 
           const repeats = body.repeats ?? 10;
           if (!Number.isSafeInteger(repeats) || repeats < 1) return json({ error: 'Repeats must be a positive integer' }, 400);
@@ -35541,15 +35536,16 @@ const server = Bun.serve<UmbraSocketData>({
           }
           const folderName = sanitizeDatasetSegment(`${repeats}_${body.isReg ? 'reg_' : ''}${conceptName}`);
           if (!folderName) return json({ error: 'Invalid concept name' }, 400);
-          const conceptPath = resolveDatasetPathSafe(datasetName, folderName);
+          const conceptPath = resolveDatasetPathSafe(folderName);
           if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
 
           if (existsSync(conceptPath)) {
             return json({ error: 'Concept folder already exists' }, 400);
           }
 
+          await fs.mkdir(dirname(conceptPath), { recursive: true });
           await fs.mkdir(conceptPath);
-          return json({ success: true, folder: folderName });
+          return json({ success: true, folder: folderName, dataset: folderName });
         } catch (error: any) {
           return json({ error: error.message }, error?.code === 'EEXIST' ? 409 : 500);
         }
@@ -35561,8 +35557,11 @@ const server = Bun.serve<UmbraSocketData>({
         const datasetName = sanitizeDatasetSegment(decodeURIComponent(parts[3] || ''));
         const conceptFolder = sanitizeDatasetSegment(decodeURIComponent(parts[5] || ''));
         if (!datasetName || !conceptFolder) return json({ error: 'Invalid dataset or concept path' }, 400);
-        const conceptPath = resolveDatasetPathSafe(datasetName, conceptFolder);
+        const conceptPath = resolveDatasetConceptPathSafe(datasetName, conceptFolder);
         if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
+        if (conceptPath === resolveDatasetPathSafe(datasetName)) {
+          return json({ error: 'Delete a root concept through the folder delete action.' }, 400);
+        }
 
         try {
           return await withDatasetConceptLocks([conceptPath], async () => {
@@ -35583,7 +35582,7 @@ const server = Bun.serve<UmbraSocketData>({
         const datasetName = sanitizeDatasetSegment(decodeURIComponent(parts[3] || ''));
         const conceptFolder = sanitizeDatasetSegment(decodeURIComponent(parts[5] || ''));
         if (!datasetName || !conceptFolder) return json({ error: 'Invalid dataset or concept path' }, 400);
-        const conceptPath = resolveDatasetPathSafe(datasetName, conceptFolder);
+        const conceptPath = resolveDatasetConceptPathSafe(datasetName, conceptFolder);
         if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
 
         try {
@@ -35617,7 +35616,7 @@ const server = Bun.serve<UmbraSocketData>({
 
                 return {
                   filename: f,
-                  path: `/User/Datasets/${datasetName}/${conceptFolder}/${f}`,
+                  path: datasetConceptImagePath(datasetName, conceptFolder, f, conceptPath === resolveDatasetPathSafe(datasetName)),
                   canRedownload: /^[a-f0-9]{32}\.[a-z0-9]+$/i.test(f) || existsSync(join(conceptPath, booruSourceSidecar(f))),
                   revision: imageStat.mtimeMs,
                   caption,
@@ -35639,7 +35638,7 @@ const server = Bun.serve<UmbraSocketData>({
         const datasetName = sanitizeDatasetSegment(decodeURIComponent(parts[3] || ''));
         const conceptFolder = sanitizeDatasetSegment(decodeURIComponent(parts[5] || ''));
         if (!datasetName || !conceptFolder) return json({ error: 'Invalid dataset or concept path' }, 400);
-        const conceptPath = resolveDatasetPathSafe(datasetName, conceptFolder);
+        const conceptPath = resolveDatasetConceptPathSafe(datasetName, conceptFolder);
         if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
 
         try {
@@ -35665,6 +35664,7 @@ const server = Bun.serve<UmbraSocketData>({
             dataset: string;
             images: string[];
             from: string;
+            toDataset?: string;
             to: string;
           } | null;
           if (!body) return json({ error: 'Invalid move request' }, 400);
@@ -35675,12 +35675,13 @@ const server = Bun.serve<UmbraSocketData>({
 
           const datasetName = sanitizeDatasetSegment(body.dataset);
           const fromConcept = sanitizeDatasetSegment(body.from);
+          const toDataset = sanitizeDatasetSegment(body.toDataset || body.dataset);
           const toConcept = sanitizeDatasetSegment(body.to);
-          if (!datasetName || !fromConcept || !toConcept) {
+          if (!datasetName || !fromConcept || !toDataset || !toConcept) {
             return json({ error: 'Invalid dataset or concept path' }, 400);
           }
-          const fromPath = resolveDatasetPathSafe(datasetName, fromConcept);
-          const toPath = resolveDatasetPathSafe(datasetName, toConcept);
+          const fromPath = resolveDatasetConceptPathSafe(datasetName, fromConcept);
+          const toPath = resolveDatasetConceptPathSafe(toDataset, toConcept);
           if (!fromPath || !toPath) {
             return json({ error: 'Invalid dataset path' }, 400);
           }
@@ -35717,7 +35718,7 @@ const server = Bun.serve<UmbraSocketData>({
           if (!datasetName || !conceptName) {
             return json({ error: 'Invalid dataset or concept path' }, 400);
           }
-          const conceptPath = resolveDatasetPathSafe(datasetName, conceptName);
+          const conceptPath = resolveDatasetConceptPathSafe(datasetName, conceptName);
           if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
 
           return await withDatasetConceptLocks([conceptPath], async () => {
@@ -35921,7 +35922,7 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'dataset and concept required' }, 400);
           }
 
-          const conceptPath = resolveDatasetPathSafe(datasetName, conceptName);
+          const conceptPath = resolveDatasetConceptPathSafe(datasetName, conceptName);
           if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
           return await withDatasetConceptLocks([conceptPath], async () => {
           if (!existsSync(conceptPath)) return json({ error: 'Concept not found' }, 404);
@@ -36145,7 +36146,7 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'dataset, concept, and image file required' }, 400);
           }
 
-          const conceptPath = resolveDatasetPathSafe(datasetName, conceptName);
+          const conceptPath = resolveDatasetConceptPathSafe(datasetName, conceptName);
           if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
           if (!(await fs.lstat(conceptPath).catch(() => null))?.isDirectory()) {
             return json({ error: 'Concept not found' }, 404);
@@ -36183,7 +36184,7 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'url, dataset, and concept required' }, 400);
           }
 
-          const conceptPath = resolveDatasetPathSafe(datasetName, conceptName);
+          const conceptPath = resolveDatasetConceptPathSafe(datasetName, conceptName);
           if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
           if (!(await fs.lstat(conceptPath).catch(() => null))?.isDirectory()) {
             return json({ error: 'Concept not found' }, 404);
@@ -36257,7 +36258,7 @@ const server = Bun.serve<UmbraSocketData>({
           if (!datasetName || !conceptName) {
             return json({ error: 'Invalid dataset or concept path' }, 400);
           }
-          const conceptPath = resolveDatasetPathSafe(datasetName, conceptName);
+          const conceptPath = resolveDatasetConceptPathSafe(datasetName, conceptName);
           if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
           if (!(await fs.lstat(conceptPath).catch(() => null))?.isDirectory()) {
             return json({ error: 'Concept not found' }, 404);
@@ -36295,7 +36296,7 @@ const server = Bun.serve<UmbraSocketData>({
           if (!datasetName || !conceptName) {
             return json({ error: 'Invalid dataset or concept path' }, 400);
           }
-          const conceptPath = resolveDatasetPathSafe(datasetName, conceptName);
+          const conceptPath = resolveDatasetConceptPathSafe(datasetName, conceptName);
           if (!conceptPath) return json({ error: 'Invalid concept path' }, 400);
           if (!(await fs.lstat(conceptPath).catch(() => null))?.isDirectory()) {
             return json({ error: 'Concept not found' }, 404);
@@ -36586,7 +36587,7 @@ const server = Bun.serve<UmbraSocketData>({
 
           // Support both flat datasets and concept folders
           const basePath = body.concept
-            ? resolveDatasetPathSafe(datasetName, conceptName)
+            ? resolveDatasetConceptPathSafe(datasetName, conceptName)
             : resolveDatasetPathSafe(datasetName);
           if (!basePath) return json({ error: 'Invalid dataset path' }, 400);
 

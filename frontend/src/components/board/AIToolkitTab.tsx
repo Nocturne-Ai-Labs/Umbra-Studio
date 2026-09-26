@@ -33,6 +33,7 @@ interface AIToolkitStatus {
   uiDependenciesInstalled: boolean;
   datasetsPath: string;
   datasetsShared: boolean;
+  datasetsVerification: 'shared' | 'different' | 'unverified';
 }
 
 interface ToolActionResult {
@@ -58,6 +59,7 @@ const EMPTY_STATUS: AIToolkitStatus = {
   uiDependenciesInstalled: false,
   datasetsPath: '',
   datasetsShared: false,
+  datasetsVerification: 'unverified',
 };
 
 type BusyAction = 'install' | 'update' | 'launch' | 'stop' | null;
@@ -83,7 +85,7 @@ function DatasetHandoffWarning({ path }: { path: string }) {
   return (
     <div role="alert" className="flex items-start gap-2 border border-amber-400/25 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-100">
       <AlertTriangle size={15} className="mt-0.5 flex-none text-amber-300" />
-      <span>Dataset sharing with Data Forge could not be verified{path ? ` for ${path}` : ''}. Check the Dataset Folder Path in AI-Toolkit settings on the host.</span>
+      <span>AI-Toolkit uses a different dataset folder{path ? `: ${path}` : ''}. Set its Dataset Folder Path to the Data Forge datasets folder to share concepts.</span>
     </div>
   );
 }
@@ -311,7 +313,7 @@ export function AIToolkitTab({ isActive }: { isActive: boolean }) {
               </div>
             </div>
 
-            {status.installed && !status.datasetsShared && <DatasetHandoffWarning path={status.datasetsPath} />}
+            {status.installed && status.datasetsVerification === 'different' && <DatasetHandoffWarning path={status.datasetsPath} />}
 
             {(statusError || (!status.nodeAvailable && !statusLoading)) && (
               <div className="mb-4 flex items-start gap-3 border border-amber-400/25 bg-amber-500/[0.06] px-3 py-3 text-sm text-amber-100">
@@ -429,7 +431,7 @@ export function AIToolkitTab({ isActive }: { isActive: boolean }) {
         </button>
       </div>
 
-      {status.installed && !status.datasetsShared && <DatasetHandoffWarning path={status.datasetsPath} />}
+      {status.installed && status.datasetsVerification === 'different' && <DatasetHandoffWarning path={status.datasetsPath} />}
 
       <div className="relative min-h-0 flex-1 bg-black">
         <iframe

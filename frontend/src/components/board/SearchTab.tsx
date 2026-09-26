@@ -1,6 +1,6 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Plus, X, Star, Download, CheckSquare, Square, Loader2, FolderPlus, Pencil, History, SlidersHorizontal } from 'lucide-react';
+import { Plus, X, Star, Download, CheckSquare, Square, Loader2, Pencil, History, SlidersHorizontal } from 'lucide-react';
 import { SourceSelector } from './components/SourceSelector';
 import { SearchInput } from './components/SearchInput';
 import { ImageGrid } from './components/ImageGrid';
@@ -33,7 +33,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
 
   const { search, error: searchError } = useBooru();
   const { config: apiKeyConfig } = useApiKeys();
-  const { datasets, createDataset, renameDataset, createConcept, error: datasetError } = useDatasets();
+  const { datasets, renameDataset, createConcept, error: datasetError } = useDatasets();
   const [datasetActionError, setDatasetActionError] = useState('');
 
   const [selectedDataset, setSelectedDataset] = useState<string>('');
@@ -45,10 +45,8 @@ export function SearchTab({ onDownload }: SearchTabProps) {
   const [newConceptIsReg, setNewConceptIsReg] = useState(false);
 
   // Dataset modals
-  const [showNewDatasetModal, setShowNewDatasetModal] = useState(false);
   const [showRenameDatasetModal, setShowRenameDatasetModal] = useState(false);
   const [newDatasetName, setNewDatasetName] = useState('');
-  const [isCreatingDataset, setIsCreatingDataset] = useState(false);
   const [isRenamingDataset, setIsRenamingDataset] = useState(false);
 
   useEffect(() => {
@@ -80,8 +78,9 @@ export function SearchTab({ onDownload }: SearchTabProps) {
 
   // Reset enabled concepts when dataset changes
   useEffect(() => {
-    setEnabledConcepts(new Set());
-  }, [selectedDataset]);
+    const selected = datasets.find(dataset => dataset.name === selectedDataset);
+    setEnabledConcepts(selected?.layout === 'flat' ? new Set([selected.name]) : new Set());
+  }, [selectedDataset, datasets]);
 
   const activeTab = searchTabs.find(t => t.id === activeSearchTabId) || searchTabs[0];
 
@@ -232,37 +231,22 @@ export function SearchTab({ onDownload }: SearchTabProps) {
 
   // Create new concept
   const handleCreateConcept = async () => {
-    if (!selectedDataset || !newConceptName.trim()) return;
+    if (!newConceptName.trim()) return;
     setDatasetActionError('');
     setIsCreatingConcept(true);
-    const folder = await createConcept(selectedDataset, newConceptName.trim(), newConceptRepeats, newConceptIsReg);
+    const folder = await createConcept(newConceptName.trim(), newConceptRepeats, newConceptIsReg);
     setIsCreatingConcept(false);
     if (!folder) {
       setDatasetActionError('Could not create concept');
       return;
     }
     // Auto-enable the new concept
-    setEnabledConcepts(prev => new Set([...prev, folder]));
+    setSelectedDataset(folder);
+    setEnabledConcepts(new Set([folder]));
     setShowNewConceptModal(false);
     setNewConceptName('');
     setNewConceptRepeats(10);
     setNewConceptIsReg(false);
-  };
-
-  // Create new dataset
-  const handleCreateDataset = async () => {
-    if (!newDatasetName.trim()) return;
-    setDatasetActionError('');
-    setIsCreatingDataset(true);
-    const success = await createDataset(newDatasetName.trim());
-    setIsCreatingDataset(false);
-    if (!success) {
-      setDatasetActionError('Could not create dataset');
-      return;
-    }
-    setSelectedDataset(newDatasetName.trim().replace(/[^a-zA-Z0-9_-]/g, '_'));
-    setShowNewDatasetModal(false);
-    setNewDatasetName('');
   };
 
   // Rename dataset
@@ -567,24 +551,25 @@ export function SearchTab({ onDownload }: SearchTabProps) {
               onChange={(e) => setSelectedDataset(e.target.value)}
               className="settings-input !py-1 !text-xs !w-auto min-w-[100px]"
             >
-              <option value="">Dataset...</option>
+              <option value="">Folder...</option>
               {datasets.map(d => (
                 <option key={d.name} value={d.name}>{d.name}</option>
               ))}
             </UmbraSelectControl>
 
             <button
-              onClick={() => { setDatasetActionError(''); setShowNewDatasetModal(true); }}
+              data-umbra-data-forge-add-concept
+              onClick={() => { setDatasetActionError(''); setShowNewConceptModal(true); }}
               className="p-1 rounded transition-colors"
               style={{ color: 'rgba(255,255,255,0.5)' }}
               onMouseEnter={e => e.currentTarget.style.color = 'var(--umbra-accent)'}
               onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.5)'}
-              title="Create new dataset"
+              title="Create concept folder"
             >
               <Plus className="w-3.5 h-3.5" />
             </button>
 
-            {selectedDataset && (
+            {selectedDataset && datasetObj?.layout !== 'flat' && (
               <button
                 onClick={() => {
                   setNewDatasetName(selectedDataset);
@@ -603,7 +588,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
           </div>
 
           {/* Concept toggles */}
-          {selectedDataset && concepts.length > 0 && (
+          {selectedDataset && datasetObj?.layout !== 'flat' && concepts.length > 0 && (
             <div data-umbra-data-forge-concepts className="flex items-center gap-1 flex-wrap flex-1 min-w-0">
               {concepts.slice(0, 20).map(c => {
                 const folder = c.folder;
@@ -625,20 +610,6 @@ export function SearchTab({ onDownload }: SearchTabProps) {
                 );
               })}
             </div>
-          )}
-
-          {selectedDataset && (
-            <button
-              data-umbra-data-forge-add-concept
-              onClick={() => { setDatasetActionError(''); setShowNewConceptModal(true); }}
-              className="p-1 rounded transition-colors flex-shrink-0"
-              style={{ color: 'rgba(255,255,255,0.5)' }}
-              onMouseEnter={e => e.currentTarget.style.color = 'var(--umbra-accent)'}
-              onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.5)'}
-              title="Add new concept"
-            >
-              <FolderPlus className="w-4 h-4" />
-            </button>
           )}
 
           <button
@@ -725,52 +696,6 @@ export function SearchTab({ onDownload }: SearchTabProps) {
                 style={{ background: 'var(--umbra-accent)', color: 'white' }}
               >
                 {isCreatingConcept ? 'Creating...' : 'Create'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* New Dataset Modal */}
-      {showNewDatasetModal && (
-        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.6)' }}>
-          <div className="glass-panel p-4 w-72" style={{ background: 'var(--umbra-panel)' }}>
-            <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--umbra-text)' }}>New Dataset</h3>
-
-            <input
-              type="text"
-              value={newDatasetName}
-              onChange={(e) => setNewDatasetName(e.target.value)}
-              placeholder="Dataset name..."
-              autoFocus
-              className="settings-input !text-xs"
-              onKeyDown={(e) => e.key === 'Enter' && handleCreateDataset()}
-            />
-
-            <p className="text-[10px] mt-2" style={{ color: 'rgba(255,255,255,0.4)' }}>
-              Special characters will be replaced with underscores
-            </p>
-            {datasetActionError && <p role="alert" className="mt-2 text-xs text-red-300">{datasetActionError}</p>}
-
-            <div className="flex justify-end gap-2 mt-3">
-              <button
-                disabled={isCreatingDataset}
-                onClick={() => {
-                  setShowNewDatasetModal(false);
-                  setNewDatasetName('');
-                }}
-                className="px-3 py-1 text-xs transition-colors"
-                style={{ color: 'rgba(255,255,255,0.6)' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateDataset}
-                disabled={!newDatasetName.trim() || isCreatingDataset}
-                className="px-3 py-1 rounded text-xs font-medium disabled:opacity-50"
-                style={{ background: 'var(--umbra-accent)', color: 'white' }}
-              >
-                {isCreatingDataset ? 'Creating...' : 'Create'}
               </button>
             </div>
           </div>

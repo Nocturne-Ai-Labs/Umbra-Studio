@@ -111,7 +111,6 @@ export function DatasetsTab() {
   const { showToast } = useStore();
   const {
     datasets,
-    createDataset,
     deleteDataset,
     renameDataset,
     archiveDataset,
@@ -164,8 +163,7 @@ export function DatasetsTab() {
   };
 
   // Modal states
-  const [showNewDataset, setShowNewDataset] = useState(false);
-  const [showNewConcept, setShowNewConcept] = useState<string | null>(null);
+  const [showNewConcept, setShowNewConcept] = useState(false);
   const [renameDatasetTarget, setRenameDatasetTarget] = useState<string | null>(null);
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [newName, setNewName] = useState('');
@@ -322,10 +320,10 @@ export function DatasetsTab() {
   };
 
   useEffect(() => {
-    if ((showNewDataset || showNewConcept || renameDatasetTarget) && datasetError) {
+    if ((showNewConcept || renameDatasetTarget) && datasetError) {
       setCreateError(datasetError);
     }
-  }, [datasetError, showNewDataset, showNewConcept, renameDatasetTarget]);
+  }, [datasetError, showNewConcept, renameDatasetTarget]);
 
   // Droppable for receiving filmstrip images - COPY action
   const dropZoneResult = useDropZone({
@@ -522,25 +520,11 @@ export function DatasetsTab() {
   };
 
   // Handlers
-  const handleCreateDataset = async () => {
-    if (!newName.trim()) return;
-    setCreateError(null);
-    setIsCreating(true);
-    const created = await createDataset(newName.trim());
-    setIsCreating(false);
-    if (!created) {
-      setCreateError(datasetError || 'Failed to create dataset');
-      return;
-    }
-    setNewName('');
-    setShowNewDataset(false);
-  };
-
   const handleCreateConcept = async () => {
     if (!showNewConcept || !newName.trim()) return;
     setCreateError(null);
     setIsCreating(true);
-    const created = await createConcept(showNewConcept, newName.trim(), newRepeats, isReg);
+    const created = await createConcept(newName.trim(), newRepeats, isReg);
     setIsCreating(false);
     if (!created) {
       setCreateError(datasetError || 'Failed to create concept');
@@ -549,7 +533,9 @@ export function DatasetsTab() {
     setNewName('');
     setNewRepeats(10);
     setIsReg(false);
-    setShowNewConcept(null);
+    setShowNewConcept(false);
+    setSelectedDataset(created);
+    setSelectedConcept(created);
   };
 
   const openRenameDataset = (name: string) => {
@@ -612,7 +598,9 @@ export function DatasetsTab() {
   const handleMoveSelected = async () => {
     if (!selectedDataset || !selectedConcept || !moveToConcept || selectedImages.size === 0) return;
 
-    const result = await moveImages(selectedDataset, Array.from(selectedImages), selectedConcept, moveToConcept);
+    const destination = otherConcepts.find(concept => JSON.stringify([concept.datasetName, concept.folder]) === moveToConcept);
+    if (!destination) return;
+    const result = await moveImages(selectedDataset, Array.from(selectedImages), selectedConcept, destination.datasetName, destination.folder);
     if (!result.success) {
       showToast(result.error, 'error');
       return;
@@ -798,11 +786,14 @@ export function DatasetsTab() {
 
   // Get current dataset concepts for move dropdown
   const currentDataset = datasets.find(d => d.name === selectedDataset);
-  const otherConcepts = currentDataset?.concepts.filter(c => {
-    return c.folder !== selectedConcept;
-  }) || [];
+  const otherConcepts = [
+    ...(currentDataset?.concepts.filter(c => c.folder !== selectedConcept).map(c => ({ ...c, datasetName: selectedDataset! })) || []),
+    ...datasets.filter(d => d.layout === 'flat' && d.name !== selectedDataset).flatMap(d => d.concepts.map(c => ({ ...c, datasetName: d.name }))),
+  ];
   const selectedConceptPath = currentDataset?.path && selectedConcept
-    ? `${currentDataset.path.replace(/[\\/]+$/, '')}\\${selectedConcept}`
+    ? currentDataset.layout === 'flat' || selectedConcept === selectedDataset
+      ? currentDataset.path
+      : `${currentDataset.path.replace(/[\\/]+$/, '')}\\${selectedConcept}`
     : '';
 
   const copySelectedConceptPath = async () => {
@@ -881,13 +872,13 @@ export function DatasetsTab() {
             setSelectedDataset(dataset);
             setSelectedConcept(concept);
           }}
-          onCreateDataset={() => { setCreateError(null); setShowNewDataset(true); }}
-          onCreateConcept={(dataset) => { setCreateError(null); setShowNewConcept(dataset); }}
+          onCreateRootConcept={() => { setCreateError(null); setShowNewConcept(true); }}
           onArchiveDataset={(dataset) => { void createDatasetZip(dataset); }}
           onOpenDatasetArchive={(archivePath) => { void openDatasetArchivePath(archivePath); }}
           onRenameDataset={openRenameDataset}
           onDeleteDataset={async (name) => {
-            if (confirm(`Delete dataset "${name}" and all its contents?`)) {
+            const kind = datasets.find(dataset => dataset.name === name)?.layout === 'flat' ? 'concept folder' : 'dataset';
+            if (confirm(`Delete ${kind} "${name}" and all its contents?`)) {
               const deleted = await deleteDataset(name);
               if (!deleted) showToast('Could not delete dataset.', 'error');
               if (deleted && selectedDataset === name) {
@@ -1438,51 +1429,11 @@ export function DatasetsTab() {
       </div>
 
       {/* Modals */}
-      {/* New Dataset Modal */}
-      {showNewDataset && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <div className="glass-panel w-80 border-white/10 p-4">
-            <h3 className="mb-4 text-sm font-bold uppercase tracking-[0.16em] text-zinc-200">Create Dataset</h3>
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Dataset name..."
-              autoFocus
-              className="umbra-input w-full rounded px-3 py-2 text-sm placeholder:text-zinc-500 focus:border-cyan-400/60 focus:outline-none"
-              onKeyDown={(e) => e.key === 'Enter' && handleCreateDataset()}
-            />
-            {createError && (
-              <p className="mt-3 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                {createError}
-              </p>
-            )}
-            <div className="flex justify-end gap-2 mt-4">
-              <button
-                onClick={() => { setShowNewDataset(false); setNewName(''); setCreateError(null); }}
-                disabled={isCreating}
-                className="umbra-icon-button rounded px-4 py-2 text-xs"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateDataset}
-                disabled={!newName.trim() || isCreating}
-                className="rounded border border-cyan-400/35 bg-cyan-500/15 px-4 py-2 text-xs font-bold uppercase tracking-[0.14em] text-cyan-100 hover:bg-cyan-500/22
-                           disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isCreating ? 'Creating...' : 'Create'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Rename Dataset Modal */}
       {renameDatasetTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="glass-panel w-80 border-white/10 p-4">
-            <h3 className="mb-4 text-sm font-bold uppercase tracking-[0.16em] text-zinc-200">Rename Dataset</h3>
+            <h3 className="mb-4 text-sm font-bold uppercase tracking-[0.16em] text-zinc-200">Rename {datasets.find(dataset => dataset.name === renameDatasetTarget)?.layout === 'flat' ? 'Concept Folder' : 'Dataset'}</h3>
             <input
               type="text"
               value={renameValue}
@@ -1564,7 +1515,7 @@ export function DatasetsTab() {
             )}
             <div className="flex justify-end gap-2 mt-4">
               <button
-                onClick={() => { setShowNewConcept(null); setNewName(''); setNewRepeats(10); setIsReg(false); setCreateError(null); }}
+                onClick={() => { setShowNewConcept(false); setNewName(''); setNewRepeats(10); setIsReg(false); setCreateError(null); }}
                 disabled={isCreating}
                 className="umbra-icon-button rounded px-4 py-2 text-xs"
               >
@@ -1597,7 +1548,7 @@ export function DatasetsTab() {
               {otherConcepts.map(c => {
                 const folder = c.folder;
                 return (
-                  <option key={folder} value={folder}>{folder}</option>
+                  <option key={`${c.datasetName}/${folder}`} value={JSON.stringify([c.datasetName, folder])}>{c.datasetName === selectedDataset ? folder : `${c.datasetName} / ${folder}`}</option>
                 );
               })}
             </UmbraSelectControl>

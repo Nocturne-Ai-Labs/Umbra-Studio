@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.32.35 - Data Forge Concept Folders
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+- Restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux, then refresh open browser tabs. No new model downloads, Umbra Nodes, or ComfyUI update is required.
+- New Data Forge concepts are created as separate folders directly under `User/Datasets`, making each folder selectable in AI Toolkit. Existing nested datasets remain readable and are **not moved automatically**. Back up any dataset before manually reorganizing it, and avoid folder-name collisions.
+- Preserve existing `User/` and `Tools/` folders during an in-place update. Linux managed tools still require `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Data Forge And AI Toolkit
+
+- Create each new concept as its own top-level dataset folder, including from the Booru search and download workflow, so AI Toolkit can select it directly.
+- Keep existing nested concepts accessible for browsing, captioning, imports, downloads, and other dataset actions without migrating their files.
+- Show the download destination folder in the queue and allow moving images between concept folders.
+- Show a dataset-sharing warning only when AI Toolkit is confirmed to use a different folder; an unavailable verification no longer implies a mismatch.
+
+### Validation And Limits
+
+- Verified targeted dataset tests, isolated API and browser flows, frontend typecheck, lint and build, and backend TypeScript checking.
+- Existing dataset migration remains manual. No personal dataset images or captions are included in the release packages.
+
+### Fixes And Quality-of-Life Recap
+
+- Improved: AI Toolkit can select newly created Data Forge concepts as independent datasets.
+- Improved: older nested datasets remain accessible while users transition at their own pace.
+- Fixed: misleading AI Toolkit dataset-sharing warnings when the folder could not be verified.
+- Improved: download destination visibility and cross-concept media moves.
+
 ## v0.32.34 - Gallery Explorer And Workspace Polish
 
 ### TL;DR - Setup After Updating

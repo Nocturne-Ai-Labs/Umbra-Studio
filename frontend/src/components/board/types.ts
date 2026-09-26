@@ -44,6 +44,7 @@ export interface DownloadItem {
 export interface Dataset {
   name: string;
   path: string;
+  layout: 'flat' | 'legacy';
   archive?: {
     path: string;
     size: number;

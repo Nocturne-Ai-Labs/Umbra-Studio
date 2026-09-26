@@ -7,9 +7,8 @@ export async function getAIToolkitDatasetsHandoff(
   toolPath: string,
   dataForgePath: string,
   localTarget: boolean,
-): Promise<{ datasetsPath: string; datasetsShared: boolean }> {
-  if (!toolPath) return { datasetsPath: dataForgePath, datasetsShared: false };
-  if (!localTarget) return { datasetsPath: '', datasetsShared: false };
+): Promise<{ datasetsPath: string; datasetsShared: boolean; datasetsVerification: 'shared' | 'different' | 'unverified' }> {
+  if (!toolPath || !localTarget) return { datasetsPath: '', datasetsShared: false, datasetsVerification: 'unverified' };
 
   let datasetsPath = join(toolPath, 'datasets');
   const databasePath = join(toolPath, 'aitk_db.db');
@@ -26,7 +25,7 @@ export async function getAIToolkitDatasetsHandoff(
         database.close();
       }
     } catch {
-      return { datasetsPath: '', datasetsShared: false };
+      return { datasetsPath: '', datasetsShared: false, datasetsVerification: 'unverified' };
     }
   }
 
@@ -35,8 +34,9 @@ export async function getAIToolkitDatasetsHandoff(
     fs.realpath(datasetsPath).catch(() => ''),
   ]);
   const normalize = (path: string) => process.platform === 'win32' ? path.toLowerCase() : path;
-  return {
-    datasetsPath,
-    datasetsShared: Boolean(dataForgeReal && toolkitReal && normalize(dataForgeReal) === normalize(toolkitReal)),
-  };
+  if (!dataForgeReal || !toolkitReal) {
+    return { datasetsPath, datasetsShared: false, datasetsVerification: 'unverified' };
+  }
+  const datasetsShared = normalize(dataForgeReal) === normalize(toolkitReal);
+  return { datasetsPath, datasetsShared, datasetsVerification: datasetsShared ? 'shared' : 'different' };
 }

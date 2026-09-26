@@ -6,7 +6,10 @@ export function isProtectedDatasetImage(image: DatasetImage | null | undefined):
 }
 
 export function datasetImageUrl(dataset: string, concept: string, image: DatasetImage): string {
-  return `/api/files/datasets/${[dataset, concept, image.filename].map(encodeURIComponent).join('/')}?v=${image.revision || 0}`;
+  const parts = image.path?.startsWith('/User/Datasets/')
+    ? image.path.slice('/User/Datasets/'.length).split('/')
+    : [dataset, concept, image.filename];
+  return `/api/files/datasets/${parts.map(encodeURIComponent).join('/')}?v=${image.revision || 0}`;
 }
 
 export async function redownloadDatasetImage(dataset: string, concept: string, filename: string): Promise<number> {

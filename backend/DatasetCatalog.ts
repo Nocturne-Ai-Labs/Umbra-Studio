@@ -40,6 +40,8 @@ export async function listDatasetCatalog(datasetsDir: string, summaryOnly = fals
         fs.readdir(datasetPath, { withFileTypes: true }),
       ]);
       if (!datasetStats.isDirectory()) return null;
+      const directImages = subEntries.filter(entry => entry.isFile() && IMAGE_EXTENSION.test(entry.name));
+      const flatMatch = dir.name.match(/^(\d+)_(reg_)?(.+)$/);
       const concepts = await mapBounded(subEntries.filter(entry => entry.isDirectory()), 8, async (conceptDir) => {
         const match = conceptDir.name.match(/^(\d+)_(reg_)?(.+)$/);
         if (!match) return null;
@@ -70,16 +72,30 @@ export async function listDatasetCatalog(datasetsDir: string, summaryOnly = fals
           throw error;
         }
       });
+      const nestedConcepts = concepts.filter((concept): concept is NonNullable<typeof concept> => concept !== null);
+      const flatRepeats = flatMatch ? Number(flatMatch[1]) : 1;
+      const flatConcept = directImages.length > 0 || nestedConcepts.length === 0
+        ? {
+            name: flatMatch?.[3] || dir.name,
+            repeats: Number.isSafeInteger(flatRepeats) && flatRepeats > 0 ? flatRepeats : 1,
+            isReg: Boolean(flatMatch?.[2]),
+            folder: dir.name,
+            modifiedMs: datasetStats.mtimeMs,
+            imageCount: directImages.length,
+            ...(summaryOnly ? {} : { images: directImages.map(entry => ({ filename: entry.name })) }),
+          }
+        : null;
       return {
         name: dir.name,
         path: datasetPath,
+        layout: flatConcept && nestedConcepts.length === 0 ? 'flat' as const : 'legacy' as const,
         modifiedMs: datasetStats.mtimeMs,
         archive: archiveStats?.isFile() ? {
           path: join(datasetsDir, `${dir.name}.zip`),
           size: archiveStats.size,
           modifiedMs: archiveStats.mtimeMs,
         } : null,
-        concepts: concepts.filter((concept): concept is NonNullable<typeof concept> => concept !== null)
+        concepts: [...(flatConcept ? [flatConcept] : []), ...nestedConcepts]
           .sort((a, b) => b.modifiedMs - a.modifiedMs),
       };
     } catch (error) {

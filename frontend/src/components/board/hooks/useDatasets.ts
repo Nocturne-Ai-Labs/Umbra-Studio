@@ -148,13 +148,12 @@ export function useDatasets() {
 
   // Create concept folder
   const createConcept = useCallback(async (
-    datasetName: string,
     conceptName: string,
     repeats: number = 10,
     isReg: boolean = false
   ): Promise<string | null> => {
     try {
-      const response = await fetch(`/api/datasets/${encodeURIComponent(datasetName)}/concept`, {
+      const response = await fetch('/api/datasets/concept', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: conceptName, repeats, isReg }),
@@ -284,6 +283,7 @@ export function useDatasets() {
     datasetName: string,
     images: string[],
     fromConcept: string,
+    toDataset: string,
     toConcept: string
   ): Promise<DatasetActionResult> => {
     try {
@@ -294,6 +294,7 @@ export function useDatasets() {
           dataset: datasetName,
           images,
           from: fromConcept,
+          toDataset,
           to: toConcept,
         }),
       });

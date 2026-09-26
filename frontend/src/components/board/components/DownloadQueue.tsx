@@ -71,12 +71,13 @@ export function DownloadQueue({ items, onRemove: _onRemove }: DownloadQueueProps
       </div>
 
       {/* Queue list */}
-      <div className="custom-scrollbar flex-1 overflow-y-auto p-2">
-        <table className="w-full">
+      <div className="custom-scrollbar flex-1 overflow-auto p-2">
+        <table className="w-full min-w-[640px]">
           <thead className="sticky top-0 z-10 border-b border-white/10 bg-[var(--umbra-bg)]/95 backdrop-blur">
             <tr className="text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-500">
               <th className="w-16 p-2 text-left">Img</th>
               <th className="p-2 text-left">Filename</th>
+              <th className="min-w-32 p-2 text-left">Folder</th>
               <th className="w-24 p-2 text-left">Source</th>
               <th className="w-20 p-2 text-left">Size</th>
               <th className="w-24 p-2 text-left">Status</th>
@@ -106,6 +107,11 @@ export function DownloadQueue({ items, onRemove: _onRemove }: DownloadQueueProps
                   <td className="p-2">
                     <span className="font-mono text-xs text-zinc-300">
                       {item.post.md5}.{item.post.fileExt}
+                    </span>
+                  </td>
+                  <td className="p-2">
+                    <span className="block max-w-48 truncate text-xs text-zinc-400" title={item.dataset === item.concept ? item.dataset : `${item.dataset}/${item.concept}`}>
+                      {item.dataset === item.concept ? item.dataset : `${item.dataset}/${item.concept}`}
                     </span>
                   </td>
                   <td className="p-2">
