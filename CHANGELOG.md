@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.32.33 - Integrated Workflow Reliability Patch
+
+### TL;DR - Setup After Updating
+
+- Restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux, then refresh open browser tabs. Restart managed ComfyUI through Umbra so its loopback binding takes effect. No new models, Umbra Nodes, or ComfyUI update is required by this patch.
+- Preserve existing `User/` and `Tools/` folders during an in-place update. Linux managed tools continue to require `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents.
+
+### Gallery And Filmstrip
+
+- Restore the prompt-search route used by the Gallery grid, fixing the Not Found error. Keep Gallery read aliases available in the pop-out workspace.
+- Improve media export and handoff paths, same-parent folder copies, cut clipboard cleanup after moves, folder path reconciliation, and navigation after Trash operations.
+- Keep pinned folders and child-folder activity fresh; prune deleted empty-folder shortcuts and activity. Preserve selections after partial operation failures and reconcile filmstrip deletions.
+- Bound background indexing and refresh work, recover summary refreshes, and avoid large base64 payloads when staging uploads for the Gallery worker.
+- Respect case-distinct Linux paths, refresh source images after inpaint replacement, and sandbox SVG previews.
+
+### Queue Manager And Power Prompter
+
+- Wait for confirmed pause acknowledgments and safe queue-drain state before admitting or saving work. Preserve durable history, group edits, moves, removals, and revisions before accepting dependent operations.
+- Release stale group pauses after rendering or group removal, roll back failed history requeues, apply dispatch-delay changes, and improve Clear and emergency controls.
+- Remove prompts by identity, keep active progress below 100% until completion, and reduce rendering work for large-queue progress updates.
+- Preserve repeated prompt terms in handoffs and history, restore workspace drafts, and allow zero-chance wildcards to be re-enabled.
+
+### Umbra UI
+
+- Preserve generation payloads, zero Hires denoise values, Canvas generation dimensions, and output-folder selections across explicit handoffs.
+- Keep video payloads out of image-editor state, validate image inputs and video LoRA selections before generation, and prevent duplicate inpaint submissions.
+- Respect LTX guide timing and duration, limit video Auto Prompter to its supported MiniMax workflow, and improve invalid pinned-output feedback.
+
+### Data Forge, Model Manager, Remote, And Extras
+
+- Bound dataset imports, repair requests, caption operations, model-file requests, download collisions, authentication requests, and telemetry work.
+- Preserve model reconciliation snapshots and copy targets, improve file-hash reconciliation, and cancel interrupted imports more reliably.
+- Require pairing-link confirmation before consuming the link, enforce shared Remote authorization checks, and protect Gallery bridge operations.
+- Bind managed ComfyUI to loopback and route remote HTTP and WebSocket access through Umbra's authenticated proxy; support HTTPS ComfyUI endpoints.
+- Cancel active video and GIF encoding through an explicit session-bound operation, including behind buffering proxies, without publishing partial outputs.
+- Bound watermark uploads and batch UI work, retain completed outputs, clear completed watermark/GIF inputs, and correct disabled preset-save behavior.
+- Improve updater settings handling, ComfyUI process ownership, and prerelease version comparisons.
+
+### Validation And Limits
+
+- Passed 512 backend tests, backend and frontend TypeScript checks, frontend lint and production build, and the pipeline audit covering 52 workflows and 59 descriptors.
+- Focused isolated checks covered Gallery prompt search, queue persistence and controls, Power Prompter handoffs, CPU video/GIF cancellation, and authenticated ComfyUI proxy behavior with mock endpoints.
+- Real GPU image/video generation was not run for this release. The exhaustive feature-interaction audit remains incomplete.
+- Known remaining issues: some Windows folder-to-Trash operations can fail with EPERM; filmstrip context-menu Place Before/After can become unavailable after selection changes. An absolute-versus-relative folder index mismatch can also produce empty prompt-search results in some indexing states. These remain separate from the fixed missing search route.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Gallery grid prompt-search Not Found errors and multiple media handoff, export, folder-refresh, and selection problems.
+- Fixed: queue pause, persistence, group-edit, recovery, and large-queue progress issues.
+- Fixed: generation payload loss, invalid input submission, and duplicate inpaint submission paths.
+- Fixed: Remote authorization and managed ComfyUI exposure gaps, plus unreliable video/GIF cancellation.
+- Improved: Data Forge and Model Manager request bounds, reconciliation, and recovery; watermark and GIF batch cleanup.
+
 ## v0.32.32 - Gallery And Queue Reliability Patch
 
 ### TL;DR - Setup After Updating
