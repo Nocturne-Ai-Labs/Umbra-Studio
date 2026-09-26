@@ -11,6 +11,7 @@ import {
   Copy,
   FileJson,
   FolderOpen,
+  GalleryHorizontalEnd,
   History,
   Image as ImageIcon,
   Loader2,
@@ -66,6 +67,8 @@ export interface FilmstripProps {
   canSkipGeneration?: boolean;
   skipGenerationPending?: boolean;
   recentGenerationExpanded?: boolean;
+  recentGenerationsVisible?: boolean;
+  onToggleRecentGenerationsVisible?: () => void;
   onToggleRecentGenerationExpanded?: () => void;
   selectedIds: Set<string>;
   onSelect: (id: string, event: React.MouseEvent) => void;
@@ -866,6 +869,8 @@ export function Filmstrip({
   canSkipGeneration = false,
   skipGenerationPending = false,
   recentGenerationExpanded = false,
+  recentGenerationsVisible = true,
+  onToggleRecentGenerationsVisible,
   onToggleRecentGenerationExpanded,
   selectedIds,
   onSelect,
@@ -927,14 +932,14 @@ export function Filmstrip({
     && (document.documentElement.dataset.umbraRemoteMode === 'phone' || document.documentElement.dataset.umbraRemoteMode === 'tablet');
   const selectedCount = selectedIds.size;
   const visibleRecentGenerationImages = useMemo(
-    () => recentGenerationImages.slice(0, recentGenerationExpanded ? 11 : 4),
-    [recentGenerationExpanded, recentGenerationImages]
+    () => recentGenerationsVisible ? recentGenerationImages.slice(0, recentGenerationExpanded ? 11 : 4) : [],
+    [recentGenerationExpanded, recentGenerationImages, recentGenerationsVisible]
   );
   const recentGenerationSectionWidth = displayMode === 'strip' && visibleRecentGenerationImages.length > 0
     ? RECENT_GENERATION_CONTROL_WIDTH
       + RECENT_GENERATION_SECTION_GAP
       + (visibleRecentGenerationImages.length * (STRIP_CARD_SIZE + STRIP_CARD_GAP))
-      + 14
+      + 24
     : 0;
   const stripVirtualizer = useVirtualizer({
     horizontal: true,
@@ -946,6 +951,15 @@ export function Filmstrip({
     overscan: 8,
   });
   const stripVirtualItems = stripVirtualizer.getVirtualItems();
+
+  useLayoutEffect(() => {
+    setMenuState(null);
+    const node = stripScrollRef.current;
+    if (node) {
+      node.scrollLeft = 0;
+      node.scrollTop = 0;
+    }
+  }, [recentGenerationsVisible]);
 
   const handleStripWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     if (displayMode !== 'strip' || event.ctrlKey) return;
@@ -1451,6 +1465,24 @@ export function Filmstrip({
           >
             <RefreshCw size={14} />
           </button>
+          {onToggleRecentGenerationsVisible ? (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={recentGenerationsVisible}
+              aria-label="Show recent generations"
+              title={recentGenerationsVisible ? 'Hide recent generations and live preview' : 'Show recent generations and live preview'}
+              onClick={onToggleRecentGenerationsVisible}
+              className={cn(
+                'flex h-7 w-7 shrink-0 items-center justify-center rounded border transition-colors',
+                recentGenerationsVisible
+                  ? 'border-emerald-300/60 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20'
+                  : 'border-zinc-700 text-zinc-500 hover:bg-white/5 hover:text-white',
+              )}
+            >
+              <GalleryHorizontalEnd size={14} aria-hidden="true" />
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -1533,7 +1565,7 @@ export function Filmstrip({
                     />
                   ))}
                 </div>
-                <div className="h-[104px] w-px shrink-0 bg-gradient-to-b from-transparent via-emerald-300/35 to-transparent" />
+                <div role="separator" aria-orientation="vertical" aria-label="Recent generations and folder media" className="mx-1 h-[104px] w-[3px] shrink-0 rounded-sm bg-emerald-200/80 shadow-[0_0_6px_rgba(110,231,183,0.35)]" />
               </div>
             ) : null}
             {stripVirtualItems.map((virtualItem) => {
@@ -1593,9 +1625,15 @@ export function Filmstrip({
               'grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2',
             )}
           >
-            {orderedSelectionImages.map((image) => (
+            {visibleRecentGenerationImages.length > 0 ? (
+              <div className="col-span-full border-b-[3px] border-emerald-200/80 pb-2 text-xs font-semibold text-emerald-200">Recent generations</div>
+            ) : null}
+            {orderedSelectionImages.map((image, index) => (
+              <React.Fragment key={image.id}>
+              {index === visibleRecentGenerationImages.length && index > 0 ? (
+                <div role="separator" aria-label="Recent generations and folder media" className="col-span-full mt-1 border-t-[3px] border-emerald-200/80 pt-2 text-xs font-semibold text-zinc-300">{folderLabel || 'Folder media'}</div>
+              ) : null}
               <FilmstripTile
-                key={image.id}
                 image={image}
                 selected={normalizedSelectedIds.has(normalizeFilmstripSelectionId(image.id))}
                 displayMode={displayMode}
@@ -1633,6 +1671,7 @@ export function Filmstrip({
                 onDrop={(event) => handleDropOnTile(event, image.id)}
                 onDragEnd={endDrag}
               />
+              </React.Fragment>
             ))}
           </div>
         )}

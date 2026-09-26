@@ -37,6 +37,7 @@ export interface AppSettings {
   'comfyui.vramMode': ComfyVramMode;
   'comfyui.showFilmstrip': boolean;
   'comfyui.showFilmstripLivePreviews': boolean;
+  'comfyui.showFilmstripRecentGenerations': boolean;
   'library.metadataHoverTooltips': boolean;
   'comfyui.externalOutputPath': string;
   'library.enableExternalRoots': boolean;
@@ -101,6 +102,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   'comfyui.vramMode': 'auto',
   'comfyui.showFilmstrip': true,
   'comfyui.showFilmstripLivePreviews': true,
+  'comfyui.showFilmstripRecentGenerations': true,
   'library.metadataHoverTooltips': false,
   'comfyui.externalOutputPath': '',
   'library.enableExternalRoots': true,
@@ -152,6 +154,7 @@ const BOOLEAN_KEYS: Array<keyof AppSettings> = [
   'ui.idleFrameCapEnabled',
   'comfyui.showFilmstrip',
   'comfyui.showFilmstripLivePreviews',
+  'comfyui.showFilmstripRecentGenerations',
   'library.metadataHoverTooltips',
   'library.enableExternalRoots',
   'library.showDefaultOutputRoot',

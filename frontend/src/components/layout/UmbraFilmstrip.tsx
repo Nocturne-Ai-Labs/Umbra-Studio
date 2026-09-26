@@ -432,7 +432,8 @@ export function UmbraFilmstrip({
   const recentFoldersSetting = useStore((state) => state.appSettings['library.recentFolders']);
   const metadataTooltipEnabled = useStore((state) => state.appSettings['library.metadataHoverTooltips'] !== false);
   const liveGenerationPreviewsEnabled = useStore((state) => state.appSettings['comfyui.showFilmstripLivePreviews'] !== false);
-  const generation = useFilmstripGeneration(liveGenerationPreviewsEnabled);
+  const recentGenerationsVisible = useStore((state) => state.appSettings['comfyui.showFilmstripRecentGenerations'] !== false);
+  const generation = useFilmstripGeneration(liveGenerationPreviewsEnabled && recentGenerationsVisible);
   const liveGenerationPreviewImage = useMemo(() => filmstripImageFromGenerationPreview(generation.preview), [generation.preview]);
   const skipCurrentGeneration = useCallback(async () => {
     try {
@@ -545,6 +546,7 @@ export function UmbraFilmstrip({
   }, [currentFolder, customOrder, feedFolder, images, rootPath, sortDirection, sortField]);
 
   const recentGenerationLaneImages = useMemo(() => {
+    if (!recentGenerationsVisible) return [];
     const recentLimit = recentGenerationsExpanded ? 10 : 3;
     const currentByPath = new Map(displayedImages.map((image) => [pathKey(image.path), image]));
     const lane = [
@@ -565,7 +567,7 @@ export function UmbraFilmstrip({
         privacyClass: image.privacyClass === 'nsfw' || current.privacyClass === 'nsfw' ? 'nsfw' : 'normal',
       };
     });
-  }, [displayedImages, liveGenerationPreviewImage, liveGenerationPreviewsEnabled, recentGenerationOutputImages, recentGenerationsExpanded]);
+  }, [displayedImages, liveGenerationPreviewImage, liveGenerationPreviewsEnabled, recentGenerationOutputImages, recentGenerationsExpanded, recentGenerationsVisible]);
 
   useEffect(() => {
     recentGenerationOutputImagesRef.current = recentGenerationOutputImages;
@@ -2230,6 +2232,8 @@ export function UmbraFilmstrip({
         canSkipGeneration={generation.canSkip}
         skipGenerationPending={generation.skipPending}
         recentGenerationExpanded={recentGenerationsExpanded}
+        recentGenerationsVisible={recentGenerationsVisible}
+        onToggleRecentGenerationsVisible={() => setAppSetting('comfyui.showFilmstripRecentGenerations', !recentGenerationsVisible)}
         onToggleRecentGenerationExpanded={() => setRecentGenerationsExpanded((current) => !current)}
         selectedIds={selectedIds}
         onSelect={onSelect}
