@@ -9827,22 +9827,35 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const cardHeight = cardSize + (isPhoneRemote ? PHONE_GRID_CARD_EXTRA_HEIGHT : GRID_CARD_EXTRA_HEIGHT);
 
   const singleFolderExplorer = !multiFolderView && !trashMode && !globalSearchActive && !searchNeedle && !metadataSearchActive && !groupBySet;
-  const gridFiles = useMemo<GalleryFile[]>(() => singleFolderExplorer
-    ? [...childFolderNodes.map(folder => ({ ...folder, type: 'folder' as const })), ...displayFiles]
-    : displayFiles, [childFolderNodes, displayFiles, singleFolderExplorer]);
+  const gridFiles = displayFiles;
+  const showExplorerFolders = singleFolderExplorer && !openingDifferentFolder && !(loading && files.length === 0) && childFolderNodes.length > 0;
   const virtualGridRef = useRef<HTMLDivElement>(null);
+  const virtualFolderGridRef = useRef<HTMLDivElement>(null);
   const [gridScrollMargin, setGridScrollMargin] = useState(0);
+  const [folderScrollMargin, setFolderScrollMargin] = useState(0);
   useEffect(() => {
     const grid = virtualGridRef.current;
+    const folderGrid = virtualFolderGridRef.current;
     const scroll = scrollParentRef.current;
-    if (!grid || !scroll) return;
-    const measure = () => setGridScrollMargin(grid.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop);
+    if (!scroll || (!grid && !folderGrid)) return;
+    const measure = () => {
+      const offset = scroll.scrollTop - scroll.getBoundingClientRect().top;
+      if (grid) setGridScrollMargin(grid.getBoundingClientRect().top + offset);
+      if (folderGrid) setFolderScrollMargin(folderGrid.getBoundingClientRect().top + offset);
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(scroll);
     for (const sibling of Array.from(scroll.children)) observer.observe(sibling);
     return () => observer.disconnect();
-  }, [archiveCount, currentFolder, gridFiles.length, folderPreviewMode, groupBySet, globalSearchActive, loading, openingDifferentFolder]);
+  }, [archiveCount, currentFolder, gridFiles.length, childFolderNodes.length, showExplorerFolders, singleFolderExplorer, folderPreviewMode, groupBySet, globalSearchActive, loading, openingDifferentFolder]);
+  const folderRowVirtualizer = useVirtualizer({
+    count: showExplorerFolders ? Math.ceil(childFolderNodes.length / columnCount) : 0,
+    getScrollElement: () => scrollParentRef.current,
+    estimateSize: () => cardHeight + GRID_GAP,
+    overscan: 4,
+    scrollMargin: folderScrollMargin,
+  });
   const fileRowCount = Math.ceil(gridFiles.length / columnCount);
   const rowVirtualizer = useVirtualizer({
     count: fileRowCount,
@@ -9852,6 +9865,11 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     scrollMargin: gridScrollMargin,
   });
   const virtualRows = rowVirtualizer.getVirtualItems();
+
+  useEffect(() => {
+    folderRowVirtualizer.measure();
+    rowVirtualizer.measure();
+  }, [cardHeight, columnCount, folderRowVirtualizer, rowVirtualizer]);
 
   useEffect(() => {
     if (!isPhoneRemote || galleryMobileView !== 'media') return;
@@ -11015,6 +11033,42 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
               event.stopPropagation();
               setContextMenu({ kind: 'archive', x: event.clientX, y: event.clientY, targetPath: path });
             }} />}
+            {showExplorerFolders && <section aria-label="Folders" data-gallery-folders className="mb-4 border-b border-white/10 pb-3">
+              <div className="mb-2 flex items-center gap-2 text-xs text-zinc-400"><FolderOpen size={14} /> Folders <span>{childFolderNodes.length}</span></div>
+              <div ref={virtualFolderGridRef} className="relative" style={{ height: folderRowVirtualizer.getTotalSize() }}>
+                {folderRowVirtualizer.getVirtualItems().map(row => <div
+                  key={row.key}
+                  className="absolute left-0 right-0 grid"
+                  style={{
+                    gridTemplateColumns: `repeat(${columnCount}, minmax(0, ${cardSize}px))`,
+                    gap: GRID_GAP,
+                    height: cardHeight,
+                    transform: `translateY(${row.start - folderScrollMargin}px)`,
+                    justifyContent: isPhoneRemote ? 'center' : undefined,
+                  }}
+                >
+                  {childFolderNodes.slice(row.index * columnCount, (row.index + 1) * columnCount).map(folder => {
+                    const path = normalizePath(folder.path);
+                    return <GalleryFolderTile
+                      key={path}
+                      folder={folder}
+                      cardSize={cardSize}
+                      cardHeight={cardHeight}
+                      revision={folderPreviewRefreshVersion}
+                      dropTargeted={pathsEqual(dropTargetFolder, path)}
+                      onOpen={() => openFolder(path)}
+                      onContextMenu={event => openFolderContextMenu(event, path)}
+                      onDragStart={event => startFolderDrag(event, path)}
+                      onDragEnd={clearMediaDrag}
+                      onDragOver={event => handleFolderDropTargetDragOver(event, path)}
+                      onDragLeave={() => handleFolderDropTargetDragLeave(path)}
+                      onDrop={event => handleFolderDropTargetDrop(event, path)}
+                    />;
+                  })}
+                </div>)}
+              </div>
+            </section>}
+            {singleFolderExplorer && !openingDifferentFolder && gridFiles.length > 0 && <div className="mb-2 flex items-center gap-2 text-xs text-zinc-400"><Images size={14} /> Media <span>{gridFiles.length}</span></div>}
             {openingDifferentFolder ? (
               <div className="flex h-full flex-col items-center justify-center gap-2 text-zinc-500">
                 <div className="flex items-center text-sm">
@@ -11034,7 +11088,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                 Searching gallery
               </div>
             ) : gridFiles.length === 0 && !folderPreviewMode && (!globalSearchActive || searchFolders.length === 0) ? (
-              <div className={archiveCount > 0 && !trashMode ? 'hidden' : 'flex h-full items-center justify-center text-sm text-zinc-500'}>
+              <div className={(archiveCount > 0 && !trashMode) || showExplorerFolders ? 'hidden' : 'flex h-full items-center justify-center text-sm text-zinc-500'}>
                 {searchNeedle ? 'No matches found' : trashMode ? 'No items in Trash' : 'No media in this folder'}
               </div>
             ) : groupBySet && !trashMode ? (
@@ -11657,21 +11711,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                         const selected = selectedPathKeys.has(selectionPathKey(path));
                         const metadataMatch = metadataMatchByPath.get(path.toLowerCase());
                         const prioritizeThumbnail = rowIndex <= 1;
-                        if (singleFolderExplorer && file.type === 'folder') return <GalleryFolderTile
-                          key={`folder:${path}`}
-                          folder={file}
-                          cardSize={cardSize}
-                          cardHeight={cardHeight}
-                          revision={folderPreviewRefreshVersion}
-                          dropTargeted={pathsEqual(dropTargetFolder, path)}
-                          onOpen={() => openFolder(path)}
-                          onContextMenu={event => openFolderContextMenu(event, path)}
-                          onDragStart={event => startFolderDrag(event, path)}
-                          onDragEnd={clearMediaDrag}
-                          onDragOver={event => handleFolderDropTargetDragOver(event, path)}
-                          onDragLeave={() => handleFolderDropTargetDragLeave(path)}
-                          onDrop={event => handleFolderDropTargetDrop(event, path)}
-                        />;
                         return (
                           <GalleryImageTile
                             key={id}
