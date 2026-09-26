@@ -152,6 +152,17 @@ export function compileUmbraUiPromptSegments(segments: UmbraUiPromptSegment[]): 
   return chunks.join(', ');
 }
 
+export function getUmbraUiSinglePromptField(segments: UmbraUiPromptSegment[]): UmbraUiPromptSegment[] {
+  if (segments.length <= 1) return segments;
+  // Keep the compiled prompt (including intentionally repeated terms) unchanged.
+  return [{
+    id: segments[0].id,
+    text: compileUmbraUiPromptSegments(segments),
+    preserveRepeatedTerms: true,
+    agentEnabled: segments.every((segment) => segment.agentEnabled === true),
+  }];
+}
+
 export function mergeUmbraUiPromptSegmentEnhancements(
   segments: UmbraUiPromptSegment[],
   sourceTextById: ReadonlyMap<string, string>,

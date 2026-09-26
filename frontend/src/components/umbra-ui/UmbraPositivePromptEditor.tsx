@@ -28,6 +28,7 @@ import {
 import {
   compileUmbraUiPromptSegments,
   createUmbraUiPromptSegment,
+  getUmbraUiSinglePromptField,
   mergeUmbraUiPromptSegmentEnhancements,
   normalizeUmbraUiPromptSegmentText,
   type UmbraUiPromptSegment,
@@ -61,6 +62,7 @@ interface UmbraPositivePromptEditorProps {
   agentContext?: Record<string, unknown>;
   onAgentEnhancementApplied?: () => void;
   mediaType?: 'image' | 'video';
+  singleField?: boolean;
 }
 
 const MAX_PROMPT_SEGMENTS = 24;
@@ -70,7 +72,7 @@ function getPromptSegmentTextSignature(segments: UmbraUiPromptSegment[]): string
 }
 
 export function UmbraPositivePromptEditor({
-  segments,
+  segments: sourceSegments,
   activeSegmentId,
   onChange,
   onActiveSegmentChange,
@@ -85,7 +87,12 @@ export function UmbraPositivePromptEditor({
   agentContext,
   onAgentEnhancementApplied,
   mediaType = 'image',
+  singleField = false,
 }: UmbraPositivePromptEditorProps) {
+  const segments = React.useMemo(
+    () => singleField ? getUmbraUiSinglePromptField(sourceSegments) : sourceSegments,
+    [singleField, sourceSegments],
+  );
   const showToast = useStore((state) => state.showToast);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [enhancingFields, setEnhancingFields] = React.useState(false);
@@ -212,6 +219,7 @@ export function UmbraPositivePromptEditor({
   }, [segments]);
 
   const addSegment = React.useCallback(() => {
+    if (singleField) return;
     const currentSegments = segmentsRef.current;
     if (currentSegments.length >= MAX_PROMPT_SEGMENTS) return;
     const nextSegment = createUmbraUiPromptSegment();
@@ -221,7 +229,7 @@ export function UmbraPositivePromptEditor({
     emitSegments(next);
     onActiveSegmentChange(nextSegment.id);
     window.requestAnimationFrame(() => textareaRefs.current.get(nextSegment.id)?.focus());
-  }, [activeSegmentId, emitSegments, onActiveSegmentChange]);
+  }, [activeSegmentId, emitSegments, onActiveSegmentChange, singleField]);
 
   const insertWildcard = React.useCallback((token: string) => {
     const target = segmentsRef.current.find((segment) => segment.id === activeSegmentId)
@@ -349,9 +357,9 @@ export function UmbraPositivePromptEditor({
       <header className="flex min-h-10 flex-wrap items-center gap-2 px-2.5 py-1.5">
         <Sparkles size={13} className={accent === 'rose' ? 'text-rose-300' : accent === 'fuchsia' ? 'text-fuchsia-300' : 'text-cyan-300'} />
         <span className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">{heading}</span>
-        <span className="rounded-sm border border-white/10 bg-black/25 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400">
+        {!singleField && <span className="rounded-sm border border-white/10 bg-black/25 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400">
           {segments.length} field{segments.length === 1 ? '' : 's'}
-        </span>
+        </span>}
         <div data-umbra-prompt-toolbar="" className="flex w-full min-w-0 flex-wrap items-center gap-1">
           <PromptWildcardLibrary onInsert={insertWildcard} compact />
           <button
@@ -395,7 +403,7 @@ export function UmbraPositivePromptEditor({
           >
             <History size={13} />
           </button>
-          <button
+          {!singleField && <button
             type="button"
             onClick={addSegment}
             disabled={segments.length >= MAX_PROMPT_SEGMENTS}
@@ -404,7 +412,7 @@ export function UmbraPositivePromptEditor({
             aria-label="Add positive prompt field"
           >
             <ListPlus size={14} />
-          </button>
+          </button>}
         </div>
       </header>
 
@@ -472,10 +480,10 @@ export function UmbraPositivePromptEditor({
           return (
             <article key={segment.id} className={cn('rounded-md border border-white/10 bg-black/25 p-2 transition-colors', active && activeClasses)}>
               <div data-umbra-prompt-field-header="" className="mb-1.5 flex items-center gap-1.5">
-                <span className="font-mono text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-400">
+                {!singleField && <span className="font-mono text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-400">
                   {segment.label || (index === 0 ? 'Base' : `Segment ${index + 1}`)}
-                </span>
-                {segment.variantName ? (
+                </span>}
+                {!singleField && segment.variantName ? (
                   <span className="min-w-0 truncate font-mono text-[9px] text-zinc-600" title={segment.variantName}>
                     {segment.variantName}
                   </span>
@@ -522,7 +530,7 @@ export function UmbraPositivePromptEditor({
                   >
                     <Bot size={12} />
                   </button>
-                  <button
+                  {!singleField && <button
                     type="button"
                     onClick={() => moveSegment(segment.id, -1)}
                     disabled={index === 0}
@@ -530,8 +538,8 @@ export function UmbraPositivePromptEditor({
                     title="Move prompt field up"
                   >
                     <ArrowUp size={11} />
-                  </button>
-                  <button
+                  </button>}
+                  {!singleField && <button
                     type="button"
                     onClick={() => moveSegment(segment.id, 1)}
                     disabled={index === segments.length - 1}
@@ -539,7 +547,7 @@ export function UmbraPositivePromptEditor({
                     title="Move prompt field down"
                   >
                     <ArrowDown size={11} />
-                  </button>
+                  </button>}
                   <button
                     type="button"
                     onClick={() => removeSegment(segment.id)}
@@ -551,6 +559,7 @@ export function UmbraPositivePromptEditor({
                 </div>
               </div>
               <textarea
+                aria-label={singleField ? heading : undefined}
                 ref={(node) => {
                   if (node) textareaRefs.current.set(segment.id, node);
                   else textareaRefs.current.delete(segment.id);
@@ -593,7 +602,7 @@ export function UmbraPositivePromptEditor({
           );
         })}
 
-        <div className="flex min-w-0 items-center gap-2 rounded-sm border border-white/10 bg-black/20 px-2 py-1.5">
+        {!singleField && <div className="flex min-w-0 items-center gap-2 rounded-sm border border-white/10 bg-black/20 px-2 py-1.5">
           <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500">Compiled</span>
           <span className="min-w-0 flex-1 truncate font-mono text-[9px] text-zinc-300" title={compiledPrompt || 'Empty prompt'}>
             {compiledPrompt || 'Empty prompt'}
@@ -607,7 +616,7 @@ export function UmbraPositivePromptEditor({
           >
             <Copy size={11} />
           </button>
-        </div>
+        </div>}
       </div>
     </section>
   );

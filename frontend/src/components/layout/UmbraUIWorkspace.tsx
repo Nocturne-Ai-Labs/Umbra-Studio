@@ -3010,6 +3010,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     <div className="relative">
       <>
         <UmbraPositivePromptEditor
+        singleField={remoteMode === 'phone' && activeMode === 'image'}
         segments={promptSegments}
         activeSegmentId={activePromptSegmentId}
         onChange={setPromptSegments}
@@ -3799,7 +3800,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               <div className="mb-3 flex items-center gap-2">
                 <Sparkles size={14} className="text-cyan-300" />
                 <h2 className="text-xs font-black uppercase tracking-[0.14em] text-zinc-200">Prompt</h2>
-                <span className="ml-auto font-mono text-[9px] text-zinc-600">{promptSegments.length} field{promptSegments.length === 1 ? '' : 's'}</span>
+                {remoteMode !== 'phone' && <span className="ml-auto font-mono text-[9px] text-zinc-600">{promptSegments.length} field{promptSegments.length === 1 ? '' : 's'}</span>}
               </div>
               <div className="space-y-3">
                 {imagePromptControls}
