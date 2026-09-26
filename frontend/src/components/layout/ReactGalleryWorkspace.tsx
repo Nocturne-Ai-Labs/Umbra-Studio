@@ -891,63 +891,6 @@ function hexToRgba(hexColor: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-const imageAccentColorCache = new Map<string, string>();
-const IMAGE_ACCENT_COLOR_CACHE_LIMIT = 800;
-
-function rgbaToCss(r: number, g: number, b: number, alpha: number): string {
-  return `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}, ${alpha})`;
-}
-
-function rememberImageAccentColor(key: string, color: string) {
-  if (!key || !color) return;
-  if (imageAccentColorCache.has(key)) imageAccentColorCache.delete(key);
-  imageAccentColorCache.set(key, color);
-  while (imageAccentColorCache.size > IMAGE_ACCENT_COLOR_CACHE_LIMIT) {
-    const oldest = imageAccentColorCache.keys().next().value;
-    if (!oldest) break;
-    imageAccentColorCache.delete(oldest);
-  }
-}
-
-function sampleImageAccentColor(image: HTMLImageElement): string {
-  try {
-    const width = Math.max(1, Math.min(24, image.naturalWidth || image.width || 1));
-    const height = Math.max(1, Math.min(24, image.naturalHeight || image.height || 1));
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    if (!context) return '';
-    context.drawImage(image, 0, 0, width, height);
-    const data = context.getImageData(0, 0, width, height).data;
-    let rTotal = 0;
-    let gTotal = 0;
-    let bTotal = 0;
-    let weightTotal = 0;
-    for (let index = 0; index < data.length; index += 4) {
-      const alpha = data[index + 3] / 255;
-      if (alpha < 0.4) continue;
-      const r = data[index];
-      const g = data[index + 1];
-      const b = data[index + 2];
-      const max = Math.max(r, g, b);
-      const min = Math.min(r, g, b);
-      const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-      const saturation = max === 0 ? 0 : (max - min) / max;
-      if (luminance < 0.08 || luminance > 0.92) continue;
-      const weight = alpha * (0.45 + saturation * 1.2) * (1 - Math.abs(luminance - 0.55) * 0.45);
-      rTotal += r * weight;
-      gTotal += g * weight;
-      bTotal += b * weight;
-      weightTotal += weight;
-    }
-    if (weightTotal <= 0) return '';
-    return `${Math.round(rTotal / weightTotal)}, ${Math.round(gTotal / weightTotal)}, ${Math.round(bTotal / weightTotal)}`;
-  } catch {
-    return '';
-  }
-}
-
 function getGallerySetColor(setId: number): string {
   const idx = Math.max(0, Math.floor(Number(setId || 1)) - 1) % GALLERY_SET_COLOR_PALETTE.length;
   return GALLERY_SET_COLOR_PALETTE[idx];
@@ -2726,38 +2669,9 @@ function GalleryImageTile({
   const tagLine = tags.length > 0 ? tags.slice(0, 5).join(', ') : 'No tags';
   const typeLabel = isFolder ? 'FOLDER' : file.type === 'video' ? 'VIDEO' : file.type === 'gif' ? 'GIF' : 'IMAGE';
   const effectiveSetColor = !isFolder && !contextTargeted && !restoredHighlighted && setColor ? setColor : '';
-  const [imageAccentColor, setImageAccentColor] = useState(() => imageAccentColorCache.get(cacheKey) || '');
-  const imageAccentRgb = useMemo(() => {
-    const parts = imageAccentColor.split(',').map((part) => Number(part.trim()));
-    if (parts.length !== 3 || !parts.every((part) => Number.isFinite(part))) return null;
-    return [parts[0], parts[1], parts[2]] as [number, number, number];
-  }, [imageAccentColor]);
-  const imageAccentCardStyle = useMemo<React.CSSProperties>(() => {
-    if (isFolder || isLivePreview || !imageAccentRgb) return {};
-    return {
-      borderColor: selected
-        ? rgbaToCss(imageAccentRgb[0], imageAccentRgb[1], imageAccentRgb[2], 0.72)
-        : rgbaToCss(imageAccentRgb[0], imageAccentRgb[1], imageAccentRgb[2], 0.28),
-      background: selected
-        ? `linear-gradient(180deg, rgba(${imageAccentColor}, 0.24), rgba(9,9,11,0.96))`
-        : `linear-gradient(180deg, rgba(${imageAccentColor}, 0.13), rgba(9,9,11,0.94))`,
-      boxShadow: selected
-        ? `0 0 0 1px rgba(${imageAccentColor}, 0.56), 0 0 22px rgba(${imageAccentColor}, 0.2)`
-        : `inset 0 1px 0 rgba(${imageAccentColor}, 0.16), 0 0 16px rgba(${imageAccentColor}, 0.08)`,
-    };
-  }, [imageAccentColor, imageAccentRgb, isFolder, isLivePreview, selected]);
   const cardStyle: React.CSSProperties = {
     width: cardSize,
     height: cardHeight,
-    ...(effectiveSetColor ? {
-      borderColor: hexToRgba(effectiveSetColor, selected ? 0.82 : 0.38),
-      background: selected
-        ? `linear-gradient(180deg, ${hexToRgba(effectiveSetColor, 0.24)}, rgba(9,9,11,0.96))`
-        : `linear-gradient(180deg, ${hexToRgba(effectiveSetColor, 0.11)}, rgba(9,9,11,0.94))`,
-      boxShadow: selected
-        ? `0 0 0 1px ${hexToRgba(effectiveSetColor, 0.72)}, 0 0 20px ${hexToRgba(effectiveSetColor, 0.24)}`
-        : `inset 0 1px 0 ${hexToRgba(effectiveSetColor, 0.12)}`,
-    } : imageAccentCardStyle),
   };
   const [thumbnailReady, setThumbnailReady] = useState(() => isLivePreview || readyThumbnailCache.has(cacheKey));
   const [retry, setRetry] = useState(0);
@@ -2779,7 +2693,6 @@ function GalleryImageTile({
     setPending(!ready);
     setLoadGranted(ready);
     setNearViewport(isLivePreview || prioritize || ready);
-    setImageAccentColor(imageAccentColorCache.get(cacheKey) || '');
     releaseLoadSlotRef.current?.();
     releaseLoadSlotRef.current = null;
     if (retryTimerRef.current !== null) {
@@ -2866,19 +2779,12 @@ function GalleryImageTile({
       return;
     }
     markThumbnailReady(cacheKey);
-    if (!isLivePreview) {
-      const sampledAccent = imageAccentColorCache.get(cacheKey) || sampleImageAccentColor(img);
-      if (sampledAccent) {
-        rememberImageAccentColor(cacheKey, sampledAccent);
-        setImageAccentColor(sampledAccent);
-      }
-    }
     setThumbnailReady(true);
     setPending(false);
     releaseLoadSlotRef.current?.();
     releaseLoadSlotRef.current = null;
     if (retry !== 0) setRetry(0);
-  }, [cacheKey, isLivePreview, retry, scheduleRetry, thumbnailReady]);
+  }, [cacheKey, retry, scheduleRetry, thumbnailReady]);
 
   const onImageError = useCallback(() => {
     setPending(true);
@@ -2955,6 +2861,7 @@ function GalleryImageTile({
       data-umbra-gallery-tile=""
       data-umbra-gallery-tile-type={isLivePreview ? 'live-preview' : isFolder ? 'folder' : 'media'}
       data-umbra-gallery-selection-mode={selectionMode && !isFolder ? '1' : '0'}
+      aria-pressed={selected}
       className={cn(
         'group relative flex flex-col overflow-hidden rounded-lg border bg-zinc-950/90 p-1.5 text-left shadow-sm outline-none transition-colors',
         isLivePreview && 'cursor-pointer',
@@ -2963,7 +2870,7 @@ function GalleryImageTile({
           : !isLivePreview && !isTrashItem && !singleTapOpen && 'cursor-grab active:cursor-grabbing',
         'before:pointer-events-none before:absolute before:inset-0 before:z-10 before:border before:border-white/5',
         selected
-          ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] shadow-[0_0_0_1px_var(--umbra-accent),0_0_18px_color-mix(in_srgb,var(--umbra-accent)_32%,transparent)]'
+          ? 'border-[var(--umbra-accent)] shadow-[0_0_0_2px_var(--umbra-accent),0_0_14px_color-mix(in_srgb,var(--umbra-accent)_50%,transparent)]'
           : isLivePreview
             ? 'border-emerald-300/80 bg-emerald-400/10 shadow-[0_0_0_1px_rgba(110,231,183,0.55),0_0_26px_rgba(16,185,129,0.28),inset_0_0_20px_rgba(16,185,129,0.08)] hover:border-emerald-200 hover:bg-emerald-400/15'
             : contextTargeted || restoredHighlighted
@@ -3026,9 +2933,7 @@ function GalleryImageTile({
         data-umbra-gallery-tile-media
         className={cn(
           'relative min-h-0 flex-1 overflow-hidden rounded-md border bg-black/65',
-          selected
-            ? 'border-[var(--umbra-accent)]/70'
-            : isLivePreview
+          isLivePreview
               ? 'border-emerald-300/40 shadow-[inset_0_0_18px_rgba(16,185,129,0.16)]'
               : 'border-white/10',
         )}
