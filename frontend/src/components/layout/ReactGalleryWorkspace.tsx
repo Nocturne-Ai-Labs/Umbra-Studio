@@ -34,6 +34,7 @@ import {
   Loader2,
   MoreHorizontal,
   Paintbrush,
+  Pencil,
   RotateCcw,
   ScanSearch,
   Send,
@@ -10079,9 +10080,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       };
       const folderFileItems: ContextMenuItem[] = [
         { label: 'Copy Path', icon: <Copy size={14} />, action: () => void copyPaths([targetPath]) },
-        { label: 'Rename Folder...', icon: <MoreHorizontal size={14} />, action: () => void renameFolder(targetPath) },
       ];
+      const renameFolderItem: ContextMenuItem = {
+        label: 'Rename Folder...', icon: <Pencil size={14} />, action: () => void renameFolder(targetPath),
+      };
       if (contextMenu.kind === 'background') return [
+        renameFolderItem,
         { label: 'New Subfolder...', icon: <Folder size={14} />, action: () => void createSubfolder(targetPath) },
         pasteFilesItem,
         {
@@ -10106,6 +10110,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           icon: <Pin size={14} />,
           action: () => togglePinnedFolder(targetPath),
         },
+        renameFolderItem,
         {
           label: 'New Subfolder...',
           icon: <Folder size={14} />,
