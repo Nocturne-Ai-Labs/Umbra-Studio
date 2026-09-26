@@ -137,7 +137,7 @@ type GalleryFile = {
   path: string;
   url?: string;
   thumbnailUrl?: string;
-  type?: 'image' | 'video' | 'gif' | 'folder';
+  type?: 'image' | 'video' | 'gif' | 'folder' | 'archive';
   size?: number;
   createdMs?: number;
   modifiedMs?: number;
@@ -938,6 +938,7 @@ function galleryMediaTypeFromPath(pathValue: unknown, explicitType?: unknown): '
 function galleryFileTypeFromPath(pathValue: unknown, explicitType?: unknown): GalleryFile['type'] {
   const normalizedType = String(explicitType || '').trim().toLowerCase();
   if (normalizedType === 'folder') return 'folder';
+  if (/\.zip$/i.test(normalizePath(pathValue))) return 'archive';
   return galleryMediaTypeFromPath(pathValue, explicitType);
 }
 
@@ -1177,7 +1178,7 @@ function isRemoteGalleryClient(): boolean {
 
 function thumbnailUrl(file: GalleryFile, options?: { defer?: boolean; retry?: number; lane?: 'gallery' | 'filmstrip' }): string {
   const path = normalizePath(file.path);
-  if (file.type === 'folder') return '';
+  if (file.type === 'folder' || file.type === 'archive') return '';
   if (isLiveGenerationPreviewPath(path)) return String(file.thumbnailUrl || file.url || '').trim();
   const remoteClient = isRemoteGalleryClient();
   const thumbSize = 'small';
@@ -1265,7 +1266,7 @@ function uniqueGalleryMediaFiles(files: GalleryFile[]): GalleryFile[] {
   const next: GalleryFile[] = [];
   for (const file of files) {
     const path = normalizePath(file?.path);
-    if (!path || file?.type === 'folder') continue;
+    if (!path || file?.type === 'folder' || file?.type === 'archive') continue;
     const key = path.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -2780,12 +2781,14 @@ function GalleryImageTile({
   const isLivePreview = isLiveGenerationPreviewPath(path);
   const cacheKey = isLivePreview ? `${path}|${file.modifiedMs || 0}` : stableSrc;
   const isFolder = file.type === 'folder';
+  const isArchive = file.type === 'archive';
+  const iconOnly = isFolder || isArchive;
   const isTrashItem = isTrashPath(path);
   const trashCountdown = isTrashItem ? formatTimeRemaining(getTrashExpiresMs(file) - Date.now()) : '';
   const tags = useMemo(() => normalizeTags(file.tags), [file.tags]);
   const isNsfw = file.privacyClass === 'nsfw';
-  const tagLine = tags.length > 0 ? tags.slice(0, 5).join(', ') : 'No tags';
-  const typeLabel = isFolder ? 'FOLDER' : file.type === 'video' ? 'VIDEO' : file.type === 'gif' ? 'GIF' : 'IMAGE';
+  const tagLine = isArchive ? 'ZIP archive' : tags.length > 0 ? tags.slice(0, 5).join(', ') : 'No tags';
+  const typeLabel = isFolder ? 'FOLDER' : isArchive ? 'ZIP' : file.type === 'video' ? 'VIDEO' : file.type === 'gif' ? 'GIF' : 'IMAGE';
   const effectiveSetColor = !isFolder && !contextTargeted && !restoredHighlighted && setColor ? setColor : '';
   const cardStyle: React.CSSProperties = {
     width: cardSize,
@@ -2804,7 +2807,7 @@ function GalleryImageTile({
   const schedulerKey = `${cacheKey}|${retry}`;
 
   useEffect(() => {
-    if (isFolder) return;
+    if (iconOnly) return;
     setRetry(0);
     const ready = isLivePreview || readyThumbnailCache.has(cacheKey);
     setThumbnailReady(ready);
@@ -2825,11 +2828,11 @@ function GalleryImageTile({
       releaseLoadSlotRef.current?.();
       releaseLoadSlotRef.current = null;
     };
-  }, [cacheKey, isFolder, isLivePreview, path, prioritize]);
+  }, [cacheKey, iconOnly, isLivePreview, path, prioritize]);
 
   useEffect(() => {
-    if (isFolder || isLivePreview || prioritize || thumbnailReady || nearViewport || readyThumbnailCache.has(cacheKey)) {
-      if (!isFolder && (isLivePreview || prioritize || thumbnailReady || readyThumbnailCache.has(cacheKey))) setNearViewport(true);
+    if (iconOnly || isLivePreview || prioritize || thumbnailReady || nearViewport || readyThumbnailCache.has(cacheKey)) {
+      if (!iconOnly && (isLivePreview || prioritize || thumbnailReady || readyThumbnailCache.has(cacheKey))) setNearViewport(true);
       return;
     }
     const node = tileRef.current;
@@ -2849,10 +2852,10 @@ function GalleryImageTile({
     });
     observer.observe(node);
     return () => observer.disconnect();
-  }, [cacheKey, isFolder, isLivePreview, nearViewport, prioritize, thumbnailReady]);
+  }, [cacheKey, iconOnly, isLivePreview, nearViewport, prioritize, thumbnailReady]);
 
   useEffect(() => {
-    if (isFolder) {
+    if (iconOnly) {
       setLoadGranted(false);
       setPending(false);
       return;
@@ -2875,7 +2878,7 @@ function GalleryImageTile({
     return () => {
       cancel();
     };
-  }, [cacheKey, isFolder, nearViewport, prioritize, schedulerKey, thumbnailReady]);
+  }, [cacheKey, iconOnly, nearViewport, prioritize, schedulerKey, thumbnailReady]);
 
   const scheduleRetry = useCallback(() => {
     if (thumbnailReady || retryTimerRef.current !== null || retry >= 60) return;
@@ -3056,9 +3059,9 @@ function GalleryImageTile({
               : 'border-white/10',
         )}
       >
-        {isFolder ? (
+        {iconOnly ? (
           <div className="flex h-full w-full flex-col items-center justify-center bg-zinc-900/70 text-zinc-400">
-            <FolderOpen size={Math.max(30, Math.min(54, Math.floor(cardSize * 0.25)))} />
+            {isArchive ? <Archive size={Math.max(30, Math.min(54, Math.floor(cardSize * 0.25)))} /> : <FolderOpen size={Math.max(30, Math.min(54, Math.floor(cardSize * 0.25)))} />}
             {file.trashOriginalPath || file.originalPath ? (
               <div className="mt-2 max-w-[80%] truncate text-[10px] text-zinc-500" title={file.trashOriginalPath || file.originalPath}>
                 {pathLeaf(file.trashOriginalPath || file.originalPath)}
@@ -3083,13 +3086,13 @@ function GalleryImageTile({
             onError={onImageError}
           />
         )}
-        {!isFolder && pending ? (
+        {!iconOnly && pending ? (
           <div className="pointer-events-none absolute inset-0 z-10 bg-zinc-950/25" />
         ) : null}
         {isLivePreview ? (
           <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-emerald-300/18 to-transparent" />
         ) : null}
-        {!isFolder ? <NsfwPrivacyShield compact protectedMedia={isNsfw} /> : null}
+        {!iconOnly ? <NsfwPrivacyShield compact protectedMedia={isNsfw} /> : null}
       </div>
       <div data-umbra-gallery-tile-footer className="shrink-0 px-0.5 pb-0.5 pt-1.5">
         <div className="truncate text-xs font-medium leading-4 text-zinc-100" title={file.name}>{file.name}</div>
@@ -5447,7 +5450,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       detail: {
         path: folderPath,
         folderPath,
-        files: nextFiles.filter((file) => file.type !== 'folder').map(galleryFileForFilmstrip),
+        files: nextFiles.filter((file) => file.type !== 'folder' && file.type !== 'archive').map(galleryFileForFilmstrip),
         mode: payload?.mode || 'replace',
         done: payload?.done,
         nextCursor: payload?.nextCursor,
@@ -6370,6 +6373,11 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     if (!path) return;
     if (file.type === 'folder') {
       openFolder(path);
+      return;
+    }
+    if (file.type === 'archive') {
+      setSelectedPaths(new Set([path]));
+      setLastSelectedPath(path);
       return;
     }
     if (isLiveGenerationPreviewPath(path)) {
@@ -9360,9 +9368,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       liveDisplayFiles.length > 0
         ? [
             ...liveDisplayFiles,
-            ...items.filter((file) => !isLiveGenerationPreviewPath(file.path)),
+            ...items.filter((file) => file.type !== 'archive' && !isLiveGenerationPreviewPath(file.path)),
           ]
-        : items
+        : items.filter((file) => file.type !== 'archive')
     );
     if (groupBySet && !trashMode) return withLive(setGroupedFiles);
     if (folderPreviewMode) return withLive([...displayFiles, ...folderPreviewFiles]);
@@ -10041,6 +10049,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         { separator: true },
         ...(!isRemoteClient ? [{ label: 'Show in File Explorer', icon: <FolderOpen size={14} />, action: () => void revealPaths([targetPath]) }] satisfies ContextMenuItem[] : []),
         { label: 'Copy Path', icon: <Copy size={14} />, action: () => void copyPaths([targetPath]) },
+        { separator: true },
+        { label: 'Move to Trash', icon: <Trash2 size={14} />, danger: true, disabled: transferInProgress, action: () => void movePathsToTrash([targetPath]) },
       ];
     }
 
@@ -10196,7 +10206,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         ] satisfies ContextMenuItem[] : []),
       ];
       return [
-        { label: 'Open', icon: targetFile?.type === 'folder' ? <FolderOpen size={14} /> : <ImageIcon size={14} />, disabled: !targetFile, action: () => targetFile && openFile(targetFile) },
+        ...(targetFile?.type === 'archive' ? [] : [{ label: 'Open', icon: targetFile?.type === 'folder' ? <FolderOpen size={14} /> : <ImageIcon size={14} />, disabled: !targetFile, action: () => targetFile && openFile(targetFile) }] satisfies ContextMenuItem[]),
         { label: paths.length > 1 ? `Restore ${paths.length} Items` : 'Restore', icon: <RotateCcw size={14} />, action: () => void restoreTrashPaths(paths) },
         {
           label: 'Export & File Tools',

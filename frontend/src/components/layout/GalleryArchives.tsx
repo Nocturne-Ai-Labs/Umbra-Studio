@@ -34,9 +34,11 @@ export function GalleryArchiveList({ folder, job, query = '', onCount, onContext
     const refresh = () => setRevision(value => value + 1);
     window.addEventListener('umbra:gallery-content-changed', refresh);
     window.addEventListener('umbra:gallery-archives-refresh', refresh);
+    window.addEventListener('umbra:gallery-restore-paths', refresh);
     return () => {
       window.removeEventListener('umbra:gallery-content-changed', refresh);
       window.removeEventListener('umbra:gallery-archives-refresh', refresh);
+      window.removeEventListener('umbra:gallery-restore-paths', refresh);
     };
   }, []);
   useEffect(() => {
