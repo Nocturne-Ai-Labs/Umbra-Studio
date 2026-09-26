@@ -24,6 +24,7 @@ import {
   Film,
   Folder,
   FolderOpen,
+  FolderTree,
   Grid3X3,
   HardDrive,
   Image as ImageIcon,
@@ -1871,6 +1872,8 @@ function findActiveRoot(folderPath: string, roots: GalleryRootChoice[]): Gallery
 
 type LibraryNavigatorProps = {
   mobileActive?: boolean;
+  multiFolderView: boolean;
+  onToggleMultiFolderView?: () => void;
   roots: GalleryRootChoice[];
   currentFolder: string;
   focusedFolder: string;
@@ -2203,6 +2206,8 @@ function LibraryFolderRow({
 
 function LibraryNavigator({
   mobileActive = true,
+  multiFolderView,
+  onToggleMultiFolderView,
   roots,
   currentFolder,
   focusedFolder,
@@ -2376,6 +2381,24 @@ function LibraryNavigator({
         <div className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
           <Grid3X3 size={16} />
           Library
+          {onToggleMultiFolderView ? (
+            <button
+              type="button"
+              role="switch"
+              aria-label="Multi-folder view"
+              aria-checked={multiFolderView}
+              title={multiFolderView ? 'Multi-folder view on: show selected folder only' : 'Multi-folder view off: include subfolder previews'}
+              onClick={onToggleMultiFolderView}
+              className={cn(
+                'ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded border transition-colors',
+                multiFolderView
+                  ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] text-[var(--umbra-accent)]'
+                  : 'border-zinc-800 text-zinc-400 hover:bg-white/5 hover:text-white',
+              )}
+            >
+              <FolderTree size={16} />
+            </button>
+          ) : null}
         </div>
         <div className="mt-2 flex items-start gap-2">
           <div className="relative min-w-0 flex-1">
@@ -4680,6 +4703,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const externalRootsSetting = useStore((state) => state.appSettings['library.externalRoots']);
   const externalRootsEnabled = useStore((state) => state.appSettings['library.enableExternalRoots'] !== false);
   const pinnedFoldersSetting = useStore((state) => state.appSettings['library.pinnedFolders']);
+  const multiFolderView = appSettings['library.multiFolderView'] === true;
   const trashAutoDeleteSetting = useStore((state) => state.appSettings['library.trashAutoDeleteDays']);
   const setAppSetting = useStore((state) => state.setAppSetting);
   const setAppSettings = useStore((state) => state.setAppSettings);
@@ -9175,7 +9199,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       }))
       .filter((folder) => folder.path && !isTrashPath(folder.path));
   }, [currentFolder, treeChildrenByPath]);
-  const folderPreviewMode = !isPhoneRemote && !trashMode && !globalSearchActive && !searchNeedle && childFolderNodes.length > 0;
+  const folderPreviewMode = multiFolderView && !isPhoneRemote && !trashMode && !globalSearchActive && !searchNeedle && childFolderNodes.length > 0;
   const currentFolderIsRoot = useMemo(() => (
     rootChoices.some((root) => pathsEqual(root.path, currentFolder))
   ), [currentFolder, rootChoices]);
@@ -10358,6 +10382,13 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       </div>
       <LibraryNavigator
         mobileActive={galleryMobileView === 'folders'}
+        multiFolderView={multiFolderView}
+        onToggleMultiFolderView={isPhoneRemote ? undefined : () => {
+          setAppSetting('library.multiFolderView', !multiFolderView);
+          applyGallerySelection(new Set(), '');
+          setContextMenu(null);
+          if (scrollParentRef.current) scrollParentRef.current.scrollTop = 0;
+        }}
         roots={rootChoices}
         currentFolder={currentFolder}
         focusedFolder={focusedFolder}
