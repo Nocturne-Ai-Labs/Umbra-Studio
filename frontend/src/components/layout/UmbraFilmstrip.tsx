@@ -13,6 +13,8 @@ import { galleryMediaRevision } from '@/lib/galleryMediaIdentity';
 import { openUmbraUiExtrasTool } from '@/lib/umbraUiExtrasNavigation';
 import { classifyUmbraPrompt, type UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
 import { useFilmstripFolderActivity } from '@/lib/useFilmstripFolderActivity';
+import { useFilmstripGeneration } from '@/components/filmstrip/useFilmstripGeneration';
+import { isProtectedLivePreview } from '@/lib/livePreviewPrivacy';
 
 interface UmbraFilmstripProps {
   initialHeight?: number;
@@ -133,7 +135,7 @@ function filmstripImageFromGenerationPreview(detail: unknown): FilmstripImage | 
     size: 0,
     dateCreated: String(updatedAt),
     dateModified: String(updatedAt),
-    privacyClass: classifyUmbraPrompt(payload.prompt),
+    privacyClass: payload.privacyClass === 'nsfw' || isProtectedLivePreview(typeof payload.prompt === 'string' ? payload.prompt : undefined) ? 'nsfw' : 'normal',
   };
 }
 
@@ -430,6 +432,15 @@ export function UmbraFilmstrip({
   const recentFoldersSetting = useStore((state) => state.appSettings['library.recentFolders']);
   const metadataTooltipEnabled = useStore((state) => state.appSettings['library.metadataHoverTooltips'] !== false);
   const liveGenerationPreviewsEnabled = useStore((state) => state.appSettings['comfyui.showFilmstripLivePreviews'] !== false);
+  const generation = useFilmstripGeneration(liveGenerationPreviewsEnabled);
+  const liveGenerationPreviewImage = useMemo(() => filmstripImageFromGenerationPreview(generation.preview), [generation.preview]);
+  const skipCurrentGeneration = useCallback(async () => {
+    try {
+      await generation.skip();
+    } catch (error) {
+      useStore.getState().showToast(error instanceof Error ? error.message : 'Failed to skip current generation.', 'error');
+    }
+  }, [generation.skip]);
   const { addToast } = useToastStore();
 
   const rootPath = DEFAULT_OUTPUT_ROOT;
@@ -440,7 +451,6 @@ export function UmbraFilmstrip({
   const [deletePending, setDeletePending] = useState(false);
   const [images, setImages] = useState<FilmstripImage[]>([]);
   const [feedComplete, setFeedComplete] = useState(true);
-  const [liveGenerationPreviewImage, setLiveGenerationPreviewImage] = useState<FilmstripImage | null>(null);
   const [recentGenerationOutputImages, setRecentGenerationOutputImages] = useState<FilmstripImage[]>([]);
   const recentGenerationOutputImagesRef = useRef<FilmstripImage[]>([]);
   const [recentGenerationsExpanded, setRecentGenerationsExpanded] = useState(false);
@@ -560,10 +570,6 @@ export function UmbraFilmstrip({
   useEffect(() => {
     recentGenerationOutputImagesRef.current = recentGenerationOutputImages;
   }, [recentGenerationOutputImages]);
-
-  useEffect(() => {
-    if (!liveGenerationPreviewsEnabled) setLiveGenerationPreviewImage(null);
-  }, [liveGenerationPreviewsEnabled]);
 
   const selectableImages = useMemo(() => getFilmstripSelectableImages(recentGenerationLaneImages, displayedImages), [
     displayedImages, recentGenerationLaneImages,
@@ -1168,16 +1174,8 @@ export function UmbraFilmstrip({
           return Array.from(byPath.values()).slice(0, 40);
         });
       }
-      setLiveGenerationPreviewImage(null);
       if (!shouldRefreshForFolders(folders)) return;
       forceRefreshBurst();
-    };
-
-    const onPowerPrompterGenerationPreview = (event: Event) => {
-      if (!liveGenerationPreviewsEnabled) return;
-      const liveImage = filmstripImageFromGenerationPreview((event as CustomEvent<unknown>)?.detail);
-      if (!liveImage) return;
-      setLiveGenerationPreviewImage(liveImage);
     };
 
     const onGenerationComplete = (event: Event) => {
@@ -1202,18 +1200,12 @@ export function UmbraFilmstrip({
     };
 
     window.addEventListener('umbra:powerprompter-output-saved', onPowerPrompterOutputSaved as EventListener);
-    if (liveGenerationPreviewsEnabled) {
-      window.addEventListener('umbra:powerprompter-generation-preview', onPowerPrompterGenerationPreview as EventListener);
-    }
     window.addEventListener('umbra:gallery-generation-complete', onGenerationComplete as EventListener);
     window.addEventListener('focus', onWake);
     document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
       window.removeEventListener('umbra:powerprompter-output-saved', onPowerPrompterOutputSaved as EventListener);
-      if (liveGenerationPreviewsEnabled) {
-        window.removeEventListener('umbra:powerprompter-generation-preview', onPowerPrompterGenerationPreview as EventListener);
-      }
       window.removeEventListener('umbra:gallery-generation-complete', onGenerationComplete as EventListener);
       window.removeEventListener('focus', onWake);
       document.removeEventListener('visibilitychange', onVisibilityChange);
@@ -1285,6 +1277,7 @@ export function UmbraFilmstrip({
         detail: {
           imagePath: normalizedTargetPath,
           source,
+          ...generation.preview,
         },
       }));
       return;
@@ -1303,7 +1296,7 @@ export function UmbraFilmstrip({
     setActiveWorkspace('library');
     const detail = { path: folderPath, folderPath, ...(imagePath ? { imagePath } : {}), source };
     window.dispatchEvent(new CustomEvent('umbra:gallery-open-path', { detail }));
-  }, [setActiveWorkspace]);
+  }, [generation.preview, setActiveWorkspace]);
 
   const onSelect = useCallback((id: string, event: React.MouseEvent) => {
     const orderedIds = selectableImages.map((item) => item.id);
@@ -2233,6 +2226,9 @@ export function UmbraFilmstrip({
         unreadFolderMediaCount={folderActivity.total}
         images={displayedImages}
         recentGenerationImages={recentGenerationLaneImages}
+        onSkipGeneration={skipCurrentGeneration}
+        canSkipGeneration={generation.canSkip}
+        skipGenerationPending={generation.skipPending}
         recentGenerationExpanded={recentGenerationsExpanded}
         onToggleRecentGenerationExpanded={() => setRecentGenerationsExpanded((current) => !current)}
         selectedIds={selectedIds}

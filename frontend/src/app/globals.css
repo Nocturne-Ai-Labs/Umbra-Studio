@@ -1669,7 +1669,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-phone-bottom-nav] {
   inset: auto 0 0 0;
   z-index: 190;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   min-height: var(--umbra-phone-bottom-nav-height);
   padding: 0.35rem max(0.35rem, env(safe-area-inset-right)) max(0.35rem, env(safe-area-inset-bottom)) max(0.35rem, env(safe-area-inset-left));
   border-top: 1px solid color-mix(in srgb, var(--umbra-accent) 20%, rgba(255, 255, 255, 0.08));

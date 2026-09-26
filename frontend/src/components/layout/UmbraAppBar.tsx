@@ -11,7 +11,6 @@ import { useStore } from '@/store/useStore';
 import {
   Image as ImageIcon,
   Laptop,
-  Layers,
   ChevronDown,
   ChevronsLeft,
   ChevronsRight,
@@ -46,21 +45,19 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 import { WatermarkSettings } from '@/components/ui/WatermarkSettings';
-import type { PowerPrompterQueueTooltipStatus } from '@/components/ui/GenerationTooltip';
 import { GlobalSettings } from '@/components/modals/GlobalSettings';
 import { UmbraUpdaterModal } from '@/components/modals/UmbraUpdaterModal';
 import { NotificationBellButton } from '@/components/ui/NotificationCenter';
 import { useNsfwPrivacy } from '@/components/privacy/NsfwPrivacyProvider';
-import { LiveGenerationPreview } from '@/components/privacy/LiveGenerationPreview';
-import { isProtectedLivePreview, readComfyPreviewPrompt } from '@/lib/livePreviewPrivacy';
 
 import { SystemMonitor } from '@/components/SystemMonitor';
 import { useComponentDebug } from '@/hooks/useComponentDebug';
 import { useToastStore } from '@/store/useToastStore';
 import { governorShouldRun, governorTryAcquire } from '@/lib/loadGovernor';
-import { DroppableNavItem } from './DroppableNavItem';
 import { UmbraRemoteSidebarSection } from './UmbraRemoteSidebarSection';
 import { LocalServersSidebarSection } from './LocalServersSidebarSection';
+import { DroppableNavItem } from './DroppableNavItem';
+import { TrainingProgressStatus } from './TrainingProgressStatus';
 import {
   applyUmbraRemoteMode,
   getUmbraRemoteMode,
@@ -126,31 +123,6 @@ const EMPTY_AI_TOOLKIT_STATUS: NeuralHubAIToolkitStatus = {
   uiDependenciesInstalled: false,
 };
 
-type ComfyQueueBadge = {
-  running: number;
-  pending: number;
-  remaining: number;
-  total: number;
-  status: 'idle' | 'busy' | 'complete' | 'error';
-  recentComplete: boolean;
-};
-
-type PowerPrompterQueueStatusEvent = PowerPrompterQueueTooltipStatus;
-type ComfyAppPreviewEvent = {
-  imageDataUrl?: string;
-  mimeType?: string;
-  step?: number;
-  maxStep?: number;
-  stepLabel?: string;
-  active?: boolean;
-  nodeId?: string;
-  promptId?: string;
-  imagePromptId?: string;
-  source?: string;
-  updatedAt?: number;
-};
-const APPBAR_COMFY_IMAGE_PREVIEW_ENABLED = true;
-const LIVE_GENERATION_PREVIEW_PATH = 'umbra-live-generation://powerprompter/current.png';
 const PHONE_REMOTE_WORKSPACES = new Set([
   'umbraui',
   'powerprompter',
@@ -189,79 +161,6 @@ function clampPhoneComfyMenuPosition(position: PhoneComfyMenuPosition): PhoneCom
   };
 }
 
-function normalizeQueueCount(value: unknown): number {
-  return Math.max(0, Math.floor(Number(value) || 0));
-}
-
-function normalizeComfyWebSocketUrl(value: unknown): string {
-  const raw = String(value || '').trim() || 'http://127.0.0.1:8188';
-  const normalized = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
-  try {
-    const url = new URL(normalized);
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    url.pathname = '/ws';
-    url.search = `?clientId=${encodeURIComponent(`umbra-appbar-image-preview-${Date.now().toString(36)}`)}`;
-    url.hash = '';
-    return url.toString();
-  } catch {
-    return '';
-  }
-}
-
-function sniffComfyPreviewMime(bytes: Uint8Array): string {
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
-  if (
-    bytes.length >= 8
-    && bytes[0] === 0x89
-    && bytes[1] === 0x50
-    && bytes[2] === 0x4e
-    && bytes[3] === 0x47
-  ) return 'image/png';
-  if (
-    bytes.length >= 12
-    && String.fromCharCode(...bytes.slice(0, 4)) === 'RIFF'
-    && String.fromCharCode(...bytes.slice(8, 12)) === 'WEBP'
-  ) return 'image/webp';
-  return '';
-}
-
-function readComfyImagePreviewBlob(buffer: ArrayBuffer): { blob: Blob; mimeType: string; promptId?: string } | null {
-  if (buffer.byteLength < 8) return null;
-  const view = new DataView(buffer);
-  const eventType = view.getUint32(0, false);
-
-  if (eventType === 1) {
-    const imageType = view.getUint32(4, false);
-    const bytes = new Uint8Array(buffer, 8);
-    const mimeType = sniffComfyPreviewMime(bytes);
-    if (!mimeType) return null;
-    const fallbackMime = imageType === 2 ? 'image/png' : imageType === 3 ? 'image/webp' : 'image/jpeg';
-    return { blob: new Blob([bytes], { type: mimeType || fallbackMime }), mimeType: mimeType || fallbackMime };
-  }
-
-  if (eventType === 4) {
-    const metadataLength = view.getUint32(4, false);
-    const imageStart = 8 + Math.max(0, metadataLength);
-    if (imageStart >= buffer.byteLength) return null;
-    const bytes = new Uint8Array(buffer, imageStart);
-    const sniffedMime = sniffComfyPreviewMime(bytes);
-    if (!sniffedMime) return null;
-    let mimeType = sniffedMime;
-    let promptId: string | undefined;
-    try {
-      const metadataText = new TextDecoder().decode(new Uint8Array(buffer, 8, metadataLength));
-      const metadata = JSON.parse(metadataText);
-      promptId = String(metadata?.prompt_id || '').trim() || undefined;
-      const metadataMime = String(metadata?.image_type || metadata?.mimeType || '').trim();
-      if (metadataMime.startsWith('image/')) mimeType = metadataMime;
-    } catch {
-      // Metadata is optional; magic-byte detection keeps image previews usable.
-    }
-    return { blob: new Blob([bytes], { type: mimeType }), mimeType, promptId };
-  }
-
-  return null;
-}
 
 interface ToolVersionOption {
   ref: string;
@@ -286,7 +185,7 @@ export const UmbraAppBar = () => {
   const gpuUsage = useStore((state) => state.systemStats.gpuUsage);
   const systemStatsStale = useStore((state) => state.systemStats.stale);
   const comfyConnection = useStore((state) => state.connections.comfyui);
-  const comfyHealth = useStore((state) => state.backendHealth.comfyui);
+  const comfyBooting = useStore((state) => state.booting.comfyui);
   const comfyUrl = useStore((state) => state.urls.comfyui);
   const isAppBarCollapsed = useStore((state) => state.ui.isAppBarCollapsed);
   const showFilmstrip = useStore((state) => state.ui.showFilmstrip);
@@ -310,9 +209,6 @@ export const UmbraAppBar = () => {
   const connections = React.useMemo(() => ({
     comfyui: comfyConnection,
   }), [comfyConnection]);
-  const backendHealth = React.useMemo(() => ({
-    comfyui: comfyHealth,
-  }), [comfyHealth]);
   const urls = React.useMemo(() => ({
     comfyui: comfyUrl,
   }), [comfyUrl]);
@@ -338,23 +234,6 @@ export const UmbraAppBar = () => {
   const [checkingConnection, setCheckingConnection] = React.useState<NeuralHubTool | null>(null);
   const [aiToolkitStatus, setAIToolkitStatus] = React.useState<NeuralHubAIToolkitStatus>(EMPTY_AI_TOOLKIT_STATUS);
   const [aiToolkitStatusLoading, setAIToolkitStatusLoading] = React.useState(false);
-  const [comfyQueueBadge, setComfyQueueBadge] = React.useState<ComfyQueueBadge>({
-    running: 0,
-    pending: 0,
-    remaining: 0,
-    total: 0,
-    status: 'idle',
-    recentComplete: false,
-  });
-  const [powerPrompterQueueStatus, setPowerPrompterQueueStatus] = React.useState<PowerPrompterQueueStatusEvent | null>(null);
-  const [comfyAppPreview, setComfyAppPreview] = React.useState<ComfyAppPreviewEvent | null>(null);
-  const [comfyPreviewPrompts, setComfyPreviewPrompts] = React.useState<Map<string, string>>(() => new Map());
-  const [sidebarSkipBusy, setSidebarSkipBusy] = React.useState(false);
-  const comfyQueueWasBusyRef = React.useRef(false);
-  const comfyRunningIdsRef = React.useRef<string[]>([]);
-  const comfyCompleteTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const powerPrompterQueueBadgeSignatureRef = React.useRef('');
-  const comfyAppPreviewSignatureRef = React.useRef('');
 
   // Backend operation loading states
   const [backendLoading, setBackendLoading] = React.useState<{
@@ -892,395 +771,6 @@ export const UmbraAppBar = () => {
     };
   }, [fetchSystemStatus]);
 
-  React.useEffect(() => {
-    const onQueueStatus = (event: Event) => {
-      const detail = (event as CustomEvent<Partial<PowerPrompterQueueStatusEvent>>).detail || {};
-      const total = Math.max(0, Math.floor(Number(detail.total) || 0));
-      const running = Math.max(0, Math.floor(Number(detail.running) || 0));
-      const pending = Math.max(0, Math.floor(Number(detail.pending) || 0));
-      const completed = Math.max(0, Math.floor(Number(detail.completed) || 0));
-      const failed = Math.max(0, Math.floor(Number(detail.failed) || 0));
-      const position = Math.max(0, Math.floor(Number(detail.position) || 0));
-      const remaining = Math.max(0, Math.floor(Number(detail.remaining) || 0));
-      const activePrompt = String(detail.activePrompt || '').trim();
-      const nextPrompt = String(detail.nextPrompt || '').trim();
-      const statusLabel = String(detail.statusLabel || '').trim();
-      const previewImageDataUrl = String(detail.previewImageDataUrl || '').trim();
-      const previewPrompt = typeof detail.previewPrompt === 'string' ? detail.previewPrompt : undefined;
-      const previewPromptId = String(detail.previewPromptId || '').trim();
-      const previewStepLabel = String(detail.previewStepLabel || '').trim();
-      const estimatedMsRemaining = Number.isFinite(Number(detail.estimatedMsRemaining))
-        ? Math.max(0, Math.floor(Number(detail.estimatedMsRemaining)))
-        : null;
-      if (total <= 0 && !previewImageDataUrl) {
-        powerPrompterQueueBadgeSignatureRef.current = '';
-        setPowerPrompterQueueStatus(null);
-        return;
-      }
-      const previewSignature = previewImageDataUrl
-        ? `${previewImageDataUrl.length}:${previewImageDataUrl.slice(-48)}`
-        : '';
-      const signature = [
-        total,
-        running,
-        pending,
-        completed,
-        failed,
-        position,
-        remaining,
-        estimatedMsRemaining ?? '',
-        statusLabel,
-        activePrompt,
-        nextPrompt,
-        previewStepLabel,
-        previewSignature,
-        JSON.stringify(previewPrompt) ?? 'unknown',
-        previewPromptId,
-      ].join('|');
-      if (signature === powerPrompterQueueBadgeSignatureRef.current) return;
-      powerPrompterQueueBadgeSignatureRef.current = signature;
-
-      setPowerPrompterQueueStatus({
-        total,
-        running,
-        pending,
-        completed,
-        failed,
-        position,
-        remaining,
-        activePrompt,
-        nextPrompt,
-        statusLabel,
-        previewImageDataUrl,
-        previewPrompt,
-        previewPromptId,
-        previewStepLabel,
-        estimatedMsRemaining,
-        updatedAt: Math.max(0, Math.floor(Number(detail.updatedAt) || Date.now())),
-      });
-    };
-
-    window.addEventListener('umbra:powerprompter-queue-status', onQueueStatus as EventListener);
-    return () => {
-      window.removeEventListener('umbra:powerprompter-queue-status', onQueueStatus as EventListener);
-    };
-  }, []);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!APPBAR_COMFY_IMAGE_PREVIEW_ENABLED) return;
-    if (isRemoteClient || connections.comfyui !== 'connected' || backendHealth.comfyui !== true) return;
-    let closed = false;
-    let socket: WebSocket | null = null;
-    let reconnectTimer: number | null = null;
-    let staleTimer: number | null = null;
-    let currentObjectUrl = '';
-    let executingPromptId = '';
-    const wsUrl = normalizeComfyWebSocketUrl(urls.comfyui || comfySettingsUrl);
-    if (!wsUrl) return;
-
-    const clearStaleTimer = () => {
-      if (staleTimer != null) {
-        window.clearTimeout(staleTimer);
-        staleTimer = null;
-      }
-    };
-
-    const scheduleStaleClear = () => {
-      clearStaleTimer();
-      staleTimer = window.setTimeout(() => {
-        if (closed) return;
-        comfyAppPreviewSignatureRef.current = '';
-        if (currentObjectUrl) {
-          URL.revokeObjectURL(currentObjectUrl);
-          currentObjectUrl = '';
-        }
-        setComfyAppPreview((current) => {
-          if (!current?.imageDataUrl) return current?.active ? { active: false, updatedAt: Date.now() } : null;
-          return null;
-        });
-      }, 45_000);
-    };
-
-    const setProgress = (data: any) => {
-      const step = Math.max(0, Math.floor(Number(data?.value ?? data?.step ?? 0) || 0));
-      const maxStep = Math.max(0, Math.floor(Number(data?.max ?? data?.total ?? data?.maxStep ?? 0) || 0));
-      if (step <= 0 && maxStep <= 0) return;
-      const stepLabel = maxStep > 0 ? `Step ${step}/${maxStep}` : `Step ${step}`;
-      const signature = `progress|${step}|${maxStep}|${stepLabel}`;
-      if (signature === comfyAppPreviewSignatureRef.current) return;
-      comfyAppPreviewSignatureRef.current = signature;
-      setComfyAppPreview((current) => ({
-        ...(current || {}),
-        step,
-        maxStep,
-        stepLabel,
-        active: true,
-        source: 'comfy_direct_image_ws',
-        updatedAt: Date.now(),
-      }));
-      scheduleStaleClear();
-    };
-
-    const connect = () => {
-      if (closed) return;
-      reconnectTimer = null;
-      const currentSocket = new WebSocket(wsUrl);
-      socket = currentSocket;
-      currentSocket.binaryType = 'arraybuffer';
-      currentSocket.onmessage = (event) => {
-        if (closed || socket !== currentSocket) return;
-        try {
-          if (typeof event.data === 'string') {
-            const message = JSON.parse(String(event.data || '{}'));
-            const messageType = String(message?.type || '').trim();
-            const data = message?.data || {};
-            if (['execution_start', 'executing', 'progress'].includes(messageType)) {
-              const promptId = String(data?.prompt_id || data?.promptId || '').trim();
-              if (promptId) executingPromptId = promptId;
-            }
-            if (messageType === 'progress') {
-              setProgress(data);
-              return;
-            }
-            if (messageType === 'executing') {
-              const nodeId = String(data?.node || data?.node_id || '').trim();
-              const promptId = String(data?.prompt_id || data?.promptId || '').trim();
-              if (!nodeId && !promptId) {
-                comfyAppPreviewSignatureRef.current = '';
-                setComfyAppPreview((current) => current?.imageDataUrl ? current : null);
-                return;
-              }
-              setComfyAppPreview((current) => ({
-                ...(current || {}),
-                active: true,
-                nodeId,
-                promptId,
-                source: 'comfy_direct_image_ws',
-                updatedAt: Date.now(),
-              }));
-              scheduleStaleClear();
-            }
-            return;
-          }
-
-          if (!(event.data instanceof ArrayBuffer)) return;
-          const frame = readComfyImagePreviewBlob(event.data);
-          if (!frame) return;
-          const imageDataUrl = URL.createObjectURL(frame.blob);
-          comfyAppPreviewSignatureRef.current = '';
-          if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
-          currentObjectUrl = imageDataUrl;
-          setComfyAppPreview({
-            imageDataUrl,
-            imagePromptId: frame.promptId || executingPromptId,
-            mimeType: frame.mimeType,
-            active: true,
-            source: 'comfy_direct_image_ws',
-            updatedAt: Date.now(),
-          });
-          scheduleStaleClear();
-        } catch {
-          // Preview messages are best-effort; malformed packets should not disturb the app bar.
-        }
-      };
-      currentSocket.onclose = () => {
-        if (closed || socket !== currentSocket) return;
-        executingPromptId = '';
-        socket = null;
-        if (!closed) reconnectTimer = window.setTimeout(connect, 2500);
-      };
-    };
-
-    connect();
-    return () => {
-      closed = true;
-      clearStaleTimer();
-      if (reconnectTimer != null) window.clearTimeout(reconnectTimer);
-      try { socket?.close(); } catch {}
-      if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
-      comfyAppPreviewSignatureRef.current = '';
-      setComfyAppPreview(null);
-    };
-  }, [backendHealth.comfyui, comfySettingsUrl, connections.comfyui, isRemoteClient, urls.comfyui]);
-
-  React.useEffect(() => {
-    const clearCompleteTimer = () => {
-      if (comfyCompleteTimerRef.current) {
-        clearTimeout(comfyCompleteTimerRef.current);
-        comfyCompleteTimerRef.current = null;
-      }
-    };
-
-    if (connections.comfyui !== 'connected' || backendHealth.comfyui !== true) {
-      clearCompleteTimer();
-      comfyQueueWasBusyRef.current = false;
-      comfyRunningIdsRef.current = [];
-      setComfyQueueBadge({
-        running: 0,
-        pending: 0,
-        remaining: 0,
-        total: 0,
-        status: 'idle',
-        recentComplete: false,
-      });
-      return;
-    }
-
-    let cancelled = false;
-
-    const readPromptId = (item: any, index: number) => {
-      if (Array.isArray(item)) return String(item[1] ?? item[3]?.prompt_id ?? item[0] ?? index);
-      return String(item?.prompt_id ?? item?.id ?? item?.number ?? index);
-    };
-
-    const markRecentComplete = (running: number, pending: number) => {
-      clearCompleteTimer();
-      const total = running + pending;
-      setComfyQueueBadge({
-        running,
-        pending,
-        remaining: total,
-        total,
-        status: total > 0 ? 'busy' : 'complete',
-        recentComplete: true,
-      });
-      comfyCompleteTimerRef.current = setTimeout(() => {
-        setComfyQueueBadge((current) => ({
-          ...current,
-          status: current.total > 0 ? 'busy' : 'idle',
-          recentComplete: false,
-        }));
-        comfyCompleteTimerRef.current = null;
-      }, 4500);
-    };
-
-    const fetchQueueStatus = async () => {
-      const release = governorTryAcquire('interactive');
-      if (!release) return;
-      try {
-        const response = await fetch('/api/umbrabridge/comfyui/queue', { cache: 'no-store' });
-        const payload = await response.json().catch(() => null);
-        if (cancelled) return;
-
-        if (payload?.unavailable) {
-          clearCompleteTimer();
-          comfyQueueWasBusyRef.current = false;
-          comfyRunningIdsRef.current = [];
-          setComfyQueueBadge({
-            running: 0,
-            pending: 0,
-            remaining: 0,
-            total: 0,
-            status: 'idle',
-            recentComplete: false,
-          });
-          return;
-        }
-
-        if (!response.ok || payload?.error) {
-          clearCompleteTimer();
-          setComfyQueueBadge((current) => ({
-            ...current,
-            status: 'error',
-            recentComplete: false,
-          }));
-          return;
-        }
-
-        const runningRows = Array.isArray(payload?.queue_running) ? payload.queue_running : [];
-        const pendingRows = Array.isArray(payload?.queue_pending) ? payload.queue_pending : [];
-        setComfyPreviewPrompts((current) => {
-          const next = new Map(current);
-          for (const row of runningRows) {
-            if (!Array.isArray(row)) continue;
-            const promptId = String(row[1] || '').trim();
-            if (!promptId || next.has(promptId)) continue;
-            const prompt = readComfyPreviewPrompt(row);
-            if (promptId && prompt !== undefined) next.set(promptId, prompt);
-          }
-          // Keep recent completed-frame metadata without retaining whole workflow graphs.
-          while (next.size > 64) next.delete(next.keys().next().value!);
-          return next.size === current.size && [...next].every(([id, prompt]) => current.get(id) === prompt)
-            ? current
-            : next;
-        });
-        const running = runningRows.length;
-        const pending = pendingRows.length;
-        const total = running + pending;
-        const runningIds = runningRows.map(readPromptId);
-        const queueDrained = comfyQueueWasBusyRef.current && total === 0;
-
-        comfyQueueWasBusyRef.current = total > 0;
-        comfyRunningIdsRef.current = runningIds;
-
-        if (queueDrained) {
-          markRecentComplete(running, pending);
-          return;
-        }
-
-        if (total > 0) {
-          setComfyQueueBadge((current) => {
-            if (current.recentComplete) {
-              return {
-                ...current,
-                running,
-                pending,
-                remaining: total,
-                total,
-                status: 'busy',
-              };
-            }
-            clearCompleteTimer();
-            return {
-              running,
-              pending,
-              remaining: total,
-              total,
-              status: 'busy',
-              recentComplete: false,
-            };
-          });
-          return;
-        }
-
-        setComfyQueueBadge((current) => (
-          current.recentComplete
-            ? { ...current, running, pending, remaining: total, total }
-            : {
-              running,
-              pending,
-              remaining: total,
-              total,
-              status: 'idle',
-              recentComplete: false,
-            }
-        ));
-      } catch {
-        if (!cancelled) {
-          clearCompleteTimer();
-          setComfyQueueBadge((current) => ({
-            ...current,
-            status: 'error',
-            recentComplete: false,
-          }));
-        }
-      } finally {
-        release();
-      }
-    };
-
-    void fetchQueueStatus();
-    const timer = window.setInterval(() => {
-      void fetchQueueStatus();
-    }, 1000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-      clearCompleteTimer();
-    };
-  }, [backendHealth.comfyui, connections.comfyui]);
 
   React.useEffect(() => {
     if (!isAppBarCollapsed && isHoverExpanded) {
@@ -1701,31 +1191,14 @@ export const UmbraAppBar = () => {
   };
 
   const isSidebarExpanded = !isAppBarCollapsed || isHoverExpanded;
+  const comfyStarting = comfyBooting || comfyConnection === 'connecting' || backendLoading.comfyui === 'starting';
+  const comfyLifecycleLabel = restartingAll ? 'ComfyUI restarting' : backendLoading.comfyui === 'stopping' ? 'ComfyUI stopping' : comfyStarting ? 'ComfyUI starting' : '';
   const hasManagedBackendRunning = connections.comfyui === 'connected'
     || (
       (aiToolkitStatus.running || aiToolkitStatus.healthy)
       && aiToolkitStatus.ownership !== 'external-compatible'
     );
   const nsfwThumbnailBlurIntensity = Math.max(0, Math.min(100, Math.round(Number(nsfwThumbnailBlurIntensitySetting ?? 85))));
-  const effectiveComfyQueueBadge = React.useMemo<ComfyQueueBadge>(() => {
-    const prompterTotal = normalizeQueueCount(powerPrompterQueueStatus?.total);
-    const prompterUpdatedAt = Math.max(0, Number(powerPrompterQueueStatus?.updatedAt) || 0);
-    const prompterFresh = prompterUpdatedAt > 0 && (Date.now() - prompterUpdatedAt) <= 15000;
-    if (!prompterFresh || prompterTotal <= comfyQueueBadge.total) return comfyQueueBadge;
-    const prompterRunning = normalizeQueueCount(powerPrompterQueueStatus?.running);
-    const prompterPending = normalizeQueueCount(powerPrompterQueueStatus?.pending);
-    const liveRemaining = prompterRunning + prompterPending;
-    const fallbackRemaining = normalizeQueueCount(powerPrompterQueueStatus?.remaining);
-    const prompterRemaining = fallbackRemaining > 0 ? fallbackRemaining : liveRemaining;
-    return {
-      running: prompterRunning,
-      pending: prompterPending,
-      remaining: prompterRemaining,
-      total: prompterTotal,
-      status: 'busy',
-      recentComplete: false,
-    };
-  }, [comfyQueueBadge, powerPrompterQueueStatus]);
 
   const handleSidebarToggle = () => {
     const nextCollapsed = !isAppBarCollapsed;
@@ -1847,74 +1320,6 @@ export const UmbraAppBar = () => {
     extra
   ), []);
   const sidebarAuxButtonClass = 'shrink-0 rounded-md border border-transparent bg-transparent px-2 text-zinc-500 transition-colors hover:border-white/10 hover:bg-white/[0.045] hover:text-zinc-100';
-  const comfyAppPreviewImage = String(comfyAppPreview?.imageDataUrl || '').trim();
-  const comfyAppPreviewStep = String(comfyAppPreview?.stepLabel || '').trim();
-  const showComfySidebarStatus = effectiveComfyQueueBadge.status !== 'idle'
-    || Boolean(comfyAppPreviewImage)
-    || Boolean(comfyAppPreview?.active)
-    || Boolean(String(powerPrompterQueueStatus?.previewImageDataUrl || '').trim())
-    || Boolean(String(powerPrompterQueueStatus?.activePrompt || powerPrompterQueueStatus?.nextPrompt || '').trim());
-  const comfySidebarProgress = powerPrompterQueueStatus && powerPrompterQueueStatus.total > 0
-    ? Math.max(0, Math.min(100, (powerPrompterQueueStatus.position / Math.max(1, powerPrompterQueueStatus.total)) * 100))
-    : (effectiveComfyQueueBadge.status === 'complete' ? 100 : 0);
-  const comfySidebarActivePrompt = String(powerPrompterQueueStatus?.activePrompt || '').trim();
-  const comfySidebarNextPrompt = String(powerPrompterQueueStatus?.nextPrompt || '').trim();
-  const comfySidebarPreviewImage = comfyAppPreviewImage || String(powerPrompterQueueStatus?.previewImageDataUrl || '').trim();
-  const comfySidebarPreviewPrompt = comfyAppPreviewImage
-    ? (comfyPreviewPrompts.get(comfyAppPreview?.imagePromptId || '')
-      ?? (comfyAppPreview?.imagePromptId && comfyAppPreview.imagePromptId === powerPrompterQueueStatus?.previewPromptId
-        ? powerPrompterQueueStatus.previewPrompt
-        : undefined))
-    : powerPrompterQueueStatus?.previewPrompt;
-  const comfySidebarPreviewIsVideo = /^data:video\//i.test(comfySidebarPreviewImage)
-    || (Boolean(comfyAppPreviewImage) && /^video\//i.test(comfyAppPreview?.mimeType || ''));
-  const comfySidebarPreviewStep = comfyAppPreviewStep || String(powerPrompterQueueStatus?.previewStepLabel || '').trim();
-  const canSkipSidebarJob = effectiveComfyQueueBadge.running > 0 || normalizeQueueCount(powerPrompterQueueStatus?.running) > 0;
-
-  const handleSidebarSkipCurrentJob = React.useCallback(async () => {
-    if (sidebarSkipBusy || !canSkipSidebarJob) return;
-    setSidebarSkipBusy(true);
-    try {
-      const skipEvent = new CustomEvent('umbra:powerprompter-skip-active-job', { cancelable: true });
-      window.dispatchEvent(skipEvent);
-      if (skipEvent.defaultPrevented) return;
-      const response = await fetch('/api/umbrabridge/comfyui/interrupt', { method: 'POST' });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload?.success === false) {
-        throw new Error(String(payload?.error || `ComfyUI interrupt failed (${response.status})`));
-      }
-      useStore.getState().showToast('Skipped current generation', 'success');
-    } catch (error: any) {
-      useStore.getState().showToast(String(error?.message || 'Failed to skip current generation.'), 'error');
-    } finally {
-      setSidebarSkipBusy(false);
-    }
-  }, [canSkipSidebarJob, sidebarSkipBusy]);
-
-  const handleOpenSidebarGenerationPreview = React.useCallback(() => {
-    if (!comfySidebarPreviewImage || comfySidebarPreviewIsVideo) return;
-    if (nsfwPrivacyLocked && isProtectedLivePreview(comfySidebarPreviewPrompt)) {
-      requestNsfwPrivacyUnlock();
-      return;
-    }
-    window.dispatchEvent(new CustomEvent('umbra:gallery-open-path', {
-      detail: {
-        imagePath: LIVE_GENERATION_PREVIEW_PATH,
-        source: 'appbar-generation-preview',
-        imageDataUrl: comfySidebarPreviewImage,
-        prompt: comfySidebarPreviewPrompt || '',
-        status: effectiveComfyQueueBadge.status === 'complete' ? 'idle' : 'running',
-        updatedAt: Date.now(),
-      },
-    }));
-  }, [
-    comfySidebarPreviewPrompt,
-    nsfwPrivacyLocked,
-    requestNsfwPrivacyUnlock,
-    comfySidebarPreviewImage,
-    comfySidebarPreviewIsVideo,
-    effectiveComfyQueueBadge.status,
-  ]);
 
   return (
     <>
@@ -1953,7 +1358,7 @@ export const UmbraAppBar = () => {
       <nav data-umbra-phone-bottom-nav="" aria-label="Primary workspace navigation">
         <button
           type="button"
-          data-active={activeWorkspace === 'umbraui' || activeWorkspace === 'powerprompter' ? '1' : '0'}
+          data-active={activeWorkspace === 'umbraui' || activeWorkspace === 'powerprompter' || activeWorkspace === 'comfyui' ? '1' : '0'}
           onClick={() => handleWorkspaceSelect('umbraui')}
           aria-label="Open Umbra UI"
         >
@@ -1968,15 +1373,6 @@ export const UmbraAppBar = () => {
         >
           <ImageIcon size={19} />
           <span>{t('nav.gallery')}</span>
-        </button>
-        <button
-          type="button"
-          data-active={activeWorkspace === 'comfyui' ? '1' : '0'}
-          onClick={() => handleWorkspaceSelect('comfyui')}
-          aria-label="Open ComfyUI"
-        >
-          <Layers size={19} />
-          <span>Comfy</span>
         </button>
         <button
           type="button"
@@ -2442,130 +1838,20 @@ export const UmbraAppBar = () => {
       <div data-umbra-sidebar-nav="" className="flex-1 overflow-y-auto custom-scrollbar px-2 py-2">
         <div className="umbra-sidebar-section rounded-lg border border-transparent p-1">
           <div className="space-y-1">
-          {!isPhoneRemote ? (
             <button
               onClick={() => handleWorkspaceSelect('umbraui')}
-              className={sidebarNavItemClass(activeWorkspace === 'umbraui' || activeWorkspace === 'powerprompter', 'w-full')}
+              className={sidebarNavItemClass(activeWorkspace === 'umbraui' || activeWorkspace === 'powerprompter' || activeWorkspace === 'comfyui', 'w-full')}
             >
               <PanelsTopLeft size={14} />
               <span>{t('nav.umbraUi')}</span>
             </button>
+          {comfyLifecycleLabel ? (
+            <div role="status" data-umbra-comfy-startup-status="" title={comfyLifecycleLabel} className="flex min-h-7 items-center gap-2 px-3 text-[10px] text-amber-300">
+              <Loader2 size={13} className="shrink-0 animate-spin" />
+              {isSidebarExpanded ? <span className="min-w-0 break-words">{comfyLifecycleLabel}</span> : null}
+            </div>
           ) : null}
-
-          <div>
-            <div className="flex items-stretch gap-1">
-                <DroppableNavItem id="nav-comfy" className="flex-1">
-                  <button
-                    onClick={() => handleWorkspaceSelect('comfyui')}
-                    className={sidebarNavItemClass(activeWorkspace === 'comfyui', 'w-full')}
-                  >
-                    <Layers size={14} />
-                    <span>ComfyUI</span>
-                    {effectiveComfyQueueBadge.status === 'complete' && (
-                      <span
-                        className="ml-auto inline-flex items-center rounded-full border border-emerald-300/60 bg-emerald-500/15 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-emerald-100"
-                        title="ComfyUI queue completed"
-                      >
-                        Complete
-                      </span>
-                    )}
-                    <div
-                      className={cn(
-                        "w-1.5 h-1.5 rounded-full shadow-[0_0_5px_currentColor]",
-                        effectiveComfyQueueBadge.status === 'busy' || effectiveComfyQueueBadge.status === 'complete' ? "" : "ml-auto",
-                        effectiveComfyQueueBadge.recentComplete || effectiveComfyQueueBadge.status === 'complete'
-                          ? "text-emerald-300 bg-emerald-300 animate-pulse"
-                          : effectiveComfyQueueBadge.status === 'busy'
-                            ? "text-cyan-300 bg-cyan-300 animate-pulse"
-                            : effectiveComfyQueueBadge.status === 'error'
-                              ? "text-red-400 bg-red-400"
-                              : connections.comfyui === 'connected'
-                                ? "text-emerald-500 bg-emerald-500"
-                                : "text-zinc-700 bg-zinc-700"
-                      )}
-                    />
-                  </button>
-                </DroppableNavItem>
-                {!isPhoneRemote ? (
-                  <button
-                    onClick={(event) => handleOpenWorkspaceInBrowser(event, 'comfyui')}
-                    className={sidebarAuxButtonClass}
-                    title="Open ComfyUI in browser"
-                    aria-label="Open ComfyUI in browser"
-                  >
-                    <ExternalLink size={12} />
-                  </button>
-                ) : null}
-              </div>
-              <div
-                className={cn(
-                  'overflow-hidden transition-[max-height,opacity,transform,margin] duration-200 ease-out',
-                  showComfySidebarStatus
-                    ? 'mt-1 max-h-[30rem] translate-y-0 opacity-100'
-                    : 'mt-0 max-h-0 -translate-y-1 opacity-0 pointer-events-none'
-                )}
-                aria-hidden={!showComfySidebarStatus}
-              >
-                <div className="rounded-md border border-cyan-300/15 bg-cyan-500/[0.055] px-2.5 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[9px] font-black uppercase tracking-[0.16em] text-cyan-200">
-                      {comfyAppPreviewImage ? 'ComfyUI Preview' : powerPrompterQueueStatus?.total ? 'Power Prompter Queue' : 'ComfyUI Queue'}
-                    </span>
-                    <div className="ml-auto flex items-center gap-1.5">
-                      <span className="font-mono text-[10px] text-zinc-400">
-                        {effectiveComfyQueueBadge.remaining > 0
-                          ? `${effectiveComfyQueueBadge.remaining} left`
-                          : effectiveComfyQueueBadge.status === 'complete'
-                            ? 'complete'
-                            : effectiveComfyQueueBadge.status}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleSidebarSkipCurrentJob}
-                        disabled={!canSkipSidebarJob || sidebarSkipBusy}
-                        className={cn(
-                          'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider transition-colors',
-                          canSkipSidebarJob && !sidebarSkipBusy
-                            ? 'border-amber-300/35 bg-amber-500/12 text-amber-100 hover:border-amber-200/60'
-                            : 'border-white/10 bg-white/[0.03] text-zinc-600'
-                        )}
-                        title={canSkipSidebarJob ? 'Skip the current ComfyUI generation' : 'No running generation to skip'}
-                      >
-                        {sidebarSkipBusy ? <Loader2 size={10} className="animate-spin" /> : <Square size={9} />}
-                        Skip
-                      </button>
-                    </div>
-                  </div>
-                  {comfySidebarPreviewImage ? (
-                    <LiveGenerationPreview
-                      src={comfySidebarPreviewImage}
-                      prompt={comfySidebarPreviewPrompt}
-                      streamKey={comfyAppPreviewImage ? comfyAppPreview?.imagePromptId : powerPrompterQueueStatus?.previewPromptId}
-                      mimeType={comfyAppPreviewImage ? comfyAppPreview?.mimeType : undefined}
-                      onOpen={handleOpenSidebarGenerationPreview}
-                      className="mt-2 h-56 rounded-md border border-white/10"
-                    />
-                  ) : null}
-                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-black/35">
-                    <div
-                      className="h-full rounded-full bg-cyan-300/80 transition-[width] duration-300"
-                      style={{ width: `${Math.max(0, Math.min(100, comfySidebarProgress))}%` }}
-                    />
-                  </div>
-                  {comfySidebarPreviewStep ? (
-                    <div className="mt-1 font-mono text-[9px] uppercase tracking-wider text-cyan-100/85">
-                      {comfySidebarPreviewStep}
-                    </div>
-                  ) : null}
-                  {comfySidebarActivePrompt || comfySidebarNextPrompt ? (
-                    <div className="mt-1.5 min-w-0 text-[10px] leading-snug text-zinc-300">
-                      <span className="text-zinc-500">{comfySidebarActivePrompt ? 'Now: ' : 'Next: '}</span>
-                      <span className="line-clamp-2">{comfySidebarActivePrompt || comfySidebarNextPrompt}</span>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-          </div>
+          <TrainingProgressStatus collapsed={!isSidebarExpanded} enabled={!isRemoteClient} aiToolkit={aiToolkitStatus} />
 
           <div className="flex items-stretch gap-1">
             <button

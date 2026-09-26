@@ -2418,7 +2418,7 @@ export const Workspace = () => {
   } | null>(null);
   const getWorkspaceLayerStyle = (workspace: WorkspaceType): React.CSSProperties => {
     const isActive = workspace === 'umbraui'
-      ? activeWorkspace === 'umbraui' || activeWorkspace === 'powerprompter'
+      ? activeWorkspace === 'umbraui' || activeWorkspace === 'powerprompter' || activeWorkspace === 'comfyui'
       : activeWorkspace === workspace;
     const isTransitionFrom = workspaceTransition?.from === workspace;
     const isTransitionTo = workspaceTransition?.to === workspace;
@@ -2457,7 +2457,7 @@ export const Workspace = () => {
   });
   const [loadedWorkspaces, setLoadedWorkspaces] = useState<Record<string, boolean>>(() => ({
     [activeWorkspace]: true,
-    umbraui: activeWorkspace === 'umbraui' || activeWorkspace === 'powerprompter',
+    umbraui: activeWorkspace === 'umbraui' || activeWorkspace === 'powerprompter' || activeWorkspace === 'comfyui',
     library: true,
   }));
   useComponentDebug('Workspace', { activeWorkspace });
@@ -2492,8 +2492,8 @@ export const Workspace = () => {
     if (previousWorkspace === activeWorkspace) return;
 
     previousWorkspaceRef.current = activeWorkspace;
-    const stayedInsideUmbraUi = (previousWorkspace === 'umbraui' || previousWorkspace === 'powerprompter')
-      && (activeWorkspace === 'umbraui' || activeWorkspace === 'powerprompter');
+    const stayedInsideUmbraUi = ['umbraui', 'powerprompter', 'comfyui'].includes(previousWorkspace)
+      && ['umbraui', 'powerprompter', 'comfyui'].includes(activeWorkspace);
     if (stayedInsideUmbraUi) {
       setWorkspaceTransition(null);
       return;
@@ -2522,7 +2522,7 @@ export const Workspace = () => {
       return;
     }
     setLoadedWorkspaces((prev) => {
-      const workspaceToLoad = activeWorkspace === 'powerprompter' ? 'umbraui' : activeWorkspace;
+      const workspaceToLoad = activeWorkspace === 'powerprompter' || activeWorkspace === 'comfyui' ? 'umbraui' : activeWorkspace;
       if (prev[workspaceToLoad]) return prev;
       return { ...prev, [workspaceToLoad]: true };
     });
@@ -2581,14 +2581,6 @@ export const Workspace = () => {
         so long-running tool state survives workspace switches.
       */}
       
-      {/* ComfyUI Layer */}
-      <div
-        className="absolute inset-0 workspace-comfyui"
-        style={getWorkspaceLayerStyle('comfyui')}
-      >
-        {loadedWorkspaces.comfyui ? <ComfyUIWorkspace isActive={activeWorkspace === 'comfyui'} mobileManager={remoteMode === 'phone'} /> : null}
-      </div>
-
       {/* Umbra UI Layer */}
       <div
         className="absolute inset-0 workspace-umbraui"
@@ -2596,7 +2588,9 @@ export const Workspace = () => {
       >
         {loadedWorkspaces.umbraui ? (
           <Suspense fallback={null}>
-            <UmbraUIWorkspace />
+            <UmbraUIWorkspace renderComfyWorkspace={(active) => (
+              <ComfyUIWorkspace isActive={active && activeWorkspace === 'comfyui'} mobileManager={remoteMode === 'phone'} />
+            )} />
           </Suspense>
         ) : null}
       </div>

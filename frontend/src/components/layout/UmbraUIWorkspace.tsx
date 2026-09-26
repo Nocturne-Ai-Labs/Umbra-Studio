@@ -5,6 +5,7 @@ import { insertCatalogTagsAtCursor } from '@/lib/powerPrompterPromptInsertion';
 import { normalizeUmbraUiPinnedFolder } from '@/lib/pinnedOutputFolders';
 import { isSameUmbraCanvasImportHandoff } from '@/lib/umbraCanvasMediaImportGate';
 import React from 'react';
+import comfyLogo from '@/assets/comfy-logo-single.svg';
 import { formatMissingUmbraUiNodes } from '../../../../shared/umbra-ui/runtimeNodeMessages';
 import { UmbraPinnedOutputControl, usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
 import {
@@ -195,10 +196,10 @@ import {
   writeImg2ImgReplacementIntents,
 } from '@/lib/umbraImg2ImgReplacementIntents';
 
-type UmbraGenerationMode = 'prompter' | 'queue' | 'image' | 'img2img' | 'inpaint' | 'canvas' | 'video' | 'extras';
+type UmbraGenerationMode = 'prompter' | 'queue' | 'image' | 'img2img' | 'inpaint' | 'canvas' | 'video' | 'extras' | 'comfyui';
 
 const UMBRA_UI_ACTIVE_MODE_STORAGE_KEY = 'umbra-ui:active-mode';
-const UMBRA_UI_GENERATION_MODES: UmbraGenerationMode[] = ['prompter', 'queue', 'image', 'img2img', 'inpaint', 'canvas', 'video', 'extras'];
+const UMBRA_UI_GENERATION_MODES: UmbraGenerationMode[] = ['prompter', 'queue', 'image', 'img2img', 'inpaint', 'canvas', 'video', 'extras', 'comfyui'];
 
 function snapshotUmbraImageGenerationInfo(
   workflowName: string,
@@ -523,7 +524,7 @@ function PipelineControls({
   );
 }
 
-export function UmbraUIWorkspace() {
+export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspace: (active: boolean) => React.ReactNode }) {
   const { t } = useI18n();
   const workspaceRootRef = React.useRef<HTMLDivElement>(null);
   const [tabletPanels, toggleTabletPanel] = React.useReducer(reduceTabletPanels, INITIAL_TABLET_PANELS);
@@ -599,7 +600,7 @@ export function UmbraUIWorkspace() {
     () => new Set([activeMode]),
   );
   const previousShellWorkspaceRef = React.useRef<typeof activeWorkspace | null>(null);
-  const shellPrompterSyncPendingRef = React.useRef(false);
+  const shellModeSyncPendingRef = React.useRef<'prompter' | 'comfyui' | null>(null);
   const activeModeRef = React.useRef(activeMode);
   activeModeRef.current = activeMode;
   const openQueueManager = React.useCallback(() => setActiveMode('queue'), []);
@@ -610,24 +611,25 @@ export function UmbraUIWorkspace() {
     const previousWorkspace = previousShellWorkspaceRef.current;
     previousShellWorkspaceRef.current = activeWorkspace;
     if (previousWorkspace === activeWorkspace) return;
-    if (activeWorkspace === 'powerprompter' && activeModeRef.current !== 'prompter') {
-      shellPrompterSyncPendingRef.current = true;
-      setActiveMode('prompter');
+    const requestedMode = activeWorkspace === 'powerprompter' ? 'prompter' : activeWorkspace === 'comfyui' ? 'comfyui' : null;
+    if (requestedMode && activeModeRef.current !== requestedMode) {
+      shellModeSyncPendingRef.current = requestedMode;
+      setActiveMode(requestedMode);
     }
   }, [activeWorkspace]);
 
   React.useEffect(() => {
-    if (shellPrompterSyncPendingRef.current) {
-      if (activeMode !== 'prompter') return;
-      shellPrompterSyncPendingRef.current = false;
+    if (shellModeSyncPendingRef.current) {
+      if (activeMode !== shellModeSyncPendingRef.current) return;
+      shellModeSyncPendingRef.current = null;
       return;
     }
-    const targetWorkspace = activeMode === 'prompter' ? 'powerprompter' : 'umbraui';
+    const targetWorkspace = activeMode === 'prompter' ? 'powerprompter' : activeMode === 'comfyui' ? 'comfyui' : 'umbraui';
     const currentWorkspace = useStore.getState().activeWorkspace;
-    if (currentWorkspace !== 'umbraui' && currentWorkspace !== 'powerprompter') return;
+    if (currentWorkspace !== 'umbraui' && currentWorkspace !== 'powerprompter' && currentWorkspace !== 'comfyui') return;
     if (currentWorkspace === targetWorkspace) return;
     setActiveWorkspace(targetWorkspace);
-  }, [activeMode, setActiveWorkspace]);
+  }, [activeMode, activeWorkspace, setActiveWorkspace]);
 
   React.useEffect(() => {
     const root = document.documentElement;
@@ -2650,7 +2652,7 @@ export function UmbraUIWorkspace() {
     const publishContext = () => {
       void publishUmbraUiAgentContext({
         updatedAt: Date.now(),
-        activeMode: activeMode === 'prompter' || activeMode === 'queue' ? 'image' : activeMode,
+        activeMode: activeMode === 'prompter' || activeMode === 'queue' || activeMode === 'comfyui' ? 'image' : activeMode,
         image: {
           prompt: workflowImagePrompt,
           promptSegments: activeImagePromptSegments,
@@ -3127,6 +3129,7 @@ export function UmbraUIWorkspace() {
                 { value: 'inpaint', label: 'Inpaint', icon: <Paintbrush size={14} /> },
                 { value: 'video', label: 'Video', icon: <Clapperboard size={14} />, badge: 'BETA' },
                 { value: 'extras', label: 'Extras', icon: <ImageUp size={14} /> },
+                { value: 'comfyui', label: 'ComfyUI', icon: <img src={comfyLogo} alt="" className="h-4 w-4" /> },
                 { value: 'queue', label: 'Queue Manager', icon: <ListOrdered size={14} /> },
               ]}
               onValueChange={(nextValue) => navigateWorkspace(nextValue as UmbraGenerationMode)}
@@ -3142,7 +3145,7 @@ export function UmbraUIWorkspace() {
             ref={modeNavigationRef}
             data-umbra-ui-mode-nav=""
             data-umbra-ui-canvas-enabled={canvasEnabled ? 'true' : 'false'}
-            className="inline-flex h-9 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/25"
+            className="inline-flex h-9 min-w-0 max-w-full shrink overflow-x-auto rounded-md border border-white/10 bg-black/25 [&>button]:shrink-0"
           >
           <button
             type="button"
@@ -3224,6 +3227,18 @@ export function UmbraUIWorkspace() {
           >
             <ImageUp size={13} /> Extras
           </button>
+          <button
+            type="button"
+            data-umbra-ui-mode="comfyui"
+            onClick={() => navigateWorkspace('comfyui')}
+            title="ComfyUI workspace"
+            className={cn(
+              'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase transition-colors',
+              activeMode === 'comfyui' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-200',
+            )}
+          >
+            <img src={comfyLogo} alt="" className="h-5 w-5 shrink-0" /> ComfyUI
+          </button>
           </div>
         )}
         <div data-umbra-ui-header-actions="" className="ml-auto flex shrink-0 items-center gap-2">
@@ -3270,7 +3285,7 @@ export function UmbraUIWorkspace() {
           'grid min-h-0 flex-1',
           activeMode === 'video' && videoStoryboardOpen
             ? 'grid-cols-[minmax(340px,400px)_minmax(320px,380px)_minmax(320px,1fr)]'
-            : activeMode === 'canvas' || prompterSurfaceActive
+            : activeMode === 'canvas' || activeMode === 'comfyui' || prompterSurfaceActive
               ? 'grid-cols-[minmax(0,1fr)]'
             : activeMode === 'image'
               ? 'grid-cols-[clamp(300px,24vw,380px)_clamp(280px,22vw,360px)_minmax(300px,1fr)]'
@@ -3279,6 +3294,11 @@ export function UmbraUIWorkspace() {
               : 'grid-cols-[minmax(360px,400px)_minmax(320px,1fr)]',
         )}
       >
+        {modeIsMounted('comfyui') ? (
+          <div className={activeMode === 'comfyui' ? 'relative h-full min-h-0 min-w-0' : 'hidden'} aria-hidden={activeMode !== 'comfyui'}>
+            {renderComfyWorkspace(activeMode === 'comfyui')}
+          </div>
+        ) : null}
         {modeIsMounted('prompter') || modeIsMounted('queue') ? (
           <div
             data-umbra-ui-power-prompter=""
@@ -4000,7 +4020,7 @@ export function UmbraUIWorkspace() {
 
       </div>
 
-      {activeMode !== 'extras' && !prompterSurfaceActive && activeMode !== 'image' && activeMode !== 'img2img' && activeMode !== 'inpaint' ? (
+      {activeMode !== 'comfyui' && activeMode !== 'extras' && !prompterSurfaceActive && activeMode !== 'image' && activeMode !== 'img2img' && activeMode !== 'inpaint' ? (
         <PowerPrompterSearchPanel
           drawerTriggerContainer={activeMode === 'canvas' ? canvasCatalogTriggerContainer : undefined}
           onInsert={handleCatalogInsert}

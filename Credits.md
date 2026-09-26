@@ -75,6 +75,7 @@ up of coordinated frontend and backend services.
 
 ### ComfyUI
 - Project: https://github.com/comfyanonymous/ComfyUI
+- ComfyUI tab icon: the original yellow C app mark from https://github.com/Comfy-Org/ComfyUI_frontend/blob/main/public/assets/images/comfy-logo-single.svg, used without recoloring to identify the integrated ComfyUI interface.
 - Creator / maintainer: comfyanonymous, the Comfy Org team, and contributors
 - License: GPL-3.0
 - Usage in Umbra Studio:

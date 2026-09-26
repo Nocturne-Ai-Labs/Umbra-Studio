@@ -13,12 +13,14 @@ import {
   FolderOpen,
   History,
   Image as ImageIcon,
+  Loader2,
   MoreHorizontal,
   Pin,
   RefreshCw,
   RotateCcw,
   ScanSearch,
   Send,
+  SkipForward,
   Tags,
   Trash2,
   Undo2,
@@ -28,6 +30,7 @@ import { cn } from '@/lib/utils';
 import { getSelectedIdsForTarget, normalizeFilmstripSelectionId } from './filmstripSelection';
 import { NsfwPrivacyShield } from '@/components/privacy/NsfwPrivacyProvider';
 import type { UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
+import { FilmstripHoverPreview, useFilmstripHoverPreview } from './FilmstripHoverPreview';
 
 export interface FilmstripImage {
   id: string;
@@ -59,6 +62,9 @@ export interface FilmstripProps {
   statusMessage?: string;
   statusIsError?: boolean;
   recentGenerationImages?: FilmstripImage[];
+  onSkipGeneration?: () => void;
+  canSkipGeneration?: boolean;
+  skipGenerationPending?: boolean;
   recentGenerationExpanded?: boolean;
   onToggleRecentGenerationExpanded?: () => void;
   selectedIds: Set<string>;
@@ -660,6 +666,8 @@ function FilmstripTile({
   onDragEnd: () => void;
 }) {
   const retryTimerRef = useRef<number | null>(null);
+  const tileRef = useRef<HTMLButtonElement>(null);
+  const hoverPreview = useFilmstripHoverPreview(image.path);
   const primarySrc = useMemo(() => image.thumbnailUrl || image.url || fallbackThumbnailUrl(image), [
     image.dateCreated,
     image.dateModified,
@@ -716,13 +724,20 @@ function FilmstripTile({
   }, [primarySrc, retry]);
 
   return (
+    <>
     <button
+      ref={tileRef}
       type="button"
       draggable={!isLivePreview && !selectionMode && !singleTapOpen}
       data-filmstrip-id={image.id}
       data-active-workspace={activeWorkspace || ''}
       data-umbra-filmstrip-live-preview={isLivePreview ? '1' : '0'}
-      title={tooltip}
+      aria-label={tooltip}
+      onMouseEnter={hoverPreview.enter}
+      onMouseLeave={hoverPreview.close}
+      onFocus={hoverPreview.enter}
+      onBlur={hoverPreview.close}
+      onPointerDown={hoverPreview.close}
       data-umbra-filmstrip-selection-mode={selectionMode ? '1' : '0'}
       onClick={(event) => {
         if (singleTapOpen) {
@@ -732,8 +747,8 @@ function FilmstripTile({
         onSelect(event);
       }}
       onDoubleClick={singleTapOpen || selectionMode ? undefined : onOpen}
-      onContextMenu={onContextMenu}
-      onDragStart={onDragStart}
+      onContextMenu={(event) => { hoverPreview.close(); onContextMenu(event); }}
+      onDragStart={(event) => { hoverPreview.close(); onDragStart(event); }}
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDragEnd={onDragEnd}
@@ -760,7 +775,7 @@ function FilmstripTile({
           alt={image.name}
           loading="lazy"
           decoding="async"
-          className="h-full w-full select-none object-cover"
+          className={cn('h-full w-full select-none', isLivePreview ? 'object-contain' : 'object-cover')}
           draggable={false}
           onLoad={(event) => {
             const img = event.currentTarget;
@@ -777,6 +792,7 @@ function FilmstripTile({
             }
           }}
           onError={() => {
+            if (isLivePreview) return;
             if (!failedPrimary && image.url && image.url !== src) {
               setFailedPrimary(true);
               setSrc(image.url);
@@ -836,6 +852,8 @@ function FilmstripTile({
         ) : size ? <div className="truncate text-[9px] text-zinc-400">{size}</div> : null}
       </div>
     </button>
+    {hoverPreview.open ? <FilmstripHoverPreview anchor={tileRef} image={image} open /> : null}
+    </>
   );
 }
 
@@ -844,6 +862,9 @@ export function Filmstrip({
   statusMessage,
   statusIsError = false,
   recentGenerationImages = [],
+  onSkipGeneration,
+  canSkipGeneration = false,
+  skipGenerationPending = false,
   recentGenerationExpanded = false,
   onToggleRecentGenerationExpanded,
   selectedIds,
@@ -1284,7 +1305,7 @@ export function Filmstrip({
       )}
       style={{ height: fillContainer ? '100%' : `${height}px` }}
     >
-      <div className="flex min-h-10 items-center justify-between gap-3 border-b border-zinc-800/80 px-3 py-1.5">
+      <div className="flex min-h-10 flex-wrap items-center justify-between gap-3 border-b border-zinc-800/80 px-3 py-1.5">
         <div className="flex min-w-0 items-center gap-2">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-zinc-800 bg-zinc-900/80 text-zinc-400">
             <ImageIcon size={14} />
@@ -1310,6 +1331,19 @@ export function Filmstrip({
         </div>
 
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
+          {onSkipGeneration ? (
+            <button
+              type="button"
+              onClick={onSkipGeneration}
+              disabled={!canSkipGeneration || skipGenerationPending}
+              aria-label="Skip current generation"
+              aria-busy={skipGenerationPending}
+              title={skipGenerationPending ? 'Skipping current generation' : canSkipGeneration ? 'Skip current generation; keep pending jobs' : 'No running generation to skip'}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-zinc-800 text-zinc-400 hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {skipGenerationPending ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <SkipForward size={14} aria-hidden="true" />}
+            </button>
+          ) : null}
           <FilmstripFolderSelector
             unreadCount={unreadFolderMediaCount}
             pinnedFolders={pinnedFolders}
@@ -1559,7 +1593,7 @@ export function Filmstrip({
               'grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2',
             )}
           >
-            {images.map((image) => (
+            {orderedSelectionImages.map((image) => (
               <FilmstripTile
                 key={image.id}
                 image={image}
