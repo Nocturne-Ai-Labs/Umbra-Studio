@@ -58,6 +58,7 @@ import { prepareGalleryDownload, startGalleryDownload } from '@/lib/galleryDownl
 import { GalleryTransferStrip } from './GalleryTransferStrip';
 import { archiveIsActive, startGalleryArchive, useGalleryArchive } from '@/lib/galleryArchives';
 import { GalleryArchiveList, GalleryArchiveStatus } from './GalleryArchives';
+import { GalleryBreadcrumbs } from './GalleryBreadcrumbs';
 import { openUmbraUiExtrasTool } from '@/lib/umbraUiExtrasNavigation';
 import { cn } from '@/lib/utils';
 import {
@@ -92,7 +93,7 @@ import { buildGalleryGenerationPromptDetails } from '@/lib/galleryGenerationProm
 import { PowerPrompterActivePromptInline } from './PowerPrompterActivePromptInline';
 import type { Dataset } from '@/components/board/types';
 import { resolveGalleryContextSelectionPaths } from './galleryContextSelection';
-import { NsfwPrivacyShield } from '@/components/privacy/NsfwPrivacyProvider';
+import { NsfwPrivacyShield, useNsfwPrivacy } from '@/components/privacy/NsfwPrivacyProvider';
 import { classifyUmbraPrompt, type UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
 import { UMBRA_MANUAL_NSFW_TAG } from '../../../../shared/nsfwPrivacyClassifier';
 
@@ -545,6 +546,8 @@ class ThumbnailLoadScheduler {
 }
 
 const thumbnailLoadScheduler = new ThumbnailLoadScheduler(THUMBNAIL_LOAD_CONCURRENCY);
+const folderCoverScheduler = new ThumbnailLoadScheduler(3);
+const folderCoverCache = new Map<string, { file: GalleryFile | null; at: number; revision: number }>();
 
 type GalleryRootKind = 'output' | 'external' | 'trash';
 
@@ -555,7 +558,7 @@ type GalleryRootChoice = {
 };
 
 type GalleryContextMenuState = {
-  kind: 'media' | 'folder' | 'transfer';
+  kind: 'media' | 'folder' | 'transfer' | 'background' | 'archive';
   x: number;
   y: number;
   targetPath: string;
@@ -2617,6 +2620,97 @@ function LibraryNavigator({
       </div>
     </aside>
   );
+}
+
+function GalleryFolderTile({ folder, cardSize, cardHeight, revision, dropTargeted, onOpen, onContextMenu, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }: {
+  folder: GalleryFolder;
+  cardSize: number;
+  cardHeight: number;
+  revision: number;
+  dropTargeted: boolean;
+  onOpen: () => void;
+  onContextMenu: (event: GalleryContextMenuEvent) => void;
+  onDragStart: (event: React.DragEvent) => void;
+  onDragEnd: () => void;
+  onDragOver: (event: React.DragEvent) => void;
+  onDragLeave: () => void;
+  onDrop: (event: React.DragEvent) => void;
+}) {
+  const { locked } = useNsfwPrivacy();
+  const [cover, setCover] = useState<GalleryFile | null>(null);
+  const [failedImage, setFailedImage] = useState(false);
+  const longPress = useGalleryLongPress(point => onContextMenu(galleryPointToContextEvent(point)));
+  useEffect(() => {
+    setCover(null);
+    setFailedImage(false);
+    const cached = folderCoverCache.get(folder.path);
+    if (cached && cached.revision === revision && Date.now() - cached.at < 60_000) {
+      setCover(cached.file);
+      return;
+    }
+    const controller = new AbortController();
+    let releaseSlot: (() => void) | undefined;
+    const cancel = folderCoverScheduler.acquire(`folder:${folder.path}`, release => {
+      releaseSlot = release;
+      void (async () => {
+        try {
+          const response = await fetchGalleryFs('/list-progressive', new URLSearchParams({
+            path: folder.path, limit: '1', sortBy: 'name', sortOrder: 'asc', fast: '1', recursive: 'false',
+          }), { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]) });
+          if (!response.ok) return;
+          const payload: GalleryListPayload = await response.json();
+          if (controller.signal.aborted) return;
+          const file = payload.files?.find(entry => entry.type !== 'folder');
+          const normalized = file ? normalizeGalleryFile(file) : null;
+          folderCoverCache.delete(folder.path);
+          folderCoverCache.set(folder.path, { file: normalized, at: Date.now(), revision });
+          while (folderCoverCache.size > 160) folderCoverCache.delete(folderCoverCache.keys().next().value!);
+          setCover(normalized);
+        } catch { /* A missing cover must not prevent opening the folder. */ }
+        finally { release(); }
+      })();
+    });
+    return () => { controller.abort(); cancel(); releaseSlot?.(); };
+  }, [folder.path, revision]);
+  const protectedMedia = cover?.privacyClass !== 'normal';
+  return <div
+    role="button"
+    tabIndex={0}
+    aria-label={`Open folder ${folder.name}`}
+    title={folder.path}
+    data-umbra-gallery-tile=""
+    data-umbra-gallery-tile-type="folder"
+    onClick={() => { if (!longPress.consumeSuppressedClick()) onOpen(); }}
+    onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(); } }}
+    onContextMenu={onContextMenu}
+    onPointerDown={longPress.onPointerDown}
+    onPointerMove={longPress.onPointerMove}
+    onPointerUp={longPress.onPointerUp}
+    onPointerCancel={longPress.onPointerCancel}
+    draggable
+    onDragStart={onDragStart}
+    onDragEnd={onDragEnd}
+    onDragOver={event => { event.stopPropagation(); onDragOver(event); }}
+    onDragLeave={onDragLeave}
+    onDrop={event => { event.stopPropagation(); onDrop(event); }}
+    className={cn('relative flex cursor-pointer flex-col overflow-hidden rounded-lg border bg-zinc-950/90 p-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-[var(--umbra-accent)]', dropTargeted ? 'border-[var(--umbra-accent)] ring-2 ring-[var(--umbra-accent)]' : 'border-white/10 hover:border-white/25')}
+    style={{ width: cardSize, height: cardHeight }}
+  >
+    <div className="mb-1 flex h-5 shrink-0 items-center justify-between px-0.5 text-[10px] text-zinc-400">
+      <span>FOLDER</span>
+      <button type="button" aria-label={`Folder menu for ${folder.name}`} title="Folder actions" className="flex h-5 w-6 items-center justify-center hover:text-white" onClick={event => { event.stopPropagation(); onContextMenu(event); }} onKeyDown={event => event.stopPropagation()}><MoreHorizontal size={14} /></button>
+    </div>
+    <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-zinc-900/60">
+      <FolderOpen size={54} className="text-zinc-500" />
+      {cover && !failedImage && !(locked && protectedMedia) ? <img src={thumbnailUrl(cover)} alt={`Preview of ${folder.name}`} data-umbra-nsfw-media={protectedMedia ? '' : undefined} draggable={false} decoding="async" className="absolute inset-0 h-full w-full object-contain" onError={() => setFailedImage(true)} /> : null}
+      <span className="pointer-events-none absolute bottom-2 left-2 rounded border border-white/15 bg-zinc-950/90 p-1.5 text-zinc-200"><Folder size={18} /></span>
+      {cover && <NsfwPrivacyShield compact protectedMedia={protectedMedia} />}
+    </div>
+    <div className="shrink-0 px-0.5 pb-0.5 pt-1.5">
+      <div className="truncate text-xs leading-4 text-zinc-100">{folder.name}</div>
+      <div className="text-[10px] leading-3 text-zinc-500">Folder</div>
+    </div>
+  </div>;
 }
 
 function GalleryImageTile({
@@ -4787,6 +4881,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const [contextMenu, setContextMenu] = useState<GalleryContextMenuState | null>(null);
   const [datasetPicker, setDatasetPicker] = useState<GalleryDatasetPickerState | null>(null);
   const [folderClipboard, setFolderClipboard] = useState<{ source: string; mode: 'copy' | 'move' } | null>(null);
+  const [fileClipboard, setFileClipboard] = useState<{ paths: string[]; mode: 'copy' | 'move' } | null>(null);
   const undoMove = useGalleryUndoMove();
   const [renameModal, setRenameModal] = useState<GalleryRenameModalState | null>(null);
   const [tagModal, setTagModal] = useState<GalleryTagModalState | null>(null);
@@ -7138,6 +7233,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     setOpenedFolders((current) => uniqueNormalizedPaths(current.map(remap)));
     setOpeningFolder(remap);
     setFolderClipboard((current) => current ? { ...current, source: remap(current.source) } : current);
+    setFileClipboard(current => current ? { ...current, paths: current.paths.map(remap) } : current);
     if (options?.updateFolderSettings !== false) remapSavedFolderSettings([{ source, target }]);
 
     // Drop request ownership before remapping caches so old replies cannot restore the old branch.
@@ -7341,6 +7437,15 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     if (successfulResults.length) refreshAfterTransfer(successfulResults, transferProgress.destination, transferProgress.mode);
     if (transferProgress.mode === 'move') {
       setFolderClipboard(current => folderClipboardAfterTransfer(current, successfulResults, transferProgress.mode));
+      setFileClipboard(current => {
+        if (!current) return null;
+        const paths = current.paths.flatMap(path => {
+          const moved = successfulResults.find(result => pathsEqual(result.path, path) || (result.newPath && pathsEqual(result.newPath, path)));
+          if (!moved) return [path];
+          return current.mode === 'move' ? [] : [moved.newPath || path];
+        });
+        return paths.length ? { ...current, paths } : null;
+      });
     }
     const failures = transferProgress.results.filter(result => !result.success).length;
     addToast({
@@ -9712,12 +9817,30 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   }, [columnCount, effectiveGridWidth, isPhoneRemote]);
   const cardHeight = cardSize + (isPhoneRemote ? PHONE_GRID_CARD_EXTRA_HEIGHT : GRID_CARD_EXTRA_HEIGHT);
 
-  const fileRowCount = Math.ceil(displayFiles.length / columnCount);
+  const singleFolderExplorer = !multiFolderView && !trashMode && !globalSearchActive && !searchNeedle && !metadataSearchActive && !groupBySet;
+  const gridFiles = useMemo<GalleryFile[]>(() => singleFolderExplorer
+    ? [...childFolderNodes.map(folder => ({ ...folder, type: 'folder' as const })), ...displayFiles]
+    : displayFiles, [childFolderNodes, displayFiles, singleFolderExplorer]);
+  const virtualGridRef = useRef<HTMLDivElement>(null);
+  const [gridScrollMargin, setGridScrollMargin] = useState(0);
+  useEffect(() => {
+    const grid = virtualGridRef.current;
+    const scroll = scrollParentRef.current;
+    if (!grid || !scroll) return;
+    const measure = () => setGridScrollMargin(grid.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroll);
+    for (const sibling of Array.from(scroll.children)) observer.observe(sibling);
+    return () => observer.disconnect();
+  }, [archiveCount, currentFolder, gridFiles.length, folderPreviewMode, groupBySet, globalSearchActive, loading, openingDifferentFolder]);
+  const fileRowCount = Math.ceil(gridFiles.length / columnCount);
   const rowVirtualizer = useVirtualizer({
     count: fileRowCount,
     getScrollElement: () => scrollParentRef.current,
     estimateSize: () => cardHeight + GRID_GAP,
     overscan: 4,
+    scrollMargin: gridScrollMargin,
   });
   const virtualRows = rowVirtualizer.getVirtualItems();
 
@@ -9743,11 +9866,11 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   useEffect(() => {
     const pendingPath = normalizePath(pendingRevealPathRef.current);
     if (!pendingPath || columnCount <= 0) return;
-    const index = displayFiles.findIndex((file) => pathsEqual(file.path, pendingPath));
+    const index = gridFiles.findIndex((file) => pathsEqual(file.path, pendingPath));
     if (index < 0) return;
     pendingRevealPathRef.current = '';
     rowVirtualizer.scrollToIndex(Math.max(0, Math.floor(index / columnCount)), { align: 'center' });
-  }, [columnCount, displayFiles, rowVirtualizer]);
+  }, [columnCount, gridFiles, rowVirtualizer]);
 
   const viewerFile = useMemo(() => {
     const normalized = normalizePath(viewerPath);
@@ -9910,7 +10033,17 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       ];
     }
 
-    if (contextMenu.kind === 'folder') {
+    if (contextMenu.kind === 'archive') {
+      return [
+        { label: 'Copy ZIP', icon: <Copy size={14} />, disabled: transferInProgress, action: () => { setFolderClipboard(null); setFileClipboard({ paths: [targetPath], mode: 'copy' }); } },
+        { label: 'Cut ZIP', icon: <Scissors size={14} />, disabled: transferInProgress, action: () => { setFolderClipboard(null); setFileClipboard({ paths: [targetPath], mode: 'move' }); } },
+        { separator: true },
+        ...(!isRemoteClient ? [{ label: 'Show in File Explorer', icon: <FolderOpen size={14} />, action: () => void revealPaths([targetPath]) }] satisfies ContextMenuItem[] : []),
+        { label: 'Copy Path', icon: <Copy size={14} />, action: () => void copyPaths([targetPath]) },
+      ];
+    }
+
+    if (contextMenu.kind === 'folder' || contextMenu.kind === 'background') {
       if (isTrashPath(targetPath)) {
         return [
           { label: 'Open', icon: <FolderOpen size={14} />, action: () => openFolder(targetPath) },
@@ -9938,9 +10071,30 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           action: () => void transferPathsToFolder(Array.from(selectedPaths), targetPath, 'copy'),
         },
       ];
+      const pasteFilesItem: ContextMenuItem = {
+        label: 'Paste Files', icon: <ClipboardPaste size={14} />,
+        badge: fileClipboard ? `${fileClipboard.mode === 'move' ? 'Move' : 'Copy'} ${fileClipboard.paths.length}` : undefined,
+        disabled: transferInProgress || !fileClipboard || getValidTransferPathsForDestination(fileClipboard.paths, targetPath, fileClipboard.mode).length === 0,
+        action: () => { if (fileClipboard) void transferPathsToFolder(fileClipboard.paths, targetPath, fileClipboard.mode); },
+      };
       const folderFileItems: ContextMenuItem[] = [
         { label: 'Copy Path', icon: <Copy size={14} />, action: () => void copyPaths([targetPath]) },
         { label: 'Rename Folder...', icon: <MoreHorizontal size={14} />, action: () => void renameFolder(targetPath) },
+      ];
+      if (contextMenu.kind === 'background') return [
+        { label: 'New Subfolder...', icon: <Folder size={14} />, action: () => void createSubfolder(targetPath) },
+        pasteFilesItem,
+        {
+          label: 'Paste Folder', icon: <ClipboardPaste size={14} />,
+          badge: folderClipboard?.mode === 'move' ? 'Move' : folderClipboard ? 'Copy' : undefined,
+          disabled: transferInProgress || !folderClipboard || getValidTransferPathsForDestination([folderClipboard.source], targetPath, folderClipboard.mode).length === 0,
+          action: () => { if (folderClipboard) void transferPathsToFolder([folderClipboard.source], targetPath, folderClipboard.mode); },
+        },
+        ...transferItems,
+        { separator: true },
+        { label: 'Create ZIP', icon: <Archive size={14} />, disabled: archiveIsActive(archiveJob), action: () => void startGalleryArchive(targetPath) },
+        ...(!isRemoteClient ? [{ label: 'Open in File Explorer', icon: <FolderOpen size={14} />, action: () => void revealPaths([targetPath]) }] satisfies ContextMenuItem[] : []),
+        { label: 'Copy Path', icon: <Copy size={14} />, action: () => void copyPaths([targetPath]) },
       ];
       return [
         { label: 'Open Folder', icon: <FolderOpen size={14} />, action: () => openFolder(targetPath) },
@@ -9968,13 +10122,13 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           label: 'Copy Folder',
           icon: <Copy size={14} />,
           disabled: transferInProgress || !pathParent(targetPath),
-          action: () => setFolderClipboard({ source: targetPath, mode: 'copy' }),
+          action: () => { setFileClipboard(null); setFolderClipboard({ source: targetPath, mode: 'copy' }); },
         },
         {
           label: 'Cut Folder',
           icon: <Scissors size={14} />,
           disabled: transferInProgress || !pathParent(targetPath),
-          action: () => setFolderClipboard({ source: targetPath, mode: 'move' }),
+          action: () => { setFileClipboard(null); setFolderClipboard({ source: targetPath, mode: 'move' }); },
         },
         {
           label: 'Paste Folder',
@@ -9984,6 +10138,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           action: () => {
             if (folderClipboard) void transferPathsToFolder([folderClipboard.source], targetPath, folderClipboard.mode);
           },
+        },
+        {
+          ...pasteFilesItem,
         },
         {
           label: 'Transfer Selected',
@@ -10174,6 +10331,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     ];
     return [
       { label: 'Open', icon: <ImageIcon size={14} />, disabled: !targetFile, action: () => targetFile && openFile(targetFile) },
+      { label: paths.length > 1 ? `Copy ${paths.length} Files` : 'Copy File', icon: <Copy size={14} />, disabled: transferInProgress || paths.length === 0, action: () => { setFolderClipboard(null); setFileClipboard({ paths, mode: 'copy' }); } },
+      { label: paths.length > 1 ? `Cut ${paths.length} Files` : 'Cut File', icon: <Scissors size={14} />, disabled: transferInProgress || paths.length === 0, action: () => { setFolderClipboard(null); setFileClipboard({ paths, mode: 'move' }); } },
       ...(targetPowerPrompterPngPath ? [
         {
           label: 'Restore in Power Prompter',
@@ -10225,6 +10384,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   }, [
     contextMenu,
     folderClipboard,
+    fileClipboard,
     archiveJob,
     openOrCopyComfyWorkflow,
     copyPaths,
@@ -10268,6 +10428,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     const targetPath = normalizePath(contextMenu.targetPath);
     const title = pathLeaf(targetPath) || 'Selection';
     if (contextMenu.kind === 'folder') return { title, subtitle: 'Folder' };
+    if (contextMenu.kind === 'background') return { title, subtitle: 'Current folder' };
+    if (contextMenu.kind === 'archive') return { title, subtitle: 'ZIP archive' };
     if (contextMenu.kind === 'transfer') {
       const count = contextMenu.paths?.length || 0;
       return { title, subtitle: `${count} item${count === 1 ? '' : 's'} ready to transfer` };
@@ -10434,18 +10596,28 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       >
         <header
           data-umbra-gallery-header=""
-          className="flex min-h-14 items-center justify-between gap-3 border-b border-zinc-800/80 bg-zinc-950/90 px-4"
+          className="flex min-h-14 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-zinc-800/80 bg-zinc-950/90 px-4 py-1"
         >
-          <div data-umbra-gallery-folder-summary="" className="min-w-0 flex-1">
-            <div data-umbra-gallery-folder-title="" className="truncate text-sm font-semibold text-zinc-100">
-              {openingDifferentFolder ? `Opening ${pathLeaf(openingFolder) || openingFolder}` : (pathLeaf(currentFolder) || currentFolder)}
-            </div>
+          <div data-umbra-gallery-folder-summary="" className="min-w-[min(100%,240px)] flex-1">
+            <GalleryBreadcrumbs
+              folder={displayFolder}
+              roots={rootChoices}
+              childrenByPath={treeChildrenByPath}
+              loadingPaths={loadingTreePaths}
+              loadChildren={loadTreeChildren}
+              onOpen={openFolder}
+              onContextMenu={openFolderContextMenu}
+              onDragOver={handleFolderDropTargetDragOver}
+              onDragLeave={handleFolderDropTargetDragLeave}
+              onDrop={handleFolderDropTargetDrop}
+              dropTarget={dropTargetFolder}
+            />
             <div
               data-umbra-gallery-path-ticker=""
               className="truncate text-[11px] text-zinc-500"
               title={`${displayFolder} - ${openingDifferentFolder ? 'opening...' : `${formatCount(total, files.length)} loaded`}`}
             >
-              <span>{displayFolder} - {openingDifferentFolder ? 'opening...' : `${formatCount(total, files.length)} loaded`}</span>
+              <span>{openingDifferentFolder ? 'Opening folder...' : `${formatCount(total, files.length)} media loaded`}</span>
             </div>
           </div>
 
@@ -10578,7 +10750,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                   ? `${displayFiles.length + folderPreviewFiles.length} media, ${folderPreviewGroups.length || childFolderNodes.length} folder${(folderPreviewGroups.length || childFolderNodes.length) === 1 ? '' : 's'}`
                   : searchNeedle
                     ? `${displayFiles.length} match${displayFiles.length === 1 ? '' : 'es'} in current folder`
-                    : `${displayFiles.length} visible`}
+                    : singleFolderExplorer
+                      ? `${displayFiles.length} media, ${childFolderNodes.length} folder${childFolderNodes.length === 1 ? '' : 's'}${archiveCount ? `, ${archiveCount} ZIP${archiveCount === 1 ? '' : 's'}` : ''}`
+                      : `${displayFiles.length} visible`}
             </div>
             <div data-umbra-gallery-action-controls="" className="flex items-center gap-2">
               {!trashMode ? (
@@ -10810,9 +10984,22 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
             ref={scrollParentRef}
             data-umbra-gallery-scroll=""
             onScroll={handleGalleryMediaScroll}
-            className="min-h-0 flex-1 overflow-y-auto p-3"
+            onContextMenu={event => {
+              if (!singleFolderExplorer || (event.target as Element).closest('[data-umbra-gallery-tile], [data-gallery-archives], button, input, a')) return;
+              event.preventDefault();
+              event.stopPropagation();
+              setContextMenu({ kind: 'background', x: event.clientX, y: event.clientY, targetPath: currentFolder });
+            }}
+            onDragOver={event => { if (singleFolderExplorer) handleFolderDropTargetDragOver(event, currentFolder); }}
+            onDragLeave={() => handleFolderDropTargetDragLeave(currentFolder)}
+            onDrop={event => { if (singleFolderExplorer) handleFolderDropTargetDrop(event, currentFolder); }}
+            className={cn('min-h-0 flex-1 overflow-y-auto p-3', singleFolderExplorer && pathsEqual(dropTargetFolder, currentFolder) && 'ring-2 ring-inset ring-[var(--umbra-accent)]')}
           >
-            {!trashMode && <GalleryArchiveList folder={currentFolder} job={archiveJob} query={searchNeedle} onCount={setArchiveCount} />}
+            {!trashMode && <GalleryArchiveList folder={currentFolder} job={archiveJob} query={searchNeedle} onCount={setArchiveCount} onContextMenu={(event, path) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setContextMenu({ kind: 'archive', x: event.clientX, y: event.clientY, targetPath: path });
+            }} />}
             {openingDifferentFolder ? (
               <div className="flex h-full flex-col items-center justify-center gap-2 text-zinc-500">
                 <div className="flex items-center text-sm">
@@ -10831,7 +11018,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                 <Loader2 className="mr-2 animate-spin" size={18} />
                 Searching gallery
               </div>
-            ) : displayFiles.length === 0 && !folderPreviewMode && (!globalSearchActive || searchFolders.length === 0) ? (
+            ) : gridFiles.length === 0 && !folderPreviewMode && (!globalSearchActive || searchFolders.length === 0) ? (
               <div className={archiveCount > 0 && !trashMode ? 'hidden' : 'flex h-full items-center justify-center text-sm text-zinc-500'}>
                 {searchNeedle ? 'No matches found' : trashMode ? 'No items in Trash' : 'No media in this folder'}
               </div>
@@ -11425,6 +11612,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
               </div>
             ) : (
               <div
+                ref={virtualGridRef}
                 className="relative"
                 style={{ height: rowVirtualizer.getTotalSize() }}
                 data-umbra-virtualized-gallery-grid
@@ -11432,7 +11620,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                 {virtualRows.map((virtualRow) => {
                   const rowIndex = virtualRow.index;
                   const start = rowIndex * columnCount;
-                  const rowFiles = displayFiles.slice(start, start + columnCount);
+                  const rowFiles = gridFiles.slice(start, start + columnCount);
                   const rowKey = rowFiles
                     .map((file) => fileId(file) || normalizePath(file.path))
                     .join('|');
@@ -11444,7 +11632,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                         gridTemplateColumns: `repeat(${columnCount}, minmax(0, ${cardSize}px))`,
                         gap: GRID_GAP,
                         height: cardHeight,
-                        transform: `translateY(${virtualRow.start}px)`,
+                        transform: `translateY(${virtualRow.start - gridScrollMargin}px)`,
                         justifyContent: isPhoneRemote ? 'center' : undefined,
                       }}
                     >
@@ -11454,6 +11642,21 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                         const selected = selectedPathKeys.has(selectionPathKey(path));
                         const metadataMatch = metadataMatchByPath.get(path.toLowerCase());
                         const prioritizeThumbnail = rowIndex <= 1;
+                        if (singleFolderExplorer && file.type === 'folder') return <GalleryFolderTile
+                          key={`folder:${path}`}
+                          folder={file}
+                          cardSize={cardSize}
+                          cardHeight={cardHeight}
+                          revision={folderPreviewRefreshVersion}
+                          dropTargeted={pathsEqual(dropTargetFolder, path)}
+                          onOpen={() => openFolder(path)}
+                          onContextMenu={event => openFolderContextMenu(event, path)}
+                          onDragStart={event => startFolderDrag(event, path)}
+                          onDragEnd={clearMediaDrag}
+                          onDragOver={event => handleFolderDropTargetDragOver(event, path)}
+                          onDragLeave={() => handleFolderDropTargetDragLeave(path)}
+                          onDrop={event => handleFolderDropTargetDrop(event, path)}
+                        />;
                         return (
                           <GalleryImageTile
                             key={id}
