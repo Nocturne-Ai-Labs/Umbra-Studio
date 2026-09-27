@@ -6,6 +6,9 @@ export function formatMissingUmbraUiNodes(missing: string[]): string {
   if (missing.some((name) => ['Anima38BV2Loader', 'Anima38BV2Prompt', 'AnimaQwen35Loader'].includes(name))) {
     return `${message} Update ComfyUI and install/update comfyui-anima-3-8B through Umbra's managed custom-node setup, then restart ComfyUI. The extension needs native Anima support.`;
   }
+  if (missing.includes('UmbraAnimaQwen35CpuLoader')) {
+    return `${message} Run Umbra's managed ComfyUI custom-node setup and restart ComfyUI to use Anima CPU text encoding.`;
+  }
   if (missing.includes('PathchSageAttentionKJ')) {
     return `${message} Disable Sage Attention to use standard mode, or install/update KJNodes and its SageAttention dependency through the managed ComfyUI environment, then restart ComfyUI.`;
   }

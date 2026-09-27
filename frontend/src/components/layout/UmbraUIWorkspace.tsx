@@ -7,6 +7,7 @@ import { isSameUmbraCanvasImportHandoff } from '@/lib/umbraCanvasMediaImportGate
 import React from 'react';
 import comfyLogo from '@/assets/comfy-logo-single.svg';
 import { formatMissingUmbraUiNodes } from '../../../../shared/umbra-ui/runtimeNodeMessages';
+import { ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, normalizeAnima38TextEncoderDevice } from '../../../../shared/umbra-ui/animaTextEncoderDevice';
 import { UmbraPinnedOutputControl, usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
 import {
   Activity,
@@ -3435,6 +3436,23 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               onChoose={openWorkflowResourcePicker}
               onChange={updateWorkflowResource}
             />
+
+            {activeMode === 'image' && selectedImagePipeline?.modelFamilyKey === 'anima38b' ? (
+              <label className="block space-y-1.5">
+                <span className={labelClass}>Anima Text Encoders</span>
+                <UmbraSelectControl
+                  value={normalizeAnima38TextEncoderDevice(workflowResourceValues[ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE])}
+                  onChange={(event) => updateWorkflowResource(ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, event.target.value)}
+                  className={inputClass}
+                >
+                  <option value="default">Auto offload after prompt</option>
+                  <option value="cpu">Encode on CPU (low VRAM)</option>
+                </UmbraSelectControl>
+                <p className="font-mono text-[9px] leading-relaxed text-zinc-500">
+                  CPU encoding saves VRAM while preparing the prompt, but takes longer. Both encoders unload after use in either mode.
+                </p>
+              </label>
+            ) : null}
 
             {imageCapabilities.loras.support === 'adjustable' ? (
               <UmbraLoraStackControls

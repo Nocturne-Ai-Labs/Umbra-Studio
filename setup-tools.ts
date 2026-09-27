@@ -1314,6 +1314,24 @@ function syncUmbraNodesToComfy(nodesDir: string): boolean {
     return false;
 }
 
+function syncUmbraAnimaCpuNode(nodesDir: string): boolean {
+    const source = join(ROOT_DIR, 'backend', 'python', 'comfy_nodes', 'umbra_anima_cpu', '__init__.py');
+    const targetDir = join(nodesDir, 'umbra_anima_cpu');
+    if (!existsSync(source)) {
+        log(`${c.red}X${c.reset}`, 'Umbra Anima CPU node source is missing');
+        return false;
+    }
+    try {
+        ensureDir(targetDir);
+        cpSync(source, join(targetDir, '__init__.py'), { force: true });
+        log(`${c.green}OK${c.reset}`, 'Umbra Anima CPU node installed');
+        return true;
+    } catch {
+        log(`${c.red}X${c.reset}`, 'Failed to install Umbra Anima CPU node');
+        return false;
+    }
+}
+
 function findVideoHelperSuiteDir(nodesDir: string): string | null {
     try {
         const entries = readdirSync(nodesDir, { withFileTypes: true });
@@ -1945,6 +1963,7 @@ function installComfyNodes(comfyDir: string): boolean {
 
     console.log(`\n${c.cyan}--- Installing ComfyUI Custom Nodes ---${c.reset}`);
     syncUmbraNodesToComfy(nodesDir);
+    const umbraAnimaCpuReady = syncUmbraAnimaCpuNode(nodesDir);
 
     // Get enabled nodes from config
     const enabledNodes = getEnabledNodes();
@@ -2023,7 +2042,7 @@ function installComfyNodes(comfyDir: string): boolean {
         log(`${c.red}X${c.reset}`, 'Umbra-Nodes installation failed');
     }
 
-    if (!hasUmbraNodesPayload(umbraNodesPath)) requiredFailure = true;
+    if (!hasUmbraNodesPayload(umbraNodesPath) || !umbraAnimaCpuReady) requiredFailure = true;
     if (requiredFailure) {
         return failWithVerify(
             'comfy-required-nodes-failed',
@@ -2842,12 +2861,12 @@ async function main() {
             );
         }
         const nodesDir = join(comfyDir, 'custom_nodes');
-        if (!syncUmbraNodesToComfy(nodesDir)) {
+        if (!syncUmbraNodesToComfy(nodesDir) || !syncUmbraAnimaCpuNode(nodesDir)) {
             exitWithVerifyFailure(
                 'umbra-nodes-sync-failed',
-                'Umbra-Nodes could not be installed from the public repository.',
-                [`Target directory: ${join(nodesDir, 'Umbra-Nodes')}`],
-                ['Check the network connection and retry ComfyUI custom-node setup.']
+                'Umbra custom nodes could not be installed from the public repository.',
+                [`Target directory: ${nodesDir}`],
+                ['Check the setup log and retry ComfyUI custom-node setup.']
             );
         }
     } else if (arg === 'comfy-nodes') {
