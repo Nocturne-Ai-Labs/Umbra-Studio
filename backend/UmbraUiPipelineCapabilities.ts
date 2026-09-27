@@ -606,6 +606,7 @@ export function deriveUmbraUiTxt2ImgCapabilities(
   const unifiedPromptNodes = nodes.filter((node) => node.classType === 'UmbraPowerPrompter');
   const negativeEncoderNodes = nodes.filter((node) => (
     (node.classType === 'TextEncodeQwenImage21' && hasInput(node, 'negative_prompt'))
+    || (node.classType === 'Anima38BV2Prompt' && node.role === 'negative_prompt' && hasInput(node, 'prompt'))
     || ((node.role === 'negative_prompt' || /negative/i.test(node.title))
     && /^CLIPTextEncode/.test(node.classType)
     && (hasInput(node, 'text') || hasInput(node, 'prompt')))

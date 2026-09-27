@@ -9230,6 +9230,13 @@ function compileUmbraUiPipelineWorkflow(
       continue;
     }
 
+    if (classType === 'Anima38BV2Loader') {
+      if (generation.modelType === 'diffusion_model' && generation.checkpointName) {
+        setPPApiNodeInput(node, 'model_name', generation.checkpointName);
+      }
+      continue;
+    }
+
     const nodeRole = getPPApiNodeRole(node);
     const isDetailerNode = classType === 'UmbraImageDetailer'
       || classType === 'NativeDetailerProvider'
