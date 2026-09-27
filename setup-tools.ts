@@ -1316,7 +1316,7 @@ function syncUmbraNodesToComfy(nodesDir: string): boolean {
 }
 
 function syncUmbraAnimaCpuNode(nodesDir: string): boolean {
-    const source = join(ROOT_DIR, 'backend', 'python', 'comfy_nodes', 'umbra_anima_cpu', '__init__.py');
+    const source = join(import.meta.dir, 'backend', 'python', 'comfy_nodes', 'umbra_anima_cpu', '__init__.py');
     const targetDir = join(nodesDir, 'umbra_anima_cpu');
     if (!existsSync(source)) {
         log(`${c.red}X${c.reset}`, 'Umbra Anima CPU node source is missing');
@@ -1962,6 +1962,19 @@ function installComfyNodeRequirements(comfyDir: string, nodePath: string, nodeNa
     return true;
 }
 
+function isOwnGitCheckout(nodePath: string): boolean {
+    try {
+        const topLevel = execSync('git rev-parse --show-toplevel', {
+            cwd: nodePath,
+            encoding: 'utf-8',
+            stdio: ['ignore', 'pipe', 'ignore']
+        }).trim();
+        return resolve(topLevel).toLowerCase() === resolve(nodePath).toLowerCase();
+    } catch {
+        return false;
+    }
+}
+
 function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boolean {
     const nodesDir = join(comfyDir, 'custom_nodes');
     if (!existsSync(nodesDir)) mkdirSync(nodesDir, { recursive: true });
@@ -2000,21 +2013,26 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
             }
         } else {
             // Check for updates
-            try {
-                configureGitRepoForPortableUpdates(nodePath);
-                execSync('git fetch', { cwd: nodePath, stdio: 'ignore' });
-                const status = execSync('git status -uno', { cwd: nodePath, encoding: 'utf-8' });
-                if (status.includes('behind')) {
-                    log('->', `Updating ${node.name}...`);
-                    execSync('git pull', { cwd: nodePath, stdio: 'ignore' });
-                    log(`${c.green}OK${c.reset}`, `${node.name} updated`);
-                } else {
-                    log('OK', `${node.name} is up to date`);
-                }
-            } catch {
-                if (onlyNames) {
-                    log(`${c.red}X${c.reset}`, `Failed to update ${node.name}`);
-                    requiredFailure = true;
+            if (!isOwnGitCheckout(nodePath)) {
+                log(`${c.yellow}WARN${c.reset}`, `${node.name} is not an independent Git checkout; its files were left unchanged. Back it up outside custom_nodes and retry to install a managed checkout.`);
+                if (onlyNames) requiredFailure = true;
+            } else {
+                try {
+                    configureGitRepoForPortableUpdates(nodePath);
+                    execSync('git fetch', { cwd: nodePath, stdio: 'ignore' });
+                    const status = execSync('git status -uno', { cwd: nodePath, encoding: 'utf-8' });
+                    if (status.includes('behind')) {
+                        log('->', `Updating ${node.name}...`);
+                        execSync('git pull', { cwd: nodePath, stdio: 'ignore' });
+                        log(`${c.green}OK${c.reset}`, `${node.name} updated`);
+                    } else {
+                        log('OK', `${node.name} is up to date`);
+                    }
+                } catch {
+                    if (onlyNames) {
+                        log(`${c.red}X${c.reset}`, `Failed to update ${node.name}`);
+                        requiredFailure = true;
+                    }
                 }
             }
         }

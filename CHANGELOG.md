@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.32.37 - Portable Setup Repair
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+- Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux, then restart Umbra Studio and ComfyUI. No new model download is required for an installation that already has its Anima 3.8B and MiniMax H3 files.
+- If a custom-node folder was copied without its own Git checkout, back it up outside `custom_nodes` before using the updater to install a managed copy. Existing files are not moved automatically.
+
+### Setup And Updating
+
+- Fix portable custom-node setup locating the bundled Anima CPU encoder source under `resources/app`.
+- Report an unversioned custom-node folder as unknown instead of reading the parent ComfyUI Git revision or claiming the node is current.
+- Refuse a managed custom-node update against that unversioned folder until the user backs it up, preventing an update of the wrong repository.
+
+### Validation And Limits
+
+- Verified TypeScript checking and the installed personal build's Anima 3.8B and MiniMax H3 node registration, model catalog, and ComfyUI health. No new GPU generation was run for this setup-only patch.
+- Existing `User/` and `Tools/` content remains outside the package and is preserved by the updater.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: portable setup can install the Anima CPU encoder node after updating.
+- Fixed: custom-node readiness and update checks no longer trust a parent ComfyUI Git checkout.
+
 ## v0.32.36 - H3 Director And Managed Dependencies
 
 ### TL;DR - Setup After Updating

@@ -73,6 +73,10 @@ function inspectNode(comfyRoot: string, requirement: NodeRequirement): ManagedNo
   const nodePath = safeChild(join(comfyRoot, 'custom_nodes'), requirement.name);
   const base = { name: requirement.name, minimumCommit: requirement.minimumCommit };
   if (!existsSync(join(nodePath, '__init__.py'))) return { ...base, installedCommit: '', status: 'missing' };
+  const topLevel = spawnSync('git', ['-C', nodePath, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', windowsHide: true, timeout: 5_000 });
+  if (topLevel.status !== 0 || resolve(topLevel.stdout.trim()).toLowerCase() !== resolve(nodePath).toLowerCase()) {
+    return { ...base, installedCommit: '', status: 'unknown' };
+  }
   const head = spawnSync('git', ['-C', nodePath, 'rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true, timeout: 5_000 });
   const installedCommit = head.status === 0 ? head.stdout.trim() : '';
   if (!/^[a-f0-9]{40}$/.test(installedCommit)) return { ...base, installedCommit: '', status: 'unknown' };
