@@ -3838,7 +3838,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
 
       </div>
 
-      {activeMode !== 'comfyui' && activeMode !== 'extras' && !prompterSurfaceActive && activeMode !== 'image' && activeMode !== 'img2img' && activeMode !== 'inpaint' ? (
+      {activeMode !== 'comfyui' && activeMode !== 'extras' && activeMode !== 'video' && !prompterSurfaceActive && activeMode !== 'image' && activeMode !== 'img2img' && activeMode !== 'inpaint' ? (
         <PowerPrompterSearchPanel
           drawerTriggerContainer={activeMode === 'canvas' ? canvasCatalogTriggerContainer : undefined}
           onInsert={handleCatalogInsert}
