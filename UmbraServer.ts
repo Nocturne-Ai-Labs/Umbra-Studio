@@ -7814,6 +7814,7 @@ function getPPApiNodeRole(node: any): string {
 const UMBRA_UI_OUTPUT_MODES = new Set(['txt2img', 'img2img', 'img2vid', 'ref2vid', 'txt2vid', 'vid2vid', 'inpainting', 'pose', 'extras']);
 
 function getUmbraUiOutputMode(generation: PowerPrompterGenerationControls): string {
+  if (generation.video?.family === 'minimax_h3' && generation.video.minimaxH3.director.imageInpaint) return 'inpainting';
   const requested = String(generation.outputMode || '').trim().toLowerCase();
   if (UMBRA_UI_OUTPUT_MODES.has(requested)) return requested;
   if (generation.mediaType === 'video') {
@@ -7923,8 +7924,13 @@ function applyPPVideoRoleToApiNode(
           ? `Umbra UI/${getUmbraUiOutputMode(generation)}/${formatUmbraUiLocalDate()}/${sanitizeUmbraUiOutputPrefix(video.outputPrefix, 'UmbraUI_Video')}`
           : video.outputPrefix,
       );
-      setPPApiNodeInput(node, 'format', video.format);
-      setPPApiNodeInput(node, 'codec', video.codec);
+      if (node.class_type === 'DaSiWa_EnhancedVideoCombine') {
+        setPPApiNodeInput(node, 'container', video.format === 'mp4' ? 'MP4' : 'Auto');
+        setPPApiNodeInput(node, 'codec', video.codec === 'h264' ? 'H.264' : 'Auto');
+      } else {
+        setPPApiNodeInput(node, 'format', video.format);
+        setPPApiNodeInput(node, 'codec', video.codec);
+      }
       return true;
     case 'video_create':
       setPPApiNodeInput(node, 'fps', video.fps);
@@ -8245,10 +8251,18 @@ function applyPPVideoPostProcessing(
   if (generation.mediaType !== 'video' || !video) return;
   const decode = roleEntries.get('video_decode');
   const create = roleEntries.get('video_create');
-  if (!decode || !create) return;
+  const output = roleEntries.get('video_output');
+  const directH3Output = video.family === 'minimax_h3' && output?.node.class_type === 'DaSiWa_EnhancedVideoCombine';
+  if (!decode || (!create && !directH3Output)) return;
+  const continuity = video.minimaxH3.director.continuity;
+  const continuityActive = directH3Output && (continuity.capture || !!continuity.sourceId || !!continuity.sourceVideoId);
+  if (continuityActive && (video.fps !== 24 || video.postprocess.interpolationEnabled)) {
+    throw new Error('H3 continuity requires a 24 fps export with frame interpolation off so the video matches its saved checkpoint.');
+  }
 
-  const createInputs = ensurePPApiNodeInputs(create.node);
-  const connectedImages = createInputs?.images;
+  const target = directH3Output ? output : create;
+  const targetInputs = ensurePPApiNodeInputs(target!.node);
+  const connectedImages = targetInputs?.images;
   let currentImages: PPApiNodeRef = Array.isArray(connectedImages)
     && typeof connectedImages[0] === 'string'
     && Number.isFinite(Number(connectedImages[1]))
@@ -8326,8 +8340,37 @@ function applyPPVideoPostProcessing(
     currentImages = [upscaleId, 0];
   }
 
-  setPPApiNodeInput(create.node, 'images', currentImages);
-  setPPApiNodeInput(create.node, 'fps', outputFps);
+  setPPApiNodeInput(target!.node, 'images', currentImages);
+  setPPApiNodeInput(target!.node, directH3Output ? 'frame_rate' : 'fps', outputFps);
+}
+
+function applyPPH3ImageInpaintOutput(
+  promptGraph: Record<string, unknown>,
+  roleEntries: Map<string, { id: string; node: any }>,
+  generation: PowerPrompterGenerationControls,
+) {
+  const video = generation.video;
+  if (generation.mediaType !== 'video' || video?.family !== 'minimax_h3' || !video.minimaxH3.director.imageInpaint) return;
+  if (video.minimaxH3.guides.length || video.postprocess.interpolationEnabled
+    || video.postprocess.upscaleMode !== 'none' || video.postprocess.rtxVsrEnabled) {
+    throw new Error('H3 Image Inpaint saves a still frame. Remove timed guides and turn off video postprocessing.');
+  }
+  const decode = roleEntries.get('video_decode');
+  const output = roleEntries.get('video_output');
+  if (!decode || !output || output.node.class_type !== 'DaSiWa_EnhancedVideoCombine') {
+    throw new Error('H3 Image Inpaint requires the DaSiWa Director workflow and its video decoder.');
+  }
+  for (const [id, node] of Object.entries(promptGraph)) {
+    if (id === output.id || (node as any)?.class_type === 'DaSiWaH3ContinuityPublish'
+      || getPPApiNodeRole(node) === 'minimax_h3_audio_decode') delete promptGraph[id];
+  }
+  const frameId = addPPApiPromptNode(promptGraph, 'ImageFromBatch', {
+    image: [decode.id, 0], batch_index: 0, length: 1,
+  }, 'H3 Inpaint Frame');
+  addPPApiPromptNode(promptGraph, 'SaveImage', {
+    images: [frameId, 0],
+    filename_prefix: `Umbra UI/inpainting/${formatUmbraUiLocalDate()}/${sanitizeUmbraUiOutputPrefix(video.outputPrefix, 'UmbraUI_H3_Inpaint')}`,
+  }, 'Save H3 Inpaint Image');
 }
 
 function applyPPWanVideoTopology(
@@ -9416,7 +9459,11 @@ function compileUmbraUiPipelineWorkflow(
   applyPPMiniMaxH3ReferenceTopology(videoRoleEntries, generation);
   applyPPLtxVideoTopology(promptGraph, videoRoleEntries, generation, activePrompt);
   applyPPVideoSourceAudio(promptGraph, videoRoleEntries, generation);
-  applyPPVideoPostProcessing(promptGraph, videoRoleEntries, generation);
+  if (generation.video?.family === 'minimax_h3' && generation.video.minimaxH3.director.imageInpaint) {
+    applyPPH3ImageInpaintOutput(promptGraph, videoRoleEntries, generation);
+  } else {
+    applyPPVideoPostProcessing(promptGraph, videoRoleEntries, generation);
+  }
   if (generation.mediaType === 'video' && generation.video) {
     applyUmbraUiVideoLoraStack(promptGraph, generation.video.family, generation.video.loraStack);
   }
@@ -9642,6 +9689,7 @@ function emitBackendPowerPrompterJobProgress(
 }
 
 function getPowerPrompterGenerationMediaType(generation: PowerPrompterGenerationControls | undefined): 'image' | 'video' | '' {
+  if (generation?.video?.family === 'minimax_h3' && generation.video.minimaxH3.director.imageInpaint) return 'image';
   if (generation?.mediaType === 'video' || generation?.outputMode === 'txt2vid'
     || generation?.outputMode === 'img2vid' || generation?.outputMode === 'ref2vid'
     || generation?.outputMode === 'vid2vid') return 'video';
@@ -10019,7 +10067,8 @@ async function emitBackendPowerPrompterSavedOutputs(
     const comfyRoot = getComfyToolRootFast();
     for (const [index, output] of resolvedOutputs.entries()) {
       const sourcePath = resolvePinnedVideoSourcePath(outputs[index], ROOT_DIR, comfyRoot);
-      const fullpath = await publishPinnedVideoOutput(sourcePath, join(destination, formatUmbraUiLocalDate()), promptId, destination);
+      const fullpath = await publishPinnedVideoOutput(sourcePath, join(destination, formatUmbraUiLocalDate()), promptId, destination,
+        generation.video?.family === 'minimax_h3' && generation.video.minimaxH3.director.imageInpaint);
       if (fullpath !== sourcePath) Object.assign(output, { fullpath, filename: basename(fullpath), subfolder: '' });
     }
   }
@@ -24972,8 +25021,8 @@ function validatePPApiWorkflowDocument(
       graphIssues.push('Umbra video role: positive_prompt');
     }
     if (!roles.has('video_output')) graphIssues.push('Umbra video role: video_output');
-    if (!classTypes.has('SaveVideo') && !classTypes.has('VHS_VideoCombine')) {
-      graphIssues.push('SaveVideo/VHS_VideoCombine');
+    if (!classTypes.has('SaveVideo') && !classTypes.has('VHS_VideoCombine') && !classTypes.has('DaSiWa_EnhancedVideoCombine')) {
+      graphIssues.push('video output node');
     }
   } else {
     const hasUnifiedPowerPrompter = classTypes.has('UmbraPowerPrompter');

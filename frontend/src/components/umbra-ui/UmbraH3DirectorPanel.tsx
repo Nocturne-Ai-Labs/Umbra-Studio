@@ -26,6 +26,8 @@ interface Props {
   onChange: (controls: MiniMaxH3DirectorControls) => void;
   prompt: string;
   durationSeconds: number;
+  width: number;
+  height: number;
   comfyConnected: boolean;
   onApplyPrompt: (prompt: string) => void;
   onClose: () => void;
@@ -49,7 +51,7 @@ function newItem(kind: MiniMaxH3DirectorMediaKind): MiniMaxH3DirectorItem {
   };
 }
 
-export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeChange, onModeChange, controls, onChange, prompt, durationSeconds, comfyConnected, onApplyPrompt, onClose }: Props) {
+export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeChange, onModeChange, controls, onChange, prompt, durationSeconds, width, height, comfyConnected, onApplyPrompt, onClose }: Props) {
   const directorMode = miniMaxH3DirectorMode(mode, frameGuideMode, controls);
   const [forgeCatalog, setForgeCatalog] = React.useState<ForgeCatalog | null>(null);
   const [forgeError, setForgeError] = React.useState('');
@@ -66,11 +68,80 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
   const [packScope, setPackScope] = React.useState<MiniMaxH3ReferencePackScope>('all');
   const [packLoadMode, setPackLoadMode] = React.useState<MiniMaxH3ReferencePackMode>('overwrite');
   const [packStatus, setPackStatus] = React.useState('');
+  const [checkpoints, setCheckpoints] = React.useState<Array<{ clip_id: string; seconds: number; completed_ns: number }>>([]);
+  const [checkpointError, setCheckpointError] = React.useState('');
+  const [checkpointRefresh, setCheckpointRefresh] = React.useState(0);
+  const [sourceCheck, setSourceCheck] = React.useState('');
+  const [sourceCheckFailed, setSourceCheckFailed] = React.useState(false);
+  const [sourceVideoUploading, setSourceVideoUploading] = React.useState(false);
   const requestIdRef = React.useRef('');
   const packInput = React.useRef<HTMLInputElement | null>(null);
+  const sourceVideoInput = React.useRef<HTMLInputElement | null>(null);
   const fileInputs = React.useRef<Record<string, HTMLInputElement | null>>({});
   const enabled = selectedMiniMaxH3DirectorItems(controls, mode, frameGuideMode);
-  const maxItems = directorMode === 'T2VA' ? 0 : directorMode === 'I2VA' || directorMode === 'L2VA' ? 1 : directorMode === 'FL2VA' ? 2 : 12;
+  const maxItems = directorMode === 'T2VA' ? 0 : directorMode === 'I2VA' || directorMode === 'L2VA' || directorMode === 'Image Inpaint' ? 1 : directorMode === 'FL2VA' ? 2 : 12;
+  const continuity = controls.continuity;
+  const continuitySource = continuity.sourceKind === 'video' ? continuity.sourceVideoId : continuity.sourceId;
+
+  React.useEffect(() => { setDraft(''); }, [continuity.session, continuity.sourceKind, continuitySource,
+    continuity.overlapFrames, continuity.idea, directorMode, durationSeconds, width, height, brief, model, detail, creativity]);
+
+  React.useEffect(() => {
+    if (!comfyConnected || !/^[a-zA-Z0-9_-]{1,80}$/.test(continuity.session)) return;
+    const abort = new AbortController();
+    fetch(`/comfy/df_h3_continuity/session/${encodeURIComponent(continuity.session)}`, { signal: abort.signal })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok || !Array.isArray(data.clips)) throw new Error(data.error || 'Could not load H3 checkpoints. Update DaSiWa nodes in ComfyUI.');
+        setCheckpoints(data.clips);
+        setCheckpointError('');
+      })
+      .catch((error) => { if (!abort.signal.aborted) setCheckpointError(error instanceof Error ? error.message : 'Could not load checkpoints.'); });
+    return () => abort.abort();
+  }, [comfyConnected, continuity.session, checkpointRefresh]);
+
+  React.useEffect(() => {
+    if (!comfyConnected || !continuitySource) { setSourceCheck(''); setSourceCheckFailed(false); return; }
+    const abort = new AbortController();
+    setSourceCheck('Checking continuity source...');
+    setSourceCheckFailed(false);
+    fetch('/comfy/df_h3_continuity/preflight', {
+      method: 'POST', signal: abort.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: continuity.session, source_kind: continuity.sourceKind, source_id: continuitySource,
+        mode: directorMode, width, height, duration: durationSeconds, frame_rate: 24, overlap_frames: continuity.overlapFrames }),
+    }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(Array.isArray(data.issues) ? data.issues.join(' ') : 'Continuity source check failed.');
+      setSourceCheck(`Ready to continue · ${Number(data.total_seconds || 0).toFixed(1)}s total`);
+    }).catch((error) => { if (!abort.signal.aborted) {
+      setSourceCheck(error instanceof Error ? error.message : 'Continuity source check failed.');
+      setSourceCheckFailed(true);
+    } });
+    return () => abort.abort();
+  }, [comfyConnected, continuity.session, continuity.sourceKind, continuitySource, continuity.overlapFrames, directorMode, width, height, durationSeconds]);
+
+  const uploadContinuityVideo = async (file: File) => {
+    setSourceVideoUploading(true);
+    try {
+      const uploadResponse = await fetch('/api/comfy/upload-media', {
+        method: 'POST', headers: { 'Content-Type': file.type || 'video/mp4', 'x-umbra-media-kind': 'video',
+          'x-umbra-file-name': encodeURIComponent(file.name) }, body: file,
+      });
+      const uploadResult = await uploadResponse.json() as { filename?: string; error?: string };
+      if (!uploadResponse.ok || !uploadResult.filename) throw new Error(uploadResult.error || 'Video upload failed.');
+      const prepareResponse = await fetch('/comfy/df_h3_continuity/video', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: uploadResult.filename }),
+      });
+      const prepared = await prepareResponse.json() as { clip_id?: string; error?: string };
+      if (!prepareResponse.ok || !prepared.clip_id) throw new Error(prepared.error || 'DaSiWa could not prepare the source video.');
+      onChange({ ...controls, continuity: { ...continuity, sourceKind: 'video', sourceVideoId: prepared.clip_id, capture: true } });
+      setCheckpointError('');
+    } catch (error) {
+      setCheckpointError(error instanceof Error ? error.message : 'Video preparation failed.');
+    } finally { setSourceVideoUploading(false); }
+  };
 
   React.useEffect(() => {
     if (!comfyConnected || directorMode !== 'REF2VA') return;
@@ -210,14 +281,15 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
   };
 
   const forge = async () => {
-    if (drafting || !brief.trim() || !model) return;
+    if (drafting || (!brief.trim() && !continuitySource) || !model) return;
     const requestId = crypto.randomUUID();
     requestIdRef.current = requestId;
     setDrafting(true);
     setForgeError('');
     try {
       const references = [];
-      for (const item of enabled) {
+      const forgeReferences = continuitySource && (directorMode !== 'REF2VA' || !continuity.useReferences) ? [] : enabled;
+      for (const item of forgeReferences) {
         const path = await ensureUmbraUiQueuedMedia(item.kind, item.sourcePath, item.sourceName, `Director ${item.kind}`);
         if (item.kind === 'image') references.push({ kind: 'image', path, role: directorMode === 'REF2VA' ? item.role : 'keyframe', keep: item.note });
         else if (item.kind === 'video') references.push({ kind: 'video', role: 'motion', stream: item.mediaMode === 'video_audio' ? 'both' : item.mediaMode, keep: item.note, duration_seconds: item.trimEnd === null ? undefined : item.trimEnd - item.trimStart });
@@ -235,6 +307,13 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
           detail,
           creativity,
           references,
+          ...(continuitySource ? { continuity: {
+            session: continuity.session,
+            clip_id: continuitySource,
+            source_kind: continuity.sourceKind,
+            overlap_frames: continuity.overlapFrames,
+            current_prompt: continuity.idea,
+          } } : {}),
         }),
       });
       const result = await response.json().catch(() => ({})) as { simple_prompt?: string; message?: string; warnings?: string[] };
@@ -262,6 +341,10 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
         DaSiWa nodes changed upstream. Check Umbra Director compatibility before updating in ComfyUI Manager. Umbra workflow changes are reviewed separately.
         <a href="/comfy/" target="_blank" rel="noopener noreferrer" className="ml-2 underline">Open ComfyUI</a>
       </div> : null}
+      <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
+        <input type="checkbox" checked={controls.imageInpaint} onChange={(event) => onChange({ ...controls, imageInpaint: event.target.checked,
+          continuity: event.target.checked ? { ...continuity, capture: false, sourceId: '', sourceVideoId: '' } : continuity })} /> Image Inpaint (still frame)
+      </label>
       <div className="mb-3 flex flex-wrap gap-2">
         <span className="text-[10px] text-zinc-500">{enabled.length}/{maxItems} reference slots</span>
         <label className="ml-auto flex items-center gap-1 text-[10px] text-zinc-400">
@@ -271,7 +354,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
           </UmbraSelectControl>
         </label>
       </div>
-      {mode === 'image_to_video' ? <label className="mb-3 block text-[10px] text-zinc-500">Frame direction
+      {mode === 'image_to_video' && !controls.imageInpaint ? <label className="mb-3 block text-[10px] text-zinc-500">Frame direction
         <UmbraSelectControl value={directorMode === 'L2VA' ? 'last' : directorMode === 'FL2VA' ? 'first_last' : 'first'} onChange={(event) => {
           const next = event.target.value as MiniMaxH3DirectorControls['endpointMode'];
           onChange({ ...controls, endpointMode: next });
@@ -280,6 +363,55 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
           <option value="first">First frame</option><option value="last">Last frame</option><option value="first_last">First + last frames</option>
         </UmbraSelectControl>
       </label> : null}
+      {!controls.imageInpaint ? <div className="mb-3 border-y border-white/10 py-3">
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-xs font-semibold text-zinc-200">Continuity</h3>
+          <button type="button" className="text-[10px] text-zinc-400 hover:text-zinc-100" onClick={() => setCheckpointRefresh((value) => value + 1)}>Refresh checkpoints</button>
+        </div>
+        <label className="block text-[10px] text-zinc-500">Session
+          <input className={fieldClass} value={continuity.session} onChange={(event) => onChange({ ...controls, continuity: { ...continuity, session: event.target.value, sourceId: '', sourceVideoId: '' } })} />
+        </label>
+        <label className="mt-2 block text-[10px] text-zinc-500">Source
+          <UmbraSelectControl className={fieldClass} value={continuity.sourceKind} onChange={(event) => onChange({ ...controls, continuity: { ...continuity, sourceKind: event.target.value as typeof continuity.sourceKind } })}>
+            <option value="checkpoint">Saved checkpoint</option><option value="video">Uploaded video</option>
+          </UmbraSelectControl>
+        </label>
+        {continuity.sourceKind === 'checkpoint' ? <label className="mt-2 block text-[10px] text-zinc-500">Continue from
+          <UmbraSelectControl className={fieldClass} value={continuity.sourceId} onChange={(event) => onChange({ ...controls, continuity: { ...continuity, sourceId: event.target.value, capture: event.target.value ? true : continuity.capture } })}>
+            <option value="">New take</option>
+            {checkpoints.map((clip) => <option key={clip.clip_id} value={clip.clip_id}>{new Date(clip.completed_ns / 1e6).toLocaleString()} · {clip.seconds.toFixed(1)}s · {clip.clip_id.slice(0, 8)}</option>)}
+          </UmbraSelectControl>
+        </label> : <div className="mt-2 flex items-center gap-2">
+          <button type="button" className="inline-flex h-8 items-center gap-1 border border-white/10 px-2 text-xs text-zinc-300" disabled={!comfyConnected || sourceVideoUploading} onClick={() => sourceVideoInput.current?.click()}>
+            {sourceVideoUploading ? <Loader2 size={13} className="animate-spin" /> : <FolderUp size={13} />} Upload source video
+          </button>
+          <input ref={sourceVideoInput} type="file" accept="video/*" className="hidden" onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void uploadContinuityVideo(file);
+            event.target.value = '';
+          }} />
+          {continuity.sourceVideoId ? <span className="truncate font-mono text-[10px] text-zinc-400" title={continuity.sourceVideoId}>{continuity.sourceVideoId.slice(0, 10)}</span> : null}
+          {continuity.sourceVideoId ? <button type="button" className={iconButton} title="Clear source video" onClick={() => onChange({ ...controls, continuity: { ...continuity, sourceVideoId: '' } })}><X size={13} /></button> : null}
+        </div>}
+        <label className="mt-2 flex items-center gap-2 text-xs text-zinc-300">
+          <input type="checkbox" checked={continuity.capture || !!continuitySource} disabled={!!continuitySource} onChange={(event) => onChange({ ...controls, continuity: { ...continuity, capture: event.target.checked } })} /> Save checkpoint after export
+        </label>
+        {continuitySource ? <>
+          <label className="mt-2 block text-[10px] text-zinc-500">Context frames
+            <UmbraSelectControl className={fieldClass} value={continuity.overlapFrames} onChange={(event) => onChange({ ...controls, continuity: { ...continuity, overlapFrames: Number(event.target.value) as typeof continuity.overlapFrames } })}>
+              {[5, 22, 39, 56, 73].map((frames) => <option key={frames} value={frames}>{frames}</option>)}
+            </UmbraSelectControl>
+          </label>
+          <label className="mt-2 block text-[10px] text-zinc-500">Next action
+            <textarea className={fieldClass} rows={3} value={continuity.idea} onChange={(event) => onChange({ ...controls, continuity: { ...continuity, idea: event.target.value } })} />
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-xs text-zinc-300">
+            <input type="checkbox" checked={continuity.useReferences} onChange={(event) => onChange({ ...controls, continuity: { ...continuity, useReferences: event.target.checked } })} /> Use Director references
+          </label>
+          {sourceCheck ? <p role={sourceCheckFailed ? 'alert' : 'status'} className={`mt-2 text-[10px] ${sourceCheckFailed ? 'text-amber-300' : 'text-zinc-400'}`}>{sourceCheck}</p> : null}
+        </> : null}
+        {checkpointError ? <p role="alert" className="mt-2 text-[10px] text-amber-300">{checkpointError}</p> : null}
+      </div> : null}
       <div className="mb-3 border-y border-white/10 py-3">
         <div className="mb-2 flex items-center gap-2"><h3 className="text-xs font-semibold text-zinc-200">Reference pack</h3></div>
         <div className="grid grid-cols-2 gap-2">
@@ -418,7 +550,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
           <h3 className="text-xs font-semibold text-zinc-200">DaSiWa Prompt Forge</h3>
           <a href="https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes" target="_blank" rel="noopener noreferrer" className="ml-auto text-[10px] text-zinc-500 underline hover:text-zinc-300">DaSiWa</a>
         </div>
-        <textarea value={brief} onChange={(event) => setBrief(event.target.value)} className={`${fieldClass} min-h-20 resize-y`} placeholder="Describe the shot to draft" aria-label="Prompt Forge idea" />
+        <textarea value={brief} onChange={(event) => setBrief(event.target.value)} className={`${fieldClass} min-h-20 resize-y`} placeholder={continuitySource ? 'Next action (optional)' : 'Describe the shot to draft'} aria-label="Prompt Forge idea" />
         <div className="mt-2 grid grid-cols-[minmax(0,1fr)_75px] gap-2">
           <label className="min-w-0 text-[10px] text-zinc-500">Model
             <UmbraSelectControl value={model} onChange={(event) => setModel(event.target.value)} className={fieldClass}>
@@ -435,7 +567,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
           </UmbraSelectControl>
         </label>
         <div className="mt-2 flex gap-2">
-          <button type="button" className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded border border-fuchsia-300/30 px-2 text-xs text-fuchsia-100 disabled:opacity-40" disabled={!model || !brief.trim() || drafting} onClick={() => void forge()}>
+          <button type="button" className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded border border-fuchsia-300/30 px-2 text-xs text-fuchsia-100 disabled:opacity-40" disabled={!model || (!brief.trim() && !continuitySource) || drafting} onClick={() => void forge()}>
             {drafting ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}{drafting ? 'Drafting...' : 'Draft prompt'}
           </button>
           {drafting ? <button type="button" className={iconButton} title="Cancel Prompt Forge" onClick={() => void cancelForge()}><X size={13} /></button> : null}
@@ -444,7 +576,8 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
         {draft ? <div className="mt-3 space-y-2">
           <textarea value={draft} onChange={(event) => setDraft(event.target.value)} className={`${fieldClass} min-h-40 resize-y`} aria-label="Prompt Forge draft" />
           <button type="button" className="h-9 rounded border border-fuchsia-300/30 px-3 text-xs text-fuchsia-100" onClick={() => {
-            if (controls.promptBuilder.structured) updateBuilder({ description: draft.trim() });
+            if (continuitySource) onChange({ ...controls, continuity: { ...continuity, idea: draft.trim() } });
+            else if (controls.promptBuilder.structured) updateBuilder({ description: draft.trim() });
             else onApplyPrompt(draft.trim());
           }} disabled={!draft.trim()}>Use draft</button>
         </div> : null}

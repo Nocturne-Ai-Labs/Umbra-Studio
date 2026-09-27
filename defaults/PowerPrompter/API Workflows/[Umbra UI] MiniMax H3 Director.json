@@ -76,25 +76,37 @@
     "inputs": { "noise": ["6", 0], "guider": ["7", 0], "sampler": ["8", 0], "sigmas": ["9", 0], "latent_image": ["15", 1] },
     "_meta": { "title": "MiniMax H3 Sample", "umbra_role": "minimax_h3_sample" }
   },
+  "23": {
+    "class_type": "DaSiWaH3ContinuityAppend",
+    "inputs": { "sampled": ["10", 0], "context": ["15", 2] },
+    "_meta": { "title": "H3 Continuity Append" }
+  },
   "11": {
     "class_type": "VAEDecode",
-    "inputs": { "samples": ["10", 0], "vae": ["3", 0] },
+    "inputs": { "samples": ["23", 0], "vae": ["3", 0] },
     "_meta": { "title": "Video Decode", "umbra_role": "video_decode" }
   },
   "12": {
     "class_type": "VAEDecodeAudio",
-    "inputs": { "samples": ["10", 0], "vae": ["4", 0] },
+    "inputs": { "samples": ["23", 0], "vae": ["4", 0] },
     "_meta": { "title": "Audio Decode", "umbra_role": "minimax_h3_audio_decode" }
   },
-  "13": {
-    "class_type": "CreateVideo",
-    "inputs": { "images": ["11", 0], "audio": ["12", 0], "fps": 24 },
-    "_meta": { "title": "Create MiniMax H3 Video", "umbra_role": "video_create" }
-  },
   "14": {
-    "class_type": "SaveVideo",
-    "inputs": { "video": ["13", 0], "filename_prefix": "video/Umbra_MiniMaxH3", "format": "auto", "codec": "h264" },
+    "class_type": "DaSiWa_EnhancedVideoCombine",
+    "inputs": {
+      "images": ["11", 0], "audio": ["12", 0], "frame_rate": 24,
+      "codec": "H.264", "container": "MP4", "bit_depth": "8-bit", "quality": 20,
+      "log_level": "Standard", "pingpong": false, "save_metadata": true,
+      "filename_prefix": "video/Umbra_MiniMaxH3", "save_output": true,
+      "pass_frames": false, "crop_to_audio": false, "audio_codec": "Auto",
+      "audio_bitrate": "192k", "save_first_frame": false, "save_last_frame": false
+    },
     "_meta": { "title": "Save MiniMax H3 Video", "umbra_role": "video_output" }
+  },
+  "24": {
+    "class_type": "DaSiWaH3ContinuityPublish",
+    "inputs": { "filename": ["14", 1], "ticket": ["23", 1] },
+    "_meta": { "title": "H3 Continuity Publish" }
   },
   "22": {
     "class_type": "MiniMaxH3SigmaShift",

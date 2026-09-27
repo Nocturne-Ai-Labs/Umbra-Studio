@@ -1576,10 +1576,18 @@ export function UmbraVideoGenerationControls({
   };
 
   const directorEnabled = video.family === 'minimax_h3' && video.minimaxH3.director.enabled;
+  const h3Still = directorEnabled && video.minimaxH3.director.imageInpaint;
+  const h3Continuity = directorEnabled && !h3Still && (video.minimaxH3.director.continuity.capture
+    || !!video.minimaxH3.director.continuity.sourceId || !!video.minimaxH3.director.continuity.sourceVideoId);
   const sourceDimensionsMissing = !directorEnabled && !hasUmbraVideoSourceDimensions(video);
   const turboIssue = video.family === 'minimax_h3'
     ? (directorEnabled ? miniMaxH3DirectorModelIssue(video.minimaxH3.model, miniMaxH3DirectorMode(video.mode, video.frameGuideMode, video.minimaxH3.director)) : '')
       || miniMaxH3DirectorIssue(video.minimaxH3.director, video.mode, video.frameGuideMode)
+      || (h3Still && (video.minimaxH3.guides.length || video.postprocess.interpolationEnabled
+        || video.postprocess.upscaleMode !== 'none' || video.postprocess.rtxVsrEnabled)
+        ? 'H3 Image Inpaint saves a still frame. Remove timed guides and turn off video postprocessing.' : '')
+      || (h3Continuity && (video.fps !== 24 || video.postprocess.interpolationEnabled)
+        ? 'H3 continuity requires 24 fps with frame interpolation off so the export matches its checkpoint.' : '')
       || miniMaxH3GuideIssue(video.minimaxH3.guides, video.frames, video.mode === 'reference_to_video')
       || miniMaxH3TurboIssue(video.minimaxH3, video.mode === 'reference_to_video')
       || (video.minimaxH3.turboPreset !== 'none' && !catalog.loras.some((name) => name.replace(/\\/g, '/') === video.minimaxH3.turboLora)
@@ -2670,10 +2678,12 @@ export function UmbraVideoGenerationControls({
             onClick={() => void handleQueue(effectivePlacement)}
             disabled={queueDisabled}
             className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-fuchsia-300/30 bg-fuchsia-500/[0.1] text-[10px] font-black uppercase tracking-[0.16em] text-fuchsia-100 transition-colors hover:bg-fuchsia-500/[0.16] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
-            title={queueBlockReason || 'Queue this video through the shared Power Prompter queue'}
+            title={queueBlockReason || (video.family === 'minimax_h3' && video.minimaxH3.director.imageInpaint
+              ? 'Queue this H3 still frame through the shared generation queue' : 'Queue this video through the shared Power Prompter queue')}
           >
             {isQueueing ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-            {extendedOpen ? 'Generate Extended Video' : 'Generate Video'}
+            {video.family === 'minimax_h3' && video.minimaxH3.director.imageInpaint ? 'Generate Image'
+              : extendedOpen ? 'Generate Extended Video' : 'Generate Video'}
           </button>
             <button
               type="button"
@@ -2697,6 +2707,8 @@ export function UmbraVideoGenerationControls({
         onChange={(director) => setMiniMaxH3('director', director)}
         prompt={prompt}
         durationSeconds={videoDurationSeconds}
+        width={video.width}
+        height={video.height}
         comfyConnected={comfyConnected}
         onApplyPrompt={(draft) => {
           if (prompt.trim()) rememberCurrentPrompt();

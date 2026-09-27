@@ -37,8 +37,9 @@ async function videoDigest(path: string): Promise<string> {
 }
 
 // Keep ComfyUI's original for history/continuation; publish a completed copy only.
-export async function publishPinnedVideoOutput(source: string, directory: string, promptId: string, pinnedTaskRoot: string): Promise<string> {
-  if (!/\.(mp4|webm|mov|mkv|gif|avi|m4v)$/i.test(source)) return source;
+export async function publishPinnedVideoOutput(source: string, directory: string, promptId: string, pinnedTaskRoot: string, allowStillImage = false): Promise<string> {
+  if (!/\.(mp4|webm|mov|mkv|gif|avi|m4v)$/i.test(source)
+    && !(allowStillImage && /\.(png|jpe?g|webp)$/i.test(source))) return source;
   const key = JSON.stringify([source, directory, promptId, pinnedTaskRoot]);
   const active = publications.get(key);
   if (active) return active;
