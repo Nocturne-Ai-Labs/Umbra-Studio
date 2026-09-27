@@ -10,6 +10,7 @@ import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
  */
 
 import { applyMiniMaxH3Acceleration, assertMiniMaxH3TurboInstalled, assertMiniMaxH3GuidesInstalled, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
+import { draftMiniMaxH3Prompt, normalizeH3AutoPromptInput } from './backend/MiniMaxH3AutoPrompter';
 import { applyUmbraUiVideoLoraStack, assertUmbraUiVideoLoraStackInstalled, resolveUmbraUiVideoLoraNames } from './backend/UmbraUiVideoLoraStack';
 import { bindPPGenerationToWorkflowVideo } from './backend/UmbraUiVideoGenerationBinding';
 import { normalizeUmbraVideoLoraStack, type UmbraVideoLoraEntry } from './shared/umbra-ui/videoLoraStack';
@@ -37854,6 +37855,15 @@ const server = Bun.serve<UmbraSocketData>({
           return json({ success: true, video: getUmbraUiVideoControlsSession() });
         } catch (error: any) {
           return json({ success: false, error: error?.message || 'Failed to load Umbra UI video controls.' }, 500);
+        }
+      }
+
+      if (path === '/api/umbra-ui/minimax-h3/auto-prompt' && method === 'POST') {
+        try {
+          const input = normalizeH3AutoPromptInput(await readJsonObject(req, false, 10 * 1024 * 1024));
+          return json({ success: true, prompt: await draftMiniMaxH3Prompt(ROOT_DIR, input) });
+        } catch (error: any) {
+          return json({ success: false, error: String(error?.message || 'Auto Prompter failed.') }, 400);
         }
       }
 
