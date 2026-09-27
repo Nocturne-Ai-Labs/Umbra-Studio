@@ -43,6 +43,7 @@ jobs:
             if (!(Test-Path "$packageRoot/resources/app/defaults/DataForge/model-manifest.json")) { throw 'Data Forge model manifest is missing' }
             if (!(Test-Path "$packageRoot/resources/app/defaults/UmbraUI/model-manifest.json")) { throw 'Umbra UI model manifest is missing' }
             if (!(Test-Path "$packageRoot/resources/app/defaults/UmbraUI/model-requirements-manifest.json")) { throw 'Model requirements manifest is missing' }
+            if (!(Test-Path "$packageRoot/resources/app/defaults/UmbraUI/tool-requirements.json")) { throw 'Managed tool requirements manifest is missing' }
             if (!(Test-Path "$packageRoot/UmbraSetup.bat")) { throw 'Standalone Umbra setup launcher is missing' }
             if (!(Test-Path "$packageRoot/resources/app/setup/UmbraSetupApp.js")) { throw 'Standalone Umbra setup service is missing' }
             if (!(Test-Path "$packageRoot/resources/app/setup/models.js")) { throw 'Model setup interface is missing' }
@@ -100,6 +101,7 @@ jobs:
           test -f "${package_root}/resources/app/defaults/DataForge/model-manifest.json"
           test -f "${package_root}/resources/app/defaults/UmbraUI/model-manifest.json"
           test -f "${package_root}/resources/app/defaults/UmbraUI/model-requirements-manifest.json"
+          test -f "${package_root}/resources/app/defaults/UmbraUI/tool-requirements.json"
           test -f "${package_root}/umbra-setup.sh"
           test -f "${package_root}/resources/app/setup/UmbraSetupApp.js"
           test -f "${package_root}/resources/app/setup/models.js"

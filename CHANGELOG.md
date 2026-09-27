@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.32.36 - H3 Director And Managed Dependencies
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+- Restart with `UmbraStudio.bat` on Windows or `./start-umbra.sh` on Linux. For MiniMax H3, stop ComfyUI, update managed ComfyUI to v0.37.0 or newer from **Umbra UI > ComfyUI**, install/update **H3 Nodes**, then restart ComfyUI. The standalone Updater now shows declared dependencies after an app update and offers separate, confirmed repairs.
+- In `UmbraSetup.bat` or `./umbra-setup.sh` > **Models**, install only the families you use: Anima 3.8B v1.1 is about 14 GiB; MiniMax H3 base video is about 37 GiB. H3 Reference Video adds about 20 GiB, and the local DaSiWa Prompt Forge model adds about 11 GiB; those two are optional. PixAI captioning is optional and downloads about 1.8 GiB plus Python dependencies. The updater's model button opens Setup with the affected family preselected.
+- Review each model's license in Setup before downloading. Anima 3.8B is non-commercial, and other model terms remain separate from Umbra Studio's license. Existing `User/` and `Tools/` are preserved; no personal models or media are packaged. Linux managed tools need `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or equivalents. Optional AI Toolkit still needs host Git and Node.js 20 or newer.
+
+### Video And Image Generation
+
+- Add Anima 3.8B v1.1 with its Qwen3 0.6B and Qwen3.5 4B text encoders, Qwen Image VAE, and optional CPU text encoding path.
+- Integrate DaSiWa's MiniMax H3 Director workflow for scene authoring, endpoint frames, references, motion guidance, still output, and continuity sessions. Keep image inpainting disabled until its controls are ready.
+- Expose local H3 Prompt Forge without requiring Director mode. Send Gallery and filmstrip media directly into Director roles, and hide the image tag catalog while Video is active.
+- Show missing video models and ComfyUI nodes in the workspace with a path to the appropriate managed controls.
+
+### Data Forge And Updating
+
+- Add optional PixAI Tagger v1.0 for dataset captions and metadata scanning.
+- Extend the external updater with release-declared dependency checks, separate confirmed ComfyUI/node actions, model-family preselection in Umbra Setup, and independent progress/errors. A dependency failure does not roll back a successful Umbra update.
+- Keep ComfyUI core, optional custom nodes, and model downloads as distinct actions. Existing users receive in-app readiness guidance even if their older updater cannot read the new declaration until this update is installed.
+
+### Validation And Limits
+
+- Passed backend and frontend TypeScript checks, frontend lint and build, updater and Setup builds, model-manifest checks, and the Umbra UI pipeline audit. Packaged archive checks are run as part of release publication.
+- H3 Director generation was exercised in isolated development earlier; this pass did not perform a new GPU generation or install optional models on a user's machine. Prompt Forge and reference-video downloads remain optional.
+
+### Fixes And Quality-of-Life Recap
+
+- Improved: H3 Director scene control, continuity, Gallery/filmstrip handoffs, and local prompt drafting.
+- Improved: Anima 3.8B setup and CPU text encoding choice.
+- Improved: clear, confirmed updater actions for ComfyUI, H3 nodes, and model requirements.
+- Fixed: missing ComfyUI nodes now appear as specific readiness issues instead of a generic check failure.
+- Improved: optional PixAI captioning without changing the default tagger.
+
 ## v0.32.35 - Data Forge Concept Folders
 
 ### TL;DR - Setup After Updating
