@@ -197,6 +197,10 @@ async function runModelInstall(
     job,
     hfToken,
   );
+  if (pack === 'requirements' && profiles.includes('minimax-h3-autoprompter')) {
+    job.step = check ? 'Verifying H3 Auto Prompter runtime' : 'Installing H3 Auto Prompter runtime';
+    await runScript(runtimeRoot, join(sourceRoot, 'scripts', 'install-h3-autoprompt-runtime.mjs'), check ? ['--check'] : [], job);
+  }
 }
 
 function launchUmbra(runtimeRoot: string) {

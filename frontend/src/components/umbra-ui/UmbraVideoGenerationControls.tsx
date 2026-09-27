@@ -27,6 +27,7 @@ import {
   Plus,
   RefreshCw,
   Scaling,
+  Sparkles,
   SlidersHorizontal,
   Trash2,
   Upload,
@@ -757,6 +758,8 @@ export function UmbraVideoGenerationControls({
   const [selectedStoryboardShotId, setSelectedStoryboardShotId] = React.useState('');
   const [sourcePreviewUrl, setSourcePreviewUrl] = React.useState('');
   const [isQueueing, setIsQueueing] = React.useState(false);
+  const [autoPromptLoading, setAutoPromptLoading] = React.useState(false);
+  const [autoPromptDraft, setAutoPromptDraft] = React.useState('');
   const queueInFlightRef = React.useRef(false);
   const [resourcePicker, setResourcePicker] = React.useState<VideoResourcePicker | null>(null);
   const [pinnedOutputFolder, setPinnedOutputFolder] = usePinnedOutputFolder('video');
@@ -801,6 +804,46 @@ export function UmbraVideoGenerationControls({
     setPromptSegments(nextSegments);
     setActivePromptSegmentId(nextSegments[0]?.id || '');
   }, []);
+
+  const draftH3Prompt = async () => {
+    if (autoPromptLoading || !prompt.trim()) return;
+    setAutoPromptLoading(true);
+    try {
+      const paths = video.mode === 'text_to_video' ? []
+        : [video.sourceImagePath, video.middleImagePath, video.lastImagePath].filter(Boolean).slice(0, 3);
+      const images: string[] = [];
+      for (const path of paths) {
+        const response = await fetch(`/api/fs/image?path=${encodeURIComponent(path)}`);
+        if (!response.ok) throw new Error('A reference image could not be loaded.');
+        const blob = await response.blob();
+        const bitmap = await createImageBitmap(blob);
+        try {
+          const scale = Math.min(1, 768 / Math.max(bitmap.width, bitmap.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+          canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+          const context = canvas.getContext('2d');
+          if (!context) throw new Error('Could not prepare a reference image.');
+          context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+          images.push(canvas.toDataURL('image/jpeg', 0.8));
+        } finally {
+          bitmap.close();
+        }
+      }
+      const response = await fetch('/api/umbra-ui/minimax-h3/auto-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, mode: video.mode, durationSeconds: videoDurationSeconds, images }),
+      });
+      const result = await response.json() as { success?: boolean; prompt?: string; error?: string };
+      if (!response.ok || !result.success || !result.prompt) throw new Error(result.error || 'Auto Prompter failed.');
+      setAutoPromptDraft(result.prompt);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Auto Prompter failed.', 'error');
+    } finally {
+      setAutoPromptLoading(false);
+    }
+  };
 
   React.useEffect(() => {
     setVideo((current) => (
@@ -2056,6 +2099,40 @@ export function UmbraVideoGenerationControls({
           onSubmit={() => { void handleQueue(); }}
           accent="fuchsia"
         />
+        {video.family === 'minimax_h3' ? (
+          <div className="space-y-2 border border-fuchsia-300/15 bg-fuchsia-500/[0.035] p-2.5">
+            <button
+              type="button"
+              onClick={() => { void draftH3Prompt(); }}
+              disabled={autoPromptLoading || !prompt.trim()}
+              className="inline-flex min-h-9 items-center gap-2 border border-fuchsia-300/30 px-3 text-xs text-fuchsia-100 disabled:opacity-50"
+              title="Draft a MiniMax H3 prompt with the optional local Qwen model"
+            >
+              {autoPromptLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+              {autoPromptLoading ? 'Drafting locally...' : 'Draft with local Qwen'}
+            </button>
+            {autoPromptDraft ? (
+              <div className="space-y-2">
+                <textarea
+                  aria-label="Auto Prompter draft"
+                  value={autoPromptDraft}
+                  onChange={(event) => setAutoPromptDraft(event.target.value)}
+                  className={`${inputClass} min-h-32 w-full resize-y leading-relaxed`}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => {
+                    if (!autoPromptDraft.trim()) return;
+                    rememberCurrentPrompt();
+                    replacePromptSegments(autoPromptDraft.trim());
+                    setAutoPromptDraft('');
+                  }} className="min-h-9 border border-fuchsia-300/30 px-3 text-xs text-fuchsia-100">Use Draft</button>
+                  <button type="button" onClick={() => setAutoPromptDraft('')}
+                    className="min-h-9 border border-white/15 px-3 text-xs text-zinc-300">Discard</button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         </>}
         {video.family === 'minimax_h3' ? (
           <div className="border border-fuchsia-300/15 bg-fuchsia-500/[0.035] px-2.5 py-2 font-mono text-[9px] leading-relaxed text-fuchsia-100/70">
