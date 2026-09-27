@@ -12,6 +12,7 @@
 import { join, basename, dirname, relative } from 'path';
 import { existsSync, readdirSync, statSync, lstatSync, realpathSync, unlinkSync, rmSync, mkdirSync, readFileSync, writeFileSync, cpSync, renameSync, symlinkSync } from 'fs';
 import { spawn, spawnSync, execSync } from 'child_process';
+import { installDaSiWaRequirements } from './setup/DaSiWaRequirements';
 
 const ROOT_DIR = process.env.UMBRA_ROOT || import.meta.dir;
 const TOOLS_DIR = join(ROOT_DIR, 'Tools');
@@ -1889,6 +1890,7 @@ const COMFY_NODES = [
     { name: 'ComfyUI_IPAdapter_plus', repo: 'https://github.com/cubiq/ComfyUI_IPAdapter_plus.git', required: true },
     { name: 'ComfyUI-Anima-LLLite', repo: 'https://github.com/kohya-ss/ComfyUI-Anima-LLLite.git', required: true },
     { name: 'ComfyUI-Anima-2.9B', repo: 'https://github.com/gazingstars123/ComfyUI-Anima-2.9B.git', required: true },
+    { name: 'ComfyUI-DaSiWa-Nodes', repo: 'https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes.git' },
     { name: 'comfyui-anima-3-8B', repo: 'https://github.com/GumGum10/comfyui-anima-3-8B.git' },
     { name: 'ComfyUI-KJNodes', repo: 'https://github.com/kijai/ComfyUI-KJNodes.git', required: true },
     { name: 'ComfyUI-Inpaint-CropAndStitch', repo: 'https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch.git' },
@@ -1937,6 +1939,9 @@ function installComfyNodeRequirements(comfyDir: string, nodePath: string, nodeNa
 
     const requirementsHash = Bun.hash(readFileSync(requirementsPath, 'utf-8')).toString();
     const markerPath = join(nodePath, '.umbra-requirements-installed');
+    if (nodeName === 'ComfyUI-DaSiWa-Nodes') {
+        return installDaSiWaRequirements(py, requirementsPath, markerPath, (message) => log(`${c.yellow}WARN${c.reset}`, message));
+    }
     try {
         if (readFileSync(markerPath, 'utf-8').trim() === requirementsHash) return true;
     } catch {

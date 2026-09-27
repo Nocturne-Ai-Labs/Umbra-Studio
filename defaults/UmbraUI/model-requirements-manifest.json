@@ -88,8 +88,8 @@
       "description": "MiniMax H3 diffusion model, Qwen 3 VL text encoder, and video/audio VAEs for Umbra UI text-to-video and image-to-video. Very large download."
     },
     "minimax-h3-autoprompter": {
-      "label": "MiniMax H3 Auto Prompter (Optional)",
-      "description": "Local Qwen3.5 9B Q8 GGUF prompt model and matching vision projector. Separate from H3 generation weights; about 11.7 GB total. Requires a compatible local llama.cpp runtime."
+      "label": "DaSiWa H3 Prompt Forge Model (Optional)",
+      "description": "Local Qwen3.5 9B Q8 GGUF and matching vision projector for DaSiWa Prompt Forge. About 11.7 GB total. Install ComfyUI-DaSiWa-Nodes and its requirements separately."
     },
     "minimax-h3-vae-int8": {
       "label": "MiniMax H3 INT8 Video VAE",
@@ -650,10 +650,10 @@
       "revision": "425937812d28d85a5b5bd70f90e66b590db1fb3c",
       "license": "apache-2.0",
       "licenseUrl": "https://huggingface.co/DavidAU/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-NEO-IMATRIX-MAX-MTP-GGUF/blob/425937812d28d85a5b5bd70f90e66b590db1fb3c/README.md",
-      "licenseNotice": "Optional local prompt model. Model weights are not included in Umbra Studio packages. The matching projector is required for image-aware prompting. The GGUF alone supports text prompting only.",
+      "licenseNotice": "Optional local model for the separately licensed DaSiWa Prompt Forge extension. Model weights are not included in Umbra Studio packages. The matching projector is required for image-aware prompting. The GGUF alone supports text prompting only.",
       "installPolicy": "automatic",
       "profiles": ["minimax-h3-autoprompter"],
-      "purpose": "Optional local MiniMax H3 Auto Prompter model and matching image projector",
+      "purpose": "Optional local DaSiWa H3 Prompt Forge model and matching image projector",
       "files": [
         {
           "destination": "llm/qwen35-h3-autoprompter/Qwen3.5-9B-The-Defiant-Fable-Uncnr-Heretic-NEO-MAX-MTP-Q8_0.gguf",

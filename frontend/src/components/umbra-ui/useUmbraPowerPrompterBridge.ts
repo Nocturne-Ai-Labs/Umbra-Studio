@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { normalizeMiniMaxH3Guides } from '../../../../shared/umbra-ui/minimaxH3Guides';
+import { miniMaxH3DirectorIssue, normalizeMiniMaxH3Director, selectedMiniMaxH3DirectorItems } from '../../../../shared/umbra-ui/minimaxH3Director';
 import { hasUmbraVideoSourceDimensions, normalizeUmbraVideoQueueSources } from '@/lib/umbraVideoQueueSource';
 import { resolveUmbraVideoQueueNegativePrompt } from '@/lib/umbraVideoQueuePrompt';
 import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
@@ -1842,7 +1843,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       ...options.video,
       postprocess: { ...options.video.postprocess },
       wan: { ...options.video.wan },
-      minimaxH3: { ...options.video.minimaxH3, guides: normalizeMiniMaxH3Guides(options.video.minimaxH3.guides) },
+      minimaxH3: { ...options.video.minimaxH3, guides: normalizeMiniMaxH3Guides(options.video.minimaxH3.guides), director: normalizeMiniMaxH3Director(options.video.minimaxH3.director) },
       ltx25: {
         ...options.video.ltx25,
         keyframes: options.video.ltx25.keyframes.map((keyframe) => ({ ...keyframe })),
@@ -1875,13 +1876,14 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       sourceAudioName: String(options.video.sourceAudioName || '').trim(),
     };
     const extendedStartsFromImage = normalizeUmbraVideoQueueSources(video, extendedEnabled);
-    if (!hasUmbraVideoSourceDimensions(video)) {
+    const directorEnabled = video.family === 'minimax_h3' && video.minimaxH3.director.enabled;
+    if (!directorEnabled && !hasUmbraVideoSourceDimensions(video)) {
       throw new Error('Umbra could not read the source media dimensions. Reload the source before queueing.');
     }
     const targetDimensions = resolveUmbraVideoTargetDimensions({
       resolutionPreset: video.resolutionPreset,
-      sourceWidth: video.mode === 'text_to_video' ? 0 : video.sourceWidth,
-      sourceHeight: video.mode === 'text_to_video' ? 0 : video.sourceHeight,
+      sourceWidth: video.mode === 'text_to_video' || directorEnabled ? 0 : video.sourceWidth,
+      sourceHeight: video.mode === 'text_to_video' || directorEnabled ? 0 : video.sourceHeight,
       fallbackAspect: video.aspectRatio,
     });
     video.width = targetDimensions.targetWidth;
@@ -1916,7 +1918,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       ? 'Wan 2.2'
       : video.family === 'ltx23'
         ? 'LTX-2.3'
-        : video.family === 'ltx25' ? 'LTX-2.5' : 'MiniMax H3';
+        : video.family === 'ltx25' ? 'LTX-2.5' : directorEnabled ? 'MiniMax H3 Director' : 'MiniMax H3';
     const feature: UmbraUiPipelineFeature = video.mode === 'video_to_video'
       ? 'vid2vid'
       : video.mode === 'reference_to_video' ? 'ref2vid'
@@ -1925,7 +1927,14 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     const pipelineMatch = resolveUmbraUiPipeline(workflows, feature, modelFamily, modelSource);
     if (!pipelineMatch.workflow) throw new Error(pipelineMatch.error || 'No compatible video pipeline is available.');
 
-    if (video.mode === 'image_to_video' || video.mode === 'reference_to_video') {
+    if (directorEnabled) {
+      const issue = miniMaxH3DirectorIssue(video.minimaxH3.director, video.mode, video.frameGuideMode);
+      if (issue) throw new Error(issue);
+      for (const item of selectedMiniMaxH3DirectorItems(video.minimaxH3.director, video.mode, video.frameGuideMode)) {
+        item.sourceName = await ensureUmbraUiQueuedMedia(item.kind, item.sourcePath, item.sourceName, `Director ${item.kind}`);
+        if (!item.sourceName) throw new Error('ComfyUI did not stage a Director media slot.');
+      }
+    } else if (video.mode === 'image_to_video' || video.mode === 'reference_to_video') {
       if (!video.sourceImagePath && !video.sourceImageName) throw new Error('Choose a source image for image-to-video.');
       const stageFrame = async (label: string, path: string, name: string): Promise<string> => {
         if (!path && !name) throw new Error(`Choose a ${label.toLowerCase()} image.`);

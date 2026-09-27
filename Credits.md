@@ -544,6 +544,13 @@ upstream default branches. They are not frozen to Umbra-selected commit hashes.
 - Original project purpose:
   - Bundled Anima 3.8B Semantic Connector v2 loader and Qwen3.5 4B conditioning nodes
 
+### ComfyUI-DaSiWa-Nodes
+- Project: https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes
+- Creator / maintainer: darksidewalker and contributors
+- License: GPL-3.0 (installed as a separate ComfyUI extension; not copied into Umbra source)
+- Original project purpose:
+  - MiniMax H3 Director, Director Guide, Prompt Forge, references, and continuity tools
+
 ### ComfyUI-Inpaint-CropAndStitch
 - Project: https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch
 - Creator / maintainer: lquesada

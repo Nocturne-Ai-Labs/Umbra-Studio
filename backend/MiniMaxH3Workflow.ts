@@ -1,6 +1,7 @@
 import { miniMaxH3TurboIssue, normalizeMiniMaxH3Turbo, type MiniMaxH3TurboControls } from '../shared/umbra-ui/minimaxH3Turbo';
 import { readComfyInputChoices } from '../shared/umbra-ui/comfyInputChoices';
 import { miniMaxH3GuideIssue, normalizeMiniMaxH3Guides, type MiniMaxH3Guide } from '../shared/umbra-ui/minimaxH3Guides';
+import { miniMaxH3DirectorModelIssue } from '../shared/umbra-ui/minimaxH3Director';
 
 type PromptNode = { class_type: string; inputs: Record<string, unknown>; _meta?: Record<string, unknown> };
 type PromptGraph = Record<string, unknown>;
@@ -9,6 +10,7 @@ export interface MiniMaxH3AccelerationControls extends Partial<MiniMaxH3TurboCon
   model?: string;
   guides?: MiniMaxH3Guide[];
   guideFrameCount?: number;
+  directorMode?: string;
   sageAttention?: 'auto' | 'disabled';
   allowCompile?: boolean;
   easyCacheEnabled?: boolean;
@@ -31,6 +33,10 @@ export function applyMiniMaxH3Acceleration(
   }));
   const source = roles.get('minimax_h3_model');
   if (!source) return false;
+  if (controls.directorMode) {
+    const modelIssue = miniMaxH3DirectorModelIssue(controls.model ?? String(source.node.inputs.unet_name || ''), controls.directorMode);
+    if (modelIssue) throw new Error(modelIssue);
+  }
   const shift = roles.get('minimax_h3_sigma_shift');
   const guider = roles.get('minimax_h3_guider');
   const scheduler = roles.get('minimax_h3_scheduler');
@@ -56,7 +62,7 @@ export function applyMiniMaxH3Acceleration(
   const turbo = normalizeMiniMaxH3Turbo({ ...controls });
   const turboIssue = miniMaxH3TurboIssue(
     { ...turbo, model: controls.model ?? String(source.node.inputs.unet_name || '') },
-    roles.get('minimax_h3_conditioning')?.node.class_type === 'MiniMaxH3ReferenceToVideo',
+    roles.get('minimax_h3_conditioning')?.node.class_type === 'MiniMaxH3ReferenceToVideo' || controls.directorMode === 'REF2VA',
   );
   if (turboIssue) throw new Error(turboIssue);
   optional('minimax_h3_turbo_lora', 'LoraLoaderModelOnly', turbo.turboPreset !== 'none', {
@@ -69,6 +75,12 @@ export function applyMiniMaxH3Acceleration(
   if (controls.shiftVideo !== undefined) shift.node.inputs.shift_video = controls.shiftVideo;
   if (controls.shiftAudio !== undefined) shift.node.inputs.shift_audio = controls.shiftAudio;
   model = [shift.id, 0];
+  const director = roles.get('minimax_h3_director');
+  if (director) {
+    director.node.inputs.fl2va_model = model;
+    director.node.inputs.ref2va_model = model;
+    model = [director.id, 5];
+  }
   if (controls.easyCacheEnabled && (controls.easyCacheStartPercent ?? 0.15) >= (controls.easyCacheEndPercent ?? 0.95)) {
     throw new Error('MiniMax H3 EasyCache Start must be less than End. Adjust the cache interval or disable EasyCache.');
   }
@@ -95,7 +107,7 @@ function applyMiniMaxH3Guides(graph: PromptGraph, controls: MiniMaxH3Acceleratio
     return;
   }
   const frames = controls.guideFrameCount ?? Number(conditioning[1].inputs.length);
-  const issue = miniMaxH3GuideIssue(guides, frames, conditioning[1].class_type === 'MiniMaxH3ReferenceToVideo');
+  const issue = miniMaxH3GuideIssue(guides, frames, conditioning[1].class_type === 'MiniMaxH3ReferenceToVideo' || controls.directorMode === 'REF2VA');
   if (issue) throw new Error(issue);
   for (const [id, node] of entries) if (node._meta?.umbra_h3_timed_guide === true) delete graph[id];
   let positive: [string, number] = [conditioning[0], 0];

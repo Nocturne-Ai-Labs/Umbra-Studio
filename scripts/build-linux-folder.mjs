@@ -425,7 +425,6 @@ function verifyPublish() {
     'resources/app/scripts/install-pixai-tagger-deps.mjs',
     'resources/app/scripts/download-caption-models.mjs',
     'resources/app/scripts/download-umbra-ui-models.mjs',
-    'resources/app/scripts/install-h3-autoprompt-runtime.mjs',
     'resources/app/scripts/download-umbra-model-requirements.mjs',
     'umbra-setup.sh',
     'umbra-updater.sh',

@@ -29,7 +29,7 @@ export function bindPPGenerationToWorkflowVideo(
     video: {
       ...video,
       family: workflow.videoFamily || 'wan22',
-      mode: workflow.videoMode || 'text_to_video',
+      mode: workflow.videoMode || String(video.mode || 'text_to_video'),
     },
   };
 }

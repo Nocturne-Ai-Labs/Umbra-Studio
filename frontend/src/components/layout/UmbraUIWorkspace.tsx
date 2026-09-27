@@ -886,6 +886,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const [queuedImageGenerationInfo, setQueuedImageGenerationInfo] = React.useState<Record<string, UmbraImageGenerationInfo>>({});
   const [lastImageGenerationInfo, setLastImageGenerationInfo] = React.useState<UmbraImageGenerationInfo | null>(null);
   const [videoStoryboardOpen, setVideoStoryboardOpen] = React.useState(false);
+  const [videoDirectorOpen, setVideoDirectorOpen] = React.useState(false);
   const [videoEditorDraft, setVideoEditorDraft] = React.useState<UmbraVideoEditorDraft | null>(null);
   const inheritedControlsAppliedRef = React.useRef(false);
   const attemptedLoraInfoRef = React.useRef(new Set<string>());
@@ -3082,7 +3083,9 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         data-tablet-prompt={tabletPanels.prompt ? 'shown' : 'hidden'}
         className={cn(
           'grid min-h-0 flex-1',
-          activeMode === 'video' && videoStoryboardOpen
+          activeMode === 'video' && videoDirectorOpen
+            ? 'grid-cols-[minmax(340px,390px)_minmax(460px,1.2fr)_minmax(300px,0.8fr)] max-[1500px]:grid-cols-[minmax(340px,390px)_minmax(460px,1fr)]'
+            : activeMode === 'video' && videoStoryboardOpen
             ? 'grid-cols-[minmax(340px,400px)_minmax(320px,380px)_minmax(320px,1fr)]'
             : activeMode === 'canvas' || activeMode === 'comfyui' || prompterSurfaceActive
               ? 'grid-cols-[minmax(0,1fr)]'
@@ -3799,9 +3802,11 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               editorDraft={videoEditorDraft}
               onEditorDraftApplied={(draftId) => setVideoEditorDraft((current) => current?.id === draftId ? null : current)}
               onStoryboardOpenChange={setVideoStoryboardOpen}
+              onDirectorOpenChange={setVideoDirectorOpen}
             />
             <UmbraMobileWorkspaceSheet
               active={activeMode === 'video'}
+              className={videoDirectorOpen ? 'md:max-[1500px]:hidden' : undefined}
               title="Video Review"
               subtitle={videoJobs.length > 0 ? `${videoJobs.length} recent job${videoJobs.length === 1 ? '' : 's'}` : 'Waiting for output'}
               badge={videoJobs.length > 0 ? `${videoJobs.length}` : undefined}

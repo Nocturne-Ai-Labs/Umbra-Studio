@@ -12,6 +12,7 @@
 import { join } from 'path';
 import { existsSync, statSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { execSync, spawnSync } from 'child_process';
+import { installDaSiWaRequirements } from './setup/DaSiWaRequirements';
 import * as readline from 'readline';
 
 const COMFY_NODES_FILE = join(import.meta.dir, 'User', 'Config', 'comfy-nodes.json');
@@ -26,6 +27,7 @@ const COMFY_NODES = [
     { name: 'ComfyUI_IPAdapter_plus', repo: 'https://github.com/cubiq/ComfyUI_IPAdapter_plus.git', desc: 'IP-Adapter reference-image conditioning', required: true },
     { name: 'ComfyUI-Anima-LLLite', repo: 'https://github.com/kohya-ss/ComfyUI-Anima-LLLite.git', desc: 'Anima LLLite control and inpainting adapters', required: true },
     { name: 'ComfyUI-Anima-2.9B', repo: 'https://github.com/gazingstars123/ComfyUI-Anima-2.9B.git', desc: 'Required 40-layer loader patch for Anima 2.9B models', required: true },
+    { name: 'ComfyUI-DaSiWa-Nodes', repo: 'https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes.git', desc: 'MiniMax H3 Director, Guide, and Prompt Forge' },
     { name: 'comfyui-anima-3-8B', repo: 'https://github.com/GumGum10/comfyui-anima-3-8B.git', desc: 'Anima 3.8B bundled v1.1 loader and Qwen3.5 prompt nodes' },
     { name: 'ComfyUI-Inpaint-CropAndStitch', repo: 'https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch.git', desc: 'Crop and stitch nodes for inpainting workflows' },
     { name: 'ComfyUI_ComfyRoll_CustomNodes', repo: 'https://github.com/Suzie1/ComfyUI_Comfyroll_CustomNodes.git', desc: 'Animation and batch processing nodes' },
@@ -108,6 +110,9 @@ function installComfyNodeRequirements(comfyPath: string, nodePath: string, nodeN
 
     const requirementsHash = Bun.hash(readFileSync(requirementsPath, 'utf-8')).toString();
     const markerPath = join(nodePath, '.umbra-requirements-installed');
+    if (nodeName === 'ComfyUI-DaSiWa-Nodes') {
+        return installDaSiWaRequirements(venvPython, requirementsPath, markerPath, (message) => log(`${c.yellow}WARN${c.reset}`, message));
+    }
     try {
         if (readFileSync(markerPath, 'utf-8').trim() === requirementsHash) return true;
     } catch {

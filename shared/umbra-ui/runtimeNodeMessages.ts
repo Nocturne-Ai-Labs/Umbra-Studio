@@ -1,5 +1,8 @@
 export function formatMissingUmbraUiNodes(missing: string[]): string {
   const message = `ComfyUI is missing required node classes: ${missing.join(', ') || 'unknown node class'}.`;
+  if (missing.some((name) => name === 'MiniMaxH3Director' || name === 'MiniMaxH3DirectorGuide')) {
+    return `${message} Install or update the separate ComfyUI-DaSiWa-Nodes extension through Umbra's managed custom-node setup, then restart ComfyUI.`;
+  }
   if (missing.some((name) => name.startsWith('MiniMaxH3') || name === 'EmptyMiniMaxH3LatentAV')) {
     return `${message} Update ComfyUI through Umbra's managed update controls and restart ComfyUI to enable the native MiniMax H3 pipeline.`;
   }

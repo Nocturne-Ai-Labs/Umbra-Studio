@@ -1,5 +1,6 @@
 import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from './shared/umbra-ui/minimaxH3Defaults';
 import { normalizeMiniMaxH3Guides, type MiniMaxH3Guide } from './shared/umbra-ui/minimaxH3Guides';
+import { buildMiniMaxH3DirectorTimeline, miniMaxH3DirectorIssue, miniMaxH3DirectorMode, normalizeMiniMaxH3Director, type MiniMaxH3DirectorControls } from './shared/umbra-ui/minimaxH3Director';
 import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
 /**
  * Umbra backend entrypoint.
@@ -12,7 +13,6 @@ import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
 import { applyMiniMaxH3Acceleration, assertMiniMaxH3TurboInstalled, assertMiniMaxH3GuidesInstalled, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
 import { applyAnima38TextEncoderDevice } from './backend/AnimaTextEncoderDevice';
 import { ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, normalizeAnima38TextEncoderDevice } from './shared/umbra-ui/animaTextEncoderDevice';
-import { draftMiniMaxH3Prompt, normalizeH3AutoPromptInput } from './backend/MiniMaxH3AutoPrompter';
 import { applyUmbraUiVideoLoraStack, assertUmbraUiVideoLoraStackInstalled, resolveUmbraUiVideoLoraNames } from './backend/UmbraUiVideoLoraStack';
 import { bindPPGenerationToWorkflowVideo } from './backend/UmbraUiVideoGenerationBinding';
 import { normalizeUmbraVideoLoraStack, type UmbraVideoLoraEntry } from './shared/umbra-ui/videoLoraStack';
@@ -8038,6 +8038,7 @@ function applyPPVideoRoleToApiNode(
       setPPApiNodeInput(node, 'vae_name', minimaxH3.audioVae);
       return true;
     case 'minimax_h3_conditioning':
+      if (node.class_type === 'MiniMaxH3DirectorGuide') return true;
       setPPApiNodeInput(node, 'prompt', activePrompt);
       setPPApiNodeInput(node, 'width', sizing.samplingWidth);
       setPPApiNodeInput(node, 'height', sizing.samplingHeight);
@@ -8049,6 +8050,22 @@ function applyPPVideoRoleToApiNode(
         delete node.inputs.last_frame;
       }
       return true;
+    case 'minimax_h3_director': {
+      const director = normalizeMiniMaxH3Director(minimaxH3.director);
+      if (!director.enabled) throw new Error('Enable DaSiWa Director before using its workflow.');
+      const issue = miniMaxH3DirectorIssue(director, video.mode, video.frameGuideMode);
+      if (issue) throw new Error(issue);
+      setPPApiNodeInput(node, 'mode', miniMaxH3DirectorMode(video.mode, video.frameGuideMode));
+      setPPApiNodeInput(node, 'prompt', activePrompt);
+      setPPApiNodeInput(node, 'width', sizing.samplingWidth);
+      setPPApiNodeInput(node, 'height', sizing.samplingHeight);
+      setPPApiNodeInput(node, 'duration', normalizeMiniMaxH3VideoFrames(video.frames) / 24);
+      setPPApiNodeInput(node, 'ref_image_size', minimaxH3.referenceImageSize);
+      setPPApiNodeInput(node, 'timeline_data', buildMiniMaxH3DirectorTimeline(director, video.mode, video.frameGuideMode));
+      setPPApiNodeInput(node, 'builder_state', '');
+      setPPApiNodeInput(node, 'frame_rate', 24);
+      return true;
+    }
     case 'minimax_h3_sage_attention':
     case 'minimax_h3_easycache':
       // These nodes are wired after roles are collected so either acceleration
@@ -8489,7 +8506,7 @@ function applyPPMiniMaxH3ReferenceTopology(
   generation: PowerPrompterGenerationControls,
 ) {
   const video = generation.video;
-  if (generation.mediaType !== 'video' || !video || video.family !== 'minimax_h3' || video.mode !== 'reference_to_video') return;
+  if (generation.mediaType !== 'video' || !video || video.family !== 'minimax_h3' || video.mode !== 'reference_to_video' || video.minimaxH3.director.enabled) return;
   const conditioning = roleEntries.get('minimax_h3_conditioning');
   const first = roleEntries.get('reference_image_0');
   if (!conditioning || !first) throw new Error('The locked MiniMax H3 reference pipeline is missing its conditioning or first reference image role.');
@@ -9387,7 +9404,14 @@ function compileUmbraUiPipelineWorkflow(
   applyPPWanVideoTopology(promptGraph, videoRoleEntries, generation);
   applyPPWanVid2VidTopology(videoRoleEntries, generation);
   if (generation.mediaType === 'video' && generation.video?.family === 'minimax_h3') {
-    applyMiniMaxH3Acceleration(promptGraph, { ...generation.video.minimaxH3, guideFrameCount: generation.video.frames });
+    const directorRequested = generation.video.minimaxH3.director.enabled;
+    const directorGraph = videoRoleEntries.has('minimax_h3_director');
+    if (directorRequested !== directorGraph) {
+      throw new Error(directorRequested
+        ? 'The selected H3 pipeline is not a DaSiWa Director workflow. Select the Director pipeline and try again.'
+        : 'The DaSiWa Director workflow requires Director mode to be enabled.');
+    }
+    applyMiniMaxH3Acceleration(promptGraph, { ...generation.video.minimaxH3, guideFrameCount: generation.video.frames, directorMode: generation.video.minimaxH3.director.enabled ? miniMaxH3DirectorMode(generation.video.mode, generation.video.frameGuideMode) : undefined });
   }
   applyPPMiniMaxH3ReferenceTopology(videoRoleEntries, generation);
   applyPPLtxVideoTopology(promptGraph, videoRoleEntries, generation, activePrompt);
@@ -19525,6 +19549,7 @@ interface PowerPrompterVideoControls {
   };
   minimaxH3: {
     guides: MiniMaxH3Guide[];
+    director: MiniMaxH3DirectorControls;
     turboPreset: 'none' | 'fl2va-v4-8step' | 'ref2va-4step';
     turboLora: string;
     turboStrength: number;
@@ -19858,6 +19883,7 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
       referenceImageSize: 'match',
       referenceNotes: ['', '', ''],
       guides: [],
+      director: normalizeMiniMaxH3Director(null),
       ...normalizeMiniMaxH3Turbo({}),
       // Acceleration is opt-in; preserve explicit choices when restoring saved jobs.
       sageAttention: 'disabled',
@@ -20455,6 +20481,7 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
   const ltx = video.ltx && typeof video.ltx === 'object' ? video.ltx as Record<string, any> : {};
   const ltx25 = video.ltx25 && typeof video.ltx25 === 'object' ? video.ltx25 as Record<string, any> : {};
   const minimaxH3 = video.minimaxH3 && typeof video.minimaxH3 === 'object' ? video.minimaxH3 as Record<string, any> : {};
+  const h3Director = normalizeMiniMaxH3Director(minimaxH3.director);
   const postprocess = video.postprocess && typeof video.postprocess === 'object'
     ? video.postprocess as Record<string, any>
     : {};
@@ -20514,8 +20541,8 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
   const sourceHeight = clampPPInteger(video.sourceHeight, 0, 0, 32768);
   const targetDimensions = resolveUmbraVideoTargetDimensions({
     resolutionPreset,
-    sourceWidth: resolvedMode === 'text_to_video' ? 0 : sourceWidth,
-    sourceHeight: resolvedMode === 'text_to_video' ? 0 : sourceHeight,
+    sourceWidth: resolvedMode === 'text_to_video' || (family === 'minimax_h3' && h3Director.enabled) ? 0 : sourceWidth,
+    sourceHeight: resolvedMode === 'text_to_video' || (family === 'minimax_h3' && h3Director.enabled) ? 0 : sourceHeight,
     fallbackAspect: aspectRatio,
   });
   return {
@@ -20659,6 +20686,7 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
       referenceImageSize: String(minimaxH3.referenceImageSize || '').trim().toLowerCase() === 'max' ? 'max' : 'match',
       referenceNotes: [0, 1, 2].map((index) => String(Array.isArray(minimaxH3.referenceNotes) ? minimaxH3.referenceNotes[index] || '' : '').trim().slice(0, 500)) as [string, string, string],
       guides: normalizeMiniMaxH3Guides(minimaxH3.guides),
+      director: h3Director,
       ...normalizeMiniMaxH3Turbo(minimaxH3),
       sageAttention: String(minimaxH3.sageAttention || '').trim().toLowerCase() === 'auto' ? 'auto' : 'disabled',
       allowCompile: minimaxH3.allowCompile === true,
@@ -24843,10 +24871,9 @@ function describePPApiWorkflow(rawDoc: unknown): {
         : familyRaw === 'ltx25'
           ? 'ltx25'
           : familyRaw === 'minimax_h3' ? 'minimax_h3' : 'wan22',
-      videoMode: modeRaw === 'video_to_video'
-        ? 'video_to_video'
-        : modeRaw === 'reference_to_video' ? 'reference_to_video'
-        : modeRaw === 'image_to_video' ? 'image_to_video' : 'text_to_video',
+      ...(modeRaw === 'video_to_video' || modeRaw === 'reference_to_video'
+        || modeRaw === 'image_to_video' || modeRaw === 'text_to_video'
+        ? { videoMode: modeRaw as PowerPrompterVideoMode } : {}),
     };
   }
   return {
@@ -25110,7 +25137,7 @@ async function assertPPApiWorkflowExecutionReady(
   ));
   const isMiniMaxH3 = generation.mediaType === 'video' && generation.video?.family === 'minimax_h3';
   if (isMiniMaxH3 || !validationContext.validatedWorkflows.has(loaded)) {
-    const validation = validatePPApiWorkflowDocument(loaded.document, validationContext.availableClassTypes, isMiniMaxH3 ? { ...generation.video.minimaxH3, guideFrameCount: generation.video.frames } : {});
+    const validation = validatePPApiWorkflowDocument(loaded.document, validationContext.availableClassTypes, isMiniMaxH3 ? { ...generation.video.minimaxH3, guideFrameCount: generation.video.frames, directorMode: generation.video.minimaxH3.director.enabled ? miniMaxH3DirectorMode(generation.video.mode, generation.video.frameGuideMode) : undefined } : {});
     if (!validation.ok) {
       throw new Error(`Selected generation pipeline has an invalid graph: ${validation.graph.issues.join(', ') || 'unknown graph issue'}.`);
     }
@@ -37870,15 +37897,6 @@ const server = Bun.serve<UmbraSocketData>({
           return json({ success: true, video: getUmbraUiVideoControlsSession() });
         } catch (error: any) {
           return json({ success: false, error: error?.message || 'Failed to load Umbra UI video controls.' }, 500);
-        }
-      }
-
-      if (path === '/api/umbra-ui/minimax-h3/auto-prompt' && method === 'POST') {
-        try {
-          const input = normalizeH3AutoPromptInput(await readJsonObject(req, false, 10 * 1024 * 1024));
-          return json({ success: true, prompt: await draftMiniMaxH3Prompt(ROOT_DIR, input) });
-        } catch (error: any) {
-          return json({ success: false, error: String(error?.message || 'Auto Prompter failed.') }, 400);
         }
       }
 

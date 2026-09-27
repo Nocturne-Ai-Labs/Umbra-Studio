@@ -1,5 +1,6 @@
 import type { MiniMaxH3Guide } from '../../../shared/umbra-ui/minimaxH3Guides';
 import type { MiniMaxH3TurboControls } from '../../../shared/umbra-ui/minimaxH3Turbo';
+import type { MiniMaxH3DirectorControls } from '../../../shared/umbra-ui/minimaxH3Director';
 import type { UmbraUiPipelineSelection } from '../../../shared/umbra-ui/pipelineTypes';
 import type { UmbraLtxStoryboardControls } from '../../../shared/umbra-ui/videoStoryboard';
 import type { UmbraVideoLoraEntry } from '../../../shared/umbra-ui/videoLoraStack';
@@ -137,6 +138,7 @@ export interface PowerPrompterLtx25VideoControls {
 
 export interface PowerPrompterMiniMaxH3VideoControls extends MiniMaxH3TurboControls {
   guides: MiniMaxH3Guide[];
+  director: MiniMaxH3DirectorControls;
   model: string;
   textEncoder: string;
   videoVae: string;

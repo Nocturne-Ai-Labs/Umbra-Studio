@@ -3,6 +3,7 @@ import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from '../../../../shared/umbra-ui/minima
 import { normalizeUmbraVideoLoraStack, type UmbraVideoLoraEntry } from '../../../../shared/umbra-ui/videoLoraStack';
 
 import { miniMaxH3GuideIssue, normalizeMiniMaxH3Guides } from '../../../../shared/umbra-ui/minimaxH3Guides';
+import { miniMaxH3DirectorIssue, miniMaxH3DirectorMode, miniMaxH3DirectorModelIssue, normalizeMiniMaxH3Director } from '../../../../shared/umbra-ui/minimaxH3Director';
 import { MINIMAX_H3_TURBO_PRESETS, miniMaxH3TurboIssue, miniMaxH3TurboSamplingPreset, type MiniMaxH3TurboPreset } from '../../../../shared/umbra-ui/minimaxH3Turbo';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
@@ -27,7 +28,6 @@ import {
   Plus,
   RefreshCw,
   Scaling,
-  Sparkles,
   SlidersHorizontal,
   Trash2,
   Upload,
@@ -56,6 +56,7 @@ import type {
 import { UmbraPositivePromptEditor } from '@/components/umbra-ui/UmbraPositivePromptEditor';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
 import { UmbraLtxStoryboardPanel } from '@/components/umbra-ui/UmbraLtxStoryboardPanel';
+import { UmbraH3DirectorPanel } from '@/components/umbra-ui/UmbraH3DirectorPanel';
 import { UmbraLtxExtendedPanel } from '@/components/umbra-ui/UmbraLtxExtendedPanel';
 import {
   UmbraQueuePlacementControls,
@@ -136,6 +137,7 @@ interface UmbraVideoGenerationControlsProps {
   editorDraft?: UmbraVideoEditorDraft | null;
   onEditorDraftApplied?: (draftId: string) => void;
   onStoryboardOpenChange?: (open: boolean) => void;
+  onDirectorOpenChange?: (open: boolean) => void;
 }
 
 export interface UmbraVideoEditorDraft {
@@ -290,6 +292,7 @@ function createDefaultVideoControls(): PowerPrompterVideoControls {
       referenceImageSize: 'match',
       referenceNotes: ['', '', ''],
       guides: [],
+      director: { enabled: false, items: [], inputScaling: 'Auto' },
       turboPreset: 'none',
       turboLora: '',
       turboStrength: 1,
@@ -724,6 +727,7 @@ export function UmbraVideoGenerationControls({
   editorDraft,
   onEditorDraftApplied,
   onStoryboardOpenChange,
+  onDirectorOpenChange,
 }: UmbraVideoGenerationControlsProps) {
   const showToast = useStore((state) => state.showToast);
   const [initialDeviceResume] = React.useState(() => readDeviceUiResume<UmbraVideoDeviceResume>('umbra-ui-video'));
@@ -758,8 +762,6 @@ export function UmbraVideoGenerationControls({
   const [selectedStoryboardShotId, setSelectedStoryboardShotId] = React.useState('');
   const [sourcePreviewUrl, setSourcePreviewUrl] = React.useState('');
   const [isQueueing, setIsQueueing] = React.useState(false);
-  const [autoPromptLoading, setAutoPromptLoading] = React.useState(false);
-  const [autoPromptDraft, setAutoPromptDraft] = React.useState('');
   const queueInFlightRef = React.useRef(false);
   const [resourcePicker, setResourcePicker] = React.useState<VideoResourcePicker | null>(null);
   const [pinnedOutputFolder, setPinnedOutputFolder] = usePinnedOutputFolder('video');
@@ -771,10 +773,10 @@ export function UmbraVideoGenerationControls({
   const handoffAppliedAtRef = React.useRef(0);
   const targetDimensions = React.useMemo(() => resolveUmbraVideoTargetDimensions({
     resolutionPreset: video.resolutionPreset,
-    sourceWidth: video.mode === 'text_to_video' ? 0 : video.sourceWidth,
-    sourceHeight: video.mode === 'text_to_video' ? 0 : video.sourceHeight,
+    sourceWidth: video.mode === 'text_to_video' || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled) ? 0 : video.sourceWidth,
+    sourceHeight: video.mode === 'text_to_video' || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled) ? 0 : video.sourceHeight,
     fallbackAspect: video.aspectRatio,
-  }), [video.aspectRatio, video.mode, video.resolutionPreset, video.sourceHeight, video.sourceWidth]);
+  }), [video.aspectRatio, video.family, video.minimaxH3.director.enabled, video.mode, video.resolutionPreset, video.sourceHeight, video.sourceWidth]);
   const storyboardTimeline = React.useMemo(
     () => resolveUmbraLtxStoryboardTimeline(video.ltx.storyboard, video.fps, video.frames),
     [video.fps, video.frames, video.ltx.storyboard],
@@ -805,46 +807,6 @@ export function UmbraVideoGenerationControls({
     setActivePromptSegmentId(nextSegments[0]?.id || '');
   }, []);
 
-  const draftH3Prompt = async () => {
-    if (autoPromptLoading || !prompt.trim()) return;
-    setAutoPromptLoading(true);
-    try {
-      const paths = video.mode === 'text_to_video' ? []
-        : [video.sourceImagePath, video.middleImagePath, video.lastImagePath].filter(Boolean).slice(0, 3);
-      const images: string[] = [];
-      for (const path of paths) {
-        const response = await fetch(`/api/fs/image?path=${encodeURIComponent(path)}`);
-        if (!response.ok) throw new Error('A reference image could not be loaded.');
-        const blob = await response.blob();
-        const bitmap = await createImageBitmap(blob);
-        try {
-          const scale = Math.min(1, 768 / Math.max(bitmap.width, bitmap.height));
-          const canvas = document.createElement('canvas');
-          canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-          canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-          const context = canvas.getContext('2d');
-          if (!context) throw new Error('Could not prepare a reference image.');
-          context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-          images.push(canvas.toDataURL('image/jpeg', 0.8));
-        } finally {
-          bitmap.close();
-        }
-      }
-      const response = await fetch('/api/umbra-ui/minimax-h3/auto-prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, mode: video.mode, durationSeconds: videoDurationSeconds, images }),
-      });
-      const result = await response.json() as { success?: boolean; prompt?: string; error?: string };
-      if (!response.ok || !result.success || !result.prompt) throw new Error(result.error || 'Auto Prompter failed.');
-      setAutoPromptDraft(result.prompt);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Auto Prompter failed.', 'error');
-    } finally {
-      setAutoPromptLoading(false);
-    }
-  };
-
   React.useEffect(() => {
     setVideo((current) => (
       current.width === targetDimensions.targetWidth && current.height === targetDimensions.targetHeight
@@ -854,9 +816,14 @@ export function UmbraVideoGenerationControls({
   }, [targetDimensions.targetHeight, targetDimensions.targetWidth]);
 
   React.useEffect(() => {
-    onStoryboardOpenChange?.(storyboardOpen || extendedOpen);
+    onStoryboardOpenChange?.(storyboardOpen || extendedOpen || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled));
     return () => onStoryboardOpenChange?.(false);
-  }, [extendedOpen, onStoryboardOpenChange, storyboardOpen]);
+  }, [extendedOpen, onStoryboardOpenChange, storyboardOpen, video.family, video.minimaxH3.director.enabled]);
+
+  React.useEffect(() => {
+    onDirectorOpenChange?.(video.family === 'minimax_h3' && video.minimaxH3.director.enabled);
+    return () => onDirectorOpenChange?.(false);
+  }, [onDirectorOpenChange, video.family, video.minimaxH3.director.enabled]);
 
   React.useEffect(() => {
     if (!storyboardOpen || video.frames === storyboardTimeline.frames) return;
@@ -903,6 +870,7 @@ export function UmbraVideoGenerationControls({
             minimaxH3: {
               ...defaults.minimaxH3, ...(savedVideo.minimaxH3 || {}),
               guides: normalizeMiniMaxH3Guides(savedVideo.minimaxH3?.guides),
+              director: normalizeMiniMaxH3Director(savedVideo.minimaxH3?.director),
             },
             ltx: {
               ...defaults.ltx,
@@ -1100,6 +1068,7 @@ export function UmbraVideoGenerationControls({
         ...defaults.minimaxH3,
         ...(editorDraft.video.minimaxH3 || {}),
         guides: normalizeMiniMaxH3Guides(editorDraft.video.minimaxH3?.guides),
+        director: normalizeMiniMaxH3Director(editorDraft.video.minimaxH3?.director),
       },
     });
     setSourcePreviewUrl(editorDraft.video.sourceImagePath
@@ -1185,7 +1154,7 @@ export function UmbraVideoGenerationControls({
     return () => controller.abort();
   }, [video.mode, video.sourceImagePath, video.sourceVideoName, video.sourceVideoPath]);
 
-  const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : video.family === 'ltx25' ? 'LTX-2.5' : 'MiniMax H3';
+  const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : video.family === 'ltx25' ? 'LTX-2.5' : video.minimaxH3.director.enabled ? 'MiniMax H3 Director' : 'MiniMax H3';
   const pipelineFeature = video.mode === 'video_to_video'
     ? 'vid2vid'
     : video.mode === 'reference_to_video' ? 'ref2vid'
@@ -1363,6 +1332,23 @@ export function UmbraVideoGenerationControls({
   const setMiniMaxH3 = <K extends keyof PowerPrompterVideoControls['minimaxH3']>(key: K, value: PowerPrompterVideoControls['minimaxH3'][K]) => {
     setVideo((current) => ({ ...current, minimaxH3: { ...current.minimaxH3, [key]: value } }));
   };
+  const toggleH3Director = () => setVideo((current) => {
+    const director = current.minimaxH3.director;
+    const enabled = !director.enabled;
+    const imageItem = (sourcePath: string, sourceName: string) => ({
+      id: crypto.randomUUID(), kind: 'image' as const, sourcePath, sourceName,
+      enabled: true, note: '', trimStart: 0, trimEnd: null, mediaMode: 'video' as const, role: 'subject' as const,
+    });
+    const sources = current.mode === 'text_to_video' ? []
+      : current.mode === 'image_to_video'
+        ? [[current.sourceImagePath, current.sourceImageName], ...(current.frameGuideMode === 'first_last' || current.frameGuideMode === 'first_middle_last' ? [[current.lastImagePath, current.lastImageName]] : [])]
+        : [[current.sourceImagePath, current.sourceImageName], [current.middleImagePath, current.middleImageName], [current.lastImagePath, current.lastImageName]];
+    const items = enabled && director.items.length === 0
+      ? sources.filter(([path, name]) => path || name).map(([path, name]) => imageItem(path, name))
+      : director.items;
+    return { ...current, frameGuideMode: enabled && current.frameGuideMode === 'first_middle_last' ? 'first_last' : current.frameGuideMode,
+      minimaxH3: { ...current.minimaxH3, director: { ...director, enabled, items } } };
+  });
   const setMiniMaxReferenceNote = (index: 0 | 1 | 2, value: string) => {
     setVideo((current) => {
       const referenceNotes = [...current.minimaxH3.referenceNotes] as [string, string, string];
@@ -1589,9 +1575,12 @@ export function UmbraVideoGenerationControls({
     }));
   };
 
-  const sourceDimensionsMissing = !hasUmbraVideoSourceDimensions(video);
+  const directorEnabled = video.family === 'minimax_h3' && video.minimaxH3.director.enabled;
+  const sourceDimensionsMissing = !directorEnabled && !hasUmbraVideoSourceDimensions(video);
   const turboIssue = video.family === 'minimax_h3'
-    ? miniMaxH3GuideIssue(video.minimaxH3.guides, video.frames, video.mode === 'reference_to_video')
+    ? (directorEnabled ? miniMaxH3DirectorModelIssue(video.minimaxH3.model, miniMaxH3DirectorMode(video.mode, video.frameGuideMode)) : '')
+      || miniMaxH3DirectorIssue(video.minimaxH3.director, video.mode, video.frameGuideMode)
+      || miniMaxH3GuideIssue(video.minimaxH3.guides, video.frames, video.mode === 'reference_to_video')
       || miniMaxH3TurboIssue(video.minimaxH3, video.mode === 'reference_to_video')
       || (video.minimaxH3.turboPreset !== 'none' && !catalog.loras.some((name) => name.replace(/\\/g, '/') === video.minimaxH3.turboLora)
         ? 'Install the matching Turbo pack in Umbra Setup > Models, refresh the catalog, and select the LoRA.' : '')
@@ -1617,6 +1606,12 @@ export function UmbraVideoGenerationControls({
       ].some((value) => !String(value || '').trim());
     }
     if (video.family === 'minimax_h3') {
+      if (directorEnabled) return [
+        video.minimaxH3.model,
+        video.minimaxH3.textEncoder,
+        video.minimaxH3.videoVae,
+        video.minimaxH3.audioVae,
+      ].some((value) => !String(value || '').trim());
       const referenceMissing = video.mode === 'reference_to_video' && !video.sourceImagePath;
       return frameGuideMissing || referenceMissing || sourceDimensionsMissing || [
         video.minimaxH3.model,
@@ -1828,6 +1823,7 @@ export function UmbraVideoGenerationControls({
         <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'text_to_video'} label="Text to Video" onClick={() => setMode('text_to_video')} />
         <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'image_to_video'} label="Image to Video" onClick={() => setMode('image_to_video')} />
         {video.family === 'minimax_h3' ? <ToggleButton active={video.mode === 'reference_to_video'} label="Reference to Video" onClick={() => setMode('reference_to_video')} /> : null}
+        {video.family === 'minimax_h3' ? <div className="col-span-full"><ToggleButton active={video.minimaxH3.director.enabled} label="DaSiWa Director" onClick={toggleH3Director} title="Use the separately installed DaSiWa H3 Director nodes" /></div> : null}
         {video.family !== 'minimax_h3' ? <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'video_to_video'} label="Video to Video" onClick={() => setMode('video_to_video')} /> : null}
         {video.family === 'ltx23' ? (
           <ToggleButton
@@ -1852,7 +1848,7 @@ export function UmbraVideoGenerationControls({
       <div className="space-y-3">
         {pipelineMatch.error ? <div className="font-mono text-[9px] leading-relaxed text-red-300/80">{pipelineMatch.error}</div> : null}
 
-        {extendedOpen ? (
+        {video.family === 'minimax_h3' && video.minimaxH3.director.enabled ? null : extendedOpen ? (
           <VideoAccordion
             title="Extended Starting Frame"
             icon={<ImageIcon size={12} className="text-fuchsia-300" />}
@@ -2008,7 +2004,7 @@ export function UmbraVideoGenerationControls({
           </VideoAccordion>
         ) : null}
 
-        <VideoAccordion
+        {video.family === 'minimax_h3' && video.minimaxH3.director.enabled ? null : <VideoAccordion
           title="Media Inputs"
           icon={<Video size={12} className="text-cyan-300" />}
           summary={video.sourceAudioPath ? 'audio attached' : video.mode === 'video_to_video' ? 'source video' : 'optional audio'}
@@ -2073,7 +2069,7 @@ export function UmbraVideoGenerationControls({
             onUploaded={(path, name) => setVideo((current) => ({ ...current, sourceAudioPath: path, sourceAudioName: name }))}
             onClear={() => setVideo((current) => ({ ...current, sourceAudioPath: '', sourceAudioName: '' }))}
           />
-        </VideoAccordion>
+        </VideoAccordion>}
 
         {extendedOpen ? (
           <div className="border border-cyan-300/15 bg-cyan-500/[0.035] px-3 py-2.5">
@@ -2099,44 +2095,10 @@ export function UmbraVideoGenerationControls({
           onSubmit={() => { void handleQueue(); }}
           accent="fuchsia"
         />
-        {video.family === 'minimax_h3' ? (
-          <div className="space-y-2 border border-fuchsia-300/15 bg-fuchsia-500/[0.035] p-2.5">
-            <button
-              type="button"
-              onClick={() => { void draftH3Prompt(); }}
-              disabled={autoPromptLoading || !prompt.trim()}
-              className="inline-flex min-h-9 items-center gap-2 border border-fuchsia-300/30 px-3 text-xs text-fuchsia-100 disabled:opacity-50"
-              title="Draft a MiniMax H3 prompt with the optional local Qwen model"
-            >
-              {autoPromptLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-              {autoPromptLoading ? 'Drafting locally...' : 'Draft with local Qwen'}
-            </button>
-            {autoPromptDraft ? (
-              <div className="space-y-2">
-                <textarea
-                  aria-label="Auto Prompter draft"
-                  value={autoPromptDraft}
-                  onChange={(event) => setAutoPromptDraft(event.target.value)}
-                  className={`${inputClass} min-h-32 w-full resize-y leading-relaxed`}
-                />
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => {
-                    if (!autoPromptDraft.trim()) return;
-                    rememberCurrentPrompt();
-                    replacePromptSegments(autoPromptDraft.trim());
-                    setAutoPromptDraft('');
-                  }} className="min-h-9 border border-fuchsia-300/30 px-3 text-xs text-fuchsia-100">Use Draft</button>
-                  <button type="button" onClick={() => setAutoPromptDraft('')}
-                    className="min-h-9 border border-white/15 px-3 text-xs text-zinc-300">Discard</button>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
         </>}
         {video.family === 'minimax_h3' ? (
           <div className="border border-fuchsia-300/15 bg-fuchsia-500/[0.035] px-2.5 py-2 font-mono text-[9px] leading-relaxed text-fuchsia-100/70">
-            MiniMax H3 uses one native audio-video prompt. Negative prompting is not part of this workflow.
+            {video.minimaxH3.director.enabled ? 'DaSiWa Director uses the prompt and reference slots shown in its panel.' : 'MiniMax H3 uses one native audio-video prompt.'} Negative prompting is not part of this workflow.
           </div>
         ) : (
           <label className="block space-y-1.5">
@@ -2294,7 +2256,7 @@ export function UmbraVideoGenerationControls({
           icon={video.family === 'wan22'
             ? <Database size={12} className="text-amber-300" />
             : video.family === 'minimax_h3' ? <Film size={12} className="text-fuchsia-300" /> : <Film size={12} className="text-cyan-300" />}
-          summary={video.family === 'wan22' ? 'high + low noise' : video.family === 'minimax_h3' ? 'native AV sampling' : video.family === 'ltx25' ? video.ltx25.twoStage ? 'pixel diffusion + refine' : 'pixel diffusion' : video.ltx.twoStage ? 'two stage' : 'single stage'}
+          summary={video.family === 'wan22' ? 'high + low noise' : video.family === 'minimax_h3' ? video.minimaxH3.director.enabled ? 'DaSiWa Director' : 'native AV sampling' : video.family === 'ltx25' ? video.ltx25.twoStage ? 'pixel diffusion + refine' : 'pixel diffusion' : video.ltx.twoStage ? 'two stage' : 'single stage'}
           accent={video.family === 'wan22' ? 'amber' : video.family === 'minimax_h3' ? 'fuchsia' : 'cyan'}
           defaultOpen={video.family === 'wan22'
             ? !video.wan.highModel || !video.wan.lowModel || !video.wan.textEncoder || !video.wan.vae
@@ -2725,6 +2687,22 @@ export function UmbraVideoGenerationControls({
         </div>
       </div>
     </section>
+    {directorEnabled ? (
+      <UmbraH3DirectorPanel
+        mode={video.mode}
+        frameGuideMode={video.frameGuideMode}
+        controls={video.minimaxH3.director}
+        onChange={(director) => setMiniMaxH3('director', director)}
+        prompt={prompt}
+        durationSeconds={videoDurationSeconds}
+        comfyConnected={comfyConnected}
+        onApplyPrompt={(draft) => {
+          if (prompt.trim()) rememberCurrentPrompt();
+          replacePromptSegments(draft);
+        }}
+        onClose={() => setMiniMaxH3('director', { ...video.minimaxH3.director, enabled: false })}
+      />
+    ) : null}
     {storyboardOpen ? (
       <UmbraLtxStoryboardPanel
         shots={video.ltx.storyboard.shots}
