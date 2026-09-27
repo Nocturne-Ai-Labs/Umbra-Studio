@@ -3,7 +3,7 @@ import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from '../../../../shared/umbra-ui/minima
 import { normalizeUmbraVideoLoraStack, type UmbraVideoLoraEntry } from '../../../../shared/umbra-ui/videoLoraStack';
 
 import { miniMaxH3GuideIssue, normalizeMiniMaxH3Guides } from '../../../../shared/umbra-ui/minimaxH3Guides';
-import { miniMaxH3DirectorIssue, miniMaxH3DirectorMode, miniMaxH3DirectorModelIssue, normalizeMiniMaxH3Director } from '../../../../shared/umbra-ui/minimaxH3Director';
+import { DEFAULT_MINIMAX_H3_DIRECTOR, miniMaxH3DirectorIssue, miniMaxH3DirectorMode, miniMaxH3DirectorModelIssue, normalizeMiniMaxH3Director } from '../../../../shared/umbra-ui/minimaxH3Director';
 import { MINIMAX_H3_TURBO_PRESETS, miniMaxH3TurboIssue, miniMaxH3TurboSamplingPreset, type MiniMaxH3TurboPreset } from '../../../../shared/umbra-ui/minimaxH3Turbo';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
@@ -292,7 +292,7 @@ function createDefaultVideoControls(): PowerPrompterVideoControls {
       referenceImageSize: 'match',
       referenceNotes: ['', '', ''],
       guides: [],
-      director: { enabled: false, items: [], inputScaling: 'Auto' },
+      director: { ...DEFAULT_MINIMAX_H3_DIRECTOR },
       turboPreset: 'none',
       turboLora: '',
       turboStrength: 1,
@@ -1578,7 +1578,7 @@ export function UmbraVideoGenerationControls({
   const directorEnabled = video.family === 'minimax_h3' && video.minimaxH3.director.enabled;
   const sourceDimensionsMissing = !directorEnabled && !hasUmbraVideoSourceDimensions(video);
   const turboIssue = video.family === 'minimax_h3'
-    ? (directorEnabled ? miniMaxH3DirectorModelIssue(video.minimaxH3.model, miniMaxH3DirectorMode(video.mode, video.frameGuideMode)) : '')
+    ? (directorEnabled ? miniMaxH3DirectorModelIssue(video.minimaxH3.model, miniMaxH3DirectorMode(video.mode, video.frameGuideMode, video.minimaxH3.director)) : '')
       || miniMaxH3DirectorIssue(video.minimaxH3.director, video.mode, video.frameGuideMode)
       || miniMaxH3GuideIssue(video.minimaxH3.guides, video.frames, video.mode === 'reference_to_video')
       || miniMaxH3TurboIssue(video.minimaxH3, video.mode === 'reference_to_video')
@@ -2692,6 +2692,7 @@ export function UmbraVideoGenerationControls({
         mode={video.mode}
         frameGuideMode={video.frameGuideMode}
         onFrameGuideModeChange={(mode) => setCommon('frameGuideMode', mode)}
+        onModeChange={setMode}
         controls={video.minimaxH3.director}
         onChange={(director) => setMiniMaxH3('director', director)}
         prompt={prompt}

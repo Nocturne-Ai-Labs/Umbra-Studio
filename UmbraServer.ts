@@ -1,6 +1,6 @@
 import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from './shared/umbra-ui/minimaxH3Defaults';
 import { normalizeMiniMaxH3Guides, type MiniMaxH3Guide } from './shared/umbra-ui/minimaxH3Guides';
-import { buildMiniMaxH3DirectorTimeline, miniMaxH3DirectorIssue, miniMaxH3DirectorMode, normalizeMiniMaxH3Director, type MiniMaxH3DirectorControls } from './shared/umbra-ui/minimaxH3Director';
+import { buildMiniMaxH3DirectorBuilderState, buildMiniMaxH3DirectorTimeline, miniMaxH3DirectorIssue, miniMaxH3DirectorMode, normalizeMiniMaxH3Director, type MiniMaxH3DirectorControls } from './shared/umbra-ui/minimaxH3Director';
 import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
 /**
  * Umbra backend entrypoint.
@@ -8055,14 +8055,14 @@ function applyPPVideoRoleToApiNode(
       if (!director.enabled) throw new Error('Enable DaSiWa Director before using its workflow.');
       const issue = miniMaxH3DirectorIssue(director, video.mode, video.frameGuideMode);
       if (issue) throw new Error(issue);
-      setPPApiNodeInput(node, 'mode', miniMaxH3DirectorMode(video.mode, video.frameGuideMode));
+      setPPApiNodeInput(node, 'mode', miniMaxH3DirectorMode(video.mode, video.frameGuideMode, director));
       setPPApiNodeInput(node, 'prompt', activePrompt);
       setPPApiNodeInput(node, 'width', sizing.samplingWidth);
       setPPApiNodeInput(node, 'height', sizing.samplingHeight);
       setPPApiNodeInput(node, 'duration', normalizeMiniMaxH3VideoFrames(video.frames) / 24);
       setPPApiNodeInput(node, 'ref_image_size', minimaxH3.referenceImageSize);
       setPPApiNodeInput(node, 'timeline_data', buildMiniMaxH3DirectorTimeline(director, video.mode, video.frameGuideMode));
-      setPPApiNodeInput(node, 'builder_state', '');
+      setPPApiNodeInput(node, 'builder_state', buildMiniMaxH3DirectorBuilderState(director, video.mode, video.frameGuideMode));
       setPPApiNodeInput(node, 'frame_rate', 24);
       return true;
     }
@@ -9411,7 +9411,7 @@ function compileUmbraUiPipelineWorkflow(
         ? 'The selected H3 pipeline is not a DaSiWa Director workflow. Select the Director pipeline and try again.'
         : 'The DaSiWa Director workflow requires Director mode to be enabled.');
     }
-    applyMiniMaxH3Acceleration(promptGraph, { ...generation.video.minimaxH3, guideFrameCount: generation.video.frames, directorMode: generation.video.minimaxH3.director.enabled ? miniMaxH3DirectorMode(generation.video.mode, generation.video.frameGuideMode) : undefined });
+    applyMiniMaxH3Acceleration(promptGraph, { ...generation.video.minimaxH3, guideFrameCount: generation.video.frames, directorMode: generation.video.minimaxH3.director.enabled ? miniMaxH3DirectorMode(generation.video.mode, generation.video.frameGuideMode, generation.video.minimaxH3.director) : undefined });
   }
   applyPPMiniMaxH3ReferenceTopology(videoRoleEntries, generation);
   applyPPLtxVideoTopology(promptGraph, videoRoleEntries, generation, activePrompt);
@@ -16349,7 +16349,7 @@ interface UpdateInfo {
   currentVersion: string;
   latestVersion: string;
   hasUpdate: boolean;
-  updateType: 'pytorch' | 'tool';
+  updateType: 'pytorch' | 'tool' | 'custom_nodes';
   details?: string;
 }
 
@@ -17388,6 +17388,21 @@ async function checkAllUpdates(): Promise<UpdateCache> {
         updateType: 'tool',
         details: 'git pull to update'
       });
+    }
+    const directorNodesPath = join(detected.comfyui.path, 'custom_nodes', 'ComfyUI-DaSiWa-Nodes');
+    if (existsSync(directorNodesPath)) {
+      const installedDirectorCommit = getLocalGitCommit(directorNodesPath);
+      const latestDirectorCommit = await getGitLatestCommit('https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes');
+      if (installedDirectorCommit && latestDirectorCommit) {
+        updates.push({
+          tool: 'DaSiWa H3 Director',
+          currentVersion: installedDirectorCommit,
+          latestVersion: latestDirectorCommit,
+          hasUpdate: !installedDirectorCommit.startsWith(latestDirectorCommit) && !latestDirectorCommit.startsWith(installedDirectorCommit),
+          updateType: 'custom_nodes',
+          details: 'DaSiWa changed upstream. Check Umbra Director compatibility before updating custom nodes in ComfyUI Manager.',
+        });
+      }
     }
   }
 
@@ -25137,7 +25152,7 @@ async function assertPPApiWorkflowExecutionReady(
   ));
   const isMiniMaxH3 = generation.mediaType === 'video' && generation.video?.family === 'minimax_h3';
   if (isMiniMaxH3 || !validationContext.validatedWorkflows.has(loaded)) {
-    const validation = validatePPApiWorkflowDocument(loaded.document, validationContext.availableClassTypes, isMiniMaxH3 ? { ...generation.video.minimaxH3, guideFrameCount: generation.video.frames, directorMode: generation.video.minimaxH3.director.enabled ? miniMaxH3DirectorMode(generation.video.mode, generation.video.frameGuideMode) : undefined } : {});
+    const validation = validatePPApiWorkflowDocument(loaded.document, validationContext.availableClassTypes, isMiniMaxH3 ? { ...generation.video.minimaxH3, guideFrameCount: generation.video.frames, directorMode: generation.video.minimaxH3.director.enabled ? miniMaxH3DirectorMode(generation.video.mode, generation.video.frameGuideMode, generation.video.minimaxH3.director) : undefined } : {});
     if (!validation.ok) {
       throw new Error(`Selected generation pipeline has an invalid graph: ${validation.graph.issues.join(', ') || 'unknown graph issue'}.`);
     }

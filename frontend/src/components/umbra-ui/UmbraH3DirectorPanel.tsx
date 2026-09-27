@@ -1,11 +1,11 @@
 'use client';
 
 import React from 'react';
-import { ArrowDown, ArrowUp, FolderUp, Image as ImageIcon, Loader2, Music2, Plus, Sparkles, Trash2, Video, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Download, FolderUp, Image as ImageIcon, Loader2, Music2, Plus, Sparkles, Trash2, Video, X } from 'lucide-react';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
 import { resolveUmbraVideoQueueSourceUrl } from '@/lib/umbraVideoQueuePreview';
-import { miniMaxH3DirectorMode, selectedMiniMaxH3DirectorItems, type MiniMaxH3DirectorControls, type MiniMaxH3DirectorItem, type MiniMaxH3DirectorMediaKind } from '../../../../shared/umbra-ui/minimaxH3Director';
+import { createMiniMaxH3ReferencePack, miniMaxH3DirectorMode, parseMiniMaxH3ReferencePack, selectedMiniMaxH3DirectorItems, type MiniMaxH3DirectorControls, type MiniMaxH3DirectorItem, type MiniMaxH3DirectorMediaKind, type MiniMaxH3ReferencePackMode, type MiniMaxH3ReferencePackScope } from '../../../../shared/umbra-ui/minimaxH3Director';
 
 interface ForgeModel { id: string; label: string; disabled?: boolean }
 interface ForgeCatalog {
@@ -21,6 +21,7 @@ interface Props {
   mode: string;
   frameGuideMode: string;
   onFrameGuideModeChange: (mode: 'first' | 'first_last') => void;
+  onModeChange: (mode: 'text_to_video' | 'image_to_video' | 'reference_to_video') => void;
   controls: MiniMaxH3DirectorControls;
   onChange: (controls: MiniMaxH3DirectorControls) => void;
   prompt: string;
@@ -48,8 +49,8 @@ function newItem(kind: MiniMaxH3DirectorMediaKind): MiniMaxH3DirectorItem {
   };
 }
 
-export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeChange, controls, onChange, prompt, durationSeconds, comfyConnected, onApplyPrompt, onClose }: Props) {
-  const directorMode = miniMaxH3DirectorMode(mode, frameGuideMode);
+export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeChange, onModeChange, controls, onChange, prompt, durationSeconds, comfyConnected, onApplyPrompt, onClose }: Props) {
+  const directorMode = miniMaxH3DirectorMode(mode, frameGuideMode, controls);
   const [forgeCatalog, setForgeCatalog] = React.useState<ForgeCatalog | null>(null);
   const [forgeError, setForgeError] = React.useState('');
   const [brief, setBrief] = React.useState(prompt);
@@ -59,10 +60,38 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
   const [draft, setDraft] = React.useState('');
   const [drafting, setDrafting] = React.useState(false);
   const [uploadingId, setUploadingId] = React.useState('');
+  const [refModLibrary, setRefModLibrary] = React.useState<Array<{ name: string; kind: string; description?: string }>>([]);
+  const [refModError, setRefModError] = React.useState('');
+  const [nodesUpdateAvailable, setNodesUpdateAvailable] = React.useState(false);
+  const [packScope, setPackScope] = React.useState<MiniMaxH3ReferencePackScope>('all');
+  const [packLoadMode, setPackLoadMode] = React.useState<MiniMaxH3ReferencePackMode>('overwrite');
+  const [packStatus, setPackStatus] = React.useState('');
   const requestIdRef = React.useRef('');
+  const packInput = React.useRef<HTMLInputElement | null>(null);
   const fileInputs = React.useRef<Record<string, HTMLInputElement | null>>({});
   const enabled = selectedMiniMaxH3DirectorItems(controls, mode, frameGuideMode);
-  const maxItems = directorMode === 'T2VA' ? 0 : directorMode === 'I2VA' ? 1 : directorMode === 'FL2VA' ? 2 : 12;
+  const maxItems = directorMode === 'T2VA' ? 0 : directorMode === 'I2VA' || directorMode === 'L2VA' ? 1 : directorMode === 'FL2VA' ? 2 : 12;
+
+  React.useEffect(() => {
+    if (!comfyConnected || directorMode !== 'REF2VA') return;
+    let active = true;
+    fetch('/comfy/dasiwa/refmods').then(async (response) => {
+      const result = await response.json();
+      if (!response.ok || !Array.isArray(result)) throw new Error(result.error || 'Could not load RefMods from ComfyUI.');
+      if (active) { setRefModLibrary(result); setRefModError(''); }
+    }).catch((error) => { if (active) setRefModError(error instanceof Error ? error.message : 'Could not load RefMods.'); });
+    return () => { active = false; };
+  }, [comfyConnected, directorMode]);
+
+  React.useEffect(() => {
+    let active = true;
+    fetch('/api/tools/updates/summary').then(async (response) => {
+      if (!response.ok) return;
+      const result = await response.json() as { updates?: Array<{ tool?: string; type?: string }> };
+      if (active) setNodesUpdateAvailable(Boolean(result.updates?.some((entry) => entry.tool === 'DaSiWa H3 Director' && entry.type === 'custom_nodes')));
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
 
   React.useEffect(() => () => {
     const requestId = requestIdRef.current;
@@ -73,6 +102,9 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
   }, []);
 
   const updateItems = (items: MiniMaxH3DirectorItem[]) => onChange({ ...controls, items });
+  const updateBuilder = (patch: Partial<MiniMaxH3DirectorControls['promptBuilder']>) => onChange({
+    ...controls, promptBuilder: { ...controls.promptBuilder, ...patch },
+  });
   const updateItem = (id: string, patch: Partial<MiniMaxH3DirectorItem>) => {
     updateItems(controls.items.map((item) => item.id === id ? { ...item, ...patch } : item));
   };
@@ -148,6 +180,35 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
     }).catch(() => undefined);
   };
 
+  const savePack = () => {
+    try {
+      const pack = createMiniMaxH3ReferencePack(controls, mode, frameGuideMode, prompt, packScope);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `minimax-h3-${packScope}-pack.json`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setPackStatus('Reference pack saved.');
+    } catch (error) {
+      setPackStatus(error instanceof Error ? error.message : 'Reference pack could not be saved.');
+    }
+  };
+
+  const loadPack = async (file: File) => {
+    try {
+      if (file.size > 1024 * 1024) throw new Error('Reference pack is larger than 1 MB.');
+      const parsed = parseMiniMaxH3ReferencePack(JSON.parse(await file.text()), controls, packScope, packLoadMode);
+      onModeChange(parsed.mode);
+      onFrameGuideModeChange(parsed.frameGuideMode);
+      onChange(parsed.controls);
+      if (parsed.prompt !== null) onApplyPrompt(packLoadMode === 'append' && prompt.trim() ? `${prompt.trim()}\n\n${parsed.prompt}` : parsed.prompt);
+      setPackStatus('Reference pack loaded. Missing media must be uploaded again before queueing.');
+    } catch (error) {
+      setPackStatus(error instanceof Error ? error.message : 'Reference pack could not be loaded.');
+    }
+  };
+
   const forge = async () => {
     if (drafting || !brief.trim() || !model) return;
     const requestId = crypto.randomUUID();
@@ -197,20 +258,45 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
         <span className="font-mono text-[10px] text-zinc-500">{directorMode}</span>
         <button type="button" className={`${iconButton} ml-auto`} title="Close Director" onClick={onClose}><X size={14} /></button>
       </div>
+      {nodesUpdateAvailable ? <div role="status" className="mb-3 border border-amber-400/25 bg-amber-400/5 p-2 text-xs text-amber-200">
+        DaSiWa nodes changed upstream. Check Umbra Director compatibility before updating in ComfyUI Manager. Umbra workflow changes are reviewed separately.
+        <a href="/comfy/" target="_blank" rel="noopener noreferrer" className="ml-2 underline">Open ComfyUI</a>
+      </div> : null}
       <div className="mb-3 flex flex-wrap gap-2">
         <span className="text-[10px] text-zinc-500">{enabled.length}/{maxItems} reference slots</span>
         <label className="ml-auto flex items-center gap-1 text-[10px] text-zinc-400">
           Input scaling
-          <UmbraSelectControl value={controls.inputScaling} onChange={(event) => onChange({ ...controls, inputScaling: event.target.value === 'Off' ? 'Off' : 'Auto' })} className="h-8 rounded border border-white/10 bg-black/50 px-2 text-xs text-zinc-100">
-            <option value="Auto">Auto</option><option value="Off">Off</option>
+          <UmbraSelectControl value={controls.inputScaling} onChange={(event) => onChange({ ...controls, inputScaling: event.target.value as MiniMaxH3DirectorControls['inputScaling'] })} className="h-8 rounded border border-white/10 bg-black/50 px-2 text-xs text-zinc-100">
+            {['Auto', 'Off', 'Target', 'Fit', 'Fill and crop', 'Fit and pad', 'Long side with divisible crop'].map((value) => <option key={value} value={value}>{value}</option>)}
           </UmbraSelectControl>
         </label>
       </div>
       {mode === 'image_to_video' ? <label className="mb-3 block text-[10px] text-zinc-500">Frame direction
-        <UmbraSelectControl value={frameGuideMode === 'first_last' ? 'first_last' : 'first'} onChange={(event) => onFrameGuideModeChange(event.target.value === 'first_last' ? 'first_last' : 'first')} className={fieldClass}>
-          <option value="first">First frame</option><option value="first_last">First + last frames</option>
+        <UmbraSelectControl value={directorMode === 'L2VA' ? 'last' : directorMode === 'FL2VA' ? 'first_last' : 'first'} onChange={(event) => {
+          const next = event.target.value as MiniMaxH3DirectorControls['endpointMode'];
+          onChange({ ...controls, endpointMode: next });
+          if (next !== 'last') onFrameGuideModeChange(next);
+        }} className={fieldClass}>
+          <option value="first">First frame</option><option value="last">Last frame</option><option value="first_last">First + last frames</option>
         </UmbraSelectControl>
       </label> : null}
+      <div className="mb-3 border-y border-white/10 py-3">
+        <div className="mb-2 flex items-center gap-2"><h3 className="text-xs font-semibold text-zinc-200">Reference pack</h3></div>
+        <div className="grid grid-cols-2 gap-2">
+          <UmbraSelectControl aria-label="Reference pack contents" value={packScope} onChange={(event) => setPackScope(event.target.value as MiniMaxH3ReferencePackScope)} className={fieldClass}>
+            <option value="all">Files + prompt</option><option value="files">Files only</option><option value="prompt">Prompt only</option>
+          </UmbraSelectControl>
+          <UmbraSelectControl aria-label="Reference pack load mode" value={packLoadMode} onChange={(event) => setPackLoadMode(event.target.value as MiniMaxH3ReferencePackMode)} className={fieldClass}>
+            <option value="overwrite">Overwrite</option><option value="append">Append</option>
+          </UmbraSelectControl>
+        </div>
+        <div className="mt-2 flex gap-2">
+          <button type="button" className="inline-flex h-8 flex-1 items-center justify-center gap-1 border border-white/10 text-xs text-zinc-300" onClick={savePack}><Download size={13} /> Save</button>
+          <button type="button" className="inline-flex h-8 flex-1 items-center justify-center gap-1 border border-white/10 text-xs text-zinc-300" onClick={() => packInput.current?.click()}><FolderUp size={13} /> Load</button>
+          <input ref={packInput} type="file" accept="application/json,.json" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void loadPack(file); event.target.value = ''; }} />
+        </div>
+        {packStatus ? <p role="status" className="mt-2 text-[10px] text-zinc-400">{packStatus}</p> : null}
+      </div>
       <div className="space-y-2">
         {enabled.map((item, index) => (
           <div key={item.id} className="border border-white/10 bg-white/[0.025] p-2">
@@ -242,7 +328,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
                 <option value="subject">Subject</option><option value="style">Style</option><option value="keyframe">Keyframe</option>
               </UmbraSelectControl>
             </label> : null}
-            {directorMode === 'REF2VA' ? <input aria-label={`${item.kind} ${index + 1} details for Prompt Forge`} className={`${fieldClass} mt-2`} value={item.note} placeholder="Details to preserve in Prompt Forge" onChange={(event) => updateItem(item.id, { note: event.target.value })} /> : null}
+            <input aria-label={`${item.kind} ${index + 1} reference prompt`} className={`${fieldClass} mt-2`} value={item.note} placeholder="Reference prompt" onChange={(event) => updateItem(item.id, { note: event.target.value })} />
             {item.kind !== 'image' ? (
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <label className="text-[10px] text-zinc-500">Trim start (s)<input type="number" min={0} step={0.1} value={item.trimStart} onChange={(event) => updateItem(item.id, { trimStart: Number(event.target.value) || 0 })} className={fieldClass} /></label>
@@ -266,6 +352,66 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
           </> : null}
         </div>
       ) : null}
+      {directorMode === 'REF2VA' ? <div className="mt-4 border-t border-white/10 pt-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold text-zinc-200">RefMods</h3>
+          <button type="button" className={iconButton} title="Add RefMod" disabled={controls.refMods.length >= 8} onClick={() => {
+            const slot = Array.from({ length: 8 }, (_, index) => index + 1).find((value) => !controls.refMods.some((row) => row.slot === value));
+            if (slot) onChange({ ...controls, refMods: [...controls.refMods, { slot, name: '', enabled: true, strength: 1, description: '' }] });
+          }}><Plus size={13} /></button>
+        </div>
+        {refModError ? <p role="status" className="mb-2 text-xs text-amber-300">{refModError}</p> : null}
+        {controls.refMods.map((ref) => <div key={ref.slot} className="mb-2 border border-white/10 p-2">
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1 text-xs text-zinc-300"><input type="checkbox" checked={ref.enabled} onChange={(event) => onChange({ ...controls, refMods: controls.refMods.map((row) => row.slot === ref.slot ? { ...row, enabled: event.target.checked } : row) })} />RefMod {ref.slot}</label>
+            <button type="button" className={`${iconButton} ml-auto`} title="Insert RefMod tag" disabled={!ref.name || !ref.enabled} onClick={() => {
+              const tag = `<RefMod ${ref.slot}>`;
+              if (controls.promptBuilder.structured) {
+                const description = controls.promptBuilder.description.trim();
+                updateBuilder({ description: `${description}${description ? '\n' : ''}${tag}` });
+              } else {
+                onApplyPrompt(`${prompt.trim()}${prompt.trim() ? '\n' : ''}${tag}`);
+              }
+            }}><Plus size={13} /></button>
+            <button type="button" className={iconButton} title="Remove RefMod" onClick={() => onChange({ ...controls, refMods: controls.refMods.filter((row) => row.slot !== ref.slot) })}><Trash2 size={13} /></button>
+          </div>
+          <UmbraSelectControl value={ref.name} onChange={(event) => onChange({ ...controls, refMods: controls.refMods.map((row) => row.slot === ref.slot ? { ...row, name: event.target.value } : row) })} className={`${fieldClass} mt-2`}>
+            <option value="">Select a RefMod</option>
+            {refModLibrary.map((entry) => <option key={entry.name} value={entry.name}>{entry.name} ({entry.kind})</option>)}
+          </UmbraSelectControl>
+          <label className="mt-2 block text-[10px] text-zinc-500">Strength
+            <input type="number" min={0} max={1} step={0.05} value={ref.strength} onChange={(event) => onChange({ ...controls, refMods: controls.refMods.map((row) => row.slot === ref.slot ? { ...row, strength: Number(event.target.value) } : row) })} className={fieldClass} />
+          </label>
+          <input aria-label={`RefMod ${ref.slot} description`} className={`${fieldClass} mt-2`} value={ref.description} placeholder="Reference description" onChange={(event) => onChange({ ...controls, refMods: controls.refMods.map((row) => row.slot === ref.slot ? { ...row, description: event.target.value } : row) })} />
+        </div>)}
+      </div> : null}
+      <div className="mt-4 border-t border-white/10 pt-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold text-zinc-200">Prompt</h3>
+          <div className="flex border border-white/10" role="group" aria-label="Director prompt mode">
+            <button type="button" className={`px-2 py-1 text-[10px] ${!controls.promptBuilder.structured ? 'bg-fuchsia-500/20 text-fuchsia-100' : 'text-zinc-400'}`} onClick={() => {
+              if (!controls.promptBuilder.structured) return;
+              const builder = controls.promptBuilder;
+              const sections = directorMode === 'REF2VA'
+                ? [['subject_definitions', builder.subjects], ['summary', builder.summary], ['retention_analysis', builder.retention], ['detailed_description', builder.description], ['overall_soundscape', builder.soundscape], ['non_diegetic_music', builder.music]]
+                : [['integrated_multimodal_description', builder.description], ['overall_soundscape', builder.soundscape], ['non_diegetic_music', builder.music]];
+              onApplyPrompt(sections.map(([label, value]) => `${label}: ${value}`).join('\n\n'));
+              updateBuilder({ structured: false });
+            }}>Simple</button>
+            <button type="button" className={`px-2 py-1 text-[10px] ${controls.promptBuilder.structured ? 'bg-fuchsia-500/20 text-fuchsia-100' : 'text-zinc-400'}`} onClick={() => updateBuilder({ structured: true, description: controls.promptBuilder.description || prompt })}>Structured</button>
+          </div>
+        </div>
+        {controls.promptBuilder.structured ? <div className="space-y-2">
+          {directorMode === 'REF2VA' ? <>
+            <label className="block text-[10px] text-zinc-500">Subject definitions<textarea value={controls.promptBuilder.subjects} onChange={(event) => updateBuilder({ subjects: event.target.value })} className={`${fieldClass} min-h-16 resize-y`} /></label>
+            <label className="block text-[10px] text-zinc-500">Reference summary<textarea value={controls.promptBuilder.summary} onChange={(event) => updateBuilder({ summary: event.target.value })} className={`${fieldClass} min-h-16 resize-y`} /></label>
+            <label className="block text-[10px] text-zinc-500">Retention analysis<textarea value={controls.promptBuilder.retention} onChange={(event) => updateBuilder({ retention: event.target.value })} className={`${fieldClass} min-h-16 resize-y`} /></label>
+          </> : null}
+          <label className="block text-[10px] text-zinc-500">{directorMode === 'REF2VA' ? 'Detailed description' : 'Integrated multimodal description'}<textarea value={controls.promptBuilder.description} onChange={(event) => updateBuilder({ description: event.target.value })} className={`${fieldClass} min-h-24 resize-y`} /></label>
+          <label className="block text-[10px] text-zinc-500">Overall soundscape<textarea value={controls.promptBuilder.soundscape} onChange={(event) => updateBuilder({ soundscape: event.target.value })} className={`${fieldClass} min-h-16 resize-y`} /></label>
+          <label className="block text-[10px] text-zinc-500">Non-diegetic music<input value={controls.promptBuilder.music} onChange={(event) => updateBuilder({ music: event.target.value })} className={fieldClass} /></label>
+        </div> : null}
+      </div>
       <div className="mt-5 border-t border-white/10 pt-3">
         <div className="mb-2 flex items-center gap-2">
           <Sparkles size={14} className="text-fuchsia-300" />
@@ -297,7 +443,10 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
         {forgeError ? <p role="status" className="mt-2 text-xs text-amber-300">{forgeError}</p> : null}
         {draft ? <div className="mt-3 space-y-2">
           <textarea value={draft} onChange={(event) => setDraft(event.target.value)} className={`${fieldClass} min-h-40 resize-y`} aria-label="Prompt Forge draft" />
-          <button type="button" className="h-9 rounded border border-fuchsia-300/30 px-3 text-xs text-fuchsia-100" onClick={() => onApplyPrompt(draft.trim())} disabled={!draft.trim()}>Use draft</button>
+          <button type="button" className="h-9 rounded border border-fuchsia-300/30 px-3 text-xs text-fuchsia-100" onClick={() => {
+            if (controls.promptBuilder.structured) updateBuilder({ description: draft.trim() });
+            else onApplyPrompt(draft.trim());
+          }} disabled={!draft.trim()}>Use draft</button>
         </div> : null}
       </div>
     </aside>

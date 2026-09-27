@@ -1,6 +1,6 @@
 import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from '../../../shared/umbra-ui/minimaxH3Defaults';
 import { normalizeMiniMaxH3Guides } from '../../../shared/umbra-ui/minimaxH3Guides';
-import { normalizeMiniMaxH3Director } from '../../../shared/umbra-ui/minimaxH3Director';
+import { DEFAULT_MINIMAX_H3_DIRECTOR, normalizeMiniMaxH3Director } from '../../../shared/umbra-ui/minimaxH3Director';
 import { normalizeMiniMaxH3Turbo } from '../../../shared/umbra-ui/minimaxH3Turbo';
 import { normalizeUmbraVideoLoraStack } from '../../../shared/umbra-ui/videoLoraStack';
 import type {
@@ -536,7 +536,7 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
       referenceImageSize: 'match',
       referenceNotes: ['', '', ''],
       guides: [],
-      director: { enabled: false, items: [], inputScaling: 'Auto' },
+      director: { ...DEFAULT_MINIMAX_H3_DIRECTOR },
       ...normalizeMiniMaxH3Turbo({}),
       // Acceleration is opt-in; preserve explicit choices when restoring saved jobs.
       sageAttention: 'disabled',
