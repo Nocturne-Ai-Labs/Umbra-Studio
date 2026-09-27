@@ -2691,6 +2691,7 @@ export function UmbraVideoGenerationControls({
       <UmbraH3DirectorPanel
         mode={video.mode}
         frameGuideMode={video.frameGuideMode}
+        onFrameGuideModeChange={(mode) => setCommon('frameGuideMode', mode)}
         controls={video.minimaxH3.director}
         onChange={(director) => setMiniMaxH3('director', director)}
         prompt={prompt}

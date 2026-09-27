@@ -20,6 +20,7 @@ interface ForgeCatalog {
 interface Props {
   mode: string;
   frameGuideMode: string;
+  onFrameGuideModeChange: (mode: 'first' | 'first_last') => void;
   controls: MiniMaxH3DirectorControls;
   onChange: (controls: MiniMaxH3DirectorControls) => void;
   prompt: string;
@@ -47,7 +48,7 @@ function newItem(kind: MiniMaxH3DirectorMediaKind): MiniMaxH3DirectorItem {
   };
 }
 
-export function UmbraH3DirectorPanel({ mode, frameGuideMode, controls, onChange, prompt, durationSeconds, comfyConnected, onApplyPrompt, onClose }: Props) {
+export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeChange, controls, onChange, prompt, durationSeconds, comfyConnected, onApplyPrompt, onClose }: Props) {
   const directorMode = miniMaxH3DirectorMode(mode, frameGuideMode);
   const [forgeCatalog, setForgeCatalog] = React.useState<ForgeCatalog | null>(null);
   const [forgeError, setForgeError] = React.useState('');
@@ -205,6 +206,11 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, controls, onChange,
           </UmbraSelectControl>
         </label>
       </div>
+      {mode === 'image_to_video' ? <label className="mb-3 block text-[10px] text-zinc-500">Frame direction
+        <UmbraSelectControl value={frameGuideMode === 'first_last' ? 'first_last' : 'first'} onChange={(event) => onFrameGuideModeChange(event.target.value === 'first_last' ? 'first_last' : 'first')} className={fieldClass}>
+          <option value="first">First frame</option><option value="first_last">First + last frames</option>
+        </UmbraSelectControl>
+      </label> : null}
       <div className="space-y-2">
         {enabled.map((item, index) => (
           <div key={item.id} className="border border-white/10 bg-white/[0.025] p-2">
