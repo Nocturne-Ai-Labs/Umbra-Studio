@@ -55,6 +55,22 @@
       ]
     },
     {
+      "id": "pixai-tagger-v1.0",
+      "family": "WaifuTagger",
+      "repository": "pixai-labs/pixai-tagger-v1.0",
+      "revision": "9fe10addf9326e292da8a85a98ea74cd91b41771",
+      "folder": "pixai-tagger-v1.0",
+      "license": "Apache-2.0",
+      "installPolicy": "optional",
+      "purpose": "Optional 1008px anime tagger with general, character, style, copyright, meta and rating scores; requires PyTorch, torchvision, Transformers and timm",
+      "files": [
+        { "path": "model.safetensors", "bytes": 1945425796, "sha256": "f29e475205cbcbc25b52a075840c7809d6215be15f45375113ba09c49bf90292" },
+        { "path": "config.json", "bytes": 693918, "sha256": "f8a19b38661c37dc5fd519f2137be70f6f897972021b4ebc17b7d35a0e27b9dd" },
+        { "path": "preprocessor_config.json", "bytes": 600, "sha256": "20451575e627950993de7b00641d5b263eceb3e7436e4ad518fea2411b60e49d" },
+        { "path": "tagger_pipeline.py", "bytes": 43696, "sha256": "3431279fdfff234f62664999fc1fe6bb20f1e8756f7435d0e165ebd4456f7fcd" }
+      ]
+    },
+    {
       "id": "qwen2-vl-2b-abliterated-caption-it",
       "family": "DataForgeCaption",
       "repository": "prithivMLmods/Qwen2-VL-2B-Abliterated-Caption-it",

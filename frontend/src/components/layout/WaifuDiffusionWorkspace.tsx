@@ -47,6 +47,7 @@ interface WaifuTagResult {
   rating: Record<string, number>;
   general: WaifuTagScore[];
   character: WaifuTagScore[];
+  style?: WaifuTagScore[];
   booruTags: string[];
   booruTagString: string;
   generalTagString: string;
@@ -132,6 +133,7 @@ const WAIFU_MODEL_OPTIONS = [
   { id: 'SmilingWolf/wd-convnext-tagger-v3', label: 'wd-convnext-tagger-v3' },
   { id: 'SmilingWolf/wd-eva02-large-tagger-v3', label: 'wd-eva02-large-tagger-v3' },
   { id: 'SmilingWolf/wd-swinv2-tagger-v3', label: 'wd-swinv2-tagger-v3' },
+  { id: 'pixai-labs/pixai-tagger-v1.0', label: 'PixAI Tagger v1.0' },
 ];
 const NATURAL_MODEL_OPTIONS = [
   {
@@ -1036,7 +1038,14 @@ export function WaifuDiffusionWorkspace({
                       Model
                       <UmbraSelectControl
                         value={waifuOptions.modelRepo}
-                        onChange={(event) => setWaifuOptions((prev) => ({ ...prev, modelRepo: event.target.value }))}
+                        onChange={(event) => setWaifuOptions((prev) => {
+                          const pixai = event.target.value === 'pixai-labs/pixai-tagger-v1.0';
+                          return { ...prev, modelRepo: event.target.value,
+                            generalThreshold: pixai ? 0.17 : 0.35,
+                            characterThreshold: pixai ? 0.27 : 0.85,
+                            ratingThreshold: pixai ? 0.41 : 0.25,
+                            generalMcutEnabled: false, characterMcutEnabled: false };
+                        })}
                         className="umbra-input umbra-themed-select mt-1 w-full rounded px-2 py-1 text-xs"
                       >
                         {WAIFU_MODEL_OPTIONS.map((option) => (
@@ -1109,6 +1118,7 @@ export function WaifuDiffusionWorkspace({
                       <input
                         type="checkbox"
                         checked={waifuOptions.generalMcutEnabled}
+                        disabled={waifuOptions.modelRepo === 'pixai-labs/pixai-tagger-v1.0'}
                         onChange={(event) => setWaifuOptions((prev) => ({ ...prev, generalMcutEnabled: event.target.checked }))}
                         className="accent-[var(--umbra-accent)]"
                       />
@@ -1118,6 +1128,7 @@ export function WaifuDiffusionWorkspace({
                       <input
                         type="checkbox"
                         checked={waifuOptions.characterMcutEnabled}
+                        disabled={waifuOptions.modelRepo === 'pixai-labs/pixai-tagger-v1.0'}
                         onChange={(event) => setWaifuOptions((prev) => ({ ...prev, characterMcutEnabled: event.target.checked }))}
                         className="accent-[var(--umbra-accent)]"
                       />
@@ -1368,6 +1379,18 @@ export function WaifuDiffusionWorkspace({
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       {selectedItem.waifuTagger.result.general.map(({ tag, score }) => (
+                        <span key={tag} className="px-2 py-1 rounded text-[11px] umbra-chip-neutral">
+                          {tag} ({(score * 100).toFixed(1)}%)
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {(selectedItem.waifuTagger.result.style?.length || 0) > 0 && (
+                  <div className="glass-panel rounded-lg p-3 border-white/10 umbra-surface-soft">
+                    <p className="text-[11px] umbra-text-faint uppercase tracking-wide mb-1">Style Tags</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedItem.waifuTagger.result.style?.map(({ tag, score }) => (
                         <span key={tag} className="px-2 py-1 rounded text-[11px] umbra-chip-neutral">
                           {tag} ({(score * 100).toFixed(1)}%)
                         </span>

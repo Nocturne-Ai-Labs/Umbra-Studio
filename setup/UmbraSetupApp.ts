@@ -15,7 +15,7 @@ const DEFAULT_SETUP_PORT = 8215;
 const SUPPORTED_LANGUAGES = new Set(['en', 'ja', 'zh-CN', 'ko', 'de']);
 const MAX_LOG_LINES = 500;
 
-type SetupJobKind = 'data-forge' | 'umbra-ui' | 'requirements' | 'support';
+type SetupJobKind = 'data-forge' | 'data-forge-pixai' | 'umbra-ui' | 'requirements' | 'support';
 type SetupJobState = {
   id: string;
   kind: SetupJobKind;
@@ -184,6 +184,13 @@ async function runModelInstall(
     await runScript(runtimeRoot, join(sourceRoot, 'scripts', 'download-caption-models.mjs'), [], job);
     return;
   }
+  if (kind === 'data-forge-pixai') {
+    job.step = 'Installing PixAI Python dependencies';
+    await runScript(runtimeRoot, join(sourceRoot, 'scripts', 'install-pixai-tagger-deps.mjs'), [], job);
+    job.step = 'Installing optional PixAI tagger';
+    await runScript(runtimeRoot, join(sourceRoot, 'scripts', 'download-waifu-models.mjs'), ['--only', 'pixai-tagger-v1.0'], job);
+    return;
+  }
   const pack = kind === 'requirements' ? 'requirements' : 'support';
   if (!profiles.length) return;
   job.step = check ? 'Verifying selected models' : 'Installing selected models';
@@ -293,14 +300,14 @@ async function main() {
           return json({ success: false, error: 'Model installation requires a settings object.' }, 400);
         }
         const kind = String(body.kind || '') as SetupJobKind;
-        if (!['data-forge', 'umbra-ui', 'requirements', 'support'].includes(kind)) {
+        if (!['data-forge', 'data-forge-pixai', 'umbra-ui', 'requirements', 'support'].includes(kind)) {
           return json({ success: false, error: 'Choose a supported model pack.' }, 400);
         }
         let profiles: string[] = ['core'];
         try {
           if (kind === 'requirements' || kind === 'support') profiles = modelSetupSelection(sourceRoot, kind as ModelSetupPack, body.profiles);
           if (body.hfToken !== undefined && (typeof body.hfToken !== 'string' || body.hfToken.length > 512 || /[\r\n]/.test(body.hfToken))) throw new Error('Invalid Hugging Face token.');
-          if (kind === 'data-forge' && body.check) throw new Error('Data Forge verification runs during installation.');
+          if ((kind === 'data-forge' || kind === 'data-forge-pixai') && body.check) throw new Error('Data Forge verification runs during installation.');
         } catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 400); }
         // Reading the request body yields; another installer may now own the slot.
         if (hasRunningInstaller()) {
@@ -315,7 +322,7 @@ async function main() {
           startedAt: new Date().toISOString(),
           completedAt: null,
           error: '',
-          cancellable: kind !== 'data-forge',
+          cancellable: kind !== 'data-forge' && kind !== 'data-forge-pixai',
         };
         activeJob = job;
         void runModelInstall(runtimeRoot, sourceRoot, kind, job, profiles, body.check === true, String(body.hfToken || '').trim())
