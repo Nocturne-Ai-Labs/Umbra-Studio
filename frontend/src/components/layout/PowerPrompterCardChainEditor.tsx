@@ -1,4 +1,5 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, normalizeAnima38TextEncoderDevice } from '../../../../shared/umbra-ui/animaTextEncoderDevice';
 
 import React, { forwardRef, useCallback, useDeferredValue, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -9036,6 +9037,25 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   <div className="text-[10px] leading-relaxed text-amber-200/85">
                     Missing: {selectedPipeline.missing.join(', ')}
                   </div>
+                ) : null}
+                {selectedPipeline?.modelFamilyKey === 'anima38b' ? (
+                  <label className="block text-[10px] uppercase tracking-widest text-zinc-400">
+                    Text Encoders
+                    <UmbraSelectControl
+                      value={normalizeAnima38TextEncoderDevice(generation.workflowResources?.[ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE])}
+                      onChange={(event) => updateGeneration({
+                        workflowResources: {
+                          ...generation.workflowResources,
+                          [ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE]: event.target.value,
+                        },
+                      })}
+                      className={`mt-1 w-full rounded border border-white/20 bg-black/45 px-2 py-1.5 text-[11px] text-zinc-200 focus:border-cyan-300 focus:outline-none ${UMBRA_THEMED_SELECT_CLASS}`}
+                    >
+                      <option value="default">Auto offload after prompt</option>
+                      <option value="cpu">Encode on CPU (low VRAM)</option>
+                    </UmbraSelectControl>
+                    <span className="mt-1 block normal-case tracking-normal text-zinc-500">CPU uses less VRAM during prompt encoding and takes longer.</span>
+                  </label>
                 ) : null}
               </div>
               <div className="rounded-md border border-white/10 bg-black/30 p-2 space-y-2">

@@ -9,6 +9,10 @@
       "label": "Anima 2.9B Preview",
       "description": "Anima 2.9B Preview v1 diffusion model plus the shared Anima Qwen 3 text encoder and Qwen Image VAE. Model weights are non-commercial."
     },
+    "anima-3.8b": {
+      "label": "Anima 3.8B v1.1",
+      "description": "Bundled 52-block Anima 3.8B diffusion model and Semantic Connector v2, separate Qwen3 0.6B and Qwen3.5 4B text encoders, and Qwen Image VAE. Follows upstream Anima non-commercial model terms. About 14 GiB total."
+    },
     "flux-1": {
       "label": "FLUX.1",
       "description": "CLIP-L, T5-XXL FP8, and AE VAE for FLUX.1 pipelines."
@@ -182,7 +186,7 @@
     {
       "id": "anima-qwen-3-text-encoder",
       "installPolicy": "automatic",
-      "profiles": ["anima", "anima-2.9b"],
+      "profiles": ["anima", "anima-2.9b", "anima-3.8b"],
       "repository": "circlestone-labs/Anima",
       "revision": "f7382c4bf9d7ffe4ceea593a0adbb470c56dd79b",
       "files": [
@@ -197,7 +201,7 @@
     {
       "id": "qwen-image-vae",
       "installPolicy": "automatic",
-      "profiles": ["anima", "anima-2.9b", "qwen-image", "krea-2"],
+      "profiles": ["anima", "anima-2.9b", "anima-3.8b", "qwen-image", "krea-2"],
       "repository": "circlestone-labs/Anima",
       "revision": "f7382c4bf9d7ffe4ceea593a0adbb470c56dd79b",
       "files": [
@@ -207,6 +211,23 @@
           "bytes": 253806246,
           "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
         }
+      ]
+    },
+    {
+      "id": "anima-3.8b-v1.1",
+      "family": "Anima 3.8B",
+      "creator": "lylogummy",
+      "repository": "lylogummy/Anima-3.8B",
+      "revision": "3ef641256377dc4e7efbf35d426ca31c1fe5180b",
+      "license": "Derived from circlestone-labs/Anima (non-commercial model terms)",
+      "licenseUrl": "https://huggingface.co/lylogummy/Anima-3.8B",
+      "licenseNotice": "The model card directs users to follow the upstream Anima-base and Anima 2.9B licenses. The ComfyUI extension is MIT; the weights are not thereby commercially licensed.",
+      "installPolicy": "automatic",
+      "profiles": ["anima-3.8b"],
+      "purpose": "Anima 3.8B v1.1 text-to-image with bundled Semantic Connector v2; requires comfyui-anima-3-8B and native ComfyUI Anima support",
+      "files": [
+        { "destination": "diffusion_models/Anima-3.8B-v1.1.safetensors", "sourcePath": "difussion_models/Anima-3.8B-v1.1.safetensors", "bytes": 8809227318, "sha256": "4a458d26b21efa350073422f756d521b4397d9ca5964da4dc6bd9ae258a29629" },
+        { "destination": "text_encoders/qwen35_4b.safetensors", "sourcePath": "text_encoders/qwen35_4b.safetensors", "bytes": 4779016600, "sha256": "ea289be7c916726d09953c7db9971c82b280e694b5d7c47f8ad9ffad6acb54ba" }
       ]
     },
     {

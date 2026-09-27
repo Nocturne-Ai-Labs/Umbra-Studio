@@ -537,6 +537,13 @@ upstream default branches. They are not frozen to Umbra-selected commit hashes.
 - Usage in Umbra Studio:
   - Required integration for Anima control and inpainting adapters in Canvas
 
+### comfyui-anima-3-8B
+- Project: https://github.com/GumGum10/comfyui-anima-3-8B
+- Creator / maintainer: GumGum10 and contributors
+- License: MIT (extension code); Anima model weights retain their upstream terms
+- Original project purpose:
+  - Bundled Anima 3.8B Semantic Connector v2 loader and Qwen3.5 4B conditioning nodes
+
 ### ComfyUI-Inpaint-CropAndStitch
 - Project: https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch
 - Creator / maintainer: lquesada

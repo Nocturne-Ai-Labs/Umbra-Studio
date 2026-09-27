@@ -10,6 +10,8 @@ import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
  */
 
 import { applyMiniMaxH3Acceleration, assertMiniMaxH3TurboInstalled, assertMiniMaxH3GuidesInstalled, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
+import { applyAnima38TextEncoderDevice } from './backend/AnimaTextEncoderDevice';
+import { ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, normalizeAnima38TextEncoderDevice } from './shared/umbra-ui/animaTextEncoderDevice';
 import { draftMiniMaxH3Prompt, normalizeH3AutoPromptInput } from './backend/MiniMaxH3AutoPrompter';
 import { applyUmbraUiVideoLoraStack, assertUmbraUiVideoLoraStackInstalled, resolveUmbraUiVideoLoraNames } from './backend/UmbraUiVideoLoraStack';
 import { bindPPGenerationToWorkflowVideo } from './backend/UmbraUiVideoGenerationBinding';
@@ -9230,6 +9232,13 @@ function compileUmbraUiPipelineWorkflow(
       continue;
     }
 
+    if (classType === 'Anima38BV2Loader') {
+      if (generation.modelType === 'diffusion_model' && generation.checkpointName) {
+        setPPApiNodeInput(node, 'model_name', generation.checkpointName);
+      }
+      continue;
+    }
+
     const nodeRole = getPPApiNodeRole(node);
     const isDetailerNode = classType === 'UmbraImageDetailer'
       || classType === 'NativeDetailerProvider'
@@ -9367,6 +9376,12 @@ function compileUmbraUiPipelineWorkflow(
   if (workflowDescriptor.mediaType === 'image') {
     applyUmbraUiClipSkipToGraph(promptGraph, supportsClipSkip ? generation.clipSkip : 1);
     applyPPTiledVaeToGraph(promptGraph, generation.tiledVae);
+    if (Object.values(promptGraph).some((node: any) => node?.class_type === 'Anima38BV2Loader')) {
+      applyAnima38TextEncoderDevice(
+        promptGraph,
+        normalizeAnima38TextEncoderDevice(workflowResourceValues[ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE]),
+      );
+    }
   }
 
   applyPPWanVideoTopology(promptGraph, videoRoleEntries, generation);
