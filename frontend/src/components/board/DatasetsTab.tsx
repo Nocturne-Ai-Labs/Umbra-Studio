@@ -25,6 +25,7 @@ const WAIFU_MODEL_OPTIONS = [
   { id: 'SmilingWolf/wd-convnext-tagger-v3', label: 'wd-convnext' },
   { id: 'SmilingWolf/wd-eva02-large-tagger-v3', label: 'wd-eva02' },
   { id: 'SmilingWolf/wd-swinv2-tagger-v3', label: 'wd-swinv2' },
+  { id: 'pixai-labs/pixai-tagger-v1.0', label: 'PixAI Tagger v1.0' },
 ];
 const NATURAL_MODEL_OPTIONS = [
   {
@@ -47,6 +48,7 @@ const DEFAULT_CONCEPT_SETTINGS: DatasetConceptSettings = {
   generalMcutEnabled: false,
   characterMcutEnabled: false,
   includeGeneralTags: true,
+  includeStyleTags: true,
   includeCharacterTags: true,
   includeCopyrightTags: false,
   includeArtistTags: false,
@@ -190,6 +192,7 @@ export function DatasetsTab() {
   const [generalMcutEnabled, setGeneralMcutEnabled] = useState(DEFAULT_CONCEPT_SETTINGS.generalMcutEnabled);
   const [characterMcutEnabled, setCharacterMcutEnabled] = useState(DEFAULT_CONCEPT_SETTINGS.characterMcutEnabled);
   const [includeGeneralTags, setIncludeGeneralTags] = useState(DEFAULT_CONCEPT_SETTINGS.includeGeneralTags);
+  const [includeStyleTags, setIncludeStyleTags] = useState(DEFAULT_CONCEPT_SETTINGS.includeStyleTags);
   const [includeCharacterTags, setIncludeCharacterTags] = useState(DEFAULT_CONCEPT_SETTINGS.includeCharacterTags);
   const [includeCopyrightTags, setIncludeCopyrightTags] = useState(DEFAULT_CONCEPT_SETTINGS.includeCopyrightTags);
   const [includeArtistTags, setIncludeArtistTags] = useState(DEFAULT_CONCEPT_SETTINGS.includeArtistTags);
@@ -361,6 +364,7 @@ export function DatasetsTab() {
     setGeneralMcutEnabled(next.generalMcutEnabled === true);
     setCharacterMcutEnabled(next.characterMcutEnabled === true);
     setIncludeGeneralTags(next.includeGeneralTags !== false);
+    setIncludeStyleTags(next.includeStyleTags !== false);
     setIncludeCharacterTags(next.includeCharacterTags !== false);
     setIncludeCopyrightTags(next.includeCopyrightTags === true);
     setIncludeArtistTags(next.includeArtistTags === true);
@@ -453,6 +457,7 @@ export function DatasetsTab() {
         generalMcutEnabled,
         characterMcutEnabled,
         includeGeneralTags,
+        includeStyleTags,
         includeCharacterTags,
         includeCopyrightTags,
         includeArtistTags,
@@ -473,6 +478,7 @@ export function DatasetsTab() {
     includeCharacterTags,
     includeCopyrightTags,
     includeGeneralTags,
+    includeStyleTags,
     includeMetaTags,
     includeRatingTags,
     maxTags,
@@ -663,6 +669,7 @@ export function DatasetsTab() {
           generalMcutEnabled,
           characterMcutEnabled,
           includeGeneralTags,
+          includeStyleTags,
           includeCharacterTags,
           includeCopyrightTags,
           includeArtistTags,
@@ -1087,7 +1094,16 @@ export function DatasetsTab() {
                 </div>
                 <UmbraSelectControl
                   value={captionMode === 'natural' ? naturalModel : taggerModel}
-                  onChange={(e) => captionMode === 'natural' ? setNaturalModel(e.target.value) : setTaggerModel(e.target.value)}
+                  onChange={(e) => {
+                    if (captionMode === 'natural') { setNaturalModel(e.target.value); return; }
+                    const pixai = e.target.value === 'pixai-labs/pixai-tagger-v1.0';
+                    setTaggerModel(e.target.value);
+                    setGeneralThreshold(pixai ? 0.17 : 0.35);
+                    setCharacterThreshold(pixai ? 0.27 : 0.85);
+                    setRatingThreshold(pixai ? 0.41 : 0.25);
+                    setGeneralMcutEnabled(false);
+                    setCharacterMcutEnabled(false);
+                  }}
                   className="umbra-input h-8 w-full rounded px-2 text-xs focus:border-cyan-400/60 focus:outline-none"
                   title="Caption model"
                 >
@@ -1190,6 +1206,7 @@ export function DatasetsTab() {
                 <input
                   type="checkbox"
                   checked={generalMcutEnabled}
+                  disabled={taggerModel === 'pixai-labs/pixai-tagger-v1.0'}
                   onChange={(e) => setGeneralMcutEnabled(e.target.checked)}
                   className="h-3 w-3"
                   style={{ accentColor: 'var(--umbra-accent)' }}
@@ -1200,6 +1217,7 @@ export function DatasetsTab() {
                 <input
                   type="checkbox"
                   checked={characterMcutEnabled}
+                  disabled={taggerModel === 'pixai-labs/pixai-tagger-v1.0'}
                   onChange={(e) => setCharacterMcutEnabled(e.target.checked)}
                   className="h-3 w-3"
                   style={{ accentColor: 'var(--umbra-accent)' }}
@@ -1221,6 +1239,7 @@ export function DatasetsTab() {
               </span>
               {[
                 ['General', includeGeneralTags, setIncludeGeneralTags],
+                ['Style', includeStyleTags, setIncludeStyleTags],
                 ['Character', includeCharacterTags, setIncludeCharacterTags],
                 ['Copyright', includeCopyrightTags, setIncludeCopyrightTags],
                 ['Artist', includeArtistTags, setIncludeArtistTags],

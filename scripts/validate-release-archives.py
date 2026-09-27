@@ -82,6 +82,7 @@ def validate(archive, version, platform):
                 raise ValueError(f'{archive.name}: file/directory path collision: {key}')
         required = [
             'resources/app/scripts/download-waifu-models.mjs',
+            'resources/app/scripts/install-pixai-tagger-deps.mjs',
             'resources/app/scripts/download-caption-models.mjs',
             'resources/app/scripts/download-umbra-ui-models.mjs',
             'resources/app/scripts/download-umbra-model-requirements.mjs',

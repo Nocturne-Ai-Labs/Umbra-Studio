@@ -15,6 +15,7 @@ export interface DatasetConceptSettings {
   generalMcutEnabled: boolean;
   characterMcutEnabled: boolean;
   includeGeneralTags: boolean;
+  includeStyleTags: boolean;
   includeCharacterTags: boolean;
   includeCopyrightTags: boolean;
   includeArtistTags: boolean;

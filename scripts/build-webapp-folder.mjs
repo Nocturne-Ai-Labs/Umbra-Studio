@@ -526,6 +526,7 @@ function verifyBundledDataForgeModels() {
   const manifestPath = path.join(root, 'defaults', 'DataForge', 'model-manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   for (const model of manifest.models || []) {
+    if (model.installPolicy === 'optional') continue;
     for (const expected of model.files || []) {
       const targetPath = path.join(publishRoot, 'User', 'Models', model.family, model.folder, expected.path);
       if (!fs.existsSync(targetPath) || fs.statSync(targetPath).size !== expected.bytes) {
@@ -576,6 +577,7 @@ function verifyPublish() {
     'User/PowerPrompter/Prompts/Intro to Powerprompter.ppcards.json',
     'User/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',
     'resources/app/scripts/download-waifu-models.mjs',
+    'resources/app/scripts/install-pixai-tagger-deps.mjs',
     'resources/app/scripts/download-caption-models.mjs',
     'resources/app/scripts/download-umbra-ui-models.mjs',
     'resources/app/scripts/download-umbra-model-requirements.mjs',

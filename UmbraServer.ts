@@ -515,6 +515,7 @@ type DatasetConceptCaptionSettings = {
   generalMcutEnabled: boolean;
   characterMcutEnabled: boolean;
   includeGeneralTags: boolean;
+  includeStyleTags: boolean;
   includeCharacterTags: boolean;
   includeCopyrightTags: boolean;
   includeArtistTags: boolean;
@@ -548,6 +549,7 @@ function createDefaultDatasetConceptSettings(_datasetName: string, conceptFolder
     generalMcutEnabled: false,
     characterMcutEnabled: false,
     includeGeneralTags: true,
+    includeStyleTags: true,
     includeCharacterTags: true,
     includeCopyrightTags: false,
     includeArtistTags: false,
@@ -601,6 +603,7 @@ function normalizeDatasetConceptSettings(
     generalMcutEnabled: parseBool(input?.generalMcutEnabled, defaults.generalMcutEnabled),
     characterMcutEnabled: parseBool(input?.characterMcutEnabled, defaults.characterMcutEnabled),
     includeGeneralTags: parseBool(input?.includeGeneralTags, defaults.includeGeneralTags),
+    includeStyleTags: parseBool(input?.includeStyleTags, defaults.includeStyleTags),
     includeCharacterTags: parseBool(input?.includeCharacterTags, defaults.includeCharacterTags),
     includeCopyrightTags: parseBool(input?.includeCopyrightTags, defaults.includeCopyrightTags),
     includeArtistTags: parseBool(input?.includeArtistTags, defaults.includeArtistTags),
@@ -1184,7 +1187,9 @@ const DATASET_TAGGER_MODEL_REPOS = new Set([
   'SmilingWolf/wd-convnext-tagger-v3',
   'SmilingWolf/wd-eva02-large-tagger-v3',
   'SmilingWolf/wd-swinv2-tagger-v3',
+  'pixai-labs/pixai-tagger-v1.0',
 ]);
+const PIXAI_TAGGER_REPO = 'pixai-labs/pixai-tagger-v1.0';
 const DATASET_NATURAL_MODEL_REPO = 'prithivMLmods/Qwen2-VL-2B-Abliterated-Caption-it';
 
 function datasetCaptionPath(directory: string, imageName: string, imageSpecificFirst = false): string {
@@ -15929,7 +15934,12 @@ async function runWaifuTagger(options: WaifuTaggerRunOptions): Promise<any> {
     return candidates[0];
   };
 
-  const scriptPath = resolveBundledPath('backend', 'python', 'waifu_tagger.py');
+  if (!DATASET_TAGGER_MODEL_REPOS.has(options.modelRepo)) throw new Error('Unsupported tagger model.');
+  const pixai = options.modelRepo === PIXAI_TAGGER_REPO;
+  if (pixai && (options.generalMcutEnabled || options.characterMcutEnabled)) {
+    throw new Error('MCUT is not supported by PixAI Tagger. Disable MCUT for this model.');
+  }
+  const scriptPath = resolveBundledPath('backend', 'python', pixai ? 'pixai_tagger.py' : 'waifu_tagger.py');
   if (!existsSync(scriptPath)) {
     throw new Error(`Tagger script not found: ${scriptPath}`);
   }
@@ -15940,15 +15950,17 @@ async function runWaifuTagger(options: WaifuTaggerRunOptions): Promise<any> {
   const scriptArgs = [
     scriptPath,
     '--image', options.imagePath,
-    '--model', options.modelRepo,
     '--general-threshold', String(options.generalThreshold),
     '--character-threshold', String(options.characterThreshold),
     '--rating-threshold', String(options.ratingThreshold),
     '--max-tags', String(options.maxTags),
     '--local-model-root', localModelRoot,
   ];
-  if (options.generalMcutEnabled) scriptArgs.push('--general-mcut-enabled');
-  if (options.characterMcutEnabled) scriptArgs.push('--character-mcut-enabled');
+  if (!pixai) {
+    scriptArgs.push('--model', options.modelRepo);
+    if (options.generalMcutEnabled) scriptArgs.push('--general-mcut-enabled');
+    if (options.characterMcutEnabled) scriptArgs.push('--character-mcut-enabled');
+  }
 
   const candidates = getPythonCommandCandidates();
   const failures: string[] = [];
@@ -15985,6 +15997,54 @@ async function runWaifuTagger(options: WaifuTaggerRunOptions): Promise<any> {
 
   console.error(`[WaifuTagger] Failed image="${basename(options.imagePath)}" ms=${Date.now() - startedAt}`);
   throw new Error(`Waifu tagger failed. ${failures.slice(-3).join(' | ')}`);
+}
+
+async function runPixaiTaggerBatch(
+  imagePaths: string[],
+  options: Omit<WaifuTaggerRunOptions, 'imagePath' | 'modelRepo'>,
+): Promise<Map<string, { result?: any; error?: string }>> {
+  const scriptCandidates = [
+    join(ROOT_DIR, 'backend', 'python', 'pixai_tagger.py'),
+    join(ROOT_DIR, 'resources', 'app', 'backend', 'python', 'pixai_tagger.py'),
+    join(SOURCE_DIR, 'backend', 'python', 'pixai_tagger.py'),
+  ];
+  const scriptPath = scriptCandidates.find((candidate) => existsSync(candidate));
+  if (!scriptPath) throw new Error('PixAI tagger script is missing.');
+  if (options.generalMcutEnabled || options.characterMcutEnabled) {
+    throw new Error('MCUT is not supported by PixAI Tagger. Disable MCUT for this model.');
+  }
+  const tempDir = join(USER_DIR, 'Temp');
+  await fs.mkdir(tempDir, { recursive: true });
+  const manifestPath = join(tempDir, `pixai-tag-batch-${crypto.randomUUID()}.json`);
+  const localModelRoot = String(process.env.UMBRA_WAIFU_MODEL_ROOT || '').trim()
+    || join(ROOT_DIR, 'User', 'Models', 'WaifuTagger');
+  await fs.writeFile(manifestPath, JSON.stringify({ images: imagePaths.map((path) => ({
+    filename: basename(path), path,
+  })) }), 'utf8');
+  try {
+    const scriptArgs = [scriptPath, '--manifest', manifestPath,
+      '--local-model-root', localModelRoot,
+      '--general-threshold', String(options.generalThreshold),
+      '--character-threshold', String(options.characterThreshold),
+      '--rating-threshold', String(options.ratingThreshold),
+      '--max-tags', String(options.maxTags)];
+    const failures: string[] = [];
+    for (const candidate of getPythonCommandCandidates()) {
+      const run = await runCommandCapture(candidate.command, [...candidate.prefixArgs, ...scriptArgs], ROOT_DIR);
+      if (run.error || run.code !== 0) {
+        failures.push(run.error || `${candidate.command}: ${run.stdout || run.stderr || `exit ${run.code}`}`);
+        continue;
+      }
+      const parsed = parseJsonFromProcessOutput(run.stdout);
+      if (!Array.isArray(parsed?.results)) throw new Error('PixAI tagger returned no image results.');
+      return new Map(parsed.results.map((entry: any) => [String(entry.filename || ''), {
+        result: entry.result, error: entry.error,
+      }]));
+    }
+    throw new Error(`PixAI tagger failed. ${failures.slice(-2).join(' | ')}`);
+  } finally {
+    await fs.rm(manifestPath, { force: true }).catch(() => undefined);
+  }
 }
 
 async function runNaturalCaptioner(options: NaturalCaptionRunOptions): Promise<any> {
@@ -35887,6 +35947,7 @@ const server = Bun.serve<UmbraSocketData>({
             useSpaces: boolean,
             include: {
               general: boolean;
+              style: boolean;
               character: boolean;
               copyright: boolean;
               artist: boolean;
@@ -35895,18 +35956,19 @@ const server = Bun.serve<UmbraSocketData>({
             },
           ): string[] => {
             if (!result || typeof result !== 'object') return [];
-            const hasCategoryFields = ['general', 'character', 'copyright', 'artist', 'meta', 'rating']
+            const hasCategoryFields = ['general', 'style', 'character', 'copyright', 'artist', 'meta', 'rating']
               .some((field) => Object.prototype.hasOwnProperty.call(result, field));
             const categoryTags = mergeTags(
               include.character ? tagsFromEntries(result.character, useSpaces) : [],
               include.general ? tagsFromEntries(result.general, useSpaces) : [],
+              include.style ? tagsFromEntries(result.style, useSpaces) : [],
               include.copyright ? tagsFromEntries(result.copyright, useSpaces) : [],
               include.artist ? tagsFromEntries(result.artist, useSpaces) : [],
               include.meta ? tagsFromEntries(result.meta, useSpaces) : [],
               include.rating ? ratingTagsFromResult(result, useSpaces) : [],
             );
             if (hasCategoryFields) return categoryTags;
-            if (!include.general && !include.character && !include.copyright && !include.artist && !include.meta && !include.rating) {
+            if (!include.general && !include.style && !include.character && !include.copyright && !include.artist && !include.meta && !include.rating) {
               return [];
             }
             return Array.isArray(result?.booruTags)
@@ -35945,6 +36007,7 @@ const server = Bun.serve<UmbraSocketData>({
           const generalMcutEnabled = parseBool(body.generalMcutEnabled, false);
           const characterMcutEnabled = parseBool(body.characterMcutEnabled, false);
           const includeGeneralTags = parseBool(body.includeGeneralTags, true);
+          const includeStyleTags = parseBool(body.includeStyleTags, true);
           const includeCharacterTags = parseBool(body.includeCharacterTags, true);
           const includeCopyrightTags = parseBool(body.includeCopyrightTags, false);
           const includeArtistTags = parseBool(body.includeArtistTags, false);
@@ -35995,6 +36058,7 @@ const server = Bun.serve<UmbraSocketData>({
             generalMcutEnabled,
             characterMcutEnabled,
             includeGeneralTags,
+            includeStyleTags,
             includeCharacterTags,
             includeCopyrightTags,
             includeArtistTags,
@@ -36008,6 +36072,12 @@ const server = Bun.serve<UmbraSocketData>({
           });
 
           const naturalCaptionResults = new Map<string, { caption?: string; error?: string }>();
+          const pixaiResults = autoTag && captionMode === 'tags' && modelRepo === PIXAI_TAGGER_REPO
+            ? await runPixaiTaggerBatch(imageFiles.map((filename) => join(conceptPath, filename)), {
+              generalThreshold, characterThreshold, ratingThreshold,
+              generalMcutEnabled, characterMcutEnabled, maxTags,
+            })
+            : null;
           if (autoTag && captionMode === 'natural') {
             const naturalRun = await runNaturalCaptioner({
               imagePaths: imageFiles.map((filename) => join(conceptPath, filename)),
@@ -36051,7 +36121,14 @@ const server = Bun.serve<UmbraSocketData>({
               let generatedTags: string[] = [];
 
               if (autoTag && captionMode === 'tags') {
-                const result = await runWaifuTagger({
+                const result = pixaiResults
+                  ? (() => {
+                    const entry = pixaiResults.get(filename);
+                    if (entry?.error) throw new Error(entry.error);
+                    if (!entry?.result) throw new Error('PixAI tagger returned no result for this image.');
+                    return entry.result;
+                  })()
+                  : await runWaifuTagger({
                   imagePath,
                   modelRepo,
                   generalThreshold,
@@ -36066,13 +36143,14 @@ const server = Bun.serve<UmbraSocketData>({
                 }
                 generatedTags = generatedTagsFromWaifuResult(result, replaceUnderscoresWithSpaces, {
                   general: includeGeneralTags,
+                  style: includeStyleTags,
                   character: includeCharacterTags,
                   copyright: includeCopyrightTags,
                   artist: includeArtistTags,
                   meta: includeMetaTags,
                   rating: includeRatingTags,
                 });
-                const categorized = ['general', 'character', 'copyright', 'artist', 'meta', 'rating']
+                const categorized = ['general', 'style', 'character', 'copyright', 'artist', 'meta', 'rating']
                   .some(field => Object.prototype.hasOwnProperty.call(result, field));
                 if (!categorized) {
                   if (!filterCaptionCategories) {
@@ -39138,6 +39216,9 @@ const server = Bun.serve<UmbraSocketData>({
             }, 400);
           }
 
+          if (!DATASET_TAGGER_MODEL_REPOS.has(modelRepo)) {
+            return json({ error: 'Unsupported tagger model.' }, 400);
+          }
           const result = await runWaifuTagger({
             imagePath,
             modelRepo,

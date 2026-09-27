@@ -14,7 +14,12 @@ const HF_BASE = process.env.HF_BASE_URL || 'https://huggingface.co';
 
 function loadModels() {
   const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
-  const models = manifest.models?.filter(model => model.family === 'WaifuTagger') || [];
+  const requestedId = process.argv[2] === '--only' ? process.argv[3] : '';
+  if (process.argv.length > 2 && (!requestedId || process.argv.length !== 4)) {
+    throw new Error('Usage: download-waifu-models.mjs [--only model-id]');
+  }
+  const models = manifest.models?.filter(model => model.family === 'WaifuTagger'
+    && (requestedId ? model.id === requestedId : model.installPolicy !== 'optional')) || [];
   if (models.length === 0) throw new Error(`No WaifuTagger models were found in ${MANIFEST_PATH}`);
   return models;
 }

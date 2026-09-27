@@ -215,6 +215,8 @@
             <h3 data-i18n="dataForgeModels">Data Forge Models</h3>
             <p data-i18n="dataForgeModelsDescription">WD taggers and the natural-language caption model used by datasets and Image Inspector.</p>
             <button class="button" data-install="data-forge" type="button" data-i18n="installDataForgeModels">Install Data Forge Models</button>
+            <p data-i18n="pixaiTaggerDescription">Optional PixAI Tagger v1.0 for anime metadata and dataset tags. About 1.95 GB of model files plus Python dependencies. Run main tool setup first.</p>
+            <button class="button" data-install="data-forge-pixai" type="button" data-i18n="installPixaiTagger">Install PixAI Tagger</button>
           </article>
         </div>
         </div>
@@ -253,6 +255,10 @@
         dataForgeModels: 'Data Forge Models',
         dataForgeModelsDescription: 'WD taggers and the natural-language caption model used by datasets and Image Inspector.',
         installDataForgeModels: 'Install Data Forge Models',
+        pixaiTaggerDescription: 'Optional PixAI Tagger v1.0 for anime metadata and dataset tags. About 1.95 GB of model files plus Python dependencies. Run main tool setup first.',
+        installPixaiTagger: 'Install PixAI Tagger',
+        installingPixaiDependencies: 'Installing PixAI Python dependencies',
+        installingPixaiTagger: 'Installing optional PixAI tagger',
         umbraUiSupportModels: 'Umbra UI Support Models',
         umbraUiSupportDescription: 'Default person, face, and hand detailers, SAM refinement, and upscale resources used by Umbra UI pipelines. Install ComfyUI first.',
         installUmbraUiModels: 'Install Umbra UI Models',
@@ -286,6 +292,10 @@
         dataForgeModels: 'Data-Forge-Modelle',
         dataForgeModelsDescription: 'WD-Tagger und das Modell für natürliche Bildbeschreibungen, die von Datensätzen und dem Bildinspektor verwendet werden.',
         installDataForgeModels: 'Data-Forge-Modelle installieren',
+        pixaiTaggerDescription: 'Optionaler PixAI Tagger v1.0 für Anime-Metadaten und Datensatz-Tags. Etwa 1,95 GB Modelldateien plus Python-Abhängigkeiten. Zuerst das Hauptsetup ausführen.',
+        installPixaiTagger: 'PixAI Tagger installieren',
+        installingPixaiDependencies: 'PixAI-Python-Abhängigkeiten installieren',
+        installingPixaiTagger: 'Optionalen PixAI Tagger installieren',
         umbraUiSupportModels: 'Umbra-UI-Unterstützungsmodelle',
         umbraUiSupportDescription: 'Standard-Detailer für Personen, Gesichter und Hände, SAM-Verfeinerung und Upscale-Ressourcen für Umbra-UI-Pipelines. Installieren Sie zuerst ComfyUI.',
         installUmbraUiModels: 'Umbra-UI-Modelle installieren',
@@ -353,6 +363,8 @@
       const jobSteps = {
         'Preparing installer': 'preparingInstaller',
         'Installing WD tagger models': 'installingWdTaggers',
+        'Installing PixAI Python dependencies': 'installingPixaiDependencies',
+        'Installing optional PixAI tagger': 'installingPixaiTagger',
         'Installing natural-language caption models': 'installingCaptionModels',
         'Installing Umbra UI support models': 'installingUmbraUiModels',
         'Installation complete': 'installationComplete',
