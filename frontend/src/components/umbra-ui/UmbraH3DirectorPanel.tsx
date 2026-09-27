@@ -85,10 +85,10 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
 
   React.useEffect(() => {
     let active = true;
-    fetch('/api/tools/updates/summary').then(async (response) => {
+    fetch('/api/umbra-ui/h3-director/node-update').then(async (response) => {
       if (!response.ok) return;
-      const result = await response.json() as { updates?: Array<{ tool?: string; type?: string }> };
-      if (active) setNodesUpdateAvailable(Boolean(result.updates?.some((entry) => entry.tool === 'DaSiWa H3 Director' && entry.type === 'custom_nodes')));
+      const result = await response.json() as { updateAvailable?: boolean };
+      if (active) setNodesUpdateAvailable(result.updateAvailable === true);
     }).catch(() => undefined);
     return () => { active = false; };
   }, []);

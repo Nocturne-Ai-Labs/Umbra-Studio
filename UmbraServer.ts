@@ -16349,7 +16349,7 @@ interface UpdateInfo {
   currentVersion: string;
   latestVersion: string;
   hasUpdate: boolean;
-  updateType: 'pytorch' | 'tool' | 'custom_nodes';
+  updateType: 'pytorch' | 'tool';
   details?: string;
 }
 
@@ -16471,6 +16471,8 @@ function getLocalGitCommit(toolPath: string): string | null {
     return null;
   }
 }
+
+let h3DirectorNodeUpdateCache: { installedCommit: string; latestCommit: string | null; checkedAt: number } | null = null;
 
 type ToolVersionTarget = 'comfyui';
 
@@ -17388,21 +17390,6 @@ async function checkAllUpdates(): Promise<UpdateCache> {
         updateType: 'tool',
         details: 'git pull to update'
       });
-    }
-    const directorNodesPath = join(detected.comfyui.path, 'custom_nodes', 'ComfyUI-DaSiWa-Nodes');
-    if (existsSync(directorNodesPath)) {
-      const installedDirectorCommit = getLocalGitCommit(directorNodesPath);
-      const latestDirectorCommit = await getGitLatestCommit('https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes');
-      if (installedDirectorCommit && latestDirectorCommit) {
-        updates.push({
-          tool: 'DaSiWa H3 Director',
-          currentVersion: installedDirectorCommit,
-          latestVersion: latestDirectorCommit,
-          hasUpdate: !installedDirectorCommit.startsWith(latestDirectorCommit) && !latestDirectorCommit.startsWith(installedDirectorCommit),
-          updateType: 'custom_nodes',
-          details: 'DaSiWa changed upstream. Check Umbra Director compatibility before updating custom nodes in ComfyUI Manager.',
-        });
-      }
     }
   }
 
@@ -34729,6 +34716,23 @@ const server = Bun.serve<UmbraSocketData>({
             from: u.currentVersion,
             to: u.latestVersion
           }))
+        });
+      }
+
+      if (path === '/api/umbra-ui/h3-director/node-update' && method === 'GET') {
+        const comfy = detectAllTools().comfyui;
+        const nodesPath = comfy.detected && comfy.path ? join(comfy.path, 'custom_nodes', 'ComfyUI-DaSiWa-Nodes') : '';
+        const installedCommit = nodesPath && existsSync(nodesPath) ? getLocalGitCommit(nodesPath) : null;
+        if (!installedCommit) return json({ installed: false, updateAvailable: false });
+        const cached = h3DirectorNodeUpdateCache;
+        const latestCommit = cached && cached.installedCommit === installedCommit && Date.now() - cached.checkedAt < 10 * 60_000
+          ? cached.latestCommit : await getGitLatestCommit('https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes');
+        h3DirectorNodeUpdateCache = { installedCommit, latestCommit, checkedAt: Date.now() };
+        return json({
+          installed: true,
+          updateAvailable: Boolean(latestCommit && !installedCommit.startsWith(latestCommit) && !latestCommit.startsWith(installedCommit)),
+          installedCommit,
+          latestCommit,
         });
       }
 

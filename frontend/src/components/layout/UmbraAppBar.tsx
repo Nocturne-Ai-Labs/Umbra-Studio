@@ -249,10 +249,9 @@ export const UmbraAppBar = () => {
   const [toolUpdates, setToolUpdates] = React.useState<Record<NeuralHubTool, {
     tool: boolean;
     pytorch: boolean;
-    directorNodes: boolean;
   }>>({
-    comfyui: { tool: false, pytorch: false, directorNodes: false },
-    aitoolkit: { tool: false, pytorch: false, directorNodes: false },
+    comfyui: { tool: false, pytorch: false },
+    aitoolkit: { tool: false, pytorch: false },
   });
   const [toolVersions, setToolVersions] = React.useState<Record<VersionManagedTool, ToolVersionOption[]>>({
     comfyui: [],
@@ -602,12 +601,10 @@ export const UmbraAppBar = () => {
         comfyui: {
           tool: updates.some((u: any) => u.tool === 'ComfyUI' && u.type === 'tool'),
           pytorch: updates.some((u: any) => u.tool === 'ComfyUI' && u.type === 'pytorch'),
-          directorNodes: updates.some((u: any) => u.tool === 'DaSiWa H3 Director' && u.type === 'custom_nodes'),
         },
         aitoolkit: {
           tool: updates.some((u: any) => u.tool === 'AI-Toolkit' && u.type === 'tool'),
           pytorch: updates.some((u: any) => u.tool === 'AI-Toolkit' && u.type === 'pytorch'),
-          directorNodes: false,
         },
       });
     } catch {
@@ -1594,7 +1591,7 @@ export const UmbraAppBar = () => {
                         connections.comfyui === 'connected' ? "bg-emerald-500 shadow-[0_0_5px_#10b981]" : "bg-zinc-700"
                       )} />
                       <span className="tool-name text-xs font-bold text-white flex-1">ComfyUI</span>
-                      {(toolUpdates.comfyui.tool || toolUpdates.comfyui.pytorch || toolUpdates.comfyui.directorNodes) && <AlertCircle size={10} className="text-amber-400" />}
+                      {(toolUpdates.comfyui.tool || toolUpdates.comfyui.pytorch) && <AlertCircle size={10} className="text-amber-400" />}
                       <span className={cn("tool-status text-[8px] uppercase font-bold",
                         backendLoading.comfyui ? "text-amber-500" :
                         connections.comfyui === 'connected' ? "text-emerald-500" : "text-zinc-600"
@@ -1602,9 +1599,6 @@ export const UmbraAppBar = () => {
                         {backendLoading.comfyui || connections.comfyui}
                       </span>
                     </div>
-                    {toolUpdates.comfyui.directorNodes ? <p role="status" className="text-[10px] text-amber-200">
-                      DaSiWa H3 nodes changed upstream. Check Umbra Director compatibility before updating the custom node in ComfyUI Manager.
-                    </p> : null}
                     <div className="flex gap-1.5">
                       <button
                         onClick={() => handleBackendToggle('comfyui')}
