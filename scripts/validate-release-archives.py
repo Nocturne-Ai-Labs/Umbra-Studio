@@ -95,6 +95,7 @@ def validate(archive, version, platform):
             'resources/app/node_modules/sharp/package.json',
             'resources/app/defaults/UmbraUI/model-manifest.json',
             'resources/app/defaults/UmbraUI/model-requirements-manifest.json',
+            'resources/app/defaults/UmbraUI/tool-requirements.json',
             'resources/app/defaults/DataForge/model-manifest.json',
         ]
         required += (['UmbraStudio.bat', 'UmbraSetup.bat', 'Runtime/Bun/win32/bun.exe']

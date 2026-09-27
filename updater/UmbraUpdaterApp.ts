@@ -5,7 +5,10 @@ import {
   readFileSync,
 } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
+import { inspectManagedDependencies } from './ManagedDependencyStatus';
 import { AppUpdateService, compareUmbraVersions, readUmbraAppVersion } from '../backend/AppUpdateService';
 import {
   createIdleUmbraUpdateState,
@@ -54,6 +57,31 @@ function json(value: unknown, status = 200): Response {
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
     },
+  });
+}
+
+type DependencyAction = {
+  id: string;
+  kind: 'comfyui' | 'node';
+  target: string;
+  phase: 'running' | 'complete' | 'failed';
+  lines: string[];
+  error: string;
+};
+
+function bundledBun(session: UpdaterSession): string {
+  return join(session.runtimeRoot, 'Runtime', 'Bun', process.platform, process.platform === 'win32' ? 'bun.exe' : 'bun');
+}
+
+function freeLocalPort(): Promise<number> {
+  return new Promise((resolvePort, rejectPort) => {
+    const probe = createServer();
+    probe.once('error', rejectPort);
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      probe.close((error) => error ? rejectPort(error) : resolvePort(port));
+    });
   });
 }
 
@@ -255,6 +283,65 @@ async function runUpdate(service: AppUpdateService, session: UpdaterSession, rel
   }
 }
 
+async function runDependencyAction(session: UpdaterSession, action: DependencyAction, args: string[]): Promise<void> {
+  const bunPath = bundledBun(session);
+  const scriptPath = join(session.sourceRoot, 'setup-tools.ts');
+  if (!existsSync(bunPath) || !existsSync(scriptPath)) throw new Error('Managed setup tools are missing from this installation.');
+  const child = spawn(bunPath, [scriptPath, ...args], {
+    cwd: session.runtimeRoot,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, UMBRA_ROOT: session.runtimeRoot, UMBRA_SOURCE_ROOT: session.sourceRoot },
+  });
+  let output = '';
+  const append = (chunk: unknown) => {
+    output = (output + String(chunk)).slice(-100_000);
+    action.lines = output.split(/\r?\n/).filter(Boolean).slice(-80);
+  };
+  child.stdout?.on('data', append);
+  child.stderr?.on('data', append);
+  const code = await new Promise<number>((resolveExit, rejectExit) => {
+    child.once('error', rejectExit);
+    child.once('exit', (value) => resolveExit(value ?? 1));
+  });
+  if (code !== 0 || !output.includes('UMBRA_VERIFY_OK|setup-tools')) {
+    throw new Error(`Managed ${action.target} setup failed (exit ${code}). Review the log and retry.`);
+  }
+}
+
+async function openModelSetup(session: UpdaterSession): Promise<{ url: string; child: ReturnType<typeof spawn> }> {
+  const bunPath = bundledBun(session);
+  const scriptPath = join(session.sourceRoot, 'setup', 'UmbraSetupApp.js');
+  if (!existsSync(bunPath) || !existsSync(scriptPath)) throw new Error('Umbra Setup is missing from this installation.');
+  const port = await freeLocalPort();
+  const token = randomUUID();
+  const child = spawn(bunPath, [scriptPath, '--root', session.runtimeRoot, '--source', session.sourceRoot,
+    '--port', String(port), '--token', token, '--tab', 'models', '--pack', 'requirements', '--no-open'], {
+    cwd: session.runtimeRoot,
+    windowsHide: true,
+    stdio: 'ignore',
+    env: { ...process.env, UMBRA_ROOT: session.runtimeRoot, UMBRA_SOURCE_ROOT: session.sourceRoot },
+  });
+  let launchError: Error | null = null;
+  child.once('error', (error) => { launchError = error; });
+  const url = `http://127.0.0.1:${port}/?token=${encodeURIComponent(token)}&tab=models&pack=requirements`;
+  try {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      if (launchError) throw launchError;
+      if (child.exitCode !== null || child.signalCode !== null) throw new Error('Umbra Setup exited before its model installer was ready.');
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/api/health?token=${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(500) });
+        if (response.ok) return { url, child };
+      } catch { /* Setup is still starting. */ }
+      await Bun.sleep(100);
+    }
+    throw new Error('Umbra Setup did not become ready.');
+  } catch (error) {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    throw error;
+  }
+}
+
 async function main() {
   const sessionPath = resolve(readArg('--session'));
   if (!sessionPath || !existsSync(sessionPath)) throw new Error('A valid updater session is required.');
@@ -301,6 +388,10 @@ async function main() {
   const html = readFileSync(join(session.workspaceRoot, 'index.html'), 'utf8');
   let activeUpdate: Promise<void> | null = null;
   let activeRelaunch: Promise<void> | null = null;
+  let activeDependency: Promise<void> | null = null;
+  let dependencyAction: DependencyAction | null = null;
+  let modelSetup: { url: string; child: ReturnType<typeof spawn> } | null = null;
+  const modelSetupRunning = () => Boolean(modelSetup?.child.exitCode === null && modelSetup.child.signalCode === null && !modelSetup.child.killed);
   let admittingOperation = false;
   let relaunchState: { phase: 'idle' | 'starting' | 'ready' | 'failed'; error: string } = {
     phase: 'idle',
@@ -336,8 +427,86 @@ async function main() {
           : persisted;
         return json({ success: true, state });
       }
+      if (url.pathname === '/api/dependencies' && request.method === 'GET') {
+        try {
+          return json({ success: true, ...inspectManagedDependencies(session.sourceRoot, session.runtimeRoot), action: dependencyAction, modelSetupRunning: modelSetupRunning() });
+        } catch (error) {
+          return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
+        }
+      }
+      if (url.pathname === '/api/dependencies/action' && request.method === 'POST') {
+        if (activeUpdate || activeRelaunch || activeDependency || admittingOperation || modelSetupRunning()) {
+          return json({ success: false, error: 'Finish the current updater or model setup operation first.' }, 409);
+        }
+        if (readState(service, session).phase !== 'complete') {
+          return json({ success: false, error: 'Install the Umbra Studio update before managing its dependencies.' }, 409);
+        }
+        admittingOperation = true;
+        try {
+          const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+          const kind = body.kind;
+          const target = String(body.target || '');
+          const status = inspectManagedDependencies(session.sourceRoot, session.runtimeRoot);
+          let args: string[];
+          if (kind === 'comfyui' && target === 'ComfyUI') {
+            args = ['managed-comfyui'];
+          } else if (kind === 'node' && status.features.some((feature) => feature.customNodes.some((node) => node.name === target))) {
+            args = ['comfy-node', target];
+          } else {
+            return json({ success: false, error: 'This managed dependency is not declared by the installed Umbra Studio build.' }, 400);
+          }
+          const action: DependencyAction = { id: randomUUID(), kind, target, phase: 'running', lines: [], error: '' };
+          dependencyAction = action;
+          activeDependency = runDependencyAction(session, action, args)
+            .then(() => { action.phase = 'complete'; })
+            .catch((error) => {
+              action.phase = 'failed';
+              action.error = error instanceof Error ? error.message : String(error);
+              console.error('[UmbraUpdaterApp] Dependency action failed:', error);
+            })
+            .finally(() => { activeDependency = null; });
+          return json({ success: true, accepted: true, action }, 202);
+        } catch (error) {
+          return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
+        } finally { admittingOperation = false; }
+      }
+      if (url.pathname === '/api/dependencies/model-setup' && request.method === 'POST') {
+        if (activeUpdate || activeRelaunch || activeDependency || admittingOperation) {
+          return json({ success: false, error: 'Finish the current updater operation first.' }, 409);
+        }
+        if (readState(service, session).phase !== 'complete') {
+          return json({ success: false, error: 'Install the Umbra Studio update before opening its model installer.' }, 409);
+        }
+        admittingOperation = true;
+        try {
+          const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+          const profile = String(body.profile || '');
+          const status = inspectManagedDependencies(session.sourceRoot, session.runtimeRoot);
+          if (!status.features.some((feature) => feature.modelProfiles.includes(profile))) {
+            return json({ success: false, error: 'The selected model profile is not declared by this Umbra Studio build.' }, 400);
+          }
+          if (!modelSetupRunning()) modelSetup = await openModelSetup(session);
+          return json({ success: true, url: `${modelSetup!.url}&profiles=${encodeURIComponent(profile)}` });
+        } catch (error) {
+          return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
+        } finally { admittingOperation = false; }
+      }
+      if (url.pathname === '/api/dependencies/model-setup/close' && request.method === 'POST') {
+        if (!modelSetupRunning()) return json({ success: true });
+        try {
+          const setupUrl = new URL(modelSetup!.url);
+          const response = await fetch(`${setupUrl.origin}/api/close?token=${encodeURIComponent(setupUrl.searchParams.get('token') || '')}`, {
+            method: 'POST', signal: AbortSignal.timeout(2_000),
+          });
+          const result = await response.json() as { error?: string };
+          if (!response.ok) return json({ success: false, error: result.error || 'The model installer could not close.' }, response.status);
+          return json({ success: true });
+        } catch (error) {
+          return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
+        }
+      }
       if (url.pathname === '/api/update' && request.method === 'POST') {
-        if (activeUpdate || activeRelaunch || admittingOperation) return json({ success: false, error: 'An update operation is already running.' }, 409);
+        if (activeUpdate || activeRelaunch || activeDependency || admittingOperation || modelSetupRunning()) return json({ success: false, error: 'An updater or model setup operation is already running.' }, 409);
         admittingOperation = true;
         try {
           const body = await request.json().catch(() => ({})) as Record<string, unknown>;
@@ -364,7 +533,7 @@ async function main() {
         } finally { admittingOperation = false; }
       }
       if (url.pathname === '/api/relaunch' && request.method === 'POST') {
-        if (activeUpdate || admittingOperation) return json({ success: false, error: 'Wait for the current update to finish before launching Umbra Studio.' }, 409);
+        if (activeUpdate || activeDependency || admittingOperation || modelSetupRunning()) return json({ success: false, error: 'Wait for the current update or model setup to finish before launching Umbra Studio.' }, 409);
         if (activeRelaunch) return json({ success: false, error: 'Umbra Studio is already starting.' }, 409);
         const state = readState(service, session);
         if (state.phase !== 'complete') {
@@ -395,7 +564,7 @@ async function main() {
         return json({ success: true, ...relaunchState });
       }
       if (url.pathname === '/api/close' && request.method === 'POST') {
-        if (activeUpdate || activeRelaunch || admittingOperation) return json({ success: false, error: 'Wait for the current operation to finish before closing the updater.' }, 409);
+        if (activeUpdate || activeRelaunch || activeDependency || admittingOperation || modelSetupRunning()) return json({ success: false, error: 'Wait for the current operation or model setup to finish before closing the updater.' }, 409);
         admittingOperation = true;
         setTimeout(async () => {
           await server.stop(true);
@@ -420,7 +589,7 @@ async function main() {
   console.log(`[UmbraUpdaterApp] Ready: http://127.0.0.1:${server.port}`);
   const stopAfterIdle = () => {
     setTimeout(async () => {
-      if (activeUpdate || activeRelaunch || admittingOperation) {
+      if (activeUpdate || activeRelaunch || activeDependency || admittingOperation || modelSetupRunning()) {
         stopAfterIdle();
         return;
       }

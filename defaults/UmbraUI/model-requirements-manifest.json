@@ -85,11 +85,11 @@
     },
     "minimax-h3": {
       "label": "MiniMax H3 Video",
-      "description": "MiniMax H3 diffusion model, Qwen 3 VL text encoder, and video/audio VAEs for Umbra UI text-to-video and image-to-video. Very large download."
+      "description": "MiniMax H3 diffusion model, Qwen 3 VL text encoder, and video/audio VAEs for Umbra UI text-to-video and image-to-video. Very large download. Director and Prompt Forge also need DaSiWa H3 nodes from Umbra UI > ComfyUI > H3 Nodes."
     },
     "minimax-h3-autoprompter": {
       "label": "DaSiWa H3 Prompt Forge Model (Optional)",
-      "description": "Local Qwen3.5 9B Q8 GGUF and matching vision projector for DaSiWa Prompt Forge. About 11.7 GB total. Install ComfyUI-DaSiWa-Nodes and its requirements separately."
+      "description": "Local Qwen3.5 9B Q8 GGUF and matching vision projector for DaSiWa Prompt Forge. About 11.7 GB total. Install or update its extension from Umbra UI > ComfyUI > H3 Nodes."
     },
     "minimax-h3-vae-int8": {
       "label": "MiniMax H3 INT8 Video VAE",

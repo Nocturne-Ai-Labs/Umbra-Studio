@@ -110,6 +110,14 @@
     .message { margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
     .message.error { color: var(--danger); }
     .message.warning { color: var(--warning); }
+    .dependencies { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 16px; }
+    .dependencies h3 { margin: 0 0 8px; font-size: 14px; }
+    .dependency-list { display: grid; gap: 0; margin-top: 12px; }
+    .dependency-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; border-top: 1px solid var(--line); padding: 12px 0; }
+    .dependency-row strong { display: block; font-size: 12px; }
+    .dependency-row span { display: block; color: var(--muted); font-size: 11px; line-height: 1.5; margin-top: 4px; }
+    .dependency-row .button { flex: none; }
+    .dependency-log { margin: 8px 0 0; max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font-size: 10px; }
     footer {
       display: flex;
       align-items: center;
@@ -174,6 +182,13 @@
           <div id="state-message" class="message"></div>
         </div>
         <div id="notes" class="notes">Choose a release from the left. Umbra Studio, ComfyUI, AI-Toolkit, and the gallery service will close only when installation begins. User and Tools remain preserved.</div>
+        <section class="dependencies" aria-label="Managed dependencies">
+          <h3>Managed dependencies</h3>
+          <div id="dependency-summary" class="meta">Checking installed tools and model packs...</div>
+          <div id="dependency-list" class="dependency-list"></div>
+          <div id="dependency-message" class="message" role="status"></div>
+          <pre id="dependency-log" class="dependency-log" hidden></pre>
+        </section>
       </section>
     </main>
     <footer>
@@ -203,10 +218,17 @@
     const refreshButton = document.querySelector('#refresh');
     const progressPanel = document.querySelector('#progress-panel');
     const stateMessage = document.querySelector('#state-message');
+    const dependencyList = document.querySelector('#dependency-list');
+    const dependencySummary = document.querySelector('#dependency-summary');
+    const dependencyMessage = document.querySelector('#dependency-message');
+    const dependencyLog = document.querySelector('#dependency-log');
     let summary = null;
     let selected = null;
     let latestState = null;
     let stateTimer = 0;
+    let dependencyTimer = 0;
+    let dependencyRunning = false;
+    let dependencyReady = false;
     const activePhases = new Set(['downloading', 'staged', 'stopping', 'extracting', 'applying', 'updating_nodes']);
     const phaseNames = {
       downloading: 'Downloading release',
@@ -282,7 +304,8 @@
     }
     function updateActions(state = latestState) {
       const active = Boolean(state && activePhases.has(state.phase));
-      const canInstallSelected = !active && selectedIsNewer();
+      const busy = active || dependencyRunning;
+      const canInstallSelected = !busy && selectedIsNewer();
       const completedCurrentSelection = Boolean(
         state
         && state.phase === 'complete'
@@ -292,8 +315,8 @@
       updateButton.disabled = !canInstallSelected;
       updateButton.hidden = !canInstallSelected && completedCurrentSelection;
       launchUmbraButton.hidden = !completedCurrentSelection;
-      launchUmbraButton.disabled = active;
-      closeUpdaterButton.disabled = active;
+      launchUmbraButton.disabled = busy;
+      closeUpdaterButton.disabled = busy;
     }
     function selectRelease(release) {
       selected = release;
@@ -359,6 +382,10 @@
           summary.currentVersion = state.currentVersion;
           document.querySelector('#status-pill').textContent = `Installed v${state.currentVersion}`;
           updateReleaseLabels();
+          if (!dependencyReady) {
+            dependencyReady = true;
+            void loadDependencies();
+          }
         }
         stateMessage.className = `message${state.error ? ' error' : state.warning ? ' warning' : ''}`;
         const completionMessage = completedCurrentSelection
@@ -367,6 +394,7 @@
         stateMessage.textContent = state.error || [state.warning, completionMessage].filter(Boolean).join(' ');
         updateActions(state);
         if (active) {
+          dependencyReady = false;
           updateButton.textContent = phaseNames[state.phase] || 'Updating';
           clearTimeout(stateTimer);
           stateTimer = setTimeout(pollState, 350);
@@ -376,6 +404,120 @@
       } catch (error) {
         stateMessage.className = 'message error';
         stateMessage.textContent = error.message;
+      }
+    }
+    function dependencyRow(name, detail, label, onClick, forceEnabled = false) {
+      const row = document.createElement('div');
+      row.className = 'dependency-row';
+      const copy = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = name;
+      const description = document.createElement('span');
+      description.textContent = detail;
+      copy.append(title, description);
+      row.append(copy);
+      if (label) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'button';
+        button.textContent = label;
+        button.disabled = !forceEnabled && (dependencyRunning || Boolean(latestState && activePhases.has(latestState.phase)));
+        button.addEventListener('click', onClick);
+        row.append(button);
+      }
+      dependencyList.append(row);
+    }
+    async function startDependency(kind, target) {
+      dependencyRunning = true;
+      dependencyList.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+      updateActions();
+      dependencyMessage.className = 'message';
+      dependencyMessage.textContent = `Preparing ${target}...`;
+      try {
+        await api('/api/dependencies/action', { method: 'POST', body: JSON.stringify({ kind, target }) });
+        await loadDependencies();
+      } catch (error) {
+        dependencyRunning = false;
+        await loadDependencies();
+        dependencyMessage.className = 'message error';
+        dependencyMessage.textContent = error.message;
+        updateActions();
+      }
+    }
+    async function launchModelSetup(profile) {
+      const tab = window.open('', '_blank');
+      dependencyList.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+      try {
+        const result = await api('/api/dependencies/model-setup', { method: 'POST', body: JSON.stringify({ profile }) });
+        if (tab) tab.location.href = result.url;
+        else window.location.href = result.url;
+        await loadDependencies();
+      } catch (error) {
+        tab?.close();
+        await loadDependencies();
+        dependencyMessage.className = 'message error';
+        dependencyMessage.textContent = error.message;
+      }
+    }
+    async function closeModelSetup() {
+      try {
+        await api('/api/dependencies/model-setup/close', { method: 'POST', body: '{}' });
+        dependencyMessage.textContent = 'Closing model installer...';
+        setTimeout(loadDependencies, 350);
+      } catch (error) {
+        dependencyMessage.className = 'message error';
+        dependencyMessage.textContent = error.message;
+      }
+    }
+    async function loadDependencies() {
+      try {
+        const status = await api('/api/dependencies');
+        const action = status.action;
+        dependencyRunning = action?.phase === 'running' || status.modelSetupRunning;
+        dependencyList.replaceChildren();
+        const requiredVersion = status.comfyui.minimumRequired;
+        const outdatedComfy = Boolean(requiredVersion && compare(status.comfyui.version || '0.0.0', requiredVersion) < 0);
+        const canManage = latestState?.phase === 'complete';
+        dependencySummary.textContent = status.features.length
+          ? canManage ? 'Checked against the installed update. Tool changes require your confirmation.' : 'Current installation shown. Install an Umbra Studio update to unlock managed dependency actions.'
+          : 'This installed build does not declare managed feature requirements yet.';
+        if (status.modelSetupRunning) {
+          dependencyRow('Model installer', 'Open in a separate tab. Finish or cancel downloads before closing it.', 'Close installer', closeModelSetup, true);
+        }
+        dependencyRow('ComfyUI', `${status.comfyui.installed ? `Installed v${status.comfyui.version}` : 'Not installed'}${requiredVersion ? ` · active features need v${requiredVersion}+` : ''}`,
+          canManage ? !status.comfyui.installed ? 'Install' : outdatedComfy ? 'Update' : '' : '', () => startDependency('comfyui', 'ComfyUI'));
+        for (const feature of status.features) {
+          const prefix = feature.optional ? 'Optional' : feature.active ? 'In use' : 'Available';
+          const missing = feature.missingModels.length;
+          const missingDetail = missing ? ` · Missing: ${feature.missingModels.join(', ')}` : '';
+          dependencyRow(feature.label, `${prefix} · ${feature.totalModels - missing}/${feature.totalModels} managed models present · ComfyUI v${feature.minimumComfyVersion}+${missingDetail}`,
+            canManage && missing && (feature.active || feature.optional) ? 'Models' : '', () => launchModelSetup(feature.modelProfiles[0]));
+          for (const node of feature.customNodes) {
+            if (dependencyList.querySelector(`[data-node="${node.name}"]`)) continue;
+            dependencyRow(node.name, `${feature.optional ? 'Optional for Director' : 'Required'} · ${node.status === 'ready' ? 'Ready' : node.status === 'unknown' ? 'Installed; version unverified' : node.status}`, !canManage || node.status === 'ready' ? '' : 'Install / Update',
+              () => startDependency('node', node.name));
+            dependencyList.lastElementChild.dataset.node = node.name;
+          }
+        }
+        dependencyLog.hidden = !action?.lines?.length;
+        dependencyLog.textContent = action?.lines?.join('\n') || '';
+        if (status.modelSetupRunning) {
+          dependencyMessage.className = 'message';
+          dependencyMessage.textContent = 'Model installer is open. Close it when downloads finish to continue in the updater.';
+        } else if (action) {
+          dependencyMessage.className = `message${action.phase === 'failed' ? ' error' : ''}`;
+          dependencyMessage.textContent = action.phase === 'running' ? `Working on ${action.target}...`
+            : action.phase === 'complete' ? `${action.target} is ready. Reopen ComfyUI if it was running.`
+            : action.error;
+        }
+        updateActions();
+        clearTimeout(dependencyTimer);
+        if (dependencyRunning) dependencyTimer = setTimeout(loadDependencies, status.modelSetupRunning ? 2000 : 1000);
+      } catch (error) {
+        dependencyRunning = false;
+        dependencyMessage.className = 'message error';
+        dependencyMessage.textContent = error.message;
+        updateActions();
       }
     }
     refreshButton.addEventListener('click', () => loadReleases(true));
@@ -445,6 +587,7 @@
       }
     });
     void loadReleases().then(pollState);
+    void loadDependencies();
   </script>
 </body>
 </html>

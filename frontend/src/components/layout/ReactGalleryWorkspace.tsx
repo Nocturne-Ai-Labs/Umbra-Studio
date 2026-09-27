@@ -84,6 +84,7 @@ import { isDiagnosticLoggingEnabled, logDiagnostic } from '@/lib/diagnostics';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import {
   stageUmbraUiMediaHandoff,
+  type UmbraUiH3DirectorRole,
   type UmbraUiMediaHandoffMode,
   type UmbraUiVideoFrameRole,
 } from '@/lib/umbraUiMediaHandoff';
@@ -3138,7 +3139,7 @@ function GalleryMediaViewer({
   onCopyPath: () => void;
   onSendScanner: () => void;
   onSendWaifu: () => void;
-  onSendUmbra: (mode: UmbraUiMediaHandoffMode, frameRole?: UmbraUiVideoFrameRole, metadata?: ImageMetadata | null) => void;
+  onSendUmbra: (mode: UmbraUiMediaHandoffMode, frameRole?: UmbraUiVideoFrameRole, metadata?: ImageMetadata | null, h3DirectorRole?: UmbraUiH3DirectorRole) => void;
   onDelete: () => void;
 }) {
   const [zoom, setZoom] = useState(1);
@@ -3612,9 +3613,9 @@ function GalleryMediaViewer({
     }
   }, [addToast, promptDetails.ppuid]);
 
-  const sendToUmbra = useCallback((mode: UmbraUiMediaHandoffMode, frameRole?: UmbraUiVideoFrameRole) => {
+  const sendToUmbra = useCallback((mode: UmbraUiMediaHandoffMode, frameRole?: UmbraUiVideoFrameRole, h3DirectorRole?: UmbraUiH3DirectorRole) => {
     setMobileSendMenuOpen(false);
-    onSendUmbra(mode, frameRole, metadata);
+    onSendUmbra(mode, frameRole, metadata, h3DirectorRole);
   }, [metadata, onSendUmbra]);
 
   const renderUmbraSendMenu = () => isPhoneViewer ? (
@@ -3639,7 +3640,7 @@ function GalleryMediaViewer({
       >
         <Send size={15} />
       </summary>
-      <div data-umbra-gallery-viewer-send-menu-panel="" className="absolute right-0 top-10 z-[120] w-52 overflow-hidden rounded-md border border-cyan-300/25 bg-[#070a0c] p-1 shadow-2xl shadow-black/70">
+      <div data-umbra-gallery-viewer-send-menu-panel="" className="absolute right-0 top-10 z-[120] max-h-[70dvh] w-52 overflow-y-auto rounded-md border border-cyan-300/25 bg-[#070a0c] p-1 shadow-2xl shadow-black/70">
         <button type="button" disabled={isVideo} onClick={() => sendToUmbra('txt2img')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Sparkles size={12} className="text-emerald-300" /> TXT2IMG Parameters
         </button>
@@ -3664,6 +3665,11 @@ function GalleryMediaViewer({
         <button type="button" disabled={!isVideo} onClick={() => sendToUmbra('video', 'source_video')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Video size={12} className="text-emerald-300" /> VID2VID Source
         </button>
+        <div className="my-1 border-t border-white/10" />
+        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first', 'first')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35"><Clapperboard size={12} className="text-fuchsia-300" /> H3 Director First Frame</button>
+        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'last', 'last')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35"><Clapperboard size={12} className="text-amber-300" /> H3 Director Last Frame</button>
+        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first', 'reference_image')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35"><Images size={12} className="text-cyan-300" /> H3 Director Reference</button>
+        <button type="button" disabled={!isVideo} onClick={() => sendToUmbra('video', 'source_video', 'motion_video')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35"><Video size={12} className="text-emerald-300" /> H3 Director Motion</button>
       </div>
     </details>
   );
@@ -3998,7 +4004,7 @@ function GalleryMediaViewer({
             onClick={() => setMobileSendMenuOpen(false)}
             aria-label="Close send menu"
           />
-          <section className="relative w-full rounded-t-2xl border-t border-cyan-300/25 bg-[#080b0d] px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-24px_70px_rgba(0,0,0,0.72)]">
+          <section className="relative max-h-[90dvh] w-full overflow-y-auto rounded-t-2xl border-t border-cyan-300/25 bg-[#080b0d] px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-24px_70px_rgba(0,0,0,0.72)]">
             <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-white/20" />
             <div className="mb-3 flex items-center justify-between gap-3 px-1">
               <div>
@@ -4039,6 +4045,10 @@ function GalleryMediaViewer({
               <button type="button" disabled={!isVideo} onClick={() => sendToUmbra('video', 'source_video')} className="col-span-2 flex min-h-14 items-center justify-center gap-2.5 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] px-3 text-xs font-semibold text-zinc-200 active:bg-emerald-400/15 disabled:opacity-30">
                 <Video size={17} className="shrink-0 text-emerald-300" /> Send video to VID2VID
               </button>
+              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first', 'first')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-fuchsia-400/20 bg-fuchsia-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-fuchsia-400/15 disabled:opacity-30"><Clapperboard size={17} className="shrink-0 text-fuchsia-300" /> H3 first frame</button>
+              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'last', 'last')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-amber-400/15 disabled:opacity-30"><Clapperboard size={17} className="shrink-0 text-amber-300" /> H3 last frame</button>
+              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first', 'reference_image')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-cyan-400/20 bg-cyan-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-cyan-400/15 disabled:opacity-30"><Images size={17} className="shrink-0 text-cyan-300" /> H3 reference</button>
+              <button type="button" disabled={!isVideo} onClick={() => sendToUmbra('video', 'source_video', 'motion_video')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-emerald-400/15 disabled:opacity-30"><Video size={17} className="shrink-0 text-emerald-300" /> H3 motion reference</button>
             </div>
           </section>
         </div>
@@ -6541,6 +6551,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     mode: UmbraUiMediaHandoffMode,
     frameRole?: UmbraUiVideoFrameRole,
     metadata?: ImageMetadata | null,
+    h3DirectorRole?: UmbraUiH3DirectorRole,
   ) => {
     const path = normalizePath(pathValue);
     if (!path || isLiveGenerationPreviewPath(path)) return;
@@ -6553,9 +6564,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         imageUrl: `/api/fs/image?${new URLSearchParams({ path }).toString()}`,
         source: 'gallery',
         videoFrameRole: frameRole,
+        h3DirectorRole,
         metadata: metadata || undefined,
       });
-      const label = mode === 'txt2img'
+      const label = h3DirectorRole
+        ? `H3 Director ${h3DirectorRole === 'reference_image' ? 'reference image' : h3DirectorRole === 'motion_video' ? 'motion reference' : `${h3DirectorRole} frame`}`
+        : mode === 'txt2img'
         ? 'TXT2IMG parameters'
         : mode === 'img2img'
           ? 'IMG2IMG source with metadata'
@@ -6636,11 +6650,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     mode: UmbraUiMediaHandoffMode,
     frameRole?: UmbraUiVideoFrameRole,
     metadata?: ImageMetadata | null,
+    h3DirectorRole?: UmbraUiH3DirectorRole,
   ) => {
     const path = selectedOrViewerPaths().at(0) || '';
     if (!path) return;
     closeViewer();
-    void sendPathToUmbraUi(path, mode, frameRole, metadata);
+    void sendPathToUmbraUi(path, mode, frameRole, metadata, h3DirectorRole);
   }, [closeViewer, selectedOrViewerPaths, sendPathToUmbraUi]);
 
   const restoreTrashUndoItems = useCallback(async (undoItems: GalleryTrashUndoItem[]) => {
@@ -10307,6 +10322,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       { label: 'Use as Last Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'last') },
       { label: 'VID2VID Source', icon: <Video size={14} />, disabled: !targetVideoPath, action: () => void sendPathToUmbraUi(targetVideoPath, 'video', 'source_video') },
     ];
+    const h3DirectorItems: ContextMenuItem[] = [
+      { label: 'Use as First Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'first', undefined, 'first') },
+      { label: 'Use as Last Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'last', undefined, 'last') },
+      { label: 'Add Reference Image', icon: <Images size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'first', undefined, 'reference_image') },
+      { label: 'Add Motion Reference', icon: <Video size={14} />, disabled: !targetVideoPath, action: () => void sendPathToUmbraUi(targetVideoPath, 'video', 'source_video', undefined, 'motion_video') },
+    ];
     const umbraUiExtrasItems: ContextMenuItem[] = [
       {
         label: selectedImagePaths.length > 1 ? `Upscale (${selectedImagePaths.length})` : 'Upscale',
@@ -10384,6 +10405,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
             icon: <Clapperboard size={14} />,
             children: umbraUiVideoItems,
           },
+          { label: 'H3 Director', icon: <Clapperboard size={14} />, children: h3DirectorItems },
           {
             label: 'Extras',
             icon: <Sparkles size={14} />,

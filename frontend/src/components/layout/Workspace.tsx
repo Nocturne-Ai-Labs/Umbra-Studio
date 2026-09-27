@@ -3,7 +3,7 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '@/store/useStore';
-import { ArrowDown, ArrowUp, Power, Zap, RefreshCw, Loader2, ExternalLink, Pencil, Globe2, Plus, Save, Trash2, FolderOpen } from 'lucide-react';
+import { ArrowDown, ArrowUp, Power, Zap, RefreshCw, Loader2, ExternalLink, Pencil, Globe2, Plus, Save, Trash2, FolderOpen, Clapperboard } from 'lucide-react';
 import { useComponentDebug } from '@/hooks/useComponentDebug';
 import { DropZone } from '@/lib/dnd';
 import { useToastStore } from '@/store/useToastStore';
@@ -304,7 +304,7 @@ export const BackendSplash = ({
   const [toolInstalled, setToolInstalled] = useState<boolean | null>(null);
   const [hasToolUpdate, setHasToolUpdate] = useState(false);
   const [hasPyTorchUpdate, setHasPyTorchUpdate] = useState(false);
-  const [toolActionLoading, setToolActionLoading] = useState<'install' | 'update' | 'custom_nodes' | 'update_pytorch' | 'install_sageattention' | null>(null);
+  const [toolActionLoading, setToolActionLoading] = useState<'install' | 'update' | 'custom_nodes' | 'h3_nodes' | 'update_pytorch' | 'install_sageattention' | null>(null);
   const [comfyVersions, setComfyVersions] = useState<ComfyVersionOption[]>([]);
   const [currentComfyRef, setCurrentComfyRef] = useState('');
   const [currentComfyCommit, setCurrentComfyCommit] = useState('');
@@ -674,7 +674,7 @@ export const BackendSplash = ({
     }
   };
 
-  const handleToolAction = async (action: 'install' | 'update' | 'custom_nodes' | 'update_pytorch' | 'install_sageattention') => {
+  const handleToolAction = async (action: 'install' | 'update' | 'custom_nodes' | 'h3_nodes' | 'update_pytorch' | 'install_sageattention') => {
     if (managementBlocked) {
       setError('Install and update actions are only available from the host PC.');
       setStatusText('Host-only action blocked');
@@ -939,7 +939,8 @@ export const BackendSplash = ({
               <button
                 type="button"
                 onClick={() => handleToolAction('update')}
-                disabled={mobileManagerBusy || toolInstalled === false}
+                disabled={mobileManagerBusy || isBackendRunning || toolInstalled === false}
+                title={isBackendRunning ? 'Stop ComfyUI before updating it' : 'Update managed ComfyUI'}
                 className="relative flex min-h-12 items-center justify-center gap-2 rounded-lg border border-amber-400/25 bg-amber-500/10 px-2 text-sm font-semibold text-amber-100 disabled:opacity-40"
               >
                 {toolActionLoading === 'update' ? <Loader2 size={17} className="animate-spin" /> : <RefreshCw size={17} />}
@@ -949,11 +950,22 @@ export const BackendSplash = ({
               <button
                 type="button"
                 onClick={() => handleToolAction('custom_nodes')}
-                disabled={mobileManagerBusy || toolInstalled === false}
+                disabled={mobileManagerBusy || isBackendRunning || toolInstalled === false}
+                title={isBackendRunning ? 'Stop ComfyUI before installing or updating custom nodes' : 'Install or update managed custom nodes'}
                 className="flex min-h-12 items-center justify-center gap-2 rounded-lg border border-emerald-400/25 bg-emerald-500/10 px-2 text-sm font-semibold text-emerald-100 disabled:opacity-40"
               >
                 {toolActionLoading === 'custom_nodes' ? <Loader2 size={17} className="animate-spin" /> : <Zap size={17} />}
                 Custom Nodes
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToolAction('h3_nodes')}
+                disabled={mobileManagerBusy || isBackendRunning || toolInstalled === false}
+                title={isBackendRunning ? 'Stop ComfyUI before updating DaSiWa nodes' : 'Install or update DaSiWa H3 Director and Prompt Forge nodes'}
+                className="flex min-h-12 items-center justify-center gap-2 rounded-lg border border-fuchsia-400/25 bg-fuchsia-500/10 px-2 text-sm font-semibold text-fuchsia-100 disabled:opacity-40"
+              >
+                {toolActionLoading === 'h3_nodes' ? <Loader2 size={17} className="animate-spin" /> : <Clapperboard size={17} />}
+                H3 Nodes
               </button>
               <button
                 type="button"
@@ -1133,7 +1145,8 @@ export const BackendSplash = ({
           </button>
           <button
             onClick={() => handleToolAction('update')}
-            disabled={managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+            disabled={managementBlocked || isBackendRunning || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+            title={isBackendRunning ? 'Stop ComfyUI before updating it' : 'Update managed ComfyUI'}
             className="glass-panel px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
           >
             {toolActionLoading === 'update' ? 'Updating...' : `Update ${name}`}
@@ -1141,10 +1154,21 @@ export const BackendSplash = ({
           {(backend === 'comfyui') && (
             <button
               onClick={() => handleToolAction('custom_nodes')}
-              disabled={managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+              disabled={managementBlocked || isBackendRunning || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+              title={isBackendRunning ? 'Stop ComfyUI before installing or updating custom nodes' : 'Install or update managed custom nodes'}
               className="glass-panel px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
             >
               {toolActionLoading === 'custom_nodes' ? 'Installing Nodes...' : 'Install Custom Nodes'}
+            </button>
+          )}
+          {backend === 'comfyui' && (
+            <button
+              onClick={() => handleToolAction('h3_nodes')}
+              disabled={managementBlocked || isBackendRunning || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+              title={isBackendRunning ? 'Stop ComfyUI before updating DaSiWa nodes' : 'Install or update DaSiWa H3 Director and Prompt Forge nodes'}
+              className="glass-panel px-4 py-2 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 border-fuchsia-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
+            >
+              {toolActionLoading === 'h3_nodes' ? 'Updating H3 Nodes...' : 'Install/Update H3 Nodes'}
             </button>
           )}
           {backend === 'comfyui' && (

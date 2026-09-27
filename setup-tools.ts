@@ -1962,7 +1962,7 @@ function installComfyNodeRequirements(comfyDir: string, nodePath: string, nodeNa
     return true;
 }
 
-function installComfyNodes(comfyDir: string): boolean {
+function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boolean {
     const nodesDir = join(comfyDir, 'custom_nodes');
     if (!existsSync(nodesDir)) mkdirSync(nodesDir, { recursive: true });
 
@@ -1971,9 +1971,11 @@ function installComfyNodes(comfyDir: string): boolean {
     const umbraAnimaCpuReady = syncUmbraAnimaCpuNode(nodesDir);
 
     // Get enabled nodes from config
-    const enabledNodes = getEnabledNodes();
+    const enabledNodes = onlyNames ? new Set(onlyNames) : getEnabledNodes();
+    const nodes = onlyNames ? COMFY_NODES.filter((node) => enabledNodes.has(node.name)) : COMFY_NODES;
+    let requiredFailure = false;
 
-    for (const node of COMFY_NODES) {
+    for (const node of nodes) {
         if ('nvidiaOnly' in node && node.nvidiaOnly && !GPU_NAME) {
             log('-', `${node.name} ${c.dim}(skipped - NVIDIA GPU not detected)${c.reset}`);
             continue;
@@ -1994,6 +1996,7 @@ function installComfyNodes(comfyDir: string): boolean {
                 log(`${c.green}OK${c.reset}`, `${node.name} installed`);
             } catch {
                 log(`${c.red}X${c.reset}`, `Failed to install ${node.name}`);
+                if (onlyNames) requiredFailure = true;
             }
         } else {
             // Check for updates
@@ -2008,15 +2011,19 @@ function installComfyNodes(comfyDir: string): boolean {
                 } else {
                     log('OK', `${node.name} is up to date`);
                 }
-            } catch { }
+            } catch {
+                if (onlyNames) {
+                    log(`${c.red}X${c.reset}`, `Failed to update ${node.name}`);
+                    requiredFailure = true;
+                }
+            }
         }
     }
 
-    let requiredFailure = false;
-    for (const node of COMFY_NODES) {
+    for (const node of nodes) {
         if ('nvidiaOnly' in node && node.nvidiaOnly && !GPU_NAME) continue;
 
-        const required = 'required' in node && node.required;
+        const required = Boolean(onlyNames) || ('required' in node && node.required);
         if (!enabledNodes.has(node.name) && !required) continue;
 
         const nodePath = join(nodesDir, node.name);
@@ -2027,6 +2034,11 @@ function installComfyNodes(comfyDir: string): boolean {
             } else {
                 log(`${c.yellow}WARN${c.reset}`, `Optional node ${node.name} is unavailable`);
             }
+            continue;
+        }
+        if (onlyNames && !existsSync(join(nodePath, '__init__.py'))) {
+            log('X', `${node.name} is incomplete`);
+            requiredFailure = true;
             continue;
         }
 
@@ -2121,7 +2133,7 @@ function removeLegacyToolRootShortcuts() {
 // ============================================
 
 
-async function processTool(key: keyof typeof CONFIG, autoInstall = false, nonInteractive = false): Promise<boolean> {
+async function processTool(key: keyof typeof CONFIG, autoInstall = false, nonInteractive = false, coreOnly = false): Promise<boolean> {
     const cfg = CONFIG[key];
     console.log('\n' + c.cyan + '--- Processing ' + cfg.name + ' ---' + c.reset);
 
@@ -2172,8 +2184,10 @@ async function processTool(key: keyof typeof CONFIG, autoInstall = false, nonInt
 
     if (key === 'comfyui') {
         if (!refreshComfyPinnedPackages(toolDir)) return false;
-        if (!installComfyNodes(toolDir)) return false;
-        if (!installUmbraUiSupportModels(toolDir)) return false;
+        if (!coreOnly) {
+            if (!installComfyNodes(toolDir)) return false;
+            if (!installUmbraUiSupportModels(toolDir)) return false;
+        }
     } else if (key === 'aitoolkit') {
         ensureAIToolkitDatasetsLink(toolDir);
         if (!setupAIToolkitUI(toolDir)) return false;
@@ -2184,13 +2198,13 @@ async function processTool(key: keyof typeof CONFIG, autoInstall = false, nonInt
     return true;
 }
 
-async function updateTool(key: keyof typeof CONFIG) {
+async function updateTool(key: keyof typeof CONFIG, coreOnly = false) {
     const cfg = CONFIG[key];
     const toolDir = findToolPath(cfg.search);
 
     if (!toolDir) {
         log(c.yellow + '!' + c.reset, cfg.name + ' is not installed; installing now...');
-        const installed = await processTool(key, true, true);
+        const installed = await processTool(key, true, true, coreOnly);
         if (!installed) exitWithExistingVerifyFailure();
         return;
     }
@@ -2241,11 +2255,13 @@ async function updateTool(key: keyof typeof CONFIG) {
         if (!refreshComfyPinnedPackages(toolDir)) {
             exitWithExistingVerifyFailure();
         }
-        if (!installComfyNodes(toolDir)) {
-            exitWithExistingVerifyFailure();
-        }
-        if (!installUmbraUiSupportModels(toolDir)) {
-            exitWithExistingVerifyFailure();
+        if (!coreOnly) {
+            if (!installComfyNodes(toolDir)) {
+                exitWithExistingVerifyFailure();
+            }
+            if (!installUmbraUiSupportModels(toolDir)) {
+                exitWithExistingVerifyFailure();
+            }
         }
     } else if (key === 'aitoolkit') {
         ensureAIToolkitDatasetsLink(toolDir);
@@ -2891,6 +2907,28 @@ async function main() {
         if (!installUmbraUiSupportModels(comfyDir)) {
             exitWithExistingVerifyFailure();
         }
+    } else if (arg === 'comfy-h3-nodes' || arg === 'comfy-node') {
+        const nodeName = arg === 'comfy-h3-nodes' ? 'ComfyUI-DaSiWa-Nodes' : String(process.argv[3] || '');
+        if (!COMFY_NODES.some((node) => node.name === nodeName)) {
+            exitWithVerifyFailure(
+                'unsupported-custom-node',
+                'The requested managed custom node is not in Umbra Studio setup.',
+                [`Node: ${nodeName}`],
+                ['Update Umbra Studio before retrying this dependency.']
+            );
+        }
+        const comfyDir = findToolPath(CONFIG.comfyui.search);
+        if (!comfyDir) {
+            exitWithVerifyFailure(
+                'comfyui-not-found',
+                'ComfyUI must be installed before DaSiWa H3 nodes.',
+                [`Expected directory under: ${TOOLS_DIR}`],
+                ['Install ComfyUI first.']
+            );
+        }
+        if (!installComfyNodes(comfyDir, [nodeName])) {
+            exitWithExistingVerifyFailure();
+        }
     } else if (arg === 'umbra-ui-models') {
         const comfyDir = findToolPath(CONFIG.comfyui.search);
         if (!comfyDir) {
@@ -2906,6 +2944,8 @@ async function main() {
         }
     } else if (arg === 'update-comfyui') {
         await updateTool('comfyui');
+    } else if (arg === 'managed-comfyui') {
+        await updateTool('comfyui', true);
     } else if (arg === 'update-aitoolkit') {
         await updateTool('aitoolkit');
     } else if (arg === 'set-comfyui-version' || arg === 'downgrade-comfyui') {

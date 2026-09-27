@@ -29,6 +29,7 @@ import {
   RefreshCw,
   Scaling,
   SlidersHorizontal,
+  Sparkles,
   Trash2,
   Upload,
   Video,
@@ -57,6 +58,8 @@ import { UmbraPositivePromptEditor } from '@/components/umbra-ui/UmbraPositivePr
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
 import { UmbraLtxStoryboardPanel } from '@/components/umbra-ui/UmbraLtxStoryboardPanel';
 import { UmbraH3DirectorPanel } from '@/components/umbra-ui/UmbraH3DirectorPanel';
+import { UmbraH3PromptForgeModal } from '@/components/umbra-ui/UmbraH3PromptForgeModal';
+import { UmbraVideoRequirementsNotice } from '@/components/umbra-ui/UmbraVideoRequirementsNotice';
 import { UmbraLtxExtendedPanel } from '@/components/umbra-ui/UmbraLtxExtendedPanel';
 import {
   UmbraQueuePlacementControls,
@@ -352,6 +355,65 @@ function resolveMiniMaxH3FramesForDuration(durationSeconds: number): number {
   const requested = Math.max(5, Math.round(Math.max(0.25, durationSeconds) * 24));
   const remainder = requested % 17;
   return remainder === 5 ? requested : requested + ((5 - remainder + 17) % 17);
+}
+
+function applyH3DirectorMediaHandoff(current: PowerPrompterVideoControls, handoff: UmbraUiMediaHandoff): PowerPrompterVideoControls {
+  const role = handoff.h3DirectorRole;
+  if (!role) return current;
+  const director = current.minimaxH3.director;
+  const item = {
+    id: `gallery-${handoff.createdAt}`,
+    kind: role === 'motion_video' ? 'video' as const : 'image' as const,
+    sourcePath: handoff.path,
+    sourceName: '',
+    enabled: true,
+    note: '',
+    trimStart: 0,
+    trimEnd: null,
+    mediaMode: 'video' as const,
+    role: 'subject' as const,
+  };
+  const previous = director.items.filter((entry) => entry.id !== item.id);
+  const images = previous.filter((entry) => entry.enabled && entry.kind === 'image');
+  let items = previous;
+  let mode: PowerPrompterVideoControls['mode'] = 'reference_to_video';
+  let endpointMode: typeof director.endpointMode = 'first';
+  if (role === 'first') {
+    const closing = current.mode === 'image_to_video' && director.enabled
+      ? director.endpointMode === 'last' ? images[0] : director.endpointMode === 'first_last' ? images[1] : undefined
+      : undefined;
+    const replaced = current.mode === 'image_to_video' && director.endpointMode !== 'last' ? images[0] : undefined;
+    items = [item, ...(closing ? [closing] : []), ...previous.filter((entry) => entry.id !== closing?.id && entry.id !== replaced?.id)];
+    mode = 'image_to_video';
+    endpointMode = closing ? 'first_last' : 'first';
+  } else if (role === 'last') {
+    const opening = current.mode === 'image_to_video' && director.enabled && director.endpointMode !== 'last' ? images[0] : undefined;
+    const replaced = current.mode === 'image_to_video' && director.endpointMode === 'first_last' ? images[1]
+      : current.mode === 'image_to_video' && director.endpointMode === 'last' ? images[0] : undefined;
+    items = [...(opening ? [opening] : []), item, ...previous.filter((entry) => entry.id !== opening?.id && entry.id !== replaced?.id)];
+    mode = 'image_to_video';
+    endpointMode = opening ? 'first_last' : 'last';
+  } else {
+    const existing = previous.find((entry) => entry.kind === item.kind && entry.sourcePath === item.sourcePath);
+    if (existing) items = previous.map((entry) => entry.id === existing.id ? { ...entry, enabled: true } : entry);
+    else if (previous.length < 12) items = [...previous, item];
+    else return current;
+  }
+  if (items.length > 12) return current;
+  const switchingFamily = current.family !== 'minimax_h3';
+  const duration = resolveUmbraVideoDurationSeconds(current.frames, current.fps);
+  const base = prepareVideoControlsForHandoff(current, false);
+  return {
+    ...base,
+    family: 'minimax_h3',
+    mode,
+    frameGuideMode: endpointMode === 'first_last' ? 'first_last' : 'first',
+    fps: 24,
+    frames: switchingFamily ? resolveMiniMaxH3FramesForDuration(duration) : current.frames,
+    minimaxH3: { ...base.minimaxH3, director: { ...director, enabled: true, imageInpaint: false, endpointMode, items,
+      continuity: role === 'reference_image' || role === 'motion_video'
+        ? { ...director.continuity, useReferences: true } : director.continuity } },
+  };
 }
 
 function resolveVideoFramesForDurationChange(
@@ -764,12 +826,14 @@ export function UmbraVideoGenerationControls({
   const [isQueueing, setIsQueueing] = React.useState(false);
   const queueInFlightRef = React.useRef(false);
   const [resourcePicker, setResourcePicker] = React.useState<VideoResourcePicker | null>(null);
+  const [h3ForgeOpen, setH3ForgeOpen] = React.useState(false);
   const [pinnedOutputFolder, setPinnedOutputFolder] = usePinnedOutputFolder('video');
   const { placement, setPlacement, effectivePlacement } = useUmbraQueuePlacement(queueSummary);
   const [settingsLoaded, setSettingsLoaded] = React.useState(false);
   const [settingsResolved, setSettingsResolved] = React.useState(false);
   const videoControlsWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const handoffRolesRef = React.useRef(new Set<UmbraUiVideoFrameRole>());
+  const directorHandoffsRef = React.useRef<UmbraUiMediaHandoff[]>([]);
   const handoffAppliedAtRef = React.useRef(0);
   const targetDimensions = React.useMemo(() => resolveUmbraVideoTargetDimensions({
     resolutionPreset: video.resolutionPreset,
@@ -893,6 +957,9 @@ export function UmbraVideoGenerationControls({
             },
           };
           setVideo((current) => {
+            if (directorHandoffsRef.current.length > 0) {
+              return directorHandoffsRef.current.reduce(applyH3DirectorMediaHandoff, normalizedSavedVideo);
+            }
             const roles = handoffRolesRef.current;
             if (roles.size === 0) return normalizedSavedVideo;
             const middleImagePath = roles.has('middle') ? current.middleImagePath : normalizedSavedVideo.middleImagePath;
@@ -1213,6 +1280,12 @@ export function UmbraVideoGenerationControls({
     if (!detail || detail.mode !== 'video' || !detail.path) return;
     if (detail.createdAt <= handoffAppliedAtRef.current) return;
     handoffAppliedAtRef.current = detail.createdAt;
+    if (detail.h3DirectorRole) {
+      directorHandoffsRef.current.push(detail);
+      setVideo((current) => applyH3DirectorMediaHandoff(current, detail));
+      clearPendingUmbraUiMediaHandoff(detail);
+      return;
+    }
     const role: UmbraUiVideoFrameRole = detail.videoFrameRole || 'first';
     handoffRolesRef.current.add(role);
     setVideo((current) => {
@@ -1784,6 +1857,13 @@ export function UmbraVideoGenerationControls({
             {video.family === 'ltx23' ? 'LTX-2.3' : video.family === 'ltx25' ? 'LTX-2.5' : video.family === 'minimax_h3' ? 'MiniMax H3' : 'Wan 2.2'}
           </span>
         </div>
+        {(video.family === 'minimax_h3' || video.family === 'ltx25') ? <UmbraVideoRequirementsNotice
+          family={video.family}
+          referenceMode={video.family === 'minimax_h3' && video.mode === 'reference_to_video'}
+          directorEnabled={video.family === 'minimax_h3' && video.minimaxH3.director.enabled}
+          promptForgeOpen={video.family === 'minimax_h3' && h3ForgeOpen}
+          comfyConnected={comfyConnected}
+        /> : null}
         {video.family === 'ltx23' ? (
           <VideoResourceField
             label="LTX Checkpoint"
@@ -2089,6 +2169,9 @@ export function UmbraVideoGenerationControls({
             </span>
           </div>
         ) : <>
+        {video.family === 'minimax_h3' && !directorEnabled ? <button type="button" className="inline-flex h-9 items-center gap-2 self-start rounded border border-fuchsia-300/30 px-3 text-xs text-fuchsia-100 hover:bg-fuchsia-500/10" onClick={() => setH3ForgeOpen(true)} title="Draft a prompt without enabling Director">
+          <Sparkles size={14} /> Prompt Forge
+        </button> : null}
         <UmbraPositivePromptEditor
           segments={promptSegments}
           activeSegmentId={activePromptSegmentId}
@@ -2717,6 +2800,14 @@ export function UmbraVideoGenerationControls({
         onClose={() => setMiniMaxH3('director', { ...video.minimaxH3.director, enabled: false })}
       />
     ) : null}
+    {h3ForgeOpen && video.family === 'minimax_h3' && !directorEnabled ? <UmbraH3PromptForgeModal
+      video={video} prompt={prompt} durationSeconds={videoDurationSeconds} comfyConnected={comfyConnected}
+      onApplyPrompt={(draft) => {
+        if (prompt.trim()) rememberCurrentPrompt();
+        replacePromptSegments(draft);
+      }}
+      onClose={() => setH3ForgeOpen(false)}
+    /> : null}
     {storyboardOpen ? (
       <UmbraLtxStoryboardPanel
         shots={video.ltx.storyboard.shots}

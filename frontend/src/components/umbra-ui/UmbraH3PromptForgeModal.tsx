@@ -1,0 +1,179 @@
+'use client';
+
+import React from 'react';
+import { createPortal } from 'react-dom';
+import { Loader2, Sparkles, X } from 'lucide-react';
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
+import type { PowerPrompterVideoControls } from '@/types/powerPrompter';
+import { miniMaxH3DirectorMode } from '../../../../shared/umbra-ui/minimaxH3Director';
+
+interface ForgeModel { id: string; label: string; disabled?: boolean }
+interface ForgeCatalog {
+  models?: ForgeModel[];
+  creativity?: string[];
+  default_detail?: number;
+  default_creativity?: string;
+  message?: string;
+}
+
+interface Props {
+  video: PowerPrompterVideoControls;
+  prompt: string;
+  durationSeconds: number;
+  comfyConnected: boolean;
+  onApplyPrompt: (prompt: string) => void;
+  onClose: () => void;
+}
+
+const fieldClass = 'min-h-9 w-full min-w-0 rounded border border-white/15 bg-black/30 px-2 py-2 text-xs text-zinc-100 outline-none focus:border-fuchsia-300/50';
+const buttonClass = 'inline-flex min-h-9 items-center justify-center gap-2 rounded border border-white/15 px-3 text-xs text-zinc-200 hover:border-fuchsia-300/40 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40';
+
+export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyConnected, onApplyPrompt, onClose }: Props) {
+  const [catalog, setCatalog] = React.useState<ForgeCatalog | null>(null);
+  const [model, setModel] = React.useState('');
+  const [detail, setDetail] = React.useState(5);
+  const [creativity, setCreativity] = React.useState('balanced');
+  const [brief, setBrief] = React.useState(prompt);
+  const [draft, setDraft] = React.useState('');
+  const [drafting, setDrafting] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const dialogRef = React.useRef<HTMLDivElement>(null);
+  const requestIdRef = React.useRef('');
+  const mode = miniMaxH3DirectorMode(video.mode, video.frameGuideMode);
+
+  React.useEffect(() => {
+    const previousFocus = document.activeElement as HTMLElement | null;
+    dialogRef.current?.focus();
+    return () => previousFocus?.focus();
+  }, []);
+
+  React.useEffect(() => {
+    if (!comfyConnected) { setError('Start the managed ComfyUI server to use DaSiWa Prompt Forge.'); return; }
+    const abort = new AbortController();
+    fetch('/comfy/dasiwa/h3/forge/models', {
+      method: 'POST', signal: abort.signal, headers: { 'Content-Type': 'application/json' }, body: '{}',
+    }).then(async (response) => {
+      const result = await response.json().catch(() => ({})) as ForgeCatalog;
+      if (!response.ok) throw new Error(result.message || 'Prompt Forge is unavailable. Install or update DaSiWa nodes.');
+      setCatalog(result);
+      setModel(result.models?.find((entry) => !entry.disabled && entry.id.startsWith('local:'))?.id || '');
+      setDetail(Number(result.default_detail) || 5);
+      setCreativity(result.default_creativity || 'balanced');
+      setError('');
+    }).catch((cause) => { if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : 'Prompt Forge is unavailable.'); });
+    return () => abort.abort();
+  }, [comfyConnected]);
+
+  React.useEffect(() => () => {
+    if (!requestIdRef.current) return;
+    void fetch('/comfy/dasiwa/h3/forge/cancel', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request_id: requestIdRef.current }),
+    }).catch(() => undefined);
+  }, []);
+
+  const cancel = () => {
+    if (!requestIdRef.current) return;
+    const requestId = requestIdRef.current;
+    requestIdRef.current = '';
+    setDrafting(false);
+    void fetch('/comfy/dasiwa/h3/forge/cancel', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request_id: requestId }),
+    }).catch(() => undefined);
+  };
+
+  const forge = async () => {
+    if (drafting || !comfyConnected || !brief.trim() || !model) return;
+    const requestId = crypto.randomUUID();
+    requestIdRef.current = requestId;
+    setDrafting(true);
+    setDraft('');
+    setError('');
+    try {
+      const imageSources = video.mode === 'text_to_video' ? [] : video.mode === 'image_to_video'
+        ? [[video.sourceImagePath, video.sourceImageName, ''], ...(video.frameGuideMode === 'first_last' ? [[video.lastImagePath, video.lastImageName, '']] : [])]
+        : [[video.sourceImagePath, video.sourceImageName, video.minimaxH3.referenceNotes[0]],
+          [video.middleImagePath, video.middleImageName, video.minimaxH3.referenceNotes[1]],
+          [video.lastImagePath, video.lastImageName, video.minimaxH3.referenceNotes[2]]];
+      const references = [];
+      for (const [sourcePath, filename, keep] of imageSources) {
+        if (requestIdRef.current !== requestId) return;
+        if (!sourcePath && !filename) continue;
+        const path = await ensureUmbraUiQueuedMedia('image', sourcePath, filename, 'H3 Prompt Forge image');
+        references.push({ kind: 'image', path, role: mode === 'REF2VA' ? 'subject' : 'keyframe', keep });
+      }
+      if (requestIdRef.current !== requestId) return;
+      const response = await fetch('/comfy/dasiwa/h3/forge', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: requestId, brief: brief.trim(), mode, duration: durationSeconds,
+          model, detail, creativity, references }),
+      });
+      const result = await response.json().catch(() => ({})) as { simple_prompt?: string; message?: string; warnings?: string[] };
+      if (!response.ok || !result.simple_prompt) throw new Error(result.message || 'Prompt Forge did not return a draft.');
+      if (requestIdRef.current !== requestId) return;
+      setDraft(result.simple_prompt);
+      if (result.warnings?.length) setError(result.warnings.join(' '));
+    } catch (cause) {
+      if (requestIdRef.current === requestId) setError(cause instanceof Error ? cause.message : 'Prompt Forge failed.');
+    } finally {
+      if (requestIdRef.current === requestId) requestIdRef.current = '';
+      setDrafting(false);
+    }
+  };
+
+  return createPortal(
+    <div data-umbra-modal-root="" className="fixed inset-0 z-[240] flex items-center justify-center bg-black/80 p-3" onMouseDown={(event) => { if (event.target === event.currentTarget && !drafting) onClose(); }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="MiniMax H3 Prompt Forge" tabIndex={-1}
+        className="flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-fuchsia-300/35 bg-[#101114] text-zinc-200 shadow-2xl outline-none"
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') { event.stopPropagation(); if (!drafting) onClose(); }
+          if (event.key !== 'Tab') return;
+          const nodes = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), textarea:not(:disabled), input:not(:disabled)') ?? []);
+          const first = nodes[0]; const last = nodes[nodes.length - 1];
+          if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) { event.preventDefault(); last?.focus(); }
+          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+        }}>
+        <header className="flex items-center gap-2 border-b border-white/10 p-3">
+          <Sparkles size={16} className="text-fuchsia-300" />
+          <h2 className="min-w-0 flex-1 text-sm font-semibold">H3 Prompt Forge</h2>
+          <span className="text-[10px] text-zinc-500">{mode}</span>
+          <button type="button" className={buttonClass} title="Close Prompt Forge" aria-label="Close Prompt Forge" disabled={drafting} onClick={onClose}><X size={15} /></button>
+        </header>
+        <div className="min-h-0 space-y-3 overflow-y-auto p-3">
+          <label className="block text-xs text-zinc-400">Video idea
+            <textarea className={`${fieldClass} mt-1 min-h-24 resize-y`} value={brief} onChange={(event) => setBrief(event.target.value)} placeholder="Describe the shot" />
+          </label>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_80px_minmax(0,1fr)]">
+            <label className="min-w-0 text-xs text-zinc-400">Model
+              <UmbraSelectControl aria-label="Prompt Forge model" value={model} onChange={(event) => setModel(event.target.value)} className={`${fieldClass} mt-1`}>
+                <option value="">Choose a model</option>
+                {(catalog?.models || []).map((entry) => <option key={entry.id} value={entry.id} disabled={entry.disabled}>{entry.label}</option>)}
+              </UmbraSelectControl>
+            </label>
+            <label className="text-xs text-zinc-400">Detail
+              <input type="number" min={1} max={10} value={detail} onChange={(event) => setDetail(Math.max(1, Math.min(10, Number(event.target.value) || 1)))} className={`${fieldClass} mt-1`} />
+            </label>
+            <label className="min-w-0 text-xs text-zinc-400">Creativity
+              <UmbraSelectControl value={creativity} onChange={(event) => setCreativity(event.target.value)} className={`${fieldClass} mt-1`}>
+                {(catalog?.creativity || ['balanced']).map((entry) => <option key={entry} value={entry}>{entry}</option>)}
+              </UmbraSelectControl>
+            </label>
+          </div>
+          {error ? <p role="status" className="text-xs text-amber-300">{error}</p> : null}
+          <div className="flex gap-2">
+            <button type="button" className={buttonClass} disabled={!comfyConnected || !model || !brief.trim() || drafting} onClick={() => void forge()}>
+              {drafting ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}{drafting ? 'Drafting...' : 'Draft prompt'}
+            </button>
+            {drafting ? <button type="button" className={buttonClass} onClick={cancel}>Cancel draft</button> : null}
+          </div>
+          {draft ? <div className="space-y-2 border-t border-white/10 pt-3">
+            <label className="block text-xs text-zinc-400">Draft
+              <textarea aria-label="Prompt Forge draft" className={`${fieldClass} mt-1 min-h-40 resize-y`} value={draft} onChange={(event) => setDraft(event.target.value)} />
+            </label>
+            <button type="button" className={buttonClass} disabled={!draft.trim()} onClick={() => { onApplyPrompt(draft.trim()); onClose(); }}>Use prompt</button>
+          </div> : null}
+        </div>
+      </div>
+    </div>, document.body,
+  );
+}

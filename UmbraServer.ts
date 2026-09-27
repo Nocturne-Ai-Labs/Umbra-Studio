@@ -11,6 +11,7 @@ import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
  */
 
 import { applyMiniMaxH3Acceleration, assertMiniMaxH3TurboInstalled, assertMiniMaxH3GuidesInstalled, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
+import { inspectManagedVideoModels } from './backend/VideoSetupReadiness';
 import { applyAnima38TextEncoderDevice } from './backend/AnimaTextEncoderDevice';
 import { ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, normalizeAnima38TextEncoderDevice } from './shared/umbra-ui/animaTextEncoderDevice';
 import { applyUmbraUiVideoLoraStack, assertUmbraUiVideoLoraStackInstalled, resolveUmbraUiVideoLoraNames } from './backend/UmbraUiVideoLoraStack';
@@ -34771,18 +34772,27 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/umbra-ui/h3-director/node-update' && method === 'GET') {
         const comfy = detectAllTools().comfyui;
         const nodesPath = comfy.detected && comfy.path ? join(comfy.path, 'custom_nodes', 'ComfyUI-DaSiWa-Nodes') : '';
+        const installed = Boolean(nodesPath && existsSync(join(nodesPath, '__init__.py')));
         const installedCommit = nodesPath && existsSync(nodesPath) ? getLocalGitCommit(nodesPath) : null;
-        if (!installedCommit) return json({ installed: false, updateAvailable: false });
+        if (!installedCommit) return json({ installed, updateAvailable: false });
         const cached = h3DirectorNodeUpdateCache;
         const latestCommit = cached && cached.installedCommit === installedCommit && Date.now() - cached.checkedAt < 10 * 60_000
           ? cached.latestCommit : await getGitLatestCommit('https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes');
         h3DirectorNodeUpdateCache = { installedCommit, latestCommit, checkedAt: Date.now() };
         return json({
-          installed: true,
+          installed,
           updateAvailable: Boolean(latestCommit && !installedCommit.startsWith(latestCommit) && !latestCommit.startsWith(installedCommit)),
           installedCommit,
           latestCommit,
         });
+      }
+
+      if (path === '/api/umbra-ui/video-setup-readiness' && method === 'GET') {
+        const family = url.searchParams.get('family');
+        if (family !== 'minimax_h3' && family !== 'ltx25') return json({ error: 'Unsupported managed video family.' }, 400);
+        return json(await inspectManagedVideoModels(SOURCE_DIR, ROOT_DIR, family,
+          family === 'minimax_h3' && url.searchParams.get('reference') === 'true',
+          family === 'minimax_h3' && url.searchParams.get('promptForge') === 'true'));
       }
 
       const toolVersionsMatch = path.match(/^\/api\/tools\/(comfyui)\/versions$/);
@@ -34863,7 +34873,7 @@ const server = Bun.serve<UmbraSocketData>({
           return json({ error: 'Tool install and update actions are only available from the host PC.' }, 403);
         }
         const body = await req.json() as {
-          action: 'install' | 'update' | 'custom_nodes' | 'update_pytorch' | 'install_sageattention';
+          action: 'install' | 'update' | 'custom_nodes' | 'h3_nodes' | 'update_pytorch' | 'install_sageattention';
           tool?: 'comfyui' | 'aitoolkit';
         };
         const rawAction = String((body as any)?.action || '').toLowerCase();
@@ -34921,9 +34931,13 @@ const server = Bun.serve<UmbraSocketData>({
           }
           updateCache = null;
           job = createToolAction('install_sageattention', ['install-sageattention-comfyui'], tool);
-        } else if (normalizedAction === 'custom_nodes') {
+        } else if (normalizedAction === 'custom_nodes' || normalizedAction === 'h3_nodes') {
           if (tool === 'comfyui') {
-            job = createToolAction('custom_nodes', ['comfy-nodes'], tool);
+            const backendStatus = await getBackendStatusAsync('comfyui');
+            if (backendStatus.running) {
+              return json({ error: 'Stop ComfyUI before installing or updating custom nodes, then restart it afterward.' }, 400);
+            }
+            job = createToolAction(normalizedAction, [normalizedAction === 'h3_nodes' ? 'comfy-h3-nodes' : 'comfy-nodes'], tool);
           } else {
             return json({ error: 'Custom nodes are only available for ComfyUI workflows' }, 400);
           }

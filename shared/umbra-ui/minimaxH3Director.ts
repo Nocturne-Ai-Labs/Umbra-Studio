@@ -77,6 +77,8 @@ export const DEFAULT_MINIMAX_H3_DIRECTOR: MiniMaxH3DirectorControls = {
   continuity: { ...DEFAULT_MINIMAX_H3_CONTINUITY },
 };
 
+export const MINIMAX_H3_IMAGE_INPAINT_ENABLED = false;
+
 export function normalizeMiniMaxH3Director(raw: unknown): MiniMaxH3DirectorControls {
   const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   const items = Array.isArray(value.items) ? value.items : [];
@@ -84,7 +86,7 @@ export function normalizeMiniMaxH3Director(raw: unknown): MiniMaxH3DirectorContr
   const rawContinuity = value.continuity && typeof value.continuity === 'object' ? value.continuity as Record<string, unknown> : {};
   return {
     enabled: value.enabled === true,
-    imageInpaint: value.imageInpaint === true,
+    imageInpaint: MINIMAX_H3_IMAGE_INPAINT_ENABLED && value.imageInpaint === true,
     inputScaling: DIRECTOR_SCALING.includes(value.inputScaling as MiniMaxH3DirectorScaling) ? value.inputScaling as MiniMaxH3DirectorScaling : 'Auto',
     endpointMode: value.endpointMode === 'last' || value.endpointMode === 'first_last' ? value.endpointMode : 'first',
     refMods: (Array.isArray(value.refMods) ? value.refMods : []).slice(0, 8).map((rawRef, index) => {
@@ -338,6 +340,7 @@ export function parseMiniMaxH3ReferencePack(
   if (pack.dasiwa_minimax_h3_reference_pack !== true || pack.schema_version !== 1) throw new Error('Unsupported MiniMax H3 reference pack.');
   const modelMode = pack.model_mode;
   if (!['T2VA', 'I2VA', 'L2VA', 'FL2VA', 'REF2VA', 'Image Inpaint'].includes(String(modelMode))) throw new Error('This reference pack uses an unsupported Director mode.');
+  if (modelMode === 'Image Inpaint' && !MINIMAX_H3_IMAGE_INPAINT_ENABLED) throw new Error('H3 Image Inpaint is temporarily unavailable.');
   const mode = modelMode === 'REF2VA' ? 'reference_to_video' : modelMode === 'T2VA' ? 'text_to_video' : 'image_to_video';
   const frameGuideMode = modelMode === 'FL2VA' ? 'first_last' : 'first';
   const endpointMode = modelMode === 'L2VA' ? 'last' : modelMode === 'FL2VA' ? 'first_last' : 'first';

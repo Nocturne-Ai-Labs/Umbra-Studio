@@ -399,6 +399,7 @@ function verifyPublish() {
     'resources/app/defaults/DataForge/model-manifest.json',
     'resources/app/defaults/UmbraUI/model-manifest.json',
     'resources/app/defaults/UmbraUI/model-requirements-manifest.json',
+    'resources/app/defaults/UmbraUI/tool-requirements.json',
     'resources/app/defaults/PowerPrompter/API Workflows/[Umbra UI] Stable Diffusion Image Pipeline.json',
     'resources/app/defaults/PowerPrompter/Prompts/Anime Girls Starter.ppcards.json',
     'resources/app/defaults/PowerPrompter/Prompts/Krea 2 Art Starter.ppcards.json',

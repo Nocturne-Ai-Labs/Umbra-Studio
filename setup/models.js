@@ -36,7 +36,10 @@ Object.assign(SETUP_TRANSLATIONS.de, {
 let modelCatalog = null;
 let modelBusy = false;
 let modelPack = new URLSearchParams(location.search).get('pack') === 'support' ? 'support' : 'requirements';
-const modelSelections = { requirements: new Set(), support: new Set(['core']) };
+const modelSelections = {
+  requirements: new Set((new URLSearchParams(location.search).get('profiles') || '').split(',').filter(id => /^[a-z0-9-]{1,64}$/.test(id))),
+  support: new Set(['core']),
+};
 let completedModelJob = '';
 const modelElement = id => document.getElementById(id);
 document.querySelector('main').insertBefore(progress, modelElement('general-panel'));

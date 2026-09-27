@@ -18,6 +18,7 @@ export const UMBRA_UI_MEDIA_HANDOFF_EVENT = 'umbra:umbra-ui-media-handoff';
 
 export type UmbraUiMediaHandoffMode = 'txt2img' | 'img2img' | 'inpaint' | 'canvas' | 'video';
 export type UmbraUiVideoFrameRole = 'first' | 'middle' | 'last' | 'source_video';
+export type UmbraUiH3DirectorRole = 'first' | 'last' | 'reference_image' | 'motion_video';
 export type UmbraUiStudioDestinationMode = 'new_artboard' | 'layer_on_artboard' | 'reference' | 'replace_source';
 
 export interface UmbraUiMediaHandoffLora {
@@ -113,6 +114,7 @@ export interface UmbraUiMediaHandoff {
   studioArtboardId?: string;
   studioDestination?: UmbraUiStudioDestinationMode;
   videoFrameRole?: UmbraUiVideoFrameRole;
+  h3DirectorRole?: UmbraUiH3DirectorRole;
   generation?: UmbraUiMediaGenerationSnapshot;
   createdAt: number;
 }
@@ -580,6 +582,7 @@ export function normalizeUmbraUiMediaHandoff(value: unknown): UmbraUiMediaHandof
   const imageUrl = String(value.imageUrl || '').trim();
   if (!path || !imageUrl) return null;
   const role = String(value.videoFrameRole || '').trim().toLowerCase();
+  const directorRole = String(value.h3DirectorRole || '').trim().toLowerCase();
   const studioDestination = String(value.studioDestination || '').trim();
   return {
     mode,
@@ -597,6 +600,8 @@ export function normalizeUmbraUiMediaHandoff(value: unknown): UmbraUiMediaHandof
       : studioDestination === 'new_artboard' ? 'new_artboard' : undefined,
     ...(mode === 'video' ? {
       videoFrameRole: role === 'middle' || role === 'last' || role === 'source_video' ? role : 'first',
+      ...(directorRole === 'first' || directorRole === 'last' || directorRole === 'reference_image' || directorRole === 'motion_video'
+        ? { h3DirectorRole: directorRole } : {}),
     } : {}),
     generation: normalizeUmbraUiMediaGenerationSnapshot(value.generation),
     createdAt: finiteNumber(value.createdAt) || Date.now(),
@@ -656,6 +661,7 @@ export async function stageUmbraUiMediaHandoff(options: {
   imageUrl?: string;
   source: string;
   videoFrameRole?: UmbraUiVideoFrameRole;
+  h3DirectorRole?: UmbraUiH3DirectorRole;
   canvasProjectId?: string;
   canvasOperationMode?: 'inpaint' | 'outpaint';
   studioProjectId?: string;
@@ -698,7 +704,10 @@ export async function stageUmbraUiMediaHandoff(options: {
     ...(options.studioProjectId ? { studioProjectId: options.studioProjectId } : {}),
     ...(options.studioArtboardId ? { studioArtboardId: options.studioArtboardId } : {}),
     ...(options.studioDestination ? { studioDestination: options.studioDestination } : {}),
-    ...(options.mode === 'video' ? { videoFrameRole: options.videoFrameRole || 'first' } : {}),
+    ...(options.mode === 'video' ? {
+      videoFrameRole: options.videoFrameRole || 'first',
+      ...(options.h3DirectorRole ? { h3DirectorRole: options.h3DirectorRole } : {}),
+    } : {}),
     generation,
     createdAt: handoffId,
   };

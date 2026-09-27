@@ -1,11 +1,12 @@
 'use client';
 
 import React from 'react';
-import { ArrowDown, ArrowUp, Download, FolderUp, Image as ImageIcon, Loader2, Music2, Plus, Sparkles, Trash2, Video, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Download, FolderOpen, FolderUp, Image as ImageIcon, Loader2, Music2, Plus, Sparkles, Trash2, Video, X } from 'lucide-react';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { UmbraH3ContinuitySessionModal } from './UmbraH3ContinuitySessionModal';
 import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
 import { resolveUmbraVideoQueueSourceUrl } from '@/lib/umbraVideoQueuePreview';
-import { createMiniMaxH3ReferencePack, miniMaxH3DirectorMode, parseMiniMaxH3ReferencePack, selectedMiniMaxH3DirectorItems, type MiniMaxH3DirectorControls, type MiniMaxH3DirectorItem, type MiniMaxH3DirectorMediaKind, type MiniMaxH3ReferencePackMode, type MiniMaxH3ReferencePackScope } from '../../../../shared/umbra-ui/minimaxH3Director';
+import { createMiniMaxH3ReferencePack, MINIMAX_H3_IMAGE_INPAINT_ENABLED, miniMaxH3DirectorMode, parseMiniMaxH3ReferencePack, selectedMiniMaxH3DirectorItems, type MiniMaxH3DirectorControls, type MiniMaxH3DirectorItem, type MiniMaxH3DirectorMediaKind, type MiniMaxH3ReferencePackMode, type MiniMaxH3ReferencePackScope } from '../../../../shared/umbra-ui/minimaxH3Director';
 
 interface ForgeModel { id: string; label: string; disabled?: boolean }
 interface ForgeCatalog {
@@ -71,6 +72,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
   const [checkpoints, setCheckpoints] = React.useState<Array<{ clip_id: string; seconds: number; completed_ns: number }>>([]);
   const [checkpointError, setCheckpointError] = React.useState('');
   const [checkpointRefresh, setCheckpointRefresh] = React.useState(0);
+  const [sessionPickerOpen, setSessionPickerOpen] = React.useState(false);
   const [sourceCheck, setSourceCheck] = React.useState('');
   const [sourceCheckFailed, setSourceCheckFailed] = React.useState(false);
   const [sourceVideoUploading, setSourceVideoUploading] = React.useState(false);
@@ -87,6 +89,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
     continuity.overlapFrames, continuity.idea, directorMode, durationSeconds, width, height, brief, model, detail, creativity]);
 
   React.useEffect(() => {
+    setCheckpoints([]);
     if (!comfyConnected || !/^[a-zA-Z0-9_-]{1,80}$/.test(continuity.session)) return;
     const abort = new AbortController();
     fetch(`/comfy/df_h3_continuity/session/${encodeURIComponent(continuity.session)}`, { signal: abort.signal })
@@ -341,9 +344,10 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
         DaSiWa nodes changed upstream. Check Umbra Director compatibility before updating in ComfyUI Manager. Umbra workflow changes are reviewed separately.
         <a href="/comfy/" target="_blank" rel="noopener noreferrer" className="ml-2 underline">Open ComfyUI</a>
       </div> : null}
-      <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
-        <input type="checkbox" checked={controls.imageInpaint} onChange={(event) => onChange({ ...controls, imageInpaint: event.target.checked,
+      <label className={`mb-3 flex items-center gap-2 text-xs ${MINIMAX_H3_IMAGE_INPAINT_ENABLED ? 'text-zinc-300' : 'cursor-not-allowed text-zinc-600'}`} title={MINIMAX_H3_IMAGE_INPAINT_ENABLED ? undefined : 'Temporarily unavailable'}>
+        <input type="checkbox" checked={MINIMAX_H3_IMAGE_INPAINT_ENABLED && controls.imageInpaint} disabled={!MINIMAX_H3_IMAGE_INPAINT_ENABLED} onChange={(event) => onChange({ ...controls, imageInpaint: event.target.checked,
           continuity: event.target.checked ? { ...continuity, capture: false, sourceId: '', sourceVideoId: '' } : continuity })} /> Image Inpaint (still frame)
+        {!MINIMAX_H3_IMAGE_INPAINT_ENABLED ? <span className="text-[10px]">Unavailable for now</span> : null}
       </label>
       <div className="mb-3 flex flex-wrap gap-2">
         <span className="text-[10px] text-zinc-500">{enabled.length}/{maxItems} reference slots</span>
@@ -368,9 +372,11 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
           <h3 className="text-xs font-semibold text-zinc-200">Continuity</h3>
           <button type="button" className="text-[10px] text-zinc-400 hover:text-zinc-100" onClick={() => setCheckpointRefresh((value) => value + 1)}>Refresh checkpoints</button>
         </div>
-        <label className="block text-[10px] text-zinc-500">Session
-          <input className={fieldClass} value={continuity.session} onChange={(event) => onChange({ ...controls, continuity: { ...continuity, session: event.target.value, sourceId: '', sourceVideoId: '' } })} />
-        </label>
+        <div className="text-[10px] text-zinc-500">Session
+          <button type="button" className={`${fieldClass} mt-1 flex items-center gap-2 text-left`} onClick={() => setSessionPickerOpen(true)} title="Choose or create continuity session">
+            <FolderOpen size={13} className="shrink-0 text-fuchsia-300" /><span className="min-w-0 flex-1 truncate">{continuity.session}</span>
+          </button>
+        </div>
         <label className="mt-2 block text-[10px] text-zinc-500">Source
           <UmbraSelectControl className={fieldClass} value={continuity.sourceKind} onChange={(event) => onChange({ ...controls, continuity: { ...continuity, sourceKind: event.target.value as typeof continuity.sourceKind } })}>
             <option value="checkpoint">Saved checkpoint</option><option value="video">Uploaded video</option>
@@ -412,6 +418,13 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
         </> : null}
         {checkpointError ? <p role="alert" className="mt-2 text-[10px] text-amber-300">{checkpointError}</p> : null}
       </div> : null}
+      {sessionPickerOpen ? <UmbraH3ContinuitySessionModal currentSession={continuity.session} comfyConnected={comfyConnected}
+        onClose={() => setSessionPickerOpen(false)} onSelect={(session) => {
+          if (session === continuity.session) return;
+          setCheckpoints([]);
+          setCheckpointError('');
+          onChange({ ...controls, continuity: { ...continuity, session, sourceKind: 'checkpoint', sourceId: '', sourceVideoId: '', capture: true, idea: '', useReferences: false } });
+        }} /> : null}
       <div className="mb-3 border-y border-white/10 py-3">
         <div className="mb-2 flex items-center gap-2"><h3 className="text-xs font-semibold text-zinc-200">Reference pack</h3></div>
         <div className="grid grid-cols-2 gap-2">

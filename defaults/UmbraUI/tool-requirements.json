@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "features": [
+    {
+      "id": "minimax-h3",
+      "label": "MiniMax H3 video",
+      "activationFile": "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "minimumComfyVersion": "0.37.0",
+      "modelProfiles": ["minimax-h3"],
+      "customNodes": []
+    },
+    {
+      "id": "minimax-h3-director",
+      "label": "MiniMax H3 Director",
+      "optional": true,
+      "activationFile": "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "minimumComfyVersion": "0.37.0",
+      "modelProfiles": ["minimax-h3"],
+      "customNodes": [
+        {
+          "name": "ComfyUI-DaSiWa-Nodes",
+          "minimumCommit": "9f5aef4a2748bba9486dda0a7efec7689462d7e0"
+        }
+      ]
+    }
+  ]
+}
