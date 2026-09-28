@@ -6,6 +6,7 @@ import { FolderOpen, Loader2, RefreshCw, Sparkles, X } from 'lucide-react';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
 import { openH3PromptForgeModelFolder } from '@/lib/h3PromptForgeModelFolder';
+import { UmbraH3ForgeDeviceControl, useH3ForgeComputeDevice } from './UmbraH3ForgeDeviceControl';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import type { PowerPrompterVideoControls } from '@/types/powerPrompter';
 import { miniMaxH3DirectorMode } from '../../../../shared/umbra-ui/minimaxH3Director';
@@ -13,6 +14,7 @@ import { miniMaxH3DirectorMode } from '../../../../shared/umbra-ui/minimaxH3Dire
 interface ForgeModel { id: string; label: string; disabled?: boolean }
 interface ForgeCatalog {
   models?: ForgeModel[];
+  compute_devices?: string[];
   creativity?: string[];
   default_detail?: number;
   default_creativity?: string;
@@ -36,6 +38,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
   const [model, setModel] = React.useState('');
   const [detail, setDetail] = React.useState(5);
   const [creativity, setCreativity] = React.useState('balanced');
+  const [computeDevice, setComputeDevice] = useH3ForgeComputeDevice();
   const [brief, setBrief] = React.useState(prompt);
   const [draft, setDraft] = React.useState('');
   const [drafting, setDrafting] = React.useState(false);
@@ -44,6 +47,8 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
   const dialogRef = React.useRef<HTMLDivElement>(null);
   const requestIdRef = React.useRef('');
   const mode = miniMaxH3DirectorMode(video.mode, video.frameGuideMode);
+  const localModel = model.startsWith('local:');
+  const supportsComputeDevice = catalog?.compute_devices?.includes('cpu') && catalog.compute_devices.includes('gpu');
 
   React.useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null;
@@ -111,7 +116,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
       const response = await fetch('/comfy/dasiwa/h3/forge', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ request_id: requestId, brief: brief.trim(), mode, duration: durationSeconds,
-          model, detail, creativity, references }),
+          model, detail, creativity, references, ...(localModel ? { compute_device: computeDevice } : {}) }),
       });
       const result = await response.json().catch(() => ({})) as { simple_prompt?: string; message?: string; warnings?: string[] };
       if (!response.ok || !result.simple_prompt) throw new Error(result.message || 'Prompt Forge did not return a draft.');
@@ -174,9 +179,13 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
               </UmbraSelectControl>
             </label>
           </div>
+          {localModel ? <>
+            <UmbraH3ForgeDeviceControl value={computeDevice} onChange={(value) => { setComputeDevice(value); setDraft(''); }} disabled={drafting || !supportsComputeDevice} />
+            {!supportsComputeDevice ? <p role="status" className="text-xs text-amber-300">Update DaSiWa H3 nodes in Umbra Setup and restart ComfyUI to choose CPU or GPU.</p> : null}
+          </> : null}
           {error ? <p role="status" className="text-xs text-amber-300">{error}</p> : null}
           <div className="flex gap-2">
-            <button type="button" className={buttonClass} disabled={!comfyConnected || !model || !brief.trim() || drafting} onClick={() => void forge()}>
+            <button type="button" className={buttonClass} disabled={!comfyConnected || !model || !brief.trim() || drafting || (localModel && !supportsComputeDevice)} onClick={() => void forge()}>
               {drafting ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}{drafting ? 'Drafting...' : 'Draft prompt'}
             </button>
             {drafting ? <button type="button" className={buttonClass} onClick={cancel}>Cancel draft</button> : null}

@@ -13,6 +13,7 @@ import { join } from 'path';
 import { existsSync, statSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { execSync, spawnSync } from 'child_process';
 import { installDaSiWaRequirements } from './setup/DaSiWaRequirements';
+import { ensureDaSiWaForgeComputePatch, removeDaSiWaForgeComputePatchForUpdate } from './setup/DaSiWaForgeCompute';
 import * as readline from 'readline';
 
 const COMFY_NODES_FILE = join(import.meta.dir, 'User', 'Config', 'comfy-nodes.json');
@@ -685,13 +686,22 @@ async function manageCustomNodes() {
                     const status = execSync('git status -uno', { cwd: nodePath, encoding: 'utf-8' });
                     if (status.includes('behind')) {
                         log('→', `Updating ${node.name}...`);
-                        execSync('git pull', { cwd: nodePath, stdio: 'ignore' });
+                        if (node.name === 'ComfyUI-DaSiWa-Nodes') {
+                            removeDaSiWaForgeComputePatchForUpdate(nodePath);
+                            try {
+                                execSync('git pull --ff-only', { cwd: nodePath, stdio: 'ignore' });
+                            } finally {
+                                ensureDaSiWaForgeComputePatch(nodePath);
+                            }
+                        } else {
+                            execSync('git pull', { cwd: nodePath, stdio: 'ignore' });
+                        }
                         log(`${c.green}✓${c.reset}`, `${node.name} updated`);
                     } else {
                         log('✓', `${node.name} is up to date`);
                     }
-                } catch {
-                    log('✓', `${node.name} already installed`);
+                } catch (error) {
+                    log(`${c.yellow}WARN${c.reset}`, `${node.name} update failed: ${error instanceof Error ? error.message : String(error)}`);
                 }
             } else {
                 log('→', `Installing ${node.name}...`);
@@ -701,6 +711,14 @@ async function manageCustomNodes() {
                     log(`${c.green}✓${c.reset}`, `${node.name} installed`);
                 } catch {
                     log(`${c.red}✗${c.reset}`, `Failed to install ${node.name}`);
+                }
+            }
+
+            if (node.name === 'ComfyUI-DaSiWa-Nodes' && existsSync(nodePath)) {
+                try {
+                    ensureDaSiWaForgeComputePatch(nodePath);
+                } catch (error) {
+                    log(`${c.yellow}WARN${c.reset}`, error instanceof Error ? error.message : 'DaSiWa H3 Forge patch failed');
                 }
             }
 

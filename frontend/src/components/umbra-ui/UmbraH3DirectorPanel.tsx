@@ -6,6 +6,7 @@ import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { UmbraH3ContinuitySessionModal } from './UmbraH3ContinuitySessionModal';
 import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
 import { openH3PromptForgeModelFolder } from '@/lib/h3PromptForgeModelFolder';
+import { UmbraH3ForgeDeviceControl, useH3ForgeComputeDevice } from './UmbraH3ForgeDeviceControl';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import { resolveUmbraVideoQueueSourceUrl } from '@/lib/umbraVideoQueuePreview';
 import { createMiniMaxH3ReferencePack, MINIMAX_H3_IMAGE_INPAINT_ENABLED, miniMaxH3DirectorMode, parseMiniMaxH3ReferencePack, selectedMiniMaxH3DirectorItems, type MiniMaxH3DirectorControls, type MiniMaxH3DirectorItem, type MiniMaxH3DirectorMediaKind, type MiniMaxH3ReferencePackMode, type MiniMaxH3ReferencePackScope } from '../../../../shared/umbra-ui/minimaxH3Director';
@@ -13,6 +14,7 @@ import { createMiniMaxH3ReferencePack, MINIMAX_H3_IMAGE_INPAINT_ENABLED, miniMax
 interface ForgeModel { id: string; label: string; disabled?: boolean }
 interface ForgeCatalog {
   models?: ForgeModel[];
+  compute_devices?: string[];
   creativity?: string[];
   detail_levels?: Record<string, string>;
   default_detail?: number;
@@ -63,6 +65,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
   const [model, setModel] = React.useState('');
   const [detail, setDetail] = React.useState(5);
   const [creativity, setCreativity] = React.useState('balanced');
+  const [computeDevice, setComputeDevice] = useH3ForgeComputeDevice();
   const [draft, setDraft] = React.useState('');
   const [drafting, setDrafting] = React.useState(false);
   const [uploadingId, setUploadingId] = React.useState('');
@@ -87,9 +90,11 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
   const maxItems = directorMode === 'T2VA' ? 0 : directorMode === 'I2VA' || directorMode === 'L2VA' || directorMode === 'Image Inpaint' ? 1 : directorMode === 'FL2VA' ? 2 : 12;
   const continuity = controls.continuity;
   const continuitySource = continuity.sourceKind === 'video' ? continuity.sourceVideoId : continuity.sourceId;
+  const localForgeModel = model.startsWith('local:');
+  const supportsComputeDevice = forgeCatalog?.compute_devices?.includes('cpu') && forgeCatalog.compute_devices.includes('gpu');
 
   React.useEffect(() => { setDraft(''); }, [continuity.session, continuity.sourceKind, continuitySource,
-    continuity.overlapFrames, continuity.idea, directorMode, durationSeconds, width, height, brief, model, detail, creativity]);
+    continuity.overlapFrames, continuity.idea, directorMode, durationSeconds, width, height, brief, model, detail, creativity, computeDevice]);
 
   React.useEffect(() => {
     setCheckpoints([]);
@@ -313,6 +318,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
           model,
           detail,
           creativity,
+          ...(localForgeModel ? { compute_device: computeDevice } : {}),
           references,
           ...(continuitySource ? { continuity: {
             session: continuity.session,
@@ -592,8 +598,12 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
             {(forgeCatalog?.creativity || ['balanced']).map((entry) => <option key={entry} value={entry}>{entry}</option>)}
           </UmbraSelectControl>
         </label>
+        {localForgeModel ? <>
+          <div className="mt-2"><UmbraH3ForgeDeviceControl value={computeDevice} onChange={setComputeDevice} disabled={drafting || !supportsComputeDevice} /></div>
+          {!supportsComputeDevice ? <p role="status" className="mt-2 text-xs text-amber-300">Update DaSiWa H3 nodes in Umbra Setup and restart ComfyUI to choose CPU or GPU.</p> : null}
+        </> : null}
         <div className="mt-2 flex gap-2">
-          <button type="button" className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded border border-fuchsia-300/30 px-2 text-xs text-fuchsia-100 disabled:opacity-40" disabled={!model || (!brief.trim() && !continuitySource) || drafting} onClick={() => void forge()}>
+          <button type="button" className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded border border-fuchsia-300/30 px-2 text-xs text-fuchsia-100 disabled:opacity-40" disabled={!model || (!brief.trim() && !continuitySource) || drafting || (localForgeModel && !supportsComputeDevice)} onClick={() => void forge()}>
             {drafting ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}{drafting ? 'Drafting...' : 'Draft prompt'}
           </button>
           {drafting ? <button type="button" className={iconButton} title="Cancel Prompt Forge" onClick={() => void cancelForge()}><X size={13} /></button> : null}

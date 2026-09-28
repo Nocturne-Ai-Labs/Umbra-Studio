@@ -13,6 +13,7 @@ import { join, basename, dirname, relative } from 'path';
 import { existsSync, readdirSync, statSync, lstatSync, realpathSync, unlinkSync, rmSync, mkdirSync, readFileSync, writeFileSync, cpSync, renameSync, symlinkSync } from 'fs';
 import { spawn, spawnSync, execSync } from 'child_process';
 import { installDaSiWaRequirements } from './setup/DaSiWaRequirements';
+import { ensureDaSiWaForgeComputePatch, removeDaSiWaForgeComputePatchForUpdate } from './setup/DaSiWaForgeCompute';
 
 const ROOT_DIR = process.env.UMBRA_ROOT || import.meta.dir;
 const TOOLS_DIR = join(ROOT_DIR, 'Tools');
@@ -2024,7 +2025,16 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
                     const status = execSync('git status -uno', { cwd: nodePath, encoding: 'utf-8' });
                     if (status.includes('behind')) {
                         log('->', `Updating ${node.name}...`);
-                        execSync('git pull', { cwd: nodePath, stdio: 'ignore' });
+                        if (node.name === 'ComfyUI-DaSiWa-Nodes') {
+                            removeDaSiWaForgeComputePatchForUpdate(nodePath);
+                            try {
+                                execSync('git pull --ff-only', { cwd: nodePath, stdio: 'ignore' });
+                            } finally {
+                                ensureDaSiWaForgeComputePatch(nodePath);
+                            }
+                        } else {
+                            execSync('git pull', { cwd: nodePath, stdio: 'ignore' });
+                        }
                         log(`${c.green}OK${c.reset}`, `${node.name} updated`);
                     } else {
                         log('OK', `${node.name} is up to date`);
@@ -2059,6 +2069,15 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
             log('X', `${node.name} is incomplete`);
             requiredFailure = true;
             continue;
+        }
+
+        if (node.name === 'ComfyUI-DaSiWa-Nodes') {
+            try {
+                ensureDaSiWaForgeComputePatch(nodePath);
+            } catch (error) {
+                log(`${c.yellow}WARN${c.reset}`, error instanceof Error ? error.message : 'DaSiWa H3 Forge patch failed');
+                if (required) requiredFailure = true;
+            }
         }
 
         if (!installComfyNodeRequirements(comfyDir, nodePath, node.name)) {

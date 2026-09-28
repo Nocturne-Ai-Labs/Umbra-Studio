@@ -9,3 +9,4 @@
 *.svg text eol=lf
 *.db binary
 *.sqlite binary
+setup/DaSiWaForgeCompute.patch text eol=lf whitespace=-blank-at-eol
