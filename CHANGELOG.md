@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.32.38 - Anima Workflow And Prompt Forge Controls
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+- Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux, then restart Umbra Studio. Stop ComfyUI before using the managed custom-node update action in **Umbra UI > ComfyUI**; update the Anima 3.8B LoRA Bridge and DaSiWa H3 nodes, then restart ComfyUI. Existing model files do not need to be downloaded again.
+- For a new Anima 3.8B installation, use `UmbraSetup.bat` or `./umbra-setup.sh` > **Models** to install its approximately 14 GiB model pack. The optional local H3 Prompt Forge model is approximately 11 GiB. GPU Prompt Forge with GGUF needs a compatible GPU-offload llama-cpp-python build; a CPU/GPU toggle cannot repair an incompatible native wheel. Retry managed H3 node setup if the runtime reports an illegal instruction or unavailable GPU offload.
+- Anima 3.8B has non-commercial model terms. Review each model's license in Setup. Existing `User/` and `Tools/` content is preserved. Linux custom-node setup may require `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or equivalents; optional AI Toolkit still requires host Git and Node.js 20 or newer.
+
+### Image And Video Workflows
+
+- Wire Anima 3.8B LoRA loading through TXT2IMG, IMG2IMG, inpainting, Canvas, and Power Prompter, including hires fix and detailer stages where the selected workflow supports them. Missing or ambiguous LoRA files now fail before ComfyUI submission.
+- Add a persistent CPU/GPU choice for local H3 Prompt Forge models in both the standalone prompt modal and Director panel. CPU mode disables GGUF model and vision-projector GPU offload; GPU mode reports unavailable offload instead of silently running on CPU. Older DaSiWa nodes request an update rather than ignoring the selection.
+- Add an Explorer shortcut beside both H3 Prompt Forge model pickers. The managed DaSiWa update applies Umbra's device-choice compatibility patch without changing user-owned custom-node folders.
+
+### Validation And Limits
+
+- Passed Anima workflow unit tests, backend/frontend TypeScript checks, targeted frontend lint, frontend build, the Umbra UI pipeline audit, and focused CPU/GPU loader and managed-patch checks. Clean Windows and Linux archive validation is performed by the tagged release workflow.
+- The isolated app UI opens the H3 Prompt Forge modal; that checkout has no installed H3 model or managed ComfyUI, so this pass did not verify a live GPU prompt draft or new Anima image generation. The managed setup and runtime remain necessary for a full device test.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Anima 3.8B LoRA and optional processing stages are carried through supported image workflows.
+- Fixed: local H3 Prompt Forge no longer silently ignores the selected CPU or GPU path.
+- Improved: CPU-compatible llama-cpp setup and actionable GPU-offload errors.
+- Improved: one-click access to the local Prompt Forge model directory.
+
 ## v0.32.37 - Portable Setup Repair
 
 ### TL;DR - Setup After Updating
