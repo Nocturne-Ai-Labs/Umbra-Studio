@@ -2,9 +2,11 @@
 
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { Loader2, Sparkles, X } from 'lucide-react';
+import { FolderOpen, Loader2, RefreshCw, Sparkles, X } from 'lucide-react';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
+import { openH3PromptForgeModelFolder } from '@/lib/h3PromptForgeModelFolder';
+import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import type { PowerPrompterVideoControls } from '@/types/powerPrompter';
 import { miniMaxH3DirectorMode } from '../../../../shared/umbra-ui/minimaxH3Director';
 
@@ -38,6 +40,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
   const [draft, setDraft] = React.useState('');
   const [drafting, setDrafting] = React.useState(false);
   const [error, setError] = React.useState('');
+  const [catalogRefresh, setCatalogRefresh] = React.useState(0);
   const dialogRef = React.useRef<HTMLDivElement>(null);
   const requestIdRef = React.useRef('');
   const mode = miniMaxH3DirectorMode(video.mode, video.frameGuideMode);
@@ -57,13 +60,15 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
       const result = await response.json().catch(() => ({})) as ForgeCatalog;
       if (!response.ok) throw new Error(result.message || 'Prompt Forge is unavailable. Install or update DaSiWa nodes.');
       setCatalog(result);
-      setModel(result.models?.find((entry) => !entry.disabled && entry.id.startsWith('local:'))?.id || '');
+      setModel((current) => result.models?.some((entry) => entry.id === current && !entry.disabled)
+        ? current : result.models?.find((entry) => !entry.disabled && entry.id.startsWith('local:'))?.id
+          || result.models?.find((entry) => !entry.disabled)?.id || '');
       setDetail(Number(result.default_detail) || 5);
       setCreativity(result.default_creativity || 'balanced');
       setError('');
     }).catch((cause) => { if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : 'Prompt Forge is unavailable.'); });
     return () => abort.abort();
-  }, [comfyConnected]);
+  }, [comfyConnected, catalogRefresh]);
 
   React.useEffect(() => () => {
     if (!requestIdRef.current) return;
@@ -144,12 +149,22 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
             <textarea className={`${fieldClass} mt-1 min-h-24 resize-y`} value={brief} onChange={(event) => setBrief(event.target.value)} placeholder="Describe the shot" />
           </label>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_80px_minmax(0,1fr)]">
-            <label className="min-w-0 text-xs text-zinc-400">Model
-              <UmbraSelectControl aria-label="Prompt Forge model" value={model} onChange={(event) => setModel(event.target.value)} className={`${fieldClass} mt-1`}>
-                <option value="">Choose a model</option>
-                {(catalog?.models || []).map((entry) => <option key={entry.id} value={entry.id} disabled={entry.disabled}>{entry.label}</option>)}
-              </UmbraSelectControl>
-            </label>
+            <div className="min-w-0 text-xs text-zinc-400">Model
+              <div className="mt-1 flex min-w-0 gap-1">
+                <UmbraSelectControl aria-label="Prompt Forge model" value={model} onChange={(event) => setModel(event.target.value)} className={fieldClass}>
+                  <option value="">Choose a model</option>
+                  {(catalog?.models || []).map((entry) => <option key={entry.id} value={entry.id} disabled={entry.disabled}>{entry.label}</option>)}
+                </UmbraSelectControl>
+                <button type="button" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded border border-white/15 text-zinc-300 hover:border-fuchsia-300/40 hover:bg-white/5 disabled:opacity-40"
+                  title="Open Prompt Forge model folder" aria-label="Open Prompt Forge model folder" disabled={isUmbraRemoteClient()}
+                  onClick={() => void openH3PromptForgeModelFolder().catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not open model folder.'))}>
+                  <FolderOpen size={15} />
+                </button>
+                <button type="button" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded border border-white/15 text-zinc-300 hover:border-fuchsia-300/40 hover:bg-white/5 disabled:opacity-40"
+                  title="Refresh Prompt Forge models" aria-label="Refresh Prompt Forge models" disabled={!comfyConnected}
+                  onClick={() => setCatalogRefresh((current) => current + 1)}><RefreshCw size={15} /></button>
+              </div>
+            </div>
             <label className="text-xs text-zinc-400">Detail
               <input type="number" min={1} max={10} value={detail} onChange={(event) => setDetail(Math.max(1, Math.min(10, Number(event.target.value) || 1)))} className={`${fieldClass} mt-1`} />
             </label>

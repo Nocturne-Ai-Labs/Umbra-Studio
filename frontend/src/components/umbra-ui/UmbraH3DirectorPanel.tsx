@@ -1,10 +1,12 @@
 'use client';
 
 import React from 'react';
-import { ArrowDown, ArrowUp, Download, FolderOpen, FolderUp, Image as ImageIcon, Loader2, Music2, Plus, Sparkles, Trash2, Video, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Download, FolderOpen, FolderUp, Image as ImageIcon, Loader2, Music2, Plus, RefreshCw, Sparkles, Trash2, Video, X } from 'lucide-react';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { UmbraH3ContinuitySessionModal } from './UmbraH3ContinuitySessionModal';
 import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
+import { openH3PromptForgeModelFolder } from '@/lib/h3PromptForgeModelFolder';
+import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import { resolveUmbraVideoQueueSourceUrl } from '@/lib/umbraVideoQueuePreview';
 import { createMiniMaxH3ReferencePack, MINIMAX_H3_IMAGE_INPAINT_ENABLED, miniMaxH3DirectorMode, parseMiniMaxH3ReferencePack, selectedMiniMaxH3DirectorItems, type MiniMaxH3DirectorControls, type MiniMaxH3DirectorItem, type MiniMaxH3DirectorMediaKind, type MiniMaxH3ReferencePackMode, type MiniMaxH3ReferencePackScope } from '../../../../shared/umbra-ui/minimaxH3Director';
 
@@ -56,6 +58,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
   const directorMode = miniMaxH3DirectorMode(mode, frameGuideMode, controls);
   const [forgeCatalog, setForgeCatalog] = React.useState<ForgeCatalog | null>(null);
   const [forgeError, setForgeError] = React.useState('');
+  const [forgeCatalogRefresh, setForgeCatalogRefresh] = React.useState(0);
   const [brief, setBrief] = React.useState(prompt);
   const [model, setModel] = React.useState('');
   const [detail, setDetail] = React.useState(5);
@@ -210,7 +213,8 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
         if (!response.ok) throw new Error(result.message || 'DaSiWa Prompt Forge is unavailable. Install or update ComfyUI-DaSiWa-Nodes.');
         if (!active) return;
         setForgeCatalog(result);
-        setModel((current) => current || result.models?.find((entry) => !entry.disabled)?.id || '');
+        setModel((current) => result.models?.some((entry) => entry.id === current && !entry.disabled)
+          ? current : result.models?.find((entry) => !entry.disabled)?.id || '');
         setDetail(Number(result.default_detail) || 5);
         setCreativity(result.default_creativity || 'balanced');
         setForgeError('');
@@ -220,7 +224,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
     };
     void load();
     return () => { active = false; };
-  }, [comfyConnected]);
+  }, [comfyConnected, forgeCatalogRefresh]);
 
   const upload = async (item: MiniMaxH3DirectorItem, file: File) => {
     setUploadingId(item.id);
@@ -565,11 +569,20 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
         </div>
         <textarea value={brief} onChange={(event) => setBrief(event.target.value)} className={`${fieldClass} min-h-20 resize-y`} placeholder={continuitySource ? 'Next action (optional)' : 'Describe the shot to draft'} aria-label="Prompt Forge idea" />
         <div className="mt-2 grid grid-cols-[minmax(0,1fr)_75px] gap-2">
-          <label className="min-w-0 text-[10px] text-zinc-500">Model
-            <UmbraSelectControl value={model} onChange={(event) => setModel(event.target.value)} className={fieldClass}>
-              {(forgeCatalog?.models || []).map((entry) => <option key={entry.id} value={entry.id} disabled={entry.disabled}>{entry.label}</option>)}
-            </UmbraSelectControl>
-          </label>
+          <div className="min-w-0 text-[10px] text-zinc-500">Model
+            <div className="flex min-w-0 gap-1">
+              <UmbraSelectControl aria-label="Prompt Forge model" value={model} onChange={(event) => setModel(event.target.value)} className={fieldClass}>
+                <option value="">Choose a model</option>
+                {(forgeCatalog?.models || []).map((entry) => <option key={entry.id} value={entry.id} disabled={entry.disabled}>{entry.label}</option>)}
+              </UmbraSelectControl>
+              <button type="button" className={iconButton} title="Open Prompt Forge model folder" aria-label="Open Prompt Forge model folder"
+                disabled={isUmbraRemoteClient()} onClick={() => void openH3PromptForgeModelFolder().catch((error) => setForgeError(error instanceof Error ? error.message : 'Could not open model folder.'))}>
+                <FolderOpen size={14} />
+              </button>
+              <button type="button" className={iconButton} title="Refresh Prompt Forge models" aria-label="Refresh Prompt Forge models"
+                disabled={!comfyConnected} onClick={() => setForgeCatalogRefresh((current) => current + 1)}><RefreshCw size={14} /></button>
+            </div>
+          </div>
           <label className="text-[10px] text-zinc-500">Detail
             <input type="number" min={1} max={10} value={detail} onChange={(event) => setDetail(Math.max(1, Math.min(10, Number(event.target.value) || 1)))} className={fieldClass} />
           </label>

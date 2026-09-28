@@ -29602,6 +29602,28 @@ async function handleLocalServerOpenFolder(req: Request, server?: RequestIpServe
   }
 }
 
+async function handleH3PromptForgeModelFolder(req: Request, server?: RequestIpServer): Promise<Response> {
+  const requestUrl = new URL(req.url);
+  if (!isHostRequest(req, requestUrl, server)) {
+    return json({ error: 'Opening the Prompt Forge model folder is only available from the host PC.' }, 403);
+  }
+
+  const comfyRoot = getComfyToolRootFast();
+  if (!comfyRoot || !existsSync(join(comfyRoot, 'main.py'))) {
+    return json({ error: 'Install the managed ComfyUI server before opening its model folder.' }, 404);
+  }
+
+  try {
+    const modelFolder = join(comfyRoot, 'models', 'llm');
+    await fs.mkdir(modelFolder, { recursive: true });
+    const opened = await openPathInHostFileExplorer(modelFolder, await fs.stat(modelFolder));
+    if (!opened.opened) return json({ error: 'Failed to open the Prompt Forge model folder.' }, 500);
+    return json({ success: true, fullPath: modelFolder });
+  } catch (error: any) {
+    return json({ error: error?.message || 'Failed to open the Prompt Forge model folder.' }, 500);
+  }
+}
+
 const modelManagerDownloadInvalidationSet = new Set<string>();
 
 function normalizeModelManagerTypeFolder(rawType: unknown): string {
@@ -33668,6 +33690,9 @@ const server = Bun.serve<UmbraSocketData>({
       }
       if (path === '/api/local-server-apps/open-folder' && method === 'POST') {
           return await handleLocalServerOpenFolder(req, server);
+      }
+      if (path === '/api/umbra-ui/h3-prompt-forge/model-folder/open' && method === 'POST') {
+          return await handleH3PromptForgeModelFolder(req, server);
       }
 
         if (path.startsWith(LOCAL_SERVER_PROXY_PREFIX) && method === 'GET' && req.headers.get('upgrade')?.toLowerCase() === 'websocket') {
