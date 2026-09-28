@@ -35,6 +35,7 @@ export interface AppSettings {
   'comfyui.securityLevel': ComfySecurityLevel;
   'comfyui.attentionBackend': ComfyAttentionBackend;
   'comfyui.vramMode': ComfyVramMode;
+  'comfyui.anima38KeepTextEncodersLoaded': boolean;
   'comfyui.showFilmstrip': boolean;
   'comfyui.showFilmstripLivePreviews': boolean;
   'comfyui.showFilmstripRecentGenerations': boolean;
@@ -101,6 +102,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   'comfyui.securityLevel': 'normal',
   'comfyui.attentionBackend': 'default',
   'comfyui.vramMode': 'auto',
+  'comfyui.anima38KeepTextEncodersLoaded': false,
   'comfyui.showFilmstrip': true,
   'comfyui.showFilmstripLivePreviews': true,
   'comfyui.showFilmstripRecentGenerations': true,
@@ -146,6 +148,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 
 const BOOLEAN_KEYS: Array<keyof AppSettings> = [
   'comfyui.autoStart',
+  'comfyui.anima38KeepTextEncodersLoaded',
   'enableToasts',
   'alerts.configured',
   'alerts.soundEnabled',

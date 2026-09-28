@@ -70,5 +70,42 @@ class UmbraAnimaQwen35CpuLoader:
         return (clip,)
 
 
-NODE_CLASS_MAPPINGS = {"UmbraAnimaQwen35CpuLoader": UmbraAnimaQwen35CpuLoader}
-NODE_DISPLAY_NAME_MAPPINGS = {"UmbraAnimaQwen35CpuLoader": "Umbra Anima Qwen3.5 CPU Loader"}
+class UmbraAnima38BV2RetainedPrompt:
+    @classmethod
+    def _upstream(cls):
+        upstream = nodes.NODE_CLASS_MAPPINGS.get("Anima38BV2Prompt")
+        if upstream is None or not callable(getattr(upstream, "_unload_clip", None)):
+            raise RuntimeError(
+                "Update comfyui-anima-3-8B before using Anima text encoder retention."
+            )
+        return upstream
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return cls._upstream().INPUT_TYPES()
+
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING")
+    RETURN_NAMES = ("expanded", "native")
+    FUNCTION = "encode"
+    CATEGORY = "conditioning/Anima"
+    TITLE = "Umbra Anima 3.8B Prompt (Retain Encoders)"
+    DESCRIPTION = "Skips Anima's forced text-encoder unload after prompt encoding."
+
+    def encode(self, **inputs):
+        upstream = self._upstream()
+        retained = type(
+            "RetainedAnima38BV2Prompt",
+            (upstream,),
+            {"_unload_clip": staticmethod(lambda _clip: None)},
+        )
+        return retained().encode(**inputs)
+
+
+NODE_CLASS_MAPPINGS = {
+    "UmbraAnimaQwen35CpuLoader": UmbraAnimaQwen35CpuLoader,
+    "UmbraAnima38BV2RetainedPrompt": UmbraAnima38BV2RetainedPrompt,
+}
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "UmbraAnimaQwen35CpuLoader": "Umbra Anima Qwen3.5 CPU Loader",
+    "UmbraAnima38BV2RetainedPrompt": "Umbra Anima 3.8B Prompt (Retain Encoders)",
+}

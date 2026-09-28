@@ -1,5 +1,7 @@
 import type { Anima38TextEncoderDevice } from '../shared/umbra-ui/animaTextEncoderDevice';
 
+const RETAINED_PROMPT_NODE = 'UmbraAnima38BV2RetainedPrompt';
+
 export function applyAnima38TextEncoderDevice(
   graph: Record<string, any>,
   device: Anima38TextEncoderDevice,
@@ -15,4 +17,26 @@ export function applyAnima38TextEncoderDevice(
 
   native.inputs.device = 'cpu';
   semantic.class_type = 'UmbraAnimaQwen35CpuLoader';
+}
+
+export function applyAnima38TextEncoderRetention(
+  graph: Record<string, any>,
+  enabled: boolean,
+): void {
+  if (!enabled) return;
+  for (const node of Object.values(graph)) {
+    if (node?.class_type === 'Anima38BV2Prompt') {
+      node.class_type = RETAINED_PROMPT_NODE;
+    }
+  }
+}
+
+export function assertAnima38TextEncoderRetentionAvailable(
+  graph: Record<string, any>,
+  objectInfo: Record<string, unknown> | null,
+): void {
+  if (!Object.values(graph).some((node) => node?.class_type === RETAINED_PROMPT_NODE)) return;
+  if (!objectInfo?.[RETAINED_PROMPT_NODE]) {
+    throw new Error('Anima 3.8B text encoder retention needs updated Umbra custom nodes. Restart Umbra-managed ComfyUI, or update its custom nodes through Umbra Setup, then try again.');
+  }
 }

@@ -3440,7 +3440,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               onChange={updateWorkflowResource}
             />
 
-            {activeMode === 'image' && selectedImagePipeline?.modelFamilyKey === 'anima38b' ? (
+            {selectedImagePipeline?.modelFamilyKey === 'anima38b' ? (
               <label className="block space-y-1.5">
                 <span className={labelClass}>Anima Text Encoders</span>
                 <UmbraSelectControl
@@ -3448,11 +3448,11 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
                   onChange={(event) => updateWorkflowResource(ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, event.target.value)}
                   className={inputClass}
                 >
-                  <option value="default">Auto offload after prompt</option>
+                  <option value="default">GPU (automatic)</option>
                   <option value="cpu">Encode on CPU (low VRAM)</option>
                 </UmbraSelectControl>
                 <p className="font-mono text-[9px] leading-relaxed text-zinc-500">
-                  CPU encoding saves VRAM while preparing the prompt, but takes longer. Both encoders unload after use in either mode.
+                  CPU encoding saves VRAM but takes longer. Encoder retention is configured in Settings &gt; ComfyUI.
                 </p>
               </label>
             ) : null}

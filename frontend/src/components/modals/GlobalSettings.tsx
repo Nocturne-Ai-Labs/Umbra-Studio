@@ -590,13 +590,14 @@ const SettingsActionButton = ({ onClick, children, disabled = false }: { onClick
   </button>
 );
 
-const SettingCheckbox = ({ checked, onChange, label, description }: any) => (
-  <label className="flex items-start gap-3 cursor-pointer group">
+const SettingCheckbox = ({ checked, onChange, label, description, disabled = false }: any) => (
+  <label className={cn('flex items-start gap-3 cursor-pointer group', disabled && 'cursor-not-allowed opacity-50')}>
     <input
       type="checkbox"
       checked={checked || false}
       onChange={(e) => onChange(e.target.checked)}
-      className="w-4 h-4 mt-0.5 accent-[var(--umbra-accent)] cursor-pointer"
+      disabled={disabled}
+      className="w-4 h-4 mt-0.5 accent-[var(--umbra-accent)] cursor-pointer disabled:cursor-not-allowed"
     />
     <div className="flex-1">
       <span className="text-sm text-zinc-300 group-hover:text-white transition-colors">{label}</span>
@@ -1222,6 +1223,16 @@ const ComfyUISettings = ({ settings, updateSetting }: any) => {
           <SettingHint>
             Applied on the next Umbra-managed ComfyUI launch or restart. The modes are mutually exclusive.
           </SettingHint>
+        </SettingGroup>
+
+        <SettingGroup label="Anima 3.8B">
+          <SettingCheckbox
+            checked={settings['comfyui.anima38KeepTextEncodersLoaded']}
+            onChange={(val: boolean) => updateSetting('comfyui.anima38KeepTextEncodersLoaded', val)}
+            disabled={isRemoteClient}
+            label="Keep text encoders loaded between prompts"
+            description="Uses more VRAM or RAM. ComfyUI may still offload under memory pressure. Restart managed ComfyUI once after an Umbra update to load the required node."
+          />
         </SettingGroup>
 
         <SettingGroup label="ComfyUI Security Level">

@@ -9051,10 +9051,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       })}
                       className={`mt-1 w-full rounded border border-white/20 bg-black/45 px-2 py-1.5 text-[11px] text-zinc-200 focus:border-cyan-300 focus:outline-none ${UMBRA_THEMED_SELECT_CLASS}`}
                     >
-                      <option value="default">Auto offload after prompt</option>
+                      <option value="default">GPU (automatic)</option>
                       <option value="cpu">Encode on CPU (low VRAM)</option>
                     </UmbraSelectControl>
-                    <span className="mt-1 block normal-case tracking-normal text-zinc-500">CPU uses less VRAM during prompt encoding and takes longer.</span>
+                    <span className="mt-1 block normal-case tracking-normal text-zinc-500">CPU encoding takes longer. Encoder retention is configured in Settings &gt; ComfyUI.</span>
                   </label>
                 ) : null}
               </div>

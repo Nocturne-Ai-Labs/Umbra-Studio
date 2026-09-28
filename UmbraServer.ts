@@ -12,7 +12,8 @@ import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
 
 import { applyMiniMaxH3Acceleration, assertMiniMaxH3TurboInstalled, assertMiniMaxH3GuidesInstalled, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
 import { inspectManagedVideoModels } from './backend/VideoSetupReadiness';
-import { applyAnima38TextEncoderDevice } from './backend/AnimaTextEncoderDevice';
+import { applyAnima38TextEncoderDevice, applyAnima38TextEncoderRetention, assertAnima38TextEncoderRetentionAvailable } from './backend/AnimaTextEncoderDevice';
+import { syncUmbraAnimaCustomNode } from './backend/AnimaCustomNodeSync';
 import { applyAnima38LoraStack, resolveAnima38LoraNames } from './backend/Anima38LoraStack';
 import { ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, normalizeAnima38TextEncoderDevice } from './shared/umbra-ui/animaTextEncoderDevice';
 import { applyUmbraUiVideoLoraStack, assertUmbraUiVideoLoraStackInstalled, resolveUmbraUiVideoLoraNames } from './backend/UmbraUiVideoLoraStack';
@@ -9444,6 +9445,10 @@ function compileUmbraUiPipelineWorkflow(
         promptGraph,
         normalizeAnima38TextEncoderDevice(workflowResourceValues[ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE]),
       );
+      applyAnima38TextEncoderRetention(
+        promptGraph,
+        settingsManager.getAppSettings()['comfyui.anima38KeepTextEncodersLoaded'] === true,
+      );
     }
   }
 
@@ -11683,7 +11688,9 @@ async function runBackendPowerPrompterPipelineQueue(
       if (generation.mediaType === 'video') {
         resolveUmbraUiVideoLoraNames(queuedWorkflow.promptGraph, await getPPComfyObjectInfoForValidation());
       } else {
-        resolveAnima38LoraNames(queuedWorkflow.promptGraph, await getPPComfyObjectInfoForValidation());
+        const objectInfo = await getPPComfyObjectInfoForValidation();
+        resolveAnima38LoraNames(queuedWorkflow.promptGraph, objectInfo);
+        assertAnima38TextEncoderRetentionAvailable(queuedWorkflow.promptGraph, objectInfo);
       }
       const continuationPreviewNodeId = extendedSession && index < prompts.length - 1
         ? injectUmbraExtendedContinuationPreview(
@@ -17641,6 +17648,14 @@ async function startComfyUIProcess() {
       };
     }
 
+    if (settingsManager.getAppSettings()['comfyui.anima38KeepTextEncodersLoaded'] === true) {
+      try {
+        syncUmbraAnimaCustomNode(ROOT_DIR, join(config.cwd, 'custom_nodes'));
+      } catch (error) {
+        return { success: false, error: `Could not install the Anima 3.8B encoder-retention node: ${error instanceof Error ? error.message : String(error)}` };
+      }
+    }
+
     applyComfyFrontendCompatibilityPatches(config.cwd || '');
 
     const securityApply = applyComfySecurityLevelSetting(config.cwd || '');
@@ -21071,7 +21086,9 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
     styleSeedMode: 'different',
     selectedPipeline,
   });
-  resolveAnima38LoraNames(compiled.promptGraph, await getPPComfyObjectInfoForValidation());
+  const objectInfo = await getPPComfyObjectInfoForValidation();
+  resolveAnima38LoraNames(compiled.promptGraph, objectInfo);
+  assertAnima38TextEncoderRetentionAvailable(compiled.promptGraph, objectInfo);
   return compiled;
 }
 

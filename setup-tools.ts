@@ -14,6 +14,7 @@ import { existsSync, readdirSync, statSync, lstatSync, realpathSync, unlinkSync,
 import { spawn, spawnSync, execSync } from 'child_process';
 import { installDaSiWaRequirements } from './setup/DaSiWaRequirements';
 import { ensureDaSiWaForgeComputePatch, removeDaSiWaForgeComputePatchForUpdate } from './setup/DaSiWaForgeCompute';
+import { syncUmbraAnimaCustomNode } from './backend/AnimaCustomNodeSync';
 
 const ROOT_DIR = process.env.UMBRA_ROOT || import.meta.dir;
 const TOOLS_DIR = join(ROOT_DIR, 'Tools');
@@ -1317,19 +1318,12 @@ function syncUmbraNodesToComfy(nodesDir: string): boolean {
 }
 
 function syncUmbraAnimaCpuNode(nodesDir: string): boolean {
-    const source = join(import.meta.dir, 'backend', 'python', 'comfy_nodes', 'umbra_anima_cpu', '__init__.py');
-    const targetDir = join(nodesDir, 'umbra_anima_cpu');
-    if (!existsSync(source)) {
-        log(`${c.red}X${c.reset}`, 'Umbra Anima CPU node source is missing');
-        return false;
-    }
     try {
-        ensureDir(targetDir);
-        cpSync(source, join(targetDir, '__init__.py'), { force: true });
-        log(`${c.green}OK${c.reset}`, 'Umbra Anima CPU node installed');
+        syncUmbraAnimaCustomNode(ROOT_DIR, nodesDir);
+        log(`${c.green}OK${c.reset}`, 'Umbra Anima custom node installed');
         return true;
-    } catch {
-        log(`${c.red}X${c.reset}`, 'Failed to install Umbra Anima CPU node');
+    } catch (error) {
+        log(`${c.red}X${c.reset}`, `Failed to install Umbra Anima custom node: ${error instanceof Error ? error.message : String(error)}`);
         return false;
     }
 }
