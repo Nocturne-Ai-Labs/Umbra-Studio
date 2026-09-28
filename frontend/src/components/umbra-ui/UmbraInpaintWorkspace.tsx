@@ -9470,7 +9470,7 @@ export function UmbraInpaintWorkspace({
     setIsSubmitting(true);
     try {
       const promptWithLoras = capabilities.loras.support === 'adjustable'
-        ? composeUmbraUiPromptWithLoras(prompt, loras)
+        ? composeUmbraUiPromptWithLoras(prompt, loras, modelFamily.trim().toLowerCase() === 'anima 3.8b')
         : prompt;
       const inpaintDocument = {
         ...canvasDocument,
@@ -10004,6 +10004,7 @@ export function UmbraInpaintWorkspace({
               availableCount={loraAvailableCount}
               onChange={onLorasChange}
               onOpenPicker={onOpenLoraPicker}
+              modelOnly={modelFamily.trim().toLowerCase() === 'anima 3.8b'}
             />
           ) : null}
 

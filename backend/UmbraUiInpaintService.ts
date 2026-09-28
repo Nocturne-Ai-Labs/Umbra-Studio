@@ -882,6 +882,11 @@ function findUmbraInpaintBindings(graph: Record<string, any>): UmbraUiInpaintGra
   const clip = loraRoot
     ? [loraRoot[0], 1] satisfies UmbraUiGraphRef
     : (() => {
+      const animaPrompt = Object.values(graph).find((node: any) => (
+        String(node?.class_type || '') === 'Anima38BV2Prompt'
+        && normalizeGraphReference(node?.inputs?.native_clip, graph)
+      )) as any;
+      if (animaPrompt) return normalizeGraphReference(animaPrompt.inputs.native_clip, graph);
       const encoder = Object.values(graph).find((node: any) => (
         String(node?.class_type || '').startsWith('CLIPTextEncode')
         && normalizeGraphReference(node?.inputs?.clip, graph)

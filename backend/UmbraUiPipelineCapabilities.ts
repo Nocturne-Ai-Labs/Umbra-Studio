@@ -633,6 +633,7 @@ export function deriveUmbraUiTxt2ImgCapabilities(
     node.classType === 'UmbraPowerPrompter'
     || node.classType === 'UmbraA1111LoraSyntax'
     || node.role === 'lora_stack'
+    || (node.classType === 'Anima38BV2Loader' && node.meta.umbra_lora_adapter === 'model_only')
   ));
   const loras = loraNodes.length > 0
     ? control('adjustable', 'The graph includes an Umbra LoRA-aware prompt/model adapter.', loraNodes)

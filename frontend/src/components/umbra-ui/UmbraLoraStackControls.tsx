@@ -26,6 +26,7 @@ interface UmbraLoraStackControlsProps {
   availableCount: number;
   onChange: (loras: UmbraUiLoraEntry[]) => void;
   onOpenPicker: () => void;
+  modelOnly?: boolean;
 }
 
 const labelClass = 'text-[9px] font-black uppercase tracking-[0.11em] text-zinc-500';
@@ -77,6 +78,7 @@ export function UmbraLoraStackControls({
   availableCount,
   onChange,
   onOpenPicker,
+  modelOnly = false,
 }: UmbraLoraStackControlsProps) {
   const showToast = useStore((state) => state.showToast);
   const [expanded, setExpanded] = React.useState(false);
@@ -163,7 +165,7 @@ export function UmbraLoraStackControls({
               Choose a LoRA from the ComfyUI catalog
             </button>
           ) : loras.map((lora) => {
-            const syntax = buildUmbraUiLoraSyntax(lora);
+            const syntax = buildUmbraUiLoraSyntax(lora, modelOnly);
             const thumbnail = String(lora.thumbnailUrls?.[0] || lora.thumbnailUrl || '').trim();
             const triggerWords = Array.from(new Set(
               (lora.triggerWords || []).map((word) => String(word || '').trim()).filter(Boolean),
@@ -217,11 +219,8 @@ export function UmbraLoraStackControls({
                     {copiedToken === syntax ? <Check size={10} className="shrink-0 text-emerald-300" /> : <Copy size={10} className="shrink-0" />}
                     <span className="min-w-0 break-all">{syntax}</span>
                   </button>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {([
-                      ['strengthModel', 'Model'],
-                      ['strengthClip', 'CLIP'],
-                    ] as const).map(([key, label]) => (
+                  <div className={modelOnly ? 'grid grid-cols-1 gap-1.5' : 'grid grid-cols-2 gap-1.5'}>
+                    {([['strengthModel', 'Model'], ...(!modelOnly ? [['strengthClip', 'CLIP']] : [])] as Array<['strengthModel' | 'strengthClip', string]>).map(([key, label]) => (
                       <div key={key} className="min-w-0 space-y-1">
                         <span className={labelClass}>{label}</span>
                         <div className="flex h-8 overflow-hidden rounded-sm border border-white/10 bg-black/35 focus-within:border-emerald-300/35">

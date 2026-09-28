@@ -29,6 +29,7 @@ const COMFY_NODES = [
     { name: 'ComfyUI-Anima-2.9B', repo: 'https://github.com/gazingstars123/ComfyUI-Anima-2.9B.git', desc: 'Required 40-layer loader patch for Anima 2.9B models', required: true },
     { name: 'ComfyUI-DaSiWa-Nodes', repo: 'https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes.git', desc: 'MiniMax H3 Director, Guide, and Prompt Forge' },
     { name: 'comfyui-anima-3-8B', repo: 'https://github.com/GumGum10/comfyui-anima-3-8B.git', desc: 'Anima 3.8B bundled v1.1 loader and Qwen3.5 prompt nodes' },
+    { name: 'ComfyUI-Anima-3.8B-LoRA-Bridge', repo: 'https://github.com/Lakeside529/ComfyUI-Anima-3.8B-LoRA-Bridge.git', desc: 'Maps Anima Base and 2.9B LoRAs onto Anima 3.8B' },
     { name: 'ComfyUI-Inpaint-CropAndStitch', repo: 'https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch.git', desc: 'Crop and stitch nodes for inpainting workflows' },
     { name: 'ComfyUI_ComfyRoll_CustomNodes', repo: 'https://github.com/Suzie1/ComfyUI_Comfyroll_CustomNodes.git', desc: 'Animation and batch processing nodes' },
     { name: 'ComfyUI-Inspire-Pack', repo: 'https://github.com/ltdrdata/ComfyUI-Inspire-Pack.git', desc: 'Advanced prompt and regional control' },

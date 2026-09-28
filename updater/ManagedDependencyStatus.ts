@@ -48,7 +48,7 @@ function readRequirements(sourceRoot: string): FeatureRequirement[] {
       throw new Error('Invalid managed tool requirement.');
     }
     for (const node of feature.customNodes) {
-      if (!/^[A-Za-z0-9_-]{1,80}$/.test(node.name) || !/^[a-f0-9]{40}$/.test(node.minimumCommit)) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(node.name) || !/^[a-f0-9]{40}$/.test(node.minimumCommit)) {
         throw new Error('Invalid managed custom-node requirement.');
       }
     }

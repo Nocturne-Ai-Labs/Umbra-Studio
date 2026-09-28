@@ -1667,7 +1667,7 @@ export function UmbraCanvasWorkspace({
       }
       const queuedSeed = resolveUmbraUiQueueSeed(seed, seedMode);
       const promptWithLoras = capabilities.loras.support === 'adjustable'
-        ? composeUmbraUiPromptWithLoras(compiledPrompt, loras)
+        ? composeUmbraUiPromptWithLoras(compiledPrompt, loras, modelFamily.trim().toLowerCase() === 'anima 3.8b')
         : compiledPrompt;
       const enabledControlLayers = submissionProject.entities.filter(isUmbraCanvasControlEntity).filter((entity) => entity.generationEnabled);
       if (enabledControlLayers.length > 0 && !controlLayersAvailable) throw new Error(controlLayersReason || 'Control layers are unavailable for this pipeline.');
@@ -2448,7 +2448,7 @@ export function UmbraCanvasWorkspace({
             showClipSkip={capabilities.clipSkip.support === 'adjustable'}
           />
           {capabilities.loras.support === 'adjustable' ? (
-            <UmbraLoraStackControls loras={loras} availableCount={loraAvailableCount} onChange={onLorasChange} onOpenPicker={onOpenLoraPicker} />
+            <UmbraLoraStackControls loras={loras} availableCount={loraAvailableCount} onChange={onLorasChange} onOpenPicker={onOpenLoraPicker} modelOnly={modelFamily.trim().toLowerCase() === 'anima 3.8b'} />
           ) : null}
           <UmbraSeedControls
             seed={seed}

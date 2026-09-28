@@ -2,6 +2,20 @@
   "schemaVersion": 1,
   "features": [
     {
+      "id": "anima-38-lora",
+      "label": "Anima 3.8B LoRA support",
+      "optional": true,
+      "activationFile": "diffusion_models/Anima-3.8B-v1.1.safetensors",
+      "minimumComfyVersion": "0.37.0",
+      "modelProfiles": ["anima-3.8b"],
+      "customNodes": [
+        {
+          "name": "ComfyUI-Anima-3.8B-LoRA-Bridge",
+          "minimumCommit": "fbd0850a7d641ad898cddb112d0617ec5d6c0497"
+        }
+      ]
+    },
+    {
       "id": "minimax-h3",
       "label": "MiniMax H3 video",
       "activationFile": "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",

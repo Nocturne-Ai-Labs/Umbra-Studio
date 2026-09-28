@@ -80,19 +80,19 @@ function formatStrength(value: number): string {
   return Number(clampStrength(value).toFixed(3)).toString();
 }
 
-export function buildUmbraUiLoraSyntax(lora: UmbraUiLoraEntry): string {
+export function buildUmbraUiLoraSyntax(lora: UmbraUiLoraEntry, modelOnly = false): string {
   const name = String(lora.name || '').trim().replace(/\\/g, '/');
   if (!name) return '';
   const modelStrength = clampStrength(lora.strengthModel);
-  const clipStrength = clampStrength(lora.strengthClip, modelStrength);
+  const clipStrength = modelOnly ? 0 : clampStrength(lora.strengthClip, modelStrength);
   return `<lora:${name}:${formatStrength(modelStrength)}:${formatStrength(clipStrength)}>`;
 }
 
-export function composeUmbraUiPromptWithLoras(prompt: string, loras: UmbraUiLoraEntry[]): string {
+export function composeUmbraUiPromptWithLoras(prompt: string, loras: UmbraUiLoraEntry[], modelOnly = false): string {
   const basePrompt = String(prompt || '').trim();
   const syntax = (Array.isArray(loras) ? loras : [])
     .filter((lora) => lora?.enabled !== false)
-    .map(buildUmbraUiLoraSyntax)
+    .map((lora) => buildUmbraUiLoraSyntax(lora, modelOnly))
     .filter(Boolean);
   return [basePrompt, ...syntax].filter(Boolean).join(', ');
 }

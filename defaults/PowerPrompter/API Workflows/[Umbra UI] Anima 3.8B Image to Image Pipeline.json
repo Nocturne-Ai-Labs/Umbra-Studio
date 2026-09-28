@@ -1,0 +1,81 @@
+{
+  "1": {
+    "class_type": "Anima38BV2Loader",
+    "inputs": { "model_name": "Anima-3.8B-v1.1.safetensors" },
+    "_meta": {
+      "title": "Anima 3.8B v1.1 bundle (Semantic Connector v2)",
+      "umbra_role": "model_loader",
+      "umbra_lora_adapter": "model_only",
+      "umbra_model_family": "Anima 3.8B",
+      "umbra_ui_pipelines": [{
+        "feature": "img2img", "model_family": "Anima 3.8B", "model_sources": ["diffusion_model"], "priority": 110,
+        "defaults": { "modelName": "Anima-3.8B-v1.1.safetensors", "modelNamesBySource": { "diffusion_model": "Anima-3.8B-v1.1.safetensors" }, "steps": 35, "cfg": 5, "samplerName": "res_multistep", "scheduler": "beta", "width": 832, "height": 1216, "denoise": 0.3 }
+      }]
+    }
+  },
+  "2": {
+    "class_type": "UmbraPowerPrompterReader",
+    "inputs": { "prompt_text": "A scenic mountain lake beneath cherry blossoms in soft morning light, detailed illustration, no people.", "negative_prompt": "low quality, blurry", "seed": 20260926, "control_after_generate": "fixed", "increment_step": 1, "style_seed_behavior": "normal", "aspect_ratio": "custom", "swap_dimensions": "Off", "width": 832, "height": 1216, "batch_size": 1 },
+    "_meta": { "title": "Umbra Prompt + Generation Controls" }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "inputs": { "clip_name": "qwen_3_06b_base.safetensors", "type": "stable_diffusion", "device": "default" },
+    "_meta": { "title": "Anima Native Qwen3 0.6B Encoder", "umbra_resources": [{ "id": "anima38.native_encoder", "label": "Anima Native Qwen3 0.6B Encoder", "kind": "text_encoder", "input": "clip_name", "required": true, "order": 10 }] }
+  },
+  "4": {
+    "class_type": "AnimaQwen35Loader",
+    "inputs": { "qwen35_model": "qwen35_4b.safetensors" },
+    "_meta": { "title": "Anima Qwen3.5 4B Encoder", "umbra_resources": [{ "id": "anima38.semantic_encoder", "label": "Anima Qwen3.5 4B Encoder", "kind": "text_encoder", "input": "qwen35_model", "required": true, "order": 20 }] }
+  },
+  "5": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "qwen_image_vae.safetensors" },
+    "_meta": { "title": "Anima Qwen Image VAE", "umbra_resources": [{ "id": "anima38.vae", "label": "Anima Qwen Image VAE", "kind": "vae", "input": "vae_name", "required": true, "order": 30 }] }
+  },
+  "6": {
+    "class_type": "Anima38BV2Prompt",
+    "inputs": { "model": ["1", 0], "native_clip": ["3", 0], "qwen35_clip": ["4", 0], "prompt": ["2", 0] },
+    "_meta": { "title": "Anima 3.8B Positive Prompt", "umbra_role": "positive_prompt" }
+  },
+  "7": {
+    "class_type": "Anima38BV2Prompt",
+    "inputs": { "model": ["1", 0], "native_clip": ["3", 0], "qwen35_clip": ["4", 0], "prompt": ["2", 8] },
+    "_meta": { "title": "Anima 3.8B Negative Prompt", "umbra_role": "negative_prompt" }
+  },
+  "8": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "umbra-img2img-source.png" },
+    "_meta": { "title": "Umbra IMG2IMG Source", "umbra_role": "img2img_source" }
+  },
+  "9": {
+    "class_type": "ImageScale",
+    "inputs": { "image": ["8", 0], "upscale_method": "lanczos", "width": 832, "height": 1216, "crop": "center" },
+    "_meta": { "title": "Resize Source", "umbra_role": "img2img_resize" }
+  },
+  "10": {
+    "class_type": "VAEEncode",
+    "inputs": { "pixels": ["9", 0], "vae": ["5", 0] },
+    "_meta": { "title": "Encode Source", "umbra_role": "img2img_encode" }
+  },
+  "11": {
+    "class_type": "UmbraKSamplerHiResFix",
+    "inputs": { "model": ["1", 0], "vae": ["5", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["10", 0], "seed": ["2", 3], "steps": 35, "cfg": 5, "sampler_name": "res_multistep", "scheduler": "beta", "denoise": 0.3, "enabled": false, "upscaler": "Latent", "resize_mode": "upscale by", "scale_by": 2, "resize_width": 0, "resize_height": 0, "hires_steps": 0, "hires_cfg": 0, "hires_sampler_name": "Use same", "hires_scheduler": "Use same", "hires_denoise": 0.35 },
+    "_meta": { "title": "Anima 3.8B IMG2IMG Sampling + Hires Fix", "umbra_role": "img2img_sampler" }
+  },
+  "12": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["11", 0], "vae": ["5", 0] },
+    "_meta": { "title": "Decode Anima 3.8B" }
+  },
+  "13": {
+    "class_type": "UmbraImageDetailer",
+    "inputs": { "image": ["12", 0], "model": ["1", 0], "clip": ["3", 0], "vae": ["5", 0], "positive": ["6", 0], "negative": ["7", 0], "seed": ["2", 3], "pipeline_json": "[]", "person_detail": false, "face_detail": false, "eye_detail": false, "hand_detail": false },
+    "_meta": { "title": "Anima 3.8B Detailer Pipeline", "umbra_role": "detailer" }
+  },
+  "14": {
+    "class_type": "UmbraLabSaveImage",
+    "inputs": { "images": ["13", 0], "filename_prefix": "UmbraUI_Anima38B_IMG2IMG_%date%", "positive_prompt": ["2", 0], "negative_prompt": ["2", 8], "positive": ["6", 0], "negative": ["7", 0], "output_folder": "Umbra UI/img2img", "save_to_yyyy_mm_dd_folder": true, "save_to_set_subfolder": false, "set_subfolder": "", "save_set_to_style_subfolder": "", "model_name": "Anima-3.8B-v1.1.safetensors", "seed": ["2", 3], "steps": 35, "cfg": 5, "sampler_name": "res_multistep", "scheduler": "beta" },
+    "_meta": { "title": "Save Anima 3.8B IMG2IMG" }
+  }
+}

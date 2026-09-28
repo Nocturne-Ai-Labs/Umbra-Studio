@@ -5,9 +5,13 @@
     "_meta": {
       "title": "Anima 3.8B v1.1 bundle (Semantic Connector v2)",
       "umbra_role": "model_loader",
+      "umbra_lora_adapter": "model_only",
       "umbra_model_family": "Anima 3.8B",
       "umbra_ui_pipelines": [{
-        "feature": "txt2img", "model_family": "Anima 3.8B", "model_sources": ["diffusion_model"], "priority": 100,
+        "feature": "txt2img", "model_family": "Anima 3.8B", "model_sources": ["diffusion_model"], "priority": 110,
+        "defaults": { "modelName": "Anima-3.8B-v1.1.safetensors", "modelNamesBySource": { "diffusion_model": "Anima-3.8B-v1.1.safetensors" }, "steps": 35, "cfg": 5, "samplerName": "res_multistep", "scheduler": "beta", "width": 832, "height": 1216 }
+      }, {
+        "feature": "inpainting", "model_family": "Anima 3.8B", "model_sources": ["diffusion_model"], "inpaint_adapter": "classic_conditioning", "priority": 110,
         "defaults": { "modelName": "Anima-3.8B-v1.1.safetensors", "modelNamesBySource": { "diffusion_model": "Anima-3.8B-v1.1.safetensors" }, "steps": 35, "cfg": 5, "samplerName": "res_multistep", "scheduler": "beta", "width": 832, "height": 1216 }
       }]
     }
@@ -48,8 +52,8 @@
     "_meta": { "title": "Anima 3.8B Latent" }
   },
   "9": {
-    "class_type": "KSampler",
-    "inputs": { "model": ["1", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["8", 0], "seed": ["2", 3], "steps": 35, "cfg": 5, "sampler_name": "res_multistep", "scheduler": "beta", "denoise": 1 },
+    "class_type": "UmbraKSamplerHiResFix",
+    "inputs": { "model": ["1", 0], "vae": ["5", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["8", 0], "seed": ["2", 3], "steps": 35, "cfg": 5, "sampler_name": "res_multistep", "scheduler": "beta", "denoise": 1, "enabled": false, "upscaler": "Latent", "resize_mode": "upscale by", "scale_by": 2, "resize_width": 0, "resize_height": 0, "hires_steps": 0, "hires_cfg": 0, "hires_sampler_name": "Use same", "hires_scheduler": "Use same", "hires_denoise": 0.35 },
     "_meta": { "title": "Anima 3.8B Sampling" }
   },
   "10": {
@@ -59,7 +63,12 @@
   },
   "11": {
     "class_type": "UmbraLabSaveImage",
-    "inputs": { "images": ["10", 0], "filename_prefix": "UmbraUI_Anima38B_%date%", "positive_prompt": ["2", 0], "negative_prompt": ["2", 8], "positive": ["6", 0], "negative": ["7", 0], "output_folder": "Umbra UI/txt2img", "save_to_yyyy_mm_dd_folder": true, "save_to_set_subfolder": false, "set_subfolder": "", "save_set_to_style_subfolder": "", "model_name": "Anima-3.8B-v1.1.safetensors", "seed": ["2", 3], "steps": 35, "cfg": 5, "sampler_name": "res_multistep", "scheduler": "beta" },
+    "inputs": { "images": ["12", 0], "filename_prefix": "UmbraUI_Anima38B_%date%", "positive_prompt": ["2", 0], "negative_prompt": ["2", 8], "positive": ["6", 0], "negative": ["7", 0], "output_folder": "Umbra UI/txt2img", "save_to_yyyy_mm_dd_folder": true, "save_to_set_subfolder": false, "set_subfolder": "", "save_set_to_style_subfolder": "", "model_name": "Anima-3.8B-v1.1.safetensors", "seed": ["2", 3], "steps": 35, "cfg": 5, "sampler_name": "res_multistep", "scheduler": "beta" },
     "_meta": { "title": "Save Anima 3.8B Image" }
+  },
+  "12": {
+    "class_type": "UmbraImageDetailer",
+    "inputs": { "image": ["10", 0], "model": ["1", 0], "clip": ["3", 0], "vae": ["5", 0], "positive": ["6", 0], "negative": ["7", 0], "seed": ["2", 3], "pipeline_json": "[]", "person_detail": false, "face_detail": false, "eye_detail": false, "hand_detail": false },
+    "_meta": { "title": "Anima 3.8B Detailer Pipeline", "umbra_role": "detailer" }
   }
 }

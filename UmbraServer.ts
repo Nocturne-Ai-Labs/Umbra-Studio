@@ -13,6 +13,7 @@ import { normalizeMiniMaxH3Turbo } from './shared/umbra-ui/minimaxH3Turbo';
 import { applyMiniMaxH3Acceleration, assertMiniMaxH3TurboInstalled, assertMiniMaxH3GuidesInstalled, type MiniMaxH3AccelerationControls } from './backend/MiniMaxH3Workflow';
 import { inspectManagedVideoModels } from './backend/VideoSetupReadiness';
 import { applyAnima38TextEncoderDevice } from './backend/AnimaTextEncoderDevice';
+import { applyAnima38LoraStack, resolveAnima38LoraNames } from './backend/Anima38LoraStack';
 import { ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, normalizeAnima38TextEncoderDevice } from './shared/umbra-ui/animaTextEncoderDevice';
 import { applyUmbraUiVideoLoraStack, assertUmbraUiVideoLoraStackInstalled, resolveUmbraUiVideoLoraNames } from './backend/UmbraUiVideoLoraStack';
 import { bindPPGenerationToWorkflowVideo } from './backend/UmbraUiVideoGenerationBinding';
@@ -9025,6 +9026,7 @@ function compileUmbraUiPipelineWorkflow(
   const supportsClipSkip = !activeImageCapabilities
     || activeImageCapabilities.clipSkip.support === 'adjustable';
   const activePrompt = String(options.prompt || state?.activePrompt || '').trim();
+  const anima38Prompt = applyAnima38LoraStack(promptGraph, activePrompt);
   const promptSetId = clampPPQueueSetId(options.promptSetId ?? state?.activeQueueSet ?? state?.activeSetId ?? 1);
   const outputSubfolder = String(options.outputSubfolder || '').trim().replace(/\\/g, '/');
   const setLabel = `Set ${promptSetId}`;
@@ -9112,7 +9114,7 @@ function compileUmbraUiPipelineWorkflow(
     }
 
     if (classType === 'UmbraPowerPrompterReader') {
-      setPPApiNodeInput(node, 'prompt_text', activePrompt);
+      setPPApiNodeInput(node, 'prompt_text', anima38Prompt);
       setPPApiNodeInput(node, 'negative_prompt', generation.negativePrompt || '');
       setPPApiNodeInput(node, 'seed', generation.seed);
       setPPApiNodeInput(node, 'control_after_generate', generation.controlAfterGenerate || 'fixed');
@@ -11680,6 +11682,8 @@ async function runBackendPowerPrompterPipelineQueue(
       });
       if (generation.mediaType === 'video') {
         resolveUmbraUiVideoLoraNames(queuedWorkflow.promptGraph, await getPPComfyObjectInfoForValidation());
+      } else {
+        resolveAnima38LoraNames(queuedWorkflow.promptGraph, await getPPComfyObjectInfoForValidation());
       }
       const continuationPreviewNodeId = extendedSession && index < prompts.length - 1
         ? injectUmbraExtendedContinuationPreview(
@@ -20981,7 +20985,7 @@ async function saveUmbraUiVideoControlsSession(rawVideo: unknown): Promise<Power
 }
 
 async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings, seed: number) {
-  const loaded = await loadPPApiWorkflowById(settings.workflowId);
+  const loaded = await loadBundledUmbraUiWorkflowById(settings.workflowId);
   if (!loaded) throw new Error('The selected Umbra image workflow could not be loaded.');
   if (loaded.item.mediaType === 'video') throw new Error('Video workflows cannot be used for image inpainting.');
   if (!loaded.item.compatible) {
@@ -21059,7 +21063,7 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
     generation,
   };
   await assertPPApiWorkflowExecutionReady(executionTarget, generation);
-  return compileUmbraUiPipelineWorkflow(loaded.document, state, {
+  const compiled = compileUmbraUiPipelineWorkflow(loaded.document, state, {
     prompt: settings.prompt,
     generation,
     promptSetId: 1,
@@ -21067,6 +21071,8 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
     styleSeedMode: 'different',
     selectedPipeline,
   });
+  resolveAnima38LoraNames(compiled.promptGraph, await getPPComfyObjectInfoForValidation());
+  return compiled;
 }
 
 const UMBRA_UI_INPAINT_IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);

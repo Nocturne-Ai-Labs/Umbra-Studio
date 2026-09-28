@@ -1634,8 +1634,8 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         if (match.status === 'missing') throw new Error(`The selected LoRA is not installed: ${name}.`);
         return { ...lora, name: match.match };
       });
-    const promptWithLoras = composeUmbraUiPromptWithLoras(prompt, enabledLoras);
     const modelFamily = String(options.modelFamily || '').trim();
+    const promptWithLoras = composeUmbraUiPromptWithLoras(prompt, enabledLoras, modelFamily.toLowerCase() === 'anima 3.8b');
     const feature: UmbraUiPipelineFeature = options.outputMode === 'img2img' ? 'img2img' : 'txt2img';
     const pipelineMatch = resolveUmbraUiPipeline(workflows, feature, modelFamily, options.modelType);
     if (!pipelineMatch.workflow || !pipelineMatch.pipeline) {
