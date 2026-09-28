@@ -1936,7 +1936,7 @@ function installComfyNodeRequirements(comfyDir: string, nodePath: string, nodeNa
     const requirementsHash = Bun.hash(readFileSync(requirementsPath, 'utf-8')).toString();
     const markerPath = join(nodePath, '.umbra-requirements-installed');
     if (nodeName === 'ComfyUI-DaSiWa-Nodes') {
-        return installDaSiWaRequirements(py, requirementsPath, markerPath, (message) => log(`${c.yellow}WARN${c.reset}`, message));
+        return installDaSiWaRequirements(py, requirementsPath, markerPath);
     }
     try {
         if (readFileSync(markerPath, 'utf-8').trim() === requirementsHash) return true;

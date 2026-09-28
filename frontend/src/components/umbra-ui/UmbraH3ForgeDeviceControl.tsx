@@ -31,7 +31,7 @@ export function UmbraH3ForgeDeviceControl({ value, onChange, disabled }: Props) 
     <div role="group" aria-label="Prompt Forge compute device" className="inline-flex overflow-hidden rounded border border-white/15">
       {(['gpu', 'cpu'] as const).map((device) => <button key={device} type="button"
         aria-pressed={value === device} disabled={disabled} onClick={() => onChange(device)}
-        title={device === 'gpu' ? 'Use GPU offload; GGUF models require a CUDA-enabled llama-cpp-python build' : 'Run the local model on CPU'}
+        title={device === 'gpu' ? 'Run Llama on the GPU using PyTorch CUDA' : 'Run Llama on the CPU'}
         className={`min-h-8 min-w-14 px-2 font-medium disabled:opacity-40 ${value === device ? 'bg-fuchsia-400/20 text-fuchsia-100' : 'bg-black/25 text-zinc-400 hover:text-zinc-100'}`}>
         {device.toUpperCase()}
       </button>)}

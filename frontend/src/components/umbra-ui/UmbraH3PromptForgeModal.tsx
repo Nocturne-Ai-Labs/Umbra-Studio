@@ -4,8 +4,8 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { FolderOpen, Loader2, RefreshCw, Sparkles, X } from 'lucide-react';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
-import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
 import { openH3PromptForgeModelFolder } from '@/lib/h3PromptForgeModelFolder';
+import { h3PromptForgeModels, H3_FORGE_MODEL_MISSING } from '@/lib/h3PromptForgeModels';
 import { UmbraH3ForgeDeviceControl, useH3ForgeComputeDevice } from './UmbraH3ForgeDeviceControl';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import type { PowerPrompterVideoControls } from '@/types/powerPrompter';
@@ -16,6 +16,7 @@ interface ForgeModel { id: string; label: string; disabled?: boolean }
 interface ForgeCatalog {
   models?: ForgeModel[];
   compute_devices?: string[];
+  local_model?: string;
   creativity?: string[];
   default_detail?: number;
   default_creativity?: string;
@@ -50,7 +51,8 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
   const requestIdRef = React.useRef('');
   const mode = miniMaxH3DirectorMode(video.mode, video.frameGuideMode);
   const localModel = model.startsWith('local:');
-  const supportsComputeDevice = catalog?.compute_devices?.includes('cpu') && catalog.compute_devices.includes('gpu');
+  const supportsComputeDevice = catalog?.local_model === 'llama-3.2-3b-instruct'
+    && catalog.compute_devices?.includes('cpu') && catalog.compute_devices.includes('gpu');
 
   React.useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null;
@@ -66,13 +68,12 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
     }).then(async (response) => {
       const result = await response.json().catch(() => ({})) as ForgeCatalog;
       if (!response.ok) throw new Error(result.message || 'Prompt Forge is unavailable. Install or update DaSiWa nodes.');
-      setCatalog(result);
-      setModel((current) => result.models?.some((entry) => entry.id === current && !entry.disabled)
-        ? current : result.models?.find((entry) => !entry.disabled && entry.id.startsWith('local:'))?.id
-          || result.models?.find((entry) => !entry.disabled)?.id || '');
+      const models = h3PromptForgeModels(result.models);
+      setCatalog({ ...result, models });
+      setModel((current) => models.some((entry) => entry.id === current) ? current : models[0]?.id || '');
       setDetail(Number(result.default_detail) || 5);
       setCreativity(result.default_creativity || 'balanced');
-      setError('');
+      setError(models.length ? '' : H3_FORGE_MODEL_MISSING);
     }).catch((cause) => { if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : 'Prompt Forge is unavailable.'); });
     return () => abort.abort();
   }, [comfyConnected, catalogRefresh]);
@@ -112,8 +113,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
       for (const [sourcePath, filename, keep] of imageSources) {
         if (requestIdRef.current !== requestId) return;
         if (!sourcePath && !filename) continue;
-        const path = await ensureUmbraUiQueuedMedia('image', sourcePath, filename, 'H3 Prompt Forge image');
-        references.push({ kind: 'image', path, role: mode === 'REF2VA' ? 'subject' : 'keyframe', keep });
+        references.push({ kind: 'image', role: mode === 'REF2VA' ? 'subject' : 'keyframe', keep });
       }
       if (requestIdRef.current !== requestId) return;
       const response = await fetch('/comfy/dasiwa/h3/forge', {
@@ -170,7 +170,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
             <div className="min-w-0 text-xs text-zinc-400">Model
               <div className="mt-1 flex min-w-0 gap-1">
                 <UmbraSelectControl aria-label="Prompt Forge model" value={model} onChange={(event) => setModel(event.target.value)} className={fieldClass}>
-                  <option value="">Choose a model</option>
+                  <option value="">Llama 3.2 not installed</option>
                   {(catalog?.models || []).map((entry) => <option key={entry.id} value={entry.id} disabled={entry.disabled}>{entry.label}</option>)}
                 </UmbraSelectControl>
                 <button type="button" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded border border-white/15 text-zinc-300 hover:border-fuchsia-300/40 hover:bg-white/5 disabled:opacity-40"
@@ -192,9 +192,10 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
               </UmbraSelectControl>
             </label>
           </div>
+          <p className="text-xs text-zinc-500">Text-only model: describe reference images in your idea or reference notes.</p>
           {localModel ? <>
             <UmbraH3ForgeDeviceControl value={computeDevice} onChange={(value) => { setComputeDevice(value); setDraft(''); }} disabled={drafting || !supportsComputeDevice} />
-            {!supportsComputeDevice ? <p role="status" className="text-xs text-amber-300">Update DaSiWa H3 nodes in Umbra Setup and restart ComfyUI to choose CPU or GPU.</p> : null}
+            {!supportsComputeDevice ? <p role="status" className="text-xs text-amber-300">Update DaSiWa H3 nodes in Umbra Setup and restart ComfyUI for local Llama support.</p> : null}
           </> : null}
           {error ? <p role="status" className="text-xs text-amber-300">{error}</p> : null}
           <H3ForgeRawResponse raw={rawResponse} />

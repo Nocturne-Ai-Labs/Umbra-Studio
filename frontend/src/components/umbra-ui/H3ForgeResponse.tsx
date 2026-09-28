@@ -41,7 +41,7 @@ export function recoverH3ForgeDraft(response: H3ForgeResponse, mode: string): st
 export function h3ForgeFailureMessage(response: H3ForgeResponse): string {
   if (response.error === 'no_segments') {
     return response.raw?.trim()
-      ? 'The model used a different format than DaSiWa Prompt Forge. View its response below, or try an instruction-following model.'
+      ? 'Llama returned a reply without the required Prompt Forge sections. View its response below before retrying.'
       : 'The model returned no text. Check that it loaded correctly and has enough context to write a prompt.';
   }
   return response.message || 'Prompt Forge did not return a draft.';

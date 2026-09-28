@@ -89,7 +89,7 @@
     },
     "minimax-h3-autoprompter": {
       "label": "DaSiWa H3 Prompt Forge Model (Optional)",
-      "description": "Local Qwen3.5 9B Q8 GGUF and matching vision projector for DaSiWa Prompt Forge. About 11.7 GB total. Install or update its extension from Umbra UI > ComfyUI > H3 Nodes."
+      "description": "Llama 3.2 3B Instruct for local text-only Prompt Forge, on CPU or GPU using Transformers. About 6.4 GB. Install or update DaSiWa H3 nodes from Umbra UI > ComfyUI > H3 Nodes."
     },
     "minimax-h3-vae-int8": {
       "label": "MiniMax H3 INT8 Video VAE",
@@ -643,29 +643,73 @@
       ]
     },
     {
-      "id": "minimax-h3-autoprompter-qwen35-q8",
+      "id": "minimax-h3-autoprompter-llama32-3b",
       "family": "Video",
-      "creator": "DavidAU",
-      "repository": "DavidAU/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-NEO-IMATRIX-MAX-MTP-GGUF",
-      "revision": "425937812d28d85a5b5bd70f90e66b590db1fb3c",
-      "license": "apache-2.0",
-      "licenseUrl": "https://huggingface.co/DavidAU/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-NEO-IMATRIX-MAX-MTP-GGUF/blob/425937812d28d85a5b5bd70f90e66b590db1fb3c/README.md",
-      "licenseNotice": "Optional local model for the separately licensed DaSiWa Prompt Forge extension. Model weights are not included in Umbra Studio packages. The matching projector is required for image-aware prompting. The GGUF alone supports text prompting only.",
+      "creator": "Meta / Unsloth",
+      "repository": "unsloth/Llama-3.2-3B-Instruct",
+      "revision": "006f5dcd1393c3add266de40994ba96225e9689d",
+      "license": "llama3.2",
+      "licenseUrl": "https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct/blob/0cb88a4f764b7a12671c53f0838cd831a0843b95/LICENSE.txt",
+      "licenseNotice": "Built with Llama. Llama 3.2 is licensed under the Llama 3.2 Community License, Copyright Meta Platforms, Inc. All Rights Reserved. Model weights are downloaded separately and are subject to Meta's license and acceptable use policy. This text-only model drafts from your idea and reference notes; it does not analyze images.",
       "installPolicy": "automatic",
-      "profiles": ["minimax-h3-autoprompter"],
-      "purpose": "Optional local DaSiWa H3 Prompt Forge model and matching image projector",
+      "profiles": [
+        "minimax-h3-autoprompter"
+      ],
+      "purpose": "Local Llama 3.2 3B Instruct for DaSiWa H3 Prompt Forge",
       "files": [
         {
-          "destination": "llm/qwen35-h3-autoprompter/Qwen3.5-9B-The-Defiant-Fable-Uncnr-Heretic-NEO-MAX-MTP-Q8_0.gguf",
-          "sourcePath": "Qwen3.5-9B-The-Defiant-Fable-Uncnr-Heretic-NEO-MAX-MTP-Q8_0.gguf",
-          "bytes": 10739611872,
-          "sha256": "1830f3beffb43850143bf45ee6f9d637f82ca22ddd9e08e40be1399062be32a2"
+          "destination": "llm/Llama-3.2-3B-Instruct/model-00001-of-00002.safetensors",
+          "sourcePath": "model-00001-of-00002.safetensors",
+          "bytes": 4965799096,
+          "sha256": "13cbd6d16e927a0c5bad54102514e6e18b4a47b3a6eb911e39d678d328d19f55"
         },
         {
-          "destination": "llm/qwen35-h3-autoprompter/mmproj-F16.gguf",
-          "sourcePath": "mmproj-F16.gguf",
-          "bytes": 918166080,
-          "sha256": "f70dc3509053962b0d0d3ee8a7eacebf5d60aa560cad78254ae8698516ae029f"
+          "destination": "llm/Llama-3.2-3B-Instruct/model-00002-of-00002.safetensors",
+          "sourcePath": "model-00002-of-00002.safetensors",
+          "bytes": 1459729952,
+          "sha256": "7b770216613ac5c34d7c54bdff1fa616bc4e338a9d0b20af6303e48c295ee23c"
+        },
+        {
+          "destination": "llm/Llama-3.2-3B-Instruct/tokenizer.json",
+          "sourcePath": "tokenizer.json",
+          "bytes": 17209920,
+          "sha256": "6b9e4e7fb171f92fd137b777cc2714bf87d11576700a1dcd7a399e7bbe39537b"
+        },
+        {
+          "destination": "llm/Llama-3.2-3B-Instruct/chat_template.jinja",
+          "sourcePath": "chat_template.jinja",
+          "bytes": 3827,
+          "sha256": "5816fce10444e03c2e9ee1ef8a4a1ea61ae7e69e438613f3b17b69d0426223a4"
+        },
+        {
+          "destination": "llm/Llama-3.2-3B-Instruct/config.json",
+          "sourcePath": "config.json",
+          "bytes": 890,
+          "sha256": "eadff796b79b82cefa0537004668d70a1dd099fd4986b91ef88398ed91b26311"
+        },
+        {
+          "destination": "llm/Llama-3.2-3B-Instruct/generation_config.json",
+          "sourcePath": "generation_config.json",
+          "bytes": 234,
+          "sha256": "8bab06a398ca622f8b941eb0b5f425d71d007080436cfa4f37d6c03c23b756a9"
+        },
+        {
+          "destination": "llm/Llama-3.2-3B-Instruct/model.safetensors.index.json",
+          "sourcePath": "model.safetensors.index.json",
+          "bytes": 20919,
+          "sha256": "0a57c30afc07c81610ae7fe013bea3b9d50365f9a8145ae98e8714220f3d7c7c"
+        },
+        {
+          "destination": "llm/Llama-3.2-3B-Instruct/special_tokens_map.json",
+          "sourcePath": "special_tokens_map.json",
+          "bytes": 454,
+          "sha256": "94e708c3f5e64acf85bbe5ad01467a1248faadb73e83b41793087ecced586e8f"
+        },
+        {
+          "destination": "llm/Llama-3.2-3B-Instruct/tokenizer_config.json",
+          "sourcePath": "tokenizer_config.json",
+          "bytes": 54669,
+          "sha256": "9ddd255c19fe319c8d4e891163540382e9fbda99f394674f2a929efc47d57458"
         }
       ]
     },

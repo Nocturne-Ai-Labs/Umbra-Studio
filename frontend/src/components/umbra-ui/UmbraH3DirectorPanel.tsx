@@ -6,6 +6,7 @@ import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { UmbraH3ContinuitySessionModal } from './UmbraH3ContinuitySessionModal';
 import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
 import { openH3PromptForgeModelFolder } from '@/lib/h3PromptForgeModelFolder';
+import { h3PromptForgeModels, H3_FORGE_MODEL_MISSING } from '@/lib/h3PromptForgeModels';
 import { UmbraH3ForgeDeviceControl, useH3ForgeComputeDevice } from './UmbraH3ForgeDeviceControl';
 import { H3ForgeRawResponse, h3ForgeFailureMessage, recoverH3ForgeDraft, type H3ForgeResponse } from './H3ForgeResponse';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
@@ -16,6 +17,7 @@ interface ForgeModel { id: string; label: string; disabled?: boolean }
 interface ForgeCatalog {
   models?: ForgeModel[];
   compute_devices?: string[];
+  local_model?: string;
   creativity?: string[];
   detail_levels?: Record<string, string>;
   default_detail?: number;
@@ -93,7 +95,8 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
   const continuity = controls.continuity;
   const continuitySource = continuity.sourceKind === 'video' ? continuity.sourceVideoId : continuity.sourceId;
   const localForgeModel = model.startsWith('local:');
-  const supportsComputeDevice = forgeCatalog?.compute_devices?.includes('cpu') && forgeCatalog.compute_devices.includes('gpu');
+  const supportsComputeDevice = forgeCatalog?.local_model === 'llama-3.2-3b-instruct'
+    && forgeCatalog.compute_devices?.includes('cpu') && forgeCatalog.compute_devices.includes('gpu');
 
   React.useEffect(() => { setDraft(''); }, [continuity.session, continuity.sourceKind, continuitySource,
     continuity.overlapFrames, continuity.idea, directorMode, durationSeconds, width, height, brief, model, detail, creativity, computeDevice]);
@@ -219,12 +222,12 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
         const result = await response.json().catch(() => ({})) as ForgeCatalog;
         if (!response.ok) throw new Error(result.message || 'DaSiWa Prompt Forge is unavailable. Install or update ComfyUI-DaSiWa-Nodes.');
         if (!active) return;
-        setForgeCatalog(result);
-        setModel((current) => result.models?.some((entry) => entry.id === current && !entry.disabled)
-          ? current : result.models?.find((entry) => !entry.disabled)?.id || '');
+        const models = h3PromptForgeModels(result.models);
+        setForgeCatalog({ ...result, models });
+        setModel((current) => models.some((entry) => entry.id === current) ? current : models[0]?.id || '');
         setDetail(Number(result.default_detail) || 5);
         setCreativity(result.default_creativity || 'balanced');
-        setForgeError('');
+        setForgeError(models.length ? '' : H3_FORGE_MODEL_MISSING);
       } catch (error) {
         if (active) setForgeError(error instanceof Error ? error.message : 'Prompt Forge is unavailable.');
       }
@@ -305,8 +308,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
       const references = [];
       const forgeReferences = continuitySource && (directorMode !== 'REF2VA' || !continuity.useReferences) ? [] : enabled;
       for (const item of forgeReferences) {
-        const path = await ensureUmbraUiQueuedMedia(item.kind, item.sourcePath, item.sourceName, `Director ${item.kind}`);
-        if (item.kind === 'image') references.push({ kind: 'image', path, role: directorMode === 'REF2VA' ? item.role : 'keyframe', keep: item.note });
+        if (item.kind === 'image') references.push({ kind: 'image', role: directorMode === 'REF2VA' ? item.role : 'keyframe', keep: item.note });
         else if (item.kind === 'video') references.push({ kind: 'video', role: 'motion', stream: item.mediaMode === 'video_audio' ? 'both' : item.mediaMode, keep: item.note, duration_seconds: item.trimEnd === null ? undefined : item.trimEnd - item.trimStart });
         else references.push({ kind: 'audio', keep: item.note, duration_seconds: item.trimEnd === null ? undefined : item.trimEnd - item.trimStart });
       }
@@ -591,7 +593,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
           <div className="min-w-0 text-[10px] text-zinc-500">Model
             <div className="flex min-w-0 gap-1">
               <UmbraSelectControl aria-label="Prompt Forge model" value={model} onChange={(event) => setModel(event.target.value)} className={fieldClass}>
-                <option value="">Choose a model</option>
+                <option value="">Llama 3.2 not installed</option>
                 {(forgeCatalog?.models || []).map((entry) => <option key={entry.id} value={entry.id} disabled={entry.disabled}>{entry.label}</option>)}
               </UmbraSelectControl>
               <button type="button" className={iconButton} title="Open Prompt Forge model folder" aria-label="Open Prompt Forge model folder"
@@ -611,9 +613,10 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
             {(forgeCatalog?.creativity || ['balanced']).map((entry) => <option key={entry} value={entry}>{entry}</option>)}
           </UmbraSelectControl>
         </label>
+        <p className="mt-2 text-xs text-zinc-500">Text-only model: describe reference images in your idea or reference notes.</p>
         {localForgeModel ? <>
           <div className="mt-2"><UmbraH3ForgeDeviceControl value={computeDevice} onChange={setComputeDevice} disabled={drafting || !supportsComputeDevice} /></div>
-          {!supportsComputeDevice ? <p role="status" className="mt-2 text-xs text-amber-300">Update DaSiWa H3 nodes in Umbra Setup and restart ComfyUI to choose CPU or GPU.</p> : null}
+          {!supportsComputeDevice ? <p role="status" className="mt-2 text-xs text-amber-300">Update DaSiWa H3 nodes in Umbra Setup and restart ComfyUI for local Llama support.</p> : null}
         </> : null}
         <div className="mt-2 flex gap-2">
           <button type="button" className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded border border-fuchsia-300/30 px-2 text-xs text-fuchsia-100 disabled:opacity-40" disabled={!model || (!brief.trim() && !continuitySource) || drafting || (localForgeModel && !supportsComputeDevice)} onClick={() => void forge()}>

@@ -1,0 +1,84 @@
+diff --git a/nodes/h3_forge.py b/nodes/h3_forge.py
+--- a/nodes/h3_forge.py
++++ b/nodes/h3_forge.py
+@@ -641,18 +641,30 @@ class Local:
+         self._llm()._release_all_model_memory()
+         return True
+ 
+-    def chat(self, name, system, user, images_b64, sampling, num_ctx, timeout, cancel=None):
++    def chat(self, name, system, user, images_b64, sampling, num_ctx, timeout, cancel=None, compute_device="gpu"):
+         llm = self._llm()
+         gguf = name.lower().endswith(".gguf")
++        if compute_device not in ("cpu", "gpu"):
++            raise ForgeError("bad_device", "Choose CPU or GPU for the local Forge model.")
++        if compute_device == "gpu" and not gguf:
++            import torch
++            if not torch.cuda.is_available():
++                raise ForgeError("gpu_unavailable", "CUDA is unavailable. Choose CPU or install a CUDA-enabled PyTorch build.")
++        if compute_device == "gpu" and gguf:
++            from llama_cpp import llama_supports_gpu_offload
++            if not llama_supports_gpu_offload():
++                raise ForgeError("gpu_unavailable", "This llama-cpp-python build has no GPU offload. Choose CPU or install a CUDA-enabled build.")
+         config = {
+             "model_path": llm._resolve_model_path(name, "", allow_gguf=gguf),
+             "backend": "llama_cpp" if gguf else "transformers",
+             "task": "vision" if images_b64 else "text",
+-            "device": "auto", "dtype": _half_dtype(), "quantization": "none",
++            "device": "cpu" if compute_device == "cpu" else "cuda",
++            "dtype": "float32" if compute_device == "cpu" else _half_dtype(), "quantization": "none",
+             "cache_mode": "unload_after_run", "attention_implementation": "auto",
+             "kv_cache_implementation": "default", "kv_cache_quant_backend": "quanto",
+             "kv_cache_nbits": 4, "kv_cache_residual_length": 128,
+-            "llama_n_ctx": num_ctx, "llama_n_gpu_layers": -1, "llama_n_threads": 0, "llama_chat_format": "",
++            "llama_n_ctx": num_ctx, "llama_n_gpu_layers": 0 if compute_device == "cpu" else -1,
++            "llama_n_threads": 0, "llama_chat_format": "",
+         }
+         temperature, top_p = sampling.get("temperature", 0.7), sampling.get("top_p", 0.8)
+         loaded = None
+@@ -836,6 +848,9 @@ def _generate(body, input_directory, release_memory, stop):
+ 
+     def run(with_images):
+         user = build_user_message(bundle, brief, mode, duration, detail, creativity, references, bool(with_images))
++        if kind == "local":
++            return backend.chat(name, spec["system"], user, with_images, sampling, num_ctx,
++                                timeout, stop, compute_device=body.get("compute_device") or "gpu")
+         return backend.chat(name, spec["system"], user, with_images, sampling, num_ctx, timeout, stop)
+ 
+     if kind != "local":
+@@ -984,8 +999,13 @@ def generate_continuity_draft(metadata, idea, directory, model, settings,
+         if cancel is not None and cancel.is_set():
+             raise ForgeError("cancelled", CANCELLED)
+         try:
+-            raw, stats = backend.chat(name, CONTINUATION_SYSTEM, user, images,
+-                                       sampling, bundle["context_length"], 600, cancel)
++            if kind == "local":
++                raw, stats = backend.chat(name, CONTINUATION_SYSTEM, user, images,
++                                          sampling, bundle["context_length"], 600, cancel,
++                                          compute_device=options.get("compute_device") or "gpu")
++            else:
++                raw, stats = backend.chat(name, CONTINUATION_SYSTEM, user, images,
++                                          sampling, bundle["context_length"], 600, cancel)
+         except urlerror.HTTPError as exc:
+             if _key_refused(exc):
+                 raise ForgeError("backend", KEY_REFUSED.format(where=backend.base, code=exc.code))
+@@ -1040,6 +1060,7 @@ def register_routes():
+         bundle = load_bundle()
+         return web.json_response({
+             "models": models,
++            "compute_devices": ["cpu", "gpu"],
+             "errors": errors,
+             "detail_levels": {k: v.get("label") for k, v in bundle["detail_levels"].items()},
+             "creativity": list(bundle["creativity_presets"].keys()),
+diff --git a/nodes/nodes_llm.py b/nodes/nodes_llm.py
+--- a/nodes/nodes_llm.py
++++ b/nodes/nodes_llm.py
+@@ -511,7 +511,8 @@ def _load_llama_cpp_model(config, need_vision):
+             raise ImportError(
+                 "GGUF vision needs llama-cpp-python 0.3.26 or newer. Update it in the ComfyUI environment."
+             ) from exc
+-        chat_handler = MTMDChatHandler(clip_model_path=mmproj, verbose=False)
++        chat_handler = MTMDChatHandler(clip_model_path=mmproj, verbose=False,
++                                       use_gpu=config["llama_n_gpu_layers"] != 0)
+         try:
+             # mtmd logs through its own hook, not llama.cpp's, and prints the
+             # whole prompt on every image. Route it through llama-cpp-python's
