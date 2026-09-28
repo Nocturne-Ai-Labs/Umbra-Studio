@@ -438,8 +438,8 @@ async function main() {
         if (activeUpdate || activeRelaunch || activeDependency || admittingOperation || modelSetupRunning()) {
           return json({ success: false, error: 'Finish the current updater or model setup operation first.' }, 409);
         }
-        if (readState(service, session).phase !== 'complete') {
-          return json({ success: false, error: 'Install the Umbra Studio update before managing its dependencies.' }, 409);
+        if (!['idle', 'complete'].includes(readState(service, session).phase)) {
+          return json({ success: false, error: 'Finish the Umbra Studio update before managing its dependencies.' }, 409);
         }
         admittingOperation = true;
         try {
@@ -474,8 +474,8 @@ async function main() {
         if (activeUpdate || activeRelaunch || activeDependency || admittingOperation) {
           return json({ success: false, error: 'Finish the current updater operation first.' }, 409);
         }
-        if (readState(service, session).phase !== 'complete') {
-          return json({ success: false, error: 'Install the Umbra Studio update before opening its model installer.' }, 409);
+        if (!['idle', 'complete'].includes(readState(service, session).phase)) {
+          return json({ success: false, error: 'Finish the Umbra Studio update before opening its model installer.' }, 409);
         }
         admittingOperation = true;
         try {

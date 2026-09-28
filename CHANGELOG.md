@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.32.39 - Managed Dependency Update Hotfix
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+- Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux. When the app update completes, close and reopen the updater before using **Managed dependencies**. This reloads the new updater code; no model download or data migration is required.
+- Stop ComfyUI before updating the Anima 3.8B LoRA Bridge or DaSiWa H3 custom nodes, then restart ComfyUI. Existing `User/`, `Tools/`, and model files are preserved. Review each model's license in Setup before downloading optional models.
+
+### Updater
+
+- Managed dependency actions and model setup remain available when a fresh updater session is idle, while still blocking them during an active or failed app update.
+- This fixes the post-update state reset that disabled custom-node repair after reopening the updater.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: reopening the updater no longer locks its managed dependency controls.
+- Improved: node and model setup actions stay blocked while an app update is incomplete.
+
 ## v0.32.38 - Anima Workflow And Prompt Forge Controls
 
 ### TL;DR - Setup After Updating

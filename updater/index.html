@@ -477,9 +477,9 @@
         dependencyList.replaceChildren();
         const requiredVersion = status.comfyui.minimumRequired;
         const outdatedComfy = Boolean(requiredVersion && compare(status.comfyui.version || '0.0.0', requiredVersion) < 0);
-        const canManage = latestState?.phase === 'complete';
+        const canManage = latestState?.phase === 'idle' || latestState?.phase === 'complete';
         dependencySummary.textContent = status.features.length
-          ? canManage ? 'Checked against the installed update. Tool changes require your confirmation.' : 'Current installation shown. Install an Umbra Studio update to unlock managed dependency actions.'
+          ? canManage ? 'Checked against the installed build. Tool changes require your confirmation.' : 'Current installation shown. Finish the Umbra Studio update to unlock managed dependency actions.'
           : 'This installed build does not declare managed feature requirements yet.';
         if (status.modelSetupRunning) {
           dependencyRow('Model installer', 'Open in a separate tab. Finish or cancel downloads before closing it.', 'Close installer', closeModelSetup, true);
