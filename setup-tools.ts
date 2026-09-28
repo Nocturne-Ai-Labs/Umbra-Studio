@@ -9,7 +9,7 @@
  * - Respects existing installations (skipped if detected)
  */
 
-import { join, basename, dirname, relative } from 'path';
+import { join, basename, dirname, relative, resolve } from 'path';
 import { existsSync, readdirSync, statSync, lstatSync, realpathSync, unlinkSync, rmSync, mkdirSync, readFileSync, writeFileSync, cpSync, renameSync, symlinkSync } from 'fs';
 import { spawn, spawnSync, execSync } from 'child_process';
 import { installDaSiWaRequirements } from './setup/DaSiWaRequirements';

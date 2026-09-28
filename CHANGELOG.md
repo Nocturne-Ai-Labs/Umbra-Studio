@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.32.40 - Managed Custom-Node Checkout Hotfix
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+- Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux. Close and reopen the updater after the app update to load its new managed-dependency controls. No model download or data migration is required.
+- Stop ComfyUI before retrying a managed custom-node update, then restart ComfyUI. Existing `User/`, `Tools/`, and model files are preserved. Review optional model licenses in Setup before downloading them.
+
+### Setup
+
+- Correct the independent Git-checkout check used by managed ComfyUI custom-node updates. Valid existing DaSiWa installations no longer fail with a misleading ownership warning.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: managed custom-node repair recognizes an existing independent Git checkout.
+- Improved: DaSiWa H3 CPU/GPU Prompt Forge compatibility patch can be applied through managed setup.
+
 ## v0.32.39 - Managed Dependency Update Hotfix
 
 ### TL;DR - Setup After Updating
