@@ -10,6 +10,7 @@ import { UmbraH3ForgeDeviceControl, useH3ForgeComputeDevice } from './UmbraH3For
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import type { PowerPrompterVideoControls } from '@/types/powerPrompter';
 import { miniMaxH3DirectorMode } from '../../../../shared/umbra-ui/minimaxH3Director';
+import { H3ForgeRawResponse, h3ForgeFailureMessage, recoverH3ForgeDraft, type H3ForgeResponse } from './H3ForgeResponse';
 
 interface ForgeModel { id: string; label: string; disabled?: boolean }
 interface ForgeCatalog {
@@ -43,6 +44,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
   const [draft, setDraft] = React.useState('');
   const [drafting, setDrafting] = React.useState(false);
   const [error, setError] = React.useState('');
+  const [rawResponse, setRawResponse] = React.useState('');
   const [catalogRefresh, setCatalogRefresh] = React.useState(0);
   const dialogRef = React.useRef<HTMLDivElement>(null);
   const requestIdRef = React.useRef('');
@@ -99,6 +101,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
     setDrafting(true);
     setDraft('');
     setError('');
+    setRawResponse('');
     try {
       const imageSources = video.mode === 'text_to_video' ? [] : video.mode === 'image_to_video'
         ? [[video.sourceImagePath, video.sourceImageName, ''], ...(video.frameGuideMode === 'first_last' ? [[video.lastImagePath, video.lastImageName, '']] : [])]
@@ -118,8 +121,18 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
         body: JSON.stringify({ request_id: requestId, brief: brief.trim(), mode, duration: durationSeconds,
           model, detail, creativity, references, ...(localModel ? { compute_device: computeDevice } : {}) }),
       });
-      const result = await response.json().catch(() => ({})) as { simple_prompt?: string; message?: string; warnings?: string[] };
-      if (!response.ok || !result.simple_prompt) throw new Error(result.message || 'Prompt Forge did not return a draft.');
+      const result = await response.json().catch(() => ({})) as H3ForgeResponse;
+      if (!response.ok || !result.simple_prompt) {
+        if (requestIdRef.current !== requestId) return;
+        setRawResponse(result.raw || '');
+        const recovered = recoverH3ForgeDraft(result, mode);
+        if (recovered) {
+          setDraft(recovered);
+          setError('The model returned a complete H3 prompt without DaSiWa markers. Review it before using.');
+          return;
+        }
+        throw new Error(h3ForgeFailureMessage(result));
+      }
       if (requestIdRef.current !== requestId) return;
       setDraft(result.simple_prompt);
       if (result.warnings?.length) setError(result.warnings.join(' '));
@@ -184,6 +197,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
             {!supportsComputeDevice ? <p role="status" className="text-xs text-amber-300">Update DaSiWa H3 nodes in Umbra Setup and restart ComfyUI to choose CPU or GPU.</p> : null}
           </> : null}
           {error ? <p role="status" className="text-xs text-amber-300">{error}</p> : null}
+          <H3ForgeRawResponse raw={rawResponse} />
           <div className="flex gap-2">
             <button type="button" className={buttonClass} disabled={!comfyConnected || !model || !brief.trim() || drafting || (localModel && !supportsComputeDevice)} onClick={() => void forge()}>
               {drafting ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}{drafting ? 'Drafting...' : 'Draft prompt'}

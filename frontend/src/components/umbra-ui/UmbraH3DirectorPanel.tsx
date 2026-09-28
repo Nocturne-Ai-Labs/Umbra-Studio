@@ -7,6 +7,7 @@ import { UmbraH3ContinuitySessionModal } from './UmbraH3ContinuitySessionModal';
 import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
 import { openH3PromptForgeModelFolder } from '@/lib/h3PromptForgeModelFolder';
 import { UmbraH3ForgeDeviceControl, useH3ForgeComputeDevice } from './UmbraH3ForgeDeviceControl';
+import { H3ForgeRawResponse, h3ForgeFailureMessage, recoverH3ForgeDraft, type H3ForgeResponse } from './H3ForgeResponse';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import { resolveUmbraVideoQueueSourceUrl } from '@/lib/umbraVideoQueuePreview';
 import { createMiniMaxH3ReferencePack, MINIMAX_H3_IMAGE_INPAINT_ENABLED, miniMaxH3DirectorMode, parseMiniMaxH3ReferencePack, selectedMiniMaxH3DirectorItems, type MiniMaxH3DirectorControls, type MiniMaxH3DirectorItem, type MiniMaxH3DirectorMediaKind, type MiniMaxH3ReferencePackMode, type MiniMaxH3ReferencePackScope } from '../../../../shared/umbra-ui/minimaxH3Director';
@@ -60,6 +61,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
   const directorMode = miniMaxH3DirectorMode(mode, frameGuideMode, controls);
   const [forgeCatalog, setForgeCatalog] = React.useState<ForgeCatalog | null>(null);
   const [forgeError, setForgeError] = React.useState('');
+  const [forgeRawResponse, setForgeRawResponse] = React.useState('');
   const [forgeCatalogRefresh, setForgeCatalogRefresh] = React.useState(0);
   const [brief, setBrief] = React.useState(prompt);
   const [model, setModel] = React.useState('');
@@ -298,6 +300,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
     requestIdRef.current = requestId;
     setDrafting(true);
     setForgeError('');
+    setForgeRawResponse('');
     try {
       const references = [];
       const forgeReferences = continuitySource && (directorMode !== 'REF2VA' || !continuity.useReferences) ? [] : enabled;
@@ -329,8 +332,18 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
           } } : {}),
         }),
       });
-      const result = await response.json().catch(() => ({})) as { simple_prompt?: string; message?: string; warnings?: string[] };
-      if (!response.ok || !result.simple_prompt) throw new Error(result.message || 'Prompt Forge did not return a draft.');
+      const result = await response.json().catch(() => ({})) as H3ForgeResponse;
+      if (!response.ok || !result.simple_prompt) {
+        if (requestIdRef.current !== requestId) return;
+        setForgeRawResponse(result.raw || '');
+        const recovered = recoverH3ForgeDraft(result, directorMode);
+        if (recovered) {
+          setDraft(recovered);
+          setForgeError('The model returned a complete H3 prompt without DaSiWa markers. Review it before using.');
+          return;
+        }
+        throw new Error(h3ForgeFailureMessage(result));
+      }
       if (requestIdRef.current !== requestId) return;
       setDraft(result.simple_prompt);
       if (result.warnings?.length) setForgeError(result.warnings.join(' '));
@@ -609,6 +622,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
           {drafting ? <button type="button" className={iconButton} title="Cancel Prompt Forge" onClick={() => void cancelForge()}><X size={13} /></button> : null}
         </div>
         {forgeError ? <p role="status" className="mt-2 text-xs text-amber-300">{forgeError}</p> : null}
+        <H3ForgeRawResponse raw={forgeRawResponse} />
         {draft ? <div className="mt-3 space-y-2">
           <textarea value={draft} onChange={(event) => setDraft(event.target.value)} className={`${fieldClass} min-h-40 resize-y`} aria-label="Prompt Forge draft" />
           <button type="button" className="h-9 rounded border border-fuchsia-300/30 px-3 text-xs text-fuchsia-100" onClick={() => {
