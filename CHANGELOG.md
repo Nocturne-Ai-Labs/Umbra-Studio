@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.32.41 - Prompt Forge Setup And Anima Encoder Retention
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+- Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux. Close and reopen the updater after the app update to load its new managed-dependency checks.
+- H3 Prompt Forge now uses local **Llama 3.2 3B Instruct through Transformers**, with CPU/GPU selection. Stop ComfyUI, use **Umbra Updater > Managed dependencies > ComfyUI-DaSiWa-Nodes > Install / Update**, then restart ComfyUI. Updating the upstream node alone does not install Umbra's required compatibility patch.
+- For Prompt Forge, open `UmbraSetup.bat` or `./umbra-setup.sh` > **Models > DaSiWa H3 Prompt Forge Model (Optional)**. Install or verify its nine files, approximately **6 GiB / 6.4 GB**, then refresh Forge's model list. An existing complete Llama Transformers folder can be reused. The model is text-only: describe image references in your idea or reference notes.
+- GGUF/Qwen models are no longer offered by Umbra's H3 Prompt Forge, and managed H3 setup no longer installs or builds llama.cpp. Existing GGUF files and installed Python packages are not deleted; other tools may still use them.
+- Anima 3.8B users can enable **Settings > ComfyUI > Anima 3.8B > Keep text encoders loaded between prompts**, then restart Umbra-managed ComfyUI once to load the bundled node. It defaults off, needs more RAM/VRAM, and does not prevent ComfyUI from offloading under memory pressure. No additional Anima model download is needed.
+- Review the Llama 3.2 Community License and other model terms in Setup. Existing `User/` and `Tools/` are preserved. Linux managed tools may need `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit still requires host Git and Node.js 20 or newer.
+
+### Prompt Forge And Setup
+
+- Use the supported local Llama model in both the standalone H3 Prompt Forge modal and Director panel. Preserve the manual CPU/GPU choice and block drafting with an actionable message when the managed node needs updating.
+- Surface the model's raw reply when its required segment format is missing. Recover a draft only when the response contains the complete recognizable H3 section structure; incomplete replies and refusals remain errors.
+- Ship a pinned, checksum-verified Transformers model pack, including both weight shards, tokenizer, model configuration, and chat template. Keep model weights out of the portable archives.
+- Migrate the previous CPU/GPU compatibility patch to the Llama-only patch, restore the previous patch if migration fails, and preserve unrelated custom-node changes.
+- Check the required Umbra compatibility patch as well as the upstream Git revision before reporting DaSiWa ready. Expose the optional Llama pack through the updater's model action and direct node-repair messages to Umbra Updater.
+- Wrap long dependency paths and stack repair controls in narrow updater windows so labels and actions remain visible.
+
+### Anima 3.8B
+
+- Add opt-in encoder retention across TXT2IMG, IMG2IMG, Power Prompter, inpainting, and Canvas through the shared graph builder and inpaint adapter.
+- Keep the normal unload behavior when the setting is off. Report missing retention-node support before submitting a job and synchronize the bundled node during managed setup or launch.
+
+### Validation And Limits
+
+- Passed 23 targeted tests, all 55 bundled workflow audits, normal-shutdown and hung-process updater recovery cycles, desktop/mobile Setup and Forge UI checks with mocked inference, frontend type checking, lint, and build. Verified all nine Llama download sources and built the Setup/updater entrypoints.
+- Live Llama inference and Anima repeat-generation encoder retention were not rerun for this release. No personal GPU session or installation was changed. Windows and Linux archive validation runs before release publication.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: the updater no longer reports an unpatched or legacy Forge installation as ready.
+- Fixed: the updater exposes the optional Llama pack and points node repairs to the correct tool.
+- Fixed: long dependency names no longer push updater repair controls out of view on narrow windows.
+- Improved: local Prompt Forge uses one supported Transformers model without installing the optional llama.cpp runtime.
+- Improved: malformed Forge replies are inspectable, with conservative recovery of complete H3 drafts.
+- Improved: Anima 3.8B can retain its encoders between prompts across supported image workflows.
+
 ## v0.32.40 - Managed Custom-Node Checkout Hotfix
 
 ### TL;DR - Setup After Updating
