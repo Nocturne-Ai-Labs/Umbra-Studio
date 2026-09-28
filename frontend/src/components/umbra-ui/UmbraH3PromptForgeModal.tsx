@@ -195,7 +195,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
           <p className="text-xs text-zinc-500">Text-only model: describe reference images in your idea or reference notes.</p>
           {localModel ? <>
             <UmbraH3ForgeDeviceControl value={computeDevice} onChange={(value) => { setComputeDevice(value); setDraft(''); }} disabled={drafting || !supportsComputeDevice} />
-            {!supportsComputeDevice ? <p role="status" className="text-xs text-amber-300">Update DaSiWa H3 nodes in Umbra Setup and restart ComfyUI for local Llama support.</p> : null}
+            {!supportsComputeDevice ? <p role="status" className="text-xs text-amber-300">Update DaSiWa H3 nodes in Umbra Updater and restart ComfyUI for local Llama support.</p> : null}
           </> : null}
           {error ? <p role="status" className="text-xs text-amber-300">{error}</p> : null}
           <H3ForgeRawResponse raw={rawResponse} />

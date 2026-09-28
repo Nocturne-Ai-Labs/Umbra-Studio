@@ -616,7 +616,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
         <p className="mt-2 text-xs text-zinc-500">Text-only model: describe reference images in your idea or reference notes.</p>
         {localForgeModel ? <>
           <div className="mt-2"><UmbraH3ForgeDeviceControl value={computeDevice} onChange={setComputeDevice} disabled={drafting || !supportsComputeDevice} /></div>
-          {!supportsComputeDevice ? <p role="status" className="mt-2 text-xs text-amber-300">Update DaSiWa H3 nodes in Umbra Setup and restart ComfyUI for local Llama support.</p> : null}
+          {!supportsComputeDevice ? <p role="status" className="mt-2 text-xs text-amber-300">Update DaSiWa H3 nodes in Umbra Updater and restart ComfyUI for local Llama support.</p> : null}
         </> : null}
         <div className="mt-2 flex gap-2">
           <button type="button" className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded border border-fuchsia-300/30 px-2 text-xs text-fuchsia-100 disabled:opacity-40" disabled={!model || (!brief.trim() && !continuitySource) || drafting || (localForgeModel && !supportsComputeDevice)} onClick={() => void forge()}>

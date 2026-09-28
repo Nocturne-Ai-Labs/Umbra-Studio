@@ -33,7 +33,23 @@
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "9f5aef4a2748bba9486dda0a7efec7689462d7e0"
+          "minimumCommit": "9f5aef4a2748bba9486dda0a7efec7689462d7e0",
+          "requiredPatch": "DaSiWaForgeCompute.patch"
+        }
+      ]
+    },
+    {
+      "id": "minimax-h3-autoprompter",
+      "label": "DaSiWa H3 Prompt Forge",
+      "optional": true,
+      "activationFile": "llm/Llama-3.2-3B-Instruct/config.json",
+      "minimumComfyVersion": "0.37.0",
+      "modelProfiles": ["minimax-h3-autoprompter"],
+      "customNodes": [
+        {
+          "name": "ComfyUI-DaSiWa-Nodes",
+          "minimumCommit": "9f5aef4a2748bba9486dda0a7efec7689462d7e0",
+          "requiredPatch": "DaSiWaForgeCompute.patch"
         }
       ]
     }

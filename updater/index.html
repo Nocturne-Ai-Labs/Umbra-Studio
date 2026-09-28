@@ -114,6 +114,7 @@
     .dependencies h3 { margin: 0 0 8px; font-size: 14px; }
     .dependency-list { display: grid; gap: 0; margin-top: 12px; }
     .dependency-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; border-top: 1px solid var(--line); padding: 12px 0; }
+    .dependency-row > div { min-width: 0; overflow-wrap: anywhere; }
     .dependency-row strong { display: block; font-size: 12px; }
     .dependency-row span { display: block; color: var(--muted); font-size: 11px; line-height: 1.5; margin-top: 4px; }
     .dependency-row .button { flex: none; }
@@ -144,6 +145,7 @@
     .button.primary { border-color: var(--accent); background: #0c201a; color: #d8fff3; }
     @media (max-width: 760px) {
       main { grid-template-columns: 1fr; }
+      .dependency-row { flex-direction: column; align-items: stretch; }
       #release-list { max-height: 210px; }
       footer { align-items: stretch; flex-direction: column; }
       .actions, .button { width: 100%; }
@@ -494,7 +496,7 @@
             canManage && missing && (feature.active || feature.optional) ? 'Models' : '', () => launchModelSetup(feature.modelProfiles[0]));
           for (const node of feature.customNodes) {
             if (dependencyList.querySelector(`[data-node="${node.name}"]`)) continue;
-            dependencyRow(node.name, `${feature.optional ? 'Optional for Director' : 'Required'} · ${node.status === 'ready' ? 'Ready' : node.status === 'unknown' ? 'Installed; version unverified' : node.status}`, !canManage || node.status === 'ready' ? '' : 'Install / Update',
+            dependencyRow(node.name, `${feature.optional ? 'Optional' : 'Required'} · ${node.status === 'ready' ? 'Ready' : node.status === 'unknown' ? 'Installed; version unverified' : node.status}${node.reason ? ` · ${node.reason}` : ''}`, !canManage || node.status === 'ready' ? '' : 'Install / Update',
               () => startDependency('node', node.name));
             dependencyList.lastElementChild.dataset.node = node.name;
           }

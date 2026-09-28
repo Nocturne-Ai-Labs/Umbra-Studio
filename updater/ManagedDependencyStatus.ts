@@ -4,7 +4,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { compareUmbraVersions } from '../shared/appUpdate';
 import { readModelSetupManifest } from '../setup/ModelSetupCatalog';
 
-type NodeRequirement = { name: string; minimumCommit: string };
+type NodeRequirement = { name: string; minimumCommit: string; requiredPatch?: string };
 type FeatureRequirement = {
   id: string;
   label: string;
@@ -15,7 +15,7 @@ type FeatureRequirement = {
   customNodes: NodeRequirement[];
 };
 
-export type ManagedNodeStatus = { name: string; minimumCommit: string; installedCommit: string; status: 'ready' | 'missing' | 'outdated' | 'unknown' };
+export type ManagedNodeStatus = { name: string; minimumCommit: string; installedCommit: string; status: 'ready' | 'missing' | 'outdated' | 'unknown'; reason?: string };
 export type ManagedFeatureStatus = {
   id: string;
   label: string;
@@ -48,7 +48,9 @@ function readRequirements(sourceRoot: string): FeatureRequirement[] {
       throw new Error('Invalid managed tool requirement.');
     }
     for (const node of feature.customNodes) {
-      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(node.name) || !/^[a-f0-9]{40}$/.test(node.minimumCommit)) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(node.name) || !/^[a-f0-9]{40}$/.test(node.minimumCommit)
+        || (node.requiredPatch !== undefined && (typeof node.requiredPatch !== 'string'
+          || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\.patch$/.test(node.requiredPatch)))) {
         throw new Error('Invalid managed custom-node requirement.');
       }
     }
@@ -69,7 +71,7 @@ function readComfyVersion(comfyRoot: string): string {
   return '';
 }
 
-function inspectNode(comfyRoot: string, requirement: NodeRequirement): ManagedNodeStatus {
+function inspectNode(sourceRoot: string, comfyRoot: string, requirement: NodeRequirement): ManagedNodeStatus {
   const nodePath = safeChild(join(comfyRoot, 'custom_nodes'), requirement.name);
   const base = { name: requirement.name, minimumCommit: requirement.minimumCommit };
   if (!existsSync(join(nodePath, '__init__.py'))) return { ...base, installedCommit: '', status: 'missing' };
@@ -80,11 +82,26 @@ function inspectNode(comfyRoot: string, requirement: NodeRequirement): ManagedNo
   const head = spawnSync('git', ['-C', nodePath, 'rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true, timeout: 5_000 });
   const installedCommit = head.status === 0 ? head.stdout.trim() : '';
   if (!/^[a-f0-9]{40}$/.test(installedCommit)) return { ...base, installedCommit: '', status: 'unknown' };
-  if (installedCommit === requirement.minimumCommit) return { ...base, installedCommit, status: 'ready' };
-  const ancestor = spawnSync('git', ['-C', nodePath, 'merge-base', '--is-ancestor', requirement.minimumCommit, 'HEAD'], {
-    encoding: 'utf8', windowsHide: true, timeout: 5_000,
-  });
-  return { ...base, installedCommit, status: ancestor.status === 0 ? 'ready' : 'outdated' };
+  if (installedCommit !== requirement.minimumCommit) {
+    const ancestor = spawnSync('git', ['-C', nodePath, 'merge-base', '--is-ancestor', requirement.minimumCommit, 'HEAD'], {
+      encoding: 'utf8', windowsHide: true, timeout: 5_000,
+    });
+    if (ancestor.status !== 0) return { ...base, installedCommit, status: 'outdated' };
+  }
+  if (requirement.requiredPatch) {
+    const patch = safeChild(join(sourceRoot, 'setup'), requirement.requiredPatch);
+    if (!existsSync(patch)) {
+      return { ...base, installedCommit, status: 'unknown', reason: 'Bundled compatibility patch is missing; repair the Umbra Studio installation.' };
+    }
+    // The upstream commit alone cannot establish readiness for Umbra's local integration.
+    const applied = spawnSync('git', ['-C', nodePath, 'apply', '--reverse', '--check', patch], {
+      encoding: 'utf8', windowsHide: true, timeout: 5_000,
+    });
+    if (applied.status !== 0) {
+      return { ...base, installedCommit, status: 'outdated', reason: 'Umbra compatibility patch needs to be installed or refreshed.' };
+    }
+  }
+  return { ...base, installedCommit, status: 'ready' };
 }
 
 export function inspectManagedDependencies(sourceRoot: string, runtimeRoot: string) {
@@ -116,7 +133,7 @@ export function inspectManagedDependencies(sourceRoot: string, runtimeRoot: stri
       modelProfiles: feature.modelProfiles,
       missingModels,
       totalModels: files.size,
-      customNodes: feature.customNodes.map((node) => inspectNode(comfyRoot, node)),
+      customNodes: feature.customNodes.map((node) => inspectNode(sourceRoot, comfyRoot, node)),
     };
   });
   return {
