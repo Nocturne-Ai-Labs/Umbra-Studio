@@ -122,6 +122,10 @@
       "label": "LTX-2.3 Video",
       "description": "Gemma 3 FP8 encoder, LTX-2.3 text projection, separate video/audio VAEs, and x2 latent spatial upscaler for video generation. Download a compatible LTX-2.3 transformer and any chosen LoRAs separately in Model Manager. Split VAE/projection files are community extractions of Lightricks weights; the LTX-2 Community License applies. Large download."
     },
+    "ltx-2.3-preview-tae": {
+      "label": "LTX-2.3 Preview TAE (Optional)",
+      "description": "Small LTX-2.3 temporal autoencoder for optional sampler previews. Does not replace the full video or audio VAE and does not include generation weights. Requires LTX-2.3 support separately."
+    },
     "ltx-2.5": {
       "label": "LTX-2.5 Video",
       "description": "LTX-2.5 INT8 ConvRot diffusion model, Gemma 4 text encoder, video/audio VAEs, and latent upscaler for Umbra UI text-to-video, image-to-video, and experimental video-to-video. Requires accepting the Lightricks LTX-2.5 model license on Hugging Face. Very large download."
@@ -216,6 +220,27 @@
           "sourcePath": "vae/LTX23_audio_vae_bf16.safetensors",
           "bytes": 364855188,
           "sha256": "5bc10fa4adecf99dda132d916e23048cbd56797702c5fa50eb5d2079048a38c3"
+        }
+      ]
+    },
+    {
+      "id": "ltx-2.3-preview-tae",
+      "family": "Video",
+      "creator": "Lightricks / Kijai",
+      "repository": "Kijai/LTX2.3_comfy",
+      "revision": "6d980fde0d330f2fed6ff8dfdfddb06d88a004e5",
+      "license": "ltx-2-community-license-agreement",
+      "licenseUrl": "https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE",
+      "licenseNotice": "Optional community-extracted LTX-2.3 preview autoencoder; the Lightricks LTX-2 Community License applies. Not a replacement for the full video/audio VAEs.",
+      "installPolicy": "automatic",
+      "profiles": ["ltx-2.3-preview-tae"],
+      "purpose": "Optional lightweight sampler preview decoding for LTX-2.3",
+      "files": [
+        {
+          "destination": "vae/taeltx2_3.safetensors",
+          "sourcePath": "vae/taeltx2_3.safetensors",
+          "bytes": 23531296,
+          "sha256": "f0773b4e3e57318e6aa4dd4a35e1d16213a5f160fbc0376163f06888bbcbe246"
         }
       ]
     },

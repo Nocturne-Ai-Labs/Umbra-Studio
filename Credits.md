@@ -566,6 +566,19 @@ upstream default branches. They are not frozen to Umbra-selected commit hashes.
 - Creator / maintainer: Kijai and contributors
 - License: GPL-3.0 (installed as a separate ComfyUI extension; not copied into Umbra source)
 - LTX-2.3 workflow role: VAE loaders and optional sampling preview helpers
+  - Experimental `PatchTritonVAE` is available only when a compatible Triton runtime is installed separately; Setup does not install Triton for this workflow.
+
+### ComfyUI-LTXVideo
+- Project: https://github.com/Lightricks/ComfyUI-LTXVideo
+- Creator / maintainer: Lightricks and contributors
+- License: LTX-2 Community License (installed as a separate ComfyUI extension; not copied into Umbra source)
+- LTX-2.3 workflow role: optional `LTXVSpatioTemporalTiledVAEDecode` for spatial/temporal tiled video decoding
+
+### comfyui-WhiteRabbit
+- Project: https://github.com/Artificial-Sweetener/comfyui-WhiteRabbit
+- Creator / maintainer: Artificial-Sweetener and contributors
+- License: AGPL-3.0-only (installed as a separate ComfyUI extension; not copied into Umbra source)
+- LTX-2.3 workflow role: optional `UpscaleWithModelAdvanced` pixel upscaling; an upscale model must be supplied separately
 
 ### ComfyUI-Inpaint-CropAndStitch
 - Project: https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch

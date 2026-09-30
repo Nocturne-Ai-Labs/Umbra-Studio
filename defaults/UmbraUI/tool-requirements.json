@@ -74,6 +74,34 @@
           "minimumCommit": "d3cfe21625e5170126ce06fbfcfe1d88108688c3"
         }
       ]
+    },
+    {
+      "id": "ltx23-omniforge-tiled-decode",
+      "label": "LTX-2.3 tiled video VAE decode",
+      "optional": true,
+      "activationFile": "diffusion_models/ltx-2.3-22b-dev_transformer_only_bf16.safetensors",
+      "minimumComfyVersion": "0.37.0",
+      "modelProfiles": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-LTXVideo",
+          "minimumCommit": "5722b53a08daec57f5442347b235cb84df0afbe7"
+        }
+      ]
+    },
+    {
+      "id": "ltx23-omniforge-pixel-upscale",
+      "label": "LTX-2.3 advanced pixel upscale",
+      "optional": true,
+      "activationFile": "diffusion_models/ltx-2.3-22b-dev_transformer_only_bf16.safetensors",
+      "minimumComfyVersion": "0.37.0",
+      "modelProfiles": [],
+      "customNodes": [
+        {
+          "name": "comfyui-WhiteRabbit",
+          "minimumCommit": "4815da41473c99400da6ca4127f0e324dbfd865a"
+        }
+      ]
     }
   ]
 }

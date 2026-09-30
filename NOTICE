@@ -26,6 +26,12 @@ LTX-2.3 OmniForge integration notice:
   as separate ComfyUI extensions by Setup/updater. No LTX OmniForge upstream node
   source is copied into or modified in Umbra Studio for this integration. The existing
   MiniMax H3 DaSiWa compatibility patch remains a separate managed-install change.
+- Optional LTX video tiling nodes come from Lightricks/ComfyUI-LTXVideo under the
+  LTX-2 Community License. Optional advanced pixel upscaling comes from
+  Artificial-Sweetener/comfyui-WhiteRabbit under AGPL-3.0-only. Setup/updater
+  installs each as a separate upstream checkout on request; no node code is vendored.
+  KJNodes' experimental PatchTritonVAE additionally requires a compatible Triton
+  runtime, which this integration does not install automatically.
 - LTX-2.3 model components downloaded separately are subject to the LTX-2 Community
   License (https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE). The Gemma 3
   encoder has separate Gemma terms (https://ai.google.dev/gemma/terms). Umbra's MIT
