@@ -582,7 +582,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     const selectedKey = txt2imgOutputFolder.toLowerCase();
     return pinnedOutputFolders.find((folder) => folder.toLowerCase() === selectedKey) || txt2imgOutputFolder;
   }, [pinnedOutputFolders, txt2imgOutputFolder]);
-  const canvasEnabled = remoteMode !== 'phone';
+  const canvasEnabled = false; // Temporarily hidden until the Canvas UX is ready for feedback.
   const [activeMode, setActiveMode] = React.useState<UmbraGenerationMode>(() => (
     initialDeviceResume?.activeMode
       ? normalizeUmbraGenerationMode(initialDeviceResume.activeMode)

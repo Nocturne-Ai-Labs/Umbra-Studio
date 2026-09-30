@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is temporarily disabled and is not ready for feedback.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+### Workspace Availability
+
+- Hide the Canvas tab for now without removing its implementation or changing its generation logic. Saved Canvas workspace navigation returns to TXT2IMG while Canvas is disabled.
+- Carry the Mobile, Canvas, and Video readiness warnings in every package release. Video generation remains available; no video pipeline behavior changes.
+
+### Fixes And Quality-of-Life Recap
+
+- Improved: Canvas stays out of the navigation until its interface is ready for feedback.
+- Improved: release notes clearly state the availability and maturity of Mobile, Canvas, and Video.
+
 ## v0.32.43 - Portable Anima Node Sync Hotfix
 
 ### TL;DR - Setup After Updating
