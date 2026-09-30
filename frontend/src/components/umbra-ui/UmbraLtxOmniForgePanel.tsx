@@ -598,8 +598,9 @@ export function UmbraLtxOmniForgePanel({
               (fuseNormSilu) => change({ tritonVae: { ...controls.tritonVae, fuseNormSilu } }))}
             {boolean('Channels last', controls.tritonVae.channelsLast,
               (channelsLast) => change({ tritonVae: { ...controls.tritonVae, channelsLast } }))}
-            {boolean('INT8 conv', controls.tritonVae.int8Conv,
-              (int8Conv) => change({ tritonVae: { ...controls.tritonVae, int8Conv } }))}
+            <label className="inline-flex items-center gap-2 text-xs text-zinc-500" title="Unavailable for the LTX VAE">
+              <input type="checkbox" checked={false} disabled readOnly /> INT8 conv
+            </label>
             {boolean('Autotune', controls.tritonVae.autotune,
               (autotune) => change({ tritonVae: { ...controls.tritonVae, autotune } }))}
           </div>}
@@ -612,7 +613,7 @@ export function UmbraLtxOmniForgePanel({
             {resource('Preview VAE', controls.samplingPreview.previewVae, catalog.previewVaes,
               (previewVae) => change({ samplingPreview: { ...controls.samplingPreview, previewVae } }))}
             {numeric('Preview rate', controls.samplingPreview.previewRate,
-              (previewRate) => change({ samplingPreview: { ...controls.samplingPreview, previewRate } }), 1, 240)}
+              (previewRate) => change({ samplingPreview: { ...controls.samplingPreview, previewRate } }), 1, 60)}
           </div>}
         </section>}
         {wired('colorTransfer') && <section aria-label="Color transfer" className="space-y-2">

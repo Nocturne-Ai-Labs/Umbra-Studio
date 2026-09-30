@@ -1,0 +1,883 @@
+{
+  "model": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "ltx-2.3-22b-dev_transformer_only_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "LTX OmniForge model",
+      "umbra_role": "ltx23_omniforge_model",
+      "umbra_resources": [
+        {
+          "id": "omniforge.model",
+          "inputName": "unet_name",
+          "kind": "unet",
+          "label": "LTX-2.3 transformer",
+          "required": true
+        }
+      ],
+      "umbra_media_type": "video",
+      "umbra_video_family": "ltx23",
+      "umbra_ui_pipelines": [
+        {
+          "feature": "txt2vid",
+          "modelFamily": "LTX-2.3 OmniForge",
+          "modelSources": [
+            "unet",
+            "gguf"
+          ],
+          "priority": 100
+        },
+        {
+          "feature": "img2vid",
+          "modelFamily": "LTX-2.3 OmniForge",
+          "modelSources": [
+            "unet",
+            "gguf"
+          ],
+          "priority": 100
+        }
+      ],
+      "umbra_attribution": {
+        "workflow": "DaSiWa LTX-2.3 OmniForge V5.0",
+        "workflowAuthor": "DaSiWa / darksidewalker",
+        "director": "Jonathan Watkins (WhatDreamsCost), PodJamz fork",
+        "nodes": [
+          "DaSiWa Nodes",
+          "WhatDreamsCost",
+          "KJNodes",
+          "Lightricks ComfyUI-LTXVideo",
+          "WhiteRabbit (optional)",
+          "ComfyUI"
+        ],
+        "integration": "Umbra-owned API wiring and frontend; upstream workflow and custom-node source are not vendored or modified."
+      }
+    }
+  },
+  "encoder": {
+    "class_type": "DualCLIPLoader",
+    "inputs": {
+      "clip_name1": "gemma_3_12B_it_fp8_scaled.safetensors",
+      "clip_name2": "ltx-2.3_text_projection_bf16.safetensors",
+      "type": "ltxv",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "LTX OmniForge encoder",
+      "umbra_resources": [
+        {
+          "id": "omniforge.encoder",
+          "inputName": "clip_name1",
+          "kind": "text_encoder",
+          "label": "Gemma text encoder",
+          "required": true
+        },
+        {
+          "id": "omniforge.connector",
+          "inputName": "clip_name2",
+          "kind": "text_encoder",
+          "label": "LTX-2.3 text projection",
+          "required": true
+        }
+      ]
+    }
+  },
+  "video_vae": {
+    "class_type": "VAELoaderKJ",
+    "inputs": {
+      "vae_name": "LTX23_video_vae_bf16.safetensors",
+      "device": "main_device",
+      "weight_dtype": "bf16"
+    },
+    "_meta": {
+      "title": "LTX OmniForge video_vae",
+      "umbra_resources": [
+        {
+          "id": "omniforge.video_vae",
+          "inputName": "vae_name",
+          "kind": "vae",
+          "label": "LTX-2.3 video VAE",
+          "required": true
+        }
+      ]
+    }
+  },
+  "audio_vae": {
+    "class_type": "VAELoaderKJ",
+    "inputs": {
+      "vae_name": "LTX23_audio_vae_bf16.safetensors",
+      "device": "main_device",
+      "weight_dtype": "bf16"
+    },
+    "_meta": {
+      "title": "LTX OmniForge audio_vae",
+      "umbra_resources": [
+        {
+          "id": "omniforge.audio_vae",
+          "inputName": "vae_name",
+          "kind": "vae",
+          "label": "LTX-2.3 audio VAE",
+          "required": true
+        }
+      ]
+    }
+  },
+  "loras": {
+    "class_type": "DaSiWa_LTX2LoraLoader",
+    "inputs": {
+      "model": [
+        "model",
+        0
+      ],
+      "clip": [
+        "encoder",
+        0
+      ],
+      "model_type": "LTX-2.3",
+      "use_cache": false,
+      "stack_data": "[]"
+    },
+    "_meta": {
+      "title": "LTX OmniForge loras"
+    }
+  },
+  "prompt": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": "A scenic mountain lake at sunrise, a gentle camera move and natural ambient sound."
+    },
+    "_meta": {
+      "title": "LTX OmniForge prompt",
+      "umbra_role": "positive_prompt"
+    }
+  },
+  "negative": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "loras",
+        1
+      ],
+      "text": ""
+    },
+    "_meta": {
+      "title": "LTX OmniForge negative",
+      "umbra_role": "negative_prompt"
+    }
+  },
+  "director": {
+    "class_type": "LTXDirector",
+    "inputs": {
+      "timeline_data": "{\"mainTrackEnabled\":true,\"audioTrackEnabled\":false,\"motionTrackEnabled\":false,\"global_prompt\":\"A scenic mountain lake at sunrise, a gentle camera move and natural ambient sound.\",\"retake_global_prompt\":\"A scenic mountain lake at sunrise, a gentle camera move and natural ambient sound.\",\"overrideAudio\":false,\"inpaint_audio\":true,\"retakeMode\":false,\"retakeStart\":24,\"retakeLength\":48,\"retakePrompt\":\"\",\"retakeStrength\":1,\"retakeVideo\":null,\"normalStartFrame\":0,\"normalDurationFrames\":121,\"segments\":[],\"audioSegments\":[],\"motionSegments\":[]}",
+      "local_prompts": "",
+      "segment_lengths": "",
+      "guide_strength": "",
+      "global_prompt": [
+        "prompt",
+        0
+      ],
+      "start_frame": 0,
+      "end_frame": 121,
+      "duration_frames": 121,
+      "start_second": 0,
+      "end_second": 5.041666666666667,
+      "duration_seconds": 5.041666666666667,
+      "frame_rate": 24,
+      "resize_method": "maintain aspect ratio",
+      "img_compression": 18,
+      "epsilon": 0.001,
+      "use_custom_audio": false,
+      "use_custom_motion": false,
+      "override_audio": false,
+      "inpaint_audio": true,
+      "model": [
+        "loras",
+        0
+      ],
+      "clip": [
+        "loras",
+        1
+      ],
+      "audio_vae": [
+        "audio_vae",
+        0
+      ],
+      "display_mode": "seconds",
+      "custom_width": 1280,
+      "custom_height": 704,
+      "divisible_by": 32
+    },
+    "_meta": {
+      "title": "LTX OmniForge director",
+      "umbra_role": "ltx23_omniforge_director"
+    }
+  },
+  "torch_settings": {
+    "class_type": "ModelPatchTorchSettings",
+    "inputs": {
+      "model": [
+        "director",
+        0
+      ],
+      "enable_fp16_accumulation": true
+    },
+    "_meta": {
+      "title": "LTX OmniForge torch_settings"
+    }
+  },
+  "conditioning": {
+    "class_type": "LTXVConditioning",
+    "inputs": {
+      "positive": [
+        "director",
+        1
+      ],
+      "negative": [
+        "negative",
+        0
+      ],
+      "frame_rate": 24
+    },
+    "_meta": {
+      "title": "LTX OmniForge conditioning"
+    }
+  },
+  "noise": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 0
+    },
+    "_meta": {
+      "title": "LTX OmniForge noise"
+    }
+  },
+  "latent_upscaler": {
+    "class_type": "LatentUpscaleModelLoader",
+    "inputs": {
+      "model_name": "ltx-2.3-spatial-upscaler-x2-1.1.safetensors"
+    },
+    "_meta": {
+      "title": "LTX OmniForge latent_upscaler",
+      "umbra_resources": [
+        {
+          "id": "omniforge.latent_upscaler",
+          "inputName": "model_name",
+          "kind": "model",
+          "label": "LTX-2.3 x2 latent upscaler",
+          "required": true
+        }
+      ]
+    }
+  },
+  "pass_1_guide": {
+    "class_type": "LTXDirectorGuide",
+    "inputs": {
+      "positive": [
+        "conditioning",
+        0
+      ],
+      "negative": [
+        "conditioning",
+        1
+      ],
+      "vae": [
+        "video_vae",
+        0
+      ],
+      "latent": [
+        "director",
+        2
+      ],
+      "guide_data": [
+        "director",
+        4
+      ],
+      "motion_guide_data": [
+        "director",
+        5
+      ],
+      "model": [
+        "torch_settings",
+        0
+      ],
+      "ic_lora_name": "None",
+      "ic_lora_strength": 1,
+      "scale_by": 0.5,
+      "upscale_method": "bicubic",
+      "image_attention_strength": 0.8,
+      "crop": "center",
+      "auto_snap_ic_grid": true,
+      "use_tiled_encode": false,
+      "tile_size": 512,
+      "tile_overlap": 128,
+      "retake_mode": false
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_1_guide"
+    }
+  },
+  "pass_1_guider": {
+    "class_type": "CFGGuider",
+    "inputs": {
+      "model": [
+        "pass_1_guide",
+        3
+      ],
+      "positive": [
+        "pass_1_guide",
+        0
+      ],
+      "negative": [
+        "pass_1_guide",
+        1
+      ],
+      "cfg": 1
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_1_guider"
+    }
+  },
+  "pass_1_sigmas": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "pass_1_guide",
+        3
+      ],
+      "scheduler": "linear_quadratic",
+      "steps": 8,
+      "denoise": 1
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_1_sigmas"
+    }
+  },
+  "pass_1_sampler": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler_cfg_pp"
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_1_sampler"
+    }
+  },
+  "pass_1_av": {
+    "class_type": "LTXVConcatAVLatent",
+    "inputs": {
+      "video_latent": [
+        "pass_1_guide",
+        2
+      ],
+      "audio_latent": [
+        "director",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_1_av"
+    }
+  },
+  "pass_1_sample": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "noise",
+        0
+      ],
+      "guider": [
+        "pass_1_guider",
+        0
+      ],
+      "sampler": [
+        "pass_1_sampler",
+        0
+      ],
+      "sigmas": [
+        "pass_1_sigmas",
+        0
+      ],
+      "latent_image": [
+        "pass_1_av",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_1_sample"
+    }
+  },
+  "pass_1_separate": {
+    "class_type": "LTXVSeparateAVLatent",
+    "inputs": {
+      "av_latent": [
+        "pass_1_sample",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_1_separate"
+    }
+  },
+  "pass_1_crop": {
+    "class_type": "LTXDirectorCropGuides",
+    "inputs": {
+      "positive": [
+        "pass_1_guide",
+        0
+      ],
+      "negative": [
+        "pass_1_guide",
+        1
+      ],
+      "latent": [
+        "pass_1_separate",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_1_crop"
+    }
+  },
+  "pass_2_upscale": {
+    "class_type": "LTXVLatentUpsampler",
+    "inputs": {
+      "samples": [
+        "pass_1_crop",
+        2
+      ],
+      "upscale_model": [
+        "latent_upscaler",
+        0
+      ],
+      "vae": [
+        "video_vae",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_2_upscale"
+    }
+  },
+  "pass_2_guide": {
+    "class_type": "LTXDirectorGuide",
+    "inputs": {
+      "positive": [
+        "pass_1_crop",
+        0
+      ],
+      "negative": [
+        "pass_1_crop",
+        1
+      ],
+      "vae": [
+        "video_vae",
+        0
+      ],
+      "latent": [
+        "pass_2_upscale",
+        0
+      ],
+      "guide_data": [
+        "director",
+        4
+      ],
+      "motion_guide_data": [
+        "director",
+        5
+      ],
+      "model": [
+        "torch_settings",
+        0
+      ],
+      "ic_lora_name": "None",
+      "ic_lora_strength": 1,
+      "scale_by": 1,
+      "upscale_method": "bicubic",
+      "image_attention_strength": 0.8,
+      "crop": "center",
+      "auto_snap_ic_grid": true,
+      "use_tiled_encode": false,
+      "tile_size": 512,
+      "tile_overlap": 128,
+      "retake_mode": false
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_2_guide"
+    }
+  },
+  "pass_2_guider": {
+    "class_type": "CFGGuider",
+    "inputs": {
+      "model": [
+        "pass_2_guide",
+        3
+      ],
+      "positive": [
+        "pass_2_guide",
+        0
+      ],
+      "negative": [
+        "pass_2_guide",
+        1
+      ],
+      "cfg": 1
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_2_guider"
+    }
+  },
+  "pass_2_sigmas": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "pass_2_guide",
+        3
+      ],
+      "scheduler": "linear_quadratic",
+      "steps": 4,
+      "denoise": 0.4
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_2_sigmas"
+    }
+  },
+  "pass_2_sampler": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler_cfg_pp"
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_2_sampler"
+    }
+  },
+  "pass_2_av": {
+    "class_type": "LTXVConcatAVLatent",
+    "inputs": {
+      "video_latent": [
+        "pass_2_guide",
+        2
+      ],
+      "audio_latent": [
+        "pass_1_separate",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_2_av"
+    }
+  },
+  "pass_2_sample": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "noise",
+        0
+      ],
+      "guider": [
+        "pass_2_guider",
+        0
+      ],
+      "sampler": [
+        "pass_2_sampler",
+        0
+      ],
+      "sigmas": [
+        "pass_2_sigmas",
+        0
+      ],
+      "latent_image": [
+        "pass_2_av",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_2_sample"
+    }
+  },
+  "pass_2_separate": {
+    "class_type": "LTXVSeparateAVLatent",
+    "inputs": {
+      "av_latent": [
+        "pass_2_sample",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_2_separate"
+    }
+  },
+  "pass_2_crop": {
+    "class_type": "LTXDirectorCropGuides",
+    "inputs": {
+      "positive": [
+        "pass_2_guide",
+        0
+      ],
+      "negative": [
+        "pass_2_guide",
+        1
+      ],
+      "latent": [
+        "pass_2_separate",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_2_crop"
+    }
+  },
+  "pass_3_crop_input": {
+    "class_type": "LTXVCropGuides",
+    "inputs": {
+      "positive": [
+        "pass_2_crop",
+        0
+      ],
+      "negative": [
+        "pass_2_crop",
+        1
+      ],
+      "latent": [
+        "pass_2_crop",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_3_crop_input"
+    }
+  },
+  "pass_3_guide": {
+    "class_type": "LTXDirectorGuide",
+    "inputs": {
+      "positive": [
+        "pass_3_crop_input",
+        0
+      ],
+      "negative": [
+        "pass_3_crop_input",
+        1
+      ],
+      "vae": [
+        "video_vae",
+        0
+      ],
+      "latent": [
+        "pass_3_crop_input",
+        2
+      ],
+      "guide_data": [
+        "director",
+        4
+      ],
+      "motion_guide_data": [
+        "director",
+        5
+      ],
+      "model": [
+        "torch_settings",
+        0
+      ],
+      "ic_lora_name": "None",
+      "ic_lora_strength": 1,
+      "scale_by": 1,
+      "upscale_method": "bicubic",
+      "image_attention_strength": 0.9,
+      "crop": "center",
+      "auto_snap_ic_grid": true,
+      "use_tiled_encode": false,
+      "tile_size": 512,
+      "tile_overlap": 128,
+      "retake_mode": false
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_3_guide"
+    }
+  },
+  "pass_3_guider": {
+    "class_type": "CFGGuider",
+    "inputs": {
+      "model": [
+        "pass_3_guide",
+        3
+      ],
+      "positive": [
+        "pass_3_guide",
+        0
+      ],
+      "negative": [
+        "pass_3_guide",
+        1
+      ],
+      "cfg": 1
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_3_guider"
+    }
+  },
+  "pass_3_sigmas": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "pass_3_guide",
+        3
+      ],
+      "scheduler": "linear_quadratic",
+      "steps": 2,
+      "denoise": 0.2
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_3_sigmas"
+    }
+  },
+  "pass_3_sampler": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler_cfg_pp"
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_3_sampler"
+    }
+  },
+  "pass_3_av": {
+    "class_type": "LTXVConcatAVLatent",
+    "inputs": {
+      "video_latent": [
+        "pass_3_guide",
+        2
+      ],
+      "audio_latent": [
+        "pass_2_separate",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_3_av"
+    }
+  },
+  "pass_3_sample": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "noise",
+        0
+      ],
+      "guider": [
+        "pass_3_guider",
+        0
+      ],
+      "sampler": [
+        "pass_3_sampler",
+        0
+      ],
+      "sigmas": [
+        "pass_3_sigmas",
+        0
+      ],
+      "latent_image": [
+        "pass_3_av",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_3_sample"
+    }
+  },
+  "pass_3_separate": {
+    "class_type": "LTXVSeparateAVLatent",
+    "inputs": {
+      "av_latent": [
+        "pass_3_sample",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_3_separate"
+    }
+  },
+  "pass_3_crop": {
+    "class_type": "LTXVCropGuides",
+    "inputs": {
+      "positive": [
+        "pass_3_guide",
+        0
+      ],
+      "negative": [
+        "pass_3_guide",
+        1
+      ],
+      "latent": [
+        "pass_3_separate",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge pass_3_crop"
+    }
+  },
+  "decode": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "vae": [
+        "video_vae",
+        0
+      ],
+      "samples": [
+        "pass_3_crop",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge decode"
+    }
+  },
+  "audio_decode": {
+    "class_type": "LTXVAudioVAEDecode",
+    "inputs": {
+      "samples": [
+        "pass_3_separate",
+        1
+      ],
+      "audio_vae": [
+        "audio_vae",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "LTX OmniForge audio_decode"
+    }
+  },
+  "output": {
+    "class_type": "DaSiWa_EnhancedVideoCombine",
+    "inputs": {
+      "images": [
+        "decode",
+        0
+      ],
+      "audio": [
+        "audio_decode",
+        0
+      ],
+      "frame_rate": 24,
+      "codec": "Auto",
+      "container": "Auto",
+      "bit_depth": "Auto",
+      "quality": 20,
+      "log_level": "Standard",
+      "pingpong": false,
+      "save_metadata": true,
+      "filename_prefix": "video/Umbra_LTX23_OmniForge",
+      "save_output": true,
+      "pass_frames": false,
+      "crop_to_audio": false,
+      "audio_codec": "Auto",
+      "audio_bitrate": "192k",
+      "save_first_frame": false,
+      "save_last_frame": false,
+      "seed": 0
+    },
+    "_meta": {
+      "title": "LTX OmniForge output",
+      "umbra_role": "video_output"
+    }
+  }
+}

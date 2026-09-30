@@ -4,6 +4,7 @@ import type { MiniMaxH3DirectorControls } from '../../../shared/umbra-ui/minimax
 import type { UmbraUiPipelineSelection } from '../../../shared/umbra-ui/pipelineTypes';
 import type { UmbraLtxStoryboardControls } from '../../../shared/umbra-ui/videoStoryboard';
 import type { UmbraVideoLoraEntry } from '../../../shared/umbra-ui/videoLoraStack';
+import type { Ltx23OmniForgeControls } from '../../../shared/umbra-ui/ltx23OmniForge';
 import type {
   UmbraLtxExtendedControls,
   UmbraLtxExtendedSequenceMetadata,
@@ -104,6 +105,7 @@ export interface PowerPrompterLtxVideoControls {
   keyframes: PowerPrompterLtxVideoKeyframe[];
   storyboard: UmbraLtxStoryboardControls;
   extended: UmbraLtxExtendedControls;
+  omniForge: Ltx23OmniForgeControls;
 }
 
 export interface PowerPrompterLtx25VideoControls {

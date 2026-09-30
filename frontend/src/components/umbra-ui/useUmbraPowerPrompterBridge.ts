@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { normalizeMiniMaxH3Guides } from '../../../../shared/umbra-ui/minimaxH3Guides';
+import { normalizeLtx23OmniForgeControls, buildLtx23DirectorInputs } from '../../../../shared/umbra-ui/ltx23OmniForge';
 import { miniMaxH3DirectorIssue, normalizeMiniMaxH3Director, selectedMiniMaxH3DirectorItems } from '../../../../shared/umbra-ui/minimaxH3Director';
 import { hasUmbraVideoSourceDimensions, normalizeUmbraVideoQueueSources } from '@/lib/umbraVideoQueueSource';
 import { resolveUmbraVideoQueueNegativePrompt } from '@/lib/umbraVideoQueuePrompt';
@@ -188,6 +189,7 @@ function getUmbraModelCatalogValues(
 }
 
 export interface UmbraVideoModelCatalog {
+  attentionBackends: string[];
   diffusionModels: string[];
   checkpoints: string[];
   loras: string[];
@@ -386,6 +388,7 @@ const EMPTY_MODEL_CATALOG: UmbraModelCatalog = {
 };
 
 const EMPTY_VIDEO_MODEL_CATALOG: UmbraVideoModelCatalog = {
+  attentionBackends: [],
   diffusionModels: [],
   checkpoints: [],
   loras: [],
@@ -931,6 +934,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       fetchNodeAvailable('RTXVideoSuperResolution').catch(() => false),
       fetchNodeAvailable('UmbraLTXDirector').catch(() => false),
       fetchNodeRequiredInputs('KSamplerAdvanced'),
+      fetchNodeRequiredInputs('DualCLIPLoader').catch(() => ({})),
+      fetchNodeRequiredInputs('DualCLIPLoaderGGUF').catch(() => ({})),
+      fetchNodeRequiredInputs('ModelAttentionBackend').catch(() => ({})),
+      fetchNodeRequiredInputs('VAELoaderKJ').catch(() => ({})),
     ]).then(([
       unetInputs,
       ggufUnetInputs,
@@ -946,9 +953,14 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       rtxAvailable,
       umbraDirectorAvailable,
       samplerInputs,
+      dualClipInputs,
+      dualGgufClipInputs,
+      attentionInputs,
+      kjVaeInputs,
     ]) => {
       if (canceled) return;
       setVideoModelCatalog({
+        attentionBackends: readObjectInfoChoices(attentionInputs, 'attention'),
         diffusionModels: Array.from(new Set([
           ...readObjectInfoChoices(unetInputs, 'unet_name'),
           ...readObjectInfoChoices(ggufUnetInputs, 'unet_name'),
@@ -958,8 +970,12 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         textEncoders: Array.from(new Set([
           ...readObjectInfoChoices(clipInputs, 'clip_name'),
           ...readObjectInfoChoices(ggufClipInputs, 'clip_name'),
+          ...readObjectInfoChoices(dualClipInputs, 'clip_name1'),
+          ...readObjectInfoChoices(dualClipInputs, 'clip_name2'),
+          ...readObjectInfoChoices(dualGgufClipInputs, 'clip_name1'),
+          ...readObjectInfoChoices(dualGgufClipInputs, 'clip_name2'),
         ])),
-        vaes: readObjectInfoChoices(vaeInputs, 'vae_name'),
+        vaes: Array.from(new Set([...readObjectInfoChoices(vaeInputs, 'vae_name'), ...readObjectInfoChoices(kjVaeInputs, 'vae_name')])),
         clipVision: readObjectInfoChoices(clipVisionInputs, 'clip_name'),
         latentUpscaleModels: readObjectInfoChoices(latentUpscaleInputs, 'model_name'),
         frameInterpolationModels: readObjectInfoChoices(frameInterpolationInputs, 'model_name'),
@@ -1832,6 +1848,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     const requestedExtended = normalizeUmbraLtxExtendedControls(options.video.ltx.extended);
     const extendedEnabled = options.video.family === 'ltx23'
       && requestedExtended.enabled
+      && options.video.ltx.omniForge?.enabled !== true
       && options.video.ltx.storyboard?.enabled !== true;
     const prompt = extendedEnabled
       ? String(requestedExtended.clips[0]?.prompt || '').trim()
@@ -1850,6 +1867,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       },
       ltx: {
         ...options.video.ltx,
+        omniForge: normalizeLtx23OmniForgeControls(options.video.ltx.omniForge),
         keyframes: options.video.ltx.keyframes.map((keyframe) => ({ ...keyframe })),
         storyboard: {
           enabled: !extendedEnabled && options.video.ltx.storyboard?.enabled === true,
@@ -1877,13 +1895,41 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     };
     const extendedStartsFromImage = normalizeUmbraVideoQueueSources(video, extendedEnabled);
     const directorEnabled = video.family === 'minimax_h3' && video.minimaxH3.director.enabled;
-    if (!directorEnabled && !hasUmbraVideoSourceDimensions(video)) {
+    const omniForgeEnabled = video.family === 'ltx23' && video.ltx.omniForge.enabled;
+    if (omniForgeEnabled) {
+      video.ltx.storyboard.enabled = false;
+      video.ltx.extended.enabled = false;
+      if (video.mode !== 'text_to_video' && video.mode !== 'image_to_video') throw new Error('Use image/text segments in the LTX OmniForge timeline.');
+      const controls = video.ltx.omniForge;
+      if (video.mode === 'image_to_video' && !controls.retake.enabled
+        && (!controls.mainTrackEnabled || !controls.segments.some((segment) => segment.type === 'image'))) {
+        throw new Error('Add an image to the LTX OmniForge main timeline before using Image to Video, or select Text to Video.');
+      }
+      if (controls.mainTrackEnabled && !controls.retake.enabled) for (const segment of controls.segments) {
+        if (segment.type !== 'image') continue;
+        segment.sourceImageName = await ensureUmbraUiQueuedMedia('image', segment.sourcePath || '', segment.sourceImageName, 'LTX timeline image');
+      }
+      if (controls.audioTrackEnabled && controls.useCustomAudio && !controls.overrideAudio && !controls.retake.enabled) for (const segment of controls.audioSegments) {
+        segment.audioFile = await ensureUmbraUiQueuedMedia('audio', segment.sourcePath || '', segment.audioFile, 'LTX timeline audio');
+      }
+      if (controls.motionTrackEnabled && controls.useCustomMotion && !controls.retake.enabled) for (const segment of controls.motionSegments) {
+        segment.videoFile = await ensureUmbraUiQueuedMedia('video', segment.sourcePath || '', segment.videoFile, 'LTX timeline motion');
+      }
+      if (controls.retake.enabled && controls.retake.video) {
+        controls.retake.video.imageFile = await ensureUmbraUiQueuedMedia('video', controls.retake.video.sourcePath || '', controls.retake.video.imageFile, 'LTX retake video');
+      }
+      for (const mark of controls.watermarks) if (mark.enabled) {
+        mark.imageName = await ensureUmbraUiQueuedMedia('image', mark.sourcePath || '', mark.imageName, 'LTX watermark');
+      }
+      buildLtx23DirectorInputs(controls, video.fps, video.frames, prompt);
+    }
+    if (!directorEnabled && !omniForgeEnabled && !hasUmbraVideoSourceDimensions(video)) {
       throw new Error('Umbra could not read the source media dimensions. Reload the source before queueing.');
     }
     const targetDimensions = resolveUmbraVideoTargetDimensions({
       resolutionPreset: video.resolutionPreset,
-      sourceWidth: video.mode === 'text_to_video' || directorEnabled ? 0 : video.sourceWidth,
-      sourceHeight: video.mode === 'text_to_video' || directorEnabled ? 0 : video.sourceHeight,
+      sourceWidth: video.mode === 'text_to_video' || directorEnabled || omniForgeEnabled ? 0 : video.sourceWidth,
+      sourceHeight: video.mode === 'text_to_video' || directorEnabled || omniForgeEnabled ? 0 : video.sourceHeight,
       fallbackAspect: video.aspectRatio,
     });
     video.width = targetDimensions.targetWidth;
@@ -1917,13 +1963,13 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     const modelFamily = video.family === 'wan22'
       ? 'Wan 2.2'
       : video.family === 'ltx23'
-        ? 'LTX-2.3'
+        ? omniForgeEnabled ? 'LTX-2.3 OmniForge' : 'LTX-2.3'
         : video.family === 'ltx25' ? 'LTX-2.5' : directorEnabled ? 'MiniMax H3 Director' : 'MiniMax H3';
     const feature: UmbraUiPipelineFeature = video.mode === 'video_to_video'
       ? 'vid2vid'
       : video.mode === 'reference_to_video' ? 'ref2vid'
       : video.mode === 'image_to_video' ? 'img2vid' : 'txt2vid';
-    const modelSource = video.family === 'ltx23' ? 'checkpoint' : 'unet';
+    const modelSource = omniForgeEnabled ? video.ltx.omniForge.modelSource === 'gguf' ? 'gguf' : 'unet' : video.family === 'ltx23' ? 'checkpoint' : 'unet';
     const pipelineMatch = resolveUmbraUiPipeline(workflows, feature, modelFamily, modelSource);
     if (!pipelineMatch.workflow) throw new Error(pipelineMatch.error || 'No compatible video pipeline is available.');
 
@@ -1934,7 +1980,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         item.sourceName = await ensureUmbraUiQueuedMedia(item.kind, item.sourcePath, item.sourceName, `Director ${item.kind}`);
         if (!item.sourceName) throw new Error('ComfyUI did not stage a Director media slot.');
       }
-    } else if (video.mode === 'image_to_video' || video.mode === 'reference_to_video') {
+    } else if (!omniForgeEnabled && (video.mode === 'image_to_video' || video.mode === 'reference_to_video')) {
       if (!video.sourceImagePath && !video.sourceImageName) throw new Error('Choose a source image for image-to-video.');
       const stageFrame = async (label: string, path: string, name: string): Promise<string> => {
         if (!path && !name) throw new Error(`Choose a ${label.toLowerCase()} image.`);
@@ -1968,7 +2014,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       }
     }
 
-    if (video.family === 'ltx23' && !video.ltx.extended.enabled && video.ltx.keyframes.length > 0) {
+    if (video.family === 'ltx23' && !omniForgeEnabled && !video.ltx.extended.enabled && video.ltx.keyframes.length > 0) {
       for (const keyframe of video.ltx.keyframes) {
         keyframe.sourceImagePath = String(keyframe.sourceImagePath || '').trim();
         keyframe.sourceImageName = String(keyframe.sourceImageName || '').trim();
@@ -2017,7 +2063,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       video.sourceVideoName = await stageMedia('video', video.sourceVideoPath, video.sourceVideoName);
       if (!video.sourceVideoName) throw new Error('ComfyUI did not return a staged source video name.');
     }
-    video.sourceAudioName = await stageMedia('audio', video.sourceAudioPath, video.sourceAudioName);
+    if (!omniForgeEnabled) video.sourceAudioName = await stageMedia('audio', video.sourceAudioPath, video.sourceAudioName);
 
     if (video.family === 'wan22') {
       const required = [
@@ -2055,6 +2101,11 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       ];
       const missing = required.find(([, value]) => !String(value || '').trim());
       if (missing) throw new Error(`Select an LTX-2.5 ${missing[0]} before queueing.`);
+    } else if (omniForgeEnabled) {
+      const controls = video.ltx.omniForge;
+      const required = [controls.modelName, controls.textEncoder, controls.connector, controls.videoVae, controls.audioVae,
+        ...(controls.passCount > 1 ? [controls.latentUpscaleModel] : [])];
+      if (required.some((name) => !name.trim())) throw new Error('Select the LTX OmniForge transformer, encoders, VAEs and active pass upscaler.');
     } else {
       const required = [
         ['checkpoint', video.ltx.checkpoint],
@@ -2072,13 +2123,13 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       if (missing) throw new Error(`Select an LTX-2.3 ${missing[0]} before queueing.`);
     }
 
-    if (video.postprocess.interpolationEnabled && !video.postprocess.interpolationModel) {
+    if (!omniForgeEnabled && video.postprocess.interpolationEnabled && !video.postprocess.interpolationModel) {
       throw new Error('Select a frame interpolation model before queueing.');
     }
-    if (video.postprocess.upscaleMode === 'model' && !video.postprocess.upscaleModel) {
+    if (!omniForgeEnabled && video.postprocess.upscaleMode === 'model' && !video.postprocess.upscaleModel) {
       throw new Error('Select a video upscale model before queueing.');
     }
-    if (video.postprocess.rtxVsrEnabled && !videoModelCatalog.rtxAvailable) {
+    if (!omniForgeEnabled && video.postprocess.rtxVsrEnabled && !videoModelCatalog.rtxAvailable) {
       throw new Error('NVIDIA RTX Video Super Resolution is not installed in the managed ComfyUI runtime.');
     }
 
@@ -2094,18 +2145,18 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       seed: toFiniteInteger(video.seed, 0, 0, Number.MAX_SAFE_INTEGER),
       controlAfterGenerate: video.seedMode,
       seedIncrement: video.seedIncrement,
-      steps: video.family === 'wan22' ? video.wan.steps : video.family === 'minimax_h3' ? video.minimaxH3.steps : 8,
-      cfg: video.family === 'wan22'
+      steps: omniForgeEnabled ? video.ltx.omniForge.passes[0].steps : video.family === 'wan22' ? video.wan.steps : video.family === 'minimax_h3' ? video.minimaxH3.steps : 8,
+      cfg: omniForgeEnabled ? video.ltx.omniForge.passes[0].cfg : video.family === 'wan22'
         ? video.wan.cfg
         : video.family === 'ltx25' ? video.ltx25.baseCfg : video.ltx.baseCfg,
-      samplerName: video.family === 'wan22'
+      samplerName: omniForgeEnabled ? video.ltx.omniForge.passes[0].sampler : video.family === 'wan22'
         ? video.wan.highSamplerName
         : video.family === 'minimax_h3'
           ? video.minimaxH3.samplerName
           : video.family === 'ltx25' ? video.ltx25.baseSamplerName : video.ltx.baseSamplerName,
-      scheduler: video.family === 'wan22' ? video.wan.highScheduler : video.family === 'minimax_h3' ? video.minimaxH3.scheduler : 'normal',
-      modelType: video.family === 'ltx23' ? 'checkpoint' : 'unet',
-      checkpointName: video.family === 'wan22'
+      scheduler: omniForgeEnabled ? video.ltx.omniForge.passes[0].scheduler : video.family === 'wan22' ? video.wan.highScheduler : video.family === 'minimax_h3' ? video.minimaxH3.scheduler : 'normal',
+      modelType: modelSource,
+      checkpointName: omniForgeEnabled ? video.ltx.omniForge.modelName : video.family === 'wan22'
         ? video.wan.highModel
         : video.family === 'minimax_h3'
           ? video.minimaxH3.model

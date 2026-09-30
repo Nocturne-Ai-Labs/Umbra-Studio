@@ -2188,6 +2188,17 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ltx-storyboard] {
   border-bottom: 1px solid rgba(103, 232, 249, 0.15);
 }
 
+html[data-umbra-remote-mode="phone"] [data-umbra-ltx23-omniforge] {
+  flex: 0 0 auto;
+  height: min(75svh, 900px);
+  min-height: 20rem;
+  border-bottom: 1px solid rgba(103, 232, 249, 0.15);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-ltx23-omniforge] button {
+  min-height: 2.75rem;
+}
+
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-generation-panel],
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-prompt-panel],
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-video-controls],

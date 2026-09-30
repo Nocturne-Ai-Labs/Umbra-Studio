@@ -286,7 +286,7 @@ export function createDefaultLtx23OmniForgeControls(): Ltx23OmniForgeControls {
     audioSegments: [],
     motionSegments: [],
     retake: { enabled: false, start: 24, length: 48, prompt: '', strength: 1, video: null },
-    tritonVae: { enabled: false, fuseNormSilu: true, channelsLast: true, int8Conv: true, autotune: false },
+    tritonVae: { enabled: false, fuseNormSilu: true, channelsLast: true, int8Conv: false, autotune: false },
     samplingPreview: { enabled: false, previewVae: '', previewRate: 24 },
     colorTransfer: { enabled: false, method: 'reinhard_lab', sourceStats: 'per_frame', targetIndex: 0, strength: 0.75 },
     watermarks: [defaultWatermark('top-left'), defaultWatermark('top-right')],
@@ -526,7 +526,8 @@ export function normalizeLtx23OmniForgeControls(raw: unknown): Ltx23OmniForgeCon
       enabled: triton.enabled === true,
       fuseNormSilu: triton.fuseNormSilu !== false,
       channelsLast: triton.channelsLast !== false,
-      int8Conv: triton.int8Conv !== false,
+      // Upstream INT8 convolutions support Wan/KL VAEs, not the LTX VAE.
+      int8Conv: false,
       autotune: triton.autotune === true,
     },
     samplingPreview: {

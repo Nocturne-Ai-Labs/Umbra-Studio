@@ -8,6 +8,8 @@ export interface UmbraVideoLoraEntry {
   strength: number;
   enabled: boolean;
   wanStage: UmbraWanLoraStage;
+  visualStrength?: number;
+  audioStrength?: number;
 }
 
 export function normalizeUmbraVideoLoraStack(value: unknown): UmbraVideoLoraEntry[] {
@@ -29,6 +31,8 @@ export function normalizeUmbraVideoLoraStack(value: unknown): UmbraVideoLoraEntr
       strength: Number.isFinite(strength) ? Math.max(-10, Math.min(10, strength)) : 1,
       enabled: item.enabled !== false,
       wanStage: stage === 'high' || stage === 'low' ? stage : 'both',
+      visualStrength: item.visualStrength != null && Number.isFinite(Number(item.visualStrength)) ? Math.max(-10, Math.min(10, Number(item.visualStrength))) : 1,
+      audioStrength: item.audioStrength != null && Number.isFinite(Number(item.audioStrength)) ? Math.max(-10, Math.min(10, Number(item.audioStrength))) : 1,
     });
     counts.set(family, (counts.get(family) || 0) + 1);
   }

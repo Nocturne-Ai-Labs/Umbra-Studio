@@ -2,7 +2,7 @@ import { stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { readModelSetupManifest } from '../setup/ModelSetupCatalog';
 
-export type ManagedVideoFamily = 'minimax_h3' | 'ltx25';
+export type ManagedVideoFamily = 'minimax_h3' | 'ltx25' | 'ltx23';
 
 export async function inspectManagedVideoModels(
   sourceRoot: string,
@@ -14,7 +14,7 @@ export async function inspectManagedVideoModels(
   const profiles = family === 'minimax_h3'
     ? ['minimax-h3', ...(referenceMode ? ['minimax-h3-reference'] : []),
       ...(promptForge ? ['minimax-h3-autoprompter'] : [])]
-    : ['ltx-2.5'];
+    : [family === 'ltx23' ? 'ltx-2.3' : 'ltx-2.5'];
   const manifest = readModelSetupManifest(sourceRoot, 'requirements');
   const modelsRoot = resolve(runtimeRoot, 'Tools', 'ComfyUI', 'models');
   const files = new Map<string, { destination: string; bytes: number }>();

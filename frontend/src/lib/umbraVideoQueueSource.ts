@@ -13,6 +13,7 @@ export function selectUmbraVideoMode(
       ...current.ltx,
       storyboard: { ...current.ltx.storyboard, enabled: false },
       extended: { ...current.ltx.extended, enabled: false },
+      omniForge: { ...current.ltx.omniForge, enabled: current.family === 'ltx23' && current.ltx.omniForge.enabled && (mode === 'text_to_video' || mode === 'image_to_video') },
     },
   };
 }
