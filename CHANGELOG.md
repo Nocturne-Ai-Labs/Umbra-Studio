@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.32.43 - Portable Anima Node Sync Hotfix
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+- Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux. Restart Umbra-managed ComfyUI after updating to load the synchronized bundled Anima node. No model download or card migration is required.
+- This release includes the Power Prompter queue fixes from v0.32.42. Existing `User/`, `Tools/`, cards, datasets, and model files are preserved.
+
+### Portable Setup
+
+- Resolve the bundled Anima custom node from `resources/app` when setup or managed ComfyUI launch supplies the portable installation root. Direct development-source roots continue to work.
+- Correct the misleading missing-bundled-node warning seen during the v0.32.42 update. A genuinely missing source still fails without overwriting an installed node.
+
+### Validation And Limits
+
+- Passed five focused filesystem tests covering development and portable roots, source precedence, and preservation on missing source. The v0.32.42 queue fix passed 26 targeted tests, frontend type checking, lint, build, and all 55 pipeline audits.
+- Windows and Linux archives are validated before publication. Live GPU generation was not rerun.
+- Linux managed tools may need `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit still requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: portable node sync no longer searches only the installation root for bundled Anima source.
+- Fixed: missing-source errors preserve any installed Anima node.
+- Improved: updater and managed ComfyUI startup share the corrected source lookup.
+
 ## v0.32.42 - Power Prompter Queue Hotfix
 
 ### TL;DR - Setup After Updating
