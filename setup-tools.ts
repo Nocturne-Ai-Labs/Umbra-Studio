@@ -1886,6 +1886,7 @@ const COMFY_NODES = [
     { name: 'ComfyUI-Anima-LLLite', repo: 'https://github.com/kohya-ss/ComfyUI-Anima-LLLite.git', required: true },
     { name: 'ComfyUI-Anima-2.9B', repo: 'https://github.com/gazingstars123/ComfyUI-Anima-2.9B.git', required: true },
     { name: 'ComfyUI-DaSiWa-Nodes', repo: 'https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes.git' },
+    { name: 'whatdreamscost-comfyui', repo: 'https://github.com/PodJamz/whatdreamscost-comfyui.git' },
     { name: 'comfyui-anima-3-8B', repo: 'https://github.com/GumGum10/comfyui-anima-3-8B.git' },
     { name: 'ComfyUI-Anima-3.8B-LoRA-Bridge', repo: 'https://github.com/Lakeside529/ComfyUI-Anima-3.8B-LoRA-Bridge.git' },
     { name: 'ComfyUI-KJNodes', repo: 'https://github.com/kijai/ComfyUI-KJNodes.git', required: true },

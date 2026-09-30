@@ -120,7 +120,7 @@
     },
     "ltx-2.3": {
       "label": "LTX-2.3 Video",
-      "description": "Gemma 3 FP8 text encoder and spatial upscaler for LTX-2.3. Download a compatible LTX-2.3 checkpoint and any selected optional LoRAs separately in Model Manager. Large download."
+      "description": "Gemma 3 FP8 encoder, LTX-2.3 text projection, separate video/audio VAEs, and x2 latent spatial upscaler for video generation. Download a compatible LTX-2.3 transformer and any chosen LoRAs separately in Model Manager. Split VAE/projection files are community extractions of Lightricks weights; the LTX-2 Community License applies. Large download."
     },
     "ltx-2.5": {
       "label": "LTX-2.5 Video",
@@ -162,6 +162,8 @@
       "repository": "Comfy-Org/ltx-2",
       "revision": "101c239b4b64dd1b45d645365339c56e0e7df4c3",
       "license": "Gemma terms; see source repository",
+      "licenseUrl": "https://ai.google.dev/gemma/terms",
+      "licenseNotice": "Gemma 3 text encoder weights are subject to Google's Gemma Terms of Use; LTX-2.3 projection and VAE weights have separate Lightricks terms.",
       "files": [{
         "destination": "text_encoders/gemma_3_12B_it_fp8_scaled.safetensors",
         "sourcePath": "split_files/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors",
@@ -176,12 +178,46 @@
       "repository": "Lightricks/LTX-2.3",
       "revision": "5948be4ced3a4493d1f836df64378ff136ddb770",
       "license": "ltx-2-community-license-agreement",
+      "licenseUrl": "https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE",
       "files": [{
         "destination": "latent_upscale_models/ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
         "sourcePath": "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
         "bytes": 995743560,
         "sha256": "5f416311fa8172b65af67530758964708d29a317b830d689a51143b7f91913ed"
       }]
+    },
+    {
+      "id": "ltx-2.3-split-support",
+      "family": "Video",
+      "creator": "Lightricks / Kijai",
+      "repository": "Kijai/LTX2.3_comfy",
+      "revision": "6d980fde0d330f2fed6ff8dfdfddb06d88a004e5",
+      "license": "ltx-2-community-license-agreement",
+      "licenseUrl": "https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE",
+      "licenseNotice": "Community-extracted LTX-2.3 components; the underlying Lightricks weights remain subject to the LTX-2 Community License. Review its commercial-use restrictions before use.",
+      "installPolicy": "automatic",
+      "profiles": ["ltx-2.3"],
+      "purpose": "LTX-2.3 DualCLIPLoader projection and separate video/audio VAEs for native audio-video decoding",
+      "files": [
+        {
+          "destination": "text_encoders/ltx-2.3_text_projection_bf16.safetensors",
+          "sourcePath": "text_encoders/ltx-2.3_text_projection_bf16.safetensors",
+          "bytes": 2312149072,
+          "sha256": "911d59bb4cb7708179c9a0045ea0fe41212ecfb77aed3a02702b7c0a8274911f"
+        },
+        {
+          "destination": "vae/LTX23_video_vae_bf16.safetensors",
+          "sourcePath": "vae/LTX23_video_vae_bf16.safetensors",
+          "bytes": 1452258578,
+          "sha256": "01ea62d09bc139f95c5dee7b5c062ad6a3e6cd8be910a1983ac02e7eb5b8ee3b"
+        },
+        {
+          "destination": "vae/LTX23_audio_vae_bf16.safetensors",
+          "sourcePath": "vae/LTX23_audio_vae_bf16.safetensors",
+          "bytes": 364855188,
+          "sha256": "5bc10fa4adecf99dda132d916e23048cbd56797702c5fa50eb5d2079048a38c3"
+        }
+      ]
     },
     {
       "id": "anima-qwen-3-text-encoder",

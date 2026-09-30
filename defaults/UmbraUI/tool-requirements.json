@@ -52,6 +52,28 @@
           "requiredPatch": "DaSiWaForgeCompute.patch"
         }
       ]
+    },
+    {
+      "id": "ltx23-omniforge",
+      "label": "LTX-2.3 OmniForge video tools",
+      "optional": true,
+      "activationFile": "diffusion_models/ltx-2.3-22b-dev_transformer_only_bf16.safetensors",
+      "minimumComfyVersion": "0.37.0",
+      "modelProfiles": ["ltx-2.3"],
+      "customNodes": [
+        {
+          "name": "ComfyUI-DaSiWa-Nodes",
+          "minimumCommit": "db34bc1129155e3d1683cfcea850ab59c1f191b2"
+        },
+        {
+          "name": "whatdreamscost-comfyui",
+          "minimumCommit": "fe09f73756df202d08341c66b4dc5fc8d2acca22"
+        },
+        {
+          "name": "ComfyUI-KJNodes",
+          "minimumCommit": "d3cfe21625e5170126ce06fbfcfe1d88108688c3"
+        }
+      ]
     }
   ]
 }

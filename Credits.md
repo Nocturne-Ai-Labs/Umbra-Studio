@@ -550,6 +550,14 @@ upstream default branches. They are not frozen to Umbra-selected commit hashes.
 - License: GPL-3.0 (installed as a separate ComfyUI extension; not copied into Umbra source)
 - Original project purpose:
   - MiniMax H3 Director, Director Guide, Prompt Forge, references, and continuity tools
+  - LTX-2.3 Advanced LoRA Loader, Enhanced Video Combine, and optional workflow helpers
+
+### whatdreamscost-comfyui
+- Project: https://github.com/PodJamz/whatdreamscost-comfyui
+- Creator / maintainer: PodJamz and contributors
+- License: GPL-3.0 (installed as a separate ComfyUI extension; not copied into Umbra source)
+- Original project purpose:
+  - LTX Director, Director Guide, and Director Crop Guides used by LTX-2.3 timeline workflows
 
 ### ComfyUI-Inpaint-CropAndStitch
 - Project: https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch
