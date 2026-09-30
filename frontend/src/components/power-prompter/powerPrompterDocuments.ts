@@ -7,7 +7,6 @@ import {
   normalizeQueueTraversalRole,
 } from '@/lib/powerPrompter';
 import {
-  createSlotId,
   normalizeBlockLinks,
   normalizeChainCards,
   normalizeChainLinks,
@@ -39,7 +38,8 @@ export function getCardDocSignature(document: PowerPrompterCardDocument | null):
   const generation = normalizePowerPrompterGenerationControls(document.generation);
   const cardSignature = (card: PowerPrompterCardDocument['cards'][number]) => ({
     id: card.id,
-    slotId: String(card.slotId || '').trim() || createSlotId(card.type, card.label),
+    // Signature reads must not invent identities for legacy deleted cards.
+    slotId: String(card.slotId || '').trim(),
     type: card.type,
     utilityKind: (card as any).utilityKind === 'wildcard' ? 'wildcard' : undefined,
     label: card.label,

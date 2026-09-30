@@ -7289,6 +7289,8 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
 
           if (requestMeta && hasPromptSeed) {
             setCardDocument((prev) => {
+              // Background seed reflection must not invalidate an in-flight queue build.
+              if (queueSubmissionInFlightRef.current) return prev;
               const nextDoc = {
                 ...prev,
                 updatedAt: new Date().toISOString(),
