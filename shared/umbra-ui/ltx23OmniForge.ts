@@ -366,10 +366,14 @@ export function normalizeLtx23OmniForgeControls(raw: unknown): Ltx23OmniForgeCon
       previewUrl: string(segment.previewUrl) || undefined,
     };
   }) : [];
+  const usedAudioIds = new Set<string>();
   const audioSegments: Ltx23DirectorAudioSegment[] = Array.isArray(value.audioSegments) ? value.audioSegments.map((item, index) => {
     const segment = record(item);
+    let id = string(segment.id).trim() || `audio-${index + 1}`;
+    if (usedAudioIds.has(id)) id = `audio-${index + 1}-${id}`;
+    usedAudioIds.add(id);
     return {
-      id: string(segment.id).trim() || `audio-${index + 1}`,
+      id,
       type: 'audio',
       start: number(segment.start, 0, 0, 10_000, true),
       length: number(segment.length, 1, 1, 10_000, true),
@@ -380,10 +384,14 @@ export function normalizeLtx23OmniForgeControls(raw: unknown): Ltx23OmniForgeCon
       previewUrl: string(segment.previewUrl) || undefined,
     };
   }) : [];
+  const usedMotionIds = new Set<string>();
   const motionSegments: Ltx23DirectorMotionSegment[] = Array.isArray(value.motionSegments) ? value.motionSegments.map((item, index) => {
     const segment = record(item);
+    let id = string(segment.id).trim() || `motion-${index + 1}`;
+    if (usedMotionIds.has(id)) id = `motion-${index + 1}-${id}`;
+    usedMotionIds.add(id);
     return {
-      id: string(segment.id).trim() || `motion-${index + 1}`,
+      id,
       type: 'motion_video',
       start: number(segment.start, 0, 0, 10_000, true),
       length: number(segment.length, 1, 1, 10_000, true),
