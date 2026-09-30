@@ -551,13 +551,21 @@ upstream default branches. They are not frozen to Umbra-selected commit hashes.
 - Original project purpose:
   - MiniMax H3 Director, Director Guide, Prompt Forge, references, and continuity tools
   - LTX-2.3 Advanced LoRA Loader, Enhanced Video Combine, and optional workflow helpers
+- LTX-2.3 OmniForge technique reference: the user-provided workflow titled `DaSiWa - LTX OmniForge` is credited to DaSiWa / darksidewalker based on its branding and project links. Umbra adapts its video workflow concepts; the supplied workflow JSON is not redistributed.
 
 ### whatdreamscost-comfyui
-- Project: https://github.com/PodJamz/whatdreamscost-comfyui
-- Creator / maintainer: PodJamz and contributors
+- Managed install source: https://github.com/PodJamz/whatdreamscost-comfyui (fork)
+- Original project: https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI
+- LTX Director author: Jonathan Watkins (WhatDreamsCost); fork maintainer: PodJamz
 - License: GPL-3.0 (installed as a separate ComfyUI extension; not copied into Umbra source)
 - Original project purpose:
   - LTX Director, Director Guide, and Director Crop Guides used by LTX-2.3 timeline workflows
+
+### ComfyUI-KJNodes
+- Project: https://github.com/kijai/ComfyUI-KJNodes
+- Creator / maintainer: Kijai and contributors
+- License: GPL-3.0 (installed as a separate ComfyUI extension; not copied into Umbra source)
+- LTX-2.3 workflow role: VAE loaders and optional sampling preview helpers
 
 ### ComfyUI-Inpaint-CropAndStitch
 - Project: https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch
