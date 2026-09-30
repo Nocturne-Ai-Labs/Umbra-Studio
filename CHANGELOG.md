@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.32.42 - Power Prompter Queue Hotfix
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+- Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux, then reopen Umbra Studio. No new models, custom-node updates, or card migration are required.
+- Existing `User/`, `Tools/`, cards, presets, and model files are preserved. There is no need to recreate cards or remove their deleted-card history.
+
+### Power Prompter
+
+- Make card signature comparisons deterministic when older cards or deleted-card history lack a slot ID. Queue preparation no longer invents random identities and falsely reports that an unchanged card was edited.
+- Prevent automatic completed-job seed reflection from changing the source card while a new queue is being prepared. Ordinary seed reflection resumes after preparation, and real manual edits or file switches still invalidate a stale build.
+
+### Validation And Limits
+
+- Passed 26 targeted document, queue-building, admission, and Skip tests, frontend type checking, lint, and production build. Windows and Linux archives are validated before publication.
+- This is a queue-preparation fix; live GPU generation was not rerun, and no ComfyUI graph or model configuration changed.
+- Linux managed tools may need `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit still requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: unchanged legacy cards no longer fail queue preparation with a false card-changed warning.
+- Fixed: background generation seed updates no longer interrupt preparation of another queue.
+- Improved: genuine card edits and file changes retain the existing stale-queue protection.
+
 ## v0.32.41 - Prompt Forge Setup And Anima Encoder Retention
 
 ### TL;DR - Setup After Updating
