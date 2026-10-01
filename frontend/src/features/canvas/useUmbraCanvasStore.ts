@@ -154,11 +154,13 @@ function duplicateCanvasEntity(source: UmbraCanvasEntity, offset = 24): UmbraCan
 }
 
 interface UmbraCanvasStore extends UmbraCanvasHistory {
+  historyEpoch: number;
   replaceProject: (project: UmbraCanvasProjectDocument) => void;
   syncPersistedProject: (project: UmbraCanvasProjectDocument) => void;
   newProject: () => void;
   renameProject: (name: string) => void;
   addRaster: (entity: UmbraCanvasRasterEntity) => void;
+  addRasterCutout: (projectId: string, sourceId: string, sourceRevision: number, historyEpoch: number, entity: UmbraCanvasRasterEntity) => boolean;
   addDrawable: (entity: UmbraCanvasDrawableEntity) => void;
   mergeVisibleDrawables: (entity: UmbraCanvasRasterEntity, sourceIds: string[]) => void;
   addRasterStroke: (entityId: string, stroke: UmbraCanvasRasterStroke) => void;
@@ -292,17 +294,18 @@ function hydratePersistedAssets(
 }
 
 export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
+  historyEpoch: 0,
   past: [],
   present: createUmbraCanvasProjectDocument(),
   future: [],
-  replaceProject: (project) => set({ past: [], present: cloneProject(project), future: [] }),
+  replaceProject: (project) => set((state) => ({ past: [], present: cloneProject(project), future: [], historyEpoch: state.historyEpoch + 1 })),
   syncPersistedProject: (project) => set((state) => {
     if (state.present.id !== project.id) return state;
     if ((project.serverRevision ?? 0) < (state.present.serverRevision ?? 0)) return state;
     if (state.present.revision === project.revision) return { present: cloneProject(project) };
     return { present: hydratePersistedAssets(state.present, project) };
   }),
-  newProject: () => set({ past: [], present: createUmbraCanvasProjectDocument(), future: [] }),
+  newProject: () => set((state) => ({ past: [], present: createUmbraCanvasProjectDocument(), future: [], historyEpoch: state.historyEpoch + 1 })),
   renameProject: (name) => set((state) => revise(state, (project) => ({
     ...project,
     name: String(name || '').trim().slice(0, 160) || 'Untitled Canvas',
@@ -312,6 +315,26 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
     entities: [...project.entities, entity],
     activeEntityId: entity.id,
   }))),
+  addRasterCutout: (projectId, sourceId, sourceRevision, historyEpoch, entity) => {
+    let applied = false;
+    set((state) => {
+      const index = state.present.entities.findIndex((candidate) => candidate.id === sourceId);
+      const source = state.present.entities[index];
+      if (state.historyEpoch !== historyEpoch || state.present.id !== projectId || !source || source.kind !== 'raster' || source.locked || source.alphaLocked || source.revision !== sourceRevision) return state;
+      applied = true;
+      return revise(state, (project) => ({
+        ...project,
+        entities: [
+          ...project.entities.slice(0, index),
+          { ...source, visible: false, generationEnabled: false, revision: source.revision + 1, updatedAt: Date.now() },
+          entity,
+          ...project.entities.slice(index + 1),
+        ],
+        activeEntityId: entity.id,
+      }));
+    });
+    return applied;
+  },
   addDrawable: (entity) => set((state) => revise(state, (project) => ({
     ...project,
     entities: [...project.entities, entity],
@@ -700,6 +723,7 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
       past: state.past.slice(0, -1),
       present: { ...cloneProject(previous), serverRevision: state.present.serverRevision, revision: state.present.revision + 1, updatedAt: Date.now() },
       future: [cloneProject(state.present), ...state.future.slice(0, 79)],
+      historyEpoch: state.historyEpoch + 1,
     };
   }),
   redo: () => set((state) => {
@@ -709,6 +733,7 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
       past: [...state.past.slice(-79), cloneProject(state.present)],
       present: { ...cloneProject(next), serverRevision: state.present.serverRevision, revision: state.present.revision + 1, updatedAt: Date.now() },
       future: state.future.slice(1),
+      historyEpoch: state.historyEpoch + 1,
     };
   }),
 }));

@@ -40,6 +40,7 @@ import {
   RotateCcw,
   RotateCw,
   Save,
+  Scissors,
   ScanLine,
   Search,
   Send,
@@ -89,6 +90,7 @@ import {
   fetchUmbraUiInpaintJob,
   failLostUmbraUiInpaintJob,
   isUmbraUiInpaintJobTerminal,
+  removeUmbraUiImageBackground,
   submitUmbraUiInpaintJob,
   type UmbraUiInpaintJob,
 } from '@/lib/umbraUiInpaint';
@@ -131,6 +133,7 @@ import {
 import {
   createUmbraCanvasMaskEntity,
   createUmbraCanvasRasterEntity,
+  createUmbraCanvasRasterCutoutEntity,
   createUmbraCanvasShapeEntity,
   createUmbraCanvasTextEntity,
   createUmbraCanvasGradientEntity,
@@ -150,7 +153,7 @@ import {
   type UmbraCanvasProjectDocument,
   type UmbraCanvasStagedGeneration,
 } from './canvasModel';
-import { composeUmbraCanvasAcceptedReplacementBlob, composeUmbraCanvasDrawableRegionBlob, composeUmbraCanvasGenerationRegion, composeUmbraCanvasMaskBlob, composeUmbraCanvasProjectThumbnail, composeUmbraCanvasRasterBlob, composeUmbraCanvasRasterCropBlob, type UmbraCanvasCompositeResult } from './canvasCompositor';
+import { composeUmbraCanvasAcceptedReplacementBlob, composeUmbraCanvasCutoutBlob, composeUmbraCanvasDrawableRegionBlob, composeUmbraCanvasGenerationRegion, composeUmbraCanvasMaskBlob, composeUmbraCanvasProjectThumbnail, composeUmbraCanvasRasterBlob, composeUmbraCanvasRasterCropBlob, composeUmbraCanvasRasterSourceBlob, type UmbraCanvasCompositeResult } from './canvasCompositor';
 import { releaseUmbraCanvasImageResource, UmbraCanvasManager, type UmbraCanvasTool } from './UmbraCanvasManager';
 import { saveUmbraCanvasRequiredRevision } from './canvasProjectSaveGate';
 import { useUmbraCanvasStore } from './useUmbraCanvasStore';
@@ -403,6 +406,7 @@ export function UmbraCanvasWorkspace({
   const canUndo = useUmbraCanvasStore((state) => state.past.length > 0);
   const canRedo = useUmbraCanvasStore((state) => state.future.length > 0);
   const addRaster = useUmbraCanvasStore((state) => state.addRaster);
+  const addRasterCutout = useUmbraCanvasStore((state) => state.addRasterCutout);
   const addDrawable = useUmbraCanvasStore((state) => state.addDrawable);
   const mergeVisibleDrawables = useUmbraCanvasStore((state) => state.mergeVisibleDrawables);
   const addRasterStroke = useUmbraCanvasStore((state) => state.addRasterStroke);
@@ -479,6 +483,10 @@ export function UmbraCanvasWorkspace({
   const [forkingProject, setForkingProject] = React.useState(false);
   const [croppingRaster, setCroppingRaster] = React.useState(false);
   const [mergingLayers, setMergingLayers] = React.useState(false);
+  const [removingBackground, setRemovingBackground] = React.useState(false);
+  const [exportingRaster, setExportingRaster] = React.useState(false);
+  const [backgroundRemovalError, setBackgroundRemovalError] = React.useState('');
+  const backgroundRemovalRequestRef = React.useRef<AbortController | null>(null);
   const [archiving, setArchiving] = React.useState(false);
   const [preparingRegion, setPreparingRegion] = React.useState(false);
   const [preparedRegion, setPreparedRegion] = React.useState<UmbraCanvasPreparedRegion | null>(null);
@@ -546,6 +554,15 @@ export function UmbraCanvasWorkspace({
   const projectRef = React.useRef(project);
   projectRef.current = project;
   jobRef.current = job;
+
+  React.useEffect(() => {
+    setRemovingBackground(false);
+    setBackgroundRemovalError('');
+    return () => {
+      backgroundRemovalRequestRef.current?.abort();
+      backgroundRemovalRequestRef.current = null;
+    };
+  }, [project.id]);
 
   const resetGenerationTracking = React.useCallback((stages: readonly UmbraCanvasStagedGeneration[] = []) => {
     setJob(null);
@@ -2359,6 +2376,65 @@ export function UmbraCanvasWorkspace({
       setCroppingRaster(false);
     }
   };
+  const removeRasterBackground = async () => {
+    if (backgroundRemovalRequestRef.current || !comfyConnected) return;
+    const { present: current, historyEpoch } = useUmbraCanvasStore.getState();
+    const raster = current.entities.find((entity) => entity.id === current.activeEntityId && entity.kind === 'raster');
+    if (!raster || raster.kind !== 'raster' || raster.locked || raster.alphaLocked) return;
+    const frozenRaster = structuredClone(raster);
+    const controller = new AbortController();
+    backgroundRemovalRequestRef.current = controller;
+    setRemovingBackground(true);
+    setBackgroundRemovalError('');
+    let imageUrl = '';
+    try {
+      const response = await fetch('/api/umbra-ui/inpaint/models', { cache: 'no-store', signal: controller.signal });
+      const catalog = await response.json();
+      if (!response.ok || catalog?.verified !== true || catalog?.features?.backgroundRemoval !== true) {
+        throw new Error('Background removal requires the Remove Background custom node in ComfyUI. Update your custom nodes and restart ComfyUI.');
+      }
+      const source = await composeUmbraCanvasRasterSourceBlob(frozenRaster);
+      controller.signal.throwIfAborted();
+      const result = await removeUmbraUiImageBackground({ image: source, imageName: `${frozenRaster.name}-source.png`, model: 'isnet-anime', signal: controller.signal });
+      const blob = await composeUmbraCanvasCutoutBlob(source, result.blob, frozenRaster.width, frozenRaster.height);
+      controller.signal.throwIfAborted();
+      imageUrl = URL.createObjectURL(blob);
+      const cutout = createUmbraCanvasRasterCutoutEntity(frozenRaster, imageUrl);
+      if (!addRasterCutout(current.id, frozenRaster.id, frozenRaster.revision, historyEpoch, cutout)) {
+        throw new Error('The source layer changed during background removal. Try again from the current layer.');
+      }
+      imageUrl = '';
+    } catch (error) {
+      if (!controller.signal.aborted) setBackgroundRemovalError(error instanceof Error ? error.message : 'Background removal failed. The original image was kept.');
+    } finally {
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+      if (backgroundRemovalRequestRef.current === controller) {
+        backgroundRemovalRequestRef.current = null;
+        setRemovingBackground(false);
+      }
+    }
+  };
+  const exportRasterPng = async () => {
+    if (exportingRaster) return;
+    const current = useUmbraCanvasStore.getState().present;
+    const raster = current.entities.find((entity) => entity.id === current.activeEntityId && entity.kind === 'raster');
+    if (!raster || raster.kind !== 'raster') return;
+    setExportingRaster(true);
+    setBackgroundRemovalError('');
+    try {
+      const blob = await composeUmbraCanvasRasterSourceBlob(structuredClone(raster));
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${raster.name.replace(/[^a-z0-9._-]+/gi, '-').replace(/\.[a-z0-9]+$/i, '') || 'canvas-layer'}.png`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (error) {
+      setBackgroundRemovalError(error instanceof Error ? error.message : 'The image layer could not be exported.');
+    } finally {
+      setExportingRaster(false);
+    }
+  };
   const mergeVisibleLayers = async () => {
     if (mergingLayers || saving) return;
     const current = useUmbraCanvasStore.getState().present;
@@ -2402,6 +2478,11 @@ export function UmbraCanvasWorkspace({
   const generationResolutionIssue = getUmbraCanvasGenerationResolutionIssue(project.generationBbox, capabilities.resolution);
   const isMaskBrush = tool === 'mask-brush' || tool === 'mask-eraser';
   const isRasterBrush = tool === 'raster-brush' || tool === 'raster-eraser';
+  const backgroundRemovalDisabledReason = removingBackground ? 'Removing background'
+    : !comfyConnected ? 'Launch ComfyUI to remove image backgrounds'
+      : activeEntity?.kind !== 'raster' ? 'Select an image layer to remove its background'
+        : activeEntity.locked ? 'Unlock the image layer before removing its background'
+          : activeEntity.alphaLocked ? 'Unlock transparent pixels before removing the background' : '';
   const togglePanel = (panel: 'generation' | 'inpaint' | 'layers') => {
     lastPanelRef.current = panel;
     setCompactPanel((current) => current === panel ? '' : panel);
@@ -2705,6 +2786,8 @@ export function UmbraCanvasWorkspace({
             </>
           ) : null}
           <button type="button" title="Import image" aria-label="Import image" onClick={() => fileInputRef.current?.click()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-500 hover:border-cyan-300/30 hover:text-cyan-100"><ImagePlus size={15} /></button>
+          <button type="button" title={backgroundRemovalDisabledReason || 'Remove image background'} aria-label="Remove image background" aria-busy={removingBackground} disabled={Boolean(backgroundRemovalDisabledReason)} onClick={() => void removeRasterBackground()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-700">{removingBackground ? <LoaderCircle size={15} className="animate-spin" /> : <Scissors size={15} />}</button>
+          <button type="button" title="Export image layer PNG" aria-label="Export image layer PNG" disabled={exportingRaster || activeEntity?.kind !== 'raster'} onClick={() => void exportRasterPng()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-700">{exportingRaster ? <LoaderCircle size={15} className="animate-spin" /> : <Download size={15} />}</button>
           <button type="button" title="Import mask image" aria-label="Import mask image" onClick={() => maskInputRef.current?.click()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-rose-300/15 bg-black/35 text-rose-300/55 hover:border-rose-300/35 hover:text-rose-100"><LassoSelect size={15} /></button>
           <button type="button" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo (Ctrl/Cmd+Z)" onClick={undo} disabled={!canUndo} className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 disabled:text-zinc-800"><Undo2 size={15} /><kbd aria-hidden="true" className="absolute bottom-0.5 right-0.5 min-w-3 rounded-sm bg-black/80 px-0.5 text-center font-mono text-[6px] font-black leading-3 tracking-normal text-zinc-400">Z</kbd></button>
           <button type="button" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo (Ctrl/Cmd+Shift+Z)" onClick={redo} disabled={!canRedo} className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 disabled:text-zinc-800"><Redo2 size={15} /><kbd aria-hidden="true" className="absolute bottom-0.5 right-0.5 min-w-3 rounded-sm bg-black/80 px-0.5 text-center font-mono text-[6px] font-black leading-3 tracking-normal text-zinc-400">⇧Z</kbd></button>
@@ -2713,6 +2796,7 @@ export function UmbraCanvasWorkspace({
             <button type="button" title="Fit visible content" aria-label="Fit visible content" onClick={() => managerRef.current?.fitToContent()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100"><Focus size={15} /></button>
             <button type="button" title="Reset view" aria-label="Reset view" onClick={() => managerRef.current?.resetView()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100"><RotateCcw size={15} /></button>
           </div>
+          {backgroundRemovalError ? <p role="alert" className="basis-full px-1 py-2 text-xs text-rose-200">{backgroundRemovalError}</p> : null}
         </div>
         <div className="relative min-h-0 min-w-0">
         <div

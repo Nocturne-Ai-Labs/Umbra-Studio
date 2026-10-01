@@ -522,6 +522,37 @@ export async function composeUmbraCanvasRasterBlob(
   return canvasToPngBlob(canvas);
 }
 
+export async function composeUmbraCanvasRasterSourceBlob(entity: UmbraCanvasRasterEntity): Promise<Blob> {
+  const bitmap = await loadBitmap(entity.imageUrl);
+  try {
+    return await canvasToPngBlob(renderUmbraCanvasRasterSurface(bitmap, entity));
+  } finally {
+    bitmap.close();
+  }
+}
+
+export async function composeUmbraCanvasCutoutBlob(source: Blob, cutout: Blob, width: number, height: number): Promise<Blob> {
+  const resultBitmap = await createImageBitmap(cutout);
+  try {
+    if (resultBitmap.width !== width || resultBitmap.height !== height) throw new Error('Background removal returned an image with different dimensions. The original layer was kept.');
+    const sourceBitmap = await createImageBitmap(source);
+    try {
+      const canvas = createCanvas(width, height);
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('The transparent cutout could not be rendered.');
+      context.drawImage(resultBitmap, 0, 0);
+      // LoadImage sends RGB to rembg, so restore existing erased pixels and alpha.
+      context.globalCompositeOperation = 'destination-in';
+      context.drawImage(sourceBitmap, 0, 0);
+      return await canvasToPngBlob(canvas);
+    } finally {
+      sourceBitmap.close();
+    }
+  } finally {
+    resultBitmap.close();
+  }
+}
+
 export async function composeUmbraCanvasRasterCropBlob(
   project: UmbraCanvasProjectDocument,
   rasterEntityId: string,
